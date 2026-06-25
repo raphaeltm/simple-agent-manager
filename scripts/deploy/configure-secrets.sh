@@ -186,16 +186,6 @@ set_worker_secret "GITHUB_APP_ID" "${GH_APP_ID:-}" "$ENVIRONMENT" "true" || FAIL
 set_worker_secret "GITHUB_APP_PRIVATE_KEY" "${GH_APP_PRIVATE_KEY:-}" "$ENVIRONMENT" "true" || FAILED=true
 set_worker_secret "GITHUB_APP_SLUG" "${GH_APP_SLUG:-}" "$ENVIRONMENT" "true" || FAILED=true
 
-# Configure Origin CA certificate/key (required for TLS between CF edge and VM agents)
-PULUMI_ORIGIN_CA_CERT="${PULUMI_ORIGIN_CA_CERT:-}"
-PULUMI_ORIGIN_CA_KEY="${PULUMI_ORIGIN_CA_KEY:-}"
-if [ -z "$PULUMI_ORIGIN_CA_CERT" ] && [ -n "${PULUMI_STACK:-}" ]; then
-  PULUMI_ORIGIN_CA_CERT="$(read_pulumi_secret originCaCertPem)"
-  PULUMI_ORIGIN_CA_KEY="$(read_pulumi_secret originCaKeyPem)"
-fi
-set_worker_secret "ORIGIN_CA_CERT" "$PULUMI_ORIGIN_CA_CERT" "$ENVIRONMENT" "true" || FAILED=true
-set_worker_secret "ORIGIN_CA_KEY" "$PULUMI_ORIGIN_CA_KEY" "$ENVIRONMENT" "true" || FAILED=true
-
 # Configure trial onboarding claim/fingerprint HMAC secret (Pulumi-managed, persists across deploys).
 # Required when trials are enabled; harmless when trials are disabled (cookies just aren't issued).
 PULUMI_TRIAL_CLAIM_TOKEN_SECRET="${PULUMI_TRIAL_CLAIM_TOKEN_SECRET:-}"

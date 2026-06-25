@@ -34,9 +34,10 @@ Uses `GH_*` prefix because GitHub Actions secret names cannot start with `GITHUB
 | Secret   | `JWT_PUBLIC_KEY`           | No (auto-generated)                     |
 | Secret   | `DEPLOY_SIGNING_PRIVATE_KEY` | No (auto-generated; override only)    |
 | Secret   | `DEPLOY_SIGNING_PUBLIC_KEY`  | No (derived during deploy; override only) |
-| Secret   | `ORIGIN_CA_CERT`           | No (auto-generated)                     |
-| Secret   | `ORIGIN_CA_KEY`            | No (auto-generated)                     |
 | Secret   | `TRIAL_CLAIM_TOKEN_SECRET` | No (auto-generated)                     |
+| Variable | `ORIGIN_CA_CERT_VALIDITY_DAYS` | No (default: 7)                    |
+
+`ORIGIN_CA_CERT` and `ORIGIN_CA_KEY` are legacy rotation inputs for nodes provisioned before per-node Origin CA CSR signing. They are not required for new node provisioning.
 
 ## GH* to GITHUB* Mapping (done by `configure-secrets.sh`)
 

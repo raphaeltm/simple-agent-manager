@@ -35,24 +35,24 @@ Tradeoff: this still relies on wildcard hostnames because existing workspace sub
 
 ## Checklist
 
-- [ ] Remove static Origin CA private key/certificate embedding from cloud-init template generation.
-- [ ] Add boot-time per-node key and CSR generation in cloud-init.
-- [ ] Add node-scoped Origin CA CSR signing API route.
-- [ ] Wire provisioning to pass only the certificate retrieval URL/metadata needed by cloud-init.
-- [ ] Add cloud-init YAML parsing tests that prove static user-data does not contain the private key.
-- [ ] Add authz tests proving a token from another node is rejected by the CSR signing endpoint.
-- [ ] Add service tests for Cloudflare Origin CA request payload and error handling.
-- [ ] Update self-hosting and security architecture docs with the new cert model and existing wildcard-key rotation path.
+- [x] Remove static Origin CA private key/certificate embedding from cloud-init template generation.
+- [x] Add boot-time per-node key and CSR generation in cloud-init.
+- [x] Add node-scoped Origin CA CSR signing API route.
+- [x] Wire provisioning to pass only the certificate retrieval URL/metadata needed by cloud-init.
+- [x] Add cloud-init YAML parsing tests that prove static user-data does not contain the private key.
+- [x] Add authz tests proving a token from another node is rejected by the CSR signing endpoint.
+- [x] Add service tests for Cloudflare Origin CA request payload and error handling.
+- [x] Update self-hosting and security architecture docs with the new cert model and existing wildcard-key rotation path.
 - [ ] Run local quality checks and specialist review.
 - [ ] Open draft PR with `needs-human-review`; do not deploy, provision VMs, merge, or mark ready.
 
 ## Acceptance Criteria
 
-- [ ] New nodes no longer carry the shared Origin CA private key in static cloud-init user-data.
-- [ ] Cloud-init output is parsed in tests and asserted not to contain the private key.
-- [ ] Node-scoped retrieval/signing endpoint rejects a token from a different node.
-- [ ] Rotation path for the existing broadly distributed wildcard key is documented.
-- [ ] Self-hosting and security architecture docs reflect the new cert model.
+- [x] New nodes no longer carry the shared Origin CA private key in static cloud-init user-data.
+- [x] Cloud-init output is parsed in tests and asserted not to contain the private key.
+- [x] Node-scoped retrieval/signing endpoint rejects a token from a different node.
+- [x] Rotation path for the existing broadly distributed wildcard key is documented.
+- [x] Self-hosting and security architecture docs reflect the new cert model.
 - [ ] Staging/real TLS verification is explicitly left for human review.
 
 ## References

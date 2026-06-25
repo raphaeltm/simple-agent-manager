@@ -16,12 +16,12 @@ These are Cloudflare Worker secrets set during deployment:
 | `ENCRYPTION_KEY`          | AES-256-GCM key for encrypting user credentials                                          |
 | `JWT_PRIVATE_KEY`         | RSA-2048 key for signing workspace and callback tokens                                   |
 | `JWT_PUBLIC_KEY`          | RSA-2048 key for token verification (exposed via JWKS)                                   |
-| `CF_API_TOKEN`            | Cloudflare deploy, DNS, observability, and AI Gateway operations                         |
+| `CF_API_TOKEN`            | Cloudflare deploy, DNS, Origin CA CSR signing, observability, and AI Gateway operations  |
 | `GITHUB_CLIENT_ID/SECRET` | OAuth authentication                                                                     |
 | `GITHUB_APP_*`            | GitHub App for repository access                                                         |
 | `GITHUB_WEBHOOK_SECRET`   | GitHub App webhook HMAC verification; set from GitHub Actions secret `GH_WEBHOOK_SECRET` |
 
-Security keys and Origin CA credentials are automatically generated and persisted by Pulumi on first deployment. Cloudflare and GitHub secrets are external inputs supplied through GitHub Actions and mapped into Worker secrets by the deploy scripts. They never appear in source control.
+Security keys are automatically generated and persisted by Pulumi on first deployment. Cloudflare and GitHub secrets are external inputs supplied through GitHub Actions and mapped into Worker secrets by the deploy scripts. They never appear in source control.
 
 ### User Credentials
 
@@ -86,6 +86,21 @@ When a new VM starts, it needs credentials (callback URL, node ID) but **no secr
 3. VM Agent redeems the token: `POST /api/bootstrap/{token}`
 4. API returns the full configuration (callback URL, node ID, etc.)
 5. Token is invalidated after use
+
+## VM TLS Certificates
+
+New nodes use per-node Origin CA key material rather than a platform-shared private key:
+
+1. The API Worker passes a node-scoped certificate endpoint into cloud-init (`apps/api/src/services/nodes.ts`).
+2. Cloud-init generates `/etc/sam/tls/origin-ca-key.pem` locally on the VM, creates a CSR, and posts only that CSR to `POST /api/nodes/:id/origin-ca-certificate` with the node callback JWT (`packages/cloud-init/src/template.ts`).
+3. The API Worker verifies the callback token is node-scoped and matches `:id`, then signs the CSR through Cloudflare Origin CA using `CF_API_TOKEN` (`apps/api/src/routes/node-lifecycle.ts`, `apps/api/src/services/origin-ca-certificates.ts`).
+4. The VM stores the returned certificate at `/etc/sam/tls/origin-ca.pem` and starts the VM agent with `TLS_CERT_PATH` and `TLS_KEY_PATH`.
+
+The certificate hostnames remain wildcard-scoped (`*.BASE_DOMAIN`, `*.vm.BASE_DOMAIN`, and `BASE_DOMAIN`) so existing `ws-*` and `{node}.vm` routing continues to work. The private key is no longer shared across nodes or embedded in static cloud-init user-data. Each node receives a distinct private key and short-lived certificate, with `ORIGIN_CA_CERT_VALIDITY_DAYS` defaulting to 7 days.
+
+### Legacy Origin CA Rotation
+
+Deployments created before the per-node CSR model may have running nodes that still hold a broadly distributed wildcard `ORIGIN_CA_KEY`. Rotate that legacy material by draining or deleting old nodes, deploying the per-node certificate model, revoking the old wildcard Origin CA certificate in Cloudflare SSL/TLS → Origin Server, and removing any manually configured `ORIGIN_CA_CERT`/`ORIGIN_CA_KEY` Worker secrets. New nodes do not require those Worker secrets.
 
 ## Security Best Practices
 

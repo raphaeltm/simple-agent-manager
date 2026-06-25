@@ -37,15 +37,6 @@ const SAFE_DEPLOY_COMPOSE_CMD_RE = /^[a-zA-Z0-9_./:-]+(?: [a-zA-Z0-9_./:-]+)*$/;
 const GO_DURATION_RE = /^(?:[0-9]+(?:ns|us|ms|s|m|h))+$/;
 
 /**
- * PEM envelope: must start with -----BEGIN <label>----- and end with -----END <label>-----.
- * BEGIN and END labels must match (enforced via backreference).
- * Content between markers must be base64 characters, spaces, and newlines only.
- * Uses `[ \n\r]` instead of `\s` to exclude tab/form-feed/vertical-tab which are
- * not valid in PEM and could smuggle YAML indentation.
- */
-const PEM_ENVELOPE_RE = /^-----BEGIN ([A-Z0-9 ]+)-----\n[A-Za-z0-9+/= \n\r]+\n-----END \1-----$/;
-
-/**
  * Validate all CloudInitVariables before they are embedded into shell/YAML.
  * Throws an error describing the first invalid field found.
  */
@@ -163,17 +154,10 @@ export function validateCloudInitVariables(variables: CloudInitVariables): void 
       );
     }
   }
-  if (variables.originCaCert !== undefined && variables.originCaCert !== '') {
-    if (!PEM_ENVELOPE_RE.test(variables.originCaCert)) {
+  if (variables.originCaCertificateUrl !== undefined && variables.originCaCertificateUrl !== '') {
+    if (!SAFE_URL_RE.test(variables.originCaCertificateUrl)) {
       errors.push(
-        'originCaCert: must be a valid PEM-encoded certificate (-----BEGIN ... ----- / -----END ... -----)'
-      );
-    }
-  }
-  if (variables.originCaKey !== undefined && variables.originCaKey !== '') {
-    if (!PEM_ENVELOPE_RE.test(variables.originCaKey)) {
-      errors.push(
-        'originCaKey: must be a valid PEM-encoded key (-----BEGIN ... ----- / -----END ... -----)'
+        `originCaCertificateUrl: must be a valid HTTPS URL (got ${JSON.stringify(variables.originCaCertificateUrl)})`
       );
     }
   }
@@ -279,10 +263,8 @@ export interface CloudInitVariables {
   taskMode?: string;
   /** Docker daemon DNS servers as JSON array content (default: "1.1.1.1", "8.8.8.8") */
   dockerDnsServers?: string;
-  /** Origin CA certificate PEM for TLS between CF edge and VM agent (nullable) */
-  originCaCert?: string;
-  /** Origin CA private key PEM for TLS (nullable) */
-  originCaKey?: string;
+  /** Node-scoped endpoint used at boot to sign a locally generated Origin CA CSR. */
+  originCaCertificateUrl?: string;
   /** VM agent port override (default: 8443 with TLS, 8080 without) */
   vmAgentPort?: string;
   /** Timeout in seconds for fetching Cloudflare IP ranges at boot (default: 10) */
@@ -343,11 +325,10 @@ export function generateCloudInit(
     '{{ task_mode }}': variables.taskMode ?? 'task',
     '{{ docker_name_tag }}': '{{.Name}}',
     '{{ docker_dns_servers }}': variables.dockerDnsServers ?? '"1.1.1.1", "8.8.8.8"',
-    '{{ origin_ca_cert }}': indentForYamlBlock(variables.originCaCert ?? '', 6),
-    '{{ origin_ca_key }}': indentForYamlBlock(variables.originCaKey ?? '', 6),
-    '{{ vm_agent_port }}': variables.vmAgentPort ?? (variables.originCaCert ? '8443' : '8080'),
-    '{{ tls_cert_path }}': variables.originCaCert ? '/etc/sam/tls/origin-ca.pem' : '',
-    '{{ tls_key_path }}': variables.originCaCert ? '/etc/sam/tls/origin-ca-key.pem' : '',
+    '{{ vm_agent_port }}': variables.vmAgentPort ?? (variables.originCaCertificateUrl ? '8443' : '8080'),
+    '{{ tls_cert_path }}': variables.originCaCertificateUrl ? '/etc/sam/tls/origin-ca.pem' : '',
+    '{{ tls_key_path }}': variables.originCaCertificateUrl ? '/etc/sam/tls/origin-ca-key.pem' : '',
+    '{{ origin_ca_certificate_url }}': variables.originCaCertificateUrl ?? '',
     '{{ cf_ip_fetch_timeout }}': variables.cfIpFetchTimeout ?? '10',
     '{{ provider }}': variables.provider ?? '',
     '{{ devcontainer_cache_enabled }}': variables.devcontainerCacheEnabled ?? 'false',

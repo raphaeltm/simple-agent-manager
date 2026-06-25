@@ -128,7 +128,11 @@ GitHub App secrets use `GH_*` prefix because GitHub Actions secret names cannot 
 :::
 
 :::note
-Security keys (`ENCRYPTION_KEY`, `JWT_PRIVATE_KEY`, `JWT_PUBLIC_KEY`, `DEPLOY_SIGNING_PRIVATE_KEY`, `DEPLOY_SIGNING_PUBLIC_KEY`), Origin CA credentials (`ORIGIN_CA_CERT`, `ORIGIN_CA_KEY`), and `TRIAL_CLAIM_TOKEN_SECRET` are automatically generated during deployment. Pulumi persists the source key material, and the deployment workflow derives/copies the runtime Worker secrets. No manual setup required.
+Security keys (`ENCRYPTION_KEY`, `JWT_PRIVATE_KEY`, `JWT_PUBLIC_KEY`, `DEPLOY_SIGNING_PRIVATE_KEY`, `DEPLOY_SIGNING_PUBLIC_KEY`) and `TRIAL_CLAIM_TOKEN_SECRET` are automatically generated during deployment. Pulumi persists the source key material, and the deployment workflow derives/copies the runtime Worker secrets. No manual setup required.
+:::
+
+:::note[VM TLS certificates]
+New VM nodes do not receive a shared Origin CA private key in cloud-init. The cloud-init template generates a node-local RSA key and CSR, then calls the node-scoped callback endpoint `POST /api/nodes/:id/origin-ca-certificate` with its callback JWT. The API Worker signs that CSR through Cloudflare Origin CA using `CF_API_TOKEN` (`packages/cloud-init/src/template.ts`, `apps/api/src/routes/node-lifecycle.ts`, `apps/api/src/services/origin-ca-certificates.ts`).
 :::
 
 ## Step 7: Deploy
@@ -227,7 +231,16 @@ Check that your GitHub App's Callback URL matches your `BASE_DOMAIN` exactly: `h
 
 ### Origin CA Certificate Error (1016)
 
-Your API token is missing the **Zone → SSL and Certificates → Edit** permission. Edit the token in Cloudflare and add it.
+Your API token is missing the **Zone → SSL and Certificates → Edit** permission. New nodes use this permission when the API Worker signs the node-generated CSR for VM TLS. Edit the token in Cloudflare and add it.
+
+### Rotating legacy shared Origin CA certificates
+
+Older deployments may have existing nodes that were provisioned before per-node CSR signing and therefore received the legacy shared `ORIGIN_CA_KEY` in cloud-init. To rotate safely:
+
+1. Drain or delete existing workspace/deployment nodes so no running VM depends on the old certificate/key pair.
+2. Re-deploy SAM with this per-node certificate model so new nodes generate their own private key locally and fetch only a signed certificate.
+3. In Cloudflare SSL/TLS → Origin Server, revoke the old wildcard Origin CA certificate after all old nodes are gone.
+4. Remove any manually configured `ORIGIN_CA_CERT` or `ORIGIN_CA_KEY` Worker secrets. They are legacy rotation inputs and are not required for new node provisioning.
 
 ### Analytics Engine Not Enabled (10089)
 

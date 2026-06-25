@@ -13,28 +13,26 @@ This reference covers the most important configuration variables. For the comple
 
 These are Cloudflare Worker secrets, set during deployment. Pulumi auto-generates security keys on first deploy.
 
-| Secret                                     | Description                                                                                    |
-| ------------------------------------------ | ---------------------------------------------------------------------------------------------- |
-| `ENCRYPTION_KEY`                           | AES-256-GCM key for credential encryption (auto-generated)                                     |
-| `JWT_PRIVATE_KEY`                          | RSA-2048 private key for signing tokens (auto-generated)                                       |
-| `JWT_PUBLIC_KEY`                           | RSA-2048 public key for token verification (auto-generated)                                    |
-| `DEPLOY_SIGNING_PRIVATE_KEY`               | Ed25519 private key for signing deployment apply payloads (auto-generated)                     |
-| `DEPLOY_SIGNING_PUBLIC_KEY`                | Ed25519 public key derived during deployment for deployment node verification (auto-generated) |
-| `CF_API_TOKEN`                             | Cloudflare API token for infrastructure, DNS, observability, AI Gateway, and admin log access  |
-| `CF_AIG_TOKEN`                             | Optional narrower Cloudflare AI Gateway Unified Billing token                                  |
-| `CF_ZONE_ID`                               | Cloudflare zone ID for DNS record management                                                   |
-| `CF_ACCOUNT_ID`                            | Cloudflare account ID                                                                          |
-| `DEVCONTAINER_CACHE_CLOUDFLARE_API_TOKEN`  | Optional narrower Cloudflare token for managed devcontainer registry credentials               |
-| `DEVCONTAINER_CACHE_CLOUDFLARE_ACCOUNT_ID` | Optional Cloudflare account override for managed devcontainer registry credentials             |
-| `GITHUB_CLIENT_ID`                         | GitHub App client ID for OAuth                                                                 |
-| `GITHUB_CLIENT_SECRET`                     | GitHub App client secret for OAuth                                                             |
-| `GITHUB_APP_ID`                            | GitHub App ID for installation tokens                                                          |
-| `GITHUB_APP_PRIVATE_KEY`                   | GitHub App private key (PEM or base64)                                                         |
-| `GITHUB_APP_SLUG`                          | GitHub App URL slug                                                                            |
-| `GITHUB_WEBHOOK_SECRET`                    | GitHub App webhook HMAC secret; set from GitHub Actions secret `GH_WEBHOOK_SECRET`             |
-| `ORIGIN_CA_CERT`                           | Cloudflare Origin CA certificate for VM-agent TLS (auto-generated)                             |
-| `ORIGIN_CA_KEY`                            | Cloudflare Origin CA private key for VM-agent TLS (auto-generated)                             |
-| `TRIAL_CLAIM_TOKEN_SECRET`                 | Trial onboarding HMAC secret (auto-generated)                                                  |
+| Secret                                     | Description                                                                                                    |
+| ------------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
+| `ENCRYPTION_KEY`                           | AES-256-GCM key for credential encryption (auto-generated)                                                     |
+| `JWT_PRIVATE_KEY`                          | RSA-2048 private key for signing tokens (auto-generated)                                                       |
+| `JWT_PUBLIC_KEY`                           | RSA-2048 public key for token verification (exposed via JWKS)                                                  |
+| `DEPLOY_SIGNING_PRIVATE_KEY`               | Ed25519 private key for signing deployment apply payloads (auto-generated)                                     |
+| `DEPLOY_SIGNING_PUBLIC_KEY`                | Ed25519 public key derived during deployment for deployment node verification (auto-generated)                  |
+| `CF_API_TOKEN`                             | Cloudflare API token for infrastructure, DNS, Origin CA CSR signing, observability, AI Gateway, and admin logs  |
+| `CF_AIG_TOKEN`                             | Optional narrower Cloudflare AI Gateway Unified Billing token                                                  |
+| `CF_ZONE_ID`                               | Cloudflare zone ID for DNS record management                                                                   |
+| `CF_ACCOUNT_ID`                            | Cloudflare account ID                                                                                          |
+| `DEVCONTAINER_CACHE_CLOUDFLARE_API_TOKEN`  | Optional narrower Cloudflare token for managed devcontainer registry credentials                               |
+| `DEVCONTAINER_CACHE_CLOUDFLARE_ACCOUNT_ID` | Optional Cloudflare account override for managed devcontainer registry credentials                             |
+| `GITHUB_CLIENT_ID`                         | GitHub App client ID for OAuth                                                                                 |
+| `GITHUB_CLIENT_SECRET`                     | GitHub App client secret for OAuth                                                                             |
+| `GITHUB_APP_ID`                            | GitHub App ID for installation tokens                                                                          |
+| `GITHUB_APP_PRIVATE_KEY`                   | GitHub App private key (PEM or base64)                                                                         |
+| `GITHUB_APP_SLUG`                          | GitHub App URL slug                                                                                            |
+| `GITHUB_WEBHOOK_SECRET`                    | GitHub App webhook HMAC secret; set from GitHub Actions secret `GH_WEBHOOK_SECRET`                             |
+| `TRIAL_CLAIM_TOKEN_SECRET`                 | Trial onboarding HMAC secret (auto-generated)                                                                  |
 
 ## Worker Variables
 
@@ -72,6 +70,7 @@ GitHub App secrets use `GH_*` prefix (e.g., `GH_CLIENT_ID`, `GH_WEBHOOK_SECRET`)
 | `REQUIRE_APPROVAL`               | _(unset)_                 | Require admin approval for new users. The first genuine human becomes superadmin regardless of this flag — see [First Login & Admin Access](/docs/guides/self-hosting/#first-login--admin-access).                               |
 | `TRIAL_ANONYMOUS_USER_ID`        | `system_anonymous_trials` | Id of the internal anonymous-trial sentinel user, excluded from first-user superadmin checks. Override only if your deployment uses a different sentinel id.                                                                     |
 | `CAPACITY_SIZE_FALLBACK_ENABLED` | `true`                    | When a new node's VM size is exhausted on transient capacity, descend the size chain (large→medium→small). Only applies to default-derived sizes (project/platform default), never user-requested sizes. Set `false` to disable. |
+| `ORIGIN_CA_CERT_VALIDITY_DAYS`   | `7`                       | Validity for per-node Cloudflare Origin CA certificates issued from node-generated CSRs. Must be one of Cloudflare's supported values: 7, 30, 90, 365, 730, 1095, or 5475.                                                     |
 
 ## AI Idea Title Generation
 
@@ -298,8 +297,9 @@ SAM loads OpenCode Zen and OpenCode Go model choices through the authenticated m
 | ------------------- | -------- | ------------------------------------------ |
 | `VM_AGENT_PROTOCOL` | `https`  | Protocol for VM agent communication        |
 | `VM_AGENT_PORT`     | `8443`   | VM agent listening port                    |
-| `ORIGIN_CA_CERT`    | _(auto)_ | TLS certificate (auto-generated by Pulumi) |
-| `ORIGIN_CA_KEY`     | _(auto)_ | TLS private key (auto-generated by Pulumi) |
+| `ORIGIN_CA_CERT_VALIDITY_DAYS` | `7` | Validity for per-node Origin CA certificates signed by the API Worker |
+
+New nodes generate `/etc/sam/tls/origin-ca-key.pem` locally in cloud-init and fetch only the signed certificate from `POST /api/nodes/:id/origin-ca-certificate` (`packages/cloud-init/src/template.ts`, `apps/api/src/routes/node-lifecycle.ts`). Legacy `ORIGIN_CA_CERT` and `ORIGIN_CA_KEY` Worker secrets are not required for new node provisioning.
 
 ## Journald Configuration (VM)
 

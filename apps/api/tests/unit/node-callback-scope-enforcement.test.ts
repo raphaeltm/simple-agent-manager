@@ -224,4 +224,32 @@ describe('node callback auth — scope enforcement', () => {
     const body = await res.json();
     expect(body.message).toBe('Insufficient token scope');
   });
+
+  it('REJECTS different-node tokens on origin certificate endpoint', async () => {
+    mockVerifyCallbackToken.mockResolvedValue({
+      workspace: 'node-other',
+      type: 'callback',
+      scope: 'node',
+    });
+
+    const res = await app.request('/api/nodes/node-test/origin-ca-certificate', {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer other-node-token',
+        'Content-Type': 'text/plain',
+      },
+      body: [
+        '-----BEGIN CERTIFICATE REQUEST-----',
+        'MIIBUzCB/QIBADAWMRQwEgYDVQQDEwtub2RlLXRlc3QwXDANBgkqhkiG9w0BAQEF',
+        'AANLADBIAkEA0HP1uR9jfnFvD6h9P5gQ2fVw0tZNNqYiT7WL4S2c5tqR0CkW3Jj3',
+        'o9C5zU3n+J8z9kA2q7dLa8YyMPpH6wIDAQABoAAwDQYJKoZIhvcNAQELBQADQQAF',
+        'y8QvVrrqzXK6yH9E8pFzj0yJrUiXjZk5GmQxG1c5M4n0Qv7YqgC6h8jYwKpR2sU',
+        '-----END CERTIFICATE REQUEST-----',
+      ].join('\n'),
+    });
+
+    expect(res.status).toBe(401);
+    const body = await res.json();
+    expect(body.message).toBe('Callback token does not match node');
+  });
 });

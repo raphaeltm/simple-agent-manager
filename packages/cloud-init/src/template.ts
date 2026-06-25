@@ -71,6 +71,34 @@ runcmd:
     logger -t sam-boot "vm-agent binary downloaded, size=$(stat -c%s /usr/local/bin/vm-agent 2>/dev/null || echo unknown)"
   - 'logger -t sam-boot "PHASE END: vm-agent-download"'
 
+  - 'logger -t sam-boot "PHASE START: origin-ca-bootstrap"'
+  - |
+    set -euo pipefail
+    ORIGIN_CA_CERTIFICATE_URL="{{ origin_ca_certificate_url }}"
+    TLS_CERT_PATH="/etc/sam/tls/origin-ca.pem"
+    TLS_KEY_PATH="/etc/sam/tls/origin-ca-key.pem"
+    TLS_CSR_PATH="/etc/sam/tls/origin-ca.csr"
+    if [ -n "$ORIGIN_CA_CERTIFICATE_URL" ]; then
+      logger -t sam-boot "Generating node-local Origin CA private key and CSR"
+      if [ ! -s "$TLS_KEY_PATH" ]; then
+        openssl genrsa -out "$TLS_KEY_PATH" 2048 2>&1 | logger -t sam-boot
+        chmod 600 "$TLS_KEY_PATH"
+      fi
+      openssl req -new -key "$TLS_KEY_PATH" -out "$TLS_CSR_PATH" -subj "/CN={{ node_id }}" 2>&1 | logger -t sam-boot
+      curl -fsS -X POST \
+        -H "Authorization: Bearer {{ callback_token }}" \
+        -H "Content-Type: text/plain" \
+        --data-binary "@$TLS_CSR_PATH" \
+        -o "$TLS_CERT_PATH" \
+        "$ORIGIN_CA_CERTIFICATE_URL" 2>&1 | logger -t sam-boot
+      chmod 0644 "$TLS_CERT_PATH"
+      rm -f "$TLS_CSR_PATH"
+      logger -t sam-boot "Node-local Origin CA certificate installed"
+    else
+      logger -t sam-boot "Skipping Origin CA bootstrap; TLS disabled"
+    fi
+  - 'logger -t sam-boot "PHASE END: origin-ca-bootstrap"'
+
   - 'logger -t sam-boot "PHASE START: vm-agent-start"'
   - systemctl daemon-reload
   - systemctl enable vm-agent
@@ -349,16 +377,6 @@ write_files:
         "live-restore": true
       }
     permissions: '0644'
-
-  - path: /etc/sam/tls/origin-ca.pem
-    content: |
-      {{ origin_ca_cert }}
-    permissions: '0644'
-
-  - path: /etc/sam/tls/origin-ca-key.pem
-    content: |
-      {{ origin_ca_key }}
-    permissions: '0600'
 
   - path: /etc/apt/apt.conf.d/80-retries
     content: |
