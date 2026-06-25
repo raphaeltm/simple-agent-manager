@@ -11,7 +11,7 @@
 # Required env vars:
 #   CF_ACCOUNT_ID  - Cloudflare account ID
 #   CF_API_TOKEN   - API token with Pages:Edit permission
-#   PAGES_PROJECT  - Pages project name (e.g. "sam-web-staging")
+#   PAGES_PROJECT  - Pages project name (e.g. "sa379a6-web-staging")
 #   PAGES_DOMAIN   - Custom domain (e.g. "app.sammy.party")
 #
 # Optional env vars:

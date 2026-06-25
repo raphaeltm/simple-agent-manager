@@ -126,11 +126,13 @@ export function validatePulumiOutputs(outputs: unknown): asserts outputs is Pulu
 // Tail Worker Existence Check
 // ============================================================================
 
-async function checkTailWorkerExists(accountId: string, tailWorkerName: string): Promise<boolean> {
+export async function checkTailWorkerExists(
+  accountId: string,
+  tailWorkerName: string
+): Promise<boolean> {
   const apiToken = process.env.CF_API_TOKEN || process.env.CLOUDFLARE_API_TOKEN;
   if (!apiToken) {
-    console.log('  No CF API token available, assuming tail worker does not exist');
-    return false;
+    throw new Error('CF_API_TOKEN or CLOUDFLARE_API_TOKEN is required to check tail worker status');
   }
 
   try {
@@ -138,10 +140,25 @@ async function checkTailWorkerExists(accountId: string, tailWorkerName: string):
       `https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/scripts/${tailWorkerName}`,
       { headers: { Authorization: `Bearer ${apiToken}` } }
     );
-    return response.ok;
-  } catch {
-    console.log('  Failed to check tail worker existence, assuming it does not exist');
-    return false;
+
+    if (response.ok) {
+      return true;
+    }
+
+    if (response.status === 404) {
+      return false;
+    }
+
+    const body = await response.text().catch(() => '');
+    throw new Error(
+      `Failed to check tail worker "${tailWorkerName}" (HTTP ${response.status})${body ? `: ${body}` : ''}`
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.startsWith('Failed to check tail worker')) {
+      throw error;
+    }
+    throw new Error(`Failed to check tail worker "${tailWorkerName}": ${message}`);
   }
 }
 
@@ -185,7 +202,7 @@ function saveWranglerToml(config: WranglerToml): void {
   writeFileSync(WRANGLER_TOML_PATH, content, 'utf-8');
 }
 
-function generateApiWorkerEnv(
+export function generateApiWorkerEnv(
   topLevel: WranglerToml,
   outputs: PulumiOutputs,
   stack: string,
@@ -193,6 +210,10 @@ function generateApiWorkerEnv(
 ): WranglerEnvConfig {
   const staticBindings = extractStaticBindings(topLevel);
   const tailWorkerName = DEPLOYMENT_CONFIG.resources.tailWorkerName(stack);
+  const analyticsDataset = `${DEPLOYMENT_CONFIG.prefix}_analytics`;
+  const analyticsEngineDatasets = staticBindings.analytics_engine_datasets?.map((dataset) =>
+    dataset.binding === 'ANALYTICS' ? { ...dataset, dataset: analyticsDataset } : dataset
+  );
 
   const envConfig: WranglerEnvConfig = {
     // Worker name derived from config
@@ -251,7 +272,9 @@ function generateApiWorkerEnv(
       // AI Gateway ID matches the resource prefix (created by configure-ai-gateway.sh)
       AI_GATEWAY_ID: DEPLOYMENT_CONFIG.prefix,
       // Analytics Engine dataset — derived from prefix so forks don't co-mingle data
-      ANALYTICS_DATASET: `${DEPLOYMENT_CONFIG.prefix}_analytics`,
+      ANALYTICS_DATASET: analyticsDataset,
+      // Marketing Pages project — used when the wildcard Worker route intercepts www.*
+      WWW_PAGES_PROJECT_NAME: `${DEPLOYMENT_CONFIG.prefix}-www`,
       // Deployment environment — used by trial runner to choose agent type + model
       ENVIRONMENT: DEPLOYMENT_CONFIG.getEnvironmentFromStack(stack),
     },
@@ -277,9 +300,7 @@ function generateApiWorkerEnv(
     // Static bindings copied from top-level config
     ...(staticBindings.durable_objects ? { durable_objects: staticBindings.durable_objects } : {}),
     ...(staticBindings.ai ? { ai: staticBindings.ai } : {}),
-    ...(staticBindings.analytics_engine_datasets
-      ? { analytics_engine_datasets: staticBindings.analytics_engine_datasets }
-      : {}),
+    ...(analyticsEngineDatasets ? { analytics_engine_datasets: analyticsEngineDatasets } : {}),
     ...(staticBindings.migrations ? { migrations: staticBindings.migrations } : {}),
     ...(staticBindings.containers ? { containers: staticBindings.containers } : {}),
     ...(staticBindings.artifacts ? { artifacts: staticBindings.artifacts } : {}),

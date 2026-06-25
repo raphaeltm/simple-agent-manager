@@ -26,7 +26,7 @@ on:
         description: 'R2 bucket name for Pulumi state'
         required: false
         type: string
-        default: 'sam-pulumi-state'
+        default: '{prefix}-pulumi-state'
       dry_run:
         description: 'Preview changes without applying'
         required: false
@@ -165,7 +165,7 @@ jobs:
 
       - name: Deploy Web UI
         if: ${{ !inputs.dry_run }}
-        run: pnpm --filter @simple-agent-manager/web exec wrangler pages deploy dist --project-name sam-web-${{ inputs.environment }}
+        run: pnpm --filter @simple-agent-manager/web exec wrangler pages deploy dist --project-name ${{ steps.prefix.outputs.value }}-web-${{ inputs.environment }}
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
 
@@ -261,7 +261,7 @@ on:
         description: 'R2 bucket name for Pulumi state'
         required: false
         type: string
-        default: 'sam-pulumi-state'
+        default: '{prefix}-pulumi-state'
 
 jobs:
   teardown:
@@ -318,4 +318,4 @@ jobs:
           echo "- Pages Project"
           echo ""
           echo "Note: Pulumi state bucket was NOT deleted."
-          echo "Delete manually if no longer needed: sam-pulumi-state"
+          echo "Delete manually if no longer needed: {prefix}-pulumi-state"

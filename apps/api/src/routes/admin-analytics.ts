@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import * as v from 'valibot';
 
 import type { Env } from '../env';
+import { getAnalyticsDataset } from '../lib/analytics-config';
 import { log } from '../lib/logger';
 import { readResponseJson } from '../lib/runtime-validation';
 import { requireApproved, requireAuth, requireSuperadmin } from '../middleware/auth';
@@ -10,7 +11,6 @@ import { getForwardStatus } from '../services/analytics-forward';
 
 const DEFAULT_ANALYTICS_SQL_API_URL = 'https://api.cloudflare.com/client/v4/accounts';
 const DEFAULT_PERIOD_DAYS = 30;
-const DEFAULT_DATASET = 'sam_analytics';
 const DEFAULT_TOP_EVENTS_LIMIT = 50;
 const DEFAULT_GEO_LIMIT = 50;
 const DEFAULT_RETENTION_WEEKS = 12;
@@ -53,11 +53,18 @@ function periodToInterval(period: Period): string {
 
 /** Feature event categories for grouping in the adoption chart. */
 const FEATURE_EVENTS = [
-  'project_created', 'project_deleted',
-  'workspace_created', 'workspace_started', 'workspace_stopped',
-  'task_submitted', 'task_completed', 'task_failed',
-  'node_created', 'node_deleted',
-  'credential_saved', 'session_created',
+  'project_created',
+  'project_deleted',
+  'workspace_created',
+  'workspace_started',
+  'workspace_stopped',
+  'task_submitted',
+  'task_completed',
+  'task_failed',
+  'node_created',
+  'node_deleted',
+  'credential_saved',
+  'session_created',
   'settings_changed',
 ];
 
@@ -69,10 +76,7 @@ adminAnalyticsRoutes.use('/*', requireAuth(), requireApproved(), requireSuperadm
 /**
  * Execute an Analytics Engine SQL query via the Cloudflare API.
  */
-async function queryAnalyticsEngine(
-  env: Env,
-  sql: string,
-): Promise<unknown> {
+async function queryAnalyticsEngine(env: Env, sql: string): Promise<unknown> {
   const baseUrl = env.ANALYTICS_SQL_API_URL || DEFAULT_ANALYTICS_SQL_API_URL;
   const accountId = env.CF_ACCOUNT_ID;
 
@@ -85,7 +89,7 @@ async function queryAnalyticsEngine(
   const response = await fetch(url, {
     method: 'POST',
     headers: {
-      'Authorization': `Bearer ${env.CF_API_TOKEN}`,
+      Authorization: `Bearer ${env.CF_API_TOKEN}`,
       'Content-Type': 'text/plain',
     },
     body: sql,
@@ -111,7 +115,7 @@ async function queryAnalyticsEngine(
  */
 adminAnalyticsRoutes.get('/dau', async (c) => {
   const periodDays = parsePositiveInt(c.env.ANALYTICS_DEFAULT_PERIOD_DAYS, DEFAULT_PERIOD_DAYS);
-  const dataset = c.env.ANALYTICS_DATASET || DEFAULT_DATASET;
+  const dataset = getAnalyticsDataset(c.env);
 
   const sql = `
     SELECT
@@ -125,7 +129,10 @@ adminAnalyticsRoutes.get('/dau', async (c) => {
     ORDER BY date ASC
   `;
 
-  const data = (await queryAnalyticsEngine(c.env, sql)) as Array<{ date: string; unique_users: string }>;
+  const data = (await queryAnalyticsEngine(c.env, sql)) as Array<{
+    date: string;
+    unique_users: string;
+  }>;
   const dau = data.map((row) => ({
     date: row.date,
     unique_users: Number(row.unique_users),
@@ -139,9 +146,12 @@ adminAnalyticsRoutes.get('/dau', async (c) => {
  */
 adminAnalyticsRoutes.get('/events', async (c) => {
   const period = parsePeriod(c.req.query('period'));
-  const dataset = c.env.ANALYTICS_DATASET || DEFAULT_DATASET;
+  const dataset = getAnalyticsDataset(c.env);
   const intervalExpr = periodToInterval(period);
-  const topEventsLimit = parsePositiveInt(c.env.ANALYTICS_TOP_EVENTS_LIMIT, DEFAULT_TOP_EVENTS_LIMIT);
+  const topEventsLimit = parsePositiveInt(
+    c.env.ANALYTICS_TOP_EVENTS_LIMIT,
+    DEFAULT_TOP_EVENTS_LIMIT
+  );
 
   const sql = `
     SELECT
@@ -158,7 +168,10 @@ adminAnalyticsRoutes.get('/events', async (c) => {
   `;
 
   const data = (await queryAnalyticsEngine(c.env, sql)) as Array<{
-    event_name: string; count: string; unique_users: string; avg_response_ms: string;
+    event_name: string;
+    count: string;
+    unique_users: string;
+    avg_response_ms: string;
   }>;
   const events = data.map((row) => ({
     event_name: row.event_name,
@@ -175,7 +188,7 @@ adminAnalyticsRoutes.get('/events', async (c) => {
  */
 adminAnalyticsRoutes.get('/funnel', async (c) => {
   const periodDays = parsePositiveInt(c.env.ANALYTICS_DEFAULT_PERIOD_DAYS, DEFAULT_PERIOD_DAYS);
-  const dataset = c.env.ANALYTICS_DATASET || DEFAULT_DATASET;
+  const dataset = getAnalyticsDataset(c.env);
 
   const sql = `
     SELECT
@@ -188,7 +201,10 @@ adminAnalyticsRoutes.get('/funnel', async (c) => {
     GROUP BY event_name
   `;
 
-  const data = (await queryAnalyticsEngine(c.env, sql)) as Array<{ event_name: string; unique_users: string }>;
+  const data = (await queryAnalyticsEngine(c.env, sql)) as Array<{
+    event_name: string;
+    unique_users: string;
+  }>;
   const funnel = data.map((row) => ({
     event_name: row.event_name,
     unique_users: Number(row.unique_users),
@@ -204,7 +220,7 @@ adminAnalyticsRoutes.get('/funnel', async (c) => {
  */
 adminAnalyticsRoutes.get('/feature-adoption', async (c) => {
   const period = parsePeriod(c.req.query('period') || '30d');
-  const dataset = c.env.ANALYTICS_DATASET || DEFAULT_DATASET;
+  const dataset = getAnalyticsDataset(c.env);
   const intervalExpr = periodToInterval(period);
 
   const eventList = FEATURE_EVENTS.map((e) => `'${e}'`).join(', ');
@@ -266,7 +282,7 @@ adminAnalyticsRoutes.get('/feature-adoption', async (c) => {
  */
 adminAnalyticsRoutes.get('/geo', async (c) => {
   const period = parsePeriod(c.req.query('period') || '30d');
-  const dataset = c.env.ANALYTICS_DATASET || DEFAULT_DATASET;
+  const dataset = getAnalyticsDataset(c.env);
   const intervalExpr = periodToInterval(period);
   const geoLimit = parsePositiveInt(c.env.ANALYTICS_GEO_LIMIT, DEFAULT_GEO_LIMIT);
 
@@ -285,7 +301,9 @@ adminAnalyticsRoutes.get('/geo', async (c) => {
   `;
 
   const data = (await queryAnalyticsEngine(c.env, sql)) as Array<{
-    country: string; event_count: string; unique_users: string;
+    country: string;
+    event_count: string;
+    unique_users: string;
   }>;
   const geo = data.map((row) => ({
     country: row.country,
@@ -304,8 +322,11 @@ adminAnalyticsRoutes.get('/geo', async (c) => {
  * then any subsequent event defines "returned in week N".
  */
 adminAnalyticsRoutes.get('/retention', async (c) => {
-  const dataset = c.env.ANALYTICS_DATASET || DEFAULT_DATASET;
-  const weeks = parsePositiveInt(c.req.query('weeks') || c.env.ANALYTICS_RETENTION_WEEKS, DEFAULT_RETENTION_WEEKS);
+  const dataset = getAnalyticsDataset(c.env);
+  const weeks = parsePositiveInt(
+    c.req.query('weeks') || c.env.ANALYTICS_RETENTION_WEEKS,
+    DEFAULT_RETENTION_WEEKS
+  );
 
   // Two-query approach:
   // 1. Get cohort week (first activity) per user
@@ -341,8 +362,12 @@ adminAnalyticsRoutes.get('/retention', async (c) => {
   `;
 
   const [cohortData, activityData] = await Promise.all([
-    queryAnalyticsEngine(c.env, cohortSql) as Promise<Array<{ user_id: string; cohort_week: string }>>,
-    queryAnalyticsEngine(c.env, activitySql) as Promise<Array<{ user_id: string; active_week: string }>>,
+    queryAnalyticsEngine(c.env, cohortSql) as Promise<
+      Array<{ user_id: string; cohort_week: string }>
+    >,
+    queryAnalyticsEngine(c.env, activitySql) as Promise<
+      Array<{ user_id: string; active_week: string }>
+    >,
   ]);
 
   // Build cohort map: userId -> cohort_week
@@ -411,11 +436,11 @@ adminAnalyticsRoutes.get('/retention', async (c) => {
  */
 adminAnalyticsRoutes.get('/website-traffic', async (c) => {
   const period = parsePeriod(c.req.query('period'));
-  const dataset = c.env.ANALYTICS_DATASET || DEFAULT_DATASET;
+  const dataset = getAnalyticsDataset(c.env);
   const intervalExpr = periodToInterval(period);
   const topPagesLimit = parsePositiveInt(
     c.env.ANALYTICS_WEBSITE_TRAFFIC_TOP_PAGES_LIMIT,
-    DEFAULT_WEBSITE_TRAFFIC_TOP_PAGES_LIMIT,
+    DEFAULT_WEBSITE_TRAFFIC_TOP_PAGES_LIMIT
   );
 
   // Section totals: group page_view events by host and path prefix.
@@ -493,7 +518,14 @@ adminAnalyticsRoutes.get('/website-traffic', async (c) => {
   // Build per-host section breakdowns from top pages data
   const hostSections = new Map<
     string,
-    Map<SectionName, { views: number; unique_visitors: number; pages: Array<{ page: string; views: number; unique_visitors: number }> }>
+    Map<
+      SectionName,
+      {
+        views: number;
+        unique_visitors: number;
+        pages: Array<{ page: string; views: number; unique_visitors: number }>;
+      }
+    >
   >();
 
   for (const row of topPagesData) {
@@ -508,7 +540,11 @@ adminAnalyticsRoutes.get('/website-traffic', async (c) => {
     s.views += Number(row.views);
     s.unique_visitors += Number(row.unique_visitors);
     if (s.pages.length < topPagesLimit) {
-      s.pages.push({ page: row.page, views: Number(row.views), unique_visitors: Number(row.unique_visitors) });
+      s.pages.push({
+        page: row.page,
+        views: Number(row.views),
+        unique_visitors: Number(row.unique_visitors),
+      });
     }
   }
 

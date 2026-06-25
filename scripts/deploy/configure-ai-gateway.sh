@@ -5,11 +5,15 @@
 # Required env vars:
 #   CF_API_TOKEN    — Cloudflare API token with AI Gateway permissions
 #   CF_ACCOUNT_ID   — Cloudflare account ID
-#   AI_GATEWAY_ID   — Gateway slug (default: "sam")
+#   AI_GATEWAY_ID   — Gateway slug
 
 set -euo pipefail
 
-GATEWAY_ID="${AI_GATEWAY_ID:-sam}"
+: "${CF_API_TOKEN:?CF_API_TOKEN is required}"
+: "${CF_ACCOUNT_ID:?CF_ACCOUNT_ID is required}"
+: "${AI_GATEWAY_ID:?AI_GATEWAY_ID is required}"
+
+GATEWAY_ID="${AI_GATEWAY_ID}"
 
 echo "Ensuring AI Gateway '${GATEWAY_ID}' exists..."
 
@@ -21,6 +25,11 @@ HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
 if [ "$HTTP_CODE" -eq 200 ]; then
   echo "AI Gateway '${GATEWAY_ID}' already exists"
   exit 0
+fi
+
+if [ "$HTTP_CODE" -ne 404 ]; then
+  echo "::error::Failed to check AI Gateway '${GATEWAY_ID}' (HTTP ${HTTP_CODE})"
+  exit 1
 fi
 
 echo "Creating AI Gateway '${GATEWAY_ID}'..."
@@ -46,6 +55,6 @@ if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
 elif [ "$HTTP_CODE" -eq 409 ]; then
   echo "AI Gateway '${GATEWAY_ID}' already exists (409 conflict — OK)"
 else
-  echo "::warning::Failed to create AI Gateway (HTTP ${HTTP_CODE}): ${BODY}"
-  echo "AI proxy will fall back to Workers AI REST API (no caching/logging)"
+  echo "::error::Failed to create AI Gateway (HTTP ${HTTP_CODE}): ${BODY}"
+  exit 1
 fi

@@ -499,7 +499,7 @@ export interface Env {
   ANALYTICS_SKIP_ROUTES?: string; // Comma-separated route patterns to skip
   ANALYTICS_SQL_API_URL?: string; // Override Analytics Engine SQL API URL
   ANALYTICS_DEFAULT_PERIOD_DAYS?: string; // Default query period (default: 30)
-  ANALYTICS_DATASET?: string; // Dataset name (default: "sam_analytics")
+  ANALYTICS_DATASET?: string; // Dataset name (set by deployment from resource prefix)
   ANALYTICS_TOP_EVENTS_LIMIT?: string; // Max events in top events query (default: 50)
   ANALYTICS_GEO_LIMIT?: string; // Max countries in geo distribution (default: 50)
   ANALYTICS_RETENTION_WEEKS?: string; // Retention cohort lookback weeks (default: 12)
@@ -605,7 +605,7 @@ export interface Env {
   AI_PROXY_BILLING_MODE?: string; // Billing mode: "unified" | "platform-key" | "auto" (default: auto)
   AI_MONTHLY_COST_CACHE_TTL_SECONDS?: string; // TTL for monthly cost KV cache entries in seconds (default: 7200)
   AI_MONTHLY_COST_AGGREGATION_MAX_PAGES?: string; // Max AI Gateway log pages for monthly cost cron (default: 200, hard cap: 500, invalid values fall back)
-  AI_GATEWAY_ID?: string; // Cloudflare AI Gateway ID (default: sam)
+  AI_GATEWAY_ID?: string; // Cloudflare AI Gateway ID (set by deployment from resource prefix)
   CF_AIG_TOKEN?: string; // Cloudflare AI Gateway Unified Billing token (optional — enables all providers without separate keys)
   AI_USAGE_PAGE_SIZE?: string; // AI Gateway logs page size for usage aggregation (1-50, default: 50, invalid values fall back)
   AI_USAGE_MAX_PAGES?: string; // Max pages to iterate for AI usage aggregation (default: 20, hard cap: 20, invalid values fall back)

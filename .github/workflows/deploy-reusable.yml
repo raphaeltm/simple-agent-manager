@@ -87,7 +87,7 @@ jobs:
             MISSING="$MISSING\n  - secrets.GH_APP_SLUG"
           fi
           if [ "$HAS_GH_WEBHOOK_SECRET" != "true" ]; then
-            echo "::notice::GH_WEBHOOK_SECRET not set — GitHub webhook signature verification will be disabled. Set this secret to enable webhook security."
+            MISSING="$MISSING\n  - secrets.GH_WEBHOOK_SECRET"
           fi
           if [ "$HAS_CF_ORIGIN_CA_KEY" != "true" ]; then
             echo "::notice::CF_ORIGIN_CA_KEY not set — using CF_API_TOKEN for Origin CA certs. If Pulumi fails with error 1016, ensure your API token has Zone > SSL and Certificates > Edit permission."
@@ -723,6 +723,9 @@ jobs:
           SEGMENT_WRITE_KEY: ${{ secrets.SEGMENT_WRITE_KEY }}
           GA4_API_SECRET: ${{ secrets.GA4_API_SECRET }}
           GA4_MEASUREMENT_ID: ${{ secrets.GA4_MEASUREMENT_ID }}
+          CF_AIG_TOKEN: ${{ secrets.CF_AIG_TOKEN }}
+          DEVCONTAINER_CACHE_CLOUDFLARE_API_TOKEN: ${{ secrets.DEVCONTAINER_CACHE_CLOUDFLARE_API_TOKEN }}
+          DEVCONTAINER_CACHE_CLOUDFLARE_ACCOUNT_ID: ${{ secrets.DEVCONTAINER_CACHE_CLOUDFLARE_ACCOUNT_ID }}
 
       # Secret writes create fresh Worker deployments. Re-deploy once after all
       # secrets are configured so routes serving the web app keep the current
