@@ -46,22 +46,18 @@ function isOnboardingForced(): boolean {
   return new URLSearchParams(window.location.search).has('onboarding');
 }
 
-export function OnboardingProvider({ children }: { children: ReactNode }) {
-  const { user } = useAuth();
-  const userId = user?.id;
+// ---------------------------------------------------------------------------
+// Extracted hook: fetches credential / installation / agent status
+// ---------------------------------------------------------------------------
 
+interface OnboardingStatus {
+  loading: boolean;
+  setupComplete: boolean;
+}
+
+function useOnboardingStatus(userId: string | undefined): OnboardingStatus {
   const [loading, setLoading] = useState(true);
   const [setupComplete, setSetupComplete] = useState(false);
-  const [dismissed, setDismissed] = useState<boolean>(() => {
-    // ?onboarding forces the overlay open, overriding a persisted dismissal
-    // (without clearing the stored flag — see openOnboarding / checkStatus).
-    if (isOnboardingForced()) return false;
-    if (!userId) return false;
-    return localStorage.getItem(getStorageKey(userId)) === 'true';
-  });
-  // Open synchronously when forced so the overlay paints immediately rather
-  // than waiting on the background credential-status fetch.
-  const [overlayOpen, setOverlayOpen] = useState<boolean>(() => isOnboardingForced());
 
   useEffect(() => {
     const controller = new AbortController();
@@ -88,23 +84,7 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
         // agent, cloud, and GitHub. Platform availability (SAM-managed AI tokens /
         // SAM-managed infrastructure) must NOT auto-complete onboarding — choosing
         // to route through SAM is itself a decision the user makes inside onboarding.
-        const isComplete = hasAgent && hasCloud && hasGitHub;
-        setSetupComplete(isComplete);
-
-        // ?onboarding URL param forces the overlay open (for testing / re-running).
-        // Reset the dismissed flag so users who previously dismissed can always
-        // re-view onboarding on demand. (The overlay is already open synchronously
-        // from initial state in this case; this keeps it open after the fetch.)
-        if (isOnboardingForced()) {
-          setOverlayOpen(true);
-          setDismissed(false);
-        } else if (isComplete) {
-          setDismissed(true);
-          if (userId) localStorage.setItem(getStorageKey(userId), 'true');
-        } else if (!localStorage.getItem(getStorageKey(userId ?? ''))) {
-          // First visit with incomplete setup — auto-show the overlay
-          setOverlayOpen(true);
-        }
+        setSetupComplete(hasAgent && hasCloud && hasGitHub);
       } catch {
         // Non-critical
       } finally {
@@ -114,6 +94,43 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
     checkStatus();
     return () => controller.abort();
   }, [userId]);
+
+  return { loading, setupComplete };
+}
+
+export function OnboardingProvider({ children }: { children: ReactNode }) {
+  const { user } = useAuth();
+  const userId = user?.id;
+
+  // Network fetch for setup status (separated concern)
+  const { loading, setupComplete } = useOnboardingStatus(userId);
+
+  // Dismissal / overlay state
+  const [dismissed, setDismissed] = useState<boolean>(() => {
+    // ?onboarding forces the overlay open, overriding a persisted dismissal
+    // (without clearing the stored flag — see openOnboarding / checkStatus).
+    if (isOnboardingForced()) return false;
+    if (!userId) return false;
+    return localStorage.getItem(getStorageKey(userId)) === 'true';
+  });
+  // Open synchronously when forced so the overlay paints immediately rather
+  // than waiting on the background credential-status fetch.
+  const [overlayOpen, setOverlayOpen] = useState<boolean>(() => isOnboardingForced());
+
+  // Derive overlay decisions from fetch results (separated from the fetch itself)
+  useEffect(() => {
+    if (loading) return;
+    if (isOnboardingForced()) {
+      setOverlayOpen(true);
+      setDismissed(false);
+    } else if (setupComplete) {
+      setDismissed(true);
+      if (userId) localStorage.setItem(getStorageKey(userId), 'true');
+    } else if (!localStorage.getItem(getStorageKey(userId ?? ''))) {
+      // First visit with incomplete setup — auto-show the overlay
+      setOverlayOpen(true);
+    }
+  }, [loading, setupComplete, userId]);
 
   const needsOnboarding = !setupComplete && !loading;
 
