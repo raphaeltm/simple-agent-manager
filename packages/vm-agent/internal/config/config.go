@@ -67,6 +67,10 @@ const (
 	// DefaultDeployApplyIdleTimeout bounds deployment apply goroutines only when
 	// no progress events have been emitted. Override via DEPLOY_APPLY_IDLE_TIMEOUT.
 	DefaultDeployApplyIdleTimeout = 15 * time.Minute
+
+	// DefaultDeployBuildPublishTimeout bounds host build + push + release publish
+	// work. Override via DEPLOY_BUILD_PUBLISH_TIMEOUT.
+	DefaultDeployBuildPublishTimeout = 20 * time.Minute
 )
 
 // Node role constants.
@@ -284,6 +288,7 @@ type Config struct {
 	DeployArtifactResponseHeaderTimeout time.Duration // Response-header timeout for artifact downloads (env: DEPLOY_ARTIFACT_RESPONSE_HEADER_TIMEOUT)
 	DeployArtifactIdleTimeout           time.Duration // Max no-progress body read interval for artifact downloads (env: DEPLOY_ARTIFACT_IDLE_TIMEOUT)
 	DeployApplyIdleTimeout              time.Duration // Max no-progress interval for detached apply goroutines (env: DEPLOY_APPLY_IDLE_TIMEOUT)
+	DeployBuildPublishTimeout           time.Duration // Max host build/push/release publish duration (env: DEPLOY_BUILD_PUBLISH_TIMEOUT)
 }
 
 // Load reads configuration from environment variables.
@@ -510,6 +515,7 @@ func Load() (*Config, error) {
 		DeployArtifactResponseHeaderTimeout: getEnvDuration("DEPLOY_ARTIFACT_RESPONSE_HEADER_TIMEOUT", DefaultDeployArtifactResponseHeaderTimeout),
 		DeployArtifactIdleTimeout:           getEnvDuration("DEPLOY_ARTIFACT_IDLE_TIMEOUT", DefaultDeployArtifactIdleTimeout),
 		DeployApplyIdleTimeout:              getEnvDuration("DEPLOY_APPLY_IDLE_TIMEOUT", DefaultDeployApplyIdleTimeout),
+		DeployBuildPublishTimeout:           getEnvDuration("DEPLOY_BUILD_PUBLISH_TIMEOUT", DefaultDeployBuildPublishTimeout),
 	}
 
 	// Derive TLS enabled state from cert/key paths

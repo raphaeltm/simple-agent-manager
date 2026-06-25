@@ -15,14 +15,10 @@ import (
 	"time"
 
 	"github.com/workspace/vm-agent/internal/bootstrap"
+	"github.com/workspace/vm-agent/internal/config"
 	"github.com/workspace/vm-agent/internal/container"
 	"github.com/workspace/vm-agent/internal/publish"
 )
-
-// buildPublishTimeout bounds the whole host build + push + release flow. Image
-// builds and registry pushes are slow, so this is far longer than ordinary MCP
-// tool calls.
-const buildPublishTimeout = 20 * time.Minute
 
 // McpBuildAndPublishRequest is the body for the build-and-publish endpoint.
 type McpBuildAndPublishRequest struct {
@@ -103,7 +99,8 @@ func (s *Server) handleMcpBuildAndPublish(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), buildPublishTimeout)
+	publishTimeout := s.deployBuildPublishTimeout()
+	ctx, cancel := context.WithTimeout(r.Context(), publishTimeout)
 	defer cancel()
 	result, err := s.runPreparedBuildAndPublish(ctx, prepared, nil)
 	if err != nil {
@@ -155,7 +152,8 @@ func (s *Server) handleMcpBuildAndPublishJobStart(w http.ResponseWriter, r *http
 			return
 		}
 	}
-	jobCtx, cancel := context.WithTimeout(context.Background(), buildPublishTimeout)
+	publishTimeout := s.deployBuildPublishTimeout()
+	jobCtx, cancel := context.WithTimeout(context.Background(), publishTimeout)
 	s.publishJobs[jobID] = publishJobState{
 		ID:          jobID,
 		WorkspaceID: prepared.WorkspaceID,
@@ -167,7 +165,7 @@ func (s *Server) handleMcpBuildAndPublishJobStart(w http.ResponseWriter, r *http
 	s.publishJobsMu.Unlock()
 	s.persistVMJobStart(jobID, vmJobKindPublish, prepared.WorkspaceID, vmJobStatusStarting, "starting")
 
-	controlPlaneReporter := newPublishJobReporter(s.config.ControlPlaneURL, prepared.ProjectID, jobID, prepared.Token, s.controlPlaneHTTPClient(buildPublishTimeout), prepared.Log)
+	controlPlaneReporter := newPublishJobReporter(s.config.ControlPlaneURL, prepared.ProjectID, jobID, prepared.Token, s.controlPlaneHTTPClient(publishTimeout), prepared.Log)
 	reporter := publish.EventFunc(func(ctx context.Context, event publish.Event) {
 		s.persistPublishEvent(jobID, event)
 		controlPlaneReporter.Event(ctx, event)
@@ -321,7 +319,7 @@ func (s *Server) runPreparedBuildAndPublish(ctx context.Context, prepared *prepa
 		ControlPlane: publish.NewHTTPControlPlane(publish.HTTPControlPlaneOptions{
 			BaseURL: s.config.ControlPlaneURL,
 			Token:   prepared.Token,
-			Client:  s.controlPlaneHTTPClient(buildPublishTimeout),
+			Client:  s.controlPlaneHTTPClient(s.deployBuildPublishTimeout()),
 			Logger:  log,
 		}),
 		Docker: publish.NewHostDocker(),
@@ -498,4 +496,11 @@ func containerPathRelativeToWorkspaces(p string) (string, bool) {
 		return "", false
 	}
 	return rel, true
+}
+
+func (s *Server) deployBuildPublishTimeout() time.Duration {
+	if s != nil && s.config.DeployBuildPublishTimeout > 0 {
+		return s.config.DeployBuildPublishTimeout
+	}
+	return config.DefaultDeployBuildPublishTimeout
 }

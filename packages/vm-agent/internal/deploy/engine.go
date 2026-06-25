@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/workspace/vm-agent/internal/cache"
+	"github.com/workspace/vm-agent/internal/config"
 )
 
 // Engine manages the deployment lifecycle: reconcile, apply, revert, observe.
@@ -114,7 +115,7 @@ func NewEngine(disk *DiskState, verifier *Verifier, cfg EngineConfig) *Engine {
 		cfg.HTTPClient = NewArtifactHTTPClient(ArtifactHTTPClientConfig{})
 	}
 	if cfg.ArtifactIdleTimeout == 0 {
-		cfg.ArtifactIdleTimeout = DefaultArtifactIdleTimeout
+		cfg.ArtifactIdleTimeout = config.DefaultDeployArtifactIdleTimeout
 	}
 	return &Engine{
 		disk:          disk,

@@ -840,12 +840,16 @@ func TestLoadDeployArtifactAndApplyTimeouts(t *testing.T) {
 	if cfg.DeployApplyIdleTimeout != DefaultDeployApplyIdleTimeout {
 		t.Fatalf("DeployApplyIdleTimeout = %v, want %v", cfg.DeployApplyIdleTimeout, DefaultDeployApplyIdleTimeout)
 	}
+	if cfg.DeployBuildPublishTimeout != DefaultDeployBuildPublishTimeout {
+		t.Fatalf("DeployBuildPublishTimeout = %v, want %v", cfg.DeployBuildPublishTimeout, DefaultDeployBuildPublishTimeout)
+	}
 
 	t.Setenv("DEPLOY_ARTIFACT_DIAL_TIMEOUT", "7s")
 	t.Setenv("DEPLOY_ARTIFACT_TLS_HANDSHAKE_TIMEOUT", "8s")
 	t.Setenv("DEPLOY_ARTIFACT_RESPONSE_HEADER_TIMEOUT", "9s")
 	t.Setenv("DEPLOY_ARTIFACT_IDLE_TIMEOUT", "10s")
 	t.Setenv("DEPLOY_APPLY_IDLE_TIMEOUT", "11s")
+	t.Setenv("DEPLOY_BUILD_PUBLISH_TIMEOUT", "12s")
 
 	cfg, err = Load()
 	if err != nil {
@@ -865,6 +869,9 @@ func TestLoadDeployArtifactAndApplyTimeouts(t *testing.T) {
 	}
 	if cfg.DeployApplyIdleTimeout != 11*time.Second {
 		t.Fatalf("DeployApplyIdleTimeout override = %v, want 11s", cfg.DeployApplyIdleTimeout)
+	}
+	if cfg.DeployBuildPublishTimeout != 12*time.Second {
+		t.Fatalf("DeployBuildPublishTimeout override = %v, want 12s", cfg.DeployBuildPublishTimeout)
 	}
 }
 

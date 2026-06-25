@@ -7,13 +7,11 @@ import (
 	"net"
 	"net/http"
 	"time"
+
+	"github.com/workspace/vm-agent/internal/config"
 )
 
 const (
-	DefaultArtifactDialTimeout           = 30 * time.Second
-	DefaultArtifactTLSHandshakeTimeout   = 15 * time.Second
-	DefaultArtifactResponseHeaderTimeout = 60 * time.Second
-	DefaultArtifactIdleTimeout           = 2 * time.Minute
 	defaultArtifactKeepAlive             = 30 * time.Second
 	defaultArtifactMaxIdleConns          = 100
 	defaultArtifactIdleConnTimeout       = 90 * time.Second
@@ -28,13 +26,13 @@ type ArtifactHTTPClientConfig struct {
 
 func NewArtifactHTTPClient(cfg ArtifactHTTPClientConfig) *http.Client {
 	if cfg.DialTimeout <= 0 {
-		cfg.DialTimeout = DefaultArtifactDialTimeout
+		cfg.DialTimeout = config.DefaultDeployArtifactDialTimeout
 	}
 	if cfg.TLSHandshakeTimeout <= 0 {
-		cfg.TLSHandshakeTimeout = DefaultArtifactTLSHandshakeTimeout
+		cfg.TLSHandshakeTimeout = config.DefaultDeployArtifactTLSHandshakeTimeout
 	}
 	if cfg.ResponseHeaderTimeout <= 0 {
-		cfg.ResponseHeaderTimeout = DefaultArtifactResponseHeaderTimeout
+		cfg.ResponseHeaderTimeout = config.DefaultDeployArtifactResponseHeaderTimeout
 	}
 	return &http.Client{
 		Transport: &http.Transport{
