@@ -1,11 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mockAssertAgentDeploymentAllowed = vi.fn();
-const mockProxyToVmAgentWithNodeManagement = vi.fn();
 const mockLoadDeploymentBuildInterpolationEnv = vi.fn();
+const mockLookupWorkspaceForVmAgent = vi.fn();
+const mockStartBuildPublishJobOnVm = vi.fn();
+const mockCreateDeploymentPublishJob = vi.fn();
+const mockAppendDeploymentPublishJobEvent = vi.fn();
+const mockGetDeploymentPublishJobForMcp = vi.fn();
 
 vi.mock('drizzle-orm/d1', () => ({
-  drizzle: vi.fn(() => ({ mocked: true })),
+  drizzle: vi.fn(() => ({ mockedDb: true })),
 }));
 
 vi.mock('../../src/services/deployment-control', () => ({
@@ -17,18 +21,28 @@ vi.mock('../../src/services/deployment-environment-config', () => ({
     mockLoadDeploymentBuildInterpolationEnv(...args),
 }));
 
+vi.mock('../../src/services/deployment-publish-jobs', () => ({
+  appendDeploymentPublishJobEvent: (...args: unknown[]) =>
+    mockAppendDeploymentPublishJobEvent(...args),
+  createDeploymentPublishJob: (...args: unknown[]) => mockCreateDeploymentPublishJob(...args),
+  getDeploymentPublishJobForMcp: (...args: unknown[]) => mockGetDeploymentPublishJobForMcp(...args),
+  sanitizePublishEventText: (value: unknown) =>
+    String(value).replace(/X-Amz-Signature=[^&\s"]+/g, 'X-Amz-Signature=[redacted]'),
+}));
+
 vi.mock('../../src/routes/mcp/workspace-tools', async () => {
   const actual = await vi.importActual<typeof import('../../src/routes/mcp/workspace-tools')>(
     '../../src/routes/mcp/workspace-tools'
   );
   return {
     ...actual,
-    proxyToVmAgentWithNodeManagement: (...args: unknown[]) =>
-      mockProxyToVmAgentWithNodeManagement(...args),
+    lookupWorkspaceForVmAgent: (...args: unknown[]) => mockLookupWorkspaceForVmAgent(...args),
+    startBuildPublishJobOnVm: (...args: unknown[]) => mockStartBuildPublishJobOnVm(...args),
   };
 });
 
-const { handleBuildAndPublish } = await import('../../src/routes/mcp/compose-publish-tools');
+const { handleBuildAndPublish, handleGetPublishStatus } =
+  await import('../../src/routes/mcp/compose-publish-tools');
 
 function tokenData(overrides: Record<string, unknown> = {}) {
   return {
@@ -42,19 +56,32 @@ function tokenData(overrides: Record<string, unknown> = {}) {
 }
 
 function env() {
-  return { DATABASE: {} } as any;
+  return { DATABASE: {}, BUILD_PUBLISH_START_TIMEOUT_MS: '12345' } as any;
 }
 
-describe('handleBuildAndPublish', () => {
+describe('async build_and_publish MCP tools', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockLoadDeploymentBuildInterpolationEnv.mockResolvedValue({
-      values: {},
-      plainKeys: [],
-      secretKeys: [],
-      configUpdatedAt: null,
-      totalBytes: 0,
+    mockAssertAgentDeploymentAllowed.mockResolvedValue({
+      environmentId: 'env-1',
+      policy: { agentDeployEnabled: true, allowedDeployProfileIds: [] },
+      taskAgentProfileId: 'profile-1',
     });
+    mockLoadDeploymentBuildInterpolationEnv.mockResolvedValue({
+      values: { PUBLIC_APP_DOMAIN: 'staging.example.com' },
+      plainKeys: ['PUBLIC_APP_DOMAIN'],
+      secretKeys: ['DATABASE_URL'],
+      configUpdatedAt: null,
+      totalBytes: 43,
+    });
+    mockLookupWorkspaceForVmAgent.mockResolvedValue({
+      id: 'ws-1',
+      status: 'running',
+      nodeId: 'node-1',
+      projectId: 'proj-1',
+    });
+    mockCreateDeploymentPublishJob.mockResolvedValue({ id: 'job-1' });
+    mockStartBuildPublishJobOnVm.mockResolvedValue({ publishJobId: 'job-1', status: 'accepted' });
   });
 
   it('rejects when there is no active workspace', async () => {
@@ -67,18 +94,9 @@ describe('handleBuildAndPublish', () => {
 
     expect(result.error?.message).toContain('No active workspace');
     expect(mockAssertAgentDeploymentAllowed).not.toHaveBeenCalled();
-    expect(mockProxyToVmAgentWithNodeManagement).not.toHaveBeenCalled();
   });
 
-  it('rejects when no target environment is provided', async () => {
-    const result = await handleBuildAndPublish('req-1', {}, tokenData(), env());
-
-    expect(result.error?.message).toContain('deployment environment name is required');
-    expect(mockAssertAgentDeploymentAllowed).not.toHaveBeenCalled();
-    expect(mockProxyToVmAgentWithNodeManagement).not.toHaveBeenCalled();
-  });
-
-  it('rejects when agent deployment is not enabled for the target environment', async () => {
+  it('still enforces deployment environment policy before creating a job', async () => {
     mockAssertAgentDeploymentAllowed.mockResolvedValue({
       error: 'Agent deployment is disabled for environment staging.',
     });
@@ -91,275 +109,69 @@ describe('handleBuildAndPublish', () => {
     );
 
     expect(result.error?.message).toContain('Agent deployment is disabled');
-    expect(mockAssertAgentDeploymentAllowed).toHaveBeenCalledWith(
-      expect.anything(),
-      'proj-1',
-      'staging',
-      tokenData()
-    );
-    expect(mockProxyToVmAgentWithNodeManagement).not.toHaveBeenCalled();
+    expect(mockCreateDeploymentPublishJob).not.toHaveBeenCalled();
+    expect(mockStartBuildPublishJobOnVm).not.toHaveBeenCalled();
   });
 
-  it('proxies to the vm-agent build-and-publish path and returns the release result', async () => {
-    mockAssertAgentDeploymentAllowed.mockResolvedValue({
-      environmentId: 'env-1',
-      policy: { agentDeployEnabled: true, allowedDeployProfileIds: [] },
-      taskAgentProfileId: 'profile-1',
-    });
-    mockProxyToVmAgentWithNodeManagement.mockResolvedValue({
-      releaseId: 'rel-1',
-      version: 1,
-      status: 'created',
-    });
-
+  it('creates a durable job, starts the VM job with a short timeout, and returns polling instructions', async () => {
     const result = await handleBuildAndPublish(
       'req-1',
-      { environment: ' staging ' },
+      {
+        environment: ' staging ',
+        reference: ' v1 ',
+        workingDir: ' /workspaces/app-wt-feature ',
+      },
       tokenData(),
       env()
     );
 
     expect(result.error).toBeUndefined();
-    expect(mockLoadDeploymentBuildInterpolationEnv).toHaveBeenCalledWith(
-      expect.anything(),
-      'env-1'
-    );
-    expect(mockProxyToVmAgentWithNodeManagement).toHaveBeenCalledWith(
+    expect(mockCreateDeploymentPublishJob).toHaveBeenCalledWith(expect.anything(), {
+      projectId: 'proj-1',
+      environmentId: 'env-1',
+      workspaceId: 'ws-1',
+      nodeId: 'node-1',
+      taskId: 'task-1',
+      agentProfileId: 'profile-1',
+      requestedBy: 'user-1',
+      environmentName: 'staging',
+      reference: 'v1',
+      workingDir: '/workspaces/app-wt-feature',
+    });
+    expect(mockStartBuildPublishJobOnVm).toHaveBeenCalledWith(
       expect.anything(),
       'ws-1',
       'user-1',
       'proj-1',
-      'build-and-publish',
-      'POST',
-      {
+      'node-1',
+      'job-1',
+      expect.objectContaining({
+        publishJobId: 'job-1',
         environment: 'staging',
         environmentId: 'env-1',
-        buildInterpolationEnv: {},
-        secretInterpolationKeys: [],
-        submittedBy: {
-          userId: 'user-1',
-          workspaceId: 'ws-1',
-          taskId: 'task-1',
-          agentProfileId: 'profile-1',
-        },
-      },
-      expect.any(Number)
-    );
-
-    const text = result.result?.content?.[0]?.text as string;
-    const payload = JSON.parse(text);
-    expect(payload.releaseId).toBe('rel-1');
-    expect(payload.status).toBe('created');
-  });
-
-  it('forwards non-secret build interpolation env and secret key names to the vm-agent', async () => {
-    mockAssertAgentDeploymentAllowed.mockResolvedValue({
-      environmentId: 'env-1',
-      policy: {},
-      taskAgentProfileId: null,
-    });
-    mockLoadDeploymentBuildInterpolationEnv.mockResolvedValue({
-      values: { PUBLIC_APP_DOMAIN: 'staging.example.com' },
-      plainKeys: ['PUBLIC_APP_DOMAIN'],
-      secretKeys: ['DATABASE_URL'],
-      configUpdatedAt: null,
-      totalBytes: 43,
-    });
-    mockProxyToVmAgentWithNodeManagement.mockResolvedValue({
-      releaseId: 'rel-env',
-      version: 8,
-      status: 'created',
-    });
-
-    await handleBuildAndPublish('req-1', { environment: 'staging' }, tokenData(), env());
-
-    expect(mockProxyToVmAgentWithNodeManagement).toHaveBeenCalledWith(
-      expect.anything(),
-      'ws-1',
-      'user-1',
-      'proj-1',
-      'build-and-publish',
-      'POST',
-      expect.objectContaining({
+        reference: 'v1',
+        workingDir: '/workspaces/app-wt-feature',
         buildInterpolationEnv: { PUBLIC_APP_DOMAIN: 'staging.example.com' },
         secretInterpolationKeys: ['DATABASE_URL'],
       }),
-      expect.any(Number)
+      12345
     );
-  });
-
-  it('forwards a trimmed reference argument to the vm-agent', async () => {
-    mockAssertAgentDeploymentAllowed.mockResolvedValue({
-      environmentId: 'env-1',
-      policy: {},
-      taskAgentProfileId: null,
-    });
-    mockProxyToVmAgentWithNodeManagement.mockResolvedValue({
-      releaseId: 'rel-2',
-      version: 2,
-      status: 'created',
-    });
-
-    await handleBuildAndPublish(
-      'req-1',
-      { environment: 'staging', reference: '  v2  ' },
-      tokenData(),
-      env()
-    );
-
-    expect(mockProxyToVmAgentWithNodeManagement).toHaveBeenCalledWith(
+    expect(mockAppendDeploymentPublishJobEvent).toHaveBeenCalledWith(
       expect.anything(),
-      'ws-1',
-      'user-1',
-      'proj-1',
-      'build-and-publish',
-      'POST',
-      expect.objectContaining({ environment: 'staging', environmentId: 'env-1', reference: 'v2' }),
-      expect.any(Number)
+      expect.objectContaining({ publishJobId: 'job-1', eventType: 'publish.job.accepted' })
     );
+
+    const payload = JSON.parse(result.result?.content?.[0]?.text as string);
+    expect(payload).toMatchObject({
+      publishJobId: 'job-1',
+      status: 'starting',
+      pollTool: 'get_publish_status',
+    });
   });
 
-  it('ignores a blank reference argument', async () => {
-    mockAssertAgentDeploymentAllowed.mockResolvedValue({
-      environmentId: 'env-1',
-      policy: {},
-      taskAgentProfileId: null,
-    });
-    mockProxyToVmAgentWithNodeManagement.mockResolvedValue({
-      releaseId: 'rel-3',
-      version: 3,
-      status: 'created',
-    });
-
-    await handleBuildAndPublish(
-      'req-1',
-      { environment: 'staging', reference: '   ' },
-      tokenData(),
-      env()
-    );
-
-    expect(mockProxyToVmAgentWithNodeManagement).toHaveBeenCalledWith(
-      expect.anything(),
-      'ws-1',
-      'user-1',
-      'proj-1',
-      'build-and-publish',
-      'POST',
-      expect.objectContaining({ environment: 'staging', environmentId: 'env-1' }),
-      expect.any(Number)
-    );
-  });
-
-  it('forwards a trimmed workingDir argument to the vm-agent', async () => {
-    mockAssertAgentDeploymentAllowed.mockResolvedValue({
-      environmentId: 'env-1',
-      policy: {},
-      taskAgentProfileId: null,
-    });
-    mockProxyToVmAgentWithNodeManagement.mockResolvedValue({
-      releaseId: 'rel-4',
-      version: 4,
-      status: 'created',
-    });
-
-    await handleBuildAndPublish(
-      'req-1',
-      { environment: 'staging', workingDir: '  /workspaces/crewai-wt-feature  ' },
-      tokenData(),
-      env()
-    );
-
-    expect(mockProxyToVmAgentWithNodeManagement).toHaveBeenCalledWith(
-      expect.anything(),
-      'ws-1',
-      'user-1',
-      'proj-1',
-      'build-and-publish',
-      'POST',
-      expect.objectContaining({
-        environment: 'staging',
-        environmentId: 'env-1',
-        workingDir: '/workspaces/crewai-wt-feature',
-      }),
-      expect.any(Number)
-    );
-  });
-
-  it('forwards both reference and workingDir when provided together', async () => {
-    mockAssertAgentDeploymentAllowed.mockResolvedValue({
-      environmentId: 'env-1',
-      policy: {},
-      taskAgentProfileId: null,
-    });
-    mockProxyToVmAgentWithNodeManagement.mockResolvedValue({
-      releaseId: 'rel-5',
-      version: 5,
-      status: 'created',
-    });
-
-    await handleBuildAndPublish(
-      'req-1',
-      { environment: 'staging', reference: 'v5', workingDir: '/workspaces/crewai-wt-feature' },
-      tokenData(),
-      env()
-    );
-
-    expect(mockProxyToVmAgentWithNodeManagement).toHaveBeenCalledWith(
-      expect.anything(),
-      'ws-1',
-      'user-1',
-      'proj-1',
-      'build-and-publish',
-      'POST',
-      expect.objectContaining({
-        environment: 'staging',
-        environmentId: 'env-1',
-        reference: 'v5',
-        workingDir: '/workspaces/crewai-wt-feature',
-      }),
-      expect.any(Number)
-    );
-  });
-
-  it('ignores a blank or non-string workingDir argument', async () => {
-    mockAssertAgentDeploymentAllowed.mockResolvedValue({
-      environmentId: 'env-1',
-      policy: {},
-      taskAgentProfileId: null,
-    });
-    mockProxyToVmAgentWithNodeManagement.mockResolvedValue({
-      releaseId: 'rel-6',
-      version: 6,
-      status: 'created',
-    });
-
-    await handleBuildAndPublish(
-      'req-1',
-      { environment: 'staging', workingDir: '   ', reference: 42 as unknown as string },
-      tokenData(),
-      env()
-    );
-
-    expect(mockProxyToVmAgentWithNodeManagement).toHaveBeenCalledWith(
-      expect.anything(),
-      'ws-1',
-      'user-1',
-      'proj-1',
-      'build-and-publish',
-      'POST',
-      expect.objectContaining({ environment: 'staging', environmentId: 'env-1' }),
-      expect.any(Number)
-    );
-  });
-
-  it('surfaces a vm-agent failure as an internal error', async () => {
-    mockAssertAgentDeploymentAllowed.mockResolvedValue({
-      environmentId: 'env-1',
-      policy: {},
-      taskAgentProfileId: null,
-    });
-    mockProxyToVmAgentWithNodeManagement.mockRejectedValue(
-      new Error('VM agent returned 500: build failed')
+  it('persists a failed terminal job when VM start fails and redacts signed URL details', async () => {
+    mockStartBuildPublishJobOnVm.mockRejectedValue(
+      new Error('Put https://r2.example/object?X-Amz-Signature=secret failed')
     );
 
     const result = await handleBuildAndPublish(
@@ -369,7 +181,63 @@ describe('handleBuildAndPublish', () => {
       env()
     );
 
-    expect(result.error?.message).toContain('Build and publish failed');
-    expect(result.error?.message).toContain('build failed');
+    expect(result.error).toBeUndefined();
+    expect(mockAppendDeploymentPublishJobEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        publishJobId: 'job-1',
+        status: 'failed',
+        terminal: true,
+        errorCode: 'failed_to_start',
+        message: expect.not.stringContaining('X-Amz-Signature=secret'),
+      })
+    );
+    const payload = JSON.parse(result.result?.content?.[0]?.text as string);
+    expect(payload.status).toBe('failed');
+    expect(payload.publishJobId).toBe('job-1');
+  });
+
+  it('polls publish status scoped to the MCP workspace and returns the job view', async () => {
+    mockGetDeploymentPublishJobForMcp.mockResolvedValue({
+      publishJobId: 'job-1',
+      status: 'uploading',
+      events: [{ seq: 3, eventType: 'publish.upload.started' }],
+      nextSinceSeq: 3,
+      pollAfterSeconds: 15,
+    });
+
+    const result = await handleGetPublishStatus(
+      'req-2',
+      { publishJobId: 'job-1', sinceSeq: 2, limit: 20 },
+      tokenData(),
+      env()
+    );
+
+    expect(mockGetDeploymentPublishJobForMcp).toHaveBeenCalledWith(
+      expect.anything(),
+      'proj-1',
+      'job-1',
+      {
+        workspaceId: 'ws-1',
+        sinceSeq: 2,
+        limit: 20,
+      }
+    );
+    const payload = JSON.parse(result.result?.content?.[0]?.text as string);
+    expect(payload.status).toBe('uploading');
+    expect(payload.nextSinceSeq).toBe(3);
+  });
+
+  it('rejects polling for jobs outside the workspace scope', async () => {
+    mockGetDeploymentPublishJobForMcp.mockResolvedValue(null);
+
+    const result = await handleGetPublishStatus(
+      'req-2',
+      { publishJobId: 'job-other' },
+      tokenData(),
+      env()
+    );
+
+    expect(result.error?.message).toContain('Publish job not found');
   });
 });

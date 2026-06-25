@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -25,6 +26,8 @@ const buildPublishTimeout = 20 * time.Minute
 
 // McpBuildAndPublishRequest is the body for the build-and-publish endpoint.
 type McpBuildAndPublishRequest struct {
+	// PublishJobID is the durable control-plane job id for async publish jobs.
+	PublishJobID string `json:"publishJobId,omitempty"`
 	// Environment is the deployment environment name already authorized by the
 	// control plane MCP handler.
 	Environment string `json:"environment"`
@@ -61,27 +64,133 @@ type McpBuildAndPublishResponse struct {
 	Status    string `json:"status"`
 }
 
+type McpBuildAndPublishJobStartResponse struct {
+	PublishJobID string `json:"publishJobId"`
+	Status       string `json:"status"`
+}
+
+type publishJobState struct {
+	ID          string
+	WorkspaceID string
+	ProjectID   string
+	Status      string
+	Cancel      context.CancelFunc
+	StartedAt   time.Time
+	CompletedAt time.Time
+}
+
+type preparedBuildPublish struct {
+	WorkspaceID   string
+	ProjectID     string
+	Environment   string
+	EnvironmentID string
+	Reference     string
+	BuildDir      string
+	HostCloneDir  string
+	Token         string
+	Request       McpBuildAndPublishRequest
+	Log           *slog.Logger
+}
+
 // handleMcpBuildAndPublish builds the workspace's compose services on the host
 // docker daemon, re-pushes the built images into the project-scoped registry
 // namespace with short-lived control-plane credentials, and records a release.
 // The coding agent triggers this server-side; it runs zero docker commands.
 // POST /workspaces/{workspaceId}/mcp/build-and-publish
 func (s *Server) handleMcpBuildAndPublish(w http.ResponseWriter, r *http.Request) {
-	workspaceID := r.PathValue("workspaceId")
-	if workspaceID == "" {
-		writeError(w, http.StatusBadRequest, "workspaceId is required")
+	prepared, ok := s.prepareMcpBuildAndPublish(w, r)
+	if !ok {
 		return
 	}
 
-	if !s.requireNodeManagementAuth(w, r, workspaceID) {
+	ctx, cancel := context.WithTimeout(r.Context(), buildPublishTimeout)
+	defer cancel()
+	result, err := s.runPreparedBuildAndPublish(ctx, prepared, nil)
+	if err != nil {
+		prepared.Log.Error("publish failed", "error", err)
+		writeError(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+
+	writeJSON(w, http.StatusOK, McpBuildAndPublishResponse{
+		ReleaseID: result.ReleaseID,
+		Version:   result.Version,
+		Status:    result.Status,
+	})
+}
+
+// handleMcpBuildAndPublishJobStart accepts an async publish job and starts the
+// real build/publish work in a job-owned background context. The context is not
+// parented to r.Context(), so Cloudflare/API/client cancellation after 202
+// acceptance cannot kill docker build/save or R2 upload work.
+func (s *Server) handleMcpBuildAndPublishJobStart(w http.ResponseWriter, r *http.Request) {
+	jobID := strings.TrimSpace(r.PathValue("jobId"))
+	if jobID == "" {
+		writeError(w, http.StatusBadRequest, "jobId is required")
+		return
+	}
+
+	prepared, ok := s.prepareMcpBuildAndPublish(w, r)
+	if !ok {
+		return
+	}
+	if prepared.Request.PublishJobID != "" && prepared.Request.PublishJobID != jobID {
+		writeError(w, http.StatusBadRequest, "publishJobId does not match path jobId")
+		return
+	}
+
+	s.publishJobsMu.Lock()
+	if s.publishJobs == nil {
+		s.publishJobs = make(map[string]publishJobState)
+	}
+	if existing, exists := s.publishJobs[jobID]; exists && existing.CompletedAt.IsZero() {
+		s.publishJobsMu.Unlock()
+		writeError(w, http.StatusConflict, "publish job is already active")
+		return
+	}
+	for _, existing := range s.publishJobs {
+		if existing.WorkspaceID == prepared.WorkspaceID && existing.CompletedAt.IsZero() {
+			s.publishJobsMu.Unlock()
+			writeError(w, http.StatusConflict, "workspace already has an active publish job")
+			return
+		}
+	}
+	jobCtx, cancel := context.WithTimeout(context.Background(), buildPublishTimeout)
+	s.publishJobs[jobID] = publishJobState{
+		ID:          jobID,
+		WorkspaceID: prepared.WorkspaceID,
+		ProjectID:   prepared.ProjectID,
+		Status:      "starting",
+		Cancel:      cancel,
+		StartedAt:   time.Now().UTC(),
+	}
+	s.publishJobsMu.Unlock()
+
+	reporter := newPublishJobReporter(s.config.ControlPlaneURL, prepared.ProjectID, jobID, prepared.Token, s.controlPlaneHTTPClient(buildPublishTimeout), prepared.Log)
+	go s.runAcceptedPublishJob(jobCtx, jobID, prepared, reporter)
+
+	writeJSON(w, http.StatusAccepted, McpBuildAndPublishJobStartResponse{
+		PublishJobID: jobID,
+		Status:       "accepted",
+	})
+}
+
+func (s *Server) prepareMcpBuildAndPublish(w http.ResponseWriter, r *http.Request) (*preparedBuildPublish, bool) {
+	workspaceID := r.PathValue("workspaceId")
+	if workspaceID == "" {
+		writeError(w, http.StatusBadRequest, "workspaceId is required")
+		return nil, false
+	}
+
+	if !s.requireNodeManagementAuth(w, r, workspaceID) {
+		return nil, false
 	}
 
 	var req McpBuildAndPublishRequest
 	// Body is optional; an empty body (io.EOF) is fine.
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
 		writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
-		return
+		return nil, false
 	}
 
 	reference := strings.TrimSpace(req.Reference)
@@ -91,36 +200,36 @@ func (s *Server) handleMcpBuildAndPublish(w http.ResponseWriter, r *http.Request
 	environment := strings.TrimSpace(req.Environment)
 	if environment == "" {
 		writeError(w, http.StatusBadRequest, "environment is required")
-		return
+		return nil, false
 	}
 	environmentID := strings.TrimSpace(req.EnvironmentID)
 	if environmentID == "" {
 		writeError(w, http.StatusBadRequest, "environmentId is required")
-		return
+		return nil, false
 	}
 
 	runtime, ok := s.getWorkspaceRuntime(workspaceID)
 	if !ok {
 		writeError(w, http.StatusNotFound, "workspace not found")
-		return
+		return nil, false
 	}
 
 	workspaceDir := strings.TrimSpace(runtime.WorkspaceDir)
 	if workspaceDir == "" {
 		writeError(w, http.StatusInternalServerError, "workspace has no cloned repository path")
-		return
+		return nil, false
 	}
 
 	projectID := firstNonEmpty(strings.TrimSpace(runtime.ProjectID), strings.TrimSpace(s.config.ProjectID))
 	if projectID == "" {
 		writeError(w, http.StatusInternalServerError, "workspace is not linked to a project")
-		return
+		return nil, false
 	}
 
 	token := strings.TrimSpace(runtime.CallbackToken)
 	if token == "" {
 		writeError(w, http.StatusInternalServerError, "workspace has no callback token for publishing")
-		return
+		return nil, false
 	}
 
 	log := slog.Default().With(
@@ -131,7 +240,7 @@ func (s *Server) handleMcpBuildAndPublish(w http.ResponseWriter, r *http.Request
 		"environmentId", environmentID,
 		"reference", reference)
 
-	ctx, cancel := context.WithTimeout(r.Context(), buildPublishTimeout)
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
 	// runtime.WorkspaceDir is a host clone captured at workspace boot. The coding
@@ -142,49 +251,140 @@ func (s *Server) handleMcpBuildAndPublish(w http.ResponseWriter, r *http.Request
 	// named volume before building. req.WorkingDir lets the agent point at a git
 	// worktree (a sibling dir of the primary repo) rather than the primary repo.
 	buildDir := s.resolveBuildSourceDir(ctx, workspaceID, runtime, req.WorkingDir, log)
+	return &preparedBuildPublish{
+		WorkspaceID:   workspaceID,
+		ProjectID:     projectID,
+		Environment:   environment,
+		EnvironmentID: environmentID,
+		Reference:     reference,
+		BuildDir:      buildDir,
+		HostCloneDir:  workspaceDir,
+		Token:         token,
+		Request:       req,
+		Log:           log,
+	}, true
+}
 
-	log.Info("host build starting", "buildDir", buildDir, "hostClone", workspaceDir)
+func (s *Server) runAcceptedPublishJob(ctx context.Context, jobID string, prepared *preparedBuildPublish, reporter publish.EventSink) {
+	reporter.Event(ctx, publish.Event{Status: "starting", CurrentStep: "started", EventType: "publish.job.started", Message: "publish job started"})
+	runner := s.runPreparedBuildAndPublish
+	if s.buildPublishRunner != nil {
+		runner = s.buildPublishRunner
+	}
+	result, err := runner(ctx, prepared, reporter)
+	s.publishJobsMu.Lock()
+	state := s.publishJobs[jobID]
+	if state.Cancel != nil {
+		state.Cancel()
+	}
+	state.CompletedAt = time.Now().UTC()
+	if err != nil {
+		state.Status = "failed"
+	} else {
+		state.Status = "succeeded"
+	}
+	s.publishJobs[jobID] = state
+	s.publishJobsMu.Unlock()
+	if err != nil {
+		prepared.Log.Error("async publish failed", "publishJobId", jobID, "error", err)
+		reporter.Event(context.Background(), publish.Event{Status: "failed", CurrentStep: "failed", Level: "error", EventType: "publish.job.failed", Message: "publish job failed", ErrorMessage: err.Error(), ErrorCode: "publish_failed", Terminal: true, Retryable: true})
+		return
+	}
+	prepared.Log.Info("async publish complete", "publishJobId", jobID, "releaseId", result.ReleaseID, "version", result.Version)
+	reporter.Event(context.Background(), publish.Event{Status: "succeeded", CurrentStep: "succeeded", EventType: "publish.job.succeeded", Message: "publish job succeeded", ReleaseID: result.ReleaseID, ReleaseVersion: result.Version, ReleaseStatus: result.Status, Terminal: true})
+}
+
+func (s *Server) runPreparedBuildAndPublish(ctx context.Context, prepared *preparedBuildPublish, events publish.EventSink) (*publish.ReleaseResult, error) {
+	log := prepared.Log
+	log.Info("host build starting", "buildDir", prepared.BuildDir, "hostClone", prepared.HostCloneDir)
 	artifact, err := publish.Build(ctx, publish.BuildOptions{
-		WorkspaceDir: buildDir,
-		Reference:    reference,
-		BuildEnv:     req.BuildInterpolationEnv,
-		SecretKeys:   req.SecretInterpolationKeys,
+		WorkspaceDir: prepared.BuildDir,
+		Reference:    prepared.Reference,
+		BuildEnv:     prepared.Request.BuildInterpolationEnv,
+		SecretKeys:   prepared.Request.SecretInterpolationKeys,
+		Events:       events,
 		Logger:       log,
 	})
 	if err != nil {
 		log.Error("host build failed", "error", err)
-		writeError(w, http.StatusInternalServerError, "build failed: "+err.Error())
-		return
+		return nil, errors.New("build failed: " + err.Error())
 	}
 
 	orch := publish.New(publish.Options{
 		ControlPlane: publish.NewHTTPControlPlane(publish.HTTPControlPlaneOptions{
 			BaseURL: s.config.ControlPlaneURL,
-			Token:   token,
+			Token:   prepared.Token,
 			Client:  s.controlPlaneHTTPClient(buildPublishTimeout),
 			Logger:  log,
 		}),
 		Docker: publish.NewHostDocker(),
+		Events: events,
 		Logger: log,
 	})
 
-	result, err := orch.Publish(ctx, projectID, environment, environmentID, artifact, req.SubmittedBy)
+	result, err := orch.Publish(ctx, prepared.ProjectID, prepared.Environment, prepared.EnvironmentID, artifact, prepared.Request.SubmittedBy)
 	if err != nil {
 		log.Error("publish failed", "error", err)
-		writeError(w, http.StatusInternalServerError, "publish failed: "+err.Error())
-		return
+		return nil, errors.New("publish failed: " + err.Error())
 	}
 
 	log.Info("publish complete",
 		"releaseId", result.ReleaseID,
 		"version", result.Version,
 		"status", result.Status)
+	return result, nil
+}
 
-	writeJSON(w, http.StatusOK, McpBuildAndPublishResponse{
-		ReleaseID: result.ReleaseID,
-		Version:   result.Version,
-		Status:    result.Status,
-	})
+type publishJobReporter struct {
+	baseURL   string
+	projectID string
+	jobID     string
+	token     string
+	client    *http.Client
+	log       *slog.Logger
+}
+
+func newPublishJobReporter(baseURL, projectID, jobID, token string, client *http.Client, log *slog.Logger) *publishJobReporter {
+	return &publishJobReporter{
+		baseURL:   strings.TrimRight(baseURL, "/"),
+		projectID: projectID,
+		jobID:     jobID,
+		token:     token,
+		client:    client,
+		log:       log.With("component", "publish-job-reporter", "publishJobId", jobID),
+	}
+}
+
+func (r *publishJobReporter) Event(ctx context.Context, event publish.Event) {
+	if r == nil || r.client == nil {
+		return
+	}
+	if event.Level == "" {
+		event.Level = "info"
+	}
+	raw, err := json.Marshal(event)
+	if err != nil {
+		r.log.Warn("marshal publish job event failed", "error", err)
+		return
+	}
+	url := r.baseURL + "/api/projects/" + r.projectID + "/deployment-publish-jobs/" + r.jobID + "/events"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(raw))
+	if err != nil {
+		r.log.Warn("create publish job event request failed", "error", err)
+		return
+	}
+	req.Header.Set("Authorization", "Bearer "+r.token)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := r.client.Do(req)
+	if err != nil {
+		r.log.Warn("send publish job event failed", "eventType", event.EventType, "error", err)
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		r.log.Warn("publish job event rejected", "eventType", event.EventType, "status", resp.StatusCode, "body", string(body))
+	}
 }
 
 // resolveBuildSourceDir returns the host filesystem path of the agent's actual

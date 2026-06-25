@@ -48,14 +48,14 @@ type VmAgentToolPath =
 
 // ─── Shared proxy helper ────────────────────────────────────────────────────
 
-interface WorkspaceForVmAgent {
+export interface WorkspaceForVmAgent {
   id: string;
   status: string;
   nodeId: string;
   projectId: string;
 }
 
-async function lookupWorkspaceForVmAgent(
+export async function lookupWorkspaceForVmAgent(
   env: Env,
   workspaceId: string,
   projectId: string
@@ -90,6 +90,12 @@ async function lookupWorkspaceForVmAgent(
     nodeId: workspace.nodeId,
     projectId: workspace.projectId ?? projectId,
   };
+}
+
+function vmAgentUrlForPath(env: Env, nodeId: string, path: string): string {
+  const protocol = env.VM_AGENT_PROTOCOL || 'https';
+  const port = env.VM_AGENT_PORT || '8443';
+  return `${protocol}://${nodeId.toLowerCase()}.vm.${env.BASE_DOMAIN}:${port}${path}`;
 }
 
 function vmAgentToolUrl(
@@ -192,6 +198,34 @@ export async function proxyToVmAgentWithNodeManagement(
   };
 
   return fetchVmAgentJson(vmUrl, method, headers, body, timeoutMs);
+}
+
+export async function startBuildPublishJobOnVm(
+  env: Env,
+  workspaceId: string,
+  userId: string,
+  projectId: string,
+  nodeId: string,
+  publishJobId: string,
+  body: unknown,
+  timeoutOverrideMs?: number
+): Promise<unknown> {
+  void projectId;
+  const { token } = await signNodeManagementToken(userId, nodeId, workspaceId, env);
+  const path = `/workspaces/${encodeURIComponent(workspaceId)}/mcp/build-and-publish-jobs/${encodeURIComponent(publishJobId)}/start`;
+  const vmUrl = vmAgentUrlForPath(env, nodeId, path);
+  const timeoutMs = timeoutOverrideMs ?? getWorkspaceToolTimeout(env);
+  return fetchVmAgentJson(
+    vmUrl,
+    'POST',
+    {
+      Authorization: `Bearer ${token}`,
+      'X-SAM-Node-Id': nodeId,
+      'X-SAM-Workspace-Id': workspaceId,
+    },
+    body,
+    timeoutMs
+  );
 }
 
 /**

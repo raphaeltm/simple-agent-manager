@@ -141,6 +141,7 @@ type Options struct {
 	ControlPlane ControlPlane
 	Docker       Docker
 	HTTPClient   *http.Client
+	Events       EventSink
 	Logger       *slog.Logger
 }
 
@@ -150,6 +151,7 @@ type Orchestrator struct {
 	docker       Docker
 	httpClient   *http.Client
 	log          *slog.Logger
+	events       EventSink
 }
 
 // New constructs an Orchestrator. ControlPlane and Docker are required.
@@ -166,6 +168,7 @@ func New(opts Options) *Orchestrator {
 		controlPlane: opts.ControlPlane,
 		docker:       opts.Docker,
 		httpClient:   client,
+		events:       opts.Events,
 		log:          log.With("component", "publish-orchestrator"),
 	}
 }
@@ -199,6 +202,9 @@ func (o *Orchestrator) Publish(ctx context.Context, projectID, environment, envi
 		"reference", art.Reference,
 		"serviceCount", len(art.Services),
 		"composeYamlBytes", len(art.ComposeYAML))
+	if o.events != nil {
+		o.events.Event(ctx, Event{Status: "uploading", CurrentStep: "artifact_init", EventType: "publish.artifact_init.started", Message: "initializing image artifact uploads", Detail: map[string]any{"serviceCount": len(art.Services)}})
+	}
 
 	uploadInit, err := o.controlPlane.InitArtifactUploads(ctx, projectID, ArtifactUploadRequest{
 		Environment:    environment,
@@ -215,11 +221,17 @@ func (o *Orchestrator) Publish(ctx context.Context, projectID, environment, envi
 		"uploadId", uploadInit.UploadID,
 		"serviceCount", len(uploadInit.Uploads),
 		"maxBytes", uploadInit.MaxBytes)
+	if o.events != nil {
+		o.events.Event(ctx, Event{Status: "uploading", CurrentStep: "artifact_init", EventType: "publish.artifact_init.completed", Message: "image artifact uploads initialized", Detail: map[string]any{"serviceCount": len(uploadInit.Uploads), "maxBytes": uploadInit.MaxBytes}})
+	}
 
 	services, err := o.exportAndUploadServices(ctx, art, uploadInit)
 	if err != nil {
 		o.log.Error("upload services failed", "projectId", projectID, "error", err)
 		return nil, err
+	}
+	if o.events != nil {
+		o.events.Event(ctx, Event{Status: "uploading", CurrentStep: "artifact_complete", EventType: "publish.artifact_complete.started", Message: "completing image artifact uploads", Detail: map[string]any{"serviceCount": len(services)}})
 	}
 	if err := o.controlPlane.CompleteArtifactUploads(ctx, projectID, ArtifactCompleteRequest{
 		Environment:    environment,
@@ -228,6 +240,9 @@ func (o *Orchestrator) Publish(ctx context.Context, projectID, environment, envi
 		Artifacts:      services,
 	}); err != nil {
 		return nil, fmt.Errorf("publish: complete artifact uploads: %w", err)
+	}
+	if o.events != nil {
+		o.events.Event(ctx, Event{Status: "uploading", CurrentStep: "artifact_complete", EventType: "publish.artifact_complete.completed", Message: "image artifact uploads completed", Detail: map[string]any{"serviceCount": len(services)}})
 	}
 
 	submission := &ReleaseSubmission{
@@ -239,6 +254,9 @@ func (o *Orchestrator) Publish(ctx context.Context, projectID, environment, envi
 		SubmittedBy:   submittedBy,
 	}
 
+	if o.events != nil {
+		o.events.Event(ctx, Event{Status: "recording_release", CurrentStep: "release_submission", EventType: "publish.release_submission.started", Message: "submitting deployment release", Detail: map[string]any{"serviceCount": len(services)}})
+	}
 	result, err := o.controlPlane.SubmitRelease(ctx, projectID, submission)
 	if err != nil {
 		o.log.Error("submit release failed",
@@ -254,6 +272,9 @@ func (o *Orchestrator) Publish(ctx context.Context, projectID, environment, envi
 		"version", result.Version,
 		"status", result.Status,
 		"services", len(services))
+	if o.events != nil {
+		o.events.Event(ctx, Event{Status: "recording_release", CurrentStep: "release_submission", EventType: "publish.release_submission.completed", Message: "deployment release recorded", ReleaseID: result.ReleaseID, ReleaseVersion: result.Version, ReleaseStatus: result.Status})
+	}
 
 	return result, nil
 }
@@ -299,6 +320,9 @@ func (o *Orchestrator) exportAndUploadServices(ctx context.Context, art *BuildAr
 			"service", originalServiceName,
 			"source", svc.LocalRef,
 			"archivePath", archivePath)
+		if o.events != nil {
+			o.events.Event(ctx, Event{Status: "exporting", CurrentStep: "docker_save", EventType: "publish.export.started", Message: "exporting service image", Detail: map[string]any{"service": originalServiceName}})
+		}
 
 		if err := o.docker.Save(ctx, svc.LocalRef, archivePath); err != nil {
 			return nil, fmt.Errorf("publish: save %s: %w", svc.LocalRef, err)
@@ -314,6 +338,10 @@ func (o *Orchestrator) exportAndUploadServices(ctx context.Context, art *BuildAr
 		if maxBytes > 0 && sizeBytes > maxBytes {
 			return nil, fmt.Errorf("publish: artifact %s size %d exceeds maximum %d bytes", originalServiceName, sizeBytes, maxBytes)
 		}
+		if o.events != nil {
+			o.events.Event(ctx, Event{Status: "exporting", CurrentStep: "docker_save", EventType: "publish.export.completed", Message: "service image exported", Detail: map[string]any{"service": originalServiceName, "sizeBytes": sizeBytes, "archiveSha256": archiveSHA}})
+			o.events.Event(ctx, Event{Status: "uploading", CurrentStep: "upload_archive", EventType: "publish.upload.started", Message: "uploading service image artifact", Detail: map[string]any{"service": originalServiceName, "sizeBytes": sizeBytes}})
+		}
 		if err := o.uploadArchive(ctx, upload.UploadURL, upload.MediaType, archivePath, sizeBytes); err != nil {
 			return nil, err
 		}
@@ -322,6 +350,9 @@ func (o *Orchestrator) exportAndUploadServices(ctx context.Context, art *BuildAr
 			"r2Key", upload.R2Key,
 			"sizeBytes", sizeBytes,
 			"archiveSha256", archiveSHA)
+		if o.events != nil {
+			o.events.Event(ctx, Event{Status: "uploading", CurrentStep: "upload_archive", EventType: "publish.upload.completed", Message: "service image artifact uploaded", Detail: map[string]any{"service": originalServiceName, "r2Key": upload.R2Key, "sizeBytes": sizeBytes, "archiveSha256": archiveSHA}})
+		}
 
 		releases = append(releases, ServiceRelease{
 			ServiceName:         originalServiceName,

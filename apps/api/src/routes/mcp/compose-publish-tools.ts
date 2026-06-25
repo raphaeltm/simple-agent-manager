@@ -1,13 +1,9 @@
 /**
  * MCP tool handler: build_and_publish
  *
- * Builds the project's Docker Compose stack on the agent-node HOST docker daemon
- * (from the workspace's cloned repo), re-pushes the built service images into the
- * project-scoped registry namespace using short-lived control-plane credentials,
- * and records a deployment release — all server-side. The coding agent runs ZERO
- * docker or registry commands and never receives a credential: this handler
- * proxies a single request to the vm-agent, which owns the entire build → push →
- * release flow.
+ * Starts an async build/publish job on the workspace VM and returns a durable
+ * publish job id. Agents poll get_publish_status for progress and terminal
+ * release/error details.
  *
  * Gated behind the same phase-D environment-scoped agent-deploy policy as the
  * registry credential path.
@@ -20,7 +16,12 @@ import { parsePositiveInt } from '../../lib/route-helpers';
 import { assertAgentDeploymentAllowed } from '../../services/deployment-control';
 import { loadDeploymentBuildInterpolationEnv } from '../../services/deployment-environment-config';
 import {
-  INTERNAL_ERROR,
+  appendDeploymentPublishJobEvent,
+  createDeploymentPublishJob,
+  getDeploymentPublishJobForMcp,
+  sanitizePublishEventText,
+} from '../../services/deployment-publish-jobs';
+import {
   INVALID_PARAMS,
   jsonRpcError,
   type JsonRpcResponse,
@@ -28,16 +29,22 @@ import {
   type McpTokenData,
   sanitizeUserInput,
 } from './_helpers';
-import { proxyToVmAgentWithNodeManagement, requireWorkspace } from './workspace-tools';
+import {
+  lookupWorkspaceForVmAgent,
+  requireWorkspace,
+  startBuildPublishJobOnVm,
+} from './workspace-tools';
 
 /**
- * Host build + registry push + release submission is slow (image build + push).
- * This bounds the worker→vm-agent proxy wait; the vm-agent applies its own
- * 20-minute internal cap. Override via BUILD_PUBLISH_TOOL_TIMEOUT_MS.
+ * Only bounds the worker→vm-agent job acceptance request. The actual build runs
+ * in a VM-owned background context and reports progress through callbacks.
  */
-const DEFAULT_BUILD_PUBLISH_TIMEOUT_MS = 21 * 60 * 1000;
-function getBuildPublishTimeout(env: Env): number {
-  return parsePositiveInt(env.BUILD_PUBLISH_TOOL_TIMEOUT_MS, DEFAULT_BUILD_PUBLISH_TIMEOUT_MS);
+const DEFAULT_BUILD_PUBLISH_START_TIMEOUT_MS = 30_000;
+function getBuildPublishStartTimeout(env: Env): number {
+  return parsePositiveInt(
+    env.BUILD_PUBLISH_START_TIMEOUT_MS,
+    DEFAULT_BUILD_PUBLISH_START_TIMEOUT_MS
+  );
 }
 
 /**
@@ -77,8 +84,8 @@ export async function handleBuildAndPublish(
 
   const reference =
     typeof toolArgs.reference === 'string' && toolArgs.reference.trim() !== ''
-      ? toolArgs.reference.trim()
-      : undefined;
+      ? sanitizeUserInput(toolArgs.reference.trim()).slice(0, 200)
+      : 'latest';
 
   // Optional: the agent's current working directory (e.g. a git worktree under
   // /workspaces). When set, the vm-agent builds the source at this directory
@@ -89,7 +96,33 @@ export async function handleBuildAndPublish(
       ? toolArgs.workingDir.trim()
       : undefined;
 
+  const workspace = await lookupWorkspaceForVmAgent(env, tokenData.workspaceId, projectId);
+  const job = await createDeploymentPublishJob(db, {
+    projectId,
+    environmentId: policyResult.environmentId,
+    workspaceId: tokenData.workspaceId,
+    nodeId: workspace.nodeId,
+    taskId: tokenData.taskId || null,
+    agentProfileId: policyResult.taskAgentProfileId || null,
+    requestedBy: tokenData.userId,
+    environmentName: environment,
+    reference,
+    workingDir: workingDir ?? null,
+  });
+  await appendDeploymentPublishJobEvent(db, {
+    publishJobId: job.id,
+    projectId,
+    environmentId: policyResult.environmentId,
+    nodeId: workspace.nodeId,
+    workspaceId: tokenData.workspaceId,
+    status: 'queued',
+    currentStep: 'queued',
+    eventType: 'publish.job.created',
+    message: 'publish job created',
+  });
+
   const proxyBody: Record<string, unknown> = {
+    publishJobId: job.id,
     environment,
     environmentId: policyResult.environmentId,
     submittedBy: {
@@ -105,25 +138,121 @@ export async function handleBuildAndPublish(
   if (workingDir) proxyBody.workingDir = workingDir;
 
   try {
-    const result = await proxyToVmAgentWithNodeManagement(
+    await startBuildPublishJobOnVm(
       env,
       tokenData.workspaceId,
       tokenData.userId,
       projectId,
-      'build-and-publish',
-      'POST',
+      workspace.nodeId,
+      job.id,
       proxyBody,
-      getBuildPublishTimeout(env)
+      getBuildPublishStartTimeout(env)
     );
+    await appendDeploymentPublishJobEvent(db, {
+      publishJobId: job.id,
+      projectId,
+      environmentId: policyResult.environmentId,
+      nodeId: workspace.nodeId,
+      workspaceId: tokenData.workspaceId,
+      status: 'starting',
+      currentStep: 'accepted',
+      eventType: 'publish.job.accepted',
+      message: 'vm agent accepted the publish job',
+    });
 
     return jsonRpcSuccess(requestId, {
-      content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify(
+            {
+              publishJobId: job.id,
+              status: 'starting',
+              environment,
+              environmentId: policyResult.environmentId,
+              reference,
+              pollTool: 'get_publish_status',
+              pollAfterSeconds: 10,
+              instructions:
+                'Call get_publish_status with publishJobId until status is succeeded, failed, canceled, or unknown. Do not retry blindly while this job is still active.',
+            },
+            null,
+            2
+          ),
+        },
+      ],
     });
   } catch (e) {
-    return jsonRpcError(
-      requestId,
-      INTERNAL_ERROR,
-      `Build and publish failed: ${e instanceof Error ? e.message : String(e)}`
-    );
+    const message = sanitizePublishEventText(e instanceof Error ? e.message : String(e));
+    await appendDeploymentPublishJobEvent(db, {
+      publishJobId: job.id,
+      projectId,
+      environmentId: policyResult.environmentId,
+      nodeId: workspace.nodeId,
+      workspaceId: tokenData.workspaceId,
+      status: 'failed',
+      currentStep: 'start',
+      level: 'error',
+      eventType: 'publish.job.start_failed',
+      message,
+      errorMessage: message,
+      errorCode: 'failed_to_start',
+      terminal: true,
+      retryable: true,
+    });
+    return jsonRpcSuccess(requestId, {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify(
+            {
+              publishJobId: job.id,
+              status: 'failed',
+              errorCode: 'failed_to_start',
+              errorMessage: message,
+              pollTool: 'get_publish_status',
+              instructions:
+                'The publish job failed before VM acceptance. Inspect get_publish_status before retrying.',
+            },
+            null,
+            2
+          ),
+        },
+      ],
+    });
   }
+}
+
+export async function handleGetPublishStatus(
+  requestId: string | number | null,
+  toolArgs: Record<string, unknown>,
+  tokenData: McpTokenData,
+  env: Env
+): Promise<JsonRpcResponse> {
+  const { projectId } = tokenData;
+  const publishJobId =
+    typeof toolArgs.publishJobId === 'string' ? toolArgs.publishJobId.trim() : '';
+  if (!publishJobId) {
+    return jsonRpcError(requestId, INVALID_PARAMS, 'publishJobId is required.');
+  }
+  const sinceSeq =
+    typeof toolArgs.sinceSeq === 'number' && Number.isFinite(toolArgs.sinceSeq)
+      ? Math.max(0, Math.trunc(toolArgs.sinceSeq))
+      : undefined;
+  const limit =
+    typeof toolArgs.limit === 'number' && Number.isFinite(toolArgs.limit)
+      ? Math.max(1, Math.min(100, Math.trunc(toolArgs.limit)))
+      : undefined;
+  const db = drizzle(env.DATABASE, { schema });
+  const status = await getDeploymentPublishJobForMcp(db, projectId, publishJobId, {
+    workspaceId: tokenData.workspaceId,
+    sinceSeq,
+    limit,
+  });
+  if (!status) {
+    return jsonRpcError(requestId, INVALID_PARAMS, 'Publish job not found for this workspace.');
+  }
+  return jsonRpcSuccess(requestId, {
+    content: [{ type: 'text', text: JSON.stringify(status, null, 2) }],
+  });
 }

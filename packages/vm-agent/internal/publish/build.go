@@ -32,6 +32,7 @@ type BuildOptions struct {
 	// available on build nodes; phase-one validation rejects obvious build-field
 	// references before running compose.
 	SecretKeys []string
+	Events     EventSink
 	Logger     *slog.Logger
 }
 
@@ -87,6 +88,9 @@ func Build(ctx context.Context, opts BuildOptions) (*BuildArtifact, error) {
 		"workspaceDir", opts.WorkspaceDir,
 		"composeCmd", composeCmd,
 		"reference", opts.Reference)
+	if opts.Events != nil {
+		opts.Events.Event(ctx, Event{Status: "validating", CurrentStep: "compose_config", EventType: "publish.compose_config.started", Message: "validating compose configuration"})
+	}
 
 	templateCfg, err := loadComposeTemplateConfig(ctx, composeCmd, opts.WorkspaceDir)
 	if err != nil {
@@ -112,6 +116,9 @@ func Build(ctx context.Context, opts BuildOptions) (*BuildArtifact, error) {
 	}
 	log.Debug("compose config validated",
 		"project", cfg.Name, "serviceCount", len(cfg.Services))
+	if opts.Events != nil {
+		opts.Events.Event(ctx, Event{Status: "validating", CurrentStep: "compose_config", EventType: "publish.compose_config.completed", Message: "compose configuration validated", Detail: map[string]any{"serviceCount": len(cfg.Services)}})
+	}
 
 	// Only services with a `build` section produce images we re-push. Services
 	// without build (e.g. postgres:15) are pulled by the deployment node.
@@ -184,11 +191,17 @@ func Build(ctx context.Context, opts BuildOptions) (*BuildArtifact, error) {
 		"skippedCount", len(skipped))
 
 	log.Debug("running compose build", "composeCmd", composeCmd, "workspaceDir", opts.WorkspaceDir)
+	if opts.Events != nil {
+		opts.Events.Event(ctx, Event{Status: "building", CurrentStep: "compose_build", EventType: "publish.build.started", Message: "docker compose build started", Detail: map[string]any{"targetCount": len(targets)}})
+	}
 	if _, err := runCompose(ctx, composeCmd, opts.WorkspaceDir, composeEnv, "build"); err != nil {
 		log.Error("compose build command failed", "composeCmd", composeCmd, "error", err)
 		return nil, fmt.Errorf("build: docker compose build: %w", err)
 	}
 	log.Info("host compose build complete", "serviceCount", len(targets))
+	if opts.Events != nil {
+		opts.Events.Event(ctx, Event{Status: "building", CurrentStep: "compose_build", EventType: "publish.build.completed", Message: "docker compose build completed", Detail: map[string]any{"targetCount": len(targets)}})
+	}
 
 	log.Debug("capturing resolved compose config", "composeCmd", composeCmd)
 	composeYAML, err := runCompose(ctx, composeCmd, opts.WorkspaceDir, nil, "config", "--no-interpolate")
