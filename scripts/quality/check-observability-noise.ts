@@ -62,7 +62,10 @@ interface TelemetryResponse {
   errors?: Array<{ message: string }>;
 }
 
-const jsonRecordSchema = v.record(v.string(), v.unknown());
+const jsonRecordSchema = v.custom<Record<string, unknown>>(
+  (value) => typeof value === 'object' && value !== null && !Array.isArray(value),
+  'Expected an object'
+);
 const errorListSchema = v.array(v.object({ message: v.string() }));
 const d1ResultItemSchema = v.object({
   results: v.array(jsonRecordSchema),

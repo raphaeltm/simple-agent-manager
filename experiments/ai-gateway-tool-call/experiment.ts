@@ -147,7 +147,10 @@ interface ExperimentResult {
   durationMs: number;
 }
 
-const jsonRecordSchema = v.record(v.string(), v.unknown());
+const jsonRecordSchema = v.custom<Record<string, unknown>>(
+  (value) => typeof value === 'object' && value !== null && !Array.isArray(value),
+  'Expected an object'
+);
 const usageSchema = v.object({
   prompt_tokens: v.pipe(v.number(), v.finite()),
   completion_tokens: v.pipe(v.number(), v.finite()),
