@@ -53,8 +53,52 @@ func (RealMountChecker) IsMountpoint(path string) (bool, error) {
 // used only to extract the volumes fields from each service.
 type composeVolumeMounts struct {
 	Services map[string]struct {
-		Volumes []string `yaml:"volumes"`
+		Volumes []composeVolumeEntry `yaml:"volumes"`
 	} `yaml:"services"`
+}
+
+type composeVolumeEntry struct {
+	raw    string
+	source string
+}
+
+func (v *composeVolumeEntry) UnmarshalYAML(node *yaml.Node) error {
+	switch node.Kind {
+	case yaml.ScalarNode:
+		var value string
+		if err := node.Decode(&value); err != nil {
+			return err
+		}
+		v.raw = value
+		return nil
+	case yaml.MappingNode:
+		var value struct {
+			Source string `yaml:"source"`
+			Src    string `yaml:"src"`
+		}
+		if err := node.Decode(&value); err != nil {
+			return err
+		}
+		v.source = value.Source
+		if v.source == "" {
+			v.source = value.Src
+		}
+		return nil
+	default:
+		return nil
+	}
+}
+
+func (v composeVolumeEntry) hostPath() string {
+	if v.source != "" {
+		return v.source
+	}
+	// Bind mount format: /host/path:/container/path[:options]
+	parts := strings.SplitN(v.raw, ":", 2)
+	if len(parts) < 2 {
+		return ""
+	}
+	return parts[0]
 }
 
 // extractSAMVolumeMountRoots parses rendered Docker Compose YAML and returns
@@ -81,12 +125,7 @@ func extractSAMVolumeMountRoots(composeYAML string) ([]string, error) {
 
 	for _, svc := range compose.Services {
 		for _, vol := range svc.Volumes {
-			// Bind mount format: /host/path:/container/path[:options]
-			parts := strings.SplitN(vol, ":", 2)
-			if len(parts) < 2 {
-				continue
-			}
-			hostPath := parts[0]
+			hostPath := vol.hostPath()
 			if !strings.HasPrefix(hostPath, samVolumeMountPrefix) {
 				continue
 			}

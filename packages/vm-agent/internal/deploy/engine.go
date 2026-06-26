@@ -394,7 +394,9 @@ func (e *Engine) Apply(ctx context.Context, payload *ApplyPayload) error {
 	// Wait for health checks
 	e.reportApplyEvent(ctx, payload, "info", "deployment.apply.health_check_started", "health_check", "waiting for deployment health checks", nil)
 	if err := e.waitForHealth(ctx, payload.Seq, payload.Routes, applyEnv); err != nil {
-		return e.handleApplyFailure(ctx, newState, currentSeq, redactor.redactError(fmt.Errorf("health check: %w", err)), applyEnv)
+		// waitForHealth already redacts docker compose diagnostics while keeping
+		// typed timeout details available for observed-state reporting.
+		return e.handleApplyFailure(ctx, newState, currentSeq, fmt.Errorf("health check: %w", err), applyEnv)
 	}
 	e.reportApplyEvent(ctx, payload, "info", "deployment.apply.health_check_completed", "health_check", "deployment health checks passed", nil)
 
@@ -458,10 +460,16 @@ func (e *Engine) handleApplyFailure(ctx context.Context, state *ReleaseState, pr
 				"seq", state.Seq, "error", err)
 			persistenceErrs = append(persistenceErrs, fmt.Errorf("persist failed-initial state: %w", err))
 		}
+		var healthErr *healthTimeoutError
+		var failedServices []ServiceState
+		if errors.As(applyErr, &healthErr) {
+			failedServices = healthErr.Services()
+		}
 		e.setObserved(ObservedState{
 			AppliedSeq:   0,
 			Status:       StatusFailedInitial,
 			ErrorMessage: applyErr.Error(),
+			Services:     failedServices,
 		})
 		e.reportApplyEvent(ctx, &ApplyPayload{EnvironmentID: state.EnvironmentID, NodeID: state.NodeID, Seq: state.Seq}, "error", "deployment.apply.failed_initial", "failed_initial", "deployment apply failed with no previous release to revert to", map[string]any{"error": applyErr.Error()})
 		return errors.Join(
