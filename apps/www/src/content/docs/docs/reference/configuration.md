@@ -206,6 +206,7 @@ GitHub App secrets use `GH_*` prefix (e.g., `GH_CLIENT_ID`, `GH_WEBHOOK_SECRET`)
 | `DEPLOYMENT_DEFAULT_MEMORY_LIMIT_MB`   | `256`                                  | Default per-service memory limit for compose-publish releases         |
 | `DEPLOYMENT_LOG_MAX_SIZE`              | `10m`                                  | Default json-file log max-size for compose-publish releases           |
 | `DEPLOYMENT_LOG_MAX_FILE`              | `3`                                    | Default json-file log max-file for compose-publish releases           |
+| `MCP_DEPLOYMENT_COMPOSE_PREVIEW_MAX_BYTES` | `128000`                               | Max Compose YAML size accepted by deployment route preview MCP tool   |
 | `BUILD_PUBLISH_TOOL_TIMEOUT_MS`        | `1260000`                              | Worker-to-VM proxy timeout for `build_and_publish`                    |
 | `DEPLOY_ACME_EMAIL`                    | _(unset)_                              | Optional ACME contact email emitted into deployment-node Caddy config |
 | `DEPLOY_ACME_CA`                       | _(unset)_                              | Optional ACME CA directory override, useful for Let's Encrypt staging |

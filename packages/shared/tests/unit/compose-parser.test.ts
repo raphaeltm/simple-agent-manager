@@ -701,6 +701,31 @@ x-sam-routes:
 `);
     expect(manifest.routes).toContainEqual({ service: 'web', port: 8080, mode: 'public' });
   });
+
+  it('treats long-syntax ports with mode host as private route hints', () => {
+    const manifest = expectSuccess(`
+services:
+  api:
+    image: example/api
+    ports:
+      - target: 8000
+        published: 8000
+        protocol: tcp
+        mode: ingress
+  db:
+    image: postgres
+    ports:
+      - target: 5432
+        published: 5432
+        protocol: tcp
+        mode: host
+`);
+
+    expect(manifest.routes).toEqual([
+      { service: 'api', port: 8000, mode: 'public' },
+      { service: 'db', port: 5432, mode: 'private' },
+    ]);
+  });
 });
 
 // =============================================================================

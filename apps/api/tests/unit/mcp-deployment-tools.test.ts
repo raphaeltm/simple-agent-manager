@@ -35,6 +35,8 @@ const schema = await import('../../src/db/schema');
 const {
   handleListDeploymentEnvironmentConfig,
   handleListDeploymentEnvironments,
+  handleListDeploymentRoutes,
+  handlePreviewDeploymentRoutes,
   handleReadDeploymentLogs,
   handleSetDeploymentEnvironmentConfig,
 } = await import('../../src/routes/mcp/deployment-tools');
@@ -44,6 +46,7 @@ type Row = Record<string, unknown>;
 interface TestDbState {
   deploymentEnvironmentConfigVars: Row[];
   deploymentEnvironments: Row[];
+  deploymentReleases: Row[];
   nodes: Row[];
   tasks: Row[];
 }
@@ -71,6 +74,7 @@ function tokenData(overrides: Partial<McpTokenData> = {}): McpTokenData {
 
 function env(overrides: Partial<Env> = {}): Env {
   return {
+    BASE_DOMAIN: 'sammy.party',
     DATABASE: {},
     ENCRYPTION_KEY,
     ...overrides,
@@ -109,6 +113,7 @@ function createDbState(overrides: Partial<TestDbState> = {}): TestDbState {
   return {
     deploymentEnvironmentConfigVars: [],
     deploymentEnvironments: [deploymentEnvironment()],
+    deploymentReleases: [],
     nodes: [],
     tasks: [{ id: 'task-1', agentProfileHint: null }],
     ...overrides,
@@ -138,6 +143,13 @@ function fieldForColumn(column: unknown): string | null {
     [schema.deploymentEnvironments.name, 'name'],
     [schema.deploymentEnvironments.projectId, 'projectId'],
     [schema.deploymentEnvironments.status, 'status'],
+    [schema.deploymentReleases.createdAt, 'createdAt'],
+    [schema.deploymentReleases.environmentId, 'environmentId'],
+    [schema.deploymentReleases.id, 'id'],
+    [schema.deploymentReleases.manifest, 'manifest'],
+    [schema.deploymentReleases.source, 'source'],
+    [schema.deploymentReleases.status, 'status'],
+    [schema.deploymentReleases.version, 'version'],
     [schema.nodes.id, 'id'],
     [schema.nodes.status, 'status'],
     [schema.nodes.userId, 'userId'],
@@ -150,24 +162,29 @@ function fieldForColumn(column: unknown): string | null {
   const name = getColumnName(column);
   if (!name) return null;
   return (
-    {
-      agent_deploy_disabled_at: 'agentDeployDisabledAt',
-      agent_deploy_enabled: 'agentDeployEnabled',
-      agent_deploy_enabled_at: 'agentDeployEnabledAt',
-      agent_deploy_enabled_by: 'agentDeployEnabledBy',
-      agent_profile_hint: 'agentProfileHint',
-      allowed_deploy_profile_ids_json: 'allowedDeployProfileIdsJson',
-      config_updated_at: 'configUpdatedAt',
-      created_at: 'createdAt',
-      env_key: 'envKey',
-      environment_id: 'environmentId',
-      id: 'id',
-      name: 'name',
-      project_id: 'projectId',
-      status: 'status',
-      user_id: 'userId',
-    } as Record<string, string>
-  )[name] ?? null;
+    (
+      {
+        agent_deploy_disabled_at: 'agentDeployDisabledAt',
+        agent_deploy_enabled: 'agentDeployEnabled',
+        agent_deploy_enabled_at: 'agentDeployEnabledAt',
+        agent_deploy_enabled_by: 'agentDeployEnabledBy',
+        agent_profile_hint: 'agentProfileHint',
+        allowed_deploy_profile_ids_json: 'allowedDeployProfileIdsJson',
+        config_updated_at: 'configUpdatedAt',
+        created_at: 'createdAt',
+        env_key: 'envKey',
+        environment_id: 'environmentId',
+        id: 'id',
+        manifest: 'manifest',
+        name: 'name',
+        project_id: 'projectId',
+        source: 'source',
+        status: 'status',
+        user_id: 'userId',
+        version: 'version',
+      } as Record<string, string>
+    )[name] ?? null
+  );
 }
 
 function rowsForTable(state: TestDbState, table: unknown): Row[] {
@@ -175,6 +192,7 @@ function rowsForTable(state: TestDbState, table: unknown): Row[] {
   if (table === schema.deploymentEnvironmentConfigVars) {
     return state.deploymentEnvironmentConfigVars;
   }
+  if (table === schema.deploymentReleases) return state.deploymentReleases;
   if (table === schema.nodes) return state.nodes;
   if (table === schema.tasks) return state.tasks;
   return [];
@@ -413,6 +431,138 @@ describe('deployment MCP tools', () => {
 
     expect(response.error?.message).toContain('Agent deployment is disabled');
     expect(mockGetNodeLogsFromNode).not.toHaveBeenCalled();
+  });
+
+  it('previews public URLs and internal mode host routes for submitted compose', async () => {
+    installDb(
+      createDbState({
+        deploymentEnvironments: [deploymentEnvironment({ id: 'env-preview', name: 'staging' })],
+      })
+    );
+
+    const response = await handlePreviewDeploymentRoutes(
+      'req-1',
+      {
+        environment: 'staging',
+        composeYaml: `services:
+  api:
+    image: example/api
+    ports:
+      - mode: ingress
+        target: 8000
+        published: "8000"
+        protocol: tcp
+  db:
+    image: postgres
+    ports:
+      - mode: host
+        target: 5432
+        published: "5432"
+        protocol: tcp
+  redis:
+    image: redis
+    ports:
+      - mode: host
+        target: 6379
+        published: "6379"
+        protocol: tcp
+`,
+      },
+      tokenData(),
+      env({ DEPLOYMENT_ROUTE_PORT_BASE: '36000', DEPLOYMENT_ROUTE_PORT_SPAN: '10' })
+    );
+    const payload = parseToolPayload(response);
+
+    expect(response.error).toBeUndefined();
+    expect(payload.routes).toMatchObject({
+      publicRoutes: [
+        expect.objectContaining({
+          hostname: 'r1-api-8000-env-preview.apps.sammy.party',
+          service: 'api',
+          containerPort: 8000,
+          url: 'https://r1-api-8000-env-preview.apps.sammy.party',
+        }),
+      ],
+      internalRoutes: [
+        { service: 'db', containerPort: 5432, mode: 'private' },
+        { service: 'redis', containerPort: 6379, mode: 'private' },
+      ],
+    });
+  });
+
+  it('lists latest release routes without returning the stored compose manifest', async () => {
+    const composeManifest = {
+      reference: 'v1',
+      composeYaml: `services:
+  frontend:
+    image: example/frontend
+    ports:
+      - mode: ingress
+        target: 3000
+        published: "3000"
+        protocol: tcp
+  db:
+    image: postgres
+    ports:
+      - mode: host
+        target: 5432
+        published: "5432"
+        protocol: tcp
+`,
+    };
+    installDb(
+      createDbState({
+        deploymentEnvironments: [deploymentEnvironment({ id: 'env-routes', name: 'staging' })],
+        deploymentReleases: [
+          {
+            createdAt: '2026-06-25T00:00:00Z',
+            environmentId: 'env-routes',
+            id: 'release-old',
+            manifest: JSON.stringify({ ...composeManifest, composeYaml: 'services: {}' }),
+            source: 'compose-publish',
+            status: 'created',
+            version: 1,
+          },
+          {
+            createdAt: '2026-06-26T00:00:00Z',
+            environmentId: 'env-routes',
+            id: 'release-new',
+            manifest: JSON.stringify(composeManifest),
+            source: 'compose-publish',
+            status: 'applied',
+            version: 2,
+          },
+        ],
+      })
+    );
+
+    const response = await handleListDeploymentRoutes(
+      'req-1',
+      { environment: 'staging' },
+      tokenData(),
+      env()
+    );
+    const payload = parseToolPayload(response);
+
+    expect(response.error).toBeUndefined();
+    expect(payload.latestRelease).toEqual({
+      createdAt: '2026-06-26T00:00:00Z',
+      id: 'release-new',
+      source: 'compose-publish',
+      status: 'applied',
+      version: 2,
+    });
+    expect(payload.routes).toMatchObject({
+      publicRoutes: [
+        expect.objectContaining({
+          hostname: 'r1-frontend-3000-env-routes.apps.sammy.party',
+          service: 'frontend',
+          containerPort: 3000,
+        }),
+      ],
+      internalRoutes: [{ service: 'db', containerPort: 5432, mode: 'private' }],
+    });
+    expect(JSON.stringify(payload)).not.toContain('composeYaml');
   });
 
   it('sets variables and secrets and never returns decrypted secret values', async () => {

@@ -61,6 +61,43 @@ export const DEPLOYMENT_TOOLS = [
     },
   },
   {
+    name: 'preview_deployment_routes',
+    description:
+      'Preview SAM route classification and generated public URLs for a Docker Compose file without deploying it. Requires an accessible deployment environment because public URLs are derived from the environment id and base domain. Compose ports with mode: host are treated as internal/private; other ports are public unless an explicit private route suppresses them.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        environment: {
+          type: 'string',
+          description: 'Deployment environment name, such as "staging" or "production".',
+        },
+        composeYaml: {
+          type: 'string',
+          description:
+            'Docker Compose YAML to inspect. The tool returns public routes with URLs and internal routes without public DNS.',
+        },
+      },
+      required: ['environment', 'composeYaml'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'list_deployment_routes',
+    description:
+      'List generated public URLs and internal routes for the latest release in an accessible deployment environment. This is read-only and never returns the stored Compose file or secret values.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        environment: {
+          type: 'string',
+          description: 'Deployment environment name, such as "staging" or "production".',
+        },
+      },
+      required: ['environment'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'list_deployment_environment_config',
     description:
       'List Variables and Secrets configured for an accessible deployment environment. Variable values are visible. Secret values are never returned; only secret keys and metadata are shown.',

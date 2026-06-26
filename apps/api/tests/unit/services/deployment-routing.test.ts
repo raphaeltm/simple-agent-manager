@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   buildDeploymentRouteTargets,
+  buildReleaseRouteDiscovery,
   collectEnvironmentRouteHostnames,
   environmentPortOffset,
 } from '../../../src/services/deployment-routing';
@@ -273,6 +274,48 @@ describe('collectEnvironmentRouteHostnames', () => {
     expect(hostnames).toEqual([
       'r1-web-8000-01ktx9m6j0tpmgw0cq98hq1eaw.apps.sammy.party',
       'r2-api-8080-01ktx9m6j0tpmgw0cq98hq1eaw.apps.sammy.party',
+    ]);
+  });
+
+  it('treats compose-publish mode host ports as internal and omits public hostnames', () => {
+    const composePublishSubmission = {
+      reference: 'v1',
+      composeYaml: `services:
+  api:
+    image: example/api
+    ports:
+      - mode: ingress
+        target: 8000
+        published: "8000"
+        protocol: tcp
+  db:
+    image: postgres
+    ports:
+      - mode: host
+        target: 5432
+        published: "5432"
+        protocol: tcp
+  redis:
+    image: redis
+    ports:
+      - mode: host
+        target: 6379
+        published: "6379"
+        protocol: tcp
+`,
+    };
+
+    const discovery = buildReleaseRouteDiscovery(JSON.stringify(composePublishSubmission), opts);
+
+    expect(discovery?.publicRoutes.map((route) => route.hostname)).toEqual([
+      'r1-api-8000-01ktx9m6j0tpmgw0cq98hq1eaw.apps.sammy.party',
+    ]);
+    expect(discovery?.publicRoutes[0]?.url).toBe(
+      'https://r1-api-8000-01ktx9m6j0tpmgw0cq98hq1eaw.apps.sammy.party'
+    );
+    expect(discovery?.internalRoutes).toEqual([
+      { service: 'db', containerPort: 5432, mode: 'private' },
+      { service: 'redis', containerPort: 6379, mode: 'private' },
     ]);
   });
 

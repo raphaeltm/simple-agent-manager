@@ -21,10 +21,11 @@
  *    re-labelled).
  *  - `build:` is replaced with the digest-pinned `image:` that the publish
  *    orchestrator already pushed to the project registry (`pushedRef`).
- *  - `ports:` is TRANSFORMED (not stripped): each published container port
- *    becomes a public route (hostname + loopback hostPort) and the service's
- *    ports are rewritten to `127.0.0.1:<hostPort>:<containerPort>` so node-local
- *    Caddy can reverse-proxy to it.
+ *  - `ports:` is TRANSFORMED (not stripped): public ports become routes
+ *    (hostname + loopback hostPort) and are rewritten to
+ *    `127.0.0.1:<hostPort>:<containerPort>` so node-local Caddy can
+ *    reverse-proxy to them. Long-syntax `mode: host` ports are internal/private
+ *    route hints and are not host-published.
  *  - Every other denied field (DENIED_SERVICE_FIELDS) is stripped with a
  *    warning. `logging`/`labels` are denied because SAM re-injects its own.
  *  - SAM injects: the per-environment bridge network, sam.* labels,
@@ -46,7 +47,6 @@ import {
   type ComposeParseError,
   DENIED_SERVICE_FIELDS,
   DENIED_TOP_LEVEL_FIELDS,
-  extractContainerPort,
   parseServiceVolumes,
   parseVolumes,
 } from '@simple-agent-manager/shared';
@@ -60,6 +60,7 @@ import {
   assignRouteTargets,
   type DeploymentRouteTarget,
   type DeploymentRouteTargetOptions,
+  extractComposeRouteHints,
   type PublicRouteInput,
 } from './deployment-routing';
 
@@ -167,18 +168,43 @@ function buildArtifactMap(submission: ComposePublishSubmission): Map<string, Com
   return map;
 }
 
-/** Normalize a compose `ports:` entry list into container ports (transform exception). */
-function collectServiceContainerPorts(serviceName: string, ports: unknown): number[] {
-  if (!Array.isArray(ports)) return [];
-  const result: number[] = [];
-  for (const [index, spec] of ports.entries()) {
-    rejectInterpolatedContainerPort(serviceName, index, spec);
-    const port = extractContainerPort(spec);
-    if (port !== null) {
-      result.push(port);
+/** Reject compose `ports:` entries whose container side cannot be routed safely. */
+function validateLiteralContainerPorts(rawServices: Record<string, unknown>): void {
+  for (const [serviceName, rawService] of Object.entries(rawServices)) {
+    if (!isPlainObject(rawService) || !Array.isArray(rawService.ports)) continue;
+
+    for (const [index, spec] of rawService.ports.entries()) {
+      rejectInterpolatedContainerPort(serviceName, index, spec);
     }
   }
-  return result;
+}
+
+type ComposePublishRouteHint = { service: string; port: number; mode: 'public' | 'private' };
+
+function collectPublicRouteInputs(routeHints: ComposePublishRouteHint[]): PublicRouteInput[] {
+  return routeHints
+    .filter((route) => route.mode === 'public')
+    .map((route) => ({ service: route.service, port: route.port }));
+}
+
+function assertComposeRoutesReferenceServices(
+  routeHints: ComposePublishRouteHint[],
+  rawServices: Record<string, unknown>
+): void {
+  const serviceNames = new Set(Object.keys(rawServices));
+  for (const route of routeHints) {
+    if (!serviceNames.has(route.service)) {
+      throw new Error(
+        `Compose-publish route validation failed: route references missing service "${route.service}".`
+      );
+    }
+  }
+}
+
+function publicRouteServicePorts(
+  routes: PublicRouteInput[]
+): Array<{ service: string; containerPort: number }> {
+  return routes.map((route) => ({ service: route.service, containerPort: route.port }));
 }
 
 function hasComposeInterpolation(value: string): boolean {
@@ -187,7 +213,7 @@ function hasComposeInterpolation(value: string): boolean {
 
 function rejectInterpolatedContainerPort(serviceName: string, index: number, spec: unknown): void {
   if (typeof spec === 'string') {
-    const cleaned = spec.split('/')[0]!;
+    const [cleaned = ''] = spec.split('/');
     const parts = cleaned.split(':');
     const containerPart = parts[parts.length - 1]?.trim() ?? '';
     if (hasComposeInterpolation(containerPart)) {
@@ -376,15 +402,18 @@ export function buildComposePublishApplyPayload(
     throw new Error('Captured composeYaml has no services mapping');
   }
   const sanitizedVolumes = validateSafeNamedVolumes(doc, rawServices);
+  validateLiteralContainerPorts(rawServices);
+  const routeHints = extractComposeRouteHints(submission.composeYaml);
+  assertComposeRoutesReferenceServices(routeHints, rawServices);
+  const publicRoutes = collectPublicRouteInputs(routeHints);
 
   const pushedRefByService = buildPushedRefMap(submission);
   const artifactByService = buildArtifactMap(submission);
   const networkName = `sam-internal-${opts.environmentId.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
 
-  const publicRoutes: PublicRouteInput[] = [];
   // Track which service each route maps to, in route order, so we can rewrite
   // the service's ports to loopback bindings after host ports are assigned.
-  const routeServiceByIndex: Array<{ service: string; containerPort: number }> = [];
+  const routeServiceByIndex = publicRouteServicePorts(publicRoutes);
 
   let hasModelProvider = false;
   const artifacts: ComposeImageArtifactDescriptor[] = [];
@@ -444,14 +473,9 @@ export function buildComposePublishApplyPayload(
       }
     }
 
-    // Collect public routes from ports: (transform exception — NOT stripped).
-    const containerPorts = collectServiceContainerPorts(name, service.ports);
-    for (const port of containerPorts) {
-      publicRoutes.push({ service: name, port });
-      routeServiceByIndex.push({ service: name, containerPort: port });
-    }
-    // Remove ports for now; rewritten to loopback bindings after host-port
-    // assignment below. A service with no resolvable ports keeps none.
+    // Remove all original port declarations. Public routes are rewritten to
+    // loopback bindings below; private/internal routes intentionally remain
+    // un-published outside the SAM bridge network.
     delete service.ports;
 
     // Strip every other denied service field (WARN, never error).

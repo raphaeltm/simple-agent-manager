@@ -1,4 +1,9 @@
-import { type DeploymentManifest, extractContainerPort } from '@simple-agent-manager/shared';
+import {
+  type ComposeParseError,
+  type ComposeRouteHint,
+  type DeploymentManifest,
+  parseComposeRouteHints,
+} from '@simple-agent-manager/shared';
 import { parse as parseYaml } from 'yaml';
 
 /** Default loopback port base for app routes published to node-local Caddy. */
@@ -27,6 +32,22 @@ export interface DeploymentRouteTarget {
   service: string;
   containerPort: number;
   hostPort: number;
+}
+
+export interface DeploymentRoutePublicDiscovery extends DeploymentRouteTarget {
+  url: string;
+}
+
+export interface DeploymentRouteInternalDiscovery {
+  service: string;
+  containerPort: number;
+  mode: 'private';
+}
+
+export interface DeploymentRouteDiscovery {
+  publicRoutes: DeploymentRoutePublicDiscovery[];
+  internalRoutes: DeploymentRouteInternalDiscovery[];
+  publicUrlPattern: string;
 }
 
 export interface DeploymentRouteTargetOptions {
@@ -165,10 +186,7 @@ export function buildDeploymentRouteTargets(
   manifest: DeploymentManifest,
   opts: DeploymentRouteTargetOptions
 ): DeploymentRouteTarget[] {
-  const publicRoutes = manifest.routes
-    .filter((route) => route.mode === 'public')
-    .map((route) => ({ service: route.service, port: route.port }));
-  return assignRouteTargets(publicRoutes, opts);
+  return buildDeploymentRouteDiscovery(manifest, opts).publicRoutes.map(toRouteTarget);
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -179,35 +197,107 @@ export function buildComposePublishRouteTargets(
   submission: Record<string, unknown>,
   opts: DeploymentRouteTargetOptions
 ): DeploymentRouteTarget[] {
-  const composeYaml = submission.composeYaml;
-  if (typeof composeYaml !== 'string' || composeYaml.trim() === '') {
-    return [];
+  return buildComposePublishRouteDiscovery(submission, opts).publicRoutes.map(toRouteTarget);
+}
+
+function routeWithUrl(route: DeploymentRouteTarget): DeploymentRoutePublicDiscovery {
+  return { ...route, url: `https://${route.hostname}` };
+}
+
+function toRouteTarget(route: DeploymentRoutePublicDiscovery): DeploymentRouteTarget {
+  return {
+    hostname: route.hostname,
+    service: route.service,
+    containerPort: route.containerPort,
+    hostPort: route.hostPort,
+  };
+}
+
+function publicUrlPattern(opts: DeploymentRouteTargetOptions): string {
+  return `https://r{index}-{service}-{port}-${sanitizeDnsLabelPart(opts.environmentId)}.apps.${opts.baseDomain.toLowerCase()}`;
+}
+
+export function buildDeploymentRouteDiscovery(
+  manifest: DeploymentManifest,
+  opts: DeploymentRouteTargetOptions
+): DeploymentRouteDiscovery {
+  return buildRouteDiscoveryFromHints(manifest.routes, opts);
+}
+
+function formatRouteErrors(errors: ComposeParseError[]): string {
+  return errors.map((err) => `${err.path}: ${err.message}`).join('; ');
+}
+
+export function extractComposeRouteHints(composeYaml: string): ComposeRouteHint[] {
+  if (composeYaml.trim() === '') {
+    throw new Error('Compose YAML must not be empty.');
   }
 
   let doc: unknown;
   try {
     doc = parseYaml(composeYaml);
-  } catch {
-    return [];
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(`Failed to parse compose YAML: ${message}`);
   }
+
   if (!isPlainObject(doc) || !isPlainObject(doc.services)) {
-    return [];
+    throw new Error('Compose YAML must define a services mapping.');
   }
 
-  const publicRoutes: PublicRouteInput[] = [];
-  for (const [serviceName, rawService] of Object.entries(doc.services)) {
-    if (!isPlainObject(rawService) || !Array.isArray(rawService.ports)) {
-      continue;
-    }
-    for (const portSpec of rawService.ports) {
-      const port = extractContainerPort(portSpec);
-      if (port !== null) {
-        publicRoutes.push({ service: serviceName, port });
-      }
+  const errors: ComposeParseError[] = [];
+  const routes = parseComposeRouteHints(doc['x-sam-routes'], doc.services, errors);
+  if (errors.length > 0) {
+    throw new Error(`Compose route validation failed: ${formatRouteErrors(errors)}`);
+  }
+
+  const services = new Set(Object.keys(doc.services));
+  for (const route of routes) {
+    if (!services.has(route.service)) {
+      throw new Error(`Compose route references missing service "${route.service}".`);
     }
   }
 
-  return assignRouteTargets(publicRoutes, opts);
+  return routes;
+}
+
+export function buildComposePublishRouteDiscovery(
+  submission: Record<string, unknown>,
+  opts: DeploymentRouteTargetOptions
+): DeploymentRouteDiscovery {
+  const composeYaml = submission.composeYaml;
+  if (typeof composeYaml !== 'string' || composeYaml.trim() === '') {
+    return {
+      publicRoutes: [],
+      internalRoutes: [],
+      publicUrlPattern: publicUrlPattern(opts),
+    };
+  }
+
+  return buildRouteDiscoveryFromHints(extractComposeRouteHints(composeYaml), opts);
+}
+
+function buildRouteDiscoveryFromHints(
+  routeHints: ComposeRouteHint[],
+  opts: DeploymentRouteTargetOptions
+): DeploymentRouteDiscovery {
+  const publicInputs: PublicRouteInput[] = routeHints
+    .filter((route) => route.mode === 'public')
+    .map((route) => ({ service: route.service, port: route.port }));
+  const publicRoutes = assignRouteTargets(publicInputs, opts).map(routeWithUrl);
+  const internalRoutes = routeHints
+    .filter((route) => route.mode === 'private')
+    .map((route) => ({
+      service: route.service,
+      containerPort: route.port,
+      mode: 'private' as const,
+    }));
+
+  return {
+    publicRoutes,
+    internalRoutes,
+    publicUrlPattern: publicUrlPattern(opts),
+  };
 }
 
 /**
@@ -227,19 +317,26 @@ export function buildReleaseRouteTargets(
   manifestJson: string,
   opts: DeploymentRouteTargetOptions
 ): DeploymentRouteTarget[] {
+  return buildReleaseRouteDiscovery(manifestJson, opts)?.publicRoutes.map(toRouteTarget) ?? [];
+}
+
+export function buildReleaseRouteDiscovery(
+  manifestJson: string,
+  opts: DeploymentRouteTargetOptions
+): DeploymentRouteDiscovery | null {
   let manifest: Record<string, unknown>;
   try {
     manifest = JSON.parse(manifestJson) as Record<string, unknown>;
   } catch {
-    return [];
+    return null;
   }
 
   try {
     return Array.isArray(manifest.routes)
-      ? buildDeploymentRouteTargets(manifest as unknown as DeploymentManifest, opts)
-      : buildComposePublishRouteTargets(manifest, opts);
+      ? buildDeploymentRouteDiscovery(manifest as unknown as DeploymentManifest, opts)
+      : buildComposePublishRouteDiscovery(manifest, opts);
   } catch {
-    return [];
+    return null;
   }
 }
 

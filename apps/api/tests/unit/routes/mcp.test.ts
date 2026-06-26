@@ -363,9 +363,11 @@ describe('MCP Routes', () => {
       expect(toolNames).toContain('get_publish_status');
       expect(toolNames).toContain('list_deployment_environments');
       expect(toolNames).toContain('read_deployment_logs');
+      expect(toolNames).toContain('preview_deployment_routes');
+      expect(toolNames).toContain('list_deployment_routes');
       expect(toolNames).toContain('list_deployment_environment_config');
       expect(toolNames).toContain('set_deployment_environment_config');
-      expect(body.result.tools).toHaveLength(93);
+      expect(body.result.tools).toHaveLength(95);
     });
 
     it('should include MUST call directive in get_instructions description', async () => {
@@ -512,6 +514,9 @@ describe('MCP Routes', () => {
       expect(text).toContain('Agent-First Deployment Model');
       expect(text).toContain('build_and_publish');
       expect(text).toContain('list_deployment_environments');
+      expect(text).toContain('preview_deployment_routes');
+      expect(text).toContain('list_deployment_routes');
+      expect(text).toContain('mode: host');
       expect(text).toContain('Variables');
       expect(text).toContain('Secrets');
       expect(text).toContain('read_deployment_logs');

@@ -53,6 +53,8 @@ SAM exposes these MCP tools for deployment. They are the only interface you need
 | \`set_deployment_environment_config(environment, key, value, isSecret?)\` | Create or update a Variable or Secret for an environment. |
 | \`build_and_publish(environment, reference?, workingDir?)\` | Start an async server-side Compose build/publish job and return a durable \`publishJobId\`. |
 | \`get_publish_status(publishJobId, sinceSeq?, limit?)\` | Poll the build/publish job for status, events, release details, and sanitized failure diagnostics. |
+| \`preview_deployment_routes(environment, composeYaml)\` | Preview which Compose ports will get public SAM URLs before deploying. \`mode: host\` ports are internal/private; other ports are public unless explicitly marked private. |
+| \`list_deployment_routes(environment)\` | List the public URLs and internal routes for the latest release in an accessible environment. |
 | \`read_deployment_logs(environment, source?, level?, container?, since?, until?, search?, cursor?, limit?)\` | Read deployment-node logs for an environment to verify the release and debug failures. |
 | \`check_dns_status()\` | Check DNS propagation and TLS validity for **this workspace's own** \`ws-*\` URL. It verifies the workspace is reachable at the Cloudflare edge — it does NOT check a deployed app's public route. |
 
@@ -103,9 +105,16 @@ x-sam-routes:
 
 Constraints for compose-publish releases:
 
+- \`ports:\` entries are route hints, not raw host publishing. Long-syntax \`mode: host\` ports are treated as **internal/private** and do not get public DNS. Other \`ports:\` entries are public by default.
 - Safe named volumes are preserved. **Host bind mounts, Docker socket mounts, \`tmpfs\`, external volumes, and custom volume drivers are rejected.**
 - Docker Model Runner \`provider:\` services are preserved.
 - Prefer normal \`\${VAR}\` placeholders backed by per-environment Variables and Secrets over older explicit secret references. The legacy \`x-sam-secret\` syntax is still supported for compatibility, but new deployments should use \`\${VAR}\` placeholders.
+
+Before publishing, call \`preview_deployment_routes(environment, composeYaml)\` with the exact Compose file you plan to deploy. It returns:
+
+- \`publicRoutes\` with the generated SAM hostname and \`https://...\` URL.
+- \`internalRoutes\` for private ports, including \`mode: host\` service ports.
+- \`publicUrlPattern\`, the deterministic hostname pattern for that environment.
 
 ### Step 4 — Build and publish (the deploy action)
 
@@ -129,6 +138,7 @@ This tool requires the named environment to be active, agent deployment to be en
 
 After the publish job reaches \`succeeded\`:
 
+- Call \`list_deployment_routes(environment)\` to see the generated public URLs for the latest release and confirm internal services such as databases or queues were not given public DNS.
 - Call \`read_deployment_logs(environment)\` to confirm the deployment node applied the release and the containers are healthy. Deployment nodes also persist release-scoped apply events for phases such as fetch, compose config, artifact load, compose up, health check, Caddy reload, success, failure, and revert. Read the logs/events before guessing at fixes.
 - Call \`check_dns_status()\` to confirm **this workspace's** \`ws-*\` URL is reachable with valid TLS at the edge. Note this checks the workspace itself, not the deployed app's public route — use \`read_deployment_logs\` to confirm the deployed containers are serving.
 
@@ -143,6 +153,7 @@ After the publish job reaches \`succeeded\`:
 - **Skipping apply verification.** A successful publish job records a release; it does not prove the containers are healthy. Always read deployment logs/apply events to confirm.
 - **Guessing when an environment is missing.** If \`list_deployment_environments()\` is empty, the user must create/enable an environment. Tell them; do not improvise.
 - **Using rejected volume types.** Host bind mounts, Docker socket mounts, tmpfs, external volumes, and custom drivers are rejected. Use safe named volumes.
+- **Accidentally exposing databases or queues.** Use Compose long-syntax \`ports:\` with \`mode: host\` for internal/private route hints, or mark the service/port private in \`x-sam-routes\`. Verify with \`preview_deployment_routes\` before publishing.
 
 ---
 
@@ -150,10 +161,11 @@ After the publish job reaches \`succeeded\`:
 
 1. \`list_deployment_environments()\` → pick the target.
 2. \`list_deployment_environment_config(environment)\` → review; \`set_deployment_environment_config(...)\` for anything missing (Secrets via \`isSecret: true\`).
-3. Author the Compose stack with \`\${VAR}\` placeholders and \`x-sam-routes\`.
-4. \`build_and_publish(environment)\` → capture \`publishJobId\`.
-5. \`get_publish_status(publishJobId)\` until terminal.
-6. \`read_deployment_logs(environment)\` and \`check_dns_status()\` → verify it is actually running.`;
+3. Author the Compose stack with \`\${VAR}\` placeholders and route hints.
+4. \`preview_deployment_routes(environment, composeYaml)\` → confirm public URLs and internal routes.
+5. \`build_and_publish(environment)\` → capture \`publishJobId\`.
+6. \`get_publish_status(publishJobId)\` until terminal.
+7. \`list_deployment_routes(environment)\`, \`read_deployment_logs(environment)\`, and \`check_dns_status()\` → verify it is actually running.`;
 
 export function handleGetDeploymentGuide(requestId: string | number | null): JsonRpcResponse {
   return jsonRpcSuccess(requestId, {

@@ -30,6 +30,8 @@ import { handleGetDeploymentGuide } from './deployment-guide-tools';
 import {
   handleListDeploymentEnvironmentConfig,
   handleListDeploymentEnvironments,
+  handleListDeploymentRoutes,
+  handlePreviewDeploymentRoutes,
   handleReadDeploymentLogs,
   handleSetDeploymentEnvironmentConfig,
 } from './deployment-tools';
@@ -298,6 +300,12 @@ mcpRoutes.post('/', async (c) => {
             );
           case 'read_deployment_logs':
             return c.json(await handleReadDeploymentLogs(requestId, toolArgs, tokenData, c.env));
+          case 'preview_deployment_routes':
+            return c.json(
+              await handlePreviewDeploymentRoutes(requestId, toolArgs, tokenData, c.env)
+            );
+          case 'list_deployment_routes':
+            return c.json(await handleListDeploymentRoutes(requestId, toolArgs, tokenData, c.env));
           case 'list_deployment_environment_config':
             return c.json(
               await handleListDeploymentEnvironmentConfig(requestId, toolArgs, tokenData, c.env)

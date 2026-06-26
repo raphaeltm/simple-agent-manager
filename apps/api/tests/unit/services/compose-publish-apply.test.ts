@@ -104,7 +104,8 @@ describe('buildComposePublishApplyPayload', () => {
             localImageRef: 'crewai-app',
             r2Key: 'compose-image-artifacts/proj/env/ws/upload/app.tar',
             sizeBytes: 123,
-            archiveSha256: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            archiveSha256:
+              'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
             archiveType: 'docker-save',
             mediaType: 'application/vnd.docker.image.rootfs.diff.tar',
           },
@@ -114,7 +115,8 @@ describe('buildComposePublishApplyPayload', () => {
             localImageRef: 'crewai-worker',
             r2Key: 'compose-image-artifacts/proj/env/ws/upload/worker.tar',
             sizeBytes: 456,
-            archiveSha256: 'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+            archiveSha256:
+              'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
             archiveType: 'docker-save',
             mediaType: 'application/vnd.docker.image.rootfs.diff.tar',
           },
@@ -181,6 +183,43 @@ describe('buildComposePublishApplyPayload', () => {
     expect(doc.services.worker.ports).toBeUndefined();
   });
 
+  it('does not publish long-syntax mode host ports as public routes', () => {
+    const compose = `services:
+  api:
+    image: example/api:1
+    ports:
+      - mode: ingress
+        target: 8000
+        published: "8000"
+        protocol: tcp
+  db:
+    image: postgres:16
+    ports:
+      - mode: host
+        target: 5432
+        published: "5432"
+        protocol: tcp
+  redis:
+    image: redis:7
+    ports:
+      - mode: host
+        target: 6379
+        published: "6379"
+        protocol: tcp
+`;
+    const result = buildComposePublishApplyPayload(
+      makeSubmission({ composeYaml: compose, services: [] }),
+      OPTS
+    );
+    const doc = parseYaml(result.composeYaml) as Record<string, any>;
+
+    expect(result.routes).toHaveLength(1);
+    expect(result.routes[0]).toMatchObject({ service: 'api', containerPort: 8000 });
+    expect(doc.services.api.ports).toEqual([`127.0.0.1:${result.routes[0]!.hostPort}:8000`]);
+    expect(doc.services.db.ports).toBeUndefined();
+    expect(doc.services.redis.ports).toBeUndefined();
+  });
+
   it('allows interpolated host ports because SAM rewrites host bindings', () => {
     const composeWithInterpolatedHostPort = `services:
   app:
@@ -196,9 +235,7 @@ describe('buildComposePublishApplyPayload', () => {
 
     expect(result.routes).toHaveLength(1);
     expect(result.routes[0]!.containerPort).toBe(8000);
-    expect(doc.services.app.ports).toEqual([
-      `127.0.0.1:${result.routes[0]!.hostPort}:8000`,
-    ]);
+    expect(doc.services.app.ports).toEqual([`127.0.0.1:${result.routes[0]!.hostPort}:8000`]);
   });
 
   it('rejects interpolated short-syntax container ports with an actionable diagnostic', () => {
