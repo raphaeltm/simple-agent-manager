@@ -1597,3 +1597,76 @@ exit 0
 		t.Fatalf("expected [REDACTED] marker in reported error, got %q", observed.ErrorMessage)
 	}
 }
+
+func TestEngine_HealthTimeoutReportsFailedServicesInObservedState(t *testing.T) {
+	dir := t.TempDir()
+	disk, err := NewDiskState(filepath.Join(dir, "state"))
+	if err != nil {
+		t.Fatalf("NewDiskState: %v", err)
+	}
+
+	composeScript := filepath.Join(dir, "compose.sh")
+	if err := os.WriteFile(composeScript, []byte(`#!/bin/sh
+case "$*" in
+  *" ps --format json"*)
+    echo '{"Name":"web-1","Service":"web","State":"running","Health":"healthy"}'
+    echo '{"Name":"api-1","Service":"api","State":"running","Health":"starting"}'
+    ;;
+esac
+exit 0
+`), 0755); err != nil {
+		t.Fatalf("write compose script: %v", err)
+	}
+
+	pub, priv := generateTestKeys(t)
+	verifier, err := NewVerifier(base64.StdEncoding.EncodeToString(pub))
+	if err != nil {
+		t.Fatalf("NewVerifier: %v", err)
+	}
+
+	engine := NewEngine(disk, verifier, EngineConfig{
+		EnvironmentID:      "env-1",
+		NodeID:             "node-1",
+		ComposeCmd:         composeScript,
+		CaddyfilePath:      filepath.Join(dir, "active", "Caddyfile"),
+		CaddyReloadCmd:     "/bin/true",
+		HealthTimeout:      30 * time.Millisecond,
+		HealthPollInterval: 5 * time.Millisecond,
+	})
+
+	payload := &ApplyPayload{
+		EnvironmentID: "env-1",
+		NodeID:        "node-1",
+		Seq:           1,
+		ExpiresAt:     time.Now().Add(1 * time.Hour).Unix(),
+		ComposeYAML:   "services:\n  web:\n    image: nginx\n  api:\n    image: nginx\n",
+		Routes: []RouteTarget{
+			{Hostname: "web.example.com", Service: "web", ContainerPort: 3000, HostPort: 35000},
+			{Hostname: "api.example.com", Service: "api", ContainerPort: 3000, HostPort: 35001},
+		},
+	}
+	sig, err := SignPayload(payload, priv)
+	if err != nil {
+		t.Fatalf("SignPayload: %v", err)
+	}
+	payload.Signature = sig
+
+	err = engine.Apply(context.Background(), payload)
+	if err == nil {
+		t.Fatal("expected apply to fail on health timeout")
+	}
+
+	observed := engine.GetObserved()
+	if observed.Status != StatusFailedInitial {
+		t.Fatalf("expected observed failed-initial status, got %s", observed.Status)
+	}
+	if !strings.Contains(observed.ErrorMessage, "unhealthy routed services: api (state=running health=starting)") {
+		t.Fatalf("expected observed error to name unhealthy routed service, got %q", observed.ErrorMessage)
+	}
+	if len(observed.Services) != 2 {
+		t.Fatalf("expected final service snapshot in observed state, got %#v", observed.Services)
+	}
+	if observed.Services[1].Service != "api" || observed.Services[1].Status != "running" || observed.Services[1].Health != "starting" {
+		t.Fatalf("expected api starting service snapshot, got %#v", observed.Services[1])
+	}
+}

@@ -1,6 +1,15 @@
 package deploy
 
-import "testing"
+import (
+	"bytes"
+	"context"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+)
 
 func TestServiceHealthy(t *testing.T) {
 	cases := []struct {
@@ -61,5 +70,73 @@ func TestRoutedServicesHealthy_NoRequiredServices(t *testing.T) {
 	// With no routed services, health gating is a no-op (vacuously true).
 	if !routedServicesHealthy(nil, map[string]bool{}) {
 		t.Fatalf("expected true when no services are required")
+	}
+}
+
+func TestWaitForHealth_TimeoutWarnsWithRequiredServiceDiagnostics(t *testing.T) {
+	const secret = "supersecretvalue123"
+
+	dir := t.TempDir()
+	disk, err := NewDiskState(filepath.Join(dir, "state"))
+	if err != nil {
+		t.Fatalf("NewDiskState: %v", err)
+	}
+
+	composeScript := filepath.Join(dir, "compose.sh")
+	if err := os.WriteFile(composeScript, []byte(`#!/bin/sh
+case "$*" in
+  *" ps --format json"*)
+    echo '{"Name":"web-1","Service":"web","State":"running","Health":"healthy"}'
+    echo '{"Name":"`+secret+`-api-1","Service":"api","State":"running","Health":"starting"}'
+    echo '{"Name":"worker-1","Service":"worker","State":"running","Health":"starting"}'
+    ;;
+esac
+exit 0
+`), 0755); err != nil {
+		t.Fatalf("write compose script: %v", err)
+	}
+
+	engine := NewEngine(disk, nil, EngineConfig{
+		ComposeCmd:         composeScript,
+		HealthTimeout:      30 * time.Millisecond,
+		HealthPollInterval: 5 * time.Millisecond,
+	})
+
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	err = engine.waitForHealth(context.Background(), 1, []RouteTarget{
+		{Service: "web"},
+		{Service: "api"},
+		{Service: "frontend"},
+	}, map[string]string{"SAM_SECRET_TOKEN": secret})
+	if err == nil {
+		t.Fatal("expected health timeout")
+	}
+	if !strings.Contains(err.Error(), "unhealthy routed services: api (state=running health=starting), frontend (state=missing health=missing)") {
+		t.Fatalf("timeout error did not name unhealthy routed services: %v", err)
+	}
+
+	output := logs.String()
+	for _, want := range []string{
+		"deploy.health: timed out waiting for routed services",
+		"requiredServices=\"[api frontend web]\"",
+		"unhealthyServices=\"[api (state=running health=starting) frontend (state=missing health=missing)]\"",
+		"Service:api",
+		"State:missing",
+		"deploy.health: final docker compose ps output",
+		"[REDACTED]-api-1",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected log output to contain %q, got:\n%s", want, output)
+		}
+	}
+	if strings.Contains(output, secret) {
+		t.Fatalf("raw compose ps warning leaked interpolation secret: %s", output)
+	}
+	if strings.Contains(err.Error(), "worker") || strings.Contains(output, "unhealthyServices=\"[api (state=running health=starting) frontend (state=missing health=missing) worker") {
+		t.Fatalf("non-routed worker should not be named as a gate blocker, got:\n%s", output)
 	}
 }

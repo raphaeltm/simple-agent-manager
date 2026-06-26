@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"time"
 )
@@ -90,7 +91,7 @@ func (e *Engine) waitForHealth(ctx context.Context, seq int64, routes []RouteTar
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-deadline.C:
-			return fmt.Errorf("health check timed out after %s", e.cfg.HealthTimeout)
+			return e.healthTimeoutError(ctx, seq, requiredServices, interpolationEnv)
 		case <-ticker.C:
 			services, err := e.inspectServices(ctx, seq, interpolationEnv)
 			if err != nil {
@@ -103,6 +104,105 @@ func (e *Engine) waitForHealth(ctx context.Context, seq int64, routes []RouteTar
 			}
 		}
 	}
+}
+
+type serviceHealthSnapshot struct {
+	Service string `json:"service"`
+	Name    string `json:"name,omitempty"`
+	State   string `json:"state"`
+	Health  string `json:"health"`
+}
+
+type healthTimeoutError struct {
+	timeout           time.Duration
+	unhealthyServices []string
+	services          []ServiceState
+	inspectErr        error
+}
+
+func (e *healthTimeoutError) Error() string {
+	if len(e.unhealthyServices) == 0 {
+		if e.inspectErr != nil {
+			return fmt.Sprintf("health check timed out after %s; final inspect failed: %v", e.timeout, e.inspectErr)
+		}
+		return fmt.Sprintf("health check timed out after %s", e.timeout)
+	}
+	return fmt.Sprintf("health check timed out after %s; unhealthy routed services: %s", e.timeout, strings.Join(e.unhealthyServices, ", "))
+}
+
+func (e *healthTimeoutError) Unwrap() error {
+	return e.inspectErr
+}
+
+func (e *healthTimeoutError) Services() []ServiceState {
+	return append([]ServiceState(nil), e.services...)
+}
+
+func (e *Engine) healthTimeoutError(ctx context.Context, seq int64, requiredServices map[string]bool, interpolationEnv map[string]string) error {
+	services, raw, err := e.inspectServicesWithRaw(ctx, seq, interpolationEnv)
+	if err != nil {
+		slog.Warn("deploy.health: final inspect failed after timeout",
+			"seq", seq,
+			"requiredServices", sortedMapKeys(requiredServices),
+			"error", err)
+		return &healthTimeoutError{
+			timeout:           e.cfg.HealthTimeout,
+			unhealthyServices: sortedMapKeys(requiredServices),
+			inspectErr:        err,
+		}
+	}
+
+	redactor := newEnvRedactor(interpolationEnv)
+	snapshots, unhealthy := routedServiceHealthDiagnostics(services, requiredServices)
+	redactedSnapshots := redactServiceHealthSnapshots(snapshots, redactor)
+	redactedUnhealthy := redactStrings(unhealthy, redactor)
+	redactedServices := redactServiceStates(services, redactor)
+	slog.Warn("deploy.health: timed out waiting for routed services",
+		"seq", seq,
+		"requiredServices", sortedMapKeys(requiredServices),
+		"unhealthyServices", redactedUnhealthy,
+		"services", redactedSnapshots)
+	slog.Warn("deploy.health: final docker compose ps output",
+		"seq", seq,
+		"output", raw)
+
+	return &healthTimeoutError{
+		timeout:           e.cfg.HealthTimeout,
+		unhealthyServices: redactedUnhealthy,
+		services:          redactedServices,
+	}
+}
+
+func redactServiceStates(services []ServiceState, redactor envRedactor) []ServiceState {
+	redacted := make([]ServiceState, 0, len(services))
+	for _, service := range services {
+		service.Name = redactor.redact(service.Name)
+		service.Service = redactor.redact(service.Service)
+		service.Status = redactor.redact(service.Status)
+		service.Health = redactor.redact(service.Health)
+		redacted = append(redacted, service)
+	}
+	return redacted
+}
+
+func redactServiceHealthSnapshots(snapshots []serviceHealthSnapshot, redactor envRedactor) []serviceHealthSnapshot {
+	redacted := make([]serviceHealthSnapshot, 0, len(snapshots))
+	for _, snapshot := range snapshots {
+		snapshot.Service = redactor.redact(snapshot.Service)
+		snapshot.Name = redactor.redact(snapshot.Name)
+		snapshot.State = redactor.redact(snapshot.State)
+		snapshot.Health = redactor.redact(snapshot.Health)
+		redacted = append(redacted, snapshot)
+	}
+	return redacted
+}
+
+func redactStrings(values []string, redactor envRedactor) []string {
+	redacted := make([]string, 0, len(values))
+	for _, value := range values {
+		redacted = append(redacted, redactor.redact(value))
+	}
+	return redacted
 }
 
 func routeServiceSet(routes []RouteTarget) map[string]bool {
@@ -132,6 +232,54 @@ func routedServicesHealthy(services []ServiceState, requiredServices map[string]
 	return true
 }
 
+func routedServiceHealthDiagnostics(services []ServiceState, requiredServices map[string]bool) ([]serviceHealthSnapshot, []string) {
+	snapshotByService := make(map[string]serviceHealthSnapshot, len(requiredServices))
+	healthyByService := make(map[string]bool, len(requiredServices))
+	for _, svc := range services {
+		service, ok := matchedService(svc, requiredServices)
+		if !ok {
+			continue
+		}
+		snapshotByService[service] = serviceHealthSnapshot{
+			Service: service,
+			Name:    svc.Name,
+			State:   svc.Status,
+			Health:  svc.Health,
+		}
+		if serviceHealthy(svc) {
+			healthyByService[service] = true
+		}
+	}
+
+	required := sortedMapKeys(requiredServices)
+	snapshots := make([]serviceHealthSnapshot, 0, len(required))
+	var unhealthy []string
+	for _, service := range required {
+		snapshot, ok := snapshotByService[service]
+		if !ok {
+			snapshot = serviceHealthSnapshot{
+				Service: service,
+				State:   "missing",
+				Health:  "missing",
+			}
+		}
+		snapshots = append(snapshots, snapshot)
+		if !healthyByService[service] {
+			unhealthy = append(unhealthy, fmt.Sprintf("%s (state=%s health=%s)", service, snapshot.State, snapshot.Health))
+		}
+	}
+	return snapshots, unhealthy
+}
+
+func sortedMapKeys(values map[string]bool) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	slices.Sort(keys)
+	return keys
+}
+
 func matchedService(svc ServiceState, requiredServices map[string]bool) (string, bool) {
 	if requiredServices[svc.Service] {
 		return svc.Service, true
@@ -150,6 +298,11 @@ func serviceHealthy(svc ServiceState) bool {
 }
 
 func (e *Engine) inspectServices(ctx context.Context, seq int64, interpolationEnv map[string]string) ([]ServiceState, error) {
+	services, _, err := e.inspectServicesWithRaw(ctx, seq, interpolationEnv)
+	return services, err
+}
+
+func (e *Engine) inspectServicesWithRaw(ctx context.Context, seq int64, interpolationEnv map[string]string) ([]ServiceState, string, error) {
 	composeFile := e.disk.ComposeFilePath(seq)
 
 	parts := strings.Fields(e.cfg.ComposeCmd)
@@ -163,9 +316,10 @@ func (e *Engine) inspectServices(ctx context.Context, seq int64, interpolationEn
 	redactor := newEnvRedactor(interpolationEnv)
 
 	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("compose ps: %w (stderr: %s)", err, redactor.redact(stderr.String()))
+		return nil, "", fmt.Errorf("compose ps: %w (stderr: %s)", err, redactor.redact(stderr.String()))
 	}
 
+	raw := redactor.redact(stdout.String())
 	var services []ServiceState
 	for _, line := range strings.Split(strings.TrimSpace(stdout.String()), "\n") {
 		if line == "" {
@@ -188,5 +342,5 @@ func (e *Engine) inspectServices(ctx context.Context, seq int64, interpolationEn
 			Health:  container.Health,
 		})
 	}
-	return services, nil
+	return services, raw, nil
 }

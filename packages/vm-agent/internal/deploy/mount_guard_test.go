@@ -210,6 +210,33 @@ func TestVerifyVolumeMounts_VolumeNotMounted_Refuses(t *testing.T) {
 	}
 }
 
+func TestVerifyVolumeMounts_LongFormSAMVolumeNotMounted_Refuses(t *testing.T) {
+	yaml := `services:
+  db:
+    image: postgres:16
+    volumes:
+      - type: bind
+        source: /mnt/sam-env-env-abc123/volumes/postgres-data
+        target: /var/lib/postgresql/data
+      - type: volume
+        source: postgres-cache
+        target: /cache
+`
+	checker := newFakeMountChecker()
+	checker.mountpoints["/mnt/sam-env-env-abc123"] = false
+
+	err := verifyVolumeMounts(yaml, checker)
+	if err == nil {
+		t.Fatal("expected long-form SAM volume to run the mount guard and refuse")
+	}
+	if !strings.Contains(err.Error(), "/mnt/sam-env-env-abc123") {
+		t.Fatalf("expected error to mention the SAM mount root, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "not a mountpoint") {
+		t.Fatalf("expected 'not a mountpoint' in error, got: %v", err)
+	}
+}
+
 func TestVerifyVolumeMounts_VolumeMissing_Refuses(t *testing.T) {
 	yaml := `services:
   db:
