@@ -29,8 +29,8 @@ The mount guard also silently skips valid Compose files that use long-form map `
 
 ## Acceptance Criteria
 
-- A health timeout produces a Warn-level structured log naming each required routed service, its state/health, and the routed services that blocked the gate.
-- A health timeout also emits one redacted raw Compose `ps --format json` dump at Warn level.
+- When final Docker inspection succeeds, a health timeout produces a Warn-level structured log naming each required routed service, its state/health, and the routed services that blocked the gate.
+- When final Docker inspection succeeds, a health timeout also emits one redacted raw Compose `ps --format json` dump at Warn level. If the final inspection fails, the timeout path logs the required routed services plus the inspection error instead.
 - The observed error message or services payload lets the control plane identify the routed service that blocked the gate.
 - Long-form Compose volume entries such as `type/source/target` are parsed and still trigger the `/mnt/sam-env-*` mountpoint guard.
 - Existing routed service health semantics remain unchanged.

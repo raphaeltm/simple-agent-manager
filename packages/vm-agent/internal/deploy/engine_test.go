@@ -1599,18 +1599,27 @@ exit 0
 }
 
 func TestEngine_HealthTimeoutReportsFailedServicesInObservedState(t *testing.T) {
+	const secret = "supersecretvalue123"
+
 	dir := t.TempDir()
 	disk, err := NewDiskState(filepath.Join(dir, "state"))
 	if err != nil {
 		t.Fatalf("NewDiskState: %v", err)
 	}
 
+	composeStatePath := filepath.Join(dir, "compose-state")
 	composeScript := filepath.Join(dir, "compose.sh")
 	if err := os.WriteFile(composeScript, []byte(`#!/bin/sh
 case "$*" in
+  *" down"*)
+    echo cleaned > "`+composeStatePath+`"
+    ;;
   *" ps --format json"*)
+    if [ -f "`+composeStatePath+`" ]; then
+      exit 0
+    fi
     echo '{"Name":"web-1","Service":"web","State":"running","Health":"healthy"}'
-    echo '{"Name":"api-1","Service":"api","State":"running","Health":"starting"}'
+    echo '{"Name":"`+secret+`-api-1","Service":"api","State":"running","Health":"starting"}'
     ;;
 esac
 exit 0
@@ -1640,6 +1649,9 @@ exit 0
 		Seq:           1,
 		ExpiresAt:     time.Now().Add(1 * time.Hour).Unix(),
 		ComposeYAML:   "services:\n  web:\n    image: nginx\n  api:\n    image: nginx\n",
+		InterpolationEnv: map[string]string{
+			"SAM_SECRET_TOKEN": secret,
+		},
 		Routes: []RouteTarget{
 			{Hostname: "web.example.com", Service: "web", ContainerPort: 3000, HostPort: 35000},
 			{Hostname: "api.example.com", Service: "api", ContainerPort: 3000, HostPort: 35001},
@@ -1666,7 +1678,10 @@ exit 0
 	if len(observed.Services) != 2 {
 		t.Fatalf("expected final service snapshot in observed state, got %#v", observed.Services)
 	}
-	if observed.Services[1].Service != "api" || observed.Services[1].Status != "running" || observed.Services[1].Health != "starting" {
+	if observed.Services[1].Service != "api" || observed.Services[1].Name != "[REDACTED]-api-1" || observed.Services[1].Status != "running" || observed.Services[1].Health != "starting" {
 		t.Fatalf("expected api starting service snapshot, got %#v", observed.Services[1])
+	}
+	if strings.Contains(fmt.Sprintf("%#v", observed.Services), secret) {
+		t.Fatalf("observed service snapshot leaked secret after cleanup: %#v", observed.Services)
 	}
 }
