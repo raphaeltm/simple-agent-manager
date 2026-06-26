@@ -18,12 +18,28 @@ import {
 
 const DEFAULT_MONTHLY_COST_AGGREGATION_MAX_PAGES = 200;
 const MONTHLY_COST_AGGREGATION_MAX_PAGES_HARD_CAP = 500;
+const MIN_MONTHLY_COST_CACHE_TTL_SECONDS = 60;
+export const MAX_MONTHLY_COST_CACHE_TTL_SECONDS = 86_400;
 
 export interface MonthlyCostCronResult {
   enabled: boolean;
   usersUpdated: number;
   totalEntries: number;
   errors: number;
+}
+
+export function resolveMonthlyCostCacheTtlSeconds(raw: string | undefined): number {
+  const fallback = DEFAULT_AI_MONTHLY_COST_CACHE_TTL_SECONDS;
+  if (raw === undefined || raw.trim() === '') {
+    return fallback;
+  }
+
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < MIN_MONTHLY_COST_CACHE_TTL_SECONDS) {
+    return fallback;
+  }
+
+  return Math.min(Math.floor(parsed), MAX_MONTHLY_COST_CACHE_TTL_SECONDS);
 }
 
 /**
@@ -41,8 +57,7 @@ export async function runMonthlyCostAggregation(env: Env): Promise<MonthlyCostCr
   const now = new Date();
   const monthKey = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
   const { startDate } = getGatewayPeriodBounds('current-month');
-  const ttl = parseInt(env.AI_MONTHLY_COST_CACHE_TTL_SECONDS || '', 10)
-    || DEFAULT_AI_MONTHLY_COST_CACHE_TTL_SECONDS;
+  const ttl = resolveMonthlyCostCacheTtlSeconds(env.AI_MONTHLY_COST_CACHE_TTL_SECONDS);
 
   // Aggregate cost per userId from Gateway logs
   const costByUser = new Map<string, number>();
