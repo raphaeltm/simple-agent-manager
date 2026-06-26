@@ -80,9 +80,18 @@ Update the relevant agent rule or checklist so billing/control-plane safety writ
 - [x] Run targeted API unit tests:
   - [x] `pnpm --filter @simple-agent-manager/api test -- tests/unit/services/ai-monthly-cost-cron.test.ts tests/unit/ai-gateway-logs.test.ts tests/unit/services/ai-token-budget.test.ts tests/unit/usage-budget-routes.test.ts`
 - [x] Run API lint and typecheck for touched code.
-- [ ] Run broader affected tests if targeted validation exposes a shared issue.
-- [ ] Run relevant local specialist reviews before PR: `task-completion-validator`, `cloudflare-specialist`, `env-validator`, `constitution-validator`, and `test-engineer`.
+- [x] Run broader affected tests if targeted validation exposes a shared issue.
+- [x] Run relevant local specialist reviews before PR: `task-completion-validator`, `cloudflare-specialist`, `env-validator`, `constitution-validator`, and `test-engineer`.
 - [ ] Open a PR describing this as fail-open budget-control hardening, wait for CI, merge when green, and monitor production deploy.
+
+## Validation Results
+
+- Targeted API tests passed: `pnpm --filter @simple-agent-manager/api test -- tests/unit/services/ai-monthly-cost-cron.test.ts tests/unit/ai-gateway-logs.test.ts tests/unit/services/ai-token-budget.test.ts tests/unit/usage-budget-routes.test.ts` -> 4 files, 110 tests.
+- API lint passed: `pnpm --filter @simple-agent-manager/api lint`.
+- API typecheck passed: `pnpm --filter @simple-agent-manager/api typecheck`.
+- Broader validation passed: `pnpm lint`, `pnpm typecheck`, `pnpm test`, and `pnpm build`.
+- Local specialist reviews passed: `task-completion-validator`, `cloudflare-specialist`, `env-validator`, `constitution-validator`, and `test-engineer`.
+- PR/CI/merge is blocked because `git push -u origin sam/run-end-end-workflow-01kw0v` returns GitHub 403 for `simple-agent-manager[bot]`, and SAM credential status reports no alternate GitHub token is available.
 
 ## Acceptance Criteria
 
