@@ -139,27 +139,28 @@ func (e *healthTimeoutError) Services() []ServiceState {
 }
 
 func (e *Engine) healthTimeoutError(ctx context.Context, seq int64, requiredServices map[string]bool, interpolationEnv map[string]string) error {
+	redactor := newEnvRedactor(interpolationEnv)
+	redactedRequiredServices := redactStrings(sortedMapKeys(requiredServices), redactor)
 	services, raw, err := e.inspectServicesWithRaw(ctx, seq, interpolationEnv)
 	if err != nil {
 		slog.Warn("deploy.health: final inspect failed after timeout",
 			"seq", seq,
-			"requiredServices", sortedMapKeys(requiredServices),
+			"requiredServices", redactedRequiredServices,
 			"error", err)
 		return &healthTimeoutError{
 			timeout:           e.cfg.HealthTimeout,
-			unhealthyServices: sortedMapKeys(requiredServices),
+			unhealthyServices: redactedRequiredServices,
 			inspectErr:        err,
 		}
 	}
 
-	redactor := newEnvRedactor(interpolationEnv)
 	snapshots, unhealthy := routedServiceHealthDiagnostics(services, requiredServices)
 	redactedSnapshots := redactServiceHealthSnapshots(snapshots, redactor)
 	redactedUnhealthy := redactStrings(unhealthy, redactor)
 	redactedServices := redactServiceStates(services, redactor)
 	slog.Warn("deploy.health: timed out waiting for routed services",
 		"seq", seq,
-		"requiredServices", sortedMapKeys(requiredServices),
+		"requiredServices", redactedRequiredServices,
 		"unhealthyServices", redactedUnhealthy,
 		"services", redactedSnapshots)
 	slog.Warn("deploy.health: final docker compose ps output",
@@ -332,7 +333,7 @@ func (e *Engine) inspectServicesWithRaw(ctx context.Context, seq int64, interpol
 			Health  string `json:"Health"`
 		}
 		if err := json.Unmarshal([]byte(line), &container); err != nil {
-			slog.Debug("deploy.inspect: failed to parse container JSON", "line", line, "error", err)
+			slog.Debug("deploy.inspect: failed to parse container JSON", "line", redactor.redact(line), "error", err)
 			continue
 		}
 		services = append(services, ServiceState{
