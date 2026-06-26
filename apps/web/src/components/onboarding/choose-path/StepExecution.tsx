@@ -1,9 +1,7 @@
 import type { Repository } from '@simple-agent-manager/shared';
-import { AGENT_CATALOG } from '@simple-agent-manager/shared';
 import { Alert, Card } from '@simple-agent-manager/ui';
 import { Check, ChevronDown } from 'lucide-react';
 import { useCallback, useRef, useState } from 'react';
-import { useNavigate } from 'react-router';
 
 import {
   getGitHubInstallUrl,
@@ -25,31 +23,18 @@ const COMPLETION_DELAY_MS = 300;
 
 interface StepExecutionProps {
   steps: GeneratedStep[];
-  tags: string[];
   onComplete: () => void;
-  onDismiss: () => void;
 }
 
 /* ─── Component ─── */
 
-export function StepExecution({ steps, tags, onComplete, onDismiss }: StepExecutionProps) {
-  const navigate = useNavigate();
+export function StepExecution({ steps, onComplete }: StepExecutionProps) {
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
   const [completedSteps, setCompletedSteps] = useState<string[]>([]);
   const [expandedDetails, setExpandedDetails] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [form, setForm] = useState<StepFormState>(() => {
-    const base = { ...INITIAL_FORM };
-    if (steps.some((s) => s.id === 'ai-apikey')) {
-      const isAnthropic = tags.includes('anthropic-key') || tags.includes('has-claude');
-      const agents = AGENT_CATALOG.filter((a) =>
-        isAnthropic ? a.provider === 'anthropic' : a.provider === 'openai'
-      );
-      if (agents[0]) base.selectedAgent = agents[0].id;
-    }
-    return base;
-  });
+  const [form, setForm] = useState<StepFormState>(INITIAL_FORM);
   const [repos, setRepos] = useState<Repository[]>([]);
   const [reposLoading, setReposLoading] = useState(false);
 
@@ -99,8 +84,17 @@ export function StepExecution({ steps, tags, onComplete, onDismiss }: StepExecut
       await executeStep(step.id, form);
       if (abortRef.current.signal.aborted) return;
       // Clear credentials from memory after successful submission
-      if (step.id === 'ai-apikey') setForm((prev) => ({ ...prev, apiKey: '' }));
-      if (step.id === 'cloud-hetzner') setForm((prev) => ({ ...prev, hetznerToken: '' }));
+      if (step.id === 'ai-setup') {
+        setForm((prev) => ({ ...prev, apiKey: '', oauthToken: '' }));
+      }
+      if (step.id === 'cloud-byoc') {
+        setForm((prev) => ({
+          ...prev,
+          hetznerToken: '',
+          scalewaySecretKey: '',
+          scalewayProjectId: '',
+        }));
+      }
       markStepDone();
     } catch (err) {
       if (abortRef.current.signal.aborted) return;
@@ -176,7 +170,7 @@ export function StepExecution({ steps, tags, onComplete, onDismiss }: StepExecut
     setLoading(true);
     setError(null);
     try {
-      const project = await createProject({
+      await createProject({
         name: form.selectedRepoName.split('/').pop() || form.selectedRepoName,
         repository: form.selectedRepoName,
         installationId: selectedRepo.installationId,
@@ -184,15 +178,16 @@ export function StepExecution({ steps, tags, onComplete, onDismiss }: StepExecut
         defaultBranch: selectedRepo.defaultBranch,
       });
       if (abortRef.current.signal.aborted) return;
-      onDismiss();
-      navigate(`/projects/${project.id}`);
+      // Project is the last step: advance to the completion screen rather than
+      // dismissing the wizard outright, so the user gets a clean "all set" hand-off.
+      markStepDone();
     } catch (err) {
       if (abortRef.current.signal.aborted) return;
       setError(err instanceof Error ? err.message : 'Failed to create project');
     } finally {
       if (!abortRef.current.signal.aborted) setLoading(false);
     }
-  }, [form.selectedRepoName, repos, onDismiss, navigate]);
+  }, [form.selectedRepoName, repos, markStepDone]);
 
   /* ─── Repository loading ─── */
 
@@ -248,7 +243,6 @@ export function StepExecution({ steps, tags, onComplete, onDismiss }: StepExecut
         <div className="sm:ml-9">
           <StepForm
             stepId={step.id}
-            tags={tags}
             form={form}
             setForm={setForm}
             loading={loading}

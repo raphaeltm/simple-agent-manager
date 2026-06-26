@@ -41,71 +41,26 @@ function opt(
 
 export const QUESTIONS: PathQuestion[] = [
   {
-    id: 'ai-subscription',
-    question: 'How do you want to power your AI agent?',
-    description:
-      'SAM uses AI agents like Claude Code to write code. Pick how you want to pay for AI usage.',
-    options: [
-      opt(
-        'claude-pro',
-        'Claude Pro or Max subscription',
-        'Use your existing Anthropic subscription — no extra AI cost',
-        'C',
-        'cloud-account',
-        ['has-claude', 'oauth']
-      ),
-      opt(
-        'api-key',
-        'I have an API key',
-        'Anthropic or OpenAI API key for direct pay-per-token usage',
-        '\u{1F511}',
-        'which-api-key',
-        ['has-api-key', 'user-api-key']
-      ),
-      opt(
-        'nothing',
-        'Use SAM-managed AI',
-        'Route AI usage through SAM — no key or setup needed, works with any agent. Switch to your own key anytime.',
-        '\u{2728}',
-        'cloud-account',
-        ['no-ai', 'sam-billing']
-      ),
-    ],
-  },
-  {
-    id: 'which-api-key',
-    question: 'Which API key do you have?',
-    description:
-      'With your own API key, you pay per-token directly to the provider.',
-    options: [
-      opt('anthropic', 'Anthropic (Claude)', 'For Claude Code agent', 'C', 'cloud-account', [
-        'has-claude',
-        'anthropic-key',
-      ]),
-      opt('openai', 'OpenAI', 'For Codex agent', 'O', 'cloud-account', ['has-openai', 'openai-key']),
-    ],
-  },
-  {
     id: 'cloud-account',
     question: 'Do you have a cloud hosting account?',
     description:
       'AI agents need a real computer to run on. SAM creates temporary VMs for each task.',
     options: [
       opt(
-        'hetzner',
-        'I have Hetzner',
-        'Most cost-effective — you pay Hetzner directly for usage',
+        'byoc',
+        'I have Hetzner or Scaleway',
+        'Most cost-effective — you pay your cloud provider directly for usage',
         'H',
         'github-ready',
-        ['has-hetzner', 'byoc']
+        ['byoc']
       ),
       opt(
         'no-cloud',
         'Use SAM-managed infrastructure',
-        'Let SAM provision and manage VMs for you — bring your own Hetzner account anytime.',
+        'Let SAM provision and manage VMs for you — bring your own cloud account anytime.',
         '\u{1F680}',
         'github-ready',
-        ['no-cloud', 'sam-infra']
+        []
       ),
     ],
   },
@@ -129,7 +84,7 @@ export const QUESTIONS: PathQuestion[] = [
         'Connect GitHub first, then choose or fork a repo',
         '\u{1F517}',
         null,
-        ['no-repo']
+        []
       ),
     ],
   },
