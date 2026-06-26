@@ -36,7 +36,8 @@ export const DEPLOYMENT_TOOLS = [
         },
         since: {
           type: 'string',
-          description: 'Optional lower time bound, as ISO 8601 or a VM-agent relative value like "-1h".',
+          description:
+            'Optional lower time bound, as ISO 8601 or a VM-agent relative value like "-1h".',
         },
         until: {
           type: 'string',
@@ -84,7 +85,7 @@ export const DEPLOYMENT_TOOLS = [
   {
     name: 'list_deployment_routes',
     description:
-      'List generated public URLs, custom domains, and internal routes for the latest release in an accessible deployment environment. This is read-only and never returns the stored Compose file or secret values.',
+      'List generated public URLs, custom domains, and internal routes derived from the latest release version in an accessible deployment environment. Check latestRelease.status before assuming the routes are currently live. This is read-only and never returns the stored Compose file or secret values.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -130,7 +131,8 @@ export const DEPLOYMENT_TOOLS = [
         },
         value: {
           type: 'string',
-          description: 'Value to store. For secrets this value is write-only and will not be returned.',
+          description:
+            'Value to store. For secrets this value is write-only and will not be returned.',
         },
         isSecret: {
           type: 'boolean',
@@ -146,9 +148,10 @@ export const DEPLOYMENT_TOOLS = [
     description:
       'Get a comprehensive guide for deploying an app with SAM. ' +
       'Call this whenever a user asks to deploy, launch, publish, ship, or release an app. ' +
-      'Returns a briefing covering SAM\'s agent-first / never-through-CI deployment model, the ' +
-      'full tool-by-tool flow in order (list environments, set Variables/Secrets, build_and_publish, ' +
-      'read logs, check DNS), Variables vs Secrets semantics, Compose authoring, and common pitfalls.',
+      "Returns a briefing covering SAM's agent-first / never-through-CI deployment model, the " +
+      'full tool-by-tool flow in order (list environments, preview routes, set Variables/Secrets, ' +
+      'build_and_publish, poll publish status, list routes, read logs, check DNS), Variables vs ' +
+      'Secrets semantics, Compose authoring, and common pitfalls.',
     inputSchema: {
       type: 'object' as const,
       properties: {},

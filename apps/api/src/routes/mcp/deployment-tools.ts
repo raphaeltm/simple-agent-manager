@@ -115,8 +115,9 @@ function findPublicRoute(
   port: number
 ): DeploymentRoutePublicDiscovery | null {
   return (
-    routes.publicRoutes.find((route) => route.service === service && route.containerPort === port) ??
-    null
+    routes.publicRoutes.find(
+      (route) => route.service === service && route.containerPort === port
+    ) ?? null
   );
 }
 

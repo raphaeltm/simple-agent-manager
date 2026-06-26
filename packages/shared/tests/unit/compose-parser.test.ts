@@ -1,7 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import type { ImageResolver, UnresolvedManifest } from '../../src/compose-parser';
-import { DENIED_SERVICE_FIELDS, DENIED_TOP_LEVEL_FIELDS, isDigestReference, parseCompose, resolveManifest } from '../../src/compose-parser';
+import {
+  DENIED_SERVICE_FIELDS,
+  DENIED_TOP_LEVEL_FIELDS,
+  isDigestReference,
+  parseCompose,
+  resolveManifest,
+} from '../../src/compose-parser';
 
 // =============================================================================
 // Helpers
@@ -10,7 +16,9 @@ import { DENIED_SERVICE_FIELDS, DENIED_TOP_LEVEL_FIELDS, isDigestReference, pars
 function expectSuccess(yaml: string) {
   const result = parseCompose(yaml);
   if (!result.success) {
-    throw new Error(`Expected success but got errors:\n${result.errors.map((e) => `  ${e.path}: ${e.message}`).join('\n')}`);
+    throw new Error(
+      `Expected success but got errors:\n${result.errors.map((e) => `  ${e.path}: ${e.message}`).join('\n')}`
+    );
   }
   return result.manifest;
 }
@@ -18,7 +26,9 @@ function expectSuccess(yaml: string) {
 function expectErrors(yaml: string) {
   const result = parseCompose(yaml);
   if (result.success) {
-    throw new Error(`Expected errors but got success with manifest:\n${JSON.stringify(result.manifest, null, 2)}`);
+    throw new Error(
+      `Expected errors but got success with manifest:\n${JSON.stringify(result.manifest, null, 2)}`
+    );
   }
   return result.errors;
 }
@@ -347,7 +357,8 @@ x-sam-routes:
   });
 
   it('rejects missing image field', () => {
-    expectErrorAt(`
+    expectErrorAt(
+      `
 services:
   web:
     environment:
@@ -356,7 +367,9 @@ x-sam-routes:
   - service: web
     port: 80
     mode: public
-`, 'services.web.image');
+`,
+      'services.web.image'
+    );
   });
 });
 
@@ -541,7 +554,8 @@ x-sam-routes:
   });
 
   it('rejects bind mounts (short syntax)', () => {
-    expectErrorAt(`
+    expectErrorAt(
+      `
 services:
   web:
     image: nginx
@@ -551,11 +565,14 @@ x-sam-routes:
   - service: web
     port: 80
     mode: public
-`, 'services.web.volumes[0]');
+`,
+      'services.web.volumes[0]'
+    );
   });
 
   it('rejects bind mounts (long syntax)', () => {
-    expectErrorAt(`
+    expectErrorAt(
+      `
 services:
   web:
     image: nginx
@@ -567,11 +584,14 @@ x-sam-routes:
   - service: web
     port: 80
     mode: public
-`, 'services.web.volumes[0]');
+`,
+      'services.web.volumes[0]'
+    );
   });
 
   it('rejects Docker socket mounts', () => {
-    expectErrorAt(`
+    expectErrorAt(
+      `
 services:
   web:
     image: nginx
@@ -581,11 +601,14 @@ x-sam-routes:
   - service: web
     port: 80
     mode: public
-`, 'services.web.volumes[0]');
+`,
+      'services.web.volumes[0]'
+    );
   });
 
   it('rejects external volumes', () => {
-    expectErrorAt(`
+    expectErrorAt(
+      `
 services:
   web:
     image: nginx
@@ -598,7 +621,9 @@ x-sam-routes:
   - service: web
     port: 80
     mode: public
-`, 'volumes.ext');
+`,
+      'volumes.ext'
+    );
   });
 
   it('validates volume cross-references (undeclared volume)', () => {
@@ -756,7 +781,8 @@ x-sam-routes:
   });
 
   it('validates route mode', () => {
-    expectErrorAt(`
+    expectErrorAt(
+      `
 services:
   web:
     image: nginx
@@ -764,11 +790,14 @@ x-sam-routes:
   - service: web
     port: 80
     mode: invalid
-`, 'x-sam-routes[0].mode');
+`,
+      'x-sam-routes[0].mode'
+    );
   });
 
   it('validates route port', () => {
-    expectErrorAt(`
+    expectErrorAt(
+      `
 services:
   web:
     image: nginx
@@ -776,7 +805,9 @@ x-sam-routes:
   - service: web
     port: 0
     mode: public
-`, 'x-sam-routes[0].port');
+`,
+      'x-sam-routes[0].port'
+    );
   });
 });
 
@@ -939,7 +970,8 @@ x-sam-routes:
   });
 
   it('rejects unsupported deploy sub-fields', () => {
-    expectErrorAt(`
+    expectErrorAt(
+      `
 services:
   web:
     image: nginx
@@ -949,7 +981,9 @@ x-sam-routes:
   - service: web
     port: 80
     mode: public
-`, 'services.web.deploy.replicas');
+`,
+      'services.web.deploy.replicas'
+    );
   });
 });
 
@@ -1014,7 +1048,9 @@ x-sam-pre-flight:
   service: nonexistent
   command: ["echo"]
 `);
-    expect(errors.some((e) => e.path === 'x-sam-pre-flight.service' && e.message.includes('nonexistent'))).toBe(true);
+    expect(
+      errors.some((e) => e.path === 'x-sam-pre-flight.service' && e.message.includes('nonexistent'))
+    ).toBe(true);
   });
 });
 
@@ -1125,10 +1161,11 @@ x-sam-routes:
     expect(parsed.success).toBe(true);
     if (!parsed.success) return;
 
-    const multiResolver: ImageResolver = vi.fn().mockImplementation(
-      (_reg: string, _repo: string, tag: string) =>
-        Promise.resolve('sha256:' + (tag === 'v1' ? 'a' : 'b').repeat(64)),
-    );
+    const multiResolver: ImageResolver = vi
+      .fn()
+      .mockImplementation((_reg: string, _repo: string, tag: string) =>
+        Promise.resolve('sha256:' + (tag === 'v1' ? 'a' : 'b').repeat(64))
+      );
 
     const resolved = await resolveManifest(parsed.manifest, multiResolver);
     expect(resolved.success).toBe(true);
@@ -1143,14 +1180,15 @@ x-sam-routes:
       unresolvedManifest({
         routes: [{ service: 'api', port: 80, mode: 'public' }],
       }),
-      mockResolver,
+      mockResolver
     );
 
     expect(resolved.success).toBe(false);
     if (resolved.success) return;
     expect(resolved.errors).toContainEqual({
       path: 'routes[0].service',
-      message: 'Route references service "api" which is not declared in "services". Declared services: web',
+      message:
+        'Route references service "api" which is not declared in "services". Declared services: web',
     });
   });
 
@@ -1170,7 +1208,7 @@ x-sam-routes:
         },
         volumes: {},
       }),
-      mockResolver,
+      mockResolver
     );
 
     expect(resolved.success).toBe(false);
@@ -1192,14 +1230,15 @@ x-sam-routes:
           },
         },
       }),
-      mockResolver,
+      mockResolver
     );
 
     expect(resolved.success).toBe(false);
     if (resolved.success) return;
     expect(resolved.errors).toContainEqual({
       path: 'hooks.preFlight.service',
-      message: 'Hook references service "worker" which is not declared in "services". Declared services: web',
+      message:
+        'Hook references service "worker" which is not declared in "services". Declared services: web',
     });
   });
 });
@@ -1314,7 +1353,8 @@ x-sam-routes:
   });
 
   it('rejects custom volume drivers', () => {
-    expectErrorAt(`
+    expectErrorAt(
+      `
 services:
   web:
     image: nginx
@@ -1327,7 +1367,9 @@ x-sam-routes:
   - service: web
     port: 80
     mode: public
-`, 'volumes.mydata');
+`,
+      'volumes.mydata'
+    );
   });
 
   it('depends_on is accepted but not extracted (ordering is informational)', () => {
@@ -1372,7 +1414,8 @@ x-sam-routes:
   });
 
   it('rejects pre-flight timeoutSeconds out of range', () => {
-    expectErrorAt(`
+    expectErrorAt(
+      `
 services:
   web:
     image: nginx
@@ -1384,11 +1427,14 @@ x-sam-pre-flight:
   service: web
   command: ["echo"]
   timeoutSeconds: 9999
-`, 'x-sam-pre-flight.timeoutSeconds');
+`,
+      'x-sam-pre-flight.timeoutSeconds'
+    );
   });
 
   it('rejects tmpfs volume type in long syntax', () => {
-    expectErrorAt(`
+    expectErrorAt(
+      `
 services:
   web:
     image: nginx
@@ -1399,7 +1445,9 @@ x-sam-routes:
   - service: web
     port: 80
     mode: public
-`, 'services.web.volumes[0]');
+`,
+      'services.web.volumes[0]'
+    );
   });
 
   it('handles numeric port spec in ports array', () => {

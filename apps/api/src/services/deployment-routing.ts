@@ -122,6 +122,11 @@ export function buildRouteHostname(
   return `r${routeIndex + 1}-${servicePart}-${port}-${envPart}.apps.${baseDomain.toLowerCase()}`;
 }
 
+export function buildRouteHostnamePattern(environmentId: string, baseDomain: string): string {
+  const envPart = sanitizeDnsLabelPart(environmentId);
+  return `r{index}-{service}-{port}-${envPart}.apps.${baseDomain.toLowerCase()}`;
+}
+
 /** A public route to publish, identified only by service name and container port. */
 export interface PublicRouteInput {
   service: string;
@@ -214,7 +219,7 @@ function toRouteTarget(route: DeploymentRoutePublicDiscovery): DeploymentRouteTa
 }
 
 function publicUrlPattern(opts: DeploymentRouteTargetOptions): string {
-  return `https://r{index}-{service}-{port}-${sanitizeDnsLabelPart(opts.environmentId)}.apps.${opts.baseDomain.toLowerCase()}`;
+  return `https://${buildRouteHostnamePattern(opts.environmentId, opts.baseDomain)}`;
 }
 
 export function buildDeploymentRouteDiscovery(

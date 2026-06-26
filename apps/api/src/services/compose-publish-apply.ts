@@ -52,10 +52,7 @@ import {
 } from '@simple-agent-manager/shared';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 
-import {
-  buildLocalImageRef,
-  type ComposeImageArtifactDescriptor,
-} from './compose-image-artifacts';
+import { buildLocalImageRef, type ComposeImageArtifactDescriptor } from './compose-image-artifacts';
 import {
   assignRouteTargets,
   type DeploymentRouteTarget,
@@ -135,7 +132,9 @@ function buildPushedRefMap(submission: ComposePublishSubmission): Map<string, st
   return map;
 }
 
-function buildArtifactMap(submission: ComposePublishSubmission): Map<string, ComposeImageArtifactDescriptor> {
+function buildArtifactMap(
+  submission: ComposePublishSubmission
+): Map<string, ComposeImageArtifactDescriptor> {
   const map = new Map<string, ComposeImageArtifactDescriptor>();
   for (const svc of submission.services ?? []) {
     if (

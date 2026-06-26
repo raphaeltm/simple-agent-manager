@@ -21,7 +21,7 @@ import type { ComposeParseError, UnresolvedManifest } from './types';
 export function parseEnvironment(
   value: unknown,
   prefix: string,
-  errors: ComposeParseError[],
+  errors: ComposeParseError[]
 ): Record<string, string | { secret: string }> {
   if (value === undefined || value === null) return {};
 
@@ -77,7 +77,7 @@ export function parseEnvironment(
 function parseEnvironmentList(
   list: unknown[],
   prefix: string,
-  errors: ComposeParseError[],
+  errors: ComposeParseError[]
 ): Record<string, string | { secret: string }> {
   const env: Record<string, string | { secret: string }> = {};
 
@@ -111,7 +111,7 @@ function parseEnvironmentList(
 export function parseServiceVolumes(
   value: unknown,
   prefix: string,
-  errors: ComposeParseError[],
+  errors: ComposeParseError[]
 ): Array<{ name: string; mountPath: string }> {
   if (value === undefined || value === null) return [];
 
@@ -155,14 +155,15 @@ export function parseServiceVolumes(
 function parseShortVolume(
   spec: string,
   path: string,
-  errors: ComposeParseError[],
+  errors: ComposeParseError[]
 ): { name: string; mountPath: string } | null {
   // Check for Docker socket
   for (const socketPath of DOCKER_SOCKET_PATHS) {
     if (spec.includes(socketPath)) {
       errors.push({
         path,
-        message: 'Docker socket mounts are not allowed. Containers cannot access the host Docker daemon.',
+        message:
+          'Docker socket mounts are not allowed. Containers cannot access the host Docker daemon.',
       });
       return null;
     }
@@ -195,7 +196,7 @@ function parseShortVolume(
 function parseLongVolume(
   vol: Record<string, unknown>,
   path: string,
-  errors: ComposeParseError[],
+  errors: ComposeParseError[]
 ): { name: string; mountPath: string } | null {
   const type = vol['type'] as string | undefined;
   const source = vol['source'] as string | undefined;
@@ -206,7 +207,8 @@ function parseLongVolume(
     if (source === socketPath || target === socketPath) {
       errors.push({
         path,
-        message: 'Docker socket mounts are not allowed. Containers cannot access the host Docker daemon.',
+        message:
+          'Docker socket mounts are not allowed. Containers cannot access the host Docker daemon.',
       });
       return null;
     }
@@ -215,7 +217,8 @@ function parseLongVolume(
   if (type === 'bind') {
     errors.push({
       path,
-      message: 'Bind mounts (type: bind) are not allowed. Use named volumes (type: volume) instead.',
+      message:
+        'Bind mounts (type: bind) are not allowed. Use named volumes (type: volume) instead.',
     });
     return null;
   }
@@ -262,7 +265,7 @@ function parseLongVolume(
 
 export function parseVolumes(
   value: unknown,
-  errors: ComposeParseError[],
+  errors: ComposeParseError[]
 ): Record<string, { sizeHintMb?: number }> {
   if (value === undefined || value === null) return {};
 
@@ -322,7 +325,7 @@ export interface ComposeRouteHint {
 export function parseComposeRouteHints(
   xSamRoutes: unknown,
   services: Record<string, unknown>,
-  errors: ComposeParseError[],
+  errors: ComposeParseError[]
 ): ComposeRouteHint[] {
   const routes: ComposeRouteHint[] = [];
 
@@ -388,7 +391,8 @@ export function parseComposeRouteHints(
       const expose = svc['expose'];
       if (Array.isArray(expose)) {
         for (const item of expose) {
-          const port = typeof item === 'string' ? parseInt(item, 10) : typeof item === 'number' ? item : NaN;
+          const port =
+            typeof item === 'string' ? parseInt(item, 10) : typeof item === 'number' ? item : NaN;
           if (!isNaN(port) && port >= 1 && port <= 65535) {
             // Only add as hint if no explicit x-sam-routes entry for this service+port
             if (!routes.some((r) => r.service === serviceName && r.port === port)) {
@@ -422,7 +426,7 @@ export function parseComposeRouteHints(
 export function parseRoutes(
   xSamRoutes: unknown,
   services: Record<string, unknown>,
-  errors: ComposeParseError[],
+  errors: ComposeParseError[]
 ): ComposeRouteHint[] {
   return parseComposeRouteHints(xSamRoutes, services, errors);
 }
@@ -467,7 +471,7 @@ export function extractContainerPort(portSpec: unknown): number | null {
 
 export function parseHooks(
   xSamPreFlight: unknown,
-  errors: ComposeParseError[],
+  errors: ComposeParseError[]
 ): UnresolvedManifest['hooks'] | undefined {
   if (xSamPreFlight === undefined || xSamPreFlight === null) return undefined;
 
@@ -483,7 +487,8 @@ export function parseHooks(
 
   const service = hook['service'] as string | undefined;
   const command = hook['command'] as string[] | undefined;
-  const timeoutSeconds = (hook['timeoutSeconds'] as number | undefined) ?? DEFAULT_PRE_FLIGHT_TIMEOUT_SECONDS;
+  const timeoutSeconds =
+    (hook['timeoutSeconds'] as number | undefined) ?? DEFAULT_PRE_FLIGHT_TIMEOUT_SECONDS;
 
   if (!service || typeof service !== 'string') {
     errors.push({
@@ -501,7 +506,11 @@ export function parseHooks(
     return undefined;
   }
 
-  if (typeof timeoutSeconds !== 'number' || timeoutSeconds < 1 || timeoutSeconds > MAX_PRE_FLIGHT_TIMEOUT_SECONDS) {
+  if (
+    typeof timeoutSeconds !== 'number' ||
+    timeoutSeconds < 1 ||
+    timeoutSeconds > MAX_PRE_FLIGHT_TIMEOUT_SECONDS
+  ) {
     errors.push({
       path: 'x-sam-pre-flight.timeoutSeconds',
       message: 'Pre-flight hook timeoutSeconds must be between 1 and 3600.',

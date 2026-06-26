@@ -1,9 +1,14 @@
 import { Hono } from 'hono';
-import { beforeEach,describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { groupTokensIntoMessages } from '../../../src/routes/mcp';
 import * as projectHelpers from '../../../src/routes/projects/_helpers';
 import * as agentProfileService from '../../../src/services/agent-profiles';
+
+const deploymentToolMocks = vi.hoisted(() => ({
+  handleListDeploymentRoutes: vi.fn(),
+  handlePreviewDeploymentRoutes: vi.fn(),
+}));
 
 vi.mock('../../../src/services/agent-profiles', () => ({
   createProfile: vi.fn(),
@@ -17,6 +22,19 @@ vi.mock('../../../src/services/agent-profiles', () => ({
 vi.mock('../../../src/routes/projects/_helpers', () => ({
   requireRepositoryOwnerAccess: vi.fn().mockResolvedValue(undefined),
 }));
+
+vi.mock('../../../src/routes/mcp/deployment-tools', async () => {
+  const actual = await vi.importActual<typeof import('../../../src/routes/mcp/deployment-tools')>(
+    '../../../src/routes/mcp/deployment-tools'
+  );
+  return {
+    ...actual,
+    handleListDeploymentRoutes: (...args: unknown[]) =>
+      deploymentToolMocks.handleListDeploymentRoutes(...args),
+    handlePreviewDeploymentRoutes: (...args: unknown[]) =>
+      deploymentToolMocks.handlePreviewDeploymentRoutes(...args),
+  };
+});
 
 // Mock KV namespace
 const mockKV = {
@@ -48,7 +66,10 @@ function createMockD1() {
  * Drizzle uses .all() for select() and .raw() for select({...}).
  * For .raw(), data must be array-of-arrays (positional values).
  */
-function mockD1Results(stmt: ReturnType<typeof createMockD1>['_stmt'], rows: Record<string, unknown>[]) {
+function mockD1Results(
+  stmt: ReturnType<typeof createMockD1>['_stmt'],
+  rows: Record<string, unknown>[]
+) {
   // For .all() path: { results: [row_objects] }
   stmt.all.mockResolvedValue({ results: rows });
   // For .raw() path: [array_of_values] — drizzle maps positionally
@@ -126,19 +147,19 @@ function jsonRpcRequest(method: string, params?: Record<string, unknown>) {
   };
 }
 
-async function mcpRequest(
-  app: Hono,
-  body: unknown,
-  token: string = 'valid-token',
-) {
-  return app.request('/mcp', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
+async function mcpRequest(app: Hono, body: unknown, token: string = 'valid-token') {
+  return app.request(
+    '/mcp',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(body),
     },
-    body: JSON.stringify(body),
-  }, mockEnv);
+    mockEnv
+  );
 }
 
 describe('MCP Routes', () => {
@@ -157,11 +178,15 @@ describe('MCP Routes', () => {
 
   describe('Authentication', () => {
     it('should return 401 without Authorization header', async () => {
-      const res = await app.request('/mcp', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(jsonRpcRequest('initialize')),
-      }, mockEnv);
+      const res = await app.request(
+        '/mcp',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(jsonRpcRequest('initialize')),
+        },
+        mockEnv
+      );
 
       expect(res.status).toBe(401);
       const body = await res.json();
@@ -238,14 +263,18 @@ describe('MCP Routes', () => {
     });
 
     it('should return parse error for invalid JSON', async () => {
-      const res = await app.request('/mcp', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: 'Bearer valid-token',
+      const res = await app.request(
+        '/mcp',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: 'Bearer valid-token',
+          },
+          body: 'not valid json{',
         },
-        body: 'not valid json{',
-      }, mockEnv);
+        mockEnv
+      );
 
       expect(res.status).toBe(400);
       const body = await res.json();
@@ -330,7 +359,7 @@ describe('MCP Routes', () => {
       // Deployment discovery tool — verify it advertises a zero-argument schema
       expect(toolNames).toContain('get_deployment_guide');
       const deploymentGuideTool = body.result.tools.find(
-        (t: { name: string }) => t.name === 'get_deployment_guide',
+        (t: { name: string }) => t.name === 'get_deployment_guide'
       );
       expect(deploymentGuideTool.inputSchema.properties).toEqual({});
       expect(deploymentGuideTool.inputSchema.required).toBeUndefined();
@@ -375,7 +404,7 @@ describe('MCP Routes', () => {
 
       const body = await res.json();
       const getInstructions = body.result.tools.find(
-        (t: { name: string }) => t.name === 'get_instructions',
+        (t: { name: string }) => t.name === 'get_instructions'
       );
       expect(getInstructions.description).toContain('MUST call this tool');
     });
@@ -395,7 +424,7 @@ describe('MCP Routes', () => {
 
       const body = await res.json();
       const updateTool = body.result.tools.find(
-        (t: { name: string }) => t.name === 'update_task_status',
+        (t: { name: string }) => t.name === 'update_task_status'
       );
       expect(updateTool.inputSchema.required).toContain('message');
     });
@@ -409,10 +438,13 @@ describe('MCP Routes', () => {
     });
 
     it('should return error for unknown tool name', async () => {
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'nonexistent_tool',
-        arguments: {},
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'nonexistent_tool',
+          arguments: {},
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -421,10 +453,13 @@ describe('MCP Routes', () => {
     });
 
     it('should reject update_task_status without message', async () => {
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'update_task_status',
-        arguments: {},
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'update_task_status',
+          arguments: {},
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -433,15 +468,75 @@ describe('MCP Routes', () => {
     });
 
     it('should reject update_task_status with empty message', async () => {
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'update_task_status',
-        arguments: { message: '   ' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'update_task_status',
+          arguments: { message: '   ' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(body.error).toBeDefined();
       expect(body.error.code).toBe(-32602);
+    });
+
+    it('should dispatch preview_deployment_routes through tools/call', async () => {
+      deploymentToolMocks.handlePreviewDeploymentRoutes.mockResolvedValue({
+        jsonrpc: '2.0',
+        id: 1,
+        result: { content: [{ type: 'text', text: '{"preview":true}' }] },
+      });
+      const args = {
+        environment: 'staging',
+        composeYaml: 'services:\n  web:\n    image: nginx\n',
+      };
+
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'preview_deployment_routes',
+          arguments: args,
+        })
+      );
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeUndefined();
+      expect(deploymentToolMocks.handlePreviewDeploymentRoutes).toHaveBeenCalledWith(
+        1,
+        args,
+        validTokenData,
+        mockEnv
+      );
+    });
+
+    it('should dispatch list_deployment_routes through tools/call', async () => {
+      deploymentToolMocks.handleListDeploymentRoutes.mockResolvedValue({
+        jsonrpc: '2.0',
+        id: 1,
+        result: { content: [{ type: 'text', text: '{"routes":[]}' }] },
+      });
+      const args = { environment: 'staging' };
+
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'list_deployment_routes',
+          arguments: args,
+        })
+      );
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeUndefined();
+      expect(deploymentToolMocks.handleListDeploymentRoutes).toHaveBeenCalledWith(
+        1,
+        args,
+        validTokenData,
+        mockEnv
+      );
     });
   });
 
@@ -453,10 +548,13 @@ describe('MCP Routes', () => {
     });
 
     it('should return SAM Environment Briefing markdown', async () => {
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'get_repo_setup_guide',
-        arguments: {},
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'get_repo_setup_guide',
+          arguments: {},
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -475,9 +573,12 @@ describe('MCP Routes', () => {
     });
 
     it('should not require any arguments', async () => {
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'get_repo_setup_guide',
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'get_repo_setup_guide',
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -494,10 +595,13 @@ describe('MCP Routes', () => {
     });
 
     it('should return the SAM deployment guide markdown', async () => {
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'get_deployment_guide',
-        arguments: {},
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'get_deployment_guide',
+          arguments: {},
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -509,7 +613,9 @@ describe('MCP Routes', () => {
       expect(body.result.content[0].type).toBe('text');
       const text = body.result.content[0].text;
       // Preamble from handleGetDeploymentGuide (not part of the guide constant).
-      expect(text).toContain('Follow the guide below to deploy, launch, publish, ship, or release an app with SAM.');
+      expect(text).toContain(
+        'Follow the guide below to deploy, launch, publish, ship, or release an app with SAM.'
+      );
       expect(text).toContain('SAM App Deployment Guide');
       expect(text).toContain('Agent-First Deployment Model');
       expect(text).toContain('build_and_publish');
@@ -523,12 +629,19 @@ describe('MCP Routes', () => {
       expect(text).toContain('Secrets');
       expect(text).toContain('read_deployment_logs');
       expect(text).toContain('check_dns_status');
+      const quickReference = text.slice(text.indexOf('## Quick Reference'));
+      expect(quickReference.indexOf('preview_deployment_routes')).toBeLessThan(
+        quickReference.indexOf('build_and_publish')
+      );
     });
 
     it('should not require any arguments', async () => {
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'get_deployment_guide',
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'get_deployment_guide',
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -560,10 +673,13 @@ describe('MCP Routes', () => {
         },
       ]);
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'list_tasks',
-        arguments: {},
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'list_tasks',
+          arguments: {},
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -576,10 +692,13 @@ describe('MCP Routes', () => {
     it('should accept status filter', async () => {
       mockD1Results(mockD1._stmt, []);
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'list_tasks',
-        arguments: { status: 'completed' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'list_tasks',
+          arguments: { status: 'completed' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -589,10 +708,13 @@ describe('MCP Routes', () => {
     it('should accept limit parameter', async () => {
       mockD1Results(mockD1._stmt, []);
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'list_tasks',
-        arguments: { limit: 5 },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'list_tasks',
+          arguments: { limit: 5 },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -608,26 +730,31 @@ describe('MCP Routes', () => {
     });
 
     it('should return task details when found', async () => {
-      mockD1Results(mockD1._stmt, [{
-        id: 'task-other',
-        title: 'Another task',
-        description: 'Full description here',
-        status: 'completed',
-        priority: 2,
-        output_branch: 'sam/other',
-        output_pr_url: 'https://github.com/user/repo/pull/1',
-        output_summary: 'Did some work',
-        error_message: null,
-        created_at: '2026-03-14T00:00:00Z',
-        updated_at: '2026-03-14T01:00:00Z',
-        started_at: '2026-03-14T00:05:00Z',
-        completed_at: '2026-03-14T01:00:00Z',
-      }]);
+      mockD1Results(mockD1._stmt, [
+        {
+          id: 'task-other',
+          title: 'Another task',
+          description: 'Full description here',
+          status: 'completed',
+          priority: 2,
+          output_branch: 'sam/other',
+          output_pr_url: 'https://github.com/user/repo/pull/1',
+          output_summary: 'Did some work',
+          error_message: null,
+          created_at: '2026-03-14T00:00:00Z',
+          updated_at: '2026-03-14T01:00:00Z',
+          started_at: '2026-03-14T00:05:00Z',
+          completed_at: '2026-03-14T01:00:00Z',
+        },
+      ]);
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'get_task_details',
-        arguments: { taskId: 'task-other' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'get_task_details',
+          arguments: { taskId: 'task-other' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -640,10 +767,13 @@ describe('MCP Routes', () => {
     it('should return error when task not found', async () => {
       mockD1Results(mockD1._stmt, []);
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'get_task_details',
-        arguments: { taskId: 'nonexistent' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'get_task_details',
+          arguments: { taskId: 'nonexistent' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -653,10 +783,13 @@ describe('MCP Routes', () => {
     });
 
     it('should require taskId', async () => {
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'get_task_details',
-        arguments: {},
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'get_task_details',
+          arguments: {},
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -673,22 +806,27 @@ describe('MCP Routes', () => {
     });
 
     it('should search tasks by keyword', async () => {
-      mockD1Results(mockD1._stmt, [{
-        id: 'task-match',
-        title: 'Fix authentication bug',
-        description: 'The login flow is broken',
-        status: 'in_progress',
-        priority: 1,
-        output_branch: null,
-        output_pr_url: null,
-        output_summary: null,
-        updated_at: '2026-03-14T00:00:00Z',
-      }]);
+      mockD1Results(mockD1._stmt, [
+        {
+          id: 'task-match',
+          title: 'Fix authentication bug',
+          description: 'The login flow is broken',
+          status: 'in_progress',
+          priority: 1,
+          output_branch: null,
+          output_pr_url: null,
+          output_summary: null,
+          updated_at: '2026-03-14T00:00:00Z',
+        },
+      ]);
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'search_tasks',
-        arguments: { query: 'authentication' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'search_tasks',
+          arguments: { query: 'authentication' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -698,10 +836,13 @@ describe('MCP Routes', () => {
     });
 
     it('should reject empty query', async () => {
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'search_tasks',
-        arguments: { query: '' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'search_tasks',
+          arguments: { query: '' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -710,10 +851,13 @@ describe('MCP Routes', () => {
     });
 
     it('should reject query shorter than 2 characters', async () => {
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'search_tasks',
-        arguments: { query: 'a' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'search_tasks',
+          arguments: { query: 'a' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -722,10 +866,13 @@ describe('MCP Routes', () => {
     });
 
     it('should require query parameter', async () => {
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'search_tasks',
-        arguments: {},
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'search_tasks',
+          arguments: {},
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -757,10 +904,13 @@ describe('MCP Routes', () => {
         total: 1,
       });
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'list_sessions',
-        arguments: {},
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'list_sessions',
+          arguments: {},
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -774,10 +924,13 @@ describe('MCP Routes', () => {
     it('should accept status filter', async () => {
       mockDoStub.listSessions.mockResolvedValue({ sessions: [], total: 0 });
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'list_sessions',
-        arguments: { status: 'active' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'list_sessions',
+          arguments: { status: 'active' },
+        })
+      );
 
       expect(res.status).toBe(200);
       expect(mockDoStub.listSessions).toHaveBeenCalledWith('active', expect.any(Number), 0, null);
@@ -800,15 +953,23 @@ describe('MCP Routes', () => {
       mockDoStub.getMessages.mockResolvedValue({
         messages: [
           { id: 'msg-1', role: 'user', content: 'Please fix the bug', createdAt: 1710000000000 },
-          { id: 'msg-2', role: 'assistant', content: 'I will fix it now', createdAt: 1710000001000 },
+          {
+            id: 'msg-2',
+            role: 'assistant',
+            content: 'I will fix it now',
+            createdAt: 1710000001000,
+          },
         ],
         hasMore: false,
       });
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'get_session_messages',
-        arguments: { sessionId: 'sess-1' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'get_session_messages',
+          arguments: { sessionId: 'sess-1' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -836,23 +997,35 @@ describe('MCP Routes', () => {
         hasMore: false,
       });
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'get_session_messages',
-        arguments: { sessionId: 'sess-1' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'get_session_messages',
+          arguments: { sessionId: 'sess-1' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
       const data = JSON.parse(body.result.content[0].text);
       expect(data.messages).toHaveLength(3);
       expect(data.messages[0]).toEqual({
-        id: 'tok-1', role: 'user', content: 'Fix the bug', createdAt: 1710000000000,
+        id: 'tok-1',
+        role: 'user',
+        content: 'Fix the bug',
+        createdAt: 1710000000000,
       });
       expect(data.messages[1]).toEqual({
-        id: 'tok-2', role: 'assistant', content: 'Let me look at that file.', createdAt: 1710000001000,
+        id: 'tok-2',
+        role: 'assistant',
+        content: 'Let me look at that file.',
+        createdAt: 1710000001000,
       });
       expect(data.messages[2]).toEqual({
-        id: 'tok-5', role: 'user', content: 'Thanks', createdAt: 1710000002000,
+        id: 'tok-5',
+        role: 'user',
+        content: 'Thanks',
+        createdAt: 1710000002000,
       });
       expect(data.messageCount).toBe(3);
     });
@@ -860,10 +1033,13 @@ describe('MCP Routes', () => {
     it('should return error for non-existent session', async () => {
       mockDoStub.getSession.mockResolvedValue(null);
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'get_session_messages',
-        arguments: { sessionId: 'nonexistent' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'get_session_messages',
+          arguments: { sessionId: 'nonexistent' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -873,10 +1049,13 @@ describe('MCP Routes', () => {
     });
 
     it('should require sessionId', async () => {
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'get_session_messages',
-        arguments: {},
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'get_session_messages',
+          arguments: {},
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -888,17 +1067,20 @@ describe('MCP Routes', () => {
       mockDoStub.getSession.mockResolvedValue({ id: 'sess-1', topic: null, taskId: null });
       mockDoStub.getMessages.mockResolvedValue({ messages: [], hasMore: false });
 
-      await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'get_session_messages',
-        arguments: { sessionId: 'sess-1' },
-      }));
+      await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'get_session_messages',
+          arguments: { sessionId: 'sess-1' },
+        })
+      );
 
       expect(mockDoStub.getMessages).toHaveBeenCalledWith(
         'sess-1',
         expect.any(Number),
         null,
         ['user', 'assistant'],
-        false,
+        false
       );
     });
   });
@@ -923,10 +1105,13 @@ describe('MCP Routes', () => {
         },
       ]);
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'search_messages',
-        arguments: { query: 'authentication' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'search_messages',
+          arguments: { query: 'authentication' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -937,10 +1122,13 @@ describe('MCP Routes', () => {
     });
 
     it('should reject empty query', async () => {
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'search_messages',
-        arguments: { query: '' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'search_messages',
+          arguments: { query: '' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -949,10 +1137,13 @@ describe('MCP Routes', () => {
     });
 
     it('should reject query shorter than 2 characters', async () => {
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'search_messages',
-        arguments: { query: 'x' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'search_messages',
+          arguments: { query: 'x' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -962,17 +1153,20 @@ describe('MCP Routes', () => {
     it('should accept optional sessionId filter', async () => {
       mockDoStub.searchMessages.mockReturnValue([]);
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'search_messages',
-        arguments: { query: 'test', sessionId: 'sess-1' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'search_messages',
+          arguments: { query: 'test', sessionId: 'sess-1' },
+        })
+      );
 
       expect(res.status).toBe(200);
       expect(mockDoStub.searchMessages).toHaveBeenCalledWith(
         'test',
         'sess-1',
         ['user', 'assistant'],
-        expect.any(Number),
+        expect.any(Number)
       );
     });
   });
@@ -985,10 +1179,13 @@ describe('MCP Routes', () => {
     });
 
     it('should reject empty description', async () => {
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'dispatch_task',
-        arguments: { description: '' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'dispatch_task',
+          arguments: { description: '' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -998,10 +1195,13 @@ describe('MCP Routes', () => {
     });
 
     it('should reject missing description', async () => {
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'dispatch_task',
-        arguments: {},
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'dispatch_task',
+          arguments: {},
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -1011,10 +1211,13 @@ describe('MCP Routes', () => {
 
     it('should reject description exceeding max length', async () => {
       const longDescription = 'a'.repeat(33_000);
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'dispatch_task',
-        arguments: { description: longDescription },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'dispatch_task',
+          arguments: { description: longDescription },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -1024,10 +1227,13 @@ describe('MCP Routes', () => {
     });
 
     it('should reject invalid vmSize', async () => {
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'dispatch_task',
-        arguments: { description: 'Build feature X', vmSize: 'gigantic' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'dispatch_task',
+          arguments: { description: 'Build feature X', vmSize: 'gigantic' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -1040,10 +1246,13 @@ describe('MCP Routes', () => {
       // Current task query returns empty
       mockD1Results(mockD1._stmt, []);
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'dispatch_task',
-        arguments: { description: 'Build feature X' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'dispatch_task',
+          arguments: { description: 'Build feature X' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -1053,16 +1262,21 @@ describe('MCP Routes', () => {
 
     it('should reject when dispatch depth would exceed limit', async () => {
       // Current task with dispatch_depth = 3 (at the limit)
-      mockD1Results(mockD1._stmt, [{
-        id: 'task-123',
-        dispatch_depth: 3,
-        status: 'in_progress',
-      }]);
+      mockD1Results(mockD1._stmt, [
+        {
+          id: 'task-123',
+          dispatch_depth: 3,
+          status: 'in_progress',
+        },
+      ]);
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'dispatch_task',
-        arguments: { description: 'Build feature X' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'dispatch_task',
+          arguments: { description: 'Build feature X' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -1076,7 +1290,7 @@ describe('MCP Routes', () => {
 
       const body = await res.json();
       const dispatchTool = body.result.tools.find(
-        (t: { name: string }) => t.name === 'dispatch_task',
+        (t: { name: string }) => t.name === 'dispatch_task'
       );
       expect(dispatchTool).toBeDefined();
       expect(dispatchTool.inputSchema.required).toContain('description');
@@ -1088,16 +1302,21 @@ describe('MCP Routes', () => {
 
     it('should reject dispatch from a task in terminal status', async () => {
       // Current task is completed
-      mockD1Results(mockD1._stmt, [{
-        id: 'task-123',
-        dispatch_depth: 0,
-        status: 'completed',
-      }]);
+      mockD1Results(mockD1._stmt, [
+        {
+          id: 'task-123',
+          dispatch_depth: 0,
+          status: 'completed',
+        },
+      ]);
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'dispatch_task',
-        arguments: { description: 'Follow up work' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'dispatch_task',
+          arguments: { description: 'Follow up work' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -1106,16 +1325,21 @@ describe('MCP Routes', () => {
     });
 
     it('should reject dispatch from a failed task', async () => {
-      mockD1Results(mockD1._stmt, [{
-        id: 'task-123',
-        dispatch_depth: 0,
-        status: 'failed',
-      }]);
+      mockD1Results(mockD1._stmt, [
+        {
+          id: 'task-123',
+          dispatch_depth: 0,
+          status: 'failed',
+        },
+      ]);
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'dispatch_task',
-        arguments: { description: 'Retry the work' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'dispatch_task',
+          arguments: { description: 'Retry the work' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -1160,11 +1384,11 @@ describe('MCP Routes', () => {
       // Sequential .raw() calls (credential check removed from Promise.all — now uses resolveCredentialSource)
       mockD1._stmt.raw
         .mockResolvedValueOnce([['task-123', 0, 'in_progress']]) // current task
-        .mockResolvedValueOnce([[0]])  // child count (advisory)
-        .mockResolvedValueOnce([[0]])  // active dispatched count (advisory)
+        .mockResolvedValueOnce([[0]]) // child count (advisory)
+        .mockResolvedValueOnce([[0]]) // active dispatched count (advisory)
         // project query may also use .raw() — add extra entries
         .mockResolvedValueOnce([Object.values(mockProject)]) // project (if raw)
-        .mockResolvedValueOnce([['User', 'user@test.com', '12345']]);  // user lookup
+        .mockResolvedValueOnce([['User', 'user@test.com', '12345']]); // user lookup
 
       // .run() for conditional INSERT + status event insert
       mockD1._stmt.run.mockResolvedValue({ success: true, meta: { changes: 1 } });
@@ -1177,15 +1401,18 @@ describe('MCP Routes', () => {
     it('should dispatch task successfully (happy path)', async () => {
       setupHappyPathMocks();
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'dispatch_task',
-        arguments: {
-          description: 'Build the notification system',
-          vmSize: 'medium',
-          priority: 2,
-          references: ['specs/014-notifications/spec.md', 'apps/api/src/routes/notifications.ts'],
-        },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'dispatch_task',
+          arguments: {
+            description: 'Build the notification system',
+            vmSize: 'medium',
+            priority: 2,
+            references: ['specs/014-notifications/spec.md', 'apps/api/src/routes/notifications.ts'],
+          },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -1206,13 +1433,17 @@ describe('MCP Routes', () => {
 
     it('should reject dispatch before provisioning when GitHub owner access is revoked', async () => {
       setupHappyPathMocks();
-      vi.mocked(projectHelpers.requireRepositoryOwnerAccess)
-        .mockRejectedValueOnce(new Error('Repository access is no longer available'));
+      vi.mocked(projectHelpers.requireRepositoryOwnerAccess).mockRejectedValueOnce(
+        new Error('Repository access is no longer available')
+      );
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'dispatch_task',
-        arguments: { description: 'Build the notification system' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'dispatch_task',
+          arguments: { description: 'Build the notification system' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -1227,13 +1458,16 @@ describe('MCP Routes', () => {
     it('should use explicit branch parameter when provided', async () => {
       setupHappyPathMocks();
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'dispatch_task',
-        arguments: {
-          description: 'Work from main branch',
-          branch: 'main',
-        },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'dispatch_task',
+          arguments: {
+            description: 'Work from main branch',
+            branch: 'main',
+          },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -1246,16 +1480,21 @@ describe('MCP Routes', () => {
     });
 
     it('should reject empty branch parameter', async () => {
-      mockD1Results(mockD1._stmt, [{
-        id: 'task-123',
-        dispatch_depth: 0,
-        status: 'in_progress',
-      }]);
+      mockD1Results(mockD1._stmt, [
+        {
+          id: 'task-123',
+          dispatch_depth: 0,
+          status: 'in_progress',
+        },
+      ]);
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'dispatch_task',
-        arguments: { description: 'Some task', branch: '  ' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'dispatch_task',
+          arguments: { description: 'Some task', branch: '  ' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -1264,16 +1503,21 @@ describe('MCP Routes', () => {
     });
 
     it('should reject non-string branch parameter', async () => {
-      mockD1Results(mockD1._stmt, [{
-        id: 'task-123',
-        dispatch_depth: 0,
-        status: 'in_progress',
-      }]);
+      mockD1Results(mockD1._stmt, [
+        {
+          id: 'task-123',
+          dispatch_depth: 0,
+          status: 'in_progress',
+        },
+      ]);
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'dispatch_task',
-        arguments: { description: 'Some task', branch: 123 },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'dispatch_task',
+          arguments: { description: 'Some task', branch: 123 },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -1285,12 +1529,15 @@ describe('MCP Routes', () => {
       // Current task query
       mockD1._stmt.raw
         .mockResolvedValueOnce([['task-123', 0, 'in_progress']]) // current task
-        .mockResolvedValueOnce([[5]]);  // child count = 5 (at default limit)
+        .mockResolvedValueOnce([[5]]); // child count = 5 (at default limit)
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'dispatch_task',
-        arguments: { description: 'One more task' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'dispatch_task',
+          arguments: { description: 'One more task' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -1302,13 +1549,16 @@ describe('MCP Routes', () => {
     it('should reject when per-project active limit is reached', async () => {
       mockD1._stmt.raw
         .mockResolvedValueOnce([['task-123', 0, 'in_progress']]) // current task
-        .mockResolvedValueOnce([[2]])   // child count = 2 (under limit)
+        .mockResolvedValueOnce([[2]]) // child count = 2 (under limit)
         .mockResolvedValueOnce([[10]]); // active dispatched = 10 (at default limit)
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'dispatch_task',
-        arguments: { description: 'Another dispatched task' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'dispatch_task',
+          arguments: { description: 'Another dispatched task' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -1319,10 +1569,15 @@ describe('MCP Routes', () => {
 
     it('should reject when cloud credentials are missing', async () => {
       const noCredProject = {
-        id: 'proj-456', name: 'Test', repository: 'user/repo',
-        defaultBranch: 'main', installationId: 'inst-1',
-        defaultVmSize: null, defaultWorkspaceProfile: null,
-        defaultProvider: null, defaultAgentType: null,
+        id: 'proj-456',
+        name: 'Test',
+        repository: 'user/repo',
+        defaultBranch: 'main',
+        installationId: 'inst-1',
+        defaultVmSize: null,
+        defaultWorkspaceProfile: null,
+        defaultProvider: null,
+        defaultAgentType: null,
       };
 
       // Set persistent defaults for project (covers both .all() and .raw() paths)
@@ -1332,15 +1587,18 @@ describe('MCP Routes', () => {
       // Chain .raw() Once values for sequential queries before resolveCredentialSource
       mockD1._stmt.raw
         .mockResolvedValueOnce([['task-123', 0, 'in_progress']]) // current task
-        .mockResolvedValueOnce([[0]])   // child count
-        .mockResolvedValueOnce([[0]])   // active dispatched count
+        .mockResolvedValueOnce([[0]]) // child count
+        .mockResolvedValueOnce([[0]]) // active dispatched count
         .mockResolvedValueOnce([Object.values(noCredProject)]); // project (raw path)
       // After these 4 Once values are consumed, .raw() falls back to default [] (no credentials)
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'dispatch_task',
-        arguments: { description: 'Build feature Y' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'dispatch_task',
+          arguments: { description: 'Build feature Y' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -1359,10 +1617,15 @@ describe('MCP Routes', () => {
 
     it('should handle session creation failure gracefully', async () => {
       const sessionProject = {
-        id: 'proj-456', name: 'Test', repository: 'user/repo',
-        defaultBranch: 'main', installationId: 'inst-1',
-        defaultVmSize: null, defaultWorkspaceProfile: null,
-        defaultProvider: null, defaultAgentType: null,
+        id: 'proj-456',
+        name: 'Test',
+        repository: 'user/repo',
+        defaultBranch: 'main',
+        installationId: 'inst-1',
+        defaultVmSize: null,
+        defaultWorkspaceProfile: null,
+        defaultProvider: null,
+        defaultAgentType: null,
       };
 
       // Use persistent defaults for .all() and .run() (same pattern as setupHappyPathMocks)
@@ -1371,18 +1634,21 @@ describe('MCP Routes', () => {
 
       mockD1._stmt.raw
         .mockResolvedValueOnce([['task-123', 0, 'in_progress']]) // current task
-        .mockResolvedValueOnce([[0]])   // child count (advisory)
-        .mockResolvedValueOnce([[0]])   // active dispatched count (advisory)
-        .mockResolvedValueOnce([['cred-1']])  // credential
+        .mockResolvedValueOnce([[0]]) // child count (advisory)
+        .mockResolvedValueOnce([[0]]) // active dispatched count (advisory)
+        .mockResolvedValueOnce([['cred-1']]) // credential
         .mockResolvedValueOnce([Object.values(sessionProject)]); // project (if raw path)
 
       // Session creation fails
       mockDoStub.createSession = vi.fn().mockRejectedValue(new Error('DO unavailable'));
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'dispatch_task',
-        arguments: { description: 'Build feature Z' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'dispatch_task',
+          arguments: { description: 'Build feature Z' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -1397,10 +1663,13 @@ describe('MCP Routes', () => {
       // Override TaskRunner to fail
       mockTaskRunnerStub.start.mockRejectedValueOnce(new Error('DO crashed'));
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'dispatch_task',
-        arguments: { description: 'Build feature W' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'dispatch_task',
+          arguments: { description: 'Build feature W' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -1410,13 +1679,15 @@ describe('MCP Routes', () => {
     });
 
     it('should reject dispatching from a cancelled task', async () => {
-      mockD1._stmt.raw
-        .mockResolvedValueOnce([['task-123', 0, 'cancelled']]);
+      mockD1._stmt.raw.mockResolvedValueOnce([['task-123', 0, 'cancelled']]);
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'dispatch_task',
-        arguments: { description: 'Build something' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'dispatch_task',
+          arguments: { description: 'Build something' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -1427,10 +1698,13 @@ describe('MCP Routes', () => {
     it('should clamp priority to max allowed value', async () => {
       setupHappyPathMocks();
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'dispatch_task',
-        arguments: { description: 'High priority task', priority: 99999 },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'dispatch_task',
+          arguments: { description: 'High priority task', priority: 99999 },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -1446,13 +1720,16 @@ describe('MCP Routes', () => {
 
       mockD1._stmt.raw
         .mockResolvedValueOnce([['task-123', 0, 'in_progress']]) // current task
-        .mockResolvedValueOnce([[0]])   // child count
-        .mockResolvedValueOnce([[0]]);  // active dispatched count
+        .mockResolvedValueOnce([[0]]) // child count
+        .mockResolvedValueOnce([[0]]); // active dispatched count
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'dispatch_task',
-        arguments: { description: 'Build feature X' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'dispatch_task',
+          arguments: { description: 'Build feature X' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -1463,10 +1740,13 @@ describe('MCP Routes', () => {
     it('should verify TaskRunner DO receives correct config', async () => {
       setupHappyPathMocks();
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'dispatch_task',
-        arguments: { description: 'Build notification system', vmSize: 'large' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'dispatch_task',
+          arguments: { description: 'Build notification system', vmSize: 'large' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -1487,7 +1767,7 @@ describe('MCP Routes', () => {
 
       const body = await res.json();
       const dispatchTool = body.result.tools.find(
-        (t: { name: string }) => t.name === 'dispatch_task',
+        (t: { name: string }) => t.name === 'dispatch_task'
       );
       expect(dispatchTool).toBeDefined();
       const props = dispatchTool.inputSchema.properties;
@@ -1506,16 +1786,21 @@ describe('MCP Routes', () => {
     });
 
     it('should reject invalid taskMode', async () => {
-      mockD1Results(mockD1._stmt, [{
-        id: 'task-123',
-        dispatch_depth: 0,
-        status: 'in_progress',
-      }]);
+      mockD1Results(mockD1._stmt, [
+        {
+          id: 'task-123',
+          dispatch_depth: 0,
+          status: 'in_progress',
+        },
+      ]);
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'dispatch_task',
-        arguments: { description: 'Some task', taskMode: 'invalid' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'dispatch_task',
+          arguments: { description: 'Some task', taskMode: 'invalid' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -1525,16 +1810,21 @@ describe('MCP Routes', () => {
     });
 
     it('should reject invalid agentType', async () => {
-      mockD1Results(mockD1._stmt, [{
-        id: 'task-123',
-        dispatch_depth: 0,
-        status: 'in_progress',
-      }]);
+      mockD1Results(mockD1._stmt, [
+        {
+          id: 'task-123',
+          dispatch_depth: 0,
+          status: 'in_progress',
+        },
+      ]);
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'dispatch_task',
-        arguments: { description: 'Some task', agentType: 'not-a-real-agent' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'dispatch_task',
+          arguments: { description: 'Some task', agentType: 'not-a-real-agent' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -1544,16 +1834,21 @@ describe('MCP Routes', () => {
     });
 
     it('should reject invalid workspaceProfile', async () => {
-      mockD1Results(mockD1._stmt, [{
-        id: 'task-123',
-        dispatch_depth: 0,
-        status: 'in_progress',
-      }]);
+      mockD1Results(mockD1._stmt, [
+        {
+          id: 'task-123',
+          dispatch_depth: 0,
+          status: 'in_progress',
+        },
+      ]);
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'dispatch_task',
-        arguments: { description: 'Some task', workspaceProfile: 'ultra' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'dispatch_task',
+          arguments: { description: 'Some task', workspaceProfile: 'ultra' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -1563,16 +1858,21 @@ describe('MCP Routes', () => {
     });
 
     it('should reject invalid provider', async () => {
-      mockD1Results(mockD1._stmt, [{
-        id: 'task-123',
-        dispatch_depth: 0,
-        status: 'in_progress',
-      }]);
+      mockD1Results(mockD1._stmt, [
+        {
+          id: 'task-123',
+          dispatch_depth: 0,
+          status: 'in_progress',
+        },
+      ]);
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'dispatch_task',
-        arguments: { description: 'Some task', provider: 'aws' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'dispatch_task',
+          arguments: { description: 'Some task', provider: 'aws' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -1582,10 +1882,13 @@ describe('MCP Routes', () => {
     });
 
     it('should reject empty agentProfileId', async () => {
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'dispatch_task',
-        arguments: { description: 'Some task', agentProfileId: '  ' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'dispatch_task',
+          arguments: { description: 'Some task', agentProfileId: '  ' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -1595,16 +1898,21 @@ describe('MCP Routes', () => {
     });
 
     it('should reject empty vmLocation', async () => {
-      mockD1Results(mockD1._stmt, [{
-        id: 'task-123',
-        dispatch_depth: 0,
-        status: 'in_progress',
-      }]);
+      mockD1Results(mockD1._stmt, [
+        {
+          id: 'task-123',
+          dispatch_depth: 0,
+          status: 'in_progress',
+        },
+      ]);
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'dispatch_task',
-        arguments: { description: 'Some task', vmLocation: '' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'dispatch_task',
+          arguments: { description: 'Some task', vmLocation: '' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -1616,13 +1924,16 @@ describe('MCP Routes', () => {
     it('should dispatch with explicit taskMode=conversation', async () => {
       setupHappyPathMocks();
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'dispatch_task',
-        arguments: {
-          description: 'Chat with the user about their code',
-          taskMode: 'conversation',
-        },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'dispatch_task',
+          arguments: {
+            description: 'Chat with the user about their code',
+            taskMode: 'conversation',
+          },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -1657,13 +1968,16 @@ describe('MCP Routes', () => {
         systemPromptAppend: null,
       } as Awaited<ReturnType<typeof agentProfileService.resolveAgentProfile>>);
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'dispatch_task',
-        arguments: {
-          description: 'Continue the design discussion',
-          agentProfileId: 'conversation-profile',
-        },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'dispatch_task',
+          arguments: {
+            description: 'Continue the design discussion',
+            agentProfileId: 'conversation-profile',
+          },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -1680,18 +1994,21 @@ describe('MCP Routes', () => {
     it('should pass explicit config fields to TaskRunner DO', async () => {
       setupHappyPathMocks();
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'dispatch_task',
-        arguments: {
-          description: 'Deploy the feature',
-          vmSize: 'large',
-          taskMode: 'task',
-          workspaceProfile: 'lightweight',
-          agentType: 'claude-code',
-          provider: 'hetzner',
-          vmLocation: 'fsn1',
-        },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'dispatch_task',
+          arguments: {
+            description: 'Deploy the feature',
+            vmSize: 'large',
+            taskMode: 'task',
+            workspaceProfile: 'lightweight',
+            agentType: 'claude-code',
+            provider: 'hetzner',
+            vmLocation: 'fsn1',
+          },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -1709,10 +2026,13 @@ describe('MCP Routes', () => {
     it('should dispatch with minimal args (backward compatibility)', async () => {
       setupHappyPathMocks();
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'dispatch_task',
-        arguments: { description: 'Simple task' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'dispatch_task',
+          arguments: { description: 'Simple task' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -1737,14 +2057,17 @@ describe('MCP Routes', () => {
       // Full happy-path mocks — the cross-validation happens after project load
       setupHappyPathMocks();
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'dispatch_task',
-        arguments: {
-          description: 'Deploy to scaleway',
-          provider: 'scaleway',
-          vmLocation: 'nbg1', // Hetzner-only location
-        },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'dispatch_task',
+          arguments: {
+            description: 'Deploy to scaleway',
+            provider: 'scaleway',
+            vmLocation: 'nbg1', // Hetzner-only location
+          },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -1756,13 +2079,16 @@ describe('MCP Routes', () => {
     it('should default to task mode when workspaceProfile=lightweight and no explicit taskMode', async () => {
       setupHappyPathMocks();
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'dispatch_task',
-        arguments: {
-          description: 'Quick lightweight task',
-          workspaceProfile: 'lightweight',
-        },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'dispatch_task',
+          arguments: {
+            description: 'Quick lightweight task',
+            workspaceProfile: 'lightweight',
+          },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -1776,14 +2102,17 @@ describe('MCP Routes', () => {
     it('should pass provider and vmLocation to TaskRunner DO', async () => {
       setupHappyPathMocks();
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'dispatch_task',
-        arguments: {
-          description: 'Deploy in Falkenstein',
-          provider: 'hetzner',
-          vmLocation: 'fsn1',
-        },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'dispatch_task',
+          arguments: {
+            description: 'Deploy in Falkenstein',
+            provider: 'hetzner',
+            vmLocation: 'fsn1',
+          },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -1800,22 +2129,25 @@ describe('MCP Routes', () => {
       mockD1._stmt.all.mockResolvedValue({ results: [projectWithDefaults] });
       mockD1._stmt.raw
         .mockResolvedValueOnce([['task-123', 0, 'in_progress']]) // current task
-        .mockResolvedValueOnce([[0]])  // child count
-        .mockResolvedValueOnce([[0]])  // active dispatched count
-        .mockResolvedValueOnce([['cred-1']])  // credential
+        .mockResolvedValueOnce([[0]]) // child count
+        .mockResolvedValueOnce([[0]]) // active dispatched count
+        .mockResolvedValueOnce([['cred-1']]) // credential
         .mockResolvedValueOnce([Object.values(projectWithDefaults)]) // project (if raw)
-        .mockResolvedValueOnce([['User', 'user@test.com', '12345']]);  // user lookup
+        .mockResolvedValueOnce([['User', 'user@test.com', '12345']]); // user lookup
       mockD1._stmt.run.mockResolvedValue({ success: true, meta: { changes: 1 } });
       mockDoStub.createSession = vi.fn().mockResolvedValue('sess-new-1');
       mockDoStub.persistMessage = vi.fn().mockResolvedValue('msg-new-1');
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'dispatch_task',
-        arguments: {
-          description: 'Need a big VM',
-          vmSize: 'large',
-        },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'dispatch_task',
+          arguments: {
+            description: 'Need a big VM',
+            vmSize: 'large',
+          },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -1831,20 +2163,23 @@ describe('MCP Routes', () => {
       mockD1._stmt.all.mockResolvedValue({ results: [mockProject] });
       mockD1._stmt.raw
         .mockResolvedValueOnce([['task-123', 0, 'in_progress', 'mission-parent-1']]) // current task with missionId
-        .mockResolvedValueOnce([[0]])  // child count
-        .mockResolvedValueOnce([[0]])  // active dispatched count
+        .mockResolvedValueOnce([[0]]) // child count
+        .mockResolvedValueOnce([[0]]) // active dispatched count
         .mockResolvedValueOnce([Object.values(mockProject)]) // project (if raw)
-        .mockResolvedValueOnce([['User', 'user@test.com', '12345']]);  // user lookup
+        .mockResolvedValueOnce([['User', 'user@test.com', '12345']]); // user lookup
       mockD1._stmt.run.mockResolvedValue({ success: true, meta: { changes: 1 } });
       mockDoStub.createSession = vi.fn().mockResolvedValue('sess-new-1');
       mockDoStub.persistMessage = vi.fn().mockResolvedValue('msg-new-1');
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'dispatch_task',
-        arguments: {
-          description: 'Child task inheriting mission',
-        },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'dispatch_task',
+          arguments: {
+            description: 'Child task inheriting mission',
+          },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -1854,7 +2189,7 @@ describe('MCP Routes', () => {
       const bindCalls = mockD1._stmt.bind.mock.calls;
       // The batch INSERT binds include mission_id — find the bind call containing 'mission-parent-1'
       const hasMissionId = bindCalls.some((call: unknown[]) =>
-        call.some((arg: unknown) => arg === 'mission-parent-1'),
+        call.some((arg: unknown) => arg === 'mission-parent-1')
       );
       expect(hasMissionId).toBe(true);
     });
@@ -1864,21 +2199,24 @@ describe('MCP Routes', () => {
       mockD1._stmt.all.mockResolvedValue({ results: [mockProject] });
       mockD1._stmt.raw
         .mockResolvedValueOnce([['task-123', 0, 'in_progress', 'mission-parent-1']]) // current task with missionId
-        .mockResolvedValueOnce([[0]])  // child count
-        .mockResolvedValueOnce([[0]])  // active dispatched count
+        .mockResolvedValueOnce([[0]]) // child count
+        .mockResolvedValueOnce([[0]]) // active dispatched count
         .mockResolvedValueOnce([Object.values(mockProject)]) // project (if raw)
-        .mockResolvedValueOnce([['User', 'user@test.com', '12345']]);  // user lookup
+        .mockResolvedValueOnce([['User', 'user@test.com', '12345']]); // user lookup
       mockD1._stmt.run.mockResolvedValue({ success: true, meta: { changes: 1 } });
       mockDoStub.createSession = vi.fn().mockResolvedValue('sess-new-1');
       mockDoStub.persistMessage = vi.fn().mockResolvedValue('msg-new-1');
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'dispatch_task',
-        arguments: {
-          description: 'Child task with explicit mission',
-          missionId: 'mission-explicit-2',
-        },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'dispatch_task',
+          arguments: {
+            description: 'Child task with explicit mission',
+            missionId: 'mission-explicit-2',
+          },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -1887,10 +2225,10 @@ describe('MCP Routes', () => {
       // Verify explicit missionId was used (not the parent's)
       const bindCalls = mockD1._stmt.bind.mock.calls;
       const hasExplicitMission = bindCalls.some((call: unknown[]) =>
-        call.some((arg: unknown) => arg === 'mission-explicit-2'),
+        call.some((arg: unknown) => arg === 'mission-explicit-2')
       );
       const hasParentMission = bindCalls.some((call: unknown[]) =>
-        call.some((arg: unknown) => arg === 'mission-parent-1'),
+        call.some((arg: unknown) => arg === 'mission-parent-1')
       );
       expect(hasExplicitMission).toBe(true);
       // Parent missionId appears in the current task lookup result but should NOT appear in the INSERT
@@ -1903,12 +2241,15 @@ describe('MCP Routes', () => {
       // Mock current task WITHOUT missionId
       setupHappyPathMocks();
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'dispatch_task',
-        arguments: {
-          description: 'Standalone task no mission',
-        },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'dispatch_task',
+          arguments: {
+            description: 'Standalone task no mission',
+          },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -1918,7 +2259,7 @@ describe('MCP Routes', () => {
       const bindCalls = mockD1._stmt.bind.mock.calls;
       // Check that no mission ID string was bound (only null)
       const hasMissionString = bindCalls.some((call: unknown[]) =>
-        call.some((arg: unknown) => typeof arg === 'string' && arg.startsWith('mission-')),
+        call.some((arg: unknown) => typeof arg === 'string' && arg.startsWith('mission-'))
       );
       expect(hasMissionString).toBe(false);
     });
@@ -1964,8 +2305,9 @@ describe('MCP Routes', () => {
 
       // Should have written a rate limit entry keyed by the task ID
       const putCalls = mockKV.put.mock.calls;
-      const rateLimitPut = putCalls.find((c: unknown[]) =>
-        typeof c[0] === 'string' && (c[0] as string).startsWith('ratelimit:mcp:task-123:'),
+      const rateLimitPut = putCalls.find(
+        (c: unknown[]) =>
+          typeof c[0] === 'string' && (c[0] as string).startsWith('ratelimit:mcp:task-123:')
       );
       expect(rateLimitPut).toBeDefined();
     });
@@ -2013,8 +2355,8 @@ describe('MCP Routes', () => {
       expect(res.status).toBe(200);
       // Should have reset the counter since the window doesn't match
       const putCalls = mockKV.put.mock.calls;
-      const rateLimitPut = putCalls.find((c: unknown[]) =>
-        typeof c[0] === 'string' && (c[0] as string).startsWith('ratelimit:mcp:'),
+      const rateLimitPut = putCalls.find(
+        (c: unknown[]) => typeof c[0] === 'string' && (c[0] as string).startsWith('ratelimit:mcp:')
       );
       expect(rateLimitPut).toBeDefined();
       const stored = JSON.parse(rateLimitPut![1] as string);
@@ -2030,10 +2372,13 @@ describe('MCP Routes', () => {
     });
 
     it('should reject invalid roles in get_session_messages', async () => {
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'get_session_messages',
-        arguments: { sessionId: 'sess-1', roles: ['user', 'admin'] },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'get_session_messages',
+          arguments: { sessionId: 'sess-1', roles: ['user', 'admin'] },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -2044,10 +2389,13 @@ describe('MCP Routes', () => {
     });
 
     it('should reject invalid roles in search_messages', async () => {
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'search_messages',
-        arguments: { query: 'test query', roles: ['superuser'] },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'search_messages',
+          arguments: { query: 'test query', roles: ['superuser'] },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -2061,10 +2409,16 @@ describe('MCP Routes', () => {
       mockDoStub.getSession.mockResolvedValue({ id: 'sess-1', topic: null, taskId: null });
       mockDoStub.getMessages.mockResolvedValue({ messages: [], hasMore: false });
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'get_session_messages',
-        arguments: { sessionId: 'sess-1', roles: ['user', 'assistant', 'system', 'tool', 'thinking', 'plan'] },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'get_session_messages',
+          arguments: {
+            sessionId: 'sess-1',
+            roles: ['user', 'assistant', 'system', 'tool', 'thinking', 'plan'],
+          },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -2075,17 +2429,20 @@ describe('MCP Routes', () => {
       mockDoStub.getSession.mockResolvedValue({ id: 'sess-1', topic: null, taskId: null });
       mockDoStub.getMessages.mockResolvedValue({ messages: [], hasMore: false });
 
-      await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'get_session_messages',
-        arguments: { sessionId: 'sess-1' },
-      }));
+      await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'get_session_messages',
+          arguments: { sessionId: 'sess-1' },
+        })
+      );
 
       expect(mockDoStub.getMessages).toHaveBeenCalledWith(
         'sess-1',
         expect.any(Number),
         null,
         ['user', 'assistant'],
-        false,
+        false
       );
     });
 
@@ -2093,17 +2450,20 @@ describe('MCP Routes', () => {
       mockDoStub.getSession.mockResolvedValue({ id: 'sess-1', topic: null, taskId: null });
       mockDoStub.getMessages.mockResolvedValue({ messages: [], hasMore: false });
 
-      await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'get_session_messages',
-        arguments: { sessionId: 'sess-1', roles: [] },
-      }));
+      await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'get_session_messages',
+          arguments: { sessionId: 'sess-1', roles: [] },
+        })
+      );
 
       expect(mockDoStub.getMessages).toHaveBeenCalledWith(
         'sess-1',
         expect.any(Number),
         null,
         ['user', 'assistant'],
-        false,
+        false
       );
     });
 
@@ -2111,10 +2471,13 @@ describe('MCP Routes', () => {
       mockDoStub.getSession.mockResolvedValue({ id: 'sess-1', topic: null, taskId: null });
       mockDoStub.getMessages.mockResolvedValue({ messages: [], hasMore: false });
 
-      await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'get_session_messages',
-        arguments: { sessionId: 'sess-1', roles: 'user' },
-      }));
+      await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'get_session_messages',
+          arguments: { sessionId: 'sess-1', roles: 'user' },
+        })
+      );
 
       // Non-array input should fall back to default roles
       expect(mockDoStub.getMessages).toHaveBeenCalledWith(
@@ -2122,7 +2485,7 @@ describe('MCP Routes', () => {
         expect.any(Number),
         null,
         ['user', 'assistant'],
-        false,
+        false
       );
     });
   });
@@ -2136,17 +2499,26 @@ describe('MCP Routes', () => {
 
     it('should use conditional INSERT for atomic rate-limit enforcement', async () => {
       // Set up advisory pre-checks to pass
-      mockD1._stmt.all.mockResolvedValue({ results: [{
-        id: 'proj-456', name: 'Test', repository: 'user/repo',
-        defaultBranch: 'main', installationId: 'inst-1',
-        defaultVmSize: null, defaultWorkspaceProfile: null,
-        defaultProvider: null, defaultAgentType: null,
-      }] });
+      mockD1._stmt.all.mockResolvedValue({
+        results: [
+          {
+            id: 'proj-456',
+            name: 'Test',
+            repository: 'user/repo',
+            defaultBranch: 'main',
+            installationId: 'inst-1',
+            defaultVmSize: null,
+            defaultWorkspaceProfile: null,
+            defaultProvider: null,
+            defaultAgentType: null,
+          },
+        ],
+      });
       mockD1._stmt.raw
         .mockResolvedValueOnce([['task-123', 0, 'in_progress']]) // current task
-        .mockResolvedValueOnce([[0]])  // advisory child count
-        .mockResolvedValueOnce([[0]])  // advisory active count
-        .mockResolvedValueOnce([['cred-1']])  // credential
+        .mockResolvedValueOnce([[0]]) // advisory child count
+        .mockResolvedValueOnce([[0]]) // advisory active count
+        .mockResolvedValueOnce([['cred-1']]) // credential
         .mockResolvedValueOnce([['User', 'user@test.com', '12345']]);
 
       // Conditional INSERT succeeds (counts under limit → row inserted)
@@ -2154,10 +2526,13 @@ describe('MCP Routes', () => {
       mockDoStub.createSession = vi.fn().mockResolvedValue('sess-new-1');
       mockDoStub.persistMessage = vi.fn().mockResolvedValue('msg-new-1');
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'dispatch_task',
-        arguments: { description: 'Test atomic dispatch' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'dispatch_task',
+          arguments: { description: 'Test atomic dispatch' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -2170,26 +2545,34 @@ describe('MCP Routes', () => {
     it('should reject when conditional INSERT produces zero rows (TOCTOU race)', async () => {
       // Advisory pre-checks pass (counts under limit)
       const raceProject = {
-        id: 'proj-456', name: 'Test', repository: 'user/repo',
-        defaultBranch: 'main', installationId: 'inst-1',
-        defaultVmSize: null, defaultWorkspaceProfile: null,
-        defaultProvider: null, defaultAgentType: null,
+        id: 'proj-456',
+        name: 'Test',
+        repository: 'user/repo',
+        defaultBranch: 'main',
+        installationId: 'inst-1',
+        defaultVmSize: null,
+        defaultWorkspaceProfile: null,
+        defaultProvider: null,
+        defaultAgentType: null,
       };
       mockD1._stmt.all.mockResolvedValue({ results: [raceProject] });
       mockD1._stmt.raw
         .mockResolvedValueOnce([['task-123', 0, 'in_progress']])
-        .mockResolvedValueOnce([[4]])  // advisory: under limit (5)
-        .mockResolvedValueOnce([[9]])  // advisory: under limit (10)
+        .mockResolvedValueOnce([[4]]) // advisory: under limit (5)
+        .mockResolvedValueOnce([[9]]) // advisory: under limit (10)
         .mockResolvedValueOnce([['cred-1']])
         .mockResolvedValueOnce([Object.values(raceProject)]); // project (if raw path)
 
       // Conditional INSERT returns 0 changes — concurrent insert pushed count over limit
       mockD1._stmt.run.mockResolvedValueOnce({ success: true, meta: { changes: 0 } });
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'dispatch_task',
-        arguments: { description: 'Race condition task' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'dispatch_task',
+          arguments: { description: 'Race condition task' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -2210,10 +2593,13 @@ describe('MCP Routes', () => {
       // Mock the D1 update to indicate a successful completion
       mockD1._stmt.run.mockResolvedValue({ success: true, meta: { changes: 1 } });
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'complete_task',
-        arguments: { summary: 'Done' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'complete_task',
+          arguments: { summary: 'Done' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -2228,10 +2614,13 @@ describe('MCP Routes', () => {
     it('should allow tool calls after complete_task (token still valid)', async () => {
       // First call: complete_task
       mockD1._stmt.run.mockResolvedValue({ success: true, meta: { changes: 1 } });
-      const completeRes = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'complete_task',
-        arguments: { summary: 'Task done' },
-      }));
+      const completeRes = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'complete_task',
+          arguments: { summary: 'Task done' },
+        })
+      );
       expect(completeRes.status).toBe(200);
 
       // Token was NOT revoked, so KV still returns valid data
@@ -2242,28 +2631,35 @@ describe('MCP Routes', () => {
       // get_instructions makes two queries: tasks then projects
       mockD1._stmt.all
         .mockResolvedValueOnce({
-          results: [{
-            id: 'task-123',
-            title: 'Test task',
-            description: 'A test task',
-            status: 'completed',
-            priority: 0,
-            outputBranch: 'sam/test',
-          }],
+          results: [
+            {
+              id: 'task-123',
+              title: 'Test task',
+              description: 'A test task',
+              status: 'completed',
+              priority: 0,
+              outputBranch: 'sam/test',
+            },
+          ],
         })
         .mockResolvedValueOnce({
-          results: [{
-            id: 'proj-456',
-            name: 'Test Project',
-            repository: 'user/repo',
-            defaultBranch: 'main',
-          }],
+          results: [
+            {
+              id: 'proj-456',
+              name: 'Test Project',
+              repository: 'user/repo',
+              defaultBranch: 'main',
+            },
+          ],
         });
 
-      const instructionsRes = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'get_instructions',
-        arguments: {},
-      }));
+      const instructionsRes = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'get_instructions',
+          arguments: {},
+        })
+      );
       // The key assertion: request authenticates (200, not 401)
       // because the token was NOT revoked after complete_task
       expect(instructionsRes.status).toBe(200);
@@ -2272,10 +2668,13 @@ describe('MCP Routes', () => {
     it('should allow update_task_status after complete_task (token still valid)', async () => {
       // First: complete_task
       mockD1._stmt.run.mockResolvedValue({ success: true, meta: { changes: 1 } });
-      await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'complete_task',
-        arguments: { summary: 'Done' },
-      }));
+      await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'complete_task',
+          arguments: { summary: 'Done' },
+        })
+      );
 
       expect(mockKV.delete).not.toHaveBeenCalled();
 
@@ -2286,10 +2685,13 @@ describe('MCP Routes', () => {
         results: [{ id: 'task-123', status: 'completed' }],
       });
 
-      const updateRes = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'update_task_status',
-        arguments: { message: 'Follow-up update' },
-      }));
+      const updateRes = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'update_task_status',
+          arguments: { message: 'Follow-up update' },
+        })
+      );
       expect(updateRes.status).toBe(200);
       // The request should authenticate successfully (200, not 401)
       // The handler may reject based on task state, but that's business
@@ -2316,10 +2718,13 @@ describe('MCP Routes', () => {
       // Second query: update task to awaiting_followup — succeeds
       mockD1._stmt.run.mockResolvedValue({ success: true, meta: { changes: 1 } });
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'complete_task',
-        arguments: { summary: 'Done exploring' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'complete_task',
+          arguments: { summary: 'Done exploring' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -2332,10 +2737,13 @@ describe('MCP Routes', () => {
       // Second query: update fails — task in terminal status (0 changes)
       mockD1._stmt.run.mockResolvedValue({ success: true, meta: { changes: 0 } });
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'complete_task',
-        arguments: {},
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'complete_task',
+          arguments: {},
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -2349,10 +2757,13 @@ describe('MCP Routes', () => {
       // Second query: update task to completed — succeeds
       mockD1._stmt.run.mockResolvedValue({ success: true, meta: { changes: 1 } });
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'complete_task',
-        arguments: { summary: 'Bug fixed' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'complete_task',
+          arguments: { summary: 'Bug fixed' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -2375,14 +2786,17 @@ describe('MCP Routes', () => {
         title: 'Fix the bug',
       });
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'request_human_input',
-        arguments: {
-          context: 'Should I use approach A or B for the database migration?',
-          category: 'decision',
-          options: ['Approach A', 'Approach B'],
-        },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'request_human_input',
+          arguments: {
+            context: 'Should I use approach A or B for the database migration?',
+            category: 'decision',
+            options: ['Approach A', 'Approach B'],
+          },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -2390,10 +2804,13 @@ describe('MCP Routes', () => {
     });
 
     it('should reject empty context', async () => {
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'request_human_input',
-        arguments: { context: '' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'request_human_input',
+          arguments: { context: '' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -2402,10 +2819,13 @@ describe('MCP Routes', () => {
     });
 
     it('should reject context exceeding max length', async () => {
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'request_human_input',
-        arguments: { context: 'A'.repeat(5000) },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'request_human_input',
+          arguments: { context: 'A'.repeat(5000) },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -2414,10 +2834,13 @@ describe('MCP Routes', () => {
     });
 
     it('should reject invalid category', async () => {
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'request_human_input',
-        arguments: { context: 'Need help', category: 'invalid' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'request_human_input',
+          arguments: { context: 'Need help', category: 'invalid' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -2431,10 +2854,13 @@ describe('MCP Routes', () => {
         title: 'My task',
       });
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'request_human_input',
-        arguments: { context: 'I need help with this' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'request_human_input',
+          arguments: { context: 'I need help with this' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -2446,10 +2872,13 @@ describe('MCP Routes', () => {
       // D1 first() returns null — task not in DB
       mockD1._stmt.first.mockResolvedValueOnce(null);
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'request_human_input',
-        arguments: { context: 'Need approval to continue' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'request_human_input',
+          arguments: { context: 'Need approval to continue' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -2458,10 +2887,13 @@ describe('MCP Routes', () => {
     });
 
     it('should reject non-array options', async () => {
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'request_human_input',
-        arguments: { context: 'Pick one', options: 'not-an-array' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'request_human_input',
+          arguments: { context: 'Pick one', options: 'not-an-array' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -2477,10 +2909,13 @@ describe('MCP Routes', () => {
       // Make the notification DO throw to exercise the best-effort catch branch
       mockNotificationStub.createNotification.mockRejectedValueOnce(new Error('DO unavailable'));
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'request_human_input',
-        arguments: { context: 'I need a decision' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'request_human_input',
+          arguments: { context: 'I need a decision' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -2489,10 +2924,13 @@ describe('MCP Routes', () => {
     });
 
     it('should reject context that is only whitespace', async () => {
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'request_human_input',
-        arguments: { context: '   ' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'request_human_input',
+          arguments: { context: '   ' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -2511,29 +2949,35 @@ describe('MCP Routes', () => {
           title: 'My task',
         });
 
-        const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-          name: 'request_human_input',
-          arguments: { context: 'Need help', category },
-        }));
+        const res = await mcpRequest(
+          app,
+          jsonRpcRequest('tools/call', {
+            name: 'request_human_input',
+            arguments: { context: 'Need help', category },
+          })
+        );
 
         expect(res.status).toBe(200);
         const body = await res.json();
         expect(body.result).toBeDefined();
         expect(mockNotificationStub.createNotification).toHaveBeenCalledWith(
           'user-789',
-          expect.objectContaining({ type: 'needs_input' }),
+          expect.objectContaining({ type: 'needs_input' })
         );
       }
     });
 
     it('should reject options array with non-string elements', async () => {
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'request_human_input',
-        arguments: {
-          context: 'Pick an approach',
-          options: ['Option A', 42, null, 'Option B'],
-        },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'request_human_input',
+          arguments: {
+            context: 'Pick an approach',
+            options: ['Option A', 42, null, 'Option B'],
+          },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -2554,32 +2998,42 @@ describe('MCP Routes', () => {
       // values in column-select order: id, status, user_id(userId), title.
       // mockD1Results sets both .all() and .raw() so Drizzle can find rows either way.
       // Status must be in ACTIVE_STATUSES: ['queued','in_progress','delegated','awaiting_followup']
-      mockD1Results(mockD1._stmt, [{ id: 'task-123', status: 'in_progress', user_id: 'user-789', title: 'Implement feature' }]);
+      mockD1Results(mockD1._stmt, [
+        { id: 'task-123', status: 'in_progress', user_id: 'user-789', title: 'Implement feature' },
+      ]);
       mockD1._stmt.run.mockResolvedValue({ success: true, meta: { changes: 1 } });
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'update_task_status',
-        arguments: { message: 'Completed step 2 of 5' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'update_task_status',
+          arguments: { message: 'Completed step 2 of 5' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(body.result).toBeDefined();
       expect(mockNotificationStub.createNotification).toHaveBeenCalledWith(
         'user-789',
-        expect.objectContaining({ type: 'progress' }),
+        expect.objectContaining({ type: 'progress' })
       );
     });
 
     it('update_task_status should remain successful when notification DO throws', async () => {
-      mockD1Results(mockD1._stmt, [{ id: 'task-123', status: 'in_progress', user_id: 'user-789', title: 'Implement feature' }]);
+      mockD1Results(mockD1._stmt, [
+        { id: 'task-123', status: 'in_progress', user_id: 'user-789', title: 'Implement feature' },
+      ]);
       mockD1._stmt.run.mockResolvedValue({ success: true, meta: { changes: 1 } });
       mockNotificationStub.createNotification.mockRejectedValueOnce(new Error('DO unavailable'));
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'update_task_status',
-        arguments: { message: 'Step done' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'update_task_status',
+          arguments: { message: 'Step done' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -2600,17 +3054,20 @@ describe('MCP Routes', () => {
       });
       mockD1._stmt.run.mockResolvedValue({ success: true, meta: { changes: 1 } });
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'complete_task',
-        arguments: { summary: 'Done exploring' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'complete_task',
+          arguments: { summary: 'Done exploring' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(body.result.content[0].text).toContain('Conversation remains open');
       expect(mockNotificationStub.createNotification).toHaveBeenCalledWith(
         'user-789',
-        expect.objectContaining({ type: 'session_ended' }),
+        expect.objectContaining({ type: 'session_ended' })
       );
     });
   });
@@ -2623,10 +3080,13 @@ describe('MCP Routes', () => {
     });
 
     it('should reject missing topic', async () => {
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'update_session_topic',
-        arguments: {},
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'update_session_topic',
+          arguments: {},
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -2635,10 +3095,13 @@ describe('MCP Routes', () => {
     });
 
     it('should reject empty topic', async () => {
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'update_session_topic',
-        arguments: { topic: '   ' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'update_session_topic',
+          arguments: { topic: '   ' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -2649,10 +3112,13 @@ describe('MCP Routes', () => {
     it('should reject when no session found for workspace', async () => {
       mockD1._stmt.first.mockResolvedValueOnce(null);
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'update_session_topic',
-        arguments: { topic: 'New discussion topic' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'update_session_topic',
+          arguments: { topic: 'New discussion topic' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -2664,10 +3130,13 @@ describe('MCP Routes', () => {
       mockD1._stmt.first.mockResolvedValueOnce({ chat_session_id: 'session-1' });
       mockDoStub.updateSessionTopic.mockResolvedValueOnce(true);
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'update_session_topic',
-        arguments: { topic: 'Debugging auth flow' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'update_session_topic',
+          arguments: { topic: 'Debugging auth flow' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -2682,10 +3151,13 @@ describe('MCP Routes', () => {
       mockD1._stmt.first.mockResolvedValueOnce({ chat_session_id: 'session-1' });
       mockDoStub.updateSessionTopic.mockResolvedValueOnce(false);
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'update_session_topic',
-        arguments: { topic: 'New topic' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'update_session_topic',
+          arguments: { topic: 'New topic' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -2698,10 +3170,13 @@ describe('MCP Routes', () => {
       mockDoStub.updateSessionTopic.mockResolvedValueOnce(true);
 
       const longTopic = 'A'.repeat(300);
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'update_session_topic',
-        arguments: { topic: longTopic },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'update_session_topic',
+          arguments: { topic: longTopic },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -2710,10 +3185,13 @@ describe('MCP Routes', () => {
     });
 
     it('should reject topic that is empty after sanitization', async () => {
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'update_session_topic',
-        arguments: { topic: '\x01\x02\x03' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'update_session_topic',
+          arguments: { topic: '\x01\x02\x03' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -2725,10 +3203,13 @@ describe('MCP Routes', () => {
       mockD1._stmt.first.mockResolvedValueOnce({ chat_session_id: 'session-1' });
       mockDoStub.updateSessionTopic.mockResolvedValueOnce(true);
 
-      await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'update_session_topic',
-        arguments: { topic: 'New topic' },
-      }));
+      await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'update_session_topic',
+          arguments: { topic: 'New topic' },
+        })
+      );
 
       expect(mockDoStub.updateSessionTopic).toHaveBeenCalledWith('session-1', 'New topic');
     });
@@ -2742,10 +3223,13 @@ describe('MCP Routes', () => {
     });
 
     it('should reject missing taskId', async () => {
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'link_idea',
-        arguments: {},
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'link_idea',
+          arguments: {},
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -2757,10 +3241,13 @@ describe('MCP Routes', () => {
       // resolveSessionId returns null when workspace has no chat_session_id
       mockD1._stmt.first.mockResolvedValue(null);
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'link_idea',
-        arguments: { taskId: 'task-1' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'link_idea',
+          arguments: { taskId: 'task-1' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -2775,10 +3262,13 @@ describe('MCP Routes', () => {
         .mockResolvedValueOnce({ chat_session_id: 'sess-1' })
         .mockResolvedValueOnce(null);
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'link_idea',
-        arguments: { taskId: 'nonexistent-task' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'link_idea',
+          arguments: { taskId: 'nonexistent-task' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -2791,10 +3281,13 @@ describe('MCP Routes', () => {
         .mockResolvedValueOnce({ chat_session_id: 'sess-1' })
         .mockResolvedValueOnce({ id: 'task-1', title: 'Fix auth bug' });
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'link_idea',
-        arguments: { taskId: 'task-1', context: 'discussing auth' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'link_idea',
+          arguments: { taskId: 'task-1', context: 'discussing auth' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -2802,7 +3295,11 @@ describe('MCP Routes', () => {
       expect(data.linked).toBe(true);
       expect(data.taskTitle).toBe('Fix auth bug');
       expect(data.context).toBe('discussing auth');
-      expect(mockDoStub.linkSessionIdea).toHaveBeenCalledWith('sess-1', 'task-1', 'discussing auth');
+      expect(mockDoStub.linkSessionIdea).toHaveBeenCalledWith(
+        'sess-1',
+        'task-1',
+        'discussing auth'
+      );
     });
   });
 
@@ -2812,10 +3309,13 @@ describe('MCP Routes', () => {
     });
 
     it('should reject missing taskId', async () => {
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'unlink_idea',
-        arguments: {},
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'unlink_idea',
+          arguments: {},
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -2826,10 +3326,13 @@ describe('MCP Routes', () => {
     it('should unlink idea successfully', async () => {
       mockD1._stmt.first.mockResolvedValueOnce({ chat_session_id: 'sess-1' });
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'unlink_idea',
-        arguments: { taskId: 'task-1' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'unlink_idea',
+          arguments: { taskId: 'task-1' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -2847,10 +3350,13 @@ describe('MCP Routes', () => {
     it('should return error when no session found', async () => {
       mockD1._stmt.first.mockResolvedValue(null);
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'list_linked_ideas',
-        arguments: {},
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'list_linked_ideas',
+          arguments: {},
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -2862,10 +3368,13 @@ describe('MCP Routes', () => {
       mockD1._stmt.first.mockResolvedValueOnce({ chat_session_id: 'sess-1' });
       mockDoStub.getIdeasForSession.mockReturnValue([]);
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'list_linked_ideas',
-        arguments: {},
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'list_linked_ideas',
+          arguments: {},
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -2884,10 +3393,13 @@ describe('MCP Routes', () => {
         results: [{ id: 'task-1', title: 'Fix auth', status: 'in_progress' }],
       });
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'list_linked_ideas',
-        arguments: {},
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'list_linked_ideas',
+          arguments: {},
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -2906,10 +3418,13 @@ describe('MCP Routes', () => {
     });
 
     it('should reject empty query', async () => {
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'find_related_ideas',
-        arguments: { query: '' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'find_related_ideas',
+          arguments: { query: '' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -2918,10 +3433,13 @@ describe('MCP Routes', () => {
     });
 
     it('should reject query shorter than 2 characters', async () => {
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'find_related_ideas',
-        arguments: { query: 'a' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'find_related_ideas',
+          arguments: { query: 'a' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -2931,20 +3449,25 @@ describe('MCP Routes', () => {
 
     it('should search ideas by keyword', async () => {
       mockD1._stmt.all.mockResolvedValueOnce({
-        results: [{
-          id: 'task-found',
-          title: 'Improve authentication',
-          description: 'Rework the auth flow',
-          status: 'draft',
-          priority: 1,
-          updated_at: '2026-03-19T00:00:00Z',
-        }],
+        results: [
+          {
+            id: 'task-found',
+            title: 'Improve authentication',
+            description: 'Rework the auth flow',
+            status: 'draft',
+            priority: 1,
+            updated_at: '2026-03-19T00:00:00Z',
+          },
+        ],
       });
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'find_related_ideas',
-        arguments: { query: 'authentication' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'find_related_ideas',
+          arguments: { query: 'authentication' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -2958,14 +3481,18 @@ describe('MCP Routes', () => {
     it('should default to draft status filter', async () => {
       mockD1._stmt.all.mockResolvedValueOnce({ results: [] });
 
-      await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'find_related_ideas',
-        arguments: { query: 'test query' },
-      }));
+      await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'find_related_ideas',
+          arguments: { query: 'test query' },
+        })
+      );
 
       // Verify the SQL includes a status filter for 'draft'
       const prepareCall = mockD1.prepare.mock.calls.find(
-        (call) => typeof call[0] === 'string' && call[0].includes('LIKE') && call[0].includes('status'),
+        (call) =>
+          typeof call[0] === 'string' && call[0].includes('LIKE') && call[0].includes('status')
       );
       expect(prepareCall).toBeDefined();
       // The bind should include 'draft' as status filter
@@ -2982,10 +3509,13 @@ describe('MCP Routes', () => {
     });
 
     it('should reject missing title', async () => {
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'create_idea',
-        arguments: {},
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'create_idea',
+          arguments: {},
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -2995,10 +3525,13 @@ describe('MCP Routes', () => {
     });
 
     it('should reject empty title', async () => {
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'create_idea',
-        arguments: { title: '   ' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'create_idea',
+          arguments: { title: '   ' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -3009,10 +3542,13 @@ describe('MCP Routes', () => {
     it('should create an idea with title only', async () => {
       mockD1._stmt.run.mockResolvedValueOnce({ success: true });
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'create_idea',
-        arguments: { title: 'New feature idea' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'create_idea',
+          arguments: { title: 'New feature idea' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -3032,10 +3568,16 @@ describe('MCP Routes', () => {
     it('should create an idea with title and content', async () => {
       mockD1._stmt.run.mockResolvedValueOnce({ success: true });
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'create_idea',
-        arguments: { title: 'Auth improvements', content: 'We should add SSO support.\n\n## Checklist\n- [ ] Research providers' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'create_idea',
+          arguments: {
+            title: 'Auth improvements',
+            content: 'We should add SSO support.\n\n## Checklist\n- [ ] Research providers',
+          },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -3048,10 +3590,13 @@ describe('MCP Routes', () => {
     it('should create an idea with priority', async () => {
       mockD1._stmt.run.mockResolvedValueOnce({ success: true });
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'create_idea',
-        arguments: { title: 'High priority idea', priority: 5 },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'create_idea',
+          arguments: { title: 'High priority idea', priority: 5 },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -3066,10 +3611,13 @@ describe('MCP Routes', () => {
     });
 
     it('should reject missing ideaId', async () => {
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'update_idea',
-        arguments: {},
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'update_idea',
+          arguments: {},
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -3081,10 +3629,13 @@ describe('MCP Routes', () => {
     it('should reject idea not found', async () => {
       mockD1._stmt.first.mockResolvedValueOnce(null);
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'update_idea',
-        arguments: { ideaId: 'nonexistent', content: 'New content' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'update_idea',
+          arguments: { ideaId: 'nonexistent', content: 'New content' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -3101,10 +3652,13 @@ describe('MCP Routes', () => {
         priority: 0,
       });
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'update_idea',
-        arguments: { ideaId: 'idea-1', content: 'New content' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'update_idea',
+          arguments: { ideaId: 'idea-1', content: 'New content' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -3121,10 +3675,13 @@ describe('MCP Routes', () => {
         priority: 0,
       });
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'update_idea',
-        arguments: { ideaId: 'idea-1', content: 'New content' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'update_idea',
+          arguments: { ideaId: 'idea-1', content: 'New content' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -3142,10 +3699,13 @@ describe('MCP Routes', () => {
       });
       mockD1._stmt.run.mockResolvedValueOnce({ success: true });
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'update_idea',
-        arguments: { ideaId: 'idea-1', status: 'ready' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'update_idea',
+          arguments: { ideaId: 'idea-1', status: 'ready' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -3164,10 +3724,13 @@ describe('MCP Routes', () => {
       });
       mockD1._stmt.run.mockResolvedValueOnce({ success: true });
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'update_idea',
-        arguments: { ideaId: 'idea-1', status: 'completed' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'update_idea',
+          arguments: { ideaId: 'idea-1', status: 'completed' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -3185,10 +3748,13 @@ describe('MCP Routes', () => {
         priority: 0,
       });
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'update_idea',
-        arguments: { ideaId: 'idea-1', status: 'completed' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'update_idea',
+          arguments: { ideaId: 'idea-1', status: 'completed' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -3206,10 +3772,13 @@ describe('MCP Routes', () => {
       });
       mockD1._stmt.run.mockResolvedValueOnce({ success: true });
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'update_idea',
-        arguments: { ideaId: 'idea-1', title: 'Updated title' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'update_idea',
+          arguments: { ideaId: 'idea-1', title: 'Updated title' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -3228,10 +3797,13 @@ describe('MCP Routes', () => {
       });
       mockD1._stmt.run.mockResolvedValueOnce({ success: true });
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'update_idea',
-        arguments: { ideaId: 'idea-1', content: 'Appended content' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'update_idea',
+          arguments: { ideaId: 'idea-1', content: 'Appended content' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -3260,10 +3832,13 @@ describe('MCP Routes', () => {
       });
       mockD1._stmt.run.mockResolvedValueOnce({ success: true });
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'update_idea',
-        arguments: { ideaId: 'idea-1', content: 'Replacement content', append: false },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'update_idea',
+          arguments: { ideaId: 'idea-1', content: 'Replacement content', append: false },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -3285,10 +3860,13 @@ describe('MCP Routes', () => {
         priority: 0,
       });
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'update_idea',
-        arguments: { ideaId: 'idea-1' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'update_idea',
+          arguments: { ideaId: 'idea-1' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -3306,10 +3884,13 @@ describe('MCP Routes', () => {
       });
       mockD1._stmt.run.mockResolvedValueOnce({ success: true });
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'update_idea',
-        arguments: { ideaId: 'idea-1', title: 'New title' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'update_idea',
+          arguments: { ideaId: 'idea-1', title: 'New title' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -3328,10 +3909,13 @@ describe('MCP Routes', () => {
       });
       mockD1._stmt.run.mockResolvedValueOnce({ success: true });
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'update_idea',
-        arguments: { ideaId: 'idea-1', priority: 7 },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'update_idea',
+          arguments: { ideaId: 'idea-1', priority: 7 },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -3350,10 +3934,13 @@ describe('MCP Routes', () => {
       });
       mockD1._stmt.run.mockResolvedValueOnce({ success: true });
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'update_idea',
-        arguments: { ideaId: 'idea-1', content: 'First content' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'update_idea',
+          arguments: { ideaId: 'idea-1', content: 'First content' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -3376,10 +3963,13 @@ describe('MCP Routes', () => {
     });
 
     it('should reject missing ideaId', async () => {
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'get_idea',
-        arguments: {},
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'get_idea',
+          arguments: {},
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -3390,10 +3980,13 @@ describe('MCP Routes', () => {
     it('should return idea not found for nonexistent task', async () => {
       mockD1._stmt.first.mockResolvedValueOnce(null);
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'get_idea',
-        arguments: { ideaId: 'nonexistent' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'get_idea',
+          arguments: { ideaId: 'nonexistent' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -3412,10 +4005,13 @@ describe('MCP Routes', () => {
         updated_at: '2026-03-22T01:00:00Z',
       });
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'get_idea',
-        arguments: { ideaId: 'idea-1' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'get_idea',
+          arguments: { ideaId: 'idea-1' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -3439,10 +4035,13 @@ describe('MCP Routes', () => {
         updated_at: '2026-03-25T00:00:00Z',
       });
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'get_idea',
-        arguments: { ideaId: 'idea-completed' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'get_idea',
+          arguments: { ideaId: 'idea-completed' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -3462,10 +4061,13 @@ describe('MCP Routes', () => {
         updated_at: '2026-03-22T00:00:00Z',
       });
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'get_idea',
-        arguments: { ideaId: 'idea-2' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'get_idea',
+          arguments: { ideaId: 'idea-2' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -3483,10 +4085,13 @@ describe('MCP Routes', () => {
     it('should return empty list when no ideas exist', async () => {
       mockD1._stmt.all.mockResolvedValueOnce({ results: [] });
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'list_ideas',
-        arguments: {},
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'list_ideas',
+          arguments: {},
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -3517,10 +4122,13 @@ describe('MCP Routes', () => {
         ],
       });
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'list_ideas',
-        arguments: {},
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'list_ideas',
+          arguments: {},
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -3536,10 +4144,13 @@ describe('MCP Routes', () => {
     it('should respect limit parameter', async () => {
       mockD1._stmt.all.mockResolvedValueOnce({ results: [] });
 
-      await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'list_ideas',
-        arguments: { limit: 5 },
-      }));
+      await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'list_ideas',
+          arguments: { limit: 5 },
+        })
+      );
 
       // Verify the SQL includes the limit
       const bindCalls = mockD1._stmt.bind.mock.calls;
@@ -3550,14 +4161,17 @@ describe('MCP Routes', () => {
     it('should filter by draft status', async () => {
       mockD1._stmt.all.mockResolvedValueOnce({ results: [] });
 
-      await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'list_ideas',
-        arguments: {},
-      }));
+      await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'list_ideas',
+          arguments: {},
+        })
+      );
 
       // Verify SQL includes status = 'draft'
       const sql = mockD1.prepare.mock.calls[0][0];
-      expect(sql).toContain("status = ?");
+      expect(sql).toContain('status = ?');
       const bindCalls = mockD1._stmt.bind.mock.calls;
       const lastBind = bindCalls[bindCalls.length - 1];
       expect(lastBind).toContain('draft');
@@ -3570,10 +4184,13 @@ describe('MCP Routes', () => {
     });
 
     it('should reject empty query', async () => {
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'search_ideas',
-        arguments: { query: '' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'search_ideas',
+          arguments: { query: '' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -3582,10 +4199,13 @@ describe('MCP Routes', () => {
     });
 
     it('should reject query shorter than 2 characters', async () => {
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'search_ideas',
-        arguments: { query: 'x' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'search_ideas',
+          arguments: { query: 'x' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -3595,20 +4215,25 @@ describe('MCP Routes', () => {
 
     it('should search ideas with draft filter', async () => {
       mockD1._stmt.all.mockResolvedValueOnce({
-        results: [{
-          id: 'idea-match',
-          title: 'SSO integration idea',
-          description: 'Add SAML support for enterprise',
-          priority: 2,
-          created_at: '2026-03-22T00:00:00Z',
-          updated_at: '2026-03-22T01:00:00Z',
-        }],
+        results: [
+          {
+            id: 'idea-match',
+            title: 'SSO integration idea',
+            description: 'Add SAML support for enterprise',
+            priority: 2,
+            created_at: '2026-03-22T00:00:00Z',
+            updated_at: '2026-03-22T01:00:00Z',
+          },
+        ],
       });
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'search_ideas',
-        arguments: { query: 'SSO' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'search_ideas',
+          arguments: { query: 'SSO' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -3634,10 +4259,13 @@ describe('MCP Routes', () => {
     });
 
     it('should reject missing title', async () => {
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'create_mission',
-        arguments: {},
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'create_mission',
+          arguments: {},
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -3650,13 +4278,16 @@ describe('MCP Routes', () => {
       mockD1._stmt.first.mockResolvedValueOnce({ cnt: 0 });
       mockD1._stmt.run.mockResolvedValue({ success: true });
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'create_mission',
-        arguments: {
-          title: 'Test Mission',
-          description: 'A test mission description',
-        },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'create_mission',
+          arguments: {
+            title: 'Test Mission',
+            description: 'A test mission description',
+          },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -3673,10 +4304,13 @@ describe('MCP Routes', () => {
       // Mock count at the limit
       mockD1._stmt.first.mockResolvedValueOnce({ cnt: 50 });
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'create_mission',
-        arguments: { title: 'Over limit' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'create_mission',
+          arguments: { title: 'Over limit' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -3691,10 +4325,13 @@ describe('MCP Routes', () => {
     });
 
     it('should reject missing missionId', async () => {
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'get_mission',
-        arguments: {},
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'get_mission',
+          arguments: {},
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -3705,10 +4342,13 @@ describe('MCP Routes', () => {
     it('should return not found for non-existent mission', async () => {
       mockD1._stmt.first.mockResolvedValueOnce(null);
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'get_mission',
-        arguments: { missionId: 'nonexistent' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'get_mission',
+          arguments: { missionId: 'nonexistent' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -3723,14 +4363,17 @@ describe('MCP Routes', () => {
     });
 
     it('should reject invalid entryType', async () => {
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'publish_mission_state',
-        arguments: {
-          missionId: 'mission-1',
-          entryType: 'invalid_type',
-          title: 'Test',
-        },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'publish_mission_state',
+          arguments: {
+            missionId: 'mission-1',
+            entryType: 'invalid_type',
+            title: 'Test',
+          },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -3739,13 +4382,16 @@ describe('MCP Routes', () => {
     });
 
     it('should reject missing title', async () => {
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'publish_mission_state',
-        arguments: {
-          missionId: 'mission-1',
-          entryType: 'decision',
-        },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'publish_mission_state',
+          arguments: {
+            missionId: 'mission-1',
+            entryType: 'decision',
+          },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -3756,14 +4402,17 @@ describe('MCP Routes', () => {
     it('should reject when mission not found in project', async () => {
       mockD1._stmt.first.mockResolvedValueOnce(null); // mission lookup
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'publish_mission_state',
-        arguments: {
-          missionId: 'other-project-mission',
-          entryType: 'fact',
-          title: 'Cross-project attempt',
-        },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'publish_mission_state',
+          arguments: {
+            missionId: 'other-project-mission',
+            entryType: 'fact',
+            title: 'Cross-project attempt',
+          },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -3778,12 +4427,15 @@ describe('MCP Routes', () => {
     });
 
     it('should reject missing summary', async () => {
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'publish_handoff',
-        arguments: {
-          missionId: 'mission-1',
-        },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'publish_handoff',
+          arguments: {
+            missionId: 'mission-1',
+          },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -3794,13 +4446,16 @@ describe('MCP Routes', () => {
     it('should reject when mission not found in project', async () => {
       mockD1._stmt.first.mockResolvedValueOnce(null); // mission lookup
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'publish_handoff',
-        arguments: {
-          missionId: 'other-project-mission',
-          summary: 'Cross-project attempt',
-        },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'publish_handoff',
+          arguments: {
+            missionId: 'other-project-mission',
+            summary: 'Cross-project attempt',
+          },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -3822,10 +4477,13 @@ describe('MCP Routes', () => {
       // Token data with empty workspaceId — any Category B tool exercises requireWorkspace
       mockKV.get.mockResolvedValue({ ...validTokenData, workspaceId: '' });
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'get_workspace_info',
-        arguments: {},
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'get_workspace_info',
+          arguments: {},
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -3837,10 +4495,13 @@ describe('MCP Routes', () => {
     it('requireWorkspace: returns INVALID_PARAMS when workspaceId is null', async () => {
       mockKV.get.mockResolvedValue({ ...validTokenData, workspaceId: null });
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'get_workspace_info',
-        arguments: {},
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'get_workspace_info',
+          arguments: {},
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -3870,10 +4531,13 @@ describe('MCP Routes', () => {
         },
       ]);
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'list_project_agents',
-        arguments: {},
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'list_project_agents',
+          arguments: {},
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -3901,10 +4565,13 @@ describe('MCP Routes', () => {
         },
       ]);
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'list_project_agents',
-        arguments: {},
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'list_project_agents',
+          arguments: {},
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -3919,10 +4586,13 @@ describe('MCP Routes', () => {
     it('get_peer_agent_output: returns INVALID_PARAMS when task not found', async () => {
       mockD1Results(mockD1._stmt, []);
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'get_peer_agent_output',
-        arguments: { taskId: 'nonexistent-task' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'get_peer_agent_output',
+          arguments: { taskId: 'nonexistent-task' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -3932,10 +4602,13 @@ describe('MCP Routes', () => {
     });
 
     it('get_peer_agent_output: returns INVALID_PARAMS when taskId is missing', async () => {
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'get_peer_agent_output',
-        arguments: {},
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'get_peer_agent_output',
+          arguments: {},
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -3945,10 +4618,13 @@ describe('MCP Routes', () => {
     });
 
     it('get_peer_agent_output: returns INVALID_PARAMS when taskId is empty string', async () => {
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'get_peer_agent_output',
-        arguments: { taskId: '   ' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'get_peer_agent_output',
+          arguments: { taskId: '   ' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -3958,19 +4634,24 @@ describe('MCP Routes', () => {
     });
 
     it('get_peer_agent_output: returns task data when found', async () => {
-      mockD1Results(mockD1._stmt, [{
-        id: 'task-peer',
-        title: 'Auth refactor',
-        status: 'completed',
-        description: 'Refactored the auth module',
-        output_summary: 'PR merged, tests passing',
-        output_branch: 'sam/auth-refactor',
-      }]);
+      mockD1Results(mockD1._stmt, [
+        {
+          id: 'task-peer',
+          title: 'Auth refactor',
+          status: 'completed',
+          description: 'Refactored the auth module',
+          output_summary: 'PR merged, tests passing',
+          output_branch: 'sam/auth-refactor',
+        },
+      ]);
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'get_peer_agent_output',
-        arguments: { taskId: 'task-peer' },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'get_peer_agent_output',
+          arguments: { taskId: 'task-peer' },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -3985,14 +4666,17 @@ describe('MCP Routes', () => {
     // ─── report_environment_issue parameter validation ─────────────────
 
     it('report_environment_issue: returns INVALID_PARAMS for invalid severity', async () => {
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'report_environment_issue',
-        arguments: {
-          category: 'networking',
-          severity: 'catastrophic', // invalid — not in allowed enum
-          description: 'DNS resolution failed',
-        },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'report_environment_issue',
+          arguments: {
+            category: 'networking',
+            severity: 'catastrophic', // invalid — not in allowed enum
+            description: 'DNS resolution failed',
+          },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -4002,13 +4686,16 @@ describe('MCP Routes', () => {
     });
 
     it('report_environment_issue: returns INVALID_PARAMS when category is missing', async () => {
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'report_environment_issue',
-        arguments: {
-          severity: 'high',
-          description: 'Something broke',
-        },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'report_environment_issue',
+          arguments: {
+            severity: 'high',
+            description: 'Something broke',
+          },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -4018,13 +4705,16 @@ describe('MCP Routes', () => {
     });
 
     it('report_environment_issue: returns INVALID_PARAMS when description is missing', async () => {
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'report_environment_issue',
-        arguments: {
-          category: 'filesystem',
-          severity: 'medium',
-        },
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'report_environment_issue',
+          arguments: {
+            category: 'filesystem',
+            severity: 'medium',
+          },
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -4035,14 +4725,17 @@ describe('MCP Routes', () => {
 
     it('report_environment_issue: succeeds with all valid severities', async () => {
       for (const severity of ['low', 'medium', 'high', 'critical']) {
-        const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-          name: 'report_environment_issue',
-          arguments: {
-            category: 'networking',
-            severity,
-            description: 'Test issue description',
-          },
-        }));
+        const res = await mcpRequest(
+          app,
+          jsonRpcRequest('tools/call', {
+            name: 'report_environment_issue',
+            arguments: {
+              category: 'networking',
+              severity,
+              description: 'Test issue description',
+            },
+          })
+        );
 
         expect(res.status).toBe(200);
         const body = await res.json();
@@ -4058,10 +4751,13 @@ describe('MCP Routes', () => {
     it('get_task_dependencies: returns INVALID_PARAMS when taskId is empty', async () => {
       mockKV.get.mockResolvedValue({ ...validTokenData, taskId: '' });
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'get_task_dependencies',
-        arguments: {},
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'get_task_dependencies',
+          arguments: {},
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -4073,10 +4769,13 @@ describe('MCP Routes', () => {
     it('get_task_dependencies: returns INVALID_PARAMS when taskId is null', async () => {
       mockKV.get.mockResolvedValue({ ...validTokenData, taskId: null });
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'get_task_dependencies',
-        arguments: {},
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'get_task_dependencies',
+          arguments: {},
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -4091,10 +4790,13 @@ describe('MCP Routes', () => {
         .mockResolvedValueOnce([['task-123', 'My task', null]]) // current task
         .mockResolvedValueOnce([]); // downstream (no children)
 
-      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
-        name: 'get_task_dependencies',
-        arguments: {},
-      }));
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'get_task_dependencies',
+          arguments: {},
+        })
+      );
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -4185,8 +4887,18 @@ describe('groupTokensIntoMessages', () => {
     ];
     const result = groupTokensIntoMessages(tokens);
     expect(result).toHaveLength(2);
-    expect(result[0]).toEqual({ id: 'tok-1', role: 'user', content: 'Fix the bug', createdAt: 1000 });
-    expect(result[1]).toEqual({ id: 'tok-2', role: 'assistant', content: 'I will fix it now.', createdAt: 2000 });
+    expect(result[0]).toEqual({
+      id: 'tok-1',
+      role: 'user',
+      content: 'Fix the bug',
+      createdAt: 1000,
+    });
+    expect(result[1]).toEqual({
+      id: 'tok-2',
+      role: 'assistant',
+      content: 'I will fix it now.',
+      createdAt: 2000,
+    });
   });
 
   it('should handle mixed sequence correctly', () => {
@@ -4212,9 +4924,7 @@ describe('groupTokensIntoMessages', () => {
   });
 
   it('should pass through single messages unchanged', () => {
-    const tokens = [
-      { id: 'tok-1', role: 'user', content: 'Hello', createdAt: 1000 },
-    ];
+    const tokens = [{ id: 'tok-1', role: 'user', content: 'Hello', createdAt: 1000 }];
     const result = groupTokensIntoMessages(tokens);
     expect(result).toHaveLength(1);
     expect(result[0]).toEqual(tokens[0]);
@@ -4223,7 +4933,7 @@ describe('groupTokensIntoMessages', () => {
   it('should not group alternating groupable roles (assistant → tool → assistant)', () => {
     const tokens = [
       { id: 'tok-1', role: 'assistant', content: 'Calling tool', createdAt: 1000 },
-      { id: 'tok-2', role: 'tool',      content: 'Tool output', createdAt: 2000 },
+      { id: 'tok-2', role: 'tool', content: 'Tool output', createdAt: 2000 },
       { id: 'tok-3', role: 'assistant', content: 'Got the result.', createdAt: 3000 },
     ];
     const result = groupTokensIntoMessages(tokens);

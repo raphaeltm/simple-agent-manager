@@ -54,7 +54,7 @@ SAM exposes these MCP tools for deployment. They are the only interface you need
 | \`build_and_publish(environment, reference?, workingDir?)\` | Start an async server-side Compose build/publish job and return a durable \`publishJobId\`. |
 | \`get_publish_status(publishJobId, sinceSeq?, limit?)\` | Poll the build/publish job for status, events, release details, and sanitized failure diagnostics. |
 | \`preview_deployment_routes(environment, composeYaml)\` | Preview which Compose ports will get public SAM URLs before deploying. \`mode: host\` ports are internal/private; other ports are public unless explicitly marked private. |
-| \`list_deployment_routes(environment)\` | List the public URLs, custom domains, and internal routes for the latest release in an accessible environment. |
+| \`list_deployment_routes(environment)\` | List the public URLs, custom domains, and internal routes derived from the latest release version in an accessible environment. |
 | \`read_deployment_logs(environment, source?, level?, container?, since?, until?, search?, cursor?, limit?)\` | Read deployment-node logs for an environment to verify the release and debug failures. |
 | \`check_dns_status()\` | Check DNS propagation and TLS validity for **this workspace's own** \`ws-*\` URL. It verifies the workspace is reachable at the Cloudflare edge — it does NOT check a deployed app's public route. |
 
@@ -140,7 +140,7 @@ This tool requires the named environment to be active, agent deployment to be en
 
 After the publish job reaches \`succeeded\`:
 
-- Call \`list_deployment_routes(environment)\` to see the generated public URLs, custom domains, and internal routes for the latest release. Confirm internal services such as databases or queues were not given public DNS. For custom domains, check the expected \`cnameTarget\`, \`verificationStatus\`, and whether the domain \`willBeIncludedInApplyPayload\`.
+- Call \`list_deployment_routes(environment)\` to see the generated public URLs, custom domains, and internal routes for the latest release version. Check \`latestRelease.status\`: a newer non-applied release may not be what Caddy is currently serving. Confirm internal services such as databases or queues were not given public DNS. For custom domains, check the expected \`cnameTarget\`, \`verificationStatus\`, and whether the domain \`willBeIncludedInApplyPayload\`; verified custom domains may still require a later apply/redeploy before they are served.
 - Call \`read_deployment_logs(environment)\` to confirm the deployment node applied the release and the containers are healthy. Deployment nodes also persist release-scoped apply events for phases such as fetch, compose config, artifact load, compose up, health check, Caddy reload, success, failure, and revert. Read the logs/events before guessing at fixes.
 - Call \`check_dns_status()\` to confirm **this workspace's** \`ws-*\` URL is reachable with valid TLS at the edge. Note this checks the workspace itself, not the deployed app's public route — use \`read_deployment_logs\` to confirm the deployed containers are serving.
 
