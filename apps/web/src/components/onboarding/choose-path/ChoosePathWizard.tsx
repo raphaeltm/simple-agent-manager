@@ -26,7 +26,7 @@ export function ChoosePathWizard() {
   const { showOverlay, dismissOnboarding } = useOnboarding();
 
   const [phase, setPhase] = useState<Phase>('questions');
-  const [currentQuestionId, setCurrentQuestionId] = useState('ai-subscription');
+  const [currentQuestionId, setCurrentQuestionId] = useState('cloud-account');
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [tags, setTags] = useState<string[]>([]);
   const [generatedSteps, setGeneratedSteps] = useState<GeneratedStep[]>([]);
@@ -142,7 +142,7 @@ export function ChoosePathWizard() {
 
   const handleReset = useCallback(() => {
     setPhase('questions');
-    setCurrentQuestionId('ai-subscription');
+    setCurrentQuestionId('cloud-account');
     setAnswers({});
     setTags((prev) => prev.filter((t) => t.startsWith('existing-')));
     setGeneratedSteps([]);
@@ -254,9 +254,7 @@ export function ChoosePathWizard() {
           {phase === 'executing' && (
             <StepExecution
               steps={executableSteps}
-              tags={tags}
               onComplete={handleExecutionComplete}
-              onDismiss={dismissOnboarding}
             />
           )}
           {phase === 'complete' && <CompletionScreen onDismiss={dismissOnboarding} />}

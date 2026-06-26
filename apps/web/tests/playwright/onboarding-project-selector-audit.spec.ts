@@ -95,8 +95,7 @@ async function reachProjectSelector(page: Page) {
   const wizard = page.locator('[data-testid="onboarding-wizard"]');
   await expect(wizard).toBeVisible({ timeout: 3000 });
 
-  await wizard.getByRole('button', { name: 'Claude Pro or Max subscription' }).click();
-  await wizard.getByRole('button', { name: 'I have Hetzner' }).click();
+  await wizard.getByRole('button', { name: 'I have Hetzner or Scaleway' }).click();
   await wizard.getByRole('button', { name: 'Yes, I have a repo' }).click();
   await wizard.getByRole('button', { name: /Start setup/ }).click();
 
@@ -116,5 +115,10 @@ test('onboarding project selector submits owner/repo without overflow', async ({
   await screenshot(page, 'onboarding-project-selector-selected');
 
   await wizard.getByRole('button', { name: /Create Project/ }).click();
-  await page.waitForURL('**/projects/project-1', { timeout: 3000 });
+
+  // After project creation the wizard advances to the completion screen
+  // (markStepDone → onComplete → phase='complete'), NOT a project detail URL.
+  await expect(wizard.getByText(/You're all set/i)).toBeVisible({ timeout: 3000 });
+  await assertNoOverflow(page);
+  await screenshot(page, 'onboarding-project-selector-complete');
 });

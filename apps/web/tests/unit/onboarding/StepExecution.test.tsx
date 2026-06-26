@@ -31,6 +31,26 @@ const projectStep: GeneratedStep = {
   isOptional: false,
 };
 
+const aiSetupStep: GeneratedStep = {
+  id: 'ai-setup',
+  title: 'Set up your coding agent',
+  description: 'Pick an agent and connect it.',
+  actionLabel: 'Save agent',
+  timeEstimate: '1 minute',
+  details: ['Choose from the supported agents'],
+  isOptional: false,
+};
+
+const cloudByocStep: GeneratedStep = {
+  id: 'cloud-byoc',
+  title: 'Connect your cloud',
+  description: 'Add your Hetzner or Scaleway credentials.',
+  actionLabel: 'Save credentials',
+  timeEstimate: '1 minute',
+  details: ['Bring your own cloud'],
+  isOptional: false,
+};
+
 const installation = {
   id: 'inst-1',
   userId: 'user-1',
@@ -51,20 +71,15 @@ const repo = {
 };
 
 function renderProjectStep() {
-  const onDismiss = vi.fn();
+  const onComplete = vi.fn();
 
   render(
     <MemoryRouter>
-      <StepExecution
-        steps={[projectStep]}
-        tags={['existing-github', 'has-repo']}
-        onComplete={vi.fn()}
-        onDismiss={onDismiss}
-      />
+      <StepExecution steps={[projectStep]} onComplete={onComplete} />
     </MemoryRouter>
   );
 
-  return { onDismiss };
+  return { onComplete };
 }
 
 describe('StepExecution project creation', () => {
@@ -76,7 +91,7 @@ describe('StepExecution project creation', () => {
   });
 
   it('sends the selected repository full name to project creation', async () => {
-    const { onDismiss } = renderProjectStep();
+    const { onComplete } = renderProjectStep();
 
     await waitFor(() => {
       expect(mocks.listRepositories).toHaveBeenCalledWith('inst-1');
@@ -97,6 +112,57 @@ describe('StepExecution project creation', () => {
         })
       );
     });
-    expect(onDismiss).toHaveBeenCalled();
+    await waitFor(() => expect(onComplete).toHaveBeenCalled());
+  });
+});
+
+describe('StepExecution ai-setup step', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('renders all six catalog agents and reveals the API key input after selecting one', async () => {
+    render(
+      <MemoryRouter>
+        <StepExecution steps={[aiSetupStep]} onComplete={vi.fn()} />
+      </MemoryRouter>
+    );
+
+    for (const name of ['Claude Code', 'OpenAI Codex', 'Gemini CLI', 'Mistral Vibe', 'OpenCode', 'Amp']) {
+      expect(screen.getByRole('button', { name: new RegExp(name) })).toBeInTheDocument();
+    }
+
+    // No credential input until an agent is chosen.
+    expect(document.querySelector('#onboarding-api-key')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: /Claude Code/ }));
+
+    await waitFor(() => {
+      expect(document.querySelector('#onboarding-api-key')).not.toBeNull();
+    });
+  });
+});
+
+describe('StepExecution cloud-byoc step', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('defaults to the Hetzner token input and offers a Scaleway toggle', async () => {
+    render(
+      <MemoryRouter>
+        <StepExecution steps={[cloudByocStep]} onComplete={vi.fn()} />
+      </MemoryRouter>
+    );
+
+    expect(document.querySelector('#onboarding-hetzner-token')).not.toBeNull();
+    expect(screen.getByRole('button', { name: /scaleway/i })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /scaleway/i }));
+
+    await waitFor(() => {
+      expect(document.querySelector('#onboarding-scaleway-secret')).not.toBeNull();
+    });
+    expect(document.querySelector('#onboarding-scaleway-project')).not.toBeNull();
   });
 });

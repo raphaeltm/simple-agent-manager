@@ -120,18 +120,29 @@ describe('QUESTIONS graph validation', () => {
     }
   });
 
-  // ── Tag completeness ──
+  // ── Tag vocabulary ──
 
-  it('terminal options always produce at least one tag', () => {
+  // The cloud + github questions are framed so that the affirmative option adds
+  // a tag (`byoc`, `has-repo`) and the "not yet / SAM-managed" option carries no
+  // tag — its meaning IS the absence of the tag. generatePath() branches on
+  // presence/absence, so empty-tag terminal options are intentional, not a bug.
+  it('only uses recognized tags (byoc, has-repo)', () => {
+    const recognized = new Set(['byoc', 'has-repo']);
     for (const q of QUESTIONS) {
       for (const o of q.options) {
-        if (o.next === null) {
-          expect(
-            o.tags.length,
-            `terminal option "${o.id}" in question "${q.id}" has no tags`
-          ).toBeGreaterThan(0);
+        for (const t of o.tags) {
+          expect(recognized.has(t), `option "${o.id}" emits unrecognized tag "${t}"`).toBe(true);
         }
       }
+    }
+  });
+
+  it('each tag-bearing question offers exactly one affirmative (tagged) and one absence (untagged) option', () => {
+    for (const q of QUESTIONS) {
+      const tagged = q.options.filter((o) => o.tags.length > 0);
+      const untagged = q.options.filter((o) => o.tags.length === 0);
+      expect(tagged.length, `question "${q.id}" should have one tagged option`).toBe(1);
+      expect(untagged.length, `question "${q.id}" should have one untagged option`).toBe(1);
     }
   });
 
@@ -156,22 +167,13 @@ describe('QUESTIONS graph validation', () => {
 
     enumerate(QUESTIONS[0]!.id, []);
 
-    // 3 AI choices × 2 cloud choices × 2 github choices = 12 paths
-    // BUT api-key goes to which-api-key (2 sub-choices), so:
-    // 1 (claude-pro) + 2 (api-key → anthropic/openai) + 1 (nothing) = 4 AI paths
-    // 4 × 2 cloud × 2 github = 16 paths
-    expect(allPaths.length).toBe(16);
+    // 2 cloud choices × 2 github choices = 4 paths.
+    expect(allPaths.length).toBe(4);
 
-    // Every path includes a cloud tag
-    for (const path of allPaths) {
-      const hasCloud = path.includes('byoc') || path.includes('sam-infra');
-      expect(hasCloud, `path [${path.join(', ')}] has no cloud tag`).toBe(true);
-    }
-
-    // Every path includes a github tag
-    for (const path of allPaths) {
-      const hasGithub = path.includes('has-repo') || path.includes('no-repo');
-      expect(hasGithub, `path [${path.join(', ')}] has no github tag`).toBe(true);
-    }
+    // The four paths cover every (cloud, github) combination of the two tags.
+    const signatures = allPaths
+      .map((p) => `${p.includes('byoc') ? 'byoc' : '-'}/${p.includes('has-repo') ? 'repo' : '-'}`)
+      .sort();
+    expect(signatures).toEqual(['-/-', '-/repo', 'byoc/-', 'byoc/repo']);
   });
 });
