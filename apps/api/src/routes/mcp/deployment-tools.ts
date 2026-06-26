@@ -20,6 +20,8 @@ import {
 import {
   buildComposePublishRouteDiscovery,
   buildReleaseRouteDiscovery,
+  type DeploymentRouteDiscovery,
+  type DeploymentRoutePublicDiscovery,
   type DeploymentRouteTargetOptions,
 } from '../../services/deployment-routing';
 import { getRuntimeLimits } from '../../services/limits';
@@ -36,6 +38,31 @@ import {
 } from './_helpers';
 
 type DeploymentDb = ReturnType<typeof drizzle<typeof schema>>;
+
+interface DeploymentRouteCustomDomainDiscovery {
+  id: string;
+  service: string;
+  containerPort: number;
+  routeIndex: number;
+  hostname: string;
+  url: string;
+  verificationStatus: string;
+  verificationError: string | null;
+  verifiedAt: string | null;
+  createdAt: string;
+  cnameTarget: string | null;
+  routeAvailable: boolean;
+  willBeIncludedInApplyPayload: boolean;
+}
+
+type DeploymentRoutePublicDiscoveryWithCustomDomains = DeploymentRoutePublicDiscovery & {
+  customDomains: DeploymentRouteCustomDomainDiscovery[];
+};
+
+type DeploymentRouteDiscoveryWithCustomDomains = Omit<DeploymentRouteDiscovery, 'publicRoutes'> & {
+  publicRoutes: DeploymentRoutePublicDiscoveryWithCustomDomains[];
+  customDomains: DeploymentRouteCustomDomainDiscovery[];
+};
 
 const DEFAULT_MCP_DEPLOYMENT_LOG_LIMIT = 200;
 const DEFAULT_MCP_DEPLOYMENT_LOG_MAX_LIMIT = 1000;
@@ -80,6 +107,76 @@ function emptyRouteDiscovery(env: Env, environmentId: string) {
     { composeYaml: '' },
     routeTargetOptions(env, environmentId)
   );
+}
+
+function findPublicRoute(
+  routes: DeploymentRouteDiscovery,
+  service: string,
+  port: number
+): DeploymentRoutePublicDiscovery | null {
+  return (
+    routes.publicRoutes.find((route) => route.service === service && route.containerPort === port) ??
+    null
+  );
+}
+
+async function loadRouteCustomDomains(
+  db: DeploymentDb,
+  environmentId: string,
+  routes: DeploymentRouteDiscovery
+): Promise<DeploymentRouteCustomDomainDiscovery[]> {
+  const domains = await db
+    .select({
+      id: schema.deploymentCustomDomains.id,
+      service: schema.deploymentCustomDomains.service,
+      port: schema.deploymentCustomDomains.port,
+      routeIndex: schema.deploymentCustomDomains.routeIndex,
+      hostname: schema.deploymentCustomDomains.hostname,
+      verificationStatus: schema.deploymentCustomDomains.verificationStatus,
+      verificationError: schema.deploymentCustomDomains.verificationError,
+      verifiedAt: schema.deploymentCustomDomains.verifiedAt,
+      createdAt: schema.deploymentCustomDomains.createdAt,
+    })
+    .from(schema.deploymentCustomDomains)
+    .where(eq(schema.deploymentCustomDomains.environmentId, environmentId))
+    .orderBy(schema.deploymentCustomDomains.createdAt);
+
+  return domains.map((domain) => {
+    const parent = findPublicRoute(routes, domain.service, domain.port);
+    return {
+      id: domain.id,
+      service: domain.service,
+      containerPort: domain.port,
+      routeIndex: domain.routeIndex,
+      hostname: domain.hostname,
+      url: `https://${domain.hostname}`,
+      verificationStatus: domain.verificationStatus,
+      verificationError: domain.verificationError,
+      verifiedAt: domain.verifiedAt,
+      createdAt: domain.createdAt,
+      cnameTarget: parent?.hostname ?? null,
+      routeAvailable: parent !== null,
+      willBeIncludedInApplyPayload: domain.verificationStatus === 'verified' && parent !== null,
+    };
+  });
+}
+
+async function withCustomDomains(
+  db: DeploymentDb,
+  environmentId: string,
+  routes: DeploymentRouteDiscovery
+): Promise<DeploymentRouteDiscoveryWithCustomDomains> {
+  const customDomains = await loadRouteCustomDomains(db, environmentId, routes);
+  return {
+    ...routes,
+    publicRoutes: routes.publicRoutes.map((route) => ({
+      ...route,
+      customDomains: customDomains.filter(
+        (domain) => domain.service === route.service && domain.containerPort === route.containerPort
+      ),
+    })),
+    customDomains,
+  };
 }
 
 function trimmedString(value: unknown): string | null {
@@ -393,10 +490,11 @@ export async function handleListDeploymentRoutes(
 
   const release = releases[0];
   if (!release) {
+    const routes = emptyRouteDiscovery(env, resolved.environment.id);
     return jsonTextResult(requestId, {
       environment: summarizeEnvironment(resolved.environment, resolved.taskAgentProfileId),
       latestRelease: null,
-      routes: emptyRouteDiscovery(env, resolved.environment.id),
+      routes: await withCustomDomains(db, resolved.environment.id, routes),
     });
   }
 
@@ -404,6 +502,11 @@ export async function handleListDeploymentRoutes(
     release.manifest,
     routeTargetOptions(env, resolved.environment.id)
   );
+
+  const routeDiscovery = routes ?? {
+    ...emptyRouteDiscovery(env, resolved.environment.id),
+    unavailableReason: 'release_manifest_unreadable',
+  };
 
   return jsonTextResult(requestId, {
     environment: summarizeEnvironment(resolved.environment, resolved.taskAgentProfileId),
@@ -414,10 +517,7 @@ export async function handleListDeploymentRoutes(
       source: release.source ?? 'build-on-node',
       createdAt: release.createdAt,
     },
-    routes: routes ?? {
-      ...emptyRouteDiscovery(env, resolved.environment.id),
-      unavailableReason: 'release_manifest_unreadable',
-    },
+    routes: await withCustomDomains(db, resolved.environment.id, routeDiscovery),
   });
 }
 

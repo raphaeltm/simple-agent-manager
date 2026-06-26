@@ -44,6 +44,7 @@ const {
 type Row = Record<string, unknown>;
 
 interface TestDbState {
+  deploymentCustomDomains: Row[];
   deploymentEnvironmentConfigVars: Row[];
   deploymentEnvironments: Row[];
   deploymentReleases: Row[];
@@ -111,6 +112,7 @@ function deploymentEnvironment(overrides: Row = {}): Row {
 
 function createDbState(overrides: Partial<TestDbState> = {}): TestDbState {
   return {
+    deploymentCustomDomains: [],
     deploymentEnvironmentConfigVars: [],
     deploymentEnvironments: [deploymentEnvironment()],
     deploymentReleases: [],
@@ -132,6 +134,16 @@ function fieldForColumn(column: unknown): string | null {
     [schema.deploymentEnvironmentConfigVars.envKey, 'envKey'],
     [schema.deploymentEnvironmentConfigVars.environmentId, 'environmentId'],
     [schema.deploymentEnvironmentConfigVars.id, 'id'],
+    [schema.deploymentCustomDomains.createdAt, 'createdAt'],
+    [schema.deploymentCustomDomains.environmentId, 'environmentId'],
+    [schema.deploymentCustomDomains.hostname, 'hostname'],
+    [schema.deploymentCustomDomains.id, 'id'],
+    [schema.deploymentCustomDomains.port, 'port'],
+    [schema.deploymentCustomDomains.routeIndex, 'routeIndex'],
+    [schema.deploymentCustomDomains.service, 'service'],
+    [schema.deploymentCustomDomains.verificationError, 'verificationError'],
+    [schema.deploymentCustomDomains.verificationStatus, 'verificationStatus'],
+    [schema.deploymentCustomDomains.verifiedAt, 'verifiedAt'],
     [schema.deploymentEnvironments.agentDeployDisabledAt, 'agentDeployDisabledAt'],
     [schema.deploymentEnvironments.agentDeployEnabled, 'agentDeployEnabled'],
     [schema.deploymentEnvironments.agentDeployEnabledAt, 'agentDeployEnabledAt'],
@@ -174,13 +186,20 @@ function fieldForColumn(column: unknown): string | null {
         created_at: 'createdAt',
         env_key: 'envKey',
         environment_id: 'environmentId',
+        hostname: 'hostname',
         id: 'id',
         manifest: 'manifest',
         name: 'name',
+        port: 'port',
         project_id: 'projectId',
+        route_index: 'routeIndex',
+        service: 'service',
         source: 'source',
         status: 'status',
         user_id: 'userId',
+        verification_error: 'verificationError',
+        verification_status: 'verificationStatus',
+        verified_at: 'verifiedAt',
         version: 'version',
       } as Record<string, string>
     )[name] ?? null
@@ -188,6 +207,7 @@ function fieldForColumn(column: unknown): string | null {
 }
 
 function rowsForTable(state: TestDbState, table: unknown): Row[] {
+  if (table === schema.deploymentCustomDomains) return state.deploymentCustomDomains;
   if (table === schema.deploymentEnvironments) return state.deploymentEnvironments;
   if (table === schema.deploymentEnvironmentConfigVars) {
     return state.deploymentEnvironmentConfigVars;
@@ -512,6 +532,44 @@ describe('deployment MCP tools', () => {
     };
     installDb(
       createDbState({
+        deploymentCustomDomains: [
+          {
+            createdAt: '2026-06-26T01:00:00Z',
+            environmentId: 'env-routes',
+            hostname: 'app.example.com',
+            id: 'domain-verified',
+            port: 3000,
+            routeIndex: 0,
+            service: 'frontend',
+            verificationError: null,
+            verificationStatus: 'verified',
+            verifiedAt: '2026-06-26T01:05:00Z',
+          },
+          {
+            createdAt: '2026-06-26T01:10:00Z',
+            environmentId: 'env-routes',
+            hostname: 'pending.example.com',
+            id: 'domain-pending',
+            port: 3000,
+            routeIndex: 0,
+            service: 'frontend',
+            verificationError: null,
+            verificationStatus: 'pending',
+            verifiedAt: null,
+          },
+          {
+            createdAt: '2026-06-26T01:20:00Z',
+            environmentId: 'env-routes',
+            hostname: 'old.example.com',
+            id: 'domain-stale',
+            port: 8080,
+            routeIndex: 1,
+            service: 'old-api',
+            verificationError: null,
+            verificationStatus: 'verified',
+            verifiedAt: '2026-06-26T01:25:00Z',
+          },
+        ],
         deploymentEnvironments: [deploymentEnvironment({ id: 'env-routes', name: 'staging' })],
         deploymentReleases: [
           {
@@ -552,7 +610,12 @@ describe('deployment MCP tools', () => {
       status: 'applied',
       version: 2,
     });
-    expect(payload.routes).toMatchObject({
+    const routes = payload.routes as {
+      publicRoutes: Array<{ customDomains: unknown[] }>;
+      customDomains: unknown[];
+    };
+
+    expect(routes).toMatchObject({
       publicRoutes: [
         expect.objectContaining({
           hostname: 'r1-frontend-3000-env-routes.apps.sammy.party',
@@ -562,6 +625,55 @@ describe('deployment MCP tools', () => {
       ],
       internalRoutes: [{ service: 'db', containerPort: 5432, mode: 'private' }],
     });
+    expect(routes.publicRoutes[0]?.customDomains).toEqual([
+      expect.objectContaining({
+        cnameTarget: 'r1-frontend-3000-env-routes.apps.sammy.party',
+        containerPort: 3000,
+        hostname: 'app.example.com',
+        id: 'domain-verified',
+        routeAvailable: true,
+        service: 'frontend',
+        url: 'https://app.example.com',
+        verificationStatus: 'verified',
+        willBeIncludedInApplyPayload: true,
+      }),
+      expect.objectContaining({
+        cnameTarget: 'r1-frontend-3000-env-routes.apps.sammy.party',
+        containerPort: 3000,
+        hostname: 'pending.example.com',
+        id: 'domain-pending',
+        routeAvailable: true,
+        service: 'frontend',
+        url: 'https://pending.example.com',
+        verificationStatus: 'pending',
+        willBeIncludedInApplyPayload: false,
+      }),
+    ]);
+    expect(routes.customDomains).toEqual([
+      expect.objectContaining({
+        cnameTarget: 'r1-frontend-3000-env-routes.apps.sammy.party',
+        hostname: 'app.example.com',
+        routeAvailable: true,
+        url: 'https://app.example.com',
+        verificationStatus: 'verified',
+        willBeIncludedInApplyPayload: true,
+      }),
+      expect.objectContaining({
+        cnameTarget: 'r1-frontend-3000-env-routes.apps.sammy.party',
+        hostname: 'pending.example.com',
+        routeAvailable: true,
+        verificationStatus: 'pending',
+        willBeIncludedInApplyPayload: false,
+      }),
+      expect.objectContaining({
+        cnameTarget: null,
+        hostname: 'old.example.com',
+        routeAvailable: false,
+        service: 'old-api',
+        verificationStatus: 'verified',
+        willBeIncludedInApplyPayload: false,
+      }),
+    ]);
     expect(JSON.stringify(payload)).not.toContain('composeYaml');
   });
 

@@ -54,7 +54,7 @@ SAM exposes these MCP tools for deployment. They are the only interface you need
 | \`build_and_publish(environment, reference?, workingDir?)\` | Start an async server-side Compose build/publish job and return a durable \`publishJobId\`. |
 | \`get_publish_status(publishJobId, sinceSeq?, limit?)\` | Poll the build/publish job for status, events, release details, and sanitized failure diagnostics. |
 | \`preview_deployment_routes(environment, composeYaml)\` | Preview which Compose ports will get public SAM URLs before deploying. \`mode: host\` ports are internal/private; other ports are public unless explicitly marked private. |
-| \`list_deployment_routes(environment)\` | List the public URLs and internal routes for the latest release in an accessible environment. |
+| \`list_deployment_routes(environment)\` | List the public URLs, custom domains, and internal routes for the latest release in an accessible environment. |
 | \`read_deployment_logs(environment, source?, level?, container?, since?, until?, search?, cursor?, limit?)\` | Read deployment-node logs for an environment to verify the release and debug failures. |
 | \`check_dns_status()\` | Check DNS propagation and TLS validity for **this workspace's own** \`ws-*\` URL. It verifies the workspace is reachable at the Cloudflare edge — it does NOT check a deployed app's public route. |
 
@@ -116,6 +116,8 @@ Before publishing, call \`preview_deployment_routes(environment, composeYaml)\` 
 - \`internalRoutes\` for private ports, including \`mode: host\` service ports.
 - \`publicUrlPattern\`, the deterministic hostname pattern for that environment.
 
+If the application needs to know its public hostnames before it starts, use this preview output before \`build_and_publish\`. For example, set framework configuration such as Django \`ALLOWED_HOSTS\` / CSRF trusted origins, CORS origins, OAuth callback URLs, webhook callback URLs, or canonical app URLs from the returned public route URLs. If those values are deployment Variables or Secrets, call \`set_deployment_environment_config\` after previewing and before publishing. Do not guess route hostnames by hand when the MCP tool can compute them.
+
 ### Step 4 — Build and publish (the deploy action)
 
 Call \`build_and_publish(environment, reference?, workingDir?)\`:
@@ -138,7 +140,7 @@ This tool requires the named environment to be active, agent deployment to be en
 
 After the publish job reaches \`succeeded\`:
 
-- Call \`list_deployment_routes(environment)\` to see the generated public URLs for the latest release and confirm internal services such as databases or queues were not given public DNS.
+- Call \`list_deployment_routes(environment)\` to see the generated public URLs, custom domains, and internal routes for the latest release. Confirm internal services such as databases or queues were not given public DNS. For custom domains, check the expected \`cnameTarget\`, \`verificationStatus\`, and whether the domain \`willBeIncludedInApplyPayload\`.
 - Call \`read_deployment_logs(environment)\` to confirm the deployment node applied the release and the containers are healthy. Deployment nodes also persist release-scoped apply events for phases such as fetch, compose config, artifact load, compose up, health check, Caddy reload, success, failure, and revert. Read the logs/events before guessing at fixes.
 - Call \`check_dns_status()\` to confirm **this workspace's** \`ws-*\` URL is reachable with valid TLS at the edge. Note this checks the workspace itself, not the deployed app's public route — use \`read_deployment_logs\` to confirm the deployed containers are serving.
 
@@ -153,6 +155,7 @@ After the publish job reaches \`succeeded\`:
 - **Skipping apply verification.** A successful publish job records a release; it does not prove the containers are healthy. Always read deployment logs/apply events to confirm.
 - **Guessing when an environment is missing.** If \`list_deployment_environments()\` is empty, the user must create/enable an environment. Tell them; do not improvise.
 - **Using rejected volume types.** Host bind mounts, Docker socket mounts, tmpfs, external volumes, and custom drivers are rejected. Use safe named volumes.
+- **Forgetting route-dependent app config.** Frameworks often reject unknown hosts/origins. Preview routes first, then set allowed hosts, trusted origins, CORS origins, callback URLs, or canonical URL variables before publishing.
 - **Accidentally exposing databases or queues.** Use Compose long-syntax \`ports:\` with \`mode: host\` for internal/private route hints, or mark the service/port private in \`x-sam-routes\`. Verify with \`preview_deployment_routes\` before publishing.
 
 ---
@@ -163,9 +166,10 @@ After the publish job reaches \`succeeded\`:
 2. \`list_deployment_environment_config(environment)\` → review; \`set_deployment_environment_config(...)\` for anything missing (Secrets via \`isSecret: true\`).
 3. Author the Compose stack with \`\${VAR}\` placeholders and route hints.
 4. \`preview_deployment_routes(environment, composeYaml)\` → confirm public URLs and internal routes.
-5. \`build_and_publish(environment)\` → capture \`publishJobId\`.
-6. \`get_publish_status(publishJobId)\` until terminal.
-7. \`list_deployment_routes(environment)\`, \`read_deployment_logs(environment)\`, and \`check_dns_status()\` → verify it is actually running.`;
+5. \`set_deployment_environment_config(...)\` again if previewed URLs must be written into app config.
+6. \`build_and_publish(environment)\` → capture \`publishJobId\`.
+7. \`get_publish_status(publishJobId)\` until terminal.
+8. \`list_deployment_routes(environment)\`, \`read_deployment_logs(environment)\`, and \`check_dns_status()\` → verify it is actually running.`;
 
 export function handleGetDeploymentGuide(requestId: string | number | null): JsonRpcResponse {
   return jsonRpcSuccess(requestId, {

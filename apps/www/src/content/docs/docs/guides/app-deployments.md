@@ -13,7 +13,7 @@ Agents publish with a single tool:
 
 This tool requires the named deployment environment to be active, agent deployment to be enabled by a user, and the agent profile to satisfy that environment's policy.
 
-Agents can preview route behavior before publishing with `preview_deployment_routes(environment, composeYaml)` and inspect the latest release's generated routes with `list_deployment_routes(environment)`.
+Agents can preview route behavior before publishing with `preview_deployment_routes(environment, composeYaml)` and inspect the latest release's generated routes and custom domains with `list_deployment_routes(environment)`.
 
 The release submission format is Docker Compose YAML with SAM extensions. SAM supports multi-service Compose stacks, preserves service topology including Docker Model Runner `provider:` services, and derives route hints from either `x-sam-routes` or compose service `ports:`. Compose long-syntax `ports:` entries with `mode: host` are treated as internal/private route hints; other `ports:` entries are public by default unless an explicit private `x-sam-routes` entry suppresses them.
 
@@ -63,6 +63,8 @@ Compose interpolation only affects placeholders such as `${DATABASE_URL}`. It do
 For compose-publish releases, SAM preserves safe named volumes declared in the Compose file. Host bind mounts, Docker socket mounts, `tmpfs`, external volumes, and custom volume drivers are rejected.
 
 Use `mode: host` for service ports such as databases, queues, and workers that should be reachable only inside the deployed Compose stack/private network. Public web/API entrypoints should use normal `ports:` entries or explicit public `x-sam-routes`.
+
+If an app needs to know its public hostname before it starts, agents should preview routes before publishing and then write the returned URLs into deployment configuration. Common examples are Django `ALLOWED_HOSTS` / CSRF trusted origins, CORS origins, OAuth callback URLs, webhook callback URLs, and canonical app URL variables.
 
 ## Custom domains
 

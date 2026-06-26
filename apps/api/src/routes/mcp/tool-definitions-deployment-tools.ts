@@ -63,7 +63,7 @@ export const DEPLOYMENT_TOOLS = [
   {
     name: 'preview_deployment_routes',
     description:
-      'Preview SAM route classification and generated public URLs for a Docker Compose file without deploying it. Requires an accessible deployment environment because public URLs are derived from the environment id and base domain. Compose ports with mode: host are treated as internal/private; other ports are public unless an explicit private route suppresses them.',
+      'Preview SAM route classification and generated public URLs for a Docker Compose file without deploying it. Use this before publishing when app configuration needs public hosts/origins/callback URLs. Requires an accessible deployment environment because public URLs are derived from the environment id and base domain. Compose ports with mode: host are treated as internal/private; other ports are public unless an explicit private route suppresses them.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -84,7 +84,7 @@ export const DEPLOYMENT_TOOLS = [
   {
     name: 'list_deployment_routes',
     description:
-      'List generated public URLs and internal routes for the latest release in an accessible deployment environment. This is read-only and never returns the stored Compose file or secret values.',
+      'List generated public URLs, custom domains, and internal routes for the latest release in an accessible deployment environment. This is read-only and never returns the stored Compose file or secret values.',
     inputSchema: {
       type: 'object' as const,
       properties: {

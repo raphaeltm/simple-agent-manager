@@ -517,6 +517,8 @@ describe('MCP Routes', () => {
       expect(text).toContain('preview_deployment_routes');
       expect(text).toContain('list_deployment_routes');
       expect(text).toContain('mode: host');
+      expect(text).toContain('ALLOWED_HOSTS');
+      expect(text).toContain('custom domains');
       expect(text).toContain('Variables');
       expect(text).toContain('Secrets');
       expect(text).toContain('read_deployment_logs');
