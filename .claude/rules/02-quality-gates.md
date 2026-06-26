@@ -120,6 +120,16 @@ Before finalizing tests, ask:
 
 For exported helpers that return canonical domain types, include at least one direct malformed-domain test when the codebase separates structural validation from semantic validation. A resolver, converter, or parser success result must prove the canonical validation helper ran, not just the lower-level schema parser.
 
+### External System Gate Diagnostics
+
+When a health gate, readiness gate, reconciler, or deploy/apply workflow decides pass/fail from an external system snapshot, the failure path MUST preserve diagnosable state before cleanup, revert, or retry can destroy the evidence.
+
+Required coverage for external-system gates:
+- Emit a Warn-or-higher structured diagnostic that includes the evaluated resources and the exact blockers that caused the gate to fail.
+- Surface the blockers in the returned error, observed state, or control-plane payload that operators can inspect after cleanup.
+- Redact secrets before logging or surfacing raw external command output.
+- Add a behavioral regression test for the timeout/failure path that proves the diagnostic and surfaced blockers are produced before cleanup removes the underlying resources.
+
 ## Post-Mortem and Process Fix Requirements (Mandatory for Bug Fixes)
 
 Every PR that fixes a bug MUST include a post-mortem and process improvement. Bug fixes without process fixes only fix the symptom — the class of bug will recur.

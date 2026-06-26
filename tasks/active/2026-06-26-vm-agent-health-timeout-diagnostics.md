@@ -69,6 +69,10 @@ The health gate treated timeout as a scalar error instead of preserving the syst
 
 The defect was discovered while diagnosing the wedged `dexxy` production deployment on June 26, 2026. Production D1 showed `failed-initial` with a bare timeout message and no `observed_services_json`, while node debug evidence showed containers had stayed running for the full timeout window.
 
+### Why it wasn't caught
+
+Existing tests covered the health gate's pass/fail semantics but not the timeout observability contract after failure cleanup. The mount guard tests covered short-form volume strings but not the valid long-form map syntax Docker Compose accepts.
+
 ### Class of bug
 
 Health gate / system boundary is a black box on failure: failure state logged at Debug, never surfaced. A related parser-tolerance bug allowed a valid input shape to bypass a safety guard.
@@ -76,3 +80,5 @@ Health gate / system boundary is a black box on failure: failure state logged at
 ### Process fix
 
 For future deployment-node gates that make pass/fail decisions from an external system snapshot, the failure path must include a Warn-or-higher structured diagnostic with the evaluated resources and the specific blockers, plus a behavioral test that proves the diagnostic survives the cleanup/revert path. Compose parsers used for safety checks must include valid short-form and long-form syntax fixtures before shipping.
+
+Concrete rule update: `.claude/rules/02-quality-gates.md` now requires external-system gate diagnostics to preserve evaluated resources and exact blockers before cleanup, redact raw external output, surface blockers after cleanup, and include behavioral timeout/failure tests.
