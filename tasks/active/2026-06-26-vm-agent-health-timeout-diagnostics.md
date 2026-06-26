@@ -24,8 +24,8 @@ The mount guard also silently skips valid Compose files that use long-form map `
 - [x] Add behavioral Go tests for timeout diagnostics and long-form mount guard enforcement.
 - [x] Add post-mortem with process fix before archiving.
 - [x] Run local VM-agent Go tests.
-- [ ] Run required specialist reviews: `go-specialist`, `task-completion-validator`, and test coverage review.
-- [ ] Deploy to staging only after deleting existing staging deployment nodes, then verify on a freshly provisioned node per rule 27.
+- [x] Run required specialist reviews: `go-specialist`, `task-completion-validator`, and test coverage review.
+- [x] Deploy to staging only after deleting existing staging deployment nodes, then verify on a freshly provisioned node per rule 27.
 
 ## Acceptance Criteria
 
@@ -34,6 +34,24 @@ The mount guard also silently skips valid Compose files that use long-form map `
 - The observed error message or services payload lets the control plane identify the routed service that blocked the gate.
 - Long-form Compose volume entries such as `type/source/target` are parsed and still trigger the `/mnt/sam-env-*` mountpoint guard.
 - Existing routed service health semantics remain unchanged.
+
+## Verification
+
+- `go test ./internal/deploy` in `packages/vm-agent`
+- `go test ./...` in `packages/vm-agent`
+- `pnpm lint`
+- `pnpm typecheck`
+- `pnpm test`
+- `pnpm build`
+- Staging workflow `28211432012` passed, including VM-agent build/upload, staging health check, and smoke tests.
+- Rule 27 fresh-node verification: deleted user-visible staging nodes before deploy, created fresh node `01KW0SGZGJ44BG0TRF5DKSN2ZG` after staging VM-agent upload, observed `status=running`, `healthStatus=healthy`, and `lastHeartbeatAt=2026-06-26T01:45:19.554Z`, then deleted the node successfully.
+- Staging note: a stale non-user-visible `system_anonymous_trials` D1 row from May 2026 remained inaccessible through the primary user's node API; the primary staging API returned `[]` before and after the fresh-node verification cleanup.
+
+## Reviews
+
+- `go-specialist`: PASS after redaction hardening for service-state fields on the timeout path.
+- `test-engineer`: PASS; behavioral tests cover health timeout diagnostics, engine observed state, and long-form mount guard enforcement.
+- `task-completion-validator`: PASS; checklist and acceptance criteria covered by diff and validation commands.
 
 ## Post-Mortem
 
