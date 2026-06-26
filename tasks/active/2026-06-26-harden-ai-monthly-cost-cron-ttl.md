@@ -64,22 +64,22 @@ Update the relevant agent rule or checklist so billing/control-plane safety writ
 
 ## Implementation Checklist
 
-- [ ] Add a typed TTL resolver near the monthly-cost cron that uses `DEFAULT_AI_MONTHLY_COST_CACHE_TTL_SECONDS`, rejects invalid/empty/zero/negative/NaN/below-min values by falling back to the shared default, floors positive fractional values, and caps excessively large values to a documented maximum.
-- [ ] Use the resolver in `runMonthlyCostAggregation()` so KV writes never receive invalid `expirationTtl` from configuration.
-- [ ] Update `apps/api/src/env.ts` comment if the TTL cap/range becomes externally meaningful.
-- [ ] Add focused unit tests for `runMonthlyCostAggregation()`:
-  - [ ] disabled when `AI_GATEWAY_ID` is absent.
-  - [ ] aggregates per-user costs and writes expected `ai-monthly-cost:{userId}:{YYYY-MM}` keys with safe TTL.
-  - [ ] invalid/negative TTL falls back to `DEFAULT_AI_MONTHLY_COST_CACHE_TTL_SECONDS`.
-  - [ ] excessively high TTL is capped.
-  - [ ] Gateway iteration failure returns `errors: 1` without KV writes.
-  - [ ] per-user KV write failures increment `errors` without stopping other users.
-- [ ] Mock `iterateGatewayLogs` at the service boundary and control dates for deterministic month keys.
-- [ ] Add direct TTL resolver tests if the resolver is exported.
-- [ ] Add the bug-class process fix required by `.claude/rules/02-quality-gates.md`.
-- [ ] Run targeted API unit tests:
-  - [ ] `pnpm --filter @simple-agent-manager/api test -- tests/unit/services/ai-monthly-cost-cron.test.ts tests/unit/ai-gateway-logs.test.ts tests/unit/services/ai-token-budget.test.ts tests/unit/usage-budget-routes.test.ts`
-- [ ] Run API lint and typecheck for touched code.
+- [x] Add a typed TTL resolver near the monthly-cost cron that uses `DEFAULT_AI_MONTHLY_COST_CACHE_TTL_SECONDS`, rejects invalid/empty/zero/negative/NaN/below-min values by falling back to the shared default, floors positive fractional values, and caps excessively large values to a documented maximum.
+- [x] Use the resolver in `runMonthlyCostAggregation()` so KV writes never receive invalid `expirationTtl` from configuration.
+- [x] Update `apps/api/src/env.ts` comment if the TTL cap/range becomes externally meaningful.
+- [x] Add focused unit tests for `runMonthlyCostAggregation()`:
+  - [x] disabled when `AI_GATEWAY_ID` is absent.
+  - [x] aggregates per-user costs and writes expected `ai-monthly-cost:{userId}:{YYYY-MM}` keys with safe TTL.
+  - [x] invalid/negative TTL falls back to `DEFAULT_AI_MONTHLY_COST_CACHE_TTL_SECONDS`.
+  - [x] excessively high TTL is capped.
+  - [x] Gateway iteration failure returns `errors: 1` without KV writes.
+  - [x] per-user KV write failures increment `errors` without stopping other users.
+- [x] Mock `iterateGatewayLogs` at the service boundary and control dates for deterministic month keys.
+- [x] Add direct TTL resolver tests if the resolver is exported.
+- [x] Add the bug-class process fix required by `.claude/rules/02-quality-gates.md`.
+- [x] Run targeted API unit tests:
+  - [x] `pnpm --filter @simple-agent-manager/api test -- tests/unit/services/ai-monthly-cost-cron.test.ts tests/unit/ai-gateway-logs.test.ts tests/unit/services/ai-token-budget.test.ts tests/unit/usage-budget-routes.test.ts`
+- [x] Run API lint and typecheck for touched code.
 - [ ] Run broader affected tests if targeted validation exposes a shared issue.
 - [ ] Run relevant local specialist reviews before PR: `task-completion-validator`, `cloudflare-specialist`, `env-validator`, `constitution-validator`, and `test-engineer`.
 - [ ] Open a PR describing this as fail-open budget-control hardening, wait for CI, merge when green, and monitor production deploy.
