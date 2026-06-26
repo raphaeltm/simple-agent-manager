@@ -147,27 +147,28 @@ test('ai-setup inline form: agent grid, api-key, OAuth, and SAM budget', async (
   await assertNoOverflow(page);
   await screenshot(page, 'onboarding-inline-ai-agent-grid');
 
-  // Claude Code → API key input present.
+  // Claude Code → API key input present. Screenshot the empty field BEFORE
+  // filling so no secret value (even a test value) is ever captured to disk.
   await wizard.getByRole('button', { name: /Claude Code/ }).click();
   await expect(page.locator('#onboarding-api-key')).toBeVisible();
-  await page.locator('#onboarding-api-key').fill('sk-test-key');
   await assertNoOverflow(page);
   await screenshot(page, 'onboarding-inline-ai-apikey');
+  await page.locator('#onboarding-api-key').fill('sk-test-key');
 
   // Claude Code → Subscription (OAuth token) widget — the regression target.
   await wizard.getByRole('button', { name: 'Subscription' }).click();
   await expect(page.locator('#onboarding-oauth-token')).toBeVisible();
-  await page.locator('#onboarding-oauth-token').fill('claude-oauth-token');
   await assertNoOverflow(page);
   await screenshot(page, 'onboarding-inline-ai-oauth-claude');
+  await page.locator('#onboarding-oauth-token').fill('claude-oauth-token');
 
   // OpenAI Codex → ChatGPT subscription → auth.json textarea.
   await wizard.getByRole('button', { name: /OpenAI Codex/ }).click();
   await wizard.getByRole('button', { name: 'ChatGPT subscription' }).click();
   await expect(page.locator('textarea#onboarding-oauth-token')).toBeVisible();
-  await page.locator('#onboarding-oauth-token').fill('{"OPENAI_API_KEY":"x"}');
   await assertNoOverflow(page);
   await screenshot(page, 'onboarding-inline-ai-oauth-codex');
+  await page.locator('#onboarding-oauth-token').fill('{"OPENAI_API_KEY":"x"}');
 
   // SAM-managed AI → inline budget inputs.
   await wizard.getByRole('button', { name: 'SAM-managed AI' }).click();
@@ -187,20 +188,21 @@ test('cloud-byoc inline form: Hetzner and Scaleway provider toggle', async ({ pa
   await setupMocks(page, { existingAgent: true, existingCloud: false, existingGithub: true });
   const wizard = await reachExecution(page, 'byoc');
 
-  // Hetzner is the default provider.
+  // Hetzner is the default provider. Screenshot the empty field BEFORE filling
+  // so no credential value is ever captured to disk.
   await expect(page.locator('#onboarding-hetzner-token')).toBeVisible({ timeout: 5000 });
-  await page.locator('#onboarding-hetzner-token').fill('hetzner-token-xyz');
   await assertNoOverflow(page);
   await screenshot(page, 'onboarding-inline-cloud-hetzner');
+  await page.locator('#onboarding-hetzner-token').fill('hetzner-token-xyz');
 
   // Switch to Scaleway → secret key + project ID.
   await wizard.getByRole('button', { name: 'scaleway' }).click();
   await expect(page.locator('#onboarding-scaleway-secret')).toBeVisible();
   await expect(page.locator('#onboarding-scaleway-project')).toBeVisible();
-  await page.locator('#onboarding-scaleway-secret').fill('scw-secret');
-  await page.locator('#onboarding-scaleway-project').fill('proj-1234');
   await assertNoOverflow(page);
   await screenshot(page, 'onboarding-inline-cloud-scaleway');
+  await page.locator('#onboarding-scaleway-secret').fill('scw-secret');
+  await page.locator('#onboarding-scaleway-project').fill('proj-1234');
 });
 
 /* ─── Scenario C: Cloud SAM-managed step (confirmation) ─── */

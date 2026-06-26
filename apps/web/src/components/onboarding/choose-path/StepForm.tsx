@@ -102,10 +102,17 @@ export function StepForm({
         <>
           {/* Agent selection — all catalog agents */}
           <div className="mb-4">
-            <label className="block text-xs font-medium text-fg-muted mb-1.5">
+            <span
+              id="onboarding-agent-group-label"
+              className="block text-xs font-medium text-fg-muted mb-1.5"
+            >
               Coding agent
-            </label>
-            <div className="grid grid-cols-2 gap-2">
+            </span>
+            <div
+              role="group"
+              aria-labelledby="onboarding-agent-group-label"
+              className="grid grid-cols-2 gap-2"
+            >
               {AGENT_CATALOG.map((agent) => (
                 <button
                   key={agent.id}
@@ -119,7 +126,7 @@ export function StepForm({
                   }`}
                 >
                   <span className="block text-sm font-medium">{agent.name}</span>
-                  <span className="block text-[11px] text-fg-muted/70 mt-0.5">
+                  <span className="block text-xs text-fg-muted/70 mt-0.5">
                     {agent.description}
                   </span>
                 </button>
@@ -130,10 +137,17 @@ export function StepForm({
           {/* Auth-method selection — driven by the selected agent's capabilities */}
           {selectedAgentId && methods.length > 0 && (
             <div className="mb-3">
-              <label className="block text-xs font-medium text-fg-muted mb-1.5">
+              <span
+                id="onboarding-auth-group-label"
+                className="block text-xs font-medium text-fg-muted mb-1.5"
+              >
                 How do you want to connect?
-              </label>
-              <div className="flex gap-2 flex-wrap">
+              </span>
+              <div
+                role="group"
+                aria-labelledby="onboarding-auth-group-label"
+                className="flex gap-2 flex-wrap"
+              >
                 {methods.map((m) => (
                   <button
                     key={m}
@@ -197,6 +211,9 @@ export function StepForm({
                   id="onboarding-oauth-token"
                   rows={6}
                   autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="off"
+                  spellCheck={false}
                   value={form.oauthToken}
                   onChange={(e) =>
                     setForm((prev) => ({ ...prev, oauthToken: e.target.value }))
@@ -242,7 +259,7 @@ export function StepForm({
                 <div>
                   <label
                     htmlFor="onboarding-daily-input"
-                    className="block text-[11px] text-fg-muted mb-1"
+                    className="block text-xs text-fg-muted mb-1"
                   >
                     Daily input token limit
                   </label>
@@ -264,7 +281,7 @@ export function StepForm({
                 <div>
                   <label
                     htmlFor="onboarding-daily-output"
-                    className="block text-[11px] text-fg-muted mb-1"
+                    className="block text-xs text-fg-muted mb-1"
                   >
                     Daily output token limit
                   </label>
@@ -286,7 +303,7 @@ export function StepForm({
                 <div>
                   <label
                     htmlFor="onboarding-monthly-cap"
-                    className="block text-[11px] text-fg-muted mb-1"
+                    className="block text-xs text-fg-muted mb-1"
                   >
                     Monthly cost cap (USD)
                   </label>
@@ -345,10 +362,17 @@ export function StepForm({
         <>
           {/* Provider toggle */}
           <div className="mb-3">
-            <label className="block text-xs font-medium text-fg-muted mb-1.5">
+            <span
+              id="onboarding-cloud-group-label"
+              className="block text-xs font-medium text-fg-muted mb-1.5"
+            >
               Cloud provider
-            </label>
-            <div className="flex gap-2 flex-wrap">
+            </span>
+            <div
+              role="group"
+              aria-labelledby="onboarding-cloud-group-label"
+              className="flex gap-2 flex-wrap"
+            >
               {(['hetzner', 'scaleway'] as const).map((provider) => (
                 <button
                   key={provider}

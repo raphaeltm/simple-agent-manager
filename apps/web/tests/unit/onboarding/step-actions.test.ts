@@ -84,6 +84,25 @@ describe('executeStep', () => {
     vi.mocked(validateCredential).mockResolvedValue({ valid: true });
   });
 
+  // ── ai-setup: no auth method chosen ──
+
+  describe('ai-setup / no auth method', () => {
+    it('throws when an agent is chosen but selectedAuthMethod is null', async () => {
+      const form: StepFormState = {
+        ...INITIAL_FORM,
+        selectedAgent: 'claude-code',
+        selectedAuthMethod: null,
+      };
+      await expect(executeStep('ai-setup', form)).rejects.toThrow(
+        'Please choose how to connect this agent'
+      );
+      // No credential/settings call should fire when the method is unresolved.
+      expect(validateAgentCredential).not.toHaveBeenCalled();
+      expect(saveAgentCredential).not.toHaveBeenCalled();
+      expect(saveAgentSettings).not.toHaveBeenCalled();
+    });
+  });
+
   // ── ai-setup: api-key ──
 
   describe('ai-setup / api-key', () => {
@@ -119,6 +138,15 @@ describe('executeStep', () => {
 
       await executeStep('ai-setup', apiKeyForm());
       expect(callOrder).toEqual(['validate', 'save']);
+    });
+
+    it('validates with the exact agentType + credentialKind + trimmed credential payload', async () => {
+      await executeStep('ai-setup', apiKeyForm({ selectedAgent: 'claude-code', apiKey: '  sk-test  ' }));
+      expect(validateAgentCredential).toHaveBeenCalledWith({
+        agentType: 'claude-code',
+        credentialKind: 'api-key',
+        credential: 'sk-test',
+      });
     });
 
     it('does not call save when validation fails', async () => {
@@ -203,6 +231,22 @@ describe('executeStep', () => {
       );
       expect(updateUserAiBudget).toHaveBeenCalledWith({
         dailyInputTokenLimit: 100000,
+        monthlyCostCapUsd: 25,
+      });
+    });
+
+    it('sends a positive dailyOutputTokenLimit when provided', async () => {
+      await executeStep(
+        'ai-setup',
+        samForm({
+          dailyInputTokenLimit: '100000',
+          dailyOutputTokenLimit: '50000',
+          monthlyCostCapUsd: '25',
+        })
+      );
+      expect(updateUserAiBudget).toHaveBeenCalledWith({
+        dailyInputTokenLimit: 100000,
+        dailyOutputTokenLimit: 50000,
         monthlyCostCapUsd: 25,
       });
     });
