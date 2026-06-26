@@ -10,90 +10,83 @@ describe('generatePath', () => {
   // Helper to extract step IDs
   const ids = (steps: GeneratedStep[]) => steps.map((s) => s.id);
 
-  // ── AI step branching ──
-  // Each case is (label, input tags, expected step ids). Parametrized so the
-  // branch matrix reads as a table rather than eight near-identical blocks.
+  // ── Step order & cloud branching ──
+  // Each case is (label, input tags, expected step ids). The path is now fully
+  // agent-neutral: ai-setup is ALWAYS emitted (agent + connection method are
+  // chosen inline), the cloud step branches on `byoc`, github is always present,
+  // and project is always last. Only `byoc` and `has-repo` influence the shape.
   it.each([
-    ['claude-pro + hetzner + repo', ['oauth', 'has-claude', 'byoc', 'has-repo'], ['ai-oauth', 'cloud-hetzner', 'github', 'project']],
-    ['claude-pro + no-cloud + no-repo', ['oauth', 'has-claude', 'sam-infra', 'no-repo'], ['ai-oauth', 'cloud-sam', 'github', 'project']],
-    ['api-key + anthropic + hetzner + repo', ['has-api-key', 'user-api-key', 'has-claude', 'anthropic-key', 'has-hetzner', 'byoc', 'has-repo'], ['ai-apikey', 'cloud-hetzner', 'github', 'project']],
-    ['api-key + openai + no-cloud + repo', ['has-api-key', 'user-api-key', 'has-openai', 'openai-key', 'no-cloud', 'sam-infra', 'has-repo'], ['ai-apikey', 'cloud-sam', 'github', 'project']],
-    ['sam-billing + no-cloud + no-repo', ['no-ai', 'sam-billing', 'no-cloud', 'sam-infra', 'no-repo'], ['ai-sam', 'cloud-sam', 'github', 'project']],
-    ['sam-billing + hetzner + repo', ['no-ai', 'sam-billing', 'has-hetzner', 'byoc', 'has-repo'], ['ai-sam', 'cloud-hetzner', 'github', 'project']],
-    ['api-key + openai + hetzner + no-repo', ['has-api-key', 'user-api-key', 'has-openai', 'openai-key', 'has-hetzner', 'byoc', 'no-repo'], ['ai-apikey', 'cloud-hetzner', 'github', 'project']],
-    ['api-key + anthropic + no-cloud + no-repo', ['has-api-key', 'user-api-key', 'has-claude', 'anthropic-key', 'no-cloud', 'sam-infra', 'no-repo'], ['ai-apikey', 'cloud-sam', 'github', 'project']],
+    ['byoc + repo', ['byoc', 'has-repo'], ['ai-setup', 'cloud-byoc', 'github', 'project']],
+    ['byoc + no-repo', ['byoc'], ['ai-setup', 'cloud-byoc', 'github', 'project']],
+    ['sam-managed + repo', ['has-repo'], ['ai-setup', 'cloud-sam', 'github', 'project']],
+    ['sam-managed + no-repo', [], ['ai-setup', 'cloud-sam', 'github', 'project']],
   ])('%s → %j', (_label, tags, expected) => {
     expect(ids(generatePath(tags))).toEqual(expected);
   });
 
-  // ── Edge cases: no AI step produced ──
+  // ── ai-setup is always present and agent-neutral ──
 
-  it('empty tags → no AI step, only [cloud-sam, github, project]', () => {
-    const steps = generatePath([]);
-    expect(ids(steps)).toEqual(['cloud-sam', 'github', 'project']);
+  it('always emits the ai-setup step regardless of tags', () => {
+    expect(ids(generatePath([]))).toContain('ai-setup');
+    expect(ids(generatePath(['byoc', 'has-repo']))).toContain('ai-setup');
   });
 
-  it('oauth without has-claude → no AI step produced', () => {
-    const steps = generatePath(['oauth', 'byoc', 'has-repo']);
-    expect(ids(steps)).not.toContain('ai-oauth');
-    expect(ids(steps)).not.toContain('ai-apikey');
-    expect(ids(steps)).not.toContain('ai-sam');
+  it('never emits any Claude-specific or per-provider AI step id', () => {
+    const steps = ids(generatePath(['byoc', 'has-repo']));
+    for (const dead of ['ai-oauth', 'ai-apikey', 'ai-sam']) {
+      expect(steps).not.toContain(dead);
+    }
   });
 
-  it('has-claude without oauth → no AI-oauth step (falls through to no AI step)', () => {
-    const steps = generatePath(['has-claude', 'byoc', 'has-repo']);
-    expect(ids(steps)).not.toContain('ai-oauth');
+  // ── Cloud branching ──
+
+  it('byoc tag produces cloud-byoc (own cloud account)', () => {
+    const steps = ids(generatePath(['byoc']));
+    expect(steps).toContain('cloud-byoc');
+    expect(steps).not.toContain('cloud-sam');
   });
 
-  // ── isOptional behavior ──
-
-  it('existing-agent tag marks AI step as isOptional', () => {
-    const steps = generatePath(['oauth', 'has-claude', 'byoc', 'has-repo', 'existing-agent']);
-    const aiStep = steps.find((s) => s.id === 'ai-oauth');
-    expect(aiStep?.isOptional).toBe(true);
+  it('absence of byoc produces cloud-sam (SAM-managed)', () => {
+    const steps = ids(generatePath([]));
+    expect(steps).toContain('cloud-sam');
+    expect(steps).not.toContain('cloud-byoc');
   });
 
-  it('existing-agent tag marks ai-sam step as isOptional', () => {
-    const steps = generatePath(['no-ai', 'sam-billing', 'sam-infra', 'no-repo', 'existing-agent']);
-    const aiStep = steps.find((s) => s.id === 'ai-sam');
-    expect(aiStep?.isOptional).toBe(true);
+  // ── isOptional behavior (existing-* pre-population) ──
+
+  it('existing-agent tag marks ai-setup as isOptional', () => {
+    const steps = generatePath(['byoc', 'has-repo', 'existing-agent']);
+    expect(steps.find((s) => s.id === 'ai-setup')?.isOptional).toBe(true);
   });
 
-  it('ai-sam step is NOT optional without existing-agent tag', () => {
-    const steps = generatePath(['no-ai', 'sam-billing', 'sam-infra', 'no-repo']);
-    const aiStep = steps.find((s) => s.id === 'ai-sam');
-    expect(aiStep?.isOptional).toBe(false);
+  it('ai-setup is NOT optional without existing-agent tag', () => {
+    const steps = generatePath(['byoc', 'has-repo']);
+    expect(steps.find((s) => s.id === 'ai-setup')?.isOptional).toBe(false);
   });
 
-  it('existing-agent tag marks ai-apikey step as isOptional', () => {
-    const steps = generatePath(['user-api-key', 'has-claude', 'byoc', 'has-repo', 'existing-agent']);
-    const aiStep = steps.find((s) => s.id === 'ai-apikey');
-    expect(aiStep?.isOptional).toBe(true);
+  it('existing-cloud tag marks cloud-byoc step as isOptional', () => {
+    const steps = generatePath(['byoc', 'has-repo', 'existing-cloud']);
+    expect(steps.find((s) => s.id === 'cloud-byoc')?.isOptional).toBe(true);
   });
 
-  it('existing-cloud tag marks cloud-hetzner step as isOptional', () => {
-    const steps = generatePath(['oauth', 'has-claude', 'byoc', 'has-repo', 'existing-cloud']);
-    const cloudStep = steps.find((s) => s.id === 'cloud-hetzner');
-    expect(cloudStep?.isOptional).toBe(true);
+  it('existing-cloud tag marks cloud-sam step as isOptional', () => {
+    const steps = generatePath(['has-repo', 'existing-cloud']);
+    expect(steps.find((s) => s.id === 'cloud-sam')?.isOptional).toBe(true);
+  });
+
+  it('cloud step is NOT optional without existing-cloud tag', () => {
+    expect(generatePath(['byoc']).find((s) => s.id === 'cloud-byoc')?.isOptional).toBe(false);
+    expect(generatePath([]).find((s) => s.id === 'cloud-sam')?.isOptional).toBe(false);
   });
 
   it('existing-github tag marks github step as isOptional', () => {
-    const steps = generatePath(['oauth', 'has-claude', 'byoc', 'has-repo', 'existing-github']);
-    const ghStep = steps.find((s) => s.id === 'github');
-    expect(ghStep?.isOptional).toBe(true);
-  });
-
-  it('cloud-sam step is optional only when existing-cloud tag is present', () => {
-    const stepsNew = generatePath(['sam-billing', 'sam-infra', 'has-repo']);
-    expect(stepsNew.find((s) => s.id === 'cloud-sam')?.isOptional).toBe(false);
-
-    const stepsExisting = generatePath(['sam-billing', 'sam-infra', 'has-repo', 'existing-cloud']);
-    expect(stepsExisting.find((s) => s.id === 'cloud-sam')?.isOptional).toBe(true);
+    const steps = generatePath(['byoc', 'has-repo', 'existing-github']);
+    expect(steps.find((s) => s.id === 'github')?.isOptional).toBe(true);
   });
 
   it('project step is never isOptional', () => {
-    const stepsRepo = generatePath(['oauth', 'has-claude', 'byoc', 'has-repo']);
-    const stepsTemplate = generatePath(['oauth', 'has-claude', 'sam-infra', 'no-repo']);
+    const stepsRepo = generatePath(['byoc', 'has-repo']);
+    const stepsTemplate = generatePath(['byoc']);
     expect(stepsRepo.find((s) => s.id === 'project')?.isOptional).toBe(false);
     expect(stepsTemplate.find((s) => s.id === 'project')?.isOptional).toBe(false);
   });
@@ -101,46 +94,44 @@ describe('generatePath', () => {
   // ── Project step variant ──
 
   it('has-repo produces project step with "Choose Repository" actionLabel', () => {
-    const steps = generatePath(['oauth', 'has-claude', 'byoc', 'has-repo']);
-    const proj = steps.find((s) => s.id === 'project');
-    expect(proj?.actionLabel).toBe('Choose Repository');
+    const steps = generatePath(['byoc', 'has-repo']);
+    expect(steps.find((s) => s.id === 'project')?.actionLabel).toBe('Choose Repository');
   });
 
   it('no-repo produces project step with "Choose Repository" actionLabel', () => {
-    const steps = generatePath(['oauth', 'has-claude', 'sam-infra', 'no-repo']);
-    const proj = steps.find((s) => s.id === 'project');
-    expect(proj?.actionLabel).toBe('Choose Repository');
+    const steps = generatePath(['byoc']);
+    expect(steps.find((s) => s.id === 'project')?.actionLabel).toBe('Choose Repository');
   });
 
-  // ── Always has exactly one project step ──
+  it('has-repo and no-repo project variants differ in copy', () => {
+    const withRepo = generatePath(['has-repo']).find((s) => s.id === 'project');
+    const withoutRepo = generatePath([]).find((s) => s.id === 'project');
+    expect(withRepo?.description).not.toBe(withoutRepo?.description);
+  });
 
-  it('always includes exactly one project step', () => {
-    const tags = [
-      ['oauth', 'has-claude', 'byoc', 'has-repo'],
-      ['sam-billing', 'sam-infra', 'no-repo'],
-      ['user-api-key', 'byoc', 'has-repo'],
-      [],
-    ];
-    for (const t of tags) {
+  // ── Project step is always present and last ──
+
+  it('always includes exactly one project step, always last', () => {
+    const tagSets = [['byoc', 'has-repo'], ['byoc'], ['has-repo'], []];
+    for (const t of tagSets) {
       const steps = generatePath(t);
       const projectSteps = steps.filter((s) => s.id === 'project');
       expect(projectSteps).toHaveLength(1);
+      expect(steps.at(-1)?.id).toBe('project');
     }
   });
 });
 
 describe('getTimeEstimate', () => {
-  it('returns "< 1 min" for zero-duration steps', () => {
-    const steps = generatePath(['sam-billing', 'sam-infra', 'no-repo']);
-    // cloud-sam is "Instant" (no countable time), but ai-sam=30s, github=30s,
-    // project=30s → 90s → 2 mins. Only cloud-sam contributes nothing.
-    const estimate = getTimeEstimate(steps);
-    expect(estimate).toMatch(/~\d+ min/);
+  it('sums the default (SAM-managed) path: ai-setup + github + project', () => {
+    // generatePath([]) → ai-setup(60s) + cloud-sam(Instant, 0) + github(30s) +
+    // project(30s) = 120s → 2 mins. cloud-sam contributes nothing.
+    const estimate = getTimeEstimate(generatePath([]));
+    expect(estimate).toBe('~2 mins');
   });
 
   it('returns singular "min" for exactly 1 minute', () => {
-    // Construct a step set that totals exactly 60s
-    const fakeSteps = [{ timeEstimate: '1 minute' }] as any[];
+    const fakeSteps = [{ timeEstimate: '1 minute' }] as GeneratedStep[];
     expect(getTimeEstimate(fakeSteps)).toBe('~1 min');
   });
 
@@ -148,21 +139,20 @@ describe('getTimeEstimate', () => {
     const fakeSteps = [
       { timeEstimate: '1 minute' },
       { timeEstimate: '30 seconds' },
-    ] as any[];
+    ] as GeneratedStep[];
     expect(getTimeEstimate(fakeSteps)).toBe('~2 mins');
   });
 
   it('handles "0 seconds" without NaN', () => {
-    const fakeSteps = [{ timeEstimate: '0 seconds' }] as any[];
-    const result = getTimeEstimate(fakeSteps);
-    expect(result).toBe('< 1 min');
+    const fakeSteps = [{ timeEstimate: '0 seconds' }] as GeneratedStep[];
+    expect(getTimeEstimate(fakeSteps)).toBe('< 1 min');
   });
 
   it('excludes optional steps from the time estimate', () => {
     const fakeSteps = [
       { timeEstimate: '30 seconds', isOptional: true },
       { timeEstimate: '1 minute', isOptional: false },
-    ] as any[];
+    ] as GeneratedStep[];
     // Only the non-optional step counts: 60s → 1 min
     expect(getTimeEstimate(fakeSteps)).toBe('~1 min');
   });
@@ -171,7 +161,7 @@ describe('getTimeEstimate', () => {
     const fakeSteps = [
       { timeEstimate: '30 seconds', isOptional: true },
       { timeEstimate: '1 minute', isOptional: true },
-    ] as any[];
+    ] as GeneratedStep[];
     expect(getTimeEstimate(fakeSteps)).toBe('< 1 min');
   });
 });

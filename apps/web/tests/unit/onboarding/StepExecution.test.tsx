@@ -51,20 +51,15 @@ const repo = {
 };
 
 function renderProjectStep() {
-  const onDismiss = vi.fn();
+  const onComplete = vi.fn();
 
   render(
     <MemoryRouter>
-      <StepExecution
-        steps={[projectStep]}
-        tags={['existing-github', 'has-repo']}
-        onComplete={vi.fn()}
-        onDismiss={onDismiss}
-      />
+      <StepExecution steps={[projectStep]} onComplete={onComplete} />
     </MemoryRouter>
   );
 
-  return { onDismiss };
+  return { onComplete };
 }
 
 describe('StepExecution project creation', () => {
@@ -76,7 +71,7 @@ describe('StepExecution project creation', () => {
   });
 
   it('sends the selected repository full name to project creation', async () => {
-    const { onDismiss } = renderProjectStep();
+    const { onComplete } = renderProjectStep();
 
     await waitFor(() => {
       expect(mocks.listRepositories).toHaveBeenCalledWith('inst-1');
@@ -97,6 +92,6 @@ describe('StepExecution project creation', () => {
         })
       );
     });
-    expect(onDismiss).toHaveBeenCalled();
+    await waitFor(() => expect(onComplete).toHaveBeenCalled());
   });
 });

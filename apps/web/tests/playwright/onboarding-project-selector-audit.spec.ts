@@ -95,8 +95,7 @@ async function reachProjectSelector(page: Page) {
   const wizard = page.locator('[data-testid="onboarding-wizard"]');
   await expect(wizard).toBeVisible({ timeout: 3000 });
 
-  await wizard.getByRole('button', { name: 'Claude Pro or Max subscription' }).click();
-  await wizard.getByRole('button', { name: 'I have Hetzner' }).click();
+  await wizard.getByRole('button', { name: 'I have Hetzner or Scaleway' }).click();
   await wizard.getByRole('button', { name: 'Yes, I have a repo' }).click();
   await wizard.getByRole('button', { name: /Start setup/ }).click();
 
