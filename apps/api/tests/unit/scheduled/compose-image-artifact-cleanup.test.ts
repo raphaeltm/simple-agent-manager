@@ -36,12 +36,15 @@ function makeDb(rows: ReleaseRow[]): D1Database {
   } as unknown as D1Database;
 }
 
-function makeR2(objects: ListedObject[], options: { deleteErrorFor?: string } = {}) {
+function makeR2(objects: ListedObject[], options: { deleteErrorFor?: string; listError?: boolean } = {}) {
   const deleted: string[] = [];
   const r2 = {
     list: vi.fn(async (listOptions: { prefix?: string; cursor?: string; limit?: number }) => {
       expect(listOptions.prefix).toBe(COMPOSE_IMAGE_ARTIFACT_PREFIX);
       expect(listOptions.limit).toBe(1000);
+      if (options.listError) {
+        throw new Error('list failed');
+      }
       return { objects, truncated: false };
     }),
     delete: vi.fn(async (key: string) => {
@@ -68,8 +71,12 @@ function makeEnv(options: {
   kvLastRun?: string | null;
   overrides?: Partial<Env>;
   deleteErrorFor?: string;
+  listError?: boolean;
 } = {}): Env & { R2: ReturnType<typeof makeR2>; KV: ReturnType<typeof makeKv> } {
-  const r2 = makeR2(options.objects ?? [], { deleteErrorFor: options.deleteErrorFor });
+  const r2 = makeR2(options.objects ?? [], {
+    deleteErrorFor: options.deleteErrorFor,
+    listError: options.listError,
+  });
   const kv = makeKv(options.kvLastRun ?? null);
   return {
     DATABASE: makeDb(options.rows ?? []),
@@ -202,6 +209,27 @@ describe('compose image artifact cleanup', () => {
     expect(result).toMatchObject({
       deleteCandidates: 2,
       deletedObjects: 1,
+      errors: 1,
+    });
+  });
+
+  it('fails closed without throwing when R2 listing fails', async () => {
+    const env = makeEnv({
+      objects: [oldObject('orphan')],
+      listError: true,
+    });
+
+    const result = await runScheduledComposeImageArtifactCleanup(env);
+
+    expect(env.R2.delete).not.toHaveBeenCalled();
+    expect(env.KV.put).toHaveBeenCalledWith(
+      'cleanup:compose-image-artifacts:last-run',
+      '2026-06-27T12:00:00.000Z',
+      { expirationTtl: 172800 }
+    );
+    expect(result).toMatchObject({
+      scannedObjects: 0,
+      deletedObjects: 0,
       errors: 1,
     });
   });

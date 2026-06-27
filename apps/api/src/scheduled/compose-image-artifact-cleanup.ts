@@ -183,11 +183,21 @@ export async function runComposeImageArtifactCleanup(
   let cursor: string | undefined;
 
   do {
-    const page = (await env.R2.list({
-      prefix: COMPOSE_IMAGE_ARTIFACT_PREFIX,
-      cursor,
-      limit: 1000,
-    })) as R2ListResult;
+    let page: R2ListResult;
+    try {
+      page = (await env.R2.list({
+        prefix: COMPOSE_IMAGE_ARTIFACT_PREFIX,
+        cursor,
+        limit: 1000,
+      })) as R2ListResult;
+    } catch (err) {
+      stats.errors += 1;
+      log.error('list_failed', {
+        prefix: COMPOSE_IMAGE_ARTIFACT_PREFIX,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return stats;
+    }
 
     for (const object of page.objects) {
       stats.scannedObjects += 1;
