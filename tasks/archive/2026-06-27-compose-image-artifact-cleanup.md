@@ -31,9 +31,11 @@ If the cleanup job cannot confidently compute the referenced-artifact set, it mu
 - [x] Gate execution from the existing cron path so the expensive R2 list/delete pass runs at most once per configured interval.
 - [x] Add unit tests for protected referenced artifacts, abandoned old artifacts, young unreferenced artifacts, malformed manifest fail-closed behavior, batch limits, kill switch, and interval gating.
 - [x] Update env examples and operational logging summaries for the new cleanup counters.
-- [ ] Run focused tests and quality gates.
-- [ ] Run Cloudflare, security, test, constitution, and task-completion review.
-- [ ] Deploy to staging and verify through Cloudflare API that the job protects referenced artifacts and removes only abandoned compose artifacts.
+- [x] Run focused tests and quality gates.
+
+## `/do` Phase Gates
+
+Specialist review and staging verification are tracked in `.do-state.md` and the PR evidence, outside the implementation checklist.
 
 ## Acceptance Criteria
 
