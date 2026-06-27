@@ -37,18 +37,24 @@ The SAM-session Durable Object `search_tasks` tool has drifted from the canonica
 - [x] Add focused unit tests proving user/project scoping is preserved.
 - [x] Add focused unit tests proving the project-agent `withProjectId` path prevents cross-project task search.
 - [x] Run targeted API tests first.
-- [ ] Run repo quality checks appropriate for API TypeScript changes.
+- [x] Run repo quality checks appropriate for API TypeScript changes.
+
+## Workflow Gates
+
+These are required by `/do` after implementation validation and are tracked in `.do-state.md` plus PR evidence, not as implementation work.
+
 - [ ] Run required specialist reviews: cloudflare-specialist, security-auditor, constitution-validator, test-engineer, and task-completion-validator.
+- [ ] Create PR, check CI, complete staging verification, merge if all gates pass, and monitor production deploy.
 
 ## Acceptance Criteria
 
-- [ ] DO `search_tasks` and project-agent wrapped `search_tasks` expose the correct task status vocabulary and do not mention `running`.
-- [ ] Description-only task matches are returned.
-- [ ] Invalid or too-short queries and invalid statuses return explicit errors instead of broad or misleading queries.
-- [ ] Result shape gives agents enough context to triage task history without calling `get_task_details` for every hit.
-- [ ] Tests fail on the current implementation and pass after the fix.
-- [ ] No cross-project or cross-user leakage is introduced.
-- [ ] PR is created, CI is checked, and the `/do` workflow proceeds through merge if all gates pass.
+- [x] DO `search_tasks` and project-agent wrapped `search_tasks` expose the correct task status vocabulary and do not mention `running`.
+- [x] Description-only task matches are returned.
+- [x] Invalid or too-short queries and invalid statuses return explicit errors instead of broad or misleading queries.
+- [x] Result shape gives agents enough context to triage task history without calling `get_task_details` for every hit.
+- [x] Tests fail on the current implementation and pass after the fix.
+- [x] No cross-project or cross-user leakage is introduced.
+- [ ] PR is created, CI is checked, and the `/do` workflow proceeds through merge if all gates pass. This is a `/do` workflow gate completed after task archive.
 
 ## References
 
