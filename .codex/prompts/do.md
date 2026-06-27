@@ -65,7 +65,7 @@ Statements like "it probably won't work" or "credentials seem unavailable" are n
    - Use web search for external library/API docs if needed
    - Identify existing patterns, conventions, and test approaches in the affected areas
 
-   If the user explicitly asks for local subagents to critique proposed changes before implementation, do that after research and before file edits. Send the concrete proposal to bounded local subagents, wait for their critique, reconcile disagreements, and record the consensus or remaining dissent in the task file or `.do-state.md` before implementing.
+   If the user explicitly asks for local subagents to critique proposed changes before implementation, do that after research and before file edits. Send the original request or user-visible issue, relevant evidence, explicit constraints, and concrete proposal to bounded local subagents. Wait for their critique, reconcile disagreements, and record the consensus or remaining dissent in the task file or `.do-state.md` before implementing.
 
 3. **Create a task file** in `tasks/backlog/` using the format `YYYY-MM-DD-descriptive-name.md`:
    - Problem statement (what and why)
