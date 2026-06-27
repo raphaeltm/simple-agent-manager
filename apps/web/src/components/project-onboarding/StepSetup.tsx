@@ -168,6 +168,10 @@ export function StepSetup({
 
       {setupError && <Alert variant="error">{setupError}</Alert>}
 
+      {!canContinueFromSetup && (
+        <p className="text-sm text-fg-muted">Create or skip each item above to continue.</p>
+      )}
+
       <div className="flex flex-wrap gap-2">
         <Button type="button" onClick={onContinue} disabled={!canContinueFromSetup}>
           Continue <ChevronRight size={16} aria-hidden="true" />

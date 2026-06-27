@@ -60,9 +60,10 @@ export function StepConnect({
         </p>
       </div>
 
-      <label className="grid gap-1.5">
+      <label htmlFor="project-onboarding-installation" className="grid gap-1.5">
         <span className="text-sm text-fg-muted">Installation</span>
         <select
+          id="project-onboarding-installation"
           value={projectForm.installationId}
           onChange={(event) => onInstallationChange(event.currentTarget.value)}
           disabled={creatingProject}
@@ -87,8 +88,8 @@ export function StepConnect({
           disabled={creatingProject}
           required
         />
-        {fieldErrors.repository && <span className="text-sm text-danger">{fieldErrors.repository}</span>}
-        {fieldErrors.githubRepoId && <span className="text-sm text-danger">{fieldErrors.githubRepoId}</span>}
+        {fieldErrors.repository && <span id="project-onboarding-repository-error" className="text-sm text-danger" role="alert">{fieldErrors.repository}</span>}
+        {fieldErrors.githubRepoId && <span id="project-onboarding-repo-id-error" className="text-sm text-danger" role="alert">{fieldErrors.githubRepoId}</span>}
       </label>
 
       <label htmlFor="project-onboarding-branch" className="grid gap-1.5">
@@ -105,20 +106,24 @@ export function StepConnect({
         />
       </label>
 
-      <label className="grid gap-1.5">
+      <label htmlFor="project-onboarding-name" className="grid gap-1.5">
         <span className="text-sm text-fg-muted">Project name</span>
         <Input
+          id="project-onboarding-name"
           value={projectForm.name}
           onChange={(event) => onNameChange(event.currentTarget.value)}
           disabled={creatingProject}
           placeholder="Project name"
+          aria-invalid={!!fieldErrors.name}
+          aria-describedby={fieldErrors.name ? 'project-onboarding-name-error' : undefined}
         />
-        {fieldErrors.name && <span className="text-sm text-danger">{fieldErrors.name}</span>}
+        {fieldErrors.name && <span id="project-onboarding-name-error" className="text-sm text-danger" role="alert">{fieldErrors.name}</span>}
       </label>
 
-      <label className="grid gap-1.5">
+      <label htmlFor="project-onboarding-description" className="grid gap-1.5">
         <span className="text-sm text-fg-muted">Description</span>
         <textarea
+          id="project-onboarding-description"
           value={projectForm.description}
           onChange={(event) => onDescriptionChange(event.currentTarget.value)}
           rows={3}

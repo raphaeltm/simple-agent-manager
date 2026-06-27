@@ -124,6 +124,7 @@ export function StepIndicator({ current }: { current: WizardStep }) {
                   : 'border-border-default bg-surface text-fg-muted'
             }`}
             aria-current={state === 'current' ? 'step' : undefined}
+            aria-label={state === 'complete' ? `${step.label} — complete` : undefined}
           >
             <span className="flex size-6 shrink-0 items-center justify-center rounded-full border border-current text-xs">
               {state === 'complete' ? <Check size={14} aria-hidden="true" /> : index + 1}
