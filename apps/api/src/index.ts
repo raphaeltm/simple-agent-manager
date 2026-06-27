@@ -119,6 +119,7 @@ import { uiGovernanceRoutes } from './routes/ui-governance';
 import { usageRoutes } from './routes/usage';
 import { workspacesRoutes } from './routes/workspaces';
 import { runAnalyticsForwardJob } from './scheduled/analytics-forward';
+import { runScheduledComposeImageArtifactCleanup } from './scheduled/compose-image-artifact-cleanup';
 import { runComputeUsageCleanup } from './scheduled/compute-usage-cleanup';
 import { runCronTriggerSweep } from './scheduled/cron-triggers';
 import { runNodeCleanupSweep } from './scheduled/node-cleanup';
@@ -838,6 +839,10 @@ export default {
     // Recover stale trigger executions and purge old logs
     const triggerCleanup = await runTriggerExecutionCleanup(env);
 
+    // Clean up abandoned R2 compose image artifacts. The cleanup module is
+    // interval-gated through KV so the 5-minute sweep does not scan R2 every run.
+    const composeArtifactCleanup = await runScheduledComposeImageArtifactCleanup(env);
+
     // Close orphaned compute_usage records
     const computeUsageClosed = await runComputeUsageCleanup(env);
 
@@ -872,6 +877,15 @@ export default {
       triggerExecStaleQueuedRecovered: triggerCleanup.staleQueuedRecovered,
       triggerExecRetentionPurged: triggerCleanup.retentionPurged,
       triggerExecCleanupErrors: triggerCleanup.errors,
+      composeArtifactCleanupSkipped: composeArtifactCleanup.skipped,
+      composeArtifactCleanupSkipReason: composeArtifactCleanup.skipReason,
+      composeArtifactCleanupScanned: composeArtifactCleanup.scannedObjects,
+      composeArtifactCleanupReferencedKeys: composeArtifactCleanup.referencedKeys,
+      composeArtifactCleanupRetainedReferenced: composeArtifactCleanup.retainedReferenced,
+      composeArtifactCleanupRetainedYoung: composeArtifactCleanup.retainedYoung,
+      composeArtifactCleanupDeleted: composeArtifactCleanup.deletedObjects,
+      composeArtifactCleanupDeletedBytes: composeArtifactCleanup.deletedBytes,
+      composeArtifactCleanupErrors: composeArtifactCleanup.errors,
       computeUsageOrphansClosed: computeUsageClosed,
       trialExpired: trialExpire.expired,
       trialProjectsLinked: trialExpire.projectsLinked,

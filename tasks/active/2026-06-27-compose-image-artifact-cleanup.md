@@ -23,14 +23,14 @@ If the cleanup job cannot confidently compute the referenced-artifact set, it mu
 
 ## Implementation Checklist
 
-- [ ] Add configurable env vars for compose image artifact cleanup: kill switch, abandoned-object grace period, batch size, and run interval.
-- [ ] Implement a scheduled cleanup service that lists only `compose-image-artifacts/` objects.
-- [ ] Compute a protected artifact key set from persisted deployment release manifests across all environments/projects.
-- [ ] Fail closed and delete nothing if any relevant release manifest cannot be parsed safely.
-- [ ] Delete only unreferenced compose artifact objects older than the configured grace period, bounded by batch size.
-- [ ] Gate execution from the existing cron path so the expensive R2 list/delete pass runs at most once per configured interval.
-- [ ] Add unit tests for protected referenced artifacts, abandoned old artifacts, young unreferenced artifacts, malformed manifest fail-closed behavior, batch limits, kill switch, and interval gating.
-- [ ] Update env examples and operational logging summaries for the new cleanup counters.
+- [x] Add configurable env vars for compose image artifact cleanup: kill switch, abandoned-object grace period, batch size, and run interval.
+- [x] Implement a scheduled cleanup service that lists only `compose-image-artifacts/` objects.
+- [x] Compute a protected artifact key set from persisted deployment release manifests across all environments/projects.
+- [x] Fail closed and delete nothing if any relevant release manifest cannot be parsed safely.
+- [x] Delete only unreferenced compose artifact objects older than the configured grace period, bounded by batch size.
+- [x] Gate execution from the existing cron path so the expensive R2 list/delete pass runs at most once per configured interval.
+- [x] Add unit tests for protected referenced artifacts, abandoned old artifacts, young unreferenced artifacts, malformed manifest fail-closed behavior, batch limits, kill switch, and interval gating.
+- [x] Update env examples and operational logging summaries for the new cleanup counters.
 - [ ] Run focused tests and quality gates.
 - [ ] Run Cloudflare, security, test, constitution, and task-completion review.
 - [ ] Deploy to staging and verify through Cloudflare API that the job protects referenced artifacts and removes only abandoned compose artifacts.
