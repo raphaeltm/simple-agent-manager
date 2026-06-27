@@ -20,23 +20,23 @@ The SAM-session Durable Object `search_tasks` tool has drifted from the canonica
 
 ## Implementation Checklist
 
-- [ ] Update `searchTasksDef` to advertise `query` and the real statuses: `draft`, `queued`, `in_progress`, `delegated`, `awaiting_followup`, `completed`, `failed`, `cancelled`.
-- [ ] Preserve `keyword` as a deprecated alias while documenting `query` as the public parameter.
-- [ ] Require a trimmed query, reject blank or one-character queries, and return explicit DO-style errors.
-- [ ] Validate `status` against the real enum and reject invalid values such as `running`.
-- [ ] Round and clamp `limit` to a defensible min/default/max before passing it to Drizzle/D1.
-- [ ] Search both `schema.tasks.title` and `schema.tasks.description` using Drizzle predicates with parameter binding.
-- [ ] Preserve user ownership scoping and optional project scoping.
-- [ ] Return canonical investigation fields: `id`, `title`, `status`, `priority`, `projectId`, `projectName`, `descriptionSnippet`, `outputBranch`, `outputPrUrl`, `outputSummary`, and `updatedAt`.
-- [ ] Keep generated snippets bounded with a documented local constant or existing route helper if practical.
-- [ ] Add focused unit tests for missing, blank, and one-character query rejection.
-- [ ] Add focused unit tests for invalid status rejection and `in_progress` acceptance, including no advertised `running` status.
-- [ ] Add focused unit tests proving description-only matches are returned.
-- [ ] Add focused unit tests proving limit clamping.
-- [ ] Add focused unit tests proving canonical fields and bounded snippets are returned.
-- [ ] Add focused unit tests proving user/project scoping is preserved.
-- [ ] Add focused unit tests proving the project-agent `withProjectId` path prevents cross-project task search.
-- [ ] Run targeted API tests first.
+- [x] Update `searchTasksDef` to advertise `query` and the real statuses: `draft`, `queued`, `in_progress`, `delegated`, `awaiting_followup`, `completed`, `failed`, `cancelled`.
+- [x] Preserve `keyword` as a deprecated alias while documenting `query` as the public parameter.
+- [x] Require a trimmed query, reject blank or one-character queries, and return explicit DO-style errors.
+- [x] Validate `status` against the real enum and reject invalid values such as `running`.
+- [x] Round and clamp `limit` to a defensible min/default/max before passing it to Drizzle/D1.
+- [x] Search both `schema.tasks.title` and `schema.tasks.description` using Drizzle predicates with parameter binding.
+- [x] Preserve user ownership scoping and optional project scoping.
+- [x] Return canonical investigation fields: `id`, `title`, `status`, `priority`, `projectId`, `projectName`, `descriptionSnippet`, `outputBranch`, `outputPrUrl`, `outputSummary`, and `updatedAt`.
+- [x] Keep generated snippets bounded with a documented local constant or existing route helper if practical.
+- [x] Add focused unit tests for missing, blank, and one-character query rejection.
+- [x] Add focused unit tests for invalid status rejection and `in_progress` acceptance, including no advertised `running` status.
+- [x] Add focused unit tests proving description-only matches are returned.
+- [x] Add focused unit tests proving limit clamping.
+- [x] Add focused unit tests proving canonical fields and bounded snippets are returned.
+- [x] Add focused unit tests proving user/project scoping is preserved.
+- [x] Add focused unit tests proving the project-agent `withProjectId` path prevents cross-project task search.
+- [x] Run targeted API tests first.
 - [ ] Run repo quality checks appropriate for API TypeScript changes.
 - [ ] Run required specialist reviews: cloudflare-specialist, security-auditor, constitution-validator, test-engineer, and task-completion-validator.
 
