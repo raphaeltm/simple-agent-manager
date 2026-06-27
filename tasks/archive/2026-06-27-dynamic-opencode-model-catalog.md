@@ -18,18 +18,18 @@ SAM's OpenCode model selector uses a static shared catalog that does not reflect
 
 ## Implementation Checklist
 
-- [ ] Add shared constants/types for a dynamic model catalog response and Models.dev provider IDs used by SAM.
-- [ ] Expand the static OpenCode fallback catalog to active OpenCode Zen and OpenCode Go models from Models.dev.
-- [ ] Add an authenticated API route that returns model groups for an agent type.
-- [ ] For OpenCode, fetch Models.dev server-side, normalize relevant providers into `ModelGroup[]`, filter deprecated models by default, cache the normalized payload in KV with configurable TTL, and fall back to the static shared catalog on upstream/cache failures.
-- [ ] Keep non-OpenCode agents on the existing static catalog through the same API shape.
-- [ ] Update API route wiring and tests for static, dynamic, cached, and upstream-failure behavior.
-- [ ] Update the web API client and `ModelSelect` to optionally load dynamic model groups.
-- [ ] Make OpenCode settings use the API-backed `ModelSelect`, filtered by selected provider when appropriate.
-- [ ] Preserve a static fallback in the web component if the API request fails.
-- [ ] Add/adjust web unit tests for loading, provider filtering, and fallback behavior.
-- [ ] Add or update Playwright visual audit coverage for the changed agent settings model selector.
-- [ ] Update public docs/configuration references for the new dynamic model catalog behavior and new environment variables.
+- [x] Add shared constants/types for a dynamic model catalog response and Models.dev provider IDs used by SAM.
+- [x] Expand the static OpenCode fallback catalog to active OpenCode Zen and OpenCode Go models from Models.dev.
+- [x] Add an authenticated API route that returns model groups for an agent type.
+- [x] For OpenCode, fetch Models.dev server-side, normalize relevant providers into `ModelGroup[]`, filter deprecated models by default, cache the normalized payload in KV with configurable TTL, and fall back to the static shared catalog on upstream/cache failures.
+- [x] Keep non-OpenCode agents on the existing static catalog through the same API shape.
+- [x] Update API route wiring and tests for static, dynamic, cached, and upstream-failure behavior.
+- [x] Update the web API client and `ModelSelect` to optionally load dynamic model groups.
+- [x] Make OpenCode settings use the API-backed `ModelSelect`, filtered by selected provider when appropriate.
+- [x] Preserve a static fallback in the web component if the API request fails.
+- [x] Add/adjust web unit tests for loading, provider filtering, and fallback behavior.
+- [x] Add or update Playwright visual audit coverage for the changed agent settings model selector.
+- [x] Update public docs/configuration references for the new dynamic model catalog behavior and new environment variables.
 - [ ] Run focused tests, full validation, specialist reviews, staging verification, PR, and merge per `/do`.
 
 ## Acceptance Criteria
@@ -43,6 +43,12 @@ SAM's OpenCode model selector uses a static shared catalog that does not reflect
 - Non-OpenCode agents continue to work with their existing static model catalog.
 - Tests cover API normalization/cache/fallback behavior and web loading/fallback behavior.
 - Public docs mention that OpenCode model options are loaded dynamically from Models.dev with a static fallback.
+
+## Validation
+
+- Focused tests passed for shared model catalog behavior, API model-catalog service/route behavior, web `ModelSelect`/`AgentSettingsCard` behavior, and the OpenCode Go Playwright audit on mobile and desktop.
+- Full validation passed with `pnpm lint`, `pnpm typecheck`, `pnpm test`, and `pnpm build`.
+- Specialist review checks passed for task completion, Cloudflare Worker/KV behavior, UI/UX, security, environment variables, documentation sync, constitution compliance, and test coverage.
 
 ## References
 

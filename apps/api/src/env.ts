@@ -597,6 +597,9 @@ export interface Env {
   AI_PROXY_DEFAULT_ANTHROPIC_MODEL?: string; // Default model for Claude Code proxy (default: claude-sonnet-4-6)
   AI_PROXY_DEFAULT_OPENAI_MODEL?: string; // Default model for Codex proxy (default: gpt-4.1)
   AI_PROXY_ALLOWED_MODELS?: string; // Comma-separated allowed models
+  MODEL_CATALOG_SOURCE_URL?: string; // OpenCode model catalog source URL (default: https://models.dev/api.json)
+  MODEL_CATALOG_CACHE_TTL_SECONDS?: string; // KV cache TTL for dynamic model catalogs (default: 3600)
+  MODEL_CATALOG_FETCH_TIMEOUT_MS?: string; // Upstream model catalog fetch timeout (default: 5000)
   AI_PROXY_DAILY_INPUT_TOKEN_LIMIT?: string; // Per-user daily input token cap (default: 500000)
   AI_PROXY_DAILY_OUTPUT_TOKEN_LIMIT?: string; // Per-user daily output token cap (default: 200000)
   AI_PROXY_MAX_INPUT_TOKENS_PER_REQUEST?: string; // Max input tokens per request (default: 32000)

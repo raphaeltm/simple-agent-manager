@@ -86,6 +86,16 @@ GitHub App secrets use `GH_*` prefix (e.g., `GH_CLIENT_ID`, `GH_WEBHOOK_SECRET`)
 | `TASK_TITLE_RETRY_DELAY_MS`          | `1000`                      | Base delay between retries (exponential backoff) |
 | `TASK_TITLE_RETRY_MAX_DELAY_MS`      | `4000`                      | Max delay cap for backoff                        |
 
+## Agent Model Catalog
+
+SAM loads OpenCode Zen and OpenCode Go model choices through the authenticated model-catalog API, backed by Models.dev and cached in KV. If the upstream catalog or cache is unavailable, SAM falls back to the static catalog shipped with the app.
+
+| Variable                          | Default                       | Description                                                   |
+| --------------------------------- | ----------------------------- | ------------------------------------------------------------- |
+| `MODEL_CATALOG_SOURCE_URL`        | `https://models.dev/api.json` | Source URL for the dynamic model catalog                      |
+| `MODEL_CATALOG_CACHE_TTL_SECONDS` | `3600`                        | KV cache TTL for normalized dynamic model catalog payloads    |
+| `MODEL_CATALOG_FETCH_TIMEOUT_MS`  | `5000`                        | Timeout for the upstream catalog fetch before static fallback |
+
 ## Warm Node Pooling
 
 | Variable                        | Default            | Description                                           |

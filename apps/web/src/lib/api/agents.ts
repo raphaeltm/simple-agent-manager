@@ -6,6 +6,7 @@ import type {
   AgentSkill,
   CreateAgentProfileRequest,
   CreateSkillRequest,
+  ModelCatalogResponse,
   ProjectRuntimeConfigResponse,
   SaveAgentCredentialRequest,
   SaveAgentSettingsRequest,
@@ -19,6 +20,10 @@ import { API_URL, request } from './client';
 
 export async function listAgents(): Promise<{ agents: AgentInfo[] }> {
   return request<{ agents: AgentInfo[] }>('/api/agents');
+}
+
+export async function getAgentModelCatalog(agentType: string): Promise<ModelCatalogResponse> {
+  return request<ModelCatalogResponse>(`/api/model-catalog/${encodeURIComponent(agentType)}`);
 }
 
 export async function listAgentCredentials(): Promise<{ credentials: AgentCredentialInfo[] }> {

@@ -41,10 +41,13 @@ describe('model-catalog', () => {
 
     it('returns grouped models for opencode', () => {
       const groups = getModelGroupsForAgent('opencode');
-      expect(groups.length).toBeGreaterThanOrEqual(1);
+      expect(groups.length).toBeGreaterThanOrEqual(2);
       const allModels = groups.flatMap((g) => g.models);
-      expect(allModels.some((m) => m.id === 'devstral-2512')).toBe(true);
-      expect(allModels.some((m) => m.id === 'north-mini-code-1-0')).toBe(true);
+      expect(groups.map((g) => g.label)).toEqual(
+        expect.arrayContaining(['OpenCode Zen', 'OpenCode Go'])
+      );
+      expect(allModels.some((m) => m.id === 'opencode/claude-sonnet-4-6')).toBe(true);
+      expect(allModels.some((m) => m.id === 'opencode-go/glm-5.2')).toBe(true);
     });
   });
 

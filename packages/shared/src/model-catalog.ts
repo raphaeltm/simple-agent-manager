@@ -20,6 +20,18 @@ export interface ModelGroup {
   models: ModelDefinition[];
 }
 
+export type ModelCatalogSource = 'dynamic' | 'cache' | 'static';
+
+export interface ModelCatalogResponse {
+  agentType: string;
+  groups: ModelGroup[];
+  source: ModelCatalogSource;
+  updatedAt: string | null;
+}
+
+export const OPENCODE_MODELS_DEV_PROVIDER_IDS = ['opencode', 'opencode-go'] as const;
+export type OpenCodeModelsDevProviderId = (typeof OPENCODE_MODELS_DEV_PROVIDER_IDS)[number];
+
 function modelGroup(label: string, models: Array<Omit<ModelDefinition, 'group'>>): ModelGroup {
   return {
     label,
@@ -104,28 +116,72 @@ const CODEX_MODELS: ModelGroup[] = [
 ];
 
 // ---------------------------------------------------------------------------
-// OpenAI-compatible alternative provider models
+// OpenCode models
 // ---------------------------------------------------------------------------
 
-const OPENAI_COMPATIBLE_ALTERNATIVE_MODELS: ModelGroup[] = [
-  modelGroup('Mistral AI (OpenAI-compatible)', [
-    { id: 'mistral-medium-3-5-2604', name: 'Mistral Medium 3.5' },
-    { id: 'mistral-small-2603', name: 'Mistral Small 4' },
-    { id: 'mistral-large-2512', name: 'Mistral Large 3' },
-    { id: 'devstral-2512', name: 'Devstral 2' },
-    { id: 'codestral-2508', name: 'Codestral' },
+const OPENCODE_MODELS: ModelGroup[] = [
+  modelGroup('OpenCode Zen', [
+    { id: 'opencode/big-pickle', name: 'Big Pickle' },
+    { id: 'opencode/claude-haiku-4-5', name: 'Claude Haiku 4.5' },
+    { id: 'opencode/claude-opus-4-1', name: 'Claude Opus 4.1' },
+    { id: 'opencode/claude-opus-4-5', name: 'Claude Opus 4.5' },
+    { id: 'opencode/claude-opus-4-6', name: 'Claude Opus 4.6' },
+    { id: 'opencode/claude-opus-4-7', name: 'Claude Opus 4.7' },
+    { id: 'opencode/claude-opus-4-8', name: 'Claude Opus 4.8' },
+    { id: 'opencode/claude-sonnet-4', name: 'Claude Sonnet 4' },
+    { id: 'opencode/claude-sonnet-4-5', name: 'Claude Sonnet 4.5' },
+    { id: 'opencode/claude-sonnet-4-6', name: 'Claude Sonnet 4.6' },
+    { id: 'opencode/deepseek-v4-flash', name: 'DeepSeek V4 Flash' },
+    { id: 'opencode/deepseek-v4-flash-free', name: 'DeepSeek V4 Flash Free' },
+    { id: 'opencode/deepseek-v4-pro', name: 'DeepSeek V4 Pro' },
+    { id: 'opencode/gemini-3-flash', name: 'Gemini 3 Flash' },
+    { id: 'opencode/gemini-3.1-pro', name: 'Gemini 3.1 Pro Preview' },
+    { id: 'opencode/gemini-3.5-flash', name: 'Gemini 3.5 Flash' },
+    { id: 'opencode/glm-5', name: 'GLM-5' },
+    { id: 'opencode/glm-5.1', name: 'GLM-5.1' },
+    { id: 'opencode/glm-5.2', name: 'GLM-5.2' },
+    { id: 'opencode/gpt-5', name: 'GPT-5' },
+    { id: 'opencode/gpt-5-codex', name: 'GPT-5 Codex' },
+    { id: 'opencode/gpt-5-nano', name: 'GPT-5 Nano' },
+    { id: 'opencode/gpt-5.1', name: 'GPT-5.1' },
+    { id: 'opencode/gpt-5.1-codex', name: 'GPT-5.1 Codex' },
+    { id: 'opencode/gpt-5.1-codex-max', name: 'GPT-5.1 Codex Max' },
+    { id: 'opencode/gpt-5.1-codex-mini', name: 'GPT-5.1 Codex Mini' },
+    { id: 'opencode/gpt-5.2', name: 'GPT-5.2' },
+    { id: 'opencode/gpt-5.2-codex', name: 'GPT-5.2 Codex' },
+    { id: 'opencode/gpt-5.3-codex', name: 'GPT-5.3 Codex' },
+    { id: 'opencode/gpt-5.3-codex-spark', name: 'GPT-5.3 Codex Spark' },
+    { id: 'opencode/gpt-5.4', name: 'GPT-5.4' },
+    { id: 'opencode/gpt-5.4-mini', name: 'GPT-5.4 Mini' },
+    { id: 'opencode/gpt-5.4-nano', name: 'GPT-5.4 Nano' },
+    { id: 'opencode/gpt-5.4-pro', name: 'GPT-5.4 Pro' },
+    { id: 'opencode/gpt-5.5', name: 'GPT-5.5' },
+    { id: 'opencode/gpt-5.5-pro', name: 'GPT-5.5 Pro' },
+    { id: 'opencode/grok-build-0.1', name: 'Grok Build 0.1' },
+    { id: 'opencode/kimi-k2.5', name: 'Kimi K2.5' },
+    { id: 'opencode/kimi-k2.6', name: 'Kimi K2.6' },
+    { id: 'opencode/mimo-v2.5-free', name: 'MiMo V2.5 Free' },
+    { id: 'opencode/minimax-m2.5', name: 'MiniMax M2.5' },
+    { id: 'opencode/minimax-m2.7', name: 'MiniMax M2.7' },
+    { id: 'opencode/nemotron-3-ultra-free', name: 'Nemotron 3 Ultra Free' },
+    { id: 'opencode/north-mini-code-free', name: 'North Mini Code Free' },
+    { id: 'opencode/qwen3.5-plus', name: 'Qwen3.5 Plus' },
+    { id: 'opencode/qwen3.6-plus', name: 'Qwen3.6 Plus' },
   ]),
-  modelGroup('Cohere North (OpenAI-compatible)', [
-    { id: 'north-mini-code-1-0', name: 'North Mini Code' },
-    { id: 'command-a-plus-05-2026', name: 'Command A+' },
-    { id: 'command-a-03-2025', name: 'Command A' },
-    { id: 'command-a-reasoning-08-2025', name: 'Command A Reasoning' },
-  ]),
-  modelGroup('Scaleway Generative APIs (OpenAI-compatible)', [
-    { id: 'qwen3-coder-30b-a3b-instruct', name: 'Qwen3 Coder 30B A3B Instruct' },
-    { id: 'qwen3.6-35b-a3b', name: 'Qwen3.6 35B A3B' },
-    { id: 'gemma-4-26b-a4b-it', name: 'Gemma 4 26B A4B IT' },
-    { id: 'gpt-oss-120b', name: 'GPT OSS 120B' },
+  modelGroup('OpenCode Go', [
+    { id: 'opencode-go/deepseek-v4-flash', name: 'DeepSeek V4 Flash' },
+    { id: 'opencode-go/deepseek-v4-pro', name: 'DeepSeek V4 Pro' },
+    { id: 'opencode-go/glm-5.1', name: 'GLM-5.1' },
+    { id: 'opencode-go/glm-5.2', name: 'GLM-5.2' },
+    { id: 'opencode-go/kimi-k2.6', name: 'Kimi K2.6' },
+    { id: 'opencode-go/kimi-k2.7-code', name: 'Kimi K2.7 Code' },
+    { id: 'opencode-go/mimo-v2.5', name: 'MiMo V2.5' },
+    { id: 'opencode-go/mimo-v2.5-pro', name: 'MiMo V2.5 Pro' },
+    { id: 'opencode-go/minimax-m2.7', name: 'MiniMax M2.7' },
+    { id: 'opencode-go/minimax-m3', name: 'MiniMax M3 (3x usage)' },
+    { id: 'opencode-go/qwen3.6-plus', name: 'Qwen3.6 Plus' },
+    { id: 'opencode-go/qwen3.7-max', name: 'Qwen3.7 Max' },
+    { id: 'opencode-go/qwen3.7-plus', name: 'Qwen3.7 Plus' },
   ]),
 ];
 
@@ -199,7 +255,7 @@ const MODEL_CATALOG: Partial<Record<AgentType, ModelGroup[]>> = {
   'openai-codex': CODEX_MODELS,
   'mistral-vibe': MISTRAL_MODELS,
   'google-gemini': GEMINI_MODELS,
-  opencode: OPENAI_COMPATIBLE_ALTERNATIVE_MODELS,
+  opencode: OPENCODE_MODELS,
 };
 
 /** Get the model groups for a given agent type. Returns empty array if none defined. */

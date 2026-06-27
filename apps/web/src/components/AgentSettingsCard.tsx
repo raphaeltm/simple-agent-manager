@@ -27,7 +27,7 @@ import { ModelSelect } from './ModelSelect';
 
 const DEFAULT_SUCCESS_BANNER_MS = 3000;
 const SUCCESS_BANNER_MS = Number(
-  import.meta.env.VITE_SUCCESS_BANNER_MS ?? DEFAULT_SUCCESS_BANNER_MS,
+  import.meta.env.VITE_SUCCESS_BANNER_MS ?? DEFAULT_SUCCESS_BANNER_MS
 );
 
 export interface AgentSettingsCardProps {
@@ -61,7 +61,9 @@ export function AgentSettingsCard({
     settings?.opencodeProvider ?? ''
   );
   const [opencodeBaseUrl, setOpencodeBaseUrl] = useState(settings?.opencodeBaseUrl ?? '');
-  const [opencodeProviderName, setOpencodeProviderName] = useState(settings?.opencodeProviderName ?? '');
+  const [opencodeProviderName, setOpencodeProviderName] = useState(
+    settings?.opencodeProviderName ?? ''
+  );
   const [providerMode, setProviderMode] = useState<AgentProviderMode | ''>(
     settings?.providerMode ?? ''
   );
@@ -76,6 +78,14 @@ export function AgentSettingsCard({
   const selectedProvider = opencodeProvider || null;
   const providerMeta = selectedProvider ? OPENCODE_PROVIDERS[selectedProvider] : null;
   const showBaseUrl = selectedProvider === 'custom' || selectedProvider === 'openai-compatible';
+  const openCodeModelProviderFilter: readonly string[] | undefined = (() => {
+    if (!isOpenCode) return undefined;
+    const provider = selectedProvider ?? 'opencode-zen';
+    if (provider === 'opencode-zen' || provider === 'opencode-managed') return ['opencode'];
+    if (provider === 'opencode-go') return ['opencode-go'];
+    return undefined;
+  })();
+  const useOpenCodeModelCatalog = isOpenCode && openCodeModelProviderFilter !== undefined;
 
   const formControlClass =
     'w-full min-h-11 py-2 px-3 rounded-sm border border-border-default bg-inset text-fg-primary text-sm outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring box-border';
@@ -166,7 +176,8 @@ export function AgentSettingsCard({
     if (isOpenCode) {
       if ((opencodeProvider || null) !== (settings?.opencodeProvider ?? null)) return true;
       if ((opencodeBaseUrl.trim() || null) !== (settings?.opencodeBaseUrl ?? null)) return true;
-      if ((opencodeProviderName.trim() || null) !== (settings?.opencodeProviderName ?? null)) return true;
+      if ((opencodeProviderName.trim() || null) !== (settings?.opencodeProviderName ?? null))
+        return true;
     }
     if (supportsSamProvider) {
       if ((providerMode || null) !== (settings?.providerMode ?? null)) return true;
@@ -178,7 +189,9 @@ export function AgentSettingsCard({
     <>
       {error && (
         <div className="mb-3">
-          <Alert variant="error" onDismiss={() => setError(null)}>{error}</Alert>
+          <Alert variant="error" onDismiss={() => setError(null)}>
+            {error}
+          </Alert>
         </div>
       )}
 
@@ -191,7 +204,12 @@ export function AgentSettingsCard({
       {/* OpenCode provider selection */}
       {isOpenCode && (
         <div className="mb-4">
-          <label htmlFor={`opencode-provider-${agent.id}`} className="text-sm font-medium text-fg-primary mb-1 block">Inference Provider</label>
+          <label
+            htmlFor={`opencode-provider-${agent.id}`}
+            className="text-sm font-medium text-fg-primary mb-1 block"
+          >
+            Inference Provider
+          </label>
           <div className="text-xs text-fg-muted mb-2">
             Select the AI provider for OpenCode inference. Default uses OpenCode Zen.
           </div>
@@ -232,7 +250,12 @@ export function AgentSettingsCard({
 
       {isOpenCode && showBaseUrl && (
         <div className="mb-4">
-          <label htmlFor={`opencode-base-url-${agent.id}`} className="text-sm font-medium text-fg-primary mb-1 block">Base URL</label>
+          <label
+            htmlFor={`opencode-base-url-${agent.id}`}
+            className="text-sm font-medium text-fg-primary mb-1 block"
+          >
+            Base URL
+          </label>
           <div className="text-xs text-fg-muted mb-2">
             The HTTPS endpoint for your provider&apos;s API.
           </div>
@@ -250,10 +273,13 @@ export function AgentSettingsCard({
 
       {isOpenCode && selectedProvider === 'custom' && (
         <div className="mb-4">
-          <label htmlFor={`opencode-provider-name-${agent.id}`} className="text-sm font-medium text-fg-primary mb-1 block">Provider Name</label>
-          <div className="text-xs text-fg-muted mb-2">
-            A display name for your custom provider.
-          </div>
+          <label
+            htmlFor={`opencode-provider-name-${agent.id}`}
+            className="text-sm font-medium text-fg-primary mb-1 block"
+          >
+            Provider Name
+          </label>
+          <div className="text-xs text-fg-muted mb-2">A display name for your custom provider.</div>
           <input
             id={`opencode-provider-name-${agent.id}`}
             type="text"
@@ -269,9 +295,15 @@ export function AgentSettingsCard({
       {/* Provider mode for Claude Code / Codex */}
       {supportsSamProvider && (
         <div className="mb-4">
-          <label htmlFor={`provider-mode-${agent.id}`} className="text-sm font-medium text-fg-primary mb-1 block">AI Provider</label>
+          <label
+            htmlFor={`provider-mode-${agent.id}`}
+            className="text-sm font-medium text-fg-primary mb-1 block"
+          >
+            AI Provider
+          </label>
           <div className="text-xs text-fg-muted mb-2">
-            Choose how this agent connects to its AI model. &quot;SAM Platform&quot; uses your SAM AI allowance (no API key needed). &quot;Own API Key&quot; uses your personal key.
+            Choose how this agent connects to its AI model. &quot;SAM Platform&quot; uses your SAM
+            AI allowance (no API key needed). &quot;Own API Key&quot; uses your personal key.
             {supportsOAuthProvider ? ' "OAuth Token" uses your subscription token.' : ''}
           </div>
           <select
@@ -288,14 +320,21 @@ export function AgentSettingsCard({
           </select>
           {providerMode === 'sam' && (
             <div className="text-xs text-fg-muted py-2 px-3 rounded-md bg-inset mt-2 border border-border-default">
-              AI requests will be routed through the SAM platform proxy. Usage counts against your daily token budget and monthly cost cap. An admin may set allowance ceilings for your account.
+              AI requests will be routed through the SAM platform proxy. Usage counts against your
+              daily token budget and monthly cost cap. An admin may set allowance ceilings for your
+              account.
             </div>
           )}
         </div>
       )}
 
       <div className="mb-4">
-        <label htmlFor={`model-input-${agent.id}`} className="text-sm font-medium text-fg-primary mb-1 block">Model</label>
+        <label
+          htmlFor={`model-input-${agent.id}`}
+          className="text-sm font-medium text-fg-primary mb-1 block"
+        >
+          Model
+        </label>
         <div className="text-xs text-fg-muted mb-2">
           {isOpenCode && selectedProvider === 'platform'
             ? 'Select a model from the available Workers AI models.'
@@ -309,7 +348,9 @@ export function AgentSettingsCard({
             className={formControlClass}
             data-testid={`model-input-${agent.id}`}
           >
-            <option value="">Default ({PLATFORM_AI_MODELS.find((m) => m.isDefault)?.label ?? 'auto'})</option>
+            <option value="">
+              Default ({PLATFORM_AI_MODELS.find((m) => m.isDefault)?.label ?? 'auto'})
+            </option>
             {PLATFORM_AI_MODELS.map((m) => (
               <option key={m.id} value={m.id}>
                 {m.label}
@@ -323,19 +364,30 @@ export function AgentSettingsCard({
             value={model}
             onChange={setModel}
             placeholder={modelPlaceholder}
+            useDynamicCatalog={useOpenCodeModelCatalog}
+            modelProviderFilter={openCodeModelProviderFilter}
+            allowStaticCatalog={!isOpenCode || useOpenCodeModelCatalog}
             data-testid={`model-input-${agent.id}`}
           />
         )}
       </div>
 
       <div className="mb-4" role="group" aria-labelledby={`permission-mode-label-${agent.id}`}>
-        <div id={`permission-mode-label-${agent.id}`} className="text-sm font-medium text-fg-primary mb-1">Permission Mode</div>
+        <div
+          id={`permission-mode-label-${agent.id}`}
+          className="text-sm font-medium text-fg-primary mb-1"
+        >
+          Permission Mode
+        </div>
         <div className="text-xs text-fg-muted mb-2">
           Controls how the agent handles file edits and tool execution.
         </div>
         <div className="flex flex-col gap-2">
           {VALID_PERMISSION_MODES.map((mode) => (
-            <label key={mode} className="flex items-center gap-2 text-sm text-fg-primary cursor-pointer">
+            <label
+              key={mode}
+              className="flex items-center gap-2 text-sm text-fg-primary cursor-pointer"
+            >
               <input
                 type="radio"
                 name={`permission-mode-${agent.id}`}
@@ -349,8 +401,12 @@ export function AgentSettingsCard({
           ))}
         </div>
         {permissionMode === 'bypassPermissions' && (
-          <div role="alert" className="text-xs text-danger-fg py-2 px-3 rounded-md bg-danger-tint mt-1">
-            ⚠ Warning: This disables all safety prompts. The agent will execute commands and edit files without confirmation.
+          <div
+            role="alert"
+            className="text-xs text-danger-fg py-2 px-3 rounded-md bg-danger-tint mt-1"
+          >
+            ⚠ Warning: This disables all safety prompts. The agent will execute commands and edit
+            files without confirmation.
           </div>
         )}
       </div>
@@ -386,9 +442,7 @@ export function AgentSettingsCard({
 
   return (
     <Card variant="glass" className="p-4" data-testid={`agent-settings-${agent.id}`}>
-      <div className="mb-2 font-semibold text-base text-fg-primary">
-        {agent.name}
-      </div>
+      <div className="mb-2 font-semibold text-base text-fg-primary">{agent.name}</div>
       {body}
     </Card>
   );

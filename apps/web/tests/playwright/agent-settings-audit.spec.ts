@@ -52,15 +52,17 @@ const MOCK_AGENT_AMP = {
 
 type AgentMock = typeof MOCK_AGENT_OPENCODE;
 
-function makeSettings(overrides: {
-  agentType?: string;
-  model?: string | null;
-  permissionMode?: string | null;
-  opencodeProvider?: string | null;
-  opencodeBaseUrl?: string | null;
-  opencodeProviderName?: string | null;
-  providerMode?: string | null;
-} = {}) {
+function makeSettings(
+  overrides: {
+    agentType?: string;
+    model?: string | null;
+    permissionMode?: string | null;
+    opencodeProvider?: string | null;
+    opencodeBaseUrl?: string | null;
+    opencodeProviderName?: string | null;
+    providerMode?: string | null;
+  } = {}
+) {
   return {
     agentType: overrides.agentType ?? 'opencode',
     model: overrides.model ?? null,
@@ -74,6 +76,36 @@ function makeSettings(overrides: {
     providerMode: overrides.providerMode ?? null,
     createdAt: '2026-01-01T00:00:00Z',
     updatedAt: '2026-01-01T00:00:00Z',
+  };
+}
+
+function makeOpenCodeModelCatalog() {
+  return {
+    agentType: 'opencode',
+    source: 'dynamic',
+    updatedAt: '2026-06-27T00:00:00.000Z',
+    groups: [
+      {
+        label: 'OpenCode Zen',
+        models: [
+          {
+            id: 'opencode/claude-sonnet-4-6',
+            name: 'Claude Sonnet 4.6',
+            group: 'OpenCode Zen',
+          },
+        ],
+      },
+      {
+        label: 'OpenCode Go',
+        models: [
+          {
+            id: 'opencode-go/glm-5.2',
+            name: 'GLM-5.2',
+            group: 'OpenCode Go',
+          },
+        ],
+      },
+    ],
   };
 }
 
@@ -118,6 +150,10 @@ async function setupApiMocks(
         return respond(500, { error: 'Failed to load agents' });
       }
       return respond(200, { agents });
+    }
+
+    if (path === '/api/model-catalog/opencode') {
+      return respond(200, makeOpenCodeModelCatalog());
     }
 
     // Agent settings by type
@@ -225,13 +261,18 @@ async function assertNoOverflow(page: Page) {
 
 async function takeScreenshot(page: Page, name: string) {
   await page.waitForTimeout(600);
+  const viewport = page.viewportSize();
+  const suffix = viewport ? `${viewport.width}x${viewport.height}` : 'unknown-viewport';
   await page.screenshot({
-    path: `../../.codex/tmp/playwright-screenshots/${name}.png`,
+    path: `../../.codex/tmp/playwright-screenshots/${name}-${suffix}.png`,
     fullPage: true,
   });
 }
 
 async function navigateToAgentConfig(page: Page) {
+  await page.addInitScript((userId) => {
+    window.localStorage.setItem(`sam-onboarding-wizard-dismissed-${userId}`, 'true');
+  }, MOCK_USER.user.id);
   await page.goto('/settings/agents');
   await page.waitForTimeout(1000);
 }
@@ -298,7 +339,10 @@ test.describe('Unified Agent Cards — Mobile', () => {
     await setupApiMocks(page, {
       agents: [MOCK_AGENT_OPENCODE],
       settingsMap: {
-        opencode: makeSettings({ opencodeProvider: 'platform', model: '@cf/meta/llama-4-scout-17b-16e-instruct' }),
+        opencode: makeSettings({
+          opencodeProvider: 'platform',
+          model: '@cf/meta/llama-4-scout-17b-16e-instruct',
+        }),
       },
     });
     await navigateToAgentConfig(page);
@@ -316,7 +360,9 @@ test.describe('Unified Agent Cards — Mobile', () => {
     await expect(modelSelect).toHaveValue('@cf/meta/llama-4-scout-17b-16e-instruct');
   });
 
-  test('platform provider: switching from text input to dropdown clears model', async ({ page }) => {
+  test('platform provider: switching from text input to dropdown clears model', async ({
+    page,
+  }) => {
     await setupApiMocks(page, {
       agents: [MOCK_AGENT_OPENCODE],
       settingsMap: {
@@ -349,7 +395,10 @@ test.describe('Unified Agent Cards — Mobile', () => {
     await setupApiMocks(page, {
       agents: [MOCK_AGENT_OPENCODE],
       settingsMap: {
-        opencode: makeSettings({ opencodeProvider: 'platform', model: '@cf/qwen/qwen3-30b-a3b-fp8' }),
+        opencode: makeSettings({
+          opencodeProvider: 'platform',
+          model: '@cf/qwen/qwen3-30b-a3b-fp8',
+        }),
       },
     });
     await navigateToAgentConfig(page);
@@ -415,7 +464,9 @@ test.describe('Unified Agent Cards — Mobile', () => {
     await assertNoOverflow(page);
 
     await expect(page.getByTestId('provider-mode-claude-code')).toHaveValue('sam');
-    await expect(page.getByText('Usage counts against your daily token budget and monthly cost cap.')).toBeVisible();
+    await expect(
+      page.getByText('Usage counts against your daily token budget and monthly cost cap.')
+    ).toBeVisible();
   });
 
   test('Codex: shows SAM provider selector without OAuth option', async ({ page }) => {
@@ -561,7 +612,9 @@ test.describe('Unified Agent Cards — Mobile', () => {
     expect(labelFor).toBe(selectId);
   });
 
-  test('focus ring: focus-visible:outline classes are applied to model select', async ({ page }) => {
+  test('focus ring: focus-visible:outline classes are applied to model select', async ({
+    page,
+  }) => {
     await setupApiMocks(page, {
       agents: [MOCK_AGENT_OPENCODE],
       settingsMap: {
@@ -581,7 +634,9 @@ test.describe('Unified Agent Cards — Mobile', () => {
     expect(modelSelectClass).toContain('focus-visible:outline-focus-ring');
 
     // Same check on the provider select
-    const providerSelectClass = await page.getByTestId('opencode-provider-select').getAttribute('class');
+    const providerSelectClass = await page
+      .getByTestId('opencode-provider-select')
+      .getAttribute('class');
     expect(providerSelectClass).toContain('focus-visible:outline');
     expect(providerSelectClass).toContain('focus-visible:outline-focus-ring');
 
@@ -666,7 +721,9 @@ test.describe('Unified Agent Cards — Mobile', () => {
     await takeScreenshot(page, 'agent-settings-mobile-platform-default-option');
   });
 
-  test('openai-compatible provider: shows base URL but no provider name field', async ({ page }) => {
+  test('openai-compatible provider: shows base URL but no provider name field', async ({
+    page,
+  }) => {
     await setupApiMocks(page, {
       agents: [MOCK_AGENT_OPENCODE],
       settingsMap: {
@@ -688,7 +745,9 @@ test.describe('Unified Agent Cards — Mobile', () => {
     await expect(page.getByTestId('opencode-provider-name-input')).not.toBeVisible();
   });
 
-  test('OpenCode Go provider: keeps model as text input with GLM 5.2 placeholder', async ({ page }) => {
+  test('OpenCode Go provider: uses API-backed model select with Go-only options', async ({
+    page,
+  }) => {
     await setupApiMocks(page, {
       agents: [MOCK_AGENT_OPENCODE],
       settingsMap: {
@@ -697,7 +756,6 @@ test.describe('Unified Agent Cards — Mobile', () => {
     });
     await navigateToAgentConfig(page);
     await page.waitForSelector('[data-testid="agent-card-opencode"]');
-    await takeScreenshot(page, 'agent-settings-mobile-opencode-go-provider');
     await assertNoOverflow(page);
 
     await expect(page.getByTestId('opencode-provider-select')).toHaveValue('opencode-go');
@@ -706,6 +764,13 @@ test.describe('Unified Agent Cards — Mobile', () => {
     await expect(modelInput).toHaveAttribute('placeholder', 'e.g. opencode-go/glm-5.2');
     const tagName = await modelInput.evaluate((el) => el.tagName.toLowerCase());
     expect(tagName).toBe('input');
+    await modelInput.scrollIntoViewIfNeeded();
+    await modelInput.click();
+    await expect(page.getByRole('option', { name: /GLM 5\.2|GLM-5\.2/ })).toBeVisible();
+    await expect(page.getByRole('option', { name: /opencode-go\/glm-5\.2/ })).toBeVisible();
+    await expect(page.getByRole('option', { name: /Claude Sonnet 4\.6/ })).not.toBeVisible();
+    await takeScreenshot(page, 'agent-settings-mobile-opencode-go-provider-dropdown');
+    await assertNoOverflow(page);
   });
 });
 
@@ -720,7 +785,10 @@ test.describe('Unified Agent Cards — Desktop', () => {
     await setupApiMocks(page, {
       agents: [MOCK_AGENT_OPENCODE],
       settingsMap: {
-        opencode: makeSettings({ opencodeProvider: 'platform', model: '@cf/meta/llama-4-scout-17b-16e-instruct' }),
+        opencode: makeSettings({
+          opencodeProvider: 'platform',
+          model: '@cf/meta/llama-4-scout-17b-16e-instruct',
+        }),
       },
     });
     await navigateToAgentConfig(page);
@@ -734,7 +802,15 @@ test.describe('Unified Agent Cards — Desktop', () => {
   });
 
   test('all providers: layout holds on desktop for each provider', async ({ page }) => {
-    const providers = ['opencode-go', 'platform', 'scaleway', 'google-vertex', 'anthropic', 'custom', 'openai-compatible'];
+    const providers = [
+      'opencode-go',
+      'platform',
+      'scaleway',
+      'google-vertex',
+      'anthropic',
+      'custom',
+      'openai-compatible',
+    ];
     for (const provider of providers) {
       await setupApiMocks(page, {
         agents: [MOCK_AGENT_OPENCODE],
