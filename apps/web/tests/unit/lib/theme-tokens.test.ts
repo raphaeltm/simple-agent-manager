@@ -68,7 +68,6 @@ describe('Slice E theme token coverage', () => {
     'apps/web/src/components/library/LibraryToolbar.tsx',
     'apps/web/src/components/library/TagEditor.tsx',
     'apps/web/src/components/library/UploadProgressChips.tsx',
-    'apps/web/src/components/project/ProjectForm.tsx',
     'apps/web/src/components/project/TaskDelegateDialog.tsx',
     'apps/web/src/components/triggers/SchedulePicker.tsx',
     'apps/web/src/components/NotificationCenter.tsx',
