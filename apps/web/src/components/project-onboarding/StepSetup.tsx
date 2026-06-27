@@ -5,9 +5,9 @@ import { ChevronRight } from 'lucide-react';
 import {
   type CreatedProfiles,
   type ProfileDraft,
-  type SetupStatus,
   ProfileSetupPanel,
   SetupHeader,
+  type SetupStatus,
 } from './shared';
 
 interface TriggerFormState {

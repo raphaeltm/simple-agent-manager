@@ -19,17 +19,17 @@ import {
 } from '../../lib/api';
 import {
   type CreatedProfiles,
-  type FieldErrors,
-  type ProfileDraft,
-  type SetupStatus,
-  type WizardStep,
-  StepIndicator,
   deriveProjectName,
+  type FieldErrors,
   isCredentialError,
   isNotApprovedError,
   mapProjectCreateError,
   normalizeRepository,
+  type ProfileDraft,
   profilePayload,
+  type SetupStatus,
+  StepIndicator,
+  type WizardStep,
 } from './shared';
 import { StepConnect } from './StepConnect';
 import { StepKickoff } from './StepKickoff';
