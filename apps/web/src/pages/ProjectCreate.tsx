@@ -1,87 +1,31 @@
 import type { GitHubInstallation } from '@simple-agent-manager/shared';
-import { Alert, Breadcrumb, PageLayout, Skeleton } from '@simple-agent-manager/ui';
+import { Breadcrumb, PageLayout } from '@simple-agent-manager/ui';
 import { useCallback, useEffect, useState } from 'react';
-import { useNavigate } from 'react-router';
 
-import { ProjectForm, type ProjectFormValues } from '../components/project/ProjectForm';
-import { useToast } from '../hooks/useToast';
-import { createProject, listGitHubInstallations } from '../lib/api';
-import { API_URL } from '../lib/api/client';
-import { readResponseJson } from '../lib/runtime-validation';
+import { ProjectOnboardingWizard } from '../components/project-onboarding';
+import { listGitHubInstallations } from '../lib/api';
 
 export function ProjectCreate() {
-  const navigate = useNavigate();
-  const toast = useToast();
   const [installations, setInstallations] = useState<GitHubInstallation[]>([]);
   const [loading, setLoading] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [artifactsEnabled, setArtifactsEnabled] = useState(false);
-  const [artifactsLoading, setArtifactsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
-      setError(null);
+      setLoadError(null);
+      setLoading(true);
       const data = await listGitHubInstallations();
       setInstallations(data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load installations');
+      setLoadError(err instanceof Error ? err.message : 'Failed to load installations');
     } finally {
       setLoading(false);
     }
   }, []);
 
-  // Check if artifacts provider is enabled
-  useEffect(() => {
-    const checkArtifacts = async () => {
-      try {
-        const resp = await fetch(`${API_URL}/api/config/artifacts-enabled`, { credentials: 'include' });
-        if (resp.ok) {
-          const data = await readResponseJson(resp, 'config.artifacts_enabled', (record) => ({
-            enabled: record.enabled === true,
-          }));
-          setArtifactsEnabled(data.enabled);
-        }
-      } catch {
-        // Artifacts check is best-effort — if it fails, GitHub-only mode
-      } finally {
-        setArtifactsLoading(false);
-      }
-    };
-    void checkArtifacts();
-  }, []);
-
   useEffect(() => {
     void load();
   }, [load]);
-
-  const handleCreate = async (values: ProjectFormValues) => {
-    try {
-      setSubmitting(true);
-      const project = await createProject({
-        name: values.name,
-        description: values.description || undefined,
-        ...(values.repoProvider === 'artifacts'
-          ? { repoProvider: 'artifacts' }
-          : {
-              repoProvider: 'github',
-              installationId: values.installationId,
-              repository: values.repository,
-              defaultBranch: values.defaultBranch,
-              githubRepoId: values.githubRepoId,
-            }),
-      });
-      toast.success('Project created');
-      navigate(`/projects/${project.id}`);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to create project');
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const isLoading = loading || artifactsLoading;
-  const canShowForm = installations.length > 0 || artifactsEnabled;
 
   return (
     <PageLayout title="New Project" maxWidth="xl">
@@ -93,36 +37,13 @@ export function ProjectCreate() {
         ]}
       />
 
-      {error && (
-        <div className="mt-3">
-          <Alert variant="error" onDismiss={() => setError(null)}>
-            {error}
-          </Alert>
-        </div>
-      )}
-
-      <div className="mt-4 border border-border-default rounded-md bg-surface p-4">
-        {isLoading ? (
-          <div className="grid gap-3">
-            <Skeleton width="30%" height="0.875rem" />
-            <Skeleton width="100%" height="2.5rem" borderRadius="var(--sam-radius-md)" />
-            <Skeleton width="30%" height="0.875rem" />
-            <Skeleton width="100%" height="2.5rem" borderRadius="var(--sam-radius-md)" />
-          </div>
-        ) : !canShowForm ? (
-          <Alert variant="warning">
-            Install the GitHub App first in Settings before creating projects.
-          </Alert>
-        ) : (
-          <ProjectForm
-            mode="create"
-            installations={installations}
-            submitting={submitting}
-            onSubmit={handleCreate}
-            onCancel={() => navigate('/projects')}
-            artifactsEnabled={artifactsEnabled}
-          />
-        )}
+      <div className="mt-4">
+        <ProjectOnboardingWizard
+          installations={installations}
+          loading={loading}
+          loadError={loadError}
+          onRetryInstallations={load}
+        />
       </div>
     </PageLayout>
   );
