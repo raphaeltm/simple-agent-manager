@@ -35,7 +35,9 @@ describe('deploy reusable workflow', () => {
 
     expect(block).toContain('SAM_DO_MIGRATION_BACKEND=$OPTIONAL_DO_MIGRATION_BACKEND');
     expect(block).toContain('>> "$GITHUB_ENV"');
-    expect(block).toContain("OPTIONAL_DO_MIGRATION_BACKEND: ${{ vars.SAM_DO_MIGRATION_BACKEND || '' }}");
+    expect(block).toContain(
+      "OPTIONAL_DO_MIGRATION_BACKEND: ${{ vars.SAM_DO_MIGRATION_BACKEND || '' }}"
+    );
   });
 
   it('deploys API Worker through retry wrapper with Cloudflare identity', () => {

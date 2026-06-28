@@ -18,7 +18,10 @@ import { resolve } from 'node:path';
 import * as TOML from '@iarna/toml';
 
 const API_WRANGLER_PATH = resolve(import.meta.dirname, '../../apps/api/wrangler.toml');
-const TAIL_WORKER_WRANGLER_PATH = resolve(import.meta.dirname, '../../apps/tail-worker/wrangler.toml');
+const TAIL_WORKER_WRANGLER_PATH = resolve(
+  import.meta.dirname,
+  '../../apps/tail-worker/wrangler.toml'
+);
 const API_DURABLE_OBJECTS_DIR = resolve(import.meta.dirname, '../../apps/api/src/durable-objects');
 
 const LEGACY_KV_BACKED_DO_CLASSES = new Map<string, string>([
@@ -140,8 +143,8 @@ function main(): void {
     const envNames = Object.keys(apiConfig.env).join(', ');
     errors.push(
       `apps/api/wrangler.toml contains [env.*] sections (${envNames}). ` +
-      `These are generated at deploy time by sync-wrangler-config.ts. ` +
-      `Remove them from the checked-in file.`
+        `These are generated at deploy time by sync-wrangler-config.ts. ` +
+        `Remove them from the checked-in file.`
     );
   }
 
@@ -152,7 +155,7 @@ function main(): void {
     const envNames = Object.keys(tailConfig.env).join(', ');
     errors.push(
       `apps/tail-worker/wrangler.toml contains [env.*] sections (${envNames}). ` +
-      `These are generated at deploy time. Remove them from the checked-in file.`
+        `These are generated at deploy time. Remove them from the checked-in file.`
     );
   }
 
@@ -161,11 +164,15 @@ function main(): void {
   // ========================================
 
   if (!apiConfig.durable_objects?.bindings?.length) {
-    errors.push('apps/api/wrangler.toml: top-level missing durable_objects.bindings (sync script copies these to env sections)');
+    errors.push(
+      'apps/api/wrangler.toml: top-level missing durable_objects.bindings (sync script copies these to env sections)'
+    );
   }
 
   if (!apiConfig.ai?.binding) {
-    errors.push('apps/api/wrangler.toml: top-level missing [ai] binding (sync script copies this to env sections)');
+    errors.push(
+      'apps/api/wrangler.toml: top-level missing [ai] binding (sync script copies this to env sections)'
+    );
   }
 
   if (!apiConfig.d1_databases?.length) {
@@ -181,7 +188,9 @@ function main(): void {
   }
 
   if (!apiConfig.migrations?.length) {
-    errors.push('apps/api/wrangler.toml: top-level missing [[migrations]] (sync script copies these to env sections)');
+    errors.push(
+      'apps/api/wrangler.toml: top-level missing [[migrations]] (sync script copies these to env sections)'
+    );
   }
 
   // ========================================
@@ -193,16 +202,22 @@ function main(): void {
 
     for (const binding of apiConfig.durable_objects.bindings) {
       if (!binding.class_name) {
-        errors.push(`apps/api/wrangler.toml: Durable Object binding ${binding.name ?? '<unnamed>'} is missing class_name`);
+        errors.push(
+          `apps/api/wrangler.toml: Durable Object binding ${binding.name ?? '<unnamed>'} is missing class_name`
+        );
         continue;
       }
 
       const creates = createMigrations.get(binding.class_name) ?? [];
       if (creates.length === 0) {
-        errors.push(`apps/api/wrangler.toml: Durable Object ${binding.class_name} has a binding but no create migration`);
+        errors.push(
+          `apps/api/wrangler.toml: Durable Object ${binding.class_name} has a binding but no create migration`
+        );
       } else if (creates.length > 1) {
         const tags = creates.map((create) => `${create.tag}:${create.backend}`).join(', ');
-        errors.push(`apps/api/wrangler.toml: Durable Object ${binding.class_name} has multiple create migrations (${tags})`);
+        errors.push(
+          `apps/api/wrangler.toml: Durable Object ${binding.class_name} has multiple create migrations (${tags})`
+        );
       }
     }
 
@@ -258,7 +273,9 @@ function main(): void {
 
   console.log('Wrangler config check passed.');
   console.log(`  No [env.*] sections in checked-in files.`);
-  console.log(`  Top-level: ${doCount} DOs, ${d1Count} D1, ${kvCount} KV, ${r2Count} R2, AI, ${migrationCount} migrations`);
+  console.log(
+    `  Top-level: ${doCount} DOs, ${d1Count} D1, ${kvCount} KV, ${r2Count} R2, AI, ${migrationCount} migrations`
+  );
 }
 
 main();
