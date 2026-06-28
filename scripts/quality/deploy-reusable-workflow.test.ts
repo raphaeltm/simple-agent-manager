@@ -30,6 +30,34 @@ describe('deploy reusable workflow', () => {
     }
   });
 
+  it('configures optional Durable Object migration backend through GITHUB_ENV', () => {
+    const block = stepBlock('Configure Durable Object Migration Backend');
+
+    expect(block).toContain('SAM_DO_MIGRATION_BACKEND=$OPTIONAL_DO_MIGRATION_BACKEND');
+    expect(block).toContain('>> "$GITHUB_ENV"');
+    expect(block).toContain("OPTIONAL_DO_MIGRATION_BACKEND: ${{ vars.SAM_DO_MIGRATION_BACKEND || '' }}");
+  });
+
+  it('deploys API Worker through retry wrapper with Cloudflare identity', () => {
+    for (const name of [
+      'Deploy API Worker',
+      'Re-deploy API Worker \\(with tail_consumers\\)',
+      'Re-deploy API Worker \\(after secrets\\)',
+    ]) {
+      const block = stepBlock(name);
+
+      expect(block).toContain('bash scripts/deploy/deploy-api-worker.sh');
+      expect(block).toContain('CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}');
+      expect(block).toContain(
+        'API_WORKER_NAME: ${{ steps.prefix.outputs.value }}-api-${{ steps.stack.outputs.name }}'
+      );
+      expect(block).toContain('PULUMI_STACK: ${{ steps.pulumi-select.outputs.stack_name }}');
+      expect(block).toContain('BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}');
+      expect(block).toContain('RESOURCE_PREFIX: ${{ steps.prefix.outputs.value }}');
+      expect(block).not.toContain('wrangler deploy --env "$DEPLOY_ENV"');
+    }
+  });
+
   it('fails preflight before secret configuration when GitHub webhook secret is missing', () => {
     const validationBlock = stepBlock('Check Required Configuration');
 

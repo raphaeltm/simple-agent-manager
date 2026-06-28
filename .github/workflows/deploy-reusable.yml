@@ -357,6 +357,18 @@ jobs:
       # ========================================
       # Phase 2: Configuration
       # ========================================
+      - name: Configure Durable Object Migration Backend
+        if: ${{ inputs.dry_run != true }}
+        run: |
+          if [ -n "$OPTIONAL_DO_MIGRATION_BACKEND" ]; then
+            echo "SAM_DO_MIGRATION_BACKEND=$OPTIONAL_DO_MIGRATION_BACKEND" >> "$GITHUB_ENV"
+            echo "Durable Object migration backend: $OPTIONAL_DO_MIGRATION_BACKEND"
+          else
+            echo "Durable Object migration backend: legacy"
+          fi
+        env:
+          OPTIONAL_DO_MIGRATION_BACKEND: ${{ vars.SAM_DO_MIGRATION_BACKEND || '' }}
+
       - name: Sync Wrangler Config (API + Tail Worker)
         if: ${{ inputs.dry_run != true }}
         run: pnpm tsx scripts/deploy/sync-wrangler-config.ts
@@ -459,21 +471,21 @@ jobs:
       # Deploy API worker first (without tail_consumers on first deploy)
       - name: Deploy API Worker
         if: ${{ inputs.dry_run != true }}
-        run: |
-          OUTPUT=$(pnpm --filter @simple-agent-manager/api exec wrangler deploy --env "$DEPLOY_ENV" 2>&1) || {
-            echo "$OUTPUT"
-            exit 1
-          }
-          echo "$OUTPUT"
-          if echo "$OUTPUT" | grep -q "not inherited by environments"; then
-            echo ""
-            echo "::error::Wrangler detected non-inherited bindings. Check sync-wrangler-config.ts."
-            echo "See: .claude/rules/07-env-and-urls.md"
-            exit 1
-          fi
+        run: bash scripts/deploy/deploy-api-worker.sh
         env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          API_WORKER_NAME: ${{ steps.prefix.outputs.value }}-api-${{ steps.stack.outputs.name }}
           DEPLOY_ENV: ${{ inputs.environment }}
+          PULUMI_STACK: ${{ steps.pulumi-select.outputs.stack_name }}
+          BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}
+          RESOURCE_PREFIX: ${{ steps.prefix.outputs.value }}
+          REQUIRE_APPROVAL: ${{ vars.REQUIRE_APPROVAL }}
+          HETZNER_BASE_IMAGE: ${{ vars.HETZNER_BASE_IMAGE }}
 
       # Tail Worker must deploy AFTER API Worker (service binding dependency)
       - name: Deploy Tail Worker
@@ -503,15 +515,21 @@ jobs:
 
       - name: Re-deploy API Worker (with tail_consumers)
         if: ${{ inputs.dry_run != true && steps.first_deploy.outputs.is_first == 'true' }}
-        run: |
-          OUTPUT=$(pnpm --filter @simple-agent-manager/api exec wrangler deploy --env "$DEPLOY_ENV" 2>&1) || {
-            echo "$OUTPUT"
-            exit 1
-          }
-          echo "$OUTPUT"
+        run: bash scripts/deploy/deploy-api-worker.sh
         env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          API_WORKER_NAME: ${{ steps.prefix.outputs.value }}-api-${{ steps.stack.outputs.name }}
           DEPLOY_ENV: ${{ inputs.environment }}
+          PULUMI_STACK: ${{ steps.pulumi-select.outputs.stack_name }}
+          BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}
+          RESOURCE_PREFIX: ${{ steps.prefix.outputs.value }}
+          REQUIRE_APPROVAL: ${{ vars.REQUIRE_APPROVAL }}
+          HETZNER_BASE_IMAGE: ${{ vars.HETZNER_BASE_IMAGE }}
 
       - name: Deploy Web UI
         if: ${{ inputs.dry_run != true }}
@@ -732,21 +750,21 @@ jobs:
       # Worker asset bundle instead of regressing to a previous deployment.
       - name: Re-deploy API Worker (after secrets)
         if: ${{ inputs.dry_run != true }}
-        run: |
-          OUTPUT=$(pnpm --filter @simple-agent-manager/api exec wrangler deploy --env "$DEPLOY_ENV" 2>&1) || {
-            echo "$OUTPUT"
-            exit 1
-          }
-          echo "$OUTPUT"
-          if echo "$OUTPUT" | grep -q "not inherited by environments"; then
-            echo ""
-            echo "::error::Wrangler detected non-inherited bindings. Check sync-wrangler-config.ts."
-            echo "See: .claude/rules/07-env-and-urls.md"
-            exit 1
-          fi
+        run: bash scripts/deploy/deploy-api-worker.sh
         env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          API_WORKER_NAME: ${{ steps.prefix.outputs.value }}-api-${{ steps.stack.outputs.name }}
           DEPLOY_ENV: ${{ inputs.environment }}
+          PULUMI_STACK: ${{ steps.pulumi-select.outputs.stack_name }}
+          BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}
+          RESOURCE_PREFIX: ${{ steps.prefix.outputs.value }}
+          REQUIRE_APPROVAL: ${{ vars.REQUIRE_APPROVAL }}
+          HETZNER_BASE_IMAGE: ${{ vars.HETZNER_BASE_IMAGE }}
 
       # ========================================
       # Phase 4: VM Agent
