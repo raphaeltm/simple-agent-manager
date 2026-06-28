@@ -13,7 +13,6 @@ export interface AgentSettingsValidationLimits {
   maxEnvVars: number;
   maxEnvKeyLength: number;
   maxEnvValueLength: number;
-  maxProviderNameLength: number;
   maxBaseUrlLength: number;
 }
 
@@ -24,7 +23,6 @@ export const AGENT_SETTINGS_VALIDATION_DEFAULTS: AgentSettingsValidationLimits =
   maxEnvVars: 50,
   maxEnvKeyLength: 128,
   maxEnvValueLength: 4096,
-  maxProviderNameLength: 100,
   maxBaseUrlLength: 2048,
 };
 
@@ -74,7 +72,6 @@ export function createSaveAgentSettingsSchema(
       additionalEnv: v.optional(v.nullable(additionalEnvSchema)),
       opencodeProvider: v.optional(v.nullable(OpenCodeProviderSchema)),
       opencodeBaseUrl: v.optional(v.nullable(BoundedStringSchema(limits.maxBaseUrlLength))),
-      opencodeProviderName: v.optional(v.nullable(BoundedStringSchema(limits.maxProviderNameLength))),
       providerMode: v.optional(v.nullable(AgentProviderModeSchema)),
     }),
     v.check(

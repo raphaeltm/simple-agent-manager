@@ -433,20 +433,17 @@ describe('runtime.ts always-proxy', () => {
   it('preserves platform inferenceConfig outputs for explicit platform selections by agent type', async () => {
     const outputs: Record<string, unknown> = {};
 
-    for (const agentType of ['claude-code', 'openai-codex', 'opencode']) {
+    for (const agentType of ['claude-code', 'openai-codex']) {
       vi.clearAllMocks();
       queryCount = 0;
       mockKvGet.mockResolvedValue(null);
       mockDbLimit.mockImplementation(() => {
         queryCount++;
         if (queryCount === 1) return [{ userId: 'user1', projectId: 'proj1' }];
-        if (queryCount === 2 && agentType === 'opencode') return [{ opencodeProvider: 'platform' }];
         if (queryCount === 2) return [{ providerMode: 'sam' }];
         return [];
       });
-      if (agentType !== 'opencode') {
-        mockGetDecryptedAgentKey.mockResolvedValueOnce(null);
-      }
+      mockGetDecryptedAgentKey.mockResolvedValueOnce(null);
 
       const response = await postAgentKey(agentType);
       const json = (await response.json()) as { inferenceConfig?: unknown };
@@ -467,12 +464,6 @@ describe('runtime.ts always-proxy', () => {
           "baseURL": "https://api.example.com/ai/v1",
           "model": "gpt-4.1",
           "provider": "openai-proxy",
-        },
-        "opencode": {
-          "apiKeySource": "callback-token",
-          "baseURL": "https://api.example.com/ai/v1",
-          "model": "@cf/meta/llama-4-scout-17b-16e-instruct",
-          "provider": "openai-compatible",
         },
       }
     `);

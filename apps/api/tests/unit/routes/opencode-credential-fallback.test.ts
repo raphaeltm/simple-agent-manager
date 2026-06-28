@@ -1,9 +1,10 @@
 /**
  * Tests for OpenCode agent key provider resolution.
  *
- * The default OpenCode provider is Zen and requires an OpenCode API key.
- * Scaleway cloud-provider reuse remains available only when Scaleway is
- * explicitly selected as the OpenCode provider.
+ * OpenCode is a bring-your-own-key agent. The default provider is Zen and every
+ * OpenCode provider (Zen, Go, custom) requires a dedicated OpenCode API key —
+ * there is no Scaleway reuse and no platform-proxy fallback. When no dedicated
+ * key exists the agent-key endpoint returns 404.
  */
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
@@ -67,24 +68,12 @@ describe('POST /workspaces/:id/agent-key — OpenCode provider resolution', () =
     );
   }
 
+  // The workspace row carries no projectId, so the project-scoped credential
+  // query is skipped. The user-scoped credential query consumes response #1
+  // (after the workspace lookup) and the platform credential query consumes #2.
   function queueLimitResponses(...responses: unknown[][]): void {
     const queued = [...responses];
     mockDB.limit.mockImplementation(() => queued.shift() ?? []);
-  }
-
-  function queueDedicatedOpenCodeKey(provider: string, encryptedToken: string, iv: string): void {
-    queueLimitResponses(
-      [{ userId: 'user-1' }],
-      [{ opencodeProvider: provider }],
-      [
-        {
-          encryptedToken,
-          iv,
-          credentialKind: 'api-key',
-          isActive: true,
-        },
-      ]
-    );
   }
 
   beforeEach(() => {
@@ -125,31 +114,9 @@ describe('POST /workspaces/:id/agent-key — OpenCode provider resolution', () =
     expect(body.message).toBe('Agent credential not found');
   });
 
-  it('returns Scaleway cloud credential only when Scaleway is explicitly selected', async () => {
+  it('returns the dedicated opencode key without any proxy fallback', async () => {
     queueLimitResponses(
       [{ userId: 'user-1' }],
-      [{ opencodeProvider: 'scaleway' }],
-      [],
-      [],
-      [{ encryptedToken: 'encrypted-scw', iv: 'iv-scw' }]
-    );
-
-    mockDecrypt.mockResolvedValueOnce(
-      JSON.stringify({ secretKey: 'scw-secret-key-123', projectId: 'scw-proj-1' })
-    );
-
-    const resp = await postAgentKey({ agentType: 'opencode' });
-    expect(resp.status).toBe(200);
-
-    const json = await resp.json();
-    expect(json.apiKey).toBe('scw-secret-key-123');
-    expect(json.credentialKind).toBe('api-key');
-  });
-
-  it('prefers dedicated opencode agent key over Scaleway cloud credential', async () => {
-    queueLimitResponses(
-      [{ userId: 'user-1' }],
-      [{ opencodeProvider: 'scaleway' }],
       [
         {
           encryptedToken: 'encrypted-dedicated',
@@ -168,19 +135,7 @@ describe('POST /workspaces/:id/agent-key — OpenCode provider resolution', () =
     const json = await resp.json();
     expect(json.apiKey).toBe('dedicated-opencode-key');
     expect(json.credentialKind).toBe('api-key');
-  });
-
-  it('returns platform proxy only when platform is explicitly selected', async () => {
-    queueLimitResponses([{ userId: 'user-1' }], [{ opencodeProvider: 'platform' }]);
-
-    const resp = await postAgentKey({ agentType: 'opencode' });
-    expect(resp.status).toBe(200);
-    const body = await resp.json();
-    expect(body.apiKey).toBe('__platform_proxy__');
-    expect(body.credentialSource).toBe('platform');
-    expect(body.inferenceConfig).toBeDefined();
-    expect(body.inferenceConfig.provider).toBe('openai-compatible');
-    expect(body.inferenceConfig.apiKeySource).toBe('callback-token');
+    expect(json.inferenceConfig).toBeUndefined();
   });
 
   it('returns 404 for default OpenCode Zen when AI proxy is enabled or disabled', async () => {
@@ -201,39 +156,30 @@ describe('POST /workspaces/:id/agent-key — OpenCode provider resolution', () =
     expect(resp.status).toBe(404);
   });
 
-  it('does not use Scaleway fallback for non-opencode agents', async () => {
+  it('does not resolve a key for non-opencode agents without a credential', async () => {
     queueLimitResponses([{ userId: 'user-1' }]);
 
     const resp = await postAgentKey({ agentType: 'google-gemini' });
     expect(resp.status).toBe(404);
   });
 
-  it('handles malformed Scaleway credential JSON gracefully and falls back to platform proxy', async () => {
-    queueLimitResponses(
-      [{ userId: 'user-1' }],
-      [{ opencodeProvider: 'scaleway' }],
-      [],
-      [],
-      [{ encryptedToken: 'encrypted-scw', iv: 'iv-scw' }]
-    );
-
-    mockDecrypt.mockResolvedValueOnce('not-valid-json');
-
-    const resp = await postAgentKey({ agentType: 'opencode' });
-    // Malformed explicit Scaleway credential is skipped without falling through
-    // to the default Zen or platform provider.
-    expect(resp.status).toBe(404);
-    const body = await resp.json();
-    expect(body.message).toBe('Agent credential not found');
-  });
-
   it.each([
-    ['OpenCode Zen', 'opencode-zen', 'encrypted-managed-key', 'iv-managed', 'opencode-managed-api-key'],
-    ['OpenCode Go', 'opencode-go', 'encrypted-go-key', 'iv-go', 'opencode-go-api-key'],
+    ['OpenCode Zen', 'encrypted-zen-key', 'iv-zen', 'opencode-zen-api-key'],
+    ['OpenCode Go', 'encrypted-go-key', 'iv-go', 'opencode-go-api-key'],
   ])(
-    'returns dedicated key directly for %s instead of routing through platform proxy',
-    async (_label, provider, encryptedToken, iv, decryptedKey) => {
-      queueDedicatedOpenCodeKey(provider, encryptedToken, iv);
+    'returns the dedicated key directly for %s instead of routing through any proxy',
+    async (_label, encryptedToken, iv, decryptedKey) => {
+      queueLimitResponses(
+        [{ userId: 'user-1' }],
+        [
+          {
+            encryptedToken,
+            iv,
+            credentialKind: 'api-key',
+            isActive: true,
+          },
+        ]
+      );
       mockDecrypt.mockResolvedValueOnce(decryptedKey);
 
       const resp = await postAgentKey({ agentType: 'opencode' });
@@ -245,19 +191,14 @@ describe('POST /workspaces/:id/agent-key — OpenCode provider resolution', () =
     }
   );
 
-  it.each([
-    ['OpenCode Zen', 'opencode-zen'],
-    ['OpenCode Go', 'opencode-go'],
-  ])(
-    'does not fall back to Scaleway or platform credentials when %s has no key',
-    async (_label, provider) => {
-      queueLimitResponses([{ userId: 'user-1' }], [{ opencodeProvider: provider }], []);
+  it('returns 404 and does not fall back to any platform/cloud credential when no key exists', async () => {
+    queueLimitResponses([{ userId: 'user-1' }], [], []);
 
-      const resp = await postAgentKey({ agentType: 'opencode' });
-      expect(resp.status).toBe(404);
-      const body = await resp.json();
-      expect(body.message).toBe('Agent credential not found');
-      expect(mockDB.limit).toHaveBeenCalledTimes(4);
-    }
-  );
+    const resp = await postAgentKey({ agentType: 'opencode' });
+    expect(resp.status).toBe(404);
+    const body = await resp.json();
+    expect(body.message).toBe('Agent credential not found');
+    // Workspace lookup + user-scoped credential query + platform credential query.
+    expect(mockDB.limit).toHaveBeenCalledTimes(3);
+  });
 });

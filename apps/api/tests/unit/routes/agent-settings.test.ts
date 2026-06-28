@@ -102,7 +102,6 @@ describe('Agent Settings Routes', () => {
         additionalEnv: null,
         opencodeProvider: provider,
         opencodeBaseUrl: null,
-        opencodeProviderName: null,
         createdAt: new Date(),
         updatedAt: new Date(),
       },
@@ -165,7 +164,6 @@ describe('Agent Settings Routes', () => {
           additionalEnv: JSON.stringify({ DEBUG: true }),
           opencodeProvider: 'mystery-provider',
           opencodeBaseUrl: 'https://provider.example.com/v1',
-          opencodeProviderName: 'Provider',
           createdAt: new Date('2026-02-13T00:00:00Z'),
           updatedAt: new Date('2026-02-13T00:00:00Z'),
         },
@@ -354,7 +352,6 @@ describe('Agent Settings Routes', () => {
           additionalEnv: null,
           opencodeProvider: null,
           opencodeBaseUrl: null,
-          opencodeProviderName: null,
           createdAt: new Date('2026-05-19T00:00:00Z'),
           updatedAt: new Date('2026-05-19T00:00:00Z'),
         },
@@ -390,12 +387,10 @@ describe('Agent Settings Routes', () => {
       expect(body.message).toContain('opencodeBaseUrl is required');
     });
 
-    it('should reject openai-compatible provider without opencodeBaseUrl', async () => {
+    it('should reject removed openai-compatible provider value', async () => {
       const res = await putSettings('opencode', { opencodeProvider: 'openai-compatible' });
 
       expect(res.status).toBe(400);
-      const body = await res.json();
-      expect(body.message).toContain('opencodeBaseUrl is required');
     });
 
     it('should reject non-HTTPS opencodeBaseUrl', async () => {
@@ -410,7 +405,6 @@ describe('Agent Settings Routes', () => {
     });
 
     it.each([
-      { label: 'scaleway', provider: 'scaleway', model: null },
       { label: 'OpenCode Zen', provider: 'opencode-zen', model: 'opencode/claude-sonnet-4-6' },
       { label: 'OpenCode Go', provider: 'opencode-go', model: 'opencode-go/glm-5.2' },
     ])('should accept $label provider without opencodeBaseUrl', async ({ provider, model }) => {
@@ -439,7 +433,6 @@ describe('Agent Settings Routes', () => {
           additionalEnv: null,
           opencodeProvider: 'custom',
           opencodeBaseUrl: 'https://my-provider.example.com/v1',
-          opencodeProviderName: 'My Provider',
           createdAt: new Date(),
           updatedAt: new Date(),
         },
@@ -448,14 +441,12 @@ describe('Agent Settings Routes', () => {
       const res = await putSettings('opencode', {
         opencodeProvider: 'custom',
         opencodeBaseUrl: 'https://my-provider.example.com/v1',
-        opencodeProviderName: 'My Provider',
       });
 
       expect(res.status).toBe(201);
       const body = await res.json();
       expect(body.opencodeProvider).toBe('custom');
       expect(body.opencodeBaseUrl).toBe('https://my-provider.example.com/v1');
-      expect(body.opencodeProviderName).toBe('My Provider');
     });
 
     it('should reject invalid opencodeProvider value', async () => {
@@ -475,9 +466,8 @@ describe('Agent Settings Routes', () => {
           allowedTools: null,
           deniedTools: null,
           additionalEnv: null,
-          opencodeProvider: 'google-vertex',
+          opencodeProvider: 'opencode-go',
           opencodeBaseUrl: null,
-          opencodeProviderName: null,
           createdAt: new Date(),
           updatedAt: new Date(),
         },
@@ -487,9 +477,8 @@ describe('Agent Settings Routes', () => {
 
       expect(res.status).toBe(200);
       const body = await res.json();
-      expect(body.opencodeProvider).toBe('google-vertex');
+      expect(body.opencodeProvider).toBe('opencode-go');
       expect(body.opencodeBaseUrl).toBeNull();
-      expect(body.opencodeProviderName).toBeNull();
     });
   });
 

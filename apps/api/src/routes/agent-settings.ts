@@ -174,7 +174,6 @@ function toResponse(row: schema.AgentSettingsRow): AgentSettingsResponse {
     additionalEnv: stringRecordFromJson(row.additionalEnv),
     opencodeProvider: opencodeProviderFromDb(row.opencodeProvider),
     opencodeBaseUrl: row.opencodeBaseUrl ?? null,
-    opencodeProviderName: row.opencodeProviderName ?? null,
     providerMode: providerModeFromDb(row.providerMode),
     createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : String(row.createdAt),
     updatedAt: row.updatedAt instanceof Date ? row.updatedAt.toISOString() : String(row.updatedAt),
@@ -216,7 +215,6 @@ agentSettingsRoutes.get('/:agentType', async (c) => {
       additionalEnv: null,
       opencodeProvider: null,
       opencodeBaseUrl: null,
-      opencodeProviderName: null,
       providerMode: null,
       createdAt: null,
       updatedAt: null,
@@ -273,7 +271,6 @@ agentSettingsRoutes.put('/:agentType', async (c) => {
     opencodeBaseUrl: requiresBaseUrl(body.opencodeProvider)
       ? (body.opencodeBaseUrl ?? null)
       : null,
-    opencodeProviderName: body.opencodeProviderName ?? null,
     providerMode: body.providerMode ?? null,
     updatedAt: now,
   };

@@ -10,7 +10,6 @@ import {
   HARNESS_CAPABILITIES,
   isValidAgentType,
   resolveHarnessDialect,
-  resolveOpenCodeProvider,
 } from '@simple-agent-manager/shared';
 import { and, eq, isNull } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -670,37 +669,18 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
     throw errors.notFound('Workspace');
   }
 
-  let selectedOpenCodeProvider: string | null = null;
-  if (body.agentType === 'opencode') {
-    const settingsRows = await db
-      .select({ opencodeProvider: schema.agentSettings.opencodeProvider })
-      .from(schema.agentSettings)
-      .where(
-        and(
-          eq(schema.agentSettings.userId, workspace.userId),
-          eq(schema.agentSettings.agentType, body.agentType)
-        )
-      )
-      .limit(1);
-    selectedOpenCodeProvider = resolveOpenCodeProvider(settingsRows[0]?.opencodeProvider ?? null);
-  }
-
-  const opencodeRequiresDedicatedCredential =
-    body.agentType === 'opencode' &&
-    selectedOpenCodeProvider !== 'platform' &&
-    selectedOpenCodeProvider !== 'scaleway';
+  // OpenCode always uses a user-supplied credential (zen/go/custom). It never
+  // routes through the SAM platform proxy, so it always requires a dedicated key.
+  const opencodeRequiresDedicatedCredential = body.agentType === 'opencode';
 
   const encryptionKey = getCredentialEncryptionKey(c.env);
-  let credentialData =
-    body.agentType === 'opencode' && selectedOpenCodeProvider === 'platform'
-      ? null
-      : await getDecryptedAgentKey(
-          db,
-          workspace.userId,
-          body.agentType,
-          encryptionKey,
-          workspace.projectId
-        );
+  let credentialData = await getDecryptedAgentKey(
+    db,
+    workspace.userId,
+    body.agentType,
+    encryptionKey,
+    workspace.projectId
+  );
 
   // SECURITY: Never return raw platform-managed credentials to tenant workspaces.
   // Platform credentials are control-plane secrets and must only be used via
@@ -712,15 +692,10 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
 
   // Cloud provider credential fallback: if no dedicated agent key, check if the agent
   // definition specifies a cloud provider whose credential can be used instead.
-  // OpenCode no longer advertises Scaleway as a catalog fallback; retain the legacy
-  // cloud credential reuse only for explicit Scaleway provider selections.
   const agentDef = isValidAgentType(body.agentType)
     ? getAgentDefinition(body.agentType)
     : undefined;
-  const fallbackCloudProvider =
-    body.agentType === 'opencode' && selectedOpenCodeProvider === 'scaleway'
-      ? 'scaleway'
-      : agentDef?.fallbackCloudProvider;
+  const fallbackCloudProvider = agentDef?.fallbackCloudProvider;
   if (!credentialData && fallbackCloudProvider) {
     const scalewayToken = await getDecryptedCredential(
       db,
@@ -758,16 +733,14 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
       workspaceId,
       userId: workspace.userId,
       agentType: body.agentType,
-      opencodeProvider: selectedOpenCodeProvider,
     });
     throw errors.notFound('Agent credential');
   }
 
   // AI proxy: when enabled and agent is eligible, return proxy config when the
   // credential can be forwarded to the upstream provider.
-  // Three modes:
+  // Two modes:
   // - Claude/Codex with no user credential + providerMode='sam' → platform proxy (callback-token auth)
-  // - OpenCode with provider='platform' → platform proxy
   // - User has upstream-compatible credential → passthrough proxy (user credential
   //   forwarded via auth headers, wstoken in URL path for analytics/rate-limiting)
   // Note: platform proxy fallback requires explicit provider selection.
@@ -883,19 +856,9 @@ runtimeRoutes.post('/:id/agent-key', jsonValidator(AgentTypeBodySchema), async (
       });
     }
 
-    if (body.agentType === 'opencode' && selectedOpenCodeProvider !== 'platform') {
-      log.info('agent_key.opencode_zen_missing_credential', {
-        workspaceId,
-        userId: workspace.userId,
-        agentType: body.agentType,
-        opencodeProvider: selectedOpenCodeProvider,
-      });
-      throw errors.notFound('Agent credential');
-    }
-
     // Claude Code and Codex require an explicit SAM provider selection before
-    // using platform proxy. OpenCode also requires explicit platform selection;
-    // default OpenCode is Zen and must not silently fall back to SAM platform AI.
+    // using platform proxy. OpenCode never reaches this block — it always
+    // requires a dedicated user credential and returns/throws above.
     if (isClaudeCode || isCodex) {
       const providerMode = await getExplicitProviderMode();
 
@@ -1183,7 +1146,6 @@ runtimeRoutes.post('/:id/agent-settings', jsonValidator(AgentTypeBodySchema), as
     permissionMode: projectDefaults.permissionMode ?? userRow?.permissionMode ?? null,
     opencodeProvider: userRow?.opencodeProvider ?? null,
     opencodeBaseUrl: userRow?.opencodeBaseUrl ?? null,
-    opencodeProviderName: userRow?.opencodeProviderName ?? null,
   });
 });
 runtimeRoutes.get('/:id/runtime', async (c) => {

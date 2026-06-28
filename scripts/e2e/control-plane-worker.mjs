@@ -82,9 +82,8 @@ export default {
       return jsonResponse({
         model: 'opencode-zen/claude-sonnet-4-5',
         permissionMode: null,
-        opencodeProvider: 'opencode-managed',
+        opencodeProvider: 'opencode-zen',
         opencodeBaseUrl: null,
-        opencodeProviderName: null,
       });
     }
 

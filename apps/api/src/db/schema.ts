@@ -849,12 +849,10 @@ export const agentSettings = sqliteTable(
     allowedTools: text('allowed_tools'),
     deniedTools: text('denied_tools'),
     additionalEnv: text('additional_env'),
-    /** OpenCode inference provider: 'platform' | 'scaleway' | 'google-vertex' | 'openai-compatible' | 'anthropic' | 'custom'. null = use default. */
+    /** OpenCode inference provider: 'opencode-zen' | 'opencode-go' | 'custom'. null = use default (zen). */
     opencodeProvider: text('opencode_provider'),
-    /** Base URL for custom/openai-compatible OpenCode providers. */
+    /** Base URL for the custom OpenCode provider. */
     opencodeBaseUrl: text('opencode_base_url'),
-    /** Display name for custom OpenCode providers. */
-    opencodeProviderName: text('opencode_provider_name'),
     /** Explicit provider mode for Claude Code / Codex: 'sam' | 'user-api-key' | 'oauth'. null = not set. */
     providerMode: text('provider_mode'),
     createdAt: integer('created_at', { mode: 'timestamp_ms' })
