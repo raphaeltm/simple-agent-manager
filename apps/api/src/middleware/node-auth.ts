@@ -2,7 +2,7 @@ import { and, eq, ne } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import type { Context } from 'hono';
 
-import { type Node, nodes, type Workspace,workspaces } from '../db/schema';
+import { type Node, nodes, type Workspace, workspaces } from '../db/schema';
 import type { Env } from '../env';
 import { getUserId } from './auth';
 

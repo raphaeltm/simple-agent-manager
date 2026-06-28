@@ -24,6 +24,15 @@ import { seedNode, seedUser } from './helpers/seed-d1';
 
 const TEST_USER_ID = 'user-nlp-test-001';
 
+interface StoredNodeLifecycleState {
+  nodeId: string;
+  userId: string;
+  status: 'active' | 'warm' | 'destroying';
+  warmSince: number | null;
+  claimedByTask: string | null;
+  warmTimeoutOverrideMs?: number | null;
+}
+
 function getStub(nodeId: string): DurableObjectStub<NodeLifecycle> {
   const id = env.NODE_LIFECYCLE.idFromName(nodeId);
   return env.NODE_LIFECYCLE.get(id) as DurableObjectStub<NodeLifecycle>;
@@ -32,6 +41,12 @@ function getStub(nodeId: string): DurableObjectStub<NodeLifecycle> {
 async function seedTestNode(nodeId: string, userId: string = TEST_USER_ID): Promise<void> {
   await seedUser(userId);
   await seedNode(nodeId, userId);
+}
+
+async function getStoredState(nodeId: string): Promise<StoredNodeLifecycleState | null> {
+  return await runInDurableObject(getStub(nodeId), async (instance) => {
+    return (await instance.ctx.storage.get<StoredNodeLifecycleState>('state')) ?? null;
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -48,6 +63,16 @@ describe('node-lifecycle proxy — Worker→DO contract', () => {
     expect(result.status).toBe('warm');
     expect(result.warmSince).toBeTruthy();
     expect(result.nodeId).toBe(nodeId);
+
+    const stored = await getStoredState(nodeId);
+    expect(stored).toMatchObject({
+      nodeId,
+      userId: TEST_USER_ID,
+      status: 'warm',
+      claimedByTask: null,
+      warmTimeoutOverrideMs: 120_000,
+    });
+    expect(stored?.warmSince).toBeTypeOf('number');
 
     // Verify D1 was updated
     const dbNode = await env.DATABASE.prepare(
@@ -100,6 +125,15 @@ describe('node-lifecycle proxy — Worker→DO contract', () => {
     expect(result.status).toBe('active');
     expect(result.warmSince).toBeNull();
 
+    const stored = await getStoredState(nodeId);
+    expect(stored).toMatchObject({
+      nodeId,
+      userId: TEST_USER_ID,
+      status: 'active',
+      warmSince: null,
+      claimedByTask: null,
+    });
+
     // Verify D1 warm_since is cleared
     const dbNode = await env.DATABASE.prepare(
       'SELECT warm_since FROM nodes WHERE id = ?',
@@ -128,6 +162,15 @@ describe('node-lifecycle proxy — Worker→DO contract', () => {
     expect(claimed).toBe(true);
     expect(state.status).toBe('active');
     expect(state.claimedByTask).toBe('task-claim-001');
+
+    const stored = await getStoredState(nodeId);
+    expect(stored).toMatchObject({
+      nodeId,
+      userId: TEST_USER_ID,
+      status: 'active',
+      warmSince: null,
+      claimedByTask: 'task-claim-001',
+    });
 
     // D1 warm_since should be cleared
     const dbNode = await env.DATABASE.prepare(
@@ -175,7 +218,12 @@ describe('node-lifecycle proxy — Worker→DO contract', () => {
 
     // Before any state is set, default is active
     const initial = await getStatus(env, nodeId);
-    expect(initial.status).toBe('active');
+    expect(initial).toEqual({
+      nodeId: '',
+      status: 'active',
+      warmSince: null,
+      claimedByTask: null,
+    });
 
     // After markIdle
     await markIdle(env, nodeId, TEST_USER_ID);

@@ -15,22 +15,33 @@
 
 ## Implementation Checklist
 
-- [ ] Replace or delete `apps/api/tests/unit/node-lifecycle.test.ts` so no NodeLifecycle implementation-internal source-fragment assertions remain.
-- [ ] Add behavior-focused service wrapper tests proving deterministic `idFromName(nodeId)` resolution and correct forwarding for `markIdle`, `markActive`, `tryClaim`, and `getStatus`.
-- [ ] Ensure `NodeLifecycle` default/no-state behavior is covered by Miniflare or an equivalent behavioral test.
-- [ ] Add an observable warm timeout override test that fails if the override is ignored.
-- [ ] Add focused coverage proving workspace deletion alarms are preserved when `markActive` and `tryClaim` clear warm state.
-- [ ] Make only tiny directly adjacent hygiene fixes if touched.
+- [x] Replace or delete `apps/api/tests/unit/node-lifecycle.test.ts` so no NodeLifecycle implementation-internal source-fragment assertions remain.
+- [x] Add behavior-focused service wrapper tests proving deterministic `idFromName(nodeId)` resolution and correct forwarding for `markIdle`, `markActive`, `tryClaim`, and `getStatus`.
+- [x] Ensure `NodeLifecycle` default/no-state behavior is covered by Miniflare or an equivalent behavioral test.
+- [x] Add an observable warm timeout override test that fails if the override is ignored.
+- [x] Add focused coverage proving workspace deletion alarms are preserved when `markActive` and `tryClaim` clear warm state.
+- [x] Make only tiny directly adjacent hygiene fixes if touched.
 - [ ] Run focused NodeLifecycle tests first, then API package quality checks required by the repo.
 - [ ] Run specialist review appropriate for API/Cloudflare/test behavior and address findings.
 
 ## Acceptance Criteria
 
-- [ ] No source-fragment test remains for NodeLifecycle implementation internals.
-- [ ] Behavior around service forwarding, default state, warm claiming, alarm preservation, and workspace deletion scheduling is covered by real tests.
+- [x] No source-fragment test remains for NodeLifecycle implementation internals.
+- [x] Behavior around service forwarding, default state, warm claiming, alarm preservation, and workspace deletion scheduling is covered by real tests.
 - [ ] Focused tests pass locally.
-- [ ] API package quality checks pass, or any intentionally skipped expensive checks are documented with exact commands run.
+- [x] API package quality checks pass, or any intentionally skipped expensive checks are documented with exact commands run.
 - [ ] Branch is pushed and a PR is opened according to `/do`; merge only if the normal `/do` gates are satisfied.
+
+## Verification Notes
+
+- `pnpm --filter @simple-agent-manager/api typecheck` passed.
+- `pnpm --filter @simple-agent-manager/api lint` passed with existing warnings.
+- `pnpm quality:source-contract-tests` passed and reported no prohibited patterns in 742 test files.
+- Focused worker tests are currently blocked locally by the Cloudflare worker runtime crashing before test import:
+  - `pnpm --filter @simple-agent-manager/api test:workers -- tests/workers/node-lifecycle-do.test.ts tests/workers/node-lifecycle-proxy.test.ts` entered a repeated `workerd` SIGSEGV crash loop.
+  - `pnpm --filter @simple-agent-manager/api exec vitest run --config vitest.workers.config.ts --maxWorkers=1 tests/workers/node-lifecycle-proxy.test.ts` failed before importing tests with `Worker cloudflare-pool emitted error` caused by `workerd` SIGSEGV.
+  - Retried with Node 20.20.2 plus PNPM 9.15.9 directly from Corepack; the same `workerd` SIGSEGV occurred.
+  - An unrelated control run, `pnpm --filter @simple-agent-manager/api exec vitest run --config vitest.workers.config.ts --maxWorkers=1 tests/workers/worker-smoke.test.ts`, also failed before importing tests with the same `workerd` SIGSEGV, confirming this is local worker-harness startup failure rather than a NodeLifecycle assertion failure.
 
 ## References
 

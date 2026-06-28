@@ -8,10 +8,10 @@
  * NodeLifecycle DO: apps/api/src/durable-objects/node-lifecycle.ts
  */
 import { env, runInDurableObject } from 'cloudflare:test';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { NodeLifecycle } from '../../src/durable-objects/node-lifecycle';
-import { seedNode, seedUser } from './helpers/seed-d1';
+import { seedNode, seedUser, seedWorkspace } from './helpers/seed-d1';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -24,6 +24,15 @@ function getStub(nodeId: string): DurableObjectStub<NodeLifecycle> {
 
 const TEST_USER_ID = 'user-nl-test-001';
 
+interface StoredNodeLifecycleState {
+  nodeId: string;
+  userId: string;
+  status: 'active' | 'warm' | 'destroying';
+  warmSince: number | null;
+  claimedByTask: string | null;
+  warmTimeoutOverrideMs?: number | null;
+}
+
 async function seedTestNode(nodeId: string, userId: string = TEST_USER_ID): Promise<void> {
   await seedUser(userId);
   await seedNode(nodeId, userId);
@@ -35,12 +44,28 @@ async function getNodeFromD1(nodeId: string): Promise<{ status: string; warm_sin
   ).bind(nodeId).first<{ status: string; warm_since: string | null }>();
 }
 
+async function getStoredState(stub: DurableObjectStub<NodeLifecycle>): Promise<StoredNodeLifecycleState | null> {
+  return await runInDurableObject(stub, async (instance) => {
+    return (await instance.ctx.storage.get<StoredNodeLifecycleState>('state')) ?? null;
+  });
+}
+
+async function getAlarm(stub: DurableObjectStub<NodeLifecycle>): Promise<number | null> {
+  return await runInDurableObject(stub, async (instance) => {
+    return await instance.ctx.storage.getAlarm();
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
 describe('NodeLifecycle DO — warm pool state machine', () => {
   // Each test uses a unique nodeId to avoid cross-test DO state leakage
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
 
   it('markIdle transitions to warm and updates D1 warm_since', async () => {
     const nodeId = 'nl-test-idle-001';
@@ -144,7 +169,12 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
 
     // Before any state is set
     const initial = await stub.getStatus();
-    expect(initial.status).toBe('active'); // default when no stored state
+    expect(initial).toEqual({
+      nodeId: '',
+      status: 'active',
+      warmSince: null,
+      claimedByTask: null,
+    }); // default when no stored state
 
     // After markIdle
     await stub.markIdle(nodeId, TEST_USER_ID);
@@ -200,6 +230,21 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
     expect(dbNode!.warm_since).toBeNull();
   });
 
+  it('tryClaim on node with no stored state returns false and the default active state', async () => {
+    const nodeId = 'nl-test-claim-no-state-001';
+    await seedTestNode(nodeId);
+
+    const { claimed, state } = await getStub(nodeId).tryClaim('task-no-state');
+
+    expect(claimed).toBe(false);
+    expect(state).toEqual({
+      nodeId: '',
+      status: 'active',
+      warmSince: null,
+      claimedByTask: null,
+    });
+  });
+
   it('alarm on active state is a no-op (node was claimed between schedule and fire)', async () => {
     const nodeId = 'nl-test-alarm-active-noop-001';
     await seedTestNode(nodeId);
@@ -250,6 +295,80 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
     expect(status.status).toBe('warm');
   });
 
+  it('markActive preserves a pending workspace deletion alarm when clearing warm state', async () => {
+    const nodeId = 'nl-test-active-preserves-ws-delete-001';
+    const wsId = 'ws-delete-after-active-001';
+    await seedTestNode(nodeId);
+
+    const stub = getStub(nodeId);
+    await stub.markIdle(nodeId, TEST_USER_ID);
+    await stub.scheduleWorkspaceDeletion(wsId, TEST_USER_ID);
+    const deletionAlarm = await getAlarm(stub);
+    expect(deletionAlarm).toBeGreaterThan(Date.now());
+
+    await stub.markActive();
+
+    const alarmAfterActivation = await getAlarm(stub);
+    expect(alarmAfterActivation).toBe(deletionAlarm);
+  });
+
+  it('tryClaim preserves a pending workspace deletion alarm when clearing warm state', async () => {
+    const nodeId = 'nl-test-claim-preserves-ws-delete-001';
+    const wsId = 'ws-delete-after-claim-001';
+    await seedTestNode(nodeId);
+
+    const stub = getStub(nodeId);
+    await stub.markIdle(nodeId, TEST_USER_ID);
+    await stub.scheduleWorkspaceDeletion(wsId, TEST_USER_ID);
+    const deletionAlarm = await getAlarm(stub);
+    expect(deletionAlarm).toBeGreaterThan(Date.now());
+
+    const claim = await stub.tryClaim('task-preserve-delete-alarm');
+    expect(claim.claimed).toBe(true);
+
+    const alarmAfterClaim = await getAlarm(stub);
+    expect(alarmAfterClaim).toBe(deletionAlarm);
+  });
+
+  it('alarm processes due workspace deletions while preserving active node state', async () => {
+    const nodeId = 'nl-test-active-ws-delete-alarm-001';
+    const wsId = 'ws-due-delete-active-001';
+    await seedTestNode(nodeId);
+    await seedWorkspace(wsId, nodeId, TEST_USER_ID, { status: 'stopped' });
+
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const stub = getStub(nodeId);
+    await runInDurableObject(stub, async (instance) => {
+      await instance.ctx.storage.put('state', {
+        nodeId,
+        userId: TEST_USER_ID,
+        status: 'active',
+        warmSince: null,
+        claimedByTask: null,
+      } satisfies StoredNodeLifecycleState);
+      await instance.ctx.storage.put(`ws-delete:${wsId}`, {
+        workspaceId: wsId,
+        userId: TEST_USER_ID,
+        deleteAt: Date.now() - 1_000,
+      });
+      await instance.ctx.storage.setAlarm(Date.now() - 1);
+    });
+
+    await runInDurableObject(stub, async (instance) => {
+      await instance.alarm();
+    });
+
+    expect(await stub.getStatus()).toMatchObject({ status: 'active' });
+    const workspace = await env.DATABASE.prepare(
+      'SELECT status FROM workspaces WHERE id = ?',
+    ).bind(wsId).first<{ status: string }>();
+    expect(workspace?.status).toBe('deleted');
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(await getAlarm(stub)).toBeNull();
+  });
+
   it('tryClaim on destroying node returns false', async () => {
     const nodeId = 'nl-test-claim-destroying-001';
     await seedTestNode(nodeId);
@@ -280,5 +399,32 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
 
     expect(result.status).toBe('warm');
     expect(result.warmSince).toBeTruthy();
+
+    const stored = await getStoredState(stub);
+    expect(stored?.warmTimeoutOverrideMs).toBe(60_000);
+  });
+
+  it('warm timeout override controls the alarm transition to destroying', async () => {
+    const nodeId = 'nl-test-override-transition-001';
+    await seedTestNode(nodeId);
+
+    const stub = getStub(nodeId);
+    await stub.markIdle(nodeId, TEST_USER_ID, 1_000);
+
+    await runInDurableObject(stub, async (instance) => {
+      const state = await instance.ctx.storage.get<StoredNodeLifecycleState>('state');
+      if (!state) throw new Error('expected stored NodeLifecycle state');
+
+      await instance.ctx.storage.put('state', {
+        ...state,
+        warmSince: Date.now() - 1_500,
+      });
+    });
+
+    await runInDurableObject(stub, async (instance) => {
+      await instance.alarm();
+    });
+
+    expect((await stub.getStatus()).status).toBe('destroying');
   });
 });
