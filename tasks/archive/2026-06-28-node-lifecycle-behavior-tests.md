@@ -49,6 +49,7 @@
 - Test-engineer review: PASS with residual risk from the local worker-harness crash. Coverage is behavior-focused, uses Miniflare DO/D1 state, avoids internal function mocks, and covers service forwarding, default state, warm claim behavior, warm timeout override, alarm preservation, and due workspace deletion processing.
 - Cloudflare-specialist review: PASS with residual risk from the local worker-harness crash. The tests use `runInDurableObject` only to arrange or observe DO storage/alarm state that is otherwise not public, and they exercise real DO storage plus D1 instead of source fragments.
 - Constitution-validator review: PASS. No production hardcoded timeout/URL/limit values were added; the new numeric timeout values are scoped to behavioral test fixtures.
+- Explicit deferral: focused NodeLifecycle worker test execution must be validated by CI or another environment because this local VM crashes `workerd` before worker test import. Merge remains blocked unless GitHub Actions validates the worker tests or the maintainer explicitly accepts that local harness limitation.
 
 ## References
 
