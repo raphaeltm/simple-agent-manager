@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   saveAgentCredential: vi.fn(),
   saveProjectAgentCredential: vi.fn(),
+  saveAgentSettings: vi.fn(),
   success: vi.fn(),
 }));
 
@@ -11,6 +12,7 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../src/lib/api')>()),
   saveAgentCredential: mocks.saveAgentCredential,
   saveProjectAgentCredential: mocks.saveProjectAgentCredential,
+  saveAgentSettings: mocks.saveAgentSettings,
 }));
 
 vi.mock('../../../src/hooks/useToast', () => ({
@@ -28,6 +30,7 @@ describe('ConnectFlow', () => {
     vi.clearAllMocks();
     mocks.saveAgentCredential.mockResolvedValue({});
     mocks.saveProjectAgentCredential.mockResolvedValue({});
+    mocks.saveAgentSettings.mockResolvedValue({});
   });
 
   it('renders agent selection cards from AGENT_CATALOG', () => {
@@ -150,6 +153,106 @@ describe('ConnectFlow', () => {
 
     await waitFor(() => {
       expect(screen.getByText('Invalid key')).toBeInTheDocument();
+    });
+  });
+
+  it('defaults the OpenCode provider to opencode-zen and saves the selected Go provider', async () => {
+    const onConnected = vi.fn();
+    renderFlow({ initialAgentId: 'opencode', onConnected });
+
+    const providerSelect = screen.getByLabelText('OpenCode provider') as HTMLSelectElement;
+    expect(providerSelect.value).toBe('opencode-zen');
+
+    fireEvent.change(providerSelect, { target: { value: 'opencode-go' } });
+
+    const input = screen.getByLabelText('OpenCode API Key');
+    fireEvent.change(input, { target: { value: 'opencode-key' } });
+
+    fireEvent.click(screen.getByRole('button', { name: /Connect$/i }));
+
+    await waitFor(() => {
+      expect(mocks.saveAgentCredential).toHaveBeenCalledWith({
+        agentType: 'opencode',
+        credentialKind: 'api-key',
+        credential: 'opencode-key',
+      });
+    });
+
+    expect(mocks.saveAgentSettings).toHaveBeenCalledWith('opencode', {
+      opencodeProvider: 'opencode-go',
+      opencodeBaseUrl: null,
+      model: null,
+    });
+    expect(onConnected).toHaveBeenCalled();
+  });
+
+  it('saves a model string alongside the OpenCode provider', async () => {
+    renderFlow({ initialAgentId: 'opencode' });
+
+    fireEvent.change(screen.getByLabelText('OpenCode API Key'), {
+      target: { value: 'opencode-key' },
+    });
+    fireEvent.change(screen.getByLabelText('Model'), {
+      target: { value: 'opencode/claude-sonnet-4-6' },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Connect$/i }));
+
+    await waitFor(() => {
+      expect(mocks.saveAgentSettings).toHaveBeenCalledWith('opencode', {
+        opencodeProvider: 'opencode-zen',
+        opencodeBaseUrl: null,
+        model: 'opencode/claude-sonnet-4-6',
+      });
+    });
+  });
+
+  it('passes a base URL only for the custom OpenCode provider', async () => {
+    renderFlow({ initialAgentId: 'opencode' });
+
+    // Base URL input is hidden for the default zen provider
+    expect(screen.queryByLabelText('Base URL')).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('OpenCode provider'), {
+      target: { value: 'custom' },
+    });
+
+    const baseUrl = screen.getByLabelText('Base URL');
+    fireEvent.change(baseUrl, { target: { value: 'https://llm.example.com/v1' } });
+
+    fireEvent.change(screen.getByLabelText('OpenCode API Key'), {
+      target: { value: 'opencode-key' },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Connect$/i }));
+
+    await waitFor(() => {
+      expect(mocks.saveAgentSettings).toHaveBeenCalledWith('opencode', {
+        opencodeProvider: 'custom',
+        opencodeBaseUrl: 'https://llm.example.com/v1',
+        model: null,
+      });
+    });
+  });
+
+  it('does not surface OpenCode provider settings for project-scoped overrides', () => {
+    renderFlow({ projectId: 'proj-1', initialAgentId: 'opencode' });
+
+    expect(screen.queryByLabelText('OpenCode provider')).not.toBeInTheDocument();
+  });
+
+  it('surfaces an error when saving OpenCode provider settings fails', async () => {
+    mocks.saveAgentSettings.mockRejectedValue(new Error('settings rejected'));
+    renderFlow({ initialAgentId: 'opencode' });
+
+    fireEvent.change(screen.getByLabelText('OpenCode API Key'), {
+      target: { value: 'opencode-key' },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Connect$/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('settings rejected')).toBeInTheDocument();
     });
   });
 

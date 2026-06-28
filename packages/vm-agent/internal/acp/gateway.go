@@ -449,7 +449,9 @@ func (g *Gateway) handleMessage(ctx context.Context, data []byte) {
 type agentCredential struct {
 	credential     string
 	credentialKind string // "api-key" or "oauth-token"
-	// Platform inference proxy fields (set when credentialSource == "platform" for opencode)
+	// AI proxy fields (set for claude-code/openai-codex when the AI proxy is
+	// enabled and the user has no dedicated agent key). OpenCode is always
+	// bring-your-own-key and never uses these.
 	inferenceConfig *inferenceConfig
 }
 
