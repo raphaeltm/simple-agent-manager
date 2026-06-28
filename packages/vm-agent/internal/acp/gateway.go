@@ -215,10 +215,10 @@ type GatewayConfig struct {
 	// Values are provider-neutral: "auto", "low", "medium", "high", "xhigh", "max".
 	EffortOverride string
 	// OpencodeProviderOverride, if non-empty, overrides the OpenCode inference provider.
-	// Values: "platform", "scaleway", "opencode-zen", "opencode-go", "opencode-managed", "google-vertex", "openai-compatible", "anthropic", "custom".
+	// Values: "opencode-zen", "opencode-go", "custom".
 	OpencodeProviderOverride string
 	// OpencodeBaseURLOverride, if non-empty, overrides the OpenCode base URL
-	// (used for "custom" and "openai-compatible" providers).
+	// (used for the "custom" provider).
 	OpencodeBaseURLOverride string
 	// HTTPClient is the HTTP client used for outbound control-plane calls
 	// (credential fetches, settings fetches). Must have an explicit timeout.
@@ -1275,8 +1275,6 @@ const (
 	DefaultOpencodeProvider          = "opencode-zen"
 	DefaultOpencodeModel             = "opencode/claude-sonnet-4-6"
 	DefaultOpencodeGoModel           = "opencode-go/glm-5.2"
-	DefaultScalewayBaseURL           = "https://api.scaleway.ai/v1"
-	DefaultGoogleVertexBaseURL       = "https://generativelanguage.googleapis.com/v1beta/openai"
 	DefaultCompatibleFallbackBaseURL = "http://localhost:11434/v1"
 )
 
@@ -1296,7 +1294,7 @@ func getOpencodeDefault(envKey, fallback string) string {
 
 func normalizeOpencodeProvider(provider string) string {
 	switch provider {
-	case "platform", "scaleway", "opencode-zen", "opencode-go", "opencode-managed", "google-vertex", "openai-compatible", "anthropic", "custom":
+	case "opencode-zen", "opencode-go", "custom":
 		return provider
 	default:
 		return DefaultOpencodeProvider
@@ -1327,17 +1325,11 @@ func resolveOpencodeModel(provider string, settings *agentSettingsPayload) strin
 //   - "models": a map registering model aliases so OpenCode recognises them
 //   - model field: formatted as "providerID/modelAlias"
 //
-// Built-in providers (OpenCode Zen, OpenCode Go, Scaleway, Anthropic) have pre-registered models and
-// don't need the npm/models keys.
-
-// opencodeConfigOverrides holds optional direct values to embed in the config
-// instead of using {env:...} references.
-type opencodeConfigOverrides struct {
-	PlatformBaseURL string // if non-empty, embedded directly instead of {env:OPENCODE_PLATFORM_BASE_URL}
-	PlatformAPIKey  string // if non-empty, embedded directly instead of {env:OPENCODE_PLATFORM_API_KEY}
-}
-
-func buildOpencodeConfig(settings *agentSettingsPayload, overrides *opencodeConfigOverrides) map[string]interface{} {
+// Built-in providers (OpenCode Zen, OpenCode Go) have pre-registered models
+// reached purely by model namespace and need only OPENCODE_API_KEY — no
+// provider block. Only "custom" (bring-your-own OpenAI-compatible endpoint)
+// needs the npm/models keys plus a baseURL.
+func buildOpencodeConfig(settings *agentSettingsPayload) map[string]interface{} {
 	provider := DefaultOpencodeProvider
 
 	if settings != nil && settings.OpencodeProvider != "" {
@@ -1348,10 +1340,9 @@ func buildOpencodeConfig(settings *agentSettingsPayload, overrides *opencodeConf
 
 	slog.Debug("buildOpencodeConfig: input",
 		"provider", provider,
-		"rawModel", model,
-		"hasOverrides", overrides != nil)
+		"rawModel", model)
 
-	// Strip @cf/ prefix from Workers AI model IDs for openai-compatible providers.
+	// Strip @cf/ prefix from Workers AI model IDs for custom providers.
 	model = stripCFPrefix(model)
 
 	slog.Debug("buildOpencodeConfig: after stripCFPrefix",
@@ -1360,97 +1351,10 @@ func buildOpencodeConfig(settings *agentSettingsPayload, overrides *opencodeConf
 
 	config := map[string]interface{}{}
 
-	scalewayBaseURL := getOpencodeDefault("OPENCODE_SCALEWAY_BASE_URL", DefaultScalewayBaseURL)
-
 	switch provider {
-	case "platform":
-		// SAM Platform (Workers AI) — uses a custom "sam-platform" provider ID.
-		// OpenCode requires npm + models keys for non-built-in providers.
-		// Embed actual values directly rather than {env:} references because
-		// OPENCODE_CONFIG_CONTENT may not support variable interpolation.
-		baseURL := "{env:OPENCODE_PLATFORM_BASE_URL}"
-		apiKey := "{env:OPENCODE_PLATFORM_API_KEY}"
-		if overrides != nil {
-			if overrides.PlatformBaseURL != "" {
-				baseURL = overrides.PlatformBaseURL
-			}
-			if overrides.PlatformAPIKey != "" {
-				apiKey = overrides.PlatformAPIKey
-			}
-		}
-		// For platform provider, preserve the vendor prefix in the model alias
-		// (e.g. "meta/llama-4-scout-17b-16e-instruct") so the AI proxy can
-		// reconstruct the full Workers AI model ID (@cf/meta/...).
-		// sanitizeModelAlias would strip "meta/" leaving just the model name,
-		// causing the proxy to resolve @cf/llama-4-... instead of @cf/meta/llama-4-...
-		// OpenCode splits "sam-platform/meta/llama-4-..." on the first "/" to get
-		// provider "sam-platform" and model "meta/llama-4-...", which is correct.
-		modelAlias := model // preserve vendor prefix (e.g. "meta/llama-4-scout-17b-16e-instruct")
-		config["model"] = "sam-platform/" + modelAlias
-		config["provider"] = map[string]interface{}{
-			"sam-platform": map[string]interface{}{
-				"npm":  "@ai-sdk/openai-compatible",
-				"name": "SAM Platform",
-				"options": map[string]interface{}{
-					"baseURL": baseURL,
-					"apiKey":  apiKey,
-				},
-				"models": map[string]interface{}{
-					modelAlias: map[string]interface{}{
-						"name": model,
-					},
-				},
-			},
-		}
-		slog.Info("buildOpencodeConfig: platform provider configured",
-			"modelAlias", modelAlias,
-			"fullModelKey", "sam-platform/"+modelAlias,
-			"baseURL", baseURL,
-			"apiKeyLen", len(apiKey))
-	case "opencode-zen", "opencode-go", "opencode-managed":
+	case "opencode-zen", "opencode-go":
 		config["model"] = model
-	case "scaleway":
-		// Scaleway is a built-in OpenCode provider with pre-registered models.
-		config["model"] = model
-		config["provider"] = map[string]interface{}{
-			"scaleway": map[string]interface{}{
-				"options": map[string]interface{}{
-					"baseURL": scalewayBaseURL,
-					"apiKey":  "{env:SCW_SECRET_KEY}",
-				},
-			},
-		}
-	case "google-vertex":
-		// Uses Google's Gemini API via its OpenAI-compatible endpoint.
-		// Named "google-vertex" in the UI; uses custom provider with npm + models.
-		modelAlias := sanitizeModelAlias(model)
-		config["model"] = "google-vertex/" + modelAlias
-		config["provider"] = map[string]interface{}{
-			"google-vertex": map[string]interface{}{
-				"npm":  "@ai-sdk/openai-compatible",
-				"name": "Google Gemini",
-				"options": map[string]interface{}{
-					"baseURL": getOpencodeDefault("OPENCODE_GOOGLE_VERTEX_BASE_URL", DefaultGoogleVertexBaseURL),
-					"apiKey":  "{env:GOOGLE_API_KEY}",
-				},
-				"models": map[string]interface{}{
-					modelAlias: map[string]interface{}{
-						"name": model,
-					},
-				},
-			},
-		}
-	case "anthropic":
-		// Anthropic is a built-in OpenCode provider.
-		config["model"] = model
-		config["provider"] = map[string]interface{}{
-			"anthropic": map[string]interface{}{
-				"options": map[string]interface{}{
-					"apiKey": "{env:ANTHROPIC_API_KEY}",
-				},
-			},
-		}
-	case "openai-compatible", "custom":
+	case "custom":
 		baseURL := getOpencodeDefault("OPENCODE_COMPATIBLE_DEFAULT_BASE_URL", DefaultCompatibleFallbackBaseURL)
 		if settings != nil && settings.OpencodeBaseURL != "" {
 			baseURL = settings.OpencodeBaseURL
@@ -1473,8 +1377,7 @@ func buildOpencodeConfig(settings *agentSettingsPayload, overrides *opencodeConf
 			},
 		}
 	default:
-		// Unknown provider — fail closed to the Zen default. Do not silently
-		// resurrect Scaleway inference from an unset or invalid provider value.
+		// Unknown provider — fail closed to the Zen default (model-only config).
 		config["model"] = model
 	}
 
@@ -1488,7 +1391,7 @@ func buildOpencodeConfig(settings *agentSettingsPayload, overrides *opencodeConf
 // silently fails and OpenCode returns end_turn with no content.
 func opencodeProviderNeedsNpmPackage(provider string) string {
 	switch provider {
-	case "platform", "google-vertex", "openai-compatible", "custom":
+	case "custom":
 		return "@ai-sdk/openai-compatible"
 	default:
 		return ""

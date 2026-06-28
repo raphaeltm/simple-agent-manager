@@ -1427,7 +1427,7 @@ func TestAuthFilePathValidation(t *testing.T) {
 func TestBuildOpencodeConfig_DefaultUsesOpenCodeZen(t *testing.T) {
 	t.Parallel()
 
-	config := buildOpencodeConfig(nil, nil)
+	config := buildOpencodeConfig(nil)
 
 	assertOpenCodeZenDefaultConfig(t, config)
 }
@@ -1437,7 +1437,7 @@ func TestBuildOpencodeConfig_UnknownProviderFallsBackToOpenCodeZen(t *testing.T)
 
 	config := buildOpencodeConfig(&agentSettingsPayload{
 		OpencodeProvider: "unknown-provider",
-	}, nil)
+	})
 
 	assertOpenCodeZenDefaultConfig(t, config)
 }
@@ -1470,7 +1470,7 @@ func TestBuildOpencodeConfig_OpenCodeZenUsesBuiltInModelPrefixes(t *testing.T) {
 			config := buildOpencodeConfig(&agentSettingsPayload{
 				OpencodeProvider: "opencode-zen",
 				Model:            tt.model,
-			}, nil)
+			})
 
 			if got := config["model"]; got != tt.model {
 				t.Fatalf("model = %v, want %q", got, tt.model)
@@ -1487,7 +1487,7 @@ func TestBuildOpencodeConfig_OpenCodeGoDefaultsToGLM52(t *testing.T) {
 
 	config := buildOpencodeConfig(&agentSettingsPayload{
 		OpencodeProvider: "opencode-go",
-	}, nil)
+	})
 
 	if got := config["model"]; got != DefaultOpencodeGoModel {
 		t.Fatalf("model = %v, want %q", got, DefaultOpencodeGoModel)
@@ -1504,7 +1504,7 @@ func TestBuildOpencodeConfig_OpenCodeGoPreservesExplicitModel(t *testing.T) {
 	config := buildOpencodeConfig(&agentSettingsPayload{
 		OpencodeProvider: "opencode-go",
 		Model:            model,
-	}, nil)
+	})
 
 	if got := config["model"]; got != model {
 		t.Fatalf("model = %v, want %q", got, model)
