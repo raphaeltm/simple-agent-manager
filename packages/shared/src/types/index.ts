@@ -282,7 +282,6 @@ export {
   GITHUB_CLI_POLICY_PERMISSION_KEYS,
   isAgentEffort,
   isAgentEffortSupported,
-  OPENCODE_MANAGED_PROVIDER_ALIAS,
   OPENCODE_PROVIDER_OPTIONS,
   OPENCODE_PROVIDERS,
   resolveOpenCodeProvider,

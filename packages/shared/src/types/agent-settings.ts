@@ -27,19 +27,9 @@ export type AgentPermissionMode =
   | 'bypassPermissions';
 
 /** Valid OpenCode inference provider types */
-export type OpenCodeProvider =
-  | 'platform'
-  | 'scaleway'
-  | 'opencode-zen'
-  | 'opencode-go'
-  | 'opencode-managed'
-  | 'google-vertex'
-  | 'openai-compatible'
-  | 'anthropic'
-  | 'custom';
+export type OpenCodeProvider = 'opencode-zen' | 'opencode-go' | 'custom';
 
 export const DEFAULT_OPENCODE_PROVIDER = 'opencode-zen' as const;
-export const OPENCODE_MANAGED_PROVIDER_ALIAS = 'opencode-managed' as const;
 export const DEFAULT_OPENCODE_ZEN_MODEL = 'opencode/claude-sonnet-4-6' as const;
 export const DEFAULT_OPENCODE_GO_MODEL = 'opencode-go/glm-5.2' as const;
 
@@ -59,22 +49,6 @@ export interface OpenCodeProviderMeta {
 
 /** Provider metadata registry — used by both UI and validation */
 export const OPENCODE_PROVIDERS: Record<OpenCodeProvider, OpenCodeProviderMeta> = {
-  platform: {
-    label: 'SAM Platform (Workers AI)',
-    modelPlaceholder: 'e.g. @cf/qwen/qwen3-30b-a3b-fp8',
-    requiresBaseUrl: false,
-    requiresApiKey: false,
-    keyLabel: '',
-    keyHelpText: "Using SAM's platform AI — daily limit applies",
-  },
-  scaleway: {
-    label: 'Scaleway',
-    modelPlaceholder: 'e.g. scaleway/qwen3-coder-30b-a3b-instruct',
-    requiresBaseUrl: false,
-    requiresApiKey: true,
-    keyLabel: 'Scaleway Secret Key',
-    keyHelpText: 'Create a Scaleway API key with GenerativeApisModelAccess permission',
-  },
   'opencode-zen': {
     label: 'OpenCode Zen',
     modelPlaceholder: `e.g. ${DEFAULT_OPENCODE_ZEN_MODEL}`,
@@ -91,45 +65,13 @@ export const OPENCODE_PROVIDERS: Record<OpenCodeProvider, OpenCodeProviderMeta> 
     keyLabel: 'OpenCode API Key',
     keyHelpText: 'Create an OpenCode API key at opencode.ai/auth',
   },
-  'opencode-managed': {
-    label: 'OpenCode Zen',
-    modelPlaceholder: `e.g. ${DEFAULT_OPENCODE_ZEN_MODEL}`,
-    requiresBaseUrl: false,
-    requiresApiKey: true,
-    keyLabel: 'OpenCode API Key',
-    keyHelpText: 'Create an OpenCode API key at opencode.ai/auth',
-  },
-  'google-vertex': {
-    label: 'Google Vertex',
-    modelPlaceholder: 'e.g. gemini-2.5-pro',
-    requiresBaseUrl: false,
-    requiresApiKey: true,
-    keyLabel: 'Google Cloud API Key',
-    keyHelpText: 'Enter your Google Cloud API key for Vertex AI',
-  },
-  'openai-compatible': {
-    label: 'OpenAI Compatible',
-    modelPlaceholder: 'e.g. your-model-name',
-    requiresBaseUrl: true,
-    requiresApiKey: true,
-    keyLabel: 'API Key',
-    keyHelpText: 'Enter your API key for the OpenAI-compatible endpoint',
-  },
-  anthropic: {
-    label: 'Anthropic',
-    modelPlaceholder: 'e.g. claude-sonnet-4-5-20250514',
-    requiresBaseUrl: false,
-    requiresApiKey: true,
-    keyLabel: 'Anthropic API Key',
-    keyHelpText: 'Enter your Anthropic API key',
-  },
   custom: {
-    label: 'Custom',
+    label: 'Custom (OpenAI-compatible)',
     modelPlaceholder: 'e.g. your-model-name',
     requiresBaseUrl: true,
     requiresApiKey: true,
     keyLabel: 'API Key',
-    keyHelpText: 'Enter your API key for the custom provider',
+    keyHelpText: 'Enter the base URL and API key for your OpenAI-compatible endpoint',
   },
 };
 
@@ -137,16 +79,10 @@ export const OPENCODE_PROVIDERS: Record<OpenCodeProvider, OpenCodeProviderMeta> 
 export const OPENCODE_PROVIDER_OPTIONS: OpenCodeProvider[] = [
   'opencode-zen',
   'opencode-go',
-  'platform',
-  'scaleway',
-  'google-vertex',
-  'openai-compatible',
-  'anthropic',
   'custom',
 ];
 
 export function resolveOpenCodeProvider(raw: unknown): OpenCodeProvider {
-  if (raw === OPENCODE_MANAGED_PROVIDER_ALIAS) return DEFAULT_OPENCODE_PROVIDER;
   if (typeof raw === 'string' && Object.hasOwn(OPENCODE_PROVIDERS, raw)) {
     return raw as OpenCodeProvider;
   }
@@ -176,10 +112,8 @@ export interface AgentSettingsResponse {
   additionalEnv: Record<string, string> | null;
   /** OpenCode inference provider. null = use default. */
   opencodeProvider: OpenCodeProvider | null;
-  /** Base URL for custom/openai-compatible providers. */
+  /** Base URL for the custom provider. */
   opencodeBaseUrl: string | null;
-  /** Display name for custom providers. */
-  opencodeProviderName: string | null;
   /** Provider mode for Claude Code / Codex. null = not explicitly selected. */
   providerMode: AgentProviderMode | null;
   createdAt: string | null;
@@ -195,10 +129,8 @@ export interface SaveAgentSettingsRequest {
   additionalEnv?: Record<string, string> | null;
   /** OpenCode inference provider. null = use default. */
   opencodeProvider?: OpenCodeProvider | null;
-  /** Base URL for custom/openai-compatible providers. */
+  /** Base URL for the custom provider. */
   opencodeBaseUrl?: string | null;
-  /** Display name for custom providers. */
-  opencodeProviderName?: string | null;
   /** Provider mode for Claude Code / Codex. null = clear selection. */
   providerMode?: AgentProviderMode | null;
 }
