@@ -15,6 +15,8 @@ export interface GitHubAppConfig {
   clientSecret: string;
   appId: string;
   appPrivateKey: string;
+  appSlug: string;
+  webhookSecret: string;
 }
 
 export interface GitHubAppManifest {
@@ -22,14 +24,17 @@ export interface GitHubAppManifest {
   url: string;
   hook_url?: string;
   redirect_url: string;
+  callback_urls: string[];
+  setup_url: string;
+  setup_on_update: boolean;
   description: string;
   public: boolean;
   default_events: string[];
   default_permissions: {
     contents: string;
     metadata: string;
+    email_addresses: string;
     pull_requests: string;
-    statuses: string;
   };
 }
 
@@ -40,10 +45,7 @@ export interface GitHubAppManifest {
 /**
  * Generate a GitHub App manifest for automatic app creation.
  */
-export function generateAppManifest(
-  appName: string,
-  baseDomain: string
-): GitHubAppManifest {
+export function generateAppManifest(appName: string, baseDomain: string): GitHubAppManifest {
   const webUrl = `https://app.${baseDomain}`;
   const apiUrl = `https://api.${baseDomain}`;
 
@@ -51,15 +53,18 @@ export function generateAppManifest(
     name: appName,
     url: webUrl,
     hook_url: `${apiUrl}/api/github/webhook`,
-    redirect_url: `${apiUrl}/api/auth/github/callback`,
+    redirect_url: `${apiUrl}/api/github/callback`,
+    callback_urls: [`${apiUrl}/api/auth/callback/github`],
+    setup_url: `${apiUrl}/api/github/callback`,
+    setup_on_update: true,
     description: 'Simple Agent Manager - AI Coding Agent Environment Manager',
     public: false,
     default_events: ['push', 'pull_request'],
     default_permissions: {
-      contents: 'read',
+      contents: 'write',
       metadata: 'read',
+      email_addresses: 'read',
       pull_requests: 'read',
-      statuses: 'read',
     },
   };
 }
@@ -67,15 +72,26 @@ export function generateAppManifest(
 /**
  * Generate a URL to create a GitHub App with pre-filled settings.
  */
-export function generateAppCreationUrl(
-  baseDomain: string,
-  appName: string = 'SAM Dev Agent'
-): string {
-  const manifest = generateAppManifest(appName, baseDomain);
-  const encodedManifest = encodeURIComponent(JSON.stringify(manifest));
+export function generateAppCreationUrl(baseDomain: string, appName: string = 'SAM'): string {
+  const apiUrl = `https://api.${baseDomain}`;
+  const params = new URLSearchParams();
 
-  // GitHub App Manifest flow
-  return `https://github.com/settings/apps/new?manifest=${encodedManifest}`;
+  params.set('name', appName);
+  params.set('url', `https://app.${baseDomain}`);
+  params.append('callback_urls[]', `${apiUrl}/api/auth/callback/github`);
+  params.set('setup_url', `${apiUrl}/api/github/callback`);
+  params.set('setup_on_update', 'true');
+  params.set('public', 'false');
+  params.set('webhook_active', 'true');
+  params.set('webhook_url', `${apiUrl}/api/github/webhook`);
+  params.set('contents', 'write');
+  params.set('metadata', 'read');
+  params.set('email_addresses', 'read');
+  params.set('pull_requests', 'read');
+  params.append('events[]', 'push');
+  params.append('events[]', 'pull_request');
+
+  return `https://github.com/settings/apps/new?${params.toString()}`;
 }
 
 /**
@@ -158,11 +174,20 @@ export async function collectGitHubAppCredentials(): Promise<GitHubAppConfig | n
       return null;
     }
 
+    const appSlug = await prompt(rl, 'GitHub App slug (from github.com/apps/<slug>): ');
+    if (!appSlug) {
+      logger.error('App slug is required');
+      return null;
+    }
+
+    const webhookSecret = await prompt(rl, 'GitHub App webhook secret: ');
+    if (!webhookSecret) {
+      logger.error('Webhook secret is required');
+      return null;
+    }
+
     logger.info('');
-    const appPrivateKey = await promptMultiline(
-      rl,
-      'GitHub App Private Key (PEM format):'
-    );
+    const appPrivateKey = await promptMultiline(rl, 'GitHub App Private Key (PEM format):');
 
     if (!appPrivateKey || !appPrivateKey.includes('-----BEGIN')) {
       logger.error('Private key must be in PEM format');
@@ -174,6 +199,8 @@ export async function collectGitHubAppCredentials(): Promise<GitHubAppConfig | n
       clientSecret,
       appId,
       appPrivateKey,
+      appSlug,
+      webhookSecret,
     };
   } finally {
     rl.close();
@@ -197,44 +224,56 @@ export function displaySetupGuide(baseDomain: string): void {
 To enable GitHub authentication, you need to create a GitHub App.
 Follow these steps:
 
-1. Go to GitHub Settings:
-   https://github.com/settings/apps/new
+1. Open the pre-filled GitHub App URL shown below.
 
-2. Fill in the required fields:
+2. Verify the required fields:
 
-   📝 App Name: SAM Dev Agent (or your preferred name)
+   📝 App Name: SAM (or your preferred name)
 
    🌐 Homepage URL:
    ${webUrl}
 
    🔗 Callback URL:
-   ${apiUrl}/api/auth/github/callback
+   ${apiUrl}/api/auth/callback/github
 
-   🪝 Webhook URL (optional):
+   🧭 Setup URL:
+   ${apiUrl}/api/github/callback
+   Enable "Redirect on update" for the Setup URL.
+
+   🪝 Webhook URL:
    ${apiUrl}/api/github/webhook
 
-3. Set Permissions:
-   - Repository contents: Read
-   - Repository metadata: Read
-   - Commit statuses: Read
+   Leave "Request user authorization (OAuth) during installation" unchecked.
 
-4. After creating the app, collect these values:
+3. Set Permissions:
+   - Repository contents: Read and write
+   - Repository metadata: Read
+   - Email addresses: Read-only
+   - Pull requests: Read-only
+
+4. Subscribe to events:
+   - push
+   - pull_request
+
+5. After creating the app, collect these values:
    - App ID (shown on the app settings page)
    - Client ID (from OAuth credentials)
    - Client Secret (generate one in OAuth credentials)
    - Private Key (generate and download .pem file)
+   - App slug (from github.com/apps/<slug>)
+   - Webhook secret (the value you entered on the form)
 
-5. Add these as secrets in your GitHub repository:
+6. Add these as secrets in your GitHub repository's production environment:
    - GH_APP_ID
    - GH_CLIENT_ID
    - GH_CLIENT_SECRET
    - GH_APP_PRIVATE_KEY
-
-💡 Tip: You can use the manifest URL below to pre-fill most settings:
+   - GH_APP_SLUG
+   - GH_WEBHOOK_SECRET
 `);
 
-  const manifestUrl = generateAppCreationUrl(baseDomain);
-  logger.keyValue('Manifest URL', manifestUrl);
+  const setupUrl = generateAppCreationUrl(baseDomain);
+  logger.keyValue('Pre-filled URL', setupUrl);
 }
 
 /**
@@ -249,10 +288,12 @@ The following credentials are needed for GitHub authentication:
 ┌────────────────────────┬─────────────────────────────────────────────┐
 │ Credential             │ Description                                  │
 ├────────────────────────┼─────────────────────────────────────────────┤
-│ GITHUB_CLIENT_ID       │ OAuth 2.0 Client ID                         │
-│ GITHUB_CLIENT_SECRET   │ OAuth 2.0 Client Secret                     │
-│ GITHUB_APP_ID          │ Numeric App ID from settings page           │
-│ GITHUB_APP_PRIVATE_KEY │ Private key (.pem file contents)            │
+│ GH_CLIENT_ID           │ OAuth 2.0 Client ID                         │
+│ GH_CLIENT_SECRET       │ OAuth 2.0 Client Secret                     │
+│ GH_APP_ID              │ Numeric App ID from settings page           │
+│ GH_APP_PRIVATE_KEY     │ Private key (.pem file contents)            │
+│ GH_APP_SLUG            │ App URL slug from github.com/apps/<slug>    │
+│ GH_WEBHOOK_SECRET      │ GitHub App webhook secret                   │
 └────────────────────────┴─────────────────────────────────────────────┘
 
 Where to find these:
@@ -260,6 +301,8 @@ Where to find these:
 2. App ID is shown at the top of the page
 3. Client ID/Secret are in the "OAuth credentials" section
 4. Generate Private Key in the "Private keys" section
+5. App slug is visible in the public app URL
+6. Webhook secret is the value you entered when creating the app
 `);
 }
 
@@ -290,6 +333,16 @@ export function validateCredentials(config: Partial<GitHubAppConfig>): {
     errors.push('Missing GitHub App ID');
   } else if (!/^\d+$/.test(config.appId)) {
     errors.push('GitHub App ID must be numeric');
+  }
+
+  if (!config.appSlug) {
+    errors.push('Missing GitHub App slug');
+  } else if (!/^[a-z0-9][a-z0-9-]*$/i.test(config.appSlug)) {
+    errors.push('GitHub App slug must contain only letters, numbers, and hyphens');
+  }
+
+  if (!config.webhookSecret) {
+    errors.push('Missing GitHub App webhook secret');
   }
 
   if (!config.appPrivateKey) {
@@ -334,20 +387,23 @@ export async function testGitHubAppCredentials(
 // Environment Variable Output
 // ============================================================================
 
+function shellSingleQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
 /**
  * Generate environment variable export commands.
  */
 export function generateEnvExports(config: GitHubAppConfig): string {
-  // Escape the private key for shell
-  const escapedKey = config.appPrivateKey.replace(/'/g, "'\\''");
-
   return `
-# Add these to your .env.local file or GitHub repository secrets:
+# Add these to your .env.local file:
 
-GITHUB_CLIENT_ID='${config.clientId}'
-GITHUB_CLIENT_SECRET='${config.clientSecret}'
-GITHUB_APP_ID='${config.appId}'
-GITHUB_APP_PRIVATE_KEY='${escapedKey}'
+GITHUB_CLIENT_ID=${shellSingleQuote(config.clientId)}
+GITHUB_CLIENT_SECRET=${shellSingleQuote(config.clientSecret)}
+GITHUB_APP_ID=${shellSingleQuote(config.appId)}
+GITHUB_APP_PRIVATE_KEY=${shellSingleQuote(config.appPrivateKey)}
+GITHUB_APP_SLUG=${shellSingleQuote(config.appSlug)}
+GITHUB_WEBHOOK_SECRET=${shellSingleQuote(config.webhookSecret)}
 `.trim();
 }
 
@@ -359,9 +415,11 @@ export function generateGitHubSecretsCommands(config: GitHubAppConfig): string {
 # Run these commands to set GitHub repository secrets:
 # (requires gh CLI to be installed and authenticated)
 
-gh secret set GH_CLIENT_ID --body "${config.clientId}"
-gh secret set GH_CLIENT_SECRET --body "${config.clientSecret}"
-gh secret set GH_APP_ID --body "${config.appId}"
-gh secret set GH_APP_PRIVATE_KEY < path/to/private-key.pem
+gh secret set GH_CLIENT_ID --env production --body ${shellSingleQuote(config.clientId)}
+gh secret set GH_CLIENT_SECRET --env production --body ${shellSingleQuote(config.clientSecret)}
+gh secret set GH_APP_ID --env production --body ${shellSingleQuote(config.appId)}
+gh secret set GH_APP_SLUG --env production --body ${shellSingleQuote(config.appSlug)}
+gh secret set GH_WEBHOOK_SECRET --env production --body ${shellSingleQuote(config.webhookSecret)}
+gh secret set GH_APP_PRIVATE_KEY --env production < path/to/private-key.pem
 `.trim();
 }

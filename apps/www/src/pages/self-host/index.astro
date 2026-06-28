@@ -17,6 +17,7 @@ const steps = [
   { id: 'github-env', num: 6, label: 'Configure environment', short: 'Environment' },
   { id: 'deploy', num: 7, label: 'Deploy & verify', short: 'Deploy' },
 ];
+const lastStep = steps[steps.length - 1]?.num ?? 0;
 
 // Cloudflare API token permission matrix — exact values from the guide.
 const cfPermissions = [
@@ -27,15 +28,11 @@ const cfPermissions = [
   { type: 'Account', resource: 'Workers Observability', access: 'Read' },
   { type: 'Account', resource: 'Cloudflare Pages', access: 'Edit' },
   { type: 'Account', resource: 'AI Gateway', access: 'Edit' },
+  { type: 'Account', resource: 'Containers', access: 'Edit' },
   { type: 'Zone', resource: 'DNS', access: 'Edit' },
   { type: 'Zone', resource: 'Workers Routes', access: 'Edit' },
   { type: 'Zone', resource: 'SSL and Certificates', access: 'Edit' },
   { type: 'Zone', resource: 'Zone', access: 'Read' },
-];
-
-// Optional / experimental permissions — only needed for opt-in features.
-const cfOptionalPermissions = [
-  { type: 'Account', resource: 'Containers', access: 'Edit', note: 'Experimental Cloudflare-native runtime' },
 ];
 ---
 
@@ -52,7 +49,7 @@ const cfOptionalPermissions = [
           <img src="/images/sam-head.png" alt="" class="sh-rail-mascot" width="36" height="36" />
           <div>
             <div class="sh-rail-title">Self-host SAM</div>
-            <div class="sh-rail-sub" id="sh-progress-label" aria-live="polite" hidden>Step 0 of 8</div>
+            <div class="sh-rail-sub" id="sh-progress-label" aria-live="polite" hidden>Step 0 of {lastStep}</div>
           </div>
         </div>
         <ol class="sh-steps">
@@ -87,7 +84,7 @@ const cfOptionalPermissions = [
           <div class="sh-prereqs">
             <div class="sh-prereq">
               <h3>Cloudflare account</h3>
-              <p>Workers Paid plan ($5/mo) for Durable Objects, plus Analytics Engine enabled (free).</p>
+              <p>Workers Paid plan ($5/mo) for Durable Objects, with R2 and Analytics Engine enabled.</p>
             </div>
             <div class="sh-prereq">
               <h3>GitHub account</h3>
@@ -123,6 +120,7 @@ const cfOptionalPermissions = [
             <div class="sh-field">
               <label for="sh-cf-account">Cloudflare account ID</label>
               <input type="text" id="sh-cf-account" placeholder="32-character account ID" autocomplete="off" spellcheck="false" />
+              <span class="sh-hint" id="sh-cf-account-error" hidden>Enter the 32-character Cloudflare account ID.</span>
               <span class="sh-hint">In the Cloudflare dashboard URL, this is the 32-character value after <code>dash.cloudflare.com/</code>.</span>
             </div>
           </div>
@@ -166,8 +164,8 @@ const cfOptionalPermissions = [
           <span class="sh-eyebrow">Step 2</span>
           <h2 class="sh-h2">Fork the repository</h2>
           <p class="sh-lead">
-            SAM deploys from your own fork. Pushing to <code>main</code> triggers the GitHub Actions
-            pipeline that provisions everything via Pulumi.
+            SAM deploys from your own fork. You'll run the GitHub Actions deploy workflow there once
+            the <code>production</code> environment is configured.
           </p>
           <a class="sh-btn sh-btn-primary" id="sh-fork-link" href={`${repoUrl}/fork`} target="_blank" rel="noopener noreferrer">
             Fork simple-agent-manager on GitHub
@@ -203,10 +201,11 @@ const cfOptionalPermissions = [
           <span class="sh-eyebrow">Step 3</span>
           <h2 class="sh-h2">Create your Cloudflare tokens</h2>
           <p class="sh-lead">
-            Create the main Cloudflare API token in your account's token page, then create the R2
-            access keys used for Pulumi state. Grant the main token exactly these permissions:
+            In the Cloudflare account from Step 1, enable R2 first if it is not already active.
+            Then create the deploy API token and the separate R2 S3 credentials used for Pulumi
+            state. Grant the deploy token exactly these permissions:
           </p>
-          <a class="sh-btn sh-btn-primary" id="sh-cf-api-link" href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" rel="noopener noreferrer">
+          <a class="sh-btn sh-btn-primary" id="sh-cf-api-link" href="https://dash.cloudflare.com/" target="_blank" rel="noopener noreferrer">
             Open Cloudflare API Tokens
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
           </a>
@@ -224,28 +223,11 @@ const cfOptionalPermissions = [
               </div>
             ))}
           </div>
-          <details class="sh-optional-perms">
-            <summary>
-              <span class="sh-optional-badge">Optional</span>
-              Experimental permissions — only if you opt in
-              <svg class="sh-why-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
-            </summary>
-            <div class="sh-optional-perms-body">
-              <p>Skip these unless you specifically want the feature they enable. Add them to the same token if you do.</p>
-              <div role="table" aria-label="Optional Cloudflare token permissions">
-                {cfOptionalPermissions.map((p) => (
-                  <div class="sh-perm-row sh-perm-row-optional" role="row">
-                    <span role="cell" data-perm-type={p.type}>{p.type}</span>
-                    <span role="cell">{p.resource}<span class="sh-perm-note">{p.note}</span></span>
-                    <span role="cell"><span class={`sh-access sh-access-${p.access.toLowerCase()}`}>{p.access}</span></span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </details>
           <div class="sh-callout sh-callout-info">
             Set <strong>Zone Resources</strong> to your domain and <strong>Account Resources</strong> to your account.
             Also enable <strong>Analytics Engine</strong> (free): Workers &amp; Pages → Analytics Engine → Enable.
+            The default deploy configures AI Gateway and writes Analytics Engine data, so keep those
+            enabled even if every user brings their own model keys.
           </div>
           <p class="sh-lead">Paste the generated values so we can assemble your final secrets in Step 6:</p>
           <div class="sh-field">
@@ -262,10 +244,16 @@ const cfOptionalPermissions = [
           </div>
           <h4 class="sh-subhead">R2 access keys for Pulumi state</h4>
           <p class="sh-lead">
-            Cloudflare may show these while you create token credentials. If not, open R2 API Tokens
-            and create an <strong>Object Read &amp; Write</strong> token.
+            Open R2 API Tokens in the same Cloudflare account and create
+            <strong>Object Read &amp; Write</strong> credentials. Cloudflare shows the Access Key ID
+            and Secret Access Key once; copy both before leaving the page.
           </p>
-          <a class="sh-btn sh-btn-primary" id="sh-r2-api-link" href="https://dash.cloudflare.com/?to=/:account/r2/api-tokens" target="_blank" rel="noopener noreferrer">
+          <div class="sh-callout sh-callout-info">
+            For the first deploy, scope the R2 credentials to <strong>All buckets</strong>. The deploy
+            workflow creates the Pulumi state bucket later as <code>{'${RESOURCE_PREFIX}-pulumi-state'}</code>.
+            After the first successful deploy, you can rotate these credentials to that one bucket.
+          </div>
+          <a class="sh-btn sh-btn-primary" id="sh-r2-api-link" href="https://dash.cloudflare.com/" target="_blank" rel="noopener noreferrer">
             Open R2 API Tokens
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
           </a>
@@ -293,15 +281,14 @@ const cfOptionalPermissions = [
                 <li><b>Cloudflare Pages</b> Hosts the web dashboard your team logs into.</li>
                 <li><b>DNS · Workers Routes</b> Auto-creates the <code>api.</code>, <code>app.</code>, and per-workspace <code>ws-…</code> hostnames and points each at the right Worker.</li>
                 <li><b>SSL and Certificates</b> Issues the Origin CA certificate so Cloudflare trusts the agent VMs you provision.</li>
-                <li><b>AI Gateway</b> Only used if you turn on SAM-managed AI — it meters and routes your agents' LLM traffic. Skip it entirely if everyone brings their own API keys.</li>
-                <li><b>Containers</b> Optional — an experimental Cloudflare-native runtime for lightweight agent workloads. Most agents run in your own BYOC clouds, so you can skip this unless you want to try the experimental runtime.</li>
+                <li><b>AI Gateway</b> Created by the default deploy so SAM-managed AI and unified billing can be enabled without changing token permissions later.</li>
+                <li><b>Containers</b> Required by the current API Worker config for the experimental Sandbox binding, even if you leave that feature disabled.</li>
                 <li><b>Workers Observability (read-only)</b> Powers the in-app logs and error views so you can debug your own instance.</li>
                 <li><b>Zone (read-only)</b> Lets Pulumi look up your domain. It never changes zone settings.</li>
               </ul>
               <p style="margin-top:12px;">
-                <strong>Analytics Engine</strong> (enabled separately, free) feeds SAM's own usage and
-                cost dashboards — useful when you're running a team and want to see what your agents
-                spend. For a solo instance it's entirely optional.
+                <strong>Analytics Engine</strong> (enabled separately, free) feeds SAM's usage and
+                cost dashboards and is used by the default deploy's analytics writes.
               </p>
             </div>
           </details>
@@ -563,9 +550,9 @@ const cfOptionalPermissions = [
             </summary>
             <div class="sh-why-body">
               <p>
-                One push runs the whole pipeline: Pulumi provisions D1, KV, R2, and DNS, deploys the
-                Worker and dashboard, runs database migrations, and builds the VM agent your
-                workspaces boot from.
+                One workflow run handles the whole pipeline: Pulumi provisions D1, KV, R2, and DNS,
+                deploys the Worker and dashboard, runs database migrations, and builds the VM agent
+                your workspaces boot from.
               </p>
               <p>
                 Re-running it later is safe — Pulumi compares your config to what's already live and
@@ -1418,15 +1405,64 @@ const cfOptionalPermissions = [
     .sh-reset { display: none; }
     .sh-stage { padding: 28px 20px 100px; max-width: 100%; }
     .sh-field-row { grid-template-columns: 1fr; gap: 0; }
+    .sh-derived dl { grid-template-columns: 1fr; gap: 3px; }
+    :global(.sh-derived dt:not(:first-child)) { margin-top: 8px; }
+    :global(.sh-derived dd) {
+      overflow-wrap: break-word;
+      word-break: normal;
+    }
+    :global(.sh-app-result .sh-derived dd) {
+      background: var(--color-bg-inset);
+      border: 1px solid var(--color-border-subtle);
+      border-radius: var(--radius-sm);
+      display: block;
+      font-size: 0.74rem;
+      line-height: 1.45;
+      padding: 7px 9px;
+    }
     .sh-perm-row { grid-template-columns: 70px 1fr 64px; gap: 8px; padding: 9px 12px; font-size: 0.8rem; }
-    :global(.sh-secret-row) { flex-direction: column; }
-    :global(.sh-secret-key) { min-width: 0; border-right: none; border-bottom: 1px solid var(--color-border); }
-    :global(.sh-secret-act) { border-left: none; border-top: 1px solid var(--color-border); justify-content: center; padding: 8px; }
-    /* Stack the action cluster as a full-width row; each button shares the width
-       evenly, with a divider between reveal and copy. */
-    :global(.sh-secret-acts) { width: 100%; }
-    :global(.sh-secret-acts .sh-secret-act) { flex: 1 1 0; }
+    :global(.sh-secret-row) {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+    }
+    :global(.sh-secret-key) {
+      border-bottom: 1px solid var(--color-border);
+      border-right: none;
+      grid-column: 1 / -1;
+      min-width: 0;
+      padding: 8px 10px;
+    }
+    :global(.sh-secret-val) {
+      align-self: stretch;
+      display: flex;
+      align-items: center;
+      min-height: 44px;
+      padding: 9px 10px;
+    }
+    :global(.sh-secret-acts) {
+      border-left: 1px solid var(--color-border);
+      grid-column: 2;
+      grid-row: 2;
+      min-height: 44px;
+      width: auto;
+    }
+    :global(.sh-secret-acts .sh-secret-act) {
+      border-left: none;
+      border-top: none;
+      flex: 0 0 44px;
+      justify-content: center;
+      padding: 8px;
+    }
     :global(.sh-secret-acts .sh-secret-act + .sh-secret-act) { border-left: 1px solid var(--color-border); }
+    :global(.sh-secret-row > .sh-secret-act) {
+      border-left: 1px solid var(--color-border);
+      border-top: none;
+      grid-column: 2;
+      grid-row: 2;
+      justify-content: center;
+      padding: 8px;
+      width: 44px;
+    }
     .sh-nav { flex-wrap: wrap; }
     .sh-nav-help { order: 3; width: 100%; text-align: center; }
   }

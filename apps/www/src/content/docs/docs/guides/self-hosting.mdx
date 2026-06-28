@@ -5,7 +5,7 @@ description: Deploy SAM to your own infrastructure with Cloudflare Workers, Pulu
 
 import GitHubAppSetup from '../../../../components/GitHubAppSetup.astro';
 
-This guide walks you through deploying Simple Agent Manager to your own infrastructure. Deployment is automated via GitHub Actions + Pulumi — push to `main` and everything is provisioned.
+This guide walks you through deploying Simple Agent Manager to your own infrastructure. Deployment is automated via GitHub Actions + Pulumi from your own fork.
 
 ## Prerequisites
 
@@ -15,7 +15,7 @@ This guide walks you through deploying Simple Agent Manager to your own infrastr
 | **GitHub account**       | Authentication, CI/CD     | Free tier            |
 | **Domain on Cloudflare** | Workspace URLs            | Any registrar        |
 
-**Workers Paid** is required because SAM uses Durable Objects for real-time chat, task execution, and node lifecycle. Go to **Workers & Pages** in the Cloudflare dashboard to upgrade. You also need **Analytics Engine** enabled (free): **Workers & Pages** → **Analytics Engine** → **Enable**.
+**Workers Paid** is required because SAM uses Durable Objects for real-time chat, task execution, and node lifecycle. Go to **Workers & Pages** in the Cloudflare dashboard to upgrade. You also need **R2** enabled for Pulumi state and **Analytics Engine** enabled (free): **Workers & Pages** → **Analytics Engine** → **Enable**.
 
 You do **not** need a shared cloud provider account. Users provide their own [Hetzner API token](https://console.hetzner.cloud/), [Scaleway API key](https://console.scaleway.com/iam/api-keys), or GCP configuration through the Settings UI. GCP support also requires optional Google OAuth configuration on the SAM instance.
 
@@ -37,7 +37,7 @@ Fork [simple-agent-manager](https://github.com/raphaeltm/simple-agent-manager) o
 
 ## Step 3: Create Cloudflare Tokens
 
-In Cloudflare Dashboard → `https://dash.cloudflare.com/<account-id>/api-tokens` → Create Custom Token:
+In the Cloudflare account from Step 1, enable R2 first if it is not already active. Then open `https://dash.cloudflare.com/<account-id>/api-tokens` → Create Custom Token:
 
 | Permission Type | Resource               | Access |
 | --------------- | ---------------------- | ------ |
@@ -56,11 +56,16 @@ In Cloudflare Dashboard → `https://dash.cloudflare.com/<account-id>/api-tokens
 
 Set **Zone Resources** to your specific domain and **Account Resources** to your account.
 
-Create R2 access keys for Pulumi state in the same Cloudflare account:
+The default deploy configures AI Gateway and writes Analytics Engine data, so keep the **AI Gateway** permission and enable **Analytics Engine** even if every user brings their own model keys. The current API Worker config also includes the experimental Sandbox binding, so **Containers: Edit** is required for the default Worker deploy.
+
+Create R2 S3 access keys for Pulumi state in the same Cloudflare account:
 
 1. Open `https://dash.cloudflare.com/<account-id>/r2/api-tokens`
-2. Create a token with **Object Read & Write** permissions
-3. Note the Access Key ID and Secret Access Key
+2. If Cloudflare prompts you to enable R2, complete that first
+3. Create credentials with **Object Read & Write** permissions scoped to **All buckets**
+4. Copy the Access Key ID and Secret Access Key before leaving the page
+
+Use **All buckets** for the first deploy because the workflow creates the Pulumi state bucket later as `${RESOURCE_PREFIX}-pulumi-state`. After the first successful deploy, you may rotate these R2 credentials to credentials scoped only to that generated bucket.
 
 ## Step 4: Create GitHub App
 
@@ -129,7 +134,7 @@ Security keys (`ENCRYPTION_KEY`, `JWT_PRIVATE_KEY`, `JWT_PUBLIC_KEY`, `DEPLOY_SI
 
 ## Step 7: Deploy
 
-Push any commit to `main`, or go to Actions → Deploy → Run workflow.
+Go to Actions → Deploy Production → Run workflow. Choose the `main` branch. No commit is needed after the environment is configured.
 
 The workflow:
 
@@ -219,7 +224,7 @@ Your `PULUMI_CONFIG_PASSPHRASE` doesn't match the one used when state was create
 
 ### "OAuth callback failed" / redirect URI mismatch
 
-Check that your GitHub App's Callback URL matches your `BASE_DOMAIN` exactly: `https://api.yourdomain.com/api/auth/callback/github`. If you changed `BASE_DOMAIN` after initial setup, update the URLs in both your GitHub OAuth App and GitHub App.
+Check that your GitHub App's Callback URL matches your `BASE_DOMAIN` exactly: `https://api.yourdomain.com/api/auth/callback/github`. If you changed `BASE_DOMAIN` after initial setup, update the Callback URL, Setup URL, and Webhook URL on the same GitHub App.
 
 ### Origin CA Certificate Error (1016)
 

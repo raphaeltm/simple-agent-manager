@@ -78,14 +78,17 @@
 
   function saveState() {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({
-        step: state.step,
-        furthest: state.furthest,
-        accountType: state.accountType,
-        webhookSecret: state.webhookSecret,
-        passphrase: state.passphrase,
-        fields: state.fields,
-      }));
+      localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({
+          step: state.step,
+          furthest: state.furthest,
+          accountType: state.accountType,
+          webhookSecret: state.webhookSecret,
+          passphrase: state.passphrase,
+          fields: state.fields,
+        })
+      );
     } catch (e) {
       /* storage may be unavailable; wizard still works in-memory */
     }
@@ -155,14 +158,23 @@
 
   // --- Domain logic ---
   var DOMAIN_RE = /^(?=.{1,253}$)(?!-)[a-z0-9-]{1,63}(\.[a-z0-9-]{1,63})+$/i;
+  var ACCOUNT_ID_RE = /^[a-f0-9]{32}$/i;
   var derivedPrefixCache = { domain: '', prefix: '' };
 
   function getDomain() {
     return getField('sh-domain').toLowerCase();
   }
 
+  function getCloudflareAccountId() {
+    return getField('sh-cf-account');
+  }
+
   function isValidDomain(d) {
     return DOMAIN_RE.test(d);
+  }
+
+  function isValidCloudflareAccountId(account) {
+    return ACCOUNT_ID_RE.test(account);
   }
 
   function deriveResourcePrefix(domain) {
@@ -174,12 +186,15 @@
     if (!window.crypto || !window.crypto.subtle || !window.TextEncoder) {
       return Promise.reject(new Error('Web Crypto SHA-256 is unavailable in this browser.'));
     }
-    return window.crypto.subtle.digest('SHA-256', new TextEncoder().encode(domain))
+    return window.crypto.subtle
+      .digest('SHA-256', new TextEncoder().encode(domain))
       .then(function (buffer) {
         var bytes = Array.prototype.slice.call(new Uint8Array(buffer));
-        var hex = bytes.map(function (byte) {
-          return byte.toString(16).padStart(2, '0');
-        }).join('');
+        var hex = bytes
+          .map(function (byte) {
+            return byte.toString(16).padStart(2, '0');
+          })
+          .join('');
         var prefix = 's' + hex.slice(0, 6);
         derivedPrefixCache = { domain: domain, prefix: prefix };
         return prefix;
@@ -214,6 +229,33 @@
     }
   }
 
+  function updateCloudflareAccountValidation() {
+    var account = getCloudflareAccountId();
+    var err = document.getElementById('sh-cf-account-error');
+    if (err) err.hidden = account === '' || isValidCloudflareAccountId(account);
+  }
+
+  function validateDomainStep() {
+    var domainValid = isValidDomain(getDomain());
+    var accountValid = isValidCloudflareAccountId(getCloudflareAccountId());
+    updateDomainDerived();
+    updateCloudflareAccountValidation();
+
+    if (!domainValid) {
+      var domainErr = document.getElementById('sh-domain-error');
+      if (domainErr) domainErr.hidden = false;
+      flash(fieldEl('sh-domain'));
+      return false;
+    }
+    if (!accountValid) {
+      var accountErr = document.getElementById('sh-cf-account-error');
+      if (accountErr) accountErr.hidden = false;
+      flash(fieldEl('sh-cf-account'));
+      return false;
+    }
+    return true;
+  }
+
   function setDerived(key, value) {
     var el = main.querySelector('[data-derived="' + key + '"]');
     if (el) el.textContent = value;
@@ -238,9 +280,12 @@
     params.append('events[]', 'push');
     params.append('events[]', 'pull_request');
 
-    var base = org && org.trim()
-      ? 'https://github.com/organizations/' + encodeURIComponent(org.trim()) + '/settings/apps/new'
-      : 'https://github.com/settings/apps/new';
+    var base =
+      org && org.trim()
+        ? 'https://github.com/organizations/' +
+          encodeURIComponent(org.trim()) +
+          '/settings/apps/new'
+        : 'https://github.com/settings/apps/new';
     return base + '?' + params.toString();
   }
 
@@ -274,7 +319,11 @@
       addPreviewRow(preview, 'Setup URL', 'https://api.' + domain + '/api/github/callback');
       addPreviewRow(preview, 'Redirect on update', 'Enabled');
       addPreviewRow(preview, 'Webhook URL', 'https://api.' + domain + '/api/github/webhook');
-      addPreviewRow(preview, 'Permissions', 'Contents: write · Metadata: read · Emails: read · Pull requests: read');
+      addPreviewRow(
+        preview,
+        'Permissions',
+        'Contents: write · Metadata: read · Emails: read · Pull requests: read'
+      );
       addPreviewRow(preview, 'Events', 'push, pull_request');
     }
 
@@ -323,7 +372,12 @@
       { key: 'GH_CLIENT_ID', value: getField('sh-client-id') },
       { key: 'GH_CLIENT_SECRET', value: getField('sh-client-secret'), secret: true },
       { key: 'GH_APP_ID', value: getField('sh-app-id') },
-      { key: 'GH_APP_PRIVATE_KEY', value: privateKey ? base64Encode(privateKey) : '', secret: true, note: 'base64-encoded' },
+      {
+        key: 'GH_APP_PRIVATE_KEY',
+        value: privateKey ? base64Encode(privateKey) : '',
+        secret: true,
+        note: 'base64-encoded',
+      },
       { key: 'GH_APP_SLUG', value: getField('sh-app-slug') },
       { key: 'GH_WEBHOOK_SECRET', value: state.webhookSecret, secret: true },
     ];
@@ -354,9 +408,8 @@
       })
       .catch(function (err) {
         if (varsOutput) {
-          varsOutput.textContent = err && err.message
-            ? err.message
-            : 'Could not generate RESOURCE_PREFIX.';
+          varsOutput.textContent =
+            err && err.message ? err.message : 'Could not generate RESOURCE_PREFIX.';
         }
       });
   }
@@ -398,7 +451,8 @@
       key.textContent = row.key + (row.note ? ' (' + row.note + ')' : '');
 
       var val = document.createElement('span');
-      val.className = 'sh-secret-val' + (missing ? ' is-missing' : '') + (maskable ? ' is-masked' : '');
+      val.className =
+        'sh-secret-val' + (missing ? ' is-missing' : '') + (maskable ? ' is-masked' : '');
       val.textContent = maskable ? maskValue(realVal) : displayVal;
 
       var acts = document.createElement('span');
@@ -475,13 +529,15 @@
     var lines = [];
     var r = repo ? ' --repo ' + shellQuote(repo) : '';
     data.vars.forEach(function (row) {
-      var v = row.value && row.value.length > 0 ? row.value : (row.fallback || '');
+      var v = row.value && row.value.length > 0 ? row.value : row.fallback || '';
       if (!v) return;
       lines.push('gh variable set ' + row.key + r + ' --env production --body ' + shellQuote(v));
     });
     data.secrets.forEach(function (row) {
       if (!row.value || row.value.length === 0) return;
-      lines.push('gh secret set ' + row.key + r + ' --env production --body ' + shellQuote(row.value));
+      lines.push(
+        'gh secret set ' + row.key + r + ' --env production --body ' + shellQuote(row.value)
+      );
     });
     return lines.join('\n');
   }
@@ -498,8 +554,8 @@
 
     var code = out.querySelector('code');
     if (code) {
-      code.textContent = renderMaskedGhScript(script)
-        || '# Fill in the earlier steps to generate the command.';
+      code.textContent =
+        renderMaskedGhScript(script) || '# Fill in the earlier steps to generate the command.';
     }
     out.setAttribute('data-revealed', 'false');
 
@@ -534,9 +590,9 @@
   }
 
   function renderCloudflareLinks() {
-    var account = getField('sh-cf-account').trim();
+    var account = getCloudflareAccountId();
     var domain = getDomain();
-    var hasAccount = /^[a-f0-9]{32}$/i.test(account);
+    var hasAccount = isValidCloudflareAccountId(account);
     var cfApiLink = document.getElementById('sh-cf-api-link');
     var r2ApiLink = document.getElementById('sh-r2-api-link');
     var zoneLink = document.getElementById('sh-cf-zone-link');
@@ -544,17 +600,18 @@
     if (cfApiLink) {
       cfApiLink.href = hasAccount
         ? 'https://dash.cloudflare.com/' + account + '/api-tokens'
-        : 'https://dash.cloudflare.com/profile/api-tokens';
+        : 'https://dash.cloudflare.com/';
     }
     if (r2ApiLink) {
       r2ApiLink.href = hasAccount
         ? 'https://dash.cloudflare.com/' + account + '/r2/api-tokens'
-        : 'https://dash.cloudflare.com/?to=/:account/r2/api-tokens';
+        : 'https://dash.cloudflare.com/';
     }
     if (zoneLink) {
-      zoneLink.href = hasAccount && isValidDomain(domain)
-        ? 'https://dash.cloudflare.com/' + account + '/' + domain
-        : 'https://dash.cloudflare.com/';
+      zoneLink.href =
+        hasAccount && isValidDomain(domain)
+          ? 'https://dash.cloudflare.com/' + account + '/' + domain
+          : 'https://dash.cloudflare.com/';
     }
   }
 
@@ -564,10 +621,14 @@
     var done = function () {
       if (!btn) return;
       btn.classList.add('is-copied');
-      setTimeout(function () { btn.classList.remove('is-copied'); }, 1400);
+      setTimeout(function () {
+        btn.classList.remove('is-copied');
+      }, 1400);
     };
     if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(text).then(done, function () { fallbackCopy(text, done); });
+      navigator.clipboard.writeText(text).then(done, function () {
+        fallbackCopy(text, done);
+      });
     } else {
       fallbackCopy(text, done);
     }
@@ -580,7 +641,11 @@
     ta.style.opacity = '0';
     document.body.appendChild(ta);
     ta.select();
-    try { document.execCommand('copy'); } catch (e) { /* noop */ }
+    try {
+      document.execCommand('copy');
+    } catch (e) {
+      /* noop */
+    }
     document.body.removeChild(ta);
     done();
   }
@@ -589,7 +654,9 @@
     if (!el) return;
     el.focus();
     el.style.boxShadow = '0 0 0 3px rgba(245, 158, 11, 0.4)';
-    setTimeout(function () { el.style.boxShadow = ''; }, 1200);
+    setTimeout(function () {
+      el.style.boxShadow = '';
+    }, 1200);
   }
 
   // --- Navigation / rendering ---
@@ -628,7 +695,10 @@
 
     // Per-step side effects
     var id = STEP_IDS[state.step];
-    if (id === 'domain') updateDomainDerived();
+    if (id === 'domain') {
+      updateDomainDerived();
+      updateCloudflareAccountValidation();
+    }
     if (id === 'cf-token') renderCloudflareLinks();
     if (id === 'github-app') {
       if (state.webhookSecret) generateAppLink();
@@ -640,7 +710,9 @@
     try {
       main.scrollIntoView({ block: 'start', behavior: 'auto' });
       window.scrollTo({ top: 0, behavior: 'auto' });
-    } catch (e) { /* noop */ }
+    } catch (e) {
+      /* noop */
+    }
   }
 
   function goTo(step) {
@@ -654,15 +726,17 @@
     var heading = panels[id] && panels[id].querySelector('.sh-h1, .sh-h2');
     if (heading) {
       heading.setAttribute('tabindex', '-1');
-      try { heading.focus(); } catch (e) { /* noop */ }
+      try {
+        heading.focus();
+      } catch (e) {
+        /* noop */
+      }
     }
   }
 
   function next() {
     if (state.step >= LAST) return;
-    if (STEP_IDS[state.step] === 'domain' && !isValidDomain(getDomain())) {
-      updateDomainDerived();
-      flash(fieldEl('sh-domain'));
+    if (STEP_IDS[state.step] === 'domain' && !validateDomainStep()) {
       return;
     }
     goTo(state.step + 1);
@@ -703,6 +777,7 @@
       el.addEventListener('input', function () {
         persistField(fid);
         if (fid === 'sh-domain') updateDomainDerived();
+        if (fid === 'sh-cf-account') updateCloudflareAccountValidation();
         if (fid === 'sh-domain' || fid === 'sh-cf-account') renderCloudflareLinks();
         if (STEP_IDS[state.step] === 'github-env') renderEnvOutputs();
       });
@@ -735,8 +810,9 @@
           if (revealed) {
             code.textContent = script || '# Fill in the earlier steps to generate the command.';
           } else {
-            code.textContent = renderMaskedGhScript(script)
-              || '# Fill in the earlier steps to generate the command.';
+            code.textContent =
+              renderMaskedGhScript(script) ||
+              '# Fill in the earlier steps to generate the command.';
           }
         }
         ghReveal.innerHTML = revealed ? eyeOffIcon() : eyeIcon();
@@ -786,7 +862,11 @@
     if (resetBtn) {
       resetBtn.addEventListener('click', function () {
         if (!confirm('Reset all progress and clear the values you entered on this page?')) return;
-        try { localStorage.removeItem(STORAGE_KEY); } catch (e) { /* noop */ }
+        try {
+          localStorage.removeItem(STORAGE_KEY);
+        } catch (e) {
+          /* noop */
+        }
         state = {
           step: 0,
           furthest: 0,
@@ -799,13 +879,17 @@
           var el = fieldEl(fid);
           if (el) el.value = '';
         });
-        ['sh-cf-token', 'sh-client-secret', 'sh-private-key', 'sh-r2-secret'].forEach(function (sid) {
-          var el = fieldEl(sid);
-          if (el) el.value = '';
-        });
+        ['sh-cf-token', 'sh-client-secret', 'sh-private-key', 'sh-r2-secret'].forEach(
+          function (sid) {
+            var el = fieldEl(sid);
+            if (el) el.value = '';
+          }
+        );
         var result = document.getElementById('sh-app-result');
         if (result) result.hidden = true;
-        accountRadios.forEach(function (r) { r.checked = r.value === 'personal'; });
+        accountRadios.forEach(function (r) {
+          r.checked = r.value === 'personal';
+        });
         if (orgField) orgField.hidden = true;
         render();
       });

@@ -645,8 +645,9 @@
       var hasAppId = credAppId.value.trim().length > 0;
       var hasClientId = credClientId.value.trim().length > 0;
       var hasClientSecret = credClientSecret.value.trim().length > 0;
+      var hasAppSlug = credAppSlug.value.trim().length > 0;
       var hasPrivateKey = credPrivateKey.value.trim().indexOf('-----BEGIN') !== -1;
-      btnGenerateSecrets.disabled = !(hasAppId && hasClientId && hasClientSecret && hasPrivateKey);
+      btnGenerateSecrets.disabled = !(hasAppId && hasClientId && hasClientSecret && hasAppSlug && hasPrivateKey);
     }
 
     [credAppId, credClientId, credClientSecret, credAppSlug, credPrivateKey].forEach(function(el) {
@@ -666,7 +667,7 @@
         ['GH_APP_ID', appId, appId],
         ['GH_CLIENT_ID', clientId, clientId],
         ['GH_CLIENT_SECRET', clientSecret, clientSecret],
-        ['GH_APP_SLUG', appSlug || '(not set)', appSlug],
+        ['GH_APP_SLUG', appSlug, appSlug],
         ['GH_APP_PRIVATE_KEY', privateKeyB64.length > 40 ? privateKeyB64.substring(0, 40) + '...' : privateKeyB64, privateKeyB64],
         ['GH_WEBHOOK_SECRET', webhookSecret, webhookSecret],
       ];
