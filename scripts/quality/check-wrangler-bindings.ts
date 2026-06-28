@@ -13,12 +13,21 @@
  *
  * This check runs in CI to prevent misconfigurations.
  */
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import * as TOML from '@iarna/toml';
 
 const API_WRANGLER_PATH = resolve(import.meta.dirname, '../../apps/api/wrangler.toml');
 const TAIL_WORKER_WRANGLER_PATH = resolve(import.meta.dirname, '../../apps/tail-worker/wrangler.toml');
+const API_DURABLE_OBJECTS_DIR = resolve(import.meta.dirname, '../../apps/api/src/durable-objects');
+
+const LEGACY_KV_BACKED_DO_CLASSES = new Map<string, string>([
+  ['NodeLifecycle', 'v2'],
+  ['AdminLogs', 'v3'],
+  ['TaskRunner', 'v4'],
+  ['CodexRefreshLock', 'v6'],
+  ['TrialEventBus', 'v8'],
+]);
 
 interface Binding {
   name?: string;
@@ -41,9 +50,19 @@ interface WranglerConfig {
   kv_namespaces?: Binding[];
   r2_buckets?: Binding[];
   ai?: AIConfig;
-  migrations?: Array<{ tag: string; [key: string]: unknown }>;
+  migrations?: Array<{
+    tag: string;
+    new_classes?: string[];
+    new_sqlite_classes?: string[];
+    [key: string]: unknown;
+  }>;
   env?: Record<string, unknown>;
   [key: string]: unknown;
+}
+
+interface DurableObjectCreateMigration {
+  tag: string;
+  backend: 'kv' | 'sqlite';
 }
 
 function fail(errors: string[]): never {
@@ -53,6 +72,58 @@ function fail(errors: string[]): never {
   }
   console.error('\nSee: .claude/rules/07-env-and-urls.md\n');
   process.exit(1);
+}
+
+function listTypeScriptFiles(dir: string): string[] {
+  const files: string[] = [];
+
+  for (const entry of readdirSync(dir)) {
+    const path = resolve(dir, entry);
+    const stats = statSync(path);
+
+    if (stats.isDirectory()) {
+      files.push(...listTypeScriptFiles(path));
+    } else if (path.endsWith('.ts')) {
+      files.push(path);
+    }
+  }
+
+  return files;
+}
+
+function legacyClassUsesSqlStorage(className: string): string | undefined {
+  const classPattern = new RegExp(`class\\s+${className}\\b`);
+
+  for (const file of listTypeScriptFiles(API_DURABLE_OBJECTS_DIR)) {
+    const content = readFileSync(file, 'utf-8');
+    if (classPattern.test(content) && /\bstorage\.sql\b/.test(content)) {
+      return file.replace(resolve(import.meta.dirname, '../..') + '/', '');
+    }
+  }
+
+  return undefined;
+}
+
+function collectDoCreateMigrations(
+  migrations: NonNullable<WranglerConfig['migrations']>
+): Map<string, DurableObjectCreateMigration[]> {
+  const creates = new Map<string, DurableObjectCreateMigration[]>();
+
+  for (const migration of migrations) {
+    for (const className of migration.new_classes ?? []) {
+      const existing = creates.get(className) ?? [];
+      existing.push({ tag: migration.tag, backend: 'kv' });
+      creates.set(className, existing);
+    }
+
+    for (const className of migration.new_sqlite_classes ?? []) {
+      const existing = creates.get(className) ?? [];
+      existing.push({ tag: migration.tag, backend: 'sqlite' });
+      creates.set(className, existing);
+    }
+  }
+
+  return creates;
 }
 
 function main(): void {
@@ -111,6 +182,64 @@ function main(): void {
 
   if (!apiConfig.migrations?.length) {
     errors.push('apps/api/wrangler.toml: top-level missing [[migrations]] (sync script copies these to env sections)');
+  }
+
+  // ========================================
+  // Check 3: Durable Object migration safety
+  // ========================================
+
+  if (apiConfig.durable_objects?.bindings?.length && apiConfig.migrations?.length) {
+    const createMigrations = collectDoCreateMigrations(apiConfig.migrations);
+
+    for (const binding of apiConfig.durable_objects.bindings) {
+      if (!binding.class_name) {
+        errors.push(`apps/api/wrangler.toml: Durable Object binding ${binding.name ?? '<unnamed>'} is missing class_name`);
+        continue;
+      }
+
+      const creates = createMigrations.get(binding.class_name) ?? [];
+      if (creates.length === 0) {
+        errors.push(`apps/api/wrangler.toml: Durable Object ${binding.class_name} has a binding but no create migration`);
+      } else if (creates.length > 1) {
+        const tags = creates.map((create) => `${create.tag}:${create.backend}`).join(', ');
+        errors.push(`apps/api/wrangler.toml: Durable Object ${binding.class_name} has multiple create migrations (${tags})`);
+      }
+    }
+
+    for (const migration of apiConfig.migrations) {
+      for (const className of migration.new_classes ?? []) {
+        const expectedTag = LEGACY_KV_BACKED_DO_CLASSES.get(className);
+        if (!expectedTag) {
+          errors.push(
+            `apps/api/wrangler.toml: Durable Object ${className} uses legacy new_classes in ${migration.tag}. ` +
+              `New Durable Object classes must use new_sqlite_classes so fresh Free-plan installs work.`
+          );
+        } else if (migration.tag !== expectedTag) {
+          errors.push(
+            `apps/api/wrangler.toml: legacy Durable Object ${className} must stay in ${expectedTag}; found ${migration.tag}. ` +
+              `Changing shipped migration tags can break existing deployments.`
+          );
+        }
+      }
+    }
+
+    for (const [className, expectedTag] of LEGACY_KV_BACKED_DO_CLASSES.entries()) {
+      const creates = createMigrations.get(className) ?? [];
+      const create = creates[0];
+      if (!create || create.tag !== expectedTag || create.backend !== 'kv') {
+        errors.push(
+          `apps/api/wrangler.toml: legacy Durable Object ${className} must remain new_classes in ${expectedTag} for existing paid-plan deployments`
+        );
+      }
+
+      const sqlFile = legacyClassUsesSqlStorage(className);
+      if (sqlFile) {
+        errors.push(
+          `${sqlFile}: legacy KV-backed Durable Object ${className} uses storage.sql. ` +
+            `Existing deployments keep this class on new_classes, so SQL-only APIs are unsafe.`
+        );
+      }
+    }
   }
 
   // ========================================

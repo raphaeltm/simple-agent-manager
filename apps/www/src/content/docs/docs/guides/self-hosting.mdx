@@ -15,7 +15,7 @@ This guide walks you through deploying Simple Agent Manager to your own infrastr
 | **GitHub account**       | Authentication, CI/CD     | Free tier            |
 | **Domain on Cloudflare** | Workspace URLs            | Any registrar        |
 
-**Workers Paid** is required because SAM uses Durable Objects for real-time chat, task execution, and node lifecycle. Go to **Workers & Pages** in the Cloudflare dashboard to upgrade. You also need **Analytics Engine** enabled (free): **Workers & Pages** → **Analytics Engine** → **Enable**.
+**Workers Paid** is currently required because SAM uses Cloudflare Containers for its Sandbox runtime. Durable Objects themselves can run on Free-plan accounts when new namespaces are created with SQLite-backed migrations. Go to **Workers & Pages** in the Cloudflare dashboard to upgrade. You also need **Analytics Engine** enabled (free): **Workers & Pages** → **Analytics Engine** → **Enable**.
 
 You do **not** need a shared cloud provider account. Users provide their own [Hetzner API token](https://console.hetzner.cloud/), [Scaleway API key](https://console.scaleway.com/iam/api-keys), or GCP configuration through the Settings UI. GCP support also requires optional Google OAuth configuration on the SAM instance.
 
@@ -185,7 +185,7 @@ To remove all resources: Actions → Teardown → Run workflow → type `DELETE`
 | Cloudflare R2      | 10GB storage     | $0.015/GB/month |
 | Cloudflare Pages   | Unlimited        | Free            |
 
-The Workers Paid plan ($5/month) is required for Durable Objects. Beyond the base plan, usage-based costs stay within free tier allowances for small to medium usage.
+The Workers Paid plan ($5/month) is currently required for Cloudflare Containers. Beyond the base plan, usage-based costs stay within free tier allowances for small to medium usage.
 
 ### User VM Costs
 
@@ -227,7 +227,9 @@ Go to **Workers & Pages** → **Analytics Engine** → **Enable**. This is free 
 
 ### Durable Objects Free Plan Error (10097)
 
-Upgrade to the **Workers Paid plan** ($5/month). Go to **Workers & Pages** → upgrade plan.
+Fresh deploys should handle this automatically: the workflow retries the API Worker deploy with SQLite-backed Durable Object namespace creation. If you still see this error, rerun the latest deploy workflow from `main`.
+
+Existing deployments that already created KV-backed Durable Object namespaces cannot convert those namespaces to SQLite in place. Keep that deployment on Workers Paid, or recreate the Worker and Durable Object namespaces for a fresh SQLite-backed install.
 
 ### Containers Forbidden
 
