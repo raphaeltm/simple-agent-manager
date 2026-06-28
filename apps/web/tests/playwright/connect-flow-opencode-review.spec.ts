@@ -9,7 +9,7 @@
  * Verified: label associations, select defaults, conditional base URL,
  * no horizontal overflow at 375px and 1280px.
  */
-import { expect, test, type Page, type Route } from '@playwright/test';
+import { expect, type Page, type Route,test } from '@playwright/test';
 
 // ---------------------------------------------------------------------------
 // Shared constants
