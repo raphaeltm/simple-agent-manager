@@ -202,21 +202,7 @@ func (h *SessionHost) injectPassthroughProxyCredential(
 	settings *agentSettingsPayload,
 	envVars []string,
 ) ([]string, *agentSettingsPayload, error) {
-	if h.config.CallbackToken == "" {
-		return envVars, settings, fmt.Errorf("passthrough proxy configured but CallbackToken is empty for workspace %s", h.config.WorkspaceID)
-	}
-
-	baseURL := h.proxyBaseURL(cred)
-	descriptor, ok := proxyEnvDescriptorFor(agentType, cred.inferenceConfig.Provider)
-	if !ok {
-		return envVars, settings, fmt.Errorf("passthrough proxy not supported for agent %q provider %q in workspace %s", agentType, cred.inferenceConfig.Provider, h.config.WorkspaceID)
-	}
-	envVars = appendProxyEnv(envVars, descriptor, baseURL, cred.credential, cred.inferenceConfig.Model)
-	slog.Info("Passthrough proxy credential injected",
-		"agentType", agentType, "provider", cred.inferenceConfig.Provider,
-		"hasBaseURL", baseURL != "", "model", cred.inferenceConfig.Model,
-		"credentialLen", len(cred.credential), "workspaceId", h.config.WorkspaceID)
-	return envVars, settings, nil
+	return h.injectProxyCredential(agentType, cred, settings, envVars, "passthrough proxy", cred.credential, "credentialLen")
 }
 
 func (h *SessionHost) injectPlatformProxyCredential(
@@ -225,20 +211,36 @@ func (h *SessionHost) injectPlatformProxyCredential(
 	settings *agentSettingsPayload,
 	envVars []string,
 ) ([]string, *agentSettingsPayload, error) {
+	return h.injectProxyCredential(agentType, cred, settings, envVars, "platform AI proxy", h.config.CallbackToken, "callbackTokenLen")
+}
+
+// injectProxyCredential is the shared implementation behind the passthrough and
+// platform proxy credential injectors. They differ only in the label used for
+// diagnostics, the credential value forwarded to the agent env, and the log
+// field name that records the credential length.
+func (h *SessionHost) injectProxyCredential(
+	agentType string,
+	cred *agentCredential,
+	settings *agentSettingsPayload,
+	envVars []string,
+	label string,
+	credential string,
+	credLenKey string,
+) ([]string, *agentSettingsPayload, error) {
 	if h.config.CallbackToken == "" {
-		return envVars, settings, fmt.Errorf("platform AI proxy configured but CallbackToken is empty for workspace %s", h.config.WorkspaceID)
+		return envVars, settings, fmt.Errorf("%s configured but CallbackToken is empty for workspace %s", label, h.config.WorkspaceID)
 	}
 
 	baseURL := h.proxyBaseURL(cred)
 	descriptor, ok := proxyEnvDescriptorFor(agentType, cred.inferenceConfig.Provider)
 	if !ok {
-		return envVars, settings, fmt.Errorf("platform AI proxy not supported for agent %q provider %q in workspace %s", agentType, cred.inferenceConfig.Provider, h.config.WorkspaceID)
+		return envVars, settings, fmt.Errorf("%s not supported for agent %q provider %q in workspace %s", label, agentType, cred.inferenceConfig.Provider, h.config.WorkspaceID)
 	}
-	envVars = appendProxyEnv(envVars, descriptor, baseURL, h.config.CallbackToken, cred.inferenceConfig.Model)
-	slog.Info("AI proxy credential injected",
-		"agentType", agentType, "provider", cred.inferenceConfig.Provider,
+	envVars = appendProxyEnv(envVars, descriptor, baseURL, credential, cred.inferenceConfig.Model)
+	slog.Info("Proxy credential injected",
+		"label", label, "agentType", agentType, "provider", cred.inferenceConfig.Provider,
 		"hasBaseURL", baseURL != "", "model", cred.inferenceConfig.Model,
-		"callbackTokenLen", len(h.config.CallbackToken), "workspaceId", h.config.WorkspaceID)
+		credLenKey, len(credential), "workspaceId", h.config.WorkspaceID)
 	return envVars, settings, nil
 }
 
