@@ -21,8 +21,8 @@
 - [x] Add an observable warm timeout override test that fails if the override is ignored.
 - [x] Add focused coverage proving workspace deletion alarms are preserved when `markActive` and `tryClaim` clear warm state.
 - [x] Make only tiny directly adjacent hygiene fixes if touched.
-- [ ] Run focused NodeLifecycle tests first, then API package quality checks required by the repo.
-- [ ] Run specialist review appropriate for API/Cloudflare/test behavior and address findings.
+- [x] Run focused NodeLifecycle tests first, then API package quality checks required by the repo.
+- [x] Run specialist review appropriate for API/Cloudflare/test behavior and address findings.
 
 ## Acceptance Criteria
 
@@ -37,11 +37,18 @@
 - `pnpm --filter @simple-agent-manager/api typecheck` passed.
 - `pnpm --filter @simple-agent-manager/api lint` passed with existing warnings.
 - `pnpm quality:source-contract-tests` passed and reported no prohibited patterns in 742 test files.
+- `pnpm lint` passed with existing warnings.
+- `pnpm typecheck` passed.
+- `pnpm test` passed: API 352 files / 5624 tests, web 199 files / 2442 tests, plus package tests.
+- `pnpm build` passed.
 - Focused worker tests are currently blocked locally by the Cloudflare worker runtime crashing before test import:
   - `pnpm --filter @simple-agent-manager/api test:workers -- tests/workers/node-lifecycle-do.test.ts tests/workers/node-lifecycle-proxy.test.ts` entered a repeated `workerd` SIGSEGV crash loop.
   - `pnpm --filter @simple-agent-manager/api exec vitest run --config vitest.workers.config.ts --maxWorkers=1 tests/workers/node-lifecycle-proxy.test.ts` failed before importing tests with `Worker cloudflare-pool emitted error` caused by `workerd` SIGSEGV.
   - Retried with Node 20.20.2 plus PNPM 9.15.9 directly from Corepack; the same `workerd` SIGSEGV occurred.
   - An unrelated control run, `pnpm --filter @simple-agent-manager/api exec vitest run --config vitest.workers.config.ts --maxWorkers=1 tests/workers/worker-smoke.test.ts`, also failed before importing tests with the same `workerd` SIGSEGV, confirming this is local worker-harness startup failure rather than a NodeLifecycle assertion failure.
+- Test-engineer review: PASS with residual risk from the local worker-harness crash. Coverage is behavior-focused, uses Miniflare DO/D1 state, avoids internal function mocks, and covers service forwarding, default state, warm claim behavior, warm timeout override, alarm preservation, and due workspace deletion processing.
+- Cloudflare-specialist review: PASS with residual risk from the local worker-harness crash. The tests use `runInDurableObject` only to arrange or observe DO storage/alarm state that is otherwise not public, and they exercise real DO storage plus D1 instead of source fragments.
+- Constitution-validator review: PASS. No production hardcoded timeout/URL/limit values were added; the new numeric timeout values are scoped to behavioral test fixtures.
 
 ## References
 
