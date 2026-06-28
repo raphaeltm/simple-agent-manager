@@ -91,13 +91,18 @@ function AccountMapCanvasInner({ nodes: initialNodes, edges: initialEdges, isMob
     setEdges(initialEdges);
   }, [initialEdges, setEdges]);
 
+  // Latest-ref for isMobile so mouse/click handlers don't recreate on every
+  // resize event — the ref always holds the current value.
+  const isMobileRef = useRef(isMobile);
+  isMobileRef.current = isMobile;
+
   const handleNodeMouseEnter = useCallback(
     (_event: React.MouseEvent, node: Node) => {
-      if (isMobile) return;
+      if (isMobileRef.current) return;
       if (timeoutRef.current) clearTimeout(timeoutRef.current);
       setTooltip({ x: _event.clientX + 12, y: _event.clientY + 12, node });
     },
-    [isMobile]
+    []
   );
 
   const handleNodeMouseLeave = useCallback(() => {
@@ -106,13 +111,13 @@ function AccountMapCanvasInner({ nodes: initialNodes, edges: initialEdges, isMob
 
   const handleNodeClick = useCallback(
     (_event: React.MouseEvent, node: Node) => {
-      if (!isMobile) return;
+      if (!isMobileRef.current) return;
       // On mobile, show tooltip on tap
       setTooltip((prev) =>
         prev?.node.id === node.id ? null : { x: 0, y: 0, node }
       );
     },
-    [isMobile]
+    []
   );
 
   const handlePaneClick = useCallback(() => {

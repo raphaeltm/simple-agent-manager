@@ -1,5 +1,5 @@
 import type { PlatformErrorLevel,PlatformErrorSource } from '@simple-agent-manager/shared';
-import { type FC,useEffect, useRef, useState } from 'react';
+import { type FC, useEffect, useRef, useState } from 'react';
 
 import type { TimeRange } from '../../hooks/useAdminErrors';
 import { useIsMobile } from '../../hooks/useIsMobile';
@@ -50,11 +50,6 @@ export const ObservabilityFilters: FC<ObservabilityFiltersProps> = ({
 }) => {
   const [searchInput, setSearchInput] = useState(search);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
-
-  // Sync external search changes
-  useEffect(() => {
-    setSearchInput(search);
-  }, [search]);
 
   const isMobile = useIsMobile();
 

@@ -195,37 +195,28 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     setShowTimeline(false);
   }, []);
 
-  // Close plan modal when agent transitions to idle
-  useEffect(() => {
-    if (lc.agentActivity === 'idle') setShowPlanModal(false);
-  }, [lc.agentActivity]);
+  // UE120: Plan modal is only meaningful while the agent is working.
+  // Derive effective visibility at render time instead of syncing via useEffect.
+  const effectiveShowPlanModal = showPlanModal && lc.agentActivity !== 'idle';
 
-  // Track IDs of user messages that should animate (freshly submitted optimistic messages)
-  const [animatedUserMsgIds] = useState(() => new Set<string>());
-  const prevMsgCountRef = useRef(0);
+  // Derive animation-eligible optimistic user message IDs at render time.
+  // An optimistic message is eligible for animation if it is a recent user message
+  // with the 'optimistic-' prefix. Animation is CSS-driven and self-expires.
+  const optimisticUserMsgIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const msg of lc.messages) {
+      if (msg.role === 'user' && msg.id.startsWith('optimistic-')) {
+        ids.add(msg.id);
+      }
+    }
+    return ids;
+  }, [lc.messages]);
 
   /** Lazy-load tool content for a compact-mode tool call card. */
   const handleLoadToolContent = useCallback(async (messageId: string): Promise<ToolCallContentItem[]> => {
     const { content } = await getMessageToolContent(projectId, sessionId, messageId);
     return (content as Array<{ type: string } & Record<string, unknown>>).map((c) => mapToolCallContent(c));
   }, [projectId, sessionId]);
-
-  // Detect newly added optimistic user messages for fade animation
-  useEffect(() => {
-    const currentCount = lc.messages.length;
-    if (currentCount > prevMsgCountRef.current) {
-      // Check for new optimistic messages in the delta
-      for (let i = prevMsgCountRef.current; i < currentCount; i++) {
-        const msg = lc.messages[i];
-        if (msg && msg.role === 'user' && msg.id.startsWith('optimistic-')) {
-          animatedUserMsgIds.add(msg.id);
-          // Remove from set after animation completes (max 1.5s + buffer)
-          setTimeout(() => { animatedUserMsgIds.delete(msg.id); }, 2000);
-        }
-      }
-    }
-    prevMsgCountRef.current = currentCount;
-  }, [lc.messages, animatedUserMsgIds]);
 
   // Identify the animation target: only animate if the very last item is an
   // agent_message. If a tool_call or thinking block is the latest item, the
@@ -335,7 +326,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
                     onFileClick={lc.session?.workspaceId && lc.sessionState === 'active' ? lc.handleFileClick : undefined}
                     onLoadToolContent={handleLoadToolContent}
                     animateText={item.kind === 'agent_message' && (index - lc.firstItemIndex) === animationTargetIdx && lc.agentActivity === 'responding'}
-                    animateUserMessage={item.kind === 'user_message' && animatedUserMsgIds.has(item.id)}
+                    animateUserMessage={item.kind === 'user_message' && optimisticUserMsgIds.has(item.id)}
                   />
                 </div>
               )}
@@ -422,7 +413,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
       {planItem && (
         <PlanModal
           plan={planItem}
-          isOpen={showPlanModal}
+          isOpen={effectiveShowPlanModal}
           onClose={() => setShowPlanModal(false)}
         />
       )}

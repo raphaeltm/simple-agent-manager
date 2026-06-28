@@ -1,5 +1,5 @@
 import type { HealthSummary } from '@simple-agent-manager/shared';
-import { useCallback, useEffect, useRef,useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { fetchAdminHealth } from '../lib/api';
 
@@ -25,15 +25,9 @@ export function useAdminHealth(options?: UseAdminHealthOptions): UseAdminHealthR
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const mountedRef = useRef(true);
   const hasLoadedRef = useRef(false);
 
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => { mountedRef.current = false; };
-  }, []);
-
-  const fetchHealth = useCallback(async () => {
+  const fetchHealth = useCallback(async (signal?: AbortSignal) => {
     if (hasLoadedRef.current) {
       setIsRefreshing(true);
     }
@@ -42,15 +36,15 @@ export function useAdminHealth(options?: UseAdminHealthOptions): UseAdminHealthR
 
       const result = await fetchAdminHealth();
 
-      if (!mountedRef.current) return;
+      if (signal?.aborted) return;
 
       setHealth(result);
     } catch (err) {
-      if (mountedRef.current) {
+      if (!signal?.aborted) {
         setError(err instanceof Error ? err.message : 'Failed to load health data');
       }
     } finally {
-      if (mountedRef.current) {
+      if (!signal?.aborted) {
         hasLoadedRef.current = true;
         setLoading(false);
         setIsRefreshing(false);
@@ -60,18 +54,25 @@ export function useAdminHealth(options?: UseAdminHealthOptions): UseAdminHealthR
 
   // Fetch on mount
   useEffect(() => {
-    fetchHealth();
+    const controller = new AbortController();
+    fetchHealth(controller.signal);
+    return () => { controller.abort(); };
   }, [fetchHealth]);
 
   // Auto-refresh interval
   useEffect(() => {
     if (!refreshIntervalMs || refreshIntervalMs <= 0) return;
 
+    let controller: AbortController;
     const intervalId = setInterval(() => {
-      fetchHealth();
+      controller = new AbortController();
+      fetchHealth(controller.signal);
     }, refreshIntervalMs);
 
-    return () => clearInterval(intervalId);
+    return () => {
+      clearInterval(intervalId);
+      controller?.abort();
+    };
   }, [refreshIntervalMs, fetchHealth]);
 
   const refresh = useCallback(() => {

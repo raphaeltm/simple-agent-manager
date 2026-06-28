@@ -1,6 +1,6 @@
 import { AGENT_CATALOG, CREDENTIAL_PROVIDERS } from '@simple-agent-manager/shared';
 import { Alert, Button, Card, Input, Select, StatusBadge } from '@simple-agent-manager/ui';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 
 import type { CCConfigurationListItem, CCCredentialListItem } from '../../lib/api';
 import { createCCConfiguration, deleteCCConfiguration, updateCCConfiguration } from '../../lib/api';
@@ -38,7 +38,7 @@ export function ConfigurationSection({
         )}
         {configurations.map((cfg) => (
           <ConfigurationCard
-            key={cfg.id}
+            key={`${cfg.id}-${cfg.updatedAt}`}
             cfg={cfg}
             credentials={credentials}
             onUpdate={(body) => onMutation(() => updateCCConfiguration(cfg.id, body))}
@@ -93,11 +93,8 @@ function ConfigurationCard({
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
-  useEffect(() => {
-    setName(cfg.name);
-    setCredentialId(cfg.credentialId ?? '');
-    setIsActive(cfg.isActive);
-  }, [cfg]);
+  // State is initialized from props; parent keys this component by
+  // cfg.id + cfg.updatedAt so it remounts with fresh state after mutations.
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();

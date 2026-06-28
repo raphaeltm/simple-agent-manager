@@ -232,18 +232,18 @@ export function ProjectLibrary() {
   // Kept server-side so freshly created (empty) directories still appear.
   // ---------------------------------------------------------------------------
   useEffect(() => {
-    let cancelled = false;
+    const controller = new AbortController();
     listLibraryDirectories(projectId, currentDirectory)
       .then((res) => {
-        if (cancelled) return;
+        if (controller.signal.aborted) return;
         setDirectories(res.directories);
         setCachedDirectories(projectId, currentDirectory, res.directories);
       })
       .catch((err) => {
-        if (!cancelled) console.error('Failed to load directories:', err);
+        if (!controller.signal.aborted) console.error('Failed to load directories:', err);
       });
     return () => {
-      cancelled = true;
+      controller.abort();
     };
   }, [projectId, currentDirectory, dirRefreshToken]);
 

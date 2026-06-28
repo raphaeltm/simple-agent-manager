@@ -123,13 +123,14 @@ export function CreateWorkspace() {
 
   const selectedNode = nodes.find((node) => node.id === selectedNodeId) ?? null;
 
-  // Check each prerequisite independently so status appears incrementally
+  // Cloud provider credentials + catalog (also check platform trial)
   useEffect(() => {
-    // Cloud provider credentials + catalog (also check platform trial)
+    const controller = new AbortController();
     Promise.all([
       listCredentials().catch(() => []),
       getTrialStatus().catch(() => null),
     ]).then(([creds, trial]) => {
+        if (controller.signal.aborted) return;
         const hasUserCreds = creds.some((c: { provider: string }) => c.provider === 'hetzner' || c.provider === 'scaleway');
         const trialAvailable = trial?.available ?? false;
         const hasCloud = hasUserCreds || trialAvailable;
@@ -137,10 +138,10 @@ export function CreateWorkspace() {
         setCloudStatus(hasCloud ? 'ready' : 'missing');
 
         if (hasCloud) {
-          // Fetch provider catalog for location/size data
           setCatalogLoading(true);
           getProviderCatalog()
             .then((resp) => {
+              if (controller.signal.aborted) return;
               setCatalogs(resp.catalogs);
               const first = resp.catalogs[0];
               if (first) {
@@ -148,40 +149,49 @@ export function CreateWorkspace() {
                 setVmLocation(keepExistingOr(first.defaultLocation));
               }
             })
-            .catch(() => {
-              // Catalog fetch failed — UI will use generic fallback
-            })
+            .catch(() => {})
             .finally(() => {
-              setCatalogLoading(false);
+              if (!controller.signal.aborted) setCatalogLoading(false);
             });
         }
       })
-      .catch(() => setCloudStatus('error'));
+      .catch(() => { if (!controller.signal.aborted) setCloudStatus('error'); });
+    return () => controller.abort();
+  }, []);
 
-    // GitHub App installations
+  // GitHub App installations
+  useEffect(() => {
+    const controller = new AbortController();
     listGitHubInstallations()
       .then((installs) => {
+        if (controller.signal.aborted) return;
         setInstallations(installs);
         setGithubStatus(installs.length > 0 ? 'ready' : 'missing');
         const first = installs[0];
         if (first) setInstallationId(first.id);
       })
-      .catch(() => setGithubStatus('error'));
+      .catch(() => { if (!controller.signal.aborted) setGithubStatus('error'); });
+    return () => controller.abort();
+  }, []);
 
-    // Load all projects for project selector (when no project in location state)
-    if (!locationState?.projectId) {
-      listProjects(100)
-        .then((resp) => {
-          setAllProjects(resp.projects);
-        })
-        .catch(() => {
-          // Best effort — project list will be empty
-        });
-    }
+  // Load all projects for project selector (when no project in location state)
+  useEffect(() => {
+    if (locationState?.projectId) return;
+    const controller = new AbortController();
+    listProjects(100)
+      .then((resp) => {
+        if (!controller.signal.aborted) setAllProjects(resp.projects);
+      })
+      .catch(() => {});
+    return () => controller.abort();
+  }, [locationState?.projectId]);
 
-    // Available nodes
+  // Available nodes
+  useEffect(() => {
+    const controller = new AbortController();
     listNodes()
       .then((nodeRows) => {
+        if (controller.signal.aborted) return;
         const usable = nodeRows.filter((n) => n.status !== 'error');
         setNodes(usable);
         setNodesStatus('ready');
@@ -189,8 +199,9 @@ export function CreateWorkspace() {
           setSelectedNodeId(locationState.nodeId);
         }
       })
-      .catch(() => setNodesStatus('error'));
-  }, []);
+      .catch(() => { if (!controller.signal.aborted) setNodesStatus('error'); });
+    return () => controller.abort();
+  }, [locationState?.nodeId]);
 
   const checkingPrereqs = cloudStatus === 'loading' || githubStatus === 'loading';
 
@@ -272,12 +283,12 @@ export function CreateWorkspace() {
       });
   }, [fetchBranches]);
 
-  // Load project context if navigated from a project
+  // Load project details when selectedProjectId changes (handles both
+  // initial navigation state and user dropdown selection)
   useEffect(() => {
-    const projectId = locationState?.projectId;
-    if (!projectId) return;
-    loadProjectDetails(projectId);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!selectedProjectId) return;
+    loadProjectDetails(selectedProjectId);
+  }, [selectedProjectId, loadProjectDetails]);
 
   // Handle project selection from dropdown
   const handleProjectSelect = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {

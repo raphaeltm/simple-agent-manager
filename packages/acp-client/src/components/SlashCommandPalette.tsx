@@ -1,4 +1,4 @@
-import { forwardRef,useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import { forwardRef,useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 
 import type { SlashCommand } from '../types';
 
@@ -38,22 +38,20 @@ export const SlashCommandPalette = forwardRef<SlashCommandPaletteHandle, SlashCo
     const listRef = useRef<HTMLUListElement>(null);
 
     // Filter commands by the current input
-    const filtered = commands.filter((cmd) =>
+    const filtered = useMemo(() => commands.filter((cmd) =>
       cmd.name.toLowerCase().startsWith(filter.toLowerCase())
-    );
+    ), [commands, filter]);
 
-    // Reset selection when filter or visibility changes
-    useEffect(() => {
-      setSelectedIndex(0);
-    }, [filter, visible]);
+    // Clamp selectedIndex to filtered list bounds (resets naturally when filter changes)
+    const clampedIndex = Math.min(selectedIndex, Math.max(filtered.length - 1, 0));
 
     // Scroll selected item into view
     useEffect(() => {
       if (!listRef.current) return;
       const items = listRef.current.children;
-      const selected = items[selectedIndex] as HTMLElement | undefined;
+      const selected = items[clampedIndex] as HTMLElement | undefined;
       if (selected && typeof selected.scrollIntoView === 'function') { selected.scrollIntoView({ block: 'nearest' }); }
-    }, [selectedIndex]);
+    }, [clampedIndex]);
 
     // Expose keyboard handler to parent
     const handleKeyDown = useCallback(
@@ -73,7 +71,7 @@ export const SlashCommandPalette = forwardRef<SlashCommandPaletteHandle, SlashCo
           }
           case 'Enter': {
             e.preventDefault();
-            const cmd = filtered[selectedIndex];
+            const cmd = filtered[clampedIndex];
             if (cmd) onSelect(cmd);
             return true;
           }
@@ -85,7 +83,7 @@ export const SlashCommandPalette = forwardRef<SlashCommandPaletteHandle, SlashCo
           case 'Tab': {
             // Tab also selects the current item (shell-like behavior)
             e.preventDefault();
-            const cmd = filtered[selectedIndex];
+            const cmd = filtered[clampedIndex];
             if (cmd) onSelect(cmd);
             return true;
           }
@@ -93,10 +91,10 @@ export const SlashCommandPalette = forwardRef<SlashCommandPaletteHandle, SlashCo
             return false;
         }
       },
-      [visible, filtered, selectedIndex, onSelect, onDismiss]
+      [visible, filtered, clampedIndex, onSelect, onDismiss]
     );
 
-    const activeDescendantId = filtered[selectedIndex] ? `slash-cmd-${filtered[selectedIndex].name}` : undefined;
+    const activeDescendantId = filtered[clampedIndex] ? `slash-cmd-${filtered[clampedIndex].name}` : undefined;
 
     useImperativeHandle(ref, () => ({ handleKeyDown, activeDescendantId }), [handleKeyDown, activeDescendantId]);
 
@@ -128,16 +126,16 @@ export const SlashCommandPalette = forwardRef<SlashCommandPaletteHandle, SlashCo
                 key={`${cmd.source}-${cmd.name}`}
                 id={`slash-cmd-${cmd.name}`}
                 role="option"
-                aria-selected={idx === selectedIndex}
+                aria-selected={idx === clampedIndex}
                 className="flex items-start gap-2 px-3 py-2 cursor-pointer select-none"
                 style={{
                   minHeight: 44,
                   backgroundColor:
-                    idx === selectedIndex
+                    idx === clampedIndex
                       ? 'var(--sam-color-bg-surface-hover)'
                       : 'transparent',
                   color:
-                    idx === selectedIndex
+                    idx === clampedIndex
                       ? 'var(--sam-color-fg-primary)'
                       : 'var(--sam-color-fg-primary)',
                 }}

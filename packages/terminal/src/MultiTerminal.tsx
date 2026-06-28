@@ -2,7 +2,7 @@ import '@xterm/xterm/css/xterm.css';
 
 import { FitAddon } from '@xterm/addon-fit';
 import { Terminal as XTerm } from '@xterm/xterm';
-import React, { useCallback, useEffect, useImperativeHandle,useRef, useState } from 'react';
+import React, { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 
 import { TabBar } from './components/TabBar';
 import { useTerminalSessions } from './hooks/useTerminalSessions';
@@ -222,13 +222,139 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
       [getOutboundSessionId, renameSession]
     );
 
-    // ── WebSocket connection lifecycle ──
-    // This single effect manages the ENTIRE WebSocket: connect, message routing,
-    // ping heartbeat, and reconnection. It resolves a fresh URL before reconnect.
+    // UE332: Session reconciliation handler — extracted from main WS effect.
+    // Matches incoming server session list to local terminal instances,
+    // restores persisted sessions, and creates/reattaches as needed.
+    const handleSessionList = useCallback(
+      (
+        ws: WebSocket,
+        serverSessionsList: Array<{
+          sessionId: string;
+          name?: string;
+          status?: string;
+          createdAt: string;
+          workingDirectory?: string;
+        }>
+      ) => {
+        // Clear reconnecting guard — response received
+        reconnectingRef.current = false;
+
+        const serverSessions = serverSessionsList
+          .filter((s) => s.status !== 'exited')
+          .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
+        const serverMap = new Map(serverSessions.map((s) => [s.sessionId, s]));
+
+        const currentSessions = Array.from(latestRef.current.sessions.entries());
+        const pendingLocalSessions: Array<{
+          localId: string;
+          name: string;
+          serverSessionId?: string;
+        }> = currentSessions.map(([localId, localSession]) => ({
+          localId,
+          name: localSession.name,
+          serverSessionId: localSession.serverSessionId,
+        }));
+
+        if (pendingLocalSessions.length === 0) {
+          const persisted = latestRef.current.getPersistedSessions();
+          const sortedPersisted = persisted
+            ? [...persisted].sort((a, b) => a.order - b.order)
+            : [];
+          const hasPersistedServerIds = sortedPersisted.some((entry) =>
+            Boolean(entry.serverSessionId)
+          );
+
+          if (
+            sortedPersisted.length > 0 &&
+            (hasPersistedServerIds || serverSessions.length === 0)
+          ) {
+            for (const entry of sortedPersisted) {
+              const localId = latestRef.current.createSession(entry.name);
+              createTerminalInstance(localId);
+              latestRef.current.updateSessionStatus(localId, 'reconnecting');
+              if (entry.serverSessionId) {
+                latestRef.current.updateServerSessionId(localId, entry.serverSessionId);
+              }
+              pendingLocalSessions.push({
+                localId,
+                name: entry.name,
+                serverSessionId: entry.serverSessionId,
+              });
+            }
+          }
+        }
+
+        if (pendingLocalSessions.length === 0 && serverSessions.length === 0) {
+          const sessionId = latestRef.current.createSession();
+          createTerminalInstance(sessionId);
+          ws.send(
+            encodeTerminalWsCreateSession(
+              sessionId,
+              24,
+              80,
+              undefined,
+              latestRef.current.defaultWorkDir
+            )
+          );
+        } else {
+          for (const localSession of pendingLocalSessions) {
+            const serverId = localSession.serverSessionId;
+            const serverInfo = serverId ? serverMap.get(serverId) : undefined;
+
+            if (serverId && serverInfo) {
+              latestRef.current.updateSessionStatus(localSession.localId, 'reconnecting');
+              if (serverInfo.workingDirectory) {
+                latestRef.current.updateSessionWorkingDirectory(
+                  localSession.localId,
+                  serverInfo.workingDirectory
+                );
+              }
+              const instance = terminalsRef.current.get(localSession.localId);
+              const rows = instance?.terminal?.rows ?? 24;
+              const cols = instance?.terminal?.cols ?? 80;
+              ws.send(encodeTerminalWsReattachSession(serverId, rows, cols));
+              serverMap.delete(serverId);
+            } else {
+              ws.send(
+                encodeTerminalWsCreateSession(
+                  localSession.localId,
+                  24,
+                  80,
+                  localSession.name,
+                  latestRef.current.defaultWorkDir
+                )
+              );
+            }
+          }
+
+          // Server has sessions not represented locally (e.g. no local cache after reload).
+          for (const serverInfo of serverMap.values()) {
+            const localId = latestRef.current.createSession(serverInfo.name);
+            createTerminalInstance(localId);
+            latestRef.current.updateSessionStatus(localId, 'reconnecting');
+            latestRef.current.updateServerSessionId(localId, serverInfo.sessionId);
+            if (serverInfo.workingDirectory) {
+              latestRef.current.updateSessionWorkingDirectory(
+                localId,
+                serverInfo.workingDirectory
+              );
+            }
+            const instance = terminalsRef.current.get(localId);
+            const rows = instance?.terminal?.rows ?? 24;
+            const cols = instance?.terminal?.cols ?? 80;
+            ws.send(encodeTerminalWsReattachSession(serverInfo.sessionId, rows, cols));
+          }
+        }
+      },
+      [createTerminalInstance]
+    );
+
+    // ── WebSocket connection lifecycle (UE332) ──
+    // Core WebSocket connect/disconnect/reconnect and message routing.
+    // Heartbeat is handled by a separate effect below.
     useEffect(() => {
       let disposed = false;
       let reconnectTimeout: ReturnType<typeof setTimeout>;
-      let pingInterval: ReturnType<typeof setInterval>;
       let currentWs: WebSocket | null = null;
       // Capture ref value at effect creation time so the cleanup closure
       // always references the same Map instance (react-hooks/exhaustive-deps).
@@ -282,14 +408,6 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
             setWsConnected(true);
             wsRef.current = ws;
 
-            // Start ping heartbeat (clear any leaked interval from a prior connection)
-            clearInterval(pingInterval);
-            pingInterval = setInterval(() => {
-              if (ws.readyState === WebSocket.OPEN) {
-                ws.send(encodeTerminalWsPing());
-              }
-            }, PING_INTERVAL_MS);
-
             // Always ask for the authoritative server-side session list on connect.
             // Guard: if a previous reconnect is still pending, skip duplicate list_sessions.
             if (reconnectingRef.current) return;
@@ -303,115 +421,7 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
             if (!msg) return;
 
             if (isSessionListMessage(msg) && msg.data) {
-              // Clear reconnecting guard — response received
-              reconnectingRef.current = false;
-
-              const serverSessions = msg.data.sessions
-                .filter((s) => s.status !== 'exited')
-                .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
-              const serverMap = new Map(serverSessions.map((s) => [s.sessionId, s]));
-
-              const currentSessions = Array.from(latestRef.current.sessions.entries());
-              const pendingLocalSessions: Array<{
-                localId: string;
-                name: string;
-                serverSessionId?: string;
-              }> = currentSessions.map(([localId, localSession]) => ({
-                localId,
-                name: localSession.name,
-                serverSessionId: localSession.serverSessionId,
-              }));
-
-              if (pendingLocalSessions.length === 0) {
-                const persisted = latestRef.current.getPersistedSessions();
-                const sortedPersisted = persisted
-                  ? [...persisted].sort((a, b) => a.order - b.order)
-                  : [];
-                const hasPersistedServerIds = sortedPersisted.some((entry) =>
-                  Boolean(entry.serverSessionId)
-                );
-
-                if (
-                  sortedPersisted.length > 0 &&
-                  (hasPersistedServerIds || serverSessions.length === 0)
-                ) {
-                  for (const entry of sortedPersisted) {
-                    const localId = latestRef.current.createSession(entry.name);
-                    createTerminalInstance(localId);
-                    latestRef.current.updateSessionStatus(localId, 'reconnecting');
-                    if (entry.serverSessionId) {
-                      latestRef.current.updateServerSessionId(localId, entry.serverSessionId);
-                    }
-                    pendingLocalSessions.push({
-                      localId,
-                      name: entry.name,
-                      serverSessionId: entry.serverSessionId,
-                    });
-                  }
-                }
-              }
-
-              if (pendingLocalSessions.length === 0 && serverSessions.length === 0) {
-                const sessionId = latestRef.current.createSession();
-                createTerminalInstance(sessionId);
-                ws.send(
-                  encodeTerminalWsCreateSession(
-                    sessionId,
-                    24,
-                    80,
-                    undefined,
-                    latestRef.current.defaultWorkDir
-                  )
-                );
-              } else {
-                for (const localSession of pendingLocalSessions) {
-                  const serverId = localSession.serverSessionId;
-                  const serverInfo = serverId ? serverMap.get(serverId) : undefined;
-
-                  if (serverId && serverInfo) {
-                    latestRef.current.updateSessionStatus(localSession.localId, 'reconnecting');
-                    if (serverInfo.workingDirectory) {
-                      latestRef.current.updateSessionWorkingDirectory(
-                        localSession.localId,
-                        serverInfo.workingDirectory
-                      );
-                    }
-                    const instance = terminalsRef.current.get(localSession.localId);
-                    const rows = instance?.terminal?.rows ?? 24;
-                    const cols = instance?.terminal?.cols ?? 80;
-                    ws.send(encodeTerminalWsReattachSession(serverId, rows, cols));
-                    serverMap.delete(serverId);
-                  } else {
-                    ws.send(
-                      encodeTerminalWsCreateSession(
-                        localSession.localId,
-                        24,
-                        80,
-                        localSession.name,
-                        latestRef.current.defaultWorkDir
-                      )
-                    );
-                  }
-                }
-
-                // Server has sessions not represented locally (e.g. no local cache after reload).
-                for (const serverInfo of serverMap.values()) {
-                  const localId = latestRef.current.createSession(serverInfo.name);
-                  createTerminalInstance(localId);
-                  latestRef.current.updateSessionStatus(localId, 'reconnecting');
-                  latestRef.current.updateServerSessionId(localId, serverInfo.sessionId);
-                  if (serverInfo.workingDirectory) {
-                    latestRef.current.updateSessionWorkingDirectory(
-                      localId,
-                      serverInfo.workingDirectory
-                    );
-                  }
-                  const instance = terminalsRef.current.get(localId);
-                  const rows = instance?.terminal?.rows ?? 24;
-                  const cols = instance?.terminal?.cols ?? 80;
-                  ws.send(encodeTerminalWsReattachSession(serverInfo.sessionId, rows, cols));
-                }
-              }
+              handleSessionList(ws, msg.data.sessions);
             } else if (isSessionReattachedMessage(msg) && msg.data) {
               // Find the local session that maps to this server session ID
               const serverId = msg.data.sessionId;
@@ -477,7 +487,6 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
             setWsConnected(false);
             wsRef.current = null;
             reconnectingRef.current = false;
-            clearInterval(pingInterval);
             scheduleReconnect();
           };
         } catch {
@@ -491,7 +500,6 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
       return () => {
         disposed = true;
         clearTimeout(reconnectTimeout);
-        clearInterval(pingInterval);
         if (currentWs) currentWs.close();
         wsRef.current = null;
         // Dispose all terminal instances using the captured map reference
@@ -503,7 +511,20 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
         }
         terminalsMap.clear();
       };
-    }, [wsUrl, createTerminalInstance, destroyTerminalInstance, resolveLocalSessionId]);
+    }, [wsUrl, createTerminalInstance, destroyTerminalInstance, resolveLocalSessionId, handleSessionList]);
+
+    // UE332: Heartbeat timer — extracted into its own effect.
+    // Runs independently of the WS connect/reconnect lifecycle.
+    useEffect(() => {
+      if (!wsConnected) return;
+      const interval = setInterval(() => {
+        const ws = wsRef.current;
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(encodeTerminalWsPing());
+        }
+      }, PING_INTERVAL_MS);
+      return () => clearInterval(interval);
+    }, [wsConnected]);
 
     // Attach/fit xterm.js to DOM container via ref callback
     const attachTerminal = useCallback(
@@ -640,7 +661,8 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
       };
     }, [activeSessionId, getOutboundSessionId]);
 
-    const sessionsArray = Array.from(sessions.values());
+    // UE335: Memoize sessionsArray so downstream effect doesn't fire every render
+    const sessionsArray = useMemo(() => Array.from(sessions.values()), [sessions]);
 
     useImperativeHandle(
       ref,
@@ -677,8 +699,14 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
       ]
     );
 
+    // UE335: Use ref for callback to avoid resubscription; memoized sessionsArray
+    // prevents firing on every render.
+    const onSessionsChangeRef = useRef(onSessionsChange);
+    onSessionsChangeRef.current = onSessionsChange;
+
     useEffect(() => {
-      if (!onSessionsChange) return;
+      const cb = onSessionsChangeRef.current;
+      if (!cb) return;
 
       const snapshots: MultiTerminalSessionSnapshot[] = sessionsArray
         .slice()
@@ -691,8 +719,8 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
           serverSessionId: session.serverSessionId,
         }));
 
-      onSessionsChange(snapshots, activeSessionId);
-    }, [activeSessionId, onSessionsChange, sessionsArray]);
+      cb(snapshots, activeSessionId);
+    }, [activeSessionId, sessionsArray]);
 
     return (
       <div

@@ -73,6 +73,9 @@ describe('useIsStandalone', () => {
     expect(result.current).toBe(false);
 
     act(() => {
+      // Update the underlying value before notifying — useSyncExternalStore
+      // re-reads matchMedia(query).matches via getSnapshot on change events.
+      matchesValue = true;
       const handler = listeners.get('(display-mode: standalone)');
       handler?.({ matches: true } as MediaQueryListEvent);
     });

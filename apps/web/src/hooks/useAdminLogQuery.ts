@@ -45,12 +45,6 @@ export function useAdminLogQuery(): UseAdminLogQueryReturn {
 
   const cursorRef = useRef<string | null>(null);
   const queryIdRef = useRef<string | undefined>(undefined);
-  const mountedRef = useRef(true);
-
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => { mountedRef.current = false; };
-  }, []);
 
   const buildTimeRange = useCallback(() => {
     const now = new Date();
@@ -61,7 +55,7 @@ export function useAdminLogQuery(): UseAdminLogQueryReturn {
     };
   }, [filter.timeRange]);
 
-  const fetchLogs = useCallback(async (append = false) => {
+  const fetchLogs = useCallback(async (append = false, signal?: AbortSignal) => {
     try {
       setLoading(true);
       setError(null);
@@ -75,7 +69,7 @@ export function useAdminLogQuery(): UseAdminLogQueryReturn {
         queryId: append ? queryIdRef.current : undefined,
       });
 
-      if (!mountedRef.current) return;
+      if (signal?.aborted) return;
 
       if (append) {
         setLogs(prev => [...prev, ...result.logs]);
@@ -87,11 +81,11 @@ export function useAdminLogQuery(): UseAdminLogQueryReturn {
       queryIdRef.current = result.queryId;
       setHasMore(result.hasMore);
     } catch (err) {
-      if (mountedRef.current) {
+      if (!signal?.aborted) {
         setError(err instanceof Error ? err.message : 'Failed to query logs');
       }
     } finally {
-      if (mountedRef.current) {
+      if (!signal?.aborted) {
         setLoading(false);
       }
     }
@@ -101,7 +95,9 @@ export function useAdminLogQuery(): UseAdminLogQueryReturn {
   useEffect(() => {
     cursorRef.current = null;
     queryIdRef.current = undefined;
-    fetchLogs(false);
+    const controller = new AbortController();
+    fetchLogs(false, controller.signal);
+    return () => { controller.abort(); };
   }, [fetchLogs]);
 
   const setLevels = useCallback((levels: LogLevel[]) => {

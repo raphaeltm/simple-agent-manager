@@ -1,6 +1,6 @@
 import type { AgentProfile, AgentSkill, CreateSkillRequest, UpdateSkillRequest } from '@simple-agent-manager/shared';
 import { Button, Dialog, Input } from '@simple-agent-manager/ui';
-import { type FC, useEffect, useState } from 'react';
+import { type FC, useMemo, useState } from 'react';
 
 import { SkillRuntimeSection } from './SkillRuntimeSection';
 
@@ -16,6 +16,30 @@ interface SkillFormDialogProps {
 const FIELD_CLASSES =
   'w-full rounded-md border border-border-default bg-surface px-3 py-2.5 text-fg-primary min-h-11 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sam-color-focus-ring)]';
 
+function parseResourceRequirements(json: string | null | undefined): {
+  minVcpu: string;
+  minMemoryGb: string;
+  minDiskGb: string;
+  exclusiveNode: boolean;
+  maxCoTenants: string;
+} {
+  if (json) {
+    try {
+      const req = JSON.parse(json) as Record<string, unknown>;
+      return {
+        minVcpu: typeof req.minVcpu === 'number' ? String(req.minVcpu) : '',
+        minMemoryGb: typeof req.minMemoryGb === 'number' ? String(req.minMemoryGb) : '',
+        minDiskGb: typeof req.minDiskGb === 'number' ? String(req.minDiskGb) : '',
+        exclusiveNode: req.exclusiveNode === true,
+        maxCoTenants: typeof req.maxCoTenants === 'number' ? String(req.maxCoTenants) : '',
+      };
+    } catch {
+      // fall through
+    }
+  }
+  return { minVcpu: '', minMemoryGb: '', minDiskGb: '', exclusiveNode: false, maxCoTenants: '' };
+}
+
 export const SkillFormDialog: FC<SkillFormDialogProps> = ({
   isOpen,
   onClose,
@@ -24,54 +48,57 @@ export const SkillFormDialog: FC<SkillFormDialogProps> = ({
   onSave,
   projectId,
 }) => {
+  // Key the form body so it remounts with fresh state when the dialog opens
+  // or the skill changes, removing the need for a prop-to-state sync effect.
+  const formKey = useMemo(
+    () => (isOpen ? `${skill?.id ?? 'new'}-${Date.now()}` : 'closed'),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [isOpen, skill?.id],
+  );
+
+  return (
+    <Dialog isOpen={isOpen} onClose={onClose} maxWidth="lg">
+      {isOpen && (
+        <SkillFormBody
+          key={formKey}
+          skill={skill ?? null}
+          profiles={profiles}
+          onSave={onSave}
+          onClose={onClose}
+          projectId={projectId}
+        />
+      )}
+    </Dialog>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// Inner form body — remounted via key. All form state is initialized from the
+// skill prop; no sync effect needed.
+// ---------------------------------------------------------------------------
+
+const SkillFormBody: FC<{
+  skill: AgentSkill | null;
+  profiles: AgentProfile[];
+  onSave: (data: CreateSkillRequest | UpdateSkillRequest) => Promise<void>;
+  onClose: () => void;
+  projectId: string;
+}> = ({ skill, profiles, onSave, onClose, projectId }) => {
   const isEdit = !!skill;
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
-  const [defaultProfileId, setDefaultProfileId] = useState('');
-  const [systemPromptAppend, setSystemPromptAppend] = useState('');
-  const [vmSizeOverride, setVmSizeOverride] = useState('');
-  const [taskMode, setTaskMode] = useState('task');
-  const [minVcpu, setMinVcpu] = useState('');
-  const [minMemoryGb, setMinMemoryGb] = useState('');
-  const [minDiskGb, setMinDiskGb] = useState('');
-  const [exclusiveNode, setExclusiveNode] = useState(false);
-  const [maxCoTenants, setMaxCoTenants] = useState('');
+  const initialResources = parseResourceRequirements(skill?.resourceRequirementsJson);
+  const [name, setName] = useState(skill?.name ?? '');
+  const [description, setDescription] = useState(skill?.description ?? '');
+  const [defaultProfileId, setDefaultProfileId] = useState(skill?.defaultProfileId ?? '');
+  const [systemPromptAppend, setSystemPromptAppend] = useState(skill?.systemPromptAppend ?? '');
+  const [vmSizeOverride, setVmSizeOverride] = useState(skill?.vmSizeOverride ?? '');
+  const [taskMode, setTaskMode] = useState(skill?.taskMode ?? 'task');
+  const [minVcpu, setMinVcpu] = useState(initialResources.minVcpu);
+  const [minMemoryGb, setMinMemoryGb] = useState(initialResources.minMemoryGb);
+  const [minDiskGb, setMinDiskGb] = useState(initialResources.minDiskGb);
+  const [exclusiveNode, setExclusiveNode] = useState(initialResources.exclusiveNode);
+  const [maxCoTenants, setMaxCoTenants] = useState(initialResources.maxCoTenants);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    setName(skill?.name ?? '');
-    setDescription(skill?.description ?? '');
-    setDefaultProfileId(skill?.defaultProfileId ?? '');
-    setSystemPromptAppend(skill?.systemPromptAppend ?? '');
-    setVmSizeOverride(skill?.vmSizeOverride ?? '');
-    setTaskMode(skill?.taskMode ?? 'task');
-    // Deserialize resource requirements JSON into individual fields
-    if (skill?.resourceRequirementsJson) {
-      try {
-        const req = JSON.parse(skill.resourceRequirementsJson) as Record<string, unknown>;
-        setMinVcpu(typeof req.minVcpu === 'number' ? String(req.minVcpu) : '');
-        setMinMemoryGb(typeof req.minMemoryGb === 'number' ? String(req.minMemoryGb) : '');
-        setMinDiskGb(typeof req.minDiskGb === 'number' ? String(req.minDiskGb) : '');
-        setExclusiveNode(req.exclusiveNode === true);
-        setMaxCoTenants(typeof req.maxCoTenants === 'number' ? String(req.maxCoTenants) : '');
-      } catch {
-        setMinVcpu('');
-        setMinMemoryGb('');
-        setMinDiskGb('');
-        setExclusiveNode(false);
-        setMaxCoTenants('');
-      }
-    } else {
-      setMinVcpu('');
-      setMinMemoryGb('');
-      setMinDiskGb('');
-      setExclusiveNode(false);
-      setMaxCoTenants('');
-    }
-    setError(null);
-  }, [isOpen, skill]);
 
   const handleSubmit = async () => {
     const trimmedName = name.trim();
@@ -109,7 +136,6 @@ export const SkillFormDialog: FC<SkillFormDialogProps> = ({
   };
 
   return (
-    <Dialog isOpen={isOpen} onClose={onClose} maxWidth="lg">
       <form onSubmit={(event) => { event.preventDefault(); void handleSubmit(); }}>
         <h2 id="dialog-title" className="mb-1 text-lg font-semibold text-fg-primary">
           {isEdit ? 'Edit Skill' : 'Create Skill'}
@@ -278,6 +304,5 @@ export const SkillFormDialog: FC<SkillFormDialogProps> = ({
           <Button type="submit" loading={saving} disabled={saving}>{isEdit ? 'Save Changes' : 'Create Skill'}</Button>
         </div>
       </form>
-    </Dialog>
   );
 };

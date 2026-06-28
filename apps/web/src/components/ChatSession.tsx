@@ -73,7 +73,7 @@ export const ChatSession = React.forwardRef<ChatSessionHandle, ChatSessionProps>
     useImperativeHandle(ref, () => ({
       focusInput: () => agentPanelRef.current?.focusInput(),
     }));
-    const wsUrlCacheRef = useRef<{ url: string; resolvedAt: number } | null>(null);
+    const wsUrlCacheRef = useRef<{ key: string; url: string; resolvedAt: number } | null>(null);
 
     // Resolve transcription API URL once (stable across renders)
     const transcribeApiUrl = useMemo(() => getTranscribeApiUrl(), []);
@@ -114,15 +114,13 @@ export const ChatSession = React.forwardRef<ChatSessionHandle, ChatSessionProps>
       [workspaceId, sessionId]
     );
 
-    useEffect(() => {
-      wsUrlCacheRef.current = null;
-    }, [wsHostInfo, workspaceId, sessionId, worktreePath]);
-
     const resolveWsUrl = useCallback(async (): Promise<string | null> => {
       if (!wsHostInfo) return null;
 
+      // Key the cache by inputs so stale session/worktree URLs cannot be reused
+      const cacheKey = `${wsHostInfo}|${workspaceId}|${sessionId}|${worktreePath ?? ''}`;
       const cached = wsUrlCacheRef.current;
-      if (cached && Date.now() - cached.resolvedAt < 15_000) {
+      if (cached && cached.key === cacheKey && Date.now() - cached.resolvedAt < 15_000) {
         return cached.url;
       }
 
@@ -138,7 +136,7 @@ export const ChatSession = React.forwardRef<ChatSessionHandle, ChatSessionProps>
         const sessionQuery = `&sessionId=${encodeURIComponent(sessionId)}`;
         const worktreeQuery = worktreePath ? `&worktree=${encodeURIComponent(worktreePath)}` : '';
         const url = `${wsHostInfo}/agent/ws?token=${encodeURIComponent(token)}${sessionQuery}${worktreeQuery}`;
-        wsUrlCacheRef.current = { url, resolvedAt: Date.now() };
+        wsUrlCacheRef.current = { key: cacheKey, url, resolvedAt: Date.now() };
         return url;
       } catch (err) {
         reportError({
@@ -151,10 +149,38 @@ export const ChatSession = React.forwardRef<ChatSessionHandle, ChatSessionProps>
       }
     }, [wsHostInfo, workspaceId, sessionId, worktreePath]);
 
+    // Refs for parent callbacks — latest-ref pattern keeps processMessage stable.
+    const onActivityRef = useRef(onActivity);
+    onActivityRef.current = onActivity;
+    const onUsageChangeRef = useRef(onUsageChange);
+    onUsageChangeRef.current = onUsageChange;
+
     // Each chat session gets its own message store.
     // No client-side persistence — on reconnect, LoadSession replays the full
     // conversation from the agent via session/update notifications.
-    const acpMessages = useAcpMessages();
+    const acpMessagesRaw = useAcpMessages();
+
+    // Wrap processMessage to report activity on each incoming message (UE012).
+    // processMessage is stable from useAcpMessages, so this callback is also stable.
+    const processMessageWrapped = useCallback(
+      (msg: Parameters<typeof acpMessagesRaw.processMessage>[0]) => {
+        acpMessagesRaw.processMessage(msg);
+        // Report activity whenever a message arrives (UE012)
+        onActivityRef.current?.();
+      },
+      [acpMessagesRaw.processMessage],
+    );
+
+    const acpMessages = { ...acpMessagesRaw, processMessage: processMessageWrapped };
+
+    // UE013: Push token usage to parent at render time when it changes.
+    // Track the last-reported total to avoid redundant calls.
+    const lastReportedUsageTotalRef = useRef(0);
+    if (acpMessages.usage.totalTokens > 0 &&
+        acpMessages.usage.totalTokens !== lastReportedUsageTotalRef.current) {
+      lastReportedUsageTotalRef.current = acpMessages.usage.totalTokens;
+      onUsageChangeRef.current?.(sessionId, acpMessages.usage);
+    }
 
     // Handle agent auto-selection on first connection using event-driven approach.
     // This replaces the useEffect-based logic and prevents infinite loops by design.
@@ -207,13 +233,12 @@ export const ChatSession = React.forwardRef<ChatSessionHandle, ChatSessionProps>
 
     const { agentType, state, switchAgent } = acpSession;
     switchAgentRef.current = switchAgent;
-    const { clear: clearMessages } = acpMessages;
+    const { clear: clearMessages } = acpMessagesRaw;
 
-    // Clear messages when no agent session exists (idle SessionHost).
-    // Replay clearing is now handled synchronously by onPrepareForReplay
-    // (called from useAcpSession when session_state arrives with replayCount > 0)
-    // which avoids the race where this useEffect fires after replay messages
-    // have already been appended.
+    // UE011: Clear messages when no agent session exists (idle SessionHost).
+    // Replay clearing is handled synchronously by onPrepareForReplay (above), which
+    // fires when session_state arrives with replayCount > 0, avoiding the race where
+    // this effect would fire after replay messages have already been appended.
     useEffect(() => {
       if (state === 'no_session') {
         reportError({
@@ -225,24 +250,6 @@ export const ChatSession = React.forwardRef<ChatSessionHandle, ChatSessionProps>
         clearMessages();
       }
     }, [state, clearMessages, workspaceId, sessionId]);
-
-    // Report activity
-    const handleActivity = useCallback(() => {
-      onActivity?.();
-    }, [onActivity]);
-
-    useEffect(() => {
-      if (acpMessages.items.length > 0) {
-        handleActivity();
-      }
-    }, [acpMessages.items.length, handleActivity]);
-
-    // Report token usage changes to parent for sidebar aggregation
-    useEffect(() => {
-      if (acpMessages.usage.totalTokens > 0) {
-        onUsageChange?.(sessionId, acpMessages.usage);
-      }
-    }, [acpMessages.usage, sessionId, onUsageChange]);
 
     // ── Agent settings ──
     const [agentSettings, setAgentSettings] = useState<ChatSettingsData | null>(null);

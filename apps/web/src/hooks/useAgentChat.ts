@@ -58,18 +58,20 @@ export function useAgentChat({ apiBase }: UseAgentChatOptions): UseAgentChatRetu
 
   // Load existing conversation on mount
   useEffect(() => {
-    let cancelled = false;
+    const controller = new AbortController();
+    const { signal } = controller;
     (async () => {
       try {
         const convResp = await fetch(`${API_URL}${apiBase}/conversations?type=human`, {
           credentials: 'include',
+          signal,
         });
-        if (!convResp.ok || cancelled) {
-          setIsLoadingHistory(false);
+        if (!convResp.ok || signal.aborted) {
+          if (!signal.aborted) setIsLoadingHistory(false);
           return;
         }
         const convData = expectJsonRecord(await convResp.json(), 'agent_chat.conversations');
-        if (cancelled) return;
+        if (signal.aborted) return;
 
         const conversations = Array.isArray(convData.conversations) ? convData.conversations : [];
         const convRecord = conversations[0]
@@ -77,22 +79,22 @@ export function useAgentChat({ apiBase }: UseAgentChatOptions): UseAgentChatRetu
           : null;
         const conv = convRecord && typeof convRecord.id === 'string' ? { id: convRecord.id } : null;
         if (!conv) {
-          setIsLoadingHistory(false);
+          if (!signal.aborted) setIsLoadingHistory(false);
           return;
         }
 
-        setConversationId(conv.id);
+        if (!signal.aborted) setConversationId(conv.id);
 
         const msgResp = await fetch(
           `${API_URL}${apiBase}/conversations/${conv.id}/messages?limit=200`,
-          { credentials: 'include' },
+          { credentials: 'include', signal },
         );
-        if (!msgResp.ok || cancelled) {
-          setIsLoadingHistory(false);
+        if (!msgResp.ok || signal.aborted) {
+          if (!signal.aborted) setIsLoadingHistory(false);
           return;
         }
         const msgData = expectJsonRecord(await msgResp.json(), 'agent_chat.messages');
-        if (cancelled) return;
+        if (signal.aborted) return;
 
         const mapped: ChatMessage[] = [];
         const rows = Array.isArray(msgData.messages) ? msgData.messages : [];
@@ -152,14 +154,15 @@ export function useAgentChat({ apiBase }: UseAgentChatOptions): UseAgentChatRetu
           }
         }
 
-        setMessages(mapped);
-      } catch {
+        if (!signal.aborted) setMessages(mapped);
+      } catch (err) {
+        if ((err as Error).name === 'AbortError') return;
         // Silently handle — user just sees empty chat
       } finally {
-        if (!cancelled) setIsLoadingHistory(false);
+        if (!signal.aborted) setIsLoadingHistory(false);
       }
     })();
-    return () => { cancelled = true; };
+    return () => { controller.abort(); };
   }, [apiBase]);
 
   /** Send a message and stream the response via SSE. */

@@ -1,5 +1,5 @@
 import type { AgentSession } from '@simple-agent-manager/shared';
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
 
 interface OrphanedSessionsBannerProps {
   orphanedSessions: AgentSession[];
@@ -14,14 +14,11 @@ export function OrphanedSessionsBanner({
   onStopAll,
   onDismiss,
 }: OrphanedSessionsBannerProps) {
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
   useEffect(() => {
-    timerRef.current = setTimeout(onDismiss, AUTO_DISMISS_MS);
-    return () => {
-      if (timerRef.current) clearTimeout(timerRef.current);
-    };
-  }, [onDismiss]);
+    if (orphanedSessions.length === 0) return;
+    const timeoutId = setTimeout(onDismiss, AUTO_DISMISS_MS);
+    return () => clearTimeout(timeoutId);
+  }, [onDismiss, orphanedSessions.length]);
 
   if (orphanedSessions.length === 0) return null;
 

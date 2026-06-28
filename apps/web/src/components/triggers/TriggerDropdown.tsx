@@ -98,26 +98,29 @@ export const TriggerDropdown: FC<TriggerDropdownProps> = ({ projectId, open, onT
     requestAnimationFrame(() => triggerBtnRef.current?.focus());
   }, [open, onToggle]);
 
-  const fetchTriggers = useCallback(async () => {
+  const fetchTriggers = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
     setLoadError(null);
     try {
       const result = await listTriggers(projectId);
+      if (signal?.aborted) return;
       setTriggers(result.triggers);
     } catch (err) {
+      if (signal?.aborted) return;
       setTriggers([]);
       setLoadError(err instanceof Error ? err.message : 'Failed to load triggers');
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) setLoading(false);
     }
   }, [projectId]);
 
   // Fetch triggers when dropdown opens
   useEffect(() => {
-    if (open) {
-      updatePosition();
-      fetchTriggers().catch(() => undefined);
-    }
+    if (!open) return;
+    updatePosition();
+    const controller = new AbortController();
+    fetchTriggers(controller.signal).catch(() => undefined);
+    return () => controller.abort();
   }, [open, fetchTriggers, updatePosition]);
 
   useEffect(() => {
@@ -161,7 +164,7 @@ export const TriggerDropdown: FC<TriggerDropdownProps> = ({ projectId, open, onT
   }, [closePopover, navigate]);
 
   const handleRetry = useCallback(() => {
-    fetchTriggers().catch(() => undefined);
+    fetchTriggers(undefined).catch(() => undefined);
   }, [fetchTriggers]);
 
   const activeTriggers = triggers.filter((t) => t.status === 'active');

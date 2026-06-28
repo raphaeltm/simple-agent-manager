@@ -16,6 +16,8 @@ import type {
 import { Alert, Spinner } from '@simple-agent-manager/ui';
 import { useCallback, useEffect, useState } from 'react';
 
+// NOTE: useEffect is still used for the loadData fetch, not for prop-to-state sync.
+
 import { useToast } from '../hooks/useToast';
 import {
   deleteProjectAgentCredential,
@@ -42,13 +44,11 @@ export function ProjectAgentsSection({
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [projectCreds, setProjectCreds] = useState<AgentCredentialInfo[]>([]);
   const [userCreds, setUserCreds] = useState<AgentCredentialInfo[]>([]);
-  const [defaults, setDefaults] = useState<ProjectAgentDefaults>(initialAgentDefaults ?? {});
+  // Derived from prop; no prop-sync effect needed. Mutations update the parent
+  // via onUpdated(), which passes back fresh initialAgentDefaults.
+  const defaults: ProjectAgentDefaults = initialAgentDefaults ?? {};
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    setDefaults(initialAgentDefaults ?? {});
-  }, [initialAgentDefaults]);
 
   const loadData = useCallback(async () => {
     try {
@@ -111,7 +111,6 @@ export function ProjectAgentsSection({
     }
     const payload = Object.keys(next).length === 0 ? null : next;
     const updated = await updateProject(projectId, { agentDefaults: payload });
-    setDefaults(updated.agentDefaults ?? {});
     onUpdated(updated.agentDefaults ?? null);
   };
 
@@ -120,7 +119,6 @@ export function ProjectAgentsSection({
     delete next[agentType];
     const payload = Object.keys(next).length === 0 ? null : next;
     const updated = await updateProject(projectId, { agentDefaults: payload });
-    setDefaults(updated.agentDefaults ?? {});
     onUpdated(updated.agentDefaults ?? null);
   };
 
@@ -158,7 +156,7 @@ export function ProjectAgentsSection({
         const userAgentCreds = userCreds.filter((c) => c.agentType === agent.id);
         return (
           <ProjectAgentCard
-            key={agent.id}
+            key={`${agent.id}-${defaults[agent.id]?.model ?? ''}-${defaults[agent.id]?.permissionMode ?? ''}`}
             agent={agent}
             projectCredentials={projectAgentCreds.length > 0 ? projectAgentCreds : null}
             userCredentials={userAgentCreds}

@@ -21,7 +21,7 @@ import {
   VALID_PERMISSION_MODES,
 } from '@simple-agent-manager/shared';
 import { Alert, Card } from '@simple-agent-manager/ui';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 
 import { ModelSelect } from './ModelSelect';
 
@@ -89,16 +89,6 @@ export function AgentSettingsCard({
 
   const formControlClass =
     'w-full min-h-11 py-2 px-3 rounded-sm border border-border-default bg-inset text-fg-primary text-sm outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring box-border';
-
-  // Sync state when settings prop changes
-  useEffect(() => {
-    setModel(settings?.model ?? '');
-    setPermissionMode(settings?.permissionMode ?? 'default');
-    setOpencodeProvider(settings?.opencodeProvider ?? '');
-    setOpencodeBaseUrl(settings?.opencodeBaseUrl ?? '');
-    setOpencodeProviderName(settings?.opencodeProviderName ?? '');
-    setProviderMode(settings?.providerMode ?? '');
-  }, [settings]);
 
   const handleSave = async () => {
     try {

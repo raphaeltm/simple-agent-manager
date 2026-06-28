@@ -531,9 +531,12 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
     return flat;
   }, [groups]);
 
+  // Clamp selectedIndex so it never exceeds the result list length
+  const clampedIndex = Math.min(selectedIndex, Math.max(flatResults.length - 1, 0));
+
   // Active descendant ID for ARIA
-  const activeDescendantId = flatResults[selectedIndex]
-    ? `gcp-option-${resultKey(flatResults[selectedIndex])}`
+  const activeDescendantId = flatResults[clampedIndex]
+    ? `gcp-option-${resultKey(flatResults[clampedIndex])}`
     : undefined;
 
   // Auto-focus on mount
@@ -546,12 +549,7 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
     if (selectedRef.current && typeof selectedRef.current.scrollIntoView === 'function') {
       selectedRef.current.scrollIntoView({ block: 'nearest' });
     }
-  }, [selectedIndex]);
-
-  // Reset selection when query changes
-  useEffect(() => {
-    setSelectedIndex(0);
-  }, [query]);
+  }, [clampedIndex]);
 
   // Focus trap — keep Tab within the dialog
   useEffect(() => {
@@ -599,8 +597,8 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
         break;
       case 'Enter':
         e.preventDefault();
-        if (flatResults[selectedIndex]) {
-          executeResult(flatResults[selectedIndex]);
+        if (flatResults[clampedIndex]) {
+          executeResult(flatResults[clampedIndex]);
         }
         break;
       case 'Escape':
@@ -654,7 +652,7 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
             aria-controls="gcp-listbox"
             aria-activedescendant={activeDescendantId}
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => { setQuery(e.target.value); setSelectedIndex(0); }}
             onKeyDown={handleKeyDown}
             placeholder="Search pages, projects, chats, nodes..."
             className="w-full bg-transparent border-none text-fg-primary text-sm outline-none font-[inherit] placeholder:text-fg-muted focus:ring-0"
@@ -689,7 +687,7 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
               {group.results.map((result) => {
                 flatIndex++;
                 const currentFlatIndex = flatIndex;
-                const isSelected = currentFlatIndex === selectedIndex;
+                const isSelected = currentFlatIndex === clampedIndex;
 
                 return (
                   <div

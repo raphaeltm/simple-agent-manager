@@ -1,5 +1,5 @@
 import type { PlatformError, PlatformErrorLevel,PlatformErrorSource } from '@simple-agent-manager/shared';
-import { useCallback, useEffect, useRef,useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { type AdminErrorsFilter,fetchAdminErrors } from '../lib/api';
 
@@ -48,12 +48,6 @@ export function useAdminErrors(): UseAdminErrorsReturn {
   });
 
   const cursorRef = useRef<string | null>(null);
-  const mountedRef = useRef(true);
-
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => { mountedRef.current = false; };
-  }, []);
 
   const buildFilter = useCallback((append: boolean): AdminErrorsFilter => {
     const now = Date.now();
@@ -69,14 +63,14 @@ export function useAdminErrors(): UseAdminErrorsReturn {
     };
   }, [filter]);
 
-  const fetchErrors = useCallback(async (append = false) => {
+  const fetchErrors = useCallback(async (append = false, signal?: AbortSignal) => {
     try {
       setLoading(true);
       setError(null);
 
       const result = await fetchAdminErrors(buildFilter(append));
 
-      if (!mountedRef.current) return;
+      if (signal?.aborted) return;
 
       if (append) {
         setErrors(prev => [...prev, ...result.errors]);
@@ -88,11 +82,11 @@ export function useAdminErrors(): UseAdminErrorsReturn {
       setHasMore(result.hasMore);
       setTotal(result.total);
     } catch (err) {
-      if (mountedRef.current) {
+      if (!signal?.aborted) {
         setError(err instanceof Error ? err.message : 'Failed to load errors');
       }
     } finally {
-      if (mountedRef.current) {
+      if (!signal?.aborted) {
         setLoading(false);
       }
     }
@@ -101,7 +95,9 @@ export function useAdminErrors(): UseAdminErrorsReturn {
   // Re-fetch when filter changes (reset cursor)
   useEffect(() => {
     cursorRef.current = null;
-    fetchErrors(false);
+    const controller = new AbortController();
+    fetchErrors(false, controller.signal);
+    return () => { controller.abort(); };
   }, [fetchErrors]);
 
   const setSource = useCallback((source: PlatformErrorSource | 'all') => {

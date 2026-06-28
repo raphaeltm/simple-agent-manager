@@ -1,6 +1,8 @@
 import { type ReactNode, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 
+import { useEscapeKey } from '../hooks/useEscapeKey';
+
 interface DialogProps {
   isOpen: boolean;
   onClose: () => void;
@@ -22,13 +24,9 @@ const maxWidthClasses: Record<NonNullable<DialogProps['maxWidth']>, string> = {
 export function Dialog({ isOpen, onClose, children, maxWidth = 'md', stickyHeader }: DialogProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && isOpen) onClose();
-    };
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
+  // Latest-ref pattern: useEscapeKey already uses this internally, so we just
+  // pass the callback directly. It re-reads the latest onClose on each keydown.
+  useEscapeKey(onClose, isOpen);
 
   useEffect(() => {
     if (isOpen) {

@@ -71,6 +71,8 @@ export function useTrialDraft(
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const trialIdRef = useRef(trialId);
   const debounceRef = useRef(debounceMs);
+  // Track the latest pending value so we can flush it on unmount
+  const pendingValueRef = useRef<string | null>(null);
 
   // Keep refs up-to-date so the closed-over setDraft / clearDraft callbacks
   // always hit the right storage key even if trialId changes mid-lifecycle.
@@ -96,6 +98,12 @@ export function useTrialDraft(
         clearTimeout(timerRef.current);
         timerRef.current = null;
       }
+      // Actually flush the pending draft value before unmounting
+      const currentTrialId = trialIdRef.current;
+      if (currentTrialId && pendingValueRef.current !== null) {
+        writeDraft(currentTrialId, pendingValueRef.current);
+        pendingValueRef.current = null;
+      }
     };
   }, []);
 
@@ -111,12 +119,15 @@ export function useTrialDraft(
     const delay = debounceRef.current;
     if (delay <= 0) {
       writeDraft(currentTrialId, value);
+      pendingValueRef.current = null;
       return;
     }
 
+    pendingValueRef.current = value;
     timerRef.current = setTimeout(() => {
       writeDraft(currentTrialId, value);
       timerRef.current = null;
+      pendingValueRef.current = null;
     }, delay);
   }, []);
 
@@ -125,6 +136,7 @@ export function useTrialDraft(
       clearTimeout(timerRef.current);
       timerRef.current = null;
     }
+    pendingValueRef.current = null;
     setDraftState('');
     const currentTrialId = trialIdRef.current;
     if (currentTrialId) {

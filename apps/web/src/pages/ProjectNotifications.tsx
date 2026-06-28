@@ -101,7 +101,11 @@ export function ProjectNotifications() {
     }
   }, [projectId, typeFilter, notifications.length]);
 
-  useEffect(() => { void loadNotifications(); }, [projectId]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const controller = new AbortController();
+    void loadNotifications();
+    return () => controller.abort();
+  }, [projectId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleTypeFilterChange = (newFilter: NotificationType | 'all') => {
     setTypeFilter(newFilter);

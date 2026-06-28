@@ -174,10 +174,8 @@ export function useProjectChatState() {
   );
   const [bootLogPanelOpen, setBootLogPanelOpen] = useState(false);
 
-  // Auto-close boot log panel when provisioning completes
-  useEffect(() => {
-    if (!provisioning) setBootLogPanelOpen(false);
-  }, [provisioning]);
+  // Auto-close boot log panel when provisioning completes (derived)
+  const effectiveBootLogPanelOpen = provisioning ? bootLogPanelOpen : false;
 
   // Fork & Retry — navigate to new chat screen with pre-filled state
   const [pendingDerived, setPendingDerived] = useState<PendingDerived | null>(null);
@@ -238,11 +236,9 @@ export function useProjectChatState() {
   // Effects
   // ---------------------------------------------------------------------------
 
-  useEffect(() => {
-    if (!userSetTaskModeRef.current) {
-      setSelectedTaskMode(selectedWorkspaceProfile === 'lightweight' ? 'conversation' : 'task');
-    }
-  }, [selectedWorkspaceProfile]);
+  // Derive effective task mode: user's explicit choice takes priority, otherwise follow workspace profile
+  const defaultTaskModeForProfile = selectedWorkspaceProfile === 'lightweight' ? 'conversation' : 'task';
+  const effectiveTaskMode = userSetTaskModeRef.current ? selectedTaskMode : defaultTaskModeForProfile;
 
 
   useEffect(() => {
@@ -346,11 +342,21 @@ export function useProjectChatState() {
   }, [loadSessions]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Poll task status during provisioning
+  // Poll task status during provisioning — use refs for callbacks that
+  // shouldn't cause re-subscription of the polling interval.
+  const navigateRef = useRef(navigate);
+  navigateRef.current = navigate;
+  const loadSessionsRef = useRef(loadSessions);
+  loadSessionsRef.current = loadSessions;
+
   useEffect(() => {
     if (!provisioning || isTerminal(provisioning.status)) return;
+
+    const { taskId, sessionId: provSessionId } = provisioning;
+
     const poll = async () => {
       try {
-        const task = await getProjectTask(projectId, provisioning.taskId);
+        const task = await getProjectTask(projectId, taskId);
         setProvisioning((prev) => {
           if (!prev) return null;
           const next = { ...prev, status: task.status, executionStep: task.executionStep ?? null, errorMessage: task.errorMessage ?? null, requestedVmSize: task.requestedVmSize ?? prev.requestedVmSize, provisionedVmSize: task.provisionedVmSize ?? prev.provisionedVmSize };
@@ -363,21 +369,23 @@ export function useProjectChatState() {
             if (ws.url) setProvisioning((prev) => prev ? { ...prev, workspaceUrl: ws.url ?? null } : null);
           } catch { /* Workspace may not be ready yet */ }
         }
+        // Transition to ready state
         if (task.status === 'in_progress' && (task.workspaceId || task.executionStep === 'running')) {
-          navigate(`/projects/${projectId}/chat/${provisioning.sessionId}`, { replace: true });
+          navigateRef.current(`/projects/${projectId}/chat/${provSessionId}`, { replace: true });
           setProvisioning(null);
         }
+        // Terminal state
         if (isTerminal(task.status)) {
-          navigate(`/projects/${projectId}/chat/${provisioning.sessionId}`, { replace: true });
+          navigateRef.current(`/projects/${projectId}/chat/${provSessionId}`, { replace: true });
           setProvisioning(null);
-          void loadSessions();
+          void loadSessionsRef.current();
         }
       } catch { /* Continue polling on transient errors */ }
     };
     void poll();
     const interval = setInterval(() => void poll(), TASK_STATUS_POLL_MS);
     return () => clearInterval(interval);
-  }, [provisioning?.taskId, provisioning?.status, projectId, navigate, loadSessions, provisioning?.sessionId]);
+  }, [provisioning?.taskId, provisioning?.status, provisioning?.workspaceUrl, provisioning?.sessionId, projectId]);
 
   // Restore provisioning state when navigating to a session with an active task
   useEffect(() => {
@@ -529,7 +537,7 @@ export function useProjectChatState() {
         selectedVmSize,
         selectedWorkspaceProfile,
         selectedDevcontainerConfigName,
-        selectedTaskMode,
+        selectedTaskMode: effectiveTaskMode,
         pendingDerived,
       });
       const result = await submitTask(projectId, withAttachmentRefs(baseRequest, attachmentRefs));
@@ -723,9 +731,9 @@ export function useProjectChatState() {
     selectedVmSize, handleVmSizeChange,
     selectedWorkspaceProfile, setSelectedWorkspaceProfile,
     selectedDevcontainerConfigName, setSelectedDevcontainerConfigName,
-    selectedTaskMode, handleTaskModeChange,
+    selectedTaskMode: effectiveTaskMode, handleTaskModeChange,
     ...attachments,
-    provisioning, bootLogs, bootLogPanelOpen, setBootLogPanelOpen,
+    provisioning, bootLogs, bootLogPanelOpen: effectiveBootLogPanelOpen, setBootLogPanelOpen,
     pendingDerived, setPendingDerived, handleFork, handleRetry,
     closingConversation, closeError, handleCloseConversation,
     transcribeApiUrl, getSessionState,

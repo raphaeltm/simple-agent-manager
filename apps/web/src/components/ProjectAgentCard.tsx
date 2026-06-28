@@ -18,7 +18,7 @@ import {
   VALID_PERMISSION_MODES,
 } from '@simple-agent-manager/shared';
 import { Alert, Button, Card, StatusBadge } from '@simple-agent-manager/ui';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 
 import { AgentKeyCard } from './AgentKeyCard';
 import { ModelSelect } from './ModelSelect';
@@ -70,6 +70,8 @@ export function ProjectAgentCard({
   onSaveDefault,
   onClearDefault,
 }: ProjectAgentCardProps) {
+  // State is initialized from props; parent uses a key that includes defaultValue
+  // so this component remounts with fresh state when the server data changes.
   const [model, setModel] = useState(defaultValue?.model ?? '');
   const [permissionMode, setPermissionMode] = useState<AgentPermissionMode | ''>(
     defaultValue?.permissionMode ?? '',
@@ -78,11 +80,6 @@ export function ProjectAgentCard({
   const [clearing, setClearing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
-
-  useEffect(() => {
-    setModel(defaultValue?.model ?? '');
-    setPermissionMode(defaultValue?.permissionMode ?? '');
-  }, [defaultValue]);
 
   const hasCredentialOverride = (projectCredentials?.length ?? 0) > 0;
   const activeUserCred = userCredentials.find((c) => c.isActive);

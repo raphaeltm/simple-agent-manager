@@ -111,7 +111,7 @@ export function useConnectionRecovery(opts: UseConnectionRecoveryOptions): UseCo
 
       resumeAgentSession(session.workspaceId!, agentSessionId)
         .then(() => {
-          setSession((prev) => {
+          setSessionRef.current((prev) => {
             if (!prev) return prev;
             return { ...prev, isIdle: false, agentCompletedAt: null } as ChatSessionResponse;
           });
@@ -130,6 +130,7 @@ export function useConnectionRecovery(opts: UseConnectionRecoveryOptions): UseCo
     }, AUTO_RESUME_DELAY_MS);
 
     return () => clearTimeout(timer);
+  // setSessionRef is a ref — excluded from deps intentionally
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionState, isResuming, isProvisioning, session?.workspaceId, agentSessionId]);
 
@@ -143,6 +144,15 @@ export function useConnectionRecovery(opts: UseConnectionRecoveryOptions): UseCo
     return () => clearTimeout(timer);
   }, [connectionState]);
 
+  // Latest-ref for callbacks used inside async chains — avoids stale closure captures
+  // while keeping the effect deps minimal (no need to re-run effects when these change).
+  const projectIdRef = useRef(projectId);
+  projectIdRef.current = projectId;
+  const sessionIdRef = useRef(sessionId);
+  sessionIdRef.current = sessionId;
+  const setSessionRef = useRef(setSession);
+  setSessionRef.current = setSession;
+
   // Resume an idle session and optionally send a follow-up prompt via REST API
   const resumeAndSend = useCallback((followUpText?: string) => {
     if (!session?.workspaceId || !agentSessionId) return;
@@ -152,14 +162,14 @@ export function useConnectionRecovery(opts: UseConnectionRecoveryOptions): UseCo
 
     resumeAgentSession(session.workspaceId, agentSessionId)
       .then(async () => {
-        setSession((prev) => {
+        setSessionRef.current((prev) => {
           if (!prev) return prev;
           return { ...prev, isIdle: false, agentCompletedAt: null } as ChatSessionResponse;
         });
         setIsResuming(false);
         if (followUpText) {
           try {
-            await sendFollowUpPrompt(projectId, sessionId, followUpText);
+            await sendFollowUpPrompt(projectIdRef.current, sessionIdRef.current, followUpText);
           } catch {
             // Agent may be offline — message is still persisted via DO
           }
@@ -175,7 +185,7 @@ export function useConnectionRecovery(opts: UseConnectionRecoveryOptions): UseCo
           setResumeError('Could not resume agent \u2014 please try again.');
         }
       });
-  }, [session?.workspaceId, agentSessionId, projectId, sessionId, setSession]);
+  }, [session?.workspaceId, agentSessionId]);
 
   return {
     isResuming,

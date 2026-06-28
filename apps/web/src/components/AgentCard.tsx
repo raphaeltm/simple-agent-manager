@@ -91,6 +91,7 @@ export function AgentCard({
           Configuration
         </h4>
         <AgentSettingsCard
+          key={`${agent.id}-${settings?.model ?? ''}-${settings?.permissionMode ?? ''}-${settings?.providerMode ?? ''}-${settings?.opencodeProvider ?? ''}`}
           agent={agent}
           settings={settings}
           onSave={onSaveSettings}

@@ -617,6 +617,15 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
     };
   }, [wsUrl, connectWithResolvedUrl, logLifecycle]);
 
+  // Latest-refs for callbacks used in the visibility and online/offline effects.
+  // This lets the effects run once (empty dep array) without capturing stale closures.
+  const connectWithResolvedUrlRef = useRef(connectWithResolvedUrl);
+  connectWithResolvedUrlRef.current = connectWithResolvedUrl;
+  const clearErrorRef = useRef(clearError);
+  clearErrorRef.current = clearError;
+  const setStructuredErrorRef = useRef(setStructuredError);
+  setStructuredErrorRef.current = setStructuredError;
+
   // Reconnect immediately when tab becomes visible again (mobile background tab fix)
   useEffect(() => {
     if (!wsUrl && !resolveWsUrlRef.current) return;
@@ -643,14 +652,14 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
       intentionalCloseRef.current = false;
 
       setState('reconnecting');
-      void connectWithResolvedUrl(connectUrlRef.current);
+      void connectWithResolvedUrlRef.current(connectUrlRef.current);
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [wsUrl, connectWithResolvedUrl, logLifecycle]);
+  }, [wsUrl, logLifecycle]);
 
   // Resume reconnection when browser comes back online
   useEffect(() => {
@@ -666,9 +675,9 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
       reconnectAttemptRef.current = 0;
       reconnectStartRef.current = 0;
       intentionalCloseRef.current = false;
-      clearError();
+      clearErrorRef.current();
       setState('reconnecting');
-      void connectWithResolvedUrl(connectUrlRef.current);
+      void connectWithResolvedUrlRef.current(connectUrlRef.current);
     };
 
     const handleOffline = () => {
@@ -681,7 +690,7 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
       // Only set offline error if we lost an active connection
       if (wasConnectedRef.current && !transportRef.current?.connected) {
         setState('error');
-        setStructuredError('NETWORK_OFFLINE');
+        setStructuredErrorRef.current('NETWORK_OFFLINE');
       }
     };
 
@@ -691,7 +700,7 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
-  }, [connectWithResolvedUrl, logLifecycle, clearError, setStructuredError]);
+  }, [logLifecycle]);
 
   // Manual reconnect (exposed to UI for "Reconnect" button)
   const reconnect = useCallback(() => {

@@ -1,4 +1,4 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 
 /** An agent profile entry for the mention autocomplete */
 export interface MentionProfile {
@@ -42,29 +42,27 @@ export const MentionPalette = forwardRef<MentionPaletteHandle, MentionPalettePro
     const [selectedIndex, setSelectedIndex] = useState(0);
     const listRef = useRef<HTMLUListElement>(null);
 
-    const filtered = profiles.filter((p) =>
+    const filtered = useMemo(() => profiles.filter((p) =>
       p.name.toLowerCase().startsWith(filter.toLowerCase())
-    );
+    ), [profiles, filter]);
 
-    // Reset selection when filter or visibility changes
-    useEffect(() => {
-      setSelectedIndex(0);
-    }, [filter, visible]);
+    // Clamp selectedIndex to filtered list bounds (resets naturally when filter changes)
+    const clampedIndex = Math.min(selectedIndex, Math.max(filtered.length - 1, 0));
 
     // Scroll selected item into view
     useEffect(() => {
       if (!listRef.current) return;
       const items = listRef.current.children;
-      const selected = items[selectedIndex] as HTMLElement | undefined;
+      const selected = items[clampedIndex] as HTMLElement | undefined;
       if (selected && typeof selected.scrollIntoView === 'function') {
         selected.scrollIntoView({ block: 'nearest' });
       }
-    }, [selectedIndex]);
+    }, [clampedIndex]);
 
     const selectCurrentProfile = useCallback(() => {
-      const profile = filtered[selectedIndex];
+      const profile = filtered[clampedIndex];
       if (profile) onSelect(profile);
-    }, [filtered, selectedIndex, onSelect]);
+    }, [filtered, clampedIndex, onSelect]);
 
     const moveSelection = useCallback((direction: 1 | -1) => {
       setSelectedIndex((prev) => {
@@ -104,8 +102,8 @@ export const MentionPalette = forwardRef<MentionPaletteHandle, MentionPalettePro
       [onSelect]
     );
 
-    const activeDescendantId = filtered[selectedIndex]
-      ? `mention-profile-${filtered[selectedIndex].id}`
+    const activeDescendantId = filtered[clampedIndex]
+      ? `mention-profile-${filtered[clampedIndex].id}`
       : undefined;
 
     useImperativeHandle(ref, () => ({ handleKeyDown, activeDescendantId }), [
@@ -139,12 +137,12 @@ export const MentionPalette = forwardRef<MentionPaletteHandle, MentionPalettePro
                 key={profile.id}
                 id={`mention-profile-${profile.id}`}
                 role="option"
-                aria-selected={idx === selectedIndex}
+                aria-selected={idx === clampedIndex}
                 className="flex items-start gap-2 px-3 py-2 cursor-pointer select-none"
                 style={{
                   minHeight: 44,
                   backgroundColor:
-                    idx === selectedIndex
+                    idx === clampedIndex
                       ? 'var(--sam-color-bg-surface-hover)'
                       : 'transparent',
                 }}

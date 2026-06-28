@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 
 const VERTEX_SHADER = `
   attribute vec2 a_position;
@@ -142,8 +142,13 @@ export function useWebGLBackground(
   amplitudeRef: React.RefObject<number>,
   options?: WebGLBackgroundOptions,
 ) {
-  const speed = options?.speed ?? 0.4;
-  const noiseSize = options?.noiseSize ?? 1.02;
+  // Latest-ref for options so the render loop always reads current values
+  // without needing to restart the WebGL context on option changes.
+  const speedRef = useRef(options?.speed ?? 0.4);
+  speedRef.current = options?.speed ?? 0.4;
+  const noiseSizeRef = useRef(options?.noiseSize ?? 1.02);
+  noiseSizeRef.current = options?.noiseSize ?? 1.02;
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -209,14 +214,17 @@ export function useWebGLBackground(
       }
 
       // Accumulate time: base speed * user multiplier + amplitude boost
-      const baseSpeed = 0.08 * speed;
-      const ampBoost = smoothedAmp * 0.24 * speed;
+      // Read from refs so option changes take effect immediately without restarting the loop
+      const currentSpeed = speedRef.current;
+      const currentNoiseSize = noiseSizeRef.current;
+      const baseSpeed = 0.08 * currentSpeed;
+      const ampBoost = smoothedAmp * 0.24 * currentSpeed;
       accumulatedTime += deltaSeconds * (baseSpeed + ampBoost);
 
       gl!.uniform1f(timeLoc, accumulatedTime);
       gl!.uniform2f(resLoc, canvas!.width, canvas!.height);
       gl!.uniform1f(ampLoc, smoothedAmp);
-      gl!.uniform1f(scaleLoc, noiseSize);
+      gl!.uniform1f(scaleLoc, currentNoiseSize);
       gl!.drawArrays(gl!.TRIANGLE_STRIP, 0, 4);
       animId = requestAnimationFrame(render);
     }

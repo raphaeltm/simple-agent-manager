@@ -38,7 +38,9 @@ export function useAgentProfiles(projectId: string | undefined): UseAgentProfile
       setLoading(false);
       return;
     }
+    const controller = new AbortController();
     void fetchProfiles();
+    return () => controller.abort();
   }, [fetchProfiles, projectId]);
 
   const refresh = useCallback(() => {

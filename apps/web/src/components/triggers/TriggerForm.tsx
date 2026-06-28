@@ -20,7 +20,7 @@ import {
 } from '@simple-agent-manager/shared';
 import { Button, Spinner } from '@simple-agent-manager/ui';
 import { ChevronDown, ChevronRight, Clock, Github, X } from 'lucide-react';
-import { type FC, useCallback, useEffect, useRef, useState } from 'react';
+import { type FC, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { useToast } from '../../hooks/useToast';
@@ -126,7 +126,9 @@ interface TriggerFormProps {
 }
 
 // ---------------------------------------------------------------------------
-// Component
+// Component — outer shell handles portal, backdrop, drawer chrome, focus.
+// The inner TriggerFormBody is keyed so it remounts with fresh state when
+// the drawer opens or the edited trigger changes.
 // ---------------------------------------------------------------------------
 
 export const TriggerForm: FC<TriggerFormProps> = ({
@@ -135,44 +137,9 @@ export const TriggerForm: FC<TriggerFormProps> = ({
   editTrigger,
   onSaved,
 }) => {
-  const toast = useToast();
-  const { projectId } = useProjectContext();
-  const templateRef = useRef<HTMLTextAreaElement>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
-  const isEdit = Boolean(editTrigger);
 
-  // Form state
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
-  const [sourceType, setSourceType] = useState<'cron' | 'github'>('cron');
-  const [cronExpression, setCronExpression] = useState('0 9 * * *');
-  const [cronTimezone, setCronTimezone] = useState('UTC');
-  const [githubEventType, setGitHubEventType] = useState<GitHubTriggerEventType>('issue_comment');
-  const [githubActions, setGitHubActions] = useState('created');
-  const [githubLabels, setGitHubLabels] = useState('');
-  const [githubIgnoreActors, setGitHubIgnoreActors] = useState('dependabot[bot]');
-  const [githubCommandPrefix, setGitHubCommandPrefix] = useState('/sam');
-  const [githubBodyContains, setGitHubBodyContains] = useState('');
-  const [githubBranches, setGitHubBranches] = useState('');
-  const [githubIgnoreDrafts, setGitHubIgnoreDrafts] = useState(true);
-  const [promptTemplate, setPromptTemplate] = useState('');
-  const [skipIfRunning, setSkipIfRunning] = useState(true);
-  const [maxConcurrent, setMaxConcurrent] = useState(1);
-  const [vmSizeOverride, setVmSizeOverride] = useState('');
-  const [taskMode, setTaskMode] = useState<'task' | 'conversation'>('task');
-  const [agentProfileId, setAgentProfileId] = useState('');
-  const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [, setCronDescription] = useState('');
-
-  // Agent profiles for the dropdown
-  const [profiles, setProfiles] = useState<AgentProfile[]>([]);
-  useEffect(() => {
-    if (open && projectId) {
-      void listAgentProfiles(projectId).then(setProfiles).catch(() => setProfiles([]));
-    }
-  }, [open, projectId]);
-
+  // Capture and restore focus when the drawer opens/closes (legitimate lifecycle effect)
   useEffect(() => {
     if (!open) return;
     returnFocusRef.current = document.activeElement instanceof HTMLElement
@@ -184,54 +151,128 @@ export const TriggerForm: FC<TriggerFormProps> = ({
     };
   }, [open]);
 
-  // Reset form when trigger changes or panel opens
+  // Key the form body so it remounts with fresh state when the drawer opens or
+  // the edited trigger changes, removing the prop-to-state sync effect.
+  const formKey = useMemo(
+    () => (open ? `${editTrigger?.id ?? 'new'}-${Date.now()}` : 'closed'),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [open, editTrigger?.id],
+  );
+
+  const isEdit = Boolean(editTrigger);
+
+  if (!open) return null;
+
+  return createPortal(
+    <>
+      {/* Backdrop */}
+      <div
+        className="fixed inset-0 glass-backdrop-dim z-[var(--sam-z-drawer-backdrop)]"
+        onClick={onClose}
+        aria-hidden="true"
+      />
+
+      {/* Drawer panel */}
+      <div
+        className="fixed top-0 right-0 bottom-0 glass-modal glass-panel-container glass-composited shadow-lg z-[var(--sam-z-drawer)] overflow-y-auto transition-transform duration-300 ease-out motion-reduce:transition-none translate-x-0"
+        style={{ width: 'min(560px, 95vw)' }}
+        role="dialog"
+        aria-modal="true"
+        aria-label={isEdit ? 'Edit trigger' : 'Create trigger'}
+      >
+        {/* Header */}
+        <div className="sticky top-0 glass-chrome p-4 flex items-center justify-between z-10">
+          <h2 className="sam-type-section-heading m-0">
+            {isEdit ? 'Edit Trigger' : 'New Trigger'}
+          </h2>
+          <button
+            onClick={onClose}
+            className={`p-1.5 rounded-sm text-fg-muted hover:text-fg-primary bg-transparent border-none cursor-pointer ${FOCUS_RING}`}
+            aria-label="Close"
+          >
+            <X size={20} />
+          </button>
+        </div>
+
+        <TriggerFormBody
+          key={formKey}
+          editTrigger={editTrigger ?? null}
+          onClose={onClose}
+          onSaved={onSaved}
+        />
+      </div>
+    </>,
+    document.body,
+  );
+};
+
+// ---------------------------------------------------------------------------
+// Inner form body — remounted via key when the drawer opens or the trigger changes.
+// All form state is initialized from the editTrigger prop; no sync effect needed.
+// ---------------------------------------------------------------------------
+
+const TriggerFormBody: FC<{
+  editTrigger: TriggerResponse | null;
+  onClose: () => void;
+  onSaved?: () => void;
+}> = ({ editTrigger, onClose, onSaved }) => {
+  const toast = useToast();
+  const { projectId } = useProjectContext();
+  const templateRef = useRef<HTMLTextAreaElement>(null);
+  const isEdit = Boolean(editTrigger);
+
+  // Form state initialized from editTrigger prop
+  const [name, setName] = useState(editTrigger?.name ?? '');
+  const [description, setDescription] = useState(editTrigger?.description ?? '');
+  const [sourceType, setSourceType] = useState<'cron' | 'github'>(
+    editTrigger?.sourceType === 'github' ? 'github' : 'cron',
+  );
+  const [cronExpression, setCronExpression] = useState(editTrigger?.cronExpression ?? '0 9 * * *');
+  const [cronTimezone, setCronTimezone] = useState(editTrigger?.cronTimezone ?? 'UTC');
+  const [githubEventType, setGitHubEventType] = useState<GitHubTriggerEventType>(
+    editTrigger?.githubConfig?.eventType ?? 'issue_comment',
+  );
+  const [githubActions, setGitHubActions] = useState(
+    joinList(editTrigger?.githubConfig?.filters.actions) || 'created',
+  );
+  const [githubLabels, setGitHubLabels] = useState(
+    joinList(editTrigger?.githubConfig?.filters.labels),
+  );
+  const [githubIgnoreActors, setGitHubIgnoreActors] = useState(
+    joinList(editTrigger?.githubConfig?.filters.ignoreActors) || 'dependabot[bot]',
+  );
+  const [githubCommandPrefix, setGitHubCommandPrefix] = useState(
+    editTrigger?.githubConfig?.filters.commandPrefix ?? '/sam',
+  );
+  const [githubBodyContains, setGitHubBodyContains] = useState(
+    editTrigger?.githubConfig?.filters.bodyContains ?? '',
+  );
+  const [githubBranches, setGitHubBranches] = useState(
+    joinList(editTrigger?.githubConfig?.filters.branches),
+  );
+  const [githubIgnoreDrafts, setGitHubIgnoreDrafts] = useState(
+    editTrigger?.githubConfig?.filters.ignoreDrafts ?? true,
+  );
+  const [promptTemplate, setPromptTemplate] = useState(editTrigger?.promptTemplate ?? '');
+  const [skipIfRunning, setSkipIfRunning] = useState(editTrigger?.skipIfRunning ?? true);
+  const [maxConcurrent, setMaxConcurrent] = useState(editTrigger?.maxConcurrent ?? 1);
+  const [vmSizeOverride, setVmSizeOverride] = useState(editTrigger?.vmSizeOverride ?? '');
+  const [taskMode, setTaskMode] = useState<'task' | 'conversation'>(editTrigger?.taskMode ?? 'task');
+  const [agentProfileId, setAgentProfileId] = useState(editTrigger?.agentProfileId ?? '');
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [, setCronDescription] = useState('');
+
+  // Agent profiles for the dropdown (legitimate data-fetch effect)
+  const [profiles, setProfiles] = useState<AgentProfile[]>([]);
   useEffect(() => {
-    if (open) {
-      if (editTrigger) {
-        setName(editTrigger.name);
-        setDescription(editTrigger.description ?? '');
-        setSourceType(editTrigger.sourceType === 'github' ? 'github' : 'cron');
-        setCronExpression(editTrigger.cronExpression ?? '0 9 * * *');
-        setCronTimezone(editTrigger.cronTimezone);
-        setGitHubEventType(editTrigger.githubConfig?.eventType ?? 'issue_comment');
-        setGitHubActions(joinList(editTrigger.githubConfig?.filters.actions) || 'created');
-        setGitHubLabels(joinList(editTrigger.githubConfig?.filters.labels));
-        setGitHubIgnoreActors(joinList(editTrigger.githubConfig?.filters.ignoreActors) || 'dependabot[bot]');
-        setGitHubCommandPrefix(editTrigger.githubConfig?.filters.commandPrefix ?? '/sam');
-        setGitHubBodyContains(editTrigger.githubConfig?.filters.bodyContains ?? '');
-        setGitHubBranches(joinList(editTrigger.githubConfig?.filters.branches));
-        setGitHubIgnoreDrafts(editTrigger.githubConfig?.filters.ignoreDrafts ?? true);
-        setPromptTemplate(editTrigger.promptTemplate);
-        setSkipIfRunning(editTrigger.skipIfRunning);
-        setMaxConcurrent(editTrigger.maxConcurrent);
-        setVmSizeOverride(editTrigger.vmSizeOverride ?? '');
-        setTaskMode(editTrigger.taskMode);
-        setAgentProfileId(editTrigger.agentProfileId ?? '');
-        setAdvancedOpen(false);
-      } else {
-        setName('');
-        setDescription('');
-        setSourceType('cron');
-        setCronExpression('0 9 * * *');
-        setCronTimezone('UTC');
-        setGitHubEventType('issue_comment');
-        setGitHubActions('created');
-        setGitHubLabels('');
-        setGitHubIgnoreActors('dependabot[bot]');
-        setGitHubCommandPrefix('/sam');
-        setGitHubBodyContains('');
-        setGitHubBranches('');
-        setGitHubIgnoreDrafts(true);
-        setPromptTemplate('');
-        setSkipIfRunning(true);
-        setMaxConcurrent(1);
-        setVmSizeOverride('');
-        setTaskMode('task');
-        setAgentProfileId('');
-        setAdvancedOpen(false);
-      }
-    }
-  }, [open, editTrigger]);
+    if (!projectId) return;
+    const controller = new AbortController();
+    listAgentProfiles(projectId)
+      .then((data) => { if (!controller.signal.aborted) setProfiles(data); })
+      .catch(() => { if (!controller.signal.aborted) setProfiles([]); });
+    return () => controller.abort();
+  }, [projectId]);
 
   const insertVariable = useCallback((varName: string) => {
     const textarea = templateRef.current;
@@ -334,41 +375,10 @@ export const TriggerForm: FC<TriggerFormProps> = ({
     ? 'When {{github.actor}} comments {{github.comment}} on {{github.repository}}#{{github.number}}, decide whether to start the requested SAM task.'
     : 'Review all open pull requests and summarize their status. Current time: {{schedule.time}}';
 
-  if (!open) return null;
-
-  return createPortal(
+  return (
     <>
-      {/* Backdrop */}
-      <div
-        className="fixed inset-0 glass-backdrop-dim z-[var(--sam-z-drawer-backdrop)]"
-        onClick={onClose}
-        aria-hidden="true"
-      />
-
-      {/* Drawer panel */}
-      <div
-        className="fixed top-0 right-0 bottom-0 glass-modal glass-panel-container glass-composited shadow-lg z-[var(--sam-z-drawer)] overflow-y-auto transition-transform duration-300 ease-out motion-reduce:transition-none translate-x-0"
-        style={{ width: 'min(560px, 95vw)' }}
-        role="dialog"
-        aria-modal="true"
-        aria-label={isEdit ? 'Edit trigger' : 'Create trigger'}
-      >
-        {/* Header */}
-        <div className="sticky top-0 glass-chrome p-4 flex items-center justify-between z-10">
-          <h2 className="sam-type-section-heading m-0">
-            {isEdit ? 'Edit Trigger' : 'New Trigger'}
-          </h2>
-          <button
-            onClick={onClose}
-            className={`p-1.5 rounded-sm text-fg-muted hover:text-fg-primary bg-transparent border-none cursor-pointer ${FOCUS_RING}`}
-            aria-label="Close"
-          >
-            <X size={20} />
-          </button>
-        </div>
-
-        {/* Form content */}
-        <div className="p-4 space-y-6">
+      {/* Form content */}
+      <div className="p-4 space-y-6">
           {/* Name */}
           <div>
             <label htmlFor="trigger-name" className="block text-sm font-medium text-fg-primary mb-1">
@@ -732,29 +742,27 @@ export const TriggerForm: FC<TriggerFormProps> = ({
           </div>
         </div>
 
-        {/* Footer actions */}
-        <div className="sticky bottom-0 bg-surface border-t border-border-default p-4 flex items-center justify-end gap-3">
-          <button
-            onClick={onClose}
-            className={`px-4 py-2 text-sm font-medium text-fg-muted hover:text-fg-primary bg-transparent border border-border-default rounded-md cursor-pointer ${FOCUS_RING}`}
-          >
-            Cancel
-          </button>
-          <Button
-            onClick={handleSubmit}
-            disabled={saving || !name.trim() || !promptTemplate.trim()}
-          >
-            {saving ? (
-              <span className="flex items-center gap-2">
-                <Spinner size="sm" /> Saving...
-              </span>
-            ) : (
-              isEdit ? 'Save Changes' : 'Create Trigger'
-            )}
-          </Button>
-        </div>
+      {/* Footer actions */}
+      <div className="sticky bottom-0 bg-surface border-t border-border-default p-4 flex items-center justify-end gap-3">
+        <button
+          onClick={onClose}
+          className={`px-4 py-2 text-sm font-medium text-fg-muted hover:text-fg-primary bg-transparent border border-border-default rounded-md cursor-pointer ${FOCUS_RING}`}
+        >
+          Cancel
+        </button>
+        <Button
+          onClick={handleSubmit}
+          disabled={saving || !name.trim() || !promptTemplate.trim()}
+        >
+          {saving ? (
+            <span className="flex items-center gap-2">
+              <Spinner size="sm" /> Saving...
+            </span>
+          ) : (
+            isEdit ? 'Save Changes' : 'Create Trigger'
+          )}
+        </Button>
       </div>
-    </>,
-    document.body,
+    </>
   );
 };

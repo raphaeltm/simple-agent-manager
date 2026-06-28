@@ -57,7 +57,14 @@ export function FilePreviewModal({
   useEffect(() => {
     if (!isMarkdown) return;
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), MD_FETCH_TIMEOUT_MS);
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+      setMdError('Request timed out');
+      setMdLoading(false);
+    }, MD_FETCH_TIMEOUT_MS);
+    setMdContent(null);
     setMdLoading(true);
     setMdError(null);
 
@@ -74,8 +81,10 @@ export function FilePreviewModal({
       })
       .catch((err: Error) => {
         if (!controller.signal.aborted) {
-          setMdError(err.name === 'AbortError' ? 'Request timed out' : err.message);
+          setMdError(err.message);
           setMdLoading(false);
+        } else if (!timedOut) {
+          // Aborted by cleanup (not timeout) — no error state needed
         }
       })
       .finally(() => clearTimeout(timer));

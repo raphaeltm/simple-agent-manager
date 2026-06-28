@@ -94,23 +94,21 @@ export function useStreamingReveal(
     };
   }, [fullText, shouldAnimate]);
 
-  // Stop the loop once fully revealed
+  // Stop the loop once fully revealed and clean up on unmount.
+  // Both concerns use the same cancel logic, so they share one effect.
   useEffect(() => {
     if (revealIndex >= fullText.length && rafIdRef.current) {
       cancelAnimationFrame(rafIdRef.current);
       rafIdRef.current = 0;
     }
-  }, [revealIndex, fullText.length]);
-
-  // Cleanup on unmount
-  useEffect(() => {
+    // Cleanup on unmount cancels any in-flight rAF.
     return () => {
       if (rafIdRef.current) {
         cancelAnimationFrame(rafIdRef.current);
         rafIdRef.current = 0;
       }
     };
-  }, []);
+  }, [revealIndex, fullText.length]);
 
   const isRevealing = shouldAnimate && revealIndex < fullText.length;
   const revealedText = shouldAnimate ? fullText.slice(0, revealIndex) : fullText;

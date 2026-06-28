@@ -4,7 +4,7 @@ import type {
   Event,
   WorkspaceResponse,
 } from '@simple-agent-manager/shared';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { useBootLogStream } from '../../hooks/useBootLogStream';
 import { useTokenRefresh } from '../../hooks/useTokenRefresh';
@@ -60,15 +60,13 @@ export function useWorkspaceCore(
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
-  const [wsUrl, setWsUrl] = useState<string | null>(null);
-  const [terminalError, setTerminalError] = useState<string | null>(null);
+  const terminalError: string | null = null;
   const [displayNameInput, setDisplayNameInput] = useState('');
   const [renaming, setRenaming] = useState(false);
   const [workspaceEvents, setWorkspaceEvents] = useState<Event[]>([]);
   const [agentSessions, setAgentSessions] = useState<AgentSession[]>([]);
 
   const terminalWsUrlCacheRef = useRef<{ url: string; resolvedAt: number } | null>(null);
-  const wsUrlSetRef = useRef(false);
 
   // Refs for polling effect — break the feedback loop where loadWorkspaceState
   // and workspace?.status in deps cause the effect to re-run on every state update.
@@ -94,12 +92,8 @@ export function useWorkspaceCore(
     enabled: isRunning && !!id,
   });
 
-  // Propagate token refresh errors
-  useEffect(() => {
-    if (tokenRefreshError) {
-      setTerminalError(tokenRefreshError);
-    }
-  }, [tokenRefreshError]);
+  // Derive terminal error: token refresh errors take priority
+  const effectiveTerminalError = tokenRefreshError || terminalError;
 
   // Boot log streaming
   const { logs: streamedBootLogs } = useBootLogStream(
@@ -215,11 +209,6 @@ export function useWorkspaceCore(
     [workspace?.url, multiTerminalEnabled]
   );
 
-  // Clear cache when URL changes
-  useEffect(() => {
-    terminalWsUrlCacheRef.current = null;
-  }, [workspace?.url, id, multiTerminalEnabled]);
-
   // Resolve terminal WS URL (cached)
   const resolveTerminalWsUrl = useCallback(async (): Promise<string | null> => {
     if (!id) return null;
@@ -238,28 +227,16 @@ export function useWorkspaceCore(
     return resolvedUrl;
   }, [id, buildTerminalWsUrl]);
 
-  // Derive WebSocket URL from token (initial set only)
-  useEffect(() => {
-    if (!workspace?.url || !terminalToken || !isRunning) {
-      setWsUrl(null);
-      wsUrlSetRef.current = false;
-      return;
-    }
-
-    if (wsUrlSetRef.current) return;
-
-    const nextUrl = buildTerminalWsUrl(terminalToken);
-    if (!nextUrl) {
-      setWsUrl(null);
-      setTerminalError('Invalid workspace URL');
-      return;
-    }
-
-    setWsUrl(nextUrl);
-    terminalWsUrlCacheRef.current = { url: nextUrl, resolvedAt: Date.now() };
-    setTerminalError(null);
-    wsUrlSetRef.current = true;
+  // Derive WebSocket URL from workspace URL, token, and running state
+  const derivedWsUrl = useMemo(() => {
+    if (!workspace?.url || !terminalToken || !isRunning) return null;
+    return buildTerminalWsUrl(terminalToken);
   }, [workspace?.url, terminalToken, isRunning, buildTerminalWsUrl]);
+
+  // Populate the cache when the derived URL changes
+  if (derivedWsUrl && (!terminalWsUrlCacheRef.current || terminalWsUrlCacheRef.current.url !== derivedWsUrl)) {
+    terminalWsUrlCacheRef.current = { url: derivedWsUrl, resolvedAt: Date.now() };
+  }
 
   // Poll detected ports
   const { ports: detectedPorts } = useWorkspacePorts(
@@ -354,8 +331,8 @@ export function useWorkspaceCore(
     error,
     setError,
     actionLoading,
-    wsUrl,
-    terminalError,
+    wsUrl: derivedWsUrl,
+    terminalError: effectiveTerminalError,
     terminalToken,
     terminalLoading,
     displayNameInput,

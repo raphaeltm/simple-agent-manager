@@ -1,5 +1,5 @@
 import type { Edge,Node } from '@xyflow/react';
-import { useCallback, useMemo, useRef,useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 
 export type EntityType = 'project' | 'node' | 'workspace' | 'session' | 'task' | 'idea';
 
@@ -28,8 +28,6 @@ interface UseMapFiltersResult {
   hasActiveFilters: boolean;
   matchCount: number;
   totalCount: number;
-  /** True when type filters changed the visible node count — signals auto-reorganize. */
-  filterNodeCountChanged: boolean;
 }
 
 const ALL_TYPES: EntityType[] = ['project', 'node', 'workspace', 'session', 'task'];
@@ -37,7 +35,6 @@ const ALL_TYPES: EntityType[] = ['project', 'node', 'workspace', 'session', 'tas
 export function useMapFilters({ nodes, edges }: UseMapFiltersOptions): UseMapFiltersResult {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilters, setActiveFilters] = useState<Set<EntityType>>(() => new Set(ALL_TYPES));
-  const prevFilteredCountRef = useRef<number | null>(null);
 
   const toggleFilter = useCallback((type: EntityType) => {
     setActiveFilters((prev) => {
@@ -56,7 +53,7 @@ export function useMapFilters({ nodes, edges }: UseMapFiltersOptions): UseMapFil
     setSearchQuery('');
   }, []);
 
-  const { filteredNodes, filteredEdges, matchCount, totalCount, filterNodeCountChanged } = useMemo(() => {
+  const { filteredNodes, filteredEdges, matchCount, totalCount } = useMemo(() => {
     const lowerQuery = searchQuery.toLowerCase().trim();
 
     // Type filters: fully REMOVE nodes whose type is toggled off
@@ -120,17 +117,11 @@ export function useMapFilters({ nodes, edges }: UseMapFiltersOptions): UseMapFil
       },
     }));
 
-    // Detect if the type filter changed the visible node count (triggers auto-reorganize)
-    const currentCount = typeFiltered.length;
-    const changed = prevFilteredCountRef.current !== null && prevFilteredCountRef.current !== currentCount;
-    prevFilteredCountRef.current = currentCount;
-
     return {
       filteredNodes: styledNodes,
       filteredEdges: styledEdges,
       matchCount: matchingIds.size,
       totalCount: typeFiltered.length,
-      filterNodeCountChanged: changed,
     };
   }, [nodes, edges, searchQuery, activeFilters]);
 
@@ -147,6 +138,5 @@ export function useMapFilters({ nodes, edges }: UseMapFiltersOptions): UseMapFil
     hasActiveFilters,
     matchCount,
     totalCount,
-    filterNodeCountChanged,
   };
 }

@@ -314,7 +314,9 @@ export function IdeaDetailPage() {
   }, [projectId, taskId]);
 
   useEffect(() => {
-    loadData();
+    const controller = new AbortController();
+    void loadData();
+    return () => controller.abort();
   }, [loadData]);
 
   const handleBack = useCallback(() => {

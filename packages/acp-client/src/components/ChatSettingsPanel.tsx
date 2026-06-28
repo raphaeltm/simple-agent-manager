@@ -39,13 +39,22 @@ export function ChatSettingsPanel({
   const headingId = 'chat-settings-heading';
   const modelInputId = 'chat-settings-model';
 
-  // Sync state when settings load
-  useEffect(() => {
-    if (settings) {
+  // Sync state when settings load — derive during render via ref comparison
+  // so we avoid the extra Effect re-render cycle.
+  const prevSettingsRef = useRef(settings);
+  if (prevSettingsRef.current !== settings && settings) {
+    prevSettingsRef.current = settings;
+    // Derive new values synchronously so they are available on this render.
+    // React will re-render a second time with the updated state, but this
+    // avoids the render with stale state that useEffect would cause.
+    // Only update when we're not currently saving to avoid clobbering edits.
+    if (!saving) {
+      // These setState calls inside render are safe when guarded by a ref
+      // comparison — React bails out immediately if the value is unchanged.
       setModel(settings.model ?? '');
       setPermissionMode(settings.permissionMode ?? 'default');
     }
-  }, [settings]);
+  }
 
   // Focus management: capture previous focus, focus panel on mount, restore on close
   useEffect(() => {
@@ -56,14 +65,17 @@ export function ChatSettingsPanel({
     };
   }, []);
 
-  // Close on Escape
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  // Close on Escape — latest-ref avoids resubscribing when onClose identity changes
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') onCloseRef.current();
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [onClose]);
+  }, []);
 
   const hasChanges =
     (model.trim() || null) !== (settings?.model ?? null) ||

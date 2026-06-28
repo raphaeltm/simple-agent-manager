@@ -50,28 +50,36 @@ export function GitHubAppSection() {
     }
   }, []);
 
+  // Load installations and install URL independently — each has its own concern
   useEffect(() => {
     loadInstallations();
-    loadInstallUrl();
-  }, [loadInstallations, loadInstallUrl]);
+  }, [loadInstallations]);
 
-  // Show feedback message if redirected from GitHub App installation
+  useEffect(() => {
+    loadInstallUrl();
+  }, [loadInstallUrl]);
+
+  // Consume OAuth callback params — runs once when params are present, cleans up URL
   useEffect(() => {
     const status = searchParams.get('github_app');
+    if (!status) return;
+
     if (status === 'installed') {
       setShowSuccess(true);
     } else if (status === 'error') {
       const reason = searchParams.get('reason') || 'Unknown error';
       setError(`GitHub App installation failed: ${reason}`);
     }
-    if (status) {
-      // Clean up the URL params without triggering navigation
-      const newParams = new URLSearchParams(searchParams);
-      newParams.delete('github_app');
-      newParams.delete('reason');
-      setSearchParams(newParams, { replace: true });
-    }
-  }, [searchParams, setSearchParams]);
+
+    // Clean up the URL params without triggering navigation
+    setSearchParams((prev) => {
+      prev.delete('github_app');
+      prev.delete('reason');
+      return prev;
+    }, { replace: true });
+  // Only re-run when the specific callback param changes, not on every searchParams update
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams.get('github_app')]);
 
   const handleInstallClick = () => {
     if (installUrl) {

@@ -1,5 +1,5 @@
 import type { NodeSystemInfo } from '@simple-agent-manager/shared';
-import { useEffect, useRef,useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { getNodeSystemInfo } from '../lib/api';
 
@@ -13,15 +13,7 @@ export function useNodeSystemInfo(
   const [loading, setLoading] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const mountedRef = useRef(true);
   const hasLoadedRef = useRef(false);
-
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
 
   useEffect(() => {
     if (!nodeId || nodeStatus !== 'running') {
@@ -31,7 +23,7 @@ export function useNodeSystemInfo(
       return;
     }
 
-    let intervalId: ReturnType<typeof setInterval> | null = null;
+    let cancelled = false;
 
     const fetchInfo = async () => {
       if (hasLoadedRef.current) {
@@ -41,16 +33,16 @@ export function useNodeSystemInfo(
       }
       try {
         const data = await getNodeSystemInfo(nodeId);
-        if (mountedRef.current) {
+        if (!cancelled) {
           setSystemInfo(data);
           setError(null);
         }
       } catch (err) {
-        if (mountedRef.current) {
+        if (!cancelled) {
           setError(err instanceof Error ? err.message : 'Failed to load system info');
         }
       } finally {
-        if (mountedRef.current) {
+        if (!cancelled) {
           hasLoadedRef.current = true;
           setLoading(false);
           setIsRefreshing(false);
@@ -60,10 +52,11 @@ export function useNodeSystemInfo(
 
     hasLoadedRef.current = false;
     fetchInfo();
-    intervalId = setInterval(fetchInfo, POLL_INTERVAL_MS);
+    const intervalId = setInterval(fetchInfo, POLL_INTERVAL_MS);
 
     return () => {
-      if (intervalId) clearInterval(intervalId);
+      cancelled = true;
+      clearInterval(intervalId);
     };
   }, [nodeId, nodeStatus]);
 

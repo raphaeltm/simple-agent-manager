@@ -1,5 +1,5 @@
 import { Spinner } from '@simple-agent-manager/ui';
-import { useEffect,useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { AccountMapCanvas } from '../components/account-map/AccountMapCanvas';
 import { AccountMapEmptyState } from '../components/account-map/AccountMapEmptyState';
@@ -26,15 +26,17 @@ export function AccountMap() {
     hasActiveFilters,
     matchCount,
     totalCount,
-    filterNodeCountChanged,
   } = useMapFilters({ nodes, edges });
 
   // Auto-reorganize when type filters add/remove nodes from the graph
+  const prevFilteredCountRef = useRef<number | null>(null);
   useEffect(() => {
-    if (filterNodeCountChanged) {
+    const currentCount = filteredNodes.length;
+    if (prevFilteredCountRef.current !== null && prevFilteredCountRef.current !== currentCount) {
       reorganize();
     }
-  }, [filterNodeCountChanged, reorganize]);
+    prevFilteredCountRef.current = currentCount;
+  }, [filteredNodes.length, reorganize]);
 
   if (loading) {
     return (

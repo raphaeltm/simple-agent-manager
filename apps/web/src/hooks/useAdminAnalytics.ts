@@ -57,15 +57,9 @@ export function useAdminAnalytics(refreshIntervalMs = DEFAULT_REFRESH_INTERVAL):
   const [error, setError] = useState<string | null>(null);
   const [eventPeriod, setEventPeriod] = useState(DEFAULT_ANALYTICS_PERIOD);
 
-  const mountedRef = useRef(true);
   const hasLoadedRef = useRef(false);
 
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => { mountedRef.current = false; };
-  }, []);
-
-  const fetchAll = useCallback(async (period: string) => {
+  const fetchAll = useCallback(async (period: string, signal?: AbortSignal) => {
     if (hasLoadedRef.current) {
       setIsRefreshing(true);
     }
@@ -83,7 +77,7 @@ export function useAdminAnalytics(refreshIntervalMs = DEFAULT_REFRESH_INTERVAL):
         fetchAnalyticsAiUsage(period).catch(() => null),
       ]);
 
-      if (!mountedRef.current) return;
+      if (signal?.aborted) return;
 
       setDau(dauRes);
       setEvents(eventsRes);
@@ -95,11 +89,11 @@ export function useAdminAnalytics(refreshIntervalMs = DEFAULT_REFRESH_INTERVAL):
       setWebsiteTraffic(websiteTrafficRes);
       setAiUsage(aiUsageRes);
     } catch (err) {
-      if (mountedRef.current) {
+      if (!signal?.aborted) {
         setError(err instanceof Error ? err.message : 'Failed to load analytics data');
       }
     } finally {
-      if (mountedRef.current) {
+      if (!signal?.aborted) {
         hasLoadedRef.current = true;
         setLoading(false);
         setIsRefreshing(false);
@@ -109,14 +103,23 @@ export function useAdminAnalytics(refreshIntervalMs = DEFAULT_REFRESH_INTERVAL):
 
   // Fetch on mount and when period changes
   useEffect(() => {
-    fetchAll(eventPeriod);
+    const controller = new AbortController();
+    fetchAll(eventPeriod, controller.signal);
+    return () => { controller.abort(); };
   }, [fetchAll, eventPeriod]);
 
   // Auto-refresh
   useEffect(() => {
     if (!refreshIntervalMs || refreshIntervalMs <= 0) return;
-    const id = setInterval(() => fetchAll(eventPeriod), refreshIntervalMs);
-    return () => clearInterval(id);
+    let controller: AbortController;
+    const id = setInterval(() => {
+      controller = new AbortController();
+      fetchAll(eventPeriod, controller.signal);
+    }, refreshIntervalMs);
+    return () => {
+      clearInterval(id);
+      controller?.abort();
+    };
   }, [refreshIntervalMs, fetchAll, eventPeriod]);
 
   const refresh = useCallback(() => {

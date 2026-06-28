@@ -11,16 +11,20 @@ vi.mock('../../../../src/hooks/useAdminErrors', () => ({
 }));
 
 // Mock the UI library components
-vi.mock('@simple-agent-manager/ui', () => ({
-  Card: ({ children }: { children: React.ReactNode }) => <div data-testid="card">{children}</div>,
-  Spinner: ({ size }: { size: string }) => <div data-testid={`spinner-${size}`}>Loading...</div>,
-  Button: ({ children, onClick, disabled }: { children: React.ReactNode; onClick?: () => void; disabled?: boolean }) => (
-    <button onClick={onClick} disabled={disabled}>{children}</button>
-  ),
-  Body: ({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) => (
-    <p style={style}>{children}</p>
-  ),
-}));
+vi.mock('@simple-agent-manager/ui', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@simple-agent-manager/ui')>();
+  return {
+    ...actual,
+    Card: ({ children }: { children: React.ReactNode }) => <div data-testid="card">{children}</div>,
+    Spinner: ({ size }: { size: string }) => <div data-testid={`spinner-${size}`}>Loading...</div>,
+    Button: ({ children, onClick, disabled }: { children: React.ReactNode; onClick?: () => void; disabled?: boolean }) => (
+      <button onClick={onClick} disabled={disabled}>{children}</button>
+    ),
+    Body: ({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) => (
+      <p style={style}>{children}</p>
+    ),
+  };
+});
 
 function createMockEntry(overrides: Partial<PlatformError> = {}): PlatformError {
   return {

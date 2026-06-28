@@ -1,4 +1,4 @@
-import { useCallback, useEffect,useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 
 import { expectJsonRecord, parseJsonRecord, requireArray } from '../runtime-validation';
 import type {
@@ -31,7 +31,26 @@ export function useTerminalSessions(
 ): UseTerminalSessionsReturn {
   const [sessions, setSessions] = useState<Map<string, TerminalSession>>(new Map());
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  // UE344: Lazy initialization from sessionStorage instead of mount effect.
+  // Uses a flag ref to ensure the read happens only once.
+  const counterInitializedRef = useRef(false);
   const sessionCounter = useRef(1);
+  if (!counterInitializedRef.current) {
+    counterInitializedRef.current = true;
+    if (persistenceKey) {
+      try {
+        const raw = sessionStorage.getItem(persistenceKey);
+        if (raw) {
+          const parsed = parseJsonRecord(raw, 'terminal.persisted_sessions');
+          if (typeof parsed.counter === 'number') {
+            sessionCounter.current = parsed.counter;
+          }
+        }
+      } catch {
+        // sessionStorage may be unavailable
+      }
+    }
+  }
 
   // Refs to avoid stale closures when multiple state updates happen in one render cycle
   const sessionsRef = useRef(sessions);
@@ -99,15 +118,6 @@ export function useTerminalSessions(
     const state = loadPersistedSessions();
     return state?.sessions ?? null;
   }, [loadPersistedSessions]);
-
-  // Restore counter on mount from persisted state
-  useEffect(() => {
-    const state = loadPersistedSessions();
-    if (state) {
-      sessionCounter.current = state.counter;
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   /**
    * Generate a unique session ID

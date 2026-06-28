@@ -54,8 +54,10 @@ export function Nodes() {
     }, 10000);
 
     // Load provider catalog for location/size data
+    const catalogAbort = new AbortController();
     getProviderCatalog()
       .then((resp) => {
+        if (catalogAbort.signal.aborted) return;
         setCatalogs(resp.catalogs);
         const first = resp.catalogs[0];
         if (first) {
@@ -65,7 +67,10 @@ export function Nodes() {
       })
       .catch(() => { /* catalog unavailable, use fallbacks */ });
 
-    return () => window.clearInterval(interval);
+    return () => {
+      window.clearInterval(interval);
+      catalogAbort.abort();
+    };
   }, [loadData]);
 
   const handleCreateNode = async () => {

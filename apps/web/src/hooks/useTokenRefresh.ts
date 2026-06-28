@@ -50,7 +50,7 @@ export function useTokenRefresh(options: UseTokenRefreshOptions): UseTokenRefres
   const [error, setError] = useState<string | null>(null);
 
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const mountedRef = useRef(true);
+  const abortControllerRef = useRef<AbortController | null>(null);
   const fetchingRef = useRef(false);
   const fetchTokenRef = useRef(fetchToken);
   fetchTokenRef.current = fetchToken;
@@ -77,7 +77,7 @@ export function useTokenRefresh(options: UseTokenRefreshOptions): UseTokenRefres
       const delay = Math.max(refreshAt - now, MIN_REFRESH_DELAY_MS);
 
       refreshTimerRef.current = setTimeout(() => {
-        if (mountedRef.current) {
+        if (!abortControllerRef.current?.signal.aborted) {
           void doFetchRef.current?.();
         }
       }, delay);
@@ -89,22 +89,23 @@ export function useTokenRefresh(options: UseTokenRefreshOptions): UseTokenRefres
     // Guard against re-entrant fetches
     if (fetchingRef.current) return;
     fetchingRef.current = true;
+    const signal = abortControllerRef.current?.signal;
 
     try {
       setLoading((prev) => (token === null ? true : prev)); // Only show loading on initial
       setError(null);
 
       const result = await fetchTokenRef.current();
-      if (!mountedRef.current) return;
+      if (signal?.aborted) return;
 
       setToken(result.token);
       scheduleRefresh(result.expiresAt);
     } catch (err) {
-      if (!mountedRef.current) return;
+      if (signal?.aborted) return;
       setError(err instanceof Error ? err.message : 'Token fetch failed');
     } finally {
       fetchingRef.current = false;
-      if (mountedRef.current) {
+      if (!signal?.aborted) {
         setLoading(false);
       }
     }
@@ -115,8 +116,6 @@ export function useTokenRefresh(options: UseTokenRefreshOptions): UseTokenRefres
 
   // Initial fetch and cleanup
   useEffect(() => {
-    mountedRef.current = true;
-
     if (!enabled) {
       setToken(null);
       setError(null);
@@ -125,10 +124,14 @@ export function useTokenRefresh(options: UseTokenRefreshOptions): UseTokenRefres
       return;
     }
 
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     void doFetchRef.current?.();
 
     return () => {
-      mountedRef.current = false;
+      controller.abort();
+      abortControllerRef.current = null;
       clearRefreshTimer();
     };
   }, [enabled]); // eslint-disable-line react-hooks/exhaustive-deps

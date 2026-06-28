@@ -65,6 +65,10 @@ export function useBootLogStream(
       return;
     }
 
+    // Clear logs when starting a new workspace stream (handles both
+    // workspaceId changes while still creating and status re-entering 'creating')
+    setLogs([]);
+
     let cancelled = false;
     let retryTimeout: ReturnType<typeof setTimeout> | null = null;
 
@@ -140,13 +144,6 @@ export function useBootLogStream(
       cleanupWebSocket(wsRef, setConnected);
     };
   }, [workspaceId, workspaceUrl, status]);
-
-  // Reset logs when workspace changes or status leaves 'creating'
-  useEffect(() => {
-    if (status !== 'creating') {
-      setLogs([]);
-    }
-  }, [status, workspaceId]);
 
   return { logs, connected };
 }
