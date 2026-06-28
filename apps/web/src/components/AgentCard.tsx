@@ -43,7 +43,7 @@ export function AgentCard({
   onResetSettings,
 }: AgentCardProps) {
   const opencodeProvider = (settings?.opencodeProvider as OpenCodeProvider | null | undefined) ?? null;
-  const summary = getAgentConnectionSummary(agent, credentials, opencodeProvider, 'user');
+  const summary = getAgentConnectionSummary(agent, credentials);
 
   return (
     <Card

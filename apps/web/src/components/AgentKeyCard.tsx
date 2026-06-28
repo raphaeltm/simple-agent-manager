@@ -14,8 +14,7 @@ interface AgentKeyCardProps {
    * Scope context for this card:
    *   - 'user' (default): user-level credential — removal disables the agent until a new key is added.
    *   - 'project': project-scoped override — removal falls back to the user-level credential.
-   * Affects delete confirmation copy and disables Scaleway-fallback display (project context
-   * does not carry the active provider).
+   * Affects delete confirmation copy.
    */
   scope?: 'user' | 'project';
   /**
@@ -49,18 +48,6 @@ export function AgentKeyCard({ agent, credentials, onSave, onDelete, opencodePro
   let saveCredentialLabel = 'Save Credential';
   if (hasAnyCredential) saveCredentialLabel = 'Update Credential';
   if (loading) saveCredentialLabel = 'Testing...';
-
-  // OpenCode can use Scaleway cloud credential as fallback (only when using Scaleway provider).
-  // Project scope does not display provider-derived fallbacks — provider selection is user-scoped,
-  // so the project card would be unable to reason about it correctly.
-  const isOpenCodePlatform =
-    scope === 'user' &&
-    agent.id === 'opencode' &&
-    (effectiveOpenCodeProvider === 'platform' || agent.fallbackCredentialSource === 'platform-opencode');
-  const usesScalewayFallback =
-    scope === 'user' &&
-    agent.fallbackCredentialSource === 'scaleway-cloud' &&
-    effectiveOpenCodeProvider === 'scaleway';
 
   // Get provider-specific key label for OpenCode
   const opencodeKeyLabel = effectiveOpenCodeProvider
@@ -121,40 +108,6 @@ export function AgentKeyCard({ agent, credentials, onSave, onDelete, opencodePro
 
   const body = (
     <>
-      {isOpenCodePlatform && !showForm && (
-        <div className="flex items-center justify-between p-3 bg-inset rounded-sm">
-          <div className="flex flex-col gap-1">
-            <span className="text-xs text-fg-muted">SAM Platform (Workers AI)</span>
-            <span className="text-sm text-fg-primary">
-              Using SAM&apos;s platform AI — daily limit applies. No API key needed.
-            </span>
-          </div>
-        </div>
-      )}
-
-      {usesScalewayFallback && !hasAnyCredential && !showForm && !isOpenCodePlatform && (
-        <div className="flex flex-col gap-3">
-          <div className="flex items-center justify-between p-3 bg-inset rounded-sm">
-            <div className="flex flex-col gap-1">
-              <span className="text-xs text-fg-muted">Scaleway Cloud Provider Credential</span>
-              <span className="text-sm text-fg-primary">
-                Your Scaleway cloud credential is being used for inference. No separate key needed.
-              </span>
-            </div>
-          </div>
-          <p className="text-xs text-fg-muted">
-            To use a different key for inference, you can save a dedicated credential below.{' '}
-            <button
-              type="button"
-              onClick={() => setShowForm(true)}
-              className="text-xs bg-transparent border-none cursor-pointer p-0 text-accent underline"
-            >
-              Add dedicated key
-            </button>
-          </p>
-        </div>
-      )}
-
       {activeCredential && !showForm && (
         <div className="flex flex-col gap-3">
           <div className="flex items-center justify-between p-3 bg-inset rounded-sm">
@@ -184,7 +137,7 @@ export function AgentKeyCard({ agent, credentials, onSave, onDelete, opencodePro
         </div>
       )}
 
-      {((!hasAnyCredential && !usesScalewayFallback && !isOpenCodePlatform) || showForm) && (
+      {(!hasAnyCredential || showForm) && (
         <form onSubmit={handleSave} className="flex flex-col gap-3">
           {supportsOAuth && (
             <div className="flex gap-2 mb-2">
@@ -237,9 +190,7 @@ export function AgentKeyCard({ agent, credentials, onSave, onDelete, opencodePro
                     ? 'Paste your OAuth token from "claude setup-token"'
                     : opencodeKeyLabel
                       ? `Enter your ${opencodeKeyLabel}`
-                      : agent.id === 'opencode'
-                        ? 'Enter your Scaleway Secret Key'
-                        : `Enter your ${agent.name} API key`
+                      : `Enter your ${agent.name} API key`
                 }
                 required
               />
@@ -254,13 +205,6 @@ export function AgentKeyCard({ agent, credentials, onSave, onDelete, opencodePro
                 </>
               ) : agent.id === 'opencode' && opencodeKeyHelp ? (
                 <>{opencodeKeyHelp}</>
-              ) : agent.id === 'opencode' ? (
-                <>
-                  Create a Scaleway API key with <strong>GenerativeApisModelAccess</strong> permission at{' '}
-                  <a href={agent.credentialHelpUrl} target="_blank" rel="noopener noreferrer" className="text-accent">
-                    Scaleway IAM Console
-                  </a>
-                </>
               ) : (
                 <>
                   Get your API key from{' '}
@@ -302,15 +246,11 @@ export function AgentKeyCard({ agent, credentials, onSave, onDelete, opencodePro
           <p className="text-xs text-fg-muted">{agent.description}</p>
         </div>
         <StatusBadge
-          status={hasAnyCredential || usesScalewayFallback || isOpenCodePlatform ? 'connected' : 'disconnected'}
+          status={hasAnyCredential ? 'connected' : 'disconnected'}
           label={
-            isOpenCodePlatform
-              ? 'Platform AI'
-              : hasAnyCredential
-                ? activeCredential?.label || (activeCredential?.credentialKind === 'oauth-token' ? 'Connected (OAuth)' : 'Connected')
-                : usesScalewayFallback
-                  ? 'Using Scaleway Cloud Key'
-                  : 'Not Configured'
+            hasAnyCredential
+              ? activeCredential?.label || (activeCredential?.credentialKind === 'oauth-token' ? 'Connected (OAuth)' : 'Connected')
+              : 'Not Configured'
           }
         />
       </div>

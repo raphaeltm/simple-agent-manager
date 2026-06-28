@@ -1,7 +1,7 @@
 /**
  * Per-agent settings body — model selection, permission mode, and (for OpenCode)
- * provider / base URL / provider-name fields. Supports both the standalone
- * "card" layout and an `embedded` mode used by the unified AgentCard.
+ * provider / base URL fields. Supports both the standalone "card" layout and an
+ * `embedded` mode used by the unified AgentCard.
  */
 import type {
   AgentInfo,
@@ -14,10 +14,10 @@ import type {
 } from '@simple-agent-manager/shared';
 import {
   AGENT_PERMISSION_MODE_LABELS,
+  DEFAULT_OPENCODE_PROVIDER,
   DEFAULT_OPENCODE_ZEN_MODEL,
   OPENCODE_PROVIDER_OPTIONS,
   OPENCODE_PROVIDERS,
-  PLATFORM_AI_MODELS,
   VALID_PERMISSION_MODES,
 } from '@simple-agent-manager/shared';
 import { Alert, Card } from '@simple-agent-manager/ui';
@@ -57,13 +57,10 @@ export function AgentSettingsCard({
   const [permissionMode, setPermissionMode] = useState<AgentPermissionMode>(
     settings?.permissionMode ?? 'default'
   );
-  const [opencodeProvider, setOpencodeProvider] = useState<OpenCodeProvider | ''>(
-    settings?.opencodeProvider ?? ''
+  const [opencodeProvider, setOpencodeProvider] = useState<OpenCodeProvider>(
+    settings?.opencodeProvider ?? DEFAULT_OPENCODE_PROVIDER
   );
   const [opencodeBaseUrl, setOpencodeBaseUrl] = useState(settings?.opencodeBaseUrl ?? '');
-  const [opencodeProviderName, setOpencodeProviderName] = useState(
-    settings?.opencodeProviderName ?? ''
-  );
   const [providerMode, setProviderMode] = useState<AgentProviderMode | ''>(
     settings?.providerMode ?? ''
   );
@@ -75,14 +72,13 @@ export function AgentSettingsCard({
   const isOpenCode = agent.id === 'opencode';
   const supportsSamProvider = agent.id === 'claude-code' || agent.id === 'openai-codex';
   const supportsOAuthProvider = agent.id === 'claude-code';
-  const selectedProvider = opencodeProvider || null;
-  const providerMeta = selectedProvider ? OPENCODE_PROVIDERS[selectedProvider] : null;
-  const showBaseUrl = selectedProvider === 'custom' || selectedProvider === 'openai-compatible';
+  const selectedProvider = opencodeProvider;
+  const providerMeta = OPENCODE_PROVIDERS[selectedProvider];
+  const showBaseUrl = selectedProvider === 'custom';
   const openCodeModelProviderFilter: readonly string[] | undefined = (() => {
     if (!isOpenCode) return undefined;
-    const provider = selectedProvider ?? 'opencode-zen';
-    if (provider === 'opencode-zen' || provider === 'opencode-managed') return ['opencode'];
-    if (provider === 'opencode-go') return ['opencode-go'];
+    if (selectedProvider === 'opencode-zen') return ['opencode'];
+    if (selectedProvider === 'opencode-go') return ['opencode-go'];
     return undefined;
   })();
   const useOpenCodeModelCatalog = isOpenCode && openCodeModelProviderFilter !== undefined;
@@ -94,9 +90,8 @@ export function AgentSettingsCard({
   useEffect(() => {
     setModel(settings?.model ?? '');
     setPermissionMode(settings?.permissionMode ?? 'default');
-    setOpencodeProvider(settings?.opencodeProvider ?? '');
+    setOpencodeProvider(settings?.opencodeProvider ?? DEFAULT_OPENCODE_PROVIDER);
     setOpencodeBaseUrl(settings?.opencodeBaseUrl ?? '');
-    setOpencodeProviderName(settings?.opencodeProviderName ?? '');
     setProviderMode(settings?.providerMode ?? '');
   }, [settings]);
 
@@ -112,9 +107,8 @@ export function AgentSettingsCard({
       };
 
       if (isOpenCode) {
-        data.opencodeProvider = opencodeProvider || null;
+        data.opencodeProvider = opencodeProvider;
         data.opencodeBaseUrl = opencodeBaseUrl.trim() || null;
-        data.opencodeProviderName = opencodeProviderName.trim() || null;
       }
 
       if (supportsSamProvider) {
@@ -139,9 +133,8 @@ export function AgentSettingsCard({
       await onReset(agent.id);
       setModel('');
       setPermissionMode('default');
-      setOpencodeProvider('');
+      setOpencodeProvider(DEFAULT_OPENCODE_PROVIDER);
       setOpencodeBaseUrl('');
-      setOpencodeProviderName('');
       setProviderMode('');
       setSuccess(true);
       setTimeout(() => setSuccess(false), SUCCESS_BANNER_MS);
@@ -174,10 +167,9 @@ export function AgentSettingsCard({
     if ((model.trim() || null) !== (settings?.model ?? null)) return true;
     if (permissionMode !== (settings?.permissionMode ?? 'default')) return true;
     if (isOpenCode) {
-      if ((opencodeProvider || null) !== (settings?.opencodeProvider ?? null)) return true;
-      if ((opencodeBaseUrl.trim() || null) !== (settings?.opencodeBaseUrl ?? null)) return true;
-      if ((opencodeProviderName.trim() || null) !== (settings?.opencodeProviderName ?? null))
+      if (opencodeProvider !== (settings?.opencodeProvider ?? DEFAULT_OPENCODE_PROVIDER))
         return true;
+      if ((opencodeBaseUrl.trim() || null) !== (settings?.opencodeBaseUrl ?? null)) return true;
     }
     if (supportsSamProvider) {
       if ((providerMode || null) !== (settings?.providerMode ?? null)) return true;
@@ -217,34 +209,21 @@ export function AgentSettingsCard({
             id={`opencode-provider-${agent.id}`}
             value={opencodeProvider}
             onChange={(e) => {
-              const val = e.target.value as OpenCodeProvider | '';
-              const prev = opencodeProvider;
+              const val = e.target.value as OpenCodeProvider;
               setOpencodeProvider(val);
-              if (val !== 'custom' && val !== 'openai-compatible') {
-                setOpencodeBaseUrl('');
-              }
               if (val !== 'custom') {
-                setOpencodeProviderName('');
-              }
-              if ((val === 'platform') !== (prev === 'platform')) {
-                setModel('');
+                setOpencodeBaseUrl('');
               }
             }}
             className={formControlClass}
             data-testid="opencode-provider-select"
           >
-            <option value="">Default (OpenCode Zen)</option>
             {OPENCODE_PROVIDER_OPTIONS.map((p) => (
               <option key={p} value={p}>
                 {OPENCODE_PROVIDERS[p].label}
               </option>
             ))}
           </select>
-          {providerMeta && !providerMeta.requiresApiKey && (
-            <div className="text-xs text-fg-muted py-2 px-3 rounded-md bg-inset mt-2 border border-border-default">
-              {providerMeta.keyHelpText}
-            </div>
-          )}
         </div>
       )}
 
@@ -267,27 +246,6 @@ export function AgentSettingsCard({
             placeholder="https://api.example.com/v1"
             className={formControlClass}
             data-testid="opencode-base-url-input"
-          />
-        </div>
-      )}
-
-      {isOpenCode && selectedProvider === 'custom' && (
-        <div className="mb-4">
-          <label
-            htmlFor={`opencode-provider-name-${agent.id}`}
-            className="text-sm font-medium text-fg-primary mb-1 block"
-          >
-            Provider Name
-          </label>
-          <div className="text-xs text-fg-muted mb-2">A display name for your custom provider.</div>
-          <input
-            id={`opencode-provider-name-${agent.id}`}
-            type="text"
-            value={opencodeProviderName}
-            onChange={(e) => setOpencodeProviderName(e.target.value)}
-            placeholder="e.g. My Custom Provider"
-            className={formControlClass}
-            data-testid="opencode-provider-name-input"
           />
         </div>
       )}
@@ -336,40 +294,20 @@ export function AgentSettingsCard({
           Model
         </label>
         <div className="text-xs text-fg-muted mb-2">
-          {isOpenCode && selectedProvider === 'platform'
-            ? 'Select a model from the available Workers AI models.'
-            : 'Leave empty to use the default model. Model availability depends on your API key or subscription.'}
+          Leave empty to use the default model. Model availability depends on your API key or
+          subscription.
         </div>
-        {isOpenCode && selectedProvider === 'platform' ? (
-          <select
-            id={`model-input-${agent.id}`}
-            value={model}
-            onChange={(e) => setModel(e.target.value)}
-            className={formControlClass}
-            data-testid={`model-input-${agent.id}`}
-          >
-            <option value="">
-              Default ({PLATFORM_AI_MODELS.find((m) => m.isDefault)?.label ?? 'auto'})
-            </option>
-            {PLATFORM_AI_MODELS.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.label}
-              </option>
-            ))}
-          </select>
-        ) : (
-          <ModelSelect
-            id={`model-input-${agent.id}`}
-            agentType={agent.id}
-            value={model}
-            onChange={setModel}
-            placeholder={modelPlaceholder}
-            useDynamicCatalog={useOpenCodeModelCatalog}
-            modelProviderFilter={openCodeModelProviderFilter}
-            allowStaticCatalog={!isOpenCode || useOpenCodeModelCatalog}
-            data-testid={`model-input-${agent.id}`}
-          />
-        )}
+        <ModelSelect
+          id={`model-input-${agent.id}`}
+          agentType={agent.id}
+          value={model}
+          onChange={setModel}
+          placeholder={modelPlaceholder}
+          useDynamicCatalog={useOpenCodeModelCatalog}
+          modelProviderFilter={openCodeModelProviderFilter}
+          allowStaticCatalog={!isOpenCode || useOpenCodeModelCatalog}
+          data-testid={`model-input-${agent.id}`}
+        />
       </div>
 
       <div className="mb-4" role="group" aria-labelledby={`permission-mode-label-${agent.id}`}>

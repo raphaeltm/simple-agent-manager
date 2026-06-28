@@ -36,7 +36,6 @@ function makeOpenCodeSettings(
     additionalEnv: null,
     opencodeProvider: null,
     opencodeBaseUrl: null,
-    opencodeProviderName: null,
     providerMode: null,
     createdAt: null,
     updatedAt: null,

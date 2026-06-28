@@ -11,14 +11,20 @@
 import type {
   AgentType,
   CredentialKind,
+  OpenCodeProvider,
   SaveAgentCredentialRequest,
 } from '@simple-agent-manager/shared';
-import { AGENT_CATALOG } from '@simple-agent-manager/shared';
+import {
+  AGENT_CATALOG,
+  DEFAULT_OPENCODE_PROVIDER,
+  OPENCODE_PROVIDER_OPTIONS,
+  OPENCODE_PROVIDERS,
+} from '@simple-agent-manager/shared';
 import { Alert, Button } from '@simple-agent-manager/ui';
 import { useState } from 'react';
 
 import { useToast } from '../hooks/useToast';
-import { saveAgentCredential, saveProjectAgentCredential } from '../lib/api';
+import { saveAgentCredential, saveAgentSettings, saveProjectAgentCredential } from '../lib/api';
 
 interface ConnectFlowProps {
   /** When set, writes project-scoped credentials. */
@@ -91,11 +97,18 @@ export function ConnectFlow({
   const [credential, setCredential] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [opencodeProvider, setOpencodeProvider] = useState<OpenCodeProvider>(DEFAULT_OPENCODE_PROVIDER);
+  const [opencodeModel, setOpencodeModel] = useState('');
+  const [opencodeBaseUrl, setOpencodeBaseUrl] = useState('');
 
   const selectedAgent = AGENT_CATALOG.find((a) => a.id === agentId);
   const hasOAuth = selectedAgent?.oauthSupport != null;
   const isCodexAuthJson = selectedAgent?.id === 'openai-codex' && authMethod === 'oauth-token';
   const isOpenCodeApiKey = selectedAgent?.id === 'opencode' && authMethod === 'api-key';
+  // OpenCode provider + model selection lives in the same flow as the key, but
+  // agent-settings are user-scoped only — so we only surface it for user-scope connects.
+  const showOpenCodeConfig = isOpenCodeApiKey && !projectId;
+  const opencodeProviderMeta = OPENCODE_PROVIDERS[opencodeProvider];
   const flowVerb = getFlowVerb(mode);
 
   const handleSave = async () => {
@@ -114,6 +127,14 @@ export function ConnectFlow({
         await saveProjectAgentCredential(projectId, request);
       } else {
         await saveAgentCredential(request);
+      }
+      if (showOpenCodeConfig) {
+        await saveAgentSettings('opencode', {
+          opencodeProvider,
+          opencodeBaseUrl:
+            opencodeProvider === 'custom' ? opencodeBaseUrl.trim() || null : null,
+          model: opencodeModel.trim() || null,
+        });
       }
       toast.success(getSuccessMessage(selectedAgent?.name ?? agentId, mode, Boolean(projectId)));
       onConnected?.();
@@ -250,6 +271,59 @@ export function ConnectFlow({
               />
             )}
           </div>
+
+          {/* OpenCode provider + model (same flow as the key, user scope only) */}
+          {showOpenCodeConfig && (
+            <>
+              <div className="flex flex-col gap-1.5">
+                <label htmlFor="connect-opencode-provider" className="text-xs font-medium text-fg-muted">
+                  OpenCode provider
+                </label>
+                <select
+                  id="connect-opencode-provider"
+                  value={opencodeProvider}
+                  onChange={(e) => setOpencodeProvider(e.currentTarget.value as OpenCodeProvider)}
+                  className="w-full py-2 px-3 min-h-9 border border-border-default rounded-sm bg-inset text-fg-primary text-[0.8125rem] box-border"
+                >
+                  {OPENCODE_PROVIDER_OPTIONS.map((provider) => (
+                    <option key={provider} value={provider}>
+                      {OPENCODE_PROVIDERS[provider].label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {opencodeProvider === 'custom' && (
+                <div className="flex flex-col gap-1.5">
+                  <label htmlFor="connect-opencode-base-url" className="text-xs font-medium text-fg-muted">
+                    Base URL
+                  </label>
+                  <input
+                    id="connect-opencode-base-url"
+                    type="text"
+                    placeholder="https://your-endpoint/v1"
+                    value={opencodeBaseUrl}
+                    onChange={(e) => setOpencodeBaseUrl(e.currentTarget.value)}
+                    className="w-full py-2 px-3 min-h-9 border border-border-default rounded-sm bg-inset text-fg-primary text-[0.8125rem] font-mono box-border"
+                  />
+                </div>
+              )}
+
+              <div className="flex flex-col gap-1.5">
+                <label htmlFor="connect-opencode-model" className="text-xs font-medium text-fg-muted">
+                  Model
+                </label>
+                <input
+                  id="connect-opencode-model"
+                  type="text"
+                  placeholder={opencodeProviderMeta.modelPlaceholder}
+                  value={opencodeModel}
+                  onChange={(e) => setOpencodeModel(e.currentTarget.value)}
+                  className="w-full py-2 px-3 min-h-9 border border-border-default rounded-sm bg-inset text-fg-primary text-[0.8125rem] font-mono box-border"
+                />
+              </div>
+            </>
+          )}
 
           {/* Actions */}
           <div className="flex gap-2 justify-end">

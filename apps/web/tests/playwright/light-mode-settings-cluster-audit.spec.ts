@@ -108,7 +108,7 @@ const agents = [
     supportsAcp: true,
     configured: false,
     credentialHelpUrl: 'https://example.com/help/opencode',
-    fallbackCredentialSource: 'platform-opencode',
+    fallbackCredentialSource: null,
   },
 ];
 
@@ -255,7 +255,6 @@ async function setupMocks(page: Page) {
         additionalEnv: null,
         opencodeProvider: null,
         opencodeBaseUrl: null,
-        opencodeProviderName: null,
         providerMode: null,
         createdAt: null,
         updatedAt: null,

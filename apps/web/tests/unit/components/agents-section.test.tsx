@@ -78,7 +78,6 @@ function makeSettings(agentType: string, overrides: Record<string, unknown> = {}
     additionalEnv: null,
     opencodeProvider: null,
     opencodeBaseUrl: null,
-    opencodeProviderName: null,
     providerMode: null,
     createdAt: null,
     updatedAt: null,

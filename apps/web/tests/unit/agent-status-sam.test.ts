@@ -24,19 +24,6 @@ describe('getAgentConnectionSummary', () => {
     const result = getAgentConnectionSummary(
       makeAgent({ fallbackCredentialSource: 'platform-sam' }),
       [],
-      null,
-      'user',
-    );
-    expect(result.status).toBe('connected');
-    expect(result.label).toBe('SAM');
-  });
-
-  it('returns SAM for project scope too (platform-sam is scope-independent)', () => {
-    const result = getAgentConnectionSummary(
-      makeAgent({ fallbackCredentialSource: 'platform-sam' }),
-      [],
-      null,
-      'project',
     );
     expect(result.status).toBe('connected');
     expect(result.label).toBe('SAM');
@@ -46,8 +33,6 @@ describe('getAgentConnectionSummary', () => {
     const result = getAgentConnectionSummary(
       makeAgent({ fallbackCredentialSource: 'platform-sam' }),
       [{ agentType: 'claude-code', credentialKind: 'api-key', isActive: true, label: 'My Key' }],
-      null,
-      'user',
     );
     // SAM is checked before credentials in priority order
     expect(result.status).toBe('connected');
@@ -58,41 +43,24 @@ describe('getAgentConnectionSummary', () => {
     const result = getAgentConnectionSummary(
       makeAgent({ fallbackCredentialSource: null }),
       [],
-      null,
-      'user',
     );
     expect(result.status).toBe('disconnected');
     expect(result.label).toBe('Not Configured');
   });
 
-  it('does not treat unset OpenCode provider as Scaleway fallback', () => {
+  it('returns the active credential label when one exists', () => {
     const result = getAgentConnectionSummary(
-      makeAgent({ id: 'opencode', fallbackCredentialSource: 'scaleway-cloud' }),
-      [],
-      null,
-      'user',
-    );
-    expect(result.status).toBe('disconnected');
-    expect(result.label).toBe('Not Configured');
-  });
-
-  it('uses Scaleway fallback only when OpenCode provider is explicit Scaleway', () => {
-    const result = getAgentConnectionSummary(
-      makeAgent({ id: 'opencode', fallbackCredentialSource: 'scaleway-cloud' }),
-      [],
-      'scaleway',
-      'user',
+      makeAgent({ id: 'opencode', fallbackCredentialSource: null }),
+      [{ agentType: 'opencode', credentialKind: 'api-key', isActive: true, label: 'My Key' }],
     );
     expect(result.status).toBe('connected');
-    expect(result.label).toBe('Using Scaleway Cloud Key');
+    expect(result.label).toBe('My Key');
   });
 
-  it('does not treat OpenCode Go as a Scaleway fallback', () => {
+  it('returns Not Configured for OpenCode without a credential', () => {
     const result = getAgentConnectionSummary(
-      makeAgent({ id: 'opencode', fallbackCredentialSource: 'scaleway-cloud' }),
+      makeAgent({ id: 'opencode', fallbackCredentialSource: null }),
       [],
-      'opencode-go',
-      'user',
     );
     expect(result.status).toBe('disconnected');
     expect(result.label).toBe('Not Configured');
