@@ -332,7 +332,10 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
   if (node.nodeRole === 'deployment' && body.deployment) {
     try {
       const envRows = await db
-        .select({ envId: schema.deploymentEnvironments.id })
+        .select({
+          envId: schema.deploymentEnvironments.id,
+          requiresVolumes: schema.deploymentEnvironments.requiresVolumes,
+        })
         .from(schema.deploymentEnvironments)
         .where(eq(schema.deploymentEnvironments.nodeId, nodeId));
       const placedEnvIds = new Set(envRows.map((row) => row.envId));
@@ -396,6 +399,30 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
           latest.version > appliedSeq &&
           (latest.status === 'created' || (latest.status === 'applying' && !nodeAlreadyApplying))
         ) {
+          if (envRow.requiresVolumes) {
+            const volumeReadiness = await c.env.DATABASE.prepare(
+              `SELECT
+                 COUNT(*) AS total,
+                 COUNT(CASE WHEN attached_server_id IS NOT NULL THEN 1 END) AS attached
+               FROM deployment_volumes
+               WHERE environment_id = ?`
+            )
+              .bind(envId)
+              .first<{ total: number; attached: number }>();
+            if (
+              !volumeReadiness ||
+              volumeReadiness.total === 0 ||
+              volumeReadiness.attached < volumeReadiness.total
+            ) {
+              log.info('heartbeat.deploy_release_waiting_for_volume_attach', {
+                nodeId,
+                environmentId: envId,
+                total: volumeReadiness?.total ?? 0,
+                attached: volumeReadiness?.attached ?? 0,
+              });
+              continue;
+            }
+          }
           pendingReleases.push({ environmentId: envId, seq: latest.version });
         }
       }

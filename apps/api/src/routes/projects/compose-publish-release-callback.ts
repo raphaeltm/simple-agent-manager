@@ -12,11 +12,17 @@ import {
   validateCompletedComposeImageArtifacts,
   validateComposeImageArtifactDescriptor,
 } from '../../services/compose-image-artifacts';
+import { extractComposePublishVolumeDeclarations } from '../../services/compose-publish-apply';
 import { assertAgentDeploymentAllowedForProfile } from '../../services/deployment-control';
 import {
   DEPLOYMENT_MODEL_RUNNER_VM_SIZE,
   provisionDeploymentNode,
+  resolveDeploymentPlacement,
 } from '../../services/deployment-provisioning';
+import {
+  attachEnvironmentVolumesToLinkedNode,
+  createMissingDeclaredVolumes,
+} from '../../services/deployment-volumes';
 import { verifyWorkspacePublishCallback } from './_callback-auth';
 
 /**
@@ -173,6 +179,27 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
   if (typeof composeYaml !== 'string' || composeYaml.trim() === '') {
     throw errors.badRequest('Release submission is missing composeYaml');
   }
+  let volumeDeclarations: Record<string, { sizeHintMb?: number }> = {};
+  try {
+    volumeDeclarations = extractComposePublishVolumeDeclarations(composeYaml);
+  } catch (err) {
+    throw errors.badRequest(err instanceof Error ? err.message : String(err));
+  }
+  const requiresVolumes = Object.keys(volumeDeclarations).length > 0;
+  const placement = requiresVolumes
+    ? await resolveDeploymentPlacement(userId, c.env)
+    : null;
+  if (requiresVolumes && !placement) {
+    throw errors.badRequest('No cloud provider credential found. Connect a cloud provider before deploying volumes.');
+  }
+  if (requiresVolumes && placement) {
+    await createMissingDeclaredVolumes(db, c.env, userId, {
+      environmentId,
+      volumes: volumeDeclarations,
+      location: placement.location,
+      targetProvider: placement.provider,
+    });
+  }
 
   const servicesRaw = submissionBody.services;
   const services: ServiceReleaseInput[] = Array.isArray(servicesRaw) ? servicesRaw : [];
@@ -234,6 +261,13 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
       source: 'compose-publish',
       createdBy: userId,
     });
+    await db
+      .update(schema.deploymentEnvironments)
+      .set({
+        requiresVolumes,
+        updatedAt: new Date().toISOString(),
+      })
+      .where(eq(schema.deploymentEnvironments.id, environmentId));
   } catch (err) {
     const internalMessage = err instanceof Error ? err.message : String(err);
     log.error('compose_publish_release.insert_failed', {
@@ -260,6 +294,22 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
   // release recording (the release is already durable); the node can be
   // provisioned on the next release or via the deploy verb.
   let nodeId: string | null = environmentRow.nodeId ?? null;
+  let currentNodeMode: string | null = null;
+  if (requiresVolumes && nodeId) {
+    const nodeRows = await db
+      .select({ nodeMode: schema.nodes.nodeMode })
+      .from(schema.nodes)
+      .where(eq(schema.nodes.id, nodeId))
+      .limit(1);
+    currentNodeMode = nodeRows[0]?.nodeMode ?? null;
+  }
+  if (requiresVolumes && nodeId && currentNodeMode !== 'exclusive') {
+    await db
+      .update(schema.deploymentEnvironments)
+      .set({ nodeId: null, updatedAt: new Date().toISOString() })
+      .where(eq(schema.deploymentEnvironments.id, environmentId));
+    nodeId = null;
+  }
   try {
     if (!nodeId) {
       const vmSizeOverride = composeHasModelProvider(composeYaml)
@@ -267,11 +317,18 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
         : undefined;
 
       const result = await provisionDeploymentNode(environmentId, projectId, userId, c.env, {
-        vmSizeOverride,
+        vmSizeOverride: placement?.vmSize ?? vmSizeOverride,
+        ...(placement ? { vmLocationOverride: placement.location } : {}),
+        requiresVolumes,
       });
       if (result) {
         nodeId = result.nodeId;
-        c.executionCtx?.waitUntil(result.provisioningPromise);
+        const provisioningPromise = requiresVolumes
+          ? result.provisioningPromise.then(() =>
+              attachEnvironmentVolumesToLinkedNode(db, c.env, userId, environmentId)
+            )
+          : result.provisioningPromise;
+        c.executionCtx?.waitUntil(provisioningPromise);
         log.info('compose_publish_release.provisioning_triggered', {
           projectId,
           environmentId,
@@ -280,6 +337,10 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
           vmSizeOverride: vmSizeOverride ?? null,
         });
       }
+    } else if (requiresVolumes) {
+      const attachPromise = attachEnvironmentVolumesToLinkedNode(db, c.env, userId, environmentId);
+      c.executionCtx?.waitUntil(attachPromise);
+      await attachPromise;
     }
   } catch (err) {
     log.error('compose_publish_release.provisioning_trigger_failed', {

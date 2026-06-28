@@ -39,18 +39,27 @@ Implement SAM idea `01KW83WNMQBY7KF51RXWP3R9HM` Design Option B: environments wi
 
 ## Checklist
 
-- [ ] Add additive D1 migration and Drizzle schema fields for `nodes.node_mode` and `deployment_environments.requires_volumes`.
-- [ ] Detect manifest volume need after validation in both release-submission paths and persist `requires_volumes`.
-- [ ] Update deployment scheduling so volume envs always create fresh exclusive nodes and stateless envs only reuse shared nodes.
-- [ ] Tighten `linkEnvironmentToNode` with an exclusive-node zero-linked-env guard.
-- [ ] Add provider-agnostic helper to create missing declared volumes and attach them before any apply can be dispatched.
-- [ ] Extend deploy callback/signing to include volume mount descriptors and `volumeMountsHash`.
-- [ ] Add vm-agent volume mount step before `verifyVolumeMounts`: discover device, format only when empty, mount, and write nofail fstab.
-- [ ] Handle Hetzner stable device paths and Scaleway node-side discovery metadata.
-- [ ] Ensure teardown detaches volumes before exclusive node destruction and excludes exclusive nodes from warm-pool reuse.
-- [ ] Add T1-T6 coverage required by the idea.
-- [ ] Run local quality gates and specialist reviews.
+- [x] Add additive D1 migration and Drizzle schema fields for `nodes.node_mode` and `deployment_environments.requires_volumes`.
+- [x] Detect manifest volume need after validation in both release-submission paths and persist `requires_volumes`.
+- [x] Update deployment scheduling so volume envs always create fresh exclusive nodes and stateless envs only reuse shared nodes.
+- [x] Tighten `linkEnvironmentToNode` with an exclusive-node zero-linked-env guard.
+- [x] Add provider-agnostic helper to create missing declared volumes and attach them before any apply can be dispatched.
+- [x] Extend deploy callback/signing to include volume mount descriptors and `volumeMountsHash`.
+- [x] Add vm-agent volume mount step before `verifyVolumeMounts`: discover device, format only when empty, mount, and write nofail fstab.
+- [x] Handle Hetzner stable device paths and Scaleway node-side discovery metadata.
+- [x] Ensure teardown detaches volumes before exclusive node destruction and excludes exclusive nodes from warm-pool reuse.
+- [x] Add T1-T6 coverage required by the idea.
+- [x] Run local quality gates and specialist reviews.
 - [ ] Deploy to staging, verify migrations and changed behavior, then open a draft PR with `needs-human-review`.
+
+## Validation Evidence
+
+- `pnpm test`
+- `pnpm typecheck`
+- `pnpm lint` (passes with existing warnings)
+- `pnpm build`
+- `pnpm quality:migration-safety`
+- `go test ./...` from `packages/vm-agent`
 
 ## Acceptance Criteria
 

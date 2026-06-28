@@ -24,7 +24,8 @@
       "hostPort": 35000
     }
   ],
-  "signature": "Q+dVlMgKM8RrrNc6mrtvTgC/vPWVAqNCjjzlv2BoTo98hVo9WGYn1hNy/uyIsES40PbZX6FKwQPHTz2kjfKKCg==",
+  "volumeMounts": [],
+  "signature": "bUfOaLqTQjCCNt9qC888gMWjkfcy0IE3YI8iDrYFGWhKF4Ah1mllIoh31hejZRakZIHqKr8EIhjy/IpVU+BvBg==",
   "registryCredentials": {
     "server": "registry.cloudflare.com",
     "username": "cf-mint-user",

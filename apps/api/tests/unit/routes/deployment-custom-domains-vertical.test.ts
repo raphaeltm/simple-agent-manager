@@ -30,6 +30,16 @@ const deploymentReleases = {
   source: 'deploymentReleases.source',
   status: 'deploymentReleases.status',
 };
+const deploymentVolumes = {
+  id: 'deploymentVolumes.id',
+  environmentId: 'deploymentVolumes.environmentId',
+  name: 'deploymentVolumes.name',
+  providerVolumeId: 'deploymentVolumes.providerVolumeId',
+  providerName: 'deploymentVolumes.providerName',
+  linuxDevice: 'deploymentVolumes.linuxDevice',
+  attachedServerId: 'deploymentVolumes.attachedServerId',
+  createdAt: 'deploymentVolumes.createdAt',
+};
 const nodes = {
   id: 'nodes.id',
   userId: 'nodes.userId',
@@ -87,6 +97,17 @@ interface DomainRow {
   createdAt: string;
 }
 
+interface VolumeRow {
+  id: string;
+  environmentId: string;
+  name: string;
+  providerVolumeId: string;
+  providerName: string;
+  linuxDevice: string | null;
+  attachedServerId: string | null;
+  createdAt: string;
+}
+
 const mockRequireOwnedProject = vi.fn();
 const mockSignDeployPayload = vi.fn();
 const mockVerifyCallbackToken = vi.fn();
@@ -99,6 +120,7 @@ let projectRows: ProjectRow[] = [];
 let nodeRows: NodeRow[] = [];
 let releaseRows: ReleaseRow[] = [];
 let domainRows: DomainRow[] = [];
+let volumeRows: VolumeRow[] = [];
 
 vi.mock('drizzle-orm', () => ({
   and: (...conds: Condition[]) => ({ op: 'and', conds }),
@@ -111,6 +133,7 @@ vi.mock('../../../src/db/schema', () => ({
   deploymentCustomDomains,
   deploymentEnvironments,
   deploymentReleases,
+  deploymentVolumes,
   nodes,
   projects,
 }));
@@ -261,6 +284,11 @@ function selectRows(table: unknown, condition: Condition, selection?: Record<str
         (hostname === undefined || row.hostname === hostname) &&
         (verificationStatus === undefined || row.verificationStatus === verificationStatus)
       );
+    });
+  } else if (table === deploymentVolumes) {
+    const environmentId = eqValue(condition, deploymentVolumes.environmentId);
+    rows = volumeRows.filter((row) => {
+      return environmentId === undefined || row.environmentId === environmentId;
     });
   }
   return rows.map((row) => projectSelection(row, selection));
@@ -421,6 +449,7 @@ describe('deployment custom domain attach verify apply flow', () => {
       },
     ];
     domainRows = [];
+    volumeRows = [];
   });
 
   it('attaches, verifies, and signs a custom domain route without upserting user DNS', async () => {

@@ -125,6 +125,15 @@ func buildSignableBytes(payload *ApplyPayload) ([]byte, error) {
 		return nil, fmt.Errorf("marshal artifacts: %w", err)
 	}
 	artifactsHash := sha256.Sum256(artifactsBytes)
+	volumeMounts := payload.VolumeMounts
+	if volumeMounts == nil {
+		volumeMounts = []VolumeMount{}
+	}
+	volumeMountsBytes, err := marshalCanonicalJSON(volumeMounts)
+	if err != nil {
+		return nil, fmt.Errorf("marshal volume mounts: %w", err)
+	}
+	volumeMountsHash := sha256.Sum256(volumeMountsBytes)
 	interpolationEnvHash, err := hashInterpolationEnv(payload.InterpolationEnv)
 	if err != nil {
 		return nil, fmt.Errorf("hash interpolation env: %w", err)
@@ -138,6 +147,7 @@ func buildSignableBytes(payload *ApplyPayload) ([]byte, error) {
 		RoutesHash:           hex.EncodeToString(routesHash[:]),
 		InterpolationEnvHash: interpolationEnvHash,
 		ArtifactsHash:        hex.EncodeToString(artifactsHash[:]),
+		VolumeMountsHash:     hex.EncodeToString(volumeMountsHash[:]),
 	}
 	signableBytes, err := marshalCanonicalJSON(signable)
 	if err != nil {

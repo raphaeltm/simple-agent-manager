@@ -284,6 +284,36 @@ function sanitizedVolumeDeclarations(
   return sanitized;
 }
 
+export function extractComposePublishVolumeDeclarations(
+  composeYaml: string
+): Record<string, { sizeHintMb?: number }> {
+  const errors: ComposeParseError[] = [];
+  let doc: unknown;
+  try {
+    doc = parseYaml(composeYaml);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(`Failed to parse captured composeYaml: ${message}`);
+  }
+  if (!isPlainObject(doc)) {
+    throw new Error(
+      'Captured composeYaml is not a valid compose document (expected a mapping at the top level)'
+    );
+  }
+  const rawServices = doc.services;
+  if (!isPlainObject(rawServices)) {
+    throw new Error('Captured composeYaml has no services mapping');
+  }
+  const volumes = parseVolumes(doc.volumes, errors);
+  validateTopLevelVolumeOptions(doc.volumes, errors);
+  if (errors.length > 0) {
+    throw new Error(
+      `Compose-publish volume validation failed: ${formatComposeParseErrors(errors)}`
+    );
+  }
+  return volumes;
+}
+
 /**
  * The raw compose-publish path preserves service volume syntax to keep real
  * Docker Compose files intact. Before doing that, enforce the same safety

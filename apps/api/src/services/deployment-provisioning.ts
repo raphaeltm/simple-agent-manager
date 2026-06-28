@@ -75,8 +75,12 @@ function parseMetrics(
 async function findDeploymentNodeWithCapacity(
   env: Env,
   userId: string,
-  placement: DeploymentPlacement
+  placement: DeploymentPlacement,
+  requiresVolumes: boolean
 ): Promise<string | null> {
+  if (requiresVolumes) {
+    return null;
+  }
   if (typeof env.DATABASE.prepare !== 'function') {
     return null;
   }
@@ -100,6 +104,7 @@ async function findDeploymentNodeWithCapacity(
        AND status = 'running'
        AND health_status != 'unhealthy'
        AND node_role = 'deployment'
+       AND COALESCE(node_mode, 'shared') = 'shared'
        AND cloud_provider = ?
        AND vm_location = ?
        AND vm_size = ?`
@@ -181,7 +186,8 @@ async function linkEnvironmentToNode(
   nodeId: string,
   placement: DeploymentPlacement,
   userId: string,
-  expectedNodeStatus: 'creating' | 'running'
+  expectedNodeStatus: 'creating' | 'running',
+  nodeMode: 'shared' | 'exclusive'
 ): Promise<boolean> {
   if (typeof env.DATABASE.prepare === 'function') {
     const result = await env.DATABASE.prepare(
@@ -198,6 +204,14 @@ async function linkEnvironmentToNode(
              AND cloud_provider = ?
              AND vm_location = ?
              AND vm_size = ?
+             AND COALESCE(node_mode, 'shared') = ?
+             AND (
+               COALESCE(node_mode, 'shared') = 'shared'
+               OR NOT EXISTS (
+                 SELECT 1 FROM deployment_environments existing
+                 WHERE existing.node_id = nodes.id
+               )
+             )
          )`
     )
       .bind(
@@ -211,7 +225,8 @@ async function linkEnvironmentToNode(
         expectedNodeStatus,
         placement.provider,
         placement.location,
-        placement.vmSize
+        placement.vmSize,
+        nodeMode
       )
       .run();
     return (result.meta?.changes ?? 0) > 0;
@@ -232,26 +247,13 @@ async function linkEnvironmentToNode(
   return true;
 }
 
-/**
- * Create a deployment node record and start provisioning.
- *
- * Creates a node record with nodeRole='deployment', links the environment
- * to the node with placement constraints, and returns a promise for the
- * actual VM provisioning. The caller should pass provisioningPromise to
- * executionCtx.waitUntil() so the Worker keeps running while the VM boots.
- *
- * @returns Node result with ID and provisioning promise, or null on failure.
- */
-export async function provisionDeploymentNode(
-  envId: string,
-  _projectId: string,
+export async function resolveDeploymentPlacement(
   userId: string,
   env: Env,
-  options?: { vmSizeOverride?: string }
-): Promise<DeploymentNodeResult | null> {
+  options?: { vmSizeOverride?: string; vmLocationOverride?: string }
+): Promise<DeploymentPlacement | null> {
   const db = drizzle(env.DATABASE, { schema });
 
-  // Resolve the user's active cloud provider credential to determine placement
   const userCreds = await db
     .select({
       provider: schema.credentials.provider,
@@ -266,7 +268,6 @@ export async function provisionDeploymentNode(
     )
     .limit(1);
 
-  // Fall back to platform credentials if no user credential
   let cloudProvider: CredentialProvider;
   if (userCreds.length > 0 && userCreds[0]) {
     cloudProvider = userCreds[0].provider as CredentialProvider;
@@ -283,21 +284,57 @@ export async function provisionDeploymentNode(
       .limit(1);
 
     if (platformCreds.length === 0 || !platformCreds[0]?.provider) {
-      log.error('deployment_provisioning.no_provider', { envId, userId });
+      log.error('deployment_provisioning.no_provider', { userId });
       return null;
     }
     cloudProvider = platformCreds[0].provider as CredentialProvider;
   }
 
-  const vmLocation = getDefaultLocationForProvider(cloudProvider) ?? DEFAULT_VM_LOCATION;
+  const vmLocation =
+    options?.vmLocationOverride?.trim() ||
+    getDefaultLocationForProvider(cloudProvider) ||
+    DEFAULT_VM_LOCATION;
   const defaultVmSize = env.DEPLOYMENT_DEFAULT_VM_SIZE?.trim() || DEPLOYMENT_DEFAULT_VM_SIZE;
-  const placement: DeploymentPlacement = {
+
+  return {
     provider: cloudProvider,
     location: vmLocation,
     vmSize: options?.vmSizeOverride?.trim() || defaultVmSize,
   };
+}
 
-  const existingNodeId = await findDeploymentNodeWithCapacity(env, userId, placement);
+/**
+ * Create a deployment node record and start provisioning.
+ *
+ * Creates a node record with nodeRole='deployment', links the environment
+ * to the node with placement constraints, and returns a promise for the
+ * actual VM provisioning. The caller should pass provisioningPromise to
+ * executionCtx.waitUntil() so the Worker keeps running while the VM boots.
+ *
+ * @returns Node result with ID and provisioning promise, or null on failure.
+ */
+export async function provisionDeploymentNode(
+  envId: string,
+  _projectId: string,
+  userId: string,
+  env: Env,
+  options?: {
+    vmSizeOverride?: string;
+    vmLocationOverride?: string;
+    requiresVolumes?: boolean;
+  }
+): Promise<DeploymentNodeResult | null> {
+  const db = drizzle(env.DATABASE, { schema });
+
+  const placement = await resolveDeploymentPlacement(userId, env, options);
+  if (!placement) {
+    log.error('deployment_provisioning.no_provider', { envId, userId });
+    return null;
+  }
+  const requiresVolumes = options?.requiresVolumes ?? false;
+  const nodeMode: 'shared' | 'exclusive' = requiresVolumes ? 'exclusive' : 'shared';
+
+  const existingNodeId = await findDeploymentNodeWithCapacity(env, userId, placement, requiresVolumes);
   if (existingNodeId) {
     const linked = await linkEnvironmentToNode(
       env,
@@ -306,14 +343,15 @@ export async function provisionDeploymentNode(
       existingNodeId,
       placement,
       userId,
-      'running'
+      'running',
+      'shared'
     );
     if (linked) {
       log.info('deployment_provisioning.placed_existing_node', {
         nodeId: existingNodeId,
         envId,
-        provider: cloudProvider,
-        location: vmLocation,
+        provider: placement.provider,
+        location: placement.location,
       });
       return { nodeId: existingNodeId, provisioningPromise: Promise.resolve() };
     }
@@ -334,10 +372,11 @@ export async function provisionDeploymentNode(
     userId,
     name: `deploy-${envId.slice(0, 8).toLowerCase()}`,
     vmSize: placement.vmSize,
-    vmLocation,
+    vmLocation: placement.location,
     heartbeatStaleAfterSeconds: 300,
-    cloudProvider,
+    cloudProvider: placement.provider,
     nodeRole: 'deployment',
+    nodeMode,
   });
 
   const linkedFreshNode = await linkEnvironmentToNode(
@@ -347,7 +386,8 @@ export async function provisionDeploymentNode(
     node.id,
     placement,
     userId,
-    'creating'
+    'creating',
+    nodeMode
   );
   if (!linkedFreshNode) {
     await db
@@ -376,8 +416,9 @@ export async function provisionDeploymentNode(
   log.info('deployment_provisioning.started', {
     nodeId: node.id,
     envId,
-    provider: cloudProvider,
-    location: vmLocation,
+    provider: placement.provider,
+    location: placement.location,
+    nodeMode,
   });
 
   // Return the provisioning promise for the caller to pass to waitUntil()

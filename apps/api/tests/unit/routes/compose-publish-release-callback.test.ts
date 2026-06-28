@@ -21,6 +21,8 @@ const DEPLOYMENT_ENVIRONMENTS = {
   agentDeployEnabledAt: 'deployment_environments.agentDeployEnabledAt',
   agentDeployDisabledAt: 'deployment_environments.agentDeployDisabledAt',
   allowedDeployProfileIdsJson: 'deployment_environments.allowedDeployProfileIdsJson',
+  requiresVolumes: 'deployment_environments.requiresVolumes',
+  updatedAt: 'deployment_environments.updatedAt',
 };
 
 let workspaceRows: Array<{ projectId: string | null; userId: string }> = [];
@@ -35,6 +37,7 @@ let environmentRows: Array<{
   allowedDeployProfileIdsJson?: string | null;
 }> = [];
 const inserted: Array<Record<string, unknown>> = [];
+const updated: Array<Record<string, unknown>> = [];
 let verifiedPayload: { workspace: string; type: string; scope?: string } = {
   workspace: 'ws-1',
   type: 'callback',
@@ -54,6 +57,7 @@ vi.mock('../../../src/db/schema', () => ({
   workspaces: WORKSPACES,
   deploymentReleases: DEPLOYMENT_RELEASES,
   deploymentEnvironments: DEPLOYMENT_ENVIRONMENTS,
+  nodes: { id: 'nodes.id', nodeMode: 'nodes.nodeMode' },
 }));
 
 // Node provisioning is best-effort and must never fail the durable release.
@@ -61,6 +65,16 @@ vi.mock('../../../src/db/schema', () => ({
 vi.mock('../../../src/services/deployment-provisioning', () => ({
   DEPLOYMENT_MODEL_RUNNER_VM_SIZE: 'medium',
   provisionDeploymentNode: vi.fn(async () => null),
+  resolveDeploymentPlacement: vi.fn(async () => ({
+    provider: 'hetzner',
+    location: 'fsn1',
+    vmSize: 'small',
+  })),
+}));
+
+vi.mock('../../../src/services/deployment-volumes', () => ({
+  createMissingDeclaredVolumes: vi.fn(async () => []),
+  attachEnvironmentVolumesToLinkedNode: vi.fn(async () => []),
 }));
 
 function createMockDb() {
@@ -95,6 +109,14 @@ function createMockDb() {
       values: vi.fn().mockImplementation((values: Record<string, unknown>) => {
         inserted.push(values);
         return Promise.resolve();
+      }),
+    })),
+    update: vi.fn().mockImplementation(() => ({
+      set: vi.fn().mockImplementation((values: Record<string, unknown>) => {
+        updated.push(values);
+        return {
+          where: vi.fn().mockResolvedValue(undefined),
+        };
       }),
     })),
   };
@@ -158,6 +180,7 @@ describe('compose-publish-release callback (vertical slice)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     inserted.length = 0;
+    updated.length = 0;
     workspaceRows = [{ projectId: 'proj-1', userId: 'user-1' }];
     latestVersionRows = [{ version: 4 }];
     environmentRows = [

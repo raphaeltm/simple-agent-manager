@@ -35,6 +35,7 @@ import {
   collectEnvironmentRouteHostnames,
   type DeploymentRouteTarget,
 } from '../services/deployment-routing';
+import { buildVolumeMountDescriptors } from '../services/deployment-volumes';
 import { cleanupAppRouteDNSRecords, upsertAppRouteDNSRecord } from '../services/dns';
 import { verifyCallbackToken } from '../services/jwt';
 import { mintProjectRegistryCredential } from '../services/registry-credentials';
@@ -370,6 +371,7 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
   const expiresAt =
     Math.floor(Date.now() / 1000) +
     parsePositiveInt(c.env.DEPLOY_PAYLOAD_EXPIRY_SECONDS, DEFAULT_DEPLOY_PAYLOAD_EXPIRY_SECONDS);
+  const volumeMounts = await buildVolumeMountDescriptors(db, environmentId);
 
   // Sign the payload with the deploy signing key
   const signature = await signDeployPayload(
@@ -382,6 +384,7 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
       routes,
       interpolationEnv,
       artifacts,
+      volumeMounts,
     },
     c.env
   );
@@ -425,6 +428,7 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
     releaseId: release.id,
     routeCount: routes.length,
     artifactCount: artifacts.length,
+    volumeMountCount: volumeMounts.length,
     interpolationEnvKeyCount: Object.keys(interpolationEnv).length,
     hasRegistryCredentials: registryCredentials !== null,
   });
@@ -438,6 +442,7 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
     interpolationEnv,
     routes,
     artifacts,
+    volumeMounts,
     signature,
     registryCredentials,
   });

@@ -80,6 +80,7 @@ type EngineConfig struct {
 	ApplyProgress       ApplyProgressFunc
 	DockerLogin         DockerLoginFunc // defaults to cache.DockerLogin if nil
 	MountChecker        MountChecker    // defaults to RealMountChecker if nil
+	VolumeMounter       VolumeMounter   // defaults to RealVolumeMounter if nil
 }
 
 // NewEngine creates a new deployment engine.
@@ -346,6 +347,18 @@ func (e *Engine) Apply(ctx context.Context, payload *ApplyPayload) error {
 			return e.handleApplyFailure(ctx, newState, currentSeq, redactor.redactError(fmt.Errorf("docker login: %w", err)), applyEnv)
 		}
 		e.reportApplyEvent(ctx, payload, "info", "deployment.apply.registry_login_completed", "registry_login", "container registry authentication completed", map[string]any{"server": payload.RegistryCredentials.Server})
+	}
+
+	if len(payload.VolumeMounts) > 0 {
+		volumeMounter := e.cfg.VolumeMounter
+		if volumeMounter == nil {
+			volumeMounter = NewRealVolumeMounter()
+		}
+		e.reportApplyEvent(ctx, payload, "info", "deployment.apply.volume_mount_started", "volume_mounts", "mounting deployment volumes", map[string]any{"volumeMountCount": len(payload.VolumeMounts)})
+		if err := volumeMounter.MountVolumes(ctx, payload.VolumeMounts); err != nil {
+			return e.handleApplyFailure(ctx, newState, currentSeq, redactor.redactError(fmt.Errorf("mount volumes: %w", err)), applyEnv)
+		}
+		e.reportApplyEvent(ctx, payload, "info", "deployment.apply.volume_mount_completed", "volume_mounts", "deployment volumes mounted", map[string]any{"volumeMountCount": len(payload.VolumeMounts)})
 	}
 
 	// Volume mount guard: refuse to apply if required SAM volumes are not mounted.

@@ -7,7 +7,11 @@
  */
 
 import type { Provider, VolumeInstance } from '@simple-agent-manager/providers';
-import { SAM_VOLUME_MOUNT_PATH_TEMPLATE } from '@simple-agent-manager/providers';
+import {
+  SAM_VOLUME_FILESYSTEM_FORMAT,
+  SAM_VOLUME_MOUNT_PATH_TEMPLATE,
+} from '@simple-agent-manager/providers';
+import type { DeploymentManifest } from '@simple-agent-manager/shared';
 import type { CredentialProvider } from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
@@ -54,6 +58,20 @@ export interface CreateVolumeOptions {
   location: string;
   /** Optional: target a specific provider. Falls through credential resolution if omitted. */
   targetProvider?: CredentialProvider;
+}
+
+export interface VolumeMountDescriptor {
+  name: string;
+  mountRoot: string;
+  providerVolumeId: string;
+  providerName: string;
+  linuxDevice?: string;
+  fsFormat: typeof SAM_VOLUME_FILESYSTEM_FORMAT;
+}
+
+function sizeHintToGb(sizeHintMb: number | undefined, minSizeGb: number | undefined): number {
+  const hintedGb = sizeHintMb ? Math.ceil(sizeHintMb / 1024) : 1;
+  return Math.max(hintedGb, minSizeGb ?? 1);
 }
 
 export async function createEnvironmentVolume(
@@ -111,6 +129,65 @@ export async function createEnvironmentVolume(
   return { ...row, id, createdAt: now, updatedAt: now } as DeploymentVolumeRow;
 }
 
+export async function createMissingManifestVolumes(
+  db: ReturnType<typeof drizzle>,
+  env: Env,
+  userId: string,
+  opts: {
+    environmentId: string;
+    manifest: DeploymentManifest;
+    location: string;
+    targetProvider: CredentialProvider;
+  },
+): Promise<DeploymentVolumeRow[]> {
+  return createMissingDeclaredVolumes(db, env, userId, {
+    environmentId: opts.environmentId,
+    volumes: opts.manifest.volumes,
+    location: opts.location,
+    targetProvider: opts.targetProvider,
+  });
+}
+
+export async function createMissingDeclaredVolumes(
+  db: ReturnType<typeof drizzle>,
+  env: Env,
+  userId: string,
+  opts: {
+    environmentId: string;
+    volumes: Record<string, { sizeHintMb?: number }>;
+    location: string;
+    targetProvider: CredentialProvider;
+  },
+): Promise<DeploymentVolumeRow[]> {
+  const declarations = Object.entries(opts.volumes);
+  if (declarations.length === 0) {
+    return [];
+  }
+
+  const existing = await listEnvironmentVolumes(db, opts.environmentId);
+  const existingByName = new Map(existing.map((volume) => [volume.name, volume]));
+  const { provider } = await getProviderForUser(db, userId, env, opts.targetProvider);
+  const minSizeGb = provider.volumeCapabilities.minSizeGb;
+
+  const results: DeploymentVolumeRow[] = [...existing];
+  for (const [name, declaration] of declarations) {
+    const current = existingByName.get(name);
+    if (current) {
+      continue;
+    }
+    const created = await createEnvironmentVolume(db, env, userId, {
+      environmentId: opts.environmentId,
+      name,
+      sizeGb: sizeHintToGb(declaration.sizeHintMb, minSizeGb),
+      location: opts.location,
+      targetProvider: opts.targetProvider,
+    });
+    results.push(created);
+  }
+
+  return results.filter((volume) => opts.volumes[volume.name] !== undefined);
+}
+
 // =============================================================================
 // List
 // =============================================================================
@@ -124,6 +201,24 @@ export async function listEnvironmentVolumes(
     .from(schema.deploymentVolumes)
     .where(eq(schema.deploymentVolumes.environmentId, environmentId))
     .orderBy(schema.deploymentVolumes.createdAt);
+}
+
+export async function buildVolumeMountDescriptors(
+  db: ReturnType<typeof drizzle>,
+  environmentId: string,
+): Promise<VolumeMountDescriptor[]> {
+  const volumes = await listEnvironmentVolumes(db, environmentId);
+  const mountRoot = resolveVolumeMountRoot(environmentId);
+  return volumes
+    .filter((volume) => volume.attachedServerId)
+    .map((volume) => ({
+      name: volume.name,
+      mountRoot,
+      providerVolumeId: volume.providerVolumeId,
+      providerName: volume.providerName,
+      ...(volume.linuxDevice ? { linuxDevice: volume.linuxDevice } : {}),
+      fsFormat: SAM_VOLUME_FILESYSTEM_FORMAT,
+    }));
 }
 
 // =============================================================================
@@ -245,6 +340,46 @@ export async function attachEnvironmentVolumes(
   }
 
   return results;
+}
+
+export async function attachEnvironmentVolumesToLinkedNode(
+  db: ReturnType<typeof drizzle>,
+  env: Env,
+  userId: string,
+  environmentId: string,
+): Promise<DeploymentVolumeRow[]> {
+  const rows = await db
+    .select({
+      nodeId: schema.deploymentEnvironments.nodeId,
+      location: schema.deploymentEnvironments.location,
+      providerInstanceId: schema.nodes.providerInstanceId,
+      vmLocation: schema.nodes.vmLocation,
+    })
+    .from(schema.deploymentEnvironments)
+    .leftJoin(schema.nodes, eq(schema.deploymentEnvironments.nodeId, schema.nodes.id))
+    .where(eq(schema.deploymentEnvironments.id, environmentId))
+    .limit(1);
+
+  const placement = rows[0];
+  if (!placement?.nodeId) {
+    throw new Error(`Deployment environment "${environmentId}" is not linked to a node`);
+  }
+  if (!placement.providerInstanceId) {
+    throw new Error(`Deployment node "${placement.nodeId}" does not have a provider instance id yet`);
+  }
+  const serverLocation = placement.location ?? placement.vmLocation;
+  if (!serverLocation) {
+    throw new Error(`Deployment node "${placement.nodeId}" does not have a volume attachment location`);
+  }
+
+  return attachEnvironmentVolumes(
+    db,
+    env,
+    userId,
+    environmentId,
+    placement.providerInstanceId,
+    serverLocation,
+  );
 }
 
 // =============================================================================

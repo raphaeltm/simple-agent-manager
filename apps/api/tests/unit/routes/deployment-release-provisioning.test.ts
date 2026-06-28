@@ -259,6 +259,7 @@ describe('POST /:projectId/environments/:envId/releases — provisioning trigger
       'proj-1',
       'test-user-id',
       expect.anything(),
+      { requiresVolumes: false },
     );
   });
 
@@ -324,4 +325,3 @@ describe('POST /:projectId/environments/:envId/releases — provisioning trigger
     expect(body.nodeId).toBeNull();
   });
 });
-

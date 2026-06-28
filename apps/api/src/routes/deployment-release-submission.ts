@@ -9,7 +9,14 @@ import { log, serializeError } from '../lib/logger';
 import { ulid } from '../lib/ulid';
 import { errors } from '../middleware/error';
 import { collectSecretNames } from '../services/compose-renderer';
-import { provisionDeploymentNode } from '../services/deployment-provisioning';
+import {
+  provisionDeploymentNode,
+  resolveDeploymentPlacement,
+} from '../services/deployment-provisioning';
+import {
+  attachEnvironmentVolumesToLinkedNode,
+  createMissingManifestVolumes,
+} from '../services/deployment-volumes';
 
 export type CreateDeploymentReleaseResult = {
   id: string;
@@ -39,6 +46,7 @@ export async function createDeploymentReleaseFromManifest(
     executionCtx?: ExecutionContext;
   },
 ): Promise<CreateDeploymentReleaseOutcome> {
+  const requiresVolumes = Object.keys(manifest.volumes).length > 0;
   const secretNames = collectSecretNames(manifest);
   if (secretNames.length > 0) {
     const existingSecrets = await db
@@ -75,6 +83,31 @@ export async function createDeploymentReleaseFromManifest(
   const id = ulid();
   const now = new Date().toISOString();
 
+  const placement = requiresVolumes
+    ? await resolveDeploymentPlacement(params.userId, params.env)
+    : null;
+  if (requiresVolumes && !placement) {
+    return {
+      success: false,
+      response: {
+        status: 400,
+        body: {
+          error: 'NO_CLOUD_PROVIDER',
+          message: 'No cloud provider credential found. Connect a cloud provider before deploying volumes.',
+        },
+      },
+    };
+  }
+
+  if (requiresVolumes && placement) {
+    await createMissingManifestVolumes(db, params.env, params.userId, {
+      environmentId: params.envId,
+      manifest,
+      location: placement.location,
+      targetProvider: placement.provider,
+    });
+  }
+
   try {
     await db.insert(schema.deploymentReleases).values({
       id,
@@ -85,6 +118,13 @@ export async function createDeploymentReleaseFromManifest(
       createdBy: params.userId,
       createdAt: now,
     });
+    await db
+      .update(schema.deploymentEnvironments)
+      .set({
+        requiresVolumes,
+        updatedAt: now,
+      })
+      .where(eq(schema.deploymentEnvironments.id, params.envId));
   } catch (err: unknown) {
     if (err instanceof Error && err.message.includes('UNIQUE')) {
       throw errors.conflict(
@@ -95,12 +135,30 @@ export async function createDeploymentReleaseFromManifest(
   }
 
   const envRow = await db
-    .select({ nodeId: schema.deploymentEnvironments.nodeId })
+    .select({
+      nodeId: schema.deploymentEnvironments.nodeId,
+    })
     .from(schema.deploymentEnvironments)
     .where(eq(schema.deploymentEnvironments.id, params.envId))
     .limit(1);
 
   let nodeId: string | null = envRow[0]?.nodeId ?? null;
+  let currentNodeMode: string | null = null;
+  if (requiresVolumes && nodeId) {
+    const nodeRows = await db
+      .select({ nodeMode: schema.nodes.nodeMode })
+      .from(schema.nodes)
+      .where(eq(schema.nodes.id, nodeId))
+      .limit(1);
+    currentNodeMode = nodeRows[0]?.nodeMode ?? null;
+  }
+  if (requiresVolumes && nodeId && currentNodeMode !== 'exclusive') {
+    await db
+      .update(schema.deploymentEnvironments)
+      .set({ nodeId: null, updatedAt: new Date().toISOString() })
+      .where(eq(schema.deploymentEnvironments.id, params.envId));
+    nodeId = null;
+  }
 
   if (!nodeId) {
     try {
@@ -109,17 +167,53 @@ export async function createDeploymentReleaseFromManifest(
         params.projectId,
         params.userId,
         params.env,
+        {
+          ...(placement
+            ? {
+                vmLocationOverride: placement.location,
+                vmSizeOverride: placement.vmSize,
+              }
+            : {}),
+          requiresVolumes,
+        }
       );
       if (result) {
         nodeId = result.nodeId;
         try {
-          params.executionCtx?.waitUntil(result.provisioningPromise);
+          const provisioningPromise = requiresVolumes
+            ? result.provisioningPromise.then(() =>
+                attachEnvironmentVolumesToLinkedNode(
+                  db,
+                  params.env,
+                  params.userId,
+                  params.envId
+                )
+              )
+            : result.provisioningPromise;
+          params.executionCtx?.waitUntil(provisioningPromise);
         } catch {
           // No execution context in tests.
         }
       }
     } catch (err) {
       log.error('deployment_release.provisioning_trigger_failed', {
+        envId: params.envId,
+        releaseId: id,
+        ...serializeError(err),
+      });
+    }
+  } else if (requiresVolumes) {
+    try {
+      const attachPromise = attachEnvironmentVolumesToLinkedNode(
+        db,
+        params.env,
+        params.userId,
+        params.envId
+      );
+      params.executionCtx?.waitUntil(attachPromise);
+      await attachPromise;
+    } catch (err) {
+      log.error('deployment_release.volume_attach_failed', {
         envId: params.envId,
         releaseId: id,
         ...serializeError(err),

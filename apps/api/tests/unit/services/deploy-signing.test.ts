@@ -31,6 +31,7 @@ async function signableBytes(payload: {
   composeYaml: string;
   routes?: unknown;
   artifacts?: unknown;
+  volumeMounts?: unknown;
   interpolationEnv?: Record<string, string>;
 }): Promise<Uint8Array> {
   const canonical = JSON.stringify({
@@ -42,6 +43,7 @@ async function signableBytes(payload: {
     routesHash: await sha256Hex(JSON.stringify(payload.routes ?? [])),
     interpolationEnvHash: await hashInterpolationEnv(payload.interpolationEnv),
     artifactsHash: await sha256Hex(JSON.stringify(payload.artifacts ?? [])),
+    volumeMountsHash: await sha256Hex(JSON.stringify(payload.volumeMounts ?? [])),
   });
   return new TextEncoder().encode(canonical);
 }
@@ -199,6 +201,52 @@ describe('signDeployPayload', () => {
     ).resolves.toBe(false);
   });
 
+  it('includes volume mount descriptors in the signed payload', async () => {
+    const payload = {
+      environmentId: 'env-1',
+      nodeId: 'node-1',
+      seq: 9,
+      expiresAt: 1_800_000_000,
+      composeYaml: 'services:\n  web:\n    image: nginx\n',
+      routes: [],
+      artifacts: [],
+      volumeMounts: [
+        {
+          name: 'data',
+          mountRoot: '/mnt/sam-env-env-1/volumes',
+          providerVolumeId: 'vol-123',
+          providerName: 'hetzner',
+          linuxDevice: '/dev/disk/by-id/scsi-0HC_Volume_123',
+          fsFormat: 'ext4',
+        },
+      ],
+      interpolationEnv: {},
+    };
+    const signature = await signDeployPayload(payload, {
+      DEPLOY_SIGNING_PRIVATE_KEY: TEST_SEED_B64,
+    });
+    const publicKey = await crypto.subtle.importKey(
+      'raw',
+      fromBase64(TEST_PUBLIC_KEY_B64),
+      { name: 'Ed25519' },
+      false,
+      ['verify']
+    );
+    const mutated = {
+      ...payload,
+      volumeMounts: [{ ...payload.volumeMounts[0], providerVolumeId: 'vol-attacker' }],
+    };
+
+    await expect(
+      crypto.subtle.verify(
+        'Ed25519',
+        publicKey,
+        fromBase64(signature),
+        await signableBytes(mutated)
+      )
+    ).resolves.toBe(false);
+  });
+
   it('matches the shared API-to-vm-agent route payload contract fixture', async () => {
     const fixture = JSON.parse(readFileSync(CONTRACT_FIXTURE_URL, 'utf8')) as {
       environmentId: string;
@@ -207,6 +255,7 @@ describe('signDeployPayload', () => {
       expiresAt: number;
       composeYaml: string;
       routes: unknown[];
+      volumeMounts?: unknown[];
       signature: string;
     };
 

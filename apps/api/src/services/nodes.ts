@@ -26,6 +26,8 @@ export interface CreateNodeInput {
   cloudProvider?: string;
   /** 'workspace' (default) or 'deployment'. */
   nodeRole?: 'workspace' | 'deployment';
+  /** 'shared' (default) or 'exclusive'. Exclusive deployment nodes accept one environment. */
+  nodeMode?: 'shared' | 'exclusive';
 }
 
 export interface ProvisionedNode {
@@ -82,6 +84,7 @@ export async function createNodeRecord(env: Env, input: CreateNodeInput): Promis
     healthStatus: 'stale',
     heartbeatStaleAfterSeconds: input.heartbeatStaleAfterSeconds,
     nodeRole: input.nodeRole ?? 'workspace',
+    nodeMode: input.nodeMode ?? 'shared',
     createdAt: now,
     updatedAt: now,
   });

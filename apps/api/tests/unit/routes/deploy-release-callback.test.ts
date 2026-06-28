@@ -14,6 +14,7 @@ const mockVerifyCallbackToken = vi.fn().mockResolvedValue({
 const mockMintProjectRegistryCredential = vi.fn();
 const mockLoadResolvedSecrets = vi.fn().mockResolvedValue({});
 const mockLoadDeploymentInterpolationEnv = vi.fn().mockResolvedValue({ values: {} });
+const mockBuildVolumeMountDescriptors = vi.fn().mockResolvedValue([]);
 const mockOrderBy = vi.fn().mockResolvedValue([]);
 const mockUpdateSet = vi.fn();
 const mockUpdateWhere = vi.fn();
@@ -79,6 +80,14 @@ vi.mock('../../../src/services/deployment-environment-config', () => ({
   loadDeploymentInterpolationEnv: (...args: unknown[]) =>
     mockLoadDeploymentInterpolationEnv(...args),
 }));
+
+vi.mock('../../../src/services/deployment-volumes', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../src/services/deployment-volumes')>();
+  return {
+    ...actual,
+    buildVolumeMountDescriptors: (...args: unknown[]) => mockBuildVolumeMountDescriptors(...args),
+  };
+});
 
 const { deployReleaseCallbackRoute } = await import('../../../src/routes/deploy-release-callback');
 
@@ -211,6 +220,8 @@ describe('deploy release callback route', () => {
     mockLoadResolvedSecrets.mockResolvedValue({});
     mockLoadDeploymentInterpolationEnv.mockReset();
     mockLoadDeploymentInterpolationEnv.mockResolvedValue({ values: {} });
+    mockBuildVolumeMountDescriptors.mockReset();
+    mockBuildVolumeMountDescriptors.mockResolvedValue([]);
     mockOrderBy.mockReset();
     mockOrderBy.mockResolvedValue([]);
     customDomainRows = [];
@@ -270,6 +281,7 @@ describe('deploy release callback route', () => {
     expect(body.composeYaml).not.toContain('9000');
     expect(body.expiresAt).toBe(1_700_000_090);
     expect(body.signature).toEqual(expect.any(String));
+    expect(body.volumeMounts).toEqual([]);
     expect(mockSignDeployPayload).toHaveBeenCalledWith(
       expect.objectContaining({
         environmentId: 'env-1',
@@ -277,6 +289,7 @@ describe('deploy release callback route', () => {
         seq: 7,
         composeYaml: expect.stringContaining(`127.0.0.1:${expectedPort0}:3000`),
         routes: body.routes,
+        volumeMounts: [],
       }),
       expect.anything()
     );
@@ -300,6 +313,33 @@ describe('deploy release callback route', () => {
       content: '203.0.113.10',
       proxied: false,
     });
+  });
+
+  it('includes attached volume descriptors in the signed apply payload', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000);
+    stubHappyPathDb();
+    const volumeMounts = [
+      {
+        name: 'data',
+        mountRoot: '/mnt/sam-env-env-1/volumes',
+        providerVolumeId: 'vol-123',
+        providerName: 'hetzner',
+        linuxDevice: '/dev/disk/by-id/scsi-0HC_Volume_123',
+        fsFormat: 'ext4',
+      },
+    ];
+    mockBuildVolumeMountDescriptors.mockResolvedValue(volumeMounts);
+    stubDnsFetch();
+
+    const response = await requestDeployRelease();
+
+    const body = await response.json();
+    expect(response.status, JSON.stringify(body)).toBe(200);
+    expect(body.volumeMounts).toEqual(volumeMounts);
+    expect(mockSignDeployPayload).toHaveBeenCalledWith(
+      expect.objectContaining({ volumeMounts }),
+      expect.anything()
+    );
   });
 
   it('adds verified custom domains to the signed apply payload without creating user DNS records', async () => {

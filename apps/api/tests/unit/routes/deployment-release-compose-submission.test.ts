@@ -13,6 +13,9 @@ import type { Env } from '../../../src/env';
 const FIXED_DIGEST = `sha256:${'a'.repeat(64)}`;
 
 const mockProvisionDeploymentNode = vi.fn();
+const mockResolveDeploymentPlacement = vi.fn();
+const mockCreateMissingManifestVolumes = vi.fn();
+const mockAttachEnvironmentVolumesToLinkedNode = vi.fn();
 const mockMintProjectRegistryCredential = vi.fn();
 const mockCreateImageResolver = vi.fn();
 const mockResolver = vi.fn();
@@ -24,6 +27,13 @@ let insertedReleases: Array<Record<string, unknown>> = [];
 
 vi.mock('../../../src/services/deployment-provisioning', () => ({
   provisionDeploymentNode: (...args: unknown[]) => mockProvisionDeploymentNode(...args),
+  resolveDeploymentPlacement: (...args: unknown[]) => mockResolveDeploymentPlacement(...args),
+}));
+
+vi.mock('../../../src/services/deployment-volumes', () => ({
+  createMissingManifestVolumes: (...args: unknown[]) => mockCreateMissingManifestVolumes(...args),
+  attachEnvironmentVolumesToLinkedNode: (...args: unknown[]) =>
+    mockAttachEnvironmentVolumesToLinkedNode(...args),
 }));
 
 vi.mock('../../../src/services/image-resolver', async () => {
@@ -87,6 +97,10 @@ vi.mock('../../../src/db/schema', () => ({
     id: 'de.id',
     projectId: 'de.projectId',
     nodeId: 'de.nodeId',
+  },
+  nodes: {
+    id: 'n.id',
+    nodeMode: 'n.nodeMode',
   },
   deploymentReleases: {
     id: 'dr.id',
@@ -231,6 +245,13 @@ describe('POST /:projectId/environments/:envId/releases — Compose submission',
       nodeId: 'node-new-1',
       provisioningPromise: Promise.resolve(),
     });
+    mockResolveDeploymentPlacement.mockResolvedValue({
+      provider: 'hetzner',
+      location: 'fsn1',
+      vmSize: 'small',
+    });
+    mockCreateMissingManifestVolumes.mockResolvedValue([]);
+    mockAttachEnvironmentVolumesToLinkedNode.mockResolvedValue([]);
   });
 
   it('accepts Compose YAML, persists a digest-pinned manifest, assigns version, and triggers provisioning', async () => {
@@ -284,6 +305,21 @@ describe('POST /:projectId/environments/:envId/releases — Compose submission',
       'proj-1',
       'test-user-id',
       expect.anything(),
+      {
+        requiresVolumes: true,
+        vmLocationOverride: 'fsn1',
+        vmSizeOverride: 'small',
+      },
+    );
+    expect(mockCreateMissingManifestVolumes).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      'test-user-id',
+      expect.objectContaining({
+        environmentId: 'env-1',
+        location: 'fsn1',
+        targetProvider: 'hetzner',
+      })
     );
   });
 

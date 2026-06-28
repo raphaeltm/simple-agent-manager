@@ -272,6 +272,69 @@ describe('provisionDeploymentNode', () => {
     expect(updateStatements[1]!.binds).toContain('creating');
   });
 
+  it('volume-free placement only reuses shared deployment nodes', async () => {
+    const mockDb = createMockDb({ userCredProvider: 'hetzner' });
+    vi.mocked(drizzle).mockReturnValue(mockDb as any);
+    vi.mocked(createNodeRecord).mockResolvedValue(makeNodeResult({ id: 'node-shared-fresh' }));
+    vi.mocked(provisionNode).mockResolvedValue();
+
+    const { env, statements } = createRawMockEnv([
+      { all: { results: [] } },
+      { run: { meta: { changes: 1 } } },
+    ]);
+
+    await provisionDeploymentNode('env-shared-only', 'proj-1', 'user-1', env);
+
+    const candidateQuery = statements.find((statement) =>
+      statement.sql.includes('FROM nodes')
+    );
+    expect(candidateQuery?.sql).toContain("COALESCE(node_mode, 'shared') = 'shared'");
+  });
+
+  it('volume placement skips existing-node reuse and creates an exclusive node', async () => {
+    const mockDb = createMockDb({ userCredProvider: 'hetzner' });
+    vi.mocked(drizzle).mockReturnValue(mockDb as any);
+    vi.mocked(createNodeRecord).mockResolvedValue(makeNodeResult({ id: 'node-exclusive-1' }));
+    vi.mocked(provisionNode).mockResolvedValue();
+
+    const { env, statements } = createRawMockEnv([{ run: { meta: { changes: 1 } } }]);
+
+    const result = await provisionDeploymentNode('env-volume', 'proj-1', 'user-1', env, {
+      requiresVolumes: true,
+    });
+
+    expect(result?.nodeId).toBe('node-exclusive-1');
+    expect(createNodeRecord).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        nodeMode: 'exclusive',
+        nodeRole: 'deployment',
+      })
+    );
+    expect(statements.some((statement) => statement.sql.includes('SELECT id, vm_size'))).toBe(false);
+  });
+
+  it('exclusive node link asserts the fresh node has no existing environments', async () => {
+    const mockDb = createMockDb({ userCredProvider: 'hetzner' });
+    vi.mocked(drizzle).mockReturnValue(mockDb as any);
+    vi.mocked(createNodeRecord).mockResolvedValue(makeNodeResult({ id: 'node-exclusive-guard' }));
+    vi.mocked(provisionNode).mockResolvedValue();
+
+    const { env, statements } = createRawMockEnv([{ run: { meta: { changes: 1 } } }]);
+
+    await provisionDeploymentNode('env-exclusive-guard', 'proj-1', 'user-1', env, {
+      requiresVolumes: true,
+    });
+
+    const update = statements.find((statement) =>
+      statement.sql.includes('UPDATE deployment_environments')
+    );
+    expect(update?.sql).toContain("COALESCE(node_mode, 'shared') = ?");
+    expect(update?.sql).toContain('NOT EXISTS');
+    expect(update?.sql).toContain('existing.node_id = nodes.id');
+    expect(update?.binds).toContain('exclusive');
+  });
+
   it('falls back to platform credentials when user has none', async () => {
     const mockDb = createMockDb({
       userCredProvider: null,
