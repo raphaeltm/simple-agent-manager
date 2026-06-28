@@ -183,7 +183,7 @@ export interface AgentInfo {
   configured: boolean;
   credentialHelpUrl: string;
   /** When configured through a fallback path rather than a dedicated agent key */
-  fallbackCredentialSource: 'scaleway-cloud' | 'platform-opencode' | 'platform-sam' | null;
+  fallbackCredentialSource: 'platform-sam' | null;
 }
 
 /** Credential kinds supported by agents */

@@ -10,15 +10,10 @@ import {
 } from '../../src/types/agent-settings';
 
 describe('OpenCode provider settings', () => {
-  it('includes OpenCode managed provider metadata first in dropdown order', () => {
+  it('exposes only zen/go/custom provider options with zen first', () => {
     expect(OPENCODE_PROVIDER_OPTIONS).toEqual([
       'opencode-zen',
       'opencode-go',
-      'platform',
-      'scaleway',
-      'google-vertex',
-      'openai-compatible',
-      'anthropic',
       'custom',
     ]);
 
@@ -37,15 +32,25 @@ describe('OpenCode provider settings', () => {
       requiresApiKey: true,
       keyLabel: 'OpenCode API Key',
     });
+
+    expect(OPENCODE_PROVIDERS['custom']).toMatchObject({
+      requiresBaseUrl: true,
+      requiresApiKey: true,
+    });
   });
 
-  it('resolves null and legacy managed provider values to OpenCode Zen', () => {
+  it('resolves null and legacy/removed provider values to OpenCode Zen', () => {
     expect(DEFAULT_OPENCODE_PROVIDER).toBe('opencode-zen');
     expect(resolveOpenCodeProvider(null)).toBe('opencode-zen');
     expect(resolveOpenCodeProvider(undefined)).toBe('opencode-zen');
     expect(resolveOpenCodeProvider('not-a-provider')).toBe('opencode-zen');
     expect(resolveOpenCodeProvider('opencode-managed')).toBe('opencode-zen');
+    expect(resolveOpenCodeProvider('platform')).toBe('opencode-zen');
+    expect(resolveOpenCodeProvider('scaleway')).toBe('opencode-zen');
+    expect(resolveOpenCodeProvider('google-vertex')).toBe('opencode-zen');
+    expect(resolveOpenCodeProvider('anthropic')).toBe('opencode-zen');
+    expect(resolveOpenCodeProvider('openai-compatible')).toBe('opencode-zen');
     expect(resolveOpenCodeProvider('opencode-go')).toBe('opencode-go');
-    expect(resolveOpenCodeProvider('scaleway')).toBe('scaleway');
+    expect(resolveOpenCodeProvider('custom')).toBe('custom');
   });
 });
