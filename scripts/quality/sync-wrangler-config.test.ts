@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PulumiOutputs, WranglerToml } from '../deploy/types.js';
-import { checkTailWorkerExists, generateApiWorkerEnv } from '../deploy/sync-wrangler-config.js';
+import {
+  checkTailWorkerExists,
+  generateApiWorkerEnv,
+  normalizeDurableObjectMigrationsForBackend,
+} from '../deploy/sync-wrangler-config.js';
 
 const outputs: PulumiOutputs = {
   d1DatabaseId: 'd1-id',
@@ -76,6 +80,72 @@ describe('sync wrangler config', () => {
       ANALYTICS_DATASET: 'sa379a6_analytics',
       WWW_PAGES_PROJECT_NAME: 'sa379a6-www',
     });
+  });
+
+  it('preserves legacy Durable Object migrations by default for existing deployments', () => {
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+
+    const topLevel: WranglerToml = {
+      migrations: [
+        { tag: 'v1', new_sqlite_classes: ['ProjectData'] },
+        { tag: 'v2', new_classes: ['NodeLifecycle'] },
+      ],
+    };
+
+    const envConfig = generateApiWorkerEnv(topLevel, outputs, 'prod', false);
+
+    expect(envConfig.migrations).toEqual([
+      { tag: 'v1', new_sqlite_classes: ['ProjectData'] },
+      { tag: 'v2', new_classes: ['NodeLifecycle'] },
+    ]);
+  });
+
+  it('rewrites generated Durable Object create migrations to SQLite when requested', () => {
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+    vi.stubEnv('SAM_DO_MIGRATION_BACKEND', 'sqlite');
+
+    const topLevel: WranglerToml = {
+      migrations: [
+        { tag: 'v1', new_sqlite_classes: ['ProjectData'] },
+        { tag: 'v2', new_classes: ['NodeLifecycle'] },
+        { tag: 'v3', new_classes: ['AdminLogs'], new_sqlite_classes: ['NotificationService'] },
+      ],
+    };
+
+    const envConfig = generateApiWorkerEnv(topLevel, outputs, 'prod', false);
+
+    expect(envConfig.migrations).toEqual([
+      { tag: 'v1', new_sqlite_classes: ['ProjectData'] },
+      { tag: 'v2', new_sqlite_classes: ['NodeLifecycle'] },
+      { tag: 'v3', new_sqlite_classes: ['NotificationService', 'AdminLogs'] },
+    ]);
+    expect(topLevel.migrations).toEqual([
+      { tag: 'v1', new_sqlite_classes: ['ProjectData'] },
+      { tag: 'v2', new_classes: ['NodeLifecycle'] },
+      { tag: 'v3', new_classes: ['AdminLogs'], new_sqlite_classes: ['NotificationService'] },
+    ]);
+  });
+
+  it('rejects unknown Durable Object migration backend values', () => {
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+    vi.stubEnv('SAM_DO_MIGRATION_BACKEND', 'kv');
+
+    expect(() => generateApiWorkerEnv({}, outputs, 'prod', false)).toThrow(
+      'SAM_DO_MIGRATION_BACKEND must be "sqlite" when set'
+    );
+  });
+
+  it('normalizes Durable Object migrations as a pure helper', () => {
+    const migrations = [
+      { tag: 'v1', new_sqlite_classes: ['ProjectData'] },
+      { tag: 'v2', new_classes: ['NodeLifecycle'] },
+    ];
+
+    expect(normalizeDurableObjectMigrationsForBackend(migrations, 'legacy')).toBe(migrations);
+    expect(normalizeDurableObjectMigrationsForBackend(migrations, 'sqlite')).toEqual([
+      { tag: 'v1', new_sqlite_classes: ['ProjectData'] },
+      { tag: 'v2', new_sqlite_classes: ['NodeLifecycle'] },
+    ]);
   });
 
   it('distinguishes a missing tail worker from Cloudflare API failures', async () => {

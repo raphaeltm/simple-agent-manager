@@ -39,6 +39,9 @@ const TAIL_WORKER_WRANGLER_TOML_PATH = resolve(
 );
 const DEPLOY_STATE_DIR = resolve(import.meta.dirname, '../../.wrangler');
 const FIRST_DEPLOY_MARKER = resolve(DEPLOY_STATE_DIR, 'tail-worker-first-deploy');
+const DO_MIGRATION_BACKEND_ENV = 'SAM_DO_MIGRATION_BACKEND';
+
+type DurableObjectMigrationBackend = 'legacy' | 'sqlite';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -63,6 +66,40 @@ function ensureTomlMap(value: unknown, path: string): TOML.JsonMap {
     throw new Error(`${path} must be a TOML table`);
   }
   return value as TOML.JsonMap;
+}
+
+function getDurableObjectMigrationBackend(): DurableObjectMigrationBackend {
+  const value = process.env[DO_MIGRATION_BACKEND_ENV]?.trim().toLowerCase();
+  if (!value) {
+    return 'legacy';
+  }
+
+  if (value === 'sqlite') {
+    return 'sqlite';
+  }
+
+  throw new Error(`${DO_MIGRATION_BACKEND_ENV} must be "sqlite" when set`);
+}
+
+export function normalizeDurableObjectMigrationsForBackend(
+  migrations: MigrationEntry[] | undefined,
+  backend: DurableObjectMigrationBackend
+): MigrationEntry[] | undefined {
+  if (!migrations || backend !== 'sqlite') {
+    return migrations;
+  }
+
+  return migrations.map((migration) => {
+    if (!migration.new_classes?.length) {
+      return { ...migration };
+    }
+
+    const { new_classes, new_sqlite_classes, ...rest } = migration;
+    return {
+      ...rest,
+      new_sqlite_classes: [...(new_sqlite_classes ?? []), ...new_classes],
+    };
+  });
 }
 
 // ============================================================================
@@ -214,6 +251,17 @@ export function generateApiWorkerEnv(
   const analyticsEngineDatasets = staticBindings.analytics_engine_datasets?.map((dataset) =>
     dataset.binding === 'ANALYTICS' ? { ...dataset, dataset: analyticsDataset } : dataset
   );
+  const migrationBackend = getDurableObjectMigrationBackend();
+  const migrations = normalizeDurableObjectMigrationsForBackend(
+    staticBindings.migrations,
+    migrationBackend
+  );
+
+  if (migrationBackend === 'sqlite') {
+    console.log(
+      `${DO_MIGRATION_BACKEND_ENV}=sqlite: generated API Worker env will create Durable Object namespaces with new_sqlite_classes`
+    );
+  }
 
   const envConfig: WranglerEnvConfig = {
     // Worker name derived from config
@@ -301,7 +349,7 @@ export function generateApiWorkerEnv(
     ...(staticBindings.durable_objects ? { durable_objects: staticBindings.durable_objects } : {}),
     ...(staticBindings.ai ? { ai: staticBindings.ai } : {}),
     ...(analyticsEngineDatasets ? { analytics_engine_datasets: analyticsEngineDatasets } : {}),
-    ...(staticBindings.migrations ? { migrations: staticBindings.migrations } : {}),
+    ...(migrations ? { migrations } : {}),
     ...(staticBindings.containers ? { containers: staticBindings.containers } : {}),
     ...(staticBindings.artifacts ? { artifacts: staticBindings.artifacts } : {}),
 
