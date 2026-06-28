@@ -19,13 +19,25 @@ This guide walks you through deploying Simple Agent Manager to your own infrastr
 
 You do **not** need a shared cloud provider account. Users provide their own [Hetzner API token](https://console.hetzner.cloud/), [Scaleway API key](https://console.scaleway.com/iam/api-keys), or GCP configuration through the Settings UI. GCP support also requires optional Google OAuth configuration on the SAM instance.
 
-## Step 1: Fork the Repository
+## Step 1: Choose Your Domain and Cloudflare Account
+
+Use a top-level domain as `BASE_DOMAIN` (e.g., `example.com`), not a subdomain (`sam.example.com`). Cloudflare's free Universal SSL covers `*.example.com` but not nested wildcards like `*.sam.example.com`. The root domain is not used by SAM — only `api.`, `app.`, and `*.` subdomains are created.
+
+Copy your Cloudflare account ID from the dashboard URL. In a URL like `https://dash.cloudflare.com/<account-id>/<domain>`, the account ID is the 32-character value immediately after `dash.cloudflare.com/`.
+
+Open your domain overview at `https://dash.cloudflare.com/<account-id>/<domain>` and copy the Zone ID from the right sidebar.
+
+:::tip[DNSSEC]
+If your registrar has DNSSEC enabled, disable it **before** changing nameservers to Cloudflare. DNSSEC with mismatched nameservers blocks DNS resolution.
+:::
+
+## Step 2: Fork the Repository
 
 Fork [simple-agent-manager](https://github.com/raphaeltm/simple-agent-manager) on GitHub.
 
-## Step 2: Create Cloudflare API Token
+## Step 3: Create Cloudflare Tokens
 
-In Cloudflare Dashboard → My Profile → API Tokens → Create Custom Token:
+In Cloudflare Dashboard → `https://dash.cloudflare.com/<account-id>/api-tokens` → Create Custom Token:
 
 | Permission Type | Resource               | Access |
 | --------------- | ---------------------- | ------ |
@@ -44,31 +56,23 @@ In Cloudflare Dashboard → My Profile → API Tokens → Create Custom Token:
 
 Set **Zone Resources** to your specific domain and **Account Resources** to your account.
 
-:::caution[Use a top-level domain]
-Use a top-level domain as `BASE_DOMAIN` (e.g., `example.com`), not a subdomain (`sam.example.com`). Cloudflare's free Universal SSL covers `*.example.com` but not nested wildcards like `*.sam.example.com`. The root domain is not used by SAM — only `api.`, `app.`, and `*.` subdomains are created.
-:::
+Create R2 access keys for Pulumi state in the same Cloudflare account:
 
-:::tip[DNSSEC]
-If your registrar has DNSSEC enabled, disable it **before** changing nameservers to Cloudflare. DNSSEC with mismatched nameservers blocks DNS resolution.
-:::
+1. Open `https://dash.cloudflare.com/<account-id>/r2/api-tokens`
+2. Create a token with **Object Read & Write** permissions
+3. Note the Access Key ID and Secret Access Key
 
-## Step 3: Create GitHub App
+## Step 4: Create GitHub App
 
 Use the wizard below to create your GitHub App with all settings pre-filled. Enter your domain, click through to GitHub, and the wizard will generate your environment secrets.
 
 <GitHubAppSetup />
 
+The GitHub App needs **Pull requests: Read-only** because it subscribes to the `pull_request` webhook event. Enable **Redirect on update** under the Setup URL settings so repository access changes return users to SAM.
+
 :::caution
 "Request user authorization (OAuth) during installation" must be **unchecked** on the GitHub form. When checked, it disables the Setup URL and breaks post-installation redirects.
 :::
-
-## Step 4: Create R2 API Token
-
-Separate from the main API token, this is for Pulumi state storage:
-
-1. Cloudflare Dashboard → R2 → Manage R2 API Tokens
-2. Create token with **Object Read & Write** permissions
-3. Note the Access Key ID and Secret Access Key
 
 ## Step 5: Generate Pulumi Passphrase
 
@@ -76,7 +80,7 @@ Separate from the main API token, this is for Pulumi state storage:
 openssl rand -base64 32
 ```
 
-Save this passphrase — you'll need it for all future deployments.
+Add this passphrase to the GitHub Actions environment in the next step and keep a copy in your password manager for future deployments or teardown.
 
 ## Step 6: Configure GitHub Environment
 

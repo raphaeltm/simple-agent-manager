@@ -15,7 +15,6 @@
     'fork',
     'cf-token',
     'github-app',
-    'r2-token',
     'passphrase',
     'github-env',
     'deploy',
@@ -228,12 +227,14 @@
     params.set('url', 'https://app.' + domain);
     params.append('callback_urls[]', 'https://api.' + domain + '/api/auth/callback/github');
     params.set('setup_url', 'https://api.' + domain + '/api/github/callback');
+    params.set('setup_on_update', 'true');
     params.set('public', 'false');
     params.set('webhook_active', 'true');
     params.set('webhook_url', 'https://api.' + domain + '/api/github/webhook');
     params.set('contents', 'write');
     params.set('metadata', 'read');
     params.set('email_addresses', 'read');
+    params.set('pull_requests', 'read');
     params.append('events[]', 'push');
     params.append('events[]', 'pull_request');
 
@@ -271,8 +272,9 @@
       addPreviewRow(preview, 'Homepage URL', 'https://app.' + domain);
       addPreviewRow(preview, 'Callback URL', 'https://api.' + domain + '/api/auth/callback/github');
       addPreviewRow(preview, 'Setup URL', 'https://api.' + domain + '/api/github/callback');
+      addPreviewRow(preview, 'Redirect on update', 'Enabled');
       addPreviewRow(preview, 'Webhook URL', 'https://api.' + domain + '/api/github/webhook');
-      addPreviewRow(preview, 'Permissions', 'Contents: write · Metadata: read · Emails: read');
+      addPreviewRow(preview, 'Permissions', 'Contents: write · Metadata: read · Emails: read · Pull requests: read');
       addPreviewRow(preview, 'Events', 'push, pull_request');
     }
 
@@ -299,7 +301,7 @@
     if (el) el.textContent = state.passphrase;
   }
 
-  // --- Step 7: vars + secrets output ---
+  // --- Step 6: vars + secrets output ---
   // Single source of truth for the GitHub Environment vars/secrets, shared by
   // the row renderer and the gh CLI script generator.
   function getEnvData(resourcePrefix) {
@@ -307,7 +309,7 @@
 
     var vars = [
       { key: 'BASE_DOMAIN', value: domain, required: true },
-      { key: 'RESOURCE_PREFIX', value: resourcePrefix, required: true, note: 'derived from BASE_DOMAIN' },
+      { key: 'RESOURCE_PREFIX', value: resourcePrefix, required: true },
     ];
 
     var privateKey = getField('sh-private-key');
@@ -445,9 +447,9 @@
   function missingStepFor(key) {
     if (key.indexOf('CF_') === 0) return 3;
     if (key.indexOf('GH_') === 0) return 4;
-    if (key.indexOf('R2_') === 0) return 5;
-    if (key === 'PULUMI_CONFIG_PASSPHRASE') return 6;
-    return 7;
+    if (key.indexOf('R2_') === 0) return 3;
+    if (key === 'PULUMI_CONFIG_PASSPHRASE') return 5;
+    return 6;
   }
 
   function copyIcon() {
@@ -462,7 +464,7 @@
     return '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c6.5 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3.5 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" x2="22" y1="2" y2="22"/></svg>';
   }
 
-  // --- Step 7: gh CLI one-shot script ---
+  // --- Step 6: gh CLI one-shot script ---
   // Single-quote escaping for POSIX shells: close the quote, emit an escaped
   // quote, reopen — '\'' — so arbitrary values (incl. base64 PEM) survive intact.
   function shellQuote(value) {
@@ -516,7 +518,7 @@
       .join('\n');
   }
 
-  // --- Step 8: deploy ---
+  // --- Step 7: deploy ---
   function renderDeploy() {
     var domain = getDomain();
     var d = isValidDomain(domain) ? domain : 'yourdomain.com';
@@ -529,17 +531,30 @@
     }
     var login = document.getElementById('sh-app-login');
     if (login) login.href = 'https://app.' + d;
-    var repo = getField('sh-repo').trim().replace(/^\/+|\/+$/g, '');
-    var deployLink = document.getElementById('sh-deploy-workflow');
-    var deployNote = document.getElementById('sh-deploy-workflow-note');
-    if (deployLink) {
-      if (/^[a-zA-Z0-9_][a-zA-Z0-9_.-]*\/[a-zA-Z0-9_][a-zA-Z0-9_.-]*$/.test(repo)) {
-        deployLink.href = 'https://github.com/' + repo + '/actions/workflows/deploy.yml';
-        if (deployNote) deployNote.textContent = 'Links straight to your fork — click "Run workflow", pick the main branch, and go.';
-      } else {
-        deployLink.href = 'https://github.com/';
-        if (deployNote) deployNote.textContent = 'Add your fork in Step 7 and this button links straight to its Run-workflow screen. Otherwise: your fork → Actions → Deploy Production → Run workflow.';
-      }
+  }
+
+  function renderCloudflareLinks() {
+    var account = getField('sh-cf-account').trim();
+    var domain = getDomain();
+    var hasAccount = /^[a-f0-9]{32}$/i.test(account);
+    var cfApiLink = document.getElementById('sh-cf-api-link');
+    var r2ApiLink = document.getElementById('sh-r2-api-link');
+    var zoneLink = document.getElementById('sh-cf-zone-link');
+
+    if (cfApiLink) {
+      cfApiLink.href = hasAccount
+        ? 'https://dash.cloudflare.com/' + account + '/api-tokens'
+        : 'https://dash.cloudflare.com/profile/api-tokens';
+    }
+    if (r2ApiLink) {
+      r2ApiLink.href = hasAccount
+        ? 'https://dash.cloudflare.com/' + account + '/r2/api-tokens'
+        : 'https://dash.cloudflare.com/?to=/:account/r2/api-tokens';
+    }
+    if (zoneLink) {
+      zoneLink.href = hasAccount && isValidDomain(domain)
+        ? 'https://dash.cloudflare.com/' + account + '/' + domain
+        : 'https://dash.cloudflare.com/';
     }
   }
 
@@ -614,6 +629,7 @@
     // Per-step side effects
     var id = STEP_IDS[state.step];
     if (id === 'domain') updateDomainDerived();
+    if (id === 'cf-token') renderCloudflareLinks();
     if (id === 'github-app') {
       if (state.webhookSecret) generateAppLink();
     }
@@ -687,7 +703,8 @@
       el.addEventListener('input', function () {
         persistField(fid);
         if (fid === 'sh-domain') updateDomainDerived();
-        if (fid === 'sh-repo' && STEP_IDS[state.step] === 'github-env') renderEnvOutputs();
+        if (fid === 'sh-domain' || fid === 'sh-cf-account') renderCloudflareLinks();
+        if (STEP_IDS[state.step] === 'github-env') renderEnvOutputs();
       });
     });
 

@@ -518,11 +518,13 @@
       params.set('public', 'false');
       params.append('callback_urls[]', apiUrl + '/api/auth/callback/github');
       params.set('setup_url', apiUrl + '/api/github/callback');
+      params.set('setup_on_update', 'true');
       params.set('webhook_active', 'true');
       params.set('webhook_url', apiUrl + '/api/github/webhook');
       params.set('contents', 'write');
       params.set('metadata', 'read');
       params.set('email_addresses', 'read');
+      params.set('pull_requests', 'read');
       params.append('events[]', 'push');
       params.append('events[]', 'pull_request');
 
@@ -620,8 +622,9 @@
         ['Homepage', appUrl],
         ['Callback', apiUrl + '/api/auth/callback/github'],
         ['Setup URL', apiUrl + '/api/github/callback'],
+        ['Redirect on update', 'Enabled'],
         ['Webhook', apiUrl + '/api/github/webhook'],
-        ['Permissions', 'Contents (write), Metadata (read), Email addresses (read)'],
+        ['Permissions', 'Contents (write), Metadata (read), Email addresses (read), Pull requests (read)'],
         ['Events', 'push, pull_request'],
       ];
 

@@ -9,14 +9,13 @@ const repoUrl = 'https://github.com/raphaeltm/simple-agent-manager';
 // Source of truth: apps/www/src/content/docs/docs/guides/self-hosting.mdx
 const steps = [
   { id: 'welcome', num: 0, label: 'Welcome', short: 'Start' },
-  { id: 'domain', num: 1, label: 'Your domain', short: 'Domain' },
+  { id: 'domain', num: 1, label: 'Domain & Cloudflare account', short: 'Domain' },
   { id: 'fork', num: 2, label: 'Fork the repo', short: 'Fork' },
-  { id: 'cf-token', num: 3, label: 'Cloudflare API token', short: 'CF token' },
+  { id: 'cf-token', num: 3, label: 'Cloudflare tokens', short: 'CF tokens' },
   { id: 'github-app', num: 4, label: 'Create GitHub App', short: 'GitHub App' },
-  { id: 'r2-token', num: 5, label: 'R2 API token', short: 'R2 token' },
-  { id: 'passphrase', num: 6, label: 'Pulumi passphrase', short: 'Passphrase' },
-  { id: 'github-env', num: 7, label: 'Configure environment', short: 'Environment' },
-  { id: 'deploy', num: 8, label: 'Deploy & verify', short: 'Deploy' },
+  { id: 'passphrase', num: 5, label: 'Pulumi passphrase', short: 'Passphrase' },
+  { id: 'github-env', num: 6, label: 'Configure environment', short: 'Environment' },
+  { id: 'deploy', num: 7, label: 'Deploy & verify', short: 'Deploy' },
 ];
 
 // Cloudflare API token permission matrix — exact values from the guide.
@@ -108,16 +107,24 @@ const cfOptionalPermissions = [
         <!-- 1. Domain -->
         <article class="sh-panel" data-panel="domain" hidden>
           <span class="sh-eyebrow">Step 1</span>
-          <h2 class="sh-h2">Your domain</h2>
+          <h2 class="sh-h2">Your domain and Cloudflare account</h2>
           <p class="sh-lead">
             Enter the domain you'll use for SAM. This becomes your <code>BASE_DOMAIN</code> and powers
             every URL and secret we generate from here on. We also derive a short resource prefix
             from this domain so your Cloudflare resources do not collide with other SAM installs.
+            Your Cloudflare account ID lets us send you to the right account-scoped token pages.
           </p>
-          <div class="sh-field">
-            <label for="sh-domain">Base domain</label>
-            <input type="text" id="sh-domain" placeholder="example.com" autocomplete="off" spellcheck="false" />
-            <span class="sh-hint" id="sh-domain-error" hidden>Enter a valid top-level domain, e.g. <code>example.com</code>.</span>
+          <div class="sh-field-row">
+            <div class="sh-field">
+              <label for="sh-domain">Base domain</label>
+              <input type="text" id="sh-domain" placeholder="example.com" autocomplete="off" spellcheck="false" />
+              <span class="sh-hint" id="sh-domain-error" hidden>Enter a valid top-level domain, e.g. <code>example.com</code>.</span>
+            </div>
+            <div class="sh-field">
+              <label for="sh-cf-account">Cloudflare account ID</label>
+              <input type="text" id="sh-cf-account" placeholder="32-character account ID" autocomplete="off" spellcheck="false" />
+              <span class="sh-hint">In the Cloudflare dashboard URL, this is the 32-character value after <code>dash.cloudflare.com/</code>.</span>
+            </div>
           </div>
           <div class="sh-callout sh-callout-warn">
             <strong>Use a top-level domain.</strong> Cloudflare's free Universal SSL covers <code>*.example.com</code>
@@ -168,7 +175,7 @@ const cfOptionalPermissions = [
           </a>
           <div class="sh-callout sh-callout-info">
             Keep the fork under the account or organization where you want the deploy to run. You'll
-            configure its <code>production</code> environment in Step 7.
+            configure its <code>production</code> environment in Step 6.
           </div>
           <details class="sh-why">
             <summary>
@@ -191,15 +198,15 @@ const cfOptionalPermissions = [
           </details>
         </article>
 
-        <!-- 3. Cloudflare API token -->
+        <!-- 3. Cloudflare tokens -->
         <article class="sh-panel" data-panel="cf-token" hidden>
           <span class="sh-eyebrow">Step 3</span>
-          <h2 class="sh-h2">Create a Cloudflare API token</h2>
+          <h2 class="sh-h2">Create your Cloudflare tokens</h2>
           <p class="sh-lead">
-            In the Cloudflare dashboard, go to <strong>My Profile → API Tokens → Create Custom Token</strong>
-            and grant exactly these permissions:
+            Create the main Cloudflare API token in your account's token page, then create the R2
+            access keys used for Pulumi state. Grant the main token exactly these permissions:
           </p>
-          <a class="sh-btn sh-btn-primary" href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" rel="noopener noreferrer">
+          <a class="sh-btn sh-btn-primary" id="sh-cf-api-link" href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" rel="noopener noreferrer">
             Open Cloudflare API Tokens
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
           </a>
@@ -240,19 +247,36 @@ const cfOptionalPermissions = [
             Set <strong>Zone Resources</strong> to your domain and <strong>Account Resources</strong> to your account.
             Also enable <strong>Analytics Engine</strong> (free): Workers &amp; Pages → Analytics Engine → Enable.
           </div>
-          <p class="sh-lead">Paste the generated values so we can assemble your final secrets in Step 7:</p>
+          <p class="sh-lead">Paste the generated values so we can assemble your final secrets in Step 6:</p>
           <div class="sh-field">
             <label for="sh-cf-token">CF_API_TOKEN <span class="sh-hint-inline">(shown once after creation)</span></label>
             <input type="password" id="sh-cf-token" placeholder="Paste token" autocomplete="off" spellcheck="false" data-secret />
           </div>
+          <div class="sh-field">
+            <label for="sh-cf-zone">CF_ZONE_ID <span class="sh-hint-inline">(32-char hex)</span></label>
+            <input type="text" id="sh-cf-zone" placeholder="Domain zone ID" autocomplete="off" spellcheck="false" />
+            <span class="sh-hint">
+              Open your domain's Cloudflare overview page and copy the Zone ID from the right sidebar.
+              <a id="sh-cf-zone-link" href="https://dash.cloudflare.com/" target="_blank" rel="noopener noreferrer">Open domain overview</a>
+            </span>
+          </div>
+          <h4 class="sh-subhead">R2 access keys for Pulumi state</h4>
+          <p class="sh-lead">
+            Cloudflare may show these while you create token credentials. If not, open R2 API Tokens
+            and create an <strong>Object Read &amp; Write</strong> token.
+          </p>
+          <a class="sh-btn sh-btn-primary" id="sh-r2-api-link" href="https://dash.cloudflare.com/?to=/:account/r2/api-tokens" target="_blank" rel="noopener noreferrer">
+            Open R2 API Tokens
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
+          </a>
           <div class="sh-field-row">
             <div class="sh-field">
-              <label for="sh-cf-account">CF_ACCOUNT_ID <span class="sh-hint-inline">(32-char hex)</span></label>
-              <input type="text" id="sh-cf-account" placeholder="abc123…" autocomplete="off" spellcheck="false" />
+              <label for="sh-r2-key">R2_ACCESS_KEY_ID</label>
+              <input type="text" id="sh-r2-key" placeholder="Access Key ID" autocomplete="off" spellcheck="false" />
             </div>
             <div class="sh-field">
-              <label for="sh-cf-zone">CF_ZONE_ID <span class="sh-hint-inline">(32-char hex)</span></label>
-              <input type="text" id="sh-cf-zone" placeholder="def456…" autocomplete="off" spellcheck="false" />
+              <label for="sh-r2-secret">R2_SECRET_ACCESS_KEY</label>
+              <input type="password" id="sh-r2-secret" placeholder="Secret Access Key" autocomplete="off" spellcheck="false" data-secret />
             </div>
           </div>
           <p class="sh-microcopy">Token and secret fields are never persisted to your browser storage — they live only in this tab until you close it.</p>
@@ -388,54 +412,13 @@ const cfOptionalPermissions = [
           </div>
         </article>
 
-        <!-- 5. R2 token -->
-        <article class="sh-panel" data-panel="r2-token" hidden>
-          <span class="sh-eyebrow">Step 5</span>
-          <h2 class="sh-h2">Create an R2 API token</h2>
-          <p class="sh-lead">
-            Separate from your main token, this one stores Pulumi state. In the Cloudflare dashboard:
-            <strong>R2 → Manage R2 API Tokens → Create</strong> with <strong>Object Read &amp; Write</strong> permissions.
-          </p>
-          <a class="sh-btn sh-btn-primary" href="https://dash.cloudflare.com/?to=/:account/r2/api-tokens" target="_blank" rel="noopener noreferrer">
-            Open R2 API Tokens
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
-          </a>
-          <div class="sh-field">
-            <label for="sh-r2-key">R2_ACCESS_KEY_ID</label>
-            <input type="text" id="sh-r2-key" placeholder="Access Key ID" autocomplete="off" spellcheck="false" />
-          </div>
-          <div class="sh-field">
-            <label for="sh-r2-secret">R2_SECRET_ACCESS_KEY</label>
-            <input type="password" id="sh-r2-secret" placeholder="Secret Access Key" autocomplete="off" spellcheck="false" data-secret />
-          </div>
-          <p class="sh-microcopy">These feed Pulumi's remote state backend. Like all secrets here, they stay in this tab only.</p>
-          <details class="sh-why">
-            <summary>
-              <svg class="sh-why-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
-              <span>Why a second, separate token?</span>
-              <svg class="sh-why-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
-            </summary>
-            <div class="sh-why-body">
-              <p>
-                Pulumi records the state of your infrastructure — what exists, resource IDs, and
-                encrypted secrets — in an R2 bucket so every deploy is repeatable and survives a fresh
-                machine or CI runner.
-              </p>
-              <p>
-                This token is deliberately narrower than your main Cloudflare one: object read &amp;
-                write on that single state bucket is all it ever needs, so it's safe to scope tightly.
-              </p>
-            </div>
-          </details>
-        </article>
-
-        <!-- 6. Pulumi passphrase -->
+        <!-- 5. Pulumi passphrase -->
         <article class="sh-panel" data-panel="passphrase" hidden>
-          <span class="sh-eyebrow">Step 6</span>
+          <span class="sh-eyebrow">Step 5</span>
           <h2 class="sh-h2">Generate a Pulumi passphrase</h2>
           <p class="sh-lead">
-            Pulumi encrypts your stack secrets with this passphrase. <strong>Save it</strong> — you'll need
-            the exact same value for every future deployment.
+            Pulumi encrypts your stack secrets with this passphrase. Add it to GitHub Actions in the next
+            step and keep a copy in your password manager for future deploys or teardown.
           </p>
           <div class="sh-secret-box">
             <h4>PULUMI_CONFIG_PASSPHRASE</h4>
@@ -476,9 +459,9 @@ const cfOptionalPermissions = [
           </details>
         </article>
 
-        <!-- 7. GitHub Environment -->
+        <!-- 6. GitHub Environment -->
         <article class="sh-panel" data-panel="github-env" hidden>
-          <span class="sh-eyebrow">Step 7</span>
+          <span class="sh-eyebrow">Step 6</span>
           <h2 class="sh-h2">Configure the production environment</h2>
           <p class="sh-lead">
             In your fork: <strong>Settings → Environments → New environment → <code>production</code></strong>.
@@ -552,9 +535,9 @@ const cfOptionalPermissions = [
           </details>
         </article>
 
-        <!-- 8. Deploy & verify -->
+        <!-- 7. Deploy & verify -->
         <article class="sh-panel" data-panel="deploy" hidden>
-          <span class="sh-eyebrow">Step 8</span>
+          <span class="sh-eyebrow">Step 7</span>
           <h2 class="sh-h2">Deploy &amp; verify</h2>
           <p class="sh-lead">
             No commit needed — just run the <strong>Deploy Production</strong> workflow in your fork.
@@ -562,11 +545,6 @@ const cfOptionalPermissions = [
             provisions D1, KV, R2, and DNS, deploys the Worker and web UI, runs migrations, and builds
             the VM agent.
           </p>
-          <a id="sh-deploy-workflow" class="sh-btn sh-btn-primary" href="https://github.com/" target="_blank" rel="noopener noreferrer">
-            Open the Deploy workflow
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
-          </a>
-          <p class="sh-microcopy" id="sh-deploy-workflow-note">Add your fork in Step 7 and this button links straight to its Run-workflow screen.</p>
           <h4 class="sh-subhead">Verify the API is healthy</h4>
           <div class="sh-copy-field sh-copy-field-block">
             <code id="sh-health-cmd"></code>

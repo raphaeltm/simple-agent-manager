@@ -28,6 +28,7 @@ export interface GitHubAppManifest {
   default_permissions: {
     contents: string;
     metadata: string;
+    pull_requests: string;
     statuses: string;
   };
 }
@@ -57,6 +58,7 @@ export function generateAppManifest(
     default_permissions: {
       contents: 'read',
       metadata: 'read',
+      pull_requests: 'read',
       statuses: 'read',
     },
   };
