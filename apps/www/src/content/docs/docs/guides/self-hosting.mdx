@@ -84,14 +84,19 @@ In your fork: Settings → Environments → New environment → name it `product
 
 **Environment variables:**
 
-| Variable          | Description                               | Example       |
-| ----------------- | ----------------------------------------- | ------------- |
-| `BASE_DOMAIN`     | Your domain                               | `example.com` |
-| `RESOURCE_PREFIX` | Domain-derived Cloudflare resource prefix | `sa379a6`     |
+| Variable                   | Description                                                     | Example       |
+| -------------------------- | --------------------------------------------------------------- | ------------- |
+| `BASE_DOMAIN`              | Your domain                                                     | `example.com` |
+| `RESOURCE_PREFIX`          | Domain-derived Cloudflare resource prefix                       | `sa379a6`     |
+| `SAM_DO_MIGRATION_BACKEND` | Optional advanced override; use `sqlite` only for fresh deploys | `sqlite`      |
 
 The guided setup generates `RESOURCE_PREFIX` from `BASE_DOMAIN` as `s` plus the
 first six hex characters of the domain's SHA-256 hash. Use that generated value
 instead of choosing a generic prefix.
+
+Leave `SAM_DO_MIGRATION_BACKEND` unset for existing deployments. The deploy
+workflow sets it automatically when a fresh Free-plan deploy needs
+SQLite-backed Durable Object namespace creation.
 
 **Environment secrets:**
 

@@ -49,15 +49,20 @@ Set as `[vars]` in `wrangler.toml` or as environment variables:
 
 Set in GitHub Settings → Environments → production:
 
-| Variable              | Description                                    | Example                |
-| --------------------- | ---------------------------------------------- | ---------------------- |
-| `BASE_DOMAIN`         | Deployment domain                              | `example.com`          |
-| `RESOURCE_PREFIX`     | Domain-derived Cloudflare resource name prefix | `sa379a6`              |
-| `PULUMI_STATE_BUCKET` | R2 bucket for Pulumi state                     | `sa379a6-pulumi-state` |
+| Variable                   | Description                                                         | Example                |
+| -------------------------- | ------------------------------------------------------------------- | ---------------------- |
+| `BASE_DOMAIN`              | Deployment domain                                                   | `example.com`          |
+| `RESOURCE_PREFIX`          | Domain-derived Cloudflare resource name prefix                      | `sa379a6`              |
+| `PULUMI_STATE_BUCKET`      | R2 bucket for Pulumi state                                          | `sa379a6-pulumi-state` |
+| `SAM_DO_MIGRATION_BACKEND` | Optional advanced override; use `sqlite` only for fresh deployments | `sqlite`               |
 
 `RESOURCE_PREFIX` is generated from `BASE_DOMAIN` as `s` plus the first six hex
 characters of the domain's SHA-256 hash. The self-host onboarding flow fills it
 in for you.
+
+Leave `SAM_DO_MIGRATION_BACKEND` unset for existing deployments. The deploy
+workflow sets it automatically when a fresh Free-plan deploy needs
+SQLite-backed Durable Object namespace creation.
 
 Required GitHub Actions secrets include `CF_API_TOKEN`, `CF_ACCOUNT_ID`, `CF_ZONE_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `PULUMI_CONFIG_PASSPHRASE`, `GH_CLIENT_ID`, `GH_CLIENT_SECRET`, `GH_APP_ID`, `GH_APP_PRIVATE_KEY`, `GH_APP_SLUG`, and `GH_WEBHOOK_SECRET`. Deploy signing keys are generated and persisted by Pulumi during deployment; GitHub Environment values are only needed for explicit key overrides.
 
