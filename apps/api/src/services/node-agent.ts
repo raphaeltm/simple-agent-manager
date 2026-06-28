@@ -304,9 +304,9 @@ export interface AgentSessionOverrides {
   model?: string | null;
   effort?: string | null;
   permissionMode?: string | null;
-  /** OpenCode inference provider (e.g. 'scaleway', 'anthropic', 'custom'). */
+  /** OpenCode inference provider ('opencode-zen', 'opencode-go', or 'custom'). */
   opencodeProvider?: string | null;
-  /** Base URL for custom/openai-compatible OpenCode providers. */
+  /** Base URL for the 'custom' OpenCode provider. */
   opencodeBaseUrl?: string | null;
 }
 

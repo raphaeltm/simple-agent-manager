@@ -2469,6 +2469,41 @@ func TestInjectAgentCredential_ProxyRequiresCallbackToken(t *testing.T) {
 	}
 }
 
+func TestInjectAgentCredential_OpencodeRejectsInferenceProxy(t *testing.T) {
+	t.Parallel()
+
+	// OpenCode has no proxy descriptor, so any non-nil inferenceConfig (platform
+	// or passthrough proxy) must be a hard error rather than silently degrading
+	// to a plain env-var injection. CallbackToken is set so the failure is the
+	// "not supported" descriptor error, not the missing-token error.
+	host := newProxyCredentialTestHost(t, "workspace-token")
+	cred := proxyCredentialForTest(
+		"sk-user",
+		"opencode-zen",
+		"",
+		"opencode/claude-sonnet-4-6",
+		"callback-token",
+	)
+	_, _, err := host.injectAgentCredential(
+		context.Background(),
+		"container-id",
+		"opencode",
+		cred,
+		nil,
+		getAgentCommandInfo("opencode", "api-key"),
+		nil,
+	)
+	if err == nil {
+		t.Fatal("injectAgentCredential returned nil error, want unsupported-proxy error")
+	}
+	if !strings.Contains(err.Error(), "not supported") {
+		t.Fatalf("error = %q, want not-supported message", err.Error())
+	}
+	if !strings.Contains(err.Error(), "opencode") {
+		t.Fatalf("error = %q, want agent name in message", err.Error())
+	}
+}
+
 func TestCodexRefreshProxyEnv(t *testing.T) {
 	t.Parallel()
 

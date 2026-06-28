@@ -702,20 +702,7 @@ func (h *SessionHost) applySessionSettings(ctx context.Context, settings *agentS
 	}
 
 	if settings.Model != "" {
-		// Skip SetSessionModel for platform AI proxy — OpenCode's model resolver
-		// splits on "/" (e.g. "meta/llama-4-scout..." → providerID:"meta") which
-		// breaks for Workers AI model IDs regardless of prefix. The model is
-		// already set in the OpenCode config file for the openai-compatible provider.
-		//
-		// Safety: OpencodeProvider is only set to "platform" via the credential
-		// injection blocks (gated on APIKeySource=="callback-token" or "user-credential"),
-		// which are exclusive to OpenCode + proxy paths. For non-opencode agents,
-		// OpencodeProvider remains empty and this branch is not taken.
-		if settings.OpencodeProvider == "platform" {
-			slog.Info("ACP: skipping session model config option for platform proxy (model set in config)", "model", settings.Model)
-		} else {
-			h.applySessionModelConfigOption(ctx, settings.Model)
-		}
+		h.applySessionModelConfigOption(ctx, settings.Model)
 	}
 
 	if settings.PermissionMode != "" && settings.PermissionMode != "default" {

@@ -72,9 +72,9 @@ export interface TaskRunConfig {
   effort: AgentEffort | null;
   /** Permission mode override from agent profile (forwarded to VM agent). Null = use agent default. */
   permissionMode: string | null;
-  /** OpenCode inference provider override (forwarded to VM agent). Null = use agent default. */
+  /** OpenCode inference provider override ('opencode-zen', 'opencode-go', or 'custom'). Null = use agent default. */
   opencodeProvider: string | null;
-  /** OpenCode base URL override for custom/openai-compatible providers. Null = use agent default. */
+  /** OpenCode base URL override for the 'custom' provider. Null = use agent default. */
   opencodeBaseUrl: string | null;
   /** System prompt text to append to the initial prompt (from agent profile). Null = no append. */
   systemPromptAppend: string | null;

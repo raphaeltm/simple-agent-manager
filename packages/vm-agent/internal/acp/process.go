@@ -97,7 +97,6 @@ var secretEnvNames = map[string]bool{
 	"GH_TOKEN":                  true,
 	"GEMINI_API_KEY":            true,
 	"MISTRAL_API_KEY":           true,
-	"SCW_SECRET_KEY":            true,
 	"OPENCODE_CONFIG_CONTENT":   true,
 	"OPENCODE_API_KEY":          true,
 }

@@ -235,6 +235,25 @@ describe('ConnectFlow', () => {
     });
   });
 
+  it('does not save OpenCode provider settings when the credential save fails', async () => {
+    mocks.saveAgentCredential.mockRejectedValue(new Error('Invalid key'));
+    renderFlow({ initialAgentId: 'opencode' });
+
+    fireEvent.change(screen.getByLabelText('OpenCode API Key'), {
+      target: { value: 'opencode-key' },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Connect$/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Invalid key')).toBeInTheDocument();
+    });
+
+    // Credential-first ordering: if the credential save throws, the provider
+    // settings save must never run (no half-applied state).
+    expect(mocks.saveAgentSettings).not.toHaveBeenCalled();
+  });
+
   it('does not surface OpenCode provider settings for project-scoped overrides', () => {
     renderFlow({ projectId: 'proj-1', initialAgentId: 'opencode' });
 
