@@ -2393,6 +2393,25 @@ func injectProxyCredentialForTest(
 	return envVars, settings
 }
 
+func injectProxyCredentialErrForTest(
+	t *testing.T,
+	host *SessionHost,
+	agentType string,
+	cred *agentCredential,
+) error {
+	t.Helper()
+	_, _, err := host.injectAgentCredential(
+		context.Background(),
+		"container-id",
+		agentType,
+		cred,
+		nil,
+		getAgentCommandInfo(agentType, "api-key"),
+		nil,
+	)
+	return err
+}
+
 func TestInjectAgentCredential_UserPassthroughProxy(t *testing.T) {
 	t.Parallel()
 
@@ -2452,15 +2471,7 @@ func TestInjectAgentCredential_ProxyRequiresCallbackToken(t *testing.T) {
 		"",
 		"user-credential",
 	)
-	_, _, err := host.injectAgentCredential(
-		context.Background(),
-		"container-id",
-		"openai-codex",
-		cred,
-		nil,
-		getAgentCommandInfo("openai-codex", "api-key"),
-		nil,
-	)
+	err := injectProxyCredentialErrForTest(t, host, "openai-codex", cred)
 	if err == nil {
 		t.Fatal("injectAgentCredential returned nil error, want missing CallbackToken error")
 	}
@@ -2484,15 +2495,7 @@ func TestInjectAgentCredential_OpencodeRejectsInferenceProxy(t *testing.T) {
 		"opencode/claude-sonnet-4-6",
 		"callback-token",
 	)
-	_, _, err := host.injectAgentCredential(
-		context.Background(),
-		"container-id",
-		"opencode",
-		cred,
-		nil,
-		getAgentCommandInfo("opencode", "api-key"),
-		nil,
-	)
+	err := injectProxyCredentialErrForTest(t, host, "opencode", cred)
 	if err == nil {
 		t.Fatal("injectAgentCredential returned nil error, want unsupported-proxy error")
 	}
