@@ -24,7 +24,7 @@ Focus this task on the backend runtime slice under `apps/api/src/durable-objects
 - [x] Make only minimal testability extractions if dynamic imports make direct handler tests too awkward.
 - [x] Validate constitution compliance: no new hardcoded operational constants unless backed by existing defaults or env configuration.
 - [x] Run targeted API tests for changed TaskRunner coverage.
-- [ ] Run broader validation required by `/do`: lint, typecheck, test, build as feasible before PR.
+- [x] Run broader validation required by `/do`: lint, typecheck, test, build as feasible before PR.
 - [ ] Run local specialist reviews: task-completion-validator, cloudflare-specialist, constitution-validator, security-auditor, and test-engineer.
 
 ## Implementation Notes
@@ -37,6 +37,15 @@ Focus this task on the backend runtime slice under `apps/api/src/durable-objects
 - Reduced `task-runner-health-check.test.ts` to pure readiness helper invariants and randomized timestamp checks.
 - Trimmed `task-runner-do-infra.test.ts` by removing initial-prompt/idempotency source-text checks now covered by executable tests. Remaining source checks are static Cloudflare/env/config wiring.
 - Attempted `pnpm --filter @simple-agent-manager/api test:workers -- tests/workers/task-runner-do.test.ts`, but local workerd repeatedly segfaulted before reporting test results. The attempted worker-test additions were moved into normal unit tests to avoid relying on the crashing worker runtime for the new coverage.
+
+## Validation
+
+- `pnpm --filter @simple-agent-manager/api test -- tests/unit/durable-objects/task-runner-agent-session.test.ts tests/unit/durable-objects/task-runner-state-machine.test.ts tests/unit/durable-objects/task-runner-initial-prompt.test.ts tests/unit/task-runner-health-check.test.ts tests/unit/task-runner-static-wiring.test.ts tests/integration/task-runner-do-infra.test.ts` — passed, 64 tests.
+- `pnpm --filter @simple-agent-manager/api typecheck` — passed.
+- `pnpm --filter @simple-agent-manager/api lint` — passed with existing warnings only.
+- `pnpm --filter @simple-agent-manager/api test` — passed, 354 files / 5508 tests.
+- `pnpm --filter @simple-agent-manager/api build` — passed.
+- `pnpm --filter @simple-agent-manager/api test:workers -- tests/workers/task-runner-do.test.ts` — local workerd repeatedly crashed with signal 11 before useful test results; no code assertion failure was reported.
 
 ## Acceptance Criteria
 
