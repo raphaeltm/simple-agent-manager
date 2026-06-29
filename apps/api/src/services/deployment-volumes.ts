@@ -11,8 +11,7 @@ import {
   SAM_VOLUME_FILESYSTEM_FORMAT,
   SAM_VOLUME_MOUNT_PATH_TEMPLATE,
 } from '@simple-agent-manager/providers';
-import type { DeploymentManifest } from '@simple-agent-manager/shared';
-import type { CredentialProvider } from '@simple-agent-manager/shared';
+import type { CredentialProvider, DeploymentManifest } from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
 
@@ -264,9 +263,9 @@ export async function buildVolumeMountDescriptors(
   const volumes = await listEnvironmentVolumes(db, environmentId);
   return volumes
     .filter((volume) =>
-      attachedServerId !== undefined
-        ? volume.attachedServerId === attachedServerId
-        : volume.attachedServerId
+      attachedServerId === undefined
+        ? Boolean(volume.attachedServerId)
+        : volume.attachedServerId === attachedServerId
     )
     .map((volume) => ({
       name: volume.name,

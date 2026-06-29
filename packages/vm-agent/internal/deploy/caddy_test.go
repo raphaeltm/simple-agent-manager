@@ -302,46 +302,19 @@ func TestReloadCaddy_WaitsForReloadCommandToExist(t *testing.T) {
 
 func TestTeardownRemovesOnlyEnvironmentSnippetAndComposeProject(t *testing.T) {
 	dir := t.TempDir()
-	disk, err := NewDiskState(filepath.Join(dir, "state"))
-	if err != nil {
-		t.Fatalf("NewDiskState: %v", err)
-	}
-	state := &ReleaseState{Seq: 1, EnvironmentID: "env-a", NodeID: "node", Status: StatusApplied}
-	composeYAML := `services:
-  web:
-    image: nginx:latest
-    volumes:
-      - /mnt/sam-env-env-a/volumes/data:/usr/share/nginx/html
-`
-	if err := disk.WriteRelease(state, composeYAML, "env-a.apps.example.com {\n\treverse_proxy 127.0.0.1:35000\n}\n"); err != nil {
-		t.Fatalf("WriteRelease: %v", err)
-	}
-	if err := disk.SetCurrent(1); err != nil {
-		t.Fatalf("SetCurrent: %v", err)
-	}
+	disk := newTestDiskState(t, dir)
+	writeTeardownRelease(t, disk)
 
 	activeDir := filepath.Join(dir, "active")
 	sitesDir := filepath.Join(activeDir, "sites")
-	if err := os.MkdirAll(sitesDir, 0755); err != nil {
-		t.Fatalf("mkdir sites: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(sitesDir, "env-a.caddy"), []byte("env-a"), 0644); err != nil {
-		t.Fatalf("write env-a snippet: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(sitesDir, "env-b.caddy"), []byte("env-b"), 0644); err != nil {
-		t.Fatalf("write env-b snippet: %v", err)
-	}
+	seedCaddySites(t, sitesDir)
 
 	composeLog := filepath.Join(dir, "compose.log")
 	composeScript := filepath.Join(dir, "compose.sh")
-	if err := os.WriteFile(composeScript, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$COMPOSE_LOG\"\n"), 0755); err != nil {
-		t.Fatalf("write compose script: %v", err)
-	}
+	mustWriteTestFile(t, composeScript, "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$COMPOSE_LOG\"\n", 0755)
 	reloadLog := filepath.Join(dir, "reload.log")
 	reloadScript := filepath.Join(dir, "reload.sh")
-	if err := os.WriteFile(reloadScript, []byte("#!/bin/sh\necho reloaded > \"$1\"\n"), 0755); err != nil {
-		t.Fatalf("write reload script: %v", err)
-	}
+	mustWriteTestFile(t, reloadScript, "#!/bin/sh\necho reloaded > \"$1\"\n", 0755)
 	t.Setenv("COMPOSE_LOG", composeLog)
 	volumeMounter := &recordingVolumeMounter{}
 
@@ -357,6 +330,60 @@ func TestTeardownRemovesOnlyEnvironmentSnippetAndComposeProject(t *testing.T) {
 	if err := engine.Teardown(t.Context()); err != nil {
 		t.Fatalf("Teardown: %v", err)
 	}
+	assertTeardownResult(t, disk, sitesDir, composeLog, reloadLog, volumeMounter)
+}
+
+func newTestDiskState(t *testing.T, dir string) *DiskState {
+	t.Helper()
+	disk, err := NewDiskState(filepath.Join(dir, "state"))
+	if err != nil {
+		t.Fatalf("NewDiskState: %v", err)
+	}
+	return disk
+}
+
+func writeTeardownRelease(t *testing.T, disk *DiskState) {
+	t.Helper()
+	state := &ReleaseState{Seq: 1, EnvironmentID: "env-a", NodeID: "node", Status: StatusApplied}
+	composeYAML := `services:
+  web:
+    image: nginx:latest
+    volumes:
+      - /mnt/sam-env-env-a/volumes/data:/usr/share/nginx/html
+`
+	if err := disk.WriteRelease(state, composeYAML, "env-a.apps.example.com {\n\treverse_proxy 127.0.0.1:35000\n}\n"); err != nil {
+		t.Fatalf("WriteRelease: %v", err)
+	}
+	if err := disk.SetCurrent(1); err != nil {
+		t.Fatalf("SetCurrent: %v", err)
+	}
+}
+
+func seedCaddySites(t *testing.T, sitesDir string) {
+	t.Helper()
+	if err := os.MkdirAll(sitesDir, 0755); err != nil {
+		t.Fatalf("mkdir sites: %v", err)
+	}
+	mustWriteTestFile(t, filepath.Join(sitesDir, "env-a.caddy"), "env-a", 0644)
+	mustWriteTestFile(t, filepath.Join(sitesDir, "env-b.caddy"), "env-b", 0644)
+}
+
+func mustWriteTestFile(t *testing.T, path string, content string, perm os.FileMode) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(content), perm); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+func assertTeardownResult(
+	t *testing.T,
+	disk *DiskState,
+	sitesDir string,
+	composeLog string,
+	reloadLog string,
+	volumeMounter *recordingVolumeMounter,
+) {
+	t.Helper()
 	if _, err := os.Stat(filepath.Join(sitesDir, "env-a.caddy")); !os.IsNotExist(err) {
 		t.Fatalf("expected env-a snippet removed, stat err=%v", err)
 	}

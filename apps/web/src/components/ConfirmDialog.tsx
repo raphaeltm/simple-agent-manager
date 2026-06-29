@@ -77,8 +77,12 @@ export function ConfirmDialog({
   if (!isOpen) return null;
 
   const config = variantConfig[variant];
-  const confirmButtonVariant =
-    variant === 'danger' ? 'danger' : variant === 'warning' ? 'secondary' : 'primary';
+  let confirmButtonVariant: 'danger' | 'secondary' | 'primary' = 'primary';
+  if (variant === 'danger') {
+    confirmButtonVariant = 'danger';
+  } else if (variant === 'warning') {
+    confirmButtonVariant = 'secondary';
+  }
   const confirmButtonStyle =
     variant === 'warning'
       ? {

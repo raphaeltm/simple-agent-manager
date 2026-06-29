@@ -82,6 +82,20 @@ function formatStopSummary(volumesDetached: number, nodeDeleted: boolean): strin
   return parts.join(', ');
 }
 
+function observeAsync(promise: Promise<unknown>): void {
+  promise.catch(() => undefined);
+}
+
+function stopNodeLifecycleMessage(env: DeploymentEnvironment, siblingCount: number): string {
+  if (!env.nodeId) {
+    return 'No deployment node is currently attached';
+  }
+  if (siblingCount > 1) {
+    return 'Keeps the shared deployment node running for other environments';
+  }
+  return 'Destroys the deployment node because no other environment is using it';
+}
+
 export function ProjectDeploymentEnvironmentDetail() {
   const { projectId } = useProjectContext();
   const { envId } = useParams<{ envId: string }>();
@@ -135,13 +149,15 @@ export function ProjectDeploymentEnvironmentDetail() {
   }, [projectId, envId]);
 
   useEffect(() => {
-    void loadEnvironment();
+    observeAsync(loadEnvironment());
   }, [loadEnvironment]);
 
   useEffect(() => {
     if (!env || (env.status !== 'starting' && env.status !== 'stopping')) return;
-    const interval = window.setInterval(() => void loadEnvironment(), 5000);
-    return () => window.clearInterval(interval);
+    const interval = globalThis.setInterval(() => {
+      observeAsync(loadEnvironment());
+    }, 5000);
+    return () => globalThis.clearInterval(interval);
   }, [env, loadEnvironment]);
 
   const refreshMetrics = useCallback(async () => {
@@ -183,9 +199,11 @@ export function ProjectDeploymentEnvironmentDetail() {
 
   useEffect(() => {
     if (env?.node?.status !== 'running') return;
-    void refreshMetrics();
-    const interval = window.setInterval(() => void refreshMetrics(), 15000);
-    return () => window.clearInterval(interval);
+    observeAsync(refreshMetrics());
+    const interval = globalThis.setInterval(() => {
+      observeAsync(refreshMetrics());
+    }, 15000);
+    return () => globalThis.clearInterval(interval);
   }, [env?.node?.status, refreshMetrics]);
 
   const refreshLogs = useCallback(
@@ -226,7 +244,7 @@ export function ProjectDeploymentEnvironmentDetail() {
   // Auto-load logs the first time the Logs tab is opened.
   useEffect(() => {
     if (activeTab === 'logs' && env && !logsRequested) {
-      void refreshLogs();
+      observeAsync(refreshLogs());
     }
   }, [activeTab, env, logsRequested, refreshLogs]);
 
@@ -272,7 +290,7 @@ export function ProjectDeploymentEnvironmentDetail() {
     try {
       const result = await deleteDeploymentEnvironment(projectId, env.id);
       toast.success(`Environment destroyed: ${formatCleanupSummary(result)}`);
-      void navigate('..');
+      observeAsync(Promise.resolve(navigate('..')));
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to destroy environment');
       setDeleting(false);
@@ -355,6 +373,7 @@ export function ProjectDeploymentEnvironmentDetail() {
     env.status !== 'stopped' && env.status !== 'stopping' && env.status !== 'starting';
   const lifecycleBusy = lifecycleAction !== null;
   const activeRouteHostnames = env.status === 'active' ? env.routeHostnames : [];
+  const stopDialogNodeMessage = stopNodeLifecycleMessage(env, siblingCount);
 
   return (
     <div className="grid gap-4">
@@ -378,7 +397,7 @@ export function ProjectDeploymentEnvironmentDetail() {
           {canStart && (
             <Button
               size="sm"
-              onClick={() => void handleStart()}
+              onClick={() => observeAsync(handleStart())}
               loading={lifecycleAction === 'start'}
               disabled={lifecycleBusy}
               className="sm:shrink-0 min-w-24"
@@ -473,8 +492,8 @@ export function ProjectDeploymentEnvironmentDetail() {
           </div>
           <LogsPanel
             state={logState}
-            onRefresh={() => void refreshLogs()}
-            onRefreshFiltered={(opts) => void refreshLogs(opts)}
+            onRefresh={() => observeAsync(refreshLogs())}
+            onRefreshFiltered={(opts) => observeAsync(refreshLogs(opts))}
           />
         </section>
       )}
@@ -492,8 +511,8 @@ export function ProjectDeploymentEnvironmentDetail() {
           env={env}
           profiles={profiles}
           policyBusy={policySaving}
-          onPolicyEnabledChange={(enabled) => void handlePolicyEnabledChange(enabled)}
-          onProfileToggle={(profileId) => void handleProfileToggle(profileId)}
+          onPolicyEnabledChange={(enabled) => observeAsync(handlePolicyEnabledChange(enabled))}
+          onProfileToggle={(profileId) => observeAsync(handleProfileToggle(profileId))}
         />
       )}
 
@@ -509,7 +528,7 @@ export function ProjectDeploymentEnvironmentDetail() {
         onClose={() => {
           if (!lifecycleBusy) setStopOpen(false);
         }}
-        onConfirm={() => void handleStopConfirm()}
+        onConfirm={() => observeAsync(handleStopConfirm())}
         title="Stop deployment environment?"
         variant="warning"
         confirmLabel="Stop"
@@ -523,15 +542,7 @@ export function ProjectDeploymentEnvironmentDetail() {
             <ul className="m-0 pl-4 grid gap-1 text-sm">
               <li>Stops app containers and removes active routes from the deployment node</li>
               <li>Detaches provider volumes but keeps the volume records and stored data</li>
-              {env.nodeId ? (
-                siblingCount > 1 ? (
-                  <li>Keeps the shared deployment node running for other environments</li>
-                ) : (
-                  <li>Destroys the deployment node because no other environment is using it</li>
-                )
-              ) : (
-                <li>No deployment node is currently attached</li>
-              )}
+              <li>{stopDialogNodeMessage}</li>
             </ul>
             <p className="m-0">You can start it again later from this page.</p>
           </div>
@@ -543,7 +554,7 @@ export function ProjectDeploymentEnvironmentDetail() {
         onClose={() => {
           if (!deleting) setDeleteOpen(false);
         }}
-        onConfirm={() => void handleDeleteConfirm()}
+        onConfirm={() => observeAsync(handleDeleteConfirm())}
         title="Destroy deployment environment?"
         variant="danger"
         confirmLabel="Destroy"

@@ -182,23 +182,30 @@ func validateVolumeMountsForEnvironment(environmentID string, volumes []VolumeMo
 	}
 
 	for _, volume := range volumes {
-		if !volumeNamePattern.MatchString(volume.Name) {
-			return fmt.Errorf("volume %q has an unsafe name", volume.Name)
+		if err := validateVolumeMountForEnvironment(environmentID, volume); err != nil {
+			return err
 		}
-		if containsWhitespaceOrControl(volume.MountRoot) {
-			return fmt.Errorf("volume %q mountRoot contains whitespace or control characters", volume.Name)
-		}
-		cleanRoot := filepath.Clean(volume.MountRoot)
-		expectedRoot := expectedVolumeMountRoot(environmentID, volume.Name)
-		if cleanRoot != volume.MountRoot || cleanRoot != expectedRoot {
-			return fmt.Errorf("volume %q mountRoot %q must exactly match %q", volume.Name, volume.MountRoot, expectedRoot)
-		}
-		if volume.LinuxDevice != "" && containsWhitespaceOrControl(volume.LinuxDevice) {
-			return fmt.Errorf("volume %q linuxDevice contains whitespace or control characters", volume.Name)
-		}
-		if volume.ProviderVolumeID == "" || containsWhitespaceOrControl(volume.ProviderVolumeID) {
-			return fmt.Errorf("volume %q providerVolumeId is missing or unsafe", volume.Name)
-		}
+	}
+	return nil
+}
+
+func validateVolumeMountForEnvironment(environmentID string, volume VolumeMount) error {
+	if !volumeNamePattern.MatchString(volume.Name) {
+		return fmt.Errorf("volume %q has an unsafe name", volume.Name)
+	}
+	if containsWhitespaceOrControl(volume.MountRoot) {
+		return fmt.Errorf("volume %q mountRoot contains whitespace or control characters", volume.Name)
+	}
+	cleanRoot := filepath.Clean(volume.MountRoot)
+	expectedRoot := expectedVolumeMountRoot(environmentID, volume.Name)
+	if cleanRoot != volume.MountRoot || cleanRoot != expectedRoot {
+		return fmt.Errorf("volume %q mountRoot %q must exactly match %q", volume.Name, volume.MountRoot, expectedRoot)
+	}
+	if volume.LinuxDevice != "" && containsWhitespaceOrControl(volume.LinuxDevice) {
+		return fmt.Errorf("volume %q linuxDevice contains whitespace or control characters", volume.Name)
+	}
+	if volume.ProviderVolumeID == "" || containsWhitespaceOrControl(volume.ProviderVolumeID) {
+		return fmt.Errorf("volume %q providerVolumeId is missing or unsafe", volume.Name)
 	}
 	return nil
 }

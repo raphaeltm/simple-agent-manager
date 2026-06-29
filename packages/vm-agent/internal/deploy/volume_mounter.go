@@ -170,40 +170,74 @@ func (m *RealVolumeMounter) ensureFstab(ctx context.Context, device, mountRoot s
 }
 
 func (m *RealVolumeMounter) TeardownMounts(ctx context.Context, mountRoots []string) error {
-	seen := make(map[string]bool, len(mountRoots))
 	var errs []string
+	for _, mountRoot := range uniqueMountRoots(mountRoots) {
+		if err := m.teardownMount(ctx, mountRoot); err != nil {
+			errs = append(errs, err.Error())
+		}
+	}
+	return joinedError(errs)
+}
+
+func uniqueMountRoots(mountRoots []string) []string {
+	seen := make(map[string]bool, len(mountRoots))
+	unique := make([]string, 0, len(mountRoots))
 	for _, mountRoot := range mountRoots {
 		mountRoot = strings.TrimSpace(mountRoot)
 		if mountRoot == "" || seen[mountRoot] {
 			continue
 		}
 		seen[mountRoot] = true
-		if err := validateFstabField("mount root", mountRoot); err != nil {
-			errs = append(errs, err.Error())
-			continue
-		}
-		if filepath.Clean(mountRoot) != mountRoot || !strings.HasPrefix(mountRoot, samVolumeMountPrefix) {
-			errs = append(errs, fmt.Sprintf("mount root %q is not a canonical SAM volume path", mountRoot))
-			continue
-		}
-
-		if out, err := m.runner.CombinedOutput(ctx, "mountpoint", "-q", mountRoot); err == nil {
-			if len(bytes.TrimSpace(out)) > 0 {
-				errs = append(errs, fmt.Sprintf("mountpoint probe for %s returned unexpected output: %s", mountRoot, strings.TrimSpace(string(out))))
-			}
-			if out, err := m.runner.CombinedOutput(ctx, "umount", mountRoot); err != nil {
-				errs = append(errs, fmt.Sprintf("umount %s: %v: %s", mountRoot, err, strings.TrimSpace(string(out))))
-			}
-		}
-
-		if err := m.removeFstabEntry(mountRoot); err != nil {
-			errs = append(errs, err.Error())
-		}
+		unique = append(unique, mountRoot)
 	}
-	if len(errs) > 0 {
-		return errors.New(strings.Join(errs, "; "))
+	return unique
+}
+
+func (m *RealVolumeMounter) teardownMount(ctx context.Context, mountRoot string) error {
+	var errs []string
+	if err := validateTeardownMountRoot(mountRoot); err != nil {
+		return err
+	}
+	if err := m.unmountIfMounted(ctx, mountRoot); err != nil {
+		errs = append(errs, err.Error())
+	}
+	if err := m.removeFstabEntry(mountRoot); err != nil {
+		errs = append(errs, err.Error())
+	}
+	return joinedError(errs)
+}
+
+func validateTeardownMountRoot(mountRoot string) error {
+	if err := validateFstabField("mount root", mountRoot); err != nil {
+		return err
+	}
+	if filepath.Clean(mountRoot) != mountRoot || !strings.HasPrefix(mountRoot, samVolumeMountPrefix) {
+		return fmt.Errorf("mount root %q is not a canonical SAM volume path", mountRoot)
 	}
 	return nil
+}
+
+func (m *RealVolumeMounter) unmountIfMounted(ctx context.Context, mountRoot string) error {
+	out, err := m.runner.CombinedOutput(ctx, "mountpoint", "-q", mountRoot)
+	if err != nil {
+		return nil
+	}
+
+	var errs []string
+	if len(bytes.TrimSpace(out)) > 0 {
+		errs = append(errs, fmt.Sprintf("mountpoint probe for %s returned unexpected output: %s", mountRoot, strings.TrimSpace(string(out))))
+	}
+	if out, err := m.runner.CombinedOutput(ctx, "umount", mountRoot); err != nil {
+		errs = append(errs, fmt.Sprintf("umount %s: %v: %s", mountRoot, err, strings.TrimSpace(string(out))))
+	}
+	return joinedError(errs)
+}
+
+func joinedError(parts []string) error {
+	if len(parts) == 0 {
+		return nil
+	}
+	return errors.New(strings.Join(parts, "; "))
 }
 
 func (m *RealVolumeMounter) removeFstabEntry(mountRoot string) error {

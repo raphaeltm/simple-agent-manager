@@ -179,6 +179,381 @@ async function finishEnvironmentStart(
   }
 }
 
+function lifecycleErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+async function markEnvironmentStopFailed(
+  db: DeploymentDb,
+  envId: string,
+  observedErrorMessage: string
+): Promise<void> {
+  await db
+    .update(schema.deploymentEnvironments)
+    .set({
+      status: 'error',
+      observedStatus: 'failed',
+      observedErrorMessage,
+      updatedAt: new Date().toISOString(),
+    })
+    .where(eq(schema.deploymentEnvironments.id, envId));
+}
+
+async function teardownLinkedDeploymentNode(
+  db: DeploymentDb,
+  env: Env,
+  userId: string,
+  envId: string,
+  nodeId: string | null
+): Promise<{ providerInstanceId: string | null; nodeStatus: string | null; warnings: string[] }> {
+  const warnings: string[] = [];
+  if (!nodeId) {
+    return { providerInstanceId: null, nodeStatus: null, warnings };
+  }
+
+  const nodeRows = await db
+    .select({
+      id: schema.nodes.id,
+      status: schema.nodes.status,
+      providerInstanceId: schema.nodes.providerInstanceId,
+    })
+    .from(schema.nodes)
+    .where(and(eq(schema.nodes.id, nodeId), eq(schema.nodes.userId, userId)))
+    .limit(1);
+  const node = nodeRows[0];
+  if (!node) {
+    warnings.push('Deployment node record was not found; skipped live container teardown.');
+    return { providerInstanceId: null, nodeStatus: null, warnings };
+  }
+
+  if (node.status !== 'running') {
+    warnings.push(`Deployment node was ${node.status}; skipped live container teardown.`);
+    return {
+      providerInstanceId: node.providerInstanceId ?? null,
+      nodeStatus: node.status,
+      warnings,
+    };
+  }
+
+  try {
+    await teardownDeploymentEnvironmentOnNode(node.id, envId, env, userId);
+    return {
+      providerInstanceId: node.providerInstanceId ?? null,
+      nodeStatus: node.status,
+      warnings,
+    };
+  } catch (err) {
+    const message = lifecycleErrorMessage(err);
+    await markEnvironmentStopFailed(
+      db,
+      envId,
+      `Stop failed while tearing down the deployment node: ${message}`
+    );
+    throw errors.conflict(`Could not stop deployment environment on node: ${message}`);
+  }
+}
+
+function collectAttachedServerIds(
+  volumes: schema.DeploymentVolumeRow[],
+  providerInstanceId: string | null
+): string[] {
+  const attachedServerIds = new Set<string>();
+  for (const volume of volumes) {
+    if (volume.attachedServerId) {
+      attachedServerIds.add(volume.attachedServerId);
+    }
+  }
+  if (providerInstanceId) {
+    attachedServerIds.add(providerInstanceId);
+  }
+  return [...attachedServerIds];
+}
+
+async function detachVolumesForEnvironmentStop(
+  db: DeploymentDb,
+  env: Env,
+  userId: string,
+  envId: string,
+  serverIds: string[]
+): Promise<number> {
+  let volumesDetached = 0;
+  for (const serverId of serverIds) {
+    try {
+      const detached = await detachEnvironmentVolumes(db, env, userId, envId, serverId);
+      volumesDetached += detached.length;
+    } catch (err) {
+      const message = lifecycleErrorMessage(err);
+      await markEnvironmentStopFailed(
+        db,
+        envId,
+        `Stop failed while detaching deployment volumes: ${message}`
+      );
+      throw errors.conflict(`Could not detach deployment volume(s): ${message}`);
+    }
+  }
+  return volumesDetached;
+}
+
+async function markEnvironmentStopped(db: DeploymentDb, envId: string): Promise<void> {
+  await db
+    .update(schema.deploymentEnvironments)
+    .set({
+      status: 'stopped',
+      nodeId: null,
+      observedAppliedSeq: null,
+      observedStatus: 'stopped',
+      observedErrorMessage: null,
+      observedServicesJson: '[]',
+      observedDeployStatusJson: null,
+      observedDiskTelemetryJson: null,
+      observedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    })
+    .where(eq(schema.deploymentEnvironments.id, envId));
+}
+
+async function stopDeploymentEnvironment(params: {
+  db: DeploymentDb;
+  env: Env;
+  userId: string;
+  projectId: string;
+  envId: string;
+}) {
+  const { db, env, userId, projectId, envId } = params;
+  const environment = await requireDeploymentEnvironment(db, projectId, envId);
+  if (environment.status === 'stopped') {
+    return {
+      environment: await buildDeploymentEnvironmentResponse(db, env, environment),
+      lifecycle: {
+        stopped: true,
+        alreadyStopped: true,
+        nodeId: environment.nodeId,
+        nodeDeleted: false,
+        volumesDetached: 0,
+        warnings: [],
+      },
+    };
+  }
+  if (environment.status === 'stopping' || environment.status === 'starting') {
+    throw errors.conflict(
+      `Deployment environment is already ${environment.status}; wait for that lifecycle operation to finish.`
+    );
+  }
+
+  await db
+    .update(schema.deploymentEnvironments)
+    .set({ status: 'stopping', updatedAt: new Date().toISOString() })
+    .where(eq(schema.deploymentEnvironments.id, envId));
+
+  const teardown = await teardownLinkedDeploymentNode(db, env, userId, envId, environment.nodeId);
+  const volumes = await listEnvironmentVolumes(db, envId);
+  const volumesDetached = await detachVolumesForEnvironmentStop(
+    db,
+    env,
+    userId,
+    envId,
+    collectAttachedServerIds(volumes, teardown.providerInstanceId)
+  );
+
+  await markEnvironmentStopped(db, envId);
+
+  const nodeCleanup = await cleanupDeploymentNodeIfUnassigned(db, env, userId, environment.nodeId);
+  const warnings = [...teardown.warnings, ...nodeCleanup.warnings];
+  const updated = await requireDeploymentEnvironment(db, projectId, envId);
+  log.info('deployment_environment.stopped', {
+    projectId,
+    envId,
+    nodeId: environment.nodeId,
+    nodeStatus: teardown.nodeStatus,
+    nodeDeleted: nodeCleanup.nodeDeleted,
+    volumesDetached,
+    warningCount: warnings.length,
+  });
+
+  return {
+    environment: await buildDeploymentEnvironmentResponse(db, env, updated),
+    lifecycle: {
+      stopped: true,
+      alreadyStopped: false,
+      nodeId: environment.nodeId,
+      nodeDeleted: nodeCleanup.nodeDeleted,
+      volumesDetached,
+      warnings,
+    },
+  };
+}
+
+async function readLatestRelease(db: DeploymentDb, envId: string) {
+  const latestRows = await db
+    .select({ id: schema.deploymentReleases.id, version: schema.deploymentReleases.version })
+    .from(schema.deploymentReleases)
+    .where(eq(schema.deploymentReleases.environmentId, envId))
+    .orderBy(desc(schema.deploymentReleases.version))
+    .limit(1);
+  return latestRows[0] ?? null;
+}
+
+function assertEnvironmentCanStart(environment: schema.DeploymentEnvironmentRow): void {
+  if (environment.status === 'stopping') {
+    throw errors.conflict(
+      'Deployment environment is stopping; wait for stop to finish before starting it.'
+    );
+  }
+  if (environment.status !== 'stopped' && environment.status !== 'error') {
+    throw errors.conflict(
+      `Deployment environment cannot be started from status "${environment.status}".`
+    );
+  }
+  if (environment.nodeId) {
+    throw errors.conflict(
+      'Deployment environment is still linked to a node. Stop it before starting it again.'
+    );
+  }
+}
+
+async function markEnvironmentStarting(
+  db: DeploymentDb,
+  envId: string,
+  latestReleaseId: string
+): Promise<void> {
+  await db
+    .update(schema.deploymentEnvironments)
+    .set({
+      status: 'starting',
+      observedStatus: null,
+      observedErrorMessage: null,
+      updatedAt: new Date().toISOString(),
+    })
+    .where(eq(schema.deploymentEnvironments.id, envId));
+  await db
+    .update(schema.deploymentReleases)
+    .set({ status: 'created' })
+    .where(eq(schema.deploymentReleases.id, latestReleaseId));
+}
+
+async function finishProvisionedEnvironmentStart(params: {
+  db: DeploymentDb;
+  env: Env;
+  userId: string;
+  envId: string;
+  nodeId: string;
+  shouldAttachVolumes: boolean;
+  provisioningStarted: boolean;
+  provisioningPromise: Promise<void>;
+  executionCtx: Pick<ExecutionContext, 'waitUntil'>;
+}): Promise<void> {
+  const finishPromise = finishEnvironmentStart(
+    params.db,
+    params.env,
+    params.userId,
+    params.envId,
+    params.nodeId,
+    params.shouldAttachVolumes,
+    params.provisioningPromise
+  );
+
+  if (params.provisioningStarted) {
+    try {
+      params.executionCtx.waitUntil(finishPromise.catch(() => undefined));
+    } catch {
+      // Tests may not provide an ExecutionContext; keep the promise observed.
+    }
+    return;
+  }
+
+  try {
+    await finishPromise;
+  } catch (err) {
+    throw errors.conflict(`Could not start deployment environment: ${lifecycleErrorMessage(err)}`);
+  }
+}
+
+async function startDeploymentEnvironment(params: {
+  db: DeploymentDb;
+  env: Env;
+  userId: string;
+  projectId: string;
+  envId: string;
+  executionCtx: Pick<ExecutionContext, 'waitUntil'>;
+}) {
+  const { db, env, userId, projectId, envId } = params;
+  const environment = await requireDeploymentEnvironment(db, projectId, envId);
+  if (environment.status === 'active' || environment.status === 'starting') {
+    return {
+      environment: await buildDeploymentEnvironmentResponse(db, env, environment),
+      lifecycle: {
+        started: true,
+        alreadyActive: environment.status === 'active',
+        nodeId: environment.nodeId,
+        provisioningStarted: false,
+        volumesAttachScheduled: false,
+      },
+    };
+  }
+
+  assertEnvironmentCanStart(environment);
+  const latestRelease = await readLatestRelease(db, envId);
+  if (!latestRelease) {
+    throw errors.conflict(
+      'Deployment environment has no release to start. Publish a release first.'
+    );
+  }
+
+  const volumes = await listEnvironmentVolumes(db, envId);
+  const volumePlacement = resolveVolumePlacementConstraint(volumes);
+  const requiresVolumes = environment.requiresVolumes || volumes.length > 0;
+
+  await markEnvironmentStarting(db, envId, latestRelease.id);
+
+  const result = await provisionDeploymentNode(envId, projectId, userId, env, {
+    requiresVolumes,
+    providerOverride: volumePlacement?.provider,
+    vmLocationOverride: volumePlacement?.location,
+  });
+  if (!result) {
+    await markEnvironmentStartFailed(
+      db,
+      envId,
+      'No cloud provider credential was available to start this deployment environment'
+    );
+    throw errors.conflict('Could not provision a deployment node for this environment.');
+  }
+
+  await finishProvisionedEnvironmentStart({
+    db,
+    env,
+    userId,
+    envId,
+    nodeId: result.nodeId,
+    shouldAttachVolumes: volumes.length > 0,
+    provisioningStarted: result.provisioningStarted,
+    provisioningPromise: result.provisioningPromise,
+    executionCtx: params.executionCtx,
+  });
+
+  const updated = await requireDeploymentEnvironment(db, projectId, envId);
+  log.info('deployment_environment.started', {
+    projectId,
+    envId,
+    nodeId: result.nodeId,
+    provisioningStarted: result.provisioningStarted,
+    volumeCount: volumes.length,
+    latestReleaseVersion: latestRelease.version,
+  });
+
+  return {
+    environment: await buildDeploymentEnvironmentResponse(db, env, updated),
+    lifecycle: {
+      started: true,
+      alreadyActive: false,
+      nodeId: result.nodeId,
+      provisioningStarted: result.provisioningStarted,
+      volumesAttachScheduled: volumes.length > 0 && result.provisioningStarted,
+      latestReleaseVersion: latestRelease.version,
+    },
+  };
+}
+
 export function registerDeploymentEnvironmentLifecycleRoutes(
   deploymentEnvironmentRoutes: Hono<{ Bindings: Env }>
 ): void {
@@ -200,160 +575,14 @@ export function registerDeploymentEnvironmentLifecycleRoutes(
       const userId = getUserId(c);
       const db = drizzle(c.env.DATABASE, { schema });
       await requireOwnedProject(db, projectId, userId);
-
-      const environment = await requireDeploymentEnvironment(db, projectId, envId);
-      if (environment.status === 'stopped') {
-        return c.json({
-          environment: await buildDeploymentEnvironmentResponse(db, c.env, environment),
-          lifecycle: {
-            stopped: true,
-            alreadyStopped: true,
-            nodeId: environment.nodeId,
-            nodeDeleted: false,
-            volumesDetached: 0,
-            warnings: [],
-          },
-        });
-      }
-      if (environment.status === 'stopping' || environment.status === 'starting') {
-        throw errors.conflict(
-          `Deployment environment is already ${environment.status}; wait for that lifecycle operation to finish.`
-        );
-      }
-
-      const now = new Date().toISOString();
-      await db
-        .update(schema.deploymentEnvironments)
-        .set({ status: 'stopping', updatedAt: now })
-        .where(eq(schema.deploymentEnvironments.id, envId));
-
-      let providerInstanceId: string | null = null;
-      let nodeStatus: string | null = null;
-      const warnings: string[] = [];
-
-      if (environment.nodeId) {
-        const nodeRows = await db
-          .select({
-            id: schema.nodes.id,
-            status: schema.nodes.status,
-            providerInstanceId: schema.nodes.providerInstanceId,
-          })
-          .from(schema.nodes)
-          .where(and(eq(schema.nodes.id, environment.nodeId), eq(schema.nodes.userId, userId)))
-          .limit(1);
-        const node = nodeRows[0];
-        if (node) {
-          nodeStatus = node.status;
-          providerInstanceId = node.providerInstanceId ?? null;
-          if (node.status === 'running') {
-            try {
-              await teardownDeploymentEnvironmentOnNode(node.id, envId, c.env, userId);
-            } catch (err) {
-              await db
-                .update(schema.deploymentEnvironments)
-                .set({
-                  status: 'error',
-                  observedStatus: 'failed',
-                  observedErrorMessage: `Stop failed while tearing down the deployment node: ${
-                    err instanceof Error ? err.message : String(err)
-                  }`,
-                  updatedAt: new Date().toISOString(),
-                })
-                .where(eq(schema.deploymentEnvironments.id, envId));
-              throw errors.conflict(
-                `Could not stop deployment environment on node: ${
-                  err instanceof Error ? err.message : String(err)
-                }`
-              );
-            }
-          } else {
-            warnings.push(`Deployment node was ${node.status}; skipped live container teardown.`);
-          }
-        } else {
-          warnings.push('Deployment node record was not found; skipped live container teardown.');
-        }
-      }
-
-      let volumesDetached = 0;
-      const volumes = await listEnvironmentVolumes(db, envId);
-      const attachedServerIds = new Set<string>();
-      for (const volume of volumes) {
-        if (volume.attachedServerId) {
-          attachedServerIds.add(volume.attachedServerId);
-        }
-      }
-      if (providerInstanceId) {
-        attachedServerIds.add(providerInstanceId);
-      }
-
-      for (const serverId of attachedServerIds) {
-        try {
-          const detached = await detachEnvironmentVolumes(db, c.env, userId, envId, serverId);
-          volumesDetached += detached.length;
-        } catch (err) {
-          await db
-            .update(schema.deploymentEnvironments)
-            .set({
-              status: 'error',
-              observedStatus: 'failed',
-              observedErrorMessage: `Stop failed while detaching deployment volumes: ${
-                err instanceof Error ? err.message : String(err)
-              }`,
-              updatedAt: new Date().toISOString(),
-            })
-            .where(eq(schema.deploymentEnvironments.id, envId));
-          throw errors.conflict(
-            `Could not detach deployment volume(s): ${err instanceof Error ? err.message : String(err)}`
-          );
-        }
-      }
-
-      await db
-        .update(schema.deploymentEnvironments)
-        .set({
-          status: 'stopped',
-          nodeId: null,
-          observedAppliedSeq: null,
-          observedStatus: 'stopped',
-          observedErrorMessage: null,
-          observedServicesJson: '[]',
-          observedDeployStatusJson: null,
-          observedDiskTelemetryJson: null,
-          observedAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        })
-        .where(eq(schema.deploymentEnvironments.id, envId));
-
-      const nodeCleanup = await cleanupDeploymentNodeIfUnassigned(
+      const result = await stopDeploymentEnvironment({
         db,
-        c.env,
+        env: c.env,
         userId,
-        environment.nodeId
-      );
-      warnings.push(...nodeCleanup.warnings);
-
-      const updated = await requireDeploymentEnvironment(db, projectId, envId);
-      log.info('deployment_environment.stopped', {
         projectId,
         envId,
-        nodeId: environment.nodeId,
-        nodeStatus,
-        nodeDeleted: nodeCleanup.nodeDeleted,
-        volumesDetached,
-        warningCount: warnings.length,
       });
-
-      return c.json({
-        environment: await buildDeploymentEnvironmentResponse(db, c.env, updated),
-        lifecycle: {
-          stopped: true,
-          alreadyStopped: false,
-          nodeId: environment.nodeId,
-          nodeDeleted: nodeCleanup.nodeDeleted,
-          volumesDetached,
-          warnings,
-        },
-      });
+      return c.json(result);
     }
   );
 
@@ -373,147 +602,21 @@ export function registerDeploymentEnvironmentLifecycleRoutes(
       const userId = getUserId(c);
       const db = drizzle(c.env.DATABASE, { schema });
       await requireOwnedProject(db, projectId, userId);
-
-      const environment = await requireDeploymentEnvironment(db, projectId, envId);
-      if (environment.status === 'active') {
-        return c.json({
-          environment: await buildDeploymentEnvironmentResponse(db, c.env, environment),
-          lifecycle: {
-            started: true,
-            alreadyActive: true,
-            nodeId: environment.nodeId,
-            provisioningStarted: false,
-            volumesAttachScheduled: false,
-          },
-        });
+      let executionCtx: Pick<ExecutionContext, 'waitUntil'>;
+      try {
+        executionCtx = c.executionCtx;
+      } catch {
+        executionCtx = { waitUntil: () => undefined };
       }
-      if (environment.status === 'starting') {
-        return c.json({
-          environment: await buildDeploymentEnvironmentResponse(db, c.env, environment),
-          lifecycle: {
-            started: true,
-            alreadyActive: false,
-            nodeId: environment.nodeId,
-            provisioningStarted: false,
-            volumesAttachScheduled: false,
-          },
-        });
-      }
-      if (environment.status === 'stopping') {
-        throw errors.conflict(
-          'Deployment environment is stopping; wait for stop to finish before starting it.'
-        );
-      }
-      if (environment.status !== 'stopped' && environment.status !== 'error') {
-        throw errors.conflict(
-          `Deployment environment cannot be started from status "${environment.status}".`
-        );
-      }
-      if (environment.nodeId) {
-        throw errors.conflict(
-          'Deployment environment is still linked to a node. Stop it before starting it again.'
-        );
-      }
-
-      const latestRows = await db
-        .select({ id: schema.deploymentReleases.id, version: schema.deploymentReleases.version })
-        .from(schema.deploymentReleases)
-        .where(eq(schema.deploymentReleases.environmentId, envId))
-        .orderBy(desc(schema.deploymentReleases.version))
-        .limit(1);
-      const latestRelease = latestRows[0];
-      if (!latestRelease) {
-        throw errors.conflict(
-          'Deployment environment has no release to start. Publish a release first.'
-        );
-      }
-
-      const volumes = await listEnvironmentVolumes(db, envId);
-      const volumePlacement = resolveVolumePlacementConstraint(volumes);
-      const requiresVolumes = environment.requiresVolumes || volumes.length > 0;
-
-      await db
-        .update(schema.deploymentEnvironments)
-        .set({
-          status: 'starting',
-          observedStatus: null,
-          observedErrorMessage: null,
-          updatedAt: new Date().toISOString(),
-        })
-        .where(eq(schema.deploymentEnvironments.id, envId));
-      await db
-        .update(schema.deploymentReleases)
-        .set({ status: 'created' })
-        .where(eq(schema.deploymentReleases.id, latestRelease.id));
-
-      const result = await provisionDeploymentNode(envId, projectId, userId, c.env, {
-        requiresVolumes,
-        providerOverride: volumePlacement?.provider,
-        vmLocationOverride: volumePlacement?.location,
-      });
-      if (!result) {
-        await markEnvironmentStartFailed(
-          db,
-          envId,
-          'No cloud provider credential was available to start this deployment environment'
-        );
-        throw errors.conflict('Could not provision a deployment node for this environment.');
-      }
-
-      if (result.provisioningStarted) {
-        const finishPromise = finishEnvironmentStart(
-          db,
-          c.env,
-          userId,
-          envId,
-          result.nodeId,
-          volumes.length > 0,
-          result.provisioningPromise
-        ).catch(() => undefined);
-        try {
-          c.executionCtx.waitUntil(finishPromise);
-        } catch {
-          // Tests may not provide an ExecutionContext; keep the promise observed.
-        }
-      } else {
-        try {
-          await finishEnvironmentStart(
-            db,
-            c.env,
-            userId,
-            envId,
-            result.nodeId,
-            volumes.length > 0,
-            result.provisioningPromise
-          );
-        } catch (err) {
-          throw errors.conflict(
-            `Could not start deployment environment: ${err instanceof Error ? err.message : String(err)}`
-          );
-        }
-      }
-
-      const updated = await requireDeploymentEnvironment(db, projectId, envId);
-      log.info('deployment_environment.started', {
+      const result = await startDeploymentEnvironment({
+        db,
+        env: c.env,
+        userId,
         projectId,
         envId,
-        nodeId: result.nodeId,
-        provisioningStarted: result.provisioningStarted,
-        volumeCount: volumes.length,
-        latestReleaseVersion: latestRelease.version,
+        executionCtx,
       });
-
-      return c.json({
-        environment: await buildDeploymentEnvironmentResponse(db, c.env, updated),
-        lifecycle: {
-          started: true,
-          alreadyActive: false,
-          nodeId: result.nodeId,
-          provisioningStarted: result.provisioningStarted,
-          volumesAttachScheduled: volumes.length > 0 && result.provisioningStarted,
-          latestReleaseVersion: latestRelease.version,
-        },
-      });
+      return c.json(result);
     }
   );
 }

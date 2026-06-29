@@ -56,6 +56,17 @@ interface DeploymentNodeCandidate {
   last_metrics: string | null;
 }
 
+interface LinkEnvironmentToNodeOptions {
+  env: Env;
+  db: ReturnType<typeof drizzle<typeof schema>>;
+  envId: string;
+  nodeId: string;
+  placement: DeploymentPlacement;
+  userId: string;
+  expectedNodeStatus: 'creating' | 'running';
+  nodeMode: 'shared' | 'exclusive';
+}
+
 function parseEnvInt(value: string | undefined, fallback: number): number {
   if (!value) return fallback;
   const parsed = Number.parseInt(value, 10);
@@ -181,16 +192,8 @@ async function readEnvironmentNodeId(
   return rows[0]?.nodeId ?? null;
 }
 
-async function linkEnvironmentToNode(
-  env: Env,
-  db: ReturnType<typeof drizzle<typeof schema>>,
-  envId: string,
-  nodeId: string,
-  placement: DeploymentPlacement,
-  userId: string,
-  expectedNodeStatus: 'creating' | 'running',
-  nodeMode: 'shared' | 'exclusive'
-): Promise<boolean> {
+async function linkEnvironmentToNode(opts: LinkEnvironmentToNodeOptions): Promise<boolean> {
+  const { env, db, envId, nodeId, placement, userId, expectedNodeStatus, nodeMode } = opts;
   if (typeof env.DATABASE.prepare === 'function') {
     const result = await env.DATABASE.prepare(
       `UPDATE deployment_environments
@@ -352,16 +355,16 @@ export async function provisionDeploymentNode(
     requiresVolumes
   );
   if (existingNodeId) {
-    const linked = await linkEnvironmentToNode(
+    const linked = await linkEnvironmentToNode({
       env,
       db,
       envId,
-      existingNodeId,
+      nodeId: existingNodeId,
       placement,
       userId,
-      'running',
-      'shared'
-    );
+      expectedNodeStatus: 'running',
+      nodeMode: 'shared',
+    });
     if (linked) {
       log.info('deployment_provisioning.placed_existing_node', {
         nodeId: existingNodeId,
@@ -403,16 +406,16 @@ export async function provisionDeploymentNode(
     nodeMode,
   });
 
-  const linkedFreshNode = await linkEnvironmentToNode(
+  const linkedFreshNode = await linkEnvironmentToNode({
     env,
     db,
     envId,
-    node.id,
+    nodeId: node.id,
     placement,
     userId,
-    'creating',
-    nodeMode
-  );
+    expectedNodeStatus: 'creating',
+    nodeMode,
+  });
   if (!linkedFreshNode) {
     await db
       .delete(schema.nodes)

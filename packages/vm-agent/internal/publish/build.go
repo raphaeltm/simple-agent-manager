@@ -405,33 +405,45 @@ func unsupportedServiceVolumeReferences(serviceName string, raw json.RawMessage)
 	var entries []composeConfigServiceVolume
 	if err := json.Unmarshal(raw, &entries); err != nil {
 		var shortEntries []string
-		if shortErr := json.Unmarshal(raw, &shortEntries); shortErr != nil {
+		if json.Unmarshal(raw, &shortEntries) != nil {
 			return nil, fmt.Errorf("build: parse compose volumes for service %s: %w", serviceName, err)
 		}
-		refs := make([]string, 0, len(shortEntries))
-		for _, spec := range shortEntries {
-			if ref, ok := unsupportedShortVolumeReference(serviceName, spec); ok {
-				refs = append(refs, ref)
-			}
-		}
-		sort.Strings(refs)
-		return refs, nil
+		return unsupportedShortVolumeReferences(serviceName, shortEntries), nil
 	}
 
+	return unsupportedStructuredVolumeReferences(serviceName, entries), nil
+}
+
+func unsupportedStructuredVolumeReferences(serviceName string, entries []composeConfigServiceVolume) []string {
 	refs := make([]string, 0, len(entries))
 	for _, entry := range entries {
 		source := strings.TrimSpace(entry.Source)
 		if source == "" {
-			target := strings.TrimSpace(entry.Target)
-			if target == "" {
-				target = "unknown target"
-			}
-			source = "anonymous at " + target
+			source = anonymousVolumeSource(entry.Target)
 		}
 		refs = append(refs, serviceName+":"+source)
 	}
 	sort.Strings(refs)
-	return refs, nil
+	return refs
+}
+
+func unsupportedShortVolumeReferences(serviceName string, entries []string) []string {
+	refs := make([]string, 0, len(entries))
+	for _, spec := range entries {
+		if ref, ok := unsupportedShortVolumeReference(serviceName, spec); ok {
+			refs = append(refs, ref)
+		}
+	}
+	sort.Strings(refs)
+	return refs
+}
+
+func anonymousVolumeSource(target string) string {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		target = "unknown target"
+	}
+	return "anonymous at " + target
 }
 
 func unsupportedShortVolumeReference(serviceName, spec string) (string, bool) {
@@ -445,11 +457,7 @@ func unsupportedShortVolumeReference(serviceName, spec string) (string, bool) {
 	}
 	source := strings.TrimSpace(parts[0])
 	if source == "" {
-		target := strings.TrimSpace(parts[1])
-		if target == "" {
-			target = "unknown target"
-		}
-		return serviceName + ":anonymous at " + target, true
+		return serviceName + ":" + anonymousVolumeSource(parts[1]), true
 	}
 	return serviceName + ":" + source, true
 }
