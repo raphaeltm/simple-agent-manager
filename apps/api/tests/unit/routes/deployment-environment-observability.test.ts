@@ -21,6 +21,7 @@ vi.mock('drizzle-orm/d1', () => ({
 
 vi.mock('drizzle-orm', () => ({
   and: (...args: unknown[]) => args,
+  desc: (value: unknown) => value,
   eq: (a: unknown, b: unknown) => [a, b],
 }));
 
@@ -52,6 +53,7 @@ vi.mock('../../../src/services/node-agent', () => ({
   getNodeLogsFromNode: (...args: unknown[]) => mockGetNodeLogsFromNode(...args),
   getNodeSystemInfoFromNode: (...args: unknown[]) => mockGetNodeSystemInfoFromNode(...args),
   listNodeContainersFromNode: (...args: unknown[]) => mockListNodeContainersFromNode(...args),
+  teardownDeploymentEnvironmentOnNode: vi.fn(),
 }));
 
 vi.mock('../../../src/services/deployment-control', () => ({
@@ -69,11 +71,16 @@ vi.mock('../../../src/services/deployment-environment-summary', () => ({
   buildDeploymentEnvironmentResponse: vi.fn(),
 }));
 
+vi.mock('../../../src/services/deployment-provisioning', () => ({
+  provisionDeploymentNode: vi.fn(),
+}));
+
 vi.mock('../../../src/services/deployment-routing', () => ({
   collectEnvironmentRouteHostnames: vi.fn(() => []),
 }));
 
 vi.mock('../../../src/services/deployment-volumes', () => ({
+  attachEnvironmentVolumesToLinkedNode: vi.fn(),
   deleteEnvironmentVolume: vi.fn(),
   detachEnvironmentVolumes: vi.fn(),
   listEnvironmentVolumes: vi.fn(),

@@ -30,6 +30,7 @@ let latestVersionRows: Array<{ version: number }> = [];
 let environmentRows: Array<{
   id: string;
   nodeId: string | null;
+  status: string;
   agentDeployEnabled: boolean;
   agentDeployEnabledBy?: string | null;
   agentDeployEnabledAt?: string | null;
@@ -38,6 +39,7 @@ let environmentRows: Array<{
 }> = [];
 const inserted: Array<Record<string, unknown>> = [];
 const updated: Array<Record<string, unknown>> = [];
+const mockProvisionDeploymentNode = vi.hoisted(() => vi.fn(async () => null));
 let verifiedPayload: { workspace: string; type: string; scope?: string } = {
   workspace: 'ws-1',
   type: 'callback',
@@ -64,7 +66,7 @@ vi.mock('../../../src/db/schema', () => ({
 // Stub it so the release-recording slice stays focused; nodeId resolves to null.
 vi.mock('../../../src/services/deployment-provisioning', () => ({
   DEPLOYMENT_MODEL_RUNNER_VM_SIZE: 'medium',
-  provisionDeploymentNode: vi.fn(async () => null),
+  provisionDeploymentNode: (...args: unknown[]) => mockProvisionDeploymentNode(...args),
   resolveDeploymentPlacement: vi.fn(async () => ({
     provider: 'hetzner',
     location: 'fsn1',
@@ -187,6 +189,7 @@ describe('compose-publish-release callback (vertical slice)', () => {
       {
         id: 'env-1',
         nodeId: null,
+        status: 'active',
         agentDeployEnabled: true,
         agentDeployEnabledBy: 'user-1',
         agentDeployEnabledAt: '2026-06-21T00:00:00.000Z',
@@ -232,6 +235,29 @@ describe('compose-publish-release callback (vertical slice)', () => {
         agentProfileId: 'profile-1',
       },
     });
+  });
+
+  it('records a stopped environment release without provisioning a node', async () => {
+    environmentRows = [
+      {
+        id: 'env-1',
+        nodeId: null,
+        status: 'stopped',
+        agentDeployEnabled: true,
+        agentDeployEnabledBy: 'user-1',
+        agentDeployEnabledAt: '2026-06-21T00:00:00.000Z',
+        agentDeployDisabledAt: null,
+        allowedDeployProfileIdsJson: null,
+      },
+    ];
+
+    const app = await buildApp();
+    const res = await request(app, 'proj-1', validSubmission);
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.nodeId).toBeNull();
+    expect(mockProvisionDeploymentNode).not.toHaveBeenCalled();
   });
 
   it('validates and records artifact-backed service descriptors', async () => {
@@ -287,7 +313,8 @@ describe('compose-publish-release callback (vertical slice)', () => {
             localImageRef: 'workspace-web',
             r2Key: 'compose-image-artifacts/proj-1/env-1/other-ws/upload-1/web.docker-save.tar',
             sizeBytes: 42,
-            archiveSha256: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            archiveSha256:
+              'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
             archiveType: 'docker-save',
             mediaType: 'application/vnd.docker.image.rootfs.diff.tar',
           },

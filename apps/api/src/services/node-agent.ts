@@ -33,7 +33,9 @@ export function getNodeAgentReadyTimeoutMs(env: { NODE_AGENT_READY_TIMEOUT_MS?: 
   return parsed;
 }
 
-export function getNodeAgentReadyPollIntervalMs(env: { NODE_AGENT_READY_POLL_INTERVAL_MS?: string }): number {
+export function getNodeAgentReadyPollIntervalMs(env: {
+  NODE_AGENT_READY_POLL_INTERVAL_MS?: string;
+}): number {
   const parsed = env.NODE_AGENT_READY_POLL_INTERVAL_MS
     ? Number.parseInt(env.NODE_AGENT_READY_POLL_INTERVAL_MS, 10)
     : DEFAULT_NODE_AGENT_READY_POLL_INTERVAL_MS;
@@ -93,9 +95,7 @@ export async function waitForNodeAgentReady(nodeId: string, env: Env): Promise<v
     if (nextRemainingMs <= 0) {
       break;
     }
-    await new Promise((resolve) =>
-      setTimeout(resolve, Math.min(pollIntervalMs, nextRemainingMs))
-    );
+    await new Promise((resolve) => setTimeout(resolve, Math.min(pollIntervalMs, nextRemainingMs)));
   }
 
   const details = lastError ? ` Last error: ${lastError}` : '';
@@ -141,10 +141,14 @@ async function nodeAgentRequest(
     env.NODE_AGENT_REQUEST_TIMEOUT_MS,
     DEFAULT_NODE_AGENT_REQUEST_TIMEOUT_MS
   );
-  const response = await fetchWithTimeout(url, {
-    ...options,
-    headers,
-  }, requestTimeoutMs);
+  const response = await fetchWithTimeout(
+    url,
+    {
+      ...options,
+      headers,
+    },
+    requestTimeoutMs
+  );
 
   recordNodeRoutingMetric(
     {
@@ -166,7 +170,7 @@ async function nodeAgentRequest(
     if (response.status === 404 && body.includes('"Endpoint not found"')) {
       throw new Error(
         `Node Agent unreachable: DNS record for ${nodeId.toLowerCase()}.vm may be missing. ` +
-        `The request was routed back to the API Worker instead of the VM.`
+          `The request was routed back to the API Worker instead of the VM.`
       );
     }
 
@@ -259,6 +263,23 @@ export async function deleteWorkspaceOnNode(
   });
 }
 
+export async function teardownDeploymentEnvironmentOnNode(
+  nodeId: string,
+  environmentId: string,
+  env: Env,
+  userId: string
+): Promise<unknown> {
+  return nodeAgentRequest(
+    nodeId,
+    env,
+    `/deployment/environments/${encodeURIComponent(environmentId)}/teardown`,
+    {
+      method: 'POST',
+      userId,
+    }
+  );
+}
+
 export async function createAgentSessionOnNode(
   nodeId: string,
   workspaceId: string,
@@ -268,7 +289,7 @@ export async function createAgentSessionOnNode(
   userId: string,
   chatSessionId?: string | null,
   projectId?: string | null,
-  mcpServer?: McpServerConfig,
+  mcpServer?: McpServerConfig
 ): Promise<unknown> {
   const body: Record<string, unknown> = {
     sessionId,
@@ -326,7 +347,7 @@ export async function startAgentSessionOnNode(
   userId: string,
   mcpServer?: McpServerConfig,
   overrides?: AgentSessionOverrides,
-  taskContext?: AgentSessionTaskContext,
+  taskContext?: AgentSessionTaskContext
 ): Promise<unknown> {
   const body: Record<string, unknown> = { agentType, initialPrompt };
   if (mcpServer) {
@@ -379,7 +400,7 @@ export async function sendPromptToAgentOnNode(
   prompt: string,
   env: Env,
   userId: string,
-  messageId?: string,
+  messageId?: string
 ): Promise<unknown> {
   const body: { prompt: string; messageId?: string } = { prompt };
   if (messageId) body.messageId = messageId;
@@ -407,7 +428,7 @@ export async function cancelAgentSessionOnNode(
   workspaceId: string,
   sessionId: string,
   env: Env,
-  userId: string,
+  userId: string
 ): Promise<{ success: boolean; status: number }> {
   try {
     await nodeAgentRequest(
@@ -418,7 +439,7 @@ export async function cancelAgentSessionOnNode(
         method: 'POST',
         userId,
         workspaceId,
-      },
+      }
     );
     return { success: true, status: 200 };
   } catch (err) {
@@ -506,10 +527,13 @@ export async function listNodeEventsOnNode(
   userId: string,
   limit = 100
 ): Promise<{ events: unknown[]; nextCursor?: string | null }> {
-  const payload = expectJsonRecord(await nodeAgentRequest(nodeId, env, `/events?limit=${limit}`, {
-    method: 'GET',
-    userId,
-  }), 'node-agent.events');
+  const payload = expectJsonRecord(
+    await nodeAgentRequest(nodeId, env, `/events?limit=${limit}`, {
+      method: 'GET',
+      userId,
+    }),
+    'node-agent.events'
+  );
   if (!Array.isArray(payload.events)) {
     throw new Error('Node Agent events response missing events array');
   }
@@ -593,28 +617,38 @@ export async function getWorkspacePortsOnNode(
   headers.set('X-SAM-Workspace-Id', workspaceId);
 
   const startedAt = Date.now();
-  recordNodeRoutingMetric({
-    metric: 'node_agent_request',
-    nodeId,
-    workspaceId,
-  }, env);
+  recordNodeRoutingMetric(
+    {
+      metric: 'node_agent_request',
+      nodeId,
+      workspaceId,
+    },
+    env
+  );
 
   const requestTimeoutMs = getTimeoutMs(
     env.NODE_AGENT_REQUEST_TIMEOUT_MS,
     DEFAULT_NODE_AGENT_REQUEST_TIMEOUT_MS
   );
-  const response = await fetchWithTimeout(url, {
-    method: 'GET',
-    headers,
-  }, requestTimeoutMs);
+  const response = await fetchWithTimeout(
+    url,
+    {
+      method: 'GET',
+      headers,
+    },
+    requestTimeoutMs
+  );
 
-  recordNodeRoutingMetric({
-    metric: 'node_agent_response',
-    nodeId,
-    workspaceId,
-    statusCode: response.status,
-    durationMs: Date.now() - startedAt,
-  }, env);
+  recordNodeRoutingMetric(
+    {
+      metric: 'node_agent_response',
+      nodeId,
+      workspaceId,
+      statusCode: response.status,
+      durationMs: Date.now() - startedAt,
+    },
+    env
+  );
 
   if (!response.ok) {
     const body = await response.text().catch(() => '');

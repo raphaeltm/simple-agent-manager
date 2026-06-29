@@ -985,6 +985,7 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 	// Node/workspace management routes (control-plane authenticated).
 	mux.HandleFunc("GET /workspaces", s.handleListWorkspaces)
 	mux.HandleFunc("POST /workspaces", s.handleCreateWorkspace)
+	mux.HandleFunc("POST /deployment/environments/{environmentId}/teardown", s.handleTeardownDeploymentEnvironment)
 	mux.HandleFunc("GET /workspaces/{workspaceId}/events", s.handleListWorkspaceEvents)
 	mux.HandleFunc("POST /workspaces/{workspaceId}/stop", s.handleStopWorkspace)
 	mux.HandleFunc("POST /workspaces/{workspaceId}/restart", s.handleRestartWorkspace)

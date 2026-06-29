@@ -29,7 +29,7 @@ interface DbCall {
 const dbCalls: DbCall[] = [];
 
 // State: simulates D1 rows
-let envRows: Array<{ id: string; projectId: string; nodeId: string | null }> = [];
+let envRows: Array<{ id: string; projectId: string; nodeId: string | null; status: string }> = [];
 let releaseRows: Array<{ version: number }> = [];
 
 // Mock provisionDeploymentNode
@@ -81,9 +81,12 @@ vi.mock('../../../src/middleware/project-auth', () => ({
 
 vi.mock('../../../src/middleware/error', () => ({
   errors: {
-    badRequest: (msg: string) => Object.assign(new Error(msg), { statusCode: 400, error: 'BAD_REQUEST', message: msg }),
-    notFound: (msg: string) => Object.assign(new Error(msg), { statusCode: 404, error: 'NOT_FOUND', message: msg }),
-    conflict: (msg: string) => Object.assign(new Error(msg), { statusCode: 409, error: 'CONFLICT', message: msg }),
+    badRequest: (msg: string) =>
+      Object.assign(new Error(msg), { statusCode: 400, error: 'BAD_REQUEST', message: msg }),
+    notFound: (msg: string) =>
+      Object.assign(new Error(msg), { statusCode: 404, error: 'NOT_FOUND', message: msg }),
+    conflict: (msg: string) =>
+      Object.assign(new Error(msg), { statusCode: 409, error: 'CONFLICT', message: msg }),
   },
 }));
 
@@ -114,6 +117,7 @@ vi.mock('../../../src/db/schema', () => ({
     id: 'de.id',
     projectId: 'de.projectId',
     nodeId: 'de.nodeId',
+    status: 'de.status',
   },
   deploymentReleases: {
     id: 'dr.id',
@@ -151,7 +155,9 @@ function createMockDb() {
                   // Call 2: check env nodeId (envRows nodeId)
                   // Heuristic: if fields include nodeId, it's the nodeId check
                   if (fields && 'nodeId' in fields) {
-                    return Promise.resolve(envRows.map((r) => ({ nodeId: r.nodeId })));
+                    return Promise.resolve(
+                      envRows.map((r) => ({ nodeId: r.nodeId, status: r.status }))
+                    );
                   }
                   return Promise.resolve(envRows);
                 }),
@@ -229,7 +235,7 @@ describe('POST /:projectId/environments/:envId/releases — provisioning trigger
   beforeEach(() => {
     vi.clearAllMocks();
     dbCalls.length = 0;
-    envRows = [{ id: 'env-1', projectId: 'proj-1', nodeId: null }];
+    envRows = [{ id: 'env-1', projectId: 'proj-1', nodeId: null, status: 'active' }];
     releaseRows = [];
   });
 
@@ -247,7 +253,7 @@ describe('POST /:projectId/environments/:envId/releases — provisioning trigger
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(validManifest()),
       },
-      mockEnv,
+      mockEnv
     );
 
     expect(res.status).toBe(201);
@@ -259,12 +265,12 @@ describe('POST /:projectId/environments/:envId/releases — provisioning trigger
       'proj-1',
       'test-user-id',
       expect.anything(),
-      { requiresVolumes: false },
+      { requiresVolumes: false }
     );
   });
 
   it('second release with existing node does NOT re-provision', async () => {
-    envRows = [{ id: 'env-1', projectId: 'proj-1', nodeId: 'node-existing' }];
+    envRows = [{ id: 'env-1', projectId: 'proj-1', nodeId: 'node-existing', status: 'active' }];
 
     const app = await createTestApp();
     const res = await app.request(
@@ -274,7 +280,7 @@ describe('POST /:projectId/environments/:envId/releases — provisioning trigger
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(validManifest()),
       },
-      mockEnv,
+      mockEnv
     );
 
     expect(res.status).toBe(201);
@@ -282,6 +288,26 @@ describe('POST /:projectId/environments/:envId/releases — provisioning trigger
     expect(body.nodeId).toBe('node-existing');
 
     // provisionDeploymentNode should NOT have been called
+    expect(mockProvisionDeploymentNode).not.toHaveBeenCalled();
+  });
+
+  it('records a release for a stopped environment without provisioning a node', async () => {
+    envRows = [{ id: 'env-1', projectId: 'proj-1', nodeId: null, status: 'stopped' }];
+
+    const app = await createTestApp();
+    const res = await app.request(
+      '/api/projects/proj-1/environments/env-1/releases',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(validManifest()),
+      },
+      mockEnv
+    );
+
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body.nodeId).toBeNull();
     expect(mockProvisionDeploymentNode).not.toHaveBeenCalled();
   });
 
@@ -296,7 +322,7 @@ describe('POST /:projectId/environments/:envId/releases — provisioning trigger
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(validManifest()),
       },
-      mockEnv,
+      mockEnv
     );
 
     expect(res.status).toBe(201);
@@ -315,7 +341,7 @@ describe('POST /:projectId/environments/:envId/releases — provisioning trigger
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(validManifest()),
       },
-      mockEnv,
+      mockEnv
     );
 
     // Release creation must still succeed

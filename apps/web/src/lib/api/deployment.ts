@@ -144,6 +144,30 @@ export interface DeleteDeploymentEnvironmentResponse {
   warnings: string[];
 }
 
+export interface DeploymentEnvironmentStopResponse {
+  environment: DeploymentEnvironment;
+  lifecycle: {
+    stopped: boolean;
+    alreadyStopped: boolean;
+    nodeId: string | null;
+    nodeDeleted: boolean;
+    volumesDetached: number;
+    warnings: string[];
+  };
+}
+
+export interface DeploymentEnvironmentStartResponse {
+  environment: DeploymentEnvironment;
+  lifecycle: {
+    started: boolean;
+    alreadyActive: boolean;
+    nodeId: string | null;
+    provisioningStarted: boolean;
+    volumesAttachScheduled: boolean;
+    latestReleaseVersion?: number;
+  };
+}
+
 export async function listDeploymentEnvironments(
   projectId: string
 ): Promise<{ environments: DeploymentEnvironment[] }> {
@@ -180,6 +204,26 @@ export async function deleteDeploymentEnvironment(
   return request<DeleteDeploymentEnvironmentResponse>(
     `/api/projects/${projectId}/environments/${envId}`,
     { method: 'DELETE' }
+  );
+}
+
+export async function stopDeploymentEnvironment(
+  projectId: string,
+  envId: string
+): Promise<DeploymentEnvironmentStopResponse> {
+  return request<DeploymentEnvironmentStopResponse>(
+    `/api/projects/${projectId}/environments/${envId}/stop`,
+    { method: 'POST' }
+  );
+}
+
+export async function startDeploymentEnvironment(
+  projectId: string,
+  envId: string
+): Promise<DeploymentEnvironmentStartResponse> {
+  return request<DeploymentEnvironmentStartResponse>(
+    `/api/projects/${projectId}/environments/${envId}/start`,
+    { method: 'POST' }
   );
 }
 

@@ -5,7 +5,7 @@ type Condition = { op: 'eq'; col: string; val: unknown } | { op: 'and'; conds: C
 
 const updates: Array<{ table: unknown; values: Record<string, unknown>; where: unknown }> = [];
 const latestByEnvironment = new Map<string, { version: number; status: string }>();
-let deploymentPlacements: Array<{ envId: string; requiresVolumes?: boolean }> = [];
+let deploymentPlacements: Array<{ envId: string; status?: string; requiresVolumes?: boolean }> = [];
 const volumeReadinessByEnvironment = new Map<string, { total: number; attached: number }>();
 
 vi.mock('drizzle-orm', () => ({
@@ -37,6 +37,7 @@ vi.mock('../../../src/db/schema', () => ({
   deploymentEnvironments: {
     id: 'deployment_environments.id',
     nodeId: 'deployment_environments.nodeId',
+    status: 'deployment_environments.status',
     requiresVolumes: 'deployment_environments.requiresVolumes',
     observedDeployment: 'deployment_environments.observedDeployment',
     observedDeploymentAt: 'deployment_environments.observedDeploymentAt',
@@ -193,14 +194,17 @@ describe('node lifecycle deployment heartbeat contract', () => {
   beforeEach(() => {
     updates.length = 0;
     volumeReadinessByEnvironment.clear();
-    deploymentPlacements = [{ envId: 'env-a', requiresVolumes: false }, { envId: 'env-b', requiresVolumes: false }];
+    deploymentPlacements = [
+      { envId: 'env-a', status: 'active', requiresVolumes: false },
+      { envId: 'env-b', status: 'active', requiresVolumes: false },
+    ];
     latestByEnvironment.clear();
     latestByEnvironment.set('env-a', { version: 5, status: 'created' });
     latestByEnvironment.set('env-b', { version: 8, status: 'applied' });
   });
 
   it('withholds pending releases for volume environments until all volumes are attached', async () => {
-    deploymentPlacements = [{ envId: 'env-a', requiresVolumes: true }];
+    deploymentPlacements = [{ envId: 'env-a', status: 'active', requiresVolumes: true }];
     latestByEnvironment.set('env-a', { version: 5, status: 'created' });
     volumeReadinessByEnvironment.set('env-a', { total: 2, attached: 1 });
 
@@ -257,6 +261,36 @@ describe('node lifecycle deployment heartbeat contract', () => {
     ).toBe(false);
   });
 
+  it('retires stopped environments without issuing pending releases', async () => {
+    deploymentPlacements = [{ envId: 'env-a', status: 'stopped', requiresVolumes: false }];
+
+    const res = await postHeartbeat({
+      deployment: {
+        environments: [{ environmentId: 'env-a', appliedSeq: 4, status: 'applied' }],
+      },
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.deployment.environments).toEqual([]);
+    expect(body.deployment.retireEnvironments).toEqual([{ environmentId: 'env-a' }]);
+    expect(body.deployment.pendingReleases).toBeUndefined();
+  });
+
+  it('promotes starting environments to active after an applied heartbeat', async () => {
+    deploymentPlacements = [{ envId: 'env-a', status: 'starting', requiresVolumes: false }];
+    latestByEnvironment.set('env-a', { version: 4, status: 'applied' });
+
+    const res = await postHeartbeat({
+      deployment: {
+        environments: [{ environmentId: 'env-a', appliedSeq: 4, status: 'applied' }],
+      },
+    });
+
+    expect(res.status).toBe(200);
+    expect(updates.some((update) => update.values.status === 'active')).toBe(true);
+  });
+
   it('does not reissue a failed newer release after the node reports rollback', async () => {
     latestByEnvironment.set('env-a', { version: 6, status: 'failed' });
 
@@ -308,7 +342,7 @@ describe('node lifecycle deployment heartbeat contract', () => {
   });
 
   it('ignores legacy top-level deployment state without an environment id', async () => {
-    deploymentPlacements = [{ envId: 'env-a' }];
+    deploymentPlacements = [{ envId: 'env-a', status: 'active' }];
     latestByEnvironment.set('env-a', { version: 5, status: 'applied' });
 
     const res = await postHeartbeat(

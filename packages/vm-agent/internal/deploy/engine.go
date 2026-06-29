@@ -177,10 +177,13 @@ func (e *Engine) Teardown(ctx context.Context) error {
 		errs = append(errs, fmt.Sprintf("reload Caddy: %v", err))
 	}
 
-	e.setObserved(ObservedState{})
 	if len(errs) > 0 {
 		return fmt.Errorf("teardown environment %s: %s", e.cfg.EnvironmentID, strings.Join(errs, "; "))
 	}
+	if err := e.disk.ClearCurrent(); err != nil {
+		return fmt.Errorf("teardown environment %s: %w", e.cfg.EnvironmentID, err)
+	}
+	e.setObserved(ObservedState{})
 	return nil
 }
 

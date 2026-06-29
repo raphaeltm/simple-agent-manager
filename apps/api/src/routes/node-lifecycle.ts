@@ -334,11 +334,15 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
       const envRows = await db
         .select({
           envId: schema.deploymentEnvironments.id,
+          status: schema.deploymentEnvironments.status,
           requiresVolumes: schema.deploymentEnvironments.requiresVolumes,
         })
         .from(schema.deploymentEnvironments)
         .where(eq(schema.deploymentEnvironments.nodeId, nodeId));
-      const placedEnvIds = new Set(envRows.map((row) => row.envId));
+      const activeEnvRows = envRows.filter(
+        (row) => row.status === 'active' || row.status === 'starting'
+      );
+      const placedEnvIds = new Set(activeEnvRows.map((row) => row.envId));
       const bodyStates = Array.isArray(body.deployment.environments)
         ? body.deployment.environments
         : [];
@@ -354,7 +358,7 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
         .map((environmentId) => ({ environmentId }));
 
       response.deployment = {
-        environments: envRows.map((row) => ({ environmentId: row.envId })),
+        environments: activeEnvRows.map((row) => ({ environmentId: row.envId })),
         ...(retireEnvironments.length > 0 ? { retireEnvironments } : {}),
       };
 
@@ -362,16 +366,26 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
 
       const pendingReleases: Array<{ environmentId: string; seq: number }> = [];
 
-      for (const envRow of envRows) {
+      for (const envRow of activeEnvRows) {
         const envId = envRow.envId;
         const bodyState = stateByEnv.get(envId);
         const deploymentState = bodyState ?? null;
         const appliedSeq = deploymentState?.appliedSeq ?? 0;
 
         if (deploymentState) {
+          const observedUpdate = buildObservedDeploymentUpdate(deploymentState, now);
+          if (envRow.status === 'starting' && deploymentState.status === 'applied') {
+            observedUpdate.status = 'active';
+          } else if (
+            envRow.status === 'starting' &&
+            (deploymentState.status === 'failed' || deploymentState.status === 'failed-initial')
+          ) {
+            observedUpdate.status = 'error';
+          }
+
           await db
             .update(schema.deploymentEnvironments)
-            .set(buildObservedDeploymentUpdate(deploymentState, now))
+            .set(observedUpdate)
             .where(
               and(
                 eq(schema.deploymentEnvironments.id, envId),

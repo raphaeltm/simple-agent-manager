@@ -37,6 +37,8 @@ export const DEFAULT_MAX_ENVIRONMENTS_PER_DEPLOYMENT_NODE = 5;
 
 export interface DeploymentNodeResult {
   nodeId: string;
+  /** True when this call started a new VM provisioning flow. */
+  provisioningStarted: boolean;
   /** Promise that resolves when VM provisioning completes. Pass to waitUntil(). */
   provisioningPromise: Promise<void>;
 }
@@ -250,44 +252,52 @@ async function linkEnvironmentToNode(
 export async function resolveDeploymentPlacement(
   userId: string,
   env: Env,
-  options?: { vmSizeOverride?: string; vmLocationOverride?: string }
+  options?: {
+    vmSizeOverride?: string;
+    vmLocationOverride?: string;
+    providerOverride?: CredentialProvider;
+  }
 ): Promise<DeploymentPlacement | null> {
   const db = drizzle(env.DATABASE, { schema });
 
-  const userCreds = await db
-    .select({
-      provider: schema.credentials.provider,
-    })
-    .from(schema.credentials)
-    .where(
-      and(
-        eq(schema.credentials.userId, userId),
-        eq(schema.credentials.credentialType, 'cloud-provider'),
-        eq(schema.credentials.isActive, true)
-      )
-    )
-    .limit(1);
-
   let cloudProvider: CredentialProvider;
-  if (userCreds.length > 0 && userCreds[0]) {
-    cloudProvider = userCreds[0].provider as CredentialProvider;
+  if (options?.providerOverride) {
+    cloudProvider = options.providerOverride;
   } else {
-    const platformCreds = await db
-      .select({ provider: schema.platformCredentials.provider })
-      .from(schema.platformCredentials)
+    const userCreds = await db
+      .select({
+        provider: schema.credentials.provider,
+      })
+      .from(schema.credentials)
       .where(
         and(
-          eq(schema.platformCredentials.credentialType, 'cloud-provider'),
-          eq(schema.platformCredentials.isEnabled, true)
+          eq(schema.credentials.userId, userId),
+          eq(schema.credentials.credentialType, 'cloud-provider'),
+          eq(schema.credentials.isActive, true)
         )
       )
       .limit(1);
 
-    if (platformCreds.length === 0 || !platformCreds[0]?.provider) {
-      log.error('deployment_provisioning.no_provider', { userId });
-      return null;
+    if (userCreds.length > 0 && userCreds[0]) {
+      cloudProvider = userCreds[0].provider as CredentialProvider;
+    } else {
+      const platformCreds = await db
+        .select({ provider: schema.platformCredentials.provider })
+        .from(schema.platformCredentials)
+        .where(
+          and(
+            eq(schema.platformCredentials.credentialType, 'cloud-provider'),
+            eq(schema.platformCredentials.isEnabled, true)
+          )
+        )
+        .limit(1);
+
+      if (platformCreds.length === 0 || !platformCreds[0]?.provider) {
+        log.error('deployment_provisioning.no_provider', { userId });
+        return null;
+      }
+      cloudProvider = platformCreds[0].provider as CredentialProvider;
     }
-    cloudProvider = platformCreds[0].provider as CredentialProvider;
   }
 
   const vmLocation =
@@ -321,6 +331,7 @@ export async function provisionDeploymentNode(
   options?: {
     vmSizeOverride?: string;
     vmLocationOverride?: string;
+    providerOverride?: CredentialProvider;
     requiresVolumes?: boolean;
   }
 ): Promise<DeploymentNodeResult | null> {
@@ -334,7 +345,12 @@ export async function provisionDeploymentNode(
   const requiresVolumes = options?.requiresVolumes ?? false;
   const nodeMode: 'shared' | 'exclusive' = requiresVolumes ? 'exclusive' : 'shared';
 
-  const existingNodeId = await findDeploymentNodeWithCapacity(env, userId, placement, requiresVolumes);
+  const existingNodeId = await findDeploymentNodeWithCapacity(
+    env,
+    userId,
+    placement,
+    requiresVolumes
+  );
   if (existingNodeId) {
     const linked = await linkEnvironmentToNode(
       env,
@@ -353,7 +369,11 @@ export async function provisionDeploymentNode(
         provider: placement.provider,
         location: placement.location,
       });
-      return { nodeId: existingNodeId, provisioningPromise: Promise.resolve() };
+      return {
+        nodeId: existingNodeId,
+        provisioningStarted: false,
+        provisioningPromise: Promise.resolve(),
+      };
     }
 
     const currentNodeId = await readEnvironmentNodeId(db, envId);
@@ -363,7 +383,11 @@ export async function provisionDeploymentNode(
         selectedNodeId: existingNodeId,
         currentNodeId,
       });
-      return { nodeId: currentNodeId, provisioningPromise: Promise.resolve() };
+      return {
+        nodeId: currentNodeId,
+        provisioningStarted: false,
+        provisioningPromise: Promise.resolve(),
+      };
     }
   }
 
@@ -407,7 +431,11 @@ export async function provisionDeploymentNode(
         abandonedNodeId: node.id,
         currentNodeId,
       });
-      return { nodeId: currentNodeId, provisioningPromise: Promise.resolve() };
+      return {
+        nodeId: currentNodeId,
+        provisioningStarted: false,
+        provisioningPromise: Promise.resolve(),
+      };
     }
 
     return null;
@@ -455,5 +483,5 @@ export async function provisionDeploymentNode(
     }
   });
 
-  return { nodeId: node.id, provisioningPromise };
+  return { nodeId: node.id, provisioningStarted: true, provisioningPromise };
 }

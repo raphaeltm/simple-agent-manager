@@ -28,8 +28,10 @@ export type CreateDeploymentReleaseResult = {
   nodeId: string | null;
 };
 
-export type CreateDeploymentReleaseError =
-  | { status: 400; body: { error: string; message: string; details?: Record<string, unknown> } };
+export type CreateDeploymentReleaseError = {
+  status: 400;
+  body: { error: string; message: string; details?: Record<string, unknown> };
+};
 
 export type CreateDeploymentReleaseOutcome =
   | { success: true; body: CreateDeploymentReleaseResult }
@@ -44,7 +46,7 @@ export async function createDeploymentReleaseFromManifest(
     userId: string;
     env: Env;
     executionCtx?: ExecutionContext;
-  },
+  }
 ): Promise<CreateDeploymentReleaseOutcome> {
   const requiresVolumes = Object.keys(manifest.volumes).length > 0;
   const secretNames = collectSecretNames(manifest);
@@ -93,7 +95,8 @@ export async function createDeploymentReleaseFromManifest(
         status: 400,
         body: {
           error: 'NO_CLOUD_PROVIDER',
-          message: 'No cloud provider credential found. Connect a cloud provider before deploying volumes.',
+          message:
+            'No cloud provider credential found. Connect a cloud provider before deploying volumes.',
         },
       },
     };
@@ -128,7 +131,7 @@ export async function createDeploymentReleaseFromManifest(
   } catch (err: unknown) {
     if (err instanceof Error && err.message.includes('UNIQUE')) {
       throw errors.conflict(
-        `Version ${nextVersion} already exists for this environment. Please retry.`,
+        `Version ${nextVersion} already exists for this environment. Please retry.`
       );
     }
     throw err;
@@ -137,12 +140,14 @@ export async function createDeploymentReleaseFromManifest(
   const envRow = await db
     .select({
       nodeId: schema.deploymentEnvironments.nodeId,
+      status: schema.deploymentEnvironments.status,
     })
     .from(schema.deploymentEnvironments)
     .where(eq(schema.deploymentEnvironments.id, params.envId))
     .limit(1);
 
   let nodeId: string | null = envRow[0]?.nodeId ?? null;
+  const shouldProvision = envRow[0]?.status !== 'stopped' && envRow[0]?.status !== 'stopping';
   let currentNodeMode: string | null = null;
   if (requiresVolumes && nodeId) {
     const nodeRows = await db
@@ -160,7 +165,13 @@ export async function createDeploymentReleaseFromManifest(
     nodeId = null;
   }
 
-  if (!nodeId) {
+  if (!shouldProvision) {
+    log.info('deployment_release.provisioning_skipped_environment_stopped', {
+      envId: params.envId,
+      releaseId: id,
+      environmentStatus: envRow[0]?.status ?? null,
+    });
+  } else if (!nodeId) {
     try {
       const result = await provisionDeploymentNode(
         params.envId,
@@ -182,12 +193,7 @@ export async function createDeploymentReleaseFromManifest(
         try {
           const provisioningPromise = requiresVolumes
             ? result.provisioningPromise.then(() =>
-                attachEnvironmentVolumesToLinkedNode(
-                  db,
-                  params.env,
-                  params.userId,
-                  params.envId
-                )
+                attachEnvironmentVolumesToLinkedNode(db, params.env, params.userId, params.envId)
               )
             : result.provisioningPromise;
           params.executionCtx?.waitUntil(provisioningPromise);

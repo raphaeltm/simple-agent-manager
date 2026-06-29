@@ -364,6 +364,16 @@ func TestTeardownRemovesOnlyEnvironmentSnippetAndComposeProject(t *testing.T) {
 	if _, err := os.ReadFile(reloadLog); err != nil {
 		t.Fatalf("reload command did not run: %v", err)
 	}
+	currentSeq, err := disk.CurrentSeq()
+	if err != nil {
+		t.Fatalf("CurrentSeq: %v", err)
+	}
+	if currentSeq != 0 {
+		t.Fatalf("expected teardown to clear current release, got seq %d", currentSeq)
+	}
+	if _, err := disk.ReadState(1); err != nil {
+		t.Fatalf("teardown should preserve release metadata: %v", err)
+	}
 }
 
 func TestGenerateCaddySnippet_RejectsUnsafeRouteTargets(t *testing.T) {

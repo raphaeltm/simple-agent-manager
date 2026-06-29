@@ -158,6 +158,7 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
   const envRows = await db
     .select({
       nodeId: schema.deploymentEnvironments.nodeId,
+      status: schema.deploymentEnvironments.status,
     })
     .from(schema.deploymentEnvironments)
     .where(
@@ -186,11 +187,11 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
     throw errors.badRequest(err instanceof Error ? err.message : String(err));
   }
   const requiresVolumes = Object.keys(volumeDeclarations).length > 0;
-  const placement = requiresVolumes
-    ? await resolveDeploymentPlacement(userId, c.env)
-    : null;
+  const placement = requiresVolumes ? await resolveDeploymentPlacement(userId, c.env) : null;
   if (requiresVolumes && !placement) {
-    throw errors.badRequest('No cloud provider credential found. Connect a cloud provider before deploying volumes.');
+    throw errors.badRequest(
+      'No cloud provider credential found. Connect a cloud provider before deploying volumes.'
+    );
   }
   if (requiresVolumes && placement) {
     await createMissingDeclaredVolumes(db, c.env, userId, {
@@ -294,6 +295,8 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
   // release recording (the release is already durable); the node can be
   // provisioned on the next release or via the deploy verb.
   let nodeId: string | null = environmentRow.nodeId ?? null;
+  const shouldProvision =
+    environmentRow.status !== 'stopped' && environmentRow.status !== 'stopping';
   let currentNodeMode: string | null = null;
   if (requiresVolumes && nodeId) {
     const nodeRows = await db
@@ -311,7 +314,14 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
     nodeId = null;
   }
   try {
-    if (!nodeId) {
+    if (!shouldProvision) {
+      log.info('compose_publish_release.provisioning_skipped_environment_stopped', {
+        projectId,
+        environmentId,
+        releaseId,
+        environmentStatus: environmentRow.status,
+      });
+    } else if (!nodeId) {
       const vmSizeOverride = composeHasModelProvider(composeYaml)
         ? c.env.DEPLOYMENT_MODEL_RUNNER_VM_SIZE?.trim() || DEPLOYMENT_MODEL_RUNNER_VM_SIZE
         : undefined;

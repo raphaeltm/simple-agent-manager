@@ -123,6 +123,39 @@ func TestDiskState_SetCurrent(t *testing.T) {
 	}
 }
 
+func TestDiskState_ClearCurrentPreservesRelease(t *testing.T) {
+	dir := t.TempDir()
+	ds, err := NewDiskState(dir)
+	if err != nil {
+		t.Fatalf("NewDiskState: %v", err)
+	}
+	if err := ds.ClearCurrent(); err != nil {
+		t.Fatalf("ClearCurrent with no current release: %v", err)
+	}
+
+	state := &ReleaseState{Seq: 12, Status: StatusApplied}
+	if err := ds.WriteRelease(state, "compose yaml", "caddyfile"); err != nil {
+		t.Fatalf("WriteRelease: %v", err)
+	}
+	if err := ds.SetCurrent(12); err != nil {
+		t.Fatalf("SetCurrent: %v", err)
+	}
+	if err := ds.ClearCurrent(); err != nil {
+		t.Fatalf("ClearCurrent: %v", err)
+	}
+
+	seq, err := ds.CurrentSeq()
+	if err != nil {
+		t.Fatalf("CurrentSeq: %v", err)
+	}
+	if seq != 0 {
+		t.Fatalf("expected current seq cleared, got %d", seq)
+	}
+	if _, err := ds.ReadState(12); err != nil {
+		t.Fatalf("release metadata should remain readable after ClearCurrent: %v", err)
+	}
+}
+
 func TestDiskState_SetCurrentAtomic(t *testing.T) {
 	dir := t.TempDir()
 	ds, err := NewDiskState(dir)
