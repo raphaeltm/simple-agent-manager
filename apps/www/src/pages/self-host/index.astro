@@ -11,7 +11,7 @@ const steps = [
   { id: 'welcome', num: 0, label: 'Welcome', short: 'Start' },
   { id: 'domain', num: 1, label: 'Domain & Cloudflare account', short: 'Domain' },
   { id: 'fork', num: 2, label: 'Fork the repo', short: 'Fork' },
-  { id: 'cf-token', num: 3, label: 'Cloudflare tokens', short: 'CF tokens' },
+  { id: 'cf-token', num: 3, label: 'Cloudflare token', short: 'CF token' },
   { id: 'github-app', num: 4, label: 'Create GitHub App', short: 'GitHub App' },
   { id: 'passphrase', num: 5, label: 'Pulumi passphrase', short: 'Passphrase' },
   { id: 'github-env', num: 6, label: 'Configure environment', short: 'Environment' },
@@ -196,14 +196,16 @@ const cfPermissions = [
           </details>
         </article>
 
-        <!-- 3. Cloudflare tokens -->
+        <!-- 3. Cloudflare token -->
         <article class="sh-panel" data-panel="cf-token" hidden>
           <span class="sh-eyebrow">Step 3</span>
-          <h2 class="sh-h2">Create your Cloudflare tokens</h2>
+          <h2 class="sh-h2">Create your Cloudflare API token</h2>
           <p class="sh-lead">
             In the Cloudflare account from Step 1, enable R2 first if it is not already active.
-            Then create the deploy API token and the separate R2 S3 credentials used for Pulumi
-            state. Grant the deploy token exactly these permissions:
+            Then create a single API token with exactly the permissions below. Because the token
+            includes <strong>R2 Storage</strong>, Cloudflare's final creation screen shows both the
+            API token <em>and</em> the R2 S3 keys (Access Key ID + Secret) together — copy all of
+            them before leaving the page. You do not need a separate R2 token.
           </p>
           <a class="sh-btn sh-btn-primary" id="sh-cf-api-link" href="https://dash.cloudflare.com/" target="_blank" rel="noopener noreferrer">
             Open Cloudflare API Tokens
@@ -229,34 +231,16 @@ const cfPermissions = [
             The default deploy configures AI Gateway and writes Analytics Engine data, so keep those
             enabled even if every user brings their own model keys.
           </div>
-          <p class="sh-lead">Paste the generated values so we can assemble your final secrets in Step 6:</p>
+          <p class="sh-lead">
+            Paste all the values from that one creation screen so we can assemble your final secrets
+            in Step 6. The R2 S3 keys are the <strong>Access Key ID</strong> and
+            <strong>Secret Access Key</strong> shown alongside the API token; Pulumi uses them for its
+            state backend.
+          </p>
           <div class="sh-field">
             <label for="sh-cf-token">CF_API_TOKEN <span class="sh-hint-inline">(shown once after creation)</span></label>
             <input type="password" id="sh-cf-token" placeholder="Paste token" autocomplete="off" spellcheck="false" data-secret />
           </div>
-          <div class="sh-field">
-            <label for="sh-cf-zone">CF_ZONE_ID <span class="sh-hint-inline">(32-char hex)</span></label>
-            <input type="text" id="sh-cf-zone" placeholder="Domain zone ID" autocomplete="off" spellcheck="false" />
-            <span class="sh-hint">
-              Open your domain's Cloudflare overview page and copy the Zone ID from the right sidebar.
-              <a id="sh-cf-zone-link" href="https://dash.cloudflare.com/" target="_blank" rel="noopener noreferrer">Open domain overview</a>
-            </span>
-          </div>
-          <h4 class="sh-subhead">R2 access keys for Pulumi state</h4>
-          <p class="sh-lead">
-            Open R2 API Tokens in the same Cloudflare account and create
-            <strong>Object Read &amp; Write</strong> credentials. Cloudflare shows the Access Key ID
-            and Secret Access Key once; copy both before leaving the page.
-          </p>
-          <div class="sh-callout sh-callout-info">
-            For the first deploy, scope the R2 credentials to <strong>All buckets</strong>. The deploy
-            workflow creates the Pulumi state bucket later as <code>{'${RESOURCE_PREFIX}-pulumi-state'}</code>.
-            After the first successful deploy, you can rotate these credentials to that one bucket.
-          </div>
-          <a class="sh-btn sh-btn-primary" id="sh-r2-api-link" href="https://dash.cloudflare.com/" target="_blank" rel="noopener noreferrer">
-            Open R2 API Tokens
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
-          </a>
           <div class="sh-field-row">
             <div class="sh-field">
               <label for="sh-r2-key">R2_ACCESS_KEY_ID</label>
@@ -266,6 +250,14 @@ const cfPermissions = [
               <label for="sh-r2-secret">R2_SECRET_ACCESS_KEY</label>
               <input type="password" id="sh-r2-secret" placeholder="Secret Access Key" autocomplete="off" spellcheck="false" data-secret />
             </div>
+          </div>
+          <div class="sh-field">
+            <label for="sh-cf-zone">CF_ZONE_ID <span class="sh-hint-inline">(32-char hex)</span></label>
+            <input type="text" id="sh-cf-zone" placeholder="Domain zone ID" autocomplete="off" spellcheck="false" />
+            <span class="sh-hint">
+              Open your domain's Cloudflare overview page and copy the Zone ID from the right sidebar.
+              <a id="sh-cf-zone-link" href="https://dash.cloudflare.com/" target="_blank" rel="noopener noreferrer">Open domain overview</a>
+            </span>
           </div>
           <p class="sh-microcopy">Token and secret fields are never persisted to your browser storage — they live only in this tab until you close it.</p>
           <details class="sh-why">
@@ -1123,14 +1115,33 @@ const cfPermissions = [
   }
   :global(.sh-secret-key) {
     background: var(--color-bg-inset);
-    padding: 10px 14px;
-    font-family: var(--font-mono);
-    color: var(--color-accent);
+    padding: 8px 14px;
     min-width: 190px;
     display: flex;
-    align-items: center;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: center;
+    gap: 1px;
+    border: none;
     border-right: 1px solid var(--color-border);
+    text-align: left;
+    cursor: pointer;
+    font: inherit;
+    transition: color 0.15s;
+  }
+  :global(.sh-secret-key-name) {
+    font-family: var(--font-mono);
+    color: var(--color-accent);
     font-size: 0.78rem;
+  }
+  :global(.sh-secret-key:hover) .sh-secret-key-name { text-decoration: underline; }
+  :global(.sh-secret-key.is-copied) .sh-secret-key-name { text-decoration: underline; }
+  :global(.sh-secret-key.is-copied) { box-shadow: inset 0 0 0 2px var(--color-accent); }
+  :global(.sh-secret-key:focus-visible) { outline: 2px solid var(--color-accent); outline-offset: -2px; }
+  :global(.sh-secret-key-note) {
+    font-family: var(--font-mono);
+    font-size: 0.66rem;
+    color: var(--color-fg-muted);
   }
   :global(.sh-secret-val) {
     flex: 1 1 auto;

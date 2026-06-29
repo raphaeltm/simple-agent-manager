@@ -446,9 +446,24 @@
       var wrap = document.createElement('div');
       wrap.className = 'sh-secret-row';
 
-      var key = document.createElement('span');
+      var key = document.createElement('button');
+      key.type = 'button';
       key.className = 'sh-secret-key';
-      key.textContent = row.key + (row.note ? ' (' + row.note + ')' : '');
+      key.title = 'Copy name';
+      key.setAttribute('aria-label', 'Copy name ' + row.key);
+      var keyName = document.createElement('span');
+      keyName.className = 'sh-secret-key-name';
+      keyName.textContent = row.key;
+      key.appendChild(keyName);
+      if (row.note) {
+        var keyNote = document.createElement('span');
+        keyNote.className = 'sh-secret-key-note';
+        keyNote.textContent = row.note;
+        key.appendChild(keyNote);
+      }
+      key.addEventListener('click', function () {
+        copyText(row.key, key);
+      });
 
       var val = document.createElement('span');
       val.className =
@@ -594,17 +609,11 @@
     var domain = getDomain();
     var hasAccount = isValidCloudflareAccountId(account);
     var cfApiLink = document.getElementById('sh-cf-api-link');
-    var r2ApiLink = document.getElementById('sh-r2-api-link');
     var zoneLink = document.getElementById('sh-cf-zone-link');
 
     if (cfApiLink) {
       cfApiLink.href = hasAccount
         ? 'https://dash.cloudflare.com/' + account + '/api-tokens'
-        : 'https://dash.cloudflare.com/';
-    }
-    if (r2ApiLink) {
-      r2ApiLink.href = hasAccount
-        ? 'https://dash.cloudflare.com/' + account + '/r2/api-tokens'
         : 'https://dash.cloudflare.com/';
     }
     if (zoneLink) {

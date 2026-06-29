@@ -35,7 +35,7 @@ If your registrar has DNSSEC enabled, disable it **before** changing nameservers
 
 Fork [simple-agent-manager](https://github.com/raphaeltm/simple-agent-manager) on GitHub.
 
-## Step 3: Create Cloudflare Tokens
+## Step 3: Create Cloudflare API Token
 
 In the Cloudflare account from Step 1, enable R2 first if it is not already active. Then open `https://dash.cloudflare.com/<account-id>/api-tokens` → Create Custom Token:
 
@@ -58,14 +58,13 @@ Set **Zone Resources** to your specific domain and **Account Resources** to your
 
 The default deploy configures AI Gateway and writes Analytics Engine data, so keep the **AI Gateway** permission and enable **Analytics Engine** even if every user brings their own model keys. The current API Worker config also includes the experimental Sandbox binding, so **Containers: Edit** is required for the default Worker deploy.
 
-Create R2 S3 access keys for Pulumi state in the same Cloudflare account:
+Because the token includes **Workers R2 Storage** access, Cloudflare's final creation screen shows **both** the API token **and** a set of R2 S3 keys (Access Key ID + Secret Access Key) together. You do **not** need to create a separate R2 API token. Copy all of the values before leaving the page:
 
-1. Open `https://dash.cloudflare.com/<account-id>/r2/api-tokens`
-2. If Cloudflare prompts you to enable R2, complete that first
-3. Create credentials with **Object Read & Write** permissions scoped to **All buckets**
-4. Copy the Access Key ID and Secret Access Key before leaving the page
+- `CF_API_TOKEN` — the API token itself
+- `R2_ACCESS_KEY_ID` — the R2 S3 Access Key ID shown alongside the token
+- `R2_SECRET_ACCESS_KEY` — the R2 S3 Secret Access Key shown alongside the token
 
-Use **All buckets** for the first deploy because the workflow creates the Pulumi state bucket later as `${RESOURCE_PREFIX}-pulumi-state`. After the first successful deploy, you may rotate these R2 credentials to credentials scoped only to that generated bucket.
+Pulumi uses the R2 S3 keys for its state backend. The deploy workflow creates the Pulumi state bucket later as `${RESOURCE_PREFIX}-pulumi-state`.
 
 ## Step 4: Create GitHub App
 
