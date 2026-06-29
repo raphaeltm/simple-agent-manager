@@ -46,6 +46,7 @@ import { handleAgentSession } from './agent-session-step';
 import { computeBackoffMs, isTransientError, parseEnvInt } from './helpers';
 import { handleNodeAgentReady, handleNodeProvisioning, handleNodeSelection } from './node-steps';
 import { failTask } from './state-machine';
+import { redactTaskRunnerStatus } from './status';
 import type { StartTaskInput, TaskRunnerContext, TaskRunnerState } from './types';
 import {
   handleAttachmentTransfer,
@@ -160,11 +161,7 @@ export class TaskRunner extends DurableObject<Env> {
    */
   async getStatus(): Promise<TaskRunnerState | null> {
     const state = await this.getState();
-    if (state?.stepResults.mcpToken) {
-      // Redact raw token from external-facing status — the token is a secret
-      return { ...state, stepResults: { ...state.stepResults, mcpToken: '[redacted]' } };
-    }
-    return state;
+    return redactTaskRunnerStatus(state);
   }
 
   // =========================================================================

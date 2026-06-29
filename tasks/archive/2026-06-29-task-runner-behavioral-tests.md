@@ -25,13 +25,14 @@ Focus this task on the backend runtime slice under `apps/api/src/durable-objects
 - [x] Validate constitution compliance: no new hardcoded operational constants unless backed by existing defaults or env configuration.
 - [x] Run targeted API tests for changed TaskRunner coverage.
 - [x] Run broader validation required by `/do`: lint, typecheck, test, build as feasible before PR.
-- [ ] Run local specialist reviews: task-completion-validator, cloudflare-specialist, constitution-validator, security-auditor, and test-engineer.
+- [x] Run local specialist reviews: task-completion-validator, cloudflare-specialist, constitution-validator, security-auditor, and test-engineer.
 
 ## Implementation Notes
 
 - Added `buildTaskAgentSessionLabel()` and `buildTaskInitialPrompt()` in `agent-session-step.ts` to remove duplicated test-only prompt logic and enable direct executable coverage.
 - The prompt tests now use the production helper directly and fixture attachments match the shared `TaskAttachment` shape (`size`).
 - Added `task-runner-agent-session.test.ts` for direct `handleAgentSession()` behavior across D1 insert values, retry idempotency, `agentStarted` gating, MCP token persistence, VM start payload, ACP session transitions, and final in-progress transition.
+- Extracted `redactTaskRunnerStatus()` so `getStatus()` token redaction is covered by the normal unit suite even when the local Worker test runtime is unavailable.
 - Added `task-runner-state-machine.test.ts` for direct `transitionToInProgress()` and `failTask()` behavior with an executable D1/KV/storage shim and mocked external cleanup/token boundaries.
 - Replaced `task-runner-do-state.test.ts` with `task-runner-static-wiring.test.ts`, limited to static public/storage contract checks that are intentionally not runtime behavior.
 - Reduced `task-runner-health-check.test.ts` to pure readiness helper invariants and randomized timestamp checks.
@@ -40,12 +41,24 @@ Focus this task on the backend runtime slice under `apps/api/src/durable-objects
 
 ## Validation
 
-- `pnpm --filter @simple-agent-manager/api test -- tests/unit/durable-objects/task-runner-agent-session.test.ts tests/unit/durable-objects/task-runner-state-machine.test.ts tests/unit/durable-objects/task-runner-initial-prompt.test.ts tests/unit/task-runner-health-check.test.ts tests/unit/task-runner-static-wiring.test.ts tests/integration/task-runner-do-infra.test.ts` — passed, 64 tests.
+- `pnpm --filter @simple-agent-manager/api test -- tests/unit/durable-objects/task-runner-agent-session.test.ts tests/unit/durable-objects/task-runner-state-machine.test.ts tests/unit/durable-objects/task-runner-initial-prompt.test.ts tests/unit/task-runner-health-check.test.ts tests/unit/task-runner-static-wiring.test.ts tests/integration/task-runner-do-infra.test.ts` — passed, 65 tests.
 - `pnpm --filter @simple-agent-manager/api typecheck` — passed.
 - `pnpm --filter @simple-agent-manager/api lint` — passed with existing warnings only.
 - `pnpm --filter @simple-agent-manager/api test` — passed, 354 files / 5508 tests.
 - `pnpm --filter @simple-agent-manager/api build` — passed.
+- `pnpm typecheck` — passed.
+- `pnpm lint` — passed with existing warnings only.
+- `pnpm test` — passed, all 19 turbo tasks; API 354 files / 5508 tests and web 199 files / 2446 tests.
+- `pnpm build` — passed, all 9 turbo tasks.
 - `pnpm --filter @simple-agent-manager/api test:workers -- tests/workers/task-runner-do.test.ts` — local workerd repeatedly crashed with signal 11 before useful test results; no code assertion failure was reported.
+
+## Specialist Review Results
+
+- `$task-completion-validator` — PASS. Research findings, checklist items, and acceptance criteria are covered by the diff and validation evidence. No UI/backend propagation or multi-resource selection scope.
+- `$cloudflare-specialist` — PASS. The tests exercise D1/KV/DO state through boundary shims, retain static Cloudflare wiring checks only where execution is impractical, and add no wrangler or binding changes.
+- `$constitution-validator` — PASS. No new production operational constants, limits, timeouts, identifiers, or deployment-specific URLs. The MCP URL remains derived from `BASE_DOMAIN`; the test literal verifies that derivation.
+- `$security-auditor` — PASS. MCP token persistence, revocation, and status redaction are covered; the helper returns a sanitized copy without mutating stored state.
+- `$test-engineer` — PASS. Source-contract assertions were materially reduced and replaced with executable TaskRunner behavioral coverage. Remaining source-contract tests are explicitly limited to static public/storage/wiring contracts.
 
 ## Acceptance Criteria
 

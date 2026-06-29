@@ -5,6 +5,7 @@ import {
   buildTaskInitialPrompt,
   handleAgentSession,
 } from '../../../src/durable-objects/task-runner/agent-session-step';
+import { redactTaskRunnerStatus } from '../../../src/durable-objects/task-runner/status';
 import type {
   TaskRunnerContext,
   TaskRunnerState,
@@ -214,6 +215,20 @@ describe('TaskRunner agent-session helpers', () => {
     expect(prompt.indexOf('Use the backend implementation profile.')).toBeLessThan(
       prompt.indexOf('IMPORTANT:'),
     );
+  });
+
+  it('redacts persisted MCP tokens from status snapshots', () => {
+    const state = makeState({
+      stepResults: {
+        ...makeState().stepResults,
+        mcpToken: 'mcp-token-secret',
+      },
+    });
+
+    const status = redactTaskRunnerStatus(state);
+
+    expect(status?.stepResults.mcpToken).toBe('[redacted]');
+    expect(state.stepResults.mcpToken).toBe('mcp-token-secret');
   });
 });
 
