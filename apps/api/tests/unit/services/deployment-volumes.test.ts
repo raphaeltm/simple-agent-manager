@@ -11,10 +11,12 @@ import type { Provider, VolumeCapabilities, VolumeInstance } from '@simple-agent
 import type { CredentialProvider } from '@simple-agent-manager/shared';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import * as schema from '../../../src/db/schema';
 import {
   attachEnvironmentVolumes,
   buildVolumeMountDescriptors,
   createEnvironmentVolume,
+  createMissingDeclaredVolumes,
   deleteEnvironmentVolume,
   detachEnvironmentVolumes,
   resolveNamedVolumeMountRoot,
@@ -140,8 +142,18 @@ interface MockRow {
   updatedAt: string;
 }
 
-function createMockDb(initialRows: MockRow[] = []) {
+function makeQueryResult<T>(rows: T[]) {
+  return {
+    orderBy: vi.fn(() => makeQueryResult(rows)),
+    limit: vi.fn((n: number) => Promise.resolve(rows.slice(0, n))),
+    then: (resolve: (v: T[]) => void) => resolve([...rows]),
+  };
+}
+
+function createMockDb(initialRows: MockRow[] = [], releaseRows: Array<{ manifest: string }> = []) {
   const rows = [...initialRows];
+  const rowsForTable = (table: unknown) =>
+    table === schema.deploymentReleases ? releaseRows : rows;
 
   // Build a chainable mock that simulates Drizzle's query builder
   const db = {
@@ -152,21 +164,12 @@ function createMockDb(initialRows: MockRow[] = []) {
       }),
     }),
     select: vi.fn().mockReturnValue({
-      from: vi.fn().mockReturnValue({
-        where: vi.fn().mockImplementation((_condition: unknown) => {
-          // Return all rows — filtering is done by the caller's condition
-          // For simplicity, we return rows and let limit/orderBy chain
-          return {
-            orderBy: vi.fn().mockResolvedValue([...rows]),
-            limit: vi.fn().mockImplementation((n: number) => {
-              return Promise.resolve(rows.slice(0, n));
-            }),
-            // If called directly as a promise (no further chaining)
-            then: (resolve: (v: MockRow[]) => void) => resolve([...rows]),
-          };
-        }),
-        orderBy: vi.fn().mockResolvedValue([...rows]),
-      }),
+      from: vi.fn().mockImplementation((table: unknown) => ({
+        where: vi
+          .fn()
+          .mockImplementation((_condition: unknown) => makeQueryResult(rowsForTable(table))),
+        orderBy: vi.fn(() => makeQueryResult(rowsForTable(table))),
+      })),
     }),
     update: vi.fn().mockReturnValue({
       set: vi.fn().mockReturnValue({
@@ -458,6 +461,143 @@ describe('createEnvironmentVolume', () => {
       })
     ).rejects.toThrow('No cloud provider credential found');
   });
+
+  it('cleans up the provider volume and returns the existing row on a unique insert race', async () => {
+    const existing: MockRow = {
+      id: 'vol-existing',
+      environmentId: 'env-001',
+      name: 'data',
+      providerVolumeId: 'prov-vol-existing',
+      providerName: 'hetzner',
+      sizeGb: 10,
+      location: 'nbg1',
+      status: 'available',
+      attachedServerId: null,
+      linuxDevice: null,
+      createdAt: '2026-06-12T00:00:00Z',
+      updatedAt: '2026-06-12T00:00:00Z',
+    };
+    const provider = makeMockProvider({
+      createResult: makeVolumeInstance({ id: 'prov-vol-race', status: 'available' }),
+    });
+    setupProvider(provider);
+    const db = createMockDb([existing]) as any;
+    db.insert = vi.fn().mockReturnValue({
+      values: vi
+        .fn()
+        .mockRejectedValue(
+          new Error(
+            'UNIQUE constraint failed: deployment_volumes.environment_id, deployment_volumes.name'
+          )
+        ),
+    });
+
+    const result = await createEnvironmentVolume(db, mockEnv, 'user-1', {
+      environmentId: 'env-001',
+      name: 'data',
+      sizeGb: 10,
+      location: 'nbg1',
+    });
+
+    expect(provider.deleteVolume).toHaveBeenCalledWith({
+      volumeId: 'prov-vol-race',
+      location: 'nbg1',
+    });
+    expect(result).toMatchObject({
+      id: 'vol-existing',
+      providerVolumeId: 'prov-vol-existing',
+    });
+  });
+
+  it('surfaces provider cleanup failure when insert fails after provider creation', async () => {
+    const provider = makeMockProvider({
+      createResult: makeVolumeInstance({ id: 'prov-vol-orphan-risk', status: 'available' }),
+    });
+    vi.mocked(provider.deleteVolume).mockRejectedValue(new Error('provider cleanup failed'));
+    setupProvider(provider);
+    const db = createMockDb() as any;
+    db.insert = vi.fn().mockReturnValue({
+      values: vi.fn().mockRejectedValue(new Error('D1 unavailable')),
+    });
+
+    await expect(
+      createEnvironmentVolume(db, mockEnv, 'user-1', {
+        environmentId: 'env-001',
+        name: 'data',
+        sizeGb: 10,
+        location: 'nbg1',
+      })
+    ).rejects.toThrow('Manual provider cleanup is required');
+
+    expect(provider.deleteVolume).toHaveBeenCalledWith({
+      volumeId: 'prov-vol-orphan-risk',
+      location: 'nbg1',
+    });
+  });
+});
+
+describe('createMissingDeclaredVolumes', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('reuses an existing volume row when automatic creation loses a duplicate race', async () => {
+    const existing: MockRow = {
+      id: 'vol-existing',
+      environmentId: 'env-001',
+      name: 'data',
+      providerVolumeId: 'prov-vol-existing',
+      providerName: 'hetzner',
+      sizeGb: 10,
+      location: 'nbg1',
+      status: 'available',
+      attachedServerId: null,
+      linuxDevice: null,
+      createdAt: '2026-06-12T00:00:00Z',
+      updatedAt: '2026-06-12T00:00:00Z',
+    };
+    const provider = makeMockProvider({
+      createResult: makeVolumeInstance({ id: 'prov-vol-race', status: 'available' }),
+    });
+    setupProvider(provider);
+    const db = createMockDb([]) as any;
+    let volumeSelectCount = 0;
+    db.select = vi.fn().mockReturnValue({
+      from: vi.fn().mockImplementation((table: unknown) => ({
+        where: vi.fn().mockImplementation(() => {
+          if (table === schema.deploymentReleases) {
+            return makeQueryResult([]);
+          }
+          volumeSelectCount += 1;
+          return makeQueryResult(volumeSelectCount === 1 ? [] : [existing]);
+        }),
+        orderBy: vi.fn(() => makeQueryResult([])),
+      })),
+    });
+    db.insert = vi.fn().mockReturnValue({
+      values: vi
+        .fn()
+        .mockRejectedValue(
+          new Error(
+            'UNIQUE constraint failed: deployment_volumes.environment_id, deployment_volumes.name'
+          )
+        ),
+    });
+
+    const result = await createMissingDeclaredVolumes(db, mockEnv, 'user-1', {
+      environmentId: 'env-001',
+      volumes: { data: { sizeHintMb: 1024 } },
+      location: 'nbg1',
+      targetProvider: 'hetzner',
+    });
+
+    expect(provider.deleteVolume).toHaveBeenCalledWith({
+      volumeId: 'prov-vol-race',
+      location: 'nbg1',
+    });
+    expect(result).toHaveLength(1);
+    expect(result[0].providerVolumeId).toBe('prov-vol-existing');
+  });
 });
 
 // =============================================================================
@@ -498,6 +638,71 @@ describe('deleteEnvironmentVolume', () => {
     });
 
     // D1 delete was called
+    expect(db.delete).toHaveBeenCalled();
+  });
+
+  it('rejects deleting a detached volume that the latest release still declares', async () => {
+    const provider = makeMockProvider();
+    setupProvider(provider);
+
+    const existingRow: MockRow = {
+      id: 'vol-1',
+      environmentId: 'env-001',
+      name: 'data',
+      providerVolumeId: 'prov-vol-1',
+      providerName: 'hetzner',
+      sizeGb: 10,
+      location: 'nbg1',
+      status: 'available',
+      attachedServerId: null,
+      linuxDevice: null,
+      createdAt: '2026-06-12T00:00:00Z',
+      updatedAt: '2026-06-12T00:00:00Z',
+    };
+    const db = createMockDb(
+      [existingRow],
+      [{ manifest: JSON.stringify({ version: 1, volumes: { data: null } }) }]
+    );
+
+    await expect(
+      deleteEnvironmentVolume(db as any, mockEnv, 'user-1', 'vol-1', 'env-001')
+    ).rejects.toThrow('latest release still declares it');
+
+    expect(provider.deleteVolume).not.toHaveBeenCalled();
+    expect(db.delete).not.toHaveBeenCalled();
+  });
+
+  it('allows destructive environment cleanup to delete a latest-release declared volume', async () => {
+    const provider = makeMockProvider();
+    setupProvider(provider);
+
+    const existingRow: MockRow = {
+      id: 'vol-1',
+      environmentId: 'env-001',
+      name: 'data',
+      providerVolumeId: 'prov-vol-1',
+      providerName: 'hetzner',
+      sizeGb: 10,
+      location: 'nbg1',
+      status: 'available',
+      attachedServerId: null,
+      linuxDevice: null,
+      createdAt: '2026-06-12T00:00:00Z',
+      updatedAt: '2026-06-12T00:00:00Z',
+    };
+    const db = createMockDb(
+      [existingRow],
+      [{ manifest: JSON.stringify({ version: 1, volumes: { data: null } }) }]
+    );
+
+    await deleteEnvironmentVolume(db as any, mockEnv, 'user-1', 'vol-1', 'env-001', {
+      allowLatestReleaseDeclaredVolume: true,
+    });
+
+    expect(provider.deleteVolume).toHaveBeenCalledWith({
+      volumeId: 'prov-vol-1',
+      location: 'nbg1',
+    });
     expect(db.delete).toHaveBeenCalled();
   });
 

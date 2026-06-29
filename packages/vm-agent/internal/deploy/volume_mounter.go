@@ -9,9 +9,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 )
 
 const defaultFstabPath = "/etc/fstab"
+
+var fstabMu sync.Mutex
 
 type VolumeMounter interface {
 	MountVolumes(ctx context.Context, volumes []VolumeMount) error
@@ -87,7 +90,11 @@ func (m *RealVolumeMounter) resolveDevice(ctx context.Context, volume VolumeMoun
 		return volume.LinuxDevice, nil
 	}
 
-	for _, pattern := range []string{"/dev/disk/by-id/*" + volume.ProviderVolumeID + "*", "/dev/disk/by-id/*" + volume.Name + "*"} {
+	if volume.ProviderVolumeID == "" {
+		return "", errors.New("providerVolumeId is required for device discovery when linuxDevice is empty")
+	}
+
+	for _, pattern := range []string{"/dev/disk/by-id/*" + volume.ProviderVolumeID + "*"} {
 		matches, err := filepath.Glob(pattern)
 		if err != nil {
 			return "", err
@@ -107,7 +114,7 @@ func (m *RealVolumeMounter) resolveDevice(ctx context.Context, volume VolumeMoun
 			continue
 		}
 		serial := strings.Join(fields[1:], " ")
-		if strings.Contains(serial, volume.ProviderVolumeID) || strings.Contains(serial, volume.Name) {
+		if strings.Contains(serial, volume.ProviderVolumeID) {
 			return fields[0], nil
 		}
 	}
@@ -152,6 +159,10 @@ func (m *RealVolumeMounter) ensureFstab(ctx context.Context, device, mountRoot s
 		return err
 	}
 	line := fmt.Sprintf("%s %s ext4 defaults,nofail 0 2", spec, mountRoot)
+
+	fstabMu.Lock()
+	defer fstabMu.Unlock()
+
 	existing, err := os.ReadFile(m.fstabPath)
 	if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("read fstab: %w", err)
@@ -241,6 +252,9 @@ func joinedError(parts []string) error {
 }
 
 func (m *RealVolumeMounter) removeFstabEntry(mountRoot string) error {
+	fstabMu.Lock()
+	defer fstabMu.Unlock()
+
 	existing, err := os.ReadFile(m.fstabPath)
 	if err != nil {
 		if os.IsNotExist(err) {

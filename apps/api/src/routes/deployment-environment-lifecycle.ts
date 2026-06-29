@@ -281,10 +281,14 @@ async function teardownLinkedDeploymentNode(
   env: Env,
   userId: string,
   envId: string,
-  nodeId: string | null
+  nodeId: string | null,
+  opts: { requireLiveTeardownBeforeDetach?: boolean } = {}
 ): Promise<{ providerInstanceId: string | null; nodeStatus: string | null; warnings: string[] }> {
   const warnings: string[] = [];
   if (!nodeId) {
+    if (opts.requireLiveTeardownBeforeDetach) {
+      warnings.push('No deployment node is linked; detaching stale provider volumes only.');
+    }
     return { providerInstanceId: null, nodeStatus: null, warnings };
   }
 
@@ -299,11 +303,31 @@ async function teardownLinkedDeploymentNode(
     .limit(1);
   const node = nodeRows[0];
   if (!node) {
+    if (opts.requireLiveTeardownBeforeDetach) {
+      await markEnvironmentStopFailed(
+        db,
+        envId,
+        'Stop failed because the linked deployment node record was not found; refusing to detach volumes without live teardown.'
+      );
+      throw errors.conflict(
+        'Cannot safely stop deployment environment: linked deployment node record was not found, so volumes were not detached.'
+      );
+    }
     warnings.push('Deployment node record was not found; skipped live container teardown.');
     return { providerInstanceId: null, nodeStatus: null, warnings };
   }
 
   if (node.status !== 'running') {
+    if (opts.requireLiveTeardownBeforeDetach) {
+      await markEnvironmentStopFailed(
+        db,
+        envId,
+        `Stop failed because the deployment node was ${node.status}; refusing to detach volumes without live teardown.`
+      );
+      throw errors.conflict(
+        `Cannot safely stop deployment environment: deployment node is ${node.status}, so volumes were not detached.`
+      );
+    }
     warnings.push(`Deployment node was ${node.status}; skipped live container teardown.`);
     return {
       providerInstanceId: node.providerInstanceId ?? null,
@@ -344,6 +368,10 @@ function collectAttachedServerIds(
     attachedServerIds.add(providerInstanceId);
   }
   return [...attachedServerIds];
+}
+
+function hasAttachedVolumes(volumes: schema.DeploymentVolumeRow[]): boolean {
+  return volumes.some((volume) => Boolean(volume.attachedServerId));
 }
 
 async function detachVolumesForEnvironmentStop(
@@ -418,18 +446,16 @@ async function stopDeploymentEnvironment(params: {
   }
 
   const volumes = await listEnvironmentVolumes(db, envId);
-  if (!environment.nodeId && !volumes.some((volume) => Boolean(volume.attachedServerId))) {
-    throw errors.conflict(
-      'Deployment environment is not linked to a node and has no attached volumes to stop.'
-    );
-  }
+  const attachedVolumes = hasAttachedVolumes(volumes);
 
   await db
     .update(schema.deploymentEnvironments)
     .set({ status: 'stopping', updatedAt: new Date().toISOString() })
     .where(eq(schema.deploymentEnvironments.id, envId));
 
-  const teardown = await teardownLinkedDeploymentNode(db, env, userId, envId, environment.nodeId);
+  const teardown = await teardownLinkedDeploymentNode(db, env, userId, envId, environment.nodeId, {
+    requireLiveTeardownBeforeDetach: attachedVolumes,
+  });
   const volumesDetached = await detachVolumesForEnvironmentStop(
     db,
     env,
@@ -585,6 +611,11 @@ async function startDeploymentEnvironment(params: {
   }
 
   const volumes = await listEnvironmentVolumes(db, envId);
+  if (environment.requiresVolumes && volumes.length === 0) {
+    throw errors.conflict(
+      'Deployment environment requires persistent volumes, but no volume records exist. Restore or recreate the declared volumes before starting.'
+    );
+  }
   const volumePlacement = resolveVolumePlacementConstraint(volumes);
   const requiresVolumes = environment.requiresVolumes || volumes.length > 0;
 

@@ -368,12 +368,8 @@ export function ProjectDeploymentEnvironmentDetail() {
     );
   }
 
-  const canStart = env.status === 'stopped' || (env.status === 'error' && !env.nodeId);
-  const canStop =
-    Boolean(env.nodeId) &&
-    env.status !== 'stopped' &&
-    env.status !== 'stopping' &&
-    env.status !== 'starting';
+  const canStart = env.status === 'stopped';
+  const canStop = env.status === 'active' || env.status === 'error';
   const lifecycleBusy = lifecycleAction !== null;
   const activeRouteHostnames = env.status === 'active' ? env.routeHostnames : [];
   const stopDialogNodeMessage = stopNodeLifecycleMessage(env, siblingCount);

@@ -5,6 +5,7 @@ import { assertNoOverflow, makeMockUser, screenshot, seedTheme } from './audit-h
 const PROJECT_ID = 'proj-deploy-audit';
 const ENV_ID = 'env-staging';
 const ENV_FAIL_ID = 'env-production-us-east-very-long-name';
+const ENV_ORPHAN_VOLUME_ID = 'env-orphan-volume';
 const NODE_ID = 'node-deploy-audit';
 const NODE_STALE_ID = 'node-deploy-stale';
 
@@ -240,6 +241,45 @@ const MOCK_ENV_FAILING = {
   node: MOCK_NODE_STALE,
 };
 
+const MOCK_ENV_ORPHAN_VOLUME = {
+  id: ENV_ORPHAN_VOLUME_ID,
+  projectId: PROJECT_ID,
+  name: 'orphan-volume-cleanup',
+  status: 'error',
+  nodeId: null,
+  provider: 'hetzner',
+  location: 'nbg1',
+  createdAt: '2026-06-18T08:20:00.000Z',
+  updatedAt: '2026-06-18T10:13:00.000Z',
+  secretsUpdatedAt: '2026-06-18T09:00:00.000Z',
+  observedDeployment: {
+    appliedSeq: null,
+    status: 'failed',
+    errorMessage: 'Volume is still attached to a stale provider server after node cleanup failed',
+    services: null,
+    deployStatus: null,
+    diskTelemetry: null,
+    observedAt: '2026-06-18T10:13:00.000Z',
+  },
+  agentPolicy: {
+    agentDeployEnabled: false,
+    agentDeployEnabledBy: null,
+    agentDeployEnabledAt: null,
+    agentDeployDisabledAt: null,
+    allowedDeployProfileIds: [],
+  },
+  latestRelease: {
+    id: 'release-orphan-volume',
+    environmentId: ENV_ORPHAN_VOLUME_ID,
+    version: 4,
+    status: 'failed',
+    createdBy: 'task-release-orphan-volume',
+    createdAt: '2026-06-18T09:50:00.000Z',
+  },
+  routeHostnames: [],
+  node: null,
+};
+
 const MOCK_LOGS = {
   entries: [
     {
@@ -458,8 +498,12 @@ async function respond(route: Route, status: number, body: unknown) {
   await route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 }
 
-async function setupMocks(page: Page, opts?: { includeFailingEnv?: boolean }) {
+async function setupMocks(
+  page: Page,
+  opts?: { includeFailingEnv?: boolean; includeOrphanVolumeEnv?: boolean }
+) {
   const includeFailingEnv = opts?.includeFailingEnv ?? true;
+  const includeOrphanVolumeEnv = opts?.includeOrphanVolumeEnv ?? false;
 
   await seedTheme(page, 'dark');
   await page.addInitScript(() => {
@@ -494,6 +538,9 @@ async function setupMocks(page: Page, opts?: { includeFailingEnv?: boolean }) {
       const envs = includeFailingEnv
         ? [MOCK_ENV, MOCK_ENV_PREVIEW, MOCK_ENV_FAILING]
         : [MOCK_ENV, MOCK_ENV_PREVIEW];
+      if (includeOrphanVolumeEnv) {
+        envs.push(MOCK_ENV_ORPHAN_VOLUME);
+      }
       return respond(route, 200, { environments: envs });
     }
     if (
@@ -539,6 +586,28 @@ async function setupMocks(page: Page, opts?: { includeFailingEnv?: boolean }) {
     }
     if (
       path === `/api/projects/${PROJECT_ID}/environments/${ENV_FAIL_ID}/custom-domains` &&
+      method === 'GET'
+    ) {
+      return respond(route, 200, { customDomains: [] });
+    }
+    if (
+      path === `/api/projects/${PROJECT_ID}/environments/${ENV_ORPHAN_VOLUME_ID}/runtime-config` &&
+      method === 'GET'
+    ) {
+      return respond(route, 200, {
+        environmentId: ENV_ORPHAN_VOLUME_ID,
+        updatedAt: null,
+        envVars: [],
+      });
+    }
+    if (
+      path === `/api/projects/${PROJECT_ID}/environments/${ENV_ORPHAN_VOLUME_ID}/public-routes` &&
+      method === 'GET'
+    ) {
+      return respond(route, 200, { publicRoutes: [] });
+    }
+    if (
+      path === `/api/projects/${PROJECT_ID}/environments/${ENV_ORPHAN_VOLUME_ID}/custom-domains` &&
       method === 'GET'
     ) {
       return respond(route, 200, { customDomains: [] });
@@ -709,6 +778,24 @@ test.describe('Deployment control surface audit — detail page', () => {
     expect(nanCount).toBe(0);
 
     await screenshot(page, 'deployment-detail-overview-failing');
+    await assertNoOverflow(page);
+  });
+
+  test('error environment without a node exposes stop cleanup instead of start', async ({
+    page,
+  }) => {
+    await setupMocks(page, { includeOrphanVolumeEnv: true });
+    await page.goto(`/projects/${PROJECT_ID}/deployments/${ENV_ORPHAN_VOLUME_ID}`);
+
+    await expect(page.getByRole('heading', { name: 'orphan-volume-cleanup' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Stop' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Start' })).toHaveCount(0);
+
+    await page.getByRole('button', { name: 'Stop' }).click();
+    await expect(page.getByText('Stop deployment environment?')).toBeVisible();
+    await expect(page.getByText('No deployment node is currently attached')).toBeVisible();
+
+    await screenshot(page, 'deployment-detail-error-no-node-stop');
     await assertNoOverflow(page);
   });
 
@@ -935,6 +1022,24 @@ test.describe('Deployment control surface — mobile', () => {
     await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
 
     await screenshot(page, 'deployment-mobile-failing');
+    await assertNoOverflow(page);
+  });
+
+  test('error environment without a node exposes stop cleanup instead of start', async ({
+    page,
+  }) => {
+    await setupMocks(page, { includeOrphanVolumeEnv: true });
+    await page.goto(`/projects/${PROJECT_ID}/deployments/${ENV_ORPHAN_VOLUME_ID}`);
+
+    await expect(page.getByRole('heading', { name: 'orphan-volume-cleanup' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Stop' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Start' })).toHaveCount(0);
+
+    await page.getByRole('button', { name: 'Stop' }).click();
+    await expect(page.getByText('Stop deployment environment?')).toBeVisible();
+    await expect(page.getByText('No deployment node is currently attached')).toBeVisible();
+
+    await screenshot(page, 'deployment-mobile-error-no-node-stop');
     await assertNoOverflow(page);
   });
 

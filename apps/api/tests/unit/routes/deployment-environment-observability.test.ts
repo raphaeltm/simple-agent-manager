@@ -407,6 +407,15 @@ describe('deployment environment observability routes', () => {
         },
       ]
     );
+    mockListEnvironmentVolumes.mockResolvedValue([
+      {
+        id: 'vol-1',
+        name: 'data',
+        providerName: 'hetzner',
+        location: 'fsn1',
+        attachedServerId: null,
+      },
+    ]);
 
     const response = await createApp().request(
       '/api/projects/project-1/environments/env-1/start',
@@ -421,7 +430,7 @@ describe('deployment environment observability routes', () => {
       'project-1',
       'user-1',
       expect.anything(),
-      { requiresVolumes: true, providerOverride: undefined, vmLocationOverride: undefined }
+      { requiresVolumes: true, providerOverride: 'hetzner', vmLocationOverride: 'fsn1' }
     );
     expect(updateCalls).toContainEqual({
       table: expect.objectContaining({ id: 'deploymentReleases.id' }),
@@ -523,17 +532,29 @@ describe('deployment environment observability routes', () => {
     });
   });
 
-  it('rejects stop when an error environment has no node and no attached volumes to clean up', async () => {
-    mockSelectRows([
-      {
-        id: 'env-1',
-        projectId: 'project-1',
-        name: 'staging',
-        status: 'error',
-        nodeId: null,
-        requiresVolumes: true,
-      },
-    ]);
+  it('stops an unplaced environment even when there are no volumes to detach', async () => {
+    mockSelectRows(
+      [
+        {
+          id: 'env-1',
+          projectId: 'project-1',
+          name: 'staging',
+          status: 'active',
+          nodeId: null,
+          requiresVolumes: false,
+        },
+      ],
+      [
+        {
+          id: 'env-1',
+          projectId: 'project-1',
+          name: 'staging',
+          status: 'stopped',
+          nodeId: null,
+          requiresVolumes: false,
+        },
+      ]
+    );
     mockListEnvironmentVolumes.mockResolvedValue([]);
 
     const response = await createApp().request(
@@ -543,13 +564,118 @@ describe('deployment environment observability routes', () => {
     );
 
     const body = await response.json<any>();
-    expect(response.status, JSON.stringify(body)).toBe(409);
-    expect(body.message).toContain('not linked to a node');
-    expect(updateCalls).not.toContainEqual(
-      expect.objectContaining({ values: expect.objectContaining({ status: 'stopping' }) })
+    expect(response.status, JSON.stringify(body)).toBe(200);
+    expect(updateCalls).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ values: expect.objectContaining({ status: 'stopping' }) }),
+        expect.objectContaining({
+          values: expect.objectContaining({ status: 'stopped', nodeId: null }),
+        }),
+      ])
     );
     expect(mockTeardownDeploymentEnvironmentOnNode).not.toHaveBeenCalled();
     expect(mockDetachEnvironmentVolumes).not.toHaveBeenCalled();
+    expect(body.lifecycle).toMatchObject({
+      stopped: true,
+      nodeId: null,
+      nodeDeleted: false,
+      volumesDetached: 0,
+    });
+  });
+
+  it('detaches stale attached volumes when an error environment has no linked node', async () => {
+    mockSelectRows(
+      [
+        {
+          id: 'env-1',
+          projectId: 'project-1',
+          name: 'staging',
+          status: 'error',
+          nodeId: null,
+          requiresVolumes: true,
+        },
+      ],
+      [
+        {
+          id: 'env-1',
+          projectId: 'project-1',
+          name: 'staging',
+          status: 'stopped',
+          nodeId: null,
+          requiresVolumes: true,
+        },
+      ]
+    );
+    mockListEnvironmentVolumes.mockResolvedValue([
+      { id: 'vol-1', name: 'data', attachedServerId: 'server-stale' },
+    ]);
+    mockDetachEnvironmentVolumes.mockResolvedValue([{ id: 'vol-1' }]);
+
+    const response = await createApp().request(
+      '/api/projects/project-1/environments/env-1/stop',
+      { method: 'POST' },
+      createEnv()
+    );
+
+    const body = await response.json<any>();
+    expect(response.status, JSON.stringify(body)).toBe(200);
+    expect(mockTeardownDeploymentEnvironmentOnNode).not.toHaveBeenCalled();
+    expect(mockDetachEnvironmentVolumes).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      'user-1',
+      'env-1',
+      'server-stale'
+    );
+    expect(body.lifecycle).toMatchObject({
+      stopped: true,
+      nodeId: null,
+      volumesDetached: 1,
+      warnings: ['No deployment node is linked; detaching stale provider volumes only.'],
+    });
+  });
+
+  it('rejects stop before detaching volumes when the linked deployment node is not running', async () => {
+    mockSelectRows(
+      [
+        {
+          id: 'env-1',
+          projectId: 'project-1',
+          name: 'staging',
+          status: 'active',
+          nodeId: 'node-1',
+          requiresVolumes: true,
+        },
+      ],
+      [{ id: 'node-1', status: 'error', providerInstanceId: 'server-current' }]
+    );
+    mockListEnvironmentVolumes.mockResolvedValue([
+      { id: 'vol-1', name: 'data', attachedServerId: 'server-current' },
+    ]);
+
+    const response = await createApp().request(
+      '/api/projects/project-1/environments/env-1/stop',
+      { method: 'POST' },
+      createEnv()
+    );
+
+    const body = await response.json<any>();
+    expect(response.status, JSON.stringify(body)).toBe(409);
+    expect(body.message).toContain('deployment node is error');
+    expect(mockTeardownDeploymentEnvironmentOnNode).not.toHaveBeenCalled();
+    expect(mockDetachEnvironmentVolumes).not.toHaveBeenCalled();
+    expect(updateCalls).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ values: expect.objectContaining({ status: 'stopping' }) }),
+        expect.objectContaining({
+          values: expect.objectContaining({
+            status: 'error',
+            observedStatus: 'failed',
+            observedErrorMessage: expect.stringContaining('deployment node was error'),
+          }),
+        }),
+      ])
+    );
   });
 
   it('starts a stopped volume environment by attaching preserved volumes before reporting start success', async () => {
@@ -640,6 +766,37 @@ describe('deployment environment observability routes', () => {
       latestReleaseVersion: 4,
       volumesAttachScheduled: false,
     });
+  });
+
+  it('rejects start when the latest release still requires volumes but no volume records exist', async () => {
+    mockSelectRows(
+      [
+        {
+          id: 'env-1',
+          projectId: 'project-1',
+          name: 'staging',
+          status: 'stopped',
+          nodeId: null,
+          requiresVolumes: true,
+        },
+      ],
+      [{ id: 'release-1', version: 4 }]
+    );
+    mockListEnvironmentVolumes.mockResolvedValue([]);
+
+    const response = await createApp().request(
+      '/api/projects/project-1/environments/env-1/start',
+      { method: 'POST' },
+      createEnv()
+    );
+
+    const body = await response.json<any>();
+    expect(response.status, JSON.stringify(body)).toBe(409);
+    expect(body.message).toContain('requires persistent volumes');
+    expect(mockProvisionDeploymentNode).not.toHaveBeenCalled();
+    expect(updateCalls).not.toContainEqual(
+      expect.objectContaining({ values: expect.objectContaining({ status: 'starting' }) })
+    );
   });
 
   it('cleans up a failed start so a volume environment remains retryable', async () => {

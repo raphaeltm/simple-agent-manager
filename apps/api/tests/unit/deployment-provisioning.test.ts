@@ -208,7 +208,7 @@ describe('provisionDeploymentNode', () => {
       'node-deploy-1',
       expect.anything(),
       undefined, // no taskContext
-      undefined, // no options
+      { rethrowProviderError: true },
       { environmentId: 'env-12345678-abcd' } // deployment context
     );
   });
@@ -259,7 +259,7 @@ describe('provisionDeploymentNode', () => {
       'node-fresh-after-race',
       expect.anything(),
       undefined,
-      undefined,
+      { rethrowProviderError: true },
       { environmentId: 'env-race' }
     );
 
@@ -404,7 +404,7 @@ describe('provisionDeploymentNode', () => {
     );
   });
 
-  it('provisioning promise catches errors without throwing', async () => {
+  it('provisioning promise rolls back nodeId and rejects so callers can mark failure', async () => {
     const mockDb = createMockDb({ userCredProvider: 'hetzner' });
     vi.mocked(drizzle).mockReturnValue(mockDb as any);
     vi.mocked(createNodeRecord).mockResolvedValue(makeNodeResult({ id: 'node-deploy-err' }));
@@ -413,8 +413,8 @@ describe('provisionDeploymentNode', () => {
     const result = await provisionDeploymentNode('env-fail', 'proj-1', 'user-1', createMockEnv());
 
     expect(result).not.toBeNull();
-    // The provisioning promise should not throw — it has a .catch()
-    await expect(result!.provisioningPromise).resolves.toBeUndefined();
+    await expect(result!.provisioningPromise).rejects.toThrow('VM creation failed');
+    expect(mockDb._tracker.updateSetValues[1]).toHaveProperty('nodeId', null);
   });
 
   it('rolls back nodeId to NULL when provisioning fails (Gap 7)', async () => {
@@ -432,8 +432,8 @@ describe('provisionDeploymentNode', () => {
 
     expect(result).not.toBeNull();
 
-    // Wait for the provisioning promise (catch handler runs the rollback)
-    await result!.provisioningPromise;
+    // Wait for the provisioning promise (catch handler runs the rollback before rejecting)
+    await expect(result!.provisioningPromise).rejects.toThrow('VM creation failed');
 
     // There should be 2 update calls:
     // 1. Initial link: set nodeId = 'node-rollback-1'
@@ -532,8 +532,9 @@ describe('provisionDeploymentNode', () => {
 
     expect(result).not.toBeNull();
 
-    // The provisioning promise should still not throw, even if rollback fails
-    await expect(result!.provisioningPromise).resolves.toBeUndefined();
+    // The provisioning promise still rejects with the original provider failure,
+    // even if rollback itself fails after being attempted.
+    await expect(result!.provisioningPromise).rejects.toThrow('VM creation failed');
 
     // Both updates were attempted
     expect(tracker.updateSetValues).toHaveLength(2);

@@ -297,6 +297,7 @@ func (e *Engine) Apply(ctx context.Context, payload *ApplyPayload) error {
 	// Each release renders as a distinct compose project, so consecutive releases
 	// compete for the same host port. We must down the old project before upping
 	// the new one to avoid port-bind failures.
+	var removedRoots []string
 	if currentSeq > 0 {
 		prevComposeFile := e.disk.ComposeFilePath(currentSeq)
 		slog.Info("deploy.apply: tearing down previous release to free ports",
@@ -311,12 +312,10 @@ func (e *Engine) Apply(ctx context.Context, payload *ApplyPayload) error {
 		} else {
 			e.reportApplyEvent(ctx, payload, "info", "deployment.apply.previous_down_completed", "previous_down", "previous release containers stopped", map[string]any{"previousSeq": currentSeq})
 		}
-		removedRoots, err := e.removedVolumeMountRoots(currentSeq, newState.VolumeMountRoots)
+		var err error
+		removedRoots, err = e.removedVolumeMountRoots(currentSeq, newState.VolumeMountRoots)
 		if err != nil {
 			return e.handleApplyFailure(ctx, newState, currentSeq, redactor.redactError(fmt.Errorf("read removed volume mounts: %w", err)), applyEnv)
-		}
-		if err := e.teardownVolumeMountRoots(ctx, removedRoots); err != nil {
-			return e.handleApplyFailure(ctx, newState, currentSeq, redactor.redactError(fmt.Errorf("teardown removed volume mounts: %w", err)), applyEnv)
 		}
 	}
 
@@ -418,6 +417,14 @@ func (e *Engine) Apply(ctx context.Context, payload *ApplyPayload) error {
 	// Success: update current pointer only after metadata is durably applied.
 	if err := e.disk.SetCurrent(payload.Seq); err != nil {
 		return e.handleApplyFailure(ctx, newState, currentSeq, redactor.redactError(fmt.Errorf("set current pointer: %w", err)), applyEnv)
+	}
+
+	if len(removedRoots) > 0 {
+		if err := e.teardownVolumeMountRoots(ctx, removedRoots); err != nil {
+			slog.Warn("deploy.apply: failed to teardown removed volume mounts after successful update",
+				"seq", payload.Seq, "error", err)
+			e.reportApplyEvent(ctx, payload, "warn", "deployment.apply.removed_volume_teardown_failed", "volume_mounts", "failed to teardown removed volume mounts after successful update", map[string]any{"error": err.Error()})
+		}
 	}
 
 	services, _ := e.inspectServices(ctx, payload.Seq, applyEnv)

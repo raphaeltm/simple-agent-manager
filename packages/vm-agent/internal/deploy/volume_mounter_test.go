@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -33,6 +34,16 @@ func (f *fakeCommandRunner) called(prefix string) bool {
 		}
 	}
 	return false
+}
+
+type fstabUUIDRunner struct{}
+
+func (fstabUUIDRunner) CombinedOutput(_ context.Context, name string, args ...string) ([]byte, error) {
+	if name == "blkid" && len(args) == 5 && args[0] == "-s" && args[1] == "UUID" {
+		uuid := strings.TrimLeft(strings.ReplaceAll(args[4], "/", "-"), "-")
+		return []byte("uuid-" + uuid + "\n"), nil
+	}
+	return nil, nil
 }
 
 func TestRealVolumeMounter_FormatOnlyIfEmpty(t *testing.T) {
@@ -168,6 +179,49 @@ func TestRealVolumeMounter_DiscoversScalewayDeviceWithLsblkSerial(t *testing.T) 
 	}
 }
 
+func TestRealVolumeMounter_DoesNotDiscoverDeviceByVolumeName(t *testing.T) {
+	mountRoot := filepath.Join(t.TempDir(), "mnt")
+	runner := &fakeCommandRunner{responses: map[string]struct {
+		out string
+		err error
+	}{
+		"lsblk -ndo PATH,SERIAL": {out: "/dev/sdb data\n"},
+	}}
+	mounter := &RealVolumeMounter{runner: runner, fstabPath: filepath.Join(t.TempDir(), "fstab")}
+	err := mounter.MountVolumes(context.Background(), []VolumeMount{{
+		Name:             "data",
+		MountRoot:        mountRoot,
+		ProviderVolumeID: "prov-vol-actual",
+		ProviderName:     "scaleway",
+		FSFormat:         "ext4",
+	}})
+	if err == nil || !strings.Contains(err.Error(), "no matching block device found") {
+		t.Fatalf("expected provider-volume-id-only discovery failure, got %v", err)
+	}
+	if runner.called("mount /dev/sdb " + mountRoot) {
+		t.Fatal("device matched only by volume name must not be mounted")
+	}
+}
+
+func TestRealVolumeMounter_RequiresProviderVolumeIDForDiscovery(t *testing.T) {
+	mounter := &RealVolumeMounter{
+		runner: &fakeCommandRunner{responses: map[string]struct {
+			out string
+			err error
+		}{}},
+		fstabPath: filepath.Join(t.TempDir(), "fstab"),
+	}
+	err := mounter.MountVolumes(context.Background(), []VolumeMount{{
+		Name:         "data",
+		MountRoot:    filepath.Join(t.TempDir(), "mnt"),
+		ProviderName: "hetzner",
+		FSFormat:     "ext4",
+	}})
+	if err == nil || !strings.Contains(err.Error(), "providerVolumeId is required") {
+		t.Fatalf("expected providerVolumeId discovery error, got %v", err)
+	}
+}
+
 func TestRealVolumeMounter_SkipsMountWhenAlreadyMounted(t *testing.T) {
 	device := filepath.Join(t.TempDir(), "vol")
 	if err := os.WriteFile(device, []byte("block"), 0644); err != nil {
@@ -237,5 +291,36 @@ func TestRealVolumeMounter_TeardownMountsUnmountsAndRemovesFstabEntry(t *testing
 	}
 	if !strings.Contains(string(contents), otherRoot) {
 		t.Fatalf("expected unrelated fstab entry preserved, got:\n%s", contents)
+	}
+}
+
+func TestRealVolumeMounter_ConcurrentFstabUpdatesPreserveEntries(t *testing.T) {
+	fstab := filepath.Join(t.TempDir(), "fstab")
+	mounter := &RealVolumeMounter{runner: fstabUUIDRunner{}, fstabPath: fstab}
+	roots := []string{
+		"/mnt/sam-env-env-1/volumes/data",
+		"/mnt/sam-env-env-2/volumes/cache",
+	}
+
+	var wg sync.WaitGroup
+	for i, root := range roots {
+		wg.Add(1)
+		go func(i int, root string) {
+			defer wg.Done()
+			if err := mounter.ensureFstab(context.Background(), "/dev/sd"+string(rune('b'+i)), root); err != nil {
+				t.Errorf("ensureFstab(%s): %v", root, err)
+			}
+		}(i, root)
+	}
+	wg.Wait()
+
+	contents, err := os.ReadFile(fstab)
+	if err != nil {
+		t.Fatalf("read fstab: %v", err)
+	}
+	for _, root := range roots {
+		if !strings.Contains(string(contents), root) {
+			t.Fatalf("expected fstab to contain %s, got:\n%s", root, contents)
+		}
 	}
 }

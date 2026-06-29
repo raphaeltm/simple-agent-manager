@@ -547,6 +547,85 @@ func TestEngine_Apply_SuccessfulUpdateTearsDownRemovedVolumeRoots(t *testing.T) 
 	}
 }
 
+func TestEngine_Apply_FailedUpdateDoesNotTeardownPreviousOnlyVolumeRootsBeforeRollback(t *testing.T) {
+	checker := newFakeMountChecker()
+	checker.mountpoints["/mnt/sam-env-env-1/volumes/keep"] = true
+	volumeMounter := &recordingVolumeMounter{}
+	engine, priv := guardEngine(t, checker, true)
+	engine.cfg.VolumeMounter = volumeMounter
+
+	composeScript := engine.cfg.ComposeCmd
+	if err := os.WriteFile(composeScript, []byte(`#!/bin/sh
+case "$*" in
+  *"desired/releases/2/docker-compose.yml up -d"*) echo "release 2 failed" >&2; exit 42 ;;
+  *" ps --format json"*) echo '{"Name":"web","State":"running","Health":"healthy"}' ;;
+esac
+exit 0
+`), 0755); err != nil {
+		t.Fatalf("write compose script: %v", err)
+	}
+
+	prevState := &ReleaseState{
+		Seq:              1,
+		EnvironmentID:    "env-1",
+		NodeID:           "node-1",
+		Status:           StatusApplied,
+		VolumeMountRoots: []string{"/mnt/sam-env-env-1/volumes/old", "/mnt/sam-env-env-1/volumes/keep"},
+	}
+	prevCompose := `services:
+  web:
+    image: myapp:v1
+    volumes:
+      - /mnt/sam-env-env-1/volumes/old:/app/old
+      - /mnt/sam-env-env-1/volumes/keep:/app/data
+    ports:
+      - "127.0.0.1:35000:3000"
+`
+	if err := engine.disk.WriteRelease(prevState, prevCompose, "app.example.com {\n\treverse_proxy 127.0.0.1:35000\n}\n"); err != nil {
+		t.Fatalf("WriteRelease previous: %v", err)
+	}
+	if err := engine.disk.SetCurrent(1); err != nil {
+		t.Fatalf("SetCurrent previous: %v", err)
+	}
+
+	payload := guardPayload(t, priv, `services:
+  web:
+    image: myapp:v2
+    volumes:
+      - /mnt/sam-env-env-1/volumes/keep:/app/data
+    ports:
+      - "127.0.0.1:35000:3000"
+`)
+	payload.Seq = 2
+	payload.VolumeMounts = []VolumeMount{{
+		Name:             "keep",
+		MountRoot:        "/mnt/sam-env-env-1/volumes/keep",
+		ProviderVolumeID: "vol-keep",
+		ProviderName:     "hetzner",
+		FSFormat:         "ext4",
+	}}
+	payload.Signature = ""
+	sig, err := SignPayload(payload, priv)
+	if err != nil {
+		t.Fatalf("SignPayload: %v", err)
+	}
+	payload.Signature = sig
+
+	if err := engine.Apply(context.Background(), payload); err == nil {
+		t.Fatal("Apply should fail and roll back to the previous release")
+	}
+	if len(volumeMounter.teardownRoots) != 0 {
+		t.Fatalf("previous-only volume roots must remain mounted for rollback, got teardown %#v", volumeMounter.teardownRoots)
+	}
+	currentSeq, err := engine.disk.CurrentSeq()
+	if err != nil {
+		t.Fatalf("CurrentSeq: %v", err)
+	}
+	if currentSeq != 1 {
+		t.Fatalf("expected rollback to keep current seq 1, got %d", currentSeq)
+	}
+}
+
 func TestValidateVolumeMountsForEnvironmentRejectsUnsafeDescriptor(t *testing.T) {
 	tests := []struct {
 		name   string

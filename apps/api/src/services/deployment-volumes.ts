@@ -19,8 +19,9 @@ import {
   SAM_DEPLOYMENT_VOLUME_NAME_MESSAGE,
   SAM_DEPLOYMENT_VOLUME_NAME_PATTERN_SOURCE,
 } from '@simple-agent-manager/shared';
-import { and, eq } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
+import { parse as parseYaml } from 'yaml';
 
 import type { DeploymentVolumeRow } from '../db/schema';
 import * as schema from '../db/schema';
@@ -107,6 +108,76 @@ function sizeHintToGb(sizeHintMb: number | undefined, minSizeGb: number | undefi
   return Math.max(hintedGb, minSizeGb ?? SAM_DEPLOYMENT_VOLUME_DEFAULT_SIZE_GB);
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isDeploymentVolumeUniqueConstraintError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return (
+    message.includes('idx_deployment_volumes_env_name') ||
+    message.includes('deployment_volumes.environment_id') ||
+    message.includes('deployment_volumes.name') ||
+    (message.includes('UNIQUE constraint failed') && message.includes('deployment_volumes'))
+  );
+}
+
+function releaseManifestVolumeNames(manifestJson: string): Set<string> | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(manifestJson);
+  } catch {
+    return null;
+  }
+
+  if (!isPlainObject(parsed)) {
+    return null;
+  }
+
+  if (isPlainObject(parsed.volumes)) {
+    return new Set(Object.keys(parsed.volumes));
+  }
+
+  if (typeof parsed.composeYaml === 'string') {
+    try {
+      const compose = parseYaml(parsed.composeYaml);
+      if (isPlainObject(compose) && isPlainObject(compose.volumes)) {
+        return new Set(Object.keys(compose.volumes));
+      }
+    } catch {
+      return null;
+    }
+  }
+
+  return new Set();
+}
+
+async function findEnvironmentVolumeByName(
+  db: ReturnType<typeof drizzle>,
+  environmentId: string,
+  name: string
+): Promise<DeploymentVolumeRow | null> {
+  const volumes = await listEnvironmentVolumes(db, environmentId);
+  return volumes.find((volume) => volume.name === name) ?? null;
+}
+
+async function cleanupProviderVolumeAfterInsertFailure(
+  provider: Provider,
+  volumeResult: VolumeInstance,
+  location: string,
+  insertErr: unknown
+): Promise<void> {
+  try {
+    await provider.deleteVolume({ volumeId: volumeResult.id, location });
+  } catch (cleanupErr) {
+    const insertMessage = insertErr instanceof Error ? insertErr.message : String(insertErr);
+    const cleanupMessage = cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr);
+    throw new Error(
+      `Created provider volume ${volumeResult.id}, but failed to record it in SAM (${insertMessage}) and cleanup also failed (${cleanupMessage}). Manual provider cleanup is required.`
+    );
+  }
+}
+
 export async function createEnvironmentVolume(
   db: ReturnType<typeof drizzle>,
   env: Env,
@@ -159,7 +230,20 @@ export async function createEnvironmentVolume(
     updatedAt: now,
   };
 
-  await db.insert(schema.deploymentVolumes).values(row);
+  try {
+    await db.insert(schema.deploymentVolumes).values(row);
+  } catch (err) {
+    await cleanupProviderVolumeAfterInsertFailure(provider, volumeResult, opts.location, err);
+
+    if (isDeploymentVolumeUniqueConstraintError(err)) {
+      const existing = await findEnvironmentVolumeByName(db, opts.environmentId, opts.name);
+      if (existing) {
+        return existing;
+      }
+    }
+
+    throw err;
+  }
 
   return { ...row, id, createdAt: now, updatedAt: now } as DeploymentVolumeRow;
 }
@@ -293,7 +377,8 @@ export async function deleteEnvironmentVolume(
   env: Env,
   userId: string,
   volumeId: string,
-  environmentId: string
+  environmentId: string,
+  opts: { allowLatestReleaseDeclaredVolume?: boolean } = {}
 ): Promise<void> {
   const rows = await db
     .select()
@@ -313,6 +398,29 @@ export async function deleteEnvironmentVolume(
 
   if (vol.attachedServerId) {
     throw new Error('Cannot delete an attached volume. Detach it first.');
+  }
+
+  if (!opts.allowLatestReleaseDeclaredVolume) {
+    const releaseRows = await db
+      .select({ manifest: schema.deploymentReleases.manifest })
+      .from(schema.deploymentReleases)
+      .where(eq(schema.deploymentReleases.environmentId, environmentId))
+      .orderBy(desc(schema.deploymentReleases.version))
+      .limit(1);
+    const latestManifest = releaseRows[0]?.manifest;
+    if (latestManifest) {
+      const declaredVolumes = releaseManifestVolumeNames(latestManifest);
+      if (!declaredVolumes) {
+        throw new Error(
+          'Cannot delete volume because the latest release manifest could not be checked. Destroy the environment or publish a new release without this volume first.'
+        );
+      }
+      if (declaredVolumes.has(vol.name)) {
+        throw new Error(
+          `Cannot delete volume "${vol.name}" because the latest release still declares it. Publish a release without this volume or destroy the environment to delete it.`
+        );
+      }
+    }
   }
 
   const { provider } = await getProviderForUser(

@@ -620,7 +620,9 @@ deploymentEnvironmentRoutes.delete(
     const currentVolumes = await listEnvironmentVolumes(db, envId);
     for (const volume of currentVolumes) {
       try {
-        await deleteEnvironmentVolume(db, c.env, userId, volume.id, envId);
+        await deleteEnvironmentVolume(db, c.env, userId, volume.id, envId, {
+          allowLatestReleaseDeclaredVolume: true,
+        });
         volumesDeleted += 1;
       } catch (err) {
         throw errors.conflict(
