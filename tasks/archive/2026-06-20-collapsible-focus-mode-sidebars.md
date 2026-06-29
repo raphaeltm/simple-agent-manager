@@ -1,7 +1,13 @@
 # Collapsible "Focus Mode" Sidebars (Desktop) → Production
 
 **SAM idea:** `01KVK5TMZXFA1YQC1M8KYEGZ2F`
-**Prototype source (throwaway, to be removed):** `apps/web/src/pages/sidebar-collapse-prototype/` (route `/prototype/sidebar-collapse`)
+**Note:** This branch forked clean off `main`; the validated prototype design
+was implemented directly (no prototype page/route/spec exists here — Phase 8 N/A).
+**Wording clarification (validator LOW):** the `FocusModeToggle` lives at the
+bottom of the desktop nav `<aside>` (`mt-auto` footer), not a top "header" bar —
+the desktop layout has no top chrome. `FocusStrip` stays in `pages/project-chat/`
+(not `components/`) because it depends on `SessionTreeItem`; moving it would create
+a `components/`→`pages/` back-reference. Both are functionally complete.
 
 ## Problem Statement
 
@@ -51,69 +57,69 @@ mobile keeps its existing drawers).
 ## Implementation Checklist
 
 ### Phase 1 — Shared Focus Mode state
-- [ ] Add `FocusMode` type + extend `AppShellContext` with `focusMode`,
+- [x] Add `FocusMode` type + extend `AppShellContext` with `focusMode`,
       `setFocusMode`, `cycleFocusMode`.
-- [ ] Persist `focusMode` to `localStorage` (hydrate on mount), desktop only.
-- [ ] Bind guarded "F" key handler in AppShell (ignore editable targets;
+- [x] Persist `focusMode` to `localStorage` (hydrate on mount), desktop only.
+- [x] Bind guarded "F" key handler in AppShell (ignore editable targets;
       desktop only).
-- [ ] Gate the entire feature behind `!isMobile`.
+- [x] Gate the entire feature behind `!isMobile`.
 
 ### Phase 2 — AppShell nav collapse
-- [ ] Derive grid column-1 width from `focusMode` (220 / 56 / 0). Animate with
+- [x] Derive grid column-1 width from `focusMode` (220 / 56 / 0). Animate with
       CSS transition; `motion-reduce` disables it.
-- [ ] Add `iconOnly` prop to `NavSidebar` (hide labels, center icons, tooltips).
-- [ ] Zen: render nav as a top-half edge-seam overlay (`ZenPeekRail`).
-- [ ] Render `FocusModeToggle` in the AppShell desktop header.
+- [x] Add `iconOnly` prop to `NavSidebar` (hide labels, center icons, tooltips).
+- [x] Zen: render nav as a top-half edge-seam overlay (`ZenPeekRail`).
+- [x] Render `FocusModeToggle` in the AppShell desktop header.
 
 ### Phase 3 — Session sidebar collapse (project-chat)
-- [ ] `project-chat/index.tsx` desktop sidebar reads `focusMode`:
+- [x] `project-chat/index.tsx` desktop sidebar reads `focusMode`:
       288px list / 64px `FocusStrip` / zen bottom-half seam.
-- [ ] Port `FocusStrip` with body-portal tooltip rendering real
+- [x] Port `FocusStrip` with body-portal tooltip rendering real
       `SessionTreeItem`.
 
 ### Phase 4 — De-duplicate attention model
-- [ ] Add shared `ATTENTION_ICON` map to `lib/chat-session-utils.ts`.
-- [ ] Consume it in `SessionItem.tsx` and the focus strip (remove duplicates).
+- [x] Add shared `ATTENTION_ICON` map to `lib/chat-session-utils.ts`.
+- [x] Consume it in `SessionItem.tsx` and the focus strip (remove duplicates).
 
 ### Phase 5 — Reusable building blocks
-- [ ] Extract `FocusModeToggle`, `NavRail` (iconOnly), `FocusStrip`,
+- [x] Extract `FocusModeToggle`, `NavRail` (iconOnly), `FocusStrip`,
       `ZenPeekRail` into shared component files under `apps/web/src/components/`.
 
 ### Phase 6 — Accessibility
-- [ ] Collapsed rails keep tab order; tooltips reachable via focus
+- [x] Collapsed rails keep tab order; tooltips reachable via focus
       (onFocus/onBlur).
-- [ ] `aria-pressed`/`aria-label` on toggle; zen seams get a focusable expand
+- [x] `aria-pressed`/`aria-label` on toggle; zen seams get a focusable expand
       affordance.
-- [ ] `prefers-reduced-motion` disables transitions.
+- [x] `prefers-reduced-motion` disables transitions.
 
 ### Phase 7 — Tests
-- [ ] Behavioral test: render AppShell, toggle mode, assert grid width changes +
+- [x] Behavioral test: render AppShell, toggle mode, assert grid width changes +
       persists to localStorage.
-- [ ] Playwright visual audit retargeted at real routes (desktop 1280 + mobile
+- [x] Playwright visual audit retargeted at real routes (desktop 1280 + mobile
       375): all 3 modes, no horizontal overflow, tooltip parented to body, zen
       peek stable.
 
-### Phase 8 — Remove prototype (REQUIRED before merge)
-- [ ] Delete `apps/web/src/pages/sidebar-collapse-prototype/`.
-- [ ] Remove `/prototype/sidebar-collapse` route from `App.tsx`.
-- [ ] Remove/port `tests/playwright/sidebar-collapse-prototype-audit.spec.ts`.
-- [ ] Grep for leftover prototype imports.
+### Phase 8 — Remove prototype (N/A on this branch)
+This branch was forked clean off `main`; the feature was implemented directly
+(no `sidebar-collapse-prototype/` page, `/prototype/sidebar-collapse` route, or
+prototype audit spec exists here). Verified absent via grep/ls. Nothing to
+remove.
 
 ## Acceptance Criteria
 
-- [ ] On desktop, a Focus Mode toggle in the AppShell header cycles
+- [x] On desktop, a Focus Mode toggle in the AppShell header cycles
       Default → Focus → Zen, collapsing BOTH sidebars in a coordinated way.
-- [ ] Default mode is the unchanged current layout (no behavior change until the
+- [x] Default mode is the unchanged current layout (no behavior change until the
       user opts in).
-- [ ] Focus mode shows a 56px nav icon rail + 64px session status strip; hovering
+- [x] Focus mode shows a 56px nav icon rail + 64px session status strip; hovering
       a strip icon peeks the real chat card via a body-portal tooltip.
-- [ ] Zen mode tucks both sidebars to glowing edge seams; hovering a seam peeks
+- [x] Zen mode tucks both sidebars to glowing edge seams; hovering a seam peeks
       its panel without flicker.
-- [ ] Mode persists across reloads (localStorage) and is desktop-only (mobile
+- [x] Mode persists across reloads (localStorage) and is desktop-only (mobile
       drawers untouched).
-- [ ] `prefers-reduced-motion` disables the width/slide transitions.
-- [ ] No horizontal overflow at 1280px in any mode; no console errors.
-- [ ] The throwaway prototype + route + spec are removed; no leftover imports.
+- [x] `prefers-reduced-motion` disables the width/slide transitions.
+- [x] No horizontal overflow at 1280px in any mode; no console errors.
+- [x] N/A — no throwaway prototype exists on this branch (implemented directly).
 
 ## References
 - SAM idea `01KVK5TMZXFA1YQC1M8KYEGZ2F`
