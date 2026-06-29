@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -291,7 +292,23 @@ func (s *Server) runAcceptedPublishJob(ctx context.Context, jobID string, prepar
 	if err != nil {
 		s.persistVMJobComplete(jobID, vmJobStatusFailed, "failed", err.Error(), nil)
 		prepared.Log.Error("async publish failed", "publishJobId", jobID, "error", err)
-		reporter.Event(context.Background(), publish.Event{Status: "failed", CurrentStep: "failed", Level: "error", EventType: "publish.job.failed", Message: "publish job failed", ErrorMessage: err.Error(), ErrorCode: "publish_failed", Terminal: true, Retryable: true})
+		errorCode := "publish_failed"
+		retryable := true
+		if publish.IsUnsupportedComposeVolumesError(err) {
+			errorCode = "unsupported_compose_volumes"
+			retryable = false
+		}
+		reporter.Event(context.Background(), publish.Event{
+			Status:       "failed",
+			CurrentStep:  "failed",
+			Level:        "error",
+			EventType:    "publish.job.failed",
+			Message:      "publish job failed",
+			ErrorMessage: err.Error(),
+			ErrorCode:    errorCode,
+			Terminal:     true,
+			Retryable:    retryable,
+		})
 		return
 	}
 	prepared.Log.Info("async publish complete", "publishJobId", jobID, "releaseId", result.ReleaseID, "version", result.Version)
@@ -312,7 +329,7 @@ func (s *Server) runPreparedBuildAndPublish(ctx context.Context, prepared *prepa
 	})
 	if err != nil {
 		log.Error("host build failed", "error", err)
-		return nil, errors.New("build failed: " + err.Error())
+		return nil, fmt.Errorf("build failed: %w", err)
 	}
 
 	orch := publish.New(publish.Options{
@@ -330,7 +347,7 @@ func (s *Server) runPreparedBuildAndPublish(ctx context.Context, prepared *prepa
 	result, err := orch.Publish(ctx, prepared.ProjectID, prepared.Environment, prepared.EnvironmentID, artifact, prepared.Request.SubmittedBy)
 	if err != nil {
 		log.Error("publish failed", "error", err)
-		return nil, errors.New("publish failed: " + err.Error())
+		return nil, fmt.Errorf("publish failed: %w", err)
 	}
 
 	log.Info("publish complete",

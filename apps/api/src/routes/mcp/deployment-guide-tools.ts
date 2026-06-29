@@ -106,7 +106,8 @@ x-sam-routes:
 Constraints for compose-publish releases:
 
 - \`ports:\` entries are route hints, not raw host publishing. Long-syntax \`mode: host\` ports are treated as **internal/private** and do not get public DNS. Other \`ports:\` entries are public by default.
-- Safe named volumes are preserved. **Host bind mounts, Docker socket mounts, \`tmpfs\`, external volumes, and custom volume drivers are rejected.**
+- Docker Compose named or anonymous volumes are not supported by \`build_and_publish\` yet. They would be Docker-managed local volumes on a deployment node, not SAM provider-backed persistent volumes, so the publish job rejects them with \`unsupported_compose_volumes\`. Do not add a top-level \`volumes:\` section or service volume mounts for stateful data until SAM provider-backed volume rewriting is available.
+- **Host bind mounts, Docker socket mounts, \`tmpfs\`, external volumes, and custom volume drivers are rejected.**
 - Docker Model Runner \`provider:\` services are preserved.
 - Prefer normal \`\${VAR}\` placeholders backed by per-environment Variables and Secrets over older explicit secret references. The legacy \`x-sam-secret\` syntax is still supported for compatibility, but new deployments should use \`\${VAR}\` placeholders.
 
@@ -154,7 +155,8 @@ After the publish job reaches \`succeeded\`:
 - **Treating job start as success.** \`build_and_publish\` starts a durable job. You must poll \`get_publish_status\` until terminal before claiming publish success.
 - **Skipping apply verification.** A successful publish job records a release; it does not prove the containers are healthy. Always read deployment logs/apply events to confirm.
 - **Guessing when an environment is missing.** If \`list_deployment_environments()\` is empty, the user must create/enable an environment. Tell them; do not improvise.
-- **Using rejected volume types.** Host bind mounts, Docker socket mounts, tmpfs, external volumes, and custom drivers are rejected. Use safe named volumes.
+- **Using Compose volumes for stateful data.** \`build_and_publish\` currently rejects Docker Compose named or anonymous volumes because they would persist under Docker's local volume store instead of a SAM cloud volume. Remove the Compose volumes and ask the user before proceeding with stateful data.
+- **Using rejected mount types.** Host bind mounts, Docker socket mounts, tmpfs, external volumes, and custom drivers are rejected.
 - **Forgetting route-dependent app config.** Frameworks often reject unknown hosts/origins. Preview routes first, then set allowed hosts, trusted origins, CORS origins, callback URLs, or canonical URL variables before publishing.
 - **Accidentally exposing databases or queues.** Use Compose long-syntax \`ports:\` with \`mode: host\` for internal/private route hints, or mark the service/port private in \`x-sam-routes\`. Verify with \`preview_deployment_routes\` before publishing.
 

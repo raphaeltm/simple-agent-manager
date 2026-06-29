@@ -25,16 +25,11 @@ services:
       NODE_ENV: ${NODE_ENV:-production}
       PUBLIC_APP_DOMAIN: ${PUBLIC_APP_DOMAIN}
       DATABASE_URL: ${DATABASE_URL}
-    volumes:
-      - app-data:/var/lib/app
     healthcheck:
       test: ['CMD', 'curl', '-f', 'http://localhost:3000/health']
       interval: 30s
       timeout: 5s
       retries: 3
-
-volumes:
-  app-data: {}
 
 x-sam-routes:
   - service: web
@@ -60,7 +55,7 @@ Compose interpolation only affects placeholders such as `${DATABASE_URL}`. It do
 
 `x-sam-secret` and older explicit secret references remain supported for compatibility, but new deployments should prefer normal Compose `${VAR}` placeholders backed by per-environment Variables and Secrets.
 
-For compose-publish releases, SAM preserves safe named volumes declared in the Compose file. Host bind mounts, Docker socket mounts, `tmpfs`, external volumes, and custom volume drivers are rejected.
+For compose-publish releases, `build_and_publish` currently rejects Docker Compose named or anonymous volumes because they would be Docker-managed local volumes on the deployment node, not SAM provider-backed persistent volumes. Host bind mounts, Docker socket mounts, `tmpfs`, external volumes, and custom volume drivers are also rejected.
 
 Use `mode: host` for service ports such as databases, queues, and workers that should be reachable only inside the deployed Compose stack/private network. Public web/API entrypoints should use normal `ports:` entries or explicit public `x-sam-routes`.
 
