@@ -18,7 +18,6 @@ import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireOwnedProject } from '../middleware/project-auth';
 import { jsonValidator } from '../schemas';
-import { registerDeploymentEnvironmentLifecycleRoutes } from './deployment-environment-lifecycle';
 import {
   encodeAllowedDeployProfileIds,
   uniqueDeployProfileIds,
@@ -39,6 +38,7 @@ import {
   listNodeContainersFromNode,
 } from '../services/node-agent';
 import { deleteNodeResources } from '../services/nodes';
+import { registerDeploymentEnvironmentLifecycleRoutes } from './deployment-environment-lifecycle';
 
 // =============================================================================
 // Validation schemas (Valibot — matches project convention)
