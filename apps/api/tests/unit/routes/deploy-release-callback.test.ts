@@ -321,7 +321,7 @@ describe('deploy release callback route', () => {
     const volumeMounts = [
       {
         name: 'data',
-        mountRoot: '/mnt/sam-env-env-1/volumes',
+        mountRoot: '/mnt/sam-env-env-1/volumes/data',
         providerVolumeId: 'vol-123',
         providerName: 'hetzner',
         linuxDevice: '/dev/disk/by-id/scsi-0HC_Volume_123',

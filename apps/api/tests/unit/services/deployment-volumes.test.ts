@@ -12,9 +12,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   attachEnvironmentVolumes,
+  buildVolumeMountDescriptors,
   createEnvironmentVolume,
   deleteEnvironmentVolume,
   detachEnvironmentVolumes,
+  resolveNamedVolumeMountRoot,
   resolveVolumeMountRoot,
 } from '../../../src/services/deployment-volumes';
 
@@ -198,6 +200,85 @@ describe('resolveVolumeMountRoot', () => {
     expect(result).toMatch(/^\/mnt\//);
     expect(result).toMatch(/\/volumes$/);
     expect(result).toContain('my-env');
+  });
+});
+
+describe('resolveNamedVolumeMountRoot', () => {
+  it('derives a distinct mountpoint for each named volume', () => {
+    expect(resolveNamedVolumeMountRoot('env-abc123', 'data')).toBe('/mnt/sam-env-env-abc123/volumes/data');
+    expect(resolveNamedVolumeMountRoot('env-abc123', 'uploads')).toBe('/mnt/sam-env-env-abc123/volumes/uploads');
+  });
+});
+
+// =============================================================================
+// buildVolumeMountDescriptors
+// =============================================================================
+
+describe('buildVolumeMountDescriptors', () => {
+  it('uses the exact named volume bind path as each provider volume mountpoint', async () => {
+    const db = createMockDb([
+      {
+        id: 'vol-1',
+        environmentId: 'env-001',
+        name: 'data',
+        providerVolumeId: 'prov-vol-data',
+        providerName: 'hetzner',
+        sizeGb: 10,
+        location: 'nbg1',
+        status: 'attached',
+        attachedServerId: 'srv-1',
+        linuxDevice: '/dev/disk/by-id/scsi-0HC_Volume_1',
+        createdAt: '2026-06-12T00:00:00Z',
+        updatedAt: '2026-06-12T00:00:00Z',
+      },
+      {
+        id: 'vol-2',
+        environmentId: 'env-001',
+        name: 'uploads',
+        providerVolumeId: 'prov-vol-uploads',
+        providerName: 'hetzner',
+        sizeGb: 10,
+        location: 'nbg1',
+        status: 'attached',
+        attachedServerId: 'srv-1',
+        linuxDevice: '/dev/disk/by-id/scsi-0HC_Volume_2',
+        createdAt: '2026-06-12T00:00:00Z',
+        updatedAt: '2026-06-12T00:00:00Z',
+      },
+      {
+        id: 'vol-3',
+        environmentId: 'env-001',
+        name: 'detached',
+        providerVolumeId: 'prov-vol-detached',
+        providerName: 'hetzner',
+        sizeGb: 10,
+        location: 'nbg1',
+        status: 'available',
+        attachedServerId: null,
+        linuxDevice: null,
+        createdAt: '2026-06-12T00:00:00Z',
+        updatedAt: '2026-06-12T00:00:00Z',
+      },
+    ]);
+
+    await expect(buildVolumeMountDescriptors(db as any, 'env-001')).resolves.toEqual([
+      {
+        name: 'data',
+        mountRoot: '/mnt/sam-env-env-001/volumes/data',
+        providerVolumeId: 'prov-vol-data',
+        providerName: 'hetzner',
+        linuxDevice: '/dev/disk/by-id/scsi-0HC_Volume_1',
+        fsFormat: 'ext4',
+      },
+      {
+        name: 'uploads',
+        mountRoot: '/mnt/sam-env-env-001/volumes/uploads',
+        providerVolumeId: 'prov-vol-uploads',
+        providerName: 'hetzner',
+        linuxDevice: '/dev/disk/by-id/scsi-0HC_Volume_2',
+        fsFormat: 'ext4',
+      },
+    ]);
   });
 });
 

@@ -73,11 +73,24 @@ func TestExtractSAMVolumeMountRoots_WithSAMVolumes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(roots) != 1 {
-		t.Fatalf("expected 1 unique root, got %d: %v", len(roots), roots)
+	if len(roots) != 3 {
+		t.Fatalf("expected 3 unique roots, got %d: %v", len(roots), roots)
 	}
-	if roots[0] != "/mnt/sam-env-env-abc123" {
-		t.Fatalf("expected /mnt/sam-env-env-abc123, got %s", roots[0])
+	expected := map[string]bool{
+		"/mnt/sam-env-env-abc123/volumes/data":    false,
+		"/mnt/sam-env-env-abc123/volumes/uploads": false,
+		"/mnt/sam-env-env-abc123/volumes/pgdata":  false,
+	}
+	for _, root := range roots {
+		if _, ok := expected[root]; !ok {
+			t.Fatalf("unexpected root %s in %v", root, roots)
+		}
+		expected[root] = true
+	}
+	for root, seen := range expected {
+		if !seen {
+			t.Fatalf("expected root %s in %v", root, roots)
+		}
 	}
 }
 
@@ -148,8 +161,8 @@ func TestExtractSAMVolumeMountRoots_PathTraversal_Rejected(t *testing.T) {
 	if len(roots) != 1 {
 		t.Fatalf("expected 1 root (only legitimate), got %d: %v", len(roots), roots)
 	}
-	if roots[0] != "/mnt/sam-env-legitimate" {
-		t.Fatalf("expected /mnt/sam-env-legitimate, got %s", roots[0])
+	if roots[0] != "/mnt/sam-env-legitimate/volumes/data" {
+		t.Fatalf("expected /mnt/sam-env-legitimate/volumes/data, got %s", roots[0])
 	}
 }
 
@@ -177,7 +190,8 @@ func TestVerifyVolumeMounts_AllMounted_Passes(t *testing.T) {
       - /mnt/sam-env-env-abc123/volumes/uploads:/app/uploads
 `
 	checker := newFakeMountChecker()
-	checker.mountpoints["/mnt/sam-env-env-abc123"] = true
+	checker.mountpoints["/mnt/sam-env-env-abc123/volumes/data"] = true
+	checker.mountpoints["/mnt/sam-env-env-abc123/volumes/uploads"] = true
 
 	if err := verifyVolumeMounts(yaml, checker); err != nil {
 		t.Fatalf("expected no error when volume is mounted, got: %v", err)
@@ -193,7 +207,7 @@ func TestVerifyVolumeMounts_VolumeNotMounted_Refuses(t *testing.T) {
 `
 	checker := newFakeMountChecker()
 	// Path exists but is NOT a mountpoint (fell-through empty dir)
-	checker.mountpoints["/mnt/sam-env-env-abc123"] = false
+	checker.mountpoints["/mnt/sam-env-env-abc123/volumes/data"] = false
 
 	err := verifyVolumeMounts(yaml, checker)
 	if err == nil {
@@ -223,14 +237,14 @@ func TestVerifyVolumeMounts_LongFormSAMVolumeNotMounted_Refuses(t *testing.T) {
         target: /cache
 `
 	checker := newFakeMountChecker()
-	checker.mountpoints["/mnt/sam-env-env-abc123"] = false
+	checker.mountpoints["/mnt/sam-env-env-abc123/volumes/postgres-data"] = false
 
 	err := verifyVolumeMounts(yaml, checker)
 	if err == nil {
 		t.Fatal("expected long-form SAM volume to run the mount guard and refuse")
 	}
-	if !strings.Contains(err.Error(), "/mnt/sam-env-env-abc123") {
-		t.Fatalf("expected error to mention the SAM mount root, got: %v", err)
+	if !strings.Contains(err.Error(), "/mnt/sam-env-env-abc123/volumes/postgres-data") {
+		t.Fatalf("expected error to mention the SAM volume mount root, got: %v", err)
 	}
 	if !strings.Contains(err.Error(), "not a mountpoint") {
 		t.Fatalf("expected 'not a mountpoint' in error, got: %v", err)
@@ -245,7 +259,7 @@ func TestVerifyVolumeMounts_VolumeMissing_Refuses(t *testing.T) {
       - /mnt/sam-env-env-abc123/volumes/pgdata:/var/lib/postgresql/data
 `
 	checker := newFakeMountChecker()
-	checker.missing["/mnt/sam-env-env-abc123"] = true
+	checker.missing["/mnt/sam-env-env-abc123/volumes/pgdata"] = true
 
 	err := verifyVolumeMounts(yaml, checker)
 	if err == nil {
@@ -268,8 +282,8 @@ func TestVerifyVolumeMounts_MultipleVolumes_OneMissing_Refuses(t *testing.T) {
       - /mnt/sam-env-env-bbb/volumes/state:/app/state
 `
 	checker := newFakeMountChecker()
-	checker.mountpoints["/mnt/sam-env-env-aaa"] = true
-	checker.missing["/mnt/sam-env-env-bbb"] = true
+	checker.mountpoints["/mnt/sam-env-env-aaa/volumes/data"] = true
+	checker.missing["/mnt/sam-env-env-bbb/volumes/state"] = true
 
 	err := verifyVolumeMounts(yaml, checker)
 	if err == nil {
@@ -363,7 +377,7 @@ const guardVolumeComposeYAML = `services:
 
 func TestEngine_Apply_VolumeMountGuard_Proceeds(t *testing.T) {
 	checker := newFakeMountChecker()
-	checker.mountpoints["/mnt/sam-env-env-1"] = true
+	checker.mountpoints["/mnt/sam-env-env-1/volumes/data"] = true
 
 	engine, priv := guardEngine(t, checker, true)
 	payload := guardPayload(t, priv, guardVolumeComposeYAML)
@@ -381,7 +395,7 @@ func TestEngine_Apply_VolumeMountGuard_Proceeds(t *testing.T) {
 func TestEngine_Apply_VolumeMountGuard_Refuses(t *testing.T) {
 	checker := newFakeMountChecker()
 	// Volume path does NOT exist
-	checker.missing["/mnt/sam-env-env-1"] = true
+	checker.missing["/mnt/sam-env-env-1/volumes/data"] = true
 
 	engine, priv := guardEngine(t, checker, false)
 	payload := guardPayload(t, priv, guardVolumeComposeYAML)
@@ -423,7 +437,7 @@ func TestEngine_Apply_VolumeMountGuard_NoVolumes_Skips(t *testing.T) {
 func TestEngine_Apply_VolumeMountGuard_ExistsButNotMountpoint_Refuses(t *testing.T) {
 	checker := newFakeMountChecker()
 	// Path exists but is NOT a mountpoint — this is the "fell-through empty dir" case
-	checker.mountpoints["/mnt/sam-env-env-1"] = false
+	checker.mountpoints["/mnt/sam-env-env-1/volumes/data"] = false
 
 	engine, priv := guardEngine(t, checker, false)
 

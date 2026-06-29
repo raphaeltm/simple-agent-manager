@@ -27,11 +27,16 @@ import { createProviderForUser } from './provider-credentials';
 // Helpers
 // =============================================================================
 
-/** Resolve the host mount path for an environment's volumes. */
+/** Resolve the host directory under which an environment's named volume mountpoints live. */
 export function resolveVolumeMountRoot(environmentId: string): string {
   const base = SAM_VOLUME_MOUNT_PATH_TEMPLATE.replace('{environmentId}', environmentId);
   // Template ends with '/', append 'volumes'
   return `${base}volumes`;
+}
+
+/** Resolve the host mountpoint for a specific named provider-backed volume. */
+export function resolveNamedVolumeMountRoot(environmentId: string, volumeName: string): string {
+  return `${resolveVolumeMountRoot(environmentId)}/${volumeName}`;
 }
 
 async function getProviderForUser(
@@ -208,12 +213,11 @@ export async function buildVolumeMountDescriptors(
   environmentId: string,
 ): Promise<VolumeMountDescriptor[]> {
   const volumes = await listEnvironmentVolumes(db, environmentId);
-  const mountRoot = resolveVolumeMountRoot(environmentId);
   return volumes
     .filter((volume) => volume.attachedServerId)
     .map((volume) => ({
       name: volume.name,
-      mountRoot,
+      mountRoot: resolveNamedVolumeMountRoot(environmentId, volume.name),
       providerVolumeId: volume.providerVolumeId,
       providerName: volume.providerName,
       ...(volume.linuxDevice ? { linuxDevice: volume.linuxDevice } : {}),

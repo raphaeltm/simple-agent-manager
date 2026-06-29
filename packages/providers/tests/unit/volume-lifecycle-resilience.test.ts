@@ -237,12 +237,12 @@ describe('volume lifecycle resilience (vertical slice)', () => {
     // This test verifies the contract between:
     // 1. The compose renderer (TypeScript) which produces bind mounts like:
     //    /mnt/sam-env-{envId}/volumes/{name}:{containerPath}
-    // 2. The Go mount guard which extracts root = /mnt/sam-env-{envId}
+    // 2. The Go mount guard which extracts root = /mnt/sam-env-{envId}/volumes/{name}
     // 3. The provider mount template: /mnt/sam-env-{environmentId}/
     //
-    // The mount guard checks that root is a real mountpoint. The provider
-    // mounts the block device at root. If these paths don't agree, the
-    // mount guard can't protect against unmounted volumes.
+    // The mount guard checks that the named volume bind source is a real
+    // mountpoint. Each provider volume mounts under the environment's canonical
+    // volume root at its safe named volume path.
     const envId = 'env-abc123';
     const volumeName = 'data';
     const containerPath = '/app/data';
@@ -254,17 +254,15 @@ describe('volume lifecycle resilience (vertical slice)', () => {
     const hostPath = composeBind.split(':')[0]!;
     expect(hostPath).toBe(`/mnt/sam-env-${envId}/volumes/${volumeName}`);
 
-    // The mount guard strips to the environment root
+    // The mount guard strips to the named volume mountpoint
     const prefix = '/mnt/sam-env-';
     const remainder = hostPath.slice(prefix.length);
-    const slashIdx = remainder.indexOf('/');
-    const mountRoot = prefix + (slashIdx === -1 ? remainder : remainder.slice(0, slashIdx));
-    expect(mountRoot).toBe(`/mnt/sam-env-${envId}`);
+    const parts = remainder.split('/');
+    const mountRoot = `${prefix}${parts[0]}/volumes/${parts[2]}`;
+    expect(mountRoot).toBe(`/mnt/sam-env-${envId}/volumes/${volumeName}`);
 
-    // What the provider mounts the block device at
+    // What the provider uses as the environment's canonical volume namespace
     const providerMount = SAM_VOLUME_MOUNT_PATH_TEMPLATE.replace('{environmentId}', envId);
-    // Provider template has trailing slash, mount root does not — but the
-    // OS mountpoint is the directory, not the trailing slash
-    expect(providerMount.replace(/\/$/, '')).toBe(mountRoot);
+    expect(mountRoot.startsWith(`${providerMount}volumes/`)).toBe(true);
   });
 });

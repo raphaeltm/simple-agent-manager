@@ -182,7 +182,7 @@ func TestVerifier_RejectsVolumeMountMutationAfterSigning(t *testing.T) {
 		ComposeYAML:   "compose yaml",
 		VolumeMounts: []VolumeMount{{
 			Name:             "data",
-			MountRoot:        "/mnt/sam-env-env-1/volumes",
+			MountRoot:        "/mnt/sam-env-env-1/volumes/data",
 			ProviderVolumeID: "vol-123",
 			ProviderName:     "hetzner",
 			LinuxDevice:      "/dev/disk/by-id/scsi-0HC_Volume_123",
