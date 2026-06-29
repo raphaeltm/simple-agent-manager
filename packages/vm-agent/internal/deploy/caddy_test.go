@@ -1,6 +1,7 @@
 package deploy
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -306,7 +307,13 @@ func TestTeardownRemovesOnlyEnvironmentSnippetAndComposeProject(t *testing.T) {
 		t.Fatalf("NewDiskState: %v", err)
 	}
 	state := &ReleaseState{Seq: 1, EnvironmentID: "env-a", NodeID: "node", Status: StatusApplied}
-	if err := disk.WriteRelease(state, "services: {}\n", "env-a.apps.example.com {\n\treverse_proxy 127.0.0.1:35000\n}\n"); err != nil {
+	composeYAML := `services:
+  web:
+    image: nginx:latest
+    volumes:
+      - /mnt/sam-env-env-a/volumes/data:/usr/share/nginx/html
+`
+	if err := disk.WriteRelease(state, composeYAML, "env-a.apps.example.com {\n\treverse_proxy 127.0.0.1:35000\n}\n"); err != nil {
 		t.Fatalf("WriteRelease: %v", err)
 	}
 	if err := disk.SetCurrent(1); err != nil {
@@ -336,6 +343,7 @@ func TestTeardownRemovesOnlyEnvironmentSnippetAndComposeProject(t *testing.T) {
 		t.Fatalf("write reload script: %v", err)
 	}
 	t.Setenv("COMPOSE_LOG", composeLog)
+	volumeMounter := &recordingVolumeMounter{}
 
 	engine := NewEngine(disk, nil, EngineConfig{
 		EnvironmentID:      "env-a",
@@ -343,6 +351,7 @@ func TestTeardownRemovesOnlyEnvironmentSnippetAndComposeProject(t *testing.T) {
 		ComposeProjectName: "sam-env-env-a",
 		CaddyfilePath:      filepath.Join(activeDir, "Caddyfile"),
 		CaddyReloadCmd:     reloadScript + " " + reloadLog,
+		VolumeMounter:      volumeMounter,
 	})
 
 	if err := engine.Teardown(t.Context()); err != nil {
@@ -374,6 +383,22 @@ func TestTeardownRemovesOnlyEnvironmentSnippetAndComposeProject(t *testing.T) {
 	if _, err := disk.ReadState(1); err != nil {
 		t.Fatalf("teardown should preserve release metadata: %v", err)
 	}
+	if len(volumeMounter.teardownRoots) != 1 || volumeMounter.teardownRoots[0] != "/mnt/sam-env-env-a/volumes/data" {
+		t.Fatalf("expected volume teardown for env-a data root, got %#v", volumeMounter.teardownRoots)
+	}
+}
+
+type recordingVolumeMounter struct {
+	teardownRoots []string
+}
+
+func (m *recordingVolumeMounter) MountVolumes(context.Context, []VolumeMount) error {
+	return nil
+}
+
+func (m *recordingVolumeMounter) TeardownMounts(_ context.Context, roots []string) error {
+	m.teardownRoots = append(m.teardownRoots, roots...)
+	return nil
 }
 
 func TestGenerateCaddySnippet_RejectsUnsafeRouteTargets(t *testing.T) {

@@ -85,9 +85,10 @@ func TestValidateNoComposeVolumesRejectsTopLevelAndServiceVolumes(t *testing.T) 
 		t.Fatalf("expected unsupported compose volumes error, got %T: %v", err, err)
 	}
 	for _, want := range []string{
-		"build_and_publish does not support Docker Compose named or anonymous volumes yet",
+		"build_and_publish does not support Docker Compose service volume mounts or top-level volumes yet",
 		"api:appdata",
 		"api:legacydata",
+		"api:/tmp/uploads",
 		"worker:anonymous at /cache",
 		"top-level:appdata",
 		"Docker-managed local volumes",
@@ -97,22 +98,26 @@ func TestValidateNoComposeVolumesRejectsTopLevelAndServiceVolumes(t *testing.T) 
 			t.Fatalf("expected error to contain %q, got: %v", want, err)
 		}
 	}
-	if strings.Contains(err.Error(), "/tmp/uploads") {
-		t.Fatalf("bind mount should not be reported as a Docker Compose volume: %v", err)
-	}
 }
 
-func TestValidateNoComposeVolumesAllowsComposeWithoutDockerVolumes(t *testing.T) {
+func TestValidateNoComposeVolumesRejectsBindAndTmpfsServiceMounts(t *testing.T) {
 	cfg := &composeConfig{Services: map[string]composeConfigService{
 		"api": {
 			Volumes: json.RawMessage(`[
-				{"type":"bind","source":"/tmp/uploads","target":"/uploads"}
+				{"type":"bind","source":"/tmp/uploads","target":"/uploads"},
+				{"type":"tmpfs","target":"/cache"}
 			]`),
 		},
 	}}
 
-	if err := validateNoComposeVolumes(cfg); err != nil {
-		t.Fatalf("non-volume compose mounts should be left to downstream validators: %v", err)
+	err := validateNoComposeVolumes(cfg)
+	if err == nil {
+		t.Fatal("expected service mounts to be rejected")
+	}
+	for _, want := range []string{"api:/tmp/uploads", "api:anonymous at /cache"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("expected error to contain %q, got: %v", want, err)
+		}
 	}
 }
 
@@ -127,13 +132,10 @@ func TestValidateNoComposeVolumesRejectsStringVolumeEntries(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected string compose volume entries to be rejected")
 	}
-	for _, want := range []string{"api:appdata", "api:anonymous at /cache"} {
+	for _, want := range []string{"api:appdata", "api:anonymous at /cache", "api:/tmp/uploads"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("expected error to contain %q, got: %v", want, err)
 		}
-	}
-	if strings.Contains(err.Error(), "/tmp/uploads") {
-		t.Fatalf("bind-like string mount should not be reported as a Docker Compose volume: %v", err)
 	}
 }
 

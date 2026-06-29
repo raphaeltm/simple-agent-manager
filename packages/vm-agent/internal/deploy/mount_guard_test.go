@@ -457,3 +457,52 @@ func TestEngine_Apply_VolumeMountGuard_ExistsButNotMountpoint_Refuses(t *testing
 		t.Fatalf("expected 'not a mountpoint' in error, got: %v", err)
 	}
 }
+
+func TestValidateVolumeMountsForEnvironmentRejectsUnsafeDescriptor(t *testing.T) {
+	tests := []struct {
+		name   string
+		volume VolumeMount
+		want   string
+	}{
+		{
+			name: "unsafe volume name",
+			volume: VolumeMount{
+				Name:             "../data",
+				MountRoot:        "/mnt/sam-env-env-1/volumes/data",
+				ProviderVolumeID: "vol-1",
+				FSFormat:         "ext4",
+			},
+			want: "unsafe name",
+		},
+		{
+			name: "wrong environment root",
+			volume: VolumeMount{
+				Name:             "data",
+				MountRoot:        "/mnt/sam-env-env-2/volumes/data",
+				ProviderVolumeID: "vol-1",
+				FSFormat:         "ext4",
+			},
+			want: "must exactly match",
+		},
+		{
+			name: "fstab injection in device",
+			volume: VolumeMount{
+				Name:             "data",
+				MountRoot:        "/mnt/sam-env-env-1/volumes/data",
+				ProviderVolumeID: "vol-1",
+				LinuxDevice:      "/dev/sdb defaults 0 0",
+				FSFormat:         "ext4",
+			},
+			want: "linuxDevice contains whitespace",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateVolumeMountsForEnvironment("env-1", []VolumeMount{tc.volume})
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("expected %q error, got %v", tc.want, err)
+			}
+		})
+	}
+}

@@ -145,11 +145,19 @@ func (e *Engine) Teardown(ctx context.Context) error {
 	defer e.applyMu.Unlock()
 
 	var errs []string
+	var mountRoots []string
 	interpolationEnv, envErr := e.fetchCurrentInterpolationEnv(ctx)
 	if envErr != nil {
 		slog.Warn("deploy.teardown: failed to fetch current interpolation env; falling back to label cleanup if compose down fails", "error", envErr)
 	}
 	if composeFile, err := e.disk.CurrentComposeFilePath(); err == nil {
+		if rawCompose, readErr := os.ReadFile(composeFile); readErr != nil {
+			errs = append(errs, fmt.Sprintf("read compose for volume teardown: %v", readErr))
+		} else if roots, extractErr := extractSAMVolumeMountRoots(string(rawCompose)); extractErr != nil {
+			errs = append(errs, fmt.Sprintf("extract volume mount roots: %v", extractErr))
+		} else {
+			mountRoots = roots
+		}
 		if err := e.composeDown(ctx, composeFile, interpolationEnv); err != nil {
 			errs = append(errs, fmt.Sprintf("compose down: %v", err))
 			if envErr != nil {
@@ -160,6 +168,16 @@ func (e *Engine) Teardown(ctx context.Context) error {
 		}
 	} else if !strings.Contains(err.Error(), "no current release") {
 		errs = append(errs, fmt.Sprintf("read current compose: %v", err))
+	}
+
+	if len(mountRoots) > 0 {
+		volumeTeardowner, ok := e.cfg.VolumeMounter.(VolumeTeardowner)
+		if !ok {
+			volumeTeardowner = NewRealVolumeMounter()
+		}
+		if err := volumeTeardowner.TeardownMounts(ctx, mountRoots); err != nil {
+			errs = append(errs, fmt.Sprintf("teardown volume mounts: %v", err))
+		}
 	}
 
 	snippetPath := filepath.Join(filepath.Dir(e.cfg.CaddyfilePath), "sites", SafeEnvironmentFilePart(e.cfg.EnvironmentID)+".caddy")
@@ -279,6 +297,9 @@ func (e *Engine) Apply(ctx context.Context, payload *ApplyPayload) error {
 	}
 	if err := verifier.Verify(payload, e.cfg.EnvironmentID, e.cfg.NodeID, currentSeq); err != nil {
 		return fmt.Errorf("payload verification failed: %w", err)
+	}
+	if err := validateVolumeMountsForEnvironment(e.cfg.EnvironmentID, payload.VolumeMounts); err != nil {
+		return fmt.Errorf("volume mount validation failed: %w", err)
 	}
 	e.reportApplyEvent(ctx, payload, "info", "deployment.apply.payload_verified", "verify_payload", "deployment payload verified", map[string]any{"previousSeq": currentSeq})
 

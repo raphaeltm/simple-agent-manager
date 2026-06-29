@@ -40,6 +40,9 @@ let environmentRows: Array<{
 const inserted: Array<Record<string, unknown>> = [];
 const updated: Array<Record<string, unknown>> = [];
 const mockProvisionDeploymentNode = vi.hoisted(() => vi.fn(async () => null));
+const mockCreateMissingDeclaredVolumes = vi.hoisted(() => vi.fn(async () => []));
+const mockAttachEnvironmentVolumesToLinkedNode = vi.hoisted(() => vi.fn(async () => []));
+const mockMarkDeploymentReleaseVolumeAttachFailed = vi.hoisted(() => vi.fn(async () => undefined));
 let verifiedPayload: { workspace: string; type: string; scope?: string } = {
   workspace: 'ws-1',
   type: 'callback',
@@ -75,8 +78,11 @@ vi.mock('../../../src/services/deployment-provisioning', () => ({
 }));
 
 vi.mock('../../../src/services/deployment-volumes', () => ({
-  createMissingDeclaredVolumes: vi.fn(async () => []),
-  attachEnvironmentVolumesToLinkedNode: vi.fn(async () => []),
+  createMissingDeclaredVolumes: (...args: unknown[]) => mockCreateMissingDeclaredVolumes(...args),
+  attachEnvironmentVolumesToLinkedNode: (...args: unknown[]) =>
+    mockAttachEnvironmentVolumesToLinkedNode(...args),
+  markDeploymentReleaseVolumeAttachFailed: (...args: unknown[]) =>
+    mockMarkDeploymentReleaseVolumeAttachFailed(...args),
 }));
 
 function createMockDb() {
@@ -138,6 +144,7 @@ vi.mock('../../../src/lib/ulid', () => ({
 
 vi.mock('../../../src/lib/logger', () => ({
   log: { debug: vi.fn(), error: vi.fn(), info: vi.fn(), warn: vi.fn() },
+  serializeError: vi.fn((err: unknown) => ({ error: err instanceof Error ? err.message : String(err) })),
 }));
 
 async function buildApp() {
@@ -258,6 +265,52 @@ describe('compose-publish-release callback (vertical slice)', () => {
     const body = await res.json();
     expect(body.nodeId).toBeNull();
     expect(mockProvisionDeploymentNode).not.toHaveBeenCalled();
+  });
+
+  it('provisions volume releases with the resolved provider and volume location', async () => {
+    mockProvisionDeploymentNode.mockResolvedValueOnce({
+      nodeId: 'node-volume-1',
+      provisioningPromise: Promise.resolve(),
+    });
+    const app = await buildApp();
+    const res = await request(app, 'proj-1', {
+      ...validSubmission,
+      composeYaml: `services:
+  web:
+    image: nginx:latest
+    volumes:
+      - data:/usr/share/nginx/html
+volumes:
+  data:
+    x-sam-size-hint-mb: 1024
+`,
+    });
+
+    const body = await res.json();
+    expect(res.status, JSON.stringify(body)).toBe(200);
+    expect(body).toMatchObject({ nodeId: 'node-volume-1' });
+    expect(mockCreateMissingDeclaredVolumes).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      'user-1',
+      expect.objectContaining({
+        environmentId: 'env-1',
+        location: 'fsn1',
+        targetProvider: 'hetzner',
+      })
+    );
+    expect(mockProvisionDeploymentNode).toHaveBeenCalledWith(
+      'env-1',
+      'proj-1',
+      'user-1',
+      expect.anything(),
+      {
+        providerOverride: 'hetzner',
+        vmLocationOverride: 'fsn1',
+        vmSizeOverride: 'small',
+        requiresVolumes: true,
+      }
+    );
   });
 
   it('validates and records artifact-backed service descriptors', async () => {

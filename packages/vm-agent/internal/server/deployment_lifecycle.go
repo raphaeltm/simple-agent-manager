@@ -24,13 +24,15 @@ func (s *Server) handleTeardownDeploymentEnvironment(w http.ResponseWriter, r *h
 		return
 	}
 
-	engine := s.ensureDeployEngine(environmentID)
+	s.deployMu.Lock()
+	engine := s.deployEngines[environmentID]
+	s.deployMu.Unlock()
 	if engine == nil {
-		writeError(w, http.StatusInternalServerError, "deployment engine unavailable")
+		writeError(w, http.StatusNotFound, "deployment environment is not active on this node")
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(r.Context(), s.deployTeardownTimeout())
 	defer cancel()
 	if err := engine.Teardown(ctx); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -48,4 +50,11 @@ func (s *Server) handleTeardownDeploymentEnvironment(w http.ResponseWriter, r *h
 		"environmentId": environmentID,
 		"status":        "torn_down",
 	})
+}
+
+func (s *Server) deployTeardownTimeout() time.Duration {
+	if s.config != nil && s.config.DeployTeardownTimeout > 0 {
+		return s.config.DeployTeardownTimeout
+	}
+	return config.DefaultDeployTeardownTimeout
 }

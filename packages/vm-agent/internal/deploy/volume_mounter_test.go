@@ -200,3 +200,42 @@ func TestRealVolumeMounter_SkipsMountWhenAlreadyMounted(t *testing.T) {
 		t.Fatal("already-mounted volume should not be mounted again")
 	}
 }
+
+func TestRealVolumeMounter_TeardownMountsUnmountsAndRemovesFstabEntry(t *testing.T) {
+	mountRoot := "/mnt/sam-env-env-1/volumes/data"
+	otherRoot := "/mnt/sam-env-env-2/volumes/data"
+	fstab := filepath.Join(t.TempDir(), "fstab")
+	if err := os.WriteFile(
+		fstab,
+		[]byte("UUID=data "+mountRoot+" ext4 defaults,nofail 0 2\nUUID=other "+otherRoot+" ext4 defaults,nofail 0 2\n"),
+		0644,
+	); err != nil {
+		t.Fatalf("write fstab: %v", err)
+	}
+	runner := &fakeCommandRunner{responses: map[string]struct {
+		out string
+		err error
+	}{
+		"mountpoint -q " + mountRoot: {},
+		"umount " + mountRoot:        {},
+	}}
+	mounter := &RealVolumeMounter{runner: runner, fstabPath: fstab}
+
+	if err := mounter.TeardownMounts(context.Background(), []string{mountRoot}); err != nil {
+		t.Fatalf("TeardownMounts: %v", err)
+	}
+
+	if !runner.called("umount " + mountRoot) {
+		t.Fatal("expected mounted SAM volume to be unmounted")
+	}
+	contents, err := os.ReadFile(fstab)
+	if err != nil {
+		t.Fatalf("read fstab: %v", err)
+	}
+	if strings.Contains(string(contents), mountRoot) {
+		t.Fatalf("expected fstab entry for %s to be removed, got:\n%s", mountRoot, contents)
+	}
+	if !strings.Contains(string(contents), otherRoot) {
+		t.Fatalf("expected unrelated fstab entry preserved, got:\n%s", contents)
+	}
+}

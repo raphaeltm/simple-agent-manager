@@ -354,6 +354,7 @@ export function ProjectDeploymentEnvironmentDetail() {
   const canStop =
     env.status !== 'stopped' && env.status !== 'stopping' && env.status !== 'starting';
   const lifecycleBusy = lifecycleAction !== null;
+  const activeRouteHostnames = env.status === 'active' ? env.routeHostnames : [];
 
   return (
     <div className="grid gap-4">
@@ -442,20 +443,20 @@ export function ProjectDeploymentEnvironmentDetail() {
         <section className="grid gap-4">
           <OperationalSummary env={env} />
           <StatusDimensions env={env} />
-          {env.routeHostnames.length > 0 && (
+          {activeRouteHostnames.length > 0 && (
             <div className="grid gap-2">
               <div className="text-xs font-semibold uppercase text-fg-muted">Public Routes</div>
               <div className="grid gap-1">
-                {env.routeHostnames.map((hostname) => (
+                {activeRouteHostnames.map((hostname) => (
                   <a
                     key={hostname}
                     href={`https://${hostname}`}
                     target="_blank"
                     rel="noreferrer"
-                    className="inline-flex items-center gap-1 min-w-0 text-sm text-accent no-underline hover:underline w-fit"
+                    className="inline-flex max-w-full items-start gap-1 text-sm text-accent no-underline hover:underline"
                   >
-                    <span className="truncate">{hostname}</span>
-                    <ExternalLink size={13} className="shrink-0" />
+                    <span className="min-w-0 break-all">{hostname}</span>
+                    <ExternalLink size={13} className="mt-0.5 shrink-0" />
                   </a>
                 ))}
               </div>

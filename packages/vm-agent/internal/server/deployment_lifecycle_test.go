@@ -127,3 +127,29 @@ func TestHandleTeardownDeploymentEnvironmentRejectsWorkspaceNode(t *testing.T) {
 		t.Fatalf("expected 409, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
+
+func TestHandleTeardownDeploymentEnvironmentRejectsUnknownEnvironment(t *testing.T) {
+	dir := t.TempDir()
+	validator, key := newWorkspaceCreateJWTValidator(t, "node-1")
+	s := &Server{
+		config: &config.Config{
+			Role:          config.RoleDeployment,
+			NodeID:        "node-1",
+			DeployBaseDir: filepath.Join(dir, "deploy"),
+		},
+		jwtValidator:  validator,
+		deployEngines: map[string]*deploy.Engine{},
+	}
+
+	mux := http.NewServeMux()
+	s.setupRoutes(mux)
+	req := httptest.NewRequest(http.MethodPost, "/deployment/environments/env-unknown/teardown", nil)
+	req.Header.Set("Authorization", "Bearer "+signWorkspaceCreateNodeToken(t, key, "node-1", ""))
+	req.Header.Set("X-SAM-Node-Id", "node-1")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", rec.Code, rec.Body.String())
+	}
+}

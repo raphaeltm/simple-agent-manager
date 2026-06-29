@@ -210,6 +210,7 @@ export function StatusDimensions({ env }: { env: DeploymentEnvironment }) {
       ? 'healthy'
       : undefined;
   const routesFallback =
+    env.status === 'active' &&
     !deployStatus?.routeCertState &&
     env.routeHostnames.length > 0 &&
     env.latestRelease?.status === 'applied'

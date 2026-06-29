@@ -20,12 +20,14 @@ const variantConfig = {
   danger: {
     iconColorClass: 'text-danger',
     iconBgClass: 'bg-danger-tint',
-    iconPath: 'M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z',
+    iconPath:
+      'M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z',
   },
   warning: {
     iconColorClass: 'text-warning',
     iconBgClass: 'bg-warning-tint',
-    iconPath: 'M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z',
+    iconPath:
+      'M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z',
   },
   info: {
     iconColorClass: 'text-accent',
@@ -75,6 +77,16 @@ export function ConfirmDialog({
   if (!isOpen) return null;
 
   const config = variantConfig[variant];
+  const confirmButtonVariant =
+    variant === 'danger' ? 'danger' : variant === 'warning' ? 'secondary' : 'primary';
+  const confirmButtonStyle =
+    variant === 'warning'
+      ? {
+          backgroundColor: 'var(--sam-color-warning-tint)',
+          borderColor: 'color-mix(in srgb, var(--sam-color-warning) 45%, transparent)',
+          color: 'var(--sam-color-warning-fg)',
+        }
+      : undefined;
 
   return createPortal(
     <div
@@ -89,16 +101,28 @@ export function ConfirmDialog({
         onClick={loading ? undefined : onClose}
       />
 
-      <div className="flex min-h-full items-center justify-center p-4">
+      <div className="flex min-h-full items-start justify-center p-3 sm:items-center sm:p-4">
         <div
           ref={dialogRef}
           tabIndex={-1}
-          className="relative glass-modal glass-panel-container glass-composited rounded-lg shadow-overlay max-w-md w-full p-6 outline-none"
+          className="relative glass-modal glass-panel-container glass-composited rounded-lg shadow-overlay max-h-[calc(100dvh-1.5rem)] w-full max-w-md overflow-hidden outline-none flex flex-col"
         >
-          <div className="flex items-start">
-            <div className={`shrink-0 flex items-center justify-center h-12 w-12 rounded-full ${config.iconBgClass}`}>
-              <svg className={`h-6 w-6 ${config.iconColorClass}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={config.iconPath} />
+          <div className="flex items-start overflow-y-auto p-5 sm:p-6">
+            <div
+              className={`shrink-0 flex items-center justify-center h-12 w-12 rounded-full ${config.iconBgClass}`}
+            >
+              <svg
+                className={`h-6 w-6 ${config.iconColorClass}`}
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d={config.iconPath}
+                />
               </svg>
             </div>
             <div className="ml-4 flex-1">
@@ -109,19 +133,16 @@ export function ConfirmDialog({
             </div>
           </div>
 
-          <div className="mt-6 flex justify-end gap-3">
-            <Button
-              variant="secondary"
-              disabled={loading}
-              onClick={onClose}
-            >
+          <div className="flex shrink-0 justify-end gap-3 border-t border-border-default p-4 sm:p-6">
+            <Button variant="secondary" disabled={loading} onClick={onClose}>
               {cancelLabel}
             </Button>
             <Button
-              variant={variant === 'danger' ? 'danger' : 'primary'}
+              variant={confirmButtonVariant}
               disabled={loading}
               onClick={onConfirm}
               loading={loading}
+              style={confirmButtonStyle}
             >
               {confirmLabel}
             </Button>
@@ -129,6 +150,6 @@ export function ConfirmDialog({
         </div>
       </div>
     </div>,
-    document.body,
+    document.body
   );
 }

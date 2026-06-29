@@ -14,6 +14,8 @@ import {
 } from './constants';
 import type { ComposeParseError, UnresolvedManifest } from './types';
 
+const VOLUME_NAME_RE = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
+
 // =============================================================================
 // Environment parsing
 // =============================================================================
@@ -189,6 +191,13 @@ function parseShortVolume(
     });
     return null;
   }
+  if (!isValidVolumeName(source)) {
+    errors.push({
+      path,
+      message: 'Volume names must be lowercase alphanumeric with optional hyphens, 1-63 chars.',
+    });
+    return null;
+  }
 
   return { name: source, mountPath: target };
 }
@@ -255,6 +264,13 @@ function parseLongVolume(
     });
     return null;
   }
+  if (!isValidVolumeName(source)) {
+    errors.push({
+      path,
+      message: 'Volume names must be lowercase alphanumeric with optional hyphens, 1-63 chars.',
+    });
+    return null;
+  }
 
   return { name: source, mountPath: target };
 }
@@ -281,6 +297,14 @@ export function parseVolumes(
   const entries = value as Record<string, unknown>;
 
   for (const [name, config] of Object.entries(entries)) {
+    if (!isValidVolumeName(name)) {
+      errors.push({
+        path: `volumes.${name}`,
+        message: 'Volume names must be lowercase alphanumeric with optional hyphens, 1-63 chars.',
+      });
+      continue;
+    }
+
     // External volumes are rejected
     if (typeof config === 'object' && config !== null && !Array.isArray(config)) {
       const obj = config as Record<string, unknown>;
@@ -310,6 +334,10 @@ export function parseVolumes(
   }
 
   return volumes;
+}
+
+function isValidVolumeName(name: string): boolean {
+  return VOLUME_NAME_RE.test(name);
 }
 
 // =============================================================================

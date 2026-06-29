@@ -16,6 +16,7 @@ import {
 import {
   attachEnvironmentVolumesToLinkedNode,
   createMissingManifestVolumes,
+  markDeploymentReleaseVolumeAttachFailed,
 } from '../services/deployment-volumes';
 
 export type CreateDeploymentReleaseResult = {
@@ -181,6 +182,7 @@ export async function createDeploymentReleaseFromManifest(
         {
           ...(placement
             ? {
+                providerOverride: placement.provider,
                 vmLocationOverride: placement.location,
                 vmSizeOverride: placement.vmSize,
               }
@@ -192,11 +194,21 @@ export async function createDeploymentReleaseFromManifest(
         nodeId = result.nodeId;
         try {
           const provisioningPromise = requiresVolumes
-            ? result.provisioningPromise.then(() =>
-                attachEnvironmentVolumesToLinkedNode(db, params.env, params.userId, params.envId)
-              )
+            ? result.provisioningPromise.then(async () => {
+                try {
+                  await attachEnvironmentVolumesToLinkedNode(
+                    db,
+                    params.env,
+                    params.userId,
+                    params.envId
+                  );
+                } catch (err) {
+                  await markDeploymentReleaseVolumeAttachFailed(db, params.envId, id, err);
+                  throw err;
+                }
+              })
             : result.provisioningPromise;
-          params.executionCtx?.waitUntil(provisioningPromise);
+          params.executionCtx?.waitUntil(provisioningPromise.catch(() => undefined));
         } catch {
           // No execution context in tests.
         }
@@ -224,6 +236,7 @@ export async function createDeploymentReleaseFromManifest(
         releaseId: id,
         ...serializeError(err),
       });
+      await markDeploymentReleaseVolumeAttachFailed(db, params.envId, id, err);
     }
   }
 

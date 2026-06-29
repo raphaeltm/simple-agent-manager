@@ -22,6 +22,7 @@ import {
 import {
   attachEnvironmentVolumesToLinkedNode,
   createMissingDeclaredVolumes,
+  markDeploymentReleaseVolumeAttachFailed,
 } from '../../services/deployment-volumes';
 import { verifyWorkspacePublishCallback } from './_callback-auth';
 
@@ -328,17 +329,24 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
 
       const result = await provisionDeploymentNode(environmentId, projectId, userId, c.env, {
         vmSizeOverride: placement?.vmSize ?? vmSizeOverride,
-        ...(placement ? { vmLocationOverride: placement.location } : {}),
+        ...(placement
+          ? { providerOverride: placement.provider, vmLocationOverride: placement.location }
+          : {}),
         requiresVolumes,
       });
       if (result) {
         nodeId = result.nodeId;
         const provisioningPromise = requiresVolumes
-          ? result.provisioningPromise.then(() =>
-              attachEnvironmentVolumesToLinkedNode(db, c.env, userId, environmentId)
-            )
+          ? result.provisioningPromise.then(async () => {
+              try {
+                await attachEnvironmentVolumesToLinkedNode(db, c.env, userId, environmentId);
+              } catch (err) {
+                await markDeploymentReleaseVolumeAttachFailed(db, environmentId, releaseId, err);
+                throw err;
+              }
+            })
           : result.provisioningPromise;
-        c.executionCtx?.waitUntil(provisioningPromise);
+        c.executionCtx?.waitUntil(provisioningPromise.catch(() => undefined));
         log.info('compose_publish_release.provisioning_triggered', {
           projectId,
           environmentId,
@@ -349,8 +357,13 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
       }
     } else if (requiresVolumes) {
       const attachPromise = attachEnvironmentVolumesToLinkedNode(db, c.env, userId, environmentId);
-      c.executionCtx?.waitUntil(attachPromise);
-      await attachPromise;
+      c.executionCtx?.waitUntil(attachPromise.catch(() => undefined));
+      try {
+        await attachPromise;
+      } catch (err) {
+        await markDeploymentReleaseVolumeAttachFailed(db, environmentId, releaseId, err);
+        throw err;
+      }
     }
   } catch (err) {
     log.error('compose_publish_release.provisioning_trigger_failed', {

@@ -553,6 +553,46 @@ x-sam-routes:
     expect(manifest.services['web']!.volumes).toEqual([{ name: 'mydata', mountPath: '/app/data' }]);
   });
 
+  it('rejects unsafe service volume names', () => {
+    const errors = expectErrors(`
+services:
+  web:
+    image: nginx
+    volumes:
+      - Data_Prod:/app/data
+volumes:
+  Data_Prod:
+x-sam-routes:
+  - service: web
+    port: 80
+    mode: public
+`);
+    expect(errors).toContainEqual({
+      path: 'services.web.volumes[0]',
+      message: 'Volume names must be lowercase alphanumeric with optional hyphens, 1-63 chars.',
+    });
+  });
+
+  it('rejects unsafe top-level volume names', () => {
+    const errors = expectErrors(`
+services:
+  web:
+    image: nginx
+    volumes:
+      - data:/app/data
+volumes:
+  Data_Prod:
+x-sam-routes:
+  - service: web
+    port: 80
+    mode: public
+`);
+    expect(errors).toContainEqual({
+      path: 'volumes.Data_Prod',
+      message: 'Volume names must be lowercase alphanumeric with optional hyphens, 1-63 chars.',
+    });
+  });
+
   it('rejects bind mounts (short syntax)', () => {
     expectErrorAt(
       `

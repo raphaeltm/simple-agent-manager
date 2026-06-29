@@ -417,11 +417,11 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
             const volumeReadiness = await c.env.DATABASE.prepare(
               `SELECT
                  COUNT(*) AS total,
-                 COUNT(CASE WHEN attached_server_id IS NOT NULL THEN 1 END) AS attached
+                 COUNT(CASE WHEN attached_server_id = ? THEN 1 END) AS attached
                FROM deployment_volumes
                WHERE environment_id = ?`
             )
-              .bind(envId)
+              .bind(node.providerInstanceId ?? '', envId)
               .first<{ total: number; attached: number }>();
             if (
               !volumeReadiness ||

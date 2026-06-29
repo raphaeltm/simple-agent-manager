@@ -86,11 +86,14 @@ function makeMockProvider(overrides?: {
   return {
     volumeCapabilities: makeVolumeCapabilities(overrides?.caps),
     createVolume: vi.fn().mockResolvedValue(overrides?.createResult ?? makeVolumeInstance()),
-    attachVolume: vi.fn().mockResolvedValue(overrides?.attachResult ?? makeVolumeInstance({
-      status: 'in-use',
-      attachedServerId: 'srv-1',
-      linuxDevice: '/dev/sdb',
-    })),
+    attachVolume: vi.fn().mockResolvedValue(
+      overrides?.attachResult ??
+        makeVolumeInstance({
+          status: 'in-use',
+          attachedServerId: 'srv-1',
+          linuxDevice: '/dev/sdb',
+        })
+    ),
     detachVolume: vi.fn().mockResolvedValue(undefined),
     deleteVolume: vi.fn().mockResolvedValue(undefined),
     resizeVolume: vi.fn(),
@@ -205,8 +208,12 @@ describe('resolveVolumeMountRoot', () => {
 
 describe('resolveNamedVolumeMountRoot', () => {
   it('derives a distinct mountpoint for each named volume', () => {
-    expect(resolveNamedVolumeMountRoot('env-abc123', 'data')).toBe('/mnt/sam-env-env-abc123/volumes/data');
-    expect(resolveNamedVolumeMountRoot('env-abc123', 'uploads')).toBe('/mnt/sam-env-env-abc123/volumes/uploads');
+    expect(resolveNamedVolumeMountRoot('env-abc123', 'data')).toBe(
+      '/mnt/sam-env-env-abc123/volumes/data'
+    );
+    expect(resolveNamedVolumeMountRoot('env-abc123', 'uploads')).toBe(
+      '/mnt/sam-env-env-abc123/volumes/uploads'
+    );
   });
 });
 
@@ -280,6 +287,48 @@ describe('buildVolumeMountDescriptors', () => {
       },
     ]);
   });
+
+  it('filters descriptors to the current attached provider server when provided', async () => {
+    const db = createMockDb([
+      {
+        id: 'vol-1',
+        environmentId: 'env-001',
+        name: 'data',
+        providerVolumeId: 'prov-vol-data',
+        providerName: 'hetzner',
+        sizeGb: 10,
+        location: 'nbg1',
+        status: 'attached',
+        attachedServerId: 'srv-current',
+        linuxDevice: '/dev/disk/by-id/scsi-0HC_Volume_1',
+        createdAt: '2026-06-12T00:00:00Z',
+        updatedAt: '2026-06-12T00:00:00Z',
+      },
+      {
+        id: 'vol-2',
+        environmentId: 'env-001',
+        name: 'stale',
+        providerVolumeId: 'prov-vol-stale',
+        providerName: 'hetzner',
+        sizeGb: 10,
+        location: 'nbg1',
+        status: 'attached',
+        attachedServerId: 'srv-old',
+        linuxDevice: '/dev/disk/by-id/scsi-0HC_Volume_2',
+        createdAt: '2026-06-12T00:00:00Z',
+        updatedAt: '2026-06-12T00:00:00Z',
+      },
+    ]);
+
+    await expect(buildVolumeMountDescriptors(db as any, 'env-001', 'srv-current')).resolves.toEqual(
+      [
+        expect.objectContaining({
+          name: 'data',
+          providerVolumeId: 'prov-vol-data',
+        }),
+      ]
+    );
+  });
 });
 
 // =============================================================================
@@ -326,6 +375,23 @@ describe('createEnvironmentVolume', () => {
     expect(result.status).toBe('available');
   });
 
+  it('rejects unsafe volume names before calling the provider', async () => {
+    const provider = makeMockProvider();
+    setupProvider(provider);
+    const db = createMockDb();
+
+    await expect(
+      createEnvironmentVolume(db as any, mockEnv, 'user-1', {
+        environmentId: 'env-001',
+        name: '../data',
+        sizeGb: 10,
+        location: 'nbg1',
+      })
+    ).rejects.toThrow('Volume names must be lowercase alphanumeric');
+
+    expect(provider.createVolume).not.toHaveBeenCalled();
+  });
+
   it('rejects when provider does not support volumes', async () => {
     const provider = makeMockProvider({ caps: { supported: false } });
     setupProvider(provider);
@@ -337,7 +403,7 @@ describe('createEnvironmentVolume', () => {
         name: 'data',
         sizeGb: 10,
         location: 'nbg1',
-      }),
+      })
     ).rejects.toThrow('does not support block volumes');
 
     // Provider createVolume was NOT called
@@ -355,7 +421,7 @@ describe('createEnvironmentVolume', () => {
         name: 'data',
         sizeGb: 5,
         location: 'nbg1',
-      }),
+      })
     ).rejects.toThrow('Minimum volume size');
 
     expect(provider.createVolume).not.toHaveBeenCalled();
@@ -372,7 +438,7 @@ describe('createEnvironmentVolume', () => {
         name: 'data',
         sizeGb: 200,
         location: 'nbg1',
-      }),
+      })
     ).rejects.toThrow('Maximum volume size');
 
     expect(provider.createVolume).not.toHaveBeenCalled();
@@ -388,7 +454,7 @@ describe('createEnvironmentVolume', () => {
         name: 'data',
         sizeGb: 10,
         location: 'nbg1',
-      }),
+      })
     ).rejects.toThrow('No cloud provider credential found');
   });
 });
@@ -455,7 +521,7 @@ describe('deleteEnvironmentVolume', () => {
     const db = createMockDb([attachedRow]);
 
     await expect(
-      deleteEnvironmentVolume(db as any, mockEnv, 'user-1', 'vol-1', 'env-001'),
+      deleteEnvironmentVolume(db as any, mockEnv, 'user-1', 'vol-1', 'env-001')
     ).rejects.toThrow('Cannot delete an attached volume');
 
     // Provider was NOT called
@@ -470,7 +536,7 @@ describe('deleteEnvironmentVolume', () => {
     const db = createMockDb([]); // empty
 
     await expect(
-      deleteEnvironmentVolume(db as any, mockEnv, 'user-1', 'vol-nonexistent', 'env-001'),
+      deleteEnvironmentVolume(db as any, mockEnv, 'user-1', 'vol-nonexistent', 'env-001')
     ).rejects.toThrow('Volume not found');
   });
 });
@@ -513,7 +579,12 @@ describe('attachEnvironmentVolumes', () => {
     const db = createMockDb(volumeRows);
 
     const results = await attachEnvironmentVolumes(
-      db as any, mockEnv, 'user-1', 'env-001', 'srv-target', 'nbg1',
+      db as any,
+      mockEnv,
+      'user-1',
+      'env-001',
+      'srv-target',
+      'nbg1'
     );
 
     // Provider attachVolume was called
@@ -539,7 +610,12 @@ describe('attachEnvironmentVolumes', () => {
     const db = createMockDb([]);
 
     const results = await attachEnvironmentVolumes(
-      db as any, mockEnv, 'user-1', 'env-001', 'srv-1', 'nbg1',
+      db as any,
+      mockEnv,
+      'user-1',
+      'env-001',
+      'srv-1',
+      'nbg1'
     );
 
     expect(results).toEqual([]);
@@ -570,7 +646,7 @@ describe('attachEnvironmentVolumes', () => {
 
     // Server is in Falkenstein — different from volume
     await expect(
-      attachEnvironmentVolumes(db as any, mockEnv, 'user-1', 'env-001', 'srv-1', 'fsn1'),
+      attachEnvironmentVolumes(db as any, mockEnv, 'user-1', 'env-001', 'srv-1', 'fsn1')
     ).rejects.toThrow('Volumes and servers must be co-located');
 
     // Provider was NOT called
@@ -600,7 +676,7 @@ describe('attachEnvironmentVolumes', () => {
     const db = createMockDb(volumeRows);
 
     await expect(
-      attachEnvironmentVolumes(db as any, mockEnv, 'user-1', 'env-001', 'srv-target', 'nbg1'),
+      attachEnvironmentVolumes(db as any, mockEnv, 'user-1', 'env-001', 'srv-target', 'nbg1')
     ).rejects.toThrow('already attached to server');
 
     expect(provider.attachVolume).not.toHaveBeenCalled();
@@ -629,7 +705,12 @@ describe('attachEnvironmentVolumes', () => {
     const db = createMockDb(volumeRows);
 
     const results = await attachEnvironmentVolumes(
-      db as any, mockEnv, 'user-1', 'env-001', 'srv-target', 'nbg1',
+      db as any,
+      mockEnv,
+      'user-1',
+      'env-001',
+      'srv-target',
+      'nbg1'
     );
 
     // Volume was skipped — provider was NOT called
@@ -672,7 +753,11 @@ describe('detachEnvironmentVolumes', () => {
     const db = createMockDb(volumeRows);
 
     const results = await detachEnvironmentVolumes(
-      db as any, mockEnv, 'user-1', 'env-001', 'srv-1',
+      db as any,
+      mockEnv,
+      'user-1',
+      'env-001',
+      'srv-1'
     );
 
     // Provider detachVolume was called
@@ -698,7 +783,11 @@ describe('detachEnvironmentVolumes', () => {
     const db = createMockDb([]); // no attached volumes
 
     const results = await detachEnvironmentVolumes(
-      db as any, mockEnv, 'user-1', 'env-001', 'srv-1',
+      db as any,
+      mockEnv,
+      'user-1',
+      'env-001',
+      'srv-1'
     );
 
     expect(results).toEqual([]);

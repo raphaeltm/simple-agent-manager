@@ -17,6 +17,10 @@ type VolumeMounter interface {
 	MountVolumes(ctx context.Context, volumes []VolumeMount) error
 }
 
+type VolumeTeardowner interface {
+	TeardownMounts(ctx context.Context, mountRoots []string) error
+}
+
 type CommandRunner interface {
 	CombinedOutput(ctx context.Context, name string, args ...string) ([]byte, error)
 }
@@ -46,6 +50,9 @@ func (m *RealVolumeMounter) MountVolumes(ctx context.Context, volumes []VolumeMo
 }
 
 func (m *RealVolumeMounter) mountVolume(ctx context.Context, volume VolumeMount) error {
+	if err := validateVolumeMountFields(volume); err != nil {
+		return err
+	}
 	if volume.MountRoot == "" {
 		return fmt.Errorf("volume %q missing mountRoot", volume.Name)
 	}
@@ -138,6 +145,12 @@ func (m *RealVolumeMounter) ensureFstab(ctx context.Context, device, mountRoot s
 			spec = "UUID=" + uuid
 		}
 	}
+	if err := validateFstabField("volume spec", spec); err != nil {
+		return err
+	}
+	if err := validateFstabField("mount root", mountRoot); err != nil {
+		return err
+	}
 	line := fmt.Sprintf("%s %s ext4 defaults,nofail 0 2", spec, mountRoot)
 	existing, err := os.ReadFile(m.fstabPath)
 	if err != nil && !os.IsNotExist(err) {
@@ -152,6 +165,108 @@ func (m *RealVolumeMounter) ensureFstab(ctx context.Context, device, mountRoot s
 	existing = append(existing, []byte(line+"\n")...)
 	if err := os.WriteFile(m.fstabPath, existing, 0644); err != nil {
 		return fmt.Errorf("write fstab: %w", err)
+	}
+	return nil
+}
+
+func (m *RealVolumeMounter) TeardownMounts(ctx context.Context, mountRoots []string) error {
+	seen := make(map[string]bool, len(mountRoots))
+	var errs []string
+	for _, mountRoot := range mountRoots {
+		mountRoot = strings.TrimSpace(mountRoot)
+		if mountRoot == "" || seen[mountRoot] {
+			continue
+		}
+		seen[mountRoot] = true
+		if err := validateFstabField("mount root", mountRoot); err != nil {
+			errs = append(errs, err.Error())
+			continue
+		}
+		if filepath.Clean(mountRoot) != mountRoot || !strings.HasPrefix(mountRoot, samVolumeMountPrefix) {
+			errs = append(errs, fmt.Sprintf("mount root %q is not a canonical SAM volume path", mountRoot))
+			continue
+		}
+
+		if out, err := m.runner.CombinedOutput(ctx, "mountpoint", "-q", mountRoot); err == nil {
+			if len(bytes.TrimSpace(out)) > 0 {
+				errs = append(errs, fmt.Sprintf("mountpoint probe for %s returned unexpected output: %s", mountRoot, strings.TrimSpace(string(out))))
+			}
+			if out, err := m.runner.CombinedOutput(ctx, "umount", mountRoot); err != nil {
+				errs = append(errs, fmt.Sprintf("umount %s: %v: %s", mountRoot, err, strings.TrimSpace(string(out))))
+			}
+		}
+
+		if err := m.removeFstabEntry(mountRoot); err != nil {
+			errs = append(errs, err.Error())
+		}
+	}
+	if len(errs) > 0 {
+		return errors.New(strings.Join(errs, "; "))
+	}
+	return nil
+}
+
+func (m *RealVolumeMounter) removeFstabEntry(mountRoot string) error {
+	existing, err := os.ReadFile(m.fstabPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read fstab: %w", err)
+	}
+
+	lines := strings.Split(string(existing), "\n")
+	kept := make([]string, 0, len(lines))
+	removed := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			kept = append(kept, line)
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) >= 2 && fields[1] == mountRoot {
+			removed = true
+			continue
+		}
+		kept = append(kept, line)
+	}
+	if !removed {
+		return nil
+	}
+
+	next := strings.Join(kept, "\n")
+	if strings.HasSuffix(string(existing), "\n") && !strings.HasSuffix(next, "\n") {
+		next += "\n"
+	}
+	if err := os.WriteFile(m.fstabPath, []byte(next), 0644); err != nil {
+		return fmt.Errorf("write fstab: %w", err)
+	}
+	return nil
+}
+
+func validateVolumeMountFields(volume VolumeMount) error {
+	if containsWhitespaceOrControl(volume.LinuxDevice) {
+		return fmt.Errorf("volume %q linuxDevice contains whitespace or control characters", volume.Name)
+	}
+	if containsWhitespaceOrControl(volume.ProviderVolumeID) {
+		return fmt.Errorf("volume %q providerVolumeId contains whitespace or control characters", volume.Name)
+	}
+	if containsWhitespaceOrControl(volume.MountRoot) {
+		return fmt.Errorf("volume %q mountRoot contains whitespace or control characters", volume.Name)
+	}
+	if volume.MountRoot != "" && filepath.Clean(volume.MountRoot) != volume.MountRoot {
+		return fmt.Errorf("volume %q mountRoot %q is not canonical", volume.Name, volume.MountRoot)
+	}
+	return nil
+}
+
+func validateFstabField(label, value string) error {
+	if value == "" {
+		return fmt.Errorf("%s is empty", label)
+	}
+	if containsWhitespaceOrControl(value) {
+		return fmt.Errorf("%s %q contains whitespace or control characters", label, value)
 	}
 	return nil
 }

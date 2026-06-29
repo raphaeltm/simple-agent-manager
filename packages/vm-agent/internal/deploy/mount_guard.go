@@ -5,7 +5,9 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
+	"unicode"
 
 	"gopkg.in/yaml.v3"
 )
@@ -17,6 +19,8 @@ import (
 // detached — starting containers against it would silently use ephemeral
 // node-local storage, violating the "data is detachable" contract.
 const samVolumeMountPrefix = "/mnt/sam-env-"
+
+var volumeNamePattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
 
 // MountChecker abstracts the filesystem check so tests can inject a fake.
 type MountChecker interface {
@@ -138,7 +142,7 @@ func extractSAMVolumeMountRoots(composeYAML string) ([]string, error) {
 			// Reject path traversal components in parsed path segments.
 			// Compose YAML is signed by the control plane so this is
 			// defense-in-depth, not a primary security boundary.
-			if len(parts) < 3 || parts[1] != "volumes" || !isSafeMountPathSegment(parts[0]) || !isSafeMountPathSegment(parts[2]) {
+			if len(parts) != 3 || parts[1] != "volumes" || !isSafeMountPathSegment(parts[0]) || !isSafeMountPathSegment(parts[2]) {
 				slog.Warn("deploy.mountGuard: skipping suspicious volume path", "hostPath", hostPath)
 				continue
 			}
@@ -157,6 +161,46 @@ func extractSAMVolumeMountRoots(composeYAML string) ([]string, error) {
 
 func isSafeMountPathSegment(segment string) bool {
 	return segment != "" && segment != "." && segment != ".." && !strings.ContainsAny(segment, "/\\")
+}
+
+func expectedVolumeMountRoot(environmentID, volumeName string) string {
+	return samVolumeMountPrefix + environmentID + "/volumes/" + volumeName
+}
+
+func containsWhitespaceOrControl(value string) bool {
+	return strings.IndexFunc(value, func(r rune) bool {
+		return unicode.IsSpace(r) || unicode.IsControl(r)
+	}) >= 0
+}
+
+func validateVolumeMountsForEnvironment(environmentID string, volumes []VolumeMount) error {
+	if len(volumes) == 0 {
+		return nil
+	}
+	if !isSafeMountPathSegment(environmentID) || containsWhitespaceOrControl(environmentID) {
+		return fmt.Errorf("unsafe environment id %q", environmentID)
+	}
+
+	for _, volume := range volumes {
+		if !volumeNamePattern.MatchString(volume.Name) {
+			return fmt.Errorf("volume %q has an unsafe name", volume.Name)
+		}
+		if containsWhitespaceOrControl(volume.MountRoot) {
+			return fmt.Errorf("volume %q mountRoot contains whitespace or control characters", volume.Name)
+		}
+		cleanRoot := filepath.Clean(volume.MountRoot)
+		expectedRoot := expectedVolumeMountRoot(environmentID, volume.Name)
+		if cleanRoot != volume.MountRoot || cleanRoot != expectedRoot {
+			return fmt.Errorf("volume %q mountRoot %q must exactly match %q", volume.Name, volume.MountRoot, expectedRoot)
+		}
+		if volume.LinuxDevice != "" && containsWhitespaceOrControl(volume.LinuxDevice) {
+			return fmt.Errorf("volume %q linuxDevice contains whitespace or control characters", volume.Name)
+		}
+		if volume.ProviderVolumeID == "" || containsWhitespaceOrControl(volume.ProviderVolumeID) {
+			return fmt.Errorf("volume %q providerVolumeId is missing or unsafe", volume.Name)
+		}
+	}
+	return nil
 }
 
 // verifyVolumeMounts checks that all SAM volume mount roots in the compose YAML

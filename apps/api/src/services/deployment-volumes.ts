@@ -43,9 +43,15 @@ async function getProviderForUser(
   db: ReturnType<typeof drizzle>,
   userId: string,
   env: Env,
-  targetProvider?: CredentialProvider,
+  targetProvider?: CredentialProvider
 ): Promise<{ provider: Provider; providerName: CredentialProvider }> {
-  const result = await createProviderForUser(db, userId, getCredentialEncryptionKey(env), env, targetProvider);
+  const result = await createProviderForUser(
+    db,
+    userId,
+    getCredentialEncryptionKey(env),
+    env,
+    targetProvider
+  );
   if (!result) {
     throw new Error('No cloud provider credential found. Connect a cloud provider in Settings.');
   }
@@ -74,6 +80,22 @@ export interface VolumeMountDescriptor {
   fsFormat: typeof SAM_VOLUME_FILESYSTEM_FORMAT;
 }
 
+export interface LinkedDeploymentNodeVolumeTarget {
+  nodeId: string;
+  serverId: string;
+  location: string;
+}
+
+const VOLUME_NAME_RE = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
+
+function assertSafeVolumeName(name: string): void {
+  if (!VOLUME_NAME_RE.test(name)) {
+    throw new Error(
+      'Volume names must be lowercase alphanumeric with optional hyphens, 1-63 chars.'
+    );
+  }
+}
+
 function sizeHintToGb(sizeHintMb: number | undefined, minSizeGb: number | undefined): number {
   const hintedGb = sizeHintMb ? Math.ceil(sizeHintMb / 1024) : 1;
   return Math.max(hintedGb, minSizeGb ?? 1);
@@ -83,8 +105,10 @@ export async function createEnvironmentVolume(
   db: ReturnType<typeof drizzle>,
   env: Env,
   userId: string,
-  opts: CreateVolumeOptions,
+  opts: CreateVolumeOptions
 ): Promise<DeploymentVolumeRow> {
+  assertSafeVolumeName(opts.name);
+
   const { provider, providerName } = await getProviderForUser(db, userId, env, opts.targetProvider);
 
   // Check volume capabilities
@@ -134,6 +158,30 @@ export async function createEnvironmentVolume(
   return { ...row, id, createdAt: now, updatedAt: now } as DeploymentVolumeRow;
 }
 
+export async function markDeploymentReleaseVolumeAttachFailed(
+  db: ReturnType<typeof drizzle>,
+  environmentId: string,
+  releaseId: string,
+  error: unknown
+): Promise<void> {
+  const message = error instanceof Error ? error.message : String(error);
+  const now = new Date().toISOString();
+
+  await db
+    .update(schema.deploymentReleases)
+    .set({ status: 'failed' })
+    .where(eq(schema.deploymentReleases.id, releaseId));
+  await db
+    .update(schema.deploymentEnvironments)
+    .set({
+      status: 'error',
+      observedStatus: 'failed',
+      observedErrorMessage: `Volume attach failed: ${message}`,
+      updatedAt: now,
+    })
+    .where(eq(schema.deploymentEnvironments.id, environmentId));
+}
+
 export async function createMissingManifestVolumes(
   db: ReturnType<typeof drizzle>,
   env: Env,
@@ -143,7 +191,7 @@ export async function createMissingManifestVolumes(
     manifest: DeploymentManifest;
     location: string;
     targetProvider: CredentialProvider;
-  },
+  }
 ): Promise<DeploymentVolumeRow[]> {
   return createMissingDeclaredVolumes(db, env, userId, {
     environmentId: opts.environmentId,
@@ -162,7 +210,7 @@ export async function createMissingDeclaredVolumes(
     volumes: Record<string, { sizeHintMb?: number }>;
     location: string;
     targetProvider: CredentialProvider;
-  },
+  }
 ): Promise<DeploymentVolumeRow[]> {
   const declarations = Object.entries(opts.volumes);
   if (declarations.length === 0) {
@@ -199,7 +247,7 @@ export async function createMissingDeclaredVolumes(
 
 export async function listEnvironmentVolumes(
   db: ReturnType<typeof drizzle>,
-  environmentId: string,
+  environmentId: string
 ): Promise<DeploymentVolumeRow[]> {
   return db
     .select()
@@ -211,10 +259,15 @@ export async function listEnvironmentVolumes(
 export async function buildVolumeMountDescriptors(
   db: ReturnType<typeof drizzle>,
   environmentId: string,
+  attachedServerId?: string
 ): Promise<VolumeMountDescriptor[]> {
   const volumes = await listEnvironmentVolumes(db, environmentId);
   return volumes
-    .filter((volume) => volume.attachedServerId)
+    .filter((volume) =>
+      attachedServerId !== undefined
+        ? volume.attachedServerId === attachedServerId
+        : volume.attachedServerId
+    )
     .map((volume) => ({
       name: volume.name,
       mountRoot: resolveNamedVolumeMountRoot(environmentId, volume.name),
@@ -234,7 +287,7 @@ export async function deleteEnvironmentVolume(
   env: Env,
   userId: string,
   volumeId: string,
-  environmentId: string,
+  environmentId: string
 ): Promise<void> {
   const rows = await db
     .select()
@@ -242,8 +295,8 @@ export async function deleteEnvironmentVolume(
     .where(
       and(
         eq(schema.deploymentVolumes.id, volumeId),
-        eq(schema.deploymentVolumes.environmentId, environmentId),
-      ),
+        eq(schema.deploymentVolumes.environmentId, environmentId)
+      )
     )
     .limit(1);
 
@@ -256,7 +309,12 @@ export async function deleteEnvironmentVolume(
     throw new Error('Cannot delete an attached volume. Detach it first.');
   }
 
-  const { provider } = await getProviderForUser(db, userId, env, vol.providerName as CredentialProvider);
+  const { provider } = await getProviderForUser(
+    db,
+    userId,
+    env,
+    vol.providerName as CredentialProvider
+  );
 
   // Provider deleteVolume is idempotent (no error on 404)
   await provider.deleteVolume({
@@ -264,14 +322,55 @@ export async function deleteEnvironmentVolume(
     location: vol.location,
   });
 
-  await db
-    .delete(schema.deploymentVolumes)
-    .where(eq(schema.deploymentVolumes.id, volumeId));
+  await db.delete(schema.deploymentVolumes).where(eq(schema.deploymentVolumes.id, volumeId));
 }
 
 // =============================================================================
 // Attach all environment volumes to a server
 // =============================================================================
+
+export async function resolveLinkedDeploymentNodeVolumeTarget(
+  db: ReturnType<typeof drizzle>,
+  environmentId: string
+): Promise<LinkedDeploymentNodeVolumeTarget> {
+  const rows = await db
+    .select({
+      nodeId: schema.deploymentEnvironments.nodeId,
+      location: schema.deploymentEnvironments.location,
+      providerInstanceId: schema.nodes.providerInstanceId,
+      vmLocation: schema.nodes.vmLocation,
+      nodeRole: schema.nodes.nodeRole,
+    })
+    .from(schema.deploymentEnvironments)
+    .leftJoin(schema.nodes, eq(schema.deploymentEnvironments.nodeId, schema.nodes.id))
+    .where(eq(schema.deploymentEnvironments.id, environmentId))
+    .limit(1);
+
+  const placement = rows[0];
+  if (!placement?.nodeId) {
+    throw new Error(`Deployment environment "${environmentId}" is not linked to a node`);
+  }
+  if (placement.nodeRole && placement.nodeRole !== 'deployment') {
+    throw new Error(`Node "${placement.nodeId}" is not a deployment node`);
+  }
+  if (!placement.providerInstanceId) {
+    throw new Error(
+      `Deployment node "${placement.nodeId}" does not have a provider instance id yet`
+    );
+  }
+  const location = placement.location ?? placement.vmLocation;
+  if (!location) {
+    throw new Error(
+      `Deployment node "${placement.nodeId}" does not have a volume attachment location`
+    );
+  }
+
+  return {
+    nodeId: placement.nodeId,
+    serverId: placement.providerInstanceId,
+    location,
+  };
+}
 
 export async function attachEnvironmentVolumes(
   db: ReturnType<typeof drizzle>,
@@ -279,7 +378,7 @@ export async function attachEnvironmentVolumes(
   userId: string,
   environmentId: string,
   serverId: string,
-  serverLocation: string,
+  serverLocation: string
 ): Promise<DeploymentVolumeRow[]> {
   const volumes = await listEnvironmentVolumes(db, environmentId);
 
@@ -292,14 +391,19 @@ export async function attachEnvironmentVolumes(
     if (vol.location !== serverLocation) {
       throw new Error(
         `Volume "${vol.name}" is in location "${vol.location}" but server is in "${serverLocation}". ` +
-        `Volumes and servers must be co-located.`,
+          `Volumes and servers must be co-located.`
       );
     }
   }
 
   // Use the provider from the first volume (all same environment = same provider)
   const firstVolume = volumes[0]!;
-  const { provider } = await getProviderForUser(db, userId, env, firstVolume.providerName as CredentialProvider);
+  const { provider } = await getProviderForUser(
+    db,
+    userId,
+    env,
+    firstVolume.providerName as CredentialProvider
+  );
 
   const now = new Date().toISOString();
   const results: DeploymentVolumeRow[] = [];
@@ -314,7 +418,7 @@ export async function attachEnvironmentVolumes(
     if (vol.attachedServerId) {
       throw new Error(
         `Volume "${vol.name}" is already attached to server "${vol.attachedServerId}". ` +
-        `Detach it first before attaching to a new server.`,
+          `Detach it first before attaching to a new server.`
       );
     }
 
@@ -350,40 +454,21 @@ export async function attachEnvironmentVolumesToLinkedNode(
   db: ReturnType<typeof drizzle>,
   env: Env,
   userId: string,
-  environmentId: string,
+  environmentId: string
 ): Promise<DeploymentVolumeRow[]> {
-  const rows = await db
-    .select({
-      nodeId: schema.deploymentEnvironments.nodeId,
-      location: schema.deploymentEnvironments.location,
-      providerInstanceId: schema.nodes.providerInstanceId,
-      vmLocation: schema.nodes.vmLocation,
-    })
-    .from(schema.deploymentEnvironments)
-    .leftJoin(schema.nodes, eq(schema.deploymentEnvironments.nodeId, schema.nodes.id))
-    .where(eq(schema.deploymentEnvironments.id, environmentId))
-    .limit(1);
+  const target = await resolveLinkedDeploymentNodeVolumeTarget(db, environmentId);
 
-  const placement = rows[0];
-  if (!placement?.nodeId) {
-    throw new Error(`Deployment environment "${environmentId}" is not linked to a node`);
-  }
-  if (!placement.providerInstanceId) {
-    throw new Error(`Deployment node "${placement.nodeId}" does not have a provider instance id yet`);
-  }
-  const serverLocation = placement.location ?? placement.vmLocation;
-  if (!serverLocation) {
-    throw new Error(`Deployment node "${placement.nodeId}" does not have a volume attachment location`);
-  }
+  return attachEnvironmentVolumes(db, env, userId, environmentId, target.serverId, target.location);
+}
 
-  return attachEnvironmentVolumes(
-    db,
-    env,
-    userId,
-    environmentId,
-    placement.providerInstanceId,
-    serverLocation,
-  );
+export async function detachEnvironmentVolumesFromLinkedNode(
+  db: ReturnType<typeof drizzle>,
+  env: Env,
+  userId: string,
+  environmentId: string
+): Promise<DeploymentVolumeRow[]> {
+  const target = await resolveLinkedDeploymentNodeVolumeTarget(db, environmentId);
+  return detachEnvironmentVolumes(db, env, userId, environmentId, target.serverId);
 }
 
 // =============================================================================
@@ -395,7 +480,7 @@ export async function detachEnvironmentVolumes(
   env: Env,
   userId: string,
   environmentId: string,
-  serverId: string,
+  serverId: string
 ): Promise<DeploymentVolumeRow[]> {
   const volumes = await db
     .select()
@@ -403,8 +488,8 @@ export async function detachEnvironmentVolumes(
     .where(
       and(
         eq(schema.deploymentVolumes.environmentId, environmentId),
-        eq(schema.deploymentVolumes.attachedServerId, serverId),
-      ),
+        eq(schema.deploymentVolumes.attachedServerId, serverId)
+      )
     );
 
   if (volumes.length === 0) {
@@ -412,7 +497,12 @@ export async function detachEnvironmentVolumes(
   }
 
   const firstVolume = volumes[0]!;
-  const { provider } = await getProviderForUser(db, userId, env, firstVolume.providerName as CredentialProvider);
+  const { provider } = await getProviderForUser(
+    db,
+    userId,
+    env,
+    firstVolume.providerName as CredentialProvider
+  );
 
   const now = new Date().toISOString();
   const results: DeploymentVolumeRow[] = [];

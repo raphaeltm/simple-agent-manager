@@ -652,7 +652,7 @@ func (s *Server) retireDeployEngines(retireEnvironmentIDs map[string]bool) {
 
 	for _, item := range retired {
 		go func(environmentID string, engine *deploy.Engine) {
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			ctx, cancel := context.WithTimeout(context.Background(), s.deployTeardownTimeout())
 			defer cancel()
 			if err := engine.Teardown(ctx); err != nil {
 				s.deployMu.Lock()

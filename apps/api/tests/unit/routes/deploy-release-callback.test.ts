@@ -19,6 +19,7 @@ const mockOrderBy = vi.fn().mockResolvedValue([]);
 const mockUpdateSet = vi.fn();
 const mockUpdateWhere = vi.fn();
 let customDomainRows: Array<{ hostname: string; service: string; port: number }> = [];
+const currentProviderServerId = 'provider-server-current';
 
 function createWhereResult() {
   return {
@@ -177,7 +178,13 @@ function env(): Env {
 /** Seed the three sequential D1 reads for the happy path (node IP, env, release). */
 function stubHappyPathDb() {
   mockLimit
-    .mockResolvedValueOnce([{ userId: 'user-1', ipAddress: '203.0.113.10' }])
+    .mockResolvedValueOnce([
+      {
+        userId: 'user-1',
+        ipAddress: '203.0.113.10',
+        providerInstanceId: currentProviderServerId,
+      },
+    ])
     .mockResolvedValueOnce([{ id: 'env-1', projectId: 'proj-1', nodeId: 'node-deploy-1' }])
     .mockResolvedValueOnce([{ id: 'rel-1', manifest: JSON.stringify(manifest()), version: 7 }]);
 }
@@ -336,6 +343,11 @@ describe('deploy release callback route', () => {
     const body = await response.json();
     expect(response.status, JSON.stringify(body)).toBe(200);
     expect(body.volumeMounts).toEqual(volumeMounts);
+    expect(mockBuildVolumeMountDescriptors).toHaveBeenCalledWith(
+      expect.anything(),
+      'env-1',
+      currentProviderServerId
+    );
     expect(mockSignDeployPayload).toHaveBeenCalledWith(
       expect.objectContaining({ volumeMounts }),
       expect.anything()

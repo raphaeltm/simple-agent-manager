@@ -36,6 +36,7 @@ let releaseRows: Array<{ version: number }> = [];
 const mockProvisionDeploymentNode = vi.fn();
 vi.mock('../../../src/services/deployment-provisioning', () => ({
   provisionDeploymentNode: (...args: unknown[]) => mockProvisionDeploymentNode(...args),
+  resolveDeploymentPlacement: vi.fn(async () => null),
 }));
 
 // Mock image resolver (no-op for these tests)

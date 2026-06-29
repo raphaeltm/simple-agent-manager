@@ -139,7 +139,11 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
 
   // Look up the node to get its userId for authorization
   const nodeRows = await db
-    .select({ userId: schema.nodes.userId, ipAddress: schema.nodes.ipAddress })
+    .select({
+      userId: schema.nodes.userId,
+      ipAddress: schema.nodes.ipAddress,
+      providerInstanceId: schema.nodes.providerInstanceId,
+    })
     .from(schema.nodes)
     .where(eq(schema.nodes.id, nodeId))
     .limit(1);
@@ -371,7 +375,11 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
   const expiresAt =
     Math.floor(Date.now() / 1000) +
     parsePositiveInt(c.env.DEPLOY_PAYLOAD_EXPIRY_SECONDS, DEFAULT_DEPLOY_PAYLOAD_EXPIRY_SECONDS);
-  const volumeMounts = await buildVolumeMountDescriptors(db, environmentId);
+  const volumeMounts = await buildVolumeMountDescriptors(
+    db,
+    environmentId,
+    node.providerInstanceId ?? ''
+  );
 
   // Sign the payload with the deploy signing key
   const signature = await signDeployPayload(

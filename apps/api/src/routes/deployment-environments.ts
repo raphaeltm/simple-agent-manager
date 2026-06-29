@@ -583,6 +583,13 @@ deploymentEnvironmentRoutes.delete(
     let volumesDetached = 0;
     let volumesDeleted = 0;
 
+    const attachedServerIds = new Set<string>();
+    for (const volume of volumes) {
+      if (volume.attachedServerId) {
+        attachedServerIds.add(volume.attachedServerId);
+      }
+    }
+
     if (volumes.length > 0 && environment.nodeId) {
       const nodeRows = await db
         .select({ providerInstanceId: schema.nodes.providerInstanceId })
@@ -592,20 +599,18 @@ deploymentEnvironmentRoutes.delete(
       const providerInstanceId = nodeRows[0]?.providerInstanceId;
 
       if (providerInstanceId) {
-        try {
-          const detached = await detachEnvironmentVolumes(
-            db,
-            c.env,
-            userId,
-            envId,
-            providerInstanceId
-          );
-          volumesDetached = detached.length;
-        } catch (err) {
-          throw errors.conflict(
-            `Could not detach deployment volume(s): ${err instanceof Error ? err.message : String(err)}`
-          );
-        }
+        attachedServerIds.add(providerInstanceId);
+      }
+    }
+
+    for (const serverId of attachedServerIds) {
+      try {
+        const detached = await detachEnvironmentVolumes(db, c.env, userId, envId, serverId);
+        volumesDetached += detached.length;
+      } catch (err) {
+        throw errors.conflict(
+          `Could not detach deployment volume(s): ${err instanceof Error ? err.message : String(err)}`
+        );
       }
     }
 

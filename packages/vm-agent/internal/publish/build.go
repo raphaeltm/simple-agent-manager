@@ -17,7 +17,7 @@ const secretInterpolationPlaceholder = "__SAM_CONFIGURED_SECRET_PLACEHOLDER__"
 
 var errUnsupportedComposeVolumes = errors.New("unsupported Docker Compose volumes")
 
-const unsupportedComposeVolumesGuidance = "build_and_publish does not support Docker Compose named or anonymous volumes yet. Compose volumes would be stored as Docker-managed local volumes on the deployment node, not SAM provider-backed deployment volumes. Remove service volume mounts and top-level volumes for now; do not retry this Compose shape for stateful data until build_and_publish supports SAM provider-backed volume rewriting."
+const unsupportedComposeVolumesGuidance = "build_and_publish does not support Docker Compose service volume mounts or top-level volumes yet. Compose volumes would be stored as Docker-managed local volumes on the deployment node, not SAM provider-backed deployment volumes. Remove service volume mounts and top-level volumes for now; do not retry this Compose shape for stateful data until build_and_publish supports SAM provider-backed volume rewriting."
 
 // BuildOptions configures a host-side compose build.
 type BuildOptions struct {
@@ -45,7 +45,7 @@ type BuildOptions struct {
 type composeConfig struct {
 	Name     string                          `json:"name"`
 	Services map[string]composeConfigService `json:"services"`
-	Volumes  map[string]json.RawMessage     `json:"volumes"`
+	Volumes  map[string]json.RawMessage      `json:"volumes"`
 }
 
 type composeConfigService struct {
@@ -420,9 +420,6 @@ func unsupportedServiceVolumeReferences(serviceName string, raw json.RawMessage)
 
 	refs := make([]string, 0, len(entries))
 	for _, entry := range entries {
-		if !isComposeManagedVolume(entry) {
-			continue
-		}
 		source := strings.TrimSpace(entry.Source)
 		if source == "" {
 			target := strings.TrimSpace(entry.Target)
@@ -435,21 +432,6 @@ func unsupportedServiceVolumeReferences(serviceName string, raw json.RawMessage)
 	}
 	sort.Strings(refs)
 	return refs, nil
-}
-
-func isComposeManagedVolume(entry composeConfigServiceVolume) bool {
-	volumeType := strings.ToLower(strings.TrimSpace(entry.Type))
-	if volumeType == "volume" {
-		return true
-	}
-	if volumeType != "" {
-		return false
-	}
-	source := strings.TrimSpace(entry.Source)
-	if source == "" {
-		return strings.TrimSpace(entry.Target) != ""
-	}
-	return !isLikelyBindMountSource(source)
 }
 
 func unsupportedShortVolumeReference(serviceName, spec string) (string, bool) {
@@ -469,20 +451,7 @@ func unsupportedShortVolumeReference(serviceName, spec string) (string, bool) {
 		}
 		return serviceName + ":anonymous at " + target, true
 	}
-	if isLikelyBindMountSource(source) {
-		return "", false
-	}
 	return serviceName + ":" + source, true
-}
-
-func isLikelyBindMountSource(source string) bool {
-	source = strings.TrimSpace(source)
-	return source == "." ||
-		source == ".." ||
-		strings.HasPrefix(source, "/") ||
-		strings.HasPrefix(source, "./") ||
-		strings.HasPrefix(source, "../") ||
-		strings.HasPrefix(source, "~")
 }
 
 // IsUnsupportedComposeVolumesError reports whether err came from Compose volume validation.
