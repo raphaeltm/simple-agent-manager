@@ -377,6 +377,7 @@ function optionalNullableIdObject(
 ): { id: number } | null {
   const value = root[key];
   if (value === undefined || value === null) return null;
+  if (typeof value === 'number') return { id: value };
   const obj = expectObject(value, providerName, `${context}.${key}`);
   return {
     id: requireNumber(obj, 'id', providerName, `${context}.${key}`),
