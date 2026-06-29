@@ -17,15 +17,26 @@ Focus this task on the backend runtime slice under `apps/api/src/durable-objects
 
 ## Implementation Checklist
 
-- [ ] Inventory TaskRunner tests and classify them as behavioral, pure helper, or source-contract in this task record.
-- [ ] Add executable behavioral coverage for `handleAgentSession()` or its alarm path proving agent session row creation, retry idempotency, `agentStarted` gating, MCP token persistence/redaction, and `transitionToInProgress()` effects.
-- [ ] Add executable behavioral coverage for failure cleanup/state-machine behavior proving terminal tasks are not overwritten, failed task fields/events are written, MCP tokens are revoked, and workspace cleanup failures are isolated from task failure.
-- [ ] Replace or sharply reduce TaskRunner behavior source-text assertions. Keep only static wiring/configuration checks that are intentionally source-contract based and document why.
-- [ ] Make only minimal testability extractions if dynamic imports make direct handler tests too awkward.
-- [ ] Validate constitution compliance: no new hardcoded operational constants unless backed by existing defaults or env configuration.
-- [ ] Run targeted API tests for changed TaskRunner coverage.
+- [x] Inventory TaskRunner tests and classify them as behavioral, pure helper, or source-contract in this task record.
+- [x] Add executable behavioral coverage for `handleAgentSession()` or its alarm path proving agent session row creation, retry idempotency, `agentStarted` gating, MCP token persistence/redaction, and `transitionToInProgress()` effects.
+- [x] Add executable behavioral coverage for failure cleanup/state-machine behavior proving terminal tasks are not overwritten, failed task fields/events are written, MCP tokens are revoked, and workspace cleanup failures are isolated from task failure.
+- [x] Replace or sharply reduce TaskRunner behavior source-text assertions. Keep only static wiring/configuration checks that are intentionally source-contract based and document why.
+- [x] Make only minimal testability extractions if dynamic imports make direct handler tests too awkward.
+- [x] Validate constitution compliance: no new hardcoded operational constants unless backed by existing defaults or env configuration.
+- [x] Run targeted API tests for changed TaskRunner coverage.
 - [ ] Run broader validation required by `/do`: lint, typecheck, test, build as feasible before PR.
 - [ ] Run local specialist reviews: task-completion-validator, cloudflare-specialist, constitution-validator, security-auditor, and test-engineer.
+
+## Implementation Notes
+
+- Added `buildTaskAgentSessionLabel()` and `buildTaskInitialPrompt()` in `agent-session-step.ts` to remove duplicated test-only prompt logic and enable direct executable coverage.
+- The prompt tests now use the production helper directly and fixture attachments match the shared `TaskAttachment` shape (`size`).
+- Added `task-runner-agent-session.test.ts` for direct `handleAgentSession()` behavior across D1 insert values, retry idempotency, `agentStarted` gating, MCP token persistence, VM start payload, ACP session transitions, and final in-progress transition.
+- Added `task-runner-state-machine.test.ts` for direct `transitionToInProgress()` and `failTask()` behavior with an executable D1/KV/storage shim and mocked external cleanup/token boundaries.
+- Replaced `task-runner-do-state.test.ts` with `task-runner-static-wiring.test.ts`, limited to static public/storage contract checks that are intentionally not runtime behavior.
+- Reduced `task-runner-health-check.test.ts` to pure readiness helper invariants and randomized timestamp checks.
+- Trimmed `task-runner-do-infra.test.ts` by removing initial-prompt/idempotency source-text checks now covered by executable tests. Remaining source checks are static Cloudflare/env/config wiring.
+- Attempted `pnpm --filter @simple-agent-manager/api test:workers -- tests/workers/task-runner-do.test.ts`, but local workerd repeatedly segfaulted before reporting test results. The attempted worker-test additions were moved into normal unit tests to avoid relying on the crashing worker runtime for the new coverage.
 
 ## Acceptance Criteria
 

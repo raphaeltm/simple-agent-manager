@@ -8,6 +8,35 @@ import { log } from '../../lib/logger';
 import { transitionToInProgress } from './state-machine';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
 
+export function buildTaskAgentSessionLabel(taskTitle: string): string {
+  return `Task: ${taskTitle.slice(0, 40)}`;
+}
+
+export function buildTaskInitialPrompt(state: TaskRunnerState): string {
+  const taskContent = state.config.taskDescription || state.config.taskTitle;
+
+  let attachmentContext = '';
+  if (state.config.attachments?.length) {
+    const fileList = state.config.attachments
+      .map((a) => `- \`/workspaces/.private/${a.filename}\` (${a.size} bytes, ${a.contentType})`)
+      .join('\n');
+    attachmentContext =
+      `\n\n## Attached Files\n\nThe following files have been uploaded to the workspace:\n${fileList}\n` +
+      `\nThese files are available at the paths listed above. Read them to understand the task context.\n`;
+  }
+
+  const systemPromptSuffix = state.config.systemPromptAppend
+    ? `\n\n${state.config.systemPromptAppend}`
+    : '';
+
+  return (
+    `${taskContent}${attachmentContext}${systemPromptSuffix}\n\n---\n\n` +
+    `IMPORTANT: Before starting any work, you MUST call the \`get_instructions\` tool from the sam-mcp MCP server. ` +
+    `This provides your task context, project information, output branch name, and instructions for reporting progress. ` +
+    `Do not proceed until you have called this tool and read its response.`
+  );
+}
+
 export async function handleAgentSession(
   state: TaskRunnerState,
   rc: TaskRunnerContext,
@@ -43,7 +72,7 @@ export async function handleAgentSession(
 
     const db = drizzle(rc.env.DATABASE, { schema });
     sessionId = ulid();
-    const sessionLabel = `Task: ${state.config.taskTitle.slice(0, 40)}`;
+    const sessionLabel = buildTaskAgentSessionLabel(state.config.taskTitle);
     const now = new Date().toISOString();
 
     const agentType = state.config.agentType || rc.env.DEFAULT_TASK_AGENT_TYPE || 'opencode';
@@ -174,29 +203,7 @@ export async function handleAgentSession(
   if (!state.stepResults.agentStarted) {
     const { startAgentSessionOnNode } = await import('../../services/node-agent');
     const agentType = state.config.agentType || rc.env.DEFAULT_TASK_AGENT_TYPE || 'opencode';
-    const taskContent = state.config.taskDescription || state.config.taskTitle;
-
-    // Build attachment context if files were transferred
-    let attachmentContext = '';
-    if (state.config.attachments?.length) {
-      const fileList = state.config.attachments
-        .map((a) => `- \`/workspaces/.private/${a.filename}\` (${a.size} bytes, ${a.contentType})`)
-        .join('\n');
-      attachmentContext =
-        `\n\n## Attached Files\n\nThe following files have been uploaded to the workspace:\n${fileList}\n` +
-        `\nThese files are available at the paths listed above. Read them to understand the task context.\n`;
-    }
-
-    // Append agent profile system prompt if configured
-    const systemPromptSuffix = state.config.systemPromptAppend
-      ? `\n\n${state.config.systemPromptAppend}`
-      : '';
-
-    const initialPrompt =
-      `${taskContent}${attachmentContext}${systemPromptSuffix}\n\n---\n\n` +
-      `IMPORTANT: Before starting any work, you MUST call the \`get_instructions\` tool from the sam-mcp MCP server. ` +
-      `This provides your task context, project information, output branch name, and instructions for reporting progress. ` +
-      `Do not proceed until you have called this tool and read its response.`;
+    const initialPrompt = buildTaskInitialPrompt(state);
 
     // Construct MCP server URL for agent platform awareness
     const mcpServerUrl = `https://api.${rc.env.BASE_DOMAIN}/mcp`;

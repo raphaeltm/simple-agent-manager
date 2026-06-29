@@ -14,47 +14,37 @@ import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-/**
- * Replicates the prompt construction logic from task-runner.ts handleAgentSession.
- * Must be kept in sync with the production code.
- */
-function buildInitialPrompt(opts: {
+import { buildTaskInitialPrompt } from '../../../src/durable-objects/task-runner/agent-session-step';
+import type { TaskRunnerState } from '../../../src/durable-objects/task-runner/types';
+
+function buildInitialPromptState(opts: {
   taskDescription: string | null;
   taskTitle: string;
   attachments?: Array<{ filename: string; size: number; contentType: string }> | null;
   systemPromptAppend: string | null;
-}): string {
-  const taskContent = opts.taskDescription || opts.taskTitle;
-
-  let attachmentContext = '';
-  if (opts.attachments?.length) {
-    const fileList = opts.attachments
-      .map((a) => `- \`/workspaces/.private/${a.filename}\` (${a.size} bytes, ${a.contentType})`)
-      .join('\n');
-    attachmentContext =
-      `\n\n## Attached Files\n\nThe following files have been uploaded to the workspace:\n${fileList}\n` +
-      `\nThese files are available at the paths listed above. Read them to understand the task context.\n`;
-  }
-
-  const systemPromptSuffix = opts.systemPromptAppend
-    ? `\n\n${opts.systemPromptAppend}`
-    : '';
-
-  return (
-    `${taskContent}${attachmentContext}${systemPromptSuffix}\n\n---\n\n` +
-    `IMPORTANT: Before starting any work, you MUST call the \`get_instructions\` tool from the sam-mcp MCP server. ` +
-    `This provides your task context, project information, output branch name, and instructions for reporting progress. ` +
-    `Do not proceed until you have called this tool and read its response.`
-  );
+}): TaskRunnerState {
+  return {
+    config: {
+      taskDescription: opts.taskDescription,
+      taskTitle: opts.taskTitle,
+      attachments: opts.attachments?.map((attachment, index) => ({
+        uploadId: `attachment-${index}`,
+        filename: attachment.filename,
+        contentType: attachment.contentType,
+        size: attachment.size,
+      })) ?? null,
+      systemPromptAppend: opts.systemPromptAppend,
+    },
+  } as TaskRunnerState;
 }
 
 describe('Initial prompt construction with systemPromptAppend', () => {
   it('appends systemPromptAppend when present', () => {
-    const prompt = buildInitialPrompt({
+    const prompt = buildTaskInitialPrompt(buildInitialPromptState({
       taskDescription: 'Fix the login bug',
       taskTitle: 'Login bug fix',
       systemPromptAppend: 'Focus on implementation. Write tests for all changes.',
-    });
+    }));
 
     expect(prompt).toContain('Fix the login bug');
     expect(prompt).toContain('Focus on implementation. Write tests for all changes.');
@@ -65,17 +55,17 @@ describe('Initial prompt construction with systemPromptAppend', () => {
   });
 
   it('produces no suffix when systemPromptAppend is null', () => {
-    const withAppend = buildInitialPrompt({
+    const withAppend = buildTaskInitialPrompt(buildInitialPromptState({
       taskDescription: 'Fix the login bug',
       taskTitle: 'Login bug fix',
       systemPromptAppend: 'Some instructions',
-    });
+    }));
 
-    const withoutAppend = buildInitialPrompt({
+    const withoutAppend = buildTaskInitialPrompt(buildInitialPromptState({
       taskDescription: 'Fix the login bug',
       taskTitle: 'Login bug fix',
       systemPromptAppend: null,
-    });
+    }));
 
     // Null version should be shorter (no appended text)
     expect(withoutAppend.length).toBeLessThan(withAppend.length);
@@ -84,28 +74,28 @@ describe('Initial prompt construction with systemPromptAppend', () => {
   });
 
   it('treats empty string the same as null', () => {
-    const withEmpty = buildInitialPrompt({
+    const withEmpty = buildTaskInitialPrompt(buildInitialPromptState({
       taskDescription: 'Fix the bug',
       taskTitle: 'Bug fix',
       systemPromptAppend: '',
-    });
+    }));
 
-    const withNull = buildInitialPrompt({
+    const withNull = buildTaskInitialPrompt(buildInitialPromptState({
       taskDescription: 'Fix the bug',
       taskTitle: 'Bug fix',
       systemPromptAppend: null,
-    });
+    }));
 
     expect(withEmpty).toBe(withNull);
   });
 
   it('preserves multiline systemPromptAppend', () => {
     const multiline = 'Follow these rules:\n- Write tests first\n- No hardcoded values\n- Keep functions small';
-    const prompt = buildInitialPrompt({
+    const prompt = buildTaskInitialPrompt(buildInitialPromptState({
       taskDescription: 'Implement feature X',
       taskTitle: 'Feature X',
       systemPromptAppend: multiline,
-    });
+    }));
 
     expect(prompt).toContain(multiline);
     expect(prompt).toContain('- Write tests first');
@@ -113,14 +103,14 @@ describe('Initial prompt construction with systemPromptAppend', () => {
   });
 
   it('works with attachments and systemPromptAppend together', () => {
-    const prompt = buildInitialPrompt({
+    const prompt = buildTaskInitialPrompt(buildInitialPromptState({
       taskDescription: 'Analyze the data',
       taskTitle: 'Data analysis',
       attachments: [
         { filename: 'data.csv', size: 1024, contentType: 'text/csv' },
       ],
       systemPromptAppend: 'Decompose tasks. Do not write code directly.',
-    });
+    }));
 
     expect(prompt).toContain('Analyze the data');
     expect(prompt).toContain('data.csv');
@@ -138,11 +128,11 @@ describe('Initial prompt construction with systemPromptAppend', () => {
   });
 
   it('falls back to taskTitle when taskDescription is null', () => {
-    const prompt = buildInitialPrompt({
+    const prompt = buildTaskInitialPrompt(buildInitialPromptState({
       taskDescription: null,
       taskTitle: 'Quick fix',
       systemPromptAppend: 'Review code for correctness.',
-    });
+    }));
 
     expect(prompt).toContain('Quick fix');
     expect(prompt).toContain('Review code for correctness.');
