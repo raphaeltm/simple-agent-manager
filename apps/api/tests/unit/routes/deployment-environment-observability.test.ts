@@ -8,15 +8,21 @@ const mockGetEnvironmentPublicRouteTargets = vi.fn();
 const mockGetNodeLogsFromNode = vi.fn();
 const mockGetNodeSystemInfoFromNode = vi.fn();
 const mockListNodeContainersFromNode = vi.fn();
+const mockBuildDeploymentEnvironmentResponse = vi.fn();
+const mockProvisionDeploymentNode = vi.fn();
+const mockListEnvironmentVolumes = vi.fn();
 
 const selectRows: unknown[][] = [];
+const updateCalls: Array<{ table: unknown; values: Record<string, unknown> }> = [];
 const mockLimit = vi.fn();
 const mockWhere = vi.fn();
+const mockOrderBy = vi.fn();
 const mockFrom = vi.fn();
 const mockSelect = vi.fn();
+const mockUpdate = vi.fn();
 
 vi.mock('drizzle-orm/d1', () => ({
-  drizzle: () => ({ select: mockSelect }),
+  drizzle: () => ({ select: mockSelect, update: mockUpdate }),
 }));
 
 vi.mock('drizzle-orm', () => ({
@@ -30,6 +36,13 @@ vi.mock('../../../src/db/schema', () => ({
     id: 'deploymentEnvironments.id',
     projectId: 'deploymentEnvironments.projectId',
     nodeId: 'deploymentEnvironments.nodeId',
+    status: 'deploymentEnvironments.status',
+  },
+  deploymentReleases: {
+    id: 'deploymentReleases.id',
+    environmentId: 'deploymentReleases.environmentId',
+    version: 'deploymentReleases.version',
+    status: 'deploymentReleases.status',
   },
   nodes: {
     id: 'nodes.id',
@@ -68,11 +81,12 @@ vi.mock('../../../src/services/deployment-custom-domains', () => ({
 }));
 
 vi.mock('../../../src/services/deployment-environment-summary', () => ({
-  buildDeploymentEnvironmentResponse: vi.fn(),
+  buildDeploymentEnvironmentResponse: (...args: unknown[]) =>
+    mockBuildDeploymentEnvironmentResponse(...args),
 }));
 
 vi.mock('../../../src/services/deployment-provisioning', () => ({
-  provisionDeploymentNode: vi.fn(),
+  provisionDeploymentNode: (...args: unknown[]) => mockProvisionDeploymentNode(...args),
 }));
 
 vi.mock('../../../src/services/deployment-routing', () => ({
@@ -83,7 +97,7 @@ vi.mock('../../../src/services/deployment-volumes', () => ({
   attachEnvironmentVolumesToLinkedNode: vi.fn(),
   deleteEnvironmentVolume: vi.fn(),
   detachEnvironmentVolumes: vi.fn(),
-  listEnvironmentVolumes: vi.fn(),
+  listEnvironmentVolumes: (...args: unknown[]) => mockListEnvironmentVolumes(...args),
 }));
 
 vi.mock('../../../src/services/dns', () => ({
@@ -131,12 +145,27 @@ function createEnv(): Env {
 describe('deployment environment observability routes', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    updateCalls.length = 0;
     mockRequireOwnedProject.mockResolvedValue(undefined);
     mockGetEnvironmentPublicRouteTargets.mockResolvedValue([]);
+    mockBuildDeploymentEnvironmentResponse.mockImplementation((_db, _env, row) => row);
+    mockProvisionDeploymentNode.mockResolvedValue({
+      nodeId: 'node-started',
+      provisioningStarted: false,
+      provisioningPromise: Promise.resolve(),
+    });
+    mockListEnvironmentVolumes.mockResolvedValue([]);
     mockLimit.mockImplementation(() => Promise.resolve(selectRows.shift() ?? []));
-    mockWhere.mockReturnValue({ limit: mockLimit });
+    mockOrderBy.mockReturnValue({ limit: mockLimit });
+    mockWhere.mockReturnValue({ limit: mockLimit, orderBy: mockOrderBy });
     mockFrom.mockReturnValue({ where: mockWhere });
     mockSelect.mockReturnValue({ from: mockFrom });
+    mockUpdate.mockImplementation((table: unknown) => ({
+      set: vi.fn((values: Record<string, unknown>) => {
+        updateCalls.push({ table, values });
+        return { where: vi.fn().mockResolvedValue(undefined) };
+      }),
+    }));
   });
 
   it('forwards docker log queries to the deployment node agent', async () => {
@@ -303,5 +332,57 @@ describe('deployment environment observability routes', () => {
       message: 'Deployment environment not found',
     });
     expect(mockGetEnvironmentPublicRouteTargets).not.toHaveBeenCalled();
+  });
+
+  it('marks the latest preserved release pending when starting a stopped environment', async () => {
+    mockSelectRows(
+      [
+        {
+          id: 'env-1',
+          projectId: 'project-1',
+          name: 'staging',
+          status: 'stopped',
+          nodeId: null,
+          requiresVolumes: true,
+        },
+      ],
+      [{ id: 'release-1', version: 3 }],
+      [{ nodeId: 'node-started' }],
+      [
+        {
+          id: 'env-1',
+          projectId: 'project-1',
+          name: 'staging',
+          status: 'starting',
+          nodeId: 'node-started',
+          requiresVolumes: true,
+        },
+      ]
+    );
+
+    const response = await createApp().request(
+      '/api/projects/project-1/environments/env-1/start',
+      { method: 'POST' },
+      createEnv()
+    );
+
+    const body = await response.json<any>();
+    expect(response.status, JSON.stringify(body)).toBe(200);
+    expect(mockProvisionDeploymentNode).toHaveBeenCalledWith(
+      'env-1',
+      'project-1',
+      'user-1',
+      expect.anything(),
+      { requiresVolumes: true, providerOverride: undefined, vmLocationOverride: undefined }
+    );
+    expect(updateCalls).toContainEqual({
+      table: expect.objectContaining({ id: 'deploymentReleases.id' }),
+      values: { status: 'created' },
+    });
+    expect(body.lifecycle).toMatchObject({
+      started: true,
+      nodeId: 'node-started',
+      latestReleaseVersion: 3,
+    });
   });
 });

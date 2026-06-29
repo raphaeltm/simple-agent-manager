@@ -817,6 +817,10 @@ deploymentEnvironmentRoutes.post(
         updatedAt: new Date().toISOString(),
       })
       .where(eq(schema.deploymentEnvironments.id, envId));
+    await db
+      .update(schema.deploymentReleases)
+      .set({ status: 'created' })
+      .where(eq(schema.deploymentReleases.id, latestRelease.id));
 
     const result = await provisionDeploymentNode(envId, projectId, userId, c.env, {
       requiresVolumes,
