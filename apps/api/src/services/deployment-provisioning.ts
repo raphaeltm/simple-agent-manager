@@ -453,9 +453,15 @@ export async function provisionDeploymentNode(
   });
 
   // Return the provisioning promise for the caller to pass to waitUntil()
-  const provisioningPromise = provisionNode(node.id, env, undefined, undefined, {
-    environmentId: envId,
-  }).catch(async (err) => {
+  const provisioningPromise = provisionNode(
+    node.id,
+    env,
+    undefined,
+    { rethrowProviderError: true },
+    {
+      environmentId: envId,
+    }
+  ).catch(async (err) => {
     log.error('deployment_provisioning.provision_failed', {
       nodeId: node.id,
       envId,
@@ -484,6 +490,7 @@ export async function provisionDeploymentNode(
         ...serializeError(rollbackErr),
       });
     }
+    throw err;
   });
 
   return { nodeId: node.id, provisioningStarted: true, provisioningPromise };

@@ -36,6 +36,21 @@ const variantConfig = {
   },
 };
 
+const focusableSelector = [
+  'a[href]',
+  'button:not([disabled])',
+  'textarea:not([disabled])',
+  'input:not([disabled])',
+  'select:not([disabled])',
+  '[tabindex]:not([tabindex="-1"])',
+].join(',');
+
+function getFocusableElements(root: HTMLElement): HTMLElement[] {
+  return Array.from(root.querySelectorAll<HTMLElement>(focusableSelector)).filter(
+    (element) => element.offsetParent !== null || element === document.activeElement
+  );
+}
+
 /**
  * Confirmation dialog component.
  */
@@ -51,12 +66,41 @@ export function ConfirmDialog({
   loading = false,
 }: ConfirmDialogProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
 
-  // Handle escape key
+  // Handle escape key and keep keyboard focus inside the open dialog.
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && isOpen && !loading) {
+      if (!isOpen) {
+        return;
+      }
+      if (e.key === 'Escape' && !loading) {
         onClose();
+        return;
+      }
+      if (e.key !== 'Tab') {
+        return;
+      }
+
+      const dialog = dialogRef.current;
+      if (!dialog) {
+        return;
+      }
+      const focusable = getFocusableElements(dialog);
+      if (focusable.length === 0) {
+        e.preventDefault();
+        dialog.focus();
+        return;
+      }
+
+      const first = focusable[0]!;
+      const last = focusable[focusable.length - 1]!;
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
       }
     };
 
@@ -67,11 +111,18 @@ export function ConfirmDialog({
   // Prevent body scroll when open
   useScrollLock(isOpen);
 
-  // Focus trap
+  // Move focus into the dialog and restore it to the opener on close.
   useEffect(() => {
-    if (isOpen && dialogRef.current) {
-      dialogRef.current.focus();
+    if (!isOpen) {
+      return;
     }
+    previousFocusRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    dialogRef.current?.focus();
+    return () => {
+      previousFocusRef.current?.focus();
+      previousFocusRef.current = null;
+    };
   }, [isOpen]);
 
   if (!isOpen) return null;

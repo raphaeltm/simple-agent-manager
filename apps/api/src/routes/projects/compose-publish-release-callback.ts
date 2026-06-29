@@ -22,8 +22,11 @@ import {
 import {
   attachEnvironmentVolumesToLinkedNode,
   createMissingDeclaredVolumes,
+  detachEnvironmentVolumes,
+  listEnvironmentVolumes,
   markDeploymentReleaseVolumeAttachFailed,
 } from '../../services/deployment-volumes';
+import { teardownDeploymentEnvironmentOnNode } from '../../services/node-agent';
 import { verifyWorkspacePublishCallback } from './_callback-auth';
 
 /**
@@ -299,15 +302,44 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
   const shouldProvision =
     environmentRow.status !== 'stopped' && environmentRow.status !== 'stopping';
   let currentNodeMode: string | null = null;
+  let currentNodeStatus: string | null = null;
+  let currentNodeProviderInstanceId: string | null = null;
   if (requiresVolumes && nodeId) {
     const nodeRows = await db
-      .select({ nodeMode: schema.nodes.nodeMode })
+      .select({
+        nodeMode: schema.nodes.nodeMode,
+        status: schema.nodes.status,
+        providerInstanceId: schema.nodes.providerInstanceId,
+      })
       .from(schema.nodes)
       .where(eq(schema.nodes.id, nodeId))
       .limit(1);
     currentNodeMode = nodeRows[0]?.nodeMode ?? null;
+    currentNodeStatus = nodeRows[0]?.status ?? null;
+    currentNodeProviderInstanceId = nodeRows[0]?.providerInstanceId ?? null;
   }
   if (requiresVolumes && nodeId && currentNodeMode !== 'exclusive') {
+    try {
+      if (currentNodeStatus === 'running') {
+        await teardownDeploymentEnvironmentOnNode(nodeId, environmentId, c.env, userId);
+      }
+      const volumes = await listEnvironmentVolumes(db, environmentId);
+      const attachedServerIds = new Set<string>();
+      for (const volume of volumes) {
+        if (volume.attachedServerId) {
+          attachedServerIds.add(volume.attachedServerId);
+        }
+      }
+      if (currentNodeProviderInstanceId) {
+        attachedServerIds.add(currentNodeProviderInstanceId);
+      }
+      for (const serverId of attachedServerIds) {
+        await detachEnvironmentVolumes(db, c.env, userId, environmentId, serverId);
+      }
+    } catch (err) {
+      await markDeploymentReleaseVolumeAttachFailed(db, environmentId, releaseId, err);
+      throw err;
+    }
     await db
       .update(schema.deploymentEnvironments)
       .set({ nodeId: null, updatedAt: new Date().toISOString() })
@@ -336,8 +368,12 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
       });
       if (result) {
         nodeId = result.nodeId;
-        const provisioningPromise = requiresVolumes
-          ? result.provisioningPromise.then(async () => {
+        const provisioningPromise = result.provisioningPromise.catch(async (err) => {
+          await markDeploymentReleaseVolumeAttachFailed(db, environmentId, releaseId, err);
+          throw err;
+        });
+        const finishPromise = requiresVolumes
+          ? provisioningPromise.then(async () => {
               try {
                 await attachEnvironmentVolumesToLinkedNode(db, c.env, userId, environmentId);
               } catch (err) {
@@ -345,8 +381,8 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
                 throw err;
               }
             })
-          : result.provisioningPromise;
-        c.executionCtx?.waitUntil(provisioningPromise.catch(() => undefined));
+          : provisioningPromise;
+        c.executionCtx?.waitUntil(finishPromise.catch(() => undefined));
         log.info('compose_publish_release.provisioning_triggered', {
           projectId,
           environmentId,

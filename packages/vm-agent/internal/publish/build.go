@@ -17,7 +17,7 @@ const secretInterpolationPlaceholder = "__SAM_CONFIGURED_SECRET_PLACEHOLDER__"
 
 var errUnsupportedComposeVolumes = errors.New("unsupported Docker Compose volumes")
 
-const unsupportedComposeVolumesGuidance = "build_and_publish does not support Docker Compose service volume mounts or top-level volumes yet. Compose volumes would be stored as Docker-managed local volumes on the deployment node, not SAM provider-backed deployment volumes. Remove service volume mounts and top-level volumes for now; do not retry this Compose shape for stateful data until build_and_publish supports SAM provider-backed volume rewriting."
+const unsupportedComposeVolumesGuidance = "build_and_publish does not support Docker Compose service volume mounts, service volumes_from, service tmpfs, or top-level volumes yet. Compose volumes would be stored as Docker-managed local volumes on the deployment node, not SAM provider-backed deployment volumes. Remove service volume mounts, volumes_from, tmpfs, and top-level volumes for now; do not retry this Compose shape for stateful data until build_and_publish supports SAM provider-backed volume rewriting."
 
 // BuildOptions configures a host-side compose build.
 type BuildOptions struct {
@@ -49,9 +49,11 @@ type composeConfig struct {
 }
 
 type composeConfigService struct {
-	Image   string          `json:"image"`
-	Build   json.RawMessage `json:"build"`
-	Volumes json.RawMessage `json:"volumes"`
+	Image       string          `json:"image"`
+	Build       json.RawMessage `json:"build"`
+	Volumes     json.RawMessage `json:"volumes"`
+	VolumesFrom json.RawMessage `json:"volumes_from"`
+	Tmpfs       json.RawMessage `json:"tmpfs"`
 }
 
 type composeConfigServiceVolume struct {
@@ -383,6 +385,28 @@ func validateNoComposeVolumes(cfg *composeConfig) error {
 		for _, ref := range serviceRefs {
 			refs[ref] = true
 		}
+		volumesFromRefs, err := unsupportedStringOrListReferences(
+			serviceName,
+			"volumes_from",
+			cfg.Services[serviceName].VolumesFrom,
+		)
+		if err != nil {
+			return err
+		}
+		for _, ref := range volumesFromRefs {
+			refs[ref] = true
+		}
+		tmpfsRefs, err := unsupportedStringOrListReferences(
+			serviceName,
+			"tmpfs",
+			cfg.Services[serviceName].Tmpfs,
+		)
+		if err != nil {
+			return err
+		}
+		for _, ref := range tmpfsRefs {
+			refs[ref] = true
+		}
 	}
 
 	if len(refs) == 0 {
@@ -394,6 +418,37 @@ func validateNoComposeVolumes(cfg *composeConfig) error {
 	}
 	sort.Strings(references)
 	return &unsupportedComposeVolumesError{References: references}
+}
+
+func unsupportedStringOrListReferences(serviceName, fieldName string, raw json.RawMessage) ([]string, error) {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+		return nil, nil
+	}
+
+	var entries []string
+	if err := json.Unmarshal(raw, &entries); err == nil {
+		return unsupportedServiceFieldReferences(serviceName, fieldName, entries), nil
+	}
+
+	var single string
+	if err := json.Unmarshal(raw, &single); err != nil {
+		return nil, fmt.Errorf("build: parse compose %s for service %s: %w", fieldName, serviceName, err)
+	}
+	return unsupportedServiceFieldReferences(serviceName, fieldName, []string{single}), nil
+}
+
+func unsupportedServiceFieldReferences(serviceName, fieldName string, entries []string) []string {
+	refs := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			entry = "unspecified"
+		}
+		refs = append(refs, serviceName+":"+fieldName+":"+entry)
+	}
+	sort.Strings(refs)
+	return refs
 }
 
 func unsupportedServiceVolumeReferences(serviceName string, raw json.RawMessage) ([]string, error) {

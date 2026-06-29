@@ -458,6 +458,95 @@ func TestEngine_Apply_VolumeMountGuard_ExistsButNotMountpoint_Refuses(t *testing
 	}
 }
 
+func TestEngine_Apply_FailedInitialTearsDownMountedVolumeRoots(t *testing.T) {
+	checker := newFakeMountChecker()
+	volumeMounter := &recordingVolumeMounter{}
+	engine, priv := guardEngine(t, checker, false)
+	engine.cfg.VolumeMounter = volumeMounter
+
+	payload := guardPayload(t, priv, `services:
+  web:
+    image: myapp:v1
+    ports:
+      - "127.0.0.1:35000:3000"
+`)
+	payload.VolumeMounts = []VolumeMount{{
+		Name:             "data",
+		MountRoot:        "/mnt/sam-env-env-1/volumes/data",
+		ProviderVolumeID: "vol-1",
+		ProviderName:     "hetzner",
+		FSFormat:         "ext4",
+	}}
+	payload.Signature = ""
+	sig, err := SignPayload(payload, priv)
+	if err != nil {
+		t.Fatalf("SignPayload: %v", err)
+	}
+	payload.Signature = sig
+
+	if err := engine.Apply(context.Background(), payload); err == nil {
+		t.Fatal("Apply should fail so failed-initial cleanup runs")
+	}
+	if len(volumeMounter.mounted) != 1 {
+		t.Fatalf("expected volume mount attempt before failure, got %#v", volumeMounter.mounted)
+	}
+	if len(volumeMounter.teardownRoots) != 1 || volumeMounter.teardownRoots[0] != "/mnt/sam-env-env-1/volumes/data" {
+		t.Fatalf("expected failed initial volume teardown, got %#v", volumeMounter.teardownRoots)
+	}
+}
+
+func TestEngine_Apply_SuccessfulUpdateTearsDownRemovedVolumeRoots(t *testing.T) {
+	checker := newFakeMountChecker()
+	checker.mountpoints["/mnt/sam-env-env-1/volumes/keep"] = true
+	volumeMounter := &recordingVolumeMounter{}
+	engine, priv := guardEngine(t, checker, true)
+	engine.cfg.VolumeMounter = volumeMounter
+
+	prevState := &ReleaseState{
+		Seq:              1,
+		EnvironmentID:    "env-1",
+		NodeID:           "node-1",
+		Status:           StatusApplied,
+		VolumeMountRoots: []string{"/mnt/sam-env-env-1/volumes/old", "/mnt/sam-env-env-1/volumes/keep"},
+	}
+	if err := engine.disk.WriteRelease(prevState, guardVolumeComposeYAML, "app.example.com {\n\treverse_proxy 127.0.0.1:35000\n}\n"); err != nil {
+		t.Fatalf("WriteRelease previous: %v", err)
+	}
+	if err := engine.disk.SetCurrent(1); err != nil {
+		t.Fatalf("SetCurrent previous: %v", err)
+	}
+
+	payload := guardPayload(t, priv, `services:
+  web:
+    image: myapp:v2
+    volumes:
+      - /mnt/sam-env-env-1/volumes/keep:/app/data
+    ports:
+      - "127.0.0.1:35000:3000"
+`)
+	payload.Seq = 2
+	payload.VolumeMounts = []VolumeMount{{
+		Name:             "keep",
+		MountRoot:        "/mnt/sam-env-env-1/volumes/keep",
+		ProviderVolumeID: "vol-keep",
+		ProviderName:     "hetzner",
+		FSFormat:         "ext4",
+	}}
+	payload.Signature = ""
+	sig, err := SignPayload(payload, priv)
+	if err != nil {
+		t.Fatalf("SignPayload: %v", err)
+	}
+	payload.Signature = sig
+
+	if err := engine.Apply(context.Background(), payload); err != nil {
+		t.Fatalf("Apply should succeed: %v", err)
+	}
+	if len(volumeMounter.teardownRoots) != 1 || volumeMounter.teardownRoots[0] != "/mnt/sam-env-env-1/volumes/old" {
+		t.Fatalf("expected only removed volume root to be torn down, got %#v", volumeMounter.teardownRoots)
+	}
+}
+
 func TestValidateVolumeMountsForEnvironmentRejectsUnsafeDescriptor(t *testing.T) {
 	tests := []struct {
 		name   string

@@ -26,6 +26,9 @@ type ReleaseState struct {
 	FailedAt      time.Time   `json:"failedAt,omitempty"`
 	ErrorMessage  string      `json:"errorMessage,omitempty"`
 	ComposeHash   string      `json:"composeHash,omitempty"` // SHA-256 of the rendered compose file
+	// Host mount roots created for this release's provider-backed volumes.
+	// Persisted so teardown/rollback can unmount even if Compose parsing fails.
+	VolumeMountRoots []string `json:"volumeMountRoots,omitempty"`
 }
 
 // ServiceState reports per-service container state for heartbeat reporting.

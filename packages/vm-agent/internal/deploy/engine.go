@@ -126,18 +126,6 @@ func NewEngine(disk *DiskState, verifier *Verifier, cfg EngineConfig) *Engine {
 	}
 }
 
-// SetCallbackToken updates the callback token for control plane requests.
-// Safe to call concurrently with fetchRelease (heartbeat vs apply goroutine).
-func (e *Engine) SetCallbackToken(token string) {
-	e.tokenMu.Lock()
-	defer e.tokenMu.Unlock()
-	e.callbackToken = token
-}
-
-func (e *Engine) EnvironmentID() string {
-	return e.cfg.EnvironmentID
-}
-
 // Teardown stops the current compose project and removes only this
 // environment's active Caddy snippet from the node-level import directory.
 func (e *Engine) Teardown(ctx context.Context) error {
@@ -150,14 +138,13 @@ func (e *Engine) Teardown(ctx context.Context) error {
 	if envErr != nil {
 		slog.Warn("deploy.teardown: failed to fetch current interpolation env; falling back to label cleanup if compose down fails", "error", envErr)
 	}
-	if composeFile, err := e.disk.CurrentComposeFilePath(); err == nil {
-		if rawCompose, readErr := os.ReadFile(composeFile); readErr != nil {
-			errs = append(errs, fmt.Sprintf("read compose for volume teardown: %v", readErr))
-		} else if roots, extractErr := extractSAMVolumeMountRoots(string(rawCompose)); extractErr != nil {
-			errs = append(errs, fmt.Sprintf("extract volume mount roots: %v", extractErr))
-		} else {
-			mountRoots = roots
+	if currentSeq, err := e.disk.CurrentSeq(); err == nil && currentSeq > 0 {
+		var rootsErr error
+		mountRoots, rootsErr = e.releaseVolumeMountRoots(currentSeq)
+		if rootsErr != nil {
+			errs = append(errs, fmt.Sprintf("read volume mount roots: %v", rootsErr))
 		}
+		composeFile := e.disk.ComposeFilePath(currentSeq)
 		if err := e.composeDown(ctx, composeFile, interpolationEnv); err != nil {
 			errs = append(errs, fmt.Sprintf("compose down: %v", err))
 			if envErr != nil {
@@ -166,18 +153,12 @@ func (e *Engine) Teardown(ctx context.Context) error {
 				}
 			}
 		}
-	} else if !strings.Contains(err.Error(), "no current release") {
-		errs = append(errs, fmt.Sprintf("read current compose: %v", err))
+	} else if err != nil {
+		errs = append(errs, fmt.Sprintf("read current release: %v", err))
 	}
 
-	if len(mountRoots) > 0 {
-		volumeTeardowner, ok := e.cfg.VolumeMounter.(VolumeTeardowner)
-		if !ok {
-			volumeTeardowner = NewRealVolumeMounter()
-		}
-		if err := volumeTeardowner.TeardownMounts(ctx, mountRoots); err != nil {
-			errs = append(errs, fmt.Sprintf("teardown volume mounts: %v", err))
-		}
+	if err := e.teardownVolumeMountRoots(ctx, mountRoots); err != nil {
+		errs = append(errs, fmt.Sprintf("teardown volume mounts: %v", err))
 	}
 
 	snippetPath := filepath.Join(filepath.Dir(e.cfg.CaddyfilePath), "sites", SafeEnvironmentFilePart(e.cfg.EnvironmentID)+".caddy")
@@ -203,29 +184,6 @@ func (e *Engine) Teardown(ctx context.Context) error {
 	}
 	e.setObserved(ObservedState{})
 	return nil
-}
-
-// getCallbackToken returns the current callback token under a read lock.
-func (e *Engine) getCallbackToken() string {
-	e.tokenMu.RLock()
-	defer e.tokenMu.RUnlock()
-	return e.callbackToken
-}
-
-// SetVerifierKey updates the signing public key via the verifier's dual-key rotation.
-func (e *Engine) SetVerifierKey(pubKeyB64 string) error {
-	e.verifierMu.Lock()
-	defer e.verifierMu.Unlock()
-
-	if e.verifier == nil {
-		verifier, err := NewVerifier(pubKeyB64)
-		if err != nil {
-			return err
-		}
-		e.verifier = verifier
-		return nil
-	}
-	return e.verifier.SetCurrentKey(pubKeyB64)
 }
 
 // ReconcileOnStart reads disk state and verifies running containers match.
@@ -312,11 +270,12 @@ func (e *Engine) Apply(ctx context.Context, payload *ApplyPayload) error {
 	// Mark as applying
 	now := time.Now().UTC()
 	newState := &ReleaseState{
-		Seq:           payload.Seq,
-		EnvironmentID: payload.EnvironmentID,
-		NodeID:        payload.NodeID,
-		Status:        StatusApplying,
-		AppliedAt:     now,
+		Seq:              payload.Seq,
+		EnvironmentID:    payload.EnvironmentID,
+		NodeID:           payload.NodeID,
+		Status:           StatusApplying,
+		AppliedAt:        now,
+		VolumeMountRoots: volumeMountRootsFromPayload(payload.VolumeMounts),
 	}
 
 	e.setObserved(ObservedState{
@@ -351,6 +310,13 @@ func (e *Engine) Apply(ctx context.Context, payload *ApplyPayload) error {
 			// containers already exited or were removed externally.
 		} else {
 			e.reportApplyEvent(ctx, payload, "info", "deployment.apply.previous_down_completed", "previous_down", "previous release containers stopped", map[string]any{"previousSeq": currentSeq})
+		}
+		removedRoots, err := e.removedVolumeMountRoots(currentSeq, newState.VolumeMountRoots)
+		if err != nil {
+			return e.handleApplyFailure(ctx, newState, currentSeq, redactor.redactError(fmt.Errorf("read removed volume mounts: %w", err)), applyEnv)
+		}
+		if err := e.teardownVolumeMountRoots(ctx, removedRoots); err != nil {
+			return e.handleApplyFailure(ctx, newState, currentSeq, redactor.redactError(fmt.Errorf("teardown removed volume mounts: %w", err)), applyEnv)
 		}
 	}
 
@@ -492,6 +458,11 @@ func (e *Engine) handleApplyFailure(ctx context.Context, state *ReleaseState, pr
 		}
 
 		var persistenceErrs []error
+		if err := e.teardownVolumeMountRoots(ctx, state.VolumeMountRoots); err != nil {
+			slog.Warn("deploy.apply: failed to teardown volume mounts after failed-initial",
+				"error", err)
+			persistenceErrs = append(persistenceErrs, fmt.Errorf("teardown failed-initial volume mounts: %w", err))
+		}
 		if err := e.disk.UpdateState(state); err != nil {
 			slog.Error("deploy.apply: failed to persist failed-initial state",
 				"seq", state.Seq, "error", err)
@@ -533,6 +504,15 @@ func (e *Engine) handleApplyFailure(ctx context.Context, state *ReleaseState, pr
 	if err := e.composeDown(ctx, newComposeFile, applyEnv); err != nil {
 		slog.Warn("deploy.apply: failed to stop new release before revert",
 			"seq", state.Seq, "error", err)
+	}
+	previousRoots, rootsErr := e.releaseVolumeMountRoots(previousSeq)
+	if rootsErr != nil {
+		recoveryErrs = append(recoveryErrs, fmt.Errorf("read previous volume mount roots: %w", rootsErr))
+	}
+	if err := e.teardownVolumeMountRoots(ctx, subtractVolumeMountRoots(state.VolumeMountRoots, previousRoots)); err != nil {
+		slog.Warn("deploy.apply: failed to teardown new release volume mounts before revert",
+			"seq", state.Seq, "error", err)
+		recoveryErrs = append(recoveryErrs, fmt.Errorf("teardown failed release volume mounts: %w", err))
 	}
 
 	prevComposeFile := e.disk.ComposeFilePath(previousSeq)

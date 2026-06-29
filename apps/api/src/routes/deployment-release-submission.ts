@@ -17,8 +17,11 @@ import {
 import {
   attachEnvironmentVolumesToLinkedNode,
   createMissingManifestVolumes,
+  detachEnvironmentVolumes,
+  listEnvironmentVolumes,
   markDeploymentReleaseVolumeAttachFailed,
 } from '../services/deployment-volumes';
+import { teardownDeploymentEnvironmentOnNode } from '../services/node-agent';
 
 export type CreateDeploymentReleaseResult = {
   id: string;
@@ -182,8 +185,73 @@ async function readEnvironmentRuntimeState(
   };
 }
 
+async function markDeploymentReleasePlacementFailed(
+  db: DeploymentReleaseDb,
+  environmentId: string,
+  releaseId: string,
+  error: unknown
+): Promise<void> {
+  const message = error instanceof Error ? error.message : String(error);
+  const now = new Date().toISOString();
+  await db
+    .update(schema.deploymentReleases)
+    .set({ status: 'failed' })
+    .where(eq(schema.deploymentReleases.id, releaseId));
+  await db
+    .update(schema.deploymentEnvironments)
+    .set({
+      status: 'error',
+      observedStatus: 'failed',
+      observedErrorMessage: `Deployment node placement failed: ${message}`,
+      updatedAt: now,
+    })
+    .where(eq(schema.deploymentEnvironments.id, environmentId));
+}
+
+async function stopSharedRuntimeBeforeVolumeMove(params: {
+  db: DeploymentReleaseDb;
+  env: Env;
+  envId: string;
+  userId: string;
+  nodeId: string;
+}): Promise<void> {
+  const nodeRows = await params.db
+    .select({
+      status: schema.nodes.status,
+      providerInstanceId: schema.nodes.providerInstanceId,
+    })
+    .from(schema.nodes)
+    .where(eq(schema.nodes.id, params.nodeId))
+    .limit(1);
+  const node = nodeRows[0];
+  if (node?.status === 'running') {
+    await teardownDeploymentEnvironmentOnNode(
+      params.nodeId,
+      params.envId,
+      params.env,
+      params.userId
+    );
+  }
+
+  const volumes = await listEnvironmentVolumes(params.db, params.envId);
+  const attachedServerIds = new Set<string>();
+  for (const volume of volumes) {
+    if (volume.attachedServerId) {
+      attachedServerIds.add(volume.attachedServerId);
+    }
+  }
+  if (node?.providerInstanceId) {
+    attachedServerIds.add(node.providerInstanceId);
+  }
+  for (const serverId of attachedServerIds) {
+    await detachEnvironmentVolumes(params.db, params.env, params.userId, params.envId, serverId);
+  }
+}
+
 async function clearSharedNodeForVolumeRelease(
   db: DeploymentReleaseDb,
+  env: Env,
+  userId: string,
   envId: string,
   nodeId: string | null,
   requiresVolumes: boolean
@@ -202,6 +270,7 @@ async function clearSharedNodeForVolumeRelease(
     return nodeId;
   }
 
+  await stopSharedRuntimeBeforeVolumeMove({ db, env, userId, envId, nodeId });
   await db
     .update(schema.deploymentEnvironments)
     .set({ nodeId: null, updatedAt: new Date().toISOString() })
@@ -251,8 +320,12 @@ function observeProvisioningResult(params: {
     return;
   }
 
-  const provisioningPromise = params.requiresVolumes
-    ? params.result.provisioningPromise.then(() =>
+  const provisioningPromise = params.result.provisioningPromise.catch(async (err) => {
+    await markDeploymentReleasePlacementFailed(params.db, params.envId, params.releaseId, err);
+    throw err;
+  });
+  const finishPromise = params.requiresVolumes
+    ? provisioningPromise.then(() =>
         attachVolumesForRelease({
           db: params.db,
           env: params.env,
@@ -261,8 +334,8 @@ function observeProvisioningResult(params: {
           releaseId: params.releaseId,
         })
       )
-    : params.result.provisioningPromise;
-  params.executionCtx.waitUntil(provisioningPromise.catch(() => undefined));
+    : provisioningPromise;
+  params.executionCtx.waitUntil(finishPromise.catch(() => undefined));
 }
 
 async function provisionNodeForRelease(params: {
@@ -285,6 +358,12 @@ async function provisionNodeForRelease(params: {
       buildProvisionOptions(params.placement, params.requiresVolumes)
     );
     if (!result) {
+      await markDeploymentReleasePlacementFailed(
+        params.db,
+        params.envId,
+        params.releaseId,
+        'No deployment node could be provisioned'
+      );
       return null;
     }
     observeProvisioningResult({ ...params, result });
@@ -295,6 +374,7 @@ async function provisionNodeForRelease(params: {
       releaseId: params.releaseId,
       ...serializeError(err),
     });
+    await markDeploymentReleasePlacementFailed(params.db, params.envId, params.releaseId, err);
     return null;
   }
 }
@@ -330,12 +410,20 @@ async function placeReleaseOnDeploymentNode(params: {
   executionCtx?: ExecutionContext;
 }): Promise<string | null> {
   const runtime = await readEnvironmentRuntimeState(params.db, params.envId);
-  const nodeId = await clearSharedNodeForVolumeRelease(
-    params.db,
-    params.envId,
-    runtime.nodeId,
-    params.requiresVolumes
-  );
+  let nodeId: string | null;
+  try {
+    nodeId = await clearSharedNodeForVolumeRelease(
+      params.db,
+      params.env,
+      params.userId,
+      params.envId,
+      runtime.nodeId,
+      params.requiresVolumes
+    );
+  } catch (err) {
+    await markDeploymentReleasePlacementFailed(params.db, params.envId, params.releaseId, err);
+    throw err;
+  }
 
   const shouldProvision = runtime.status !== 'stopped' && runtime.status !== 'stopping';
   if (!shouldProvision) {

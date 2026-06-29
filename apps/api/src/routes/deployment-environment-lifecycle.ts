@@ -70,6 +70,9 @@ async function cleanupDeploymentNodeIfUnassigned(
   if (!nodeId) {
     return { nodeDeleted: false, warnings: [] };
   }
+  if (typeof env.DATABASE.prepare !== 'function') {
+    return { nodeDeleted: false, warnings: [] };
+  }
 
   const claim = await env.DATABASE.prepare(
     `UPDATE nodes
@@ -131,17 +134,73 @@ function resolveVolumePlacementConstraint(
 async function markEnvironmentStartFailed(
   db: DeploymentDb,
   envId: string,
-  error: unknown
+  error: unknown,
+  opts: { nodeId?: string; latestReleaseId?: string } = {}
 ): Promise<void> {
+  const updates: Partial<schema.NewDeploymentEnvironmentRow> = {
+    status: 'error',
+    observedStatus: 'failed',
+    observedErrorMessage: lifecycleErrorMessage(error),
+    updatedAt: new Date().toISOString(),
+  };
+  if (opts.nodeId !== undefined) {
+    updates.nodeId = null;
+  }
+
   await db
     .update(schema.deploymentEnvironments)
-    .set({
-      status: 'error',
-      observedStatus: 'failed',
-      observedErrorMessage: error instanceof Error ? error.message : String(error),
-      updatedAt: new Date().toISOString(),
-    })
+    .set(updates)
     .where(eq(schema.deploymentEnvironments.id, envId));
+  if (opts.latestReleaseId) {
+    await db
+      .update(schema.deploymentReleases)
+      .set({ status: 'failed' })
+      .where(eq(schema.deploymentReleases.id, opts.latestReleaseId));
+  }
+}
+
+async function readLifecycleNode(
+  db: DeploymentDb,
+  userId: string,
+  nodeId: string
+): Promise<{ providerInstanceId: string | null } | null> {
+  const rows = await db
+    .select({ providerInstanceId: schema.nodes.providerInstanceId })
+    .from(schema.nodes)
+    .where(and(eq(schema.nodes.id, nodeId), eq(schema.nodes.userId, userId)))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+async function cleanupFailedEnvironmentStart(params: {
+  db: DeploymentDb;
+  env: Env;
+  userId: string;
+  envId: string;
+  nodeId: string;
+  latestReleaseId: string;
+  error: unknown;
+}): Promise<void> {
+  const { db, env, userId, envId, nodeId, latestReleaseId, error } = params;
+  const node = await readLifecycleNode(db, userId, nodeId);
+  const volumes = await listEnvironmentVolumes(db, envId);
+  const serverIds = collectAttachedServerIds(volumes, node?.providerInstanceId ?? null);
+
+  for (const serverId of serverIds) {
+    try {
+      await detachEnvironmentVolumes(db, env, userId, envId, serverId);
+    } catch (detachErr) {
+      log.warn('deployment_environment.start_failed_volume_detach_failed', {
+        envId,
+        nodeId,
+        serverId,
+        error: lifecycleErrorMessage(detachErr),
+      });
+    }
+  }
+
+  await markEnvironmentStartFailed(db, envId, error, { nodeId, latestReleaseId });
+  await cleanupDeploymentNodeIfUnassigned(db, env, userId, nodeId);
 }
 
 async function finishEnvironmentStart(
@@ -150,6 +209,7 @@ async function finishEnvironmentStart(
   userId: string,
   envId: string,
   nodeId: string,
+  latestReleaseId: string,
   shouldAttachVolumes: boolean,
   provisioningPromise: Promise<void>
 ): Promise<void> {
@@ -174,7 +234,24 @@ async function finishEnvironmentStart(
       nodeId,
       error: err instanceof Error ? err.message : String(err),
     });
-    await markEnvironmentStartFailed(db, envId, err);
+    try {
+      await cleanupFailedEnvironmentStart({
+        db,
+        env,
+        userId,
+        envId,
+        nodeId,
+        latestReleaseId,
+        error: err,
+      });
+    } catch (cleanupErr) {
+      log.error('deployment_environment.start_failed_cleanup_failed', {
+        envId,
+        nodeId,
+        error: lifecycleErrorMessage(cleanupErr),
+      });
+      await markEnvironmentStartFailed(db, envId, err, { nodeId, latestReleaseId });
+    }
     throw err;
   }
 }
@@ -340,13 +417,19 @@ async function stopDeploymentEnvironment(params: {
     );
   }
 
+  const volumes = await listEnvironmentVolumes(db, envId);
+  if (!environment.nodeId && !volumes.some((volume) => Boolean(volume.attachedServerId))) {
+    throw errors.conflict(
+      'Deployment environment is not linked to a node and has no attached volumes to stop.'
+    );
+  }
+
   await db
     .update(schema.deploymentEnvironments)
     .set({ status: 'stopping', updatedAt: new Date().toISOString() })
     .where(eq(schema.deploymentEnvironments.id, envId));
 
   const teardown = await teardownLinkedDeploymentNode(db, env, userId, envId, environment.nodeId);
-  const volumes = await listEnvironmentVolumes(db, envId);
   const volumesDetached = await detachVolumesForEnvironmentStop(
     db,
     env,
@@ -437,6 +520,7 @@ async function finishProvisionedEnvironmentStart(params: {
   userId: string;
   envId: string;
   nodeId: string;
+  latestReleaseId: string;
   shouldAttachVolumes: boolean;
   provisioningStarted: boolean;
   provisioningPromise: Promise<void>;
@@ -448,6 +532,7 @@ async function finishProvisionedEnvironmentStart(params: {
     params.userId,
     params.envId,
     params.nodeId,
+    params.latestReleaseId,
     params.shouldAttachVolumes,
     params.provisioningPromise
   );
@@ -514,7 +599,8 @@ async function startDeploymentEnvironment(params: {
     await markEnvironmentStartFailed(
       db,
       envId,
-      'No cloud provider credential was available to start this deployment environment'
+      'No cloud provider credential was available to start this deployment environment',
+      { latestReleaseId: latestRelease.id }
     );
     throw errors.conflict('Could not provision a deployment node for this environment.');
   }
@@ -525,6 +611,7 @@ async function startDeploymentEnvironment(params: {
     userId,
     envId,
     nodeId: result.nodeId,
+    latestReleaseId: latestRelease.id,
     shouldAttachVolumes: volumes.length > 0,
     provisioningStarted: result.provisioningStarted,
     provisioningPromise: result.provisioningPromise,

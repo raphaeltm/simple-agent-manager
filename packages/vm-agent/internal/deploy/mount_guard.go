@@ -20,7 +20,11 @@ import (
 // node-local storage, violating the "data is detachable" contract.
 const samVolumeMountPrefix = "/mnt/sam-env-"
 
-var volumeNamePattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
+// Keep this volume name contract in sync with
+// packages/shared/src/compose-parser/constants.ts.
+const samVolumeNamePatternSource = `^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`
+
+var volumeNamePattern = regexp.MustCompile(samVolumeNamePatternSource)
 
 // MountChecker abstracts the filesystem check so tests can inject a fake.
 type MountChecker interface {

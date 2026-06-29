@@ -85,7 +85,7 @@ func TestValidateNoComposeVolumesRejectsTopLevelAndServiceVolumes(t *testing.T) 
 		t.Fatalf("expected unsupported compose volumes error, got %T: %v", err, err)
 	}
 	for _, want := range []string{
-		"build_and_publish does not support Docker Compose service volume mounts or top-level volumes yet",
+		"build_and_publish does not support Docker Compose service volume mounts, service volumes_from, service tmpfs, or top-level volumes yet",
 		"api:appdata",
 		"api:legacydata",
 		"api:/tmp/uploads",
@@ -133,6 +133,36 @@ func TestValidateNoComposeVolumesRejectsStringVolumeEntries(t *testing.T) {
 		t.Fatal("expected string compose volume entries to be rejected")
 	}
 	for _, want := range []string{"api:appdata", "api:anonymous at /cache", "api:/tmp/uploads"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("expected error to contain %q, got: %v", want, err)
+		}
+	}
+}
+
+func TestValidateNoComposeVolumesRejectsVolumesFromAndServiceTmpfs(t *testing.T) {
+	cfg := &composeConfig{Services: map[string]composeConfigService{
+		"api": {
+			VolumesFrom: json.RawMessage(`["db:ro"]`),
+			Tmpfs:       json.RawMessage(`["/run/cache"]`),
+		},
+		"worker": {
+			VolumesFrom: json.RawMessage(`"api"`),
+			Tmpfs:       json.RawMessage(`"/tmp"`),
+		},
+	}}
+
+	err := validateNoComposeVolumes(cfg)
+	if err == nil {
+		t.Fatal("expected service volumes_from/tmpfs to be rejected")
+	}
+	for _, want := range []string{
+		"api:volumes_from:db:ro",
+		"api:tmpfs:/run/cache",
+		"worker:volumes_from:api",
+		"worker:tmpfs:/tmp",
+		"service volumes_from",
+		"service tmpfs",
+	} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("expected error to contain %q, got: %v", want, err)
 		}

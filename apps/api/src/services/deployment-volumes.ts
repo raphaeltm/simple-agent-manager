@@ -6,12 +6,19 @@
  * `createProviderForUser()` — no provider-specific branches here.
  */
 
-import type { Provider, VolumeInstance } from '@simple-agent-manager/providers';
 import {
+  type Provider,
   SAM_VOLUME_FILESYSTEM_FORMAT,
   SAM_VOLUME_MOUNT_PATH_TEMPLATE,
+  type VolumeInstance,
 } from '@simple-agent-manager/providers';
-import type { CredentialProvider, DeploymentManifest } from '@simple-agent-manager/shared';
+import {
+  type CredentialProvider,
+  type DeploymentManifest,
+  SAM_DEPLOYMENT_VOLUME_DEFAULT_SIZE_GB,
+  SAM_DEPLOYMENT_VOLUME_NAME_MESSAGE,
+  SAM_DEPLOYMENT_VOLUME_NAME_PATTERN_SOURCE,
+} from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
 
@@ -85,19 +92,19 @@ export interface LinkedDeploymentNodeVolumeTarget {
   location: string;
 }
 
-const VOLUME_NAME_RE = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
+const VOLUME_NAME_RE = new RegExp(SAM_DEPLOYMENT_VOLUME_NAME_PATTERN_SOURCE);
 
 function assertSafeVolumeName(name: string): void {
   if (!VOLUME_NAME_RE.test(name)) {
-    throw new Error(
-      'Volume names must be lowercase alphanumeric with optional hyphens, 1-63 chars.'
-    );
+    throw new Error(SAM_DEPLOYMENT_VOLUME_NAME_MESSAGE);
   }
 }
 
 function sizeHintToGb(sizeHintMb: number | undefined, minSizeGb: number | undefined): number {
-  const hintedGb = sizeHintMb ? Math.ceil(sizeHintMb / 1024) : 1;
-  return Math.max(hintedGb, minSizeGb ?? 1);
+  const hintedGb = sizeHintMb
+    ? Math.ceil(sizeHintMb / 1024)
+    : SAM_DEPLOYMENT_VOLUME_DEFAULT_SIZE_GB;
+  return Math.max(hintedGb, minSizeGb ?? SAM_DEPLOYMENT_VOLUME_DEFAULT_SIZE_GB);
 }
 
 export async function createEnvironmentVolume(

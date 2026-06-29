@@ -333,7 +333,10 @@ deploymentEnvironmentRoutes.get(
     const userId = getUserId(c);
     const db = drizzle(c.env.DATABASE, { schema });
     await requireOwnedProject(db, projectId, userId);
-    await requireDeploymentEnvironment(db, projectId, envId);
+    const environment = await requireDeploymentEnvironment(db, projectId, envId);
+    if (environment.status !== 'active') {
+      return c.json({ publicRoutes: [] });
+    }
 
     const targets = await getEnvironmentPublicRouteTargets(db, c.env, envId);
     return c.json({

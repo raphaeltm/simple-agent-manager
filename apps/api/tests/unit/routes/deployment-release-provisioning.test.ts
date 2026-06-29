@@ -39,6 +39,18 @@ vi.mock('../../../src/services/deployment-provisioning', () => ({
   resolveDeploymentPlacement: vi.fn(async () => null),
 }));
 
+vi.mock('../../../src/services/deployment-volumes', () => ({
+  attachEnvironmentVolumesToLinkedNode: vi.fn().mockResolvedValue([]),
+  createMissingManifestVolumes: vi.fn().mockResolvedValue(undefined),
+  detachEnvironmentVolumes: vi.fn().mockResolvedValue([]),
+  listEnvironmentVolumes: vi.fn().mockResolvedValue([]),
+  markDeploymentReleaseVolumeAttachFailed: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock('../../../src/services/node-agent', () => ({
+  teardownDeploymentEnvironmentOnNode: vi.fn().mockResolvedValue(undefined),
+}));
+
 // Mock image resolver (no-op for these tests)
 vi.mock('../../../src/services/image-resolver', () => ({
   createImageResolver: () => vi.fn(),

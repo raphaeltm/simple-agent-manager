@@ -8,6 +8,7 @@
  * Tests exercise the real service functions end-to-end through these mocked boundaries.
  */
 import type { Provider, VolumeCapabilities, VolumeInstance } from '@simple-agent-manager/providers';
+import type { CredentialProvider } from '@simple-agent-manager/shared';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -115,7 +116,7 @@ function makeMockProvider(overrides?: {
 function setupProvider(provider: Provider, providerName = 'hetzner') {
   mockCreateProviderForUser.mockResolvedValue({
     provider,
-    providerName: providerName as 'hetzner',
+    providerName: providerName as CredentialProvider,
     credentialSource: 'user',
   });
 }
@@ -604,6 +605,50 @@ describe('attachEnvironmentVolumes', () => {
     expect(results[0].linuxDevice).toBe('/dev/sdb');
   });
 
+  it('resolves the provider from volume rows when attaching non-default provider volumes', async () => {
+    const provider = makeMockProvider();
+    setupProvider(provider, 'scaleway');
+    const volumeRows: MockRow[] = [
+      {
+        id: 'vol-1',
+        environmentId: 'env-001',
+        name: 'data',
+        providerVolumeId: 'scw-vol-1',
+        providerName: 'scaleway',
+        sizeGb: 10,
+        location: 'fr-par-1',
+        status: 'available',
+        attachedServerId: null,
+        linuxDevice: null,
+        createdAt: '2026-06-12T00:00:00Z',
+        updatedAt: '2026-06-12T00:00:00Z',
+      },
+    ];
+    const db = createMockDb(volumeRows);
+
+    await attachEnvironmentVolumes(
+      db as any,
+      mockEnv,
+      'user-1',
+      'env-001',
+      'scw-server-1',
+      'fr-par-1'
+    );
+
+    expect(mockCreateProviderForUser).toHaveBeenCalledWith(
+      db,
+      'user-1',
+      'test-key',
+      mockEnv,
+      'scaleway'
+    );
+    expect(provider.attachVolume).toHaveBeenCalledWith({
+      volumeId: 'scw-vol-1',
+      serverId: 'scw-server-1',
+      location: 'fr-par-1',
+    });
+  });
+
   it('returns empty array when no volumes exist', async () => {
     const provider = makeMockProvider();
     setupProvider(provider);
@@ -775,6 +820,43 @@ describe('detachEnvironmentVolumes', () => {
     expect(results[0].status).toBe('available');
     expect(results[0].attachedServerId).toBeNull();
     expect(results[0].linuxDevice).toBeNull();
+  });
+
+  it('resolves the provider from volume rows when detaching non-default provider volumes', async () => {
+    const provider = makeMockProvider();
+    setupProvider(provider, 'scaleway');
+    const volumeRows: MockRow[] = [
+      {
+        id: 'vol-1',
+        environmentId: 'env-001',
+        name: 'data',
+        providerVolumeId: 'scw-vol-1',
+        providerName: 'scaleway',
+        sizeGb: 10,
+        location: 'fr-par-1',
+        status: 'in-use',
+        attachedServerId: 'scw-server-1',
+        linuxDevice: '/dev/sdb',
+        createdAt: '2026-06-12T00:00:00Z',
+        updatedAt: '2026-06-12T00:00:00Z',
+      },
+    ];
+    const db = createMockDb(volumeRows);
+
+    await detachEnvironmentVolumes(db as any, mockEnv, 'user-1', 'env-001', 'scw-server-1');
+
+    expect(mockCreateProviderForUser).toHaveBeenCalledWith(
+      db,
+      'user-1',
+      'test-key',
+      mockEnv,
+      'scaleway'
+    );
+    expect(provider.detachVolume).toHaveBeenCalledWith({
+      volumeId: 'scw-vol-1',
+      serverId: 'scw-server-1',
+      location: 'fr-par-1',
+    });
   });
 
   it('returns empty array when no volumes are attached to the server', async () => {

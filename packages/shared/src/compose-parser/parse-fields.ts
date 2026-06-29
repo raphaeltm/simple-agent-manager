@@ -11,10 +11,12 @@ import {
   DEFAULT_SERVICE_MEMORY_LIMIT_MB,
   DOCKER_SOCKET_PATHS,
   MAX_PRE_FLIGHT_TIMEOUT_SECONDS,
+  SAM_DEPLOYMENT_VOLUME_NAME_MESSAGE,
+  SAM_DEPLOYMENT_VOLUME_NAME_PATTERN_SOURCE,
 } from './constants';
 import type { ComposeParseError, UnresolvedManifest } from './types';
 
-const VOLUME_NAME_RE = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
+const VOLUME_NAME_RE = new RegExp(SAM_DEPLOYMENT_VOLUME_NAME_PATTERN_SOURCE);
 
 // =============================================================================
 // Environment parsing
@@ -194,7 +196,7 @@ function parseShortVolume(
   if (!isValidVolumeName(source)) {
     errors.push({
       path,
-      message: 'Volume names must be lowercase alphanumeric with optional hyphens, 1-63 chars.',
+      message: SAM_DEPLOYMENT_VOLUME_NAME_MESSAGE,
     });
     return null;
   }
@@ -267,7 +269,7 @@ function parseLongVolume(
   if (!isValidVolumeName(source)) {
     errors.push({
       path,
-      message: 'Volume names must be lowercase alphanumeric with optional hyphens, 1-63 chars.',
+      message: SAM_DEPLOYMENT_VOLUME_NAME_MESSAGE,
     });
     return null;
   }
@@ -300,7 +302,7 @@ export function parseVolumes(
     if (!isValidVolumeName(name)) {
       errors.push({
         path: `volumes.${name}`,
-        message: 'Volume names must be lowercase alphanumeric with optional hyphens, 1-63 chars.',
+        message: SAM_DEPLOYMENT_VOLUME_NAME_MESSAGE,
       });
       continue;
     }

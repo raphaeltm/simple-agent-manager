@@ -344,7 +344,13 @@ func newTestDiskState(t *testing.T, dir string) *DiskState {
 
 func writeTeardownRelease(t *testing.T, disk *DiskState) {
 	t.Helper()
-	state := &ReleaseState{Seq: 1, EnvironmentID: "env-a", NodeID: "node", Status: StatusApplied}
+	state := &ReleaseState{
+		Seq:              1,
+		EnvironmentID:    "env-a",
+		NodeID:           "node",
+		Status:           StatusApplied,
+		VolumeMountRoots: []string{"/mnt/sam-env-env-a/volumes/data"},
+	}
 	composeYAML := `services:
   web:
     image: nginx:latest
@@ -416,10 +422,12 @@ func assertTeardownResult(
 }
 
 type recordingVolumeMounter struct {
+	mounted       []VolumeMount
 	teardownRoots []string
 }
 
-func (m *recordingVolumeMounter) MountVolumes(context.Context, []VolumeMount) error {
+func (m *recordingVolumeMounter) MountVolumes(_ context.Context, volumes []VolumeMount) error {
+	m.mounted = append(m.mounted, volumes...)
 	return nil
 }
 
