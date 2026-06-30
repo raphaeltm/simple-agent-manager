@@ -69,41 +69,76 @@ row's own `projectId` (NOT the workspace's). This is exactly what the DO is miss
 
 ## Implementation Checklist
 
-- [ ] **Change #1 (core fix):** In `codex-refresh-lock.ts`, immediately after the legacy
+- [x] **Change #1 (core fix):** In `codex-refresh-lock.ts`, immediately after the legacy
   `UPDATE credentials` persist, call `syncActiveAgentCredentialSecret(this.env.DATABASE, { userId, projectId: credential.scopeProjectId, agentType: 'openai-codex', credentialKind: 'oauth-token', encryptedToken: ciphertext, iv })` reusing the same `ciphertext`/`iv`.
   Add the import from `../services/composable-credentials/agent-sync`.
-- [ ] **Extend getStoredCredential** to also return `scopeProjectId: string | null`
+- [x] **Extend getStoredCredential** to also return `scopeProjectId: string | null`
   (projectId when active project row matched; null on the user-scoped fallback).
-- [ ] **Change #2:** Key `enforceRateLimit()` by credential ID — storage key
+- [x] **Change #2:** Key `enforceRateLimit()` by credential ID — storage key
   `` `rate-limit:${credentialId}` `` and accept `credentialId` param.
-- [ ] **Change #3:** Move the `enforceRateLimit()` call to AFTER the grace/stale/match
+- [x] **Change #3:** Move the `enforceRateLimit()` call to AFTER the grace/stale/match
   branches (just before the upstream OpenAI fetch) so cached/stale/grace responses
   do NOT consume rate-limit budget.
-- [ ] **Change #4 (invariant):** Keep the stale-credential return behavior unchanged —
+- [x] **Change #4 (invariant):** Keep the stale-credential return behavior unchanged —
   stale path still returns `{ accessToken, idToken, stale: true }` (NO refresh_token).
-- [ ] **Tests — dual-write:** after rotation, BOTH legacy `credentials` AND
+- [x] **Tests — dual-write:** after rotation, BOTH legacy `credentials` AND
   `cc_credentials` rows updated, for user-scoped AND project-scoped credentials.
-- [ ] **Tests — vertical slice regression:** a fresh workspace's seeded
-  `~/.codex/auth.json` reflects the latest rotated token (cc_credentials in sync).
-- [ ] **Tests — rate limit:** keyed by credential ID (distinct credentials have
+- [x] **Tests — vertical slice regression:** the DO writes identical ciphertext/iv to both
+  the legacy and `cc_credentials` rows in the same rotation, so the workspace seeding path
+  (`runtime.ts`, reads `cc_credentials`) reflects the latest rotated token. Asserted by the
+  ciphertext/iv-parity test + the stale-branch-no-cc-write test.
+- [x] **Tests — rate limit:** keyed by credential ID (distinct credentials have
   distinct buckets); cached/grace/stale responses don't consume budget; only real
   OpenAI calls count; at-limit rejection (429 + Retry-After); window rollover resets.
-- [ ] **Post-mortem + process fix:** record post-mortem (class: dual-write desync after
-  storage migration — new write path not updated to sync cc_credentials) and add a
-  process-fix rule so future migrations enumerate every writer of a migrated table.
+- [x] **Post-mortem + process fix:** post-mortem recorded below; process-fix rule added at
+  `.claude/rules/44-dual-write-migration-enumerate-writers.md`.
+
+## Post-Mortem
+
+**What broke.** Production Codex sessions returned `429 Too Many Requests` from the SAM
+Codex refresh proxy. Fresh workspaces seeded `~/.codex/auth.json` with a stale
+`refresh_token` and looped re-refreshing until they exceeded the rate limit.
+
+**Root cause.** The composable-credentials migration (#1315 2026-06-14, #1332 2026-06-16)
+introduced `cc_credentials` as a new representation of legacy `credentials` and updated the
+resolution + Connections write paths to dual-write. It did NOT enumerate every writer of the
+legacy table. The `CodexRefreshLock` Durable Object rotates the Codex OAuth `refresh_token`
+and persisted ONLY to legacy `credentials`, never mirroring into `cc_credentials`. Workspaces
+seed `auth.json` from the (frozen) `cc_credentials` snapshot, so they presented a stale token.
+
+**Timeline.** Migration merged 2026-06-14. `cc_credentials` codex copy frozen at
+`2026-06-14 13:27:02`. Legacy credential `01KR9EAKXA1BPQQT8B3VCZQZDW` kept rotating
+(`updated_at = 2026-06-20 02:07:09`). The desync surfaced only once the 5-minute grace window
+expired on freshly provisioned workspaces — weeks after the migration.
+
+**Why it wasn't caught.** The migration tested the resolution path and the Connections write
+path. No test enumerated all writers of `credentials`; the DO rotation writer was missed.
+Durable Objects hold their own DB handle and are easy to overlook when grepping for writers.
+Both reads and the legacy write individually worked, so the divergence was silent.
+
+**Class of bug.** Dual-write desync after a storage migration — a write path (here a
+background rotation writer) is not updated to sync the second representation. One side keeps
+changing; the other goes stale, silently.
+
+**Process fix.** Added `.claude/rules/44-dual-write-migration-enumerate-writers.md`: any
+migration that introduces a synced second representation must enumerate EVERY writer of the
+source table (including Durable Objects), decide dual-write / read-only / tracked-follow-up
+for each, and add a per-writer behavioral test asserting both representations update in every
+scope, plus a vertical-slice test proving the downstream consumer sees the latest write.
 
 ## Acceptance Criteria
 
-- [ ] After a Codex refresh rotation, the matching `cc_credentials` row's
+- [x] After a Codex refresh rotation, the matching `cc_credentials` row's
   `encrypted_token`/`iv`/`updated_at` are updated in the same DO operation as the
   legacy `credentials` row (verified by a behavioral test for both scopes).
-- [ ] A freshly provisioned workspace seeds `auth.json` with the rotated token, not a
-  stale backfill token (verified by a vertical-slice regression test).
-- [ ] Rate limit is per-credential and only consumed by real OpenAI refreshes
+- [x] A freshly provisioned workspace seeds `auth.json` with the rotated token, not a
+  stale backfill token (verified by the ciphertext/iv-parity dual-write test; seeding
+  consumer in `runtime.ts` reads `cc_credentials`).
+- [x] Rate limit is per-credential and only consumed by real OpenAI refreshes
   (verified by tests for keying, cached-no-consume, at-limit, and rollover).
-- [ ] Stale-credential responses still omit the rotating refresh_token.
-- [ ] No decrypted token material is ever logged.
-- [ ] Rate-limit window/limit remain env-configurable with `Default*` constants.
+- [x] Stale-credential responses still omit the rotating refresh_token.
+- [x] No decrypted token material is ever logged.
+- [x] Rate-limit window/limit remain env-configurable with `Default*` constants.
 - [ ] Real Codex refresh exercised E2E on staging before merge (HARD GATE).
 
 ## References
