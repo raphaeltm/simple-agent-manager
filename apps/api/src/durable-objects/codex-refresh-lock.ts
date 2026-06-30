@@ -35,6 +35,7 @@ import * as v from 'valibot';
 import { log } from '../lib/logger';
 import { readResponseJson } from '../lib/runtime-validation';
 import { getCredentialEncryptionKey } from '../lib/secrets';
+import { syncActiveAgentCredentialSecret } from '../services/composable-credentials/agent-sync';
 import { decrypt, encrypt } from '../services/encryption';
 
 interface RefreshRequestPayload {
@@ -190,24 +191,6 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
       );
     }
 
-    // Atomic per-user rate limit (MEDIUM #5) — DO state is strongly consistent,
-    // so increments cannot race the way KV read-modify-write can.
-    const rateLimitResult = await this.enforceRateLimit();
-    if (!rateLimitResult.allowed) {
-      const retryAfter = Math.max(1, rateLimitResult.resetAt - Math.floor(Date.now() / 1000));
-      log.warn('codex_refresh.rate_limited', { userId });
-      return new Response(
-        JSON.stringify({ error: 'rate_limit_exceeded', message: 'Too many refresh requests' }),
-        {
-          status: 429,
-          headers: {
-            'Content-Type': 'application/json',
-            'Retry-After': retryAfter.toString(),
-          },
-        }
-      );
-    }
-
     // Derive encryption key from DO env (not from caller).
     const encryptionKey = getCredentialEncryptionKey(this.env);
 
@@ -279,6 +262,28 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
         idToken: tokens?.id_token ?? null,
         stale: true,
       });
+    }
+
+    // Atomic per-credential rate limit (MEDIUM #5) — DO state is strongly
+    // consistent, so increments cannot race the way KV read-modify-write can.
+    // Enforced HERE (only on the real-refresh path) so cached grace-window and
+    // stale-credential responses above do NOT consume budget — those never hit
+    // OpenAI and must not contribute to the rate limit that guards real upstream
+    // refreshes.
+    const rateLimitResult = await this.enforceRateLimit(credential.id);
+    if (!rateLimitResult.allowed) {
+      const retryAfter = Math.max(1, rateLimitResult.resetAt - Math.floor(Date.now() / 1000));
+      log.warn('codex_refresh.rate_limited', { userId });
+      return new Response(
+        JSON.stringify({ error: 'rate_limit_exceeded', message: 'Too many refresh requests' }),
+        {
+          status: 429,
+          headers: {
+            'Content-Type': 'application/json',
+            'Retry-After': retryAfter.toString(),
+          },
+        }
+      );
     }
 
     // Token matches — forward to OpenAI for a real refresh.
@@ -398,6 +403,36 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
       .bind(ciphertext, iv, credential.id)
       .run();
 
+    // CORE FIX (dual-write): mirror the rotated token into the composable-
+    // credentials store. The legacy UPDATE above only touches the `credentials`
+    // table; workspaces seed ~/.codex/auth.json from the `cc_credentials`
+    // snapshot. Without this sync, cc_credentials stays frozen at backfill time,
+    // fresh workspaces present a stale refresh_token, and Codex enters a
+    // 401 → re-refresh loop that exceeds the rate limit → 429.
+    //
+    // Reuse the same ciphertext/iv just persisted to the legacy row, and pass
+    // the credential row's OWN scope (scopeProjectId) — NOT the workspace's —
+    // so the matching active cc_credentials row is updated (mirrors runtime.ts).
+    try {
+      await syncActiveAgentCredentialSecret(db, {
+        userId,
+        projectId: credential.scopeProjectId ?? undefined,
+        agentType: 'openai-codex',
+        credentialKind: 'oauth-token',
+        encryptedToken: ciphertext,
+        iv,
+      });
+    } catch (err) {
+      // Never let a cc_credentials sync failure break the refresh — the legacy
+      // row is already updated and the caller has working tokens. Log without
+      // any token material so the desync is diagnosable.
+      log.error('codex_refresh.cc_sync_failed', {
+        userId,
+        credentialId: credential.id,
+        message: err instanceof Error ? err.message : 'unknown',
+      });
+    }
+
     // Return the new tokens to Codex.
     return this.createTokenResponse({
       accessToken: typeof newTokens.access_token === 'string' ? newTokens.access_token : null,
@@ -407,18 +442,24 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
   }
 
   /**
-   * Atomically increment the per-user rate limit counter in DO storage.
+   * Atomically increment the per-credential rate limit counter in DO storage.
    * Returns `{ allowed: false }` once the configured limit for the current
    * window is exceeded.
+   *
+   * Keyed by credential ID (not userId) so distinct credentials owned by the
+   * same user — e.g. a project-scoped override and the user-scoped default —
+   * have independent budgets. A loop on one credential must not exhaust the
+   * budget for the user's other credentials.
    */
-  private async enforceRateLimit(): Promise<{ allowed: boolean; resetAt: number }> {
+  private async enforceRateLimit(credentialId: string): Promise<{ allowed: boolean; resetAt: number }> {
     const limit = parseInt(this.env.RATE_LIMIT_CODEX_REFRESH_PER_HOUR || '', 10) || DEFAULT_RATE_LIMIT;
     const windowSeconds = parseInt(this.env.RATE_LIMIT_CODEX_REFRESH_WINDOW_SECONDS || '', 10) || DEFAULT_RATE_WINDOW_SECONDS;
     const now = Math.floor(Date.now() / 1000);
     const currentWindowStart = Math.floor(now / windowSeconds) * windowSeconds;
     const resetAt = currentWindowStart + windowSeconds;
 
-    const stored = (await this.ctx.storage.get<RateLimitState>('rate-limit')) ?? null;
+    const storageKey = `rate-limit:${credentialId}`;
+    const stored = (await this.ctx.storage.get<RateLimitState>(storageKey)) ?? null;
     const state: RateLimitState =
       stored && stored.windowStart === currentWindowStart
         ? stored
@@ -429,7 +470,7 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
     }
 
     state.count += 1;
-    await this.ctx.storage.put('rate-limit', state);
+    await this.ctx.storage.put(storageKey, state);
     return { allowed: true, resetAt };
   }
 
@@ -594,7 +635,7 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
   private async getStoredCredential(
     userId: string,
     projectId: string | null
-  ): Promise<{ id: string; encryptedToken: string; iv: string } | null> {
+  ): Promise<{ id: string; encryptedToken: string; iv: string; scopeProjectId: string | null } | null> {
     const db = this.env.DATABASE;
 
     if (projectId) {
@@ -615,6 +656,9 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
             id: projectAny.id,
             encryptedToken: projectAny.encrypted_token,
             iv: projectAny.iv,
+            // Scope of the matched row — used to mirror the rotation into the
+            // correct cc_credentials row (project-scoped, not workspace-scoped).
+            scopeProjectId: projectId,
           };
         }
         // Project-scoped row exists but is inactive — do NOT fall back.
@@ -639,6 +683,7 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
       .first<{ id: string; encrypted_token: string; iv: string }>();
 
     if (!result) return null;
-    return { id: result.id, encryptedToken: result.encrypted_token, iv: result.iv };
+    // User-scoped fallback row — its scope is null (no project override).
+    return { id: result.id, encryptedToken: result.encrypted_token, iv: result.iv, scopeProjectId: null };
   }
 }
