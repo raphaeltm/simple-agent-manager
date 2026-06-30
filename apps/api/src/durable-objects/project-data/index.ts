@@ -148,14 +148,7 @@ export class ProjectData extends DurableObject<Env> {
     return result ? this.addBaseDomain(result) : null;
   }
 
-  async getMessages(
-    sessionId: string,
-    limit: number = 1000,
-    before: number | null = null,
-    roles?: string[],
-    compact: boolean = false,
-    order: 'asc' | 'desc' = 'desc'
-  ) {
+  async getMessages(sessionId: string, limit: number = 1000, before: number | null = null, roles?: string[], compact: boolean = false, order: 'asc' | 'desc' = 'desc') {
     return messages.getMessages(this.sql, sessionId, limit, before, roles, compact, order);
   }
 
