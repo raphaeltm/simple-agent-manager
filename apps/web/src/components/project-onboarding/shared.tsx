@@ -13,6 +13,7 @@ import { ModelSelect } from '../ModelSelect';
 
 export type WizardStep = 'connect' | 'setup' | 'kickoff';
 export type SetupStatus = 'pending' | 'done' | 'skipped';
+export type SetupStatusLabels = Partial<Record<SetupStatus, string>>;
 export type FieldErrors = Partial<Record<'name' | 'repository' | 'githubRepoId' | 'general', string>>;
 
 export interface ProfileDraft {
@@ -137,8 +138,17 @@ export function StepIndicator({ current }: { current: WizardStep }) {
   );
 }
 
-export function SetupHeader({ title, status }: { title: string; status: SetupStatus }) {
-  const label = status === 'pending' ? 'Optional' : status === 'done' ? 'Created' : 'Skipped';
+export function SetupHeader({
+  title,
+  status,
+  statusLabels,
+}: {
+  title: string;
+  status: SetupStatus;
+  statusLabels?: SetupStatusLabels;
+}) {
+  const defaultLabel = status === 'pending' ? 'Optional' : status === 'done' ? 'Created' : 'Skipped';
+  const label = statusLabels?.[status] ?? defaultLabel;
   return (
     <div className="flex flex-wrap items-center justify-between gap-2">
       <h3 className="text-sm font-semibold text-fg-primary">{title}</h3>
@@ -183,6 +193,8 @@ export function ProfileSetupPanel({
   disabled,
   saving,
   showActions = true,
+  keepContentVisible = false,
+  statusLabels,
   onChange,
   onSave,
   onSkip,
@@ -194,16 +206,19 @@ export function ProfileSetupPanel({
   disabled: boolean;
   saving: boolean;
   showActions?: boolean;
+  keepContentVisible?: boolean;
+  statusLabels?: SetupStatusLabels;
   onChange: (next: ProfileDraft) => void;
   onSave: () => void;
   onSkip: () => void;
 }) {
   const fieldPrefix = title.toLowerCase().replace(/\s+/g, '-');
+  const showContent = status === 'pending' || keepContentVisible;
 
   return (
     <section className="grid gap-3 rounded-md border border-border-default bg-surface p-4">
-      <SetupHeader title={title} status={status} />
-      {status === 'pending' && (
+      <SetupHeader title={title} status={status} statusLabels={statusLabels} />
+      {showContent && (
         <>
           <div className="grid gap-3 md:grid-cols-2">
             <label htmlFor={`${fieldPrefix}-profile-name`} className="grid gap-1.5">

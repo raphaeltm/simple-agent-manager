@@ -23,6 +23,7 @@ import {
   SetupHeader,
   type ProfileDraft,
   type SetupStatus,
+  type SetupStatusLabels,
 } from '../../components/project-onboarding/shared';
 import {
   DEFAULT_CONVERSATION_DRAFT,
@@ -52,6 +53,12 @@ const STEPS: StepMeta[] = [
   { id: 'automation', label: 'Automation', icon: Clock },
   { id: 'kickoff', label: 'Kick off', icon: Rocket },
 ];
+
+const PROTOTYPE_STATUS_LABELS: SetupStatusLabels = {
+  pending: 'Optional',
+  done: 'Will create',
+  skipped: 'Skipped',
+};
 
 /* ─────────────────────────── Shared presentational ─────────────────────────── */
 
@@ -188,8 +195,9 @@ export function OnboardingPrototype() {
       : step === 'task'
         ? taskStatus
         : step === 'automation'
-          ? triggerStatus
-          : null;
+        ? triggerStatus
+        : null;
+  const isOptionalStep = optionalStepStatus !== null;
   const markOptionalStep = (status: Exclude<SetupStatus, 'pending'>) => {
     if (step === 'conversation') {
       setConversationStatus(status);
@@ -201,7 +209,7 @@ export function OnboardingPrototype() {
     goNext();
   };
   const continueStep = () => {
-    if (optionalStepStatus === 'pending') {
+    if (isOptionalStep) {
       markOptionalStep('done');
       return;
     }
@@ -419,6 +427,8 @@ export function OnboardingPrototype() {
               disabled={false}
               saving={false}
               showActions={false}
+              keepContentVisible
+              statusLabels={PROTOTYPE_STATUS_LABELS}
               onChange={setConversationDraft}
               onSave={() => setConversationStatus('done')}
               onSkip={() => setConversationStatus('skipped')}
@@ -459,6 +469,8 @@ export function OnboardingPrototype() {
               disabled={false}
               saving={false}
               showActions={false}
+              keepContentVisible
+              statusLabels={PROTOTYPE_STATUS_LABELS}
               onChange={setTaskDraft}
               onSave={() => setTaskStatus('done')}
               onSkip={() => setTaskStatus('skipped')}
@@ -493,37 +505,33 @@ export function OnboardingPrototype() {
               lead="A cron trigger runs a task agent on a schedule with a prompt you define — a nightly dependency check, a morning triage, a weekly cleanup. Skip it now and add triggers later from the project page."
             />
             <section className="grid gap-3 rounded-md border border-border-default bg-surface p-4">
-              <SetupHeader title="Cron trigger" status={triggerStatus} />
-              {triggerStatus === 'pending' && (
-                <>
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <label htmlFor="proto-trigger-name" className="grid gap-1.5">
-                      <span className="text-sm text-fg-muted">Name</span>
-                      <Input id="proto-trigger-name" value={triggerName} onChange={(e) => setTriggerName(e.currentTarget.value)} />
-                    </label>
-                    <label htmlFor="proto-cron" className="grid gap-1.5">
-                      <span className="text-sm text-fg-muted">Schedule</span>
-                      <Input
-                        id="proto-cron"
-                        value={cronExpression}
-                        onChange={(e) => setCronExpression(e.currentTarget.value)}
-                        placeholder="0 9 * * *"
-                      />
-                    </label>
-                  </div>
-                  <label htmlFor="proto-trigger-prompt" className="grid gap-1.5">
-                    <span className="text-sm text-fg-muted">Prompt</span>
-                    <textarea
-                      id="proto-trigger-prompt"
-                      value={triggerPrompt}
-                      onChange={(e) => setTriggerPrompt(e.currentTarget.value)}
-                      rows={4}
-                      placeholder="Review open dependency updates and open a PR for any safe bumps."
-                      className="w-full resize-y rounded-md bg-inset px-3 py-2 text-sm text-fg-primary"
-                    />
-                  </label>
-                </>
-              )}
+              <SetupHeader title="Cron trigger" status={triggerStatus} statusLabels={PROTOTYPE_STATUS_LABELS} />
+              <div className="grid gap-3 md:grid-cols-2">
+                <label htmlFor="proto-trigger-name" className="grid gap-1.5">
+                  <span className="text-sm text-fg-muted">Name</span>
+                  <Input id="proto-trigger-name" value={triggerName} onChange={(e) => setTriggerName(e.currentTarget.value)} />
+                </label>
+                <label htmlFor="proto-cron" className="grid gap-1.5">
+                  <span className="text-sm text-fg-muted">Schedule</span>
+                  <Input
+                    id="proto-cron"
+                    value={cronExpression}
+                    onChange={(e) => setCronExpression(e.currentTarget.value)}
+                    placeholder="0 9 * * *"
+                  />
+                </label>
+              </div>
+              <label htmlFor="proto-trigger-prompt" className="grid gap-1.5">
+                <span className="text-sm text-fg-muted">Prompt</span>
+                <textarea
+                  id="proto-trigger-prompt"
+                  value={triggerPrompt}
+                  onChange={(e) => setTriggerPrompt(e.currentTarget.value)}
+                  rows={4}
+                  placeholder="Review open dependency updates and open a PR for any safe bumps."
+                  className="w-full resize-y rounded-md bg-inset px-3 py-2 text-sm text-fg-primary"
+                />
+              </label>
             </section>
             <WhyDetails question="How does the schedule field work?">
               <p>
@@ -648,7 +656,7 @@ export function OnboardingPrototype() {
                 <ArrowLeft size={16} aria-hidden="true" /> Back
               </Button>
               <div className="grid grid-cols-2 gap-2 sm:flex sm:justify-end">
-                {optionalStepStatus === 'pending' && (
+                {isOptionalStep && (
                   <Button type="button" variant="secondary" onClick={skipStep} className="justify-center">
                     Skip
                   </Button>
@@ -657,7 +665,7 @@ export function OnboardingPrototype() {
                   <Button
                     type="button"
                     onClick={continueStep}
-                    className={`${optionalStepStatus === 'pending' ? '' : 'col-span-2'} justify-center`}
+                    className={`${isOptionalStep ? '' : 'col-span-2'} justify-center`}
                   >
                     {step === 'welcome' ? 'Get started' : 'Continue'} <ArrowRight size={16} aria-hidden="true" />
                   </Button>
