@@ -182,6 +182,7 @@ export function ProfileSetupPanel({
   configuredAgents,
   disabled,
   saving,
+  showActions = true,
   onChange,
   onSave,
   onSkip,
@@ -192,6 +193,7 @@ export function ProfileSetupPanel({
   configuredAgents: AgentInfo[];
   disabled: boolean;
   saving: boolean;
+  showActions?: boolean;
   onChange: (next: ProfileDraft) => void;
   onSave: () => void;
   onSkip: () => void;
@@ -253,14 +255,16 @@ export function ProfileSetupPanel({
             />
             <span>Use a custom GitHub CLI policy for this project repository.</span>
           </label>
-          <div className="flex flex-wrap gap-2">
-            <Button type="button" onClick={onSave} disabled={disabled || configuredAgents.length === 0}>
-              {saving ? 'Creating...' : 'Create profile'}
-            </Button>
-            <Button type="button" variant="secondary" onClick={onSkip} disabled={disabled}>
-              Skip profile
-            </Button>
-          </div>
+          {showActions && (
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" onClick={onSave} disabled={disabled || configuredAgents.length === 0}>
+                {saving ? 'Creating...' : 'Create profile'}
+              </Button>
+              <Button type="button" variant="secondary" onClick={onSkip} disabled={disabled}>
+                Skip profile
+              </Button>
+            </div>
+          )}
         </>
       )}
     </section>

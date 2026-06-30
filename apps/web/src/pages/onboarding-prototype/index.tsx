@@ -17,7 +17,13 @@ import {
 } from 'lucide-react';
 import { type ReactNode, useMemo, useState } from 'react';
 
-import { ModeButton, ProfileSetupPanel, type ProfileDraft, type SetupStatus } from '../../components/project-onboarding/shared';
+import {
+  ModeButton,
+  ProfileSetupPanel,
+  SetupHeader,
+  type ProfileDraft,
+  type SetupStatus,
+} from '../../components/project-onboarding/shared';
 import {
   DEFAULT_CONVERSATION_DRAFT,
   DEFAULT_TASK_DRAFT,
@@ -175,6 +181,34 @@ export function OnboardingPrototype() {
   const goBack = () => {
     const prev = STEPS[Math.max(currentIndex - 1, 0)]!;
     setStep(prev.id);
+  };
+  const optionalStepStatus =
+    step === 'conversation'
+      ? conversationStatus
+      : step === 'task'
+        ? taskStatus
+        : step === 'automation'
+          ? triggerStatus
+          : null;
+  const markOptionalStep = (status: Exclude<SetupStatus, 'pending'>) => {
+    if (step === 'conversation') {
+      setConversationStatus(status);
+    } else if (step === 'task') {
+      setTaskStatus(status);
+    } else if (step === 'automation') {
+      setTriggerStatus(status);
+    }
+    goNext();
+  };
+  const continueStep = () => {
+    if (optionalStepStatus === 'pending') {
+      markOptionalStep('done');
+      return;
+    }
+    goNext();
+  };
+  const skipStep = () => {
+    markOptionalStep('skipped');
   };
 
   const stepBody = useMemo<ReactNode>(() => {
@@ -384,6 +418,7 @@ export function OnboardingPrototype() {
               configuredAgents={MOCK_AGENTS}
               disabled={false}
               saving={false}
+              showActions={false}
               onChange={setConversationDraft}
               onSave={() => setConversationStatus('done')}
               onSkip={() => setConversationStatus('skipped')}
@@ -423,6 +458,7 @@ export function OnboardingPrototype() {
               configuredAgents={MOCK_AGENTS}
               disabled={false}
               saving={false}
+              showActions={false}
               onChange={setTaskDraft}
               onSave={() => setTaskStatus('done')}
               onSkip={() => setTaskStatus('skipped')}
@@ -457,45 +493,37 @@ export function OnboardingPrototype() {
               lead="A cron trigger runs a task agent on a schedule with a prompt you define — a nightly dependency check, a morning triage, a weekly cleanup. Skip it now and add triggers later from the project page."
             />
             <section className="grid gap-3 rounded-md border border-border-default bg-surface p-4">
-              <div className="grid gap-3 md:grid-cols-2">
-                <label htmlFor="proto-trigger-name" className="grid gap-1.5">
-                  <span className="text-sm text-fg-muted">Name</span>
-                  <Input id="proto-trigger-name" value={triggerName} onChange={(e) => setTriggerName(e.currentTarget.value)} />
-                </label>
-                <label htmlFor="proto-cron" className="grid gap-1.5">
-                  <span className="text-sm text-fg-muted">Schedule</span>
-                  <Input
-                    id="proto-cron"
-                    value={cronExpression}
-                    onChange={(e) => setCronExpression(e.currentTarget.value)}
-                    placeholder="0 9 * * *"
-                  />
-                </label>
-              </div>
-              <label htmlFor="proto-trigger-prompt" className="grid gap-1.5">
-                <span className="text-sm text-fg-muted">Prompt</span>
-                <textarea
-                  id="proto-trigger-prompt"
-                  value={triggerPrompt}
-                  onChange={(e) => setTriggerPrompt(e.currentTarget.value)}
-                  rows={4}
-                  placeholder="Review open dependency updates and open a PR for any safe bumps."
-                  className="w-full resize-y rounded-md bg-inset px-3 py-2 text-sm text-fg-primary"
-                />
-              </label>
-              <div className="flex flex-wrap gap-2">
-                <Button type="button" onClick={() => setTriggerStatus('done')} disabled={triggerStatus !== 'pending'}>
-                  {triggerStatus === 'done' ? 'Trigger created' : 'Create trigger'}
-                </Button>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  onClick={() => setTriggerStatus('skipped')}
-                  disabled={triggerStatus !== 'pending'}
-                >
-                  Skip
-                </Button>
-              </div>
+              <SetupHeader title="Cron trigger" status={triggerStatus} />
+              {triggerStatus === 'pending' && (
+                <>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <label htmlFor="proto-trigger-name" className="grid gap-1.5">
+                      <span className="text-sm text-fg-muted">Name</span>
+                      <Input id="proto-trigger-name" value={triggerName} onChange={(e) => setTriggerName(e.currentTarget.value)} />
+                    </label>
+                    <label htmlFor="proto-cron" className="grid gap-1.5">
+                      <span className="text-sm text-fg-muted">Schedule</span>
+                      <Input
+                        id="proto-cron"
+                        value={cronExpression}
+                        onChange={(e) => setCronExpression(e.currentTarget.value)}
+                        placeholder="0 9 * * *"
+                      />
+                    </label>
+                  </div>
+                  <label htmlFor="proto-trigger-prompt" className="grid gap-1.5">
+                    <span className="text-sm text-fg-muted">Prompt</span>
+                    <textarea
+                      id="proto-trigger-prompt"
+                      value={triggerPrompt}
+                      onChange={(e) => setTriggerPrompt(e.currentTarget.value)}
+                      rows={4}
+                      placeholder="Review open dependency updates and open a PR for any safe bumps."
+                      className="w-full resize-y rounded-md bg-inset px-3 py-2 text-sm text-fg-primary"
+                    />
+                  </label>
+                </>
+              )}
             </section>
             <WhyDetails question="How does the schedule field work?">
               <p>
@@ -606,17 +634,39 @@ export function OnboardingPrototype() {
             {stepBody}
 
             {/* Footer nav */}
-            <nav className="flex items-center justify-between gap-2 border-t border-border-default pt-4" aria-label="Step navigation">
-              <Button type="button" variant="secondary" onClick={goBack} disabled={currentIndex === 0}>
+            <nav
+              className="grid gap-2 border-t border-border-default pt-4 sm:flex sm:items-center sm:justify-between"
+              aria-label="Step navigation"
+            >
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={goBack}
+                disabled={currentIndex === 0}
+                className="justify-center sm:justify-start"
+              >
                 <ArrowLeft size={16} aria-hidden="true" /> Back
               </Button>
-              {currentIndex < STEPS.length - 1 ? (
-                <Button type="button" onClick={goNext}>
-                  {step === 'welcome' ? 'Get started' : 'Continue'} <ArrowRight size={16} aria-hidden="true" />
-                </Button>
-              ) : (
-                <Button type="button">Open project</Button>
-              )}
+              <div className="grid grid-cols-2 gap-2 sm:flex sm:justify-end">
+                {optionalStepStatus === 'pending' && (
+                  <Button type="button" variant="secondary" onClick={skipStep} className="justify-center">
+                    Skip
+                  </Button>
+                )}
+                {currentIndex < STEPS.length - 1 ? (
+                  <Button
+                    type="button"
+                    onClick={continueStep}
+                    className={`${optionalStepStatus === 'pending' ? '' : 'col-span-2'} justify-center`}
+                  >
+                    {step === 'welcome' ? 'Get started' : 'Continue'} <ArrowRight size={16} aria-hidden="true" />
+                  </Button>
+                ) : (
+                  <Button type="button" className="col-span-2 justify-center">
+                    Open project
+                  </Button>
+                )}
+              </div>
             </nav>
           </section>
         </div>
