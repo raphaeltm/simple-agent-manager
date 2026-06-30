@@ -43,7 +43,7 @@ Status updates already appear correctly in project notifications. The fix should
 - [x] Run local visual audit for the timeline drawer at mobile and desktop sizes.
 - [x] Run local lint, typecheck, tests, and build.
 - [x] Run required specialist reviews and address findings.
-- [ ] Create PR with explicit note that staging was skipped by user instruction.
+- [x] Create PR with explicit note that staging was skipped by user instruction.
 
 ## Review Results
 
@@ -65,6 +65,7 @@ Status updates already appear correctly in project notifications. The fix should
 - Focused web timeline tests passed: `buildSessionTimeline`, `useSessionTimeline`, `ChatTimelineDrawer`.
 - Local Playwright audit passed: `apps/web/tests/playwright/chat-timeline-drawer-audit.spec.ts` across iPhone SE and Desktop projects, 8/8.
 - Staging deployment and staging mutation were intentionally skipped by explicit user instruction.
+- PR: https://github.com/raphaeltm/simple-agent-manager/pull/1443
 
 ## Acceptance Criteria
 
