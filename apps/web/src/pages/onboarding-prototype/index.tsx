@@ -245,18 +245,20 @@ export function OnboardingPrototype() {
               ))}
             </div>
             <Callout variant="warn">
-              <strong className="font-semibold text-fg-primary">Nothing is saved unless you ask.</strong> Workspaces are
-              ephemeral. If an agent edits files, runs a build, or produces output and you don't tell it to push, upload,
-              or otherwise persist that work, it's gone when the workspace stops.
+              <strong className="font-semibold text-fg-primary">Workspaces are ephemeral.</strong> A task agent
+              auto-pushes its branch and opens a PR when it finishes, so its work survives. A conversation agent does
+              not — if it edits files or produces output and you don't tell it to push or persist that work, it's gone
+              when the workspace stops.
             </Callout>
             <WhyDetails question="Where can work go so it survives?">
-              <p>There are a few durable destinations, and the agent only uses them when instructed:</p>
+              <p>There are a few durable destinations:</p>
               <ul className="grid gap-1.5 pl-1">
                 <li className="flex items-start gap-2">
                   <Github size={15} className="mt-0.5 shrink-0 text-fg-muted" aria-hidden="true" />
                   <span>
-                    <strong className="text-fg-secondary">Push to a branch.</strong> The agent commits and pushes to its
-                    own branch on your repo — in the standard task workflow it then opens a pull request for you to review.
+                    <strong className="text-fg-secondary">Push to a branch.</strong> A finished task agent commits and
+                    pushes its own branch automatically and opens a pull request for review. In a conversation, you ask
+                    the agent to push when you're ready.
                   </span>
                 </li>
                 <li className="flex items-start gap-2">
@@ -354,9 +356,9 @@ export function OnboardingPrototype() {
                 so the App's permissions are the hard ceiling on what any agent can ever do here.
               </p>
               <p>
-                The branch you pick is the base agents branch off of. They work on their own branch and
-                only push it — and open a pull request — when you tell them to. SAM never pushes to your
-                default branch on its own.
+                The branch you pick is the base agents branch off of. Each run works on its own branch, so
+                SAM never pushes to your default branch on its own. A finished task agent auto-pushes that
+                branch and opens a PR for review; a conversation agent only pushes when you ask it to.
               </p>
             </WhyDetails>
           </div>
@@ -371,8 +373,9 @@ export function OnboardingPrototype() {
               lead="A conversation profile powers interactive chat — you talk to the agent, it reads and edits code live, and you stay in the loop. It's long-running and open-ended: it stays up as long as you're working with it. This is the agent you'll reach for most often."
             />
             <Callout variant="info">
-              Conversation agents default to a <strong className="font-semibold text-fg-primary">full</strong> workspace —
-              the complete devcontainer build, so the environment matches your repo exactly.
+              Conversation profiles default to a <strong className="font-semibold text-fg-primary">lightweight</strong>{' '}
+              workspace — it skips the devcontainer build for a faster start, since interactive chat usually doesn't need
+              the full environment spun up.
             </Callout>
             <ProfileSetupPanel
               title="Conversation profile"
@@ -409,9 +412,9 @@ export function OnboardingPrototype() {
               lead="A task profile runs a single, one-off job autonomously and is expected to finish on its own. Use it for work you can hand off and review later instead of watching live."
             />
             <Callout variant="info">
-              Task agents default to a <strong className="font-semibold text-fg-primary">lightweight</strong> workspace —
-              it skips the devcontainer build for a faster start, since one-off jobs usually don't need the full
-              environment.
+              Task profiles default to a <strong className="font-semibold text-fg-primary">full</strong> workspace —
+              the complete devcontainer build, so an autonomous job runs against an environment that matches your repo
+              exactly with no missing tooling.
             </Callout>
             <ProfileSetupPanel
               title="Task profile"
@@ -436,9 +439,10 @@ export function OnboardingPrototype() {
                 workspace — so a stuck task never lingers and burns resources.
               </p>
               <p>
-                Just like a conversation, the workspace is ephemeral: the agent only keeps work by pushing
-                its branch (and, in the standard workflow, opening a PR) or uploading to the SAM library —
-                because it was told to, never automatically.
+                The workspace is still ephemeral, but task mode persists for you: when the agent finishes, SAM
+                auto-commits any pending changes, pushes the agent's branch, and opens a pull request for review.
+                It pushes that branch — never your default branch. (Conversation mode does none of this; there you
+                push when you decide to.)
               </p>
             </WhyDetails>
           </div>
@@ -496,8 +500,8 @@ export function OnboardingPrototype() {
             <WhyDetails question="How does the schedule field work?">
               <p>
                 The schedule uses standard cron syntax. <code>0 9 * * *</code> runs every day at 09:00;
-                <code> 0 9 * * 1</code> runs every Monday at 09:00. Each run dispatches your task agent
-                with the prompt above, exactly as if you'd submitted it by hand.
+                <code> 0 9 * * 1</code> runs every Monday at 09:00. Each run dispatches a task agent with the
+                prompt above through the same pipeline a manual task uses.
               </p>
             </WhyDetails>
           </div>
