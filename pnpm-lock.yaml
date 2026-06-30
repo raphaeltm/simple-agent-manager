@@ -454,8 +454,8 @@ importers:
         specifier: 3.217.1
         version: 3.217.1(typescript@5.9.3)
       '@pulumi/random':
-        specifier: 4.19.2
-        version: 4.19.2(typescript@5.9.3)
+        specifier: 4.21.0
+        version: 4.21.0(typescript@5.9.3)
       '@pulumi/tls':
         specifier: 5.5.0
         version: 5.5.0(typescript@5.9.3)
@@ -2984,8 +2984,8 @@ packages:
       typescript:
         optional: true
 
-  '@pulumi/random@4.19.2':
-    resolution: {integrity: sha512-ee77eUIfPMekYi9x7/3iDVIhqUcZrvXQpC8YNTRN8XKfRDuuWio4xu2CvoHeEBDOov84FumMafFqn+xSf+XlDQ==}
+  '@pulumi/random@4.21.0':
+    resolution: {integrity: sha512-k4JHqQFOKXWkbSLZtX37xBlRsurfgZbLd1Zib0cLSDP4Dt3uTllR3CBWfMLSnXJGAoTr9MlwyHCer/5tmSaF0Q==}
 
   '@pulumi/tls@5.5.0':
     resolution: {integrity: sha512-OTGxp4sgDEuXlXrd7NtxrhhciPgcn9rqDIZlGOTmTaeGo+tlVMwv73FFqiVrzAmBiILdU8tLXHfxhjc+bTLdrQ==}
@@ -7112,8 +7112,8 @@ packages:
     engines: {node: ^10 || ^12 || ^13.7 || ^14 || >=15.0.1}
     hasBin: true
 
-  nanoid@3.3.12:
-    resolution: {integrity: sha512-ZB9RH/39qpq5Vu6Y+NmUaFhQR6pp+M2Xt76XBnEwDaGcVAqhlvxrl3B2bKS5D3NH3QR76v3aSrKaF/Kiy7lEtQ==}
+  nanoid@3.3.15:
+    resolution: {integrity: sha512-y7Wygv/7mEOvxTuEQDB8StXdMRBWf1kR/tlhAzBRUFkB2jfcLOAxO/SHmOO2zgz1pVgK29/kyupn059/bCHdjA==}
     engines: {node: ^10 || ^12 || ^13.7 || ^14 || >=15.0.1}
     hasBin: true
 
@@ -9145,7 +9145,7 @@ snapshots:
   '@ai-sdk/provider-utils@2.2.8(zod@4.3.6)':
     dependencies:
       '@ai-sdk/provider': 1.1.3
-      nanoid: 3.3.12
+      nanoid: 3.3.15
       secure-json-parse: 2.7.0
       zod: 4.3.6
 
@@ -11430,7 +11430,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@pulumi/random@4.19.2(typescript@5.9.3)':
+  '@pulumi/random@4.21.0(typescript@5.9.3)':
     dependencies:
       '@pulumi/pulumi': 3.217.1(typescript@5.9.3)
     transitivePeerDependencies:
@@ -12681,7 +12681,7 @@ snapshots:
       obug: 2.1.3
       std-env: 4.1.0
       tinyrainbow: 3.1.0
-      vitest: 4.1.5(@opentelemetry/api@1.9.0)(@types/node@22.19.7)(@vitest/coverage-v8@4.1.5)(jsdom@29.1.1(@noble/hashes@2.0.1))(vite@7.3.6(@types/node@22.19.7)(jiti@2.6.1)(lightningcss@1.32.0)(terser@5.46.0)(tsx@4.21.0)(yaml@2.9.0))
+      vitest: 4.1.5(@opentelemetry/api@1.9.0)(@types/node@25.9.1)(@vitest/coverage-v8@4.1.5)(jsdom@29.1.1(@noble/hashes@2.0.1))(vite@7.3.6(@types/node@25.9.1)(jiti@2.6.1)(lightningcss@1.32.0)(terser@5.46.0)(tsx@4.21.0)(yaml@2.9.0))
     optional: true
 
   '@vitest/coverage-v8@4.1.7(vitest@4.1.5)':
@@ -16493,7 +16493,7 @@ snapshots:
 
   nanoid@3.3.11: {}
 
-  nanoid@3.3.12: {}
+  nanoid@3.3.15: {}
 
   nanostores@1.3.0: {}
 
