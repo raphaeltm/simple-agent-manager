@@ -13,6 +13,7 @@ const SEVERITY_COLORS: Record<string, string> = {
 };
 
 const DOT_COLOR_USER = '#22c55e';
+const DOT_COLOR_PROGRESS = '#60a5fa';
 
 function formatTime(ts: number): string {
   return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -142,6 +143,20 @@ export function ChatTimelineDrawer({
                             {entry.text}
                           </div>
                         </button>
+                      </TimelineItem>
+                    ) : entry.kind === 'progress_notification' ? (
+                      <TimelineItem dot={{ color: DOT_COLOR_PROGRESS, muted: true }}>
+                        <div className="py-1.5 px-1">
+                          <div className="text-xs text-fg-muted mb-0.5">
+                            {formatTime(entry.timestamp)}
+                          </div>
+                          <div className="text-[11px] uppercase text-fg-muted mb-1">
+                            Status update
+                          </div>
+                          <div className="text-sm text-fg-primary leading-snug line-clamp-3">
+                            {entry.text}
+                          </div>
+                        </div>
                       </TimelineItem>
                     ) : (
                       <TimelineItem

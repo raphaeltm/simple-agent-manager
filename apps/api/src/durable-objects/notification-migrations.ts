@@ -67,6 +67,14 @@ export const NOTIFICATION_MIGRATIONS: NotificationMigration[] = [
       `);
     },
   },
+  {
+    name: '002-session-filter-index',
+    run: (sql) => {
+      sql.exec(
+        `CREATE INDEX idx_notifications_session_type ON notifications(user_id, project_id, session_id, type, created_at DESC)`
+      );
+    },
+  },
 ];
 
 /**

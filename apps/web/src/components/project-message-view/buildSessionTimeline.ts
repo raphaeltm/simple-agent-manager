@@ -1,3 +1,5 @@
+import type { NotificationResponse } from '@simple-agent-manager/shared';
+
 import type { ActivityEventResponse, ChatMessageResponse } from '../../lib/api/sessions';
 import type { TimelineEntry } from './timeline-types';
 
@@ -44,9 +46,19 @@ function truncateText(text: string, maxLen: number): string {
   return text.slice(0, maxLen - 1) + '\u2026';
 }
 
+function getNotificationText(notification: NotificationResponse): string {
+  const fullMessage = notification.metadata?.fullMessage;
+  const text =
+    typeof fullMessage === 'string' && fullMessage.trim()
+      ? fullMessage
+      : notification.body || notification.title;
+  return truncateText(text.trim(), 180);
+}
+
 export function buildSessionTimeline(
   messages: ChatMessageResponse[],
   activityEvents: ActivityEventResponse[],
+  progressNotifications: NotificationResponse[],
   showContext: boolean,
   messageIndexMap: Map<string, number>
 ): TimelineEntry[] {
@@ -65,6 +77,25 @@ export function buildSessionTimeline(
       text: truncateText(text.trim(), 120),
       timestamp: msg.createdAt,
       messageIndex: messageIndexMap.get(msg.id) ?? -1,
+    });
+  }
+
+  for (const notification of progressNotifications) {
+    if (notification.type !== 'progress') continue;
+    const timestamp = Date.parse(notification.createdAt);
+    if (!Number.isFinite(timestamp)) continue;
+
+    const text = getNotificationText(notification);
+    if (!text) continue;
+
+    entries.push({
+      kind: 'progress_notification',
+      id: `notif-${notification.id}`,
+      notificationId: notification.id,
+      title: notification.title,
+      text,
+      timestamp,
+      severity: 'info',
     });
   }
 

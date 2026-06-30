@@ -32,18 +32,39 @@ Status updates already appear correctly in project notifications. The fix should
 
 ## Implementation Checklist
 
-- [ ] Add `sessionId` as a validated filter on `GET /api/notifications`.
-- [ ] Add `sessionId` support to `Notification.listNotifications()` and web `listNotifications()`.
-- [ ] Add an efficient Notification Durable Object index for session-scoped notification queries.
-- [ ] Extend timeline types and builder to support progress notification entries.
-- [ ] Update `useSessionTimeline()` to fetch current-session `progress` notifications and merge them into timeline entries.
-- [ ] Render progress/status entries visibly by default in the timeline drawer, using `metadata.fullMessage` when available and falling back to `body`.
-- [ ] Add or update API/DO tests proving `sessionId + type=progress + projectId` filtering works.
-- [ ] Add or update web tests proving timeline progress notifications are fetched, merged, sorted, and rendered.
-- [ ] Run local visual audit for the timeline drawer at mobile and desktop sizes.
-- [ ] Run local lint, typecheck, tests, and build.
-- [ ] Run required specialist reviews and address findings.
+- [x] Add `sessionId` as a validated filter on `GET /api/notifications`.
+- [x] Add `sessionId` support to `Notification.listNotifications()` and web `listNotifications()`.
+- [x] Add an efficient Notification Durable Object index for session-scoped notification queries.
+- [x] Extend timeline types and builder to support progress notification entries.
+- [x] Update `useSessionTimeline()` to fetch current-session `progress` notifications and merge them into timeline entries.
+- [x] Render progress/status entries visibly by default in the timeline drawer, using `metadata.fullMessage` when available and falling back to `body`.
+- [x] Add or update API/DO tests proving `sessionId + type=progress + projectId` filtering works.
+- [x] Add or update web tests proving timeline progress notifications are fetched, merged, sorted, and rendered.
+- [x] Run local visual audit for the timeline drawer at mobile and desktop sizes.
+- [x] Run local lint, typecheck, tests, and build.
+- [x] Run required specialist reviews and address findings.
 - [ ] Create PR with explicit note that staging was skipped by user instruction.
+
+## Review Results
+
+- `$task-completion-validator` — PASS. Research findings map to checklist items and the diff; acceptance criteria are covered by API/DO tests, timeline builder/hook/drawer tests, full suite validation, and local Playwright evidence. No new UI input propagation or multi-resource selection gaps.
+- `$ui-ux-specialist` — PASS. Progress rows are visible by default in chronological order, with muted blue timeline dots and compact labels that do not compete with user turns. Screenshots were inspected at `apps/web/.codex/tmp/playwright-screenshots/timeline-drawer-desktop-1280x800.png` and `apps/web/.codex/tmp/playwright-screenshots/timeline-drawer-mobile-messages-375x667.png`; no overlap, clipping, or horizontal overflow observed.
+- `$test-engineer` — PASS. Coverage includes route validation, Durable Object filtering with realistic notification state, client API wiring, hook pagination, timeline builder merge/sort behavior, drawer rendering, and Playwright audit coverage.
+- `$cloudflare-specialist` — PASS. Notification DO migration is append-only, the new composite index matches the session/project/type query shape, and no D1/staging mutation was performed.
+- `$constitution-validator` — PASS. The implementation avoids a new hardcoded client-side notification limit by following notification pagination. The session ID regex is a bounded input-validation guard, not a deployment/config constant.
+- `$doc-sync-validator` — PASS. Internal API reference coverage was updated for the `GET /api/notifications` `sessionId` filter. No public docs, environment variables, or self-hosting docs required changes.
+
+## Validation Evidence
+
+- `git diff --check` passed.
+- `pnpm typecheck` passed.
+- `pnpm lint` passed with existing warnings only.
+- `pnpm test` passed across the repo, including API 356 files / 5,568 tests and web 199 files / 2,494 tests.
+- `pnpm build` passed.
+- Focused API notification tests passed: `notifications-validation`, `notification-migrations`, `notification-suppression`.
+- Focused web timeline tests passed: `buildSessionTimeline`, `useSessionTimeline`, `ChatTimelineDrawer`.
+- Local Playwright audit passed: `apps/web/tests/playwright/chat-timeline-drawer-audit.spec.ts` across iPhone SE and Desktop projects, 8/8.
+- Staging deployment and staging mutation were intentionally skipped by explicit user instruction.
 
 ## Acceptance Criteria
 

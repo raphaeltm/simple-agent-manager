@@ -72,6 +72,17 @@ user-invocable: false
 - `PUT /api/agent-settings/:agentType` — Upsert agent settings (model, permissionMode)
 - `DELETE /api/agent-settings/:agentType` — Reset agent settings to defaults
 
+## Notifications
+
+- `GET /api/notifications` — List notifications (supports `cursor`, `limit`, `filter`, `type`, `projectId`, `sessionId`)
+- `GET /api/notifications/unread-count` — Get unread notification count
+- `POST /api/notifications/:id/read` — Mark a notification as read
+- `POST /api/notifications/read-all` — Mark all notifications as read
+- `POST /api/notifications/:id/dismiss` — Dismiss a notification
+- `GET /api/notifications/preferences` — Get notification preferences
+- `PUT /api/notifications/preferences` — Update a notification preference
+- `GET /api/notifications/ws` — WebSocket upgrade for real-time notification delivery
+
 ## VM Communication (Callback Endpoints)
 
 - `POST /api/nodes/:id/ready` — Node Agent ready callback

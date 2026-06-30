@@ -1,5 +1,7 @@
+import type { NotificationResponse } from '@simple-agent-manager/shared';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
+import { listNotifications } from '../../lib/api/notifications';
 import type { ActivityEventResponse, ChatMessageResponse } from '../../lib/api/sessions';
 import { listActivityEvents, listChatMessages } from '../../lib/api/sessions';
 import { mergeMessages } from '../../lib/merge-messages';
@@ -22,6 +24,7 @@ export function useSessionTimeline(
 ): UseSessionTimelineResult {
   const [timelineMessages, setTimelineMessages] = useState<ChatMessageResponse[]>([]);
   const [activityEvents, setActivityEvents] = useState<ActivityEventResponse[]>([]);
+  const [progressNotifications, setProgressNotifications] = useState<NotificationResponse[]>([]);
   const [loading, setLoading] = useState(false);
   const [showContext, setShowContext] = useState(false);
 
@@ -54,6 +57,30 @@ export function useSessionTimeline(
     }
 
     try {
+      const notificationPages: NotificationResponse[][] = [];
+      let cursor: string | undefined;
+
+      for (;;) {
+        const notificationsResult = await listNotifications({
+          projectId,
+          sessionId,
+          type: 'progress',
+          cursor,
+        });
+        notificationPages.push(notificationsResult.notifications);
+
+        if (!notificationsResult.nextCursor || notificationsResult.notifications.length === 0) {
+          break;
+        }
+        cursor = notificationsResult.nextCursor;
+      }
+
+      setProgressNotifications(notificationPages.flat());
+    } catch {
+      // Silently handle — timeline is supplementary
+    }
+
+    try {
       const eventsResult = await listActivityEvents(projectId, {
         sessionId,
         limit: 100,
@@ -69,6 +96,7 @@ export function useSessionTimeline(
   useEffect(() => {
     setTimelineMessages([]);
     setActivityEvents([]);
+    setProgressNotifications([]);
   }, [projectId, sessionId]);
 
   // Fetch server-backed timeline data when drawer opens
@@ -83,8 +111,8 @@ export function useSessionTimeline(
   );
 
   const entries = useMemo(
-    () => buildSessionTimeline(messagesForTimeline, activityEvents, showContext, messageIndexMap),
-    [messagesForTimeline, activityEvents, showContext, messageIndexMap]
+    () => buildSessionTimeline(messagesForTimeline, activityEvents, progressNotifications, showContext, messageIndexMap),
+    [messagesForTimeline, activityEvents, progressNotifications, showContext, messageIndexMap]
   );
 
   return { entries, loading, showContext, setShowContext };

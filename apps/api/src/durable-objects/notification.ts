@@ -211,6 +211,7 @@ export class NotificationService extends DurableObject<Env> {
       filter?: 'all' | 'unread';
       type?: NotificationType;
       projectId?: string;
+      sessionId?: string;
     } = {}
   ): Promise<{
     notifications: NotificationResponse[];
@@ -235,6 +236,10 @@ export class NotificationService extends DurableObject<Env> {
     if (options.projectId) {
       query += ` AND project_id = ?`;
       params.push(options.projectId);
+    }
+    if (options.sessionId) {
+      query += ` AND session_id = ?`;
+      params.push(options.sessionId);
     }
     if (options.cursor) {
       query += ` AND created_at < ?`;
