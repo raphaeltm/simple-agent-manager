@@ -427,6 +427,7 @@ export function OnboardingPrototype() {
               disabled={false}
               saving={false}
               showActions={false}
+              showGithubPolicy={false}
               keepContentVisible
               statusLabels={PROTOTYPE_STATUS_LABELS}
               onChange={setConversationDraft}
@@ -469,6 +470,7 @@ export function OnboardingPrototype() {
               disabled={false}
               saving={false}
               showActions={false}
+              showGithubPolicy={false}
               keepContentVisible
               statusLabels={PROTOTYPE_STATUS_LABELS}
               onChange={setTaskDraft}

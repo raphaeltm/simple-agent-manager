@@ -193,6 +193,7 @@ export function ProfileSetupPanel({
   disabled,
   saving,
   showActions = true,
+  showGithubPolicy = true,
   keepContentVisible = false,
   statusLabels,
   onChange,
@@ -206,6 +207,7 @@ export function ProfileSetupPanel({
   disabled: boolean;
   saving: boolean;
   showActions?: boolean;
+  showGithubPolicy?: boolean;
   keepContentVisible?: boolean;
   statusLabels?: SetupStatusLabels;
   onChange: (next: ProfileDraft) => void;
@@ -260,16 +262,18 @@ export function ProfileSetupPanel({
               placeholder="Use profile default"
             />
           </label>
-          <label className="flex min-h-11 items-start gap-2 rounded-md border border-border-default p-3 text-sm text-fg-muted">
-            <input
-              type="checkbox"
-              checked={draft.useCustomGithubPolicy}
-              onChange={(event) => onChange({ ...draft, useCustomGithubPolicy: event.currentTarget.checked })}
-              disabled={disabled}
-              className="mt-1"
-            />
-            <span>Use a custom GitHub CLI policy for this project repository.</span>
-          </label>
+          {showGithubPolicy && (
+            <label className="flex min-h-11 items-start gap-2 rounded-md border border-border-default p-3 text-sm text-fg-muted">
+              <input
+                type="checkbox"
+                checked={draft.useCustomGithubPolicy}
+                onChange={(event) => onChange({ ...draft, useCustomGithubPolicy: event.currentTarget.checked })}
+                disabled={disabled}
+                className="mt-1"
+              />
+              <span>Use a custom GitHub CLI policy for this project repository.</span>
+            </label>
+          )}
           {showActions && (
             <div className="flex flex-wrap gap-2">
               <Button type="button" onClick={onSave} disabled={disabled || configuredAgents.length === 0}>

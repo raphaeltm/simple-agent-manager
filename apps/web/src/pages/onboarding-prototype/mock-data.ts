@@ -59,5 +59,5 @@ export const DEFAULT_TASK_DRAFT: ProfileDraft = {
   description: '',
   agentType: 'claude-code',
   model: '',
-  useCustomGithubPolicy: true,
+  useCustomGithubPolicy: false,
 };
