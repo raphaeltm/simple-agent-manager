@@ -833,6 +833,28 @@ describe('ProjectData Durable Object', () => {
       expect(messages).toHaveLength(3);
       expect(hasMore).toBe(true);
     });
+
+    it('can return the oldest user message with ascending order and role filtering', async () => {
+      const stub = getStub('project-msg-oldest-user');
+      const sessionId = await stub.createSession(null, null);
+
+      await stub.persistMessage(sessionId, 'user', 'Initial prompt', null);
+      await stub.persistMessage(sessionId, 'assistant', 'Working on it', null);
+      await stub.persistMessage(sessionId, 'user', 'Follow-up prompt', null);
+
+      const { messages, hasMore } = await stub.getMessages(
+        sessionId,
+        1,
+        null,
+        ['user'],
+        true,
+        'asc',
+      );
+
+      expect(messages).toHaveLength(1);
+      expect(messages[0]!.content).toBe('Initial prompt');
+      expect(hasMore).toBe(true);
+    });
   });
 
   // =========================================================================

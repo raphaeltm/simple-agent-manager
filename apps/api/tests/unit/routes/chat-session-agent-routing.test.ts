@@ -552,6 +552,27 @@ describe('chatRoutes message list', () => {
       2000,
       ['user'],
       true,
+      'desc',
+    );
+  });
+
+  it('passes ascending order through for first-message lookups', async () => {
+    const response = await app.request(
+      '/api/projects/proj-1/sessions/chat-1/messages?roles=user&limit=1&compact=true&order=asc',
+      { method: 'GET' },
+      { DATABASE: {}, CHAT_SESSION_MESSAGE_LIMIT: '500' } as Env,
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.getMessages).toHaveBeenCalledWith(
+      expect.anything(),
+      'proj-1',
+      'chat-1',
+      1,
+      null,
+      ['user'],
+      true,
+      'asc',
     );
   });
 
@@ -571,6 +592,17 @@ describe('chatRoutes message list', () => {
   it('rejects invalid before cursors', async () => {
     const response = await app.request(
       '/api/projects/proj-1/sessions/chat-1/messages?before=not-a-timestamp',
+      { method: 'GET' },
+      { DATABASE: {} } as Env,
+    );
+
+    expect(response.status).toBe(400);
+    expect(mocks.getMessages).not.toHaveBeenCalled();
+  });
+
+  it('rejects invalid message order values', async () => {
+    const response = await app.request(
+      '/api/projects/proj-1/sessions/chat-1/messages?order=sideways',
       { method: 'GET' },
       { DATABASE: {} } as Env,
     );

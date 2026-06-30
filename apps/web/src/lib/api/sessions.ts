@@ -210,13 +210,14 @@ export async function getChatSession(
 export async function listChatMessages(
   projectId: string,
   sessionId: string,
-  params: { limit?: number; before?: number; roles?: string[]; compact?: boolean; signal?: AbortSignal } = {}
+  params: { limit?: number; before?: number; roles?: string[]; compact?: boolean; order?: 'asc' | 'desc'; signal?: AbortSignal } = {}
 ): Promise<ChatMessagesListResponse> {
   const searchParams = new URLSearchParams();
   if (params.limit !== undefined) searchParams.set('limit', String(params.limit));
   if (params.before !== undefined) searchParams.set('before', String(params.before));
   if (params.roles && params.roles.length > 0) searchParams.set('roles', params.roles.join(','));
   if (params.compact !== undefined) searchParams.set('compact', String(params.compact));
+  if (params.order !== undefined) searchParams.set('order', params.order);
 
   const qs = searchParams.toString();
   const endpoint = qs

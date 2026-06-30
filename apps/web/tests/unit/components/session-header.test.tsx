@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   updateProjectTaskStatus: vi.fn(),
   deleteWorkspace: vi.fn(),
   getProjectTask: vi.fn(),
+  listChatMessages: vi.fn(),
   updateWorkspacePortsPublic: vi.fn(),
 }));
 
@@ -16,6 +17,7 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
   updateProjectTaskStatus: mocks.updateProjectTaskStatus,
   deleteWorkspace: mocks.deleteWorkspace,
   getProjectTask: mocks.getProjectTask,
+  listChatMessages: mocks.listChatMessages,
   updateWorkspacePortsPublic: mocks.updateWorkspacePortsPublic,
 }));
 
@@ -44,6 +46,7 @@ vi.mock('@simple-agent-manager/ui', () => ({
 
 vi.mock('lucide-react', () => ({
   AlertTriangle: () => <span />,
+  Bot: () => <span />,
   Box: () => <span />,
   CheckCircle2: () => <span data-testid="icon-check-circle" />,
   ChevronDown: () => <span />,
@@ -61,11 +64,13 @@ vi.mock('lucide-react', () => ({
   Hash: () => <span />,
   Loader2: () => <span />,
   MapPin: () => <span />,
+  MessageSquare: () => <span />,
   Monitor: () => <span />,
   RotateCcw: () => <span />,
   Server: () => <span />,
   Tag: () => <span />,
   Timer: () => <span />,
+  User2: () => <span />,
 }));
 
 import { SessionHeader } from '../../../src/components/project-message-view/SessionHeader';
@@ -151,6 +156,7 @@ describe('SessionHeader', () => {
     vi.clearAllMocks();
     mocks.updateProjectTaskStatus.mockResolvedValue({});
     mocks.deleteWorkspace.mockResolvedValue({});
+    mocks.listChatMessages.mockResolvedValue({ messages: [], hasMore: false });
     mocks.updateWorkspacePortsPublic.mockResolvedValue(makeWorkspace({ portsPublicEnabled: true }));
   });
 
@@ -184,6 +190,77 @@ describe('SessionHeader', () => {
     fireEvent.click(screen.getByLabelText('Show session details'));
     // Branch should now be visible
     expect(screen.getByText('sam/test')).toBeInTheDocument();
+  });
+
+  it('shows the full title and fallback initial prompt in expanded details', () => {
+    renderHeader({
+      session: makeSession({ topic: 'A very long session title that should be inspectable in full' }),
+      initialPromptFallback: 'Please build the thing from the original user prompt.',
+    });
+
+    fireEvent.click(screen.getByLabelText('Show session details'));
+
+    expect(screen.getByText('Title')).toBeInTheDocument();
+    expect(screen.getAllByText('A very long session title that should be inspectable in full')).toHaveLength(2);
+    expect(screen.getByText('Initial prompt')).toBeInTheDocument();
+    expect(screen.getByText('Please build the thing from the original user prompt.')).toBeInTheDocument();
+    expect(mocks.listChatMessages).not.toHaveBeenCalled();
+  });
+
+  it('fetches the oldest user message when no safe initial prompt fallback is available', async () => {
+    mocks.listChatMessages.mockResolvedValueOnce({
+      messages: [{
+        id: 'msg-initial',
+        sessionId: 'sess-abc123',
+        role: 'user',
+        content: 'Initial prompt loaded from the server',
+        toolMetadata: null,
+        createdAt: 1000,
+      }],
+      hasMore: true,
+    });
+
+    renderHeader({ initialPromptFallback: null });
+    fireEvent.click(screen.getByLabelText('Show session details'));
+
+    await waitFor(() => {
+      expect(mocks.listChatMessages).toHaveBeenCalledWith('proj-1', 'sess-abc123', {
+        limit: 1,
+        roles: ['user'],
+        compact: true,
+        order: 'asc',
+      });
+    });
+    expect(await screen.findByText('Initial prompt loaded from the server')).toBeInTheDocument();
+  });
+
+  it('expands details from the more-ports control', async () => {
+    renderHeader({
+      detectedPorts: [
+        {
+          port: 5173,
+          address: '127.0.0.1',
+          label: 'Vite',
+          url: 'https://ws-ws-1--5173.workspaces.example.com',
+          detectedAt: '2026-06-01T00:00:00Z',
+        },
+        {
+          port: 8787,
+          address: '127.0.0.1',
+          label: 'Worker',
+          url: 'https://ws-ws-1--8787.workspaces.example.com',
+          detectedAt: '2026-06-01T00:00:00Z',
+        },
+      ],
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show 1 more forwarded port' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('References')).toBeInTheDocument();
+    });
+    expect(screen.getAllByText('5173').length).toBeGreaterThan(0);
+    expect(screen.getByText(/8787/)).toBeInTheDocument();
   });
 
   it('shows Workspace button for active sessions with workspace', () => {

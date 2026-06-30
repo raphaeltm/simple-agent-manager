@@ -334,7 +334,8 @@ export function getMessages(
   limit: number = 1000,
   before: number | null = null,
   roles?: string[],
-  compact: boolean = false
+  compact: boolean = false,
+  order: 'asc' | 'desc' = 'desc'
 ): { messages: Record<string, unknown>[]; hasMore: boolean } {
   let query =
     'SELECT id, session_id, role, content, tool_metadata, created_at, sequence FROM chat_messages WHERE session_id = ?';
@@ -351,7 +352,8 @@ export function getMessages(
     params.push(...roles);
   }
 
-  query += ' ORDER BY created_at DESC, sequence DESC LIMIT ?';
+  const orderDirection = order === 'asc' ? 'ASC' : 'DESC';
+  query += ` ORDER BY created_at ${orderDirection}, sequence ${orderDirection} LIMIT ?`;
   params.push(limit + 1);
 
   const rows = sql.exec(query, ...params).toArray();
@@ -385,8 +387,9 @@ export function getMessages(
   const trimmedRows = candidateRows.slice(0, safeCount);
 
   const rowParser = compact ? parseChatMessageRowCompact : parseChatMessageRow;
+  const orderedRows = order === 'desc' ? trimmedRows.reverse() : trimmedRows;
   return {
-    messages: trimmedRows.reverse().map((row) => rowParser(row)),
+    messages: orderedRows.map((row) => rowParser(row)),
     hasMore,
   };
 }

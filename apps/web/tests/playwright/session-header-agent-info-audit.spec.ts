@@ -140,6 +140,9 @@ async function setupApiMocks(
   page: Page,
   opts: {
     ports?: Array<Record<string, unknown>>;
+    detailMessages?: Array<Record<string, unknown>>;
+    detailHasMore?: boolean;
+    messageLookupMessages?: Array<Record<string, unknown>>;
     session?: Record<string, unknown>;
     sessions?: Array<Record<string, unknown>>;
     tasks?: Array<Record<string, unknown>>;
@@ -151,6 +154,9 @@ async function setupApiMocks(
   const tasks = opts.tasks ?? [makeTask()];
   const workspace = makeWorkspace(opts.workspace);
   const ports = opts.ports ?? [];
+  const detailMessages = opts.detailMessages ?? [];
+  const messageLookupMessages = opts.messageLookupMessages ?? detailMessages;
+  const detailHasMore = opts.detailHasMore ?? false;
 
   await page.route('**/workspaces/ws-1/ports**', (route: Route) => respondJson(route, { ports }));
   await page.route('**/api/**', async (route: Route) => {
@@ -197,9 +203,22 @@ async function setupApiMocks(
       }
       // Session detail
       if (subPath.match(/\/sessions\/[^/]+$/) && !subPath.includes('/messages')) {
-        return respond(200, { session, messages: [], hasMore: false });
+        return respond(200, { session, messages: detailMessages, hasMore: detailHasMore });
       }
-      if (subPath.match(/\/sessions\/[^/]+\/messages/)) return respond(200, { messages: [], hasMore: false });
+      if (subPath.match(/\/sessions\/[^/]+\/messages/)) {
+        const roles = url.searchParams.get('roles')?.split(',').filter(Boolean);
+        const limit = Number.parseInt(url.searchParams.get('limit') ?? String(messageLookupMessages.length), 10);
+        const order = url.searchParams.get('order') === 'asc' ? 'asc' : 'desc';
+        const filtered = roles && roles.length > 0
+          ? messageLookupMessages.filter((msg) => roles.includes(String(msg.role)))
+          : messageLookupMessages;
+        const sorted = filtered.slice().sort((a, b) => {
+          const timeA = Number(a.createdAt ?? 0);
+          const timeB = Number(b.createdAt ?? 0);
+          return order === 'asc' ? timeA - timeB : timeB - timeA;
+        });
+        return respond(200, { messages: sorted.slice(0, limit), hasMore: sorted.length > limit });
+      }
       if (subPath === '/tasks') return respond(200, { tasks, nextCursor: null });
       if (subPath.match(/\/tasks\//)) return respond(200, { id: 'task-1', status: 'in_progress' });
       if (subPath === '/agents') return respond(200, { agents: [] });
@@ -239,6 +258,36 @@ async function assertNoOverflow(page: Page) {
     () => document.documentElement.scrollWidth > window.innerWidth
   );
   expect(overflow).toBe(false);
+}
+
+const STRESS_TITLE =
+  'Investigate a crowded mobile session header with a long conversation title, unicode Ω, HTML-looking text <script>alert(1)</script>, and a single-super-long-token-that-must-wrap-without-breaking-the-layout-abcdefghijklmnopqrstuvwxyz0123456789';
+
+const STRESS_INITIAL_PROMPT =
+  'Please review the production conversation header and make the full title plus initial prompt easy to inspect on mobile.\n\nInclude a very long sentence, unicode Ω, emoji-like text, escaped-looking HTML <script>alert(1)</script>, and enough detail to prove the prompt panel scrolls instead of pushing controls off screen. '.repeat(3);
+
+function makeStressPorts() {
+  return Array.from({ length: 50 }, (_, index) => {
+    const port = 3000 + index;
+    return {
+      port,
+      address: '127.0.0.1',
+      label: `Stress forwarded service ${index + 1}`,
+      url: `https://ws-ws-1--${port}.workspaces.example.com`,
+      detectedAt: new Date(NOW - index * 1000).toISOString(),
+    };
+  });
+}
+
+function makeStressInitialMessage() {
+  return {
+    id: 'msg-initial-prompt',
+    sessionId: 'chat-session-1',
+    role: 'user',
+    content: STRESS_INITIAL_PROMPT,
+    toolMetadata: null,
+    createdAt: NOW - 900000,
+  };
 }
 
 test.describe('SessionHeader Agent Info — Mobile', () => {
@@ -377,6 +426,38 @@ test.describe('SessionHeader Agent Info — Mobile', () => {
     await expect(page.getByTitle(/Parent session:/)).toBeVisible();
     await assertNoOverflow(page);
   });
+
+  test('title-led header handles long title, initial prompt, and many ports', async ({ page }) => {
+    await setupApiMocks(page, {
+      session: makeSession({
+        topic: STRESS_TITLE,
+        messageCount: 75,
+      }),
+      detailHasMore: true,
+      messageLookupMessages: [
+        makeStressInitialMessage(),
+        {
+          id: 'msg-followup',
+          sessionId: 'chat-session-1',
+          role: 'user',
+          content: 'Follow-up prompt',
+          toolMetadata: null,
+          createdAt: NOW - 100000,
+        },
+      ],
+      ports: makeStressPorts(),
+      workspace: { portsPublicEnabled: false },
+    });
+
+    await page.goto('/projects/proj-agent-1/chat/chat-session-1');
+    await expect(page.getByRole('button', { name: 'Show 49 more forwarded ports' })).toBeVisible();
+    await expandHeader(page);
+    await expect(page.getByText('Initial prompt', { exact: true })).toBeVisible();
+    await expect(page.getByText(/Please review the production conversation header/)).toBeVisible();
+    await expect(page.getByText('Ports (50)')).toBeVisible();
+    await screenshot(page, 'session-header-title-led-stress-mobile');
+    await assertNoOverflow(page);
+  });
 });
 
 test.describe('SessionHeader Agent Info — Desktop', () => {
@@ -420,6 +501,27 @@ test.describe('SessionHeader Agent Info — Desktop', () => {
 
     await expect(page.getByText('Source')).toBeVisible();
     await expect(page.getByRole('link', { name: 'Parent implementation session' })).toBeVisible();
+    await assertNoOverflow(page);
+  });
+
+  test('title-led stress scenario displays on desktop', async ({ page }) => {
+    await setupApiMocks(page, {
+      session: makeSession({
+        topic: STRESS_TITLE,
+        messageCount: 75,
+      }),
+      detailHasMore: true,
+      messageLookupMessages: [makeStressInitialMessage()],
+      ports: makeStressPorts(),
+      workspace: { portsPublicEnabled: true },
+    });
+
+    await page.goto('/projects/proj-agent-1/chat/chat-session-1');
+    await expect(page.getByRole('button', { name: 'Show 49 more forwarded ports' })).toBeVisible();
+    await expandHeader(page);
+    await expect(page.getByText(/Please review the production conversation header/)).toBeVisible();
+    await expect(page.getByText('Ports (50)')).toBeVisible();
+    await screenshot(page, 'session-header-title-led-stress-desktop');
     await assertNoOverflow(page);
   });
 });

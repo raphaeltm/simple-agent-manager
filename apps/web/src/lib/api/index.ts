@@ -335,6 +335,7 @@ export {
   getChatSession,
   getRecentChats,
   listActivityEvents,
+  listChatMessages,
   listChatSessions,
   resetIdleTimer,
   sendFollowUpPrompt,

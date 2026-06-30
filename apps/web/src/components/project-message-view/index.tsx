@@ -44,6 +44,10 @@ function FloatingHeader({
   onShowHierarchy?: (taskId: string) => void;
 }) {
   if (!lc.session) return null;
+  const initialPromptFallback = !lc.hasMore
+    ? lc.messages.find((msg) => msg.role === 'user')?.content ?? null
+    : null;
+
   return (
     <div className="absolute top-0 left-0 right-0 z-10">
       <SessionHeader
@@ -63,6 +67,7 @@ function FloatingHeader({
         onRetry={onRetry}
         onFork={onFork}
         lineageText={sourceContext?.lineageText}
+        initialPromptFallback={initialPromptFallback}
         sourceContext={sourceContext}
         hasContentBelow={!!lc.taskEmbed?.errorMessage}
         onShowHierarchy={onShowHierarchy}

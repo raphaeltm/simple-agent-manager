@@ -153,6 +153,13 @@ function getCompactMode(rawCompact: string | undefined, defaultValue: boolean): 
   throw errors.badRequest('compact must be true or false');
 }
 
+function getMessageOrder(rawOrder?: string): 'asc' | 'desc' {
+  if (!rawOrder) return 'desc';
+  const order = rawOrder.trim().toLowerCase();
+  if (order === 'asc' || order === 'desc') return order;
+  throw errors.badRequest('order must be asc or desc');
+}
+
 /**
  * GET /api/projects/:projectId/sessions
  * List chat sessions for a project.
@@ -392,6 +399,7 @@ chatRoutes.get('/:sessionId/messages', async (c) => {
   const limit = getSessionMessageLimit(c.env, c.req.query('limit'));
   const before = getBeforeCursor(c.req.query('before'));
   const roles = getRequestedRoles(c.req.query('roles') ?? c.req.query('role'));
+  const order = getMessageOrder(c.req.query('order'));
 
   const compactDefault = (c.env.CHAT_COMPACT_MODE_DEFAULT ?? '').toLowerCase();
   const defaultCompact = compactDefault === 'false' ? false : DEFAULT_CHAT_COMPACT_MODE;
@@ -404,7 +412,8 @@ chatRoutes.get('/:sessionId/messages', async (c) => {
     limit,
     before,
     roles,
-    compact
+    compact,
+    order
   );
 
   return c.json(messagesResult);

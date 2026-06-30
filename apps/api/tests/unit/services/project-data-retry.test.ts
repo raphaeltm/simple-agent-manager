@@ -53,7 +53,7 @@ describe('project-data Durable Object retry', () => {
     expect(result).toEqual(messages);
     expect(stub.ensureProjectId).toHaveBeenCalledTimes(2);
     expect(stub.getMessages).toHaveBeenCalledTimes(2);
-    expect(stub.getMessages).toHaveBeenLastCalledWith('chat-1', 100, null, undefined, true);
+    expect(stub.getMessages).toHaveBeenLastCalledWith('chat-1', 100, null, undefined, true, 'desc');
   });
 
   it('surfaces the reset error after max attempts are exhausted', async () => {
