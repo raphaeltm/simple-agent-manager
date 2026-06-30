@@ -28,6 +28,19 @@ function makeSystemEntry(overrides: Partial<Extract<TimelineEntry, { kind: 'syst
   };
 }
 
+function makeProgressEntry(overrides: Partial<Extract<TimelineEntry, { kind: 'progress_notification' }>> = {}): TimelineEntry {
+  return {
+    kind: 'progress_notification',
+    id: 'notif-1',
+    notificationId: 'n1',
+    title: 'Progress: Build',
+    text: 'Installed dependencies and started focused tests',
+    timestamp: 750,
+    severity: 'info',
+    ...overrides,
+  };
+}
+
 const defaultProps = {
   entries: [] as TimelineEntry[],
   loading: false,
@@ -96,6 +109,14 @@ describe('ChatTimelineDrawer', () => {
     const entries = [makeSystemEntry({ title: 'Session started', severity: 'info' })];
     render(<ChatTimelineDrawer {...defaultProps} entries={entries} />);
     expect(screen.getByText('Session started')).toBeTruthy();
+  });
+
+  it('renders progress notification entries as status updates', () => {
+    const entries = [makeProgressEntry({ text: 'Cloned the repo and inspected timeline code' })];
+    render(<ChatTimelineDrawer {...defaultProps} entries={entries} />);
+
+    expect(screen.getByText('Status update')).toBeTruthy();
+    expect(screen.getByText('Cloned the repo and inspected timeline code')).toBeTruthy();
   });
 
   it('has correct dialog aria attributes', () => {

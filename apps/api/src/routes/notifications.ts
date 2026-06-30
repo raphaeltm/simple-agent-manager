@@ -27,6 +27,7 @@ import { errors } from '../middleware/error';
 import { jsonValidator, UpdateNotificationPreferenceSchema } from '../schemas';
 
 const notificationRoutes = new Hono<{ Bindings: Env }>();
+const SESSION_ID_RE = /^[\w-]{1,64}$/;
 
 // Helper to get a typed Notification DO stub for the current user
 function getNotificationStub(env: Env, userId: string): DurableObjectStub<NotificationService> {
@@ -67,12 +68,23 @@ notificationRoutes.get('/', requireAuth(), requireApproved(), async (c) => {
       ? (typeRaw as NotificationType)
       : undefined;
   const projectId = c.req.query('projectId');
+  const rawSessionId = c.req.query('sessionId')?.trim();
 
   if (typeRaw && !type) {
     throw errors.badRequest(`Invalid notification type: ${typeRaw}`);
   }
+  if (rawSessionId !== undefined && !SESSION_ID_RE.test(rawSessionId)) {
+    throw errors.badRequest('sessionId must be a valid identifier');
+  }
 
-  const result = await stub.listNotifications(userId, { cursor, limit, filter, type, projectId });
+  const result = await stub.listNotifications(userId, {
+    cursor,
+    limit,
+    filter,
+    type,
+    projectId,
+    sessionId: rawSessionId,
+  });
   return c.json(result);
 });
 

@@ -14,4 +14,13 @@ export type TimelineEntry =
       title: string;
       timestamp: number;
       severity: 'info' | 'success' | 'warning' | 'error';
+    }
+  | {
+      kind: 'progress_notification';
+      id: string;
+      notificationId: string;
+      title: string;
+      text: string;
+      timestamp: number;
+      severity: 'info';
     };

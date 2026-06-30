@@ -96,6 +96,33 @@ class MockSqlStorage {
       return { toArray: () => matched };
     }
 
+    // SELECT * FROM notifications WHERE user_id = ? ... ORDER BY created_at DESC LIMIT ?
+    if (q.startsWith('SELECT * FROM NOTIFICATIONS WHERE USER_ID')) {
+      let paramIndex = 0;
+      const userId = params[paramIndex++] as string;
+      const type = q.includes('AND TYPE = ?') ? (params[paramIndex++] as string) : null;
+      const projectId = q.includes('AND PROJECT_ID = ?') ? (params[paramIndex++] as string) : null;
+      const sessionId = q.includes('AND SESSION_ID = ?') ? (params[paramIndex++] as string) : null;
+      const before = q.includes('AND CREATED_AT < ?') ? (params[paramIndex++] as number) : null;
+      const limit = params[params.length - 1] as number;
+      const requireUnread = q.includes('AND READ_AT IS NULL');
+
+      const matched = this.rows
+        .filter((r) => {
+          if (r.user_id !== userId || r.dismissed_at !== null) return false;
+          if (requireUnread && r.read_at !== null) return false;
+          if (type && r.type !== type) return false;
+          if (projectId && r.project_id !== projectId) return false;
+          if (sessionId && r.session_id !== sessionId) return false;
+          if (before !== null && (r.created_at as number) >= before) return false;
+          return true;
+        })
+        .sort((a, b) => (b.created_at as number) - (a.created_at as number))
+        .slice(0, Number(limit));
+
+      return { toArray: () => matched };
+    }
+
     // UPDATE notifications SET body = ?, title = ?, metadata = ?, read_at = NULL WHERE id = ?
     // Also handles: UPDATE notifications SET body = ?, title = ?, read_at = NULL WHERE id = ?
     if (q.startsWith('UPDATE NOTIFICATIONS SET')) {
@@ -326,6 +353,63 @@ describe('NotificationService suppression logic', () => {
       // Both rows should exist — the stale one is outside the 100 ms window
       const allRows = sql.getAllRows().filter((r) => r.type === 'progress');
       expect(allRows).toHaveLength(2);
+    });
+  });
+
+  describe('notification listing filters', () => {
+    it('filters progress notifications by user, project, session, and type', async () => {
+      const baseParams = [
+        'user-1',
+        'proj-1',
+        'task-1',
+        'sess-1',
+        'progress',
+        'low',
+        'Progress: Feature',
+        'Visible update',
+        '/projects/proj-1/chat/sess-1',
+        JSON.stringify({ fullMessage: 'Visible update with more detail' }),
+      ] as const;
+
+      sql.exec(
+        `INSERT INTO notifications (id, user_id, project_id, task_id, session_id, type, urgency, title, body, action_url, metadata, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        'match-new',
+        ...baseParams,
+        4000
+      );
+      sql.exec(
+        `INSERT INTO notifications (id, user_id, project_id, task_id, session_id, type, urgency, title, body, action_url, metadata, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        'other-session',
+        ...baseParams.slice(0, 3),
+        'sess-2',
+        ...baseParams.slice(4),
+        3000
+      );
+      sql.exec(
+        `INSERT INTO notifications (id, user_id, project_id, task_id, session_id, type, urgency, title, body, action_url, metadata, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        'other-type',
+        ...baseParams.slice(0, 4),
+        'error',
+        ...baseParams.slice(5),
+        2000
+      );
+      sql.exec(
+        `INSERT INTO notifications (id, user_id, project_id, task_id, session_id, type, urgency, title, body, action_url, metadata, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        'match-old',
+        ...baseParams,
+        1000
+      );
+
+      const result = await service.listNotifications('user-1', {
+        projectId: 'proj-1',
+        sessionId: 'sess-1',
+        type: 'progress',
+        limit: 10,
+      });
+
+      expect(result.notifications.map((notification) => notification.id)).toEqual(['match-new', 'match-old']);
+      expect(result.notifications[0]?.sessionId).toBe('sess-1');
+      expect(result.notifications[0]?.metadata).toEqual({ fullMessage: 'Visible update with more detail' });
     });
   });
 

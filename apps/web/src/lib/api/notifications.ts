@@ -13,6 +13,7 @@ export async function listNotifications(opts?: {
   filter?: 'all' | 'unread';
   type?: NotificationType;
   projectId?: string;
+  sessionId?: string;
 }): Promise<ListNotificationsResponse> {
   const params = new URLSearchParams();
   if (opts?.cursor) params.set('cursor', opts.cursor);
@@ -20,6 +21,7 @@ export async function listNotifications(opts?: {
   if (opts?.filter) params.set('filter', opts.filter);
   if (opts?.type) params.set('type', opts.type);
   if (opts?.projectId) params.set('projectId', opts.projectId);
+  if (opts?.sessionId) params.set('sessionId', opts.sessionId);
   const qs = params.toString();
   return request<ListNotificationsResponse>(`/api/notifications${qs ? `?${qs}` : ''}`);
 }

@@ -8,6 +8,7 @@
  *   - invalid `limit` (non-integer / non-positive) → 400, DO never called
  *   - invalid `filter` (not all|unread) → 400, DO never called
  *   - invalid `type` (not a known notification type) → 400, DO never called
+ *   - invalid `sessionId` → 400, DO never called
  *   - valid parameters pass through to the DO stub
  */
 import { Hono } from 'hono';
@@ -63,6 +64,8 @@ describe('GET /notifications query validation', () => {
     ['limit=-3', 'negative limit'],
     ['filter=bogus', 'unknown filter'],
     ['type=not_a_type', 'unknown notification type'],
+    ['sessionId=bad/id', 'invalid sessionId'],
+    ['sessionId=', 'empty sessionId'],
   ])('returns 400 for invalid %s (%s) without calling the DO', async (qs) => {
     const app = buildApp();
     const res = await app.request(`/notifications?${qs}`, {}, mockEnv);
@@ -73,7 +76,7 @@ describe('GET /notifications query validation', () => {
   it('passes valid query parameters through to the DO', async () => {
     const app = buildApp();
     const res = await app.request(
-      '/notifications?cursor=1700000000000&limit=10&filter=unread&type=error&projectId=proj-9',
+      '/notifications?cursor=1700000000000&limit=10&filter=unread&type=error&projectId=proj-9&sessionId=session-9',
       {},
       mockEnv
     );
@@ -88,6 +91,7 @@ describe('GET /notifications query validation', () => {
         filter: 'unread',
         type: 'error',
         projectId: 'proj-9',
+        sessionId: 'session-9',
       })
     );
   });

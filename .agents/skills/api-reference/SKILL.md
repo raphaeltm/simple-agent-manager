@@ -14,6 +14,7 @@ The reference covers:
 - Task Management (`/api/projects/:projectId/tasks/*`)
 - Agent Sessions (`/api/workspaces/:id/agent-sessions/*`)
 - Agent Settings (`/api/agent-settings/*`)
+- Notifications (`/api/notifications/*`)
 - VM Communication callbacks
 - Terminal Access
 - Git Integration (VM Agent direct)

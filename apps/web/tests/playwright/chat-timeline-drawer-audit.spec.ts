@@ -77,47 +77,185 @@ function makeActivityEvents() {
   };
 }
 
+function makeNotifications() {
+  return {
+    notifications: [
+      {
+        id: 'notif-1',
+        projectId: 'proj-test-1',
+        taskId: 'task-1',
+        sessionId: 'cs-1',
+        type: 'progress',
+        urgency: 'low',
+        title: 'Progress: Dependencies',
+        body: 'Dependency installation finished successfully',
+        actionUrl: '/projects/proj-test-1/chat/cs-1',
+        metadata: {
+          fullMessage: 'Dependency installation finished successfully. Running focused timeline tests next.',
+        },
+        readAt: null,
+        dismissedAt: null,
+        createdAt: new Date(NOW - 520_000).toISOString(),
+      },
+      {
+        id: 'notif-2',
+        projectId: 'proj-test-1',
+        taskId: 'task-1',
+        sessionId: 'cs-1',
+        type: 'progress',
+        urgency: 'low',
+        title: 'Progress: Audit',
+        body: 'Opened the timeline drawer for local visual verification',
+        actionUrl: '/projects/proj-test-1/chat/cs-1',
+        metadata: null,
+        readAt: null,
+        dismissedAt: null,
+        createdAt: new Date(NOW - 120_000).toISOString(),
+      },
+    ],
+    unreadCount: 2,
+    nextCursor: null,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // API Mock Setup
 // ---------------------------------------------------------------------------
 
 async function setupMocks(page: Page) {
-  await page.route('**/api/auth/get-session', async (route: Route) => {
-    await route.fulfill({ json: MOCK_USER });
-  });
-
-  await page.route('**/api/projects/proj-test-1', async (route: Route) => {
-    await route.fulfill({ json: MOCK_PROJECT });
-  });
-
-  await page.route('**/api/projects/proj-test-1/sessions', async (route: Route) => {
-    await route.fulfill({ json: { sessions: [makeChatSession()] } });
-  });
-
-  await page.route('**/api/projects/proj-test-1/sessions/cs-1', async (route: Route) => {
-    await route.fulfill({ json: makeChatSession() });
-  });
-
-  await page.route('**/api/projects/proj-test-1/sessions/cs-1/messages*', async (route: Route) => {
-    await route.fulfill({ json: makeMessages() });
-  });
-
-  await page.route('**/api/projects/proj-test-1/sessions/cs-1/state', async (route: Route) => {
-    await route.fulfill({ json: { activity: 'idle', activityAt: NOW, statusError: null, currentPlan: null } });
-  });
-
-  await page.route('**/api/projects/proj-test-1/activity*', async (route: Route) => {
-    await route.fulfill({ json: makeActivityEvents() });
-  });
-
-  // Catch-all for other API calls
   await page.route('**/api/**', async (route: Route) => {
     const url = route.request().url();
-    if (url.includes('/ws') || url.includes('websocket')) {
+    const { pathname } = new URL(url);
+
+    if (pathname.includes('/ws') || url.includes('websocket')) {
       await route.abort();
       return;
     }
+
+    if (pathname === '/api/auth/session' || pathname === '/api/auth/get-session') {
+      await route.fulfill({ json: MOCK_USER });
+      return;
+    }
+
+    if (pathname === '/api/projects') {
+      await route.fulfill({ json: { projects: [MOCK_PROJECT], nextCursor: null } });
+      return;
+    }
+
+    if (pathname === '/api/nodes') {
+      await route.fulfill({ json: [] });
+      return;
+    }
+
+    if (pathname === '/api/chats') {
+      await route.fulfill({ json: { sessions: [], total: 0 } });
+      return;
+    }
+
+    if (pathname === '/api/github/installations') {
+      await route.fulfill({ json: [] });
+      return;
+    }
+
+    if (pathname === '/api/credentials') {
+      await route.fulfill({ json: [] });
+      return;
+    }
+
+    if (pathname === '/api/trial-status') {
+      await route.fulfill({
+        json: {
+          available: false,
+          agentType: null,
+          hasInfraCredential: false,
+          hasAgentCredential: false,
+          dailyTokenBudget: null,
+          dailyTokenUsage: null,
+        },
+      });
+      return;
+    }
+
+    if (pathname === '/api/agents') {
+      await route.fulfill({ json: { agents: [] } });
+      return;
+    }
+
+    if (pathname === '/api/providers/catalog') {
+      await route.fulfill({ json: { catalogs: [] } });
+      return;
+    }
+
+    if (pathname === '/api/projects/proj-test-1/agent-profiles') {
+      await route.fulfill({ json: { items: [] } });
+      return;
+    }
+
+    if (pathname === '/api/projects/proj-test-1/tasks') {
+      await route.fulfill({ json: { tasks: [], nextCursor: null } });
+      return;
+    }
+
+    if (pathname === '/api/projects/proj-test-1/sessions/cs-1/messages') {
+      await route.fulfill({ json: makeMessages() });
+      return;
+    }
+
+    if (pathname === '/api/projects/proj-test-1/sessions/cs-1/state') {
+      await route.fulfill({ json: { activity: 'idle', activityAt: NOW, statusError: null, currentPlan: null } });
+      return;
+    }
+
+    if (pathname === '/api/projects/proj-test-1/sessions/cs-1') {
+      await route.fulfill({
+        json: {
+          session: makeChatSession(),
+          messages: makeMessages().messages,
+          hasMore: false,
+          state: { activity: 'idle', activityAt: NOW, statusError: null, currentPlan: null },
+        },
+      });
+      return;
+    }
+
+    if (pathname === '/api/projects/proj-test-1/sessions') {
+      await route.fulfill({ json: { sessions: [makeChatSession()] } });
+      return;
+    }
+
+    if (pathname === '/api/projects/proj-test-1/activity') {
+      await route.fulfill({ json: makeActivityEvents() });
+      return;
+    }
+
+    if (pathname === '/api/notifications') {
+      await route.fulfill({ json: makeNotifications() });
+      return;
+    }
+
+    if (pathname === '/api/projects/proj-test-1') {
+      await route.fulfill({ json: MOCK_PROJECT });
+      return;
+    }
+
     await route.fulfill({ json: {} });
+  });
+}
+
+async function openTimeline(page: Page) {
+  const timelineBtn = page.getByRole('button', { name: /^Timeline$/ });
+  if (!(await timelineBtn.first().isVisible().catch(() => false))) {
+    const detailsBtn = page.getByLabel('Show session details').first();
+    if (await detailsBtn.isVisible().catch(() => false)) {
+      await detailsBtn.click();
+    }
+  }
+  await timelineBtn.waitFor({ state: 'visible', timeout: 10_000 });
+  await timelineBtn.click();
+  await page.getByText('Status update').first().waitFor({ state: 'visible', timeout: 5_000 });
+  await page.getByText('Dependency installation finished successfully. Running focused timeline tests next.').waitFor({
+    state: 'visible',
+    timeout: 5_000,
   });
 }
 
@@ -133,14 +271,10 @@ test.describe('ChatTimelineDrawer — Mobile', () => {
     await page.goto('/projects/proj-test-1/chat/cs-1');
     await page.waitForTimeout(2000);
 
-    // Look for the Timeline button and click it
-    const timelineBtn = page.locator('button:has-text("Timeline")');
-    if (await timelineBtn.count() > 0) {
-      await timelineBtn.click();
-      await page.waitForTimeout(800);
-      await screenshot(page, 'timeline-drawer-mobile-messages');
-      await assertNoOverflow(page);
-    }
+    await openTimeline(page);
+    await page.waitForTimeout(800);
+    await screenshot(page, 'timeline-drawer-mobile-messages');
+    await assertNoOverflow(page);
   });
 
   test('timeline drawer with context toggle', async ({ page }) => {
@@ -148,20 +282,14 @@ test.describe('ChatTimelineDrawer — Mobile', () => {
     await page.goto('/projects/proj-test-1/chat/cs-1');
     await page.waitForTimeout(2000);
 
-    const timelineBtn = page.locator('button:has-text("Timeline")');
-    if (await timelineBtn.count() > 0) {
-      await timelineBtn.click();
-      await page.waitForTimeout(800);
+    await openTimeline(page);
+    await page.waitForTimeout(800);
 
-      // Toggle context
-      const contextBtn = page.locator('button:has-text("Context")');
-      if (await contextBtn.count() > 0) {
-        await contextBtn.click();
-        await page.waitForTimeout(600);
-        await screenshot(page, 'timeline-drawer-mobile-context');
-        await assertNoOverflow(page);
-      }
-    }
+    const contextBtn = page.locator('button:has-text("Context")');
+    await contextBtn.click();
+    await page.waitForTimeout(600);
+    await screenshot(page, 'timeline-drawer-mobile-context');
+    await assertNoOverflow(page);
   });
 });
 
@@ -173,13 +301,10 @@ test.describe('ChatTimelineDrawer — Desktop', () => {
     await page.goto('/projects/proj-test-1/chat/cs-1');
     await page.waitForTimeout(2000);
 
-    const timelineBtn = page.locator('button:has-text("Timeline")');
-    if (await timelineBtn.count() > 0) {
-      await timelineBtn.click();
-      await page.waitForTimeout(800);
-      await screenshot(page, 'timeline-drawer-desktop');
-      await assertNoOverflow(page);
-    }
+    await openTimeline(page);
+    await page.waitForTimeout(800);
+    await screenshot(page, 'timeline-drawer-desktop');
+    await assertNoOverflow(page);
   });
 
   test('timeline drawer with context on desktop', async ({ page }) => {
@@ -187,18 +312,13 @@ test.describe('ChatTimelineDrawer — Desktop', () => {
     await page.goto('/projects/proj-test-1/chat/cs-1');
     await page.waitForTimeout(2000);
 
-    const timelineBtn = page.locator('button:has-text("Timeline")');
-    if (await timelineBtn.count() > 0) {
-      await timelineBtn.click();
-      await page.waitForTimeout(800);
+    await openTimeline(page);
+    await page.waitForTimeout(800);
 
-      const contextBtn = page.locator('button:has-text("Context")');
-      if (await contextBtn.count() > 0) {
-        await contextBtn.click();
-        await page.waitForTimeout(600);
-        await screenshot(page, 'timeline-drawer-desktop-context');
-        await assertNoOverflow(page);
-      }
-    }
+    const contextBtn = page.locator('button:has-text("Context")');
+    await contextBtn.click();
+    await page.waitForTimeout(600);
+    await screenshot(page, 'timeline-drawer-desktop-context');
+    await assertNoOverflow(page);
   });
 });
