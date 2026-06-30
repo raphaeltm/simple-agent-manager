@@ -144,9 +144,44 @@ interface RateLimitState {
 
 export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
   /**
-   * Handle an incoming refresh request. The DO's single-threaded execution model
-   * guarantees that only one request is processed at a time per userId instance,
-   * providing the per-user lock without explicit mutex logic.
+   * In-memory mutex (promise chain) serializing the read→refresh→write critical
+   * section within a single DO instance.
+   *
+   * IMPORTANT: a Durable Object does NOT serialize concurrent `async fetch()`
+   * handlers across `await` points. When a handler awaits an external `fetch()`
+   * to OpenAI, the DO is free to start processing the next queued request. Two
+   * concurrent refreshes for the same user could therefore both read the same
+   * stored refresh_token, both pass the match check, and both POST it to OpenAI.
+   * OpenAI rotates the one-time-use refresh_token on first use and revokes the
+   * whole token family when the now-consumed token is replayed — which breaks
+   * every subsequent refresh (401 → re-refresh loop → 429). The AbortController
+   * timeout is NOT a mutex; only this promise chain provides real serialization.
+   *
+   * The credential read MUST happen inside the lock so that a queued second
+   * request re-reads the post-rotation token and takes the grace-window path
+   * instead of replaying the consumed token against OpenAI.
+   */
+  private refreshLock: Promise<unknown> = Promise.resolve();
+
+  /**
+   * Run `fn` exclusively with respect to other refreshes in this DO instance.
+   * Each call chains onto the previous one so the critical sections execute
+   * strictly one-at-a-time, even across `await` boundaries.
+   */
+  private withRefreshLock<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.refreshLock.then(() => fn());
+    // Keep the chain alive even if this run rejects, so a failed refresh does
+    // not permanently wedge the lock for subsequent requests.
+    this.refreshLock = run.then(
+      () => undefined,
+      () => undefined
+    );
+    return run;
+  }
+
+  /**
+   * Handle an incoming refresh request. The actual refresh runs inside
+   * `withRefreshLock` so concurrent requests for the same user are serialized.
    *
    * An AbortController enforces the lock timeout — if the overall operation
    * exceeds the limit, the upstream fetch is aborted and no background writes occur.
@@ -193,6 +228,27 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
       );
     }
 
+    // Serialize the read→refresh→write critical section so concurrent refreshes
+    // for the same user cannot both consume the same one-time-use refresh token.
+    return this.withRefreshLock(() =>
+      this.runRefresh(refreshToken, userId, projectId ?? null, signal)
+    );
+  }
+
+  /**
+   * The serialized critical section. Reads the stored credential, decides
+   * grace/stale/match, optionally refreshes against OpenAI, and persists the
+   * rotated tokens. MUST run under `withRefreshLock` — reading the credential
+   * here (rather than before acquiring the lock) is what lets a queued
+   * concurrent request observe the rotated token and take the grace-window path
+   * instead of replaying the consumed token against OpenAI.
+   */
+  private async runRefresh(
+    refreshToken: string,
+    userId: string,
+    projectId: string | null,
+    signal: AbortSignal
+  ): Promise<Response> {
     // Derive encryption key from DO env (not from caller).
     const encryptionKey = getCredentialEncryptionKey(this.env);
 
