@@ -49,6 +49,7 @@ For broad "review recent work / update memory and configs" tasks:
 3. Separate evidence-backed facts from inference: task status, merged PRs, and branch ancestry are facts; a title or draft idea alone is not shipped evidence.
 4. Keep branch-backed work open unless it has merged or shipped on the intended branch; append branch/PR/task evidence so future agents do not rediscover the same partial work.
 5. Only promote repeated human frustration into durable config when a rule would have prevented the class of failure.
+6. When a failed task proves an experimental or model-test agent profile cannot launch because its configured model is unavailable or inaccessible, update the profile state before retrying: rename/describe it as archived or disabled, use a known-working fallback only if a valid model is required, and record that availability must be verified before reuse.
 
 ## Knowledge vs Ideas vs Policies
 
