@@ -26,8 +26,10 @@
  *    every other project inheriting it.
  *  - Rate limiting (MEDIUM #5): token-bucket state is held in DO storage (strongly consistent,
  *    atomic increments). KV read-modify-write is not safe for enforcement under concurrency.
- *  - Scope validation (MEDIUM #6): enabled by default with a conservative allowlist of Codex
- *    OAuth scopes. Unexpected scopes block the refresh with 502 instead of a warn-only log.
+ *  - Scope validation (MEDIUM #6): unexpected upstream scopes are checked against a conservative
+ *    allowlist of Codex OAuth scopes. They are logged at warn level by default (we don't yet know
+ *    the full real-world scope set OpenAI returns); set CODEX_SCOPE_VALIDATION_MODE=block to
+ *    reject the refresh with 502 instead.
  */
 import { DurableObject } from 'cloudflare:workers';
 import * as v from 'valibot';

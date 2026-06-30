@@ -851,6 +851,17 @@ describe('CodexRefreshLock', () => {
           iv: expect.anything(),
         }),
       );
+      // Value-content check: even though the freshly-encrypted ciphertext/iv are
+      // in lexical scope at the catch block, the serialized log payload must not
+      // contain their VALUES under ANY key (e.g. echoed inside an error message).
+      const syncFailCall = mockLogError.mock.calls.find(
+        (call) => call[0] === 'codex_refresh.cc_sync_failed',
+      );
+      expect(syncFailCall).toBeDefined();
+      const syncFailPayload = JSON.stringify(syncFailCall?.[1] ?? {});
+      expect(syncFailPayload).not.toContain('new-encrypted');
+      expect(syncFailPayload).not.toContain('new-iv');
+      expect(syncFailPayload).not.toContain('new-refresh');
     });
 
     it('falls back to the user-scoped cc_credentials row when the project row is absent', async () => {
@@ -917,6 +928,16 @@ describe('CodexRefreshLock', () => {
           refresh_token: expect.anything(),
         }),
       );
+      // Value-content check: the serialized payload must not contain the token
+      // VALUES under any key, not just exclude the known key names.
+      const noRowCall = mockLogWarn.mock.calls.find(
+        (call) => call[0] === 'codex_refresh.cc_sync_no_row',
+      );
+      expect(noRowCall).toBeDefined();
+      const noRowPayload = JSON.stringify(noRowCall?.[1] ?? {});
+      expect(noRowPayload).not.toContain('new-encrypted');
+      expect(noRowPayload).not.toContain('new-iv');
+      expect(noRowPayload).not.toContain('new-refresh');
     });
 
     it('scopes the mirror UPDATE to the credential owner (cross-user defence)', async () => {
