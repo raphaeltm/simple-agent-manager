@@ -12,11 +12,21 @@ import {
   validateCompletedComposeImageArtifacts,
   validateComposeImageArtifactDescriptor,
 } from '../../services/compose-image-artifacts';
+import { extractComposePublishVolumeDeclarations } from '../../services/compose-publish-apply';
 import { assertAgentDeploymentAllowedForProfile } from '../../services/deployment-control';
 import {
   DEPLOYMENT_MODEL_RUNNER_VM_SIZE,
   provisionDeploymentNode,
+  resolveDeploymentPlacement,
 } from '../../services/deployment-provisioning';
+import {
+  attachEnvironmentVolumesToLinkedNode,
+  createMissingDeclaredVolumes,
+  detachEnvironmentVolumes,
+  listEnvironmentVolumes,
+  markDeploymentReleaseVolumeAttachFailed,
+} from '../../services/deployment-volumes';
+import { teardownDeploymentEnvironmentOnNode } from '../../services/node-agent';
 import { verifyWorkspacePublishCallback } from './_callback-auth';
 
 /**
@@ -152,6 +162,7 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
   const envRows = await db
     .select({
       nodeId: schema.deploymentEnvironments.nodeId,
+      status: schema.deploymentEnvironments.status,
     })
     .from(schema.deploymentEnvironments)
     .where(
@@ -172,6 +183,27 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
   const composeYaml = submissionBody.composeYaml;
   if (typeof composeYaml !== 'string' || composeYaml.trim() === '') {
     throw errors.badRequest('Release submission is missing composeYaml');
+  }
+  let volumeDeclarations: Record<string, { sizeHintMb?: number }> = {};
+  try {
+    volumeDeclarations = extractComposePublishVolumeDeclarations(composeYaml);
+  } catch (err) {
+    throw errors.badRequest(err instanceof Error ? err.message : String(err));
+  }
+  const requiresVolumes = Object.keys(volumeDeclarations).length > 0;
+  const placement = requiresVolumes ? await resolveDeploymentPlacement(userId, c.env) : null;
+  if (requiresVolumes && !placement) {
+    throw errors.badRequest(
+      'No cloud provider credential found. Connect a cloud provider before deploying volumes.'
+    );
+  }
+  if (requiresVolumes && placement) {
+    await createMissingDeclaredVolumes(db, c.env, userId, {
+      environmentId,
+      volumes: volumeDeclarations,
+      location: placement.location,
+      targetProvider: placement.provider,
+    });
   }
 
   const servicesRaw = submissionBody.services;
@@ -234,6 +266,13 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
       source: 'compose-publish',
       createdBy: userId,
     });
+    await db
+      .update(schema.deploymentEnvironments)
+      .set({
+        requiresVolumes,
+        updatedAt: new Date().toISOString(),
+      })
+      .where(eq(schema.deploymentEnvironments.id, environmentId));
   } catch (err) {
     const internalMessage = err instanceof Error ? err.message : String(err);
     log.error('compose_publish_release.insert_failed', {
@@ -260,18 +299,110 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
   // release recording (the release is already durable); the node can be
   // provisioned on the next release or via the deploy verb.
   let nodeId: string | null = environmentRow.nodeId ?? null;
+  const shouldProvision =
+    environmentRow.status !== 'stopped' && environmentRow.status !== 'stopping';
+  let currentNodeMode: string | null = null;
+  let currentNodeStatus: string | null = null;
+  let currentNodeProviderInstanceId: string | null = null;
+  if (requiresVolumes && nodeId) {
+    const nodeRows = await db
+      .select({
+        nodeMode: schema.nodes.nodeMode,
+        status: schema.nodes.status,
+        providerInstanceId: schema.nodes.providerInstanceId,
+      })
+      .from(schema.nodes)
+      .where(eq(schema.nodes.id, nodeId))
+      .limit(1);
+    currentNodeMode = nodeRows[0]?.nodeMode ?? null;
+    currentNodeStatus = nodeRows[0]?.status ?? null;
+    currentNodeProviderInstanceId = nodeRows[0]?.providerInstanceId ?? null;
+  }
+  if (requiresVolumes && nodeId && currentNodeMode !== 'exclusive') {
+    try {
+      if (currentNodeStatus === 'running') {
+        await teardownDeploymentEnvironmentOnNode(nodeId, environmentId, c.env, userId);
+      }
+      const volumes = await listEnvironmentVolumes(db, environmentId);
+      const attachedServerIds = new Set<string>();
+      for (const volume of volumes) {
+        if (volume.attachedServerId) {
+          attachedServerIds.add(volume.attachedServerId);
+        }
+      }
+      if (currentNodeProviderInstanceId) {
+        attachedServerIds.add(currentNodeProviderInstanceId);
+      }
+      for (const serverId of attachedServerIds) {
+        await detachEnvironmentVolumes(db, c.env, userId, environmentId, serverId);
+      }
+    } catch (err) {
+      // Shared→exclusive migration (teardown + volume detach) failed. The
+      // release was already recorded durably above, so we MUST NOT return a
+      // 500 here: the VM agent treats a 5xx as a transient publish failure and
+      // retries the whole submission, which inserts a SECOND release with the
+      // next version number (duplicate version records). Record the
+      // volume-attach failure for diagnosis and return the durable release.
+      // The migration is retried via the deploy verb or the next release.
+      await markDeploymentReleaseVolumeAttachFailed(db, environmentId, releaseId, err);
+      log.error('compose_publish_release.shared_to_exclusive_migration_failed', {
+        projectId,
+        environmentId,
+        releaseId,
+        nodeId,
+        action: 'release_recorded_migration_deferred',
+        ...serializeError(err),
+      });
+      return c.json({
+        releaseId,
+        version: nextVersion,
+        status: 'created',
+        nodeId,
+      });
+    }
+    await db
+      .update(schema.deploymentEnvironments)
+      .set({ nodeId: null, updatedAt: new Date().toISOString() })
+      .where(eq(schema.deploymentEnvironments.id, environmentId));
+    nodeId = null;
+  }
   try {
-    if (!nodeId) {
+    if (!shouldProvision) {
+      log.info('compose_publish_release.provisioning_skipped_environment_stopped', {
+        projectId,
+        environmentId,
+        releaseId,
+        environmentStatus: environmentRow.status,
+      });
+    } else if (!nodeId) {
       const vmSizeOverride = composeHasModelProvider(composeYaml)
         ? c.env.DEPLOYMENT_MODEL_RUNNER_VM_SIZE?.trim() || DEPLOYMENT_MODEL_RUNNER_VM_SIZE
         : undefined;
 
       const result = await provisionDeploymentNode(environmentId, projectId, userId, c.env, {
-        vmSizeOverride,
+        vmSizeOverride: placement?.vmSize ?? vmSizeOverride,
+        ...(placement
+          ? { providerOverride: placement.provider, vmLocationOverride: placement.location }
+          : {}),
+        requiresVolumes,
       });
       if (result) {
         nodeId = result.nodeId;
-        c.executionCtx?.waitUntil(result.provisioningPromise);
+        const provisioningPromise = result.provisioningPromise.catch(async (err) => {
+          await markDeploymentReleaseVolumeAttachFailed(db, environmentId, releaseId, err);
+          throw err;
+        });
+        const finishPromise = requiresVolumes
+          ? provisioningPromise.then(async () => {
+              try {
+                await attachEnvironmentVolumesToLinkedNode(db, c.env, userId, environmentId);
+              } catch (err) {
+                await markDeploymentReleaseVolumeAttachFailed(db, environmentId, releaseId, err);
+                throw err;
+              }
+            })
+          : provisioningPromise;
+        c.executionCtx?.waitUntil(finishPromise.catch(() => undefined));
         log.info('compose_publish_release.provisioning_triggered', {
           projectId,
           environmentId,
@@ -279,6 +410,15 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
           nodeId,
           vmSizeOverride: vmSizeOverride ?? null,
         });
+      }
+    } else if (requiresVolumes) {
+      const attachPromise = attachEnvironmentVolumesToLinkedNode(db, c.env, userId, environmentId);
+      c.executionCtx?.waitUntil(attachPromise.catch(() => undefined));
+      try {
+        await attachPromise;
+      } catch (err) {
+        await markDeploymentReleaseVolumeAttachFailed(db, environmentId, releaseId, err);
+        throw err;
       }
     }
   } catch (err) {

@@ -118,7 +118,11 @@ export function DeploymentCustomDomainsPanel({ projectId, environmentId }: Props
       ]);
       setRoutes(routeResponse.publicRoutes);
       setDomains(domainResponse.customDomains);
-      setSelectedRouteId((current) => current || routeResponse.publicRoutes[0]?.id || '');
+      setSelectedRouteId((current) =>
+        routeResponse.publicRoutes.some((route) => route.id === current)
+          ? current
+          : routeResponse.publicRoutes[0]?.id || ''
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load custom domains');
     } finally {
@@ -572,6 +576,7 @@ function DomainCard({
           <IconButton
             label="Open domain"
             onClick={() => window.open(`https://${domain.hostname}`, '_blank', 'noreferrer')}
+            disabled={route === null}
           >
             <ExternalLink size={14} />
           </IconButton>

@@ -706,6 +706,8 @@ export const nodes = sqliteTable(
     credentialSource: text('credential_source').default('user'),
     /** 'workspace' = ephemeral task/dev node (default); 'deployment' = long-lived app-hosting node. */
     nodeRole: text('node_role').notNull().default('workspace'),
+    /** 'shared' = eligible for multi-tenant placement; 'exclusive' = one deployment environment only. */
+    nodeMode: text('node_mode').notNull().default('shared'),
     errorMessage: text('error_message'),
     createdAt: text('created_at')
       .notNull()
@@ -1844,6 +1846,10 @@ export const deploymentEnvironments = sqliteTable(
     status: text('status').notNull().default('active'),
     /** Deployment node hosting this environment; many environments may share one node. */
     nodeId: text('node_id').references(() => nodes.id, { onDelete: 'set null' }),
+    /** True when the latest submitted manifest declares persistent volumes. */
+    requiresVolumes: integer('requires_volumes', { mode: 'boolean' })
+      .notNull()
+      .default(false),
     /** Cloud provider used for placement (e.g. 'hetzner', 'scaleway'). */
     provider: text('provider'),
     /** Provider location/region for placement constraint. */

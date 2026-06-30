@@ -80,6 +80,7 @@ type EngineConfig struct {
 	ApplyProgress       ApplyProgressFunc
 	DockerLogin         DockerLoginFunc // defaults to cache.DockerLogin if nil
 	MountChecker        MountChecker    // defaults to RealMountChecker if nil
+	VolumeMounter       VolumeMounter   // defaults to RealVolumeMounter if nil
 }
 
 // NewEngine creates a new deployment engine.
@@ -125,18 +126,6 @@ func NewEngine(disk *DiskState, verifier *Verifier, cfg EngineConfig) *Engine {
 	}
 }
 
-// SetCallbackToken updates the callback token for control plane requests.
-// Safe to call concurrently with fetchRelease (heartbeat vs apply goroutine).
-func (e *Engine) SetCallbackToken(token string) {
-	e.tokenMu.Lock()
-	defer e.tokenMu.Unlock()
-	e.callbackToken = token
-}
-
-func (e *Engine) EnvironmentID() string {
-	return e.cfg.EnvironmentID
-}
-
 // Teardown stops the current compose project and removes only this
 // environment's active Caddy snippet from the node-level import directory.
 func (e *Engine) Teardown(ctx context.Context) error {
@@ -144,11 +133,18 @@ func (e *Engine) Teardown(ctx context.Context) error {
 	defer e.applyMu.Unlock()
 
 	var errs []string
+	var mountRoots []string
 	interpolationEnv, envErr := e.fetchCurrentInterpolationEnv(ctx)
 	if envErr != nil {
 		slog.Warn("deploy.teardown: failed to fetch current interpolation env; falling back to label cleanup if compose down fails", "error", envErr)
 	}
-	if composeFile, err := e.disk.CurrentComposeFilePath(); err == nil {
+	if currentSeq, err := e.disk.CurrentSeq(); err == nil && currentSeq > 0 {
+		var rootsErr error
+		mountRoots, rootsErr = e.releaseVolumeMountRoots(currentSeq)
+		if rootsErr != nil {
+			errs = append(errs, fmt.Sprintf("read volume mount roots: %v", rootsErr))
+		}
+		composeFile := e.disk.ComposeFilePath(currentSeq)
 		if err := e.composeDown(ctx, composeFile, interpolationEnv); err != nil {
 			errs = append(errs, fmt.Sprintf("compose down: %v", err))
 			if envErr != nil {
@@ -157,8 +153,12 @@ func (e *Engine) Teardown(ctx context.Context) error {
 				}
 			}
 		}
-	} else if !strings.Contains(err.Error(), "no current release") {
-		errs = append(errs, fmt.Sprintf("read current compose: %v", err))
+	} else if err != nil {
+		errs = append(errs, fmt.Sprintf("read current release: %v", err))
+	}
+
+	if err := e.teardownVolumeMountRoots(ctx, mountRoots); err != nil {
+		errs = append(errs, fmt.Sprintf("teardown volume mounts: %v", err))
 	}
 
 	snippetPath := filepath.Join(filepath.Dir(e.cfg.CaddyfilePath), "sites", SafeEnvironmentFilePart(e.cfg.EnvironmentID)+".caddy")
@@ -176,34 +176,14 @@ func (e *Engine) Teardown(ctx context.Context) error {
 		errs = append(errs, fmt.Sprintf("reload Caddy: %v", err))
 	}
 
-	e.setObserved(ObservedState{})
 	if len(errs) > 0 {
 		return fmt.Errorf("teardown environment %s: %s", e.cfg.EnvironmentID, strings.Join(errs, "; "))
 	}
-	return nil
-}
-
-// getCallbackToken returns the current callback token under a read lock.
-func (e *Engine) getCallbackToken() string {
-	e.tokenMu.RLock()
-	defer e.tokenMu.RUnlock()
-	return e.callbackToken
-}
-
-// SetVerifierKey updates the signing public key via the verifier's dual-key rotation.
-func (e *Engine) SetVerifierKey(pubKeyB64 string) error {
-	e.verifierMu.Lock()
-	defer e.verifierMu.Unlock()
-
-	if e.verifier == nil {
-		verifier, err := NewVerifier(pubKeyB64)
-		if err != nil {
-			return err
-		}
-		e.verifier = verifier
-		return nil
+	if err := e.disk.ClearCurrent(); err != nil {
+		return fmt.Errorf("teardown environment %s: %w", e.cfg.EnvironmentID, err)
 	}
-	return e.verifier.SetCurrentKey(pubKeyB64)
+	e.setObserved(ObservedState{})
+	return nil
 }
 
 // ReconcileOnStart reads disk state and verifies running containers match.
@@ -276,6 +256,9 @@ func (e *Engine) Apply(ctx context.Context, payload *ApplyPayload) error {
 	if err := verifier.Verify(payload, e.cfg.EnvironmentID, e.cfg.NodeID, currentSeq); err != nil {
 		return fmt.Errorf("payload verification failed: %w", err)
 	}
+	if err := validateVolumeMountsForEnvironment(e.cfg.EnvironmentID, payload.VolumeMounts); err != nil {
+		return fmt.Errorf("volume mount validation failed: %w", err)
+	}
 	e.reportApplyEvent(ctx, payload, "info", "deployment.apply.payload_verified", "verify_payload", "deployment payload verified", map[string]any{"previousSeq": currentSeq})
 
 	slog.Info("deploy.apply: starting",
@@ -287,11 +270,12 @@ func (e *Engine) Apply(ctx context.Context, payload *ApplyPayload) error {
 	// Mark as applying
 	now := time.Now().UTC()
 	newState := &ReleaseState{
-		Seq:           payload.Seq,
-		EnvironmentID: payload.EnvironmentID,
-		NodeID:        payload.NodeID,
-		Status:        StatusApplying,
-		AppliedAt:     now,
+		Seq:              payload.Seq,
+		EnvironmentID:    payload.EnvironmentID,
+		NodeID:           payload.NodeID,
+		Status:           StatusApplying,
+		AppliedAt:        now,
+		VolumeMountRoots: volumeMountRootsFromPayload(payload.VolumeMounts),
 	}
 
 	e.setObserved(ObservedState{
@@ -313,6 +297,7 @@ func (e *Engine) Apply(ctx context.Context, payload *ApplyPayload) error {
 	// Each release renders as a distinct compose project, so consecutive releases
 	// compete for the same host port. We must down the old project before upping
 	// the new one to avoid port-bind failures.
+	var removedRoots []string
 	if currentSeq > 0 {
 		prevComposeFile := e.disk.ComposeFilePath(currentSeq)
 		slog.Info("deploy.apply: tearing down previous release to free ports",
@@ -326,6 +311,11 @@ func (e *Engine) Apply(ctx context.Context, payload *ApplyPayload) error {
 			// containers already exited or were removed externally.
 		} else {
 			e.reportApplyEvent(ctx, payload, "info", "deployment.apply.previous_down_completed", "previous_down", "previous release containers stopped", map[string]any{"previousSeq": currentSeq})
+		}
+		var err error
+		removedRoots, err = e.removedVolumeMountRoots(currentSeq, newState.VolumeMountRoots)
+		if err != nil {
+			return e.handleApplyFailure(ctx, newState, currentSeq, redactor.redactError(fmt.Errorf("read removed volume mounts: %w", err)), applyEnv)
 		}
 	}
 
@@ -346,6 +336,18 @@ func (e *Engine) Apply(ctx context.Context, payload *ApplyPayload) error {
 			return e.handleApplyFailure(ctx, newState, currentSeq, redactor.redactError(fmt.Errorf("docker login: %w", err)), applyEnv)
 		}
 		e.reportApplyEvent(ctx, payload, "info", "deployment.apply.registry_login_completed", "registry_login", "container registry authentication completed", map[string]any{"server": payload.RegistryCredentials.Server})
+	}
+
+	if len(payload.VolumeMounts) > 0 {
+		volumeMounter := e.cfg.VolumeMounter
+		if volumeMounter == nil {
+			volumeMounter = NewRealVolumeMounter()
+		}
+		e.reportApplyEvent(ctx, payload, "info", "deployment.apply.volume_mount_started", "volume_mounts", "mounting deployment volumes", map[string]any{"volumeMountCount": len(payload.VolumeMounts)})
+		if err := volumeMounter.MountVolumes(ctx, payload.VolumeMounts); err != nil {
+			return e.handleApplyFailure(ctx, newState, currentSeq, redactor.redactError(fmt.Errorf("mount volumes: %w", err)), applyEnv)
+		}
+		e.reportApplyEvent(ctx, payload, "info", "deployment.apply.volume_mount_completed", "volume_mounts", "deployment volumes mounted", map[string]any{"volumeMountCount": len(payload.VolumeMounts)})
 	}
 
 	// Volume mount guard: refuse to apply if required SAM volumes are not mounted.
@@ -417,6 +419,14 @@ func (e *Engine) Apply(ctx context.Context, payload *ApplyPayload) error {
 		return e.handleApplyFailure(ctx, newState, currentSeq, redactor.redactError(fmt.Errorf("set current pointer: %w", err)), applyEnv)
 	}
 
+	if len(removedRoots) > 0 {
+		if err := e.teardownVolumeMountRoots(ctx, removedRoots); err != nil {
+			slog.Warn("deploy.apply: failed to teardown removed volume mounts after successful update",
+				"seq", payload.Seq, "error", err)
+			e.reportApplyEvent(ctx, payload, "warn", "deployment.apply.removed_volume_teardown_failed", "volume_mounts", "failed to teardown removed volume mounts after successful update", map[string]any{"error": err.Error()})
+		}
+	}
+
 	services, _ := e.inspectServices(ctx, payload.Seq, applyEnv)
 	e.setObserved(ObservedState{
 		AppliedSeq: payload.Seq,
@@ -455,6 +465,11 @@ func (e *Engine) handleApplyFailure(ctx context.Context, state *ReleaseState, pr
 		}
 
 		var persistenceErrs []error
+		if err := e.teardownVolumeMountRoots(ctx, state.VolumeMountRoots); err != nil {
+			slog.Warn("deploy.apply: failed to teardown volume mounts after failed-initial",
+				"error", err)
+			persistenceErrs = append(persistenceErrs, fmt.Errorf("teardown failed-initial volume mounts: %w", err))
+		}
 		if err := e.disk.UpdateState(state); err != nil {
 			slog.Error("deploy.apply: failed to persist failed-initial state",
 				"seq", state.Seq, "error", err)
@@ -496,6 +511,15 @@ func (e *Engine) handleApplyFailure(ctx context.Context, state *ReleaseState, pr
 	if err := e.composeDown(ctx, newComposeFile, applyEnv); err != nil {
 		slog.Warn("deploy.apply: failed to stop new release before revert",
 			"seq", state.Seq, "error", err)
+	}
+	previousRoots, rootsErr := e.releaseVolumeMountRoots(previousSeq)
+	if rootsErr != nil {
+		recoveryErrs = append(recoveryErrs, fmt.Errorf("read previous volume mount roots: %w", rootsErr))
+	}
+	if err := e.teardownVolumeMountRoots(ctx, subtractVolumeMountRoots(state.VolumeMountRoots, previousRoots)); err != nil {
+		slog.Warn("deploy.apply: failed to teardown new release volume mounts before revert",
+			"seq", state.Seq, "error", err)
+		recoveryErrs = append(recoveryErrs, fmt.Errorf("teardown failed release volume mounts: %w", err))
 	}
 
 	prevComposeFile := e.disk.ComposeFilePath(previousSeq)

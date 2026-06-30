@@ -26,6 +26,9 @@ type ReleaseState struct {
 	FailedAt      time.Time   `json:"failedAt,omitempty"`
 	ErrorMessage  string      `json:"errorMessage,omitempty"`
 	ComposeHash   string      `json:"composeHash,omitempty"` // SHA-256 of the rendered compose file
+	// Host mount roots created for this release's provider-backed volumes.
+	// Persisted so teardown/rollback can unmount even if Compose parsing fails.
+	VolumeMountRoots []string `json:"volumeMountRoots,omitempty"`
 }
 
 // ServiceState reports per-service container state for heartbeat reporting.
@@ -59,6 +62,7 @@ type ApplyPayload struct {
 	InterpolationEnv map[string]string `json:"interpolationEnv,omitempty"`
 	Routes           []RouteTarget     `json:"routes,omitempty"`
 	Artifacts        []ImageArtifact   `json:"artifacts,omitempty"`
+	VolumeMounts     []VolumeMount     `json:"volumeMounts,omitempty"`
 	Signature        string            `json:"signature"` // Base64-encoded Ed25519 signature
 
 	// Registry credentials for private image pulls. When present, the
@@ -103,6 +107,15 @@ type Platform struct {
 	Variant      string `json:"variant,omitempty"`
 }
 
+type VolumeMount struct {
+	Name             string `json:"name"`
+	MountRoot        string `json:"mountRoot"`
+	ProviderVolumeID string `json:"providerVolumeId"`
+	ProviderName     string `json:"providerName"`
+	LinuxDevice      string `json:"linuxDevice,omitempty"`
+	FSFormat         string `json:"fsFormat"`
+}
+
 // RegistryCredentials holds credentials for pulling private container images.
 // Populated by the deploy-release callback when CF registry minting is available.
 type RegistryCredentials struct {
@@ -122,4 +135,5 @@ type SignablePayload struct {
 	RoutesHash           string `json:"routesHash"`  // hex-encoded SHA-256 of canonical routes JSON
 	InterpolationEnvHash string `json:"interpolationEnvHash"`
 	ArtifactsHash        string `json:"artifactsHash"`
+	VolumeMountsHash     string `json:"volumeMountsHash"`
 }

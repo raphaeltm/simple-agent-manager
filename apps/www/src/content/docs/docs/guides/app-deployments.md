@@ -25,16 +25,11 @@ services:
       NODE_ENV: ${NODE_ENV:-production}
       PUBLIC_APP_DOMAIN: ${PUBLIC_APP_DOMAIN}
       DATABASE_URL: ${DATABASE_URL}
-    volumes:
-      - app-data:/var/lib/app
     healthcheck:
       test: ['CMD', 'curl', '-f', 'http://localhost:3000/health']
       interval: 30s
       timeout: 5s
       retries: 3
-
-volumes:
-  app-data: {}
 
 x-sam-routes:
   - service: web
@@ -60,11 +55,28 @@ Compose interpolation only affects placeholders such as `${DATABASE_URL}`. It do
 
 `x-sam-secret` and older explicit secret references remain supported for compatibility, but new deployments should prefer normal Compose `${VAR}` placeholders backed by per-environment Variables and Secrets.
 
-For compose-publish releases, SAM preserves safe named volumes declared in the Compose file. Host bind mounts, Docker socket mounts, `tmpfs`, external volumes, and custom volume drivers are rejected.
+For compose-publish releases, `build_and_publish` currently rejects Docker Compose named or anonymous volumes because they would be Docker-managed local volumes on the deployment node, not SAM provider-backed persistent volumes. Host bind mounts, Docker socket mounts, `tmpfs`, external volumes, and custom volume drivers are also rejected.
 
 Use `mode: host` for service ports such as databases, queues, and workers that should be reachable only inside the deployed Compose stack/private network. Public web/API entrypoints should use normal `ports:` entries or explicit public `x-sam-routes`.
 
 If an app needs to know its public hostname before it starts, agents should preview routes before publishing and then write the returned URLs into deployment configuration. Common examples are Django `ALLOWED_HOSTS` / CSRF trusted origins, CORS origins, OAuth callback URLs, webhook callback URLs, and canonical app URL variables.
+
+## Persistent volumes
+
+Provider-backed block volumes give a deployment environment durable storage that survives container restarts and the stop/start lifecycle. Unlike the Docker-managed volumes that `build_and_publish` rejects (see above), these are real cloud block volumes created through the deployment environment's provider and attached to the deployment node.
+
+- Volumes are created, attached, detached, and deleted from the deployment environment, not from Compose. Each volume is mounted at a SAM-managed path derived from the environment id, and the deployment apply payload tells the node which provider volume to mount where.
+- All volumes in one environment must share the same provider **and** the same location. A single VM can only attach volumes that live in its own provider/location, so an environment that mixes providers or regions is rejected before a node is provisioned.
+- When an environment has volumes (or is marked as requiring volumes), provisioning is pinned to the volumes' provider and location so the node lands where the volumes can attach.
+- The provider must support first-class block volumes. **Hetzner and Scaleway are supported; GCP deployment volumes are not** (`volumeCapabilities.supported` is `false` for the GCP provider), so a GCP-backed environment cannot use persistent deployment volumes.
+
+## Stop and start lifecycle
+
+A deployment environment can be stopped to release its compute while preserving its volumes and release history, then started again later.
+
+- **Stop** tears down the running Compose stack on the node, detaches the environment's provider volumes (the volume data is preserved), clears the node placement, and deletes the node if no other environment is using it. Stop fails with a `409` if the environment is already stopping or if the live teardown on the node fails, so a stop never silently strands a half-torn-down environment.
+- **Start** re-provisions or selects a deployment node, reattaches the environment's volumes, and lets the node's heartbeat reapply the latest release. If the environment requires volumes but no volume records exist, start fails with a `409` rather than booting against empty storage.
+- Volume-requiring environments only receive a deployment payload once the node has reported its provider instance id. Until then the deploy-release callback returns `422` and the node retries, which prevents a volume-backed app from ever starting against ephemeral container storage.
 
 ## Custom domains
 

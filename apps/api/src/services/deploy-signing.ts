@@ -22,6 +22,7 @@ interface SignablePayload {
   composeYaml: string;
   routes?: unknown;
   artifacts?: unknown;
+  volumeMounts?: unknown;
   interpolationEnv?: Record<string, string>;
 }
 
@@ -59,6 +60,12 @@ async function buildSignableBytes(p: SignablePayload): Promise<Uint8Array> {
   const artifactsHash = Array.from(artifactsHashArray)
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('');
+  const volumeMountsBytes = new TextEncoder().encode(JSON.stringify(p.volumeMounts ?? []));
+  const volumeMountsHashBuffer = await crypto.subtle.digest('SHA-256', volumeMountsBytes);
+  const volumeMountsHashArray = new Uint8Array(volumeMountsHashBuffer);
+  const volumeMountsHash = Array.from(volumeMountsHashArray)
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
 
   const canonical = JSON.stringify({
     environmentId: p.environmentId,
@@ -69,6 +76,7 @@ async function buildSignableBytes(p: SignablePayload): Promise<Uint8Array> {
     routesHash,
     interpolationEnvHash,
     artifactsHash,
+    volumeMountsHash,
   });
 
   return new TextEncoder().encode(canonical);

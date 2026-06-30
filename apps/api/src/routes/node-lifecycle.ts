@@ -332,10 +332,17 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
   if (node.nodeRole === 'deployment' && body.deployment) {
     try {
       const envRows = await db
-        .select({ envId: schema.deploymentEnvironments.id })
+        .select({
+          envId: schema.deploymentEnvironments.id,
+          status: schema.deploymentEnvironments.status,
+          requiresVolumes: schema.deploymentEnvironments.requiresVolumes,
+        })
         .from(schema.deploymentEnvironments)
         .where(eq(schema.deploymentEnvironments.nodeId, nodeId));
-      const placedEnvIds = new Set(envRows.map((row) => row.envId));
+      const activeEnvRows = envRows.filter(
+        (row) => row.status === 'active' || row.status === 'starting'
+      );
+      const placedEnvIds = new Set(activeEnvRows.map((row) => row.envId));
       const bodyStates = Array.isArray(body.deployment.environments)
         ? body.deployment.environments
         : [];
@@ -351,7 +358,7 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
         .map((environmentId) => ({ environmentId }));
 
       response.deployment = {
-        environments: envRows.map((row) => ({ environmentId: row.envId })),
+        environments: activeEnvRows.map((row) => ({ environmentId: row.envId })),
         ...(retireEnvironments.length > 0 ? { retireEnvironments } : {}),
       };
 
@@ -359,16 +366,26 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
 
       const pendingReleases: Array<{ environmentId: string; seq: number }> = [];
 
-      for (const envRow of envRows) {
+      for (const envRow of activeEnvRows) {
         const envId = envRow.envId;
         const bodyState = stateByEnv.get(envId);
         const deploymentState = bodyState ?? null;
         const appliedSeq = deploymentState?.appliedSeq ?? 0;
 
         if (deploymentState) {
+          const observedUpdate = buildObservedDeploymentUpdate(deploymentState, now);
+          if (envRow.status === 'starting' && deploymentState.status === 'applied') {
+            observedUpdate.status = 'active';
+          } else if (
+            envRow.status === 'starting' &&
+            (deploymentState.status === 'failed' || deploymentState.status === 'failed-initial')
+          ) {
+            observedUpdate.status = 'error';
+          }
+
           await db
             .update(schema.deploymentEnvironments)
-            .set(buildObservedDeploymentUpdate(deploymentState, now))
+            .set(observedUpdate)
             .where(
               and(
                 eq(schema.deploymentEnvironments.id, envId),
@@ -396,6 +413,30 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
           latest.version > appliedSeq &&
           (latest.status === 'created' || (latest.status === 'applying' && !nodeAlreadyApplying))
         ) {
+          if (envRow.requiresVolumes) {
+            const volumeReadiness = await c.env.DATABASE.prepare(
+              `SELECT
+                 COUNT(*) AS total,
+                 COUNT(CASE WHEN attached_server_id = ? THEN 1 END) AS attached
+               FROM deployment_volumes
+               WHERE environment_id = ?`
+            )
+              .bind(node.providerInstanceId ?? '', envId)
+              .first<{ total: number; attached: number }>();
+            if (
+              !volumeReadiness ||
+              volumeReadiness.total === 0 ||
+              volumeReadiness.attached < volumeReadiness.total
+            ) {
+              log.info('heartbeat.deploy_release_waiting_for_volume_attach', {
+                nodeId,
+                environmentId: envId,
+                total: volumeReadiness?.total ?? 0,
+                attached: volumeReadiness?.attached ?? 0,
+              });
+              continue;
+            }
+          }
           pendingReleases.push({ environmentId: envId, seq: latest.version });
         }
       }

@@ -155,6 +155,17 @@ func (d *DiskState) SetCurrent(seq int64) error {
 	return nil
 }
 
+// ClearCurrent removes the "current" symlink after a release has been torn down.
+// Release directories stay on disk so the environment can still be inspected or
+// reapplied later.
+func (d *DiskState) ClearCurrent() error {
+	currentPath := d.currentSymlink()
+	if err := os.Remove(currentPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("clear current symlink: %w", err)
+	}
+	return nil
+}
+
 // ComposeFilePath returns the path to the docker-compose.yml for a given release.
 func (d *DiskState) ComposeFilePath(seq int64) string {
 	return filepath.Join(d.releaseDir(seq), "docker-compose.yml")

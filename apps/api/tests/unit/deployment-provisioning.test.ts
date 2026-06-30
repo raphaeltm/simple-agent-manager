@@ -208,7 +208,7 @@ describe('provisionDeploymentNode', () => {
       'node-deploy-1',
       expect.anything(),
       undefined, // no taskContext
-      undefined, // no options
+      { rethrowProviderError: true },
       { environmentId: 'env-12345678-abcd' } // deployment context
     );
   });
@@ -259,7 +259,7 @@ describe('provisionDeploymentNode', () => {
       'node-fresh-after-race',
       expect.anything(),
       undefined,
-      undefined,
+      { rethrowProviderError: true },
       { environmentId: 'env-race' }
     );
 
@@ -270,6 +270,69 @@ describe('provisionDeploymentNode', () => {
     expect(updateStatements[0]!.sql).toContain('AND EXISTS');
     expect(updateStatements[0]!.binds).toContain('running');
     expect(updateStatements[1]!.binds).toContain('creating');
+  });
+
+  it('volume-free placement only reuses shared deployment nodes', async () => {
+    const mockDb = createMockDb({ userCredProvider: 'hetzner' });
+    vi.mocked(drizzle).mockReturnValue(mockDb as any);
+    vi.mocked(createNodeRecord).mockResolvedValue(makeNodeResult({ id: 'node-shared-fresh' }));
+    vi.mocked(provisionNode).mockResolvedValue();
+
+    const { env, statements } = createRawMockEnv([
+      { all: { results: [] } },
+      { run: { meta: { changes: 1 } } },
+    ]);
+
+    await provisionDeploymentNode('env-shared-only', 'proj-1', 'user-1', env);
+
+    const candidateQuery = statements.find((statement) =>
+      statement.sql.includes('FROM nodes')
+    );
+    expect(candidateQuery?.sql).toContain("COALESCE(node_mode, 'shared') = 'shared'");
+  });
+
+  it('volume placement skips existing-node reuse and creates an exclusive node', async () => {
+    const mockDb = createMockDb({ userCredProvider: 'hetzner' });
+    vi.mocked(drizzle).mockReturnValue(mockDb as any);
+    vi.mocked(createNodeRecord).mockResolvedValue(makeNodeResult({ id: 'node-exclusive-1' }));
+    vi.mocked(provisionNode).mockResolvedValue();
+
+    const { env, statements } = createRawMockEnv([{ run: { meta: { changes: 1 } } }]);
+
+    const result = await provisionDeploymentNode('env-volume', 'proj-1', 'user-1', env, {
+      requiresVolumes: true,
+    });
+
+    expect(result?.nodeId).toBe('node-exclusive-1');
+    expect(createNodeRecord).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        nodeMode: 'exclusive',
+        nodeRole: 'deployment',
+      })
+    );
+    expect(statements.some((statement) => statement.sql.includes('SELECT id, vm_size'))).toBe(false);
+  });
+
+  it('exclusive node link asserts the fresh node has no existing environments', async () => {
+    const mockDb = createMockDb({ userCredProvider: 'hetzner' });
+    vi.mocked(drizzle).mockReturnValue(mockDb as any);
+    vi.mocked(createNodeRecord).mockResolvedValue(makeNodeResult({ id: 'node-exclusive-guard' }));
+    vi.mocked(provisionNode).mockResolvedValue();
+
+    const { env, statements } = createRawMockEnv([{ run: { meta: { changes: 1 } } }]);
+
+    await provisionDeploymentNode('env-exclusive-guard', 'proj-1', 'user-1', env, {
+      requiresVolumes: true,
+    });
+
+    const update = statements.find((statement) =>
+      statement.sql.includes('UPDATE deployment_environments')
+    );
+    expect(update?.sql).toContain("COALESCE(node_mode, 'shared') = ?");
+    expect(update?.sql).toContain('NOT EXISTS');
+    expect(update?.sql).toContain('existing.node_id = nodes.id');
+    expect(update?.binds).toContain('exclusive');
   });
 
   it('falls back to platform credentials when user has none', async () => {
@@ -341,7 +404,7 @@ describe('provisionDeploymentNode', () => {
     );
   });
 
-  it('provisioning promise catches errors without throwing', async () => {
+  it('provisioning promise rolls back nodeId and rejects so callers can mark failure', async () => {
     const mockDb = createMockDb({ userCredProvider: 'hetzner' });
     vi.mocked(drizzle).mockReturnValue(mockDb as any);
     vi.mocked(createNodeRecord).mockResolvedValue(makeNodeResult({ id: 'node-deploy-err' }));
@@ -350,8 +413,8 @@ describe('provisionDeploymentNode', () => {
     const result = await provisionDeploymentNode('env-fail', 'proj-1', 'user-1', createMockEnv());
 
     expect(result).not.toBeNull();
-    // The provisioning promise should not throw — it has a .catch()
-    await expect(result!.provisioningPromise).resolves.toBeUndefined();
+    await expect(result!.provisioningPromise).rejects.toThrow('VM creation failed');
+    expect(mockDb._tracker.updateSetValues[1]).toHaveProperty('nodeId', null);
   });
 
   it('rolls back nodeId to NULL when provisioning fails (Gap 7)', async () => {
@@ -369,8 +432,8 @@ describe('provisionDeploymentNode', () => {
 
     expect(result).not.toBeNull();
 
-    // Wait for the provisioning promise (catch handler runs the rollback)
-    await result!.provisioningPromise;
+    // Wait for the provisioning promise (catch handler runs the rollback before rejecting)
+    await expect(result!.provisioningPromise).rejects.toThrow('VM creation failed');
 
     // There should be 2 update calls:
     // 1. Initial link: set nodeId = 'node-rollback-1'
@@ -469,8 +532,9 @@ describe('provisionDeploymentNode', () => {
 
     expect(result).not.toBeNull();
 
-    // The provisioning promise should still not throw, even if rollback fails
-    await expect(result!.provisioningPromise).resolves.toBeUndefined();
+    // The provisioning promise still rejects with the original provider failure,
+    // even if rollback itself fails after being attempted.
+    await expect(result!.provisioningPromise).rejects.toThrow('VM creation failed');
 
     // Both updates were attempted
     expect(tracker.updateSetValues).toHaveLength(2);

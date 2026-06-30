@@ -220,6 +220,64 @@ func TestMcpBuildAndPublishJobStart_RequestCancelDoesNotCancelBackgroundJob(t *t
 	}
 }
 
+func TestRunAcceptedPublishJobReportsUnsupportedComposeVolumesAsNonRetryable(t *testing.T) {
+	s := &Server{publishJobs: map[string]publishJobState{
+		"job-volumes": {ID: "job-volumes", WorkspaceID: "ws-001", Status: "starting"},
+	}}
+	dir := t.TempDir()
+	compose := filepath.Join(dir, "fake-compose")
+	script := strings.Join([]string{
+		"#!/bin/sh",
+		"if [ \"$*\" = \"config --no-interpolate --format json\" ]; then",
+		"  printf '%s' '{\"name\":\"demo\",\"services\":{\"api\":{\"image\":\"demo-api\",\"build\":{\"context\":\".\"},\"volumes\":[{\"type\":\"volume\",\"source\":\"appdata\",\"target\":\"/data\"}]}},\"volumes\":{\"appdata\":{}}}'",
+		"  exit 0",
+		"fi",
+		"printf '%s' '{}'",
+	}, "\n")
+	if err := os.WriteFile(compose, []byte(script), 0o700); err != nil {
+		t.Fatalf("write fake compose: %v", err)
+	}
+	s.buildPublishRunner = func(ctx context.Context, prepared *preparedBuildPublish, events publish.EventSink) (*publish.ReleaseResult, error) {
+		_, err := publish.Build(ctx, publish.BuildOptions{
+			WorkspaceDir: prepared.BuildDir,
+			ComposeCmd:   compose,
+			Events:       events,
+		})
+		return nil, err
+	}
+
+	var events []publish.Event
+	reporter := publish.EventFunc(func(_ context.Context, event publish.Event) {
+		events = append(events, event)
+	})
+	s.runAcceptedPublishJob(context.Background(), "job-volumes", &preparedBuildPublish{
+		WorkspaceID: "ws-001",
+		ProjectID:   "proj-1",
+		BuildDir:    dir,
+		Log:         slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}, reporter)
+
+	s.publishJobsMu.Lock()
+	state := s.publishJobs["job-volumes"]
+	s.publishJobsMu.Unlock()
+	if state.Status != "failed" || state.CompletedAt.IsZero() {
+		t.Fatalf("expected failed completed job state, got %+v", state)
+	}
+	if len(events) == 0 {
+		t.Fatal("expected publish events")
+	}
+	last := events[len(events)-1]
+	if last.ErrorCode != "unsupported_compose_volumes" {
+		t.Fatalf("ErrorCode = %q, want unsupported_compose_volumes (event=%+v)", last.ErrorCode, last)
+	}
+	if last.Retryable {
+		t.Fatalf("unsupported compose volumes should be non-retryable: %+v", last)
+	}
+	if !last.Terminal || last.Status != "failed" {
+		t.Fatalf("expected terminal failed event, got %+v", last)
+	}
+}
+
 func TestMcpBuildAndPublish_AuthRejection(t *testing.T) {
 	t.Parallel()
 	s := mcpTestServer(t, "https://api.example.com")

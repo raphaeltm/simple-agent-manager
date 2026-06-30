@@ -652,7 +652,7 @@ func (s *Server) retireDeployEngines(retireEnvironmentIDs map[string]bool) {
 
 	for _, item := range retired {
 		go func(environmentID string, engine *deploy.Engine) {
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			ctx, cancel := context.WithTimeout(context.Background(), s.deployTeardownTimeout())
 			defer cancel()
 			if err := engine.Teardown(ctx); err != nil {
 				s.deployMu.Lock()
@@ -985,6 +985,7 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 	// Node/workspace management routes (control-plane authenticated).
 	mux.HandleFunc("GET /workspaces", s.handleListWorkspaces)
 	mux.HandleFunc("POST /workspaces", s.handleCreateWorkspace)
+	mux.HandleFunc("POST /deployment/environments/{environmentId}/teardown", s.handleTeardownDeploymentEnvironment)
 	mux.HandleFunc("GET /workspaces/{workspaceId}/events", s.handleListWorkspaceEvents)
 	mux.HandleFunc("POST /workspaces/{workspaceId}/stop", s.handleStopWorkspace)
 	mux.HandleFunc("POST /workspaces/{workspaceId}/restart", s.handleRestartWorkspace)

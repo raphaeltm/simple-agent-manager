@@ -114,8 +114,9 @@ describe('provider volume operations', () => {
         .mockResolvedValueOnce(new Response(JSON.stringify({ action: { id: 1 } }), { status: 200 }))
         .mockResolvedValueOnce(new Response(JSON.stringify({
           volume: hetznerVolume({
-            server: { id: 456 },
+            server: 456,
             linux_device: '/dev/disk/by-id/scsi-0HC_Volume_123',
+            status: 'in-use',
           }),
         }), { status: 200 }));
       globalThis.fetch = mockFetch;
@@ -134,6 +135,7 @@ describe('provider volume operations', () => {
       expect(fetchCall(mockFetch, 1).url).toBe('https://api.hetzner.cloud/v1/volumes/123');
       expect(volume.attachedServerId).toBe('456');
       expect(volume.linuxDevice).toBe('/dev/disk/by-id/scsi-0HC_Volume_123');
+      expect(volume.status).toBe('attached');
     });
 
     it('resizes upward with exact Hetzner payload', async () => {

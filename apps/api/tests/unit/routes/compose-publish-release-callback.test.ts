@@ -21,6 +21,15 @@ const DEPLOYMENT_ENVIRONMENTS = {
   agentDeployEnabledAt: 'deployment_environments.agentDeployEnabledAt',
   agentDeployDisabledAt: 'deployment_environments.agentDeployDisabledAt',
   allowedDeployProfileIdsJson: 'deployment_environments.allowedDeployProfileIdsJson',
+  requiresVolumes: 'deployment_environments.requiresVolumes',
+  updatedAt: 'deployment_environments.updatedAt',
+};
+const NODES = {
+  __table: 'nodes',
+  id: 'nodes.id',
+  nodeMode: 'nodes.nodeMode',
+  status: 'nodes.status',
+  providerInstanceId: 'nodes.providerInstanceId',
 };
 
 let workspaceRows: Array<{ projectId: string | null; userId: string }> = [];
@@ -28,13 +37,27 @@ let latestVersionRows: Array<{ version: number }> = [];
 let environmentRows: Array<{
   id: string;
   nodeId: string | null;
+  status: string;
   agentDeployEnabled: boolean;
   agentDeployEnabledBy?: string | null;
   agentDeployEnabledAt?: string | null;
   agentDeployDisabledAt?: string | null;
   allowedDeployProfileIdsJson?: string | null;
 }> = [];
+let nodeRows: Array<{
+  nodeMode: string | null;
+  status: string | null;
+  providerInstanceId: string | null;
+}> = [];
 const inserted: Array<Record<string, unknown>> = [];
+const updated: Array<Record<string, unknown>> = [];
+const mockProvisionDeploymentNode = vi.hoisted(() => vi.fn(async () => null));
+const mockCreateMissingDeclaredVolumes = vi.hoisted(() => vi.fn(async () => []));
+const mockAttachEnvironmentVolumesToLinkedNode = vi.hoisted(() => vi.fn(async () => []));
+const mockMarkDeploymentReleaseVolumeAttachFailed = vi.hoisted(() => vi.fn(async () => undefined));
+const mockListEnvironmentVolumes = vi.hoisted(() => vi.fn(async () => []));
+const mockDetachEnvironmentVolumes = vi.hoisted(() => vi.fn(async () => undefined));
+const mockTeardownDeploymentEnvironmentOnNode = vi.hoisted(() => vi.fn(async () => undefined));
 let verifiedPayload: { workspace: string; type: string; scope?: string } = {
   workspace: 'ws-1',
   type: 'callback',
@@ -54,13 +77,34 @@ vi.mock('../../../src/db/schema', () => ({
   workspaces: WORKSPACES,
   deploymentReleases: DEPLOYMENT_RELEASES,
   deploymentEnvironments: DEPLOYMENT_ENVIRONMENTS,
+  nodes: NODES,
 }));
 
 // Node provisioning is best-effort and must never fail the durable release.
 // Stub it so the release-recording slice stays focused; nodeId resolves to null.
 vi.mock('../../../src/services/deployment-provisioning', () => ({
   DEPLOYMENT_MODEL_RUNNER_VM_SIZE: 'medium',
-  provisionDeploymentNode: vi.fn(async () => null),
+  provisionDeploymentNode: (...args: unknown[]) => mockProvisionDeploymentNode(...args),
+  resolveDeploymentPlacement: vi.fn(async () => ({
+    provider: 'hetzner',
+    location: 'fsn1',
+    vmSize: 'small',
+  })),
+}));
+
+vi.mock('../../../src/services/deployment-volumes', () => ({
+  createMissingDeclaredVolumes: (...args: unknown[]) => mockCreateMissingDeclaredVolumes(...args),
+  attachEnvironmentVolumesToLinkedNode: (...args: unknown[]) =>
+    mockAttachEnvironmentVolumesToLinkedNode(...args),
+  markDeploymentReleaseVolumeAttachFailed: (...args: unknown[]) =>
+    mockMarkDeploymentReleaseVolumeAttachFailed(...args),
+  listEnvironmentVolumes: (...args: unknown[]) => mockListEnvironmentVolumes(...args),
+  detachEnvironmentVolumes: (...args: unknown[]) => mockDetachEnvironmentVolumes(...args),
+}));
+
+vi.mock('../../../src/services/node-agent', () => ({
+  teardownDeploymentEnvironmentOnNode: (...args: unknown[]) =>
+    mockTeardownDeploymentEnvironmentOnNode(...args),
 }));
 
 function createMockDb() {
@@ -81,6 +125,13 @@ function createMockDb() {
             }),
           };
         }
+        if (table === NODES) {
+          return {
+            where: vi.fn().mockReturnValue({
+              limit: vi.fn().mockResolvedValue(nodeRows),
+            }),
+          };
+        }
         // deployment_releases latest-version lookup
         return {
           where: vi.fn().mockReturnValue({
@@ -95,6 +146,14 @@ function createMockDb() {
       values: vi.fn().mockImplementation((values: Record<string, unknown>) => {
         inserted.push(values);
         return Promise.resolve();
+      }),
+    })),
+    update: vi.fn().mockImplementation(() => ({
+      set: vi.fn().mockImplementation((values: Record<string, unknown>) => {
+        updated.push(values);
+        return {
+          where: vi.fn().mockResolvedValue(undefined),
+        };
       }),
     })),
   };
@@ -114,6 +173,7 @@ vi.mock('../../../src/lib/ulid', () => ({
 
 vi.mock('../../../src/lib/logger', () => ({
   log: { debug: vi.fn(), error: vi.fn(), info: vi.fn(), warn: vi.fn() },
+  serializeError: vi.fn((err: unknown) => ({ error: err instanceof Error ? err.message : String(err) })),
 }));
 
 async function buildApp() {
@@ -158,12 +218,15 @@ describe('compose-publish-release callback (vertical slice)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     inserted.length = 0;
+    updated.length = 0;
+    nodeRows = [];
     workspaceRows = [{ projectId: 'proj-1', userId: 'user-1' }];
     latestVersionRows = [{ version: 4 }];
     environmentRows = [
       {
         id: 'env-1',
         nodeId: null,
+        status: 'active',
         agentDeployEnabled: true,
         agentDeployEnabledBy: 'user-1',
         agentDeployEnabledAt: '2026-06-21T00:00:00.000Z',
@@ -209,6 +272,138 @@ describe('compose-publish-release callback (vertical slice)', () => {
         agentProfileId: 'profile-1',
       },
     });
+  });
+
+  it('records a stopped environment release without provisioning a node', async () => {
+    environmentRows = [
+      {
+        id: 'env-1',
+        nodeId: null,
+        status: 'stopped',
+        agentDeployEnabled: true,
+        agentDeployEnabledBy: 'user-1',
+        agentDeployEnabledAt: '2026-06-21T00:00:00.000Z',
+        agentDeployDisabledAt: null,
+        allowedDeployProfileIdsJson: null,
+      },
+    ];
+
+    const app = await buildApp();
+    const res = await request(app, 'proj-1', validSubmission);
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.nodeId).toBeNull();
+    expect(mockProvisionDeploymentNode).not.toHaveBeenCalled();
+  });
+
+  it('provisions volume releases with the resolved provider and volume location', async () => {
+    mockProvisionDeploymentNode.mockResolvedValueOnce({
+      nodeId: 'node-volume-1',
+      provisioningPromise: Promise.resolve(),
+    });
+    const app = await buildApp();
+    const res = await request(app, 'proj-1', {
+      ...validSubmission,
+      composeYaml: `services:
+  web:
+    image: nginx:latest
+    volumes:
+      - data:/usr/share/nginx/html
+volumes:
+  data:
+    x-sam-size-hint-mb: 1024
+`,
+    });
+
+    const body = await res.json();
+    expect(res.status, JSON.stringify(body)).toBe(200);
+    expect(body).toMatchObject({ nodeId: 'node-volume-1' });
+    expect(mockCreateMissingDeclaredVolumes).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      'user-1',
+      expect.objectContaining({
+        environmentId: 'env-1',
+        location: 'fsn1',
+        targetProvider: 'hetzner',
+      })
+    );
+    expect(mockProvisionDeploymentNode).toHaveBeenCalledWith(
+      'env-1',
+      'proj-1',
+      'user-1',
+      expect.anything(),
+      {
+        providerOverride: 'hetzner',
+        vmLocationOverride: 'fsn1',
+        vmSizeOverride: 'small',
+        requiresVolumes: true,
+      }
+    );
+  });
+
+  it('does not 500 when the shared→exclusive migration fails after the release is durable', async () => {
+    // Regression (cloudflare-specialist HIGH): the release is inserted durably
+    // BEFORE the shared→exclusive migration. If the migration (teardown +
+    // volume detach) throws, the route MUST still return the recorded release
+    // (200). Returning a 5xx makes the VM agent retry the whole publish, which
+    // inserts a SECOND release with the next version number (duplicate version
+    // records). The migration is deferred to the deploy verb / next release.
+    environmentRows = [
+      {
+        id: 'env-1',
+        nodeId: 'node-shared-1',
+        status: 'active',
+        agentDeployEnabled: true,
+        agentDeployEnabledBy: 'user-1',
+        agentDeployEnabledAt: '2026-06-21T00:00:00.000Z',
+        agentDeployDisabledAt: null,
+        allowedDeployProfileIdsJson: null,
+      },
+    ];
+    // The linked node is a running SHARED node, so the migration path runs.
+    nodeRows = [{ nodeMode: 'shared', status: 'running', providerInstanceId: 'srv-old' }];
+    // The teardown call that begins the migration fails.
+    mockTeardownDeploymentEnvironmentOnNode.mockRejectedValueOnce(
+      new Error('vm agent unreachable')
+    );
+
+    const app = await buildApp();
+    const res = await request(app, 'proj-1', {
+      ...validSubmission,
+      composeYaml: `services:
+  web:
+    image: nginx:latest
+    volumes:
+      - data:/usr/share/nginx/html
+volumes:
+  data:
+    x-sam-size-hint-mb: 1024
+`,
+    });
+
+    const body = await res.json();
+    // The durable release is returned, NOT a 500.
+    expect(res.status, JSON.stringify(body)).toBe(200);
+    expect(body).toMatchObject({
+      releaseId: 'release-ulid-1',
+      version: 5,
+      status: 'created',
+      nodeId: 'node-shared-1',
+    });
+    // The release was inserted durably before the migration failed.
+    expect(inserted).toHaveLength(1);
+    expect(inserted[0].version).toBe(5);
+    // The failure was recorded for diagnosis.
+    expect(mockMarkDeploymentReleaseVolumeAttachFailed).toHaveBeenCalledWith(
+      expect.anything(),
+      'env-1',
+      'release-ulid-1',
+      expect.any(Error)
+    );
+    // The migration returns early — provisioning is NOT triggered on the failed tick.
+    expect(mockProvisionDeploymentNode).not.toHaveBeenCalled();
   });
 
   it('validates and records artifact-backed service descriptors', async () => {
@@ -264,7 +459,8 @@ describe('compose-publish-release callback (vertical slice)', () => {
             localImageRef: 'workspace-web',
             r2Key: 'compose-image-artifacts/proj-1/env-1/other-ws/upload-1/web.docker-save.tar',
             sizeBytes: 42,
-            archiveSha256: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            archiveSha256:
+              'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
             archiveType: 'docker-save',
             mediaType: 'application/vnd.docker.image.rootfs.diff.tar',
           },

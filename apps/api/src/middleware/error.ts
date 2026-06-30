@@ -42,6 +42,9 @@ export const errors = {
   conflict: (message: string) =>
     new AppError(409, 'CONFLICT', message),
 
+  unprocessable: (message: string, details?: Record<string, unknown>) =>
+    new AppError(422, 'UNPROCESSABLE_ENTITY', message, details),
+
   paymentRequired: (message = 'Payment required') =>
     new AppError(402, 'PAYMENT_REQUIRED', message),
 

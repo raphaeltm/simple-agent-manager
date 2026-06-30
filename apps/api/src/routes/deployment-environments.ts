@@ -38,6 +38,7 @@ import {
   listNodeContainersFromNode,
 } from '../services/node-agent';
 import { deleteNodeResources } from '../services/nodes';
+import { registerDeploymentEnvironmentLifecycleRoutes } from './deployment-environment-lifecycle';
 
 // =============================================================================
 // Validation schemas (Valibot — matches project convention)
@@ -332,7 +333,10 @@ deploymentEnvironmentRoutes.get(
     const userId = getUserId(c);
     const db = drizzle(c.env.DATABASE, { schema });
     await requireOwnedProject(db, projectId, userId);
-    await requireDeploymentEnvironment(db, projectId, envId);
+    const environment = await requireDeploymentEnvironment(db, projectId, envId);
+    if (environment.status !== 'active') {
+      return c.json({ publicRoutes: [] });
+    }
 
     const targets = await getEnvironmentPublicRouteTargets(db, c.env, envId);
     return c.json({
@@ -425,6 +429,8 @@ deploymentEnvironmentRoutes.patch(
     return c.json(await buildDeploymentEnvironmentResponse(db, c.env, updated!));
   }
 );
+
+registerDeploymentEnvironmentLifecycleRoutes(deploymentEnvironmentRoutes);
 
 /**
  * GET /api/projects/:projectId/environments/:envId/logs
@@ -580,6 +586,13 @@ deploymentEnvironmentRoutes.delete(
     let volumesDetached = 0;
     let volumesDeleted = 0;
 
+    const attachedServerIds = new Set<string>();
+    for (const volume of volumes) {
+      if (volume.attachedServerId) {
+        attachedServerIds.add(volume.attachedServerId);
+      }
+    }
+
     if (volumes.length > 0 && environment.nodeId) {
       const nodeRows = await db
         .select({ providerInstanceId: schema.nodes.providerInstanceId })
@@ -589,27 +602,27 @@ deploymentEnvironmentRoutes.delete(
       const providerInstanceId = nodeRows[0]?.providerInstanceId;
 
       if (providerInstanceId) {
-        try {
-          const detached = await detachEnvironmentVolumes(
-            db,
-            c.env,
-            userId,
-            envId,
-            providerInstanceId
-          );
-          volumesDetached = detached.length;
-        } catch (err) {
-          throw errors.conflict(
-            `Could not detach deployment volume(s): ${err instanceof Error ? err.message : String(err)}`
-          );
-        }
+        attachedServerIds.add(providerInstanceId);
+      }
+    }
+
+    for (const serverId of attachedServerIds) {
+      try {
+        const detached = await detachEnvironmentVolumes(db, c.env, userId, envId, serverId);
+        volumesDetached += detached.length;
+      } catch (err) {
+        throw errors.conflict(
+          `Could not detach deployment volume(s): ${err instanceof Error ? err.message : String(err)}`
+        );
       }
     }
 
     const currentVolumes = await listEnvironmentVolumes(db, envId);
     for (const volume of currentVolumes) {
       try {
-        await deleteEnvironmentVolume(db, c.env, userId, volume.id, envId);
+        await deleteEnvironmentVolume(db, c.env, userId, volume.id, envId, {
+          allowLatestReleaseDeclaredVolume: true,
+        });
         volumesDeleted += 1;
       } catch (err) {
         throw errors.conflict(

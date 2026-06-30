@@ -111,6 +111,17 @@ export const DENIED_TOP_LEVEL_FIELDS: Record<string, string> = {
 export const DOCKER_SOCKET_PATHS = ['/var/run/docker.sock', '/run/docker.sock'];
 
 // =============================================================================
+// Deployment volume contract
+// =============================================================================
+
+export const SAM_DEPLOYMENT_VOLUME_NAME_MIN_LENGTH = 1;
+export const SAM_DEPLOYMENT_VOLUME_NAME_MAX_LENGTH = 63;
+export const SAM_DEPLOYMENT_VOLUME_NAME_PATTERN_SOURCE = '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$';
+export const SAM_DEPLOYMENT_VOLUME_NAME_MESSAGE =
+  'Volume names must be lowercase alphanumeric with optional hyphens, 1-63 chars.';
+export const SAM_DEPLOYMENT_VOLUME_DEFAULT_SIZE_GB = 1;
+
+// =============================================================================
 // Parser defaults — exported so callers can override via env vars
 // =============================================================================
 

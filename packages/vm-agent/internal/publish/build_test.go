@@ -56,6 +56,154 @@ func TestValidateNoSecretRefsInBuildFieldsAllowsDeployOnlyReference(t *testing.T
 	}
 }
 
+func TestValidateNoComposeVolumesRejectsTopLevelAndServiceVolumes(t *testing.T) {
+	cfg := &composeConfig{
+		Services: map[string]composeConfigService{
+			"api": {
+				Volumes: json.RawMessage(`[
+					{"type":"volume","source":"appdata","target":"/data"},
+					{"source":"legacydata","target":"/legacy"},
+					{"type":"bind","source":"/tmp/uploads","target":"/uploads"}
+				]`),
+			},
+			"worker": {
+				Volumes: json.RawMessage(`[
+					{"type":"volume","target":"/cache"}
+				]`),
+			},
+		},
+		Volumes: map[string]json.RawMessage{
+			"appdata": json.RawMessage(`{}`),
+		},
+	}
+
+	err := validateNoComposeVolumes(cfg)
+	if err == nil {
+		t.Fatal("expected compose volumes to be rejected")
+	}
+	if !IsUnsupportedComposeVolumesError(err) {
+		t.Fatalf("expected unsupported compose volumes error, got %T: %v", err, err)
+	}
+	for _, want := range []string{
+		"build_and_publish does not support Docker Compose service volume mounts, service volumes_from, service tmpfs, or top-level volumes yet",
+		"api:appdata",
+		"api:legacydata",
+		"api:/tmp/uploads",
+		"worker:anonymous at /cache",
+		"top-level:appdata",
+		"Docker-managed local volumes",
+		"SAM provider-backed deployment volumes",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("expected error to contain %q, got: %v", want, err)
+		}
+	}
+}
+
+func TestValidateNoComposeVolumesRejectsBindAndTmpfsServiceMounts(t *testing.T) {
+	cfg := &composeConfig{Services: map[string]composeConfigService{
+		"api": {
+			Volumes: json.RawMessage(`[
+				{"type":"bind","source":"/tmp/uploads","target":"/uploads"},
+				{"type":"tmpfs","target":"/cache"}
+			]`),
+		},
+	}}
+
+	err := validateNoComposeVolumes(cfg)
+	if err == nil {
+		t.Fatal("expected service mounts to be rejected")
+	}
+	for _, want := range []string{"api:/tmp/uploads", "api:anonymous at /cache"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("expected error to contain %q, got: %v", want, err)
+		}
+	}
+}
+
+func TestValidateNoComposeVolumesRejectsStringVolumeEntries(t *testing.T) {
+	cfg := &composeConfig{Services: map[string]composeConfigService{
+		"api": {
+			Volumes: json.RawMessage(`["appdata:/data","/cache","/tmp/uploads:/uploads"]`),
+		},
+	}}
+
+	err := validateNoComposeVolumes(cfg)
+	if err == nil {
+		t.Fatal("expected string compose volume entries to be rejected")
+	}
+	for _, want := range []string{"api:appdata", "api:anonymous at /cache", "api:/tmp/uploads"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("expected error to contain %q, got: %v", want, err)
+		}
+	}
+}
+
+func TestValidateNoComposeVolumesRejectsVolumesFromAndServiceTmpfs(t *testing.T) {
+	cfg := &composeConfig{Services: map[string]composeConfigService{
+		"api": {
+			VolumesFrom: json.RawMessage(`["db:ro"]`),
+			Tmpfs:       json.RawMessage(`["/run/cache"]`),
+		},
+		"worker": {
+			VolumesFrom: json.RawMessage(`"api"`),
+			Tmpfs:       json.RawMessage(`"/tmp"`),
+		},
+	}}
+
+	err := validateNoComposeVolumes(cfg)
+	if err == nil {
+		t.Fatal("expected service volumes_from/tmpfs to be rejected")
+	}
+	for _, want := range []string{
+		"api:volumes_from:db:ro",
+		"api:tmpfs:/run/cache",
+		"worker:volumes_from:api",
+		"worker:tmpfs:/tmp",
+		"service volumes_from",
+		"service tmpfs",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("expected error to contain %q, got: %v", want, err)
+		}
+	}
+}
+
+func TestBuildRejectsComposeVolumesBeforeBuild(t *testing.T) {
+	dir := t.TempDir()
+	buildMarker := filepath.Join(dir, "build-called")
+	compose := filepath.Join(dir, "fake-compose")
+	script := strings.Join([]string{
+		"#!/bin/sh",
+		"if [ \"$*\" = \"config --no-interpolate --format json\" ]; then",
+		"  printf '%s' '{\"name\":\"demo\",\"services\":{\"api\":{\"image\":\"demo-api\",\"build\":{\"context\":\".\"},\"volumes\":[{\"type\":\"volume\",\"source\":\"appdata\",\"target\":\"/data\"}]}},\"volumes\":{\"appdata\":{}}}'",
+		"  exit 0",
+		"fi",
+		"if [ \"$1\" = \"build\" ]; then",
+		"  touch '" + buildMarker + "'",
+		"  exit 0",
+		"fi",
+		"printf '%s' '{\"name\":\"demo\",\"services\":{\"api\":{\"image\":\"demo-api\",\"build\":{\"context\":\".\"}}}}'",
+	}, "\n")
+	if err := os.WriteFile(compose, []byte(script), 0o700); err != nil {
+		t.Fatalf("write fake compose: %v", err)
+	}
+
+	_, err := Build(context.Background(), BuildOptions{
+		WorkspaceDir: dir,
+		ComposeCmd:   compose,
+	})
+	if err == nil {
+		t.Fatal("expected Build to reject compose volumes")
+	}
+	if !IsUnsupportedComposeVolumesError(err) {
+		t.Fatalf("expected unsupported compose volumes error, got %T: %v", err, err)
+	}
+	if _, statErr := os.Stat(buildMarker); !os.IsNotExist(statErr) {
+		t.Fatalf("compose build should not run after volume validation failure, stat err: %v", statErr)
+	}
+}
+
 func TestBuildComposeCommandEnvAddsSecretPlaceholders(t *testing.T) {
 	buildEnv := map[string]string{
 		"PUBLIC_TAG":   "v1",

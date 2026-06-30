@@ -71,6 +71,10 @@ const (
 	// DefaultDeployBuildPublishTimeout bounds host build + push + release publish
 	// work. Override via DEPLOY_BUILD_PUBLISH_TIMEOUT.
 	DefaultDeployBuildPublishTimeout = 20 * time.Minute
+
+	// DefaultDeployTeardownTimeout bounds per-environment deployment teardown.
+	// Override via DEPLOY_TEARDOWN_TIMEOUT.
+	DefaultDeployTeardownTimeout = 2 * time.Minute
 )
 
 // Node role constants.
@@ -273,14 +277,15 @@ type Config struct {
 	DiagDiskFullThreshold      float64 // Disk % above which build is "disk full" (env: DIAG_DISK_FULL_THRESHOLD, default: 90)
 
 	// Deployment mode settings (only used when Role == "deployment")
-	EnvironmentID        string        // Deployment environment ID (env: ENVIRONMENT_ID)
-	DeployBaseDir        string        // Base directory for deployment state (env: DEPLOY_BASE_DIR, default: /var/lib/sam-deploy)
-	DeploySigningPubKey  string        // Ed25519 public key for payload verification, base64-encoded (env: DEPLOY_SIGNING_PUB_KEY)
-	DeployRuntimeTimeout time.Duration // Max time for deployment-node host dependency setup (env: DEPLOY_RUNTIME_TIMEOUT, default: 15m)
-	DeployHealthTimeout  time.Duration // Max time to wait for container health checks (env: DEPLOY_HEALTH_TIMEOUT, default: 5m)
-	DeployComposeCmd     string        // Docker Compose command (env: DEPLOY_COMPOSE_CMD, default: "docker compose")
-	DeployACMEEmail      string        // Contact email for ACME/Let's Encrypt account (env: DEPLOY_ACME_EMAIL)
-	DeployACMECA         string        // Optional ACME CA directory URL override, e.g. LE staging (env: DEPLOY_ACME_CA)
+	EnvironmentID         string        // Deployment environment ID (env: ENVIRONMENT_ID)
+	DeployBaseDir         string        // Base directory for deployment state (env: DEPLOY_BASE_DIR, default: /var/lib/sam-deploy)
+	DeploySigningPubKey   string        // Ed25519 public key for payload verification, base64-encoded (env: DEPLOY_SIGNING_PUB_KEY)
+	DeployRuntimeTimeout  time.Duration // Max time for deployment-node host dependency setup (env: DEPLOY_RUNTIME_TIMEOUT, default: 15m)
+	DeployHealthTimeout   time.Duration // Max time to wait for container health checks (env: DEPLOY_HEALTH_TIMEOUT, default: 5m)
+	DeployComposeCmd      string        // Docker Compose command (env: DEPLOY_COMPOSE_CMD, default: "docker compose")
+	DeployACMEEmail       string        // Contact email for ACME/Let's Encrypt account (env: DEPLOY_ACME_EMAIL)
+	DeployACMECA          string        // Optional ACME CA directory URL override, e.g. LE staging (env: DEPLOY_ACME_CA)
+	DeployTeardownTimeout time.Duration // Max time for deployment environment teardown (env: DEPLOY_TEARDOWN_TIMEOUT)
 
 	// Deployment artifact/apply watchdog settings - configurable per constitution principle XI.
 	DeployArtifactDialTimeout           time.Duration // TCP dial timeout for artifact downloads (env: DEPLOY_ARTIFACT_DIAL_TIMEOUT)
@@ -501,14 +506,15 @@ func Load() (*Config, error) {
 		DiagDiskFullThreshold:      getEnvFloat("DIAG_DISK_FULL_THRESHOLD", 90),
 
 		// Deployment mode settings
-		EnvironmentID:        getEnv("ENVIRONMENT_ID", ""),
-		DeployBaseDir:        getEnv("DEPLOY_BASE_DIR", "/var/lib/sam-deploy"),
-		DeploySigningPubKey:  getEnv("DEPLOY_SIGNING_PUB_KEY", ""),
-		DeployRuntimeTimeout: getEnvDuration("DEPLOY_RUNTIME_TIMEOUT", 15*time.Minute),
-		DeployHealthTimeout:  getEnvDuration("DEPLOY_HEALTH_TIMEOUT", 5*time.Minute),
-		DeployComposeCmd:     getEnv("DEPLOY_COMPOSE_CMD", "docker compose"),
-		DeployACMEEmail:      getEnv("DEPLOY_ACME_EMAIL", ""),
-		DeployACMECA:         getEnv("DEPLOY_ACME_CA", ""),
+		EnvironmentID:         getEnv("ENVIRONMENT_ID", ""),
+		DeployBaseDir:         getEnv("DEPLOY_BASE_DIR", "/var/lib/sam-deploy"),
+		DeploySigningPubKey:   getEnv("DEPLOY_SIGNING_PUB_KEY", ""),
+		DeployRuntimeTimeout:  getEnvDuration("DEPLOY_RUNTIME_TIMEOUT", 15*time.Minute),
+		DeployHealthTimeout:   getEnvDuration("DEPLOY_HEALTH_TIMEOUT", 5*time.Minute),
+		DeployComposeCmd:      getEnv("DEPLOY_COMPOSE_CMD", "docker compose"),
+		DeployACMEEmail:       getEnv("DEPLOY_ACME_EMAIL", ""),
+		DeployACMECA:          getEnv("DEPLOY_ACME_CA", ""),
+		DeployTeardownTimeout: getEnvDuration("DEPLOY_TEARDOWN_TIMEOUT", DefaultDeployTeardownTimeout),
 
 		DeployArtifactDialTimeout:           getEnvDuration("DEPLOY_ARTIFACT_DIAL_TIMEOUT", DefaultDeployArtifactDialTimeout),
 		DeployArtifactTLSHandshakeTimeout:   getEnvDuration("DEPLOY_ARTIFACT_TLS_HANDSHAKE_TIMEOUT", DefaultDeployArtifactTLSHandshakeTimeout),

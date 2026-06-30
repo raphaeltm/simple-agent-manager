@@ -5,7 +5,13 @@ type Condition = { op: 'eq'; col: string; val: unknown } | { op: 'and'; conds: C
 
 const updates: Array<{ table: unknown; values: Record<string, unknown>; where: unknown }> = [];
 const latestByEnvironment = new Map<string, { version: number; status: string }>();
-let deploymentPlacements: Array<{ envId: string }> = [];
+let deploymentPlacements: Array<{ envId: string; status?: string; requiresVolumes?: boolean }> = [];
+const volumeReadinessByEnvironment = new Map<string, { total: number; attached: number }>();
+const currentProviderServerId = 'provider-server-current';
+
+function volumeReadinessKey(serverId: string, environmentId: string): string {
+  return `${serverId}:${environmentId}`;
+}
 
 vi.mock('drizzle-orm', () => ({
   and: (...conds: Condition[]) => ({ op: 'and', conds }),
@@ -24,6 +30,7 @@ vi.mock('../../../src/db/schema', () => ({
     updatedAt: 'nodes.updatedAt',
     lastMetrics: 'nodes.lastMetrics',
     ipAddress: 'nodes.ipAddress',
+    providerInstanceId: 'nodes.providerInstanceId',
     errorMessage: 'nodes.errorMessage',
     backendDnsRecordId: 'nodes.backendDnsRecordId',
   },
@@ -36,6 +43,8 @@ vi.mock('../../../src/db/schema', () => ({
   deploymentEnvironments: {
     id: 'deployment_environments.id',
     nodeId: 'deployment_environments.nodeId',
+    status: 'deployment_environments.status',
+    requiresVolumes: 'deployment_environments.requiresVolumes',
     observedDeployment: 'deployment_environments.observedDeployment',
     observedDeploymentAt: 'deployment_environments.observedDeploymentAt',
   },
@@ -115,6 +124,7 @@ function createMockDb() {
                   healthStatus: 'healthy',
                   nodeRole: 'deployment',
                   ipAddress: null,
+                  providerInstanceId: currentProviderServerId,
                   errorMessage: null,
                   backendDnsRecordId: null,
                 },
@@ -153,7 +163,26 @@ function createMockDb() {
 
 async function postHeartbeat(
   payload: unknown,
-  env: Record<string, unknown> = { DATABASE: {}, DEPLOY_SIGNING_PUBLIC_KEY: 'pub-key' }
+  env: Record<string, unknown> = {
+    DATABASE: {
+      prepare: vi.fn((sql: string) => ({
+        bind: vi.fn((serverId: string, environmentId: string) => ({
+          first: vi.fn(async () => {
+            if (sql.includes('FROM deployment_volumes')) {
+              return (
+                volumeReadinessByEnvironment.get(volumeReadinessKey(serverId, environmentId)) ?? {
+                  total: 0,
+                  attached: 0,
+                }
+              );
+            }
+            return null;
+          }),
+        })),
+      })),
+    },
+    DEPLOY_SIGNING_PUBLIC_KEY: 'pub-key',
+  }
 ) {
   const { nodeLifecycleRoutes } = await import('../../../src/routes/node-lifecycle');
   const app = new Hono();
@@ -176,10 +205,69 @@ async function postHeartbeat(
 describe('node lifecycle deployment heartbeat contract', () => {
   beforeEach(() => {
     updates.length = 0;
-    deploymentPlacements = [{ envId: 'env-a' }, { envId: 'env-b' }];
+    volumeReadinessByEnvironment.clear();
+    deploymentPlacements = [
+      { envId: 'env-a', status: 'active', requiresVolumes: false },
+      { envId: 'env-b', status: 'active', requiresVolumes: false },
+    ];
     latestByEnvironment.clear();
     latestByEnvironment.set('env-a', { version: 5, status: 'created' });
     latestByEnvironment.set('env-b', { version: 8, status: 'applied' });
+  });
+
+  it('withholds pending releases for volume environments until all volumes are attached', async () => {
+    deploymentPlacements = [{ envId: 'env-a', status: 'active', requiresVolumes: true }];
+    latestByEnvironment.set('env-a', { version: 5, status: 'created' });
+    volumeReadinessByEnvironment.set(volumeReadinessKey(currentProviderServerId, 'env-a'), {
+      total: 2,
+      attached: 1,
+    });
+
+    const waiting = await postHeartbeat({
+      deployment: {
+        environments: [{ environmentId: 'env-a', appliedSeq: 4, status: 'applied' }],
+      },
+    });
+
+    expect(waiting.status).toBe(200);
+    expect((await waiting.json()).deployment.pendingReleases).toBeUndefined();
+
+    volumeReadinessByEnvironment.set(volumeReadinessKey(currentProviderServerId, 'env-a'), {
+      total: 2,
+      attached: 2,
+    });
+    const ready = await postHeartbeat({
+      deployment: {
+        environments: [{ environmentId: 'env-a', appliedSeq: 4, status: 'applied' }],
+      },
+    });
+
+    expect(ready.status).toBe(200);
+    expect((await ready.json()).deployment.pendingReleases).toEqual([
+      { environmentId: 'env-a', seq: 5 },
+    ]);
+  });
+
+  it('does not treat volumes attached to a stale provider server as ready', async () => {
+    deploymentPlacements = [{ envId: 'env-a', status: 'active', requiresVolumes: true }];
+    latestByEnvironment.set('env-a', { version: 5, status: 'created' });
+    volumeReadinessByEnvironment.set(volumeReadinessKey('provider-server-old', 'env-a'), {
+      total: 2,
+      attached: 2,
+    });
+    volumeReadinessByEnvironment.set(volumeReadinessKey(currentProviderServerId, 'env-a'), {
+      total: 2,
+      attached: 0,
+    });
+
+    const res = await postHeartbeat({
+      deployment: {
+        environments: [{ environmentId: 'env-a', appliedSeq: 4, status: 'applied' }],
+      },
+    });
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).deployment.pendingReleases).toBeUndefined();
   });
 
   it('returns per-environment pending releases and explicit retirement for reported environments not placed on the node', async () => {
@@ -211,6 +299,36 @@ describe('node lifecycle deployment heartbeat contract', () => {
     expect(
       deploymentUpdates.some((update) => JSON.stringify(update.where).includes('env-evil'))
     ).toBe(false);
+  });
+
+  it('retires stopped environments without issuing pending releases', async () => {
+    deploymentPlacements = [{ envId: 'env-a', status: 'stopped', requiresVolumes: false }];
+
+    const res = await postHeartbeat({
+      deployment: {
+        environments: [{ environmentId: 'env-a', appliedSeq: 4, status: 'applied' }],
+      },
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.deployment.environments).toEqual([]);
+    expect(body.deployment.retireEnvironments).toEqual([{ environmentId: 'env-a' }]);
+    expect(body.deployment.pendingReleases).toBeUndefined();
+  });
+
+  it('promotes starting environments to active after an applied heartbeat', async () => {
+    deploymentPlacements = [{ envId: 'env-a', status: 'starting', requiresVolumes: false }];
+    latestByEnvironment.set('env-a', { version: 4, status: 'applied' });
+
+    const res = await postHeartbeat({
+      deployment: {
+        environments: [{ environmentId: 'env-a', appliedSeq: 4, status: 'applied' }],
+      },
+    });
+
+    expect(res.status).toBe(200);
+    expect(updates.some((update) => update.values.status === 'active')).toBe(true);
   });
 
   it('does not reissue a failed newer release after the node reports rollback', async () => {
@@ -264,7 +382,7 @@ describe('node lifecycle deployment heartbeat contract', () => {
   });
 
   it('ignores legacy top-level deployment state without an environment id', async () => {
-    deploymentPlacements = [{ envId: 'env-a' }];
+    deploymentPlacements = [{ envId: 'env-a', status: 'active' }];
     latestByEnvironment.set('env-a', { version: 5, status: 'applied' });
 
     const res = await postHeartbeat(

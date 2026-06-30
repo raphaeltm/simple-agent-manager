@@ -674,6 +674,8 @@ export class HetznerProvider implements Provider {
         return 'creating';
       case 'available':
         return 'available';
+      case 'in-use':
+        return 'attached';
       default:
         return 'unknown';
     }

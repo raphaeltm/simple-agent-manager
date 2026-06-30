@@ -13,6 +13,9 @@ import type { Env } from '../../../src/env';
 const FIXED_DIGEST = `sha256:${'a'.repeat(64)}`;
 
 const mockProvisionDeploymentNode = vi.fn();
+const mockResolveDeploymentPlacement = vi.fn();
+const mockCreateMissingManifestVolumes = vi.fn();
+const mockAttachEnvironmentVolumesToLinkedNode = vi.fn();
 const mockMintProjectRegistryCredential = vi.fn();
 const mockCreateImageResolver = vi.fn();
 const mockResolver = vi.fn();
@@ -24,11 +27,19 @@ let insertedReleases: Array<Record<string, unknown>> = [];
 
 vi.mock('../../../src/services/deployment-provisioning', () => ({
   provisionDeploymentNode: (...args: unknown[]) => mockProvisionDeploymentNode(...args),
+  resolveDeploymentPlacement: (...args: unknown[]) => mockResolveDeploymentPlacement(...args),
+}));
+
+vi.mock('../../../src/services/deployment-volumes', () => ({
+  createMissingManifestVolumes: (...args: unknown[]) => mockCreateMissingManifestVolumes(...args),
+  attachEnvironmentVolumesToLinkedNode: (...args: unknown[]) =>
+    mockAttachEnvironmentVolumesToLinkedNode(...args),
+  markDeploymentReleaseVolumeAttachFailed: vi.fn(),
 }));
 
 vi.mock('../../../src/services/image-resolver', async () => {
   const actual = await vi.importActual<typeof import('../../../src/services/image-resolver')>(
-    '../../../src/services/image-resolver',
+    '../../../src/services/image-resolver'
   );
   return {
     ...actual,
@@ -65,9 +76,12 @@ vi.mock('../../../src/middleware/project-auth', () => ({
 
 vi.mock('../../../src/middleware/error', () => ({
   errors: {
-    badRequest: (msg: string) => Object.assign(new Error(msg), { statusCode: 400, error: 'BAD_REQUEST', message: msg }),
-    notFound: (msg: string) => Object.assign(new Error(msg), { statusCode: 404, error: 'NOT_FOUND', message: msg }),
-    conflict: (msg: string) => Object.assign(new Error(msg), { statusCode: 409, error: 'CONFLICT', message: msg }),
+    badRequest: (msg: string) =>
+      Object.assign(new Error(msg), { statusCode: 400, error: 'BAD_REQUEST', message: msg }),
+    notFound: (msg: string) =>
+      Object.assign(new Error(msg), { statusCode: 404, error: 'NOT_FOUND', message: msg }),
+    conflict: (msg: string) =>
+      Object.assign(new Error(msg), { statusCode: 409, error: 'CONFLICT', message: msg }),
   },
 }));
 
@@ -87,6 +101,10 @@ vi.mock('../../../src/db/schema', () => ({
     id: 'de.id',
     projectId: 'de.projectId',
     nodeId: 'de.nodeId',
+  },
+  nodes: {
+    id: 'n.id',
+    nodeMode: 'n.nodeMode',
   },
   deploymentReleases: {
     id: 'dr.id',
@@ -231,6 +249,13 @@ describe('POST /:projectId/environments/:envId/releases — Compose submission',
       nodeId: 'node-new-1',
       provisioningPromise: Promise.resolve(),
     });
+    mockResolveDeploymentPlacement.mockResolvedValue({
+      provider: 'hetzner',
+      location: 'fsn1',
+      vmSize: 'small',
+    });
+    mockCreateMissingManifestVolumes.mockResolvedValue([]);
+    mockAttachEnvironmentVolumesToLinkedNode.mockResolvedValue([]);
   });
 
   it('accepts Compose YAML, persists a digest-pinned manifest, assigns version, and triggers provisioning', async () => {
@@ -242,7 +267,7 @@ describe('POST /:projectId/environments/:envId/releases — Compose submission',
         headers: { 'Content-Type': 'text/yaml' },
         body: composeYaml(),
       },
-      mockEnv,
+      mockEnv
     );
 
     expect(res.status).toBe(201);
@@ -284,6 +309,22 @@ describe('POST /:projectId/environments/:envId/releases — Compose submission',
       'proj-1',
       'test-user-id',
       expect.anything(),
+      {
+        providerOverride: 'hetzner',
+        requiresVolumes: true,
+        vmLocationOverride: 'fsn1',
+        vmSizeOverride: 'small',
+      }
+    );
+    expect(mockCreateMissingManifestVolumes).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      'test-user-id',
+      expect.objectContaining({
+        environmentId: 'env-1',
+        location: 'fsn1',
+        targetProvider: 'hetzner',
+      })
     );
   });
 
@@ -298,7 +339,7 @@ describe('POST /:projectId/environments/:envId/releases — Compose submission',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(jsonManifest()),
       },
-      mockEnv,
+      mockEnv
     );
 
     expect(res.status).toBe(201);
@@ -318,7 +359,7 @@ describe('POST /:projectId/environments/:envId/releases — Compose submission',
         headers: { 'Content-Type': 'application/yaml' },
         body: 'services: [',
       },
-      mockEnv,
+      mockEnv
     );
 
     expect(res.status).toBe(400);
@@ -339,16 +380,14 @@ describe('POST /:projectId/environments/:envId/releases — Compose submission',
         headers: { 'Content-Type': 'text/x-yaml' },
         body: composeYaml().replace('    image:', '    privileged: true\n    image:'),
       },
-      mockEnv,
+      mockEnv
     );
 
     expect(res.status).toBe(400);
     const body = await res.json();
     expect(body.error).toBe('COMPOSE_PARSE_FAILED');
     expect(body.details.errors).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ path: 'services.web.privileged' }),
-      ]),
+      expect.arrayContaining([expect.objectContaining({ path: 'services.web.privileged' })])
     );
   });
 
@@ -363,7 +402,7 @@ describe('POST /:projectId/environments/:envId/releases — Compose submission',
         headers: { 'Content-Type': 'text/yaml' },
         body: composeYaml({ secretName: 'missing-db-url' }),
       },
-      mockEnv,
+      mockEnv
     );
 
     expect(res.status).toBe(400);
@@ -389,13 +428,16 @@ describe('POST /:projectId/environments/:envId/releases — Compose submission',
 `,
         }),
       },
-      mockEnv,
+      mockEnv
     );
 
     expect(res.status).toBe(201);
     expect(insertedReleases).toHaveLength(1);
     const manifest = JSON.parse(insertedReleases[0].manifest as string);
-    expect(Object.keys(manifest.services).sort((a, b) => a.localeCompare(b))).toEqual(['web', 'worker']);
+    expect(Object.keys(manifest.services).sort((a, b) => a.localeCompare(b))).toEqual([
+      'web',
+      'worker',
+    ]);
   });
 
   it('scopes minted registry credentials to the SAM registry host for both YAML and JSON paths', async () => {
@@ -408,7 +450,7 @@ describe('POST /:projectId/environments/:envId/releases — Compose submission',
         headers: { 'Content-Type': 'text/yaml' },
         body: composeYaml(),
       },
-      mockEnv,
+      mockEnv
     );
 
     await app.request(
@@ -430,7 +472,7 @@ describe('POST /:projectId/environments/:envId/releases — Compose submission',
           },
         }),
       },
-      mockEnv,
+      mockEnv
     );
 
     expect(mockMintProjectRegistryCredential).toHaveBeenCalledWith(
@@ -439,7 +481,7 @@ describe('POST /:projectId/environments/:envId/releases — Compose submission',
       'test-user-id',
       '',
       undefined,
-      { permissions: ['pull'] },
+      { permissions: ['pull'] }
     );
     expect(mockCreateImageResolver).toHaveBeenCalledTimes(2);
     expect(mockCreateImageResolver).toHaveBeenNthCalledWith(1, {

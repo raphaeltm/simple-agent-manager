@@ -36,6 +36,7 @@ export function releaseBadgeStatus(status: string): string {
 }
 
 export function environmentBadgeStatus(status: string): string {
+  if (status === 'starting') return 'in_progress';
   return status === 'active' ? 'connected' : status;
 }
 
@@ -53,6 +54,9 @@ export function shortId(value: string | null | undefined): string | null {
 export type ServiceState = 'serving' | 'degraded' | 'not-serving' | 'unknown';
 
 export function deriveServiceState(env: DeploymentEnvironment): ServiceState {
+  if (env.status === 'stopped' || env.status === 'stopping') return 'not-serving';
+  if (env.status === 'starting') return 'unknown';
+
   const ds = objectRecord(env.observedDeployment.deployStatus);
   const node = (ds?.nodeHealth as string | undefined) ?? env.node?.healthStatus;
 
@@ -206,6 +210,7 @@ export function StatusDimensions({ env }: { env: DeploymentEnvironment }) {
       ? 'healthy'
       : undefined;
   const routesFallback =
+    env.status === 'active' &&
     !deployStatus?.routeCertState &&
     env.routeHostnames.length > 0 &&
     env.latestRelease?.status === 'applied'

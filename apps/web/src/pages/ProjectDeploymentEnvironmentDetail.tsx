@@ -1,6 +1,15 @@
 import type { AgentProfile } from '@simple-agent-manager/shared';
 import { Alert, Button, SkeletonCard, StatusBadge } from '@simple-agent-manager/ui';
-import { ArrowLeft, ExternalLink, ScrollText, Server, ShieldCheck, Trash2 } from 'lucide-react';
+import {
+  ArrowLeft,
+  ExternalLink,
+  Play,
+  ScrollText,
+  Server,
+  ShieldCheck,
+  Square,
+  Trash2,
+} from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 
@@ -30,6 +39,8 @@ import {
   getDeploymentEnvironmentMetrics,
   listDeploymentEnvironmentContainers,
   listDeploymentEnvironments,
+  startDeploymentEnvironment,
+  stopDeploymentEnvironment,
   updateDeploymentEnvironmentPolicy,
 } from '../lib/api';
 import { useProjectContext } from './ProjectContext';
@@ -62,6 +73,29 @@ function formatCleanupSummary(result: DeleteDeploymentEnvironmentResponse): stri
   return parts.length > 0 ? parts.join(', ') : 'Environment removed';
 }
 
+function formatStopSummary(volumesDetached: number, nodeDeleted: boolean): string {
+  const parts = ['environment stopped'];
+  if (volumesDetached > 0) {
+    parts.push(`${volumesDetached} volume${volumesDetached === 1 ? '' : 's'} detached`);
+  }
+  if (nodeDeleted) parts.push('node destroyed');
+  return parts.join(', ');
+}
+
+function observeAsync(promise: Promise<unknown>): void {
+  promise.catch(() => undefined);
+}
+
+function stopNodeLifecycleMessage(env: DeploymentEnvironment, siblingCount: number): string {
+  if (!env.nodeId) {
+    return 'No deployment node is currently attached';
+  }
+  if (siblingCount > 1) {
+    return 'Keeps the shared deployment node running for other environments';
+  }
+  return 'Destroys the deployment node because no other environment is using it';
+}
+
 export function ProjectDeploymentEnvironmentDetail() {
   const { projectId } = useProjectContext();
   const { envId } = useParams<{ envId: string }>();
@@ -91,6 +125,8 @@ export function ProjectDeploymentEnvironmentDetail() {
   const [logsRequested, setLogsRequested] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [stopOpen, setStopOpen] = useState(false);
+  const [lifecycleAction, setLifecycleAction] = useState<'start' | 'stop' | null>(null);
 
   const loadEnvironment = useCallback(async () => {
     if (!envId) return;
@@ -113,8 +149,16 @@ export function ProjectDeploymentEnvironmentDetail() {
   }, [projectId, envId]);
 
   useEffect(() => {
-    void loadEnvironment();
+    observeAsync(loadEnvironment());
   }, [loadEnvironment]);
+
+  useEffect(() => {
+    if (!env || (env.status !== 'starting' && env.status !== 'stopping')) return;
+    const interval = globalThis.setInterval(() => {
+      observeAsync(loadEnvironment());
+    }, 5000);
+    return () => globalThis.clearInterval(interval);
+  }, [env, loadEnvironment]);
 
   const refreshMetrics = useCallback(async () => {
     if (!env) return;
@@ -155,9 +199,11 @@ export function ProjectDeploymentEnvironmentDetail() {
 
   useEffect(() => {
     if (env?.node?.status !== 'running') return;
-    void refreshMetrics();
-    const interval = window.setInterval(() => void refreshMetrics(), 15000);
-    return () => window.clearInterval(interval);
+    observeAsync(refreshMetrics());
+    const interval = globalThis.setInterval(() => {
+      observeAsync(refreshMetrics());
+    }, 15000);
+    return () => globalThis.clearInterval(interval);
   }, [env?.node?.status, refreshMetrics]);
 
   const refreshLogs = useCallback(
@@ -198,7 +244,7 @@ export function ProjectDeploymentEnvironmentDetail() {
   // Auto-load logs the first time the Logs tab is opened.
   useEffect(() => {
     if (activeTab === 'logs' && env && !logsRequested) {
-      void refreshLogs();
+      observeAsync(refreshLogs());
     }
   }, [activeTab, env, logsRequested, refreshLogs]);
 
@@ -244,10 +290,51 @@ export function ProjectDeploymentEnvironmentDetail() {
     try {
       const result = await deleteDeploymentEnvironment(projectId, env.id);
       toast.success(`Environment destroyed: ${formatCleanupSummary(result)}`);
-      void navigate('..');
+      observeAsync(Promise.resolve(navigate('..')));
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to destroy environment');
       setDeleting(false);
+    }
+  };
+
+  const handleStart = async () => {
+    if (!env) return;
+    setLifecycleAction('start');
+    try {
+      const result = await startDeploymentEnvironment(projectId, env.id);
+      setEnv(result.environment);
+      toast.success(
+        result.lifecycle.provisioningStarted
+          ? 'Environment starting on a deployment node'
+          : 'Environment start requested'
+      );
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to start environment');
+    } finally {
+      setLifecycleAction(null);
+    }
+  };
+
+  const handleStopConfirm = async () => {
+    if (!env) return;
+    setLifecycleAction('stop');
+    try {
+      const result = await stopDeploymentEnvironment(projectId, env.id);
+      setEnv(result.environment);
+      setStopOpen(false);
+      toast.success(
+        `Environment stopped: ${formatStopSummary(
+          result.lifecycle.volumesDetached,
+          result.lifecycle.nodeDeleted
+        )}`
+      );
+      if (result.lifecycle.warnings.length > 0) {
+        toast.warning(result.lifecycle.warnings.join(' '));
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to stop environment');
+    } finally {
+      setLifecycleAction(null);
     }
   };
 
@@ -281,6 +368,12 @@ export function ProjectDeploymentEnvironmentDetail() {
     );
   }
 
+  const canStart = env.status === 'stopped';
+  const canStop = env.status === 'active' || env.status === 'error';
+  const lifecycleBusy = lifecycleAction !== null;
+  const activeRouteHostnames = env.status === 'active' ? env.routeHostnames : [];
+  const stopDialogNodeMessage = stopNodeLifecycleMessage(env, siblingCount);
+
   return (
     <div className="grid gap-4">
       <Link
@@ -299,15 +392,42 @@ export function ProjectDeploymentEnvironmentDetail() {
           </div>
           <ReleaseAttribution env={env} />
         </div>
-        <Button
-          size="sm"
-          variant="danger"
-          onClick={() => setDeleteOpen(true)}
-          className="sm:shrink-0"
-        >
-          <Trash2 size={14} />
-          Destroy Env
-        </Button>
+        <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+          {canStart && (
+            <Button
+              size="sm"
+              onClick={() => observeAsync(handleStart())}
+              loading={lifecycleAction === 'start'}
+              disabled={lifecycleBusy}
+              className="sm:shrink-0 min-w-24"
+            >
+              <Play size={14} />
+              Start
+            </Button>
+          )}
+          {canStop && (
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => setStopOpen(true)}
+              disabled={lifecycleBusy}
+              className="sm:shrink-0 min-w-24"
+            >
+              <Square size={14} />
+              Stop
+            </Button>
+          )}
+          <Button
+            size="sm"
+            variant="danger"
+            onClick={() => setDeleteOpen(true)}
+            disabled={lifecycleBusy}
+            className="sm:shrink-0"
+          >
+            <Trash2 size={14} />
+            Destroy Env
+          </Button>
+        </div>
       </header>
 
       {error && (
@@ -341,20 +461,20 @@ export function ProjectDeploymentEnvironmentDetail() {
         <section className="grid gap-4">
           <OperationalSummary env={env} />
           <StatusDimensions env={env} />
-          {env.routeHostnames.length > 0 && (
+          {activeRouteHostnames.length > 0 && (
             <div className="grid gap-2">
               <div className="text-xs font-semibold uppercase text-fg-muted">Public Routes</div>
               <div className="grid gap-1">
-                {env.routeHostnames.map((hostname) => (
+                {activeRouteHostnames.map((hostname) => (
                   <a
                     key={hostname}
                     href={`https://${hostname}`}
                     target="_blank"
                     rel="noreferrer"
-                    className="inline-flex items-center gap-1 min-w-0 text-sm text-accent no-underline hover:underline w-fit"
+                    className="inline-flex max-w-full items-start gap-1 text-sm text-accent no-underline hover:underline"
                   >
-                    <span className="truncate">{hostname}</span>
-                    <ExternalLink size={13} className="shrink-0" />
+                    <span className="min-w-0 break-all">{hostname}</span>
+                    <ExternalLink size={13} className="mt-0.5 shrink-0" />
                   </a>
                 ))}
               </div>
@@ -371,8 +491,8 @@ export function ProjectDeploymentEnvironmentDetail() {
           </div>
           <LogsPanel
             state={logState}
-            onRefresh={() => void refreshLogs()}
-            onRefreshFiltered={(opts) => void refreshLogs(opts)}
+            onRefresh={() => observeAsync(refreshLogs())}
+            onRefreshFiltered={(opts) => observeAsync(refreshLogs(opts))}
           />
         </section>
       )}
@@ -390,8 +510,8 @@ export function ProjectDeploymentEnvironmentDetail() {
           env={env}
           profiles={profiles}
           policyBusy={policySaving}
-          onPolicyEnabledChange={(enabled) => void handlePolicyEnabledChange(enabled)}
-          onProfileToggle={(profileId) => void handleProfileToggle(profileId)}
+          onPolicyEnabledChange={(enabled) => observeAsync(handlePolicyEnabledChange(enabled))}
+          onProfileToggle={(profileId) => observeAsync(handleProfileToggle(profileId))}
         />
       )}
 
@@ -403,11 +523,37 @@ export function ProjectDeploymentEnvironmentDetail() {
       )}
 
       <ConfirmDialog
+        isOpen={stopOpen}
+        onClose={() => {
+          if (!lifecycleBusy) setStopOpen(false);
+        }}
+        onConfirm={() => observeAsync(handleStopConfirm())}
+        title="Stop deployment environment?"
+        variant="warning"
+        confirmLabel="Stop"
+        loading={lifecycleAction === 'stop'}
+        message={
+          <div className="grid gap-2">
+            <p className="m-0">
+              This stops <strong>{env.name}</strong> without deleting its configuration or
+              persistent data.
+            </p>
+            <ul className="m-0 pl-4 grid gap-1 text-sm">
+              <li>Stops app containers and removes active routes from the deployment node</li>
+              <li>Detaches provider volumes but keeps the volume records and stored data</li>
+              <li>{stopDialogNodeMessage}</li>
+            </ul>
+            <p className="m-0">You can start it again later from this page.</p>
+          </div>
+        }
+      />
+
+      <ConfirmDialog
         isOpen={deleteOpen}
         onClose={() => {
           if (!deleting) setDeleteOpen(false);
         }}
-        onConfirm={() => void handleDeleteConfirm()}
+        onConfirm={() => observeAsync(handleDeleteConfirm())}
         title="Destroy deployment environment?"
         variant="danger"
         confirmLabel="Destroy"

@@ -221,7 +221,7 @@ export const SESSION_IDEA_TOOLS = [
   {
     name: 'build_and_publish',
     description:
-      "Start an asynchronous build/publish job for your project's Docker Compose stack and return a durable publishJobId immediately. This is the publish path for compose-based projects. SAM builds services on the host Docker daemon, uploads scoped image artifacts, and records a deployment release server-side. You run ZERO docker or registry commands and never receive credentials. After this tool returns, call get_publish_status with the publishJobId every 10-20 seconds until the status is succeeded, failed, canceled, or unknown. Do not treat the initial response as deployment success.",
+      "Start an asynchronous build/publish job for your project's Docker Compose stack and return a durable publishJobId immediately. This is the publish path for compose-based projects. SAM builds services on the host Docker daemon, uploads scoped image artifacts, and records a deployment release server-side. You run ZERO docker or registry commands and never receive credentials. Docker Compose service volume mounts and top-level volumes are rejected until build_and_publish supports SAM provider-backed volume rewriting; do not use Compose volumes for stateful data. After this tool returns, call get_publish_status with the publishJobId every 10-20 seconds until the status is succeeded, failed, canceled, or unknown. Do not treat the initial response as deployment success.",
     inputSchema: {
       type: 'object' as const,
       properties: {

@@ -35,6 +35,7 @@ import {
   collectEnvironmentRouteHostnames,
   type DeploymentRouteTarget,
 } from '../services/deployment-routing';
+import { buildVolumeMountDescriptors } from '../services/deployment-volumes';
 import { cleanupAppRouteDNSRecords, upsertAppRouteDNSRecord } from '../services/dns';
 import { verifyCallbackToken } from '../services/jwt';
 import { mintProjectRegistryCredential } from '../services/registry-credentials';
@@ -138,7 +139,11 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
 
   // Look up the node to get its userId for authorization
   const nodeRows = await db
-    .select({ userId: schema.nodes.userId, ipAddress: schema.nodes.ipAddress })
+    .select({
+      userId: schema.nodes.userId,
+      ipAddress: schema.nodes.ipAddress,
+      providerInstanceId: schema.nodes.providerInstanceId,
+    })
     .from(schema.nodes)
     .where(eq(schema.nodes.id, nodeId))
     .limit(1);
@@ -155,6 +160,7 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
       id: schema.deploymentEnvironments.id,
       projectId: schema.deploymentEnvironments.projectId,
       nodeId: schema.deploymentEnvironments.nodeId,
+      requiresVolumes: schema.deploymentEnvironments.requiresVolumes,
     })
     .from(schema.deploymentEnvironments)
     .innerJoin(schema.projects, eq(schema.deploymentEnvironments.projectId, schema.projects.id))
@@ -172,6 +178,19 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
   }
   // Safe: envRows.length is checked above (throws 404 if empty)
   const deployEnv = envRows[0]!;
+
+  // Volume-requiring environments need the node's providerInstanceId to build
+  // volume mount descriptors (volumes are matched to the node by attachedServerId,
+  // which equals the provider instance id). If the node has not yet reported its
+  // providerInstanceId, serving the payload would silently omit ALL volume mounts
+  // and the app would deploy against ephemeral container storage — data loss.
+  // Reject with 422 so the node retries once provisioning has populated the field.
+  if (deployEnv.requiresVolumes && !node.providerInstanceId) {
+    throw errors.unprocessable(
+      'Deployment node has not reported its provider instance id yet; retry after provisioning completes',
+      { environmentId, nodeId, seq }
+    );
+  }
 
   // Find the release by version (seq) within the environment
   const releaseRows = await db
@@ -370,6 +389,11 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
   const expiresAt =
     Math.floor(Date.now() / 1000) +
     parsePositiveInt(c.env.DEPLOY_PAYLOAD_EXPIRY_SECONDS, DEFAULT_DEPLOY_PAYLOAD_EXPIRY_SECONDS);
+  const volumeMounts = await buildVolumeMountDescriptors(
+    db,
+    environmentId,
+    node.providerInstanceId ?? ''
+  );
 
   // Sign the payload with the deploy signing key
   const signature = await signDeployPayload(
@@ -382,6 +406,7 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
       routes,
       interpolationEnv,
       artifacts,
+      volumeMounts,
     },
     c.env
   );
@@ -425,6 +450,7 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
     releaseId: release.id,
     routeCount: routes.length,
     artifactCount: artifacts.length,
+    volumeMountCount: volumeMounts.length,
     interpolationEnvKeyCount: Object.keys(interpolationEnv).length,
     hasRegistryCredentials: registryCredentials !== null,
   });
@@ -438,6 +464,7 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
     interpolationEnv,
     routes,
     artifacts,
+    volumeMounts,
     signature,
     registryCredentials,
   });

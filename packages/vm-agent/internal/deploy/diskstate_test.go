@@ -39,11 +39,12 @@ func TestDiskState_WriteAndRead(t *testing.T) {
 	}
 
 	state := &ReleaseState{
-		Seq:           42,
-		EnvironmentID: "env-1",
-		NodeID:        "node-1",
-		Status:        StatusApplied,
-		AppliedAt:     time.Now().UTC().Truncate(time.Second),
+		Seq:              42,
+		EnvironmentID:    "env-1",
+		NodeID:           "node-1",
+		Status:           StatusApplied,
+		AppliedAt:        time.Now().UTC().Truncate(time.Second),
+		VolumeMountRoots: []string{"/mnt/sam-env-env-1/volumes/data"},
 	}
 	composeYAML := "version: '3'\nservices:\n  web:\n    image: nginx\n"
 	caddyfile := "example.com {\n\treverse_proxy 127.0.0.1:35000\n}\n"
@@ -84,6 +85,9 @@ func TestDiskState_WriteAndRead(t *testing.T) {
 	if readState.Status != StatusApplied {
 		t.Errorf("status mismatch: got %s", readState.Status)
 	}
+	if len(readState.VolumeMountRoots) != 1 || readState.VolumeMountRoots[0] != "/mnt/sam-env-env-1/volumes/data" {
+		t.Errorf("volume mount roots mismatch: got %#v", readState.VolumeMountRoots)
+	}
 }
 
 func TestDiskState_SetCurrent(t *testing.T) {
@@ -120,6 +124,39 @@ func TestDiskState_SetCurrent(t *testing.T) {
 	}
 	if target != "releases/10" {
 		t.Errorf("expected symlink target 'releases/10', got %q", target)
+	}
+}
+
+func TestDiskState_ClearCurrentPreservesRelease(t *testing.T) {
+	dir := t.TempDir()
+	ds, err := NewDiskState(dir)
+	if err != nil {
+		t.Fatalf("NewDiskState: %v", err)
+	}
+	if err := ds.ClearCurrent(); err != nil {
+		t.Fatalf("ClearCurrent with no current release: %v", err)
+	}
+
+	state := &ReleaseState{Seq: 12, Status: StatusApplied}
+	if err := ds.WriteRelease(state, "compose yaml", "caddyfile"); err != nil {
+		t.Fatalf("WriteRelease: %v", err)
+	}
+	if err := ds.SetCurrent(12); err != nil {
+		t.Fatalf("SetCurrent: %v", err)
+	}
+	if err := ds.ClearCurrent(); err != nil {
+		t.Fatalf("ClearCurrent: %v", err)
+	}
+
+	seq, err := ds.CurrentSeq()
+	if err != nil {
+		t.Fatalf("CurrentSeq: %v", err)
+	}
+	if seq != 0 {
+		t.Fatalf("expected current seq cleared, got %d", seq)
+	}
+	if _, err := ds.ReadState(12); err != nil {
+		t.Fatalf("release metadata should remain readable after ClearCurrent: %v", err)
 	}
 }
 

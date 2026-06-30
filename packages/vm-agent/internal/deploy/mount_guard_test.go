@@ -73,11 +73,24 @@ func TestExtractSAMVolumeMountRoots_WithSAMVolumes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(roots) != 1 {
-		t.Fatalf("expected 1 unique root, got %d: %v", len(roots), roots)
+	if len(roots) != 3 {
+		t.Fatalf("expected 3 unique roots, got %d: %v", len(roots), roots)
 	}
-	if roots[0] != "/mnt/sam-env-env-abc123" {
-		t.Fatalf("expected /mnt/sam-env-env-abc123, got %s", roots[0])
+	expected := map[string]bool{
+		"/mnt/sam-env-env-abc123/volumes/data":    false,
+		"/mnt/sam-env-env-abc123/volumes/uploads": false,
+		"/mnt/sam-env-env-abc123/volumes/pgdata":  false,
+	}
+	for _, root := range roots {
+		if _, ok := expected[root]; !ok {
+			t.Fatalf("unexpected root %s in %v", root, roots)
+		}
+		expected[root] = true
+	}
+	for root, seen := range expected {
+		if !seen {
+			t.Fatalf("expected root %s in %v", root, roots)
+		}
 	}
 }
 
@@ -148,8 +161,8 @@ func TestExtractSAMVolumeMountRoots_PathTraversal_Rejected(t *testing.T) {
 	if len(roots) != 1 {
 		t.Fatalf("expected 1 root (only legitimate), got %d: %v", len(roots), roots)
 	}
-	if roots[0] != "/mnt/sam-env-legitimate" {
-		t.Fatalf("expected /mnt/sam-env-legitimate, got %s", roots[0])
+	if roots[0] != "/mnt/sam-env-legitimate/volumes/data" {
+		t.Fatalf("expected /mnt/sam-env-legitimate/volumes/data, got %s", roots[0])
 	}
 }
 
@@ -177,7 +190,8 @@ func TestVerifyVolumeMounts_AllMounted_Passes(t *testing.T) {
       - /mnt/sam-env-env-abc123/volumes/uploads:/app/uploads
 `
 	checker := newFakeMountChecker()
-	checker.mountpoints["/mnt/sam-env-env-abc123"] = true
+	checker.mountpoints["/mnt/sam-env-env-abc123/volumes/data"] = true
+	checker.mountpoints["/mnt/sam-env-env-abc123/volumes/uploads"] = true
 
 	if err := verifyVolumeMounts(yaml, checker); err != nil {
 		t.Fatalf("expected no error when volume is mounted, got: %v", err)
@@ -193,7 +207,7 @@ func TestVerifyVolumeMounts_VolumeNotMounted_Refuses(t *testing.T) {
 `
 	checker := newFakeMountChecker()
 	// Path exists but is NOT a mountpoint (fell-through empty dir)
-	checker.mountpoints["/mnt/sam-env-env-abc123"] = false
+	checker.mountpoints["/mnt/sam-env-env-abc123/volumes/data"] = false
 
 	err := verifyVolumeMounts(yaml, checker)
 	if err == nil {
@@ -223,14 +237,14 @@ func TestVerifyVolumeMounts_LongFormSAMVolumeNotMounted_Refuses(t *testing.T) {
         target: /cache
 `
 	checker := newFakeMountChecker()
-	checker.mountpoints["/mnt/sam-env-env-abc123"] = false
+	checker.mountpoints["/mnt/sam-env-env-abc123/volumes/postgres-data"] = false
 
 	err := verifyVolumeMounts(yaml, checker)
 	if err == nil {
 		t.Fatal("expected long-form SAM volume to run the mount guard and refuse")
 	}
-	if !strings.Contains(err.Error(), "/mnt/sam-env-env-abc123") {
-		t.Fatalf("expected error to mention the SAM mount root, got: %v", err)
+	if !strings.Contains(err.Error(), "/mnt/sam-env-env-abc123/volumes/postgres-data") {
+		t.Fatalf("expected error to mention the SAM volume mount root, got: %v", err)
 	}
 	if !strings.Contains(err.Error(), "not a mountpoint") {
 		t.Fatalf("expected 'not a mountpoint' in error, got: %v", err)
@@ -245,7 +259,7 @@ func TestVerifyVolumeMounts_VolumeMissing_Refuses(t *testing.T) {
       - /mnt/sam-env-env-abc123/volumes/pgdata:/var/lib/postgresql/data
 `
 	checker := newFakeMountChecker()
-	checker.missing["/mnt/sam-env-env-abc123"] = true
+	checker.missing["/mnt/sam-env-env-abc123/volumes/pgdata"] = true
 
 	err := verifyVolumeMounts(yaml, checker)
 	if err == nil {
@@ -268,8 +282,8 @@ func TestVerifyVolumeMounts_MultipleVolumes_OneMissing_Refuses(t *testing.T) {
       - /mnt/sam-env-env-bbb/volumes/state:/app/state
 `
 	checker := newFakeMountChecker()
-	checker.mountpoints["/mnt/sam-env-env-aaa"] = true
-	checker.missing["/mnt/sam-env-env-bbb"] = true
+	checker.mountpoints["/mnt/sam-env-env-aaa/volumes/data"] = true
+	checker.missing["/mnt/sam-env-env-bbb/volumes/state"] = true
 
 	err := verifyVolumeMounts(yaml, checker)
 	if err == nil {
@@ -363,7 +377,7 @@ const guardVolumeComposeYAML = `services:
 
 func TestEngine_Apply_VolumeMountGuard_Proceeds(t *testing.T) {
 	checker := newFakeMountChecker()
-	checker.mountpoints["/mnt/sam-env-env-1"] = true
+	checker.mountpoints["/mnt/sam-env-env-1/volumes/data"] = true
 
 	engine, priv := guardEngine(t, checker, true)
 	payload := guardPayload(t, priv, guardVolumeComposeYAML)
@@ -381,7 +395,7 @@ func TestEngine_Apply_VolumeMountGuard_Proceeds(t *testing.T) {
 func TestEngine_Apply_VolumeMountGuard_Refuses(t *testing.T) {
 	checker := newFakeMountChecker()
 	// Volume path does NOT exist
-	checker.missing["/mnt/sam-env-env-1"] = true
+	checker.missing["/mnt/sam-env-env-1/volumes/data"] = true
 
 	engine, priv := guardEngine(t, checker, false)
 	payload := guardPayload(t, priv, guardVolumeComposeYAML)
@@ -423,7 +437,7 @@ func TestEngine_Apply_VolumeMountGuard_NoVolumes_Skips(t *testing.T) {
 func TestEngine_Apply_VolumeMountGuard_ExistsButNotMountpoint_Refuses(t *testing.T) {
 	checker := newFakeMountChecker()
 	// Path exists but is NOT a mountpoint — this is the "fell-through empty dir" case
-	checker.mountpoints["/mnt/sam-env-env-1"] = false
+	checker.mountpoints["/mnt/sam-env-env-1/volumes/data"] = false
 
 	engine, priv := guardEngine(t, checker, false)
 
@@ -441,5 +455,222 @@ func TestEngine_Apply_VolumeMountGuard_ExistsButNotMountpoint_Refuses(t *testing
 	}
 	if !strings.Contains(err.Error(), "not a mountpoint") {
 		t.Fatalf("expected 'not a mountpoint' in error, got: %v", err)
+	}
+}
+
+func TestEngine_Apply_FailedInitialTearsDownMountedVolumeRoots(t *testing.T) {
+	checker := newFakeMountChecker()
+	volumeMounter := &recordingVolumeMounter{}
+	engine, priv := guardEngine(t, checker, false)
+	engine.cfg.VolumeMounter = volumeMounter
+
+	payload := guardPayload(t, priv, `services:
+  web:
+    image: myapp:v1
+    ports:
+      - "127.0.0.1:35000:3000"
+`)
+	payload.VolumeMounts = []VolumeMount{{
+		Name:             "data",
+		MountRoot:        "/mnt/sam-env-env-1/volumes/data",
+		ProviderVolumeID: "vol-1",
+		ProviderName:     "hetzner",
+		FSFormat:         "ext4",
+	}}
+	payload.Signature = ""
+	sig, err := SignPayload(payload, priv)
+	if err != nil {
+		t.Fatalf("SignPayload: %v", err)
+	}
+	payload.Signature = sig
+
+	if err := engine.Apply(context.Background(), payload); err == nil {
+		t.Fatal("Apply should fail so failed-initial cleanup runs")
+	}
+	if len(volumeMounter.mounted) != 1 {
+		t.Fatalf("expected volume mount attempt before failure, got %#v", volumeMounter.mounted)
+	}
+	if len(volumeMounter.teardownRoots) != 1 || volumeMounter.teardownRoots[0] != "/mnt/sam-env-env-1/volumes/data" {
+		t.Fatalf("expected failed initial volume teardown, got %#v", volumeMounter.teardownRoots)
+	}
+}
+
+func TestEngine_Apply_SuccessfulUpdateTearsDownRemovedVolumeRoots(t *testing.T) {
+	checker := newFakeMountChecker()
+	checker.mountpoints["/mnt/sam-env-env-1/volumes/keep"] = true
+	volumeMounter := &recordingVolumeMounter{}
+	engine, priv := guardEngine(t, checker, true)
+	engine.cfg.VolumeMounter = volumeMounter
+
+	prevState := &ReleaseState{
+		Seq:              1,
+		EnvironmentID:    "env-1",
+		NodeID:           "node-1",
+		Status:           StatusApplied,
+		VolumeMountRoots: []string{"/mnt/sam-env-env-1/volumes/old", "/mnt/sam-env-env-1/volumes/keep"},
+	}
+	if err := engine.disk.WriteRelease(prevState, guardVolumeComposeYAML, "app.example.com {\n\treverse_proxy 127.0.0.1:35000\n}\n"); err != nil {
+		t.Fatalf("WriteRelease previous: %v", err)
+	}
+	if err := engine.disk.SetCurrent(1); err != nil {
+		t.Fatalf("SetCurrent previous: %v", err)
+	}
+
+	payload := guardPayload(t, priv, `services:
+  web:
+    image: myapp:v2
+    volumes:
+      - /mnt/sam-env-env-1/volumes/keep:/app/data
+    ports:
+      - "127.0.0.1:35000:3000"
+`)
+	payload.Seq = 2
+	payload.VolumeMounts = []VolumeMount{{
+		Name:             "keep",
+		MountRoot:        "/mnt/sam-env-env-1/volumes/keep",
+		ProviderVolumeID: "vol-keep",
+		ProviderName:     "hetzner",
+		FSFormat:         "ext4",
+	}}
+	payload.Signature = ""
+	sig, err := SignPayload(payload, priv)
+	if err != nil {
+		t.Fatalf("SignPayload: %v", err)
+	}
+	payload.Signature = sig
+
+	if err := engine.Apply(context.Background(), payload); err != nil {
+		t.Fatalf("Apply should succeed: %v", err)
+	}
+	if len(volumeMounter.teardownRoots) != 1 || volumeMounter.teardownRoots[0] != "/mnt/sam-env-env-1/volumes/old" {
+		t.Fatalf("expected only removed volume root to be torn down, got %#v", volumeMounter.teardownRoots)
+	}
+}
+
+func TestEngine_Apply_FailedUpdateDoesNotTeardownPreviousOnlyVolumeRootsBeforeRollback(t *testing.T) {
+	checker := newFakeMountChecker()
+	checker.mountpoints["/mnt/sam-env-env-1/volumes/keep"] = true
+	volumeMounter := &recordingVolumeMounter{}
+	engine, priv := guardEngine(t, checker, true)
+	engine.cfg.VolumeMounter = volumeMounter
+
+	composeScript := engine.cfg.ComposeCmd
+	if err := os.WriteFile(composeScript, []byte(`#!/bin/sh
+case "$*" in
+  *"desired/releases/2/docker-compose.yml up -d"*) echo "release 2 failed" >&2; exit 42 ;;
+  *" ps --format json"*) echo '{"Name":"web","State":"running","Health":"healthy"}' ;;
+esac
+exit 0
+`), 0755); err != nil {
+		t.Fatalf("write compose script: %v", err)
+	}
+
+	prevState := &ReleaseState{
+		Seq:              1,
+		EnvironmentID:    "env-1",
+		NodeID:           "node-1",
+		Status:           StatusApplied,
+		VolumeMountRoots: []string{"/mnt/sam-env-env-1/volumes/old", "/mnt/sam-env-env-1/volumes/keep"},
+	}
+	prevCompose := `services:
+  web:
+    image: myapp:v1
+    volumes:
+      - /mnt/sam-env-env-1/volumes/old:/app/old
+      - /mnt/sam-env-env-1/volumes/keep:/app/data
+    ports:
+      - "127.0.0.1:35000:3000"
+`
+	if err := engine.disk.WriteRelease(prevState, prevCompose, "app.example.com {\n\treverse_proxy 127.0.0.1:35000\n}\n"); err != nil {
+		t.Fatalf("WriteRelease previous: %v", err)
+	}
+	if err := engine.disk.SetCurrent(1); err != nil {
+		t.Fatalf("SetCurrent previous: %v", err)
+	}
+
+	payload := guardPayload(t, priv, `services:
+  web:
+    image: myapp:v2
+    volumes:
+      - /mnt/sam-env-env-1/volumes/keep:/app/data
+    ports:
+      - "127.0.0.1:35000:3000"
+`)
+	payload.Seq = 2
+	payload.VolumeMounts = []VolumeMount{{
+		Name:             "keep",
+		MountRoot:        "/mnt/sam-env-env-1/volumes/keep",
+		ProviderVolumeID: "vol-keep",
+		ProviderName:     "hetzner",
+		FSFormat:         "ext4",
+	}}
+	payload.Signature = ""
+	sig, err := SignPayload(payload, priv)
+	if err != nil {
+		t.Fatalf("SignPayload: %v", err)
+	}
+	payload.Signature = sig
+
+	if err := engine.Apply(context.Background(), payload); err == nil {
+		t.Fatal("Apply should fail and roll back to the previous release")
+	}
+	if len(volumeMounter.teardownRoots) != 0 {
+		t.Fatalf("previous-only volume roots must remain mounted for rollback, got teardown %#v", volumeMounter.teardownRoots)
+	}
+	currentSeq, err := engine.disk.CurrentSeq()
+	if err != nil {
+		t.Fatalf("CurrentSeq: %v", err)
+	}
+	if currentSeq != 1 {
+		t.Fatalf("expected rollback to keep current seq 1, got %d", currentSeq)
+	}
+}
+
+func TestValidateVolumeMountsForEnvironmentRejectsUnsafeDescriptor(t *testing.T) {
+	tests := []struct {
+		name   string
+		volume VolumeMount
+		want   string
+	}{
+		{
+			name: "unsafe volume name",
+			volume: VolumeMount{
+				Name:             "../data",
+				MountRoot:        "/mnt/sam-env-env-1/volumes/data",
+				ProviderVolumeID: "vol-1",
+				FSFormat:         "ext4",
+			},
+			want: "unsafe name",
+		},
+		{
+			name: "wrong environment root",
+			volume: VolumeMount{
+				Name:             "data",
+				MountRoot:        "/mnt/sam-env-env-2/volumes/data",
+				ProviderVolumeID: "vol-1",
+				FSFormat:         "ext4",
+			},
+			want: "must exactly match",
+		},
+		{
+			name: "fstab injection in device",
+			volume: VolumeMount{
+				Name:             "data",
+				MountRoot:        "/mnt/sam-env-env-1/volumes/data",
+				ProviderVolumeID: "vol-1",
+				LinuxDevice:      "/dev/sdb defaults 0 0",
+				FSFormat:         "ext4",
+			},
+			want: "linuxDevice contains whitespace",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateVolumeMountsForEnvironment("env-1", []VolumeMount{tc.volume})
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("expected %q error, got %v", tc.want, err)
+			}
+		})
 	}
 }
