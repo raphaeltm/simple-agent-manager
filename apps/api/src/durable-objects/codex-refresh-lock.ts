@@ -41,9 +41,6 @@ import { syncActiveAgentCredentialSecret } from '../services/composable-credenti
 import { decrypt, encrypt } from '../services/encryption';
 import {
   type CodexRefreshEnv,
-  type RateLimitState,
-  type RefreshRequestPayload,
-  type RotatedTokenEntry,
   DEFAULT_CLIENT_ID,
   DEFAULT_EXPECTED_SCOPES,
   DEFAULT_GRACE_WINDOW_MS,
@@ -53,6 +50,9 @@ import {
   DEFAULT_UPSTREAM_TIMEOUT_MS,
   DEFAULT_UPSTREAM_URL,
   MAX_ROTATED_TOKEN_ENTRIES,
+  type RateLimitState,
+  type RefreshRequestPayload,
+  type RotatedTokenEntry,
 } from './codex-refresh-lock-config';
 
 export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
