@@ -167,6 +167,71 @@ the lock, and ship a concurrency regression test (dynamic state-mutating mocks;
 assert the one-time-use mutation fires exactly once; proven to fail when the mutex
 is bypassed).
 
+## Third Post-Mortem (theory B — externally-revoked token; DEFINITIVE)
+
+The user had **definitively ruled out** any external competing refresher
+("I made fresh json objects every time I put creds in: login, copy json, logout
+... No chance that is the problem"). With concurrency (#1445) and dual-write
+(#1439) both fixed, the 429/unauthorized still recurred — so the root cause had
+to be locatable inside the captured evidence.
+
+**Diagnostic added.** The DO's `!upstreamResponse.ok` branch previously called
+`readResponseJson()` (which throws on the body and discarded OpenAI's actual
+error), so production logs never showed *why* OpenAI rejected a refresh. We
+rewrote that branch to parse OpenAI's error body and emit a structured,
+leak-safe `codex_refresh.upstream_rejected` warn log carrying the OAuth/OpenAI
+error code + message (never the raw body).
+
+**What the live tail captured.** On staging, a single workspace (zero
+concurrency) submitted one codex task (`01KWD7HJ70RB2AR0D6T8XGXAFS`). At
+21:39:46 the refresh hit SAM (`codex_refresh.request_received`), SAM faithfully
+forwarded the stored token, and OpenAI rejected it on the **first** attempt
+with HTTP 401:
+
+```json
+{"error":{"message":"Your session has ended. Please log in again.",
+"type":"invalid_request_error","param":null,"code":"refresh_token_invalidated"}}
+```
+
+credentialId `01KWCSQ0ACGB0HXP4EN884BZ4A`, status 401, content-type
+`application/json`.
+
+**Supporting evidence.** That credential row (`SELECT … FROM credentials`):
+`created_at` == `updated_at` == `2026-06-30T17:37:29.420Z` — i.e. **never
+rotated by SAM**. Every refresh got 401, so SAM never wrote a rotated token
+back. The token was already dead at OpenAI ~2h before SAM first used it.
+
+**Root cause.** The stored `refresh_token` is **revoked at OpenAI before SAM
+ever uses it.** `refresh_token_invalidated` / "Your session has ended" is the
+signature of an explicitly-revoked token *family* — not an expired access token,
+not a one-time-use replay. The user's credential-capture workflow is
+"login → copy auth.json → **logout**". The `codex logout` step revokes the
+refresh-token family at OpenAI, killing the copied token before SAM seeds and
+uses it.
+
+**This is NOT a SAM code bug.** It is not the concurrency race (#1445) and not
+the dual-write desync (#1439). Both of those were real latent bugs and are
+legitimate defense-in-depth, but neither caused the user's reported failure. SAM
+behaved correctly: it forwarded the token it was given and surfaced OpenAI's
+rejection.
+
+**The fix (user-side).** Do NOT `logout` after copying `auth.json`. Leave the
+ChatGPT/Codex session active so the refresh-token family stays valid. A fresh,
+non-logged-out credential must be seeded before the HARD-GATE E2E can pass.
+
+**Process fix.** The diagnostic itself is the process fix: the failure was
+undiagnosable for weeks because the DO discarded OpenAI's error body and the
+error path logged nothing useful. The permanent `codex_refresh.upstream_rejected`
+structured log (error code + message, no raw body) makes the revoked-vs-transient
+distinction observable on the first occurrence going forward. Covered by a
+behavioral regression test asserting the nested OpenAI error form is parsed,
+`refresh_token_invalidated` is surfaced, and no raw body is logged.
+
+**HARD GATE status.** "Real Codex refresh exercised E2E on staging" cannot pass
+with the current staging credential because its refresh-token family is already
+revoked at OpenAI. Blocked on a human re-seeding a valid (non-logged-out)
+credential. PR #1445 labeled `needs-human-review`; do NOT merge until verified.
+
 ## Acceptance Criteria
 
 - [x] Concurrent refreshes for the same user are serialized; the consumed
@@ -184,6 +249,9 @@ is bypassed).
 - [x] No decrypted token material is ever logged.
 - [x] Rate-limit window/limit remain env-configurable with `Default*` constants.
 - [ ] Real Codex refresh exercised E2E on staging before merge (HARD GATE).
+  **BLOCKED** — staging credential `01KWCSQ0ACGB0HXP4EN884BZ4A` is revoked at
+  OpenAI (`refresh_token_invalidated`; see Third Post-Mortem). Requires a human
+  to seed a fresh, non-logged-out Codex credential. `needs-human-review` applied.
 
 ## References
 - SAM idea 01KWBRKQHR5SPVKG7Q09ZFJQ5Y

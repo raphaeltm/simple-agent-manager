@@ -1477,6 +1477,50 @@ describe('CodexRefreshLock', () => {
     expect(json.debug_info).toBeUndefined();
   });
 
+  it('parses OpenAI nested error form and surfaces refresh_token_invalidated (revoked token diagnostic)', async () => {
+    const { do: doInstance, env } = createDO();
+    setupCredentialFound(env);
+    mockLogWarn.mockClear();
+
+    // OpenAI returns the NESTED error shape (not flat OAuth2), which is what a
+    // revoked/logged-out token produces in production:
+    //   { error: { message, type, param, code } }
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(JSON.stringify({
+        error: {
+          message: 'Your session has ended. Please log in again.',
+          type: 'invalid_request_error',
+          param: null,
+          code: 'refresh_token_invalidated',
+        },
+      }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    const res = await doInstance.fetch(
+      makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' }),
+    );
+    expect(res.status).toBe(401);
+    const json = await res.json();
+    // The nested code is surfaced as the forwarded error.
+    expect(json.error).toBe('refresh_token_invalidated');
+    expect(json.error_description).toBe('Your session has ended. Please log in again.');
+
+    // Structured diagnostic captures the rejection reason — and NEVER the raw body.
+    const warnCall = mockLogWarn.mock.calls.find(
+      ([event]) => event === 'codex_refresh.upstream_rejected',
+    );
+    expect(warnCall).toBeDefined();
+    const fields = warnCall?.[1] as Record<string, unknown>;
+    expect(fields.upstreamErrorCode).toBe('refresh_token_invalidated');
+    expect(fields.upstreamErrorMessage).toBe('Your session has ended. Please log in again.');
+    expect(fields.status).toBe(401);
+    // No raw-body field is logged (refresh token can never leak).
+    expect(fields).not.toHaveProperty('rawBodySample');
+  });
+
   it('returns generic error for non-JSON upstream error responses', async () => {
     const { do: doInstance, env } = createDO();
     setupCredentialFound(env);

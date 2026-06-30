@@ -394,11 +394,15 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
     if (!upstreamResponse.ok) {
       // Parse and filter upstream error — only forward safe fields to prevent
       // information leakage (e.g., if OpenAI echoes back the refresh token).
-      // Read the raw body once as text so we can both (a) attempt JSON parse and
-      // (b) capture a truncated raw sample + content-type for diagnosis. OpenAI
-      // OAuth error bodies do NOT echo the submitted refresh_token, so a short
-      // raw sample is safe to log.
-      let safeError: Record<string, string> = { error: 'upstream_error' };
+      // OpenAI returns errors in TWO shapes: the flat OAuth2 form
+      // `{ error, error_description }` and a nested form
+      // `{ error: { code, message, type } }`. Parse both so the structured
+      // diagnostic captures the rejection reason (e.g. `refresh_token_invalidated`,
+      // which means the stored token was revoked at OpenAI — log out / re-login /
+      // a sibling refresh consumed it — versus a transient upstream fault).
+      const safeError: Record<string, string> = { error: 'upstream_error' };
+      let upstreamErrorCode: string | null = null;
+      let upstreamErrorMessage: string | null = null;
       const upstreamContentType = upstreamResponse.headers.get('Content-Type');
       let rawBody = '';
       try {
@@ -408,24 +412,41 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
       }
       try {
         const parsed = JSON.parse(rawBody) as Record<string, unknown>;
-        if (typeof parsed.error === 'string') safeError.error = parsed.error;
-        if (typeof parsed.error_description === 'string') {
-          safeError = { ...safeError, error_description: parsed.error_description };
+        if (typeof parsed.error === 'string') {
+          // Flat OAuth2 form.
+          safeError.error = parsed.error;
+          upstreamErrorCode = parsed.error;
+          if (typeof parsed.error_description === 'string') {
+            safeError.error_description = parsed.error_description;
+            upstreamErrorMessage = parsed.error_description;
+          }
+        } else if (parsed.error && typeof parsed.error === 'object') {
+          // OpenAI nested form: { error: { code, message, type } }.
+          const nested = parsed.error as Record<string, unknown>;
+          if (typeof nested.code === 'string') {
+            safeError.error = nested.code;
+            upstreamErrorCode = nested.code;
+          }
+          if (typeof nested.message === 'string') {
+            safeError.error_description = nested.message;
+            upstreamErrorMessage = nested.message;
+          }
         }
       } catch {
         // Non-JSON upstream response — use generic error.
       }
-      // Diagnostic: log OpenAI's rejection reason plus a truncated raw body and
-      // content-type so we can distinguish a revoked/expired/consumed
-      // refresh_token from a transient upstream fault or an edge/WAF block.
+      // Diagnostic: log OpenAI's structured rejection reason so we can
+      // distinguish a revoked/expired/consumed refresh_token (e.g.
+      // `refresh_token_invalidated`) from a transient upstream fault or an
+      // edge/WAF block. Only the parsed OAuth/OpenAI error code + message are
+      // logged — never the raw body — so a refresh token can never leak.
       log.warn('codex_refresh.upstream_rejected', {
         userId,
         credentialId: credential.id,
         status: upstreamResponse.status,
         upstreamContentType,
-        upstreamError: safeError.error,
-        upstreamErrorDescription: safeError.error_description ?? null,
-        rawBodySample: rawBody.slice(0, 300),
+        upstreamErrorCode,
+        upstreamErrorMessage,
       });
       return new Response(JSON.stringify(safeError), {
         status: upstreamResponse.status,
