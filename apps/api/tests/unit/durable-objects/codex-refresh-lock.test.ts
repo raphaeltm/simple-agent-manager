@@ -184,11 +184,15 @@ function setupCredentialFound(env: ReturnType<typeof createMockEnv>) {
     id: 'cred-1',
     encrypted_token: 'encrypted-data',
     iv: 'test-iv',
+    is_active: 1,
   });
   vi.mocked(env.DATABASE.prepare).mockReturnValue({
     bind: vi.fn().mockReturnValue({
       first: userFirst,
-      run: vi.fn().mockResolvedValue({}),
+      // Realistic D1 run() shape: the legacy UPDATE and the cc_credentials
+      // dual-write both report a row changed, so rotation-path tests exercise
+      // the real success path instead of silently hitting the no-op branch.
+      run: vi.fn().mockResolvedValue({ meta: { changes: 1 } }),
     }),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } as any);
@@ -847,6 +851,121 @@ describe('CodexRefreshLock', () => {
           iv: expect.anything(),
         }),
       );
+    });
+
+    it('falls back to the user-scoped cc_credentials row when the project row is absent', async () => {
+      const { do: doInstance, env } = createDO();
+      // projectId supplied to the DO, but getStoredCredential finds NO active
+      // project row → it falls back to the user-scoped credential. The mirror
+      // must follow that same fallback and target the IS NULL (user) scope,
+      // NOT the project equality predicate, or the rotated token lands on a row
+      // that resolution never reads.
+      const { ccBind, getCcSql, projectFirst, userFirst } =
+        setupDualWriteCredentials(env);
+      mockSuccessfulRefreshResponse();
+
+      const res = await doInstance.fetch(
+        makeRequest({
+          refreshToken: 'stored-refresh',
+          userId: 'user-1',
+          projectId: 'proj-a',
+        }),
+      );
+
+      expect(res.status).toBe(200);
+      // Project SELECT was attempted (returned null) then user SELECT was used.
+      expect(projectFirst).toHaveBeenCalled();
+      expect(userFirst).toHaveBeenCalled();
+      expect(ccBind).toHaveBeenCalledTimes(1);
+      const ccArgs = ccBind.mock.calls[0];
+      expect(ccArgs[0]).toBe('new-encrypted');
+      expect(ccArgs[1]).toBe('new-iv');
+      // Fallback scope → IS NULL predicate, never the project equality predicate.
+      expect(getCcSql()).toContain('att.project_id IS NULL');
+      expect(getCcSql()).not.toContain('att.project_id = ?');
+    });
+
+    it('warns codex_refresh.cc_sync_no_row when the mirror matches no row (no token material)', async () => {
+      const { do: doInstance, env } = createDO();
+      const { ccRun } = setupDualWriteCredentials(env);
+      // Legacy rotated, but the cc_credentials UPDATE matched zero rows — the
+      // exact silent desync this fix exists to surface.
+      ccRun.mockResolvedValue({ meta: { changes: 0 } });
+      mockSuccessfulRefreshResponse();
+
+      const res = await doInstance.fetch(
+        makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' }),
+      );
+
+      // Still a successful refresh — the legacy persist already succeeded.
+      expect(res.status).toBe(200);
+      expect(mockLogWarn).toHaveBeenCalledWith(
+        'codex_refresh.cc_sync_no_row',
+        expect.objectContaining({
+          userId: 'user-1',
+          credentialId: 'cred-1',
+          scopeProjectId: null,
+        }),
+      );
+      // The desync diagnostic must never carry token material.
+      expect(mockLogWarn).toHaveBeenCalledWith(
+        'codex_refresh.cc_sync_no_row',
+        expect.not.objectContaining({
+          encryptedToken: expect.anything(),
+          ciphertext: expect.anything(),
+          iv: expect.anything(),
+          refresh_token: expect.anything(),
+        }),
+      );
+    });
+
+    it('scopes the mirror UPDATE to the credential owner (cross-user defence)', async () => {
+      const { do: doInstance, env } = createDO();
+      const { getCcSql } = setupDualWriteCredentials(env);
+      mockSuccessfulRefreshResponse();
+
+      const res = await doInstance.fetch(
+        makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' }),
+      );
+
+      expect(res.status).toBe(200);
+      // A shared cc_configurations/cc_attachments row owned by a different user
+      // must not be writable: the UPDATE binds owner_id = att.user_id on both
+      // the credential and the configuration so a cross-user attachment cannot
+      // be the join target.
+      const ccSql = getCcSql();
+      expect(ccSql).toContain('cred.owner_id = att.user_id');
+      expect(ccSql).toContain('cfg.owner_id = att.user_id');
+    });
+
+    it('writes NEITHER legacy nor cc_credentials when rate-limited (429)', async () => {
+      const windowSeconds = 60;
+      const now = Math.floor(Date.now() / 1000);
+      const currentWindowStart = Math.floor(now / windowSeconds) * windowSeconds;
+
+      const { do: doInstance, env } = createDO(
+        {
+          RATE_LIMIT_CODEX_REFRESH_PER_HOUR: '3',
+          RATE_LIMIT_CODEX_REFRESH_WINDOW_SECONDS: windowSeconds.toString(),
+        },
+        {
+          'rate-limit:cred-1': { windowStart: currentWindowStart, count: 3 },
+        },
+      );
+      const { legacyBind, ccBind } = setupDualWriteCredentials(env);
+
+      const res = await doInstance.fetch(
+        makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' }),
+      );
+
+      expect(res.status).toBe(429);
+      // Rate-limit rejection happens before any rotation — so the legacy persist
+      // and the cc_credentials mirror must BOTH be untouched. Without this guard
+      // a regression that moved the rate-limit check after the rotation could
+      // silently rotate (and desync) tokens on every throttled request.
+      expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+      expect(legacyBind).not.toHaveBeenCalled();
+      expect(ccBind).not.toHaveBeenCalled();
     });
   });
 

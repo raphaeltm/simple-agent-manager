@@ -210,6 +210,10 @@ export async function disconnectAgentCredentialFromCC(
   await stmt.run();
 }
 
+// NOTE: callers (e.g. CodexRefreshLock) pass encryptedToken/iv that are already
+// ciphertext. Never log input.encryptedToken or input.iv from this function or
+// its callers' catch blocks — a sync failure must be diagnosable without any
+// token material (defence-in-depth per .claude/rules/28).
 export async function syncActiveAgentCredentialSecret(
   database: D1Database,
   input: AgentCredentialScope & {
@@ -240,6 +244,8 @@ export async function syncActiveAgentCredentialSecret(
         AND att.consumer_target = ?
         AND att.is_active = 1
         AND ${projectPredicate}
+        AND cred.owner_id = att.user_id
+        AND cfg.owner_id = att.user_id
         AND (
           cred.kind = ?
           OR (? = 'auth-json' AND cred.kind = 'oauth-token')

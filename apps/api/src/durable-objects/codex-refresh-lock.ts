@@ -238,6 +238,15 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
         // The caller's token was valid recently — this is a legitimate concurrent
         // session that started before the rotation. Return the full token set
         // so the session can continue operating without re-auth.
+        //
+        // Deliberately NOT rate-limited: reaching here requires presenting a
+        // refresh_token that was valid within the grace window, so the successor
+        // token returned is the legitimate rotation handoff the caller is already
+        // entitled to — not an escalation. Counting these calls would re-consume
+        // the OpenAI-refresh budget for responses that never hit OpenAI, which is
+        // exactly the multi-workspace concurrent re-sync path whose budget
+        // exhaustion produced the original 429. The enforceRateLimit() below
+        // guards only the real upstream-refresh path.
         log.info('codex_refresh.grace_window_hit', {
           userId,
           graceWindowMs,
@@ -414,7 +423,7 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
     // the credential row's OWN scope (scopeProjectId) — NOT the workspace's —
     // so the matching active cc_credentials row is updated (mirrors runtime.ts).
     try {
-      await syncActiveAgentCredentialSecret(db, {
+      const ccRowsUpdated = await syncActiveAgentCredentialSecret(db, {
         userId,
         projectId: credential.scopeProjectId ?? undefined,
         agentType: 'openai-codex',
@@ -422,6 +431,16 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
         encryptedToken: ciphertext,
         iv,
       });
+      if (ccRowsUpdated === 0) {
+        // The legacy row rotated but no matching active cc_credentials row was
+        // found to mirror into. This is the exact silent desync this fix exists
+        // to prevent, so surface it (no token material) for diagnosis.
+        log.warn('codex_refresh.cc_sync_no_row', {
+          userId,
+          credentialId: credential.id,
+          scopeProjectId: credential.scopeProjectId ?? null,
+        });
+      }
     } catch (err) {
       // Never let a cc_credentials sync failure break the refresh — the legacy
       // row is already updated and the caller has working tokens. Log without

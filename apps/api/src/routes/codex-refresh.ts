@@ -68,7 +68,7 @@ codexRefreshRoutes.post('/codex-refresh', async (c) => {
 
   const workspaceId = tokenPayload.workspace;
 
-  // Rate limiting is enforced atomically by CodexRefreshLock DO (keyed per-userId)
+  // Rate limiting is enforced atomically by CodexRefreshLock DO (keyed per-credential-ID)
   // using ctx.storage — the DO returns 429 with Retry-After when the window is exceeded.
   // The earlier KV-based per-workspace check was non-atomic (read-modify-write race) and
   // allowed concurrent refreshes past the limit under load (MEDIUM #5).
