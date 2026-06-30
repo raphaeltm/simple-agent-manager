@@ -394,25 +394,38 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
     if (!upstreamResponse.ok) {
       // Parse and filter upstream error — only forward safe fields to prevent
       // information leakage (e.g., if OpenAI echoes back the refresh token).
+      // Read the raw body once as text so we can both (a) attempt JSON parse and
+      // (b) capture a truncated raw sample + content-type for diagnosis. OpenAI
+      // OAuth error bodies do NOT echo the submitted refresh_token, so a short
+      // raw sample is safe to log.
       let safeError: Record<string, string> = { error: 'upstream_error' };
+      const upstreamContentType = upstreamResponse.headers.get('Content-Type');
+      let rawBody = '';
       try {
-        const parsed = await readResponseJson(upstreamResponse, v.record(v.string(), v.unknown()), 'codex-refresh.upstream_error');
+        rawBody = await upstreamResponse.text();
+      } catch {
+        // Body unreadable — leave rawBody empty.
+      }
+      try {
+        const parsed = JSON.parse(rawBody) as Record<string, unknown>;
         if (typeof parsed.error === 'string') safeError.error = parsed.error;
         if (typeof parsed.error_description === 'string') {
           safeError = { ...safeError, error_description: parsed.error_description };
         }
       } catch {
-        // Non-JSON upstream response — use generic error
+        // Non-JSON upstream response — use generic error.
       }
-      // Diagnostic: log OpenAI's rejection reason (error code + description only —
-      // never any token material) so we can distinguish a revoked/expired/consumed
-      // refresh_token from a transient upstream fault.
+      // Diagnostic: log OpenAI's rejection reason plus a truncated raw body and
+      // content-type so we can distinguish a revoked/expired/consumed
+      // refresh_token from a transient upstream fault or an edge/WAF block.
       log.warn('codex_refresh.upstream_rejected', {
         userId,
         credentialId: credential.id,
         status: upstreamResponse.status,
+        upstreamContentType,
         upstreamError: safeError.error,
         upstreamErrorDescription: safeError.error_description ?? null,
+        rawBodySample: rawBody.slice(0, 300),
       });
       return new Response(JSON.stringify(safeError), {
         status: upstreamResponse.status,
