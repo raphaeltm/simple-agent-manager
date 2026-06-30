@@ -837,6 +837,16 @@ describe('CodexRefreshLock', () => {
         'codex_refresh.cc_sync_failed',
         expect.objectContaining({ userId: 'user-1', credentialId: 'cred-1' }),
       );
+      // Invariant: the desync diagnostic must never carry token material —
+      // not the encrypted ciphertext, the iv, or any decrypted secret.
+      expect(mockLogError).toHaveBeenCalledWith(
+        'codex_refresh.cc_sync_failed',
+        expect.not.objectContaining({
+          encryptedToken: expect.anything(),
+          ciphertext: expect.anything(),
+          iv: expect.anything(),
+        }),
+      );
     });
   });
 
