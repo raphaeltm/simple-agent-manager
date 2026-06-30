@@ -111,7 +111,7 @@ async function cleanupDeploymentNodeIfUnassigned(
   return { nodeDeleted: cleanup.nodeFound, warnings: [] };
 }
 
-function resolveVolumePlacementConstraint(
+export function resolveVolumePlacementConstraint(
   volumes: schema.DeploymentVolumeRow[]
 ): VolumePlacementConstraint | null {
   const first = volumes[0];

@@ -24,6 +24,13 @@ const DEPLOYMENT_ENVIRONMENTS = {
   requiresVolumes: 'deployment_environments.requiresVolumes',
   updatedAt: 'deployment_environments.updatedAt',
 };
+const NODES = {
+  __table: 'nodes',
+  id: 'nodes.id',
+  nodeMode: 'nodes.nodeMode',
+  status: 'nodes.status',
+  providerInstanceId: 'nodes.providerInstanceId',
+};
 
 let workspaceRows: Array<{ projectId: string | null; userId: string }> = [];
 let latestVersionRows: Array<{ version: number }> = [];
@@ -37,12 +44,20 @@ let environmentRows: Array<{
   agentDeployDisabledAt?: string | null;
   allowedDeployProfileIdsJson?: string | null;
 }> = [];
+let nodeRows: Array<{
+  nodeMode: string | null;
+  status: string | null;
+  providerInstanceId: string | null;
+}> = [];
 const inserted: Array<Record<string, unknown>> = [];
 const updated: Array<Record<string, unknown>> = [];
 const mockProvisionDeploymentNode = vi.hoisted(() => vi.fn(async () => null));
 const mockCreateMissingDeclaredVolumes = vi.hoisted(() => vi.fn(async () => []));
 const mockAttachEnvironmentVolumesToLinkedNode = vi.hoisted(() => vi.fn(async () => []));
 const mockMarkDeploymentReleaseVolumeAttachFailed = vi.hoisted(() => vi.fn(async () => undefined));
+const mockListEnvironmentVolumes = vi.hoisted(() => vi.fn(async () => []));
+const mockDetachEnvironmentVolumes = vi.hoisted(() => vi.fn(async () => undefined));
+const mockTeardownDeploymentEnvironmentOnNode = vi.hoisted(() => vi.fn(async () => undefined));
 let verifiedPayload: { workspace: string; type: string; scope?: string } = {
   workspace: 'ws-1',
   type: 'callback',
@@ -62,7 +77,7 @@ vi.mock('../../../src/db/schema', () => ({
   workspaces: WORKSPACES,
   deploymentReleases: DEPLOYMENT_RELEASES,
   deploymentEnvironments: DEPLOYMENT_ENVIRONMENTS,
-  nodes: { id: 'nodes.id', nodeMode: 'nodes.nodeMode' },
+  nodes: NODES,
 }));
 
 // Node provisioning is best-effort and must never fail the durable release.
@@ -83,6 +98,13 @@ vi.mock('../../../src/services/deployment-volumes', () => ({
     mockAttachEnvironmentVolumesToLinkedNode(...args),
   markDeploymentReleaseVolumeAttachFailed: (...args: unknown[]) =>
     mockMarkDeploymentReleaseVolumeAttachFailed(...args),
+  listEnvironmentVolumes: (...args: unknown[]) => mockListEnvironmentVolumes(...args),
+  detachEnvironmentVolumes: (...args: unknown[]) => mockDetachEnvironmentVolumes(...args),
+}));
+
+vi.mock('../../../src/services/node-agent', () => ({
+  teardownDeploymentEnvironmentOnNode: (...args: unknown[]) =>
+    mockTeardownDeploymentEnvironmentOnNode(...args),
 }));
 
 function createMockDb() {
@@ -100,6 +122,13 @@ function createMockDb() {
           return {
             where: vi.fn().mockReturnValue({
               limit: vi.fn().mockResolvedValue(environmentRows),
+            }),
+          };
+        }
+        if (table === NODES) {
+          return {
+            where: vi.fn().mockReturnValue({
+              limit: vi.fn().mockResolvedValue(nodeRows),
             }),
           };
         }
@@ -190,6 +219,7 @@ describe('compose-publish-release callback (vertical slice)', () => {
     vi.clearAllMocks();
     inserted.length = 0;
     updated.length = 0;
+    nodeRows = [];
     workspaceRows = [{ projectId: 'proj-1', userId: 'user-1' }];
     latestVersionRows = [{ version: 4 }];
     environmentRows = [
@@ -311,6 +341,69 @@ volumes:
         requiresVolumes: true,
       }
     );
+  });
+
+  it('does not 500 when the shared→exclusive migration fails after the release is durable', async () => {
+    // Regression (cloudflare-specialist HIGH): the release is inserted durably
+    // BEFORE the shared→exclusive migration. If the migration (teardown +
+    // volume detach) throws, the route MUST still return the recorded release
+    // (200). Returning a 5xx makes the VM agent retry the whole publish, which
+    // inserts a SECOND release with the next version number (duplicate version
+    // records). The migration is deferred to the deploy verb / next release.
+    environmentRows = [
+      {
+        id: 'env-1',
+        nodeId: 'node-shared-1',
+        status: 'active',
+        agentDeployEnabled: true,
+        agentDeployEnabledBy: 'user-1',
+        agentDeployEnabledAt: '2026-06-21T00:00:00.000Z',
+        agentDeployDisabledAt: null,
+        allowedDeployProfileIdsJson: null,
+      },
+    ];
+    // The linked node is a running SHARED node, so the migration path runs.
+    nodeRows = [{ nodeMode: 'shared', status: 'running', providerInstanceId: 'srv-old' }];
+    // The teardown call that begins the migration fails.
+    mockTeardownDeploymentEnvironmentOnNode.mockRejectedValueOnce(
+      new Error('vm agent unreachable')
+    );
+
+    const app = await buildApp();
+    const res = await request(app, 'proj-1', {
+      ...validSubmission,
+      composeYaml: `services:
+  web:
+    image: nginx:latest
+    volumes:
+      - data:/usr/share/nginx/html
+volumes:
+  data:
+    x-sam-size-hint-mb: 1024
+`,
+    });
+
+    const body = await res.json();
+    // The durable release is returned, NOT a 500.
+    expect(res.status, JSON.stringify(body)).toBe(200);
+    expect(body).toMatchObject({
+      releaseId: 'release-ulid-1',
+      version: 5,
+      status: 'created',
+      nodeId: 'node-shared-1',
+    });
+    // The release was inserted durably before the migration failed.
+    expect(inserted).toHaveLength(1);
+    expect(inserted[0].version).toBe(5);
+    // The failure was recorded for diagnosis.
+    expect(mockMarkDeploymentReleaseVolumeAttachFailed).toHaveBeenCalledWith(
+      expect.anything(),
+      'env-1',
+      'release-ulid-1',
+      expect.any(Error)
+    );
+    // The migration returns early — provisioning is NOT triggered on the failed tick.
+    expect(mockProvisionDeploymentNode).not.toHaveBeenCalled();
   });
 
   it('validates and records artifact-backed service descriptors', async () => {

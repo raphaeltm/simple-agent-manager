@@ -100,8 +100,14 @@ func (s *Server) handleMcpBuildAndPublish(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// The build/publish work (docker build/save, R2 upload, release ingestion)
+	// must not be bound to the request context: Cloudflare/API/client
+	// cancellation after the proxy deadline would otherwise kill an in-flight
+	// build. Parent to context.Background() with the configured publish timeout,
+	// matching the async job path (handleMcpBuildAndPublishJobStart). See
+	// .claude/rules/43-long-running-mcp-tools.md.
 	publishTimeout := s.deployBuildPublishTimeout()
-	ctx, cancel := context.WithTimeout(r.Context(), publishTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), publishTimeout)
 	defer cancel()
 	result, err := s.runPreparedBuildAndPublish(ctx, prepared, nil)
 	if err != nil {

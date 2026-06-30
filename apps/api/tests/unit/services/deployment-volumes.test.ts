@@ -19,6 +19,7 @@ import {
   createMissingDeclaredVolumes,
   deleteEnvironmentVolume,
   detachEnvironmentVolumes,
+  resolveLinkedDeploymentNodeVolumeTarget,
   resolveNamedVolumeMountRoot,
   resolveVolumeMountRoot,
 } from '../../../src/services/deployment-volumes';
@@ -1079,5 +1080,154 @@ describe('detachEnvironmentVolumes', () => {
 
     expect(results).toEqual([]);
     expect(provider.detachVolume).not.toHaveBeenCalled();
+  });
+});
+
+// =============================================================================
+// resolveLinkedDeploymentNodeVolumeTarget
+// =============================================================================
+
+interface PlacementRow {
+  nodeId: string | null;
+  location: string | null;
+  providerInstanceId: string | null;
+  vmLocation: string | null;
+  nodeRole: string | null;
+}
+
+// resolveLinkedDeploymentNodeVolumeTarget queries the joined
+// deployment_environments + nodes row via
+// .select({...}).from(...).leftJoin(...).where(...).limit(1). The shared
+// createMockDb above has no leftJoin support, so build a purpose-specific mock
+// returning a single configurable placement row.
+function createPlacementDb(placement: PlacementRow | undefined) {
+  const limit = vi.fn(() => Promise.resolve(placement ? [placement] : []));
+  const where = vi.fn(() => ({ limit }));
+  const leftJoin = vi.fn(() => ({ where }));
+  const from = vi.fn(() => ({ leftJoin }));
+  const db = {
+    select: vi.fn(() => ({ from })),
+    _spies: { from, leftJoin, where, limit },
+  };
+  return db;
+}
+
+describe('resolveLinkedDeploymentNodeVolumeTarget', () => {
+  it('throws when the environment is not linked to a node', async () => {
+    const db = createPlacementDb({
+      nodeId: null,
+      location: null,
+      providerInstanceId: null,
+      vmLocation: null,
+      nodeRole: null,
+    });
+
+    await expect(resolveLinkedDeploymentNodeVolumeTarget(db as any, 'env-1')).rejects.toThrow(
+      'Deployment environment "env-1" is not linked to a node'
+    );
+  });
+
+  it('throws when no placement row is returned at all', async () => {
+    const db = createPlacementDb(undefined);
+
+    await expect(resolveLinkedDeploymentNodeVolumeTarget(db as any, 'env-1')).rejects.toThrow(
+      'Deployment environment "env-1" is not linked to a node'
+    );
+  });
+
+  it('throws when the linked node is not a deployment node', async () => {
+    const db = createPlacementDb({
+      nodeId: 'node-1',
+      location: 'nbg1',
+      providerInstanceId: 'srv-1',
+      vmLocation: 'nbg1',
+      nodeRole: 'workspace',
+    });
+
+    await expect(resolveLinkedDeploymentNodeVolumeTarget(db as any, 'env-1')).rejects.toThrow(
+      'Node "node-1" is not a deployment node'
+    );
+  });
+
+  it('throws when the deployment node has no provider instance id yet', async () => {
+    const db = createPlacementDb({
+      nodeId: 'node-1',
+      location: 'nbg1',
+      providerInstanceId: null,
+      vmLocation: 'nbg1',
+      nodeRole: 'deployment',
+    });
+
+    await expect(resolveLinkedDeploymentNodeVolumeTarget(db as any, 'env-1')).rejects.toThrow(
+      'Deployment node "node-1" does not have a provider instance id yet'
+    );
+  });
+
+  it('throws when neither the environment nor the node has a location', async () => {
+    const db = createPlacementDb({
+      nodeId: 'node-1',
+      location: null,
+      providerInstanceId: 'srv-1',
+      vmLocation: null,
+      nodeRole: 'deployment',
+    });
+
+    await expect(resolveLinkedDeploymentNodeVolumeTarget(db as any, 'env-1')).rejects.toThrow(
+      'Deployment node "node-1" does not have a volume attachment location'
+    );
+  });
+
+  it('resolves the target with the environment location preferred over node vmLocation', async () => {
+    const db = createPlacementDb({
+      nodeId: 'node-1',
+      location: 'env-nbg1',
+      providerInstanceId: 'srv-1',
+      vmLocation: 'node-fsn1',
+      nodeRole: 'deployment',
+    });
+
+    const target = await resolveLinkedDeploymentNodeVolumeTarget(db as any, 'env-1');
+
+    expect(target).toEqual({
+      nodeId: 'node-1',
+      serverId: 'srv-1',
+      location: 'env-nbg1',
+    });
+  });
+
+  it('falls back to the node vmLocation when the environment has no location', async () => {
+    const db = createPlacementDb({
+      nodeId: 'node-1',
+      location: null,
+      providerInstanceId: 'srv-1',
+      vmLocation: 'node-fsn1',
+      nodeRole: 'deployment',
+    });
+
+    const target = await resolveLinkedDeploymentNodeVolumeTarget(db as any, 'env-1');
+
+    expect(target).toEqual({
+      nodeId: 'node-1',
+      serverId: 'srv-1',
+      location: 'node-fsn1',
+    });
+  });
+
+  it('accepts a null nodeRole (unjoined role) as a deployment node', async () => {
+    const db = createPlacementDb({
+      nodeId: 'node-1',
+      location: 'nbg1',
+      providerInstanceId: 'srv-1',
+      vmLocation: 'nbg1',
+      nodeRole: null,
+    });
+
+    const target = await resolveLinkedDeploymentNodeVolumeTarget(db as any, 'env-1');
+
+    expect(target).toEqual({
+      nodeId: 'node-1',
+      serverId: 'srv-1',
+      location: 'nbg1',
+    });
   });
 });

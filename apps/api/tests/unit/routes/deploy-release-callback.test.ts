@@ -484,6 +484,67 @@ describe('deploy release callback route', () => {
     expect(mockSignDeployPayload).not.toHaveBeenCalled();
   });
 
+  it('returns 422 before release/signing when a volume-requiring env has no providerInstanceId yet', async () => {
+    // Node has provisioned but not yet reported its providerInstanceId. Volume
+    // mounts are matched to the node by attachedServerId == providerInstanceId,
+    // so serving the payload now would silently omit ALL volumes — the app would
+    // boot against ephemeral container storage (data loss). The callback must
+    // reject so the node retries once provisioning populates the field.
+    mockLimit
+      .mockResolvedValueOnce([
+        { userId: 'user-1', ipAddress: '203.0.113.10', providerInstanceId: null },
+      ])
+      .mockResolvedValueOnce([
+        { id: 'env-1', projectId: 'proj-1', nodeId: 'node-deploy-1', requiresVolumes: true },
+      ]);
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await requestDeployRelease();
+
+    expect(response.status).toBe(422);
+    expect(await response.json()).toMatchObject({
+      error: 'UNPROCESSABLE_ENTITY',
+      message:
+        'Deployment node has not reported its provider instance id yet; retry after provisioning completes',
+    });
+    // The release lookup, status flip to 'applying', DNS, volume descriptors,
+    // and signing must NOT run for a rejected request.
+    expect(mockUpdateSet).not.toHaveBeenCalled();
+    expect(mockBuildVolumeMountDescriptors).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(mockSignDeployPayload).not.toHaveBeenCalled();
+  });
+
+  it('serves the payload when a volume-requiring env has a providerInstanceId', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000);
+    mockLimit
+      .mockResolvedValueOnce([
+        {
+          userId: 'user-1',
+          ipAddress: '203.0.113.10',
+          providerInstanceId: currentProviderServerId,
+        },
+      ])
+      .mockResolvedValueOnce([
+        { id: 'env-1', projectId: 'proj-1', nodeId: 'node-deploy-1', requiresVolumes: true },
+      ])
+      .mockResolvedValueOnce([{ id: 'rel-1', manifest: JSON.stringify(manifest()), version: 7 }]);
+    stubDnsFetch();
+
+    const response = await requestDeployRelease();
+
+    const body = await response.json();
+    expect(response.status, JSON.stringify(body)).toBe(200);
+    // Volume descriptors are built against the reported providerInstanceId.
+    expect(mockBuildVolumeMountDescriptors).toHaveBeenCalledWith(
+      expect.anything(),
+      'env-1',
+      currentProviderServerId
+    );
+    expect(mockSignDeployPayload).toHaveBeenCalled();
+  });
+
   it('rejects a release fetch when the environment is assigned to a different node', async () => {
     mockLimit
       .mockResolvedValueOnce([{ userId: 'user-1', ipAddress: '203.0.113.10' }])

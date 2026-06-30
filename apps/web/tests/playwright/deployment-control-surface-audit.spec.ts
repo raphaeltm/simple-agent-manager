@@ -6,6 +6,7 @@ const PROJECT_ID = 'proj-deploy-audit';
 const ENV_ID = 'env-staging';
 const ENV_FAIL_ID = 'env-production-us-east-very-long-name';
 const ENV_ORPHAN_VOLUME_ID = 'env-orphan-volume';
+const ENV_STOPPED_ID = 'env-stopped';
 const NODE_ID = 'node-deploy-audit';
 const NODE_STALE_ID = 'node-deploy-stale';
 
@@ -280,6 +281,49 @@ const MOCK_ENV_ORPHAN_VOLUME = {
   node: null,
 };
 
+const MOCK_ENV_STOPPED = {
+  id: ENV_STOPPED_ID,
+  projectId: PROJECT_ID,
+  name: 'stopped-with-volumes',
+  status: 'stopped',
+  nodeId: null,
+  provider: 'hetzner',
+  location: 'nbg1',
+  requiresVolumes: true,
+  createdAt: '2026-06-18T08:20:00.000Z',
+  updatedAt: '2026-06-18T11:00:00.000Z',
+  secretsUpdatedAt: '2026-06-18T09:00:00.000Z',
+  // toObservedDeploymentState always returns a non-null object (all-null fields
+  // when the env has been stopped and the node detached). Mirror that shape so
+  // the mock matches the real API contract.
+  observedDeployment: {
+    appliedSeq: null,
+    status: null,
+    errorMessage: null,
+    services: null,
+    deployStatus: null,
+    diskTelemetry: null,
+    observedAt: null,
+  },
+  agentPolicy: {
+    agentDeployEnabled: true,
+    agentDeployEnabledBy: 'user-deploy-audit',
+    agentDeployEnabledAt: '2026-06-18T09:30:00.000Z',
+    agentDeployDisabledAt: null,
+    allowedDeployProfileIds: ['profile-deploy'],
+  },
+  latestRelease: {
+    id: 'release-stopped',
+    environmentId: ENV_STOPPED_ID,
+    version: 7,
+    status: 'applied',
+    createdBy: 'task-release-stopped',
+    createdAt: '2026-06-18T10:00:00.000Z',
+  },
+  routeHostnames: [],
+  node: null,
+};
+
 const MOCK_LOGS = {
   entries: [
     {
@@ -500,10 +544,15 @@ async function respond(route: Route, status: number, body: unknown) {
 
 async function setupMocks(
   page: Page,
-  opts?: { includeFailingEnv?: boolean; includeOrphanVolumeEnv?: boolean }
+  opts?: {
+    includeFailingEnv?: boolean;
+    includeOrphanVolumeEnv?: boolean;
+    includeStoppedEnv?: boolean;
+  }
 ) {
   const includeFailingEnv = opts?.includeFailingEnv ?? true;
   const includeOrphanVolumeEnv = opts?.includeOrphanVolumeEnv ?? false;
+  const includeStoppedEnv = opts?.includeStoppedEnv ?? false;
 
   await seedTheme(page, 'dark');
   await page.addInitScript(() => {
@@ -541,7 +590,70 @@ async function setupMocks(
       if (includeOrphanVolumeEnv) {
         envs.push(MOCK_ENV_ORPHAN_VOLUME);
       }
+      if (includeStoppedEnv) {
+        envs.push(MOCK_ENV_STOPPED);
+      }
       return respond(route, 200, { environments: envs });
+    }
+
+    // Stop lifecycle: tears down the stack and detaches volumes (data
+    // preserved). staging shares NODE_ID with preview, so the node is kept.
+    if (
+      path === `/api/projects/${PROJECT_ID}/environments/${ENV_ID}/stop` &&
+      method === 'POST'
+    ) {
+      return respond(route, 200, {
+        environment: { ...MOCK_ENV, status: 'stopped', nodeId: null, node: null },
+        lifecycle: {
+          stopped: true,
+          alreadyStopped: false,
+          nodeId: NODE_ID,
+          nodeDeleted: false,
+          volumesDetached: 2,
+          warnings: [],
+        },
+      });
+    }
+
+    // Start lifecycle: re-provisions a node, reattaches volumes, and lets the
+    // heartbeat reapply the latest release.
+    if (
+      path === `/api/projects/${PROJECT_ID}/environments/${ENV_STOPPED_ID}/start` &&
+      method === 'POST'
+    ) {
+      return respond(route, 200, {
+        environment: { ...MOCK_ENV_STOPPED, status: 'starting' },
+        lifecycle: {
+          started: true,
+          alreadyActive: false,
+          nodeId: NODE_ID,
+          provisioningStarted: true,
+          volumesAttachScheduled: true,
+          latestReleaseVersion: 7,
+        },
+      });
+    }
+    if (
+      path === `/api/projects/${PROJECT_ID}/environments/${ENV_STOPPED_ID}/runtime-config` &&
+      method === 'GET'
+    ) {
+      return respond(route, 200, {
+        environmentId: ENV_STOPPED_ID,
+        updatedAt: null,
+        envVars: [],
+      });
+    }
+    if (
+      path === `/api/projects/${PROJECT_ID}/environments/${ENV_STOPPED_ID}/public-routes` &&
+      method === 'GET'
+    ) {
+      return respond(route, 200, { publicRoutes: [] });
+    }
+    if (
+      path === `/api/projects/${PROJECT_ID}/environments/${ENV_STOPPED_ID}/custom-domains` &&
+      method === 'GET'
+    ) {
+      return respond(route, 200, { customDomains: [] });
     }
     if (
       path === `/api/projects/${PROJECT_ID}/environments/${ENV_ID}/runtime-config` &&
@@ -796,6 +908,70 @@ test.describe('Deployment control surface audit — detail page', () => {
     await expect(page.getByText('No deployment node is currently attached')).toBeVisible();
 
     await screenshot(page, 'deployment-detail-error-no-node-stop');
+    await assertNoOverflow(page);
+  });
+
+  test('confirming stop posts to the stop endpoint and reports cleanup summary', async ({
+    page,
+  }) => {
+    await setupMocks(page);
+    await page.goto(`/projects/${PROJECT_ID}/deployments/${ENV_ID}`);
+
+    await expect(page.getByRole('heading', { name: 'staging', level: 1 })).toBeVisible();
+
+    // Active env exposes Stop (destroys the unused node) and hides Start.
+    await expect(page.getByRole('button', { name: 'Stop' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Start' })).toHaveCount(0);
+
+    // Open the confirm dialog from the header Stop button.
+    await page.getByRole('button', { name: 'Stop' }).click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByText('Stop deployment environment?')).toBeVisible();
+    // staging shares its node with preview, so the node is kept on stop.
+    await expect(
+      dialog.getByText('Keeps the shared deployment node running for other environments')
+    ).toBeVisible();
+
+    // The dialog confirm button shares the "Stop" label with the header button,
+    // so scope the click to the dialog. Assert the POST actually fires.
+    const stopRequest = page.waitForRequest(
+      (req) =>
+        req.method() === 'POST' &&
+        req.url().includes(`/api/projects/${PROJECT_ID}/environments/${ENV_ID}/stop`)
+    );
+    await dialog.getByRole('button', { name: 'Stop', exact: true }).click();
+    await stopRequest;
+
+    // Success toast summarises detached volumes (node kept for sibling env).
+    await expect(
+      page.getByText('Environment stopped: environment stopped, 2 volumes detached')
+    ).toBeVisible();
+
+    await screenshot(page, 'deployment-detail-stop-confirmed');
+    await assertNoOverflow(page);
+  });
+
+  test('stopped environment exposes start which posts to the start endpoint', async ({ page }) => {
+    await setupMocks(page, { includeStoppedEnv: true });
+    await page.goto(`/projects/${PROJECT_ID}/deployments/${ENV_STOPPED_ID}`);
+
+    await expect(page.getByRole('heading', { name: 'stopped-with-volumes', level: 1 })).toBeVisible();
+
+    // Stopped env exposes Start and hides Stop.
+    await expect(page.getByRole('button', { name: 'Start' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Stop' })).toHaveCount(0);
+
+    const startRequest = page.waitForRequest(
+      (req) =>
+        req.method() === 'POST' &&
+        req.url().includes(`/api/projects/${PROJECT_ID}/environments/${ENV_STOPPED_ID}/start`)
+    );
+    await page.getByRole('button', { name: 'Start' }).click();
+    await startRequest;
+
+    await expect(page.getByText('Environment starting on a deployment node')).toBeVisible();
+
+    await screenshot(page, 'deployment-detail-start-requested');
     await assertNoOverflow(page);
   });
 

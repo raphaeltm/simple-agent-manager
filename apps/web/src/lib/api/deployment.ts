@@ -61,11 +61,20 @@ export interface DeploymentEnvironmentNodeSummary extends Pick<
   | 'updatedAt'
 > {}
 
+export type DeploymentEnvironmentStatus =
+  | 'created'
+  | 'active'
+  | 'starting'
+  | 'stopping'
+  | 'stopped'
+  | 'error'
+  | 'failed';
+
 export interface DeploymentEnvironment {
   id: string;
   projectId: string;
   name: string;
-  status: string;
+  status: DeploymentEnvironmentStatus;
   nodeId: string | null;
   provider: string | null;
   location: string | null;

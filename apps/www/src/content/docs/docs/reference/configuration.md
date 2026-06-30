@@ -224,6 +224,14 @@ SAM loads OpenCode Zen and OpenCode Go model choices through the authenticated m
 | `DOH_TIMEOUT_MS`                           | `10000`                                | Timeout for deployment custom-domain DNS verification lookups         |
 | `DEPLOY_COMPOSE_CMD`                       | `docker compose`                       | Docker Compose command used by the deployment engine                  |
 | `DEPLOY_HEALTH_TIMEOUT`                    | `5m`                                   | Deployment health-check timeout used by the VM agent                  |
+| `DEPLOY_RUNTIME_TIMEOUT`                   | `15m`                                  | VM-agent max time for deployment-node host dependency setup           |
+| `DEPLOY_TEARDOWN_TIMEOUT`                  | `2m`                                   | VM-agent max time for deployment environment teardown (stop/start)    |
+| `DEPLOY_APPLY_IDLE_TIMEOUT`                | `15m`                                  | VM-agent idle watchdog for deployment apply (no-progress only)        |
+| `DEPLOY_BUILD_PUBLISH_TIMEOUT`             | `20m`                                  | VM-agent max time for host build + push + release publish             |
+| `DEPLOY_ARTIFACT_DIAL_TIMEOUT`             | `30s`                                  | VM-agent TCP dial timeout for artifact downloads                      |
+| `DEPLOY_ARTIFACT_TLS_HANDSHAKE_TIMEOUT`    | `15s`                                  | VM-agent TLS handshake timeout for artifact downloads                 |
+| `DEPLOY_ARTIFACT_RESPONSE_HEADER_TIMEOUT`  | `60s`                                  | VM-agent first-response-header timeout for artifact downloads         |
+| `DEPLOY_ARTIFACT_IDLE_TIMEOUT`             | `2m`                                   | VM-agent idle watchdog for artifact body-read progress                |
 
 ## Platform Limits
 

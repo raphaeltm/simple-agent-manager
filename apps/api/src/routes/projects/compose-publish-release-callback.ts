@@ -337,8 +337,28 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
         await detachEnvironmentVolumes(db, c.env, userId, environmentId, serverId);
       }
     } catch (err) {
+      // Shared→exclusive migration (teardown + volume detach) failed. The
+      // release was already recorded durably above, so we MUST NOT return a
+      // 500 here: the VM agent treats a 5xx as a transient publish failure and
+      // retries the whole submission, which inserts a SECOND release with the
+      // next version number (duplicate version records). Record the
+      // volume-attach failure for diagnosis and return the durable release.
+      // The migration is retried via the deploy verb or the next release.
       await markDeploymentReleaseVolumeAttachFailed(db, environmentId, releaseId, err);
-      throw err;
+      log.error('compose_publish_release.shared_to_exclusive_migration_failed', {
+        projectId,
+        environmentId,
+        releaseId,
+        nodeId,
+        action: 'release_recorded_migration_deferred',
+        ...serializeError(err),
+      });
+      return c.json({
+        releaseId,
+        version: nextVersion,
+        status: 'created',
+        nodeId,
+      });
     }
     await db
       .update(schema.deploymentEnvironments)
