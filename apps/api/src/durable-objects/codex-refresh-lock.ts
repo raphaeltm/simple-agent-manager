@@ -404,6 +404,16 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
       } catch {
         // Non-JSON upstream response — use generic error
       }
+      // Diagnostic: log OpenAI's rejection reason (error code + description only —
+      // never any token material) so we can distinguish a revoked/expired/consumed
+      // refresh_token from a transient upstream fault.
+      log.warn('codex_refresh.upstream_rejected', {
+        userId,
+        credentialId: credential.id,
+        status: upstreamResponse.status,
+        upstreamError: safeError.error,
+        upstreamErrorDescription: safeError.error_description ?? null,
+      });
       return new Response(JSON.stringify(safeError), {
         status: upstreamResponse.status,
         headers: { 'Content-Type': 'application/json' },
