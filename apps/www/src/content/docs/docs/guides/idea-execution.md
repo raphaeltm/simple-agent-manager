@@ -56,10 +56,10 @@ While an idea is executing, SAM tracks detailed progress:
 
 ### What Happens When Execution Completes
 
-When an agent finishes its work:
+When an agent finishes its work (in the standard task workflow, where the agent is instructed to persist its work):
 
-1. The agent commits and pushes changes to the branch
-2. A pull request is created automatically
+1. The agent commits and pushes changes to its branch — this happens because the agent is told to, not as automatic platform behavior. The workspace is ephemeral, so nothing is kept unless the agent pushes.
+2. The agent opens a pull request for your review
 3. A notification is sent
 4. The workspace is stopped
 5. If the node was auto-provisioned and has no other active workspaces, it enters the **warm pool** for potential reuse

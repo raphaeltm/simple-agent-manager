@@ -86,7 +86,9 @@ Workspaces are also created automatically when you execute an idea:
 
 1. Go to a project's chat view
 2. Describe what you want done
-3. SAM automatically provisions a workspace, runs your configured agent, and creates a PR
+3. SAM provisions an ephemeral workspace and runs your configured agent on its own branch
+
+The workspace is ephemeral — nothing is persisted unless the agent pushes. In the standard task workflow the agent commits, pushes its branch, and opens a pull request when work is done, but this happens because the agent is told to, not automatically. If you want work kept, make sure the agent pushes (or capture it in the SAM library or as an idea).
 
 After execution completes, the node enters a **warm pool** for 30 minutes, enabling fast reuse for follow-up work.
 
