@@ -126,8 +126,52 @@ source table (including Durable Objects), decide dual-write / read-only / tracke
 for each, and add a per-writer behavioral test asserting both representations update in every
 scope, plus a vertical-slice test proving the downstream consumer sees the latest write.
 
+## Second Post-Mortem (theory A — concurrency race)
+
+The dual-write fix (#1439) resolved the stale-`cc_credentials` desync but the user
+confirmed the 429 still recurred. The user definitively ruled out any external
+competing refresher ("I made fresh json objects every time I put creds in: login,
+copy json, logout ... No chance that is the problem"), so the remaining cause had
+to be inside SAM.
+
+**What broke.** Codex refresh kept returning `unauthorized`/"access token could not
+be refreshed" in production. A user with two workspaces running concurrently could
+have both refresh the same one-time-use `refresh_token` against OpenAI; OpenAI
+rotates the token on first use and revokes the whole token family when the consumed
+token is replayed → 401 → codex re-refresh loop → 429.
+
+**Root cause.** `CodexRefreshLock` assumed the Durable Object "single-threaded
+execution model" serialized requests "without explicit mutex logic." False: a DO
+does NOT serialize concurrent `async fetch()` handlers across `await` points. When
+request A `await`ed the OpenAI fetch, request B ran, read the same pre-rotation
+stored token, and also POSTed it. The `AbortController` timeout bounds duration but
+is not a mutex. The credential read happened outside any lock.
+
+**Why it wasn't caught.** No concurrency test existed for the DO; all tests issued
+a single request. The false "single-threaded" doc comment actively discouraged
+adding a lock.
+
+**Class of bug.** Durable Object check-then-act race across an `await` boundary on
+a one-time-use rotating resource.
+
+**Fix.** Added an in-DO promise-chain mutex (`withRefreshLock`) and moved the
+credential read + OpenAI refresh + write into a serialized `runRefresh` critical
+section. Reading the credential inside the lock lets a queued second request observe
+the rotated token and take the grace-window handoff path instead of replaying the
+consumed token. Corrected the false doc comment.
+
+**Process fix.** Added `.claude/rules/45-durable-object-concurrency-mutex.md`: DO
+check-then-act critical sections on rotating/one-time-use resources must use a real
+mutex (`blockConcurrencyWhile` or a promise-chain lock), read mutated state inside
+the lock, and ship a concurrency regression test (dynamic state-mutating mocks;
+assert the one-time-use mutation fires exactly once; proven to fail when the mutex
+is bypassed).
+
 ## Acceptance Criteria
 
+- [x] Concurrent refreshes for the same user are serialized; the consumed
+  one-time-use token is presented to OpenAI exactly once (verified by a
+  concurrency regression test proven to fail when the mutex is bypassed).
 - [x] After a Codex refresh rotation, the matching `cc_credentials` row's
   `encrypted_token`/`iv`/`updated_at` are updated in the same DO operation as the
   legacy `credentials` row (verified by a behavioral test for both scopes).
