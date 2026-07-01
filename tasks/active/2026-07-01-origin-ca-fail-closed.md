@@ -18,15 +18,15 @@ This violates the project security policy: security-sensitive setup failures mus
 - [x] **cloud-init template**: Keep TLS env vars and `VM_AGENT_PORT={{ vm_agent_port }}` untouched on failure.
 - [x] **cloud-init tests**: Assert generated cloud-init no longer contains plaintext fallback markers, TLS env deletion, or port rewrite to `8080`.
 - [x] **cloud-init tests**: Assert Origin CA failure exits non-zero and preserves the HTTPS/TLS service contract.
-- [ ] **validation**: Run targeted cloud-init tests.
-- [ ] **validation**: Run full quality suite before PR.
+- [x] **validation**: Run targeted cloud-init tests.
+- [x] **validation**: Run full quality suite before PR.
 - [ ] **staging**: Deploy branch to staging, provision a real VM, verify heartbeat and TLS/HTTPS behavior, then clean up.
 
 ## Acceptance Criteria
-- [ ] Generated cloud-init never starts vm-agent in plaintext fallback mode after Origin CA bootstrap failure.
-- [ ] Origin CA bootstrap failures fail provisioning visibly before `vm-agent` starts.
-- [ ] VM-agent systemd unit remains configured for the expected TLS port/protocol contract.
-- [ ] Tests cover the removal of plaintext fallback behavior.
+- [x] Generated cloud-init never starts vm-agent in plaintext fallback mode after Origin CA bootstrap failure.
+- [x] Origin CA bootstrap failures fail provisioning visibly before `vm-agent` starts.
+- [x] VM-agent systemd unit remains configured for the expected TLS port/protocol contract.
+- [x] Tests cover the removal of plaintext fallback behavior.
 - [ ] Staging infrastructure verification provisions a real VM and confirms heartbeat/TLS behavior.
 - [ ] PR is created and merged only after CI is green.
 
