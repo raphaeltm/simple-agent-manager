@@ -444,6 +444,30 @@ test.describe('Triggers List — Mobile', () => {
     await screenshot(page, 'triggers-list-error-mobile');
     await assertNoOverflow(page);
   });
+
+  test('delete menu item in overflow menu', async ({ page }) => {
+    await setupApiMocks(page, { triggers: NORMAL_TRIGGERS });
+    await page.goto('/projects/proj-test-1/triggers');
+    await page.waitForSelector('text=Daily Code Review');
+    const menuBtns = page.getByRole('button', { name: 'Trigger actions' });
+    await menuBtns.first().click();
+    await page.waitForSelector('text=Delete');
+    await screenshot(page, 'triggers-delete-menu-mobile');
+    await assertNoOverflow(page);
+  });
+
+  test('delete confirmation dialog', async ({ page }) => {
+    await setupApiMocks(page, { triggers: NORMAL_TRIGGERS });
+    await page.goto('/projects/proj-test-1/triggers');
+    await page.waitForSelector('text=Daily Code Review');
+    const menuBtns = page.getByRole('button', { name: 'Trigger actions' });
+    await menuBtns.first().click();
+    await page.waitForSelector('text=Delete');
+    await page.getByRole('button', { name: /delete/i }).click();
+    await page.waitForSelector('role=alertdialog');
+    await screenshot(page, 'triggers-delete-confirm-mobile');
+    await assertNoOverflow(page);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -475,6 +499,30 @@ test.describe('Triggers List — Desktop', () => {
     await page.goto('/projects/proj-test-1/triggers');
     await page.waitForSelector('text=No triggers yet');
     await screenshot(page, 'triggers-list-empty-desktop');
+    await assertNoOverflow(page);
+  });
+
+  test('delete menu item in overflow menu', async ({ page }) => {
+    await setupApiMocks(page, { triggers: NORMAL_TRIGGERS });
+    await page.goto('/projects/proj-test-1/triggers');
+    await page.waitForSelector('text=Daily Code Review');
+    const menuBtns = page.getByRole('button', { name: 'Trigger actions' });
+    await menuBtns.first().click();
+    await page.waitForSelector('text=Delete');
+    await screenshot(page, 'triggers-delete-menu-desktop');
+    await assertNoOverflow(page);
+  });
+
+  test('delete confirmation dialog', async ({ page }) => {
+    await setupApiMocks(page, { triggers: NORMAL_TRIGGERS });
+    await page.goto('/projects/proj-test-1/triggers');
+    await page.waitForSelector('text=Daily Code Review');
+    const menuBtns = page.getByRole('button', { name: 'Trigger actions' });
+    await menuBtns.first().click();
+    await page.waitForSelector('text=Delete');
+    await page.getByRole('button', { name: /delete/i }).click();
+    await page.waitForSelector('role=alertdialog');
+    await screenshot(page, 'triggers-delete-confirm-desktop');
     await assertNoOverflow(page);
   });
 });
