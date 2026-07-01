@@ -45,8 +45,8 @@ Implement only the project-membership foundation:
 - [x] Add focused unit tests for membership auth helper behavior, including mismatched returned rows and missing/inactive memberships.
 - [x] Add migration/schema tests proving the migration file creates/backfills the expected table and indexes.
 - [x] Run local validation: lint, typecheck, targeted tests, full test/build suite as required by `/do`.
-- [ ] Deploy to staging and verify D1 migration state via Cloudflare API.
-- [ ] Use Playwright token-login as `SAM_PLAYWRIGHT_PRIMARY_USER`, open staging, navigate to a test project, and submit a chat message successfully.
+- [x] Deploy to staging and verify D1 migration state via Cloudflare API.
+- [x] Use Playwright token-login as `SAM_PLAYWRIGHT_PRIMARY_USER`, open staging, navigate to a test project, and submit a chat message successfully.
 
 ## Acceptance Criteria
 
@@ -57,6 +57,15 @@ Implement only the project-membership foundation:
 - Membership helpers distinguish access from capabilities and fail closed for missing, inactive, or insufficient membership.
 - Tests cover IDOR/defense-in-depth behavior with mismatched rows.
 - Staging deploy succeeds, the migration is visible in D1, and the primary staging user can still submit a project chat message.
+
+## Validation Evidence
+
+- Local validation passed: focused tests, changed-file lint, API typecheck, and `pnpm lint && pnpm typecheck && pnpm test && pnpm build`.
+- Migration safety passed with 0 new violations.
+- Specialist review passed: task-completion-validator, security-auditor, cloudflare-specialist, constitution-validator, and test-engineer.
+- Staging deploy run `28549058515` succeeded for branch `sam/project-membership-foundation` at `7aa53ace0dde633ff987412cf99cdaa9d0bcf4c7`.
+- Staging D1 has `project_members`, indexes `idx_project_members_project_status` and `idx_project_members_user_status`, recorded migration `0081_project_members.sql`, and 26/26 projects backfilled with active owner memberships.
+- Primary-user staging UI smoke passed on Test Project 1 after token-login and dismissing the account setup overlay: POST `/api/projects/01KJNR9R3TEN3KX1ETE33852R8/tasks/submit` returned 202 and created task `01KWFV02QBT2G4HG81ZTYTWFFK` / session `b34a46a2-0a1d-4b1f-a21e-666ca5c56d6d`.
 
 ## Explicit Non-Goals
 
