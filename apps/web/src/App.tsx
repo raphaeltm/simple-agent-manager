@@ -57,7 +57,7 @@ import { SettingsConnections } from './pages/SettingsConnections';
 import { SettingsCredentials } from './pages/SettingsCredentials';
 import { SettingsGitHub } from './pages/SettingsGitHub';
 import { SettingsNotifications } from './pages/SettingsNotifications';
-import { TaskDetail } from './pages/TaskDetail';
+import { TaskRedirect } from './pages/TaskRedirect';
 import { Tools } from './pages/Tools';
 import { ToolsCli } from './pages/ToolsCli';
 import { TrialChatGateHarness } from './pages/TrialChatGateHarness';
@@ -124,7 +124,7 @@ export default function App() {
                     <Route path="knowledge" element={<Navigate to="../agent-context" replace />} />
                     <Route path="ideas/:taskId" element={<IdeaDetailPage />} />
                     <Route path="tasks" element={<Navigate to="../ideas" replace />} />
-                    <Route path="tasks/:taskId" element={<TaskDetail />} />
+                    <Route path="tasks/:taskId" element={<TaskRedirect />} />
                     <Route path="settings" element={<ProjectSettings />} />
                     <Route path="activity" element={<ProjectActivity />} />
                     <Route path="notifications" element={<ProjectNotifications />} />

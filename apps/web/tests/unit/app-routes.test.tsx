@@ -93,8 +93,8 @@ vi.mock('../../src/pages/ProjectActivity', () => ({
   ProjectActivity: () => <div data-testid="project-activity-page" />,
 }));
 
-vi.mock('../../src/pages/TaskDetail', () => ({
-  TaskDetail: () => <div data-testid="task-detail-page" />,
+vi.mock('../../src/pages/TaskRedirect', () => ({
+  TaskRedirect: () => <div data-testid="task-redirect-page" />,
 }));
 
 vi.mock('../../src/pages/ChatSessionView', () => ({
@@ -126,11 +126,11 @@ describe('App routes', () => {
     expect(screen.getByTestId('tools-cli-page')).toBeInTheDocument();
   });
 
-  it('routes /projects/:id/tasks/:taskId to the task detail page nested inside project', () => {
+  it('routes /projects/:id/tasks/:taskId to the task redirect (redirects to chat session)', () => {
     renderAt('/projects/proj-1/tasks/task-1');
 
-    // TaskDetail is now a child route of Project, so both should be present
+    // TaskRedirect is a child route of Project that redirects to the chat session
     expect(screen.getByTestId('project-detail-page')).toBeInTheDocument();
-    expect(screen.getByTestId('task-detail-page')).toBeInTheDocument();
+    expect(screen.getByTestId('task-redirect-page')).toBeInTheDocument();
   });
 });

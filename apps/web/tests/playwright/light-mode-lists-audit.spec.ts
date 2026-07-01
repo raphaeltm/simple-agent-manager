@@ -8,8 +8,7 @@ import {
 } from './audit-helpers';
 
 /**
- * Light-mode visual audit for top-level list surfaces (/projects, /chats) and
- * the task detail page (/projects/:id/tasks/:taskId).
+ * Light-mode visual audit for top-level list surfaces (/projects, /chats).
  *
  * These screens were not covered by an existing light-mode audit (slice-e only
  * covers project-scoped sub-pages). This audit captures dark and light at every
@@ -177,11 +176,4 @@ describeThemeAudit('Lists theme audit', setupMocks, async (page, theme, suffix) 
   // /chats — list of active chat session cards across all projects
   await visitAndCapture(page, '/chats', `lists-chats-${suffix}`, theme);
 
-  // /projects/:id/tasks/:taskId — task detail with output, trigger, metadata
-  await visitAndCapture(
-    page,
-    `/projects/${PROJECT_ID}/tasks/task-lists-audit`,
-    `lists-task-detail-${suffix}`,
-    theme,
-  );
 });
