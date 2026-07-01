@@ -1,5 +1,4 @@
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
 import { getTableConfig } from 'drizzle-orm/sqlite-core';
@@ -7,12 +6,10 @@ import { describe, expect, it } from 'vitest';
 
 import { projectMembers } from '../../../src/db/schema';
 
-function readMigration(): string {
-  return readFileSync(
-    join(process.cwd(), 'src/db/migrations/0081_project_members.sql'),
-    'utf8'
-  );
-}
+const projectMembersMigrationUrl = new URL(
+  '../../../src/db/migrations/0081_project_members.sql',
+  import.meta.url
+);
 
 function createProjectFixtureDb(): DatabaseSync {
   const db = new DatabaseSync(':memory:');
@@ -50,7 +47,7 @@ function createProjectFixtureDb(): DatabaseSync {
 describe('project_members migration', () => {
   it('creates owner memberships for existing projects and is idempotent', () => {
     const db = createProjectFixtureDb();
-    const migration = readMigration();
+    const migration = readFileSync(projectMembersMigrationUrl, 'utf8');
 
     db.exec(migration);
     db.exec(migration);
