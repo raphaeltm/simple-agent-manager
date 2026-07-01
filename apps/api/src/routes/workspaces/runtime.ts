@@ -133,7 +133,7 @@ type MessageRouteContext = {
 };
 
 function waitUntilIfAvailable(
-  c: { executionCtx: ExecutionContext },
+  c: { executionCtx: { waitUntil(promise: Promise<unknown>): void } },
   promise: Promise<unknown> | void
 ): void {
   if (!promise) return;

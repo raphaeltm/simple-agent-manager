@@ -141,7 +141,7 @@ export async function handleCompleteTask(
   params: Record<string, unknown>,
   tokenData: McpTokenData,
   env: Env,
-  executionCtx?: ExecutionContext,
+  executionCtx?: { waitUntil(p: Promise<unknown>): void },
 ): Promise<JsonRpcResponse> {
   const summary = typeof params.summary === 'string' ? params.summary.trim() : null;
 

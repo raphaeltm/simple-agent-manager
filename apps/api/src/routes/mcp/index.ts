@@ -229,7 +229,7 @@ mcpRoutes.post('/', async (c) => {
             return c.json(await handleUpdateTaskStatus(requestId, toolArgs, tokenData, c.env));
           case 'complete_task': {
             // executionCtx may not be available in test environments (Miniflare/vitest)
-            let execCtx: ExecutionContext | undefined;
+            let execCtx: { waitUntil(p: Promise<unknown>): void } | undefined;
             try {
               execCtx = typeof c.executionCtx.waitUntil === 'function' ? c.executionCtx : undefined;
             } catch {

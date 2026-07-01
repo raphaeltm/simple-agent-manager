@@ -369,7 +369,7 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
       deleted,
     });
   };
-  let executionCtx: ExecutionContext | null = null;
+  let executionCtx: { waitUntil(p: Promise<unknown>): void } | null = null;
   try {
     executionCtx = c.executionCtx;
   } catch {
