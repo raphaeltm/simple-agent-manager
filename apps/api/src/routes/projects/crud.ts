@@ -63,6 +63,36 @@ import {
 
 const crudRoutes = new Hono<{ Bindings: Env }>();
 
+async function cleanupArtifactsRepoOnProjectDelete(env: Env, project: schema.Project): Promise<void> {
+  if (project.repoProvider !== 'artifacts' || !project.artifactsRepoId) {
+    return;
+  }
+
+  const orphanDetails = {
+    projectId: project.id,
+    repoName: project.artifactsRepoId,
+    userId: project.userId,
+    action: 'orphaned_artifacts_repo_on_delete',
+  };
+
+  if (!env.ARTIFACTS || typeof env.ARTIFACTS.delete !== 'function') {
+    log.warn('project_delete.artifacts_delete_unavailable', orphanDetails);
+    return;
+  }
+
+  try {
+    const deleted = await env.ARTIFACTS.delete(project.artifactsRepoId);
+    if (!deleted) {
+      log.warn('project_delete.artifacts_delete_returned_false', orphanDetails);
+    }
+  } catch (err) {
+    log.warn('project_delete.artifacts_delete_failed', {
+      ...orphanDetails,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
 crudRoutes.post('/', jsonValidator(CreateProjectSchema), async (c) => {
   const userId = getUserId(c);
   const db = drizzle(c.env.DATABASE, { schema });
@@ -859,7 +889,7 @@ crudRoutes.delete('/:id', async (c) => {
   const projectId = c.req.param('id');
   const db = drizzle(c.env.DATABASE, { schema });
 
-  await requireOwnedProject(db, projectId, userId);
+  const project = await requireOwnedProject(db, projectId, userId);
 
   // Explicitly delete child records instead of relying on D1 CASCADE.
   // SQLite ignores REFERENCES constraints added via ALTER TABLE, so
@@ -938,6 +968,12 @@ crudRoutes.delete('/:id', async (c) => {
 
   // 3. Execute all mutations atomically via D1 batch.
   await db.batch(statements as [typeof statements[0]]);
+
+  // Artifacts repo count limits are enforced from project rows. If this
+  // best-effort external cleanup cannot run, the deleted project no longer
+  // counts against ARTIFACTS_MAX_REPOS_PER_USER and the orphan is logged for
+  // manual reconciliation.
+  await cleanupArtifactsRepoOnProjectDelete(c.env, project);
 
   return c.json({ success: true });
 });
