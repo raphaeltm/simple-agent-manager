@@ -20,15 +20,25 @@ This violates the project security policy: security-sensitive setup failures mus
 - [x] **cloud-init tests**: Assert Origin CA failure exits non-zero and preserves the HTTPS/TLS service contract.
 - [x] **validation**: Run targeted cloud-init tests.
 - [x] **validation**: Run full quality suite before PR.
-- [ ] **staging**: Deploy branch to staging, provision a real VM, verify heartbeat and TLS/HTTPS behavior, then clean up.
+- [x] **staging**: Deploy branch to staging, provision a real VM, verify heartbeat and TLS/HTTPS behavior, then clean up.
 
 ## Acceptance Criteria
 - [x] Generated cloud-init never starts vm-agent in plaintext fallback mode after Origin CA bootstrap failure.
 - [x] Origin CA bootstrap failures fail provisioning visibly before `vm-agent` starts.
 - [x] VM-agent systemd unit remains configured for the expected TLS port/protocol contract.
 - [x] Tests cover the removal of plaintext fallback behavior.
-- [ ] Staging infrastructure verification provisions a real VM and confirms heartbeat/TLS behavior.
+- [x] Staging infrastructure verification provisions a real VM and confirms heartbeat/TLS behavior.
 - [ ] PR is created and merged only after CI is green.
+
+## Validation
+- **Targeted local**: `pnpm --filter @simple-agent-manager/cloud-init test` passed (175 tests).
+- **Targeted local**: `pnpm --filter @simple-agent-manager/cloud-init typecheck && pnpm --filter @simple-agent-manager/cloud-init build` passed.
+- **Full local**: `pnpm lint && pnpm typecheck && pnpm test && pnpm build` passed.
+- **Staging deploy**: GitHub Actions run `28536921575` deployed `sam/origin-ca-fail-closed` to staging; smoke tests passed.
+- **Staging browser auth**: Playwright token-login loaded `/dashboard`, `/projects`, and `/settings/cloud-provider` on `https://app.sammy.party` without unexpected console errors.
+- **Staging VM**: Created workspace `01KWFDR7T14DD2ECBTGCXBQSXW` on node `01KWFDR7BVTWR6EN7C82E818WH`; workspace reached `running`, node reached `running/healthy`, and fresh heartbeats were observed.
+- **Staging VM security contract**: Workspace creation exercised the control-plane node-agent path that defaults to `https://<node>.vm.sammy.party:8443`; `http://<node>.vm.sammy.party:8080/health` did not serve vm-agent health (`521`, not `200`).
+- **Staging cleanup**: Deleted workspace `01KWFDR7T14DD2ECBTGCXBQSXW` and node `01KWFDR7BVTWR6EN7C82E818WH`; a follow-up node fetch returned `404`.
 
 ## References
 - Previous session: `48e407a7-800d-4c2f-93ab-5b6fad97c0fc`
