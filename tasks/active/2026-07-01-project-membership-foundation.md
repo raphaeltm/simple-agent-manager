@@ -36,14 +36,14 @@ Implement only the project-membership foundation:
 
 ## Implementation Checklist
 
-- [ ] Add D1 migration `0081_project_members.sql` with additive `project_members` table, indexes, and owner backfill from `projects.user_id`.
-- [ ] Add `projectMembers` schema/table and inferred types in `apps/api/src/db/schema.ts`.
-- [ ] Add membership roles/capability definitions in API code near project auth.
-- [ ] Implement `requireProjectAccess()` and `requireProjectCapability()` with defense-in-depth user/project/status checks.
-- [ ] Preserve existing `requireOwnedProject()` behavior so current owners still pass and non-owners still receive `404`.
-- [ ] Seed owner project membership in all project creation paths discovered during research.
-- [ ] Add focused unit tests for membership auth helper behavior, including mismatched returned rows and missing/inactive memberships.
-- [ ] Add migration/schema tests proving the migration file creates/backfills the expected table and indexes.
+- [x] Add D1 migration `0081_project_members.sql` with additive `project_members` table, indexes, and owner backfill from `projects.user_id`.
+- [x] Add `projectMembers` schema/table and inferred types in `apps/api/src/db/schema.ts`.
+- [x] Add membership roles/capability definitions in API code near project auth.
+- [x] Implement `requireProjectAccess()` and `requireProjectCapability()` with defense-in-depth user/project/status checks.
+- [x] Preserve existing `requireOwnedProject()` behavior so current owners still pass and non-owners still receive `404`.
+- [x] Seed owner project membership in all project creation paths discovered during research.
+- [x] Add focused unit tests for membership auth helper behavior, including mismatched returned rows and missing/inactive memberships.
+- [x] Add migration/schema tests proving the migration file creates/backfills the expected table and indexes.
 - [ ] Run local validation: lint, typecheck, targeted tests, full test/build suite as required by `/do`.
 - [ ] Deploy to staging and verify D1 migration state via Cloudflare API.
 - [ ] Use Playwright token-login as `SAM_PLAYWRIGHT_PRIMARY_USER`, open staging, navigate to a test project, and submit a chat message successfully.

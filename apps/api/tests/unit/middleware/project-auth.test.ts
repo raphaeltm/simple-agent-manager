@@ -1,78 +1,77 @@
 /**
- * project-auth middleware — behavioral tests
+ * project-auth middleware — behavioral tests.
  *
- * `requireOwnedProject` / `requireOwnedTask` / `requireOwnedWorkspace` are the sole
- * IDOR defense for project-scoped routes (e.g. project credential overrides). The
- * ownership check is enforced AT THE QUERY LAYER via `and(eq(id), eq(userId))`, so
- * cross-user access manifests as "no rows returned" — exactly the same shape as
- * "record does not exist". Both MUST produce `errors.notFound` to prevent IDOR
- * enumeration.
- *
- * The pre-existing source-contract test (readFileSync + toContain) was replaced per
- * rule 02 — substring assertions on interactive code give false confidence.
+ * These helpers are IDOR boundaries for project-scoped routes. Tests construct
+ * mismatched rows directly so a weakened query or bad stub cannot bypass the
+ * explicit defense-in-depth checks.
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { AppDb } from '../../../src/middleware/project-auth';
-import { requireOwnedProject, requireOwnedTask, requireOwnedWorkspace } from '../../../src/middleware/project-auth';
+import {
+  createOwnerProjectMembership,
+  requireOwnedProject,
+  requireOwnedTask,
+  requireOwnedWorkspace,
+  requireProjectAccess,
+  requireProjectCapability,
+} from '../../../src/middleware/project-auth';
 
-/**
- * In-memory drizzle-compatible stub. Tests seed a dataset of rows; the stub filters
- * by id AND userId, matching the real query semantics of the middleware helpers.
- *
- * The middleware uses `db.select().from(table).where(and(eq(id), eq(userId))).limit(1)`.
- * We emulate this by capturing the call chain and applying a user-supplied filter.
- */
-function makeDb<T extends { id: string; userId: string }>(
-  dataByTable: Map<unknown, T[]>
-): AppDb {
+function makeDb(dataByTable: Map<unknown, unknown[]>): AppDb {
   let currentTable: unknown = null;
   const chain = {
     from: (table: unknown) => {
       currentTable = table;
       return chain;
     },
-    // The real `where` receives an opaque predicate from drizzle's `and(eq(...), eq(...))`.
-    // We ignore it and apply filtering at `.limit()` resolution based on test-captured
-    // filters set by `seedWithFilter`. This is safe because our stub is only used via
-    // `requireOwnedProject` / `requireOwnedTask` / `requireOwnedWorkspace` — those helpers
-    // always filter by (id, userId). We make the stub honor that contract by storing the
-    // expected (id, userId) pair on the row itself and matching during `.limit`.
     where: () => chain,
-    limit: () => {
-      const rows = dataByTable.get(currentTable) ?? [];
-      // Match drizzle's awaitable chain — return the full dataset; the test supplies
-      // rows that are already filtered appropriately for the scenario under test.
-      return Promise.resolve(rows);
-    },
+    limit: () => Promise.resolve(dataByTable.get(currentTable) ?? []),
   };
   return {
     select: () => chain,
   } as unknown as AppDb;
 }
 
+function makeProject(overrides: Partial<schema.Project> = {}): schema.Project {
+  return {
+    id: 'p1',
+    userId: 'u1',
+    name: 'Test',
+    description: null,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    ...overrides,
+  } as unknown as schema.Project;
+}
+
+function makeMember(overrides: Partial<schema.ProjectMember> = {}): schema.ProjectMember {
+  const now = new Date().toISOString();
+  return {
+    projectId: 'p1',
+    userId: 'u1',
+    role: 'owner',
+    status: 'active',
+    invitedBy: 'u1',
+    createdAt: now,
+    updatedAt: now,
+    ...overrides,
+  };
+}
+
 describe('requireOwnedProject', () => {
   it('returns the project when userId matches the stored owner', async () => {
-    const project: schema.Project = {
-      id: 'p1',
-      userId: 'u1',
-      name: 'Test',
-      repoUrl: null,
-      description: null,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    } as unknown as schema.Project;
-
+    const project = makeProject();
     const db = makeDb(new Map([[schema.projects, [project]]]));
+
     const result = await requireOwnedProject(db, 'p1', 'u1');
+
     expect(result).toEqual(project);
   });
 
-  it('throws notFound when the project exists but belongs to another user (IDOR defense)', async () => {
-    // Real drizzle: `and(eq(projects.id, 'p1'), eq(projects.userId, 'u1'))` returns no rows
-    // because the stored row has userId='u2'. The stub simulates that: no rows match.
+  it('throws notFound when the project exists but belongs to another user', async () => {
     const db = makeDb(new Map([[schema.projects, []]]));
+
     await expect(requireOwnedProject(db, 'p1', 'u1')).rejects.toMatchObject({
       statusCode: 404,
       error: 'NOT_FOUND',
@@ -81,25 +80,129 @@ describe('requireOwnedProject', () => {
 
   it('throws notFound when no project with that id exists', async () => {
     const db = makeDb(new Map([[schema.projects, []]]));
+
     await expect(requireOwnedProject(db, 'p-missing', 'u1')).rejects.toMatchObject({
       statusCode: 404,
     });
   });
 
-  // MEDIUM #8: Defence-in-depth. Even if the query layer is ever weakened and
-  // returns a row whose `userId` does not match the caller, the middleware's
-  // explicit identity check MUST reject with notFound rather than trust the DB.
-  it('throws notFound when DB returns a row with mismatched userId (defence-in-depth)', async () => {
-    const foreignProject: schema.Project = {
-      id: 'p1',
-      userId: 'u2', // different user
-      name: 'Foreign',
-    } as unknown as schema.Project;
-
+  it('throws notFound when DB returns a row with mismatched userId', async () => {
+    const foreignProject = makeProject({ userId: 'u2', name: 'Foreign' });
     const db = makeDb(new Map([[schema.projects, [foreignProject]]]));
+
     await expect(requireOwnedProject(db, 'p1', 'u1')).rejects.toMatchObject({
       statusCode: 404,
       error: 'NOT_FOUND',
+    });
+  });
+});
+
+describe('requireProjectAccess', () => {
+  it('returns the project for an active member who is not the project owner', async () => {
+    const project = makeProject({ userId: 'owner-user' });
+    const member = makeMember({ userId: 'member-user', role: 'viewer' });
+    const db = makeDb(new Map([[schema.projects, [project]], [schema.projectMembers, [member]]]));
+
+    const result = await requireProjectAccess(db, 'p1', 'member-user');
+
+    expect(result).toEqual(project);
+  });
+
+  it('throws notFound for inactive membership', async () => {
+    const project = makeProject({ userId: 'owner-user' });
+    const member = makeMember({ userId: 'member-user', status: 'suspended' });
+    const db = makeDb(new Map([[schema.projects, [project]], [schema.projectMembers, [member]]]));
+
+    await expect(requireProjectAccess(db, 'p1', 'member-user')).rejects.toMatchObject({
+      statusCode: 404,
+      error: 'NOT_FOUND',
+    });
+  });
+
+  it('throws notFound when DB returns a membership for a different user', async () => {
+    const project = makeProject({ userId: 'owner-user' });
+    const member = makeMember({ userId: 'other-user' });
+    const db = makeDb(new Map([[schema.projects, [project]], [schema.projectMembers, [member]]]));
+
+    await expect(requireProjectAccess(db, 'p1', 'member-user')).rejects.toMatchObject({
+      statusCode: 404,
+      error: 'NOT_FOUND',
+    });
+  });
+
+  it('throws notFound when DB returns a project row for a different project', async () => {
+    const project = makeProject({ id: 'p-other' });
+    const member = makeMember();
+    const db = makeDb(new Map([[schema.projects, [project]], [schema.projectMembers, [member]]]));
+
+    await expect(requireProjectAccess(db, 'p1', 'u1')).rejects.toMatchObject({
+      statusCode: 404,
+      error: 'NOT_FOUND',
+    });
+  });
+});
+
+describe('requireProjectCapability', () => {
+  it('allows a member whose role grants the requested capability', async () => {
+    const project = makeProject({ userId: 'owner-user' });
+    const member = makeMember({ userId: 'member-user', role: 'maintainer' });
+    const db = makeDb(new Map([[schema.projects, [project]], [schema.projectMembers, [member]]]));
+
+    const result = await requireProjectCapability(db, 'p1', 'member-user', 'deployment:deploy');
+
+    expect(result).toEqual(project);
+  });
+
+  it('throws forbidden when the active role lacks the requested capability', async () => {
+    const project = makeProject({ userId: 'owner-user' });
+    const member = makeMember({ userId: 'member-user', role: 'viewer' });
+    const db = makeDb(new Map([[schema.projects, [project]], [schema.projectMembers, [member]]]));
+
+    await expect(requireProjectCapability(db, 'p1', 'member-user', 'task:write')).rejects.toMatchObject({
+      statusCode: 403,
+      error: 'FORBIDDEN',
+    });
+  });
+
+  it('throws forbidden for an unknown active role', async () => {
+    const project = makeProject({ userId: 'owner-user' });
+    const member = makeMember({ userId: 'member-user', role: 'unexpected-role' });
+    const db = makeDb(new Map([[schema.projects, [project]], [schema.projectMembers, [member]]]));
+
+    await expect(requireProjectCapability(db, 'p1', 'member-user', 'project:read')).rejects.toMatchObject({
+      statusCode: 403,
+      error: 'FORBIDDEN',
+    });
+  });
+});
+
+describe('createOwnerProjectMembership', () => {
+  it('upserts an active owner membership for project creation paths', async () => {
+    const onConflictDoUpdate = vi.fn().mockResolvedValue(undefined);
+    const values = vi.fn().mockReturnValue({ onConflictDoUpdate });
+    const insert = vi.fn().mockReturnValue({ values });
+    const db = { insert } as unknown as AppDb;
+
+    await createOwnerProjectMembership(db, 'p1', 'u1', 'inviter-user', '2026-07-01T00:00:00.000Z');
+
+    expect(insert).toHaveBeenCalledWith(schema.projectMembers);
+    expect(values).toHaveBeenCalledWith({
+      projectId: 'p1',
+      userId: 'u1',
+      role: 'owner',
+      status: 'active',
+      invitedBy: 'inviter-user',
+      createdAt: '2026-07-01T00:00:00.000Z',
+      updatedAt: '2026-07-01T00:00:00.000Z',
+    });
+    expect(onConflictDoUpdate).toHaveBeenCalledWith({
+      target: [schema.projectMembers.projectId, schema.projectMembers.userId],
+      set: {
+        role: 'owner',
+        status: 'active',
+        invitedBy: 'inviter-user',
+        updatedAt: '2026-07-01T00:00:00.000Z',
+      },
     });
   });
 });
@@ -125,7 +228,7 @@ describe('requireOwnedTask', () => {
     });
   });
 
-  it('throws notFound when DB returns a task with mismatched userId (defence-in-depth)', async () => {
+  it('throws notFound when DB returns a task with mismatched userId', async () => {
     const foreignTask = {
       id: 't1',
       projectId: 'p1',
@@ -139,10 +242,10 @@ describe('requireOwnedTask', () => {
     });
   });
 
-  it('throws notFound when DB returns a task with mismatched projectId (defence-in-depth)', async () => {
+  it('throws notFound when DB returns a task with mismatched projectId', async () => {
     const foreignTask = {
       id: 't1',
-      projectId: 'p-other', // task belongs to a different project
+      projectId: 'p-other',
       userId: 'u1',
       status: 'queued',
     } as unknown as schema.Task;
@@ -173,7 +276,7 @@ describe('requireOwnedWorkspace', () => {
     });
   });
 
-  it('throws notFound when DB returns a workspace with mismatched userId (defence-in-depth)', async () => {
+  it('throws notFound when DB returns a workspace with mismatched userId', async () => {
     const foreignWorkspace = {
       id: 'w1',
       userId: 'u2',

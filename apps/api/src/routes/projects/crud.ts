@@ -36,7 +36,7 @@ import { getCredentialEncryptionKey } from '../../lib/secrets';
 import { ulid } from '../../lib/ulid';
 import { getUserId } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
-import { requireOwnedProject } from '../../middleware/project-auth';
+import { createOwnerProjectMembership, requireOwnedProject } from '../../middleware/project-auth';
 import {
   CreateProjectSchema,
   jsonValidator,
@@ -164,6 +164,7 @@ crudRoutes.post('/', jsonValidator(CreateProjectSchema), async (c) => {
         createdAt: now,
         updatedAt: now,
       });
+      await createOwnerProjectMembership(db, projectId, userId, userId, now);
     } catch (dbError) {
       // Log the orphaned Artifacts repo so it can be cleaned up manually.
       // The Artifacts API may not support repo deletion yet, so we log
@@ -256,6 +257,7 @@ crudRoutes.post('/', jsonValidator(CreateProjectSchema), async (c) => {
       createdAt: now,
       updatedAt: now,
     });
+    await createOwnerProjectMembership(db, projectId, userId, userId, now);
   }
 
   const rows = await db

@@ -29,6 +29,7 @@ import * as schema from '../../db/schema';
 import { log } from '../../lib/logger';
 import { expectJsonRecord } from '../../lib/runtime-validation';
 import { ulid } from '../../lib/ulid';
+import { createOwnerProjectMembership } from '../../middleware/project-auth';
 import { signCallbackToken } from '../../services/jwt';
 import { getRuntimeLimits } from '../../services/limits';
 import { generateMcpToken, storeMcpToken } from '../../services/mcp-token';
@@ -244,6 +245,7 @@ export async function handleProjectCreation(
     createdAt: now,
     updatedAt: now,
   });
+  await createOwnerProjectMembership(db, projectId, userId, userId, now);
 
   state.projectId = projectId;
   await rc.ctx.storage.put('state', state);
