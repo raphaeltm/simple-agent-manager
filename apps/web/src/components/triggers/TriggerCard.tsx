@@ -8,6 +8,7 @@ import {
   MoreVertical,
   Pause,
   Play,
+  Trash2,
 } from 'lucide-react';
 import { type FC, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -57,6 +58,7 @@ interface TriggerCardProps {
   onRunNow: (trigger: TriggerResponse) => void;
   onTogglePause: (trigger: TriggerResponse) => void;
   onViewHistory: (trigger: TriggerResponse) => void;
+  onDelete?: (trigger: TriggerResponse) => void;
 }
 
 export const TriggerCard: FC<TriggerCardProps> = ({
@@ -65,6 +67,7 @@ export const TriggerCard: FC<TriggerCardProps> = ({
   onRunNow,
   onTogglePause,
   onViewHistory,
+  onDelete,
 }) => {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuBtnRef = useRef<HTMLButtonElement>(null);
@@ -140,6 +143,18 @@ export const TriggerCard: FC<TriggerCardProps> = ({
               >
                 View History
               </button>
+              {onDelete && (
+                <>
+                  <div className="border-t border-border-default my-1" />
+                  <button
+                    onClick={() => { setMenuOpen(false); onDelete(trigger); }}
+                    className="w-full text-left px-3 py-2 text-sm text-danger hover:bg-surface-hover cursor-pointer bg-transparent border-none flex items-center gap-2"
+                  >
+                    <Trash2 size={14} aria-hidden="true" />
+                    Delete
+                  </button>
+                </>
+              )}
             </div>,
             document.body,
           )}

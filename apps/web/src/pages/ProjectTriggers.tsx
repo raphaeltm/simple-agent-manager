@@ -7,7 +7,7 @@ import { useNavigate, useSearchParams } from 'react-router';
 import { TriggerCard } from '../components/triggers/TriggerCard';
 import { TriggerForm } from '../components/triggers/TriggerForm';
 import { useToast } from '../hooks/useToast';
-import { listTriggers, runTrigger, updateTrigger } from '../lib/api';
+import { deleteTrigger, listTriggers, runTrigger, updateTrigger } from '../lib/api';
 import { useProjectContext } from './ProjectContext';
 
 // ---------------------------------------------------------------------------
@@ -30,6 +30,7 @@ export function ProjectTriggers() {
   const [triggers, setTriggers] = useState<TriggerResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [confirmDeleteTarget, setConfirmDeleteTarget] = useState<TriggerResponse | null>(null);
 
   // URL-driven edit modal — `?edit=triggerId` or `?edit=new`
   const editParam = searchParams.get('edit');
@@ -105,6 +106,23 @@ export function ProjectTriggers() {
     openForm();
   }, [openForm]);
 
+  const handleDeleteRequest = useCallback((trigger: TriggerResponse) => {
+    setConfirmDeleteTarget(trigger);
+  }, []);
+
+  const handleConfirmDelete = useCallback(async () => {
+    if (!confirmDeleteTarget) return;
+    const name = confirmDeleteTarget.name;
+    setConfirmDeleteTarget(null);
+    try {
+      await deleteTrigger(projectId, confirmDeleteTarget.id);
+      toast.success(`"${name}" deleted`);
+      void loadTriggers();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to delete trigger');
+    }
+  }, [confirmDeleteTarget, projectId, toast, loadTriggers]);
+
   // Loading
   if (loading) {
     return (
@@ -161,6 +179,7 @@ export function ProjectTriggers() {
               onRunNow={handleRunNow}
               onTogglePause={handleTogglePause}
               onViewHistory={handleViewHistory}
+              onDelete={handleDeleteRequest}
             />
           ))}
         </div>
@@ -173,6 +192,43 @@ export function ProjectTriggers() {
         editTrigger={editTarget}
         onSaved={loadTriggers}
       />
+
+      {/* Delete confirmation dialog */}
+      {confirmDeleteTarget && (
+        <>
+          <div
+            className="fixed inset-0 glass-backdrop-dim z-[var(--sam-z-dialog-backdrop)]"
+            onClick={() => setConfirmDeleteTarget(null)}
+            aria-hidden="true"
+          />
+          <div
+            className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 glass-modal glass-panel-container glass-composited rounded-lg shadow-lg p-6 z-[var(--sam-z-dialog)] w-full max-w-sm"
+            role="alertdialog"
+            aria-modal="true"
+            aria-label="Confirm delete"
+          >
+            <h3 className="sam-type-card-title m-0 mb-2">Delete trigger?</h3>
+            <p className="text-sm text-fg-muted mb-4">
+              This will permanently delete &ldquo;{confirmDeleteTarget.name}&rdquo; and all its execution history.
+              This action cannot be undone.
+            </p>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setConfirmDeleteTarget(null)}
+                className={`px-4 py-2 text-sm font-medium text-fg-muted hover:text-fg-primary bg-transparent border border-border-default rounded-md cursor-pointer ${FOCUS_RING}`}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => void handleConfirmDelete()}
+                className={`px-4 py-2 text-sm font-medium text-fg-on-accent bg-danger hover:bg-danger/90 border-none rounded-md cursor-pointer ${FOCUS_RING}`}
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }
