@@ -8,7 +8,7 @@
  *    fallback, absent row falls through to user-scoped
  *  - MEDIUM #5: rate-limit state held in `ctx.storage` (atomic, keyed per-credential),
  *    429 with Retry-After on exceed; cached/grace/stale responses do not consume budget
- *  - MEDIUM #6: upstream scope validation (warn-only by default; block when CODEX_SCOPE_VALIDATION_MODE=block)
+ *  - MEDIUM #6: upstream scope validation (block by default; empty allowlist is explicit opt-out)
  *  - Decrypt/parse failure handling
  *  - Upstream error paths (timeout, network, filtered error body)
  */
@@ -197,6 +197,12 @@ function setupCredentialFound(env: ReturnType<typeof createMockEnv>) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } as any);
   return userFirst;
+}
+
+function expectNoCredentialUpdate(env: ReturnType<typeof createMockEnv>) {
+  expect(vi.mocked(env.DATABASE.prepare)).not.toHaveBeenCalledWith(
+    expect.stringContaining('UPDATE credentials'),
+  );
 }
 
 describe('CodexRefreshLock', () => {
@@ -1182,45 +1188,13 @@ describe('CodexRefreshLock', () => {
   });
 
   // -----------------------------------------------------------------------
-  // MEDIUM #6 — Scope validation (warn-only by default, block when opted in)
+  // MEDIUM #6 — Scope validation (block by default, empty allowlist is explicit opt-out)
   // -----------------------------------------------------------------------
 
   describe('MEDIUM #6 — scope validation', () => {
-    it('warns but allows refresh on unexpected scope by default (warn mode)', async () => {
+    it('blocks with 502 on unexpected scope by default and does not persist tokens', async () => {
       const { do: doInstance, env } = createDO({
         CODEX_EXPECTED_SCOPES: 'openid,offline_access',
-        // CODEX_SCOPE_VALIDATION_MODE not set — defaults to 'warn'
-      });
-      setupCredentialFound(env);
-
-      vi.mocked(fetch).mockResolvedValue(
-        new Response(
-          JSON.stringify({
-            access_token: 'new-access',
-            refresh_token: 'new-refresh',
-            id_token: 'new-id',
-            scope: 'openid offline_access admin:write',
-          }),
-          { status: 200, headers: { 'Content-Type': 'application/json' } },
-        ),
-      );
-
-      const res = await doInstance.fetch(
-        makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' }),
-      );
-      // Warn mode: refresh succeeds despite unexpected scopes
-      expect(res.status).toBe(200);
-      expect(vi.mocked(encrypt)).toHaveBeenCalled();
-      expect(mockLogWarn).toHaveBeenCalledWith(
-        'codex_refresh.unexpected_scopes_allowed',
-        expect.objectContaining({ validationMode: 'warn' }),
-      );
-    });
-
-    it('blocks with 502 on unexpected scope when CODEX_SCOPE_VALIDATION_MODE=block', async () => {
-      const { do: doInstance, env } = createDO({
-        CODEX_EXPECTED_SCOPES: 'openid,offline_access',
-        CODEX_SCOPE_VALIDATION_MODE: 'block',
       });
       setupCredentialFound(env);
 
@@ -1242,9 +1216,8 @@ describe('CodexRefreshLock', () => {
       expect(res.status).toBe(502);
       const json = await res.json();
       expect(json.error).toBe('upstream_unexpected_scope');
-
-      // MUST NOT persist tokens that fail validation in block mode.
       expect(vi.mocked(encrypt)).not.toHaveBeenCalled();
+      expectNoCredentialUpdate(env);
       expect(mockLogWarn).toHaveBeenCalledWith(
         'codex_refresh.unexpected_scopes_blocked',
         expect.objectContaining({ unexpectedScopes: 'admin:write' }),
@@ -1275,7 +1248,7 @@ describe('CodexRefreshLock', () => {
       expect(vi.mocked(encrypt)).toHaveBeenCalled();
     });
 
-    it('warns by default when CODEX_EXPECTED_SCOPES is unset (uses default allowlist in warn mode)', async () => {
+    it('uses default allowlist and blocks when CODEX_EXPECTED_SCOPES is unset', async () => {
       // Omit CODEX_EXPECTED_SCOPES entirely — DO must apply DEFAULT_EXPECTED_SCOPES.
       const env = createMockEnv();
       // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
@@ -1298,12 +1271,14 @@ describe('CodexRefreshLock', () => {
       const res = await doInstance.fetch(
         makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' }),
       );
-      // Default is warn mode — refresh succeeds, warning logged
-      expect(res.status).toBe(200);
-      expect(vi.mocked(encrypt)).toHaveBeenCalled();
+      expect(res.status).toBe(502);
+      const json = await res.json();
+      expect(json.error).toBe('upstream_unexpected_scope');
+      expect(vi.mocked(encrypt)).not.toHaveBeenCalled();
+      expectNoCredentialUpdate(env);
       expect(mockLogWarn).toHaveBeenCalledWith(
-        'codex_refresh.unexpected_scopes_allowed',
-        expect.objectContaining({ validationMode: 'warn' }),
+        'codex_refresh.unexpected_scopes_blocked',
+        expect.objectContaining({ unexpectedScopes: 'admin:write' }),
       );
     });
 
@@ -1329,10 +1304,9 @@ describe('CodexRefreshLock', () => {
       expect(vi.mocked(encrypt)).toHaveBeenCalled();
     });
 
-    it('blocks non-string scope values in block mode', async () => {
+    it('blocks non-string scope values by default', async () => {
       const { do: doInstance, env } = createDO({
         CODEX_EXPECTED_SCOPES: 'openid',
-        CODEX_SCOPE_VALIDATION_MODE: 'block',
       });
       setupCredentialFound(env);
 
@@ -1356,11 +1330,13 @@ describe('CodexRefreshLock', () => {
         expect.objectContaining({ scopeType: 'number' }),
       );
       expect(vi.mocked(encrypt)).not.toHaveBeenCalled();
+      expectNoCredentialUpdate(env);
     });
 
-    it('warns but allows non-string scope values in default warn mode', async () => {
+    it('blocks non-string scope values even when CODEX_SCOPE_VALIDATION_MODE=warn is set', async () => {
       const { do: doInstance, env } = createDO({
         CODEX_EXPECTED_SCOPES: 'openid',
+        CODEX_SCOPE_VALIDATION_MODE: 'warn',
       });
       setupCredentialFound(env);
 
@@ -1378,13 +1354,13 @@ describe('CodexRefreshLock', () => {
       const res = await doInstance.fetch(
         makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' }),
       );
-      // Warn mode: refresh succeeds despite non-string scope
-      expect(res.status).toBe(200);
+      expect(res.status).toBe(502);
       expect(mockLogWarn).toHaveBeenCalledWith(
         'codex_refresh.scope_validation_nonstring',
         expect.objectContaining({ scopeType: 'number' }),
       );
-      expect(vi.mocked(encrypt)).toHaveBeenCalled();
+      expect(vi.mocked(encrypt)).not.toHaveBeenCalled();
+      expectNoCredentialUpdate(env);
     });
 
     it('allows responses with no scope field', async () => {

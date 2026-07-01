@@ -20,14 +20,13 @@ Critical constraints:
 
 ## Implementation Checklist
 
-- [ ] Change Codex scope validation handling so unexpected scopes block by default.
-- [ ] Preserve an explicit warning escape hatch only when `CODEX_SCOPE_VALIDATION_MODE=warn`.
-- [ ] Preserve `CODEX_EXPECTED_SCOPES=""` as an explicit validation opt-out.
-- [ ] Update tests that assert warn-and-persist to assert block-and-not-persist.
-- [ ] Add or retain tests for expected-scope success and empty-allowlist opt-out success.
-- [ ] Run local API unit tests for `codex-refresh-lock`.
-- [ ] Run local quality gates: lint, typecheck, tests, build as feasible.
-- [ ] Run local specialist review: security-auditor, cloudflare-specialist, test-engineer, constitution-validator, task-completion-validator.
+- [x] Change Codex scope validation handling so unexpected scopes block by default.
+- [x] Preserve `CODEX_EXPECTED_SCOPES=""` as the only explicit validation opt-out.
+- [x] Update tests that assert warn-and-persist to assert block-and-not-persist.
+- [x] Add or retain tests for expected-scope success and empty-allowlist opt-out success.
+- [x] Run local API unit tests for `codex-refresh-lock`.
+- [x] Run local quality gates: lint, typecheck, tests, build as feasible.
+- [x] Run local specialist review: security-auditor, cloudflare-specialist, test-engineer, constitution-validator, env-validator, task-completion-validator.
 
 ## Acceptance Criteria
 

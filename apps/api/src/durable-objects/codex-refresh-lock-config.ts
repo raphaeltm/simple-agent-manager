@@ -33,11 +33,6 @@ export interface CodexRefreshEnv {
    */
   CODEX_EXPECTED_SCOPES?: string;
   /**
-   * 'warn' (default) or 'block'. Controls whether unexpected scopes block
-   * the refresh (502) or just log a warning and allow it to proceed.
-   */
-  CODEX_SCOPE_VALIDATION_MODE?: string;
-  /**
    * Rate limit: max refresh requests per user per window. Defaults to 30.
    */
   RATE_LIMIT_CODEX_REFRESH_PER_HOUR?: string;
