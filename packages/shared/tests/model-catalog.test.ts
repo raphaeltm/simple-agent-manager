@@ -3,6 +3,18 @@ import { describe, expect, it } from 'vitest';
 import { PLATFORM_AI_MODELS } from '../src/constants/ai-services';
 import { getModelGroupsForAgent, getModelsForAgent, isKnownModel } from '../src/model-catalog';
 
+const CLAUDE_CODE_1M_SELECTOR_SUFFIX = '[1m]';
+
+function isClaudeCode1mSelector(modelId: string): boolean {
+  return modelId.endsWith(CLAUDE_CODE_1M_SELECTOR_SUFFIX);
+}
+
+function toClaudeCodeBaseModelId(modelId: string): string {
+  return modelId.endsWith(CLAUDE_CODE_1M_SELECTOR_SUFFIX)
+    ? modelId.slice(0, -CLAUDE_CODE_1M_SELECTOR_SUFFIX.length)
+    : modelId;
+}
+
 describe('model-catalog', () => {
   describe('getModelGroupsForAgent', () => {
     it('returns grouped models for claude-code', () => {
@@ -54,11 +66,38 @@ describe('model-catalog', () => {
   describe('getModelsForAgent', () => {
     it('returns flat list of models for claude-code', () => {
       const models = getModelsForAgent('claude-code');
-      expect(models.length).toBeGreaterThanOrEqual(9);
+      expect(models.length).toBeGreaterThanOrEqual(14);
       expect(models.some((m) => m.id === 'claude-fable-5')).toBe(true);
+      expect(models.some((m) => m.id === 'claude-sonnet-5')).toBe(true);
       expect(models.some((m) => m.id === 'claude-opus-4-8')).toBe(true);
       expect(models.some((m) => m.id === 'claude-opus-4-7')).toBe(true);
       expect(models.some((m) => m.id === 'claude-sonnet-4-6')).toBe(true);
+    });
+
+    it('lists the current Claude Code 1M context choices', () => {
+      const models = getModelsForAgent('claude-code');
+      const namesById = new Map(models.map((model) => [model.id, model.name]));
+
+      const expectedOneMillionContextModels = [
+        'claude-fable-5',
+        'claude-sonnet-5',
+        'claude-opus-4-8[1m]',
+        'claude-opus-4-7[1m]',
+        'claude-opus-4-6[1m]',
+        'claude-sonnet-4-6[1m]',
+      ];
+
+      expect(models.map((model) => model.id)).toEqual(
+        expect.arrayContaining(expectedOneMillionContextModels)
+      );
+      expect(models.some((model) => model.id === 'claude-sonnet-5[1m]')).toBe(false);
+
+      for (const modelId of expectedOneMillionContextModels) {
+        expect(
+          namesById.get(modelId),
+          `${modelId} should be labeled as a 1M context choice`
+        ).toContain('1M context');
+      }
     });
 
     it('returns empty array for unknown agent', () => {
@@ -67,11 +106,15 @@ describe('model-catalog', () => {
   });
 
   describe('cross-catalog invariant', () => {
-    it('every claude-code and openai-codex dropdown model has a PLATFORM_AI_MODELS entry', () => {
+    it('every platform-routed claude-code and openai-codex dropdown model has a PLATFORM_AI_MODELS entry', () => {
       const platformIds = new Set(PLATFORM_AI_MODELS.map((m) => m.id));
       for (const agentType of ['claude-code', 'openai-codex'] as const) {
         const dropdown = getModelsForAgent(agentType);
         for (const model of dropdown) {
+          if (agentType === 'claude-code' && isClaudeCode1mSelector(model.id)) {
+            continue;
+          }
+
           expect(
             platformIds.has(model.id),
             `${agentType} dropdown model ${model.id} missing from PLATFORM_AI_MODELS`
@@ -79,11 +122,42 @@ describe('model-catalog', () => {
         }
       }
     });
+
+    it('keeps Claude Code 1M selector suffixes out of raw platform proxy model IDs', () => {
+      const platformIds = new Set(PLATFORM_AI_MODELS.map((m) => m.id));
+      const selectorIds = getModelsForAgent('claude-code')
+        .map((model) => model.id)
+        .filter(isClaudeCode1mSelector);
+
+      expect(selectorIds).toEqual(
+        expect.arrayContaining([
+          'claude-opus-4-8[1m]',
+          'claude-opus-4-7[1m]',
+          'claude-opus-4-6[1m]',
+          'claude-sonnet-4-6[1m]',
+        ])
+      );
+
+      for (const selectorId of selectorIds) {
+        expect(
+          platformIds.has(selectorId),
+          `${selectorId} should not be accepted by the raw platform proxy`
+        ).toBe(false);
+        expect(
+          platformIds.has(toClaudeCodeBaseModelId(selectorId)),
+          `${selectorId} should map back to a known platform base model`
+        ).toBe(true);
+      }
+    });
   });
 
   describe('isKnownModel', () => {
     it('returns true for a known claude model', () => {
       expect(isKnownModel('claude-code', 'claude-opus-4-7')).toBe(true);
+    });
+
+    it('returns true for a Claude Code 1M selector variant', () => {
+      expect(isKnownModel('claude-code', 'claude-opus-4-8[1m]')).toBe(true);
     });
 
     it('returns false for a codex model under claude-code', () => {

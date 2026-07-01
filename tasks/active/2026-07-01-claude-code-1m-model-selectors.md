@@ -15,11 +15,11 @@ The Claude Code model list exposes Claude Fable 5 but does not clearly expose th
 
 ## Implementation Checklist
 
-- [ ] Add Claude Code-visible 1M model choices for Fable 5, Sonnet 5, Opus 4.8, Opus 4.7, Opus 4.6, and Sonnet 4.6.
-- [ ] Keep `[1m]` selector variants scoped to the Claude Code dropdown rather than adding them to raw platform AI proxy allowed models.
-- [ ] Add platform catalog metadata for any new base Anthropic model IDs used by the dropdown.
-- [ ] Update model catalog tests to assert the full expected 1M selector list and the selector-to-base-model invariant.
-- [ ] Run focused shared tests and the repository quality checks required for this scoped change.
+- [x] Add Claude Code-visible 1M model choices for Fable 5, Sonnet 5, Opus 4.8, Opus 4.7, Opus 4.6, and Sonnet 4.6.
+- [x] Keep `[1m]` selector variants scoped to the Claude Code dropdown rather than adding them to raw platform AI proxy allowed models.
+- [x] Add platform catalog metadata for any new base Anthropic model IDs used by the dropdown.
+- [x] Update model catalog tests to assert the full expected 1M selector list and the selector-to-base-model invariant.
+- [x] Run focused shared tests and the repository quality checks required for this scoped change.
 - [ ] Open a PR on the SAM output branch and deploy staging after CI is green.
 
 ## Acceptance Criteria

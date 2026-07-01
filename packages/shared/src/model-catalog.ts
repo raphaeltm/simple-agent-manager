@@ -46,7 +46,35 @@ function modelGroup(label: string, models: Array<Omit<ModelDefinition, 'group'>>
 const CLAUDE_MODELS: ModelGroup[] = [
   {
     label: 'Claude 5 (Frontier)',
-    models: [{ id: 'claude-fable-5', name: 'Claude Fable 5', group: 'Claude 5 (Frontier)' }],
+    models: [
+      { id: 'claude-fable-5', name: 'Claude Fable 5 (1M context)', group: 'Claude 5 (Frontier)' },
+      { id: 'claude-sonnet-5', name: 'Claude Sonnet 5 (1M context)', group: 'Claude 5 (Frontier)' },
+    ],
+  },
+  {
+    label: 'Claude 4 (1M context)',
+    models: [
+      {
+        id: 'claude-opus-4-8[1m]',
+        name: 'Claude Opus 4.8 (1M context)',
+        group: 'Claude 4 (1M context)',
+      },
+      {
+        id: 'claude-opus-4-7[1m]',
+        name: 'Claude Opus 4.7 (1M context)',
+        group: 'Claude 4 (1M context)',
+      },
+      {
+        id: 'claude-opus-4-6[1m]',
+        name: 'Claude Opus 4.6 (1M context)',
+        group: 'Claude 4 (1M context)',
+      },
+      {
+        id: 'claude-sonnet-4-6[1m]',
+        name: 'Claude Sonnet 4.6 (1M context)',
+        group: 'Claude 4 (1M context)',
+      },
+    ],
   },
   {
     label: 'Claude 4 (Latest)',
