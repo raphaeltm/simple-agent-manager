@@ -27,6 +27,7 @@ Read this whole guide before touching anything. SAM deployments do not work like
 SAM app deployment is **agent-first** and **never goes through CI**. This is the single most important thing to understand.
 
 - A user creates a **deployment environment** (for example \`staging\` or \`production\`) and enables agent deployment for it.
+- If the user asks for a new non-production environment, you may create it with \`create_deployment_environment\`; SAM restricts it to your creator profile by default and the project owner can later change or disable the policy.
 - You, the agent, author a **Docker Compose stack** in the workspace and call one tool — \`build_and_publish\` — targeting that environment.
 - SAM builds the Compose stack **server-side on the SAM VM**, pushes the built service images to the project-scoped registry **using SAM-owned credentials**, and records the release.
 - SAM's deployment nodes then pull the recorded release and run it.
@@ -48,6 +49,7 @@ SAM exposes these MCP tools for deployment. They are the only interface you need
 
 | Tool | Purpose |
 | --- | --- |
+| \`create_deployment_environment(name)\` | Create a new non-reserved deployment environment for the current task. Requires a real task/profile context; defaults access to this creator profile only. |
 | \`list_deployment_environments()\` | List the active deployment environments this agent profile is allowed to target. |
 | \`list_deployment_environment_config(environment)\` | List the Variables (values visible) and Secret keys (values never returned) configured for an environment. |
 | \`set_deployment_environment_config(environment, key, value, isSecret?)\` | Create or update a Variable or Secret for an environment. |
@@ -66,7 +68,9 @@ SAM exposes these MCP tools for deployment. They are the only interface you need
 
 Call \`list_deployment_environments()\` first. It returns only the environments that are active AND that your agent profile is allowed to target.
 
-- If the list is **empty**, agent deployment is not enabled for any environment, or your profile has no access. Stop and tell the user: they need to create a deployment environment and enable agent deployment for it from the Deployments page. Do not try to work around this.
+- If the user asked for a new non-reserved environment name, call \`create_deployment_environment(name)\`, then call \`list_deployment_environments()\` again and use the newly created environment.
+- If the list is **empty** and the user did not ask you to create an environment, ask whether to create one. Reserved names such as production must be created by the project owner from the control surface.
+- If an existing environment is missing because agent deployment is disabled or your profile has no access, report that the project owner must update the deployment environment policy. Do not try to work around this.
 - If there are multiple environments, pick the one the user named (for example "deploy to staging"). If ambiguous, ask which environment to target.
 
 ### Step 2 — Review and set configuration (Variables vs Secrets)
@@ -135,7 +139,7 @@ After \`build_and_publish\` returns, call \`get_publish_status({ publishJobId })
 - \`failed\`, \`canceled\`, or \`unknown\` means publishing did not complete. Read the returned events and failed step before changing files or retrying.
 - While polling, pass \`sinceSeq\` from the previous response to receive only new events.
 
-This tool requires the named environment to be active, agent deployment to be enabled by a user, and your agent profile to satisfy that environment's policy. If it errors for one of those reasons, report it to the user — do not attempt to bypass the policy.
+This tool requires the named environment to be active, agent deployment to be enabled, and your agent profile to satisfy that environment's policy. If it errors for one of those reasons, report it to the user — do not attempt to bypass the policy.
 
 ### Step 5 — Verify the release
 
@@ -154,7 +158,7 @@ After the publish job reaches \`succeeded\`:
 - **Putting a Secret in a build arg or image tag.** Secrets never reach build nodes — the value will be empty there. Use a Variable for anything the build needs.
 - **Treating job start as success.** \`build_and_publish\` starts a durable job. You must poll \`get_publish_status\` until terminal before claiming publish success.
 - **Skipping apply verification.** A successful publish job records a release; it does not prove the containers are healthy. Always read deployment logs/apply events to confirm.
-- **Guessing when an environment is missing.** If \`list_deployment_environments()\` is empty, the user must create/enable an environment. Tell them; do not improvise.
+- **Guessing when an environment is missing.** If the user asked for a new non-reserved environment, use \`create_deployment_environment\`. Otherwise ask before creating one, or tell the user the project owner must update policy for existing/reserved environments.
 - **Using Compose volumes for stateful data.** \`build_and_publish\` currently rejects Docker Compose service volume mounts and top-level volumes because they would persist under Docker's local volume store instead of a SAM cloud volume. Remove the Compose volumes and ask the user before proceeding with stateful data.
 - **Using rejected mount types.** Host bind mounts, Docker socket mounts, tmpfs, external volumes, and custom drivers are rejected.
 - **Forgetting route-dependent app config.** Frameworks often reject unknown hosts/origins. Preview routes first, then set allowed hosts, trusted origins, CORS origins, callback URLs, or canonical URL variables before publishing.
@@ -164,7 +168,7 @@ After the publish job reaches \`succeeded\`:
 
 ## Quick Reference (happy path)
 
-1. \`list_deployment_environments()\` → pick the target.
+1. \`list_deployment_environments()\` → pick the target, or \`create_deployment_environment(name)\` if the user asked for a new non-reserved environment.
 2. \`list_deployment_environment_config(environment)\` → review; \`set_deployment_environment_config(...)\` for anything missing (Secrets via \`isSecret: true\`).
 3. Author the Compose stack with \`\${VAR}\` placeholders and route hints.
 4. \`preview_deployment_routes(environment, composeYaml)\` → confirm public URLs and internal routes.

@@ -3,6 +3,7 @@ import type { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import { log } from '../lib/logger';
+import { ulid } from '../lib/ulid';
 import type { McpTokenData } from './mcp-token';
 
 const MAX_OBSERVED_ERROR_MESSAGE_LENGTH = 4096;
@@ -10,6 +11,9 @@ const MAX_OBSERVED_JSON_LENGTH = 64_000;
 
 const TERMINAL_FAILURE_STATUSES = new Set(['failed', 'failed-initial', 'reverted']);
 const APPLY_SUCCESS_STATUSES = new Set(['applied', 'reverted', 'failed']);
+const AGENT_CREATED_ENVIRONMENT_SOURCE = 'agent-mcp';
+const RESERVED_AGENT_ENVIRONMENT_NAMES = new Set(['prod', 'production']);
+export const DEPLOYMENT_ENVIRONMENT_NAME_RE = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
 
 export interface DeploymentHeartbeatState {
   appliedSeq?: number;
@@ -414,4 +418,114 @@ export async function validateAllowedDeployProfiles(
   if (missing.length > 0) {
     throw new Error(`Agent profile(s) not found in this project: ${missing.join(', ')}`);
   }
+}
+
+export type CreateAgentDeploymentEnvironmentResult =
+  | { environment: schema.DeploymentEnvironmentRow; creatorProfileId: string }
+  | { error: string; code: 'invalid_context' | 'invalid_name' | 'conflict' | 'invalid_profile' };
+
+export async function createAgentDeploymentEnvironment(
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  projectId: string,
+  name: string,
+  tokenData: McpTokenData
+): Promise<CreateAgentDeploymentEnvironmentResult> {
+  const normalizedName = name.trim();
+  if (!DEPLOYMENT_ENVIRONMENT_NAME_RE.test(normalizedName)) {
+    return {
+      code: 'invalid_name',
+      error: 'Name must be lowercase alphanumeric with optional hyphens, 1-63 chars.',
+    };
+  }
+  if (RESERVED_AGENT_ENVIRONMENT_NAMES.has(normalizedName)) {
+    return {
+      code: 'invalid_name',
+      error:
+        'Agents cannot create reserved deployment environment names through MCP. Ask the project owner to create this environment.',
+    };
+  }
+  if (!tokenData.taskId) {
+    return {
+      code: 'invalid_context',
+      error: 'Creating a deployment environment requires an MCP token with a task context.',
+    };
+  }
+
+  const creatorProfileId = await getTaskAgentProfileId(db, tokenData.taskId);
+  if (!creatorProfileId) {
+    return {
+      code: 'invalid_context',
+      error:
+        'Creating a deployment environment requires the current task to have a resolved agent profile.',
+    };
+  }
+
+  try {
+    await validateAllowedDeployProfiles(db, projectId, [creatorProfileId]);
+  } catch (err) {
+    return {
+      code: 'invalid_profile',
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+
+  const existing = await db
+    .select({ id: schema.deploymentEnvironments.id })
+    .from(schema.deploymentEnvironments)
+    .where(
+      and(
+        eq(schema.deploymentEnvironments.projectId, projectId),
+        eq(schema.deploymentEnvironments.name, normalizedName)
+      )
+    )
+    .limit(1);
+  if (existing.length > 0) {
+    return {
+      code: 'conflict',
+      error: `Environment "${normalizedName}" already exists in this project`,
+    };
+  }
+
+  const now = new Date().toISOString();
+  const id = ulid();
+  await db.insert(schema.deploymentEnvironments).values({
+    id,
+    projectId,
+    name: normalizedName,
+    status: 'active',
+    createdAt: now,
+    updatedAt: now,
+    createdByUserId: tokenData.userId,
+    createdByAgentProfileId: creatorProfileId,
+    createdByTaskId: tokenData.taskId,
+    createdByWorkspaceId: tokenData.workspaceId || null,
+    creationSource: AGENT_CREATED_ENVIRONMENT_SOURCE,
+    agentDeployEnabled: true,
+    agentDeployEnabledBy: tokenData.userId,
+    agentDeployEnabledAt: now,
+    agentDeployDisabledAt: null,
+    allowedDeployProfileIdsJson: encodeAllowedDeployProfileIds([creatorProfileId]),
+  });
+
+  const [environment] = await db
+    .select()
+    .from(schema.deploymentEnvironments)
+    .where(eq(schema.deploymentEnvironments.id, id))
+    .limit(1);
+  if (!environment) {
+    return {
+      code: 'conflict',
+      error: 'Deployment environment could not be loaded after creation.',
+    };
+  }
+
+  log.info('deployment_environment.agent_created', {
+    projectId,
+    environmentId: id,
+    name: normalizedName,
+    taskId: tokenData.taskId,
+    creatorProfileId,
+  });
+
+  return { environment, creatorProfileId };
 }

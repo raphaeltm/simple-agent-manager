@@ -33,6 +33,7 @@ vi.mock('../../src/services/node-agent', () => ({
 
 const schema = await import('../../src/db/schema');
 const {
+  handleCreateDeploymentEnvironment,
   handleListDeploymentEnvironmentConfig,
   handleListDeploymentEnvironments,
   handleListDeploymentRoutes,
@@ -44,6 +45,7 @@ const {
 type Row = Record<string, unknown>;
 
 interface TestDbState {
+  agentProfiles: Row[];
   deploymentCustomDomains: Row[];
   deploymentEnvironmentConfigVars: Row[];
   deploymentEnvironments: Row[];
@@ -93,6 +95,11 @@ function deploymentEnvironment(overrides: Row = {}): Row {
     location: 'local',
     configUpdatedAt: null,
     createdAt: '2026-06-22T00:00:00Z',
+    createdByAgentProfileId: null,
+    createdByTaskId: null,
+    createdByUserId: null,
+    createdByWorkspaceId: null,
+    creationSource: 'user',
     updatedAt: '2026-06-22T00:00:00Z',
     observedAppliedSeq: null,
     observedStatus: null,
@@ -112,6 +119,7 @@ function deploymentEnvironment(overrides: Row = {}): Row {
 
 function createDbState(overrides: Partial<TestDbState> = {}): TestDbState {
   return {
+    agentProfiles: [{ id: 'profile-allowed', projectId: 'proj-1' }],
     deploymentCustomDomains: [],
     deploymentEnvironmentConfigVars: [],
     deploymentEnvironments: [deploymentEnvironment()],
@@ -144,6 +152,8 @@ function fieldForColumn(column: unknown): string | null {
     [schema.deploymentCustomDomains.verificationError, 'verificationError'],
     [schema.deploymentCustomDomains.verificationStatus, 'verificationStatus'],
     [schema.deploymentCustomDomains.verifiedAt, 'verifiedAt'],
+    [schema.agentProfiles.id, 'id'],
+    [schema.agentProfiles.projectId, 'projectId'],
     [schema.deploymentEnvironments.agentDeployDisabledAt, 'agentDeployDisabledAt'],
     [schema.deploymentEnvironments.agentDeployEnabled, 'agentDeployEnabled'],
     [schema.deploymentEnvironments.agentDeployEnabledAt, 'agentDeployEnabledAt'],
@@ -151,6 +161,11 @@ function fieldForColumn(column: unknown): string | null {
     [schema.deploymentEnvironments.allowedDeployProfileIdsJson, 'allowedDeployProfileIdsJson'],
     [schema.deploymentEnvironments.configUpdatedAt, 'configUpdatedAt'],
     [schema.deploymentEnvironments.createdAt, 'createdAt'],
+    [schema.deploymentEnvironments.createdByAgentProfileId, 'createdByAgentProfileId'],
+    [schema.deploymentEnvironments.createdByTaskId, 'createdByTaskId'],
+    [schema.deploymentEnvironments.createdByUserId, 'createdByUserId'],
+    [schema.deploymentEnvironments.createdByWorkspaceId, 'createdByWorkspaceId'],
+    [schema.deploymentEnvironments.creationSource, 'creationSource'],
     [schema.deploymentEnvironments.id, 'id'],
     [schema.deploymentEnvironments.name, 'name'],
     [schema.deploymentEnvironments.projectId, 'projectId'],
@@ -184,6 +199,11 @@ function fieldForColumn(column: unknown): string | null {
         allowed_deploy_profile_ids_json: 'allowedDeployProfileIdsJson',
         config_updated_at: 'configUpdatedAt',
         created_at: 'createdAt',
+        created_by_agent_profile_id: 'createdByAgentProfileId',
+        created_by_task_id: 'createdByTaskId',
+        created_by_user_id: 'createdByUserId',
+        created_by_workspace_id: 'createdByWorkspaceId',
+        creation_source: 'creationSource',
         env_key: 'envKey',
         environment_id: 'environmentId',
         hostname: 'hostname',
@@ -207,6 +227,7 @@ function fieldForColumn(column: unknown): string | null {
 }
 
 function rowsForTable(state: TestDbState, table: unknown): Row[] {
+  if (table === schema.agentProfiles) return state.agentProfiles;
   if (table === schema.deploymentCustomDomains) return state.deploymentCustomDomains;
   if (table === schema.deploymentEnvironments) return state.deploymentEnvironments;
   if (table === schema.deploymentEnvironmentConfigVars) {
@@ -339,6 +360,129 @@ describe('deployment MCP tools', () => {
       hasMore: false,
       nextCursor: null,
     });
+  });
+
+  it('creates an agent-owned deployment environment restricted to the creator profile', async () => {
+    const state = createDbState({
+      deploymentEnvironments: [],
+      tasks: [{ id: 'task-1', agentProfileHint: 'profile-allowed' }],
+    });
+    installDb(state);
+
+    const createResponse = await handleCreateDeploymentEnvironment(
+      'req-create',
+      { name: 'preview-a' },
+      tokenData(),
+      env()
+    );
+    const createPayload = parseToolPayload(createResponse);
+
+    expect(createResponse.error).toBeUndefined();
+    expect(createPayload.creatorProfileId).toBe('profile-allowed');
+    expect(createPayload.environment).toMatchObject({
+      agentDeployEnabled: true,
+      allowedDeployProfileIdsJson: '["profile-allowed"]',
+      createdByAgentProfileId: 'profile-allowed',
+      createdByTaskId: 'task-1',
+      createdByUserId: 'user-1',
+      createdByWorkspaceId: 'ws-1',
+      creationSource: 'agent-mcp',
+      name: 'preview-a',
+      projectId: 'proj-1',
+      status: 'active',
+    });
+
+    const created = state.deploymentEnvironments[0];
+    expect(created).toMatchObject({
+      agentDeployEnabled: true,
+      allowedDeployProfileIdsJson: '["profile-allowed"]',
+      createdByAgentProfileId: 'profile-allowed',
+      createdByTaskId: 'task-1',
+      createdByUserId: 'user-1',
+      creationSource: 'agent-mcp',
+    });
+
+    const creatorListResponse = await handleListDeploymentEnvironments(
+      'req-list-creator',
+      {},
+      tokenData(),
+      env()
+    );
+    const creatorListPayload = parseToolPayload(creatorListResponse);
+    expect(creatorListPayload.environments).toEqual([
+      expect.objectContaining({ name: 'preview-a' }),
+    ]);
+
+    state.tasks = [{ id: 'task-2', agentProfileHint: 'profile-other' }];
+    const otherListResponse = await handleListDeploymentEnvironments(
+      'req-list-other',
+      {},
+      tokenData({ taskId: 'task-2' }),
+      env()
+    );
+    const otherListPayload = parseToolPayload(otherListResponse);
+    expect(otherListPayload.environments).toEqual([]);
+  });
+
+  it('denies deployment environment creation without a task/profile context', async () => {
+    installDb(
+      createDbState({
+        deploymentEnvironments: [],
+        tasks: [{ id: 'task-1', agentProfileHint: null }],
+      })
+    );
+
+    const noTaskResponse = await handleCreateDeploymentEnvironment(
+      'req-no-task',
+      { name: 'preview-a' },
+      tokenData({ taskId: undefined }),
+      env()
+    );
+    expect(noTaskResponse.error?.message).toContain('requires an MCP token with a task context');
+
+    const noProfileResponse = await handleCreateDeploymentEnvironment(
+      'req-no-profile',
+      { name: 'preview-a' },
+      tokenData(),
+      env()
+    );
+    expect(noProfileResponse.error?.message).toContain('resolved agent profile');
+  });
+
+  it('preserves duplicate deployment environment name conflict behavior', async () => {
+    installDb(
+      createDbState({
+        deploymentEnvironments: [deploymentEnvironment({ name: 'preview-a' })],
+        tasks: [{ id: 'task-1', agentProfileHint: 'profile-allowed' }],
+      })
+    );
+
+    const response = await handleCreateDeploymentEnvironment(
+      'req-duplicate',
+      { name: 'preview-a' },
+      tokenData(),
+      env()
+    );
+
+    expect(response.error?.message).toBe('Environment "preview-a" already exists in this project');
+  });
+
+  it('requires owner-created reserved production environment names', async () => {
+    installDb(
+      createDbState({
+        deploymentEnvironments: [],
+        tasks: [{ id: 'task-1', agentProfileHint: 'profile-allowed' }],
+      })
+    );
+
+    const response = await handleCreateDeploymentEnvironment(
+      'req-reserved',
+      { name: 'production' },
+      tokenData(),
+      env()
+    );
+
+    expect(response.error?.message).toContain('reserved deployment environment names');
   });
 
   it('lists active deployment environments allowed for the current agent profile', async () => {

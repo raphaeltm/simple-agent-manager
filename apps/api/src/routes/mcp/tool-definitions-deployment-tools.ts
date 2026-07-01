@@ -1,5 +1,22 @@
 export const DEPLOYMENT_TOOLS = [
   {
+    name: 'create_deployment_environment',
+    description:
+      'Create a deployment environment in the current project for this task. Requires the MCP token to belong to a real task with a resolved agent profile. The new environment is agent-deploy enabled and restricted to the creator profile by default; the project owner can later manage or disable it in the deployment environment policy.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        name: {
+          type: 'string',
+          description:
+            'Deployment environment name. Must be lowercase alphanumeric with optional hyphens, 1-63 chars. Reserved production names must be created by the project owner.',
+        },
+      },
+      required: ['name'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'list_deployment_environments',
     description:
       'List active deployment environments this agent is allowed to access in the current project. Only environments with agent deployment enabled and compatible with this agent profile are returned.',

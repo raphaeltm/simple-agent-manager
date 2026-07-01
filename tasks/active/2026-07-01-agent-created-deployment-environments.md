@@ -18,22 +18,22 @@ Source idea: `01KWF8V7S87SV3SBA5MWJV06KK` — "Agent-created deployment environm
 
 ## Implementation Checklist
 
-- [ ] Add additive `deployment_environments` creator metadata columns in schema and migration, including user id, agent profile id, task id, workspace id, and creation source as needed for audit.
-- [ ] Add a reusable service helper that creates an agent-owned deployment environment from MCP context, validates the creator profile exists in the project, preserves duplicate-name conflict behavior, and seeds `agentDeployEnabled = true` plus `allowedDeployProfileIds = [creatorProfileId]`.
-- [ ] Add `create_deployment_environment` MCP tool definition and dispatcher wiring.
-- [ ] Implement MCP handler validation: require a real `tokenData.taskId`, require the task to resolve to an agent profile, reject missing/invalid names, and return the shared environment summary.
-- [ ] Keep REST owner paths able to list, inspect, disable, reassign policy, lifecycle-control, and delete agent-created environments without extra restrictions.
-- [ ] Add tests covering successful MCP creation, creator metadata, creator-only visibility, denial without task/profile context, duplicate-name conflict, and REST/user policy override behavior where appropriate.
-- [ ] Update MCP deployment guide wording if needed so agents know they can create an environment when none is available.
+- [x] Add additive `deployment_environments` creator metadata columns in schema and migration, including user id, agent profile id, task id, workspace id, and creation source as needed for audit.
+- [x] Add a reusable service helper that creates an agent-owned deployment environment from MCP context, validates the creator profile exists in the project, preserves duplicate-name conflict behavior, and seeds `agentDeployEnabled = true` plus `allowedDeployProfileIds = [creatorProfileId]`.
+- [x] Add `create_deployment_environment` MCP tool definition and dispatcher wiring.
+- [x] Implement MCP handler validation: require a real `tokenData.taskId`, require the task to resolve to an agent profile, reject missing/invalid names, and return the shared environment summary.
+- [x] Keep REST owner paths able to list, inspect, disable, reassign policy, lifecycle-control, and delete agent-created environments without extra restrictions.
+- [x] Add tests covering successful MCP creation, creator metadata, creator-only visibility, denial without task/profile context, duplicate-name conflict, and REST/user policy override behavior where appropriate.
+- [x] Update MCP deployment guide wording if needed so agents know they can create an environment when none is available.
 
 ## Acceptance Criteria
 
-- [ ] MCP agent with an explicit creator profile can create a deployment environment.
-- [ ] Created environment is visible to the creator profile via `list_deployment_environments` and not visible/usable by a different profile by default.
-- [ ] Creation without an explicit task/profile context is denied.
-- [ ] Duplicate names preserve existing conflict behavior.
-- [ ] Human REST/UI policy update paths can still override allowed profiles and disable the environment.
-- [ ] Tests cover the access boundary and creator metadata.
+- [x] MCP agent with an explicit creator profile can create a deployment environment.
+- [x] Created environment is visible to the creator profile via `list_deployment_environments` and not visible/usable by a different profile by default.
+- [x] Creation without an explicit task/profile context is denied.
+- [x] Duplicate names preserve existing conflict behavior.
+- [x] Human REST/UI policy update paths can still override allowed profiles and disable the environment.
+- [x] Tests cover the access boundary and creator metadata.
 
 ## References
 

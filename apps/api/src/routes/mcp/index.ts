@@ -28,6 +28,7 @@ import {
 import { handleBuildAndPublish, handleGetPublishStatus } from './compose-publish-tools';
 import { handleGetDeploymentGuide } from './deployment-guide-tools';
 import {
+  handleCreateDeploymentEnvironment,
   handleListDeploymentEnvironmentConfig,
   handleListDeploymentEnvironments,
   handleListDeploymentRoutes,
@@ -294,6 +295,10 @@ mcpRoutes.post('/', async (c) => {
             return c.json(await handleBuildAndPublish(requestId, toolArgs, tokenData, c.env));
           case 'get_publish_status':
             return c.json(await handleGetPublishStatus(requestId, toolArgs, tokenData, c.env));
+          case 'create_deployment_environment':
+            return c.json(
+              await handleCreateDeploymentEnvironment(requestId, toolArgs, tokenData, c.env)
+            );
           case 'list_deployment_environments':
             return c.json(
               await handleListDeploymentEnvironments(requestId, toolArgs, tokenData, c.env)

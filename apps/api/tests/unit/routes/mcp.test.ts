@@ -392,13 +392,14 @@ describe('MCP Routes', () => {
       // Compose build + publish (agent-first deployment) tool
       expect(toolNames).toContain('build_and_publish');
       expect(toolNames).toContain('get_publish_status');
+      expect(toolNames).toContain('create_deployment_environment');
       expect(toolNames).toContain('list_deployment_environments');
       expect(toolNames).toContain('read_deployment_logs');
       expect(toolNames).toContain('preview_deployment_routes');
       expect(toolNames).toContain('list_deployment_routes');
       expect(toolNames).toContain('list_deployment_environment_config');
       expect(toolNames).toContain('set_deployment_environment_config');
-      expect(body.result.tools).toHaveLength(97);
+      expect(body.result.tools).toHaveLength(98);
     });
 
     it('should include MUST call directive in get_instructions description', async () => {
@@ -621,6 +622,7 @@ describe('MCP Routes', () => {
       expect(text).toContain('SAM App Deployment Guide');
       expect(text).toContain('Agent-First Deployment Model');
       expect(text).toContain('build_and_publish');
+      expect(text).toContain('create_deployment_environment');
       expect(text).toContain('list_deployment_environments');
       expect(text).toContain('preview_deployment_routes');
       expect(text).toContain('list_deployment_routes');

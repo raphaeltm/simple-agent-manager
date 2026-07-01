@@ -1847,9 +1847,7 @@ export const deploymentEnvironments = sqliteTable(
     /** Deployment node hosting this environment; many environments may share one node. */
     nodeId: text('node_id').references(() => nodes.id, { onDelete: 'set null' }),
     /** True when the latest submitted manifest declares persistent volumes. */
-    requiresVolumes: integer('requires_volumes', { mode: 'boolean' })
-      .notNull()
-      .default(false),
+    requiresVolumes: integer('requires_volumes', { mode: 'boolean' }).notNull().default(false),
     /** Cloud provider used for placement (e.g. 'hetzner', 'scaleway'). */
     provider: text('provider'),
     /** Provider location/region for placement constraint. */
@@ -1860,6 +1858,20 @@ export const deploymentEnvironments = sqliteTable(
     updatedAt: text('updated_at')
       .notNull()
       .default(sql`(datetime('now'))`),
+    createdByUserId: text('created_by_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    createdByAgentProfileId: text('created_by_agent_profile_id').references(
+      () => agentProfiles.id,
+      {
+        onDelete: 'set null',
+      }
+    ),
+    createdByTaskId: text('created_by_task_id').references(() => tasks.id, {
+      onDelete: 'set null',
+    }),
+    createdByWorkspaceId: text('created_by_workspace_id'),
+    creationSource: text('creation_source').notNull().default('user'),
     secretsUpdatedAt: text('secrets_updated_at'),
     configUpdatedAt: text('config_updated_at'),
     /** Latest deployment state observed from the authenticated deployment node. */
@@ -1893,6 +1905,12 @@ export const deploymentEnvironments = sqliteTable(
     ),
     agentDeployEnabledIdx: index('idx_deployment_environments_agent_deploy_enabled').on(
       table.agentDeployEnabled
+    ),
+    createdByAgentProfileIdx: index('idx_deployment_environments_created_by_agent_profile').on(
+      table.createdByAgentProfileId
+    ),
+    creationSourceIdx: index('idx_deployment_environments_creation_source').on(
+      table.creationSource
     ),
   })
 );

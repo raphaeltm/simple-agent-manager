@@ -7,6 +7,7 @@ import { parsePositiveInt } from '../../lib/route-helpers';
 import { getCredentialEncryptionKey } from '../../lib/secrets';
 import {
   assertAgentDeploymentAllowed,
+  createAgentDeploymentEnvironment,
   getTaskAgentProfileId,
   isDeploymentPolicyAllowedForProfile,
   toDeploymentAgentPolicy,
@@ -17,6 +18,7 @@ import {
   loadDeploymentEnvironmentConfigRows,
   upsertDeploymentEnvironmentConfigVar,
 } from '../../services/deployment-environment-config';
+import { buildDeploymentEnvironmentResponse } from '../../services/deployment-environment-summary';
 import {
   buildComposePublishRouteDiscovery,
   buildReleaseRouteDiscovery,
@@ -303,6 +305,29 @@ export async function handleListDeploymentEnvironments(
     .map((row) => summarizeEnvironment(row, taskAgentProfileId));
 
   return jsonTextResult(requestId, { environments });
+}
+
+export async function handleCreateDeploymentEnvironment(
+  requestId: string | number | null,
+  toolArgs: Record<string, unknown>,
+  tokenData: McpTokenData,
+  env: Env
+): Promise<JsonRpcResponse> {
+  const name = trimmedString(toolArgs.name);
+  if (!name) {
+    return jsonRpcError(requestId, INVALID_PARAMS, 'A deployment environment name is required.');
+  }
+
+  const db = drizzle(env.DATABASE, { schema });
+  const result = await createAgentDeploymentEnvironment(db, tokenData.projectId, name, tokenData);
+  if ('error' in result) {
+    return jsonRpcError(requestId, INVALID_PARAMS, result.error);
+  }
+
+  return jsonTextResult(requestId, {
+    environment: await buildDeploymentEnvironmentResponse(db, env, result.environment),
+    creatorProfileId: result.creatorProfileId,
+  });
 }
 
 async function resolveDeploymentNode(

@@ -19,6 +19,7 @@ import { errors } from '../middleware/error';
 import { requireOwnedProject } from '../middleware/project-auth';
 import { jsonValidator } from '../schemas';
 import {
+  DEPLOYMENT_ENVIRONMENT_NAME_RE,
   encodeAllowedDeployProfileIds,
   uniqueDeployProfileIds,
   validateAllowedDeployProfiles,
@@ -44,13 +45,13 @@ import { registerDeploymentEnvironmentLifecycleRoutes } from './deployment-envir
 // Validation schemas (Valibot — matches project convention)
 // =============================================================================
 
-/** Environment name: lowercase alphanumeric + hyphens, 1-63 chars. */
-const ENV_NAME_RE = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
-
 const CreateEnvironmentSchema = v.object({
   name: v.pipe(
     v.string('name is required'),
-    v.regex(ENV_NAME_RE, 'Name must be lowercase alphanumeric with optional hyphens, 1-63 chars')
+    v.regex(
+      DEPLOYMENT_ENVIRONMENT_NAME_RE,
+      'Name must be lowercase alphanumeric with optional hyphens, 1-63 chars'
+    )
   ),
 });
 
@@ -258,6 +259,8 @@ deploymentEnvironmentRoutes.post(
       status: 'active',
       createdAt: now,
       updatedAt: now,
+      createdByUserId: userId,
+      creationSource: 'user',
     });
 
     const [created] = await db
