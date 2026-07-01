@@ -164,8 +164,8 @@ func TestScanner_RefreshesContainerIDAfterScanFailure(t *testing.T) {
 	if resolverCalled.Load() != 1 {
 		t.Fatalf("expected resolver to be called once, got %d", resolverCalled.Load())
 	}
-	if scanner.consecutiveFailures != 0 {
-		t.Fatalf("expected consecutiveFailures to reset after refresh, got %d", scanner.consecutiveFailures)
+	if scanner.consecutiveFailures.Load() != 0 {
+		t.Fatalf("expected consecutiveFailures to reset after refresh, got %d", scanner.consecutiveFailures.Load())
 	}
 	found := false
 	for _, event := range events {
@@ -216,8 +216,8 @@ func TestScanner_ConsecutiveFailuresTracked(t *testing.T) {
 	}
 
 	// Verify consecutive failures were tracked.
-	if scanner.consecutiveFailures < 6 {
-		t.Errorf("expected consecutiveFailures >= 6, got %d", scanner.consecutiveFailures)
+	if scanner.consecutiveFailures.Load() < 6 {
+		t.Errorf("expected consecutiveFailures >= 6, got %d", scanner.consecutiveFailures.Load())
 	}
 
 	// Verify at least one scanner_waiting event was emitted.
@@ -281,7 +281,7 @@ func TestScanner_EmitsScannerReadyOnResolution(t *testing.T) {
 	}
 
 	// Verify containerResolved flag is set.
-	if !scanner.containerResolved {
+	if !scanner.containerResolved.Load() {
 		t.Error("expected containerResolved to be true after successful resolution")
 	}
 }
@@ -327,7 +327,7 @@ func TestScanner_FailureCounterResetsOnResolution(t *testing.T) {
 	}
 
 	// Container should have been resolved.
-	if !scanner.containerResolved {
+	if !scanner.containerResolved.Load() {
 		t.Error("expected containerResolved to be true")
 	}
 
@@ -345,7 +345,55 @@ func TestScanner_ContainerResolvedFlagSetOnInit(t *testing.T) {
 		WorkspaceID: "ws-test",
 	})
 
-	if !scanner.containerResolved {
+	if !scanner.containerResolved.Load() {
 		t.Error("expected containerResolved to be true when ContainerID is set at creation")
 	}
+}
+
+// TestScanner_ConcurrentDiagnosticsGettersRaceFree exercises the diagnostics
+// getters (ConsecutiveFailures, ContainerResolved) from a separate goroutine
+// while the scan loop mutates the underlying fields. The resolver flaps between
+// failure and success so the loop drives both writers (recordResolutionFailure
+// increments the counter; resolveContainerReplacing resets it and flips the
+// resolved flag). Before the atomics conversion this test fails under
+// `go test -race` because the HTTP-diagnostics-style getter reads race with the
+// scan-loop writes; after the conversion it passes cleanly.
+func TestScanner_ConcurrentDiagnosticsGettersRaceFree(t *testing.T) {
+	var resolveCount atomic.Int32
+	resolver := func() (string, error) {
+		// Flap: fail on odd calls, succeed on even calls, so the loop keeps
+		// mutating both consecutiveFailures and containerResolved.
+		n := int(resolveCount.Add(1))
+		if n%2 == 1 {
+			return "", fmt.Errorf("container not ready (attempt %d)", n)
+		}
+		return "flapping-container", nil
+	}
+
+	scanner := NewScanner(ScannerConfig{
+		Enabled:           true,
+		Interval:          time.Millisecond,
+		ExcludePorts:      map[int]bool{},
+		EphemeralMin:      32768,
+		WorkspaceID:       "ws-test",
+		ContainerID:       "",
+		ContainerResolver: resolver,
+	})
+
+	scanner.Start()
+
+	// Hammer the diagnostics getters from a separate goroutine, mirroring the
+	// HTTP diagnostics handler that calls these concurrently with the loop.
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		deadline := time.Now().Add(100 * time.Millisecond)
+		for time.Now().Before(deadline) {
+			_ = scanner.ConsecutiveFailures()
+			_ = scanner.ContainerResolved()
+		}
+	}()
+
+	<-done
+	scanner.Stop()
 }

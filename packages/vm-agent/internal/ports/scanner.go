@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -59,8 +60,8 @@ type Scanner struct {
 	stop                chan struct{}
 	stopped             chan struct{}
 	closeOnce           sync.Once
-	consecutiveFailures int
-	containerResolved   bool // tracks whether container was ever successfully resolved
+	consecutiveFailures atomic.Int64
+	containerResolved   atomic.Bool // tracks whether container was ever successfully resolved
 }
 
 // NewScanner creates a new port scanner for a workspace container.
@@ -71,14 +72,15 @@ func NewScanner(cfg ScannerConfig) *Scanner {
 	if cfg.EphemeralMin <= 0 {
 		cfg.EphemeralMin = DefaultEphemeralMin
 	}
-	return &Scanner{
-		cfg:               cfg,
-		ports:             make(map[int]DetectedPort),
-		containerID:       cfg.ContainerID,
-		stop:              make(chan struct{}),
-		stopped:           make(chan struct{}),
-		containerResolved: cfg.ContainerID != "",
+	s := &Scanner{
+		cfg:         cfg,
+		ports:       make(map[int]DetectedPort),
+		containerID: cfg.ContainerID,
+		stop:        make(chan struct{}),
+		stopped:     make(chan struct{}),
 	}
+	s.containerResolved.Store(cfg.ContainerID != "")
+	return s
 }
 
 // Start begins the scanning loop in a goroutine.
@@ -108,12 +110,12 @@ func (s *Scanner) Ports() []DetectedPort {
 
 // ConsecutiveFailures returns the current consecutive failure count.
 func (s *Scanner) ConsecutiveFailures() int {
-	return s.consecutiveFailures
+	return int(s.consecutiveFailures.Load())
 }
 
 // ContainerResolved returns whether the container was ever successfully resolved.
 func (s *Scanner) ContainerResolved() bool {
-	return s.containerResolved
+	return s.containerResolved.Load()
 }
 
 // SetContainerID updates the container ID for scanning.
@@ -163,7 +165,7 @@ func (s *Scanner) scan() {
 	}
 
 	// Reset failure counter on successful scan.
-	s.consecutiveFailures = 0
+	s.consecutiveFailures.Store(0)
 
 	entries, err := ParseProcNetTCP(content)
 	if err != nil {
@@ -282,9 +284,9 @@ func (s *Scanner) resolveContainerReplacing(reason, previousOverride string) (st
 		previous = previousOverride
 	}
 
-	wasResolved := s.containerResolved
-	s.containerResolved = true
-	s.consecutiveFailures = 0
+	wasResolved := s.containerResolved.Load()
+	s.containerResolved.Store(true)
+	s.consecutiveFailures.Store(0)
 
 	slog.Info("Port scanner: resolved container ID",
 		"workspaceId", s.cfg.WorkspaceID,
@@ -314,32 +316,32 @@ func (s *Scanner) resolveContainerReplacing(reason, previousOverride string) (st
 }
 
 func (s *Scanner) recordResolutionFailure(err error) {
-	s.consecutiveFailures++
-	if s.consecutiveFailures == 1 {
+	n := s.consecutiveFailures.Add(1)
+	if n == 1 {
 		slog.Info("Port scanner: container not yet available, will retry",
 			"workspaceId", s.cfg.WorkspaceID, "error", err)
 	} else {
 		slog.Warn("Port scanner: container still not available",
 			"workspaceId", s.cfg.WorkspaceID,
-			"consecutiveFailures", s.consecutiveFailures,
+			"consecutiveFailures", n,
 			"error", err)
 	}
-	if s.consecutiveFailures%6 == 0 && s.cfg.EventEmitter != nil {
+	if n%6 == 0 && s.cfg.EventEmitter != nil {
 		s.cfg.EventEmitter("port.scanner_waiting",
-			fmt.Sprintf("Port scanner: waiting for container (attempt %d)", s.consecutiveFailures),
+			fmt.Sprintf("Port scanner: waiting for container (attempt %d)", n),
 			map[string]interface{}{
-				"consecutiveFailures": s.consecutiveFailures,
+				"consecutiveFailures": n,
 				"error":               fmt.Sprintf("%v", err),
 			})
 	}
 }
 
 func (s *Scanner) handleScanFailure(containerID string, err error) {
-	s.consecutiveFailures++
+	n := s.consecutiveFailures.Add(1)
 	slog.Warn("Port scan failed",
 		"workspaceId", s.cfg.WorkspaceID,
 		"containerID", containerID,
-		"consecutiveFailures", s.consecutiveFailures,
+		"consecutiveFailures", n,
 		"error", err)
 
 	if s.cfg.ContainerResolver == nil {
