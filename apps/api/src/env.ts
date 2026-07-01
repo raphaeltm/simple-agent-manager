@@ -455,7 +455,9 @@ export interface Env {
   WORKSPACE_TOOL_CI_RUNS_LIMIT?: string; // Max CI runs to return (default: 10)
   WORKSPACE_TOOL_DEPLOY_RUNS_LIMIT?: string; // Max deployment runs to return (default: 5)
   WORKSPACE_TOOL_DIAGNOSTIC_MAX_BYTES?: string; // Max diagnostic data size in bytes (default: 4096)
-  // Origin CA certificate/key (injected into cloud-init for VM TLS)
+  // Origin CA certificate issuance for VM-agent TLS
+  ORIGIN_CA_CERT_VALIDITY_DAYS?: string; // Cloudflare-supported validity: 7, 30, 90, 365, 730, 1095, 5475 (default: 7)
+  // Legacy Origin CA certificate/key retained only as manual rotation inputs for already-provisioned nodes.
   ORIGIN_CA_CERT?: string;
   ORIGIN_CA_KEY?: string;
   // Notification system configuration

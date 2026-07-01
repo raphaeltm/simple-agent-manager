@@ -31,6 +31,7 @@ import {
 import { createWorkspaceOnNode } from '../services/node-agent';
 import { verifyNodeCallbackAuth } from '../services/node-callback-auth';
 import { persistErrorBatch, type PersistErrorInput } from '../services/observability';
+import { issueNodeOriginCertificate } from '../services/origin-ca-certificates';
 import * as projectDataService from '../services/project-data';
 
 const nodeLifecycleRoutes = new Hono<{ Bindings: Env }>();
@@ -151,6 +152,41 @@ nodeLifecycleRoutes.post('/:id/ready', async (c) => {
   );
 
   return c.json({ status: 'running', readyAt: now });
+});
+
+/**
+ * POST /:id/origin-ca-certificate — Sign a node-generated CSR with Cloudflare Origin CA.
+ *
+ * Cloud-init generates the private key locally and sends only the CSR here.
+ * The returned certificate is paired with that node-local private key, so the
+ * platform-wide Origin CA private key is never embedded in static user-data.
+ */
+nodeLifecycleRoutes.post('/:id/origin-ca-certificate', async (c) => {
+  const nodeId = c.req.param('id');
+  await verifyNodeCallbackAuth(c, nodeId);
+
+  const csr = await c.req.text();
+  try {
+    const result = await issueNodeOriginCertificate(c.env, csr);
+    log.info('node_origin_ca_certificate.issued', {
+      nodeId,
+      certificateId: result.certificateId,
+      expiresOn: result.expiresOn,
+      hostnames: result.hostnames,
+      requestedValidity: result.requestedValidity,
+    });
+    return c.text(result.certificate, 200, {
+      'Content-Type': 'text/plain; charset=utf-8',
+      'Cache-Control': 'no-store',
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Origin CA certificate issuance failed';
+    log.error('node_origin_ca_certificate.failed', { nodeId, error: message });
+    if (message.includes('CSR')) {
+      throw errors.badRequest('Invalid Origin CA CSR');
+    }
+    throw errors.internal('Origin CA certificate issuance failed');
+  }
 });
 
 nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), async (c) => {

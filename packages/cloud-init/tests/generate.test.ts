@@ -67,6 +67,9 @@ const REALISTIC_KEY = [
   '-----END RSA PRIVATE KEY-----',
 ].join('\n');
 
+const ORIGIN_CA_CERTIFICATE_URL =
+  'https://api.test.example.com/api/nodes/node-test-123/origin-ca-certificate';
+
 describe('indentForYamlBlock', () => {
   it('returns empty string unchanged', () => {
     expect(indentForYamlBlock('', 6)).toBe('');
@@ -243,11 +246,10 @@ describe('generateCloudInit', () => {
     });
   });
 
-  describe('TLS certificate injection', () => {
-    it('sets VM_AGENT_PORT=8443 and TLS paths when cert provided', () => {
+  describe('TLS certificate bootstrap', () => {
+    it('sets VM_AGENT_PORT=8443 and TLS paths when certificate URL provided', () => {
       const config = generateCloudInit(baseVariables({
-        originCaCert: REALISTIC_CERT,
-        originCaKey: REALISTIC_KEY,
+        originCaCertificateUrl: ORIGIN_CA_CERTIFICATE_URL,
       }));
 
       expect(config).toContain('Environment=VM_AGENT_PORT=8443');
@@ -255,7 +257,7 @@ describe('generateCloudInit', () => {
       expect(config).toContain('Environment=TLS_KEY_PATH=/etc/sam/tls/origin-ca-key.pem');
     });
 
-    it('sets VM_AGENT_PORT=8080 and empty TLS paths when no cert', () => {
+    it('sets VM_AGENT_PORT=8080 and empty TLS paths when no certificate URL', () => {
       const config = generateCloudInit(baseVariables());
 
       expect(config).toContain('Environment=VM_AGENT_PORT=8080');
@@ -263,65 +265,47 @@ describe('generateCloudInit', () => {
       expect(config).toContain('Environment=TLS_KEY_PATH=');
     });
 
-    it('key file has restricted permissions (0600)', () => {
+    it('generates node-local key with restricted permissions before starting vm-agent', () => {
       const config = generateCloudInit(baseVariables({
-        originCaCert: REALISTIC_CERT,
-        originCaKey: REALISTIC_KEY,
+        originCaCertificateUrl: ORIGIN_CA_CERTIFICATE_URL,
       }));
-
-      expect(config).toMatch(/origin-ca-key\.pem[\s\S]*?permissions:\s*'0600'/);
-    });
-
-    /**
-     * CRITICAL REGRESSION TEST: Parse the YAML output and verify full PEM content survives.
-     *
-     * This test would have caught the bug introduced in PR #320, where plain string
-     * replacement of multi-line PEM content broke YAML block scalar indentation,
-     * truncating certs to just the first line.
-     *
-     * See: docs/notes/2026-03-12-tls-yaml-indentation-postmortem.md
-     */
-    it('full multi-line cert PEM survives YAML generation intact', () => {
-      const config = generateCloudInit(baseVariables({
-        originCaCert: REALISTIC_CERT,
-        originCaKey: REALISTIC_KEY,
-      }));
-
-      // Parse the generated YAML — this is the critical test.
-      // If indentation is wrong, YAML.parse() will either throw or
-      // produce truncated content.
       const parsed = YAML.parse(config);
 
-      const certEntry = parsed.write_files.find(
-        (f: { path: string }) => f.path === '/etc/sam/tls/origin-ca.pem'
+      const originCaBlock = parsed.runcmd.find(
+        (entry: string) => typeof entry === 'string' && entry.includes('ORIGIN_CA_CERTIFICATE_URL=')
       );
-      expect(certEntry).toBeDefined();
-
-      const parsedCert = certEntry.content.trim();
-      expect(parsedCert).toBe(REALISTIC_CERT);
+      expect(originCaBlock).toContain(`ORIGIN_CA_CERTIFICATE_URL="${ORIGIN_CA_CERTIFICATE_URL}"`);
+      expect(originCaBlock).toContain('openssl genrsa -out "$TLS_KEY_PATH" 2048');
+      expect(originCaBlock).toContain('chmod 600 "$TLS_KEY_PATH"');
+      expect(originCaBlock).toContain('openssl req -new -key "$TLS_KEY_PATH"');
+      expect(originCaBlock).toContain('Authorization: Bearer cb-token-abc');
+      expect(originCaBlock).toContain('--data-binary "@$TLS_CSR_PATH"');
+      expect(parsed.runcmd.indexOf(originCaBlock)).toBeLessThan(
+        parsed.runcmd.findIndex(
+          (entry: string) => typeof entry === 'string' && entry.includes('systemctl start vm-agent')
+        )
+      );
     });
 
-    it('full multi-line key PEM survives YAML generation intact', () => {
+    it('does not embed static Origin CA cert or private key files in parsed user-data', () => {
       const config = generateCloudInit(baseVariables({
-        originCaCert: REALISTIC_CERT,
-        originCaKey: REALISTIC_KEY,
+        originCaCertificateUrl: ORIGIN_CA_CERTIFICATE_URL,
       }));
-
       const parsed = YAML.parse(config);
-
+      const paths = parsed.write_files.map((f: { path: string }) => f.path);
+      expect(paths).not.toContain('/etc/sam/tls/origin-ca.pem');
+      expect(paths).not.toContain('/etc/sam/tls/origin-ca-key.pem');
       const keyEntry = parsed.write_files.find(
         (f: { path: string }) => f.path === '/etc/sam/tls/origin-ca-key.pem'
       );
-      expect(keyEntry).toBeDefined();
-
-      const parsedKey = keyEntry.content.trim();
-      expect(parsedKey).toBe(REALISTIC_KEY);
+      expect(keyEntry).toBeUndefined();
+      expect(JSON.stringify(parsed)).not.toContain(REALISTIC_KEY);
+      expect(JSON.stringify(parsed)).not.toContain(REALISTIC_CERT);
     });
 
-    it('generated YAML is valid and parseable with realistic certs', () => {
+    it('generated YAML is valid and parseable with certificate bootstrap', () => {
       const config = generateCloudInit(baseVariables({
-        originCaCert: REALISTIC_CERT,
-        originCaKey: REALISTIC_KEY,
+        originCaCertificateUrl: ORIGIN_CA_CERTIFICATE_URL,
         projectId: 'proj-123',
         chatSessionId: 'sess-456',
         taskId: 'task-789',
@@ -333,10 +317,9 @@ describe('generateCloudInit', () => {
       expect(parsed.write_files.length).toBeGreaterThanOrEqual(5);
     });
 
-    it('config with realistic TLS certs stays within 32KB limit', () => {
+    it('config with TLS bootstrap stays within 32KB limit', () => {
       const config = generateCloudInit(baseVariables({
-        originCaCert: REALISTIC_CERT,
-        originCaKey: REALISTIC_KEY,
+        originCaCertificateUrl: ORIGIN_CA_CERTIFICATE_URL,
         projectId: 'proj-123',
         chatSessionId: 'sess-456',
       }));
@@ -344,10 +327,9 @@ describe('generateCloudInit', () => {
       expect(validateCloudInitSize(config)).toBe(true);
     });
 
-    it('handles empty cert/key gracefully (no TLS mode)', () => {
+    it('handles empty certificate URL gracefully (no TLS mode)', () => {
       const config = generateCloudInit(baseVariables({
-        originCaCert: '',
-        originCaKey: '',
+        originCaCertificateUrl: '',
       }));
 
       const parsed = YAML.parse(config);
@@ -377,8 +359,7 @@ describe('generateCloudInit', () => {
 
     it('firewall script contains correct VM agent port (TLS mode)', () => {
       const config = generateCloudInit(baseVariables({
-        originCaCert: REALISTIC_CERT,
-        originCaKey: REALISTIC_KEY,
+        originCaCertificateUrl: ORIGIN_CA_CERTIFICATE_URL,
       }));
       const parsed = YAML.parse(config);
 
@@ -601,8 +582,7 @@ describe('generateCloudInit', () => {
 
     it('config with firewall stays within 32KB Hetzner limit', () => {
       const config = generateCloudInit(baseVariables({
-        originCaCert: REALISTIC_CERT,
-        originCaKey: REALISTIC_KEY,
+        originCaCertificateUrl: ORIGIN_CA_CERTIFICATE_URL,
         projectId: 'proj-123',
         chatSessionId: 'sess-456',
         taskId: 'task-789',
@@ -1395,93 +1375,6 @@ describe('validateCloudInitVariables', () => {
     });
   });
 
-  describe('PEM format validation', () => {
-    it('accepts valid certificate PEM', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        originCaCert: REALISTIC_CERT,
-        originCaKey: REALISTIC_KEY,
-      }))).not.toThrow();
-    });
-
-    it('accepts empty string for originCaCert (no TLS mode)', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        originCaCert: '',
-      }))).not.toThrow();
-    });
-
-    it('accepts undefined originCaCert', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        originCaCert: undefined,
-      }))).not.toThrow();
-    });
-
-    it('rejects originCaCert without BEGIN marker', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        originCaCert: 'MIIEojCCA4qgAwIBAgIUP5m7GZWdRHSJRzMPQx8sTOBZjR4w',
-      }))).toThrow('originCaCert');
-    });
-
-    it('rejects originCaCert with YAML injection between markers', () => {
-      const malicious = [
-        '-----BEGIN CERTIFICATE-----',
-        'valid_base64==',
-        'key: value',
-        '-----END CERTIFICATE-----',
-      ].join('\n');
-      expect(() => validateCloudInitVariables(baseVariables({
-        originCaCert: malicious,
-      }))).toThrow('originCaCert');
-    });
-
-    it('rejects originCaKey with shell injection between markers', () => {
-      const malicious = [
-        '-----BEGIN RSA PRIVATE KEY-----',
-        '$(rm -rf /)',
-        '-----END RSA PRIVATE KEY-----',
-      ].join('\n');
-      expect(() => validateCloudInitVariables(baseVariables({
-        originCaKey: malicious,
-      }))).toThrow('originCaKey');
-    });
-
-    it('rejects originCaCert that is just random text', () => {
-      expect(() => validateCloudInitVariables(baseVariables({
-        originCaCert: 'this is not a certificate',
-      }))).toThrow('originCaCert');
-    });
-
-    it('rejects originCaKey without END marker', () => {
-      const incomplete = [
-        '-----BEGIN RSA PRIVATE KEY-----',
-        'MIIEpAIBAAKCAQEAxvFqof1sMB1yt+eiTk7gSMkJaOWJFx7GCQIDfDs3FtQ2VLJM',
-      ].join('\n');
-      expect(() => validateCloudInitVariables(baseVariables({
-        originCaKey: incomplete,
-      }))).toThrow('originCaKey');
-    });
-
-    it('rejects PEM with mismatched BEGIN/END labels', () => {
-      const mismatched = [
-        '-----BEGIN CERTIFICATE-----',
-        'MIIEojCCA4qgAwIBAgIUP5m7GZWdRHSJRzMPQx8sTOBZjR4wDQYJKoZIhvcNAQEL',
-        '-----END RSA PRIVATE KEY-----',
-      ].join('\n');
-      expect(() => validateCloudInitVariables(baseVariables({
-        originCaCert: mismatched,
-      }))).toThrow('originCaCert');
-    });
-
-    it('rejects PEM with tab characters in body', () => {
-      const withTab = [
-        '-----BEGIN CERTIFICATE-----',
-        'MIIEojCCA4qg\tAwIBAgIUP5m7GZWdRHSJRzMPQx8sTOBZjR4wDQYJKoZIhvcNAQEL',
-        '-----END CERTIFICATE-----',
-      ].join('\n');
-      expect(() => validateCloudInitVariables(baseVariables({
-        originCaCert: withTab,
-      }))).toThrow('originCaCert');
-    });
-  });
 });
 
 describe('validateCloudInitVariables — devcontainer cache flag', () => {
@@ -1522,27 +1415,17 @@ describe('regex injection prevention ($-pattern in replacement values)', () => {
    *
    * We verify the fix by testing that the replacement function approach is used
    * (checking that known $-pattern-sensitive template text is correctly output)
-   * and by verifying PEM content survives the full replacement pipeline intact.
+   * and by verifying generated template literals survive intact.
    */
 
-  it('realistic PEM cert survives full replacement pipeline intact', () => {
+  it('does not embed static PEM material during replacement', () => {
     const config = generateCloudInit(baseVariables({
-      originCaCert: REALISTIC_CERT,
-      originCaKey: REALISTIC_KEY,
+      originCaCertificateUrl: ORIGIN_CA_CERTIFICATE_URL,
     }));
 
     const parsed = YAML.parse(config);
-    const certEntry = parsed.write_files.find(
-      (f: { path: string }) => f.path === '/etc/sam/tls/origin-ca.pem'
-    );
-    expect(certEntry).toBeDefined();
-    expect(certEntry.content.trim()).toBe(REALISTIC_CERT);
-
-    const keyEntry = parsed.write_files.find(
-      (f: { path: string }) => f.path === '/etc/sam/tls/origin-ca-key.pem'
-    );
-    expect(keyEntry).toBeDefined();
-    expect(keyEntry.content.trim()).toBe(REALISTIC_KEY);
+    expect(JSON.stringify(parsed)).not.toContain(REALISTIC_CERT);
+    expect(JSON.stringify(parsed)).not.toContain(REALISTIC_KEY);
   });
 
   it('docker_name_tag template {{.Name}} survives replacement', () => {
@@ -1640,55 +1523,21 @@ describe('validateCloudInitVariables — provider field', () => {
 
 describe('integrated size validation in generateCloudInit', () => {
   it('throws when output exceeds 32KB (default behavior)', () => {
-    // Create variables that will produce a config exceeding 32KB
-    // by providing very large PEM content
-    const largePemLines = ['-----BEGIN CERTIFICATE-----'];
-    // Each base64 line is ~64 chars; need enough to push past 32KB
-    for (let i = 0; i < 500; i++) {
-      largePemLines.push('MIIEojCCA4qgAwIBAgIUP5m7GZWdRHSJRzMPQx8sTOBZjR4wDQYJKoZIhvcNAQEL');
-    }
-    largePemLines.push('-----END CERTIFICATE-----');
-    const largeCert = largePemLines.join('\n');
-
-    const largeKeyLines = ['-----BEGIN RSA PRIVATE KEY-----'];
-    for (let i = 0; i < 500; i++) {
-      largeKeyLines.push('MIIEpAIBAAKCAQEAxvFqof1sMB1yt+eiTk7gSMkJaOWJFx7GCQIDfDs3FtQ2VLJM');
-    }
-    largeKeyLines.push('-----END RSA PRIVATE KEY-----');
-    const largeKey = largeKeyLines.join('\n');
-
     expect(() => generateCloudInit(baseVariables({
-      originCaCert: largeCert,
-      originCaKey: largeKey,
+      callbackToken: 'a'.repeat(40_000),
     }))).toThrow('32KB');
   });
 
   it('skips size validation when validateSize is false', () => {
-    const largePemLines = ['-----BEGIN CERTIFICATE-----'];
-    for (let i = 0; i < 500; i++) {
-      largePemLines.push('MIIEojCCA4qgAwIBAgIUP5m7GZWdRHSJRzMPQx8sTOBZjR4wDQYJKoZIhvcNAQEL');
-    }
-    largePemLines.push('-----END CERTIFICATE-----');
-    const largeCert = largePemLines.join('\n');
-
-    const largeKeyLines = ['-----BEGIN RSA PRIVATE KEY-----'];
-    for (let i = 0; i < 500; i++) {
-      largeKeyLines.push('MIIEpAIBAAKCAQEAxvFqof1sMB1yt+eiTk7gSMkJaOWJFx7GCQIDfDs3FtQ2VLJM');
-    }
-    largeKeyLines.push('-----END RSA PRIVATE KEY-----');
-    const largeKey = largeKeyLines.join('\n');
-
     // Should not throw with validateSize: false
     expect(() => generateCloudInit(baseVariables({
-      originCaCert: largeCert,
-      originCaKey: largeKey,
+      callbackToken: 'a'.repeat(40_000),
     }), { validateSize: false })).not.toThrow();
   });
 
   it('does not throw for normal-sized configs (default behavior)', () => {
     expect(() => generateCloudInit(baseVariables({
-      originCaCert: REALISTIC_CERT,
-      originCaKey: REALISTIC_KEY,
+      originCaCertificateUrl: ORIGIN_CA_CERTIFICATE_URL,
     }))).not.toThrow();
   });
 });

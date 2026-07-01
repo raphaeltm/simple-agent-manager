@@ -71,6 +71,68 @@ runcmd:
     logger -t sam-boot "vm-agent binary downloaded, size=$(stat -c%s /usr/local/bin/vm-agent 2>/dev/null || echo unknown)"
   - 'logger -t sam-boot "PHASE END: vm-agent-download"'
 
+  - 'logger -t sam-boot "PHASE START: origin-ca-bootstrap"'
+  - |
+    ORIGIN_CA_CERTIFICATE_URL="{{ origin_ca_certificate_url }}"
+    TLS_CERT_PATH="/etc/sam/tls/origin-ca.pem"
+    TLS_KEY_PATH="/etc/sam/tls/origin-ca-key.pem"
+    TLS_CSR_PATH="/etc/sam/tls/origin-ca.csr"
+    if [ -n "$ORIGIN_CA_CERTIFICATE_URL" ]; then
+      logger -t sam-boot "Generating node-local Origin CA private key and CSR"
+      ORIGIN_CA_OK=true
+      if [ ! -s "$TLS_KEY_PATH" ]; then
+        if openssl genrsa -out "$TLS_KEY_PATH" 2048 >/dev/null 2>&1; then
+          chmod 600 "$TLS_KEY_PATH"
+          logger -t sam-boot "RSA key generated"
+        else
+          logger -t sam-boot "ERROR: openssl genrsa failed"
+          ORIGIN_CA_OK=false
+        fi
+      fi
+      if [ "$ORIGIN_CA_OK" = true ]; then
+        if openssl req -new -key "$TLS_KEY_PATH" -out "$TLS_CSR_PATH" -subj "/CN={{ node_id }}" >/dev/null 2>&1; then
+          logger -t sam-boot "CSR generated"
+        else
+          logger -t sam-boot "ERROR: openssl req (CSR generation) failed"
+          ORIGIN_CA_OK=false
+        fi
+      fi
+      if [ "$ORIGIN_CA_OK" = true ]; then
+        HTTP_CODE=$(curl -sS -o "$TLS_CERT_PATH" -w '%{http_code}' -X POST \
+          -H "Authorization: Bearer {{ callback_token }}" \
+          -H "Content-Type: text/plain" \
+          --data-binary "@$TLS_CSR_PATH" \
+          "$ORIGIN_CA_CERTIFICATE_URL" 2>/tmp/origin-ca-curl-err) || HTTP_CODE="000"
+        CURL_ERR=$(cat /tmp/origin-ca-curl-err 2>/dev/null)
+        rm -f /tmp/origin-ca-curl-err
+        logger -t sam-boot "Origin CA cert request: HTTP=$HTTP_CODE curl_exit=$CURL_EXIT"
+        if [ -n "$CURL_ERR" ]; then
+          logger -t sam-boot "Origin CA curl stderr: $CURL_ERR"
+        fi
+        if [ "$HTTP_CODE" != "200" ] && [ "$HTTP_CODE" != "201" ]; then
+          logger -t sam-boot "ERROR: Origin CA certificate request failed (HTTP $HTTP_CODE)"
+          ORIGIN_CA_OK=false
+        fi
+      fi
+      rm -f "$TLS_CSR_PATH"
+      if [ "$ORIGIN_CA_OK" = true ] && [ -s "$TLS_CERT_PATH" ]; then
+        chmod 0644 "$TLS_CERT_PATH"
+        logger -t sam-boot "Node-local Origin CA certificate installed"
+      else
+        logger -t sam-boot "WARNING: Origin CA bootstrap failed — falling back to plaintext mode"
+        rm -f "$TLS_CERT_PATH" "$TLS_KEY_PATH"
+        # Clear TLS paths in the systemd unit so vm-agent starts without TLS
+        sed -i '/^Environment=TLS_CERT_PATH=/d' /etc/systemd/system/vm-agent.service
+        sed -i '/^Environment=TLS_KEY_PATH=/d' /etc/systemd/system/vm-agent.service
+        # Switch to plaintext port
+        sed -i 's/^Environment=VM_AGENT_PORT=8443/Environment=VM_AGENT_PORT=8080/' /etc/systemd/system/vm-agent.service
+        logger -t sam-boot "vm-agent.service updated for plaintext mode (port 8080)"
+      fi
+    else
+      logger -t sam-boot "Skipping Origin CA bootstrap; TLS disabled"
+    fi
+  - 'logger -t sam-boot "PHASE END: origin-ca-bootstrap"'
+
   - 'logger -t sam-boot "PHASE START: vm-agent-start"'
   - systemctl daemon-reload
   - systemctl enable vm-agent
@@ -349,16 +411,6 @@ write_files:
         "live-restore": true
       }
     permissions: '0644'
-
-  - path: /etc/sam/tls/origin-ca.pem
-    content: |
-      {{ origin_ca_cert }}
-    permissions: '0644'
-
-  - path: /etc/sam/tls/origin-ca-key.pem
-    content: |
-      {{ origin_ca_key }}
-    permissions: '0600'
 
   - path: /etc/apt/apt.conf.d/80-retries
     content: |
