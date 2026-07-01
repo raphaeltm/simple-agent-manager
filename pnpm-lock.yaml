@@ -190,8 +190,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/shared
       ai:
-        specifier: 6.0.168
-        version: 6.0.168(zod@4.3.6)
+        specifier: 7.0.9
+        version: 7.0.9(zod@4.3.6)
       better-auth:
         specifier: 'catalog:'
         version: 1.6.11(@cloudflare/workers-types@4.20260603.1)(@opentelemetry/api@1.9.0)(better-sqlite3@12.10.0)(drizzle-kit@0.26.2)(drizzle-orm@0.45.2(@cloudflare/workers-types@4.20260603.1)(@opentelemetry/api@1.9.0)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.10.0)(kysely@0.28.17))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(vitest@4.1.5)
@@ -215,7 +215,7 @@ importers:
         version: 1.3.1(typescript@5.9.3)
       workers-ai-provider:
         specifier: 3.1.11
-        version: 3.1.11(@ai-sdk/provider@3.0.8)(ai@6.0.168(zod@4.3.6))
+        version: 3.1.11(@ai-sdk/provider@4.0.1)(ai@7.0.9(zod@4.3.6))
       yaml:
         specifier: 2.9.0
         version: 2.9.0
@@ -736,9 +736,9 @@ packages:
     peerDependencies:
       zod: ^3.25.0 || ^4.0.0
 
-  '@ai-sdk/gateway@3.0.104':
-    resolution: {integrity: sha512-ZKX5n74io8VIRlhIMSLWVlvT3sXC8Z7cZ9GHuWBWZDVi96+62AIsWuLGvMfcBA1STYuSoDrp6rIziZmvrTq0TA==}
-    engines: {node: '>=18'}
+  '@ai-sdk/gateway@4.0.7':
+    resolution: {integrity: sha512-L0/CZwEL8AHO/Nxe5D0laNq9Q44mrKcth99tPgMNHqfsYbbNExwke4OYH18o/eLd3FLLBxs+03SuHP+Gcyp51Q==}
+    engines: {node: '>=22'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
 
@@ -760,9 +760,9 @@ packages:
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
 
-  '@ai-sdk/provider-utils@4.0.23':
-    resolution: {integrity: sha512-z8GlDaCmRSDlqkMF2f4/RFgWxdarvIbyuk+m6WXT1LYgsnGiXRJGTD2Z1+SDl3LqtFuRtGX1aghYvQLoHL/9pg==}
-    engines: {node: '>=18'}
+  '@ai-sdk/provider-utils@5.0.2':
+    resolution: {integrity: sha512-EcmdjJb7yggsZPCbS3MFBpvAUnKaPW+QvanU5GzF00XCq0bqqAmvJ3MN19ejlmOETbW8sJNiq6qam48wTcbUNw==}
+    engines: {node: '>=22'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
 
@@ -782,9 +782,9 @@ packages:
     resolution: {integrity: sha512-m9ka3ptkPQbaHHZHqDXDF9C9B5/Mav0KTdky1k2HZ3/nrW2t1AgObxIVPyGDWQNS9FXT/FS6PIoSjpcP/No8rQ==}
     engines: {node: '>=18'}
 
-  '@ai-sdk/provider@3.0.8':
-    resolution: {integrity: sha512-oGMAgGoQdBXbZqNG0Ze56CHjDZ1IDYOwGYxYjO5KLSlz5HiNQ9udIXsPZ61VWaHGZ5XW/jyjmr6t2xz2jGVwbQ==}
-    engines: {node: '>=18'}
+  '@ai-sdk/provider@4.0.1':
+    resolution: {integrity: sha512-6p3C/vGqVIjcptBu1DnVd/BZJ2wWmV9TUv9192vT6ZvT9KNED8EwRTqyqFpoQZKgSbMDSvBSq3dqR524Nt/Crw==}
+    engines: {node: '>=22'}
 
   '@ai-sdk/ui-utils@1.2.11':
     resolution: {integrity: sha512-3zcwCc8ezzFlwp3ZD15wAPjf2Au4s3vAbKsXQVyhxODHcmu0iyPO2Eua6D/vicq/AUm/BAo60r97O6HU+EI0+w==}
@@ -4334,6 +4334,9 @@ packages:
   '@vitest/utils@4.1.7':
     resolution: {integrity: sha512-T532WBu791cBxJlCl6SO+J14l81DQx6uQHm1bQbmCDY7nqlEIgkza/UFnSBNaUtSf41unldDFjdOBYEQC4b5Hw==}
 
+  '@workflow/serde@4.1.0':
+    resolution: {integrity: sha512-pav4F2BoirECWR7Nf1TKt+2eETcBj7jj4cBefQ8VXQCA6NPkaKeLfj/zMgi+3zYV5ZIBT4GuUiphsj0/b9hPQQ==}
+
   '@xterm/addon-attach@0.12.0':
     resolution: {integrity: sha512-1lxvXM4JYSm60lbFmE8WMOy2oF2ip3Ye8jWorSAmwy7x8FiC53netEJ5RguL8+FSRj79MUQsNCb2hprY2QA2ig==}
 
@@ -4394,9 +4397,9 @@ packages:
     resolution: {integrity: sha512-MnA+YT8fwfJPgBx3m60MNqakm30XOkyIoH1y6huTQvC0PwZG7ki8NacLBcrPbNoo8vEZy7Jpuk7+jMO+CUovTQ==}
     engines: {node: '>= 14'}
 
-  ai@6.0.168:
-    resolution: {integrity: sha512-2HqCJuO+1V2aV7vfYs5LFEUfxbkGX+5oa54q/gCCTL7KLTdbxcCu5D7TdLA5kwsrs3Szgjah9q6D9tpjHM3hUQ==}
-    engines: {node: '>=18'}
+  ai@7.0.9:
+    resolution: {integrity: sha512-yoxg/ousRxSX5Ko4+/8SH4vsc8BzoQqG7ywtS04L0kLH/+Ww71c+zqdTDXNVRQteDtKFGmt8+Q82ra/NbzjYqA==}
+    engines: {node: '>=22'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
 
@@ -5758,10 +5761,6 @@ packages:
 
   eventsource-parser@3.0.6:
     resolution: {integrity: sha512-Vo1ab+QXPzZ4tCa8SwIHJFaSzy4R6SHf7BY79rFBDf0idraZWAkYrDjDj8uWaSm3S2TK+hJ7/t1CEmZ7jXw+pg==}
-    engines: {node: '>=18.0.0'}
-
-  eventsource-parser@3.0.8:
-    resolution: {integrity: sha512-70QWGkr4snxr0OXLRWsFLeRBIRPuQOvt4s8QYjmUlmlkyTZkRqS7EDVRZtzU3TiyDbXSzaOeF0XUKy8PchzukQ==}
     engines: {node: '>=18.0.0'}
 
   eventsource-parser@3.1.0:
@@ -9311,10 +9310,10 @@ snapshots:
     dependencies:
       zod: 4.4.3
 
-  '@ai-sdk/gateway@3.0.104(zod@4.3.6)':
+  '@ai-sdk/gateway@4.0.7(zod@4.3.6)':
     dependencies:
-      '@ai-sdk/provider': 3.0.8
-      '@ai-sdk/provider-utils': 4.0.23(zod@4.3.6)
+      '@ai-sdk/provider': 4.0.1
+      '@ai-sdk/provider-utils': 5.0.2(zod@4.3.6)
       '@vercel/oidc': 3.2.0
       zod: 4.3.6
 
@@ -9339,11 +9338,12 @@ snapshots:
       eventsource-parser: 3.1.0
       zod: 4.3.6
 
-  '@ai-sdk/provider-utils@4.0.23(zod@4.3.6)':
+  '@ai-sdk/provider-utils@5.0.2(zod@4.3.6)':
     dependencies:
-      '@ai-sdk/provider': 3.0.8
+      '@ai-sdk/provider': 4.0.1
       '@standard-schema/spec': 1.1.0
-      eventsource-parser: 3.0.8
+      '@workflow/serde': 4.1.0
+      eventsource-parser: 3.1.0
       zod: 4.3.6
 
   '@ai-sdk/provider@1.1.3':
@@ -9362,7 +9362,7 @@ snapshots:
     dependencies:
       json-schema: 0.4.0
 
-  '@ai-sdk/provider@3.0.8':
+  '@ai-sdk/provider@4.0.1':
     dependencies:
       json-schema: 0.4.0
 
@@ -13019,6 +13019,8 @@ snapshots:
       convert-source-map: 2.0.0
       tinyrainbow: 3.1.0
 
+  '@workflow/serde@4.1.0': {}
+
   '@xterm/addon-attach@0.12.0': {}
 
   '@xterm/addon-fit@0.10.0(@xterm/xterm@5.5.0)':
@@ -13086,12 +13088,11 @@ snapshots:
 
   agent-base@7.1.4: {}
 
-  ai@6.0.168(zod@4.3.6):
+  ai@7.0.9(zod@4.3.6):
     dependencies:
-      '@ai-sdk/gateway': 3.0.104(zod@4.3.6)
-      '@ai-sdk/provider': 3.0.8
-      '@ai-sdk/provider-utils': 4.0.23(zod@4.3.6)
-      '@opentelemetry/api': 1.9.0
+      '@ai-sdk/gateway': 4.0.7(zod@4.3.6)
+      '@ai-sdk/provider': 4.0.1
+      '@ai-sdk/provider-utils': 5.0.2(zod@4.3.6)
       zod: 4.3.6
 
   ajv-formats@3.0.1(ajv@8.17.1):
@@ -14812,8 +14813,6 @@ snapshots:
   eventemitter3@5.0.4: {}
 
   eventsource-parser@3.0.6: {}
-
-  eventsource-parser@3.0.8: {}
 
   eventsource-parser@3.1.0: {}
 
@@ -18930,10 +18929,10 @@ snapshots:
       '@cloudflare/workerd-linux-arm64': 1.20260630.1
       '@cloudflare/workerd-windows-64': 1.20260630.1
 
-  workers-ai-provider@3.1.11(@ai-sdk/provider@3.0.8)(ai@6.0.168(zod@4.3.6)):
+  workers-ai-provider@3.1.11(@ai-sdk/provider@4.0.1)(ai@7.0.9(zod@4.3.6)):
     dependencies:
-      '@ai-sdk/provider': 3.0.8
-      ai: 6.0.168(zod@4.3.6)
+      '@ai-sdk/provider': 4.0.1
+      ai: 7.0.9(zod@4.3.6)
 
   wrangler@4.106.0(@cloudflare/workers-types@4.20260603.1):
     dependencies:
