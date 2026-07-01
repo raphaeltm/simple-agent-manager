@@ -27,6 +27,7 @@ describe('deploy reusable workflow', () => {
       expect(block).toContain('pnpm tsx scripts/deploy/sync-wrangler-config.ts');
       expect(block).toContain('BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}');
       expect(block).toContain('RESOURCE_PREFIX: ${{ steps.prefix.outputs.value }}');
+      expect(block).toContain('ARTIFACTS_BINDING_ENABLED: ${{ vars.ARTIFACTS_BINDING_ENABLED }}');
     }
   });
 
@@ -56,5 +57,16 @@ describe('deploy reusable workflow', () => {
     expect(block).toContain(
       'DEVCONTAINER_CACHE_CLOUDFLARE_ACCOUNT_ID: ${{ secrets.DEVCONTAINER_CACHE_CLOUDFLARE_ACCOUNT_ID }}'
     );
+  });
+
+  it('allows only the intentionally gated Artifacts non-inheritance warning', () => {
+    for (const name of ['Deploy API Worker', 'Re-deploy API Worker \\(after secrets\\)']) {
+      const block = stepBlock(name);
+
+      expect(block).toContain('NON_ARTIFACTS_BINDING_WARNINGS=');
+      expect(block).toContain('"artifacts" exists at the top level');
+      expect(block).toContain('ARTIFACTS_BINDING_ENABLED: ${{ vars.ARTIFACTS_BINDING_ENABLED }}');
+      expect(block).toContain('Wrangler detected non-inherited bindings');
+    }
   });
 });
