@@ -21,7 +21,7 @@ Implement only the project-membership foundation:
   - No shared project list behavior.
   - No project-owned infra credentials.
   - No broad route migration.
-- Optionally migrate one low-risk proof point only if useful; otherwise keep `requireOwnedProject()` behavior-preserving by delegating through the new membership primitive while preserving owner-only access.
+- Keep `requireOwnedProject()` owner-only and behavior-preserving; migrate routes to membership helpers only in later explicit route-migration work.
 
 ## Research Findings
 
@@ -44,7 +44,7 @@ Implement only the project-membership foundation:
 - [x] Seed owner project membership in all project creation paths discovered during research.
 - [x] Add focused unit tests for membership auth helper behavior, including mismatched returned rows and missing/inactive memberships.
 - [x] Add migration/schema tests proving the migration file creates/backfills the expected table and indexes.
-- [ ] Run local validation: lint, typecheck, targeted tests, full test/build suite as required by `/do`.
+- [x] Run local validation: lint, typecheck, targeted tests, full test/build suite as required by `/do`.
 - [ ] Deploy to staging and verify D1 migration state via Cloudflare API.
 - [ ] Use Playwright token-login as `SAM_PLAYWRIGHT_PRIMARY_USER`, open staging, navigate to a test project, and submit a chat message successfully.
 
