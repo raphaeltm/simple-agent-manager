@@ -81,25 +81,34 @@ runcmd:
       logger -t sam-boot "Generating node-local Origin CA private key and CSR"
       ORIGIN_CA_OK=true
       if [ ! -s "$TLS_KEY_PATH" ]; then
-        if ! openssl genrsa -out "$TLS_KEY_PATH" 2048 2>&1 | logger -t sam-boot; then
+        if openssl genrsa -out "$TLS_KEY_PATH" 2048 >/dev/null 2>&1; then
+          chmod 600 "$TLS_KEY_PATH"
+          logger -t sam-boot "RSA key generated"
+        else
           logger -t sam-boot "ERROR: openssl genrsa failed"
           ORIGIN_CA_OK=false
-        else
-          chmod 600 "$TLS_KEY_PATH"
         fi
       fi
       if [ "$ORIGIN_CA_OK" = true ]; then
-        if ! openssl req -new -key "$TLS_KEY_PATH" -out "$TLS_CSR_PATH" -subj "/CN={{ node_id }}" 2>&1 | logger -t sam-boot; then
+        if openssl req -new -key "$TLS_KEY_PATH" -out "$TLS_CSR_PATH" -subj "/CN={{ node_id }}" >/dev/null 2>&1; then
+          logger -t sam-boot "CSR generated"
+        else
           logger -t sam-boot "ERROR: openssl req (CSR generation) failed"
           ORIGIN_CA_OK=false
         fi
       fi
       if [ "$ORIGIN_CA_OK" = true ]; then
-        HTTP_CODE=$(curl -sS -o "$TLS_CERT_PATH" -w "%{http_code}" -X POST \
+        HTTP_CODE=$(curl -sS -o "$TLS_CERT_PATH" -w '%{http_code}' -X POST \
           -H "Authorization: Bearer {{ callback_token }}" \
           -H "Content-Type: text/plain" \
           --data-binary "@$TLS_CSR_PATH" \
-          "$ORIGIN_CA_CERTIFICATE_URL" 2>&1 | tee >(logger -t sam-boot) | tail -1)
+          "$ORIGIN_CA_CERTIFICATE_URL" 2>/tmp/origin-ca-curl-err) || HTTP_CODE="000"
+        CURL_ERR=$(cat /tmp/origin-ca-curl-err 2>/dev/null)
+        rm -f /tmp/origin-ca-curl-err
+        logger -t sam-boot "Origin CA cert request: HTTP=$HTTP_CODE curl_exit=$CURL_EXIT"
+        if [ -n "$CURL_ERR" ]; then
+          logger -t sam-boot "Origin CA curl stderr: $CURL_ERR"
+        fi
         if [ "$HTTP_CODE" != "200" ] && [ "$HTTP_CODE" != "201" ]; then
           logger -t sam-boot "ERROR: Origin CA certificate request failed (HTTP $HTTP_CODE)"
           ORIGIN_CA_OK=false
