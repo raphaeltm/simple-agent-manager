@@ -27,7 +27,7 @@ Agents can create cron triggers via `create_trigger`, but the MCP tool surface d
 - [x] Add Miniflare worker integration tests proving delete cascades executions and GitHub configs.
 - [x] Add cross-project isolation tests proving update and delete are rejected and leave the other project trigger unchanged.
 - [x] Run impacted local tests and quality checks.
-- [ ] Run specialist review with `cloudflare-specialist` and `security-auditor`; include task completion validation before archive.
+- [x] Run specialist review with `cloudflare-specialist` and `security-auditor`; include task completion validation before archive.
 
 ## Validation Notes
 
@@ -35,6 +35,13 @@ Agents can create cron triggers via `create_trigger`, but the MCP tool surface d
 - `pnpm --filter @simple-agent-manager/api lint` passed with existing warnings only.
 - `pnpm --filter @simple-agent-manager/api exec vitest run tests/unit/routes/mcp-update-delete-trigger.test.ts` passed.
 - Local Miniflare worker tests could not execute in this workspace because workerd segfaulted before tests ran. This was reproduced with an existing worker test (`tests/workers/trigger-execution-cleanup.test.ts`), so it is a local worker-runtime blocker rather than a failure isolated to the new MCP trigger tests.
+- `pnpm --filter @simple-agent-manager/api exec vitest run tests/unit/routes/mcp.test.ts tests/unit/routes/mcp-update-delete-trigger.test.ts` passed.
+- `pnpm build` passed.
+- `pnpm test` passed: API 359 files / 5596 tests, web 199 files / 2497 tests, 19/19 turbo tasks successful.
+- Task completion validation passed: implementation covers all research findings, checklist items, and acceptance criteria; the only warning is local Miniflare execution blocked by a reproducible workerd segfault.
+- `cloudflare-specialist` review passed: parameterized D1 statements, scoped final trigger mutations, no migration/config changes, and committed worker integration coverage using real D1/KV/`SELF.fetch`.
+- `security-auditor` review passed: cross-project update/delete attempts are rejected before mutation, final trigger mutations include `project_id = ?`, profile/skill references are project-scoped, and no secret material is logged.
+- Staging verification intentionally skipped per user instruction; no staging deployment was run.
 
 ## Acceptance Criteria
 
