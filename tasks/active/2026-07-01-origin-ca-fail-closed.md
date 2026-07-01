@@ -13,11 +13,11 @@ This violates the project security policy: security-sensitive setup failures mus
 - **Runtime evidence checked before implementation**: Staging and production observability D1 had zero `Origin CA` / `node_origin_ca_certificate.failed` records for 2026-07-01, and the post-deploy production node tested over direct IP responded on HTTPS `8443` and refused HTTP `8080`.
 
 ## Implementation Checklist
-- [ ] **cloud-init template**: Remove the plaintext fallback branch.
-- [ ] **cloud-init template**: On key generation, CSR generation, or Origin CA request failure, remove partial TLS files and exit non-zero before `systemctl start vm-agent`.
-- [ ] **cloud-init template**: Keep TLS env vars and `VM_AGENT_PORT={{ vm_agent_port }}` untouched on failure.
-- [ ] **cloud-init tests**: Assert generated cloud-init no longer contains plaintext fallback markers, TLS env deletion, or port rewrite to `8080`.
-- [ ] **cloud-init tests**: Assert Origin CA failure exits non-zero and preserves the HTTPS/TLS service contract.
+- [x] **cloud-init template**: Remove the plaintext fallback branch.
+- [x] **cloud-init template**: On key generation, CSR generation, or Origin CA request failure, remove partial TLS files and exit non-zero before `systemctl start vm-agent`.
+- [x] **cloud-init template**: Keep TLS env vars and `VM_AGENT_PORT={{ vm_agent_port }}` untouched on failure.
+- [x] **cloud-init tests**: Assert generated cloud-init no longer contains plaintext fallback markers, TLS env deletion, or port rewrite to `8080`.
+- [x] **cloud-init tests**: Assert Origin CA failure exits non-zero and preserves the HTTPS/TLS service contract.
 - [ ] **validation**: Run targeted cloud-init tests.
 - [ ] **validation**: Run full quality suite before PR.
 - [ ] **staging**: Deploy branch to staging, provision a real VM, verify heartbeat and TLS/HTTPS behavior, then clean up.

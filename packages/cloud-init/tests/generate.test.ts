@@ -287,6 +287,24 @@ describe('generateCloudInit', () => {
       );
     });
 
+    it('fails closed instead of rewriting vm-agent to plaintext when Origin CA bootstrap fails', () => {
+      const config = generateCloudInit(baseVariables({
+        originCaCertificateUrl: ORIGIN_CA_CERTIFICATE_URL,
+      }));
+      const parsed = YAML.parse(config);
+
+      const originCaBlock = parsed.runcmd.find(
+        (entry: string) => typeof entry === 'string' && entry.includes('ORIGIN_CA_CERTIFICATE_URL=')
+      );
+      expect(originCaBlock).toContain('refusing to start vm-agent without TLS');
+      expect(originCaBlock).toContain('rm -f "$TLS_CERT_PATH" "$TLS_KEY_PATH" "$TLS_CSR_PATH"');
+      expect(originCaBlock).toContain('exit 1');
+      expect(originCaBlock).not.toContain('falling back to plaintext mode');
+      expect(originCaBlock).not.toContain("sed -i '/^Environment=TLS_CERT_PATH=/d'");
+      expect(originCaBlock).not.toContain("sed -i '/^Environment=TLS_KEY_PATH=/d'");
+      expect(originCaBlock).not.toContain('Environment=VM_AGENT_PORT=8080');
+    });
+
     it('does not embed static Origin CA cert or private key files in parsed user-data', () => {
       const config = generateCloudInit(baseVariables({
         originCaCertificateUrl: ORIGIN_CA_CERTIFICATE_URL,
