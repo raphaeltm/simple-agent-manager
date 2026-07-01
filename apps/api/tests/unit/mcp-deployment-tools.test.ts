@@ -485,6 +485,30 @@ describe('deployment MCP tools', () => {
     expect(response.error?.message).toContain('reserved deployment environment names');
   });
 
+  it('uses configured reserved deployment environment names for MCP creation', async () => {
+    const state = createDbState({
+      deploymentEnvironments: [],
+      tasks: [{ id: 'task-1', agentProfileHint: 'profile-allowed' }],
+    });
+    installDb(state);
+
+    const productionResponse = await handleCreateDeploymentEnvironment(
+      'req-production',
+      { name: 'production' },
+      tokenData(),
+      env({ AGENT_DEPLOYMENT_RESERVED_ENVIRONMENT_NAMES: 'live' })
+    );
+    expect(productionResponse.error).toBeUndefined();
+
+    const liveResponse = await handleCreateDeploymentEnvironment(
+      'req-live',
+      { name: 'live' },
+      tokenData(),
+      env({ AGENT_DEPLOYMENT_RESERVED_ENVIRONMENT_NAMES: 'live' })
+    );
+    expect(liveResponse.error?.message).toContain('reserved deployment environment names');
+  });
+
   it('lists active deployment environments allowed for the current agent profile', async () => {
     installDb(
       createDbState({

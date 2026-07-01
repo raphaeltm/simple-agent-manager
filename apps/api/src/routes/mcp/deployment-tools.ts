@@ -319,7 +319,13 @@ export async function handleCreateDeploymentEnvironment(
   }
 
   const db = drizzle(env.DATABASE, { schema });
-  const result = await createAgentDeploymentEnvironment(db, tokenData.projectId, name, tokenData);
+  const result = await createAgentDeploymentEnvironment(
+    db,
+    tokenData.projectId,
+    name,
+    tokenData,
+    env.AGENT_DEPLOYMENT_RESERVED_ENVIRONMENT_NAMES
+  );
   if ('error' in result) {
     return jsonRpcError(requestId, INVALID_PARAMS, result.error);
   }

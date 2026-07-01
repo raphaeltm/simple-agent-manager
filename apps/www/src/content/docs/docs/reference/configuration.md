@@ -209,6 +209,7 @@ SAM loads OpenCode Zen and OpenCode Go model choices through the authenticated m
 | `DEPLOY_PAYLOAD_EXPIRY_SECONDS`            | `3600`                                 | Signed deployment apply payload lifetime                              |
 | `DEPLOYMENT_ROUTE_PORT_BASE`               | `35000`                                | First node-local loopback port reserved for app routes                |
 | `DEPLOYMENT_ROUTE_PORT_SPAN`               | `100`                                  | Number of loopback ports reserved per deployment environment          |
+| `AGENT_DEPLOYMENT_RESERVED_ENVIRONMENT_NAMES` | `prod,production`                   | Comma-separated environment names agents cannot create through MCP    |
 | `MAX_ENVIRONMENTS_PER_DEPLOYMENT_NODE`     | `5`                                    | Maximum deployment environments to place on one deployment node       |
 | `DEPLOYMENT_DEFAULT_VM_SIZE`               | `small`                                | Default VM size for deployment nodes                                  |
 | `DEPLOYMENT_MODEL_RUNNER_VM_SIZE`          | `medium`                               | VM size for deployment nodes that need Docker Model Runner            |

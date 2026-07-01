@@ -12,7 +12,7 @@ const MAX_OBSERVED_JSON_LENGTH = 64_000;
 const TERMINAL_FAILURE_STATUSES = new Set(['failed', 'failed-initial', 'reverted']);
 const APPLY_SUCCESS_STATUSES = new Set(['applied', 'reverted', 'failed']);
 const AGENT_CREATED_ENVIRONMENT_SOURCE = 'agent-mcp';
-const RESERVED_AGENT_ENVIRONMENT_NAMES = new Set(['prod', 'production']);
+const DEFAULT_RESERVED_AGENT_ENVIRONMENT_NAMES = ['prod', 'production'];
 export const DEPLOYMENT_ENVIRONMENT_NAME_RE = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
 
 export interface DeploymentHeartbeatState {
@@ -428,7 +428,8 @@ export async function createAgentDeploymentEnvironment(
   db: ReturnType<typeof drizzle<typeof schema>>,
   projectId: string,
   name: string,
-  tokenData: McpTokenData
+  tokenData: McpTokenData,
+  reservedEnvironmentNamesConfig?: string | null
 ): Promise<CreateAgentDeploymentEnvironmentResult> {
   const normalizedName = name.trim();
   if (!DEPLOYMENT_ENVIRONMENT_NAME_RE.test(normalizedName)) {
@@ -437,7 +438,10 @@ export async function createAgentDeploymentEnvironment(
       error: 'Name must be lowercase alphanumeric with optional hyphens, 1-63 chars.',
     };
   }
-  if (RESERVED_AGENT_ENVIRONMENT_NAMES.has(normalizedName)) {
+  const reservedEnvironmentNames = parseReservedAgentEnvironmentNames(
+    reservedEnvironmentNamesConfig
+  );
+  if (reservedEnvironmentNames.has(normalizedName)) {
     return {
       code: 'invalid_name',
       error:
@@ -528,4 +532,17 @@ export async function createAgentDeploymentEnvironment(
   });
 
   return { environment, creatorProfileId };
+}
+
+function parseReservedAgentEnvironmentNames(configValue: string | null | undefined): Set<string> {
+  const rawNames =
+    typeof configValue === 'string' && configValue.trim() !== ''
+      ? configValue.split(',')
+      : DEFAULT_RESERVED_AGENT_ENVIRONMENT_NAMES;
+
+  return new Set(
+    rawNames
+      .map((name) => name.trim())
+      .filter((name) => name !== '')
+  );
 }

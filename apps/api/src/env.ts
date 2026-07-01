@@ -109,6 +109,7 @@ export interface Env {
   DEPLOY_PAYLOAD_EXPIRY_SECONDS?: string;
   DEPLOYMENT_ROUTE_PORT_BASE?: string;
   DEPLOYMENT_ROUTE_PORT_SPAN?: string;
+  AGENT_DEPLOYMENT_RESERVED_ENVIRONMENT_NAMES?: string; // Comma-separated names agents cannot create via MCP (default: prod,production)
   MAX_ENVIRONMENTS_PER_DEPLOYMENT_NODE?: string;
   DEPLOYMENT_DEFAULT_VM_SIZE?: string; // Default VM size for deployment nodes (default: small)
   DEPLOYMENT_MODEL_RUNNER_VM_SIZE?: string; // VM size for deployment nodes running Docker Model Runner (default: medium)
