@@ -396,4 +396,11 @@ func TestScanner_ConcurrentDiagnosticsGettersRaceFree(t *testing.T) {
 
 	<-done
 	scanner.Stop()
+
+	// Self-validation: if the resolver never ran, the loop never mutated the
+	// fields and the test proved nothing. Guard against a broken setup silently
+	// passing.
+	if resolveCount.Load() == 0 {
+		t.Fatal("resolver was never called — test did not exercise field mutation")
+	}
 }
