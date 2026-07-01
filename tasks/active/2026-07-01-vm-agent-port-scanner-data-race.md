@@ -77,25 +77,25 @@ conversion.
 
 ## Implementation checklist
 
-- [ ] Add `"sync/atomic"` import to scanner.go
-- [ ] Struct: `consecutiveFailures atomic.Int64`, `containerResolved atomic.Bool`
-- [ ] `NewScanner`: post-construction `s.containerResolved.Store(cfg.ContainerID != "")`
-- [ ] `ConsecutiveFailures()` → `int(s.consecutiveFailures.Load())`
-- [ ] `ContainerResolved()` → `s.containerResolved.Load()`
-- [ ] `scan()` 166 → `s.consecutiveFailures.Store(0)`
-- [ ] `resolveContainerReplacing` 285-287 → Load/Store
-- [ ] `recordResolutionFailure` → `n := s.consecutiveFailures.Add(1)`, reuse `n`
-- [ ] `handleScanFailure` → `n := s.consecutiveFailures.Add(1)`, log `n`
-- [ ] Update `scanner_test.go` direct field reads → `.Load()`
-- [ ] Add `TestScanner_ConcurrentDiagnosticsGettersRaceFree`
+- [x] Add `"sync/atomic"` import to scanner.go
+- [x] Struct: `consecutiveFailures atomic.Int64`, `containerResolved atomic.Bool`
+- [x] `NewScanner`: post-construction `s.containerResolved.Store(cfg.ContainerID != "")`
+- [x] `ConsecutiveFailures()` → `int(s.consecutiveFailures.Load())`
+- [x] `ContainerResolved()` → `s.containerResolved.Load()`
+- [x] `scan()` 166 → `s.consecutiveFailures.Store(0)`
+- [x] `resolveContainerReplacing` 285-287 → Load/Store
+- [x] `recordResolutionFailure` → `n := s.consecutiveFailures.Add(1)`, reuse `n`
+- [x] `handleScanFailure` → `n := s.consecutiveFailures.Add(1)`, log `n`
+- [x] Update `scanner_test.go` direct field reads → `.Load()`
+- [x] Add `TestScanner_ConcurrentDiagnosticsGettersRaceFree`
 
 ## Acceptance criteria
 
-- [ ] `go test -race ./internal/ports/...` passes (including the new concurrency test)
-- [ ] `go vet ./...` clean
-- [ ] `go build ./...` succeeds
-- [ ] The new regression test fails on the pre-fix code (verified once)
-- [ ] No behavior change to port detection, event emission, or diagnostics output
+- [x] `go test -race ./internal/ports/...` passes (including the new concurrency test)
+- [x] `go vet ./...` clean
+- [x] `go build ./...` succeeds
+- [x] The new regression test fails on the pre-fix code (verified once)
+- [x] No behavior change to port detection, event emission, or diagnostics output
 
 ## Scope / non-goals
 
