@@ -7,12 +7,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/workspace/vm-agent/internal/config"
+	"github.com/workspace/vm-agent/internal/gitrepo"
 )
 
 func TestNormalizeRepoURL(t *testing.T) {
@@ -144,7 +146,7 @@ func TestIsGitHubRepo(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			if got := isGitHubRepo(tc.repo); got != tc.want {
+			if got := gitrepo.IsGitHubRepo(tc.repo); got != tc.want {
 				t.Fatalf("isGitHubRepo(%q) = %v, want %v", tc.repo, got, tc.want)
 			}
 		})
@@ -191,6 +193,78 @@ func TestRenderGitCredentialHelperScript(t *testing.T) {
 	}
 	if strings.Contains(script, " -k") {
 		t.Fatal("plain HTTP mode should not contain -k flag")
+	}
+}
+
+func TestRenderGitCredentialHelperScriptHostFiltering(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		host        string
+		wantCurl    bool
+		wantHostArg string
+	}{
+		{name: "github", host: "github.com", wantCurl: true, wantHostArg: "host=github.com"},
+		{name: "github api", host: "api.github.com", wantCurl: true, wantHostArg: "host=api.github.com"},
+		{name: "artifacts root", host: "artifacts.cloudflare.net", wantCurl: true, wantHostArg: "host=artifacts.cloudflare.net"},
+		{name: "artifacts account", host: "acct.artifacts.cloudflare.net", wantCurl: true, wantHostArg: "host=acct.artifacts.cloudflare.net"},
+		{name: "unknown", host: "gitlab.com", wantCurl: false},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			cfg := &config.Config{
+				Port:          8080,
+				CallbackToken: "callback-token-123",
+				WorkspaceID:   "ws-123",
+			}
+			script, err := renderGitCredentialHelperScript(cfg)
+			if err != nil {
+				t.Fatalf("renderGitCredentialHelperScript returned error: %v", err)
+			}
+
+			tmpDir := t.TempDir()
+			curlLog := filepath.Join(tmpDir, "curl.log")
+			curlPath := filepath.Join(tmpDir, "curl")
+			curlScript := fmt.Sprintf("#!/bin/sh\nlast=\"\"\nfor arg in \"$@\"; do last=\"$arg\"; done\nprintf '%%s\\n' \"$last\" >> %s\nprintf 'protocol=https\\nhost=example.com\\nusername=x\\npassword=token\\n\\n'\n", shellSingleQuote(curlLog))
+			if err := os.WriteFile(curlPath, []byte(curlScript), 0o755); err != nil {
+				t.Fatalf("write curl shim: %v", err)
+			}
+
+			helperPath := filepath.Join(tmpDir, "git-credential-sam")
+			if err := os.WriteFile(helperPath, []byte(script), 0o755); err != nil {
+				t.Fatalf("write helper script: %v", err)
+			}
+			cmd := exec.Command("sh", helperPath, "get")
+			cmd.Stdin = strings.NewReader("protocol=https\nhost=" + tc.host + "\n\n")
+			cmd.Env = append(os.Environ(), "PATH="+tmpDir+":"+os.Getenv("PATH"))
+			output, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("helper script failed: %v\n%s", err, output)
+			}
+
+			logBytes, readErr := os.ReadFile(curlLog)
+			if !tc.wantCurl {
+				if readErr == nil && strings.TrimSpace(string(logBytes)) != "" {
+					t.Fatalf("expected no curl call for %s, got %q", tc.host, string(logBytes))
+				}
+				return
+			}
+			if readErr != nil {
+				t.Fatalf("expected curl call: %v", readErr)
+			}
+			gotURL := strings.TrimSpace(string(logBytes))
+			if !strings.Contains(gotURL, "workspaceId=ws-123") {
+				t.Fatalf("expected workspaceId in credential request URL, got %q", gotURL)
+			}
+			if !strings.Contains(gotURL, tc.wantHostArg) {
+				t.Fatalf("expected requested host in credential request URL, got %q", gotURL)
+			}
+		})
 	}
 }
 
@@ -486,7 +560,7 @@ func TestBuildSAMEnvScriptOmitsEmptyValues(t *testing.T) {
 	cfg := &config.Config{
 		ControlPlaneURL: "https://api.example.com",
 		WorkspaceID:     "ws-123",
-		// NodeID, Repository, Branch left empty
+		// NodeID, Repository, and Branch left empty
 	}
 
 	script := buildSAMEnvScript(cfg, "")
@@ -561,6 +635,7 @@ func TestBuildSAMEnvScriptWhitespaceOnlyTokenOmitted(t *testing.T) {
 	cfg := &config.Config{
 		ControlPlaneURL: "https://api.example.com",
 		WorkspaceID:     "ws-123",
+		Repository:      "octo/repo",
 	}
 
 	script := buildSAMEnvScript(cfg, "   ")
@@ -575,6 +650,25 @@ func TestBuildSAMEnvScriptWhitespaceOnlyTokenOmitted(t *testing.T) {
 	}
 	if !strings.Contains(script, "Dynamic GH_TOKEN fallback") {
 		t.Errorf("script should contain dynamic GH_TOKEN fallback, got:\n%s", script)
+	}
+}
+
+func TestBuildSAMEnvScriptSkipsGitHubTokenFallbackForArtifactsRepo(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{
+		ControlPlaneURL: "https://api.example.com",
+		WorkspaceID:     "ws-123",
+		Repository:      "https://acct.artifacts.cloudflare.net/git/default/repo.git",
+	}
+
+	script := buildSAMEnvScript(cfg, "")
+
+	if strings.Contains(script, "GH_TOKEN") {
+		t.Fatalf("Artifacts repo env script must not include GH_TOKEN fallback, got:\n%s", script)
+	}
+	if !strings.Contains(script, `export SAM_REPOSITORY='https://acct.artifacts.cloudflare.net/git/default/repo.git'`) {
+		t.Fatalf("script should still include SAM_REPOSITORY, got:\n%s", script)
 	}
 }
 

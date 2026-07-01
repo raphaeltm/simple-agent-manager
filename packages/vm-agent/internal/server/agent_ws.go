@@ -11,6 +11,7 @@ import (
 	"github.com/workspace/vm-agent/internal/acp"
 	"github.com/workspace/vm-agent/internal/agentsessions"
 	"github.com/workspace/vm-agent/internal/config"
+	"github.com/workspace/vm-agent/internal/gitrepo"
 )
 
 // serverEventAppender adapts the Server's appendNodeEvent method to the
@@ -21,6 +22,28 @@ type serverEventAppender struct {
 
 func (a *serverEventAppender) AppendEvent(workspaceID, level, eventType, message string, detail map[string]interface{}) {
 	a.server.appendNodeEvent(workspaceID, level, eventType, message, detail)
+}
+
+func (s *Server) gitHubTokenFetcherForWorkspace(workspaceID string) func(context.Context) (string, error) {
+	repository := ""
+	if strings.TrimSpace(workspaceID) == strings.TrimSpace(s.config.WorkspaceID) {
+		repository = s.config.Repository
+	} else if runtime, ok := s.getWorkspaceRuntime(workspaceID); ok {
+		repository = runtime.Repository
+	}
+	if !gitrepo.IsGitHubRepo(repository) {
+		return nil
+	}
+
+	// Override GitTokenFetcher per-session so it targets the correct workspace's
+	// git-token endpoint. The callback token is resolved at call time via
+	// callbackTokenForWorkspace(), so token rotations are automatically picked up.
+	// Without this override, the server-level default (nil) would leave GH_TOKEN
+	// unset; the previous bug had a server-level s.fetchGitToken that silently
+	// used s.config.WorkspaceID (the node-level ID) instead.
+	return func(ctx context.Context) (string, error) {
+		return s.fetchGitTokenForWorkspace(ctx, workspaceID, "")
+	}
 }
 
 func writeSessionError(w http.ResponseWriter, statusCode int, code, message string) {
@@ -228,15 +251,7 @@ func (s *Server) getOrCreateSessionHost(hostKey, workspaceID, sessionID string, 
 	cfg.SessionID = sessionID
 	cfg.OnPromptComplete = nil
 
-	// Override GitTokenFetcher per-session so it targets the correct workspace's
-	// git-token endpoint. The callback token is resolved at call time via
-	// callbackTokenForWorkspace(), so token rotations are automatically picked up.
-	// Without this override, the server-level default (nil) would leave GH_TOKEN
-	// unset; the previous bug had a server-level s.fetchGitToken that silently
-	// used s.config.WorkspaceID (the node-level ID) instead.
-	cfg.GitTokenFetcher = func(ctx context.Context) (string, error) {
-		return s.fetchGitTokenForWorkspace(ctx, workspaceID, "")
-	}
+	cfg.GitTokenFetcher = s.gitHubTokenFetcherForWorkspace(workspaceID)
 
 	// Use per-workspace message reporter to prevent cross-workspace contamination.
 	// Lock ordering: sessionHostMu → messageReportersMu → Reporter.mu

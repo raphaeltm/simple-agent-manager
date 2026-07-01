@@ -44,15 +44,15 @@ UI onboarding is explicitly out of scope for this task.
 
 ### PR 1: Workstream A, vm-agent
 
-- [ ] Move `isGitHubRepo`, `isArtifactsHost`, and `isKnownGitHost` into a small shared internal package imported by bootstrap and server code.
-- [ ] Update the rendered `git-credential-sam` shell script to allow GitHub and Artifacts hosts while silently ignoring unknown hosts.
-- [ ] Forward the requested credential host to `/git-credential` without changing the existing loopback auth model.
-- [ ] Add server-side host/provider mismatch handling in `handleGitCredential` that returns no credential for mismatched requested hosts.
-- [ ] Gate gh-wrapper installation on GitHub repositories only.
-- [ ] Gate shell startup `GH_TOKEN` fallback generation on GitHub repositories only.
-- [ ] Gate ACP `GitTokenFetcher` setup on GitHub repositories only, including secondary workspace repository resolution.
-- [ ] Extend Go tests for credential helper rendering, host mismatch handling, and `GH_TOKEN`/`GitTokenFetcher` gating.
-- [ ] Run `go test ./...` and `go test -race ./...` in `packages/vm-agent`.
+- [x] Move `isGitHubRepo`, `isArtifactsHost`, and `isKnownGitHost` into a small shared internal package imported by bootstrap and server code.
+- [x] Update the rendered `git-credential-sam` shell script to allow GitHub and Artifacts hosts while silently ignoring unknown hosts.
+- [x] Forward the requested credential host to `/git-credential` without changing the existing loopback auth model.
+- [x] Add server-side host/provider mismatch handling in `handleGitCredential` that returns no credential for mismatched requested hosts.
+- [x] Gate gh-wrapper installation on GitHub repositories only.
+- [x] Gate shell startup `GH_TOKEN` fallback generation on GitHub repositories only.
+- [x] Gate ACP `GitTokenFetcher` setup on GitHub repositories only, including secondary workspace repository resolution.
+- [x] Extend Go tests for credential helper rendering, host mismatch handling, and `GH_TOKEN`/`GitTokenFetcher` gating.
+- [x] Run `go test ./...` and `go test -race ./...` in `packages/vm-agent`.
 - [ ] Verify staging with fresh vm-agent nodes: delete staging nodes first, deploy branch, test GitHub-path non-regression in a fresh project chat, and document Artifacts live-path gap if staging still lacks the binding.
 
 ### PR 2: Workstreams C + D, deploy gating and token expiry shape

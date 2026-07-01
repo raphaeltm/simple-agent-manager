@@ -23,6 +23,7 @@ import (
 	"github.com/workspace/vm-agent/internal/callbackretry"
 	"github.com/workspace/vm-agent/internal/config"
 	"github.com/workspace/vm-agent/internal/container"
+	"github.com/workspace/vm-agent/internal/gitrepo"
 )
 
 const (
@@ -2005,7 +2006,7 @@ func ensureGitHubCLI(ctx context.Context, cfg *config.Config) error {
 	if cfg.Repository == "" {
 		return nil
 	}
-	if !isGitHubRepo(cfg.Repository) {
+	if !gitrepo.IsGitHubRepo(cfg.Repository) {
 		return nil
 	}
 
@@ -2089,8 +2090,10 @@ func ensureGitCredentialHelper(ctx context.Context, cfg *config.Config) error {
 			return err
 		}
 		slog.Info("Configured git credential helper in devcontainer", "containerID", containerID)
-		if err := installGhWrapper(ctx, cfg, containerID); err != nil {
-			slog.Warn("gh wrapper install failed (non-fatal)", "error", err)
+		if gitrepo.IsGitHubRepo(cfg.Repository) {
+			if err := installGhWrapper(ctx, cfg, containerID); err != nil {
+				slog.Warn("gh wrapper install failed (non-fatal)", "error", err)
+			}
 		}
 		return nil
 	}
@@ -2141,10 +2144,12 @@ func ensureGitCredentialHelper(ctx context.Context, cfg *config.Config) error {
 	// This ensures gh CLI works even for sessions longer than 1 hour when the
 	// initial GH_TOKEN has expired. The wrapper fetches a fresh token from the
 	// git credential helper (which calls back to the VM agent for a new token).
-	if err := installGhWrapper(ctx, cfg, containerID); err != nil {
-		// Non-fatal: git clone/fetch still use the credential helper. Direct gh
-		// invocations may lack GH_TOKEN until shell startup fallback runs.
-		slog.Warn("gh wrapper install failed (non-fatal)", "error", err)
+	if gitrepo.IsGitHubRepo(cfg.Repository) {
+		if err := installGhWrapper(ctx, cfg, containerID); err != nil {
+			// Non-fatal: git clone/fetch still use the credential helper. Direct gh
+			// invocations may lack GH_TOKEN until shell startup fallback runs.
+			slog.Warn("gh wrapper install failed (non-fatal)", "error", err)
+		}
 	}
 
 	return nil
@@ -2248,8 +2253,19 @@ while IFS= read -r line; do
   esac
 done
 
-if [ -n "$requested_host" ] && [ "$requested_host" != "github.com" ] && [ "$requested_host" != "api.github.com" ]; then
-  exit 0
+case "$requested_host" in
+  ""|github.com|api.github.com|artifacts.cloudflare.net|*.artifacts.cloudflare.net) ;;
+  *) exit 0 ;;
+esac
+
+credential_query="%s"
+if [ -n "$requested_host" ]; then
+  encoded_host=$(printf '%%s' "$requested_host" | sed 's/%%/%%25/g; s/&/%%26/g; s/=/%%3D/g; s/?/%%3F/g; s/#/%%23/g; s/+/%%2B/g; s/ /%%20/g')
+  if [ -n "$credential_query" ]; then
+    credential_query="${credential_query}&host=${encoded_host}"
+  else
+    credential_query="?host=${encoded_host}"
+  fi
 fi
 
 resolve_gateway() {
@@ -2259,7 +2275,7 @@ resolve_gateway() {
 request_credentials() {
   target="$1"
   curl -fsS --max-time 5%s \
-    "%s://${target}:%d/git-credential%s"
+    "%s://${target}:%d/git-credential${credential_query}"
 }
 
 gateway="$(resolve_gateway || true)"
@@ -2271,7 +2287,7 @@ for target in host.docker.internal "$gateway" 172.17.0.1; do
 done
 
 exit 0
-`, curlTLSFlag, scheme, cfg.Port, query), nil
+`, query, curlTLSFlag, scheme, cfg.Port), nil
 }
 
 // sanitizeWorkspaceID strips characters that are not alphanumeric or hyphens
@@ -2781,18 +2797,20 @@ func buildSAMEnvScript(cfg *config.Config, _ string) string {
 		}
 	}
 
-	// Dynamic GH_TOKEN fallback: if the static value was empty (e.g. token
-	// wasn't available at provisioning time), fetch a fresh one from the git
-	// credential helper on shell startup. This ensures PTY sessions always
-	// have a working GH_TOKEN.
-	sb.WriteString("\n# Dynamic GH_TOKEN fallback — fetch from credential helper if not set\n")
-	sb.WriteString("if [ -z \"$GH_TOKEN\" ] && command -v git >/dev/null 2>&1; then\n")
-	sb.WriteString("  _gh_token=$(printf 'protocol=https\\nhost=github.com\\n\\n' | git credential fill 2>/dev/null | sed -n 's/^password=//p')\n")
-	sb.WriteString("  if [ -n \"$_gh_token\" ]; then\n")
-	sb.WriteString("    export GH_TOKEN=\"$_gh_token\"\n")
-	sb.WriteString("  fi\n")
-	sb.WriteString("  unset _gh_token\n")
-	sb.WriteString("fi\n")
+	if gitrepo.IsGitHubRepo(cfg.Repository) {
+		// Dynamic GH_TOKEN fallback: if the static value was empty (e.g. token
+		// wasn't available at provisioning time), fetch a fresh one from the git
+		// credential helper on shell startup. This ensures PTY sessions always
+		// have a working GH_TOKEN for GitHub-backed projects.
+		sb.WriteString("\n# Dynamic GH_TOKEN fallback — fetch from credential helper if not set\n")
+		sb.WriteString("if [ -z \"$GH_TOKEN\" ] && command -v git >/dev/null 2>&1; then\n")
+		sb.WriteString("  _gh_token=$(printf 'protocol=https\\nhost=github.com\\n\\n' | git credential fill 2>/dev/null | sed -n 's/^password=//p')\n")
+		sb.WriteString("  if [ -n \"$_gh_token\" ]; then\n")
+		sb.WriteString("    export GH_TOKEN=\"$_gh_token\"\n")
+		sb.WriteString("  fi\n")
+		sb.WriteString("  unset _gh_token\n")
+		sb.WriteString("fi\n")
+	}
 
 	return sb.String()
 }
@@ -3091,37 +3109,17 @@ func withGitHubToken(repoURL, token string) (string, error) {
 
 	// Only inject credentials for hosts we actually vend tokens for.
 	host := strings.ToLower(u.Host)
-	if !isKnownGitHost(host) {
+	if !gitrepo.IsKnownGitHost(host) {
 		return repoURL, nil
 	}
 
 	// For GitHub repos use "x-access-token" username; for Artifacts use "x".
 	username := "x-access-token"
-	if isArtifactsHost(host) {
+	if gitrepo.IsArtifactsHost(host) {
 		username = "x"
 	}
 	u.User = url.UserPassword(username, token)
 	return u.String(), nil
-}
-
-func isGitHubRepo(repo string) bool {
-	normalized := normalizeRepoURL(repo)
-	u, err := url.Parse(normalized)
-	if err != nil {
-		return false
-	}
-	return strings.EqualFold(u.Host, "github.com")
-}
-
-// isArtifactsHost returns true if host is a Cloudflare Artifacts git host.
-func isArtifactsHost(host string) bool {
-	return host == "artifacts.cloudflare.net" ||
-		strings.HasSuffix(host, ".artifacts.cloudflare.net")
-}
-
-// isKnownGitHost returns true if host is one we vend tokens for.
-func isKnownGitHost(host string) bool {
-	return host == "github.com" || isArtifactsHost(host)
 }
 
 // needsCredentialHelper returns true if the repo requires a git credential
@@ -3136,7 +3134,7 @@ func needsCredentialHelper(repo string) bool {
 		return false
 	}
 	host := strings.ToLower(u.Host)
-	return isKnownGitHost(host)
+	return gitrepo.IsKnownGitHost(host)
 }
 
 func redactSecret(input, secret string) string {
