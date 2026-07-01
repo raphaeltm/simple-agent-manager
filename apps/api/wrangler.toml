@@ -75,12 +75,11 @@ TRIALS_ENABLED_KV_KEY = "trials:enabled"
 
 # Cloudflare Artifacts for SAM-native Git repos (GitHub-optional projects)
 # NOTE: [[artifacts]] binding requires Cloudflare account-level access to Artifacts.
-# Uncomment the binding below once Artifacts is enabled on the account.
-# ARTIFACTS_ENABLED = "true"
-#
-# [[artifacts]]
-# binding = "ARTIFACTS"
-# namespace = "default"
+# Deployment envs include this binding only when ARTIFACTS_BINDING_ENABLED=true
+# during scripts/deploy/sync-wrangler-config.ts.
+[[artifacts]]
+binding = "ARTIFACTS"
+namespace = "default"
 
 # D1 Database
 [[d1_databases]]

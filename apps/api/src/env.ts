@@ -34,7 +34,8 @@ export interface Env {
         id: string;
         plaintext: string;
         scope: string;
-        expires_at: string;
+        expiresAt?: string;
+        expires_at?: string;
       }>;
     }>;
   };

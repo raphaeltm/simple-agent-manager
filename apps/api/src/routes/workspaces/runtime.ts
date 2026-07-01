@@ -1265,7 +1265,7 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
 
     return c.json({
       token: tokenSecret,
-      expiresAt: tokenResult.expires_at,
+      expiresAt: tokenResult.expiresAt ?? tokenResult.expires_at,
       cloneUrl: repo.remote,
     });
   }

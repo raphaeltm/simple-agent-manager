@@ -68,14 +68,20 @@ Staging verification notes for PR 1:
 
 ### PR 2: Workstreams C + D, deploy gating and token expiry shape
 
-- [ ] Uncomment top-level `[[artifacts]]` in `apps/api/wrangler.toml` only with safe env gating in the sync script.
-- [ ] Add explicit per-environment Artifacts binding opt-in to `scripts/deploy/sync-wrangler-config.ts`, following existing conditional binding patterns.
-- [ ] Keep runtime `ARTIFACTS_ENABLED` coherent with the binding and disabled by default.
-- [ ] Verify/update `quality:wrangler-bindings` expectations if needed for top-level-present/env-conditional bindings.
-- [ ] Update `apps/api/src/env.ts` binding type to support both `expiresAt` and `expires_at`.
-- [ ] Update `apps/api/src/routes/workspaces/runtime.ts` to return `tokenResult.expiresAt ?? tokenResult.expires_at`.
-- [ ] Add tests for generated Wrangler config with Artifacts binding enabled and disabled.
-- [ ] Add tests for both Artifacts token expiry field shapes.
+- [x] Uncomment top-level `[[artifacts]]` in `apps/api/wrangler.toml` only with safe env gating in the sync script.
+- [x] Add explicit per-environment Artifacts binding opt-in to `scripts/deploy/sync-wrangler-config.ts`, following existing conditional binding patterns.
+- [x] Keep runtime `ARTIFACTS_ENABLED` coherent with the binding and disabled by default.
+- [x] Verify/update `quality:wrangler-bindings` expectations if needed for top-level-present/env-conditional bindings.
+- [x] Update `apps/api/src/env.ts` binding type to support both `expiresAt` and `expires_at`.
+- [x] Update `apps/api/src/routes/workspaces/runtime.ts` to return `tokenResult.expiresAt ?? tokenResult.expires_at`.
+- [x] Add tests for generated Wrangler config with Artifacts binding enabled and disabled.
+- [x] Add tests for both Artifacts token expiry field shapes.
+
+Validation:
+- `npx vitest run --config scripts/quality/vitest.config.ts scripts/quality/sync-wrangler-config.test.ts`
+- `pnpm --filter @simple-agent-manager/api test -- --run tests/unit/routes/workspace-git-token.test.ts`
+- `pnpm quality:wrangler-bindings`
+- `pnpm typecheck`
 
 ### PR 3: Workstream B, Artifacts repo lifecycle
 

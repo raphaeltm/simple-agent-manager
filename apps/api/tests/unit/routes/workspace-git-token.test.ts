@@ -138,6 +138,16 @@ describe('workspace git-token GitHub scoping', () => {
     };
   }
 
+  function artifactsProjectRow(overrides: Record<string, unknown> = {}) {
+    return {
+      repoProvider: 'artifacts',
+      artifactsRepoId: 'artifacts-repo-1',
+      githubRepoId: null,
+      repository: 'https://acct123.artifacts.cloudflare.net/git/default/artifacts-repo-1.git',
+      ...overrides,
+    };
+  }
+
   function queueWorkspaceProjectLookup(
     projectOverrides: Record<string, unknown> = {},
     installationLookup: (whereClause: unknown) => unknown[] = installationRowsOnlyWhenOwnerScoped
@@ -204,6 +214,61 @@ describe('workspace git-token GitHub scoping', () => {
       return c.json({ error: 'INTERNAL_ERROR', message: err.message }, 500);
     });
     app.route('/ws', runtimeRoutes);
+  });
+
+  it('returns Artifacts token expiry from camelCase binding shape', async () => {
+    const createToken = vi.fn().mockResolvedValue({
+      plaintext: 'artifacts-token?expires=ignored',
+      expiresAt: '2026-06-06T20:00:00.000Z',
+    });
+    const artifactsEnv = {
+      ...mockEnv,
+      ARTIFACTS_ENABLED: 'true',
+      ARTIFACTS: {
+        get: vi.fn().mockResolvedValue({
+          remote: 'https://acct123.artifacts.cloudflare.net/git/default/artifacts-repo-1.git',
+          createToken,
+        }),
+      },
+    } as Env;
+    limitResponses.push([workspaceRow()], [artifactsProjectRow()]);
+
+    const res = await app.request('/ws/ws-1/git-token', { method: 'POST' }, artifactsEnv);
+
+    expect(res.status).toBe(200);
+    expect(createToken).toHaveBeenCalledWith('write', 3600);
+    await expect(res.json()).resolves.toEqual({
+      token: 'artifacts-token',
+      expiresAt: '2026-06-06T20:00:00.000Z',
+      cloneUrl: 'https://acct123.artifacts.cloudflare.net/git/default/artifacts-repo-1.git',
+    });
+    expect(getInstallationToken).not.toHaveBeenCalled();
+  });
+
+  it('falls back to Artifacts snake_case token expiry from beta binding shape', async () => {
+    const artifactsEnv = {
+      ...mockEnv,
+      ARTIFACTS_ENABLED: 'true',
+      ARTIFACTS: {
+        get: vi.fn().mockResolvedValue({
+          remote: 'https://acct123.artifacts.cloudflare.net/git/default/artifacts-repo-1.git',
+          createToken: vi.fn().mockResolvedValue({
+            plaintext: 'artifacts-token',
+            expires_at: '2026-06-06T21:00:00.000Z',
+          }),
+        }),
+      },
+    } as Env;
+    limitResponses.push([workspaceRow()], [artifactsProjectRow()]);
+
+    const res = await app.request('/ws/ws-1/git-token', { method: 'POST' }, artifactsEnv);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      token: 'artifacts-token',
+      expiresAt: '2026-06-06T21:00:00.000Z',
+    });
+    expect(getInstallationToken).not.toHaveBeenCalled();
   });
 
   it('falls back to repository-name scoping for legacy projects without a repo id', async () => {

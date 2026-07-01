@@ -209,6 +209,11 @@ export function generateApiWorkerEnv(
   includeTailConsumers: boolean
 ): WranglerEnvConfig {
   const staticBindings = extractStaticBindings(topLevel);
+  const artifactsBindingEnabled = process.env.ARTIFACTS_BINDING_ENABLED === 'true';
+  if (artifactsBindingEnabled && !staticBindings.artifacts) {
+    throw new Error('ARTIFACTS_BINDING_ENABLED=true requires a top-level [[artifacts]] binding');
+  }
+  const includeArtifactsBinding = artifactsBindingEnabled && !!staticBindings.artifacts;
   const tailWorkerName = DEPLOYMENT_CONFIG.resources.tailWorkerName(stack);
   const analyticsDataset = `${DEPLOYMENT_CONFIG.prefix}_analytics`;
   const analyticsEngineDatasets = staticBindings.analytics_engine_datasets?.map((dataset) =>
@@ -277,6 +282,8 @@ export function generateApiWorkerEnv(
       WWW_PAGES_PROJECT_NAME: `${DEPLOYMENT_CONFIG.prefix}-www`,
       // Deployment environment — used by trial runner to choose agent type + model
       ENVIRONMENT: DEPLOYMENT_CONFIG.getEnvironmentFromStack(stack),
+      // Artifacts is disabled by default and enabled only with the generated binding.
+      ARTIFACTS_ENABLED: includeArtifactsBinding ? 'true' : 'false',
     },
 
     // Dynamic bindings from Pulumi outputs
@@ -303,7 +310,7 @@ export function generateApiWorkerEnv(
     ...(analyticsEngineDatasets ? { analytics_engine_datasets: analyticsEngineDatasets } : {}),
     ...(staticBindings.migrations ? { migrations: staticBindings.migrations } : {}),
     ...(staticBindings.containers ? { containers: staticBindings.containers } : {}),
-    ...(staticBindings.artifacts ? { artifacts: staticBindings.artifacts } : {}),
+    ...(includeArtifactsBinding ? { artifacts: staticBindings.artifacts } : {}),
 
     // Tail consumers (conditional — omitted on first deploy when tail worker doesn't exist)
     ...(includeTailConsumers ? { tail_consumers: [{ service: tailWorkerName }] } : {}),

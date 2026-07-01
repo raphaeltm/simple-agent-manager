@@ -78,6 +78,40 @@ describe('sync wrangler config', () => {
     });
   });
 
+  it('omits Artifacts binding and disables runtime flag by default', () => {
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+
+    const topLevel: WranglerToml = {
+      vars: { ARTIFACTS_ENABLED: 'true' },
+      artifacts: [{ binding: 'ARTIFACTS', namespace: 'default' }],
+    };
+
+    const envConfig = generateApiWorkerEnv(topLevel, outputs, 'prod', false);
+
+    expect(envConfig.artifacts).toBeUndefined();
+    expect(envConfig.vars).toMatchObject({ ARTIFACTS_ENABLED: 'false' });
+  });
+
+  it('copies Artifacts binding and enables runtime flag only when explicitly opted in', () => {
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+    vi.stubEnv('ARTIFACTS_BINDING_ENABLED', 'true');
+
+    const artifacts = [{ binding: 'ARTIFACTS', namespace: 'default' }];
+    const envConfig = generateApiWorkerEnv({ artifacts }, outputs, 'prod', false);
+
+    expect(envConfig.artifacts).toEqual(artifacts);
+    expect(envConfig.vars).toMatchObject({ ARTIFACTS_ENABLED: 'true' });
+  });
+
+  it('fails when Artifacts binding is enabled without a top-level binding declaration', () => {
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+    vi.stubEnv('ARTIFACTS_BINDING_ENABLED', 'true');
+
+    expect(() => generateApiWorkerEnv({}, outputs, 'prod', false)).toThrow(
+      'ARTIFACTS_BINDING_ENABLED=true requires a top-level [[artifacts]] binding'
+    );
+  });
+
   it('distinguishes a missing tail worker from Cloudflare API failures', async () => {
     vi.stubEnv('CF_API_TOKEN', 'token');
 
