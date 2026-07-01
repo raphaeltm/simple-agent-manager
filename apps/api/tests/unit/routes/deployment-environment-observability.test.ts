@@ -77,6 +77,7 @@ vi.mock('../../../src/services/node-agent', () => ({
 }));
 
 vi.mock('../../../src/services/deployment-control', () => ({
+  DEPLOYMENT_ENVIRONMENT_NAME_RE: /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/,
   encodeAllowedDeployProfileIds: vi.fn(() => null),
   uniqueDeployProfileIds: vi.fn((ids) => ids ?? []),
   validateAllowedDeployProfiles: vi.fn(),
