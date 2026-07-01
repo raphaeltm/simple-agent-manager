@@ -81,6 +81,90 @@ func TestHandleGitCredentialSuccess(t *testing.T) {
 	}
 }
 
+func TestHandleGitCredentialRespectsRequestedHostProvider(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		queryHost  string
+		tokenBody  string
+		wantStatus int
+		wantBody   string
+	}{
+		{
+			name:       "artifacts token for github query is empty",
+			queryHost:  "github.com",
+			tokenBody:  `{"token":"art_token","expiresAt":"2026-01-01T00:00:00Z","cloneUrl":"https://x:art_token@acct.artifacts.cloudflare.net/git/default/repo.git"}`,
+			wantStatus: http.StatusNoContent,
+		},
+		{
+			name:       "artifacts token for matching artifacts query returns credential",
+			queryHost:  "acct.artifacts.cloudflare.net",
+			tokenBody:  `{"token":"art_token","expiresAt":"2026-01-01T00:00:00Z","cloneUrl":"https://x:art_token@acct.artifacts.cloudflare.net/git/default/repo.git"}`,
+			wantStatus: http.StatusOK,
+			wantBody:   "protocol=https\nhost=acct.artifacts.cloudflare.net\nusername=x\npassword=art_token\n\n",
+		},
+		{
+			name:       "github token for github query returns credential",
+			queryHost:  "github.com",
+			tokenBody:  `{"token":"ghs_test_token","expiresAt":"2026-01-01T00:00:00Z"}`,
+			wantStatus: http.StatusOK,
+			wantBody:   "protocol=https\nhost=github.com\nusername=x-access-token\npassword=ghs_test_token\n\n",
+		},
+		{
+			name:       "github token for artifacts query is empty",
+			queryHost:  "acct.artifacts.cloudflare.net",
+			tokenBody:  `{"token":"ghs_test_token","expiresAt":"2026-01-01T00:00:00Z"}`,
+			wantStatus: http.StatusNoContent,
+		},
+		{
+			name:       "unknown requested host is empty without token fetch",
+			queryHost:  "gitlab.com",
+			tokenBody:  `{"token":"should_not_be_used","expiresAt":"2026-01-01T00:00:00Z"}`,
+			wantStatus: http.StatusNoContent,
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			var controlPlaneCalls atomic.Int32
+			controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				controlPlaneCalls.Add(1)
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(tc.tokenBody))
+			}))
+			defer controlPlane.Close()
+
+			s := &Server{
+				config: &config.Config{
+					ControlPlaneURL: controlPlane.URL,
+					WorkspaceID:     "ws-123",
+					CallbackToken:   "callback-token",
+				},
+			}
+
+			req := httptest.NewRequest(http.MethodGet, "/git-credential?host="+tc.queryHost, nil)
+			req.Header.Set("Authorization", "Bearer callback-token")
+
+			rec := httptest.NewRecorder()
+			s.handleGitCredential(rec, req)
+
+			if rec.Code != tc.wantStatus {
+				t.Fatalf("expected status %d, got %d: %s", tc.wantStatus, rec.Code, rec.Body.String())
+			}
+			if rec.Body.String() != tc.wantBody {
+				t.Fatalf("unexpected body:\n%s\nwant:\n%s", rec.Body.String(), tc.wantBody)
+			}
+			if tc.queryHost == "gitlab.com" && controlPlaneCalls.Load() != 0 {
+				t.Fatalf("unknown host should not fetch token, got %d calls", controlPlaneCalls.Load())
+			}
+		})
+	}
+}
+
 func TestHandleGitCredentialAllowsLocalExchangeWithoutCallbackBearer(t *testing.T) {
 	t.Parallel()
 
@@ -321,6 +405,43 @@ func TestPerSessionGitTokenFetcherUsesCorrectWorkspaceID(t *testing.T) {
 	// It should use the workspace-scoped callback token, not the node-level one.
 	if requestedAuth != "Bearer session-callback-token" {
 		t.Fatalf("fetcher used wrong callback token:\n  got:  %s\n  want: Bearer session-callback-token", requestedAuth)
+	}
+}
+
+func TestGitHubTokenFetcherForWorkspaceIsProviderAware(t *testing.T) {
+	t.Parallel()
+
+	s := &Server{
+		config: &config.Config{
+			WorkspaceID: "ws-primary",
+			Repository:  "https://github.com/octo/primary.git",
+		},
+		workspaces: map[string]*WorkspaceRuntime{
+			"ws-github": {
+				ID:         "ws-github",
+				Repository: "https://github.com/octo/secondary.git",
+			},
+			"ws-artifacts": {
+				ID:         "ws-artifacts",
+				Repository: "https://acct.artifacts.cloudflare.net/git/default/repo.git",
+			},
+			"ws-empty": {
+				ID: "ws-empty",
+			},
+		},
+	}
+
+	if fetcher := s.gitHubTokenFetcherForWorkspace("ws-primary"); fetcher == nil {
+		t.Fatal("primary GitHub workspace should get a GitTokenFetcher")
+	}
+	if fetcher := s.gitHubTokenFetcherForWorkspace("ws-github"); fetcher == nil {
+		t.Fatal("secondary GitHub workspace should get a GitTokenFetcher")
+	}
+	if fetcher := s.gitHubTokenFetcherForWorkspace("ws-artifacts"); fetcher != nil {
+		t.Fatal("Artifacts workspace must not get a GH_TOKEN GitTokenFetcher")
+	}
+	if fetcher := s.gitHubTokenFetcherForWorkspace("ws-empty"); fetcher != nil {
+		t.Fatal("workspace without a GitHub repository must not get a GH_TOKEN GitTokenFetcher")
 	}
 }
 

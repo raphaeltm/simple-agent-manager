@@ -44,16 +44,27 @@ UI onboarding is explicitly out of scope for this task.
 
 ### PR 1: Workstream A, vm-agent
 
-- [ ] Move `isGitHubRepo`, `isArtifactsHost`, and `isKnownGitHost` into a small shared internal package imported by bootstrap and server code.
-- [ ] Update the rendered `git-credential-sam` shell script to allow GitHub and Artifacts hosts while silently ignoring unknown hosts.
-- [ ] Forward the requested credential host to `/git-credential` without changing the existing loopback auth model.
-- [ ] Add server-side host/provider mismatch handling in `handleGitCredential` that returns no credential for mismatched requested hosts.
-- [ ] Gate gh-wrapper installation on GitHub repositories only.
-- [ ] Gate shell startup `GH_TOKEN` fallback generation on GitHub repositories only.
-- [ ] Gate ACP `GitTokenFetcher` setup on GitHub repositories only, including secondary workspace repository resolution.
-- [ ] Extend Go tests for credential helper rendering, host mismatch handling, and `GH_TOKEN`/`GitTokenFetcher` gating.
-- [ ] Run `go test ./...` and `go test -race ./...` in `packages/vm-agent`.
-- [ ] Verify staging with fresh vm-agent nodes: delete staging nodes first, deploy branch, test GitHub-path non-regression in a fresh project chat, and document Artifacts live-path gap if staging still lacks the binding.
+- [x] Move `isGitHubRepo`, `isArtifactsHost`, and `isKnownGitHost` into a small shared internal package imported by bootstrap and server code.
+- [x] Update the rendered `git-credential-sam` shell script to allow GitHub and Artifacts hosts while silently ignoring unknown hosts.
+- [x] Forward the requested credential host to `/git-credential` without changing the existing loopback auth model.
+- [x] Add server-side host/provider mismatch handling in `handleGitCredential` that returns no credential for mismatched requested hosts.
+- [x] Gate gh-wrapper installation on GitHub repositories only.
+- [x] Gate shell startup `GH_TOKEN` fallback generation on GitHub repositories only.
+- [x] Gate ACP `GitTokenFetcher` setup on GitHub repositories only, including secondary workspace repository resolution.
+- [x] Extend Go tests for credential helper rendering, host mismatch handling, and `GH_TOKEN`/`GitTokenFetcher` gating.
+- [x] Run `go test ./...` and `go test -race ./...` in `packages/vm-agent`.
+- [x] Verify staging with fresh vm-agent nodes: delete staging nodes first, deploy branch, test GitHub-path non-regression in a fresh project chat, and document Artifacts live-path gap if staging still lacks the binding.
+
+Staging verification notes for PR 1:
+
+- Deleted the pre-existing running staging node before deployment via the staging API.
+- Deployed branch `sam/artifacts-git-vm-agent` with GitHub Actions run `28552205635`; deploy and smoke-test jobs passed.
+- Created fresh GitHub-backed staging workspace `01KWFXQ1JDBQN1EW6BKN82N35S` on fresh node `01KWFXQ14Z01YC875SPDXRD68E` for project `01KVRJCC7Y3NSDQYCPWDRPVJVH` (`serverspresentation2025/deploy-test`, branch `main`).
+- Verified workspace reached `running` with no error and node events included `workspace.provisioning`, `workspace.created`, and `agent_session.created`.
+- Created agent session `01KWFXXWQCF344WDRE3THTX1VD`; it reached `running` with no error.
+- Deleted the fresh staging node after verification.
+- Staging has no Artifacts binding, so live Artifacts fetch/push was not exercised.
+- A stale anonymous trial row `01KPJMMVWB70BA7MEGA7Z5GAS8` remains in `error` state with no provider and no heartbeat since 2026-05-01; no live staging workspace node was left running.
 
 ### PR 2: Workstreams C + D, deploy gating and token expiry shape
 

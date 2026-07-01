@@ -12,6 +12,8 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+
+	"github.com/workspace/vm-agent/internal/gitrepo"
 )
 
 type gitTokenResponse struct {
@@ -33,6 +35,12 @@ func (s *Server) handleGitCredential(w http.ResponseWriter, r *http.Request) {
 	}
 
 	bearerToken := bearerTokenFromHeader(r.Header.Get("Authorization"))
+	requestedHost := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("host")))
+	if requestedHost != "" && !gitrepo.IsKnownGitHost(requestedHost) {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
 	resp, err := s.fetchGitTokenResponseForWorkspace(r.Context(), workspaceID, bearerToken)
 	if err != nil {
 		slog.Error("Failed to fetch git token", "error", err)
@@ -47,16 +55,35 @@ func (s *Server) handleGitCredential(w http.ResponseWriter, r *http.Request) {
 	if resp.CloneURL != "" {
 		if parsed, parseErr := url.Parse(resp.CloneURL); parseErr == nil && parsed.Host != "" {
 			host = parsed.Host
-			h := strings.ToLower(parsed.Host)
-			if h == "artifacts.cloudflare.net" || strings.HasSuffix(h, ".artifacts.cloudflare.net") {
+			if gitrepo.IsArtifactsHost(parsed.Host) {
 				username = "x"
 			}
 		}
 	}
 
+	if requestedHost != "" && !credentialHostMatchesRequest(host, requestedHost) {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_, _ = fmt.Fprintf(w, "protocol=https\nhost=%s\nusername=%s\npassword=%s\n\n", host, username, resp.Token)
+}
+
+func credentialHostMatchesRequest(resolvedHost, requestedHost string) bool {
+	resolvedHost = strings.ToLower(strings.TrimSpace(resolvedHost))
+	requestedHost = strings.ToLower(strings.TrimSpace(requestedHost))
+	if requestedHost == "" {
+		return true
+	}
+	if gitrepo.IsGitHubCredentialHost(resolvedHost) {
+		return gitrepo.IsGitHubCredentialHost(requestedHost)
+	}
+	if gitrepo.IsArtifactsHost(resolvedHost) {
+		return requestedHost == resolvedHost
+	}
+	return requestedHost == resolvedHost
 }
 
 func (s *Server) fetchGitToken(ctx context.Context) (string, error) {
