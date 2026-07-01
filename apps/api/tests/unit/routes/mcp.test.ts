@@ -365,6 +365,8 @@ describe('MCP Routes', () => {
       expect(deploymentGuideTool.inputSchema.required).toBeUndefined();
       // Trigger tools
       expect(toolNames).toContain('create_trigger');
+      expect(toolNames).toContain('update_trigger');
+      expect(toolNames).toContain('delete_trigger');
       // Agent profile tools
       expect(toolNames).toContain('list_agent_profiles');
       expect(toolNames).toContain('get_agent_profile');
@@ -396,7 +398,7 @@ describe('MCP Routes', () => {
       expect(toolNames).toContain('list_deployment_routes');
       expect(toolNames).toContain('list_deployment_environment_config');
       expect(toolNames).toContain('set_deployment_environment_config');
-      expect(body.result.tools).toHaveLength(95);
+      expect(body.result.tools).toHaveLength(97);
     });
 
     it('should include MUST call directive in get_instructions description', async () => {

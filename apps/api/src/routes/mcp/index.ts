@@ -132,7 +132,7 @@ import {
   handleSearchTasks,
   handleUpdateTaskStatus,
 } from './task-tools';
-import { handleCreateTrigger } from './trigger-tools';
+import { handleCreateTrigger, handleDeleteTrigger, handleUpdateTrigger } from './trigger-tools';
 import {
   handleExposePort,
   handleGetCredentialStatus,
@@ -352,6 +352,10 @@ mcpRoutes.post('/', async (c) => {
           // ─── Trigger management tools ────────────────────────────────
           case 'create_trigger':
             return c.json(await handleCreateTrigger(requestId, toolArgs, tokenData, c.env));
+          case 'update_trigger':
+            return c.json(await handleUpdateTrigger(requestId, toolArgs, tokenData, c.env));
+          case 'delete_trigger':
+            return c.json(await handleDeleteTrigger(requestId, toolArgs, tokenData, c.env));
           // ─── Agent profile tools ──────────────────────────────────────
           case 'list_agent_profiles':
             return c.json(await handleListAgentProfiles(requestId, toolArgs, tokenData, c.env));
