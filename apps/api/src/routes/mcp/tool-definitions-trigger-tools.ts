@@ -51,4 +51,93 @@ export const TRIGGER_TOOLS = [
       additionalProperties: false,
     },
   },
+  {
+    name: 'update_trigger',
+    description:
+      'Update an existing automation trigger in the current project. ' +
+      'Use this to rename a trigger, pause/resume it, change its cron schedule, timezone, prompt template, profile, skill, task mode, VM size, or concurrency limit.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        triggerId: {
+          type: 'string',
+          description: 'ID of the trigger to update.',
+        },
+        name: {
+          type: 'string',
+          description: 'Human-readable name for the trigger.',
+        },
+        description: {
+          type: ['string', 'null'],
+          description: 'Optional trigger description. Use null to clear it.',
+        },
+        status: {
+          type: 'string',
+          description: 'Trigger status. Paused or disabled triggers do not schedule future runs.',
+          enum: ['active', 'paused', 'disabled'],
+        },
+        cronExpression: {
+          type: 'string',
+          description:
+            'Standard 5-field cron expression (minute hour day month weekday). ' +
+            'Changing this recomputes the next fire time for active triggers.',
+        },
+        cronTimezone: {
+          type: 'string',
+          description: 'IANA timezone for the schedule (e.g., "America/New_York", "UTC").',
+        },
+        skipIfRunning: {
+          type: 'boolean',
+          description: 'Whether to skip a scheduled run when a previous execution is still queued or running.',
+        },
+        promptTemplate: {
+          type: 'string',
+          description:
+            'The prompt sent to the agent each time the trigger fires. ' +
+            'Supports {{variable}} interpolation.',
+        },
+        agentProfileId: {
+          type: ['string', 'null'],
+          description: 'Agent profile to use for triggered tasks. Use null to clear the override.',
+        },
+        skillId: {
+          type: ['string', 'null'],
+          description: 'Skill to use for triggered tasks. Use null to clear the override.',
+        },
+        taskMode: {
+          type: 'string',
+          description: 'Task mode: "task" (fire-and-forget) or "conversation" (interactive).',
+          enum: ['task', 'conversation'],
+        },
+        vmSizeOverride: {
+          type: ['string', 'null'],
+          description: 'VM size override. Use null to clear the override.',
+          enum: ['small', 'medium', 'large', null],
+        },
+        maxConcurrent: {
+          type: 'number',
+          description: 'Maximum queued/running executions allowed for this trigger.',
+        },
+      },
+      required: ['triggerId'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'delete_trigger',
+    description:
+      'Delete an automation trigger in the current project. ' +
+      'This also deletes the trigger execution history and any GitHub trigger configuration for that trigger.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        triggerId: {
+          type: 'string',
+          description: 'ID of the trigger to delete.',
+        },
+      },
+      required: ['triggerId'],
+      additionalProperties: false,
+    },
+  },
 ];
