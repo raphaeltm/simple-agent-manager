@@ -7,6 +7,7 @@ import { projectsRoutes } from '../../../src/routes/projects';
 import { getUserInstallationRepositories } from '../../../src/services/github-app';
 
 const mocks = vi.hoisted(() => ({
+  createOwnerProjectMembership: vi.fn(),
   getGitHubUserAccessToken: vi.fn(),
   getUserInstallationRepositories: vi.fn(),
   requireOwnedProject: vi.fn(),
@@ -19,6 +20,7 @@ vi.mock('../../../src/middleware/auth', () => ({
   getUserId: () => 'user-1',
 }));
 vi.mock('../../../src/middleware/project-auth', () => ({
+  createOwnerProjectMembership: mocks.createOwnerProjectMembership,
   requireOwnedProject: mocks.requireOwnedProject,
 }));
 vi.mock('../../../src/services/github-user-access-token', () => ({
