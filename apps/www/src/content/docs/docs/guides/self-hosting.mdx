@@ -49,6 +49,7 @@ In the Cloudflare account from Step 1, enable R2 first if it is not already acti
 | Account         | Cloudflare Pages       | Edit   |
 | Account         | AI Gateway             | Edit   |
 | Account         | Containers             | Edit   |
+| Account         | SSL and Certificates   | Edit   |
 | Zone            | DNS                    | Edit   |
 | Zone            | Workers Routes         | Edit   |
 | Zone            | SSL and Certificates   | Edit   |
@@ -56,7 +57,7 @@ In the Cloudflare account from Step 1, enable R2 first if it is not already acti
 
 Set **Zone Resources** to your specific domain and **Account Resources** to your account.
 
-The default deploy configures AI Gateway and writes Analytics Engine data, so keep the **AI Gateway** permission and enable **Analytics Engine** even if every user brings their own model keys. The current API Worker config also includes the experimental Sandbox binding, so **Containers: Edit** is required for the default Worker deploy.
+The default deploy configures AI Gateway and writes Analytics Engine data, so keep the **AI Gateway** permission and enable **Analytics Engine** even if every user brings their own model keys. The current API Worker config also includes the experimental Sandbox binding, so **Containers: Edit** is required for the default Worker deploy. The **Account → SSL and Certificates → Edit** permission is required for issuing per-node Origin CA certificates used for VM-agent TLS — without it, new nodes cannot obtain a TLS certificate and will fail to boot.
 
 Because the token includes **Workers R2 Storage** access, Cloudflare's final creation screen shows **both** the API token **and** a set of R2 S3 keys (Access Key ID + Secret Access Key) together. You do **not** need to create a separate R2 API token. Copy all of the values before leaving the page:
 
@@ -231,7 +232,7 @@ Check that your GitHub App's Callback URL matches your `BASE_DOMAIN` exactly: `h
 
 ### Origin CA Certificate Error (1016)
 
-Your API token is missing the **Zone → SSL and Certificates → Edit** permission. New nodes use this permission when the API Worker signs the node-generated CSR for VM TLS. Edit the token in Cloudflare and add it.
+Your API token is missing the **Account → SSL and Certificates → Edit** permission. New nodes require this permission so the API Worker can sign the node-generated CSR via Cloudflare Origin CA for VM-agent TLS. Edit the token in the Cloudflare dashboard and add it.
 
 ### Rotating legacy shared Origin CA certificates
 

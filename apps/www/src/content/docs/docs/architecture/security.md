@@ -16,7 +16,7 @@ These are Cloudflare Worker secrets set during deployment:
 | `ENCRYPTION_KEY`          | AES-256-GCM key for encrypting user credentials                                          |
 | `JWT_PRIVATE_KEY`         | RSA-2048 key for signing workspace and callback tokens                                   |
 | `JWT_PUBLIC_KEY`          | RSA-2048 key for token verification (exposed via JWKS)                                   |
-| `CF_API_TOKEN`            | Cloudflare deploy, DNS, Origin CA CSR signing, observability, and AI Gateway operations  |
+| `CF_API_TOKEN`            | Cloudflare deploy, DNS, Origin CA certificate issuance, observability, and AI Gateway operations (requires Account → SSL and Certificates → Edit)  |
 | `GITHUB_CLIENT_ID/SECRET` | OAuth authentication                                                                     |
 | `GITHUB_APP_*`            | GitHub App for repository access                                                         |
 | `GITHUB_WEBHOOK_SECRET`   | GitHub App webhook HMAC verification; set from GitHub Actions secret `GH_WEBHOOK_SECRET` |

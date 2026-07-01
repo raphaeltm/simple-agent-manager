@@ -15,7 +15,7 @@ Uses `GH_*` prefix because GitHub Actions secret names cannot start with `GITHUB
 | Variable | `BASE_DOMAIN`              | Yes                                     |
 | Variable | `RESOURCE_PREFIX`          | No (default: `sam`)                     |
 | Variable | `PULUMI_STATE_BUCKET`      | No (default: `sam-pulumi-state`)        |
-| Secret   | `CF_API_TOKEN`             | Yes                                     |
+| Secret   | `CF_API_TOKEN`             | Yes (requires Account → SSL and Certificates → Edit for Origin CA)  |
 | Secret   | `CF_ACCOUNT_ID`            | Yes                                     |
 | Secret   | `CF_ZONE_ID`               | Yes                                     |
 | Secret   | `DEVCONTAINER_CACHE_CLOUDFLARE_API_TOKEN` | No (falls back to `CF_API_TOKEN`)       |

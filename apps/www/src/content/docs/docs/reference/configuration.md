@@ -20,7 +20,7 @@ These are Cloudflare Worker secrets, set during deployment. Pulumi auto-generate
 | `JWT_PUBLIC_KEY`                           | RSA-2048 public key for token verification (exposed via JWKS)                                                  |
 | `DEPLOY_SIGNING_PRIVATE_KEY`               | Ed25519 private key for signing deployment apply payloads (auto-generated)                                     |
 | `DEPLOY_SIGNING_PUBLIC_KEY`                | Ed25519 public key derived during deployment for deployment node verification (auto-generated)                  |
-| `CF_API_TOKEN`                             | Cloudflare API token for infrastructure, DNS, Origin CA CSR signing, observability, AI Gateway, and admin logs  |
+| `CF_API_TOKEN`                             | Cloudflare API token for infrastructure, DNS, Origin CA certificate issuance, observability, AI Gateway, and admin logs. Requires **Account → SSL and Certificates → Edit**.  |
 | `CF_AIG_TOKEN`                             | Optional narrower Cloudflare AI Gateway Unified Billing token                                                  |
 | `CF_ZONE_ID`                               | Cloudflare zone ID for DNS record management                                                                   |
 | `CF_ACCOUNT_ID`                            | Cloudflare account ID                                                                                          |
