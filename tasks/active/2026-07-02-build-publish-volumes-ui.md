@@ -54,7 +54,7 @@ This task implements combined idea `01KWHN2X97VG3DYEVWRPRVZ2K7` and supersedes c
 - [x] Add API tests for compose-publish callback volume creation side effects, unsafe rejection, and no side effects on invalid submissions.
 - [x] Add compose-publish apply transform tests proving safe named service volumes resolve to SAM mount roots.
 - [x] Add web tests for API client behavior and volume UI states/actions.
-- [ ] Add Playwright visual audit coverage for the deployment volumes UI on mobile and desktop with normal, empty, many, long text, and error scenarios.
+- [x] Add Playwright visual audit coverage for the deployment volumes UI on mobile and desktop with normal, empty, many, long text, and error scenarios.
 - [x] Run local quality gates and focused test suites throughout implementation.
 - [ ] Run local specialist review: task-completion-validator, go-specialist, cloudflare-specialist, ui-ux-specialist, security-auditor, test-engineer, doc-sync-validator, constitution-validator.
 - [ ] Deploy to staging, delete/recreate nodes as required for vm-agent changes, and verify a real `build_and_publish` Compose app with a safe named volume.
@@ -70,9 +70,48 @@ This task implements combined idea `01KWHN2X97VG3DYEVWRPRVZ2K7` and supersedes c
 - `pnpm typecheck` passed.
 - `pnpm --filter @simple-agent-manager/api lint` passed with existing warnings.
 - `pnpm --filter @simple-agent-manager/web lint` passed with existing warnings after touched-file import sorting fixes.
+- `pnpm --filter @simple-agent-manager/web lint` passed again after Playwright audit coverage was added, with existing warnings only.
+- `pnpm --filter @simple-agent-manager/web typecheck` passed again after Playwright audit coverage was added.
+- `pnpm --filter @simple-agent-manager/web test -- tests/unit/components/deployment-volumes-panel.test.tsx` passed again after Playwright audit coverage was added.
+- `pnpm --filter @simple-agent-manager/web exec playwright test tests/playwright/deployment-volumes-audit.spec.ts --project="iPhone SE (375x667)" --project="Desktop (1280x800)"` passed, covering normal, long/special text, empty, many-row, and error states with no horizontal overflow assertions.
 - `pnpm lint` passed.
 - `git diff --check` passed.
 - `go test ./packages/vm-agent/internal/publish` and `gofmt` are blocked in this workspace because `go` and `gofmt` are not installed.
+
+## UI/UX Validation Report
+
+### Variants Considered
+
+1. Table-heavy volume management tab with fixed columns for provider, attachment, device, and timestamps.
+2. Compact summary metrics plus row-card inventory with create/actions above the list.
+3. Split create/details layout with a side panel for selected volume details.
+
+### Selected Direction
+
+- Choice: Compact summary metrics plus row-card inventory.
+- Why: It matches the existing deployment detail surface, keeps mobile single-column behavior straightforward, and avoids horizontal table pressure from provider IDs and device paths.
+
+### Rubric Scores
+
+| Category | Score (1-5) | Notes |
+| --- | ---: | --- |
+| Visual hierarchy | 4 | Summary metrics, action row, create form, and inventory rows scan in that order. |
+| Interaction clarity | 4 | Create/delete/attach/detach/refresh states use existing buttons, disabled states, and error alerts. |
+| Mobile usability | 4 | 375px audit and explicit 320px overflow check passed; content stacks without horizontal scroll. |
+| Accessibility | 4 | Native inputs/buttons, labels, aria-labels on icon delete buttons, and text status badges. |
+| System consistency | 4 | Uses existing deployment tab patterns, shared `Button`/`Alert`/`StatusBadge`, and token classes. |
+
+### Screenshot Evidence
+
+- Mobile normal: `.codex/tmp/playwright-screenshots/deployment-volumes-normal-375x667.png`
+- Mobile long/special text: `.codex/tmp/playwright-screenshots/deployment-volumes-long-special-375x667.png`
+- Desktop many volumes: `.codex/tmp/playwright-screenshots/deployment-volumes-many-1280x800.png`
+- Desktop error state: `.codex/tmp/playwright-screenshots/deployment-volumes-error-1280x800.png`
+
+### Issues Found/Fixes
+
+- Playwright audit harness initially failed because the manually served production bundle was built without `VITE_API_URL`; rebuilt with the same env used by the Playwright config before validating.
+- Strict Playwright text locators were tightened where repeated labels appeared in both summary metrics and rows.
 
 ## Acceptance Criteria
 
