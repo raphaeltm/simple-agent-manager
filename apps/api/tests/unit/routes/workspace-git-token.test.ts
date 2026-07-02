@@ -271,6 +271,65 @@ describe('workspace git-token GitHub scoping', () => {
     expect(getInstallationToken).not.toHaveBeenCalled();
   });
 
+  // Regression: on staging the Artifacts binding's get().remote came back EMPTY
+  // (unlike create().remote), so the endpoint returned an empty cloneUrl. The VM
+  // agent then defaulted the git credential host to github.com, which never
+  // matches the real Artifacts host — so `git fetch`/`push` got no credential
+  // (helper returned github creds without host, and 204 when git asked for the
+  // Artifacts host). The endpoint must fall back to the stored project.repository,
+  // which is `created.remote` captured at project creation and is exactly what the
+  // VM agent cloned (so its host is guaranteed to match git's request).
+  it('falls back to stored project.repository as cloneUrl when the Artifacts binding returns an empty remote', async () => {
+    const artifactsEnv = {
+      ...mockEnv,
+      ARTIFACTS_ENABLED: 'true',
+      ARTIFACTS: {
+        get: vi.fn().mockResolvedValue({
+          remote: '',
+          createToken: vi.fn().mockResolvedValue({
+            plaintext: 'artifacts-token',
+            expiresAt: '2026-06-06T20:00:00.000Z',
+          }),
+        }),
+      },
+    } as Env;
+    limitResponses.push([workspaceRow()], [artifactsProjectRow()]);
+
+    const res = await app.request('/ws/ws-1/git-token', { method: 'POST' }, artifactsEnv);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({
+      token: 'artifacts-token',
+      expiresAt: '2026-06-06T20:00:00.000Z',
+      cloneUrl: 'https://acct123.artifacts.cloudflare.net/git/default/artifacts-repo-1.git',
+    });
+    expect(getInstallationToken).not.toHaveBeenCalled();
+  });
+
+  it('falls back to stored project.repository as cloneUrl when the Artifacts binding omits remote entirely', async () => {
+    const artifactsEnv = {
+      ...mockEnv,
+      ARTIFACTS_ENABLED: 'true',
+      ARTIFACTS: {
+        get: vi.fn().mockResolvedValue({
+          // no `remote` field at all (undefined)
+          createToken: vi.fn().mockResolvedValue({
+            plaintext: 'artifacts-token',
+            expiresAt: '2026-06-06T20:00:00.000Z',
+          }),
+        }),
+      },
+    } as Env;
+    limitResponses.push([workspaceRow()], [artifactsProjectRow()]);
+
+    const res = await app.request('/ws/ws-1/git-token', { method: 'POST' }, artifactsEnv);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      cloneUrl: 'https://acct123.artifacts.cloudflare.net/git/default/artifacts-repo-1.git',
+    });
+  });
+
   it('falls back to repository-name scoping for legacy projects without a repo id', async () => {
     queueWorkspaceProjectLookup({ githubRepoId: null });
 
