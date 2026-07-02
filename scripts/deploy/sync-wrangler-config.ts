@@ -17,19 +17,20 @@
 import { execSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+
 import * as TOML from '@iarna/toml';
+
+import { DEPLOYMENT_CONFIG } from './config.js';
 import type {
-  PulumiOutputs,
-  WranglerToml,
-  WranglerEnvConfig,
-  DurableObjectsConfig,
   AIBinding,
   AnalyticsEngineDatasetBinding,
   ContainerBinding,
+  DurableObjectsConfig,
   MigrationEntry,
-  TailWorkerWranglerToml,
+  PulumiOutputs,
+  WranglerEnvConfig,
+  WranglerToml,
 } from './types.js';
-import { DEPLOYMENT_CONFIG } from './config.js';
 
 const INFRA_DIR = resolve(import.meta.dirname, '../../infra');
 const WRANGLER_TOML_PATH = resolve(import.meta.dirname, '../../apps/api/wrangler.toml');
@@ -202,16 +203,88 @@ function saveWranglerToml(config: WranglerToml): void {
   writeFileSync(WRANGLER_TOML_PATH, content, 'utf-8');
 }
 
+/**
+ * Read-only probe of the Cloudflare Artifacts control-plane REST API to detect
+ * whether this deployment's account+token can actually use Artifacts. Returns
+ * true only on a 200 from the list-repos endpoint. Fail-closed (returns false)
+ * on any auth/permission error, missing token, or network failure — a broken or
+ * under-scoped probe must never silently deploy an [[artifacts]] binding the
+ * account can't support.
+ *
+ * Requires the deploy token to carry the "Artifacts > Read" permission.
+ */
+export async function detectArtifactsAvailable(
+  accountId: string,
+  namespace: string
+): Promise<boolean> {
+  const apiToken = process.env.CF_API_TOKEN || process.env.CLOUDFLARE_API_TOKEN;
+  if (!apiToken) {
+    console.warn(
+      '  Artifacts auto-detect: CF_API_TOKEN/CLOUDFLARE_API_TOKEN not set — treating Artifacts as unavailable'
+    );
+    return false;
+  }
+  const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/artifacts/namespaces/${namespace}/repos?limit=1`;
+  try {
+    const response = await fetch(url, { headers: { Authorization: `Bearer ${apiToken}` } });
+    if (response.ok) {
+      return true;
+    }
+    const hint =
+      response.status === 401 || response.status === 403
+        ? ' — the deploy token is missing the "Artifacts > Read" permission (or the account has no Artifacts access)'
+        : '';
+    console.warn(
+      `  Artifacts auto-detect: probe returned HTTP ${response.status}${hint}. Treating Artifacts as unavailable.`
+    );
+    return false;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(
+      `  Artifacts auto-detect: probe failed (${message}). Treating Artifacts as unavailable.`
+    );
+    return false;
+  }
+}
+
+/**
+ * Resolves whether the Artifacts binding should be included for this deploy.
+ *
+ * `ARTIFACTS_BINDING_ENABLED` is an optional explicit override: set it to
+ * "true"/"false" to force a value (escape hatch). When unset/"auto", the value
+ * is auto-detected from the live Artifacts REST probe. The probe always runs so
+ * the deploy log records real availability even when an override is in effect.
+ */
+export async function resolveArtifactsBindingEnabled(
+  accountId: string,
+  namespace: string
+): Promise<boolean> {
+  const override = process.env.ARTIFACTS_BINDING_ENABLED?.trim().toLowerCase();
+  const probeAvailable = await detectArtifactsAvailable(accountId, namespace);
+
+  if (override === 'true' || override === 'false') {
+    const enabled = override === 'true';
+    console.log(
+      `  Artifacts: ARTIFACTS_BINDING_ENABLED=${override} override in effect (auto-detect probe returned ${probeAvailable})`
+    );
+    return enabled;
+  }
+  console.log(
+    `  Artifacts: auto-detected availability = ${probeAvailable} (namespace "${namespace}")`
+  );
+  return probeAvailable;
+}
+
 export function generateApiWorkerEnv(
   topLevel: WranglerToml,
   outputs: PulumiOutputs,
   stack: string,
-  includeTailConsumers: boolean
+  includeTailConsumers: boolean,
+  artifactsBindingEnabled: boolean
 ): WranglerEnvConfig {
   const staticBindings = extractStaticBindings(topLevel);
-  const artifactsBindingEnabled = process.env.ARTIFACTS_BINDING_ENABLED === 'true';
   if (artifactsBindingEnabled && !staticBindings.artifacts) {
-    throw new Error('ARTIFACTS_BINDING_ENABLED=true requires a top-level [[artifacts]] binding');
+    throw new Error('Artifacts is enabled but no top-level [[artifacts]] binding exists in wrangler.toml');
   }
   const includeArtifactsBinding = artifactsBindingEnabled && !!staticBindings.artifacts;
   const tailWorkerName = DEPLOYMENT_CONFIG.resources.tailWorkerName(stack);
@@ -397,11 +470,26 @@ async function main(): Promise<void> {
     );
   }
 
+  // Auto-detect whether this deployment can use Cloudflare Artifacts (probes the
+  // Artifacts REST API with the deploy token). ARTIFACTS_BINDING_ENABLED forces a
+  // value when set explicitly.
+  const artifactsNamespace = process.env.ARTIFACTS_NAMESPACE || 'default';
+  const artifactsBindingEnabled = await resolveArtifactsBindingEnabled(
+    outputs.cloudflareAccountId,
+    artifactsNamespace
+  );
+
   // Generate complete env section for API worker
   if (!config.env) {
     config.env = {};
   }
-  config.env[envKey] = generateApiWorkerEnv(config, outputs, stack, hasTailWorker);
+  config.env[envKey] = generateApiWorkerEnv(
+    config,
+    outputs,
+    stack,
+    hasTailWorker,
+    artifactsBindingEnabled
+  );
   saveWranglerToml(config);
   console.log(`Updated wrangler.toml [env.${envKey}]`);
 

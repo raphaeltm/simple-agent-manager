@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+
+import {
+  checkTailWorkerExists,
+  detectArtifactsAvailable,
+  generateApiWorkerEnv,
+  resolveArtifactsBindingEnabled,
+} from '../deploy/sync-wrangler-config.js';
 import type { PulumiOutputs, WranglerToml } from '../deploy/types.js';
-import { checkTailWorkerExists, generateApiWorkerEnv } from '../deploy/sync-wrangler-config.js';
 
 const outputs: PulumiOutputs = {
   d1DatabaseId: 'd1-id',
@@ -45,7 +51,7 @@ describe('sync wrangler config', () => {
       analytics_engine_datasets: [{ binding: 'ANALYTICS', dataset: 'legacy_analytics' }],
     };
 
-    const envConfig = generateApiWorkerEnv(topLevel, outputs, 'prod', false);
+    const envConfig = generateApiWorkerEnv(topLevel, outputs, 'prod', false, false);
 
     expect(envConfig.vars).toMatchObject({
       ANALYTICS_DATASET: 's123abc_analytics',
@@ -60,7 +66,7 @@ describe('sync wrangler config', () => {
   });
 
   it('fails instead of falling back to sam when deployment identity is missing', () => {
-    expect(() => generateApiWorkerEnv({}, outputs, 'prod', false)).toThrow(
+    expect(() => generateApiWorkerEnv({}, outputs, 'prod', false, false)).toThrow(
       'RESOURCE_PREFIX or BASE_DOMAIN is required'
     );
   });
@@ -68,7 +74,7 @@ describe('sync wrangler config', () => {
   it('derives deployment identity from BASE_DOMAIN when RESOURCE_PREFIX is not explicit', () => {
     vi.stubEnv('BASE_DOMAIN', 'example.com');
 
-    const envConfig = generateApiWorkerEnv({}, outputs, 'prod', false);
+    const envConfig = generateApiWorkerEnv({}, outputs, 'prod', false, false);
 
     expect(envConfig.name).toBe('sa379a6-api-prod');
     expect(envConfig.vars).toMatchObject({
@@ -78,7 +84,7 @@ describe('sync wrangler config', () => {
     });
   });
 
-  it('omits Artifacts binding and disables runtime flag by default', () => {
+  it('omits Artifacts binding and disables runtime flag when Artifacts is not enabled', () => {
     vi.stubEnv('RESOURCE_PREFIX', 's123abc');
 
     const topLevel: WranglerToml = {
@@ -86,29 +92,27 @@ describe('sync wrangler config', () => {
       artifacts: [{ binding: 'ARTIFACTS', namespace: 'default' }],
     };
 
-    const envConfig = generateApiWorkerEnv(topLevel, outputs, 'prod', false);
+    const envConfig = generateApiWorkerEnv(topLevel, outputs, 'prod', false, false);
 
     expect(envConfig.artifacts).toBeUndefined();
     expect(envConfig.vars).toMatchObject({ ARTIFACTS_ENABLED: 'false' });
   });
 
-  it('copies Artifacts binding and enables runtime flag only when explicitly opted in', () => {
+  it('copies Artifacts binding and enables runtime flag when Artifacts is enabled', () => {
     vi.stubEnv('RESOURCE_PREFIX', 's123abc');
-    vi.stubEnv('ARTIFACTS_BINDING_ENABLED', 'true');
 
     const artifacts = [{ binding: 'ARTIFACTS', namespace: 'default' }];
-    const envConfig = generateApiWorkerEnv({ artifacts }, outputs, 'prod', false);
+    const envConfig = generateApiWorkerEnv({ artifacts }, outputs, 'prod', false, true);
 
     expect(envConfig.artifacts).toEqual(artifacts);
     expect(envConfig.vars).toMatchObject({ ARTIFACTS_ENABLED: 'true' });
   });
 
-  it('fails when Artifacts binding is enabled without a top-level binding declaration', () => {
+  it('fails when Artifacts is enabled without a top-level binding declaration', () => {
     vi.stubEnv('RESOURCE_PREFIX', 's123abc');
-    vi.stubEnv('ARTIFACTS_BINDING_ENABLED', 'true');
 
-    expect(() => generateApiWorkerEnv({}, outputs, 'prod', false)).toThrow(
-      'ARTIFACTS_BINDING_ENABLED=true requires a top-level [[artifacts]] binding'
+    expect(() => generateApiWorkerEnv({}, outputs, 'prod', false, true)).toThrow(
+      'Artifacts is enabled but no top-level [[artifacts]] binding exists in wrangler.toml'
     );
   });
 
@@ -131,5 +135,71 @@ describe('sync wrangler config', () => {
     await expect(checkTailWorkerExists('account-id', 'tail-worker')).rejects.toThrow(
       'CF_API_TOKEN or CLOUDFLARE_API_TOKEN is required'
     );
+  });
+});
+
+describe('detectArtifactsAvailable (Artifacts REST probe)', () => {
+  it('returns true and hits the namespace list-repos endpoint when the probe returns 200', async () => {
+    vi.stubEnv('CF_API_TOKEN', 'token');
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response('{"success":true,"result":[]}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(detectArtifactsAvailable('account-id', 'default')).resolves.toBe(true);
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://api.cloudflare.com/client/v4/accounts/account-id/artifacts/namespaces/default/repos?limit=1',
+      { headers: { Authorization: 'Bearer token' } }
+    );
+  });
+
+  it('fails closed when the token lacks the Artifacts permission (401/403)', async () => {
+    vi.stubEnv('CF_API_TOKEN', 'token');
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('nope', { status: 403 })));
+    await expect(detectArtifactsAvailable('account-id', 'default')).resolves.toBe(false);
+  });
+
+  it('fails closed when the account has no Artifacts access (404)', async () => {
+    vi.stubEnv('CF_API_TOKEN', 'token');
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('not found', { status: 404 })));
+    await expect(detectArtifactsAvailable('account-id', 'default')).resolves.toBe(false);
+  });
+
+  it('fails closed on a network error', async () => {
+    vi.stubEnv('CF_API_TOKEN', 'token');
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('boom')));
+    await expect(detectArtifactsAvailable('account-id', 'default')).resolves.toBe(false);
+  });
+
+  it('fails closed when no deploy token is available', async () => {
+    await expect(detectArtifactsAvailable('account-id', 'default')).resolves.toBe(false);
+  });
+});
+
+describe('resolveArtifactsBindingEnabled (auto-detect + override)', () => {
+  it('auto-detects true from a 200 probe when no override is set', async () => {
+    vi.stubEnv('CF_API_TOKEN', 'token');
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{}', { status: 200 })));
+    await expect(resolveArtifactsBindingEnabled('account-id', 'default')).resolves.toBe(true);
+  });
+
+  it('auto-detects false from a failing probe when no override is set', async () => {
+    vi.stubEnv('CF_API_TOKEN', 'token');
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{}', { status: 403 })));
+    await expect(resolveArtifactsBindingEnabled('account-id', 'default')).resolves.toBe(false);
+  });
+
+  it('honors an explicit ARTIFACTS_BINDING_ENABLED=true override even when the probe fails', async () => {
+    vi.stubEnv('CF_API_TOKEN', 'token');
+    vi.stubEnv('ARTIFACTS_BINDING_ENABLED', 'true');
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{}', { status: 403 })));
+    await expect(resolveArtifactsBindingEnabled('account-id', 'default')).resolves.toBe(true);
+  });
+
+  it('honors an explicit ARTIFACTS_BINDING_ENABLED=false override even when the probe succeeds', async () => {
+    vi.stubEnv('CF_API_TOKEN', 'token');
+    vi.stubEnv('ARTIFACTS_BINDING_ENABLED', 'false');
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{}', { status: 200 })));
+    await expect(resolveArtifactsBindingEnabled('account-id', 'default')).resolves.toBe(false);
   });
 });
