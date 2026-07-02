@@ -31,12 +31,15 @@
  *  - SAM injects: the per-environment bridge network, sam.* labels,
  *    `restart: unless-stopped`, bounded json-file logging, and default resource
  *    limits when the compose omits `deploy.resources`.
- *  - `image:`, `command`, `entrypoint`, `environment`, safe named `volumes`,
- *    `depends_on`, `healthcheck`, `expose`, and any explicit `deploy.resources`
- *    are PRESERVED.
+ *  - `image:`, `command`, `entrypoint`, `environment`, `depends_on`,
+ *    `healthcheck`, `expose`, and any explicit `deploy.resources` are
+ *    PRESERVED.
+ *  - Safe named service `volumes` are rewritten to SAM provider-backed bind
+ *    mount roots under `/mnt/sam-env-{environmentId}/volumes/{name}`.
  *
  * Top-level: `networks` is stripped (warned) and replaced with SAM's bridge;
- * safe named `volumes` are preserved.
+ * safe named `volumes` are consumed for provider volume creation and are not
+ * re-emitted as Docker-managed local volumes.
  *
  * The route hostnames/hostPorts are derived with the SAME primitives the
  * manifest path uses ({@link assignRouteTargets}), so DNS upsert, Caddy
@@ -60,6 +63,7 @@ import {
   extractComposeRouteHints,
   type PublicRouteInput,
 } from './deployment-routing';
+import { resolveNamedVolumeMountRoot } from './deployment-volumes';
 
 export const DEFAULT_COMPOSE_PUBLISH_MEMORY_LIMIT_MB = 256;
 export const DEFAULT_COMPOSE_PUBLISH_LOG_MAX_SIZE = '10m';
@@ -273,17 +277,6 @@ function validateTopLevelVolumeOptions(value: unknown, errors: ComposeParseError
   }
 }
 
-function sanitizedVolumeDeclarations(
-  volumes: Record<string, { sizeHintMb?: number }>
-): Record<string, null | { 'x-sam-size-hint-mb': number }> {
-  const sanitized: Record<string, null | { 'x-sam-size-hint-mb': number }> = {};
-  for (const [name, volume] of Object.entries(volumes)) {
-    sanitized[name] =
-      volume.sizeHintMb !== undefined ? { 'x-sam-size-hint-mb': volume.sizeHintMb } : null;
-  }
-  return sanitized;
-}
-
 export function extractComposePublishVolumeDeclarations(
   composeYaml: string
 ): Record<string, { sizeHintMb?: number }> {
@@ -324,7 +317,7 @@ export function extractComposePublishVolumeDeclarations(
 function validateSafeNamedVolumes(
   doc: Record<string, unknown>,
   rawServices: Record<string, unknown>
-): Record<string, null | { 'x-sam-size-hint-mb': number }> {
+): void {
   const errors: ComposeParseError[] = [];
   const volumes = parseVolumes(doc.volumes, errors);
   validateTopLevelVolumeOptions(doc.volumes, errors);
@@ -353,8 +346,59 @@ function validateSafeNamedVolumes(
       `Compose-publish volume validation failed: ${formatComposeParseErrors(errors)}`
     );
   }
+}
 
-  return sanitizedVolumeDeclarations(volumes);
+function isReadOnlyServiceVolumeMount(raw: unknown): boolean {
+  if (typeof raw === 'string') {
+    const parts = raw.split(':');
+    if (parts.length < 3) return false;
+    return parts
+      .slice(2)
+      .join(':')
+      .split(',')
+      .some((option) => option.trim() === 'ro' || option.trim() === 'readonly');
+  }
+
+  if (isPlainObject(raw)) {
+    return raw.read_only === true || raw.readonly === true;
+  }
+
+  return false;
+}
+
+function rewriteSafeNamedServiceVolumes(
+  rawVolumes: unknown,
+  serviceName: string,
+  environmentId: string
+): unknown[] | undefined {
+  if (rawVolumes === undefined || rawVolumes === null) {
+    return undefined;
+  }
+
+  const errors: ComposeParseError[] = [];
+  const parsedVolumes = parseServiceVolumes(rawVolumes, `services.${serviceName}`, errors);
+  if (errors.length > 0) {
+    throw new Error(
+      `Compose-publish volume validation failed: ${formatComposeParseErrors(errors)}`
+    );
+  }
+  if (parsedVolumes.length === 0) {
+    return undefined;
+  }
+
+  const rawEntries = Array.isArray(rawVolumes) ? rawVolumes : [];
+  return parsedVolumes.map((volume, index) => {
+    const mount: Record<string, unknown> = {
+      type: 'bind',
+      source: resolveNamedVolumeMountRoot(environmentId, volume.name),
+      target: volume.mountPath,
+      bind: { create_host_path: false },
+    };
+    if (isReadOnlyServiceVolumeMount(rawEntries[index])) {
+      mount.read_only = true;
+    }
+    return mount;
+  });
 }
 
 /**
@@ -430,7 +474,7 @@ export function buildComposePublishApplyPayload(
   if (!isPlainObject(rawServices)) {
     throw new Error('Captured composeYaml has no services mapping');
   }
-  const sanitizedVolumes = validateSafeNamedVolumes(doc, rawServices);
+  validateSafeNamedVolumes(doc, rawServices);
   validateLiteralContainerPorts(rawServices);
   const routeHints = extractComposeRouteHints(submission.composeYaml);
   assertComposeRoutesReferenceServices(routeHints, rawServices);
@@ -520,6 +564,17 @@ export function buildComposePublishApplyPayload(
       }
     }
 
+    const rewrittenVolumes = rewriteSafeNamedServiceVolumes(
+      service.volumes,
+      name,
+      opts.environmentId
+    );
+    if (rewrittenVolumes && rewrittenVolumes.length > 0) {
+      service.volumes = rewrittenVolumes;
+    } else {
+      delete service.volumes;
+    }
+
     applySamServiceInjections(service, name, opts, networkName, defaultMemMb);
     const logging = service.logging;
     if (isPlainObject(logging) && isPlainObject(logging.options)) {
@@ -558,12 +613,6 @@ export function buildComposePublishApplyPayload(
   // -- Top-level reassembly --
   const outDoc: Record<string, unknown> = {};
   outDoc.services = outServices;
-
-  // Re-emit only sanitized named volume declarations. The raw top-level volume
-  // object can encode host bind mounts through local-driver options.
-  if (Object.keys(sanitizedVolumes).length > 0) {
-    outDoc.volumes = sanitizedVolumes;
-  }
 
   // Strip denied top-level fields (WARN). networks is replaced with SAM's bridge.
   for (const deniedField of Object.keys(DENIED_TOP_LEVEL_FIELDS)) {

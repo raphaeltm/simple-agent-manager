@@ -9,15 +9,18 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"regexp"
 	"sort"
 	"strings"
 )
 
 const secretInterpolationPlaceholder = "__SAM_CONFIGURED_SECRET_PLACEHOLDER__"
+const samDeploymentVolumeNamePatternSource = `^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`
 
 var errUnsupportedComposeVolumes = errors.New("unsupported Docker Compose volumes")
+var samDeploymentVolumeNamePattern = regexp.MustCompile(samDeploymentVolumeNamePatternSource)
 
-const unsupportedComposeVolumesGuidance = "build_and_publish does not support Docker Compose service volume mounts, service volumes_from, service tmpfs, or top-level volumes yet. Compose volumes would be stored as Docker-managed local volumes on the deployment node, not SAM provider-backed deployment volumes. Remove service volume mounts, volumes_from, tmpfs, and top-level volumes for now; do not retry this Compose shape for stateful data until build_and_publish supports SAM provider-backed volume rewriting."
+const unsupportedComposeVolumesGuidance = "build_and_publish supports safe named Docker Compose volumes when each service mount references a top-level named volume declaration. Unsupported volume forms remain blocked because they cannot be mapped to SAM provider-backed deployment volumes: host bind mounts, Docker socket mounts, service tmpfs, service volumes_from, anonymous volumes, undeclared named volumes, external volumes, custom volume drivers, and driver options. Replace unsupported mounts with top-level named volumes such as volumes: {data: {}} and service mounts such as data:/app/data before retrying."
 
 // BuildOptions configures a host-side compose build.
 type BuildOptions struct {
@@ -125,15 +128,15 @@ func Build(ctx context.Context, opts BuildOptions) (*BuildArtifact, error) {
 			"composeCmd", composeCmd, "workspaceDir", opts.WorkspaceDir, "error", err)
 		return nil, err
 	}
-	if err := validateNoComposeVolumes(templateCfg); err != nil {
-		log.Error("compose template uses unsupported volumes", "error", err)
+	if err := validateComposeVolumeSafety(templateCfg); err != nil {
+		log.Error("compose template uses unsupported volume features", "error", err)
 		if opts.Events != nil {
 			opts.Events.Event(ctx, Event{
 				Status:       "failed",
 				CurrentStep:  "compose_config",
 				Level:        "error",
 				EventType:    "publish.compose_config.failed",
-				Message:      "compose configuration uses unsupported volumes",
+				Message:      "compose configuration uses unsupported volume features",
 				ErrorMessage: err.Error(),
 				ErrorCode:    "unsupported_compose_volumes",
 				Retryable:    false,
@@ -359,16 +362,30 @@ func validateNoSecretRefsInBuildFields(cfg *composeConfig, secretKeys []string) 
 	return nil
 }
 
-func validateNoComposeVolumes(cfg *composeConfig) error {
+func validateComposeVolumeSafety(cfg *composeConfig) error {
 	if cfg == nil {
 		return nil
 	}
 
 	refs := make(map[string]bool)
-	for name := range cfg.Volumes {
+	declaredVolumes := make(map[string]bool, len(cfg.Volumes))
+	for name, raw := range cfg.Volumes {
 		name = strings.TrimSpace(name)
-		if name != "" {
-			refs["top-level:"+name] = true
+		if name == "" {
+			refs["top-level:<empty>: invalid volume name"] = true
+			continue
+		}
+		if !samDeploymentVolumeNamePattern.MatchString(name) {
+			refs["top-level:"+name+": invalid volume name"] = true
+			continue
+		}
+		declaredVolumes[name] = true
+		topLevelRefs, err := unsupportedTopLevelVolumeReferences(name, raw)
+		if err != nil {
+			return err
+		}
+		for _, ref := range topLevelRefs {
+			refs[ref] = true
 		}
 	}
 
@@ -378,7 +395,7 @@ func validateNoComposeVolumes(cfg *composeConfig) error {
 	}
 	sort.Strings(serviceNames)
 	for _, serviceName := range serviceNames {
-		serviceRefs, err := unsupportedServiceVolumeReferences(serviceName, cfg.Services[serviceName].Volumes)
+		serviceRefs, err := unsupportedServiceVolumeReferences(serviceName, cfg.Services[serviceName].Volumes, declaredVolumes)
 		if err != nil {
 			return err
 		}
@@ -420,6 +437,43 @@ func validateNoComposeVolumes(cfg *composeConfig) error {
 	return &unsupportedComposeVolumesError{References: references}
 }
 
+func unsupportedTopLevelVolumeReferences(name string, raw json.RawMessage) ([]string, error) {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+		return nil, nil
+	}
+
+	var config map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &config); err != nil {
+		return nil, fmt.Errorf("build: parse compose top-level volume %s: %w", name, err)
+	}
+
+	refs := make([]string, 0)
+	for key, value := range config {
+		key = strings.TrimSpace(key)
+		switch key {
+		case "", "name":
+			continue
+		case "x-sam-size-hint-mb":
+			if !isPositiveJSONNumber(value) {
+				refs = append(refs, "top-level:"+name+".x-sam-size-hint-mb")
+			}
+		default:
+			refs = append(refs, "top-level:"+name+"."+key)
+		}
+	}
+	sort.Strings(refs)
+	return refs, nil
+}
+
+func isPositiveJSONNumber(raw json.RawMessage) bool {
+	var value float64
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return false
+	}
+	return value > 0
+}
+
 func unsupportedStringOrListReferences(serviceName, fieldName string, raw json.RawMessage) ([]string, error) {
 	raw = bytes.TrimSpace(raw)
 	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
@@ -451,7 +505,7 @@ func unsupportedServiceFieldReferences(serviceName, fieldName string, entries []
 	return refs
 }
 
-func unsupportedServiceVolumeReferences(serviceName string, raw json.RawMessage) ([]string, error) {
+func unsupportedServiceVolumeReferences(serviceName string, raw json.RawMessage, declaredVolumes map[string]bool) ([]string, error) {
 	raw = bytes.TrimSpace(raw)
 	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
 		return nil, nil
@@ -463,29 +517,46 @@ func unsupportedServiceVolumeReferences(serviceName string, raw json.RawMessage)
 		if json.Unmarshal(raw, &shortEntries) != nil {
 			return nil, fmt.Errorf("build: parse compose volumes for service %s: %w", serviceName, err)
 		}
-		return unsupportedShortVolumeReferences(serviceName, shortEntries), nil
+		return unsupportedShortVolumeReferences(serviceName, shortEntries, declaredVolumes), nil
 	}
 
-	return unsupportedStructuredVolumeReferences(serviceName, entries), nil
+	return unsupportedStructuredVolumeReferences(serviceName, entries, declaredVolumes), nil
 }
 
-func unsupportedStructuredVolumeReferences(serviceName string, entries []composeConfigServiceVolume) []string {
+func unsupportedStructuredVolumeReferences(serviceName string, entries []composeConfigServiceVolume, declaredVolumes map[string]bool) []string {
 	refs := make([]string, 0, len(entries))
 	for _, entry := range entries {
 		source := strings.TrimSpace(entry.Source)
+		volumeType := strings.TrimSpace(strings.ToLower(entry.Type))
 		if source == "" {
-			source = anonymousVolumeSource(entry.Target)
+			refs = append(refs, serviceName+":"+anonymousVolumeSource(entry.Target))
+			continue
 		}
-		refs = append(refs, serviceName+":"+source)
+		if volumeType != "" && volumeType != "volume" {
+			refs = append(refs, serviceName+":"+source+" ("+volumeType+")")
+			continue
+		}
+		if isHostPathVolumeSource(source) {
+			refs = append(refs, serviceName+":"+source)
+			continue
+		}
+		if !samDeploymentVolumeNamePattern.MatchString(source) {
+			refs = append(refs, serviceName+":"+source+" (invalid volume name)")
+			continue
+		}
+		if !declaredVolumes[source] {
+			refs = append(refs, serviceName+":"+source+" (undeclared named volume)")
+			continue
+		}
 	}
 	sort.Strings(refs)
 	return refs
 }
 
-func unsupportedShortVolumeReferences(serviceName string, entries []string) []string {
+func unsupportedShortVolumeReferences(serviceName string, entries []string, declaredVolumes map[string]bool) []string {
 	refs := make([]string, 0, len(entries))
 	for _, spec := range entries {
-		if ref, ok := unsupportedShortVolumeReference(serviceName, spec); ok {
+		if ref, ok := unsupportedShortVolumeReference(serviceName, spec, declaredVolumes); ok {
 			refs = append(refs, ref)
 		}
 	}
@@ -501,7 +572,7 @@ func anonymousVolumeSource(target string) string {
 	return "anonymous at " + target
 }
 
-func unsupportedShortVolumeReference(serviceName, spec string) (string, bool) {
+func unsupportedShortVolumeReference(serviceName, spec string, declaredVolumes map[string]bool) (string, bool) {
 	spec = strings.TrimSpace(spec)
 	if spec == "" {
 		return "", false
@@ -514,7 +585,20 @@ func unsupportedShortVolumeReference(serviceName, spec string) (string, bool) {
 	if source == "" {
 		return serviceName + ":" + anonymousVolumeSource(parts[1]), true
 	}
-	return serviceName + ":" + source, true
+	if isHostPathVolumeSource(source) {
+		return serviceName + ":" + source, true
+	}
+	if !samDeploymentVolumeNamePattern.MatchString(source) {
+		return serviceName + ":" + source + " (invalid volume name)", true
+	}
+	if !declaredVolumes[source] {
+		return serviceName + ":" + source + " (undeclared named volume)", true
+	}
+	return "", false
+}
+
+func isHostPathVolumeSource(source string) bool {
+	return strings.HasPrefix(source, "/") || strings.HasPrefix(source, ".") || strings.HasPrefix(source, "~")
 }
 
 // IsUnsupportedComposeVolumesError reports whether err came from Compose volume validation.

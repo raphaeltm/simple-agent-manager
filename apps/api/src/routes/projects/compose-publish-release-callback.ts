@@ -191,20 +191,6 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
     throw errors.badRequest(err instanceof Error ? err.message : String(err));
   }
   const requiresVolumes = Object.keys(volumeDeclarations).length > 0;
-  const placement = requiresVolumes ? await resolveDeploymentPlacement(userId, c.env) : null;
-  if (requiresVolumes && !placement) {
-    throw errors.badRequest(
-      'No cloud provider credential found. Connect a cloud provider before deploying volumes.'
-    );
-  }
-  if (requiresVolumes && placement) {
-    await createMissingDeclaredVolumes(db, c.env, userId, {
-      environmentId,
-      volumes: volumeDeclarations,
-      location: placement.location,
-      targetProvider: placement.provider,
-    });
-  }
 
   const servicesRaw = submissionBody.services;
   const services: ServiceReleaseInput[] = Array.isArray(servicesRaw) ? servicesRaw : [];
@@ -227,6 +213,21 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
     } catch (err) {
       throw errors.badRequest(err instanceof Error ? err.message : String(err));
     }
+  }
+
+  const placement = requiresVolumes ? await resolveDeploymentPlacement(userId, c.env) : null;
+  if (requiresVolumes && !placement) {
+    throw errors.badRequest(
+      'No cloud provider credential found. Connect a cloud provider before deploying volumes.'
+    );
+  }
+  if (requiresVolumes && placement) {
+    await createMissingDeclaredVolumes(db, c.env, userId, {
+      environmentId,
+      volumes: volumeDeclarations,
+      location: placement.location,
+      targetProvider: placement.provider,
+    });
   }
 
   const manifestSubmission: Record<string, unknown> = {

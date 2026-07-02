@@ -177,6 +177,27 @@ export interface DeploymentEnvironmentStartResponse {
   };
 }
 
+export interface DeploymentVolume {
+  id: string;
+  environmentId: string;
+  name: string;
+  providerVolumeId: string;
+  providerName: string;
+  sizeGb: number;
+  location: string;
+  status: string;
+  attachedServerId: string | null;
+  linuxDevice: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateDeploymentVolumeRequest {
+  name: string;
+  sizeGb: number;
+  location: string;
+}
+
 export async function listDeploymentEnvironments(
   projectId: string
 ): Promise<{ environments: DeploymentEnvironment[] }> {
@@ -232,6 +253,57 @@ export async function startDeploymentEnvironment(
 ): Promise<DeploymentEnvironmentStartResponse> {
   return request<DeploymentEnvironmentStartResponse>(
     `/api/projects/${projectId}/environments/${envId}/start`,
+    { method: 'POST' }
+  );
+}
+
+export async function listDeploymentEnvironmentVolumes(
+  projectId: string,
+  envId: string
+): Promise<{ volumes: DeploymentVolume[] }> {
+  return request<{ volumes: DeploymentVolume[] }>(
+    `/api/projects/${projectId}/environments/${envId}/volumes`
+  );
+}
+
+export async function createDeploymentEnvironmentVolume(
+  projectId: string,
+  envId: string,
+  data: CreateDeploymentVolumeRequest
+): Promise<DeploymentVolume> {
+  return request<DeploymentVolume>(`/api/projects/${projectId}/environments/${envId}/volumes`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteDeploymentEnvironmentVolume(
+  projectId: string,
+  envId: string,
+  volumeId: string
+): Promise<{ success: boolean }> {
+  return request<{ success: boolean }>(
+    `/api/projects/${projectId}/environments/${envId}/volumes/${volumeId}`,
+    { method: 'DELETE' }
+  );
+}
+
+export async function attachDeploymentEnvironmentVolumes(
+  projectId: string,
+  envId: string
+): Promise<{ volumes: DeploymentVolume[] }> {
+  return request<{ volumes: DeploymentVolume[] }>(
+    `/api/projects/${projectId}/environments/${envId}/volumes/attach`,
+    { method: 'POST' }
+  );
+}
+
+export async function detachDeploymentEnvironmentVolumes(
+  projectId: string,
+  envId: string
+): Promise<{ volumes: DeploymentVolume[] }> {
+  return request<{ volumes: DeploymentVolume[] }>(
+    `/api/projects/${projectId}/environments/${envId}/volumes/detach`,
     { method: 'POST' }
   );
 }

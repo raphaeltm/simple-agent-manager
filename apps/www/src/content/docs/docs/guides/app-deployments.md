@@ -55,7 +55,19 @@ Compose interpolation only affects placeholders such as `${DATABASE_URL}`. It do
 
 `x-sam-secret` and older explicit secret references remain supported for compatibility, but new deployments should prefer normal Compose `${VAR}` placeholders backed by per-environment Variables and Secrets.
 
-For compose-publish releases, `build_and_publish` currently rejects Docker Compose named or anonymous volumes because they would be Docker-managed local volumes on the deployment node, not SAM provider-backed persistent volumes. Host bind mounts, Docker socket mounts, `tmpfs`, external volumes, and custom volume drivers are also rejected.
+For compose-publish releases, `build_and_publish` supports safe named Docker Compose volumes when each service mount references a top-level named volume declaration. SAM creates missing provider-backed block volumes for those declarations and rewrites service mounts to SAM-managed volume roots before deployment apply. Host bind mounts, Docker socket mounts, anonymous volumes, undeclared named volumes, `volumes_from`, `tmpfs`, external volumes, custom volume drivers, and driver options are rejected.
+
+```yaml
+services:
+  web:
+    image: registry.example.com/my-project/web:v1.2.3
+    volumes:
+      - data:/app/data
+
+volumes:
+  data:
+    x-sam-size-hint-mb: 2048
+```
 
 Use `mode: host` for service ports such as databases, queues, and workers that should be reachable only inside the deployed Compose stack/private network. Public web/API entrypoints should use normal `ports:` entries or explicit public `x-sam-routes`.
 
@@ -63,9 +75,10 @@ If an app needs to know its public hostname before it starts, agents should prev
 
 ## Persistent volumes
 
-Provider-backed block volumes give a deployment environment durable storage that survives container restarts and the stop/start lifecycle. Unlike the Docker-managed volumes that `build_and_publish` rejects (see above), these are real cloud block volumes created through the deployment environment's provider and attached to the deployment node.
+Provider-backed block volumes give a deployment environment durable storage that survives container restarts and the stop/start lifecycle. They are real cloud block volumes created through the deployment environment's provider and attached to the deployment node.
 
-- Volumes are created, attached, detached, and deleted from the deployment environment, not from Compose. Each volume is mounted at a SAM-managed path derived from the environment id, and the deployment apply payload tells the node which provider volume to mount where.
+- Volumes are created automatically from safe Compose named volume declarations during `build_and_publish`, and can also be created, viewed, attached, detached, and deleted from the deployment environment's **Volumes** tab.
+- Each volume is mounted at a SAM-managed path derived from the environment id, and the deployment apply payload tells the node which provider volume to mount where.
 - All volumes in one environment must share the same provider **and** the same location. A single VM can only attach volumes that live in its own provider/location, so an environment that mixes providers or regions is rejected before a node is provisioned.
 - When an environment has volumes (or is marked as requiring volumes), provisioning is pinned to the volumes' provider and location so the node lands where the volumes can attach.
 - The provider must support first-class block volumes. **Hetzner and Scaleway are supported; GCP deployment volumes are not** (`volumeCapabilities.supported` is `false` for the GCP provider), so a GCP-backed environment cannot use persistent deployment volumes.
