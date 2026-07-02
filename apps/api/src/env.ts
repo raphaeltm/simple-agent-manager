@@ -22,6 +22,7 @@ export interface Env {
       token: string;
       default_branch: string;
     }>;
+    delete(name: string): Promise<boolean>;
     get(name: string): Promise<{
       id: string;
       name: string;

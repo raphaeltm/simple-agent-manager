@@ -85,11 +85,21 @@ Validation:
 
 ### PR 3: Workstream B, Artifacts repo lifecycle
 
-- [ ] Verify the real Cloudflare Artifacts binding API surface before adding any repo delete call.
-- [ ] If a supported delete API exists, perform best-effort repo deletion before D1 row deletion and log structured cleanup failures without blocking project deletion.
-- [ ] If no supported delete API exists, emit a structured orphan log on project delete with `action: 'orphaned_artifacts_repo_on_delete'`.
-- [ ] Add a code comment clarifying that `ARTIFACTS_MAX_REPOS_PER_USER` counts project rows and orphans require manual reconciliation for now.
-- [ ] Add tests for artifacts project delete cleanup/orphan behavior, cleanup failure preserving project deletion, and GitHub project delete not touching Artifacts.
+- [x] Verify the real Cloudflare Artifacts binding API surface before adding any repo delete call.
+- [x] If a supported delete API exists, perform best-effort repo deletion after successful D1 row deletion and log structured cleanup failures without blocking project deletion.
+- [x] If the delete binding is unavailable or returns failure, emit a structured orphan log on project delete with `action: 'orphaned_artifacts_repo_on_delete'`.
+- [x] Add a code comment clarifying that `ARTIFACTS_MAX_REPOS_PER_USER` counts project rows and orphans require manual reconciliation for now.
+- [x] Add tests for artifacts project delete cleanup/orphan behavior, cleanup failure preserving project deletion, and GitHub project delete not touching Artifacts.
+
+Validation:
+- Official Cloudflare Artifacts Workers binding docs show `artifacts.delete(name): Promise<boolean>`.
+- `pnpm --filter @simple-agent-manager/api test -- --run tests/unit/routes/project-delete.test.ts`
+- `pnpm --filter @simple-agent-manager/api test -- --run tests/unit/routes/workspace-git-token.test.ts tests/unit/routes/project-delete.test.ts`
+- `pnpm --filter @simple-agent-manager/api test -- --run tests/unit/project-default-provider.test.ts tests/unit/routes/project-delete.test.ts`
+- `pnpm typecheck`
+- `pnpm lint`
+- `pnpm test`
+- `pnpm build`
 
 ## Acceptance Criteria
 
