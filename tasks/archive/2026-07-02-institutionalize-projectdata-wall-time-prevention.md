@@ -40,8 +40,8 @@ This task delivers the prevention/process/tooling layer from idea `01KWH2QKQHND5
 - [x] Add unit tests for regression, no-regression, and empty/missing-data cases using realistic GraphQL response payload shapes.
 - [x] Add a daily scheduled GitHub Actions workflow that runs the wall-time check and visibly fails on regression.
 - [x] Run the script against Cloudflare with the available `CF_TOKEN`/`CF_ACCOUNT_ID` and record the output as PR evidence.
-- [ ] Run targeted quality-script tests and relevant repo checks.
-- [ ] Run required specialist reviews and address findings.
+- [x] Run targeted quality-script tests and relevant repo checks.
+- [x] Run required specialist reviews and address findings.
 
 ## Acceptance Criteria
 
@@ -51,3 +51,31 @@ This task delivers the prevention/process/tooling layer from idea `01KWH2QKQHND5
 - Scheduled CI runs the check daily and surfaces regressions visibly.
 - Tests prove regression detection, non-regression behavior, and empty/missing data does not false-positive.
 - Cloudflare schema verification and live-script output are included as PR evidence.
+
+## Verification Notes
+
+- Official Cloudflare docs consulted: Durable Objects metrics and analytics (`developers.cloudflare.com/durable-objects/observability/metrics-and-analytics/`) and GraphQL Analytics API (`developers.cloudflare.com/analytics/graphql-api/`).
+- Live GraphQL introspection confirmed `durableObjectsInvocationsAdaptiveGroups`, `quantiles.wallTimeP99`, `dimensions.scriptName`, `dimensions.namespaceId`, `dimensions.name`, `dimensions.type`, and filter fields used by the script.
+- Live script run on 2026-07-02:
+  - `pnpm quality:do-wall-time`
+  - Recent window: `2026-07-01T11:00:12.576Z` to `2026-07-02T11:00:12.576Z`
+  - Baseline window: `2026-06-24T11:00:12.576Z` to `2026-07-01T11:00:12.576Z`
+  - Threshold: `2x`; minimum requests: `10`; invocation type filter: `alarm`
+  - Output: recent series `31`, baseline series `20`, skipped series `21`, no Durable Object wall-time regressions detected.
+- Validation passed:
+  - `pnpm exec vitest run --config scripts/quality/vitest.config.ts scripts/quality/check-do-wall-time.test.ts`
+  - `pnpm quality:do-wall-time`
+  - `pnpm quality:specialist-review:test`
+  - `pnpm typecheck`
+  - `pnpm lint` (existing warnings only, no errors)
+  - `pnpm test`
+  - `pnpm build`
+
+## Specialist Review Notes
+
+- `task-completion-validator`: PASS. Research findings, checklist items, and acceptance criteria are covered by diff or verification evidence; no UI/backend or multi-resource selection paths apply.
+- `cloudflare-specialist`: PASS. Query shape was verified via official docs and live introspection; workflow maps `CF_TOKEN` from existing `CF_API_TOKEN` secret convention; scheduled job fails visibly and writes a step summary.
+- `env-validator`: PASS. New `DO_WALL_TIME_*` controls are script/workflow-scoped, documented in the script header, and do not alter Worker Env or GH/GITHUB secret mappings.
+- `constitution-validator`: PASS. Thresholds, windows, filters, and GraphQL endpoint are env-configurable with `DEFAULT_*` constants where appropriate; Cloudflare GraphQL endpoint is an external API default with override.
+- `doc-sync-validator`: PASS. Agent-facing rule and PR template were updated; no public user docs or runtime Env interface changed.
+- `test-engineer`: PASS. Pure comparison logic has regression, no-regression, missing-data, and low-volume no-false-positive coverage using realistic GraphQL-shaped payloads.
