@@ -98,7 +98,7 @@ function ErrorBanner({ message }: { message: string }) {
   );
 }
 
-/** Convert session state plan array to PlanItem for StickyPlanButton/PlanModal. */
+/** Convert session state plan array to PlanItem for the CompletionDock plan pill / PlanModal. */
 function currentPlanToPlanItem(plan: Array<{ content: string; status: string }>): PlanItem {
   return {
     kind: 'plan',

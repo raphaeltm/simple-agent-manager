@@ -224,6 +224,11 @@ export function CompletionDock({
 
   return (
     <div className="shrink-0">
+      {/* Announce working/idle transitions to assistive tech (the morph itself is
+          purely visual; ElapsedTime is aria-hidden). */}
+      <span className="sr-only" role="status" aria-live="polite">
+        {working ? 'Agent working' : 'Agent idle'}
+      </span>
       <div ref={ref} className="relative w-full select-none" style={{ height: totalH }}>
         <svg
           width={width}
@@ -250,7 +255,7 @@ export function CompletionDock({
             type="button"
             onClick={onOpenPlan}
             aria-label="View plan"
-            className="absolute flex items-center gap-1 text-xs rounded-md px-2 py-1 border border-[rgba(34,197,94,0.2)] bg-[rgba(34,197,94,0.06)] text-fg-primary cursor-pointer"
+            className="absolute flex items-center gap-1 text-xs rounded-md px-2 py-1 border border-[rgba(34,197,94,0.2)] bg-[rgba(34,197,94,0.06)] text-fg-primary cursor-pointer focus-visible:outline-2 focus-visible:outline-focus-ring focus-visible:-outline-offset-2"
             style={{ left: 12, top: yB + (BAR_H - 26) / 2, zIndex: 2 }}
           >
             <ListTodo size={13} />
@@ -274,7 +279,7 @@ export function CompletionDock({
           onClick={showArchiveInCenter ? onArchive : onInterrupt}
           disabled={centerDisabled}
           aria-label={showArchiveInCenter ? 'Archive conversation' : 'Interrupt agent'}
-          className="absolute flex items-center justify-center rounded-full cursor-pointer border-0 shadow-lg disabled:cursor-not-allowed disabled:opacity-60"
+          className="absolute flex items-center justify-center rounded-full cursor-pointer border-0 shadow-lg disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-focus-ring focus-visible:outline-offset-2"
           style={{
             width: BTN,
             height: BTN,

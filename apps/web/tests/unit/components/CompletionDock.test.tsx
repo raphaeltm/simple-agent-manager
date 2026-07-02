@@ -172,6 +172,19 @@ describe('CompletionDock', () => {
     expect(screen.queryByTestId('elapsed')).not.toBeInTheDocument();
   });
 
+  it('announces working/idle state via an aria-live status region', () => {
+    const { rerender } = render(
+      <CompletionDock working={false} hasPlan={false} onInterrupt={vi.fn()} onArchive={vi.fn()} onOpenPlan={vi.fn()} />,
+    );
+    const status = screen.getByRole('status');
+    expect(status).toHaveTextContent('Agent idle');
+
+    rerender(
+      <CompletionDock working hasPlan={false} onInterrupt={vi.fn()} onArchive={vi.fn()} onOpenPlan={vi.fn()} />,
+    );
+    expect(screen.getByRole('status')).toHaveTextContent('Agent working');
+  });
+
   it('reduced-motion path: still renders both morph states without animation', () => {
     setReducedMotion(true);
     const { rerender } = render(
