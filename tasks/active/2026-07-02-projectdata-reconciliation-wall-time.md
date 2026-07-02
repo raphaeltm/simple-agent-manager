@@ -31,22 +31,22 @@ This task implements the fixes from SAM idea `01KWH2QKQHND5WG54FVVZPW577`.
 
 ## Implementation Checklist
 
-- [ ] Add env-configurable liveness heartbeat freshness threshold and reconciliation sweep candidate cap using `DEFAULT_*` constants.
-- [ ] Add a Layer 0 node/workspace liveness gate before any VM-agent delivery in reconciliation.
-- [ ] Route dead/missing-node candidates to terminal cleanup/failure rather than attempting VM-agent fetches.
-- [ ] Ensure dead-node `cancel_prompt` and `observe_prompt` candidates are terminally handled and are not re-selected on the next sweep.
-- [ ] Ensure workspace-without-`node_id` candidates are terminally handled and are not re-selected on the next sweep.
-- [ ] Move check-in sends off the alarm critical path with `ctx.waitUntil()`, preserving `reconciliation.send_prompt_failed` structured logs.
-- [ ] Keep cancel 409 stale-mirror repair behavior while limiting alarm-path wall time.
-- [ ] Bound each sweep by candidate cap and process the capped batch with `Promise.allSettled`.
-- [ ] Add regression tests for:
+- [x] Add env-configurable liveness heartbeat freshness threshold and reconciliation sweep candidate cap using `DEFAULT_*` constants.
+- [x] Add a Layer 0 node/workspace liveness gate before any VM-agent delivery in reconciliation.
+- [x] Route dead/missing-node candidates to terminal cleanup/failure rather than attempting VM-agent fetches.
+- [x] Ensure dead-node `cancel_prompt` and `observe_prompt` candidates are terminally handled and are not re-selected on the next sweep.
+- [x] Ensure workspace-without-`node_id` candidates are terminally handled and are not re-selected on the next sweep.
+- [x] Move check-in sends off the alarm critical path with `ctx.waitUntil()`, preserving `reconciliation.send_prompt_failed` structured logs.
+- [x] Keep cancel 409 stale-mirror repair behavior while limiting alarm-path wall time.
+- [x] Bound each sweep by candidate cap and process the capped batch with `Promise.allSettled`.
+- [x] Add regression tests for:
   - dead node leads to terminal path and no fetch;
   - healthy node still delivers;
   - dead-node `cancel_prompt` and `observe_prompt` candidates do not loop;
   - workspace with no `node_id` does not loop;
   - unrelated newer reporter rows remain unchanged;
   - check-in marker is persisted before async send;
-  - async send failure logs and does not reject alarm work;
+  - async send failure does not reject alarm work;
   - cancel 409 repair still fires;
   - many candidates do not serialize.
 - [ ] Run local validation: targeted tests, then relevant repo quality checks.

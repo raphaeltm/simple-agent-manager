@@ -21,6 +21,7 @@ function getNodeBackendBaseUrl(nodeId: string, env: Env): string {
 interface NodeAgentRequestOptions extends RequestInit {
   userId: string;
   workspaceId?: string | null;
+  requestTimeoutMs?: number;
 }
 
 export function getNodeAgentReadyTimeoutMs(env: { NODE_AGENT_READY_TIMEOUT_MS?: string }): number {
@@ -137,7 +138,7 @@ async function nodeAgentRequest(
     env
   );
 
-  const requestTimeoutMs = getTimeoutMs(
+  const requestTimeoutMs = options.requestTimeoutMs ?? getTimeoutMs(
     env.NODE_AGENT_REQUEST_TIMEOUT_MS,
     DEFAULT_NODE_AGENT_REQUEST_TIMEOUT_MS
   );
@@ -400,7 +401,8 @@ export async function sendPromptToAgentOnNode(
   prompt: string,
   env: Env,
   userId: string,
-  messageId?: string
+  messageId?: string,
+  options?: { requestTimeoutMs?: number }
 ): Promise<unknown> {
   const body: { prompt: string; messageId?: string } = { prompt };
   if (messageId) body.messageId = messageId;
@@ -413,6 +415,7 @@ export async function sendPromptToAgentOnNode(
       method: 'POST',
       userId,
       workspaceId,
+      requestTimeoutMs: options?.requestTimeoutMs,
       body: JSON.stringify(body),
     }
   );
@@ -428,7 +431,8 @@ export async function cancelAgentSessionOnNode(
   workspaceId: string,
   sessionId: string,
   env: Env,
-  userId: string
+  userId: string,
+  options?: { requestTimeoutMs?: number }
 ): Promise<{ success: boolean; status: number }> {
   try {
     await nodeAgentRequest(
@@ -439,6 +443,7 @@ export async function cancelAgentSessionOnNode(
         method: 'POST',
         userId,
         workspaceId,
+        requestTimeoutMs: options?.requestTimeoutMs,
       }
     );
     return { success: true, status: 200 };

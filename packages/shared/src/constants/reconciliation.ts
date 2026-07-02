@@ -26,3 +26,12 @@ export const DEFAULT_TASK_RECONCILIATION_PROMPT_HARD_STALL_MS = 2 * 60 * 60 * 10
 
 /** Minimum delay before the next reconciliation alarm is allowed to fire. */
 export const DEFAULT_TASK_RECONCILIATION_MIN_ALARM_DELAY_MS = 10 * 1000; // 10 seconds
+
+/** Maximum number of reconciliation candidates to process in one alarm pass. */
+export const DEFAULT_TASK_RECONCILIATION_MAX_CANDIDATES_PER_SWEEP = 5;
+
+/** Maximum age for a node heartbeat before reconciliation treats the node as dead. */
+export const DEFAULT_TASK_RECONCILIATION_NODE_HEARTBEAT_STALE_MS = 5 * 60 * 1000; // 5 minutes
+
+/** Short timeout for reconciliation-originated cancel requests that remain on the alarm path. */
+export const DEFAULT_TASK_RECONCILIATION_NODE_CALL_TIMEOUT_MS = 5 * 1000; // 5 seconds

@@ -33,7 +33,14 @@ vi.mock('../../src/services/node-agent', () => ({
 }));
 
 type TaskRow = { task_mode: string; status: string; error?: string | null };
-type WorkspaceRow = { node_id: string | null; user_id: string; status: string };
+type WorkspaceRow = {
+  node_id: string | null;
+  user_id: string;
+  status: string;
+  node_status?: string | null;
+  health_status?: string | null;
+  last_heartbeat_at?: string | null;
+};
 
 function createSqlStorage(db: Database.Database): SqlStorage {
   return {
@@ -69,7 +76,15 @@ function createMockD1(
             return tasks[args[0] as string] ?? null;
           }
           if (query.includes('FROM workspaces')) {
-            return workspaces[args[0] as string] ?? null;
+            const row = workspaces[args[0] as string];
+            if (!row) return null;
+            if (!row.node_id) return row;
+            return {
+              node_status: 'running',
+              health_status: 'healthy',
+              last_heartbeat_at: new Date(Date.now()).toISOString(),
+              ...row,
+            };
           }
           return null;
         }),
@@ -209,6 +224,8 @@ describe('agent lifecycle orchestration integration', () => {
       expect.stringContaining('continue working from where you left off'),
       expect.anything(),
       'user-1',
+      undefined,
+      { requestTimeoutMs: 5000 },
     );
     expect(db.prepare(`SELECT role, content, tool_metadata FROM chat_messages`).all()).toMatchObject([
       {
