@@ -204,7 +204,14 @@ export function MobileProgress({ current }: Readonly<{ current: OnboardingStepId
         </span>
         <span>{ONBOARDING_STEPS[currentIndex]!.label}</span>
       </div>
-      <div className="h-1.5 w-full overflow-hidden rounded-full bg-inset">
+      <div
+        className="h-1.5 w-full overflow-hidden rounded-full bg-inset"
+        role="progressbar"
+        aria-valuemin={1}
+        aria-valuemax={ONBOARDING_STEPS.length}
+        aria-valuenow={currentIndex + 1}
+        aria-label={`Step ${currentIndex + 1} of ${ONBOARDING_STEPS.length}: ${ONBOARDING_STEPS[currentIndex]!.label}`}
+      >
         <div
           className="h-full rounded-full bg-accent transition-all"
           style={{ width: `${progressPct}%` }}

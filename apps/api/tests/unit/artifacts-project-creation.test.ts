@@ -54,6 +54,13 @@ describe('toArtifactsRepoName', () => {
     // 30-char name cap + '-' + 26-char ulid = 57.
     expect(name.length).toBeLessThanOrEqual(57);
   });
+
+  it('does not leave a dangling hyphen when the 30-char cap falls on a hyphen', () => {
+    // 29 'a's then a hyphen: char 30 is the hyphen, which must be stripped.
+    const name = toArtifactsRepoName('a'.repeat(29) + '-bbbb', '01KWGVSZ9JE791KGJZCHVM42YF');
+    expect(name).not.toMatch(/--/);
+    expect(name).toBe('a'.repeat(29) + '-01kwgvsz9je791kgjzchvm42yf');
+  });
 });
 
 describe('CreateProjectSchema with repoProvider', () => {
@@ -154,24 +161,23 @@ describe('Artifacts agent instructions', () => {
   it('artifacts projects should produce instructions that forbid gh CLI', () => {
     // Simulates what handleGetInstructions returns for Artifacts projects
     const repoProvider = 'artifacts';
-    const artifactsInstructions = repoProvider === 'artifacts'
-      ? [
-          'This project uses SAM Git (Cloudflare Artifacts) — NOT GitHub.',
-          'Do NOT use `gh pr create`, `gh` CLI, or any GitHub-specific commands.',
-          'Push your changes directly to the remote branch. Summarize your changes in the task completion message.',
-        ]
-      : [];
+    const artifactsInstructions =
+      repoProvider === 'artifacts'
+        ? [
+            'This project uses SAM Git (Cloudflare Artifacts) — NOT GitHub.',
+            'Do NOT use `gh pr create`, `gh` CLI, or any GitHub-specific commands.',
+            'Push your changes directly to the remote branch. Summarize your changes in the task completion message.',
+          ]
+        : [];
 
     expect(artifactsInstructions).toHaveLength(3);
-    expect(artifactsInstructions.some(i => i.includes('gh pr create'))).toBe(true);
-    expect(artifactsInstructions.some(i => i.includes('NOT GitHub'))).toBe(true);
+    expect(artifactsInstructions.some((i) => i.includes('gh pr create'))).toBe(true);
+    expect(artifactsInstructions.some((i) => i.includes('NOT GitHub'))).toBe(true);
   });
 
   it('github projects should not produce artifacts instructions', () => {
     const repoProvider = 'github';
-    const artifactsInstructions = repoProvider === 'artifacts'
-      ? ['This project uses SAM Git']
-      : [];
+    const artifactsInstructions = repoProvider === 'artifacts' ? ['This project uses SAM Git'] : [];
 
     expect(artifactsInstructions).toHaveLength(0);
   });

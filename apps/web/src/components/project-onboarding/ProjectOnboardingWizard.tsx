@@ -134,11 +134,14 @@ export function ProjectOnboardingWizard({
   const lockedBeforeIndex = project ? stepIndex('conversation') : 0;
 
   const goToStep = (id: OnboardingStepId) => {
+    // Clear step-scoped setup errors so a failed Create attempt on one step does
+    // not surface under a different step's form.
+    setSetupError(null);
     setStep(id);
   };
   const goNext = () =>
-    setStep(ONBOARDING_STEPS[Math.min(currentIndex + 1, ONBOARDING_STEPS.length - 1)]!.id);
-  const goBack = () => setStep(ONBOARDING_STEPS[Math.max(currentIndex - 1, 0)]!.id);
+    goToStep(ONBOARDING_STEPS[Math.min(currentIndex + 1, ONBOARDING_STEPS.length - 1)]!.id);
+  const goBack = () => goToStep(ONBOARDING_STEPS[Math.max(currentIndex - 1, 0)]!.id);
 
   /* ─── Connect handlers ─── */
 

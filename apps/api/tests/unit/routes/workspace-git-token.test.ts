@@ -194,7 +194,8 @@ describe('workspace git-token GitHub scoping', () => {
         // Thenable: queries that await `.where()` directly (no `.limit()`) resolve
         // from whereResponses. The `.limit()` chains never trigger this because the
         // builder itself is not awaited — only the Promise returned by `.limit()`.
-        then: ( // NOSONAR - intentional thenable mirroring drizzle's awaitable query builder.
+        then: (
+          // NOSONAR - intentional thenable mirroring drizzle's awaitable query builder.
           onFulfilled: (value: unknown[]) => unknown,
           onRejected?: (reason: unknown) => unknown
         ) => Promise.resolve(resolveQueued(whereResponses)).then(onFulfilled, onRejected),
@@ -328,6 +329,79 @@ describe('workspace git-token GitHub scoping', () => {
     await expect(res.json()).resolves.toMatchObject({
       cloneUrl: 'https://acct123.artifacts.cloudflare.net/git/default/artifacts-repo-1.git',
     });
+  });
+
+  it('returns 200 with an empty cloneUrl when both binding remote and project.repository are empty', async () => {
+    const artifactsEnv = {
+      ...mockEnv,
+      ARTIFACTS_ENABLED: 'true',
+      ARTIFACTS: {
+        get: vi.fn().mockResolvedValue({
+          remote: '',
+          createToken: vi.fn().mockResolvedValue({
+            plaintext: 'artifacts-token',
+            expiresAt: '2026-06-06T20:00:00.000Z',
+          }),
+        }),
+      },
+    } as Env;
+    limitResponses.push([workspaceRow()], [artifactsProjectRow({ repository: null })]);
+
+    const res = await app.request('/ws/ws-1/git-token', { method: 'POST' }, artifactsEnv);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({ token: 'artifacts-token', cloneUrl: '' });
+  });
+
+  it('rejects the Artifacts git-token path with 403 when ARTIFACTS_ENABLED is not "true"', async () => {
+    // mockEnv has no ARTIFACTS_ENABLED / ARTIFACTS binding.
+    limitResponses.push([workspaceRow()], [artifactsProjectRow()]);
+
+    const res = await app.request('/ws/ws-1/git-token', { method: 'POST' }, mockEnv);
+
+    expect(res.status).toBe(403);
+    await expect(res.json()).resolves.toMatchObject({ error: 'FORBIDDEN' });
+    expect(getInstallationToken).not.toHaveBeenCalled();
+  });
+
+  it('returns 500 when an Artifacts project has a null artifactsRepoId', async () => {
+    const artifactsEnv = {
+      ...mockEnv,
+      ARTIFACTS_ENABLED: 'true',
+      ARTIFACTS: { get: vi.fn() },
+    } as unknown as Env;
+    limitResponses.push([workspaceRow()], [artifactsProjectRow({ artifactsRepoId: null })]);
+
+    const res = await app.request('/ws/ws-1/git-token', { method: 'POST' }, artifactsEnv);
+
+    expect(res.status).toBe(500);
+  });
+
+  it('mints a read-scoped Artifacts token when ?scope=read is requested', async () => {
+    const createToken = vi.fn().mockResolvedValue({
+      plaintext: 'artifacts-read-token',
+      expiresAt: '2026-06-06T20:00:00.000Z',
+    });
+    const artifactsEnv = {
+      ...mockEnv,
+      ARTIFACTS_ENABLED: 'true',
+      ARTIFACTS: {
+        get: vi.fn().mockResolvedValue({
+          remote: 'https://acct123.artifacts.cloudflare.net/git/default/artifacts-repo-1.git',
+          createToken,
+        }),
+      },
+    } as Env;
+    limitResponses.push([workspaceRow()], [artifactsProjectRow()]);
+
+    const res = await app.request(
+      '/ws/ws-1/git-token?scope=read',
+      { method: 'POST' },
+      artifactsEnv
+    );
+
+    expect(res.status).toBe(200);
+    expect(createToken).toHaveBeenCalledWith('read', expect.any(Number));
   });
 
   it('falls back to repository-name scoping for legacy projects without a repo id', async () => {

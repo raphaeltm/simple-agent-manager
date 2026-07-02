@@ -1254,7 +1254,11 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
       throw errors.internal('Artifacts binding or repo ID missing');
     }
 
-    const ttl = parseInt(c.env.ARTIFACTS_TOKEN_TTL_SECONDS || '', 10) || 3600;
+    // Clamp the token TTL to a sane range: a negative/zero/NaN or excessively
+    // large configured value must not mint a token that never expires (or expires
+    // instantly). Default 1h; hard cap 24h.
+    const rawTtl = Number.parseInt(c.env.ARTIFACTS_TOKEN_TTL_SECONDS || '', 10);
+    const ttl = Number.isFinite(rawTtl) && rawTtl > 0 && rawTtl <= 86400 ? rawTtl : 3600;
     // Use requested scope or default to 'write' (agents need push access)
     const requestedScope = c.req.query('scope') === 'read' ? ('read' as const) : ('write' as const);
     const repo = await c.env.ARTIFACTS.get(artifactsRepoId);

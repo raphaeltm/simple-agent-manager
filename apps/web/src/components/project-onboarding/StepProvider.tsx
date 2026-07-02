@@ -50,7 +50,8 @@ function OptionCard({
   return (
     <button
       type="button"
-      aria-pressed={selected}
+      role="radio"
+      aria-checked={selected}
       onClick={onSelect}
       className={`grid gap-3 rounded-md border p-4 text-left transition-colors ${
         selected
@@ -108,7 +109,11 @@ export function StepProvider({
         title="Where should your code live?"
         lead="SAM can work against a repository you already have on GitHub, or it can host a brand-new Git repository for you. Both give agents a repo to clone, edit, and push to — the difference is who owns the remote and how finished work is reviewed."
       />
-      <div className={`grid gap-3 ${options.length > 1 ? 'sm:grid-cols-2' : ''}`}>
+      <div
+        role="radiogroup"
+        aria-label="Where your code lives"
+        className={`grid gap-3 ${options.length > 1 ? 'sm:grid-cols-2' : ''}`}
+      >
         {options.map((option) => (
           <OptionCard
             key={option.id}

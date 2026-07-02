@@ -109,16 +109,17 @@ export function ModeButton({
   title,
   description,
   onClick,
-}: {
+}: Readonly<{
   selected: boolean;
   title: string;
   description: string;
   onClick: () => void;
-}) {
+}>) {
   return (
     <button
       type="button"
-      aria-pressed={selected}
+      role="radio"
+      aria-checked={selected}
       onClick={onClick}
       className={`min-h-[56px] rounded-md border px-3 py-2 text-left transition-colors ${
         selected

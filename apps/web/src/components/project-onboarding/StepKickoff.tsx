@@ -34,7 +34,7 @@ export function StepKickoff({
       />
 
       <div className="grid gap-4 rounded-md border border-border-default bg-surface p-4">
-        <div className="grid gap-2 sm:grid-cols-2">
+        <div role="radiogroup" aria-label="Kickoff mode" className="grid gap-2 sm:grid-cols-2">
           <ModeButton
             selected={kickoffMode === 'task'}
             title="Task"

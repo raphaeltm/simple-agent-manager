@@ -284,7 +284,9 @@ export function generateApiWorkerEnv(
 ): WranglerEnvConfig {
   const staticBindings = extractStaticBindings(topLevel);
   if (artifactsBindingEnabled && !staticBindings.artifacts) {
-    throw new Error('Artifacts is enabled but no top-level [[artifacts]] binding exists in wrangler.toml');
+    throw new Error(
+      'Artifacts is enabled but no top-level [[artifacts]] binding exists in wrangler.toml'
+    );
   }
   const includeArtifactsBinding = artifactsBindingEnabled && !!staticBindings.artifacts;
   const tailWorkerName = DEPLOYMENT_CONFIG.resources.tailWorkerName(stack);
@@ -472,8 +474,12 @@ async function main(): Promise<void> {
 
   // Auto-detect whether this deployment can use Cloudflare Artifacts (probes the
   // Artifacts REST API with the deploy token). ARTIFACTS_BINDING_ENABLED forces a
-  // value when set explicitly.
-  const artifactsNamespace = process.env.ARTIFACTS_NAMESPACE || 'default';
+  // value when set explicitly. The probe namespace is derived from the actual
+  // [[artifacts]] binding so the probe and the runtime binding can never diverge.
+  const artifactsBindingConfig = (
+    config.artifacts as Array<{ namespace?: string }> | undefined
+  )?.[0];
+  const artifactsNamespace = artifactsBindingConfig?.namespace || 'default';
   const artifactsBindingEnabled = await resolveArtifactsBindingEnabled(
     outputs.cloudflareAccountId,
     artifactsNamespace

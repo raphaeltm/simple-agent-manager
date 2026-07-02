@@ -28,14 +28,40 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
 }));
 
 vi.mock('../../../src/components/RepoSelector', () => ({
-  RepoSelector: ({ value, onChange, id }: { value: string; onChange: (v: string) => void; id?: string }) => (
-    <input id={id} data-testid="repo-selector" value={value} onChange={(e) => onChange(e.target.value)} />
+  RepoSelector: ({
+    value,
+    onChange,
+    id,
+  }: {
+    value: string;
+    onChange: (v: string) => void;
+    id?: string;
+  }) => (
+    <input
+      id={id}
+      data-testid="repo-selector"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+    />
   ),
 }));
 
 vi.mock('../../../src/components/BranchSelector', () => ({
-  BranchSelector: ({ value, onChange, id }: { value: string; onChange: (v: string) => void; id?: string }) => (
-    <input id={id} data-testid="branch-selector" value={value} onChange={(e) => onChange(e.target.value)} />
+  BranchSelector: ({
+    value,
+    onChange,
+    id,
+  }: {
+    value: string;
+    onChange: (v: string) => void;
+    id?: string;
+  }) => (
+    <input
+      id={id}
+      data-testid="branch-selector"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+    />
   ),
 }));
 
@@ -58,14 +84,19 @@ const MOCK_PROJECT = {
 };
 
 const MOCK_AGENTS = [
-  { id: 'claude-code', name: 'Claude Code', configured: true, models: ['claude-sonnet-4-5-20250514'] },
+  {
+    id: 'claude-code',
+    name: 'Claude Code',
+    configured: true,
+    models: ['claude-sonnet-4-5-20250514'],
+  },
 ];
 
 function renderWizard(props = {}) {
   return render(
     <MemoryRouter>
       <ProjectOnboardingWizard installations={INSTALLATIONS} artifactsEnabled {...props} />
-    </MemoryRouter>,
+    </MemoryRouter>
   );
 }
 
@@ -122,8 +153,9 @@ describe('ProjectOnboardingWizard', () => {
 
     const githubCard = screen.getByText('Connect a GitHub repository').closest('button')!;
     const samCard = screen.getByText('Let SAM host the repository').closest('button')!;
-    expect(githubCard).toHaveAttribute('aria-pressed', 'true');
-    expect(samCard).toHaveAttribute('aria-pressed', 'false');
+    expect(githubCard).toHaveAttribute('role', 'radio');
+    expect(githubCard).toHaveAttribute('aria-checked', 'true');
+    expect(samCard).toHaveAttribute('aria-checked', 'false');
   });
 
   it('hides the SAM option when Artifacts is disabled on the deployment', async () => {
@@ -147,12 +179,14 @@ describe('ProjectOnboardingWizard', () => {
     // No GitHub installation picker on the SAM path.
     expect(screen.queryByText('test-org (Organization)')).not.toBeInTheDocument();
 
-    fireEvent.change(screen.getByPlaceholderText('Project name'), { target: { value: 'greenfield thing' } });
+    fireEvent.change(screen.getByPlaceholderText('Project name'), {
+      target: { value: 'greenfield thing' },
+    });
     fireEvent.click(screen.getByRole('button', { name: /Create project/ }));
 
     await waitFor(() => {
       expect(mockCreateProject).toHaveBeenCalledWith(
-        expect.objectContaining({ repoProvider: 'artifacts', name: 'greenfield thing' }),
+        expect.objectContaining({ repoProvider: 'artifacts', name: 'greenfield thing' })
       );
     });
     const payload = mockCreateProject.mock.calls[0]![0] as Record<string, unknown>;
@@ -179,7 +213,9 @@ describe('ProjectOnboardingWizard', () => {
 
     expect(screen.getByText('test-org (Organization)')).toBeInTheDocument();
     fireEvent.change(screen.getByPlaceholderText('Project name'), { target: { value: 'my-repo' } });
-    fireEvent.change(screen.getByTestId('repo-selector'), { target: { value: 'test-org/my-repo' } });
+    fireEvent.change(screen.getByTestId('repo-selector'), {
+      target: { value: 'test-org/my-repo' },
+    });
     fireEvent.click(screen.getByRole('button', { name: /Create project/ }));
 
     await waitFor(() => {
@@ -188,7 +224,7 @@ describe('ProjectOnboardingWizard', () => {
           repoProvider: 'github',
           installationId: 'inst-1',
           repository: 'test-org/my-repo',
-        }),
+        })
       );
     });
     await screen.findByRole('heading', { name: 'Set up a conversation agent' });
@@ -202,7 +238,9 @@ describe('ProjectOnboardingWizard', () => {
 
   it('displays name-conflict error from a 409 response', async () => {
     const mod = await import('../../../src/lib/api');
-    mockCreateProject.mockRejectedValue(new mod.ApiClientError('CONFLICT', 'Project name conflict', 409));
+    mockCreateProject.mockRejectedValue(
+      new mod.ApiClientError('CONFLICT', 'Project name conflict', 409)
+    );
     renderWizard();
     await advanceToConnect('artifacts');
     fireEvent.change(screen.getByPlaceholderText('Project name'), { target: { value: 'dupe' } });
@@ -220,7 +258,9 @@ describe('ProjectOnboardingWizard', () => {
     await advanceToConnect(provider);
     fireEvent.change(screen.getByPlaceholderText('Project name'), { target: { value: 'my-repo' } });
     if (provider === 'github') {
-      fireEvent.change(screen.getByTestId('repo-selector'), { target: { value: 'test-org/my-repo' } });
+      fireEvent.change(screen.getByTestId('repo-selector'), {
+        target: { value: 'test-org/my-repo' },
+      });
     }
     fireEvent.click(screen.getByRole('button', { name: /Create project/ }));
     await screen.findByRole('heading', { name: 'Set up a conversation agent' });
@@ -236,10 +276,53 @@ describe('ProjectOnboardingWizard', () => {
     await waitFor(() => {
       expect(mockCreateAgentProfile).toHaveBeenCalledWith(
         'proj-1',
-        expect.objectContaining({ taskMode: 'conversation' }),
+        expect.objectContaining({ taskMode: 'conversation' })
       );
     });
     await screen.findByRole('heading', { name: 'Set up a task agent' });
+  });
+
+  it('disables Create profile when no agents are configured but Skip still advances', async () => {
+    mockListAgents.mockResolvedValue({ agents: [] });
+    await advanceToSetup();
+
+    const create = screen.getByRole('button', { name: /Create profile/ });
+    expect(create).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: /Skip/ }));
+    await screen.findByRole('heading', { name: 'Set up a task agent' });
+    expect(mockCreateAgentProfile).not.toHaveBeenCalled();
+  });
+
+  it('creates a cron trigger from the automation footer and advances to kickoff', async () => {
+    mockCreateTrigger.mockResolvedValue({ id: 'trigger-1' });
+    await advanceToSetup();
+    fireEvent.click(screen.getByRole('button', { name: /Skip/ })); // conversation → task
+    await screen.findByRole('heading', { name: 'Set up a task agent' });
+    fireEvent.click(screen.getByRole('button', { name: /Skip/ })); // task → automation
+    await screen.findByRole('heading', { name: /Schedule automation/ });
+
+    fireEvent.click(screen.getByRole('button', { name: /Create trigger/ }));
+    await waitFor(() => {
+      expect(mockCreateTrigger).toHaveBeenCalledWith(
+        'proj-1',
+        expect.objectContaining({ sourceType: 'cron' })
+      );
+    });
+    await screen.findByRole('heading', { name: 'Kick off your first work' });
+  });
+
+  it('shows the loadError with a working Retry on the connect step', async () => {
+    const onRetry = vi.fn();
+    renderWizard({ loadError: 'Failed to load installations', onRetryInstallations: onRetry });
+    // On the GitHub connect step, a loadError renders an error Alert (no connect form).
+    fireEvent.click(screen.getByRole('button', { name: /Get started/ }));
+    await screen.findByRole('heading', { name: 'How SAM works' });
+    fireEvent.click(screen.getByRole('button', { name: /Continue/ }));
+    await screen.findByRole('heading', { name: /Where should your code live/ });
+    fireEvent.click(screen.getByRole('button', { name: /Continue/ }));
+    expect(await screen.findByText('Failed to load installations')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Retry/ }));
+    expect(onRetry).toHaveBeenCalledTimes(1);
   });
 
   it('walks conversation → task → automation → kickoff via footer Skip', async () => {
@@ -273,7 +356,10 @@ describe('ProjectOnboardingWizard', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Start task/ }));
     await waitFor(() => {
-      expect(mockSubmitTask).toHaveBeenCalledWith('proj-1', expect.objectContaining({ taskMode: 'task' }));
+      expect(mockSubmitTask).toHaveBeenCalledWith(
+        'proj-1',
+        expect.objectContaining({ taskMode: 'task' })
+      );
       expect(mockNavigate).toHaveBeenCalledWith('/projects/proj-1/tasks/task-1');
     });
   });
@@ -285,7 +371,10 @@ describe('ProjectOnboardingWizard', () => {
     fireEvent.click(screen.getByText('Conversation').closest('button')!);
     fireEvent.click(screen.getByRole('button', { name: /Start conversation/ }));
     await waitFor(() => {
-      expect(mockSubmitTask).toHaveBeenCalledWith('proj-1', expect.objectContaining({ taskMode: 'conversation' }));
+      expect(mockSubmitTask).toHaveBeenCalledWith(
+        'proj-1',
+        expect.objectContaining({ taskMode: 'conversation' })
+      );
       expect(mockNavigate).toHaveBeenCalledWith('/projects/proj-1/chat/sess-2');
     });
   });
