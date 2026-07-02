@@ -10,6 +10,8 @@
 import { Archive, Check, ListTodo, Pause, Square } from 'lucide-react';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
+import { FollowUpInput } from '../../components/project-message-view/FollowUpInput';
+import { useTheme } from '../../contexts/ThemeContext';
 import {
   ARCHIVE_LABELS,
   DOCK_CONCEPTS,
@@ -225,17 +227,13 @@ function BumpBar({
         style={{ zIndex: 1, pointerEvents: 'none' }}
         aria-hidden
       >
-        <defs>
-          <linearGradient id="dockFill" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="rgba(22,30,27,0.92)" />
-            <stop offset="100%" stopColor="rgba(14,20,18,0.96)" />
-          </linearGradient>
-        </defs>
+        {/* Theme-aware chrome: fill + hairline read from the same tokens the
+            composer's .glass-chrome uses, so the dock adapts to dark/light. */}
         <path
           d={path}
           fillRule="evenodd"
-          fill="url(#dockFill)"
-          stroke="rgba(34,197,94,0.18)"
+          fill="var(--sam-glass-bg-chrome)"
+          stroke="var(--sam-glass-border-color)"
           strokeWidth={1}
         />
       </svg>
@@ -365,32 +363,22 @@ function FlatBar({
 }
 
 // ---------------------------------------------------------------------------
-// Mock composer (visual only)
+// Real composer with mock data — renders the production FollowUpInput
+// (which wraps ProjectChatComposer) so the dock is previewed against the
+// actual composer chrome instead of a bespoke mock.
 // ---------------------------------------------------------------------------
 
-function MockComposer() {
+function RealComposer() {
+  const [value, setValue] = useState('');
   return (
-    <div className="glass-chrome border-x-0 border-b-0 px-4 py-3">
-      <div className="flex gap-2 items-end">
-        <button
-          type="button"
-          className="shrink-0 p-2 min-h-[44px] min-w-[44px] flex items-center justify-center bg-transparent border border-[rgba(34,197,94,0.12)] rounded-md text-fg-muted"
-          aria-label="Attach"
-        >
-          <span className="text-lg leading-none">+</span>
-        </button>
-        <div className="flex-1 p-2 px-3 bg-[var(--sam-form-bg,rgba(255,255,255,0.03))] border border-[rgba(34,197,94,0.12)] rounded-md text-fg-muted text-base min-h-[38px] flex items-center">
-          Message the agent...
-        </div>
-        <button
-          type="button"
-          className="px-3 py-2 min-h-[44px] rounded-md text-base font-medium text-white"
-          style={{ background: 'linear-gradient(135deg,var(--sam-color-accent-primary,#16a34a),#22c55e)' }}
-        >
-          Send
-        </button>
-      </div>
-    </div>
+    <FollowUpInput
+      value={value}
+      onChange={setValue}
+      onSend={() => setValue('')}
+      sending={false}
+      placeholder="Message the agent..."
+      transcribeApiUrl="/api/transcribe"
+    />
   );
 }
 
@@ -442,11 +430,15 @@ function Segmented<T extends string>({
 
 export function DockPrototype() {
   const [working, setWorking] = useState(true);
-  const [concept, setConcept] = useState<DockConceptId>('bump');
+  const [concept, setConcept] = useState<DockConceptId>('morph');
   const [interruptLabel, setInterruptLabel] = useState<InterruptLabel>('Stop');
   const [archiveLabel, setArchiveLabel] = useState<ArchiveLabel>('Archive');
   const [reducedMotion, setReducedMotion] = useState(false);
   const [hasPlan, setHasPlan] = useState(true);
+  // Drive the real app ThemeProvider so the dock is proven against the actual
+  // token layer (dark = `sam`, light = `sam-light` on <html>), exactly as the
+  // production integration would behave.
+  const { resolvedTheme, setTheme } = useTheme();
   const [lastAction, setLastAction] = useState<string | null>(null);
 
   const progress = useEased(working ? 1 : 0, reducedMotion);
@@ -509,6 +501,15 @@ export function DockPrototype() {
             value={hasPlan ? 'yes' : 'no'}
             onChange={(v) => setHasPlan(v === 'yes')}
           />
+          <Segmented
+            label="Theme"
+            options={[
+              { id: 'dark', name: 'Dark' },
+              { id: 'light', name: 'Light' },
+            ]}
+            value={resolvedTheme}
+            onChange={(v) => setTheme(v as 'dark' | 'light')}
+          />
         </div>
 
         <p className="text-xs text-fg-muted mb-3">
@@ -534,7 +535,7 @@ export function DockPrototype() {
                 onInterrupt={() => flash(`${interruptLabel} tapped`)}
                 onArchive={() => flash(`${archiveLabel} tapped`)}
               />
-              <MockComposer />
+              <RealComposer />
             </div>
           </div>
 
@@ -556,7 +557,7 @@ export function DockPrototype() {
                 onInterrupt={() => flash(`${interruptLabel} tapped`)}
                 onArchive={() => flash(`${archiveLabel} tapped`)}
               />
-              <MockComposer />
+              <RealComposer />
             </div>
           </div>
         </div>
@@ -619,9 +620,7 @@ function Transcript() {
         <div
           key={i}
           className={`max-w-[85%] text-sm rounded-lg px-3 py-2 ${
-            m.role === 'user'
-              ? 'self-end bg-[rgba(34,197,94,0.1)] text-fg-primary'
-              : 'self-start bg-[rgba(255,255,255,0.04)] text-fg-primary'
+            m.role === 'user' ? 'self-end glass-msg-user' : 'self-start glass-msg-assistant'
           }`}
         >
           {m.text}
