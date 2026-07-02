@@ -4,14 +4,12 @@ import type {
   GitHubCliPolicy,
 } from '@simple-agent-manager/shared';
 import { Button, Input } from '@simple-agent-manager/ui';
-import { Check } from 'lucide-react';
 
 import { ApiClientError } from '../../lib/api';
 import { ModelSelect } from '../ModelSelect';
 
 /* ───────── Types ───────── */
 
-export type WizardStep = 'connect' | 'setup' | 'kickoff';
 export type SetupStatus = 'pending' | 'done' | 'skipped';
 export type FieldErrors = Partial<Record<'name' | 'repository' | 'githubRepoId' | 'general', string>>;
 
@@ -100,42 +98,6 @@ export function profilePayload(
 }
 
 /* ───────── Shared UI Components ───────── */
-
-export function StepIndicator({ current }: { current: WizardStep }) {
-  const steps: Array<{ id: WizardStep; label: string }> = [
-    { id: 'connect', label: 'Connect code' },
-    { id: 'setup', label: 'Set up' },
-    { id: 'kickoff', label: 'Kick off' },
-  ];
-  const currentIndex = steps.findIndex((step) => step.id === current);
-
-  return (
-    <ol className="grid gap-2 sm:grid-cols-3" aria-label="Project onboarding steps">
-      {steps.map((step, index) => {
-        const state = index < currentIndex ? 'complete' : index === currentIndex ? 'current' : 'upcoming';
-        return (
-          <li
-            key={step.id}
-            className={`flex min-h-11 items-center gap-2 rounded-md border px-3 py-2 text-sm ${
-              state === 'current'
-                ? 'border-accent bg-accent/10 text-fg-primary'
-                : state === 'complete'
-                  ? 'border-success/40 bg-success-tint text-fg-primary'
-                  : 'border-border-default bg-surface text-fg-muted'
-            }`}
-            aria-current={state === 'current' ? 'step' : undefined}
-            aria-label={state === 'complete' ? `${step.label} — complete` : undefined}
-          >
-            <span className="flex size-6 shrink-0 items-center justify-center rounded-full border border-current text-xs">
-              {state === 'complete' ? <Check size={14} aria-hidden="true" /> : index + 1}
-            </span>
-            <span className="truncate">{step.label}</span>
-          </li>
-        );
-      })}
-    </ol>
-  );
-}
 
 export function SetupHeader({ title, status }: { title: string; status: SetupStatus }) {
   const label = status === 'pending' ? 'Optional' : status === 'done' ? 'Created' : 'Skipped';

@@ -120,6 +120,19 @@ export async function createProject(data: CreateProjectRequest): Promise<Project
   });
 }
 
+/**
+ * Whether the SAM-hosted (Cloudflare Artifacts) repo provider is enabled on this
+ * deployment. Used to decide whether to offer it during project onboarding.
+ */
+export async function getArtifactsEnabled(): Promise<boolean> {
+  try {
+    const result = await request<{ enabled: boolean }>('/api/config/artifacts-enabled');
+    return !!result.enabled;
+  } catch {
+    return false;
+  }
+}
+
 export async function getProject(id: string): Promise<ProjectDetailResponse> {
   return request<ProjectDetailResponse>(`/api/projects/${id}`);
 }

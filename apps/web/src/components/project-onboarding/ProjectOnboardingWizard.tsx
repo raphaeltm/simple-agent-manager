@@ -3,8 +3,10 @@ import type {
   AgentProfile,
   GitHubInstallation,
   Project,
+  RepoProvider,
 } from '@simple-agent-manager/shared';
 import { Alert, Button, Skeleton } from '@simple-agent-manager/ui';
+import { ArrowLeft, ArrowRight } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
 
@@ -18,6 +20,13 @@ import {
   submitTask,
 } from '../../lib/api';
 import {
+  MobileProgress,
+  ONBOARDING_STEPS,
+  type OnboardingStepId,
+  ProgressRail,
+  stepIndex,
+} from './explain';
+import {
   type CreatedProfiles,
   deriveProjectName,
   type FieldErrors,
@@ -28,15 +37,17 @@ import {
   type ProfileDraft,
   profilePayload,
   type SetupStatus,
-  StepIndicator,
-  type WizardStep,
 } from './shared';
+import { StepAutomation } from './StepAutomation';
 import { StepConnect } from './StepConnect';
+import { StepHowSamWorks, StepWelcome } from './StepIntro';
 import { StepKickoff } from './StepKickoff';
-import { StepSetup } from './StepSetup';
+import { StepProfile } from './StepProfile';
+import { StepProvider } from './StepProvider';
 
 interface ProjectOnboardingWizardProps {
   installations: GitHubInstallation[];
+  artifactsEnabled?: boolean;
   loading?: boolean;
   loadError?: string | null;
   onRetryInstallations?: () => void;
@@ -44,12 +55,14 @@ interface ProjectOnboardingWizardProps {
 
 export function ProjectOnboardingWizard({
   installations,
+  artifactsEnabled = false,
   loading = false,
   loadError,
   onRetryInstallations,
 }: ProjectOnboardingWizardProps) {
   const navigate = useNavigate();
-  const [step, setStep] = useState<WizardStep>('connect');
+  const [step, setStep] = useState<OnboardingStepId>('welcome');
+  const [repoProvider, setRepoProvider] = useState<RepoProvider>('github');
   const [project, setProject] = useState<Project | null>(null);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -70,7 +83,7 @@ export function ProjectOnboardingWizard({
   const [branchesError, setBranchesError] = useState<string | null>(null);
   const [repoDefaultBranch, setRepoDefaultBranch] = useState<string | undefined>(undefined);
 
-  // Step 2: Setup state
+  // Setup state
   const [agentsLoading, setAgentsLoading] = useState(false);
   const [agentsError, setAgentsError] = useState<string | null>(null);
   const [configuredAgents, setConfiguredAgents] = useState<AgentInfo[]>([]);
@@ -104,7 +117,7 @@ export function ProjectOnboardingWizard({
   });
   const [triggerError, setTriggerError] = useState<string | null>(null);
 
-  // Step 3: Kickoff state
+  // Kickoff state
   const [kickoffMode, setKickoffMode] = useState<'task' | 'conversation'>('task');
   const [kickoffMessage, setKickoffMessage] = useState('Review this repository and suggest the highest-impact next steps.');
   const [kickoffError, setKickoffError] = useState<string | null>(null);
@@ -116,7 +129,17 @@ export function ProjectOnboardingWizard({
     ));
   }, [defaultInstallationId]);
 
-  /* ─── Step 1 handlers ─── */
+  const currentIndex = stepIndex(step);
+  // Once a project exists, steps before "conversation" are locked (can't re-create).
+  const lockedBeforeIndex = project ? stepIndex('conversation') : 0;
+
+  const goToStep = (id: OnboardingStepId) => {
+    setStep(id);
+  };
+  const goNext = () => setStep(ONBOARDING_STEPS[Math.min(currentIndex + 1, ONBOARDING_STEPS.length - 1)]!.id);
+  const goBack = () => setStep(ONBOARDING_STEPS[Math.max(currentIndex - 1, 0)]!.id);
+
+  /* ─── Connect handlers ─── */
 
   const fetchBranches = useCallback(async (repository: string, installationId: string, defaultBranch?: string) => {
     setBranchesLoading(true);
@@ -191,42 +214,59 @@ export function ProjectOnboardingWizard({
     }
   }, []);
 
-  const handleCreateProject = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  const handleCreateProject = async () => {
+    if (project) {
+      goToStep('conversation');
+      return;
+    }
     setSubmitError(null);
     setFieldErrors({});
 
-    const repository = normalizeRepository(projectForm.repository);
     if (!projectForm.name.trim()) {
       setFieldErrors({ name: 'Project name is required.' });
       return;
     }
-    if (!projectForm.installationId.trim()) {
-      setFieldErrors({ general: 'Select a GitHub installation.' });
-      return;
-    }
-    if (!repository) {
-      setFieldErrors({ repository: 'Repository is required.' });
-      return;
-    }
-    if (!projectForm.defaultBranch.trim()) {
-      setFieldErrors({ general: 'Default branch is required.' });
-      return;
-    }
 
-    setCreatingProject(true);
-    try {
-      const created = await createProject({
+    let payload;
+    if (repoProvider === 'artifacts') {
+      payload = {
         name: projectForm.name.trim(),
         description: projectForm.description.trim() || undefined,
-        repoProvider: 'github',
+        repoProvider: 'artifacts' as const,
+        defaultBranch: 'main',
+      };
+    } else {
+      const repository = normalizeRepository(projectForm.repository);
+      if (!projectForm.installationId.trim()) {
+        setFieldErrors({ general: 'Select a GitHub installation.' });
+        setSubmitError('Select a GitHub installation.');
+        return;
+      }
+      if (!repository) {
+        setFieldErrors({ repository: 'Repository is required.' });
+        return;
+      }
+      if (!projectForm.defaultBranch.trim()) {
+        setFieldErrors({ general: 'Default branch is required.' });
+        setSubmitError('Default branch is required.');
+        return;
+      }
+      payload = {
+        name: projectForm.name.trim(),
+        description: projectForm.description.trim() || undefined,
+        repoProvider: 'github' as const,
         installationId: projectForm.installationId,
         repository,
         defaultBranch: projectForm.defaultBranch.trim(),
         githubRepoId: projectForm.githubRepoId,
-      });
+      };
+    }
+
+    setCreatingProject(true);
+    try {
+      const created = await createProject(payload);
       setProject(created);
-      setStep('setup');
+      goToStep('conversation');
       void loadConfiguredAgents();
     } catch (error) {
       const mapped = mapProjectCreateError(error);
@@ -237,7 +277,7 @@ export function ProjectOnboardingWizard({
     }
   };
 
-  /* ─── Step 2 handlers ─── */
+  /* ─── Setup handlers ─── */
 
   const saveProfile = async (kind: 'conversation' | 'task') => {
     if (!project) return;
@@ -305,7 +345,7 @@ export function ProjectOnboardingWizard({
     }
   };
 
-  /* ─── Step 3 handlers ─── */
+  /* ─── Kickoff handlers ─── */
 
   const selectedKickoffProfileId = kickoffMode === 'conversation'
     ? createdProfiles.conversation?.id
@@ -342,129 +382,173 @@ export function ProjectOnboardingWizard({
     }
   };
 
-  const canContinueFromSetup = conversationStatus !== 'pending' && taskStatus !== 'pending' && triggerStatus !== 'pending';
-
-  /* ─── Loading / error states ─── */
-
-  if (loading) {
-    return (
-      <div className="grid gap-4">
-        <StepIndicator current="connect" />
-        <div className="grid gap-3 rounded-md border border-border-default bg-surface p-4">
-          <Skeleton width="35%" height="1rem" />
-          <Skeleton width="100%" height="2.75rem" borderRadius="var(--sam-radius-md)" />
-          <Skeleton width="100%" height="2.75rem" borderRadius="var(--sam-radius-md)" />
-        </div>
-      </div>
-    );
-  }
-
-  if (loadError) {
-    return (
-      <div className="grid gap-4">
-        <StepIndicator current="connect" />
-        <Alert variant="error">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <span>{loadError}</span>
-            {onRetryInstallations && (
-              <Button type="button" variant="secondary" onClick={onRetryInstallations}>
-                Retry
-              </Button>
-            )}
-          </div>
-        </Alert>
-      </div>
-    );
-  }
-
-  if (installations.length === 0) {
-    return (
-      <div className="grid gap-4">
-        <StepIndicator current="connect" />
-        <Alert variant="warning">
-          Install the GitHub App in Settings before creating a project from a repository.
-        </Alert>
-      </div>
-    );
-  }
-
   /* ─── Render ─── */
 
+  const renderBody = () => {
+    switch (step) {
+      case 'welcome':
+        return <StepWelcome />;
+      case 'how-sam-works':
+        return <StepHowSamWorks />;
+      case 'provider':
+        return (
+          <StepProvider
+            value={repoProvider}
+            artifactsEnabled={artifactsEnabled}
+            onChange={setRepoProvider}
+          />
+        );
+      case 'connect':
+        if (repoProvider === 'github' && loading) {
+          return (
+            <div className="grid gap-3 rounded-md border border-border-default bg-surface p-4">
+              <Skeleton width="35%" height="1rem" />
+              <Skeleton width="100%" height="2.75rem" borderRadius="var(--sam-radius-md)" />
+              <Skeleton width="100%" height="2.75rem" borderRadius="var(--sam-radius-md)" />
+            </div>
+          );
+        }
+        if (repoProvider === 'github' && loadError) {
+          return (
+            <Alert variant="error">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <span>{loadError}</span>
+                {onRetryInstallations && (
+                  <Button type="button" variant="secondary" onClick={onRetryInstallations}>
+                    Retry
+                  </Button>
+                )}
+              </div>
+            </Alert>
+          );
+        }
+        return (
+          <StepConnect
+            repoProvider={repoProvider}
+            installations={installations}
+            projectForm={projectForm}
+            branches={branches}
+            branchesLoading={branchesLoading}
+            branchesError={branchesError}
+            repoDefaultBranch={repoDefaultBranch}
+            fieldErrors={fieldErrors}
+            submitError={submitError}
+            creatingProject={creatingProject}
+            onInstallationChange={handleInstallationChange}
+            onRepositoryChange={handleRepositoryChange}
+            onRepoSelect={handleRepoSelect}
+            onBranchChange={(value) => setProjectForm((c) => ({ ...c, defaultBranch: value }))}
+            onNameChange={(value) => {
+              setProjectNameTouched(true);
+              setProjectForm((c) => ({ ...c, name: value }));
+              setFieldErrors((c) => ({ ...c, name: undefined }));
+            }}
+            onDescriptionChange={(value) => setProjectForm((c) => ({ ...c, description: value }))}
+          />
+        );
+      case 'conversation':
+        return (
+          <StepProfile
+            kind="conversation"
+            status={conversationStatus}
+            draft={conversationProfile}
+            configuredAgents={configuredAgents}
+            agentsLoading={agentsLoading}
+            agentsError={agentsError}
+            saving={savingSetup === 'conversation'}
+            onChange={setConversationProfile}
+            onSave={() => void saveProfile('conversation')}
+            onSkip={() => setConversationStatus('skipped')}
+            onRefreshAgents={loadConfiguredAgents}
+          />
+        );
+      case 'task':
+        return (
+          <StepProfile
+            kind="task"
+            status={taskStatus}
+            draft={taskProfile}
+            configuredAgents={configuredAgents}
+            agentsLoading={agentsLoading}
+            agentsError={agentsError}
+            saving={savingSetup === 'task'}
+            onChange={setTaskProfile}
+            onSave={() => void saveProfile('task')}
+            onSkip={() => setTaskStatus('skipped')}
+            onRefreshAgents={loadConfiguredAgents}
+          />
+        );
+      case 'automation':
+        return (
+          <StepAutomation
+            triggerForm={triggerForm}
+            status={triggerStatus}
+            error={triggerError}
+            saving={savingSetup === 'trigger'}
+            onChange={setTriggerForm}
+            onSave={() => void saveTrigger()}
+            onSkip={() => setTriggerStatus('skipped')}
+          />
+        );
+      case 'kickoff':
+        return (
+          <StepKickoff
+            kickoffMode={kickoffMode}
+            kickoffMessage={kickoffMessage}
+            kickoffError={kickoffError}
+            kickoffSubmitting={kickoffSubmitting}
+            onModeChange={setKickoffMode}
+            onMessageChange={setKickoffMessage}
+            onKickoff={() => void handleKickoff()}
+            onSkip={() => navigate(`/projects/${project?.id ?? ''}`)}
+          />
+        );
+    }
+  };
+
+  // Setup profile errors surface at the step level (shared across conversation/task).
+  const showSetupError = setupError && (step === 'conversation' || step === 'task');
+
   return (
-    <div className="grid gap-4">
-      <StepIndicator current={step} />
+    <div className="grid gap-6 lg:grid-cols-[220px_1fr]">
+      <aside className="hidden lg:block">
+        <div className="sticky top-4">
+          <ProgressRail current={step} lockedBeforeIndex={lockedBeforeIndex} onJump={goToStep} />
+        </div>
+      </aside>
 
-      {step === 'connect' && (
-        <StepConnect
-          installations={installations}
-          projectForm={projectForm}
-          branches={branches}
-          branchesLoading={branchesLoading}
-          branchesError={branchesError}
-          repoDefaultBranch={repoDefaultBranch}
-          fieldErrors={fieldErrors}
-          submitError={submitError}
-          creatingProject={creatingProject}
-          onInstallationChange={handleInstallationChange}
-          onRepositoryChange={handleRepositoryChange}
-          onRepoSelect={handleRepoSelect}
-          onBranchChange={(value) => setProjectForm((c) => ({ ...c, defaultBranch: value }))}
-          onNameChange={(value) => {
-            setProjectNameTouched(true);
-            setProjectForm((c) => ({ ...c, name: value }));
-            setFieldErrors((c) => ({ ...c, name: undefined }));
-          }}
-          onDescriptionChange={(value) => setProjectForm((c) => ({ ...c, description: value }))}
-          onSubmit={handleCreateProject}
-          onCancel={() => navigate('/projects')}
-        />
-      )}
+      <section className="grid gap-4">
+        <MobileProgress current={step} />
 
-      {step === 'setup' && project && (
-        <StepSetup
-          project={project}
-          configuredAgents={configuredAgents}
-          agentsLoading={agentsLoading}
-          agentsError={agentsError}
-          conversationProfile={conversationProfile}
-          taskProfile={taskProfile}
-          triggerForm={triggerForm}
-          conversationStatus={conversationStatus}
-          taskStatus={taskStatus}
-          triggerStatus={triggerStatus}
-          setupError={setupError}
-          triggerError={triggerError}
-          savingSetup={savingSetup}
-          createdProfiles={createdProfiles}
-          canContinueFromSetup={canContinueFromSetup}
-          onRefreshAgents={loadConfiguredAgents}
-          onConversationProfileChange={setConversationProfile}
-          onTaskProfileChange={setTaskProfile}
-          onTriggerFormChange={setTriggerForm}
-          onSaveProfile={(kind) => void saveProfile(kind)}
-          onSkipProfile={(kind) => {
-            if (kind === 'conversation') setConversationStatus('skipped');
-            if (kind === 'task') setTaskStatus('skipped');
-          }}
-          onSaveTrigger={() => void saveTrigger()}
-          onSkipTrigger={() => setTriggerStatus('skipped')}
-          onContinue={() => setStep('kickoff')}
-          onOpenProject={() => navigate(`/projects/${project.id}`)}
-        />
-      )}
+        {renderBody()}
 
-      {step === 'kickoff' && project && (
-        <StepKickoff
-          kickoffMode={kickoffMode}
-          kickoffMessage={kickoffMessage}
-          kickoffError={kickoffError}
-          kickoffSubmitting={kickoffSubmitting}
-          onModeChange={setKickoffMode}
-          onMessageChange={setKickoffMessage}
-          onKickoff={() => void handleKickoff()}
-          onSkip={() => navigate(`/projects/${project.id}`)}
-        />
-      )}
+        {showSetupError && <Alert variant="error">{setupError}</Alert>}
+
+        <nav
+          className="flex items-center justify-between gap-2 border-t border-border-default pt-4"
+          aria-label="Step navigation"
+        >
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={step === 'welcome' ? () => navigate('/projects') : goBack}
+            disabled={creatingProject || (currentIndex <= lockedBeforeIndex && currentIndex !== 0 && !!project)}
+          >
+            <ArrowLeft size={16} aria-hidden="true" /> {step === 'welcome' ? 'Cancel' : 'Back'}
+          </Button>
+
+          {step === 'connect' ? (
+            <Button type="button" onClick={() => void handleCreateProject()} disabled={creatingProject}>
+              {creatingProject ? 'Creating...' : project ? 'Continue' : 'Create project'}{' '}
+              <ArrowRight size={16} aria-hidden="true" />
+            </Button>
+          ) : step === 'kickoff' ? null : (
+            <Button type="button" onClick={goNext}>
+              {step === 'welcome' ? 'Get started' : 'Continue'} <ArrowRight size={16} aria-hidden="true" />
+            </Button>
+          )}
+        </nav>
+      </section>
     </div>
   );
 }
