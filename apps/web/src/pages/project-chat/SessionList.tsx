@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 
-import type { ChatSessionListItem, ChatSessionResponse } from '../../lib/api';
+import type { ChatSessionListItem } from '../../lib/api';
 import { getLineageText } from './lineageUtils';
 import { SessionTreeItem } from './SessionTreeItem';
 import type { TaskInfo } from './useTaskGroups';
@@ -18,7 +18,6 @@ export function SessionList({
   sessions,
   selectedSessionId,
   onSelect,
-  onFork,
   taskInfoMap,
   onShowHierarchy,
 }: {
@@ -26,7 +25,6 @@ export function SessionList({
   sessions: ChatSessionListItem[];
   selectedSessionId: string | null;
   onSelect: (id: string) => void;
-  onFork?: (session: ChatSessionResponse) => void;
   taskInfoMap: Map<string, TaskInfo>;
   onShowHierarchy: (taskId: string) => void;
 }) {
@@ -50,7 +48,6 @@ export function SessionList({
           session={session}
           selectedSessionId={selectedSessionId}
           onSelect={onSelect}
-          onFork={onFork}
           taskInfoMap={taskInfoMap}
           onShowHierarchy={onShowHierarchy}
           lineageText={lineageMap.get(session.id)}

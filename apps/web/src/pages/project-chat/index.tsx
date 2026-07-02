@@ -166,7 +166,6 @@ export function ProjectChat() {
                 sessions={state.filteredRecent}
                 selectedSessionId={state.sessionId ?? null}
                 onSelect={state.handleSelect}
-                onFork={state.handleFork}
                 taskInfoMap={state.taskInfoMap}
                 onShowHierarchy={handleShowHierarchy}
               />
@@ -185,7 +184,6 @@ export function ProjectChat() {
                       sessions={state.filteredStale}
                       selectedSessionId={state.sessionId ?? null}
                       onSelect={state.handleSelect}
-                      onFork={state.handleFork}
                       taskInfoMap={state.taskInfoMap}
                       onShowHierarchy={handleShowHierarchy}
                     />
@@ -349,7 +347,6 @@ export function ProjectChat() {
           sessions={state.sessions}
           selectedSessionId={state.sessionId ?? null}
           onSelect={state.handleSelect}
-          onFork={(session) => { state.setSidebarOpen(false); state.handleFork(session); }}
           onNewChat={() => { state.setSidebarOpen(false); state.handleNewChat(); }}
           onClose={() => state.setSidebarOpen(false)}
           realtimeDegraded={state.realtimeDegraded}

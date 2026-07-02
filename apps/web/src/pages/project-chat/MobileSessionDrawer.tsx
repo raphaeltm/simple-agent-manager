@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { useScrollLock } from '../../hooks/useScrollLock';
-import type { ChatSessionListItem, ChatSessionResponse } from '../../lib/api';
+import type { ChatSessionListItem } from '../../lib/api';
 import { isStaleSession } from '../../lib/chat-session-utils';
 import { stripMarkdown } from '../../lib/text-utils';
 import { SessionList } from './SessionList';
@@ -13,7 +13,6 @@ export function MobileSessionDrawer({
   sessions,
   selectedSessionId,
   onSelect,
-  onFork,
   onNewChat,
   onClose,
   realtimeDegraded = false,
@@ -25,7 +24,6 @@ export function MobileSessionDrawer({
   sessions: ChatSessionListItem[];
   selectedSessionId: string | null;
   onSelect: (id: string) => void;
-  onFork: (session: ChatSessionResponse) => void;
   onNewChat: () => void;
   onClose: () => void;
   realtimeDegraded?: boolean;
@@ -169,7 +167,6 @@ export function MobileSessionDrawer({
             sessions={filteredR}
             selectedSessionId={selectedSessionId}
             onSelect={onSelect}
-            onFork={onFork}
             taskInfoMap={taskInfoMap}
             onShowHierarchy={onShowHierarchy}
           />
@@ -188,7 +185,6 @@ export function MobileSessionDrawer({
                   sessions={filteredS}
                   selectedSessionId={selectedSessionId}
                   onSelect={onSelect}
-                  onFork={onFork}
                   taskInfoMap={taskInfoMap}
                   onShowHierarchy={onShowHierarchy}
                 />
