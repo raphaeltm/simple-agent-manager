@@ -27,6 +27,7 @@ import { Chats } from './pages/Chats';
 import { CreateWorkspace } from './pages/CreateWorkspace';
 import { Dashboard } from './pages/Dashboard';
 import { DeviceAuth } from './pages/DeviceAuth';
+import { DockPrototype } from './pages/dock-prototype';
 import { IdeaDetailPage } from './pages/IdeaDetailPage';
 import { IdeasPage } from './pages/IdeasPage';
 import { Landing } from './pages/Landing';
@@ -97,6 +98,8 @@ export default function App() {
                 <Route path="/try/:trialId" element={<TryDiscovery />} />
                 {/* SAM prototype — public, no auth */}
                 <Route path="/sam" element={<SamPrototype />} />
+                {/* Dock prototype — public, no auth (design exploration) */}
+                <Route path="/prototype/dock" element={<DockPrototype />} />
                 <Route path="/device" element={<DeviceAuth />} />
                 {/* Harness for Playwright audits — mounts trial components with mock data */}
                 <Route path="/__test/trial-chat-gate" element={<TrialChatGateHarness />} />
