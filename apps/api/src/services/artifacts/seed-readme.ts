@@ -241,7 +241,7 @@ export function buildReceivePackRequest(commitOid: string, branch: string, pack:
  * on failure. Exported for tests.
  */
 export function parseReceivePackResult(body: string): { ok: boolean; detail: string } {
-  if (/(^|\n|\r|\x00|[0-9a-f]{4})ng /.test(body) || body.includes('ng refs/')) {
+  if (/(^|\n|\r|[0-9a-f]{4})ng /.test(body) || body.includes('ng refs/')) {
     return { ok: false, detail: body.trim() };
   }
   if (body.includes('unpack ok') || body.includes('ok refs/')) {
