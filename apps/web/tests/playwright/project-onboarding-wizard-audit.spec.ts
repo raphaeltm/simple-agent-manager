@@ -1,165 +1,161 @@
-import { type Page, type Route, test } from '@playwright/test';
+import { expect, type Page, test } from '@playwright/test';
 
-import { assertNoOverflow, makeMockUser, screenshot } from './audit-helpers';
+import { assertNoOverflow, makeMockUser, screenshot, seedTheme, setupAuditRoutes } from './audit-helpers';
 
 const MOCK_USER = makeMockUser({
   email: 'test@example.com',
   name: 'Test User',
-  role: 'superadmin',
   sessionId: 'session-1',
   userId: 'user-1',
 });
 
 const INSTALLATIONS = [
-  { id: 'inst-1', accountName: 'acme-org', accountType: 'Organization' },
+  { id: 'inst-1', accountName: 'a-fairly-long-github-organization-name-inc', accountType: 'Organization' },
   { id: 'inst-2', accountName: 'personal-account', accountType: 'User' },
 ];
 
-const REPOS = [
-  { fullName: 'acme-org/frontend', defaultBranch: 'main', private: true, githubRepoId: 1001 },
-  { fullName: 'acme-org/backend-api', defaultBranch: 'develop', private: true, githubRepoId: 1002 },
-  { fullName: 'acme-org/infrastructure-as-code-monorepo-with-a-very-long-name', defaultBranch: 'main', private: false, githubRepoId: 1003 },
-];
-
-const BRANCHES = [
-  { name: 'main' },
-  { name: 'develop' },
-  { name: 'feature/onboarding-wizard-with-a-really-long-branch-name' },
-];
-
 const AGENTS = [
-  { id: 'claude-code', name: 'Claude Code', configured: true, models: ['claude-sonnet-4-5-20250514'] },
-  { id: 'codex', name: 'Codex', configured: true, models: ['o4-mini'] },
-  { id: 'aider', name: 'Aider', configured: false, models: [] },
+  { id: 'claude-code', name: 'Claude Code', configured: true, models: ['claude-sonnet-4-5'] },
+  { id: 'openai-codex', name: 'OpenAI Codex', configured: true, models: ['gpt-5'] },
 ];
 
-async function setupApiMocks(page: Page, overrides: {
-  installations?: unknown[];
-  repos?: unknown[];
-  branches?: unknown[];
-  agents?: unknown[];
-  createProjectError?: { status: number; body: unknown };
-} = {}) {
-  const {
-    installations = INSTALLATIONS,
-    repos = REPOS,
-    branches = BRANCHES,
-    agents = AGENTS,
-  } = overrides;
+const CREATED_PROJECT = {
+  id: 'proj-audit-1',
+  name: 'greenfield',
+  description: null,
+  repository: 'https://acct.artifacts.cloudflare.net/git/default/greenfield.git',
+  defaultBranch: 'main',
+  installationId: 'system_anonymous_trials_installation',
+  status: 'active',
+  repoProvider: 'artifacts',
+  createdAt: '2026-07-02T00:00:00Z',
+  updatedAt: '2026-07-02T00:00:00Z',
+  userId: 'user-1',
+};
 
-  await page.route('**/api/auth/get-session', (route: Route) =>
-    route.fulfill({ status: 200, json: MOCK_USER }),
-  );
-
-  await page.route('**/api/github/installations', (route: Route) =>
-    route.fulfill({ status: 200, json: installations }),
-  );
-
-  await page.route('**/api/github/repos*', (route: Route) =>
-    route.fulfill({ status: 200, json: repos }),
-  );
-
-  await page.route('**/api/github/branches*', (route: Route) =>
-    route.fulfill({ status: 200, json: branches }),
-  );
-
-  await page.route('**/api/agents', (route: Route) =>
-    route.fulfill({ status: 200, json: { agents } }),
-  );
-
-  await page.route('**/api/config/artifacts-enabled', (route: Route) =>
-    route.fulfill({ status: 200, json: { enabled: false } }),
-  );
-
-  await page.route('**/api/credentials', (route: Route) =>
-    route.fulfill({ status: 200, json: [{ provider: 'hetzner', status: 'valid' }] }),
-  );
-
-  await page.route('**/api/trial/status', (route: Route) =>
-    route.fulfill({ status: 200, json: { available: false } }),
-  );
-
-  // Catch-all for remaining API routes
-  await page.route('**/api/**', (route: Route) => {
-    const url = route.request().url();
-    if (url.includes('/api/projects') && route.request().method() === 'POST') {
-      if (overrides.createProjectError) {
-        return route.fulfill({
-          status: overrides.createProjectError.status,
-          json: overrides.createProjectError.body,
-        });
-      }
-      return route.fulfill({
-        status: 201,
-        json: {
-          id: 'proj-new-1',
-          name: 'frontend',
-          description: null,
-          repository: 'acme-org/frontend',
-          defaultBranch: 'main',
-          installationId: 'inst-1',
-          status: 'active',
-          repoProvider: 'github',
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-          userId: 'user-1',
-        },
-      });
+async function setupMocks(
+  page: Page,
+  opts: { installations?: unknown[]; artifactsEnabled?: boolean } = {},
+) {
+  const { installations = INSTALLATIONS, artifactsEnabled = true } = opts;
+  await setupAuditRoutes(page, (path, respond) => {
+    if (path.endsWith('/api/github/installations')) return respond(200, installations);
+    if (path.endsWith('/api/github/repositories')) {
+      return respond(200, { repositories: [], failedInstallations: [] });
     }
-    return route.fulfill({ status: 200, json: {} });
+    if (path.endsWith('/api/config/artifacts-enabled')) return respond(200, { enabled: artifactsEnabled });
+    if (path.endsWith('/api/agents')) return respond(200, { agents: AGENTS });
+    if (path.endsWith('/api/credentials')) return respond(200, [{ provider: 'hetzner', status: 'valid' }]);
+    if (path.endsWith('/api/trial/status')) return respond(200, { available: false });
+    // App-shell surfaces that load on every authed page.
+    if (path.endsWith('/api/projects')) return respond(200, { projects: [], total: 0, hasMore: false });
+    if (path.endsWith('/api/notifications')) return respond(200, { notifications: [], unreadCount: 0, hasMore: false });
+    return undefined;
   });
+  // Project creation (POST) — registered after the catch-all so it wins for /api/projects.
+  await page.route('**/api/projects', (route) => {
+    if (route.request().method() === 'POST') {
+      return route.fulfill({ status: 201, json: CREATED_PROJECT });
+    }
+    return route.fulfill({ status: 200, json: { projects: [], total: 0, hasMore: false } });
+  });
+  // Register auth last so it wins over the catch-all (last route registered wins).
+  await page.route('**/api/auth/get-session', (route) => route.fulfill({ status: 200, json: MOCK_USER }));
 }
 
-test.describe('Project Onboarding Wizard — Mobile', () => {
-  test.use({ viewport: { width: 375, height: 667 } });
+async function gotoWizard(page: Page) {
+  await seedTheme(page, 'dark');
+  await page.goto('/projects/new');
+  await expect(page.getByRole('heading', { name: "Let's create your project" })).toBeVisible();
+}
 
-  test('step 1: connect code form', async ({ page }) => {
-    await setupApiMocks(page);
-    await page.goto('/projects/new');
-    await page.waitForTimeout(600);
-    await screenshot(page, 'onboarding-wizard-step1-connect');
+test.describe('Project onboarding wizard', () => {
+  test('captures every step with no horizontal overflow', async ({ page }) => {
+    await setupMocks(page);
+    await gotoWizard(page);
+
+    await screenshot(page, 'onboarding-01-welcome');
+    await assertNoOverflow(page);
+
+    await page.getByRole('button', { name: /Get started/ }).click();
+    await expect(page.getByRole('heading', { name: 'How SAM works' })).toBeVisible();
+    await screenshot(page, 'onboarding-02-how-sam-works');
+    await assertNoOverflow(page);
+
+    await page.getByRole('button', { name: /Continue/ }).click();
+    await expect(page.getByRole('heading', { name: /Where should your code live/ })).toBeVisible();
+    await expect(page.getByText('Let SAM host the repository')).toBeVisible();
+    await screenshot(page, 'onboarding-03-provider');
+    await assertNoOverflow(page);
+
+    // Connect — GitHub
+    await page.getByRole('button', { name: /Continue/ }).click();
+    await expect(page.getByRole('heading', { name: 'Connect your code' })).toBeVisible();
+    await screenshot(page, 'onboarding-04-connect-github');
+    await assertNoOverflow(page);
+
+    // Connect — SAM (Artifacts), with a long project name to stress the layout
+    await page.getByRole('button', { name: /^Back/ }).click();
+    await expect(page.getByRole('heading', { name: /Where should your code live/ })).toBeVisible();
+    await page.getByText('Let SAM host the repository').click();
+    await page.getByRole('button', { name: /Continue/ }).click();
+    await expect(page.getByRole('heading', { name: 'Name your project' })).toBeVisible();
+    await page
+      .getByPlaceholder('Project name')
+      .fill('an-extremely-long-greenfield-project-name-that-should-wrap-not-overflow');
+    await screenshot(page, 'onboarding-04-connect-artifacts');
     await assertNoOverflow(page);
   });
 
-  test('step 1: no installations warning', async ({ page }) => {
-    await setupApiMocks(page, { installations: [] });
-    await page.goto('/projects/new');
-    await page.waitForTimeout(600);
-    await screenshot(page, 'onboarding-wizard-no-installations');
+  test('setup steps show Create/Skip in the footer (not inside the card)', async ({ page }) => {
+    await setupMocks(page);
+    await gotoWizard(page);
+
+    // Fast-path to the conversation step via the SAM provider.
+    await page.getByRole('button', { name: /Get started/ }).click();
+    await page.getByRole('button', { name: /Continue/ }).click();
+    await page.getByText('Let SAM host the repository').click();
+    await page.getByRole('button', { name: /Continue/ }).click();
+    await page.getByPlaceholder('Project name').fill('greenfield');
+    await page.getByRole('button', { name: /Create project/ }).click();
+
+    // Conversation step: footer has Skip + Create profile; the card has no buttons.
+    await expect(page.getByRole('heading', { name: 'Set up a conversation agent' })).toBeVisible();
+    const nav = page.getByRole('navigation', { name: 'Step navigation' });
+    await expect(nav.getByRole('button', { name: /Create profile/ })).toBeVisible();
+    await expect(nav.getByRole('button', { name: /^Skip$/ })).toBeVisible();
+    await screenshot(page, 'onboarding-05-conversation');
+    await assertNoOverflow(page);
+
+    // Automation step footer: Create trigger + Skip.
+    await nav.getByRole('button', { name: /^Skip$/ }).click();
+    await expect(page.getByRole('heading', { name: 'Set up a task agent' })).toBeVisible();
+    await nav.getByRole('button', { name: /^Skip$/ }).click();
+    await expect(page.getByRole('heading', { name: /Schedule automation/ })).toBeVisible();
+    await expect(nav.getByRole('button', { name: /Create trigger/ })).toBeVisible();
+    await screenshot(page, 'onboarding-06-automation');
     await assertNoOverflow(page);
   });
 
-  test('step 1: validation error', async ({ page }) => {
-    await setupApiMocks(page);
-    await page.goto('/projects/new');
-    await page.waitForTimeout(600);
-    // Submit without filling in fields
-    const form = page.locator('form');
-    await form.evaluate((f) => {
-      f.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-    });
-    await page.waitForTimeout(400);
-    await screenshot(page, 'onboarding-wizard-validation-error');
-    await assertNoOverflow(page);
-  });
-});
-
-test.describe('Project Onboarding Wizard — Desktop', () => {
-  test.use({ viewport: { width: 1280, height: 800 } });
-
-  test('step 1: connect code form', async ({ page }) => {
-    await setupApiMocks(page);
-    await page.goto('/projects/new');
-    await page.waitForTimeout(600);
-    await screenshot(page, 'onboarding-wizard-step1-connect');
+  test('hides the SAM option when Artifacts is disabled', async ({ page }) => {
+    await setupMocks(page, { artifactsEnabled: false });
+    await gotoWizard(page);
+    await page.getByRole('button', { name: /Get started/ }).click();
+    await page.getByRole('button', { name: /Continue/ }).click();
+    await expect(page.getByRole('heading', { name: /Where should your code live/ })).toBeVisible();
+    await expect(page.getByText('Connect a GitHub repository')).toBeVisible();
+    await expect(page.getByText('Let SAM host the repository')).toHaveCount(0);
     await assertNoOverflow(page);
   });
 
-  test('step 1: no installations warning', async ({ page }) => {
-    await setupApiMocks(page, { installations: [] });
-    await page.goto('/projects/new');
-    await page.waitForTimeout(600);
-    await screenshot(page, 'onboarding-wizard-no-installations');
+  test('shows the GitHub-App install warning when no installations exist', async ({ page }) => {
+    await setupMocks(page, { installations: [] });
+    await gotoWizard(page);
+    await page.getByRole('button', { name: /Get started/ }).click();
+    await page.getByRole('button', { name: /Continue/ }).click();
+    await page.getByRole('button', { name: /Continue/ }).click();
+    await expect(page.getByText(/Install the GitHub App/)).toBeVisible();
+    await screenshot(page, 'onboarding-connect-github-no-install');
     await assertNoOverflow(page);
   });
 });

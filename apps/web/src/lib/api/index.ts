@@ -300,6 +300,7 @@ export {
   deleteProjectRuntimeFile,
   discoverSubmoduleRepos,
   getAccountMap,
+  getArtifactsEnabled,
   getProject,
   getProjectRuntimeConfig,
   listActiveTasks,

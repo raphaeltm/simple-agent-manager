@@ -3,10 +3,11 @@ import { Breadcrumb, PageLayout } from '@simple-agent-manager/ui';
 import { useCallback, useEffect, useState } from 'react';
 
 import { ProjectOnboardingWizard } from '../components/project-onboarding';
-import { listGitHubInstallations } from '../lib/api';
+import { getArtifactsEnabled, listGitHubInstallations } from '../lib/api';
 
 export function ProjectCreate() {
   const [installations, setInstallations] = useState<GitHubInstallation[]>([]);
+  const [artifactsEnabled, setArtifactsEnabled] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -14,8 +15,9 @@ export function ProjectCreate() {
     try {
       setLoadError(null);
       setLoading(true);
-      const data = await listGitHubInstallations();
+      const [data, artifacts] = await Promise.all([listGitHubInstallations(), getArtifactsEnabled()]);
       setInstallations(data);
+      setArtifactsEnabled(artifacts);
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : 'Failed to load installations');
     } finally {
@@ -40,6 +42,7 @@ export function ProjectCreate() {
       <div className="mt-4">
         <ProjectOnboardingWizard
           installations={installations}
+          artifactsEnabled={artifactsEnabled}
           loading={loading}
           loadError={loadError}
           onRetryInstallations={load}

@@ -44,6 +44,7 @@ import {
   UpsertProjectRuntimeEnvVarSchema,
   UpsertProjectRuntimeFileSchema,
 } from '../../schemas';
+import { seedArtifactsReadme } from '../../services/artifacts/seed-readme';
 import { encrypt } from '../../services/encryption';
 import { getExternalInstallationId } from '../../services/github-installation-ids';
 import { getRuntimeLimits } from '../../services/limits';
@@ -59,6 +60,7 @@ import {
   PROJECT_ENV_KEY_PATTERN,
   requireGitHubUserAccessToken,
   requireOwnedInstallation,
+  toArtifactsRepoName,
 } from './_helpers';
 
 const crudRoutes = new Hono<{ Bindings: Env }>();
@@ -165,12 +167,38 @@ crudRoutes.post('/', jsonValidator(CreateProjectSchema), async (c) => {
       || c.env.ARTIFACTS_DEFAULT_BRANCH
       || ARTIFACTS_DEFAULTS.DEFAULT_BRANCH;
 
-    // Create Artifacts repo — name includes projectId for uniqueness
-    const repoName = `${normalizedName}-${projectId}`;
+    // Create Artifacts repo — name includes projectId for uniqueness.
+    // Must be sanitized: Artifacts rejects uppercase/spaces (the ULID projectId
+    // is uppercase and normalizedName preserves spaces).
+    const repoName = toArtifactsRepoName(normalizedName, projectId);
     const created = await c.env.ARTIFACTS.create(repoName, {
       description: description || undefined,
       setDefaultBranch: defaultBranch,
     });
+
+    // Seed an initial README commit so the repo has a real default-branch ref.
+    // A freshly-created Artifacts repo is empty, and the VM agent bootstrap
+    // clones with `git clone --branch <defaultBranch>` (bootstrap.go), which
+    // fails against a repo whose default branch does not exist yet. The README
+    // also orients agents (project name, description, SAM MCP tools). If seeding
+    // fails the repo is unusable, so we abort creation and log the orphan.
+    try {
+      await seedArtifactsReadme({
+        remote: created.remote,
+        token: created.token,
+        branch: defaultBranch,
+        projectName: name,
+        description,
+      });
+    } catch (seedError) {
+      log.error('project_create.artifacts_seed_failed', {
+        projectId,
+        repoName: created.name,
+        error: seedError instanceof Error ? seedError.message : String(seedError),
+        action: 'orphaned_artifacts_repo',
+      });
+      throw errors.internal('Failed to initialize Artifacts repository');
+    }
 
     // Store the full Artifacts clone URL as repository so normalizeRepoURL()
     // on the VM agent passes it through as-is (it handles https:// URLs correctly).

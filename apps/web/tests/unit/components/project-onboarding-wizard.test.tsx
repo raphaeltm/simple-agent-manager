@@ -27,27 +27,15 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
   submitTask: (...args: unknown[]) => mockSubmitTask(...args),
 }));
 
-// Mock RepoSelector and BranchSelector as simple inputs so we can set form values
 vi.mock('../../../src/components/RepoSelector', () => ({
   RepoSelector: ({ value, onChange, id }: { value: string; onChange: (v: string) => void; id?: string }) => (
-    <input
-      id={id}
-      data-testid="repo-selector"
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      placeholder="owner/repo"
-    />
+    <input id={id} data-testid="repo-selector" value={value} onChange={(e) => onChange(e.target.value)} />
   ),
 }));
 
 vi.mock('../../../src/components/BranchSelector', () => ({
   BranchSelector: ({ value, onChange, id }: { value: string; onChange: (v: string) => void; id?: string }) => (
-    <input
-      id={id}
-      data-testid="branch-selector"
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-    />
+    <input id={id} data-testid="branch-selector" value={value} onChange={(e) => onChange(e.target.value)} />
   ),
 }));
 
@@ -76,19 +64,24 @@ const MOCK_AGENTS = [
 function renderWizard(props = {}) {
   return render(
     <MemoryRouter>
-      <ProjectOnboardingWizard installations={INSTALLATIONS} {...props} />
+      <ProjectOnboardingWizard installations={INSTALLATIONS} artifactsEnabled {...props} />
     </MemoryRouter>,
   );
 }
 
-function fillStep1Form() {
-  fireEvent.change(screen.getByPlaceholderText('Project name'), { target: { value: 'my-repo' } });
-  fireEvent.change(screen.getByTestId('repo-selector'), { target: { value: 'test-org/my-repo' } });
-}
-
-async function submitStep1() {
-  const form = screen.getByText('Create project').closest('form')!;
-  fireEvent.submit(form);
+/** Walk the intro steps (welcome → how-sam-works → provider) to the connect step. */
+async function advanceToConnect(provider: 'github' | 'artifacts' = 'github') {
+  fireEvent.click(screen.getByRole('button', { name: /Get started/ }));
+  await screen.findByRole('heading', { name: 'How SAM works' });
+  fireEvent.click(screen.getByRole('button', { name: /Continue/ }));
+  await screen.findByRole('heading', { name: /Where should your code live/ });
+  if (provider === 'artifacts') {
+    fireEvent.click(screen.getByText('Let SAM host the repository'));
+  }
+  fireEvent.click(screen.getByRole('button', { name: /Continue/ }));
+  await screen.findByRole('heading', {
+    name: provider === 'artifacts' ? 'Name your project' : 'Connect your code',
+  });
 }
 
 describe('ProjectOnboardingWizard', () => {
@@ -98,348 +91,208 @@ describe('ProjectOnboardingWizard', () => {
     mockCreateProject.mockReset();
     mockCreateAgentProfile.mockReset();
     mockCreateTrigger.mockReset();
-    mockListAgents.mockReset().mockResolvedValue({ agents: [] });
+    mockListAgents.mockReset().mockResolvedValue({ agents: MOCK_AGENTS });
     mockListBranches.mockReset().mockResolvedValue([{ name: 'main' }, { name: 'develop' }]);
     mockSubmitTask.mockReset();
   });
 
-  /* ─── Step 1: Rendering ─── */
+  /* ─── Intro + progress ─── */
 
-  it('renders step indicator with all three steps', () => {
+  it('starts on the welcome step with the full 8-step progress rail', () => {
     renderWizard();
-    const steps = screen.getByRole('list', { name: 'Project onboarding steps' });
-    expect(steps).toBeInTheDocument();
-    expect(steps.querySelectorAll('li')).toHaveLength(3);
+    const steps = screen.getByRole('list', { name: 'Onboarding steps' });
+    expect(steps.querySelectorAll('li')).toHaveLength(8);
+    expect(screen.getByRole('heading', { name: "Let's create your project" })).toBeInTheDocument();
   });
 
-  it('renders the connect form with installation picker', () => {
+  it('cancel on the welcome step navigates to /projects', () => {
     renderWizard();
-    expect(screen.getByRole('heading', { name: 'Connect code' })).toBeInTheDocument();
-    expect(screen.getByText('test-org (Organization)')).toBeInTheDocument();
-    expect(screen.getByText('Create project')).toBeInTheDocument();
-  });
-
-  it('shows loading skeleton when loading is true', () => {
-    renderWizard({ loading: true });
-    expect(screen.queryByRole('heading', { name: 'Connect code' })).not.toBeInTheDocument();
-  });
-
-  it('shows error alert with retry button when loadError is set', () => {
-    const onRetry = vi.fn();
-    renderWizard({ loadError: 'Network error', onRetryInstallations: onRetry });
-    expect(screen.getByText('Network error')).toBeInTheDocument();
-    fireEvent.click(screen.getByText('Retry'));
-    expect(onRetry).toHaveBeenCalledTimes(1);
-  });
-
-  it('shows warning when no installations available', () => {
-    renderWizard({ installations: [] });
-    expect(screen.getByText(/Install the GitHub App/)).toBeInTheDocument();
-  });
-
-  it('renders project name and description inputs', () => {
-    renderWizard();
-    expect(screen.getByPlaceholderText('Project name')).toBeInTheDocument();
-    expect(screen.getByText('Description')).toBeInTheDocument();
-  });
-
-  it('renders branch selector label', () => {
-    renderWizard();
-    expect(screen.getByText('Branch')).toBeInTheDocument();
-  });
-
-  it('navigates to /projects on cancel', () => {
-    renderWizard();
-    fireEvent.click(screen.getByText('Cancel'));
+    fireEvent.click(screen.getByRole('button', { name: /Cancel/ }));
     expect(mockNavigate).toHaveBeenCalledWith('/projects');
   });
 
-  /* ─── Step 1: Validation ─── */
+  /* ─── Provider selection ─── */
 
-  it('validates project name is required', async () => {
+  it('provider step offers both GitHub and SAM-hosted options, GitHub selected by default', async () => {
     renderWizard();
-    fireEvent.change(screen.getByTestId('repo-selector'), { target: { value: 'org/repo' } });
-    await submitStep1();
+    fireEvent.click(screen.getByRole('button', { name: /Get started/ }));
+    await screen.findByRole('heading', { name: 'How SAM works' });
+    fireEvent.click(screen.getByRole('button', { name: /Continue/ }));
+    await screen.findByRole('heading', { name: /Where should your code live/ });
+
+    const githubCard = screen.getByText('Connect a GitHub repository').closest('button')!;
+    const samCard = screen.getByText('Let SAM host the repository').closest('button')!;
+    expect(githubCard).toHaveAttribute('aria-pressed', 'true');
+    expect(samCard).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('hides the SAM option when Artifacts is disabled on the deployment', async () => {
+    renderWizard({ artifactsEnabled: false });
+    fireEvent.click(screen.getByRole('button', { name: /Get started/ }));
+    await screen.findByRole('heading', { name: 'How SAM works' });
+    fireEvent.click(screen.getByRole('button', { name: /Continue/ }));
+    await screen.findByRole('heading', { name: /Where should your code live/ });
+
+    expect(screen.getByText('Connect a GitHub repository')).toBeInTheDocument();
+    expect(screen.queryByText('Let SAM host the repository')).not.toBeInTheDocument();
+  });
+
+  /* ─── SAM (Artifacts) connect path ─── */
+
+  it('creates an Artifacts project with no GitHub fields and advances to setup', async () => {
+    mockCreateProject.mockResolvedValue({ ...MOCK_PROJECT, repoProvider: 'artifacts' });
+    renderWizard();
+    await advanceToConnect('artifacts');
+
+    // No GitHub installation picker on the SAM path.
+    expect(screen.queryByText('test-org (Organization)')).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText('Project name'), { target: { value: 'greenfield thing' } });
+    fireEvent.click(screen.getByRole('button', { name: /Create project/ }));
+
+    await waitFor(() => {
+      expect(mockCreateProject).toHaveBeenCalledWith(
+        expect.objectContaining({ repoProvider: 'artifacts', name: 'greenfield thing' }),
+      );
+    });
+    const payload = mockCreateProject.mock.calls[0]![0] as Record<string, unknown>;
+    expect(payload.installationId).toBeUndefined();
+    expect(payload.repository).toBeUndefined();
+
+    await screen.findByRole('heading', { name: 'Set up a conversation agent' });
+  });
+
+  it('validates project name is required on the SAM path', async () => {
+    renderWizard();
+    await advanceToConnect('artifacts');
+    fireEvent.click(screen.getByRole('button', { name: /Create project/ }));
     expect(await screen.findByText('Project name is required.')).toBeInTheDocument();
     expect(mockCreateProject).not.toHaveBeenCalled();
   });
 
-  it('validates repository is required', async () => {
-    renderWizard();
-    fireEvent.change(screen.getByPlaceholderText('Project name'), { target: { value: 'test' } });
-    await submitStep1();
-    expect(await screen.findByText('Repository is required.')).toBeInTheDocument();
-    expect(mockCreateProject).not.toHaveBeenCalled();
-  });
+  /* ─── GitHub connect path ─── */
 
-  /* ─── Step progression: connect → setup ─── */
-
-  it('advances to setup step after successful project creation', async () => {
+  it('creates a GitHub project with installation + repository', async () => {
     mockCreateProject.mockResolvedValue(MOCK_PROJECT);
-    mockListAgents.mockResolvedValue({ agents: MOCK_AGENTS });
     renderWizard();
+    await advanceToConnect('github');
 
-    fillStep1Form();
-    await submitStep1();
+    expect(screen.getByText('test-org (Organization)')).toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText('Project name'), { target: { value: 'my-repo' } });
+    fireEvent.change(screen.getByTestId('repo-selector'), { target: { value: 'test-org/my-repo' } });
+    fireEvent.click(screen.getByRole('button', { name: /Create project/ }));
 
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: /Set up/ })).toBeInTheDocument();
+      expect(mockCreateProject).toHaveBeenCalledWith(
+        expect.objectContaining({
+          repoProvider: 'github',
+          installationId: 'inst-1',
+          repository: 'test-org/my-repo',
+        }),
+      );
     });
-    expect(screen.queryByRole('heading', { name: 'Connect code' })).not.toBeInTheDocument();
-    expect(mockCreateProject).toHaveBeenCalledTimes(1);
-    expect(mockListAgents).toHaveBeenCalledTimes(1);
+    await screen.findByRole('heading', { name: 'Set up a conversation agent' });
   });
 
-  /* ─── Step 1: Error paths (409 conflict) ─── */
+  it('shows the GitHub App install warning when no installations exist', async () => {
+    renderWizard({ installations: [] });
+    await advanceToConnect('github');
+    expect(screen.getByText(/Install the GitHub App/)).toBeInTheDocument();
+  });
 
-  it('displays name conflict error from 409 response', async () => {
+  it('displays name-conflict error from a 409 response', async () => {
     const mod = await import('../../../src/lib/api');
     mockCreateProject.mockRejectedValue(new mod.ApiClientError('CONFLICT', 'Project name conflict', 409));
     renderWizard();
+    await advanceToConnect('artifacts');
+    fireEvent.change(screen.getByPlaceholderText('Project name'), { target: { value: 'dupe' } });
+    fireEvent.click(screen.getByRole('button', { name: /Create project/ }));
 
-    fillStep1Form();
-    await submitStep1();
-
-    await waitFor(() => {
-      expect(screen.getByText('A project with this name already exists.')).toBeInTheDocument();
-    });
-    expect(screen.getByRole('heading', { name: 'Connect code' })).toBeInTheDocument();
+    expect(await screen.findByText('A project with this name already exists.')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Name your project' })).toBeInTheDocument();
   });
 
-  it('displays repository conflict error from 409 response', async () => {
-    const mod = await import('../../../src/lib/api');
-    mockCreateProject.mockRejectedValue(new mod.ApiClientError('CONFLICT', 'repository conflict', 409));
+  /* ─── Setup steps ─── */
+
+  async function advanceToSetup(provider: 'github' | 'artifacts' = 'artifacts') {
+    mockCreateProject.mockResolvedValue({ ...MOCK_PROJECT, repoProvider: provider });
     renderWizard();
-
-    fillStep1Form();
-    await submitStep1();
-
-    await waitFor(() => {
-      expect(screen.getByText('This repository is already linked to another project.')).toBeInTheDocument();
-    });
-  });
-
-  it('displays generic error from non-409 rejection', async () => {
-    mockCreateProject.mockRejectedValue(new Error('Server error'));
-    renderWizard();
-
-    fillStep1Form();
-    await submitStep1();
-
-    await waitFor(() => {
-      expect(screen.getByText('Server error')).toBeInTheDocument();
-    });
-  });
-
-  /* ─── Step 2: Setup ─── */
-
-  describe('Step 2: Setup', () => {
-    async function advanceToStep2() {
-      mockCreateProject.mockResolvedValue(MOCK_PROJECT);
-      mockListAgents.mockResolvedValue({ agents: MOCK_AGENTS });
-      renderWizard();
-      fillStep1Form();
-      await submitStep1();
-      await waitFor(() => {
-        expect(screen.getByRole('heading', { name: /Set up/ })).toBeInTheDocument();
-      });
+    await advanceToConnect(provider);
+    fireEvent.change(screen.getByPlaceholderText('Project name'), { target: { value: 'my-repo' } });
+    if (provider === 'github') {
+      fireEvent.change(screen.getByTestId('repo-selector'), { target: { value: 'test-org/my-repo' } });
     }
+    fireEvent.click(screen.getByRole('button', { name: /Create project/ }));
+    await screen.findByRole('heading', { name: 'Set up a conversation agent' });
+  }
 
-    it('shows profile setup panels and trigger form', async () => {
-      await advanceToStep2();
-      expect(screen.getByText('Conversation profile')).toBeInTheDocument();
-      expect(screen.getByText('Task profile')).toBeInTheDocument();
-      expect(screen.getByText('Cron trigger')).toBeInTheDocument();
+  it('creates a conversation profile from the footer and advances to the task step', async () => {
+    const mockProfile = { id: 'profile-1', name: 'Conversation profile', taskMode: 'conversation' };
+    mockCreateAgentProfile.mockResolvedValue(mockProfile);
+    await advanceToSetup();
+
+    // Create button lives in the footer now (not inside the card) and advances.
+    fireEvent.click(screen.getByRole('button', { name: /Create profile/ }));
+    await waitFor(() => {
+      expect(mockCreateAgentProfile).toHaveBeenCalledWith(
+        'proj-1',
+        expect.objectContaining({ taskMode: 'conversation' }),
+      );
     });
+    await screen.findByRole('heading', { name: 'Set up a task agent' });
+  });
 
-    it('skip buttons enable Continue', async () => {
-      await advanceToStep2();
+  it('walks conversation → task → automation → kickoff via footer Skip', async () => {
+    await advanceToSetup();
+    fireEvent.click(screen.getByRole('button', { name: /Skip/ }));
+    await screen.findByRole('heading', { name: 'Set up a task agent' });
+    fireEvent.click(screen.getByRole('button', { name: /Skip/ }));
+    await screen.findByRole('heading', { name: /Schedule automation/ });
+    fireEvent.click(screen.getByRole('button', { name: /Skip/ }));
+    await screen.findByRole('heading', { name: 'Kick off your first work' });
+    // No profile/trigger was created when skipping.
+    expect(mockCreateAgentProfile).not.toHaveBeenCalled();
+    expect(mockCreateTrigger).not.toHaveBeenCalled();
+  });
 
-      const continueBtn = screen.getByText(/Continue/);
-      expect(continueBtn).toBeDisabled();
+  /* ─── Kickoff ─── */
 
-      // Skip all three items
-      const skipButtons = screen.getAllByText(/Skip/);
-      for (const btn of skipButtons) {
-        fireEvent.click(btn);
-      }
+  async function advanceToKickoff() {
+    await advanceToSetup();
+    fireEvent.click(screen.getByRole('button', { name: /Skip/ }));
+    await screen.findByRole('heading', { name: 'Set up a task agent' });
+    fireEvent.click(screen.getByRole('button', { name: /Skip/ }));
+    await screen.findByRole('heading', { name: /Schedule automation/ });
+    fireEvent.click(screen.getByRole('button', { name: /Skip/ }));
+    await screen.findByRole('heading', { name: 'Kick off your first work' });
+  }
 
-      await waitFor(() => {
-        expect(screen.getByText(/Continue/)).not.toBeDisabled();
-      });
-    });
+  it('task kickoff submits and navigates to the task page', async () => {
+    mockSubmitTask.mockResolvedValue({ taskId: 'task-1', sessionId: 'sess-1' });
+    await advanceToKickoff();
 
-    it('creates a profile and calls createAgentProfile', async () => {
-      const mockProfile = { id: 'profile-1', name: 'Conversation profile', taskMode: 'conversation' };
-      mockCreateAgentProfile.mockResolvedValue(mockProfile);
-      await advanceToStep2();
-
-      const createButtons = screen.getAllByText('Create profile');
-      fireEvent.click(createButtons[0]);
-
-      await waitFor(() => {
-        expect(mockCreateAgentProfile).toHaveBeenCalledTimes(1);
-        expect(mockCreateAgentProfile).toHaveBeenCalledWith('proj-1', expect.objectContaining({
-          name: 'Conversation profile',
-          taskMode: 'conversation',
-        }));
-      });
-    });
-
-    it('shows error when profile creation fails', async () => {
-      mockCreateAgentProfile.mockRejectedValue(new Error('Profile creation failed'));
-      await advanceToStep2();
-
-      const createButtons = screen.getAllByText('Create profile');
-      fireEvent.click(createButtons[0]);
-
-      await waitFor(() => {
-        expect(screen.getByText('Profile creation failed')).toBeInTheDocument();
-      });
-    });
-
-    it('Continue button advances to kickoff step', async () => {
-      await advanceToStep2();
-
-      const skipButtons = screen.getAllByText(/Skip/);
-      for (const btn of skipButtons) {
-        fireEvent.click(btn);
-      }
-
-      await waitFor(() => {
-        expect(screen.getByText(/Continue/)).not.toBeDisabled();
-      });
-
-      fireEvent.click(screen.getByText(/Continue/));
-
-      await waitFor(() => {
-        expect(screen.getByRole('heading', { name: 'Kick off' })).toBeInTheDocument();
-      });
-    });
-
-    it('Open project button navigates to the project page', async () => {
-      await advanceToStep2();
-      fireEvent.click(screen.getByText('Open project'));
-      expect(mockNavigate).toHaveBeenCalledWith('/projects/proj-1');
+    fireEvent.click(screen.getByRole('button', { name: /Start task/ }));
+    await waitFor(() => {
+      expect(mockSubmitTask).toHaveBeenCalledWith('proj-1', expect.objectContaining({ taskMode: 'task' }));
+      expect(mockNavigate).toHaveBeenCalledWith('/projects/proj-1/tasks/task-1');
     });
   });
 
-  /* ─── Step 3: Kickoff ─── */
+  it('conversation kickoff submits and navigates to the chat page', async () => {
+    mockSubmitTask.mockResolvedValue({ taskId: 'task-2', sessionId: 'sess-2' });
+    await advanceToKickoff();
 
-  describe('Step 3: Kickoff', () => {
-    async function advanceToStep3() {
-      mockCreateProject.mockResolvedValue(MOCK_PROJECT);
-      mockListAgents.mockResolvedValue({ agents: MOCK_AGENTS });
-      renderWizard();
-      fillStep1Form();
-      await submitStep1();
-      await waitFor(() => {
-        expect(screen.getByRole('heading', { name: /Set up/ })).toBeInTheDocument();
-      });
-
-      const skipButtons = screen.getAllByText(/Skip/);
-      for (const btn of skipButtons) {
-        fireEvent.click(btn);
-      }
-      await waitFor(() => {
-        expect(screen.getByText(/Continue/)).not.toBeDisabled();
-      });
-      fireEvent.click(screen.getByText(/Continue/));
-      await waitFor(() => {
-        expect(screen.getByRole('heading', { name: 'Kick off' })).toBeInTheDocument();
-      });
-    }
-
-    it('renders task and conversation mode buttons', async () => {
-      await advanceToStep3();
-      expect(screen.getByText('Task')).toBeInTheDocument();
-      expect(screen.getByText('Conversation')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Conversation').closest('button')!);
+    fireEvent.click(screen.getByRole('button', { name: /Start conversation/ }));
+    await waitFor(() => {
+      expect(mockSubmitTask).toHaveBeenCalledWith('proj-1', expect.objectContaining({ taskMode: 'conversation' }));
+      expect(mockNavigate).toHaveBeenCalledWith('/projects/proj-1/chat/sess-2');
     });
+  });
 
-    it('mode buttons toggle aria-pressed state', async () => {
-      await advanceToStep3();
-      const taskBtn = screen.getByText('Task').closest('button')!;
-      const convBtn = screen.getByText('Conversation').closest('button')!;
-
-      expect(taskBtn).toHaveAttribute('aria-pressed', 'true');
-      expect(convBtn).toHaveAttribute('aria-pressed', 'false');
-
-      fireEvent.click(convBtn);
-
-      await waitFor(() => {
-        expect(convBtn).toHaveAttribute('aria-pressed', 'true');
-        expect(taskBtn).toHaveAttribute('aria-pressed', 'false');
-      });
-    });
-
-    it('successful task kickoff navigates to task page', async () => {
-      mockSubmitTask.mockResolvedValue({ taskId: 'task-1', sessionId: 'sess-1' });
-      await advanceToStep3();
-
-      fireEvent.click(screen.getByText('Start'));
-
-      await waitFor(() => {
-        expect(mockSubmitTask).toHaveBeenCalledWith('proj-1', expect.objectContaining({
-          taskMode: 'task',
-        }));
-        expect(mockNavigate).toHaveBeenCalledWith('/projects/proj-1/tasks/task-1');
-      });
-    });
-
-    it('successful conversation kickoff navigates to chat page', async () => {
-      mockSubmitTask.mockResolvedValue({ taskId: 'task-2', sessionId: 'sess-2' });
-      await advanceToStep3();
-
-      fireEvent.click(screen.getByText('Conversation').closest('button')!);
-      fireEvent.click(screen.getByText('Start'));
-
-      await waitFor(() => {
-        expect(mockSubmitTask).toHaveBeenCalledWith('proj-1', expect.objectContaining({
-          taskMode: 'conversation',
-        }));
-        expect(mockNavigate).toHaveBeenCalledWith('/projects/proj-1/chat/sess-2');
-      });
-    });
-
-    it('shows error when kickoff fails with not-approved 403', async () => {
-      const mod = await import('../../../src/lib/api');
-      mockSubmitTask.mockRejectedValue(new mod.ApiClientError('FORBIDDEN', 'Account not approved', 403));
-      await advanceToStep3();
-
-      fireEvent.click(screen.getByText('Start'));
-
-      await waitFor(() => {
-        expect(screen.getByText(/pending approval/)).toBeInTheDocument();
-      });
-    });
-
-    it('shows error when kickoff fails with credential 403', async () => {
-      const mod = await import('../../../src/lib/api');
-      mockSubmitTask.mockRejectedValue(new mod.ApiClientError('FORBIDDEN', 'Forbidden', 403));
-      await advanceToStep3();
-
-      fireEvent.click(screen.getByText('Start'));
-
-      await waitFor(() => {
-        expect(screen.getByText(/Cloud credentials are required/)).toBeInTheDocument();
-      });
-    });
-
-    it('shows generic error when kickoff fails', async () => {
-      mockSubmitTask.mockRejectedValue(new Error('Network failure'));
-      await advanceToStep3();
-
-      fireEvent.click(screen.getByText('Start'));
-
-      await waitFor(() => {
-        expect(screen.getByText('Network failure')).toBeInTheDocument();
-      });
-    });
-
-    it('skip and open project navigates correctly', async () => {
-      await advanceToStep3();
-      fireEvent.click(screen.getByText('Skip and open project'));
-      expect(mockNavigate).toHaveBeenCalledWith('/projects/proj-1');
-    });
+  it('skip and open project navigates to the project page', async () => {
+    await advanceToKickoff();
+    fireEvent.click(screen.getByRole('button', { name: /Skip and open project/ }));
+    expect(mockNavigate).toHaveBeenCalledWith('/projects/proj-1');
   });
 });
