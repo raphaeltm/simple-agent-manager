@@ -406,7 +406,7 @@ export class ProjectData extends DurableObject<Env> {
       await reconciliation.processReconciliationCandidates(
         this.sql, this.env,
         (type, payload, sid) => this.broadcastEvent(type, payload, sid),
-        { waitUntil: (promise) => this.ctx.waitUntil(promise) },
+        { waitUntil: (promise) => this.ctx.waitUntil(promise), projectId: this.getProjectId() },
       );
     } catch (err) {
       log.error('alarm.reconciliation_failed', { error: err instanceof Error ? err.message : String(err) });

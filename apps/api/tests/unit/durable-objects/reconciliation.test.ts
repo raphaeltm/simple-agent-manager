@@ -34,6 +34,7 @@ function createMockD1(
   workspaceRows: Record<string, {
     node_id: string | null;
     user_id: string;
+    project_id?: string | null;
     node_status?: string | null;
     health_status?: string | null;
     last_heartbeat_at?: string | null;
@@ -548,6 +549,7 @@ describe('Task Reconciliation Module', () => {
           'ws-1': {
             node_id: 'node-1',
             user_id: 'user-1',
+            project_id: 'project-1',
             node_status: 'destroyed',
             health_status: 'unhealthy',
             last_heartbeat_at: null,
@@ -557,7 +559,9 @@ describe('Task Reconciliation Module', () => {
       const env = { DATABASE: mockDb } as unknown as ProjectDataEnv;
       const broadcastEvent = vi.fn();
 
-      const processed = await processReconciliationCandidates(sql, env, broadcastEvent);
+      const processed = await processReconciliationCandidates(sql, env, broadcastEvent, {
+        projectId: 'project-1',
+      });
 
       expect(processed).toBe(1);
       expect(vi.mocked(sendPromptToAgentOnNode)).not.toHaveBeenCalled();
@@ -566,9 +570,17 @@ describe('Task Reconciliation Module', () => {
         status: 'failed',
       });
       expect(db.prepare(`SELECT * FROM chat_messages WHERE session_id = 'session-1'`).all()).toHaveLength(0);
-      expect((mockDb as unknown as { __runCalls: Array<{ query: string }> }).__runCalls.some((call) => (
-        call.query.includes("UPDATE tasks") && call.query.includes("status = 'failed'")
-      ))).toBe(true);
+      const runCalls = (mockDb as unknown as { __runCalls: Array<{ query: string; args: unknown[] }> }).__runCalls;
+      expect(runCalls).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          query: expect.stringContaining('WHERE id = ? AND project_id = ?'),
+          args: expect.arrayContaining(['task-1', 'project-1']),
+        }),
+        expect.objectContaining({
+          query: expect.stringContaining('WHERE id = ? AND project_id = ?'),
+          args: expect.arrayContaining(['ws-1', 'project-1']),
+        }),
+      ]));
     });
 
     it('gives no-node workspaces a terminal disposition so they are not selected again', async () => {

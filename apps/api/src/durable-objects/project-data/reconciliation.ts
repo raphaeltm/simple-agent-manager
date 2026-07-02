@@ -72,11 +72,12 @@ interface WorkspaceDeliveryTarget {
 
 interface ReconciliationProcessingHooks {
   waitUntil?: (promise: Promise<unknown>) => void;
+  projectId?: string | null;
 }
 
 type WorkspaceDeliveryTargetResult =
   | { ok: true; target: WorkspaceDeliveryTarget }
-  | { ok: false; reason: string; nodeId: string | null; userId: string | null };
+  | { ok: false; reason: string; nodeId: string | null; userId: string | null; projectId: string | null };
 
 function envNumber(env: DOEnv, key: string, fallback: number): number {
   const value = Number.parseInt((env as unknown as Record<string, string | undefined>)[key] ?? '', 10);
@@ -302,7 +303,11 @@ export async function processReconciliationCandidates(
 
   const results = await Promise.allSettled(candidates.map(async (candidate) => {
     try {
-      const targetResult = await resolveWorkspaceDeliveryTarget(env as unknown as WorkerEnv, candidate.workspaceId);
+      const targetResult = await resolveWorkspaceDeliveryTarget(
+        env as unknown as WorkerEnv,
+        candidate.workspaceId,
+        hooks.projectId ?? null,
+      );
       if (!targetResult.ok) {
         await terminallyFailDeadTarget(sql, env, candidate, targetResult, hooks);
         return 1;
@@ -529,12 +534,14 @@ async function sendCheckinToAgent(
 async function resolveWorkspaceDeliveryTarget(
   env: WorkerEnv,
   workspaceId: string,
+  projectId: string | null,
 ): Promise<WorkspaceDeliveryTargetResult> {
   const staleMs = nodeHeartbeatStaleMs(env as unknown as DOEnv);
   const wsRow = await env.DATABASE.prepare(
     `SELECT
        w.node_id,
        w.user_id,
+       w.project_id,
        n.status AS node_status,
        n.health_status,
        n.last_heartbeat_at
@@ -545,6 +552,7 @@ async function resolveWorkspaceDeliveryTarget(
   ).bind(workspaceId).first<{
     node_id: string | null;
     user_id: string;
+    project_id: string | null;
     node_status: string | null;
     health_status: string | null;
     last_heartbeat_at: string | null;
@@ -552,12 +560,34 @@ async function resolveWorkspaceDeliveryTarget(
 
   if (!wsRow) {
     log.warn('reconciliation.workspace_missing', { workspaceId });
-    return { ok: false, reason: 'workspace_missing', nodeId: null, userId: null };
+    return { ok: false, reason: 'workspace_missing', nodeId: null, userId: null, projectId: null };
+  }
+
+  if (projectId && wsRow.project_id && wsRow.project_id !== projectId) {
+    log.error('reconciliation.workspace_project_mismatch', {
+      workspaceId,
+      expectedProjectId: projectId,
+      actualProjectId: wsRow.project_id,
+      action: 'rejected',
+    });
+    return {
+      ok: false,
+      reason: 'workspace_project_mismatch',
+      nodeId: wsRow.node_id,
+      userId: wsRow.user_id,
+      projectId: wsRow.project_id,
+    };
   }
 
   if (!wsRow?.node_id) {
     log.warn('reconciliation.workspace_missing_node', { workspaceId });
-    return { ok: false, reason: 'workspace_missing_node', nodeId: null, userId: wsRow.user_id };
+    return {
+      ok: false,
+      reason: 'workspace_missing_node',
+      nodeId: null,
+      userId: wsRow.user_id,
+      projectId: wsRow.project_id,
+    };
   }
 
   if (wsRow.node_status !== 'running') {
@@ -571,6 +601,7 @@ async function resolveWorkspaceDeliveryTarget(
       reason: wsRow.node_status ? 'node_not_running' : 'node_missing',
       nodeId: wsRow.node_id,
       userId: wsRow.user_id,
+      projectId: wsRow.project_id,
     };
   }
 
@@ -580,12 +611,24 @@ async function resolveWorkspaceDeliveryTarget(
       nodeId: wsRow.node_id,
       healthStatus: wsRow.health_status,
     });
-    return { ok: false, reason: 'node_unhealthy', nodeId: wsRow.node_id, userId: wsRow.user_id };
+    return {
+      ok: false,
+      reason: 'node_unhealthy',
+      nodeId: wsRow.node_id,
+      userId: wsRow.user_id,
+      projectId: wsRow.project_id,
+    };
   }
 
   if (!wsRow.last_heartbeat_at) {
     log.warn('reconciliation.node_missing_heartbeat', { workspaceId, nodeId: wsRow.node_id });
-    return { ok: false, reason: 'node_missing_heartbeat', nodeId: wsRow.node_id, userId: wsRow.user_id };
+    return {
+      ok: false,
+      reason: 'node_missing_heartbeat',
+      nodeId: wsRow.node_id,
+      userId: wsRow.user_id,
+      projectId: wsRow.project_id,
+    };
   }
 
   const heartbeatAt = new Date(wsRow.last_heartbeat_at).getTime();
@@ -596,7 +639,13 @@ async function resolveWorkspaceDeliveryTarget(
       lastHeartbeatAt: wsRow.last_heartbeat_at,
       staleMs,
     });
-    return { ok: false, reason: 'node_stale_heartbeat', nodeId: wsRow.node_id, userId: wsRow.user_id };
+    return {
+      ok: false,
+      reason: 'node_stale_heartbeat',
+      nodeId: wsRow.node_id,
+      userId: wsRow.user_id,
+      projectId: wsRow.project_id,
+    };
   }
 
   return { ok: true, target: { nodeId: wsRow.node_id, userId: wsRow.user_id } };
@@ -619,7 +668,7 @@ async function terminallyFailDeadTarget(
 ): Promise<void> {
   const errorMessage = `Agent workspace unavailable during reconciliation (${targetResult.reason})`;
 
-  await failTaskAndWorkspace(env, candidate.taskId, candidate.workspaceId, errorMessage);
+  await failTaskAndWorkspace(env, candidate.taskId, candidate.workspaceId, hooks.projectId ?? null, errorMessage);
   sessions.failSession(sql, candidate.sessionId);
   recordActivityEventInternal(
     sql,
@@ -656,8 +705,29 @@ async function failTaskAndWorkspace(
   env: DOEnv,
   taskId: string,
   workspaceId: string,
+  projectId: string | null,
   errorMessage: string,
 ): Promise<void> {
+  if (projectId) {
+    const now = new Date().toISOString();
+    await env.DATABASE.prepare(
+      `UPDATE tasks
+       SET status = 'failed', error_message = ?, updated_at = datetime('now')
+       WHERE id = ? AND project_id = ? AND status IN ('in_progress', 'delegated', 'awaiting_followup')`,
+    ).bind(errorMessage, taskId, projectId).run();
+    await env.DATABASE.prepare(
+      `UPDATE workspaces
+       SET status = 'stopped', updated_at = ?
+       WHERE id = ? AND project_id = ? AND status IN ('running', 'recovery')`,
+    ).bind(now, workspaceId, projectId).run();
+    return;
+  }
+
+  log.warn('reconciliation.project_scope_missing_for_d1_failure', {
+    taskId,
+    workspaceId,
+    action: 'unscoped_legacy_update',
+  });
   await env.DATABASE.prepare(
     `UPDATE tasks
      SET status = 'failed', error_message = ?, updated_at = datetime('now')

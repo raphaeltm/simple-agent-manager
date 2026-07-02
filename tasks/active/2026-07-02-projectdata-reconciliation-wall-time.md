@@ -49,8 +49,8 @@ This task implements the fixes from SAM idea `01KWH2QKQHND5WG54FVVZPW577`.
   - async send failure does not reject alarm work;
   - cancel 409 repair still fires;
   - many candidates do not serialize.
-- [ ] Run local validation: targeted tests, then relevant repo quality checks.
-- [ ] Run required specialist reviews and address findings.
+- [x] Run local validation: targeted tests, then relevant repo quality checks.
+- [x] Run required specialist reviews and address findings.
 - [ ] Open PR with wall-time reasoning and the explicit no-staging exception.
 
 ## Acceptance Criteria
