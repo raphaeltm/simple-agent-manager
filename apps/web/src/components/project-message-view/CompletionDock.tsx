@@ -21,7 +21,7 @@ import { type ReactNode,useEffect, useLayoutEffect, useRef, useState } from 'rea
 // Geometry constants (approved in the prototype)
 // ---------------------------------------------------------------------------
 
-const BAR_H = 56; // flat bar height (px)
+const BAR_H = 38; // flat bar height (px) — ~2/3 of the original 56px
 const BTN = Math.round(BAR_H * 0.9); // button diameter ≈ 90% of the bar height
 const BUBBLE_R = BAR_H / 2; // bubble radius = half bar height => ~5% gap around the button
 const FILLET_R = 12; // radius of the smooth blend where the dome meets the flat bar
@@ -223,7 +223,13 @@ export function CompletionDock({
   const centerDisabled = showArchiveInCenter && archiving;
 
   return (
-    <div className="shrink-0">
+    // Only the flat bar (BAR_H) participates in the flex column; the crest
+    // region (SVG_PAD_TOP) overhangs UP over the message list via a negative
+    // top margin so the scroll area reaches the top of the flat bar and the
+    // bubble floats OVER the chat. `pointer-events-none` on the wrapper lets
+    // scroll/clicks pass through the transparent crest to the messages behind
+    // it; interactive controls re-enable events with `pointer-events-auto`.
+    <div className="shrink-0 pointer-events-none" style={{ marginTop: -SVG_PAD_TOP }}>
       {/* Announce working/idle transitions to assistive tech (the morph itself is
           purely visual; ElapsedTime is aria-hidden). */}
       <span className="sr-only" role="status" aria-live="polite">
@@ -255,7 +261,7 @@ export function CompletionDock({
             type="button"
             onClick={onOpenPlan}
             aria-label="View plan"
-            className="absolute flex items-center gap-1 text-xs rounded-md px-2 py-1 border border-[rgba(34,197,94,0.2)] bg-[rgba(34,197,94,0.06)] text-fg-primary cursor-pointer focus-visible:outline-2 focus-visible:outline-focus-ring focus-visible:-outline-offset-2"
+            className="pointer-events-auto absolute flex items-center gap-1 text-xs rounded-md px-2 py-1 border border-[rgba(34,197,94,0.2)] bg-[rgba(34,197,94,0.06)] text-fg-primary cursor-pointer focus-visible:outline-2 focus-visible:outline-focus-ring focus-visible:-outline-offset-2"
             style={{ left: 12, top: yB + (BAR_H - 26) / 2, zIndex: 2 }}
           >
             <ListTodo size={13} />
@@ -279,7 +285,7 @@ export function CompletionDock({
           onClick={showArchiveInCenter ? onArchive : onInterrupt}
           disabled={centerDisabled}
           aria-label={showArchiveInCenter ? 'Archive conversation' : 'Interrupt agent'}
-          className="absolute flex items-center justify-center rounded-full cursor-pointer border-0 shadow-lg disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-focus-ring focus-visible:outline-offset-2"
+          className="pointer-events-auto absolute flex items-center justify-center rounded-full cursor-pointer border-0 shadow-lg disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-focus-ring focus-visible:outline-offset-2"
           style={{
             width: BTN,
             height: BTN,
