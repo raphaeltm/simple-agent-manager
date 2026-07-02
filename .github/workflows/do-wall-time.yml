@@ -1,0 +1,59 @@
+name: Durable Object Wall-Time
+
+on:
+  schedule:
+    - cron: '17 9 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Check DO Wall-Time
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check Durable Object wall-time regression
+        env:
+          CF_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          DO_WALL_TIME_SCRIPT_NAMES: ${{ vars.DO_WALL_TIME_SCRIPT_NAMES }}
+          DO_WALL_TIME_NAMESPACE_IDS: ${{ vars.DO_WALL_TIME_NAMESPACE_IDS }}
+          DO_WALL_TIME_OBJECT_NAMES: ${{ vars.DO_WALL_TIME_OBJECT_NAMES }}
+          DO_WALL_TIME_INVOCATION_TYPES: ${{ vars.DO_WALL_TIME_INVOCATION_TYPES }}
+          DO_WALL_TIME_RECENT_HOURS: ${{ vars.DO_WALL_TIME_RECENT_HOURS }}
+          DO_WALL_TIME_BASELINE_HOURS: ${{ vars.DO_WALL_TIME_BASELINE_HOURS }}
+          DO_WALL_TIME_REGRESSION_RATIO: ${{ vars.DO_WALL_TIME_REGRESSION_RATIO }}
+          DO_WALL_TIME_MIN_REQUESTS: ${{ vars.DO_WALL_TIME_MIN_REQUESTS }}
+          DO_WALL_TIME_LIMIT: ${{ vars.DO_WALL_TIME_LIMIT }}
+        run: |
+          set -o pipefail
+          pnpm quality:do-wall-time | tee do-wall-time-report.txt
+
+      - name: Publish check summary
+        if: always()
+        run: |
+          {
+            echo "## Durable Object Wall-Time Check"
+            echo
+            if [ -f do-wall-time-report.txt ]; then
+              echo '```'
+              cat do-wall-time-report.txt
+              echo '```'
+            else
+              echo "The check did not produce a report."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

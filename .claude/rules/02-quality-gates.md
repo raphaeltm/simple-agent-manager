@@ -43,6 +43,7 @@ Before marking feature work complete:
 - [ ] CI test checks are expected to pass with the changes
 - [ ] Staging deployment succeeded and live app verified via Playwright (see `13-staging-verification.md`)
 - [ ] Playwright visual audit passed for all changed UI surfaces — mobile + desktop, overflow asserted (see `.claude/rules/17-ui-visual-testing.md`; required when `apps/web/`, `packages/ui/`, or `packages/terminal/` are modified)
+- [ ] Alarm/cron/sweep candidate-selection changes include the control-loop load review required by `.claude/rules/47-control-loop-io-budget.md`: expected candidate volume, worst-case per-candidate cost, tiered timeout, and candidate escape path.
 
 ### Test Locations
 

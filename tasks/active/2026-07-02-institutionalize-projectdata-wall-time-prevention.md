@@ -20,7 +20,7 @@ This task delivers the prevention/process/tooling layer from idea `01KWH2QKQHND5
 - Cloudflare Durable Objects metrics docs (last updated 2026-06-29) state DO metrics are exposed through GraphQL datasets including `durableObjectsInvocationsAdaptiveGroups` and tell callers to use GraphQL introspection for dataset fields.
 - Live Cloudflare GraphQL introspection on 2026-07-02 confirmed:
   - dataset type `AccountDurableObjectsInvocationsAdaptiveGroups`
-  - dimensions include `scriptName`, `namespaceId`, `name`, `datetime`, `datetimeHour`, and related time buckets
+  - dimensions include `scriptName`, `namespaceId`, `name`, `type`, `datetime`, `datetimeHour`, and related time buckets
   - quantiles include `wallTimeP99` and `wallTimeP999`
   - filter fields include `datetime_geq`, `datetime_lt`, `scriptName`, `scriptName_in`, `namespaceId`, `namespaceId_in`, `name`, and `name_in`
 - Existing quality scripts live in `scripts/quality/`, use `tsx`, expose pure exported logic for Vitest, and use `CF_TOKEN`/`CF_ACCOUNT_ID` for Cloudflare API access.
@@ -32,14 +32,14 @@ This task delivers the prevention/process/tooling layer from idea `01KWH2QKQHND5
 
 ## Implementation Checklist
 
-- [ ] Add `.claude/rules/47-control-loop-io-budget.md` covering wall-time budgets, tiered timeouts, zombie prevention, reviewer questions, and incident citations.
-- [ ] Add the selection-widening load-review checklist item to `.github/pull_request_template.md`.
-- [ ] Add a short quality-gates pointer to rule 47 in `.claude/rules/02-quality-gates.md`.
-- [ ] Implement `scripts/quality/check-do-wall-time.ts` with env-configurable windows, thresholds, account/script/namespace filters, Cloudflare GraphQL query, comparison logic, clear exit codes, and no hardcoded IDs.
-- [ ] Expose the script as `pnpm quality:do-wall-time`.
-- [ ] Add unit tests for regression, no-regression, and empty/missing-data cases using realistic GraphQL response payload shapes.
-- [ ] Add a daily scheduled GitHub Actions workflow that runs the wall-time check and visibly fails on regression.
-- [ ] Run the script against Cloudflare with the available `CF_TOKEN`/`CF_ACCOUNT_ID` and record the output as PR evidence.
+- [x] Add `.claude/rules/47-control-loop-io-budget.md` covering wall-time budgets, tiered timeouts, zombie prevention, reviewer questions, and incident citations.
+- [x] Add the selection-widening load-review checklist item to `.github/pull_request_template.md`.
+- [x] Add a short quality-gates pointer to rule 47 in `.claude/rules/02-quality-gates.md`.
+- [x] Implement `scripts/quality/check-do-wall-time.ts` with env-configurable windows, thresholds, account/script/namespace filters, Cloudflare GraphQL query, comparison logic, clear exit codes, and no hardcoded IDs.
+- [x] Expose the script as `pnpm quality:do-wall-time`.
+- [x] Add unit tests for regression, no-regression, and empty/missing-data cases using realistic GraphQL response payload shapes.
+- [x] Add a daily scheduled GitHub Actions workflow that runs the wall-time check and visibly fails on regression.
+- [x] Run the script against Cloudflare with the available `CF_TOKEN`/`CF_ACCOUNT_ID` and record the output as PR evidence.
 - [ ] Run targeted quality-script tests and relevant repo checks.
 - [ ] Run required specialist reviews and address findings.
 

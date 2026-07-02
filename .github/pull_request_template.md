@@ -9,6 +9,7 @@
 - [ ] `pnpm typecheck`
 - [ ] `pnpm test`
 - [ ] Additional validation run (if applicable)
+- [ ] If this PR changes candidate selection for a sweep/cron/alarm loop (WHERE clause, status set, join, or equivalent), expected candidate volume and worst-case per-candidate cost are stated in the summary or validation notes (see `.claude/rules/47-control-loop-io-budget.md`)
 
 ## Staging Verification (REQUIRED for all code changes — merge-blocking)
 
