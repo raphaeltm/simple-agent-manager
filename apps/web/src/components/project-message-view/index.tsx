@@ -7,10 +7,10 @@
  * render instantly.
  */
 import type { ConversationItem, PlanItem, SlashCommand, ToolCallContentItem } from '@simple-agent-manager/acp-client';
-import { mapToolCallContent, PlanModal, StickyPlanButton } from '@simple-agent-manager/acp-client';
+import { mapToolCallContent, PlanModal } from '@simple-agent-manager/acp-client';
 import type { AgentProfile } from '@simple-agent-manager/shared';
 import { Button, Spinner } from '@simple-agent-manager/ui';
-import { ChevronDown, Clock } from 'lucide-react';
+import { ChevronDown } from 'lucide-react';
 import { type FC, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 
@@ -20,6 +20,7 @@ import { ChatFilePanel } from '../chat/ChatFilePanel';
 import { ChatTimelineDrawer } from '../chat/ChatTimelineDrawer';
 import { TruncatedSummary } from '../chat/TruncatedSummary';
 import { AcpConversationItemView } from './AcpConversationItemView';
+import { CompletionDock } from './CompletionDock';
 import { FollowUpInput } from './FollowUpInput';
 import { ConnectionBanner } from './MessageBanners';
 import { SessionHeader } from './SessionHeader';
@@ -382,47 +383,22 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
         </div>
       )}
 
-      {/* Inline idle indicator — subtle "Agent idle | End session" for conversation-mode sessions */}
-      {lc.sessionState === 'idle' && lc.taskEmbed?.taskMode === 'conversation' && onCloseConversation && (
-        <div role="status" className="shrink-0 flex items-center gap-3 px-4 py-1.5 text-xs text-fg-muted">
-          <span className="inline-flex items-center gap-1">
-            <Clock size={12} aria-hidden="true" style={{ color: 'var(--sam-color-warning)' }} />
-            Agent idle
-          </span>
-          <span aria-hidden="true" style={{ color: 'var(--sam-color-border-default)' }}>|</span>
-          <button
-            type="button"
-            onClick={onCloseConversation}
-            disabled={closingConversation}
-            className="min-h-[44px] flex items-center bg-transparent border-none text-xs cursor-pointer px-2 underline decoration-from-font underline-offset-2 text-fg-muted hover:text-fg-primary disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sam-color-focus-ring)] rounded-sm"
-          >
-            {closingConversation ? 'Ending...' : 'End session'}
-          </button>
-          {closeError && <span role="alert" className="text-danger text-xs">{closeError}</span>}
-        </div>
-      )}
-
-      {/* Agent working indicator with plan button */}
-      {lc.agentActivity !== 'idle' && isActive && (
-        <div role="status" className="flex flex-wrap items-center gap-2 px-4 py-2 glass-chrome border-x-0 border-b-0 shrink-0">
-          <Spinner size="sm" />
-          <span className="text-xs text-fg-muted">Agent is working...</span>
-          {lc.promptStartedAt && <ElapsedTime startedAt={lc.promptStartedAt} />}
-          {planItem && (
-            <StickyPlanButton
-              plan={planItem}
-              onClick={() => setShowPlanModal(true)}
-            />
-          )}
-          <button
-            type="button"
-            onClick={lc.handleCancelPrompt}
-            aria-label="Cancel agent"
-            className="ml-auto flex-shrink-0 px-2 py-2.5 min-h-[44px] text-xs font-medium rounded border border-border-default bg-transparent cursor-pointer text-danger hover:bg-danger-tint focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sam-color-focus-ring)]"
-          >
-            Cancel
-          </button>
-        </div>
+      {/* Lifecycle control — a single always-mounted dock while the session is
+          active. Its center button morphs between a red Interrupt (working) and
+          a grey Archive (idle), so the control never disappears even when the
+          `agentActivity` signal is stale. Archive is only wired for
+          conversation-mode sessions the caller can close. */}
+      {isActive && (onCloseConversation || lc.agentActivity !== 'idle') && (
+        <CompletionDock
+          working={lc.agentActivity !== 'idle'}
+          hasPlan={!!planItem}
+          onInterrupt={lc.handleCancelPrompt}
+          onArchive={() => onCloseConversation?.()}
+          onOpenPlan={() => setShowPlanModal(true)}
+          archiving={closingConversation}
+          archiveError={closeError}
+          elapsed={lc.promptStartedAt ? <ElapsedTime startedAt={lc.promptStartedAt} /> : undefined}
+        />
       )}
       {planItem && (
         <PlanModal
