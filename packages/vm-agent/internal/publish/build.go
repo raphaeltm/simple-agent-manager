@@ -20,7 +20,7 @@ const samDeploymentVolumeNamePatternSource = `^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])
 var errUnsupportedComposeVolumes = errors.New("unsupported Docker Compose volumes")
 var samDeploymentVolumeNamePattern = regexp.MustCompile(samDeploymentVolumeNamePatternSource)
 
-const unsupportedComposeVolumesGuidance = "build_and_publish supports safe named Docker Compose volumes when each service mount references a top-level named volume declaration. Unsupported volume forms remain blocked because they cannot be mapped to SAM provider-backed deployment volumes: host bind mounts, Docker socket mounts, tmpfs, service volumes_from, anonymous volumes, undeclared named volumes, external volumes, custom volume drivers, and driver options. Replace unsupported mounts with top-level named volumes such as volumes: {data: {}} and service mounts such as data:/app/data before retrying."
+const unsupportedComposeVolumesGuidance = "build_and_publish supports safe named Docker Compose volumes when each service mount references a top-level named volume declaration. Unsupported volume forms remain blocked because they cannot be mapped to SAM provider-backed deployment volumes: host bind mounts, Docker socket mounts, service tmpfs, service volumes_from, anonymous volumes, undeclared named volumes, external volumes, custom volume drivers, and driver options. Replace unsupported mounts with top-level named volumes such as volumes: {data: {}} and service mounts such as data:/app/data before retrying."
 
 // BuildOptions configures a host-side compose build.
 type BuildOptions struct {

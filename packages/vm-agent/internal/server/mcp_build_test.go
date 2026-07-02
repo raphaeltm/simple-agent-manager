@@ -229,7 +229,7 @@ func TestRunAcceptedPublishJobReportsUnsupportedComposeVolumesAsNonRetryable(t *
 	script := strings.Join([]string{
 		"#!/bin/sh",
 		"if [ \"$*\" = \"config --no-interpolate --format json\" ]; then",
-		"  printf '%s' '{\"name\":\"demo\",\"services\":{\"api\":{\"image\":\"demo-api\",\"build\":{\"context\":\".\"},\"volumes\":[{\"type\":\"volume\",\"source\":\"appdata\",\"target\":\"/data\"}]}},\"volumes\":{\"appdata\":{}}}'",
+		"  printf '%s' '{\"name\":\"demo\",\"services\":{\"api\":{\"image\":\"demo-api\",\"build\":{\"context\":\".\"},\"volumes\":[{\"type\":\"bind\",\"source\":\"/tmp/uploads\",\"target\":\"/uploads\"}]}},\"volumes\":{}}'",
 		"  exit 0",
 		"fi",
 		"printf '%s' '{}'",
