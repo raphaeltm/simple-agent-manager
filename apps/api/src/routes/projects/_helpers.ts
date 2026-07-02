@@ -34,11 +34,12 @@ export function toArtifactsRepoName(projectName: string, projectId: string): str
   const sanitize = (value: string): string =>
     value
       .toLowerCase()
-      .replace(/[^a-z0-9-]+/g, '-')
-      .replace(/-+/g, '-')
-      .replace(/^-+|-+$/g, '');
+      // Collapse every run of non-alphanumerics (spaces, symbols, existing
+      // hyphens) into a single hyphen, then trim a single leading/trailing one.
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '');
 
-  const namePart = sanitize(projectName).slice(0, 30).replace(/-+$/g, '');
+  const namePart = sanitize(projectName).slice(0, 30).replace(/-$/, '');
   const idPart = sanitize(projectId);
   return namePart ? `${namePart}-${idPart}` : `repo-${idPart}`;
 }

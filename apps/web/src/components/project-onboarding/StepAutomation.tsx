@@ -18,11 +18,11 @@ export function StepAutomation({
   triggerForm,
   error,
   onChange,
-}: {
+}: Readonly<{
   triggerForm: TriggerForm;
   error: string | null;
   onChange: (next: TriggerForm) => void;
-}) {
+}>) {
   return (
     <div className="grid gap-4">
       <StepHeader
@@ -45,7 +45,9 @@ export function StepAutomation({
             <Input
               id="project-onboarding-cron"
               value={triggerForm.cronExpression}
-              onChange={(event) => onChange({ ...triggerForm, cronExpression: event.currentTarget.value })}
+              onChange={(event) =>
+                onChange({ ...triggerForm, cronExpression: event.currentTarget.value })
+              }
               placeholder="0 9 * * *"
             />
           </label>
@@ -55,7 +57,9 @@ export function StepAutomation({
           <textarea
             id="project-onboarding-trigger-prompt"
             value={triggerForm.promptTemplate}
-            onChange={(event) => onChange({ ...triggerForm, promptTemplate: event.currentTarget.value })}
+            onChange={(event) =>
+              onChange({ ...triggerForm, promptTemplate: event.currentTarget.value })
+            }
             rows={4}
             placeholder="Review open dependency updates and open a PR for any safe bumps."
             className="w-full resize-y rounded-md bg-inset px-3 py-2 text-sm text-fg-primary"
@@ -67,8 +71,8 @@ export function StepAutomation({
       <WhyDetails question="How does the schedule field work?">
         <p>
           The schedule uses standard cron syntax. <code>0 9 * * *</code> runs every day at 09:00;{' '}
-          <code>0 9 * * 1</code> runs every Monday at 09:00. Each run dispatches a task agent with the prompt
-          above through the same pipeline a manual task uses.
+          <code>0 9 * * 1</code> runs every Monday at 09:00. Each run dispatches a task agent with
+          the prompt above through the same pipeline a manual task uses.
         </p>
       </WhyDetails>
     </div>

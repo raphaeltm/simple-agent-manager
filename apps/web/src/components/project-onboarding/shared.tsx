@@ -11,7 +11,9 @@ import { ModelSelect } from '../ModelSelect';
 /* ───────── Types ───────── */
 
 export type SetupStatus = 'pending' | 'done' | 'skipped';
-export type FieldErrors = Partial<Record<'name' | 'repository' | 'githubRepoId' | 'general', string>>;
+export type FieldErrors = Partial<
+  Record<'name' | 'repository' | 'githubRepoId' | 'general', string>
+>;
 
 export interface ProfileDraft {
   name: string;
@@ -80,12 +82,15 @@ export function isCredentialError(error: unknown): boolean {
 
 export function isNotApprovedError(error: unknown): boolean {
   if (!(error instanceof ApiClientError) || error.status !== 403) return false;
-  return error.message.toLowerCase().includes('approved') || error.message.toLowerCase().includes('pending');
+  return (
+    error.message.toLowerCase().includes('approved') ||
+    error.message.toLowerCase().includes('pending')
+  );
 }
 
 export function profilePayload(
   draft: ProfileDraft,
-  taskMode: 'conversation' | 'task',
+  taskMode: 'conversation' | 'task'
 ): CreateAgentProfileRequest {
   return {
     name: draft.name.trim(),
@@ -164,7 +169,9 @@ export function ProfileSetupPanel({
           <select
             id={`${fieldPrefix}-profile-agent`}
             value={draft.agentType}
-            onChange={(event) => onChange({ ...draft, agentType: event.currentTarget.value, model: '' })}
+            onChange={(event) =>
+              onChange({ ...draft, agentType: event.currentTarget.value, model: '' })
+            }
             disabled={disabled || configuredAgents.length === 0}
             className="min-h-11 w-full rounded-md bg-inset px-3 py-2 text-sm text-fg-primary"
           >
@@ -172,7 +179,9 @@ export function ProfileSetupPanel({
               <option value="">No configured agents</option>
             ) : (
               configuredAgents.map((agent) => (
-                <option key={agent.id} value={agent.id}>{agent.name}</option>
+                <option key={agent.id} value={agent.id}>
+                  {agent.name}
+                </option>
               ))
             )}
           </select>
@@ -193,7 +202,9 @@ export function ProfileSetupPanel({
         <input
           type="checkbox"
           checked={draft.useCustomGithubPolicy}
-          onChange={(event) => onChange({ ...draft, useCustomGithubPolicy: event.currentTarget.checked })}
+          onChange={(event) =>
+            onChange({ ...draft, useCustomGithubPolicy: event.currentTarget.checked })
+          }
           disabled={disabled}
           className="mt-1"
         />

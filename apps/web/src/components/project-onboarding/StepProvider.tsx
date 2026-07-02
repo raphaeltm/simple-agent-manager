@@ -41,11 +41,11 @@ function OptionCard({
   option,
   selected,
   onSelect,
-}: {
+}: Readonly<{
   option: ProviderOption;
   selected: boolean;
   onSelect: () => void;
-}) {
+}>) {
   const Icon = option.icon;
   return (
     <button
@@ -65,7 +65,9 @@ function OptionCard({
         </span>
         <span
           className={`flex size-5 shrink-0 items-center justify-center rounded-full border ${
-            selected ? 'border-accent bg-accent text-white' : 'border-border-default text-transparent'
+            selected
+              ? 'border-accent bg-accent text-white'
+              : 'border-border-default text-transparent'
           }`}
           aria-hidden="true"
         >
@@ -90,13 +92,15 @@ export function StepProvider({
   onChange,
   artifactsEnabled = true,
   note,
-}: {
+}: Readonly<{
   value: RepoProvider;
   onChange: (provider: RepoProvider) => void;
   artifactsEnabled?: boolean;
   note?: ReactNode;
-}) {
-  const options = artifactsEnabled ? OPTIONS : OPTIONS.filter((option) => option.id !== 'artifacts');
+}>) {
+  const options = artifactsEnabled
+    ? OPTIONS
+    : OPTIONS.filter((option) => option.id !== 'artifacts');
   return (
     <div className="grid gap-4">
       <StepHeader
@@ -117,19 +121,20 @@ export function StepProvider({
       {note}
       <WhyDetails question="How do I choose, and can I change it later?">
         <p>
-          <strong className="text-fg-secondary">GitHub</strong> is the right pick when your code already
-          lives there and you want the usual pull-request review flow — SAM mints a short-lived,
-          repository-scoped token from your GitHub App installation each time an agent runs.
+          <strong className="text-fg-secondary">GitHub</strong> is the right pick when your code
+          already lives there and you want the usual pull-request review flow — SAM mints a
+          short-lived, repository-scoped token from your GitHub App installation each time an agent
+          runs.
         </p>
         <p>
-          <strong className="text-fg-secondary">SAM-hosted (Cloudflare Artifacts)</strong> is the fastest way
-          to start from nothing: SAM provisions a private Git repo, seeds it with a README, and agents push
-          straight to it. There’s no GitHub App to install and no pull requests — you review changes as
-          branches on the SAM-hosted remote.
+          <strong className="text-fg-secondary">SAM-hosted (Cloudflare Artifacts)</strong> is the
+          fastest way to start from nothing: SAM provisions a private Git repo, seeds it with a
+          README, and agents push straight to it. There’s no GitHub App to install and no pull
+          requests — you review changes as branches on the SAM-hosted remote.
         </p>
         <p>
-          The repository backing a project is fixed once it’s created, so pick the one that fits this
-          project. You can always create another project with the other option.
+          The repository backing a project is fixed once it’s created, so pick the one that fits
+          this project. You can always create another project with the other option.
         </p>
       </WhyDetails>
     </div>

@@ -21,9 +21,10 @@ const COPY: Record<'conversation' | 'task', ProfileCopy> = {
     lead: "A conversation profile powers interactive chat — you talk to the agent, it reads and edits code live, and you stay in the loop. It's long-running and open-ended: it stays up as long as you're working with it. This is the agent you'll reach for most often.",
     callout: (
       <>
-        Conversation profiles default to a <strong className="font-semibold text-fg-primary">lightweight</strong>{' '}
-        workspace — it skips the devcontainer build for a faster start, since interactive chat usually doesn’t
-        need the full environment spun up.
+        Conversation profiles default to a{' '}
+        <strong className="font-semibold text-fg-primary">lightweight</strong> workspace — it skips
+        the devcontainer build for a faster start, since interactive chat usually doesn’t need the
+        full environment spun up.
       </>
     ),
     panelTitle: 'Conversation profile',
@@ -31,14 +32,15 @@ const COPY: Record<'conversation' | 'task', ProfileCopy> = {
     why: (
       <>
         <p>
-          A profile bundles an agent (Claude Code, Codex, …), an optional model override, and a permission
-          policy into a reusable preset. Conversation profiles are tuned for fast, interactive turns; task
-          profiles are tuned to run a single job autonomously.
+          A profile bundles an agent (Claude Code, Codex, …), an optional model override, and a
+          permission policy into a reusable preset. Conversation profiles are tuned for fast,
+          interactive turns; task profiles are tuned to run a single job autonomously.
         </p>
         <p>
-          A conversation has no built-in “done” — it’s open-ended. It stays alive while you chat and is
-          cleaned up after the workspace sits idle past its timeout. Remember the workspace is ephemeral: ask
-          the agent to push or persist anything you want to keep before you walk away.
+          A conversation has no built-in “done” — it’s open-ended. It stays alive while you chat and
+          is cleaned up after the workspace sits idle past its timeout. Remember the workspace is
+          ephemeral: ask the agent to push or persist anything you want to keep before you walk
+          away.
         </p>
       </>
     ),
@@ -48,9 +50,9 @@ const COPY: Record<'conversation' | 'task', ProfileCopy> = {
     lead: 'A task profile runs a single, one-off job autonomously and is expected to finish on its own. Use it for work you can hand off and review later instead of watching live.',
     callout: (
       <>
-        Task profiles default to a <strong className="font-semibold text-fg-primary">full</strong> workspace —
-        the complete devcontainer build, so an autonomous job runs against an environment that matches your
-        repo exactly with no missing tooling.
+        Task profiles default to a <strong className="font-semibold text-fg-primary">full</strong>{' '}
+        workspace — the complete devcontainer build, so an autonomous job runs against an
+        environment that matches your repo exactly with no missing tooling.
       </>
     ),
     panelTitle: 'Task profile',
@@ -58,14 +60,14 @@ const COPY: Record<'conversation' | 'task', ProfileCopy> = {
     why: (
       <>
         <p>
-          A task agent works on its own branch and is expected to wrap up by calling a completion tool when
-          the job is finished. Because the work is isolated on a branch, it can’t disrupt your default branch
-          or another agent’s work.
+          A task agent works on its own branch and is expected to wrap up by calling a completion
+          tool when the job is finished. Because the work is isolated on a branch, it can’t disrupt
+          your default branch or another agent’s work.
         </p>
         <p>
-          If the agent goes quiet without finishing, SAM’s scheduler checks in and asks whether it’s still on
-          track. If it doesn’t respond, SAM marks the task failed and cleans up the workspace — so a stuck
-          task never lingers and burns resources.
+          If the agent goes quiet without finishing, SAM’s scheduler checks in and asks whether it’s
+          still on track. If it doesn’t respond, SAM marks the task failed and cleans up the
+          workspace — so a stuck task never lingers and burns resources.
         </p>
       </>
     ),
@@ -80,7 +82,7 @@ export function StepProfile({
   agentsError,
   onChange,
   onRefreshAgents,
-}: {
+}: Readonly<{
   kind: 'conversation' | 'task';
   draft: ProfileDraft;
   configuredAgents: AgentInfo[];
@@ -88,7 +90,7 @@ export function StepProfile({
   agentsError: string | null;
   onChange: (next: ProfileDraft) => void;
   onRefreshAgents: () => void;
-}) {
+}>) {
   const copy = COPY[kind];
   return (
     <div className="grid gap-4">

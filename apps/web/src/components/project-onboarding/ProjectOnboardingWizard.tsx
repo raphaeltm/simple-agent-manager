@@ -117,14 +117,16 @@ export function ProjectOnboardingWizard({
 
   // Kickoff state
   const [kickoffMode, setKickoffMode] = useState<'task' | 'conversation'>('task');
-  const [kickoffMessage, setKickoffMessage] = useState('Review this repository and suggest the highest-impact next steps.');
+  const [kickoffMessage, setKickoffMessage] = useState(
+    'Review this repository and suggest the highest-impact next steps.'
+  );
   const [kickoffError, setKickoffError] = useState<string | null>(null);
   const [kickoffSubmitting, setKickoffSubmitting] = useState(false);
 
   useEffect(() => {
-    setProjectForm((current) => (
+    setProjectForm((current) =>
       current.installationId ? current : { ...current, installationId: defaultInstallationId }
-    ));
+    );
   }, [defaultInstallationId]);
 
   const currentIndex = stepIndex(step);
@@ -134,28 +136,32 @@ export function ProjectOnboardingWizard({
   const goToStep = (id: OnboardingStepId) => {
     setStep(id);
   };
-  const goNext = () => setStep(ONBOARDING_STEPS[Math.min(currentIndex + 1, ONBOARDING_STEPS.length - 1)]!.id);
+  const goNext = () =>
+    setStep(ONBOARDING_STEPS[Math.min(currentIndex + 1, ONBOARDING_STEPS.length - 1)]!.id);
   const goBack = () => setStep(ONBOARDING_STEPS[Math.max(currentIndex - 1, 0)]!.id);
 
   /* ─── Connect handlers ─── */
 
-  const fetchBranches = useCallback(async (repository: string, installationId: string, defaultBranch?: string) => {
-    setBranchesLoading(true);
-    setBranches([]);
-    setBranchesError(null);
-    try {
-      const result = await listBranches(repository, installationId || undefined, defaultBranch);
-      setBranches(result.length > 0 ? result : [{ name: 'main' }, { name: 'master' }]);
-      if (result.length === 0) {
-        setBranchesError('No branches returned. Common branch names are available.');
+  const fetchBranches = useCallback(
+    async (repository: string, installationId: string, defaultBranch?: string) => {
+      setBranchesLoading(true);
+      setBranches([]);
+      setBranchesError(null);
+      try {
+        const result = await listBranches(repository, installationId || undefined, defaultBranch);
+        setBranches(result.length > 0 ? result : [{ name: 'main' }, { name: 'master' }]);
+        if (result.length === 0) {
+          setBranchesError('No branches returned. Common branch names are available.');
+        }
+      } catch {
+        setBranches([{ name: 'main' }, { name: 'master' }, { name: 'develop' }]);
+        setBranchesError('Unable to fetch branches. Common branch names are available.');
+      } finally {
+        setBranchesLoading(false);
       }
-    } catch {
-      setBranches([{ name: 'main' }, { name: 'master' }, { name: 'develop' }]);
-      setBranchesError('Unable to fetch branches. Common branch names are available.');
-    } finally {
-      setBranchesLoading(false);
-    }
-  }, []);
+    },
+    []
+  );
 
   const handleRepositoryChange = (value: string) => {
     setProjectForm((current) => ({ ...current, repository: value, githubRepoId: undefined }));
@@ -178,7 +184,7 @@ export function ProjectOnboardingWizard({
       }));
       void fetchBranches(repo.fullName, projectForm.installationId, repo.defaultBranch);
     },
-    [fetchBranches, projectForm.installationId, projectNameTouched],
+    [fetchBranches, projectForm.installationId, projectNameTouched]
   );
 
   const handleInstallationChange = (installationId: string) => {
@@ -203,7 +209,10 @@ export function ProjectOnboardingWizard({
       const agents = response.agents.filter((agent) => agent.configured);
       setConfiguredAgents(agents);
       const firstAgent = agents[0]?.id ?? '';
-      setConversationProfile((current) => ({ ...current, agentType: current.agentType || firstAgent }));
+      setConversationProfile((current) => ({
+        ...current,
+        agentType: current.agentType || firstAgent,
+      }));
       setTaskProfile((current) => ({ ...current, agentType: current.agentType || firstAgent }));
     } catch (error) {
       setAgentsError(error instanceof Error ? error.message : 'Failed to load configured agents');
@@ -291,7 +300,10 @@ export function ProjectOnboardingWizard({
     setSetupError(null);
     setSavingSetup(kind);
     try {
-      const created: AgentProfile = await createAgentProfile(project.id, profilePayload(draft, kind));
+      const created: AgentProfile = await createAgentProfile(
+        project.id,
+        profilePayload(draft, kind)
+      );
       setCreatedProfiles((current) => ({ ...current, [kind]: created }));
       return true;
     } catch (error) {
@@ -376,9 +388,8 @@ export function ProjectOnboardingWizard({
 
   /* ─── Kickoff handlers ─── */
 
-  const selectedKickoffProfileId = kickoffMode === 'conversation'
-    ? createdProfiles.conversation?.id
-    : createdProfiles.task?.id;
+  const selectedKickoffProfileId =
+    kickoffMode === 'conversation' ? createdProfiles.conversation?.id : createdProfiles.task?.id;
 
   const handleKickoff = async () => {
     if (!project) return;
@@ -394,15 +405,20 @@ export function ProjectOnboardingWizard({
         taskMode: kickoffMode,
         agentProfileId: selectedKickoffProfileId,
       });
-      const destination = kickoffMode === 'conversation'
-        ? `/projects/${project.id}/chat/${result.sessionId}`
-        : `/projects/${project.id}/tasks/${result.taskId}`;
+      const destination =
+        kickoffMode === 'conversation'
+          ? `/projects/${project.id}/chat/${result.sessionId}`
+          : `/projects/${project.id}/tasks/${result.taskId}`;
       navigate(destination);
     } catch (error) {
       if (isNotApprovedError(error)) {
-        setKickoffError('Your account is pending approval. You can still create projects and profiles, but starting tasks requires an approved account.');
+        setKickoffError(
+          'Your account is pending approval. You can still create projects and profiles, but starting tasks requires an approved account.'
+        );
       } else if (isCredentialError(error)) {
-        setKickoffError('Cloud credentials are required. Connect a cloud provider in Settings before starting a task or conversation.');
+        setKickoffError(
+          'Cloud credentials are required. Connect a cloud provider in Settings before starting a task or conversation.'
+        );
       } else {
         setKickoffError(error instanceof Error ? error.message : 'Failed to start');
       }
@@ -542,7 +558,12 @@ export function ProjectOnboardingWizard({
       const saving = savingSetup === step;
       return (
         <div className="flex flex-wrap gap-2">
-          <Button type="button" variant="secondary" onClick={() => skipProfile(step)} disabled={saving}>
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => skipProfile(step)}
+            disabled={saving}
+          >
             Skip
           </Button>
           <Button
@@ -570,7 +591,8 @@ export function ProjectOnboardingWizard({
     }
     return (
       <Button type="button" onClick={goNext}>
-        {step === 'welcome' ? 'Get started' : 'Continue'} <ArrowRight size={16} aria-hidden="true" />
+        {step === 'welcome' ? 'Get started' : 'Continue'}{' '}
+        <ArrowRight size={16} aria-hidden="true" />
       </Button>
     );
   };
@@ -598,7 +620,10 @@ export function ProjectOnboardingWizard({
             type="button"
             variant="secondary"
             onClick={step === 'welcome' ? () => navigate('/projects') : goBack}
-            disabled={creatingProject || (currentIndex <= lockedBeforeIndex && currentIndex !== 0 && !!project)}
+            disabled={
+              creatingProject ||
+              (currentIndex <= lockedBeforeIndex && currentIndex !== 0 && !!project)
+            }
           >
             <ArrowLeft size={16} aria-hidden="true" /> {step === 'welcome' ? 'Cancel' : 'Back'}
           </Button>

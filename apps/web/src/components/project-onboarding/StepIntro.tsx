@@ -18,8 +18,8 @@ export function StepWelcome() {
       <WhyDetails question="Why organize work into projects?">
         <p>
           Everything an agent needs lives in one place: the repo it can read and write, the profiles
-          that define how it behaves, the chat history, and the tasks it has run. That scoping is also
-          a security boundary — an agent in this project can’t reach another project’s code or
+          that define how it behaves, the chat history, and the tasks it has run. That scoping is
+          also a security boundary — an agent in this project can’t reach another project’s code or
           credentials.
         </p>
       </WhyDetails>
@@ -53,10 +53,10 @@ export function StepHowSamWorks() {
         />
       </div>
       <Callout variant="warn">
-        <strong className="font-semibold text-fg-primary">Workspaces are ephemeral.</strong> A task agent
-        auto-pushes its branch and opens a PR when it finishes, so its work survives. A conversation agent
-        does not — if it edits files or produces output and you don’t tell it to push or persist that work,
-        it’s gone when the workspace stops.
+        <strong className="font-semibold text-fg-primary">Workspaces are ephemeral.</strong> A task
+        agent auto-pushes its branch and opens a PR when it finishes, so its work survives. A
+        conversation agent does not — if it edits files or produces output and you don’t tell it to
+        push or persist that work, it’s gone when the workspace stops.
       </Callout>
       <WhyDetails question="Where can work go so it survives?">
         <p>There are a few durable destinations:</p>
@@ -64,23 +64,23 @@ export function StepHowSamWorks() {
           <li className="flex items-start gap-2">
             <Github size={15} className="mt-0.5 shrink-0 text-fg-muted" aria-hidden="true" />
             <span>
-              <strong className="text-fg-secondary">Push to a branch.</strong> A finished task agent commits
-              and pushes its own branch automatically and opens a pull request for review. In a conversation,
-              you ask the agent to push when you’re ready.
+              <strong className="text-fg-secondary">Push to a branch.</strong> A finished task agent
+              commits and pushes its own branch automatically and opens a pull request for review.
+              In a conversation, you ask the agent to push when you’re ready.
             </span>
           </li>
           <li className="flex items-start gap-2">
             <UploadCloud size={15} className="mt-0.5 shrink-0 text-fg-muted" aria-hidden="true" />
             <span>
-              <strong className="text-fg-secondary">Upload to the SAM library.</strong> Files, artifacts, and
-              notes you want to keep outside of git.
+              <strong className="text-fg-secondary">Upload to the SAM library.</strong> Files,
+              artifacts, and notes you want to keep outside of git.
             </span>
           </li>
           <li className="flex items-start gap-2">
             <Lightbulb size={15} className="mt-0.5 shrink-0 text-fg-muted" aria-hidden="true" />
             <span>
-              <strong className="text-fg-secondary">Capture as a SAM idea.</strong> Turn findings or follow-up
-              work into an idea you can execute later.
+              <strong className="text-fg-secondary">Capture as a SAM idea.</strong> Turn findings or
+              follow-up work into an idea you can execute later.
             </span>
           </li>
         </ul>

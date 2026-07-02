@@ -53,13 +53,20 @@ export function stepIndex(id: OnboardingStepId): number {
  * `<details class="sh-why">`: an info icon, a question, and an expand chevron
  * that reveals extra context for readers who want it.
  */
-export function WhyDetails({ question, children }: { question: string; children: ReactNode }) {
+export function WhyDetails({
+  question,
+  children,
+}: Readonly<{ question: string; children: ReactNode }>) {
   return (
     <details className="group rounded-md border border-border-default bg-inset/60 [&_svg.why-chevron]:open:rotate-180">
       <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 text-sm text-fg-secondary [&::-webkit-details-marker]:hidden">
         <Info size={16} className="shrink-0 text-accent" aria-hidden="true" />
         <span className="flex-1">{question}</span>
-        <ChevronDown size={16} className="why-chevron shrink-0 text-fg-muted transition-transform" aria-hidden="true" />
+        <ChevronDown
+          size={16}
+          className="why-chevron shrink-0 text-fg-muted transition-transform"
+          aria-hidden="true"
+        />
       </summary>
       <div className="grid gap-2 border-t border-border-default px-3 py-3 text-sm leading-relaxed text-fg-muted">
         {children}
@@ -68,7 +75,10 @@ export function WhyDetails({ question, children }: { question: string; children:
   );
 }
 
-export function Callout({ variant, children }: { variant: 'info' | 'warn'; children: ReactNode }) {
+export function Callout({
+  variant,
+  children,
+}: Readonly<{ variant: 'info' | 'warn'; children: ReactNode }>) {
   const styles =
     variant === 'info'
       ? 'border-accent/40 bg-accent/10 text-fg-secondary'
@@ -82,7 +92,11 @@ export function Callout({ variant, children }: { variant: 'info' | 'warn'; child
 }
 
 /** Eyebrow + heading + lead (the "what + why" intro shared by every step). */
-export function StepHeader({ id, title, lead }: { id: OnboardingStepId; title: string; lead: ReactNode }) {
+export function StepHeader({
+  id,
+  title,
+  lead,
+}: Readonly<{ id: OnboardingStepId; title: string; lead: ReactNode }>) {
   const index = stepIndex(id);
   return (
     <div className="grid gap-2">
@@ -96,7 +110,11 @@ export function StepHeader({ id, title, lead }: { id: OnboardingStepId; title: s
 }
 
 /** A small "icon + title + body" info card used across intro steps. */
-export function InfoCard({ icon: Icon, title, body }: { icon: LucideIcon; title: string; body: ReactNode }) {
+export function InfoCard({
+  icon: Icon,
+  title,
+  body,
+}: Readonly<{ icon: LucideIcon; title: string; body: ReactNode }>) {
   return (
     <div className="grid gap-1.5 rounded-md border border-border-default bg-surface p-3">
       <Icon size={18} className="text-accent" aria-hidden="true" />
@@ -104,6 +122,26 @@ export function InfoCard({ icon: Icon, title, body }: { icon: LucideIcon; title:
       <span className="text-xs text-fg-muted">{body}</span>
     </div>
   );
+}
+
+type RailState = 'complete' | 'current' | 'upcoming';
+
+function railState(index: number, currentIndex: number): RailState {
+  if (index < currentIndex) return 'complete';
+  if (index === currentIndex) return 'current';
+  return 'upcoming';
+}
+
+function railButtonClass(state: RailState, locked: boolean): string {
+  if (state === 'current') return 'bg-accent/10 text-fg-primary';
+  if (locked) return 'cursor-default text-fg-muted';
+  return 'text-fg-muted hover:bg-surface-hover';
+}
+
+function railBadgeClass(state: RailState): string {
+  if (state === 'complete') return 'border-success/50 bg-success-tint text-fg-primary';
+  if (state === 'current') return 'border-accent text-fg-primary';
+  return 'border-border-default text-fg-muted';
 }
 
 /**
@@ -115,16 +153,16 @@ export function ProgressRail({
   current,
   lockedBeforeIndex = 0,
   onJump,
-}: {
+}: Readonly<{
   current: OnboardingStepId;
   lockedBeforeIndex?: number;
   onJump: (id: OnboardingStepId) => void;
-}) {
+}>) {
   const currentIndex = stepIndex(current);
   return (
     <ol className="grid gap-1" aria-label="Onboarding steps">
       {ONBOARDING_STEPS.map((step, index) => {
-        const state = index < currentIndex ? 'complete' : index === currentIndex ? 'current' : 'upcoming';
+        const state = railState(index, currentIndex);
         const locked = index < lockedBeforeIndex && index !== currentIndex;
         const Icon = step.icon;
         return (
@@ -134,24 +172,16 @@ export function ProgressRail({
               onClick={() => !locked && onJump(step.id)}
               disabled={locked}
               aria-current={state === 'current' ? 'step' : undefined}
-              className={`flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm transition-colors ${
-                state === 'current'
-                  ? 'bg-accent/10 text-fg-primary'
-                  : locked
-                    ? 'cursor-default text-fg-muted'
-                    : 'text-fg-muted hover:bg-surface-hover'
-              }`}
+              className={`flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm transition-colors ${railButtonClass(state, locked)}`}
             >
               <span
-                className={`flex size-7 shrink-0 items-center justify-center rounded-full border text-xs ${
-                  state === 'complete'
-                    ? 'border-success/50 bg-success-tint text-fg-primary'
-                    : state === 'current'
-                      ? 'border-accent text-fg-primary'
-                      : 'border-border-default text-fg-muted'
-                }`}
+                className={`flex size-7 shrink-0 items-center justify-center rounded-full border text-xs ${railBadgeClass(state)}`}
               >
-                {state === 'complete' ? <Check size={14} aria-hidden="true" /> : <Icon size={14} aria-hidden="true" />}
+                {state === 'complete' ? (
+                  <Check size={14} aria-hidden="true" />
+                ) : (
+                  <Icon size={14} aria-hidden="true" />
+                )}
               </span>
               <span className="truncate">{step.label}</span>
             </button>
@@ -163,7 +193,7 @@ export function ProgressRail({
 }
 
 /** Mobile progress bar shown above the step body on small screens. */
-export function MobileProgress({ current }: { current: OnboardingStepId }) {
+export function MobileProgress({ current }: Readonly<{ current: OnboardingStepId }>) {
   const currentIndex = stepIndex(current);
   const progressPct = Math.round((currentIndex / (ONBOARDING_STEPS.length - 1)) * 100);
   return (
@@ -175,7 +205,10 @@ export function MobileProgress({ current }: { current: OnboardingStepId }) {
         <span>{ONBOARDING_STEPS[currentIndex]!.label}</span>
       </div>
       <div className="h-1.5 w-full overflow-hidden rounded-full bg-inset">
-        <div className="h-full rounded-full bg-accent transition-all" style={{ width: `${progressPct}%` }} />
+        <div
+          className="h-full rounded-full bg-accent transition-all"
+          style={{ width: `${progressPct}%` }}
+        />
       </div>
     </div>
   );

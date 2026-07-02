@@ -68,7 +68,7 @@ function concatBytes(chunks: Uint8Array[]): Uint8Array {
 function hexToBytes(hex: string): Uint8Array {
   const out = new Uint8Array(hex.length / 2);
   for (let i = 0; i < out.length; i++) {
-    out[i] = parseInt(hex.substr(i * 2, 2), 16);
+    out[i] = Number.parseInt(hex.slice(i * 2, i * 2 + 2), 16);
   }
   return out;
 }
@@ -80,7 +80,10 @@ function bytesToHex(bytes: Uint8Array): string {
 }
 
 async function sha1Bytes(data: Uint8Array): Promise<Uint8Array> {
-  const digest = await crypto.subtle.digest('SHA-1', data as unknown as BufferSource);
+  // NOSONAR: Git's object model is defined in terms of SHA-1 object IDs — this is
+  // content addressing for git-receive-pack, not a security/cryptographic context.
+  // Cloudflare Artifacts repos are SHA-1; the algorithm is not a free choice here.
+  const digest = await crypto.subtle.digest('SHA-1', data as unknown as BufferSource); // NOSONAR
   return new Uint8Array(digest);
 }
 
@@ -128,8 +131,7 @@ async function buildPack(objects: PackObject[]): Promise<Uint8Array> {
 
   const parts: Uint8Array[] = [header];
   for (const obj of objects) {
-    parts.push(packObjectHeader(obj.type, obj.content.length));
-    parts.push(await deflate(obj.content));
+    parts.push(packObjectHeader(obj.type, obj.content.length), await deflate(obj.content));
   }
   const body = concatBytes(parts);
   const trailer = await sha1Bytes(body);
@@ -198,10 +200,7 @@ export async function buildSeedPack(params: {
   const blobOid = await objectId('blob', blobContent);
 
   // Tree with a single entry: `100644 README.md\0<20 raw sha bytes>`.
-  const treeContent = concatBytes([
-    encoder.encode('100644 README.md\0'),
-    hexToBytes(blobOid),
-  ]);
+  const treeContent = concatBytes([encoder.encode('100644 README.md\0'), hexToBytes(blobOid)]);
   const treeOid = await objectId('tree', treeContent);
 
   const timestamp = Math.floor((params.now?.getTime() ?? Date.now()) / 1000);
@@ -228,10 +227,12 @@ export async function buildSeedPack(params: {
  * Builds the raw `git-receive-pack` request body (ref-update command + flush +
  * packfile). Exported for tests.
  */
-export function buildReceivePackRequest(commitOid: string, branch: string, pack: Uint8Array): Uint8Array {
-  const command = encoder.encode(
-    `${ZERO_OID} ${commitOid} refs/heads/${branch}\0report-status\n`
-  );
+export function buildReceivePackRequest(
+  commitOid: string,
+  branch: string,
+  pack: Uint8Array
+): Uint8Array {
+  const command = encoder.encode(`${ZERO_OID} ${commitOid} refs/heads/${branch}\0report-status\n`);
   return concatBytes([pktLine(command), FLUSH_PKT, pack]);
 }
 
@@ -283,9 +284,7 @@ export async function seedArtifactsReadme(params: SeedReadmeParams): Promise<voi
   const resultText = await response.text();
 
   if (!response.ok) {
-    throw new Error(
-      `Artifacts receive-pack HTTP ${response.status}: ${resultText.slice(0, 500)}`
-    );
+    throw new Error(`Artifacts receive-pack HTTP ${response.status}: ${resultText.slice(0, 500)}`);
   }
 
   const result = parseReceivePackResult(resultText);
