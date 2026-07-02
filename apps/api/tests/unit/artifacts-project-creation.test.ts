@@ -9,7 +9,52 @@ import { ARTIFACTS_DEFAULTS, VALID_REPO_PROVIDERS } from '@simple-agent-manager/
 import { parse } from 'valibot';
 import { describe, expect, it } from 'vitest';
 
+import { toArtifactsRepoName } from '../../src/routes/projects/_helpers';
 import { CreateProjectSchema } from '../../src/schemas/projects';
+
+describe('toArtifactsRepoName', () => {
+  const VALID = /^[a-z0-9-]+$/;
+
+  it('lowercases the uppercase ULID projectId', () => {
+    const name = toArtifactsRepoName('my project', '01KWGVSZ9JE791KGJZCHVM42YF');
+    expect(name).toMatch(VALID);
+    expect(name).toContain('01kwgvsz9je791kgjzchvm42yf');
+  });
+
+  it('replaces spaces and special characters with hyphens', () => {
+    // normalizeProjectName lowercases but preserves spaces — this must be sanitized.
+    const name = toArtifactsRepoName('Seed Verify 0702!', '01KWGVSZ9JE791KGJZCHVM42YF');
+    expect(name).toMatch(VALID);
+    expect(name.startsWith('seed-verify-0702-')).toBe(true);
+  });
+
+  it('never emits uppercase, spaces, or leading/trailing/double hyphens in the name part', () => {
+    const name = toArtifactsRepoName('  --Weird__Name!!  ', 'ABCdef123');
+    expect(name).toMatch(VALID);
+    expect(name).not.toMatch(/--/);
+    expect(name.startsWith('-')).toBe(false);
+  });
+
+  it('always preserves the (lowercased) projectId for uniqueness', () => {
+    const id = '01KWGVSZ9JE791KGJZCHVM42YF';
+    const a = toArtifactsRepoName('same name', id);
+    const b = toArtifactsRepoName('same name', '01KWH000000000000000000000');
+    expect(a).not.toBe(b);
+    expect(a.endsWith(id.toLowerCase())).toBe(true);
+  });
+
+  it('falls back to repo-<id> when the name has no usable characters', () => {
+    const name = toArtifactsRepoName('!!!', '01KWGVSZ9JE791KGJZCHVM42YF');
+    expect(name).toBe('repo-01kwgvsz9je791kgjzchvm42yf');
+  });
+
+  it('caps the name component so the full name stays short', () => {
+    const longName = 'a'.repeat(200);
+    const name = toArtifactsRepoName(longName, '01KWGVSZ9JE791KGJZCHVM42YF');
+    // 30-char name cap + '-' + 26-char ulid = 57.
+    expect(name.length).toBeLessThanOrEqual(57);
+  });
+});
 
 describe('CreateProjectSchema with repoProvider', () => {
   it('accepts artifacts as repoProvider', () => {

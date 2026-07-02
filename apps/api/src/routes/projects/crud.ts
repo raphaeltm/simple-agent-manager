@@ -60,6 +60,7 @@ import {
   PROJECT_ENV_KEY_PATTERN,
   requireGitHubUserAccessToken,
   requireOwnedInstallation,
+  toArtifactsRepoName,
 } from './_helpers';
 
 const crudRoutes = new Hono<{ Bindings: Env }>();
@@ -166,8 +167,10 @@ crudRoutes.post('/', jsonValidator(CreateProjectSchema), async (c) => {
       || c.env.ARTIFACTS_DEFAULT_BRANCH
       || ARTIFACTS_DEFAULTS.DEFAULT_BRANCH;
 
-    // Create Artifacts repo — name includes projectId for uniqueness
-    const repoName = `${normalizedName}-${projectId}`;
+    // Create Artifacts repo — name includes projectId for uniqueness.
+    // Must be sanitized: Artifacts rejects uppercase/spaces (the ULID projectId
+    // is uppercase and normalizedName preserves spaces).
+    const repoName = toArtifactsRepoName(normalizedName, projectId);
     const created = await c.env.ARTIFACTS.create(repoName, {
       description: description || undefined,
       setDefaultBranch: defaultBranch,
