@@ -1,7 +1,6 @@
-import { Alert, Button, Input } from '@simple-agent-manager/ui';
+import { Alert, Input } from '@simple-agent-manager/ui';
 
 import { StepHeader, WhyDetails } from './explain';
-import type { SetupStatus } from './shared';
 
 interface TriggerForm {
   name: string;
@@ -11,24 +10,19 @@ interface TriggerForm {
   promptTemplate: string;
 }
 
+/**
+ * The cron-trigger form for the automation step. Skip / Create trigger buttons
+ * live in the wizard footer, so this panel always shows its fields.
+ */
 export function StepAutomation({
   triggerForm,
-  status,
   error,
-  saving,
   onChange,
-  onSave,
-  onSkip,
 }: {
   triggerForm: TriggerForm;
-  status: SetupStatus;
   error: string | null;
-  saving: boolean;
   onChange: (next: TriggerForm) => void;
-  onSave: () => void;
-  onSkip: () => void;
 }) {
-  const disabled = status !== 'pending';
   return (
     <div className="grid gap-4">
       <StepHeader
@@ -44,7 +38,6 @@ export function StepAutomation({
               id="project-onboarding-trigger-name"
               value={triggerForm.name}
               onChange={(event) => onChange({ ...triggerForm, name: event.currentTarget.value })}
-              disabled={disabled}
             />
           </label>
           <label htmlFor="project-onboarding-cron" className="grid gap-1.5">
@@ -54,7 +47,6 @@ export function StepAutomation({
               value={triggerForm.cronExpression}
               onChange={(event) => onChange({ ...triggerForm, cronExpression: event.currentTarget.value })}
               placeholder="0 9 * * *"
-              disabled={disabled}
             />
           </label>
         </div>
@@ -66,21 +58,11 @@ export function StepAutomation({
             onChange={(event) => onChange({ ...triggerForm, promptTemplate: event.currentTarget.value })}
             rows={4}
             placeholder="Review open dependency updates and open a PR for any safe bumps."
-            disabled={disabled}
             className="w-full resize-y rounded-md bg-inset px-3 py-2 text-sm text-fg-primary"
           />
         </label>
 
         {error && <Alert variant="error">{error}</Alert>}
-
-        <div className="flex flex-wrap gap-2">
-          <Button type="button" onClick={onSave} disabled={disabled}>
-            {status === 'done' ? 'Trigger created' : saving ? 'Creating...' : 'Create trigger'}
-          </Button>
-          <Button type="button" variant="secondary" onClick={onSkip} disabled={disabled}>
-            Skip
-          </Button>
-        </div>
       </section>
       <WhyDetails question="How does the schedule field work?">
         <p>

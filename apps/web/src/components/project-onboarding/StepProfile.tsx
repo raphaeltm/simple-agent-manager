@@ -4,7 +4,7 @@ import type { ReactNode } from 'react';
 import { Link } from 'react-router';
 
 import { Callout, StepHeader, WhyDetails } from './explain';
-import { type ProfileDraft, ProfileSetupPanel, type SetupStatus } from './shared';
+import { type ProfileDraft, ProfileSetupPanel } from './shared';
 
 interface ProfileCopy {
   title: string;
@@ -74,27 +74,19 @@ const COPY: Record<'conversation' | 'task', ProfileCopy> = {
 
 export function StepProfile({
   kind,
-  status,
   draft,
   configuredAgents,
   agentsLoading,
   agentsError,
-  saving,
   onChange,
-  onSave,
-  onSkip,
   onRefreshAgents,
 }: {
   kind: 'conversation' | 'task';
-  status: SetupStatus;
   draft: ProfileDraft;
   configuredAgents: AgentInfo[];
   agentsLoading: boolean;
   agentsError: string | null;
-  saving: boolean;
   onChange: (next: ProfileDraft) => void;
-  onSave: () => void;
-  onSkip: () => void;
   onRefreshAgents: () => void;
 }) {
   const copy = COPY[kind];
@@ -126,14 +118,10 @@ export function StepProfile({
 
       <ProfileSetupPanel
         title={copy.panelTitle}
-        status={status}
         draft={draft}
         configuredAgents={configuredAgents}
         disabled={agentsLoading}
-        saving={saving}
         onChange={onChange}
-        onSave={onSave}
-        onSkip={onSkip}
       />
 
       <WhyDetails question={copy.whyQuestion}>{copy.why}</WhyDetails>

@@ -88,8 +88,6 @@ export function ProjectOnboardingWizard({
   const [agentsError, setAgentsError] = useState<string | null>(null);
   const [configuredAgents, setConfiguredAgents] = useState<AgentInfo[]>([]);
   const [createdProfiles, setCreatedProfiles] = useState<CreatedProfiles>({});
-  const [conversationStatus, setConversationStatus] = useState<SetupStatus>('pending');
-  const [taskStatus, setTaskStatus] = useState<SetupStatus>('pending');
   const [triggerStatus, setTriggerStatus] = useState<SetupStatus>('pending');
   const [setupError, setSetupError] = useState<string | null>(null);
   const [savingSetup, setSavingSetup] = useState<string | null>(null);
@@ -279,45 +277,45 @@ export function ProjectOnboardingWizard({
 
   /* ─── Setup handlers ─── */
 
-  const saveProfile = async (kind: 'conversation' | 'task') => {
-    if (!project) return;
+  const saveProfile = async (kind: 'conversation' | 'task'): Promise<boolean> => {
+    if (!project) return false;
     const draft = kind === 'conversation' ? conversationProfile : taskProfile;
     if (!draft.agentType) {
       setSetupError('Choose a configured agent before creating this profile, or skip it.');
-      return;
+      return false;
     }
     if (!draft.name.trim()) {
       setSetupError('Profile name is required.');
-      return;
+      return false;
     }
     setSetupError(null);
     setSavingSetup(kind);
     try {
       const created: AgentProfile = await createAgentProfile(project.id, profilePayload(draft, kind));
       setCreatedProfiles((current) => ({ ...current, [kind]: created }));
-      if (kind === 'conversation') setConversationStatus('done');
-      if (kind === 'task') setTaskStatus('done');
+      return true;
     } catch (error) {
       setSetupError(error instanceof Error ? error.message : 'Failed to create profile');
+      return false;
     } finally {
       setSavingSetup(null);
     }
   };
 
-  const saveTrigger = async () => {
-    if (!project) return;
+  const saveTrigger = async (): Promise<boolean> => {
+    if (!project) return false;
     setTriggerError(null);
     if (!triggerForm.name.trim()) {
       setTriggerError('Trigger name is required.');
-      return;
+      return false;
     }
     if (!triggerForm.cronExpression.trim()) {
       setTriggerError('Schedule is required.');
-      return;
+      return false;
     }
     if (!triggerForm.promptTemplate.trim()) {
       setTriggerError('Prompt is required.');
-      return;
+      return false;
     }
     setSavingSetup('trigger');
     try {
@@ -334,15 +332,46 @@ export function ProjectOnboardingWizard({
         agentProfileId: createdProfiles.task?.id,
       });
       setTriggerStatus('done');
+      return true;
     } catch (error) {
       if (error instanceof ApiClientError && error.status === 409) {
         setTriggerError('A trigger with this name already exists in this project.');
       } else {
         setTriggerError(error instanceof Error ? error.message : 'Failed to create trigger');
       }
+      return false;
     } finally {
       setSavingSetup(null);
     }
+  };
+
+  /* ─── Footer step actions (Create / Skip advance to the next step) ─── */
+
+  const createProfileAndAdvance = async (kind: 'conversation' | 'task') => {
+    if (createdProfiles[kind]) {
+      goNext();
+      return;
+    }
+    if (await saveProfile(kind)) goNext();
+  };
+
+  const skipProfile = (_kind: 'conversation' | 'task') => {
+    setSetupError(null);
+    goNext();
+  };
+
+  const createTriggerAndAdvance = async () => {
+    if (triggerStatus === 'done') {
+      goNext();
+      return;
+    }
+    if (await saveTrigger()) goNext();
+  };
+
+  const skipTrigger = () => {
+    setTriggerStatus('skipped');
+    setTriggerError(null);
+    goNext();
   };
 
   /* ─── Kickoff handlers ─── */
@@ -450,15 +479,11 @@ export function ProjectOnboardingWizard({
         return (
           <StepProfile
             kind="conversation"
-            status={conversationStatus}
             draft={conversationProfile}
             configuredAgents={configuredAgents}
             agentsLoading={agentsLoading}
             agentsError={agentsError}
-            saving={savingSetup === 'conversation'}
             onChange={setConversationProfile}
-            onSave={() => void saveProfile('conversation')}
-            onSkip={() => setConversationStatus('skipped')}
             onRefreshAgents={loadConfiguredAgents}
           />
         );
@@ -466,15 +491,11 @@ export function ProjectOnboardingWizard({
         return (
           <StepProfile
             kind="task"
-            status={taskStatus}
             draft={taskProfile}
             configuredAgents={configuredAgents}
             agentsLoading={agentsLoading}
             agentsError={agentsError}
-            saving={savingSetup === 'task'}
             onChange={setTaskProfile}
-            onSave={() => void saveProfile('task')}
-            onSkip={() => setTaskStatus('skipped')}
             onRefreshAgents={loadConfiguredAgents}
           />
         );
@@ -482,12 +503,8 @@ export function ProjectOnboardingWizard({
         return (
           <StepAutomation
             triggerForm={triggerForm}
-            status={triggerStatus}
             error={triggerError}
-            saving={savingSetup === 'trigger'}
             onChange={setTriggerForm}
-            onSave={() => void saveTrigger()}
-            onSkip={() => setTriggerStatus('skipped')}
           />
         );
       case 'kickoff':
@@ -508,6 +525,55 @@ export function ProjectOnboardingWizard({
 
   // Setup profile errors surface at the step level (shared across conversation/task).
   const showSetupError = setupError && (step === 'conversation' || step === 'task');
+
+  // Footer primary/secondary actions per step. Create and Skip both advance;
+  // kickoff renders its own actions inside the step body.
+  const renderStepActions = () => {
+    if (step === 'connect') {
+      return (
+        <Button type="button" onClick={() => void handleCreateProject()} disabled={creatingProject}>
+          {creatingProject ? 'Creating...' : project ? 'Continue' : 'Create project'}{' '}
+          <ArrowRight size={16} aria-hidden="true" />
+        </Button>
+      );
+    }
+    if (step === 'kickoff') return null;
+    if (step === 'conversation' || step === 'task') {
+      const saving = savingSetup === step;
+      return (
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" variant="secondary" onClick={() => skipProfile(step)} disabled={saving}>
+            Skip
+          </Button>
+          <Button
+            type="button"
+            onClick={() => void createProfileAndAdvance(step)}
+            disabled={saving || configuredAgents.length === 0}
+          >
+            {saving ? 'Creating...' : 'Create profile'} <ArrowRight size={16} aria-hidden="true" />
+          </Button>
+        </div>
+      );
+    }
+    if (step === 'automation') {
+      const saving = savingSetup === 'trigger';
+      return (
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" variant="secondary" onClick={skipTrigger} disabled={saving}>
+            Skip
+          </Button>
+          <Button type="button" onClick={() => void createTriggerAndAdvance()} disabled={saving}>
+            {saving ? 'Creating...' : 'Create trigger'} <ArrowRight size={16} aria-hidden="true" />
+          </Button>
+        </div>
+      );
+    }
+    return (
+      <Button type="button" onClick={goNext}>
+        {step === 'welcome' ? 'Get started' : 'Continue'} <ArrowRight size={16} aria-hidden="true" />
+      </Button>
+    );
+  };
 
   return (
     <div className="grid gap-6 lg:grid-cols-[220px_1fr]">
@@ -537,16 +603,7 @@ export function ProjectOnboardingWizard({
             <ArrowLeft size={16} aria-hidden="true" /> {step === 'welcome' ? 'Cancel' : 'Back'}
           </Button>
 
-          {step === 'connect' ? (
-            <Button type="button" onClick={() => void handleCreateProject()} disabled={creatingProject}>
-              {creatingProject ? 'Creating...' : project ? 'Continue' : 'Create project'}{' '}
-              <ArrowRight size={16} aria-hidden="true" />
-            </Button>
-          ) : step === 'kickoff' ? null : (
-            <Button type="button" onClick={goNext}>
-              {step === 'welcome' ? 'Get started' : 'Continue'} <ArrowRight size={16} aria-hidden="true" />
-            </Button>
-          )}
+          {renderStepActions()}
         </nav>
       </section>
     </div>

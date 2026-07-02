@@ -226,39 +226,44 @@ describe('ProjectOnboardingWizard', () => {
     await screen.findByRole('heading', { name: 'Set up a conversation agent' });
   }
 
-  it('creates a conversation profile', async () => {
+  it('creates a conversation profile from the footer and advances to the task step', async () => {
     const mockProfile = { id: 'profile-1', name: 'Conversation profile', taskMode: 'conversation' };
     mockCreateAgentProfile.mockResolvedValue(mockProfile);
     await advanceToSetup();
 
-    fireEvent.click(screen.getByText('Create profile'));
+    // Create button lives in the footer now (not inside the card) and advances.
+    fireEvent.click(screen.getByRole('button', { name: /Create profile/ }));
     await waitFor(() => {
       expect(mockCreateAgentProfile).toHaveBeenCalledWith(
         'proj-1',
         expect.objectContaining({ taskMode: 'conversation' }),
       );
     });
+    await screen.findByRole('heading', { name: 'Set up a task agent' });
   });
 
-  it('walks conversation → task → automation → kickoff via Continue', async () => {
+  it('walks conversation → task → automation → kickoff via footer Skip', async () => {
     await advanceToSetup();
-    fireEvent.click(screen.getByRole('button', { name: /Continue/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Skip/ }));
     await screen.findByRole('heading', { name: 'Set up a task agent' });
-    fireEvent.click(screen.getByRole('button', { name: /Continue/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Skip/ }));
     await screen.findByRole('heading', { name: /Schedule automation/ });
-    fireEvent.click(screen.getByRole('button', { name: /Continue/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Skip/ }));
     await screen.findByRole('heading', { name: 'Kick off your first work' });
+    // No profile/trigger was created when skipping.
+    expect(mockCreateAgentProfile).not.toHaveBeenCalled();
+    expect(mockCreateTrigger).not.toHaveBeenCalled();
   });
 
   /* ─── Kickoff ─── */
 
   async function advanceToKickoff() {
     await advanceToSetup();
-    fireEvent.click(screen.getByRole('button', { name: /Continue/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Skip/ }));
     await screen.findByRole('heading', { name: 'Set up a task agent' });
-    fireEvent.click(screen.getByRole('button', { name: /Continue/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Skip/ }));
     await screen.findByRole('heading', { name: /Schedule automation/ });
-    fireEvent.click(screen.getByRole('button', { name: /Continue/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Skip/ }));
     await screen.findByRole('heading', { name: 'Kick off your first work' });
   }
 

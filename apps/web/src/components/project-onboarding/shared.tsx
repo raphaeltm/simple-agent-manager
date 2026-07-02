@@ -3,7 +3,7 @@ import type {
   CreateAgentProfileRequest,
   GitHubCliPolicy,
 } from '@simple-agent-manager/shared';
-import { Button, Input } from '@simple-agent-manager/ui';
+import { Input } from '@simple-agent-manager/ui';
 
 import { ApiClientError } from '../../lib/api';
 import { ModelSelect } from '../ModelSelect';
@@ -99,16 +99,6 @@ export function profilePayload(
 
 /* ───────── Shared UI Components ───────── */
 
-export function SetupHeader({ title, status }: { title: string; status: SetupStatus }) {
-  const label = status === 'pending' ? 'Optional' : status === 'done' ? 'Created' : 'Skipped';
-  return (
-    <div className="flex flex-wrap items-center justify-between gap-2">
-      <h3 className="text-sm font-semibold text-fg-primary">{title}</h3>
-      <span className="rounded-md border border-border-default px-2 py-1 text-xs text-fg-muted">{label}</span>
-    </div>
-  );
-}
-
 export function ModeButton({
   selected,
   title,
@@ -137,94 +127,78 @@ export function ModeButton({
   );
 }
 
+/**
+ * The profile form fields for a setup step. Buttons live in the wizard footer
+ * (Skip / Create), so this panel always shows its fields and never collapses.
+ */
 export function ProfileSetupPanel({
   title,
-  status,
   draft,
   configuredAgents,
   disabled,
-  saving,
   onChange,
-  onSave,
-  onSkip,
 }: {
   title: string;
-  status: SetupStatus;
   draft: ProfileDraft;
   configuredAgents: AgentInfo[];
   disabled: boolean;
-  saving: boolean;
   onChange: (next: ProfileDraft) => void;
-  onSave: () => void;
-  onSkip: () => void;
 }) {
   const fieldPrefix = title.toLowerCase().replace(/\s+/g, '-');
 
   return (
     <section className="grid gap-3 rounded-md border border-border-default bg-surface p-4">
-      <SetupHeader title={title} status={status} />
-      {status === 'pending' && (
-        <>
-          <div className="grid gap-3 md:grid-cols-2">
-            <label htmlFor={`${fieldPrefix}-profile-name`} className="grid gap-1.5">
-              <span className="text-sm text-fg-muted">Name</span>
-              <Input
-                id={`${fieldPrefix}-profile-name`}
-                value={draft.name}
-                onChange={(event) => onChange({ ...draft, name: event.currentTarget.value })}
-                disabled={disabled}
-              />
-            </label>
-            <label htmlFor={`${fieldPrefix}-profile-agent`} className="grid gap-1.5">
-              <span className="text-sm text-fg-muted">Agent</span>
-              <select
-                id={`${fieldPrefix}-profile-agent`}
-                value={draft.agentType}
-                onChange={(event) => onChange({ ...draft, agentType: event.currentTarget.value, model: '' })}
-                disabled={disabled || configuredAgents.length === 0}
-                className="min-h-11 w-full rounded-md bg-inset px-3 py-2 text-sm text-fg-primary"
-              >
-                {configuredAgents.length === 0 ? (
-                  <option value="">No configured agents</option>
-                ) : (
-                  configuredAgents.map((agent) => (
-                    <option key={agent.id} value={agent.id}>{agent.name}</option>
-                  ))
-                )}
-              </select>
-            </label>
-          </div>
-          <label htmlFor={`${fieldPrefix}-profile-model`} className="grid gap-1.5">
-            <span className="text-sm text-fg-muted">Model override</span>
-            <ModelSelect
-              id={`${fieldPrefix}-profile-model`}
-              agentType={draft.agentType}
-              value={draft.model}
-              onChange={(model) => onChange({ ...draft, model })}
-              disabled={disabled || !draft.agentType}
-              placeholder="Use profile default"
-            />
-          </label>
-          <label className="flex min-h-11 items-start gap-2 rounded-md border border-border-default p-3 text-sm text-fg-muted">
-            <input
-              type="checkbox"
-              checked={draft.useCustomGithubPolicy}
-              onChange={(event) => onChange({ ...draft, useCustomGithubPolicy: event.currentTarget.checked })}
-              disabled={disabled}
-              className="mt-1"
-            />
-            <span>Use a custom GitHub CLI policy for this project repository.</span>
-          </label>
-          <div className="flex flex-wrap gap-2">
-            <Button type="button" onClick={onSave} disabled={disabled || configuredAgents.length === 0}>
-              {saving ? 'Creating...' : 'Create profile'}
-            </Button>
-            <Button type="button" variant="secondary" onClick={onSkip} disabled={disabled}>
-              Skip profile
-            </Button>
-          </div>
-        </>
-      )}
+      <h3 className="text-sm font-semibold text-fg-primary">{title}</h3>
+      <div className="grid gap-3 md:grid-cols-2">
+        <label htmlFor={`${fieldPrefix}-profile-name`} className="grid gap-1.5">
+          <span className="text-sm text-fg-muted">Name</span>
+          <Input
+            id={`${fieldPrefix}-profile-name`}
+            value={draft.name}
+            onChange={(event) => onChange({ ...draft, name: event.currentTarget.value })}
+            disabled={disabled}
+          />
+        </label>
+        <label htmlFor={`${fieldPrefix}-profile-agent`} className="grid gap-1.5">
+          <span className="text-sm text-fg-muted">Agent</span>
+          <select
+            id={`${fieldPrefix}-profile-agent`}
+            value={draft.agentType}
+            onChange={(event) => onChange({ ...draft, agentType: event.currentTarget.value, model: '' })}
+            disabled={disabled || configuredAgents.length === 0}
+            className="min-h-11 w-full rounded-md bg-inset px-3 py-2 text-sm text-fg-primary"
+          >
+            {configuredAgents.length === 0 ? (
+              <option value="">No configured agents</option>
+            ) : (
+              configuredAgents.map((agent) => (
+                <option key={agent.id} value={agent.id}>{agent.name}</option>
+              ))
+            )}
+          </select>
+        </label>
+      </div>
+      <label htmlFor={`${fieldPrefix}-profile-model`} className="grid gap-1.5">
+        <span className="text-sm text-fg-muted">Model override</span>
+        <ModelSelect
+          id={`${fieldPrefix}-profile-model`}
+          agentType={draft.agentType}
+          value={draft.model}
+          onChange={(model) => onChange({ ...draft, model })}
+          disabled={disabled || !draft.agentType}
+          placeholder="Use profile default"
+        />
+      </label>
+      <label className="flex min-h-11 items-start gap-2 rounded-md border border-border-default p-3 text-sm text-fg-muted">
+        <input
+          type="checkbox"
+          checked={draft.useCustomGithubPolicy}
+          onChange={(event) => onChange({ ...draft, useCustomGithubPolicy: event.currentTarget.checked })}
+          disabled={disabled}
+          className="mt-1"
+        />
+        <span>Use a custom GitHub CLI policy for this project repository.</span>
+      </label>
     </section>
   );
 }

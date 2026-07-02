@@ -19,6 +19,20 @@ const AGENTS = [
   { id: 'openai-codex', name: 'OpenAI Codex', configured: true, models: ['gpt-5'] },
 ];
 
+const CREATED_PROJECT = {
+  id: 'proj-audit-1',
+  name: 'greenfield',
+  description: null,
+  repository: 'https://acct.artifacts.cloudflare.net/git/default/greenfield.git',
+  defaultBranch: 'main',
+  installationId: 'system_anonymous_trials_installation',
+  status: 'active',
+  repoProvider: 'artifacts',
+  createdAt: '2026-07-02T00:00:00Z',
+  updatedAt: '2026-07-02T00:00:00Z',
+  userId: 'user-1',
+};
+
 async function setupMocks(
   page: Page,
   opts: { installations?: unknown[]; artifactsEnabled?: boolean } = {},
@@ -37,6 +51,13 @@ async function setupMocks(
     if (path.endsWith('/api/projects')) return respond(200, { projects: [], total: 0, hasMore: false });
     if (path.endsWith('/api/notifications')) return respond(200, { notifications: [], unreadCount: 0, hasMore: false });
     return undefined;
+  });
+  // Project creation (POST) — registered after the catch-all so it wins for /api/projects.
+  await page.route('**/api/projects', (route) => {
+    if (route.request().method() === 'POST') {
+      return route.fulfill({ status: 201, json: CREATED_PROJECT });
+    }
+    return route.fulfill({ status: 200, json: { projects: [], total: 0, hasMore: false } });
   });
   // Register auth last so it wins over the catch-all (last route registered wins).
   await page.route('**/api/auth/get-session', (route) => route.fulfill({ status: 200, json: MOCK_USER }));
@@ -83,6 +104,36 @@ test.describe('Project onboarding wizard', () => {
       .getByPlaceholder('Project name')
       .fill('an-extremely-long-greenfield-project-name-that-should-wrap-not-overflow');
     await screenshot(page, 'onboarding-04-connect-artifacts');
+    await assertNoOverflow(page);
+  });
+
+  test('setup steps show Create/Skip in the footer (not inside the card)', async ({ page }) => {
+    await setupMocks(page);
+    await gotoWizard(page);
+
+    // Fast-path to the conversation step via the SAM provider.
+    await page.getByRole('button', { name: /Get started/ }).click();
+    await page.getByRole('button', { name: /Continue/ }).click();
+    await page.getByText('Let SAM host the repository').click();
+    await page.getByRole('button', { name: /Continue/ }).click();
+    await page.getByPlaceholder('Project name').fill('greenfield');
+    await page.getByRole('button', { name: /Create project/ }).click();
+
+    // Conversation step: footer has Skip + Create profile; the card has no buttons.
+    await expect(page.getByRole('heading', { name: 'Set up a conversation agent' })).toBeVisible();
+    const nav = page.getByRole('navigation', { name: 'Step navigation' });
+    await expect(nav.getByRole('button', { name: /Create profile/ })).toBeVisible();
+    await expect(nav.getByRole('button', { name: /^Skip$/ })).toBeVisible();
+    await screenshot(page, 'onboarding-05-conversation');
+    await assertNoOverflow(page);
+
+    // Automation step footer: Create trigger + Skip.
+    await nav.getByRole('button', { name: /^Skip$/ }).click();
+    await expect(page.getByRole('heading', { name: 'Set up a task agent' })).toBeVisible();
+    await nav.getByRole('button', { name: /^Skip$/ }).click();
+    await expect(page.getByRole('heading', { name: /Schedule automation/ })).toBeVisible();
+    await expect(nav.getByRole('button', { name: /Create trigger/ })).toBeVisible();
+    await screenshot(page, 'onboarding-06-automation');
     await assertNoOverflow(page);
   });
 
