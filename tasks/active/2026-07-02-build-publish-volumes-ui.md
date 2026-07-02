@@ -57,7 +57,7 @@ This task implements combined idea `01KWHN2X97VG3DYEVWRPRVZ2K7` and supersedes c
 - [x] Add Playwright visual audit coverage for the deployment volumes UI on mobile and desktop with normal, empty, many, long text, and error scenarios.
 - [x] Run local quality gates and focused test suites throughout implementation.
 - [x] Run local specialist review: task-completion-validator, go-specialist, cloudflare-specialist, ui-ux-specialist, security-auditor, test-engineer, doc-sync-validator, constitution-validator.
-- [ ] Deploy to staging, delete/recreate nodes as required for vm-agent changes, and verify a real `build_and_publish` Compose app with a safe named volume.
+- [x] Deploy to staging, delete/recreate nodes as required for vm-agent changes, and verify a real `build_and_publish` Compose app with a safe named volume. **VERIFIED 2026-07-02** — see Staging Verification Evidence below.
 - [ ] Leave or clean up staging resources according to current staging-validation policy, reporting exact project/environment/volume/node evidence.
 - [ ] Archive the task after task-completion-validator passes.
 
@@ -79,6 +79,19 @@ This task implements combined idea `01KWHN2X97VG3DYEVWRPRVZ2K7` and supersedes c
 - `pnpm lint` passed, and passed again after the review fix with existing warnings only.
 - `git diff --check` passed.
 - `go test ./packages/vm-agent/internal/publish` and `gofmt` are blocked in this workspace because `go` and `gofmt` are not installed.
+
+## Staging Verification Evidence (2026-07-02)
+
+Branch deployed to staging (deploy run `28622740482`, green, smoke tests 12/12). Staging had zero live nodes beforehand, so the fresh node pulled this branch's vm-agent binary (rule 27 satisfied).
+
+A controlled verification task (`01KWJCANJQGWG8G047M6E21TKG`, profile "Claude Code Chat") built a minimal busybox Compose app with a named volume (`services.web.volumes: [data:/data]` + top-level `volumes.data`) and ran the real MCP `build_and_publish` against deployment environment `r2-validation` (`01KVT1H89TP88K1ESN7HTSKS1C`).
+
+Result — feature working end-to-end, zero errors:
+
+- Publish job `01KWJCNE7R0MFJMT9SY31YQV14`: status `succeeded`, no `error_code`, **no `unsupported_compose_volumes` rejection** (the exact regression this PR fixes). Release `01KWJCP105FMYSAAT3MRWCPPZF`. Full pipeline build → export → upload → release in ~21s.
+- `deployment_volumes` row created: `01KWJCP0QGEKXD466GJQJ7ZF48` name `data`, status `available`, **provider `hetzner`**, 10GB, real `provider_volume_id=106214240`. Staging previously had **zero** deployment_volumes rows.
+- Env `r2-validation` `requires_volumes` 0 → 1, `observed_status=applied`.
+- Exclusive volume deployment node `01KWJCP1KFJGQ8TNTTK2KZEA9X` (`node_mode=exclusive`) provisioned with the volume attached, plus agent workspace node `01KWJCAYW0TW7P0PK94XAD0JA0`. Both `credential_source=platform` — provisioned via the platform Hetzner credential (the staging user has no cloud credential of its own).
 
 ## Local Specialist Review
 
