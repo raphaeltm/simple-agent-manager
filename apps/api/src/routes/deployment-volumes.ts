@@ -8,6 +8,7 @@
  * Auth: session cookie + project ownership.
  */
 
+import { type CredentialProvider, isValidProvider } from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
@@ -67,10 +68,51 @@ async function requireOwnedEnvironment(
     )
     .limit(1);
 
-  if (rows.length === 0) {
+  const row = rows[0];
+  if (!row) {
     throw errors.notFound('Deployment environment');
   }
-  return rows[0];
+  return row;
+}
+
+function toCredentialProvider(value: unknown): CredentialProvider | undefined {
+  return typeof value === 'string' && isValidProvider(value) ? value : undefined;
+}
+
+async function resolveManualVolumeCreateProvider(
+  db: ReturnType<typeof drizzle>,
+  envRow: Awaited<ReturnType<typeof requireOwnedEnvironment>>,
+  requestedLocation: string
+): Promise<CredentialProvider | undefined> {
+  const existingVolumes = await listEnvironmentVolumes(db, envRow.id);
+  const firstVolume = existingVolumes[0];
+
+  if (firstVolume) {
+    const provider = toCredentialProvider(firstVolume.providerName);
+    if (!provider) {
+      throw new Error(`Existing volume provider "${firstVolume.providerName}" is not supported`);
+    }
+
+    for (const volume of existingVolumes) {
+      if (volume.providerName !== firstVolume.providerName) {
+        throw new Error('Existing environment volumes use mixed providers; resolve them before adding more');
+      }
+      if (volume.location !== requestedLocation) {
+        throw new Error(
+          `New volume location "${requestedLocation}" must match existing environment volume location "${volume.location}"`
+        );
+      }
+    }
+    return provider;
+  }
+
+  if (envRow.location && envRow.location !== requestedLocation) {
+    throw new Error(
+      `New volume location "${requestedLocation}" must match environment location "${envRow.location}"`
+    );
+  }
+
+  return toCredentialProvider(envRow.provider);
 }
 
 // =============================================================================
@@ -95,16 +137,30 @@ deploymentVolumeRoutes.post(
     const db = drizzle(c.env.DATABASE, { schema });
 
     await requireOwnedProject(db, projectId, userId);
-    await requireOwnedEnvironment(db, envId, projectId);
+    const envRow = await requireOwnedEnvironment(db, envId, projectId);
 
     const { name, sizeGb, location } = c.req.valid('json');
 
     try {
-      const volume = await createEnvironmentVolume(db, c.env, userId, {
+      const targetProvider = await resolveManualVolumeCreateProvider(db, envRow, location);
+      const createOptions: {
+        environmentId: string;
+        name: string;
+        sizeGb: number;
+        location: string;
+        targetProvider?: CredentialProvider;
+      } = {
         environmentId: envId,
         name,
         sizeGb,
         location,
+      };
+      if (targetProvider) {
+        createOptions.targetProvider = targetProvider;
+      }
+
+      const volume = await createEnvironmentVolume(db, c.env, userId, {
+        ...createOptions,
       });
       return c.json(volume, 201);
     } catch (err) {

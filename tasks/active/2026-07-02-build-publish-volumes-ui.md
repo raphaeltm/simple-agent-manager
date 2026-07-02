@@ -56,7 +56,7 @@ This task implements combined idea `01KWHN2X97VG3DYEVWRPRVZ2K7` and supersedes c
 - [x] Add web tests for API client behavior and volume UI states/actions.
 - [x] Add Playwright visual audit coverage for the deployment volumes UI on mobile and desktop with normal, empty, many, long text, and error scenarios.
 - [x] Run local quality gates and focused test suites throughout implementation.
-- [ ] Run local specialist review: task-completion-validator, go-specialist, cloudflare-specialist, ui-ux-specialist, security-auditor, test-engineer, doc-sync-validator, constitution-validator.
+- [x] Run local specialist review: task-completion-validator, go-specialist, cloudflare-specialist, ui-ux-specialist, security-auditor, test-engineer, doc-sync-validator, constitution-validator.
 - [ ] Deploy to staging, delete/recreate nodes as required for vm-agent changes, and verify a real `build_and_publish` Compose app with a safe named volume.
 - [ ] Leave or clean up staging resources according to current staging-validation policy, reporting exact project/environment/volume/node evidence.
 - [ ] Archive the task after task-completion-validator passes.
@@ -64,19 +64,32 @@ This task implements combined idea `01KWHN2X97VG3DYEVWRPRVZ2K7` and supersedes c
 ## Validation Notes
 
 - `pnpm --filter @simple-agent-manager/api test -- tests/unit/services/compose-publish-apply.test.ts tests/unit/routes/compose-publish-release-callback.test.ts` passed.
+- `pnpm --filter @simple-agent-manager/api test -- tests/unit/routes/deployment-volumes.test.ts` passed.
+- `pnpm --filter @simple-agent-manager/api test -- tests/unit/services/compose-publish-apply.test.ts tests/unit/routes/compose-publish-release-callback.test.ts tests/unit/routes/deployment-volumes.test.ts` passed after the review fix (44 tests).
 - `pnpm --filter @simple-agent-manager/web test -- tests/unit/components/deployment-volumes-panel.test.tsx` passed.
 - `pnpm --filter @simple-agent-manager/api typecheck` passed.
 - `pnpm --filter @simple-agent-manager/web typecheck` passed.
-- `pnpm typecheck` passed.
+- `pnpm typecheck` passed, and passed again after the review fix.
 - `pnpm --filter @simple-agent-manager/api lint` passed with existing warnings.
 - `pnpm --filter @simple-agent-manager/web lint` passed with existing warnings after touched-file import sorting fixes.
 - `pnpm --filter @simple-agent-manager/web lint` passed again after Playwright audit coverage was added, with existing warnings only.
 - `pnpm --filter @simple-agent-manager/web typecheck` passed again after Playwright audit coverage was added.
 - `pnpm --filter @simple-agent-manager/web test -- tests/unit/components/deployment-volumes-panel.test.tsx` passed again after Playwright audit coverage was added.
 - `pnpm --filter @simple-agent-manager/web exec playwright test tests/playwright/deployment-volumes-audit.spec.ts --project="iPhone SE (375x667)" --project="Desktop (1280x800)"` passed, covering normal, long/special text, empty, many-row, and error states with no horizontal overflow assertions.
-- `pnpm lint` passed.
+- `pnpm lint` passed, and passed again after the review fix with existing warnings only.
 - `git diff --check` passed.
 - `go test ./packages/vm-agent/internal/publish` and `gofmt` are blocked in this workspace because `go` and `gofmt` are not installed.
+
+## Local Specialist Review
+
+- task-completion-validator: implementation checklist is covered except staging verification and final archive; acceptance criterion requiring a live MCP `build_and_publish` volume deployment remains pending Phase 6.
+- go-specialist: VM-agent validation now permits only declared safe named volumes and keeps unsafe forms non-retryable; Go tests were added, but local execution/formatting is blocked by missing `go`/`gofmt`.
+- cloudflare-specialist: provider volume creation side effects were deferred until after callback/artifact validation. Review found one additional manual UI route risk: creating a new volume could use credential-order provider selection instead of the existing environment volume provider. Fixed by binding manual create to existing environment volume provider/location or environment placement metadata, with route tests.
+- ui-ux-specialist: real deployment environment page gained a Volumes tab, with mobile/desktop Playwright audits for normal, empty, long/special text, many-row, and error states. No horizontal overflow found.
+- security-auditor: unsafe Compose volume forms remain rejected before build/apply, top-level custom/external volume options are blocked, and manual volume creation now avoids mixed provider/location drift.
+- test-engineer: focused API route/service, compose-transform, web component, and Playwright coverage exists for the changed behavior; missing local Go execution is documented as an environment blocker.
+- doc-sync-validator: MCP tool definitions, deployment guide, and public app-deployment docs now describe safe named Compose volume support and remaining unsupported mount forms.
+- constitution-validator: no new hardcoded deployment endpoints/secrets/config values were added; provider validation uses the shared provider guard.
 
 ## UI/UX Validation Report
 
