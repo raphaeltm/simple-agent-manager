@@ -373,12 +373,61 @@ networks:
     expect(doc.services.app.deploy.resources.limits.memory).toBe('1G');
   });
 
-  it('preserves top-level named volumes', () => {
+  it('rewrites named Compose volumes to SAM provider-backed bind mounts', () => {
     const result = buildComposePublishApplyPayload(makeSubmission(), OPTS);
     const doc = parseYaml(result.composeYaml) as Record<string, any>;
-    expect(doc.volumes).toEqual({ pgdata: null });
-    // The postgres service's volume mount is preserved verbatim.
-    expect(doc.services.postgres.volumes).toEqual(['pgdata:/var/lib/postgresql/data']);
+    expect(doc.volumes).toBeUndefined();
+    expect(doc.services.postgres.volumes).toEqual([
+      {
+        type: 'bind',
+        source: `/mnt/sam-env-${ENVIRONMENT_ID}/volumes/pgdata`,
+        target: '/var/lib/postgresql/data',
+        bind: { create_host_path: false },
+      },
+    ]);
+  });
+
+  it('preserves read-only mode while rewriting named Compose volumes', () => {
+    const composeWithReadOnlyVolume = `services:
+  app:
+    image: example/app:1
+    volumes:
+      - data:/data:ro
+  worker:
+    image: example/worker:1
+    volumes:
+      - type: volume
+        source: data
+        target: /mirror
+        read_only: true
+volumes:
+  data:
+`;
+
+    const result = buildComposePublishApplyPayload(
+      makeSubmission({ composeYaml: composeWithReadOnlyVolume, services: [] }),
+      OPTS
+    );
+    const doc = parseYaml(result.composeYaml) as Record<string, any>;
+
+    expect(doc.services.app.volumes).toEqual([
+      {
+        type: 'bind',
+        source: `/mnt/sam-env-${ENVIRONMENT_ID}/volumes/data`,
+        target: '/data',
+        bind: { create_host_path: false },
+        read_only: true,
+      },
+    ]);
+    expect(doc.services.worker.volumes).toEqual([
+      {
+        type: 'bind',
+        source: `/mnt/sam-env-${ENVIRONMENT_ID}/volumes/data`,
+        target: '/mirror',
+        bind: { create_host_path: false },
+        read_only: true,
+      },
+    ]);
   });
 
   it('rejects host bind mounts before rendering compose-publish applies', () => {
@@ -603,12 +652,17 @@ volumes:
       expect(doc.services[name].labels['sam.service']).toBe(name);
     }
 
-    // Long-syntax volume mount preserved verbatim; Compose's global volume name
-    // is stripped so the deploy node creates an environment-scoped local volume.
+    // Long-syntax named volume mount is rewritten to the SAM provider-backed
+    // mount root; top-level Docker volumes are not emitted.
     expect(doc.services.postgres.volumes).toEqual([
-      { type: 'volume', source: 'pgdata', target: '/var/lib/postgresql/data', volume: {} },
+      {
+        type: 'bind',
+        source: `/mnt/sam-env-${ENVIRONMENT_ID}/volumes/pgdata`,
+        target: '/var/lib/postgresql/data',
+        bind: { create_host_path: false },
+      },
     ]);
-    expect(doc.volumes).toEqual({ pgdata: null });
+    expect(doc.volumes).toBeUndefined();
 
     // Top-level named network is stripped (warned) and replaced with SAM's bridge.
     expect(result.warnings.some((w) => w.field === 'networks')).toBe(true);

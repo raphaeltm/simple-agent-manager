@@ -37,29 +37,42 @@ This task implements combined idea `01KWHN2X97VG3DYEVWRPRVZ2K7` and supersedes c
 
 ## Implementation Checklist
 
-- [ ] Move this task file from `tasks/backlog/` to `tasks/active/` in the feature worktree and commit.
-- [ ] Replace the blanket VM-agent `validateNoComposeVolumes()` publish guard with validation that permits safe named volume mounts and rejects unsafe/unsupported forms.
-- [ ] Preserve non-retryable, clear publish errors for host bind mounts, Docker socket mounts, `tmpfs`, `volumes_from`, external volumes, custom drivers/options, anonymous volumes, and undeclared volume references.
-- [ ] Ensure the compose-publish release callback creates provider-backed volume records only after payload/artifact validation succeeds and only for safe declared volumes.
-- [ ] Rewrite or preserve compose-publish service volume mounts so deployment apply uses SAM provider-backed mount roots, not Docker-managed local volumes.
-- [ ] Keep signed `volumeMounts`, mount-before-verify, and mount guard behavior intact.
-- [ ] Update MCP tool definitions and `get_deployment_guide` so agents are guided to safe named volumes and still warned away from unsafe mount types.
-- [ ] Update public app-deployment docs to describe safe named Compose volumes through `build_and_publish` and the remaining unsupported mount types.
-- [ ] Add web API client types/functions for list/create/delete deployment volumes.
-- [ ] Add a Volumes surface to the deployment environment detail UI using existing production page/components, not a prototype route.
-- [ ] Display volume inventory fields: name, provider volume id, provider, location, size, status, attached server/node, Linux device when available, and created/updated timestamps.
-- [ ] Add create volume and delete detached volume actions with clear loading/error/destructive states.
-- [ ] Keep stop/start/delete environment copy consistent with the volume inventory.
-- [ ] Add or update Go tests for publish validation and `build_and_publish` job behavior with safe and unsafe Compose volumes.
-- [ ] Add API tests for compose-publish callback volume creation side effects, unsafe rejection, and no side effects on invalid submissions.
-- [ ] Add compose-publish apply transform tests proving safe named service volumes resolve to SAM mount roots.
-- [ ] Add web tests for API client behavior and volume UI states/actions.
+- [x] Move this task file from `tasks/backlog/` to `tasks/active/` in the feature worktree and commit.
+- [x] Replace the blanket VM-agent `validateNoComposeVolumes()` publish guard with validation that permits safe named volume mounts and rejects unsafe/unsupported forms.
+- [x] Preserve non-retryable, clear publish errors for host bind mounts, Docker socket mounts, `tmpfs`, `volumes_from`, external volumes, custom drivers/options, anonymous volumes, and undeclared volume references.
+- [x] Ensure the compose-publish release callback creates provider-backed volume records only after payload/artifact validation succeeds and only for safe declared volumes.
+- [x] Rewrite or preserve compose-publish service volume mounts so deployment apply uses SAM provider-backed mount roots, not Docker-managed local volumes.
+- [x] Keep signed `volumeMounts`, mount-before-verify, and mount guard behavior intact.
+- [x] Update MCP tool definitions and `get_deployment_guide` so agents are guided to safe named volumes and still warned away from unsafe mount types.
+- [x] Update public app-deployment docs to describe safe named Compose volumes through `build_and_publish` and the remaining unsupported mount types.
+- [x] Add web API client types/functions for list/create/delete deployment volumes.
+- [x] Add a Volumes surface to the deployment environment detail UI using existing production page/components, not a prototype route.
+- [x] Display volume inventory fields: name, provider volume id, provider, location, size, status, attached server/node, Linux device when available, and created/updated timestamps.
+- [x] Add create volume and delete detached volume actions with clear loading/error/destructive states.
+- [x] Keep stop/start/delete environment copy consistent with the volume inventory.
+- [x] Add or update Go tests for publish validation and `build_and_publish` job behavior with safe and unsafe Compose volumes.
+- [x] Add API tests for compose-publish callback volume creation side effects, unsafe rejection, and no side effects on invalid submissions.
+- [x] Add compose-publish apply transform tests proving safe named service volumes resolve to SAM mount roots.
+- [x] Add web tests for API client behavior and volume UI states/actions.
 - [ ] Add Playwright visual audit coverage for the deployment volumes UI on mobile and desktop with normal, empty, many, long text, and error scenarios.
-- [ ] Run local quality gates and focused test suites throughout implementation.
+- [x] Run local quality gates and focused test suites throughout implementation.
 - [ ] Run local specialist review: task-completion-validator, go-specialist, cloudflare-specialist, ui-ux-specialist, security-auditor, test-engineer, doc-sync-validator, constitution-validator.
 - [ ] Deploy to staging, delete/recreate nodes as required for vm-agent changes, and verify a real `build_and_publish` Compose app with a safe named volume.
 - [ ] Leave or clean up staging resources according to current staging-validation policy, reporting exact project/environment/volume/node evidence.
 - [ ] Archive the task after task-completion-validator passes.
+
+## Validation Notes
+
+- `pnpm --filter @simple-agent-manager/api test -- tests/unit/services/compose-publish-apply.test.ts tests/unit/routes/compose-publish-release-callback.test.ts` passed.
+- `pnpm --filter @simple-agent-manager/web test -- tests/unit/components/deployment-volumes-panel.test.tsx` passed.
+- `pnpm --filter @simple-agent-manager/api typecheck` passed.
+- `pnpm --filter @simple-agent-manager/web typecheck` passed.
+- `pnpm typecheck` passed.
+- `pnpm --filter @simple-agent-manager/api lint` passed with existing warnings.
+- `pnpm --filter @simple-agent-manager/web lint` passed with existing warnings after touched-file import sorting fixes.
+- `pnpm lint` passed.
+- `git diff --check` passed.
+- `go test ./packages/vm-agent/internal/publish` and `gofmt` are blocked in this workspace because `go` and `gofmt` are not installed.
 
 ## Acceptance Criteria
 

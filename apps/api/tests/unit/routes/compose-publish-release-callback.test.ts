@@ -173,7 +173,9 @@ vi.mock('../../../src/lib/ulid', () => ({
 
 vi.mock('../../../src/lib/logger', () => ({
   log: { debug: vi.fn(), error: vi.fn(), info: vi.fn(), warn: vi.fn() },
-  serializeError: vi.fn((err: unknown) => ({ error: err instanceof Error ? err.message : String(err) })),
+  serializeError: vi.fn((err: unknown) => ({
+    error: err instanceof Error ? err.message : String(err),
+  })),
 }));
 
 async function buildApp() {
@@ -471,6 +473,43 @@ volumes:
 
     expect(res.status).toBe(400);
     expect(inserted).toHaveLength(0);
+  });
+
+  it('does not create provider volumes when artifact validation fails', async () => {
+    const app = await buildApp();
+    const res = await request(
+      app,
+      'proj-1',
+      {
+        ...validSubmission,
+        composeYaml: `services:
+  web:
+    image: nginx:latest
+    volumes:
+      - data:/usr/share/nginx/html
+volumes:
+  data:
+`,
+        services: [
+          {
+            serviceName: 'web',
+            sourceRef: 'workspace-web',
+            localImageRef: 'workspace-web',
+            r2Key: 'compose-image-artifacts/proj-1/env-1/other-ws/upload-1/web.docker-save.tar',
+            sizeBytes: 42,
+            archiveSha256:
+              'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+            archiveType: 'docker-save',
+            mediaType: 'application/vnd.docker.image.rootfs.diff.tar',
+          },
+        ],
+      },
+      { R2: { head: vi.fn() } }
+    );
+
+    expect(res.status).toBe(400);
+    expect(inserted).toHaveLength(0);
+    expect(mockCreateMissingDeclaredVolumes).not.toHaveBeenCalled();
   });
 
   it('starts at version 1 when the environment has no prior releases', async () => {

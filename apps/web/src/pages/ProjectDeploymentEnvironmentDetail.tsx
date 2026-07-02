@@ -29,6 +29,7 @@ import {
   DeploymentMetricsPanel,
   type DeploymentMetricsState,
 } from '../components/deployments/DeploymentMetricsPanel';
+import { DeploymentVolumesPanel } from '../components/deployments/DeploymentVolumesPanel';
 import { useAgentProfiles } from '../hooks/useAgentProfiles';
 import { useToast } from '../hooks/useToast';
 import {
@@ -45,11 +46,12 @@ import {
 } from '../lib/api';
 import { useProjectContext } from './ProjectContext';
 
-type TabKey = 'overview' | 'domains' | 'logs' | 'config' | 'policy' | 'node';
+type TabKey = 'overview' | 'domains' | 'volumes' | 'logs' | 'config' | 'policy' | 'node';
 
 const TABS: Array<{ key: TabKey; label: string }> = [
   { key: 'overview', label: 'Overview' },
   { key: 'domains', label: 'Domains' },
+  { key: 'volumes', label: 'Volumes' },
   { key: 'logs', label: 'Logs' },
   { key: 'config', label: 'Configuration' },
   { key: 'policy', label: 'Policy' },
@@ -499,6 +501,15 @@ export function ProjectDeploymentEnvironmentDetail() {
 
       {activeTab === 'domains' && (
         <DeploymentCustomDomainsPanel projectId={projectId} environmentId={env.id} />
+      )}
+
+      {activeTab === 'volumes' && (
+        <DeploymentVolumesPanel
+          projectId={projectId}
+          environmentId={env.id}
+          defaultLocation={env.location ?? env.node?.vmLocation ?? ''}
+          hasLinkedNode={Boolean(env.nodeId)}
+        />
       )}
 
       {activeTab === 'config' && (

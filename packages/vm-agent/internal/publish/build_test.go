@@ -56,7 +56,28 @@ func TestValidateNoSecretRefsInBuildFieldsAllowsDeployOnlyReference(t *testing.T
 	}
 }
 
-func TestValidateNoComposeVolumesRejectsTopLevelAndServiceVolumes(t *testing.T) {
+func TestValidateComposeVolumeSafetyAllowsDeclaredNamedVolumes(t *testing.T) {
+	cfg := &composeConfig{
+		Services: map[string]composeConfigService{
+			"api": {
+				Volumes: json.RawMessage(`[
+					{"type":"volume","source":"appdata","target":"/data"},
+					{"source":"cache","target":"/cache","read_only":true}
+				]`),
+			},
+		},
+		Volumes: map[string]json.RawMessage{
+			"appdata": json.RawMessage(`{"name":"demo_appdata"}`),
+			"cache":   json.RawMessage(`{"x-sam-size-hint-mb":2048}`),
+		},
+	}
+
+	if err := validateComposeVolumeSafety(cfg); err != nil {
+		t.Fatalf("declared named volumes should be allowed: %v", err)
+	}
+}
+
+func TestValidateComposeVolumeSafetyRejectsUnsupportedVolumeFeatures(t *testing.T) {
 	cfg := &composeConfig{
 		Services: map[string]composeConfigService{
 			"api": {
@@ -73,25 +94,27 @@ func TestValidateNoComposeVolumesRejectsTopLevelAndServiceVolumes(t *testing.T) 
 			},
 		},
 		Volumes: map[string]json.RawMessage{
-			"appdata": json.RawMessage(`{}`),
+			"appdata": json.RawMessage(`{"external":true}`),
+			"cache":   json.RawMessage(`{"driver_opts":{"type":"none","device":"/","o":"bind"}}`),
+			"BadName": json.RawMessage(`{}`),
 		},
 	}
 
-	err := validateNoComposeVolumes(cfg)
+	err := validateComposeVolumeSafety(cfg)
 	if err == nil {
-		t.Fatal("expected compose volumes to be rejected")
+		t.Fatal("expected unsupported compose volume features to be rejected")
 	}
 	if !IsUnsupportedComposeVolumesError(err) {
 		t.Fatalf("expected unsupported compose volumes error, got %T: %v", err, err)
 	}
 	for _, want := range []string{
-		"build_and_publish does not support Docker Compose service volume mounts, service volumes_from, service tmpfs, or top-level volumes yet",
-		"api:appdata",
-		"api:legacydata",
+		"build_and_publish supports safe named Docker Compose volumes",
+		"top-level:appdata.external",
+		"top-level:cache.driver_opts",
+		"top-level:BadName: invalid volume name",
+		"api:legacydata (undeclared named volume)",
 		"api:/tmp/uploads",
 		"worker:anonymous at /cache",
-		"top-level:appdata",
-		"Docker-managed local volumes",
 		"SAM provider-backed deployment volumes",
 	} {
 		if !strings.Contains(err.Error(), want) {
@@ -100,7 +123,7 @@ func TestValidateNoComposeVolumesRejectsTopLevelAndServiceVolumes(t *testing.T) 
 	}
 }
 
-func TestValidateNoComposeVolumesRejectsBindAndTmpfsServiceMounts(t *testing.T) {
+func TestValidateComposeVolumeSafetyRejectsBindAndTmpfsServiceMounts(t *testing.T) {
 	cfg := &composeConfig{Services: map[string]composeConfigService{
 		"api": {
 			Volumes: json.RawMessage(`[
@@ -110,7 +133,7 @@ func TestValidateNoComposeVolumesRejectsBindAndTmpfsServiceMounts(t *testing.T) 
 		},
 	}}
 
-	err := validateNoComposeVolumes(cfg)
+	err := validateComposeVolumeSafety(cfg)
 	if err == nil {
 		t.Fatal("expected service mounts to be rejected")
 	}
@@ -121,25 +144,33 @@ func TestValidateNoComposeVolumesRejectsBindAndTmpfsServiceMounts(t *testing.T) 
 	}
 }
 
-func TestValidateNoComposeVolumesRejectsStringVolumeEntries(t *testing.T) {
-	cfg := &composeConfig{Services: map[string]composeConfigService{
-		"api": {
-			Volumes: json.RawMessage(`["appdata:/data","/cache","/tmp/uploads:/uploads"]`),
+func TestValidateComposeVolumeSafetyRejectsUnsafeStringVolumeEntries(t *testing.T) {
+	cfg := &composeConfig{
+		Services: map[string]composeConfigService{
+			"api": {
+				Volumes: json.RawMessage(`["appdata:/data","/cache","/tmp/uploads:/uploads","other:/other"]`),
+			},
 		},
-	}}
-
-	err := validateNoComposeVolumes(cfg)
-	if err == nil {
-		t.Fatal("expected string compose volume entries to be rejected")
+		Volumes: map[string]json.RawMessage{
+			"appdata": json.RawMessage(`{}`),
+		},
 	}
-	for _, want := range []string{"api:appdata", "api:anonymous at /cache", "api:/tmp/uploads"} {
+
+	err := validateComposeVolumeSafety(cfg)
+	if err == nil {
+		t.Fatal("expected unsafe string compose volume entries to be rejected")
+	}
+	for _, want := range []string{"api:anonymous at /cache", "api:/tmp/uploads", "api:other (undeclared named volume)"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("expected error to contain %q, got: %v", want, err)
 		}
 	}
+	if strings.Contains(err.Error(), "api:appdata") {
+		t.Fatalf("declared named volume should be allowed, got: %v", err)
+	}
 }
 
-func TestValidateNoComposeVolumesRejectsVolumesFromAndServiceTmpfs(t *testing.T) {
+func TestValidateComposeVolumeSafetyRejectsVolumesFromAndServiceTmpfs(t *testing.T) {
 	cfg := &composeConfig{Services: map[string]composeConfigService{
 		"api": {
 			VolumesFrom: json.RawMessage(`["db:ro"]`),
@@ -151,7 +182,7 @@ func TestValidateNoComposeVolumesRejectsVolumesFromAndServiceTmpfs(t *testing.T)
 		},
 	}}
 
-	err := validateNoComposeVolumes(cfg)
+	err := validateComposeVolumeSafety(cfg)
 	if err == nil {
 		t.Fatal("expected service volumes_from/tmpfs to be rejected")
 	}
@@ -169,14 +200,14 @@ func TestValidateNoComposeVolumesRejectsVolumesFromAndServiceTmpfs(t *testing.T)
 	}
 }
 
-func TestBuildRejectsComposeVolumesBeforeBuild(t *testing.T) {
+func TestBuildRejectsUnsafeComposeVolumesBeforeBuild(t *testing.T) {
 	dir := t.TempDir()
 	buildMarker := filepath.Join(dir, "build-called")
 	compose := filepath.Join(dir, "fake-compose")
 	script := strings.Join([]string{
 		"#!/bin/sh",
 		"if [ \"$*\" = \"config --no-interpolate --format json\" ]; then",
-		"  printf '%s' '{\"name\":\"demo\",\"services\":{\"api\":{\"image\":\"demo-api\",\"build\":{\"context\":\".\"},\"volumes\":[{\"type\":\"volume\",\"source\":\"appdata\",\"target\":\"/data\"}]}},\"volumes\":{\"appdata\":{}}}'",
+		"  printf '%s' '{\"name\":\"demo\",\"services\":{\"api\":{\"image\":\"demo-api\",\"build\":{\"context\":\".\"},\"volumes\":[{\"type\":\"bind\",\"source\":\"/tmp/uploads\",\"target\":\"/uploads\"}]}},\"volumes\":{}}'",
 		"  exit 0",
 		"fi",
 		"if [ \"$1\" = \"build\" ]; then",
@@ -201,6 +232,43 @@ func TestBuildRejectsComposeVolumesBeforeBuild(t *testing.T) {
 	}
 	if _, statErr := os.Stat(buildMarker); !os.IsNotExist(statErr) {
 		t.Fatalf("compose build should not run after volume validation failure, stat err: %v", statErr)
+	}
+}
+
+func TestBuildAllowsSafeComposeVolumesBeforeBuild(t *testing.T) {
+	dir := t.TempDir()
+	buildMarker := filepath.Join(dir, "build-called")
+	compose := filepath.Join(dir, "fake-compose")
+	script := strings.Join([]string{
+		"#!/bin/sh",
+		"if [ \"$*\" = \"config --no-interpolate --format json\" ]; then",
+		"  printf '%s' '{\"name\":\"demo\",\"services\":{\"api\":{\"image\":\"demo-api\",\"build\":{\"context\":\".\"},\"volumes\":[{\"type\":\"volume\",\"source\":\"appdata\",\"target\":\"/data\"}]}},\"volumes\":{\"appdata\":{\"name\":\"demo_appdata\"}}}'",
+		"  exit 0",
+		"fi",
+		"if [ \"$1\" = \"build\" ]; then",
+		"  touch '" + buildMarker + "'",
+		"  exit 0",
+		"fi",
+		"if [ \"$*\" = \"config --format json\" ]; then",
+		"  printf '%s' '{\"name\":\"demo\",\"services\":{\"api\":{\"image\":\"demo-api\",\"build\":{\"context\":\".\"}}}}'",
+		"  exit 0",
+		"fi",
+		"if [ \"$*\" = \"config --no-interpolate\" ]; then",
+		"  printf '%s' 'services:\\n  api:\\n    image: demo-api\\n    volumes:\\n      - appdata:/data\\nvolumes:\\n  appdata:\\n'",
+		"  exit 0",
+		"fi",
+		"printf '%s' '{}'",
+	}, "\n")
+	if err := os.WriteFile(compose, []byte(script), 0o700); err != nil {
+		t.Fatalf("write fake compose: %v", err)
+	}
+
+	_, _ = Build(context.Background(), BuildOptions{
+		WorkspaceDir: dir,
+		ComposeCmd:   compose,
+	})
+	if _, statErr := os.Stat(buildMarker); statErr != nil {
+		t.Fatalf("compose build should run after safe named volume validation, stat err: %v", statErr)
 	}
 }
 

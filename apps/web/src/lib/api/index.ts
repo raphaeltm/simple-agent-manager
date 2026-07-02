@@ -144,6 +144,7 @@ export {
 export { getGcpOAuthResult, listGcpProjects, runGcpSetup, verifyGcpSetup } from './credentials';
 export type {
   CreateDeploymentCustomDomainRequest,
+  CreateDeploymentVolumeRequest,
   DeleteDeploymentEnvironmentResponse,
   DeploymentAgentPolicy,
   DeploymentCustomDomain,
@@ -159,17 +160,22 @@ export type {
   DeploymentPublicRoute,
   DeploymentReleaseSummary,
   DeploymentSecretEntry,
+  DeploymentVolume,
   ProjectDeploymentGcpResponse,
   UpsertDeploymentEnvironmentConfigVarRequest,
 } from './deployment';
 export {
+  attachDeploymentEnvironmentVolumes,
   createDeploymentCustomDomain,
   createDeploymentEnvironment,
+  createDeploymentEnvironmentVolume,
   deleteDeploymentCustomDomain,
   deleteDeploymentEnvironment,
   deleteDeploymentEnvironmentConfigVar,
+  deleteDeploymentEnvironmentVolume,
   deleteDeploymentSecret,
   deleteProjectDeploymentGcp,
+  detachDeploymentEnvironmentVolumes,
   getDeploymentEnvironmentConfig,
   getDeploymentEnvironmentLogs,
   getDeploymentEnvironmentMetrics,
@@ -178,6 +184,7 @@ export {
   listDeploymentCustomDomains,
   listDeploymentEnvironmentContainers,
   listDeploymentEnvironments,
+  listDeploymentEnvironmentVolumes,
   listDeploymentPublicRoutes,
   listDeploymentSecrets,
   listGcpProjectsForDeploy,
