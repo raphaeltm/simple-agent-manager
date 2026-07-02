@@ -388,7 +388,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
           a grey Archive (idle), so the control never disappears even when the
           `agentActivity` signal is stale. Archive is only wired for
           conversation-mode sessions the caller can close. */}
-      {isActive && (onCloseConversation || lc.agentActivity !== 'idle') && (
+      {isActive && ((lc.taskEmbed?.taskMode === 'conversation' && onCloseConversation) || lc.agentActivity !== 'idle') && (
         <CompletionDock
           working={lc.agentActivity !== 'idle'}
           hasPlan={!!planItem}

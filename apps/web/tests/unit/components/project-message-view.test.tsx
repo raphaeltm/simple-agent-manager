@@ -1427,8 +1427,8 @@ describe('ProjectMessageView — cancel button', () => {
       expect(screen.getByText('Working on it')).toBeTruthy();
     });
 
-    // Initially no "Agent is working" indicator
-    expect(screen.queryByText('Agent is working...')).toBeNull();
+    // Initially no working morph — the dock's Interrupt control is absent
+    expect(screen.queryByRole('button', { name: 'Interrupt agent' })).toBeNull();
 
     // Inject an assistant message via WebSocket to trigger 'responding' state
     expect(capturedWsOnMessage).toBeTruthy();
@@ -1436,14 +1436,14 @@ describe('ProjectMessageView — cancel button', () => {
       capturedWsOnMessage!(makeMessage('msg-2', 'session-1', 'Still working'));
     });
 
-    // Now the "Agent is working" indicator should appear with a Cancel button
+    // Now the dock morphs to the working state — a red Interrupt control appears
     await waitFor(() => {
-      expect(screen.getByText('Agent is working...')).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'Interrupt agent' })).toBeTruthy();
     });
-    const cancelButton = screen.getByRole('button', { name: /cancel/i });
+    const cancelButton = screen.getByRole('button', { name: 'Interrupt agent' });
     expect(cancelButton).toBeTruthy();
 
-    // Click cancel
+    // Click interrupt
     await act(async () => {
       fireEvent.click(cancelButton);
     });
@@ -1451,9 +1451,9 @@ describe('ProjectMessageView — cancel button', () => {
     // Verify cancelAgentPrompt was called with the right args
     expect(mocks.cancelAgentPrompt).toHaveBeenCalledWith('proj-1', 'session-1');
 
-    // After successful cancel, the indicator should disappear (agent goes idle)
+    // After successful cancel, the working morph disappears (agent goes idle)
     await waitFor(() => {
-      expect(screen.queryByText('Agent is working...')).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Interrupt agent' })).toBeNull();
     });
   });
 });
@@ -1470,7 +1470,7 @@ describe('ProjectMessageView — inline idle indicator', () => {
     vi.useRealTimers();
   });
 
-  it('shows "End session" for idle conversation-mode session with onCloseConversation', async () => {
+  it('shows Archive control for idle conversation-mode session with onCloseConversation', async () => {
     const session = {
       ...makeSession('sess-idle', 'active'),
       isIdle: true,
@@ -1501,13 +1501,15 @@ describe('ProjectMessageView — inline idle indicator', () => {
       />,
     );
 
+    // Idle conversation-mode dock morphs to the grey Archive control
     await waitFor(() => {
-      expect(screen.getByText('Agent idle')).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'Archive conversation' })).toBeTruthy();
     });
-    expect(screen.getByText('End session')).toBeTruthy();
+    // Working morph is absent while idle
+    expect(screen.queryByRole('button', { name: 'Interrupt agent' })).toBeNull();
   });
 
-  it('does NOT show "End session" for idle task-mode session', async () => {
+  it('does NOT show Archive control for idle task-mode session', async () => {
     const session = {
       ...makeSession('sess-task', 'active'),
       isIdle: true,
@@ -1542,12 +1544,12 @@ describe('ProjectMessageView — inline idle indicator', () => {
       expect(screen.getByText('Session sess-task')).toBeTruthy();
     });
 
-    // The idle indicator should NOT appear for task-mode
-    expect(screen.queryByText('End session')).toBeNull();
-    expect(screen.queryByText('Agent idle')).toBeNull();
+    // The dock's Archive control must never appear for task-mode idle sessions
+    expect(screen.queryByRole('button', { name: 'Archive conversation' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Interrupt agent' })).toBeNull();
   });
 
-  it('does NOT show "End session" for active conversation-mode session', async () => {
+  it('shows Archive control for active conversation-mode session (always-mounted morph)', async () => {
     const session = {
       ...makeSession('sess-active', 'active'),
       isIdle: false,
@@ -1581,9 +1583,10 @@ describe('ProjectMessageView — inline idle indicator', () => {
       expect(screen.getByText('Session sess-active')).toBeTruthy();
     });
 
-    // Active session should NOT show the idle indicator
-    expect(screen.queryByText('End session')).toBeNull();
-    expect(screen.queryByText('Agent idle')).toBeNull();
+    // The dock stays mounted for conversation-mode while active; with the agent
+    // idle it shows the grey Archive morph (not the working Interrupt).
+    expect(screen.getByRole('button', { name: 'Archive conversation' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Interrupt agent' })).toBeNull();
   });
 
   it('renders error banner with glass-chrome styling when task has errorMessage', async () => {

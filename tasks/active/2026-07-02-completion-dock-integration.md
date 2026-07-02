@@ -76,43 +76,49 @@ no-op on this branch. The prototype branch is simply abandoned after merge.
 
 ## Implementation Checklist
 
-- [ ] Create `apps/web/src/components/project-message-view/CompletionDock.tsx` (production component)
-  - [ ] Port `useEased`, `useWidth`, `Ring` helpers (or extract into the file)
-  - [ ] Port `BumpBar` geometry (bump path + evenodd hole + fillet tangent-blend)
-  - [ ] Props: `working: boolean`, `hasPlan: boolean`, `onInterrupt`, `onArchive`,
+- [x] Create `apps/web/src/components/project-message-view/CompletionDock.tsx` (production component)
+  - [x] Port `useEased`, `useWidth`, `Ring` helpers (or extract into the file)
+  - [x] Port `BumpBar` geometry (bump path + evenodd hole + fillet tangent-blend)
+  - [x] Props: `working: boolean`, `hasPlan: boolean`, `onInterrupt`, `onArchive`,
         `onOpenPlan`, `archiving`, `archiveDisabled`, `elapsed` slot / `promptStartedAt`
-  - [ ] Center button: red Interrupt (Square/Pause) + spinner Ring while working;
+  - [x] Center button: red Interrupt (Square/Pause) + spinner Ring while working;
         grey Archive while idle. NO "Agent is working..." text.
-  - [ ] Bump domed while working, flat while idle; gated by `prefers-reduced-motion`
-  - [ ] Token-driven fill/stroke only (`var(--sam-glass-bg-chrome)`,
+  - [x] Bump domed while working, flat while idle; gated by `prefers-reduced-motion`
+  - [x] Token-driven fill/stroke only (`var(--sam-glass-bg-chrome)`,
         `var(--sam-glass-border-color)`, `var(--sam-color-danger)`, etc.) — no hardcoded colors
-- [ ] Wire `CompletionDock` into `ProjectMessageView`
-  - [ ] Remove idle strip (385-403) and working strip (405-426)
-  - [ ] Render `CompletionDock` ALWAYS while `isActive` (single mount point)
-  - [ ] `working = lc.agentActivity !== 'idle'`
-  - [ ] Interrupt → `lc.handleCancelPrompt`
-  - [ ] Archive → `onCloseConversation`; disabled/label via `closingConversation`; show `closeError`
-  - [ ] Plan pill → `setShowPlanModal(true)` when `planItem` exists and working
-  - [ ] Keep `ElapsedTime` using `lc.promptStartedAt`
-  - [ ] Keep `PlanModal` (427-433) and `FollowUpInput` (436-453) unchanged
-- [ ] Behavioral tests: render CompletionDock, assert Interrupt fires while working,
+- [x] Wire `CompletionDock` into `ProjectMessageView`
+  - [x] Remove idle strip (385-403) and working strip (405-426)
+  - [x] Render `CompletionDock` while `isActive` (single mount point). NOTE: gated
+        `(taskEmbed?.taskMode === 'conversation' && onCloseConversation) || agentActivity !== 'idle'`
+        — conversation-mode gets the always-mounted morph; task-mode keeps its original
+        working-only behavior (idle task-mode shows nothing, matching the original strip).
+  - [x] `working = lc.agentActivity !== 'idle'`
+  - [x] Interrupt → `lc.handleCancelPrompt`
+  - [x] Archive → `onCloseConversation`; disabled/label via `closingConversation`; show `closeError`
+  - [x] Plan pill → `setShowPlanModal(true)` when `planItem` exists and working
+  - [x] Keep `ElapsedTime` using `lc.promptStartedAt`
+  - [x] Keep `PlanModal` (427-433) and `FollowUpInput` (436-453) unchanged
+- [x] Behavioral tests: render CompletionDock, assert Interrupt fires while working,
       Archive fires while idle, plan pill opens modal, reduced-motion path, disabled archive
-- [ ] Playwright visual audit: 375x667 + 1280x800, dark + light, working + idle, assert no
+- [x] Playwright visual audit: 375x667 + 1280x800, dark + light, working + idle, assert no
       horizontal overflow (`scrollWidth <= innerWidth`)
 
 ## Acceptance Criteria
 
-- [ ] The dock is a single component always mounted while `isActive` — Interrupt/Archive never
-      disappears when `agentActivity` is stale (covered by a render test that mounts with
-      `agentActivity='idle'` yet `isActive=true` and asserts the Archive control is present).
-- [ ] Working state shows a red Interrupt with spinner ring and NO "Agent is working..." text.
-- [ ] Idle state shows a grey Archive button that calls `onCloseConversation`.
-- [ ] Plan pill appears only while working and a plan exists; clicking opens `PlanModal`.
-- [ ] Renders correctly in dark (`data-ui-theme=sam`) and light (`sam-light`) — Playwright evidence.
-- [ ] No horizontal overflow at 375px or 1280px — Playwright assertion.
-- [ ] `agentActivity` signal path and task-mode behavior are untouched; agent never calls
+- [x] The dock is a single component that stays mounted for conversation-mode while `isActive` —
+      Interrupt/Archive never disappears when `agentActivity` is stale (covered by a render test
+      that mounts a conversation-mode session with `agentActivity='idle'` yet `isActive=true` and
+      asserts the Archive control is present). Task-mode intentionally retains original
+      working-only mounting (see gating note above) to satisfy the "do NOT touch task-mode
+      behavior" constraint.
+- [x] Working state shows a red Interrupt with spinner ring and NO "Agent is working..." text.
+- [x] Idle state shows a grey Archive button that calls `onCloseConversation`.
+- [x] Plan pill appears only while working and a plan exists; clicking opens `PlanModal`.
+- [x] Renders correctly in dark (`data-ui-theme=sam`) and light (`sam-light`) — Playwright evidence.
+- [x] No horizontal overflow at 375px or 1280px — Playwright assertion.
+- [x] `agentActivity` signal path and task-mode behavior are untouched; agent never calls
       `complete_task`.
-- [ ] `pnpm lint && pnpm typecheck && pnpm test && pnpm build` all pass.
+- [x] `pnpm lint && pnpm typecheck && pnpm test && pnpm build` all pass.
 
 ## References
 
