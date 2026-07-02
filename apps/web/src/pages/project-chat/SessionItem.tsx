@@ -2,7 +2,6 @@ import {
   AlertCircle,
   CheckCircle2,
   CirclePause,
-  GitFork,
   HelpCircle,
   ListTodo,
   Loader2,
@@ -18,7 +17,6 @@ import {
   getAttentionState,
   getLastActivity,
   getSessionMode,
-  getSessionState,
 } from '../../lib/chat-session-utils';
 import { stripMarkdown } from '../../lib/text-utils';
 
@@ -46,7 +44,6 @@ export function SessionItem({
   session,
   isSelected,
   onSelect,
-  onFork,
   variant = 'default',
   badge,
   progressBar,
@@ -58,7 +55,6 @@ export function SessionItem({
   session: ChatSessionResponse;
   isSelected: boolean;
   onSelect: (id: string) => void;
-  onFork?: (session: ChatSessionResponse) => void;
   variant?: SessionItemVariant;
   badge?: ReactNode;
   progressBar?: ReactNode;
@@ -67,10 +63,8 @@ export function SessionItem({
   ariaLabel?: string;
   lineageText?: string;
 }) {
-  const state = getSessionState(session);
   const attentionState = getAttentionState(session);
   const mode = getSessionMode(session);
-  const canFork = state === 'terminated' && !!session.task?.id;
 
   const isChild = variant === 'group-child';
   const isGrouped = variant !== 'default';
@@ -177,18 +171,6 @@ export function SessionItem({
         </div>
         {progressBar}
       </button>
-      {canFork && onFork && (
-        <button
-          type="button"
-          onClick={(e) => { e.stopPropagation(); onFork(session); }}
-          className="mt-1 flex items-center gap-1 text-xs text-accent bg-transparent border border-transparent rounded-sm cursor-pointer py-0.5 px-1.5 hover:bg-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent transition-colors"
-          style={{ marginLeft: 20 }}
-          title="Continue from this session"
-        >
-          <GitFork size={12} />
-          Continue
-        </button>
-      )}
     </div>
   );
 }

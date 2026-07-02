@@ -21,7 +21,6 @@ export function SessionTreeItem({
   session,
   selectedSessionId,
   onSelect,
-  onFork,
   taskInfoMap,
   onShowHierarchy,
   lineageText,
@@ -29,7 +28,6 @@ export function SessionTreeItem({
   session: ChatSessionListItem;
   selectedSessionId: string | null;
   onSelect: (id: string) => void;
-  onFork?: (session: ChatSessionResponse) => void;
   taskInfoMap: Map<string, TaskInfo>;
   onShowHierarchy?: (taskId: string) => void;
   lineageText?: string;
@@ -82,7 +80,6 @@ export function SessionTreeItem({
         session={enrichedSession}
         isSelected={isSelected}
         onSelect={onSelect}
-        onFork={onFork}
         variant="default"
         badge={badge}
         blockedBadge={taskInfo?.blocked}
