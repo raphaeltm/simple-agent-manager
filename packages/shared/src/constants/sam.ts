@@ -1,6 +1,6 @@
 /**
  * SAM Agent constants — configurable via env vars with defaults.
- * See specs/sam-agent/plan.md for architecture details.
+ * See specs/031-sam-agent/plan.md for architecture details.
  */
 
 /** Default LLM model for SAM agent loop. */

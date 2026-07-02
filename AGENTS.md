@@ -37,14 +37,6 @@ Skills are invoked with `$skill-name` (Codex) or dispatched as subagents (Claude
 - `$changelog` — Recent feature changes and history
 - `$env-reference` — Full environment variable reference
 
-### Strategy Skills
-
-- `$business-strategy` — Market sizing, pricing, business model, GTM
-- `$competitive-research` — Competitor profiles, feature matrices, SWOT
-- `$content-create` — Social posts, blog outlines, changelogs, launch copy
-- `$engineering-strategy` — Roadmap, tech radar, tech debt, build-vs-buy
-- `$marketing-strategy` — Positioning, messaging, gap analysis, channel strategy
-
 ### Task Execution
 
 - `$do` — End-to-end task executor: research → plan → implement → review → staging → PR

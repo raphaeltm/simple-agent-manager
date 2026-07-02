@@ -15,7 +15,7 @@ Read the full workflow from `.codex/prompts/prioritize.md` and execute it.
    code on main over the board.
 2. **Step 1 — Gather signal** — four tiers, highest authority first: human intent (policies,
    knowledge, in-session asks) → production reality (incidents, CI, open PRs) → curated backlog
-   (ideas, `tasks/backlog/`) → strategic direction (`strategy/`, CLAUDE.md Recent Changes).
+   (ideas, `tasks/backlog/`) → strategic direction (CLAUDE.md Recent Changes, SAM project knowledge).
 3. **Step 2 — Rank survivors** — impact (×multiplier for security/data-integrity), evidence
    quality, effort/blast radius, reversibility, strategic fit, in-flight duplication. Security/
    correctness bugs and anything broken in prod jump the queue.

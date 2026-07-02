@@ -56,7 +56,7 @@ Pull candidates from all four tiers. Higher tiers override lower ones on conflic
 2. **Production reality.** Incidents, crashes, error spikes, analytics anomalies; CI/staging health
    (`gh run list`); open PRs (`gh pr list`) and failing checks; anything broken for real users.
 3. **Curated backlog.** SAM `list_ideas`; `tasks/backlog/*.md`. (These feed Step 0 for reconciliation.)
-4. **Strategic direction.** `strategy/` docs; CLAUDE.md "Recent Changes"; roadmap/engineering-strategy.
+4. **Strategic direction.** CLAUDE.md "Recent Changes" and SAM project knowledge/ideas (strategy docs are intentionally not kept in this public repo).
 
 ---
 

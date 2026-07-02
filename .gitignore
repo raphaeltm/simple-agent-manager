@@ -58,6 +58,17 @@ pnpm-debug.log*
 # Playwright audit screenshots write under apps/web cwd, not the repo root
 **/.codex/tmp/
 
+# Ephemeral agent scratch space — screenshots, debug dumps, downloads, notes.
+# Anything that should NOT be committed goes in .tmp/ (see .tmp/README.md).
+.tmp/
+!.tmp/README.md
+
+# Playwright MCP session artifacts (page snapshots, login scripts)
+.playwright-mcp/
+
+# SAM library downloads (download_library_file MCP tool target — canonical copies live in the platform library)
+.library/
+
 # /do workflow state (ephemeral, per-session)
 .do-state.md
 

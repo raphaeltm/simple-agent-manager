@@ -21,7 +21,7 @@
  * On transient failure: retry with exponential backoff (up to max retries).
  * On permanent failure: transition task to failed, clean up resources.
  *
- * See: specs/tdf-2-orchestration-engine/ for full design.
+ * See: specs/032-tdf-2-orchestration-engine/ for full design.
  */
 import type { TaskExecutionStep } from '@simple-agent-manager/shared';
 import {

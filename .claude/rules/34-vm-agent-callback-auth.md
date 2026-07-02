@@ -4,7 +4,7 @@
 
 `projectsRoutes` applies `requireAuth()` + `requireApproved()` middleware via `use('/*', ...)`. This middleware validates **BetterAuth session cookies** — it does NOT recognize callback JWT Bearer tokens. When a VM agent route is placed inside `projectsRoutes` (or any subrouter mounted under it), every VM agent request gets a silent 401 because the VM agent authenticates with a callback JWT, not a session cookie.
 
-This is the Hono middleware scoping leak described in `.claude/rules/06-api-patterns.md`, applied specifically to VM agent → API callbacks.
+This is the Hono middleware scoping leak described in `.claude/rules/06-technical-patterns.md`, applied specifically to VM agent → API callbacks.
 
 ## Incident History
 
