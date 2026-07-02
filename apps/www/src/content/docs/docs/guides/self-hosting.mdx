@@ -59,6 +59,8 @@ Set **Zone Resources** to your specific domain and **Account Resources** to your
 
 The default deploy configures AI Gateway and writes Analytics Engine data, so keep the **AI Gateway** permission and enable **Analytics Engine** even if every user brings their own model keys. The current API Worker config also includes the experimental Sandbox binding, so **Containers: Edit** is required for the default Worker deploy. The **Account → SSL and Certificates → Edit** permission is required for issuing per-node Origin CA certificates used for VM-agent TLS — without it, new nodes cannot obtain a TLS certificate and will fail to boot.
 
+**Optional — SAM-hosted repositories (experimental):** SAM can create and host Git repositories for projects directly on [Cloudflare Artifacts](https://developers.cloudflare.com/artifacts/) (currently in beta), letting users start a project without connecting GitHub. If your Cloudflare account has Artifacts access, add an **Account → Artifacts → Edit** permission to the token. The deploy **auto-detects** whether the token can reach the Artifacts REST API and enables the SAM-hosted project option only when it can — so it is safe to add the permission if it is available, or omit it entirely with no effect. To force the behavior regardless of detection, set the `ARTIFACTS_BINDING_ENABLED` GitHub Actions **variable** to `true` or `false`.
+
 Because the token includes **Workers R2 Storage** access, Cloudflare's final creation screen shows **both** the API token **and** a set of R2 S3 keys (Access Key ID + Secret Access Key) together. You do **not** need to create a separate R2 API token. Copy all of the values before leaving the page:
 
 - `CF_API_TOKEN` — the API token itself
