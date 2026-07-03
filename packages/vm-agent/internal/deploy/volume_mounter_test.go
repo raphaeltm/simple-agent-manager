@@ -10,12 +10,14 @@ import (
 	"testing"
 )
 
+type cmdResponse struct {
+	out string
+	err error
+}
+
 type fakeCommandRunner struct {
-	responses map[string]struct {
-		out string
-		err error
-	}
-	calls []string
+	responses map[string]cmdResponse
+	calls     []string
 }
 
 func (f *fakeCommandRunner) CombinedOutput(_ context.Context, name string, args ...string) ([]byte, error) {
@@ -46,29 +48,55 @@ func (fstabUUIDRunner) CombinedOutput(_ context.Context, name string, args ...st
 	return nil, nil
 }
 
-func TestRealVolumeMounter_FormatOnlyIfEmpty(t *testing.T) {
+// writeFakeDevice creates a fake block-device file and returns its path.
+func writeFakeDevice(t *testing.T) string {
+	t.Helper()
 	device := filepath.Join(t.TempDir(), "vol")
 	if err := os.WriteFile(device, []byte("block"), 0644); err != nil {
 		t.Fatalf("write fake device: %v", err)
 	}
-	fstab := filepath.Join(t.TempDir(), "fstab")
-	runner := &fakeCommandRunner{responses: map[string]struct {
-		out string
-		err error
-	}{
-		"blkid " + device:                  {err: errors.New("no filesystem")},
-		"wipefs -n " + device:              {},
+	return device
+}
+
+// newAlreadyMountedExt4Runner returns a runner simulating a formatted ext4
+// device whose mount root is already mounted (mountpoint -q succeeds).
+func newAlreadyMountedExt4Runner(device, mountRoot string) *fakeCommandRunner {
+	return &fakeCommandRunner{responses: map[string]cmdResponse{
+		"blkid " + device:                  {out: device + ": UUID=\"uuid-123\" TYPE=\"ext4\"\n"},
+		"mountpoint -q " + mountRoot:       {},
 		"blkid -s UUID -o value " + device: {out: "uuid-123\n"},
 	}}
+}
+
+// mountFormattedHetznerVolume runs MountVolumes for a pre-formatted hetzner
+// volume and fails the test on error.
+func mountFormattedHetznerVolume(t *testing.T, runner *fakeCommandRunner, name, device, mountRoot string) {
+	t.Helper()
+	mounter := &RealVolumeMounter{runner: runner, fstabPath: filepath.Join(t.TempDir(), "fstab")}
+	err := mounter.MountVolumes(context.Background(), []VolumeMount{{
+		Name:             name,
+		MountRoot:        mountRoot,
+		ProviderVolumeID: "vol-formatted",
+		ProviderName:     "hetzner",
+		LinuxDevice:      device,
+		FSFormat:         "ext4",
+	}})
+	if err != nil {
+		t.Fatalf("MountVolumes: %v", err)
+	}
+}
+
+func TestRealVolumeMounter_FormatOnlyIfEmpty(t *testing.T) {
+	device := writeFakeDevice(t)
+	fstab := filepath.Join(t.TempDir(), "fstab")
 	mountRoot := filepath.Join(t.TempDir(), "mnt")
-	runner.responses["mountpoint -q "+mountRoot] = struct {
-		out string
-		err error
-	}{err: errors.New("not mounted")}
-	runner.responses["mount "+device+" "+mountRoot] = struct {
-		out string
-		err error
-	}{}
+	runner := &fakeCommandRunner{responses: map[string]cmdResponse{
+		"blkid " + device:                   {err: errors.New("no filesystem")},
+		"wipefs -n " + device:               {},
+		"blkid -s UUID -o value " + device:  {out: "uuid-123\n"},
+		"mountpoint -q " + mountRoot:        {err: errors.New("not mounted")},
+		"mount " + device + " " + mountRoot: {},
+	}}
 
 	mounter := &RealVolumeMounter{runner: runner, fstabPath: fstab}
 	err := mounter.MountVolumes(context.Background(), []VolumeMount{{
@@ -88,48 +116,21 @@ func TestRealVolumeMounter_FormatOnlyIfEmpty(t *testing.T) {
 }
 
 func TestRealVolumeMounter_DoesNotFormatExistingFilesystem(t *testing.T) {
-	device := filepath.Join(t.TempDir(), "vol")
-	if err := os.WriteFile(device, []byte("block"), 0644); err != nil {
-		t.Fatalf("write fake device: %v", err)
-	}
+	device := writeFakeDevice(t)
 	mountRoot := filepath.Join(t.TempDir(), "mnt")
-	fstab := filepath.Join(t.TempDir(), "fstab")
-	runner := &fakeCommandRunner{responses: map[string]struct {
-		out string
-		err error
-	}{
-		"blkid " + device:                   {out: device + ": UUID=\"uuid-123\" TYPE=\"ext4\"\n"},
-		"blkid -s UUID -o value " + device:  {out: "uuid-123\n"},
-		"mountpoint -q " + mountRoot:        {err: errors.New("not mounted")},
-		"mount " + device + " " + mountRoot: {},
-	}}
+	runner := newAlreadyMountedExt4Runner(device, mountRoot)
+	runner.responses["mountpoint -q "+mountRoot] = cmdResponse{err: errors.New("not mounted")}
+	runner.responses["mount "+device+" "+mountRoot] = cmdResponse{}
 
-	mounter := &RealVolumeMounter{runner: runner, fstabPath: fstab}
-	err := mounter.MountVolumes(context.Background(), []VolumeMount{{
-		Name:             "data",
-		MountRoot:        mountRoot,
-		ProviderVolumeID: "vol-formatted",
-		ProviderName:     "hetzner",
-		LinuxDevice:      device,
-		FSFormat:         "ext4",
-	}})
-	if err != nil {
-		t.Fatalf("MountVolumes: %v", err)
-	}
+	mountFormattedHetznerVolume(t, runner, "data", device, mountRoot)
 	if runner.called("mkfs.ext4") {
 		t.Fatal("existing filesystem must not be formatted")
 	}
 }
 
 func TestRealVolumeMounter_RefusesWipefsSignatures(t *testing.T) {
-	device := filepath.Join(t.TempDir(), "vol")
-	if err := os.WriteFile(device, []byte("block"), 0644); err != nil {
-		t.Fatalf("write fake device: %v", err)
-	}
-	runner := &fakeCommandRunner{responses: map[string]struct {
-		out string
-		err error
-	}{
+	device := writeFakeDevice(t)
+	runner := &fakeCommandRunner{responses: map[string]cmdResponse{
 		"blkid " + device:     {err: errors.New("no filesystem")},
 		"wipefs -n " + device: {out: "offset type\n0x1 dos\n"},
 	}}
@@ -153,10 +154,7 @@ func TestRealVolumeMounter_RefusesWipefsSignatures(t *testing.T) {
 func TestRealVolumeMounter_DiscoversScalewayDeviceWithLsblkSerial(t *testing.T) {
 	mountRoot := filepath.Join(t.TempDir(), "mnt")
 	fstab := filepath.Join(t.TempDir(), "fstab")
-	runner := &fakeCommandRunner{responses: map[string]struct {
-		out string
-		err error
-	}{
+	runner := &fakeCommandRunner{responses: map[string]cmdResponse{
 		"lsblk -ndo PATH,SERIAL":          {out: "/dev/sdb scw-vol-abc\n"},
 		"blkid /dev/sdb":                  {out: "/dev/sdb: UUID=\"uuid\" TYPE=\"ext4\"\n"},
 		"blkid -s UUID -o value /dev/sdb": {out: "uuid\n"},
@@ -181,10 +179,7 @@ func TestRealVolumeMounter_DiscoversScalewayDeviceWithLsblkSerial(t *testing.T) 
 
 func TestRealVolumeMounter_DoesNotDiscoverDeviceByVolumeName(t *testing.T) {
 	mountRoot := filepath.Join(t.TempDir(), "mnt")
-	runner := &fakeCommandRunner{responses: map[string]struct {
-		out string
-		err error
-	}{
+	runner := &fakeCommandRunner{responses: map[string]cmdResponse{
 		"lsblk -ndo PATH,SERIAL": {out: "/dev/sdb data\n"},
 	}}
 	mounter := &RealVolumeMounter{runner: runner, fstabPath: filepath.Join(t.TempDir(), "fstab")}
@@ -205,10 +200,7 @@ func TestRealVolumeMounter_DoesNotDiscoverDeviceByVolumeName(t *testing.T) {
 
 func TestRealVolumeMounter_RequiresProviderVolumeIDForDiscovery(t *testing.T) {
 	mounter := &RealVolumeMounter{
-		runner: &fakeCommandRunner{responses: map[string]struct {
-			out string
-			err error
-		}{}},
+		runner:    &fakeCommandRunner{responses: map[string]cmdResponse{}},
 		fstabPath: filepath.Join(t.TempDir(), "fstab"),
 	}
 	err := mounter.MountVolumes(context.Background(), []VolumeMount{{
@@ -223,35 +215,72 @@ func TestRealVolumeMounter_RequiresProviderVolumeIDForDiscovery(t *testing.T) {
 }
 
 func TestRealVolumeMounter_SkipsMountWhenAlreadyMounted(t *testing.T) {
-	device := filepath.Join(t.TempDir(), "vol")
-	if err := os.WriteFile(device, []byte("block"), 0644); err != nil {
-		t.Fatalf("write fake device: %v", err)
-	}
+	device := writeFakeDevice(t)
 	mountRoot := filepath.Join(t.TempDir(), "mnt")
-	fstab := filepath.Join(t.TempDir(), "fstab")
-	runner := &fakeCommandRunner{responses: map[string]struct {
-		out string
-		err error
-	}{
-		"blkid " + device:                  {out: device + ": UUID=\"uuid-123\" TYPE=\"ext4\"\n"},
-		"mountpoint -q " + mountRoot:       {},
-		"blkid -s UUID -o value " + device: {out: "uuid-123\n"},
-	}}
+	runner := newAlreadyMountedExt4Runner(device, mountRoot)
 
-	mounter := &RealVolumeMounter{runner: runner, fstabPath: fstab}
-	err := mounter.MountVolumes(context.Background(), []VolumeMount{{
-		Name:             "data",
-		MountRoot:        mountRoot,
-		ProviderVolumeID: "vol-formatted",
-		ProviderName:     "hetzner",
-		LinuxDevice:      device,
-		FSFormat:         "ext4",
-	}})
-	if err != nil {
-		t.Fatalf("MountVolumes: %v", err)
-	}
+	mountFormattedHetznerVolume(t, runner, "data", device, mountRoot)
 	if runner.called("mount " + device + " " + mountRoot) {
 		t.Fatal("already-mounted volume should not be mounted again")
+	}
+}
+
+func TestRealVolumeMounter_CreatesWritableDataSubdirForFreshExt4LostFound(t *testing.T) {
+	device := writeFakeDevice(t)
+	mountRoot := filepath.Join(t.TempDir(), "mnt")
+	if err := os.MkdirAll(filepath.Join(mountRoot, "lost+found"), 0700); err != nil {
+		t.Fatalf("create lost+found fixture: %v", err)
+	}
+	runner := newAlreadyMountedExt4Runner(device, mountRoot)
+	runner.responses["mountpoint -q "+mountRoot] = cmdResponse{err: errors.New("not mounted")}
+	runner.responses["mount "+device+" "+mountRoot] = cmdResponse{}
+
+	mountFormattedHetznerVolume(t, runner, "pgdata", device, mountRoot)
+
+	dataDir := filepath.Join(mountRoot, "data")
+	info, err := os.Stat(dataDir)
+	if err != nil {
+		t.Fatalf("stat data dir: %v", err)
+	}
+	if !info.IsDir() {
+		t.Fatalf("expected %s to be a directory", dataDir)
+	}
+	if got := info.Mode().Perm(); got != 0777 {
+		t.Fatalf("expected data dir mode 0777, got %03o", got)
+	}
+	if _, err := os.Stat(filepath.Join(mountRoot, "lost+found")); err != nil {
+		t.Fatalf("lost+found fixture should remain untouched: %v", err)
+	}
+}
+
+func TestRealVolumeMounter_DoesNotChmodOrClobberExistingDataSubdir(t *testing.T) {
+	device := writeFakeDevice(t)
+	mountRoot := filepath.Join(t.TempDir(), "mnt")
+	dataDir := filepath.Join(mountRoot, "data")
+	if err := os.MkdirAll(dataDir, 0700); err != nil {
+		t.Fatalf("create data dir fixture: %v", err)
+	}
+	sentinel := filepath.Join(dataDir, "sentinel")
+	if err := os.WriteFile(sentinel, []byte("keep"), 0600); err != nil {
+		t.Fatalf("write sentinel: %v", err)
+	}
+	runner := newAlreadyMountedExt4Runner(device, mountRoot)
+
+	mountFormattedHetznerVolume(t, runner, "pgdata", device, mountRoot)
+
+	info, err := os.Stat(dataDir)
+	if err != nil {
+		t.Fatalf("stat data dir: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0700 {
+		t.Fatalf("pre-existing data dir mode should be preserved, got %03o", got)
+	}
+	contents, err := os.ReadFile(sentinel)
+	if err != nil {
+		t.Fatalf("read sentinel: %v", err)
+	}
+	if string(contents) != "keep" {
+		t.Fatalf("sentinel contents changed: %q", contents)
 	}
 }
 
@@ -266,10 +295,7 @@ func TestRealVolumeMounter_TeardownMountsUnmountsAndRemovesFstabEntry(t *testing
 	); err != nil {
 		t.Fatalf("write fstab: %v", err)
 	}
-	runner := &fakeCommandRunner{responses: map[string]struct {
-		out string
-		err error
-	}{
+	runner := &fakeCommandRunner{responses: map[string]cmdResponse{
 		"mountpoint -q " + mountRoot: {},
 		"umount " + mountRoot:        {},
 	}}

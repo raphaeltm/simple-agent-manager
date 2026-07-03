@@ -244,7 +244,35 @@ describe('getUserInstallationRepositories', () => {
     expect(JSON.stringify(mocks.log.info.mock.calls)).not.toContain('github-user-token');
   });
 
-  it('throws GitHub errors without logging the user token', async () => {
+  it('maps GitHub 401 to a typed reauth error without logging the user token', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(Response.json({ message: 'Bad credentials' }, { status: 401 }))
+    );
+
+    await expect(getUserInstallationRepositories('expired-token', '120081765', {
+      flow: 'project-access',
+      userId: 'user-1',
+      installationId: '120081765',
+      repository: 'acme/private',
+    })).rejects.toMatchObject({
+      statusCode: 401,
+      error: 'GITHUB_REAUTH_REQUIRED',
+      message: 'Your GitHub authorization has expired — please sign out and back in',
+    });
+    expect(mocks.log.warn).toHaveBeenCalledWith('github.user_installation_repositories.response', {
+      flow: 'project-access',
+      userId: 'user-1',
+      installationId: '120081765',
+      repository: 'acme/private',
+      page: 1,
+      status: 401,
+      ok: false,
+    });
+    expect(JSON.stringify(mocks.log.warn.mock.calls)).not.toContain('expired-token');
+  });
+
+  it('maps GitHub 403 to a typed forbidden error without logging the user token', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue(Response.json({ message: 'Resource not accessible' }, { status: 403 }))
@@ -255,7 +283,11 @@ describe('getUserInstallationRepositories', () => {
       userId: 'user-1',
       installationId: '120081765',
       repository: 'acme/private',
-    })).rejects.toThrow('Resource not accessible');
+    })).rejects.toMatchObject({
+      statusCode: 403,
+      error: 'GITHUB_FORBIDDEN',
+      message: 'Resource not accessible',
+    });
     expect(mocks.log.warn).toHaveBeenCalledWith('github.user_installation_repositories.response', {
       flow: 'project-access',
       userId: 'user-1',

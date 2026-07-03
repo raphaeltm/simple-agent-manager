@@ -16,12 +16,14 @@ import (
 type fakeMountChecker struct {
 	mountpoints map[string]bool // path → true if mountpoint, false if exists-but-not-mounted
 	missing     map[string]bool // path → true if path does not exist at all
+	dirs        map[string]bool // path → true if directory, false if not a directory
 }
 
 func newFakeMountChecker() *fakeMountChecker {
 	return &fakeMountChecker{
 		mountpoints: make(map[string]bool),
 		missing:     make(map[string]bool),
+		dirs:        make(map[string]bool),
 	}
 }
 
@@ -35,6 +37,16 @@ func (f *fakeMountChecker) IsMountpoint(path string) (bool, error) {
 		return false, nil
 	}
 	return mounted, nil
+}
+
+func (f *fakeMountChecker) IsDir(path string) (bool, error) {
+	if f.missing[path] {
+		return false, fmt.Errorf("stat %s: no such file or directory", path)
+	}
+	if isDir, ok := f.dirs[path]; ok {
+		return isDir, nil
+	}
+	return true, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -62,12 +74,12 @@ func TestExtractSAMVolumeMountRoots_WithSAMVolumes(t *testing.T) {
   web:
     image: myapp:v1
     volumes:
-      - /mnt/sam-env-env-abc123/volumes/data:/app/data
-      - /mnt/sam-env-env-abc123/volumes/uploads:/app/uploads
+      - /mnt/sam-env-env-abc123/volumes/data/data:/app/data
+      - /mnt/sam-env-env-abc123/volumes/uploads/data:/app/uploads
   db:
     image: postgres:16
     volumes:
-      - /mnt/sam-env-env-abc123/volumes/pgdata:/var/lib/postgresql/data
+      - /mnt/sam-env-env-abc123/volumes/pgdata/data:/var/lib/postgresql/data
 `
 	roots, err := extractSAMVolumeMountRoots(yaml)
 	if err != nil {
@@ -101,8 +113,8 @@ func TestExtractSAMVolumeMountRoots_MultipleEnvironments(t *testing.T) {
   app:
     image: myapp:v1
     volumes:
-      - /mnt/sam-env-env-aaa/volumes/data:/app/data
-      - /mnt/sam-env-env-bbb/volumes/state:/app/state
+      - /mnt/sam-env-env-aaa/volumes/data/data:/app/data
+      - /mnt/sam-env-env-bbb/volumes/state/data:/app/state
 `
 	roots, err := extractSAMVolumeMountRoots(yaml)
 	if err != nil {
@@ -120,7 +132,7 @@ func TestExtractSAMVolumeMountRoots_IgnoresNonSAMVolumes(t *testing.T) {
     volumes:
       - ./config:/app/config
       - /var/log/app:/app/logs
-      - /mnt/sam-env-env-abc123/volumes/data:/app/data
+      - /mnt/sam-env-env-abc123/volumes/data/data:/app/data
 `
 	roots, err := extractSAMVolumeMountRoots(yaml)
 	if err != nil {
@@ -152,7 +164,7 @@ func TestExtractSAMVolumeMountRoots_PathTraversal_Rejected(t *testing.T) {
     volumes:
       - /mnt/sam-env-../etc/shadow:/x
       - /mnt/sam-env-.:/y
-      - /mnt/sam-env-legitimate/volumes/data:/data`
+      - /mnt/sam-env-legitimate/volumes/data/data:/data`
 	roots, err := extractSAMVolumeMountRoots(yaml)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -163,6 +175,22 @@ func TestExtractSAMVolumeMountRoots_PathTraversal_Rejected(t *testing.T) {
 	}
 	if roots[0] != "/mnt/sam-env-legitimate/volumes/data" {
 		t.Fatalf("expected /mnt/sam-env-legitimate/volumes/data, got %s", roots[0])
+	}
+}
+
+func TestExtractSAMVolumeMountRoots_RawRootBindRejected(t *testing.T) {
+	yaml := `services:
+  db:
+    image: postgres:16
+    volumes:
+      - /mnt/sam-env-env-abc123/volumes/pgdata:/var/lib/postgresql/data
+`
+	_, err := extractSAMVolumeMountRoots(yaml)
+	if err == nil {
+		t.Fatal("expected raw volume root bind source to be rejected")
+	}
+	if !strings.Contains(err.Error(), "raw SAM volume root bind source") {
+		t.Fatalf("expected raw-root diagnostic, got %v", err)
 	}
 }
 
@@ -186,8 +214,8 @@ func TestVerifyVolumeMounts_AllMounted_Passes(t *testing.T) {
   web:
     image: myapp:v1
     volumes:
-      - /mnt/sam-env-env-abc123/volumes/data:/app/data
-      - /mnt/sam-env-env-abc123/volumes/uploads:/app/uploads
+      - /mnt/sam-env-env-abc123/volumes/data/data:/app/data
+      - /mnt/sam-env-env-abc123/volumes/uploads/data:/app/uploads
 `
 	checker := newFakeMountChecker()
 	checker.mountpoints["/mnt/sam-env-env-abc123/volumes/data"] = true
@@ -203,7 +231,7 @@ func TestVerifyVolumeMounts_VolumeNotMounted_Refuses(t *testing.T) {
   web:
     image: myapp:v1
     volumes:
-      - /mnt/sam-env-env-abc123/volumes/data:/app/data
+      - /mnt/sam-env-env-abc123/volumes/data/data:/app/data
 `
 	checker := newFakeMountChecker()
 	// Path exists but is NOT a mountpoint (fell-through empty dir)
@@ -230,7 +258,7 @@ func TestVerifyVolumeMounts_LongFormSAMVolumeNotMounted_Refuses(t *testing.T) {
     image: postgres:16
     volumes:
       - type: bind
-        source: /mnt/sam-env-env-abc123/volumes/postgres-data
+        source: /mnt/sam-env-env-abc123/volumes/postgres-data/data
         target: /var/lib/postgresql/data
       - type: volume
         source: postgres-cache
@@ -256,7 +284,7 @@ func TestVerifyVolumeMounts_VolumeMissing_Refuses(t *testing.T) {
   db:
     image: postgres:16
     volumes:
-      - /mnt/sam-env-env-abc123/volumes/pgdata:/var/lib/postgresql/data
+      - /mnt/sam-env-env-abc123/volumes/pgdata/data:/var/lib/postgresql/data
 `
 	checker := newFakeMountChecker()
 	checker.missing["/mnt/sam-env-env-abc123/volumes/pgdata"] = true
@@ -273,13 +301,33 @@ func TestVerifyVolumeMounts_VolumeMissing_Refuses(t *testing.T) {
 	}
 }
 
+func TestVerifyVolumeMounts_DataSubdirMissing_Refuses(t *testing.T) {
+	yaml := `services:
+  db:
+    image: postgres:16
+    volumes:
+      - /mnt/sam-env-env-abc123/volumes/pgdata/data:/var/lib/postgresql/data
+`
+	checker := newFakeMountChecker()
+	checker.mountpoints["/mnt/sam-env-env-abc123/volumes/pgdata"] = true
+	checker.missing["/mnt/sam-env-env-abc123/volumes/pgdata/data"] = true
+
+	err := verifyVolumeMounts(yaml, checker)
+	if err == nil {
+		t.Fatal("expected error when data subdirectory does not exist")
+	}
+	if !strings.Contains(err.Error(), "data dir check failed") {
+		t.Fatalf("expected data-dir diagnostic, got: %v", err)
+	}
+}
+
 func TestVerifyVolumeMounts_MultipleVolumes_OneMissing_Refuses(t *testing.T) {
 	yaml := `services:
   app:
     image: myapp:v1
     volumes:
-      - /mnt/sam-env-env-aaa/volumes/data:/app/data
-      - /mnt/sam-env-env-bbb/volumes/state:/app/state
+      - /mnt/sam-env-env-aaa/volumes/data/data:/app/data
+      - /mnt/sam-env-env-bbb/volumes/state/data:/app/state
 `
 	checker := newFakeMountChecker()
 	checker.mountpoints["/mnt/sam-env-env-aaa/volumes/data"] = true
@@ -370,7 +418,7 @@ const guardVolumeComposeYAML = `services:
   web:
     image: myapp:v1
     volumes:
-      - /mnt/sam-env-env-1/volumes/data:/app/data
+      - /mnt/sam-env-env-1/volumes/data/data:/app/data
     ports:
       - "127.0.0.1:35000:3000"
 `
@@ -445,7 +493,7 @@ func TestEngine_Apply_VolumeMountGuard_ExistsButNotMountpoint_Refuses(t *testing
   web:
     image: myapp:v1
     volumes:
-      - /mnt/sam-env-env-1/volumes/data:/app/data
+      - /mnt/sam-env-env-1/volumes/data/data:/app/data
 `
 	payload := guardPayload(t, priv, composeYAML)
 
@@ -520,7 +568,7 @@ func TestEngine_Apply_SuccessfulUpdateTearsDownRemovedVolumeRoots(t *testing.T) 
   web:
     image: myapp:v2
     volumes:
-      - /mnt/sam-env-env-1/volumes/keep:/app/data
+      - /mnt/sam-env-env-1/volumes/keep/data:/app/data
     ports:
       - "127.0.0.1:35000:3000"
 `)
@@ -576,8 +624,8 @@ exit 0
   web:
     image: myapp:v1
     volumes:
-      - /mnt/sam-env-env-1/volumes/old:/app/old
-      - /mnt/sam-env-env-1/volumes/keep:/app/data
+      - /mnt/sam-env-env-1/volumes/old/data:/app/old
+      - /mnt/sam-env-env-1/volumes/keep/data:/app/data
     ports:
       - "127.0.0.1:35000:3000"
 `
@@ -592,7 +640,7 @@ exit 0
   web:
     image: myapp:v2
     volumes:
-      - /mnt/sam-env-env-1/volumes/keep:/app/data
+      - /mnt/sam-env-env-1/volumes/keep/data:/app/data
     ports:
       - "127.0.0.1:35000:3000"
 `)

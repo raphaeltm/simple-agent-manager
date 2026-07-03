@@ -76,7 +76,35 @@ func (m *RealVolumeMounter) mountVolume(ctx context.Context, volume VolumeMount)
 	} else if len(bytes.TrimSpace(out)) > 0 {
 		return fmt.Errorf("mountpoint probe for %s returned unexpected output: %s", volume.MountRoot, strings.TrimSpace(string(out)))
 	}
+	if err := ensureVolumeDataDir(volume.MountRoot); err != nil {
+		return fmt.Errorf("volume %q data directory: %w", volume.Name, err)
+	}
 	if err := m.ensureFstab(ctx, device, volume.MountRoot); err != nil {
+		return err
+	}
+	return nil
+}
+
+func ensureVolumeDataDir(mountRoot string) error {
+	dataDir := filepath.Join(mountRoot, samVolumeBindDataDir)
+	info, err := os.Stat(dataDir)
+	if err == nil {
+		if !info.IsDir() {
+			return fmt.Errorf("%s exists but is not a directory", dataDir)
+		}
+		return nil
+	}
+	if !os.IsNotExist(err) {
+		return err
+	}
+	// 0777 is intentional: the container UID that will own this bind source is
+	// unknown at mount time (e.g. postgres runs as uid 70/999 and chmods the
+	// directory to 0700 during initdb). The directory lives on a dedicated,
+	// single-tenant provider volume mounted only for this environment.
+	if err := os.MkdirAll(dataDir, 0777); err != nil { // NOSONAR go:S2612 -- see comment above
+		return err
+	}
+	if err := os.Chmod(dataDir, 0777); err != nil { // NOSONAR go:S2612 -- see comment above
 		return err
 	}
 	return nil

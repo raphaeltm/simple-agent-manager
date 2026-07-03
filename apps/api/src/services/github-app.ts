@@ -5,6 +5,7 @@ import * as v from 'valibot';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { readResponseJson } from '../lib/runtime-validation';
+import { AppError } from '../middleware/error';
 
 const githubErrorSchema = v.object({
   message: v.optional(v.string()),
@@ -67,6 +68,24 @@ async function readGitHubError(response: Response, fallback: string): Promise<st
   } catch {
     return fallback;
   }
+}
+
+async function githubRepositoryAccessError(response: Response): Promise<AppError> {
+  if (response.status === 401) {
+    return new AppError(
+      401,
+      'GITHUB_REAUTH_REQUIRED',
+      'Your GitHub authorization has expired — please sign out and back in'
+    );
+  }
+  if (response.status === 403) {
+    const message = await readGitHubError(response, 'GitHub denied access to this repository or installation');
+    return new AppError(403, 'GITHUB_FORBIDDEN', message);
+  }
+  const message = await readGitHubError(response, `GitHub API request failed: ${response.status}`);
+  return new AppError(response.status >= 500 ? 502 : response.status, 'GITHUB_API_ERROR', message, {
+    githubStatus: response.status,
+  });
 }
 
 export interface UserAccessibleInstallation {
@@ -541,7 +560,7 @@ export async function getUserInstallationRepositories(
     }
 
     if (!response.ok) {
-      throw new Error(await readGitHubError(response, `Failed to get user installation repositories: ${response.status}`));
+      throw await githubRepositoryAccessError(response);
     }
 
     const data = await readResponseJson(response, installationRepositoriesSchema, 'github.user_installation_repositories');

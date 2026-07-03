@@ -86,11 +86,11 @@ describe('renderCompose', () => {
     expect(doc.services.web.environment).toBeUndefined();
   });
 
-  it('renders volume bind mounts under environment-specific volume root', () => {
+  it('renders volume bind mounts under environment-specific data subdirectories', () => {
     const doc = parse(renderCompose(makeManifest(), CTX));
-    // Default derives from SAM_VOLUME_MOUNT_PATH_TEMPLATE: /mnt/sam-env-{environmentId}/volumes/{name}
+    // The provider volume is mounted at /volumes/{name}; containers bind its data subdir.
     expect(doc.services.web.volumes).toEqual([
-      '/mnt/sam-env-env-001/volumes/data:/app/data',
+      '/mnt/sam-env-env-001/volumes/data/data:/app/data',
     ]);
   });
 
@@ -98,7 +98,7 @@ describe('renderCompose', () => {
     const ctx: ComposeRenderContext = { ...CTX, volumeRoot: '/custom/volumes' };
     const doc = parse(renderCompose(makeManifest(), ctx));
     expect(doc.services.web.volumes).toEqual([
-      '/custom/volumes/data:/app/data',
+      '/custom/volumes/data/data:/app/data',
     ]);
   });
 

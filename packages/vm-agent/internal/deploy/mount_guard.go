@@ -24,6 +24,8 @@ const samVolumeMountPrefix = "/mnt/sam-env-"
 // packages/shared/src/compose-parser/constants.ts.
 const samVolumeNamePatternSource = `^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`
 
+const samVolumeBindDataDir = "data"
+
 var volumeNamePattern = regexp.MustCompile(samVolumeNamePatternSource)
 
 // MountChecker abstracts the filesystem check so tests can inject a fake.
@@ -32,6 +34,8 @@ type MountChecker interface {
 	// (backed by a different device than its parent). Returns false if the
 	// path does not exist or is a regular directory on the root filesystem.
 	IsMountpoint(path string) (bool, error)
+	// IsDir returns true if the given path exists and is a directory.
+	IsDir(path string) (bool, error)
 }
 
 // RealMountChecker checks the actual filesystem.
@@ -55,6 +59,14 @@ func (RealMountChecker) IsMountpoint(path string) (bool, error) {
 	}
 
 	return deviceID(info) != deviceID(parentInfo), nil
+}
+
+func (RealMountChecker) IsDir(path string) (bool, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return false, err
+	}
+	return info.IsDir(), nil
 }
 
 // composeVolumeMounts is a minimal representation of a Docker Compose file,
@@ -113,10 +125,10 @@ func (v composeVolumeEntry) hostPath() string {
 // the set of host-side SAM named volume mountpoint directories that need to be
 // verified. Each volume bind mount follows the pattern:
 //
-//	/mnt/sam-env-{environmentId}/volumes/{name}:{containerPath}
+//	/mnt/sam-env-{environmentId}/volumes/{name}/data:{containerPath}
 //
-// Each provider block volume is mounted at its named volume path, so the guard
-// checks the exact bind source (/mnt/sam-env-{environmentId}/volumes/{name}).
+// Each provider block volume is mounted at its named volume path, while
+// containers bind the post-mount data subdirectory to avoid ext4 lost+found.
 func extractSAMVolumeMountRoots(composeYAML string) ([]string, error) {
 	var compose composeVolumeMounts
 	if err := yaml.Unmarshal([]byte(composeYAML), &compose); err != nil {
@@ -138,15 +150,18 @@ func extractSAMVolumeMountRoots(composeYAML string) ([]string, error) {
 				continue
 			}
 
-			// Extract the named volume mountpoint:
-			// /mnt/sam-env-{envId}/volumes/{name}
+			// Extract the named volume mountpoint from the bind source:
+			// /mnt/sam-env-{envId}/volumes/{name}/data
 			remainder := hostPath[len(samVolumeMountPrefix):]
 			parts := strings.Split(remainder, "/")
 
 			// Reject path traversal components in parsed path segments.
 			// Compose YAML is signed by the control plane so this is
 			// defense-in-depth, not a primary security boundary.
-			if len(parts) != 3 || parts[1] != "volumes" || !isSafeMountPathSegment(parts[0]) || !isSafeMountPathSegment(parts[2]) {
+			if len(parts) == 3 && parts[1] == "volumes" && isSafeMountPathSegment(parts[0]) && isSafeMountPathSegment(parts[2]) {
+				return nil, fmt.Errorf("raw SAM volume root bind source %q is not allowed; expected %q", hostPath, hostPath+"/"+samVolumeBindDataDir)
+			}
+			if len(parts) != 4 || parts[1] != "volumes" || parts[3] != samVolumeBindDataDir || !isSafeMountPathSegment(parts[0]) || !isSafeMountPathSegment(parts[2]) {
 				slog.Warn("deploy.mountGuard: skipping suspicious volume path", "hostPath", hostPath)
 				continue
 			}
@@ -237,6 +252,16 @@ func verifyVolumeMounts(composeYAML string, checker MountChecker) error {
 		}
 		if !mounted {
 			missing = append(missing, fmt.Sprintf("%s (exists but is not a mountpoint)", root))
+			continue
+		}
+		dataDir := filepath.Join(root, samVolumeBindDataDir)
+		isDir, err := checker.IsDir(dataDir)
+		if err != nil {
+			missing = append(missing, fmt.Sprintf("%s (data dir check failed: %v)", dataDir, err))
+			continue
+		}
+		if !isDir {
+			missing = append(missing, fmt.Sprintf("%s (data dir is missing or not a directory)", dataDir))
 			continue
 		}
 		slog.Info("deploy.mountGuard: volume mount verified", "path", root)

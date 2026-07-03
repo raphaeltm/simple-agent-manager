@@ -63,7 +63,7 @@ import {
   extractComposeRouteHints,
   type PublicRouteInput,
 } from './deployment-routing';
-import { resolveNamedVolumeMountRoot } from './deployment-volumes';
+import { resolveNamedVolumeBindSource } from './deployment-volumes';
 
 export const DEFAULT_COMPOSE_PUBLISH_MEMORY_LIMIT_MB = 256;
 export const DEFAULT_COMPOSE_PUBLISH_LOG_MAX_SIZE = '10m';
@@ -390,7 +390,7 @@ function rewriteSafeNamedServiceVolumes(
   return parsedVolumes.map((volume, index) => {
     const mount: Record<string, unknown> = {
       type: 'bind',
-      source: resolveNamedVolumeMountRoot(environmentId, volume.name),
+      source: resolveNamedVolumeBindSource(environmentId, volume.name),
       target: volume.mountPath,
       bind: { create_host_path: false },
     };

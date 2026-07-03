@@ -380,7 +380,7 @@ networks:
     expect(doc.services.postgres.volumes).toEqual([
       {
         type: 'bind',
-        source: `/mnt/sam-env-${ENVIRONMENT_ID}/volumes/pgdata`,
+        source: `/mnt/sam-env-${ENVIRONMENT_ID}/volumes/pgdata/data`,
         target: '/var/lib/postgresql/data',
         bind: { create_host_path: false },
       },
@@ -413,7 +413,7 @@ volumes:
     expect(doc.services.app.volumes).toEqual([
       {
         type: 'bind',
-        source: `/mnt/sam-env-${ENVIRONMENT_ID}/volumes/data`,
+        source: `/mnt/sam-env-${ENVIRONMENT_ID}/volumes/data/data`,
         target: '/data',
         bind: { create_host_path: false },
         read_only: true,
@@ -422,7 +422,7 @@ volumes:
     expect(doc.services.worker.volumes).toEqual([
       {
         type: 'bind',
-        source: `/mnt/sam-env-${ENVIRONMENT_ID}/volumes/data`,
+        source: `/mnt/sam-env-${ENVIRONMENT_ID}/volumes/data/data`,
         target: '/mirror',
         bind: { create_host_path: false },
         read_only: true,
@@ -653,11 +653,11 @@ volumes:
     }
 
     // Long-syntax named volume mount is rewritten to the SAM provider-backed
-    // mount root; top-level Docker volumes are not emitted.
+    // data subdirectory; top-level Docker volumes are not emitted.
     expect(doc.services.postgres.volumes).toEqual([
       {
         type: 'bind',
-        source: `/mnt/sam-env-${ENVIRONMENT_ID}/volumes/pgdata`,
+        source: `/mnt/sam-env-${ENVIRONMENT_ID}/volumes/pgdata/data`,
         target: '/var/lib/postgresql/data',
         bind: { create_host_path: false },
       },

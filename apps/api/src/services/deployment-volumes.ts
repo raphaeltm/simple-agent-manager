@@ -34,6 +34,8 @@ import { createProviderForUser } from './provider-credentials';
 // Helpers
 // =============================================================================
 
+export const NAMED_VOLUME_BIND_DATA_DIR = 'data';
+
 /** Resolve the host directory under which an environment's named volume mountpoints live. */
 export function resolveVolumeMountRoot(environmentId: string): string {
   const base = SAM_VOLUME_MOUNT_PATH_TEMPLATE.replace('{environmentId}', environmentId);
@@ -44,6 +46,11 @@ export function resolveVolumeMountRoot(environmentId: string): string {
 /** Resolve the host mountpoint for a specific named provider-backed volume. */
 export function resolveNamedVolumeMountRoot(environmentId: string, volumeName: string): string {
   return `${resolveVolumeMountRoot(environmentId)}/${volumeName}`;
+}
+
+/** Resolve the host bind source exposed to containers for a named provider-backed volume. */
+export function resolveNamedVolumeBindSource(environmentId: string, volumeName: string): string {
+  return `${resolveNamedVolumeMountRoot(environmentId, volumeName)}/${NAMED_VOLUME_BIND_DATA_DIR}`;
 }
 
 async function getProviderForUser(

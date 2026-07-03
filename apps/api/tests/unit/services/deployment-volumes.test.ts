@@ -20,6 +20,7 @@ import {
   deleteEnvironmentVolume,
   detachEnvironmentVolumes,
   resolveLinkedDeploymentNodeVolumeTarget,
+  resolveNamedVolumeBindSource,
   resolveNamedVolumeMountRoot,
   resolveVolumeMountRoot,
 } from '../../../src/services/deployment-volumes';
@@ -222,12 +223,20 @@ describe('resolveNamedVolumeMountRoot', () => {
   });
 });
 
+describe('resolveNamedVolumeBindSource', () => {
+  it('binds containers to the post-mount data subdirectory', () => {
+    expect(resolveNamedVolumeBindSource('env-abc123', 'pgdata')).toBe(
+      '/mnt/sam-env-env-abc123/volumes/pgdata/data'
+    );
+  });
+});
+
 // =============================================================================
 // buildVolumeMountDescriptors
 // =============================================================================
 
 describe('buildVolumeMountDescriptors', () => {
-  it('uses the exact named volume bind path as each provider volume mountpoint', async () => {
+  it('uses the exact named volume mount root as each provider volume mountpoint', async () => {
     const db = createMockDb([
       {
         id: 'vol-1',
