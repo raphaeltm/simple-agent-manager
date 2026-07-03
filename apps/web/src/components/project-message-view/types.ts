@@ -1,6 +1,6 @@
 import type { ConversationItem, ToolCallContentItem, ToolCallItem } from '@simple-agent-manager/acp-client';
 
-import type { ChatMessageResponse, ChatSessionResponse } from '../../lib/api';
+import type { ChatMessageResponse, ChatSessionResponse, SessionStateSnapshot } from '../../lib/api';
 import { maybeJsonRecord } from '../../lib/runtime-validation';
 
 /** Default idle timeout in ms — matches the server-side default (NODE_WARM_TIMEOUT_MS). */
@@ -26,6 +26,15 @@ export const IDLE_TIMEOUT_MS = 30_000;
 
 /** Virtual scroll: starting index for prepend-stable pagination */
 export const VIRTUAL_START = 100_000;
+
+/** Agent activity state derived from message flow (no ACP connection needed). */
+export type AgentActivityState = 'idle' | 'prompting' | 'responding' | 'recovering';
+
+export function isWorkingActivity(
+  activity: SessionStateSnapshot['activity'] | AgentActivityState | undefined | null,
+): activity is 'prompting' | 'recovering' {
+  return activity === 'prompting' || activity === 'recovering';
+}
 
 /** True for placeholder content that adds no user value. */
 function isPlaceholderContent(content: string): boolean {

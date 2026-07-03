@@ -380,6 +380,7 @@ func (h *SessionHost) markPromptStarted(sessionID acpsdk.SessionId, blockCount i
 	h.setStatus(HostPrompting, "")
 	h.broadcastControl(MsgSessionPrompting, nil)
 	h.reportActivity("prompting")
+	h.startPromptActivityRereport()
 
 	slog.Info("ACP: sending Prompt", "sessionID", string(sessionID), "blockCount", blockCount)
 	h.reportLifecycle("info", "ACP Prompt started", map[string]interface{}{
@@ -392,7 +393,45 @@ func (h *SessionHost) markPromptStarted(sessionID acpsdk.SessionId, blockCount i
 func (h *SessionHost) markPromptDone() {
 	h.setStatus(HostReady, "")
 	h.broadcastControl(MsgSessionPromptDone, nil)
+	h.stopPromptActivityRereport()
 	h.reportActivity("idle")
+}
+
+func (h *SessionHost) startPromptActivityRereport() {
+	interval := h.config.ActivityRereportInterval
+	if interval <= 0 {
+		return
+	}
+	ctx, cancel := context.WithCancel(h.ctx)
+	h.promptCancelMu.Lock()
+	if h.promptActivityCancel != nil {
+		h.promptActivityCancel()
+	}
+	h.promptActivityCancel = cancel
+	h.promptCancelMu.Unlock()
+
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				h.reportActivity("prompting")
+			}
+		}
+	}()
+}
+
+func (h *SessionHost) stopPromptActivityRereport() {
+	h.promptCancelMu.Lock()
+	cancel := h.promptActivityCancel
+	h.promptActivityCancel = nil
+	h.promptCancelMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
 }
 
 func (h *SessionHost) finishPrompt(

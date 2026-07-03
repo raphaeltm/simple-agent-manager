@@ -26,7 +26,7 @@ interface UseChatWebSocketOptions {
   /** Called when the agent completes on the session. */
   onAgentCompleted?: (agentCompletedAt: number) => void;
   /** Called when a session.activity event arrives (prompting/idle). */
-  onAgentActivity?: (activity: 'prompting' | 'idle', promptStartedAt?: number | null) => void;
+  onAgentActivity?: (activity: 'prompting' | 'idle' | 'recovering' | 'error', promptStartedAt?: number | null) => void;
 }
 
 export interface UseChatWebSocketReturn {
@@ -189,7 +189,12 @@ export function useChatWebSocket({
           } else if (data.type === 'session.activity') {
             const p = payload;
             if (p.sessionId !== sessionId) return;
-            if (p.activity === 'prompting' || p.activity === 'idle') {
+            if (
+              p.activity === 'prompting'
+              || p.activity === 'idle'
+              || p.activity === 'recovering'
+              || p.activity === 'error'
+            ) {
               onAgentActivityRef.current?.(p.activity, p.promptStartedAt ?? null);
             }
           }

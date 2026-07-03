@@ -9,6 +9,7 @@ import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { runMigrations } from '../../../src/durable-objects/migrations';
+import { persistMessageWithSideEffects } from '../../../src/durable-objects/project-data/message-persistence';
 import * as sessionState from '../../../src/durable-objects/project-data/session-state';
 import { createSqlStorage } from './sql-storage-test-utils';
 
@@ -148,6 +149,45 @@ describe('Session State Mirror — vertical slice', () => {
 
       const healed = sessionState.reconcileStaleActivity(sql, 5 * 60 * 1000);
       expect(healed).toEqual([]);
+    });
+  });
+
+  describe('Message persistence liveness refresh', () => {
+    it('bumps activity_at for prompting ACP sessions when a message is persisted', async () => {
+      const now = Date.now();
+      sql.exec(
+        `INSERT INTO chat_sessions (id, workspace_id, topic, status, message_count, started_at, created_at, updated_at)
+         VALUES ('chat-1', 'ws-1', 'Topic', 'active', 0, ?, ?, ?)`,
+        now,
+        now,
+        now,
+      );
+      sql.exec(
+        `INSERT INTO acp_sessions (id, chat_session_id, workspace_id, status, agent_type, created_at, updated_at)
+         VALUES ('acp-1', 'chat-1', 'ws-1', 'running', 'claude_code', ?, ?)`,
+        now,
+        now,
+      );
+      sessionState.upsertActivityState(sql, 'acp-1', { activity: 'prompting' });
+      const before = sessionState.getSessionState(sql, 'acp-1')!.activityAt;
+
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      await persistMessageWithSideEffects(
+        sql,
+        { DATABASE: {} as D1Database },
+        {
+          recalculateAlarm: async () => {},
+          scheduleSummarySync: () => {},
+          broadcastEvent: () => {},
+        },
+        'chat-1',
+        'assistant',
+        'progress',
+        null,
+      );
+
+      const after = sessionState.getSessionState(sql, 'acp-1')!.activityAt;
+      expect(after).toBeGreaterThan(before);
     });
   });
 

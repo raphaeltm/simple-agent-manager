@@ -330,7 +330,7 @@ export interface PlanEntry {
  * waiting for the next WebSocket broadcast.
  */
 export interface SessionStateSnapshot {
-  activity: 'idle' | 'prompting' | 'error' | 'stopped';
+  activity: 'idle' | 'prompting' | 'recovering' | 'error' | 'stopped';
   activityAt: number;
   statusError: string | null;
   currentPlan: PlanEntry[] | null;

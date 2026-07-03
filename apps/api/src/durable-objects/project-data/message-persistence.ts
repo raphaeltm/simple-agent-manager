@@ -64,6 +64,7 @@ export async function persistMessageWithSideEffects(
     }
   }
 
+  sessionState.refreshWorkingActivityForChatSession(sql, sessionId, result.now);
   await resolveAttentionForRoles(sql, hooks, sessionId, [{ id: result.id, role }]);
 
   if (result.workspaceId) activity.updateMessageActivity(sql, result.workspaceId, sessionId);
@@ -113,6 +114,14 @@ export async function persistMessageBatchWithSideEffects(
     } catch (err) {
       log.warn('project_data.batch_plan_extraction_failed', { sessionId, error: String(err) });
     }
+  }
+
+  const latestMessageAt = result.persistedMessages.reduce(
+    (latest, message) => Math.max(latest, message.createdAt),
+    0,
+  );
+  if (latestMessageAt > 0) {
+    sessionState.refreshWorkingActivityForChatSession(sql, sessionId, latestMessageAt);
   }
 
   await resolveAttentionForRoles(sql, hooks, sessionId, result.persistedMessages);

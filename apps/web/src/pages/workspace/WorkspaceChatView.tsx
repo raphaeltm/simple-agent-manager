@@ -19,14 +19,13 @@ import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 
 import { AcpConversationItemView } from '../../components/project-message-view/AcpConversationItemView';
 import { FollowUpInput } from '../../components/project-message-view/FollowUpInput';
-import { chatMessagesToConversationItems, deriveSessionState, VIRTUAL_START } from '../../components/project-message-view/types';
+import type { AgentActivityState } from '../../components/project-message-view/types';
+import { chatMessagesToConversationItems, deriveSessionState, isWorkingActivity, VIRTUAL_START } from '../../components/project-message-view/types';
+import { useActivityVerifyTimer } from '../../components/project-message-view/useActivityVerifyTimer';
 import { useChatWebSocket } from '../../hooks/useChatWebSocket';
 import { cancelAgentPrompt, getChatSession, getTranscribeApiUrl, resetIdleTimer, sendFollowUpPrompt, uploadSessionFiles } from '../../lib/api';
-import type { ChatMessageResponse, ChatSessionDetailResponse, ChatSessionResponse } from '../../lib/api/sessions';
+import type { ChatMessageResponse, ChatSessionDetailResponse, ChatSessionResponse, SessionStateSnapshot } from '../../lib/api/sessions';
 import { mergeMessages } from '../../lib/merge-messages';
-
-/** Agent activity state derived from message flow (no ACP connection needed). */
-type AgentActivityState = 'idle' | 'prompting' | 'responding';
 
 /** Seconds of silence after last assistant message before returning to idle. */
 const IDLE_TIMEOUT_MS = 3000;
@@ -61,7 +60,6 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
 
   // ── Agent activity state (derived from message flow) ──
   const [agentActivity, setAgentActivity] = useState<AgentActivityState>('idle');
-  const idleTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   // ── Scroll ──
   const [firstItemIndex, setFirstItemIndex] = useState(VIRTUAL_START);
@@ -69,6 +67,29 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
 
   const sessionState = session ? deriveSessionState(session) : 'terminated';
   const transcribeApiUrl = useMemo(() => getTranscribeApiUrl(), []);
+
+  const clearActivity = useCallback(() => {
+    setAgentActivity('idle');
+  }, []);
+
+  const { startVerifyDecayTimer, stopVerifyDecayTimer } = useActivityVerifyTimer({
+    projectId,
+    sessionId,
+    delayMs: IDLE_TIMEOUT_MS,
+    logMessage: 'Workspace chat activity verify failed; re-arming timer',
+    onVerifiedIdle: clearActivity,
+  });
+
+  const hydrateActivity = useCallback((state: SessionStateSnapshot | null | undefined) => {
+    if (!state) return;
+    if (isWorkingActivity(state.activity)) {
+      setAgentActivity(state.activity);
+      startVerifyDecayTimer();
+    } else {
+      clearActivity();
+      stopVerifyDecayTimer();
+    }
+  }, [clearActivity, startVerifyDecayTimer, stopVerifyDecayTimer]);
 
   // ── DO WebSocket for real-time message updates (SOLE message source) ──
   const { connectionState, wsRef } = useChatWebSocket({
@@ -82,26 +103,31 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
       // and also idle→responding on reconnect with in-progress agent output)
       if (msg.role === 'assistant') {
         setAgentActivity('responding');
-
-        // Reset idle timer — go idle after silence
-        clearTimeout(idleTimerRef.current);
-        idleTimerRef.current = setTimeout(() => {
-          setAgentActivity('idle');
-        }, IDLE_TIMEOUT_MS);
+        startVerifyDecayTimer();
       }
-    }, []),
+    }, [startVerifyDecayTimer]),
     onSessionStopped: useCallback(() => {
       setSession((prev) => prev ? { ...prev, status: 'stopped' } : prev);
       setAgentActivity('idle');
     }, []),
-    onCatchUp: useCallback((catchUpMsgs: ChatMessageResponse[], catchUpSession: ChatSessionResponse) => {
+    onCatchUp: useCallback((catchUpMsgs: ChatMessageResponse[], catchUpSession: ChatSessionResponse, state?: SessionStateSnapshot | null) => {
       setSession(catchUpSession);
       setMessages((prev) => mergeMessages(prev, catchUpMsgs, 'replace'));
-    }, []),
+      hydrateActivity(state);
+    }, [hydrateActivity]),
     onAgentCompleted: useCallback((agentCompletedAt: number) => {
       setSession((prev) => prev ? { ...prev, agentCompletedAt, isIdle: true } as ChatSessionResponse : prev);
       setAgentActivity('idle');
     }, []),
+    onAgentActivity: useCallback((activity: 'prompting' | 'idle' | 'recovering' | 'error') => {
+      if (activity === 'prompting' || activity === 'recovering') {
+        setAgentActivity(activity);
+        startVerifyDecayTimer();
+      } else {
+        clearActivity();
+        stopVerifyDecayTimer();
+      }
+    }, [clearActivity, startVerifyDecayTimer, stopVerifyDecayTimer]),
   });
 
   // ── Load session data ──
@@ -113,12 +139,13 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
       setSession(data.session);
       setMessages(data.messages);
       setHasMore(data.hasMore);
+      hydrateActivity(data.state);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load session');
     } finally {
       setLoading(false);
     }
-  }, [projectId, sessionId]);
+  }, [projectId, sessionId, hydrateActivity]);
 
   useEffect(() => { void loadSession(); }, [loadSession]);
 
@@ -126,12 +153,8 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
   useEffect(() => {
     setFirstItemIndex(VIRTUAL_START);
     setShowScrollButton(false);
-  }, [sessionId]);
-
-  // Cleanup idle timer on unmount
-  useEffect(() => {
-    return () => clearTimeout(idleTimerRef.current);
-  }, []);
+    stopVerifyDecayTimer();
+  }, [sessionId, stopVerifyDecayTimer]);
 
   // ── Conversation items from DO messages only (single source) ──
   const conversationItems = useMemo<ConversationItem[]>(() => {

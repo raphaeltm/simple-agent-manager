@@ -182,6 +182,29 @@ describe('useChatWebSocket (behavioral)', () => {
     expect(onSessionStopped).toHaveBeenCalledOnce();
   });
 
+  it('forwards all supported session.activity states', () => {
+    const onAgentActivity = vi.fn();
+    renderHook(() => useChatWebSocket({ ...defaultProps, onAgentActivity }));
+
+    act(() => {
+      MockWebSocket.instances[0]!.simulateOpen();
+      for (const activity of ['prompting', 'recovering', 'error', 'idle']) {
+        MockWebSocket.instances[0]!.simulateMessage({
+          type: 'session.activity',
+          sessionId: 'sess-1',
+          activity,
+          promptStartedAt: 123,
+        });
+      }
+    });
+
+    expect(onAgentActivity).toHaveBeenCalledTimes(4);
+    expect(onAgentActivity).toHaveBeenNthCalledWith(1, 'prompting', 123);
+    expect(onAgentActivity).toHaveBeenNthCalledWith(2, 'recovering', 123);
+    expect(onAgentActivity).toHaveBeenNthCalledWith(3, 'error', 123);
+    expect(onAgentActivity).toHaveBeenNthCalledWith(4, 'idle', 123);
+  });
+
   it('reconnects with exponential backoff on abnormal close', () => {
     renderHook(() => useChatWebSocket({ ...defaultProps }));
 

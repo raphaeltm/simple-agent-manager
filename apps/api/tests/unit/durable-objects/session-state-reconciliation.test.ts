@@ -59,6 +59,44 @@ describe('reconcileStaleActivity', () => {
     );
   }
 
+  function createAcpSession(
+    acpSessionId: string,
+    chatSessionId: string,
+    status: 'running' | 'started' | 'completed' | 'failed' = 'running',
+    heartbeatAt: number | null = now,
+  ): void {
+    sql.exec(
+      `INSERT INTO chat_sessions (id, workspace_id, task_id, topic, status, message_count, started_at, created_at, updated_at)
+       VALUES (?, 'ws-1', NULL, 'Chat', 'active', 0, ?, ?, ?)`,
+      chatSessionId,
+      now,
+      now,
+      now,
+    );
+    sql.exec(
+      `INSERT INTO acp_sessions (id, chat_session_id, workspace_id, status, agent_type, last_heartbeat_at, created_at, updated_at, started_at, completed_at)
+       VALUES (?, ?, 'ws-1', ?, 'claude_code', ?, ?, ?, ?, ?)`,
+      acpSessionId,
+      chatSessionId,
+      status,
+      heartbeatAt,
+      now,
+      heartbeatAt ?? now,
+      now,
+      status === 'completed' ? now : null,
+    );
+  }
+
+  function insertMessage(sessionId: string, createdAt: number): void {
+    sql.exec(
+      `INSERT INTO chat_messages (id, session_id, role, content, created_at, sequence)
+       VALUES (?, ?, 'assistant', 'still working', ?, 1)`,
+      `msg-${sessionId}-${createdAt}`,
+      sessionId,
+      createdAt,
+    );
+  }
+
   it.each(['prompting', 'error', 'recovering'] as const)(
     'heals stale %s sessions',
     (activity) => {
@@ -88,15 +126,64 @@ describe('reconcileStaleActivity', () => {
     expect(getActivity('sess-fresh')).toBe('prompting');
   });
 
-  it('does not heal stale task-linked prompting sessions', () => {
+  it('does not heal stale task-linked prompting sessions with recent running ACP evidence', () => {
     createTaskLinkedAcpSession('acp-task');
     upsertActivityState(sql, 'acp-task', { activity: 'prompting' });
+
+    const recentHeartbeat = now + FIVE_MINUTES + 500;
+    sql.exec('UPDATE acp_sessions SET last_heartbeat_at = ?, updated_at = ? WHERE id = ?', recentHeartbeat, recentHeartbeat, 'acp-task');
 
     vi.setSystemTime(now + FIVE_MINUTES + 1000);
     const healed = reconcileStaleActivity(sql);
 
     expect(healed).not.toContain('acp-task');
     expect(getActivity('acp-task')).toBe('prompting');
+  });
+
+  it('does not heal stale prompting sessions when a message arrived since activity_at', () => {
+    createAcpSession('acp-chat', 'chat-live', 'completed', null);
+    upsertActivityState(sql, 'acp-chat', { activity: 'prompting' });
+    const activityAt = now;
+    insertMessage('chat-live', activityAt + 1);
+
+    vi.setSystemTime(now + FIVE_MINUTES + 1000);
+    const healed = reconcileStaleActivity(sql);
+
+    expect(healed).not.toContain('acp-chat');
+    expect(getActivity('acp-chat')).toBe('prompting');
+  });
+
+  it('heals when the latest message timestamp equals refreshed activity_at', () => {
+    createAcpSession('acp-equal', 'chat-equal', 'completed', null);
+    upsertActivityState(sql, 'acp-equal', { activity: 'prompting' });
+    const activityAt = now;
+    insertMessage('chat-equal', activityAt);
+
+    vi.setSystemTime(now + FIVE_MINUTES + 1000);
+    const healed = reconcileStaleActivity(sql);
+
+    expect(healed).toContain('acp-equal');
+    expect(getActivity('acp-equal')).toBe('idle');
+  });
+
+  it('heals stale prompting sessions with no messages and no live ACP evidence', () => {
+    createAcpSession('acp-dead', 'chat-dead', 'completed', null);
+    upsertActivityState(sql, 'acp-dead', { activity: 'prompting' });
+
+    vi.setSystemTime(now + FIVE_MINUTES + 1000);
+    const healed = reconcileStaleActivity(sql);
+
+    expect(healed).toEqual(['acp-dead']);
+    expect(getActivity('acp-dead')).toBe('idle');
+  });
+
+  it('does not reselect a healed zombie on the second sweep', () => {
+    createAcpSession('acp-zombie', 'chat-zombie', 'failed', null);
+    upsertActivityState(sql, 'acp-zombie', { activity: 'recovering' });
+
+    vi.setSystemTime(now + FIVE_MINUTES + 1000);
+    expect(reconcileStaleActivity(sql)).toEqual(['acp-zombie']);
+    expect(reconcileStaleActivity(sql)).toEqual([]);
   });
 
   it('heals multiple stale states in one call', () => {
