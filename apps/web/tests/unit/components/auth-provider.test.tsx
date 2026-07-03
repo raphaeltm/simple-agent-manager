@@ -1,11 +1,14 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach,describe, expect, it, vi } from 'vitest';
 
 import { AuthProvider, useAuth } from '../../../src/components/AuthProvider';
+import { GITHUB_REAUTH_REQUIRED_EVENT } from '../../../src/lib/api/client';
 
 const mockUseSession = vi.fn();
+const mockSignOut = vi.fn();
 
 vi.mock('../../../src/lib/auth', () => ({
+  signOut: () => mockSignOut(),
   useSession: () => mockUseSession(),
 }));
 
@@ -187,5 +190,28 @@ describe('AuthProvider', () => {
     );
     expect(screen.getByTestId('authenticated')).toHaveTextContent('true');
     expect(screen.getByTestId('user-name')).toHaveTextContent('Updated User');
+  });
+
+  it('shows a GitHub reauth prompt and signs out when reconnect is clicked', () => {
+    mockUseSession.mockReturnValue({
+      data: validSession,
+      isPending: false,
+      error: null,
+      isRefetching: false,
+    });
+    renderWithAuth();
+
+    fireEvent(window, new CustomEvent(GITHUB_REAUTH_REQUIRED_EVENT, {
+      detail: {
+        message: 'Your GitHub authorization has expired — please sign out and back in',
+      },
+    }));
+
+    expect(screen.getByRole('alert')).toHaveTextContent('GitHub sign-in required');
+    expect(screen.getByText('Your GitHub authorization has expired — please sign out and back in')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sign out and reconnect' }));
+
+    expect(mockSignOut).toHaveBeenCalledTimes(1);
   });
 });

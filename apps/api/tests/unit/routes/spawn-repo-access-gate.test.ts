@@ -221,6 +221,14 @@ describe('spawn entry points enforce the user∩app repo-access gate (fail-fast)
     await expect(res.json()).resolves.toMatchObject({ error: 'FORBIDDEN', message });
   }
 
+  async function expectGitHubReauthRequired(res: Response): Promise<void> {
+    expect(res.status).toBe(401);
+    await expect(res.json()).resolves.toMatchObject({
+      error: 'GITHUB_REAUTH_REQUIRED',
+      message: 'Your GitHub authorization has expired — please sign out and back in',
+    });
+  }
+
   // The gate always consults the user's OAuth token + the installation's EXTERNAL
   // id for the bound repository — assert that invariant from the happy-path tests.
   function expectGateRan(): void {
@@ -266,6 +274,21 @@ describe('spawn entry points enforce the user∩app repo-access gate (fail-fast)
   // ---------------------------------------------------------------------------
   // Task submit: POST /api/projects/:projectId/tasks/submit
   // ---------------------------------------------------------------------------
+
+  it('task submit: expired GitHub authorization returns typed 401 instead of opaque 500', async () => {
+    limitResponses.push([INSTALLATION_ROW]);
+    mocks.getGitHubUserAccessToken.mockResolvedValue(null);
+
+    const res = await post(
+      '/api/projects/proj-1/tasks/submit',
+      { message: 'Start a new session' },
+      mockExecutionCtx
+    );
+
+    await expectGitHubReauthRequired(res);
+    expect(mocks.getUserInstallationRepositories).not.toHaveBeenCalled();
+    expect(mocks.startTaskRunnerDO).not.toHaveBeenCalled();
+  });
 
   it('task submit: returns 403 and does NOT start the Task Runner when access is revoked', async () => {
     limitResponses.push([INSTALLATION_ROW]);

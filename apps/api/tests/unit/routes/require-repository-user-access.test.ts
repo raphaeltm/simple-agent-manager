@@ -106,12 +106,16 @@ describe('requireRepositoryUserAccess', () => {
     );
   });
 
-  it('fails fast with 403 when the user has no GitHub token — before any repo query', async () => {
+  it('fails fast with typed 401 reauth when the user has no GitHub token — before any repo query', async () => {
     mocks.getGitHubUserAccessToken.mockResolvedValue(null);
 
     await expect(
       requireRepositoryUserAccess(ctx, makeDb([INSTALLATION_ROW]), makeProject(), 'user-1')
-    ).rejects.toMatchObject({ statusCode: 403, message: 'GitHub user token unavailable' });
+    ).rejects.toMatchObject({
+      statusCode: 401,
+      error: 'GITHUB_REAUTH_REQUIRED',
+      message: 'Your GitHub authorization has expired — please sign out and back in',
+    });
 
     // Intersection source must NOT be consulted once the token is missing.
     expect(mocks.getUserInstallationRepositories).not.toHaveBeenCalled();

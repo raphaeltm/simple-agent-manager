@@ -563,6 +563,45 @@ describe('GitHub App installation sharing', () => {
     expect(mocks.getUserAccessibleInstallations).not.toHaveBeenCalled();
   });
 
+  it('treats expired returned access tokens as unavailable', async () => {
+    mocks.getAccessToken.mockResolvedValue({
+      accessToken: 'stale-github-user-token',
+      accessTokenExpiresAt: new Date(Date.now() - 60_000),
+      scopes: ['read:user'],
+    });
+
+    const res = await app.request('/api/github/installations', {}, mockEnv);
+
+    expect(res.status).toBe(200);
+    expect(mocks.log.warn).toHaveBeenCalledWith('github.user_access_token_expired', {
+      userId: 'user-1',
+      tokenPresent: true,
+      accessTokenExpiresAt: expect.any(String),
+      flow: 'request',
+    });
+    expect(mocks.log.info).toHaveBeenCalledWith('github.installations_sync.token_status', {
+      userId: 'user-1',
+      tokenPresent: false,
+    });
+    expect(mocks.getUserAccessibleInstallations).not.toHaveBeenCalled();
+    expect(JSON.stringify(mocks.log.warn.mock.calls)).not.toContain('stale-github-user-token');
+  });
+
+  it('returns null when GitHub refresh fails instead of surfacing a stale token', async () => {
+    mocks.getAccessToken.mockRejectedValue(new Error('FAILED_TO_GET_ACCESS_TOKEN'));
+
+    const res = await app.request('/api/github/installations', {}, mockEnv);
+
+    expect(res.status).toBe(200);
+    expect(mocks.log.warn).toHaveBeenCalledWith('github.user_access_token_unavailable', {
+      userId: 'user-1',
+      tokenPresent: false,
+      error: 'FAILED_TO_GET_ACCESS_TOKEN',
+      flow: 'request',
+    });
+    expect(mocks.getUserAccessibleInstallations).not.toHaveBeenCalled();
+  });
+
   it('does not direct-sync shared organization installations from user-context GitHub access', async () => {
     whereResponses.push([existingInstallationRow()]);
     mocks.getUserAccessibleInstallations.mockResolvedValue([
