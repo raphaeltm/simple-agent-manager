@@ -27,6 +27,7 @@ import * as chatPersistence from '../services/chat-persistence';
 import { persistError } from '../services/observability';
 import * as projectDataService from '../services/project-data';
 import { isTaskStatus } from '../services/task-status';
+import { getChatSessionRouteContext } from './chat-route-context';
 import { chatStateRoutes } from './chat-state';
 import { resolveLiveAgentSessionForChat } from './chat-workspace-resolver';
 
@@ -235,12 +236,7 @@ chatRoutes.route('/', chatStateRoutes);
  * Get a single session with its messages (cursor-paginated).
  */
 chatRoutes.get('/:sessionId', async (c) => {
-  const userId = getUserId(c);
-  const projectId = requireRouteParam(c, 'projectId');
-  const sessionId = requireRouteParam(c, 'sessionId');
-  const db = drizzle(c.env.DATABASE, { schema });
-
-  await requireOwnedProject(db, projectId, userId);
+  const { db, projectId, sessionId, userId } = await getChatSessionRouteContext(c);
 
   let session: Awaited<ReturnType<typeof projectDataService.getSession>>;
   try {

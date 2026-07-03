@@ -3,17 +3,13 @@
  *
  * Mounted under /api/projects/:projectId/sessions before /:sessionId detail.
  */
-import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
-import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { requireRouteParam } from '../lib/route-helpers';
-import { getUserId } from '../middleware/auth';
 import { errors } from '../middleware/error';
-import { requireOwnedProject } from '../middleware/project-auth';
 import * as projectDataService from '../services/project-data';
+import { getChatSessionRouteContext } from './chat-route-context';
 
 const chatStateRoutes = new Hono<{ Bindings: Env }>();
 
@@ -22,12 +18,7 @@ const chatStateRoutes = new Hono<{ Bindings: Env }>();
  * Read the lightweight ACP activity snapshot for a chat session.
  */
 chatStateRoutes.get('/:sessionId/state', async (c) => {
-  const userId = getUserId(c);
-  const projectId = requireRouteParam(c, 'projectId');
-  const sessionId = requireRouteParam(c, 'sessionId');
-  const db = drizzle(c.env.DATABASE, { schema });
-
-  await requireOwnedProject(db, projectId, userId);
+  const { projectId, sessionId } = await getChatSessionRouteContext(c);
 
   const session = await projectDataService.getSession(c.env, projectId, sessionId);
   if (!session) {
