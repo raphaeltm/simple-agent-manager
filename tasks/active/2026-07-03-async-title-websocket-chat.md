@@ -27,7 +27,7 @@ Production evidence showed new chat submissions sometimes spent 5-15 seconds bef
 - [x] Add regression tests proving submit does not await AI title generation, lightweight state reads avoid message loading, and WebSocket session updates are handled.
 - [x] Run API/web tests, typechecks, lint, and build.
 - [x] Run specialist validation for API/Cloudflare patterns, UI behavior, tests, task completion, documentation sync, and no-hardcoded-values compliance.
-- [ ] Deploy to staging and verify the changed behavior end-to-end.
+- [x] Deploy to staging and verify the changed behavior end-to-end.
 
 ## Acceptance Criteria
 
@@ -38,3 +38,12 @@ Production evidence showed new chat submissions sometimes spent 5-15 seconds bef
 - Activity decay verification uses a lightweight endpoint and does not fetch messages.
 - Tests cover the changed API and WebSocket/client behavior.
 - Staging verification confirms the deployed branch works before merge.
+
+## Staging Verification
+
+- GitHub Actions `Deploy Staging` run `28662509888` completed successfully for commit `9769c46f`; smoke tests reported 12 passed.
+- Cloudflare Worker `sam-api-staging` reported `modified_on=2026-07-03T13:11:31.882981Z`, matching the staging deploy window.
+- `https://api.sammy.party/health` returned `status=healthy` with no missing bindings.
+- `GET /api/projects/:projectId/sessions/:sessionId/state` returned only `state`, `agentSessionId`, and `agentType` for an existing staging session; response was 267 bytes and contained no `messages` or `session` payload.
+- Browser audit against an active staging chat opened project session WebSockets and kept full session-detail requests at 1 across the fallback polling window.
+- Staging had no running nodes, so no live task dispatch was created solely for async title verification; that behavior is covered by route-level tests that prove submit starts TaskRunner while title generation is unresolved and later updates D1 + ProjectData when async title generation succeeds.
