@@ -60,7 +60,7 @@ type ToolMeta struct {
 	// typed tool-call cards match on. Sourced from the ACP _meta.claudeCode
 	// extension when present, with a fallback that recognizes the mcp__<server>__
 	// <tool> title convention used by non-Claude adapters.
-	ToolName string `json:"toolName,omitempty"`
+	ToolName  string `json:"toolName,omitempty"`
 	Locations []struct {
 		Path string `json:"path,omitempty"`
 		Line *int   `json:"line,omitempty"`
