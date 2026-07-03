@@ -153,6 +153,19 @@ describe('reconcileStaleActivity', () => {
     expect(getActivity('acp-chat')).toBe('prompting');
   });
 
+  it('heals when the latest message timestamp equals refreshed activity_at', () => {
+    createAcpSession('acp-equal', 'chat-equal', 'completed', null);
+    upsertActivityState(sql, 'acp-equal', { activity: 'prompting' });
+    const activityAt = now;
+    insertMessage('chat-equal', activityAt);
+
+    vi.setSystemTime(now + FIVE_MINUTES + 1000);
+    const healed = reconcileStaleActivity(sql);
+
+    expect(healed).toContain('acp-equal');
+    expect(getActivity('acp-equal')).toBe('idle');
+  });
+
   it('heals stale prompting sessions with no messages and no live ACP evidence', () => {
     createAcpSession('acp-dead', 'chat-dead', 'completed', null);
     upsertActivityState(sql, 'acp-dead', { activity: 'prompting' });

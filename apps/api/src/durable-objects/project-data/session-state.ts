@@ -164,8 +164,12 @@ export function getSessionState(
 
 /**
  * Auto-heal stuck working states only with positive dead-session evidence:
- * activity is stale, no messages arrived since activity_at, and no linked ACP
+ * activity is stale, no messages arrived after activity_at, and no linked ACP
  * session is still running/started with recent heartbeat/update evidence.
+ *
+ * Message persistence refreshes activity_at to the latest message timestamp
+ * while a prompt is working, so equality is the refresh point itself rather
+ * than new liveness evidence.
  *
  * Returns session IDs that were auto-healed (for broadcasting).
  */
@@ -185,12 +189,12 @@ export function reconcileStaleActivity(
       FROM acp_sessions acp
       JOIN chat_messages msg ON msg.session_id = acp.chat_session_id
       WHERE acp.id = session_state.session_id
-        AND msg.created_at >= session_state.activity_at
+        AND msg.created_at > session_state.activity_at
       UNION
       SELECT 1
       FROM chat_messages msg
       WHERE msg.session_id = session_state.session_id
-        AND msg.created_at >= session_state.activity_at
+        AND msg.created_at > session_state.activity_at
     )
     AND NOT EXISTS (
       SELECT 1
