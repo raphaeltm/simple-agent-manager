@@ -104,6 +104,7 @@ describe('MCP Library Tools', () => {
   let handleDownloadLibraryFile: typeof import('../../../src/routes/mcp/library-tools').handleDownloadLibraryFile;
   let handleUploadToLibrary: typeof import('../../../src/routes/mcp/library-tools').handleUploadToLibrary;
   let handleReplaceLibraryFile: typeof import('../../../src/routes/mcp/library-tools').handleReplaceLibraryFile;
+  let handleDisplayFromLibrary: typeof import('../../../src/routes/mcp/library-tools').handleDisplayFromLibrary;
 
   beforeEach(async () => {
     vi.clearAllMocks();
@@ -115,6 +116,7 @@ describe('MCP Library Tools', () => {
     handleDownloadLibraryFile = mod.handleDownloadLibraryFile;
     handleUploadToLibrary = mod.handleUploadToLibrary;
     handleReplaceLibraryFile = mod.handleReplaceLibraryFile;
+    handleDisplayFromLibrary = mod.handleDisplayFromLibrary;
   });
 
   // ─── list_library_files ─────────────────────────────────────────────────
@@ -357,6 +359,7 @@ describe('MCP Library Tools', () => {
       mockUploadFile.mockResolvedValueOnce({
         id: 'file-new-001',
         filename: 'notes.txt',
+        mimeType: 'text/plain',
         sizeBytes: 12,
       });
 
@@ -370,6 +373,8 @@ describe('MCP Library Tools', () => {
       const content = JSON.parse((result.result as { content: { text: string }[] }).content[0].text);
       expect(content.fileId).toBe('file-new-001');
       expect(content.filename).toBe('notes.txt');
+      // mimeType lets the DocumentCard pick the correct preview tier from rawOutput
+      expect(content.mimeType).toBe('text/plain');
 
       // Verify upload was called with agent source
       expect(mockUploadFile).toHaveBeenCalledWith(
@@ -563,6 +568,7 @@ describe('MCP Library Tools', () => {
       mockReplaceFile.mockResolvedValueOnce({
         id: 'file-001',
         filename: 'config.json',
+        mimeType: 'application/json',
         sizeBytes: 18,
       });
 
@@ -575,6 +581,7 @@ describe('MCP Library Tools', () => {
       expect(result.error).toBeUndefined();
       const content = JSON.parse((result.result as { content: { text: string }[] }).content[0].text);
       expect(content.fileId).toBe('file-001');
+      expect(content.mimeType).toBe('application/json');
       expect(content.sizeBytes).toBe(18);
       expect(content.previousSizeBytes).toBe(200);
 
@@ -775,6 +782,83 @@ describe('MCP Library Tools', () => {
         { add: ['v2'] },
         'agent',
       );
+    });
+  });
+
+  // ─── display_from_library ───────────────────────────────────────────────
+
+  describe('handleDisplayFromLibrary', () => {
+    it('requires fileId parameter', async () => {
+      const result = await handleDisplayFromLibrary(1, {}, tokenData, mockEnv as Env);
+      expect(result.error).toBeDefined();
+      expect(result.error!.message).toContain('fileId');
+    });
+
+    it('returns file metadata for a valid fileId (no workspace required)', async () => {
+      mockGetFile.mockResolvedValueOnce({
+        file: { id: 'file-001', filename: 'auth-explainer.md', mimeType: 'text/markdown', sizeBytes: 4096 },
+        tags: [],
+      });
+
+      // Note: tokenDataNoWorkspace — display_from_library must work without a workspace.
+      const result = await handleDisplayFromLibrary(1, { fileId: 'file-001' }, tokenDataNoWorkspace, mockEnv as Env);
+
+      expect(result.error).toBeUndefined();
+      const content = JSON.parse((result.result as { content: { text: string }[] }).content[0].text);
+      expect(content.fileId).toBe('file-001');
+      expect(content.filename).toBe('auth-explainer.md');
+      expect(content.mimeType).toBe('text/markdown');
+      expect(content.sizeBytes).toBe(4096);
+      expect(content.caption).toBeUndefined();
+
+      // getFile is the project-scoped ownership check.
+      expect(mockGetFile).toHaveBeenCalledWith(expect.anything(), 'proj-001', 'file-001');
+    });
+
+    it('returns FILE_NOT_FOUND for a cross-project or missing fileId', async () => {
+      // getFile filters by projectId and throws when the row belongs to another
+      // project — the trust boundary that prevents cross-project disclosure.
+      mockGetFile.mockRejectedValueOnce(new Error('Not Found'));
+
+      const result = await handleDisplayFromLibrary(1, { fileId: 'other-project-file' }, tokenData, mockEnv as Env);
+
+      expect(result.error).toBeUndefined();
+      const content = JSON.parse((result.result as { content: { text: string }[] }).content[0].text);
+      expect(content.error).toBe('FILE_NOT_FOUND');
+      expect(content.fileId).toBeUndefined();
+    });
+
+    it('passes through the optional caption', async () => {
+      mockGetFile.mockResolvedValueOnce({
+        file: { id: 'file-002', filename: 'diagram.png', mimeType: 'image/png', sizeBytes: 20480 },
+        tags: [],
+      });
+
+      const result = await handleDisplayFromLibrary(1, {
+        fileId: 'file-002',
+        caption: 'Section 3 covers your question about token refresh',
+      }, tokenData, mockEnv as Env);
+
+      const content = JSON.parse((result.result as { content: { text: string }[] }).content[0].text);
+      expect(content.caption).toBe('Section 3 covers your question about token refresh');
+    });
+
+    it('truncates an over-long caption to the configured cap', async () => {
+      mockGetFile.mockResolvedValueOnce({
+        file: { id: 'file-003', filename: 'notes.md', mimeType: 'text/markdown', sizeBytes: 100 },
+        tags: [],
+      });
+
+      const longCaption = 'x'.repeat(1000);
+      const result = await handleDisplayFromLibrary(
+        1,
+        { fileId: 'file-003', caption: longCaption },
+        tokenData,
+        { ...mockEnv, LIBRARY_MCP_CAPTION_MAX_LENGTH: '50' } as Env,
+      );
+
+      const content = JSON.parse((result.result as { content: { text: string }[] }).content[0].text);
+      expect(content.caption).toHaveLength(50);
     });
   });
 });
