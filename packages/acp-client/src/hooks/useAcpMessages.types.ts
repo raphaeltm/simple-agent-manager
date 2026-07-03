@@ -34,6 +34,16 @@ export interface ToolCallItem {
   content: ToolCallContentItem[];
   locations: Array<{ path: string; line?: number | null }>;
   timestamp: number;
+  /**
+   * Stable machine-readable tool identifier (e.g. "mcp__sam-mcp__upload_to_library"
+   * or "Read"), sourced from ACP _meta. Used by typed tool-call cards to match on
+   * a durable discriminator instead of the mutable human-readable title.
+   */
+  toolName?: string;
+  /** Raw tool input parameters (card-critical fields; survives compact mode). */
+  rawInput?: unknown;
+  /** Raw tool output/result (card-critical fields; survives compact mode). */
+  rawOutput?: unknown;
   /** Byte size of stripped content (present when loaded in compact mode). */
   contentSize?: number;
   /** Whether content has been lazy-loaded (false = needs fetch on expand). */

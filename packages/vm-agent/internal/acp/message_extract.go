@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"strconv"
+	"strings"
 	"unicode/utf8"
 
 	acpsdk "github.com/coder/acp-go-sdk"
@@ -19,6 +20,22 @@ var maxToolContentSize = func() int {
 		}
 	}
 	return 100 * 1024 // 100KB default
+}()
+
+// maxToolRawFieldSize is the maximum serialized size (in bytes) for the
+// rawInput/rawOutput fields captured into ToolMeta. These fields carry the
+// card-critical metadata (fileId, filename, mimeType, sizeBytes, caption) that
+// typed tool-call cards need, and unlike Content they survive compact-mode
+// stripping. Large raw payloads (file contents, command output) exceed this cap
+// and are omitted so tool metadata stays lean. Configurable via
+// MAX_TOOL_RAW_FIELD_SIZE.
+var maxToolRawFieldSize = func() int {
+	if v := os.Getenv("MAX_TOOL_RAW_FIELD_SIZE"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return 16 * 1024 // 16KB default
 }()
 
 // ExtractedMessage represents a chat message extracted from an ACP
@@ -37,7 +54,14 @@ type ToolMeta struct {
 	Title      string `json:"title,omitempty"`
 	Kind       string `json:"kind,omitempty"`
 	Status     string `json:"status,omitempty"`
-	Locations  []struct {
+	// ToolName is the stable, machine-readable tool identifier (e.g.
+	// "mcp__sam-mcp__upload_to_library" or "Read"). Unlike Title (a
+	// human-readable, mutable string), ToolName is a durable discriminator that
+	// typed tool-call cards match on. Sourced from the ACP _meta.claudeCode
+	// extension when present, with a fallback that recognizes the mcp__<server>__
+	// <tool> title convention used by non-Claude adapters.
+	ToolName  string `json:"toolName,omitempty"`
+	Locations []struct {
 		Path string `json:"path,omitempty"`
 		Line *int   `json:"line,omitempty"`
 	} `json:"locations,omitempty"`
@@ -46,6 +70,13 @@ type ToolMeta struct {
 	// nested content blocks, and all fields). This ensures the persisted path
 	// produces the same shape as the real-time ACP WebSocket path.
 	Content []json.RawMessage `json:"content,omitempty"`
+	// RawInput/RawOutput carry the tool's raw input parameters and raw result.
+	// They hold the card-critical fields (fileId, filename, mimeType, sizeBytes,
+	// caption) and — unlike Content — are NOT stripped in compact mode, so typed
+	// cards can render from durable metadata after reload. Size-capped via
+	// maxToolRawFieldSize; oversized payloads are omitted.
+	RawInput  json.RawMessage `json:"rawInput,omitempty"`
+	RawOutput json.RawMessage `json:"rawOutput,omitempty"`
 }
 
 // ExtractMessages converts an ACP SessionNotification into zero or more
@@ -113,7 +144,12 @@ func ExtractMessages(notif acpsdk.SessionNotification) []ExtractedMessage {
 			Title:      u.ToolCall.Title,
 			Kind:       string(u.ToolCall.Kind),
 			Status:     string(u.ToolCall.Status),
+			ToolName:   extractToolName(u.ToolCall.Meta, u.ToolCall.Title),
 			Content:    marshalRawContent(u.ToolCall.Content),
+		}
+		if toolNameNeedsRawCapture(meta.ToolName) {
+			meta.RawInput = marshalRawField(u.ToolCall.RawInput)
+			meta.RawOutput = marshalRawField(u.ToolCall.RawOutput)
 		}
 		for _, loc := range u.ToolCall.Locations {
 			meta.Locations = append(meta.Locations, struct {
@@ -140,6 +176,15 @@ func ExtractMessages(notif acpsdk.SessionNotification) []ExtractedMessage {
 		meta := ToolMeta{
 			ToolCallId: string(u.ToolCallUpdate.ToolCallId),
 			Content:    marshalRawContent(u.ToolCallUpdate.Content),
+		}
+		var updateTitle string
+		if u.ToolCallUpdate.Title != nil {
+			updateTitle = *u.ToolCallUpdate.Title
+		}
+		meta.ToolName = extractToolName(u.ToolCallUpdate.Meta, updateTitle)
+		if toolNameNeedsRawCapture(meta.ToolName) {
+			meta.RawInput = marshalRawField(u.ToolCallUpdate.RawInput)
+			meta.RawOutput = marshalRawField(u.ToolCallUpdate.RawOutput)
 		}
 		if u.ToolCallUpdate.Title != nil {
 			meta.Title = *u.ToolCallUpdate.Title
@@ -226,6 +271,69 @@ func marshalRawContent(contents []acpsdk.ToolCallContent) []json.RawMessage {
 		}
 	}
 	return items
+}
+
+// extractToolName resolves the stable tool identifier for a tool call.
+//
+// Primary source: the ACP `_meta.claudeCode.toolName` extension, which the
+// claude-agent-acp adapter sets on both the initial tool_call and every
+// tool_call_update. Fallback: the mcp__<server>__<tool> title convention that
+// non-Claude adapters (e.g. codex) pass through as the ACP title. Returns ""
+// when neither source yields a name (callers treat "" as "unknown tool").
+func extractToolName(meta map[string]any, title string) string {
+	if cc, ok := meta["claudeCode"].(map[string]any); ok {
+		if name, ok := cc["toolName"].(string); ok && name != "" {
+			return name
+		}
+	}
+	// Title-pattern fallback: mcp__<server>__<tool> is the verbatim MCP tool
+	// name some adapters use as the human-readable title.
+	if strings.HasPrefix(title, "mcp__") && strings.Count(title, "__") >= 2 {
+		return title
+	}
+	return ""
+}
+
+// rawCaptureToolNames is the set of tool names (base form, after stripping the
+// mcp__<server>__ prefix) whose rawInput/rawOutput are captured into ToolMeta.
+// Restricting capture to the tools that render typed cards keeps other tools'
+// arguments — Bash command strings, Write file contents — out of persisted chat
+// metadata (data minimization: those would otherwise survive compact-mode
+// stripping and be returned in every chat load).
+var rawCaptureToolNames = map[string]bool{
+	"upload_to_library":    true,
+	"replace_library_file": true,
+	"display_from_library": true,
+}
+
+// toolNameNeedsRawCapture reports whether a tool's raw input/output should be
+// persisted for card rendering. Matches on the base tool name (mcp__<server>__
+// prefix stripped).
+func toolNameNeedsRawCapture(toolName string) bool {
+	base := toolName
+	if strings.HasPrefix(toolName, "mcp__") {
+		parts := strings.Split(toolName, "__")
+		base = parts[len(parts)-1]
+	}
+	return rawCaptureToolNames[base]
+}
+
+// marshalRawField serializes a tool's raw input/output value to JSON for
+// storage in ToolMeta. Returns nil (omitted from the metadata) when the value
+// is absent, cannot be marshaled, or exceeds maxToolRawFieldSize. Empty objects
+// ({}) and arrays ([]) marshal to 2 bytes and are also treated as absent. The
+// size cap keeps tool metadata lean: small results (library tool payloads) are
+// kept, large ones are dropped. Unlike Content, this is not truncated — a
+// partial JSON value would be unparseable — so it is stored whole or not at all.
+func marshalRawField(v any) json.RawMessage {
+	if v == nil {
+		return nil
+	}
+	raw, err := json.Marshal(v)
+	if err != nil || len(raw) <= 2 || len(raw) > maxToolRawFieldSize {
+		return nil
+	}
+	return raw
 }
 
 // extractToolCallContents aggregates text from tool call content blocks.

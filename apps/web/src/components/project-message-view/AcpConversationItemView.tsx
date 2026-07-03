@@ -11,6 +11,7 @@ import {
 
 import { useGlobalAudio } from '../../contexts/GlobalAudioContext';
 import { getTtsApiUrl } from '../../lib/api';
+import { matchToolCard } from './tool-cards';
 
 /** Lazily computed TTS API URL — avoids module-scope errors in test environments. */
 let _cachedTtsApiUrl: string | undefined;
@@ -55,7 +56,7 @@ export function SystemMessageBubble({ text }: { text: string }) {
 /** Renders a single ACP ConversationItem using the shared acp-client components.
  *  When `animateText` is true for agent_message items, MessageBubble renders with
  *  per-character fade-in animation via TypewriterText. */
-export function AcpConversationItemView({ item, onFileClick, onLoadToolContent, animateText, animateUserMessage }: {
+export function AcpConversationItemView({ item, onFileClick, onLoadToolContent, animateText, animateUserMessage, projectId }: {
   item: ConversationItem;
   onFileClick?: (path: string, line?: number | null) => void;
   onLoadToolContent?: (messageId: string) => Promise<ToolCallContentItem[]>;
@@ -63,6 +64,8 @@ export function AcpConversationItemView({ item, onFileClick, onLoadToolContent, 
   animateText?: boolean;
   /** When true, user_message text is animated with per-character fade. */
   animateUserMessage?: boolean;
+  /** Project context — enables typed tool-call cards (e.g. DocumentCard previews). */
+  projectId?: string;
 }) {
   const globalAudio = useGlobalAudio();
 
@@ -113,7 +116,13 @@ export function AcpConversationItemView({ item, onFileClick, onLoadToolContent, 
       );
     case 'thinking':
       return <AcpThinkingBlock text={item.text} active={item.active} />;
-    case 'tool_call':
+    case 'tool_call': {
+      // Typed tool-call cards (e.g. DocumentCard) render in place of the generic
+      // card when the tool matches the registry; unknown tools fall back.
+      const TypedCard = matchToolCard(item);
+      if (TypedCard) {
+        return <TypedCard item={item} projectId={projectId} />;
+      }
       return (
         <AcpToolCallCard
           toolCall={item}
@@ -122,6 +131,7 @@ export function AcpConversationItemView({ item, onFileClick, onLoadToolContent, 
           className={item.contentLoaded === false ? 'glass-surface rounded-md border-border-default' : undefined}
         />
       );
+    }
     case 'plan':
       return <PlanView plan={item} />;
     case 'system_message':

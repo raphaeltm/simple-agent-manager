@@ -354,6 +354,7 @@ describe('MCP Routes', () => {
       expect(toolNames).toContain('download_library_file');
       expect(toolNames).toContain('upload_to_library');
       expect(toolNames).toContain('replace_library_file');
+      expect(toolNames).toContain('display_from_library');
       // Onboarding tools
       expect(toolNames).toContain('get_repo_setup_guide');
       // Deployment discovery tool — verify it advertises a zero-argument schema
@@ -399,7 +400,7 @@ describe('MCP Routes', () => {
       expect(toolNames).toContain('list_deployment_routes');
       expect(toolNames).toContain('list_deployment_environment_config');
       expect(toolNames).toContain('set_deployment_environment_config');
-      expect(body.result.tools).toHaveLength(98);
+      expect(body.result.tools).toHaveLength(99);
     });
 
     it('should include MUST call directive in get_instructions description', async () => {

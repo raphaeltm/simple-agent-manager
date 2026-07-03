@@ -57,6 +57,29 @@ When browsing files, images are rendered inline with a dedicated viewer:
 
 Supported formats include PNG, JPG, GIF, SVG, WebP, and other common image types.
 
+## Document Cards
+
+When an agent adds a file to the project library or surfaces an existing one, the
+chat renders a rich **document card** in the timeline instead of a plain tool
+row. Cards appear for three agent tools:
+
+- `upload_to_library` — the agent saved a new document (e.g. a written
+  explanation or report) to the library.
+- `replace_library_file` — the agent updated an existing library document.
+- `display_from_library` — the agent pointed at a document that already exists,
+  optionally with a short caption explaining why it's relevant.
+
+Each card shows a tiered inline preview based on the file type:
+
+- **Images** render as an inline thumbnail.
+- **Markdown** shows a clamped source preview with a fade.
+- **PDFs and other types** show an icon with the file name and size.
+
+Click a card to open the document full-screen. Because library files are stored
+durably (encrypted in R2), document cards keep working after the workspace is
+gone — a card whose file was later deleted degrades to a "no longer in the
+library" note rather than breaking.
+
 ## Voice Input
 
 Click the microphone button to speak your message instead of typing. SAM transcribes your audio using OpenAI Whisper (via Cloudflare Workers AI).

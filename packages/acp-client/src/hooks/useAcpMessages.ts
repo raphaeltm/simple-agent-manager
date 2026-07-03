@@ -197,6 +197,9 @@ export function useAcpMessages(): AcpMessagesHandle {
               content: (tc.content ?? []).map(mapToolCallContent),
               locations: tc.locations ?? [],
               timestamp: now,
+              toolName: tc.toolName,
+              rawInput: tc.rawInput,
+              rawOutput: tc.rawOutput,
             };
             const result = enforceItemCap([...finalized, newItem]);
             lastToolCallIndexRef.current = result.length - 1;
@@ -240,6 +243,11 @@ export function useAcpMessages(): AcpMessagesHandle {
               status: tcu.status ?? target.status,
               title: tcu.title ?? target.title,
               content: tcu.content ? tcu.content.map(mapToolCallContent) : target.content,
+              // Preserve-on-empty: the result update carries rawOutput + toolName;
+              // a status-only patch must not erase the initial call's rawInput.
+              toolName: tcu.toolName ?? target.toolName,
+              rawInput: tcu.rawInput ?? target.rawInput,
+              rawOutput: tcu.rawOutput ?? target.rawOutput,
             };
             const result = prev.slice(0);
             result[targetIdx] = updated;

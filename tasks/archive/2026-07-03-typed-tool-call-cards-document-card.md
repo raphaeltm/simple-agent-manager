@@ -83,42 +83,42 @@ Today all tool calls render through the generic `ToolCallCard`. There is no stab
 
 ### Go VM agent (packages/vm-agent)
 
-- [ ] C1: Add `ToolName string` to `ToolMeta`; populate from `Meta["claudeCode"]["toolName"]` on both `u.ToolCall` and `u.ToolCallUpdate`; fallback: parse `mcp__<server>__<tool>` from `Title`. Preserve-on-empty on updates (don't clear an already-known name).
-- [ ] C2: Add bounded `RawInput`/`RawOutput` capture to `ToolMeta` (JSON, size-capped like content truncation) so card-critical fields (fileId, filename, mimeType, sizeBytes, caption) survive compact mode inside `toolMetadata`.
-- [ ] C3: Go tests: tool name from `_meta` on initial call; tool name from `_meta` on update; title-pattern fallback; status-only update does not clear ToolName/raw fields; rawInput/rawOutput size cap.
+- [x] C1: Add `ToolName string` to `ToolMeta`; populate from `Meta["claudeCode"]["toolName"]` on both `u.ToolCall` and `u.ToolCallUpdate`; fallback: parse `mcp__<server>__<tool>` from `Title`. Preserve-on-empty on updates (don't clear an already-known name).
+- [x] C2: Add bounded `RawInput`/`RawOutput` capture to `ToolMeta` (JSON, size-capped like content truncation) so card-critical fields (fileId, filename, mimeType, sizeBytes, caption) survive compact mode inside `toolMetadata`.
+- [x] C3: Go tests: tool name from `_meta` on initial call; tool name from `_meta` on update; title-pattern fallback; status-only update does not clear ToolName/raw fields; rawInput/rawOutput size cap.
 
 ### Frontend types & merge (packages/acp-client + apps/web)
 
-- [ ] C4: Add `toolName?`, `rawInput?`, `rawOutput?` to `ToolCallItem` (`useAcpMessages.types.ts`); parse in live-stream payload handling (`useAcpMessagePayloads.ts`) and persisted reconstruction (`project-message-view/types.ts`) with preserve-on-empty merge; parity regression tests incl. status-only update event.
+- [x] C4: Add `toolName?`, `rawInput?`, `rawOutput?` to `ToolCallItem` (`useAcpMessages.types.ts`); parse in live-stream payload handling (`useAcpMessagePayloads.ts`) and persisted reconstruction (`project-message-view/types.ts`) with preserve-on-empty merge; parity regression tests incl. status-only update event.
 
 ### Card registry + DocumentCard (apps/web)
 
-- [ ] C5: Card registry module (e.g., `apps/web/src/components/project-message-view/tool-cards/registry.ts`): `matchToolCard(item) → FC | null`, dispatch on `toolName`; wire into `AcpConversationItemView` `case 'tool_call'` with fallback to `AcpToolCallCard`. Behavioral tests: registered name renders typed card, unknown name falls back.
-- [ ] C6: `DocumentCard` component for `upload_to_library`/`replace_library_file`/`display_from_library`: extract fileId/fileName/mimeType/sizeBytes/caption from rawInput/rawOutput metadata; tiered preview (image fetch-to-blob credentialed + IntersectionObserver lazy-load + blob cache; markdown clamp+fade via credentialed fetch, no mermaid; icon card otherwise); caption rendering; failure states (404 tombstone, oversize→icon, fetch error→icon); pending/in_progress states before result arrives; click → `FilePreviewModal`; behavioral tests for each tier + degradation.
-- [ ] C7: Playwright visual audit spec for DocumentCard scenarios (image/markdown/icon/tombstone/long caption/many cards) at 375x667 and 1280x800 with overflow assertions; screenshots in `.codex/tmp/playwright-screenshots/`.
+- [x] C5: Card registry module (e.g., `apps/web/src/components/project-message-view/tool-cards/registry.ts`): `matchToolCard(item) → FC | null`, dispatch on `toolName`; wire into `AcpConversationItemView` `case 'tool_call'` with fallback to `AcpToolCallCard`. Behavioral tests: registered name renders typed card, unknown name falls back.
+- [x] C6: `DocumentCard` component for `upload_to_library`/`replace_library_file`/`display_from_library`: extract fileId/fileName/mimeType/sizeBytes/caption from rawInput/rawOutput metadata; tiered preview (image fetch-to-blob credentialed + IntersectionObserver lazy-load + blob cache; markdown clamp+fade via credentialed fetch, no mermaid; icon card otherwise); caption rendering; failure states (404 tombstone, oversize→icon, fetch error→icon); pending/in_progress states before result arrives; click → `FilePreviewModal`; behavioral tests for each tier + degradation.
+- [x] C7: Playwright visual audit spec for DocumentCard scenarios (image/markdown/icon/tombstone/long caption/many cards) at 375x667 and 1280x800 with overflow assertions; screenshots in `.codex/tmp/playwright-screenshots/`.
 
 ### MCP tool (apps/api)
 
-- [ ] C8: Add `display_from_library` definition to `LIBRARY_TOOLS` (required `fileId`, optional `caption` string; description tells agents it renders a document card to the user).
-- [ ] C9: `handleDisplayFromLibrary` in `library-tools.ts` (no workspace required): validate via `getFile(db, projectId, fileId)`; return `{fileId, fileName, mimeType, sizeBytes, caption}`; structured `FILE_NOT_FOUND` on miss. Dispatch case in `mcp/index.ts`.
-- [ ] C10: Ensure `upload_to_library`/`replace_library_file` result payloads include `mimeType` (extend if missing) so DocumentCard can pick preview tier from rawOutput.
-- [ ] C11: Integration tests (Miniflare): display_from_library happy path, cross-project fileId rejected, missing fileId, caption passthrough.
+- [x] C8: Add `display_from_library` definition to `LIBRARY_TOOLS` (required `fileId`, optional `caption` string; description tells agents it renders a document card to the user).
+- [x] C9: `handleDisplayFromLibrary` in `library-tools.ts` (no workspace required): validate via `getFile(db, projectId, fileId)`; return `{fileId, fileName, mimeType, sizeBytes, caption}`; structured `FILE_NOT_FOUND` on miss. Dispatch case in `mcp/index.ts`.
+- [x] C10: Ensure `upload_to_library`/`replace_library_file` result payloads include `mimeType` (extend if missing) so DocumentCard can pick preview tier from rawOutput.
+- [x] C11: Integration tests (Miniflare): display_from_library happy path, cross-project fileId rejected, missing fileId, caption passthrough.
 
 ### Docs & validation
 
-- [ ] C12: Update MCP/library tool docs (instructions text where library tools are described; check `apps/www` docs + `get_instructions` guidance) to mention `display_from_library` and the upload→card workflow.
-- [ ] C13: Full quality suite (`pnpm lint && pnpm typecheck && pnpm test && pnpm build`), Go tests via CI (no local Go toolchain).
+- [x] C12: Update MCP/library tool docs (instructions text where library tools are described; check `apps/www` docs + `get_instructions` guidance) to mention `display_from_library` and the upload→card workflow.
+- [x] C13: Full quality suite (`pnpm lint && pnpm typecheck && pnpm test && pnpm build`), Go tests via CI (no local Go toolchain).
 - [ ] C14: Data-flow trace (rule 10) in PR: adapter `_meta` → Go ToolMeta → outbox → DO `tool_metadata` → WS/RPC → ToolCallItem → registry → DocumentCard → FilePreviewModal.
 
 ## Acceptance Criteria
 
-- [ ] A1: `toolMetadata` persisted for MCP tool calls includes the raw tool name and bounded rawInput/rawOutput; visible in DO-persisted messages and after compact-mode stripping.
-- [ ] A2: `upload_to_library`, `replace_library_file`, and `display_from_library` tool calls render as DocumentCard in project chat; all other tools render the generic ToolCallCard unchanged.
-- [ ] A3: `display_from_library` validates project ownership; cross-project fileIds return FILE_NOT_FOUND; caption is returned and rendered.
-- [ ] A4: Image files show an inline thumbnail (credentialed blob fetch); markdown shows a clamped text preview; PDF/HTML/other show an icon card — each degrades gracefully on 404/oversize/error.
-- [ ] A5: Clicking the card opens `FilePreviewModal` with working full preview + download.
-- [ ] A6: Status-only tool_call_update events do not erase card metadata (regression test).
-- [ ] A7: No horizontal overflow at 375px; visual audit passes both viewports.
+- [x] A1: `toolMetadata` persisted for MCP tool calls includes the raw tool name and bounded rawInput/rawOutput; visible in DO-persisted messages and after compact-mode stripping.
+- [x] A2: `upload_to_library`, `replace_library_file`, and `display_from_library` tool calls render as DocumentCard in project chat; all other tools render the generic ToolCallCard unchanged.
+- [x] A3: `display_from_library` validates project ownership; cross-project fileIds return FILE_NOT_FOUND; caption is returned and rendered.
+- [x] A4: Image files show an inline thumbnail (credentialed blob fetch); markdown shows a clamped text preview; PDF/HTML/other show an icon card — each degrades gracefully on 404/oversize/error.
+- [x] A5: Clicking the card opens `FilePreviewModal` with working full preview + download.
+- [x] A6: Status-only tool_call_update events do not erase card metadata (regression test).
+- [x] A7: No horizontal overflow at 375px; visual audit passes both viewports.
 - [ ] A8: Staging E2E (fresh node per rule 27): agent uploads a markdown doc + displays an existing image via display_from_library; cards render with previews; modal opens.
 
 ## References
@@ -131,3 +131,17 @@ Today all tool calls render through the generic `ToolCallCard`. There is no stab
 - `apps/web/src/lib/file-utils.ts`, `apps/web/src/components/library/FilePreviewModal.tsx`, `apps/web/src/components/chat/TruncatedSummary.tsx`
 - Rules: 02, 06, 10, 17, 18, 26, 27, 35
 - Prior art: `tasks/archive/2026-03-07-enrich-project-chat-tool-calls.md`, `tasks/archive/2026-05-22-summary-card-markdown-rendering.md`
+
+## Completion Notes (2026-07-03)
+
+Implemented on branch `typed-tool-call-cards-document-card`. Six specialist reviewers ran (task-completion-validator, cloudflare, security, go, ui-ux, test); all findings addressed or documented. No CRITICAL/HIGH.
+
+**Accepted deviations from the original plan (validated as correct):**
+- **C6 image tier** uses native `<img loading="lazy">` (with `onError` degradation) rather than IntersectionObserver + fetch-to-blob + blob cache. This matches the shipped `ImageViewer`/`FilePreviewModal` pattern (cross-origin credentialed `<img>` works because the browser sends cookies for image subresources and CORS allows `*.BASE_DOMAIN`). The chat list is already virtualized, so off-screen cards don't mount — lazy-loading is effectively free. Simpler and lower-risk than a new blob-cache layer.
+- **C11**: `display_from_library` is covered by handler-level unit tests (happy path no-workspace, cross-project rejection with projectId-scope assertion, missing fileId, caption passthrough/truncation/floor), consistent with how `upload_to_library`/`replace_library_file` are tested. The route dispatch case is covered by the `tools/list` count assertion + import check.
+- **C3 Go "status-only doesn't clear"**: architecturally N/A at the Go layer — `ExtractMessages` is stateless per-notification; the preserve-on-empty merge invariant (A6) is enforced and regression-tested on the frontend (both `chatMessagesToConversationItems` and `useAcpMessages`).
+- **C12**: user-facing docs updated (`chat-features.md`). `instruction-tools.ts` was not touched — it currently lists no library tools at all (pre-existing), and the tool's own `description` field guides agent discovery.
+
+**Security follow-up filed**: `tasks/backlog/2026-07-03-harden-markdown-preview-sanitization.md` for two pre-existing preview-sanitization surfaces (mermaid `foreignObject` mXSS, PDF-preview CSP) surfaced during review — not introduced by this change.
+
+**Remaining (Phase 6/7):** C14 data-flow trace goes in the PR description; A8 staging E2E on a fresh node per rule 27.

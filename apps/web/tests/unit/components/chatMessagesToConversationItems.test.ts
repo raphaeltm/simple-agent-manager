@@ -678,4 +678,103 @@ describe('chatMessagesToConversationItems', () => {
     const items = chatMessagesToConversationItems(input);
     expect(items).toHaveLength(2);
   });
+
+  // -------------------------------------------------------------------------
+  // Typed tool-call card fields (toolName / rawInput / rawOutput)
+  //
+  // These carry the discriminator + payload that DocumentCard renders. The
+  // initial tool_call carries toolName + rawInput; the result update carries
+  // toolName + rawOutput. Both must reach the ToolCallItem, and — critically —
+  // a status-only update must NOT erase them (rule 02 persisted-parity).
+  // -------------------------------------------------------------------------
+
+  it('extracts toolName, rawInput and rawOutput from tool metadata', () => {
+    const meta = {
+      toolCallId: 'tc-doc',
+      title: 'Display document',
+      status: 'completed',
+      toolName: 'mcp__sam-mcp__display_from_library',
+      rawInput: { fileId: 'file-1', caption: 'the auth doc' },
+      rawOutput: [{ type: 'text', text: '{"fileId":"file-1","filename":"auth.md","mimeType":"text/markdown","sizeBytes":1234}' }],
+    };
+    const items = chatMessagesToConversationItems([
+      toolMsg({ content: '(tool call)', toolMetadata: meta }),
+    ]);
+
+    expect(items[0]).toMatchObject({
+      kind: 'tool_call',
+      toolName: 'mcp__sam-mcp__display_from_library',
+      rawInput: { fileId: 'file-1', caption: 'the auth doc' },
+    });
+    const tool = items[0] as { rawOutput: Array<{ type: string; text: string }> };
+    expect(tool.rawOutput[0]?.type).toBe('text');
+  });
+
+  it('merges rawOutput from the result update while keeping rawInput from the initial call', () => {
+    // Real upload/display flow: initial tool_call has toolName + rawInput (args),
+    // the completed update has toolName + rawOutput (the MCP result payload).
+    const initial = {
+      toolCallId: 'tc-upload',
+      status: 'pending',
+      toolName: 'mcp__sam-mcp__upload_to_library',
+      rawInput: { filePath: '/tmp/auth.md', directory: '/docs/' },
+    };
+    const result = {
+      toolCallId: 'tc-upload',
+      status: 'completed',
+      toolName: 'mcp__sam-mcp__upload_to_library',
+      rawOutput: [{ type: 'text', text: '{"fileId":"f-9","filename":"auth.md","mimeType":"text/markdown","sizeBytes":900}' }],
+    };
+    const items = chatMessagesToConversationItems([
+      toolMsg({ id: 'up-start', content: '(tool call)', toolMetadata: initial }),
+      toolMsg({ id: 'up-done', content: '(tool update)', toolMetadata: result }),
+    ]);
+
+    expect(items).toHaveLength(1);
+    const tool = items[0] as {
+      toolName: string;
+      status: string;
+      rawInput: { filePath: string };
+      rawOutput: Array<{ text: string }>;
+    };
+    expect(tool.toolName).toBe('mcp__sam-mcp__upload_to_library');
+    expect(tool.status).toBe('completed');
+    // rawInput survived from the initial call
+    expect(tool.rawInput.filePath).toBe('/tmp/auth.md');
+    // rawOutput arrived on the update
+    expect(tool.rawOutput[0]?.text).toContain('"fileId":"f-9"');
+  });
+
+  it('does NOT erase toolName/rawInput/rawOutput when a status-only update merges in (regression)', () => {
+    // A6 regression: the completed tool_call_update may be a bare status change
+    // with no toolName/rawInput/rawOutput. The card metadata captured on the
+    // initial call must survive so DocumentCard still renders after reload.
+    const initial = {
+      toolCallId: 'tc-keep-card',
+      status: 'in_progress',
+      toolName: 'mcp__sam-mcp__display_from_library',
+      rawInput: { fileId: 'file-keep' },
+      rawOutput: [{ type: 'text', text: '{"fileId":"file-keep","filename":"guide.md","mimeType":"text/markdown","sizeBytes":42}' }],
+    };
+    const statusOnly = {
+      toolCallId: 'tc-keep-card',
+      status: 'completed',
+    };
+    const items = chatMessagesToConversationItems([
+      toolMsg({ id: 'keep-start', content: '(tool call)', toolMetadata: initial }),
+      toolMsg({ id: 'keep-done', content: '(tool update)', toolMetadata: statusOnly }),
+    ]);
+
+    expect(items).toHaveLength(1);
+    const tool = items[0] as {
+      status: string;
+      toolName?: string;
+      rawInput?: { fileId: string };
+      rawOutput?: Array<{ text: string }>;
+    };
+    expect(tool.status).toBe('completed');
+    expect(tool.toolName).toBe('mcp__sam-mcp__display_from_library');
+    expect(tool.rawInput?.fileId).toBe('file-keep');
+    expect(tool.rawOutput?.[0]?.text).toContain('guide.md');
+  });
 });
