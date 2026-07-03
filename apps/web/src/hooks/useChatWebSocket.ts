@@ -189,7 +189,12 @@ export function useChatWebSocket({
           } else if (data.type === 'session.activity') {
             const p = payload;
             if (p.sessionId !== sessionId) return;
-            if (p.activity === 'prompting' || p.activity === 'idle') {
+            if (
+              p.activity === 'prompting'
+              || p.activity === 'idle'
+              || p.activity === 'recovering'
+              || p.activity === 'error'
+            ) {
               onAgentActivityRef.current?.(p.activity, p.promptStartedAt ?? null);
             }
           }

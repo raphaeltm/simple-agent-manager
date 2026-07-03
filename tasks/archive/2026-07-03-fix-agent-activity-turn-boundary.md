@@ -28,7 +28,8 @@ Long silent tool calls can make the project chat activity indicator decay to idl
 - [x] Rehydrate client activity from polling and reconnect snapshots, including `recovering` and `error`.
 - [x] Move the reconnect backlog task to archive after implementing its criteria.
 - [x] Add/extend Go, schema, DO, client timer, and vertical slice tests.
-- [ ] Run required quality checks, specialist reviews, staging verification, PR, and merge per `/do`.
+- [x] Run local quality checks and visual audit.
+- [ ] Run specialist reviews, staging verification, PR, and merge per `/do`.
 
 ## Rule 47 control-loop load review
 
@@ -46,6 +47,21 @@ Long silent tool calls can make the project chat activity indicator decay to idl
 - [x] No client or server timer decays to idle on silence alone.
 - [x] Activity thresholds and retry intervals are configurable with `DEFAULT_*` constants.
 - [x] Reconciler changes include a rule 47 load review and zombie prevention test.
+
+## Local validation
+
+- `go test ./internal/acp` from `packages/vm-agent`
+- `pnpm --filter @simple-agent-manager/api test -- tests/unit/acp-session-activity-schema.test.ts tests/unit/durable-objects/session-state-reconciliation.test.ts tests/unit/durable-objects/session-state-mirror.test.ts`
+- `pnpm --filter @simple-agent-manager/web test -- tests/unit/components/project-message-view-status-timer.test.ts`
+- `pnpm --filter @simple-agent-manager/api typecheck`
+- `pnpm --filter @simple-agent-manager/web typecheck`
+- `pnpm --filter @simple-agent-manager/api lint`
+- `pnpm --filter @simple-agent-manager/web lint`
+- `pnpm lint`
+- `pnpm typecheck`
+- `pnpm test`
+- `pnpm build`
+- `npx playwright test tests/playwright/completion-dock-audit.spec.ts tests/playwright/project-agent-chat-audit.spec.ts --project="iPhone SE (375x667)" --project="Desktop (1280x800)"`
 
 ## References
 
