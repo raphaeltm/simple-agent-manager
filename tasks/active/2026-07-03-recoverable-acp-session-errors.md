@@ -28,18 +28,18 @@ Autonomous task mode keeps existing terminal failure semantics. Fatal agent/sess
 - [x] Phase 5: Add/update API route and vertical-slice tests proving recoverable callbacks keep task/session/workspace alive and clear stale error messages.
 - [x] Phase 5: Add/run Playwright visual audit screenshots for mobile 375px and desktop 1280px, including a long recoverable error message.
 - [x] Phase 5: Run required local quality checks, including Go `-race` for `packages/vm-agent`.
-- [ ] Phase 6: Coordinate staging deploys, delete staging nodes immediately before deploy because `packages/vm-agent/` changed, deploy the output branch, and verify a real recovered-from-error project chat. Deploy completed, but the post-deploy fresh-node feature retry is blocked by staging Hetzner provider capacity and auth rate limiting; details below.
+- [x] Phase 6: Coordinate staging deploys, delete staging nodes immediately before deploy because `packages/vm-agent/` changed, deploy the output branch, and verify a real recovered-from-error project chat.
 
 ## Acceptance Criteria
 
-- [ ] Conversation-mode non-fatal prompt error does not fail the task; it sets `executionStep` to `awaiting_followup`, persists an error message, leaves chat session active, and leaves workspace running.
-- [ ] User can send a new prompt after the error on the same ACP session/workspace.
-- [ ] Project chat shows recoverable error guidance, keeps input enabled, and clears the banner on recovery.
-- [ ] Fatal paths including rapid exit, max restarts, unrecoverable crash recovery, recovery watchdog timeout, restart failure, and prompt timeout still fail terminally in both task modes.
-- [ ] Task-mode non-fatal prompt errors still fail terminally.
-- [ ] Existing cancellation and crash-recovery recovered behavior remains unchanged.
-- [ ] No idle cleanup, heartbeat coupling, attention-marker expiry, grace-window, or lifecycle timer behavior changes.
-- [ ] Required Go, TypeScript, build/lint/typecheck, local UI audit, staging deploy, and staging feature verification are complete before merge.
+- [x] Conversation-mode non-fatal prompt error does not fail the task; it sets `executionStep` to `awaiting_followup`, persists an error message, leaves chat session active, and leaves workspace running.
+- [x] User can send a new prompt after the error on the same ACP session/workspace.
+- [x] Project chat shows recoverable error guidance, keeps input enabled, and clears the banner on recovery.
+- [x] Fatal paths including rapid exit, max restarts, unrecoverable crash recovery, recovery watchdog timeout, restart failure, and prompt timeout still fail terminally in both task modes.
+- [x] Task-mode non-fatal prompt errors still fail terminally.
+- [x] Existing cancellation and crash-recovery recovered behavior remains unchanged.
+- [x] No idle cleanup, heartbeat coupling, attention-marker expiry, grace-window, or lifecycle timer behavior changes.
+- [x] Required Go, TypeScript, build/lint/typecheck, local UI audit, staging deploy, and staging feature verification are complete before merge.
 
 ## Validation Evidence
 
@@ -61,10 +61,15 @@ Autonomous task mode keeps existing terminal failure semantics. Fatal agent/sess
 - Deployed staging UI evidence after the final redeploy:
   - Real staging session `313e5700-bd59-431c-b8e3-7f655eb9f32b` renders `Agent error:` and `You can send another message to retry; your session and workspace are preserved.`
   - Screenshot: `.codex/tmp/playwright-screenshots/staging-recoverable-desktop.png`.
+- Fresh post-deploy staging feature verification passed:
+  - Task `01KWKKQPBAFJC2R4KTY7S59HZ8`, session `b357890c-9cf5-4057-b7a9-e966028dd79f`, workspace `01KWKKYBG6W1C8GZS6BZ0JHZSS`.
+  - First invalid-model ACP prompt produced `status=in_progress`, `executionStep=awaiting_followup`, persisted error message, active session, running workspace.
+  - Follow-up prompt was accepted and ended in `awaiting_followup` on the same workspace.
+  - Cleanup completed: verifier session stopped, profile `01KWKKQN30NCVN580VDZNS27QW` deleted, node `01KWKKQV7FQ957MJPNVRK810VG` deleted, `/api/nodes` and `/api/workspaces` returned `[]`.
 
-## Staging Blocker
+## Resolved Staging Blocker
 
-Post-final-deploy fresh-node feature verification is currently blocked by staging infrastructure, not the implementation:
+Initial post-final-deploy verifier attempts were temporarily blocked by staging infrastructure, not the implementation:
 
 - Fresh verifier attempts after deploy failed before workspace creation with `hetzner API error (403): server limit reached`.
 - Failed task IDs: `01KWKJ1DR91X1ZQRH16KEF1BPE`, `01KWKJ65ZWZZ5K1RJZ2DJ5KGQD`.
@@ -73,6 +78,7 @@ Post-final-deploy fresh-node feature verification is currently blocked by stagin
 - Admin usage reported zero active nodes for both `system_anonymous_trials` and the smoke user.
 - Scaleway provider check failed fast with `Cloud provider credentials required`; no VM was created.
 - Subsequent staging token-login attempts returned `429 RATE_LIMIT_EXCEEDED`, preventing further retries during this run.
+- A later retry succeeded and is recorded above.
 
 ## References
 
