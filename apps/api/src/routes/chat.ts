@@ -140,6 +140,16 @@ function getSessionMessageLimit(env: Env, requestedLimit?: string): number {
     ? configuredMax
     : DEFAULT_CHAT_SESSION_MESSAGE_MAX;
   // Guard against misconfiguration where the default page size exceeds the max.
+  // We promote the ceiling to the page size so the default page always fits, but
+  // this silently overrides an operator's intended (smaller) ceiling — warn so it
+  // is visible in `wrangler tail`.
+  if (maxLimit < defaultLimit) {
+    log.warn('chat.session_message_limit_misconfigured', {
+      defaultLimit,
+      maxLimit,
+      effectiveMax: defaultLimit,
+    });
+  }
   const effectiveMax = Math.max(defaultLimit, maxLimit);
   const parsedLimit = Number.parseInt(requestedLimit || '', 10);
   const limit = Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : defaultLimit;

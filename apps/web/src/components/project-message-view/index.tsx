@@ -273,7 +273,9 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     }
   }, [pendingJump, itemIndexById, conversationItems, lc.loadingMore, scrollAndHighlight]);
 
-  // Auto-clear the jump highlight after the flash animation.
+  // Auto-clear the jump highlight after the flash animation. The 2200ms here is
+  // coupled to the `.sam-message-highlight` animation-duration (2.2s) in index.css
+  // — keep the two in sync. Re-jumping resets the timer via this effect's cleanup.
   useEffect(() => {
     if (!highlightedItemId) return;
     const timer = setTimeout(() => setHighlightedItemId(null), 2200);

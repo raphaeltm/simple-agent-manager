@@ -133,7 +133,7 @@ export function ChatTimelineDrawer({
                       <TimelineItem dot={{ color: DOT_COLOR_USER }}>
                         <button
                           type="button"
-                          className="w-full text-left py-1.5 px-1 rounded hover:bg-bg-hover transition-colors group cursor-pointer"
+                          className="w-full text-left py-1.5 px-1 rounded hover:bg-bg-hover transition-colors group cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
                           onClick={() => onJump({ messageId: entry.messageId, timestamp: entry.timestamp })}
                         >
                           <div className="text-xs text-fg-muted mb-0.5">
@@ -148,7 +148,8 @@ export function ChatTimelineDrawer({
                       <TimelineItem dot={{ color: DOT_COLOR_PROGRESS, muted: true }}>
                         <button
                           type="button"
-                          className="w-full text-left py-1.5 px-1 rounded hover:bg-bg-hover transition-colors group cursor-pointer"
+                          aria-label={`Jump to conversation near status update: ${entry.title}`}
+                          className="w-full text-left py-1.5 px-1 rounded hover:bg-bg-hover transition-colors group cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
                           onClick={() => onJump({ timestamp: entry.timestamp })}
                         >
                           <div className="text-xs text-fg-muted mb-0.5">
@@ -171,7 +172,8 @@ export function ChatTimelineDrawer({
                       >
                         <button
                           type="button"
-                          className="w-full text-left py-1.5 px-1 rounded hover:bg-bg-hover transition-colors group cursor-pointer"
+                          aria-label={`Jump to conversation near activity: ${entry.title}`}
+                          className="w-full text-left py-1.5 px-1 rounded hover:bg-bg-hover transition-colors group cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
                           onClick={() => onJump({ timestamp: entry.timestamp })}
                         >
                           <div className="text-xs text-fg-muted mb-0.5">

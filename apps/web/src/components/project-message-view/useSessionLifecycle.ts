@@ -1,5 +1,5 @@
 import type { NodeResponse, WorkspaceResponse } from '@simple-agent-manager/shared';
-import { DEFAULT_CHAT_SESSION_MESSAGE_LIMIT, DEFAULT_CHAT_SESSION_MESSAGE_MAX } from '@simple-agent-manager/shared';
+import { DEFAULT_CHAT_LOAD_UNTIL_MAX_PAGES, DEFAULT_CHAT_SESSION_MESSAGE_LIMIT, DEFAULT_CHAT_SESSION_MESSAGE_MAX } from '@simple-agent-manager/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { ChatConnectionState } from '../../hooks/useChatWebSocket';
@@ -456,9 +456,12 @@ export function useSessionLifecycle(
       let before: number | undefined = oldest === Infinity ? undefined : oldest;
       const accumulated: ChatMessageResponse[] = [];
       // Safety bound: never loop unbounded even if the server misreports hasMore.
-      const MAX_PAGES = 400;
+      const maxPages = Number.parseInt(
+        import.meta.env.VITE_CHAT_LOAD_UNTIL_MAX_PAGES || '',
+        10,
+      ) || DEFAULT_CHAT_LOAD_UNTIL_MAX_PAGES;
       let pages = 0;
-      while (more && oldest > targetTimestamp && pages++ < MAX_PAGES) {
+      while (more && oldest > targetTimestamp && pages++ < maxPages) {
         const data = await getChatSession(projectId, sessionId, {
           before,
           limit: DEFAULT_CHAT_SESSION_MESSAGE_LIMIT,

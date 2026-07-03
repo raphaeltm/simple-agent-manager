@@ -1,4 +1,4 @@
-import { type Page, type Route, test } from '@playwright/test';
+import { expect, type Page, type Route, test } from '@playwright/test';
 
 import { assertNoOverflow, makeMockUser, screenshot } from './audit-helpers';
 
@@ -320,5 +320,39 @@ test.describe('ChatTimelineDrawer — Desktop', () => {
     await page.waitForTimeout(600);
     await screenshot(page, 'timeline-drawer-desktop-context');
     await assertNoOverflow(page);
+  });
+
+  test('clicking a user-message entry closes the drawer and highlights the message', async ({ page }) => {
+    await setupMocks(page);
+    await page.goto('/projects/proj-test-1/chat/cs-1');
+    await page.waitForTimeout(2000);
+
+    await openTimeline(page);
+    await page.waitForTimeout(500);
+
+    const dialog = page.getByRole('dialog');
+    // Click a user-message entry inside the timeline (scoped to the dialog so it
+    // does not match the same text in the underlying chat transcript).
+    await dialog.getByText('Please implement the new timeline feature for our chat interface').click();
+
+    // The drawer closes and the jumped-to message flashes.
+    await expect(dialog).toBeHidden({ timeout: 3000 });
+    await expect(page.locator('.sam-message-highlight').first()).toBeVisible({ timeout: 3000 });
+    await screenshot(page, 'timeline-drawer-jump-highlight');
+  });
+
+  test('clicking a status-update entry closes the drawer (jumps to nearest message)', async ({ page }) => {
+    await setupMocks(page);
+    await page.goto('/projects/proj-test-1/chat/cs-1');
+    await page.waitForTimeout(2000);
+
+    await openTimeline(page);
+    await page.waitForTimeout(500);
+
+    const dialog = page.getByRole('dialog');
+    await dialog.getByText('Dependency installation finished successfully. Running focused timeline tests next.').click();
+
+    await expect(dialog).toBeHidden({ timeout: 3000 });
+    await expect(page.locator('.sam-message-highlight').first()).toBeVisible({ timeout: 3000 });
   });
 });

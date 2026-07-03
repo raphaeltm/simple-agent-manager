@@ -86,6 +86,8 @@ See `apps/api/.env.example` for the full list. Key variables:
 
 - `TASK_LIST_DEFAULT_PAGE_SIZE` — Default task/project list page size
 - `TASK_LIST_MAX_PAGE_SIZE` — Maximum task/project list page size
+- `CHAT_SESSION_MESSAGE_LIMIT` — Default page size for chat session message REST responses when no limit is requested — used by the 3s poll and load-more (default: 500)
+- `CHAT_SESSION_MESSAGE_MAX` — Ceiling any chat session message request is clamped to; the initial full-conversation load requests up to this (default: 50000)
 
 ### Timeouts
 

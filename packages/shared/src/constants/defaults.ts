@@ -82,6 +82,14 @@ export const DEFAULT_CHAT_SESSION_MESSAGE_LIMIT = 500;
 export const DEFAULT_CHAT_SESSION_MESSAGE_MAX = 50000;
 
 /**
+ * Safety bound on how many older pages the chat client will fetch while chasing a
+ * timeline jump target that predates the loaded window (the rare oversized-session
+ * fallback). Bounds the load-until loop so a server misreporting `hasMore` can
+ * never loop unbounded. Override at build time via VITE_CHAT_LOAD_UNTIL_MAX_PAGES.
+ */
+export const DEFAULT_CHAT_LOAD_UNTIL_MAX_PAGES = 400;
+
+/**
  * Whether chat session message loads strip tool_metadata.content by default.
  * When true, tool call content is lazy-loaded on demand when users expand
  * individual tool calls, dramatically reducing RPC payload size.

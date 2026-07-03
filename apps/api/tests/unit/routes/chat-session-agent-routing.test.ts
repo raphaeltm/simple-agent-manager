@@ -344,6 +344,37 @@ describe('chatRoutes agent session routing', () => {
     );
   });
 
+  it('promotes the ceiling to the page size when misconfigured (default > max)', async () => {
+    mocks.listAcpSessions.mockResolvedValue({
+      sessions: [],
+      total: 0,
+    });
+
+    // Operator misconfiguration: page-size default (8000) exceeds the ceiling (3000).
+    // The guard promotes the effective ceiling to the page size so the default page
+    // still fits — an unspecified request resolves to the default, not the smaller max.
+    const response = await app.request(
+      '/api/projects/proj-1/sessions/chat-1',
+      { method: 'GET' },
+      {
+        DATABASE: {} as D1Database,
+        CHAT_SESSION_MESSAGE_LIMIT: '8000',
+        CHAT_SESSION_MESSAGE_MAX: '3000',
+      } as Env,
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.getMessages).toHaveBeenCalledWith(
+      expect.anything(),
+      'proj-1',
+      'chat-1',
+      8000,
+      null,
+      undefined,
+      true,
+    );
+  });
+
   it('uses CHAT_SESSION_MESSAGE_LIMIT as the page size when no limit is requested', async () => {
     mocks.listAcpSessions.mockResolvedValue({
       sessions: [],

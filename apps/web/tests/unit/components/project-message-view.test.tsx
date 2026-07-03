@@ -8,6 +8,7 @@
  * Fix: Added AbortController to the polling useEffect so in-flight requests
  * are cancelled when the session changes.
  */
+import { DEFAULT_CHAT_SESSION_MESSAGE_LIMIT, DEFAULT_CHAT_SESSION_MESSAGE_MAX } from '@simple-agent-manager/shared';
 import { act, fireEvent,render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -183,6 +184,26 @@ describe('ProjectMessageView — session isolation', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it('loads the full conversation on open and polls with only the small window', async () => {
+    const limits: Array<number | undefined> = [];
+    mocks.getChatSession.mockImplementation(async (_p: string, _s: string, params?: { limit?: number }) => {
+      limits.push(params?.limit);
+      return makeSessionResponse('session-A', [makeMessage('m1', 'session-A', 'Hi')]);
+    });
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-A" />);
+
+    // Initial load requests the full-conversation ceiling.
+    await waitFor(() => expect(limits.length).toBeGreaterThanOrEqual(1));
+    expect(limits[0]).toBe(DEFAULT_CHAT_SESSION_MESSAGE_MAX);
+
+    // The 3s poll must request only the small recent window — never the ceiling.
+    await act(async () => { await vi.advanceTimersByTimeAsync(3200); });
+    await waitFor(() => expect(limits.length).toBeGreaterThanOrEqual(2));
+    expect(limits.slice(1)).toContain(DEFAULT_CHAT_SESSION_MESSAGE_LIMIT);
+    expect(limits.slice(1)).not.toContain(DEFAULT_CHAT_SESSION_MESSAGE_MAX);
   });
 
   it('does not apply polling response from a different session', async () => {

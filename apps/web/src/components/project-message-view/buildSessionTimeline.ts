@@ -37,7 +37,9 @@ function getTaskSeverity(payload: Record<string, unknown> | null): Severity {
 
 function getTaskTitle(payload: Record<string, unknown> | null): string {
   const toStatus = payload?.toStatus as string | undefined;
-  if (toStatus) return `Task ${toStatus}`;
+  // Humanize the raw status identifier (e.g. "in_progress" → "in progress")
+  // so the timeline shows user-facing labels, not snake_case programmer values.
+  if (toStatus) return `Task ${toStatus.replace(/_/g, ' ')}`;
   return 'Task status changed';
 }
 
