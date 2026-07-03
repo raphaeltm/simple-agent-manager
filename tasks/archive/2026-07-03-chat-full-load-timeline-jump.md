@@ -155,7 +155,13 @@ a size-capped fallback to pagination only for the rare oversized tail.
       and jump still resolves (load-until).
 - [x] Ceiling + poll size are env-configurable (`CHAT_SESSION_MESSAGE_MAX`,
       `CHAT_SESSION_MESSAGE_LIMIT`) — no hardcoded operational limits.
-- [ ] Staging verified end-to-end via Playwright (Phase 6). Local Playwright visual audit already passes.
+- [x] Staging verified end-to-end via Playwright (Phase 6) — 2026-07-03 against
+      app.sammy.party (desktop + mobile): full conversation loads on open (0 "Load
+      earlier messages" buttons); clicking a user-message timeline entry scrolls +
+      flash-highlights the target; clicking a status/activity (context) entry
+      jumps + highlights the nearest message. Zero feature errors (the only
+      console errors were a pre-existing 404 for a deleted workspace on the old
+      ended session and an aborted transcribe request — unrelated to the timeline).
 
 ## Staging verification post-mortem (2026-07-03) — jump dead-click on virtualized sessions
 
