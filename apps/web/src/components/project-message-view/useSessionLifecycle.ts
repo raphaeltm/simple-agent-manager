@@ -10,17 +10,12 @@ import { cancelAgentPrompt, getChatSession, getNode, getTerminalToken, getTransc
 import { mergeMessages } from '../../lib/merge-messages';
 import { isWorkspaceOperational } from '../../lib/workspace-status-utils';
 import type { SessionState } from './types';
-import { deriveSessionState, IDLE_TIMEOUT_MS, VIRTUAL_START } from './types';
+import type { AgentActivityState } from './types';
+import { deriveSessionState, IDLE_TIMEOUT_MS, isWorkingActivity, VIRTUAL_START } from './types';
+import { useActivityVerifyTimer } from './useActivityVerifyTimer';
 import { useConnectionRecovery } from './useConnectionRecovery';
 
-/** Agent activity state derived from message flow (no ACP connection needed). */
-export type AgentActivityState = 'idle' | 'prompting' | 'responding' | 'recovering';
-
 type FilePanelState = { mode: 'browse' | 'view' | 'diff' | 'git-status'; path?: string; line?: number | null } | null;
-
-function isWorkingActivity(activity: SessionStateSnapshot['activity'] | AgentActivityState | undefined | null): activity is 'prompting' | 'recovering' {
-  return activity === 'prompting' || activity === 'recovering';
-}
 
 export interface UseSessionLifecycleResult {
   session: ChatSessionResponse | null;
@@ -85,53 +80,17 @@ export function useSessionLifecycle(
   const [sendingFollowUp, setSendingFollowUp] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [agentActivity, setAgentActivity] = useState<AgentActivityState>('idle');
-  const idleTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const verifyAbortRef = useRef<AbortController | null>(null);
-  const nullStateVerifyCountRef = useRef(0);
   const [currentPlan, setCurrentPlan] = useState<SessionStateSnapshot['currentPlan']>(null);
   const [promptStartedAt, setPromptStartedAt] = useState<number | null>(null);
   const clearActivity = useCallback(() => { setAgentActivity('idle'); setPromptStartedAt(null); }, []);
 
-  // Shared verify-before-decay timer. Both onAgentActivity('prompting') and onMessage
-  // (agent output streaming) arm this single timer so they stop fighting over idleTimerRef.
-  // After IDLE_TIMEOUT_MS of silence it verifies DO state before decaying: while the DO
-  // still reports activity === 'prompting' it re-arms instead of flipping to idle. This is
-  // what keeps the status bar (and Cancel button) alive through long >30s tool-call silences.
-  const startVerifyDecayTimer = useCallback(() => {
-    clearTimeout(idleTimerRef.current);
-    verifyAbortRef.current?.abort();
-    const abortController = new AbortController();
-    verifyAbortRef.current = abortController;
-    const armVerifyTimer = () => {
-      idleTimerRef.current = setTimeout(async () => {
-        if (abortController.signal.aborted) return;
-        try {
-          const data = await getChatSession(projectId, sessionId, {
-            limit: 0,
-            signal: abortController.signal,
-          });
-          if (abortController.signal.aborted) return;
-          const activity = data.state?.activity;
-          if (isWorkingActivity(activity)) {
-            nullStateVerifyCountRef.current = 0;
-            armVerifyTimer();
-          } else if (activity == null && nullStateVerifyCountRef.current < 3) {
-            nullStateVerifyCountRef.current += 1;
-            armVerifyTimer();
-          } else {
-            nullStateVerifyCountRef.current = 0;
-            clearActivity();
-          }
-        } catch (err) {
-          if (!abortController.signal.aborted) {
-            console.warn('Agent activity verify failed; re-arming timer', err);
-            armVerifyTimer();
-          }
-        }
-      }, IDLE_TIMEOUT_MS);
-    };
-    armVerifyTimer();
-  }, [projectId, sessionId, clearActivity]);
+  const { startVerifyDecayTimer, stopVerifyDecayTimer } = useActivityVerifyTimer({
+    projectId,
+    sessionId,
+    delayMs: IDLE_TIMEOUT_MS,
+    logMessage: 'Agent activity verify failed; re-arming timer',
+    onVerifiedIdle: clearActivity,
+  });
 
   const hydrateState = useCallback((s: SessionStateSnapshot | null | undefined) => {
     if (!s) return;
@@ -141,12 +100,10 @@ export function useSessionLifecycle(
       startVerifyDecayTimer();
     } else {
       clearActivity();
-      clearTimeout(idleTimerRef.current);
-      verifyAbortRef.current?.abort();
-      verifyAbortRef.current = null;
+      stopVerifyDecayTimer();
     }
     if (s.currentPlan) setCurrentPlan(s.currentPlan);
-  }, [clearActivity, startVerifyDecayTimer]);
+  }, [clearActivity, startVerifyDecayTimer, stopVerifyDecayTimer]);
 
   const [filePanel, setFilePanel] = useState<FilePanelState>(null);
 
@@ -189,10 +146,8 @@ export function useSessionLifecycle(
       setAgentActivity('idle');
       setPromptStartedAt(null);
       // Stop any pending verify timer so it can't re-arm and flash the bar back on.
-      clearTimeout(idleTimerRef.current);
-      verifyAbortRef.current?.abort();
-      verifyAbortRef.current = null;
-    }, []),
+      stopVerifyDecayTimer();
+    }, [stopVerifyDecayTimer]),
     onCatchUp: useCallback((catchUpMessages: ChatMessageResponse[], catchUpSession: ChatSessionResponse, state?: SessionStateSnapshot | null) => {
       setSession(catchUpSession);
       setMessages((prev) => mergeMessages(prev, catchUpMessages, 'replace'));
@@ -203,10 +158,8 @@ export function useSessionLifecycle(
       setAgentActivity('idle');
       setPromptStartedAt(null);
       // Stop any pending verify timer so it can't re-arm and flash the bar back on.
-      clearTimeout(idleTimerRef.current);
-      verifyAbortRef.current?.abort();
-      verifyAbortRef.current = null;
-    }, []),
+      stopVerifyDecayTimer();
+    }, [stopVerifyDecayTimer]),
     onAgentActivity: useCallback((activity: 'prompting' | 'idle' | 'recovering' | 'error', promptStartedAt?: number | null) => {
       const working = activity === 'prompting' || activity === 'recovering';
       setAgentActivity(working ? activity : 'idle');
@@ -216,11 +169,9 @@ export function useSessionLifecycle(
         startVerifyDecayTimer();
       } else {
         // Authoritative idle from the DO: stop any pending verify timer.
-        clearTimeout(idleTimerRef.current);
-        verifyAbortRef.current?.abort();
-        verifyAbortRef.current = null;
+        stopVerifyDecayTimer();
       }
-    }, [startVerifyDecayTimer]),
+    }, [startVerifyDecayTimer, stopVerifyDecayTimer]),
   });
 
   // Connection recovery (banner debounce, idle timer, auto-resume)
@@ -236,13 +187,10 @@ export function useSessionLifecycle(
 
   // Reset virtual scroll and idle timer on session change; cleanup on unmount
   useEffect(() => {
-    clearTimeout(idleTimerRef.current);
-    verifyAbortRef.current?.abort();
-    verifyAbortRef.current = null;
+    stopVerifyDecayTimer();
     setFirstItemIndex(VIRTUAL_START);
     setShowScrollButton(false);
-    return () => { clearTimeout(idleTimerRef.current); verifyAbortRef.current?.abort(); };
-  }, [sessionId]);
+  }, [sessionId, stopVerifyDecayTimer]);
 
   // Load session
   const loadSession = useCallback(async () => {

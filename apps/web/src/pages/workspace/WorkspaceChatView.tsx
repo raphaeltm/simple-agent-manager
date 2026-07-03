@@ -19,21 +19,16 @@ import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 
 import { AcpConversationItemView } from '../../components/project-message-view/AcpConversationItemView';
 import { FollowUpInput } from '../../components/project-message-view/FollowUpInput';
-import { chatMessagesToConversationItems, deriveSessionState, VIRTUAL_START } from '../../components/project-message-view/types';
+import type { AgentActivityState } from '../../components/project-message-view/types';
+import { chatMessagesToConversationItems, deriveSessionState, isWorkingActivity, VIRTUAL_START } from '../../components/project-message-view/types';
+import { useActivityVerifyTimer } from '../../components/project-message-view/useActivityVerifyTimer';
 import { useChatWebSocket } from '../../hooks/useChatWebSocket';
 import { cancelAgentPrompt, getChatSession, getTranscribeApiUrl, resetIdleTimer, sendFollowUpPrompt, uploadSessionFiles } from '../../lib/api';
 import type { ChatMessageResponse, ChatSessionDetailResponse, ChatSessionResponse, SessionStateSnapshot } from '../../lib/api/sessions';
 import { mergeMessages } from '../../lib/merge-messages';
 
-/** Agent activity state derived from message flow (no ACP connection needed). */
-type AgentActivityState = 'idle' | 'prompting' | 'responding' | 'recovering';
-
 /** Seconds of silence after last assistant message before returning to idle. */
 const IDLE_TIMEOUT_MS = 3000;
-
-function isWorkingActivity(activity: SessionStateSnapshot['activity'] | AgentActivityState | undefined | null): activity is 'prompting' | 'recovering' {
-  return activity === 'prompting' || activity === 'recovering';
-}
 
 interface WorkspaceChatViewProps {
   projectId: string;
@@ -65,9 +60,6 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
 
   // ── Agent activity state (derived from message flow) ──
   const [agentActivity, setAgentActivity] = useState<AgentActivityState>('idle');
-  const idleTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const verifyAbortRef = useRef<AbortController | null>(null);
-  const nullStateVerifyCountRef = useRef(0);
 
   // ── Scroll ──
   const [firstItemIndex, setFirstItemIndex] = useState(VIRTUAL_START);
@@ -80,41 +72,13 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
     setAgentActivity('idle');
   }, []);
 
-  const startVerifyDecayTimer = useCallback(() => {
-    clearTimeout(idleTimerRef.current);
-    verifyAbortRef.current?.abort();
-    const abortController = new AbortController();
-    verifyAbortRef.current = abortController;
-    const armVerifyTimer = () => {
-      idleTimerRef.current = setTimeout(async () => {
-        if (abortController.signal.aborted) return;
-        try {
-          const data = await getChatSession(projectId, sessionId, {
-            limit: 0,
-            signal: abortController.signal,
-          });
-          if (abortController.signal.aborted) return;
-          const activity = data.state?.activity;
-          if (isWorkingActivity(activity)) {
-            nullStateVerifyCountRef.current = 0;
-            armVerifyTimer();
-          } else if (activity == null && nullStateVerifyCountRef.current < 3) {
-            nullStateVerifyCountRef.current += 1;
-            armVerifyTimer();
-          } else {
-            nullStateVerifyCountRef.current = 0;
-            clearActivity();
-          }
-        } catch (err) {
-          if (!abortController.signal.aborted) {
-            console.warn('Workspace chat activity verify failed; re-arming timer', err);
-            armVerifyTimer();
-          }
-        }
-      }, IDLE_TIMEOUT_MS);
-    };
-    armVerifyTimer();
-  }, [clearActivity, projectId, sessionId]);
+  const { startVerifyDecayTimer, stopVerifyDecayTimer } = useActivityVerifyTimer({
+    projectId,
+    sessionId,
+    delayMs: IDLE_TIMEOUT_MS,
+    logMessage: 'Workspace chat activity verify failed; re-arming timer',
+    onVerifiedIdle: clearActivity,
+  });
 
   const hydrateActivity = useCallback((state: SessionStateSnapshot | null | undefined) => {
     if (!state) return;
@@ -123,11 +87,9 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
       startVerifyDecayTimer();
     } else {
       clearActivity();
-      clearTimeout(idleTimerRef.current);
-      verifyAbortRef.current?.abort();
-      verifyAbortRef.current = null;
+      stopVerifyDecayTimer();
     }
-  }, [clearActivity, startVerifyDecayTimer]);
+  }, [clearActivity, startVerifyDecayTimer, stopVerifyDecayTimer]);
 
   // ── DO WebSocket for real-time message updates (SOLE message source) ──
   const { connectionState, wsRef } = useChatWebSocket({
@@ -163,11 +125,9 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
         startVerifyDecayTimer();
       } else {
         clearActivity();
-        clearTimeout(idleTimerRef.current);
-        verifyAbortRef.current?.abort();
-        verifyAbortRef.current = null;
+        stopVerifyDecayTimer();
       }
-    }, [clearActivity, startVerifyDecayTimer]),
+    }, [clearActivity, startVerifyDecayTimer, stopVerifyDecayTimer]),
   });
 
   // ── Load session data ──
@@ -185,7 +145,7 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
     } finally {
       setLoading(false);
     }
-  }, [projectId, sessionId]);
+  }, [projectId, sessionId, hydrateActivity]);
 
   useEffect(() => { void loadSession(); }, [loadSession]);
 
@@ -193,18 +153,8 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
   useEffect(() => {
     setFirstItemIndex(VIRTUAL_START);
     setShowScrollButton(false);
-    clearTimeout(idleTimerRef.current);
-    verifyAbortRef.current?.abort();
-    verifyAbortRef.current = null;
-  }, [sessionId]);
-
-  // Cleanup idle timer on unmount
-  useEffect(() => {
-    return () => {
-      clearTimeout(idleTimerRef.current);
-      verifyAbortRef.current?.abort();
-    };
-  }, []);
+    stopVerifyDecayTimer();
+  }, [sessionId, stopVerifyDecayTimer]);
 
   // ── Conversation items from DO messages only (single source) ──
   const conversationItems = useMemo<ConversationItem[]>(() => {
