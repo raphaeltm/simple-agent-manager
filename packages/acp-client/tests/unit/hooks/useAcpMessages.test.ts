@@ -114,6 +114,80 @@ describe('useAcpMessages tool call parsing', () => {
       text: 'Command completed successfully',
     });
   });
+
+  it('captures toolName from _meta and rawInput on the initial tool_call, then rawOutput on the result update without erasing rawInput', () => {
+    const { result } = renderHook(() => useAcpMessages());
+
+    act(() => {
+      // Initial call: adapter sends _meta.claudeCode.toolName + rawInput (args)
+      result.current.processMessage(sessionUpdateMessage({
+        sessionUpdate: 'tool_call',
+        toolCallId: 'tc-doc',
+        title: 'Display document',
+        status: 'pending',
+        _meta: { claudeCode: { toolName: 'mcp__sam-mcp__display_from_library' } },
+        rawInput: { fileId: 'file-1', caption: 'the auth doc' },
+      }));
+
+      // Result update: adapter sends toolName + rawOutput (MCP content array),
+      // but no rawInput. rawInput must survive.
+      result.current.processMessage(sessionUpdateMessage({
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'tc-doc',
+        status: 'completed',
+        _meta: { claudeCode: { toolName: 'mcp__sam-mcp__display_from_library' } },
+        rawOutput: [{ type: 'text', text: '{"fileId":"file-1","filename":"auth.md","mimeType":"text/markdown","sizeBytes":1234}' }],
+      }));
+    });
+
+    const item = result.current.items.find(
+      (entry) => entry.kind === 'tool_call' && entry.toolCallId === 'tc-doc'
+    );
+    if (item?.kind !== 'tool_call') {
+      throw new Error('expected tool_call item');
+    }
+
+    expect(item.status).toBe('completed');
+    expect(item.toolName).toBe('mcp__sam-mcp__display_from_library');
+    expect(item.rawInput).toMatchObject({ fileId: 'file-1', caption: 'the auth doc' });
+    const rawOutput = item.rawOutput as Array<{ type: string; text: string }>;
+    expect(rawOutput[0]?.text).toContain('"filename":"auth.md"');
+  });
+
+  it('does not erase toolName/rawInput/rawOutput on a bare status-only tool_call_update (regression)', () => {
+    const { result } = renderHook(() => useAcpMessages());
+
+    act(() => {
+      result.current.processMessage(sessionUpdateMessage({
+        sessionUpdate: 'tool_call',
+        toolCallId: 'tc-keep',
+        title: 'Upload document',
+        status: 'in_progress',
+        _meta: { claudeCode: { toolName: 'mcp__sam-mcp__upload_to_library' } },
+        rawInput: { filePath: '/tmp/doc.md' },
+        rawOutput: [{ type: 'text', text: '{"fileId":"f-keep"}' }],
+      }));
+
+      // A bare status change with no _meta / rawInput / rawOutput.
+      result.current.processMessage(sessionUpdateMessage({
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'tc-keep',
+        status: 'completed',
+      }));
+    });
+
+    const item = result.current.items.find(
+      (entry) => entry.kind === 'tool_call' && entry.toolCallId === 'tc-keep'
+    );
+    if (item?.kind !== 'tool_call') {
+      throw new Error('expected tool_call item');
+    }
+
+    expect(item.status).toBe('completed');
+    expect(item.toolName).toBe('mcp__sam-mcp__upload_to_library');
+    expect(item.rawInput).toMatchObject({ filePath: '/tmp/doc.md' });
+    expect(item.rawOutput).toBeDefined();
+  });
 });
 
 describe('useAcpMessages available_commands_update', () => {

@@ -234,6 +234,12 @@ export function chatMessagesToConversationItems(msgs: ChatMessageResponse[]): Co
         ? kind.charAt(0).toUpperCase() + kind.slice(1)
         : 'Tool Call');
       const locations = (meta?.locations as Array<{ path?: string; line?: number | null }>) ?? [];
+      // Card-critical fields for typed tool-call cards. toolName is the stable
+      // discriminator; rawInput/rawOutput carry the payload (fileId, filename,
+      // mimeType, sizeBytes, caption) and survive compact-mode content stripping.
+      const toolName = meta && typeof meta.toolName === 'string' ? meta.toolName : undefined;
+      const rawInput = meta ? meta.rawInput : undefined;
+      const rawOutput = meta ? meta.rawOutput : undefined;
       const validStatuses = new Set(['pending', 'in_progress', 'completed', 'failed']);
       const rawStatus = meta && typeof meta.status === 'string' ? meta.status : '';
       const status = (validStatuses.has(rawStatus)
@@ -262,6 +268,12 @@ export function chatMessagesToConversationItems(msgs: ChatMessageResponse[]): Co
         if (rawTitle) existing.title = rawTitle;
         if (locations.length > 0) existing.locations = locations.map((l) => ({ path: l.path ?? '', line: l.line ?? null }));
         if (kind !== 'tool') existing.toolKind = kind;
+        // Preserve-on-empty: a status-only tool_call_update must not erase the
+        // toolName/rawInput/rawOutput captured from the initial tool_call (the
+        // result update carries rawOutput; the initial carries rawInput).
+        if (toolName) existing.toolName = toolName;
+        if (rawInput !== undefined) existing.rawInput = rawInput;
+        if (rawOutput !== undefined) existing.rawOutput = rawOutput;
         applyToolContentPointer(existing, contentPointer);
       } else {
         const idx = acc.length;
@@ -275,6 +287,9 @@ export function chatMessagesToConversationItems(msgs: ChatMessageResponse[]): Co
           content: contentItems,
           locations: locations.map((l) => ({ path: l.path ?? '', line: l.line ?? null })),
           timestamp: msg.createdAt,
+          toolName,
+          rawInput,
+          rawOutput,
         };
         applyToolContentPointer(toolItem, contentPointer, true);
         acc.push(toolItem);
