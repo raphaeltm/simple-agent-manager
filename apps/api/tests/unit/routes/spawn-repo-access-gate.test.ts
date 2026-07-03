@@ -33,6 +33,7 @@ const mocks = vi.hoisted(() => ({
   persistMessage: vi.fn(),
   recordActivityEvent: vi.fn(),
   stopSession: vi.fn(),
+  updateSessionTopic: vi.fn(),
   resolveCredentialSource: vi.fn(),
   generateTaskTitle: vi.fn(),
   getTaskTitleConfig: vi.fn(),
@@ -69,7 +70,7 @@ vi.mock('../../../src/services/project-data', () => ({
   persistMessage: mocks.persistMessage,
   recordActivityEvent: mocks.recordActivityEvent,
   stopSession: mocks.stopSession,
-  updateSessionTopic: vi.fn().mockResolvedValue(true),
+  updateSessionTopic: mocks.updateSessionTopic,
 }));
 vi.mock('../../../src/services/provider-credentials', () => ({
   resolveCredentialSource: mocks.resolveCredentialSource,
@@ -125,6 +126,7 @@ function makeProject(overrides: Partial<schema.Project> = {}): schema.Project {
 describe('spawn entry points enforce the user∩app repo-access gate (fail-fast)', () => {
   let whereResponses: unknown[][];
   let limitResponses: unknown[][];
+  let updateSetSpy: ReturnType<typeof vi.fn>;
   const mockEnv = {
     // `prepare` backs the optimistic-lock UPDATE in tasks/run.ts (line 191),
     // which bypasses Drizzle and hits the raw D1 binding. The run happy-path
@@ -148,6 +150,7 @@ describe('spawn entry points enforce the user∩app repo-access gate (fail-fast)
     vi.clearAllMocks();
     whereResponses = [];
     limitResponses = [];
+    updateSetSpy = vi.fn(() => ({ where: vi.fn(() => Promise.resolve(undefined)) }));
 
     const makeSelectBuilder = () => {
       const fromBuilder = {
@@ -164,7 +167,7 @@ describe('spawn entry points enforce the user∩app repo-access gate (fail-fast)
       select: vi.fn(() => makeSelectBuilder()),
       insert: vi.fn(() => ({ values: vi.fn(() => Promise.resolve(undefined)) })),
       update: vi.fn(() => ({
-        set: vi.fn(() => ({ where: vi.fn(() => Promise.resolve(undefined)) })),
+        set: updateSetSpy,
       })),
     };
     (drizzle as unknown as ReturnType<typeof vi.fn>).mockReturnValue(mockDB);
@@ -190,6 +193,7 @@ describe('spawn entry points enforce the user∩app repo-access gate (fail-fast)
     mocks.createSession.mockResolvedValue('sess-1');
     mocks.persistMessage.mockResolvedValue(undefined);
     mocks.recordActivityEvent.mockResolvedValue(undefined);
+    mocks.updateSessionTopic.mockResolvedValue(true);
   });
 
   function buildApp(): Hono<{ Bindings: Env }> {
@@ -349,6 +353,37 @@ describe('spawn entry points enforce the user∩app repo-access gate (fail-fast)
       expect.anything(),
       'Write a detailed implementation plan for async task titles',
       {},
+    );
+  });
+
+  it('task submit: asynchronously updates task title and session topic when AI generation succeeds', async () => {
+    limitResponses.push([INSTALLATION_ROW]); // installation lookup (gate)
+    limitResponses.push([{ githubId: null }]); // user githubId fallback lookup
+    mocks.getUserInstallationRepositories.mockResolvedValue([VISIBLE_REPO]);
+    mocks.truncateTitle.mockReturnValue('Fallback title');
+    mocks.generateTaskTitle.mockResolvedValue('Generated AI title');
+
+    const res = await post(
+      '/api/projects/proj-1/tasks/submit',
+      { message: 'Write a detailed implementation plan for async task titles' },
+      mockExecutionCtx
+    );
+
+    expect(res.status).toBe(202);
+    const waitUntilMock = mockExecutionCtx.waitUntil as unknown as ReturnType<typeof vi.fn>;
+    const titleUpdatePromise = waitUntilMock.mock.calls[0]?.[0] as Promise<void> | undefined;
+    expect(titleUpdatePromise).toBeDefined();
+    await titleUpdatePromise;
+
+    expect(updateSetSpy).toHaveBeenCalledWith(expect.objectContaining({
+      title: 'Generated AI title',
+      updatedAt: expect.any(String),
+    }));
+    expect(mocks.updateSessionTopic).toHaveBeenCalledWith(
+      expect.anything(),
+      'proj-1',
+      'sess-1',
+      'Generated AI title',
     );
   });
 
