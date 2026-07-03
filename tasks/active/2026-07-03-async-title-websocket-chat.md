@@ -15,16 +15,16 @@ Production evidence showed new chat submissions sometimes spent 5-15 seconds bef
 
 ## Implementation Checklist
 
-- [ ] Change `tasks/submit` to create task/session using an immediate deterministic fallback title.
-- [ ] Schedule AI title generation with `executionCtx.waitUntil()` after task/session creation.
-- [ ] Update both the D1 task title and ProjectData session topic when async title generation produces a better title.
-- [ ] Add a lightweight chat session state endpoint that returns ACP activity state without loading messages or task metadata.
-- [ ] Update the web activity verify timer to call the lightweight state endpoint.
-- [ ] Gate full session-detail polling so connected active sessions rely on WebSocket events and reconnect catch-up.
-- [ ] Keep a slower full-session fallback only while the WebSocket is not connected.
-- [ ] Handle `session.updated` WebSocket events so async topic/title changes reach the chat UI live.
-- [ ] Update API reference material for the new endpoint.
-- [ ] Add regression tests proving submit does not await AI title generation, lightweight state reads avoid message loading, and WebSocket session updates are handled.
+- [x] Change `tasks/submit` to create task/session using an immediate deterministic fallback title.
+- [x] Schedule AI title generation with `executionCtx.waitUntil()` after task/session creation.
+- [x] Update both the D1 task title and ProjectData session topic when async title generation produces a better title.
+- [x] Add a lightweight chat session state endpoint that returns ACP activity state without loading messages or task metadata.
+- [x] Update the web activity verify timer to call the lightweight state endpoint.
+- [x] Gate full session-detail polling so connected active sessions rely on WebSocket events and reconnect catch-up.
+- [x] Keep a slower full-session fallback only while the WebSocket is not connected.
+- [x] Handle `session.updated` WebSocket events so async topic/title changes reach the chat UI live.
+- [x] Update API reference material for the new endpoint.
+- [x] Add regression tests proving submit does not await AI title generation, lightweight state reads avoid message loading, and WebSocket session updates are handled.
 - [ ] Run API/web tests, typechecks, lint, and build.
 - [ ] Run specialist validation for API/Cloudflare patterns, UI behavior, tests, task completion, documentation sync, and no-hardcoded-values compliance.
 - [ ] Deploy to staging and verify the changed behavior end-to-end.
