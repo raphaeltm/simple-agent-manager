@@ -15,6 +15,13 @@ const log = createModuleLogger('project_data.session_state');
 
 export const DEFAULT_SESSION_ACTIVITY_STALE_THRESHOLD_MS = 5 * 60 * 1000;
 
+export function parseActivityStaleThreshold(value: string | undefined): number {
+  const parsed = Number.parseInt(value ?? '', 10);
+  return Number.isFinite(parsed) && parsed > 0
+    ? parsed
+    : DEFAULT_SESSION_ACTIVITY_STALE_THRESHOLD_MS;
+}
+
 // --- Write Operations ---
 
 export interface ActivityUpdate {
@@ -72,6 +79,14 @@ export function refreshWorkingActivityForChatSession(
     chatSessionId,
     chatSessionId,
   );
+}
+
+export function resolveActivityChatSessionId(sql: SqlStorage, sessionId: string): string {
+  const row = sql.exec(
+    'SELECT chat_session_id FROM acp_sessions WHERE id = ?',
+    sessionId,
+  ).toArray()[0];
+  return (row?.chat_session_id as string | undefined) ?? sessionId;
 }
 
 export function updateCurrentPlan(
