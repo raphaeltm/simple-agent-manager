@@ -61,6 +61,7 @@ GitHub App refresh tokens are single-use and rotating, so concurrent refreshes a
 - `pnpm lint` (passed with pre-existing warnings only)
 - `pnpm test`
 - `pnpm build`
+- Final post-fix rerun: `pnpm lint && pnpm test && pnpm build`
 - `pnpm --filter @simple-agent-manager/web exec playwright test tests/playwright/github-reauth-prompt-audit.spec.ts`
 - Rule-45 discrimination check: bypassing the GitHub token mutex made `github-user-access-token-lock.test.ts` fail with two refresh POSTs; restoring the mutex made it pass.
 
