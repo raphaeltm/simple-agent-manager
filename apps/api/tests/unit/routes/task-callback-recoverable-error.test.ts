@@ -26,6 +26,16 @@ const mocks = vi.hoisted(() => {
   };
 });
 
+const MOCK_DATABASE_BINDING = {
+  prepare: vi.fn(),
+  batch: vi.fn(),
+};
+
+const MOCK_PROJECT_DATA_BINDING = {
+  idFromName: vi.fn((projectId: string) => projectId),
+  get: vi.fn(),
+};
+
 vi.mock('drizzle-orm/d1', () => ({
   drizzle: () => ({
     select: (selection?: Record<string, unknown>) => ({
@@ -111,8 +121,8 @@ async function postCallback(app: Hono, body: Record<string, unknown>): Promise<R
       body: JSON.stringify(body),
     },
     {
-      DATABASE: {},
-      PROJECT_DATA: {},
+      DATABASE: MOCK_DATABASE_BINDING,
+      PROJECT_DATA: MOCK_PROJECT_DATA_BINDING,
     },
     {
       waitUntil: (promise: Promise<unknown>) => {
@@ -158,6 +168,8 @@ describe('task callback recoverable errors', () => {
       executionStep: 'awaiting_followup',
       errorMessage: 'Provider credits exhausted. Add credits and retry.',
     });
+    expect(mocks.updateSets.at(-1)).not.toHaveProperty('status');
+    expect(mocks.task.status).toBe('running');
 
     await flushWaitUntil();
 
