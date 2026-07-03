@@ -26,7 +26,7 @@ Production evidence showed new chat submissions sometimes spent 5-15 seconds bef
 - [x] Update API reference material for the new endpoint.
 - [x] Add regression tests proving submit does not await AI title generation, lightweight state reads avoid message loading, and WebSocket session updates are handled.
 - [x] Run API/web tests, typechecks, lint, and build.
-- [ ] Run specialist validation for API/Cloudflare patterns, UI behavior, tests, task completion, documentation sync, and no-hardcoded-values compliance.
+- [x] Run specialist validation for API/Cloudflare patterns, UI behavior, tests, task completion, documentation sync, and no-hardcoded-values compliance.
 - [ ] Deploy to staging and verify the changed behavior end-to-end.
 
 ## Acceptance Criteria
