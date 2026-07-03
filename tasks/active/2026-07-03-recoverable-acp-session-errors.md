@@ -28,7 +28,7 @@ Autonomous task mode keeps existing terminal failure semantics. Fatal agent/sess
 - [x] Phase 5: Add/update API route and vertical-slice tests proving recoverable callbacks keep task/session/workspace alive and clear stale error messages.
 - [x] Phase 5: Add/run Playwright visual audit screenshots for mobile 375px and desktop 1280px, including a long recoverable error message.
 - [x] Phase 5: Run required local quality checks, including Go `-race` for `packages/vm-agent`.
-- [ ] Phase 6: Coordinate staging deploys, delete staging nodes immediately before deploy because `packages/vm-agent/` changed, deploy the output branch, and verify a real recovered-from-error project chat.
+- [ ] Phase 6: Coordinate staging deploys, delete staging nodes immediately before deploy because `packages/vm-agent/` changed, deploy the output branch, and verify a real recovered-from-error project chat. Deploy completed, but the post-deploy fresh-node feature retry is blocked by staging Hetzner provider capacity and auth rate limiting; details below.
 
 ## Acceptance Criteria
 
@@ -40,6 +40,39 @@ Autonomous task mode keeps existing terminal failure semantics. Fatal agent/sess
 - [ ] Existing cancellation and crash-recovery recovered behavior remains unchanged.
 - [ ] No idle cleanup, heartbeat coupling, attention-marker expiry, grace-window, or lifecycle timer behavior changes.
 - [ ] Required Go, TypeScript, build/lint/typecheck, local UI audit, staging deploy, and staging feature verification are complete before merge.
+
+## Validation Evidence
+
+- Local full validation passed: `pnpm lint && pnpm typecheck && pnpm test && pnpm build`.
+- VM-agent validation passed: `go test ./internal/acp ./internal/server` and `go test -race ./...` in `packages/vm-agent`.
+- Targeted API callback tests passed, including recoverable callback persistence/clearing and session-not-stopped assertions.
+- Local Playwright visual audit passed for desktop 1280px and mobile 375px:
+  - `.codex/tmp/playwright-screenshots/project-chat-recoverable-error-desktop.png`
+  - `.codex/tmp/playwright-screenshots/project-chat-recoverable-error-mobile.png`
+- Staging deploy coordination:
+  - Checked `deploy-staging.yml` queued/running runs before deploy: none.
+  - Deleted smoke-user staging node `01KWKGXZY8B5NWWG6X0D6XAT7Y` before the final deploy; `/api/nodes` returned `[]`.
+  - Final staging deploy run `28648434336` completed successfully; deploy job uploaded VM-agent binaries and smoke tests passed (`12 passed`).
+  - Served Pages bundle `index-KSKvCNWf.js` contains `Agent error:` and the retry guidance.
+- Live staging feature evidence before the final redeploy:
+  - Task `01KWKGXSMF7WJGVX1M7D133F0Z`, session `313e5700-bd59-431c-b8e3-7f655eb9f32b`, workspace `01KWKH2RPJJHSDNJ666MP6BH92`.
+  - First invalid-model prompt produced `status=in_progress`, `executionStep=awaiting_followup`, persisted error message, active session, running workspace.
+  - Follow-up prompt was accepted on the same workspace/session and again returned `awaiting_followup`, proving same-workspace recovery.
+- Deployed staging UI evidence after the final redeploy:
+  - Real staging session `313e5700-bd59-431c-b8e3-7f655eb9f32b` renders `Agent error:` and `You can send another message to retry; your session and workspace are preserved.`
+  - Screenshot: `.codex/tmp/playwright-screenshots/staging-recoverable-desktop.png`.
+
+## Staging Blocker
+
+Post-final-deploy fresh-node feature verification is currently blocked by staging infrastructure, not the implementation:
+
+- Fresh verifier attempts after deploy failed before workspace creation with `hetzner API error (403): server limit reached`.
+- Failed task IDs: `01KWKJ1DR91X1ZQRH16KEF1BPE`, `01KWKJ65ZWZZ5K1RJZ2DJ5KGQD`.
+- Corresponding temporary profiles were deleted.
+- Error node records were deleted; `/api/nodes` returned `[]` and `/api/workspaces` returned `[]`.
+- Admin usage reported zero active nodes for both `system_anonymous_trials` and the smoke user.
+- Scaleway provider check failed fast with `Cloud provider credentials required`; no VM was created.
+- Subsequent staging token-login attempts returned `429 RATE_LIMIT_EXCEEDED`, preventing further retries during this run.
 
 ## References
 
