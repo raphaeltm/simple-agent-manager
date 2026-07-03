@@ -6,9 +6,9 @@
 import { Hono } from 'hono';
 
 import type { Env } from '../env';
-import { log } from '../lib/logger';
 import { errors } from '../middleware/error';
 import * as projectDataService from '../services/project-data';
+import { resolveChatAgentState } from './chat-agent-state';
 import { getChatSessionRouteContext } from './chat-route-context';
 
 const chatStateRoutes = new Hono<{ Bindings: Env }>();
@@ -25,36 +25,12 @@ chatStateRoutes.get('/:sessionId/state', async (c) => {
     throw errors.notFound('Chat session');
   }
 
-  let agentSessionId: string | null = null;
-  let agentType: string | null = null;
-  try {
-    const acpSessions = await projectDataService.listAcpSessions(c.env, projectId, {
-      chatSessionId: sessionId,
-      limit: 1,
-    });
-    agentSessionId = acpSessions.sessions[0]?.id ?? null;
-    agentType = acpSessions.sessions[0]?.agentType ?? null;
-  } catch (err) {
-    log.warn('chat.state_agent_session_lookup_failed', {
-      projectId,
-      sessionId,
-      error: err instanceof Error ? err.message : String(err),
-    });
-  }
-
-  let state = null;
-  if (agentSessionId) {
-    try {
-      state = await projectDataService.getSessionState(c.env, projectId, agentSessionId);
-    } catch (err) {
-      log.warn('chat.state_snapshot_lookup_failed', {
-        projectId,
-        sessionId,
-        agentSessionId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
+  const { agentSessionId, agentType, state } = await resolveChatAgentState(c.env, {
+    projectId,
+    sessionId,
+    lookupFailureEvent: 'chat.state_agent_session_lookup_failed',
+    stateFailureEvent: 'chat.state_snapshot_lookup_failed',
+  });
 
   return c.json({ state, agentSessionId, agentType });
 });

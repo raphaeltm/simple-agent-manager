@@ -27,6 +27,7 @@ import * as chatPersistence from '../services/chat-persistence';
 import { persistError } from '../services/observability';
 import * as projectDataService from '../services/project-data';
 import { isTaskStatus } from '../services/task-status';
+import { resolveChatAgentState } from './chat-agent-state';
 import { getChatSessionRouteContext } from './chat-route-context';
 import { chatStateRoutes } from './chat-state';
 import { resolveLiveAgentSessionForChat } from './chat-workspace-resolver';
@@ -331,45 +332,11 @@ chatRoutes.get('/:sessionId', async (c) => {
     }
   }
 
-  // Resolve the ACP session from the ProjectData DO's canonical chatSessionId
-  // mapping rather than inferring it from the workspace. A workspace can host
-  // multiple agent sessions over time, so "latest agent session in workspace"
-  // is not a safe proxy for "agent session for this chat session".
-  //
-  // We intentionally do NOT filter by ACP status='running' — the agent session
-  // may be suspended (idle timeout) or briefly in another transient state. The
-  // VM agent auto-resumes suspended sessions on WebSocket attach
-  // (agent_ws.go:96-117), so the browser should always reconnect with the
-  // original ACP session ID linked to this chat session to preserve
-  // conversation context.
-  let agentSessionId: string | null = null;
-  let agentType: string | null = null;
-  try {
-    const acpSessions = await projectDataService.listAcpSessions(c.env, projectId, {
-      chatSessionId: sessionId,
-      limit: 1,
-    });
-    agentSessionId = acpSessions.sessions[0]?.id ?? null;
-    agentType = acpSessions.sessions[0]?.agentType ?? null;
-  } catch (err) {
-    // ACP session lookup failure is non-fatal — UI falls back to the chat
-    // session ID and can still load persisted history from the DO.
-    log.warn('chat.agent_session_id_lookup_failed', {
-      projectId,
-      sessionId,
-      error: err instanceof Error ? err.message : String(err),
-    });
-  }
-
-  // Fetch persisted session state for catch-up (activity, plan, etc.)
-  let state = null;
-  if (agentSessionId) {
-    try {
-      state = await projectDataService.getSessionState(c.env, projectId, agentSessionId);
-    } catch {
-      // Non-fatal — UI falls back to idle default
-    }
-  }
+  const { agentSessionId, agentType, state } = await resolveChatAgentState(c.env, {
+    projectId,
+    sessionId,
+    lookupFailureEvent: 'chat.agent_session_id_lookup_failed',
+  });
 
   return c.json({
     session: { ...session, agentSessionId, agentType, task },
@@ -659,7 +626,7 @@ chatRoutes.post('/:sessionId/summarize', async (c) => {
   return c.json(result);
 });
 
-// ─── Session–Idea linking endpoints ───────────────────────────────────────────
+// ─── Session–Idea linking endpoints ─────────────────────────────────────────
 
 /**
  * GET /api/projects/:projectId/sessions/:sessionId/ideas
