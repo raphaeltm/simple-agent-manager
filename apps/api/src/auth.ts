@@ -97,19 +97,20 @@ function expiresAtFromSeconds(seconds: number | undefined): Date | undefined {
 }
 
 export async function refreshGitHubAccessToken(env: Env, refreshToken: string) {
+  const requestBody = new URLSearchParams();
+  requestBody.set('client_id', env.GITHUB_CLIENT_ID);
+  requestBody.set('client_secret', env.GITHUB_CLIENT_SECRET);
+  requestBody.set('grant_type', 'refresh_token');
+  requestBody.set('refresh_token', refreshToken);
+
   const response = await fetch(GITHUB_TOKEN_URL, {
     method: 'POST',
     headers: {
       Accept: 'application/json',
-      'Content-Type': 'application/json',
+      'Content-Type': 'application/x-www-form-urlencoded',
       'User-Agent': 'SAM-Auth',
     },
-    body: JSON.stringify({
-      client_id: env.GITHUB_CLIENT_ID,
-      client_secret: env.GITHUB_CLIENT_SECRET,
-      grant_type: 'refresh_token',
-      refresh_token: refreshToken,
-    }),
+    body: requestBody,
   });
 
   const body = await response.json().catch(() => null);
@@ -133,9 +134,10 @@ export async function refreshGitHubAccessToken(env: Env, refreshToken: string) {
     refreshToken: data.refresh_token,
     accessTokenExpiresAt: expiresAtFromSeconds(data.expires_in),
     refreshTokenExpiresAt: expiresAtFromSeconds(data.refresh_token_expires_in),
-    scopes: data.scope ? data.scope.split(/[,\s]+/).filter(Boolean) : undefined,
+    scopes: data.scope ? data.scope.split(/[,\s]+/).filter(Boolean) : [],
     tokenType: data.token_type,
     idToken: data.id_token,
+    raw: data,
   };
 }
 
