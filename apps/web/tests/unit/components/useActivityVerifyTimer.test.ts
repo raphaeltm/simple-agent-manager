@@ -1,8 +1,8 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { getChatSessionState } from '../../../src/lib/api';
 import { useActivityVerifyTimer } from '../../../src/components/project-message-view/useActivityVerifyTimer';
+import { getChatSessionState } from '../../../src/lib/api';
 
 vi.mock('../../../src/lib/api', () => ({
   getChatSessionState: vi.fn(),
