@@ -128,6 +128,22 @@ describe('DocumentCard', () => {
     expect(screen.getByText('huge.png')).toBeTruthy();
   });
 
+  it('degrades markdown to the icon tier when the preview fetch errors (non-404)', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network down')));
+
+    render(<DocumentCard projectId="proj-1" item={toolItem({
+      toolName: 'mcp__sam-mcp__upload_to_library',
+      rawInput: { filePath: '/docs/flaky.md' },
+      rawOutput: rawOutput({ fileId: 'f-md', filename: 'flaky.md', mimeType: 'text/markdown', sizeBytes: 40 }),
+    })} />);
+
+    // The card stays as an icon card (filename shown), no tombstone, no <pre>.
+    await waitFor(() => {
+      expect(screen.getByText('flaky.md')).toBeTruthy();
+    });
+    expect(screen.queryByText(/No longer in the library/)).toBeNull();
+  });
+
   it('renders an icon card (no preview) for PDF documents', () => {
     render(<DocumentCard projectId="proj-1" item={toolItem({
       toolName: 'mcp__sam-mcp__display_from_library',
