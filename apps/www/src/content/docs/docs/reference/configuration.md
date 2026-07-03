@@ -138,6 +138,9 @@ SAM loads OpenCode Zen and OpenCode Go model choices through the authenticated m
 | `ACP_PROMPT_RETRY_MAX_RETRIES`     | `2`     | Max transient provider prompt retries after the initial attempt  |
 | `ACP_PROMPT_RETRY_INITIAL_BACKOFF` | `15s`   | Initial backoff before retrying transient provider prompt errors |
 | `ACP_PROMPT_RETRY_MAX_BACKOFF`     | `2m`    | Max exponential backoff for transient provider prompt retries    |
+| `ACTIVITY_REREPORT_INTERVAL`       | `60s`   | Re-send prompting activity while a prompt is active              |
+| `ACTIVITY_TERMINAL_REPORT_ATTEMPTS` | `5`     | Retry attempts for terminal activity reports                     |
+| `ACTIVITY_TERMINAL_REPORT_BACKOFF` | `1s`    | Backoff between terminal activity report retries                 |
 | `ACP_IDLE_SUSPEND_TIMEOUT`         | `30m`   | Idle session auto-suspend timeout                                |
 | `ACP_NOTIF_SERIALIZE_TIMEOUT`      | `5s`    | Notification serialization timeout                               |
 
@@ -252,6 +255,7 @@ SAM loads OpenCode Zen and OpenCode Go model choices through the authenticated m
 | `MESSAGE_SIZE_THRESHOLD`       | `102400` | Max message size in bytes          |
 | `ACTIVITY_RETENTION_DAYS`      | `90`     | Days to retain activity events     |
 | `SESSION_IDLE_TIMEOUT_MINUTES` | `60`     | Idle session timeout               |
+| `SESSION_ACTIVITY_STALE_THRESHOLD_MS` | `300000` (5 min) | Evidence threshold before stale working activity can be healed to idle |
 | `DO_SUMMARY_SYNC_DEBOUNCE_MS`  | `5000`   | Debounce for DO-to-D1 summary sync |
 
 ## Durable Object Retry
