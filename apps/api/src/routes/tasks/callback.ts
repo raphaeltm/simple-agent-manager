@@ -80,6 +80,7 @@ taskCallbackRoute.post('/:projectId/tasks/:taskId/status/callback', jsonValidato
     const now = new Date().toISOString();
     const stepUpdate: Partial<schema.NewTask> = {
       executionStep: body.executionStep,
+      errorMessage: body.errorMessage?.trim() || null,
       updatedAt: now,
     };
 
@@ -120,6 +121,32 @@ taskCallbackRoute.post('/:projectId/tasks/:taskId/status/callback', jsonValidato
         }
       ).catch((e) => { log.warn('task.execution_step_activity_failed', { taskId, error: String(e) }); })
     );
+
+    const recoverableErrorMessage = body.errorMessage?.trim();
+    if (recoverableErrorMessage) {
+      c.executionCtx.waitUntil(
+        (async () => {
+          const [ws] = task.workspaceId
+            ? await db
+              .select({ chatSessionId: schema.workspaces.chatSessionId })
+              .from(schema.workspaces)
+              .where(eq(schema.workspaces.id, task.workspaceId))
+              .limit(1)
+            : [];
+
+          await projectDataService.recordActivityEvent(
+            c.env, projectId, 'task.agent_error_recoverable', 'workspace_callback', payload.workspace,
+            task.workspaceId, ws?.chatSessionId ?? null, taskId, {
+              title: task.title,
+              executionStep: body.executionStep,
+              errorMessage: recoverableErrorMessage,
+            }
+          );
+        })().catch((err) => {
+          log.warn('task.agent_error_recoverable_activity_failed', { taskId, error: err instanceof Error ? err.message : String(err) });
+        })
+      );
+    }
 
     // Record agent-completed activity for awaiting_followup (task-mode only).
     // Task-mode cleanup is NOT triggered here — it happens when the agent explicitly

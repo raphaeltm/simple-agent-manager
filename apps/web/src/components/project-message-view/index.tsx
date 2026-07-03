@@ -48,6 +48,14 @@ function FloatingHeader({
   const initialPromptFallback = !lc.hasMore
     ? lc.messages.find((msg) => msg.role === 'user')?.content ?? null
     : null;
+  const taskStatus = lc.taskEmbed?.status;
+  const hasRecoverableTaskError = Boolean(
+    lc.taskEmbed?.errorMessage &&
+    lc.taskEmbed?.taskMode === 'conversation' &&
+    taskStatus !== 'failed' &&
+    taskStatus !== 'cancelled' &&
+    taskStatus !== 'completed'
+  );
 
   return (
     <div className="absolute top-0 left-0 right-0 z-10">
@@ -74,7 +82,7 @@ function FloatingHeader({
         onShowHierarchy={onShowHierarchy}
       />
       {lc.taskEmbed?.errorMessage && (
-        <ErrorBanner message={lc.taskEmbed.errorMessage} />
+        <ErrorBanner message={lc.taskEmbed.errorMessage} recoverable={hasRecoverableTaskError} />
       )}
       {lc.taskEmbed?.outputSummary && (
         <TruncatedSummary summary={lc.taskEmbed.outputSummary} taskId={lc.taskEmbed.id} />
@@ -84,7 +92,7 @@ function FloatingHeader({
 }
 
 /** Glass-chrome error banner with red accents, used below the session header. */
-function ErrorBanner({ message }: { message: string }) {
+function ErrorBanner({ message, recoverable }: { message: string; recoverable: boolean }) {
   return (
     <div
       className="glass-chrome px-4 py-2 rounded-b-2xl relative after:content-[''] after:absolute after:bottom-0 after:left-[8%] after:right-[8%] after:h-[3px] after:bg-[radial-gradient(ellipse_at_center,rgba(239,68,68,0.55)_0%,transparent_70%)] after:blur-[2px] after:pointer-events-none after:z-10"
@@ -92,8 +100,15 @@ function ErrorBanner({ message }: { message: string }) {
         boxShadow: '0 4px 24px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(239, 68, 68, 0.08)',
       }}
     >
-      <span className="sam-type-caption text-danger font-medium">Task failed:</span>{' '}
+      <span className="sam-type-caption text-danger font-medium">
+        {recoverable ? 'Agent error:' : 'Task failed:'}
+      </span>{' '}
       <span className="sam-type-caption text-danger break-words">{message}</span>
+      {recoverable && (
+        <span className="sam-type-caption text-danger break-words">
+          {' '}You can send another message to retry; your session and workspace are preserved.
+        </span>
+      )}
     </div>
   );
 }
