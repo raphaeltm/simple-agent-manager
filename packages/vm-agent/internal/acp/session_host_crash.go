@@ -15,6 +15,12 @@ import (
 
 const crashRecoveredStopReason = "recovered"
 
+// fatalErrorStopReason marks prompt terminations where the agent process/session
+// cannot continue (rapid exit, max restarts, unrecoverable crash, prompt timeout).
+// The control plane maps this to terminal task failure; plain "error" stopReasons
+// are recoverable and map to awaiting_followup in conversation mode.
+const fatalErrorStopReason = "fatal_error"
+
 var diagnosticRedactionPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)(bearer\s+)[A-Za-z0-9._~+/=-]{16,}`),
 	regexp.MustCompile(`(?i)((?:api[_-]?key|token|secret|password|authorization)\s*[:=]\s*)("[^"]+"|'[^']+'|[^\s,;]+)`),

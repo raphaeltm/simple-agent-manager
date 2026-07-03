@@ -215,6 +215,6 @@ func (h *SessionHost) finishCrashRecoveryFailure(crashRecovery crashRecoverySnap
 	}
 	h.broadcastAgentCrashReport(h.crashReport(crashRecovery, false, message))
 	if notify != nil {
-		notify("error", err)
+		notify(fatalErrorStopReason, err)
 	}
 }

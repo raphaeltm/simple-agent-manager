@@ -157,7 +157,7 @@ func TestSessionHost_UnkillableProcessWatchdogSignalsError(t *testing.T) {
 	_, completed, _ := armRecoverablePrompt(t, host, "openai-codex", 10*time.Second, false)
 	finishWithPeerDisconnect(host)
 
-	expectCompletion(t, completed, "error", time.Second, "watchdog did not emit terminal error")
+	expectCompletion(t, completed, fatalErrorStopReason, time.Second, "watchdog did not emit terminal error")
 	assertNoSecondCompletion(t, completed)
 }
 
@@ -288,7 +288,7 @@ func TestSessionHost_RecoveryNotifyOnceDoesNotWrapLaterNormalPrompt(t *testing.T
 	notify(crashRecoveredStopReason, nil)
 	host.finishCrashRecoveryFailure(snapshot, "watchdog", errors.New("watchdog"), notify)
 
-	expectCompletion(t, completed, "error", time.Second, "missing recovery completion")
+	expectCompletion(t, completed, fatalErrorStopReason, time.Second, "missing recovery completion")
 	select {
 	case err := <-errs:
 		if err == nil || err.Error() != "rapid exit" {
@@ -323,7 +323,7 @@ func TestSessionHost_CodexCrashRecovery_ReportsRecovered(t *testing.T) {
 
 // TestSessionHost_CrashRecovery_MaxRestartExhausted proves that exceeding the
 // restart budget while a crash recovery episode is in flight resolves the
-// stranded prompt to a terminal "error" instead of leaving it recovering. No
+// stranded prompt to a terminal "fatal_error" instead of leaving it recovering. No
 // restart is attempted once the budget is exhausted.
 func TestSessionHost_CrashRecovery_MaxRestartExhausted(t *testing.T) {
 	host := newRecoveryTestHost(t, 30*time.Second)
@@ -339,7 +339,7 @@ func TestSessionHost_CrashRecovery_MaxRestartExhausted(t *testing.T) {
 	completed := startRecoveryMonitor(t, host, oldProc, "claude-code", countingSpawn(t, &startCount))
 	finishWithPeerDisconnect(host)
 
-	expectCompletion(t, completed, "error", 2*time.Second, "max-restart exhaustion did not report terminal error")
+	expectCompletion(t, completed, fatalErrorStopReason, 2*time.Second, "max-restart exhaustion did not report terminal error")
 	assertNoSecondCompletion(t, completed)
 	if startCount.Load() != 0 {
 		t.Fatalf("restart attempted despite exhausted budget: startCount=%d", startCount.Load())
@@ -348,7 +348,7 @@ func TestSessionHost_CrashRecovery_MaxRestartExhausted(t *testing.T) {
 
 // TestSessionHost_CrashRecovery_RestartFails proves that when the recovery
 // restart itself fails to spawn a new agent process, the stranded prompt is
-// resolved to a terminal "error" rather than hanging in recovering state.
+// resolved to a terminal "fatal_error" rather than hanging in recovering state.
 func TestSessionHost_CrashRecovery_RestartFails(t *testing.T) {
 	host := newRecoveryTestHost(t, 30*time.Second)
 	defer host.Stop()
@@ -360,7 +360,7 @@ func TestSessionHost_CrashRecovery_RestartFails(t *testing.T) {
 	})
 	finishWithPeerDisconnect(host)
 
-	expectCompletion(t, completed, "error", 2*time.Second, "failed restart did not report terminal error")
+	expectCompletion(t, completed, fatalErrorStopReason, 2*time.Second, "failed restart did not report terminal error")
 	assertNoSecondCompletion(t, completed)
 }
 

@@ -887,8 +887,8 @@ func TestSessionHost_FinishPromptWithUnrecoverablePeerDisconnectReportsActionabl
 
 	completed := make(chan error, 1)
 	host.config.OnPromptComplete = func(stopReason string, promptErr error) {
-		if stopReason != "error" {
-			t.Errorf("stopReason = %q, want error", stopReason)
+		if stopReason != fatalErrorStopReason {
+			t.Errorf("stopReason = %q, want %s", stopReason, fatalErrorStopReason)
 		}
 		completed <- promptErr
 	}
@@ -955,6 +955,48 @@ func TestSessionHost_FinishPromptWithUnrecoverablePeerDisconnectReportsActionabl
 	// After an unrecoverable crash the host must be in HostError, not HostReady.
 	if status := host.Status(); status != HostError {
 		t.Fatalf("host.Status() = %s after unrecoverable crash, want %s", status, HostError)
+	}
+}
+
+func TestSessionHost_FinishPromptDeadlineExceededReportsFatalWithoutCrashRecovery(t *testing.T) {
+	t.Parallel()
+
+	host := newTestSessionHost(t)
+	defer host.Stop()
+
+	completed := make(chan string, 1)
+	host.config.OnPromptComplete = func(stopReason string, _ error) {
+		completed <- stopReason
+	}
+	host.mu.Lock()
+	host.agentType = "openai-codex"
+	host.sessionID = "acp-session-1"
+	host.agentSupportsLoadSession = true
+	host.mu.Unlock()
+
+	promptCtx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+
+	host.finishPromptWithError(
+		promptCtx,
+		json.RawMessage(`"req-1"`),
+		promptStartInfo{startedAt: time.Now(), viewerID: "viewer-1", timeout: 6 * time.Hour},
+		errors.New("peer disconnected before response"),
+	)
+
+	select {
+	case stopReason := <-completed:
+		if stopReason != fatalErrorStopReason {
+			t.Fatalf("stopReason = %q, want %s", stopReason, fatalErrorStopReason)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for prompt completion callback")
+	}
+
+	host.mu.RLock()
+	defer host.mu.RUnlock()
+	if host.crashRecoveryInProgress {
+		t.Fatal("crashRecoveryInProgress = true, want false for prompt deadline")
 	}
 }
 
@@ -1050,8 +1092,8 @@ func TestSessionHost_MonitorRapidExitCrashRecoveryFailsWithReport(t *testing.T) 
 
 	select {
 	case stopReason := <-done:
-		if stopReason != "error" {
-			t.Fatalf("stopReason = %q, want error", stopReason)
+		if stopReason != fatalErrorStopReason {
+			t.Fatalf("stopReason = %q, want %s", stopReason, fatalErrorStopReason)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for prompt completion callback")

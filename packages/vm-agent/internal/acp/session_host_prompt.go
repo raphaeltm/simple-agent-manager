@@ -432,6 +432,21 @@ func (h *SessionHost) finishPromptCancelled(reqID json.RawMessage, info promptSt
 }
 
 func (h *SessionHost) finishPromptWithError(promptCtx context.Context, reqID json.RawMessage, info promptStartInfo, err error) {
+	if errors.Is(promptCtx.Err(), context.DeadlineExceeded) {
+		errMsg := "Prompt cancelled (context deadline exceeded)"
+		if info.timeout > 0 {
+			errMsg = fmt.Sprintf("Prompt timed out after %s", info.timeout)
+		}
+		slog.Warn("ACP Prompt timed out", "error", err)
+		h.reportLifecycle("warn", "ACP Prompt timed out", map[string]interface{}{
+			"error":    errMsg,
+			"duration": time.Since(info.startedAt).String(),
+		})
+		h.broadcastMessage(h.marshalJSONRPCError(reqID, -32603, errMsg))
+		h.notifyPromptComplete(fatalErrorStopReason, err)
+		return
+	}
+
 	if isCrashPromptError(err) && !errors.Is(promptCtx.Err(), context.DeadlineExceeded) {
 		agentType, stderr, proc, _, ok := h.beginCrashRecovery(reqID, info.viewerID)
 		if ok {
@@ -491,7 +506,7 @@ func (h *SessionHost) finishUnrecoverableCrashPrompt(reqID json.RawMessage, info
 	h.broadcastMessage(h.marshalJSONRPCError(reqID, -32603, message))
 	h.setStatus(HostError, message)
 	h.broadcastAgentStatus(StatusError, agentType, message)
-	h.notifyPromptComplete("error", fmt.Errorf("%s: %w", message, err))
+	h.notifyPromptComplete(fatalErrorStopReason, fmt.Errorf("%s: %w", message, err))
 }
 
 func (h *SessionHost) broadcastPromptResponse(reqID json.RawMessage, resp acpsdk.PromptResponse) {

@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -54,6 +55,17 @@ type taskCallbackContext struct {
 	TaskID      string
 	WorkspaceID string
 	TaskMode    string
+}
+
+const fatalErrorStopReason = "fatal_error"
+
+var taskCallbackDiagnosticRedactionPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)(bearer\s+)[A-Za-z0-9._~+/=-]{16,}`),
+	regexp.MustCompile(`(?i)((?:api[_-]?key|token|secret|password|authorization)\s*[:=]\s*)("[^"]+"|'[^']+'|[^\s,;]+)`),
+	regexp.MustCompile(`\b(sk-[A-Za-z0-9_-]{12,})\b`),
+	regexp.MustCompile(`\b(gh[pousr]_[A-Za-z0-9_]{12,})\b`),
+	regexp.MustCompile(`\b(github_pat_[A-Za-z0-9_]{12,})\b`),
+	regexp.MustCompile(`\b(sam_test_[A-Za-z0-9_-]{12,})\b`),
 }
 
 // Server is the HTTP server for the VM Agent.
@@ -1274,13 +1286,27 @@ func (s *Server) makeTaskCompletionCallback(
 			return
 		}
 
-		// On error, send terminal failure immediately.
-		if promptErr != nil || stopReason == "error" {
+		if stopReason == fatalErrorStopReason {
 			reason := "Agent prompt failed"
-			errorMessage := ""
-			if promptErr != nil {
-				errorMessage = promptErr.Error()
+			errorMessage := taskCallbackErrorMessage(promptErr)
+			s.postTaskCallback(callbackURL, taskID, s.callbackTokenForWorkspace(workspaceID), map[string]interface{}{
+				"toStatus":     "failed",
+				"reason":       reason,
+				"errorMessage": errorMessage,
+			})
+			return
+		}
+
+		if promptErr != nil || stopReason == "error" {
+			if taskMode == config.TaskModeConversation {
+				body := awaitingFollowupCallbackBody(gitPushResult{})
+				body["errorMessage"] = taskCallbackErrorMessage(promptErr)
+				s.postTaskCallback(callbackURL, taskID, s.callbackTokenForWorkspace(workspaceID), body)
+				return
 			}
+
+			reason := "Agent prompt failed"
+			errorMessage := taskCallbackErrorMessage(promptErr)
 			s.postTaskCallback(callbackURL, taskID, s.callbackTokenForWorkspace(workspaceID), map[string]interface{}{
 				"toStatus":     "failed",
 				"reason":       reason,
@@ -1324,6 +1350,30 @@ func (s *Server) makeTaskCompletionCallback(
 
 func isPromptCancellation(stopReason string, promptErr error) bool {
 	return stopReason == "cancelled" || stopReason == "canceled"
+}
+
+func taskCallbackErrorMessage(promptErr error) string {
+	if promptErr == nil {
+		return ""
+	}
+	return redactTaskCallbackDiagnosticText(promptErr.Error())
+}
+
+func redactTaskCallbackDiagnosticText(text string) string {
+	redacted := text
+	for _, pattern := range taskCallbackDiagnosticRedactionPatterns {
+		redacted = pattern.ReplaceAllStringFunc(redacted, func(match string) string {
+			submatches := pattern.FindStringSubmatch(match)
+			if len(submatches) >= 3 {
+				return submatches[1] + "[REDACTED]"
+			}
+			if len(submatches) >= 2 && strings.HasSuffix(strings.ToLower(submatches[1]), " ") {
+				return submatches[1] + "[REDACTED]"
+			}
+			return "[REDACTED]"
+		})
+	}
+	return redacted
 }
 
 func awaitingFollowupCallbackBody(pushResult gitPushResult) map[string]interface{} {

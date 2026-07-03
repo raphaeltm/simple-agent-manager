@@ -104,7 +104,45 @@ func TestTaskCompletionCallbackTreatsCrashRecoveryAsAwaitingFollowup(t *testing.
 	}
 }
 
-func TestTaskCompletionCallbackTreatsErrorStopReasonAsTerminalFailure(t *testing.T) {
+func TestTaskCompletionCallbackTreatsConversationErrorStopReasonAsRecoverable(t *testing.T) {
+	t.Parallel()
+
+	body := runTaskCompletionCallback(
+		t,
+		config.TaskModeConversation,
+		"error",
+		errors.New("provider exhausted credits with api_key=sk-secret1234567890"),
+	)
+
+	if body["toStatus"] != nil {
+		t.Fatalf("toStatus = %v, want no terminal task status", body["toStatus"])
+	}
+	if body["executionStep"] != "awaiting_followup" {
+		t.Fatalf("executionStep = %v, want awaiting_followup", body["executionStep"])
+	}
+	errorMessage, ok := body["errorMessage"].(string)
+	if !ok || errorMessage == "" {
+		t.Fatalf("errorMessage = %v, want non-empty string", body["errorMessage"])
+	}
+	if strings.Contains(errorMessage, "sk-secret1234567890") {
+		t.Fatalf("errorMessage leaked secret: %q", errorMessage)
+	}
+}
+
+func TestTaskCompletionCallbackTreatsFatalErrorStopReasonAsTerminalFailure(t *testing.T) {
+	t.Parallel()
+
+	body := runTaskCompletionCallback(t, config.TaskModeConversation, fatalErrorStopReason, errors.New("recovery failed"))
+
+	if body["toStatus"] != "failed" {
+		t.Fatalf("toStatus = %v, want failed", body["toStatus"])
+	}
+	if body["executionStep"] != nil {
+		t.Fatalf("executionStep = %v, want terminal failure without awaiting_followup", body["executionStep"])
+	}
+}
+
+func TestTaskCompletionCallbackTreatsTaskModeErrorStopReasonAsTerminalFailure(t *testing.T) {
 	t.Parallel()
 
 	body := runTaskCompletionCallback(t, config.TaskModeTask, "error", errors.New("recovery failed"))
