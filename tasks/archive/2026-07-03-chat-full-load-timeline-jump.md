@@ -99,63 +99,63 @@ a size-capped fallback to pagination only for the rare oversized tail.
 
 ## Implementation checklist
 
-- [ ] shared: add `DEFAULT_CHAT_SESSION_MESSAGE_MAX` in
+- [x] shared: add `DEFAULT_CHAT_SESSION_MESSAGE_MAX` in
       `packages/shared/src/constants/defaults.ts`; export from `constants/index.ts`.
-- [ ] api: add `CHAT_SESSION_MESSAGE_MAX?` to `apps/api/src/env.ts` (+ `.env.example`).
-- [ ] api: refactor `getSessionMessageLimit` in `chat.ts` — unspecified default =
+- [x] api: add `CHAT_SESSION_MESSAGE_MAX?` to `apps/api/src/env.ts` (+ `.env.example`).
+- [x] api: refactor `getSessionMessageLimit` in `chat.ts` — unspecified default =
       `CHAT_SESSION_MESSAGE_LIMIT`/`DEFAULT_CHAT_SESSION_MESSAGE_LIMIT`; max clamp =
       `CHAT_SESSION_MESSAGE_MAX`/`DEFAULT_CHAT_SESSION_MESSAGE_MAX`;
       return `min(requested ?? default, max)`.
-- [ ] web: `useSessionLifecycle.loadSession` requests
+- [x] web: `useSessionLifecycle.loadSession` requests
       `limit: DEFAULT_CHAT_SESSION_MESSAGE_MAX`.
-- [ ] web: poll (`useSessionLifecycle.ts:270`) requests explicit small
+- [x] web: poll (`useSessionLifecycle.ts:270`) requests explicit small
       `limit: DEFAULT_CHAT_SESSION_MESSAGE_LIMIT`.
-- [ ] web: add `loadUntil(timestamp)` to `useSessionLifecycle` (loops `loadMore`
+- [x] web: add `loadUntil(timestamp)` to `useSessionLifecycle` (loops `loadMore`
       while oldest-loaded `createdAt` > timestamp AND `hasMore`, bounded).
-- [ ] web: `index.tsx` — pending-jump effect + `handleJumpToMessage(entry)` that
+- [x] web: `index.tsx` — pending-jump effect + `handleJumpToMessage(entry)` that
       scrolls when loaded or `loadUntil` then scrolls; `handleJumpToTimestamp(ts)`
       for context entries (nearest item by timestamp).
-- [ ] web: `index.tsx` — `highlightedItemId` state; pass to Virtuoso `itemContent`
+- [x] web: `index.tsx` — `highlightedItemId` state; pass to Virtuoso `itemContent`
       wrapper (`sam-message-highlight` class on match), auto-clear ~2s.
-- [ ] web: `ChatTimelineDrawer.tsx` — make `progress_notification` and
+- [x] web: `ChatTimelineDrawer.tsx` — make `progress_notification` and
       `system_event` entries clickable (call jump-by-timestamp); keep user_message
       → jump-by-message. Update prop signature (`onJump(entry)`).
-- [ ] web: `apps/web/src/index.css` — add `@keyframes` + `.sam-message-highlight`.
-- [ ] Tests (see below).
-- [ ] Docs: `env-reference` (add `CHAT_SESSION_MESSAGE_MAX`), CLAUDE.md Recent
+- [x] web: `apps/web/src/index.css` — add `@keyframes` + `.sam-message-highlight`.
+- [x] Tests (see below).
+- [x] Docs: `env-reference` (add `CHAT_SESSION_MESSAGE_MAX`), CLAUDE.md Recent
       Changes, `.env.example`.
-- [ ] Playwright visual audit of timeline drawer (all entry kinds clickable) +
+- [x] Playwright visual audit of timeline drawer (all entry kinds clickable) +
       highlight, mobile 375 + desktop 1280, overflow assertion.
 
 ## Tests
 
-- [ ] api unit: `getSessionMessageLimit` — unspecified → default (small);
+- [x] api unit: `getSessionMessageLimit` — unspecified → default (small);
       requested below max → requested; requested above max → clamped to max;
       env overrides for both default and max.
-- [ ] web unit: `mergeReplace` preserves full history when poll returns a small
+- [x] web unit: `mergeReplace` preserves full history when poll returns a small
       recent window (regression for the poll-clobber gotcha) — extend existing
       merge-messages tests with a "10k loaded, poll returns latest 500" case.
-- [ ] web behavioral: `ChatTimelineDrawer` renders and clicking a
+- [x] web behavioral: `ChatTimelineDrawer` renders and clicking a
       `progress_notification` / `system_event` entry calls the jump handler
       (interactive-element requirement, Rule 02).
-- [ ] web behavioral: jump resolves for a message present in the map (scroll
+- [x] web behavioral: jump resolves for a message present in the map (scroll
       invoked) and, when absent, triggers load-until then scroll.
-- [ ] buildSessionTimeline: existing coverage still holds (messageIndex mapping).
+- [x] buildSessionTimeline: coverage updated for the new signature (no messageIndex); asserts messageId + timestamp anchoring.
 
 ## Acceptance criteria
 
-- [ ] Opening a session loads the full conversation in one request for typical
+- [x] Opening a session loads the full conversation in one request for typical
       sessions (no "Load earlier messages" button for ≤ ceiling / ≤30 MiB).
-- [ ] Clicking ANY timeline entry (user message, status update, activity) scrolls
+- [x] Clicking ANY timeline entry (user message, status update, activity) scrolls
       the chat to the relevant message — never a silent no-op.
-- [ ] The jumped-to message briefly highlights.
-- [ ] The 3s poll does NOT re-fetch the whole conversation and does NOT discard
+- [x] The jumped-to message briefly highlights.
+- [x] The 3s poll does NOT re-fetch the whole conversation and does NOT discard
       loaded history.
-- [ ] Oversized/guard-trimmed sessions still work via the "Load earlier" fallback
+- [x] Oversized/guard-trimmed sessions still work via the "Load earlier" fallback
       and jump still resolves (load-until).
-- [ ] Ceiling + poll size are env-configurable (`CHAT_SESSION_MESSAGE_MAX`,
+- [x] Ceiling + poll size are env-configurable (`CHAT_SESSION_MESSAGE_MAX`,
       `CHAT_SESSION_MESSAGE_LIMIT`) — no hardcoded operational limits.
-- [ ] Staging verified end-to-end via Playwright; visual audit passes.
+- [ ] Staging verified end-to-end via Playwright (Phase 6). Local Playwright visual audit already passes.
 
 ## References
 - Rule 02 (interactive-element behavioral tests), Rule 06 (React interaction-effect
