@@ -157,6 +157,41 @@ a size-capped fallback to pagination only for the rare oversized tail.
       `CHAT_SESSION_MESSAGE_LIMIT`) — no hardcoded operational limits.
 - [ ] Staging verified end-to-end via Playwright (Phase 6). Local Playwright visual audit already passes.
 
+## Staging verification post-mortem (2026-07-03) — jump dead-click on virtualized sessions
+
+**What broke:** On staging, clicking a timeline entry closed the drawer but did
+NOT scroll the chat to the message and did NOT flash the highlight — the exact
+dead-click this task set out to fix, still present for real sessions.
+
+**Root cause:** `itemIndexById` (`index.tsx`) mapped `item.id → lc.firstItemIndex + i`
+(the `firstItemIndex`-offset ABSOLUTE coordinate ≈ `VIRTUAL_START` + i ≈ 100000).
+`scrollAndHighlight` passed that value straight to react-virtuoso's
+`scrollToIndex`, which operates on the **0-based data-array** coordinate (see the
+codebase's other calls: `scrollToIndex({ index: 'LAST' })` and
+`{ index: conversationItems.length - 1 }`). Passing ~100000 is out of range →
+Virtuoso never scrolls → the target row stays virtualized-out → the highlight,
+set on an unmounted row, never renders.
+
+**Why it wasn't caught:** The `react-virtuoso` test mock renders EVERY row (jsdom
+has no layout engine) and ignored the forwarded ref, so `scrollToIndex` was a
+no-op and the highlight always attached regardless of the index passed. The unit
+tests asserted highlight presence, which passes even with the wrong coordinate.
+The drawer Playwright audit mocked `onJump`, so it never exercised the real
+`scrollToIndex` path either.
+
+**Class of bug:** Virtualization-hidden coordinate mismatch — a jsdom mock that
+renders all items masks a real virtual-window bug. Any "scroll/jump to item"
+feature is exposed to this.
+
+**Fix:** `itemIndexById` now maps `item.id → i` (0-based data index);
+`scrollToIndex` receives the correct coordinate. Commit on this branch.
+
+**Process/test fix:** The `react-virtuoso` mock in `project-message-view.test.tsx`
+now exposes `scrollToIndex` via `useImperativeHandle` and captures its argument.
+New regression test asserts the jump calls `scrollToIndex` with the 0-based index
+(`1`) and that no call uses the absolute `VIRTUAL_START` coordinate. Verified the
+test FAILS on the pre-fix code (`expected [ 100001 ] to include 1`).
+
 ## References
 - Rule 02 (interactive-element behavioral tests), Rule 06 (React interaction-effect
   analysis — jump vs. auto-scroll effects), Rule 16 (no reload on mutation),
