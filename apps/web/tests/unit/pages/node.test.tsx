@@ -160,7 +160,7 @@ describe('Node page', () => {
     await waitFor(() => {
       expect(mocks.listNodeEvents).toHaveBeenCalled();
     });
-    expect(screen.getByText('Node started')).toBeInTheDocument();
+    expect(await screen.findByText('Node started')).toBeInTheDocument();
   });
 
   it('supports create-workspace navigation from node detail', async () => {
