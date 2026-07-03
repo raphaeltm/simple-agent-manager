@@ -420,7 +420,11 @@ export class ProjectData extends DurableObject<Env> {
 
     // Session state staleness: auto-heal stuck "prompting" states
     try {
-      const healedSessionIds = sessionState.reconcileStaleActivity(this.sql);
+      const configuredThreshold = Number.parseInt(this.env.SESSION_ACTIVITY_STALE_THRESHOLD_MS ?? '', 10);
+      const staleThresholdMs = Number.isFinite(configuredThreshold) && configuredThreshold > 0
+        ? configuredThreshold
+        : sessionState.DEFAULT_SESSION_ACTIVITY_STALE_THRESHOLD_MS;
+      const healedSessionIds = sessionState.reconcileStaleActivity(this.sql, staleThresholdMs);
       for (const healedId of healedSessionIds) {
         // Resolve ACP session ID → chat session ID (same mismatch as reportActivity)
         const healedRow = this.sql.exec(

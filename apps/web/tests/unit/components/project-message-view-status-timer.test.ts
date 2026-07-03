@@ -20,7 +20,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const IDLE_TIMEOUT_MS = 30_000;
 
-type AgentActivityState = 'idle' | 'prompting' | 'responding';
+type AgentActivityState = 'idle' | 'prompting' | 'responding' | 'recovering';
+type SnapshotActivity = 'prompting' | 'recovering' | 'idle' | 'error' | null;
+
+function isWorkingActivity(activity: SnapshotActivity | AgentActivityState | undefined): activity is 'prompting' | 'recovering' {
+  return activity === 'prompting' || activity === 'recovering';
+}
 
 /**
  * Mirrors the shared verify-before-decay timer logic from useSessionLifecycle.
@@ -28,12 +33,13 @@ type AgentActivityState = 'idle' | 'prompting' | 'responding';
  */
 function useStatusTimerMirror(
   sessionId: string,
-  verifyActivity: () => Promise<'prompting' | 'idle'>,
+  verifyActivity: () => Promise<SnapshotActivity>,
 ) {
   const [agentActivity, setAgentActivity] = useState<AgentActivityState>('idle');
   const [promptStartedAt, setPromptStartedAt] = useState<number | null>(null);
   const idleTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const verifyAbortRef = useRef<AbortController | null>(null);
+  const nullStateVerifyCountRef = useRef(0);
 
   const clearActivity = useCallback(() => {
     setAgentActivity('idle');
@@ -51,31 +57,50 @@ function useStatusTimerMirror(
         try {
           const activity = await verifyActivity();
           if (abortController.signal.aborted) return;
-          if (activity === 'prompting') {
+          if (isWorkingActivity(activity)) {
+            nullStateVerifyCountRef.current = 0;
+            armVerifyTimer();
+          } else if (activity == null && nullStateVerifyCountRef.current < 3) {
+            nullStateVerifyCountRef.current += 1;
             armVerifyTimer();
           } else {
+            nullStateVerifyCountRef.current = 0;
             clearActivity();
           }
         } catch {
-          if (!abortController.signal.aborted) clearActivity();
+          if (!abortController.signal.aborted) armVerifyTimer();
         }
       }, IDLE_TIMEOUT_MS);
     };
     armVerifyTimer();
   }, [clearActivity, verifyActivity]);
 
-  // onAgentActivity('prompting' | 'idle', promptStartedAt?)
-  const onAgentActivity = useCallback((activity: 'prompting' | 'idle', startedAt?: number | null) => {
-    setAgentActivity(activity === 'prompting' ? 'prompting' : 'idle');
-    setPromptStartedAt(activity === 'prompting' ? (startedAt ?? Date.now()) : null);
-    if (activity === 'prompting') {
+  const hydrateState = useCallback((activity: SnapshotActivity, startedAt?: number | null) => {
+    if (isWorkingActivity(activity)) {
+      setAgentActivity(activity);
+      setPromptStartedAt(startedAt ?? null);
       startVerifyDecayTimer();
     } else {
+      clearActivity();
       clearTimeout(idleTimerRef.current);
       verifyAbortRef.current?.abort();
       verifyAbortRef.current = null;
     }
-  }, [startVerifyDecayTimer]);
+  }, [clearActivity, startVerifyDecayTimer]);
+
+  // onAgentActivity('prompting' | 'idle' | 'recovering' | 'error', promptStartedAt?)
+  const onAgentActivity = useCallback((activity: 'prompting' | 'idle' | 'recovering' | 'error', startedAt?: number | null) => {
+    if (activity === 'prompting' || activity === 'recovering') {
+      setAgentActivity(activity);
+      setPromptStartedAt(startedAt ?? Date.now());
+      startVerifyDecayTimer();
+    } else {
+      clearActivity();
+      clearTimeout(idleTimerRef.current);
+      verifyAbortRef.current?.abort();
+      verifyAbortRef.current = null;
+    }
+  }, [clearActivity, startVerifyDecayTimer]);
 
   // onMessage (non-user agent output)
   const onAgentMessage = useCallback(() => {
@@ -100,12 +125,12 @@ function useStatusTimerMirror(
     return () => { clearTimeout(idleTimerRef.current); verifyAbortRef.current?.abort(); };
   }, [sessionId]);
 
-  return { agentActivity, promptStartedAt, onAgentActivity, onAgentMessage, onTerminalIdle };
+  return { agentActivity, promptStartedAt, hydrateState, onAgentActivity, onAgentMessage, onTerminalIdle };
 }
 
 /** Render the mirror hook with a `verifyActivity` mock resolving (or rejecting) as configured. */
 function setup(
-  verifyResult: 'prompting' | 'idle' | Error = 'prompting',
+  verifyResult: SnapshotActivity | Error = 'prompting',
   sessionId = 'sess-1',
 ) {
   const verifyActivity =
@@ -248,12 +273,92 @@ describe('Agent status verify-before-decay timer', () => {
     expect(result.current.agentActivity).toBe('idle');
   });
 
-  // Verify failure decays to idle (fail-safe).
-  it('decays to idle when the DO verify call fails', async () => {
-    const { result } = setup(new Error('network'));
+  it('re-arms instead of decaying when the DO verify call fails', async () => {
+    const { result, verifyActivity } = setup(new Error('network'));
 
     act(() => { result.current.onAgentActivity('prompting'); });
     await advance();
+    expect(verifyActivity).toHaveBeenCalledTimes(1);
+    expect(result.current.agentActivity).toBe('prompting');
+
+    await advance();
+    expect(verifyActivity).toHaveBeenCalledTimes(2);
+    expect(result.current.agentActivity).toBe('prompting');
+  });
+
+  it('treats recovering as working and keeps the timer armed', async () => {
+    const { result, verifyActivity } = setup('recovering');
+
+    act(() => { result.current.onAgentActivity('recovering', 1000); });
+    expect(result.current.agentActivity).toBe('recovering');
+    expect(result.current.promptStartedAt).toBe(1000);
+
+    await advance();
+    expect(verifyActivity).toHaveBeenCalledTimes(1);
+    expect(result.current.agentActivity).toBe('recovering');
+  });
+
+  it('treats error activity as terminal idle', async () => {
+    const { result, verifyActivity } = setup('prompting');
+
+    act(() => { result.current.onAgentActivity('prompting', 1000); });
+    act(() => { result.current.onAgentActivity('error'); });
     expect(result.current.agentActivity).toBe('idle');
+    expect(result.current.promptStartedAt).toBeNull();
+
+    await advance();
+    expect(verifyActivity).not.toHaveBeenCalled();
+  });
+
+  it('bounds null-state verifies before decaying', async () => {
+    const { result, verifyActivity } = setup(null);
+
+    act(() => { result.current.onAgentActivity('prompting'); });
+    await advance();
+    await advance();
+    await advance();
+    expect(result.current.agentActivity).toBe('prompting');
+
+    await advance();
+    expect(verifyActivity).toHaveBeenCalledTimes(4);
+    expect(result.current.agentActivity).toBe('idle');
+  });
+
+  it('hydrateState arms the verify timer for working snapshots', async () => {
+    const { result, verifyActivity } = setup('idle');
+
+    act(() => { result.current.hydrateState('prompting', 1000); });
+    expect(result.current.agentActivity).toBe('prompting');
+    expect(result.current.promptStartedAt).toBe(1000);
+
+    await advance();
+    expect(verifyActivity).toHaveBeenCalledTimes(1);
+    expect(result.current.agentActivity).toBe('idle');
+  });
+
+  it('hydrateState cancels the verify timer for idle snapshots', async () => {
+    const { result, verifyActivity } = setup('prompting');
+
+    act(() => { result.current.hydrateState('prompting', 1000); });
+    act(() => { result.current.hydrateState('idle'); });
+    expect(result.current.agentActivity).toBe('idle');
+
+    await advance();
+    expect(verifyActivity).not.toHaveBeenCalled();
+  });
+
+  it('poll-style hydration rehydrates activity in both directions', async () => {
+    const { result } = setup('prompting');
+
+    act(() => { result.current.hydrateState('idle'); });
+    expect(result.current.agentActivity).toBe('idle');
+
+    act(() => { result.current.hydrateState('recovering', 2000); });
+    expect(result.current.agentActivity).toBe('recovering');
+    expect(result.current.promptStartedAt).toBe(2000);
+
+    act(() => { result.current.hydrateState('error'); });
+    expect(result.current.agentActivity).toBe('idle');
+    expect(result.current.promptStartedAt).toBeNull();
   });
 });

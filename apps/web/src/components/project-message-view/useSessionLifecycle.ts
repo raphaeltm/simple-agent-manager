@@ -14,9 +14,13 @@ import { deriveSessionState, IDLE_TIMEOUT_MS, VIRTUAL_START } from './types';
 import { useConnectionRecovery } from './useConnectionRecovery';
 
 /** Agent activity state derived from message flow (no ACP connection needed). */
-export type AgentActivityState = 'idle' | 'prompting' | 'responding';
+export type AgentActivityState = 'idle' | 'prompting' | 'responding' | 'recovering';
 
 type FilePanelState = { mode: 'browse' | 'view' | 'diff' | 'git-status'; path?: string; line?: number | null } | null;
+
+function isWorkingActivity(activity: SessionStateSnapshot['activity'] | AgentActivityState | undefined | null): activity is 'prompting' | 'recovering' {
+  return activity === 'prompting' || activity === 'recovering';
+}
 
 export interface UseSessionLifecycleResult {
   session: ChatSessionResponse | null;
@@ -83,6 +87,7 @@ export function useSessionLifecycle(
   const [agentActivity, setAgentActivity] = useState<AgentActivityState>('idle');
   const idleTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const verifyAbortRef = useRef<AbortController | null>(null);
+  const nullStateVerifyCountRef = useRef(0);
   const [currentPlan, setCurrentPlan] = useState<SessionStateSnapshot['currentPlan']>(null);
   const [promptStartedAt, setPromptStartedAt] = useState<number | null>(null);
   const clearActivity = useCallback(() => { setAgentActivity('idle'); setPromptStartedAt(null); }, []);
@@ -106,25 +111,42 @@ export function useSessionLifecycle(
             signal: abortController.signal,
           });
           if (abortController.signal.aborted) return;
-          if (data.state?.activity === 'prompting') {
+          const activity = data.state?.activity;
+          if (isWorkingActivity(activity)) {
+            nullStateVerifyCountRef.current = 0;
+            armVerifyTimer();
+          } else if (activity == null && nullStateVerifyCountRef.current < 3) {
+            nullStateVerifyCountRef.current += 1;
             armVerifyTimer();
           } else {
+            nullStateVerifyCountRef.current = 0;
             clearActivity();
           }
-        } catch {
-          if (!abortController.signal.aborted) clearActivity();
+        } catch (err) {
+          if (!abortController.signal.aborted) {
+            console.warn('Agent activity verify failed; re-arming timer', err);
+            armVerifyTimer();
+          }
         }
       }, IDLE_TIMEOUT_MS);
     };
     armVerifyTimer();
   }, [projectId, sessionId, clearActivity]);
 
-  const hydrateState = (s: SessionStateSnapshot | null | undefined) => {
+  const hydrateState = useCallback((s: SessionStateSnapshot | null | undefined) => {
     if (!s) return;
-    if (s.activity === 'prompting') { setAgentActivity('prompting'); setPromptStartedAt(s.promptStartedAt ?? null); }
-    else if (s.activity === 'idle') setAgentActivity('idle');
+    if (isWorkingActivity(s.activity)) {
+      setAgentActivity(s.activity);
+      setPromptStartedAt(s.promptStartedAt ?? null);
+      startVerifyDecayTimer();
+    } else {
+      clearActivity();
+      clearTimeout(idleTimerRef.current);
+      verifyAbortRef.current?.abort();
+      verifyAbortRef.current = null;
+    }
     if (s.currentPlan) setCurrentPlan(s.currentPlan);
-  };
+  }, [clearActivity, startVerifyDecayTimer]);
 
   const [filePanel, setFilePanel] = useState<FilePanelState>(null);
 
@@ -175,7 +197,7 @@ export function useSessionLifecycle(
       setSession(catchUpSession);
       setMessages((prev) => mergeMessages(prev, catchUpMessages, 'replace'));
       hydrateState(state);
-    }, []),
+    }, [hydrateState]),
     onAgentCompleted: useCallback((agentCompletedAt: number) => {
       setSession((prev) => prev ? { ...prev, agentCompletedAt, isIdle: true } as ChatSessionResponse : prev);
       setAgentActivity('idle');
@@ -185,10 +207,11 @@ export function useSessionLifecycle(
       verifyAbortRef.current?.abort();
       verifyAbortRef.current = null;
     }, []),
-    onAgentActivity: useCallback((activity: 'prompting' | 'idle', promptStartedAt?: number | null) => {
-      setAgentActivity(activity === 'prompting' ? 'prompting' : 'idle');
-      setPromptStartedAt(activity === 'prompting' ? (promptStartedAt ?? Date.now()) : null);
-      if (activity === 'prompting') {
+    onAgentActivity: useCallback((activity: 'prompting' | 'idle' | 'recovering' | 'error', promptStartedAt?: number | null) => {
+      const working = activity === 'prompting' || activity === 'recovering';
+      setAgentActivity(working ? activity : 'idle');
+      setPromptStartedAt(working ? (promptStartedAt ?? Date.now()) : null);
+      if (working) {
         // Arm the shared verify-before-decay timer (prevents false idle during long tool calls).
         startVerifyDecayTimer();
       } else {
@@ -237,7 +260,7 @@ export function useSessionLifecycle(
     } finally {
       setLoading(false);
     }
-  }, [projectId, sessionId]);
+  }, [projectId, sessionId, hydrateState]);
 
   useEffect(() => { void loadSession(); }, [loadSession]);
 
@@ -318,6 +341,7 @@ export function useSessionLifecycle(
           setMessages((prev) => mergeMessages(prev, data.messages, 'replace'));
           if (data.session.task) setTaskEmbed(data.session.task);
         }
+        hydrateState(data.state);
       } catch (err) {
         if (err instanceof DOMException && err.name === 'AbortError') return;
       }
@@ -327,7 +351,7 @@ export function useSessionLifecycle(
       clearInterval(pollInterval);
       abortController.abort();
     };
-  }, [session?.status, projectId, sessionId]);
+  }, [session?.status, projectId, sessionId, hydrateState]);
 
   // ── Send follow-up via REST API ──
   const handleSendFollowUp = async () => {

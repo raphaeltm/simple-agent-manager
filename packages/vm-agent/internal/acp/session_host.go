@@ -256,6 +256,9 @@ type SessionHost struct {
 	promptCancelMu sync.Mutex
 	// promptCancel cancels the in-flight Prompt() context. Protected by promptCancelMu.
 	promptCancel context.CancelFunc
+	// promptActivityCancel stops the periodic prompting re-report loop.
+	// Protected by promptCancelMu.
+	promptActivityCancel context.CancelFunc
 	// activePromptID identifies the in-flight prompt associated with promptCancel.
 	// Protected by promptCancelMu.
 	activePromptID uint64
@@ -654,6 +657,7 @@ func (h *SessionHost) Stop() {
 	h.syncCredentialOnStop(snap)
 
 	// Report idle to the control plane so the browser status bar clears.
+	h.stopPromptActivityRereport()
 	h.reportActivity("idle")
 
 	// Cancel any pending auto-suspend timer.

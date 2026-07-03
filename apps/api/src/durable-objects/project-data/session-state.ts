@@ -13,7 +13,7 @@ import { createModuleLogger } from '../../lib/logger';
 
 const log = createModuleLogger('project_data.session_state');
 
-const STALE_ACTIVITY_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes default
+export const DEFAULT_SESSION_ACTIVITY_STALE_THRESHOLD_MS = 5 * 60 * 1000;
 
 // --- Write Operations ---
 
@@ -31,7 +31,7 @@ export function upsertActivityState(
   update: ActivityUpdate,
 ): void {
   const now = Date.now();
-  const promptStartedAt = update.activity === 'prompting'
+  const promptStartedAt = update.activity === 'prompting' || update.activity === 'recovering'
     ? (update.promptStartedAt ?? now)
     : null;
 
@@ -41,7 +41,7 @@ export function upsertActivityState(
      ON CONFLICT(session_id) DO UPDATE SET
        activity = excluded.activity,
        activity_at = excluded.activity_at,
-       prompt_started_at = CASE WHEN excluded.activity = 'prompting' THEN excluded.prompt_started_at ELSE session_state.prompt_started_at END,
+       prompt_started_at = CASE WHEN excluded.activity IN ('prompting', 'recovering') THEN excluded.prompt_started_at ELSE session_state.prompt_started_at END,
        agent_type = COALESCE(excluded.agent_type, session_state.agent_type),
        restart_count = COALESCE(excluded.restart_count, session_state.restart_count),
        status_error = excluded.status_error`,
@@ -52,6 +52,25 @@ export function upsertActivityState(
     update.agentType ?? null,
     update.restartCount ?? 0,
     update.statusError ?? null,
+  );
+}
+
+export function refreshWorkingActivityForChatSession(
+  sql: SqlStorage,
+  chatSessionId: string,
+  now = Date.now(),
+): void {
+  sql.exec(
+    `UPDATE session_state
+     SET activity_at = ?
+     WHERE activity IN ('prompting', 'recovering')
+       AND session_id IN (
+         SELECT id FROM acp_sessions WHERE chat_session_id = ?
+         UNION SELECT ?
+       )`,
+    now,
+    chatSessionId,
+    chatSessionId,
   );
 }
 
@@ -144,8 +163,9 @@ export function getSessionState(
 // --- Staleness Reconciliation ---
 
 /**
- * Auto-heal stuck "prompting" states. If activity_at is older than the
- * staleness threshold and no messages have arrived since, transition to idle.
+ * Auto-heal stuck working states only with positive dead-session evidence:
+ * activity is stale, no messages arrived since activity_at, and no linked ACP
+ * session is still running/started with recent heartbeat/update evidence.
  *
  * Returns session IDs that were auto-healed (for broadcasting).
  */
@@ -153,32 +173,38 @@ export function reconcileStaleActivity(
   sql: SqlStorage,
   thresholdMs?: number,
 ): string[] {
-  const threshold = thresholdMs ?? STALE_ACTIVITY_THRESHOLD_MS;
+  const threshold = thresholdMs ?? DEFAULT_SESSION_ACTIVITY_STALE_THRESHOLD_MS;
   const cutoff = Date.now() - threshold;
   const now = Date.now();
 
-  // Identify stale sessions for broadcast notification. Task-linked prompting
-  // states are intentionally excluded: task reconciliation uses them to decide
-  // whether to defer, observe, or cancel an in-flight prompt.
+  const stalePredicate = `
+    activity IN ('prompting', 'recovering', 'error')
+    AND activity_at < ?
+    AND NOT EXISTS (
+      SELECT 1
+      FROM acp_sessions acp
+      JOIN chat_messages msg ON msg.session_id = acp.chat_session_id
+      WHERE acp.id = session_state.session_id
+        AND msg.created_at >= session_state.activity_at
+      UNION
+      SELECT 1
+      FROM chat_messages msg
+      WHERE msg.session_id = session_state.session_id
+        AND msg.created_at >= session_state.activity_at
+    )
+    AND NOT EXISTS (
+      SELECT 1
+      FROM acp_sessions acp
+      WHERE acp.id = session_state.session_id
+        AND acp.status IN ('running', 'started')
+        AND COALESCE(acp.last_heartbeat_at, acp.updated_at, acp.started_at, acp.created_at, 0) >= ?
+    )`;
+
   const staleRows = sql
     .exec(
       `SELECT session_id FROM session_state
-       WHERE activity_at < ?
-         AND (
-           activity IN ('error', 'recovering')
-           OR (
-             activity = 'prompting'
-             AND NOT EXISTS (
-               SELECT 1
-               FROM acp_sessions acp
-               JOIN chat_sessions cs ON cs.id = acp.chat_session_id
-               LEFT JOIN idle_cleanup_schedule ics ON ics.session_id = cs.id
-               WHERE acp.id = session_state.session_id
-                 AND acp.status IN ('running', 'started')
-                 AND COALESCE(ics.task_id, cs.task_id) IS NOT NULL
-             )
-           )
-         )`,
+       WHERE ${stalePredicate}`,
+      cutoff,
       cutoff,
     )
     .toArray();
@@ -188,23 +214,9 @@ export function reconcileStaleActivity(
   // Bulk-heal all stale sessions in a single atomic statement
   sql.exec(
     `UPDATE session_state SET activity = 'idle', activity_at = ?
-     WHERE activity_at < ?
-       AND (
-         activity IN ('error', 'recovering')
-         OR (
-           activity = 'prompting'
-           AND NOT EXISTS (
-             SELECT 1
-             FROM acp_sessions acp
-             JOIN chat_sessions cs ON cs.id = acp.chat_session_id
-             LEFT JOIN idle_cleanup_schedule ics ON ics.session_id = cs.id
-             WHERE acp.id = session_state.session_id
-               AND acp.status IN ('running', 'started')
-               AND COALESCE(ics.task_id, cs.task_id) IS NOT NULL
-           )
-         )
-       )`,
+     WHERE ${stalePredicate}`,
     now,
+    cutoff,
     cutoff,
   );
 

@@ -28,7 +28,7 @@ export const AcpSessionHeartbeatSchema = v.object({
 });
 
 export const AcpSessionActivityReportSchema = v.object({
-  activity: v.picklist(['prompting', 'idle']),
+  activity: v.picklist(['prompting', 'idle', 'recovering', 'error']),
   nodeId: v.string(),
   promptStartedAt: v.optional(v.number()),
   agentType: v.optional(v.string()),

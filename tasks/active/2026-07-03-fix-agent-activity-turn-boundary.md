@@ -17,28 +17,35 @@ Long silent tool calls can make the project chat activity indicator decay to idl
 
 ## Implementation checklist
 
-- [ ] Add VM agent activity re-report interval config/default and re-send `prompting` while a prompt is active.
-- [ ] Stop the re-report loop on prompt completion/cancel/host stop and cover it with Go tests.
-- [ ] Add env-configurable terminal activity report retry count/backoff while keeping `prompting` cheap.
-- [ ] Extend API activity schema and types to `prompting`, `idle`, `recovering`, and `error`.
-- [ ] Treat `recovering` as working and `error` as terminal/error in project-data storage and broadcasts.
-- [ ] Make stale activity reconciliation evidence-based: threshold, no messages since `activity_at`, and ACP session not live.
-- [ ] Refresh `activity_at` when messages persist during `prompting` or `recovering`.
-- [ ] Update client verify timer so fetch failures re-arm instead of decaying to idle.
-- [ ] Rehydrate client activity from polling and reconnect snapshots, including `recovering` and `error`.
-- [ ] Move the reconnect backlog task to archive after implementing its criteria.
-- [ ] Add/extend Go, schema, DO, client timer, and vertical slice tests.
+- [x] Add VM agent activity re-report interval config/default and re-send `prompting` while a prompt is active.
+- [x] Stop the re-report loop on prompt completion/cancel/host stop and cover it with Go tests.
+- [x] Add env-configurable terminal activity report retry count/backoff while keeping `prompting` cheap.
+- [x] Extend API activity schema and types to `prompting`, `idle`, `recovering`, and `error`.
+- [x] Treat `recovering` as working and `error` as terminal/error in project-data storage and broadcasts.
+- [x] Make stale activity reconciliation evidence-based: threshold, no messages since `activity_at`, and ACP session not live.
+- [x] Refresh `activity_at` when messages persist during `prompting` or `recovering`.
+- [x] Update client verify timer so fetch failures re-arm instead of decaying to idle.
+- [x] Rehydrate client activity from polling and reconnect snapshots, including `recovering` and `error`.
+- [x] Move the reconnect backlog task to archive after implementing its criteria.
+- [x] Add/extend Go, schema, DO, client timer, and vertical slice tests.
 - [ ] Run required quality checks, specialist reviews, staging verification, PR, and merge per `/do`.
+
+## Rule 47 control-loop load review
+
+- Candidate volume: only `session_state` rows currently in `prompting`, `recovering`, or `error` with `activity_at` older than `SESSION_ACTIVITY_STALE_THRESHOLD_MS` are selected.
+- Per-candidate cost: the ProjectData alarm performs local SQLite checks only. It does not call VM agents or external services. The query checks indexed ACP session status/timestamps and chat messages for linked chat sessions.
+- Escape path: candidates with positive dead-session evidence are atomically updated to `idle`, so the second sweep does not reselect them. Live prompts escape by receiving VM re-reports or persisted messages that refresh `activity_at`.
+- Zombie regression: `session-state-reconciliation.test.ts` runs the sweep twice against a stale recovering session and asserts the second sweep returns no candidate.
 
 ## Acceptance criteria
 
 - [ ] A non-task prompt running a long silent command keeps the working indicator and Cancel button visible until actual prompt end.
 - [ ] A genuine prompt end clears the indicator promptly via the idle activity event.
 - [ ] Dead VM/agent mid-prompt eventually clears through evidence-based reconciliation.
-- [ ] `recovering` and `error` activity reports no longer return 400.
-- [ ] No client or server timer decays to idle on silence alone.
-- [ ] Activity thresholds and retry intervals are configurable with `DEFAULT_*` constants.
-- [ ] Reconciler changes include a rule 47 load review and zombie prevention test.
+- [x] `recovering` and `error` activity reports no longer return 400.
+- [x] No client or server timer decays to idle on silence alone.
+- [x] Activity thresholds and retry intervals are configurable with `DEFAULT_*` constants.
+- [x] Reconciler changes include a rule 47 load review and zombie prevention test.
 
 ## References
 

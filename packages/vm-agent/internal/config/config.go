@@ -43,6 +43,18 @@ const (
 	// DefaultACPRestartDecayWindow is the quiet period after which restartCount
 	// resets. Override via DEFAULT_RESTART_DECAY_WINDOW.
 	DefaultACPRestartDecayWindow = 5 * time.Minute
+
+	// DefaultACPActivityRereportInterval refreshes prompt activity while a
+	// prompt is in flight. Override via ACTIVITY_REREPORT_INTERVAL.
+	DefaultACPActivityRereportInterval = 60 * time.Second
+
+	// DefaultACPTerminalActivityReportAttempts is the retry budget for
+	// terminal/error activity reports. Override via ACTIVITY_TERMINAL_REPORT_ATTEMPTS.
+	DefaultACPTerminalActivityReportAttempts = 5
+
+	// DefaultACPTerminalActivityReportBackoff is the delay between terminal
+	// activity report retries. Override via ACTIVITY_TERMINAL_REPORT_BACKOFF.
+	DefaultACPTerminalActivityReportBackoff = time.Second
 )
 
 const (
@@ -143,29 +155,32 @@ type Config struct {
 	PTYOutputBufferSize  int           // Ring buffer capacity per session in bytes
 
 	// ACP settings - configurable per constitution principle XI
-	ACPInitTimeoutMs         int // Fallback timeout for all ACP init phases (default: 30000ms)
-	ACPInitializeTimeoutMs   int // Per-phase timeout for Initialize RPC; 0 = use ACPInitTimeoutMs (default: 0)
-	ACPNewSessionTimeoutMs   int // Per-phase timeout for NewSession RPC; 0 = use ACPInitTimeoutMs (default: 0)
-	ACPLoadSessionTimeoutMs  int // Per-phase timeout for LoadSession RPC; 0 = use ACPInitTimeoutMs (default: 0)
-	ACPReconnectDelayMs      int
-	ACPReconnectTimeoutMs    int
-	ACPMaxRestartAttempts    int
-	ACPMessageBufferSize     int           // Max buffered messages per SessionHost for late-join replay
-	ACPViewerSendBuffer      int           // Per-viewer send channel buffer size
-	ACPStderrBufferBytes     int           // Max agent stderr bytes retained for crash reports
-	ACPPingInterval          time.Duration // WebSocket ping interval (default: 30s)
-	ACPPongTimeout           time.Duration // WebSocket pong deadline after ping (default: 10s)
-	ACPPromptTimeout         time.Duration // Max prompt runtime; 0 = no timeout (default: 0). Used for workspace sessions; task sessions use ACPTaskPromptTimeout via effectivePromptTimeout().
-	ACPTaskPromptTimeout     time.Duration // Max prompt runtime for task-driven sessions; 0 = no timeout (default: 6h)
-	ACPPromptCancelGrace     time.Duration // Wait after cancel before force-stop fallback (default: 5s)
-	ACPPromptRetryMaxRetries int           // Retryable transient provider prompt errors after initial attempt (default: 2)
-	ACPPromptRetryInitial    time.Duration // Initial backoff for transient provider prompt retries (default: 15s)
-	ACPPromptRetryMax        time.Duration // Max backoff for transient provider prompt retries (default: 2m)
-	ACPRecoveryWatchdog      time.Duration // Max crash recovery duration before terminal error (default: 2m)
-	ACPRestartDecayWindow    time.Duration // Quiet period before restartCount decays (default: 5m)
-	ACPIdleSuspendTimeout    time.Duration // Auto-suspend after this idle duration with no viewers (default: 30m, 0=disabled)
-	ACPNotifSerializeTimeout time.Duration // Max wait for previous notification processing before delivering next (default: 5s)
-	ACPHeartbeatInterval     time.Duration // Interval for direct ACP session heartbeats to control plane (default: 60s, env: ACP_HEARTBEAT_INTERVAL)
+	ACPInitTimeoutMs                  int // Fallback timeout for all ACP init phases (default: 30000ms)
+	ACPInitializeTimeoutMs            int // Per-phase timeout for Initialize RPC; 0 = use ACPInitTimeoutMs (default: 0)
+	ACPNewSessionTimeoutMs            int // Per-phase timeout for NewSession RPC; 0 = use ACPInitTimeoutMs (default: 0)
+	ACPLoadSessionTimeoutMs           int // Per-phase timeout for LoadSession RPC; 0 = use ACPInitTimeoutMs (default: 0)
+	ACPReconnectDelayMs               int
+	ACPReconnectTimeoutMs             int
+	ACPMaxRestartAttempts             int
+	ACPMessageBufferSize              int           // Max buffered messages per SessionHost for late-join replay
+	ACPViewerSendBuffer               int           // Per-viewer send channel buffer size
+	ACPStderrBufferBytes              int           // Max agent stderr bytes retained for crash reports
+	ACPPingInterval                   time.Duration // WebSocket ping interval (default: 30s)
+	ACPPongTimeout                    time.Duration // WebSocket pong deadline after ping (default: 10s)
+	ACPPromptTimeout                  time.Duration // Max prompt runtime; 0 = no timeout (default: 0). Used for workspace sessions; task sessions use ACPTaskPromptTimeout via effectivePromptTimeout().
+	ACPTaskPromptTimeout              time.Duration // Max prompt runtime for task-driven sessions; 0 = no timeout (default: 6h)
+	ACPPromptCancelGrace              time.Duration // Wait after cancel before force-stop fallback (default: 5s)
+	ACPPromptRetryMaxRetries          int           // Retryable transient provider prompt errors after initial attempt (default: 2)
+	ACPPromptRetryInitial             time.Duration // Initial backoff for transient provider prompt retries (default: 15s)
+	ACPPromptRetryMax                 time.Duration // Max backoff for transient provider prompt retries (default: 2m)
+	ACPRecoveryWatchdog               time.Duration // Max crash recovery duration before terminal error (default: 2m)
+	ACPRestartDecayWindow             time.Duration // Quiet period before restartCount decays (default: 5m)
+	ACPIdleSuspendTimeout             time.Duration // Auto-suspend after this idle duration with no viewers (default: 30m, 0=disabled)
+	ACPNotifSerializeTimeout          time.Duration // Max wait for previous notification processing before delivering next (default: 5s)
+	ACPHeartbeatInterval              time.Duration // Interval for direct ACP session heartbeats to control plane (default: 60s, env: ACP_HEARTBEAT_INTERVAL)
+	ACPActivityRereportInterval       time.Duration // Re-report prompting while a prompt is active (default: 60s, env: ACTIVITY_REREPORT_INTERVAL)
+	ACPTerminalActivityReportAttempts int           // Retry attempts for terminal activity reports (default: 5, env: ACTIVITY_TERMINAL_REPORT_ATTEMPTS)
+	ACPTerminalActivityReportBackoff  time.Duration // Retry backoff for terminal activity reports (default: 1s, env: ACTIVITY_TERMINAL_REPORT_BACKOFF)
 
 	// Event log settings - configurable per constitution principle XI
 	MaxNodeEvents      int // Max node-level events retained in memory (default: 500)
@@ -377,29 +392,32 @@ func Load() (*Config, error) {
 		PTYOutputBufferSize:  getEnvInt("PTY_OUTPUT_BUFFER_SIZE", 262144), // 256 KB default
 
 		// ACP settings - configurable per constitution principle XI
-		ACPInitTimeoutMs:         getEnvInt("ACP_INIT_TIMEOUT_MS", 30000),
-		ACPInitializeTimeoutMs:   getEnvInt("ACP_INITIALIZE_TIMEOUT_MS", 0),   // 0 = use ACPInitTimeoutMs
-		ACPNewSessionTimeoutMs:   getEnvInt("ACP_NEW_SESSION_TIMEOUT_MS", 0),  // 0 = use ACPInitTimeoutMs
-		ACPLoadSessionTimeoutMs:  getEnvInt("ACP_LOAD_SESSION_TIMEOUT_MS", 0), // 0 = use ACPInitTimeoutMs
-		ACPReconnectDelayMs:      getEnvInt("ACP_RECONNECT_DELAY_MS", 2000),
-		ACPReconnectTimeoutMs:    getEnvInt("ACP_RECONNECT_TIMEOUT_MS", 30000),
-		ACPMaxRestartAttempts:    getEnvInt("ACP_MAX_RESTART_ATTEMPTS", 3),
-		ACPMessageBufferSize:     getEnvInt("ACP_MESSAGE_BUFFER_SIZE", 5000),
-		ACPViewerSendBuffer:      getEnvInt("ACP_VIEWER_SEND_BUFFER", 256),
-		ACPStderrBufferBytes:     getEnvInt("ACP_STDERR_BUFFER_BYTES", 4096),
-		ACPPingInterval:          getEnvDuration("ACP_PING_INTERVAL", 30*time.Second),
-		ACPPongTimeout:           getEnvDuration("ACP_PONG_TIMEOUT", 10*time.Second),
-		ACPPromptTimeout:         getEnvDuration("ACP_PROMPT_TIMEOUT", 0),
-		ACPTaskPromptTimeout:     getEnvDuration("ACP_TASK_PROMPT_TIMEOUT", 6*time.Hour),
-		ACPPromptCancelGrace:     getEnvDuration("ACP_PROMPT_CANCEL_GRACE_PERIOD", 5*time.Second),
-		ACPPromptRetryMaxRetries: getEnvInt("ACP_PROMPT_RETRY_MAX_RETRIES", 2),
-		ACPPromptRetryInitial:    getEnvDuration("ACP_PROMPT_RETRY_INITIAL_BACKOFF", 15*time.Second),
-		ACPPromptRetryMax:        getEnvDuration("ACP_PROMPT_RETRY_MAX_BACKOFF", 2*time.Minute),
-		ACPRecoveryWatchdog:      getEnvDuration("DEFAULT_RECOVERY_WATCHDOG_TIMEOUT", DefaultACPRecoveryWatchdogTimeout),
-		ACPRestartDecayWindow:    getEnvDuration("DEFAULT_RESTART_DECAY_WINDOW", DefaultACPRestartDecayWindow),
-		ACPIdleSuspendTimeout:    getEnvDuration("ACP_IDLE_SUSPEND_TIMEOUT", 30*time.Minute),
-		ACPNotifSerializeTimeout: getEnvDuration("ACP_NOTIF_SERIALIZE_TIMEOUT", 5*time.Second),
-		ACPHeartbeatInterval:     getEnvDuration("ACP_HEARTBEAT_INTERVAL", 60*time.Second),
+		ACPInitTimeoutMs:                  getEnvInt("ACP_INIT_TIMEOUT_MS", 30000),
+		ACPInitializeTimeoutMs:            getEnvInt("ACP_INITIALIZE_TIMEOUT_MS", 0),   // 0 = use ACPInitTimeoutMs
+		ACPNewSessionTimeoutMs:            getEnvInt("ACP_NEW_SESSION_TIMEOUT_MS", 0),  // 0 = use ACPInitTimeoutMs
+		ACPLoadSessionTimeoutMs:           getEnvInt("ACP_LOAD_SESSION_TIMEOUT_MS", 0), // 0 = use ACPInitTimeoutMs
+		ACPReconnectDelayMs:               getEnvInt("ACP_RECONNECT_DELAY_MS", 2000),
+		ACPReconnectTimeoutMs:             getEnvInt("ACP_RECONNECT_TIMEOUT_MS", 30000),
+		ACPMaxRestartAttempts:             getEnvInt("ACP_MAX_RESTART_ATTEMPTS", 3),
+		ACPMessageBufferSize:              getEnvInt("ACP_MESSAGE_BUFFER_SIZE", 5000),
+		ACPViewerSendBuffer:               getEnvInt("ACP_VIEWER_SEND_BUFFER", 256),
+		ACPStderrBufferBytes:              getEnvInt("ACP_STDERR_BUFFER_BYTES", 4096),
+		ACPPingInterval:                   getEnvDuration("ACP_PING_INTERVAL", 30*time.Second),
+		ACPPongTimeout:                    getEnvDuration("ACP_PONG_TIMEOUT", 10*time.Second),
+		ACPPromptTimeout:                  getEnvDuration("ACP_PROMPT_TIMEOUT", 0),
+		ACPTaskPromptTimeout:              getEnvDuration("ACP_TASK_PROMPT_TIMEOUT", 6*time.Hour),
+		ACPPromptCancelGrace:              getEnvDuration("ACP_PROMPT_CANCEL_GRACE_PERIOD", 5*time.Second),
+		ACPPromptRetryMaxRetries:          getEnvInt("ACP_PROMPT_RETRY_MAX_RETRIES", 2),
+		ACPPromptRetryInitial:             getEnvDuration("ACP_PROMPT_RETRY_INITIAL_BACKOFF", 15*time.Second),
+		ACPPromptRetryMax:                 getEnvDuration("ACP_PROMPT_RETRY_MAX_BACKOFF", 2*time.Minute),
+		ACPRecoveryWatchdog:               getEnvDuration("DEFAULT_RECOVERY_WATCHDOG_TIMEOUT", DefaultACPRecoveryWatchdogTimeout),
+		ACPRestartDecayWindow:             getEnvDuration("DEFAULT_RESTART_DECAY_WINDOW", DefaultACPRestartDecayWindow),
+		ACPIdleSuspendTimeout:             getEnvDuration("ACP_IDLE_SUSPEND_TIMEOUT", 30*time.Minute),
+		ACPNotifSerializeTimeout:          getEnvDuration("ACP_NOTIF_SERIALIZE_TIMEOUT", 5*time.Second),
+		ACPHeartbeatInterval:              getEnvDuration("ACP_HEARTBEAT_INTERVAL", 60*time.Second),
+		ACPActivityRereportInterval:       getEnvDuration("ACTIVITY_REREPORT_INTERVAL", DefaultACPActivityRereportInterval),
+		ACPTerminalActivityReportAttempts: getEnvInt("ACTIVITY_TERMINAL_REPORT_ATTEMPTS", DefaultACPTerminalActivityReportAttempts),
+		ACPTerminalActivityReportBackoff:  getEnvDuration("ACTIVITY_TERMINAL_REPORT_BACKOFF", DefaultACPTerminalActivityReportBackoff),
 
 		// Event log settings
 		MaxNodeEvents:      getEnvInt("MAX_NODE_EVENTS", 500),

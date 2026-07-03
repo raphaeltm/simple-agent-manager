@@ -26,7 +26,7 @@ interface UseChatWebSocketOptions {
   /** Called when the agent completes on the session. */
   onAgentCompleted?: (agentCompletedAt: number) => void;
   /** Called when a session.activity event arrives (prompting/idle). */
-  onAgentActivity?: (activity: 'prompting' | 'idle', promptStartedAt?: number | null) => void;
+  onAgentActivity?: (activity: 'prompting' | 'idle' | 'recovering' | 'error', promptStartedAt?: number | null) => void;
 }
 
 export interface UseChatWebSocketReturn {

@@ -171,6 +171,14 @@ type GatewayConfig struct {
 	PromptRetryMaxDelay time.Duration
 	// PromptRetrySleeper is injectable for tests. Nil uses time.Sleep with context cancellation.
 	PromptRetrySleeper func(context.Context, time.Duration) error
+	// ActivityRereportInterval refreshes prompt activity while a prompt is active.
+	// Zero disables the periodic re-report loop.
+	ActivityRereportInterval time.Duration
+	// TerminalActivityReportAttempts is the retry budget for terminal/error
+	// activity reports. Zero uses the legacy cheap retry policy.
+	TerminalActivityReportAttempts int
+	// TerminalActivityReportBackoff is the delay between terminal/error retries.
+	TerminalActivityReportBackoff time.Duration
 	// RecoveryWatchdogTimeout bounds crash recovery after a prompt disconnect.
 	// Zero uses DefaultRecoveryWatchdogTimeout.
 	RecoveryWatchdogTimeout time.Duration

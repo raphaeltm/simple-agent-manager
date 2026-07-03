@@ -173,8 +173,9 @@ type activityPayload struct {
 }
 
 // reportActivity sends a durable activity signal to the control plane.
-// Includes one retry with backoff to tolerate transient failures.
-// activity should be "prompting" or "idle".
+// Prompting reports stay cheap because the periodic re-report loop self-heals
+// missed starts; terminal/error reports use a larger retry budget.
+// activity should be "prompting", "idle", "recovering", or "error".
 func (h *SessionHost) reportActivity(activity string) {
 	// h.config fields are immutable after construction — no lock needed.
 	projectID := h.config.ProjectID
@@ -224,14 +225,13 @@ func (h *SessionHost) reportActivity(activity string) {
 			return
 		}
 
-		// Attempt with one retry on failure.
-		const maxAttempts = 2
+		maxAttempts, retryBackoff := h.activityReportRetryPolicy(activity)
 		for attempt := 1; attempt <= maxAttempts; attempt++ {
 			statusCode, doErr := h.doActivityRequest(url, body, callbackToken)
 			if doErr != nil {
 				if attempt < maxAttempts {
 					slog.Info("reportActivity: attempt failed, retrying", "attempt", attempt, "error", doErr)
-					time.Sleep(500 * time.Millisecond)
+					time.Sleep(retryBackoff)
 					continue
 				}
 				slog.Warn("reportActivity: all attempts failed", "error", doErr)
@@ -239,7 +239,7 @@ func (h *SessionHost) reportActivity(activity string) {
 			}
 			if statusCode >= 500 && attempt < maxAttempts {
 				slog.Info("reportActivity: server error, retrying", "status", statusCode)
-				time.Sleep(500 * time.Millisecond)
+				time.Sleep(retryBackoff)
 				continue
 			}
 			if statusCode >= 400 {
@@ -248,6 +248,21 @@ func (h *SessionHost) reportActivity(activity string) {
 			return
 		}
 	}()
+}
+
+func (h *SessionHost) activityReportRetryPolicy(activity string) (int, time.Duration) {
+	if activity == "prompting" {
+		return 2, 500 * time.Millisecond
+	}
+	attempts := h.config.TerminalActivityReportAttempts
+	if attempts <= 0 {
+		attempts = 2
+	}
+	backoff := h.config.TerminalActivityReportBackoff
+	if backoff <= 0 {
+		backoff = 500 * time.Millisecond
+	}
+	return attempts, backoff
 }
 
 // doActivityRequest performs a single HTTP POST attempt to the activity endpoint.
