@@ -22,10 +22,10 @@ Autonomous task mode keeps existing terminal failure semantics. Fatal agent/sess
 - [x] Phase 1: Add `fatalErrorStopReason = "fatal_error"` in ACP code and route fatal crash recovery, unrecoverable crash prompts, and deadline-exceeded prompt timeout to it.
 - [x] Phase 1: Preserve plain non-crash prompt errors as stopReason `"error"` and verify post-retry prompt errors remain non-fatal.
 - [x] Phase 2: Update `makeTaskCompletionCallback` so `fatal_error` is terminal failed in both modes, conversation-mode `"error"` maps to execution-step-only `awaiting_followup` with a redacted error message, and task-mode `"error"` remains terminal failed.
-- [ ] Phase 3: Update task callback execution-step handling to persist recoverable `errorMessage`, clear it on subsequent execution-step callbacks without an error, and record `task.agent_error_recoverable` activity without stopping sessions or notifying task failure.
+- [x] Phase 3: Update task callback execution-step handling to persist recoverable `errorMessage`, clear it on subsequent execution-step callbacks without an error, and record `task.agent_error_recoverable` activity without stopping sessions or notifying task failure.
 - [ ] Phase 4: Surface recoverable errors in project chat with non-terminal recovery guidance; keep input enabled and ensure the banner clears/supersedes after recovery.
 - [ ] Phase 5: Add/update Go tests for callback mapping, crash recovery fatal stop reasons, deadline-exceeded prompt timeout fatal behavior, and post-retry non-fatal prompt errors.
-- [ ] Phase 5: Add/update API route and vertical-slice tests proving recoverable callbacks keep task/session/workspace alive and clear stale error messages.
+- [x] Phase 5: Add/update API route and vertical-slice tests proving recoverable callbacks keep task/session/workspace alive and clear stale error messages.
 - [ ] Phase 5: Add/run Playwright visual audit screenshots for mobile 375px and desktop 1280px, including a long recoverable error message.
 - [ ] Phase 5: Run required local quality checks, including Go `-race` for `packages/vm-agent`.
 - [ ] Phase 6: Coordinate staging deploys, delete staging nodes immediately before deploy because `packages/vm-agent/` changed, deploy the output branch, and verify a real recovered-from-error project chat.
