@@ -355,7 +355,7 @@ func writeTeardownRelease(t *testing.T, disk *DiskState) {
   web:
     image: nginx:latest
     volumes:
-      - /mnt/sam-env-env-a/volumes/data:/usr/share/nginx/html
+      - /mnt/sam-env-env-a/volumes/data/data:/usr/share/nginx/html
 `
 	if err := disk.WriteRelease(state, composeYAML, "env-a.apps.example.com {\n\treverse_proxy 127.0.0.1:35000\n}\n"); err != nil {
 		t.Fatalf("WriteRelease: %v", err)

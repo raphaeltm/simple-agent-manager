@@ -10,7 +10,11 @@
 import type { DeploymentManifest, EnvValue } from '@simple-agent-manager/shared';
 import { stringify } from 'yaml';
 
-import { resolveVolumeMountRoot } from './deployment-volumes';
+import {
+  NAMED_VOLUME_BIND_DATA_DIR,
+  resolveNamedVolumeBindSource,
+  resolveVolumeMountRoot,
+} from './deployment-volumes';
 
 // =============================================================================
 // Render context — caller supplies IDs and config
@@ -124,10 +128,10 @@ function resolveEnvValue(
  */
 interface ServiceBuildContext {
   volumeRoot: string;
+  environmentId: string;
   networkName: string;
   defaultMemMb: number;
   resolvedSecrets: Record<string, string>;
-  environmentId: string;
   releaseId: string;
   routeTargets: NonNullable<ComposeRenderContext['routeTargets']>;
   logMaxSize: string;
@@ -178,7 +182,12 @@ function buildService(
   // Volumes — bind named volumes under the host volume root
   if (svc.volumes.length > 0) {
     service.volumes = svc.volumes.map(
-      (v) => `${buildCtx.volumeRoot}/${v.name}:${v.mountPath}`,
+      (v) => {
+        const source = buildCtx.volumeRoot === resolveVolumeMountRoot(buildCtx.environmentId)
+          ? resolveNamedVolumeBindSource(buildCtx.environmentId, v.name)
+          : `${buildCtx.volumeRoot}/${v.name}/${NAMED_VOLUME_BIND_DATA_DIR}`;
+        return `${source}:${v.mountPath}`;
+      },
     );
   }
 

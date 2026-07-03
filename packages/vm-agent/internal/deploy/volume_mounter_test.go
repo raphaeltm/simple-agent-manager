@@ -255,6 +255,108 @@ func TestRealVolumeMounter_SkipsMountWhenAlreadyMounted(t *testing.T) {
 	}
 }
 
+func TestRealVolumeMounter_CreatesWritableDataSubdirForFreshExt4LostFound(t *testing.T) {
+	device := filepath.Join(t.TempDir(), "vol")
+	if err := os.WriteFile(device, []byte("block"), 0644); err != nil {
+		t.Fatalf("write fake device: %v", err)
+	}
+	mountRoot := filepath.Join(t.TempDir(), "mnt")
+	if err := os.MkdirAll(filepath.Join(mountRoot, "lost+found"), 0700); err != nil {
+		t.Fatalf("create lost+found fixture: %v", err)
+	}
+	fstab := filepath.Join(t.TempDir(), "fstab")
+	runner := &fakeCommandRunner{responses: map[string]struct {
+		out string
+		err error
+	}{
+		"blkid " + device:                   {out: device + ": UUID=\"uuid-123\" TYPE=\"ext4\"\n"},
+		"mountpoint -q " + mountRoot:        {err: errors.New("not mounted")},
+		"mount " + device + " " + mountRoot: {},
+		"blkid -s UUID -o value " + device:  {out: "uuid-123\n"},
+	}}
+
+	mounter := &RealVolumeMounter{runner: runner, fstabPath: fstab}
+	err := mounter.MountVolumes(context.Background(), []VolumeMount{{
+		Name:             "pgdata",
+		MountRoot:        mountRoot,
+		ProviderVolumeID: "vol-formatted",
+		ProviderName:     "hetzner",
+		LinuxDevice:      device,
+		FSFormat:         "ext4",
+	}})
+	if err != nil {
+		t.Fatalf("MountVolumes: %v", err)
+	}
+
+	dataDir := filepath.Join(mountRoot, "data")
+	info, err := os.Stat(dataDir)
+	if err != nil {
+		t.Fatalf("stat data dir: %v", err)
+	}
+	if !info.IsDir() {
+		t.Fatalf("expected %s to be a directory", dataDir)
+	}
+	if got := info.Mode().Perm(); got != 0777 {
+		t.Fatalf("expected data dir mode 0777, got %03o", got)
+	}
+	if _, err := os.Stat(filepath.Join(mountRoot, "lost+found")); err != nil {
+		t.Fatalf("lost+found fixture should remain untouched: %v", err)
+	}
+}
+
+func TestRealVolumeMounter_DoesNotChmodOrClobberExistingDataSubdir(t *testing.T) {
+	device := filepath.Join(t.TempDir(), "vol")
+	if err := os.WriteFile(device, []byte("block"), 0644); err != nil {
+		t.Fatalf("write fake device: %v", err)
+	}
+	mountRoot := filepath.Join(t.TempDir(), "mnt")
+	dataDir := filepath.Join(mountRoot, "data")
+	if err := os.MkdirAll(dataDir, 0700); err != nil {
+		t.Fatalf("create data dir fixture: %v", err)
+	}
+	sentinel := filepath.Join(dataDir, "sentinel")
+	if err := os.WriteFile(sentinel, []byte("keep"), 0600); err != nil {
+		t.Fatalf("write sentinel: %v", err)
+	}
+	fstab := filepath.Join(t.TempDir(), "fstab")
+	runner := &fakeCommandRunner{responses: map[string]struct {
+		out string
+		err error
+	}{
+		"blkid " + device:                  {out: device + ": UUID=\"uuid-123\" TYPE=\"ext4\"\n"},
+		"mountpoint -q " + mountRoot:       {},
+		"blkid -s UUID -o value " + device: {out: "uuid-123\n"},
+	}}
+
+	mounter := &RealVolumeMounter{runner: runner, fstabPath: fstab}
+	err := mounter.MountVolumes(context.Background(), []VolumeMount{{
+		Name:             "pgdata",
+		MountRoot:        mountRoot,
+		ProviderVolumeID: "vol-formatted",
+		ProviderName:     "hetzner",
+		LinuxDevice:      device,
+		FSFormat:         "ext4",
+	}})
+	if err != nil {
+		t.Fatalf("MountVolumes: %v", err)
+	}
+
+	info, err := os.Stat(dataDir)
+	if err != nil {
+		t.Fatalf("stat data dir: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0700 {
+		t.Fatalf("pre-existing data dir mode should be preserved, got %03o", got)
+	}
+	contents, err := os.ReadFile(sentinel)
+	if err != nil {
+		t.Fatalf("read sentinel: %v", err)
+	}
+	if string(contents) != "keep" {
+		t.Fatalf("sentinel contents changed: %q", contents)
+	}
+}
+
 func TestRealVolumeMounter_TeardownMountsUnmountsAndRemovesFstabEntry(t *testing.T) {
 	mountRoot := "/mnt/sam-env-env-1/volumes/data"
 	otherRoot := "/mnt/sam-env-env-2/volumes/data"
