@@ -17,7 +17,21 @@ import type {
   VMSize,
   WorkspaceProfile,
 } from '@simple-agent-manager/shared';
-import { ATTACHMENT_DEFAULTS, CREDENTIAL_PROVIDERS, DEFAULT_TASK_TITLE_MAX_LENGTH, DEFAULT_VM_LOCATION, DEFAULT_VM_SIZE, DEFAULT_WORKSPACE_PROFILE, getDefaultLocationForProvider,getLocationsForProvider, isValidLocationForProvider, isValidProvider, MAX_CONTEXT_SUMMARY_BYTES, resolveResourceReservation, SAFE_FILENAME_REGEX } from '@simple-agent-manager/shared';
+import {
+  ATTACHMENT_DEFAULTS,
+  CREDENTIAL_PROVIDERS,
+  DEFAULT_TASK_TITLE_MAX_LENGTH,
+  DEFAULT_VM_LOCATION,
+  DEFAULT_VM_SIZE,
+  DEFAULT_WORKSPACE_PROFILE,
+  getDefaultLocationForProvider,
+  getLocationsForProvider,
+  isValidLocationForProvider,
+  isValidProvider,
+  MAX_CONTEXT_SUMMARY_BYTES,
+  resolveResourceReservation,
+  SAFE_FILENAME_REGEX,
+} from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
@@ -38,7 +52,8 @@ import { resolveProjectAgentDefault } from '../../services/project-agent-default
 import * as projectDataService from '../../services/project-data';
 import { parseSkillResourceRequirementsJson, resolveSkillProfile } from '../../services/skills';
 import { startTaskRunnerDO } from '../../services/task-runner-do';
-import { generateTaskTitle, getTaskTitleConfig, truncateTitle, type TaskTitleConfig } from '../../services/task-title';
+import type { TaskTitleConfig } from '../../services/task-title';
+import { generateTaskTitle, getTaskTitleConfig, truncateTitle } from '../../services/task-title';
 import { requireRepositoryUserAccess } from '../projects/_helpers';
 
 /** Default max task message length. Override via MAX_TASK_MESSAGE_LENGTH env var. */
