@@ -214,15 +214,21 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     return chatMessagesToConversationItems(lc.messages);
   }, [lc.messages]);
 
-  // Build item-id → rendered Virtuoso index map for jump-to-message from the
-  // timeline. Includes EVERY conversation item so any timeline anchor resolves.
+  // Build item-id → 0-based data index map for jump-to-message from the timeline.
+  // Includes EVERY conversation item so any timeline anchor resolves. The value is
+  // the ZERO-BASED index into `conversationItems` — Virtuoso's `scrollToIndex`
+  // operates on the data-array coordinate, NOT the `firstItemIndex`-offset
+  // absolute coordinate used for `itemContent`'s `index` arg. Passing the offset
+  // value (VIRTUAL_START + i ≈ 100000) is out of range, so Virtuoso never scrolls
+  // and the highlighted row stays virtualized-out → a dead click on real
+  // (virtualized) sessions. jsdom renders all rows, which hid this locally.
   const itemIndexById = useMemo(() => {
     const map = new Map<string, number>();
     conversationItems.forEach((item, i) => {
-      map.set(item.id, lc.firstItemIndex + i);
+      map.set(item.id, i);
     });
     return map;
-  }, [conversationItems, lc.firstItemIndex]);
+  }, [conversationItems]);
 
   const timeline = useSessionTimeline(projectId, sessionId, lc.messages, showTimeline);
 
