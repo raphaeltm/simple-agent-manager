@@ -181,33 +181,30 @@ export function reconcileStaleActivity(
   const cutoff = Date.now() - threshold;
   const now = Date.now();
 
-  const stalePredicate = `
-    activity IN ('prompting', 'recovering', 'error')
-    AND activity_at < ?
-    AND NOT EXISTS (
-      SELECT 1
-      FROM acp_sessions acp
-      JOIN chat_messages msg ON msg.session_id = acp.chat_session_id
-      WHERE acp.id = session_state.session_id
-        AND msg.created_at > session_state.activity_at
-      UNION
-      SELECT 1
-      FROM chat_messages msg
-      WHERE msg.session_id = session_state.session_id
-        AND msg.created_at > session_state.activity_at
-    )
-    AND NOT EXISTS (
-      SELECT 1
-      FROM acp_sessions acp
-      WHERE acp.id = session_state.session_id
-        AND acp.status IN ('running', 'started')
-        AND COALESCE(acp.last_heartbeat_at, acp.updated_at, acp.started_at, acp.created_at, 0) >= ?
-    )`;
-
   const staleRows = sql
     .exec(
       `SELECT session_id FROM session_state
-       WHERE ${stalePredicate}`,
+       WHERE activity IN ('prompting', 'recovering', 'error')
+         AND activity_at < ?
+         AND NOT EXISTS (
+           SELECT 1
+           FROM acp_sessions acp
+           JOIN chat_messages msg ON msg.session_id = acp.chat_session_id
+           WHERE acp.id = session_state.session_id
+             AND msg.created_at > session_state.activity_at
+           UNION
+           SELECT 1
+           FROM chat_messages msg
+           WHERE msg.session_id = session_state.session_id
+             AND msg.created_at > session_state.activity_at
+         )
+         AND NOT EXISTS (
+           SELECT 1
+           FROM acp_sessions acp
+           WHERE acp.id = session_state.session_id
+             AND acp.status IN ('running', 'started')
+             AND COALESCE(acp.last_heartbeat_at, acp.updated_at, acp.started_at, acp.created_at, 0) >= ?
+         )`,
       cutoff,
       cutoff,
     )
@@ -218,7 +215,27 @@ export function reconcileStaleActivity(
   // Bulk-heal all stale sessions in a single atomic statement
   sql.exec(
     `UPDATE session_state SET activity = 'idle', activity_at = ?
-     WHERE ${stalePredicate}`,
+     WHERE activity IN ('prompting', 'recovering', 'error')
+       AND activity_at < ?
+       AND NOT EXISTS (
+         SELECT 1
+         FROM acp_sessions acp
+         JOIN chat_messages msg ON msg.session_id = acp.chat_session_id
+         WHERE acp.id = session_state.session_id
+           AND msg.created_at > session_state.activity_at
+         UNION
+         SELECT 1
+         FROM chat_messages msg
+         WHERE msg.session_id = session_state.session_id
+           AND msg.created_at > session_state.activity_at
+       )
+       AND NOT EXISTS (
+         SELECT 1
+         FROM acp_sessions acp
+         WHERE acp.id = session_state.session_id
+           AND acp.status IN ('running', 'started')
+           AND COALESCE(acp.last_heartbeat_at, acp.updated_at, acp.started_at, acp.created_at, 0) >= ?
+       )`,
     now,
     cutoff,
     cutoff,
