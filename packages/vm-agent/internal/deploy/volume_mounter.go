@@ -97,10 +97,14 @@ func ensureVolumeDataDir(mountRoot string) error {
 	if !os.IsNotExist(err) {
 		return err
 	}
-	if err := os.MkdirAll(dataDir, 0777); err != nil {
+	// 0777 is intentional: the container UID that will own this bind source is
+	// unknown at mount time (e.g. postgres runs as uid 70/999 and chmods the
+	// directory to 0700 during initdb). The directory lives on a dedicated,
+	// single-tenant provider volume mounted only for this environment.
+	if err := os.MkdirAll(dataDir, 0777); err != nil { // NOSONAR go:S2612 -- see comment above
 		return err
 	}
-	if err := os.Chmod(dataDir, 0777); err != nil {
+	if err := os.Chmod(dataDir, 0777); err != nil { // NOSONAR go:S2612 -- see comment above
 		return err
 	}
 	return nil
