@@ -128,9 +128,9 @@ func TestExtractMessages_ToolName_NoSource(t *testing.T) {
 	}
 }
 
-// TestExtractMessages_RawField_SizeCap verifies oversized raw payloads (file
-// contents, command output) are omitted so tool metadata stays lean, while the
-// tool name is still captured.
+// TestExtractMessages_RawField_SizeCap verifies oversized raw payloads are
+// omitted (for a library tool that IS eligible for capture) so tool metadata
+// stays lean, while the tool name is still captured.
 func TestExtractMessages_RawField_SizeCap(t *testing.T) {
 	status := acpsdk.ToolCallStatusCompleted
 	huge := strings.Repeat("x", maxToolRawFieldSize+100)
@@ -140,18 +140,89 @@ func TestExtractMessages_RawField_SizeCap(t *testing.T) {
 			ToolCallUpdate: &acpsdk.SessionToolCallUpdate{
 				ToolCallId: "tc-4",
 				Status:     &status,
-				Meta:       map[string]any{"claudeCode": map[string]any{"toolName": "Read"}},
+				Meta:       map[string]any{"claudeCode": map[string]any{"toolName": "mcp__sam-mcp__upload_to_library"}},
 				RawOutput:  []any{map[string]any{"type": "text", "text": huge}},
 			},
 		},
 	}
 
 	meta := unmarshalMeta(t, ExtractMessages(notif))
-	if meta.ToolName != "Read" {
+	if meta.ToolName != "mcp__sam-mcp__upload_to_library" {
 		t.Fatalf("expected toolName captured, got %q", meta.ToolName)
 	}
 	if meta.RawOutput != nil {
 		t.Fatalf("expected oversized rawOutput to be omitted, got %d bytes", len(meta.RawOutput))
+	}
+}
+
+// TestExtractMessages_RawField_ExactCap verifies a payload at exactly the cap is
+// kept (the boundary is inclusive: the guard is `len > cap`).
+func TestExtractMessages_RawField_ExactCap(t *testing.T) {
+	// Build a JSON string value whose marshaled length is exactly the cap.
+	// A JSON string is the content plus two quote bytes.
+	inner := strings.Repeat("x", maxToolRawFieldSize-2)
+	status := acpsdk.ToolCallStatusCompleted
+	notif := acpsdk.SessionNotification{
+		SessionId: "sess-1",
+		Update: acpsdk.SessionUpdate{
+			ToolCallUpdate: &acpsdk.SessionToolCallUpdate{
+				ToolCallId: "tc-exact",
+				Status:     &status,
+				Meta:       map[string]any{"claudeCode": map[string]any{"toolName": "mcp__sam-mcp__upload_to_library"}},
+				RawOutput:  inner,
+			},
+		},
+	}
+
+	meta := unmarshalMeta(t, ExtractMessages(notif))
+	if len(meta.RawOutput) != maxToolRawFieldSize {
+		t.Fatalf("expected exactly-at-cap rawOutput to be kept (%d bytes), got %d", maxToolRawFieldSize, len(meta.RawOutput))
+	}
+}
+
+// TestExtractMessages_RawField_NonLibraryToolNotCaptured verifies rawInput and
+// rawOutput are NOT persisted for tools outside the card allowlist — Bash/Write
+// arguments must not leak into persisted chat metadata (data minimization).
+func TestExtractMessages_RawField_NonLibraryToolNotCaptured(t *testing.T) {
+	notif := acpsdk.SessionNotification{
+		SessionId: "sess-1",
+		Update: acpsdk.SessionUpdate{
+			ToolCall: &acpsdk.SessionUpdateToolCall{
+				ToolCallId: "tc-bash",
+				Title:      "Bash: echo secret",
+				Meta:       map[string]any{"claudeCode": map[string]any{"toolName": "Bash"}},
+				RawInput:   map[string]any{"command": "curl -H 'Authorization: Bearer sk-secret' https://x"},
+				RawOutput:  []any{map[string]any{"type": "text", "text": "ok"}},
+			},
+		},
+	}
+
+	meta := unmarshalMeta(t, ExtractMessages(notif))
+	if meta.ToolName != "Bash" {
+		t.Fatalf("expected toolName Bash, got %q", meta.ToolName)
+	}
+	if meta.RawInput != nil || meta.RawOutput != nil {
+		t.Fatalf("expected non-library tool raw fields to be omitted, got in=%s out=%s", meta.RawInput, meta.RawOutput)
+	}
+}
+
+// TestExtractMessages_ToolName_MetaEmptyFallsToTitle verifies an empty
+// _meta.claudeCode.toolName falls through to the mcp__ title convention.
+func TestExtractMessages_ToolName_MetaEmptyFallsToTitle(t *testing.T) {
+	notif := acpsdk.SessionNotification{
+		SessionId: "sess-1",
+		Update: acpsdk.SessionUpdate{
+			ToolCall: &acpsdk.SessionUpdateToolCall{
+				ToolCallId: "tc-empty",
+				Title:      "mcp__sam-mcp__display_from_library",
+				Meta:       map[string]any{"claudeCode": map[string]any{"toolName": ""}},
+			},
+		},
+	}
+
+	meta := unmarshalMeta(t, ExtractMessages(notif))
+	if meta.ToolName != "mcp__sam-mcp__display_from_library" {
+		t.Fatalf("expected title fallback when claudeCode.toolName empty, got %q", meta.ToolName)
 	}
 }
 

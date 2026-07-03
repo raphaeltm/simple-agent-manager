@@ -1,7 +1,7 @@
 import type { ToolCallItem } from '@simple-agent-manager/acp-client';
 import { Spinner } from '@simple-agent-manager/ui';
 import { AlertTriangle, FileWarning } from 'lucide-react';
-import { type FC, useEffect, useMemo, useRef, useState } from 'react';
+import { type FC, useEffect, useMemo, useState } from 'react';
 
 import { downloadLibraryFile, getLibraryFilePreviewUrl } from '../../../lib/api/library';
 import {
@@ -48,7 +48,6 @@ export const DocumentCard: FC<DocumentCardProps> = ({ item, projectId }) => {
   const [imgFailed, setImgFailed] = useState(false);
   const [mdText, setMdText] = useState<string | null>(null);
   const [mdDeleted, setMdDeleted] = useState(false);
-  const cardRef = useRef<HTMLDivElement>(null);
 
   const { state, fileId, fileName, mimeType, sizeBytes, caption, tool } = data;
   const label = TOOL_LABELS[tool] ?? 'Document';
@@ -122,7 +121,7 @@ export const DocumentCard: FC<DocumentCardProps> = ({ item, projectId }) => {
         aria-label="Preparing document"
       >
         <Spinner size="sm" />
-        <div className="text-sm text-fg-muted truncate">
+        <div className="text-sm text-fg-muted truncate min-w-0">
           Preparing {fileName ?? 'document'}…
         </div>
       </div>
@@ -167,7 +166,13 @@ export const DocumentCard: FC<DocumentCardProps> = ({ item, projectId }) => {
 
       {showMarkdownTier && mdText !== null && (
         <div className="relative max-h-32 overflow-hidden rounded-md bg-surface-inset px-3 py-2">
-          <pre className="text-xs text-fg-secondary whitespace-pre-wrap break-words m-0 font-sans leading-relaxed">
+          {/* aria-hidden: the source preview is decorative — the button's
+              aria-label ("Open <file>") is the accessible name, and the full
+              document is available in the modal. */}
+          <pre
+            aria-hidden="true"
+            className="text-xs text-fg-secondary whitespace-pre-wrap break-words m-0 font-sans leading-relaxed"
+          >
             {mdText}
           </pre>
           {/* Fade-out to signal truncation */}
@@ -194,7 +199,7 @@ export const DocumentCard: FC<DocumentCardProps> = ({ item, projectId }) => {
 
   return (
     <>
-      <div ref={cardRef} className="my-1">
+      <div className="my-1">
         {clickable ? (
           <button
             type="button"

@@ -99,6 +99,35 @@ describe('DocumentCard', () => {
     });
   });
 
+  it('degrades an image to the icon tier when the thumbnail fails to load', () => {
+    render(<DocumentCard projectId="proj-1" item={toolItem({
+      toolName: 'mcp__sam-mcp__display_from_library',
+      rawInput: { fileId: 'f-img' },
+      rawOutput: rawOutput({ fileId: 'f-img', filename: 'broken.png', mimeType: 'image/png', sizeBytes: 5000 }),
+    })} />);
+
+    const img = screen.getByAltText('broken.png');
+    // Simulate the preview failing to load (404, auth, network).
+    fireEvent.error(img);
+
+    // The thumbnail is removed; the card degrades to the icon tier (filename kept).
+    expect(screen.queryByAltText('broken.png')).toBeNull();
+    expect(screen.getByText('broken.png')).toBeTruthy();
+  });
+
+  it('suppresses the inline image tier for files over the inline size cap', () => {
+    // 60 MB — above FILE_PREVIEW_INLINE_MAX_BYTES (10 MB).
+    render(<DocumentCard projectId="proj-1" item={toolItem({
+      toolName: 'mcp__sam-mcp__display_from_library',
+      rawInput: { fileId: 'f-huge' },
+      rawOutput: rawOutput({ fileId: 'f-huge', filename: 'huge.png', mimeType: 'image/png', sizeBytes: 60 * 1024 * 1024 }),
+    })} />);
+
+    // No inline thumbnail; icon card with the filename instead.
+    expect(screen.queryByAltText('huge.png')).toBeNull();
+    expect(screen.getByText('huge.png')).toBeTruthy();
+  });
+
   it('renders an icon card (no preview) for PDF documents', () => {
     render(<DocumentCard projectId="proj-1" item={toolItem({
       toolName: 'mcp__sam-mcp__display_from_library',

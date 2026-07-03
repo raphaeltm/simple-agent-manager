@@ -50,6 +50,17 @@ function getTransferTimeout(env: Env): number {
   return parsePositiveInt(env.LIBRARY_MCP_TRANSFER_TIMEOUT_MS, DEFAULT_LIBRARY_MCP_TRANSFER_TIMEOUT_MS);
 }
 
+/** Max caption length for display_from_library cards. Override via LIBRARY_MCP_CAPTION_MAX_LENGTH. */
+const DEFAULT_LIBRARY_MCP_CAPTION_MAX = 500;
+/** Floor to keep a misconfigured (tiny) cap from silently breaking captions. */
+const MIN_LIBRARY_MCP_CAPTION_MAX = 20;
+function getCaptionMax(env: Env): number {
+  return Math.max(
+    parsePositiveInt(env.LIBRARY_MCP_CAPTION_MAX_LENGTH, DEFAULT_LIBRARY_MCP_CAPTION_MAX),
+    MIN_LIBRARY_MCP_CAPTION_MAX,
+  );
+}
+
 // ─── Shared helpers ─────────────────────────────────────────────────────────
 
 function getEncryptionKey(env: Env): string {
@@ -452,6 +463,7 @@ export async function handleUploadToLibrary(
               existingFile: {
                 id: existing.id,
                 filename: existing.filename,
+                mimeType: existing.mimeType,
                 sizeBytes: existing.sizeBytes,
                 uploadSource: existing.uploadSource,
                 uploadedBy: existing.uploadedBy,
@@ -607,8 +619,7 @@ export async function handleDisplayFromLibrary(
 
   // Optional caption — bound length to keep tool metadata lean and avoid an
   // unbounded string rendering in the card.
-  const DEFAULT_LIBRARY_MCP_CAPTION_MAX = 500;
-  const captionMax = parsePositiveInt(env.LIBRARY_MCP_CAPTION_MAX_LENGTH, DEFAULT_LIBRARY_MCP_CAPTION_MAX);
+  const captionMax = getCaptionMax(env);
   const caption = typeof params.caption === 'string' && params.caption.trim()
     ? params.caption.trim().slice(0, captionMax)
     : undefined;

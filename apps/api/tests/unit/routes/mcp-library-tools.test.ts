@@ -443,6 +443,7 @@ describe('MCP Library Tools', () => {
       expect(content.error).toBe('FILE_EXISTS');
       expect(content.existingFile.id).toBe('existing-file-001');
       expect(content.existingFile.filename).toBe('notes.txt');
+      expect(content.existingFile.mimeType).toBe('text/plain');
       expect(content.existingFile.uploadSource).toBe('user');
     });
 
@@ -826,6 +827,27 @@ describe('MCP Library Tools', () => {
       const content = JSON.parse((result.result as { content: { text: string }[] }).content[0].text);
       expect(content.error).toBe('FILE_NOT_FOUND');
       expect(content.fileId).toBeUndefined();
+      // Prove the ownership scope is passed: getFile must be called with the
+      // caller's projectId, so a refactor dropping the scope is caught here.
+      expect(mockGetFile).toHaveBeenCalledWith(expect.anything(), 'proj-001', 'other-project-file');
+    });
+
+    it('floors an absurdly small configured caption cap', async () => {
+      mockGetFile.mockResolvedValueOnce({
+        file: { id: 'file-floor', filename: 'notes.md', mimeType: 'text/markdown', sizeBytes: 100 },
+        tags: [],
+      });
+
+      const result = await handleDisplayFromLibrary(
+        1,
+        { fileId: 'file-floor', caption: 'x'.repeat(100) },
+        tokenData,
+        { ...mockEnv, LIBRARY_MCP_CAPTION_MAX_LENGTH: '1' } as Env,
+      );
+
+      const content = JSON.parse((result.result as { content: { text: string }[] }).content[0].text);
+      // 1 is below the floor (20), so the caption keeps at least 20 chars.
+      expect(content.caption.length).toBeGreaterThanOrEqual(20);
     });
 
     it('passes through the optional caption', async () => {

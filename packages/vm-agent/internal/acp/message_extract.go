@@ -146,8 +146,10 @@ func ExtractMessages(notif acpsdk.SessionNotification) []ExtractedMessage {
 			Status:     string(u.ToolCall.Status),
 			ToolName:   extractToolName(u.ToolCall.Meta, u.ToolCall.Title),
 			Content:    marshalRawContent(u.ToolCall.Content),
-			RawInput:   marshalRawField(u.ToolCall.RawInput),
-			RawOutput:  marshalRawField(u.ToolCall.RawOutput),
+		}
+		if toolNameNeedsRawCapture(meta.ToolName) {
+			meta.RawInput = marshalRawField(u.ToolCall.RawInput)
+			meta.RawOutput = marshalRawField(u.ToolCall.RawOutput)
 		}
 		for _, loc := range u.ToolCall.Locations {
 			meta.Locations = append(meta.Locations, struct {
@@ -174,14 +176,16 @@ func ExtractMessages(notif acpsdk.SessionNotification) []ExtractedMessage {
 		meta := ToolMeta{
 			ToolCallId: string(u.ToolCallUpdate.ToolCallId),
 			Content:    marshalRawContent(u.ToolCallUpdate.Content),
-			RawInput:   marshalRawField(u.ToolCallUpdate.RawInput),
-			RawOutput:  marshalRawField(u.ToolCallUpdate.RawOutput),
 		}
 		var updateTitle string
 		if u.ToolCallUpdate.Title != nil {
 			updateTitle = *u.ToolCallUpdate.Title
 		}
 		meta.ToolName = extractToolName(u.ToolCallUpdate.Meta, updateTitle)
+		if toolNameNeedsRawCapture(meta.ToolName) {
+			meta.RawInput = marshalRawField(u.ToolCallUpdate.RawInput)
+			meta.RawOutput = marshalRawField(u.ToolCallUpdate.RawOutput)
+		}
 		if u.ToolCallUpdate.Title != nil {
 			meta.Title = *u.ToolCallUpdate.Title
 		}
@@ -290,13 +294,37 @@ func extractToolName(meta map[string]any, title string) string {
 	return ""
 }
 
+// rawCaptureToolNames is the set of tool names (base form, after stripping the
+// mcp__<server>__ prefix) whose rawInput/rawOutput are captured into ToolMeta.
+// Restricting capture to the tools that render typed cards keeps other tools'
+// arguments — Bash command strings, Write file contents — out of persisted chat
+// metadata (data minimization: those would otherwise survive compact-mode
+// stripping and be returned in every chat load).
+var rawCaptureToolNames = map[string]bool{
+	"upload_to_library":    true,
+	"replace_library_file": true,
+	"display_from_library": true,
+}
+
+// toolNameNeedsRawCapture reports whether a tool's raw input/output should be
+// persisted for card rendering. Matches on the base tool name (mcp__<server>__
+// prefix stripped).
+func toolNameNeedsRawCapture(toolName string) bool {
+	base := toolName
+	if strings.HasPrefix(toolName, "mcp__") {
+		parts := strings.Split(toolName, "__")
+		base = parts[len(parts)-1]
+	}
+	return rawCaptureToolNames[base]
+}
+
 // marshalRawField serializes a tool's raw input/output value to JSON for
 // storage in ToolMeta. Returns nil (omitted from the metadata) when the value
-// is absent, cannot be marshaled, or exceeds maxToolRawFieldSize. The size cap
-// keeps tool metadata lean: small results (library tool payloads) are kept,
-// large ones (file contents, command output) are dropped. Unlike Content, this
-// is not truncated — a partial JSON value would be unparseable — so it is
-// stored whole or not at all.
+// is absent, cannot be marshaled, or exceeds maxToolRawFieldSize. Empty objects
+// ({}) and arrays ([]) marshal to 2 bytes and are also treated as absent. The
+// size cap keeps tool metadata lean: small results (library tool payloads) are
+// kept, large ones are dropped. Unlike Content, this is not truncated — a
+// partial JSON value would be unparseable — so it is stored whole or not at all.
 func marshalRawField(v any) json.RawMessage {
 	if v == nil {
 		return nil
