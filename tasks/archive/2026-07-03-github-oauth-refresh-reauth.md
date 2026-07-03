@@ -65,6 +65,15 @@ GitHub App refresh tokens are single-use and rotating, so concurrent refreshes a
 - `pnpm --filter @simple-agent-manager/web exec playwright test tests/playwright/github-reauth-prompt-audit.spec.ts`
 - Rule-45 discrimination check: bypassing the GitHub token mutex made `github-user-access-token-lock.test.ts` fail with two refresh POSTs; restoring the mutex made it pass.
 
+## Specialist Review Log
+
+- `$task-completion-validator`: PASS. Research findings, checklist items, and acceptance criteria are covered by the diff and tests; no unchecked implementation items remain before delivery.
+- `$cloudflare-specialist`: PASS. New `GitHubUserAccessTokenLock` Durable Object binding is exported, typed in `Env`, bound in `wrangler.toml`, and declared in migration `v15`; stateless `new_classes` matches the mutex-only design.
+- `$security-auditor`: PASS. The changed code does not log access-token or refresh-token values; logs include only status, user/flow metadata, token presence, scopes, and expiry timestamp. GitHub refresh failures throw generic errors without secret payloads.
+- `$test-engineer`: PASS. Required regression coverage is present for 200 error-body refresh failures, expired returned tokens, typed submit-route 401, GitHub 401/403 mapping, per-user mutex concurrency, and frontend re-auth behavior.
+- `$ui-ux-specialist`: PASS. Re-auth prompt variants considered: global toast/banner, modal, and inline per-error message. Selected global alert because API errors can originate anywhere in the app, it keeps context visible, and it gives a direct reconnect action. Rubric: visual hierarchy 4/5, interaction clarity 5/5, mobile usability 5/5, accessibility 4/5, system consistency 4/5. Playwright screenshots captured for iPhone SE, iPhone 14, and desktop with no horizontal overflow.
+- `$constitution-validator`: PASS. New hardcoded URL values are limited to external GitHub OAuth/API endpoints or internal Durable Object stub routing; deployment URLs continue to derive from env/config.
+
 ## Acceptance Criteria
 
 - GitHub refresh failures represented as HTTP 200 JSON error bodies are treated as failed refreshes, not stale-token success.
