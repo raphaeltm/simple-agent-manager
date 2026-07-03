@@ -45,11 +45,24 @@ GitHub App refresh tokens are single-use and rotating, so concurrent refreshes a
   - [x] Rule-45 concurrency test: two overlapping refresh requests with dynamic state-mutating mocks produce exactly one GitHub refresh POST and both callers get usable tokens.
   - [x] Frontend behavioral test renders and simulates the re-auth flow.
 - [ ] Validation and delivery.
-  - [ ] Run relevant unit/integration tests during implementation.
-  - [ ] Run `pnpm lint`, `pnpm typecheck`, `pnpm test`, and `pnpm build`.
+  - [x] Run relevant unit/integration tests during implementation.
+  - [x] Run `pnpm lint`, `pnpm typecheck`, `pnpm test`, and `pnpm build`.
+  - [x] Run focused Playwright visual audit for the GitHub re-auth prompt.
   - [ ] Run specialist reviews: task-completion-validator, cloudflare-specialist, security-auditor, test-engineer, ui-ux-specialist, constitution-validator.
   - [ ] Deploy to staging and verify changed behavior end to end.
   - [ ] Open PR, wait for CI, merge if unblocked.
+
+## Validation Log
+
+- `pnpm --filter @simple-agent-manager/api test -- tests/unit/auth-github-refresh.test.ts tests/unit/durable-objects/github-user-access-token-lock.test.ts tests/unit/services/github-app.test.ts tests/unit/routes/github-installations.test.ts tests/unit/routes/spawn-repo-access-gate.test.ts`
+- `pnpm --filter @simple-agent-manager/web test -- tests/unit/lib/api-client.test.ts tests/unit/components/auth-provider.test.tsx`
+- `pnpm --filter @simple-agent-manager/api test -- tests/unit/routes/require-repository-user-access.test.ts tests/unit/routes/spawn-repo-access-gate.test.ts`
+- `pnpm typecheck`
+- `pnpm lint` (passed with pre-existing warnings only)
+- `pnpm test`
+- `pnpm build`
+- `pnpm --filter @simple-agent-manager/web exec playwright test tests/playwright/github-reauth-prompt-audit.spec.ts`
+- Rule-45 discrimination check: bypassing the GitHub token mutex made `github-user-access-token-lock.test.ts` fail with two refresh POSTs; restoring the mutex made it pass.
 
 ## Acceptance Criteria
 
