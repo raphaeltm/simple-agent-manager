@@ -19,31 +19,31 @@ GitHub App refresh tokens are single-use and rotating, so concurrent refreshes a
 
 ## Implementation Checklist
 
-- [ ] Add a custom GitHub `refreshAccessToken` override in `apps/api/src/auth.ts`.
-  - [ ] POST to `https://github.com/login/oauth/access_token` with `Accept: application/json`.
-  - [ ] Throw on non-2xx.
-  - [ ] Throw on 2xx JSON bodies containing `error`.
-  - [ ] Return BetterAuth-compatible OAuth2 token fields on success.
-- [ ] Serialize GitHub refresh per user.
-  - [ ] Add a GitHub OAuth refresh lock Durable Object modeled on `CodexRefreshLock`.
-  - [ ] Read the account state inside the lock.
-  - [ ] Refresh only if the token is still expired/near expiry.
-  - [ ] Persist rotated tokens before releasing the lock.
-  - [ ] Wire Worker env bindings and exports.
-- [ ] Harden token boundaries.
-  - [ ] Make `getGitHubUserAccessTokenWithHeaders` return null and structured warn when `accessTokenExpiresAt` is in the past.
-  - [ ] Convert GitHub repository-list 401 to `AppError(401, 'GITHUB_REAUTH_REQUIRED', ...)`.
-  - [ ] Convert GitHub repository-list 403 to a typed forbidden error.
-  - [ ] Ensure GitHub API repository-list failures do not escape as plain `Error` and produce opaque 500s.
-- [ ] Frontend re-auth handling.
-  - [ ] In `apps/web/src/lib/api/client.ts`, special-case `GITHUB_REAUTH_REQUIRED`.
-  - [ ] Surface a clear sign-out/re-login affordance instead of a generic error.
-- [ ] Regression tests.
-  - [ ] GitHub refresh endpoint returns HTTP 200 with `{"error":"bad_refresh_token"}` -> wrapper returns null, never stale token.
-  - [ ] Expired stored token and failed refresh -> `POST /api/projects/:projectId/tasks/submit` returns typed 401 `GITHUB_REAUTH_REQUIRED`, not 500, via a vertical-slice route test with realistic D1 state.
-  - [ ] `accessTokenExpiresAt` in the past -> wrapper returns null.
-  - [ ] Rule-45 concurrency test: two overlapping refresh requests with dynamic state-mutating mocks produce exactly one GitHub refresh POST and both callers get usable tokens.
-  - [ ] Frontend behavioral test renders and simulates the re-auth flow.
+- [x] Add a custom GitHub `refreshAccessToken` override in `apps/api/src/auth.ts`.
+  - [x] POST to `https://github.com/login/oauth/access_token` with `Accept: application/json`.
+  - [x] Throw on non-2xx.
+  - [x] Throw on 2xx JSON bodies containing `error`.
+  - [x] Return BetterAuth-compatible OAuth2 token fields on success.
+- [x] Serialize GitHub refresh per user.
+  - [x] Add a GitHub OAuth refresh lock Durable Object modeled on `CodexRefreshLock`.
+  - [x] Read the account state inside the lock.
+  - [x] Refresh only if the token is still expired/near expiry.
+  - [x] Persist rotated tokens before releasing the lock.
+  - [x] Wire Worker env bindings and exports.
+- [x] Harden token boundaries.
+  - [x] Make `getGitHubUserAccessTokenWithHeaders` return null and structured warn when `accessTokenExpiresAt` is in the past.
+  - [x] Convert GitHub repository-list 401 to `AppError(401, 'GITHUB_REAUTH_REQUIRED', ...)`.
+  - [x] Convert GitHub repository-list 403 to a typed forbidden error.
+  - [x] Ensure GitHub API repository-list failures do not escape as plain `Error` and produce opaque 500s.
+- [x] Frontend re-auth handling.
+  - [x] In `apps/web/src/lib/api/client.ts`, special-case `GITHUB_REAUTH_REQUIRED`.
+  - [x] Surface a clear sign-out/re-login affordance instead of a generic error.
+- [x] Regression tests.
+  - [x] GitHub refresh endpoint returns HTTP 200 with `{"error":"bad_refresh_token"}` -> wrapper returns null, never stale token.
+  - [x] Expired stored token and failed refresh -> `POST /api/projects/:projectId/tasks/submit` returns typed 401 `GITHUB_REAUTH_REQUIRED`, not 500, via a vertical-slice route test with realistic D1 state.
+  - [x] `accessTokenExpiresAt` in the past -> wrapper returns null.
+  - [x] Rule-45 concurrency test: two overlapping refresh requests with dynamic state-mutating mocks produce exactly one GitHub refresh POST and both callers get usable tokens.
+  - [x] Frontend behavioral test renders and simulates the re-auth flow.
 - [ ] Validation and delivery.
   - [ ] Run relevant unit/integration tests during implementation.
   - [ ] Run `pnpm lint`, `pnpm typecheck`, `pnpm test`, and `pnpm build`.

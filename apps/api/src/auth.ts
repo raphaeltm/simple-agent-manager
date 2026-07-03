@@ -58,6 +58,7 @@ interface GitHubEmailResponse {
 }
 
 const GITHUB_API_VERSION = '2022-11-28';
+const GITHUB_TOKEN_URL = 'https://github.com/login/oauth/access_token';
 
 const githubUserSchema = v.object({
   id: v.union([v.number(), v.string()]),
@@ -72,6 +73,71 @@ const githubEmailSchema = v.object({
   primary: v.boolean(),
   verified: v.boolean(),
 });
+
+const githubRefreshTokenSuccessSchema = v.object({
+  access_token: v.string(),
+  refresh_token: v.optional(v.string()),
+  expires_in: v.optional(v.number()),
+  refresh_token_expires_in: v.optional(v.number()),
+  scope: v.optional(v.string()),
+  token_type: v.optional(v.string()),
+  id_token: v.optional(v.string()),
+});
+
+const githubRefreshTokenErrorSchema = v.object({
+  error: v.string(),
+  error_description: v.optional(v.string()),
+});
+
+function expiresAtFromSeconds(seconds: number | undefined): Date | undefined {
+  if (typeof seconds !== 'number' || !Number.isFinite(seconds)) {
+    return undefined;
+  }
+  return new Date(Date.now() + seconds * 1000);
+}
+
+export async function refreshGitHubAccessToken(env: Env, refreshToken: string) {
+  const response = await fetch(GITHUB_TOKEN_URL, {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      'User-Agent': 'SAM-Auth',
+    },
+    body: JSON.stringify({
+      client_id: env.GITHUB_CLIENT_ID,
+      client_secret: env.GITHUB_CLIENT_SECRET,
+      grant_type: 'refresh_token',
+      refresh_token: refreshToken,
+    }),
+  });
+
+  const body = await response.json().catch(() => null);
+  if (!response.ok) {
+    log.warn('github_oauth_refresh_failed', { status: response.status });
+    throw new Error('GitHub OAuth refresh failed');
+  }
+
+  const errorResult = v.safeParse(githubRefreshTokenErrorSchema, body);
+  if (errorResult.success) {
+    log.warn('github_oauth_refresh_error_body', {
+      status: response.status,
+      error: errorResult.output.error,
+    });
+    throw new Error('GitHub OAuth refresh failed');
+  }
+
+  const data = v.parse(githubRefreshTokenSuccessSchema, body);
+  return {
+    accessToken: data.access_token,
+    refreshToken: data.refresh_token,
+    accessTokenExpiresAt: expiresAtFromSeconds(data.expires_in),
+    refreshTokenExpiresAt: expiresAtFromSeconds(data.refresh_token_expires_in),
+    scopes: data.scope ? data.scope.split(/[,\s]+/).filter(Boolean) : undefined,
+    tokenType: data.token_type,
+    idToken: data.id_token,
+  };
+}
 
 function githubApiHeaders(accessToken: string): HeadersInit {
   return {
@@ -152,6 +218,7 @@ export function createAuth(env: Env) {
         clientId: env.GITHUB_CLIENT_ID,
         clientSecret: env.GITHUB_CLIENT_SECRET,
         scope: ['read:user', 'user:email', 'read:org'],
+        refreshAccessToken: (refreshToken) => refreshGitHubAccessToken(env, refreshToken),
         // Ensure existing linked users are refreshed with latest provider profile data on sign-in.
         overrideUserInfoOnSignIn: true,
         // Custom getUserInfo to ensure we persist the account's primary email when available.

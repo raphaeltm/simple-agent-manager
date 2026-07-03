@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { ApiClientError, request } from '../../../src/lib/api/client';
+import { ApiClientError, GITHUB_REAUTH_REQUIRED_EVENT, request } from '../../../src/lib/api/client';
 
 describe('request() — content type handling', () => {
   const originalFetch = globalThis.fetch;
@@ -76,5 +76,26 @@ describe('request() — content type handling', () => {
       expect(e.status).toBe(404);
       expect(e.message).toBe('Not found');
     }
+  });
+
+  it('emits a GitHub reauth event for GITHUB_REAUTH_REQUIRED errors', async () => {
+    const onReauth = vi.fn();
+    window.addEventListener(GITHUB_REAUTH_REQUIRED_EVENT, onReauth);
+    mockResponse(JSON.stringify({
+      error: 'GITHUB_REAUTH_REQUIRED',
+      message: 'Your GitHub authorization has expired — please sign out and back in',
+    }), {
+      status: 401,
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+    await expect(request('/api/projects/proj-1/tasks/submit', { method: 'POST' })).rejects.toThrow(ApiClientError);
+
+    expect(onReauth).toHaveBeenCalledTimes(1);
+    const event = onReauth.mock.calls[0][0] as CustomEvent;
+    expect(event.detail).toEqual({
+      message: 'Your GitHub authorization has expired — please sign out and back in',
+    });
+    window.removeEventListener(GITHUB_REAUTH_REQUIRED_EVENT, onReauth);
   });
 });

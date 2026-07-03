@@ -1,11 +1,55 @@
 import { type Context } from 'hono';
+import * as v from 'valibot';
 
 import { createAuth } from '../auth';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { readResponseJson } from '../lib/runtime-validation';
 import { getTokenType } from './github-route-helpers';
 
-async function getGitHubUserAccessTokenWithHeaders(
+const lockedTokenResponseSchema = v.object({
+  accessToken: v.nullable(v.string()),
+  accessTokenExpiresAt: v.nullable(v.string()),
+  scopes: v.optional(v.array(v.string())),
+});
+
+type GitHubAccessTokenResult = {
+  accessToken: string | null | undefined;
+  accessTokenExpiresAt?: Date | string | null;
+  scopes?: string[];
+};
+
+function isExpired(expiresAt: Date | string | null | undefined): boolean {
+  if (!expiresAt) {
+    return false;
+  }
+  const expiresAtMs = new Date(expiresAt).getTime();
+  return Number.isFinite(expiresAtMs) && expiresAtMs <= Date.now();
+}
+
+function availableAccessToken(
+  token: GitHubAccessTokenResult,
+  flow: string,
+  userId: string
+): string | null {
+  if (!token.accessToken) {
+    return null;
+  }
+  if (isExpired(token.accessTokenExpiresAt)) {
+    log.warn('github.user_access_token_expired', {
+      flow,
+      userId,
+      tokenPresent: true,
+      accessTokenExpiresAt: token.accessTokenExpiresAt
+        ? new Date(token.accessTokenExpiresAt).toISOString()
+        : null,
+    });
+    return null;
+  }
+  return token.accessToken;
+}
+
+async function getDirectGitHubUserAccessTokenWithHeaders(
   env: Env,
   headers: Headers,
   userId: string,
@@ -24,7 +68,60 @@ async function getGitHubUserAccessTokenWithHeaders(
       tokenType: getTokenType(token),
       scopes: token.scopes,
     });
-    return token.accessToken || null;
+    return availableAccessToken(token, flow, userId);
+  } catch (err) {
+    log.warn('github.user_access_token_unavailable', {
+      flow,
+      userId,
+      tokenPresent: false,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  }
+}
+
+export async function getGitHubUserAccessTokenWithHeaders(
+  env: Env,
+  headers: Headers,
+  userId: string,
+  flow: string
+): Promise<string | null> {
+  if (!env.GITHUB_USER_ACCESS_TOKEN_LOCK) {
+    return getDirectGitHubUserAccessTokenWithHeaders(env, headers, userId, flow);
+  }
+
+  try {
+    const id = env.GITHUB_USER_ACCESS_TOKEN_LOCK.idFromName(userId);
+    const stub = env.GITHUB_USER_ACCESS_TOKEN_LOCK.get(id);
+    const response = await stub.fetch('https://github-user-access-token-lock/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        userId,
+        flow,
+        headers: Array.from(headers.entries()),
+      }),
+    });
+
+    if (!response.ok) {
+      log.warn('github.user_access_token_unavailable', {
+        flow,
+        userId,
+        tokenPresent: false,
+        status: response.status,
+      });
+      return null;
+    }
+
+    const token = await readResponseJson(response, lockedTokenResponseSchema, 'github.user_access_token.locked');
+    log.info('github.user_access_token.lookup', {
+      flow,
+      userId,
+      tokenPresent: Boolean(token.accessToken),
+      tokenType: getTokenType(token),
+      scopes: token.scopes,
+    });
+    return availableAccessToken(token, flow, userId);
   } catch (err) {
     log.warn('github.user_access_token_unavailable', {
       flow,
