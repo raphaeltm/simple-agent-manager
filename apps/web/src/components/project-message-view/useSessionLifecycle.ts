@@ -11,7 +11,7 @@ import { mergeMessages } from '../../lib/merge-messages';
 import { isWorkspaceOperational } from '../../lib/workspace-status-utils';
 import type { SessionState } from './types';
 import type { AgentActivityState } from './types';
-import { deriveSessionState, IDLE_TIMEOUT_MS, isWorkingActivity, VIRTUAL_START } from './types';
+import { CHAT_FALLBACK_POLL_MS, deriveSessionState, IDLE_TIMEOUT_MS, isWorkingActivity, VIRTUAL_START } from './types';
 import { useActivityVerifyTimer } from './useActivityVerifyTimer';
 import { useConnectionRecovery } from './useConnectionRecovery';
 
@@ -172,6 +172,9 @@ export function useSessionLifecycle(
         stopVerifyDecayTimer();
       }
     }, [startVerifyDecayTimer, stopVerifyDecayTimer]),
+    onSessionUpdated: useCallback((updates: Partial<Pick<ChatSessionResponse, 'topic' | 'workspaceId'>>) => {
+      setSession((prev) => prev ? { ...prev, ...updates } : prev);
+    }, []),
   });
 
   // Connection recovery (banner debounce, idle timer, auto-resume)
@@ -266,14 +269,19 @@ export function useSessionLifecycle(
     isWorkspaceRunning,
   );
 
-  // Polling fallback
+  // Degraded fallback while the DO WebSocket is unavailable. Connected active
+  // sessions rely on WebSocket events and reconnect catch-up instead of polling
+  // the full session detail endpoint.
   useEffect(() => {
     if (!session || session.status !== 'active') return;
+    if (connectionState === 'connected') return;
 
     const abortController = new AbortController();
-    const ACTIVE_POLL_MS = 3000;
     let lastPollFingerprint = '';
-    const pollInterval = setInterval(async () => {
+    let pollInFlight = false;
+    const pollActiveSession = async () => {
+      if (pollInFlight) return;
+      pollInFlight = true;
       try {
         const data: ChatSessionDetailResponse = await getChatSession(
           projectId, sessionId, { signal: abortController.signal },
@@ -292,14 +300,17 @@ export function useSessionLifecycle(
         hydrateState(data.state);
       } catch (err) {
         if (err instanceof DOMException && err.name === 'AbortError') return;
+      } finally {
+        pollInFlight = false;
       }
-    }, ACTIVE_POLL_MS);
+    };
+    const pollInterval = setInterval(() => { void pollActiveSession(); }, CHAT_FALLBACK_POLL_MS);
 
     return () => {
       clearInterval(pollInterval);
       abortController.abort();
     };
-  }, [session?.status, projectId, sessionId, hydrateState]);
+  }, [session?.status, projectId, sessionId, hydrateState, connectionState]);
 
   // ── Send follow-up via REST API ──
   const handleSendFollowUp = async () => {

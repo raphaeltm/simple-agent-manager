@@ -108,6 +108,12 @@ export interface ChatSessionDetailResponse {
   state?: SessionStateSnapshot | null;
 }
 
+export interface ChatSessionStateResponse {
+  state: SessionStateSnapshot | null;
+  agentSessionId: string | null;
+  agentType: string | null;
+}
+
 export interface ChatMessagesListResponse {
   messages: ChatMessageResponse[];
   hasMore: boolean;
@@ -205,6 +211,17 @@ export async function getChatSession(
     : `/api/projects/${projectId}/sessions/${sessionId}`;
 
   return request<ChatSessionDetailResponse>(endpoint, params.signal ? { signal: params.signal } : {});
+}
+
+export async function getChatSessionState(
+  projectId: string,
+  sessionId: string,
+  params: { signal?: AbortSignal } = {}
+): Promise<ChatSessionStateResponse> {
+  return request<ChatSessionStateResponse>(
+    `/api/projects/${projectId}/sessions/${sessionId}/state`,
+    params.signal ? { signal: params.signal } : {}
+  );
 }
 
 export async function listChatMessages(

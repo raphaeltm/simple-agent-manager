@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react';
 
-import { getChatSession } from '../../lib/api';
+import { getChatSessionState } from '../../lib/api';
 import { isWorkingActivity } from './types';
 
 interface ActivityVerifyTimerOptions {
@@ -37,8 +37,7 @@ export function useActivityVerifyTimer({
       timerRef.current = setTimeout(async () => {
         if (abortController.signal.aborted) return;
         try {
-          const data = await getChatSession(projectId, sessionId, {
-            limit: 0,
+          const data = await getChatSessionState(projectId, sessionId, {
             signal: abortController.signal,
           });
           if (abortController.signal.aborted) return;

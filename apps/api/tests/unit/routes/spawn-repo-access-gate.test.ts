@@ -36,6 +36,7 @@ const mocks = vi.hoisted(() => ({
   resolveCredentialSource: vi.fn(),
   generateTaskTitle: vi.fn(),
   getTaskTitleConfig: vi.fn(),
+  truncateTitle: vi.fn(),
   enrichMessageWithMentions: vi.fn(),
 }));
 
@@ -68,6 +69,7 @@ vi.mock('../../../src/services/project-data', () => ({
   persistMessage: mocks.persistMessage,
   recordActivityEvent: mocks.recordActivityEvent,
   stopSession: mocks.stopSession,
+  updateSessionTopic: vi.fn().mockResolvedValue(true),
 }));
 vi.mock('../../../src/services/provider-credentials', () => ({
   resolveCredentialSource: mocks.resolveCredentialSource,
@@ -75,6 +77,7 @@ vi.mock('../../../src/services/provider-credentials', () => ({
 vi.mock('../../../src/services/task-title', () => ({
   generateTaskTitle: mocks.generateTaskTitle,
   getTaskTitleConfig: mocks.getTaskTitleConfig,
+  truncateTitle: mocks.truncateTitle,
 }));
 vi.mock('../../../src/services/mention-enrichment', () => ({
   enrichMessageWithMentions: mocks.enrichMessageWithMentions,
@@ -182,6 +185,7 @@ describe('spawn entry points enforce the user∩app repo-access gate (fail-fast)
     mocks.resolveCredentialSource.mockResolvedValue({ credentialSource: 'user' });
     mocks.getTaskTitleConfig.mockReturnValue({});
     mocks.generateTaskTitle.mockResolvedValue('Task title');
+    mocks.truncateTitle.mockImplementation((message: string) => message);
     mocks.enrichMessageWithMentions.mockResolvedValue({ enrichedMessage: 'Do the thing' });
     mocks.createSession.mockResolvedValue('sess-1');
     mocks.persistMessage.mockResolvedValue(undefined);
@@ -291,6 +295,38 @@ describe('spawn entry points enforce the user∩app repo-access gate (fail-fast)
     expectGateRan();
     // Gate allowed the request through to Task Runner provisioning.
     expect(mocks.startTaskRunnerDO).toHaveBeenCalled();
+  });
+
+  it('task submit: starts the Task Runner with a fallback title before AI title generation resolves', async () => {
+    limitResponses.push([INSTALLATION_ROW]); // installation lookup (gate)
+    limitResponses.push([{ githubId: null }]); // user githubId fallback lookup
+    mocks.getUserInstallationRepositories.mockResolvedValue([VISIBLE_REPO]);
+    mocks.truncateTitle.mockReturnValue('Fallback title');
+    mocks.generateTaskTitle.mockReturnValue(new Promise<string>(() => {}));
+
+    const res = await post(
+      '/api/projects/proj-1/tasks/submit',
+      { message: 'Write a detailed implementation plan for async task titles' },
+      mockExecutionCtx
+    );
+
+    expect(res.status).toBe(202);
+    expect(mocks.createSession).toHaveBeenCalledWith(
+      expect.anything(),
+      'proj-1',
+      null,
+      'Fallback title',
+      expect.any(String),
+    );
+    expect(mocks.startTaskRunnerDO).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ taskTitle: 'Fallback title' }),
+    );
+    expect(mocks.generateTaskTitle).toHaveBeenCalledWith(
+      expect.anything(),
+      'Write a detailed implementation plan for async task titles',
+      {},
+    );
   });
 
   // ---------------------------------------------------------------------------

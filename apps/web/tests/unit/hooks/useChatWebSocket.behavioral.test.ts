@@ -205,6 +205,42 @@ describe('useChatWebSocket (behavioral)', () => {
     expect(onAgentActivity).toHaveBeenNthCalledWith(4, 'idle', 123);
   });
 
+  it('calls onSessionUpdated when a session.updated event arrives', () => {
+    const onSessionUpdated = vi.fn();
+    renderHook(() => useChatWebSocket({ ...defaultProps, onSessionUpdated }));
+
+    act(() => {
+      MockWebSocket.instances[0]!.simulateOpen();
+      MockWebSocket.instances[0]!.simulateMessage({
+        type: 'session.updated',
+        sessionId: 'sess-1',
+        topic: 'Async generated title',
+        workspaceId: 'ws-1',
+      });
+    });
+
+    expect(onSessionUpdated).toHaveBeenCalledWith({
+      topic: 'Async generated title',
+      workspaceId: 'ws-1',
+    });
+  });
+
+  it('ignores session.updated events for different sessions', () => {
+    const onSessionUpdated = vi.fn();
+    renderHook(() => useChatWebSocket({ ...defaultProps, onSessionUpdated }));
+
+    act(() => {
+      MockWebSocket.instances[0]!.simulateOpen();
+      MockWebSocket.instances[0]!.simulateMessage({
+        type: 'session.updated',
+        sessionId: 'sess-other',
+        topic: 'Wrong session',
+      });
+    });
+
+    expect(onSessionUpdated).not.toHaveBeenCalled();
+  });
+
   it('reconnects with exponential backoff on abnormal close', () => {
     renderHook(() => useChatWebSocket({ ...defaultProps }));
 

@@ -46,13 +46,14 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
 let capturedWsOnMessage: ((msg: ReturnType<typeof makeMessage>) => void) | null = null;
 // Captured onCatchUp callback — tests can call this to simulate catch-up after reconnect
 let capturedWsOnCatchUp: ((msgs: ReturnType<typeof makeMessage>[], session: ReturnType<typeof makeSession>) => void) | null = null;
+let mockWsConnectionState: 'connecting' | 'connected' | 'reconnecting' | 'disconnected' = 'connected';
 
 vi.mock('../../../src/hooks/useChatWebSocket', () => ({
   useChatWebSocket: (opts: { onMessage?: (msg: unknown) => void; onCatchUp?: (msgs: unknown[], session: unknown) => void }) => {
     capturedWsOnMessage = (opts.onMessage ?? null) as typeof capturedWsOnMessage;
     capturedWsOnCatchUp = (opts.onCatchUp ?? null) as typeof capturedWsOnCatchUp;
     return {
-      connectionState: 'connected' as const,
+      connectionState: mockWsConnectionState,
       wsRef: { current: null },
       retry: vi.fn(),
     };
@@ -107,6 +108,12 @@ const virtuosoMock = vi.hoisted(() => {
 vi.mock('react-virtuoso', () => virtuosoMock);
 
 import { chatMessagesToConversationItems,ProjectMessageView } from '../../../src/components/project-message-view';
+
+beforeEach(() => {
+  mockWsConnectionState = 'connected';
+  capturedWsOnMessage = null;
+  capturedWsOnCatchUp = null;
+});
 
 // --- Test helpers ---
 
@@ -176,6 +183,7 @@ describe('ProjectMessageView — session isolation', () => {
   beforeEach(() => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.clearAllMocks();
+    mockWsConnectionState = 'connected';
     // Default workspace/node mocks — return pending promises to avoid side effects
     mocks.getWorkspace.mockResolvedValue({ id: 'ws-test', name: 'test', status: 'running', vmSize: 'medium', vmLocation: 'fsn1' });
     mocks.getNode.mockResolvedValue({ id: 'node-test', name: 'node-test', status: 'active', healthStatus: 'healthy' });
@@ -219,6 +227,7 @@ describe('ProjectMessageView — session isolation', () => {
   });
 
   it('aborts in-flight polling requests on session switch', async () => {
+    mockWsConnectionState = 'reconnecting';
     let pollSignal: AbortSignal | undefined;
 
     const sessionAResponse = makeSessionResponse('session-A', [
@@ -236,7 +245,7 @@ describe('ProjectMessageView — session isolation', () => {
       expect(screen.getByText('Data from A')).toBeTruthy();
     });
 
-    // Now capture the signal from the polling interval (fires every 3s)
+    // Now capture the signal from the degraded fallback polling interval.
     mocks.getChatSession.mockImplementation(async (
       _projectId: string,
       _sessionId: string,
@@ -246,11 +255,11 @@ describe('ProjectMessageView — session isolation', () => {
       return sessionAResponse;
     });
 
-    // Advance past the 3s poll interval. Use advanceTimersByTimeAsync to
-    // properly process microtasks (the polling effect starts asynchronously
+    // Advance past the fallback poll interval. Use advanceTimersByTimeAsync to
+    // properly process microtasks (the fallback effect starts asynchronously
     // after session state is committed to the DOM).
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(3100);
+      await vi.advanceTimersByTimeAsync(10_100);
     });
 
     // Verify the poll fired and we captured a signal. CI can schedule the
@@ -276,6 +285,7 @@ describe('ProjectMessageView — session isolation', () => {
   });
 
   it('discards stale poll response that resolves after session switch', async () => {
+    mockWsConnectionState = 'reconnecting';
     // This is the definitive regression test: a poll for session A is
     // held in-flight while the user switches to session B. When the
     // signal is aborted, the mock rejects with AbortError (matching
@@ -323,9 +333,9 @@ describe('ProjectMessageView — session isolation', () => {
       expect(screen.getByText('Hello from A')).toBeTruthy();
     });
 
-    // Trigger a poll for session A (3s interval)
+    // Trigger a fallback poll for session A.
     await act(async () => {
-      vi.advanceTimersByTime(3100);
+      vi.advanceTimersByTime(10_100);
     });
 
     // Switch to session B while the poll is in-flight.

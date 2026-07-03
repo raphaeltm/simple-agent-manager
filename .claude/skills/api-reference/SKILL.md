@@ -39,6 +39,7 @@ user-invocable: false
 
 - `GET /api/projects/:projectId/sessions` — List chat sessions for a project
 - `GET /api/projects/:projectId/sessions/:sessionId` — Get chat session detail with recent messages
+- `GET /api/projects/:projectId/sessions/:sessionId/state` — Get lightweight ACP activity state for a chat session
 - `GET /api/projects/:projectId/sessions/:sessionId/messages` — List persisted session messages (supports `roles`, `before`, `limit`, `compact`, `order=asc|desc`)
 - `GET /api/projects/:projectId/sessions/:sessionId/messages/:messageId/tool-content` — Lazy-load stored tool content for compact messages
 - `POST /api/projects/:projectId/sessions/:sessionId/prompt` — Send a follow-up prompt to the active agent session
