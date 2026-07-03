@@ -140,6 +140,43 @@ If any visual audit reveals:
 
 You MUST fix the issue before proceeding. Do NOT defer visual bugs to a follow-up task.
 
+## Virtualized-List Scroll/Jump Features (jsdom Renders All Rows — Assert the Coordinate)
+
+When a feature scrolls or jumps to a specific item in a **virtualized** list
+(react-virtuoso, react-window, TanStack Virtual, etc.), the jsdom test mock has no
+layout engine and typically renders **every** row. This masks two whole classes of
+bug that only appear against a real virtual window:
+
+1. **Coordinate-space mismatches.** The library's `scrollToIndex` may expect a
+   0-based data-array index while your code holds an offset/absolute index (e.g.
+   react-virtuoso's `firstItemIndex`-offset coordinate used for `itemContent`'s
+   `index` arg). Passing the wrong coordinate is silently out-of-range → no scroll.
+2. **"Highlight set on an unmounted row."** If the target row is virtualized-out and
+   the scroll never lands, a class/state applied to that row never renders. A test
+   that only asserts "the highlight class appears" PASSES anyway, because the mock
+   rendered the row regardless of scroll.
+
+This is exactly how the timeline jump-to-message shipped a dead click: the unit
+mock rendered all rows and ignored the ref, so `scrollToIndex` was a no-op and the
+highlight always attached in jsdom. See the retained incident lesson in this rule
+(2026-07-03).
+
+### Required for any scroll/jump-to-item feature
+
+1. **The virtualization mock MUST expose the scroll method** (via
+   `useImperativeHandle` on the forwarded ref) and capture its arguments. A mock
+   that ignores the ref cannot test the jump.
+2. **Assert the exact index/coordinate passed to `scrollToIndex`** — not just that
+   a highlight/selection appeared. Place the target at a non-trivial position (not
+   index 0, not the last item) so the correct value is unambiguously different from
+   the buggy offset value (e.g. assert `index === 1` AND `index < 1000` to rule out
+   a `firstItemIndex`-offset ~100000).
+3. **Verify the assertion is discriminating**: confirm the test FAILS on the
+   pre-fix (wrong-coordinate) code before relying on it.
+4. **Staging-verify the scroll/jump in a real browser.** jsdom cannot prove a
+   virtual-window scroll actually lands. The staging Playwright pass MUST click the
+   real control and confirm the target scrolls into view / highlights (Rule 13).
+
 ## Integration with /do Workflow
 
 This testing is triggered in **Phase 3 (Implementation)** of the `/do` workflow. See `.codex/prompts/do.md` Phase 3 for the exact integration point. The `/do` workflow will not proceed to Phase 4 if visual audit failures are unresolved.
