@@ -276,6 +276,27 @@ describe('mergeMessages', () => {
       ]);
     });
 
+    it('preserves a fully-loaded conversation when the poll returns only a small recent window', () => {
+      // Chat now loads the FULL conversation up front (large window), while the
+      // 3s poll fetches only a small recent window. mergeReplace must NOT discard
+      // the loaded history — otherwise the full load is clobbered every poll.
+      const fullyLoaded = Array.from({ length: 12 }, (_, i) =>
+        msg({ id: `m-${i + 1}`, createdAt: i + 1 }),
+      );
+      // Poll returns just the latest 3 messages (t=10..12).
+      const pollWindow = [
+        msg({ id: 'm-10', createdAt: 10 }),
+        msg({ id: 'm-11', createdAt: 11 }),
+        msg({ id: 'm-12', createdAt: 12 }),
+      ];
+      const result = mergeMessages(fullyLoaded, pollWindow, 'replace');
+      expect(result).toHaveLength(12);
+      expect(result.map((m) => m.id)).toEqual([
+        'm-1', 'm-2', 'm-3', 'm-4', 'm-5', 'm-6',
+        'm-7', 'm-8', 'm-9', 'm-10', 'm-11', 'm-12',
+      ]);
+    });
+
     it('does not duplicate messages at the boundary between earlier and incoming', () => {
       // Exact boundary: prev has msg at t=3, incoming starts at t=3
       const prev = [

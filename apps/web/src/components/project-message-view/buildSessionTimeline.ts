@@ -59,8 +59,7 @@ export function buildSessionTimeline(
   messages: ChatMessageResponse[],
   activityEvents: ActivityEventResponse[],
   progressNotifications: NotificationResponse[],
-  showContext: boolean,
-  messageIndexMap: Map<string, number>
+  showContext: boolean
 ): TimelineEntry[] {
   const entries: TimelineEntry[] = [];
 
@@ -76,7 +75,6 @@ export function buildSessionTimeline(
       messageId: msg.id,
       text: truncateText(text.trim(), 120),
       timestamp: msg.createdAt,
-      messageIndex: messageIndexMap.get(msg.id) ?? -1,
     });
   }
 

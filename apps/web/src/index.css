@@ -220,6 +220,29 @@
     transform: translate3d(0, -2.75rem, 0);
   }
 
+  /* Flash a message briefly when jumped to from the timeline. */
+  @keyframes sam-message-flash {
+    0% {
+      background-color: rgba(34, 197, 94, 0.2);
+      box-shadow: 0 0 0 1px rgba(34, 197, 94, 0.35);
+    }
+    100% {
+      background-color: transparent;
+      box-shadow: 0 0 0 1px transparent;
+    }
+  }
+
+  .sam-message-highlight {
+    animation: sam-message-flash 2.2s ease-out;
+    border-radius: 12px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .sam-message-highlight {
+      animation-duration: 0.01ms;
+    }
+  }
+
   .glass-card-glow {
     position: relative;
   }

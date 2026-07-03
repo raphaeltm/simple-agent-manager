@@ -24,9 +24,26 @@ import { CompletionDock } from './CompletionDock';
 import { FollowUpInput } from './FollowUpInput';
 import { ConnectionBanner } from './MessageBanners';
 import { SessionHeader } from './SessionHeader';
+import type { TimelineJumpTarget } from './timeline-types';
 import { chatMessagesToConversationItems } from './types';
 import { useSessionLifecycle } from './useSessionLifecycle';
 import { useSessionTimeline } from './useSessionTimeline';
+
+/**
+ * Resolve the id of the loaded conversation item nearest to (at or just before)
+ * a timestamp. Used to anchor timeline entries that have no exact message id
+ * (status updates, activity events) to a message in the list.
+ */
+function nearestItemId(items: ConversationItem[], timestamp: number): string | undefined {
+  if (items.length === 0) return undefined;
+  let candidateId = items[0]!.id;
+  for (const item of items) {
+    const ts = 'timestamp' in item && typeof item.timestamp === 'number' ? item.timestamp : 0;
+    if (ts <= timestamp) candidateId = item.id;
+    else break;
+  }
+  return candidateId;
+}
 
 // Re-export utilities used by external consumers
 export { chatMessagesToConversationItems, groupMessages } from './types';
@@ -197,24 +214,71 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     return chatMessagesToConversationItems(lc.messages);
   }, [lc.messages]);
 
-  // Build message-id → rendered Virtuoso index map for jump-to-message from timeline
-  const messageIndexMap = useMemo(() => {
+  // Build item-id → rendered Virtuoso index map for jump-to-message from the
+  // timeline. Includes EVERY conversation item so any timeline anchor resolves.
+  const itemIndexById = useMemo(() => {
     const map = new Map<string, number>();
     conversationItems.forEach((item, i) => {
-      if (item.kind === 'user_message') {
-        map.set(item.id, lc.firstItemIndex + i);
-      }
+      map.set(item.id, lc.firstItemIndex + i);
     });
     return map;
   }, [conversationItems, lc.firstItemIndex]);
 
-  const timeline = useSessionTimeline(projectId, sessionId, lc.messages, showTimeline, messageIndexMap);
+  const timeline = useSessionTimeline(projectId, sessionId, lc.messages, showTimeline);
 
-  const handleJumpToMessage = useCallback((messageIndex: number) => {
-    if (messageIndex < 0) return;
-    virtuosoRef.current?.scrollToIndex({ index: messageIndex, behavior: 'smooth', align: 'center' });
+  // Jump-to-message from the timeline. A jump targets either an exact message
+  // (user message) or the nearest message to a timestamp (status/activity
+  // entries). Because the full conversation loads on open, the target is almost
+  // always already rendered. For the rare oversized/guard-trimmed session the
+  // target may predate the loaded window — we set a pending jump and load older
+  // pages until it resolves, so a jump never dead-clicks.
+  const [pendingJump, setPendingJump] = useState<TimelineJumpTarget | null>(null);
+  const [highlightedItemId, setHighlightedItemId] = useState<string | null>(null);
+
+  const scrollAndHighlight = useCallback((itemId: string): boolean => {
+    const index = itemIndexById.get(itemId);
+    if (index === undefined) return false;
+    virtuosoRef.current?.scrollToIndex({ index, behavior: 'smooth', align: 'center' });
+    setHighlightedItemId(itemId);
+    return true;
+  }, [itemIndexById]);
+
+  const handleTimelineJump = useCallback((target: TimelineJumpTarget) => {
     setShowTimeline(false);
-  }, []);
+    // Fast path: exact message already loaded.
+    if (target.messageId && itemIndexById.has(target.messageId)) {
+      scrollAndHighlight(target.messageId);
+      return;
+    }
+    // Otherwise resolve via the pending-jump effect, loading older pages toward
+    // the target timestamp first (no-op when the history is already fully loaded).
+    setPendingJump(target);
+    void lc.loadUntil(target.timestamp);
+  }, [itemIndexById, scrollAndHighlight, lc]);
+
+  // Resolve a pending jump once the target (or the nearest message, after
+  // loading settles) is available in the rendered list.
+  useEffect(() => {
+    if (!pendingJump) return;
+    let targetId: string | undefined;
+    if (pendingJump.messageId && itemIndexById.has(pendingJump.messageId)) {
+      targetId = pendingJump.messageId;
+    } else if (!lc.loadingMore) {
+      // No exact anchor, or the anchor never materialized after loading
+      // settled → jump to the nearest loaded message by timestamp.
+      targetId = nearestItemId(conversationItems, pendingJump.timestamp);
+    }
+    if (targetId && scrollAndHighlight(targetId)) {
+      setPendingJump(null);
+    }
+  }, [pendingJump, itemIndexById, conversationItems, lc.loadingMore, scrollAndHighlight]);
+
+  // Auto-clear the jump highlight after the flash animation.
+  useEffect(() => {
+    if (!highlightedItemId) return;
+    const timer = setTimeout(() => setHighlightedItemId(null), 2200);
+    return () => clearTimeout(timer);
+  }, [highlightedItemId]);
 
   // Close plan modal when agent transitions to idle
   useEffect(() => {
@@ -350,7 +414,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
               atBottomStateChange={(atBottom) => lc.setShowScrollButton(!atBottom)}
               overscan={200}
               itemContent={(index, item) => (
-                <div className="sam-message-entry px-4 pb-3">
+                <div className={`sam-message-entry px-4 pb-3${highlightedItemId === item.id ? ' sam-message-highlight' : ''}`}>
                   <AcpConversationItemView
                     item={item}
                     onFileClick={lc.session?.workspaceId && lc.sessionState === 'active' ? lc.handleFileClick : undefined}
@@ -469,7 +533,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
           showContext={timeline.showContext}
           onToggleContext={() => timeline.setShowContext(!timeline.showContext)}
           onClose={() => setShowTimeline(false)}
-          onJumpToMessage={handleJumpToMessage}
+          onJump={handleTimelineJump}
         />
       )}
     </div>

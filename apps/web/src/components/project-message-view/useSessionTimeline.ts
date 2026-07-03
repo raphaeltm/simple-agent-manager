@@ -19,8 +19,7 @@ export function useSessionTimeline(
   projectId: string,
   sessionId: string,
   messages: ChatMessageResponse[],
-  enabled: boolean,
-  messageIndexMap: Map<string, number>
+  enabled: boolean
 ): UseSessionTimelineResult {
   const [timelineMessages, setTimelineMessages] = useState<ChatMessageResponse[]>([]);
   const [activityEvents, setActivityEvents] = useState<ActivityEventResponse[]>([]);
@@ -111,8 +110,8 @@ export function useSessionTimeline(
   );
 
   const entries = useMemo(
-    () => buildSessionTimeline(messagesForTimeline, activityEvents, progressNotifications, showContext, messageIndexMap),
-    [messagesForTimeline, activityEvents, progressNotifications, showContext, messageIndexMap]
+    () => buildSessionTimeline(messagesForTimeline, activityEvents, progressNotifications, showContext),
+    [messagesForTimeline, activityEvents, progressNotifications, showContext]
   );
 
   return { entries, loading, showContext, setShowContext };

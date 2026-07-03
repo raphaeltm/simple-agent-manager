@@ -7,7 +7,7 @@
  * See: specs/018-project-first-architecture/tasks.md (T027)
  */
 import type { ChatSessionTaskEmbed } from '@simple-agent-manager/shared';
-import { DEFAULT_CHAT_COMPACT_MODE, DEFAULT_CHAT_SESSION_MESSAGE_LIMIT, isTaskExecutionStep, isTaskMode } from '@simple-agent-manager/shared';
+import { DEFAULT_CHAT_COMPACT_MODE, DEFAULT_CHAT_SESSION_MESSAGE_LIMIT, DEFAULT_CHAT_SESSION_MESSAGE_MAX, isTaskExecutionStep, isTaskMode } from '@simple-agent-manager/shared';
 import { and, eq, inArray } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import type { Context } from 'hono';
@@ -118,14 +118,32 @@ async function recordChatSessionLoadFailure(
   return c.json(body, 500);
 }
 
+/**
+ * Resolve the effective message limit for a chat session REST response.
+ *
+ * Two distinct knobs (see `.claude/rules/03-constitution.md` Principle XI):
+ * - `CHAT_SESSION_MESSAGE_LIMIT` — the page size used when no explicit limit is
+ *   requested (the 3s poll and load-more pagination). Kept small so polling does
+ *   not re-fetch the whole conversation every cycle.
+ * - `CHAT_SESSION_MESSAGE_MAX` — the ceiling any request is clamped to. The
+ *   client's initial load explicitly requests this so the full conversation
+ *   arrives in one request. The 30 MiB RPC size guard in `getMessages()` is the
+ *   ultimate cap; oversized sessions keep `hasMore=true` and paginate.
+ */
 function getSessionMessageLimit(env: Env, requestedLimit?: string): number {
-  const configuredLimit = Number.parseInt(env.CHAT_SESSION_MESSAGE_LIMIT || '', 10);
-  const maxLimit = Number.isFinite(configuredLimit) && configuredLimit > 0
-    ? configuredLimit
+  const configuredDefault = Number.parseInt(env.CHAT_SESSION_MESSAGE_LIMIT || '', 10);
+  const defaultLimit = Number.isFinite(configuredDefault) && configuredDefault > 0
+    ? configuredDefault
     : DEFAULT_CHAT_SESSION_MESSAGE_LIMIT;
+  const configuredMax = Number.parseInt(env.CHAT_SESSION_MESSAGE_MAX || '', 10);
+  const maxLimit = Number.isFinite(configuredMax) && configuredMax > 0
+    ? configuredMax
+    : DEFAULT_CHAT_SESSION_MESSAGE_MAX;
+  // Guard against misconfiguration where the default page size exceeds the max.
+  const effectiveMax = Math.max(defaultLimit, maxLimit);
   const parsedLimit = Number.parseInt(requestedLimit || '', 10);
-  const limit = Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : maxLimit;
-  return Math.min(limit, maxLimit);
+  const limit = Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : defaultLimit;
+  return Math.min(limit, effectiveMax);
 }
 
 function getBeforeCursor(rawBefore?: string): number | null {

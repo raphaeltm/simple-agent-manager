@@ -49,7 +49,7 @@ function makeNotification(overrides: Partial<NotificationResponse> & { id: strin
 
 describe('buildSessionTimeline', () => {
   it('returns empty array when no messages and no events', () => {
-    const result = buildSessionTimeline([], [], [], false, new Map());
+    const result = buildSessionTimeline([], [], [], false);
     expect(result).toEqual([]);
   });
 
@@ -59,12 +59,20 @@ describe('buildSessionTimeline', () => {
       makeMessage({ id: 'm2', role: 'assistant', content: 'Hi there', createdAt: 2000 }),
       makeMessage({ id: 'm3', role: 'user', content: 'How are you?', createdAt: 3000 }),
     ];
-    const indexMap = new Map([['m1', 0], ['m2', 1], ['m3', 2]]);
-    const result = buildSessionTimeline(messages, [], [], false, indexMap);
+    const result = buildSessionTimeline(messages, [], [], false);
 
     expect(result).toHaveLength(2);
     expect(result[0]).toMatchObject({ kind: 'user_message', messageId: 'm1' });
     expect(result[1]).toMatchObject({ kind: 'user_message', messageId: 'm3' });
+  });
+
+  it('carries the messageId and timestamp used to anchor a jump', () => {
+    const messages: ChatMessageResponse[] = [
+      makeMessage({ id: 'm1', content: 'Hello', createdAt: 1234 }),
+    ];
+    const result = buildSessionTimeline(messages, [], [], false);
+
+    expect(result[0]).toMatchObject({ kind: 'user_message', messageId: 'm1', timestamp: 1234 });
   });
 
   it('excludes activity events when showContext is false', () => {
@@ -74,7 +82,7 @@ describe('buildSessionTimeline', () => {
     const events: ActivityEventResponse[] = [
       makeEvent({ id: 'e1', eventType: 'workspace.created', createdAt: 500 }),
     ];
-    const result = buildSessionTimeline(messages, events, [], false, new Map([['m1', 0]]));
+    const result = buildSessionTimeline(messages, events, [], false);
 
     expect(result).toHaveLength(1);
     expect(result[0]).toMatchObject({ kind: 'user_message' });
@@ -87,7 +95,7 @@ describe('buildSessionTimeline', () => {
     const events: ActivityEventResponse[] = [
       makeEvent({ id: 'e1', eventType: 'workspace.created', createdAt: 1000 }),
     ];
-    const result = buildSessionTimeline(messages, events, [], true, new Map([['m1', 0]]));
+    const result = buildSessionTimeline(messages, events, [], true);
 
     expect(result).toHaveLength(2);
     expect(result[0]).toMatchObject({ kind: 'system_event', title: 'Workspace created' });
@@ -103,7 +111,7 @@ describe('buildSessionTimeline', () => {
         createdAt: new Date(1000).toISOString(),
       }),
     ];
-    const result = buildSessionTimeline([], [], notifications, false, new Map());
+    const result = buildSessionTimeline([], [], notifications, false);
 
     expect(result).toHaveLength(1);
     expect(result[0]).toMatchObject({
@@ -143,8 +151,7 @@ describe('buildSessionTimeline', () => {
           createdAt: new Date(3000).toISOString(),
         }),
       ],
-      false,
-      new Map()
+      false
     );
 
     expect(result.map((entry) => ('text' in entry ? entry.text : ''))).toEqual([
@@ -166,8 +173,7 @@ describe('buildSessionTimeline', () => {
           createdAt: new Date(1000).toISOString(),
         }),
       ],
-      false,
-      new Map()
+      false
     );
 
     expect(result).toHaveLength(1);
@@ -186,8 +192,7 @@ describe('buildSessionTimeline', () => {
         makeNotification({ id: 'n2', createdAt: 'not-a-date' }),
         makeNotification({ id: 'n3', body: 'Visible update', createdAt: new Date(2000).toISOString() }),
       ],
-      false,
-      new Map()
+      false
     );
 
     expect(result).toHaveLength(1);
@@ -205,7 +210,7 @@ describe('buildSessionTimeline', () => {
     const notifications: NotificationResponse[] = [
       makeNotification({ id: 'n1', body: 'Progress between event and final message', createdAt: new Date(2500).toISOString() }),
     ];
-    const result = buildSessionTimeline(messages, events, notifications, true, new Map([['m1', 0], ['m2', 1]]));
+    const result = buildSessionTimeline(messages, events, notifications, true);
 
     expect(result).toHaveLength(4);
     expect(result[0].timestamp).toBe(1000);
@@ -220,7 +225,7 @@ describe('buildSessionTimeline', () => {
       makeEvent({ id: 'e2', eventType: 'task.status_changed', payload: { toStatus: 'failed' }, createdAt: 2000 }),
       makeEvent({ id: 'e3', eventType: 'task.status_changed', payload: { toStatus: 'cancelled' }, createdAt: 3000 }),
     ];
-    const result = buildSessionTimeline([], events, [], true, new Map());
+    const result = buildSessionTimeline([], events, [], true);
 
     expect(result[0]).toMatchObject({ severity: 'success', title: 'Task completed' });
     expect(result[1]).toMatchObject({ severity: 'error', title: 'Task failed' });
@@ -232,7 +237,7 @@ describe('buildSessionTimeline', () => {
     const messages: ChatMessageResponse[] = [
       makeMessage({ id: 'm1', content: longText, createdAt: 1000 }),
     ];
-    const result = buildSessionTimeline(messages, [], [], false, new Map([['m1', 0]]));
+    const result = buildSessionTimeline(messages, [], [], false);
 
     expect(result).toHaveLength(1);
     if (result[0].kind === 'user_message') {
@@ -247,36 +252,17 @@ describe('buildSessionTimeline', () => {
       makeMessage({ id: 'm2', content: '', createdAt: 2000 }),
       makeMessage({ id: 'm3', content: 'Real message', createdAt: 3000 }),
     ];
-    const result = buildSessionTimeline(messages, [], [], false, new Map([['m1', 0], ['m2', 1], ['m3', 2]]));
+    const result = buildSessionTimeline(messages, [], [], false);
 
     expect(result).toHaveLength(1);
     expect(result[0]).toMatchObject({ kind: 'user_message', messageId: 'm3' });
-  });
-
-  it('preserves messageIndex from the index map', () => {
-    const messages: ChatMessageResponse[] = [
-      makeMessage({ id: 'm1', content: 'Hello', createdAt: 1000 }),
-    ];
-    const indexMap = new Map([['m1', 42]]);
-    const result = buildSessionTimeline(messages, [], [], false, indexMap);
-
-    expect(result[0]).toMatchObject({ kind: 'user_message', messageIndex: 42 });
-  });
-
-  it('returns messageIndex -1 when message ID is absent from index map', () => {
-    const messages: ChatMessageResponse[] = [
-      makeMessage({ id: 'm1', content: 'Hello', createdAt: 1000 }),
-    ];
-    const result = buildSessionTimeline(messages, [], [], false, new Map());
-
-    expect(result[0]).toMatchObject({ kind: 'user_message', messageIndex: -1 });
   });
 
   it('handles non-string message content', () => {
     const messages: ChatMessageResponse[] = [
       makeMessage({ id: 'm1', content: 123 as unknown as string, createdAt: 1000 }),
     ];
-    const result = buildSessionTimeline(messages, [], [], false, new Map([['m1', 0]]));
+    const result = buildSessionTimeline(messages, [], [], false);
     // Non-string content produces empty text which is skipped
     expect(result).toHaveLength(0);
   });
@@ -294,7 +280,7 @@ describe('buildSessionTimeline', () => {
     const events = eventTypes.map((et, i) =>
       makeEvent({ id: `e${i}`, eventType: et.eventType, createdAt: i * 1000 })
     );
-    const result = buildSessionTimeline([], events, [], true, new Map());
+    const result = buildSessionTimeline([], events, [], true);
 
     for (let i = 0; i < eventTypes.length; i++) {
       expect(result[i]).toMatchObject({
@@ -317,7 +303,7 @@ describe('buildSessionTimeline', () => {
     const events = expectations.map((et, i) =>
       makeEvent({ id: `e${i}`, eventType: et.eventType, createdAt: i * 1000 })
     );
-    const result = buildSessionTimeline([], events, [], true, new Map());
+    const result = buildSessionTimeline([], events, [], true);
 
     for (let i = 0; i < expectations.length; i++) {
       expect(result[i]).toMatchObject({
@@ -331,7 +317,7 @@ describe('buildSessionTimeline', () => {
     const events: ActivityEventResponse[] = [
       makeEvent({ id: 'e1', eventType: 'task.status_changed', payload: { toStatus: 'error' }, createdAt: 1000 }),
     ];
-    const result = buildSessionTimeline([], events, [], true, new Map());
+    const result = buildSessionTimeline([], events, [], true);
     expect(result[0]).toMatchObject({ severity: 'error', title: 'Task error' });
   });
 
@@ -339,7 +325,7 @@ describe('buildSessionTimeline', () => {
     const events: ActivityEventResponse[] = [
       makeEvent({ id: 'e1', eventType: 'task.status_changed', payload: null, createdAt: 1000 }),
     ];
-    const result = buildSessionTimeline([], events, [], true, new Map());
+    const result = buildSessionTimeline([], events, [], true);
     expect(result[0]).toMatchObject({ severity: 'info', title: 'Task status changed' });
   });
 
@@ -347,7 +333,7 @@ describe('buildSessionTimeline', () => {
     const events: ActivityEventResponse[] = [
       makeEvent({ id: 'e1', eventType: 'unknown.event', createdAt: 1000 }),
     ];
-    const result = buildSessionTimeline([], events, [], true, new Map());
+    const result = buildSessionTimeline([], events, [], true);
     expect(result[0]).toMatchObject({
       kind: 'system_event',
       title: 'unknown.event',

@@ -1,4 +1,5 @@
 import type { NodeResponse, WorkspaceResponse } from '@simple-agent-manager/shared';
+import { DEFAULT_CHAT_SESSION_MESSAGE_LIMIT, DEFAULT_CHAT_SESSION_MESSAGE_MAX } from '@simple-agent-manager/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { ChatConnectionState } from '../../hooks/useChatWebSocket';
@@ -54,6 +55,7 @@ export interface UseSessionLifecycleResult {
   handleSendFollowUp: () => Promise<void>;
   handleUploadFiles: (files: FileList | File[]) => Promise<void>;
   loadMore: () => Promise<void>;
+  loadUntil: (targetTimestamp: number) => Promise<void>;
   loadingMore: boolean;
   transcribeApiUrl: string;
   wsRef: React.RefObject<WebSocket | null>;
@@ -72,6 +74,13 @@ export function useSessionLifecycle(
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Refs mirror the latest messages/hasMore so imperative loaders (loadUntil)
+  // can read current state without stale closures.
+  const messagesRef = useRef<ChatMessageResponse[]>([]);
+  const hasMoreRef = useRef(false);
+  useEffect(() => { messagesRef.current = messages; }, [messages]);
+  useEffect(() => { hasMoreRef.current = hasMore; }, [hasMore]);
 
   const [workspace, setWorkspace] = useState<WorkspaceResponse | null>(null);
   const [node, setNode] = useState<NodeResponse | null>(null);
@@ -197,7 +206,13 @@ export function useSessionLifecycle(
     try {
       setError(null);
       setLoading(true);
-      const data: ChatSessionDetailResponse = await getChatSession(projectId, sessionId);
+      // Load the FULL conversation up front (server clamps to CHAT_SESSION_MESSAGE_MAX
+      // and the 30 MiB RPC size guard). This keeps the timeline jump index map
+      // complete and removes windowed loading for typical sessions. Oversized /
+      // guard-trimmed sessions keep hasMore=true and fall back to "Load earlier".
+      const data: ChatSessionDetailResponse = await getChatSession(projectId, sessionId, {
+        limit: DEFAULT_CHAT_SESSION_MESSAGE_MAX,
+      });
       setSession(data.session);
       setMessages(data.messages);
       setHasMore(data.hasMore);
@@ -275,8 +290,10 @@ export function useSessionLifecycle(
     let lastPollFingerprint = '';
     const pollInterval = setInterval(async () => {
       try {
+        // Poll only the most-recent window — mergeReplace preserves the fully
+        // loaded history, so polling must NOT re-fetch the whole conversation.
         const data: ChatSessionDetailResponse = await getChatSession(
-          projectId, sessionId, { signal: abortController.signal },
+          projectId, sessionId, { signal: abortController.signal, limit: DEFAULT_CHAT_SESSION_MESSAGE_LIMIT },
         );
         if (data.session.id !== sessionId) return;
         const newLastId = data.messages[data.messages.length - 1]?.id ?? '';
@@ -425,6 +442,47 @@ export function useSessionLifecycle(
     }
   };
 
+  // Load older pages until a target timestamp is covered (or no more history).
+  // Used by timeline jump-to-message for the rare oversized/guard-trimmed session
+  // where the target predates the loaded window, so a jump never dead-clicks.
+  const loadUntil = useCallback(async (targetTimestamp: number) => {
+    let oldest = messagesRef.current[0]?.createdAt ?? Infinity;
+    if (oldest <= targetTimestamp) return;
+    let more = hasMoreRef.current;
+    if (!more) return;
+
+    setLoadingMore(true);
+    try {
+      let before: number | undefined = oldest === Infinity ? undefined : oldest;
+      const accumulated: ChatMessageResponse[] = [];
+      // Safety bound: never loop unbounded even if the server misreports hasMore.
+      const MAX_PAGES = 400;
+      let pages = 0;
+      while (more && oldest > targetTimestamp && pages++ < MAX_PAGES) {
+        const data = await getChatSession(projectId, sessionId, {
+          before,
+          limit: DEFAULT_CHAT_SESSION_MESSAGE_LIMIT,
+        });
+        if (data.messages.length === 0) { more = false; break; }
+        accumulated.unshift(...data.messages);
+        oldest = data.messages[0]!.createdAt;
+        before = oldest;
+        more = data.hasMore;
+      }
+      if (accumulated.length > 0) {
+        setMessages((prev) => {
+          const merged = mergeMessages(prev, accumulated, 'prepend');
+          const actualAdded = merged.length - prev.length;
+          setFirstItemIndex((fi) => fi - actualAdded);
+          return merged;
+        });
+      }
+      setHasMore(more);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [projectId, sessionId]);
+
   return {
     session, messages, hasMore, loading, error, setError, sessionState, taskEmbed,
     workspace, node, detectedPorts,
@@ -436,6 +494,6 @@ export function useSessionLifecycle(
     idleCountdownMs: recovery.idleCountdownMs,
     filePanel, setFilePanel, handleFileClick, handleOpenFileBrowser, handleOpenGitChanges,
     handleCancelPrompt, handleSendFollowUp, handleUploadFiles,
-    loadMore, loadingMore, transcribeApiUrl, wsRef,
+    loadMore, loadUntil, loadingMore, transcribeApiUrl, wsRef,
   };
 }
