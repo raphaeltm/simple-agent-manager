@@ -61,6 +61,7 @@ The task-start prompt already names `get_instructions` as coming from the `sam-m
   - Use the SAM MCP `dispatch_task` tool.
 - Cloudflare Worker script `sam-api-staging` no longer contains the old bare wording: Call `complete_task` with a summary when all work is done.
 - Live staging `/mcp` JSON-RPC `tools/call get_instructions` returned all expected task-mode fragments for an existing staging MCP token: top-level SAM MCP server note, `update_task_status`, `complete_task`, and the push-before-`complete_task` instruction.
+- Live staging Playwright browser check authenticated through `token-login` and loaded `dashboard`, `projects`, and `settings/cloud-provider` on `app.sammy.party` at 1280x800 with non-empty bodies and no 500 page.
 
 ## References
 
