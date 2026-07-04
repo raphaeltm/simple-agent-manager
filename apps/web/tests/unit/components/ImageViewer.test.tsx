@@ -62,25 +62,26 @@ describe('ImageViewer', () => {
 
     // Default: fit to panel
     const toggleBtn = screen.getByText('Actual size (1:1)');
-    expect(img.style.maxWidth).toBe('100%');
+    expect(img.style.transform).toContain('scale(1)');
 
     // Click to switch to actual size
     act(() => {
       fireEvent.click(toggleBtn);
     });
-    expect(img.style.maxWidth).toBe('none');
+    expect(img.style.transform).toContain('scale(2)');
     expect(screen.getByText('Fit to panel')).toBeInTheDocument();
 
     // Click again to switch back
     act(() => {
       fireEvent.click(screen.getByText('Fit to panel'));
     });
-    expect(img.style.maxWidth).toBe('100%');
+    expect(img.style.transform).toContain('scale(1)');
   });
 
-  it('toggles size on image click', () => {
+  it('toggles zoom on desktop pointer click', () => {
     render(<ImageViewer {...defaultProps} />);
     const img = document.querySelector('img')!;
+    const imageArea = img.parentElement!;
 
     Object.defineProperty(img, 'naturalWidth', { value: 800, configurable: true });
     Object.defineProperty(img, 'naturalHeight', { value: 600, configurable: true });
@@ -88,12 +89,54 @@ describe('ImageViewer', () => {
       fireEvent.load(img);
     });
 
-    expect(img.style.maxWidth).toBe('100%');
+    expect(img.style.transform).toContain('scale(1)');
 
     act(() => {
-      fireEvent.click(img);
+      fireEvent.pointerDown(imageArea, { pointerId: 1, pointerType: 'mouse', clientX: 10, clientY: 10 });
+      fireEvent.pointerUp(imageArea, { pointerId: 1, pointerType: 'mouse', clientX: 10, clientY: 10 });
     });
-    expect(img.style.maxWidth).toBe('none');
+    expect(img.style.transform).toContain('scale(2)');
+  });
+
+  it('double-taps to zoom on touch pointers', () => {
+    render(<ImageViewer {...defaultProps} />);
+    const img = document.querySelector('img')!;
+    const imageArea = img.parentElement!;
+
+    Object.defineProperty(img, 'naturalWidth', { value: 800, configurable: true });
+    Object.defineProperty(img, 'naturalHeight', { value: 600, configurable: true });
+    act(() => {
+      fireEvent.load(img);
+    });
+
+    act(() => {
+      fireEvent.pointerDown(imageArea, { pointerId: 1, pointerType: 'touch', clientX: 20, clientY: 20 });
+      fireEvent.pointerUp(imageArea, { pointerId: 1, pointerType: 'touch', clientX: 20, clientY: 20 });
+      fireEvent.pointerDown(imageArea, { pointerId: 2, pointerType: 'touch', clientX: 20, clientY: 20 });
+      fireEvent.pointerUp(imageArea, { pointerId: 2, pointerType: 'touch', clientX: 20, clientY: 20 });
+    });
+
+    expect(img.style.transform).toContain('scale(2)');
+  });
+
+  it('pinch zoom clamps scale to the configured maximum', () => {
+    render(<ImageViewer {...defaultProps} />);
+    const img = document.querySelector('img')!;
+    const imageArea = img.parentElement!;
+
+    Object.defineProperty(img, 'naturalWidth', { value: 800, configurable: true });
+    Object.defineProperty(img, 'naturalHeight', { value: 600, configurable: true });
+    act(() => {
+      fireEvent.load(img);
+    });
+
+    act(() => {
+      fireEvent.pointerDown(imageArea, { pointerId: 1, pointerType: 'touch', clientX: 0, clientY: 0 });
+      fireEvent.pointerDown(imageArea, { pointerId: 2, pointerType: 'touch', clientX: 10, clientY: 0 });
+      fireEvent.pointerMove(imageArea, { pointerId: 2, pointerType: 'touch', clientX: 100, clientY: 0 });
+    });
+
+    expect(img.style.transform).toContain('scale(4)');
   });
 
   it('shows error message when image fails to load', () => {

@@ -16,14 +16,14 @@ Project library previews need a stronger full-screen experience and safe support
 
 ## Checklist
 
-- [ ] Convert `FilePreviewModal` to an edge-to-edge `100dvh` fullscreen surface with safe-area-aware header/footer padding while preserving focus trap, Escape, scroll lock, portal, filename, size, download, and close controls.
-- [ ] Add backend HTML preview allowlist support in `apps/api/src/routes/library.ts` while returning HTML previews as `text/plain; charset=utf-8` with CSP `default-src 'none'`, without changing download dangerous MIME rewrites.
-- [ ] Add regression coverage proving HTML preview responses are never `text/html` and keep non-allowlisted MIME previews blocked.
-- [ ] Add frontend HTML MIME helpers and render HTML in the modal through a credentialed text fetch, Rendered/Source toggle, `iframe srcdoc`, and sandbox exactly `allow-scripts`.
-- [ ] Ensure `DocumentCard` keeps HTML files on the icon tier with an `Interactive · tap to open` hint and no inline HTML rendering.
-- [ ] Replace image overflow actual-size mode with transform-based pinch zoom, pan, and double-tap gestures while preserving desktop click zoom, Actual size control, guardrails, and metadata.
-- [ ] Add unit/behavior tests for iframe sandbox/srcdoc, HTML source toggle, DocumentCard behavior, and image zoom transitions.
-- [ ] Update API contract docs if the preview response contract changes.
+- [x] Convert `FilePreviewModal` to an edge-to-edge `100dvh` fullscreen surface with safe-area-aware header/footer padding while preserving focus trap, Escape, scroll lock, portal, filename, size, download, and close controls.
+- [x] Add backend HTML preview allowlist support in `apps/api/src/routes/library.ts` while returning HTML previews as `text/plain; charset=utf-8` with CSP `default-src 'none'`, without changing download dangerous MIME rewrites.
+- [x] Add regression coverage proving HTML preview responses are never `text/html` and keep non-allowlisted MIME previews blocked.
+- [x] Add frontend HTML MIME helpers and render HTML in the modal through a credentialed text fetch, Rendered/Source toggle, `iframe srcdoc`, and sandbox exactly `allow-scripts`.
+- [x] Ensure `DocumentCard` keeps HTML files on the icon tier with an `Interactive · tap to open` hint and no inline HTML rendering.
+- [x] Replace image overflow actual-size mode with transform-based pinch zoom, pan, and double-tap gestures while preserving desktop click zoom, Actual size control, guardrails, and metadata.
+- [x] Add unit/behavior tests for iframe sandbox/srcdoc, HTML source toggle, DocumentCard behavior, and image zoom transitions.
+- [x] Update API contract docs if the preview response contract changes.
 - [ ] Run local Playwright visual audits at 375x667 and 1280x800 for image, markdown, PDF, and HTML modal content with overflow assertions.
 - [ ] Run security review for API HTML handling and iframe sandbox.
 - [ ] Deploy and verify on staging: interactive HTML from a DocumentCard runs in sandbox without session cookie access, and mobile pinch zoom works.

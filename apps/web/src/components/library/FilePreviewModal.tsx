@@ -6,11 +6,13 @@ import { createPortal } from 'react-dom';
 import { useScrollLock } from '../../hooks/useScrollLock';
 import {
   formatFileSize,
+  isHtmlMime,
   isMarkdownMime,
   isPdfMime,
   isPreviewableImageMime,
 } from '../../lib/file-utils';
 import { RenderedMarkdown, SyntaxHighlightedCode } from '../MarkdownRenderer';
+import { HtmlViewer } from '../shared-file-viewer/HtmlViewer';
 import { ImageViewer } from '../shared-file-viewer/ImageViewer';
 import { type FileWithTags, FOCUS_RING } from './types';
 
@@ -46,6 +48,7 @@ export function FilePreviewModal({
   const isImage = isPreviewableImageMime(file.mimeType);
   const isPdf = isPdfMime(file.mimeType);
   const isMarkdown = isMarkdownMime(file.mimeType);
+  const isHtml = isHtmlMime(file.mimeType);
 
   // Markdown state
   const [mdContent, setMdContent] = useState<string | null>(null);
@@ -159,25 +162,26 @@ export function FilePreviewModal({
   }, [isPdf, pdfLoading]);
 
   return createPortal(
-    <div className="fixed inset-0 z-dialog-backdrop overflow-hidden">
-      {/* Backdrop */}
-      <div
-        className="fixed inset-0 glass-backdrop-dim transition-opacity duration-150"
-        onClick={onClose}
-      />
-
-      {/* Modal panel */}
-      <div className="flex items-center justify-center h-full p-4 sm:p-6">
+    <div className="fixed inset-0 z-dialog-backdrop overflow-hidden bg-surface">
+      <div className="fixed inset-0 glass-backdrop-dim" aria-hidden="true" />
+      <div className="fixed inset-0 h-[100dvh] overflow-hidden">
         <div
           ref={dialogRef}
           tabIndex={-1}
           role="dialog"
           aria-modal="true"
           aria-labelledby="preview-modal-title"
-          className="relative z-dialog glass-modal glass-panel-container glass-composited rounded-lg shadow-overlay w-full max-w-4xl max-h-[90vh] flex flex-col outline-none"
+          className="relative z-dialog flex h-[100dvh] w-full flex-col overflow-hidden bg-surface outline-none"
         >
           {/* Header */}
-          <div className="flex items-center gap-3 px-4 py-3 border-b border-border-default shrink-0">
+          <div
+            className="flex shrink-0 items-center gap-3 border-b border-border-default bg-surface px-4 py-3"
+            style={{
+              paddingTop: 'calc(env(safe-area-inset-top) + 0.75rem)',
+              paddingLeft: 'calc(env(safe-area-inset-left) + 1rem)',
+              paddingRight: 'calc(env(safe-area-inset-right) + 1rem)',
+            }}
+          >
             <div className="flex-1 min-w-0">
               <h3
                 id="preview-modal-title"
@@ -245,7 +249,14 @@ export function FilePreviewModal({
           </div>
 
           {/* Content */}
-          <div className="flex-1 min-h-0 overflow-auto">
+          <div
+            className="min-h-0 flex-1 overflow-auto"
+            style={{
+              paddingBottom: 'env(safe-area-inset-bottom)',
+              paddingLeft: 'env(safe-area-inset-left)',
+              paddingRight: 'env(safe-area-inset-right)',
+            }}
+          >
             {isImage && (
               <ImageViewer
                 src={previewUrl}
@@ -281,7 +292,7 @@ export function FilePreviewModal({
                     src={previewUrl}
                     title={`Preview of ${file.filename}`}
                     sandbox="allow-same-origin"
-                    className="w-full h-full border-none min-h-[60vh]"
+                    className="h-full min-h-[60vh] w-full border-none"
                     onLoad={() => setPdfLoading(false)}
                     onError={() => {
                       setPdfLoading(false);
@@ -319,12 +330,16 @@ export function FilePreviewModal({
                   mdViewMode === 'rendered' ? (
                     <RenderedMarkdown content={mdContent} />
                   ) : (
-                    <div className="p-4 overflow-auto bg-surface-inset rounded-md m-2">
+                    <div className="overflow-auto bg-surface-inset p-4">
                       <SyntaxHighlightedCode content={mdContent} language="markdown" />
                     </div>
                   )
                 )}
               </>
+            )}
+
+            {isHtml && (
+              <HtmlViewer previewUrl={previewUrl} fileName={file.filename} />
             )}
           </div>
         </div>

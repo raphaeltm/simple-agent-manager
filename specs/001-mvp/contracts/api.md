@@ -32,6 +32,19 @@ Authorization: Bearer {API_TOKEN}
 
 ## Endpoints
 
+### GET /projects/:projectId/library/:fileId/preview
+
+Return an inline preview for supported project library files. Supported MIME
+families are previewable images, PDF, Markdown, and HTML.
+
+HTML preview safety contract: files stored as `text/html` MUST be returned as
+`Content-Type: text/plain; charset=utf-8` with
+`Content-Security-Policy: default-src 'none'`. The API preview response must
+never serve generated HTML as `text/html`; clients that render HTML must fetch
+the inert text and place it in a sandboxed iframe without same-origin access.
+
+Unsupported MIME types return a client error without decrypting the file body.
+
 ### POST /vms
 
 Create a new workspace.

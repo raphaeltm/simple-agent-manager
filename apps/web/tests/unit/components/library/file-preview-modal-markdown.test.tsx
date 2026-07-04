@@ -28,6 +28,14 @@ const x = 42;
 | Cell 1   | Cell 2   |
 `;
 
+const HTML_CONTENT = `<!doctype html>
+<html>
+  <body>
+    <button id="run">Run</button>
+    <script>window.__ran = true;</script>
+  </body>
+</html>`;
+
 function makeMarkdownFile(overrides?: Partial<FileWithTags>): FileWithTags {
   return {
     id: 'file-1',
@@ -241,5 +249,79 @@ describe('FilePreviewModal — Markdown', () => {
     expect(iframe!.getAttribute('title')).toContain('doc.pdf');
     // No markdown content should be rendered
     expect(screen.queryByTestId('rendered-markdown')).not.toBeInTheDocument();
+  });
+});
+
+describe('FilePreviewModal — HTML', () => {
+  let fetchSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(HTML_CONTENT, { status: 200, headers: { 'Content-Type': 'text/plain; charset=utf-8' } }),
+    );
+  });
+
+  afterEach(() => {
+    fetchSpy.mockRestore();
+    document.body.style.overflow = '';
+  });
+
+  it('fetches HTML as text and renders it through a srcdoc sandbox iframe', async () => {
+    const file = makeMarkdownFile({
+      mimeType: 'text/html',
+      filename: 'interactive.html',
+      sizeBytes: HTML_CONTENT.length,
+    });
+    render(
+      <FilePreviewModal
+        file={file}
+        previewUrl="https://api.example.com/preview/interactive"
+        onClose={vi.fn()}
+        onDownload={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(document.querySelector('iframe')).toBeTruthy();
+    });
+    const iframe = document.querySelector('iframe')!;
+    expect(fetchSpy).toHaveBeenCalledWith('https://api.example.com/preview/interactive', expect.objectContaining({
+      credentials: 'include',
+    }));
+    expect(iframe).toHaveAttribute('sandbox', 'allow-scripts');
+    expect(iframe).toHaveAttribute('srcdoc', HTML_CONTENT);
+    expect(iframe).not.toHaveAttribute('src');
+  });
+
+  it('toggles HTML between rendered and source views', async () => {
+    const user = userEvent.setup();
+    const file = makeMarkdownFile({
+      mimeType: 'text/html',
+      filename: 'interactive.html',
+      sizeBytes: HTML_CONTENT.length,
+    });
+    render(
+      <FilePreviewModal
+        file={file}
+        previewUrl="https://api.example.com/preview/interactive"
+        onClose={vi.fn()}
+        onDownload={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(document.querySelector('iframe')).toBeTruthy();
+    });
+    await user.click(screen.getByRole('button', { name: 'Source view' }));
+
+    expect(document.querySelector('iframe')).toBeNull();
+    const source = document.querySelector('pre');
+    expect(source).toBeTruthy();
+    expect(source!.textContent).toContain('<script>');
+
+    await user.click(screen.getByRole('button', { name: 'Rendered view' }));
+    await waitFor(() => {
+      expect(document.querySelector('iframe')).toBeTruthy();
+    });
   });
 });

@@ -325,6 +325,33 @@ describe('library routes', () => {
       expect(res.headers.get('Content-Security-Policy')).toContain("script-src 'unsafe-inline'");
     });
 
+    it('serves HTML previews as inert plain text with strict CSP', async () => {
+      const content = new TextEncoder().encode('<script>document.body.textContent = document.cookie</script>');
+      mockGetFile.mockResolvedValue({
+        file: { filename: 'interactive.html', mimeType: 'text/html', sizeBytes: content.byteLength },
+        tags: [],
+      });
+      mockDownloadFile.mockResolvedValue({
+        data: content.buffer,
+        file: { filename: 'interactive.html', mimeType: 'text/html', sizeBytes: content.byteLength },
+        metadata: {},
+      });
+
+      const { app, env } = makeApp(makeEnv());
+      const res = await app.fetch(
+        new Request(`${BASE_URL}/projects/test-project-id/library/file-123/preview`),
+        env
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.headers.get('Content-Type')).toBe('text/plain; charset=utf-8');
+      expect(res.headers.get('Content-Type')).not.toContain('text/html');
+      expect(res.headers.get('Content-Security-Policy')).toBe("default-src 'none'");
+      expect(res.headers.get('X-Content-Type-Options')).toBe('nosniff');
+      expect(res.headers.get('Cache-Control')).toBe('private, no-store');
+      expect(await res.text()).toContain('<script>');
+    });
+
     it('rejects non-previewable MIME types with 400 without decrypting', async () => {
       mockGetFile.mockResolvedValue({
         file: { filename: 'readme.txt', mimeType: 'text/plain' },

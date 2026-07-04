@@ -283,7 +283,7 @@ libraryRoutes.get('/:fileId/download', requireAuth(), requireApproved(), async (
 // GET /:fileId/preview — decrypt + serve inline for previewable types
 // ---------------------------------------------------------------------------
 
-/** MIME types safe to render inline in a browser (images, PDF, markdown).
+/** MIME types safe to render inline in a browser (images, PDF, markdown, inert HTML text).
  *  Keep in sync with PREVIEWABLE_IMAGE_MIMES + PREVIEWABLE_MIMES in apps/web/src/lib/file-utils.ts */
 const PREVIEWABLE_MIMES = new Set([
   'image/png',
@@ -293,6 +293,7 @@ const PREVIEWABLE_MIMES = new Set([
   'image/avif',
   'application/pdf',
   'text/markdown',
+  'text/html',
 ]);
 
 libraryRoutes.get('/:fileId/preview', requireAuth(), requireApproved(), async (c) => {
@@ -332,18 +333,25 @@ libraryRoutes.get('/:fileId/preview', requireAuth(), requireApproved(), async (c
 
   const safeFilename = file.filename.replace(/[^\x20-\x7E]|["\\;]/g, '_');
 
+  const responseContentType = mimeTypeLower === 'text/html'
+    ? 'text/plain; charset=utf-8'
+    : mimeTypeLower;
+  const csp = mimeTypeLower === 'application/pdf'
+    ? "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; object-src 'self'"
+    : mimeTypeLower === 'text/html'
+      ? "default-src 'none'"
+      : "default-src 'none'; style-src 'unsafe-inline'";
+
   return new Response(data, {
     status: 200,
     headers: {
-      'Content-Type': mimeTypeLower,
+      'Content-Type': responseContentType,
       'Content-Length': String(data.byteLength),
       'Content-Disposition': `inline; filename="${safeFilename}"`,
       'Cache-Control': 'private, no-store',
       'X-Content-Type-Options': 'nosniff',
       // PDF viewers need script-src for browser-native rendering; images get strict CSP
-      'Content-Security-Policy': mimeTypeLower === 'application/pdf'
-        ? "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; object-src 'self'"
-        : "default-src 'none'; style-src 'unsafe-inline'",
+      'Content-Security-Policy': csp,
     },
   });
 });

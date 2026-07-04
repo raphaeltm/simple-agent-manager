@@ -3,7 +3,7 @@ const IMAGE_EXTENSIONS = new Set([
   'png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'avif', 'ico', 'bmp',
 ]);
 
-/** MIME types that support inline preview (images + PDF + markdown). SVG excluded — script risk in iframe. */
+/** MIME types that support inline preview. SVG excluded — script risk in iframe. */
 const PREVIEWABLE_IMAGE_MIMES = new Set([
   'image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/avif',
 ]);
@@ -12,6 +12,7 @@ const PREVIEWABLE_MIMES = new Set([
   ...PREVIEWABLE_IMAGE_MIMES,
   'application/pdf',
   'text/markdown',
+  'text/html',
 ]);
 
 /** Check if a file path is a renderable image based on extension. */
@@ -30,7 +31,7 @@ export function baseMimeType(mimeType: string): string {
   return (mimeType.split(';')[0] ?? mimeType).trim().toLowerCase();
 }
 
-/** Check if a file's MIME type supports inline preview (images + PDF + markdown). */
+/** Check if a file's MIME type supports inline preview. */
 export function isPreviewableMime(mimeType: string): boolean {
   return PREVIEWABLE_MIMES.has(baseMimeType(mimeType));
 }
@@ -48,6 +49,11 @@ export function isPdfMime(mimeType: string): boolean {
 /** Check if a MIME type is markdown. */
 export function isMarkdownMime(mimeType: string): boolean {
   return baseMimeType(mimeType) === 'text/markdown';
+}
+
+/** Check if a MIME type is HTML. */
+export function isHtmlMime(mimeType: string): boolean {
+  return baseMimeType(mimeType) === 'text/html';
 }
 
 /** Default threshold for inline rendering (0–10 MB). Override via VITE_FILE_PREVIEW_INLINE_MAX_BYTES. */

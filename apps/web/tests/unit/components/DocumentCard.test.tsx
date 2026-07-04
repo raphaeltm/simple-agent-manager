@@ -155,6 +155,28 @@ describe('DocumentCard', () => {
     expect(screen.queryByAltText('report.pdf')).toBeNull();
   });
 
+  it('keeps HTML documents on the icon tier with an interactive hint', () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal('fetch', fetchSpy);
+
+    render(<DocumentCard projectId="proj-1" item={toolItem({
+      toolName: 'mcp__sam-mcp__display_from_library',
+      rawInput: { fileId: 'f-html' },
+      rawOutput: rawOutput({
+        fileId: 'f-html',
+        filename: 'interactive.html',
+        mimeType: 'text/html',
+        sizeBytes: 1200,
+      }),
+    })} />);
+
+    expect(screen.getByText('interactive.html')).toBeTruthy();
+    expect(screen.getByText('Interactive · tap to open')).toBeTruthy();
+    expect(document.querySelector('iframe')).toBeNull();
+    expect(document.querySelector('pre')).toBeNull();
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
   it('renders a tombstone card for FILE_NOT_FOUND', () => {
     render(<DocumentCard projectId="proj-1" item={toolItem({
       toolName: 'mcp__sam-mcp__display_from_library',

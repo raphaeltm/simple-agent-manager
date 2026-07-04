@@ -7,6 +7,7 @@ import { downloadLibraryFile, getLibraryFilePreviewUrl } from '../../../lib/api/
 import {
   FILE_PREVIEW_INLINE_MAX_BYTES,
   formatFileSize,
+  isHtmlMime,
   isMarkdownMime,
   isPreviewableImageMime,
 } from '../../../lib/file-utils';
@@ -57,6 +58,7 @@ export const DocumentCard: FC<DocumentCardProps> = ({ item, projectId }) => {
 
   const isImage = Boolean(mimeType && isPreviewableImageMime(mimeType));
   const isMarkdown = Boolean(mimeType && isMarkdownMime(mimeType));
+  const isHtml = Boolean(mimeType && isHtmlMime(mimeType));
   const withinInlineCap = sizeBytes === undefined || sizeBytes <= FILE_PREVIEW_INLINE_MAX_BYTES;
 
   const showImageTier = state === 'ready' && canPreview && isImage && withinInlineCap && !imgFailed;
@@ -186,6 +188,10 @@ export const DocumentCard: FC<DocumentCardProps> = ({ item, projectId }) => {
 
       {caption && (
         <div className="text-xs text-fg-secondary break-words">{caption}</div>
+      )}
+
+      {isHtml && (
+        <div className="text-xs text-fg-muted">Interactive · tap to open</div>
       )}
 
       {state === 'unavailable' && (
