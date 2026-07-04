@@ -6,6 +6,7 @@ import {
   FILE_PREVIEW_LOAD_MAX_BYTES,
   formatFileSize,
   isImageFile,
+  isHtmlMime,
   isMarkdownMime,
   isPdfMime,
   isPreviewableImageMime,
@@ -96,6 +97,11 @@ describe('isPreviewableMime', () => {
     expect(isPreviewableMime('text/markdown')).toBe(true);
   });
 
+  it('returns true for HTML', () => {
+    expect(isPreviewableMime('text/html')).toBe(true);
+    expect(isPreviewableMime('Text/HTML; charset=utf-8')).toBe(true);
+  });
+
   it('handles MIME types with charset parameters', () => {
     expect(isPreviewableMime('text/markdown; charset=utf-8')).toBe(true);
     expect(isPreviewableMime('image/png; charset=utf-8')).toBe(true);
@@ -109,7 +115,6 @@ describe('isPreviewableMime', () => {
 
   it('returns false for non-previewable types', () => {
     expect(isPreviewableMime('text/plain')).toBe(false);
-    expect(isPreviewableMime('text/html')).toBe(false);
     expect(isPreviewableMime('application/json')).toBe(false);
     expect(isPreviewableMime('application/javascript')).toBe(false);
     expect(isPreviewableMime('application/zip')).toBe(false);
@@ -166,6 +171,25 @@ describe('isMarkdownMime', () => {
     expect(isMarkdownMime('text/html')).toBe(false);
     expect(isMarkdownMime('application/pdf')).toBe(false);
     expect(isMarkdownMime('image/png')).toBe(false);
+  });
+});
+
+describe('isHtmlMime', () => {
+  it('returns true for HTML', () => {
+    expect(isHtmlMime('text/html')).toBe(true);
+    expect(isHtmlMime('Text/HTML')).toBe(true);
+  });
+
+  it('returns true for HTML with charset parameter', () => {
+    expect(isHtmlMime('text/html; charset=utf-8')).toBe(true);
+    expect(isHtmlMime('Text/HTML; charset=UTF-8')).toBe(true);
+  });
+
+  it('returns false for non-HTML', () => {
+    expect(isHtmlMime('text/plain')).toBe(false);
+    expect(isHtmlMime('text/markdown')).toBe(false);
+    expect(isHtmlMime('application/pdf')).toBe(false);
+    expect(isHtmlMime('image/png')).toBe(false);
   });
 });
 
