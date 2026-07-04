@@ -49,11 +49,12 @@ Deployment and infrastructure project routes still gate project access through `
 
 ## Validation Evidence
 
-- Focused route tests passed: `pnpm --filter @simple-agent-manager/api test -- tests/unit/routes/deployment-membership-auth.test.ts tests/unit/routes/deployment-custom-domains.test.ts tests/unit/routes/deployment-volumes.test.ts tests/unit/routes/deployment-release-compose-submission.test.ts tests/unit/routes/deployment-release-provisioning.test.ts tests/unit/routes/deployment-environment-observability.test.ts tests/unit/routes/deployment-environment-lifecycle-vertical.test.ts tests/unit/routes/deployment-custom-domains-vertical.test.ts tests/unit/routes/project-deployment.test.ts` (9 files, 72 tests).
+- Focused route tests passed: `pnpm --filter @simple-agent-manager/api test -- tests/unit/routes/deployment-membership-auth.test.ts tests/unit/routes/deployment-custom-domains.test.ts tests/unit/routes/deployment-volumes.test.ts tests/unit/routes/deployment-release-compose-submission.test.ts tests/unit/routes/deployment-release-provisioning.test.ts tests/unit/routes/deployment-environment-observability.test.ts tests/unit/routes/deployment-environment-lifecycle-vertical.test.ts tests/unit/routes/deployment-custom-domains-vertical.test.ts tests/unit/routes/project-deployment.test.ts` (9 files, 73 tests).
 - Scoped grep check passed: no `requireOwnedProject` matches in the eight scoped route files.
+- Review fix added coverage proving an admin member can read deployment logs from an owner-created deployment node without reintroducing a `nodes.userId = active user` project-access boundary.
 - `pnpm lint` passed with existing warnings only.
 - `pnpm typecheck` passed.
-- `pnpm test` passed: turbo 19/19 tasks successful, including API 367 files / 5687 tests and web 206 files / 2548 tests.
+- `pnpm test` passed: turbo 19/19 tasks successful, including API 367 files / 5688 tests and web 206 files / 2548 tests.
 - `pnpm build` passed.
 - `$task-completion-validator` passed before archive: research findings map to checklist items, checked items map to the diff, acceptance criteria have automated or command evidence, no UI data path applies, no new multi-resource selector applies, and the route-level test provides vertical coverage for membership authorization.
 
