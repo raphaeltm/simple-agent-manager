@@ -7,7 +7,7 @@ import { requireRouteParam } from '../lib/route-helpers';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
-import { type ProjectCapability,requireProjectAccess, requireProjectCapability } from '../middleware/project-auth';
+import { type ProjectCapability, requireProjectAccess, requireProjectCapability } from '../middleware/project-auth';
 import { jsonValidator, UpsertProjectRuntimeEnvVarSchema, UpsertProjectRuntimeFileSchema } from '../schemas';
 import { getRuntimeLimits } from '../services/limits';
 import {
