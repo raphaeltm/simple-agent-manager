@@ -108,7 +108,8 @@ interface VolumeRow {
   createdAt: string;
 }
 
-const mockRequireOwnedProject = vi.fn();
+const mockRequireProjectAccess = vi.fn();
+const mockRequireProjectCapability = vi.fn();
 const mockSignDeployPayload = vi.fn();
 const mockVerifyCallbackToken = vi.fn();
 const mockMintProjectRegistryCredential = vi.fn();
@@ -145,7 +146,8 @@ vi.mock('../../../src/middleware/auth', () => ({
 }));
 
 vi.mock('../../../src/middleware/project-auth', () => ({
-  requireOwnedProject: (...args: unknown[]) => mockRequireOwnedProject(...args),
+  requireProjectAccess: (...args: unknown[]) => mockRequireProjectAccess(...args),
+  requireProjectCapability: (...args: unknown[]) => mockRequireProjectCapability(...args),
 }));
 
 vi.mock('../../../src/services/jwt', () => ({
@@ -417,7 +419,8 @@ describe('deployment custom domain attach verify apply flow', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.unstubAllGlobals();
-    mockRequireOwnedProject.mockResolvedValue(undefined);
+    mockRequireProjectAccess.mockResolvedValue(undefined);
+    mockRequireProjectCapability.mockResolvedValue(undefined);
     mockVerifyCallbackToken.mockResolvedValue({
       workspace: 'node-deploy-1',
       type: 'callback',

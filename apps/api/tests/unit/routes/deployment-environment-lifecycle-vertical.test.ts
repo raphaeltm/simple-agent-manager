@@ -89,7 +89,7 @@ interface NodeRow {
   providerInstanceId: string | null;
 }
 
-const mockRequireOwnedProject = vi.fn();
+const mockRequireProjectCapability = vi.fn();
 const mockProvisionDeploymentNode = vi.fn();
 const mockTeardownDeploymentEnvironmentOnNode = vi.fn();
 const mockListEnvironmentVolumes = vi.fn();
@@ -124,7 +124,7 @@ vi.mock('../../../src/middleware/auth', () => ({
 }));
 
 vi.mock('../../../src/middleware/project-auth', () => ({
-  requireOwnedProject: (...args: unknown[]) => mockRequireOwnedProject(...args),
+  requireProjectCapability: (...args: unknown[]) => mockRequireProjectCapability(...args),
 }));
 
 vi.mock('../../../src/services/deployment-provisioning', () => ({
@@ -302,7 +302,7 @@ function start(app: ReturnType<typeof createApp>) {
 describe('deployment environment stop/start lifecycle', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockRequireOwnedProject.mockResolvedValue(undefined);
+    mockRequireProjectCapability.mockResolvedValue(undefined);
     mockBuildDeploymentEnvironmentResponse.mockImplementation(
       async (_db: unknown, _env: unknown, row: EnvironmentRow) => ({
         id: row.id,

@@ -2,7 +2,7 @@
  * Deployment release routes.
  *
  * Scoped under /api/projects/:projectId/environments/:envId/releases.
- * Auth: session cookie + project ownership.
+ * Auth: session cookie + active project membership/capabilities.
  */
 
 import { parseCompose, resolveManifest, validateManifest } from '@simple-agent-manager/shared';
@@ -14,7 +14,7 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
-import { requireOwnedProject } from '../middleware/project-auth';
+import { requireProjectAccess, requireProjectCapability } from '../middleware/project-auth';
 import { collectSecretNames, renderCompose } from '../services/compose-renderer';
 import { buildDeploymentRouteTargets } from '../services/deployment-routing';
 import { decrypt } from '../services/encryption';
@@ -148,7 +148,7 @@ deploymentReleaseRoutes.post(
     const envId = c.req.param('envId');
     const userId = getUserId(c);
     const db = drizzle(c.env.DATABASE, { schema });
-    await requireOwnedProject(db, projectId, userId);
+    await requireProjectCapability(db, projectId, userId, 'deployment:deploy');
     await requireOwnedEnvironment(db, envId, projectId);
 
     const contentType = c.req.header('Content-Type') ?? '';
@@ -264,7 +264,7 @@ deploymentReleaseRoutes.get(
     const envId = c.req.param('envId');
     const userId = getUserId(c);
     const db = drizzle(c.env.DATABASE, { schema });
-    await requireOwnedProject(db, projectId, userId);
+    await requireProjectAccess(db, projectId, userId);
     await requireOwnedEnvironment(db, envId, projectId);
 
     const rows = await db
@@ -298,7 +298,7 @@ deploymentReleaseRoutes.get(
     const releaseId = c.req.param('releaseId');
     const userId = getUserId(c);
     const db = drizzle(c.env.DATABASE, { schema });
-    await requireOwnedProject(db, projectId, userId);
+    await requireProjectAccess(db, projectId, userId);
     await requireOwnedEnvironment(db, envId, projectId);
     const row = await requireOwnedRelease(db, releaseId, envId);
 
@@ -329,7 +329,7 @@ deploymentReleaseRoutes.get(
     const releaseId = c.req.param('releaseId');
     const userId = getUserId(c);
     const db = drizzle(c.env.DATABASE, { schema });
-    await requireOwnedProject(db, projectId, userId);
+    await requireProjectAccess(db, projectId, userId);
     await requireOwnedEnvironment(db, envId, projectId);
     const row = await requireOwnedRelease(db, releaseId, envId);
 

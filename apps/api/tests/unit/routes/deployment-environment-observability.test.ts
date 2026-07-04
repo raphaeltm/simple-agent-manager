@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
 
-const mockRequireOwnedProject = vi.fn();
+const mockRequireProjectCapability = vi.fn();
 const mockGetEnvironmentPublicRouteTargets = vi.fn();
 const mockGetNodeLogsFromNode = vi.fn();
 const mockGetNodeSystemInfoFromNode = vi.fn();
@@ -65,7 +65,7 @@ vi.mock('../../../src/middleware/auth', () => ({
 }));
 
 vi.mock('../../../src/middleware/project-auth', () => ({
-  requireOwnedProject: (...args: unknown[]) => mockRequireOwnedProject(...args),
+  requireProjectCapability: (...args: unknown[]) => mockRequireProjectCapability(...args),
 }));
 
 vi.mock('../../../src/services/node-agent', () => ({
@@ -167,7 +167,7 @@ describe('deployment environment observability routes', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     updateCalls.length = 0;
-    mockRequireOwnedProject.mockResolvedValue(undefined);
+    mockRequireProjectCapability.mockResolvedValue(undefined);
     mockGetEnvironmentPublicRouteTargets.mockResolvedValue([]);
     mockBuildDeploymentEnvironmentResponse.mockImplementation((_db, _env, row) => row);
     mockProvisionDeploymentNode.mockResolvedValue({
@@ -336,7 +336,12 @@ describe('deployment environment observability routes', () => {
         routeIndex: 1,
       },
     ]);
-    expect(mockRequireOwnedProject).toHaveBeenCalledWith(expect.anything(), 'project-1', 'user-1');
+    expect(mockRequireProjectCapability).toHaveBeenCalledWith(
+      expect.anything(),
+      'project-1',
+      'user-1',
+      'deployment:read'
+    );
     expect(mockGetEnvironmentPublicRouteTargets).toHaveBeenCalledWith(
       expect.anything(),
       expect.anything(),

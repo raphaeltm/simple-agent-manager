@@ -15,7 +15,7 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
-import { requireOwnedProject } from '../middleware/project-auth';
+import { requireProjectCapability } from '../middleware/project-auth';
 import { buildDeploymentEnvironmentResponse } from '../services/deployment-environment-summary';
 import { provisionDeploymentNode } from '../services/deployment-provisioning';
 import {
@@ -692,7 +692,7 @@ export function registerDeploymentEnvironmentLifecycleRoutes(
       const envId = c.req.param('envId');
       const userId = getUserId(c);
       const db = drizzle(c.env.DATABASE, { schema });
-      await requireOwnedProject(db, projectId, userId);
+      await requireProjectCapability(db, projectId, userId, 'deployment:manage');
       const result = await stopDeploymentEnvironment({
         db,
         env: c.env,
@@ -719,7 +719,7 @@ export function registerDeploymentEnvironmentLifecycleRoutes(
       const envId = c.req.param('envId');
       const userId = getUserId(c);
       const db = drizzle(c.env.DATABASE, { schema });
-      await requireOwnedProject(db, projectId, userId);
+      await requireProjectCapability(db, projectId, userId, 'deployment:manage');
       let executionCtx: Pick<ExecutionContext, 'waitUntil'>;
       try {
         executionCtx = c.executionCtx;

@@ -37,7 +37,8 @@ interface VolumeRow {
   updatedAt: string;
 }
 
-const mockRequireOwnedProject = vi.hoisted(() => vi.fn(async () => undefined));
+const mockRequireProjectAccess = vi.hoisted(() => vi.fn(async () => undefined));
+const mockRequireProjectCapability = vi.hoisted(() => vi.fn(async () => undefined));
 const mockCreateEnvironmentVolume = vi.hoisted(() => vi.fn());
 const mockDeleteEnvironmentVolume = vi.hoisted(() => vi.fn());
 const mockAttachEnvironmentVolumesToLinkedNode = vi.hoisted(() => vi.fn());
@@ -63,7 +64,8 @@ vi.mock('../../../src/middleware/auth', () => ({
 }));
 
 vi.mock('../../../src/middleware/project-auth', () => ({
-  requireOwnedProject: (...args: unknown[]) => mockRequireOwnedProject(...args),
+  requireProjectAccess: (...args: unknown[]) => mockRequireProjectAccess(...args),
+  requireProjectCapability: (...args: unknown[]) => mockRequireProjectCapability(...args),
 }));
 
 vi.mock('../../../src/services/deployment-volumes', () => ({

@@ -5,7 +5,7 @@
  * All provider operations go through the shared Provider interface.
  *
  * Scoped under /api/projects/:projectId/environments/:envId/volumes.
- * Auth: session cookie + project ownership.
+ * Auth: session cookie + active project membership/capabilities.
  */
 
 import { type CredentialProvider, isValidProvider } from '@simple-agent-manager/shared';
@@ -18,7 +18,7 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
-import { requireOwnedProject } from '../middleware/project-auth';
+import { requireProjectAccess, requireProjectCapability } from '../middleware/project-auth';
 import { jsonValidator } from '../schemas';
 import {
   attachEnvironmentVolumesToLinkedNode,
@@ -136,7 +136,7 @@ deploymentVolumeRoutes.post(
     const userId = getUserId(c);
     const db = drizzle(c.env.DATABASE, { schema });
 
-    await requireOwnedProject(db, projectId, userId);
+    await requireProjectCapability(db, projectId, userId, 'deployment:manage');
     const envRow = await requireOwnedEnvironment(db, envId, projectId);
 
     const { name, sizeGb, location } = c.req.valid('json');
@@ -184,7 +184,7 @@ deploymentVolumeRoutes.get(
     const userId = getUserId(c);
     const db = drizzle(c.env.DATABASE, { schema });
 
-    await requireOwnedProject(db, projectId, userId);
+    await requireProjectAccess(db, projectId, userId);
     await requireOwnedEnvironment(db, envId, projectId);
 
     const volumes = await listEnvironmentVolumes(db, envId);
@@ -207,7 +207,7 @@ deploymentVolumeRoutes.delete(
     const userId = getUserId(c);
     const db = drizzle(c.env.DATABASE, { schema });
 
-    await requireOwnedProject(db, projectId, userId);
+    await requireProjectCapability(db, projectId, userId, 'deployment:manage');
     await requireOwnedEnvironment(db, envId, projectId);
 
     try {
@@ -234,7 +234,7 @@ deploymentVolumeRoutes.post(
     const userId = getUserId(c);
     const db = drizzle(c.env.DATABASE, { schema });
 
-    await requireOwnedProject(db, projectId, userId);
+    await requireProjectCapability(db, projectId, userId, 'deployment:manage');
     await requireOwnedEnvironment(db, envId, projectId);
 
     try {
@@ -261,7 +261,7 @@ deploymentVolumeRoutes.post(
     const userId = getUserId(c);
     const db = drizzle(c.env.DATABASE, { schema });
 
-    await requireOwnedProject(db, projectId, userId);
+    await requireProjectCapability(db, projectId, userId, 'deployment:manage');
     await requireOwnedEnvironment(db, envId, projectId);
 
     try {

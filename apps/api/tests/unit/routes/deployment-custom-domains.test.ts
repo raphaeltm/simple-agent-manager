@@ -45,7 +45,8 @@ interface DomainRow {
   createdAt: string;
 }
 
-const mockRequireOwnedProject = vi.fn();
+const mockRequireProjectAccess = vi.fn();
+const mockRequireProjectCapability = vi.fn();
 const mockGetEnvironmentPublicRouteTargets = vi.fn();
 const mockVerifyCustomDomainTarget = vi.fn();
 
@@ -71,7 +72,8 @@ vi.mock('../../../src/middleware/auth', () => ({
 }));
 
 vi.mock('../../../src/middleware/project-auth', () => ({
-  requireOwnedProject: (...args: unknown[]) => mockRequireOwnedProject(...args),
+  requireProjectAccess: (...args: unknown[]) => mockRequireProjectAccess(...args),
+  requireProjectCapability: (...args: unknown[]) => mockRequireProjectCapability(...args),
 }));
 
 vi.mock('../../../src/services/deployment-custom-domains', () => ({
@@ -226,7 +228,8 @@ const parentRoute = {
 describe('deployment custom domain routes', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockRequireOwnedProject.mockResolvedValue(undefined);
+    mockRequireProjectAccess.mockResolvedValue(undefined);
+    mockRequireProjectCapability.mockResolvedValue(undefined);
     mockGetEnvironmentPublicRouteTargets.mockResolvedValue([parentRoute]);
     mockVerifyCustomDomainTarget.mockResolvedValue(true);
     envRows = [{ id: 'env-1', projectId: 'proj-1', nodeId: 'node-1' }];

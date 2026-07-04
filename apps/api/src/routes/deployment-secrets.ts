@@ -5,7 +5,7 @@
  * Secret values are never returned by any endpoint.
  *
  * Scoped under /api/projects/:projectId/environments/:envId/secrets.
- * Auth: session cookie + project ownership.
+ * Auth: session cookie + active project membership/capabilities.
  */
 
 import { and, count, eq } from 'drizzle-orm';
@@ -18,7 +18,7 @@ import type { Env } from '../env';
 import { ulid } from '../lib/ulid';
 import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
-import { requireOwnedProject } from '../middleware/project-auth';
+import { requireProjectCapability } from '../middleware/project-auth';
 import { rateLimitCredentialUpdate } from '../middleware/rate-limit';
 import { jsonValidator } from '../schemas';
 import { encrypt } from '../services/encryption';
@@ -106,7 +106,7 @@ deploymentSecretRoutes.put(
     const name = c.req.param('name');
     const userId = getUserId(c);
     const db = drizzle(c.env.DATABASE, { schema });
-    await requireOwnedProject(db, projectId, userId);
+    await requireProjectCapability(db, projectId, userId, 'secret:write');
     await requireOwnedEnvironment(db, envId, projectId);
 
     // Validate secret name format
@@ -203,7 +203,7 @@ deploymentSecretRoutes.delete(
     const name = c.req.param('name');
     const userId = getUserId(c);
     const db = drizzle(c.env.DATABASE, { schema });
-    await requireOwnedProject(db, projectId, userId);
+    await requireProjectCapability(db, projectId, userId, 'secret:write');
     await requireOwnedEnvironment(db, envId, projectId);
 
     const existing = await db
@@ -245,7 +245,7 @@ deploymentSecretRoutes.get(
     const envId = c.req.param('envId');
     const userId = getUserId(c);
     const db = drizzle(c.env.DATABASE, { schema });
-    await requireOwnedProject(db, projectId, userId);
+    await requireProjectCapability(db, projectId, userId, 'secret:read');
     await requireOwnedEnvironment(db, envId, projectId);
 
     const rows = await db

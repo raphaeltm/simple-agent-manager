@@ -71,7 +71,8 @@ vi.mock('../../../src/middleware/auth', () => ({
 }));
 
 vi.mock('../../../src/middleware/project-auth', () => ({
-  requireOwnedProject: vi.fn().mockResolvedValue(undefined),
+  requireProjectAccess: vi.fn().mockResolvedValue(undefined),
+  requireProjectCapability: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('../../../src/middleware/error', () => ({

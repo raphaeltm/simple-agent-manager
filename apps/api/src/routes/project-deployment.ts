@@ -17,9 +17,9 @@ import { extractBearerToken } from '../lib/auth-helpers';
 import { log } from '../lib/logger';
 import { expectJsonRecord, maybeJsonRecord, readResponseJson } from '../lib/runtime-validation';
 import { ulid } from '../lib/ulid';
-import { getUserId,requireApproved, requireAuth } from '../middleware/auth';
+import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
-import { requireOwnedProject } from '../middleware/project-auth';
+import { requireProjectCapability } from '../middleware/project-auth';
 import {
   checkRateLimit,
   createRateLimitKey,
@@ -62,9 +62,9 @@ projectDeploymentRoutes.get(
       throw errors.badRequest('Google OAuth is not configured on this SAM instance');
     }
 
-    // Verify project ownership
+    // Verify project infrastructure-management capability.
     const db = drizzle(c.env.DATABASE, { schema });
-    await requireOwnedProject(db, projectId, userId);
+    await requireProjectCapability(db, projectId, userId, 'infra:manage');
 
     // Generate CSRF state token with project context
     const state = crypto.randomUUID();
@@ -109,7 +109,7 @@ projectDeploymentRoutes.get(
     const projectId = c.req.param('id');
     const userId = getUserId(c);
     const db = drizzle(c.env.DATABASE, { schema });
-    await requireOwnedProject(db, projectId, userId);
+    await requireProjectCapability(db, projectId, userId, 'infra:manage');
 
     const kvKey = `gcp-deploy-oauth-result:${userId}:${projectId}`;
     const handle = await c.env.KV.get(kvKey);
@@ -142,7 +142,7 @@ projectDeploymentRoutes.post(
     const projectId = c.req.param('id');
     const userId = getUserId(c);
     const db = drizzle(c.env.DATABASE, { schema });
-    await requireOwnedProject(db, projectId, userId);
+    await requireProjectCapability(db, projectId, userId, 'infra:manage');
 
     const body = c.req.valid('json');
 
@@ -173,7 +173,7 @@ projectDeploymentRoutes.post(
     const projectId = c.req.param('id');
     const userId = getUserId(c);
     const db = drizzle(c.env.DATABASE, { schema });
-    await requireOwnedProject(db, projectId, userId);
+    await requireProjectCapability(db, projectId, userId, 'infra:manage');
 
     const body = c.req.valid('json');
 
@@ -259,7 +259,7 @@ projectDeploymentRoutes.get(
     const projectId = c.req.param('id');
     const userId = getUserId(c);
     const db = drizzle(c.env.DATABASE, { schema });
-    await requireOwnedProject(db, projectId, userId);
+    await requireProjectCapability(db, projectId, userId, 'infra:manage');
 
     const rows = await db
       .select()
@@ -299,7 +299,7 @@ projectDeploymentRoutes.delete(
     const projectId = c.req.param('id');
     const userId = getUserId(c);
     const db = drizzle(c.env.DATABASE, { schema });
-    await requireOwnedProject(db, projectId, userId);
+    await requireProjectCapability(db, projectId, userId, 'infra:manage');
 
     await db
       .delete(schema.projectDeploymentCredentials)
@@ -522,10 +522,11 @@ gcpDeployCallbackRoute.get(
 
     const projectId = storedState.projectId;
 
-    // Defense-in-depth: verify the session user owns the project in the database,
-    // even though the KV state was created by an authenticated owner at authorize time
+    // Defense-in-depth: verify the session user can still manage project
+    // infrastructure, even though the KV state was created by an authenticated
+    // actor at authorize time.
     const db = drizzle(c.env.DATABASE, { schema });
-    await requireOwnedProject(db, projectId, sessionUserId);
+    await requireProjectCapability(db, projectId, sessionUserId, 'infra:manage');
 
     const appUrl = `https://app.${c.env.BASE_DOMAIN}/projects/${projectId}/settings`;
 

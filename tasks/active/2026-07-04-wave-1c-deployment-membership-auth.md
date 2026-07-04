@@ -30,11 +30,11 @@ Deployment and infrastructure project routes still gate project access through `
 
 ## Implementation Checklist
 
-- [ ] Replace `requireOwnedProject()` imports and calls in the eight scoped route files with `requireProjectAccess()` or `requireProjectCapability()` using route-appropriate capabilities.
-- [ ] Preserve current `userId` usage for created-by/audit fields, OAuth state identity, deployment provisioning, image resolution, node proxy calls, and credential/node service calls.
-- [ ] Update route comments that describe owner-only authorization where touched.
-- [ ] Add focused route tests proving an active admin member can access representative migrated deployment routes and a non-member is rejected.
-- [ ] Run a grep check proving no `requireOwnedProject` usage remains in the eight scoped files.
+- [x] Replace `requireOwnedProject()` imports and calls in the eight scoped route files with `requireProjectAccess()` or `requireProjectCapability()` using route-appropriate capabilities.
+- [x] Preserve current `userId` usage for created-by/audit fields, OAuth state identity, deployment provisioning, image resolution, node proxy calls, and credential/node service calls.
+- [x] Update route comments that describe owner-only authorization where touched.
+- [x] Add focused route tests proving an active admin member can access representative migrated deployment routes and a non-member is rejected.
+- [x] Run a grep check proving no `requireOwnedProject` usage remains in the eight scoped files.
 - [ ] Run relevant API/unit tests and broader quality gates required by `/do`.
 - [ ] Run specialist reviews required for API/auth/credential-sensitive changes.
 - [ ] Open PR for `sam/wave-1c-migrate-deployment-01kwpm`, wait for CI, perform required staging verification if not blocked, and merge if gates pass.

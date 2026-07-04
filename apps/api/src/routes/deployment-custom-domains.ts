@@ -2,8 +2,8 @@
  * Custom domain routes for deployment public routes (v1).
  *
  * Scoped under /api/projects/:projectId/environments/:envId/custom-domains.
- * Auth: session cookie + project ownership (browser CRUD — NOT a VM-agent
- * callback, so standard requireAuth/requireApproved/requireOwnedProject apply).
+ * Auth: session cookie + active project membership/capabilities (browser CRUD
+ * — NOT a VM-agent callback, so standard session auth applies).
  *
  * A user attaches their own subdomain (CNAME) to an existing public route of a
  * deployment environment. SAM does NOT create the DNS record — the user points
@@ -24,7 +24,7 @@ import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
 import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
-import { requireOwnedProject } from '../middleware/project-auth';
+import { requireProjectAccess, requireProjectCapability } from '../middleware/project-auth';
 import { jsonValidator } from '../schemas';
 import { getEnvironmentPublicRouteTargets } from '../services/deployment-custom-domains';
 import { verifyCustomDomainTarget } from '../services/deployment-domain-verify';
@@ -166,7 +166,7 @@ deploymentCustomDomainRoutes.post(
     const envId = c.req.param('envId');
     const userId = getUserId(c);
     const db = drizzle(c.env.DATABASE, { schema });
-    await requireOwnedProject(db, projectId, userId);
+    await requireProjectCapability(db, projectId, userId, 'deployment:manage');
     await requireEnvironment(db, projectId, envId);
 
     const { service, port, hostname } = c.req.valid('json');
@@ -235,7 +235,7 @@ deploymentCustomDomainRoutes.get(
     const envId = c.req.param('envId');
     const userId = getUserId(c);
     const db = drizzle(c.env.DATABASE, { schema });
-    await requireOwnedProject(db, projectId, userId);
+    await requireProjectAccess(db, projectId, userId);
     await requireEnvironment(db, projectId, envId);
 
     const [rows, routes] = await Promise.all([
@@ -265,7 +265,7 @@ deploymentCustomDomainRoutes.post(
     const domainId = c.req.param('domainId');
     const userId = getUserId(c);
     const db = drizzle(c.env.DATABASE, { schema });
-    await requireOwnedProject(db, projectId, userId);
+    await requireProjectCapability(db, projectId, userId, 'deployment:manage');
     const environment = await requireEnvironment(db, projectId, envId);
 
     const [domain] = await db
@@ -349,7 +349,7 @@ deploymentCustomDomainRoutes.delete(
     const domainId = c.req.param('domainId');
     const userId = getUserId(c);
     const db = drizzle(c.env.DATABASE, { schema });
-    await requireOwnedProject(db, projectId, userId);
+    await requireProjectCapability(db, projectId, userId, 'deployment:manage');
     await requireEnvironment(db, projectId, envId);
 
     const [domain] = await db

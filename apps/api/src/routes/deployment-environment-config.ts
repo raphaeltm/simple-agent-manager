@@ -8,7 +8,7 @@ import type { Env } from '../env';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
-import { requireOwnedProject } from '../middleware/project-auth';
+import { requireProjectCapability } from '../middleware/project-auth';
 import { rateLimitCredentialUpdate } from '../middleware/rate-limit';
 import {
   buildDeploymentEnvironmentConfigResponse,
@@ -66,7 +66,7 @@ deploymentEnvironmentConfigRoutes.get(
     const userId = getUserId(c);
     const db = drizzle(c.env.DATABASE, { schema });
 
-    await requireOwnedProject(db, projectId, userId);
+    await requireProjectCapability(db, projectId, userId, 'secret:read');
     await requireOwnedEnvironment(db, envId, projectId);
 
     return c.json(await buildDeploymentEnvironmentConfigResponse(db, envId));
@@ -86,7 +86,7 @@ deploymentEnvironmentConfigRoutes.post(
     const body = parseConfigRequest(await c.req.json());
     const limits = getRuntimeLimits(c.env);
 
-    await requireOwnedProject(db, projectId, userId);
+    await requireProjectCapability(db, projectId, userId, 'secret:write');
     await requireOwnedEnvironment(db, envId, projectId);
 
     const envKey = body.key.trim();
@@ -163,7 +163,7 @@ deploymentEnvironmentConfigRoutes.delete(
       throw errors.badRequest('envKey must match [A-Za-z_][A-Za-z0-9_]*');
     }
 
-    await requireOwnedProject(db, projectId, userId);
+    await requireProjectCapability(db, projectId, userId, 'secret:write');
     await requireOwnedEnvironment(db, envId, projectId);
     await deleteDeploymentEnvironmentConfigVar(db, envId, envKey);
 
