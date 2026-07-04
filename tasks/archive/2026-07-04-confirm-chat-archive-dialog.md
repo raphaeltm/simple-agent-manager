@@ -66,6 +66,7 @@ Selected direction: variant 1. It keeps the safety behavior attached to the dest
 - `pnpm lint && pnpm typecheck && pnpm test && pnpm build` — passed; full monorepo validation completed successfully.
 - `$task-completion-validator` — passed; research findings, checked checklist items, acceptance criteria, tests, UI data path, and multi-resource checks match the branch diff.
 - Post-rebase CI note: latest `main` introduced an 806-line `apps/api/src/scheduled/stuck-tasks.ts` merge-checkout file-size failure unrelated to this UI fix. Added the checker-supported `FILE SIZE EXCEPTION` marker as a comment-only CI unblock and verified `pnpm quality:file-sizes` passes.
+- Current-head staging deploy `28713170558` passed for `b95be238cb1185e862b288551e57aa9007e4212c`. `https://app.sammy.party` served the branch bundle and `PLAYWRIGHT_BASE_URL=https://app.sammy.party npx playwright test tests/playwright/completion-dock-audit.spec.ts --project="iPhone SE (375x667)" --project="Desktop (1280x800)"` passed 16/16. Authenticated dashboard/project/settings regression also passed with no browser console/page errors.
 
 ## References
 
