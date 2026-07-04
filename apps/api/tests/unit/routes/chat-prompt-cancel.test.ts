@@ -247,6 +247,26 @@ describe('POST /sessions/:sessionId/prompt', () => {
     expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
   });
 
+  it('does not let an admin member prompt the project owner session', async () => {
+    // Project membership grants visibility/write capability, but message
+    // submission still resolves the live workspace by the active creator user.
+    setupDrizzle({
+      workspace: { id: 'ws-owner', nodeId: 'node-1', nodeStatus: 'running', userId: 'owner-user' },
+      agentSession: { id: 'agent-sess-owner' },
+    });
+
+    const response = await postPrompt();
+
+    expect(mocks.requireProjectCapability).toHaveBeenCalledWith(
+      expect.anything(),
+      'proj-1',
+      'user-1',
+      'task:write'
+    );
+    expect(response.status).toBe(404);
+    expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
+  });
+
   it('rejects a workspace row belonging to another project (404, no prompt sent)', async () => {
     setupDrizzle({
       workspace: { id: 'ws-1', nodeId: 'node-1', nodeStatus: 'running', projectId: 'other-proj' },
