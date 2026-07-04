@@ -34,6 +34,37 @@ import {
   type McpTokenData,
 } from './_helpers';
 
+type TaskSearchRow = {
+  id: string;
+  title: string;
+  status: string;
+  priority: number;
+  description: string | null;
+  outputBranch: string | null;
+  outputPrUrl: string | null;
+  outputSummary: string | null;
+  updatedAt: string;
+};
+
+function truncateSnippet(value: string | null, maxLength: number): string | null {
+  if (!value) return null;
+  return value.slice(0, maxLength) + (value.length > maxLength ? '...' : '');
+}
+
+function toTaskSearchResult(task: TaskSearchRow, snippetLength: number) {
+  return {
+    id: task.id,
+    title: task.title,
+    status: task.status,
+    priority: task.priority,
+    descriptionSnippet: truncateSnippet(task.description, snippetLength),
+    outputBranch: task.outputBranch,
+    outputPrUrl: task.outputPrUrl,
+    outputSummary: truncateSnippet(task.outputSummary, snippetLength),
+    updatedAt: task.updatedAt,
+  };
+}
+
 export async function handleUpdateTaskStatus(
   requestId: string | number | null,
   params: Record<string, unknown>,
@@ -114,7 +145,8 @@ export async function handleUpdateTaskStatus(
       ]);
       const trimmedMessage = message.trim();
       const maxFullBodyLength =
-        parseInt(env.NOTIFICATION_FULL_BODY_LENGTH || '') || DEFAULT_NOTIFICATION_FULL_BODY_LENGTH;
+        Number.parseInt(env.NOTIFICATION_FULL_BODY_LENGTH || '', 10) ||
+        DEFAULT_NOTIFICATION_FULL_BODY_LENGTH;
       await notificationService.notifyProgress(env, tokenData.userId, {
         projectId: tokenData.projectId,
         projectName,
@@ -499,21 +531,7 @@ export async function handleListTasks(
   tasks = tasks.slice(0, limit);
 
   const snippetLen = limits.taskDescriptionSnippetLength;
-  const result = tasks.map((t) => ({
-    id: t.id,
-    title: t.title,
-    status: t.status,
-    priority: t.priority,
-    descriptionSnippet: t.description
-      ? t.description.slice(0, snippetLen) + (t.description.length > snippetLen ? '...' : '')
-      : null,
-    outputBranch: t.outputBranch,
-    outputPrUrl: t.outputPrUrl,
-    outputSummary: t.outputSummary
-      ? t.outputSummary.slice(0, snippetLen) + (t.outputSummary.length > snippetLen ? '...' : '')
-      : null,
-    updatedAt: t.updatedAt,
-  }));
+  const result = tasks.map((task) => toTaskSearchResult(task, snippetLen));
 
   return jsonRpcSuccess(requestId, {
     content: [
@@ -636,21 +654,7 @@ export async function handleSearchTasks(
     .limit(searchLimit);
 
   const snippetLen = limits.taskDescriptionSnippetLength;
-  const result = rows.map((t) => ({
-    id: t.id,
-    title: t.title,
-    status: t.status,
-    priority: t.priority,
-    descriptionSnippet: t.description
-      ? t.description.slice(0, snippetLen) + (t.description.length > snippetLen ? '...' : '')
-      : null,
-    outputBranch: t.outputBranch,
-    outputPrUrl: t.outputPrUrl,
-    outputSummary: t.outputSummary
-      ? t.outputSummary.slice(0, snippetLen) + (t.outputSummary.length > snippetLen ? '...' : '')
-      : null,
-    updatedAt: t.updatedAt,
-  }));
+  const result = rows.map((task) => toTaskSearchResult(task, snippetLen));
 
   return jsonRpcSuccess(requestId, {
     content: [
