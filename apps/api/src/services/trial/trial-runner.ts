@@ -133,7 +133,8 @@ export async function startDiscoveryAgent(
     opts.projectId,
     opts.workspaceId,
     opts.sessionTopic ?? 'Exploring repository',
-    null /* taskId */
+    null /* taskId */,
+    null
   );
 
   // ACP session — represents the agent run in the workspace.

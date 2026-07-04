@@ -415,7 +415,8 @@ submitRoutes.post('/submit', requireAuth(), requireApproved(), jsonValidator(Sub
       projectId,
       null, // workspaceId — linked later by TaskRunner DO when workspace is created
       taskTitle,
-      taskId
+      taskId,
+      userId
     );
 
     // If this is a forked task, persist the context summary as a system message first.

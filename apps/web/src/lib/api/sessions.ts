@@ -31,6 +31,15 @@ export interface ChatSessionListItem {
   id: string;
   workspaceId: string | null;
   taskId: string | null;
+  createdByUserId?: string | null;
+  createdBy?: {
+    id: string;
+    name: string | null;
+    email: string | null;
+    image: string | null;
+    avatarUrl: string | null;
+  } | null;
+  isMine?: boolean;
   topic: string | null;
   status: string;
   messageCount: number;
@@ -121,12 +130,13 @@ export interface ChatMessagesListResponse {
 
 export async function listChatSessions(
   projectId: string,
-  params: { status?: string; limit?: number; offset?: number } = {}
+  params: { status?: string; limit?: number; offset?: number; scope?: 'my' | 'all' } = {}
 ): Promise<ChatSessionListResponse> {
   const searchParams = new URLSearchParams();
   if (params.status) searchParams.set('status', params.status);
   if (params.limit !== undefined) searchParams.set('limit', String(params.limit));
   if (params.offset !== undefined) searchParams.set('offset', String(params.offset));
+  if (params.scope) searchParams.set('scope', params.scope);
 
   const qs = searchParams.toString();
   const endpoint = qs

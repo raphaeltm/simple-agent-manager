@@ -18,17 +18,17 @@ Shared project authorization now allows active project members to read project-s
 
 ## Implementation Checklist
 
-- [ ] Add durable ProjectData creator attribution for chat sessions (`created_by_user_id` or equivalent), including migration, row schema, list/detail mapping, and session-created broadcast payload.
-- [ ] Extend `projectDataService.createSession` and all session creation callers to pass the actor `userId` while preserving existing optional task/workspace/topic behavior.
-- [ ] Add API support for session list filtering by creator (`scope=my|all` or equivalent) and return safe creator metadata for list and detail responses.
-- [ ] Enforce creator-only writes in API routes that submit, cancel, or reset follow-up activity for an existing session. Active non-creator project members must be able to list/view but not write.
-- [ ] Update web API types and request helpers for owner metadata and my/all filtering.
-- [ ] Implement the My sessions / All sessions filter near the existing project-chat search input using the production chat page/components.
-- [ ] Add compact ownership indicators in the sidebar session list and selected session view. Labels should distinguish the current user from other creators without exposing private data beyond safe display metadata.
-- [ ] Replace the composer for non-creator selected sessions with a clear read-only state and an action to start a new/related session.
-- [ ] Add focused API/DO tests for member list/view access, my/all filtering, creator-only prompt submission, and creator submission success.
-- [ ] Add focused web tests for filter behavior, ownership labels, read-only non-creator composer, and mobile usability.
-- [ ] Run local Playwright visual audit for project chat on desktop and mobile with normal, long, empty, many-session, error, and special-character mock data.
+- [x] Add durable ProjectData creator attribution for chat sessions (`created_by_user_id` or equivalent), including migration, row schema, list/detail mapping, and session-created broadcast payload.
+- [x] Extend `projectDataService.createSession` and all session creation callers to pass the actor `userId` while preserving existing optional task/workspace/topic behavior.
+- [x] Add API support for session list filtering by creator (`scope=my|all` or equivalent) and return safe creator metadata for list and detail responses.
+- [x] Enforce creator-only writes in API routes that submit, cancel, or reset follow-up activity for an existing session. Active non-creator project members must be able to list/view but not write.
+- [x] Update web API types and request helpers for owner metadata and my/all filtering.
+- [x] Implement the My sessions / All sessions filter near the existing project-chat search input using the production chat page/components.
+- [x] Add compact ownership indicators in the sidebar session list and selected session view. Labels should distinguish the current user from other creators without exposing private data beyond safe display metadata.
+- [x] Replace the composer for non-creator selected sessions with a clear read-only state and an action to start a new/related session.
+- [x] Add focused API/DO tests for member list/view access, my/all filtering, creator-only prompt submission, and creator submission success.
+- [x] Add focused web tests for filter behavior, ownership labels, read-only non-creator composer, and mobile usability.
+- [x] Run local Playwright visual audit for project chat on desktop and mobile with normal, long, empty, many-session, error, and special-character mock data.
 - [ ] Run required quality gates, specialist validation, staging verification, PR, merge, and production deploy monitoring per `/do`.
 
 ## Acceptance Criteria

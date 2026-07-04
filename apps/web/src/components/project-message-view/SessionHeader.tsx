@@ -80,6 +80,13 @@ function formatAgentType(agentType: string): string {
   return labels[agentType] ?? agentType;
 }
 
+function getCreatorLabel(session: ChatSessionResponse): string | null {
+  if (session.isMine) return 'You';
+  if (!session.createdByUserId) return null;
+  const creator = session.createdBy;
+  return creator?.name?.trim() || creator?.email?.split('@')[0] || 'Member';
+}
+
 /** Human-readable task mode label. */
 function formatTaskMode(mode: string): string {
   return mode === 'conversation' ? 'Conversation' : 'Task';
@@ -229,6 +236,7 @@ export function SessionHeader({
   }, [publicPorts.enabled, workspace]);
 
   const sessionTitle = session.topic ? stripMarkdown(session.topic) : `Chat ${session.id.slice(0, 8)}`;
+  const creatorLabel = getCreatorLabel(session);
   const sortedPorts = detectedPorts.slice().sort((a, b) => a.port - b.port);
   const firstPort = sortedPorts[0];
   const extraPortCount = Math.max(0, sortedPorts.length - 1);
@@ -308,6 +316,18 @@ export function SessionHeader({
           </span>
 
           {workspace && <WorkspaceProfileBadge workspace={workspace} />}
+
+          {creatorLabel && (
+            <span
+              className={`inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0 ${
+                session.isMine ? 'text-fg-secondary bg-surface' : 'text-fg-muted bg-surface'
+              }`}
+              title={session.isMine ? 'Created by you' : `Created by ${creatorLabel}`}
+            >
+              <User2 size={10} aria-hidden="true" />
+              <span>{session.isMine ? 'Your session' : creatorLabel}</span>
+            </span>
+          )}
 
           {firstPort && (
             <a

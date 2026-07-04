@@ -67,14 +67,14 @@ export class ProjectData extends DurableObject<Env> {
     this.cachedProjectId = projectId;
   }
 
-  async createSession(workspaceId: string | null, topic: string | null, taskId: string | null = null): Promise<string> {
-    const { id, now } = sessions.createSession(this.sql, this.env, workspaceId, topic, taskId);
+  async createSession(workspaceId: string | null, topic: string | null, taskId: string | null = null, createdByUserId: string | null = null): Promise<string> {
+    const { id, now } = sessions.createSession(this.sql, this.env, workspaceId, topic, taskId, createdByUserId);
     if (workspaceId) {
       this.recalculateAlarm().catch((err) => log.warn('schedule_workspace_idle_alarm_failed', { workspaceId, ...serializeError(err) }));
     }
-    activity.recordActivityEventInternal(this.sql, 'session.started', 'system', null, workspaceId, id, taskId, null);
+    activity.recordActivityEventInternal(this.sql, 'session.started', createdByUserId ? 'user' : 'system', createdByUserId, workspaceId, id, taskId, null);
     this.scheduleSummarySync();
-    this.broadcastEvent('session.created', { id, workspaceId, taskId, topic, status: 'active', messageCount: 0, createdAt: now });
+    this.broadcastEvent('session.created', { id, workspaceId, taskId, createdByUserId, topic, status: 'active', messageCount: 0, createdAt: now });
     return id;
   }
 
@@ -134,8 +134,8 @@ export class ProjectData extends DurableObject<Env> {
     this.broadcastEvent('session.updated', { sessionId, workspaceId }, sessionId);
   }
 
-  async listSessions(status: string | null, limit: number = 20, offset: number = 0, taskId: string | null = null): Promise<{ sessions: Record<string, unknown>[]; total: number }> {
-    const result = sessions.listSessions(this.sql, status, limit, offset, taskId);
+  async listSessions(status: string | null, limit: number = 20, offset: number = 0, taskId: string | null = null, createdByUserId: string | null = null): Promise<{ sessions: Record<string, unknown>[]; total: number }> {
+    const result = sessions.listSessions(this.sql, status, limit, offset, taskId, createdByUserId);
     return { sessions: result.sessions.map((s) => this.addBaseDomain(s)), total: result.total };
   }
 

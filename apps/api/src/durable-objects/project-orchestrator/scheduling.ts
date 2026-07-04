@@ -274,7 +274,7 @@ async function autoDispatchSchedulableTasks(
 
       // Create chat session for the task
       const sessionId = await projectDataService.createSession(
-        env, projectId, null, task.title, task.id,
+        env, projectId, null, task.title, task.id, task.user_id,
       );
 
       if (task.description) {

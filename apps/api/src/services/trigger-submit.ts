@@ -225,7 +225,8 @@ export async function submitTriggeredTask(
       input.projectId,
       null, // workspaceId — linked later by TaskRunner DO
       taskTitle,
-      taskId
+      taskId,
+      input.userId
     );
 
     // Persist the rendered prompt as the initial user message

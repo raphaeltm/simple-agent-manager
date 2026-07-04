@@ -7,6 +7,7 @@ import type { ChatSessionListItem } from '../../lib/api';
 import { isStaleSession } from '../../lib/chat-session-utils';
 import { stripMarkdown } from '../../lib/text-utils';
 import { SessionList } from './SessionList';
+import type { SessionScope } from './useProjectChatState';
 import type { TaskInfo } from './useTaskGroups';
 
 export function MobileSessionDrawer({
@@ -20,6 +21,8 @@ export function MobileSessionDrawer({
   onRefresh,
   taskInfoMap = new Map(),
   onShowHierarchy,
+  sessionScope,
+  onSessionScopeChange,
 }: {
   sessions: ChatSessionListItem[];
   selectedSessionId: string | null;
@@ -31,6 +34,8 @@ export function MobileSessionDrawer({
   onRefresh?: () => void;
   taskInfoMap?: Map<string, TaskInfo>;
   onShowHierarchy: (taskId: string) => void;
+  sessionScope: SessionScope;
+  onSessionScopeChange: (scope: SessionScope) => void;
 }) {
   const [mobileSearch, setMobileSearch] = useState('');
   const [mobileShowStale, setMobileShowStale] = useState(false);
@@ -56,7 +61,10 @@ export function MobileSessionDrawer({
     if (!mobileSearch.trim()) return recent;
     const q = mobileSearch.toLowerCase();
     return recent.filter(
-      (s) => (s.topic && stripMarkdown(s.topic).toLowerCase().includes(q)) || s.id.includes(q),
+      (s) => (s.topic && stripMarkdown(s.topic).toLowerCase().includes(q))
+        || s.id.includes(q)
+        || (s.createdBy?.name?.toLowerCase().includes(q) ?? false)
+        || (s.createdBy?.email?.toLowerCase().includes(q) ?? false),
     );
   }, [recent, mobileSearch]);
 
@@ -64,7 +72,10 @@ export function MobileSessionDrawer({
     if (!mobileSearch.trim()) return stale;
     const q = mobileSearch.toLowerCase();
     return stale.filter(
-      (s) => (s.topic && stripMarkdown(s.topic).toLowerCase().includes(q)) || s.id.includes(q),
+      (s) => (s.topic && stripMarkdown(s.topic).toLowerCase().includes(q))
+        || s.id.includes(q)
+        || (s.createdBy?.name?.toLowerCase().includes(q) ?? false)
+        || (s.createdBy?.email?.toLowerCase().includes(q) ?? false),
     );
   }, [stale, mobileSearch]);
 
@@ -133,7 +144,7 @@ export function MobileSessionDrawer({
         </div>
 
         {/* Search */}
-        <div className="shrink-0 px-2 py-1.5 border-b border-border-default">
+        <div className="shrink-0 px-2 py-1.5 border-b border-border-default space-y-1.5">
           <div className="relative flex items-center">
             <Search size={13} className="absolute left-2 text-fg-muted pointer-events-none" />
             <input
@@ -153,6 +164,23 @@ export function MobileSessionDrawer({
                 <X size={12} />
               </button>
             )}
+          </div>
+          <div className="grid grid-cols-2 gap-1 rounded-md border border-border-default bg-surface/40 p-0.5" aria-label="Session ownership filter">
+            {(['my', 'all'] as const).map((scope) => (
+              <button
+                key={scope}
+                type="button"
+                onClick={() => onSessionScopeChange(scope)}
+                aria-pressed={sessionScope === scope}
+                className={`rounded-sm px-2 py-1 text-[11px] font-medium transition-colors ${
+                  sessionScope === scope
+                    ? 'bg-accent/15 text-accent'
+                    : 'bg-transparent text-fg-muted hover:text-fg-primary'
+                }`}
+              >
+                {scope === 'my' ? 'My sessions' : 'All sessions'}
+              </button>
+            ))}
           </div>
         </div>
 

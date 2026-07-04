@@ -58,6 +58,7 @@ export interface PendingDerived {
 }
 
 export type ProfileWizardStep = 'agent' | 'work-type' | 'vm-size' | 'name';
+export type SessionScope = 'my' | 'all';
 
 export interface ProfileWizardState {
   open: boolean;
@@ -105,6 +106,7 @@ export function useProjectChatState() {
   // Sidebar filtering
   const [searchQuery, setSearchQuery] = useState('');
   const [showStale, setShowStale] = useState(false);
+  const [sessionScope, setSessionScope] = useState<SessionScope>('all');
 
   // Track explicit "new chat" intent so auto-select doesn't override it
   const newChatIntentRef = useRef(false);
@@ -220,7 +222,10 @@ export function useProjectChatState() {
     if (!searchQuery.trim()) return recentSessions;
     const q = searchQuery.toLowerCase();
     return recentSessions.filter(
-      (s) => (s.topic && stripMarkdown(s.topic).toLowerCase().includes(q)) || s.id.includes(q),
+      (s) => (s.topic && stripMarkdown(s.topic).toLowerCase().includes(q))
+        || s.id.includes(q)
+        || (s.createdBy?.name?.toLowerCase().includes(q) ?? false)
+        || (s.createdBy?.email?.toLowerCase().includes(q) ?? false),
     );
   }, [recentSessions, searchQuery]);
 
@@ -228,7 +233,10 @@ export function useProjectChatState() {
     if (!searchQuery.trim()) return staleSessions;
     const q = searchQuery.toLowerCase();
     return staleSessions.filter(
-      (s) => (s.topic && stripMarkdown(s.topic).toLowerCase().includes(q)) || s.id.includes(q),
+      (s) => (s.topic && stripMarkdown(s.topic).toLowerCase().includes(q))
+        || s.id.includes(q)
+        || (s.createdBy?.name?.toLowerCase().includes(q) ?? false)
+        || (s.createdBy?.email?.toLowerCase().includes(q) ?? false),
     );
   }, [staleSessions, searchQuery]);
 
@@ -312,7 +320,7 @@ export function useProjectChatState() {
   const loadSessions = useCallback(async () => {
     if (hasLoadedRef.current) setIsRefreshing(true);
     try {
-      const sessionResult = await listChatSessions(projectId, { limit: CHAT_SESSION_LIST_LIMIT });
+      const sessionResult = await listChatSessions(projectId, { limit: CHAT_SESSION_LIST_LIMIT, scope: sessionScope });
       setSessions(sessionResult.sessions);
       hasLoadedRef.current = true;
 
@@ -331,7 +339,7 @@ export function useProjectChatState() {
     } finally {
       setIsRefreshing(false);
     }
-  }, [projectId]);
+  }, [projectId, sessionScope]);
 
   const { connectionState } = useProjectWebSocket({
     projectId,
@@ -710,7 +718,7 @@ export function useProjectChatState() {
     sessions, loading, isRefreshing, hasSessions, showNewChatInput,
     loadSessions, realtimeDegraded,
     sidebarOpen, setSidebarOpen,
-    searchQuery, setSearchQuery, showStale, setShowStale,
+    searchQuery, setSearchQuery, showStale, setShowStale, sessionScope, setSessionScope,
     filteredRecent, filteredStale, effectiveShowStale, taskTitleMap, taskInfoMap,
     message, setMessage, submitting, submitError,
     handleSubmit, handleNewChat, handleSelect,

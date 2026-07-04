@@ -50,3 +50,33 @@ export function FollowUpInput({
     </div>
   );
 }
+
+export function ReadOnlyFollowUp({
+  ownerLabel,
+  onNewChat,
+}: {
+  ownerLabel: string;
+  onNewChat?: () => void;
+}) {
+  return (
+    <div className="relative shrink-0 glass-chrome border-x-0 border-b-0 px-4 py-3 before:content-[''] before:absolute before:top-0 before:left-[15%] before:right-[15%] before:h-px before:bg-[radial-gradient(ellipse_at_center,rgba(34,197,94,0.18)_0%,transparent_70%)] before:pointer-events-none">
+      <div className="flex items-center gap-3 rounded-md border border-border-default bg-surface/50 px-3 py-2">
+        <div className="min-w-0 flex-1">
+          <div className="text-xs font-medium text-fg-primary">Read-only session</div>
+          <div className="text-xs text-fg-muted truncate">
+            Only {ownerLabel} can send messages here.
+          </div>
+        </div>
+        {onNewChat && (
+          <button
+            type="button"
+            onClick={onNewChat}
+            className="shrink-0 rounded-md border border-accent/40 bg-accent/10 px-3 py-1.5 text-xs font-medium text-accent hover:bg-accent/15 transition-colors"
+          >
+            New chat
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}

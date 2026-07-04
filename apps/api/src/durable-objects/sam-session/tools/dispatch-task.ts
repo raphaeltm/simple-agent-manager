@@ -354,6 +354,7 @@ export async function dispatchTask(
       null,
       taskTitle,
       taskId,
+      ctx.userId,
     );
 
     await projectDataService.persistMessage(

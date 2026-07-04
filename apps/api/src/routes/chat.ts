@@ -191,6 +191,91 @@ function getMessageOrder(rawOrder?: string): 'asc' | 'desc' {
   throw errors.badRequest('order must be asc or desc');
 }
 
+type SessionCreator = {
+  id: string;
+  name: string | null;
+  email: string | null;
+  image: string | null;
+  avatarUrl: string | null;
+};
+
+async function buildCreatorMap(
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  sessions: Array<Record<string, unknown>>
+): Promise<Map<string, SessionCreator>> {
+  const creatorIds = [
+    ...new Set(
+      sessions
+        .map((session) => session.createdByUserId)
+        .filter((id): id is string => typeof id === 'string' && id.length > 0)
+    ),
+  ];
+
+  if (creatorIds.length === 0) return new Map();
+
+  const rows = await db
+    .select({
+      id: schema.users.id,
+      name: schema.users.name,
+      email: schema.users.email,
+      image: schema.users.image,
+      avatarUrl: schema.users.avatarUrl,
+    })
+    .from(schema.users)
+    .where(inArray(schema.users.id, creatorIds));
+
+  return new Map(rows.map((row) => [row.id, row]));
+}
+
+function attachCreator(
+  session: Record<string, unknown>,
+  creators: Map<string, SessionCreator>,
+  currentUserId: string
+): Record<string, unknown> {
+  const creatorId = typeof session.createdByUserId === 'string' ? session.createdByUserId : null;
+  const creator = creatorId ? creators.get(creatorId) ?? null : null;
+  return {
+    ...session,
+    createdBy: creator,
+    isMine: creatorId === currentUserId,
+  };
+}
+
+async function enrichSessionsWithCreators(
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  sessions: Array<Record<string, unknown>>,
+  currentUserId: string
+): Promise<Array<Record<string, unknown>>> {
+  const creators = await buildCreatorMap(db, sessions);
+  return sessions.map((session) => attachCreator(session, creators, currentUserId));
+}
+
+function getSessionListScope(rawScope?: string): 'my' | 'all' {
+  if (!rawScope) return 'all';
+  const scope = rawScope.trim().toLowerCase();
+  if (scope === 'my' || scope === 'all') return scope;
+  throw errors.badRequest('scope must be my or all');
+}
+
+async function requireSessionCreator(
+  env: Env,
+  projectId: string,
+  sessionId: string,
+  userId: string
+): Promise<Record<string, unknown>> {
+  const session = await projectDataService.getSession(env, projectId, sessionId);
+  if (!session) {
+    throw errors.notFound('Chat session');
+  }
+
+  const creatorId = typeof session.createdByUserId === 'string' ? session.createdByUserId : null;
+  if (creatorId !== userId) {
+    throw errors.forbidden('Only the session creator can write to this chat session');
+  }
+
+  return session;
+}
+
 /**
  * GET /api/projects/:projectId/sessions
  * List chat sessions for a project.
@@ -205,10 +290,23 @@ chatRoutes.get('/', async (c) => {
   const status = c.req.query('status') || null;
   const limit = Math.min(parseInt(c.req.query('limit') || '20', 10), 100);
   const offset = parseInt(c.req.query('offset') || '0', 10);
+  const scope = getSessionListScope(c.req.query('scope'));
+  const createdByUserId = scope === 'my' ? userId : null;
 
-  const result = await projectDataService.listSessions(c.env, projectId, status, limit, offset);
+  const result = await projectDataService.listSessions(
+    c.env,
+    projectId,
+    status,
+    limit,
+    offset,
+    null,
+    createdByUserId
+  );
 
-  return c.json(result);
+  return c.json({
+    ...result,
+    sessions: await enrichSessionsWithCreators(db, result.sessions, userId),
+  });
 });
 
 /**
@@ -226,7 +324,7 @@ chatRoutes.post('/', async (c) => {
   const workspaceId = body.workspaceId?.trim() || null;
   const topic = body.topic?.trim() || null;
 
-  const sessionId = await chatPersistence.createChatSession(c.env, projectId, workspaceId, topic);
+  const sessionId = await chatPersistence.createChatSession(c.env, projectId, workspaceId, topic, userId);
 
   return c.json({ id: sessionId }, 201);
 });
@@ -367,7 +465,7 @@ chatRoutes.get('/:sessionId', async (c) => {
   });
 
   return c.json({
-    session: { ...session, agentSessionId, agentType, task },
+    session: (await enrichSessionsWithCreators(db, [{ ...session, agentSessionId, agentType, task }], userId))[0],
     messages: messagesResult.messages,
     hasMore: messagesResult.hasMore,
     state,
@@ -475,6 +573,7 @@ chatRoutes.post('/:sessionId/idle-reset', async (c) => {
   const db = drizzle(c.env.DATABASE, { schema });
 
   await requireProjectCapability(db, projectId, userId, 'task:write');
+  await requireSessionCreator(c.env, projectId, sessionId, userId);
 
   const result = await projectDataService.resetIdleCleanup(c.env, projectId, sessionId);
 
@@ -493,6 +592,7 @@ chatRoutes.post('/:sessionId/prompt', async (c) => {
   const db = drizzle(c.env.DATABASE, { schema });
 
   await requireProjectCapability(db, projectId, userId, 'task:write');
+  await requireSessionCreator(c.env, projectId, sessionId, userId);
 
   const body = await parseOptionalBody(c.req.raw, SendChatMessageSchema, {});
   const content = body.content?.trim();
@@ -541,6 +641,7 @@ chatRoutes.post('/:sessionId/cancel', async (c) => {
   const db = drizzle(c.env.DATABASE, { schema });
 
   await requireProjectCapability(db, projectId, userId, 'task:write');
+  await requireSessionCreator(c.env, projectId, sessionId, userId);
 
   // Resolve the live workspace + running agent session, tenant-scoped and
   // fail-fast (see resolveLiveAgentSessionForChat).

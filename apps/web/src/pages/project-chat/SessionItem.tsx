@@ -6,6 +6,7 @@ import {
   ListTodo,
   Loader2,
   MessageSquare,
+  User2,
   XCircle,
 } from 'lucide-react';
 import type { ReactNode } from 'react';
@@ -21,6 +22,13 @@ import {
 import { stripMarkdown } from '../../lib/text-utils';
 
 export type SessionItemVariant = 'default' | 'group-parent' | 'group-child';
+
+function getCreatorLabel(session: ChatSessionResponse): string | null {
+  if (session.isMine) return 'You';
+  if (!session.createdByUserId) return null;
+  const creator = session.createdBy;
+  return creator?.name?.trim() || creator?.email?.split('@')[0] || 'Member';
+}
 
 // ---------------------------------------------------------------------------
 // Attention state -> icon + color mapping (uses design tokens)
@@ -76,6 +84,7 @@ export function SessionItem({
 
   const StatusIcon = iconConfig.icon;
   const ModeIcon = mode === 'task' ? ListTodo : MessageSquare;
+  const creatorLabel = getCreatorLabel(session);
 
   // Font sizing: parent 13px/500, child 12px/400, default unchanged
   const titleStyle: React.CSSProperties = isChild
@@ -155,6 +164,18 @@ export function SessionItem({
                 <ModeIcon size={10} />
                 <span>{mode === 'task' ? 'Task' : 'Chat'}</span>
               </span>
+              {creatorLabel && (
+                <>
+                  <span>&middot;</span>
+                  <span
+                    className={`flex items-center gap-0.5 min-w-0 ${session.isMine ? 'font-medium text-fg-secondary' : 'text-fg-muted'}`}
+                    title={session.isMine ? 'Created by you' : `Created by ${creatorLabel}`}
+                  >
+                    <User2 size={10} className="shrink-0" />
+                    <span className="truncate max-w-[86px]">{creatorLabel}</span>
+                  </span>
+                </>
+              )}
               {/* Attention label for high-priority states */}
               {attentionState === 'needs_input' && (
                 <span className="text-warning-fg font-medium">Needs input</span>

@@ -311,7 +311,9 @@ crudRoutes.post('/', requireAuth(), requireApproved(), jsonValidator(CreateWorks
       c.env,
       linkedProject.id,
       workspaceId,
-      workspaceName
+      workspaceName,
+      null,
+      userId
     );
     await db
       .update(schema.workspaces)
