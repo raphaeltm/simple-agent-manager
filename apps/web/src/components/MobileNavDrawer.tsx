@@ -30,6 +30,7 @@ interface MobileNavDrawerProps {
   infraSection?: InfraSection;
   /** Rendered below Infrastructure in both default and global panels */
   projectListSection?: ReactNode;
+  projectHealthElement?: ReactNode;
   showGlobalNav?: boolean;
   onToggleGlobalNav?: () => void;
 }
@@ -52,6 +53,7 @@ export function MobileNavDrawer({
   projectName,
   infraSection,
   projectListSection,
+  projectHealthElement,
   showGlobalNav,
   onToggleGlobalNav,
 }: MobileNavDrawerProps) {
@@ -183,6 +185,12 @@ export function MobileNavDrawer({
               aria-hidden={(canToggle && showGlobalNav) || undefined}
               inert={canToggle && showGlobalNav ? true : undefined}
             >
+              {projectHealthElement && !showGlobalNav && (
+                <div className="px-5 pb-2">
+                  {projectHealthElement}
+                </div>
+              )}
+
               {(canToggle ? projectItems : navItems).map((item) => {
                 const active = isNavItemActive(item.path, currentPath);
                 return (

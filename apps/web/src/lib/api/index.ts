@@ -312,6 +312,7 @@ export {
   getAccountMap,
   getArtifactsEnabled,
   getProject,
+  getProjectCredentialAttributionHealth,
   getProjectInvitePreview,
   getProjectMembers,
   getProjectRuntimeConfig,

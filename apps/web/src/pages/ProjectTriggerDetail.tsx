@@ -19,6 +19,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
 
 import { ExecutionHistory } from '../components/triggers/ExecutionHistory';
+import { TriggerCredentialWarning } from '../components/triggers/TriggerCredentialWarning';
 import { TriggerForm } from '../components/triggers/TriggerForm';
 import { useToast } from '../hooks/useToast';
 import {
@@ -285,6 +286,12 @@ export function ProjectTriggerDetail() {
           </button>
         </div>
       </div>
+
+      {trigger.credentialAttribution?.hasPersonalWarning && (
+        <div className="mb-6">
+          <TriggerCredentialWarning trigger={trigger} />
+        </div>
+      )}
 
       {/* Summary cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-8">
