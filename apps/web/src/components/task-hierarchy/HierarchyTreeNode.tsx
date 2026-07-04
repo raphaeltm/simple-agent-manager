@@ -11,6 +11,9 @@ import { TreeConnector } from './TreeConnector';
 /** Gap between sibling nodes in px. */
 const SIBLING_GAP = 2;
 
+/** Diameter of the circular expand/collapse chevron button (and leaf spacer). */
+export const CHEVRON_SIZE = 20;
+
 export function HierarchyTreeNode({
   node,
   focusTaskId,
@@ -55,17 +58,31 @@ export function HierarchyTreeNode({
       {showConnector && <TreeConnector isLast={isLast} branchY={branchY} />}
       <div className="flex-1 min-w-0">
         <div ref={nodeRowRef} className="flex items-center gap-1">
-          {hasChildren && (
+          {hasChildren ? (
             <button
               type="button"
               onClick={() => toggleExpanded(node.task.id)}
               className="flex items-center justify-center shrink-0"
-              style={{ ...iconButtonStyle, width: 20, height: 20, borderRadius: 4 }}
+              style={{
+                ...iconButtonStyle,
+                // Neutralize iconButtonStyle's 44px min sizing — without this the
+                // chevron renders 44x44 and pushes parent cards right of their children.
+                width: CHEVRON_SIZE,
+                height: CHEVRON_SIZE,
+                minWidth: CHEVRON_SIZE,
+                minHeight: CHEVRON_SIZE,
+                borderRadius: '50%',
+                border: '1px solid var(--sam-color-border-default)',
+                background: 'var(--sam-color-bg-inset)',
+              }}
               aria-label={effectiveChildrenVisible ? 'Collapse subtasks' : 'Expand subtasks'}
               aria-expanded={effectiveChildrenVisible}
             >
               {effectiveChildrenVisible ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
             </button>
+          ) : (
+            // Spacer keeps leaf cards aligned with expandable siblings' cards.
+            <div style={{ width: CHEVRON_SIZE, flexShrink: 0 }} aria-hidden="true" />
           )}
           <div className="flex-1 min-w-0">
             <HierarchyNodeCard
