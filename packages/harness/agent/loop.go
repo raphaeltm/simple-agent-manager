@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	ctxmgr "github.com/workspace/harness/context"
+	"github.com/workspace/harness/handoff"
 	"github.com/workspace/harness/llm"
 	"github.com/workspace/harness/session"
 	"github.com/workspace/harness/tools"
@@ -78,6 +79,16 @@ type Config struct {
 	SessionStore *session.Store
 	// SessionID is the session to persist messages to. Required if SessionStore is set.
 	SessionID string
+	// HandoffEnabled emits a platform-shaped handoff packet at terminal state.
+	HandoffEnabled bool
+	// HandoffTranscriptPath is included as the transcript artifact ref when set.
+	HandoffTranscriptPath string
+	// HandoffMissionID maps to the platform HandoffPacket missionId.
+	HandoffMissionID string
+	// HandoffFromTaskID maps to the platform HandoffPacket fromTaskId.
+	HandoffFromTaskID string
+	// HandoffToTaskID maps to the platform HandoffPacket toTaskId.
+	HandoffToTaskID *string
 	// InitialMessages, if non-empty, seeds the conversation instead of building
 	// a fresh system+user pair. The new userPrompt is appended as a user message.
 	// This allows callers (e.g. ACP handler) to carry conversation history
@@ -106,11 +117,15 @@ type Result struct {
 	// Callers can feed this back via Config.InitialMessages to continue
 	// the conversation in a subsequent Run() call.
 	Messages []llm.Message
+	// Handoff is the structured terminal session handoff, when enabled.
+	Handoff *handoff.Packet
 }
 
 // Run executes the agent loop: think -> act -> observe, repeating until
 // the model stops calling tools or max turns is reached.
-func Run(ctx context.Context, provider llm.Provider, registry *tools.Registry, log *transcript.Log, cfg Config, userPrompt string) (*Result, error) {
+func Run(ctx context.Context, provider llm.Provider, registry *tools.Registry, log *transcript.Log, cfg Config, userPrompt string) (result *Result, err error) {
+	defer func() { result = emitHandoff(ctx, provider, log, cfg, userPrompt, result) }()
+
 	maxTurns := cfg.MaxTurns
 	if maxTurns <= 0 {
 		maxTurns = 10

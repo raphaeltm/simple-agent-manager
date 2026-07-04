@@ -155,7 +155,8 @@ func (h *Handler) Prompt(ctx context.Context, params acpsdk.PromptRequest) (acps
 		conn:      h.conn,
 		sessionID: params.SessionId,
 	}
-	cfg.Stream = true // OnToken() streams content; suppress duplicate FinalMessage send
+	_, canStream := h.provider.(llm.StreamProvider)
+	cfg.Stream = canStream // OnToken() streams content; suppress duplicate FinalMessage send only when supported.
 
 	// Carry forward conversation history from previous Prompt() calls.
 	h.mu.Lock()
@@ -299,7 +300,7 @@ func (e *acpEventHandler) OnToolEnd(id string, name string, result string, isErr
 	})
 }
 
-func (e *acpEventHandler) OnTurnStart(turn, maxTurns int) {}
+func (e *acpEventHandler) OnTurnStart(turn, maxTurns int)        {}
 func (e *acpEventHandler) OnTurnEnd(turn int, toolCallCount int) {}
 
 // extractText concatenates all text content blocks from the prompt.

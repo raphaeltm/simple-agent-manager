@@ -12,6 +12,7 @@ import (
 
 	acpserver "github.com/workspace/harness/acp"
 	"github.com/workspace/harness/agent"
+	"github.com/workspace/harness/handoff"
 	"github.com/workspace/harness/llm"
 	"github.com/workspace/harness/mcp"
 	"github.com/workspace/harness/prompts"
@@ -28,6 +29,8 @@ func main() {
 		maxTurns         = flag.Int("max-turns", 10, "Maximum agent loop iterations")
 		maxContextTokens = flag.Int("max-context-tokens", 30000, "Maximum context window tokens before compaction")
 		transcriptF      = flag.String("transcript", "", "Path to write transcript JSON")
+		handoffEnabled   = flag.Bool("handoff", true, "Write a SAM HandoffPacket JSON artifact at session end")
+		handoffPath      = flag.String("handoff-path", "", "Path to write handoff JSON (default: sidecar next to transcript, or .sam-harness/handoffs/)")
 		systemPrompt     = flag.String("system", "You are a coding assistant. Use the provided tools to complete tasks.", "System prompt (lowest precedence)")
 		promptFile       = flag.String("prompt-file", "", "Path to a markdown file to use as system prompt (highest precedence)")
 		promptPreset     = flag.String("prompt-preset", "", "Built-in prompt preset: workspace, orchestrator")
@@ -316,19 +319,23 @@ func main() {
 	defer cancel()
 
 	result, err := agent.Run(ctx, provider, registry, log, agent.Config{
-		SystemPrompt:       sysPrompt,
-		MaxTurns:           *maxTurns,
-		MaxContextTokens:   *maxContextTokens,
-		CompactionStrategy: agent.CompactionStrategy(*compactionStrat),
-		WorkerModel:        resolvedWorkerModel,
-		WorkDir:            workDir,
-		Stream:             *stream,
-		PermissionMode:     permMode,
-		PermissionChecker:  tools.AutoApproveChecker{},
-		ParallelTools:      *parallelTools,
-		MaxParallelTools:   *maxParallelTools,
-		SessionStore:       sessionStore,
-		SessionID:          sessionID,
+		SystemPrompt:          sysPrompt,
+		MaxTurns:              *maxTurns,
+		MaxContextTokens:      *maxContextTokens,
+		CompactionStrategy:    agent.CompactionStrategy(*compactionStrat),
+		WorkerModel:           resolvedWorkerModel,
+		WorkDir:               workDir,
+		Stream:                *stream,
+		PermissionMode:        permMode,
+		PermissionChecker:     tools.AutoApproveChecker{},
+		ParallelTools:         *parallelTools,
+		MaxParallelTools:      *maxParallelTools,
+		SessionStore:          sessionStore,
+		SessionID:             sessionID,
+		HandoffEnabled:        *handoffEnabled,
+		HandoffTranscriptPath: *transcriptF,
+		HandoffMissionID:      envOr("SAM_MISSION_ID", ""),
+		HandoffFromTaskID:     envOr("SAM_TASK_ID", ""),
 		ProviderConfig: &agent.ProviderConfig{
 			Name:       *providerName,
 			APIURL:     *apiURL,
@@ -364,6 +371,21 @@ func main() {
 			os.Exit(1)
 		}
 		fmt.Printf("Transcript written to %s (%d events)\n", *transcriptF, log.Len())
+	}
+
+	if *handoffEnabled && result != nil && result.Handoff != nil {
+		path := *handoffPath
+		if path == "" {
+			path = handoff.HandoffPathForTranscript(*transcriptF)
+		}
+		if path == "" {
+			path = filepath.Join(workDir, ".sam-harness", "handoffs", fmt.Sprintf("%d.handoff.json", time.Now().UnixNano()))
+		}
+		if err := handoff.Save(path, *result.Handoff); err != nil {
+			fmt.Fprintf(os.Stderr, "error writing handoff: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("Handoff written to %s\n", path)
 	}
 }
 
@@ -587,4 +609,3 @@ func buildToolRegistry(args acpModeArgs, workDir string) *tools.Registry {
 	}
 	return registry
 }
-
