@@ -1484,6 +1484,13 @@
             "type": "string",
             "nullable": true
           },
+          "completionEvidence": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": true,
+            "nullable": true
+          },
           "errorMessage": {
             "type": "string",
             "nullable": true
@@ -1566,6 +1573,13 @@
           },
           "outputSummary": {
             "type": "string",
+            "nullable": true
+          },
+          "completionEvidence": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": true,
             "nullable": true
           },
           "errorMessage": {
