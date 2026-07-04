@@ -1,5 +1,5 @@
 import { inArray } from 'drizzle-orm';
-import { drizzle } from 'drizzle-orm/d1';
+import type { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
