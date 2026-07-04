@@ -80,7 +80,7 @@ describe('useSessionTimeline', () => {
 
   it('does not fetch events when disabled', () => {
     renderHook(() =>
-      useSessionTimeline('proj-1', 'sess-1', [], false, new Map())
+      useSessionTimeline('proj-1', 'sess-1', [], false)
     );
 
     expect(mockListActivityEvents).not.toHaveBeenCalled();
@@ -99,7 +99,7 @@ describe('useSessionTimeline', () => {
     });
 
     const { result } = renderHook(() =>
-      useSessionTimeline('proj-1', 'sess-1', [], true, new Map())
+      useSessionTimeline('proj-1', 'sess-1', [], true)
     );
 
     // Wait for the fetch to complete
@@ -135,7 +135,7 @@ describe('useSessionTimeline', () => {
     const loadedMessages = [makeMessage('loaded-ui-message', 1000)];
 
     const { result } = renderHook(() =>
-      useSessionTimeline('proj-1', 'sess-1', loadedMessages, true, new Map())
+      useSessionTimeline('proj-1', 'sess-1', loadedMessages, true)
     );
 
     await act(async () => {
@@ -160,7 +160,7 @@ describe('useSessionTimeline', () => {
       });
 
     const { result } = renderHook(() =>
-      useSessionTimeline('proj-1', 'sess-1', [], true, new Map())
+      useSessionTimeline('proj-1', 'sess-1', [], true)
     );
 
     await act(async () => {
@@ -190,7 +190,7 @@ describe('useSessionTimeline', () => {
     });
 
     const { result } = renderHook(() =>
-      useSessionTimeline('proj-1', 'sess-1', [], true, new Map())
+      useSessionTimeline('proj-1', 'sess-1', [], true)
     );
 
     await act(async () => {
@@ -226,7 +226,7 @@ describe('useSessionTimeline', () => {
       });
 
     const { result } = renderHook(() =>
-      useSessionTimeline('proj-1', 'sess-1', [], true, new Map())
+      useSessionTimeline('proj-1', 'sess-1', [], true)
     );
 
     await act(async () => {
@@ -262,10 +262,8 @@ describe('useSessionTimeline', () => {
       hasMore: false,
     });
 
-    const indexMap = new Map([['m1', 0]]);
-
     const { result } = renderHook(() =>
-      useSessionTimeline('proj-1', 'sess-1', [], true, indexMap)
+      useSessionTimeline('proj-1', 'sess-1', [], true)
     );
 
     // Wait for fetch to settle
@@ -287,7 +285,7 @@ describe('useSessionTimeline', () => {
     mockListActivityEvents.mockRejectedValue(new Error('Network error'));
 
     const { result } = renderHook(() =>
-      useSessionTimeline('proj-1', 'sess-1', [], true, new Map())
+      useSessionTimeline('proj-1', 'sess-1', [], true)
     );
 
     // Wait for the rejected promise to settle
@@ -304,7 +302,7 @@ describe('useSessionTimeline', () => {
     mockListActivityEvents.mockResolvedValue({ events: [], hasMore: false });
 
     const { result } = renderHook(() =>
-      useSessionTimeline('proj-1', 'sess-1', [], false, new Map())
+      useSessionTimeline('proj-1', 'sess-1', [], false)
     );
 
     expect(result.current.showContext).toBe(false);

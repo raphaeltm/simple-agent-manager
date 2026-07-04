@@ -99,63 +99,104 @@ a size-capped fallback to pagination only for the rare oversized tail.
 
 ## Implementation checklist
 
-- [ ] shared: add `DEFAULT_CHAT_SESSION_MESSAGE_MAX` in
+- [x] shared: add `DEFAULT_CHAT_SESSION_MESSAGE_MAX` in
       `packages/shared/src/constants/defaults.ts`; export from `constants/index.ts`.
-- [ ] api: add `CHAT_SESSION_MESSAGE_MAX?` to `apps/api/src/env.ts` (+ `.env.example`).
-- [ ] api: refactor `getSessionMessageLimit` in `chat.ts` — unspecified default =
+- [x] api: add `CHAT_SESSION_MESSAGE_MAX?` to `apps/api/src/env.ts` (+ `.env.example`).
+- [x] api: refactor `getSessionMessageLimit` in `chat.ts` — unspecified default =
       `CHAT_SESSION_MESSAGE_LIMIT`/`DEFAULT_CHAT_SESSION_MESSAGE_LIMIT`; max clamp =
       `CHAT_SESSION_MESSAGE_MAX`/`DEFAULT_CHAT_SESSION_MESSAGE_MAX`;
       return `min(requested ?? default, max)`.
-- [ ] web: `useSessionLifecycle.loadSession` requests
+- [x] web: `useSessionLifecycle.loadSession` requests
       `limit: DEFAULT_CHAT_SESSION_MESSAGE_MAX`.
-- [ ] web: poll (`useSessionLifecycle.ts:270`) requests explicit small
+- [x] web: poll (`useSessionLifecycle.ts:270`) requests explicit small
       `limit: DEFAULT_CHAT_SESSION_MESSAGE_LIMIT`.
-- [ ] web: add `loadUntil(timestamp)` to `useSessionLifecycle` (loops `loadMore`
+- [x] web: add `loadUntil(timestamp)` to `useSessionLifecycle` (loops `loadMore`
       while oldest-loaded `createdAt` > timestamp AND `hasMore`, bounded).
-- [ ] web: `index.tsx` — pending-jump effect + `handleJumpToMessage(entry)` that
+- [x] web: `index.tsx` — pending-jump effect + `handleJumpToMessage(entry)` that
       scrolls when loaded or `loadUntil` then scrolls; `handleJumpToTimestamp(ts)`
       for context entries (nearest item by timestamp).
-- [ ] web: `index.tsx` — `highlightedItemId` state; pass to Virtuoso `itemContent`
+- [x] web: `index.tsx` — `highlightedItemId` state; pass to Virtuoso `itemContent`
       wrapper (`sam-message-highlight` class on match), auto-clear ~2s.
-- [ ] web: `ChatTimelineDrawer.tsx` — make `progress_notification` and
+- [x] web: `ChatTimelineDrawer.tsx` — make `progress_notification` and
       `system_event` entries clickable (call jump-by-timestamp); keep user_message
       → jump-by-message. Update prop signature (`onJump(entry)`).
-- [ ] web: `apps/web/src/index.css` — add `@keyframes` + `.sam-message-highlight`.
-- [ ] Tests (see below).
-- [ ] Docs: `env-reference` (add `CHAT_SESSION_MESSAGE_MAX`), CLAUDE.md Recent
+- [x] web: `apps/web/src/index.css` — add `@keyframes` + `.sam-message-highlight`.
+- [x] Tests (see below).
+- [x] Docs: `env-reference` (add `CHAT_SESSION_MESSAGE_MAX`), CLAUDE.md Recent
       Changes, `.env.example`.
-- [ ] Playwright visual audit of timeline drawer (all entry kinds clickable) +
+- [x] Playwright visual audit of timeline drawer (all entry kinds clickable) +
       highlight, mobile 375 + desktop 1280, overflow assertion.
 
 ## Tests
 
-- [ ] api unit: `getSessionMessageLimit` — unspecified → default (small);
+- [x] api unit: `getSessionMessageLimit` — unspecified → default (small);
       requested below max → requested; requested above max → clamped to max;
       env overrides for both default and max.
-- [ ] web unit: `mergeReplace` preserves full history when poll returns a small
+- [x] web unit: `mergeReplace` preserves full history when poll returns a small
       recent window (regression for the poll-clobber gotcha) — extend existing
       merge-messages tests with a "10k loaded, poll returns latest 500" case.
-- [ ] web behavioral: `ChatTimelineDrawer` renders and clicking a
+- [x] web behavioral: `ChatTimelineDrawer` renders and clicking a
       `progress_notification` / `system_event` entry calls the jump handler
       (interactive-element requirement, Rule 02).
-- [ ] web behavioral: jump resolves for a message present in the map (scroll
+- [x] web behavioral: jump resolves for a message present in the map (scroll
       invoked) and, when absent, triggers load-until then scroll.
-- [ ] buildSessionTimeline: existing coverage still holds (messageIndex mapping).
+- [x] buildSessionTimeline: coverage updated for the new signature (no messageIndex); asserts messageId + timestamp anchoring.
 
 ## Acceptance criteria
 
-- [ ] Opening a session loads the full conversation in one request for typical
+- [x] Opening a session loads the full conversation in one request for typical
       sessions (no "Load earlier messages" button for ≤ ceiling / ≤30 MiB).
-- [ ] Clicking ANY timeline entry (user message, status update, activity) scrolls
+- [x] Clicking ANY timeline entry (user message, status update, activity) scrolls
       the chat to the relevant message — never a silent no-op.
-- [ ] The jumped-to message briefly highlights.
-- [ ] The 3s poll does NOT re-fetch the whole conversation and does NOT discard
+- [x] The jumped-to message briefly highlights.
+- [x] The 3s poll does NOT re-fetch the whole conversation and does NOT discard
       loaded history.
-- [ ] Oversized/guard-trimmed sessions still work via the "Load earlier" fallback
+- [x] Oversized/guard-trimmed sessions still work via the "Load earlier" fallback
       and jump still resolves (load-until).
-- [ ] Ceiling + poll size are env-configurable (`CHAT_SESSION_MESSAGE_MAX`,
+- [x] Ceiling + poll size are env-configurable (`CHAT_SESSION_MESSAGE_MAX`,
       `CHAT_SESSION_MESSAGE_LIMIT`) — no hardcoded operational limits.
-- [ ] Staging verified end-to-end via Playwright; visual audit passes.
+- [x] Staging verified end-to-end via Playwright (Phase 6) — 2026-07-03 against
+      app.sammy.party (desktop + mobile): full conversation loads on open (0 "Load
+      earlier messages" buttons); clicking a user-message timeline entry scrolls +
+      flash-highlights the target; clicking a status/activity (context) entry
+      jumps + highlights the nearest message. Zero feature errors (the only
+      console errors were a pre-existing 404 for a deleted workspace on the old
+      ended session and an aborted transcribe request — unrelated to the timeline).
+
+## Staging verification post-mortem (2026-07-03) — jump dead-click on virtualized sessions
+
+**What broke:** On staging, clicking a timeline entry closed the drawer but did
+NOT scroll the chat to the message and did NOT flash the highlight — the exact
+dead-click this task set out to fix, still present for real sessions.
+
+**Root cause:** `itemIndexById` (`index.tsx`) mapped `item.id → lc.firstItemIndex + i`
+(the `firstItemIndex`-offset ABSOLUTE coordinate ≈ `VIRTUAL_START` + i ≈ 100000).
+`scrollAndHighlight` passed that value straight to react-virtuoso's
+`scrollToIndex`, which operates on the **0-based data-array** coordinate (see the
+codebase's other calls: `scrollToIndex({ index: 'LAST' })` and
+`{ index: conversationItems.length - 1 }`). Passing ~100000 is out of range →
+Virtuoso never scrolls → the target row stays virtualized-out → the highlight,
+set on an unmounted row, never renders.
+
+**Why it wasn't caught:** The `react-virtuoso` test mock renders EVERY row (jsdom
+has no layout engine) and ignored the forwarded ref, so `scrollToIndex` was a
+no-op and the highlight always attached regardless of the index passed. The unit
+tests asserted highlight presence, which passes even with the wrong coordinate.
+The drawer Playwright audit mocked `onJump`, so it never exercised the real
+`scrollToIndex` path either.
+
+**Class of bug:** Virtualization-hidden coordinate mismatch — a jsdom mock that
+renders all items masks a real virtual-window bug. Any "scroll/jump to item"
+feature is exposed to this.
+
+**Fix:** `itemIndexById` now maps `item.id → i` (0-based data index);
+`scrollToIndex` receives the correct coordinate. Commit on this branch.
+
+**Process/test fix:** The `react-virtuoso` mock in `project-message-view.test.tsx`
+now exposes `scrollToIndex` via `useImperativeHandle` and captures its argument.
+New regression test asserts the jump calls `scrollToIndex` with the 0-based index
+(`1`) and that no call uses the absolute `VIRTUAL_START` coordinate. Verified the
+test FAILS on the pre-fix code (`expected [ 100001 ] to include 1`).
 
 ## References
 - Rule 02 (interactive-element behavioral tests), Rule 06 (React interaction-effect

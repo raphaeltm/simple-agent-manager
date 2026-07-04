@@ -8,7 +8,8 @@
  * Fix: Added AbortController to the polling useEffect so in-flight requests
  * are cancelled when the session changes.
  */
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { DEFAULT_CHAT_SESSION_MESSAGE_LIMIT, DEFAULT_CHAT_SESSION_MESSAGE_MAX } from '@simple-agent-manager/shared';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // jsdom doesn't support scrollIntoView
@@ -26,6 +27,10 @@ const mocks = vi.hoisted(() => ({
   getNode: vi.fn(),
   updateProjectTaskStatus: vi.fn(),
   deleteWorkspace: vi.fn(),
+  // Timeline data sources (useSessionTimeline)
+  listChatMessages: vi.fn(),
+  listActivityEvents: vi.fn(),
+  listNotifications: vi.fn(),
 }));
 
 vi.mock('../../../src/lib/api', async (importOriginal) => ({
@@ -80,10 +85,21 @@ vi.mock('@simple-agent-manager/acp-client', async (importOriginal) => {
 
 // Mock react-virtuoso — JSDOM has no layout engine, so Virtuoso can't measure items.
 // Uses vi.hoisted to ensure the mock factory runs before imports.
+//
+// The mock exposes `scrollToIndex` via useImperativeHandle so tests can assert the
+// EXACT index the component asks Virtuoso to scroll to. This is critical: real
+// Virtuoso's `scrollToIndex` uses the 0-based data-array coordinate, while
+// `itemContent`'s `index` arg is the `firstItemIndex`-offset absolute coordinate.
+// Passing the absolute value (~VIRTUAL_START) is out of range and silently does
+// nothing — a dead click on virtualized sessions. The mock renders every row, so
+// a highlight-presence assertion alone would NOT catch that; the scrollToIndex
+// argument assertion does.
 const virtuosoMock = vi.hoisted(() => {
   // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-explicit-any
   const React = require('react') as typeof import('react');
+  const scrollToIndexCalls: Array<{ index?: number | string } | number> = [];
   return {
+    scrollToIndexCalls,
     Virtuoso: React.forwardRef(function MockVirtuoso(
       props: {
         data?: unknown[];
@@ -92,9 +108,13 @@ const virtuosoMock = vi.hoisted(() => {
         style?: React.CSSProperties;
         components?: { Header?: React.ComponentType };
       },
-      _ref: React.Ref<unknown>,
+      ref: React.Ref<unknown>,
     ) {
       const { data, itemContent, style, components } = props;
+      React.useImperativeHandle(ref, () => ({
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        scrollToIndex: (arg: any) => { scrollToIndexCalls.push(arg); },
+      }), []);
       const HeaderComponent = components?.Header;
       return React.createElement('div', { 'data-testid': 'virtuoso-scroller', style },
         HeaderComponent ? React.createElement(HeaderComponent) : null,
@@ -105,7 +125,26 @@ const virtuosoMock = vi.hoisted(() => {
     }),
   };
 });
-vi.mock('react-virtuoso', () => virtuosoMock);
+vi.mock('react-virtuoso', () => ({ Virtuoso: virtuosoMock.Virtuoso }));
+
+// Timeline data sources — useSessionTimeline fetches these when the drawer opens.
+vi.mock('../../../src/lib/api/sessions', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/lib/api/sessions')>()),
+  listChatMessages: mocks.listChatMessages,
+  listActivityEvents: mocks.listActivityEvents,
+}));
+vi.mock('../../../src/lib/api/notifications', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/lib/api/notifications')>()),
+  listNotifications: mocks.listNotifications,
+}));
+
+// Safe defaults so any expanded-header / timeline fetch resolves to empty rather
+// than `undefined` (SessionHeader chains `.then()` on listChatMessages). These
+// implementations survive `vi.clearAllMocks()` (which clears calls, not impls),
+// so unrelated tests that expand the header keep working.
+mocks.listChatMessages.mockResolvedValue({ messages: [], hasMore: false });
+mocks.listActivityEvents.mockResolvedValue({ events: [] });
+mocks.listNotifications.mockResolvedValue({ notifications: [], nextCursor: null });
 
 import { chatMessagesToConversationItems, ProjectMessageView } from '../../../src/components/project-message-view';
 
@@ -191,6 +230,28 @@ describe('ProjectMessageView — session isolation', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it('loads the full conversation on open and polls with only the small window', async () => {
+    // The fallback poll only runs while the WebSocket is not connected.
+    mockWsConnectionState = 'reconnecting';
+    const limits: Array<number | undefined> = [];
+    mocks.getChatSession.mockImplementation(async (_p: string, _s: string, params?: { limit?: number }) => {
+      limits.push(params?.limit);
+      return makeSessionResponse('session-A', [makeMessage('m1', 'session-A', 'Hi')]);
+    });
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-A" />);
+
+    // Initial load requests the full-conversation ceiling.
+    await waitFor(() => expect(limits.length).toBeGreaterThanOrEqual(1));
+    expect(limits[0]).toBe(DEFAULT_CHAT_SESSION_MESSAGE_MAX);
+
+    // The fallback poll must request only the small recent window — never the ceiling.
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_500); });
+    await waitFor(() => expect(limits.length).toBeGreaterThanOrEqual(2));
+    expect(limits.slice(1)).toContain(DEFAULT_CHAT_SESSION_MESSAGE_LIMIT);
+    expect(limits.slice(1)).not.toContain(DEFAULT_CHAT_SESSION_MESSAGE_MAX);
   });
 
   it('does not apply polling response from a different session', async () => {
@@ -1639,5 +1700,85 @@ describe('ProjectMessageView — inline idle indicator', () => {
     const headerEl = container.querySelector('.glass-chrome.border-t-0');
     expect(headerEl).toBeTruthy();
     expect(headerEl!.className).not.toContain('rounded-b-2xl');
+  });
+});
+
+describe('ProjectMessageView — timeline jump-to-message', () => {
+  function makeUserMessage(id: string, sessionId: string, content: string, createdAt: number) {
+    return { id, sessionId, role: 'user' as const, content, toolMetadata: null, createdAt, sequence: null };
+  }
+  function makeAgentMessage(id: string, sessionId: string, content: string, createdAt: number) {
+    return { id, sessionId, role: 'assistant' as const, content, toolMetadata: null, createdAt, sequence: null };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    virtuosoMock.scrollToIndexCalls.length = 0;
+    mocks.getWorkspace.mockResolvedValue({ id: 'ws-test', name: 'test', status: 'running', vmSize: 'medium', vmLocation: 'fsn1' });
+    mocks.getNode.mockResolvedValue({ id: 'node-test', name: 'node-test', status: 'active', healthStatus: 'healthy' });
+    mocks.listActivityEvents.mockResolvedValue({ events: [] });
+    mocks.listNotifications.mockResolvedValue({ notifications: [], nextCursor: null });
+  });
+
+  // Regression: clicking a timeline entry must scroll the chat to that message.
+  // itemIndexById previously stored `firstItemIndex + i` (absolute ≈ VIRTUAL_START
+  // + i ≈ 100000) and passed it to Virtuoso's scrollToIndex, which expects the
+  // 0-BASED data index. The out-of-range value never scrolled, so on a real
+  // virtualized session the target row stayed unmounted and the highlight never
+  // rendered — a dead click. jsdom renders every row, so a highlight-presence
+  // assertion would pass despite the bug; asserting the scrollToIndex ARGUMENT is
+  // what catches it.
+  it('scrolls Virtuoso to the target message using its 0-based index (not the firstItemIndex offset)', async () => {
+    const sid = 'session-jump';
+    // Order matters: user message sits at 0-based conversation index 1 (between two
+    // agent messages), so the correct index (1) is unambiguously different from the
+    // buggy absolute value (VIRTUAL_START + 1 = 100001).
+    const messages = [
+      makeAgentMessage('a0', sid, 'agent intro', 1000),
+      makeUserMessage('user-jump-1', sid, 'JUMPME', 2000),
+      makeAgentMessage('a2', sid, 'agent reply', 3000),
+    ];
+    mocks.getChatSession.mockResolvedValue({ session: makeSession(sid, 'active'), messages, hasMore: false });
+    // Timeline fetches user messages independently (roles=['user']).
+    mocks.listChatMessages.mockResolvedValue({
+      messages: [makeUserMessage('user-jump-1', sid, 'JUMPME', 2000)],
+      hasMore: false,
+    });
+
+    render(<ProjectMessageView projectId="proj-1" sessionId={sid} />);
+
+    // Wait for the conversation to load.
+    await waitFor(() => {
+      expect(screen.getByTestId('virtuoso-scroller').textContent).toContain('JUMPME');
+    });
+
+    // Expand the session header, then open the Timeline drawer.
+    fireEvent.click(screen.getByRole('button', { name: 'Show session details' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Timeline' }));
+
+    const drawer = await screen.findByRole('dialog', { name: 'Session timeline' });
+
+    // The user-message timeline entry.
+    const entry = await waitFor(() => {
+      const btn = within(drawer).getAllByRole('button').find((b) => /JUMPME/.test(b.textContent ?? ''));
+      expect(btn).toBeTruthy();
+      return btn!;
+    });
+
+    fireEvent.click(entry);
+
+    // The component must ask Virtuoso to scroll to the 0-based data index (1),
+    // NOT the firstItemIndex-offset absolute value.
+    await waitFor(() => {
+      expect(virtuosoMock.scrollToIndexCalls.length).toBeGreaterThan(0);
+    });
+    const indices = virtuosoMock.scrollToIndexCalls.map((c) =>
+      typeof c === 'number' ? c : c.index,
+    );
+    expect(indices).toContain(1);
+    // Guard against the regression: no call may use the absolute VIRTUAL_START coordinate.
+    for (const idx of indices) {
+      expect(typeof idx === 'number' ? idx : Number(idx)).toBeLessThan(1000);
+    }
   });
 });

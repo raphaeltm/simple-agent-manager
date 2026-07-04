@@ -62,6 +62,34 @@ export const DEFAULT_TASK_LIST_MAX_PAGE_SIZE = 200;
 export const DEFAULT_CHAT_SESSION_MESSAGE_LIMIT = 500;
 
 /**
+ * Ceiling (max clamp) for a single chat session message REST response.
+ *
+ * This is distinct from DEFAULT_CHAT_SESSION_MESSAGE_LIMIT (the page size used
+ * when no explicit limit is requested — e.g. the 3s poll and load-more). The
+ * client's INITIAL session load requests up to this ceiling so the entire
+ * conversation arrives in one request, making the timeline jump index map
+ * complete (no dead clicks) and removing the windowed-loading UX for typical
+ * sessions.
+ *
+ * Compact-mode token rows are small (~150 B), so even the largest observed
+ * production sessions (~30k token rows ≈ ~4.5 MB) load fully in one request and
+ * stay well under the Cloudflare DO 30 MiB RPC size guard in
+ * `getMessages()`. Sessions larger than the ceiling OR larger than the RPC size
+ * guard keep `hasMore=true` and fall back to `before`/"Load earlier" pagination.
+ *
+ * Override via CHAT_SESSION_MESSAGE_MAX env var.
+ */
+export const DEFAULT_CHAT_SESSION_MESSAGE_MAX = 50000;
+
+/**
+ * Safety bound on how many older pages the chat client will fetch while chasing a
+ * timeline jump target that predates the loaded window (the rare oversized-session
+ * fallback). Bounds the load-until loop so a server misreporting `hasMore` can
+ * never loop unbounded. Override at build time via VITE_CHAT_LOAD_UNTIL_MAX_PAGES.
+ */
+export const DEFAULT_CHAT_LOAD_UNTIL_MAX_PAGES = 400;
+
+/**
  * Whether chat session message loads strip tool_metadata.content by default.
  * When true, tool call content is lazy-loaded on demand when users expand
  * individual tool calls, dramatically reducing RPC payload size.

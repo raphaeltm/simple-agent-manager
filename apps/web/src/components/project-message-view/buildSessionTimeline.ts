@@ -37,7 +37,9 @@ function getTaskSeverity(payload: Record<string, unknown> | null): Severity {
 
 function getTaskTitle(payload: Record<string, unknown> | null): string {
   const toStatus = payload?.toStatus as string | undefined;
-  if (toStatus) return `Task ${toStatus}`;
+  // Humanize the raw status identifier (e.g. "in_progress" → "in progress")
+  // so the timeline shows user-facing labels, not snake_case programmer values.
+  if (toStatus) return `Task ${toStatus.replace(/_/g, ' ')}`;
   return 'Task status changed';
 }
 
@@ -59,8 +61,7 @@ export function buildSessionTimeline(
   messages: ChatMessageResponse[],
   activityEvents: ActivityEventResponse[],
   progressNotifications: NotificationResponse[],
-  showContext: boolean,
-  messageIndexMap: Map<string, number>
+  showContext: boolean
 ): TimelineEntry[] {
   const entries: TimelineEntry[] = [];
 
@@ -76,7 +77,6 @@ export function buildSessionTimeline(
       messageId: msg.id,
       text: truncateText(text.trim(), 120),
       timestamp: msg.createdAt,
-      messageIndex: messageIndexMap.get(msg.id) ?? -1,
     });
   }
 

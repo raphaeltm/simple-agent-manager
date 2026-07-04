@@ -67,7 +67,8 @@ vi.mock('drizzle-orm/d1', () => ({
 }));
 
 vi.mock('@simple-agent-manager/shared', () => ({
-  DEFAULT_CHAT_SESSION_MESSAGE_LIMIT: 3000,
+  DEFAULT_CHAT_SESSION_MESSAGE_LIMIT: 500,
+  DEFAULT_CHAT_SESSION_MESSAGE_MAX: 50000,
   DEFAULT_CHAT_COMPACT_MODE: true,
   DEFAULT_WORKSPACE_PROFILE: 'full',
   isTaskExecutionStep: () => true,
@@ -330,18 +331,18 @@ describe('chatRoutes agent session routing', () => {
     expect(mocks.getMessages).not.toHaveBeenCalled();
   });
 
-  it('caps session detail message loads to the configured chat session limit', async () => {
+  it('clamps a requested limit to CHAT_SESSION_MESSAGE_MAX', async () => {
     mocks.listAcpSessions.mockResolvedValue({
       sessions: [],
       total: 0,
     });
 
     const response = await app.request(
-      '/api/projects/proj-1/sessions/chat-1?limit=50000',
+      '/api/projects/proj-1/sessions/chat-1?limit=999999',
       { method: 'GET' },
       {
         DATABASE: {} as D1Database,
-        CHAT_SESSION_MESSAGE_LIMIT: '500',
+        CHAT_SESSION_MESSAGE_MAX: '5000',
       } as Env,
     );
 
@@ -350,14 +351,75 @@ describe('chatRoutes agent session routing', () => {
       expect.anything(),
       'proj-1',
       'chat-1',
-      500,
+      5000,
       null,
       undefined,
       true,
     );
   });
 
-  it('uses the default chat session limit (3000) when no limit is requested', async () => {
+  it('honors a full-conversation load request up to the max ceiling', async () => {
+    mocks.listAcpSessions.mockResolvedValue({
+      sessions: [],
+      total: 0,
+    });
+
+    // The client requests the full-load ceiling; it must NOT be clamped down to
+    // the small default page size (that would re-window the conversation).
+    const response = await app.request(
+      '/api/projects/proj-1/sessions/chat-1?limit=50000',
+      { method: 'GET' },
+      {
+        DATABASE: {} as D1Database,
+        CHAT_SESSION_MESSAGE_LIMIT: '500',
+        CHAT_SESSION_MESSAGE_MAX: '50000',
+      } as Env,
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.getMessages).toHaveBeenCalledWith(
+      expect.anything(),
+      'proj-1',
+      'chat-1',
+      50000,
+      null,
+      undefined,
+      true,
+    );
+  });
+
+  it('promotes the ceiling to the page size when misconfigured (default > max)', async () => {
+    mocks.listAcpSessions.mockResolvedValue({
+      sessions: [],
+      total: 0,
+    });
+
+    // Operator misconfiguration: page-size default (8000) exceeds the ceiling (3000).
+    // The guard promotes the effective ceiling to the page size so the default page
+    // still fits — an unspecified request resolves to the default, not the smaller max.
+    const response = await app.request(
+      '/api/projects/proj-1/sessions/chat-1',
+      { method: 'GET' },
+      {
+        DATABASE: {} as D1Database,
+        CHAT_SESSION_MESSAGE_LIMIT: '8000',
+        CHAT_SESSION_MESSAGE_MAX: '3000',
+      } as Env,
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.getMessages).toHaveBeenCalledWith(
+      expect.anything(),
+      'proj-1',
+      'chat-1',
+      8000,
+      null,
+      undefined,
+      true,
+    );
+  });
+
+  it('uses CHAT_SESSION_MESSAGE_LIMIT as the page size when no limit is requested', async () => {
     mocks.listAcpSessions.mockResolvedValue({
       sessions: [],
       total: 0,
@@ -366,7 +428,7 @@ describe('chatRoutes agent session routing', () => {
     const response = await app.request(
       '/api/projects/proj-1/sessions/chat-1',
       { method: 'GET' },
-      { DATABASE: {} as D1Database } as Env,
+      { DATABASE: {} as D1Database, CHAT_SESSION_MESSAGE_LIMIT: '500' } as Env,
     );
 
     expect(response.status).toBe(200);
@@ -374,7 +436,7 @@ describe('chatRoutes agent session routing', () => {
       expect.anything(),
       'proj-1',
       'chat-1',
-      3000,
+      500,
       null,
       undefined,
       true,

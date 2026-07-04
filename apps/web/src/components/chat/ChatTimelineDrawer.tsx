@@ -3,7 +3,7 @@ import { AlignLeft, Clock, X } from 'lucide-react';
 import { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 
-import type { TimelineEntry } from '../project-message-view/timeline-types';
+import type { TimelineEntry, TimelineJumpTarget } from '../project-message-view/timeline-types';
 
 const SEVERITY_COLORS: Record<string, string> = {
   info: '#3b82f6',
@@ -25,7 +25,7 @@ interface ChatTimelineDrawerProps {
   showContext: boolean;
   onToggleContext: () => void;
   onClose: () => void;
-  onJumpToMessage: (messageIndex: number) => void;
+  onJump: (target: TimelineJumpTarget) => void;
 }
 
 export function ChatTimelineDrawer({
@@ -34,7 +34,7 @@ export function ChatTimelineDrawer({
   showContext,
   onToggleContext,
   onClose,
-  onJumpToMessage,
+  onJump,
 }: ChatTimelineDrawerProps) {
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -133,8 +133,8 @@ export function ChatTimelineDrawer({
                       <TimelineItem dot={{ color: DOT_COLOR_USER }}>
                         <button
                           type="button"
-                          className="w-full text-left py-1.5 px-1 rounded hover:bg-bg-hover transition-colors group cursor-pointer"
-                          onClick={() => onJumpToMessage(entry.messageIndex)}
+                          className="w-full text-left py-1.5 px-1 rounded hover:bg-bg-hover transition-colors group cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
+                          onClick={() => onJump({ messageId: entry.messageId, timestamp: entry.timestamp })}
                         >
                           <div className="text-xs text-fg-muted mb-0.5">
                             {formatTime(entry.timestamp)}
@@ -146,17 +146,22 @@ export function ChatTimelineDrawer({
                       </TimelineItem>
                     ) : entry.kind === 'progress_notification' ? (
                       <TimelineItem dot={{ color: DOT_COLOR_PROGRESS, muted: true }}>
-                        <div className="py-1.5 px-1">
+                        <button
+                          type="button"
+                          aria-label={`Jump to conversation near status update: ${entry.title}`}
+                          className="w-full text-left py-1.5 px-1 rounded hover:bg-bg-hover transition-colors group cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
+                          onClick={() => onJump({ timestamp: entry.timestamp })}
+                        >
                           <div className="text-xs text-fg-muted mb-0.5">
                             {formatTime(entry.timestamp)}
                           </div>
                           <div className="text-[11px] uppercase text-fg-muted mb-1">
                             Status update
                           </div>
-                          <div className="text-sm text-fg-primary leading-snug line-clamp-3">
+                          <div className="text-sm text-fg-primary leading-snug line-clamp-3 group-hover:text-fg-accent transition-colors">
                             {entry.text}
                           </div>
-                        </div>
+                        </button>
                       </TimelineItem>
                     ) : (
                       <TimelineItem
@@ -165,14 +170,19 @@ export function ChatTimelineDrawer({
                           muted: entry.severity === 'info',
                         }}
                       >
-                        <div className="py-1.5 px-1">
+                        <button
+                          type="button"
+                          aria-label={`Jump to conversation near activity: ${entry.title}`}
+                          className="w-full text-left py-1.5 px-1 rounded hover:bg-bg-hover transition-colors group cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
+                          onClick={() => onJump({ timestamp: entry.timestamp })}
+                        >
                           <div className="text-xs text-fg-muted mb-0.5">
                             {formatTime(entry.timestamp)}
                           </div>
-                          <div className="text-xs text-fg-muted leading-snug">
+                          <div className="text-xs text-fg-muted leading-snug group-hover:text-fg-accent transition-colors">
                             {entry.title}
                           </div>
-                        </div>
+                        </button>
                       </TimelineItem>
                     )}
                   </div>

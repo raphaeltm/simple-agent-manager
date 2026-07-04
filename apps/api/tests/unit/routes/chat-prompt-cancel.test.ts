@@ -19,7 +19,8 @@ vi.mock('drizzle-orm/d1', () => ({
 }));
 
 vi.mock('@simple-agent-manager/shared', () => ({
-  DEFAULT_CHAT_SESSION_MESSAGE_LIMIT: 3000,
+  DEFAULT_CHAT_SESSION_MESSAGE_LIMIT: 500,
+  DEFAULT_CHAT_SESSION_MESSAGE_MAX: 50000,
   DEFAULT_CHAT_COMPACT_MODE: true,
   DEFAULT_WORKSPACE_PROFILE: 'full',
   isTaskExecutionStep: () => true,

@@ -11,7 +11,6 @@ function makeUserEntry(overrides: Partial<Extract<TimelineEntry, { kind: 'user_m
     messageId: 'm1',
     text: 'Hello world',
     timestamp: 1000,
-    messageIndex: 0,
     ...overrides,
   };
 }
@@ -47,7 +46,7 @@ const defaultProps = {
   showContext: false,
   onToggleContext: vi.fn(),
   onClose: vi.fn(),
-  onJumpToMessage: vi.fn(),
+  onJump: vi.fn(),
 };
 
 describe('ChatTimelineDrawer', () => {
@@ -95,28 +94,35 @@ describe('ChatTimelineDrawer', () => {
     expect(contextBtn.getAttribute('aria-pressed')).toBe('true');
   });
 
-  it('renders user message entries and calls onJumpToMessage on click', () => {
-    const onJumpToMessage = vi.fn();
-    const entries = [makeUserEntry({ id: 'msg-1', text: 'Test message', messageIndex: 5 })];
-    render(<ChatTimelineDrawer {...defaultProps} entries={entries} onJumpToMessage={onJumpToMessage} />);
+  it('renders user message entries and jumps by messageId + timestamp on click', () => {
+    const onJump = vi.fn();
+    const entries = [makeUserEntry({ id: 'msg-1', messageId: 'm-abc', text: 'Test message', timestamp: 4321 })];
+    render(<ChatTimelineDrawer {...defaultProps} entries={entries} onJump={onJump} />);
 
     const msgBtn = screen.getByText('Test message');
     fireEvent.click(msgBtn);
-    expect(onJumpToMessage).toHaveBeenCalledWith(5);
+    expect(onJump).toHaveBeenCalledWith({ messageId: 'm-abc', timestamp: 4321 });
   });
 
-  it('renders system event entries', () => {
-    const entries = [makeSystemEntry({ title: 'Session started', severity: 'info' })];
-    render(<ChatTimelineDrawer {...defaultProps} entries={entries} />);
-    expect(screen.getByText('Session started')).toBeTruthy();
+  it('renders system event entries and jumps by timestamp on click', () => {
+    const onJump = vi.fn();
+    const entries = [makeSystemEntry({ title: 'Session started', severity: 'info', timestamp: 555 })];
+    render(<ChatTimelineDrawer {...defaultProps} entries={entries} onJump={onJump} />);
+
+    const eventBtn = screen.getByText('Session started');
+    fireEvent.click(eventBtn);
+    expect(onJump).toHaveBeenCalledWith({ timestamp: 555 });
   });
 
-  it('renders progress notification entries as status updates', () => {
-    const entries = [makeProgressEntry({ text: 'Cloned the repo and inspected timeline code' })];
-    render(<ChatTimelineDrawer {...defaultProps} entries={entries} />);
+  it('renders progress notification entries as status updates and jumps by timestamp on click', () => {
+    const onJump = vi.fn();
+    const entries = [makeProgressEntry({ text: 'Cloned the repo and inspected timeline code', timestamp: 777 })];
+    render(<ChatTimelineDrawer {...defaultProps} entries={entries} onJump={onJump} />);
 
     expect(screen.getByText('Status update')).toBeTruthy();
-    expect(screen.getByText('Cloned the repo and inspected timeline code')).toBeTruthy();
+    const progressBtn = screen.getByText('Cloned the repo and inspected timeline code');
+    fireEvent.click(progressBtn);
+    expect(onJump).toHaveBeenCalledWith({ timestamp: 777 });
   });
 
   it('has correct dialog aria attributes', () => {

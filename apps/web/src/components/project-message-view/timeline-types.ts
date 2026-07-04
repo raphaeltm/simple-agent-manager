@@ -5,7 +5,6 @@ export type TimelineEntry =
       messageId: string;
       text: string;
       timestamp: number;
-      messageIndex: number;
     }
   | {
       kind: 'system_event';
@@ -24,3 +23,11 @@ export type TimelineEntry =
       timestamp: number;
       severity: 'info';
     };
+
+/** Where a timeline entry should jump to in the message list. */
+export interface TimelineJumpTarget {
+  /** Exact message anchor, when the entry corresponds to a persisted message. */
+  messageId?: string;
+  /** Timestamp used to resolve the nearest message when there is no exact anchor. */
+  timestamp: number;
+}

@@ -1,3 +1,4 @@
+import { DEFAULT_CHAT_SESSION_MESSAGE_LIMIT } from '@simple-agent-manager/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { ChatMessageResponse, ChatSessionResponse, SessionStateSnapshot } from '../lib/api';
@@ -248,7 +249,11 @@ export function useChatWebSocket({
 
   const catchUpMessages = useCallback(async () => {
     try {
-      const data = await getChatSession(projectId, sessionId);
+      // Reconnect catch-up fetches only the recent window (like the poll), not the
+      // whole conversation — mergeReplace preserves any earlier-loaded history.
+      const data = await getChatSession(projectId, sessionId, {
+        limit: DEFAULT_CHAT_SESSION_MESSAGE_LIMIT,
+      });
       onCatchUpRef.current(data.messages, data.session, data.state);
     } catch {
       // Best-effort catch-up — the next reconnect or explicit reload will retry.
