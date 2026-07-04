@@ -384,7 +384,8 @@ export const ImageViewer: FC<ImageViewerProps> = ({ src, fileName, fileSize }) =
             onError={handleError}
             className="max-h-full max-w-full select-none object-contain"
             style={{
-              display: loading ? 'none' : 'block',
+              display: 'block',
+              visibility: loading ? 'hidden' : 'visible',
               cursor: transform.scale > FIT_SCALE ? 'grab' : 'zoom-in',
               transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`,
               transformOrigin: 'center center',

@@ -182,7 +182,7 @@ export function FilePreviewModal({
               paddingRight: 'calc(env(safe-area-inset-right) + 1rem)',
             }}
           >
-            <div className="flex-1 min-w-0">
+            <div className="min-w-0 flex-1">
               <h3
                 id="preview-modal-title"
                 className="text-sm font-semibold text-fg-primary truncate"
@@ -197,7 +197,7 @@ export function FilePreviewModal({
 
             {/* Markdown rendered/source toggle */}
             {isMarkdown && mdContent !== null && (
-              <div className="flex rounded-lg border border-border-default overflow-hidden shrink-0">
+              <div className="flex shrink-0 overflow-hidden rounded-lg border border-border-default">
                 <button
                   type="button"
                   onClick={() => setMdViewMode('rendered')}
@@ -210,7 +210,7 @@ export function FilePreviewModal({
                   }`}
                 >
                   <Eye size={14} />
-                  Rendered
+                  <span className="hidden sm:inline">Rendered</span>
                 </button>
                 <button
                   type="button"
@@ -224,7 +224,7 @@ export function FilePreviewModal({
                   }`}
                 >
                   <Code size={14} />
-                  Source
+                  <span className="hidden sm:inline">Source</span>
                 </button>
               </div>
             )}
@@ -236,7 +236,7 @@ export function FilePreviewModal({
               aria-label={`Download ${file.filename}`}
             >
               <Download size={14} />
-              Download
+              <span className="hidden sm:inline">Download</span>
             </button>
             <button
               type="button"

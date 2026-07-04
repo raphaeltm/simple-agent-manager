@@ -255,7 +255,7 @@ export async function setupProjectChatMocks(page: Page, options: ProjectChatMock
     route.fulfill({ status: 200, json: [] }),
   );
 
-  await page.route(`**/api/projects/${projectId}`, (route: Route) => {
+  await page.route(new RegExp(`/api/projects/${projectId}(?:\\?.*)?$`), (route: Route) => {
     if (route.request().method() === 'GET') {
       return route.fulfill({ status: 200, json: project });
     }
