@@ -22,7 +22,7 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { getAuth, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
-import { requireOwnedProject } from '../middleware/project-auth';
+import { requireProjectAccess, requireProjectCapability } from '../middleware/project-auth';
 import * as projectDataService from '../services/project-data';
 
 const knowledgeRoutes = new Hono<{ Bindings: Env }>();
@@ -49,7 +49,7 @@ knowledgeRoutes.get('/', async (c) => {
   const auth = getAuth(c);
   const projectId = requireParam(c.req.param('projectId'), 'projectId');
   const db = drizzle(c.env.DATABASE, { schema });
-  await requireOwnedProject(db, projectId, auth.user.id);
+  await requireProjectAccess(db, projectId, auth.user.id);
 
   const entityType = c.req.query('entityType') || null;
   const defaultPageSize = getLimit(c.env, 'KNOWLEDGE_LIST_PAGE_SIZE', KNOWLEDGE_DEFAULTS.listPageSize);
@@ -70,7 +70,7 @@ knowledgeRoutes.get('/search', async (c) => {
   const auth = getAuth(c);
   const projectId = requireParam(c.req.param('projectId'), 'projectId');
   const db = drizzle(c.env.DATABASE, { schema });
-  await requireOwnedProject(db, projectId, auth.user.id);
+  await requireProjectAccess(db, projectId, auth.user.id);
 
   const query = c.req.query('q') || '';
   if (!query.trim()) throw errors.badRequest('Query parameter "q" is required');
@@ -95,7 +95,7 @@ knowledgeRoutes.get('/:entityId', async (c) => {
   const projectId = requireParam(c.req.param('projectId'), 'projectId');
   const entityId = requireParam(c.req.param('entityId'), 'entityId');
   const db = drizzle(c.env.DATABASE, { schema });
-  await requireOwnedProject(db, projectId, auth.user.id);
+  await requireProjectAccess(db, projectId, auth.user.id);
 
   const entity = await projectDataService.getKnowledgeEntity(c.env, projectId, entityId);
   if (!entity) throw errors.notFound('Entity not found');
@@ -114,7 +114,7 @@ knowledgeRoutes.post('/', async (c) => {
   const auth = getAuth(c);
   const projectId = requireParam(c.req.param('projectId'), 'projectId');
   const db = drizzle(c.env.DATABASE, { schema });
-  await requireOwnedProject(db, projectId, auth.user.id);
+  await requireProjectCapability(db, projectId, auth.user.id, 'project:update');
 
   const body = await c.req.json<CreateKnowledgeEntityRequest>();
   if (!body.name?.trim()) throw errors.badRequest('name is required');
@@ -140,7 +140,7 @@ knowledgeRoutes.patch('/:entityId', async (c) => {
   const projectId = requireParam(c.req.param('projectId'), 'projectId');
   const entityId = requireParam(c.req.param('entityId'), 'entityId');
   const db = drizzle(c.env.DATABASE, { schema });
-  await requireOwnedProject(db, projectId, auth.user.id);
+  await requireProjectCapability(db, projectId, auth.user.id, 'project:update');
 
   const body = await c.req.json<UpdateKnowledgeEntityRequest>();
   const updates: UpdateKnowledgeEntityRequest = {};
@@ -175,7 +175,7 @@ knowledgeRoutes.delete('/:entityId', async (c) => {
   const projectId = requireParam(c.req.param('projectId'), 'projectId');
   const entityId = requireParam(c.req.param('entityId'), 'entityId');
   const db = drizzle(c.env.DATABASE, { schema });
-  await requireOwnedProject(db, projectId, auth.user.id);
+  await requireProjectCapability(db, projectId, auth.user.id, 'project:update');
 
   await projectDataService.deleteKnowledgeEntity(c.env, projectId, entityId);
   return c.json({ deleted: true });
@@ -188,7 +188,7 @@ knowledgeRoutes.post('/:entityId/observations', async (c) => {
   const projectId = requireParam(c.req.param('projectId'), 'projectId');
   const entityId = requireParam(c.req.param('entityId'), 'entityId');
   const db = drizzle(c.env.DATABASE, { schema });
-  await requireOwnedProject(db, projectId, auth.user.id);
+  await requireProjectCapability(db, projectId, auth.user.id, 'project:update');
 
   const body = await c.req.json<AddObservationRequest>();
   if (!body.content?.trim()) throw errors.badRequest('content is required');
@@ -215,7 +215,7 @@ knowledgeRoutes.patch('/observations/:observationId', async (c) => {
   const projectId = requireParam(c.req.param('projectId'), 'projectId');
   const observationId = requireParam(c.req.param('observationId'), 'observationId');
   const db = drizzle(c.env.DATABASE, { schema });
-  await requireOwnedProject(db, projectId, auth.user.id);
+  await requireProjectCapability(db, projectId, auth.user.id, 'project:update');
 
   const body = await c.req.json<UpdateObservationRequest>();
   if (body.content !== undefined && !body.content.trim()) {
@@ -253,7 +253,7 @@ knowledgeRoutes.delete('/observations/:observationId', async (c) => {
   const projectId = requireParam(c.req.param('projectId'), 'projectId');
   const observationId = requireParam(c.req.param('observationId'), 'observationId');
   const db = drizzle(c.env.DATABASE, { schema });
-  await requireOwnedProject(db, projectId, auth.user.id);
+  await requireProjectCapability(db, projectId, auth.user.id, 'project:update');
 
   try {
     await projectDataService.removeKnowledgeObservation(c.env, projectId, observationId);

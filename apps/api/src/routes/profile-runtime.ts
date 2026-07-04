@@ -7,14 +7,14 @@ import { requireRouteParam } from '../lib/route-helpers';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
-import { requireOwnedProject } from '../middleware/project-auth';
+import type { ProjectCapability } from '../middleware/project-auth';
 import { jsonValidator, UpsertProjectRuntimeEnvVarSchema, UpsertProjectRuntimeFileSchema } from '../schemas';
 import { getRuntimeLimits } from '../services/limits';
 import {
   buildProfileRuntimeConfigResponse,
   deleteProfileRuntimeEnvVar,
   deleteProfileRuntimeFile,
-  requireOwnedProjectScopedProfile,
+  requireProjectScopedProfile,
   upsertProfileRuntimeEnvVar,
   upsertProfileRuntimeFile,
 } from '../services/profile-runtime-assets';
@@ -23,13 +23,14 @@ import {
   normalizeProjectFilePath,
   PROJECT_ENV_KEY_PATTERN,
 } from './projects/_helpers';
+import { requireProjectRuntimeAuthorization } from './runtime-project-auth';
 
 export const profileRuntimeRoutes = new Hono<{ Bindings: Env }>();
 
 profileRuntimeRoutes.use('/*', requireAuth(), requireApproved());
 
 profileRuntimeRoutes.get('/env-vars', async (c) => {
-  const { db, profileId, userId } = await requireProfileRuntimeAccess(c);
+  const { db, profileId, userId } = await requireProfileRuntimeAccess(c, 'project:read');
   const response = await buildProfileRuntimeConfigResponse(db, profileId, userId);
   return c.json({ envVars: response.envVars });
 });
@@ -37,7 +38,7 @@ profileRuntimeRoutes.get('/env-vars', async (c) => {
 profileRuntimeRoutes.post('/env-vars', jsonValidator(UpsertProjectRuntimeEnvVarSchema), async (c) => {
   const body = c.req.valid('json');
   const limits = getRuntimeLimits(c.env);
-  const { db, profileId, userId } = await requireProfileRuntimeAccess(c);
+  const { db, profileId, userId } = await requireProfileRuntimeAccess(c, 'secret:write');
   const envKey = body.key.trim();
 
   if (!PROJECT_ENV_KEY_PATTERN.test(envKey)) {
@@ -69,7 +70,7 @@ profileRuntimeRoutes.delete('/env-vars/:envKey', async (c) => {
     throw errors.badRequest('envKey must match [A-Za-z_][A-Za-z0-9_]*');
   }
 
-  const { db, profileId, userId } = await requireProfileRuntimeAccess(c);
+  const { db, profileId, userId } = await requireProfileRuntimeAccess(c, 'secret:write');
   await deleteProfileRuntimeEnvVar(db, profileId, userId, envKey);
 
   const response = await buildProfileRuntimeConfigResponse(db, profileId, userId);
@@ -77,7 +78,7 @@ profileRuntimeRoutes.delete('/env-vars/:envKey', async (c) => {
 });
 
 profileRuntimeRoutes.get('/files', async (c) => {
-  const { db, profileId, userId } = await requireProfileRuntimeAccess(c);
+  const { db, profileId, userId } = await requireProfileRuntimeAccess(c, 'project:read');
   const response = await buildProfileRuntimeConfigResponse(db, profileId, userId);
   return c.json({ files: response.files });
 });
@@ -85,7 +86,7 @@ profileRuntimeRoutes.get('/files', async (c) => {
 profileRuntimeRoutes.post('/files', jsonValidator(UpsertProjectRuntimeFileSchema), async (c) => {
   const body = c.req.valid('json');
   const limits = getRuntimeLimits(c.env);
-  const { db, profileId, userId } = await requireProfileRuntimeAccess(c);
+  const { db, profileId, userId } = await requireProfileRuntimeAccess(c, 'secret:write');
   const path = normalizeProjectFilePath(body.path);
 
   if (path.length > limits.maxProjectRuntimeFilePathLength) {
@@ -120,21 +121,24 @@ profileRuntimeRoutes.delete('/files/*', async (c) => {
   }
 
   const path = normalizeProjectFilePath(rawPath);
-  const { db, profileId, userId } = await requireProfileRuntimeAccess(c);
+  const { db, profileId, userId } = await requireProfileRuntimeAccess(c, 'secret:write');
   await deleteProfileRuntimeFile(db, profileId, userId, path);
 
   const response = await buildProfileRuntimeConfigResponse(db, profileId, userId);
   return c.json(response);
 });
 
-async function requireProfileRuntimeAccess(c: Context<{ Bindings: Env }>) {
+async function requireProfileRuntimeAccess(
+  c: Context<{ Bindings: Env }>,
+  capability: ProjectCapability
+) {
   const userId = getUserId(c);
   const projectId = requireRouteParam(c, 'projectId');
   const profileId = requireRouteParam(c, 'profileId');
   const db = drizzle(c.env.DATABASE, { schema });
 
-  await requireOwnedProject(db, projectId, userId);
-  await requireOwnedProjectScopedProfile(db, projectId, profileId, userId);
+  await requireProjectRuntimeAuthorization(db, projectId, userId, capability);
+  await requireProjectScopedProfile(db, projectId, profileId);
 
   return { db, profileId, userId };
 }

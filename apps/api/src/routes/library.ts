@@ -1,7 +1,7 @@
 /**
  * Project File Library API routes.
  *
- * All routes are scoped to a project and require authentication + project ownership.
+ * All routes are scoped to a project and require authentication + project membership.
  * Mounted at /api/projects/:projectId/library
  */
 
@@ -14,7 +14,7 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { getAuth, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
-import { requireOwnedProject } from '../middleware/project-auth';
+import { requireProjectAccess, requireProjectCapability } from '../middleware/project-auth';
 import {
   deleteFile,
   downloadFile,
@@ -69,7 +69,7 @@ libraryRoutes.post('/upload', requireAuth(), requireApproved(), async (c) => {
   const projectId = requireParam(c.req.param('projectId'), 'projectId');
   const db = drizzle(c.env.DATABASE, { schema });
 
-  await requireOwnedProject(db, projectId, userId);
+  await requireProjectCapability(db, projectId, userId, 'project:update');
 
   // Parse multipart form data
   let formData: Record<string, string | File>;
@@ -132,7 +132,7 @@ libraryRoutes.put('/:fileId/replace', requireAuth(), requireApproved(), async (c
   const fileId = requireParam(c.req.param('fileId'), 'fileId');
   const db = drizzle(c.env.DATABASE, { schema });
 
-  await requireOwnedProject(db, projectId, userId);
+  await requireProjectCapability(db, projectId, userId, 'project:update');
 
   let formData: Record<string, string | File>;
   try {
@@ -174,7 +174,7 @@ libraryRoutes.get('/', requireAuth(), requireApproved(), async (c) => {
   const projectId = requireParam(c.req.param('projectId'), 'projectId');
   const db = drizzle(c.env.DATABASE, { schema });
 
-  await requireOwnedProject(db, projectId, userId);
+  await requireProjectAccess(db, projectId, userId);
 
   const query = c.req.query();
   validateSearchLength(query['search'] || undefined, c.env);
@@ -207,7 +207,7 @@ libraryRoutes.get('/directories', requireAuth(), requireApproved(), async (c) =>
   const projectId = requireParam(c.req.param('projectId'), 'projectId');
   const db = drizzle(c.env.DATABASE, { schema });
 
-  await requireOwnedProject(db, projectId, userId);
+  await requireProjectAccess(db, projectId, userId);
 
   const rawParent = c.req.query('parentDirectory') || '/';
   const parentDirectory = validateDirectory(rawParent, c.env);
@@ -229,7 +229,7 @@ libraryRoutes.get('/:fileId', requireAuth(), requireApproved(), async (c) => {
   const fileId = requireParam(c.req.param('fileId'), 'fileId');
   const db = drizzle(c.env.DATABASE, { schema });
 
-  await requireOwnedProject(db, projectId, userId);
+  await requireProjectAccess(db, projectId, userId);
 
   const result = await getFile(db, projectId, fileId);
   return c.json(result, 200);
@@ -246,7 +246,7 @@ libraryRoutes.get('/:fileId/download', requireAuth(), requireApproved(), async (
   const fileId = requireParam(c.req.param('fileId'), 'fileId');
   const db = drizzle(c.env.DATABASE, { schema });
 
-  await requireOwnedProject(db, projectId, userId);
+  await requireProjectAccess(db, projectId, userId);
 
   const encryptionKey = getEncryptionKey(c.env);
   const timeoutMs = getDownloadTimeoutMs(c.env);
@@ -302,7 +302,7 @@ libraryRoutes.get('/:fileId/preview', requireAuth(), requireApproved(), async (c
   const fileId = requireParam(c.req.param('fileId'), 'fileId');
   const db = drizzle(c.env.DATABASE, { schema });
 
-  await requireOwnedProject(db, projectId, userId);
+  await requireProjectAccess(db, projectId, userId);
 
   // Check MIME type BEFORE decrypting to avoid wasting CPU on unsupported types
   const { file } = await getFile(db, projectId, fileId);
@@ -359,7 +359,7 @@ libraryRoutes.delete('/:fileId', requireAuth(), requireApproved(), async (c) => 
   const fileId = requireParam(c.req.param('fileId'), 'fileId');
   const db = drizzle(c.env.DATABASE, { schema });
 
-  await requireOwnedProject(db, projectId, userId);
+  await requireProjectCapability(db, projectId, userId, 'project:update');
 
   await deleteFile(db, c.env.R2, projectId, fileId);
 
@@ -377,7 +377,7 @@ libraryRoutes.patch('/:fileId/move', requireAuth(), requireApproved(), async (c)
   const fileId = requireParam(c.req.param('fileId'), 'fileId');
   const db = drizzle(c.env.DATABASE, { schema });
 
-  await requireOwnedProject(db, projectId, userId);
+  await requireProjectCapability(db, projectId, userId, 'project:update');
 
   const body = await c.req.json<MoveFileRequest>();
 
@@ -401,7 +401,7 @@ libraryRoutes.post('/:fileId/tags', requireAuth(), requireApproved(), async (c) 
   const fileId = requireParam(c.req.param('fileId'), 'fileId');
   const db = drizzle(c.env.DATABASE, { schema });
 
-  await requireOwnedProject(db, projectId, userId);
+  await requireProjectCapability(db, projectId, userId, 'project:update');
 
   const body = await c.req.json<UpdateTagsRequest>();
 

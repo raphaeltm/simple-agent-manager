@@ -71,6 +71,14 @@ export async function seedProject(
   )
     .bind(projectId, userId, name, normalizedName, installationId, repository, userId)
     .run();
+
+  await env.DATABASE.prepare(
+    `INSERT OR IGNORE INTO project_members
+       (project_id, user_id, role, status, invited_by, created_at, updated_at)
+     VALUES (?, ?, 'owner', 'active', ?, datetime('now'), datetime('now'))`,
+  )
+    .bind(projectId, userId, userId)
+    .run();
 }
 
 /**

@@ -1,7 +1,7 @@
 /**
  * Unit tests for trigger route validation logic.
  *
- * Tests request validation by mocking auth, project ownership, and DB layers,
+ * Tests request validation by mocking auth, project authorization, and DB layers,
  * then making HTTP requests through the Hono router.
  *
  * These tests focus on input validation (which happens before DB queries)
@@ -30,9 +30,9 @@ vi.mock('../../../src/middleware/auth', () => ({
 
 // Mock project auth — always succeeds and returns a project
 vi.mock('../../../src/middleware/project-auth', () => ({
-  requireOwnedProject: vi.fn().mockResolvedValue({
+  requireProjectCapability: vi.fn().mockResolvedValue({
     id: 'test-project-id',
-    userId: 'test-user-id',
+    userId: 'owner-user-id',
     name: 'Test Project',
     repository: 'user/repo',
     installationId: 'install-1',
@@ -449,7 +449,7 @@ describe('Trigger Routes', () => {
   // =============================================================================
   describe('DELETE /:triggerId/executions/:executionId — Delete execution', () => {
     it('returns 404 when execution does not exist', async () => {
-      // Queue: execution lookup (empty — no trigger lookup since requireOwnedProject is mocked)
+      // Queue: execution lookup (empty — no trigger lookup since project auth is mocked)
       queryResults = [[]];
 
       const res = await app.request(

@@ -5,7 +5,7 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { requireRouteParam } from '../lib/route-helpers';
 import { getUserId, requireApproved,requireAuth } from '../middleware/auth';
-import { requireOwnedProject } from '../middleware/project-auth';
+import { requireProjectAccess, requireProjectCapability } from '../middleware/project-auth';
 import { CreateAgentProfileSchema, jsonValidator, SetProjectDefaultProfileSchema,UpdateAgentProfileSchema } from '../schemas';
 import * as agentProfileService from '../services/agent-profiles';
 
@@ -20,7 +20,7 @@ agentProfileRoutes.get('/', async (c) => {
   const projectId = requireRouteParam(c, 'projectId');
   const db = drizzle(c.env.DATABASE, { schema });
 
-  await requireOwnedProject(db, projectId, userId);
+  await requireProjectAccess(db, projectId, userId);
 
   const profiles = await agentProfileService.listProfiles(db, projectId, userId, c.env);
   return c.json({ items: profiles });
@@ -32,7 +32,7 @@ agentProfileRoutes.post('/', jsonValidator(CreateAgentProfileSchema), async (c) 
   const projectId = requireRouteParam(c, 'projectId');
   const db = drizzle(c.env.DATABASE, { schema });
 
-  await requireOwnedProject(db, projectId, userId);
+  await requireProjectCapability(db, projectId, userId, 'project:update');
 
   const body = c.req.valid('json');
   const profile = await agentProfileService.createProfile(db, projectId, userId, body, c.env);
@@ -46,7 +46,7 @@ agentProfileRoutes.get('/:profileId', async (c) => {
   const profileId = requireRouteParam(c, 'profileId');
   const db = drizzle(c.env.DATABASE, { schema });
 
-  await requireOwnedProject(db, projectId, userId);
+  await requireProjectAccess(db, projectId, userId);
 
   const profile = await agentProfileService.getProfile(db, projectId, profileId, userId);
   return c.json(profile);
@@ -59,7 +59,7 @@ agentProfileRoutes.put('/:profileId', jsonValidator(UpdateAgentProfileSchema), a
   const profileId = requireRouteParam(c, 'profileId');
   const db = drizzle(c.env.DATABASE, { schema });
 
-  await requireOwnedProject(db, projectId, userId);
+  await requireProjectCapability(db, projectId, userId, 'project:update');
 
   const body = c.req.valid('json');
   const profile = await agentProfileService.updateProfile(db, projectId, profileId, userId, body);
@@ -73,7 +73,7 @@ agentProfileRoutes.delete('/:profileId', async (c) => {
   const profileId = requireRouteParam(c, 'profileId');
   const db = drizzle(c.env.DATABASE, { schema });
 
-  await requireOwnedProject(db, projectId, userId);
+  await requireProjectCapability(db, projectId, userId, 'project:update');
 
   await agentProfileService.deleteProfile(db, projectId, profileId, userId);
   return c.json({ success: true });
@@ -85,7 +85,7 @@ agentProfileRoutes.post('/resolve', jsonValidator(SetProjectDefaultProfileSchema
   const projectId = requireRouteParam(c, 'projectId');
   const db = drizzle(c.env.DATABASE, { schema });
 
-  await requireOwnedProject(db, projectId, userId);
+  await requireProjectAccess(db, projectId, userId);
 
   const body = c.req.valid('json');
   const resolved = await agentProfileService.resolveAgentProfile(

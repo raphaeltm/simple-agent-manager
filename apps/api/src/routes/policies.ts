@@ -13,7 +13,7 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { getAuth, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
-import { requireOwnedProject } from '../middleware/project-auth';
+import { requireProjectAccess, requireProjectCapability } from '../middleware/project-auth';
 import * as projectDataService from '../services/project-data';
 import { sanitizeUserInput } from './mcp/_helpers';
 
@@ -30,7 +30,7 @@ policyRoutes.get('/', async (c) => {
   const projectId = c.req.param('projectId');
   if (!projectId) throw errors.badRequest('Missing projectId');
   const db = drizzle(c.env.DATABASE, { schema });
-  await requireOwnedProject(db, projectId, auth.user.id);
+  await requireProjectAccess(db, projectId, auth.user.id);
 
   const limits = resolvePolicyLimits(c.env);
   const category = c.req.query('category') || null;
@@ -60,7 +60,7 @@ policyRoutes.get('/:policyId', async (c) => {
   if (!projectId) throw errors.badRequest('Missing projectId');
   if (!policyId) throw errors.badRequest('Missing policyId');
   const db = drizzle(c.env.DATABASE, { schema });
-  await requireOwnedProject(db, projectId, auth.user.id);
+  await requireProjectAccess(db, projectId, auth.user.id);
 
   const policy = await projectDataService.getPolicy(c.env, projectId, policyId);
   if (!policy) throw errors.notFound('Policy not found');
@@ -75,7 +75,7 @@ policyRoutes.post('/', async (c) => {
   const projectId = c.req.param('projectId');
   if (!projectId) throw errors.badRequest('Missing projectId');
   const db = drizzle(c.env.DATABASE, { schema });
-  await requireOwnedProject(db, projectId, auth.user.id);
+  await requireProjectCapability(db, projectId, auth.user.id, 'project:update');
 
   const body = await c.req.json<CreatePolicyRequest>();
   const limits = resolvePolicyLimits(c.env);
@@ -118,7 +118,7 @@ policyRoutes.patch('/:policyId', async (c) => {
   if (!projectId) throw errors.badRequest('Missing projectId');
   if (!policyId) throw errors.badRequest('Missing policyId');
   const db = drizzle(c.env.DATABASE, { schema });
-  await requireOwnedProject(db, projectId, auth.user.id);
+  await requireProjectCapability(db, projectId, auth.user.id, 'project:update');
 
   const body = await c.req.json<UpdatePolicyRequest>();
   const limits = resolvePolicyLimits(c.env);
@@ -175,7 +175,7 @@ policyRoutes.delete('/:policyId', async (c) => {
   if (!projectId) throw errors.badRequest('Missing projectId');
   if (!policyId) throw errors.badRequest('Missing policyId');
   const db = drizzle(c.env.DATABASE, { schema });
-  await requireOwnedProject(db, projectId, auth.user.id);
+  await requireProjectCapability(db, projectId, auth.user.id, 'project:update');
 
   const removed = await projectDataService.removePolicy(c.env, projectId, policyId);
   if (!removed) throw errors.notFound('Policy not found');

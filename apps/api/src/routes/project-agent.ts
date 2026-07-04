@@ -15,7 +15,7 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
-import { requireOwnedProject } from '../middleware/project-auth';
+import { requireProjectAccess, requireProjectCapability } from '../middleware/project-auth';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -31,7 +31,7 @@ app.post('/chat', requireAuth(), async (c) => {
   const projectId = c.req.param('projectId');
   if (!projectId) throw errors.badRequest('Missing projectId');
   const db = drizzle(c.env.DATABASE, { schema });
-  await requireOwnedProject(db, projectId, auth.user.id);
+  await requireProjectCapability(db, projectId, auth.user.id, 'task:write');
 
   const body = await c.req.json<{ conversationId?: string; message: string }>();
 
@@ -70,7 +70,7 @@ app.get('/conversations', requireAuth(), async (c) => {
   const projectId = c.req.param('projectId');
   if (!projectId) throw errors.badRequest('Missing projectId');
   const db = drizzle(c.env.DATABASE, { schema });
-  await requireOwnedProject(db, projectId, auth.user.id);
+  await requireProjectAccess(db, projectId, auth.user.id);
 
   const stub = getProjectAgent(c.env, projectId);
   const response = await stub.fetch('https://project-agent/conversations');
@@ -84,7 +84,7 @@ app.get('/conversations/:id/messages', requireAuth(), async (c) => {
   const projectId = c.req.param('projectId');
   if (!projectId) throw errors.badRequest('Missing projectId');
   const db = drizzle(c.env.DATABASE, { schema });
-  await requireOwnedProject(db, projectId, auth.user.id);
+  await requireProjectAccess(db, projectId, auth.user.id);
 
   const conversationId = c.req.param('id');
   const limit = c.req.query('limit') || '';
@@ -103,7 +103,7 @@ app.get('/search', requireAuth(), async (c) => {
   const projectId = c.req.param('projectId');
   if (!projectId) throw errors.badRequest('Missing projectId');
   const db = drizzle(c.env.DATABASE, { schema });
-  await requireOwnedProject(db, projectId, auth.user.id);
+  await requireProjectAccess(db, projectId, auth.user.id);
 
   const query = c.req.query('query') || '';
   const limit = c.req.query('limit') || '';

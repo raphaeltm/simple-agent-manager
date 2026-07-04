@@ -13,6 +13,11 @@ const mockService = vi.hoisted(() => ({
   resolveAgentProfile: vi.fn(),
 }));
 
+const mockProjectAuth = vi.hoisted(() => ({
+  requireProjectAccess: vi.fn(),
+  requireProjectCapability: vi.fn(),
+}));
+
 // Mock auth middleware
 vi.mock('../../../src/middleware/auth', () => ({
   requireAuth: () => vi.fn((c: any, next: any) => next()),
@@ -20,10 +25,8 @@ vi.mock('../../../src/middleware/auth', () => ({
   getUserId: () => 'test-user-id',
 }));
 vi.mock('../../../src/middleware/project-auth', () => ({
-  requireOwnedProject: vi.fn().mockResolvedValue({
-    id: 'test-project-id',
-    userId: 'test-user-id',
-  }),
+  requireProjectAccess: mockProjectAuth.requireProjectAccess,
+  requireProjectCapability: mockProjectAuth.requireProjectCapability,
 }));
 vi.mock('drizzle-orm/d1', () => ({
   drizzle: vi.fn().mockReturnValue({}),
@@ -72,6 +75,14 @@ describe('Agent Profiles Routes', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockProjectAuth.requireProjectAccess.mockResolvedValue({
+      id: 'test-project-id',
+      userId: 'owner-user-id',
+    });
+    mockProjectAuth.requireProjectCapability.mockResolvedValue({
+      id: 'test-project-id',
+      userId: 'owner-user-id',
+    });
 
     app = new Hono<{ Bindings: Env }>();
     app.onError((err, c) => {
@@ -85,7 +96,7 @@ describe('Agent Profiles Routes', () => {
   });
 
   describe('GET /', () => {
-    it('returns list of profiles', async () => {
+    it('allows an active project member who is not the project owner to list profiles', async () => {
       const profiles = [
         makeProfile({ id: 'p1', name: 'default' }),
         makeProfile({ id: 'p2', name: 'planner' }),
@@ -99,6 +110,25 @@ describe('Agent Profiles Routes', () => {
       expect(body.items).toHaveLength(2);
       expect(body.items[0].name).toBe('default');
       expect(body.items[1].name).toBe('planner');
+      expect(mockProjectAuth.requireProjectAccess).toHaveBeenCalledWith(
+        expect.anything(),
+        'test-project-id',
+        'test-user-id'
+      );
+    });
+
+    it('rejects non-members before listing profiles', async () => {
+      mockProjectAuth.requireProjectAccess.mockRejectedValueOnce(
+        Object.assign(new Error('Project not found'), {
+          statusCode: 404,
+          error: 'NOT_FOUND',
+        })
+      );
+
+      const res = await app.request(`${BASE_URL}${REQUEST_PATH}`, { method: 'GET' }, makeEnv());
+
+      expect(res.status).toBe(404);
+      expect(mockService.listProfiles).not.toHaveBeenCalled();
     });
   });
 

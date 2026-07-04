@@ -36,7 +36,8 @@ export interface RuntimeRouteTestConfig {
   expectedInsertEntity: Record<string, unknown>;
   /** Caller's hoisted mocks for project auth + encryption. */
   mocks: {
-    requireOwnedProject: ReturnType<typeof vi.fn>;
+    requireProjectAccess: ReturnType<typeof vi.fn>;
+    requireProjectCapability: ReturnType<typeof vi.fn>;
     encrypt: ReturnType<typeof vi.fn>;
   };
 }
@@ -110,7 +111,8 @@ export function runRuntimeRouteTests(config: RuntimeRouteTestConfig): void {
       };
 
       (drizzle as any).mockReturnValue(mockDB);
-      mocks.requireOwnedProject.mockResolvedValue({ id: 'proj-1', userId: 'user-1' });
+      mocks.requireProjectAccess.mockResolvedValue({ id: 'proj-1', userId: 'owner-1' });
+      mocks.requireProjectCapability.mockResolvedValue({ id: 'proj-1', userId: 'owner-1' });
       mocks.encrypt.mockResolvedValue({ ciphertext: 'enc-value', iv: 'enc-iv' });
 
       app = createRouteTestApp(basePath, routes);

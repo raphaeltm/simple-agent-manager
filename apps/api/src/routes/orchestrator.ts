@@ -16,8 +16,8 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { getAuth, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
-import { requireOwnedProject } from '../middleware/project-auth';
 import * as orchestratorService from '../services/project-orchestrator';
+import { requireProjectTaskRead, requireProjectTaskWrite } from './task-project-auth';
 
 const orchestratorRoutes = new Hono<{ Bindings: Env }>();
 
@@ -30,7 +30,7 @@ orchestratorRoutes.get('/status', async (c) => {
   const db = drizzle(c.env.DATABASE, { schema });
   const projectId = c.req.param('projectId');
   if (!projectId) throw errors.badRequest('Missing projectId');
-  await requireOwnedProject(db, projectId, auth.user.id);
+  await requireProjectTaskRead(db, projectId, auth.user.id);
 
   const status = await orchestratorService.getOrchestratorStatus(c.env, projectId);
   return c.json(status);
@@ -43,7 +43,7 @@ orchestratorRoutes.get('/queue', async (c) => {
   const db = drizzle(c.env.DATABASE, { schema });
   const projectId = c.req.param('projectId');
   if (!projectId) throw errors.badRequest('Missing projectId');
-  await requireOwnedProject(db, projectId, auth.user.id);
+  await requireProjectTaskRead(db, projectId, auth.user.id);
 
   const queue = await orchestratorService.getSchedulingQueue(c.env, projectId);
   return c.json({ queue });
@@ -57,7 +57,7 @@ orchestratorRoutes.post('/missions/:missionId/pause', async (c) => {
   const projectId = c.req.param('projectId');
   const missionId = c.req.param('missionId');
   if (!projectId || !missionId) throw errors.badRequest('Missing projectId or missionId');
-  await requireOwnedProject(db, projectId, auth.user.id);
+  await requireProjectTaskWrite(db, projectId, auth.user.id);
 
   const ok = await orchestratorService.pauseMission(c.env, projectId, missionId);
   if (!ok) throw errors.notFound('Mission not found or not active');
@@ -72,7 +72,7 @@ orchestratorRoutes.post('/missions/:missionId/resume', async (c) => {
   const projectId = c.req.param('projectId');
   const missionId = c.req.param('missionId');
   if (!projectId || !missionId) throw errors.badRequest('Missing projectId or missionId');
-  await requireOwnedProject(db, projectId, auth.user.id);
+  await requireProjectTaskWrite(db, projectId, auth.user.id);
 
   const ok = await orchestratorService.resumeMission(c.env, projectId, missionId);
   if (!ok) throw errors.notFound('Mission not found or not paused');
@@ -87,7 +87,7 @@ orchestratorRoutes.post('/missions/:missionId/cancel', async (c) => {
   const projectId = c.req.param('projectId');
   const missionId = c.req.param('missionId');
   if (!projectId || !missionId) throw errors.badRequest('Missing projectId or missionId');
-  await requireOwnedProject(db, projectId, auth.user.id);
+  await requireProjectTaskWrite(db, projectId, auth.user.id);
 
   const ok = await orchestratorService.cancelMission(c.env, projectId, missionId);
   if (!ok) throw errors.notFound('Mission not found');
@@ -102,7 +102,7 @@ orchestratorRoutes.post('/tasks/:taskId/override', async (c) => {
   const projectId = c.req.param('projectId');
   const taskId = c.req.param('taskId');
   if (!projectId || !taskId) throw errors.badRequest('Missing projectId or taskId');
-  await requireOwnedProject(db, projectId, auth.user.id);
+  await requireProjectTaskWrite(db, projectId, auth.user.id);
 
   const body = await c.req.json<{ missionId: string; newState: string; reason: string }>();
   if (!body.missionId || !body.newState || !body.reason) {

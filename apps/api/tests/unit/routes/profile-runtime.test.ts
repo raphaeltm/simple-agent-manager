@@ -4,7 +4,8 @@ import { profileRuntimeRoutes } from '../../../src/routes/profile-runtime';
 import { runRuntimeRouteTests } from './runtime-routes-test-suite';
 
 const mocks = vi.hoisted(() => ({
-  requireOwnedProject: vi.fn(),
+  requireProjectAccess: vi.fn(),
+  requireProjectCapability: vi.fn(),
   encrypt: vi.fn(),
 }));
 
@@ -15,7 +16,8 @@ vi.mock('../../../src/middleware/auth', () => ({
   getUserId: () => 'user-1',
 }));
 vi.mock('../../../src/middleware/project-auth', () => ({
-  requireOwnedProject: mocks.requireOwnedProject,
+  requireProjectAccess: mocks.requireProjectAccess,
+  requireProjectCapability: mocks.requireProjectCapability,
 }));
 vi.mock('../../../src/services/encryption', () => ({
   encrypt: mocks.encrypt,
