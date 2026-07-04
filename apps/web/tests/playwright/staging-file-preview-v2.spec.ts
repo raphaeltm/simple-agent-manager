@@ -24,8 +24,14 @@ const HTML_FIXTURE = `<!doctype html>
     <pre id="result">not run</pre>
     <script>
       function mark() {
+        let cookieResult = 'blocked';
+        try {
+          cookieResult = document.cookie || 'blocked';
+        } catch (err) {
+          cookieResult = 'blocked';
+        }
         document.getElementById('result').textContent =
-          'script ran; cookie=' + (document.cookie || 'blocked');
+          'script ran; cookie=' + cookieResult;
       }
       document.getElementById('run').addEventListener('click', mark);
       mark();
@@ -196,7 +202,11 @@ test.describe('File Preview v2 staging', () => {
     );
 
     const htmlPreview = await page.request.get(`${STAGING_API}/api/projects/${PROJECT_ID}/library/${htmlFile.id}/preview`);
-    expect(htmlPreview.status()).toBe(200);
+    const htmlPreviewBody = await htmlPreview.text();
+    expect(
+      htmlPreview.status(),
+      `HTML preview failed for ${JSON.stringify(htmlFile)} with body: ${htmlPreviewBody}`,
+    ).toBe(200);
     expect(htmlPreview.headers()['content-type']).toBe('text/plain; charset=utf-8');
     expect(htmlPreview.headers()['content-type']).not.toContain('text/html');
     expect(htmlPreview.headers()['content-security-policy']).toBe("default-src 'none'");
@@ -228,13 +238,13 @@ test.describe('File Preview v2 staging', () => {
     await page.getByRole('button', { name: /Close preview/ }).click();
 
     await page.getByRole('button', { name: `Open ${imageFile.filename}` }).click();
-    const image = page.getByRole('img', { name: imageFile.filename });
+    const imageViewer = page.locator('div[style*="touch-action: none"]').first();
+    const image = imageViewer.getByRole('img', { name: imageFile.filename });
     await expect(image).toBeVisible();
     const imageBox = await image.boundingBox();
     expect(imageBox).not.toBeNull();
     const box = imageBox!;
-    const canvasSelector = 'div[style*="touch-action: none"]';
-    await page.dispatchEvent(canvasSelector, 'pointerdown', {
+    await imageViewer.dispatchEvent('pointerdown', {
       pointerId: 1,
       pointerType: 'touch',
       isPrimary: true,
@@ -242,7 +252,7 @@ test.describe('File Preview v2 staging', () => {
       clientX: box.x + box.width / 2 - 30,
       clientY: box.y + box.height / 2,
     });
-    await page.dispatchEvent(canvasSelector, 'pointerdown', {
+    await imageViewer.dispatchEvent('pointerdown', {
       pointerId: 2,
       pointerType: 'touch',
       isPrimary: false,
@@ -250,7 +260,7 @@ test.describe('File Preview v2 staging', () => {
       clientX: box.x + box.width / 2 + 30,
       clientY: box.y + box.height / 2,
     });
-    await page.dispatchEvent(canvasSelector, 'pointermove', {
+    await imageViewer.dispatchEvent('pointermove', {
       pointerId: 1,
       pointerType: 'touch',
       isPrimary: true,
@@ -258,7 +268,7 @@ test.describe('File Preview v2 staging', () => {
       clientX: box.x + box.width / 2 - 90,
       clientY: box.y + box.height / 2,
     });
-    await page.dispatchEvent(canvasSelector, 'pointermove', {
+    await imageViewer.dispatchEvent('pointermove', {
       pointerId: 2,
       pointerType: 'touch',
       isPrimary: false,
@@ -266,13 +276,13 @@ test.describe('File Preview v2 staging', () => {
       clientX: box.x + box.width / 2 + 90,
       clientY: box.y + box.height / 2,
     });
-    await page.dispatchEvent(canvasSelector, 'pointerup', {
+    await imageViewer.dispatchEvent('pointerup', {
       pointerId: 1,
       pointerType: 'touch',
       isPrimary: true,
       bubbles: true,
     });
-    await page.dispatchEvent(canvasSelector, 'pointerup', {
+    await imageViewer.dispatchEvent('pointerup', {
       pointerId: 2,
       pointerType: 'touch',
       isPrimary: false,

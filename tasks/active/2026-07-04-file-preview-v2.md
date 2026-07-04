@@ -26,7 +26,7 @@ Project library previews need a stronger full-screen experience and safe support
 - [x] Update API contract docs if the preview response contract changes.
 - [x] Run local Playwright visual audits at 375x667 and 1280x800 for image, markdown, PDF, and HTML modal content with overflow assertions.
 - [x] Run security review for API HTML handling and iframe sandbox.
-- [ ] Deploy and verify on staging: interactive HTML from a DocumentCard runs in sandbox without session cookie access, and mobile pinch zoom works.
+- [x] Deploy and verify on staging: interactive HTML from a DocumentCard runs in sandbox without session cookie access, and mobile pinch zoom works.
 
 ## Acceptance Criteria
 
