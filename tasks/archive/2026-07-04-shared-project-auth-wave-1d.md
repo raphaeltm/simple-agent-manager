@@ -44,6 +44,19 @@ Waves 1A, 1B, and 1C migrated the major route families from owner-only project a
 - API typecheck passed: `pnpm --filter @simple-agent-manager/api typecheck`.
 - API lint passed with existing warnings only: `pnpm --filter @simple-agent-manager/api lint`.
 - Full API test suite passed: `pnpm --filter @simple-agent-manager/api test` (369 files, 5702 tests).
+- Root lint passed with existing warnings only: `pnpm lint`.
+- Root typecheck passed: `pnpm typecheck`.
+- Root test suite passed: `pnpm test`.
+- Root build passed: `pnpm build`.
+
+## Task Completion Validation
+
+- Research-to-checklist: PASS. The checklist covers the audit finding, project list migration, intentional private/user-scoped boundaries, tests, and validation.
+- Checklist-to-diff: PASS. The diff changes `GET /api/projects`, adds cross-cutting route tests, adds creator-only prompt coverage, and records classification/validation evidence.
+- Acceptance criteria-to-tests: PASS. Grep proves no route `requireOwnedProject` call sites remain, the new consolidation tests cover admin list visibility and owner-only deletion, prior wave tests cover representative route-family access and non-member rejection, and the chat prompt test covers creator-only message submission.
+- UI-to-backend: N/A. This wave has no UI changes.
+- Multi-resource selection: N/A. This wave does not add a multi-resource selector or new cross-resource endpoint.
+- Vertical slice: PASS. The changed HTTP route is exercised through the real Hono route with mocked Drizzle boundaries and realistic project/member rows; full API and root suites passed.
 
 ## Acceptance Criteria
 
