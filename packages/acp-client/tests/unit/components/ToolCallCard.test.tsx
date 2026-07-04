@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { ToolCallCard } from '../../../src/components/ToolCallCard';
 import type { ToolCallItem } from '../../../src/hooks/useAcpMessages';
 
@@ -87,8 +87,13 @@ describe('ToolCallCard', () => {
 
     fireEvent.click(header);
 
-    await waitFor(() => expect(onLoadContent).toHaveBeenCalledWith('msg-empty-tool'));
-    expect(screen.getByText('No output.')).toBeTruthy();
+    // Assert the FINAL UI state asynchronously. handleToggle calls onLoadContent
+    // and only afterwards awaits the promise and flushes lazyContent/loading
+    // state — a waitFor on "mock was called" resolves during the intermediate
+    // "Loading content…" window and a sync getByText races. findByText waits
+    // for the settled state deterministically.
+    expect(await screen.findByText('No output.')).toBeTruthy();
+    expect(onLoadContent).toHaveBeenCalledWith('msg-empty-tool');
   });
 
   describe('onFileClick behavior', () => {
