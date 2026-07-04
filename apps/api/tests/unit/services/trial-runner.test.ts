@@ -160,6 +160,7 @@ describe('trial-runner — startDiscoveryAgent', () => {
       'proj_1',
       'ws_1',
       'acme/repo',
+      null,
       null
     );
     expect(createAcpSessionMock).toHaveBeenCalledTimes(1);
@@ -187,6 +188,7 @@ describe('trial-runner — startDiscoveryAgent', () => {
       'p',
       'w',
       'Exploring repository',
+      null,
       null
     );
   });

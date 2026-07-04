@@ -1208,7 +1208,7 @@ describe('MCP Routes', () => {
       );
 
       expect(res.status).toBe(200);
-      expect(mockDoStub.listSessions).toHaveBeenCalledWith('active', expect.any(Number), 0, null);
+      expect(mockDoStub.listSessions).toHaveBeenCalledWith('active', expect.any(Number), 0, null, null);
     });
   });
 
