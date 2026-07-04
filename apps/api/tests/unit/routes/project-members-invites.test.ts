@@ -257,6 +257,43 @@ describe('project invite links and access requests', () => {
     );
   });
 
+  it('hides pending access requests from active members without member management capability', async () => {
+    mocks.currentUserId = 'viewer-user';
+    selectResults.push(
+      [
+        {
+          member: {
+            projectId: 'proj-1',
+            userId: 'viewer-user',
+            role: 'viewer',
+            status: 'active',
+            invitedBy: 'owner-user',
+            createdAt: '2026-07-04T00:00:00.000Z',
+            updatedAt: '2026-07-04T00:00:00.000Z',
+          },
+          userId: 'viewer-user',
+          name: 'Viewer',
+          email: 'viewer@example.com',
+          image: null,
+          avatarUrl: null,
+        },
+      ],
+      [makeInviteLink()]
+    );
+
+    const response = await app.request('/api/projects/proj-1/members', {}, env);
+
+    expect(response.status).toBe(200);
+    const body = await response.json<{
+      accessRequests: unknown[];
+      inviteLinks: unknown[];
+      members: unknown[];
+    }>();
+    expect(body.members).toHaveLength(1);
+    expect(body.inviteLinks).toHaveLength(1);
+    expect(body.accessRequests).toEqual([]);
+  });
+
   it('lets an authenticated non-member request access through a valid invite link', async () => {
     mocks.currentUserId = 'requester-user';
     selectResults.push(

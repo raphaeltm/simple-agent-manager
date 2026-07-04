@@ -338,19 +338,23 @@ projectMembersRoutes.get('/:id/members', async (c) => {
     .where(eq(schema.projectInviteLinks.projectId, projectId))
     .orderBy(sql`${schema.projectInviteLinks.createdAt} desc`);
 
-  const requestRows = await db
-    .select({
-      request: schema.projectAccessRequests,
-      userId: schema.users.id,
-      name: schema.users.name,
-      email: schema.users.email,
-      image: schema.users.image,
-      avatarUrl: schema.users.avatarUrl,
-    })
-    .from(schema.projectAccessRequests)
-    .leftJoin(schema.users, eq(schema.projectAccessRequests.requesterUserId, schema.users.id))
-    .where(eq(schema.projectAccessRequests.projectId, projectId))
-    .orderBy(sql`${schema.projectAccessRequests.requestedAt} desc`);
+  const currentMember = memberRows.find((row) => row.member.userId === userId)?.member;
+  const canManageRequests = currentMember?.role === 'owner' || currentMember?.role === 'admin';
+  const requestRows = canManageRequests
+    ? await db
+        .select({
+          request: schema.projectAccessRequests,
+          userId: schema.users.id,
+          name: schema.users.name,
+          email: schema.users.email,
+          image: schema.users.image,
+          avatarUrl: schema.users.avatarUrl,
+        })
+        .from(schema.projectAccessRequests)
+        .leftJoin(schema.users, eq(schema.projectAccessRequests.requesterUserId, schema.users.id))
+        .where(eq(schema.projectAccessRequests.projectId, projectId))
+        .orderBy(sql`${schema.projectAccessRequests.requestedAt} desc`)
+    : [];
 
   const response: ProjectMembersResponse = {
     members: memberRows.map((row): ProjectMemberResponse => ({
