@@ -188,12 +188,20 @@ submitRoutes.post('/submit', requireAuth(), requireApproved(), jsonValidator(Sub
     validatedAttachments = body.attachments;
   }
 
+  let inheritedAttributionUserId: string | null = null;
+  let inheritedAttributionProjectId: string | null = null;
+  let inheritedAttributionSource: import('@simple-agent-manager/shared').CredentialSource | null = null;
+
   // Validate parentTaskId if provided — must belong to the same project
   if (body.parentTaskId) {
     const [parentTask] = await db
       .select({
         id: schema.tasks.id,
         projectId: schema.tasks.projectId,
+        userId: schema.tasks.userId,
+        credentialAttributionUserId: schema.tasks.credentialAttributionUserId,
+        credentialAttributionProjectId: schema.tasks.credentialAttributionProjectId,
+        credentialAttributionSource: schema.tasks.credentialAttributionSource,
       })
       .from(schema.tasks)
       .where(eq(schema.tasks.id, body.parentTaskId))
@@ -205,6 +213,11 @@ submitRoutes.post('/submit', requireAuth(), requireApproved(), jsonValidator(Sub
     if (parentTask.projectId !== projectId) {
       throw errors.badRequest('Parent task belongs to a different project');
     }
+    inheritedAttributionUserId = parentTask.credentialAttributionUserId ?? parentTask.userId;
+    inheritedAttributionSource = (parentTask.credentialAttributionSource ?? 'user') as import('@simple-agent-manager/shared').CredentialSource;
+    inheritedAttributionProjectId = inheritedAttributionSource === 'project'
+      ? (parentTask.credentialAttributionProjectId ?? projectId)
+      : null;
   }
 
   // Validate nodeId if provided
@@ -324,11 +337,19 @@ submitRoutes.post('/submit', requireAuth(), requireApproved(), jsonValidator(Sub
   // ensuring quota enforcement is based on the actual credential source — not
   // just whether the user has ANY cloud credential registered.
   const { resolveCredentialSource } = await import('../../services/provider-credentials');
-  const credResult = await resolveCredentialSource(db, userId, provider ?? undefined);
+  const credentialResolutionUserId = inheritedAttributionUserId ?? userId;
+  const credentialResolutionProjectId = inheritedAttributionUserId ? inheritedAttributionProjectId : projectId;
+  const credResult = await resolveCredentialSource(
+    db,
+    credentialResolutionUserId,
+    provider ?? undefined,
+    credentialResolutionProjectId
+  );
 
   if (!credResult) {
     throw errors.forbidden('Cloud provider credentials required. Connect your account in Settings.');
   }
+  const effectiveProvider = provider ?? credResult.providerName;
 
   if (credResult.credentialSource === 'platform') {
     const quotaEnforcementEnabled = c.env.COMPUTE_QUOTA_ENFORCEMENT_ENABLED !== 'false';
@@ -343,6 +364,12 @@ submitRoutes.post('/submit', requireAuth(), requireApproved(), jsonValidator(Sub
       }
     }
   }
+
+  const credentialAttributionUserId = inheritedAttributionUserId ?? userId;
+  const credentialAttributionSource = inheritedAttributionSource ?? credResult.credentialSource;
+  const credentialAttributionProjectId = credentialAttributionSource === 'project'
+    ? (inheritedAttributionProjectId ?? projectId)
+    : null;
 
   // Determine task mode: explicit override > profile > inferred from workspace profile > default 'task'
   const taskMode = body.taskMode
@@ -386,6 +413,9 @@ submitRoutes.post('/submit', requireAuth(), requireApproved(), jsonValidator(Sub
       : (resolvedProfile?.resourceRequirementsJson ?? null),
     resourceRequirementsSource: resolvedReservation.source,
     resolvedReservationJson: JSON.stringify(resolvedReservation),
+    credentialAttributionUserId,
+    credentialAttributionProjectId,
+    credentialAttributionSource,
     createdBy: userId,
     createdAt: now,
     updatedAt: now,
@@ -538,7 +568,10 @@ submitRoutes.post('/submit', requireAuth(), requireApproved(), jsonValidator(Sub
       agentType: body.agentType ?? resolvedProfile?.agentType ?? project.defaultAgentType ?? null,
       workspaceProfile,
       devcontainerConfigName,
-      cloudProvider: provider,
+      cloudProvider: effectiveProvider,
+      credentialAttributionUserId,
+      credentialAttributionProjectId,
+      credentialAttributionSource,
       taskMode,
       // Resolution chain: agent profile > project.agentDefaults[agentType] > null (VM agent
       // then falls through to user agent_settings via callback, then platform default).

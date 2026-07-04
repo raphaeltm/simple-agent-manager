@@ -3,7 +3,7 @@
  *
  * Handles workspace_creation, workspace_dispatch, workspace_ready, and attachment_transfer steps.
  */
-import { DEFAULT_WORKSPACE_PROFILE } from '@simple-agent-manager/shared';
+import { type CredentialSource,DEFAULT_WORKSPACE_PROFILE } from '@simple-agent-manager/shared';
 
 import { log } from '../../lib/logger';
 import type { DevcontainerCacheCredentials } from '../../services/devcontainer-cache';
@@ -207,7 +207,7 @@ async function startComputeTrackingBestEffort(
       nodeId,
       vmSize: state.config.vmSize,
       cloudProvider: nodeRow?.cloud_provider,
-      credentialSource: (nodeRow?.credential_source as 'user' | 'platform') ?? 'user',
+      credentialSource: (nodeRow?.credential_source as CredentialSource | null) ?? 'user',
     });
   } catch (err) {
     log.error('task_runner_do.compute_tracking_start_failed', {

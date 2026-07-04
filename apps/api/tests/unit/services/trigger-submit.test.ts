@@ -47,6 +47,12 @@ vi.mock('../../../src/routes/projects/_helpers', () => ({
   requireRepositoryOwnerAccess: vi.fn().mockResolvedValue(undefined),
 }));
 
+const providerCredentialMocks = vi.hoisted(() => ({
+  resolveCredentialSource: vi.fn(),
+}));
+
+vi.mock('../../../src/services/provider-credentials', () => providerCredentialMocks);
+
 let ulidCounter = 0;
 vi.mock('../../../src/lib/ulid', () => ({
   ulid: () => `ULID${String(++ulidCounter).padStart(6, '0')}`,
@@ -126,7 +132,6 @@ function triggerProjectRow(overrides: Record<string, unknown> = {}) {
 function queueTriggerSubmitLookups(project = triggerProjectRow()) {
   mockSelectResult.push(
     [project],
-    [{ id: 'cred-1' }], // credential
     [{ githubId: '123', name: 'User', email: 'user@test.com' }] // user
   );
 }
@@ -140,10 +145,14 @@ describe('submitTriggeredTask', () => {
     ulidCounter = 0;
     vi.clearAllMocks();
     mockSelectResult.length = 0;
+    providerCredentialMocks.resolveCredentialSource.mockResolvedValue({
+      credentialSource: 'user',
+      providerName: 'hetzner',
+    });
   });
 
   it('creates a task with trigger metadata fields', async () => {
-    // Setup mock DB responses: project, credential, user
+    // Setup mock DB responses: project, user
     queueTriggerSubmitLookups();
 
     const { submitTriggeredTask } = await import('../../../src/services/trigger-submit');
@@ -160,6 +169,44 @@ describe('submitTriggeredTask', () => {
     expect(insertCall.triggerId).toBe('trigger-1');
     expect(insertCall.triggerExecutionId).toBe('exec-1');
     expect(insertCall.status).toBe('queued');
+    expect(insertCall.credentialAttributionUserId).toBe('user-1');
+    expect(insertCall.credentialAttributionSource).toBe('user');
+  });
+
+  it('pins project credential attribution for member A trigger even if another member edited it', async () => {
+    providerCredentialMocks.resolveCredentialSource.mockResolvedValueOnce({
+      credentialSource: 'project',
+      providerName: 'hetzner',
+    });
+    queueTriggerSubmitLookups(triggerProjectRow({ userId: 'member-b' }));
+
+    const { submitTriggeredTask } = await import('../../../src/services/trigger-submit');
+    await submitTriggeredTask({} as any, {
+      ...defaultInput,
+      userId: 'member-a',
+      projectId: 'project-1',
+    });
+
+    expect(providerCredentialMocks.resolveCredentialSource).toHaveBeenCalledWith(
+      expect.anything(),
+      'member-a',
+      undefined,
+      'project-1',
+    );
+    const insertCall = mockInsertValues.mock.calls[0]![0];
+    expect(insertCall.credentialAttributionUserId).toBe('member-a');
+    expect(insertCall.credentialAttributionProjectId).toBe('project-1');
+    expect(insertCall.credentialAttributionSource).toBe('project');
+    expect(taskRunnerDo.startTaskRunnerDO).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        userId: 'member-a',
+        credentialAttributionUserId: 'member-a',
+        credentialAttributionProjectId: 'project-1',
+        credentialAttributionSource: 'project',
+        cloudProvider: 'hetzner',
+      }),
+    );
   });
 
   it('persists resolved skill metadata for trigger submissions', async () => {
@@ -216,11 +263,12 @@ describe('submitTriggeredTask', () => {
   });
 
   it('throws when user has no cloud provider credentials', async () => {
-    mockSelectResult.push([triggerProjectRow({ installationId: 'i1' })], []); // no credentials
+    providerCredentialMocks.resolveCredentialSource.mockResolvedValueOnce(null);
+    mockSelectResult.push([triggerProjectRow({ installationId: 'i1' })]);
 
     const { submitTriggeredTask } = await import('../../../src/services/trigger-submit');
     await expect(submitTriggeredTask({} as any, defaultInput)).rejects.toThrow(
-      'no cloud provider credentials'
+      'No cloud provider credentials available'
     );
   });
 

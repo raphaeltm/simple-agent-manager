@@ -1,6 +1,6 @@
 import type { Provider, ProviderConfig } from '@simple-agent-manager/providers';
 import { createProvider, GcpProvider } from '@simple-agent-manager/providers';
-import type { CredentialProvider, CredentialSource, GcpOidcCredential } from '@simple-agent-manager/shared';
+import { computeAssembler, type CredentialProvider, type CredentialSource, type GcpOidcCredential } from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
 
@@ -8,7 +8,7 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { expectJsonRecord } from '../lib/runtime-validation';
 import { lazyBackfillIfNeeded } from './composable-credentials/lazy-backfill';
-import { resolveComputeConfig } from './composable-credentials/resolve';
+import { resolveForConsumer } from './composable-credentials/resolve';
 import { decrypt } from './encryption';
 import { getPlatformCloudCredential } from './platform-credentials';
 
@@ -207,6 +207,7 @@ export async function createProviderForUser(
   encryptionKey: string,
   env: Env & Partial<HetznerCapacityRetryEnv>,
   targetProvider?: CredentialProvider,
+  projectId?: string | null,
 ): Promise<{ provider: Provider; providerName: CredentialProvider; credentialSource: CredentialSource } | null> {
   // --- Primary path: composable-credentials resolver -------------------------
   // CC resolver requires a specific provider name (compute consumers are always
@@ -216,7 +217,7 @@ export async function createProviderForUser(
   // practice. When legacy tables are fully retired, all call sites must pass
   // targetProvider explicitly.
   if (targetProvider) {
-    const ccResult = await resolveProviderViaCC(db, userId, encryptionKey, env, targetProvider);
+    const ccResult = await resolveProviderViaCC(db, userId, encryptionKey, env, targetProvider, projectId);
     if (ccResult !== undefined) return ccResult;
   }
 
@@ -234,8 +235,10 @@ async function resolveProviderViaCC(
   encryptionKey: string,
   env: Env & Partial<HetznerCapacityRetryEnv>,
   targetProvider: CredentialProvider,
+  projectId?: string | null,
 ): Promise<{ provider: Provider; providerName: CredentialProvider; credentialSource: CredentialSource } | null | undefined> {
-  let ccConfig = await resolveComputeConfig(db, userId, encryptionKey, targetProvider);
+  const consumer = { kind: 'compute' as const, provider: targetProvider };
+  let resolved = await resolveForConsumer(db, userId, encryptionKey, consumer, projectId);
 
   // A platform-only first resolution (isPlatform) must be treated like a miss:
   // an enabled platform default resolves non-null at Tier 3 on the first pass,
@@ -243,20 +246,26 @@ async function resolveProviderViaCC(
   // legacy credentials. Run the backfill, then re-resolve so the user's own
   // credential takes precedence over the platform default. Mirrors the
   // agent-path platformOnly logic in resolveAgentKeyViaCC (credentials.ts).
-  const platformOnly = ccConfig !== null && ccConfig.isPlatform;
-  if (!ccConfig || platformOnly) {
+  const platformOnly = resolved !== null && resolved.source === 'platform';
+  if (!resolved || platformOnly) {
     const didBackfill = await lazyBackfillIfNeeded(db, userId);
     if (didBackfill) {
-      ccConfig = await resolveComputeConfig(db, userId, encryptionKey, targetProvider);
-    } else if (!ccConfig) {
+      resolved = await resolveForConsumer(db, userId, encryptionKey, consumer, projectId);
+    } else if (!resolved) {
       return undefined;
     }
   }
 
-  if (!ccConfig) return undefined;
+  if (!resolved) return undefined;
 
   const providerName = targetProvider;
-  const credentialSource: CredentialSource = ccConfig.isPlatform ? 'platform' : 'user';
+  const credentialSource: CredentialSource =
+    resolved.source === 'project-attachment'
+      ? 'project'
+      : resolved.source === 'user-attachment'
+        ? 'user'
+        : 'platform';
+  const ccConfig = computeAssembler.assemble(resolved);
 
   // GCP requires runtime STS token exchange — not a simple token
   if (providerName === 'gcp') {
@@ -356,7 +365,13 @@ export async function resolveCredentialSource(
   db: ReturnType<typeof drizzle>,
   userId: string,
   targetProvider?: CredentialProvider,
+  projectId?: string | null,
 ): Promise<{ credentialSource: CredentialSource; providerName: CredentialProvider } | null> {
+  const projectCredential = await resolveProjectComputeCredentialSource(db, userId, targetProvider, projectId);
+  if (projectCredential !== undefined) {
+    return projectCredential;
+  }
+
   // 1. Check user's own credential for the target provider
   const userConditions = [
     eq(schema.credentials.userId, userId),
@@ -402,4 +417,49 @@ export async function resolveCredentialSource(
   }
 
   return null;
+}
+
+async function resolveProjectComputeCredentialSource(
+  db: ReturnType<typeof drizzle>,
+  userId: string,
+  targetProvider?: CredentialProvider,
+  projectId?: string | null,
+): Promise<{ credentialSource: CredentialSource; providerName: CredentialProvider } | null | undefined> {
+  if (!projectId) return undefined;
+
+  const conditions = [
+    eq(schema.ccAttachments.userId, userId),
+    eq(schema.ccAttachments.projectId, projectId),
+    eq(schema.ccAttachments.consumerKind, 'compute'),
+  ];
+  if (targetProvider) {
+    conditions.push(eq(schema.ccAttachments.consumerTarget, targetProvider));
+  }
+
+  const rows = await db
+    .select({
+      attachmentActive: schema.ccAttachments.isActive,
+      consumerTarget: schema.ccAttachments.consumerTarget,
+      configurationActive: schema.ccConfigurations.isActive,
+      credentialId: schema.ccConfigurations.credentialId,
+      credentialActive: schema.ccCredentials.isActive,
+    })
+    .from(schema.ccAttachments)
+    .innerJoin(schema.ccConfigurations, eq(schema.ccAttachments.configurationId, schema.ccConfigurations.id))
+    .leftJoin(schema.ccCredentials, eq(schema.ccConfigurations.credentialId, schema.ccCredentials.id))
+    .where(and(...conditions))
+    .limit(targetProvider ? 1 : 2);
+
+  if (rows.length === 0) return undefined;
+  if (rows.length > 1) return null;
+
+  const row = rows[0];
+  if (!row) return null;
+  if (!row.attachmentActive || !row.configurationActive) return null;
+  if (row.credentialId && !row.credentialActive) return null;
+
+  return {
+    credentialSource: 'project',
+    providerName: row.consumerTarget as CredentialProvider,
+  };
 }

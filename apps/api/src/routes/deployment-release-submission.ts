@@ -85,6 +85,7 @@ async function prepareManifestVolumes(params: {
   db: DeploymentReleaseDb;
   manifest: DeploymentManifest;
   envId: string;
+  projectId: string;
   userId: string;
   env: Env;
   requiresVolumes: boolean;
@@ -93,7 +94,7 @@ async function prepareManifestVolumes(params: {
     return { success: true, placement: null };
   }
 
-  const placement = await resolveDeploymentPlacement(params.userId, params.env);
+  const placement = await resolveDeploymentPlacement(params.userId, params.env, params.projectId);
   if (!placement) {
     return {
       success: false,
@@ -470,6 +471,7 @@ export async function createDeploymentReleaseFromManifest(
     db,
     manifest,
     envId: params.envId,
+    projectId: params.projectId,
     userId: params.userId,
     env: params.env,
     requiresVolumes,

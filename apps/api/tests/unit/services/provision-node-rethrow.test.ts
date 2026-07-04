@@ -143,6 +143,45 @@ describe('provisionNode backend DNS records', () => {
     }));
   });
 
+  it('uses project-pinned compute attribution when resolving the provider', async () => {
+    nodeRows.length = 0;
+    nodeRows.push({
+      id: 'node-project',
+      userId: 'member-b',
+      credentialAttributionUserId: 'member-a',
+      credentialAttributionProjectId: 'project-1',
+      credentialAttributionSource: 'project',
+      vmSize: 'large',
+      vmLocation: 'fsn1',
+      cloudProvider: 'hetzner',
+    });
+    createProviderForUser.mockResolvedValueOnce({
+      provider: { createVM },
+      providerName: 'hetzner',
+      credentialSource: 'project',
+    });
+
+    await provisionNode('node-project', ENV);
+
+    expect(createProviderForUser).toHaveBeenCalledWith(
+      expect.anything(),
+      'member-a',
+      'test-key',
+      ENV,
+      'hetzner',
+      'project-1',
+    );
+    expect(ops).toContainEqual(expect.objectContaining({
+      kind: 'update',
+      set: expect.objectContaining({
+        credentialSource: 'project',
+        credentialAttributionUserId: 'member-a',
+        credentialAttributionProjectId: 'project-1',
+        credentialAttributionSource: 'project',
+      }),
+    }));
+  });
+
   it('records explicit node state when backend DNS creation fails', async () => {
     createNodeBackendDNSRecord.mockRejectedValue(new Error('Cloudflare DNS unavailable'));
 

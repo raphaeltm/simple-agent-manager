@@ -94,7 +94,23 @@ function selectRows(rows: unknown[]) {
  * - Tracks all prepare().bind() calls for assertion
  * - Optionally returns a parent task row for the lineage lookup
  */
-function buildCtx(parentTaskRow?: { id: string; dispatch_depth: number } | null) {
+function buildCtx(parentTaskRow?: {
+  id: string;
+  dispatch_depth: number;
+  user_id?: string;
+  credential_attribution_user_id?: string | null;
+  credential_attribution_project_id?: string | null;
+  credential_attribution_source?: string | null;
+} | null) {
+  const hydratedParentTaskRow = parentTaskRow
+    ? {
+        user_id: 'user-1',
+        credential_attribution_user_id: null,
+        credential_attribution_project_id: null,
+        credential_attribution_source: 'user',
+        ...parentTaskRow,
+      }
+    : parentTaskRow;
   const bindCalls: unknown[][] = [];
   const statement = {
     bind: vi.fn((...args: unknown[]) => {
@@ -102,7 +118,7 @@ function buildCtx(parentTaskRow?: { id: string; dispatch_depth: number } | null)
       return statement;
     }),
     run: vi.fn().mockResolvedValue({ success: true, meta: { changes: 1 } }),
-    first: vi.fn().mockResolvedValue(parentTaskRow ?? null),
+    first: vi.fn().mockResolvedValue(hydratedParentTaskRow ?? null),
   };
 
   return {
@@ -137,7 +153,7 @@ describe('SAM dispatch_task lineage propagation', () => {
       .mockImplementationOnce(() => selectRows([project]))
       .mockImplementationOnce(() => selectRows([{ name: 'User', email: 'user@example.com', githubId: '12345' }]));
     mocks.resolveAgentProfile.mockResolvedValue(null);
-    mocks.resolveCredentialSource.mockResolvedValue({ source: 'user', credential: { id: 'cred-1' } });
+    mocks.resolveCredentialSource.mockResolvedValue({ credentialSource: 'user', providerName: 'hetzner' });
     mocks.generateTaskTitle.mockResolvedValue('Child task title');
     mocks.requireRepositoryOwnerAccess.mockResolvedValue(undefined);
     mocks.createSession.mockResolvedValue('session-1');
@@ -215,6 +231,38 @@ describe('SAM dispatch_task lineage propagation', () => {
       // It should scope by taskId, projectId, and userId
       const parentLookupBind = bindCalls[0];
       expect(parentLookupBind).toEqual(['parent-task-1', 'proj-1', 'user-1']);
+    });
+
+    it('inherits the parent credential attribution pin for child resolution and TaskRunner start', async () => {
+      const { ctx } = buildCtx({
+        id: 'parent-task-1',
+        dispatch_depth: 0,
+        user_id: 'member-a',
+        credential_attribution_user_id: 'member-a',
+        credential_attribution_project_id: 'proj-1',
+        credential_attribution_source: 'project',
+      });
+
+      await dispatchTask(
+        { projectId: 'proj-1', description: 'Subtask', parentTaskId: 'parent-task-1' },
+        ctx,
+      );
+
+      expect(mocks.resolveCredentialSource).toHaveBeenCalledWith(
+        expect.anything(),
+        'member-a',
+        undefined,
+        'proj-1',
+      );
+      expect(mocks.startTaskRunnerDO).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          credentialAttributionUserId: 'member-a',
+          credentialAttributionProjectId: 'proj-1',
+          credentialAttributionSource: 'project',
+          cloudProvider: 'hetzner',
+        }),
+      );
     });
 
     it('sets triggered_by to mcp so isRetryOrFork returns false', async () => {

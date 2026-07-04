@@ -20,20 +20,20 @@ Wave 5 for shared-project credential attribution must make project-attached comp
 
 ## Implementation Checklist
 
-- [ ] Add non-secret credential attribution pin metadata to tasks and nodes, with append-only migration and schema updates.
-- [ ] Extend compute credential resolution to accept project scope and return project/personal/platform source metadata without exposing secrets.
-- [ ] Update `createProviderForUser()` and `resolveCredentialSource()` to use project attachments, including Rule 28 inactive-project-attachment halt semantics.
-- [ ] Pass project/attribution scope through task submit, TaskRunner provisioning, manual node creation, deployment provisioning, volumes, and teardown/lifecycle paths where project context exists.
-- [ ] Ensure teardown resolves using the attribution metadata recorded at creation; do not implement Wave 6 offboarding behavior.
-- [ ] Pin root task credential attribution once for user-created and trigger-created roots, then inherit that pin through MCP dispatch, SAM session dispatch, retry-subtask, and mission/task tree paths.
-- [ ] Remove/replace trigger submission's legacy personal-cloud-credential precheck so project/platform fallback works.
-- [ ] Update workspace/agent credential callbacks if needed so agent/LLM keys resolve against the inherited pin.
-- [ ] Keep Wave 4 credential-attribution health accurate for project-vs-personal compute coverage.
-- [ ] Add service/API tests for fallback branches: active project attachment wins, inactive attachment rejects without falling through, no attachment falls back to personal, no rows fail cleanly.
-- [ ] Add vertical-slice tests proving project-attached compute credential is used for node provisioning and child dispatch inherits the root pin.
-- [ ] Add canonical trigger regression: A creates trigger, B edits it, trigger fires, child dispatch inherits A or project credential attribution across the tree.
-- [ ] Run focused tests during implementation and full `/do` validation.
-- [ ] Run specialist reviews: task-completion-validator, security-auditor, cloudflare-specialist, constitution-validator, test-engineer.
+- [x] Add non-secret credential attribution pin metadata to tasks and nodes, with append-only migration and schema updates.
+- [x] Extend compute credential resolution to accept project scope and return project/personal/platform source metadata without exposing secrets.
+- [x] Update `createProviderForUser()` and `resolveCredentialSource()` to use project attachments, including Rule 28 inactive-project-attachment halt semantics.
+- [x] Pass project/attribution scope through task submit, TaskRunner provisioning, manual node creation, deployment provisioning, volumes, and teardown/lifecycle paths where project context exists.
+- [x] Ensure teardown resolves using the attribution metadata recorded at creation; do not implement Wave 6 offboarding behavior.
+- [x] Pin root task credential attribution once for user-created and trigger-created roots, then inherit that pin through MCP dispatch, SAM session dispatch, retry-subtask, and mission/task tree paths.
+- [x] Remove/replace trigger submission's legacy personal-cloud-credential precheck so project/platform fallback works.
+- [x] Update workspace/agent credential callbacks if needed so agent/LLM keys resolve against the inherited pin.
+- [x] Keep Wave 4 credential-attribution health accurate for project-vs-personal compute coverage.
+- [x] Add service/API tests for fallback branches: active project attachment wins, inactive attachment rejects without falling through, no attachment falls back to personal, no rows fail cleanly.
+- [x] Add vertical-slice tests proving project-attached compute credential is used for node provisioning and child dispatch inherits the root pin.
+- [x] Add canonical trigger regression: A creates trigger, B edits it, trigger fires, child dispatch inherits A or project credential attribution across the tree.
+- [x] Run focused tests during implementation and full `/do` validation.
+- [x] Run specialist reviews: task-completion-validator, security-auditor, cloudflare-specialist, constitution-validator, test-engineer.
 - [ ] Deploy to staging and exercise real node provisioning with a project-attached compute credential; stop for human input if required staging config is missing.
 
 ## Acceptance Criteria

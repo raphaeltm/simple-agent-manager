@@ -57,19 +57,33 @@ async function getProviderForUser(
   db: ReturnType<typeof drizzle>,
   userId: string,
   env: Env,
-  targetProvider?: CredentialProvider
+  targetProvider?: CredentialProvider,
+  projectId?: string | null
 ): Promise<{ provider: Provider; providerName: CredentialProvider }> {
   const result = await createProviderForUser(
     db,
     userId,
     getCredentialEncryptionKey(env),
     env,
-    targetProvider
+    targetProvider,
+    projectId
   );
   if (!result) {
     throw new Error('No cloud provider credential found. Connect a cloud provider in Settings.');
   }
   return { provider: result.provider, providerName: result.providerName };
+}
+
+async function getEnvironmentProjectId(
+  db: ReturnType<typeof drizzle>,
+  environmentId: string
+): Promise<string | null> {
+  const rows = await db
+    .select({ projectId: schema.deploymentEnvironments.projectId })
+    .from(schema.deploymentEnvironments)
+    .where(eq(schema.deploymentEnvironments.id, environmentId))
+    .limit(1);
+  return rows[0]?.projectId ?? null;
 }
 
 // =============================================================================
@@ -193,7 +207,8 @@ export async function createEnvironmentVolume(
 ): Promise<DeploymentVolumeRow> {
   assertSafeVolumeName(opts.name);
 
-  const { provider, providerName } = await getProviderForUser(db, userId, env, opts.targetProvider);
+  const projectId = await getEnvironmentProjectId(db, opts.environmentId);
+  const { provider, providerName } = await getProviderForUser(db, userId, env, opts.targetProvider, projectId);
 
   // Check volume capabilities
   const caps = provider.volumeCapabilities;
@@ -316,7 +331,8 @@ export async function createMissingDeclaredVolumes(
 
   const existing = await listEnvironmentVolumes(db, opts.environmentId);
   const existingByName = new Map(existing.map((volume) => [volume.name, volume]));
-  const { provider } = await getProviderForUser(db, userId, env, opts.targetProvider);
+  const projectId = await getEnvironmentProjectId(db, opts.environmentId);
+  const { provider } = await getProviderForUser(db, userId, env, opts.targetProvider, projectId);
   const minSizeGb = provider.volumeCapabilities.minSizeGb;
 
   const results: DeploymentVolumeRow[] = [...existing];
@@ -434,7 +450,8 @@ export async function deleteEnvironmentVolume(
     db,
     userId,
     env,
-    vol.providerName as CredentialProvider
+    vol.providerName as CredentialProvider,
+    await getEnvironmentProjectId(db, environmentId)
   );
 
   // Provider deleteVolume is idempotent (no error on 404)
@@ -523,7 +540,8 @@ export async function attachEnvironmentVolumes(
     db,
     userId,
     env,
-    firstVolume.providerName as CredentialProvider
+    firstVolume.providerName as CredentialProvider,
+    await getEnvironmentProjectId(db, environmentId)
   );
 
   const now = new Date().toISOString();
@@ -622,7 +640,8 @@ export async function detachEnvironmentVolumes(
     db,
     userId,
     env,
-    firstVolume.providerName as CredentialProvider
+    firstVolume.providerName as CredentialProvider,
+    await getEnvironmentProjectId(db, environmentId)
   );
 
   const now = new Date().toISOString();

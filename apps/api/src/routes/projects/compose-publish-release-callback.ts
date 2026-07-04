@@ -215,7 +215,7 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
     }
   }
 
-  const placement = requiresVolumes ? await resolveDeploymentPlacement(userId, c.env) : null;
+  const placement = requiresVolumes ? await resolveDeploymentPlacement(userId, c.env, projectId) : null;
   if (requiresVolumes && !placement) {
     throw errors.badRequest(
       'No cloud provider credential found. Connect a cloud provider before deploying volumes.'
