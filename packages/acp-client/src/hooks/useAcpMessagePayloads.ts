@@ -27,6 +27,9 @@ export interface ToolCallUpdate extends SessionUpdate {
   status?: ToolCallItem['status'];
   content?: Array<{ type: string } & Record<string, unknown>>;
   locations?: Array<{ path: string; line?: number | null }>;
+  toolName?: string;
+  rawInput?: unknown;
+  rawOutput?: unknown;
 }
 
 export interface ToolCallPatchUpdate extends SessionUpdate {
@@ -34,6 +37,9 @@ export interface ToolCallPatchUpdate extends SessionUpdate {
   status?: ToolCallItem['status'];
   content?: Array<{ type: string } & Record<string, unknown>> | null;
   title?: string | null;
+  toolName?: string;
+  rawInput?: unknown;
+  rawOutput?: unknown;
 }
 
 export interface PlanUpdate extends SessionUpdate {
@@ -89,6 +95,9 @@ export function asToolCallUpdate(update: SessionUpdate): ToolCallUpdate {
     status: isToolStatus(update.status) ? update.status : undefined,
     content: parseToolContent(update.content),
     locations: parseLocations(update.locations),
+    toolName: extractToolName(update),
+    rawInput: update.rawInput,
+    rawOutput: update.rawOutput,
   };
 }
 
@@ -99,7 +108,29 @@ export function asToolCallPatchUpdate(update: SessionUpdate): ToolCallPatchUpdat
     title: typeof update.title === 'string' || update.title === null ? update.title : undefined,
     status: isToolStatus(update.status) ? update.status : undefined,
     content: update.content === null ? null : parseToolContent(update.content),
+    toolName: extractToolName(update),
+    rawInput: update.rawInput,
+    rawOutput: update.rawOutput,
   };
+}
+
+/**
+ * Resolve the stable tool name from an ACP session update. Primary source is
+ * the `_meta.claudeCode.toolName` extension; falls back to the mcp__<server>__
+ * <tool> title convention. Mirrors the VM agent's Go extractToolName so the
+ * live-stream and persisted paths produce the same discriminator.
+ */
+function extractToolName(update: SessionUpdate): string | undefined {
+  const meta = maybeJsonRecord(update._meta);
+  const claudeCode = maybeJsonRecord(meta?.claudeCode);
+  if (claudeCode && typeof claudeCode.toolName === 'string' && claudeCode.toolName) {
+    return claudeCode.toolName;
+  }
+  const title = update.title;
+  if (typeof title === 'string' && title.startsWith('mcp__') && (title.match(/__/g)?.length ?? 0) >= 2) {
+    return title;
+  }
+  return undefined;
 }
 
 export function asPlanUpdate(update: SessionUpdate): PlanUpdate {

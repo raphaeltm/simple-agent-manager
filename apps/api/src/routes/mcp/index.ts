@@ -63,6 +63,7 @@ import {
   handleUpdateKnowledge,
 } from './knowledge-tools';
 import {
+  handleDisplayFromLibrary,
   handleDownloadLibraryFile,
   handleListLibraryFiles,
   handleReplaceLibraryFile,
@@ -354,6 +355,8 @@ mcpRoutes.post('/', async (c) => {
             return c.json(await handleUploadToLibrary(requestId, toolArgs, tokenData, c.env));
           case 'replace_library_file':
             return c.json(await handleReplaceLibraryFile(requestId, toolArgs, tokenData, c.env));
+          case 'display_from_library':
+            return c.json(await handleDisplayFromLibrary(requestId, toolArgs, tokenData, c.env));
           // ─── Trigger management tools ────────────────────────────────
           case 'create_trigger':
             return c.json(await handleCreateTrigger(requestId, toolArgs, tokenData, c.env));

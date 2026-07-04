@@ -99,6 +99,29 @@ export const LIBRARY_TOOLS = [
     },
   },
   {
+    name: 'display_from_library',
+    description:
+      'Surface an existing library file to the user as a rich document card in the chat. Use this to show the user a document ' +
+      'that already exists in the library — for example, re-answering a question that a previously written explanation already covers. ' +
+      'The card renders an inline preview (image thumbnail or clamped markdown) and opens full-screen on click. ' +
+      'Does not require a workspace. Use list_library_files first to find the file ID.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        fileId: {
+          type: 'string',
+          description: 'The file ID to display (from list_library_files)',
+        },
+        caption: {
+          type: 'string',
+          description: 'Optional short context shown with the card (e.g. "Section 3 covers your question about token refresh")',
+        },
+      },
+      required: ['fileId'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'replace_library_file',
     description:
       'Replace the content of an existing library file with a new version from the workspace. Requires the file ID (not filename). ' +

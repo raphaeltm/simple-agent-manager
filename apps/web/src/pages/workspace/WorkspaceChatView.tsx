@@ -339,7 +339,7 @@ export const WorkspaceChatView: FC<WorkspaceChatViewProps> = memo(function Works
           startReached={hasMore ? () => { void loadMore(); } : undefined}
           itemContent={(_index, item) => (
             <div className="px-4 py-1">
-              <AcpConversationItemView item={item} />
+              <AcpConversationItemView item={item} projectId={projectId} />
             </div>
           )}
         />

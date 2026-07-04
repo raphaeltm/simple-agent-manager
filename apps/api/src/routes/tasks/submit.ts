@@ -17,7 +17,21 @@ import type {
   VMSize,
   WorkspaceProfile,
 } from '@simple-agent-manager/shared';
-import { ATTACHMENT_DEFAULTS, CREDENTIAL_PROVIDERS, DEFAULT_VM_LOCATION, DEFAULT_VM_SIZE, DEFAULT_WORKSPACE_PROFILE, getDefaultLocationForProvider,getLocationsForProvider, isValidLocationForProvider, isValidProvider, MAX_CONTEXT_SUMMARY_BYTES, resolveResourceReservation, SAFE_FILENAME_REGEX } from '@simple-agent-manager/shared';
+import {
+  ATTACHMENT_DEFAULTS,
+  CREDENTIAL_PROVIDERS,
+  DEFAULT_TASK_TITLE_MAX_LENGTH,
+  DEFAULT_VM_LOCATION,
+  DEFAULT_VM_SIZE,
+  DEFAULT_WORKSPACE_PROFILE,
+  getDefaultLocationForProvider,
+  getLocationsForProvider,
+  isValidLocationForProvider,
+  isValidProvider,
+  MAX_CONTEXT_SUMMARY_BYTES,
+  resolveResourceReservation,
+  SAFE_FILENAME_REGEX,
+} from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
@@ -27,7 +41,7 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { parsePositiveInt } from '../../lib/route-helpers';
 import { ulid } from '../../lib/ulid';
-import { getAuth, requireApproved,requireAuth } from '../../middleware/auth';
+import { getAuth, requireApproved, requireAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { requireOwnedProject } from '../../middleware/project-auth';
 import { jsonValidator, SubmitTaskSchema } from '../../schemas';
@@ -38,7 +52,8 @@ import { resolveProjectAgentDefault } from '../../services/project-agent-default
 import * as projectDataService from '../../services/project-data';
 import { parseSkillResourceRequirementsJson, resolveSkillProfile } from '../../services/skills';
 import { startTaskRunnerDO } from '../../services/task-runner-do';
-import { generateTaskTitle, getTaskTitleConfig } from '../../services/task-title';
+import type { TaskTitleConfig } from '../../services/task-title';
+import { generateTaskTitle, getTaskTitleConfig, truncateTitle } from '../../services/task-title';
 import { requireRepositoryUserAccess } from '../projects/_helpers';
 
 /** Default max task message length. Override via MAX_TASK_MESSAGE_LENGTH env var. */
@@ -47,6 +62,58 @@ const submitRoutes = new Hono<{ Bindings: Env }>();
 
 // Auth applied per-route to avoid Hono middleware leak across sibling subrouters.
 // See .claude/rules/06-api-patterns.md and docs/notes/2026-03-12-callback-auth-middleware-leak-postmortem.md.
+
+function getInitialTaskTitle(message: string, config: TaskTitleConfig): string {
+  const configuredMax = config.maxLength;
+  const maxLength = typeof configuredMax === 'number' && Number.isFinite(configuredMax) && configuredMax > 3
+    ? configuredMax
+    : DEFAULT_TASK_TITLE_MAX_LENGTH;
+  return truncateTitle(message, maxLength);
+}
+
+async function updateGeneratedTaskTitle(input: {
+  env: Env;
+  projectId: string;
+  taskId: string;
+  sessionId: string;
+  message: string;
+  initialTitle: string;
+  titleConfig: TaskTitleConfig;
+}): Promise<void> {
+  try {
+    const generatedTitle = await generateTaskTitle(input.env, input.message, input.titleConfig);
+    const taskTitle = generatedTitle.trim();
+    if (!taskTitle || taskTitle === input.initialTitle) return;
+
+    const db = drizzle(input.env.DATABASE, { schema });
+    const updatedAt = new Date().toISOString();
+    await db
+      .update(schema.tasks)
+      .set({ title: taskTitle, updatedAt })
+      .where(and(eq(schema.tasks.id, input.taskId), eq(schema.tasks.projectId, input.projectId)));
+
+    const sessionUpdated = await projectDataService.updateSessionTopic(
+      input.env,
+      input.projectId,
+      input.sessionId,
+      taskTitle
+    );
+
+    log.info('task_submit.title_generated_async', {
+      taskId: input.taskId,
+      projectId: input.projectId,
+      sessionId: input.sessionId,
+      sessionUpdated,
+    });
+  } catch (err) {
+    log.warn('task_submit.title_generation_async_failed', {
+      taskId: input.taskId,
+      projectId: input.projectId,
+      sessionId: input.sessionId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
 
 /**
  * POST /projects/:projectId/tasks/submit
@@ -287,9 +354,10 @@ submitRoutes.post('/submit', requireAuth(), requireApproved(), jsonValidator(Sub
   // the remote (agent may not have pushed, or branch was deleted).
   const branch = project.defaultBranch;
 
-  // Generate concise task title via AI (falls back to truncation on failure)
+  // Use a deterministic title immediately. AI title refinement runs after the
+  // task/session exist so submit latency is not coupled to model latency.
   const titleConfig = getTaskTitleConfig(c.env);
-  const taskTitle = await generateTaskTitle(c.env, message, titleConfig);
+  const taskTitle = getInitialTaskTitle(message, titleConfig);
 
   // Enrich message with @mention context for the agent.
   // The enriched version (with hidden profile hints) is stored as the task description
@@ -394,6 +462,16 @@ submitRoutes.post('/submit', requireAuth(), requireApproved(), jsonValidator(Sub
     log.error('task_submit.session_failed', { taskId, projectId, error: errorMsg });
     throw err; // Re-throw to return 500 to the frontend
   }
+
+  c.executionCtx.waitUntil(updateGeneratedTaskTitle({
+    env: c.env,
+    projectId,
+    taskId,
+    sessionId,
+    message,
+    initialTitle: taskTitle,
+    titleConfig,
+  }));
 
   // Record activity event (best-effort)
   c.executionCtx.waitUntil(

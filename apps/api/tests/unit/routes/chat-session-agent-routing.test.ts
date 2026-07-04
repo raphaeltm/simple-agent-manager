@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   getSession: vi.fn(),
   getMessages: vi.fn(),
   listAcpSessions: vi.fn(),
+  getSessionState: vi.fn(),
   persistError: vi.fn(async () => undefined),
   userRole: 'user',
 }));
@@ -105,6 +106,7 @@ vi.mock('../../../src/services/project-data', () => ({
   getMessages: mocks.getMessages,
   resetIdleCleanup: vi.fn(),
   listAcpSessions: mocks.listAcpSessions,
+  getSessionState: mocks.getSessionState,
   stopSession: vi.fn(),
   linkSessionIdea: vi.fn(),
   unlinkSessionIdea: vi.fn(),
@@ -165,6 +167,7 @@ describe('chatRoutes agent session routing', () => {
       messages: [makePersistedMessage('msg-1', 'assistant', 'Persisted output', 1, 1)],
       hasMore: false,
     });
+    mocks.getSessionState.mockResolvedValue(null);
 
     app = createChatRoutesTestApp();
   });
@@ -285,6 +288,45 @@ describe('chatRoutes agent session routing', () => {
     expect(response.status).toBe(200);
     const body = await response.json();
     expect(body.session.agentType).toBe('claude-code');
+  });
+
+  it('returns lightweight session state without loading messages or task metadata', async () => {
+    const state = {
+      activity: 'prompting',
+      activityAt: 1000,
+      statusError: null,
+      currentPlan: null,
+      planUpdatedAt: null,
+      promptStartedAt: 900,
+      agentType: 'openai-codex',
+      lastStopReason: null,
+    };
+    mocks.listAcpSessions.mockResolvedValue({
+      sessions: [
+        {
+          id: 'acp-chat-1',
+          chatSessionId: 'chat-1',
+          status: 'running',
+          agentType: 'openai-codex',
+        },
+      ],
+      total: 1,
+    });
+    mocks.getSessionState.mockResolvedValue(state);
+
+    const response = await app.request(
+      '/api/projects/proj-1/sessions/chat-1/state',
+      { method: 'GET' },
+      { DATABASE: {} as D1Database } as Env,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      state,
+      agentSessionId: 'acp-chat-1',
+      agentType: 'openai-codex',
+    });
+    expect(mocks.getMessages).not.toHaveBeenCalled();
   });
 
   it('clamps a requested limit to CHAT_SESSION_MESSAGE_MAX', async () => {

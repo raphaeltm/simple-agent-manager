@@ -9,11 +9,10 @@
  *     → OpenAI-compatible chat completion
  *       → concise task title
  *
- * Design decision: the AI call is synchronous (awaited before DB insert)
- * rather than async via waitUntil. This keeps the title consistent across
- * the task record, session label, and activity event, and avoids a second
- * DB write. The per-attempt timeout (configurable, default 5s) bounds
- * individual AI call latency.
+ * The task submit path starts with a deterministic truncated title and runs
+ * this AI refinement asynchronously via waitUntil, then updates the task record
+ * and session topic. The per-attempt timeout (configurable, default 5s) bounds
+ * individual AI call latency without blocking submission.
  *
  * Retry: Under burst load (multiple concurrent tasks), Workers AI may
  * rate-limit requests. Retry with exponential backoff (configurable,

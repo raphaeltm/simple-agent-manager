@@ -425,6 +425,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
                 <div className={`sam-message-entry px-4 pb-3${highlightedItemId === item.id ? ' sam-message-highlight' : ''}`}>
                   <AcpConversationItemView
                     item={item}
+                    projectId={projectId}
                     onFileClick={lc.session?.workspaceId && lc.sessionState === 'active' ? lc.handleFileClick : undefined}
                     onLoadToolContent={handleLoadToolContent}
                     animateText={item.kind === 'agent_message' && (index - lc.firstItemIndex) === animationTargetIdx && lc.agentActivity === 'responding'}

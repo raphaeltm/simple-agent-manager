@@ -28,6 +28,8 @@ interface UseChatWebSocketOptions {
   onAgentCompleted?: (agentCompletedAt: number) => void;
   /** Called when a session.activity event arrives (prompting/idle). */
   onAgentActivity?: (activity: 'prompting' | 'idle' | 'recovering' | 'error', promptStartedAt?: number | null) => void;
+  /** Called when the session metadata changes server-side. */
+  onSessionUpdated?: (updates: Partial<Pick<ChatSessionResponse, 'topic' | 'workspaceId'>>) => void;
 }
 
 export interface UseChatWebSocketReturn {
@@ -51,6 +53,7 @@ export function useChatWebSocket({
   onCatchUp,
   onAgentCompleted,
   onAgentActivity,
+  onSessionUpdated,
 }: UseChatWebSocketOptions): UseChatWebSocketReturn {
   const [connectionState, setConnectionState] = useState<ChatConnectionState>('disconnected');
 
@@ -68,11 +71,13 @@ export function useChatWebSocket({
   const onCatchUpRef = useRef(onCatchUp);
   const onAgentCompletedRef = useRef(onAgentCompleted);
   const onAgentActivityRef = useRef(onAgentActivity);
+  const onSessionUpdatedRef = useRef(onSessionUpdated);
   onMessageRef.current = onMessage;
   onSessionStoppedRef.current = onSessionStopped;
   onCatchUpRef.current = onCatchUp;
   onAgentCompletedRef.current = onAgentCompleted;
   onAgentActivityRef.current = onAgentActivity;
+  onSessionUpdatedRef.current = onSessionUpdated;
 
   const getReconnectDelay = useCallback((attempt: number) => {
     return Math.min(BASE_RECONNECT_DELAY * Math.pow(2, attempt), MAX_RECONNECT_DELAY);
@@ -187,6 +192,19 @@ export function useChatWebSocket({
             const p = payload;
             if (p.sessionId !== sessionId) return;
             onAgentCompletedRef.current?.(p.agentCompletedAt ?? Date.now());
+          } else if (data.type === 'session.updated') {
+            const p = payload;
+            if (p.sessionId !== sessionId) return;
+            const updates: Partial<Pick<ChatSessionResponse, 'topic' | 'workspaceId'>> = {};
+            if (typeof p.topic === 'string' || p.topic === null) {
+              updates.topic = p.topic;
+            }
+            if (typeof p.workspaceId === 'string' || p.workspaceId === null) {
+              updates.workspaceId = p.workspaceId;
+            }
+            if (Object.keys(updates).length > 0) {
+              onSessionUpdatedRef.current?.(updates);
+            }
           } else if (data.type === 'session.activity') {
             const p = payload;
             if (p.sessionId !== sessionId) return;
@@ -238,7 +256,7 @@ export function useChatWebSocket({
       });
       onCatchUpRef.current(data.messages, data.session, data.state);
     } catch {
-      // Best-effort catch-up — poll fallback will handle it
+      // Best-effort catch-up — the next reconnect or explicit reload will retry.
     }
   }, [projectId, sessionId]);
 
