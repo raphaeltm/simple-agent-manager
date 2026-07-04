@@ -24,6 +24,7 @@ import { CompletionDock } from './CompletionDock';
 import { FollowUpInput } from './FollowUpInput';
 import { ConnectionBanner } from './MessageBanners';
 import { SessionHeader } from './SessionHeader';
+import { type MessageListHandle, TanStackMessageList } from './TanStackMessageList';
 import type { TimelineJumpTarget } from './timeline-types';
 import { chatMessagesToConversationItems } from './types';
 import { useSessionLifecycle } from './useSessionLifecycle';
@@ -47,6 +48,22 @@ function nearestItemId(items: ConversationItem[], timestamp: number): string | u
 
 // Re-export utilities used by external consumers
 export { chatMessagesToConversationItems, groupMessages } from './types';
+
+/**
+ * EXPERIMENT FLAG — swap react-virtuoso for @tanstack/react-virtual.
+ * Enable via `?virtualizer=tanstack` or `localStorage['sam:virtualizer'] = 'tanstack'`.
+ * Spike only; see TanStackMessageList.tsx.
+ */
+function resolveVirtualizerExperiment(): boolean {
+  try {
+    const qp = new URLSearchParams(window.location.search).get('virtualizer');
+    if (qp) return qp === 'tanstack';
+    return window.localStorage.getItem('sam:virtualizer') === 'tanstack';
+  } catch {
+    return false;
+  }
+}
+const USE_TANSTACK_VIRTUAL = resolveVirtualizerExperiment();
 
 /** Floating session header with optional error banner and summary. */
 function FloatingHeader({
@@ -204,6 +221,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   onShowHierarchy,
 }) => {
   const virtuosoRef = useRef<VirtuosoHandle>(null);
+  const tanstackRef = useRef<MessageListHandle>(null);
   const [showPlanModal, setShowPlanModal] = useState(false);
   const [showTimeline, setShowTimeline] = useState(false);
 
@@ -244,7 +262,11 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   const scrollAndHighlight = useCallback((itemId: string): boolean => {
     const index = itemIndexById.get(itemId);
     if (index === undefined) return false;
-    virtuosoRef.current?.scrollToIndex({ index, behavior: 'smooth', align: 'center' });
+    if (USE_TANSTACK_VIRTUAL) {
+      tanstackRef.current?.scrollToItem(index, { behavior: 'smooth', align: 'center' });
+    } else {
+      virtuosoRef.current?.scrollToIndex({ index, behavior: 'smooth', align: 'center' });
+    }
     setHighlightedItemId(itemId);
     return true;
   }, [itemIndexById]);
@@ -334,6 +356,21 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     [lc.currentPlan],
   );
 
+  // Shared item renderer for both virtualizers. `dataIndex` is the ZERO-BASED
+  // index into `conversationItems` (Virtuoso callers must subtract firstItemIndex).
+  const renderConversationItem = useCallback((item: ConversationItem, dataIndex: number) => (
+    <div className={`sam-message-entry px-4 pb-3${highlightedItemId === item.id ? ' sam-message-highlight' : ''}`}>
+      <AcpConversationItemView
+        item={item}
+        projectId={projectId}
+        onFileClick={lc.session?.workspaceId && lc.sessionState === 'active' ? lc.handleFileClick : undefined}
+        onLoadToolContent={handleLoadToolContent}
+        animateText={item.kind === 'agent_message' && dataIndex === animationTargetIdx && lc.agentActivity === 'responding'}
+        animateUserMessage={item.kind === 'user_message' && animatedUserMsgIds.has(item.id)}
+      />
+    </div>
+  ), [highlightedItemId, projectId, lc.session?.workspaceId, lc.sessionState, lc.handleFileClick, lc.agentActivity, handleLoadToolContent, animationTargetIdx, animatedUserMsgIds]);
+
   // Initial load — only show full spinner when no data exists yet
   if (lc.loading && lc.messages.length === 0 && !lc.session) {
     return (
@@ -410,45 +447,46 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
         <div className="flex-1 min-h-0 min-w-0 relative flex flex-col" role="log" aria-live="polite" aria-label="Conversation">
           <FloatingHeader projectId={projectId} lc={lc} onSessionMutated={onSessionMutated} onRetry={onRetry} onFork={onFork} onOpenTimeline={() => setShowTimeline(true)} sourceContext={sourceContext} onShowHierarchy={onShowHierarchy} />
           <div className="flex-1 min-h-0">
-            <Virtuoso
-              ref={virtuosoRef}
-              style={{ height: '100%' }}
-              data={conversationItems}
-              firstItemIndex={lc.firstItemIndex}
-              initialTopMostItemIndex={conversationItems.length - 1}
-              followOutput={(isAtBottom: boolean) => isAtBottom ? 'smooth' : false}
-              alignToBottom
-              atBottomThreshold={50}
-              atBottomStateChange={(atBottom) => lc.setShowScrollButton(!atBottom)}
-              overscan={200}
-              itemContent={(index, item) => (
-                <div className={`sam-message-entry px-4 pb-3${highlightedItemId === item.id ? ' sam-message-highlight' : ''}`}>
-                  <AcpConversationItemView
-                    item={item}
-                    projectId={projectId}
-                    onFileClick={lc.session?.workspaceId && lc.sessionState === 'active' ? lc.handleFileClick : undefined}
-                    onLoadToolContent={handleLoadToolContent}
-                    animateText={item.kind === 'agent_message' && (index - lc.firstItemIndex) === animationTargetIdx && lc.agentActivity === 'responding'}
-                    animateUserMessage={item.kind === 'user_message' && animatedUserMsgIds.has(item.id)}
-                  />
-                </div>
-              )}
-              components={{
-                Header: () => (
-                  <>
-                    {/* Spacer for absolutely-positioned FloatingHeader so messages aren't hidden behind it */}
-                    <div className="h-14" />
-                    {lc.hasMore && (
-                      <div className="text-center py-3">
-                        <Button variant="ghost" size="sm" onClick={lc.loadMore} loading={lc.loadingMore}>
-                          Load earlier messages
-                        </Button>
-                      </div>
-                    )}
-                  </>
-                ),
-              }}
-            />
+            {USE_TANSTACK_VIRTUAL ? (
+              <TanStackMessageList
+                ref={tanstackRef}
+                items={conversationItems}
+                hasMore={lc.hasMore}
+                loadingMore={lc.loadingMore}
+                onLoadMore={lc.loadMore}
+                onAtBottomChange={(atBottom) => lc.setShowScrollButton(!atBottom)}
+                renderItem={renderConversationItem}
+              />
+            ) : (
+              <Virtuoso
+                ref={virtuosoRef}
+                style={{ height: '100%' }}
+                data={conversationItems}
+                firstItemIndex={lc.firstItemIndex}
+                initialTopMostItemIndex={conversationItems.length - 1}
+                followOutput={(isAtBottom: boolean) => isAtBottom ? 'smooth' : false}
+                alignToBottom
+                atBottomThreshold={50}
+                atBottomStateChange={(atBottom) => lc.setShowScrollButton(!atBottom)}
+                overscan={200}
+                itemContent={(index, item) => renderConversationItem(item, index - lc.firstItemIndex)}
+                components={{
+                  Header: () => (
+                    <>
+                      {/* Spacer for absolutely-positioned FloatingHeader so messages aren't hidden behind it */}
+                      <div className="h-14" />
+                      {lc.hasMore && (
+                        <div className="text-center py-3">
+                          <Button variant="ghost" size="sm" onClick={lc.loadMore} loading={lc.loadingMore}>
+                            Load earlier messages
+                          </Button>
+                        </div>
+                      )}
+                    </>
+                  ),
+                }}
+              />
+            )}
           </div>
 
           {/* Scroll to bottom button */}
@@ -456,6 +494,10 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
             <button
               type="button"
               onClick={() => {
+                if (USE_TANSTACK_VIRTUAL) {
+                  tanstackRef.current?.scrollToBottom('smooth');
+                  return;
+                }
                 virtuosoRef.current?.scrollToIndex({
                   index: 'LAST',
                   behavior: 'smooth',
