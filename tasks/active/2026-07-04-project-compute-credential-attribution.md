@@ -32,8 +32,8 @@ Wave 5 for shared-project credential attribution must make project-attached comp
 - [x] Add service/API tests for fallback branches: active project attachment wins, inactive attachment rejects without falling through, no attachment falls back to personal, no rows fail cleanly.
 - [x] Add vertical-slice tests proving project-attached compute credential is used for node provisioning and child dispatch inherits the root pin.
 - [x] Add canonical trigger regression: A creates trigger, B edits it, trigger fires, child dispatch inherits A or project credential attribution across the tree.
-- [ ] Run focused tests during implementation and full `/do` validation.
-- [ ] Run specialist reviews: task-completion-validator, security-auditor, cloudflare-specialist, constitution-validator, test-engineer.
+- [x] Run focused tests during implementation and full `/do` validation.
+- [x] Run specialist reviews: task-completion-validator, security-auditor, cloudflare-specialist, constitution-validator, test-engineer.
 - [ ] Deploy to staging and exercise real node provisioning with a project-attached compute credential; stop for human input if required staging config is missing.
 
 ## Acceptance Criteria
