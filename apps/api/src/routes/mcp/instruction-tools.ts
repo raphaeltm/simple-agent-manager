@@ -132,19 +132,20 @@ export async function handleGetInstructions(
       repoProvider: project.repoProvider || 'github',
     },
     instructions: [
+      'Tool names in these instructions refer to SAM MCP tools from the `sam-mcp` MCP server.',
       ...(task.taskMode === 'conversation'
         ? [
             'You are in a conversation with a human. Respond to their messages directly.',
-            'Use `dispatch_task` to spawn follow-up work to other agents when needed.',
-            'Use `update_task_status` to report significant findings or progress.',
-            'Do NOT call `complete_task` — the human will end the conversation when they are ready.',
-            'If you encounter blockers, report them via `update_task_status` with a clear description.',
+            'Use the SAM MCP `dispatch_task` tool to spawn follow-up work to other agents when needed.',
+            'Use the SAM MCP `update_task_status` tool to report significant findings or progress.',
+            'Do NOT call the SAM MCP `complete_task` tool — the human will end the conversation when they are ready.',
+            'If you encounter blockers, report them via the SAM MCP `update_task_status` tool with a clear description.',
           ]
         : [
-            'Call `update_task_status` to report progress as you complete significant milestones.',
-            'Call `complete_task` with a summary when all work is done.',
-            'Push your changes to the output branch before calling `complete_task`.',
-            'If you encounter blockers, report them via `update_task_status` with a clear description.',
+            'Call the SAM MCP `update_task_status` tool to report progress as you complete significant milestones.',
+            'Call the SAM MCP `complete_task` tool with a summary when all work is done.',
+            'Push your changes to the output branch before calling the SAM MCP `complete_task` tool.',
+            'If you encounter blockers, report them via the SAM MCP `update_task_status` tool with a clear description.',
           ]),
       ...knowledgeInstructions,
       ...policyInstructions,

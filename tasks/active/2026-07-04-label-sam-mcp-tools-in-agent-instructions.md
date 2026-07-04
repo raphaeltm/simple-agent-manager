@@ -20,10 +20,10 @@ The task-start prompt already names `get_instructions` as coming from the `sam-m
 
 ## Implementation Checklist
 
-- [ ] Update `get_instructions` task-mode wording to label `update_task_status` and `complete_task` as SAM MCP tools.
-- [ ] Update `get_instructions` conversation-mode wording to label `dispatch_task`, `update_task_status`, and `complete_task` as SAM MCP tools.
-- [ ] Add or update focused API test assertions so the returned instructions include the SAM MCP wording.
-- [ ] Run targeted MCP route tests and relevant quality checks.
+- [x] Update `get_instructions` task-mode wording to label `update_task_status` and `complete_task` as SAM MCP tools.
+- [x] Update `get_instructions` conversation-mode wording to label `dispatch_task`, `update_task_status`, and `complete_task` as SAM MCP tools.
+- [x] Add or update focused API test assertions so the returned instructions include the SAM MCP wording.
+- [x] Run targeted MCP route tests and relevant quality checks.
 - [ ] Ship through PR, merge, and monitor production deploy.
 
 ## Acceptance Criteria

@@ -216,6 +216,8 @@ const mockDoStub = {
   getIdeasForSession: vi.fn().mockReturnValue([]),
   getSessionsForIdea: vi.fn().mockReturnValue([]),
   updateSessionTopic: vi.fn().mockResolvedValue(true),
+  getAllHighConfidenceKnowledge: vi.fn().mockResolvedValue([]),
+  getActivePolicies: vi.fn().mockResolvedValue([]),
 };
 const mockProjectData = {
   idFromName: vi.fn().mockReturnValue('do-id'),
@@ -667,6 +669,148 @@ describe('MCP Routes', () => {
         validTokenData,
         mockEnv
       );
+    });
+  });
+
+  // ─── get_instructions ──────────────────────────────────────────────
+
+  describe('get_instructions', () => {
+    beforeEach(() => {
+      mockKV.get.mockResolvedValue(validTokenData);
+    });
+
+    function mockInstructionRows(taskMode: 'task' | 'conversation') {
+      mockD1._stmt.raw
+        .mockResolvedValueOnce([
+          [
+            'task-123',
+            'proj-456',
+            'user-789',
+            null,
+            'ws-abc',
+            'Test task',
+            'A test task',
+            'in_progress',
+            null,
+            0,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            'sam/test',
+            null,
+            null,
+            null,
+            taskMode,
+            0,
+            null,
+            'user',
+            null,
+            null,
+            'user',
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            'user-789',
+            '2026-07-04T00:00:00.000Z',
+            '2026-07-04T00:00:00.000Z',
+          ],
+        ])
+        .mockResolvedValueOnce([
+          [
+            'proj-456',
+            'user-789',
+            'Test Project',
+            'test-project',
+            null,
+            'installation-1',
+            'user/repo',
+            'main',
+            'github',
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            'active',
+            null,
+            0,
+            'user-789',
+            '2026-07-04T00:00:00.000Z',
+            '2026-07-04T00:00:00.000Z',
+          ],
+        ]);
+    }
+
+    it('labels task-mode lifecycle calls as SAM MCP tools', async () => {
+      mockInstructionRows('task');
+
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'get_instructions',
+          arguments: {},
+        })
+      );
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeUndefined();
+
+      const data = JSON.parse(body.result.content[0].text);
+      const instructionText = data.instructions.join('\n');
+      expect(instructionText).toContain(
+        'Tool names in these instructions refer to SAM MCP tools from the `sam-mcp` MCP server.'
+      );
+      expect(instructionText).toContain('Call the SAM MCP `update_task_status` tool');
+      expect(instructionText).toContain('Call the SAM MCP `complete_task` tool');
+      expect(instructionText).toContain('before calling the SAM MCP `complete_task` tool');
+    });
+
+    it('labels conversation-mode lifecycle calls as SAM MCP tools', async () => {
+      mockInstructionRows('conversation');
+
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'get_instructions',
+          arguments: {},
+        })
+      );
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeUndefined();
+
+      const data = JSON.parse(body.result.content[0].text);
+      const instructionText = data.instructions.join('\n');
+      expect(instructionText).toContain('Use the SAM MCP `dispatch_task` tool');
+      expect(instructionText).toContain('Use the SAM MCP `update_task_status` tool');
+      expect(instructionText).toContain('Do NOT call the SAM MCP `complete_task` tool');
     });
   });
 
