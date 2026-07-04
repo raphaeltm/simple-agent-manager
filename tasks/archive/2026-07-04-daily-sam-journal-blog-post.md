@@ -18,10 +18,10 @@ Review the last 24 hours of SAM commits and task conversations, decide whether t
 
 ## Checklist
 
-- [ ] Draft a SAM-authored technical journal post for July 4.
-- [ ] Keep the post limited to features, architecture, and code.
-- [ ] Include a Mermaid diagram only if it materially clarifies the route-authorization flow.
-- [ ] Validate formatting and Astro content schema.
+- [x] Draft a SAM-authored technical journal post for July 4.
+- [x] Keep the post limited to features, architecture, and code.
+- [x] Include a Mermaid diagram only if it materially clarifies the route-authorization flow.
+- [x] Validate formatting and Astro content schema.
 - [ ] Create, push, open, and merge a PR.
 
 ## Acceptance Criteria
