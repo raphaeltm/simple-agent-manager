@@ -28,7 +28,7 @@ Waves 1A, 1B, and 1C migrated the major route families from owner-only project a
 - [x] Add or adjust tests proving owner-only project deletion remains denied for an admin member via the real capability model.
 - [x] Add or adjust tests proving creator-only chat prompt/session action boundaries still reject a shared-project admin who is not the session/workspace creator.
 - [x] Document intentionally retained/deferred owner-private or user-scoped boundaries in this task and the PR summary.
-- [ ] Run focused tests for changed routes and relevant full validation (`grep`, lint, typecheck, tests/build as appropriate).
+- [x] Run focused tests for changed routes and relevant full validation (`grep`, lint, typecheck, tests/build as appropriate).
 
 ## Consolidation Classification
 
@@ -41,6 +41,9 @@ Waves 1A, 1B, and 1C migrated the major route families from owner-only project a
 
 - Grep: `find apps/api/src -type f -name '*.ts' -print | xargs grep -n "requireOwnedProject"` returns only `apps/api/src/middleware/project-auth.ts:188`.
 - Focused tests passed: `pnpm --filter @simple-agent-manager/api test -- tests/unit/routes/shared-project-consolidation-auth.test.ts tests/unit/routes/chat-prompt-cancel.test.ts tests/unit/routes/shared-project-route-auth.test.ts tests/unit/routes/deployment-membership-auth.test.ts tests/unit/middleware/project-auth.test.ts` (5 files, 45 tests).
+- API typecheck passed: `pnpm --filter @simple-agent-manager/api typecheck`.
+- API lint passed with existing warnings only: `pnpm --filter @simple-agent-manager/api lint`.
+- Full API test suite passed: `pnpm --filter @simple-agent-manager/api test` (369 files, 5702 tests).
 
 ## Acceptance Criteria
 
