@@ -364,7 +364,15 @@ crudRoutes.get('/', async (c) => {
   const statusFilter = c.req.query('status')?.trim();
   const sortField = c.req.query('sort')?.trim() || 'last_activity';
 
-  const conditions = [eq(schema.projects.userId, userId)];
+  const conditions = [
+    sql`exists (
+      select 1
+      from ${schema.projectMembers}
+      where ${schema.projectMembers.projectId} = ${schema.projects.id}
+        and ${schema.projectMembers.userId} = ${userId}
+        and ${schema.projectMembers.status} = 'active'
+    )`,
+  ];
   if (cursor) {
     conditions.push(lt(schema.projects.id, cursor));
   }

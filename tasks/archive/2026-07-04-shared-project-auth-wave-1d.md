@@ -20,15 +20,43 @@ Waves 1A, 1B, and 1C migrated the major route families from owner-only project a
 
 ## Implementation Checklist
 
-- [ ] Re-run and record full `requireOwnedProject` grep across `apps/api/src`.
-- [ ] Classify remaining `requireOwnedProject` usage as intentionally retained, migration target, or follow-up.
-- [ ] Migrate `GET /api/projects` to include active project memberships so active admins can discover shared projects.
-- [ ] Preserve user-owned project creation limits, duplicate checks, GitHub token access, personal credential attribution, and creator-only workspace/session action boundaries.
-- [ ] Add cross-cutting route tests proving an active admin can see shared projects in the project list and non-members cannot.
-- [ ] Add or adjust tests proving owner-only project deletion remains denied for an admin member via the real capability model.
-- [ ] Add or adjust tests proving creator-only chat prompt/session action boundaries still reject a shared-project admin who is not the session/workspace creator.
-- [ ] Document intentionally retained/deferred owner-private or user-scoped boundaries in this task and the PR summary.
-- [ ] Run focused tests for changed routes and relevant full validation (`grep`, lint, typecheck, tests/build as appropriate).
+- [x] Re-run and record full `requireOwnedProject` grep across `apps/api/src`.
+- [x] Classify remaining `requireOwnedProject` usage as intentionally retained, migration target, or follow-up.
+- [x] Migrate `GET /api/projects` to include active project memberships so active admins can discover shared projects.
+- [x] Preserve user-owned project creation limits, duplicate checks, GitHub token access, personal credential attribution, and creator-only workspace/session action boundaries.
+- [x] Add cross-cutting route tests proving an active admin can see shared projects in the project list and non-members cannot.
+- [x] Add or adjust tests proving owner-only project deletion remains denied for an admin member via the real capability model.
+- [x] Add or adjust tests proving creator-only chat prompt/session action boundaries still reject a shared-project admin who is not the session/workspace creator.
+- [x] Document intentionally retained/deferred owner-private or user-scoped boundaries in this task and the PR summary.
+- [x] Run focused tests for changed routes and relevant full validation (`grep`, lint, typecheck, tests/build as appropriate).
+
+## Consolidation Classification
+
+- Intentionally retained: `apps/api/src/middleware/project-auth.ts:requireOwnedProject()` remains exported and unit-tested as the owner/private guard for any future narrow owner-only resource checks.
+- Migrated in Wave 1D: `apps/api/src/routes/projects/crud.ts` project list now uses active `project_members` membership instead of `projects.user_id = active user`, so admin members can discover shared projects.
+- Intentionally retained user/private boundaries: project creation quota and duplicate checks, GitHub repository/token checks, project runtime credential value attribution, profile/skill runtime asset value attribution, personal Account Map/dashboard views, and workspace/session lifecycle routes that operate on concrete user-owned workspaces/agent sessions.
+- Deferred follow-up: SAM MCP Durable Object tools still contain project-owner query patterns. These are agent-runtime control-plane surfaces rather than the migrated HTTP route families and need a dedicated MCP/tool authorization wave so token/session semantics are handled consistently.
+
+## Validation Evidence
+
+- Grep: `find apps/api/src -type f -name '*.ts' -print | xargs grep -n "requireOwnedProject"` returns only `apps/api/src/middleware/project-auth.ts:188`.
+- Focused tests passed: `pnpm --filter @simple-agent-manager/api test -- tests/unit/routes/shared-project-consolidation-auth.test.ts tests/unit/routes/chat-prompt-cancel.test.ts tests/unit/routes/shared-project-route-auth.test.ts tests/unit/routes/deployment-membership-auth.test.ts tests/unit/middleware/project-auth.test.ts` (5 files, 45 tests).
+- API typecheck passed: `pnpm --filter @simple-agent-manager/api typecheck`.
+- API lint passed with existing warnings only: `pnpm --filter @simple-agent-manager/api lint`.
+- Full API test suite passed: `pnpm --filter @simple-agent-manager/api test` (369 files, 5702 tests).
+- Root lint passed with existing warnings only: `pnpm lint`.
+- Root typecheck passed: `pnpm typecheck`.
+- Root test suite passed: `pnpm test`.
+- Root build passed: `pnpm build`.
+
+## Task Completion Validation
+
+- Research-to-checklist: PASS. The checklist covers the audit finding, project list migration, intentional private/user-scoped boundaries, tests, and validation.
+- Checklist-to-diff: PASS. The diff changes `GET /api/projects`, adds cross-cutting route tests, adds creator-only prompt coverage, and records classification/validation evidence.
+- Acceptance criteria-to-tests: PASS. Grep proves no route `requireOwnedProject` call sites remain, the new consolidation tests cover admin list visibility and owner-only deletion, prior wave tests cover representative route-family access and non-member rejection, and the chat prompt test covers creator-only message submission.
+- UI-to-backend: N/A. This wave has no UI changes.
+- Multi-resource selection: N/A. This wave does not add a multi-resource selector or new cross-resource endpoint.
+- Vertical slice: PASS. The changed HTTP route is exercised through the real Hono route with mocked Drizzle boundaries and realistic project/member rows; full API and root suites passed.
 
 ## Acceptance Criteria
 
