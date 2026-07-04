@@ -24,14 +24,43 @@ The task-start prompt already names `get_instructions` as coming from the `sam-m
 - [x] Update `get_instructions` conversation-mode wording to label `dispatch_task`, `update_task_status`, and `complete_task` as SAM MCP tools.
 - [x] Add or update focused API test assertions so the returned instructions include the SAM MCP wording.
 - [x] Run targeted MCP route tests and relevant quality checks.
-- [ ] Ship through PR, merge, and monitor production deploy.
+- [x] Deploy to staging and verify live MCP instruction wording before PR.
+- [x] Prepare PR for merge. Post-merge production monitoring is tracked in `/do` Phase 7 and SAM task status after this archive commit.
 
 ## Acceptance Criteria
 
 - Agents receiving `get_instructions` see SAM MCP tool names explicitly described as SAM MCP tools.
 - The instructions still preserve task-mode versus conversation-mode behavior.
 - Automated tests fail if the explicit SAM MCP wording is removed from the main instruction payload.
-- Production deploy succeeds after merge.
+- Staging deployment verifies the changed instructions on the live Worker before merge.
+- Production deploy is monitored after merge.
+
+## Validation
+
+- `pnpm --filter @simple-agent-manager/api test -- tests/unit/routes/mcp.test.ts`
+- `pnpm --filter @simple-agent-manager/api lint`
+- `pnpm --filter @simple-agent-manager/api typecheck`
+- `pnpm lint`
+- `pnpm typecheck`
+- `pnpm test`
+- `pnpm build`
+
+## Review Evidence
+
+- `$task-completion-validator`: PASS. Research findings, checklist items, diff, and test coverage were aligned; post-merge production monitoring remains a workflow step.
+- `$cloudflare-specialist`: PASS. No Wrangler, D1, KV, R2, or migration changes; Worker route behavior is covered by MCP route tests.
+- `$constitution-validator`: PASS. No new hardcoded configurable URLs, timeouts, limits, or identifiers.
+- `$test-engineer`: PASS. Regression tests cover task and conversation mode through JSON-RPC `tools/call`.
+
+## Staging Evidence
+
+- Staging workflow `Deploy Staging` run `28711486479` passed for branch `sam/32a107df-6aff-4e35-867f-01kwpt`.
+- Cloudflare Worker script `sam-api-staging` contains:
+  - Tool names in these instructions refer to SAM MCP tools from the `sam-mcp` MCP server.
+  - Call the SAM MCP `complete_task` tool.
+  - Use the SAM MCP `dispatch_task` tool.
+- Cloudflare Worker script `sam-api-staging` no longer contains the old bare wording: Call `complete_task` with a summary when all work is done.
+- Live staging `/mcp` JSON-RPC `tools/call get_instructions` returned all expected task-mode fragments for an existing staging MCP token: top-level SAM MCP server note, `update_task_status`, `complete_task`, and the push-before-`complete_task` instruction.
 
 ## References
 
