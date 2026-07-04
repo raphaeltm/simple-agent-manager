@@ -117,7 +117,7 @@ interface UserAccessibleInstallationsDiagnostics {
 }
 
 interface UserInstallationRepositoriesDiagnostics {
-  flow: 'repositories' | 'branches' | 'project-access';
+  flow: 'repositories' | 'branches' | 'project-access' | 'project-invite';
   userId: string;
   installationId: string;
   repository?: string;

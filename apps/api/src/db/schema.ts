@@ -376,6 +376,79 @@ export const projectMembers = sqliteTable(
   })
 );
 
+export const projectInviteLinks = sqliteTable(
+  'project_invite_links',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    tokenHash: text('token_hash').notNull().unique(),
+    createdBy: text('created_by').references(() => users.id, { onDelete: 'set null' }),
+    expiresAt: text('expires_at').notNull(),
+    revokedAt: text('revoked_at'),
+    revokedBy: text('revoked_by').references(() => users.id, { onDelete: 'set null' }),
+    lastUsedAt: text('last_used_at'),
+    useCount: integer('use_count').notNull().default(0),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    projectActiveIdx: index('idx_project_invite_links_project').on(
+      table.projectId,
+      table.revokedAt,
+      table.expiresAt
+    ),
+  })
+);
+
+export const projectAccessRequests = sqliteTable(
+  'project_access_requests',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    inviteLinkId: text('invite_link_id').references(() => projectInviteLinks.id, {
+      onDelete: 'set null',
+    }),
+    requesterUserId: text('requester_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    status: text('status').notNull().default('pending'),
+    githubAccessStatus: text('github_access_status').notNull().default('unchecked'),
+    githubAccessCheckedAt: text('github_access_checked_at'),
+    githubAccessMessage: text('github_access_message'),
+    requestedAt: text('requested_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    decidedAt: text('decided_at'),
+    decidedBy: text('decided_by').references(() => users.id, { onDelete: 'set null' }),
+    decisionNote: text('decision_note'),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    projectRequesterUnique: uniqueIndex('idx_project_access_requests_project_requester').on(
+      table.projectId,
+      table.requesterUserId
+    ),
+    projectStatusIdx: index('idx_project_access_requests_project_status').on(
+      table.projectId,
+      table.status,
+      table.requestedAt
+    ),
+  })
+);
+
 /** Per-project runtime environment variables injected into workspaces.
  *  Secret values are AES-256-GCM encrypted; non-secret values are stored in plaintext. */
 export const projectRuntimeEnvVars = sqliteTable(
@@ -1332,6 +1405,10 @@ export type Project = typeof projects.$inferSelect;
 export type NewProject = typeof projects.$inferInsert;
 export type ProjectMember = typeof projectMembers.$inferSelect;
 export type NewProjectMember = typeof projectMembers.$inferInsert;
+export type ProjectInviteLink = typeof projectInviteLinks.$inferSelect;
+export type NewProjectInviteLink = typeof projectInviteLinks.$inferInsert;
+export type ProjectAccessRequest = typeof projectAccessRequests.$inferSelect;
+export type NewProjectAccessRequest = typeof projectAccessRequests.$inferInsert;
 export type ProjectRuntimeEnvVar = typeof projectRuntimeEnvVars.$inferSelect;
 export type NewProjectRuntimeEnvVar = typeof projectRuntimeEnvVars.$inferInsert;
 export type ProjectRuntimeFile = typeof projectRuntimeFiles.$inferSelect;

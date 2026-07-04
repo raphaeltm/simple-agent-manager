@@ -1,11 +1,18 @@
 import type {
   AddProjectRepositoryRequest,
   AvailableRepositoriesResponse,
+  CreatedProjectInviteLinkResponse,
+  CreateProjectInviteRequest,
   CreateProjectRequest,
   DashboardActiveTasksResponse,
+  DecideProjectAccessRequest,
   ListProjectsResponse,
   Project,
+  ProjectAccessRequestResponse,
   ProjectDetailResponse,
+  ProjectInviteLinkResponse,
+  ProjectInvitePreviewResponse,
+  ProjectMembersResponse,
   ProjectRepositoryAccessResponse,
   ProjectRuntimeConfigResponse,
   SubmoduleDiscoveryResponse,
@@ -246,6 +253,81 @@ export async function listAvailableRepositories(
 ): Promise<AvailableRepositoriesResponse> {
   return request<AvailableRepositoriesResponse>(
     `/api/projects/${projectId}/repository-access/available`
+  );
+}
+
+// =============================================================================
+// Project Members and Invite Links
+// =============================================================================
+
+export async function getProjectMembers(projectId: string): Promise<ProjectMembersResponse> {
+  return request<ProjectMembersResponse>(`/api/projects/${projectId}/members`);
+}
+
+export async function createProjectInviteLink(
+  projectId: string,
+  data: CreateProjectInviteRequest = {}
+): Promise<CreatedProjectInviteLinkResponse> {
+  return request<CreatedProjectInviteLinkResponse>(`/api/projects/${projectId}/invite-links`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function revokeProjectInviteLink(
+  projectId: string,
+  linkId: string
+): Promise<ProjectInviteLinkResponse> {
+  return request<ProjectInviteLinkResponse>(
+    `/api/projects/${projectId}/invite-links/${encodeURIComponent(linkId)}/revoke`,
+    {
+      method: 'POST',
+    }
+  );
+}
+
+export async function getProjectInvitePreview(
+  token: string
+): Promise<ProjectInvitePreviewResponse> {
+  return request<ProjectInvitePreviewResponse>(
+    `/api/projects/invite-links/${encodeURIComponent(token)}`
+  );
+}
+
+export async function requestProjectAccess(token: string): Promise<ProjectAccessRequestResponse> {
+  return request<ProjectAccessRequestResponse>(
+    `/api/projects/invite-links/${encodeURIComponent(token)}/request`,
+    {
+      method: 'POST',
+    }
+  );
+}
+
+export async function approveProjectAccessRequest(
+  projectId: string,
+  requestId: string,
+  data: DecideProjectAccessRequest = {}
+): Promise<ProjectAccessRequestResponse> {
+  return request<ProjectAccessRequestResponse>(
+    `/api/projects/${projectId}/access-requests/${encodeURIComponent(requestId)}/approve`,
+    {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }
+  );
+}
+
+export async function denyProjectAccessRequest(
+  projectId: string,
+  requestId: string,
+  data: DecideProjectAccessRequest = {}
+): Promise<ProjectAccessRequestResponse> {
+  return request<ProjectAccessRequestResponse>(
+    `/api/projects/${projectId}/access-requests/${encodeURIComponent(requestId)}/deny`,
+    {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }
   );
 }
 

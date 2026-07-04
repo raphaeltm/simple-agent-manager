@@ -65,3 +65,11 @@ export const UpsertProjectRuntimeFileSchema = v.object({
 export const AddProjectRepositorySchema = v.object({
   repository: v.string(),
 });
+
+export const CreateProjectInviteSchema = v.object({
+  expiresInDays: v.optional(v.number()),
+});
+
+export const DecideProjectAccessRequestSchema = v.object({
+  note: v.optional(v.string()),
+});

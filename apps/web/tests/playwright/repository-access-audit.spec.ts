@@ -157,6 +157,30 @@ async function setupMocks(
       if (subPath === '/repository-access') {
         return respond(200, { primaryRepository: project.repository, repositories });
       }
+      if (subPath === '/members') {
+        return respond(200, {
+          members: [
+            {
+              projectId: project.id,
+              userId: 'user-test-1',
+              role: 'owner',
+              status: 'active',
+              invitedBy: null,
+              createdAt: '2026-01-01T00:00:00Z',
+              updatedAt: '2026-01-01T00:00:00Z',
+              user: {
+                id: 'user-test-1',
+                name: 'Test User',
+                email: 'test@example.com',
+                image: null,
+                avatarUrl: null,
+              },
+            },
+          ],
+          inviteLinks: [],
+          accessRequests: [],
+        });
+      }
       if (subPath === '/repository-access/discover') return respond(200, { suggestions: [] });
       if (subPath === '/runtime-config') return respond(200, { envVars: [], files: [] });
       if (subPath.startsWith('/sessions')) return respond(200, { sessions: [], total: 0 });
