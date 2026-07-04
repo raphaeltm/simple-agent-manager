@@ -36,12 +36,12 @@ import { expectJsonRecord } from '../../lib/runtime-validation';
 import { ulid } from '../../lib/ulid';
 import { getAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
-import { requireProjectCapability } from '../../middleware/project-auth';
 import { CreateTriggerSchema, jsonValidator, UpdateTriggerSchema } from '../../schemas';
 import { validateCronExpression } from '../../services/cron-utils';
 import { cronToHumanReadable, cronToNextFire } from '../../services/cron-utils';
 import { submitTriggeredTask } from '../../services/trigger-submit';
 import { buildCronContext, renderTemplate } from '../../services/trigger-template';
+import { requireProjectTaskRead, requireProjectTaskWrite } from '../task-project-auth';
 
 const crudRoutes = new Hono<{ Bindings: Env }>();
 
@@ -88,7 +88,7 @@ crudRoutes.post('/', jsonValidator(CreateTriggerSchema), async (c) => {
     throw errors.badRequest('projectId is required');
   }
 
-  await requireProjectCapability(db, projectId, userId, 'task:write');
+  await requireProjectTaskWrite(db, projectId, userId);
   const body = c.req.valid('json');
 
   // Validate required fields
@@ -276,7 +276,7 @@ crudRoutes.get('/', async (c) => {
     throw errors.badRequest('projectId is required');
   }
 
-  await requireProjectCapability(db, projectId, userId, 'task:read');
+  await requireProjectTaskRead(db, projectId, userId);
 
   const rows = await db
     .select()
@@ -349,7 +349,7 @@ crudRoutes.get('/:triggerId', async (c) => {
     throw errors.badRequest('projectId and triggerId are required');
   }
 
-  await requireProjectCapability(db, projectId, userId, 'task:read');
+  await requireProjectTaskRead(db, projectId, userId);
 
   const [trigger] = await db
     .select()
@@ -426,7 +426,7 @@ crudRoutes.patch('/:triggerId', jsonValidator(UpdateTriggerSchema), async (c) =>
     throw errors.badRequest('projectId and triggerId are required');
   }
 
-  await requireProjectCapability(db, projectId, userId, 'task:write');
+  await requireProjectTaskWrite(db, projectId, userId);
 
   const [trigger] = await db
     .select()
@@ -573,7 +573,7 @@ crudRoutes.delete('/:triggerId', async (c) => {
     throw errors.badRequest('projectId and triggerId are required');
   }
 
-  await requireProjectCapability(db, projectId, userId, 'task:write');
+  await requireProjectTaskWrite(db, projectId, userId);
 
   const [trigger] = await db
     .select({ id: schema.triggers.id })
@@ -614,7 +614,7 @@ crudRoutes.post('/:triggerId/test', async (c) => {
     throw errors.badRequest('projectId and triggerId are required');
   }
 
-  const project = await requireProjectCapability(db, projectId, userId, 'task:read');
+  const project = await requireProjectTaskRead(db, projectId, userId);
 
   const [trigger] = await db
     .select()
@@ -673,7 +673,7 @@ crudRoutes.post('/:triggerId/run', async (c) => {
     throw errors.badRequest('projectId and triggerId are required');
   }
 
-  const project = await requireProjectCapability(db, projectId, userId, 'task:write');
+  const project = await requireProjectTaskWrite(db, projectId, userId);
 
   const [trigger] = await db
     .select()
@@ -815,7 +815,7 @@ crudRoutes.delete('/:triggerId/executions/:executionId', async (c) => {
     throw errors.badRequest('projectId, triggerId, and executionId are required');
   }
 
-  await requireProjectCapability(db, projectId, userId, 'task:write');
+  await requireProjectTaskWrite(db, projectId, userId);
 
   // Verify the execution belongs to this trigger and project
   const [execution] = await db
@@ -863,7 +863,7 @@ crudRoutes.post('/:triggerId/executions/cleanup', async (c) => {
     throw errors.badRequest('projectId and triggerId are required');
   }
 
-  await requireProjectCapability(db, projectId, userId, 'task:write');
+  await requireProjectTaskWrite(db, projectId, userId);
 
   // Verify the trigger exists
   const [trigger] = await db
