@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  @font-face {
+    font-family: 'Chillax';
+    src: url('./assets/Chillax-Variable.woff2') format('woff2');
+    font-weight: 200 700;
+  }
+  html, body { margin: 0; padding: 0; }
+  #map { width: 800px; height: 800px; background: #0b1110; }
+  .pin {
+    width: 30px; height: 30px; border-radius: 50%;
+    background: #16a34a; color: #e6f2ee;
+    border: 2.5px solid #22c55e;
+    box-shadow: 0 0 18px rgba(34, 197, 94, 0.65), 0 2px 8px rgba(0,0,0,0.5);
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'Chillax', sans-serif; font-weight: 600; font-size: 15px;
+  }
+  .leaflet-control-attribution { display: none; }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<script>
+  const stops = [
+    { n: 1, ll: [48.8570, 2.3413] },  // Pont Neuf quay
+    { n: 2, ll: [48.8465, 2.3607] },  // Port de la Rapée / Austerlitz viaduct
+    { n: 3, ll: [48.8438, 2.3597] },  // Jardin des Plantes alpine garden
+    { n: 4, ll: [48.8480, 2.3745] },  // Coulée Verte / Viaduc des Arts
+  ];
+  const map = L.map('map', { zoomControl: false, attributionControl: false });
+  L.tileLayer('https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom: 19 }).addTo(map);
+  const route = [
+    [48.8570, 2.3413],
+    [48.8552, 2.3448],
+    [48.8517, 2.3521],
+    [48.8465, 2.3607],
+    [48.8438, 2.3597],
+    [48.8447, 2.3648],
+    [48.8492, 2.3702],
+    [48.8480, 2.3745],
+  ];
+  L.polyline(route, { color: '#22c55e', weight: 3.5, opacity: 0.85, dashArray: '1 8', lineCap: 'round' }).addTo(map);
+  stops.forEach(s => {
+    L.marker(s.ll, { icon: L.divIcon({ className: '', html: `<div class="pin">${s.n}</div>`, iconSize: [30, 30], iconAnchor: [15, 15] }) }).addTo(map);
+  });
+  map.fitBounds(L.latLngBounds(route), { padding: [70, 70] });
+  window.__ready = new Promise(res => {
+    let n = 0;
+    map.on('load', () => {});
+    setTimeout(res, 4000);
+  });
+</script>
+</body>
+</html>
