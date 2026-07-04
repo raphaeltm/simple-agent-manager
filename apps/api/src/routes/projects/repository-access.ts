@@ -17,7 +17,7 @@ import { log } from '../../lib/logger';
 import { ulid } from '../../lib/ulid';
 import { getUserId } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
-import { requireOwnedProject } from '../../middleware/project-auth';
+import { requireProjectAccess, requireProjectCapability } from '../../middleware/project-auth';
 import { AddProjectRepositorySchema, jsonValidator } from '../../schemas';
 import {
   getRepositoryGitmodules,
@@ -104,7 +104,7 @@ async function resolveGitHubProjectContext(
   const userId = getUserId(c);
   const projectId = c.req.param('id') ?? '';
   const db = drizzle(c.env.DATABASE, { schema });
-  const project = await requireOwnedProject(db, projectId, userId);
+  const project = await requireProjectAccess(db, projectId, userId);
 
   if (project.repoProvider && project.repoProvider !== 'github') {
     throw errors.badRequest(nonGithubMessage);
@@ -120,7 +120,7 @@ repositoryAccessRoutes.get('/:id/repository-access', async (c) => {
   const userId = getUserId(c);
   const projectId = c.req.param('id');
   const db = drizzle(c.env.DATABASE, { schema });
-  const project = await requireOwnedProject(db, projectId, userId);
+  const project = await requireProjectCapability(db, projectId, userId, 'project:update');
 
   const rows = await db
     .select()
@@ -162,7 +162,7 @@ repositoryAccessRoutes.post(
     const body = c.req.valid('json');
     const limits = getRuntimeLimits(c.env);
 
-    const project = await requireOwnedProject(db, projectId, userId);
+    const project = await requireProjectCapability(db, projectId, userId, 'project:update');
     if (project.repoProvider && project.repoProvider !== 'github') {
       throw errors.badRequest('Repository access is only supported for GitHub-backed projects');
     }
@@ -252,7 +252,7 @@ repositoryAccessRoutes.delete('/:id/repository-access/:repoRowId', async (c) => 
   const projectId = c.req.param('id');
   const repoRowId = c.req.param('repoRowId');
   const db = drizzle(c.env.DATABASE, { schema });
-  const project = await requireOwnedProject(db, projectId, userId);
+  const project = await requireProjectCapability(db, projectId, userId, 'project:update');
 
   const existing = await db
     .select({ id: schema.projectGithubRepositories.id })

@@ -5,7 +5,8 @@ import { chatRoutes } from '../../../src/routes/chat';
 
 const mocks = vi.hoisted(() => ({
   drizzle: vi.fn(),
-  requireOwnedProject: vi.fn(),
+  requireProjectAccess: vi.fn(),
+  requireProjectCapability: vi.fn(),
   getSession: vi.fn(),
   getMessages: vi.fn(),
   listAcpSessions: vi.fn(),
@@ -94,7 +95,8 @@ vi.mock('../../../src/middleware/auth', () => ({
 }));
 
 vi.mock('../../../src/middleware/project-auth', () => ({
-  requireOwnedProject: mocks.requireOwnedProject,
+  requireProjectAccess: mocks.requireProjectAccess,
+  requireProjectCapability: mocks.requireProjectCapability,
 }));
 
 vi.mock('../../../src/services/project-data', () => ({
@@ -145,7 +147,7 @@ describe('chatRoutes agent session routing', () => {
       select: vi.fn().mockReturnValue(queryBuilder),
     });
 
-    mocks.requireOwnedProject.mockResolvedValue({
+    mocks.requireProjectAccess.mockResolvedValue({
       id: 'proj-1',
       userId: 'user-1',
     });
@@ -550,7 +552,7 @@ describe('chatRoutes message list', () => {
       select: vi.fn().mockReturnValue(makeTaskQuery([])),
     });
 
-    mocks.requireOwnedProject.mockResolvedValue({
+    mocks.requireProjectAccess.mockResolvedValue({
       id: 'proj-1',
       userId: 'user-1',
     });

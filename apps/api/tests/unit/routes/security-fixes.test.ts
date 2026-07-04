@@ -14,7 +14,8 @@ import { projectsRoutes } from '../../../src/routes/projects';
 // --- Mocks ---
 
 const mocks = vi.hoisted(() => ({
-  requireOwnedProject: vi.fn(),
+  requireProjectAccess: vi.fn(),
+  requireProjectCapability: vi.fn(),
   encrypt: vi.fn(),
   getAcpSession: vi.fn(),
   updateAcpSessionHeartbeat: vi.fn(),
@@ -32,7 +33,8 @@ vi.mock('../../../src/middleware/auth', () => ({
   }),
 }));
 vi.mock('../../../src/middleware/project-auth', () => ({
-  requireOwnedProject: mocks.requireOwnedProject,
+  requireProjectAccess: mocks.requireProjectAccess,
+  requireProjectCapability: mocks.requireProjectCapability,
 }));
 vi.mock('../../../src/services/encryption', () => ({
   encrypt: mocks.encrypt,
@@ -84,13 +86,15 @@ describe('Shannon Security Fixes', () => {
 
     (drizzle as any).mockReturnValue(mockDB);
 
-    mocks.requireOwnedProject.mockResolvedValue({
+    const projectRow = {
       id: 'proj-1',
       userId: 'user-1',
       installationId: 'inst-1',
       repository: 'acme/repo',
       defaultBranch: 'main',
-    });
+    };
+    mocks.requireProjectAccess.mockResolvedValue(projectRow);
+    mocks.requireProjectCapability.mockResolvedValue(projectRow);
     mocks.encrypt.mockResolvedValue({ ciphertext: 'enc-value', iv: 'enc-iv' });
 
     app = new Hono<{ Bindings: Env }>();

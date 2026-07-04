@@ -17,7 +17,7 @@ import { getUserInstallationRepositories } from '../../../src/services/github-ap
 const mocks = vi.hoisted(() => ({
   getUserInstallationRepositories: vi.fn(),
   getGitHubUserAccessToken: vi.fn(),
-  requireOwnedProject: vi.fn(),
+  requireProjectAccess: vi.fn(),
 }));
 
 vi.mock('drizzle-orm/d1');
@@ -27,7 +27,7 @@ vi.mock('../../../src/middleware/auth', () => ({
   getUserId: () => 'user-1',
 }));
 vi.mock('../../../src/middleware/project-auth', () => ({
-  requireOwnedProject: mocks.requireOwnedProject,
+  requireProjectAccess: mocks.requireProjectAccess,
 }));
 vi.mock('../../../src/services/github-app', () => ({
   getUserInstallationRepositories: mocks.getUserInstallationRepositories,
@@ -87,7 +87,7 @@ describe('GET /:id/repository-access/available', () => {
     });
 
     mocks.getGitHubUserAccessToken.mockResolvedValue('github-user-token');
-    mocks.requireOwnedProject.mockResolvedValue(PROJECT);
+    mocks.requireProjectAccess.mockResolvedValue(PROJECT);
   });
 
   function buildApp(): Hono<{ Bindings: Env }> {
@@ -166,7 +166,7 @@ describe('GET /:id/repository-access/available', () => {
   });
 
   it('rejects non-GitHub projects with 400', async () => {
-    mocks.requireOwnedProject.mockResolvedValue({ ...PROJECT, repoProvider: 'artifacts' });
+    mocks.requireProjectAccess.mockResolvedValue({ ...PROJECT, repoProvider: 'artifacts' });
 
     const res = await get();
     expect(res.status).toBe(400);

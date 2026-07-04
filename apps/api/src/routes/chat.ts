@@ -20,7 +20,7 @@ import { requireRouteParam } from '../lib/route-helpers';
 import { expectJsonRecord } from '../lib/runtime-validation';
 import { getAuth, getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
-import { requireOwnedProject } from '../middleware/project-auth';
+import { requireProjectAccess, requireProjectCapability } from '../middleware/project-auth';
 import { CreateChatSessionSchema, LinkTaskToChatSchema, parseOptionalBody, SendChatMessageSchema } from '../schemas';
 import { resolveTaskAgentProfileHint } from '../services/agent-profile-display';
 import * as chatPersistence from '../services/chat-persistence';
@@ -172,7 +172,7 @@ chatRoutes.get('/', async (c) => {
   const projectId = requireRouteParam(c, 'projectId');
   const db = drizzle(c.env.DATABASE, { schema });
 
-  await requireOwnedProject(db, projectId, userId);
+  await requireProjectAccess(db, projectId, userId);
 
   const status = c.req.query('status') || null;
   const limit = Math.min(parseInt(c.req.query('limit') || '20', 10), 100);
@@ -192,7 +192,7 @@ chatRoutes.post('/', async (c) => {
   const projectId = requireRouteParam(c, 'projectId');
   const db = drizzle(c.env.DATABASE, { schema });
 
-  await requireOwnedProject(db, projectId, userId);
+  await requireProjectCapability(db, projectId, userId, 'task:write');
 
   const body = await parseOptionalBody(c.req.raw, CreateChatSessionSchema, {});
   const workspaceId = body.workspaceId?.trim() || null;
@@ -216,7 +216,7 @@ chatRoutes.get('/ws', async (c) => {
   const projectId = requireRouteParam(c, 'projectId');
   const db = drizzle(c.env.DATABASE, { schema });
 
-  await requireOwnedProject(db, projectId, userId);
+  await requireProjectAccess(db, projectId, userId);
 
   const upgradeHeader = c.req.header('Upgrade');
   if (!upgradeHeader || upgradeHeader.toLowerCase() !== 'websocket') {
@@ -359,7 +359,7 @@ chatRoutes.get('/:sessionId/messages', async (c) => {
   const sessionId = requireRouteParam(c, 'sessionId');
   const db = drizzle(c.env.DATABASE, { schema });
 
-  await requireOwnedProject(db, projectId, userId);
+  await requireProjectAccess(db, projectId, userId);
 
   const session = await projectDataService.getSession(c.env, projectId, sessionId);
   if (!session) {
@@ -403,7 +403,7 @@ chatRoutes.get('/:sessionId/messages/:messageId/tool-content', async (c) => {
   const messageId = requireRouteParam(c, 'messageId');
   const db = drizzle(c.env.DATABASE, { schema });
 
-  await requireOwnedProject(db, projectId, userId);
+  await requireProjectAccess(db, projectId, userId);
 
   const content = await projectDataService.getMessageToolContent(
     c.env,
@@ -429,7 +429,7 @@ chatRoutes.post('/:sessionId/stop', async (c) => {
   const sessionId = requireRouteParam(c, 'sessionId');
   const db = drizzle(c.env.DATABASE, { schema });
 
-  await requireOwnedProject(db, projectId, userId);
+  await requireProjectCapability(db, projectId, userId, 'task:write');
 
   await chatPersistence.stopChatSession(c.env, projectId, sessionId);
 
@@ -446,7 +446,7 @@ chatRoutes.post('/:sessionId/idle-reset', async (c) => {
   const sessionId = requireRouteParam(c, 'sessionId');
   const db = drizzle(c.env.DATABASE, { schema });
 
-  await requireOwnedProject(db, projectId, userId);
+  await requireProjectCapability(db, projectId, userId, 'task:write');
 
   const result = await projectDataService.resetIdleCleanup(c.env, projectId, sessionId);
 
@@ -464,7 +464,7 @@ chatRoutes.post('/:sessionId/prompt', async (c) => {
   const sessionId = requireRouteParam(c, 'sessionId');
   const db = drizzle(c.env.DATABASE, { schema });
 
-  await requireOwnedProject(db, projectId, userId);
+  await requireProjectCapability(db, projectId, userId, 'task:write');
 
   const body = await parseOptionalBody(c.req.raw, SendChatMessageSchema, {});
   const content = body.content?.trim();
@@ -512,7 +512,7 @@ chatRoutes.post('/:sessionId/cancel', async (c) => {
   const sessionId = requireRouteParam(c, 'sessionId');
   const db = drizzle(c.env.DATABASE, { schema });
 
-  await requireOwnedProject(db, projectId, userId);
+  await requireProjectCapability(db, projectId, userId, 'task:write');
 
   // Resolve the live workspace + running agent session, tenant-scoped and
   // fail-fast (see resolveLiveAgentSessionForChat).
@@ -555,7 +555,7 @@ chatRoutes.post('/:sessionId/summarize', async (c) => {
   const sessionId = requireRouteParam(c, 'sessionId');
   const db = drizzle(c.env.DATABASE, { schema });
 
-  await requireOwnedProject(db, projectId, userId);
+  await requireProjectCapability(db, projectId, userId, 'task:write');
 
   // Verify session exists
   const session = await projectDataService.getSession(c.env, projectId, sessionId);
@@ -638,7 +638,7 @@ chatRoutes.get('/:sessionId/ideas', async (c) => {
   const sessionId = requireRouteParam(c, 'sessionId');
   const db = drizzle(c.env.DATABASE, { schema });
 
-  await requireOwnedProject(db, projectId, userId);
+  await requireProjectAccess(db, projectId, userId);
 
   const links = await projectDataService.getIdeasForSession(c.env, projectId, sessionId);
 
@@ -677,7 +677,7 @@ chatRoutes.post('/:sessionId/ideas', async (c) => {
   const sessionId = requireRouteParam(c, 'sessionId');
   const db = drizzle(c.env.DATABASE, { schema });
 
-  await requireOwnedProject(db, projectId, userId);
+  await requireProjectCapability(db, projectId, userId, 'task:write');
 
   const body = await parseOptionalBody(c.req.raw, LinkTaskToChatSchema, {});
   const taskId = body.taskId?.trim();
@@ -713,7 +713,7 @@ chatRoutes.delete('/:sessionId/ideas/:taskId', async (c) => {
   const taskId = requireRouteParam(c, 'taskId');
   const db = drizzle(c.env.DATABASE, { schema });
 
-  await requireOwnedProject(db, projectId, userId);
+  await requireProjectCapability(db, projectId, userId, 'task:write');
 
   await projectDataService.unlinkSessionIdea(c.env, projectId, sessionId, taskId);
 

@@ -15,14 +15,14 @@ The membership foundation is merged, but core project/chat/task/workspace API ro
 
 ## Checklist
 
-- [ ] Inspect each scoped route and classify current `requireOwnedProject` calls as read visibility, write/management, delete, or creator/user-scoped action.
-- [ ] Replace scoped `requireOwnedProject` imports/calls with `requireProjectAccess` or `requireProjectCapability` using the narrowest relevant capability.
-- [ ] Keep owner-only project deletion on `project:delete`.
-- [ ] Preserve existing actor/audit `userId` usage and any task/session/workspace owner checks that protect concrete user-owned resources.
-- [ ] Keep GitHub repository/token access user-scoped at token mint boundaries.
-- [ ] Add focused route tests for active admin-member access and non-member rejection.
-- [ ] Run relevant API/unit tests.
-- [ ] Grep the scoped file list to verify `requireOwnedProject` no longer remains there.
+- [x] Inspect each scoped route and classify current `requireOwnedProject` calls as read visibility, write/management, delete, or creator/user-scoped action.
+- [x] Replace scoped `requireOwnedProject` imports/calls with `requireProjectAccess` or `requireProjectCapability` using the narrowest relevant capability.
+- [x] Keep owner-only project deletion on `project:delete`.
+- [x] Preserve existing actor/audit `userId` usage and any task/session/workspace owner checks that protect concrete user-owned resources.
+- [x] Keep GitHub repository/token access user-scoped at token mint boundaries.
+- [x] Add focused route tests for active admin-member access and non-member rejection.
+- [x] Run relevant API/unit tests.
+- [x] Grep the scoped file list to verify `requireOwnedProject` no longer remains there.
 
 ## Acceptance Criteria
 

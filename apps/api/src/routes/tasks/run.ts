@@ -22,7 +22,7 @@ import { log } from '../../lib/logger';
 import { ulid } from '../../lib/ulid';
 import { getAuth, requireApproved,requireAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
-import { requireOwnedProject, requireOwnedTask } from '../../middleware/project-auth';
+import { requireOwnedTask, requireProjectCapability } from '../../middleware/project-auth';
 import { parseOptionalBody, RunTaskSchema } from '../../schemas';
 import * as projectDataService from '../../services/project-data';
 import { isTaskBlocked } from '../../services/task-graph';
@@ -64,8 +64,8 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
     throw errors.badRequest('taskId is required');
   }
 
-  // Validate ownership
-  await requireOwnedProject(db, projectId, userId);
+  // Starting or cleaning up a run uses the caller's credentials and compute context.
+  await requireProjectCapability(db, projectId, userId, 'task:write');
   const task = await requireOwnedTask(db, projectId, taskId, userId);
 
   // Check task status
@@ -337,7 +337,8 @@ runRoutes.post('/:taskId/run/cleanup', requireAuth(), requireApproved(), async (
     throw errors.badRequest('projectId and taskId are required');
   }
 
-  await requireOwnedProject(db, projectId, userId);
+  // Cleanup controls a concrete task runner owned by the caller.
+  await requireProjectCapability(db, projectId, userId, 'task:write');
   const task = await requireOwnedTask(db, projectId, taskId, userId);
 
   // Only allow cleanup for terminal states

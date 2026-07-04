@@ -6,7 +6,7 @@ import type { Env } from '../../../src/env';
 import { projectsRoutes } from '../../../src/routes/projects';
 
 const mocks = vi.hoisted(() => ({
-  requireOwnedProject: vi.fn(),
+  requireProjectCapability: vi.fn(),
 }));
 
 vi.mock('drizzle-orm/d1');
@@ -16,7 +16,7 @@ vi.mock('../../../src/middleware/auth', () => ({
   getUserId: () => 'user-1',
 }));
 vi.mock('../../../src/middleware/project-auth', () => ({
-  requireOwnedProject: mocks.requireOwnedProject,
+  requireProjectCapability: mocks.requireProjectCapability,
 }));
 vi.mock('../../../src/services/encryption', () => ({
   encrypt: vi.fn().mockResolvedValue({ ciphertext: 'enc', iv: 'iv' }),
@@ -98,7 +98,7 @@ describe('DELETE /api/projects/:id', () => {
     const mockDB = buildMockDB();
     (drizzle as any).mockReturnValue(mockDB);
 
-    mocks.requireOwnedProject.mockResolvedValue({
+    mocks.requireProjectCapability.mockResolvedValue({
       id: 'proj-1',
       userId: 'user-1',
       name: 'Test Project',
@@ -234,16 +234,16 @@ describe('DELETE /api/projects/:id', () => {
     expect(batchedStatements.length).toBe(10);
   });
 
-  it('calls requireOwnedProject for authorization', async () => {
+  it('calls requireProjectCapability for authorization', async () => {
     selectResults.push([]);
 
     await app.request('/api/projects/proj-1', { method: 'DELETE' }, env);
 
-    expect(mocks.requireOwnedProject).toHaveBeenCalledTimes(1);
+    expect(mocks.requireProjectCapability).toHaveBeenCalledTimes(1);
   });
 
-  it('returns error when requireOwnedProject rejects (not owner)', async () => {
-    mocks.requireOwnedProject.mockRejectedValueOnce(
+  it('returns error when requireProjectCapability rejects (not owner)', async () => {
+    mocks.requireProjectCapability.mockRejectedValueOnce(
       Object.assign(new Error('Project not found'), {
         statusCode: 404,
         error: 'NOT_FOUND',
@@ -294,7 +294,7 @@ describe('DELETE /api/projects/:id', () => {
 
   it('deletes the Artifacts repo after project rows are deleted', async () => {
     const artifactsDelete = vi.fn().mockResolvedValue(true);
-    mocks.requireOwnedProject.mockResolvedValueOnce({
+    mocks.requireProjectCapability.mockResolvedValueOnce({
       id: 'proj-1',
       userId: 'user-1',
       name: 'Artifacts Project',
@@ -326,7 +326,7 @@ describe('DELETE /api/projects/:id', () => {
   });
 
   it('logs an orphan and still deletes the project when the Artifacts binding is unavailable', async () => {
-    mocks.requireOwnedProject.mockResolvedValueOnce({
+    mocks.requireProjectCapability.mockResolvedValueOnce({
       id: 'proj-1',
       userId: 'user-1',
       name: 'Artifacts Project',
@@ -362,7 +362,7 @@ describe('DELETE /api/projects/:id', () => {
     const artifactsDelete = vi
       .fn()
       .mockRejectedValue(new Error('Cloudflare Artifacts unavailable'));
-    mocks.requireOwnedProject.mockResolvedValueOnce({
+    mocks.requireProjectCapability.mockResolvedValueOnce({
       id: 'proj-1',
       userId: 'user-1',
       name: 'Artifacts Project',

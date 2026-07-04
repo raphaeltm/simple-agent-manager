@@ -6,7 +6,8 @@ import { chatRoutes } from '../../../src/routes/chat';
 
 const mocks = vi.hoisted(() => ({
   drizzle: vi.fn(),
-  requireOwnedProject: vi.fn(),
+  requireProjectAccess: vi.fn(),
+  requireProjectCapability: vi.fn(),
   sendPromptToAgentOnNode: vi.fn(),
   cancelAgentSessionOnNode: vi.fn(),
   enrichMessageWithMentions: vi.fn(),
@@ -46,7 +47,8 @@ vi.mock('../../../src/middleware/auth', () => ({
 }));
 
 vi.mock('../../../src/middleware/project-auth', () => ({
-  requireOwnedProject: mocks.requireOwnedProject,
+  requireProjectAccess: mocks.requireProjectAccess,
+  requireProjectCapability: mocks.requireProjectCapability,
 }));
 
 vi.mock('../../../src/services/project-data', () => ({
@@ -126,7 +128,7 @@ let app: Hono<{ Bindings: Env }>;
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.requireOwnedProject.mockResolvedValue({ id: 'proj-1', userId: 'user-1' });
+  mocks.requireProjectAccess.mockResolvedValue({ id: 'proj-1', userId: 'user-1' });
   mocks.parseOptionalBody.mockResolvedValue({ content: 'hello agent' });
   mocks.enrichMessageWithMentions.mockResolvedValue({ enrichedMessage: 'hello agent' });
 

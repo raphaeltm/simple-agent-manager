@@ -23,6 +23,12 @@ vi.mock('../../../src/middleware/auth', () => ({
   requireApproved: () => vi.fn((_c: unknown, next: () => unknown) => next()),
   getUserId: () => 'test-user-id',
 }));
+const projectAuthMocks = vi.hoisted(() => ({
+  requireProjectCapability: vi.fn(),
+}));
+vi.mock('../../../src/middleware/project-auth', () => ({
+  requireProjectCapability: projectAuthMocks.requireProjectCapability,
+}));
 vi.mock('../../../src/lib/ulid', () => ({
   ulid: () => 'test-ulid',
 }));
@@ -82,6 +88,10 @@ describe('Project Credentials Routes', () => {
 
     mockDB = makeMockDB();
     (drizzle as unknown as ReturnType<typeof vi.fn>).mockReturnValue(mockDB);
+    projectAuthMocks.requireProjectCapability.mockResolvedValue({
+      id: 'proj-1',
+      userId: 'test-user-id',
+    });
   });
 
   // Rate-limit middleware on PUT /:id/credentials calls KV.get / KV.put; stub
@@ -112,8 +122,12 @@ describe('Project Credentials Routes', () => {
 
   describe('GET /:id/credentials', () => {
     it('rejects read when project is not owned by user (returns 404)', async () => {
-      // requireOwnedProject: ownership check fails
-      mockDB.limit.mockResolvedValueOnce([]);
+      projectAuthMocks.requireProjectCapability.mockRejectedValueOnce(
+        Object.assign(new Error('Project not found'), {
+          statusCode: 404,
+          error: 'NOT_FOUND',
+        })
+      );
 
       const res = await app.request(
         '/api/projects/other-users-project/credentials',
@@ -124,12 +138,7 @@ describe('Project Credentials Routes', () => {
     });
 
     it('returns an empty credentials array when no project-scoped credentials exist', async () => {
-      // ownership check succeeds
-      mockDB.limit.mockResolvedValueOnce([{ id: 'proj-1', userId: 'test-user-id' }]);
-      // credentials query: where() resolves with no rows (2nd where call)
-      mockDB.where
-        .mockReturnValueOnce(mockDB) // 1st call: ownership where() → chain continues into limit()
-        .mockResolvedValueOnce([]); // 2nd call: credentials where() awaited directly
+      mockDB.where.mockResolvedValueOnce([]);
 
       const res = await app.request('/api/projects/proj-1/credentials', { method: 'GET' }, env);
       expect(res.status).toBe(200);
@@ -138,8 +147,7 @@ describe('Project Credentials Routes', () => {
     });
 
     it('returns project-scoped credentials with scope="project" and the requested projectId', async () => {
-      mockDB.limit.mockResolvedValueOnce([{ id: 'proj-1', userId: 'test-user-id' }]);
-      mockDB.where.mockReturnValueOnce(mockDB).mockResolvedValueOnce([
+      mockDB.where.mockResolvedValueOnce([
         {
           agentType: 'claude-code',
           provider: null,
@@ -176,8 +184,7 @@ describe('Project Credentials Routes', () => {
     });
 
     it('adds a "Pro/Max Subscription" label for claude-code OAuth tokens', async () => {
-      mockDB.limit.mockResolvedValueOnce([{ id: 'proj-1', userId: 'test-user-id' }]);
-      mockDB.where.mockReturnValueOnce(mockDB).mockResolvedValueOnce([
+      mockDB.where.mockResolvedValueOnce([
         {
           agentType: 'claude-code',
           provider: null,
@@ -202,8 +209,12 @@ describe('Project Credentials Routes', () => {
 
   describe('PUT /:id/credentials', () => {
     it('rejects write when project is not owned by user (returns 404)', async () => {
-      // requireOwnedProject: project lookup returns no rows
-      mockDB.limit.mockResolvedValueOnce([]); // ownership check fails
+      projectAuthMocks.requireProjectCapability.mockRejectedValueOnce(
+        Object.assign(new Error('Project not found'), {
+          statusCode: 404,
+          error: 'NOT_FOUND',
+        })
+      );
 
       const body: SaveAgentCredentialRequest = {
         agentType: 'claude-code',
@@ -223,8 +234,6 @@ describe('Project Credentials Routes', () => {
     });
 
     it('creates a project-scoped credential when none exists', async () => {
-      // ownership check returns a project
-      mockDB.limit.mockResolvedValueOnce([{ id: 'proj-1', userId: 'test-user-id' }]);
       // existing-credential check returns nothing
       mockDB.limit.mockResolvedValueOnce([]);
 
@@ -263,7 +272,6 @@ describe('Project Credentials Routes', () => {
     });
 
     it('when autoActivate is true, only deactivates project-scoped rows (user-scoped rows untouched)', async () => {
-      mockDB.limit.mockResolvedValueOnce([{ id: 'proj-1', userId: 'test-user-id' }]);
       mockDB.limit.mockResolvedValueOnce([]);
 
       const body: SaveAgentCredentialRequest = {
@@ -352,7 +360,12 @@ describe('Project Credentials Routes', () => {
 
   describe('DELETE /:id/credentials/:agentType/:credentialKind', () => {
     it('returns 404 when project is not owned', async () => {
-      mockDB.limit.mockResolvedValueOnce([]);
+      projectAuthMocks.requireProjectCapability.mockRejectedValueOnce(
+        Object.assign(new Error('Project not found'), {
+          statusCode: 404,
+          error: 'NOT_FOUND',
+        })
+      );
 
       const res = await app.request(
         '/api/projects/other/credentials/claude-code/api-key',
@@ -363,7 +376,6 @@ describe('Project Credentials Routes', () => {
     });
 
     it('disconnects a CC-only project override when no legacy row matches', async () => {
-      mockDB.limit.mockResolvedValueOnce([{ id: 'proj-1', userId: 'test-user-id' }]);
       mockDB.returning.mockResolvedValueOnce([]);
       database.prepare.mockClear();
 
@@ -384,7 +396,6 @@ describe('Project Credentials Routes', () => {
     });
 
     it('deletes only the project-scoped credential', async () => {
-      mockDB.limit.mockResolvedValueOnce([{ id: 'proj-1', userId: 'test-user-id' }]);
       mockDB.returning.mockResolvedValueOnce([{ id: 'cred-1' }]);
 
       const res = await app.request(

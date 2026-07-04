@@ -42,6 +42,25 @@ export async function requireOwnedTaskById(
   return task;
 }
 
+export async function requireProjectTaskById(
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  projectId: string,
+  taskId: string
+): Promise<schema.Task> {
+  const rows = await db
+    .select()
+    .from(schema.tasks)
+    .where(and(eq(schema.tasks.id, taskId), eq(schema.tasks.projectId, projectId)))
+    .limit(1);
+
+  const task = rows[0];
+  if (!task) {
+    throw errors.notFound('Task');
+  }
+
+  return task;
+}
+
 export async function appendStatusEvent(
   db: ReturnType<typeof drizzle<typeof schema>>,
   taskId: string,

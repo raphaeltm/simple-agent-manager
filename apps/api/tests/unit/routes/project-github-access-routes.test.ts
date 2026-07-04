@@ -10,7 +10,8 @@ const mocks = vi.hoisted(() => ({
   createOwnerProjectMembership: vi.fn(),
   getGitHubUserAccessToken: vi.fn(),
   getUserInstallationRepositories: vi.fn(),
-  requireOwnedProject: vi.fn(),
+  requireProjectAccess: vi.fn(),
+  requireProjectCapability: vi.fn(),
 }));
 
 vi.mock('drizzle-orm/d1');
@@ -21,7 +22,8 @@ vi.mock('../../../src/middleware/auth', () => ({
 }));
 vi.mock('../../../src/middleware/project-auth', () => ({
   createOwnerProjectMembership: mocks.createOwnerProjectMembership,
-  requireOwnedProject: mocks.requireOwnedProject,
+  requireProjectAccess: mocks.requireProjectAccess,
+  requireProjectCapability: mocks.requireProjectCapability,
 }));
 vi.mock('../../../src/services/github-user-access-token', () => ({
   getGitHubUserAccessToken: mocks.getGitHubUserAccessToken,
@@ -89,7 +91,7 @@ describe('project GitHub repository authorization routes', () => {
         defaultBranch: 'main',
       },
     ]);
-    mocks.requireOwnedProject.mockResolvedValue({
+    const projectRow = {
       id: 'proj-1',
       userId: 'user-1',
       name: 'Project One',
@@ -117,7 +119,9 @@ describe('project GitHub repository authorization routes', () => {
       nodeMemoryThresholdPercent: null,
       createdAt: '2026-06-06T00:00:00.000Z',
       updatedAt: '2026-06-06T00:00:00.000Z',
-    });
+    };
+    mocks.requireProjectAccess.mockResolvedValue(projectRow);
+    mocks.requireProjectCapability.mockResolvedValue(projectRow);
 
     app = new Hono<{ Bindings: Env }>();
     app.onError((err, c) => {
