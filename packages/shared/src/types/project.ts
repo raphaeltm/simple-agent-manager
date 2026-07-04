@@ -334,6 +334,57 @@ export interface ProjectMembersResponse {
   accessRequests: ProjectAccessRequestResponse[];
 }
 
+export type CredentialAttributionConsumerKind = 'agent' | 'compute';
+export type CredentialAttributionSource = 'project' | 'personal' | 'platform' | 'unknown';
+export type CredentialAttributionResourceKind = 'trigger';
+
+export interface CredentialAttributionUser {
+  id: string;
+  name: string | null;
+  email: string | null;
+  avatarUrl: string | null;
+}
+
+export interface CredentialAttributionCheck {
+  consumerKind: CredentialAttributionConsumerKind;
+  consumerTarget: string;
+  label: string;
+  source: CredentialAttributionSource;
+  owner: CredentialAttributionUser | null;
+  projectCredential: {
+    configurationId: string;
+    configurationName: string;
+    credentialId: string | null;
+    credentialName: string | null;
+    owner: CredentialAttributionUser | null;
+  } | null;
+  fixHref: string;
+  warning: string | null;
+}
+
+export interface CredentialAttributionResource {
+  id: string;
+  projectId: string;
+  kind: CredentialAttributionResourceKind;
+  title: string;
+  subtitle: string | null;
+  href: string;
+  createdBy: CredentialAttributionUser | null;
+  checks: CredentialAttributionCheck[];
+}
+
+export interface ProjectCredentialAttributionHealthSummary {
+  projectId: string;
+  counts: {
+    resources: number;
+    personalResources: number;
+    personalCredentials: number;
+    projectCoveredCredentials: number;
+    unknownCredentials: number;
+  };
+  resources: CredentialAttributionResource[];
+}
+
 export interface ProjectInvitePreviewResponse {
   token: string;
   status: ProjectInviteLinkStatus;

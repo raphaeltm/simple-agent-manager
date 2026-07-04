@@ -1,3 +1,4 @@
+import type { CredentialAttributionCheck } from './project';
 import type { TaskMode } from './task';
 
 // =============================================================================
@@ -120,6 +121,11 @@ export interface UpdateTriggerRequest {
 export interface TriggerResponse extends Trigger {
   /** Human-readable description of the cron schedule (e.g., "Every weekday at 9:00 AM UTC"). */
   cronHumanReadable?: string;
+  /** Effective credential attribution checks for this trigger. No secret material is included. */
+  credentialAttribution?: {
+    hasPersonalWarning: boolean;
+    checks: CredentialAttributionCheck[];
+  };
   /** GitHub trigger configuration, present when sourceType is 'github'. */
   githubConfig?: {
     eventType: GitHubTriggerEventType;

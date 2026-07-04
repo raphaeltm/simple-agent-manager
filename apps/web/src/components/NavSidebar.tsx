@@ -95,9 +95,10 @@ interface NavSidebarProps {
   onToggleGlobalNav?: () => void;
   /** Rendered below Infrastructure in global nav views */
   projectListSection?: ReactNode;
+  projectHealthElement?: ReactNode;
 }
 
-export function NavSidebar({ className, projectName, showGlobalNav, onToggleGlobalNav, projectListSection }: NavSidebarProps) {
+export function NavSidebar({ className, projectName, showGlobalNav, onToggleGlobalNav, projectListSection, projectHealthElement }: NavSidebarProps) {
   const location = useLocation();
   const { isSuperadmin } = useAuth();
   const { needsOnboarding, openOnboarding } = useOnboarding();
@@ -192,6 +193,12 @@ export function NavSidebar({ className, projectName, showGlobalNav, onToggleGlob
             <div className="px-3 py-2 text-xs font-semibold text-fg-muted uppercase tracking-wider truncate" title={projectName}>
               {projectName || 'Project'}
             </div>
+
+            {projectHealthElement && (
+              <div className="px-1 pb-1">
+                {projectHealthElement}
+              </div>
+            )}
 
             {/* Project sub-nav */}
             {PROJECT_NAV_ITEMS.map((item) => {

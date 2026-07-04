@@ -1,12 +1,13 @@
 import type {
   ProjectAccessRequestResponse,
+  ProjectCredentialAttributionHealthSummary,
   ProjectInviteGithubAccessStatus,
   ProjectInviteLinkResponse,
   ProjectMemberResponse,
   ProjectMembersResponse,
 } from '@simple-agent-manager/shared';
 import { Button, Spinner } from '@simple-agent-manager/ui';
-import { Check, Copy, Link as LinkIcon, RefreshCcw, UserPlus, X } from 'lucide-react';
+import { AlertTriangle, Check, Copy, Link as LinkIcon, RefreshCcw, UserPlus, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { useToast } from '../../hooks/useToast';
@@ -14,6 +15,7 @@ import {
   approveProjectAccessRequest,
   createProjectInviteLink,
   denyProjectAccessRequest,
+  getProjectCredentialAttributionHealth,
   getProjectMembers,
   revokeProjectInviteLink,
 } from '../../lib/api';
@@ -100,6 +102,40 @@ function MemberRow({ member }: { member: ProjectMemberResponse }) {
   );
 }
 
+function CredentialTransitionWarning({
+  health,
+}: {
+  health: ProjectCredentialAttributionHealthSummary;
+}) {
+  const resources = health.resources.filter((resource) =>
+    resource.checks.some((check) => check.source === 'personal')
+  );
+  if (resources.length === 0) return null;
+
+  return (
+    <div className="flex items-start gap-2 rounded-md border border-warning/40 bg-warning-tint px-3 py-2 text-xs text-warning-fg">
+      <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+      <div className="min-w-0">
+        <div className="font-semibold text-fg-primary">Credential checklist before sharing</div>
+        <p className="m-0 mt-1">
+          {health.counts.personalResources} shared resource{health.counts.personalResources === 1 ? '' : 's'} still run on personal keys.
+          Invite and approval can continue.
+        </p>
+        <div className="mt-2 grid gap-1">
+          {resources.slice(0, 3).map((resource) => (
+            <div key={resource.id} className="truncate">
+              {resource.title}: {resource.checks.filter((check) => check.source === 'personal').map((check) => check.consumerKind).join(', ')}
+            </div>
+          ))}
+          {resources.length > 3 && (
+            <div>{resources.length - 3} more in credential health.</div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function RequestRow({
   request,
   disabled,
@@ -158,11 +194,18 @@ export function ProjectMembersSection({ projectId }: { projectId: string }) {
   const [decidingId, setDecidingId] = useState<string | null>(null);
   const [createdToken, setCreatedToken] = useState<string | null>(null);
   const [createdInviteLink, setCreatedInviteLink] = useState<ProjectInviteLinkResponse | null>(null);
+  const [credentialHealth, setCredentialHealth] =
+    useState<ProjectCredentialAttributionHealthSummary | null>(null);
 
   const load = useCallback(async () => {
     try {
       setLoading(true);
-      setData(await getProjectMembers(projectId));
+      const [members, health] = await Promise.all([
+        getProjectMembers(projectId),
+        getProjectCredentialAttributionHealth(projectId).catch(() => null),
+      ]);
+      setData(members);
+      setCredentialHealth(health);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to load members');
     } finally {
@@ -182,6 +225,10 @@ export function ProjectMembersSection({ projectId }: { projectId: string }) {
   const pendingRequests = data?.accessRequests.filter((request) => request.status === 'pending') ?? [];
   const activeInvite =
     createdInviteLink ?? data?.inviteLinks.find((link) => link.status === 'active') ?? null;
+  const multiplayerTransitionActive =
+    (data?.members.filter((member) => member.status === 'active').length ?? 0) > 1 ||
+    Boolean(activeInvite) ||
+    pendingRequests.length > 0;
   const inviteUrl =
     typeof window === 'undefined'
       ? ''
@@ -322,6 +369,10 @@ export function ProjectMembersSection({ projectId }: { projectId: string }) {
       ) : (
         <div className="grid gap-4 min-w-0 lg:grid-cols-[minmax(0,1fr)_minmax(18rem,0.8fr)]">
           <div className="grid gap-3 min-w-0">
+            {credentialHealth && multiplayerTransitionActive && (
+              <CredentialTransitionWarning health={credentialHealth} />
+            )}
+
             <div className="min-w-0">
               <div className="flex items-center justify-between gap-2">
                 <h3 className="sam-type-card-title m-0 text-fg-primary">Current Members</h3>
