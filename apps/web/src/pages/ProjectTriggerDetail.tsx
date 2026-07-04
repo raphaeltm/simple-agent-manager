@@ -229,20 +229,20 @@ export function ProjectTriggerDetail() {
       </button>
 
       {/* Header */}
-      <div className="flex items-start justify-between gap-4 mb-6">
+      <div className="flex flex-col gap-4 mb-6 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
+          <div className="flex min-w-0 items-start gap-2">
             <span
-              className="inline-block w-3 h-3 rounded-full shrink-0"
+              className="mt-2 inline-block w-3 h-3 rounded-full shrink-0"
               style={{ backgroundColor: statusCfg.color }}
               aria-label={`Status: ${statusCfg.label}`}
             />
-            <h1 className="sam-type-page-title m-0 truncate">{trigger.name}</h1>
+            <h1 className="sam-type-page-title m-0 min-w-0 max-w-full whitespace-normal [overflow-wrap:anywhere]">{trigger.name}</h1>
           </div>
           {trigger.description && (
-            <p className="sam-type-secondary text-fg-muted mt-1 mb-0">{trigger.description}</p>
+            <p className="sam-type-secondary text-fg-muted mt-1 mb-0 [overflow-wrap:anywhere]">{trigger.description}</p>
           )}
-          <p className="text-sm text-fg-muted mt-2 mb-0 flex items-center gap-1.5">
+          <p className="text-sm text-fg-muted mt-2 mb-0 flex flex-wrap items-center gap-1.5">
             <Clock size={14} aria-hidden="true" />
             {trigger.cronHumanReadable ?? trigger.cronExpression}
             {trigger.cronTimezone !== 'UTC' && ` (${trigger.cronTimezone.replace(/_/g, ' ')})`}

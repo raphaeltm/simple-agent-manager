@@ -31,7 +31,7 @@ Implement a compact persistent project health surface, detailed modal, invite/me
 - [x] Add non-blocking invite/member-management soft warning/checklist when a project is already multiplayer or an invite/access transition is underway.
 - [x] Add inline trigger/resource edit warnings when effective credential attribution is personal, especially when the actor differs from the trigger creator/credential owner.
 - [x] Add focused web unit tests for nav badge/modal, invite warning, trigger inline warning, and mobile nav behavior.
-- [ ] Run mandatory Playwright visual audit for changed production UI surfaces at mobile and desktop widths.
+- [x] Run mandatory Playwright visual audit for changed production UI surfaces at mobile and desktop widths.
 - [ ] Run `/do` validation: lint, typecheck, tests, build, specialist reviews, staging verification, PR, CI, merge, and production deploy monitoring.
 
 ## Acceptance Criteria

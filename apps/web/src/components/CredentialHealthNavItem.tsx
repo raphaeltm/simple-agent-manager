@@ -37,7 +37,7 @@ function CredentialHealthModal({
   onClose: () => void;
 }) {
   return createPortal(
-    <div className="fixed inset-0 z-modal flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-[var(--sam-z-dialog-backdrop)] flex items-center justify-center p-4">
       <button
         type="button"
         aria-label="Close credential health"

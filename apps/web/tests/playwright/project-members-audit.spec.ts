@@ -130,6 +130,18 @@ const emptyMembers = {
   accessRequests: [],
 };
 
+const emptyCredentialHealth = {
+  projectId: project.id,
+  counts: {
+    resources: 0,
+    personalResources: 0,
+    personalCredentials: 0,
+    projectCoveredCredentials: 0,
+    unknownCredentials: 0,
+  },
+  resources: [],
+};
+
 async function setupMocks(
   page: Page,
   options: {
@@ -180,6 +192,7 @@ async function setupMocks(
     if (projectMatch) {
       const subPath = projectMatch[2] ?? '';
       if (subPath === '/members') return respond(200, members);
+      if (subPath === '/credential-attribution-health') return respond(200, emptyCredentialHealth);
       if (subPath === '/runtime-config') return respond(200, { envVars: [], files: [] });
       if (subPath === '/repository-access') {
         return respond(200, { primaryRepository: project.repository, repositories: [] });
