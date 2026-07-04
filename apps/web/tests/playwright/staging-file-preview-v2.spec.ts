@@ -5,8 +5,9 @@
  * Only the project-chat session payload is mocked so the uploaded files appear
  * as DocumentCards without requiring a live agent run.
  */
-import { expect, type APIRequestContext, type Page, test } from '@playwright/test';
 import { deflateSync } from 'node:zlib';
+
+import { type APIRequestContext, expect, type Page, test } from '@playwright/test';
 
 import { assertNoOverflow, screenshot, setupProjectChatMocks } from './audit-helpers';
 
