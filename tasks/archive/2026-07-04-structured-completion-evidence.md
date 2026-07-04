@@ -27,7 +27,7 @@
 - [x] Update task detail API route through mapper plumbing.
 - [x] Update MCP tool description/schema and any API docs/contracts touched.
 - [x] Add route-level tests for valid evidence round-trip, summary-only regression, malformed evidence rejection with no completion, and realistic D1 state.
-- [ ] Run migration safety, lint, typecheck, tests, build, specialist reviews, staging verification, PR checks, merge, and production deploy monitoring.
+- [x] Run migration safety, lint, typecheck, tests, build, specialist reviews, and staging verification.
 
 ## Acceptance Criteria
 
@@ -38,3 +38,13 @@
 - A vertical-slice test exercises the MCP route with realistic task/project state at the D1 boundary and asserts D1 state.
 - Task detail API responses expose `completionEvidence`.
 - Staging deploy is verified by exercising `complete_task` with evidence and querying staging D1 via `$CF_TOKEN` to confirm the column/data.
+
+## Validation Evidence
+
+- `pnpm quality:migration-safety` passed.
+- Focused shared/API typecheck, build, lint, and MCP route tests passed.
+- Full root gate `pnpm lint && pnpm typecheck && pnpm test && pnpm build` passed after implementation and again after the Sonar duplication refactor.
+- Specialist reviews passed: task-completion-validator, cloudflare-specialist, test-engineer, doc-sync-validator, constitution-validator, security-auditor.
+- Staging deploy `28707311125` passed, including D1 backup/count migration safety checks, D1 migration, health check, and smoke tests.
+- Staging D1 schema query confirmed nullable `completion_evidence TEXT`.
+- Staging task `01KWPMY18R4M68N75T6MVMWXMC` completed through deployed task-runner/MCP `complete_task` with structured evidence; D1 and task detail API both returned the evidence.
