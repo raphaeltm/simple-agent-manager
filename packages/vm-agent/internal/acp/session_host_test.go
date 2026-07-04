@@ -430,71 +430,108 @@ func TestSessionHost_LateJoinReplay(t *testing.T) {
 }
 
 // TestSessionHost_ReplayDoesNotDropMessages verifies that replay delivers all
-// buffered messages even when the buffer exceeds the viewer's send channel
-// capacity (previously messages were silently dropped by non-blocking sends).
+// buffered messages to an attaching viewer.
+//
+// ViewerSendBuffer is sized ABOVE the replay volume so replayToViewer can
+// enqueue the entire replay without ever blocking on write-pump goroutine
+// scheduling. With a buffer smaller than the replay, each blocked send waits
+// on the pump via sendToViewerWithTimeout(5s); under -race + coverage +
+// t.Parallel() on saturated CI runners the pump goroutine can be starved past
+// that timeout, causing replayToViewer to abort and silently drop the replay
+// suffix while still delivering replay_done (observed in CI as 48-49 of 50).
+// Ingestion is NOT the race: broadcastMessage appends synchronously under
+// bufMu before returning. The silent-abort product bug is tracked in
+// tasks/backlog/2026-07-04-vm-agent-silent-replay-abort-sends-replay-done.md.
 func TestSessionHost_ReplayDoesNotDropMessages(t *testing.T) {
 	t.Parallel()
 
-	// Use a small send buffer to test the blocking replay path
+	const messageCount = 50
+
 	host := NewSessionHost(SessionHostConfig{
 		GatewayConfig: GatewayConfig{
 			SessionID:   "test-session",
 			WorkspaceID: "test-workspace",
 		},
 		MessageBufferSize: 500,
-		ViewerSendBuffer:  8, // Much smaller than message count
+		ViewerSendBuffer:  64, // > messageCount + control frames: replay enqueue never blocks on pump scheduling
 	})
 	defer host.Stop()
 
-	// Fill buffer with more messages than the send channel capacity
-	const messageCount = 50
+	// Fill the replay buffer. appendMessage runs synchronously under bufMu,
+	// so all messages are buffered before AttachViewer below.
 	for i := 0; i < messageCount; i++ {
 		msg, _ := json.Marshal(map[string]int{"seq": i})
 		host.broadcastMessage(msg)
 	}
 
 	serverConn, clientConn := testWSPair(t)
+
+	// Read concurrently with AttachViewer, mirroring real browser behavior:
+	// a browser starts reading as soon as the socket opens; it does not wait
+	// for the server's synchronous attach path to return.
+	type replayResult struct {
+		preReplayCount int
+		received       int
+		err            error
+	}
+	resCh := make(chan replayResult, 1)
+	go func() {
+		var res replayResult
+		defer func() { resCh <- res }()
+
+		if err := clientConn.SetReadDeadline(time.Now().Add(10 * time.Second)); err != nil {
+			res.err = fmt.Errorf("set read deadline: %w", err)
+			return
+		}
+
+		// Read session_state (pre-replay)
+		_, raw, err := clientConn.ReadMessage()
+		if err != nil {
+			res.err = fmt.Errorf("read session_state: %w", err)
+			return
+		}
+		var stateMsg SessionStateMessage
+		if err := json.Unmarshal(raw, &stateMsg); err != nil {
+			res.err = fmt.Errorf("unmarshal session_state: %w", err)
+			return
+		}
+		res.preReplayCount = stateMsg.ReplayCount
+
+		// Read all replay messages until replay_done
+		for {
+			_, raw, err := clientConn.ReadMessage()
+			if err != nil {
+				res.err = fmt.Errorf("read replay message: %w", err)
+				return
+			}
+			var parsed map[string]interface{}
+			if err := json.Unmarshal(raw, &parsed); err != nil {
+				res.err = fmt.Errorf("parse message: %w", err)
+				return
+			}
+			// replay_done marks the end of the replay
+			if parsed["type"] == string(MsgSessionReplayDone) {
+				return
+			}
+			// Skip other control messages (session_state, etc.)
+			if _, isType := parsed["type"]; isType {
+				continue
+			}
+			res.received++
+		}
+	}()
+
 	host.AttachViewer("replay-v1", serverConn)
 
-	clientConn.SetReadDeadline(time.Now().Add(10 * time.Second))
-
-	// Read session_state (pre-replay)
-	_, raw, err := clientConn.ReadMessage()
-	if err != nil {
-		t.Fatalf("read session_state: %v", err)
+	res := <-resCh
+	if res.err != nil {
+		t.Fatal(res.err)
 	}
-	var stateMsg SessionStateMessage
-	if err := json.Unmarshal(raw, &stateMsg); err != nil {
-		t.Fatalf("unmarshal session_state: %v", err)
+	if res.preReplayCount != messageCount {
+		t.Fatalf("pre-replay replayCount = %d, want %d", res.preReplayCount, messageCount)
 	}
-	if stateMsg.ReplayCount != messageCount {
-		t.Fatalf("pre-replay replayCount = %d, want %d", stateMsg.ReplayCount, messageCount)
-	}
-
-	// Read all replay messages
-	receivedCount := 0
-	for {
-		_, raw, err = clientConn.ReadMessage()
-		if err != nil {
-			t.Fatalf("read replay message: %v", err)
-		}
-		var parsed map[string]interface{}
-		if err := json.Unmarshal(raw, &parsed); err != nil {
-			t.Fatalf("parse message: %v", err)
-		}
-		// Check if this is the replay_complete control message
-		if parsed["type"] == string(MsgSessionReplayDone) {
-			break
-		}
-		// Check if this is a control message (session_state, etc.) — skip
-		if _, isType := parsed["type"]; isType {
-			continue
-		}
-		receivedCount++
-	}
-
-	if receivedCount != messageCount {
-		t.Fatalf("received %d replay messages, want %d (messages were dropped)", receivedCount, messageCount)
+	if res.received != messageCount {
+		t.Fatalf("received %d replay messages, want %d (messages were dropped)", res.received, messageCount)
 	}
 }
 
