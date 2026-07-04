@@ -198,8 +198,10 @@ async function setupApiMocks(page: Page, opts: { working: boolean }) {
 
 async function screenshot(page: Page, name: string) {
   await page.waitForTimeout(700);
+  const viewport = page.viewportSize();
+  const suffix = viewport ? `-${viewport.width}x${viewport.height}` : '';
   await page.screenshot({
-    path: `../../.codex/tmp/playwright-screenshots/${name}.png`,
+    path: `../../.codex/tmp/playwright-screenshots/${name}${suffix}.png`,
     fullPage: true,
   });
 }
@@ -231,6 +233,12 @@ for (const theme of ['dark', 'light'] as const) {
       await expect(page.getByRole('button', { name: 'Archive conversation' })).toBeVisible();
       await screenshot(page, `completion-dock-idle-${theme}-desktop`);
       await assertNoOverflow(page);
+
+      await page.getByRole('button', { name: 'Archive conversation' }).click();
+      await expect(page.getByRole('dialog')).toBeVisible();
+      await expect(page.getByText('Archive conversation?')).toBeVisible();
+      await screenshot(page, `completion-dock-archive-confirm-${theme}-desktop`);
+      await assertNoOverflow(page);
     });
 
     test('working: red Interrupt + spinner + plan pill', async ({ page }) => {
@@ -251,6 +259,12 @@ for (const theme of ['dark', 'light'] as const) {
       await gotoChat(page);
       await expect(page.getByRole('button', { name: 'Archive conversation' })).toBeVisible();
       await screenshot(page, `completion-dock-idle-${theme}-mobile`);
+      await assertNoOverflow(page);
+
+      await page.getByRole('button', { name: 'Archive conversation' }).click();
+      await expect(page.getByRole('dialog')).toBeVisible();
+      await expect(page.getByText('Archive conversation?')).toBeVisible();
+      await screenshot(page, `completion-dock-archive-confirm-${theme}-mobile`);
       await assertNoOverflow(page);
     });
 

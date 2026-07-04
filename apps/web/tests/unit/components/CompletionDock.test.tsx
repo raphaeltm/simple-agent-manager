@@ -79,7 +79,7 @@ describe('CompletionDock', () => {
     expect(onArchive).not.toHaveBeenCalled();
   });
 
-  it('calls onArchive when the center button is clicked while idle', async () => {
+  it('opens an archive confirmation when the center button is clicked while idle', async () => {
     const user = userEvent.setup();
     const onInterrupt = vi.fn();
     const onArchive = vi.fn();
@@ -87,8 +87,64 @@ describe('CompletionDock', () => {
 
     await user.click(screen.getByRole('button', { name: 'Archive conversation' }));
 
-    expect(onArchive).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(screen.getByText('Archive conversation?')).toBeInTheDocument();
+    expect(onArchive).not.toHaveBeenCalled();
     expect(onInterrupt).not.toHaveBeenCalled();
+  });
+
+  it('does not archive when the confirmation is cancelled', async () => {
+    const user = userEvent.setup();
+    const onArchive = vi.fn();
+    renderDock({ working: false, onArchive });
+
+    await user.click(screen.getByRole('button', { name: 'Archive conversation' }));
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(onArchive).not.toHaveBeenCalled();
+  });
+
+  it('calls onArchive only after the confirmation action is clicked', async () => {
+    const user = userEvent.setup();
+    const onArchive = vi.fn();
+    renderDock({ working: false, onArchive });
+
+    await user.click(screen.getByRole('button', { name: 'Archive conversation' }));
+    await user.click(screen.getByRole('button', { name: 'Archive Conversation' }));
+
+    expect(onArchive).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows archive confirmation loading state while archiving is in flight', async () => {
+    const user = userEvent.setup();
+    const onArchive = vi.fn();
+    const onInterrupt = vi.fn();
+    const onOpenPlan = vi.fn();
+    const { rerender } = render(
+      <CompletionDock
+        working={false}
+        hasPlan={false}
+        onInterrupt={onInterrupt}
+        onArchive={onArchive}
+        onOpenPlan={onOpenPlan}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Archive conversation' }));
+    rerender(
+      <CompletionDock
+        working={false}
+        hasPlan={false}
+        onInterrupt={onInterrupt}
+        onArchive={onArchive}
+        onOpenPlan={onOpenPlan}
+        archiving
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: 'Archiving...' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
   });
 
   it('shows the plan pill only while working and a plan exists, and opens the plan', async () => {
