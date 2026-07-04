@@ -258,6 +258,109 @@ export interface AvailableRepositoriesResponse {
   repositories: AvailableRepository[];
 }
 
+// =============================================================================
+// Project Members and Invite Links
+// =============================================================================
+
+export type ProjectMemberRole = 'owner' | 'admin' | 'maintainer' | 'viewer';
+export type ProjectMemberStatus = 'active' | 'invited' | 'suspended' | 'removed';
+export type ProjectAccessRequestStatus = 'pending' | 'approved' | 'denied';
+export type ProjectInviteLinkStatus = 'active' | 'expired' | 'revoked';
+export type ProjectInviteGithubAccessStatus =
+  | 'unchecked'
+  | 'verified'
+  | 'missing-token'
+  | 'no-access'
+  | 'unsupported-provider'
+  | 'check-failed';
+
+export interface ProjectMemberUser {
+  id: string;
+  name: string | null;
+  email: string | null;
+  image: string | null;
+  avatarUrl: string | null;
+}
+
+export interface ProjectMemberResponse {
+  projectId: string;
+  userId: string;
+  role: ProjectMemberRole;
+  status: ProjectMemberStatus;
+  invitedBy: string | null;
+  createdAt: string;
+  updatedAt: string;
+  user: ProjectMemberUser | null;
+}
+
+export interface ProjectInviteLinkResponse {
+  id: string;
+  projectId: string;
+  status: ProjectInviteLinkStatus;
+  expiresAt: string;
+  revokedAt: string | null;
+  createdBy: string | null;
+  createdAt: string;
+  updatedAt: string;
+  lastUsedAt: string | null;
+  useCount: number;
+}
+
+export interface CreatedProjectInviteLinkResponse extends ProjectInviteLinkResponse {
+  token: string;
+}
+
+export interface ProjectAccessRequestResponse {
+  id: string;
+  projectId: string;
+  inviteLinkId: string | null;
+  requesterUserId: string;
+  status: ProjectAccessRequestStatus;
+  githubAccessStatus: ProjectInviteGithubAccessStatus;
+  githubAccessCheckedAt: string | null;
+  githubAccessMessage: string | null;
+  requestedAt: string;
+  decidedAt: string | null;
+  decidedBy: string | null;
+  decisionNote: string | null;
+  createdAt: string;
+  updatedAt: string;
+  requester: ProjectMemberUser | null;
+}
+
+export interface ProjectMembersResponse {
+  members: ProjectMemberResponse[];
+  inviteLinks: ProjectInviteLinkResponse[];
+  accessRequests: ProjectAccessRequestResponse[];
+}
+
+export interface ProjectInvitePreviewResponse {
+  token: string;
+  status: ProjectInviteLinkStatus;
+  expiresAt: string;
+  project: {
+    id: string;
+    name: string;
+    repository: string;
+    repoProvider: RepoProvider;
+  };
+  membershipStatus:
+    | 'active-member'
+    | 'pending-request'
+    | 'approved-request'
+    | 'denied-request'
+    | 'can-request';
+  accessRequest: ProjectAccessRequestResponse | null;
+}
+
+export interface CreateProjectInviteRequest {
+  expiresInDays?: number;
+}
+
+export interface DecideProjectAccessRequest {
+  note?: string;
+}
+
 /** Configurable defaults for Artifacts-backed projects (Constitution Principle XI). */
 export const ARTIFACTS_DEFAULTS = {
   /** Default branch for new Artifacts repos. Env: ARTIFACTS_DEFAULT_BRANCH */
