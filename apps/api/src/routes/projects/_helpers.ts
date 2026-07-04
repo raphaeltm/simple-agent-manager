@@ -240,6 +240,24 @@ export async function requireOwnedInstallation(
   return installation;
 }
 
+export async function requireProjectInstallation(
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  installationRowId: string
+): Promise<schema.GitHubInstallation> {
+  const rows = await db
+    .select()
+    .from(schema.githubInstallations)
+    .where(eq(schema.githubInstallations.id, installationRowId))
+    .limit(1);
+
+  const installation = rows[0];
+  if (!installation) {
+    throw errors.notFound('Installation');
+  }
+
+  return installation;
+}
+
 export async function assertRepositoryAccess(
   accessToken: string,
   installationExternalId: string,
@@ -316,7 +334,7 @@ export async function requireRepositoryUserAccess(
     throw errors.forbidden('Unsupported repository provider');
   }
 
-  const installation = await requireOwnedInstallation(db, project.installationId, userId);
+  const installation = await requireProjectInstallation(db, project.installationId);
   const externalInstallationId = getExternalInstallationId(installation);
   const accessToken = await requireGitHubUserAccessToken(c, userId);
   const verifiedRepo = await assertRepositoryAccess(

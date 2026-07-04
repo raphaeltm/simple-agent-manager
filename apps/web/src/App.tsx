@@ -39,6 +39,7 @@ import { ProjectAgentChat } from './pages/ProjectAgentChat';
 import { ProjectCreate } from './pages/ProjectCreate';
 import { ProjectDeploymentEnvironmentDetail } from './pages/ProjectDeploymentEnvironmentDetail';
 import { ProjectDeployments } from './pages/ProjectDeployments';
+import { ProjectInvite } from './pages/ProjectInvite';
 import { ProjectLibrary } from './pages/ProjectLibrary';
 import { ProjectNotifications } from './pages/ProjectNotifications';
 import { ProjectProfiles } from './pages/ProjectProfiles';
@@ -106,6 +107,7 @@ export default function App() {
                   <Route path="/chats" element={<Chats />} />
                   <Route path="/projects" element={<Projects />} />
                   <Route path="/projects/new" element={<ProjectCreate />} />
+                  <Route path="/projects/invite/:token" element={<ProjectInvite />} />
 
                   {/* Project detail — shell with sub-routes */}
                   <Route path="/projects/:id" element={<Project />}>

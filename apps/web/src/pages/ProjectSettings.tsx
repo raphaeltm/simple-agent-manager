@@ -11,6 +11,7 @@ import { useNavigate } from 'react-router';
 
 import { DeploymentSettings } from '../components/DeploymentSettings';
 import { ProjectConnectionsSection } from '../components/project-settings/ProjectConnectionsSection';
+import { ProjectMembersSection } from '../components/project-settings/ProjectMembersSection';
 import { ProjectRuntimeConfigSection } from '../components/project-settings/ProjectRuntimeConfigSection';
 import { ProjectAgentsSection } from '../components/ProjectAgentsSection';
 import { RepositoryAccessSettings } from '../components/RepositoryAccessSettings';
@@ -281,6 +282,9 @@ export function ProjectSettings() {
 
       {/* Repository Access — additional same-installation repos for workspace tokens */}
       {project && <RepositoryAccessSettings project={project} />}
+
+      {/* Members */}
+      <ProjectMembersSection projectId={projectId} />
 
       {/* Workspace Idle Timeout */}
       <section className="glass-surface rounded-lg p-4 grid gap-3">

@@ -31,8 +31,8 @@ No email delivery is in scope. Membership approval must not allow a user to oper
 - [x] Verify/flag the requester's GitHub repo access using the existing user∩app helper path. If exact verification is unavailable in a specific state, persist and surface a clear status instead of widening access.
 - [x] Preserve owner-only project deletion and ownership-transfer boundaries; do not grant `project:delete` through admin approval.
 - [x] Add focused API tests for happy path, non-member request, non-admin approval denial, admin approval success, denied request, revoked/expired link, and GitHub access status handling.
-- [ ] Add `ProjectMembersSection` to the real project settings page using existing components/styles, including invite link creation/copy/revoke, pending request approval/denial, current member display, and GitHub access status.
-- [ ] Add UI behavior tests for new member-management interactions and a Playwright visual audit covering mobile/desktop edge cases.
+- [x] Add `ProjectMembersSection` to the real project settings page using existing components/styles, including invite link creation/copy/revoke, pending request approval/denial, current member display, and GitHub access status.
+- [x] Add UI behavior tests for new member-management interactions and a Playwright visual audit covering mobile/desktop edge cases.
 - [ ] Run relevant validation, specialist reviews, staging verification, PR creation, CI, merge, and production deploy monitoring per `/do`.
 
 ## Acceptance Criteria

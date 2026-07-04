@@ -22,8 +22,8 @@ vi.mock('../../../src/services/github-app', () => ({
 
 /**
  * Build a Drizzle-shaped db stub whose `.select().from().where().limit(n)`
- * resolves the supplied installation rows. `requireOwnedInstallation` is the
- * only db consumer inside the helper, so this single chain is sufficient.
+ * resolves the supplied project installation rows. The helper then verifies
+ * the acting user's own OAuth token against that installation's external id.
  */
 function makeDb(installationRows: Array<Partial<schema.GitHubInstallation>>) {
   return {
@@ -181,7 +181,7 @@ describe('requireRepositoryUserAccess', () => {
     ).resolves.toBeUndefined();
   });
 
-  it('rejects with 404 when the installation is not owned by the user', async () => {
+  it('rejects with 404 when the project installation row is missing', async () => {
     mocks.getGitHubUserAccessToken.mockResolvedValue('github-user-token');
 
     await expect(
@@ -192,26 +192,26 @@ describe('requireRepositoryUserAccess', () => {
     expect(mocks.getUserInstallationRepositories).not.toHaveBeenCalled();
   });
 
-  it('preserves org sharing: a distinct user with their own access resolves independently', async () => {
-    mocks.getGitHubUserAccessToken.mockResolvedValue('user-2-token');
+  it('preserves project sharing: a distinct member with their own GitHub access resolves independently', async () => {
+    mocks.getGitHubUserAccessToken.mockResolvedValue('admin-token');
     mocks.getUserInstallationRepositories.mockResolvedValue([VISIBLE_REPO]);
 
-    const sharedProject = makeProject({ userId: 'user-2', githubRepoId: 42 });
+    const sharedProject = makeProject({ userId: 'owner-user', githubRepoId: 42 });
 
     await expect(
       requireRepositoryUserAccess(
         ctx,
-        makeDb([{ ...INSTALLATION_ROW, userId: 'user-2' }]),
+        makeDb([{ ...INSTALLATION_ROW, userId: 'owner-user' }]),
         sharedProject,
-        'user-2'
+        'admin-user'
       )
     ).resolves.toBeUndefined();
 
     expect(getUserInstallationRepositories).toHaveBeenCalledWith(
-      'user-2-token',
+      'admin-token',
       '120081765',
-      expect.objectContaining({ userId: 'user-2' })
+      expect.objectContaining({ userId: 'admin-user' })
     );
-    expect(getGitHubUserAccessToken).toHaveBeenCalledWith(ctx, 'user-2');
+    expect(getGitHubUserAccessToken).toHaveBeenCalledWith(ctx, 'admin-user');
   });
 });
