@@ -14,12 +14,12 @@ Wave 1B should migrate the automation/context route family from owner-only proje
 
 ## Checklist
 
-- [ ] Replace direct `requireOwnedProject` imports/calls in scoped route files with `requireProjectAccess` for reads and `requireProjectCapability` for mutations.
-- [ ] Update profile/skill runtime asset helpers so project-scoped resources authorize through membership/capabilities instead of owner-only project ownership.
-- [ ] Preserve `userId` for actor, audit, creator, and per-user resources where the existing data model requires it.
-- [ ] Add focused API/unit tests proving active admin members can access representative migrated routes and non-members are rejected.
-- [ ] Run relevant API/unit tests and type/lint checks.
-- [ ] Verify `requireOwnedProject` is gone from the specified Wave 1B file list, aside from non-runtime historical comments if intentionally retained.
+- [x] Replace direct `requireOwnedProject` imports/calls in scoped route files with `requireProjectAccess` for reads and `requireProjectCapability` for mutations.
+- [x] Update profile/skill runtime asset helpers so project-scoped resources authorize through membership/capabilities instead of owner-only project ownership.
+- [x] Preserve `userId` for actor, audit, creator, and per-user resources where the existing data model requires it.
+- [x] Add focused API/unit tests proving active admin members can access representative migrated routes and non-members are rejected.
+- [x] Run relevant API/unit tests and type/lint checks.
+- [x] Verify `requireOwnedProject` is gone from the specified Wave 1B file list.
 
 ## Acceptance Criteria
 

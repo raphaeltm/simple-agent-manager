@@ -7,14 +7,14 @@ import { requireRouteParam } from '../lib/route-helpers';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
-import { requireOwnedProject } from '../middleware/project-auth';
+import { type ProjectCapability,requireProjectAccess, requireProjectCapability } from '../middleware/project-auth';
 import { jsonValidator, UpsertProjectRuntimeEnvVarSchema, UpsertProjectRuntimeFileSchema } from '../schemas';
 import { getRuntimeLimits } from '../services/limits';
 import {
   buildSkillRuntimeConfigResponse,
   deleteSkillRuntimeEnvVar,
   deleteSkillRuntimeFile,
-  requireOwnedProjectScopedSkill,
+  requireProjectScopedSkill,
   upsertSkillRuntimeEnvVar,
   upsertSkillRuntimeFile,
 } from '../services/profile-runtime-assets';
@@ -25,7 +25,7 @@ export const skillRuntimeRoutes = new Hono<{ Bindings: Env }>();
 skillRuntimeRoutes.use('/*', requireAuth(), requireApproved());
 
 skillRuntimeRoutes.get('/env-vars', async (c) => {
-  const { db, skillId, userId } = await requireSkillRuntimeAccess(c);
+  const { db, skillId, userId } = await requireSkillRuntimeAccess(c, 'project:read');
   const response = await buildSkillRuntimeConfigResponse(db, skillId, userId);
   return c.json({ envVars: response.envVars });
 });
@@ -33,7 +33,7 @@ skillRuntimeRoutes.get('/env-vars', async (c) => {
 skillRuntimeRoutes.post('/env-vars', jsonValidator(UpsertProjectRuntimeEnvVarSchema), async (c) => {
   const body = c.req.valid('json');
   const limits = getRuntimeLimits(c.env);
-  const { db, skillId, userId } = await requireSkillRuntimeAccess(c);
+  const { db, skillId, userId } = await requireSkillRuntimeAccess(c, 'secret:write');
   const envKey = body.key.trim();
   if (!PROJECT_ENV_KEY_PATTERN.test(envKey)) throw errors.badRequest('key must match [A-Za-z_][A-Za-z0-9_]*');
   if (byteLength(body.value) > limits.maxProjectRuntimeEnvValueBytes) {
@@ -54,13 +54,13 @@ skillRuntimeRoutes.post('/env-vars', jsonValidator(UpsertProjectRuntimeEnvVarSch
 skillRuntimeRoutes.delete('/env-vars/:envKey', async (c) => {
   const envKey = requireRouteParam(c, 'envKey').trim();
   if (!PROJECT_ENV_KEY_PATTERN.test(envKey)) throw errors.badRequest('envKey must match [A-Za-z_][A-Za-z0-9_]*');
-  const { db, skillId, userId } = await requireSkillRuntimeAccess(c);
+  const { db, skillId, userId } = await requireSkillRuntimeAccess(c, 'secret:write');
   await deleteSkillRuntimeEnvVar(db, skillId, userId, envKey);
   return c.json(await buildSkillRuntimeConfigResponse(db, skillId, userId));
 });
 
 skillRuntimeRoutes.get('/files', async (c) => {
-  const { db, skillId, userId } = await requireSkillRuntimeAccess(c);
+  const { db, skillId, userId } = await requireSkillRuntimeAccess(c, 'project:read');
   const response = await buildSkillRuntimeConfigResponse(db, skillId, userId);
   return c.json({ files: response.files });
 });
@@ -68,7 +68,7 @@ skillRuntimeRoutes.get('/files', async (c) => {
 skillRuntimeRoutes.post('/files', jsonValidator(UpsertProjectRuntimeFileSchema), async (c) => {
   const body = c.req.valid('json');
   const limits = getRuntimeLimits(c.env);
-  const { db, skillId, userId } = await requireSkillRuntimeAccess(c);
+  const { db, skillId, userId } = await requireSkillRuntimeAccess(c, 'secret:write');
   const path = normalizeProjectFilePath(body.path);
   if (path.length > limits.maxProjectRuntimeFilePathLength) {
     throw errors.badRequest(`path exceeds max length of ${limits.maxProjectRuntimeFilePathLength} characters`);
@@ -92,17 +92,24 @@ skillRuntimeRoutes.delete('/files/*', async (c) => {
   const rawPath = c.req.param('*') || c.req.query('path');
   if (!rawPath) throw errors.badRequest('file path is required');
   const path = normalizeProjectFilePath(rawPath);
-  const { db, skillId, userId } = await requireSkillRuntimeAccess(c);
+  const { db, skillId, userId } = await requireSkillRuntimeAccess(c, 'secret:write');
   await deleteSkillRuntimeFile(db, skillId, userId, path);
   return c.json(await buildSkillRuntimeConfigResponse(db, skillId, userId));
 });
 
-async function requireSkillRuntimeAccess(c: Context<{ Bindings: Env }>) {
+async function requireSkillRuntimeAccess(
+  c: Context<{ Bindings: Env }>,
+  capability: ProjectCapability
+) {
   const userId = getUserId(c);
   const projectId = requireRouteParam(c, 'projectId');
   const skillId = requireRouteParam(c, 'skillId');
   const db = drizzle(c.env.DATABASE, { schema });
-  await requireOwnedProject(db, projectId, userId);
-  await requireOwnedProjectScopedSkill(db, projectId, skillId, userId);
+  if (capability === 'project:read') {
+    await requireProjectAccess(db, projectId, userId);
+  } else {
+    await requireProjectCapability(db, projectId, userId, capability);
+  }
+  await requireProjectScopedSkill(db, projectId, skillId);
   return { db, skillId, userId };
 }

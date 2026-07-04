@@ -10,9 +10,9 @@ vi.mock('../../../src/middleware/auth', () => ({
   getAuth: () => ({ user: { id: 'test-user-id' } }),
 }));
 vi.mock('../../../src/middleware/project-auth', () => ({
-  requireOwnedProject: vi.fn().mockResolvedValue({
+  requireProjectCapability: vi.fn().mockResolvedValue({
     id: 'test-project-id',
-    userId: 'test-user-id',
+    userId: 'owner-user-id',
   }),
 }));
 vi.mock('drizzle-orm/d1', () => ({

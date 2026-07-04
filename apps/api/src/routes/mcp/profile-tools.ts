@@ -11,12 +11,13 @@ import * as schema from '../../db/schema';
 import type { Env } from '../../index';
 import { log } from '../../lib/logger';
 import { getCredentialEncryptionKey } from '../../lib/secrets';
+import { requireProjectAccess, requireProjectCapability } from '../../middleware/project-auth';
 import * as agentProfileService from '../../services/agent-profiles';
 import { getRuntimeLimits } from '../../services/limits';
 import {
   buildProfileRuntimeConfigResponse,
   deleteProfileRuntimeEnvVar,
-  requireOwnedProjectScopedProfile,
+  requireProjectScopedProfile,
   upsertProfileRuntimeEnvVar,
 } from '../../services/profile-runtime-assets';
 import { byteLength, PROJECT_ENV_KEY_PATTERN } from '../projects/_helpers';
@@ -58,6 +59,7 @@ export async function handleListAgentProfiles(
 ): Promise<JsonRpcResponse> {
   try {
     const db = drizzle(env.DATABASE, { schema });
+    await requireProjectAccess(db, tokenData.projectId, tokenData.userId);
     const profiles = await agentProfileService.listProfiles(db, tokenData.projectId, tokenData.userId, env);
 
     return jsonRpcSuccess(requestId, {
@@ -99,6 +101,7 @@ export async function handleGetAgentProfile(
 
   try {
     const db = drizzle(env.DATABASE, { schema });
+    await requireProjectAccess(db, tokenData.projectId, tokenData.userId);
     const profile = await agentProfileService.getProfile(db, tokenData.projectId, profileId, tokenData.userId);
 
     return jsonRpcSuccess(requestId, {
@@ -152,6 +155,7 @@ export async function handleCreateAgentProfile(
 
   try {
     const db = drizzle(env.DATABASE, { schema });
+    await requireProjectCapability(db, tokenData.projectId, tokenData.userId, 'project:update');
     const profile = await agentProfileService.createProfile(db, tokenData.projectId, tokenData.userId, body, env);
 
     log.info('mcp.create_agent_profile', {
@@ -207,6 +211,7 @@ export async function handleUpdateAgentProfile(
 
   try {
     const db = drizzle(env.DATABASE, { schema });
+    await requireProjectCapability(db, tokenData.projectId, tokenData.userId, 'project:update');
     const profile = await agentProfileService.updateProfile(db, tokenData.projectId, profileId, tokenData.userId, body);
 
     log.info('mcp.update_agent_profile', {
@@ -249,6 +254,7 @@ export async function handleDeleteAgentProfile(
 
   try {
     const db = drizzle(env.DATABASE, { schema });
+    await requireProjectCapability(db, tokenData.projectId, tokenData.userId, 'project:update');
     await agentProfileService.deleteProfile(db, tokenData.projectId, profileId, tokenData.userId);
 
     log.info('mcp.delete_agent_profile', {
@@ -289,7 +295,8 @@ export async function handleListProfileEnvVars(
 
   try {
     const db = drizzle(env.DATABASE, { schema });
-    await requireOwnedProjectScopedProfile(db, tokenData.projectId, profileId, tokenData.userId);
+    await requireProjectAccess(db, tokenData.projectId, tokenData.userId);
+    await requireProjectScopedProfile(db, tokenData.projectId, profileId);
     const response = await buildProfileRuntimeConfigResponse(db, profileId, tokenData.userId);
 
     return jsonRpcSuccess(requestId, {
@@ -329,7 +336,8 @@ export async function handleAddProfileEnvVar(
 
   try {
     const db = drizzle(env.DATABASE, { schema });
-    await requireOwnedProjectScopedProfile(db, tokenData.projectId, profileId, tokenData.userId);
+    await requireProjectCapability(db, tokenData.projectId, tokenData.userId, 'secret:write');
+    await requireProjectScopedProfile(db, tokenData.projectId, profileId);
     await upsertProfileRuntimeEnvVar(db, {
       profileId,
       userId: tokenData.userId,
@@ -366,7 +374,8 @@ export async function handleRemoveProfileEnvVar(
 
   try {
     const db = drizzle(env.DATABASE, { schema });
-    await requireOwnedProjectScopedProfile(db, tokenData.projectId, profileId, tokenData.userId);
+    await requireProjectCapability(db, tokenData.projectId, tokenData.userId, 'secret:write');
+    await requireProjectScopedProfile(db, tokenData.projectId, profileId);
     await deleteProfileRuntimeEnvVar(db, profileId, tokenData.userId, key);
 
     return jsonRpcSuccess(requestId, {

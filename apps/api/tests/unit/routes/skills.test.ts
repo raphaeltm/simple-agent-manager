@@ -4,7 +4,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Env } from '../../../src/env';
 
 const mocks = vi.hoisted(() => ({
-  requireOwnedProject: vi.fn(),
+  requireProjectAccess: vi.fn(),
+  requireProjectCapability: vi.fn(),
   listSkills: vi.fn(),
   getSkill: vi.fn(),
   createSkill: vi.fn(),
@@ -18,7 +19,8 @@ vi.mock('../../../src/middleware/auth', () => ({
   getUserId: () => 'user-1',
 }));
 vi.mock('../../../src/middleware/project-auth', () => ({
-  requireOwnedProject: mocks.requireOwnedProject,
+  requireProjectAccess: mocks.requireProjectAccess,
+  requireProjectCapability: mocks.requireProjectCapability,
 }));
 vi.mock('drizzle-orm/d1', () => ({
   drizzle: vi.fn().mockReturnValue({}),
@@ -77,7 +79,8 @@ describe('Skill Routes', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.requireOwnedProject.mockResolvedValue({ id: 'project-1', userId: 'user-1' });
+    mocks.requireProjectAccess.mockResolvedValue({ id: 'project-1', userId: 'owner-1' });
+    mocks.requireProjectCapability.mockResolvedValue({ id: 'project-1', userId: 'owner-1' });
     app = new Hono<{ Bindings: Env }>();
     app.onError((err, c) => {
       const appError = err as { statusCode?: number; error?: string; message?: string };
@@ -89,14 +92,14 @@ describe('Skill Routes', () => {
     app.route(ROUTE_PATH, skillRoutes);
   });
 
-  it('lists skills for an owned project', async () => {
+  it('lists skills for an active project member', async () => {
     mocks.listSkills.mockResolvedValueOnce([makeSkill()]);
 
     const res = await app.request(REQUEST_PATH, { method: 'GET' }, makeEnv());
 
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toMatchObject({ items: [{ id: 'skill-1' }] });
-    expect(mocks.requireOwnedProject).toHaveBeenCalled();
+    expect(mocks.requireProjectAccess).toHaveBeenCalledWith(expect.anything(), 'project-1', 'user-1');
     expect(mocks.listSkills).toHaveBeenCalledWith(expect.anything(), 'project-1', 'user-1');
   });
 
@@ -118,6 +121,30 @@ describe('Skill Routes', () => {
       expect.objectContaining({ name: 'Release', resourceRequirementsJson: '{"cpu":4}' }),
       expect.anything()
     );
+    expect(mocks.requireProjectCapability).toHaveBeenCalledWith(
+      expect.anything(),
+      'project-1',
+      'user-1',
+      'project:update'
+    );
+  });
+
+  it('rejects non-members before creating a skill', async () => {
+    mocks.requireProjectCapability.mockRejectedValueOnce(
+      Object.assign(new Error('Project not found'), {
+        statusCode: 404,
+        error: 'NOT_FOUND',
+      })
+    );
+
+    const res = await app.request(REQUEST_PATH, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'Release' }),
+    }, makeEnv());
+
+    expect(res.status).toBe(404);
+    expect(mocks.createSkill).not.toHaveBeenCalled();
   });
 
   it('rejects invalid create payloads before calling the service', async () => {

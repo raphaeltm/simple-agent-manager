@@ -65,11 +65,10 @@ function toRuntimeConfigResponse(
   };
 }
 
-export async function requireOwnedProjectScopedProfile(
+export async function requireProjectScopedProfile(
   db: Db,
   projectId: string,
-  profileId: string,
-  userId: string
+  profileId: string
 ): Promise<schema.AgentProfileRow> {
   const rows = await db
     .select()
@@ -77,8 +76,7 @@ export async function requireOwnedProjectScopedProfile(
     .where(
       and(
         eq(schema.agentProfiles.id, profileId),
-        eq(schema.agentProfiles.projectId, projectId),
-        eq(schema.agentProfiles.userId, userId)
+        eq(schema.agentProfiles.projectId, projectId)
       )
     )
     .limit(1);
@@ -176,11 +174,10 @@ export function mergeRuntimeAssetRows(
   };
 }
 
-export async function requireOwnedProjectScopedSkill(
+export async function requireProjectScopedSkill(
   db: Db,
   projectId: string,
-  skillId: string,
-  userId: string
+  skillId: string
 ): Promise<schema.SkillRow> {
   const rows = await db
     .select()
@@ -188,8 +185,7 @@ export async function requireOwnedProjectScopedSkill(
     .where(
       and(
         eq(schema.skills.id, skillId),
-        eq(schema.skills.projectId, projectId),
-        eq(schema.skills.userId, userId)
+        eq(schema.skills.projectId, projectId)
       )
     )
     .limit(1);

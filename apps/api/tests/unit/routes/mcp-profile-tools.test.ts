@@ -29,8 +29,13 @@ vi.mock('../../../src/services/agent-profiles', () => ({
 vi.mock('../../../src/services/profile-runtime-assets', () => ({
   buildProfileRuntimeConfigResponse: vi.fn(),
   deleteProfileRuntimeEnvVar: vi.fn(),
-  requireOwnedProjectScopedProfile: vi.fn(),
+  requireProjectScopedProfile: vi.fn(),
   upsertProfileRuntimeEnvVar: vi.fn(),
+}));
+
+vi.mock('../../../src/middleware/project-auth', () => ({
+  requireProjectAccess: vi.fn().mockResolvedValue({ id: 'proj-456', userId: 'owner-user' }),
+  requireProjectCapability: vi.fn().mockResolvedValue({ id: 'proj-456', userId: 'owner-user' }),
 }));
 
 vi.mock('../../../src/lib/secrets', () => ({
@@ -92,7 +97,7 @@ function makeProfile(overrides: Partial<AgentProfile> = {}): AgentProfile {
 describe('MCP Profile Tools', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(profileRuntimeService.requireOwnedProjectScopedProfile).mockResolvedValue(makeProfile());
+    vi.mocked(profileRuntimeService.requireProjectScopedProfile).mockResolvedValue(makeProfile());
     vi.mocked(profileRuntimeService.buildProfileRuntimeConfigResponse).mockResolvedValue({
       envVars: [],
       files: [],
@@ -462,11 +467,10 @@ describe('MCP Profile Tools', () => {
       const result = await handleListProfileEnvVars(1, { profileId: 'prof-1' }, tokenData, mockEnv);
 
       expect(result.error).toBeUndefined();
-      expect(profileRuntimeService.requireOwnedProjectScopedProfile).toHaveBeenCalledWith(
+      expect(profileRuntimeService.requireProjectScopedProfile).toHaveBeenCalledWith(
         expect.anything(),
         'proj-456',
         'prof-1',
-        'user-789',
       );
       const content = JSON.parse((result.result as { content: Array<{ text: string }> }).content[0].text);
       expect(content.envVars).toEqual([
@@ -474,7 +478,7 @@ describe('MCP Profile Tools', () => {
       ]);
     });
 
-    it('adds a profile env var after validating ownership, key, size, and secret flag', async () => {
+    it('adds a profile env var after validating membership, key, size, and secret flag', async () => {
       const result = await handleAddProfileEnvVar(1, {
         profileId: 'prof-1',
         key: 'API_TOKEN',
@@ -483,11 +487,10 @@ describe('MCP Profile Tools', () => {
       }, tokenData, mockEnv);
 
       expect(result.error).toBeUndefined();
-      expect(profileRuntimeService.requireOwnedProjectScopedProfile).toHaveBeenCalledWith(
+      expect(profileRuntimeService.requireProjectScopedProfile).toHaveBeenCalledWith(
         expect.anything(),
         'proj-456',
         'prof-1',
-        'user-789',
       );
       expect(profileRuntimeService.upsertProfileRuntimeEnvVar).toHaveBeenCalledWith(
         expect.anything(),
@@ -516,18 +519,17 @@ describe('MCP Profile Tools', () => {
       expect(profileRuntimeService.upsertProfileRuntimeEnvVar).not.toHaveBeenCalled();
     });
 
-    it('removes a profile env var after validating profile ownership', async () => {
+    it('removes a profile env var after validating project membership and profile scope', async () => {
       const result = await handleRemoveProfileEnvVar(1, {
         profileId: 'prof-1',
         key: 'API_TOKEN',
       }, tokenData, mockEnv);
 
       expect(result.error).toBeUndefined();
-      expect(profileRuntimeService.requireOwnedProjectScopedProfile).toHaveBeenCalledWith(
+      expect(profileRuntimeService.requireProjectScopedProfile).toHaveBeenCalledWith(
         expect.anything(),
         'proj-456',
         'prof-1',
-        'user-789',
       );
       expect(profileRuntimeService.deleteProfileRuntimeEnvVar).toHaveBeenCalledWith(
         expect.anything(),

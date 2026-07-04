@@ -25,9 +25,13 @@ vi.mock('../../../src/middleware/auth', () => ({
   getAuth: () => ({ user: { id: 'test-user-id', email: 'test@example.com', name: 'Test', role: 'user', status: 'active' } }),
 }));
 vi.mock('../../../src/middleware/project-auth', () => ({
-  requireOwnedProject: vi.fn().mockResolvedValue({
+  requireProjectAccess: vi.fn().mockResolvedValue({
     id: 'test-project-id',
-    userId: 'test-user-id',
+    userId: 'owner-user-id',
+  }),
+  requireProjectCapability: vi.fn().mockResolvedValue({
+    id: 'test-project-id',
+    userId: 'owner-user-id',
   }),
 }));
 vi.mock('drizzle-orm/d1', () => ({

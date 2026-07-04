@@ -15,7 +15,7 @@ import type { Env } from '../../env';
 import { parsePositiveInt } from '../../lib/route-helpers';
 import { getAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
-import { requireOwnedProject } from '../../middleware/project-auth';
+import { requireProjectCapability } from '../../middleware/project-auth';
 
 const executionRoutes = new Hono<{ Bindings: Env }>();
 
@@ -56,7 +56,7 @@ executionRoutes.get('/:triggerId/executions', async (c) => {
     throw errors.badRequest('projectId and triggerId are required');
   }
 
-  await requireOwnedProject(db, projectId, userId);
+  await requireProjectCapability(db, projectId, userId, 'task:read');
 
   // Verify trigger exists and belongs to project
   const [trigger] = await db
@@ -126,7 +126,7 @@ executionRoutes.get('/:triggerId/executions/:executionId', async (c) => {
     throw errors.badRequest('projectId, triggerId, and executionId are required');
   }
 
-  await requireOwnedProject(db, projectId, userId);
+  await requireProjectCapability(db, projectId, userId, 'task:read');
 
   const [execution] = await db
     .select()

@@ -15,7 +15,7 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { getAuth, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
-import { requireOwnedProject } from '../middleware/project-auth';
+import { requireProjectCapability } from '../middleware/project-auth';
 import * as projectDataService from '../services/project-data';
 
 const missionRoutes = new Hono<{ Bindings: Env }>();
@@ -29,7 +29,7 @@ missionRoutes.get('/', async (c) => {
   const db = drizzle(c.env.DATABASE, { schema });
   const projectId = c.req.param('projectId');
   if (!projectId) throw errors.badRequest('Missing projectId');
-  await requireOwnedProject(db, projectId, auth.user.id);
+  await requireProjectCapability(db, projectId, auth.user.id, 'task:read');
 
   const pageSize = Number(c.env.MISSION_LIST_PAGE_SIZE) || DEFAULT_MISSION_LIST_PAGE_SIZE;
   const maxPageSize = Number(c.env.MISSION_LIST_MAX_PAGE_SIZE) || DEFAULT_MISSION_LIST_MAX_PAGE_SIZE;
@@ -77,7 +77,7 @@ missionRoutes.get('/:missionId', async (c) => {
   const projectId = c.req.param('projectId');
   const missionId = c.req.param('missionId');
   if (!projectId || !missionId) throw errors.badRequest('Missing required parameters');
-  await requireOwnedProject(db, projectId, auth.user.id);
+  await requireProjectCapability(db, projectId, auth.user.id, 'task:read');
 
   const mission = await c.env.DATABASE.prepare(
     'SELECT * FROM missions WHERE id = ? AND project_id = ?',
@@ -118,7 +118,7 @@ missionRoutes.get('/:missionId/state', async (c) => {
   const projectId = c.req.param('projectId');
   const missionId = c.req.param('missionId');
   if (!projectId || !missionId) throw errors.badRequest('Missing required parameters');
-  await requireOwnedProject(db, projectId, auth.user.id);
+  await requireProjectCapability(db, projectId, auth.user.id, 'task:read');
 
   // Verify mission belongs to project
   const mission = await c.env.DATABASE.prepare(
@@ -140,7 +140,7 @@ missionRoutes.get('/:missionId/handoffs', async (c) => {
   const projectId = c.req.param('projectId');
   const missionId = c.req.param('missionId');
   if (!projectId || !missionId) throw errors.badRequest('Missing required parameters');
-  await requireOwnedProject(db, projectId, auth.user.id);
+  await requireProjectCapability(db, projectId, auth.user.id, 'task:read');
 
   // Verify mission belongs to project
   const mission = await c.env.DATABASE.prepare(
