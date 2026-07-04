@@ -248,9 +248,10 @@ describe('compute quota pipeline', () => {
       expect(submitRoute).toContain('resolveCredentialSource');
     });
 
-    it('passes resolved provider to credential source check', () => {
-      // The provider is resolved earlier in the function, then passed to resolveCredentialSource
-      expect(submitRoute).toContain('resolveCredentialSource(db, userId, provider');
+    it('passes resolved provider and attribution scope to credential source check', () => {
+      expect(submitRoute).toContain('credentialResolutionUserId');
+      expect(submitRoute).toContain('credentialResolutionProjectId');
+      expect(submitRoute).toContain('provider ?? undefined');
     });
 
     it('enforces quota only when credential source is platform', () => {
@@ -343,8 +344,10 @@ describe('compute quota pipeline', () => {
       expect(dispatchToolFile).toContain('resolveCredentialSource');
     });
 
-    it('passes resolvedProvider to credential source check', () => {
-      expect(dispatchToolFile).toContain('resolveCredentialSource(db, tokenData.userId, resolvedProvider');
+    it('passes resolvedProvider and inherited attribution scope to credential source check', () => {
+      expect(dispatchToolFile).toContain('inheritedAttributionUserId');
+      expect(dispatchToolFile).toContain('inheritedAttributionProjectId');
+      expect(dispatchToolFile).toContain('resolvedProvider ?? undefined');
     });
 
     it('enforces quota when credential source is platform', () => {

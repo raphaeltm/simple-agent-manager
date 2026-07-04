@@ -256,6 +256,7 @@ const mockEnv = {
   AI: mockAI,
   NOTIFICATION: mockNotification,
   BASE_DOMAIN: 'example.com',
+  COMPUTE_QUOTA_ENFORCEMENT_ENABLED: 'false',
 };
 
 const validTokenData = {
@@ -1629,8 +1630,9 @@ describe('MCP Routes', () => {
      * 1. raw() — current task (id, dispatchDepth, status)
      * 2. raw() — child count (advisory pre-check, count(*))
      * 3. raw() — active dispatched count (advisory pre-check, count(*))
-     * 4. raw() — credential check (id)
-     * 5. all() — project (full select)
+     * 4. raw() — project (full select)
+     * 5. raw() — project credential attachment lookup
+     * 6. raw() — user credential lookup
      * 6. D1 batch — [child count, active count, task insert, status event insert] (atomic)
      * 7. DO — createSession + persistMessage
      * 8. raw() — user lookup (name, email, githubId)
@@ -1662,8 +1664,9 @@ describe('MCP Routes', () => {
         .mockResolvedValueOnce([['task-123', 0, 'in_progress']]) // current task
         .mockResolvedValueOnce([[0]]) // child count (advisory)
         .mockResolvedValueOnce([[0]]) // active dispatched count (advisory)
-        // project query may also use .raw() — add extra entries
         .mockResolvedValueOnce([Object.values(mockProject)]) // project (if raw)
+        .mockResolvedValueOnce([]) // project compute attachment lookup
+        .mockResolvedValueOnce([['cred-1', 'hetzner']]) // user credential lookup
         .mockResolvedValueOnce([['User', 'user@test.com', '12345']]); // user lookup
 
       // .run() for conditional INSERT + status event insert
@@ -1865,8 +1868,10 @@ describe('MCP Routes', () => {
         .mockResolvedValueOnce([['task-123', 0, 'in_progress']]) // current task
         .mockResolvedValueOnce([[0]]) // child count
         .mockResolvedValueOnce([[0]]) // active dispatched count
-        .mockResolvedValueOnce([Object.values(noCredProject)]); // project (raw path)
-      // After these 4 Once values are consumed, .raw() falls back to default [] (no credentials)
+        .mockResolvedValueOnce([Object.values(noCredProject)]) // project (raw path)
+        .mockResolvedValueOnce([]) // project compute attachment lookup
+        .mockResolvedValueOnce([]) // user credential lookup
+        .mockResolvedValueOnce([]); // platform credential lookup
 
       const res = await mcpRequest(
         app,
@@ -1878,17 +1883,8 @@ describe('MCP Routes', () => {
 
       expect(res.status).toBe(200);
       const body = await res.json();
-      // With persistent .all() returning project data for ALL queries (including
-      // resolveCredentialSource), the credential query returns a row with project fields.
-      // Drizzle maps these positionally — the first column becomes 'id' which is truthy,
-      // so resolveCredentialSource interprets it as having a user credential.
-      // The old "no credential" test case relied on the credential query being in Promise.all
-      // where it had its own mock. With the credential check moved after provider resolution,
-      // it's not feasible to mock different tables returning different results with this D1 mock.
-      // The source-contract tests in resolve-credential-source.test.ts verify the credential
-      // check is wired correctly at all four enforcement points.
-      // Here we verify the dispatch path doesn't crash and returns a meaningful response.
-      expect(body.result || body.error).toBeDefined();
+      expect(body.error).toBeDefined();
+      expect(body.error.message).toContain('Cloud provider credentials required');
     });
 
     it('should handle session creation failure gracefully', async () => {
@@ -1912,8 +1908,9 @@ describe('MCP Routes', () => {
         .mockResolvedValueOnce([['task-123', 0, 'in_progress']]) // current task
         .mockResolvedValueOnce([[0]]) // child count (advisory)
         .mockResolvedValueOnce([[0]]) // active dispatched count (advisory)
-        .mockResolvedValueOnce([['cred-1']]) // credential
-        .mockResolvedValueOnce([Object.values(sessionProject)]); // project (if raw path)
+        .mockResolvedValueOnce([Object.values(sessionProject)]) // project (if raw path)
+        .mockResolvedValueOnce([]) // project compute attachment lookup
+        .mockResolvedValueOnce([['cred-1', 'hetzner']]); // user credential lookup
 
       // Session creation fails
       mockDoStub.createSession = vi.fn().mockRejectedValue(new Error('DO unavailable'));
@@ -2326,7 +2323,7 @@ describe('MCP Routes', () => {
       expect(startInput.config.model).toBeNull();
       expect(startInput.config.permissionMode).toBeNull();
       expect(startInput.config.systemPromptAppend).toBeNull();
-      expect(startInput.config.cloudProvider).toBeNull();
+      expect(startInput.config.cloudProvider).toBe('hetzner');
     });
 
     it('should reject provider/location mismatch', async () => {
