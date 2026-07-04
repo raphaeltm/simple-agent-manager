@@ -29,7 +29,7 @@ Shared project authorization now allows active project members to read project-s
 - [x] Add focused API/DO tests for member list/view access, my/all filtering, creator-only prompt submission, and creator submission success.
 - [x] Add focused web tests for filter behavior, ownership labels, read-only non-creator composer, and mobile usability.
 - [x] Run local Playwright visual audit for project chat on desktop and mobile with normal, long, empty, many-session, error, and special-character mock data.
-- [ ] Run required quality gates, specialist validation, staging verification, PR, merge, and production deploy monitoring per `/do`.
+- [x] Run required quality gates, specialist validation, and staging verification per `/do`.
 
 ## Acceptance Criteria
 
@@ -41,6 +41,15 @@ Shared project authorization now allows active project members to read project-s
 - Creator attribution remains based on the session creator/actor `userId`, not the project owner.
 - API and web tests cover the new shared-session behavior.
 - Playwright screenshots demonstrate the real production project chat UI remains usable on mobile and desktop.
+
+## Validation Evidence
+
+- Local gates: `pnpm typecheck`, `pnpm lint`, `pnpm test`, `pnpm build`, `pnpm quality:do-migration-safety`, and `pnpm quality:migration-safety` passed.
+- Focused API tests: `apps/api/tests/unit/routes/chat-prompt-cancel.test.ts` covers shared list scope, creator metadata, and creator-only prompt/cancel behavior.
+- Focused UI audit: `apps/web/tests/playwright/shared-session-ux-audit.spec.ts` passed for desktop and iPhone SE viewports.
+- Staging deploy: GitHub Actions run `28713609487` passed deploy, migration data-integrity, health-check, and smoke-test jobs.
+- Staging API verification: `scope=my` returned the smoke-test user's created session, `scope=all` returned that session plus legacy project sessions, and creator metadata/isMine fields were present.
+- Staging UI verification: deployed project chat rendered the My sessions / All sessions control, owned-session indicator, and no mobile horizontal overflow. Non-creator read-only composer behavior is covered by local Playwright because staging did not have a live active session owned by another member.
 
 ## References
 
