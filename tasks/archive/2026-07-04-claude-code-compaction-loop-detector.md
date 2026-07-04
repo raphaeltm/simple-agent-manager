@@ -52,6 +52,7 @@ SAM-managed Claude Code sessions can enter repeated `Compacting...` / `Compactin
 - `pnpm test` passed.
 - `pnpm build` passed.
 - `pnpm --filter @simple-agent-manager/api test:workers -- tests/workers/scheduled-stuck-tasks.test.ts` did not run tests because the Cloudflare worker pool crashed repeatedly with `workerd` signal 11 / worker exited unexpectedly errors.
+- Staging deploy run `28711899218` passed, including Cloudflare deploy health check and smoke tests.
 
 ## Specialist Validation
 
