@@ -124,6 +124,32 @@ describe('HierarchyModal — filter empty state', () => {
     expect(screen.queryByText('Child task')).not.toBeInTheDocument();
   });
 
+  it('does not render a tree role while the empty state is shown', () => {
+    const { taskInfoMap, sessions } = makeParentChildFixture();
+    renderModal({ taskInfoMap, sessions });
+
+    expect(screen.getByRole('tree', { name: 'Task hierarchy' })).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Filter tasks'), {
+      target: { value: 'zzz-no-match' },
+    });
+
+    // ARIA: role="tree" may only own treeitem/group children, so the empty
+    // state must render outside of any tree role container.
+    expect(screen.queryByRole('tree')).not.toBeInTheDocument();
+  });
+
+  it('returns focus to the filter input when Clear filter is clicked', () => {
+    const { taskInfoMap, sessions } = makeParentChildFixture();
+    renderModal({ taskInfoMap, sessions });
+
+    const input = screen.getByLabelText('Filter tasks');
+    fireEvent.change(input, { target: { value: 'zzz-no-match' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Clear filter' }));
+
+    expect(input).toHaveFocus();
+  });
+
   it('restores the tree when the Clear filter button is clicked', () => {
     const { taskInfoMap, sessions } = makeParentChildFixture();
     renderModal({ taskInfoMap, sessions });
