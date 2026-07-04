@@ -290,7 +290,9 @@ describe('FilePreviewModal — HTML', () => {
     }));
     expect(iframe).toHaveAttribute('sandbox', 'allow-scripts');
     expect(iframe).toHaveAttribute('referrerpolicy', 'no-referrer');
-    expect(iframe).toHaveAttribute('srcdoc', HTML_CONTENT);
+    await waitFor(() => {
+      expect(iframe).toHaveAttribute('srcdoc', HTML_CONTENT);
+    });
     expect(iframe).not.toHaveAttribute('src');
   });
 

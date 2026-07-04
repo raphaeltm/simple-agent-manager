@@ -25,6 +25,7 @@ export const HtmlViewer: FC<HtmlViewerProps> = ({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'rendered' | 'source'>('rendered');
+  const [renderedSrcDoc, setRenderedSrcDoc] = useState<string | undefined>(undefined);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -60,6 +61,13 @@ export const HtmlViewer: FC<HtmlViewerProps> = ({
       controller.abort();
     };
   }, [onContentStateChange, previewUrl]);
+
+  useEffect(() => {
+    setRenderedSrcDoc(undefined);
+    if (viewMode !== 'rendered' || content === null) return undefined;
+    const frame = requestAnimationFrame(() => setRenderedSrcDoc(content));
+    return () => cancelAnimationFrame(frame);
+  }, [content, viewMode]);
 
   if (loading) {
     return (
@@ -117,7 +125,7 @@ export const HtmlViewer: FC<HtmlViewerProps> = ({
 
       {viewMode === 'rendered' ? (
         <iframe
-          srcDoc={content}
+          srcDoc={renderedSrcDoc}
           sandbox="allow-scripts"
           referrerPolicy="no-referrer"
           title={fileName}
