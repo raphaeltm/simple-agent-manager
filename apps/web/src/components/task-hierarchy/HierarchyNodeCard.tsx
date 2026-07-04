@@ -91,10 +91,14 @@ export function HierarchyNodeCard({
       </span>
       <div className="flex-1 min-w-0">
         <div
-          className="truncate"
           style={{
             fontSize: compact ? 11 : 12,
             fontWeight: isFocus ? 600 : 500,
+            display: '-webkit-box',
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: 'vertical',
+            overflow: 'hidden',
+            wordBreak: 'break-word',
           }}
         >
           {node.task.title}

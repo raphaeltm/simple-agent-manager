@@ -3,7 +3,7 @@ import { useMemo, useState } from 'react';
 
 import type { HierarchyNode } from './buildHierarchyTree';
 import { containsFocus } from './buildHierarchyTree';
-import { HierarchyTreeNode } from './HierarchyTreeNode';
+import { CHEVRON_SIZE, HierarchyTreeNode } from './HierarchyTreeNode';
 import { getStatusColorVar, statusBadgeStyle } from './statusConfig';
 import { TreeConnector } from './TreeConnector';
 
@@ -81,6 +81,8 @@ export function HierarchyChildrenGroup({
       {hasMore && (
         <div className="flex items-start">
           {showConnectors && <TreeConnector isLast branchY={14} />}
+          {/* Align with sibling cards, which sit after the chevron/spacer + 4px gap */}
+          <div style={{ width: CHEVRON_SIZE + 4, flexShrink: 0 }} aria-hidden="true" />
           <button
             type="button"
             onClick={() => setShowAll(true)}
