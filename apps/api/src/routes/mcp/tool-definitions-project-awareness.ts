@@ -13,8 +13,18 @@ export const PROJECT_AWARENESS_TOOLS = [
       properties: {
         status: {
           type: 'string',
-          description: 'Filter by task status (draft, queued, in_progress, delegated, awaiting_followup, completed, failed, cancelled). Omit for all statuses.',
-          enum: ['draft', 'queued', 'in_progress', 'delegated', 'awaiting_followup', 'completed', 'failed', 'cancelled'],
+          description:
+            'Filter by task status (draft, queued, in_progress, delegated, awaiting_followup, completed, failed, cancelled). Omit for all statuses.',
+          enum: [
+            'draft',
+            'queued',
+            'in_progress',
+            'delegated',
+            'awaiting_followup',
+            'completed',
+            'failed',
+            'cancelled',
+          ],
         },
         include_own: {
           type: 'boolean',
@@ -31,7 +41,7 @@ export const PROJECT_AWARENESS_TOOLS = [
   {
     name: 'get_task_details',
     description:
-      'Get full details of a specific task in your project, including its description, output summary, output branch, and PR URL.',
+      'Get full details of a specific task in your project, including its description, output summary, output branch, PR URL, and structured completion evidence.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -58,7 +68,16 @@ export const PROJECT_AWARENESS_TOOLS = [
         status: {
           type: 'string',
           description: 'Filter by task status. Omit for all statuses.',
-          enum: ['draft', 'queued', 'in_progress', 'delegated', 'awaiting_followup', 'completed', 'failed', 'cancelled'],
+          enum: [
+            'draft',
+            'queued',
+            'in_progress',
+            'delegated',
+            'awaiting_followup',
+            'completed',
+            'failed',
+            'cancelled',
+          ],
         },
         limit: {
           type: 'number',
@@ -107,7 +126,8 @@ export const PROJECT_AWARENESS_TOOLS = [
         roles: {
           type: 'array',
           items: { type: 'string' },
-          description: 'Filter by message roles (default: ["user", "assistant"]). Use ["user", "assistant", "system", "tool", "thinking", "plan"] for all.',
+          description:
+            'Filter by message roles (default: ["user", "assistant"]). Use ["user", "assistant", "system", "tool", "thinking", "plan"] for all.',
         },
       },
       required: ['sessionId'],

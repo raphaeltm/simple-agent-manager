@@ -20,7 +20,11 @@ import type {
   TaskStatus,
   WorkspaceResponse,
 } from '@simple-agent-manager/shared';
-import { DEFAULT_WORKSPACE_PROFILE,isTaskExecutionStep } from '@simple-agent-manager/shared';
+import {
+  DEFAULT_WORKSPACE_PROFILE,
+  isTaskExecutionStep,
+  parseCompletionEvidenceJson,
+} from '@simple-agent-manager/shared';
 
 /**
  * Parse the project.agentDefaults JSON column. Returns null if unset or invalid.
@@ -54,7 +58,8 @@ export function toWorkspaceResponse(ws: schema.Workspace, baseDomain: string): W
     status: ws.status as WorkspaceResponse['status'],
     vmSize: ws.vmSize as WorkspaceResponse['vmSize'],
     vmLocation: ws.vmLocation as WorkspaceResponse['vmLocation'],
-    workspaceProfile: (ws.workspaceProfile as WorkspaceResponse['workspaceProfile']) ?? DEFAULT_WORKSPACE_PROFILE,
+    workspaceProfile:
+      (ws.workspaceProfile as WorkspaceResponse['workspaceProfile']) ?? DEFAULT_WORKSPACE_PROFILE,
     devcontainerConfigName: ws.devcontainerConfigName ?? null,
     vmIp: ws.vmIp,
     lastActivityAt: ws.lastActivityAt,
@@ -97,7 +102,8 @@ export function toProjectResponse(project: schema.Project): Project {
     artifactsRepoId: project.artifactsRepoId ?? null,
     defaultVmSize: (project.defaultVmSize as Project['defaultVmSize']) ?? null,
     defaultAgentType: project.defaultAgentType ?? null,
-    defaultWorkspaceProfile: (project.defaultWorkspaceProfile as Project['defaultWorkspaceProfile']) ?? null,
+    defaultWorkspaceProfile:
+      (project.defaultWorkspaceProfile as Project['defaultWorkspaceProfile']) ?? null,
     defaultDevcontainerConfigName: project.defaultDevcontainerConfigName ?? null,
     defaultProvider: (project.defaultProvider as Project['defaultProvider']) ?? null,
     defaultLocation: project.defaultLocation ?? null,
@@ -168,7 +174,8 @@ export function toTaskResponse(
     requestedVmSizeSource: (task.requestedVmSizeSource as Task['requestedVmSizeSource']) ?? null,
     provisionedVmSize: task.provisionedVmSize ?? null,
     resourceRequirementsJson: task.resourceRequirementsJson ?? null,
-    resourceRequirementsSource: (task.resourceRequirementsSource as Task['resourceRequirementsSource']) ?? null,
+    resourceRequirementsSource:
+      (task.resourceRequirementsSource as Task['resourceRequirementsSource']) ?? null,
     resolvedReservationJson: task.resolvedReservationJson ?? null,
     placementExplanationJson: task.placementExplanationJson ?? null,
     startedAt: task.startedAt,
@@ -177,6 +184,7 @@ export function toTaskResponse(
     outputSummary: task.outputSummary,
     outputBranch: task.outputBranch,
     outputPrUrl: task.outputPrUrl,
+    completionEvidence: parseCompletionEvidenceJson(task.completionEvidence ?? null),
     finalizedAt: task.finalizedAt ?? null,
     createdAt: task.createdAt,
     updatedAt: task.updatedAt,

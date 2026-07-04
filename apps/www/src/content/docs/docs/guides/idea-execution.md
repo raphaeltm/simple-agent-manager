@@ -20,39 +20,39 @@ You execute ideas through the **project chat interface**. Type your description 
 
 When executing an idea, you can optionally specify:
 
-| Option | Description | Default |
-|--------|-------------|---------|
-| **VM Size** | small, medium, or large | Project default |
-| **Provider** | Hetzner, Scaleway, or GCP | Project default provider |
-| **Agent Type** | Which AI agent to use | Project default agent |
-| **Workspace Profile** | `full` or `lightweight` | `full` |
-| **Node** | Reuse a specific existing node | Auto-select |
+| Option                | Description                    | Default                  |
+| --------------------- | ------------------------------ | ------------------------ |
+| **VM Size**           | small, medium, or large        | Project default          |
+| **Provider**          | Hetzner, Scaleway, or GCP      | Project default provider |
+| **Agent Type**        | Which AI agent to use          | Project default agent    |
+| **Workspace Profile** | `full` or `lightweight`        | `full`                   |
+| **Node**              | Reuse a specific existing node | Auto-select              |
 
 ## Idea Lifecycle
 
 Ideas progress through these stages as seen in the UI:
 
-| Stage | What's happening |
-|-------|-----------------|
+| Stage         | What's happening                           |
+| ------------- | ------------------------------------------ |
 | **Exploring** | You're brainstorming — the idea is a draft |
-| **Ready** | The idea is defined and ready to execute |
-| **Executing** | An agent is actively working on it |
-| **Done** | The agent finished and created a PR |
-| **Parked** | The idea was cancelled or execution failed |
+| **Ready**     | The idea is defined and ready to execute   |
+| **Executing** | An agent is actively working on it         |
+| **Done**      | The agent finished and created a PR        |
+| **Parked**    | The idea was cancelled or execution failed |
 
 ### Execution Steps
 
 While an idea is executing, SAM tracks detailed progress:
 
-| Step | Description |
-|------|-------------|
-| `node_selection` | Finding or provisioning a node |
-| `node_provisioning` | Waiting for the VM to boot |
-| `node_agent_ready` | Waiting for the VM Agent to report ready |
+| Step                 | Description                                        |
+| -------------------- | -------------------------------------------------- |
+| `node_selection`     | Finding or provisioning a node                     |
+| `node_provisioning`  | Waiting for the VM to boot                         |
+| `node_agent_ready`   | Waiting for the VM Agent to report ready           |
 | `workspace_creation` | Creating the Docker container and cloning the repo |
-| `workspace_ready` | Waiting for the devcontainer to finish building |
-| `agent_session` | Starting the AI agent session |
-| `running` | Agent is actively working |
+| `workspace_ready`    | Waiting for the devcontainer to finish building    |
+| `agent_session`      | Starting the AI agent session                      |
+| `running`            | Agent is actively working                          |
 
 ### What Happens When Execution Completes
 
@@ -75,12 +75,12 @@ SAM automatically generates concise titles for ideas using Workers AI:
 
 Configure via environment variables:
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `TASK_TITLE_MODEL` | `@cf/zai-org/glm-4.7-flash` | Workers AI model for title generation |
-| `TASK_TITLE_GENERATION_ENABLED` | `true` | Set `false` to always use truncation |
-| `TASK_TITLE_TIMEOUT_MS` | `5000` | Per-attempt timeout |
-| `TASK_TITLE_SHORT_MESSAGE_THRESHOLD` | `100` | Messages at or below this length bypass AI |
+| Variable                             | Default                     | Description                                |
+| ------------------------------------ | --------------------------- | ------------------------------------------ |
+| `TASK_TITLE_MODEL`                   | `@cf/zai-org/glm-4.7-flash` | Workers AI model for title generation      |
+| `TASK_TITLE_GENERATION_ENABLED`      | `true`                      | Set `false` to always use truncation       |
+| `TASK_TITLE_TIMEOUT_MS`              | `5000`                      | Per-attempt timeout                        |
+| `TASK_TITLE_SHORT_MESSAGE_THRESHOLD` | `100`                       | Messages at or below this length bypass AI |
 
 ## Agent-to-Agent Dispatch
 
@@ -90,27 +90,27 @@ Running agents can spawn follow-up work within the same project using MCP tools.
 
 An agent running inside a workspace has access to MCP tools that provide project awareness:
 
-| Tool | Purpose |
-|------|---------|
-| `dispatch_task` | Spawn a new idea for execution |
-| `create_idea` | Create a new idea |
-| `update_idea` | Update an idea's title, content, priority, or status |
-| `list_ideas` | View existing ideas |
-| `get_idea` | Read idea details |
-| `search_ideas` | Search ideas by keyword |
-| `update_task_status` | Report progress |
-| `complete_task` | Mark the current work as done |
-| `request_human_input` | Ask the user for a decision |
+| Tool                  | Purpose                                                                       |
+| --------------------- | ----------------------------------------------------------------------------- |
+| `dispatch_task`       | Spawn a new idea for execution                                                |
+| `create_idea`         | Create a new idea                                                             |
+| `update_idea`         | Update an idea's title, content, priority, or status                          |
+| `list_ideas`          | View existing ideas                                                           |
+| `get_idea`            | Read idea details                                                             |
+| `search_ideas`        | Search ideas by keyword                                                       |
+| `update_task_status`  | Report progress                                                               |
+| `complete_task`       | Mark the current work as done, optionally with structured completion evidence |
+| `request_human_input` | Ask the user for a decision                                                   |
 
 ### Dispatch Limits
 
 To prevent runaway recursion, dispatch has configurable limits:
 
-| Limit | Default | Env Variable |
-|-------|---------|-------------|
-| Max recursion depth | 3 | `MCP_DISPATCH_MAX_DEPTH` |
-| Max dispatched per parent | 5 | `MCP_DISPATCH_MAX_PER_TASK` |
-| Max active dispatched per project | 10 | `MCP_DISPATCH_MAX_ACTIVE_PER_PROJECT` |
+| Limit                             | Default | Env Variable                          |
+| --------------------------------- | ------- | ------------------------------------- |
+| Max recursion depth               | 3       | `MCP_DISPATCH_MAX_DEPTH`              |
+| Max dispatched per parent         | 5       | `MCP_DISPATCH_MAX_PER_TASK`           |
+| Max active dispatched per project | 10      | `MCP_DISPATCH_MAX_ACTIVE_PER_PROJECT` |
 
 ### Example Flow
 
@@ -140,11 +140,11 @@ After an idea finishes executing, the auto-provisioned node enters a **warm** st
 
 ### Configuration
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `NODE_WARM_TIMEOUT_MS` | `1800000` (30 min) | How long warm nodes stay alive |
-| `MAX_AUTO_NODE_LIFETIME_MS` | `14400000` (4 hr) | Absolute max lifetime for auto-provisioned nodes |
-| `NODE_WARM_GRACE_PERIOD_MS` | `2100000` (35 min) | Cron sweep grace period |
+| Variable                    | Default            | Description                                      |
+| --------------------------- | ------------------ | ------------------------------------------------ |
+| `NODE_WARM_TIMEOUT_MS`      | `1800000` (30 min) | How long warm nodes stay alive                   |
+| `MAX_AUTO_NODE_LIFETIME_MS` | `14400000` (4 hr)  | Absolute max lifetime for auto-provisioned nodes |
+| `NODE_WARM_GRACE_PERIOD_MS` | `2100000` (35 min) | Cron sweep grace period                          |
 
 ### Orphan Protection
 

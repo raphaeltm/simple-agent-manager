@@ -36,6 +36,7 @@ function makeTaskRow(overrides: Partial<schema.Task> = {}): schema.Task {
     outputSummary: null,
     outputBranch: null,
     outputPrUrl: null,
+    completionEvidence: null,
     finalizedAt: null,
     createdAt: '2026-06-05T00:00:00.000Z',
     updatedAt: '2026-06-05T00:00:00.000Z',
@@ -54,5 +55,17 @@ describe('toTaskResponse skill fields', () => {
     const res = toTaskResponse(makeTaskRow({ skillId: null, skillHint: null }));
     expect(res.skillId).toBeNull();
     expect(res.skillHint).toBeNull();
+  });
+
+  it('parses completion evidence for task detail API responses', () => {
+    const evidence = {
+      testsRun: [{ command: 'pnpm test', passed: true }],
+      verifications: [{ kind: 'test' as const, description: 'Unit tests passed' }],
+      prUrl: 'https://github.com/raphaeltm/simple-agent-manager/pull/999',
+    };
+
+    const res = toTaskResponse(makeTaskRow({ completionEvidence: JSON.stringify(evidence) }));
+
+    expect(res.completionEvidence).toEqual(evidence);
   });
 });

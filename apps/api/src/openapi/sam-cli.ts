@@ -35,10 +35,13 @@ type OperationObject = {
     required: boolean;
     content: Record<string, MediaTypeObject>;
   };
-  responses: Record<string, {
-    description: string;
-    content?: Record<string, MediaTypeObject>;
-  }>;
+  responses: Record<
+    string,
+    {
+      description: string;
+      content?: Record<string, MediaTypeObject>;
+    }
+  >;
 };
 
 export type OpenApiDocument = {
@@ -56,17 +59,36 @@ export type OpenApiDocument = {
   };
 };
 
-const stringSchema = (description?: string): SchemaObject => ({ type: 'string', ...(description ? { description } : {}) });
-const dateTimeSchema = (description?: string): SchemaObject => ({ type: 'string', format: 'date-time', ...(description ? { description } : {}) });
-const integerSchema = (description?: string): SchemaObject => ({ type: 'integer', ...(description ? { description } : {}) });
-const numberSchema = (description?: string): SchemaObject => ({ type: 'number', ...(description ? { description } : {}) });
-const booleanSchema = (description?: string): SchemaObject => ({ type: 'boolean', ...(description ? { description } : {}) });
-const nullable = (schema: SchemaObject | ReferenceObject): SchemaObject | ReferenceObject => ({ ...schema, nullable: true });
+const stringSchema = (description?: string): SchemaObject => ({
+  type: 'string',
+  ...(description ? { description } : {}),
+});
+const dateTimeSchema = (description?: string): SchemaObject => ({
+  type: 'string',
+  format: 'date-time',
+  ...(description ? { description } : {}),
+});
+const integerSchema = (description?: string): SchemaObject => ({
+  type: 'integer',
+  ...(description ? { description } : {}),
+});
+const numberSchema = (description?: string): SchemaObject => ({
+  type: 'number',
+  ...(description ? { description } : {}),
+});
+const booleanSchema = (description?: string): SchemaObject => ({
+  type: 'boolean',
+  ...(description ? { description } : {}),
+});
+const nullable = (schema: SchemaObject | ReferenceObject): SchemaObject | ReferenceObject => ({
+  ...schema,
+  nullable: true,
+});
 const arrayOf = (items: SchemaObject | ReferenceObject): SchemaObject => ({ type: 'array', items });
 const objectSchema = (
   properties: Record<string, SchemaObject | ReferenceObject>,
   required: string[] = [],
-  additionalProperties: boolean | SchemaObject | ReferenceObject = false,
+  additionalProperties: boolean | SchemaObject | ReferenceObject = false
 ): SchemaObject => ({ type: 'object', properties, required, additionalProperties });
 const ref = (name: string): ReferenceObject => ({ $ref: `#/components/schemas/${name}` });
 
@@ -106,7 +128,7 @@ const getOp = (
   summary: string,
   tags: string[],
   responses: OperationObject['responses'],
-  parameters?: OperationObject['parameters'],
+  parameters?: OperationObject['parameters']
 ): Partial<Record<'get' | 'post', OperationObject>> => ({
   get: {
     operationId,
@@ -148,6 +170,7 @@ const taskBaseFields: Record<string, SchemaObject | ReferenceObject> = {
   outputBranch: nullable(stringSchema()),
   outputPrUrl: nullable(stringSchema()),
   outputSummary: nullable(stringSchema()),
+  completionEvidence: nullable(objectSchema({}, [], true)),
   errorMessage: nullable(stringSchema()),
   finalizedAt: nullable(dateTimeSchema()),
   createdAt: dateTimeSchema(),
@@ -208,14 +231,14 @@ export const samCliOpenApiDocument: OpenApiDocument = {
       [
         queryParam('limit', integerSchema(), 'Maximum number of projects to return.'),
         queryParam('cursor', stringSchema(), 'Pagination cursor.'),
-      ],
+      ]
     ),
     '/api/projects/{projectId}': getOp(
       'getProject',
       'Get project details.',
       ['Projects'],
       { '200': ok(ref('ProjectDetailResponse')), '404': ok(ref('ApiError'), 'Not found') },
-      [projectId],
+      [projectId]
     ),
     '/api/projects/{projectId}/sessions': getOp(
       'listProjectSessions',
@@ -227,7 +250,7 @@ export const samCliOpenApiDocument: OpenApiDocument = {
         queryParam('status', stringSchema(), 'Optional session status filter.'),
         queryParam('limit', integerSchema(), 'Maximum number of sessions to return.'),
         queryParam('offset', integerSchema(), 'Offset for session pagination.'),
-      ],
+      ]
     ),
     '/api/projects/{projectId}/sessions/{sessionId}': getOp(
       'getProjectSession',
@@ -239,7 +262,7 @@ export const samCliOpenApiDocument: OpenApiDocument = {
         sessionId,
         queryParam('limit', integerSchema(), 'Maximum number of messages to return.'),
         queryParam('before', integerSchema(), 'Message pagination cursor.'),
-      ],
+      ]
     ),
     '/api/projects/{projectId}/tasks/submit': {
       post: {
@@ -262,14 +285,14 @@ export const samCliOpenApiDocument: OpenApiDocument = {
         queryParam('status', stringSchema('Task status filter.'), 'Task status filter.'),
         queryParam('limit', integerSchema(), 'Maximum number of tasks to return.'),
         queryParam('cursor', stringSchema(), 'Pagination cursor.'),
-      ],
+      ]
     ),
     '/api/projects/{projectId}/tasks/{taskId}': getOp(
       'getProjectTask',
       'Get project task details.',
       ['Tasks'],
       { '200': ok(ref('TaskDetailResponse')), '404': ok(ref('ApiError'), 'Not found') },
-      [projectId, taskId],
+      [projectId, taskId]
     ),
     '/api/projects/{projectId}/library': getOp(
       'listProjectLibraryFiles',
@@ -282,14 +305,14 @@ export const samCliOpenApiDocument: OpenApiDocument = {
         queryParam('uploadSource', stringSchema(), 'Upload source filter.'),
         queryParam('limit', integerSchema(), 'Maximum number of files to return.'),
         queryParam('cursor', stringSchema(), 'Pagination cursor.'),
-      ],
+      ]
     ),
     '/api/projects/{projectId}/knowledge': getOp(
       'listProjectKnowledge',
       'List project knowledge graph entities.',
       ['Knowledge'],
       { '200': ok(ref('ListKnowledgeEntitiesResponse')) },
-      [projectId, queryParam('limit', integerSchema(), 'Maximum number of entities to return.')],
+      [projectId, queryParam('limit', integerSchema(), 'Maximum number of entities to return.')]
     ),
     '/api/notifications': getOp(
       'listNotifications',
@@ -299,55 +322,55 @@ export const samCliOpenApiDocument: OpenApiDocument = {
       [
         queryParam('limit', integerSchema(), 'Maximum number of notifications to return.'),
         queryParam('cursor', stringSchema(), 'Pagination cursor.'),
-      ],
+      ]
     ),
     '/api/projects/{projectId}/triggers': getOp(
       'listProjectTriggers',
       'List project triggers.',
       ['Triggers'],
       { '200': ok(ref('ListTriggersResponse')) },
-      [projectId],
+      [projectId]
     ),
     '/api/projects/{projectId}/agent-profiles': getOp(
       'listProjectAgentProfiles',
       'List project and builtin agent profiles.',
       ['Agent profiles'],
       { '200': ok(ref('ListAgentProfilesResponse')) },
-      [projectId],
+      [projectId]
     ),
     '/api/projects/{projectId}/activity': getOp(
       'listProjectActivity',
       'List project activity events.',
       ['Activity'],
       { '200': ok(ref('ListActivityEventsResponse')) },
-      [projectId, queryParam('limit', integerSchema(), 'Maximum number of events to return.')],
+      [projectId, queryParam('limit', integerSchema(), 'Maximum number of events to return.')]
     ),
     '/api/nodes': getOp(
       'listNodes',
       'List infrastructure nodes for the authenticated user.',
       ['Nodes'],
-      { '200': ok(arrayOf(ref('Node'))) },
+      { '200': ok(arrayOf(ref('Node'))) }
     ),
     '/api/workspaces/{id}': getOp(
       'getWorkspace',
       'Get workspace details.',
       ['Workspaces'],
       { '200': ok(ref('WorkspaceResponse')), '404': ok(ref('ApiError'), 'Not found') },
-      [workspaceId],
+      [workspaceId]
     ),
     '/api/workspaces/{id}/ports': getOp(
       'listWorkspacePorts',
       'List detected ports for a workspace.',
       ['Workspaces'],
       { '200': ok(ref('PortsResponse')) },
-      [workspaceId],
+      [workspaceId]
     ),
     '/api/workspaces/{id}/port-access': getOp(
       'createWorkspacePortAccess',
       'Create an access token and URL for a workspace port.',
       ['Workspaces'],
       { '200': ok(ref('PortAccessResponse')) },
-      [workspaceId, queryParam('port', integerSchema(), 'Workspace port number.')],
+      [workspaceId, queryParam('port', integerSchema(), 'Workspace port number.')]
     ),
   },
   components: {
@@ -359,10 +382,13 @@ export const samCliOpenApiDocument: OpenApiDocument = {
       },
     },
     schemas: {
-      ApiError: objectSchema({
-        error: stringSchema(),
-        message: stringSchema(),
-      }, ['error', 'message']),
+      ApiError: objectSchema(
+        {
+          error: stringSchema(),
+          message: stringSchema(),
+        },
+        ['error', 'message']
+      ),
       AuthUser: objectSchema({
         id: stringSchema(),
         email: stringSchema(),
@@ -370,266 +396,366 @@ export const samCliOpenApiDocument: OpenApiDocument = {
       }),
       TokenLoginRequest: objectSchema({ token: stringSchema() }, ['token']),
       DeviceTokenRequest: objectSchema({ deviceCode: stringSchema() }, ['deviceCode']),
-      TokenLoginResponse: objectSchema({
-        success: booleanSchema(),
-        user: ref('AuthUser'),
-        sessionCookie: stringSchema(),
-      }, ['success', 'sessionCookie']),
-      DeviceCodeResponse: objectSchema({
-        deviceCode: stringSchema(),
-        userCode: stringSchema(),
-        verificationUri: stringSchema(),
-        verificationUriComplete: stringSchema(),
-        expiresIn: integerSchema(),
-        interval: integerSchema(),
-      }, ['deviceCode', 'userCode', 'verificationUri', 'verificationUriComplete', 'expiresIn', 'interval']),
+      TokenLoginResponse: objectSchema(
+        {
+          success: booleanSchema(),
+          user: ref('AuthUser'),
+          sessionCookie: stringSchema(),
+        },
+        ['success', 'sessionCookie']
+      ),
+      DeviceCodeResponse: objectSchema(
+        {
+          deviceCode: stringSchema(),
+          userCode: stringSchema(),
+          verificationUri: stringSchema(),
+          verificationUriComplete: stringSchema(),
+          expiresIn: integerSchema(),
+          interval: integerSchema(),
+        },
+        [
+          'deviceCode',
+          'userCode',
+          'verificationUri',
+          'verificationUriComplete',
+          'expiresIn',
+          'interval',
+        ]
+      ),
       Project: objectSchema({ ...projectBaseFields }, ['id', 'name']),
-      ListProjectsResponse: objectSchema({
-        projects: arrayOf(ref('Project')),
-        nextCursor: nullable(stringSchema()),
-      }, ['projects']),
-      ProjectDetailResponse: objectSchema({
-        ...projectBaseFields,
-        recentSessions: arrayOf(ref('ChatSession')),
-      }, ['id', 'name']),
-      ChatSession: objectSchema({
-        id: stringSchema(),
-        projectId: stringSchema(),
-        workspaceId: nullable(stringSchema()),
-        topic: nullable(stringSchema()),
-        status: stringSchema(),
-        startedAt: nullable(dateTimeSchema()),
-        lastMessageAt: nullable(dateTimeSchema()),
-        messageCount: integerSchema(),
-        taskId: nullable(stringSchema()),
-        agentSessionId: nullable(stringSchema()),
-        agentType: nullable(stringSchema()),
-        task: nullable(ref('ChatSessionTask')),
-      }, ['id']),
-      ChatSessionTask: objectSchema({
-        id: stringSchema(),
-        status: stringSchema(),
-        executionStep: nullable(stringSchema()),
-        errorMessage: nullable(stringSchema()),
-        outputBranch: nullable(stringSchema()),
-        outputPrUrl: nullable(stringSchema()),
-        outputSummary: nullable(stringSchema()),
-        finalizedAt: nullable(dateTimeSchema()),
-        taskMode: nullable(stringSchema()),
-        agentProfileHint: nullable(stringSchema()),
-      }, ['id', 'status']),
-      ChatMessage: objectSchema({
-        id: stringSchema(),
-        sessionId: stringSchema(),
-        role: stringSchema(),
-        content: stringSchema(),
-        createdAt: numberSchema(),
-        metadata: objectSchema({}, [], true),
-      }, ['id', 'role', 'content']),
-      ListSessionsResponse: objectSchema({
-        sessions: arrayOf(ref('ChatSession')),
-        total: integerSchema(),
-      }, ['sessions']),
-      SessionDetailResponse: objectSchema({
-        session: ref('ChatSession'),
-        messages: arrayOf(ref('ChatMessage')),
-        hasMore: booleanSchema(),
-        state: nullable(objectSchema({}, [], true)),
-      }, ['session', 'messages', 'hasMore']),
-      SubmitTaskRequest: objectSchema({
-        prompt: stringSchema(),
-        agentType: stringSchema(),
-        agentProfile: stringSchema(),
-        contextSummary: stringSchema(),
-        parentTaskId: stringSchema(),
-        nodeId: stringSchema(),
-        workspaceId: stringSchema(),
-        provider: stringSchema(),
-        vmLocation: stringSchema(),
-        vmSize: stringSchema(),
-        taskMode: stringSchema(),
-        devcontainerConfigName: stringSchema(),
-      }, ['prompt']),
-      SubmitTaskResponse: objectSchema({
-        taskId: stringSchema(),
-        sessionId: stringSchema(),
-        branchName: stringSchema(),
-        status: stringSchema(),
-      }, ['taskId', 'status']),
+      ListProjectsResponse: objectSchema(
+        {
+          projects: arrayOf(ref('Project')),
+          nextCursor: nullable(stringSchema()),
+        },
+        ['projects']
+      ),
+      ProjectDetailResponse: objectSchema(
+        {
+          ...projectBaseFields,
+          recentSessions: arrayOf(ref('ChatSession')),
+        },
+        ['id', 'name']
+      ),
+      ChatSession: objectSchema(
+        {
+          id: stringSchema(),
+          projectId: stringSchema(),
+          workspaceId: nullable(stringSchema()),
+          topic: nullable(stringSchema()),
+          status: stringSchema(),
+          startedAt: nullable(dateTimeSchema()),
+          lastMessageAt: nullable(dateTimeSchema()),
+          messageCount: integerSchema(),
+          taskId: nullable(stringSchema()),
+          agentSessionId: nullable(stringSchema()),
+          agentType: nullable(stringSchema()),
+          task: nullable(ref('ChatSessionTask')),
+        },
+        ['id']
+      ),
+      ChatSessionTask: objectSchema(
+        {
+          id: stringSchema(),
+          status: stringSchema(),
+          executionStep: nullable(stringSchema()),
+          errorMessage: nullable(stringSchema()),
+          outputBranch: nullable(stringSchema()),
+          outputPrUrl: nullable(stringSchema()),
+          outputSummary: nullable(stringSchema()),
+          finalizedAt: nullable(dateTimeSchema()),
+          taskMode: nullable(stringSchema()),
+          agentProfileHint: nullable(stringSchema()),
+        },
+        ['id', 'status']
+      ),
+      ChatMessage: objectSchema(
+        {
+          id: stringSchema(),
+          sessionId: stringSchema(),
+          role: stringSchema(),
+          content: stringSchema(),
+          createdAt: numberSchema(),
+          metadata: objectSchema({}, [], true),
+        },
+        ['id', 'role', 'content']
+      ),
+      ListSessionsResponse: objectSchema(
+        {
+          sessions: arrayOf(ref('ChatSession')),
+          total: integerSchema(),
+        },
+        ['sessions']
+      ),
+      SessionDetailResponse: objectSchema(
+        {
+          session: ref('ChatSession'),
+          messages: arrayOf(ref('ChatMessage')),
+          hasMore: booleanSchema(),
+          state: nullable(objectSchema({}, [], true)),
+        },
+        ['session', 'messages', 'hasMore']
+      ),
+      SubmitTaskRequest: objectSchema(
+        {
+          prompt: stringSchema(),
+          agentType: stringSchema(),
+          agentProfile: stringSchema(),
+          contextSummary: stringSchema(),
+          parentTaskId: stringSchema(),
+          nodeId: stringSchema(),
+          workspaceId: stringSchema(),
+          provider: stringSchema(),
+          vmLocation: stringSchema(),
+          vmSize: stringSchema(),
+          taskMode: stringSchema(),
+          devcontainerConfigName: stringSchema(),
+        },
+        ['prompt']
+      ),
+      SubmitTaskResponse: objectSchema(
+        {
+          taskId: stringSchema(),
+          sessionId: stringSchema(),
+          branchName: stringSchema(),
+          status: stringSchema(),
+        },
+        ['taskId', 'status']
+      ),
       Task: objectSchema({ ...taskBaseFields }, ['id', 'title', 'status']),
-      ListTasksResponse: objectSchema({
-        tasks: arrayOf(ref('Task')),
-        nextCursor: nullable(stringSchema()),
-      }, ['tasks']),
-      TaskDetailResponse: objectSchema({
-        ...taskBaseFields,
-        dependencies: arrayOf(objectSchema({}, [], true)),
-        blocked: booleanSchema(),
-      }, ['id', 'title', 'status']),
-      ProjectFileTag: objectSchema({
-        fileId: stringSchema(),
-        tag: stringSchema(),
-        tagSource: stringSchema(),
-      }, ['fileId', 'tag', 'tagSource']),
-      ProjectFile: objectSchema({
-        id: stringSchema(),
-        projectId: stringSchema(),
-        filename: stringSchema(),
-        directory: stringSchema(),
-        mimeType: stringSchema(),
-        sizeBytes: integerSchema(),
-        description: nullable(stringSchema()),
-        uploadedBy: stringSchema(),
-        uploadSource: stringSchema(),
-        uploadSessionId: nullable(stringSchema()),
-        uploadTaskId: nullable(stringSchema()),
-        replacedAt: nullable(dateTimeSchema()),
-        replacedBy: nullable(stringSchema()),
-        status: stringSchema(),
-        extractedTextPreview: nullable(stringSchema()),
-        createdAt: dateTimeSchema(),
-        updatedAt: dateTimeSchema(),
-        tags: arrayOf(ref('ProjectFileTag')),
-      }, ['id', 'projectId', 'filename', 'sizeBytes', 'uploadSource', 'createdAt']),
-      ListFilesResponse: objectSchema({
-        files: arrayOf(ref('ProjectFile')),
-        cursor: nullable(stringSchema()),
-        total: integerSchema(),
-      }, ['files', 'total']),
-      KnowledgeEntity: objectSchema({
-        id: stringSchema(),
-        name: stringSchema(),
-        entityType: stringSchema(),
-        description: nullable(stringSchema()),
-        observationCount: integerSchema(),
-        createdAt: integerSchema(),
-        updatedAt: integerSchema(),
-      }, ['id', 'name', 'entityType', 'updatedAt']),
-      ListKnowledgeEntitiesResponse: objectSchema({
-        entities: arrayOf(ref('KnowledgeEntity')),
-        total: integerSchema(),
-      }, ['entities', 'total']),
-      Notification: objectSchema({
-        id: stringSchema(),
-        type: stringSchema(),
-        title: stringSchema(),
-        message: stringSchema(),
-        read: booleanSchema(),
-        createdAt: dateTimeSchema(),
-      }, ['id', 'type', 'title', 'read']),
-      ListNotificationsResponse: objectSchema({
-        notifications: arrayOf(ref('Notification')),
-        unreadCount: integerSchema(),
-        nextCursor: nullable(stringSchema()),
-      }, ['notifications']),
-      Trigger: objectSchema({
-        id: stringSchema(),
-        projectId: stringSchema(),
-        userId: stringSchema(),
-        name: stringSchema(),
-        description: nullable(stringSchema()),
-        status: stringSchema(),
-        sourceType: stringSchema(),
-        cronExpression: nullable(stringSchema()),
-        cronTimezone: stringSchema(),
-        skipIfRunning: booleanSchema(),
-        promptTemplate: stringSchema(),
-        agentProfileId: nullable(stringSchema()),
-        taskMode: stringSchema(),
-        vmSizeOverride: nullable(stringSchema()),
-        maxConcurrent: integerSchema(),
-        lastTriggeredAt: nullable(dateTimeSchema()),
-        triggerCount: integerSchema(),
-        nextFireAt: nullable(dateTimeSchema()),
-        createdAt: dateTimeSchema(),
-        updatedAt: dateTimeSchema(),
-        cronHumanReadable: stringSchema(),
-      }, ['id', 'name', 'sourceType', 'cronExpression', 'nextFireAt']),
-      ListTriggersResponse: objectSchema({
-        triggers: arrayOf(ref('Trigger')),
-      }, ['triggers']),
-      AgentProfile: objectSchema({
-        id: stringSchema(),
-        projectId: nullable(stringSchema()),
-        userId: stringSchema(),
-        name: stringSchema(),
-        description: nullable(stringSchema()),
-        agentType: stringSchema(),
-        model: nullable(stringSchema()),
-        permissionMode: nullable(stringSchema()),
-        systemPromptAppend: nullable(stringSchema()),
-        maxTurns: nullable(integerSchema()),
-        timeoutMinutes: nullable(integerSchema()),
-        vmSizeOverride: nullable(stringSchema()),
-        provider: nullable(stringSchema()),
-        vmLocation: nullable(stringSchema()),
-        workspaceProfile: nullable(stringSchema()),
-        devcontainerConfigName: nullable(stringSchema()),
-        taskMode: nullable(stringSchema()),
-        isBuiltin: booleanSchema(),
-        createdAt: dateTimeSchema(),
-        updatedAt: dateTimeSchema(),
-      }, ['id', 'name', 'agentType']),
-      ListAgentProfilesResponse: objectSchema({
-        items: arrayOf(ref('AgentProfile')),
-      }, ['items']),
-      ActivityEvent: objectSchema({
-        id: stringSchema(),
-        eventType: stringSchema(),
-        actorType: stringSchema(),
-        actorId: nullable(stringSchema()),
-        workspaceId: nullable(stringSchema()),
-        sessionId: nullable(stringSchema()),
-        taskId: nullable(stringSchema()),
-        payload: nullable(objectSchema({}, [], true)),
-        createdAt: integerSchema(),
-      }, ['id', 'eventType', 'payload', 'createdAt']),
-      ListActivityEventsResponse: objectSchema({
-        events: arrayOf(ref('ActivityEvent')),
-        hasMore: booleanSchema(),
-      }, ['events']),
-      Node: objectSchema({
-        id: stringSchema(),
-        provider: stringSchema(),
-        name: stringSchema(),
-        status: stringSchema(),
-        healthStatus: stringSchema(),
-        location: stringSchema(),
-        vmSize: stringSchema(),
-        ipAddress: stringSchema(),
-        domain: stringSchema(),
-        workspaceCount: integerSchema(),
-        lastHeartbeatAt: nullable(dateTimeSchema()),
-        createdAt: dateTimeSchema(),
-      }, ['id', 'status']),
-      WorkspaceResponse: objectSchema({
-        id: stringSchema(),
-        userId: stringSchema(),
-        nodeId: nullable(stringSchema()),
-        projectId: nullable(stringSchema()),
-        displayName: nullable(stringSchema()),
-        status: stringSchema(),
-        url: stringSchema(),
-        repository: stringSchema(),
-        branch: stringSchema(),
-        createdAt: dateTimeSchema(),
-        updatedAt: dateTimeSchema(),
-      }, ['id', 'status']),
-      DetectedPort: objectSchema({
-        port: integerSchema(),
-        address: stringSchema(),
-        label: stringSchema(),
-        url: stringSchema(),
-        detectedAt: dateTimeSchema(),
-      }, ['port']),
-      PortsResponse: objectSchema({
-        ports: arrayOf(ref('DetectedPort')),
-      }, ['ports']),
-      PortAccessResponse: objectSchema({
-        token: stringSchema(),
-        url: stringSchema(),
-        port: integerSchema(),
-      }, ['token', 'url', 'port']),
+      ListTasksResponse: objectSchema(
+        {
+          tasks: arrayOf(ref('Task')),
+          nextCursor: nullable(stringSchema()),
+        },
+        ['tasks']
+      ),
+      TaskDetailResponse: objectSchema(
+        {
+          ...taskBaseFields,
+          dependencies: arrayOf(objectSchema({}, [], true)),
+          blocked: booleanSchema(),
+        },
+        ['id', 'title', 'status']
+      ),
+      ProjectFileTag: objectSchema(
+        {
+          fileId: stringSchema(),
+          tag: stringSchema(),
+          tagSource: stringSchema(),
+        },
+        ['fileId', 'tag', 'tagSource']
+      ),
+      ProjectFile: objectSchema(
+        {
+          id: stringSchema(),
+          projectId: stringSchema(),
+          filename: stringSchema(),
+          directory: stringSchema(),
+          mimeType: stringSchema(),
+          sizeBytes: integerSchema(),
+          description: nullable(stringSchema()),
+          uploadedBy: stringSchema(),
+          uploadSource: stringSchema(),
+          uploadSessionId: nullable(stringSchema()),
+          uploadTaskId: nullable(stringSchema()),
+          replacedAt: nullable(dateTimeSchema()),
+          replacedBy: nullable(stringSchema()),
+          status: stringSchema(),
+          extractedTextPreview: nullable(stringSchema()),
+          createdAt: dateTimeSchema(),
+          updatedAt: dateTimeSchema(),
+          tags: arrayOf(ref('ProjectFileTag')),
+        },
+        ['id', 'projectId', 'filename', 'sizeBytes', 'uploadSource', 'createdAt']
+      ),
+      ListFilesResponse: objectSchema(
+        {
+          files: arrayOf(ref('ProjectFile')),
+          cursor: nullable(stringSchema()),
+          total: integerSchema(),
+        },
+        ['files', 'total']
+      ),
+      KnowledgeEntity: objectSchema(
+        {
+          id: stringSchema(),
+          name: stringSchema(),
+          entityType: stringSchema(),
+          description: nullable(stringSchema()),
+          observationCount: integerSchema(),
+          createdAt: integerSchema(),
+          updatedAt: integerSchema(),
+        },
+        ['id', 'name', 'entityType', 'updatedAt']
+      ),
+      ListKnowledgeEntitiesResponse: objectSchema(
+        {
+          entities: arrayOf(ref('KnowledgeEntity')),
+          total: integerSchema(),
+        },
+        ['entities', 'total']
+      ),
+      Notification: objectSchema(
+        {
+          id: stringSchema(),
+          type: stringSchema(),
+          title: stringSchema(),
+          message: stringSchema(),
+          read: booleanSchema(),
+          createdAt: dateTimeSchema(),
+        },
+        ['id', 'type', 'title', 'read']
+      ),
+      ListNotificationsResponse: objectSchema(
+        {
+          notifications: arrayOf(ref('Notification')),
+          unreadCount: integerSchema(),
+          nextCursor: nullable(stringSchema()),
+        },
+        ['notifications']
+      ),
+      Trigger: objectSchema(
+        {
+          id: stringSchema(),
+          projectId: stringSchema(),
+          userId: stringSchema(),
+          name: stringSchema(),
+          description: nullable(stringSchema()),
+          status: stringSchema(),
+          sourceType: stringSchema(),
+          cronExpression: nullable(stringSchema()),
+          cronTimezone: stringSchema(),
+          skipIfRunning: booleanSchema(),
+          promptTemplate: stringSchema(),
+          agentProfileId: nullable(stringSchema()),
+          taskMode: stringSchema(),
+          vmSizeOverride: nullable(stringSchema()),
+          maxConcurrent: integerSchema(),
+          lastTriggeredAt: nullable(dateTimeSchema()),
+          triggerCount: integerSchema(),
+          nextFireAt: nullable(dateTimeSchema()),
+          createdAt: dateTimeSchema(),
+          updatedAt: dateTimeSchema(),
+          cronHumanReadable: stringSchema(),
+        },
+        ['id', 'name', 'sourceType', 'cronExpression', 'nextFireAt']
+      ),
+      ListTriggersResponse: objectSchema(
+        {
+          triggers: arrayOf(ref('Trigger')),
+        },
+        ['triggers']
+      ),
+      AgentProfile: objectSchema(
+        {
+          id: stringSchema(),
+          projectId: nullable(stringSchema()),
+          userId: stringSchema(),
+          name: stringSchema(),
+          description: nullable(stringSchema()),
+          agentType: stringSchema(),
+          model: nullable(stringSchema()),
+          permissionMode: nullable(stringSchema()),
+          systemPromptAppend: nullable(stringSchema()),
+          maxTurns: nullable(integerSchema()),
+          timeoutMinutes: nullable(integerSchema()),
+          vmSizeOverride: nullable(stringSchema()),
+          provider: nullable(stringSchema()),
+          vmLocation: nullable(stringSchema()),
+          workspaceProfile: nullable(stringSchema()),
+          devcontainerConfigName: nullable(stringSchema()),
+          taskMode: nullable(stringSchema()),
+          isBuiltin: booleanSchema(),
+          createdAt: dateTimeSchema(),
+          updatedAt: dateTimeSchema(),
+        },
+        ['id', 'name', 'agentType']
+      ),
+      ListAgentProfilesResponse: objectSchema(
+        {
+          items: arrayOf(ref('AgentProfile')),
+        },
+        ['items']
+      ),
+      ActivityEvent: objectSchema(
+        {
+          id: stringSchema(),
+          eventType: stringSchema(),
+          actorType: stringSchema(),
+          actorId: nullable(stringSchema()),
+          workspaceId: nullable(stringSchema()),
+          sessionId: nullable(stringSchema()),
+          taskId: nullable(stringSchema()),
+          payload: nullable(objectSchema({}, [], true)),
+          createdAt: integerSchema(),
+        },
+        ['id', 'eventType', 'payload', 'createdAt']
+      ),
+      ListActivityEventsResponse: objectSchema(
+        {
+          events: arrayOf(ref('ActivityEvent')),
+          hasMore: booleanSchema(),
+        },
+        ['events']
+      ),
+      Node: objectSchema(
+        {
+          id: stringSchema(),
+          provider: stringSchema(),
+          name: stringSchema(),
+          status: stringSchema(),
+          healthStatus: stringSchema(),
+          location: stringSchema(),
+          vmSize: stringSchema(),
+          ipAddress: stringSchema(),
+          domain: stringSchema(),
+          workspaceCount: integerSchema(),
+          lastHeartbeatAt: nullable(dateTimeSchema()),
+          createdAt: dateTimeSchema(),
+        },
+        ['id', 'status']
+      ),
+      WorkspaceResponse: objectSchema(
+        {
+          id: stringSchema(),
+          userId: stringSchema(),
+          nodeId: nullable(stringSchema()),
+          projectId: nullable(stringSchema()),
+          displayName: nullable(stringSchema()),
+          status: stringSchema(),
+          url: stringSchema(),
+          repository: stringSchema(),
+          branch: stringSchema(),
+          createdAt: dateTimeSchema(),
+          updatedAt: dateTimeSchema(),
+        },
+        ['id', 'status']
+      ),
+      DetectedPort: objectSchema(
+        {
+          port: integerSchema(),
+          address: stringSchema(),
+          label: stringSchema(),
+          url: stringSchema(),
+          detectedAt: dateTimeSchema(),
+        },
+        ['port']
+      ),
+      PortsResponse: objectSchema(
+        {
+          ports: arrayOf(ref('DetectedPort')),
+        },
+        ['ports']
+      ),
+      PortAccessResponse: objectSchema(
+        {
+          token: stringSchema(),
+          url: stringSchema(),
+          port: integerSchema(),
+        },
+        ['token', 'url', 'port']
+      ),
     },
   },
 };

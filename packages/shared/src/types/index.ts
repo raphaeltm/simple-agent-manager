@@ -120,6 +120,10 @@ export type {
 
 // Task
 export type {
+  CompletionEvidence,
+  CompletionEvidenceVerificationKind,
+  CompletionTestRun,
+  CompletionVerification,
   CreateTaskDependencyRequest,
   CreateTaskRequest,
   DashboardActiveTasksResponse,
@@ -152,15 +156,18 @@ export type {
 } from './task';
 export {
   ATTACHMENT_DEFAULTS,
+  COMPLETION_EVIDENCE_VERIFICATION_KINDS,
   EXECUTION_STEP_LABELS,
   EXECUTION_STEP_ORDER,
   isTaskExecutionStep,
   isTaskMode,
   isTaskStatus,
+  parseCompletionEvidenceJson,
   SAFE_FILENAME_REGEX,
   TASK_EXECUTION_STEPS,
   TASK_MODES,
   TASK_STATUSES,
+  validateCompletionEvidence,
 } from './task';
 
 // Session (Chat, Agent, ACP)

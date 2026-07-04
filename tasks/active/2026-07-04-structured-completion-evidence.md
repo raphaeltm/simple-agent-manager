@@ -17,16 +17,16 @@
 
 ## Implementation Checklist
 
-- [ ] Add migration `0082_task_completion_evidence.sql` using only `ALTER TABLE tasks ADD COLUMN completion_evidence TEXT;`.
-- [ ] Add `completionEvidence` shared type and defensive validator/parser in `packages/shared`.
-- [ ] Add `completionEvidence` to shared `Task` and task detail response DTOs.
-- [ ] Add `completionEvidence` to `apps/api/src/db/schema.ts`.
-- [ ] Update `toTaskResponse` to parse stored JSON and return `completionEvidence`.
-- [ ] Update `complete_task` MCP handler to accept optional `evidence`, reject malformed evidence before status mutation, and persist valid evidence JSON.
-- [ ] Update MCP `get_task_details` to include parsed `completionEvidence`.
-- [ ] Update task detail API route through mapper plumbing.
-- [ ] Update MCP tool description/schema and any API docs/contracts touched.
-- [ ] Add route-level tests for valid evidence round-trip, summary-only regression, malformed evidence rejection with no completion, and realistic D1 state.
+- [x] Add migration `0082_task_completion_evidence.sql` using only `ALTER TABLE tasks ADD COLUMN completion_evidence TEXT;`.
+- [x] Add `completionEvidence` shared type and defensive validator/parser in `packages/shared`.
+- [x] Add `completionEvidence` to shared `Task` and task detail response DTOs.
+- [x] Add `completionEvidence` to `apps/api/src/db/schema.ts`.
+- [x] Update `toTaskResponse` to parse stored JSON and return `completionEvidence`.
+- [x] Update `complete_task` MCP handler to accept optional `evidence`, reject malformed evidence before status mutation, and persist valid evidence JSON.
+- [x] Update MCP `get_task_details` to include parsed `completionEvidence`.
+- [x] Update task detail API route through mapper plumbing.
+- [x] Update MCP tool description/schema and any API docs/contracts touched.
+- [x] Add route-level tests for valid evidence round-trip, summary-only regression, malformed evidence rejection with no completion, and realistic D1 state.
 - [ ] Run migration safety, lint, typecheck, tests, build, specialist reviews, staging verification, PR checks, merge, and production deploy monitoring.
 
 ## Acceptance Criteria

@@ -77,6 +77,132 @@ function mockD1Results(
   stmt.raw.mockResolvedValue(rawRows);
 }
 
+type StatefulTaskRow = {
+  id: string;
+  project_id: string;
+  task_mode: string;
+  user_id: string;
+  title: string;
+  description: string | null;
+  status: string;
+  priority: number;
+  output_branch: string | null;
+  output_pr_url: string | null;
+  output_summary: string | null;
+  completion_evidence: string | null;
+  error_message: string | null;
+  created_at: string;
+  updated_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+  trigger_execution_id: string | null;
+};
+
+function createStatefulTaskD1(task: StatefulTaskRow) {
+  const preparedStatements: Array<{ sql: string; params: unknown[] }> = [];
+
+  return {
+    prepare: vi.fn((sql: string) => {
+      const statement = {
+        params: [] as unknown[],
+        bind: vi.fn((...params: unknown[]) => {
+          statement.params = params;
+          preparedStatements.push({ sql, params });
+          return statement;
+        }),
+        first: vi.fn(async () => {
+          if (sql.includes('SELECT task_mode')) {
+            return {
+              task_mode: task.task_mode,
+              user_id: task.user_id,
+              title: task.title,
+              output_pr_url: task.output_pr_url,
+              output_branch: task.output_branch,
+              mission_id: null,
+            };
+          }
+          if (sql.includes('SELECT trigger_execution_id')) {
+            return { trigger_execution_id: task.trigger_execution_id };
+          }
+          return undefined;
+        }),
+        run: vi.fn(async () => {
+          if (sql.includes('UPDATE tasks') && sql.includes("status = 'completed'")) {
+            const [completedAt, outputSummary, completionEvidence, updatedAt, taskId, projectId] =
+              statement.params;
+            const canComplete =
+              task.id === taskId &&
+              task.project_id === projectId &&
+              ['in_progress', 'delegated', 'awaiting_followup'].includes(task.status);
+            if (!canComplete) {
+              return { success: true, meta: { changes: 0 } };
+            }
+            task.status = 'completed';
+            task.completed_at = completedAt as string;
+            task.output_summary = (outputSummary as string | null) ?? task.output_summary;
+            task.completion_evidence =
+              (completionEvidence as string | null) ?? task.completion_evidence;
+            task.updated_at = updatedAt as string;
+            return { success: true, meta: { changes: 1 } };
+          }
+          return { success: true, meta: { changes: 0 } };
+        }),
+        all: vi.fn(async () => ({ results: [] })),
+        raw: vi.fn(async () => {
+          if (sql.includes('from "tasks"') && sql.includes('"completion_evidence"')) {
+            return [
+              [
+                task.id,
+                task.title,
+                task.description,
+                task.status,
+                task.priority,
+                task.output_branch,
+                task.output_pr_url,
+                task.output_summary,
+                task.completion_evidence,
+                task.error_message,
+                task.created_at,
+                task.updated_at,
+                task.started_at,
+                task.completed_at,
+              ],
+            ];
+          }
+          return [];
+        }),
+      };
+      return statement;
+    }),
+    batch: vi.fn(),
+    preparedStatements,
+  };
+}
+
+function makeStatefulTaskRow(overrides: Partial<StatefulTaskRow> = {}): StatefulTaskRow {
+  return {
+    id: 'task-123',
+    project_id: 'proj-456',
+    task_mode: 'task',
+    user_id: 'user-789',
+    title: 'Implement structured evidence',
+    description: 'Add machine-readable evidence to completion.',
+    status: 'in_progress',
+    priority: 2,
+    output_branch: 'sam/evidence',
+    output_pr_url: null,
+    output_summary: null,
+    completion_evidence: null,
+    error_message: null,
+    created_at: '2026-07-04T00:00:00.000Z',
+    updated_at: '2026-07-04T00:00:00.000Z',
+    started_at: '2026-07-04T00:01:00.000Z',
+    completed_at: null,
+    trigger_execution_id: null,
+    ...overrides,
+  };
+}
+
 // Mock DO namespace — includes RPC methods used by project-data service
 const mockDoStub = {
   fetch: vi.fn().mockResolvedValue(new Response('ok')),
@@ -2777,6 +2903,103 @@ describe('MCP Routes', () => {
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(body.result.content[0].text).toContain('completed');
+    });
+
+    it('complete_task with valid evidence persists and round-trips through get_task_details', async () => {
+      const task = makeStatefulTaskRow();
+      const statefulD1 = createStatefulTaskD1(task);
+      mockEnv.DATABASE = statefulD1 as unknown;
+      const evidence = {
+        testsRun: [
+          {
+            command: 'pnpm test -- --run apps/api/tests/unit/routes/mcp.test.ts',
+            passed: true,
+            detail: 'MCP route slice passed',
+          },
+        ],
+        verifications: [
+          {
+            kind: 'test',
+            description: 'Route-level MCP completion evidence test passed',
+            evidence: 'vitest output',
+          },
+        ],
+        prUrl: 'https://github.com/raphaeltm/simple-agent-manager/pull/999',
+        notes: 'Evidence persisted from complete_task.',
+      };
+
+      const completeRes = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'complete_task',
+          arguments: { summary: 'Done with proof', evidence },
+        })
+      );
+
+      expect(completeRes.status).toBe(200);
+      expect(task.status).toBe('completed');
+      expect(task.output_summary).toBe('Done with proof');
+      expect(task.completion_evidence).toBe(JSON.stringify(evidence));
+
+      const detailsRes = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'get_task_details',
+          arguments: { taskId: task.id },
+        })
+      );
+
+      expect(detailsRes.status).toBe(200);
+      const detailsBody = await detailsRes.json();
+      const details = JSON.parse(detailsBody.result.content[0].text);
+      expect(details.completionEvidence).toEqual(evidence);
+      expect(details.outputSummary).toBe('Done with proof');
+    });
+
+    it('complete_task without evidence still completes without writing completion evidence', async () => {
+      const task = makeStatefulTaskRow();
+      const statefulD1 = createStatefulTaskD1(task);
+      mockEnv.DATABASE = statefulD1 as unknown;
+
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'complete_task',
+          arguments: { summary: 'Done without structured evidence' },
+        })
+      );
+
+      expect(res.status).toBe(200);
+      expect(task.status).toBe('completed');
+      expect(task.output_summary).toBe('Done without structured evidence');
+      expect(task.completion_evidence).toBeNull();
+    });
+
+    it('rejects malformed evidence with HTTP 400 and leaves the task active', async () => {
+      const task = makeStatefulTaskRow();
+      const statefulD1 = createStatefulTaskD1(task);
+      mockEnv.DATABASE = statefulD1 as unknown;
+
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'complete_task',
+          arguments: {
+            summary: 'Should not persist',
+            evidence: { testsRun: [{ command: 'pnpm test', passed: 'yes' }] },
+          },
+        })
+      );
+
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error.message).toContain('Invalid evidence');
+      expect(task.status).toBe('in_progress');
+      expect(task.output_summary).toBeNull();
+      expect(task.completion_evidence).toBeNull();
+      expect(statefulD1.preparedStatements.some((stmt) => stmt.sql.includes('UPDATE tasks'))).toBe(
+        false
+      );
     });
   });
 

@@ -237,7 +237,21 @@ mcpRoutes.post('/', async (c) => {
             } catch {
               execCtx = undefined;
             }
-            return c.json(await handleCompleteTask(requestId, toolArgs, tokenData, c.env, execCtx));
+            const response = await handleCompleteTask(
+              requestId,
+              toolArgs,
+              tokenData,
+              c.env,
+              execCtx
+            );
+            const httpStatus =
+              response.error?.data &&
+              typeof response.error.data === 'object' &&
+              'httpStatus' in response.error.data &&
+              response.error.data.httpStatus === 400
+                ? 400
+                : 200;
+            return c.json(response, httpStatus);
           }
           case 'request_human_input':
             return c.json(await handleRequestHumanInput(requestId, toolArgs, tokenData, c.env));

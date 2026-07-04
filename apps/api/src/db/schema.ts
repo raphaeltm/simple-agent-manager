@@ -372,10 +372,7 @@ export const projectMembers = sqliteTable(
   (table) => ({
     pk: primaryKey({ columns: [table.projectId, table.userId] }),
     userStatusIdx: index('idx_project_members_user_status').on(table.userId, table.status),
-    projectStatusIdx: index('idx_project_members_project_status').on(
-      table.projectId,
-      table.status
-    ),
+    projectStatusIdx: index('idx_project_members_project_status').on(table.projectId, table.status),
   })
 );
 
@@ -596,6 +593,7 @@ export const tasks = sqliteTable(
     outputSummary: text('output_summary'),
     outputBranch: text('output_branch'),
     outputPrUrl: text('output_pr_url'),
+    completionEvidence: text('completion_evidence'),
     finalizedAt: text('finalized_at'),
     /** Task execution mode. 'task' = push/PR/complete lifecycle. 'conversation' = human-controlled lifecycle. */
     taskMode: text('task_mode').notNull().default('task'),

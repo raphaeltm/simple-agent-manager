@@ -9,62 +9,62 @@ SAM supports six AI coding agents. Each runs inside a workspace container and co
 
 ### Claude Code
 
-| Property | Value |
-|----------|-------|
-| **Provider** | Anthropic |
-| **API Key** | `ANTHROPIC_API_KEY` |
-| **OAuth Support** | Yes (Claude Max/Pro subscriptions) |
-| **Get a Key** | [Anthropic Console](https://console.anthropic.com/settings/keys) |
+| Property          | Value                                                            |
+| ----------------- | ---------------------------------------------------------------- |
+| **Provider**      | Anthropic                                                        |
+| **API Key**       | `ANTHROPIC_API_KEY`                                              |
+| **OAuth Support** | Yes (Claude Max/Pro subscriptions)                               |
+| **Get a Key**     | [Anthropic Console](https://console.anthropic.com/settings/keys) |
 
 Claude Code supports dual authentication: API keys (pay-per-use) and OAuth tokens (from Claude Max/Pro subscriptions via `claude setup-token`). Toggle between them in Settings.
 
 ### OpenAI Codex
 
-| Property | Value |
-|----------|-------|
-| **Provider** | OpenAI |
-| **API Key** | `OPENAI_API_KEY` |
-| **OAuth Support** | Yes (via `~/.codex/auth.json`) |
-| **Get a Key** | [OpenAI Platform](https://platform.openai.com/api-keys) |
+| Property          | Value                                                   |
+| ----------------- | ------------------------------------------------------- |
+| **Provider**      | OpenAI                                                  |
+| **API Key**       | `OPENAI_API_KEY`                                        |
+| **OAuth Support** | Yes (via `~/.codex/auth.json`)                          |
+| **Get a Key**     | [OpenAI Platform](https://platform.openai.com/api-keys) |
 
 ### Google Gemini
 
-| Property | Value |
-|----------|-------|
-| **Provider** | Google |
-| **API Key** | `GEMINI_API_KEY` |
+| Property      | Value                                                  |
+| ------------- | ------------------------------------------------------ |
+| **Provider**  | Google                                                 |
+| **API Key**   | `GEMINI_API_KEY`                                       |
 | **Get a Key** | [Google AI Studio](https://aistudio.google.com/apikey) |
 
 ### Mistral Vibe
 
-| Property | Value |
-|----------|-------|
-| **Provider** | Mistral |
-| **API Key** | `MISTRAL_API_KEY` |
+| Property      | Value                                                  |
+| ------------- | ------------------------------------------------------ |
+| **Provider**  | Mistral                                                |
+| **API Key**   | `MISTRAL_API_KEY`                                      |
 | **Get a Key** | [Mistral Console](https://console.mistral.ai/api-keys) |
 
 Mistral Vibe is installed via `uv` (Python package manager) and requires Python 3.12.
 
 ### OpenCode
 
-| Property | Value |
-|----------|-------|
-| **Provider** | OpenCode (SST) |
-| **Default Inference Provider** | OpenCode Zen |
+| Property                         | Value                                                                                                 |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| **Provider**                     | OpenCode (SST)                                                                                        |
+| **Default Inference Provider**   | OpenCode Zen                                                                                          |
 | **Advanced Inference Providers** | OpenCode Go, SAM Platform (Workers AI), Scaleway, Google Vertex, OpenAI-compatible, Anthropic, custom |
-| **API Key** | `OPENCODE_API_KEY` for OpenCode Zen and OpenCode Go |
-| **Get a Key** | [OpenCode auth](https://opencode.ai/auth) |
+| **API Key**                      | `OPENCODE_API_KEY` for OpenCode Zen and OpenCode Go                                                   |
+| **Get a Key**                    | [OpenCode auth](https://opencode.ai/auth)                                                             |
 
 OpenCode defaults to OpenCode Zen. SAM loads the Zen and Go model dropdowns from Models.dev through its authenticated model-catalog API, with a static fallback if that upstream catalog is unavailable. Select OpenCode Go in agent settings to use Go-only models such as `opencode-go/glm-5.2`. Advanced configurations can use SAM Platform inference without a user API key, or another user-selected inference provider. If you explicitly select Scaleway and already have a Scaleway cloud provider credential configured, OpenCode can reuse that credential — no separate API key required.
 
 ### Amp
 
-| Property | Value |
-|----------|-------|
-| **Provider** | Sourcegraph |
-| **API Key** | `AMP_API_KEY` |
-| **OAuth Support** | No |
-| **Get a Key** | [Amp settings](https://ampcode.com/settings) |
+| Property          | Value                                        |
+| ----------------- | -------------------------------------------- |
+| **Provider**      | Sourcegraph                                  |
+| **API Key**       | `AMP_API_KEY`                                |
+| **OAuth Support** | No                                           |
+| **Get a Key**     | [Amp settings](https://ampcode.com/settings) |
 
 Amp uses the community `acp-amp` ACP bridge in SAM v1. It requires an Amp API key and may require paid Amp credits. Because the current `acp-amp` release only forwards stdio MCP servers to Amp, SAM bridges its remote MCP endpoint through a pinned `mcp-remote@0.1.38` stdio wrapper when starting Amp sessions. The MCP token is passed via environment variable, never in command-line arguments.
 
@@ -82,11 +82,13 @@ You can configure credentials for multiple agents simultaneously and switch betw
 Each project can set a **default agent type** that's used when executing ideas. If no default is set, you'll need to specify the agent when starting execution.
 
 To set the default:
+
 1. Open the project settings
 2. Select your preferred agent from the dropdown
 3. Save changes
 
 The agent selection follows this precedence:
+
 1. Explicit override on execution
 2. Project default agent
 3. Platform default from `DEFAULT_TASK_AGENT_TYPE` (`opencode` in the checked-in Worker config)
@@ -152,21 +154,21 @@ pending → assigned → running → completed/failed/interrupted
 
 Running agents have access to project-aware MCP tools:
 
-| Tool | Description |
-|------|-------------|
-| `dispatch_task` | Spawn a follow-up idea for execution |
-| `create_idea` | Create a new idea |
-| `update_idea` | Update an idea's title, content, priority, or status |
-| `list_ideas` | View project ideas |
-| `get_idea` | Read idea details |
-| `search_ideas` | Search ideas by keyword |
-| `link_idea` | Link an idea to a chat session |
-| `unlink_idea` | Remove an idea-session link |
-| `find_related_ideas` | Find ideas related to a session |
-| `list_linked_ideas` | List ideas linked to a session |
-| `list_sessions` | View chat sessions |
-| `get_session_messages` | Read conversation history (consecutive streaming tokens are concatenated into logical messages) |
-| `search_messages` | Search messages by keyword — uses FTS5 full-text search for completed sessions; keyword matching for active sessions |
-| `update_task_status` | Report progress |
-| `complete_task` | Mark current work as done |
-| `request_human_input` | Ask for user decision (blocks until answered) |
+| Tool                   | Description                                                                                                          |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `dispatch_task`        | Spawn a follow-up idea for execution                                                                                 |
+| `create_idea`          | Create a new idea                                                                                                    |
+| `update_idea`          | Update an idea's title, content, priority, or status                                                                 |
+| `list_ideas`           | View project ideas                                                                                                   |
+| `get_idea`             | Read idea details                                                                                                    |
+| `search_ideas`         | Search ideas by keyword                                                                                              |
+| `link_idea`            | Link an idea to a chat session                                                                                       |
+| `unlink_idea`          | Remove an idea-session link                                                                                          |
+| `find_related_ideas`   | Find ideas related to a session                                                                                      |
+| `list_linked_ideas`    | List ideas linked to a session                                                                                       |
+| `list_sessions`        | View chat sessions                                                                                                   |
+| `get_session_messages` | Read conversation history (consecutive streaming tokens are concatenated into logical messages)                      |
+| `search_messages`      | Search messages by keyword — uses FTS5 full-text search for completed sessions; keyword matching for active sessions |
+| `update_task_status`   | Report progress                                                                                                      |
+| `complete_task`        | Mark current work as done, optionally with structured completion evidence                                            |
+| `request_human_input`  | Ask for user decision (blocks until answered)                                                                        |

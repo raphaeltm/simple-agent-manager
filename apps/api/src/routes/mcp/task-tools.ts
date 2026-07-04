@@ -4,9 +4,14 @@
  *
  * dispatch_task lives in dispatch-tool.ts due to its size.
  */
-import { DEFAULT_NOTIFICATION_FULL_BODY_LENGTH,MAX_NOTIFICATION_BODY_LENGTH } from '@simple-agent-manager/shared';
+import {
+  DEFAULT_NOTIFICATION_FULL_BODY_LENGTH,
+  MAX_NOTIFICATION_BODY_LENGTH,
+  parseCompletionEvidenceJson,
+  validateCompletionEvidence,
+} from '@simple-agent-manager/shared';
 import type { SQL } from 'drizzle-orm';
-import { and, desc,eq, like, or } from 'drizzle-orm';
+import { and, desc, eq, like, or } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../db/schema';
@@ -33,11 +38,15 @@ export async function handleUpdateTaskStatus(
   requestId: string | number | null,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env,
+  env: Env
 ): Promise<JsonRpcResponse> {
   const message = params.message;
   if (typeof message !== 'string' || !message.trim()) {
-    return jsonRpcError(requestId, INVALID_PARAMS, 'message is required and must be a non-empty string');
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      'message is required and must be a non-empty string'
+    );
   }
 
   const db = drizzle(env.DATABASE, { schema });
@@ -52,10 +61,7 @@ export async function handleUpdateTaskStatus(
     })
     .from(schema.tasks)
     .where(
-      and(
-        eq(schema.tasks.id, tokenData.taskId),
-        eq(schema.tasks.projectId, tokenData.projectId),
-      ),
+      and(eq(schema.tasks.id, tokenData.taskId), eq(schema.tasks.projectId, tokenData.projectId))
     )
     .limit(1);
 
@@ -69,7 +75,7 @@ export async function handleUpdateTaskStatus(
     return jsonRpcError(
       requestId,
       INVALID_PARAMS,
-      `Task status updates cannot be made after task reaches status '${task.status}'`,
+      `Task status updates cannot be made after task reaches status '${task.status}'`
     );
   }
 
@@ -77,19 +83,21 @@ export async function handleUpdateTaskStatus(
   try {
     const doId = env.PROJECT_DATA.idFromName(tokenData.projectId);
     const doStub = env.PROJECT_DATA.get(doId);
-    await doStub.fetch(new Request('https://do/activity', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        type: 'task.progress',
-        actorType: 'agent',
-        actorId: tokenData.workspaceId,
-        metadata: {
-          taskId: tokenData.taskId,
-          message: message.trim().slice(0, getMcpLimits(env).activityMessageMaxLength),
-        },
-      }),
-    }));
+    await doStub.fetch(
+      new Request('https://do/activity', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'task.progress',
+          actorType: 'agent',
+          actorId: tokenData.workspaceId,
+          metadata: {
+            taskId: tokenData.taskId,
+            message: message.trim().slice(0, getMcpLimits(env).activityMessageMaxLength),
+          },
+        }),
+      })
+    );
   } catch (err) {
     log.warn('mcp.update_task_status.activity_event_failed', {
       taskId: tokenData.taskId,
@@ -105,16 +113,18 @@ export async function handleUpdateTaskStatus(
         notificationService.getChatSessionId(env, tokenData.workspaceId),
       ]);
       const trimmedMessage = message.trim();
-      const maxFullBodyLength = parseInt(env.NOTIFICATION_FULL_BODY_LENGTH || '') || DEFAULT_NOTIFICATION_FULL_BODY_LENGTH;
+      const maxFullBodyLength =
+        parseInt(env.NOTIFICATION_FULL_BODY_LENGTH || '') || DEFAULT_NOTIFICATION_FULL_BODY_LENGTH;
       await notificationService.notifyProgress(env, tokenData.userId, {
         projectId: tokenData.projectId,
         projectName,
         taskId: tokenData.taskId,
         taskTitle: task.title,
         message: trimmedMessage.slice(0, MAX_NOTIFICATION_BODY_LENGTH),
-        fullMessage: trimmedMessage.length > MAX_NOTIFICATION_BODY_LENGTH
-          ? trimmedMessage.slice(0, maxFullBodyLength)
-          : undefined,
+        fullMessage:
+          trimmedMessage.length > MAX_NOTIFICATION_BODY_LENGTH
+            ? trimmedMessage.slice(0, maxFullBodyLength)
+            : undefined,
         sessionId,
       });
     } catch (err) {
@@ -141,9 +151,20 @@ export async function handleCompleteTask(
   params: Record<string, unknown>,
   tokenData: McpTokenData,
   env: Env,
-  executionCtx?: { waitUntil(p: Promise<unknown>): void },
+  executionCtx?: { waitUntil(p: Promise<unknown>): void }
 ): Promise<JsonRpcResponse> {
   const summary = typeof params.summary === 'string' ? params.summary.trim() : null;
+  const evidenceValidation =
+    params.evidence === undefined ? null : validateCompletionEvidence(params.evidence);
+  if (evidenceValidation && !evidenceValidation.ok) {
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      `Invalid evidence: ${evidenceValidation.error}`,
+      { httpStatus: 400 }
+    );
+  }
+  const evidenceJson = evidenceValidation?.ok ? JSON.stringify(evidenceValidation.value) : null;
 
   const now = new Date().toISOString();
 
@@ -151,35 +172,44 @@ export async function handleCompleteTask(
   // instead of completing the task. This prevents agents that ignore conversation-mode instructions
   // from prematurely ending the conversation.
   const taskRow = await env.DATABASE.prepare(
-    `SELECT task_mode, user_id, title, output_pr_url, output_branch, mission_id FROM tasks WHERE id = ? AND project_id = ?`,
-  ).bind(tokenData.taskId, tokenData.projectId).first<{
-    task_mode: string;
-    user_id: string;
-    title: string;
-    output_pr_url: string | null;
-    output_branch: string | null;
-    mission_id: string | null;
-  }>();
+    `SELECT task_mode, user_id, title, output_pr_url, output_branch, mission_id FROM tasks WHERE id = ? AND project_id = ?`
+  )
+    .bind(tokenData.taskId, tokenData.projectId)
+    .first<{
+      task_mode: string;
+      user_id: string;
+      title: string;
+      output_pr_url: string | null;
+      output_branch: string | null;
+      mission_id: string | null;
+    }>();
 
   const isConversation = taskRow?.task_mode === 'conversation';
 
   if (isConversation) {
     // In conversation mode, remap complete_task to awaiting_followup — keep the task active.
     const result = await env.DATABASE.prepare(
-      `UPDATE tasks SET execution_step = 'awaiting_followup', output_summary = COALESCE(?, output_summary), updated_at = ?
-       WHERE id = ? AND project_id = ? AND status IN ('in_progress', 'delegated', 'awaiting_followup')`,
-    ).bind(
-      summary ? summary.slice(0, getMcpLimits(env).outputSummaryMaxLength) : null,
-      now,
-      tokenData.taskId,
-      tokenData.projectId,
-    ).run();
+      `UPDATE tasks
+       SET execution_step = 'awaiting_followup',
+           output_summary = COALESCE(?, output_summary),
+           completion_evidence = COALESCE(?, completion_evidence),
+           updated_at = ?
+       WHERE id = ? AND project_id = ? AND status IN ('in_progress', 'delegated', 'awaiting_followup')`
+    )
+      .bind(
+        summary ? summary.slice(0, getMcpLimits(env).outputSummaryMaxLength) : null,
+        evidenceJson,
+        now,
+        tokenData.taskId,
+        tokenData.projectId
+      )
+      .run();
 
     if (!result.meta.changes || result.meta.changes === 0) {
       return jsonRpcError(
         requestId,
         INVALID_PARAMS,
-        'Task cannot be updated — it may not exist or is not in an active status',
+        'Task cannot be updated — it may not exist or is not in an active status'
       );
     }
 
@@ -193,19 +223,21 @@ export async function handleCompleteTask(
     try {
       const doId = env.PROJECT_DATA.idFromName(tokenData.projectId);
       const doStub = env.PROJECT_DATA.get(doId);
-      await doStub.fetch(new Request('https://do/activity', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'task.awaiting_followup',
-          actorType: 'agent',
-          actorId: tokenData.workspaceId,
-          metadata: {
-            taskId: tokenData.taskId,
-            summary: summary?.slice(0, getMcpLimits(env).activityMessageMaxLength) ?? null,
-          },
-        }),
-      }));
+      await doStub.fetch(
+        new Request('https://do/activity', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            type: 'task.awaiting_followup',
+            actorType: 'agent',
+            actorId: tokenData.workspaceId,
+            metadata: {
+              taskId: tokenData.taskId,
+              summary: summary?.slice(0, getMcpLimits(env).activityMessageMaxLength) ?? null,
+            },
+          }),
+        })
+      );
     } catch (err) {
       log.warn('mcp.complete_task.conversation_activity_event_failed', {
         taskId: tokenData.taskId,
@@ -245,22 +277,30 @@ export async function handleCompleteTask(
   // Atomic conditional UPDATE — only transitions from completable statuses.
   // This prevents the TOCTOU race of a separate SELECT + UPDATE.
   const result = await env.DATABASE.prepare(
-    `UPDATE tasks SET status = 'completed', completed_at = ?, output_summary = COALESCE(?, output_summary), updated_at = ?
-     WHERE id = ? AND project_id = ? AND status IN ('in_progress', 'delegated', 'awaiting_followup')`,
-  ).bind(
-    now,
-    summary ? summary.slice(0, getMcpLimits(env).outputSummaryMaxLength) : null,
-    now,
-    tokenData.taskId,
-    tokenData.projectId,
-  ).run();
+    `UPDATE tasks
+     SET status = 'completed',
+         completed_at = ?,
+         output_summary = COALESCE(?, output_summary),
+         completion_evidence = COALESCE(?, completion_evidence),
+         updated_at = ?
+     WHERE id = ? AND project_id = ? AND status IN ('in_progress', 'delegated', 'awaiting_followup')`
+  )
+    .bind(
+      now,
+      summary ? summary.slice(0, getMcpLimits(env).outputSummaryMaxLength) : null,
+      evidenceJson,
+      now,
+      tokenData.taskId,
+      tokenData.projectId
+    )
+    .run();
 
   if (!result.meta.changes || result.meta.changes === 0) {
     // Either task doesn't exist, wrong project, or not in a completable state
     return jsonRpcError(
       requestId,
       INVALID_PARAMS,
-      'Task cannot be completed — it may not exist or is not in a completable status',
+      'Task cannot be completed — it may not exist or is not in a completable status'
     );
   }
 
@@ -302,19 +342,21 @@ export async function handleCompleteTask(
   try {
     const doId = env.PROJECT_DATA.idFromName(tokenData.projectId);
     const doStub = env.PROJECT_DATA.get(doId);
-    await doStub.fetch(new Request('https://do/activity', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        type: 'task.completed',
-        actorType: 'agent',
-        actorId: tokenData.workspaceId,
-        metadata: {
-          taskId: tokenData.taskId,
-          summary: summary?.slice(0, getMcpLimits(env).activityMessageMaxLength) ?? null,
-        },
-      }),
-    }));
+    await doStub.fetch(
+      new Request('https://do/activity', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'task.completed',
+          actorType: 'agent',
+          actorId: tokenData.workspaceId,
+          metadata: {
+            taskId: tokenData.taskId,
+            summary: summary?.slice(0, getMcpLimits(env).activityMessageMaxLength) ?? null,
+          },
+        }),
+      })
+    );
   } catch (err) {
     log.warn('mcp.complete_task.activity_event_failed', {
       taskId: tokenData.taskId,
@@ -410,7 +452,7 @@ export async function handleListTasks(
   requestId: string | number | null,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env,
+  env: Env
 ): Promise<JsonRpcResponse> {
   const limits = getMcpLimits(env);
   const status = typeof params.status === 'string' ? params.status : undefined;
@@ -451,9 +493,7 @@ export async function handleListTasks(
     .orderBy(desc(schema.tasks.updatedAt))
     .limit(fetchLimit);
 
-  let tasks = includeOwn
-    ? rows
-    : rows.filter((t) => t.id !== tokenData.taskId);
+  let tasks = includeOwn ? rows : rows.filter((t) => t.id !== tokenData.taskId);
 
   // Trim to requested limit after filtering
   tasks = tasks.slice(0, limit);
@@ -464,15 +504,21 @@ export async function handleListTasks(
     title: t.title,
     status: t.status,
     priority: t.priority,
-    descriptionSnippet: t.description ? t.description.slice(0, snippetLen) + (t.description.length > snippetLen ? '...' : '') : null,
+    descriptionSnippet: t.description
+      ? t.description.slice(0, snippetLen) + (t.description.length > snippetLen ? '...' : '')
+      : null,
     outputBranch: t.outputBranch,
     outputPrUrl: t.outputPrUrl,
-    outputSummary: t.outputSummary ? t.outputSummary.slice(0, snippetLen) + (t.outputSummary.length > snippetLen ? '...' : '') : null,
+    outputSummary: t.outputSummary
+      ? t.outputSummary.slice(0, snippetLen) + (t.outputSummary.length > snippetLen ? '...' : '')
+      : null,
     updatedAt: t.updatedAt,
   }));
 
   return jsonRpcSuccess(requestId, {
-    content: [{ type: 'text', text: JSON.stringify({ tasks: result, count: result.length }, null, 2) }],
+    content: [
+      { type: 'text', text: JSON.stringify({ tasks: result, count: result.length }, null, 2) },
+    ],
   });
 }
 
@@ -480,7 +526,7 @@ export async function handleGetTaskDetails(
   requestId: string | number | null,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env,
+  env: Env
 ): Promise<JsonRpcResponse> {
   const taskId = typeof params.taskId === 'string' ? params.taskId.trim() : '';
   if (!taskId) {
@@ -499,6 +545,7 @@ export async function handleGetTaskDetails(
       outputBranch: schema.tasks.outputBranch,
       outputPrUrl: schema.tasks.outputPrUrl,
       outputSummary: schema.tasks.outputSummary,
+      completionEvidence: schema.tasks.completionEvidence,
       errorMessage: schema.tasks.errorMessage,
       createdAt: schema.tasks.createdAt,
       updatedAt: schema.tasks.updatedAt,
@@ -506,12 +553,7 @@ export async function handleGetTaskDetails(
       completedAt: schema.tasks.completedAt,
     })
     .from(schema.tasks)
-    .where(
-      and(
-        eq(schema.tasks.id, taskId),
-        eq(schema.tasks.projectId, tokenData.projectId),
-      ),
-    )
+    .where(and(eq(schema.tasks.id, taskId), eq(schema.tasks.projectId, tokenData.projectId)))
     .limit(1);
 
   const task = rows[0];
@@ -528,6 +570,7 @@ export async function handleGetTaskDetails(
     outputBranch: task.outputBranch,
     outputPrUrl: task.outputPrUrl,
     outputSummary: task.outputSummary,
+    completionEvidence: parseCompletionEvidenceJson(task.completionEvidence ?? null),
     errorMessage: task.errorMessage,
     createdAt: task.createdAt,
     updatedAt: task.updatedAt,
@@ -544,11 +587,15 @@ export async function handleSearchTasks(
   requestId: string | number | null,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env,
+  env: Env
 ): Promise<JsonRpcResponse> {
   const query = typeof params.query === 'string' ? params.query.trim() : '';
   if (!query) {
-    return jsonRpcError(requestId, INVALID_PARAMS, 'query is required and must be a non-empty string');
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      'query is required and must be a non-empty string'
+    );
   }
   if (query.length < 2) {
     return jsonRpcError(requestId, INVALID_PARAMS, 'query must be at least 2 characters');
@@ -564,10 +611,7 @@ export async function handleSearchTasks(
 
   const conditions: SQL[] = [
     eq(schema.tasks.projectId, tokenData.projectId),
-    or(
-      like(schema.tasks.title, searchPattern),
-      like(schema.tasks.description, searchPattern),
-    )!,
+    or(like(schema.tasks.title, searchPattern), like(schema.tasks.description, searchPattern))!,
   ];
 
   if (status) {
@@ -597,14 +641,23 @@ export async function handleSearchTasks(
     title: t.title,
     status: t.status,
     priority: t.priority,
-    descriptionSnippet: t.description ? t.description.slice(0, snippetLen) + (t.description.length > snippetLen ? '...' : '') : null,
+    descriptionSnippet: t.description
+      ? t.description.slice(0, snippetLen) + (t.description.length > snippetLen ? '...' : '')
+      : null,
     outputBranch: t.outputBranch,
     outputPrUrl: t.outputPrUrl,
-    outputSummary: t.outputSummary ? t.outputSummary.slice(0, snippetLen) + (t.outputSummary.length > snippetLen ? '...' : '') : null,
+    outputSummary: t.outputSummary
+      ? t.outputSummary.slice(0, snippetLen) + (t.outputSummary.length > snippetLen ? '...' : '')
+      : null,
     updatedAt: t.updatedAt,
   }));
 
   return jsonRpcSuccess(requestId, {
-    content: [{ type: 'text', text: JSON.stringify({ tasks: result, count: result.length, query }, null, 2) }],
+    content: [
+      {
+        type: 'text',
+        text: JSON.stringify({ tasks: result, count: result.length, query }, null, 2),
+      },
+    ],
   });
 }

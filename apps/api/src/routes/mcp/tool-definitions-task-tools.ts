@@ -32,13 +32,53 @@ export const TASK_LIFECYCLE_TOOLS = [
   {
     name: 'complete_task',
     description:
-      'Mark the current task as completed. Call this after all work is done and changes are pushed.',
+      'Mark the current task as completed. Call this after all work is done and changes are pushed. ' +
+      'Optionally include structured evidence describing tests, staging checks, CI, manual verification, PR URL, or notes.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         summary: {
           type: 'string',
           description: 'Brief summary of what was accomplished',
+        },
+        evidence: {
+          type: 'object',
+          description:
+            'Optional structured completion evidence. Malformed evidence rejects the whole completion request.',
+          properties: {
+            testsRun: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  command: { type: 'string' },
+                  passed: { type: 'boolean' },
+                  detail: { type: 'string' },
+                },
+                required: ['command', 'passed'],
+                additionalProperties: false,
+              },
+            },
+            verifications: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  kind: {
+                    type: 'string',
+                    enum: ['test', 'staging', 'manual', 'ci', 'other'],
+                  },
+                  description: { type: 'string' },
+                  evidence: { type: 'string' },
+                },
+                required: ['kind', 'description'],
+                additionalProperties: false,
+              },
+            },
+            prUrl: { type: 'string' },
+            notes: { type: 'string' },
+          },
+          additionalProperties: false,
         },
       },
       additionalProperties: false,
@@ -54,11 +94,13 @@ export const TASK_LIFECYCLE_TOOLS = [
       properties: {
         description: {
           type: 'string',
-          description: 'Task description — synthesize context from your conversation into a clear, actionable brief. Do NOT dump raw conversation history.',
+          description:
+            'Task description — synthesize context from your conversation into a clear, actionable brief. Do NOT dump raw conversation history.',
         },
         vmSize: {
           type: 'string',
-          description: 'VM size for the dispatched task (small, medium, large). Defaults to project default.',
+          description:
+            'VM size for the dispatched task (small, medium, large). Defaults to project default.',
           enum: ['small', 'medium', 'large'],
         },
         priority: {
@@ -68,49 +110,60 @@ export const TASK_LIFECYCLE_TOOLS = [
         references: {
           type: 'array',
           items: { type: 'string' },
-          description: 'File paths, spec references, or URLs to include as context for the dispatched agent.',
+          description:
+            'File paths, spec references, or URLs to include as context for the dispatched agent.',
         },
         branch: {
           type: 'string',
-          description: 'Git branch for the new workspace to check out. Defaults to the project\'s default branch (usually main). Only set this if you have already pushed the branch to the remote.',
+          description:
+            "Git branch for the new workspace to check out. Defaults to the project's default branch (usually main). Only set this if you have already pushed the branch to the remote.",
         },
         agentProfileId: {
           type: 'string',
-          description: 'Agent profile ID or name to use. Profile settings (model, permissionMode, agentType, vmSize, etc.) override project defaults but are overridden by explicit task-level fields.',
+          description:
+            'Agent profile ID or name to use. Profile settings (model, permissionMode, agentType, vmSize, etc.) override project defaults but are overridden by explicit task-level fields.',
         },
         skillId: {
           type: 'string',
-          description: 'Skill ID or name to use as the repeatable-work configuration layer. Skill settings override profile settings.',
+          description:
+            'Skill ID or name to use as the repeatable-work configuration layer. Skill settings override profile settings.',
         },
         taskMode: {
           type: 'string',
-          description: 'Task execution mode. "task" is recommended for subtasks and reports completion. "conversation" requires active lifecycle management via send_message_to_subtask.',
+          description:
+            'Task execution mode. "task" is recommended for subtasks and reports completion. "conversation" requires active lifecycle management via send_message_to_subtask.',
           enum: ['task', 'conversation'],
         },
         agentType: {
           type: 'string',
-          description: 'Agent type to use (e.g., "claude-code", "openai-codex"). Defaults to profile or project default.',
+          description:
+            'Agent type to use (e.g., "claude-code", "openai-codex"). Defaults to profile or project default.',
         },
         workspaceProfile: {
           type: 'string',
-          description: 'Workspace provisioning profile. "full" includes full devcontainer build. "lightweight" skips it for faster startup.',
+          description:
+            'Workspace provisioning profile. "full" includes full devcontainer build. "lightweight" skips it for faster startup.',
           enum: ['full', 'lightweight'],
         },
         devcontainerConfigName: {
           type: ['string', 'null'],
-          description: 'Devcontainer config name — a subdirectory under .devcontainer/ (e.g., "data-science"). Null or omitted means auto-discover default config. Only relevant when workspaceProfile is "full".',
+          description:
+            'Devcontainer config name — a subdirectory under .devcontainer/ (e.g., "data-science"). Null or omitted means auto-discover default config. Only relevant when workspaceProfile is "full".',
         },
         provider: {
           type: 'string',
-          description: 'Cloud provider for auto-provisioned nodes (e.g., "hetzner", "scaleway", "gcp"). Defaults to profile or project default.',
+          description:
+            'Cloud provider for auto-provisioned nodes (e.g., "hetzner", "scaleway", "gcp"). Defaults to profile or project default.',
         },
         vmLocation: {
           type: 'string',
-          description: 'VM location/datacenter. Must be valid for the selected provider. Defaults to profile or project default.',
+          description:
+            'VM location/datacenter. Must be valid for the selected provider. Defaults to profile or project default.',
         },
         missionId: {
           type: 'string',
-          description: 'Mission ID to attach this task to. The task inherits the mission context and can read/write mission state.',
+          description:
+            'Mission ID to attach this task to. The task inherits the mission context and can read/write mission state.',
         },
       },
       required: ['description'],
@@ -128,7 +181,8 @@ export const TASK_LIFECYCLE_TOOLS = [
       properties: {
         context: {
           type: 'string',
-          description: 'Explain what you need from the human — be specific about the decision, question, or blocker.',
+          description:
+            'Explain what you need from the human — be specific about the decision, question, or blocker.',
         },
         category: {
           type: 'string',
@@ -138,7 +192,8 @@ export const TASK_LIFECYCLE_TOOLS = [
         options: {
           type: 'array',
           items: { type: 'string' },
-          description: 'Optional list of choices for the human to pick from (e.g., ["Option A", "Option B"]).',
+          description:
+            'Optional list of choices for the human to pick from (e.g., ["Option A", "Option B"]).',
         },
       },
       required: ['context'],
