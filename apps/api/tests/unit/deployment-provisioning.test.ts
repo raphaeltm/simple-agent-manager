@@ -61,6 +61,7 @@ interface MockDbTracker {
 function createMockDb(options: {
   userCredProvider?: string | null;
   platformCredProvider?: string | null;
+  projectCredProvider?: string | null;
 }) {
   const tracker: MockDbTracker = {
     selectCalls: 0,
@@ -73,16 +74,35 @@ function createMockDb(options: {
   const platformCredRows = options.platformCredProvider
     ? [{ provider: options.platformCredProvider }]
     : [];
+  const projectCredRows = options.projectCredProvider
+    ? [
+        {
+          attachmentActive: true,
+          consumerTarget: options.projectCredProvider,
+          configurationActive: true,
+          credentialId: 'cc-cred-1',
+          credentialActive: true,
+        },
+      ]
+    : [];
+  let legacySelectCalls = 0;
 
   const mockDb = {
     select: vi.fn().mockImplementation(() => {
       tracker.selectCalls++;
-      const callIdx = tracker.selectCalls;
       return {
         from: vi.fn().mockReturnValue({
+          innerJoin: vi.fn().mockReturnValue({
+            leftJoin: vi.fn().mockReturnValue({
+              where: vi.fn().mockReturnValue({
+                limit: vi.fn().mockResolvedValue(projectCredRows),
+              }),
+            }),
+          }),
           where: vi.fn().mockReturnValue({
             limit: vi.fn().mockImplementation(() => {
-              if (callIdx <= 1) return Promise.resolve(userCredRows);
+              legacySelectCalls++;
+              if (legacySelectCalls <= 1) return Promise.resolve(userCredRows);
               return Promise.resolve(platformCredRows);
             }),
           }),
@@ -497,6 +517,13 @@ describe('provisionDeploymentNode', () => {
         tracker.selectCalls++;
         return {
           from: vi.fn().mockReturnValue({
+            innerJoin: vi.fn().mockReturnValue({
+              leftJoin: vi.fn().mockReturnValue({
+                where: vi.fn().mockReturnValue({
+                  limit: vi.fn().mockResolvedValue([]),
+                }),
+              }),
+            }),
             where: vi.fn().mockReturnValue({
               limit: vi.fn().mockResolvedValue([{ provider: 'hetzner' }]),
             }),

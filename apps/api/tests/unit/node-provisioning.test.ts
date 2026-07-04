@@ -461,7 +461,7 @@ describe('provider-aware node provisioning', () => {
       nodesSource.indexOf('async function stopNodeResources')
     );
     expect(section).toMatch(
-      /createProviderForUser\(\s*db,\s*node\.userId,\s*getCredentialEncryptionKey\(env\),\s*env,\s*targetProvider\s*\)/
+      /createProviderForUser\(\s*db,\s*attributionUserId,\s*getCredentialEncryptionKey\(env\),\s*env,\s*targetProvider,\s*attributionProjectId\s*\)/
     );
   });
 
@@ -510,7 +510,7 @@ describe('provider-aware node provisioning', () => {
     );
     expect(section).toContain('node.cloudProvider as CredentialProvider');
     expect(section).toMatch(
-      /createProviderForUser\(\s*db,\s*userId,\s*getCredentialEncryptionKey\(env\),\s*env,\s*targetProvider\s*\)/
+      /createProviderForUser\(\s*db,\s*attributionUserId,\s*getCredentialEncryptionKey\(env\),\s*env,\s*targetProvider,\s*attributionProjectId\s*\)/
     );
   });
 
@@ -520,7 +520,7 @@ describe('provider-aware node provisioning', () => {
     );
     expect(section).toContain('node.cloudProvider as CredentialProvider');
     expect(section).toMatch(
-      /createProviderForUser\(\s*db,\s*userId,\s*getCredentialEncryptionKey\(env\),\s*env,\s*targetProvider\s*\)/
+      /createProviderForUser\(\s*db,\s*attributionUserId,\s*getCredentialEncryptionKey\(env\),\s*env,\s*targetProvider,\s*attributionProjectId\s*\)/
     );
   });
 
