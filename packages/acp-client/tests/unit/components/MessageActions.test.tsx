@@ -610,9 +610,9 @@ describe('MessageActions', () => {
       fireEvent.click(btn);
       fireEvent.click(btn);
 
-      // Wait for any async processing
+      // Wait for the first click's synthesize + audio fetch sequence to finish.
       await waitFor(() => {
-        expect(mockFetch).toHaveBeenCalled();
+        expect(mockFetch).toHaveBeenCalledTimes(2);
       });
 
       // Exactly 2 fetches from the first click (synthesize + audio fetch).

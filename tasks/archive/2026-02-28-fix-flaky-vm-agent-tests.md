@@ -1,9 +1,18 @@
 # Fix Flaky VM Agent Tests
 
 **Created**: 2026-02-28
-**Status**: Backlog
+**Status**: Resolved
 **Priority**: Medium
 **Estimated Effort**: Medium
+
+## Resolution
+
+Resolved by `tasks/active/2026-07-04-fix-flaky-tests-at-root.md`.
+The original backlog root-cause theory was corrected: replay buffer ingestion is
+synchronous, while the flaky loss happened on delivery when replay could block on
+the viewer send buffer under CI scheduler pressure. The test now sizes
+`ViewerSendBuffer` above the replay volume and reads concurrently with attach, with
+no `time.Sleep` synchronization and no retry mechanism.
 
 ## Problem
 
@@ -63,7 +72,7 @@ A `time.Sleep(50*time.Millisecond)` before attaching the replay viewer. Simple b
 
 ## Acceptance Criteria
 
-- [ ] `TestSessionHost_ReplayDoesNotDropMessages` passes reliably (100/100 runs with `-count=100`)
-- [ ] No `time.Sleep` used as the fix (Options A or B preferred)
-- [ ] Other replay-related tests still pass
-- [ ] Run with `-race` flag to verify no data races
+- [x] `TestSessionHost_ReplayDoesNotDropMessages` passes reliably (100/100 runs with `-count=100`)
+- [x] No `time.Sleep` used as the fix (Options A or B preferred)
+- [x] Other replay-related tests still pass
+- [x] Run with `-race` flag to verify no data races

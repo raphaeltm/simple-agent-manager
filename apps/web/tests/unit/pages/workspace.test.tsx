@@ -598,8 +598,10 @@ describe('Workspace page', () => {
       expect(mocks.getGitStatus).toHaveBeenCalledTimes(2);
     });
 
-    const gitButton = screen.getByRole('button', { name: 'View git changes' });
-    expect(gitButton).toHaveTextContent('1');
+    await waitFor(() => {
+      const gitButton = screen.getByRole('button', { name: 'View git changes' });
+      expect(gitButton).toHaveTextContent('1');
+    });
   });
 
   it('marks git status as stale in the header when refresh fails', async () => {

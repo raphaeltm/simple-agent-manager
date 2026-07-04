@@ -63,15 +63,15 @@ Historically flaky files to re-check: `repo-selector.test.tsx`, `agents-section.
 
 ## Implementation Checklist
 
-- [ ] Fix ToolCallCard lazy-load test: `await screen.findByText('No output.')` for final UI state
-- [ ] Set `configure({ asyncUtilTimeout })` (CI-realistic, env-tunable constant) in `apps/web/tests/setup.ts` and the acp-client test setup
-- [ ] Verify `useAvailableCommands` refreshKey test is structurally sound (assertions in waitFor) and covered by the raised async timeout
-- [ ] Fix `TestSessionHost_ReplayDoesNotDropMessages`: `ViewerSendBuffer` sized above replay volume + concurrent client reader; no `time.Sleep`
-- [ ] File backlog task for the vm-agent product bug: silent replay abort still sends `replay_done` (suffix loss invisible to clients)
-- [ ] Add fail-fast fetch stub to `apps/web/tests/setup.ts`; fix all tests that break because they relied on real fetch
-- [ ] Audit web + acp-client tests for the sync-assert-after-async pattern; fix instances found
-- [ ] Archive `tasks/backlog/2026-04-11-fix-flaky-useAvailableCommands-test.md` and `tasks/backlog/2026-02-28-fix-flaky-vm-agent-tests.md` through the tasks/ flow (resolved by this work)
-- [ ] Verification: 5x consecutive green `--coverage` runs for each touched JS suite (matching CI conditions); `go test -race -count=100 ./internal/acp/` green
+- [x] Fix ToolCallCard lazy-load test: `await screen.findByText('No output.')` for final UI state
+- [x] Set `configure({ asyncUtilTimeout })` (CI-realistic, env-tunable constant) in `apps/web/tests/setup.ts` and the acp-client test setup
+- [x] Verify `useAvailableCommands` refreshKey test is structurally sound (assertions in waitFor) and covered by the raised async timeout
+- [x] Fix `TestSessionHost_ReplayDoesNotDropMessages`: `ViewerSendBuffer` sized above replay volume + concurrent client reader; no `time.Sleep`
+- [x] File backlog task for the vm-agent product bug: silent replay abort still sends `replay_done` (suffix loss invisible to clients)
+- [x] Add fail-fast fetch stub to `apps/web/tests/setup.ts`; fix all tests that break because they relied on real fetch
+- [x] Audit web + acp-client tests for the sync-assert-after-async pattern; fix instances found
+- [x] Archive `tasks/backlog/2026-04-11-fix-flaky-useAvailableCommands-test.md` and `tasks/backlog/2026-02-28-fix-flaky-vm-agent-tests.md` through the tasks/ flow (resolved by this work)
+- [x] Verification: 5x consecutive green `--coverage` runs for each touched JS suite (matching CI conditions); `go test -race -count=100 ./internal/acp/` green
 
 ## Hard Constraints
 
@@ -81,12 +81,12 @@ Historically flaky files to re-check: `repo-selector.test.tsx`, `agents-section.
 
 ## Acceptance Criteria
 
-- [ ] All five scope items fixed; no retry mechanism introduced anywhere
-- [ ] Touched JS suites: 5 consecutive green runs with `--coverage`
-- [ ] Go: `go test -race -count=100` green for `packages/vm-agent/internal/acp/`
-- [ ] Unmocked fetch in web unit tests fails fast with a clear message
-- [ ] Both pre-existing flaky-test backlog tasks archived with resolution notes
-- [ ] Product bug (silent replay abort) filed as its own backlog task
+- [x] All five scope items fixed; no retry mechanism introduced anywhere
+- [x] Touched JS suites: 5 consecutive green runs with `--coverage`
+- [x] Go: `go test -race -count=100` green for `packages/vm-agent/internal/acp/`
+- [x] Unmocked fetch in web unit tests fails fast with a clear message
+- [x] Both pre-existing flaky-test backlog tasks archived with resolution notes
+- [x] Product bug (silent replay abort) filed as its own backlog task
 
 ## References
 

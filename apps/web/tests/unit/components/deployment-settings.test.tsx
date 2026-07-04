@@ -274,7 +274,9 @@ describe('DeploymentSettings', () => {
         expect(mockToast.error).toHaveBeenCalledWith('Permission denied');
       });
       // Should return to project-select phase
-      expect(screen.getByText('Set Up Deployment')).toBeInTheDocument();
+      await waitFor(() => {
+        expect(screen.getByText('Set Up Deployment')).toBeInTheDocument();
+      });
     });
 
     it('passes correct arguments to setupProjectDeploymentGcp', async () => {
