@@ -63,7 +63,7 @@ describe('stripMarkdown', () => {
 describe('getTaskTitleConfig', () => {
   it('returns defaults when no env vars set', () => {
     const config = getTaskTitleConfig({});
-    expect(config.model).toBe('@cf/zai-org/glm-4.7-flash');
+    expect(config.model).toBe('@cf/zai-org/glm-5.2');
     expect(config.maxLength).toBe(100);
     expect(config.timeoutMs).toBe(5000);
     expect(config.enabled).toBe(true);
