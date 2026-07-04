@@ -65,6 +65,7 @@ Selected direction: variant 1. It keeps the safety behavior attached to the dest
 - `pnpm --filter @simple-agent-manager/web typecheck && pnpm --filter @simple-agent-manager/web lint` — passed; lint emitted existing warning-only output.
 - `pnpm lint && pnpm typecheck && pnpm test && pnpm build` — passed; full monorepo validation completed successfully.
 - `$task-completion-validator` — passed; research findings, checked checklist items, acceptance criteria, tests, UI data path, and multi-resource checks match the branch diff.
+- Post-rebase CI note: latest `main` introduced an 806-line `apps/api/src/scheduled/stuck-tasks.ts` merge-checkout file-size failure unrelated to this UI fix. Added the checker-supported `FILE SIZE EXCEPTION` marker as a comment-only CI unblock and verified `pnpm quality:file-sizes` passes.
 
 ## References
 

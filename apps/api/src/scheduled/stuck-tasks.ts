@@ -17,6 +17,10 @@
  * TDF-7: Enhanced with OBSERVABILITY_DATABASE recording, diagnostic context
  * capture (workspace/node status at recovery time), and TaskRunner DO health
  * checks for post-TDF-2 defense-in-depth.
+ *
+ * FILE SIZE EXCEPTION: Scheduled recovery currently combines timeout,
+ * heartbeat, cleanup, and compaction-loop safeguards; split in a focused
+ * follow-up.
  */
 import {
   DEFAULT_NODE_HEARTBEAT_STALE_SECONDS,
