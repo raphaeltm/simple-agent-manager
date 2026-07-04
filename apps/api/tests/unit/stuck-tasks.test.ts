@@ -10,6 +10,8 @@ import { beforeEach,describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../src/env';
 import { detectClaudeCodeCompactionLoop, recoverStuckTasks } from '../../src/scheduled/stuck-tasks';
+import { persistError } from '../../src/services/observability';
+import { cleanupTaskRun } from '../../src/services/task-runner';
 
 // Mock cleanupTaskRun
 vi.mock('../../src/services/task-runner', () => ({
@@ -223,6 +225,28 @@ describe('recoverStuckTasks', () => {
         'task-compaction-loop',
         'failed',
         expect.stringContaining('Claude Code compaction loop detected'),
+      );
+      expect(cleanupTaskRun).toHaveBeenCalledWith('task-compaction-loop', env);
+      expect(persistError).toHaveBeenCalledWith(
+        env.OBSERVABILITY_DATABASE,
+        expect.objectContaining({
+          source: 'api',
+          level: 'warn',
+          message: expect.stringContaining('Claude Code compaction loop detected'),
+          context: expect.objectContaining({
+            recoveryType: 'claude_code_compaction_loop',
+            compactionLoop: expect.objectContaining({
+              sessionId: 'chat-session-1',
+              agentSessionId: 'agent-session-1',
+              recentMessageLimit: 40,
+              evidence: expect.objectContaining({
+                detected: true,
+                markerPairs: 3,
+                snippets: expect.arrayContaining([expect.stringContaining('Compacting')]),
+              }),
+            }),
+          }),
+        }),
       );
     });
 
