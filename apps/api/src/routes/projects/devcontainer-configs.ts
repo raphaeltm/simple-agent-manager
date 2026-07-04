@@ -10,7 +10,7 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { getUserId } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
-import { requireOwnedProject } from '../../middleware/project-auth';
+import { requireProjectAccess } from '../../middleware/project-auth';
 import { getInstallationToken } from '../../services/github-app';
 import { getExternalInstallationId } from '../../services/github-installation-ids';
 import { requireOwnedInstallation } from './_helpers';
@@ -224,7 +224,7 @@ devcontainerConfigRoutes.get('/:projectId/devcontainer-configs', async (c) => {
   const db = drizzle(c.env.DATABASE, { schema });
   const projectId = c.req.param('projectId');
 
-  const project = await requireOwnedProject(db, projectId, userId);
+  const project = await requireProjectAccess(db, projectId, userId);
 
   // Non-GitHub projects: return unsupported response
   if (project.repoProvider !== 'github') {

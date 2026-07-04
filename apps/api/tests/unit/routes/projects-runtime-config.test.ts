@@ -6,7 +6,7 @@ import type { Env } from '../../../src/env';
 import { projectsRoutes } from '../../../src/routes/projects';
 
 const mocks = vi.hoisted(() => ({
-  requireOwnedProject: vi.fn(),
+  requireProjectCapability: vi.fn(),
   encrypt: vi.fn(),
 }));
 
@@ -17,7 +17,7 @@ vi.mock('../../../src/middleware/auth', () => ({
   getUserId: () => 'user-1',
 }));
 vi.mock('../../../src/middleware/project-auth', () => ({
-  requireOwnedProject: mocks.requireOwnedProject,
+  requireProjectCapability: mocks.requireProjectCapability,
 }));
 vi.mock('../../../src/services/encryption', () => ({
   encrypt: mocks.encrypt,
@@ -53,7 +53,7 @@ describe('projects runtime config routes', () => {
 
     (drizzle as any).mockReturnValue(mockDB);
 
-    mocks.requireOwnedProject.mockResolvedValue({
+    mocks.requireProjectCapability.mockResolvedValue({
       id: 'proj-1',
       userId: 'user-1',
       installationId: 'inst-1',

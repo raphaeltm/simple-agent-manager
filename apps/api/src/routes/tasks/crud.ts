@@ -27,7 +27,7 @@ import { parsePositiveInt, requireRouteParam } from '../../lib/route-helpers';
 import { ulid } from '../../lib/ulid';
 import { getUserId, requireApproved,requireAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
-import { requireOwnedProject, requireOwnedTask, requireOwnedWorkspace } from '../../middleware/project-auth';
+import { requireOwnedTask, requireOwnedWorkspace, requireProjectCapability } from '../../middleware/project-auth';
 import {
   CreateTaskDependencySchema,
   CreateTaskSchema,
@@ -57,6 +57,7 @@ import {
   getTaskDependencies,
   parseTaskSortOrder,
   requireOwnedTaskById,
+  requireProjectTaskById,
   setTaskStatus,
 } from './_helpers';
 
@@ -88,7 +89,7 @@ crudRoutes.post('/', requireAuth(), requireApproved(), jsonValidator(CreateTaskS
   const limits = getRuntimeLimits(c.env);
   const body = c.req.valid('json');
 
-  const project = await requireOwnedProject(db, projectId, userId);
+  const project = await requireProjectCapability(db, projectId, userId, 'task:write');
 
   const title = body.title?.trim();
   if (!title) {
@@ -106,7 +107,7 @@ crudRoutes.post('/', requireAuth(), requireApproved(), jsonValidator(CreateTaskS
 
   let parentTaskId: string | null = null;
   if (body.parentTaskId) {
-    const parent = await requireOwnedTaskById(db, body.parentTaskId, userId);
+    const parent = await requireProjectTaskById(db, project.id, body.parentTaskId);
     if (parent.projectId !== project.id) {
       throw errors.badRequest('parentTaskId must reference a task in the same project');
     }
@@ -154,7 +155,7 @@ crudRoutes.get('/', requireAuth(), requireApproved(), async (c) => {
   const db = drizzle(c.env.DATABASE, { schema });
   const limits = getRuntimeLimits(c.env);
 
-  await requireOwnedProject(db, projectId, userId);
+  await requireProjectCapability(db, projectId, userId, 'task:read');
 
   const requestedStatus = c.req.query('status');
   if (requestedStatus && !isTaskStatus(requestedStatus)) {
@@ -174,7 +175,6 @@ crudRoutes.get('/', requireAuth(), requireApproved(), async (c) => {
 
   const conditions: SQL[] = [
     eq(schema.tasks.projectId, projectId),
-    eq(schema.tasks.userId, userId),
   ];
 
   if (requestedStatus) {
@@ -235,8 +235,8 @@ crudRoutes.get('/:taskId', requireAuth(), requireApproved(), async (c) => {
   const taskId = requireRouteParam(c, 'taskId');
   const db = drizzle(c.env.DATABASE, { schema });
 
-  await requireOwnedProject(db, projectId, userId);
-  const task = await requireOwnedTask(db, projectId, taskId, userId);
+  await requireProjectCapability(db, projectId, userId, 'task:read');
+  const task = await requireProjectTaskById(db, projectId, taskId);
   const dependencies = await getTaskDependencies(db, task.id);
   const blocked = await computeBlockedForTask(db, task.id);
   const displayProfileHint = await resolveTaskAgentProfileHint(db, {
@@ -312,8 +312,8 @@ crudRoutes.patch('/:taskId', requireAuth(), requireApproved(), jsonValidator(Upd
   const db = drizzle(c.env.DATABASE, { schema });
   const body = c.req.valid('json');
 
-  await requireOwnedProject(db, projectId, userId);
-  const task = await requireOwnedTask(db, projectId, taskId, userId);
+  await requireProjectCapability(db, projectId, userId, 'task:write');
+  const task = await requireProjectTaskById(db, projectId, taskId);
 
   if (
     body.title === undefined &&
@@ -358,7 +358,7 @@ crudRoutes.patch('/:taskId', requireAuth(), requireApproved(), jsonValidator(Upd
       if (parentTaskId === task.id) {
         throw errors.badRequest('Task cannot be its own parent');
       }
-      const parent = await requireOwnedTaskById(db, parentTaskId, userId);
+      const parent = await requireProjectTaskById(db, projectId, parentTaskId);
       if (parent.projectId !== projectId) {
         throw errors.badRequest('parentTaskId must reference a task in the same project');
       }
@@ -392,8 +392,8 @@ crudRoutes.delete('/:taskId', requireAuth(), requireApproved(), async (c) => {
   const taskId = requireRouteParam(c, 'taskId');
   const db = drizzle(c.env.DATABASE, { schema });
 
-  await requireOwnedProject(db, projectId, userId);
-  const task = await requireOwnedTask(db, projectId, taskId, userId);
+  await requireProjectCapability(db, projectId, userId, 'task:write');
+  const task = await requireProjectTaskById(db, projectId, taskId);
 
   const [dependentCountRow] = await db
     .select({ count: count() })
@@ -416,8 +416,8 @@ crudRoutes.post('/:taskId/status', requireAuth(), requireApproved(), jsonValidat
   const db = drizzle(c.env.DATABASE, { schema });
   const body = c.req.valid('json');
 
-  await requireOwnedProject(db, projectId, userId);
-  const task = await requireOwnedTask(db, projectId, taskId, userId);
+  await requireProjectCapability(db, projectId, userId, 'task:write');
+  const task = await requireProjectTaskById(db, projectId, taskId);
 
   if (!isTaskStatus(body.toStatus)) {
     throw errors.badRequest('Invalid toStatus value');
@@ -493,8 +493,8 @@ crudRoutes.post('/:taskId/dependencies', requireAuth(), requireApproved(), jsonV
   const limits = getRuntimeLimits(c.env);
   const body = c.req.valid('json');
 
-  await requireOwnedProject(db, projectId, userId);
-  const task = await requireOwnedTask(db, projectId, taskId, userId);
+  await requireProjectCapability(db, projectId, userId, 'task:write');
+  const task = await requireProjectTaskById(db, projectId, taskId);
   const dependsOnTaskId = body.dependsOnTaskId?.trim();
 
   if (!dependsOnTaskId) {
@@ -505,7 +505,7 @@ crudRoutes.post('/:taskId/dependencies', requireAuth(), requireApproved(), jsonV
     throw errors.badRequest('Task cannot depend on itself');
   }
 
-  const dependencyTask = await requireOwnedTaskById(db, dependsOnTaskId, userId);
+  const dependencyTask = await requireProjectTaskById(db, projectId, dependsOnTaskId);
   if (dependencyTask.projectId !== projectId) {
     throw errors.badRequest('Dependency task must belong to the same project');
   }
@@ -569,8 +569,8 @@ crudRoutes.delete('/:taskId/dependencies', requireAuth(), requireApproved(), asy
   const dependsOnTaskId = c.req.query('dependsOnTaskId')?.trim();
   const db = drizzle(c.env.DATABASE, { schema });
 
-  await requireOwnedProject(db, projectId, userId);
-  await requireOwnedTask(db, projectId, taskId, userId);
+  await requireProjectCapability(db, projectId, userId, 'task:write');
+  await requireProjectTaskById(db, projectId, taskId);
 
   if (!dependsOnTaskId) {
     throw errors.badRequest('dependsOnTaskId query parameter is required');
@@ -600,7 +600,7 @@ crudRoutes.post('/:taskId/delegate', requireAuth(), requireApproved(), jsonValid
   const db = drizzle(c.env.DATABASE, { schema });
   const body = c.req.valid('json');
 
-  await requireOwnedProject(db, projectId, userId);
+  await requireProjectCapability(db, projectId, userId, 'task:write');
   const task = await requireOwnedTask(db, projectId, taskId, userId);
 
   if (task.status !== 'ready') {
@@ -656,8 +656,8 @@ crudRoutes.get('/:taskId/events', requireAuth(), requireApproved(), async (c) =>
   const db = drizzle(c.env.DATABASE, { schema });
   const limits = getRuntimeLimits(c.env);
 
-  await requireOwnedProject(db, projectId, userId);
-  await requireOwnedTask(db, projectId, taskId, userId);
+  await requireProjectCapability(db, projectId, userId, 'task:read');
+  await requireProjectTaskById(db, projectId, taskId);
 
   const requestedLimit = parsePositiveInt(c.req.query('limit'), limits.taskListDefaultPageSize);
   const limit = Math.min(requestedLimit, limits.taskListMaxPageSize);
@@ -694,7 +694,7 @@ crudRoutes.post('/:taskId/close', requireAuth(), requireApproved(), async (c) =>
   const taskId = requireRouteParam(c, 'taskId');
   const db = drizzle(c.env.DATABASE, { schema });
 
-  await requireOwnedProject(db, projectId, userId);
+  await requireProjectCapability(db, projectId, userId, 'task:write');
   const task = await requireOwnedTaskById(db, taskId, userId);
 
   // Only conversation-mode tasks can be closed via this endpoint
@@ -761,7 +761,7 @@ crudRoutes.get('/:taskId/sessions', requireAuth(), requireApproved(), async (c) 
   const taskId = requireRouteParam(c, 'taskId');
   const db = drizzle(c.env.DATABASE, { schema });
 
-  await requireOwnedProject(db, projectId, userId);
+  await requireProjectCapability(db, projectId, userId, 'task:read');
 
   const sessions = await projectDataService.getSessionsForIdea(c.env, projectId, taskId);
 

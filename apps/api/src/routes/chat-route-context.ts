@@ -5,7 +5,7 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { requireRouteParam } from '../lib/route-helpers';
 import { getUserId } from '../middleware/auth';
-import { requireOwnedProject } from '../middleware/project-auth';
+import { requireProjectAccess } from '../middleware/project-auth';
 
 async function getChatSessionRouteContext(c: Context<{ Bindings: Env }>) {
   const userId = getUserId(c);
@@ -13,7 +13,7 @@ async function getChatSessionRouteContext(c: Context<{ Bindings: Env }>) {
   const sessionId = requireRouteParam(c, 'sessionId');
   const db = drizzle(c.env.DATABASE, { schema });
 
-  await requireOwnedProject(db, projectId, userId);
+  await requireProjectAccess(db, projectId, userId);
 
   return { db, projectId, sessionId, userId };
 }

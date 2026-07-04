@@ -36,7 +36,7 @@ import { getCredentialEncryptionKey } from '../../lib/secrets';
 import { ulid } from '../../lib/ulid';
 import { getUserId } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
-import { createOwnerProjectMembership, requireOwnedProject } from '../../middleware/project-auth';
+import { createOwnerProjectMembership, requireProjectAccess, requireProjectCapability } from '../../middleware/project-auth';
 import {
   CreateProjectSchema,
   jsonValidator,
@@ -430,7 +430,7 @@ crudRoutes.get('/:id', async (c) => {
   const projectId = c.req.param('id');
   const db = drizzle(c.env.DATABASE, { schema });
 
-  const project = await requireOwnedProject(db, projectId, userId);
+  const project = await requireProjectAccess(db, projectId, userId);
 
   const taskCountsRows = await db
     .select({ status: schema.tasks.status, count: count() })
@@ -495,7 +495,7 @@ crudRoutes.get('/:id/runtime-config', async (c) => {
   const projectId = c.req.param('id');
   const db = drizzle(c.env.DATABASE, { schema });
 
-  const project = await requireOwnedProject(db, projectId, userId);
+  const project = await requireProjectCapability(db, projectId, userId, 'secret:read');
   const response = await buildProjectRuntimeConfigResponse(db, project);
   return c.json(response);
 });
@@ -507,7 +507,7 @@ crudRoutes.post('/:id/runtime/env-vars', jsonValidator(UpsertProjectRuntimeEnvVa
   const body = c.req.valid('json');
   const limits = getRuntimeLimits(c.env);
 
-  const project = await requireOwnedProject(db, projectId, userId);
+  const project = await requireProjectCapability(db, projectId, userId, 'secret:write');
   const envKey = body.key?.trim();
   if (!envKey || !PROJECT_ENV_KEY_PATTERN.test(envKey)) {
     throw errors.badRequest('key must match [A-Za-z_][A-Za-z0-9_]*');
@@ -596,7 +596,7 @@ crudRoutes.delete('/:id/runtime/env-vars/:envKey', async (c) => {
     throw errors.badRequest('envKey must match [A-Za-z_][A-Za-z0-9_]*');
   }
 
-  const project = await requireOwnedProject(db, projectId, userId);
+  const project = await requireProjectCapability(db, projectId, userId, 'secret:write');
 
   await db
     .delete(schema.projectRuntimeEnvVars)
@@ -618,7 +618,7 @@ crudRoutes.post('/:id/runtime/files', jsonValidator(UpsertProjectRuntimeFileSche
   const db = drizzle(c.env.DATABASE, { schema });
   const body = c.req.valid('json');
   const limits = getRuntimeLimits(c.env);
-  const project = await requireOwnedProject(db, projectId, userId);
+  const project = await requireProjectCapability(db, projectId, userId, 'secret:write');
 
   const path = normalizeProjectFilePath(body.path ?? '');
   if (path.length > limits.maxProjectRuntimeFilePathLength) {
@@ -705,7 +705,7 @@ crudRoutes.delete('/:id/runtime/files', async (c) => {
   const projectId = c.req.param('id');
   const rawPath = c.req.query('path');
   const db = drizzle(c.env.DATABASE, { schema });
-  const project = await requireOwnedProject(db, projectId, userId);
+  const project = await requireProjectCapability(db, projectId, userId, 'secret:write');
 
   if (!rawPath) {
     throw errors.badRequest('path query parameter is required');
@@ -732,7 +732,7 @@ crudRoutes.patch('/:id', jsonValidator(UpdateProjectSchema), async (c) => {
   const db = drizzle(c.env.DATABASE, { schema });
   const body = c.req.valid('json');
 
-  const existing = await requireOwnedProject(db, projectId, userId);
+  const existing = await requireProjectCapability(db, projectId, userId, 'project:update');
 
   const allFieldKeys: (keyof UpdateProjectRequest)[] = [
     'name', 'description', 'defaultBranch', 'defaultVmSize', 'defaultAgentType',
@@ -869,7 +869,7 @@ crudRoutes.patch('/:id', jsonValidator(UpdateProjectSchema), async (c) => {
     .from(schema.projects)
     .where(
       and(
-        eq(schema.projects.userId, userId),
+        eq(schema.projects.userId, existing.userId),
         eq(schema.projects.normalizedName, normalizedName),
         ne(schema.projects.id, projectId)
       )
@@ -919,12 +919,12 @@ crudRoutes.patch('/:id', jsonValidator(UpdateProjectSchema), async (c) => {
       nodeMemoryThresholdPercent: body.nodeMemoryThresholdPercent === undefined ? existing.nodeMemoryThresholdPercent : (body.nodeMemoryThresholdPercent ?? null),
       updatedAt: new Date().toISOString(),
     })
-    .where(and(eq(schema.projects.id, projectId), eq(schema.projects.userId, userId)));
+    .where(eq(schema.projects.id, projectId));
 
   const rows = await db
     .select()
     .from(schema.projects)
-    .where(and(eq(schema.projects.id, projectId), eq(schema.projects.userId, userId)))
+    .where(eq(schema.projects.id, projectId))
     .limit(1);
 
   const updated = rows[0];
@@ -940,7 +940,7 @@ crudRoutes.delete('/:id', async (c) => {
   const projectId = c.req.param('id');
   const db = drizzle(c.env.DATABASE, { schema });
 
-  const project = await requireOwnedProject(db, projectId, userId);
+  const project = await requireProjectCapability(db, projectId, userId, 'project:delete');
 
   // Explicitly delete child records instead of relying on D1 CASCADE.
   // SQLite ignores REFERENCES constraints added via ALTER TABLE, so

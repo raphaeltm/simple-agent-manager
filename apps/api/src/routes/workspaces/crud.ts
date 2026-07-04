@@ -10,7 +10,7 @@ import { toWorkspaceResponse } from '../../lib/mappers';
 import { ulid } from '../../lib/ulid';
 import { getAuth, getUserId, requireApproved,requireAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
-import { requireOwnedProject } from '../../middleware/project-auth';
+import { requireProjectCapability } from '../../middleware/project-auth';
 import { CreateWorkspaceSchema,jsonValidator, UpdateWorkspacePortsPublicSchema, UpdateWorkspaceSchema } from '../../schemas';
 import { startComputeTracking, stopComputeTracking } from '../../services/compute-usage';
 import { signPortAccessToken } from '../../services/jwt';
@@ -199,7 +199,7 @@ crudRoutes.post('/', requireAuth(), requireApproved(), jsonValidator(CreateWorks
     throw errors.badRequest('projectId is required');
   }
 
-  const linkedProject = await requireOwnedProject(db, projectId, userId);
+  const linkedProject = await requireProjectCapability(db, projectId, userId, 'workspace:write');
   const resolvedInstallationId = linkedProject.installationId;
   const resolvedRepository = linkedProject.repository;
   const resolvedBranch = body.branch?.trim() || linkedProject.defaultBranch;

@@ -202,7 +202,7 @@ describe('discoverGitHubDevcontainerConfigs', () => {
 // Route integration tests
 // =============================================================================
 
-const mockRequireOwnedProject = vi.hoisted(() => vi.fn());
+const mockRequireProjectAccess = vi.hoisted(() => vi.fn());
 const mockRequireOwnedInstallation = vi.hoisted(() => vi.fn());
 const mockGetInstallationToken = vi.hoisted(() => vi.fn());
 
@@ -213,7 +213,7 @@ vi.mock('../../../src/middleware/auth', () => ({
 }));
 
 vi.mock('../../../src/middleware/project-auth', () => ({
-  requireOwnedProject: mockRequireOwnedProject,
+  requireProjectAccess: mockRequireProjectAccess,
 }));
 
 vi.mock('drizzle-orm/d1', () => ({
@@ -253,7 +253,7 @@ function setupGithubProject(options: {
   project?: Record<string, unknown>;
 } = {}) {
   const token = options.token ?? 'ghs_test';
-  mockRequireOwnedProject.mockResolvedValue(makeProject(options.project));
+  mockRequireProjectAccess.mockResolvedValue(makeProject(options.project));
   mockRequireOwnedInstallation.mockResolvedValue({ installationId: '12345' });
   mockGetInstallationToken.mockResolvedValue({
     token,
@@ -317,7 +317,7 @@ describe('GET /projects/:projectId/devcontainer-configs', () => {
   });
 
   it('returns unsupported for non-GitHub projects', async () => {
-    mockRequireOwnedProject.mockResolvedValue(makeProject({ repoProvider: 'artifacts' }));
+    mockRequireProjectAccess.mockResolvedValue(makeProject({ repoProvider: 'artifacts' }));
 
     const res = await requestConfigs(app);
     expect(res.status).toBe(200);
@@ -327,7 +327,7 @@ describe('GET /projects/:projectId/devcontainer-configs', () => {
   });
 
   it('enforces project ownership', async () => {
-    mockRequireOwnedProject.mockRejectedValue(
+    mockRequireProjectAccess.mockRejectedValue(
       Object.assign(new Error('Project not found'), { statusCode: 404, error: 'NOT_FOUND' }),
     );
 

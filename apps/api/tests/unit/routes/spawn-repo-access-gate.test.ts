@@ -21,7 +21,8 @@ import { getUserInstallationRepositories } from '../../../src/services/github-ap
 const mocks = vi.hoisted(() => ({
   getGitHubUserAccessToken: vi.fn(),
   getUserInstallationRepositories: vi.fn(),
-  requireOwnedProject: vi.fn(),
+  requireProjectAccess: vi.fn(),
+  requireProjectCapability: vi.fn(),
   requireOwnedTask: vi.fn(),
   createNodeRecord: vi.fn(),
   provisionNode: vi.fn(),
@@ -49,7 +50,8 @@ vi.mock('../../../src/middleware/auth', () => ({
   getUserId: () => 'user-1',
 }));
 vi.mock('../../../src/middleware/project-auth', () => ({
-  requireOwnedProject: mocks.requireOwnedProject,
+  requireProjectAccess: mocks.requireProjectAccess,
+  requireProjectCapability: mocks.requireProjectCapability,
   requireOwnedTask: mocks.requireOwnedTask,
 }));
 vi.mock('../../../src/services/github-user-access-token', () => ({
@@ -173,7 +175,8 @@ describe('spawn entry points enforce the user∩app repo-access gate (fail-fast)
     (drizzle as unknown as ReturnType<typeof vi.fn>).mockReturnValue(mockDB);
 
     mocks.getGitHubUserAccessToken.mockResolvedValue('github-user-token');
-    mocks.requireOwnedProject.mockResolvedValue(makeProject());
+    mocks.requireProjectAccess.mockResolvedValue(makeProject());
+    mocks.requireProjectCapability.mockResolvedValue(makeProject());
     mocks.requireOwnedTask.mockResolvedValue({
       id: 'task-1',
       status: 'ready',

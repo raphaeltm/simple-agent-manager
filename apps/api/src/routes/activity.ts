@@ -14,7 +14,7 @@ import type { Env } from '../env';
 import { requireRouteParam } from '../lib/route-helpers';
 import { getUserId, requireApproved,requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
-import { requireOwnedProject } from '../middleware/project-auth';
+import { requireProjectAccess } from '../middleware/project-auth';
 import * as projectDataService from '../services/project-data';
 
 const activityRoutes = new Hono<{ Bindings: Env }>();
@@ -35,7 +35,7 @@ activityRoutes.get('/', async (c) => {
   const projectId = requireRouteParam(c, 'projectId');
   const db = drizzle(c.env.DATABASE, { schema });
 
-  await requireOwnedProject(db, projectId, userId);
+  await requireProjectAccess(db, projectId, userId);
 
   const eventType = c.req.query('eventType')?.trim() || null;
   const rawSessionId = c.req.query('sessionId')?.trim() || null;

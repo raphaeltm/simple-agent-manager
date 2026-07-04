@@ -7,7 +7,7 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { getUserId } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
-import { requireOwnedProject } from '../../middleware/project-auth';
+import { requireProjectAccess } from '../../middleware/project-auth';
 import { signTerminalToken } from '../../services/jwt';
 import * as projectDataService from '../../services/project-data';
 import { normalizeFileProxyPath } from './_helpers';
@@ -59,7 +59,7 @@ async function resolveSessionWorkspace(
   const db = drizzle(env.DATABASE, { schema });
 
   // Verify project ownership
-  await requireOwnedProject(db, projectId, userId);
+  await requireProjectAccess(db, projectId, userId);
 
   // Strategy 1: Find workspace by chatSessionId in D1 (canonical path)
   const workspaces = await db

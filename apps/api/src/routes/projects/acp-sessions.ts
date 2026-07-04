@@ -11,7 +11,7 @@ import { log } from '../../lib/logger';
 import { parsePositiveInt } from '../../lib/route-helpers';
 import { getUserId } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
-import { requireOwnedProject } from '../../middleware/project-auth';
+import { requireProjectAccess, requireProjectCapability } from '../../middleware/project-auth';
 import { AcpSessionAssignSchema, AcpSessionForkSchema,AcpSessionHeartbeatSchema, AcpSessionStatusReportSchema, CreateAcpSessionSchema, jsonValidator } from '../../schemas';
 import * as projectDataService from '../../services/project-data';
 
@@ -57,7 +57,7 @@ acpSessionRoutes.post('/:id/acp-sessions', jsonValidator(CreateAcpSessionSchema)
   const userId = getUserId(c);
   const projectId = c.req.param('id');
   const db = drizzle(c.env.DATABASE, { schema });
-  await requireOwnedProject(db, projectId, userId);
+  await requireProjectCapability(db, projectId, userId, 'task:write');
 
   const body = c.req.valid('json');
   const chatSessionId = body.chatSessionId ?? '';
@@ -87,7 +87,7 @@ acpSessionRoutes.get('/:id/acp-sessions', async (c) => {
   const userId = getUserId(c);
   const projectId = c.req.param('id');
   const db = drizzle(c.env.DATABASE, { schema });
-  await requireOwnedProject(db, projectId, userId);
+  await requireProjectAccess(db, projectId, userId);
 
   const status = c.req.query('status') as AcpSessionStatus | undefined;
   const chatSessionId = c.req.query('chatSessionId');
@@ -110,7 +110,7 @@ acpSessionRoutes.get('/:id/acp-sessions/:sessionId', async (c) => {
   const projectId = c.req.param('id');
   const sessionId = c.req.param('sessionId');
   const db = drizzle(c.env.DATABASE, { schema });
-  await requireOwnedProject(db, projectId, userId);
+  await requireProjectAccess(db, projectId, userId);
 
   const session = await projectDataService.getAcpSession(c.env, projectId, sessionId);
   if (!session) {
@@ -126,7 +126,7 @@ acpSessionRoutes.post('/:id/acp-sessions/:sessionId/assign', jsonValidator(AcpSe
   const projectId = c.req.param('id');
   const sessionId = c.req.param('sessionId');
   const db = drizzle(c.env.DATABASE, { schema });
-  await requireOwnedProject(db, projectId, userId);
+  await requireProjectCapability(db, projectId, userId, 'workspace:write');
 
   const body = c.req.valid('json');
 
@@ -166,7 +166,7 @@ acpSessionRoutes.post('/:id/acp-sessions/:sessionId/assign', jsonValidator(AcpSe
  * Auth model: BetterAuth session cookie via requireAuth() middleware (applied at
  * projectsRoutes index level) + nodeId verification in the handler (rejects if
  * body.nodeId doesn't match session's assigned node).
- * We don't use requireOwnedProject because the VM agent authenticates as the
+ * We don't use project-level membership authorization because the VM agent authenticates as the
  * workspace owner, not necessarily the project owner, and the nodeId check
  * provides identity verification at the session level.
  */
@@ -240,7 +240,7 @@ acpSessionRoutes.post('/:id/acp-sessions/:sessionId/fork', jsonValidator(AcpSess
   const projectId = c.req.param('id');
   const sessionId = c.req.param('sessionId');
   const db = drizzle(c.env.DATABASE, { schema });
-  await requireOwnedProject(db, projectId, userId);
+  await requireProjectCapability(db, projectId, userId, 'task:write');
 
   const body = c.req.valid('json');
 
@@ -266,7 +266,7 @@ acpSessionRoutes.get('/:id/acp-sessions/:sessionId/lineage', async (c) => {
   const projectId = c.req.param('id');
   const sessionId = c.req.param('sessionId');
   const db = drizzle(c.env.DATABASE, { schema });
-  await requireOwnedProject(db, projectId, userId);
+  await requireProjectAccess(db, projectId, userId);
 
   const sessions = await projectDataService.getAcpSessionLineage(c.env, projectId, sessionId);
   return c.json({ sessions });

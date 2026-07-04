@@ -43,7 +43,7 @@ import { parsePositiveInt } from '../../lib/route-helpers';
 import { ulid } from '../../lib/ulid';
 import { getAuth, requireApproved, requireAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
-import { requireOwnedProject } from '../../middleware/project-auth';
+import { requireProjectCapability } from '../../middleware/project-auth';
 import { jsonValidator, SubmitTaskSchema } from '../../schemas';
 import { validateAttachments } from '../../services/attachment-upload';
 import { generateBranchName } from '../../services/branch-name';
@@ -132,7 +132,7 @@ submitRoutes.post('/submit', requireAuth(), requireApproved(), jsonValidator(Sub
   }
 
   // Validate ownership
-  const project = await requireOwnedProject(db, projectId, userId);
+  const project = await requireProjectCapability(db, projectId, userId, 'task:write');
 
   // Fail-fast user∩app GitHub repo-access gate. Re-verify the user still has
   // access to the bound repository through the app installation BEFORE the

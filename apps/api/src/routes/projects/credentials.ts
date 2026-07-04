@@ -8,8 +8,8 @@
  *   2. User-scoped credential (existing /api/credentials/agent)
  *   3. Platform credential
  *
- * Ownership is enforced via `requireOwnedProject` — users cannot see or modify
- * credentials attached to projects they do not own.
+ * Project membership/capabilities gate access, while credential rows remain
+ * caller-scoped so members cannot read or modify another user's credential.
  */
 import type { AgentCredentialInfo, AgentType, CredentialKind } from '@simple-agent-manager/shared';
 import { getAgentDefinition, isValidAgentType } from '@simple-agent-manager/shared';
@@ -24,7 +24,7 @@ import { getCredentialEncryptionKey } from '../../lib/secrets';
 import { ulid } from '../../lib/ulid';
 import { getUserId, requireApproved, requireAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
-import { requireOwnedProject } from '../../middleware/project-auth';
+import { requireProjectCapability } from '../../middleware/project-auth';
 import { rateLimitCredentialUpdate } from '../../middleware/rate-limit';
 import { jsonValidator, SaveAgentCredentialSchema } from '../../schemas';
 import {
@@ -58,7 +58,7 @@ projectCredentialsRoutes.get('/:id/credentials', async (c) => {
   const projectId = c.req.param('id');
   const db = drizzle(c.env.DATABASE, { schema });
 
-  await requireOwnedProject(db, projectId, userId);
+  await requireProjectCapability(db, projectId, userId, 'secret:read');
 
   const creds = await db
     .select({
@@ -134,7 +134,7 @@ projectCredentialsRoutes.put(
     const projectId = c.req.param('id');
     const db = drizzle(c.env.DATABASE, { schema });
 
-    await requireOwnedProject(db, projectId, userId);
+    await requireProjectCapability(db, projectId, userId, 'secret:write');
 
     const body = c.req.valid('json');
     const credential = body.credential;
@@ -282,7 +282,7 @@ projectCredentialsRoutes.delete('/:id/credentials/:agentType/:credentialKind', a
   const credentialKind = c.req.param('credentialKind') as CredentialKind;
   const db = drizzle(c.env.DATABASE, { schema });
 
-  await requireOwnedProject(db, projectId, userId);
+  await requireProjectCapability(db, projectId, userId, 'secret:write');
 
   if (!isValidAgentType(agentType)) {
     throw errors.badRequest('Invalid agent type');
