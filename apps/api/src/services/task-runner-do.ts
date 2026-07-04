@@ -8,6 +8,7 @@
 import type {
   AgentEffort,
   CredentialProvider,
+  CredentialSource,
   ResolvedResourceReservation,
   ResourceRequirements,
   ResourceRequirementsSource,
@@ -65,6 +66,12 @@ export async function startTaskRunnerDO(
     devcontainerConfigName?: string | null;
     /** Cloud provider for auto-provisioned nodes. Falls back to any available credential. */
     cloudProvider?: CredentialProvider | null;
+    /** Root-pinned credential attribution user for this task tree. */
+    credentialAttributionUserId?: string | null;
+    /** Project scope when credentialAttributionSource is 'project'. */
+    credentialAttributionProjectId?: string | null;
+    /** Root-pinned credential attribution source. */
+    credentialAttributionSource?: CredentialSource | null;
     /** Task execution mode. 'task' = push/PR/complete. 'conversation' = human-controlled. */
     taskMode?: TaskMode;
     /** Model override from agent profile. Null = use agent default. */
@@ -125,6 +132,11 @@ export async function startTaskRunnerDO(
       workspaceProfile: input.workspaceProfile ?? null,
       devcontainerConfigName: input.devcontainerConfigName ?? null,
       cloudProvider: input.cloudProvider ?? null,
+      credentialAttributionUserId: input.credentialAttributionUserId ?? input.userId,
+      credentialAttributionProjectId: input.credentialAttributionSource === 'project'
+        ? (input.credentialAttributionProjectId ?? input.projectId)
+        : null,
+      credentialAttributionSource: input.credentialAttributionSource ?? 'user',
       taskMode: input.taskMode ?? 'task',
       model: input.model ?? null,
       effort: input.effort ?? null,
