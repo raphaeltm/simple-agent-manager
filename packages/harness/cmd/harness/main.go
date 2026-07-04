@@ -12,6 +12,7 @@ import (
 
 	acpserver "github.com/workspace/harness/acp"
 	"github.com/workspace/harness/agent"
+	"github.com/workspace/harness/features"
 	"github.com/workspace/harness/llm"
 	"github.com/workspace/harness/mcp"
 	"github.com/workspace/harness/prompts"
@@ -48,6 +49,8 @@ func main() {
 		compactionStrat  = flag.String("compaction-strategy", "extractive", "Compaction strategy: extractive (default) or llm")
 		sessionDB        = flag.String("session-db", "", "Path to SQLite session database (enables persistence)")
 		resumeSession    = flag.String("resume", "", "Resume a previous session by ID")
+		featuresFile     = flag.String("features", "", "Path to JSON feature list file (enables harness feature termination gate)")
+		featureMaxNudges = flag.Int("feature-max-nudges", 2, "Maximum feature-gate continuation nudges before incomplete termination")
 		listSessions     = flag.Bool("list-sessions", false, "List recent sessions and exit")
 		acpMode          = flag.Bool("acp", false, "Run in ACP mode: JSON-RPC over stdin/stdout (used by VM agent)")
 	)
@@ -240,6 +243,17 @@ func main() {
 	// Create transcript log.
 	log := transcript.NewLog()
 
+	var featureList *features.List
+	if *featuresFile != "" {
+		var loadErr error
+		featureList, loadErr = features.LoadFile(*featuresFile)
+		if loadErr != nil {
+			fmt.Fprintf(os.Stderr, "error loading features: %v\n", loadErr)
+			os.Exit(1)
+		}
+		fmt.Fprintf(os.Stderr, "Feature gate enabled with %d feature(s)\n", len(featureList.Snapshot()))
+	}
+
 	// Resolve system prompt from flags (precedence: file > preset > inline).
 	sysPrompt, err := prompts.Resolve(*promptFile, *promptPreset, *systemPrompt)
 	if err != nil {
@@ -316,19 +330,22 @@ func main() {
 	defer cancel()
 
 	result, err := agent.Run(ctx, provider, registry, log, agent.Config{
-		SystemPrompt:       sysPrompt,
-		MaxTurns:           *maxTurns,
-		MaxContextTokens:   *maxContextTokens,
-		CompactionStrategy: agent.CompactionStrategy(*compactionStrat),
-		WorkerModel:        resolvedWorkerModel,
-		WorkDir:            workDir,
-		Stream:             *stream,
-		PermissionMode:     permMode,
-		PermissionChecker:  tools.AutoApproveChecker{},
-		ParallelTools:      *parallelTools,
-		MaxParallelTools:   *maxParallelTools,
-		SessionStore:       sessionStore,
-		SessionID:          sessionID,
+		SystemPrompt:        sysPrompt,
+		MaxTurns:            *maxTurns,
+		MaxContextTokens:    *maxContextTokens,
+		CompactionStrategy:  agent.CompactionStrategy(*compactionStrat),
+		WorkerModel:         resolvedWorkerModel,
+		WorkDir:             workDir,
+		Stream:              *stream,
+		PermissionMode:      permMode,
+		PermissionChecker:   tools.AutoApproveChecker{},
+		ParallelTools:       *parallelTools,
+		MaxParallelTools:    *maxParallelTools,
+		SessionStore:        sessionStore,
+		SessionID:           sessionID,
+		FeatureList:         featureList,
+		MaxFeatureNudges:    *featureMaxNudges,
+		FeatureMaxNudgesSet: true,
 		ProviderConfig: &agent.ProviderConfig{
 			Name:       *providerName,
 			APIURL:     *apiURL,
@@ -347,6 +364,12 @@ func main() {
 
 	if result != nil {
 		fmt.Printf("Agent completed in %d turns (reason: %s)\n", result.TurnsUsed, result.StopReason)
+		if result.TerminalStatus != "" {
+			fmt.Printf("Terminal status: %s\n", result.TerminalStatus)
+		}
+		if len(result.UnfinishedFeatures) > 0 {
+			fmt.Printf("Unfinished features:\n%s\n", features.Summary(result.UnfinishedFeatures))
+		}
 		if result.FinalMessage != "" {
 			fmt.Printf("Final message: %s\n", result.FinalMessage)
 		}
@@ -364,6 +387,9 @@ func main() {
 			os.Exit(1)
 		}
 		fmt.Printf("Transcript written to %s (%d events)\n", *transcriptF, log.Len())
+	}
+	if result != nil && result.StopReason == "incomplete" {
+		os.Exit(2)
 	}
 }
 
@@ -587,4 +613,3 @@ func buildToolRegistry(args acpModeArgs, workDir string) *tools.Registry {
 	}
 	return registry
 }
-

@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	ctxmgr "github.com/workspace/harness/context"
+	"github.com/workspace/harness/features"
 	"github.com/workspace/harness/llm"
 	"github.com/workspace/harness/session"
 	"github.com/workspace/harness/tools"
@@ -78,6 +79,15 @@ type Config struct {
 	SessionStore *session.Store
 	// SessionID is the session to persist messages to. Required if SessionStore is set.
 	SessionID string
+	// FeatureList enables opt-in harness-owned feature tracking and termination gating.
+	FeatureList *features.List
+	// MaxFeatureNudges is the number of no-tool early stops the gate converts
+	// into continuation messages before terminating incomplete. The zero-value
+	// default is 2 unless FeatureMaxNudgesSet is true.
+	MaxFeatureNudges int
+	// FeatureMaxNudgesSet allows callers such as the CLI to intentionally set
+	// MaxFeatureNudges to 0 instead of receiving the default.
+	FeatureMaxNudgesSet bool
 	// InitialMessages, if non-empty, seeds the conversation instead of building
 	// a fresh system+user pair. The new userPrompt is appended as a user message.
 	// This allows callers (e.g. ACP handler) to carry conversation history
@@ -102,6 +112,10 @@ type Result struct {
 	TurnsUsed int
 	// StopReason indicates why the agent stopped.
 	StopReason string
+	// TerminalStatus is the harness terminal status: complete or incomplete.
+	TerminalStatus string
+	// UnfinishedFeatures lists features that prevented successful completion.
+	UnfinishedFeatures []features.Feature
 	// Messages is the full conversation history at the end of the run.
 	// Callers can feed this back via Config.InitialMessages to continue
 	// the conversation in a subsequent Run() call.
@@ -124,6 +138,16 @@ func Run(ctx context.Context, provider llm.Provider, registry *tools.Registry, l
 	compactOpts := cfg.CompactOptions
 	if compactOpts.Threshold <= 0 {
 		compactOpts = ctxmgr.DefaultCompactOptions()
+	}
+
+	featureList := loadFeatureList(cfg)
+	featureMode := featureList != nil
+	maxFeatureNudges := resolveMaxFeatureNudges(cfg)
+	if featureMode {
+		persistFeatures(cfg, featureList)
+		if err := registerFeatureTools(registry, featureList, func() { persistFeatures(cfg, featureList) }); err != nil {
+			return nil, err
+		}
 	}
 
 	toolDefs := registry.Definitions()
@@ -162,6 +186,10 @@ func Run(ctx context.Context, provider llm.Provider, registry *tools.Registry, l
 			messages = append(messages, llm.Message{Role: llm.RoleSystem, Content: cfg.SystemPrompt})
 		}
 		messages = append(messages, llm.Message{Role: llm.RoleUser, Content: userPrompt})
+		if featureMode {
+			featureMsg := llm.Message{Role: llm.RoleUser, Content: initialFeatureMessage(featureList.Snapshot(), maxFeatureNudges)}
+			messages = append(messages, featureMsg)
+		}
 
 		// Persist the initial messages.
 		persistMessages(cfg, 0, messages)
@@ -238,11 +266,53 @@ func Run(ctx context.Context, provider llm.Provider, registry *tools.Registry, l
 
 		// If no tool calls, the model is done.
 		if len(resp.ToolCalls) == 0 {
+			if featureMode && !featureList.AllDone() {
+				unfinished := featureList.Unfinished()
+				if maxFeatureNudges > 0 {
+					maxFeatureNudges--
+					assistantMsg := llm.Message{Role: llm.RoleAssistant, Content: resp.Content}
+					nudgeMsg := llm.Message{Role: llm.RoleUser, Content: features.NudgeMessage(unfinished, maxFeatureNudges)}
+					messages = append(messages, assistantMsg, nudgeMsg)
+					persistMessages(cfg, turn, []llm.Message{assistantMsg, nudgeMsg})
+					log.Append(transcript.EventInfo, turn, map[string]any{
+						"event":             "termination_gate_nudge",
+						"remaining_nudges":  maxFeatureNudges,
+						"unfinished_count":  len(unfinished),
+						"unfinished_detail": features.Summary(unfinished),
+					})
+					if cfg.Handler != nil {
+						cfg.Handler.OnTurnEnd(turn, 0)
+					}
+					continue
+				}
+
+				finalMessage := features.IncompleteMessage("model stopped calling tools before all features were done", unfinished)
+				finalMsg := llm.Message{Role: llm.RoleAssistant, Content: finalMessage}
+				messages = append(messages, finalMsg)
+				persistMessages(cfg, turn, []llm.Message{finalMsg})
+				persistStatus(cfg, "incomplete")
+				logTerminalStatus(log, turn, "incomplete", unfinished, finalMessage)
+				if cfg.Handler != nil {
+					cfg.Handler.OnTurnEnd(turn, 0)
+				}
+				return &Result{
+					FinalMessage:       finalMessage,
+					TurnsUsed:          turn - startTurn + 1,
+					StopReason:         "incomplete",
+					TerminalStatus:     "incomplete",
+					UnfinishedFeatures: unfinished,
+					Messages:           messages,
+				}, nil
+			}
+
 			// Persist the final assistant message.
 			persistMessages(cfg, turn, []llm.Message{
 				{Role: llm.RoleAssistant, Content: resp.Content},
 			})
 			persistStatus(cfg, "completed")
+			if featureMode {
+				logTerminalStatus(log, turn, "complete", nil, resp.Content)
+			}
 
 			// Add the final assistant message to history before returning.
 			messages = append(messages, llm.Message{Role: llm.RoleAssistant, Content: resp.Content})
@@ -251,10 +321,11 @@ func Run(ctx context.Context, provider llm.Provider, registry *tools.Registry, l
 				cfg.Handler.OnTurnEnd(turn, 0)
 			}
 			return &Result{
-				FinalMessage: resp.Content,
-				TurnsUsed:    turn - startTurn + 1,
-				StopReason:   "complete",
-				Messages:     messages,
+				FinalMessage:   resp.Content,
+				TurnsUsed:      turn - startTurn + 1,
+				StopReason:     "complete",
+				TerminalStatus: "complete",
+				Messages:       messages,
 			}, nil
 		}
 
@@ -301,10 +372,29 @@ func Run(ctx context.Context, provider llm.Provider, registry *tools.Registry, l
 		}
 	}
 
+	if featureMode {
+		unfinished := featureList.Unfinished()
+		finalMessage := features.IncompleteMessage("max turns exhausted", unfinished)
+		finalMsg := llm.Message{Role: llm.RoleAssistant, Content: finalMessage}
+		messages = append(messages, finalMsg)
+		persistMessages(cfg, endTurn-1, []llm.Message{finalMsg})
+		persistStatus(cfg, "incomplete")
+		logTerminalStatus(log, endTurn-1, "incomplete", unfinished, finalMessage)
+		return &Result{
+			FinalMessage:       finalMessage,
+			TurnsUsed:          maxTurns,
+			StopReason:         "incomplete",
+			TerminalStatus:     "incomplete",
+			UnfinishedFeatures: unfinished,
+			Messages:           messages,
+		}, nil
+	}
+
 	return &Result{
-		TurnsUsed:  maxTurns,
-		StopReason: "max_turns",
-		Messages:   messages,
+		TurnsUsed:      maxTurns,
+		StopReason:     "max_turns",
+		TerminalStatus: "incomplete",
+		Messages:       messages,
 	}, nil
 }
 
@@ -521,4 +611,63 @@ func persistStatus(cfg Config, status string) {
 	if err := cfg.SessionStore.UpdateStatus(cfg.SessionID, status); err != nil {
 		log.Printf("session persistence warning: %v", err)
 	}
+}
+
+func loadFeatureList(cfg Config) *features.List {
+	if cfg.SessionStore != nil && cfg.SessionID != "" {
+		if loaded, err := cfg.SessionStore.LoadFeatures(cfg.SessionID); err == nil && loaded != nil {
+			return loaded
+		} else if err != nil {
+			log.Printf("session feature persistence warning: %v", err)
+		}
+	}
+	return cfg.FeatureList
+}
+
+func persistFeatures(cfg Config, list *features.List) {
+	if cfg.SessionStore == nil || cfg.SessionID == "" || list == nil {
+		return
+	}
+	if err := cfg.SessionStore.SaveFeatures(cfg.SessionID, list); err != nil {
+		log.Printf("session feature persistence warning: %v", err)
+	}
+}
+
+func resolveMaxFeatureNudges(cfg Config) int {
+	if cfg.FeatureMaxNudgesSet || cfg.MaxFeatureNudges > 0 {
+		if cfg.MaxFeatureNudges < 0 {
+			return 0
+		}
+		return cfg.MaxFeatureNudges
+	}
+	return 2
+}
+
+func registerFeatureTools(registry *tools.Registry, list *features.List, onState func()) error {
+	for _, tool := range features.NewTools(list, onState) {
+		if registry.Get(tool.Name()) != nil {
+			return fmt.Errorf("feature gate tool name conflicts with existing tool: %s", tool.Name())
+		}
+		if err := registry.Register(tool); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func initialFeatureMessage(snapshot []features.Feature, maxNudges int) string {
+	return fmt.Sprintf("Harness feature-list mode is enabled. The harness owns feature state and will only terminate successfully when every feature is done.\n\nCurrent features:\n%s\n\nUse feature_start to begin one feature at a time. Use feature_complete only after verification, with one evidence entry for each verification item. The harness will reject invalid transitions. Early stop nudges before incomplete termination: %d.", features.Summary(snapshot), maxNudges)
+}
+
+func logTerminalStatus(log *transcript.Log, turn int, status string, unfinished []features.Feature, message string) {
+	if log == nil {
+		return
+	}
+	log.Append(transcript.EventInfo, turn, map[string]any{
+		"event":             "terminal_status",
+		"terminal_status":   status,
+		"unfinished_count":  len(unfinished),
+		"unfinished_detail": features.Summary(unfinished),
+		"message":           message,
+	})
 }

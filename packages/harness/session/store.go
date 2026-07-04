@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/workspace/harness/features"
 	"github.com/workspace/harness/llm"
 
 	_ "modernc.org/sqlite"
@@ -22,7 +23,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     status TEXT NOT NULL DEFAULT 'active',
     work_dir TEXT,
     model TEXT,
-    total_turns INTEGER DEFAULT 0
+    total_turns INTEGER DEFAULT 0,
+    feature_state TEXT
 );
 
 CREATE TABLE IF NOT EXISTS messages (
@@ -61,6 +63,10 @@ func NewStore(dbPath string) (*Store, error) {
 	if _, err := db.Exec(schema); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("session: run migrations: %w", err)
+	}
+	if err := ensureFeatureStateColumn(db); err != nil {
+		db.Close()
+		return nil, err
 	}
 
 	return &Store{db: db}, nil
@@ -224,7 +230,71 @@ func (s *Store) UpdateStatus(sessionID, status string) error {
 	return nil
 }
 
+// SaveFeatures stores the current harness-owned feature state for a session.
+func (s *Store) SaveFeatures(sessionID string, list *features.List) error {
+	if list == nil {
+		return nil
+	}
+	data, err := list.MarshalJSON()
+	if err != nil {
+		return fmt.Errorf("session: marshal features: %w", err)
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	if _, err := s.db.Exec(
+		`UPDATE sessions SET feature_state = ?, updated_at = ? WHERE id = ?`,
+		string(data), now, sessionID,
+	); err != nil {
+		return fmt.Errorf("session: save features: %w", err)
+	}
+	return nil
+}
+
+// LoadFeatures retrieves persisted feature state for a session.
+func (s *Store) LoadFeatures(sessionID string) (*features.List, error) {
+	row := s.db.QueryRow(`SELECT feature_state FROM sessions WHERE id = ?`, sessionID)
+	var raw sql.NullString
+	if err := row.Scan(&raw); err != nil {
+		return nil, fmt.Errorf("session: load features %q: %w", sessionID, err)
+	}
+	if !raw.Valid || raw.String == "" {
+		return nil, nil
+	}
+	list, err := features.FromJSON([]byte(raw.String))
+	if err != nil {
+		return nil, fmt.Errorf("session: parse features %q: %w", sessionID, err)
+	}
+	return list, nil
+}
+
 // Close closes the underlying database connection.
 func (s *Store) Close() error {
 	return s.db.Close()
+}
+
+func ensureFeatureStateColumn(db *sql.DB) error {
+	rows, err := db.Query(`PRAGMA table_info(sessions)`)
+	if err != nil {
+		return fmt.Errorf("session: inspect schema: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notNull, pk int
+		var defaultValue sql.NullString
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
+			return fmt.Errorf("session: scan schema: %w", err)
+		}
+		if name == "feature_state" {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("session: scan schema: %w", err)
+	}
+	if _, err := db.Exec(`ALTER TABLE sessions ADD COLUMN feature_state TEXT`); err != nil {
+		return fmt.Errorf("session: add feature_state column: %w", err)
+	}
+	return nil
 }
