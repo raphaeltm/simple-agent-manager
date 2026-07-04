@@ -9,7 +9,8 @@
 import { beforeEach,describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../src/env';
-import { detectClaudeCodeCompactionLoop, recoverStuckTasks } from '../../src/scheduled/stuck-tasks';
+import { detectClaudeCodeCompactionLoop } from '../../src/scheduled/claude-code-compaction-loop';
+import { recoverStuckTasks } from '../../src/scheduled/stuck-tasks';
 import { persistError } from '../../src/services/observability';
 import { cleanupTaskRun } from '../../src/services/task-runner';
 
