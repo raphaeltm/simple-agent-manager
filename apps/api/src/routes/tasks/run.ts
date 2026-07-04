@@ -217,7 +217,8 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
       projectId,
       null, // workspaceId — linked later by TaskRunner DO when workspace is created
       task.title,
-      task.id
+      task.id,
+      userId
     );
   } catch (err) {
     const failedAt = new Date().toISOString();

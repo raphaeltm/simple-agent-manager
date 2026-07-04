@@ -21,7 +21,7 @@ import { ChatTimelineDrawer } from '../chat/ChatTimelineDrawer';
 import { TruncatedSummary } from '../chat/TruncatedSummary';
 import { AcpConversationItemView } from './AcpConversationItemView';
 import { CompletionDock } from './CompletionDock';
-import { FollowUpInput } from './FollowUpInput';
+import { FollowUpInput, ReadOnlyFollowUp } from './FollowUpInput';
 import { ConnectionBanner } from './MessageBanners';
 import { SessionHeader } from './SessionHeader';
 import type { TimelineJumpTarget } from './timeline-types';
@@ -186,6 +186,8 @@ interface ProjectMessageViewProps {
   slashCommands?: SlashCommand[];
   /** Open hierarchy modal for the given task. */
   onShowHierarchy?: (taskId: string) => void;
+  /** Start a new chat from read-only sessions. */
+  onNewChat?: () => void;
 }
 
 export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
@@ -202,6 +204,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   agentProfiles = [],
   slashCommands = [],
   onShowHierarchy,
+  onNewChat,
 }) => {
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const [showPlanModal, setShowPlanModal] = useState(false);
@@ -333,6 +336,10 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     () => lc.currentPlan && lc.currentPlan.length > 0 ? currentPlanToPlanItem(lc.currentPlan) : null,
     [lc.currentPlan],
   );
+  const canWriteSession = lc.session?.isMine !== false;
+  const sessionOwnerLabel = lc.session?.createdBy?.name?.trim()
+    || lc.session?.createdBy?.email?.split('@')[0]
+    || 'the creator';
 
   // Initial load — only show full spinner when no data exists yet
   if (lc.loading && lc.messages.length === 0 && !lc.session) {
@@ -476,7 +483,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
           a grey Archive (idle), so the control never disappears even when the
           `agentActivity` signal is stale. Archive is only wired for
           conversation-mode sessions the caller can close. */}
-      {isActive && ((lc.taskEmbed?.taskMode === 'conversation' && onCloseConversation) || lc.agentActivity !== 'idle') && (
+      {isActive && canWriteSession && ((lc.taskEmbed?.taskMode === 'conversation' && onCloseConversation) || lc.agentActivity !== 'idle') && (
         <CompletionDock
           working={lc.agentActivity !== 'idle'}
           hasPlan={!!planItem}
@@ -497,7 +504,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
       )}
 
       {/* Input area */}
-      {isActive && (
+      {isActive && canWriteSession && (
         <FollowUpInput
           value={lc.followUp}
           onChange={lc.setFollowUp}
@@ -514,6 +521,9 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
           agentProfiles={agentProfiles}
           slashCommands={slashCommands}
         />
+      )}
+      {isActive && !canWriteSession && (
+        <ReadOnlyFollowUp ownerLabel={sessionOwnerLabel} onNewChat={onNewChat} />
       )}
       {lc.sessionState === 'terminated' && (
         <div className="shrink-0 border-t border-border-default px-4 py-3 bg-surface text-center">

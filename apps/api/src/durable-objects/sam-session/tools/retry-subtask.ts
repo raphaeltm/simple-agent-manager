@@ -222,7 +222,7 @@ export async function retrySubtask(
   let sessionId: string;
   try {
     sessionId = await projectDataService.createSession(
-      env, original.projectId, null, taskTitle, newTaskId,
+      env, original.projectId, null, taskTitle, newTaskId, ctx.userId,
     );
     await projectDataService.persistMessage(
       env, original.projectId, sessionId, 'user', description, null,

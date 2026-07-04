@@ -16,7 +16,8 @@ export function createSession(
   env: Env,
   workspaceId: string | null,
   topic: string | null,
-  taskId: string | null = null
+  taskId: string | null = null,
+  createdByUserId: string | null = null
 ): { id: string; now: number } {
   const maxSessions = parseInt(env.MAX_SESSIONS_PER_PROJECT || '10000', 10);
   const countRow = sql
@@ -29,11 +30,12 @@ export function createSession(
   const id = generateId();
   const now = Date.now();
   sql.exec(
-    `INSERT INTO chat_sessions (id, workspace_id, task_id, topic, status, message_count, started_at, created_at, updated_at)
-     VALUES (?, ?, ?, ?, 'active', 0, ?, ?, ?)`,
+    `INSERT INTO chat_sessions (id, workspace_id, task_id, created_by_user_id, topic, status, message_count, started_at, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, 'active', 0, ?, ?, ?)`,
     id,
     workspaceId,
     taskId,
+    createdByUserId,
     topic,
     now,
     now,
@@ -135,7 +137,8 @@ export function listSessions(
   status: string | null,
   limit: number = 20,
   offset: number = 0,
-  taskId: string | null = null
+  taskId: string | null = null,
+  createdByUserId: string | null = null
 ): { sessions: Record<string, unknown>[]; total: number } {
   const conditions: string[] = [];
   const params: (string | number)[] = [];
@@ -148,6 +151,10 @@ export function listSessions(
     conditions.push('task_id = ?');
     params.push(taskId);
   }
+  if (createdByUserId) {
+    conditions.push('created_by_user_id = ?');
+    params.push(createdByUserId);
+  }
 
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
@@ -157,7 +164,7 @@ export function listSessions(
 
   const rows = sql
     .exec(
-      `SELECT id, workspace_id, task_id, topic, status, message_count, started_at, ended_at, created_at, updated_at, agent_completed_at FROM chat_sessions ${whereClause} ORDER BY updated_at DESC LIMIT ? OFFSET ?`,
+      `SELECT id, workspace_id, task_id, created_by_user_id, topic, status, message_count, started_at, ended_at, created_at, updated_at, agent_completed_at FROM chat_sessions ${whereClause} ORDER BY updated_at DESC LIMIT ? OFFSET ?`,
       ...params,
       limit,
       offset
@@ -179,7 +186,7 @@ export function getSessionsByTaskIds(
   const placeholders = taskIds.map(() => '?').join(', ');
   const rows = sql
     .exec(
-      `SELECT id, workspace_id, task_id, topic, status, message_count, started_at, ended_at, created_at, updated_at, agent_completed_at
+      `SELECT id, workspace_id, task_id, created_by_user_id, topic, status, message_count, started_at, ended_at, created_at, updated_at, agent_completed_at
        FROM chat_sessions
        WHERE task_id IN (${placeholders})
        ORDER BY updated_at DESC`,
@@ -197,7 +204,7 @@ export function getSession(
   const rows = sql
     .exec(
       `SELECT cs.id, cs.workspace_id, cs.task_id, cs.topic, cs.status,
-              cs.message_count, cs.started_at, cs.ended_at, cs.created_at,
+              cs.created_by_user_id, cs.message_count, cs.started_at, cs.ended_at, cs.created_at,
               cs.updated_at, cs.agent_completed_at,
               ics.cleanup_at
        FROM chat_sessions cs

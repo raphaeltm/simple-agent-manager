@@ -135,7 +135,7 @@ export function ProjectChat() {
 
           {/* Search */}
           {state.hasSessions && (
-            <div className="shrink-0 px-2 py-1.5 border-b border-[rgba(34,197,94,0.08)]">
+            <div className="shrink-0 px-2 py-1.5 border-b border-[rgba(34,197,94,0.08)] space-y-1.5">
               <div className="relative flex items-center">
                 <Search size={13} className="absolute left-2 text-fg-muted pointer-events-none" />
                 <input
@@ -155,6 +155,23 @@ export function ProjectChat() {
                     <X size={12} />
                   </button>
                 )}
+              </div>
+              <div className="grid grid-cols-2 gap-1 rounded-md border border-border-default bg-surface/40 p-0.5" aria-label="Session ownership filter">
+                {(['my', 'all'] as const).map((scope) => (
+                  <button
+                    key={scope}
+                    type="button"
+                    onClick={() => state.setSessionScope(scope)}
+                    aria-pressed={state.sessionScope === scope}
+                    className={`rounded-sm px-2 py-1 text-[11px] font-medium transition-colors ${
+                      state.sessionScope === scope
+                        ? 'bg-accent/15 text-accent'
+                        : 'bg-transparent text-fg-muted hover:text-fg-primary'
+                    }`}
+                  >
+                    {scope === 'my' ? 'My sessions' : 'All sessions'}
+                  </button>
+                ))}
               </div>
             </div>
           )}
@@ -334,6 +351,7 @@ export function ProjectChat() {
               agentProfiles={state.agentProfiles}
               slashCommands={state.slashCommands}
               onShowHierarchy={handleShowHierarchy}
+              onNewChat={state.handleNewChat}
             />
           </div>
         )}
@@ -354,6 +372,8 @@ export function ProjectChat() {
           onRefresh={() => void state.loadSessions()}
           taskInfoMap={state.taskInfoMap}
           onShowHierarchy={handleShowHierarchy}
+          sessionScope={state.sessionScope}
+          onSessionScopeChange={state.setSessionScope}
         />
       )}
 

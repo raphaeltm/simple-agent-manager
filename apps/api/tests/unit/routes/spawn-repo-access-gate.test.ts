@@ -347,6 +347,7 @@ describe('spawn entry points enforce the user∩app repo-access gate (fail-fast)
       null,
       'Fallback title',
       expect.any(String),
+      'user-1',
     );
     expect(mocks.startTaskRunnerDO).toHaveBeenCalledWith(
       expect.anything(),

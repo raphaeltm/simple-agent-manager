@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
 import { chatRoutes } from '../../../src/routes/chat';
+import * as projectDataService from '../../../src/services/project-data';
 
 const mocks = vi.hoisted(() => ({
   drizzle: vi.fn(),
@@ -132,6 +133,11 @@ beforeEach(() => {
   mocks.requireProjectAccess.mockResolvedValue({ id: 'proj-1', userId: 'user-1' });
   mocks.parseOptionalBody.mockResolvedValue({ content: 'hello agent' });
   mocks.enrichMessageWithMentions.mockResolvedValue({ enrichedMessage: 'hello agent' });
+  vi.mocked(projectDataService.getSession).mockResolvedValue({
+    id: 'chat-1',
+    createdByUserId: 'user-1',
+    status: 'active',
+  });
 
   app = new Hono<{ Bindings: Env }>();
   app.onError((err, c) => {
@@ -142,6 +148,67 @@ beforeEach(() => {
     return c.json({ error: 'INTERNAL_ERROR', message: err.message }, 500);
   });
   app.route('/api/projects/:projectId/sessions', chatRoutes);
+});
+
+describe('GET /sessions', () => {
+  function setupUserLookup() {
+    mocks.drizzle.mockReturnValue({
+      select: vi.fn().mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockResolvedValue([
+            { id: 'user-1', name: 'Alice', email: 'alice@example.com', image: null, avatarUrl: null },
+            { id: 'user-2', name: 'Bob', email: 'bob@example.com', image: null, avatarUrl: null },
+          ]),
+        }),
+      }),
+    });
+  }
+
+  it('returns all member-visible sessions with creator metadata by default', async () => {
+    setupUserLookup();
+    vi.mocked(projectDataService.listSessions).mockResolvedValue({
+      sessions: [
+        { id: 'chat-1', createdByUserId: 'user-1', status: 'active' },
+        { id: 'chat-2', createdByUserId: 'user-2', status: 'active' },
+      ],
+      total: 2,
+    });
+
+    const response = await app.request(
+      '/api/projects/proj-1/sessions',
+      { method: 'GET' },
+      { DATABASE: {} as D1Database } as Env,
+    );
+
+    expect(response.status).toBe(200);
+    expect(projectDataService.listSessions).toHaveBeenCalledWith(
+      expect.anything(), 'proj-1', null, 20, 0, null, null,
+    );
+    const body = await response.json();
+    expect(body.sessions).toMatchObject([
+      { id: 'chat-1', createdByUserId: 'user-1', isMine: true, createdBy: { name: 'Alice' } },
+      { id: 'chat-2', createdByUserId: 'user-2', isMine: false, createdBy: { name: 'Bob' } },
+    ]);
+  });
+
+  it('filters to the current creator for scope=my', async () => {
+    setupUserLookup();
+    vi.mocked(projectDataService.listSessions).mockResolvedValue({
+      sessions: [{ id: 'chat-1', createdByUserId: 'user-1', status: 'active' }],
+      total: 1,
+    });
+
+    const response = await app.request(
+      '/api/projects/proj-1/sessions?scope=my',
+      { method: 'GET' },
+      { DATABASE: {} as D1Database } as Env,
+    );
+
+    expect(response.status).toBe(200);
+    expect(projectDataService.listSessions).toHaveBeenCalledWith(
+      expect.anything(), 'proj-1', null, 20, 0, null, 'user-1',
+    );
+  });
 });
 
 describe('POST /sessions/:sessionId/prompt', () => {
@@ -218,6 +285,23 @@ describe('POST /sessions/:sessionId/prompt', () => {
     const response = await postPrompt();
 
     expect(response.status).toBe(400);
+    expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
+  });
+
+  it('blocks a non-creator member before contacting the VM agent', async () => {
+    vi.mocked(projectDataService.getSession).mockResolvedValue({
+      id: 'chat-1',
+      createdByUserId: 'other-user',
+      status: 'active',
+    });
+    setupDrizzle({
+      workspace: { id: 'ws-1', nodeId: 'node-1', nodeStatus: 'running' },
+      agentSession: { id: 'agent-sess-1' },
+    });
+
+    const response = await postPrompt();
+
+    expect(response.status).toBe(403);
     expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
   });
 
@@ -363,6 +447,23 @@ describe('POST /sessions/:sessionId/cancel', () => {
     const response = await postCancel();
 
     expect(response.status).toBe(404);
+  });
+
+  it('blocks non-creator cancellation before contacting the VM agent', async () => {
+    vi.mocked(projectDataService.getSession).mockResolvedValue({
+      id: 'chat-1',
+      createdByUserId: 'other-user',
+      status: 'active',
+    });
+    setupDrizzle({
+      workspace: { id: 'ws-1', nodeId: 'node-1', nodeStatus: 'running' },
+      agentSession: { id: 'agent-sess-1' },
+    });
+
+    const response = await postCancel();
+
+    expect(response.status).toBe(403);
+    expect(mocks.cancelAgentSessionOnNode).not.toHaveBeenCalled();
   });
 
   it('rejects a workspace row owned by another user (404, no cancel sent)', async () => {

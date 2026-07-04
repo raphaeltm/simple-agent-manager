@@ -18,9 +18,10 @@ export async function createChatSession(
   env: Env,
   projectId: string,
   workspaceId: string | null,
-  topic: string | null
+  topic: string | null,
+  createdByUserId: string | null = null
 ): Promise<string> {
-  return projectDataService.createSession(env, projectId, workspaceId, topic);
+  return projectDataService.createSession(env, projectId, workspaceId, topic, null, createdByUserId);
 }
 
 /**

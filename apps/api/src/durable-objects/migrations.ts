@@ -629,6 +629,13 @@ export const MIGRATIONS: Migration[] = [
       );
     },
   },
+  {
+    name: '023-session-creator',
+    run: (sql) => {
+      sql.exec(`ALTER TABLE chat_sessions ADD COLUMN created_by_user_id TEXT`);
+      sql.exec(`CREATE INDEX IF NOT EXISTS idx_chat_sessions_created_by ON chat_sessions(created_by_user_id)`);
+    },
+  },
 ];
 
 /**

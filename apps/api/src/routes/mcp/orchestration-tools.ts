@@ -353,6 +353,7 @@ export async function handleRetrySubtask(
       null,
       taskTitle,
       taskId,
+      tokenData.userId,
     );
 
     await projectDataService.persistMessage(

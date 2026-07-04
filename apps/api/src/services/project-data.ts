@@ -89,10 +89,11 @@ export async function createSession(
   projectId: string,
   workspaceId: string | null,
   topic: string | null,
-  taskId: string | null = null
+  taskId: string | null = null,
+  createdByUserId: string | null = null
 ): Promise<string> {
   const stub = await getStub(env, projectId);
-  return stub.createSession(workspaceId, topic, taskId);
+  return stub.createSession(workspaceId, topic, taskId, createdByUserId);
 }
 
 export async function linkSessionToWorkspace(
@@ -193,10 +194,11 @@ export async function listSessions(
   status: string | null = null,
   limit: number = 20,
   offset: number = 0,
-  taskId: string | null = null
+  taskId: string | null = null,
+  createdByUserId: string | null = null
 ): Promise<{ sessions: Record<string, unknown>[]; total: number }> {
   const stub = await getStub(env, projectId);
-  return stub.listSessions(status, limit, offset, taskId);
+  return stub.listSessions(status, limit, offset, taskId, createdByUserId);
 }
 
 export async function getSessionsByTaskIds(

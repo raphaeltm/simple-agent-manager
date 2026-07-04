@@ -532,6 +532,7 @@ export async function handleDispatchTask(
       null, // workspaceId — linked later by TaskRunner DO
       taskTitle,
       taskId,
+      tokenData.userId,
     );
 
     // Persist the description as the initial user message
