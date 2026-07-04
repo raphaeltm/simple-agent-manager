@@ -18,12 +18,21 @@ const projectMembers = {
 const deploymentEnvironments = {
   id: 'deploymentEnvironments.id',
   projectId: 'deploymentEnvironments.projectId',
+  nodeId: 'deploymentEnvironments.nodeId',
   name: 'deploymentEnvironments.name',
   status: 'deploymentEnvironments.status',
   createdAt: 'deploymentEnvironments.createdAt',
   updatedAt: 'deploymentEnvironments.updatedAt',
   createdByUserId: 'deploymentEnvironments.createdByUserId',
   creationSource: 'deploymentEnvironments.creationSource',
+};
+
+const nodes = {
+  id: 'nodes.id',
+  userId: 'nodes.userId',
+  status: 'nodes.status',
+  lastMetrics: 'nodes.lastMetrics',
+  providerInstanceId: 'nodes.providerInstanceId',
 };
 
 type Condition =
@@ -46,6 +55,7 @@ interface ProjectMemberRow {
 interface EnvironmentRow {
   id: string;
   projectId: string;
+  nodeId?: string | null;
   name: string;
   status: string;
   createdAt: string;
@@ -54,11 +64,20 @@ interface EnvironmentRow {
   creationSource: string;
 }
 
+interface NodeRow {
+  id: string;
+  userId: string;
+  status: string;
+  lastMetrics: string | null;
+}
+
 const mockCurrentUserId = vi.hoisted(() => ({ value: 'admin-user' }));
+const mockGetNodeLogsFromNode = vi.hoisted(() => vi.fn());
 
 let projectRows: ProjectRow[] = [];
 let memberRows: ProjectMemberRow[] = [];
 let environmentRows: EnvironmentRow[] = [];
+let nodeRows: NodeRow[] = [];
 
 vi.mock('drizzle-orm', () => ({
   and: (...conds: Condition[]) => ({ op: 'and', conds }),
@@ -73,11 +92,7 @@ vi.mock('../../../src/db/schema', () => ({
     manifest: 'deploymentReleases.manifest',
     environmentId: 'deploymentReleases.environmentId',
   },
-  nodes: {
-    id: 'nodes.id',
-    userId: 'nodes.userId',
-    providerInstanceId: 'nodes.providerInstanceId',
-  },
+  nodes,
 }));
 
 vi.mock('../../../src/middleware/auth', () => ({
@@ -122,7 +137,7 @@ vi.mock('../../../src/services/nodes', () => ({
 }));
 
 vi.mock('../../../src/services/node-agent', () => ({
-  getNodeLogsFromNode: vi.fn(),
+  getNodeLogsFromNode: (...args: unknown[]) => mockGetNodeLogsFromNode(...args),
   getNodeSystemInfoFromNode: vi.fn(),
   listNodeContainersFromNode: vi.fn(),
   teardownDeploymentEnvironmentOnNode: vi.fn(),
@@ -192,6 +207,16 @@ function selectRows(table: unknown, condition: Condition): unknown[] {
     );
   }
 
+  if (table === nodes) {
+    const id = eqValue(condition, nodes.id);
+    const userId = eqValue(condition, nodes.userId);
+    return nodeRows.filter(
+      (row) =>
+        (id === undefined || row.id === id) &&
+        (userId === undefined || row.userId === userId)
+    );
+  }
+
   return [];
 }
 
@@ -253,6 +278,7 @@ describe('deployment route membership authorization', () => {
       {
         id: 'env-1',
         projectId: 'proj-1',
+        nodeId: 'node-owner-created',
         name: 'production',
         status: 'active',
         createdAt: '2026-07-04T00:00:00.000Z',
@@ -261,6 +287,19 @@ describe('deployment route membership authorization', () => {
         creationSource: 'user',
       },
     ];
+    nodeRows = [
+      {
+        id: 'node-owner-created',
+        userId: 'owner-user',
+        status: 'running',
+        lastMetrics: null,
+      },
+    ];
+    mockGetNodeLogsFromNode.mockResolvedValue({
+      entries: [{ timestamp: '2026-07-04T00:00:00.000Z', message: 'ready' }],
+      nextCursor: null,
+      hasMore: false,
+    });
   });
 
   it('allows an active admin member to list deployment environments in a non-owned project', async () => {
@@ -302,6 +341,24 @@ describe('deployment route membership authorization', () => {
       createdByUserId: 'admin-user',
       creationSource: 'user',
     });
+  });
+
+  it('allows an active admin member to read logs from an owner-created deployment node', async () => {
+    const response = await request('/api/projects/proj-1/environments/env-1/logs?limit=20');
+    const body = await response.json();
+
+    expect(response.status, JSON.stringify(body)).toBe(200);
+    expect(body).toMatchObject({
+      entries: [{ timestamp: '2026-07-04T00:00:00.000Z', message: 'ready' }],
+      source: 'deployment-node',
+      nodeId: 'node-owner-created',
+    });
+    expect(mockGetNodeLogsFromNode).toHaveBeenCalledWith(
+      'node-owner-created',
+      expect.anything(),
+      'admin-user',
+      'limit=20'
+    );
   });
 
   it('rejects non-members from deployment environment routes', async () => {

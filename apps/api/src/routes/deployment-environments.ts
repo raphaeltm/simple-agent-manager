@@ -123,8 +123,7 @@ type ResolvedDeploymentNode =
 async function resolveDeploymentNode(
   db: DeploymentDb,
   projectId: string,
-  envId: string,
-  userId: string
+  envId: string
 ): Promise<ResolvedDeploymentNode> {
   const envRows = await db
     .select({
@@ -156,7 +155,7 @@ async function resolveDeploymentNode(
       lastMetrics: schema.nodes.lastMetrics,
     })
     .from(schema.nodes)
-    .where(and(eq(schema.nodes.id, environment.nodeId), eq(schema.nodes.userId, userId)))
+    .where(eq(schema.nodes.id, environment.nodeId))
     .limit(1);
 
   const node = nodeRows[0];
@@ -198,7 +197,7 @@ async function handleNodeProxyRoute(
   const db = drizzle(c.env.DATABASE, { schema });
   await requireProjectCapability(db, projectId, userId, 'deployment:read');
 
-  const resolved = await resolveDeploymentNode(db, projectId, envId, userId);
+  const resolved = await resolveDeploymentNode(db, projectId, envId);
   if (resolved.kind !== 'ready') {
     return c.json(builders.notReady(resolved));
   }
