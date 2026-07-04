@@ -7,7 +7,7 @@ import { requireRouteParam } from '../lib/route-helpers';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
-import { type ProjectCapability, requireProjectAccess, requireProjectCapability } from '../middleware/project-auth';
+import type { ProjectCapability } from '../middleware/project-auth';
 import { jsonValidator, UpsertProjectRuntimeEnvVarSchema, UpsertProjectRuntimeFileSchema } from '../schemas';
 import { getRuntimeLimits } from '../services/limits';
 import {
@@ -23,6 +23,7 @@ import {
   normalizeProjectFilePath,
   PROJECT_ENV_KEY_PATTERN,
 } from './projects/_helpers';
+import { requireProjectRuntimeAuthorization } from './runtime-project-auth';
 
 export const profileRuntimeRoutes = new Hono<{ Bindings: Env }>();
 
@@ -136,11 +137,7 @@ async function requireProfileRuntimeAccess(
   const profileId = requireRouteParam(c, 'profileId');
   const db = drizzle(c.env.DATABASE, { schema });
 
-  if (capability === 'project:read') {
-    await requireProjectAccess(db, projectId, userId);
-  } else {
-    await requireProjectCapability(db, projectId, userId, capability);
-  }
+  await requireProjectRuntimeAuthorization(db, projectId, userId, capability);
   await requireProjectScopedProfile(db, projectId, profileId);
 
   return { db, profileId, userId };
