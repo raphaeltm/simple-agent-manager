@@ -75,18 +75,23 @@ func (AutoApproveChecker) CheckPermission(string, map[string]any, DangerLevel) (
 // defaultDangerLevels maps built-in tool names to their danger levels.
 // Tools not in this map and not implementing DangerLeveler default to Dangerous.
 var defaultDangerLevels = map[string]DangerLevel{
-	"read_file":   Safe,
-	"grep":        Safe,
-	"glob":        Safe,
-	"git_status":  Safe,
-	"git_log":     Safe,
-	"git_diff":    Safe,
-	"write_file":  Write,
-	"edit_file":   Write,
-	"apply_diff":  Write,
-	"bash":        Dangerous,
-	"git_commit":  Dangerous,
-	"git_branch":  Dangerous,
+	"read_file":  Safe,
+	"grep":       Safe,
+	"glob":       Safe,
+	"git_status": Safe,
+	"git_log":    Safe,
+	"git_diff":   Safe,
+	"write_file": Write,
+	"edit_file":  Write,
+	"apply_diff": Write,
+	"bash":       Dangerous,
+	"git_commit": Dangerous,
+	"git_branch": Dangerous,
+
+	"feature_start":    Write,
+	"feature_complete": Write,
+	"feature_block":    Write,
+	"feature_status":   Safe,
 }
 
 // GetDangerLevel resolves the danger level for a tool. Priority:

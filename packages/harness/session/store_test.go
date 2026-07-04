@@ -6,6 +6,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/workspace/harness/features"
 	"github.com/workspace/harness/llm"
 )
 
@@ -155,6 +156,38 @@ func TestUpdateStatus(t *testing.T) {
 	sess, _ := s.LoadSession("sess-1")
 	if sess.Status != "completed" {
 		t.Errorf("expected completed, got %q", sess.Status)
+	}
+}
+
+func TestSaveAndLoadFeatures(t *testing.T) {
+	s := tempDB(t)
+	s.CreateSession("sess-1", Config{})
+
+	list, err := features.New([]features.Feature{{
+		ID:           "gate",
+		Behavior:     "Gate completion",
+		Verification: []string{"go test ./..."},
+	}})
+	if err != nil {
+		t.Fatalf("features.New: %v", err)
+	}
+	if err := list.Start("gate"); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if err := s.SaveFeatures("sess-1", list); err != nil {
+		t.Fatalf("SaveFeatures: %v", err)
+	}
+
+	loaded, err := s.LoadFeatures("sess-1")
+	if err != nil {
+		t.Fatalf("LoadFeatures: %v", err)
+	}
+	snapshot := loaded.Snapshot()
+	if len(snapshot) != 1 {
+		t.Fatalf("expected 1 feature, got %d", len(snapshot))
+	}
+	if snapshot[0].ID != "gate" || snapshot[0].Status != features.StatusInProgress {
+		t.Fatalf("unexpected feature state: %+v", snapshot[0])
 	}
 }
 
