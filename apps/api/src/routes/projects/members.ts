@@ -5,9 +5,9 @@ import type {
   ProjectInviteLinkResponse,
   ProjectInviteLinkStatus,
   ProjectInvitePreviewResponse,
-  ProjectMembersResponse,
   ProjectMemberResponse,
   ProjectMemberRole,
+  ProjectMembersResponse,
   ProjectMemberStatus,
 } from '@simple-agent-manager/shared';
 import { and, eq, sql } from 'drizzle-orm';
@@ -29,8 +29,8 @@ import {
 import { getUserInstallationRepositories } from '../../services/github-app';
 import { getExternalInstallationId } from '../../services/github-installation-ids';
 import {
-  getGitHubUserAccessTokenWithHeaders,
   getGitHubUserAccessTokenForOwner,
+  getGitHubUserAccessTokenWithHeaders,
 } from '../../services/github-user-access-token';
 
 const INVITE_TOKEN_PREFIX = 'sam_inv_';
@@ -555,7 +555,7 @@ projectMembersRoutes.post('/invite-links/:token/request', async (c) => {
     )
     .limit(1);
   const existing = existingRows[0];
-  let requestId = existing?.id ?? ulid();
+  const requestId = existing?.id ?? ulid();
   if (existing) {
     if (existing.status === 'approved') {
       throw errors.conflict('Access request has already been approved');

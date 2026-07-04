@@ -16,8 +16,8 @@ export {
 // Project schemas
 export {
   AddProjectRepositorySchema,
-  CreateProjectSchema,
   CreateProjectInviteSchema,
+  CreateProjectSchema,
   DecideProjectAccessRequestSchema,
   UpdateProjectSchema,
   UpsertProjectRuntimeEnvVarSchema,
