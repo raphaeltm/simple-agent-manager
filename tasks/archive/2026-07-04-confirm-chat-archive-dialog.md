@@ -30,7 +30,7 @@ Selected direction: variant 1. It keeps the safety behavior attached to the dest
 - [x] Update `CompletionDock` unit tests so archive requires confirmation, cancel does not archive, and interrupt still fires immediately while working.
 - [x] Extend or run the completion dock Playwright audit to cover the confirmation dialog on mobile and desktop.
 - [x] Document effect-collision analysis in this task file after implementation.
-- [ ] Run focused unit tests, visual audit, lint/typecheck/test/build as required by `/do`.
+- [x] Run focused unit tests, visual audit, lint/typecheck/test/build as required by `/do`.
 
 ## Acceptance Criteria
 
@@ -63,6 +63,8 @@ Selected direction: variant 1. It keeps the safety behavior attached to the dest
 - `npx playwright test tests/playwright/completion-dock-audit.spec.ts --project="iPhone SE (375x667)" --project="Desktop (1280x800)"` — passed, 16 tests.
 - Visual inspection: `.codex/tmp/playwright-screenshots/completion-dock-archive-confirm-dark-mobile-375x667.png`, `.codex/tmp/playwright-screenshots/completion-dock-archive-confirm-dark-desktop-1280x800.png`, and `.codex/tmp/playwright-screenshots/completion-dock-archive-confirm-light-mobile-375x667.png` show no clipping, overlap, or horizontal overflow.
 - `pnpm --filter @simple-agent-manager/web typecheck && pnpm --filter @simple-agent-manager/web lint` — passed; lint emitted existing warning-only output.
+- `pnpm lint && pnpm typecheck && pnpm test && pnpm build` — passed; full monorepo validation completed successfully.
+- `$task-completion-validator` — passed; research findings, checked checklist items, acceptance criteria, tests, UI data path, and multi-resource checks match the branch diff.
 
 ## References
 
