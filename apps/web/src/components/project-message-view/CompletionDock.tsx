@@ -14,8 +14,9 @@
 // prototype. All fills/strokes read design tokens so the dock adapts to the
 // dark (`sam`) and light (`sam-light`) themes with no wrapper scoping.
 
+import { Button, Dialog } from '@simple-agent-manager/ui';
 import { Archive, ListTodo, Square } from 'lucide-react';
-import { type ReactNode,useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 // ---------------------------------------------------------------------------
 // Geometry constants (approved in the prototype)
@@ -166,6 +167,7 @@ export function CompletionDock({
   elapsed,
 }: CompletionDockProps) {
   const reducedMotion = usePrefersReducedMotion();
+  const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false);
   const progress = useEased(working ? 1 : 0, reducedMotion);
   const { ref, width } = useWidth<HTMLDivElement>();
 
@@ -221,6 +223,33 @@ export function CompletionDock({
     ? 'var(--sam-color-fg-muted, #9fb7ae)'
     : 'var(--sam-color-danger, #ef4444)';
   const centerDisabled = showArchiveInCenter && archiving;
+
+  useEffect(() => {
+    if (working) {
+      setArchiveConfirmOpen(false);
+    }
+  }, [working]);
+
+  const handleCenterClick = useCallback(() => {
+    if (showArchiveInCenter) {
+      setArchiveConfirmOpen(true);
+      return;
+    }
+    onInterrupt();
+  }, [onInterrupt, showArchiveInCenter]);
+
+  const handleConfirmArchive = useCallback(() => {
+    if (archiving) {
+      return;
+    }
+    onArchive();
+  }, [archiving, onArchive]);
+
+  const handleCloseArchiveConfirm = useCallback(() => {
+    if (!archiving) {
+      setArchiveConfirmOpen(false);
+    }
+  }, [archiving]);
 
   return (
     // Only the flat bar (BAR_H) participates in the flex column; the crest
@@ -282,7 +311,7 @@ export function CompletionDock({
         {/* Center button — always present & tappable (resilient to a bad signal) */}
         <button
           type="button"
-          onClick={showArchiveInCenter ? onArchive : onInterrupt}
+          onClick={handleCenterClick}
           disabled={centerDisabled}
           aria-label={showArchiveInCenter ? 'Archive conversation' : 'Interrupt agent'}
           className="pointer-events-auto absolute flex items-center justify-center rounded-full cursor-pointer border-0 shadow-lg disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-focus-ring focus-visible:outline-offset-2"
@@ -302,6 +331,24 @@ export function CompletionDock({
           <CenterIcon size={20} color="#fff" fill={showArchiveInCenter ? 'none' : '#fff'} />
         </button>
       </div>
+
+      <Dialog isOpen={archiveConfirmOpen} onClose={handleCloseArchiveConfirm} maxWidth="sm">
+        <h3 id="dialog-title" className="text-base font-semibold text-fg-primary mb-2">
+          Archive conversation?
+        </h3>
+        <p className="text-sm text-fg-muted mb-4">
+          This will archive the conversation and stop the agent session. Any uncommitted workspace
+          progress tied to this conversation may be lost. This action cannot be undone.
+        </p>
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" size="sm" onClick={handleCloseArchiveConfirm} disabled={archiving}>
+            Cancel
+          </Button>
+          <Button variant="danger" size="sm" onClick={handleConfirmArchive} loading={archiving}>
+            {archiving ? 'Archiving...' : 'Archive Conversation'}
+          </Button>
+        </div>
+      </Dialog>
 
       {archiveError && (
         <div className="px-3 pb-2 text-xs text-danger" role="alert">

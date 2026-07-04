@@ -1578,6 +1578,13 @@ describe('ProjectMessageView — inline idle indicator', () => {
     });
     // Working morph is absent while idle
     expect(screen.queryByRole('button', { name: 'Interrupt agent' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Archive conversation' }));
+    expect(screen.getByRole('dialog')).toBeTruthy();
+    expect(onClose).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Archive Conversation' }));
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it('does NOT show Archive control for idle task-mode session', async () => {
