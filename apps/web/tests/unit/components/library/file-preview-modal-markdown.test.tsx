@@ -289,6 +289,7 @@ describe('FilePreviewModal — HTML', () => {
       credentials: 'include',
     }));
     expect(iframe).toHaveAttribute('sandbox', 'allow-scripts');
+    expect(iframe).toHaveAttribute('referrerpolicy', 'no-referrer');
     expect(iframe).toHaveAttribute('srcdoc', HTML_CONTENT);
     expect(iframe).not.toHaveAttribute('src');
   });

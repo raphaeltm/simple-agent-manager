@@ -119,6 +119,7 @@ export const HtmlViewer: FC<HtmlViewerProps> = ({
         <iframe
           srcDoc={content}
           sandbox="allow-scripts"
+          referrerPolicy="no-referrer"
           title={fileName}
           className="h-full w-full flex-1 border-0 bg-white"
         />
