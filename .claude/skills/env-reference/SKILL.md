@@ -76,6 +76,9 @@ See `apps/api/.env.example` for the full list. Key variables:
 - `MAX_PROJECTS_PER_USER` — Runtime project cap
 - `MAX_TASKS_PER_PROJECT` — Runtime task cap per project
 - `MAX_TASK_DEPENDENCIES_PER_TASK` — Runtime dependency-edge cap per task
+- `PROJECT_INVITE_TOKEN_BYTES` — Random bytes used for generated project invite link tokens (default: 32)
+- `PROJECT_INVITE_DEFAULT_EXPIRY_DAYS` — Default lifetime for project invite links created without an explicit expiry (default: 7)
+- `PROJECT_INVITE_MAX_EXPIRY_DAYS` — Maximum allowed project invite link lifetime (default: 30)
 - `AGENT_SETTINGS_VALIDATION_LIMITS` — Optional JSON object overriding
   agent-settings validation bounds for model IDs, tool lists, additional env
   entries, provider display names, and OpenCode base URLs. See

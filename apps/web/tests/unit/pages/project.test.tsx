@@ -34,6 +34,7 @@ const mocks = vi.hoisted(() => ({
   listProjectRepositories: vi.fn(),
   discoverSubmoduleRepos: vi.fn(),
   listAvailableRepositories: vi.fn(),
+  getProjectMembers: vi.fn(),
 }));
 
 vi.mock('../../../src/lib/api', async (importOriginal) => ({
@@ -67,10 +68,16 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
   listProjectRepositories: mocks.listProjectRepositories,
   discoverSubmoduleRepos: mocks.discoverSubmoduleRepos,
   listAvailableRepositories: mocks.listAvailableRepositories,
+  getProjectMembers: mocks.getProjectMembers,
 }));
 
 vi.mock('../../../src/components/UserMenu', () => ({
   UserMenu: () => <div data-testid="user-menu">user-menu</div>,
+}));
+
+vi.mock('../../../src/components/AuthProvider', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/components/AuthProvider')>()),
+  useAuth: () => ({ user: { id: 'user-1', email: 'owner@example.com', name: 'Project Owner' } }),
 }));
 
 const mockSetProjectName = vi.fn();
@@ -166,6 +173,27 @@ describe('Project page', () => {
     });
     mocks.discoverSubmoduleRepos.mockResolvedValue({ suggestions: [] });
     mocks.listAvailableRepositories.mockResolvedValue({ repositories: [] });
+    mocks.getProjectMembers.mockResolvedValue({
+      members: [
+        {
+          id: 'member-1',
+          projectId: 'proj-1',
+          userId: 'user-1',
+          role: 'owner',
+          status: 'active',
+          joinedAt: '2026-02-18T00:00:00.000Z',
+          createdAt: '2026-02-18T00:00:00.000Z',
+          updatedAt: '2026-02-18T00:00:00.000Z',
+          user: {
+            id: 'user-1',
+            email: 'owner@example.com',
+            name: 'Project Owner',
+          },
+        },
+      ],
+      inviteLinks: [],
+      accessRequests: [],
+    });
     mocks.getProjectRuntimeConfig.mockResolvedValue({
       envVars: [],
       files: [],

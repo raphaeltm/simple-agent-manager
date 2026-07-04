@@ -105,6 +105,14 @@ SAM loads OpenCode Zen and OpenCode Go model choices through the authenticated m
 | `NODE_LIFECYCLE_ALARM_RETRY_MS` | `60000` (1 min)    | Retry delay for DO alarm failures                     |
 | `DEFAULT_TASK_AGENT_TYPE`       | `opencode`         | Default agent for autonomous idea execution           |
 
+## Project Invites
+
+| Variable                             | Default | Description                                                                 |
+| ------------------------------------ | ------- | --------------------------------------------------------------------------- |
+| `PROJECT_INVITE_TOKEN_BYTES`         | `32`    | Random bytes used for generated project invite link tokens                  |
+| `PROJECT_INVITE_DEFAULT_EXPIRY_DAYS` | `7`     | Default lifetime for invite links created without an explicit expiry        |
+| `PROJECT_INVITE_MAX_EXPIRY_DAYS`     | `30`    | Maximum allowed invite link lifetime, including explicit expiry-date input  |
+
 ## Notification System
 
 | Variable                                | Default                | Description                                          |
