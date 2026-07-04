@@ -33,7 +33,8 @@ No email delivery is in scope. Membership approval must not allow a user to oper
 - [x] Add focused API tests for happy path, non-member request, non-admin approval denial, admin approval success, denied request, revoked/expired link, and GitHub access status handling.
 - [x] Add `ProjectMembersSection` to the real project settings page using existing components/styles, including invite link creation/copy/revoke, pending request approval/denial, current member display, and GitHub access status.
 - [x] Add UI behavior tests for new member-management interactions and a Playwright visual audit covering mobile/desktop edge cases.
-- [ ] Run relevant validation, specialist reviews, staging verification, PR creation, CI, merge, and production deploy monitoring per `/do`.
+- [x] Run relevant local validation and specialist reviews per `/do`.
+- [ ] Complete staging verification, PR creation, CI, merge, and production deploy monitoring per `/do`.
 
 ## Acceptance Criteria
 
