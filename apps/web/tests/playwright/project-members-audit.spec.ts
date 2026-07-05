@@ -142,9 +142,129 @@ const emptyCredentialHealth = {
   resources: [],
 };
 
+function offboardingResource(
+  resourceKind: string,
+  resourceId: string,
+  title: string,
+  overrides: Record<string, unknown> = {}
+) {
+  return {
+    resourceKind,
+    resourceId,
+    title,
+    subtitle: resourceKind === 'trigger' ? '0 9 * * *' : 'running',
+    href:
+      resourceKind === 'trigger'
+        ? `/projects/${project.id}/triggers/${resourceId}`
+        : resourceKind === 'task_tree'
+          ? `/projects/${project.id}/tasks/${resourceId}`
+          : resourceKind === 'deployment_environment'
+            ? `/projects/${project.id}/deployments/${resourceId}`
+            : `/projects/${project.id}/workspaces/ws-${resourceId}`,
+    credentialSourceBefore: 'user',
+    attributionUserIdBefore: 'admin-user',
+    attributionProjectIdBefore: project.id,
+    recommendedAction: 'break_and_flag',
+    availableActions: ['break_and_flag', 'defer_removal'],
+    requiresHumanDecision: true,
+    blocksRemoval: resourceKind === 'node' || resourceKind === 'deployment_environment',
+    details: {
+      status: resourceKind === 'task_tree' ? 'running' : 'active',
+      remainingProjectCoverage: null,
+    },
+    ...overrides,
+  };
+}
+
+const normalOffboardingPreview = {
+  offboardingPlanId: 'off-normal',
+  projectId: project.id,
+  memberUserId: 'admin-user',
+  canApply: false,
+  requiresHumanDecision: true,
+  summary: {
+    breakAndFlag: 3,
+    reattachAvailable: 1,
+    blockingTeardown: 1,
+  },
+  resources: [
+    offboardingResource('trigger', 'trigger-1', 'Daily repository review', {
+      availableActions: ['reattach_to_project', 'break_and_flag', 'defer_removal'],
+      details: {
+        status: 'active',
+        remainingProjectCoverage: {
+          agent: { attachmentId: 'attach-agent', configurationId: 'config-agent' },
+          compute: { attachmentId: 'attach-compute', configurationId: 'config-compute' },
+        },
+      },
+    }),
+    offboardingResource('task_tree', 'task-1', 'Running usage analysis'),
+    offboardingResource('node', 'node-1', 'Workspace node for feature branch'),
+    offboardingResource('deployment_environment', 'deploy-1', 'Production deployment'),
+  ],
+};
+
+const longOffboardingPreview = {
+  ...normalOffboardingPreview,
+  offboardingPlanId: 'off-long',
+  resources: [
+    offboardingResource(
+      'trigger',
+      'trigger-long',
+      'Extremely long scheduled workflow name that should wrap cleanly without forcing the offboarding modal wider than the viewport or hiding the action selector from the reviewer',
+      {
+        subtitle:
+          'This trigger description includes a very long branch and repository context with repeated qualifiers, punctuation, and URL-like text https://example.com/acme/shared-project/actions/really-long-path-for-layout-testing',
+        availableActions: ['reattach_to_project', 'break_and_flag', 'defer_removal'],
+        details: {
+          status: 'active',
+          remainingProjectCoverage: {
+            agent: { attachmentId: 'attach-agent', configurationId: 'config-agent' },
+          },
+        },
+      }
+    ),
+    offboardingResource(
+      'node',
+      'node-long',
+      'deployment-node-with-a-very-long-provider-generated-name-and-region-fr-par-1-that-must-wrap',
+      {
+        subtitle:
+          'workspace-with-super-long-branch-name/feature/shared-project-offboarding-and-credential-attribution-cleanup',
+      }
+    ),
+  ],
+};
+
+const emptyOffboardingPreview = {
+  offboardingPlanId: 'off-empty',
+  projectId: project.id,
+  memberUserId: 'admin-user',
+  canApply: true,
+  requiresHumanDecision: false,
+  summary: {
+    breakAndFlag: 0,
+    reattachAvailable: 0,
+    blockingTeardown: 0,
+  },
+  resources: [],
+};
+
+const manyOffboardingPreview = {
+  ...normalOffboardingPreview,
+  offboardingPlanId: 'off-many',
+  resources: Array.from({ length: 18 }, (_, index) => {
+    const kinds = ['trigger', 'task_tree', 'node', 'deployment_environment'];
+    const kind = kinds[index % kinds.length]!;
+    return offboardingResource(kind, `${kind}-${index + 1}`, `${kind.replace('_', ' ')} ${index + 1}`);
+  }),
+};
+
 async function setupMocks(
   page: Page,
   options: {
+    applyError?: 'stale_plan' | 'expired_plan';
+    offboardingPreview?: typeof normalOffboardingPreview;
     members?: typeof normalMembers;
     inviteStatus?: 'active' | 'expired' | 'revoked';
     inviteMembershipStatus?: string;
@@ -191,6 +311,27 @@ async function setupMocks(
     const projectMatch = path.match(/^\/api\/projects\/([^/]+)(\/.*)?$/);
     if (projectMatch) {
       const subPath = projectMatch[2] ?? '';
+      if (subPath === '/members/admin-user/offboarding-preview') {
+        return respond(200, options.offboardingPreview ?? normalOffboardingPreview);
+      }
+      if (subPath === '/members/admin-user/offboarding-apply') {
+        if (options.applyError) {
+          return respond(409, {
+            error: options.applyError,
+            message:
+              options.applyError === 'stale_plan'
+                ? 'The offboarding plan is stale.'
+                : 'The offboarding plan expired.',
+          });
+        }
+        return respond(200, {
+          projectId: project.id,
+          memberUserId: 'admin-user',
+          status: 'removed',
+          appliedAt: '2026-07-04T00:20:00.000Z',
+          resourceResults: [],
+        });
+      }
       if (subPath === '/members') return respond(200, members);
       if (subPath === '/credential-attribution-health') return respond(200, emptyCredentialHealth);
       if (subPath === '/runtime-config') return respond(200, { envVars: [], files: [] });
@@ -215,6 +356,18 @@ async function goToMembers(page: Page) {
   await heading.scrollIntoViewIfNeeded();
 }
 
+async function openRemoveMember(page: Page) {
+  await goToMembers(page);
+  await page.getByRole('button', { name: 'Remove member' }).click();
+  await expect(page.getByRole('dialog', { name: /Remove member/i })).toBeVisible();
+}
+
+async function submitOffboardingModal(page: Page) {
+  const dialog = page.getByRole('dialog', { name: /Remove member/i });
+  await expect(dialog.getByText('Running tasks')).toBeVisible();
+  await dialog.getByRole('button', { name: /^Remove member$/ }).click();
+}
+
 test.describe('Project members settings — visual audit', () => {
   test('normal members and pending requests', async ({ page }) => {
     await setupMocks(page);
@@ -237,6 +390,62 @@ test.describe('Project members settings — visual audit', () => {
     await page.goto('/projects/invite/sam_inv_preview');
     await expect(page.getByRole('button', { name: 'Request Access' })).toBeVisible();
     await screenshot(page, 'project-invite-request');
+    await assertNoOverflow(page);
+  });
+
+  test('offboarding modal with mixed resources', async ({ page }) => {
+    await setupMocks(page, { offboardingPreview: normalOffboardingPreview });
+    await openRemoveMember(page);
+    await expect(page.getByText('Running tasks')).toBeVisible();
+    await screenshot(page, 'project-members-offboarding-normal');
+    await assertNoOverflow(page);
+  });
+
+  test('offboarding modal long text wraps', async ({ page }) => {
+    await setupMocks(page, { offboardingPreview: longOffboardingPreview });
+    await openRemoveMember(page);
+    await expect(page.getByText(/Extremely long scheduled workflow name/)).toBeVisible();
+    await screenshot(page, 'project-members-offboarding-long-text');
+    await assertNoOverflow(page);
+  });
+
+  test('offboarding modal clean removal empty state', async ({ page }) => {
+    await setupMocks(page, { offboardingPreview: emptyOffboardingPreview });
+    await openRemoveMember(page);
+    await expect(page.getByText(/removed cleanly/i)).toBeVisible();
+    await screenshot(page, 'project-members-offboarding-empty');
+    await assertNoOverflow(page);
+  });
+
+  test('offboarding modal many resources scrolls without overflow', async ({ page }) => {
+    await setupMocks(page, { offboardingPreview: manyOffboardingPreview });
+    await openRemoveMember(page);
+    await expect(page.getByText('trigger 17')).toBeVisible();
+    await screenshot(page, 'project-members-offboarding-many');
+    await assertNoOverflow(page);
+  });
+
+  test('offboarding stale plan error state', async ({ page }) => {
+    await setupMocks(page, {
+      offboardingPreview: normalOffboardingPreview,
+      applyError: 'stale_plan',
+    });
+    await openRemoveMember(page);
+    await submitOffboardingModal(page);
+    await expect(page.getByText(/project changed after this preview/i)).toBeVisible();
+    await screenshot(page, 'project-members-offboarding-stale-plan');
+    await assertNoOverflow(page);
+  });
+
+  test('offboarding expired plan error state', async ({ page }) => {
+    await setupMocks(page, {
+      offboardingPreview: normalOffboardingPreview,
+      applyError: 'expired_plan',
+    });
+    await openRemoveMember(page);
+    await submitOffboardingModal(page);
+    await expect(page.getByText(/preview expired/i)).toBeVisible();
+    await screenshot(page, 'project-members-offboarding-expired-plan');
     await assertNoOverflow(page);
   });
 });

@@ -16,13 +16,13 @@ Wave 6D needs the web UI for shared-project member offboarding and ownership tra
 
 ## Implementation Checklist
 
-- [ ] Add web API client methods for `POST /api/projects/:id/ownership-transfer`, `POST /api/projects/:id/members/:userId/offboarding-preview`, and `POST /api/projects/:id/members/:userId/offboarding-apply`.
-- [ ] Add member-row actions in `ProjectMembersSection`:
+- [x] Add web API client methods for `POST /api/projects/:id/ownership-transfer`, `POST /api/projects/:id/members/:userId/offboarding-preview`, and `POST /api/projects/:id/members/:userId/offboarding-apply`.
+- [x] Add member-row actions in `ProjectMembersSection`:
   - owner-only transfer ownership for eligible active members;
   - owner/admin remove member for non-owner active members;
   - current non-owner leave project.
-- [ ] Implement ownership-transfer confirmation dialog explaining the old owner becomes admin, calling the transfer API, refreshing settings, and showing success/error toasts.
-- [ ] Implement offboarding preview/apply modal:
+- [x] Implement ownership-transfer confirmation dialog explaining the old owner becomes admin, calling the transfer API, refreshing settings, and showing success/error toasts.
+- [x] Implement offboarding preview/apply modal:
   - load preview after remove/leave click;
   - show last-owner blockers;
   - group live resources by Triggers, Running tasks, Nodes, and Deployments;
@@ -33,16 +33,16 @@ Wave 6D needs the web UI for shared-project member offboarding and ownership tra
   - apply with `planId` and selected actions;
   - refresh members and credential health after success;
   - show retry guidance for `stale_plan`, `expired`, and `unresolved_credential_attribution`.
-- [ ] Extend credential health nav/modal so the badge includes offboarding/blocked resources and the modal groups Triggers, Running tasks, Nodes, and Deployments with deep links.
-- [ ] Add/extend unit tests for transfer dialog, remove member flow, leave project flow, selected action payloads, success refresh, and 409 error guidance.
-- [ ] Extend Playwright visual audit with mocked offboarding data:
+- [x] Extend credential health nav/modal so the badge includes offboarding/blocked resources and the modal groups Triggers, Running tasks, Nodes, and Deployments with deep links.
+- [x] Add/extend unit tests for transfer dialog, remove member flow, leave project flow, selected action payloads, success refresh, and 409 error guidance.
+- [x] Extend Playwright visual audit with mocked offboarding data:
   - normal 3-4 resources across trigger/task/node types;
   - long resource names/descriptions;
   - empty clean-removal state;
   - many 15+ resources;
   - expired/stale error states;
   - mobile 375px and desktop 1280px screenshots.
-- [ ] Run focused unit tests and Playwright audit, then broader web validation.
+- [x] Run focused unit tests and Playwright audit, then broader web validation.
 
 ## Acceptance Criteria
 
