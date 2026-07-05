@@ -72,6 +72,16 @@ This task will add explicit tests for both sides of the product-mode gate and up
 - `pnpm build` passed after the trigger route mock fix, with existing Vite dynamic import and chunk-size warnings only.
 - `pnpm typecheck` passed again after the trigger route mock fix.
 - `pnpm lint` passed again after the trigger route mock fix, with existing warnings only.
+- Staging deploy succeeded: GitHub Actions `deploy-staging.yml` run `28755545141` completed green for branch `sam/wave-7-multiplayershared-projects-01kwt0`; smoke-tests job completed green.
+- Live staging verification passed with a temporary Playwright verifier against `https://app.sammy.party`: created a throwaway Artifacts project and chat session, confirmed `GET /api/projects/:id` and credential-health summary reported `multiplayerActive: false` for the solo state, verified desktop/mobile chat UI showed no `My sessions` / `All sessions` scope toggle and no session ownership label, created an active invite link, confirmed `GET /api/projects/:id` reported `multiplayerActive: true`, then verified desktop/mobile chat UI showed the scope toggle and ownership label. The verifier revoked the invite and deleted the throwaway project in cleanup.
+- Live staging screenshots inspected:
+  - `apps/web/.codex/tmp/playwright-screenshots/staging-wave7-solo-chat-desktop.png`
+  - `apps/web/.codex/tmp/playwright-screenshots/staging-wave7-solo-chat-mobile.png`
+  - `apps/web/.codex/tmp/playwright-screenshots/staging-wave7-invite-chat-desktop.png`
+  - `apps/web/.codex/tmp/playwright-screenshots/staging-wave7-invite-chat-mobile.png`
+- `curl -fsS https://api.sammy.party/health` returned healthy JSON.
+- `pnpm quality:observability-noise` passed with no significant log noise detected; D1 observability was skipped because `OBSERVABILITY_DB_ID` was not set, and Workers telemetry was unavailable with 403.
+- Staging note: live staging covered the server-computed flag and chat/ownership surfaces with real project/invite state. Credential-health nav and trigger attribution warning visibility for non-empty resource data remain covered by local render/simulate tests and local Playwright because the throwaway staging project intentionally had no credential-backed resources.
 
 ## Specialist Review Log
 
