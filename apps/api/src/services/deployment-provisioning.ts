@@ -6,7 +6,7 @@
  * the shared Provider interface (no provider-specific branches).
  */
 
-import type { CredentialProvider } from '@simple-agent-manager/shared';
+import type { CredentialProvider, CredentialSource } from '@simple-agent-manager/shared';
 import {
   DEFAULT_TASK_RUN_NODE_CPU_THRESHOLD_PERCENT,
   DEFAULT_TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT,
@@ -20,6 +20,7 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log, serializeError } from '../lib/logger';
 import { createNodeRecord, provisionNode } from './nodes';
+import { resolveCredentialSource } from './provider-credentials';
 
 /** Default VM size for deployment nodes — apps are typically smaller than dev workspaces. */
 export const DEPLOYMENT_DEFAULT_VM_SIZE = 'small';
@@ -47,6 +48,7 @@ interface DeploymentPlacement {
   provider: CredentialProvider;
   location: string;
   vmSize: string;
+  credentialSource: CredentialSource;
 }
 
 interface DeploymentNodeCandidate {
@@ -255,6 +257,7 @@ async function linkEnvironmentToNode(opts: LinkEnvironmentToNodeOptions): Promis
 export async function resolveDeploymentPlacement(
   userId: string,
   env: Env,
+  projectId?: string | null,
   options?: {
     vmSizeOverride?: string;
     vmLocationOverride?: string;
@@ -264,43 +267,23 @@ export async function resolveDeploymentPlacement(
   const db = drizzle(env.DATABASE, { schema });
 
   let cloudProvider: CredentialProvider;
+  let credentialSource: CredentialSource;
   if (options?.providerOverride) {
-    cloudProvider = options.providerOverride;
-  } else {
-    const userCreds = await db
-      .select({
-        provider: schema.credentials.provider,
-      })
-      .from(schema.credentials)
-      .where(
-        and(
-          eq(schema.credentials.userId, userId),
-          eq(schema.credentials.credentialType, 'cloud-provider'),
-          eq(schema.credentials.isActive, true)
-        )
-      )
-      .limit(1);
-
-    if (userCreds.length > 0 && userCreds[0]) {
-      cloudProvider = userCreds[0].provider as CredentialProvider;
-    } else {
-      const platformCreds = await db
-        .select({ provider: schema.platformCredentials.provider })
-        .from(schema.platformCredentials)
-        .where(
-          and(
-            eq(schema.platformCredentials.credentialType, 'cloud-provider'),
-            eq(schema.platformCredentials.isEnabled, true)
-          )
-        )
-        .limit(1);
-
-      if (platformCreds.length === 0 || !platformCreds[0]?.provider) {
-        log.error('deployment_provisioning.no_provider', { userId });
-        return null;
-      }
-      cloudProvider = platformCreds[0].provider as CredentialProvider;
+    const credential = await resolveCredentialSource(db, userId, options.providerOverride, projectId);
+    if (!credential) {
+      log.error('deployment_provisioning.no_provider', { userId, projectId, provider: options.providerOverride });
+      return null;
     }
+    cloudProvider = credential.providerName;
+    credentialSource = credential.credentialSource;
+  } else {
+    const credential = await resolveCredentialSource(db, userId, undefined, projectId);
+    if (!credential) {
+      log.error('deployment_provisioning.no_provider', { userId, projectId });
+      return null;
+    }
+    cloudProvider = credential.providerName;
+    credentialSource = credential.credentialSource;
   }
 
   const vmLocation =
@@ -313,6 +296,7 @@ export async function resolveDeploymentPlacement(
     provider: cloudProvider,
     location: vmLocation,
     vmSize: options?.vmSizeOverride?.trim() || defaultVmSize,
+    credentialSource,
   };
 }
 
@@ -340,7 +324,8 @@ export async function provisionDeploymentNode(
 ): Promise<DeploymentNodeResult | null> {
   const db = drizzle(env.DATABASE, { schema });
 
-  const placement = await resolveDeploymentPlacement(userId, env, options);
+  const projectId = _projectId;
+  const placement = await resolveDeploymentPlacement(userId, env, projectId, options);
   if (!placement) {
     log.error('deployment_provisioning.no_provider', { envId, userId });
     return null;
@@ -397,6 +382,9 @@ export async function provisionDeploymentNode(
   // Create the node record with deployment role
   const node = await createNodeRecord(env, {
     userId,
+    credentialAttributionUserId: userId,
+    credentialAttributionProjectId: placement.credentialSource === 'project' ? projectId : null,
+    credentialAttributionSource: placement.credentialSource,
     name: `deploy-${envId.slice(0, 8).toLowerCase()}`,
     vmSize: placement.vmSize,
     vmLocation: placement.location,

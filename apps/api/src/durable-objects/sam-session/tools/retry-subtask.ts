@@ -78,6 +78,10 @@ export async function retrySubtask(
       agentProfileHint: schema.tasks.agentProfileHint,
       skillId: schema.tasks.skillId,
       skillHint: schema.tasks.skillHint,
+      userId: schema.tasks.userId,
+      credentialAttributionUserId: schema.tasks.credentialAttributionUserId,
+      credentialAttributionProjectId: schema.tasks.credentialAttributionProjectId,
+      credentialAttributionSource: schema.tasks.credentialAttributionSource,
       projectName: schema.projects.name,
       projectRepository: schema.projects.repository,
       projectInstallationId: schema.projects.installationId,
@@ -159,10 +163,21 @@ export async function retrySubtask(
 
   // Verify cloud credentials
   const { resolveCredentialSource } = await import('../../../services/provider-credentials');
-  const credResult = await resolveCredentialSource(db, ctx.userId, resolvedProvider ?? undefined);
+  const credentialAttributionUserId = original.credentialAttributionUserId ?? original.userId;
+  const credentialAttributionSource = (original.credentialAttributionSource ?? 'user') as import('@simple-agent-manager/shared').CredentialSource;
+  const credentialAttributionProjectId = credentialAttributionSource === 'project'
+    ? (original.credentialAttributionProjectId ?? original.projectId)
+    : null;
+  const credResult = await resolveCredentialSource(
+    db,
+    credentialAttributionUserId,
+    resolvedProvider ?? undefined,
+    credentialAttributionProjectId
+  );
   if (!credResult) {
     return { error: 'No cloud provider credentials found. The user must connect a cloud provider in Settings.' };
   }
+  const effectiveProvider = resolvedProvider ?? credResult.providerName;
 
   // Generate new task
   const newTaskId = ulid();
@@ -197,10 +212,12 @@ export async function retrySubtask(
        status, execution_step, priority, dispatch_depth, output_branch, created_by,
        task_mode, agent_profile_hint, skill_id, skill_hint, mission_id,
        requested_vm_size, requested_vm_size_source, resource_requirements_json, resource_requirements_source, resolved_reservation_json,
+       credential_attribution_user_id, credential_attribution_project_id, credential_attribution_source,
        created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, 'queued', 'node_selection', 0, 0, ?, ?,
        ?, ?, ?, ?, ?,
        ?, ?, ?, ?, ?,
+       ?, ?, ?,
        ?, ?)`,
     ).bind(
       newTaskId, original.projectId, ctx.userId,
@@ -209,6 +226,7 @@ export async function retrySubtask(
       resolvedTaskMode, resolvedProfile?.profileId ?? original.agentProfileHint ?? null,
       resolvedProfile?.skillId ?? original.skillId ?? null, original.skillHint ?? original.skillId ?? null, original.missionId ?? null,
       resolvedVmSize, vmSizeSource, resolvedProfile?.resourceRequirementsJson ?? null, resolvedReservation.source, JSON.stringify(resolvedReservation),
+      credentialAttributionUserId, credentialAttributionProjectId, credentialAttributionSource,
       now, now,
     ),
     env.DATABASE.prepare(
@@ -268,7 +286,10 @@ export async function retrySubtask(
       chatSessionId: sessionId,
       agentType: resolvedAgentType,
       workspaceProfile: resolvedWorkspaceProfile,
-      cloudProvider: resolvedProvider,
+      cloudProvider: effectiveProvider,
+      credentialAttributionUserId,
+      credentialAttributionProjectId,
+      credentialAttributionSource,
       taskMode: resolvedTaskMode,
       model: resolvedProfile?.model ?? agentDefaults.model,
       effort: resolvedProfile?.effort ?? null,

@@ -14,6 +14,7 @@ import { type FC, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { timeAgo } from '../../lib/time-utils';
+import { TriggerCredentialWarning } from './TriggerCredentialWarning';
 
 function formatNextRun(dateStr: string): string {
   const date = new Date(dateStr);
@@ -191,6 +192,12 @@ export const TriggerCard: FC<TriggerCardProps> = ({
         <div className="flex items-center gap-2 mt-3 px-3 py-2 rounded-md bg-warning/10 text-warning text-sm">
           <AlertCircle size={14} aria-hidden="true" />
           <span>Paused — may be due to consecutive failures</span>
+        </div>
+      )}
+
+      {trigger.credentialAttribution?.hasPersonalWarning && (
+        <div className="mt-3">
+          <TriggerCredentialWarning trigger={trigger} />
         </div>
       )}
 

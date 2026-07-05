@@ -8,6 +8,7 @@ import { useProjectList } from '../hooks/useProjectData';
 import { signOut } from '../lib/auth';
 import { isMacPlatform } from '../lib/keyboard-shortcuts';
 import { useAuth } from './AuthProvider';
+import { CredentialHealthNavItem } from './CredentialHealthNavItem';
 import { GlobalAudioPlayer } from './GlobalAudioPlayer';
 import { GlobalCommandPalette } from './GlobalCommandPalette';
 import { MobileNavDrawer, type MobileNavItem } from './MobileNavDrawer';
@@ -132,6 +133,14 @@ export function AppShell({ children }: AppShellProps) {
     [sidebarProjects, sidebarProjectsLoading, projectId, handleProjectNavigate],
   );
 
+  const projectHealthElement = projectId ? (
+    <CredentialHealthNavItem projectId={projectId} />
+  ) : null;
+
+  const mobileProjectHealthElement = projectId ? (
+    <CredentialHealthNavItem projectId={projectId} compact />
+  ) : null;
+
   // Close drawer and reset nav toggle on route change
   useEffect(() => {
     setDrawerOpen(false);
@@ -217,6 +226,7 @@ export function AppShell({ children }: AppShellProps) {
             projectName={projectId ? (projectName || 'Project') : undefined}
             infraSection={mobileInfraSection}
             projectListSection={mobileProjectListSection}
+            projectHealthElement={mobileProjectHealthElement}
             showGlobalNav={showGlobalNav}
             onToggleGlobalNav={projectId ? handleToggleGlobalNav : undefined}
           />
@@ -261,6 +271,7 @@ export function AppShell({ children }: AppShellProps) {
           showGlobalNav={showGlobalNav}
           onToggleGlobalNav={handleToggleGlobalNav}
           projectListSection={desktopProjectListSection}
+          projectHealthElement={projectHealthElement}
         />
         {user && (
           <div className="mt-auto border-t border-[var(--sam-glass-border-color)] bg-[var(--sam-chrome-footer-bg)]">

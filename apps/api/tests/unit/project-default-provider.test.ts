@@ -95,7 +95,7 @@ describe('Project default provider — task submit', () => {
   });
 
   it('passes cloudProvider to startTaskRunnerDO', () => {
-    expect(submit).toContain('cloudProvider: provider');
+    expect(submit).toContain('cloudProvider: effectiveProvider');
   });
 
   it('validates provider against CREDENTIAL_PROVIDERS', () => {

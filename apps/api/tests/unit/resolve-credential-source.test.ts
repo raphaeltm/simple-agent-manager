@@ -15,6 +15,29 @@ import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
+import { resolveCredentialSource } from '../../src/services/provider-credentials';
+
+function makeCredentialSourceDbMock(
+  projectRows: unknown[],
+  userRows: unknown[],
+  platformRows: unknown[] = [],
+) {
+  const resultSets = [projectRows, userRows, platformRows];
+  let selectCount = 0;
+
+  const makeBuilder = () => ({
+    from: () => makeBuilder(),
+    innerJoin: () => makeBuilder(),
+    leftJoin: () => makeBuilder(),
+    where: () => makeBuilder(),
+    limit: async () => resultSets[selectCount++] ?? [],
+  });
+
+  return {
+    select: () => makeBuilder(),
+  };
+}
+
 describe('resolveCredentialSource', () => {
   const providerCredsSource = readFileSync(
     resolve(process.cwd(), 'src/services/provider-credentials.ts'),
@@ -67,12 +90,15 @@ describe('resolveCredentialSource', () => {
     expect(resolveFunc).toContain('return null;');
   });
 
-  it('resolves user credentials BEFORE platform credentials (user-first precedence)', () => {
+  it('resolves project credentials BEFORE user and platform credentials', () => {
     const resolveFunc = providerCredsSource.substring(
       providerCredsSource.indexOf('export async function resolveCredentialSource'),
     );
+    const projectCheckIdx = resolveFunc.indexOf('resolveProjectComputeCredentialSource');
     const userCheckIdx = resolveFunc.indexOf('schema.credentials.userId');
     const platformCheckIdx = resolveFunc.indexOf('schema.platformCredentials.credentialType');
+    expect(projectCheckIdx).toBeGreaterThanOrEqual(0);
+    expect(projectCheckIdx).toBeLessThan(userCheckIdx);
     expect(userCheckIdx).toBeLessThan(platformCheckIdx);
   });
 
@@ -87,6 +113,61 @@ describe('resolveCredentialSource', () => {
     // createProviderForUser also checks user creds first, then platform
     expect(createProviderFunc).toContain("credentialSource: 'user'");
     expect(createProviderFunc).toContain("credentialSource: 'platform'");
+  });
+});
+
+describe('resolveCredentialSource project compute precedence', () => {
+  it('returns project source when an active project attachment exists', async () => {
+    const db = makeCredentialSourceDbMock(
+      [{
+        attachmentActive: true,
+        consumerTarget: 'hetzner',
+        configurationActive: true,
+        credentialId: 'cc-project-cred',
+        credentialActive: true,
+      }],
+      [{ id: 'personal-cred', provider: 'hetzner' }],
+    );
+
+    await expect(
+      resolveCredentialSource(db as never, 'member-a', 'hetzner', 'project-1'),
+    ).resolves.toEqual({ credentialSource: 'project', providerName: 'hetzner' });
+  });
+
+  it('halts on an inactive project attachment instead of falling through to personal credentials', async () => {
+    const db = makeCredentialSourceDbMock(
+      [{
+        attachmentActive: false,
+        consumerTarget: 'hetzner',
+        configurationActive: true,
+        credentialId: 'cc-project-cred',
+        credentialActive: true,
+      }],
+      [{ id: 'personal-cred', provider: 'hetzner' }],
+    );
+
+    await expect(
+      resolveCredentialSource(db as never, 'member-a', 'hetzner', 'project-1'),
+    ).resolves.toBeNull();
+  });
+
+  it('falls back to the pinned creator personal credential when no project attachment exists', async () => {
+    const db = makeCredentialSourceDbMock(
+      [],
+      [{ id: 'personal-cred', provider: 'hetzner' }],
+    );
+
+    await expect(
+      resolveCredentialSource(db as never, 'member-a', 'hetzner', 'project-1'),
+    ).resolves.toEqual({ credentialSource: 'user', providerName: 'hetzner' });
+  });
+
+  it('returns null when no project, personal, or platform credential exists', async () => {
+    const db = makeCredentialSourceDbMock([], [], []);
+
+    await expect(
+      resolveCredentialSource(db as never, 'member-a', 'scaleway', 'project-1'),
+    ).resolves.toBeNull();
   });
 });
 
@@ -205,20 +286,23 @@ describe('quota enforcement pattern: credential source, not existence', () => {
   // Provider passed to resolveCredentialSource
   // =========================================================================
   describe('target provider is passed to credential resolution', () => {
-    it('submit.ts passes resolved provider', () => {
-      expect(submitSource).toContain('resolveCredentialSource(db, userId, provider');
+    it('submit.ts passes root or inherited project scope', () => {
+      expect(submitSource).toContain('credentialResolutionProjectId');
+      expect(submitSource).toContain('provider ?? undefined');
     });
 
     it('node-steps.ts passes cloudProvider from config', () => {
       expect(nodeStepsSource).toContain('state.config.cloudProvider');
     });
 
-    it('nodes.ts passes provider from request body', () => {
-      expect(nodesSource).toContain('resolveCredentialSource(db, userId, provider');
+    it('nodes.ts passes provider from request body for user-scoped manual creation', () => {
+      expect(nodesSource).toContain('resolveCredentialSource(db, userId, provider ?? undefined)');
     });
 
-    it('dispatch-tool.ts passes resolvedProvider', () => {
-      expect(dispatchSource).toContain('resolveCredentialSource(db, tokenData.userId, resolvedProvider');
+    it('dispatch-tool.ts passes inherited root attribution scope', () => {
+      expect(dispatchSource).toContain('inheritedAttributionUserId');
+      expect(dispatchSource).toContain('inheritedAttributionProjectId');
+      expect(dispatchSource).toContain('resolvedProvider ?? undefined');
     });
   });
 

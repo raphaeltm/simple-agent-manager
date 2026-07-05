@@ -85,6 +85,8 @@ vi.mock('drizzle-orm/d1', () => ({
   drizzle: () => {
     function makeThenable(resolveValue: () => Promise<any>) {
       const obj: any = {
+        innerJoin: vi.fn(() => makeThenable(resolveValue)),
+        leftJoin: vi.fn(() => makeThenable(resolveValue)),
         where: vi.fn(() => makeThenable(resolveValue)),
         orderBy: vi.fn(() => makeThenable(resolveValue)),
         limit: vi.fn((n: number) => {
@@ -124,6 +126,8 @@ vi.mock('drizzle-orm', () => ({
   count: vi.fn(() => 'count'),
   desc: vi.fn((col: any) => col),
   inArray: vi.fn((_col: any, vals: any) => ['inArray', vals]),
+  isNull: vi.fn((col: any) => ['isNull', col]),
+  or: vi.fn((...args: any[]) => ['or', ...args]),
   sql: Object.assign((s: unknown) => s, { raw: (s: unknown) => s }),
   lte: vi.fn((_col: any, val: any) => ['lte', val]),
 }));

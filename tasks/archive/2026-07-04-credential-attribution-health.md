@@ -21,17 +21,17 @@ Implement a compact persistent project health surface, detailed modal, invite/me
 
 ## Implementation Checklist
 
-- [ ] Add shared credential-attribution health response types covering counts, resource details, credential owner metadata, project coverage, and deep links.
-- [ ] Add API service support for project credential-attribution health summary, starting with trigger resources and including agent/LLM plus compute/provider credential coverage where inferable.
-- [ ] Add project route endpoint gated by project membership/capability; ensure owner/admin/member read access as appropriate and no secret fields are returned.
-- [ ] Enrich trigger responses with effective attribution metadata so trigger list/detail/edit screens can show inline warnings.
-- [ ] Add focused API tests for summary counts/details, project-vs-personal precedence, no secret leakage, and member/admin access.
-- [ ] Add web API client support for the health endpoint and attribution metadata.
-- [ ] Add compact persistent project health element to existing desktop and mobile navigation, opening a modal with details and fix deep links.
-- [ ] Add non-blocking invite/member-management soft warning/checklist when a project is already multiplayer or an invite/access transition is underway.
-- [ ] Add inline trigger/resource edit warnings when effective credential attribution is personal, especially when the actor differs from the trigger creator/credential owner.
-- [ ] Add focused web unit tests for nav badge/modal, invite warning, trigger inline warning, and mobile nav behavior.
-- [ ] Run mandatory Playwright visual audit for changed production UI surfaces at mobile and desktop widths.
+- [x] Add shared credential-attribution health response types covering counts, resource details, credential owner metadata, project coverage, and deep links.
+- [x] Add API service support for project credential-attribution health summary, starting with trigger resources and including agent/LLM plus compute/provider credential coverage where inferable.
+- [x] Add project route endpoint gated by project membership/capability; ensure owner/admin/member read access as appropriate and no secret fields are returned.
+- [x] Enrich trigger responses with effective attribution metadata so trigger list/detail/edit screens can show inline warnings.
+- [x] Add focused API tests for summary counts/details, project-vs-personal precedence, no secret leakage, and member/admin access.
+- [x] Add web API client support for the health endpoint and attribution metadata.
+- [x] Add compact persistent project health element to existing desktop and mobile navigation, opening a modal with details and fix deep links.
+- [x] Add non-blocking invite/member-management soft warning/checklist when a project is already multiplayer or an invite/access transition is underway.
+- [x] Add inline trigger/resource edit warnings when effective credential attribution is personal, especially when the actor differs from the trigger creator/credential owner.
+- [x] Add focused web unit tests for nav badge/modal, invite warning, trigger inline warning, and mobile nav behavior.
+- [x] Run mandatory Playwright visual audit for changed production UI surfaces at mobile and desktop widths.
 - [ ] Run `/do` validation: lint, typecheck, tests, build, specialist reviews, staging verification, PR, CI, merge, and production deploy monitoring.
 
 ## Acceptance Criteria

@@ -855,7 +855,8 @@ describe('attachEnvironmentVolumes', () => {
       'user-1',
       'test-key',
       mockEnv,
-      'scaleway'
+      'scaleway',
+      null
     );
     expect(provider.attachVolume).toHaveBeenCalledWith({
       volumeId: 'scw-vol-1',
@@ -1065,7 +1066,8 @@ describe('detachEnvironmentVolumes', () => {
       'user-1',
       'test-key',
       mockEnv,
-      'scaleway'
+      'scaleway',
+      null
     );
     expect(provider.detachVolume).toHaveBeenCalledWith({
       volumeId: 'scw-vol-1',

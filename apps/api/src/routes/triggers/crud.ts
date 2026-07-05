@@ -37,6 +37,7 @@ import { ulid } from '../../lib/ulid';
 import { getAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { CreateTriggerSchema, jsonValidator, UpdateTriggerSchema } from '../../schemas';
+import { buildCredentialAttributionForTriggers } from '../../services/credential-attribution-health';
 import { validateCronExpression } from '../../services/cron-utils';
 import { cronToHumanReadable, cronToNextFire } from '../../services/cron-utils';
 import { submitTriggeredTask } from '../../services/trigger-submit';
@@ -75,6 +76,33 @@ function toTriggerResponse(row: schema.TriggerRow): TriggerResponse {
   };
 }
 
+async function attachCredentialAttribution(input: {
+  db: ReturnType<typeof drizzle<typeof schema>>;
+  env: Env;
+  project: schema.Project;
+  triggers: schema.TriggerRow[];
+}): Promise<Map<string, TriggerResponse['credentialAttribution']>> {
+  const checksByTriggerId = await buildCredentialAttributionForTriggers({
+    db: input.db,
+    project: input.project,
+    triggers: input.triggers,
+    defaultAgentType: input.env.DEFAULT_TASK_AGENT_TYPE || 'opencode',
+  });
+
+  return new Map(
+    input.triggers.map((trigger) => {
+      const checks = checksByTriggerId.get(trigger.id) ?? [];
+      return [
+        trigger.id,
+        {
+          hasPersonalWarning: checks.some((check) => check.source === 'personal'),
+          checks,
+        },
+      ];
+    })
+  );
+}
+
 // =============================================================================
 // POST / — Create trigger
 // =============================================================================
@@ -88,7 +116,7 @@ crudRoutes.post('/', jsonValidator(CreateTriggerSchema), async (c) => {
     throw errors.badRequest('projectId is required');
   }
 
-  await requireProjectTaskWrite(db, projectId, userId);
+  const project = await requireProjectTaskWrite(db, projectId, userId);
   const body = c.req.valid('json');
 
   // Validate required fields
@@ -260,7 +288,18 @@ crudRoutes.post('/', jsonValidator(CreateTriggerSchema), async (c) => {
 
   log.info('trigger.created', { triggerId: id, projectId, name, sourceType: body.sourceType });
 
-  return c.json({ ...toTriggerResponse(created!), githubConfig }, 201);
+  const attribution = await attachCredentialAttribution({
+    db,
+    env: c.env,
+    project,
+    triggers: [created!],
+  });
+
+  return c.json({
+    ...toTriggerResponse(created!),
+    credentialAttribution: attribution.get(created!.id),
+    githubConfig,
+  }, 201);
 });
 
 // =============================================================================
@@ -276,7 +315,7 @@ crudRoutes.get('/', async (c) => {
     throw errors.badRequest('projectId is required');
   }
 
-  await requireProjectTaskRead(db, projectId, userId);
+  const project = await requireProjectTaskRead(db, projectId, userId);
 
   const rows = await db
     .select()
@@ -318,8 +357,16 @@ crudRoutes.get('/', async (c) => {
     : [];
   const githubConfigByTriggerId = new Map(githubConfigs.map((config) => [config.triggerId, config]));
 
+  const attribution = await attachCredentialAttribution({
+    db,
+    env: c.env,
+    project,
+    triggers: rows,
+  });
+
   const triggers: TriggerResponse[] = rows.map((row) => {
     const response = toTriggerResponse(row);
+    response.credentialAttribution = attribution.get(row.id);
     const config = githubConfigByTriggerId.get(row.id);
     if (!config) return response;
     return {
@@ -349,7 +396,7 @@ crudRoutes.get('/:triggerId', async (c) => {
     throw errors.badRequest('projectId and triggerId are required');
   }
 
-  await requireProjectTaskRead(db, projectId, userId);
+  const project = await requireProjectTaskRead(db, projectId, userId);
 
   const [trigger] = await db
     .select()
@@ -390,8 +437,16 @@ crudRoutes.get('/:triggerId', async (c) => {
     .orderBy(desc(schema.triggerExecutions.createdAt))
     .limit(5);
 
+  const attribution = await attachCredentialAttribution({
+    db,
+    env: c.env,
+    project,
+    triggers: [trigger],
+  });
+
   return c.json({
     ...toTriggerResponse(trigger),
+    credentialAttribution: attribution.get(trigger.id),
     githubConfig,
     recentExecutions: recentExecutions.map((e) => ({
       id: e.id,
@@ -426,7 +481,7 @@ crudRoutes.patch('/:triggerId', jsonValidator(UpdateTriggerSchema), async (c) =>
     throw errors.badRequest('projectId and triggerId are required');
   }
 
-  await requireProjectTaskWrite(db, projectId, userId);
+  const project = await requireProjectTaskWrite(db, projectId, userId);
 
   const [trigger] = await db
     .select()
@@ -556,7 +611,17 @@ crudRoutes.patch('/:triggerId', jsonValidator(UpdateTriggerSchema), async (c) =>
 
   log.info('trigger.updated', { triggerId, projectId, fields: Object.keys(body) });
 
-  return c.json(toTriggerResponse(updated!));
+  const attribution = await attachCredentialAttribution({
+    db,
+    env: c.env,
+    project,
+    triggers: [updated!],
+  });
+
+  return c.json({
+    ...toTriggerResponse(updated!),
+    credentialAttribution: attribution.get(updated!.id),
+  });
 });
 
 // =============================================================================

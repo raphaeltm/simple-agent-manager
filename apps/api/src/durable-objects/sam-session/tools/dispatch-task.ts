@@ -193,13 +193,22 @@ export async function dispatchTask(
   // ── Resolve parent task lineage ────────────────────────────────────────
   let parentTaskId: string | null = null;
   let dispatchDepth = 0;
+  let inheritedAttributionUserId: string | null = null;
+  let inheritedAttributionProjectId: string | null = null;
+  let inheritedAttributionSource: import('@simple-agent-manager/shared').CredentialSource | null = null;
 
   if (input.parentTaskId?.trim()) {
     const parentRow = await env.DATABASE.prepare(
-      `SELECT id, dispatch_depth FROM tasks WHERE id = ? AND project_id = ? AND user_id = ?`,
+      `SELECT id, dispatch_depth, user_id, credential_attribution_user_id,
+        credential_attribution_project_id, credential_attribution_source
+       FROM tasks WHERE id = ? AND project_id = ? AND user_id = ?`,
     ).bind(input.parentTaskId.trim(), input.projectId, ctx.userId).first<{
       id: string;
       dispatch_depth: number;
+      user_id: string;
+      credential_attribution_user_id: string | null;
+      credential_attribution_project_id: string | null;
+      credential_attribution_source: string | null;
     }>();
 
     if (!parentRow) {
@@ -208,6 +217,11 @@ export async function dispatchTask(
 
     parentTaskId = parentRow.id;
     dispatchDepth = (parentRow.dispatch_depth ?? 0) + 1;
+    inheritedAttributionUserId = parentRow.credential_attribution_user_id ?? parentRow.user_id;
+    inheritedAttributionSource = (parentRow.credential_attribution_source ?? 'user') as import('@simple-agent-manager/shared').CredentialSource;
+    inheritedAttributionProjectId = inheritedAttributionSource === 'project'
+      ? (parentRow.credential_attribution_project_id ?? input.projectId)
+      : null;
 
     // Enforce dispatch depth limit (mirrors MCP path in dispatch-tool.ts:234-250)
     const DEFAULT_DISPATCH_MAX_DEPTH = 3;
@@ -282,10 +296,23 @@ export async function dispatchTask(
 
   // ── Verify cloud credentials ──────────────────────────────────────────
   const { resolveCredentialSource } = await import('../../../services/provider-credentials');
-  const credResult = await resolveCredentialSource(db, ctx.userId, resolvedProvider ?? undefined);
+  const credentialResolutionUserId = inheritedAttributionUserId ?? ctx.userId;
+  const credentialResolutionProjectId = inheritedAttributionUserId ? inheritedAttributionProjectId : input.projectId;
+  const credResult = await resolveCredentialSource(
+    db,
+    credentialResolutionUserId,
+    resolvedProvider ?? undefined,
+    credentialResolutionProjectId
+  );
   if (!credResult) {
     return { error: 'No cloud provider credentials found. The user must connect a cloud provider in Settings.' };
   }
+  const credentialAttributionUserId = inheritedAttributionUserId ?? ctx.userId;
+  const credentialAttributionSource = inheritedAttributionSource ?? credResult.credentialSource;
+  const credentialAttributionProjectId = credentialAttributionSource === 'project'
+    ? (inheritedAttributionProjectId ?? input.projectId)
+    : null;
+  const effectiveProvider = resolvedProvider ?? credResult.providerName;
 
   // ── Generate title and branch name ────────────────────────────────────
   const titleConfig = getTaskTitleConfig(env);
@@ -319,10 +346,12 @@ export async function dispatchTask(
      status, execution_step, priority, dispatch_depth, output_branch, created_by,
      task_mode, agent_profile_hint, skill_id, skill_hint, mission_id, triggered_by,
      requested_vm_size, requested_vm_size_source, resource_requirements_json, resource_requirements_source, resolved_reservation_json,
+     credential_attribution_user_id, credential_attribution_project_id, credential_attribution_source,
      created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, 'queued', 'node_selection', ?, ?, ?, ?,
      ?, ?, ?, ?, ?, 'mcp',
      ?, ?, ?, ?, ?,
+     ?, ?, ?,
      ?, ?)`,
   ).bind(
     taskId, input.projectId, ctx.userId, parentTaskId,
@@ -330,6 +359,7 @@ export async function dispatchTask(
     ctx.userId,
     resolvedTaskMode, resolvedProfile?.profileId ?? null, resolvedProfile?.skillId ?? null, input.skillId ?? null, input.missionId?.trim() || null,
     resolvedVmSize, vmSizeSource, resolvedProfile?.resourceRequirementsJson ?? null, resolvedReservation.source, JSON.stringify(resolvedReservation),
+    credentialAttributionUserId, credentialAttributionProjectId, credentialAttributionSource,
     now, now,
   ).run();
 
@@ -409,7 +439,10 @@ export async function dispatchTask(
       chatSessionId: sessionId,
       agentType: resolvedAgentType,
       workspaceProfile: resolvedWorkspaceProfile,
-      cloudProvider: resolvedProvider,
+      cloudProvider: effectiveProvider,
+      credentialAttributionUserId,
+      credentialAttributionProjectId,
+      credentialAttributionSource,
       taskMode: resolvedTaskMode,
       model:
         resolvedProfile?.model ??

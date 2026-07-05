@@ -683,7 +683,13 @@ export const tasks = sqliteTable(
     /** Soft FK to trigger_executions table. No DB constraint — execution record may be cleaned up independently. */
     triggerExecutionId: text('trigger_execution_id'),
     /** Whether the agent credential came from the user or the platform. */
-    agentCredentialSource: text('agent_credential_source').default('user'), // 'user' | 'platform'
+    agentCredentialSource: text('agent_credential_source').default('user'), // 'user' | 'project' | 'platform'
+    /** User whose credential attribution is pinned for this task tree. */
+    credentialAttributionUserId: text('credential_attribution_user_id').references(() => users.id, { onDelete: 'set null' }),
+    /** Project scope used when credentialAttributionSource is 'project'. */
+    credentialAttributionProjectId: text('credential_attribution_project_id').references(() => projects.id, { onDelete: 'set null' }),
+    /** Root-pinned credential attribution source: 'user' | 'project' | 'platform'. */
+    credentialAttributionSource: text('credential_attribution_source').default('user'),
     /** Null for standalone tasks; set when task belongs to a mission. Set null on mission delete. */
     missionId: text('mission_id').references(() => missions.id, { onDelete: 'set null' }),
     /** Scheduler classification for mission tasks. Null for standalone tasks. */
@@ -804,6 +810,12 @@ export const nodes = sqliteTable(
     warmSince: text('warm_since'),
     /** 'user' = provisioned with user's own credential; 'platform' = provisioned with platform credential. */
     credentialSource: text('credential_source').default('user'),
+    /** User whose credential attribution was used to provision this node. */
+    credentialAttributionUserId: text('credential_attribution_user_id').references(() => users.id, { onDelete: 'set null' }),
+    /** Project scope used when credentialAttributionSource is 'project'. */
+    credentialAttributionProjectId: text('credential_attribution_project_id').references(() => projects.id, { onDelete: 'set null' }),
+    /** Credential attribution source used at node creation: 'user' | 'project' | 'platform'. */
+    credentialAttributionSource: text('credential_attribution_source').default('user'),
     /** 'workspace' = ephemeral task/dev node (default); 'deployment' = long-lived app-hosting node. */
     nodeRole: text('node_role').notNull().default('workspace'),
     /** 'shared' = eligible for multi-tenant placement; 'exclusive' = one deployment environment only. */

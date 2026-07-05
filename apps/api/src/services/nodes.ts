@@ -1,6 +1,6 @@
 import { generateCloudInit, validateCloudInitSize } from '@simple-agent-manager/cloud-init';
 import { isTransientCapacityError, ProviderError } from '@simple-agent-manager/providers';
-import type { CredentialProvider, TaskMode } from '@simple-agent-manager/shared';
+import type { CredentialProvider, CredentialSource, TaskMode } from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
@@ -19,6 +19,9 @@ const NODE_ERROR_MESSAGE_MAX_LENGTH = 500;
 
 export interface CreateNodeInput {
   userId: string;
+  credentialAttributionUserId?: string | null;
+  credentialAttributionProjectId?: string | null;
+  credentialAttributionSource?: CredentialSource | null;
   name: string;
   vmSize: string;
   vmLocation: string;
@@ -76,6 +79,11 @@ export async function createNodeRecord(env: Env, input: CreateNodeInput): Promis
   await db.insert(schema.nodes).values({
     id: nodeId,
     userId: input.userId,
+    credentialAttributionUserId: input.credentialAttributionUserId ?? input.userId,
+    credentialAttributionProjectId: input.credentialAttributionSource === 'project'
+      ? (input.credentialAttributionProjectId ?? null)
+      : null,
+    credentialAttributionSource: input.credentialAttributionSource ?? 'user',
     name: input.name,
     status: 'creating',
     vmSize: input.vmSize,
@@ -154,14 +162,19 @@ export async function provisionNode(
 
   const targetProvider = (node.cloudProvider as CredentialProvider | null) ?? undefined;
   let attemptedProvider = targetProvider;
+  const attributionUserId = node.credentialAttributionUserId ?? node.userId;
+  const attributionProjectId = node.credentialAttributionSource === 'project'
+    ? (node.credentialAttributionProjectId ?? taskContext?.projectId ?? null)
+    : null;
 
   try {
     const providerResult = await createProviderForUser(
       db,
-      node.userId,
+      attributionUserId,
       getCredentialEncryptionKey(env),
       env,
-      targetProvider
+      targetProvider,
+      attributionProjectId
     );
     if (!providerResult) {
       throw new Error(
@@ -179,6 +192,9 @@ export async function provisionNode(
       .set({
         cloudProvider: providerResult.providerName,
         credentialSource: providerResult.credentialSource,
+        credentialAttributionUserId: attributionUserId,
+        credentialAttributionProjectId: providerResult.credentialSource === 'project' ? attributionProjectId : null,
+        credentialAttributionSource: providerResult.credentialSource,
         updatedAt: new Date().toISOString(),
       })
       .where(eq(schema.nodes.id, node.id));
@@ -253,6 +269,9 @@ export async function provisionNode(
         .set({
           cloudProvider: providerResult.providerName,
           credentialSource: providerResult.credentialSource,
+          credentialAttributionUserId: attributionUserId,
+          credentialAttributionProjectId: providerResult.credentialSource === 'project' ? attributionProjectId : null,
+          credentialAttributionSource: providerResult.credentialSource,
           providerInstanceId: vm.id,
           status: 'creating',
           errorMessage: 'Awaiting IP allocation — will be set on first heartbeat',
@@ -279,6 +298,9 @@ export async function provisionNode(
       .set({
         cloudProvider: providerResult.providerName,
         credentialSource: providerResult.credentialSource,
+        credentialAttributionUserId: attributionUserId,
+        credentialAttributionProjectId: providerResult.credentialSource === 'project' ? attributionProjectId : null,
+        credentialAttributionSource: providerResult.credentialSource,
         providerInstanceId: vm.id,
         ipAddress: vm.ip,
         backendDnsRecordId,
@@ -387,12 +409,17 @@ export async function stopNodeResources(nodeId: string, userId: string, env: Env
   // Delete the cloud provider server since stopped nodes cannot be restarted
   if (node.providerInstanceId) {
     const targetProvider = (node.cloudProvider as CredentialProvider | null) ?? undefined;
+    const attributionUserId = node.credentialAttributionUserId ?? userId;
+    const attributionProjectId = node.credentialAttributionSource === 'project'
+      ? (node.credentialAttributionProjectId ?? null)
+      : null;
     const providerResult = await createProviderForUser(
       db,
-      userId,
+      attributionUserId,
       getCredentialEncryptionKey(env),
       env,
-      targetProvider
+      targetProvider,
+      attributionProjectId
     );
     if (providerResult) {
       try {
@@ -467,12 +494,17 @@ export async function deleteNodeResources(
 
   if (node.providerInstanceId) {
     const targetProvider = (node.cloudProvider as CredentialProvider | null) ?? undefined;
+    const attributionUserId = node.credentialAttributionUserId ?? userId;
+    const attributionProjectId = node.credentialAttributionSource === 'project'
+      ? (node.credentialAttributionProjectId ?? null)
+      : null;
     const providerResult2 = await createProviderForUser(
       db,
-      userId,
+      attributionUserId,
       getCredentialEncryptionKey(env),
       env,
-      targetProvider
+      targetProvider,
+      attributionProjectId
     );
     if (providerResult2) {
       try {
@@ -547,7 +579,18 @@ export async function deleteNodeResourcesStrict(nodeId: string, userId: string, 
 
   if (node.providerInstanceId) {
     const targetProvider = (node.cloudProvider as CredentialProvider | null) ?? undefined;
-    const providerResult = await createProviderForUser(db, userId, getCredentialEncryptionKey(env), env, targetProvider);
+    const attributionUserId = node.credentialAttributionUserId ?? userId;
+    const attributionProjectId = node.credentialAttributionSource === 'project'
+      ? (node.credentialAttributionProjectId ?? null)
+      : null;
+    const providerResult = await createProviderForUser(
+      db,
+      attributionUserId,
+      getCredentialEncryptionKey(env),
+      env,
+      targetProvider,
+      attributionProjectId
+    );
     if (!providerResult) {
       throw new Error(
         `Cloud provider credentials missing for strict node deletion: node=${nodeId} provider=${node.cloudProvider ?? 'unknown'} instance=${node.providerInstanceId}`
@@ -568,6 +611,9 @@ export async function deleteNodeResourcesStrict(nodeId: string, userId: string, 
       .set({
         cloudProvider: providerResult.providerName,
         credentialSource: providerResult.credentialSource,
+        credentialAttributionUserId: attributionUserId,
+        credentialAttributionProjectId: providerResult.credentialSource === 'project' ? attributionProjectId : null,
+        credentialAttributionSource: providerResult.credentialSource,
         updatedAt: new Date().toISOString(),
       })
       .where(eq(schema.nodes.id, node.id));

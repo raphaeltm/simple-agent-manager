@@ -21,7 +21,7 @@ import {
   isValidProvider,
   resolveResourceReservation,
 } from '@simple-agent-manager/shared';
-import { and, eq } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -87,22 +87,6 @@ export async function submitTriggeredTask(
     throw new Error(`Project ${input.projectId} not found`);
   }
 
-  // Verify user has cloud provider credentials
-  const [credential] = await db
-    .select({ id: schema.credentials.id })
-    .from(schema.credentials)
-    .where(
-      and(
-        eq(schema.credentials.userId, input.userId),
-        eq(schema.credentials.credentialType, 'cloud-provider')
-      )
-    )
-    .limit(1);
-
-  if (!credential) {
-    throw new Error(`User ${input.userId} has no cloud provider credentials`);
-  }
-
   // Resolve agent profile if specified
   const resolvedProfile = input.agentProfileId || input.skillId
     ? await resolveSkillProfile(db, input.projectId, input.agentProfileId, input.skillId, input.userId, env)
@@ -131,6 +115,13 @@ export async function submitTriggeredTask(
     profileProvider
     ?? projectDefaultProvider
     ?? null;
+
+  const { resolveCredentialSource } = await import('./provider-credentials');
+  const credResult = await resolveCredentialSource(db, input.userId, provider ?? undefined, input.projectId);
+  if (!credResult) {
+    throw new Error(`No cloud provider credentials available for trigger ${input.triggerId}`);
+  }
+  const effectiveProvider = provider ?? credResult.providerName;
 
   const vmLocation: VMLocation =
     (resolvedProfile?.vmLocation as VMLocation | null)
@@ -200,6 +191,9 @@ export async function submitTriggeredTask(
     resourceRequirementsJson: resolvedProfile?.resourceRequirementsJson ?? null,
     resourceRequirementsSource: resolvedReservation.source,
     resolvedReservationJson: JSON.stringify(resolvedReservation),
+    credentialAttributionUserId: input.userId,
+    credentialAttributionProjectId: credResult.credentialSource === 'project' ? input.projectId : null,
+    credentialAttributionSource: credResult.credentialSource,
     createdBy: input.userId,
     createdAt: now,
     updatedAt: now,
@@ -295,7 +289,10 @@ export async function submitTriggeredTask(
       chatSessionId: sessionId,
       agentType: resolvedProfile?.agentType ?? project.defaultAgentType ?? null,
       workspaceProfile,
-      cloudProvider: provider,
+      cloudProvider: effectiveProvider,
+      credentialAttributionUserId: input.userId,
+      credentialAttributionProjectId: credResult.credentialSource === 'project' ? input.projectId : null,
+      credentialAttributionSource: credResult.credentialSource,
       taskMode,
       model: resolvedProfile?.model ?? null,
       effort: resolvedProfile?.effort ?? null,

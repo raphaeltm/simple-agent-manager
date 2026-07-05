@@ -27,6 +27,7 @@ import { useToast } from '../../hooks/useToast';
 import { createTrigger, listAgentProfiles, updateTrigger } from '../../lib/api';
 import { useProjectContext } from '../../pages/ProjectContext';
 import { SchedulePicker } from './SchedulePicker';
+import { TriggerCredentialWarning } from './TriggerCredentialWarning';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -366,6 +367,12 @@ export const TriggerForm: FC<TriggerFormProps> = ({
             <X size={20} />
           </button>
         </div>
+
+        {editTrigger?.credentialAttribution?.hasPersonalWarning && (
+          <div className="px-4 pt-4">
+            <TriggerCredentialWarning trigger={editTrigger} />
+          </div>
+        )}
 
         {/* Form content */}
         <div className="p-4 space-y-6">

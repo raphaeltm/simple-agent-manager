@@ -1,5 +1,5 @@
 import { Dialog } from '@simple-agent-manager/ui';
-import { ArrowLeft, X } from 'lucide-react';
+import { X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { ChatSessionListItem } from '../../lib/api';
@@ -147,6 +147,7 @@ export function HierarchyModal({
   const [filter, setFilter] = useState('');
   const [collapseState, setCollapseState] = useState<Map<string, boolean>>(new Map());
   const scrollRef = useRef<HTMLDivElement>(null);
+  const filterInputRef = useRef<HTMLInputElement>(null);
   const hasScrolledRef = useRef(false);
 
   // Build tree from live data
@@ -208,10 +209,10 @@ export function HierarchyModal({
     if (!isOpen) hasScrolledRef.current = false;
   }, [isOpen]);
 
-  // Filter
+  // Filter — null when a filter is active but nothing matches
   const displayTree = useMemo(() => {
     if (!tree || !filter.trim()) return tree;
-    return filterTree(tree, filter.trim()) ?? tree;
+    return filterTree(tree, filter.trim());
   }, [tree, filter]);
 
   const filterMatchIds = useMemo(() => {
@@ -236,15 +237,6 @@ export function HierarchyModal({
       }}
     >
       <div className="flex items-center gap-2">
-        <button
-          type="button"
-          onClick={onClose}
-          className="flex items-center justify-center shrink-0"
-          style={{ ...iconButtonStyle, border: '1px solid var(--sam-color-border-default)' }}
-          aria-label="Close hierarchy"
-        >
-          <ArrowLeft size={14} />
-        </button>
         <div className="flex-1">
           <div id="dialog-title" className="text-sm font-semibold" style={{ color: 'var(--sam-color-fg-primary)' }}>
             Task Hierarchy
@@ -276,6 +268,7 @@ export function HierarchyModal({
 
       <div className="mt-2">
         <input
+          ref={filterInputRef}
           type="text"
           placeholder="Filter tasks..."
           value={filter}
@@ -300,16 +293,42 @@ export function HierarchyModal({
 
   return (
     <Dialog isOpen={isOpen} onClose={onClose} maxWidth="lg" stickyHeader={stickyHeader}>
-      <div ref={scrollRef} role="tree" aria-label="Task hierarchy">
-        {displayTree && (
-          <HierarchyTreeNode
-            node={displayTree}
-            focusTaskId={focusTaskId}
-            onNavigate={onNavigate}
-            isExpanded={isExpanded}
-            toggleExpanded={toggleExpanded}
-            filterMatchIds={filterMatchIds}
-          />
+      <div ref={scrollRef}>
+        {displayTree ? (
+          <div role="tree" aria-label="Task hierarchy">
+            <HierarchyTreeNode
+              node={displayTree}
+              focusTaskId={focusTaskId}
+              onNavigate={onNavigate}
+              isExpanded={isExpanded}
+              toggleExpanded={toggleExpanded}
+              filterMatchIds={filterMatchIds}
+            />
+          </div>
+        ) : (
+          <div
+            className="flex flex-col items-center gap-2 py-8 text-center"
+            style={{ color: 'var(--sam-color-fg-muted)', fontSize: 12 }}
+          >
+            <span>No tasks match &ldquo;{filter.trim()}&rdquo;</span>
+            <button
+              type="button"
+              onClick={() => {
+                setFilter('');
+                filterInputRef.current?.focus();
+              }}
+              className="rounded-md text-xs font-medium"
+              style={{
+                padding: '4px 10px',
+                border: '1px solid var(--sam-color-border-default)',
+                background: 'transparent',
+                color: 'var(--sam-color-fg-primary)',
+                cursor: 'pointer',
+              }}
+            >
+              Clear filter
+            </button>
+          </div>
         )}
       </div>
     </Dialog>

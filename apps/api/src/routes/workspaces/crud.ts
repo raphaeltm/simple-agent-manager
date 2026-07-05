@@ -232,6 +232,7 @@ crudRoutes.post('/', requireAuth(), requireApproved(), jsonValidator(CreateWorks
 
   let nodeId = body.nodeId;
   let mustProvisionNode = false;
+  let credentialAttributionSource: import('@simple-agent-manager/shared').CredentialSource = 'user';
   // Use COUNT instead of fetching all node IDs (P1 fix).
   // Exclude deleted/stopped nodes — only active ones count toward the limit.
   const [userNodeCount] = await db
@@ -254,12 +255,23 @@ crudRoutes.post('/', requireAuth(), requireApproved(), jsonValidator(CreateWorks
       throw errors.badRequest(`Maximum ${limits.maxNodesPerUser} nodes allowed`);
     }
 
+    const { resolveCredentialSource } = await import('../../services/provider-credentials');
+    const credResult = await resolveCredentialSource(db, userId, body.provider, linkedProject.id);
+    if (!credResult) {
+      throw errors.forbidden('Cloud provider credentials required. Connect your account in Settings.');
+    }
+    credentialAttributionSource = credResult.credentialSource;
+    const effectiveProvider = body.provider ?? credResult.providerName;
+
     const createdNode = await createNodeRecord(c.env, {
       userId,
+      credentialAttributionUserId: userId,
+      credentialAttributionProjectId: credentialAttributionSource === 'project' ? linkedProject.id : null,
+      credentialAttributionSource,
       name: `${workspaceName} Node`,
       vmSize,
       vmLocation,
-      cloudProvider: body.provider,
+      cloudProvider: effectiveProvider,
       heartbeatStaleAfterSeconds: limits.nodeHeartbeatStaleSeconds,
     });
 
@@ -371,7 +383,7 @@ crudRoutes.post('/', requireAuth(), requireApproved(), jsonValidator(CreateWorks
       nodeId: targetNodeId,
       vmSize,
       cloudProvider: nodeRow?.cloudProvider,
-      credentialSource: (nodeRow?.credentialSource as 'user' | 'platform') ?? 'user',
+      credentialSource: (nodeRow?.credentialSource as import('@simple-agent-manager/shared').CredentialSource) ?? 'user',
     });
   } catch (err) {
     log.error('workspace.compute_tracking_start_failed', {

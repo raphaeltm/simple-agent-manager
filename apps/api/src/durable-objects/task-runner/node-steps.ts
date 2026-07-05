@@ -222,11 +222,15 @@ export async function handleNodeProvisioning(
     const drizzleSchema = await import('../../db/schema');
     const db = drizzle(rc.env.DATABASE, { schema: drizzleSchema });
     const { resolveCredentialSource } = await import('../../services/provider-credentials');
+    const attributionProjectId = state.config.credentialAttributionSource === 'project'
+      ? state.config.credentialAttributionProjectId
+      : null;
     const credResult = await resolveCredentialSource(
       db,
-      state.userId,
+      state.config.credentialAttributionUserId,
       (state.config.cloudProvider as import('@simple-agent-manager/shared').CredentialProvider) ??
-        undefined
+        undefined,
+      attributionProjectId
     );
 
     if (!credResult) {
@@ -277,6 +281,9 @@ export async function handleNodeProvisioning(
 
     const createdNode = await createNodeRecord(rc.env, {
       userId: state.userId,
+      credentialAttributionUserId: state.config.credentialAttributionUserId,
+      credentialAttributionProjectId: state.config.credentialAttributionProjectId,
+      credentialAttributionSource: state.config.credentialAttributionSource,
       name: `Auto: ${state.config.taskTitle.slice(0, 40)}`,
       vmSize: size,
       vmLocation: state.config.vmLocation,

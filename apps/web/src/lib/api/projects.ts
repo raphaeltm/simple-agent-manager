@@ -9,6 +9,7 @@ import type {
   ListProjectsResponse,
   Project,
   ProjectAccessRequestResponse,
+  ProjectCredentialAttributionHealthSummary,
   ProjectDetailResponse,
   ProjectInviteLinkResponse,
   ProjectInvitePreviewResponse,
@@ -142,6 +143,14 @@ export async function getArtifactsEnabled(): Promise<boolean> {
 
 export async function getProject(id: string): Promise<ProjectDetailResponse> {
   return request<ProjectDetailResponse>(`/api/projects/${id}`);
+}
+
+export async function getProjectCredentialAttributionHealth(
+  projectId: string
+): Promise<ProjectCredentialAttributionHealthSummary> {
+  return request<ProjectCredentialAttributionHealthSummary>(
+    `/api/projects/${projectId}/credential-attribution-health`
+  );
 }
 
 export async function updateProject(id: string, data: UpdateProjectRequest): Promise<Project> {

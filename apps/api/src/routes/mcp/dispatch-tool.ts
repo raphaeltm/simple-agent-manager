@@ -176,6 +176,9 @@ export async function handleDispatchTask(
       dispatchDepth: schema.tasks.dispatchDepth,
       status: schema.tasks.status,
       missionId: schema.tasks.missionId,
+      credentialAttributionUserId: schema.tasks.credentialAttributionUserId,
+      credentialAttributionProjectId: schema.tasks.credentialAttributionProjectId,
+      credentialAttributionSource: schema.tasks.credentialAttributionSource,
     })
     .from(schema.tasks)
     .where(
@@ -287,6 +290,12 @@ export async function handleDispatchTask(
   if (!project) {
     return jsonRpcError(requestId, INTERNAL_ERROR, 'Project not found');
   }
+
+  const inheritedAttributionUserId = currentTask.credentialAttributionUserId ?? tokenData.userId;
+  const inheritedAttributionSource = (currentTask.credentialAttributionSource ?? 'user') as import('@simple-agent-manager/shared').CredentialSource;
+  const inheritedAttributionProjectId = inheritedAttributionSource === 'project'
+    ? (currentTask.credentialAttributionProjectId ?? tokenData.projectId)
+    : null;
 
   // ── Resolve agent profile ───────────────────────────────────────────────
   // Same pattern as submit.ts — resolveAgentProfile handles ID/name lookup
@@ -430,7 +439,12 @@ export async function handleDispatchTask(
   // or a platform credential will be used for the resolved provider. Quota is
   // enforced only when platform credentials are used.
   const { resolveCredentialSource } = await import('../../services/provider-credentials');
-  const credResult = await resolveCredentialSource(db, tokenData.userId, resolvedProvider ?? undefined);
+  const credResult = await resolveCredentialSource(
+    db,
+    inheritedAttributionUserId,
+    resolvedProvider ?? undefined,
+    inheritedAttributionProjectId
+  );
 
   if (!credResult) {
     return jsonRpcError(
@@ -439,6 +453,7 @@ export async function handleDispatchTask(
       'Cloud provider credentials required. The user must connect a cloud provider in Settings.',
     );
   }
+  const effectiveProvider = resolvedProvider ?? credResult.providerName;
 
   if (credResult.credentialSource === 'platform') {
     const quotaEnforcementEnabled = env.COMPUTE_QUOTA_ENFORCEMENT_ENABLED !== 'false';
@@ -463,10 +478,12 @@ export async function handleDispatchTask(
      status, execution_step, priority, dispatch_depth, output_branch, created_by,
      task_mode, agent_profile_hint, skill_id, skill_hint, mission_id, triggered_by,
      requested_vm_size, requested_vm_size_source, resource_requirements_json, resource_requirements_source, resolved_reservation_json,
+     credential_attribution_user_id, credential_attribution_project_id, credential_attribution_source,
      created_at, updated_at)
      SELECT ?, ?, ?, ?, ?, ?, 'queued', 'node_selection', ?, ?, ?, ?,
      ?, ?, ?, ?, ?, 'mcp',
      ?, ?, ?, ?, ?,
+     ?, ?, ?,
      ?, ?
      WHERE (
        SELECT count(*) FROM tasks
@@ -486,6 +503,7 @@ export async function handleDispatchTask(
     resolvedTaskMode, resolvedProfile?.profileId ?? null, resolvedProfile?.skillId ?? null, skillId ?? null,
     explicitMissionId ?? currentTask.missionId ?? null,
     resolvedVmSize, vmSizeSource, resolvedProfile?.resourceRequirementsJson ?? null, resolvedReservation.source, JSON.stringify(resolvedReservation),
+    inheritedAttributionUserId, inheritedAttributionProjectId, inheritedAttributionSource,
     now, now,
     // Per-task child count subquery
     tokenData.taskId, tokenData.projectId,
@@ -602,7 +620,10 @@ export async function handleDispatchTask(
       agentType: resolvedAgentType,
       workspaceProfile: resolvedWorkspaceProfile,
       devcontainerConfigName: resolvedDevcontainerConfigName,
-      cloudProvider: resolvedProvider,
+      cloudProvider: effectiveProvider,
+      credentialAttributionUserId: inheritedAttributionUserId,
+      credentialAttributionProjectId: inheritedAttributionProjectId,
+      credentialAttributionSource: inheritedAttributionSource,
       taskMode: resolvedTaskMode,
       // Resolution chain: agent profile > project.agentDefaults[agentType] > null (VM agent
       // falls through to user agent_settings via callback, then platform default).
