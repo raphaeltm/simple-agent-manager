@@ -450,7 +450,7 @@ async function applyDeploymentEnvironmentAction(input: {
     throw conflict('stale_plan', 'Deployment environment state changed; preview again');
   }
 
-  await input.tx
+  const nodeRows = await input.tx
     .update(schema.nodes)
     .set({
       offboardingStatus: 'blocked',
@@ -464,7 +464,11 @@ async function applyDeploymentEnvironmentAction(input: {
         eq(schema.nodes.credentialAttributionSource, 'user'),
         eq(schema.nodes.credentialAttributionUserId, input.memberUserId)
       )
-    );
+    )
+    .returning({ id: schema.nodes.id });
+  if (nodeRows.length !== 1) {
+    throw conflict('stale_plan', 'Deployment node state changed; preview again');
+  }
 
   return resourceResult({
     resource: input.resource,
