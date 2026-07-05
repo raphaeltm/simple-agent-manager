@@ -31,8 +31,18 @@ async function measure(page: Page): Promise<{
   samples: number;
 }> {
   return page.evaluate(async () => {
-    const scroller = document.querySelector('[data-bench-scroller]') as HTMLElement | null;
-    if (!scroller) throw new Error('no [data-bench-scroller]');
+    // Locate the scroll container. Virtuoso tags its scroller via scrollerRef;
+    // the clean TanStack VirtualMessageList has no tag, so fall back to walking
+    // up from a rendered row to the nearest actually-scrollable ancestor.
+    let scroller = document.querySelector('[data-bench-scroller]') as HTMLElement | null;
+    if (!scroller) {
+      const firstRow = document.querySelector('[data-bench-row]') as HTMLElement | null;
+      scroller = firstRow?.parentElement ?? null;
+      while (scroller && scroller.scrollHeight <= scroller.clientHeight + 1) {
+        scroller = scroller.parentElement;
+      }
+    }
+    if (!scroller) throw new Error('no scrollable container found');
     const raf = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
 
     const snapshot = (): Map<string, number> => {

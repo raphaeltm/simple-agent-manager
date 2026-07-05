@@ -1,18 +1,20 @@
 import type { ConversationItem } from '@simple-agent-manager/acp-client';
-import { type FC, useRef } from 'react';
+import { type ReactNode, type FC, useRef } from 'react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
-
-import { AcpConversationItemView } from '../../components/project-message-view/AcpConversationItemView';
 
 /**
  * Virtuoso bench — mirrors the PRODUCTION ProjectMessageView config as closely
  * as possible (alignToBottom, followOutput, initialTopMostItemIndex,
- * firstItemIndex, overscan) so the benchmark measures the real component's
- * behavior, not a strawman.
+ * firstItemIndex, overscan) so the comparison measures the real component's
+ * behavior, not a strawman. Shares `renderItem` with the TanStack side so both
+ * render byte-identical content.
  */
 const VIRTUAL_START = 100_000;
 
-export const VirtuosoBench: FC<{ items: ConversationItem[] }> = ({ items }) => {
+export const VirtuosoBench: FC<{
+  items: ConversationItem[];
+  renderItem: (item: ConversationItem, index: number) => ReactNode;
+}> = ({ items, renderItem }) => {
   const ref = useRef<VirtuosoHandle>(null);
 
   return (
@@ -29,11 +31,7 @@ export const VirtuosoBench: FC<{ items: ConversationItem[] }> = ({ items }) => {
       scrollerRef={(el) => {
         if (el instanceof HTMLElement) el.setAttribute('data-bench-scroller', 'virtuoso');
       }}
-      itemContent={(_index, item) => (
-        <div className="sam-message-entry px-4 pb-3" data-bench-row data-item-id={item.id}>
-          <AcpConversationItemView item={item} />
-        </div>
-      )}
+      itemContent={(index, item) => renderItem(item, index)}
     />
   );
 };
