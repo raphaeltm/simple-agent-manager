@@ -471,7 +471,7 @@ describe('project member offboarding apply', () => {
       'owner-user',
       'member:manage'
     );
-    expect(transactionCalls).toBe(1);
+    expect(transactionCalls).toBe(0);
     expect(updatedRows).toEqual(
       expect.arrayContaining([
         expect.objectContaining({

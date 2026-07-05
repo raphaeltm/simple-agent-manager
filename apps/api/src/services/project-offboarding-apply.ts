@@ -638,86 +638,85 @@ export async function applyProjectMemberOffboarding(input: {
   assertSelectedActionsAreAvailable({ selectionsByKey, currentResources });
 
   const resourceResults: ProjectMemberOffboardingResourceResult[] = [];
-  await input.db.transaction(async (tx) => {
-    for (const resource of currentResources) {
-      const selection = selectionsByKey.get(resourceKey(resource.resourceKind, resource.resourceId));
-      if (!selection) {
-        throw conflict(
-          'unresolved_credential_attribution',
-          'Offboarding action missing for resource'
-        );
-      }
-      const result = await applyResourceAction({
-        tx,
-        projectId: input.project.id,
-        memberUserId: input.memberUserId,
-        actorUserId: input.actorUserId,
-        nowIso,
-        resource,
-        action: selection.action,
-      });
-      resourceResults.push(result);
-      const auditRows = await tx
-        .update(schema.projectMemberOffboardingResourceActions)
-        .set({
-          selectedAction: selection.action,
-          status: result.status,
-          updatedAt: nowIso,
-        })
-        .where(
-          and(
-            eq(schema.projectMemberOffboardingResourceActions.planId, input.planId),
-            eq(schema.projectMemberOffboardingResourceActions.resourceKind, resource.resourceKind),
-            eq(schema.projectMemberOffboardingResourceActions.resourceId, resource.resourceId)
-          )
-        )
-        .returning({ resourceId: schema.projectMemberOffboardingResourceActions.resourceId });
-      if (auditRows.length !== 1) {
-        throw conflict('stale_plan', 'Offboarding resource action changed; preview again');
-      }
+  const mutationDb: OffboardingMutationDb = input.db;
+  for (const resource of currentResources) {
+    const selection = selectionsByKey.get(resourceKey(resource.resourceKind, resource.resourceId));
+    if (!selection) {
+      throw conflict(
+        'unresolved_credential_attribution',
+        'Offboarding action missing for resource'
+      );
     }
-
-    const hasBlockers = resourceResults.some((result) => result.blocksRemoval);
-    if (!hasBlockers && input.finalMemberStatus === 'removed') {
-      const memberRows = await tx
-        .update(schema.projectMembers)
-        .set({
-          status: 'removed',
-          removedAt: nowIso,
-          updatedAt: nowIso,
-        })
-        .where(
-          and(
-            eq(schema.projectMembers.projectId, input.project.id),
-            eq(schema.projectMembers.userId, input.memberUserId),
-            eq(schema.projectMembers.status, 'active')
-          )
-        )
-        .returning({ userId: schema.projectMembers.userId });
-      if (memberRows.length !== 1) {
-        throw conflict('stale_plan', 'Project membership changed; preview again');
-      }
-    }
-
-    const planRows = await tx
-      .update(schema.projectMemberOffboardingPlans)
+    const result = await applyResourceAction({
+      tx: mutationDb,
+      projectId: input.project.id,
+      memberUserId: input.memberUserId,
+      actorUserId: input.actorUserId,
+      nowIso,
+      resource,
+      action: selection.action,
+    });
+    resourceResults.push(result);
+    const auditRows = await mutationDb
+      .update(schema.projectMemberOffboardingResourceActions)
       .set({
-        status: 'applied',
-        appliedAt: nowIso,
+        selectedAction: selection.action,
+        status: result.status,
+        updatedAt: nowIso,
       })
       .where(
         and(
-          eq(schema.projectMemberOffboardingPlans.id, input.planId),
-          eq(schema.projectMemberOffboardingPlans.projectId, input.project.id),
-          eq(schema.projectMemberOffboardingPlans.memberUserId, input.memberUserId),
-          eq(schema.projectMemberOffboardingPlans.status, 'preview')
+          eq(schema.projectMemberOffboardingResourceActions.planId, input.planId),
+          eq(schema.projectMemberOffboardingResourceActions.resourceKind, resource.resourceKind),
+          eq(schema.projectMemberOffboardingResourceActions.resourceId, resource.resourceId)
         )
       )
-      .returning({ id: schema.projectMemberOffboardingPlans.id });
-    if (planRows.length !== 1) {
-      throw conflict('stale_plan', 'Offboarding plan changed; preview again');
+      .returning({ resourceId: schema.projectMemberOffboardingResourceActions.resourceId });
+    if (auditRows.length !== 1) {
+      throw conflict('stale_plan', 'Offboarding resource action changed; preview again');
     }
-  });
+  }
+
+  const hasBlockers = resourceResults.some((result) => result.blocksRemoval);
+  if (!hasBlockers && input.finalMemberStatus === 'removed') {
+    const memberRows = await mutationDb
+      .update(schema.projectMembers)
+      .set({
+        status: 'removed',
+        removedAt: nowIso,
+        updatedAt: nowIso,
+      })
+      .where(
+        and(
+          eq(schema.projectMembers.projectId, input.project.id),
+          eq(schema.projectMembers.userId, input.memberUserId),
+          eq(schema.projectMembers.status, 'active')
+        )
+      )
+      .returning({ userId: schema.projectMembers.userId });
+    if (memberRows.length !== 1) {
+      throw conflict('stale_plan', 'Project membership changed; preview again');
+    }
+  }
+
+  const appliedPlanRows = await mutationDb
+    .update(schema.projectMemberOffboardingPlans)
+    .set({
+      status: 'applied',
+      appliedAt: nowIso,
+    })
+    .where(
+      and(
+        eq(schema.projectMemberOffboardingPlans.id, input.planId),
+        eq(schema.projectMemberOffboardingPlans.projectId, input.project.id),
+        eq(schema.projectMemberOffboardingPlans.memberUserId, input.memberUserId),
+        eq(schema.projectMemberOffboardingPlans.status, 'preview')
+      )
+    )
+    .returning({ id: schema.projectMemberOffboardingPlans.id });
+  if (appliedPlanRows.length !== 1) {
+    throw conflict('stale_plan', 'Offboarding plan changed; preview again');
+  }
 
   return {
     projectId: input.project.id,

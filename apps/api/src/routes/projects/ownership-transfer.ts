@@ -53,58 +53,32 @@ projectOwnershipTransferRoutes.post(
     const completedAt = new Date().toISOString();
     const transferId = ulid();
 
-    await db.transaction(async (tx) => {
-      const promotedRows = await tx
-        .update(schema.projectMembers)
-        .set({ role: 'owner', updatedAt: completedAt })
-        .where(
-          and(
-            eq(schema.projectMembers.projectId, projectId),
-            eq(schema.projectMembers.userId, toUserId),
-            eq(schema.projectMembers.status, 'active'),
-            eq(schema.projectMembers.role, 'admin')
-          )
-        )
-        .returning({ userId: schema.projectMembers.userId });
-      if (promotedRows.length !== 1) {
-        throw errors.conflict('Ownership transfer state changed; retry ownership transfer');
-      }
+    const results = await c.env.DATABASE.batch([
+      c.env.DATABASE.prepare(
+        `UPDATE project_members
+         SET role = ?, updated_at = ?
+         WHERE project_id = ? AND user_id = ? AND status = 'active' AND role = 'admin'`
+      ).bind('owner', completedAt, projectId, toUserId),
+      c.env.DATABASE.prepare(
+        `UPDATE project_members
+         SET role = ?, updated_at = ?
+         WHERE project_id = ? AND user_id = ? AND status = 'active' AND role = 'owner'`
+      ).bind(oldOwnerRole, completedAt, projectId, actorUserId),
+      c.env.DATABASE.prepare(
+        `UPDATE projects
+         SET user_id = ?, updated_at = ?
+         WHERE id = ? AND user_id = ?`
+      ).bind(toUserId, completedAt, projectId, actorUserId),
+      c.env.DATABASE.prepare(
+        `INSERT INTO project_ownership_transfers
+         (id, project_id, from_user_id, to_user_id, initiated_by, completed_at, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+      ).bind(transferId, projectId, actorUserId, toUserId, actorUserId, completedAt, completedAt),
+    ]);
 
-      const demotedRows = await tx
-        .update(schema.projectMembers)
-        .set({ role: oldOwnerRole, updatedAt: completedAt })
-        .where(
-          and(
-            eq(schema.projectMembers.projectId, projectId),
-            eq(schema.projectMembers.userId, actorUserId),
-            eq(schema.projectMembers.status, 'active'),
-            eq(schema.projectMembers.role, 'owner')
-          )
-        )
-        .returning({ userId: schema.projectMembers.userId });
-      if (demotedRows.length !== 1) {
-        throw errors.conflict('Ownership transfer state changed; retry ownership transfer');
-      }
-
-      const projectRows = await tx
-        .update(schema.projects)
-        .set({ userId: toUserId, updatedAt: completedAt })
-        .where(and(eq(schema.projects.id, projectId), eq(schema.projects.userId, actorUserId)))
-        .returning({ id: schema.projects.id });
-      if (projectRows.length !== 1) {
-        throw errors.conflict('Ownership transfer state changed; retry ownership transfer');
-      }
-
-      await tx.insert(schema.projectOwnershipTransfers).values({
-        id: transferId,
-        projectId,
-        fromUserId: actorUserId,
-        toUserId,
-        initiatedBy: actorUserId,
-        completedAt,
-        createdAt: completedAt,
-      });
-    });
+    if (results.slice(0, 3).some((result) => result.meta.changes !== 1)) {
+      throw errors.conflict('Ownership transfer state changed; retry ownership transfer');
+    }
 
     const response: ProjectOwnershipTransferResponse = {
       projectId,
