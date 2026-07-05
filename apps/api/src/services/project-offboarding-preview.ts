@@ -32,6 +32,7 @@ function resolveOffboardingPlanTtlMs(value: string | undefined): number {
 
 export async function createProjectMemberOffboardingPreview(input: {
   db: AppDb;
+  database?: D1Database;
   project: schema.Project;
   memberUserId: string;
   requestedBy: string;
@@ -77,49 +78,18 @@ export async function createProjectMemberOffboardingPreview(input: {
   const summary = summarizeOffboardingResources(resources);
   const planId = offboardingPlanId();
 
-  await input.db
-    .update(schema.projectMemberOffboardingPlans)
-    .set({ status: 'expired' })
-    .where(
-      and(
-        eq(schema.projectMemberOffboardingPlans.projectId, input.project.id),
-        eq(schema.projectMemberOffboardingPlans.memberUserId, input.memberUserId),
-        eq(schema.projectMemberOffboardingPlans.status, 'preview'),
-        sql`${schema.projectMemberOffboardingPlans.expiresAt} > ${nowIso}`
-      )
-    );
-
-  await input.db.insert(schema.projectMemberOffboardingPlans).values({
-    id: planId,
+  await persistPreviewPlan({
+    db: input.db,
+    database: input.database,
     projectId: input.project.id,
     memberUserId: input.memberUserId,
     requestedBy: input.requestedBy,
-    status: 'preview',
-    resourceSummaryJson: JSON.stringify(summary),
-    createdAt: nowIso,
+    planId,
+    summaryJson: JSON.stringify(summary),
+    resources,
+    nowIso,
     expiresAt,
-    appliedAt: null,
   });
-
-  if (resources.length > 0) {
-    await input.db.insert(schema.projectMemberOffboardingResourceActions).values(
-      resources.map((resource) => ({
-        id: offboardingActionId(),
-        planId,
-        resourceKind: resource.resourceKind,
-        resourceId: resource.resourceId,
-        credentialSourceBefore: resource.credentialSourceBefore,
-        attributionUserIdBefore: resource.attributionUserIdBefore,
-        attributionProjectIdBefore: resource.attributionProjectIdBefore,
-        recommendedAction: resource.recommendedAction,
-        selectedAction: null,
-        status: 'pending',
-        detailsJson: JSON.stringify(resource.details),
-        createdAt: nowIso,
-        updatedAt: nowIso,
-      }))
-    );
-  }
 
   return {
     offboardingPlanId: planId,
@@ -130,4 +100,121 @@ export async function createProjectMemberOffboardingPreview(input: {
     summary,
     resources: resources.map((resource): ProjectMemberOffboardingResourcePreview => ({ ...resource })),
   };
+}
+
+async function persistPreviewPlan(input: {
+  db: AppDb;
+  database?: D1Database;
+  projectId: string;
+  memberUserId: string;
+  requestedBy: string;
+  planId: string;
+  summaryJson: string;
+  resources: ProjectMemberOffboardingResourcePreview[];
+  nowIso: string;
+  expiresAt: string;
+}): Promise<void> {
+  if (
+    input.database &&
+    typeof input.database.prepare === 'function' &&
+    typeof input.database.batch === 'function'
+  ) {
+    const statements: D1PreparedStatement[] = [
+      input.database
+        .prepare(
+          `UPDATE project_member_offboarding_plans
+           SET status = 'expired'
+           WHERE project_id = ? AND member_user_id = ? AND status = 'preview' AND expires_at > ?`
+        )
+        .bind(input.projectId, input.memberUserId, input.nowIso),
+      input.database
+        .prepare(
+          `INSERT INTO project_member_offboarding_plans
+           (id, project_id, member_user_id, requested_by, status, resource_summary_json, created_at, expires_at, applied_at)
+           VALUES (?, ?, ?, ?, 'preview', ?, ?, ?, NULL)`
+        )
+        .bind(
+          input.planId,
+          input.projectId,
+          input.memberUserId,
+          input.requestedBy,
+          input.summaryJson,
+          input.nowIso,
+          input.expiresAt
+        ),
+    ];
+
+    for (const resource of input.resources) {
+      statements.push(
+        input.database
+          .prepare(
+            `INSERT INTO project_member_offboarding_resource_actions
+             (id, plan_id, resource_kind, resource_id, credential_source_before,
+              attribution_user_id_before, attribution_project_id_before,
+              recommended_action, selected_action, status, details_json, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, 'pending', ?, ?, ?)`
+          )
+          .bind(
+            offboardingActionId(),
+            input.planId,
+            resource.resourceKind,
+            resource.resourceId,
+            resource.credentialSourceBefore,
+            resource.attributionUserIdBefore,
+            resource.attributionProjectIdBefore,
+            resource.recommendedAction,
+            JSON.stringify(resource.details),
+            input.nowIso,
+            input.nowIso
+          )
+      );
+    }
+
+    await input.database.batch(statements);
+    return;
+  }
+
+  await input.db
+    .update(schema.projectMemberOffboardingPlans)
+    .set({ status: 'expired' })
+    .where(
+      and(
+        eq(schema.projectMemberOffboardingPlans.projectId, input.projectId),
+        eq(schema.projectMemberOffboardingPlans.memberUserId, input.memberUserId),
+        eq(schema.projectMemberOffboardingPlans.status, 'preview'),
+        sql`${schema.projectMemberOffboardingPlans.expiresAt} > ${input.nowIso}`
+      )
+    );
+
+  await input.db.insert(schema.projectMemberOffboardingPlans).values({
+    id: input.planId,
+    projectId: input.projectId,
+    memberUserId: input.memberUserId,
+    requestedBy: input.requestedBy,
+    status: 'preview',
+    resourceSummaryJson: input.summaryJson,
+    createdAt: input.nowIso,
+    expiresAt: input.expiresAt,
+    appliedAt: null,
+  });
+
+  if (input.resources.length > 0) {
+    await input.db.insert(schema.projectMemberOffboardingResourceActions).values(
+      input.resources.map((resource) => ({
+        id: offboardingActionId(),
+        planId: input.planId,
+        resourceKind: resource.resourceKind,
+        resourceId: resource.resourceId,
+        credentialSourceBefore: resource.credentialSourceBefore,
+        attributionUserIdBefore: resource.attributionUserIdBefore,
+        attributionProjectIdBefore: resource.attributionProjectIdBefore,
+        recommendedAction: resource.recommendedAction,
+        selectedAction: null,
+        status: 'pending',
+        detailsJson: JSON.stringify(resource.details),
+        createdAt: input.nowIso,
+        updatedAt: input.nowIso,
+      }))
+    );
+  }
 }

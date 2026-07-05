@@ -394,6 +394,7 @@ projectMembersRoutes.post('/:id/members/:userId/offboarding-preview', async (c) 
 
   const preview = await createProjectMemberOffboardingPreview({
     db,
+    database: c.env.DATABASE,
     project,
     memberUserId,
     requestedBy: requesterId,
