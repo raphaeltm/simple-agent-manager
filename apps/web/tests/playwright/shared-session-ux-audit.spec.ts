@@ -83,6 +83,21 @@ const MESSAGES = [
   { id: 'msg-2', sessionId: 'session-bob-1', role: 'assistant', content: 'I checked the shared state and left notes for the team.', toolMetadata: null, createdAt: NOW - 2000 },
 ];
 
+const EMPTY_CREDENTIAL_HEALTH = {
+  projectId: MOCK_PROJECT.id,
+  multiplayerActive: true,
+  counts: {
+    resources: 0,
+    personal: 0,
+    projectScoped: 0,
+    inheritedProject: 0,
+    missing: 0,
+    unknown: 0,
+    warnings: 0,
+  },
+  resources: [],
+};
+
 async function setupApiMocks(page: Page, options: { multiplayerActive?: boolean } = {}) {
   const mockProject = {
     ...MOCK_PROJECT,
@@ -107,6 +122,9 @@ async function setupApiMocks(page: Page, options: { multiplayerActive?: boolean 
     const projectMatch = path.match(/^\/api\/projects\/([^/]+)(\/.*)?$/);
     if (projectMatch) {
       const subPath = projectMatch[2] || '';
+      if (subPath === '/credential-attribution-health') {
+        return respond(200, { ...EMPTY_CREDENTIAL_HEALTH, multiplayerActive: mockProject.multiplayerActive });
+      }
       if (subPath === '/sessions') {
         const sessions = url.searchParams.get('scope') === 'my' ? MY_SESSIONS : ALL_SESSIONS;
         return respond(200, { sessions, total: sessions.length, hasMore: false });

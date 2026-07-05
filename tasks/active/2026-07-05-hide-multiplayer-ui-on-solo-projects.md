@@ -56,8 +56,16 @@ This task will add explicit tests for both sides of the product-mode gate and up
 - [x] Add/extend behavioral tests for solo state: none of the four multiplayer surfaces render.
 - [x] Add/extend behavioral tests for multiplayer/active-invite state: all four surfaces render and interactions still work.
 - [x] Add API/service tests proving `multiplayerActive` is false for solo projects and true for member #2, active invite, or pending request.
-- [ ] Run focused local Playwright visual audit at 375px and 1280px for solo and multiplayer states, storing screenshots under `.codex/tmp/playwright-screenshots/`.
+- [x] Run focused local Playwright visual audit at 375px and 1280px for solo and multiplayer states, storing screenshots under `.codex/tmp/playwright-screenshots/`.
 - [ ] Run `/do` quality gates: lint, typecheck, tests, build, task-completion validation, specialist reviews, staging verification, PR, CI, merge, and production deploy monitoring.
+
+## Local Validation Log
+
+- `pnpm typecheck` passed after implementation.
+- `pnpm lint` passed after import-order fixes, with existing warnings only.
+- `pnpm --filter @simple-agent-manager/api test -- tests/unit/services/project-multiplayer.test.ts tests/unit/services/credential-attribution-health.test.ts tests/unit/routes/credential-attribution-health.test.ts` passed.
+- `pnpm --filter @simple-agent-manager/web test -- tests/unit/SessionTreeItem.test.tsx tests/unit/components/credential-health-nav-item.test.tsx tests/unit/components/trigger-credential-warning.test.tsx` passed.
+- `pnpm --filter @simple-agent-manager/web exec playwright test tests/playwright/shared-session-ux-audit.spec.ts tests/playwright/credential-health-audit.spec.ts --project="iPhone SE (375x667)" --project="Desktop (1280x800)"` passed after installing Chromium and its OS dependencies: 16 passed, 8 viewport-gated skips. Representative screenshots were inspected from `.codex/tmp/playwright-screenshots/` and `apps/web/.codex/tmp/playwright-screenshots/`.
 
 ## Acceptance Criteria
 
