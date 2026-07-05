@@ -73,6 +73,90 @@ This task will add explicit tests for both sides of the product-mode gate and up
 - `pnpm typecheck` passed again after the trigger route mock fix.
 - `pnpm lint` passed again after the trigger route mock fix, with existing warnings only.
 
+## Specialist Review Log
+
+### Task Completion Validation Report
+
+**Task**: `tasks/active/2026-07-05-hide-multiplayer-ui-on-solo-projects.md`  
+**Branch**: `sam/wave-7-multiplayershared-projects-01kwt0`  
+**Date**: 2026-07-05
+
+#### Verdict: PASS
+
+| Check | Status | Issues |
+|-------|--------|--------|
+| A: Research -> Checklist | PASS | 0 findings without checklist items |
+| B: Checklist -> Diff | PASS | 0 checked items missing diff coverage |
+| C: Criteria -> Tests | PASS | 0 acceptance criteria without test/manual coverage |
+| D: UI -> Backend | PASS | 0 UI inputs not propagated |
+| E: Multi-Resource | N/A | No new multi-resource selector |
+| F: Vertical Slice | PASS | API helper/service tests plus render/simulate and Playwright coverage exercise the server flag through user-visible UI |
+
+Findings: none blocking. Research findings map to implementation changes in `apps/api/src/services/project-multiplayer.ts`, `apps/api/src/routes/projects/crud.ts`, `apps/api/src/routes/projects/credential-health.ts`, `apps/api/src/routes/triggers/crud.ts`, the project-chat session components, `CredentialHealthNavItem`, and trigger warning components. Acceptance criteria are covered by focused Vitest tests and Playwright visual audits for solo and multiplayer states.
+
+### UI/UX Validation Report
+
+Variants considered:
+1. Have each UI surface independently fetch members/invites/access requests.
+2. Gate only credential-health summary and leave project chat on local heuristics.
+3. Add one server-computed `multiplayerActive` flag to project/credential/trigger payloads and use it across the UI.
+
+Selected direction: option 3. It matches the product rule, avoids duplicate client fetching, and keeps the existing UI layout intact while removing solo-project clutter.
+
+| Category | Score | Notes |
+|----------|------:|-------|
+| Visual hierarchy and scanability | 5 | No new visual language; solo views remove non-applicable controls. |
+| Interaction clarity | 5 | Multiplayer filter remains interactive only when valid; solo projects do not expose inactive affordances. |
+| Mobile usability | 5 | Drawer controls are gated at 375px; no horizontal overflow in Playwright assertions. |
+| Accessibility | 4 | Existing roles/labels preserved; removed controls are absent rather than disabled. |
+| System consistency | 5 | Reuses existing components, tokens, and layout patterns. |
+
+Screenshot evidence:
+- Mobile session multiplayer: `.codex/tmp/playwright-screenshots/shared-session-ux-mobile.png`
+- Mobile session solo: `.codex/tmp/playwright-screenshots/solo-session-ux-mobile.png`
+- Desktop session multiplayer: `.codex/tmp/playwright-screenshots/shared-session-ux-desktop.png`
+- Desktop session solo: `.codex/tmp/playwright-screenshots/solo-session-ux-desktop.png`
+- Mobile credential solo: `apps/web/.codex/tmp/playwright-screenshots/credential-health-solo-hidden-mobile-375x667.png`
+- Desktop credential solo: `apps/web/.codex/tmp/playwright-screenshots/credential-health-solo-hidden-desktop-1280x800.png`
+
+Issues found/fixed during visual verification:
+- The shared-session Playwright mock originally returned a project-shaped object for `/credential-attribution-health`, which crashed the AppShell. Fixed by returning a health-shaped mock with `multiplayerActive`.
+- No overlap, clipping, or horizontal overflow found after the final Playwright rerun.
+
+### Security Audit Report
+
+Scope: project membership/invite/request gating for credential attribution and session ownership UI.
+
+| Severity | Count |
+|----------|------:|
+| CRITICAL | 0 |
+| HIGH | 0 |
+| MEDIUM | 0 |
+| LOW | 0 |
+
+Findings: none. The change only suppresses client UI surfaces based on existing authorized project data. API routes still use `requireProjectAccess` / `requireProjectCapability` before computing or returning project credential and trigger attribution state. No credentials, tokens, JWT claims, WebSocket auth, or cross-user authorization boundaries were loosened.
+
+### Cloudflare/D1 Review
+
+Scope: Worker API route/service changes and D1 queries.
+
+| Category | Status |
+|----------|--------|
+| Wrangler Config | N/A |
+| D1 Setup | OK |
+| KV Usage | N/A |
+| R2 Setup | N/A |
+| Testing | OK |
+
+Findings: none. `getProjectMultiplayerState()` uses Drizzle parameterized queries against existing indexed project membership/invite/request tables and does not require migrations or binding changes. The helper runs after existing project authorization checks in route paths.
+
+### Constitution / Env / Docs / Tests Review
+
+- Constitution Principle XI: PASS. Diff added no hardcoded URLs, timeouts, limits, or deployment-specific identifiers.
+- Env validation: PASS. No `Env` interface, secret, or deployment script changes.
+- Documentation sync: PASS. No public endpoint, environment variable, deployment, or user-facing documentation contract changed; shared response types were updated with tests.
+- Test-engineer review: PASS. Coverage includes server condition tests for solo/member/invite/request, API route/service propagation tests, React render/simulate tests for solo and multiplayer, and Playwright visual audits at 375px and 1280px for solo and multiplayer UI states.
+
 ## Acceptance Criteria
 
 - A solo project (one active owner, no active invite, no pending request) shows no project chat scope toggle, no session ownership indicators, no Credentials nav item/modal, and no trigger credential warning UI.
