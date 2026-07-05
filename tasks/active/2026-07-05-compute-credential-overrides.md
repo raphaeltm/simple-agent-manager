@@ -51,7 +51,7 @@ This blocks Wave 5 credential attribution validation: a user saving a Hetzner ke
 - [x] Add Rule 28 fallback matrix coverage for compute consumers, including inactive project row halting fallback.
 - [x] Add/update UI unit tests for compute row action rendering and parent callback wiring.
 - [x] Run Playwright visual audit for Connections UI at 375px and 1280px with normal, long, many, empty, error/special-character scenarios.
-- [ ] Run quality checks and staging verification of the actual flow: save cloud provider key -> see `your default`; add project override -> see `project override`.
+- [x] Run quality checks and staging verification of the actual flow: save cloud provider key -> see `your default`; add project override -> see `project override`.
 
 ## Acceptance Criteria
 
@@ -60,14 +60,28 @@ This blocks Wave 5 credential attribution validation: a user saving a Hetzner ke
 - [x] Existing legacy-saved cloud-provider keys become visible to CC resolution/status even when the user already has other CC rows.
 - [x] Compute fallback matrix is covered, including inactive project rows blocking fallback.
 - [x] Playwright screenshots are captured and inspected for mobile 375px and desktop 1280px.
-- [ ] Staging validates the live user flow end to end before merge.
+- [x] Staging validates the live user flow end to end before merge.
 
 ## Verification Notes
 
 - Unit and contract tests cover user cloud create/update/delete, GCP setup create/update, project cloud create/update/delete, resolution-status source selection, compute fallback behavior, and UI action wiring.
 - Focused Playwright audit passed for cloud-provider default and project override flows on iPhone SE 375x667 and Desktop 1280x800 in both dark and light themes.
+- Full local coverage passed after adding the legacy cloud-provider route D1 mock surface: `pnpm test:coverage`.
+- PR CI passed on commit `36c185be6`, including Build, Lint, Type Check, Test, Playwright Visual Tests, UI Compliance, Specialist Review Evidence, Preflight Evidence, Pulumi, deploy-script validation, SonarCloud, benchmarks, and VM smoke checks.
+- Staging deploy passed: GitHub Actions `deploy-staging.yml` run `28741498451` (`Deploy to Cloudflare` and smoke-tests green).
+- Live staging verification passed via Playwright against `https://app.sammy.party` / `https://api.sammy.party`:
+  - Authenticated with `SAM_PLAYWRIGHT_PRIMARY_USER` through `/api/auth/token-login`.
+  - Created an isolated temporary Artifacts-backed project because the smoke account did not have `test project 2`, then cleaned it up.
+  - Saved a disposable Hetzner user default when no Hetzner default existed and verified Connections showed `Your default`; `GET /api/credentials/resolution-status` returned Hetzner source `user-attachment`.
+  - Opened Project Settings -> Connections, added a Hetzner project override, verified the UI showed `This project`; project-scoped resolution returned `project-attachment`.
+  - Replaced the project override, then removed it and verified project-scoped resolution returned to `user-attachment`.
+  - Captured screenshots: `.codex/tmp/playwright-screenshots/staging-compute-user-default.png` and `.codex/tmp/playwright-screenshots/staging-compute-project-override.png`.
+- Regression checks on staging:
+  - `https://api.sammy.party/health` returned 200.
+  - Dashboard loaded through Playwright before feature verification.
+  - `pnpm quality:observability-noise` completed with "No significant log noise detected"; D1 check skipped because `OBSERVABILITY_DB_ID` is unset, Workers telemetry skipped with API 403.
 - Local `test:workers` is blocked by repeated `workerd` signal 11 crashes, including when selecting an existing lazy-backfill test. The D1 regression for legacy-only cloud-provider reconciliation remains in the worker suite, but local execution cannot complete in this environment.
-- Draft PR: https://github.com/raphaeltm/simple-agent-manager/pull/1511. Initial CI preflight evidence failed because the PR body was created without the required Agent Preflight block; the PR body has been updated and this note retriggers CI with the corrected event payload.
+- PR: https://github.com/raphaeltm/simple-agent-manager/pull/1511. Initial CI preflight evidence failed because the PR body was created without the required Agent Preflight block; the PR body was updated and subsequent CI passed.
 
 ## References
 
