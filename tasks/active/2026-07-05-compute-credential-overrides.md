@@ -67,6 +67,7 @@ This blocks Wave 5 credential attribution validation: a user saving a Hetzner ke
 - Unit and contract tests cover user cloud create/update/delete, GCP setup create/update, project cloud create/update/delete, resolution-status source selection, compute fallback behavior, and UI action wiring.
 - Focused Playwright audit passed for cloud-provider default and project override flows on iPhone SE 375x667 and Desktop 1280x800 in both dark and light themes.
 - Local `test:workers` is blocked by repeated `workerd` signal 11 crashes, including when selecting an existing lazy-backfill test. The D1 regression for legacy-only cloud-provider reconciliation remains in the worker suite, but local execution cannot complete in this environment.
+- Draft PR: https://github.com/raphaeltm/simple-agent-manager/pull/1511. Initial CI preflight evidence failed because the PR body was created without the required Agent Preflight block; the PR body has been updated and this note retriggers CI with the corrected event payload.
 
 ## References
 
