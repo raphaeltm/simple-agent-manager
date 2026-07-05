@@ -334,6 +334,20 @@ export interface ProjectMembersResponse {
   accessRequests: ProjectAccessRequestResponse[];
 }
 
+export interface ProjectOwnershipTransferRequest {
+  toUserId: string;
+  oldOwnerRole?: Extract<ProjectMemberRole, 'admin'>;
+}
+
+export interface ProjectOwnershipTransferResponse {
+  projectId: string;
+  fromUserId: string;
+  toUserId: string;
+  fromRole: Extract<ProjectMemberRole, 'admin'>;
+  toRole: Extract<ProjectMemberRole, 'owner'>;
+  completedAt: string;
+}
+
 export type ProjectMemberOffboardingPlanStatus = 'preview' | 'applied' | 'expired';
 export type ProjectMemberOffboardingResourceKind =
   | 'trigger'
