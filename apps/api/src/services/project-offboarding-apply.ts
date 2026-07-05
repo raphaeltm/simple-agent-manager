@@ -653,7 +653,7 @@ export async function applyProjectMemberOffboarding(input: {
         action: selection.action,
       });
       resourceResults.push(result);
-      await tx
+      const auditRows = await tx
         .update(schema.projectMemberOffboardingResourceActions)
         .set({
           selectedAction: selection.action,
@@ -666,7 +666,11 @@ export async function applyProjectMemberOffboarding(input: {
             eq(schema.projectMemberOffboardingResourceActions.resourceKind, resource.resourceKind),
             eq(schema.projectMemberOffboardingResourceActions.resourceId, resource.resourceId)
           )
-        );
+        )
+        .returning({ resourceId: schema.projectMemberOffboardingResourceActions.resourceId });
+      if (auditRows.length !== 1) {
+        throw conflict('stale_plan', 'Offboarding resource action changed; preview again');
+      }
     }
 
     const hasBlockers = resourceResults.some((result) => result.blocksRemoval);
@@ -691,7 +695,7 @@ export async function applyProjectMemberOffboarding(input: {
       }
     }
 
-    await tx
+    const planRows = await tx
       .update(schema.projectMemberOffboardingPlans)
       .set({
         status: 'applied',
@@ -704,7 +708,11 @@ export async function applyProjectMemberOffboarding(input: {
           eq(schema.projectMemberOffboardingPlans.memberUserId, input.memberUserId),
           eq(schema.projectMemberOffboardingPlans.status, 'preview')
         )
-      );
+      )
+      .returning({ id: schema.projectMemberOffboardingPlans.id });
+    if (planRows.length !== 1) {
+      throw conflict('stale_plan', 'Offboarding plan changed; preview again');
+    }
   });
 
   return {
