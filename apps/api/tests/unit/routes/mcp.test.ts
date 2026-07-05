@@ -787,6 +787,8 @@ describe('MCP Routes', () => {
       expect(instructionText).toContain(
         'Tool names in these instructions refer to SAM MCP tools from the `sam-mcp` MCP server.'
       );
+      expect(instructionText).toContain('check whether the current chat session topic/title');
+      expect(instructionText).toContain('call the SAM MCP `update_session_topic` tool');
       expect(instructionText).toContain('Call the SAM MCP `update_task_status` tool');
       expect(instructionText).toContain('Call the SAM MCP `complete_task` tool');
       expect(instructionText).toContain('before calling the SAM MCP `complete_task` tool');
@@ -809,6 +811,8 @@ describe('MCP Routes', () => {
 
       const data = JSON.parse(body.result.content[0].text);
       const instructionText = data.instructions.join('\n');
+      expect(instructionText).toContain('check whether the current chat session topic/title');
+      expect(instructionText).toContain('call the SAM MCP `update_session_topic` tool');
       expect(instructionText).toContain('Use the SAM MCP `dispatch_task` tool');
       expect(instructionText).toContain('Use the SAM MCP `update_task_status` tool');
       expect(instructionText).toContain('Do NOT call the SAM MCP `complete_task` tool');
