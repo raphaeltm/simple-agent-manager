@@ -24,8 +24,9 @@ This task must produce a specification document PR only. It must not implement r
   - `apps/api/src/routes/projects/credentials.ts`
   - `apps/api/src/routes/projects/credential-health.ts`
   - `apps/api/src/middleware/project-auth.ts`
-  - `apps/api/src/services/resolve-credential-source.ts`
-  - `apps/api/src/services/cc-attachments.ts`
+  - `apps/api/src/services/provider-credentials.ts`
+  - `apps/api/src/services/composable-credentials/resolve.ts`
+  - `apps/api/src/services/credential-attribution-health.ts`
   - `apps/api/src/durable-objects/task-runner/workspace-steps.ts`
   - `apps/api/src/routes/triggers/`
   - task, workspace/node, and deployment routes/services that carry credential attribution
