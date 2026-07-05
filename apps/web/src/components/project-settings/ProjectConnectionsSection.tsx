@@ -2,7 +2,8 @@ import type { CCConsumerResolutionStatus, CredentialKind } from '@simple-agent-m
 import { useState } from 'react';
 
 import { useToast } from '../../hooks/useToast';
-import { deleteProjectAgentCredential } from '../../lib/api';
+import { deleteProjectAgentCredential, deleteProjectCloudCredential } from '../../lib/api';
+import { CloudProviderConnectFlow } from '../CloudProviderConnectFlow';
 import { ConnectFlow } from '../ConnectFlow';
 import { ConnectionsOverview } from '../ConnectionsOverview';
 
@@ -19,6 +20,11 @@ export function ProjectConnectionsSection({ projectId, onUpdated }: ProjectConne
   const [connectMode, setConnectMode] = useState<'connect' | 'replace' | 'project-override'>(
     'project-override'
   );
+  const [showCloudConnect, setShowCloudConnect] = useState(false);
+  const [connectProviderId, setConnectProviderId] = useState<string | undefined>();
+  const [cloudConnectMode, setCloudConnectMode] = useState<
+    'connect' | 'replace' | 'project-override'
+  >('project-override');
   const [refreshKey, setRefreshKey] = useState(0);
 
   const resetConnectFlow = () => {
@@ -26,15 +32,25 @@ export function ProjectConnectionsSection({ projectId, onUpdated }: ProjectConne
     setConnectAgentId(undefined);
     setConnectAuthMethod(undefined);
     setConnectMode('project-override');
+    setShowCloudConnect(false);
+    setConnectProviderId(undefined);
+    setCloudConnectMode('project-override');
   };
 
   const handleConnect = (consumerId: string, consumerKind: 'agent' | 'compute') => {
-    if (consumerKind !== 'agent') return;
+    if (consumerKind === 'compute') {
+      setConnectProviderId(consumerId);
+      setCloudConnectMode('project-override');
+      setShowCloudConnect(true);
+      setShowConnect(false);
+      return;
+    }
 
     setConnectAgentId(consumerId);
     setConnectAuthMethod(undefined);
     setConnectMode('project-override');
     setShowConnect(true);
+    setShowCloudConnect(false);
   };
 
   const handleConnected = () => {
@@ -44,13 +60,34 @@ export function ProjectConnectionsSection({ projectId, onUpdated }: ProjectConne
   };
 
   const openProjectOverride = (consumer: CCConsumerResolutionStatus) => {
+    if (consumer.consumerKind === 'compute') {
+      setConnectProviderId(consumer.consumerId);
+      setCloudConnectMode(consumer.source === 'project-attachment' ? 'replace' : 'project-override');
+      setShowCloudConnect(true);
+      setShowConnect(false);
+      return;
+    }
     setConnectAgentId(consumer.consumerId);
     setConnectAuthMethod(toLegacyCredentialKind(consumer.credentialKind));
     setConnectMode(consumer.source === 'project-attachment' ? 'replace' : 'project-override');
     setShowConnect(true);
+    setShowCloudConnect(false);
   };
 
   const handleDisconnect = async (consumer: CCConsumerResolutionStatus) => {
+    if (consumer.consumerKind === 'compute') {
+      if (!confirm(`Remove the ${consumer.consumerName} project override?`)) return;
+      try {
+        await deleteProjectCloudCredential(projectId, consumer.consumerId);
+        toast.success(`${consumer.consumerName} project override removed`);
+        setRefreshKey((k) => k + 1);
+        onUpdated();
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : 'Failed to remove project override');
+      }
+      return;
+    }
+
     const credentialKind = toLegacyCredentialKind(consumer.credentialKind);
     if (!credentialKind) {
       toast.error('This project override does not expose a removable credential.');
@@ -98,7 +135,15 @@ export function ProjectConnectionsSection({ projectId, onUpdated }: ProjectConne
         </p>
       </div>
 
-      {showConnect ? (
+      {showCloudConnect ? (
+        <CloudProviderConnectFlow
+          projectId={projectId}
+          initialProvider={connectProviderId}
+          mode={cloudConnectMode}
+          onConnected={handleConnected}
+          onCancel={resetConnectFlow}
+        />
+      ) : showConnect ? (
         <ConnectFlow
           projectId={projectId}
           initialAgentId={connectAgentId}

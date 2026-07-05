@@ -134,6 +134,15 @@ const UNRESOLVED_CONSUMERS = [
   }),
 ];
 
+const HETZNER_UNRESOLVED_CONSUMERS = [
+  makeConsumer({
+    consumerId: 'hetzner',
+    consumerName: 'Hetzner Cloud',
+    consumerKind: 'compute',
+    source: 'unresolved',
+  }),
+];
+
 // Halted — exercises danger badge
 const HALTED_CONSUMERS = [
   makeConsumer({
@@ -252,6 +261,60 @@ const CODEX_BROKEN_CONSUMERS = [
   }),
 ];
 
+const PROJECT_ID = 'test-project-2';
+
+const PROJECT_DETAIL = {
+  id: PROJECT_ID,
+  name: 'test project 2',
+  description: null,
+  repository: 'acme/test-project-2',
+  repoProvider: 'github',
+  defaultProvider: 'hetzner',
+  defaultLocation: 'fsn1',
+  defaultVmSize: 'medium',
+  defaultAgentType: null,
+  agentDefaults: null,
+  workspaceIdleTimeoutMs: null,
+  createdAt: '2026-07-05T00:00:00.000Z',
+  updatedAt: '2026-07-05T00:00:00.000Z',
+};
+
+const EMPTY_CREDENTIAL_HEALTH = {
+  projectId: PROJECT_ID,
+  counts: {
+    resources: 0,
+    personalResources: 0,
+    personalCredentials: 0,
+    projectCoveredCredentials: 0,
+    unknownCredentials: 0,
+  },
+  resources: [],
+};
+
+const PROJECT_INHERITED_COMPUTE_CONSUMERS = [
+  makeConsumer({
+    consumerId: 'hetzner',
+    consumerName: 'Hetzner Cloud',
+    consumerKind: 'compute',
+    source: 'user-attachment',
+    credentialName: 'Raphaël Hetzner key',
+    credentialKind: 'cloud-provider',
+    configurationName: 'Hetzner default',
+  }),
+];
+
+const PROJECT_OVERRIDE_COMPUTE_CONSUMERS = [
+  makeConsumer({
+    consumerId: 'hetzner',
+    consumerName: 'Hetzner Cloud',
+    consumerKind: 'compute',
+    source: 'project-attachment',
+    credentialName: 'test project 2 Hetzner key',
+    credentialKind: 'cloud-provider',
+    configurationName: 'Hetzner project override',
+  }),
+];
+
 // AGENT_CATALOG-like mock for ConnectFlow
 const MOCK_AGENT_CATALOG = [
   {
@@ -292,6 +355,9 @@ function setupMocks(consumers: unknown[], apiError = false) {
       // @ts-expect-error injecting mock for test
       window.__TEST_AGENT_CATALOG__ = catalog;
     }, MOCK_AGENT_CATALOG);
+    await page.addInitScript(() => {
+      window.localStorage.setItem('sam-onboarding-wizard-dismissed-user-1', 'true');
+    });
 
     await setupAuditRoutes(page, (path: string, respond: AuditResponder) => {
       if (path.includes('/api/auth')) return respond(200, mockUser);
@@ -302,6 +368,79 @@ function setupMocks(consumers: unknown[], apiError = false) {
       if (path === '/api/credentials/resolution-status') {
         if (apiError) return respond(500, { error: 'Internal server error' });
         return respond(200, { consumers });
+      }
+      if (path.startsWith('/api/credentials/')) return respond(200, { success: true });
+      return undefined;
+    });
+  };
+}
+
+function setupProjectMocks(consumers: unknown[]) {
+  return async (page: import('@playwright/test').Page) => {
+    await page.addInitScript((catalog) => {
+      // @ts-expect-error injecting mock for test
+      window.__TEST_AGENT_CATALOG__ = catalog;
+    }, MOCK_AGENT_CATALOG);
+    await page.addInitScript(() => {
+      window.localStorage.setItem('sam-onboarding-wizard-dismissed-user-1', 'true');
+    });
+
+    await setupAuditRoutes(page, (path: string, respond: AuditResponder) => {
+      if (path.includes('/api/auth')) return respond(200, mockUser);
+      if (path === '/api/projects') return respond(200, { projects: [PROJECT_DETAIL], nextCursor: null });
+      if (path === `/api/projects/${PROJECT_ID}`) return respond(200, PROJECT_DETAIL);
+      if (path === '/api/github/installations') {
+        return respond(200, [{ id: 1, accountLogin: 'acme', accountType: 'Organization' }]);
+      }
+      if (path.startsWith('/api/notifications')) {
+        return respond(200, { notifications: [], unreadCount: 0 });
+      }
+      if (path === '/api/providers/catalog') return respond(200, { catalogs: [] });
+      if (path === `/api/projects/${PROJECT_ID}/runtime-config`) {
+        return respond(200, { envVars: [], files: [] });
+      }
+      if (path === '/api/agents') return respond(200, { agents: [] });
+      if (path === '/api/credentials') {
+        return respond(200, [{ id: 'cred-hetzner', provider: 'hetzner', connected: true }]);
+      }
+      if (path === '/api/credentials/agent') {
+        return respond(200, {
+          credentials: [{ agentType: 'claude-code', credentialKind: 'api-key', isActive: true }],
+        });
+      }
+      if (path === `/api/projects/${PROJECT_ID}/credentials`) {
+        return respond(200, { credentials: [] });
+      }
+      if (path === `/api/projects/${PROJECT_ID}/repository-access`) {
+        return respond(200, { primaryRepository: 'acme/test-project-2', repositories: [] });
+      }
+      if (path === `/api/projects/${PROJECT_ID}/members`) {
+        return respond(200, {
+          members: [
+            {
+              id: 'member-1',
+              projectId: PROJECT_ID,
+              userId: 'user-1',
+              role: 'owner',
+              status: 'active',
+              user: { id: 'user-1', name: 'Test User', email: 'test@example.com' },
+            },
+          ],
+          inviteLinks: [],
+          accessRequests: [],
+        });
+      }
+      if (path === `/api/projects/${PROJECT_ID}/credential-attribution-health`) {
+        return respond(200, EMPTY_CREDENTIAL_HEALTH);
+      }
+      if (path === '/api/credentials/resolution-status') {
+        return respond(200, { consumers });
+      }
+      if (path === `/api/projects/${PROJECT_ID}/cloud-credentials`) {
+        return respond(200, { connected: true, provider: 'hetzner' });
+      }
+      if (path.startsWith(`/api/projects/${PROJECT_ID}/cloud-credentials/`)) {
+        return respond(200, { success: true });
       }
       if (path.startsWith('/api/credentials/')) return respond(200, { success: true });
       return undefined;
@@ -324,6 +463,23 @@ async function gotoConnections(page: import('@playwright/test').Page) {
     state: 'visible',
     timeout: 20000,
   });
+  await page.waitForTimeout(700);
+}
+
+async function gotoProjectSettings(page: import('@playwright/test').Page) {
+  await page.goto(`/projects/${PROJECT_ID}/settings`);
+  await page.waitForSelector('text=Connections', {
+    state: 'visible',
+    timeout: 20000,
+  });
+  const exitSetupButton = page.getByRole('button', { name: 'Exit setup' });
+  if (await exitSetupButton.isVisible().catch(() => false)) {
+    await exitSetupButton.click();
+    await page.locator('[data-testid="onboarding-wizard"]').waitFor({
+      state: 'detached',
+      timeout: 5000,
+    });
+  }
   await page.waitForTimeout(700);
 }
 
@@ -429,6 +585,17 @@ describeThemeAudit(
 );
 
 describeThemeAudit(
+  'CloudProviderConnectFlow — Hetzner user default',
+  setupMocks(HETZNER_UNRESOLVED_CONSUMERS),
+  async (page, _theme, suffix) => {
+    await gotoConnections(page);
+    await page.getByRole('button', { name: 'Make default' }).click();
+    await screenshot(page, `cloud-provider-flow-hetzner-default-${suffix}`);
+    await assertNoOverflow(page);
+  }
+);
+
+describeThemeAudit(
   'Connections — Replace active Codex auth.json',
   setupMocks(CODEX_ACTIVE_CONSUMERS),
   async (page, _theme, suffix) => {
@@ -462,6 +629,37 @@ describeThemeAudit(
     await screenshot(page, `connections-codex-broken-validate-${suffix}`);
     await page.getByRole('button', { name: 'Replace default' }).click();
     await screenshot(page, `connections-codex-broken-replace-${suffix}`);
+    await assertNoOverflow(page);
+  }
+);
+
+describeThemeAudit(
+  'Project Connections — inherited Hetzner default',
+  setupProjectMocks(PROJECT_INHERITED_COMPUTE_CONSUMERS),
+  async (page, _theme, suffix) => {
+    await gotoProjectSettings(page);
+    await screenshot(page, `project-connections-hetzner-user-default-${suffix}`);
+    await assertNoOverflow(page);
+  }
+);
+
+describeThemeAudit(
+  'Project Connections — Hetzner project override flow',
+  setupProjectMocks(PROJECT_INHERITED_COMPUTE_CONSUMERS),
+  async (page, _theme, suffix) => {
+    await gotoProjectSettings(page);
+    await page.getByRole('button', { name: 'Project override' }).click();
+    await screenshot(page, `project-connections-hetzner-override-flow-${suffix}`);
+    await assertNoOverflow(page);
+  }
+);
+
+describeThemeAudit(
+  'Project Connections — active Hetzner project override',
+  setupProjectMocks(PROJECT_OVERRIDE_COMPUTE_CONSUMERS),
+  async (page, _theme, suffix) => {
+    await gotoProjectSettings(page);
+    await screenshot(page, `project-connections-hetzner-project-override-${suffix}`);
     await assertNoOverflow(page);
   }
 );

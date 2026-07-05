@@ -44,8 +44,19 @@ vi.mock('../../../src/services/encryption', () => ({
 // Test Setup
 // ============================================================================
 
+const preparedStmt = {
+  bind: vi.fn().mockReturnThis(),
+  run: vi.fn().mockResolvedValue({ success: true, meta: { changes: 1 } }),
+};
+
 const mockEnv = {
-  DATABASE: {} as any,
+  DATABASE: {
+    prepare: vi.fn().mockReturnValue(preparedStmt),
+    batch: vi.fn().mockResolvedValue([
+      { success: true, meta: { changes: 1 } },
+      { success: true, meta: { changes: 1 } },
+    ]),
+  } as unknown as Env['DATABASE'],
   ENCRYPTION_KEY: 'test-encryption-key',
 } as Env;
 

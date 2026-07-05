@@ -13,7 +13,7 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
 }));
 
 vi.mock('../../../src/hooks/useToast', () => ({
-  useToast: () => ({ success: vi.fn(), error: vi.fn(), info: vi.fn() }),
+  useToast: () => ({ success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() }),
 }));
 
 import { SettingsConnections } from '../../../src/pages/SettingsConnections';
@@ -29,6 +29,15 @@ describe('SettingsConnections', () => {
           consumerName: 'Claude Code',
           source: 'unresolved',
           credentialName: null,
+          halted: false,
+        },
+        {
+          consumerId: 'hetzner',
+          consumerKind: 'compute',
+          consumerName: 'Hetzner Cloud',
+          source: 'platform',
+          credentialName: null,
+          credentialKind: 'cloud-provider',
           halted: false,
         },
       ],
@@ -67,12 +76,27 @@ describe('SettingsConnections', () => {
       expect(screen.getByText('Claude Code')).toBeInTheDocument();
     });
 
-    const connectBtn = screen.getByRole('button', { name: 'Make default' });
+    const connectBtn = screen.getAllByRole('button', { name: 'Make default' })[0];
     fireEvent.click(connectBtn);
 
     // ConnectFlow should show with credential input visible (agent pre-selected)
     await waitFor(() => {
       expect(screen.getByLabelText(/API Key/i)).toBeInTheDocument();
+    });
+  });
+
+  it('shows cloud provider flow with pre-selected provider when compute Make default is clicked', async () => {
+    render(<SettingsConnections />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Hetzner Cloud')).toBeInTheDocument();
+    });
+
+    const buttons = screen.getAllByRole('button', { name: 'Make default' });
+    fireEvent.click(buttons[1]);
+
+    await waitFor(() => {
+      expect(screen.getByLabelText(/Hetzner API token/i)).toBeInTheDocument();
     });
   });
 

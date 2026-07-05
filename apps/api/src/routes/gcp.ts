@@ -11,6 +11,7 @@ import { ulid } from '../lib/ulid';
 import { getUserId,requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { GcpOAuthHandleSchema, GcpSetupSchema,jsonValidator } from '../schemas';
+import { syncComputeCredentialToCC } from '../services/composable-credentials/compute-sync';
 import { encrypt } from '../services/encryption';
 import { sanitizeGcpError, toSanitizedAppError } from '../services/gcp-errors';
 import { listGcpProjects, runGcpSetup } from '../services/gcp-setup';
@@ -132,6 +133,13 @@ gcpRoutes.post('/setup', jsonValidator(GcpSetupSchema), async (c) => {
         updatedAt: now,
       });
     }
+
+    await syncComputeCredentialToCC(c.env.DATABASE, {
+      userId,
+      provider: 'gcp',
+      encryptedToken: ciphertext,
+      iv,
+    });
 
     // Step 8: Verify the setup works by performing a test token exchange
     try {

@@ -5,10 +5,11 @@
 import type { CCConsumerResolutionStatus, CredentialKind } from '@simple-agent-manager/shared';
 import { useState } from 'react';
 
+import { CloudProviderConnectFlow } from '../components/CloudProviderConnectFlow';
 import { ConnectFlow } from '../components/ConnectFlow';
 import { ConnectionsOverview } from '../components/ConnectionsOverview';
 import { useToast } from '../hooks/useToast';
-import { deleteAgentCredentialByKind } from '../lib/api';
+import { deleteAgentCredentialByKind, deleteCredential } from '../lib/api';
 
 export function SettingsConnections() {
   const toast = useToast();
@@ -16,6 +17,9 @@ export function SettingsConnections() {
   const [connectAgentId, setConnectAgentId] = useState<string | undefined>();
   const [connectAuthMethod, setConnectAuthMethod] = useState<CredentialKind | undefined>();
   const [connectMode, setConnectMode] = useState<'connect' | 'replace'>('connect');
+  const [showCloudConnect, setShowCloudConnect] = useState(false);
+  const [connectProviderId, setConnectProviderId] = useState<string | undefined>();
+  const [cloudConnectMode, setCloudConnectMode] = useState<'connect' | 'replace'>('connect');
   const [refreshKey, setRefreshKey] = useState(0);
 
   const handleConnect = (consumerId: string, consumerKind: 'agent' | 'compute') => {
@@ -24,8 +28,13 @@ export function SettingsConnections() {
       setConnectAuthMethod(undefined);
       setConnectMode('connect');
       setShowConnect(true);
+      setShowCloudConnect(false);
+      return;
     }
-    // Compute consumers deep-link to cloud provider settings (handled by ConnectionsOverview)
+    setConnectProviderId(consumerId);
+    setCloudConnectMode('connect');
+    setShowCloudConnect(true);
+    setShowConnect(false);
   };
 
   const handleConnected = () => {
@@ -33,17 +42,40 @@ export function SettingsConnections() {
     setConnectAgentId(undefined);
     setConnectAuthMethod(undefined);
     setConnectMode('connect');
+    setShowCloudConnect(false);
+    setConnectProviderId(undefined);
+    setCloudConnectMode('connect');
     setRefreshKey((k) => k + 1);
   };
 
   const handleReplace = (consumer: CCConsumerResolutionStatus) => {
+    if (consumer.consumerKind === 'compute') {
+      setConnectProviderId(consumer.consumerId);
+      setCloudConnectMode('replace');
+      setShowCloudConnect(true);
+      setShowConnect(false);
+      return;
+    }
     setConnectAgentId(consumer.consumerId);
     setConnectAuthMethod(toLegacyCredentialKind(consumer.credentialKind));
     setConnectMode('replace');
     setShowConnect(true);
+    setShowCloudConnect(false);
   };
 
   const handleDisconnect = async (consumer: CCConsumerResolutionStatus) => {
+    if (consumer.consumerKind === 'compute') {
+      if (!confirm(`Disconnect ${consumer.consumerName}?`)) return;
+      try {
+        await deleteCredential(consumer.consumerId);
+        toast.success(`${consumer.consumerName} disconnected`);
+        setRefreshKey((k) => k + 1);
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : 'Failed to disconnect credential');
+      }
+      return;
+    }
+
     const credentialKind = toLegacyCredentialKind(consumer.credentialKind);
     if (!credentialKind) {
       toast.error('This connection does not expose a removable user credential.');
@@ -85,11 +117,22 @@ export function SettingsConnections() {
         <h2 className="sam-type-section-heading m-0 text-fg-primary">Connections</h2>
         <p className="m-0 mt-1 text-xs text-fg-muted">
           How each AI agent and cloud provider resolves credentials for your account. Use row
-          actions to replace, disconnect, validate, or make an agent credential the default.
+          actions to replace, disconnect, validate, or make a credential the default.
         </p>
       </div>
 
-      {showConnect ? (
+      {showCloudConnect ? (
+        <CloudProviderConnectFlow
+          initialProvider={connectProviderId}
+          mode={cloudConnectMode}
+          onConnected={handleConnected}
+          onCancel={() => {
+            setShowCloudConnect(false);
+            setConnectProviderId(undefined);
+            setCloudConnectMode('connect');
+          }}
+        />
+      ) : showConnect ? (
         <ConnectFlow
           initialAgentId={connectAgentId}
           initialAuthMethod={connectAuthMethod}

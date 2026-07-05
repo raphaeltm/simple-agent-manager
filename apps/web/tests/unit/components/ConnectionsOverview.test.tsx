@@ -95,7 +95,7 @@ describe('ConnectionsOverview', () => {
       expect(screen.getByText('Codex')).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Make default' }));
+    fireEvent.click(screen.getAllByRole('button', { name: 'Make default' })[0]);
 
     expect(onConnect).toHaveBeenCalledWith('openai-codex', 'agent');
   });
@@ -118,15 +118,74 @@ describe('ConnectionsOverview', () => {
     );
   });
 
-  it('renders Configure link for unconfigured compute consumers', async () => {
-    renderOverview();
+  it('calls onConnect when Make default is clicked for an unconfigured compute consumer', async () => {
+    const onConnect = vi.fn();
+    renderOverview({ onConnect });
 
     await waitFor(() => {
       expect(screen.getByText('Hetzner Cloud')).toBeInTheDocument();
     });
 
-    const configureLink = screen.getByRole('link', { name: 'Configure' });
-    expect(configureLink).toHaveAttribute('href', '/settings/cloud-provider');
+    const buttons = screen.getAllByRole('button', { name: 'Make default' });
+    fireEvent.click(buttons[1]);
+
+    expect(onConnect).toHaveBeenCalledWith('hetzner', 'compute');
+  });
+
+  it('renders configured compute row actions', async () => {
+    const onReplace = vi.fn();
+    const onDisconnect = vi.fn();
+    mocks.getResolutionStatus.mockResolvedValue({
+      consumers: [
+        makeConsumer({
+          consumerId: 'hetzner',
+          consumerKind: 'compute',
+          consumerName: 'Hetzner Cloud',
+          source: 'user-attachment',
+          credentialName: 'Hetzner default',
+          credentialKind: 'cloud-provider',
+        }),
+      ],
+    });
+
+    renderOverview({ onReplace, onDisconnect });
+
+    await waitFor(() => {
+      expect(screen.getByText('Hetzner Cloud')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Replace default' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Disconnect' }));
+
+    expect(onReplace).toHaveBeenCalledWith(expect.objectContaining({ consumerId: 'hetzner' }));
+    expect(onDisconnect).toHaveBeenCalledWith(expect.objectContaining({ consumerId: 'hetzner' }));
+  });
+
+  it('shows project override for inherited compute defaults in project scope', async () => {
+    const onProjectOverride = vi.fn();
+    mocks.getResolutionStatus.mockResolvedValue({
+      consumers: [
+        makeConsumer({
+          consumerId: 'hetzner',
+          consumerKind: 'compute',
+          consumerName: 'Hetzner Cloud',
+          source: 'user-attachment',
+          credentialName: 'Hetzner default',
+          credentialKind: 'cloud-provider',
+        }),
+      ],
+    });
+
+    renderOverview({ projectId: 'proj-1', onProjectOverride });
+
+    await waitFor(() => {
+      expect(screen.getByText('Hetzner Cloud')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Project override' }));
+
+    expect(screen.queryByRole('button', { name: 'Replace default' })).not.toBeInTheDocument();
+    expect(onProjectOverride).toHaveBeenCalledWith(expect.objectContaining({ consumerId: 'hetzner' }));
   });
 
   it('does not render a Connect button for configured consumers', async () => {
@@ -139,7 +198,7 @@ describe('ConnectionsOverview', () => {
 
     const connectButtons = screen.queryAllByRole('button', { name: 'Connect' });
     expect(connectButtons).toHaveLength(0);
-    expect(screen.getByRole('button', { name: 'Make default' })).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Make default' }).length).toBeGreaterThan(0);
   });
 
   it('shows error alert and retries on click', async () => {

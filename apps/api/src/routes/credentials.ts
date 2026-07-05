@@ -39,6 +39,10 @@ import {
   disconnectAgentCredentialFromCC,
   syncAgentCredentialToCC,
 } from '../services/composable-credentials/agent-sync';
+import {
+  disconnectComputeCredentialFromCC,
+  syncComputeCredentialToCC,
+} from '../services/composable-credentials/compute-sync';
 import { lazyBackfillIfNeeded } from '../services/composable-credentials/lazy-backfill';
 import { resolveForConsumer } from '../services/composable-credentials/resolve';
 import { decrypt, encrypt } from '../services/encryption';
@@ -203,7 +207,8 @@ credentialsRoutes.get('/', async (c) => {
     .where(
       and(
         eq(schema.credentials.userId, userId),
-        eq(schema.credentials.credentialType, 'cloud-provider')
+        eq(schema.credentials.credentialType, 'cloud-provider'),
+        isNull(schema.credentials.projectId)
       )
     );
 
@@ -255,7 +260,8 @@ credentialsRoutes.post('/', jsonValidator(CreateCredentialSchema), async (c) => 
       and(
         eq(schema.credentials.userId, userId),
         eq(schema.credentials.provider, providerName),
-        eq(schema.credentials.credentialType, 'cloud-provider')
+        eq(schema.credentials.credentialType, 'cloud-provider'),
+        isNull(schema.credentials.projectId)
       )
     )
     .limit(1);
@@ -272,6 +278,13 @@ credentialsRoutes.post('/', jsonValidator(CreateCredentialSchema), async (c) => 
         updatedAt: now,
       })
       .where(eq(schema.credentials.id, existingCred.id));
+
+    await syncComputeCredentialToCC(c.env.DATABASE, {
+      userId,
+      provider: providerName,
+      encryptedToken: ciphertext,
+      iv,
+    });
 
     const response: CredentialResponse = {
       id: existingCred.id,
@@ -295,6 +308,13 @@ credentialsRoutes.post('/', jsonValidator(CreateCredentialSchema), async (c) => 
     iv,
     createdAt: now,
     updatedAt: now,
+  });
+
+  await syncComputeCredentialToCC(c.env.DATABASE, {
+    userId,
+    provider: providerName,
+    encryptedToken: ciphertext,
+    iv,
   });
 
   const response: CredentialResponse = {
@@ -322,13 +342,21 @@ credentialsRoutes.delete('/:provider', async (c) => {
       and(
         eq(schema.credentials.userId, userId),
         eq(schema.credentials.provider, provider),
-        eq(schema.credentials.credentialType, 'cloud-provider')
+        eq(schema.credentials.credentialType, 'cloud-provider'),
+        isNull(schema.credentials.projectId)
       )
     )
     .returning();
 
   if (result.length === 0) {
     throw errors.notFound('Credential');
+  }
+
+  if ((CREDENTIAL_PROVIDERS as readonly string[]).includes(provider)) {
+    await disconnectComputeCredentialFromCC(c.env.DATABASE, {
+      userId,
+      provider: provider as CredentialProvider,
+    });
   }
 
   return c.json({ success: true });
