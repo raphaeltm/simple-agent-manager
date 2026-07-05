@@ -2,7 +2,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import * as schema from '../../../src/db/schema';
+import type * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { projectMembersRoutes } from '../../../src/routes/projects/members';
 
