@@ -35,6 +35,8 @@ Work in a scratch dir: `.tmp/field-notes-post/` with an `assets/` and `out/` sub
 
 Choose ~4 photos that span the day and pair each with a concrete agent milestone (kickoff, debugging, parallel work, deploy green). Each stop gets: `HH:MM · Place name` + one line of copy with a single `<b>bold</b>` highlight.
 
+**Copy rule — never use em dashes.** Absolutely no em dashes (—) in any copy across all four images (headlines, subtitles, stats, stop copy). Rewrite the sentence or use a period, comma, or colon instead.
+
 ### 3. Prepare assets into `assets/`
 
 - Photos: `magick <src> -auto-orient -resize 1600x1600 -quality 85 assets/<name>.jpg`
