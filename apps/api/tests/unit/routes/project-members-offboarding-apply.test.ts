@@ -212,6 +212,59 @@ function makeNode(overrides: Partial<schema.Node> = {}): schema.Node {
   };
 }
 
+function makeDeploymentEnvironment(
+  overrides: Partial<schema.DeploymentEnvironmentRow> = {}
+): schema.DeploymentEnvironmentRow {
+  return {
+    id: 'deploy-env-1',
+    projectId: 'proj-1',
+    name: 'Production',
+    status: 'active',
+    nodeId: 'deploy-node',
+    requiresVolumes: true,
+    provider: 'hetzner',
+    location: 'nbg1',
+    createdAt: '2026-07-05T00:00:00.000Z',
+    updatedAt: '2026-07-05T00:00:00.000Z',
+    createdByUserId: 'departing-user',
+    createdByAgentProfileId: null,
+    createdByTaskId: null,
+    createdByWorkspaceId: null,
+    creationSource: 'user',
+    secretsUpdatedAt: null,
+    configUpdatedAt: null,
+    observedAppliedSeq: null,
+    observedStatus: null,
+    observedErrorMessage: null,
+    observedServicesJson: null,
+    observedDeployStatusJson: null,
+    observedDiskTelemetryJson: null,
+    observedAt: null,
+    agentDeployEnabled: true,
+    offboardingStatus: null,
+    agentDeployEnabledBy: null,
+    agentDeployEnabledAt: null,
+    agentDeployDisabledAt: null,
+    allowedDeployProfileIdsJson: null,
+    ...overrides,
+  };
+}
+
+function makeAttachment(overrides: Partial<schema.CCAttachmentRow> = {}): schema.CCAttachmentRow {
+  return {
+    id: 'attach-departing-compute',
+    configurationId: 'config-departing-compute',
+    consumerKind: 'compute',
+    consumerTarget: 'hetzner',
+    userId: 'departing-user',
+    projectId: 'proj-1',
+    isActive: true,
+    createdAt: '2026-07-05T00:00:00.000Z',
+    updatedAt: '2026-07-05T00:00:00.000Z',
+    ...overrides,
+  };
+}
+
 function triggerDetails(hasCoverage = false) {
   return {
     status: 'active',
@@ -244,6 +297,27 @@ function nodeDetails() {
     nodeRole: 'workspace',
     cloudProvider: 'hetzner',
     workspaceId: 'workspace-1',
+    remainingProjectCoverage: null,
+  };
+}
+
+function deploymentDetails() {
+  return {
+    status: 'active',
+    nodeId: 'deploy-node',
+    nodeStatus: 'active',
+    requiresVolumes: true,
+    remainingProjectCoverage: null,
+  };
+}
+
+function attachmentDetails() {
+  return {
+    consumerKind: 'compute',
+    consumerTarget: 'hetzner',
+    attachmentUserId: 'departing-user',
+    configurationOwnerId: 'departing-user',
+    credentialOwnerId: 'departing-user',
     remainingProjectCoverage: null,
   };
 }
@@ -542,6 +616,113 @@ describe('project member offboarding apply', () => {
       ],
     });
     expect(updatedRows.some((row) => row.table === schema.projectMembers)).toBe(false);
+  });
+
+  it('breaks deployment environments and disables departing project attachments', async () => {
+    const deploymentNode = makeNode({ id: 'deploy-node', nodeRole: 'deployment' });
+    selectResults = [
+      [makeMember('owner-user', 'owner'), makeMember('departing-user', 'admin')],
+      [makePlan()],
+      [
+        storedAction({
+          resourceKind: 'deployment_environment',
+          resourceId: 'deploy-env-1',
+          recommendedAction: 'break_and_flag',
+          details: deploymentDetails(),
+        }),
+        storedAction({
+          resourceKind: 'project_attachment',
+          resourceId: 'attach-departing-compute',
+          recommendedAction: 'break_and_flag',
+          credentialSourceBefore: 'project',
+          attributionProjectIdBefore: 'proj-1',
+          details: attachmentDetails(),
+        }),
+      ],
+      [],
+      [],
+      [],
+      [],
+      [{ environment: makeDeploymentEnvironment(), node: deploymentNode }],
+      [
+        {
+          attachment: makeAttachment(),
+          configurationName: 'Departing compute',
+          configurationOwnerId: 'departing-user',
+          credentialOwnerId: 'departing-user',
+        },
+      ],
+    ];
+    updateReturningRows = [
+      [{ id: 'deploy-env-1' }],
+      [{ id: 'deploy-node' }],
+      [{ id: 'attach-departing-compute' }],
+    ];
+
+    const response = await apply([
+      {
+        resourceKind: 'deployment_environment',
+        resourceId: 'deploy-env-1',
+        action: 'break_and_flag',
+      },
+      {
+        resourceKind: 'project_attachment',
+        resourceId: 'attach-departing-compute',
+        action: 'break_and_flag',
+      },
+    ]);
+    const body = await response.json();
+
+    expect(response.status, JSON.stringify(body)).toBe(200);
+    expect(body).toMatchObject({
+      status: 'active',
+      resourceResults: [
+        {
+          resourceKind: 'deployment_environment',
+          resourceId: 'deploy-env-1',
+          action: 'break_and_flag',
+          status: 'applied',
+          blocksRemoval: true,
+        },
+        {
+          resourceKind: 'project_attachment',
+          resourceId: 'attach-departing-compute',
+          action: 'break_and_flag',
+          status: 'applied',
+          blocksRemoval: false,
+        },
+      ],
+    });
+    expect(updatedRows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          table: schema.deploymentEnvironments,
+          values: expect.objectContaining({ offboardingStatus: 'blocked' }),
+        }),
+        expect.objectContaining({
+          table: schema.nodes,
+          values: expect.objectContaining({
+            offboardingStatus: 'blocked',
+            offboardingBlockedReason: 'member_removed_credentials_unavailable',
+          }),
+        }),
+        expect.objectContaining({
+          table: schema.ccAttachments,
+          values: expect.objectContaining({ isActive: false }),
+        }),
+      ])
+    );
+    expect(updatedRows.some((row) => row.table === schema.projectMembers)).toBe(false);
+    expect(
+      updatedRows.filter((row) => row.table === schema.projectMemberOffboardingResourceActions)
+    ).toEqual([
+      expect.objectContaining({
+        values: expect.objectContaining({ selectedAction: 'break_and_flag', status: 'applied' }),
+      }),
+      expect.objectContaining({
+        values: expect.objectContaining({ selectedAction: 'break_and_flag', status: 'applied' }),
+      }),
+    ]);
   });
 
   it('rejects expired plans', async () => {
