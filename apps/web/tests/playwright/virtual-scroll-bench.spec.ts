@@ -144,7 +144,7 @@ test.describe('virtualization jump benchmark', () => {
           () => (window as unknown as Record<string, unknown>).__benchReady === true,
           { timeout: 20_000 },
         );
-        await page.waitForFunction(() => document.querySelectorAll('[data-bench-row]').length > 3, {
+        await page.waitForFunction(() => document.querySelectorAll('[data-bench-row]').length > 0, {
           timeout: 20_000,
         });
         // Let initial measurement/bottom-anchor settle.
@@ -173,4 +173,95 @@ test.describe('virtualization jump benchmark', () => {
       );
     });
   }
+
+  // Isolate the ACTUAL production cause: does a 1 Hz re-render (mimicking the
+  // idle-countdown timer) + inline components.Header turn a static, smooth list
+  // jumpy — with the SAME virtualizer and SAME data?
+  test('virtuoso: static vs simulated-live (1 Hz re-render)', async ({ page }) => {
+    test.setTimeout(120_000);
+    const run = async (live: boolean) => {
+      await page.goto(`/__bench/virtual-scroll?mode=virtuoso&count=1500${live ? '&live=1' : ''}`);
+      await page.waitForFunction(
+        () => (window as unknown as Record<string, unknown>).__benchReady === true,
+        { timeout: 20_000 },
+      );
+      await page.waitForFunction(() => document.querySelectorAll('[data-bench-row]').length > 0, {
+        timeout: 20_000,
+      });
+      await page.waitForTimeout(600);
+      return measure(page);
+    };
+
+    const staticRun = await run(false);
+    const liveRun = await run(true);
+
+    // eslint-disable-next-line no-console
+    console.log('\n===== VIRTUOSO — STATIC vs SIMULATED-LIVE (1 Hz re-render) =====');
+    // eslint-disable-next-line no-console
+    console.table({ 'virtuoso (static)': staticRun, 'virtuoso (live 1Hz)': liveRun });
+    // eslint-disable-next-line no-console
+    console.log(
+      `live/static totalJump ratio: ${(liveRun.totalJump / Math.max(1, staticRun.totalJump)).toFixed(1)}x · ` +
+        `CLS static=${staticRun.cls} live=${liveRun.cls}`,
+    );
+  });
+
+  // Does periodic DATA CHURN (items array rebuilt with new object identities,
+  // like conversationItems rebuilding on every message update) cause the jump —
+  // and does the stable-getItemKey TanStack list resist it better than virtuoso?
+  test('static vs data-churn — virtuoso and tanstack', async ({ page }) => {
+    test.setTimeout(120_000);
+    const run = async (mode: 'virtuoso' | 'tanstack', churn: boolean) => {
+      await page.goto(`/__bench/virtual-scroll?mode=${mode}&count=1500${churn ? '&churn=1' : ''}`);
+      await page.waitForFunction(
+        () => (window as unknown as Record<string, unknown>).__benchReady === true,
+        { timeout: 20_000 },
+      );
+      await page.waitForFunction(() => document.querySelectorAll('[data-bench-row]').length > 0, {
+        timeout: 20_000,
+      });
+      await page.waitForTimeout(600);
+      return measure(page);
+    };
+
+    const table = {
+      'virtuoso (static)': await run('virtuoso', false),
+      'virtuoso (churn 1.5s)': await run('virtuoso', true),
+      'tanstack (static)': await run('tanstack', false),
+      'tanstack (churn 1.5s)': await run('tanstack', true),
+    };
+    // eslint-disable-next-line no-console
+    console.log('\n===== STATIC vs DATA-CHURN =====');
+    // eslint-disable-next-line no-console
+    console.table(table);
+  });
+
+  // Reproduce a LIVE session: append a message every 1s (triggers followOutput /
+  // followOnAppend auto-scroll toward the bottom while the user scrolls up).
+  test('static vs live-append — virtuoso and tanstack', async ({ page }) => {
+    test.setTimeout(120_000);
+    const run = async (mode: 'virtuoso' | 'tanstack', append: boolean) => {
+      await page.goto(`/__bench/virtual-scroll?mode=${mode}&count=1500${append ? '&append=1' : ''}`);
+      await page.waitForFunction(
+        () => (window as unknown as Record<string, unknown>).__benchReady === true,
+        { timeout: 20_000 },
+      );
+      await page.waitForFunction(() => document.querySelectorAll('[data-bench-row]').length > 0, {
+        timeout: 20_000,
+      });
+      await page.waitForTimeout(600);
+      return measure(page);
+    };
+
+    const table = {
+      'virtuoso (static)': await run('virtuoso', false),
+      'virtuoso (append 1s)': await run('virtuoso', true),
+      'tanstack (static)': await run('tanstack', false),
+      'tanstack (append 1s)': await run('tanstack', true),
+    };
+    // eslint-disable-next-line no-console
+    console.log('\n===== STATIC vs LIVE-APPEND (followOutput / followOnAppend) =====');
+    // eslint-disable-next-line no-console
+    console.table(table);
+  });
 });
