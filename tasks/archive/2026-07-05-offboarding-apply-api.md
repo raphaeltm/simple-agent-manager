@@ -68,6 +68,14 @@ resolved or intentionally deferred.
 - Member removal sets `project_members.status = 'removed'` and `removed_at`
   only when all selected actions allow removal.
 
+## Verification
+
+- PR: https://github.com/raphaeltm/simple-agent-manager/pull/1513
+- Staging deploy and smoke tests passed:
+  https://github.com/raphaeltm/simple-agent-manager/actions/runs/28742498944
+- Full local validation passed:
+  `pnpm lint && pnpm typecheck && pnpm test && pnpm build`
+
 ## References
 
 - `specs/034-project-offboarding/spec.md`
