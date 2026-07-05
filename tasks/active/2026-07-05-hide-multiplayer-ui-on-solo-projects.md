@@ -177,6 +177,12 @@ Findings: none. `getProjectMultiplayerState()` uses Drizzle parameterized querie
 - Local Playwright screenshots cover solo and multiplayer states at 375px and 1280px.
 - Staging verification proves a live solo project hides the multiplayer UI, then creating an invite makes the surfaces appear.
 
+## PR / CI Notes
+
+- PR: https://github.com/raphaeltm/simple-agent-manager/pull/1519
+- Initial PR CI passed build, lint, typecheck, unit tests, specialist evidence, UI compliance, staging smoke, VM smoke, and the full Playwright Visual Tests job.
+- Preflight evidence initially failed because the PR body did not include the required `AGENT_PREFLIGHT` block at workflow creation time. The PR body now includes the required block; a fresh pull request event is required so CI reads the corrected body.
+
 ## References
 
 - SAM task `01KWT0KMC4RXGZ1JGAED08685M`
