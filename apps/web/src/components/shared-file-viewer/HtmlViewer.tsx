@@ -9,11 +9,40 @@ const DEFAULT_HTML_FETCH_TIMEOUT_MS = 30_000;
 const HTML_FETCH_TIMEOUT_MS = import.meta.env.VITE_HTML_FETCH_TIMEOUT_MS
   ? parseInt(import.meta.env.VITE_HTML_FETCH_TIMEOUT_MS, 10)
   : DEFAULT_HTML_FETCH_TIMEOUT_MS;
+const HTML_SANDBOX_CSP = [
+  "default-src 'none'",
+  "script-src 'unsafe-inline'",
+  "style-src 'unsafe-inline'",
+  'img-src data: blob:',
+  'font-src data:',
+  "connect-src 'none'",
+  "frame-src 'none'",
+  "object-src 'none'",
+  "base-uri 'none'",
+  "form-action 'none'",
+].join('; ');
+const HTML_SANDBOX_META = `<meta http-equiv="Content-Security-Policy" content="${HTML_SANDBOX_CSP}">`;
 
 interface HtmlViewerProps {
   previewUrl: string;
   fileName: string;
   onContentStateChange?: (loaded: boolean) => void;
+}
+
+export function buildSandboxedHtmlSrcDoc(content: string): string {
+  const headMatch = content.match(/<head\b[^>]*>/i);
+  if (headMatch?.index !== undefined) {
+    const insertAt = headMatch.index + headMatch[0].length;
+    return `${content.slice(0, insertAt)}${HTML_SANDBOX_META}${content.slice(insertAt)}`;
+  }
+
+  const htmlMatch = content.match(/<html\b[^>]*>/i);
+  if (htmlMatch?.index !== undefined) {
+    const insertAt = htmlMatch.index + htmlMatch[0].length;
+    return `${content.slice(0, insertAt)}<head>${HTML_SANDBOX_META}</head>${content.slice(insertAt)}`;
+  }
+
+  return `${HTML_SANDBOX_META}${content}`;
 }
 
 export const HtmlViewer: FC<HtmlViewerProps> = ({
@@ -65,7 +94,7 @@ export const HtmlViewer: FC<HtmlViewerProps> = ({
   useEffect(() => {
     setRenderedSrcDoc(undefined);
     if (viewMode !== 'rendered' || content === null) return undefined;
-    const frame = requestAnimationFrame(() => setRenderedSrcDoc(content));
+    const frame = requestAnimationFrame(() => setRenderedSrcDoc(buildSandboxedHtmlSrcDoc(content)));
     return () => cancelAnimationFrame(frame);
   }, [content, viewMode]);
 

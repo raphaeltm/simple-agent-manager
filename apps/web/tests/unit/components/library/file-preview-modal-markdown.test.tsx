@@ -291,8 +291,13 @@ describe('FilePreviewModal — HTML', () => {
     expect(iframe).toHaveAttribute('sandbox', 'allow-scripts');
     expect(iframe).toHaveAttribute('referrerpolicy', 'no-referrer');
     await waitFor(() => {
-      expect(iframe).toHaveAttribute('srcdoc', HTML_CONTENT);
+      expect(iframe.getAttribute('srcdoc')).toContain('Content-Security-Policy');
     });
+    const srcDoc = iframe.getAttribute('srcdoc') ?? '';
+    expect(srcDoc).toContain("connect-src 'none'");
+    expect(srcDoc).toContain('<button id="run">Run</button>');
+    expect(srcDoc).toContain('<script>window.__ran = true;</script>');
+    expect(srcDoc.indexOf('Content-Security-Policy')).toBeLessThan(srcDoc.indexOf('<script>'));
     expect(iframe).not.toHaveAttribute('src');
   });
 
