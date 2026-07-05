@@ -97,6 +97,7 @@ export interface Env {
   PROJECT_INVITE_TOKEN_BYTES?: string; // Random bytes for project invite links (default: 32)
   PROJECT_INVITE_DEFAULT_EXPIRY_DAYS?: string; // Default invite-link lifetime (default: 7)
   PROJECT_INVITE_MAX_EXPIRY_DAYS?: string; // Maximum invite-link lifetime (default: 30)
+  PROJECT_OFFBOARDING_PLAN_TTL_SECONDS?: string; // Preview plan lifetime before apply must recompute (default: 900 = 15 min)
   DEVICE_FLOW_CODE_TTL_SECONDS?: string;
   DEVICE_FLOW_POLL_INTERVAL_SECONDS?: string;
   RATE_LIMIT_DEVICE_CODE_CREATE?: string;

@@ -424,4 +424,31 @@ describe('project member offboarding preview', () => {
       availableActions: ['reattach_to_project', 'break_and_flag', 'defer_removal'],
     });
   });
+
+  it('uses the configured preview plan TTL when persisting the plan expiry', async () => {
+    selectResults = [
+      [makeMember('owner-user', 'owner'), makeMember('departing-user', 'admin')],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+    ];
+
+    const response = await app.request(
+      '/api/projects/proj-1/members/departing-user/offboarding-preview',
+      { method: 'POST' },
+      { ...env, PROJECT_OFFBOARDING_PLAN_TTL_SECONDS: '120' }
+    );
+
+    expect(response.status).toBe(200);
+    const planInsert = insertedRows.find(
+      (row) => row.table === schema.projectMemberOffboardingPlans
+    );
+    const values = planInsert?.values as { createdAt: string; expiresAt: string } | undefined;
+    expect(values).toBeDefined();
+    if (!values) throw new Error('Expected offboarding plan insert');
+    expect(new Date(values.expiresAt).getTime() - new Date(values.createdAt).getTime()).toBe(120_000);
+  });
 });

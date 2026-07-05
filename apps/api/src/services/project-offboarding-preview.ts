@@ -13,7 +13,7 @@ import {
   summarizeOffboardingResources,
 } from './project-offboarding-preview-resources';
 
-const OFFBOARDING_PLAN_TTL_MS = 15 * 60 * 1000;
+const DEFAULT_OFFBOARDING_PLAN_TTL_SECONDS = 15 * 60;
 
 function offboardingPlanId(): string {
   return `off_${ulid()}`;
@@ -23,17 +23,27 @@ function offboardingActionId(): string {
   return `offact_${ulid()}`;
 }
 
+function resolveOffboardingPlanTtlMs(value: string | undefined): number {
+  const parsed = Number.parseInt(value ?? '', 10);
+  const ttlSeconds =
+    Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_OFFBOARDING_PLAN_TTL_SECONDS;
+  return ttlSeconds * 1000;
+}
+
 export async function createProjectMemberOffboardingPreview(input: {
   db: AppDb;
   project: schema.Project;
   memberUserId: string;
   requestedBy: string;
   defaultAgentType: string;
+  planTtlSeconds?: string;
   now?: Date;
 }): Promise<ProjectMemberOffboardingPreviewResponse> {
   const now = input.now ?? new Date();
   const nowIso = now.toISOString();
-  const expiresAt = new Date(now.getTime() + OFFBOARDING_PLAN_TTL_MS).toISOString();
+  const expiresAt = new Date(
+    now.getTime() + resolveOffboardingPlanTtlMs(input.planTtlSeconds)
+  ).toISOString();
 
   const members = await input.db
     .select()

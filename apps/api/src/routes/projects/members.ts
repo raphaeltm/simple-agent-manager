@@ -394,6 +394,7 @@ projectMembersRoutes.post('/:id/members/:userId/offboarding-preview', async (c) 
     memberUserId,
     requestedBy: requesterId,
     defaultAgentType: c.env.DEFAULT_TASK_AGENT_TYPE || 'opencode',
+    planTtlSeconds: c.env.PROJECT_OFFBOARDING_PLAN_TTL_SECONDS,
   });
 
   return c.json(preview);
