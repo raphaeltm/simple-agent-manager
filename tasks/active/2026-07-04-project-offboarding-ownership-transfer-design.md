@@ -43,7 +43,16 @@ This task must produce a specification document PR only. It must not implement r
 - [x] Cover data model changes, API endpoints, authorization matrix, migration considerations, and implementation wave breakdown.
 - [x] Include project-chat-first UI flows per rule 26.
 - [x] Cite code paths for every current-behavior claim.
-- [ ] Run docs-only validation and local review skills before opening PR.
+- [x] Run docs-only validation and local review skills before opening PR.
+
+## Validation
+
+- `pnpm install` passed.
+- `pnpm typecheck` passed.
+- `pnpm lint` passed with existing warnings only.
+- `pnpm test` passed on rerun after one unrelated ACP client timing failure; focused ACP client rerun also passed.
+- `pnpm build` passed.
+- Local reviews completed with `$task-completion-validator`, `$doc-sync-validator`, and `$security-auditor`; no blocking findings for this design-only diff.
 
 ## Acceptance Criteria
 
