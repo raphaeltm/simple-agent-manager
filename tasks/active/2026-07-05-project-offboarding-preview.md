@@ -40,7 +40,7 @@ Wave 6A of the shared-projects initiative needs the backend foundation for proje
   - existing active project attachment coverage enables `reattach_to_project`
   - a new preview supersedes/expires prior preview plans as apply-staleness groundwork
   - response does not leak encrypted credential/token fields
-- [ ] Run targeted API tests, migration safety, typecheck, lint, test, and build.
+- [x] Run targeted API tests, migration safety, typecheck, lint, test, and build.
 
 ## Acceptance Criteria
 
