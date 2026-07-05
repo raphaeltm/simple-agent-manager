@@ -85,6 +85,101 @@ describe('Credentials Routes - OAuth Support', () => {
     );
   });
 
+  describe('POST /api/credentials - cloud provider dual-write', () => {
+    it('saves a Hetzner user credential to legacy storage and mirrors it to compute CC rows', async () => {
+      mockDB.limit.mockResolvedValueOnce([]);
+      const env = makeTestEnv();
+
+      const res = await app.request(
+        '/api/credentials',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ provider: 'hetzner', token: 'hetzner-token-123' }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(201);
+      expect(mockDB.insert).toHaveBeenCalled();
+      expect(mockDB.values).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: 'test-user-id',
+          provider: 'hetzner',
+          credentialType: 'cloud-provider',
+          encryptedToken: 'encrypted',
+          iv: 'iv',
+        })
+      );
+
+      const database = env.DATABASE as unknown as {
+        prepare: ReturnType<typeof vi.fn>;
+        batch: ReturnType<typeof vi.fn>;
+      };
+      const prepareCalls = database.prepare.mock.calls.map((c) => c[0] as string);
+      expect(prepareCalls.some((sql) => sql.includes('DELETE FROM cc_attachments'))).toBe(true);
+      expect(prepareCalls.some((sql) => sql.includes('INSERT INTO cc_credentials'))).toBe(true);
+      expect(prepareCalls.some((sql) => sql.includes('INSERT INTO cc_configurations'))).toBe(true);
+      expect(prepareCalls.some((sql) => sql.includes('INSERT INTO cc_attachments'))).toBe(true);
+      expect(database.batch).toHaveBeenCalled();
+    });
+
+    it('updates a Hetzner user credential in legacy storage and mirrors replacement CC rows', async () => {
+      mockDB.limit.mockResolvedValueOnce([
+        {
+          id: 'legacy-hetzner',
+          provider: 'hetzner',
+          createdAt: '2026-07-05T00:00:00.000Z',
+        },
+      ]);
+      const env = makeTestEnv();
+
+      const res = await app.request(
+        '/api/credentials',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ provider: 'hetzner', token: 'hetzner-token-456' }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      expect(mockDB.update).toHaveBeenCalled();
+      expect(mockDB.set).toHaveBeenCalledWith(
+        expect.objectContaining({ encryptedToken: 'encrypted', iv: 'iv' })
+      );
+
+      const database = env.DATABASE as unknown as {
+        prepare: ReturnType<typeof vi.fn>;
+        batch: ReturnType<typeof vi.fn>;
+      };
+      const prepareCalls = database.prepare.mock.calls.map((c) => c[0] as string);
+      expect(prepareCalls.some((sql) => sql.includes('DELETE FROM cc_attachments'))).toBe(true);
+      expect(prepareCalls.some((sql) => sql.includes('INSERT INTO cc_credentials'))).toBe(true);
+      expect(database.batch).toHaveBeenCalled();
+    });
+  });
+
+  describe('DELETE /api/credentials/:provider - cloud provider dual-write', () => {
+    it('deletes a legacy cloud provider credential and removes the compute CC attachment', async () => {
+      mockDB.returning.mockResolvedValueOnce([{ id: 'legacy-hetzner' }]);
+      const env = makeTestEnv();
+
+      const res = await app.request('/api/credentials/hetzner', { method: 'DELETE' }, env);
+
+      expect(res.status).toBe(200);
+      expect(mockDB.delete).toHaveBeenCalled();
+
+      const database = env.DATABASE as unknown as { prepare: ReturnType<typeof vi.fn> };
+      const prepareCalls = database.prepare.mock.calls.map((c) => c[0] as string);
+      const disconnectSql = prepareCalls.find((sql) => sql.includes('DELETE FROM cc_attachments'));
+      expect(disconnectSql).toBeDefined();
+      expect(disconnectSql).toContain("consumer_kind = 'compute'");
+      expect(disconnectSql).toContain('project_id IS NULL');
+    });
+  });
+
   describe('POST /api/credentials/agent/validate', () => {
     it('validates a Claude API key against the provider models endpoint without storing it', async () => {
       const claudeApiKey = makeFakeSecret('sk-ant-api03');

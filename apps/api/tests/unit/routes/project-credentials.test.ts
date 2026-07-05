@@ -92,6 +92,10 @@ describe('Project Credentials Routes', () => {
       id: 'proj-1',
       userId: 'test-user-id',
     });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(new Response(JSON.stringify({ projects: [] }), { status: 200 }))
+    );
   });
 
   // Rate-limit middleware on PUT /:id/credentials calls KV.get / KV.put; stub
@@ -355,6 +359,106 @@ describe('Project Credentials Routes', () => {
       expect(res.headers.get('Retry-After')).not.toBeNull();
       // No DB write path should have been reached for this request.
       expect(database.batch).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('PUT /:id/cloud-credentials', () => {
+    it('creates a project-scoped cloud credential and mirrors it to compute CC rows', async () => {
+      mockDB.limit.mockResolvedValueOnce([]);
+
+      const res = await app.request(
+        '/api/projects/proj-1/cloud-credentials',
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ provider: 'hetzner', token: 'hetzner-project-token' }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(201);
+      expect(mockDB.insert).toHaveBeenCalled();
+      expect(mockDB.values).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: 'test-user-id',
+          projectId: 'proj-1',
+          provider: 'hetzner',
+          credentialType: 'cloud-provider',
+          encryptedToken: 'encrypted',
+          iv: 'iv',
+        })
+      );
+
+      const prepareCalls = database.prepare.mock.calls.map((c) => c[0] as string);
+      const deleteSql = prepareCalls.find(
+        (sql) =>
+          sql.includes('DELETE FROM cc_attachments') && sql.includes("consumer_kind = 'compute'")
+      );
+      expect(deleteSql).toBeDefined();
+      expect(deleteSql).toContain("consumer_kind = 'compute'");
+      expect(deleteSql).toContain('project_id = ?');
+      expect(prepareCalls.some((sql) => sql.includes('INSERT INTO cc_credentials'))).toBe(true);
+      expect(prepareCalls.some((sql) => sql.includes('INSERT INTO cc_configurations'))).toBe(true);
+      expect(prepareCalls.some((sql) => sql.includes('INSERT INTO cc_attachments'))).toBe(true);
+      expect(database.batch).toHaveBeenCalled();
+    });
+
+    it('updates a project-scoped cloud credential and mirrors replacement CC rows', async () => {
+      mockDB.limit.mockResolvedValueOnce([
+        {
+          id: 'legacy-project-hetzner',
+          createdAt: '2026-07-05T00:00:00.000Z',
+        },
+      ]);
+
+      const res = await app.request(
+        '/api/projects/proj-1/cloud-credentials',
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ provider: 'hetzner', token: 'replacement-project-token' }),
+        },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      expect(mockDB.update).toHaveBeenCalled();
+      expect(mockDB.set).toHaveBeenCalledWith(
+        expect.objectContaining({
+          encryptedToken: 'encrypted',
+          iv: 'iv',
+          isActive: true,
+        })
+      );
+
+      const prepareCalls = database.prepare.mock.calls.map((c) => c[0] as string);
+      expect(prepareCalls.some((sql) => sql.includes('DELETE FROM cc_attachments'))).toBe(true);
+      expect(prepareCalls.some((sql) => sql.includes('INSERT INTO cc_credentials'))).toBe(true);
+      expect(database.batch).toHaveBeenCalled();
+    });
+  });
+
+  describe('DELETE /:id/cloud-credentials/:provider', () => {
+    it('removes a project cloud override from legacy storage and CC attachments', async () => {
+      mockDB.returning.mockResolvedValueOnce([{ id: 'legacy-project-hetzner' }]);
+
+      const res = await app.request(
+        '/api/projects/proj-1/cloud-credentials/hetzner',
+        { method: 'DELETE' },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      expect(mockDB.delete).toHaveBeenCalled();
+
+      const prepareCalls = database.prepare.mock.calls.map((c) => c[0] as string);
+      const disconnectSql = prepareCalls.find(
+        (sql) =>
+          sql.includes('DELETE FROM cc_attachments') && sql.includes("consumer_kind = 'compute'")
+      );
+      expect(disconnectSql).toBeDefined();
+      expect(disconnectSql).toContain("consumer_kind = 'compute'");
+      expect(disconnectSql).toContain('project_id = ?');
     });
   });
 

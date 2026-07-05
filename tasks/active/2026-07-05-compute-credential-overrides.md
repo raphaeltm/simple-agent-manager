@@ -39,28 +39,34 @@ This blocks Wave 5 credential attribution validation: a user saving a Hetzner ke
 
 ## Implementation Checklist
 
-- [ ] Add compute-specific CC sync helpers that mirror legacy cloud-provider credentials into `cc_credentials`, `cc_configurations`, and `cc_attachments` for user and project scopes.
-- [ ] Extend lazy backfill/reconciliation so existing legacy-only cloud-provider rows are mirrored even when the user already has other CC data.
-- [ ] Update user-scoped cloud-provider save/update/delete routes to dual-write or disconnect compute CC rows.
-- [ ] Update GCP setup save/update path to dual-write compute CC rows.
-- [ ] Add project-scoped cloud-provider save/delete routes using project `secret:write` capability checks and preserving inactive-project-row halted behavior.
-- [ ] Add web API client functions and a compute-capable connection flow for cloud-provider rows.
-- [ ] Wire `SettingsConnections` and `ProjectConnectionsSection` so compute rows support Make default, Replace, Project override, and Disconnect/Remove override actions where valid.
-- [ ] Add API behavioral tests per cloud-provider writer proving both legacy and CC representations update/delete.
-- [ ] Add vertical-slice test proving a freshly saved user Hetzner key resolves as `user-attachment`, not `platform`, through `GET /api/credentials/resolution-status`.
-- [ ] Add Rule 28 fallback matrix coverage for compute consumers, including inactive project row halting fallback.
-- [ ] Add/update UI unit tests for compute row action rendering and parent callback wiring.
-- [ ] Run Playwright visual audit for Connections UI at 375px and 1280px with normal, long, many, empty, error/special-character scenarios.
+- [x] Add compute-specific CC sync helpers that mirror legacy cloud-provider credentials into `cc_credentials`, `cc_configurations`, and `cc_attachments` for user and project scopes.
+- [x] Extend lazy backfill/reconciliation so existing legacy-only cloud-provider rows are mirrored even when the user already has other CC data.
+- [x] Update user-scoped cloud-provider save/update/delete routes to dual-write or disconnect compute CC rows.
+- [x] Update GCP setup save/update path to dual-write compute CC rows.
+- [x] Add project-scoped cloud-provider save/delete routes using project `secret:write` capability checks and preserving inactive-project-row halted behavior.
+- [x] Add web API client functions and a compute-capable connection flow for cloud-provider rows.
+- [x] Wire `SettingsConnections` and `ProjectConnectionsSection` so compute rows support Make default, Replace, Project override, and Disconnect/Remove override actions where valid.
+- [x] Add API behavioral tests per cloud-provider writer proving both legacy and CC representations update/delete.
+- [x] Add vertical-slice test proving a freshly saved user Hetzner key resolves as `user-attachment`, not `platform`, through `GET /api/credentials/resolution-status`.
+- [x] Add Rule 28 fallback matrix coverage for compute consumers, including inactive project row halting fallback.
+- [x] Add/update UI unit tests for compute row action rendering and parent callback wiring.
+- [x] Run Playwright visual audit for Connections UI at 375px and 1280px with normal, long, many, empty, error/special-character scenarios.
 - [ ] Run quality checks and staging verification of the actual flow: save cloud provider key -> see `your default`; add project override -> see `project override`.
 
 ## Acceptance Criteria
 
-- [ ] Saving a Hetzner key at `/settings/cloud-provider` shows Hetzner as `your default` in user Connections and in project Connections with no project override.
-- [ ] Project Settings -> Connections can add a project-level Hetzner override, replace it, and remove it.
-- [ ] Existing legacy-saved cloud-provider keys become visible to CC resolution/status even when the user already has other CC rows.
-- [ ] Compute fallback matrix is covered, including inactive project rows blocking fallback.
-- [ ] Playwright screenshots are captured and inspected for mobile 375px and desktop 1280px.
+- [x] Saving a Hetzner key at `/settings/cloud-provider` shows Hetzner as `your default` in user Connections and in project Connections with no project override.
+- [x] Project Settings -> Connections can add a project-level Hetzner override, replace it, and remove it.
+- [x] Existing legacy-saved cloud-provider keys become visible to CC resolution/status even when the user already has other CC rows.
+- [x] Compute fallback matrix is covered, including inactive project rows blocking fallback.
+- [x] Playwright screenshots are captured and inspected for mobile 375px and desktop 1280px.
 - [ ] Staging validates the live user flow end to end before merge.
+
+## Verification Notes
+
+- Unit and contract tests cover user cloud create/update/delete, GCP setup create/update, project cloud create/update/delete, resolution-status source selection, compute fallback behavior, and UI action wiring.
+- Focused Playwright audit passed for cloud-provider default and project override flows on iPhone SE 375x667 and Desktop 1280x800 in both dark and light themes.
+- Local `test:workers` is blocked by repeated `workerd` signal 11 crashes, including when selecting an existing lazy-backfill test. The D1 regression for legacy-only cloud-provider reconciliation remains in the worker suite, but local execution cannot complete in this environment.
 
 ## References
 

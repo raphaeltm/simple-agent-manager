@@ -318,6 +318,157 @@ describe('compute resolution contract vs createProviderForUser', () => {
     expect(computeAssembler.assemble(expectResolved(resolved)).isPlatform).toBe(true);
   });
 
+  it('active project compute override wins over user and platform credentials', () => {
+    idSeq = 0;
+    const userCredential: Credential = {
+      id: nextId('cred'),
+      ownerId: userId,
+      name: 'user cloud',
+      kind: 'cloud-provider',
+      secret: { kind: 'cloud-provider', provider: 'hetzner', token: 'user-token' },
+      isActive: true,
+    };
+    const projectCredential: Credential = {
+      id: nextId('cred'),
+      ownerId: userId,
+      name: 'project cloud',
+      kind: 'cloud-provider',
+      secret: { kind: 'cloud-provider', provider: 'hetzner', token: 'project-token' },
+      isActive: true,
+    };
+    const userConfig: CompositionSnapshot['configurations'][number] = {
+      id: nextId('cfg'),
+      ownerId: userId,
+      name: 'user cloud cfg',
+      consumer: { kind: 'compute', provider: 'hetzner' },
+      credentialId: userCredential.id,
+      settings: {},
+      isActive: true,
+    };
+    const projectConfig: CompositionSnapshot['configurations'][number] = {
+      id: nextId('cfg'),
+      ownerId: userId,
+      name: 'project cloud cfg',
+      consumer: { kind: 'compute', provider: 'hetzner' },
+      credentialId: projectCredential.id,
+      settings: {},
+      isActive: true,
+    };
+    const snap: CompositionSnapshot = {
+      credentials: [userCredential, projectCredential],
+      configurations: [userConfig, projectConfig],
+      attachments: [
+        {
+          id: nextId('att'),
+          configurationId: userConfig.id,
+          consumer: { kind: 'compute', provider: 'hetzner' },
+          target: { scope: 'user', userId },
+          isActive: true,
+        },
+        {
+          id: nextId('att'),
+          configurationId: projectConfig.id,
+          consumer: { kind: 'compute', provider: 'hetzner' },
+          target: { scope: 'project', userId, projectId: 'project-1' },
+          isActive: true,
+        },
+      ],
+      platform: {
+        'compute:hetzner': {
+          mode: 'credential',
+          credential: {
+            id: nextId('cred'),
+            ownerId: 'platform',
+            name: 'platform cloud',
+            kind: 'cloud-provider',
+            secret: { kind: 'cloud-provider', provider: 'hetzner', token: 'platform-token' },
+            isActive: true,
+          },
+        },
+      },
+    };
+
+    const resolved = resolveEnvironment(
+      snap,
+      { kind: 'compute', provider: 'hetzner' },
+      { userId, projectId: 'project-1' }
+    );
+
+    expect(resolved?.source).toBe('project-attachment');
+    expect(computeAssembler.assemble(expectResolved(resolved)).token).toBe('project-token');
+  });
+
+  it('inactive project compute override halts instead of falling through', () => {
+    idSeq = 0;
+    const userCredential: Credential = {
+      id: nextId('cred'),
+      ownerId: userId,
+      name: 'user cloud',
+      kind: 'cloud-provider',
+      secret: { kind: 'cloud-provider', provider: 'hetzner', token: 'user-token' },
+      isActive: true,
+    };
+    const userConfig: CompositionSnapshot['configurations'][number] = {
+      id: nextId('cfg'),
+      ownerId: userId,
+      name: 'user cloud cfg',
+      consumer: { kind: 'compute', provider: 'hetzner' },
+      credentialId: userCredential.id,
+      settings: {},
+      isActive: true,
+    };
+    const haltedConfig: CompositionSnapshot['configurations'][number] = {
+      id: nextId('cfg'),
+      ownerId: userId,
+      name: 'inactive project cfg',
+      consumer: { kind: 'compute', provider: 'hetzner' },
+      credentialId: userCredential.id,
+      settings: {},
+      isActive: true,
+    };
+    const snap: CompositionSnapshot = {
+      credentials: [userCredential],
+      configurations: [userConfig, haltedConfig],
+      attachments: [
+        {
+          id: nextId('att'),
+          configurationId: userConfig.id,
+          consumer: { kind: 'compute', provider: 'hetzner' },
+          target: { scope: 'user', userId },
+          isActive: true,
+        },
+        {
+          id: nextId('att'),
+          configurationId: haltedConfig.id,
+          consumer: { kind: 'compute', provider: 'hetzner' },
+          target: { scope: 'project', userId, projectId: 'project-1' },
+          isActive: false,
+        },
+      ],
+      platform: {
+        'compute:hetzner': {
+          mode: 'credential',
+          credential: {
+            id: nextId('cred'),
+            ownerId: 'platform',
+            name: 'platform cloud',
+            kind: 'cloud-provider',
+            secret: { kind: 'cloud-provider', provider: 'hetzner', token: 'platform-token' },
+            isActive: true,
+          },
+        },
+      },
+    };
+
+    const resolved = resolveEnvironment(
+      snap,
+      { kind: 'compute', provider: 'hetzner' },
+      { userId, projectId: 'project-1' }
+    );
+
+    expect(resolved).toBeNull();
+  });
+
   it('inactive user credential falls through to platform (compute has no halt rule)', () => {
     const snap = buildComputeSnapshot(
       { provider: 'hetzner', active: false },

@@ -5,7 +5,9 @@ import type {
   AgentSettingsResponse,
   AgentSkill,
   CreateAgentProfileRequest,
+  CreateCredentialRequest,
   CreateSkillRequest,
+  CredentialResponse,
   ModelCatalogResponse,
   ProjectRuntimeConfigResponse,
   SaveAgentCredentialRequest,
@@ -99,6 +101,29 @@ export async function deleteProjectAgentCredential(
 ): Promise<void> {
   return request<void>(
     `/api/projects/${encodeURIComponent(projectId)}/credentials/${encodeURIComponent(agentType)}/${encodeURIComponent(credentialKind)}`,
+    { method: 'DELETE' }
+  );
+}
+
+export async function saveProjectCloudCredential(
+  projectId: string,
+  data: CreateCredentialRequest
+): Promise<CredentialResponse> {
+  return request<CredentialResponse>(
+    `/api/projects/${encodeURIComponent(projectId)}/cloud-credentials`,
+    {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }
+  );
+}
+
+export async function deleteProjectCloudCredential(
+  projectId: string,
+  provider: string
+): Promise<void> {
+  return request<void>(
+    `/api/projects/${encodeURIComponent(projectId)}/cloud-credentials/${encodeURIComponent(provider)}`,
     { method: 'DELETE' }
   );
 }

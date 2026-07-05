@@ -150,6 +150,53 @@ describe('lazy backfill wiring', () => {
     const didBackfill = await lazyBackfillIfNeeded(db, userId);
     expect(didBackfill).toBe(false);
   });
+
+  it('reconciles a legacy-only cloud provider row even when cc data already exists', async () => {
+    const cloudCredId = `${TEST_PREFIX}-legacy-hetzner-after-cc`;
+    const hetznerToken = 'hetzner-token-after-cc-data';
+    await seedLegacyCredential({
+      id: cloudCredId,
+      userId,
+      credentialType: 'cloud-provider',
+      credentialKind: 'api-key',
+      agentType: null,
+      provider: 'hetzner',
+      secret: hetznerToken,
+    });
+
+    const { lazyBackfillIfNeeded } =
+      await import('../../src/services/composable-credentials/lazy-backfill');
+    const didReconcile = await lazyBackfillIfNeeded(db, userId);
+    expect(didReconcile).toBe(true);
+
+    const attachment = await env.DATABASE.prepare(
+      `SELECT id, consumer_kind, consumer_target, project_id, is_active
+       FROM cc_attachments
+       WHERE user_id = ? AND consumer_kind = 'compute' AND consumer_target = 'hetzner'
+         AND project_id IS NULL`
+    )
+      .bind(userId)
+      .first();
+    expect(attachment).toBeTruthy();
+    expect(attachment!.is_active).toBe(1);
+
+    const { resolveForConsumer } =
+      await import('../../src/services/composable-credentials/resolve');
+    const resolved = await resolveForConsumer(
+      db,
+      userId,
+      ENCRYPTION_KEY,
+      { kind: 'compute', provider: 'hetzner' }
+    );
+
+    expect(resolved).not.toBeNull();
+    expect(resolved!.source).toBe('user-attachment');
+    expect(resolved!.credential?.secret.kind).toBe('cloud-provider');
+    if (resolved!.credential?.secret.kind === 'cloud-provider') {
+      expect(resolved!.credential.secret.provider).toBe('hetzner');
+      expect(resolved!.credential.secret.token).toBe(hetznerToken);
+    }
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

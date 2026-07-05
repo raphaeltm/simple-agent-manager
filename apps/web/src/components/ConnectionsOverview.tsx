@@ -110,7 +110,11 @@ export function ConnectionsOverview({
               consumer={c}
               isLast={idx === compute.length - 1}
               onConnect={onConnect}
-              deepLinkPath="/settings/cloud-provider"
+              onReplace={onReplace}
+              onDisconnect={onDisconnect}
+              onProjectOverride={onProjectOverride}
+              onValidate={onValidate}
+              projectScoped={projectId != null}
             />
           ))}
           {compute.length === 0 && (
@@ -144,20 +148,23 @@ function ConnectionRow({
   projectScoped?: boolean;
 }) {
   const isConfigured = consumer.source !== 'unresolved' && consumer.source !== 'halted';
-  const isAgent = consumer.consumerKind === 'agent';
   const hasTenantSource =
     consumer.source === 'user-attachment' || consumer.source === 'project-attachment';
   const canDisconnect =
-    isAgent &&
     hasTenantSource &&
     (!projectScoped || consumer.source === 'project-attachment') &&
     onDisconnect;
-  const canReplace = isAgent && hasTenantSource && onReplace;
+  const canReplace =
+    hasTenantSource &&
+    (!projectScoped || consumer.source === 'project-attachment') &&
+    onReplace;
   const canProjectOverride =
-    isAgent && projectScoped && consumer.source !== 'project-attachment' && onProjectOverride;
-  const canMakeDefault = isAgent && !projectScoped && !hasTenantSource && onConnect;
+    projectScoped && consumer.source !== 'project-attachment' && onProjectOverride;
+  const canMakeDefault = !projectScoped && !hasTenantSource && onConnect;
   const canValidate =
-    isAgent && onValidate && (consumer.validation || consumer.consumerId === 'openai-codex');
+    consumer.consumerKind === 'agent' &&
+    onValidate &&
+    (consumer.validation || consumer.consumerId === 'openai-codex');
 
   return (
     <div

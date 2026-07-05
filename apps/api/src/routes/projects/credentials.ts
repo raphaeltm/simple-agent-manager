@@ -11,8 +11,20 @@
  * Project membership/capabilities gate access, while credential rows remain
  * caller-scoped so members cannot read or modify another user's credential.
  */
-import type { AgentCredentialInfo, AgentType, CredentialKind } from '@simple-agent-manager/shared';
-import { getAgentDefinition, isValidAgentType } from '@simple-agent-manager/shared';
+import type {
+  AgentCredentialInfo,
+  AgentType,
+  CreateCredentialRequest,
+  CredentialKind,
+  CredentialProvider,
+  CredentialResponse,
+  CredentialValidationStatus,
+} from '@simple-agent-manager/shared';
+import {
+  CREDENTIAL_PROVIDERS,
+  getAgentDefinition,
+  isValidAgentType,
+} from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
@@ -26,13 +38,24 @@ import { getUserId, requireApproved, requireAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { requireProjectCapability } from '../../middleware/project-auth';
 import { rateLimitCredentialUpdate } from '../../middleware/rate-limit';
-import { jsonValidator, SaveAgentCredentialSchema } from '../../schemas';
+import { CreateCredentialSchema, jsonValidator, SaveAgentCredentialSchema } from '../../schemas';
 import {
   disconnectAgentCredentialFromCC,
   syncAgentCredentialToCC,
 } from '../../services/composable-credentials/agent-sync';
+import {
+  disconnectComputeCredentialFromCC,
+  syncComputeCredentialToCC,
+} from '../../services/composable-credentials/compute-sync';
 import { decrypt, encrypt } from '../../services/encryption';
-import { CredentialValidator } from '../../services/validation';
+import { getTimeoutMs } from '../../services/fetch-timeout';
+import { serializeCredentialToken } from '../../services/provider-credentials';
+import {
+  CredentialValidator,
+  formatOnlyValidation,
+  validateHetznerCredentialWithProvider,
+  validateScalewayCredentialWithProvider,
+} from '../../services/validation';
 
 const projectCredentialsRoutes = new Hono<{ Bindings: Env }>();
 
@@ -47,6 +70,93 @@ function getAgentCredentialLabel(
 ): string | undefined {
   if (credentialKind !== 'oauth-token') return undefined;
   return agentType === 'openai-codex' ? 'Codex auth.json' : 'Pro/Max Subscription';
+}
+
+interface CloudCredentialFields {
+  providerName: CredentialProvider;
+  tokenToValidate: string;
+}
+
+function getCloudCredentialFields(body: CreateCredentialRequest): CloudCredentialFields {
+  const providerName = body.provider;
+  if (!(CREDENTIAL_PROVIDERS as readonly string[]).includes(providerName)) {
+    throw errors.badRequest(
+      `Unsupported provider: ${providerName}. Supported: ${CREDENTIAL_PROVIDERS.join(', ')}`
+    );
+  }
+
+  if (providerName === 'hetzner') {
+    if (!body.token) throw errors.badRequest('Token is required for Hetzner');
+    return {
+      providerName,
+      tokenToValidate: serializeCredentialToken(providerName, { token: body.token }),
+    };
+  }
+
+  if (providerName === 'scaleway') {
+    if (!body.secretKey || !body.projectId) {
+      throw errors.badRequest('secretKey and projectId are required for Scaleway');
+    }
+    return {
+      providerName,
+      tokenToValidate: serializeCredentialToken(providerName, {
+        secretKey: body.secretKey,
+        projectId: body.projectId,
+      }),
+    };
+  }
+
+  if (
+    !body.gcpProjectId ||
+    !body.gcpProjectNumber ||
+    !body.serviceAccountEmail ||
+    !body.wifPoolId ||
+    !body.wifProviderId ||
+    !body.defaultZone
+  ) {
+    throw errors.badRequest(
+      'gcpProjectId, gcpProjectNumber, serviceAccountEmail, wifPoolId, wifProviderId, and defaultZone are required for GCP'
+    );
+  }
+  return {
+    providerName,
+    tokenToValidate: serializeCredentialToken(providerName, {
+      gcpProjectId: body.gcpProjectId,
+      gcpProjectNumber: body.gcpProjectNumber,
+      serviceAccountEmail: body.serviceAccountEmail,
+      wifPoolId: body.wifPoolId,
+      wifProviderId: body.wifProviderId,
+      defaultZone: body.defaultZone,
+    }),
+  };
+}
+
+const DEFAULT_SAVE_VALIDATION_TIMEOUT_MS = 8000;
+
+function getSaveValidationTimeoutMs(env: Env): number {
+  return getTimeoutMs(
+    env.AGENT_CREDENTIAL_VALIDATION_TIMEOUT_MS,
+    DEFAULT_SAVE_VALIDATION_TIMEOUT_MS
+  );
+}
+
+async function validateCloudCredentialRequest(
+  body: CreateCredentialRequest,
+  env: Env
+): Promise<CredentialValidationStatus> {
+  if (body.provider === 'hetzner') {
+    return validateHetznerCredentialWithProvider(body.token, {
+      timeoutMs: getSaveValidationTimeoutMs(env),
+    });
+  }
+  if (body.provider === 'scaleway') {
+    return validateScalewayCredentialWithProvider(body.secretKey, body.projectId, {
+      timeoutMs: getSaveValidationTimeoutMs(env),
+    });
+  }
+  return formatOnlyValidation(
+    'GCP credential metadata accepted. Live validation runs during Google setup.'
+  );
 }
 
 /**
@@ -117,6 +227,140 @@ projectCredentialsRoutes.get('/:id/credentials', async (c) => {
   );
 
   return c.json({ credentials });
+});
+
+/**
+ * PUT /api/projects/:id/cloud-credentials — save or update a project-scoped
+ * cloud-provider credential override.
+ */
+projectCredentialsRoutes.put(
+  '/:id/cloud-credentials',
+  (c, next) => rateLimitCredentialUpdate(c.env)(c, next),
+  jsonValidator(CreateCredentialSchema),
+  async (c) => {
+    const userId = getUserId(c);
+    const projectId = c.req.param('id');
+    const db = drizzle(c.env.DATABASE, { schema });
+
+    await requireProjectCapability(db, projectId, userId, 'secret:write');
+
+    const requestBody = c.req.valid('json');
+    const { providerName, tokenToValidate: tokenToEncrypt } =
+      getCloudCredentialFields(requestBody);
+    const validation = await validateCloudCredentialRequest(requestBody, c.env);
+    const { ciphertext, iv } = await encrypt(tokenToEncrypt, getCredentialEncryptionKey(c.env));
+
+    const existing = await db
+      .select()
+      .from(schema.credentials)
+      .where(
+        and(
+          eq(schema.credentials.userId, userId),
+          eq(schema.credentials.projectId, projectId),
+          eq(schema.credentials.provider, providerName),
+          eq(schema.credentials.credentialType, 'cloud-provider')
+        )
+      )
+      .limit(1);
+
+    const now = new Date().toISOString();
+    const existingCred = existing[0];
+
+    if (existingCred) {
+      await db
+        .update(schema.credentials)
+        .set({ encryptedToken: ciphertext, iv, isActive: true, updatedAt: now })
+        .where(eq(schema.credentials.id, existingCred.id));
+
+      await syncComputeCredentialToCC(c.env.DATABASE, {
+        userId,
+        projectId,
+        provider: providerName,
+        encryptedToken: ciphertext,
+        iv,
+      });
+
+      const response: CredentialResponse = {
+        id: existingCred.id,
+        provider: providerName,
+        connected: true,
+        createdAt: existingCred.createdAt,
+        validation,
+      };
+      return c.json(response);
+    }
+
+    const id = ulid();
+    await db.insert(schema.credentials).values({
+      id,
+      userId,
+      projectId,
+      provider: providerName,
+      credentialType: 'cloud-provider',
+      isActive: true,
+      encryptedToken: ciphertext,
+      iv,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    await syncComputeCredentialToCC(c.env.DATABASE, {
+      userId,
+      projectId,
+      provider: providerName,
+      encryptedToken: ciphertext,
+      iv,
+    });
+
+    const response: CredentialResponse = {
+      id,
+      provider: providerName,
+      connected: true,
+      createdAt: now,
+      validation,
+    };
+    return c.json(response, 201);
+  }
+);
+
+/**
+ * DELETE /api/projects/:id/cloud-credentials/:provider — remove a project
+ * cloud-provider override. Missing legacy rows still disconnect CC-only rows.
+ */
+projectCredentialsRoutes.delete('/:id/cloud-credentials/:provider', async (c) => {
+  const userId = getUserId(c);
+  const projectId = c.req.param('id');
+  const provider = c.req.param('provider');
+  const db = drizzle(c.env.DATABASE, { schema });
+
+  await requireProjectCapability(db, projectId, userId, 'secret:write');
+
+  if (!(CREDENTIAL_PROVIDERS as readonly string[]).includes(provider)) {
+    throw errors.badRequest(
+      `Unsupported provider: ${provider}. Supported: ${CREDENTIAL_PROVIDERS.join(', ')}`
+    );
+  }
+
+  const providerName = provider as CredentialProvider;
+  await db
+    .delete(schema.credentials)
+    .where(
+      and(
+        eq(schema.credentials.userId, userId),
+        eq(schema.credentials.projectId, projectId),
+        eq(schema.credentials.provider, providerName),
+        eq(schema.credentials.credentialType, 'cloud-provider')
+      )
+    )
+    .returning();
+
+  await disconnectComputeCredentialFromCC(c.env.DATABASE, {
+    userId,
+    projectId,
+    provider: providerName,
+  });
+
+  return c.json({ success: true });
 });
 
 /**
