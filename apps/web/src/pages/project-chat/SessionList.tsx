@@ -20,6 +20,7 @@ export function SessionList({
   onSelect,
   taskInfoMap,
   onShowHierarchy,
+  showOwnership = true,
 }: {
   /** Sessions to display (already filtered to the visible bucket). */
   sessions: ChatSessionListItem[];
@@ -27,6 +28,7 @@ export function SessionList({
   onSelect: (id: string) => void;
   taskInfoMap: Map<string, TaskInfo>;
   onShowHierarchy: (taskId: string) => void;
+  showOwnership?: boolean;
 }) {
   // Pre-compute lineage text for retries/forks
   const lineageMap = useMemo(() => {
@@ -51,6 +53,7 @@ export function SessionList({
           taskInfoMap={taskInfoMap}
           onShowHierarchy={onShowHierarchy}
           lineageText={lineageMap.get(session.id)}
+          showOwnership={showOwnership}
         />
       ))}
     </>

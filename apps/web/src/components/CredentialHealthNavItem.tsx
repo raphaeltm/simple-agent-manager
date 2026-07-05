@@ -244,7 +244,7 @@ export function CredentialHealthNavItem({ projectId, compact = false }: Credenti
     };
   }, [projectId]);
 
-  if (!projectId || !summary || summary.counts.resources === 0) return null;
+  if (!projectId || !summary || !summary.multiplayerActive || summary.counts.resources === 0) return null;
 
   const needsAttention = summary.counts.personalCredentials > 0;
 

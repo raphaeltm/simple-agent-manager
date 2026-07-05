@@ -287,7 +287,7 @@ export function ProjectTriggerDetail() {
         </div>
       </div>
 
-      {trigger.credentialAttribution?.hasPersonalWarning && (
+      {trigger.credentialAttribution?.multiplayerActive && trigger.credentialAttribution.hasPersonalWarning && (
         <div className="mb-6">
           <TriggerCredentialWarning trigger={trigger} />
         </div>

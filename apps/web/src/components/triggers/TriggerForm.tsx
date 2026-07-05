@@ -368,7 +368,7 @@ export const TriggerForm: FC<TriggerFormProps> = ({
           </button>
         </div>
 
-        {editTrigger?.credentialAttribution?.hasPersonalWarning && (
+        {editTrigger?.credentialAttribution?.multiplayerActive && editTrigger.credentialAttribution.hasPersonalWarning && (
           <div className="px-4 pt-4">
             <TriggerCredentialWarning trigger={editTrigger} />
           </div>

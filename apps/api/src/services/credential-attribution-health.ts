@@ -8,6 +8,7 @@ import { and, eq, inArray, isNull, or } from 'drizzle-orm';
 
 import * as schema from '../db/schema';
 import type { AppDb } from '../middleware/project-auth';
+import { getProjectMultiplayerState } from './project-multiplayer';
 
 type ProjectRow = Pick<
   schema.Project,
@@ -267,8 +268,11 @@ export async function getProjectCredentialAttributionHealth(input: {
   db: AppDb;
   project: ProjectRow;
   defaultAgentType: string;
+  multiplayerActive?: boolean;
 }): Promise<ProjectCredentialAttributionHealthSummary> {
   const { db, project, defaultAgentType } = input;
+  const multiplayerActive = input.multiplayerActive
+    ?? (await getProjectMultiplayerState(db, project.id)).multiplayerActive;
   const triggerRows = await db
     .select()
     .from(schema.triggers)
@@ -299,6 +303,7 @@ export async function getProjectCredentialAttributionHealth(input: {
 
   return {
     projectId: project.id,
+    multiplayerActive,
     counts: {
       resources: resources.length,
       personalResources: resources.filter(resourceHasPersonalWarning).length,

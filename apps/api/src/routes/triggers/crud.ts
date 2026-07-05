@@ -40,6 +40,7 @@ import { CreateTriggerSchema, jsonValidator, UpdateTriggerSchema } from '../../s
 import { buildCredentialAttributionForTriggers } from '../../services/credential-attribution-health';
 import { validateCronExpression } from '../../services/cron-utils';
 import { cronToHumanReadable, cronToNextFire } from '../../services/cron-utils';
+import { getProjectMultiplayerState } from '../../services/project-multiplayer';
 import { submitTriggeredTask } from '../../services/trigger-submit';
 import { buildCronContext, renderTemplate } from '../../services/trigger-template';
 import { requireProjectTaskRead, requireProjectTaskWrite } from '../task-project-auth';
@@ -82,6 +83,7 @@ async function attachCredentialAttribution(input: {
   project: schema.Project;
   triggers: schema.TriggerRow[];
 }): Promise<Map<string, TriggerResponse['credentialAttribution']>> {
+  const multiplayerState = await getProjectMultiplayerState(input.db, input.project.id);
   const checksByTriggerId = await buildCredentialAttributionForTriggers({
     db: input.db,
     project: input.project,
@@ -95,6 +97,7 @@ async function attachCredentialAttribution(input: {
       return [
         trigger.id,
         {
+          multiplayerActive: multiplayerState.multiplayerActive,
           hasPersonalWarning: checks.some((check) => check.source === 'personal'),
           checks,
         },

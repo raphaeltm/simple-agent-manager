@@ -19,6 +19,7 @@ describe('CredentialHealthNavItem', () => {
     vi.clearAllMocks();
     mocks.getProjectCredentialAttributionHealth.mockResolvedValue({
       projectId: 'proj-1',
+      multiplayerActive: true,
       counts: {
         resources: 1,
         personalResources: 1,
@@ -102,5 +103,31 @@ describe('CredentialHealthNavItem', () => {
     expect(screen.getByText('Nodes')).toBeInTheDocument();
     expect(screen.getByText('Production runner node')).toBeInTheDocument();
     expect(screen.getAllByText("This runs on Coworker's personal key.")).toHaveLength(2);
+  });
+
+  it('hides the nav item for solo projects even with credential-backed resources', async () => {
+    mocks.getProjectCredentialAttributionHealth.mockResolvedValueOnce({
+      projectId: 'proj-1',
+      multiplayerActive: false,
+      counts: {
+        resources: 1,
+        personalResources: 1,
+        personalCredentials: 2,
+        projectCoveredCredentials: 0,
+        unknownCredentials: 0,
+      },
+      resources: [],
+    });
+
+    render(
+      <MemoryRouter>
+        <CredentialHealthNavItem projectId="proj-1" />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(mocks.getProjectCredentialAttributionHealth).toHaveBeenCalledWith('proj-1');
+    });
+    expect(screen.queryByRole('button', { name: /credential attribution health/i })).not.toBeInTheDocument();
   });
 });

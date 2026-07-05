@@ -23,6 +23,7 @@ export function MobileSessionDrawer({
   onShowHierarchy,
   sessionScope,
   onSessionScopeChange,
+  showOwnership,
 }: {
   sessions: ChatSessionListItem[];
   selectedSessionId: string | null;
@@ -36,6 +37,7 @@ export function MobileSessionDrawer({
   onShowHierarchy: (taskId: string) => void;
   sessionScope: SessionScope;
   onSessionScopeChange: (scope: SessionScope) => void;
+  showOwnership: boolean;
 }) {
   const [mobileSearch, setMobileSearch] = useState('');
   const [mobileShowStale, setMobileShowStale] = useState(false);
@@ -165,23 +167,25 @@ export function MobileSessionDrawer({
               </button>
             )}
           </div>
-          <div className="grid grid-cols-2 gap-1 rounded-md border border-border-default bg-surface/40 p-0.5" aria-label="Session ownership filter">
-            {(['my', 'all'] as const).map((scope) => (
-              <button
-                key={scope}
-                type="button"
-                onClick={() => onSessionScopeChange(scope)}
-                aria-pressed={sessionScope === scope}
-                className={`rounded-sm px-2 py-1 text-[11px] font-medium transition-colors ${
-                  sessionScope === scope
-                    ? 'bg-accent/15 text-accent'
-                    : 'bg-transparent text-fg-muted hover:text-fg-primary'
-                }`}
-              >
-                {scope === 'my' ? 'My sessions' : 'All sessions'}
-              </button>
-            ))}
-          </div>
+          {showOwnership && (
+            <div className="grid grid-cols-2 gap-1 rounded-md border border-border-default bg-surface/40 p-0.5" aria-label="Session ownership filter">
+              {(['my', 'all'] as const).map((scope) => (
+                <button
+                  key={scope}
+                  type="button"
+                  onClick={() => onSessionScopeChange(scope)}
+                  aria-pressed={sessionScope === scope}
+                  className={`rounded-sm px-2 py-1 text-[11px] font-medium transition-colors ${
+                    sessionScope === scope
+                      ? 'bg-accent/15 text-accent'
+                      : 'bg-transparent text-fg-muted hover:text-fg-primary'
+                  }`}
+                >
+                  {scope === 'my' ? 'My sessions' : 'All sessions'}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Subtle refresh indicator */}
@@ -197,6 +201,7 @@ export function MobileSessionDrawer({
             onSelect={onSelect}
             taskInfoMap={taskInfoMap}
             onShowHierarchy={onShowHierarchy}
+            showOwnership={showOwnership}
           />
           {filteredS.length > 0 && (
             <>
@@ -215,6 +220,7 @@ export function MobileSessionDrawer({
                   onSelect={onSelect}
                   taskInfoMap={taskInfoMap}
                   onShowHierarchy={onShowHierarchy}
+                  showOwnership={showOwnership}
                 />
               )}
             </>

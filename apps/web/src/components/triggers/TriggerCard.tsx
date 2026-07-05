@@ -195,7 +195,7 @@ export const TriggerCard: FC<TriggerCardProps> = ({
         </div>
       )}
 
-      {trigger.credentialAttribution?.hasPersonalWarning && (
+      {trigger.credentialAttribution?.multiplayerActive && trigger.credentialAttribution.hasPersonalWarning && (
         <div className="mt-3">
           <TriggerCredentialWarning trigger={trigger} />
         </div>

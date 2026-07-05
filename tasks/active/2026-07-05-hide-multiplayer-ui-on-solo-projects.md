@@ -45,17 +45,17 @@ This task will add explicit tests for both sides of the product-mode gate and up
 
 ## Implementation Checklist
 
-- [ ] Add a shared server helper/service that computes `multiplayerActive` using the canonical condition: active members > 1 OR active invite link OR pending access request.
-- [ ] Expose `multiplayerActive` on the project detail payload and shared `Project`/`ProjectDetailResponse` types so project chat can read it through existing context.
-- [ ] Expose the same `multiplayerActive` boolean on `ProjectCredentialAttributionHealthSummary`.
-- [ ] Gate project chat desktop and mobile `My sessions` / `All sessions` controls on `project.multiplayerActive`.
-- [ ] Gate session ownership badges/indicators so they only render when `project.multiplayerActive` is true and there is more than one active member behind that server condition.
-- [ ] Gate `CredentialHealthNavItem` so the Credentials nav item and modal are hidden for solo projects even when credential-backed resources exist.
-- [ ] Gate trigger credential attribution warnings in trigger cards, trigger form, and trigger detail using the server-computed condition.
-- [ ] Re-scan deployment/environment UI for credential attribution warnings and gate any production equivalents found with the same condition.
-- [ ] Add/extend behavioral tests for solo state: none of the four multiplayer surfaces render.
-- [ ] Add/extend behavioral tests for multiplayer/active-invite state: all four surfaces render and interactions still work.
-- [ ] Add API/service tests proving `multiplayerActive` is false for solo projects and true for member #2, active invite, or pending request.
+- [x] Add a shared server helper/service that computes `multiplayerActive` using the canonical condition: active members > 1 OR active invite link OR pending access request.
+- [x] Expose `multiplayerActive` on the project detail payload and shared `Project`/`ProjectDetailResponse` types so project chat can read it through existing context.
+- [x] Expose the same `multiplayerActive` boolean on `ProjectCredentialAttributionHealthSummary`.
+- [x] Gate project chat desktop and mobile `My sessions` / `All sessions` controls on `project.multiplayerActive`.
+- [x] Gate session ownership badges/indicators so they only render when `project.multiplayerActive` is true and there is more than one active member behind that server condition.
+- [x] Gate `CredentialHealthNavItem` so the Credentials nav item and modal are hidden for solo projects even when credential-backed resources exist.
+- [x] Gate trigger credential attribution warnings in trigger cards, trigger form, and trigger detail using the server-computed condition.
+- [x] Re-scan deployment/environment UI for credential attribution warnings and gate any production equivalents found with the same condition.
+- [x] Add/extend behavioral tests for solo state: none of the four multiplayer surfaces render.
+- [x] Add/extend behavioral tests for multiplayer/active-invite state: all four surfaces render and interactions still work.
+- [x] Add API/service tests proving `multiplayerActive` is false for solo projects and true for member #2, active invite, or pending request.
 - [ ] Run focused local Playwright visual audit at 375px and 1280px for solo and multiplayer states, storing screenshots under `.codex/tmp/playwright-screenshots/`.
 - [ ] Run `/do` quality gates: lint, typecheck, tests, build, task-completion validation, specialist reviews, staging verification, PR, CI, merge, and production deploy monitoring.
 

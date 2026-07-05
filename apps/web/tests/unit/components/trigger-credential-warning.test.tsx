@@ -28,6 +28,7 @@ function makeTrigger(): TriggerResponse {
     createdAt: '2026-07-04T00:00:00.000Z',
     updatedAt: '2026-07-04T00:00:00.000Z',
     credentialAttribution: {
+      multiplayerActive: true,
       hasPersonalWarning: true,
       checks: [
         {
@@ -52,5 +53,22 @@ describe('TriggerCredentialWarning', () => {
     expect(screen.getByText('Personal credential attribution')).toBeInTheDocument();
     expect(screen.getByText("This runs on Raphael's personal key.")).toBeInTheDocument();
     expect(screen.queryByText(/secret|token|sk-/i)).not.toBeInTheDocument();
+  });
+
+  it('hides personal key attribution on solo projects', () => {
+    const trigger = makeTrigger();
+    const credentialAttribution = trigger.credentialAttribution;
+    if (!credentialAttribution) {
+      throw new Error('test trigger must include credential attribution');
+    }
+    trigger.credentialAttribution = {
+      ...credentialAttribution,
+      multiplayerActive: false,
+    };
+
+    render(<TriggerCredentialWarning trigger={trigger} />);
+
+    expect(screen.queryByText('Personal credential attribution')).not.toBeInTheDocument();
+    expect(screen.queryByText("This runs on Raphael's personal key.")).not.toBeInTheDocument();
   });
 });

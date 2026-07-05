@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   db: { id: 'mock-db' },
   requireProjectCapability: vi.fn(),
   getProjectCredentialAttributionHealth: vi.fn(),
+  getProjectMultiplayerState: vi.fn(),
 }));
 
 vi.mock('drizzle-orm/d1', () => ({
@@ -26,6 +27,10 @@ vi.mock('../../../src/middleware/project-auth', () => ({
 
 vi.mock('../../../src/services/credential-attribution-health', () => ({
   getProjectCredentialAttributionHealth: mocks.getProjectCredentialAttributionHealth,
+}));
+
+vi.mock('../../../src/services/project-multiplayer', () => ({
+  getProjectMultiplayerState: mocks.getProjectMultiplayerState,
 }));
 
 describe('credential attribution health route', () => {
@@ -56,8 +61,10 @@ describe('credential attribution health route', () => {
       defaultProvider: null,
     };
     mocks.requireProjectCapability.mockResolvedValue(project);
+    mocks.getProjectMultiplayerState.mockResolvedValue({ multiplayerActive: true });
     mocks.getProjectCredentialAttributionHealth.mockResolvedValue({
       projectId: 'proj-1',
+      multiplayerActive: true,
       counts: {
         resources: 1,
         personalResources: 1,
@@ -86,9 +93,11 @@ describe('credential attribution health route', () => {
       db: mocks.db,
       project,
       defaultAgentType: 'codex',
+      multiplayerActive: true,
     });
     expect(await res.json()).toEqual({
       projectId: 'proj-1',
+      multiplayerActive: true,
       counts: {
         resources: 1,
         personalResources: 1,
@@ -115,6 +124,7 @@ describe('credential attribution health route', () => {
     );
 
     expect(res.status).toBe(404);
+    expect(mocks.getProjectMultiplayerState).not.toHaveBeenCalled();
     expect(mocks.getProjectCredentialAttributionHealth).not.toHaveBeenCalled();
   });
 });
