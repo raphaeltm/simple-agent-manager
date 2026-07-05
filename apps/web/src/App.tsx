@@ -62,6 +62,7 @@ import { TaskDetail } from './pages/TaskDetail';
 import { Tools } from './pages/Tools';
 import { ToolsCli } from './pages/ToolsCli';
 import { TrialChatGateHarness } from './pages/TrialChatGateHarness';
+import VirtualScrollBench from './pages/virtual-bench';
 import { Try } from './pages/Try';
 import { TryCapExceeded } from './pages/TryCapExceeded';
 import { TryDiscovery } from './pages/TryDiscovery';
@@ -101,6 +102,8 @@ export default function App() {
                 <Route path="/device" element={<DeviceAuth />} />
                 {/* Harness for Playwright audits — mounts trial components with mock data */}
                 <Route path="/__test/trial-chat-gate" element={<TrialChatGateHarness />} />
+                {/* virtualization benchmark spike — public, no auth. Remove before merge. */}
+                <Route path="/__bench/virtual-scroll" element={<VirtualScrollBench />} />
                 {/* Protected routes with AppShell (persistent navigation) */}
                 <Route element={<ProtectedLayout />}>
                   <Route path="/dashboard" element={<Dashboard />} />
