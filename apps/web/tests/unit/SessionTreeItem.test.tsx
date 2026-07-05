@@ -48,6 +48,7 @@ function renderItem(
     onShowHierarchy?: (taskId: string) => void;
     taskInfoMap?: Map<string, TaskInfo>;
     lineageText?: string;
+    showOwnership?: boolean;
   } = {},
 ) {
   const onSelect = options.onSelect ?? vi.fn();
@@ -59,6 +60,7 @@ function renderItem(
       taskInfoMap={options.taskInfoMap ?? new Map()}
       onShowHierarchy={options.onShowHierarchy}
       lineageText={options.lineageText}
+      showOwnership={options.showOwnership}
     />,
   );
   return { ...utils, onSelect };
@@ -84,6 +86,38 @@ describe('SessionTreeItem — flat rendering', () => {
     await user.click(row!);
 
     expect(onSelect).toHaveBeenCalledWith('target');
+  });
+
+  it('renders creator ownership labels when multiplayer affordances are active', () => {
+    renderItem(makeSession({
+      createdByUserId: 'user-2',
+      createdBy: {
+        id: 'user-2',
+        name: 'Bob Collaborator',
+        email: 'bob@example.com',
+        image: null,
+        avatarUrl: null,
+      },
+      isMine: false,
+    }), { showOwnership: true });
+
+    expect(screen.getByText('Bob Collaborator')).toBeInTheDocument();
+  });
+
+  it('hides creator ownership labels when multiplayer affordances are inactive', () => {
+    renderItem(makeSession({
+      createdByUserId: 'user-2',
+      createdBy: {
+        id: 'user-2',
+        name: 'Bob Collaborator',
+        email: 'bob@example.com',
+        image: null,
+        avatarUrl: null,
+      },
+      isMine: false,
+    }), { showOwnership: false });
+
+    expect(screen.queryByText('Bob Collaborator')).not.toBeInTheDocument();
   });
 });
 

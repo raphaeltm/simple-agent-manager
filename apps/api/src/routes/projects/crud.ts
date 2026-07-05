@@ -49,6 +49,7 @@ import { encrypt } from '../../services/encryption';
 import { getExternalInstallationId } from '../../services/github-installation-ids';
 import { getRuntimeLimits } from '../../services/limits';
 import * as projectDataService from '../../services/project-data';
+import { getProjectMultiplayerState } from '../../services/project-multiplayer';
 import {
   assertRepositoryAccess,
   buildProjectRuntimeConfigResponse,
@@ -467,6 +468,8 @@ crudRoutes.get('/:id', async (c) => {
       )
     );
 
+  const multiplayerState = await getProjectMultiplayerState(db, project.id);
+
   // Fetch recent sessions and activity from the project's DO (best-effort)
   let recentSessions: Record<string, unknown>[] = [];
   let recentActivity: Record<string, unknown>[] = [];
@@ -484,6 +487,7 @@ crudRoutes.get('/:id', async (c) => {
 
   const response: ProjectDetailResponse = {
     ...toProjectResponse(project),
+    multiplayerActive: multiplayerState.multiplayerActive,
     summary: {
       taskCountsByStatus,
       linkedWorkspaces: linkedWorkspacesRow[0]?.count ?? 0,

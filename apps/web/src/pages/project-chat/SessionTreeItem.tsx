@@ -24,6 +24,7 @@ export function SessionTreeItem({
   taskInfoMap,
   onShowHierarchy,
   lineageText,
+  showOwnership = true,
 }: {
   session: ChatSessionListItem;
   selectedSessionId: string | null;
@@ -31,6 +32,7 @@ export function SessionTreeItem({
   taskInfoMap: Map<string, TaskInfo>;
   onShowHierarchy?: (taskId: string) => void;
   lineageText?: string;
+  showOwnership?: boolean;
 }) {
   const taskInfo = session.taskId ? taskInfoMap.get(session.taskId) : undefined;
 
@@ -85,6 +87,7 @@ export function SessionTreeItem({
         blockedBadge={taskInfo?.blocked}
         blockedByTitle={blockedByTitle}
         lineageText={lineageText}
+        showOwnership={showOwnership}
       />
     </div>
   );

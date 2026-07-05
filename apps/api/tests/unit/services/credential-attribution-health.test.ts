@@ -67,8 +67,10 @@ describe('credential attribution health service', () => {
       db: db as never,
       project,
       defaultAgentType: 'opencode',
+      multiplayerActive: false,
     });
 
+    expect(summary.multiplayerActive).toBe(false);
     expect(summary.counts.resources).toBe(1);
     expect(summary.counts.personalResources).toBe(1);
     expect(summary.counts.personalCredentials).toBe(2);
@@ -114,8 +116,10 @@ describe('credential attribution health service', () => {
       db: db as never,
       project,
       defaultAgentType: 'opencode',
+      multiplayerActive: true,
     });
 
+    expect(summary.multiplayerActive).toBe(true);
     expect(summary.counts.personalResources).toBe(0);
     expect(summary.counts.personalCredentials).toBe(0);
     expect(summary.counts.projectCoveredCredentials).toBe(2);

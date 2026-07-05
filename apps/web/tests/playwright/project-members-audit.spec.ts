@@ -132,6 +132,7 @@ const emptyMembers = {
 
 const emptyCredentialHealth = {
   projectId: project.id,
+  multiplayerActive: false,
   counts: {
     resources: 0,
     personalResources: 0,

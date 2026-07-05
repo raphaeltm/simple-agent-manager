@@ -107,6 +107,7 @@ export function useProjectChatState() {
   const [searchQuery, setSearchQuery] = useState('');
   const [showStale, setShowStale] = useState(false);
   const [sessionScope, setSessionScope] = useState<SessionScope>('all');
+  const multiplayerActive = Boolean(project?.multiplayerActive);
 
   // Track explicit "new chat" intent so auto-select doesn't override it
   const newChatIntentRef = useRef(false);
@@ -252,6 +253,12 @@ export function useProjectChatState() {
     }
   }, [selectedWorkspaceProfile]);
 
+  useEffect(() => {
+    if (!multiplayerActive) {
+      setSessionScope('all');
+    }
+  }, [multiplayerActive]);
+
 
   useEffect(() => {
     void Promise.all([
@@ -320,7 +327,8 @@ export function useProjectChatState() {
   const loadSessions = useCallback(async () => {
     if (hasLoadedRef.current) setIsRefreshing(true);
     try {
-      const sessionResult = await listChatSessions(projectId, { limit: CHAT_SESSION_LIST_LIMIT, scope: sessionScope });
+      const scope = multiplayerActive ? sessionScope : 'all';
+      const sessionResult = await listChatSessions(projectId, { limit: CHAT_SESSION_LIST_LIMIT, scope });
       setSessions(sessionResult.sessions);
       hasLoadedRef.current = true;
 
@@ -339,7 +347,7 @@ export function useProjectChatState() {
     } finally {
       setIsRefreshing(false);
     }
-  }, [projectId, sessionScope]);
+  }, [projectId, sessionScope, multiplayerActive]);
 
   const { connectionState } = useProjectWebSocket({
     projectId,
@@ -714,7 +722,7 @@ export function useProjectChatState() {
   const hasSessions = sessions.length > 0;
 
   return {
-    projectId, project, sessionId,
+    projectId, project, sessionId, multiplayerActive,
     sessions, loading, isRefreshing, hasSessions, showNewChatInput,
     loadSessions, realtimeDegraded,
     sidebarOpen, setSidebarOpen,

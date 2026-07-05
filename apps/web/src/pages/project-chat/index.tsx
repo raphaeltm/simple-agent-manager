@@ -156,23 +156,25 @@ export function ProjectChat() {
                   </button>
                 )}
               </div>
-              <div className="grid grid-cols-2 gap-1 rounded-md border border-border-default bg-surface/40 p-0.5" aria-label="Session ownership filter">
-                {(['my', 'all'] as const).map((scope) => (
-                  <button
-                    key={scope}
-                    type="button"
-                    onClick={() => state.setSessionScope(scope)}
-                    aria-pressed={state.sessionScope === scope}
-                    className={`rounded-sm px-2 py-1 text-[11px] font-medium transition-colors ${
-                      state.sessionScope === scope
-                        ? 'bg-accent/15 text-accent'
-                        : 'bg-transparent text-fg-muted hover:text-fg-primary'
-                    }`}
-                  >
-                    {scope === 'my' ? 'My sessions' : 'All sessions'}
-                  </button>
-                ))}
-              </div>
+              {state.multiplayerActive && (
+                <div className="grid grid-cols-2 gap-1 rounded-md border border-border-default bg-surface/40 p-0.5" aria-label="Session ownership filter">
+                  {(['my', 'all'] as const).map((scope) => (
+                    <button
+                      key={scope}
+                      type="button"
+                      onClick={() => state.setSessionScope(scope)}
+                      aria-pressed={state.sessionScope === scope}
+                      className={`rounded-sm px-2 py-1 text-[11px] font-medium transition-colors ${
+                        state.sessionScope === scope
+                          ? 'bg-accent/15 text-accent'
+                          : 'bg-transparent text-fg-muted hover:text-fg-primary'
+                      }`}
+                    >
+                      {scope === 'my' ? 'My sessions' : 'All sessions'}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
@@ -185,6 +187,7 @@ export function ProjectChat() {
                 onSelect={state.handleSelect}
                 taskInfoMap={state.taskInfoMap}
                 onShowHierarchy={handleShowHierarchy}
+                showOwnership={state.multiplayerActive}
               />
               {state.filteredStale.length > 0 && (
                 <>
@@ -203,6 +206,7 @@ export function ProjectChat() {
                       onSelect={state.handleSelect}
                       taskInfoMap={state.taskInfoMap}
                       onShowHierarchy={handleShowHierarchy}
+                      showOwnership={state.multiplayerActive}
                     />
                   )}
                 </>
@@ -374,6 +378,7 @@ export function ProjectChat() {
           onShowHierarchy={handleShowHierarchy}
           sessionScope={state.sessionScope}
           onSessionScopeChange={state.setSessionScope}
+          showOwnership={state.multiplayerActive}
         />
       )}
 

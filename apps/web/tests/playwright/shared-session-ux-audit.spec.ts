@@ -35,6 +35,7 @@ const MOCK_PROJECT = {
   defaultLocation: null,
   defaultWorkspaceProfile: 'full',
   defaultDevcontainerConfigName: null,
+  multiplayerActive: true,
   workspaceIdleTimeoutMs: null,
   nodeIdleTimeoutMs: null,
   createdAt: '2026-01-01T00:00:00Z',
@@ -82,7 +83,27 @@ const MESSAGES = [
   { id: 'msg-2', sessionId: 'session-bob-1', role: 'assistant', content: 'I checked the shared state and left notes for the team.', toolMetadata: null, createdAt: NOW - 2000 },
 ];
 
-async function setupApiMocks(page: Page) {
+const EMPTY_CREDENTIAL_HEALTH = {
+  projectId: MOCK_PROJECT.id,
+  multiplayerActive: true,
+  counts: {
+    resources: 0,
+    personal: 0,
+    projectScoped: 0,
+    inheritedProject: 0,
+    missing: 0,
+    unknown: 0,
+    warnings: 0,
+  },
+  resources: [],
+};
+
+async function setupApiMocks(page: Page, options: { multiplayerActive?: boolean } = {}) {
+  const mockProject = {
+    ...MOCK_PROJECT,
+    multiplayerActive: options.multiplayerActive ?? MOCK_PROJECT.multiplayerActive,
+  };
+
   await page.route('**/api/**', async (route: Route) => {
     const url = new URL(route.request().url());
     const path = url.pathname;
@@ -101,6 +122,9 @@ async function setupApiMocks(page: Page) {
     const projectMatch = path.match(/^\/api\/projects\/([^/]+)(\/.*)?$/);
     if (projectMatch) {
       const subPath = projectMatch[2] || '';
+      if (subPath === '/credential-attribution-health') {
+        return respond(200, { ...EMPTY_CREDENTIAL_HEALTH, multiplayerActive: mockProject.multiplayerActive });
+      }
       if (subPath === '/sessions') {
         const sessions = url.searchParams.get('scope') === 'my' ? MY_SESSIONS : ALL_SESSIONS;
         return respond(200, { sessions, total: sessions.length, hasMore: false });
@@ -114,10 +138,10 @@ async function setupApiMocks(page: Page) {
       if (subPath === '/tasks') return respond(200, { tasks: [], nextCursor: null });
       if (subPath === '/agent-profiles') return respond(200, { items: [{ id: 'profile-1', name: 'Codex', agentType: 'openai-codex', taskMode: 'task' }] });
       if (subPath.match(/\/commands/)) return respond(200, { commands: [] });
-      return respond(200, MOCK_PROJECT);
+      return respond(200, mockProject);
     }
 
-    if (path === '/api/projects') return respond(200, { projects: [MOCK_PROJECT], nextCursor: null });
+    if (path === '/api/projects') return respond(200, { projects: [mockProject], nextCursor: null });
     return respond(200, {});
   });
 }
@@ -148,6 +172,21 @@ test.describe('shared project session UX', () => {
     await capture(page, 'shared-session-ux-desktop');
   });
 
+  test('desktop hides multiplayer controls and owner labels for solo projects', async ({ page }) => {
+    test.setTimeout(30_000);
+    await setupApiMocks(page, { multiplayerActive: false });
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto('/projects/proj-test-1/chat/session-bob-1');
+
+    await expect(page.getByRole('button', { name: 'All sessions' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'My sessions' })).toHaveCount(0);
+    const sessionNav = page.getByRole('navigation', { name: 'Chat sessions' });
+    await expect(sessionNav.getByText('Bob Collaborator')).toHaveCount(0);
+    await expect(sessionNav.getByText('You')).toHaveCount(0);
+    await expect(page.getByText('Read-only session')).toBeVisible();
+    await capture(page, 'solo-session-ux-desktop');
+  });
+
   test('mobile drawer keeps filter and owner labels usable', async ({ page }) => {
     test.setTimeout(30_000);
     await setupApiMocks(page);
@@ -162,5 +201,21 @@ test.describe('shared project session UX', () => {
     await page.getByRole('button', { name: 'My sessions' }).click();
     await expect(dialog.getByText('Bob Collaborator').first()).not.toBeVisible();
     await capture(page, 'shared-session-ux-mobile');
+  });
+
+  test('mobile drawer hides multiplayer controls and owner labels for solo projects', async ({ page }) => {
+    test.setTimeout(30_000);
+    await setupApiMocks(page, { multiplayerActive: false });
+    await page.setViewportSize({ width: 375, height: 667 });
+    await page.goto('/projects/proj-test-1/chat/session-bob-1');
+
+    await page.getByRole('button', { name: 'Open chat list' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Chat sessions' });
+    await expect(dialog).toBeVisible();
+    await expect(page.getByRole('button', { name: 'All sessions' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'My sessions' })).toHaveCount(0);
+    await expect(dialog.getByText('Bob Collaborator')).toHaveCount(0);
+    await expect(dialog.getByText('You')).toHaveCount(0);
+    await capture(page, 'solo-session-ux-mobile');
   });
 });

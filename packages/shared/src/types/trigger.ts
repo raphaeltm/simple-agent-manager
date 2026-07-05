@@ -123,6 +123,7 @@ export interface TriggerResponse extends Trigger {
   cronHumanReadable?: string;
   /** Effective credential attribution checks for this trigger. No secret material is included. */
   credentialAttribution?: {
+    multiplayerActive: boolean;
     hasPersonalWarning: boolean;
     checks: CredentialAttributionCheck[];
   };

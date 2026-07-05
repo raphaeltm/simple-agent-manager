@@ -64,6 +64,8 @@ export interface Project {
   nodeCpuThresholdPercent?: number | null;
   nodeMemoryThresholdPercent?: number | null;
   status?: ProjectStatus;
+  /** Server-computed shared-project transition state. False for solo projects. */
+  multiplayerActive?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -466,6 +468,8 @@ export interface CredentialAttributionResource {
 
 export interface ProjectCredentialAttributionHealthSummary {
   projectId: string;
+  /** Server-computed shared-project transition state. False for solo projects. */
+  multiplayerActive: boolean;
   counts: {
     resources: number;
     personalResources: number;

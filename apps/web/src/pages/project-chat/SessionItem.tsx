@@ -59,6 +59,7 @@ export function SessionItem({
   blockedByTitle,
   ariaLabel,
   lineageText,
+  showOwnership = true,
 }: {
   session: ChatSessionResponse;
   isSelected: boolean;
@@ -70,6 +71,7 @@ export function SessionItem({
   blockedByTitle?: string;
   ariaLabel?: string;
   lineageText?: string;
+  showOwnership?: boolean;
 }) {
   const attentionState = getAttentionState(session);
   const mode = getSessionMode(session);
@@ -84,7 +86,7 @@ export function SessionItem({
 
   const StatusIcon = iconConfig.icon;
   const ModeIcon = mode === 'task' ? ListTodo : MessageSquare;
-  const creatorLabel = getCreatorLabel(session);
+  const creatorLabel = showOwnership ? getCreatorLabel(session) : null;
 
   // Font sizing: parent 13px/500, child 12px/400, default unchanged
   const titleStyle: React.CSSProperties = isChild

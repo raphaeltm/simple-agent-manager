@@ -121,6 +121,7 @@ describe('ProjectMembersSection', () => {
     mocks.getProjectMembers.mockResolvedValue(makeMembersResponse());
     mocks.getProjectCredentialAttributionHealth.mockResolvedValue({
       projectId: 'proj-1',
+      multiplayerActive: true,
       counts: {
         resources: 1,
         personalResources: 1,

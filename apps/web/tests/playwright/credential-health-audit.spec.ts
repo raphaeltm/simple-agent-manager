@@ -35,6 +35,7 @@ const project = {
   nodeMemoryThresholdPercent: null,
   createdAt: '2026-07-04T00:00:00.000Z',
   updatedAt: '2026-07-04T00:00:00.000Z',
+  multiplayerActive: true,
   summary: {
     activeWorkspaceCount: 0,
     activeSessionCount: 0,
@@ -75,6 +76,7 @@ function makeTrigger(overrides: Record<string, unknown> = {}) {
     createdAt: '2026-07-04T00:00:00.000Z',
     updatedAt: '2026-07-04T00:00:00.000Z',
     credentialAttribution: {
+      multiplayerActive: true,
       hasPersonalWarning: true,
       checks: [
         {
@@ -127,6 +129,7 @@ function makeResource(resourceTrigger = trigger) {
 
 const credentialHealth = {
   projectId: PROJECT_ID,
+  multiplayerActive: true,
   counts: {
     resources: 2,
     personalResources: 2,
@@ -163,6 +166,7 @@ const credentialHealth = {
 
 const emptyHealth = {
   projectId: PROJECT_ID,
+  multiplayerActive: false,
   counts: {
     resources: 0,
     personalResources: 0,
@@ -210,9 +214,35 @@ const members = {
 
 async function setupMocks(
   page: Page,
-  options: { health?: typeof credentialHealth | typeof emptyHealth; healthError?: boolean } = {}
+  options: {
+    health?: typeof credentialHealth | typeof emptyHealth;
+    healthError?: boolean;
+    multiplayerActive?: boolean;
+  } = {}
 ) {
-  const health = options.health ?? credentialHealth;
+  const multiplayerActive = options.multiplayerActive ?? true;
+  const health = {
+    ...(options.health ?? credentialHealth),
+    multiplayerActive,
+  };
+  const mockProject = {
+    ...project,
+    multiplayerActive,
+  };
+  const mockTrigger = {
+    ...trigger,
+    credentialAttribution: {
+      ...trigger.credentialAttribution,
+      multiplayerActive,
+    },
+  };
+  const mockLongTrigger = {
+    ...longTrigger,
+    credentialAttribution: {
+      ...longTrigger.credentialAttribution,
+      multiplayerActive,
+    },
+  };
 
   await page.addInitScript(() =>
     localStorage.setItem('sam-onboarding-wizard-dismissed-owner-user', 'true')
@@ -220,7 +250,7 @@ async function setupMocks(
 
   await setupAuditRoutes(page, (path, respond) => {
     if (path.startsWith('/api/auth/')) return respond(200, MOCK_USER);
-    if (path === '/api/projects') return respond(200, { projects: [project] });
+    if (path === '/api/projects') return respond(200, { projects: [mockProject] });
     if (path === '/api/agents') return respond(200, { agents: [] });
     if (path === '/api/dashboard/active-tasks') return respond(200, { tasks: [] });
     if (path === '/api/providers/catalog') return respond(200, { catalogs: [] });
@@ -233,15 +263,15 @@ async function setupMocks(
     const projectMatch = path.match(/^\/api\/projects\/([^/]+)(\/.*)?$/);
     if (projectMatch) {
       const subPath = projectMatch[2] ?? '';
-      if (subPath === '') return respond(200, project);
+      if (subPath === '') return respond(200, mockProject);
       if (subPath === '/credential-attribution-health') {
         return options.healthError
           ? respond(500, { error: 'INTERNAL_ERROR', message: 'Health unavailable' })
           : respond(200, health);
       }
-      if (subPath === '/triggers') return respond(200, { triggers: [trigger, longTrigger] });
-      if (subPath === `/triggers/${trigger.id}`) return respond(200, trigger);
-      if (subPath === `/triggers/${longTrigger.id}`) return respond(200, longTrigger);
+      if (subPath === '/triggers') return respond(200, { triggers: [mockTrigger, mockLongTrigger] });
+      if (subPath === `/triggers/${trigger.id}`) return respond(200, mockTrigger);
+      if (subPath === `/triggers/${longTrigger.id}`) return respond(200, mockLongTrigger);
       if (subPath.match(/^\/triggers\/[^/]+\/executions/)) {
         return respond(200, { executions: [], nextCursor: null });
       }
@@ -254,7 +284,7 @@ async function setupMocks(
       if (subPath === '/repository-access/discover') return respond(200, { suggestions: [] });
       if (subPath.startsWith('/agent-profiles')) return respond(200, { items: [] });
       if (subPath === '/credentials') return respond(200, { credentials: [] });
-      return respond(200, project);
+      return respond(200, mockProject);
     }
 
     return undefined;
@@ -293,6 +323,16 @@ test.describe('Credential attribution health — desktop', () => {
     await assertNoOverflow(page);
   });
 
+  test('solo project hides credential nav and inline trigger warnings', async ({ page }) => {
+    await setupMocks(page, { multiplayerActive: false });
+    await page.goto(`/projects/${PROJECT_ID}/triggers/${trigger.id}`);
+    await expect(page.getByRole('button', { name: /credential attribution health/i })).toHaveCount(0);
+    await expect(page.getByText('Personal credential attribution')).toHaveCount(0);
+    await expect(page.getByText("This runs on Coworker's personal key.")).toHaveCount(0);
+    await screenshot(page, 'credential-health-solo-hidden-desktop');
+    await assertNoOverflow(page);
+  });
+
   test('member settings show non-blocking sharing checklist', async ({ page }) => {
     await setupMocks(page);
     await page.goto(`/projects/${PROJECT_ID}/settings`);
@@ -328,6 +368,17 @@ test.describe('Credential attribution health — mobile', () => {
     await page.goto(`/projects/${PROJECT_ID}/settings`);
     await expect(page.getByText('Credential checklist before sharing')).toBeVisible();
     await screenshot(page, 'credential-health-member-warning-mobile');
+    await assertNoOverflow(page);
+  });
+
+  test('solo project keeps credential clutter hidden on mobile', async ({ page }) => {
+    await setupMocks(page, { multiplayerActive: false });
+    await page.goto(`/projects/${PROJECT_ID}/triggers/${longTrigger.id}`);
+    await page.getByRole('button', { name: /open navigation menu/i }).click();
+    await expect(page.getByRole('button', { name: /credential attribution health/i })).toHaveCount(0);
+    await expect(page.getByText('Personal credential attribution')).toHaveCount(0);
+    await expect(page.getByText("This runs on Coworker's personal key.")).toHaveCount(0);
+    await screenshot(page, 'credential-health-solo-hidden-mobile');
     await assertNoOverflow(page);
   });
 
