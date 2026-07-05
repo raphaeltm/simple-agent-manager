@@ -133,6 +133,9 @@ export async function handleGetInstructions(
     },
     instructions: [
       'Tool names in these instructions refer to SAM MCP tools from the `sam-mcp` MCP server.',
+      'After reading this response, check whether the current chat session topic/title accurately reflects the actual work. '
+      + 'If the title is stale, generic, copied from a fork such as "get details from previous session", or the session changes direction later, '
+      + 'call the SAM MCP `update_session_topic` tool with a concise descriptive topic.',
       ...(task.taskMode === 'conversation'
         ? [
             'You are in a conversation with a human. Respond to their messages directly.',
