@@ -20,7 +20,7 @@ Wave 6B of project offboarding needs an owner-only API for transferring project 
 - [x] Add shared request/response types and a Valibot request schema for ownership transfer.
 - [x] Implement `POST /api/projects/:id/ownership-transfer` in the project members route.
 - [x] Validate body defaults and v1 role constraints: `toUserId` required, `oldOwnerRole` defaults to `admin`, only `admin` accepted for the old owner role, target must be an active admin member, viewer/maintainer/non-member/inactive targets rejected.
-- [x] Execute the ownership transfer atomically via D1 batch: set target role owner, set old owner role, update `projects.user_id`, and insert `project_ownership_transfers`.
+- [x] Execute the ownership transfer atomically via a D1 transaction: set target role owner, set old owner role, update `projects.user_id`, and insert `project_ownership_transfers`.
 - [x] Preserve `projects.created_by` and include project scope in all write predicates.
 - [x] Add vertical-slice route tests for happy path, non-member/inactive/viewer/maintainer target rejection, non-owner rejection, audit row contents, and offboarding preview after transfer.
 - [x] Run focused API tests and relevant quality checks.

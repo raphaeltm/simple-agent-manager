@@ -422,8 +422,9 @@ projectMembersRoutes.post(
 
     const completedAt = new Date().toISOString();
     const transferId = ulid();
-    const statements = [
-      db
+
+    await db.transaction(async (tx) => {
+      const promotedRows = await tx
         .update(schema.projectMembers)
         .set({ role: 'owner', updatedAt: completedAt })
         .where(
@@ -433,8 +434,13 @@ projectMembersRoutes.post(
             eq(schema.projectMembers.status, 'active'),
             eq(schema.projectMembers.role, 'admin')
           )
-        ),
-      db
+        )
+        .returning({ userId: schema.projectMembers.userId });
+      if (promotedRows.length !== 1) {
+        throw errors.conflict('Ownership transfer state changed; retry ownership transfer');
+      }
+
+      const demotedRows = await tx
         .update(schema.projectMembers)
         .set({ role: oldOwnerRole, updatedAt: completedAt })
         .where(
@@ -444,12 +450,22 @@ projectMembersRoutes.post(
             eq(schema.projectMembers.status, 'active'),
             eq(schema.projectMembers.role, 'owner')
           )
-        ),
-      db
+        )
+        .returning({ userId: schema.projectMembers.userId });
+      if (demotedRows.length !== 1) {
+        throw errors.conflict('Ownership transfer state changed; retry ownership transfer');
+      }
+
+      const projectRows = await tx
         .update(schema.projects)
         .set({ userId: toUserId, updatedAt: completedAt })
-        .where(eq(schema.projects.id, projectId)),
-      db.insert(schema.projectOwnershipTransfers).values({
+        .where(and(eq(schema.projects.id, projectId), eq(schema.projects.userId, actorUserId)))
+        .returning({ id: schema.projects.id });
+      if (projectRows.length !== 1) {
+        throw errors.conflict('Ownership transfer state changed; retry ownership transfer');
+      }
+
+      await tx.insert(schema.projectOwnershipTransfers).values({
         id: transferId,
         projectId,
         fromUserId: actorUserId,
@@ -457,10 +473,8 @@ projectMembersRoutes.post(
         initiatedBy: actorUserId,
         completedAt,
         createdAt: completedAt,
-      }),
-    ];
-
-    await db.batch(statements as [typeof statements[0]]);
+      });
+    });
 
     const response: ProjectOwnershipTransferResponse = {
       projectId,

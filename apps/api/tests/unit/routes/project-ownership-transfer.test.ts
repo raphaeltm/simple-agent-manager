@@ -87,7 +87,8 @@ describe('project ownership transfer', () => {
   let selectResults: QueryResult[];
   let insertedRows: Array<{ table: unknown; values: unknown }>;
   let updatedRows: Array<{ table: unknown; values: Record<string, unknown> }>;
-  let batchedStatements: unknown[];
+  let transactionCalls: number;
+  let updateReturningRows: unknown[][];
 
   const env = {
     DATABASE: {} as D1Database,
@@ -101,7 +102,8 @@ describe('project ownership transfer', () => {
     selectResults = [];
     insertedRows = [];
     updatedRows = [];
-    batchedStatements = [];
+    transactionCalls = 0;
+    updateReturningRows = [];
 
     const makeSelectBuilder = () => {
       const chain: Record<string, unknown> = {};
@@ -125,6 +127,9 @@ describe('project ownership transfer', () => {
           updatedRows.push({ table, values });
           const updateChain = {
             where: vi.fn(() => updateChain),
+            returning: vi.fn(() =>
+              Promise.resolve(updateReturningRows.shift() ?? [{ id: 'updated-row', userId: 'updated-user' }])
+            ),
             then: (resolve: () => unknown) => Promise.resolve(undefined).then(resolve),
           };
           return updateChain;
@@ -139,9 +144,9 @@ describe('project ownership transfer', () => {
           return insertChain;
         }),
       })),
-      batch: vi.fn((statements: unknown[]) => {
-        batchedStatements = statements;
-        return Promise.resolve(statements.map(() => undefined));
+      transaction: vi.fn(async (callback: (tx: typeof mockDb) => Promise<unknown>) => {
+        transactionCalls += 1;
+        return callback(mockDb);
       }),
     };
     (drizzle as unknown as ReturnType<typeof vi.fn>).mockReturnValue(mockDb);
@@ -191,7 +196,7 @@ describe('project ownership transfer', () => {
       'project:transfer_ownership'
     );
 
-    expect(batchedStatements).toHaveLength(4);
+    expect(transactionCalls).toBe(1);
     expect(updatedRows).toEqual([
       expect.objectContaining({
         table: schema.projectMembers,
@@ -248,7 +253,7 @@ describe('project ownership transfer', () => {
     const response = await transfer();
 
     expect(response.status).toBe(404);
-    expect(batchedStatements).toHaveLength(0);
+    expect(transactionCalls).toBe(0);
     expect(insertedRows).toHaveLength(0);
   });
 
@@ -258,7 +263,7 @@ describe('project ownership transfer', () => {
     const response = await transfer();
 
     expect(response.status).toBe(404);
-    expect(batchedStatements).toHaveLength(0);
+    expect(transactionCalls).toBe(0);
     expect(insertedRows).toHaveLength(0);
   });
 
@@ -271,7 +276,7 @@ describe('project ownership transfer', () => {
     await expect(response.json()).resolves.toMatchObject({
       error: 'BAD_REQUEST',
     });
-    expect(batchedStatements).toHaveLength(0);
+    expect(transactionCalls).toBe(0);
     expect(insertedRows).toHaveLength(0);
   });
 
@@ -294,7 +299,21 @@ describe('project ownership transfer', () => {
       'admin-user',
       'project:transfer_ownership'
     );
-    expect(batchedStatements).toHaveLength(0);
+    expect(transactionCalls).toBe(0);
+  });
+
+  it('rolls back when transfer state changes during the transaction', async () => {
+    selectResults = [[makeMember('admin-user', 'admin')]];
+    updateReturningRows = [[]];
+
+    const response = await transfer();
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      error: 'CONFLICT',
+    });
+    expect(transactionCalls).toBe(1);
+    expect(insertedRows).toHaveLength(0);
   });
 
   it('allows the old owner to be previewed for offboarding after transfer', async () => {
