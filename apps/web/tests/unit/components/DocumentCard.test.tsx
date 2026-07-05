@@ -41,6 +41,13 @@ describe('matchToolCard registry', () => {
     }
   });
 
+  it('returns DocumentCard when legacy rows only have the MCP title', () => {
+    expect(matchToolCard(toolItem({
+      title: 'mcp__sam-mcp__display_from_library',
+      toolName: undefined,
+    }))).toBe(DocumentCard);
+  });
+
   it('falls back (null) for non-document tools and unknown tools', () => {
     expect(matchToolCard(toolItem({ toolName: 'Read' }))).toBeNull();
     expect(matchToolCard(toolItem({ toolName: 'mcp__sam-mcp__list_library_files' }))).toBeNull();
@@ -65,6 +72,28 @@ describe('DocumentCard', () => {
     const img = screen.getByAltText('diagram.png') as HTMLImageElement;
     expect(img.getAttribute('src')).toBe('https://api.test/p/proj-1/f-img');
     expect(img.getAttribute('loading')).toBe('lazy');
+  });
+
+  it('renders from legacy title + content JSON when raw metadata is absent', () => {
+    render(<DocumentCard projectId="proj-1" item={toolItem({
+      title: 'mcp__sam-mcp__display_from_library',
+      content: [
+        {
+          type: 'content',
+          text: JSON.stringify({
+            fileId: 'f-legacy',
+            filename: 'legacy.png',
+            mimeType: 'image/png',
+            sizeBytes: 2048,
+            caption: 'Recovered from a stale VM agent row',
+          }),
+        },
+      ],
+    })} />);
+
+    const img = screen.getByAltText('legacy.png') as HTMLImageElement;
+    expect(img.getAttribute('src')).toBe('https://api.test/p/proj-1/f-legacy');
+    expect(screen.getByText('Recovered from a stale VM agent row')).toBeTruthy();
   });
 
   it('renders a clamped markdown source preview fetched from the preview endpoint', async () => {
