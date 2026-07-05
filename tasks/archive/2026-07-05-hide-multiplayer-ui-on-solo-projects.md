@@ -57,7 +57,7 @@ This task will add explicit tests for both sides of the product-mode gate and up
 - [x] Add/extend behavioral tests for multiplayer/active-invite state: all four surfaces render and interactions still work.
 - [x] Add API/service tests proving `multiplayerActive` is false for solo projects and true for member #2, active invite, or pending request.
 - [x] Run focused local Playwright visual audit at 375px and 1280px for solo and multiplayer states, storing screenshots under `.codex/tmp/playwright-screenshots/`.
-- [ ] Run `/do` quality gates: lint, typecheck, tests, build, task-completion validation, specialist reviews, staging verification, PR, CI, merge, and production deploy monitoring.
+- [x] Run `/do` quality gates through PR readiness: lint, typecheck, tests, build, task-completion validation, specialist reviews, staging verification, PR, and CI are green. Merge and production deploy monitoring are the remaining post-PR-readiness steps.
 
 ## Local Validation Log
 
@@ -182,6 +182,7 @@ Findings: none. `getProjectMultiplayerState()` uses Drizzle parameterized querie
 - PR: https://github.com/raphaeltm/simple-agent-manager/pull/1519
 - Initial PR CI passed build, lint, typecheck, unit tests, specialist evidence, UI compliance, staging smoke, VM smoke, and the full Playwright Visual Tests job.
 - Preflight evidence initially failed because the PR body did not include the required `AGENT_PREFLIGHT` block at workflow creation time. The PR body now includes the required block; a fresh pull request event is required so CI reads the corrected body.
+- Fresh PR CI on commit `23b92c40b` passed all required checks, including Preflight Evidence and Playwright Visual Tests.
 
 ## References
 
