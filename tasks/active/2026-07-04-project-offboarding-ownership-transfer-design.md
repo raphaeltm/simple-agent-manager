@@ -32,16 +32,16 @@ This task must produce a specification document PR only. It must not implement r
 
 ## Checklist
 
-- [ ] Research current project membership, invite, and authorization code paths.
-- [ ] Research credential attribution and root-pinned task-tree behavior.
-- [ ] Research triggers, scheduled tasks, workspaces/nodes, and deployments for credential attribution fields.
-- [ ] Create a new `specs/<nnn>-project-offboarding/` design spec following existing conventions.
-- [ ] Define ownership transfer API, authorization, UI surface, old-owner role behavior, and last-owner protection.
-- [ ] Define member removal/offboarding semantics for every credential-attributed resource type.
-- [ ] Present re-attach vs break-and-flag as a human-review product decision with a recommendation.
-- [ ] Cover data model changes, API endpoints, authorization matrix, migration considerations, and implementation wave breakdown.
-- [ ] Include project-chat-first UI flows per rule 26.
-- [ ] Cite code paths for every current-behavior claim.
+- [x] Research current project membership, invite, and authorization code paths.
+- [x] Research credential attribution and root-pinned task-tree behavior.
+- [x] Research triggers, scheduled tasks, workspaces/nodes, and deployments for credential attribution fields.
+- [x] Create a new `specs/<nnn>-project-offboarding/` design spec following existing conventions.
+- [x] Define ownership transfer API, authorization, UI surface, old-owner role behavior, and last-owner protection.
+- [x] Define member removal/offboarding semantics for every credential-attributed resource type.
+- [x] Present re-attach vs break-and-flag as a human-review product decision with a recommendation.
+- [x] Cover data model changes, API endpoints, authorization matrix, migration considerations, and implementation wave breakdown.
+- [x] Include project-chat-first UI flows per rule 26.
+- [x] Cite code paths for every current-behavior claim.
 - [ ] Run docs-only validation and local review skills before opening PR.
 
 ## Acceptance Criteria
