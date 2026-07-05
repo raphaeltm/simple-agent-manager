@@ -16,15 +16,15 @@ Wave 6A of the shared-projects initiative needs the backend foundation for proje
 
 ## Implementation Checklist
 
-- [ ] Add additive SQL migration for:
+- [x] Add additive SQL migration for:
   - `project_ownership_transfers`
   - `project_member_offboarding_plans`
   - `project_member_offboarding_resource_actions`
   - blocked/offboarding columns on `triggers`, `tasks`, `nodes`, and `deployment_environments`
   - indexes required by the spec
-- [ ] Update `apps/api/src/db/schema.ts` for new tables/columns and exported row types.
-- [ ] Add shared response/action contract types for offboarding preview.
-- [ ] Implement an offboarding preview service that:
+- [x] Update `apps/api/src/db/schema.ts` for new tables/columns and exported row types.
+- [x] Add shared response/action contract types for offboarding preview.
+- [x] Implement an offboarding preview service that:
   - validates target active membership
   - blocks sole-owner preview with `409 last_owner_requires_transfer`
   - enumerates project-visible memberships/resources for the departing member
@@ -32,19 +32,19 @@ Wave 6A of the shared-projects initiative needs the backend foundation for proje
   - defaults live personal-backed resources to `break_and_flag`
   - persists a preview plan and resource-action rows without returning secret values
   - expires or supersedes older preview plans for the same project/member
-- [ ] Add `POST /api/projects/:id/members/:userId/offboarding-preview` in the members router with project-scoped predicates and owner-only authorization for this wave.
-- [ ] Update `specs/034-project-offboarding/` contracts if implementation requires a shape correction, documenting any deviation.
-- [ ] Add vertical-slice tests covering:
+- [x] Add `POST /api/projects/:id/members/:userId/offboarding-preview` in the members router with project-scoped predicates and owner-only authorization for this wave.
+- [x] Update `specs/034-project-offboarding/` contracts if implementation requires a shape correction, documenting any deviation.
+- [x] Add vertical-slice tests covering:
   - sole owner preview returns `409 last_owner_requires_transfer`
   - member with live personal-backed trigger/node/task/project attachment returns a persisted plan and default `break_and_flag` resources
   - existing active project attachment coverage enables `reattach_to_project`
   - a new preview supersedes/expires prior preview plans as apply-staleness groundwork
   - response does not leak encrypted credential/token fields
-- [ ] Run targeted API tests, migration safety, typecheck, lint, test, and build.
+- [x] Run targeted API tests, migration safety, typecheck, lint, test, and build.
 
 ## Acceptance Criteria
 
-- Preview endpoint shape follows the spec and returns a stable offboarding plan id.
+- Preview endpoint shape follows the spec and returns a stable `offboardingPlanId`.
 - Sole-owner offboarding preview returns `409 last_owner_requires_transfer`.
 - Default recommendations follow Decision A: `break_and_flag` unless an active remaining project attachment already covers the consumer; `defer_removal` is available for human choice but not the default for live personal-backed resources.
 - Preview plan persistence supports Wave 6C stale-plan rejection.

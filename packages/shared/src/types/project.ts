@@ -334,6 +334,54 @@ export interface ProjectMembersResponse {
   accessRequests: ProjectAccessRequestResponse[];
 }
 
+export type ProjectMemberOffboardingPlanStatus = 'preview' | 'applied' | 'expired';
+export type ProjectMemberOffboardingResourceKind =
+  | 'trigger'
+  | 'task_tree'
+  | 'node'
+  | 'deployment_environment'
+  | 'project_attachment';
+export type ProjectMemberOffboardingCredentialSource =
+  | 'user'
+  | 'project'
+  | 'platform'
+  | 'unknown';
+export type ProjectMemberOffboardingAction =
+  | 'reattach_to_project'
+  | 'break_and_flag'
+  | 'defer_removal';
+export type ProjectMemberOffboardingResourceStatus = 'pending' | 'applied' | 'skipped';
+
+export interface ProjectMemberOffboardingResourcePreview {
+  resourceKind: ProjectMemberOffboardingResourceKind;
+  resourceId: string;
+  title: string;
+  subtitle: string | null;
+  href: string | null;
+  credentialSourceBefore: ProjectMemberOffboardingCredentialSource;
+  attributionUserIdBefore: string | null;
+  attributionProjectIdBefore: string | null;
+  recommendedAction: ProjectMemberOffboardingAction;
+  availableActions: ProjectMemberOffboardingAction[];
+  requiresHumanDecision: boolean;
+  blocksRemoval: boolean;
+  details: Record<string, unknown>;
+}
+
+export interface ProjectMemberOffboardingPreviewResponse {
+  offboardingPlanId: string;
+  projectId: string;
+  memberUserId: string;
+  canApply: boolean;
+  requiresHumanDecision: boolean;
+  summary: {
+    breakAndFlag: number;
+    reattachAvailable: number;
+    blockingTeardown: number;
+  };
+  resources: ProjectMemberOffboardingResourcePreview[];
+}
+
 export type CredentialAttributionConsumerKind = 'agent' | 'compute';
 export type CredentialAttributionSource = 'project' | 'personal' | 'platform' | 'unknown';
 export type CredentialAttributionResourceKind = 'trigger';

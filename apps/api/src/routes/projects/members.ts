@@ -32,6 +32,7 @@ import {
   getGitHubUserAccessTokenForOwner,
   getGitHubUserAccessTokenWithHeaders,
 } from '../../services/github-user-access-token';
+import { createProjectMemberOffboardingPreview } from '../../services/project-offboarding-preview';
 
 const INVITE_TOKEN_PREFIX = 'sam_inv_';
 const DEFAULT_INVITE_TOKEN_BYTES = 32;
@@ -378,6 +379,25 @@ projectMembersRoutes.get('/:id/members', async (c) => {
   };
 
   return c.json(response);
+});
+
+projectMembersRoutes.post('/:id/members/:userId/offboarding-preview', async (c) => {
+  const requesterId = getUserId(c);
+  const projectId = c.req.param('id');
+  const memberUserId = c.req.param('userId');
+  const db = drizzle(c.env.DATABASE, { schema });
+  const project = await requireProjectCapability(db, projectId, requesterId, 'project:delete');
+
+  const preview = await createProjectMemberOffboardingPreview({
+    db,
+    project,
+    memberUserId,
+    requestedBy: requesterId,
+    defaultAgentType: c.env.DEFAULT_TASK_AGENT_TYPE || 'opencode',
+    planTtlSeconds: c.env.PROJECT_OFFBOARDING_PLAN_TTL_SECONDS,
+  });
+
+  return c.json(preview);
 });
 
 projectMembersRoutes.post(
