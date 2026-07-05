@@ -18,7 +18,7 @@ export interface ToolCardProps {
  * tools always fall back with zero regression risk.
  */
 export function matchToolCard(item: ToolCallItem): FC<ToolCardProps> | null {
-  const base = normalizeToolName(item.toolName);
+  const base = normalizeToolName(item.toolName ?? item.title);
   if (base && DOCUMENT_CARD_TOOLS.has(base)) {
     return DocumentCard;
   }
