@@ -229,7 +229,7 @@ Response:
 
 ```json
 {
-  "planId": "off_...",
+  "offboardingPlanId": "off_...",
   "projectId": "prj_...",
   "memberUserId": "usr_departing",
   "canApply": false,
@@ -242,6 +242,11 @@ Response:
   "resources": []
 }
 ```
+
+Implementation correction for Wave 6A: the canonical preview identifier field is
+`offboardingPlanId`, matching the approved two-step preview/apply decision. The
+earlier `planId` spelling in this design snippet was shorthand and should not be
+used by clients.
 
 ### Offboarding Apply
 

@@ -50,7 +50,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function parseResultPayload(rawOutput: unknown): Record<string, unknown> | null {
   if (Array.isArray(rawOutput)) {
     for (const block of rawOutput) {
-      if (isRecord(block) && block.type === 'text' && typeof block.text === 'string') {
+      if (
+        isRecord(block)
+        && (block.type === 'text' || block.type === 'content')
+        && typeof block.text === 'string'
+      ) {
         try {
           const parsed: unknown = JSON.parse(block.text);
           if (isRecord(parsed)) return parsed;
@@ -99,9 +103,9 @@ function basename(path: string | undefined): string | undefined {
  * - FILE_NOT_FOUND → tombstone. No fileId yet + still running → pending.
  */
 export function extractDocumentCardData(item: ToolCallItem): DocumentCardData {
-  const tool = normalizeToolName(item.toolName) ?? 'document';
+  const tool = normalizeToolName(item.toolName ?? item.title) ?? 'document';
   const input = isRecord(item.rawInput) ? item.rawInput : {};
-  const result = parseResultPayload(item.rawOutput);
+  const result = parseResultPayload(item.rawOutput ?? item.content);
 
   const error = result ? str(result.error) : undefined;
   const existingFile = result && isRecord(result.existingFile) ? result.existingFile : undefined;

@@ -2,6 +2,7 @@ import type { ConversationItem, ToolCallContentItem, ToolCallItem } from '@simpl
 
 import type { ChatMessageResponse, ChatSessionResponse, SessionStateSnapshot } from '../../lib/api';
 import { maybeJsonRecord } from '../../lib/runtime-validation';
+import { DOCUMENT_CARD_TOOLS, normalizeToolName } from './tool-cards/document-card-data';
 
 /** Default idle timeout in ms — matches the server-side default (NODE_WARM_TIMEOUT_MS). */
 export const DEFAULT_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
@@ -93,6 +94,44 @@ function applyToolContentPointer(toolItem: ToolCallItem, pointer: ToolContentPoi
   if (pointer.contentSize !== undefined) {
     toolItem.contentSize = pointer.contentSize;
   }
+}
+
+function inferMcpToolNameFromTitle(title: string): string | undefined {
+  return title.startsWith('mcp__') && title.split('__').length >= 3 ? title : undefined;
+}
+
+function isDocumentCardTool(toolName: string | undefined): boolean {
+  const base = normalizeToolName(toolName);
+  return Boolean(base && DOCUMENT_CARD_TOOLS.has(base));
+}
+
+function parseJsonRecordFromToolContent(content: string): Record<string, unknown> | undefined {
+  const trimmed = content.trim();
+  if (!trimmed || isPlaceholderContent(trimmed)) return undefined;
+
+  const candidates = [trimmed];
+  const firstBrace = trimmed.indexOf('{');
+  const lastBrace = trimmed.lastIndexOf('}');
+  if (firstBrace >= 0 && lastBrace > firstBrace) {
+    candidates.push(trimmed.slice(firstBrace, lastBrace + 1));
+  }
+
+  for (const candidate of candidates) {
+    try {
+      const parsed: unknown = JSON.parse(candidate);
+      return maybeJsonRecord(parsed) ?? undefined;
+    } catch {
+      // Try the next candidate.
+    }
+  }
+
+  return undefined;
+}
+
+function legacyDocumentRawOutput(toolName: string | undefined, content: string): unknown {
+  if (!isDocumentCardTool(toolName)) return undefined;
+  const payload = parseJsonRecordFromToolContent(content);
+  return payload ? [{ type: 'text', text: JSON.stringify(payload) }] : undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -237,9 +276,11 @@ export function chatMessagesToConversationItems(msgs: ChatMessageResponse[]): Co
       // Card-critical fields for typed tool-call cards. toolName is the stable
       // discriminator; rawInput/rawOutput carry the payload (fileId, filename,
       // mimeType, sizeBytes, caption) and survive compact-mode content stripping.
-      const toolName = meta && typeof meta.toolName === 'string' ? meta.toolName : undefined;
+      const toolName = meta && typeof meta.toolName === 'string'
+        ? meta.toolName
+        : inferMcpToolNameFromTitle(rawTitle);
       const rawInput = meta ? meta.rawInput : undefined;
-      const rawOutput = meta ? meta.rawOutput : undefined;
+      const rawOutput = meta?.rawOutput ?? legacyDocumentRawOutput(toolName, msg.content);
       const validStatuses = new Set(['pending', 'in_progress', 'completed', 'failed']);
       const rawStatus = meta && typeof meta.status === 'string' ? meta.status : '';
       const status = (validStatuses.has(rawStatus)

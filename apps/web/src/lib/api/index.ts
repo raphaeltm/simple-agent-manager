@@ -303,6 +303,7 @@ export type {
 } from './projects';
 export {
   addProjectRepository,
+  applyProjectMemberOffboarding,
   approveProjectAccessRequest,
   createProject,
   createProjectInviteLink,
@@ -323,9 +324,11 @@ export {
   listProjectDevcontainerConfigs,
   listProjectRepositories,
   listProjects,
+  previewProjectMemberOffboarding,
   removeProjectRepository,
   requestProjectAccess,
   revokeProjectInviteLink,
+  transferProjectOwnership,
   updateProject,
   upsertProjectRuntimeEnvVar,
   upsertProjectRuntimeFile,

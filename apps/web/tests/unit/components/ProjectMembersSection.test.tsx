@@ -1,22 +1,28 @@
 import type { ProjectMembersResponse } from '@simple-agent-manager/shared';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { ApiClientError } from '../../../src/lib/api/client';
+
 const mocks = vi.hoisted(() => ({
+  applyProjectMemberOffboarding: vi.fn(),
   approveProjectAccessRequest: vi.fn(),
   createProjectInviteLink: vi.fn(),
   denyProjectAccessRequest: vi.fn(),
   getProjectCredentialAttributionHealth: vi.fn(),
   getProjectMembers: vi.fn(),
+  previewProjectMemberOffboarding: vi.fn(),
   revokeProjectInviteLink: vi.fn(),
+  transferProjectOwnership: vi.fn(),
   success: vi.fn(),
   error: vi.fn(),
+  currentUser: { id: 'owner-user', email: 'owner@example.com', name: 'Owner' },
 }));
 
 vi.mock('../../../src/components/AuthProvider', () => ({
   useAuth: () => ({
-    user: { id: 'owner-user', email: 'owner@example.com', name: 'Owner' },
+    user: mocks.currentUser,
   }),
 }));
 
@@ -29,12 +35,15 @@ vi.mock('../../../src/hooks/useToast', () => ({
 
 vi.mock('../../../src/lib/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../src/lib/api')>()),
+  applyProjectMemberOffboarding: mocks.applyProjectMemberOffboarding,
   approveProjectAccessRequest: mocks.approveProjectAccessRequest,
   createProjectInviteLink: mocks.createProjectInviteLink,
   denyProjectAccessRequest: mocks.denyProjectAccessRequest,
   getProjectCredentialAttributionHealth: mocks.getProjectCredentialAttributionHealth,
   getProjectMembers: mocks.getProjectMembers,
+  previewProjectMemberOffboarding: mocks.previewProjectMemberOffboarding,
   revokeProjectInviteLink: mocks.revokeProjectInviteLink,
+  transferProjectOwnership: mocks.transferProjectOwnership,
 }));
 
 import { ProjectMembersSection } from '../../../src/components/project-settings/ProjectMembersSection';
@@ -108,6 +117,7 @@ function makeMembersResponse(overrides: Partial<ProjectMembersResponse> = {}): P
 describe('ProjectMembersSection', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.currentUser = { id: 'owner-user', email: 'owner@example.com', name: 'Owner' };
     mocks.getProjectMembers.mockResolvedValue(makeMembersResponse());
     mocks.getProjectCredentialAttributionHealth.mockResolvedValue({
       projectId: 'proj-1',
@@ -161,6 +171,71 @@ describe('ProjectMembersSection', () => {
       decidedBy: 'owner-user',
       decidedAt: '2026-07-04T01:00:00.000Z',
     });
+    mocks.transferProjectOwnership.mockResolvedValue({
+      projectId: 'proj-1',
+      fromUserId: 'owner-user',
+      toUserId: 'admin-user',
+      fromRole: 'admin',
+      toRole: 'owner',
+      completedAt: '2026-07-04T01:00:00.000Z',
+    });
+    mocks.previewProjectMemberOffboarding.mockResolvedValue({
+      offboardingPlanId: 'off-plan-1',
+      projectId: 'proj-1',
+      memberUserId: 'admin-user',
+      canApply: false,
+      requiresHumanDecision: true,
+      summary: {
+        breakAndFlag: 2,
+        reattachAvailable: 1,
+        blockingTeardown: 1,
+      },
+      resources: [
+        {
+          resourceKind: 'trigger',
+          resourceId: 'trigger-1',
+          title: 'Daily review',
+          subtitle: '0 9 * * *',
+          href: '/projects/proj-1/triggers/trigger-1',
+          credentialSourceBefore: 'user',
+          attributionUserIdBefore: 'admin-user',
+          attributionProjectIdBefore: 'proj-1',
+          recommendedAction: 'reattach_to_project',
+          availableActions: ['reattach_to_project', 'break_and_flag', 'defer_removal'],
+          requiresHumanDecision: true,
+          blocksRemoval: false,
+          details: {
+            status: 'active',
+            remainingProjectCoverage: {
+              agent: { attachmentId: 'attach-agent', configurationId: 'config-agent' },
+              compute: { attachmentId: 'attach-compute', configurationId: 'config-compute' },
+            },
+          },
+        },
+        {
+          resourceKind: 'task_tree',
+          resourceId: 'task-1',
+          title: 'Running cost audit',
+          subtitle: 'running',
+          href: '/projects/proj-1/tasks/task-1',
+          credentialSourceBefore: 'user',
+          attributionUserIdBefore: 'admin-user',
+          attributionProjectIdBefore: 'proj-1',
+          recommendedAction: 'break_and_flag',
+          availableActions: ['break_and_flag', 'defer_removal'],
+          requiresHumanDecision: true,
+          blocksRemoval: true,
+          details: { status: 'running' },
+        },
+      ],
+    });
+    mocks.applyProjectMemberOffboarding.mockResolvedValue({
+      projectId: 'proj-1',
+      memberUserId: 'admin-user',
+      status: 'removed',
+      appliedAt: '2026-07-04T01:00:00.000Z',
+      resourceResults: [],
+    });
   });
 
   it('creates invite links from project settings', async () => {
@@ -203,5 +278,122 @@ describe('ProjectMembersSection', () => {
       expect(mocks.approveProjectAccessRequest).toHaveBeenCalledWith('proj-1', 'request-1');
     });
     expect(mocks.success).toHaveBeenCalledWith('Access approved');
+  });
+
+  it('transfers ownership to an eligible active member after confirmation', async () => {
+    const user = userEvent.setup();
+    render(<ProjectMembersSection projectId="proj-1" />);
+
+    await screen.findByText('Admin');
+    await user.click(screen.getByRole('button', { name: /transfer ownership/i }));
+
+    const dialog = await screen.findByRole('dialog', { name: /transfer ownership/i });
+    expect(within(dialog).getByText(/Your account becomes an admin/i)).toBeInTheDocument();
+    expect(within(dialog).getByText(/does not copy or\s+move any secret/i)).toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole('button', { name: /transfer ownership/i }));
+
+    await waitFor(() => {
+      expect(mocks.transferProjectOwnership).toHaveBeenCalledWith('proj-1', {
+        toUserId: 'admin-user',
+        oldOwnerRole: 'admin',
+      });
+    });
+    expect(mocks.getProjectMembers).toHaveBeenCalled();
+    expect(mocks.success).toHaveBeenCalledWith('Admin is now the project owner');
+  });
+
+  it('previews member removal, defaults to break and flag, and applies selected actions', async () => {
+    const user = userEvent.setup();
+    render(<ProjectMembersSection projectId="proj-1" />);
+
+    await screen.findByText('Admin');
+    await user.click(screen.getByRole('button', { name: /remove member/i }));
+
+    await waitFor(() => {
+      expect(mocks.previewProjectMemberOffboarding).toHaveBeenCalledWith('proj-1', 'admin-user');
+    });
+
+    const dialog = await screen.findByRole('dialog', { name: /remove member/i });
+    expect(within(dialog).getByText(/This trigger runs on Admin's personal key/i)).toBeInTheDocument();
+    expect(within(dialog).getByText(/Removing this member will disable the trigger/i)).toBeInTheDocument();
+    expect(within(dialog).getByText(/Running tasks/i)).toBeInTheDocument();
+
+    const triggerSelect = within(dialog).getAllByLabelText('Action')[0];
+    expect(triggerSelect).toHaveValue('break_and_flag');
+    await user.selectOptions(triggerSelect, 'reattach_to_project');
+
+    await user.click(within(dialog).getByRole('button', { name: /^remove member$/i }));
+
+    await waitFor(() => {
+      expect(mocks.applyProjectMemberOffboarding).toHaveBeenCalledWith('proj-1', 'admin-user', {
+        planId: 'off-plan-1',
+        finalMemberStatus: 'removed',
+        actions: [
+          {
+            resourceKind: 'trigger',
+            resourceId: 'trigger-1',
+            action: 'reattach_to_project',
+          },
+          {
+            resourceKind: 'task_tree',
+            resourceId: 'task-1',
+            action: 'break_and_flag',
+          },
+        ],
+      });
+    });
+    expect(mocks.getProjectMembers).toHaveBeenCalled();
+    expect(mocks.success).toHaveBeenCalledWith('Member removed');
+  });
+
+  it('allows the current non-owner member to leave through offboarding apply', async () => {
+    mocks.currentUser = { id: 'admin-user', email: 'admin@example.com', name: 'Admin' };
+    mocks.previewProjectMemberOffboarding.mockResolvedValueOnce({
+      offboardingPlanId: 'off-self',
+      projectId: 'proj-1',
+      memberUserId: 'admin-user',
+      canApply: true,
+      requiresHumanDecision: false,
+      summary: {
+        breakAndFlag: 0,
+        reattachAvailable: 0,
+        blockingTeardown: 0,
+      },
+      resources: [],
+    });
+    const user = userEvent.setup();
+    render(<ProjectMembersSection projectId="proj-1" />);
+
+    await screen.findByText('Admin');
+    await user.click(screen.getByRole('button', { name: /leave project/i }));
+
+    const dialog = await screen.findByRole('dialog', { name: /leave project/i });
+    expect(within(dialog).getByText(/removed cleanly/i)).toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: /^leave project$/i }));
+
+    await waitFor(() => {
+      expect(mocks.applyProjectMemberOffboarding).toHaveBeenCalledWith('proj-1', 'admin-user', {
+        planId: 'off-self',
+        finalMemberStatus: 'removed',
+        actions: [],
+      });
+    });
+    expect(mocks.success).toHaveBeenCalledWith('You left the project');
+  });
+
+  it('shows retry guidance for stale or expired offboarding plans', async () => {
+    const user = userEvent.setup();
+    mocks.applyProjectMemberOffboarding.mockRejectedValueOnce(
+      new ApiClientError('stale_plan', 'The offboarding plan is stale', 409)
+    );
+    render(<ProjectMembersSection projectId="proj-1" />);
+
+    await screen.findByText('Admin');
+    await user.click(screen.getByRole('button', { name: /remove member/i }));
+    const dialog = await screen.findByRole('dialog', { name: /remove member/i });
+    await user.click(within(dialog).getByRole('button', { name: /^remove member$/i }));
+
+    expect(await within(dialog).findByText(/Refresh the preview and review the resources again/i)).toBeInTheDocument();
   });
 });

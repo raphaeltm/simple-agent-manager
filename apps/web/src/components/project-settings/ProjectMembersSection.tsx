@@ -3,23 +3,47 @@ import type {
   ProjectCredentialAttributionHealthSummary,
   ProjectInviteGithubAccessStatus,
   ProjectInviteLinkResponse,
+  ProjectMemberOffboardingAction,
+  ProjectMemberOffboardingPreviewResponse,
   ProjectMemberResponse,
   ProjectMembersResponse,
 } from '@simple-agent-manager/shared';
 import { Button, Spinner } from '@simple-agent-manager/ui';
-import { AlertTriangle, Check, Copy, Link as LinkIcon, RefreshCcw, UserPlus, X } from 'lucide-react';
+import {
+  AlertTriangle,
+  Check,
+  Copy,
+  Crown,
+  DoorOpen,
+  Link as LinkIcon,
+  RefreshCcw,
+  Trash2,
+  UserPlus,
+  X,
+} from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { useToast } from '../../hooks/useToast';
 import {
+  applyProjectMemberOffboarding,
   approveProjectAccessRequest,
   createProjectInviteLink,
   denyProjectAccessRequest,
   getProjectCredentialAttributionHealth,
   getProjectMembers,
+  previewProjectMemberOffboarding,
   revokeProjectInviteLink,
+  transferProjectOwnership,
 } from '../../lib/api';
 import { useAuth } from '../AuthProvider';
+import { ConfirmDialog } from '../ConfirmDialog';
+import {
+  defaultOffboardingAction,
+  offboardingErrorGuidance,
+  type OffboardingMode,
+  offboardingResourceKey,
+  ProjectOffboardingModal,
+} from './ProjectOffboardingModal';
 
 const GITHUB_STATUS_META: Record<ProjectInviteGithubAccessStatus, { label: string; className: string }> = {
   unchecked: {
@@ -77,9 +101,32 @@ function GithubStatusBadge({ status }: { status: ProjectInviteGithubAccessStatus
   );
 }
 
-function MemberRow({ member }: { member: ProjectMemberResponse }) {
+function MemberRow({
+  member,
+  isCurrentUser,
+  canManage,
+  isOwner,
+  disabled,
+  onTransfer,
+  onRemove,
+  onLeave,
+}: {
+  canManage: boolean;
+  disabled: boolean;
+  isCurrentUser: boolean;
+  isOwner: boolean;
+  member: ProjectMemberResponse;
+  onLeave: (member: ProjectMemberResponse) => void;
+  onRemove: (member: ProjectMemberResponse) => void;
+  onTransfer: (member: ProjectMemberResponse) => void;
+}) {
+  const active = member.status === 'active';
+  const canTransfer = isOwner && active && member.role === 'admin';
+  const canRemove = canManage && active && member.role !== 'owner' && !isCurrentUser;
+  const canLeave = isCurrentUser && active && member.role !== 'owner';
+
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 items-center py-2 border-b border-border-subtle last:border-b-0 min-w-0">
+    <div className="grid gap-2 py-2 border-b border-border-subtle last:border-b-0 min-w-0 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
       <div className="min-w-0">
         <div className="text-[0.8125rem] font-medium text-fg-primary truncate">
           {userLabel(member)}
@@ -88,7 +135,7 @@ function MemberRow({ member }: { member: ProjectMemberResponse }) {
           {member.user?.email ?? member.userId}
         </div>
       </div>
-      <div className="flex items-center gap-1.5">
+      <div className="flex flex-wrap items-center gap-1.5 sm:justify-end">
         <span className="text-[0.6875rem] px-1.5 py-px rounded-sm bg-inset text-fg-muted">
           {member.role}
         </span>
@@ -96,6 +143,39 @@ function MemberRow({ member }: { member: ProjectMemberResponse }) {
           <span className="text-[0.6875rem] px-1.5 py-px rounded-sm bg-inset text-fg-muted">
             {member.status}
           </span>
+        )}
+        {canTransfer && (
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={disabled}
+            onClick={() => onTransfer(member)}
+          >
+            <Crown size={14} />
+            Transfer ownership
+          </Button>
+        )}
+        {canRemove && (
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={disabled}
+            onClick={() => onRemove(member)}
+          >
+            <Trash2 size={14} />
+            Remove member
+          </Button>
+        )}
+        {canLeave && (
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={disabled}
+            onClick={() => onLeave(member)}
+          >
+            <DoorOpen size={14} />
+            Leave project
+          </Button>
         )}
       </div>
     </div>
@@ -196,6 +276,17 @@ export function ProjectMembersSection({ projectId }: { projectId: string }) {
   const [createdInviteLink, setCreatedInviteLink] = useState<ProjectInviteLinkResponse | null>(null);
   const [credentialHealth, setCredentialHealth] =
     useState<ProjectCredentialAttributionHealthSummary | null>(null);
+  const [transferTarget, setTransferTarget] = useState<ProjectMemberResponse | null>(null);
+  const [transferring, setTransferring] = useState(false);
+  const [offboardingTarget, setOffboardingTarget] = useState<{
+    member: ProjectMemberResponse;
+    mode: OffboardingMode;
+  } | null>(null);
+  const [offboardingPreview, setOffboardingPreview] =
+    useState<ProjectMemberOffboardingPreviewResponse | null>(null);
+  const [offboardingLoading, setOffboardingLoading] = useState(false);
+  const [offboardingApplying, setOffboardingApplying] = useState(false);
+  const [offboardingError, setOffboardingError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -222,6 +313,7 @@ export function ProjectMembersSection({ projectId }: { projectId: string }) {
     [data?.members, user?.id]
   );
   const canManage = currentMember?.role === 'owner' || currentMember?.role === 'admin';
+  const isOwner = currentMember?.role === 'owner';
   const pendingRequests = data?.accessRequests.filter((request) => request.status === 'pending') ?? [];
   const activeInvite =
     createdInviteLink ?? data?.inviteLinks.find((link) => link.status === 'active') ?? null;
@@ -340,6 +432,78 @@ export function ProjectMembersSection({ projectId }: { projectId: string }) {
     }
   };
 
+  const loadOffboardingPreview = useCallback(
+    async (member: ProjectMemberResponse, mode: OffboardingMode) => {
+      setOffboardingTarget({ member, mode });
+      setOffboardingPreview(null);
+      setOffboardingError(null);
+      setOffboardingLoading(true);
+      try {
+        const preview = await previewProjectMemberOffboarding(projectId, member.userId);
+        setOffboardingPreview(preview);
+      } catch (err) {
+        setOffboardingError(offboardingErrorGuidance(err));
+      } finally {
+        setOffboardingLoading(false);
+      }
+    },
+    [projectId]
+  );
+
+  const handleTransferOwnership = async () => {
+    if (!transferTarget) return;
+    try {
+      setTransferring(true);
+      await transferProjectOwnership(projectId, {
+        toUserId: transferTarget.userId,
+        oldOwnerRole: 'admin',
+      });
+      setTransferTarget(null);
+      await load();
+      toast.success(`${userLabel(transferTarget)} is now the project owner`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to transfer ownership');
+    } finally {
+      setTransferring(false);
+    }
+  };
+
+  const handleApplyOffboarding = async (
+    selectedActions: Record<string, ProjectMemberOffboardingAction>
+  ) => {
+    if (!offboardingTarget || !offboardingPreview) return;
+    try {
+      setOffboardingApplying(true);
+      setOffboardingError(null);
+      await applyProjectMemberOffboarding(projectId, offboardingTarget.member.userId, {
+        planId: offboardingPreview.offboardingPlanId,
+        finalMemberStatus: 'removed',
+        actions: offboardingPreview.resources.map((resource) => ({
+          resourceKind: resource.resourceKind,
+          resourceId: resource.resourceId,
+          action: selectedActions[offboardingResourceKey(resource)] ?? defaultOffboardingAction(resource),
+        })),
+      });
+      const successMessage =
+        offboardingTarget.mode === 'leave' ? 'You left the project' : 'Member removed';
+      setOffboardingTarget(null);
+      setOffboardingPreview(null);
+      await load();
+      toast.success(successMessage);
+    } catch (err) {
+      setOffboardingError(offboardingErrorGuidance(err));
+    } finally {
+      setOffboardingApplying(false);
+    }
+  };
+
+  const closeOffboarding = () => {
+    if (offboardingApplying) return;
+    setOffboardingTarget(null);
+    setOffboardingPreview(null);
+    setOffboardingError(null);
+  };
+
   return (
     <section className="glass-surface rounded-lg p-4 grid gap-4 min-w-0 overflow-hidden">
       <div className="grid gap-3 sm:flex sm:items-start sm:justify-between">
@@ -380,7 +544,19 @@ export function ProjectMembersSection({ projectId }: { projectId: string }) {
               </div>
               <div className="mt-2 rounded-md border border-border-default bg-[color-mix(in_srgb,var(--sam-glass-nested-bg)_60%,transparent)] px-3 min-w-0">
                 {data?.members.length ? (
-                  data.members.map((member) => <MemberRow key={member.userId} member={member} />)
+                  data.members.map((member) => (
+                    <MemberRow
+                      key={member.userId}
+                      member={member}
+                      isCurrentUser={member.userId === user?.id}
+                      canManage={Boolean(canManage)}
+                      isOwner={Boolean(isOwner)}
+                      disabled={offboardingLoading || offboardingApplying || transferring}
+                      onTransfer={setTransferTarget}
+                      onRemove={(value) => void loadOffboardingPreview(value, 'remove')}
+                      onLeave={(value) => void loadOffboardingPreview(value, 'leave')}
+                    />
+                  ))
                 ) : (
                   <div className="py-3 text-xs text-fg-muted">No members found.</div>
                 )}
@@ -473,6 +649,46 @@ export function ProjectMembersSection({ projectId }: { projectId: string }) {
             )}
           </div>
         </div>
+      )}
+      <ConfirmDialog
+        isOpen={Boolean(transferTarget)}
+        onClose={() => {
+          if (!transferring) setTransferTarget(null);
+        }}
+        onConfirm={() => void handleTransferOwnership()}
+        title="Transfer ownership"
+        variant="warning"
+        loading={transferring}
+        confirmLabel="Transfer ownership"
+        message={
+          transferTarget ? (
+            <div className="grid gap-2">
+              <p className="m-0">
+                {userLabel(transferTarget)} will become the project owner. Your account becomes an
+                admin and keeps admin-level controls, but ownership-only actions move to the new owner.
+              </p>
+              <p className="m-0">
+                Existing personal credentials stay with their owners. This action does not copy or
+                move any secret.
+              </p>
+            </div>
+          ) : null
+        }
+      />
+      {offboardingTarget && (
+        <ProjectOffboardingModal
+          memberName={userLabel(offboardingTarget.member)}
+          mode={offboardingTarget.mode}
+          preview={offboardingPreview}
+          loading={offboardingLoading}
+          applying={offboardingApplying}
+          error={offboardingError}
+          onClose={closeOffboarding}
+          onRefresh={() =>
+            void loadOffboardingPreview(offboardingTarget.member, offboardingTarget.mode)
+          }
+          onApply={(actions) => void handleApplyOffboarding(actions)}
+        />
       )}
     </section>
   );

@@ -777,4 +777,51 @@ describe('chatMessagesToConversationItems', () => {
     expect(tool.rawInput?.fileId).toBe('file-keep');
     expect(tool.rawOutput?.[0]?.text).toContain('guide.md');
   });
+
+  it('recovers document-card metadata from pre-toolName VM agent rows', () => {
+    // Production regression shape from stale shared nodes created before the
+    // typed-card VM-agent change: title carries the MCP tool name, but
+    // toolName/rawInput/rawOutput are absent. The tool result JSON is still in
+    // the persisted message content.
+    const initial = {
+      toolCallId: 'tc-old-display',
+      title: 'mcp__sam-mcp__display_from_library',
+      kind: 'other',
+      status: 'in_progress',
+    };
+    const result = {
+      toolCallId: 'tc-old-display',
+      title: 'mcp__sam-mcp__display_from_library',
+      kind: 'other',
+      status: 'completed',
+    };
+    const items = chatMessagesToConversationItems([
+      toolMsg({ id: 'old-display-start', content: '(tool call)', toolMetadata: initial }),
+      toolMsg({
+        id: 'old-display-done',
+        content: JSON.stringify({
+          fileId: '01KWSG35DYFK7S12P175438Q67',
+          filename: 'format-c.png',
+          mimeType: 'image/png',
+          sizeBytes: 2916416,
+          caption: 'Format C — Landscape hero',
+        }),
+        toolMetadata: result,
+      }),
+    ]);
+
+    expect(items).toHaveLength(1);
+    const tool = items[0] as {
+      kind: string;
+      title: string;
+      toolName?: string;
+      rawOutput?: Array<{ type: string; text: string }>;
+    };
+    expect(tool.kind).toBe('tool_call');
+    expect(tool.title).toBe('mcp__sam-mcp__display_from_library');
+    expect(tool.toolName).toBe('mcp__sam-mcp__display_from_library');
+    expect(tool.rawOutput?.[0]?.type).toBe('text');
+    expect(tool.rawOutput?.[0]?.text).toContain('format-c.png');
+    expect(tool.rawOutput?.[0]?.text).toContain('Landscape hero');
+  });
 });

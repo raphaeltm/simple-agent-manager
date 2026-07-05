@@ -16,9 +16,11 @@ export {
 // Project schemas
 export {
   AddProjectRepositorySchema,
+  ApplyProjectMemberOffboardingSchema,
   CreateProjectInviteSchema,
   CreateProjectSchema,
   DecideProjectAccessRequestSchema,
+  TransferProjectOwnershipSchema,
   UpdateProjectSchema,
   UpsertProjectRuntimeEnvVarSchema,
   UpsertProjectRuntimeFileSchema,

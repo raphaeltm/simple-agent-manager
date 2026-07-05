@@ -13,7 +13,12 @@ import type {
   ProjectDetailResponse,
   ProjectInviteLinkResponse,
   ProjectInvitePreviewResponse,
+  ProjectMemberOffboardingApplyRequest,
+  ProjectMemberOffboardingApplyResponse,
+  ProjectMemberOffboardingPreviewResponse,
   ProjectMembersResponse,
+  ProjectOwnershipTransferRequest,
+  ProjectOwnershipTransferResponse,
   ProjectRepositoryAccessResponse,
   ProjectRuntimeConfigResponse,
   SubmoduleDiscoveryResponse,
@@ -271,6 +276,42 @@ export async function listAvailableRepositories(
 
 export async function getProjectMembers(projectId: string): Promise<ProjectMembersResponse> {
   return request<ProjectMembersResponse>(`/api/projects/${projectId}/members`);
+}
+
+export async function transferProjectOwnership(
+  projectId: string,
+  data: ProjectOwnershipTransferRequest
+): Promise<ProjectOwnershipTransferResponse> {
+  return request<ProjectOwnershipTransferResponse>(`/api/projects/${projectId}/ownership-transfer`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function previewProjectMemberOffboarding(
+  projectId: string,
+  userId: string
+): Promise<ProjectMemberOffboardingPreviewResponse> {
+  return request<ProjectMemberOffboardingPreviewResponse>(
+    `/api/projects/${projectId}/members/${encodeURIComponent(userId)}/offboarding-preview`,
+    {
+      method: 'POST',
+    }
+  );
+}
+
+export async function applyProjectMemberOffboarding(
+  projectId: string,
+  userId: string,
+  data: ProjectMemberOffboardingApplyRequest
+): Promise<ProjectMemberOffboardingApplyResponse> {
+  return request<ProjectMemberOffboardingApplyResponse>(
+    `/api/projects/${projectId}/members/${encodeURIComponent(userId)}/offboarding-apply`,
+    {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }
+  );
 }
 
 export async function createProjectInviteLink(

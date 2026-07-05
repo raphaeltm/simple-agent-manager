@@ -16,6 +16,7 @@ export const PROJECT_CAPABILITIES = [
   'project:read',
   'project:update',
   'project:delete',
+  'project:transfer_ownership',
   'task:read',
   'task:write',
   'workspace:read',
@@ -32,7 +33,12 @@ export type ProjectCapability = (typeof PROJECT_CAPABILITIES)[number];
 
 const ROLE_CAPABILITIES: Record<ProjectMemberRole, ReadonlySet<ProjectCapability>> = {
   owner: new Set(PROJECT_CAPABILITIES),
-  admin: new Set(PROJECT_CAPABILITIES.filter((capability) => capability !== 'project:delete')),
+  admin: new Set(
+    PROJECT_CAPABILITIES.filter(
+      (capability) =>
+        capability !== 'project:delete' && capability !== 'project:transfer_ownership'
+    )
+  ),
   maintainer: new Set([
     'project:read',
     'task:read',

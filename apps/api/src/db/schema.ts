@@ -362,6 +362,7 @@ export const projectMembers = sqliteTable(
     role: text('role').notNull().default('owner'),
     status: text('status').notNull().default('active'),
     invitedBy: text('invited_by').references(() => users.id, { onDelete: 'set null' }),
+    removedAt: text('removed_at'),
     createdAt: text('created_at')
       .notNull()
       .default(sql`CURRENT_TIMESTAMP`),
@@ -373,6 +374,76 @@ export const projectMembers = sqliteTable(
     pk: primaryKey({ columns: [table.projectId, table.userId] }),
     userStatusIdx: index('idx_project_members_user_status').on(table.userId, table.status),
     projectStatusIdx: index('idx_project_members_project_status').on(table.projectId, table.status),
+  })
+);
+
+export const projectOwnershipTransfers = sqliteTable(
+  'project_ownership_transfers',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id').notNull(),
+    fromUserId: text('from_user_id').notNull(),
+    toUserId: text('to_user_id').notNull(),
+    initiatedBy: text('initiated_by').notNull(),
+    completedAt: text('completed_at'),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  }
+);
+
+export const projectMemberOffboardingPlans = sqliteTable(
+  'project_member_offboarding_plans',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id').notNull(),
+    memberUserId: text('member_user_id').notNull(),
+    requestedBy: text('requested_by').notNull(),
+    status: text('status').notNull().default('preview'),
+    resourceSummaryJson: text('resource_summary_json').notNull(),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    expiresAt: text('expires_at').notNull(),
+    appliedAt: text('applied_at'),
+  },
+  (table) => ({
+    projectMemberStatusIdx: index('idx_project_offboarding_plans_project_member_status').on(
+      table.projectId,
+      table.memberUserId,
+      table.status
+    ),
+  })
+);
+
+export const projectMemberOffboardingResourceActions = sqliteTable(
+  'project_member_offboarding_resource_actions',
+  {
+    id: text('id').primaryKey(),
+    planId: text('plan_id')
+      .notNull()
+      .references(() => projectMemberOffboardingPlans.id, { onDelete: 'cascade' }),
+    resourceKind: text('resource_kind').notNull(),
+    resourceId: text('resource_id').notNull(),
+    credentialSourceBefore: text('credential_source_before').notNull(),
+    attributionUserIdBefore: text('attribution_user_id_before'),
+    attributionProjectIdBefore: text('attribution_project_id_before'),
+    recommendedAction: text('recommended_action').notNull(),
+    selectedAction: text('selected_action'),
+    status: text('status').notNull().default('pending'),
+    detailsJson: text('details_json').notNull(),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    planKindIdx: index('idx_project_offboarding_actions_plan_kind').on(
+      table.planId,
+      table.resourceKind
+    ),
   })
 );
 
@@ -690,6 +761,8 @@ export const tasks = sqliteTable(
     credentialAttributionProjectId: text('credential_attribution_project_id').references(() => projects.id, { onDelete: 'set null' }),
     /** Root-pinned credential attribution source: 'user' | 'project' | 'platform'. */
     credentialAttributionSource: text('credential_attribution_source').default('user'),
+    credentialBlockedReason: text('credential_blocked_reason'),
+    credentialBlockedAt: text('credential_blocked_at'),
     /** Null for standalone tasks; set when task belongs to a mission. Set null on mission delete. */
     missionId: text('mission_id').references(() => missions.id, { onDelete: 'set null' }),
     /** Scheduler classification for mission tasks. Null for standalone tasks. */
@@ -816,6 +889,9 @@ export const nodes = sqliteTable(
     credentialAttributionProjectId: text('credential_attribution_project_id').references(() => projects.id, { onDelete: 'set null' }),
     /** Credential attribution source used at node creation: 'user' | 'project' | 'platform'. */
     credentialAttributionSource: text('credential_attribution_source').default('user'),
+    offboardingStatus: text('offboarding_status'),
+    offboardingBlockedReason: text('offboarding_blocked_reason'),
+    offboardingBlockedAt: text('offboarding_blocked_at'),
     /** 'workspace' = ephemeral task/dev node (default); 'deployment' = long-lived app-hosting node. */
     nodeRole: text('node_role').notNull().default('workspace'),
     /** 'shared' = eligible for multi-tenant placement; 'exclusive' = one deployment environment only. */
@@ -1598,6 +1674,9 @@ export const triggers = sqliteTable(
     lastTriggeredAt: text('last_triggered_at'),
     triggerCount: integer('trigger_count').notNull().default(0),
     nextFireAt: text('next_fire_at'),
+    credentialBlockedReason: text('credential_blocked_reason'),
+    credentialBlockedAt: text('credential_blocked_at'),
+    credentialBlockedBy: text('credential_blocked_by'),
     createdAt: text('created_at')
       .notNull()
       .default(sql`CURRENT_TIMESTAMP`),
@@ -2004,6 +2083,7 @@ export const deploymentEnvironments = sqliteTable(
     agentDeployEnabled: integer('agent_deploy_enabled', { mode: 'boolean' })
       .notNull()
       .default(false),
+    offboardingStatus: text('offboarding_status'),
     agentDeployEnabledBy: text('agent_deploy_enabled_by').references(() => users.id, {
       onDelete: 'set null',
     }),

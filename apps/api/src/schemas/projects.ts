@@ -73,3 +73,26 @@ export const CreateProjectInviteSchema = v.object({
 export const DecideProjectAccessRequestSchema = v.object({
   note: v.optional(v.string()),
 });
+
+export const TransferProjectOwnershipSchema = v.object({
+  toUserId: v.string(),
+  oldOwnerRole: v.optional(v.picklist(['admin'])),
+});
+
+export const ApplyProjectMemberOffboardingSchema = v.object({
+  planId: v.string(),
+  actions: v.array(
+    v.object({
+      resourceKind: v.picklist([
+        'trigger',
+        'task_tree',
+        'node',
+        'deployment_environment',
+        'project_attachment',
+      ]),
+      resourceId: v.string(),
+      action: v.picklist(['reattach_to_project', 'break_and_flag', 'defer_removal']),
+    })
+  ),
+  finalMemberStatus: v.picklist(['removed']),
+});

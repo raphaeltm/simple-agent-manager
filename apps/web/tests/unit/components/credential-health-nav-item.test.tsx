@@ -58,6 +58,27 @@ describe('CredentialHealthNavItem', () => {
             },
           ],
         },
+        {
+          id: 'node-1',
+          projectId: 'proj-1',
+          kind: 'node',
+          title: 'Production runner node',
+          subtitle: 'active',
+          href: '/projects/proj-1/nodes/node-1',
+          createdBy: { id: 'coworker', name: 'Coworker', email: 'co@example.com', avatarUrl: null },
+          checks: [
+            {
+              consumerKind: 'compute',
+              consumerTarget: 'hetzner',
+              label: 'Compute credential (hetzner)',
+              source: 'personal',
+              owner: { id: 'coworker', name: 'Coworker', email: 'co@example.com', avatarUrl: null },
+              projectCredential: null,
+              fixHref: '/projects/proj-1/nodes/node-1',
+              warning: "This node runs on Coworker's personal key.",
+            },
+          ],
+        },
       ],
     });
   });
@@ -71,13 +92,15 @@ describe('CredentialHealthNavItem', () => {
     );
 
     const button = await screen.findByRole('button', { name: /credential attribution health/i });
-    expect(button).toHaveTextContent('1 resource / 2 keys');
+    expect(button).toHaveTextContent('2 resources / 2 keys');
 
     await user.click(button);
     await waitFor(() => {
       expect(screen.getByRole('dialog', { name: /credential attribution/i })).toBeInTheDocument();
     });
     expect(screen.getByText('Daily review')).toBeInTheDocument();
+    expect(screen.getByText('Nodes')).toBeInTheDocument();
+    expect(screen.getByText('Production runner node')).toBeInTheDocument();
     expect(screen.getAllByText("This runs on Coworker's personal key.")).toHaveLength(2);
   });
 });
