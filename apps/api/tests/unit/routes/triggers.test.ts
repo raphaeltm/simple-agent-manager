@@ -63,6 +63,15 @@ vi.mock('../../../src/services/trigger-submit', () => ({
   }),
 }));
 
+vi.mock('../../../src/services/project-multiplayer', () => ({
+  getProjectMultiplayerState: vi.fn().mockResolvedValue({
+    activeMemberCount: 1,
+    hasActiveInviteLink: false,
+    hasPendingAccessRequest: false,
+    multiplayerActive: false,
+  }),
+}));
+
 // Mock ulid
 let ulidCounter = 0;
 vi.mock('../../../src/lib/ulid', () => ({

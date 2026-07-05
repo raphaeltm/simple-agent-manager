@@ -66,6 +66,12 @@ This task will add explicit tests for both sides of the product-mode gate and up
 - `pnpm --filter @simple-agent-manager/api test -- tests/unit/services/project-multiplayer.test.ts tests/unit/services/credential-attribution-health.test.ts tests/unit/routes/credential-attribution-health.test.ts` passed.
 - `pnpm --filter @simple-agent-manager/web test -- tests/unit/SessionTreeItem.test.tsx tests/unit/components/credential-health-nav-item.test.tsx tests/unit/components/trigger-credential-warning.test.tsx` passed.
 - `pnpm --filter @simple-agent-manager/web exec playwright test tests/playwright/shared-session-ux-audit.spec.ts tests/playwright/credential-health-audit.spec.ts --project="iPhone SE (375x667)" --project="Desktop (1280x800)"` passed after installing Chromium and its OS dependencies: 16 passed, 8 viewport-gated skips. Representative screenshots were inspected from `.codex/tmp/playwright-screenshots/` and `apps/web/.codex/tmp/playwright-screenshots/`.
+- Initial full `pnpm test` exposed missing route-test mocking for the new trigger `getProjectMultiplayerState()` lookup in `apps/api/tests/unit/routes/triggers.test.ts`; create/list trigger tests returned 500 because the mock DB query queue was consumed by the new lookup.
+- `pnpm --filter @simple-agent-manager/api test -- tests/unit/routes/triggers.test.ts` passed after mocking the shared multiplayer-state service in that route test: 19 tests passed.
+- `pnpm test` passed after the trigger route mock fix: 19 successful Turbo tasks; API 376 files / 5760 tests passed; Web 211 files / 2590 tests passed.
+- `pnpm build` passed after the trigger route mock fix, with existing Vite dynamic import and chunk-size warnings only.
+- `pnpm typecheck` passed again after the trigger route mock fix.
+- `pnpm lint` passed again after the trigger route mock fix, with existing warnings only.
 
 ## Acceptance Criteria
 
