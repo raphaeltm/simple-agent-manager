@@ -19,6 +19,7 @@ export {
   CreateProjectInviteSchema,
   CreateProjectSchema,
   DecideProjectAccessRequestSchema,
+  TransferProjectOwnershipSchema,
   UpdateProjectSchema,
   UpsertProjectRuntimeEnvVarSchema,
   UpsertProjectRuntimeFileSchema,

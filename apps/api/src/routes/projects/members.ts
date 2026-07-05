@@ -33,6 +33,7 @@ import {
   getGitHubUserAccessTokenWithHeaders,
 } from '../../services/github-user-access-token';
 import { createProjectMemberOffboardingPreview } from '../../services/project-offboarding-preview';
+import { projectOwnershipTransferRoutes } from './ownership-transfer';
 
 const INVITE_TOKEN_PREFIX = 'sam_inv_';
 const DEFAULT_INVITE_TOKEN_BYTES = 32;
@@ -40,6 +41,7 @@ const DEFAULT_INVITE_EXPIRY_DAYS = 7;
 const DEFAULT_INVITE_MAX_EXPIRY_DAYS = 30;
 
 const projectMembersRoutes = new Hono<{ Bindings: Env }>();
+projectMembersRoutes.route('/', projectOwnershipTransferRoutes);
 
 function parsePositiveEnvInt(value: string | undefined, fallback: number): number {
   const parsed = parseInt(value ?? '', 10);

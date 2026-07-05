@@ -120,6 +120,8 @@ export type {
   ProjectMemberRole,
   ProjectMembersResponse,
   ProjectMemberStatus,
+  ProjectOwnershipTransferRequest,
+  ProjectOwnershipTransferResponse,
   ProjectRepository,
   ProjectRepositoryAccessResponse,
   ProjectRepositoryStatus,

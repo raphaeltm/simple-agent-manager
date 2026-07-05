@@ -174,6 +174,32 @@ describe('requireProjectCapability', () => {
       error: 'FORBIDDEN',
     });
   });
+
+  it('reserves ownership transfer for owners', async () => {
+    const project = makeProject({ userId: 'owner-user' });
+    const ownerDb = makeDb(
+      new Map([
+        [schema.projects, [project]],
+        [schema.projectMembers, [makeMember({ userId: 'owner-user', role: 'owner' })]],
+      ])
+    );
+    const adminDb = makeDb(
+      new Map([
+        [schema.projects, [project]],
+        [schema.projectMembers, [makeMember({ userId: 'admin-user', role: 'admin' })]],
+      ])
+    );
+
+    await expect(
+      requireProjectCapability(ownerDb, 'p1', 'owner-user', 'project:transfer_ownership')
+    ).resolves.toEqual(project);
+    await expect(
+      requireProjectCapability(adminDb, 'p1', 'admin-user', 'project:transfer_ownership')
+    ).rejects.toMatchObject({
+      statusCode: 403,
+      error: 'FORBIDDEN',
+    });
+  });
 });
 
 describe('createOwnerProjectMembership', () => {

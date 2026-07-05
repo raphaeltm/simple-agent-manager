@@ -73,3 +73,8 @@ export const CreateProjectInviteSchema = v.object({
 export const DecideProjectAccessRequestSchema = v.object({
   note: v.optional(v.string()),
 });
+
+export const TransferProjectOwnershipSchema = v.object({
+  toUserId: v.string(),
+  oldOwnerRole: v.optional(v.picklist(['admin'])),
+});
