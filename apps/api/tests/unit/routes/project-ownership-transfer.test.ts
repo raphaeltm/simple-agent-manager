@@ -86,25 +86,18 @@ function makeMember(
 describe('project ownership transfer', () => {
   let app: Hono<{ Bindings: Env }>;
   let selectResults: QueryResult[];
-  let insertedRows: Array<{ table: unknown; values: unknown }>;
-  let updatedRows: Array<{ table: unknown; values: Record<string, unknown> }>;
-  let transactionCalls: number;
-  let updateReturningRows: unknown[][];
+  let batchStatements: Array<{ sql: string; bindings: unknown[] }>;
+  let batchChanges: number[];
 
-  const env = {
-    DATABASE: {} as D1Database,
-    DEFAULT_TASK_AGENT_TYPE: 'claude-code',
-  } as Env;
+  let env: Env;
 
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.currentUserId = 'owner-user';
     mocks.requireProjectCapability.mockResolvedValue(makeProject());
     selectResults = [];
-    insertedRows = [];
-    updatedRows = [];
-    transactionCalls = 0;
-    updateReturningRows = [];
+    batchStatements = [];
+    batchChanges = [1, 1, 1, 1];
 
     const makeSelectBuilder = () => {
       const chain: Record<string, unknown> = {};
@@ -120,37 +113,41 @@ describe('project ownership transfer', () => {
       ) => Promise.resolve(selectResults.shift() ?? []).then(resolve, reject);
       return chain;
     };
+    const makeWritableBuilder = () => {
+      const chain: Record<string, unknown> = {};
+      chain.set = vi.fn(() => chain);
+      chain.values = vi.fn(() => Promise.resolve(undefined));
+      chain.where = vi.fn(() => Promise.resolve(undefined));
+      return chain;
+    };
 
     const mockDb = {
       select: vi.fn(() => makeSelectBuilder()),
-      update: vi.fn((table: unknown) => ({
-        set: vi.fn((values: Record<string, unknown>) => {
-          updatedRows.push({ table, values });
-          const updateChain = {
-            where: vi.fn(() => updateChain),
-            returning: vi.fn(() =>
-              Promise.resolve(updateReturningRows.shift() ?? [{ id: 'updated-row', userId: 'updated-user' }])
-            ),
-            then: (resolve: () => unknown) => Promise.resolve(undefined).then(resolve),
-          };
-          return updateChain;
-        }),
-      })),
-      insert: vi.fn((table: unknown) => ({
-        values: vi.fn((values: unknown) => {
-          insertedRows.push({ table, values });
-          const insertChain = {
-            then: (resolve: () => unknown) => Promise.resolve(undefined).then(resolve),
-          };
-          return insertChain;
-        }),
-      })),
-      transaction: vi.fn(async (callback: (tx: typeof mockDb) => Promise<unknown>) => {
-        transactionCalls += 1;
-        return callback(mockDb);
-      }),
+      update: vi.fn(() => makeWritableBuilder()),
+      insert: vi.fn(() => makeWritableBuilder()),
     };
     (drizzle as unknown as ReturnType<typeof vi.fn>).mockReturnValue(mockDb);
+
+    const database = {
+      prepare: vi.fn((sql: string) => ({
+        bind: vi.fn((...bindings: unknown[]) => {
+          const statement = { sql, bindings };
+          batchStatements.push(statement);
+          return statement as unknown as D1PreparedStatement;
+        }),
+      })),
+      batch: vi.fn(async () =>
+        batchChanges.map((changes) => ({
+          results: [],
+          success: true,
+          meta: { changes },
+        }))
+      ),
+    } as unknown as D1Database;
+    env = {
+      DATABASE: database,
+      DEFAULT_TASK_AGENT_TYPE: 'claude-code',
+    } as Env;
 
     app = new Hono<{ Bindings: Env }>();
     app.onError((err, c) => {
@@ -197,35 +194,29 @@ describe('project ownership transfer', () => {
       'project:transfer_ownership'
     );
 
-    expect(transactionCalls).toBe(1);
-    expect(updatedRows).toEqual([
-      expect.objectContaining({
-        table: schema.projectMembers,
-        values: expect.objectContaining({ role: 'owner', updatedAt: body.completedAt }),
-      }),
-      expect.objectContaining({
-        table: schema.projectMembers,
-        values: expect.objectContaining({ role: 'admin', updatedAt: body.completedAt }),
-      }),
-      expect.objectContaining({
-        table: schema.projects,
-        values: expect.objectContaining({ userId: 'admin-user', updatedAt: body.completedAt }),
-      }),
-    ]);
-    expect(updatedRows[2]?.values).not.toHaveProperty('createdBy');
-    expect(insertedRows).toEqual([
-      expect.objectContaining({
-        table: schema.projectOwnershipTransfers,
-        values: expect.objectContaining({
-          projectId: 'proj-1',
-          fromUserId: 'owner-user',
-          toUserId: 'admin-user',
-          initiatedBy: 'owner-user',
-          completedAt: body.completedAt,
-          createdAt: body.completedAt,
-        }),
-      }),
-    ]);
+    expect(env.DATABASE.batch).toHaveBeenCalledTimes(1);
+    expect(batchStatements).toHaveLength(4);
+    expect(batchStatements[0]).toMatchObject({
+      bindings: ['owner', body.completedAt, 'proj-1', 'admin-user'],
+    });
+    expect(batchStatements[1]).toMatchObject({
+      bindings: ['admin', body.completedAt, 'proj-1', 'owner-user'],
+    });
+    expect(batchStatements[2]).toMatchObject({
+      bindings: ['admin-user', body.completedAt, 'proj-1', 'owner-user'],
+    });
+    expect(batchStatements[2]?.sql).not.toContain('created_by');
+    expect(batchStatements[3]).toMatchObject({
+      bindings: [
+        expect.any(String),
+        'proj-1',
+        'owner-user',
+        'admin-user',
+        'owner-user',
+        body.completedAt,
+        body.completedAt,
+      ],
+    });
   });
 
   it('defaults the old owner role to admin', async () => {
@@ -242,10 +233,7 @@ describe('project ownership transfer', () => {
     );
 
     expect(response.status).toBe(200);
-    expect(updatedRows[1]).toMatchObject({
-      table: schema.projectMembers,
-      values: expect.objectContaining({ role: 'admin' }),
-    });
+    expect(batchStatements[1]?.bindings[0]).toBe('admin');
   });
 
   it('rejects transfer to a non-member', async () => {
@@ -254,8 +242,7 @@ describe('project ownership transfer', () => {
     const response = await transfer();
 
     expect(response.status).toBe(404);
-    expect(transactionCalls).toBe(0);
-    expect(insertedRows).toHaveLength(0);
+    expect(env.DATABASE.batch).not.toHaveBeenCalled();
   });
 
   it('rejects transfer to an inactive member', async () => {
@@ -264,8 +251,7 @@ describe('project ownership transfer', () => {
     const response = await transfer();
 
     expect(response.status).toBe(404);
-    expect(transactionCalls).toBe(0);
-    expect(insertedRows).toHaveLength(0);
+    expect(env.DATABASE.batch).not.toHaveBeenCalled();
   });
 
   it.each(['viewer', 'maintainer'] as const)('rejects transfer to an active %s', async (role) => {
@@ -277,8 +263,7 @@ describe('project ownership transfer', () => {
     await expect(response.json()).resolves.toMatchObject({
       error: 'BAD_REQUEST',
     });
-    expect(transactionCalls).toBe(0);
-    expect(insertedRows).toHaveLength(0);
+    expect(env.DATABASE.batch).not.toHaveBeenCalled();
   });
 
   it('rejects transfer by a non-owner', async () => {
@@ -300,12 +285,12 @@ describe('project ownership transfer', () => {
       'admin-user',
       'project:transfer_ownership'
     );
-    expect(transactionCalls).toBe(0);
+    expect(env.DATABASE.batch).not.toHaveBeenCalled();
   });
 
-  it('rolls back when transfer state changes during the transaction', async () => {
+  it('returns conflict when transfer state changes before the batch completes', async () => {
     selectResults = [[makeMember('admin-user', 'admin')]];
-    updateReturningRows = [[]];
+    batchChanges = [0, 1, 1, 1];
 
     const response = await transfer();
 
@@ -313,8 +298,7 @@ describe('project ownership transfer', () => {
     await expect(response.json()).resolves.toMatchObject({
       error: 'CONFLICT',
     });
-    expect(transactionCalls).toBe(1);
-    expect(insertedRows).toHaveLength(0);
+    expect(env.DATABASE.batch).toHaveBeenCalledTimes(1);
   });
 
   it('allows the old owner to be previewed for offboarding after transfer', async () => {
