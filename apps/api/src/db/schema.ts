@@ -362,6 +362,7 @@ export const projectMembers = sqliteTable(
     role: text('role').notNull().default('owner'),
     status: text('status').notNull().default('active'),
     invitedBy: text('invited_by').references(() => users.id, { onDelete: 'set null' }),
+    removedAt: text('removed_at'),
     createdAt: text('created_at')
       .notNull()
       .default(sql`CURRENT_TIMESTAMP`),

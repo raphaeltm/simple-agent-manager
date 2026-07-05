@@ -76,6 +76,7 @@ function makeMember(
     role,
     status: 'active',
     invitedBy: role === 'owner' ? null : 'owner-user',
+    removedAt: null,
     createdAt: '2026-07-05T00:00:00.000Z',
     updatedAt: '2026-07-05T00:00:00.000Z',
   };
@@ -277,7 +278,7 @@ describe('project member offboarding preview', () => {
       expect.anything(),
       'proj-1',
       'owner-user',
-      'project:delete'
+      'member:manage'
     );
     expect(insertedRows).toHaveLength(0);
   });

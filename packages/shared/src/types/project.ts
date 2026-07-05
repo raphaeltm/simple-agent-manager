@@ -396,6 +396,35 @@ export interface ProjectMemberOffboardingPreviewResponse {
   resources: ProjectMemberOffboardingResourcePreview[];
 }
 
+export interface ProjectMemberOffboardingApplyActionSelection {
+  resourceKind: ProjectMemberOffboardingResourceKind;
+  resourceId: string;
+  action: ProjectMemberOffboardingAction;
+}
+
+export interface ProjectMemberOffboardingApplyRequest {
+  planId: string;
+  actions: ProjectMemberOffboardingApplyActionSelection[];
+  finalMemberStatus: Extract<ProjectMemberStatus, 'removed'>;
+}
+
+export interface ProjectMemberOffboardingResourceResult {
+  resourceKind: ProjectMemberOffboardingResourceKind;
+  resourceId: string;
+  action: ProjectMemberOffboardingAction;
+  status: ProjectMemberOffboardingResourceStatus;
+  blocksRemoval: boolean;
+  message: string | null;
+}
+
+export interface ProjectMemberOffboardingApplyResponse {
+  projectId: string;
+  memberUserId: string;
+  status: ProjectMemberStatus;
+  appliedAt: string;
+  resourceResults: ProjectMemberOffboardingResourceResult[];
+}
+
 export type CredentialAttributionConsumerKind = 'agent' | 'compute';
 export type CredentialAttributionSource = 'project' | 'personal' | 'platform' | 'unknown';
 export type CredentialAttributionResourceKind = 'trigger';

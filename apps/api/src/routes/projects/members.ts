@@ -22,6 +22,7 @@ import { getUserId } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { requireProjectAccess, requireProjectCapability } from '../../middleware/project-auth';
 import {
+  ApplyProjectMemberOffboardingSchema,
   CreateProjectInviteSchema,
   DecideProjectAccessRequestSchema,
   jsonValidator,
@@ -32,6 +33,7 @@ import {
   getGitHubUserAccessTokenForOwner,
   getGitHubUserAccessTokenWithHeaders,
 } from '../../services/github-user-access-token';
+import { applyProjectMemberOffboarding } from '../../services/project-offboarding-apply';
 import { createProjectMemberOffboardingPreview } from '../../services/project-offboarding-preview';
 import { projectOwnershipTransferRoutes } from './ownership-transfer';
 
@@ -388,7 +390,7 @@ projectMembersRoutes.post('/:id/members/:userId/offboarding-preview', async (c) 
   const projectId = c.req.param('id');
   const memberUserId = c.req.param('userId');
   const db = drizzle(c.env.DATABASE, { schema });
-  const project = await requireProjectCapability(db, projectId, requesterId, 'project:delete');
+  const project = await requireProjectCapability(db, projectId, requesterId, 'member:manage');
 
   const preview = await createProjectMemberOffboardingPreview({
     db,
@@ -401,6 +403,32 @@ projectMembersRoutes.post('/:id/members/:userId/offboarding-preview', async (c) 
 
   return c.json(preview);
 });
+
+projectMembersRoutes.post(
+  '/:id/members/:userId/offboarding-apply',
+  jsonValidator(ApplyProjectMemberOffboardingSchema),
+  async (c) => {
+    const requesterId = getUserId(c);
+    const projectId = c.req.param('id');
+    const memberUserId = c.req.param('userId');
+    const db = drizzle(c.env.DATABASE, { schema });
+    const project = await requireProjectCapability(db, projectId, requesterId, 'member:manage');
+    const body = c.req.valid('json');
+
+    const response = await applyProjectMemberOffboarding({
+      db,
+      project,
+      memberUserId,
+      actorUserId: requesterId,
+      planId: body.planId,
+      actions: body.actions,
+      finalMemberStatus: body.finalMemberStatus,
+      defaultAgentType: c.env.DEFAULT_TASK_AGENT_TYPE || 'opencode',
+    });
+
+    return c.json(response);
+  }
+);
 
 projectMembersRoutes.post(
   '/:id/invite-links',
