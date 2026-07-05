@@ -34,19 +34,19 @@ resolved or intentionally deferred.
 
 ## Implementation Checklist
 
-- [ ] Add shared request/response types for offboarding apply.
-- [ ] Add Valibot request validation for `planId`, `actions`, and
+- [x] Add shared request/response types for offboarding apply.
+- [x] Add Valibot request validation for `planId`, `actions`, and
   `finalMemberStatus`.
-- [ ] Implement an offboarding apply service that validates plan ownership,
+- [x] Implement an offboarding apply service that validates plan ownership,
   expiry, status, resource actions, freshness against current resource
   enumeration, and owner-removal constraints.
-- [ ] Execute resource actions for triggers, task trees, nodes, deployment
+- [x] Execute resource actions for triggers, task trees, nodes, deployment
   environments, and project attachments using project-scoped predicates.
-- [ ] Persist `selected_action`, per-resource `status`, and plan `applied_at`.
-- [ ] Remove the member only after successful non-deferred resource handling.
-- [ ] Add `POST /api/projects/:id/members/:userId/offboarding-apply` requiring
+- [x] Persist `selected_action`, per-resource `status`, and plan `applied_at`.
+- [x] Remove the member only after successful non-deferred resource handling.
+- [x] Add `POST /api/projects/:id/members/:userId/offboarding-apply` requiring
   `member:manage`.
-- [ ] Add vertical-slice tests for happy path, reattach trigger, deferred node,
+- [x] Add vertical-slice tests for happy path, reattach trigger, deferred node,
   expired/stale/owner/unresolved rejection, project-scoped writes, and audit
   rows.
 

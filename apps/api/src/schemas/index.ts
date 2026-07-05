@@ -16,6 +16,7 @@ export {
 // Project schemas
 export {
   AddProjectRepositorySchema,
+  ApplyProjectMemberOffboardingSchema,
   CreateProjectInviteSchema,
   CreateProjectSchema,
   DecideProjectAccessRequestSchema,
