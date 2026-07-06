@@ -15,6 +15,7 @@ This is a spike. Do not expose a user-facing production setup flow, and do not m
 - Anthropic docs state `claude setup-token` prints the OAuth token to the terminal and does not save it anywhere.
 - OpenAI Codex docs support `codex login --device-auth`, file-backed credentials under `CODEX_HOME`, and `cli_auth_credentials_store = "file"`.
 - Existing workspace terminals are workspace-scoped and should not be reused directly for setup sessions.
+- Initial staging deploy proved the Sandbox image/CLI install path builds, but the admin probe routes stayed disabled because the deploy pipeline did not pass `SANDBOX_*` GitHub environment variables into generated Wrangler env config.
 
 ## Implementation Checklist
 
@@ -23,7 +24,8 @@ This is a spike. Do not expose a user-facing production setup flow, and do not m
 - [x] Add admin-only Sandbox probe endpoints to test terminal capability and CLI setup prerequisites without exposing regular-user routes.
 - [x] Add focused tests or static assertions for the new admin-only probe routes.
 - [x] Run focused local validation.
-- [ ] Deploy the branch to staging through `deploy-staging.yml`.
+- [x] Deploy the branch to staging through `deploy-staging.yml` and confirm the Cloudflare deploy job succeeds.
+- [x] Add deploy-pipeline support for staging `SANDBOX_*` Worker vars.
 - [ ] Exercise staging probes and record exact results.
 - [ ] Upload a findings report to the SAM library.
 

@@ -66,6 +66,14 @@ function ensureTomlMap(value: unknown, path: string): TOML.JsonMap {
   return value as TOML.JsonMap;
 }
 
+function optionalWorkerVars(names: string[]): Record<string, string> {
+  return Object.fromEntries(
+    names
+      .map((name) => [name, process.env[name]] as const)
+      .filter((entry): entry is readonly [string, string] => typeof entry[1] === 'string')
+  );
+}
+
 // ============================================================================
 // Pulumi
 // ============================================================================
@@ -349,6 +357,11 @@ export function generateApiWorkerEnv(
       ...(process.env.HETZNER_BASE_IMAGE
         ? { HETZNER_BASE_IMAGE: process.env.HETZNER_BASE_IMAGE }
         : {}),
+      ...optionalWorkerVars([
+        'SANDBOX_ENABLED',
+        'SANDBOX_SETUP_PROBE_TIMEOUT_MS',
+        'SANDBOX_PROBE_OUTPUT_MAX_CHARS',
+      ]),
       // AI Gateway ID matches the resource prefix (created by configure-ai-gateway.sh)
       AI_GATEWAY_ID: DEPLOYMENT_CONFIG.prefix,
       // Analytics Engine dataset — derived from prefix so forks don't co-mingle data

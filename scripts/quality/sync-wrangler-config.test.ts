@@ -108,6 +108,21 @@ describe('sync wrangler config', () => {
     expect(envConfig.vars).toMatchObject({ ARTIFACTS_ENABLED: 'true' });
   });
 
+  it('passes opt-in sandbox probe vars from the deploy environment', () => {
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+    vi.stubEnv('SANDBOX_ENABLED', 'true');
+    vi.stubEnv('SANDBOX_SETUP_PROBE_TIMEOUT_MS', '20000');
+    vi.stubEnv('SANDBOX_PROBE_OUTPUT_MAX_CHARS', '8000');
+
+    const envConfig = generateApiWorkerEnv({}, outputs, 'prod', false, false);
+
+    expect(envConfig.vars).toMatchObject({
+      SANDBOX_ENABLED: 'true',
+      SANDBOX_SETUP_PROBE_TIMEOUT_MS: '20000',
+      SANDBOX_PROBE_OUTPUT_MAX_CHARS: '8000',
+    });
+  });
+
   it('fails when Artifacts is enabled without a top-level binding declaration', () => {
     vi.stubEnv('RESOURCE_PREFIX', 's123abc');
 
