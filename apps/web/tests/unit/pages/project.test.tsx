@@ -87,7 +87,17 @@ vi.mock('../../../src/components/AppShell', () => ({
 
 import { Project } from '../../../src/pages/Project';
 import { ProjectActivity } from '../../../src/pages/ProjectActivity';
-import { ProjectSettings } from '../../../src/pages/ProjectSettings';
+import {
+  ProjectSettings,
+  ProjectSettingsAccess,
+  ProjectSettingsAgents,
+  ProjectSettingsConnections,
+  ProjectSettingsDeploy,
+  ProjectSettingsGeneral,
+  ProjectSettingsIndexRedirect,
+  ProjectSettingsInfrastructure,
+  ProjectSettingsRuntime,
+} from '../../../src/pages/ProjectSettings';
 import { ProjectTasks } from '../../../src/pages/ProjectTasks';
 
 function renderProjectPage(path = '/projects/proj-1/tasks') {
@@ -98,7 +108,16 @@ function renderProjectPage(path = '/projects/proj-1/tasks') {
           <Route path="/projects/:id" element={<Project />}>
             <Route index element={<Navigate to="tasks" replace />} />
             <Route path="tasks" element={<ProjectTasks />} />
-            <Route path="settings" element={<ProjectSettings />} />
+            <Route path="settings" element={<ProjectSettings />}>
+              <Route index element={<ProjectSettingsIndexRedirect />} />
+              <Route path="general" element={<ProjectSettingsGeneral />} />
+              <Route path="access" element={<ProjectSettingsAccess />} />
+              <Route path="connections" element={<ProjectSettingsConnections />} />
+              <Route path="agents" element={<ProjectSettingsAgents />} />
+              <Route path="infrastructure" element={<ProjectSettingsInfrastructure />} />
+              <Route path="runtime" element={<ProjectSettingsRuntime />} />
+              <Route path="deploy" element={<ProjectSettingsDeploy />} />
+            </Route>
             <Route path="activity" element={<ProjectActivity />} />
           </Route>
         </Routes>
@@ -315,7 +334,7 @@ describe('Project page', () => {
       files: [],
     });
 
-    renderProjectPage('/projects/proj-1/settings');
+    renderProjectPage('/projects/proj-1/settings/runtime');
 
     fireEvent.change(await screen.findByLabelText('Runtime env key'), {
       target: { value: 'API_TOKEN' },

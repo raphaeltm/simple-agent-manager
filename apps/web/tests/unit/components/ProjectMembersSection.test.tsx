@@ -146,7 +146,7 @@ describe('ProjectMembersSection', () => {
               source: 'personal',
               owner: { id: 'owner-user', name: 'Owner', email: 'owner@example.com', avatarUrl: null },
               projectCredential: null,
-              fixHref: '/projects/proj-1/settings',
+              fixHref: '/projects/proj-1/settings/connections',
               warning: "This runs on Owner's personal key.",
             },
           ],

@@ -235,7 +235,7 @@ export async function buildCredentialAttributionForTriggers(input: {
     const owner = users.get(trigger.userId) ?? null;
     const agentTarget = inferAgentTarget(trigger, project, defaultAgentType);
     const computeTarget = inferComputeTarget(trigger, project);
-    const fixHref = `/projects/${project.id}/settings`;
+    const fixHref = `/projects/${project.id}/settings/connections`;
     const agentCoverage = findCoverage(coverage, 'agent', agentTarget);
     const computeCoverage = findCoverage(coverage, 'compute', computeTarget);
 

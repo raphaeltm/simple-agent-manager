@@ -528,7 +528,7 @@ gcpDeployCallbackRoute.get(
     const db = drizzle(c.env.DATABASE, { schema });
     await requireProjectCapability(db, projectId, sessionUserId, 'infra:manage');
 
-    const appUrl = `https://app.${c.env.BASE_DOMAIN}/projects/${projectId}/settings`;
+    const appUrl = `https://app.${c.env.BASE_DOMAIN}/projects/${projectId}/settings/deploy`;
 
     // Exchange auth code for access token
     const redirectUri = `https://api.${c.env.BASE_DOMAIN}/api/deployment/gcp/callback`;

@@ -38,7 +38,7 @@ function makeTrigger(): TriggerResponse {
           source: 'personal',
           owner: { id: 'coworker', name: 'Raphael', email: 'r@example.com', avatarUrl: null },
           projectCredential: null,
-          fixHref: '/projects/proj-1/settings',
+          fixHref: '/projects/proj-1/settings/connections',
           warning: "This runs on Raphael's personal key.",
         },
       ],

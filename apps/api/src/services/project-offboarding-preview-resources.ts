@@ -391,7 +391,7 @@ async function addProjectAttachmentResources(input: {
       resourceId: attachment.id,
       title: row.configurationName,
       subtitle: `${attachment.consumerKind}:${attachment.consumerTarget}`,
-      href: `/projects/${input.projectId}/settings`,
+      href: `/projects/${input.projectId}/settings/connections`,
       credentialSourceBefore: 'project',
       attributionUserIdBefore: attachment.userId,
       attributionProjectIdBefore: input.projectId,

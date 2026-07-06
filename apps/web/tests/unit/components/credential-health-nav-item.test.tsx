@@ -44,7 +44,7 @@ describe('CredentialHealthNavItem', () => {
               source: 'personal',
               owner: { id: 'coworker', name: 'Coworker', email: 'co@example.com', avatarUrl: null },
               projectCredential: null,
-              fixHref: '/projects/proj-1/settings',
+              fixHref: '/projects/proj-1/settings/connections',
               warning: "This runs on Coworker's personal key.",
             },
             {
@@ -54,7 +54,7 @@ describe('CredentialHealthNavItem', () => {
               source: 'personal',
               owner: { id: 'coworker', name: 'Coworker', email: 'co@example.com', avatarUrl: null },
               projectCredential: null,
-              fixHref: '/projects/proj-1/settings',
+              fixHref: '/projects/proj-1/settings/connections',
               warning: "This runs on Coworker's personal key.",
             },
           ],

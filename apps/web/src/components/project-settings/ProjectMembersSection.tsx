@@ -135,7 +135,7 @@ function MemberRow({
           {member.user?.email ?? member.userId}
         </div>
       </div>
-      <div className="flex flex-wrap items-center gap-1.5 sm:justify-end">
+      <div className="flex flex-col items-start gap-1.5 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
         <span className="text-[0.6875rem] px-1.5 py-px rounded-sm bg-inset text-fg-muted">
           {member.role}
         </span>

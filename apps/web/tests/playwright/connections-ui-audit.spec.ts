@@ -467,7 +467,7 @@ async function gotoConnections(page: import('@playwright/test').Page) {
 }
 
 async function gotoProjectSettings(page: import('@playwright/test').Page) {
-  await page.goto(`/projects/${PROJECT_ID}/settings`);
+  await page.goto(`/projects/${PROJECT_ID}/settings/connections`);
   await page.waitForSelector('text=Connections', {
     state: 'visible',
     timeout: 20000,

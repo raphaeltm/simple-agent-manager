@@ -233,7 +233,7 @@ async function runSliceEAudit(page: Page, theme: 'dark' | 'light') {
   await screenshot(page, `slice-e-trigger-form-${suffix}`);
   await assertNoOverflow(page);
 
-  await visitAndCapture(page, `/projects/${PROJECT_ID}/settings`, `slice-e-project-settings-form-${suffix}`, theme);
+  await visitAndCapture(page, `/projects/${PROJECT_ID}/settings/general`, `slice-e-project-settings-form-${suffix}`, theme);
   await visitAndCapture(page, `/projects/${PROJECT_ID}/notifications`, `slice-e-notifications-many-${suffix}`, theme);
 
   await visitAndCapture(page, `/projects/${PROJECT_ID}/agent-context`, `slice-e-agent-context-overview-${suffix}`, theme);

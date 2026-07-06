@@ -351,7 +351,7 @@ async function setupMocks(
 }
 
 async function goToMembers(page: Page) {
-  await page.goto('/projects/proj-members-1/settings');
+  await page.goto('/projects/proj-members-1/settings/access');
   const heading = page.getByRole('heading', { name: 'Members', exact: true });
   await expect(heading).toBeVisible({ timeout: 12000 });
   await heading.scrollIntoViewIfNeeded();

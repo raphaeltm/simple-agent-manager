@@ -87,6 +87,14 @@ vi.mock('../../src/pages/ProjectSessions', () => ({
 
 vi.mock('../../src/pages/ProjectSettings', () => ({
   ProjectSettings: () => <div data-testid="project-settings-page" />,
+  ProjectSettingsAccess: () => <div data-testid="project-settings-access-page" />,
+  ProjectSettingsAgents: () => <div data-testid="project-settings-agents-page" />,
+  ProjectSettingsConnections: () => <div data-testid="project-settings-connections-page" />,
+  ProjectSettingsDeploy: () => <div data-testid="project-settings-deploy-page" />,
+  ProjectSettingsGeneral: () => <div data-testid="project-settings-general-page" />,
+  ProjectSettingsIndexRedirect: () => <div data-testid="project-settings-index-redirect" />,
+  ProjectSettingsInfrastructure: () => <div data-testid="project-settings-infrastructure-page" />,
+  ProjectSettingsRuntime: () => <div data-testid="project-settings-runtime-page" />,
 }));
 
 vi.mock('../../src/pages/ProjectActivity', () => ({

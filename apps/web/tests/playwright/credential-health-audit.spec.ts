@@ -86,7 +86,7 @@ function makeTrigger(overrides: Record<string, unknown> = {}) {
           source: 'personal',
           owner: coworker,
           projectCredential: null,
-          fixHref: `/projects/${PROJECT_ID}/settings`,
+          fixHref: `/projects/${PROJECT_ID}/settings/connections`,
           warning: "This runs on Coworker's personal key.",
         },
         {
@@ -96,7 +96,7 @@ function makeTrigger(overrides: Record<string, unknown> = {}) {
           source: 'personal',
           owner: coworker,
           projectCredential: null,
-          fixHref: `/projects/${PROJECT_ID}/settings`,
+          fixHref: `/projects/${PROJECT_ID}/settings/connections`,
           warning: "This runs on Coworker's personal key.",
         },
       ],
@@ -156,7 +156,7 @@ const credentialHealth = {
             credentialName: 'Shared Hetzner key',
             owner: coworker,
           },
-          fixHref: `/projects/${PROJECT_ID}/settings`,
+          fixHref: `/projects/${PROJECT_ID}/settings/connections`,
           warning: null,
         },
       ],
@@ -335,7 +335,7 @@ test.describe('Credential attribution health — desktop', () => {
 
   test('member settings show non-blocking sharing checklist', async ({ page }) => {
     await setupMocks(page);
-    await page.goto(`/projects/${PROJECT_ID}/settings`);
+    await page.goto(`/projects/${PROJECT_ID}/settings/access`);
     await expect(page.getByText('Credential checklist before sharing')).toBeVisible();
     await expect(page.getByText('Invite and approval can continue.')).toBeVisible();
     await screenshot(page, 'credential-health-member-warning-desktop');
@@ -365,7 +365,7 @@ test.describe('Credential attribution health — mobile', () => {
     await screenshot(page, 'credential-health-trigger-warning-mobile');
     await assertNoOverflow(page);
 
-    await page.goto(`/projects/${PROJECT_ID}/settings`);
+    await page.goto(`/projects/${PROJECT_ID}/settings/access`);
     await expect(page.getByText('Credential checklist before sharing')).toBeVisible();
     await screenshot(page, 'credential-health-member-warning-mobile');
     await assertNoOverflow(page);

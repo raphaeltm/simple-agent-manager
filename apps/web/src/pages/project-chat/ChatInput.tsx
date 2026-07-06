@@ -475,7 +475,7 @@ function NoAgentsNotice({ projectId }: Readonly<{ projectId: string }>) {
       </div>
       <button
         type="button"
-        onClick={() => navigate(`/projects/${projectId}/settings`)}
+        onClick={() => navigate(`/projects/${projectId}/settings/agents`)}
         className="min-h-[44px] rounded-md border border-border-default bg-page px-3 py-2 text-sm text-fg-primary hover:border-accent/60"
       >
         Settings &gt; Agents

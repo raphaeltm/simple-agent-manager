@@ -186,7 +186,7 @@ async function setupMocks(
 // ---------------------------------------------------------------------------
 
 async function goToSettings(page: Page) {
-  await page.goto('/projects/proj-test-1/settings');
+  await page.goto('/projects/proj-test-1/settings/infrastructure');
   await page.waitForSelector('text=Scaling & Scheduling', { timeout: 12000 });
 }
 

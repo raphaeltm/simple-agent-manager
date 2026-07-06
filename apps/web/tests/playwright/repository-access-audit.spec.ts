@@ -202,7 +202,7 @@ async function setupMocks(
 // ---------------------------------------------------------------------------
 
 async function goToSettings(page: Page) {
-  await page.goto('/projects/proj-test-1/settings');
+  await page.goto('/projects/proj-test-1/settings/access');
   await page.waitForSelector('text=Repository Access', { timeout: 12000 });
 }
 

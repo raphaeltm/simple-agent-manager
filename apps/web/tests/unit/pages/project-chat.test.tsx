@@ -192,6 +192,7 @@ function renderProjectChat(path = `/projects/${PROJECT_ID}/chat`) {
           <Route path="/projects/:id/chat" element={<ProjectChat />} />
           <Route path="/projects/:id/chat/:sessionId" element={<ProjectChat />} />
           <Route path="/projects/:id/settings" element={<div data-testid="settings-page">Settings</div>} />
+          <Route path="/projects/:id/settings/agents" element={<div data-testid="settings-page">Settings</div>} />
         </Routes>
       </ProjectContext.Provider>
     </MemoryRouter>

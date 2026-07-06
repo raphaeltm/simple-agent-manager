@@ -44,7 +44,17 @@ import { ProjectLibrary } from './pages/ProjectLibrary';
 import { ProjectNotifications } from './pages/ProjectNotifications';
 import { ProjectProfiles } from './pages/ProjectProfiles';
 import { Projects } from './pages/Projects';
-import { ProjectSettings } from './pages/ProjectSettings';
+import {
+  ProjectSettings,
+  ProjectSettingsAccess,
+  ProjectSettingsAgents,
+  ProjectSettingsConnections,
+  ProjectSettingsDeploy,
+  ProjectSettingsGeneral,
+  ProjectSettingsIndexRedirect,
+  ProjectSettingsInfrastructure,
+  ProjectSettingsRuntime,
+} from './pages/ProjectSettings';
 import { ProjectSkills } from './pages/ProjectSkills';
 import { ProjectTriggerDetail } from './pages/ProjectTriggerDetail';
 import { ProjectTriggers } from './pages/ProjectTriggers';
@@ -127,7 +137,16 @@ export default function App() {
                     <Route path="ideas/:taskId" element={<IdeaDetailPage />} />
                     <Route path="tasks" element={<Navigate to="../ideas" replace />} />
                     <Route path="tasks/:taskId" element={<TaskDetail />} />
-                    <Route path="settings" element={<ProjectSettings />} />
+                    <Route path="settings" element={<ProjectSettings />}>
+                      <Route index element={<ProjectSettingsIndexRedirect />} />
+                      <Route path="general" element={<ProjectSettingsGeneral />} />
+                      <Route path="access" element={<ProjectSettingsAccess />} />
+                      <Route path="connections" element={<ProjectSettingsConnections />} />
+                      <Route path="agents" element={<ProjectSettingsAgents />} />
+                      <Route path="infrastructure" element={<ProjectSettingsInfrastructure />} />
+                      <Route path="runtime" element={<ProjectSettingsRuntime />} />
+                      <Route path="deploy" element={<ProjectSettingsDeploy />} />
+                    </Route>
                     <Route path="activity" element={<ProjectActivity />} />
                     <Route path="notifications" element={<ProjectNotifications />} />
                     <Route path="triggers" element={<ProjectTriggers />} />

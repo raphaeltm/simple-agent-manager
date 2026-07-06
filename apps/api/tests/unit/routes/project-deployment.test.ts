@@ -681,7 +681,7 @@ describe('GET /api/deployment/gcp/callback (static URI)', () => {
     const location = res.headers.get('Location')!;
 
     // Redirect goes to the project from KV state, not from URL
-    expect(location).toContain('/projects/proj-from-state/settings');
+    expect(location).toContain('/projects/proj-from-state/settings/deploy');
     expect(location).toContain('gcp_deploy_setup=ready');
 
     // Token exchange uses the static redirect URI
