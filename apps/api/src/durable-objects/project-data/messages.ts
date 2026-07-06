@@ -4,6 +4,8 @@
 import { buildSafeFtsQuery } from '../../lib/fts5';
 import { log } from '../../lib/logger';
 import {
+  type CompactMessageOptions,
+  DEFAULT_DOCUMENT_CARD_RAW_OUTPUT_MAX_BYTES,
   parseChatMessageRow,
   parseChatMessageRowCompact,
   parseCount,
@@ -33,6 +35,16 @@ export class SessionMessageLimitExceededError extends Error {
 function resolveMaxMessagesPerSession(env: Env): number {
   const parsed = Number.parseInt(env.MAX_MESSAGES_PER_SESSION || '', 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_MAX_MESSAGES_PER_SESSION;
+}
+
+export function resolveCompactMessageOptions(env: Env): CompactMessageOptions {
+  const parsed = Number.parseInt(env.DOCUMENT_CARD_RAW_OUTPUT_MAX_BYTES || '', 10);
+  return {
+    documentCardRawOutputMaxBytes:
+      Number.isFinite(parsed) && parsed > 0
+        ? parsed
+        : DEFAULT_DOCUMENT_CARD_RAW_OUTPUT_MAX_BYTES,
+  };
 }
 
 /**
@@ -335,7 +347,8 @@ export function getMessages(
   before: number | null = null,
   roles?: string[],
   compact: boolean = false,
-  order: 'asc' | 'desc' = 'desc'
+  order: 'asc' | 'desc' = 'desc',
+  compactOptions?: CompactMessageOptions
 ): { messages: Record<string, unknown>[]; hasMore: boolean } {
   let query =
     'SELECT id, session_id, role, content, tool_metadata, created_at, sequence FROM chat_messages WHERE session_id = ?';
@@ -386,10 +399,11 @@ export function getMessages(
 
   const trimmedRows = candidateRows.slice(0, safeCount);
 
-  const rowParser = compact ? parseChatMessageRowCompact : parseChatMessageRow;
   const orderedRows = order === 'desc' ? trimmedRows.reverse() : trimmedRows;
   return {
-    messages: orderedRows.map((row) => rowParser(row)),
+    messages: orderedRows.map((row) =>
+      compact ? parseChatMessageRowCompact(row, compactOptions) : parseChatMessageRow(row)
+    ),
     hasMore,
   };
 }

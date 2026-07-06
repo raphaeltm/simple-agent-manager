@@ -87,6 +87,76 @@ describe('stripToolMetadataContent', () => {
     expect(result.contentSize).toBeGreaterThan(100_000);
     expect(result.toolCallId).toBe('tc-big');
   });
+
+  it('preserves a document-card rawOutput payload while stripping compact content', () => {
+    const payload = {
+      fileId: '01KWV8QZ0PM59JS9YQSPVTCMCJ',
+      filename: 'sam-architecture-comprehensive.html',
+      mimeType: 'text/html; charset=utf-8',
+      sizeBytes: 51849,
+      caption: 'Newest comprehensive SAM architecture webpage.',
+    };
+    const meta = {
+      toolCallId: 'tc-display',
+      title: 'sam-mcp/display_from_library',
+      kind: 'other',
+      status: 'completed',
+      content: [
+        {
+          type: 'content',
+          content: { type: 'text', text: JSON.stringify(payload, null, 2) },
+        },
+      ],
+    };
+
+    const result = stripToolMetadataContent(meta) as Record<string, unknown>;
+
+    expect(result.content).toBeUndefined();
+    expect(result.contentSize).toBeGreaterThan(0);
+    expect(result.title).toBe('sam-mcp/display_from_library');
+    const rawOutput = result.rawOutput as Array<{ type: string; text: string }>;
+    expect(rawOutput).toHaveLength(1);
+    expect(rawOutput[0]?.type).toBe('text');
+    expect(JSON.parse(rawOutput[0]?.text ?? '{}')).toEqual(payload);
+  });
+
+  it('does not synthesize rawOutput for non-document tool content', () => {
+    const meta = {
+      toolCallId: 'tc-shell',
+      title: 'exec_command',
+      kind: 'other',
+      status: 'completed',
+      content: [{ type: 'content', text: '{"fileId":"not-a-library-card"}' }],
+    };
+
+    const result = stripToolMetadataContent(meta) as Record<string, unknown>;
+
+    expect(result.content).toBeUndefined();
+    expect(result.contentSize).toBeGreaterThan(0);
+    expect(result.rawOutput).toBeUndefined();
+  });
+
+  it('honors the document-card rawOutput byte budget', () => {
+    const meta = {
+      toolCallId: 'tc-display',
+      title: 'sam-mcp/display_from_library',
+      status: 'completed',
+      content: [
+        {
+          type: 'content',
+          text: '{"fileId":"01KWV8QZ0PM59JS9YQSPVTCMCJ","filename":"sam-architecture-comprehensive.html"}',
+        },
+      ],
+    };
+
+    const result = stripToolMetadataContent(meta, {
+      documentCardRawOutputMaxBytes: 16,
+    }) as Record<string, unknown>;
+
+    expect(result.content).toBeUndefined();
+    expect(result.contentSize).toBeGreaterThan(0);
+    expect(result.rawOutput).toBeUndefined();
+  });
 });
 
 describe('parseChatMessageRowCompact', () => {

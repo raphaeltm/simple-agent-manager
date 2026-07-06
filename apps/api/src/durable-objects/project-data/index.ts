@@ -149,7 +149,8 @@ export class ProjectData extends DurableObject<Env> {
   }
 
   async getMessages(sessionId: string, limit: number = 1000, before: number | null = null, roles?: string[], compact: boolean = false, order: 'asc' | 'desc' = 'desc') {
-    return messages.getMessages(this.sql, sessionId, limit, before, roles, compact, order);
+    const compactOptions = compact ? messages.resolveCompactMessageOptions(this.env) : undefined;
+    return messages.getMessages(this.sql, sessionId, limit, before, roles, compact, order, compactOptions);
   }
 
   async getMessageToolContent(sessionId: string, messageId: string): Promise<unknown[] | null> {

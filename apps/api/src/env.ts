@@ -271,6 +271,7 @@ export interface Env {
   CACHED_COMMANDS_MAX_DESC_LENGTH?: string;
   MAX_SESSIONS_PER_PROJECT?: string;
   MAX_MESSAGES_PER_SESSION?: string;
+  DOCUMENT_CARD_RAW_OUTPUT_MAX_BYTES?: string; // Max document-card rawOutput bytes preserved in compact message metadata (default: 16384)
   MESSAGE_SIZE_THRESHOLD?: string;
   ACTIVITY_RETENTION_DAYS?: string;
   SESSION_IDLE_TIMEOUT_MINUTES?: string;

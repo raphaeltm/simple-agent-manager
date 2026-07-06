@@ -36,6 +36,8 @@ export {
 export { parseInboxMessageRow, parseMailboxMessageRow } from './row-schemas/mailbox';
 export { parseMaterializationCheck, parseMaterializationToken, parseRowid, parseSessionId } from './row-schemas/materialization';
 export {
+  type CompactMessageOptions,
+  DEFAULT_DOCUMENT_CARD_RAW_OUTPUT_MAX_BYTES,
   parseChatMessageRow,
   parseChatMessageRowCompact,
   parseSearchResultRow,
