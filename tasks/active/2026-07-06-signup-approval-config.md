@@ -40,6 +40,10 @@ Turning approval off should let pending users pass the gate because the gate is 
 - [x] Local validation and specialist reviews are completed.
 - [ ] Staging verification, PR, CI, and merge steps are completed.
 
+## Validation
+
+- Staging deploy `28830181609` completed successfully: deploy, D1 backup, `0087_platform_settings.sql` migration, post-migration data-integrity check, health check, and smoke tests all passed.
+
 ## References
 
 - Idea `01KWWQZJHWD8YRV913D4T0HWFQ`
