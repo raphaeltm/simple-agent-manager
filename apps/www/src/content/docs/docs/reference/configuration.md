@@ -261,15 +261,16 @@ SAM loads OpenCode Zen and OpenCode Go model choices through the authenticated m
 
 ## Durable Object Limits
 
-| Variable                       | Default  | Description                        |
-| ------------------------------ | -------- | ---------------------------------- |
-| `MAX_SESSIONS_PER_PROJECT`     | `10000`  | Max chat sessions per project      |
-| `MAX_MESSAGES_PER_SESSION`     | `100000` | Max messages per chat session      |
-| `MESSAGE_SIZE_THRESHOLD`       | `102400` | Max message size in bytes          |
-| `ACTIVITY_RETENTION_DAYS`      | `90`     | Days to retain activity events     |
-| `SESSION_IDLE_TIMEOUT_MINUTES` | `60`     | Idle session timeout               |
-| `SESSION_ACTIVITY_STALE_THRESHOLD_MS` | `300000` (5 min) | Evidence threshold before stale working activity can be healed to idle |
-| `DO_SUMMARY_SYNC_DEBOUNCE_MS`  | `5000`   | Debounce for DO-to-D1 summary sync |
+| Variable                                  | Default            | Description                                                               |
+| ----------------------------------------- | ------------------ | ------------------------------------------------------------------------- |
+| `MAX_SESSIONS_PER_PROJECT`                | `10000`            | Max chat sessions per project                                             |
+| `MAX_MESSAGES_PER_SESSION`                | `100000`           | Max messages per chat session                                             |
+| `DOCUMENT_CARD_RAW_OUTPUT_MAX_BYTES`      | `16384`            | Max compact metadata bytes preserved for library document cards           |
+| `MESSAGE_SIZE_THRESHOLD`                  | `102400`           | Max message size in bytes                                                 |
+| `ACTIVITY_RETENTION_DAYS`                 | `90`               | Days to retain activity events                                            |
+| `SESSION_IDLE_TIMEOUT_MINUTES`            | `60`               | Idle session timeout                                                      |
+| `SESSION_ACTIVITY_STALE_THRESHOLD_MS`     | `300000` (5 min)   | Evidence threshold before stale working activity can be healed to idle    |
+| `DO_SUMMARY_SYNC_DEBOUNCE_MS`             | `5000`             | Debounce for DO-to-D1 summary sync                                        |
 
 ## Durable Object Retry
 
