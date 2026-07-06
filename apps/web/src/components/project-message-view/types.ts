@@ -96,8 +96,20 @@ function applyToolContentPointer(toolItem: ToolCallItem, pointer: ToolContentPoi
   }
 }
 
-function inferMcpToolNameFromTitle(title: string): string | undefined {
-  return title.startsWith('mcp__') && title.split('__').length >= 3 ? title : undefined;
+/**
+ * Recover a stable tool identifier from the ACP title when the metadata omits
+ * an explicit `toolName` (e.g. Codex, which passes `<server>/<tool>` as the
+ * title and sets no `_meta.claudeCode.toolName`). Delimiter-agnostic: returns
+ * the title when it normalizes to a known typed-card tool, or when it follows
+ * the legacy `mcp__<server>__<tool>` convention. Returns undefined for plain
+ * human titles so they are not mistaken for tool identifiers.
+ */
+function inferToolNameFromTitle(title: string): string | undefined {
+  if (!title) return undefined;
+  const base = normalizeToolName(title);
+  if (base && DOCUMENT_CARD_TOOLS.has(base)) return title;
+  if (title.startsWith('mcp__') && title.split('__').length >= 3) return title;
+  return undefined;
 }
 
 function isDocumentCardTool(toolName: string | undefined): boolean {
@@ -276,9 +288,9 @@ export function chatMessagesToConversationItems(msgs: ChatMessageResponse[]): Co
       // Card-critical fields for typed tool-call cards. toolName is the stable
       // discriminator; rawInput/rawOutput carry the payload (fileId, filename,
       // mimeType, sizeBytes, caption) and survive compact-mode content stripping.
-      const toolName = meta && typeof meta.toolName === 'string'
+      const toolName = meta && typeof meta.toolName === 'string' && meta.toolName
         ? meta.toolName
-        : inferMcpToolNameFromTitle(rawTitle);
+        : inferToolNameFromTitle(rawTitle);
       const rawInput = meta ? meta.rawInput : undefined;
       const rawOutput = meta?.rawOutput ?? legacyDocumentRawOutput(toolName, msg.content);
       const validStatuses = new Set(['pending', 'in_progress', 'completed', 'failed']);

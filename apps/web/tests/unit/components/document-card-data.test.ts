@@ -31,6 +31,21 @@ describe('normalizeToolName', () => {
     expect(normalizeToolName('mcp__other__display_from_library')).toBe('display_from_library');
   });
 
+  it('strips the Codex <server>/<tool> slash form', () => {
+    expect(normalizeToolName('sam-mcp/display_from_library')).toBe('display_from_library');
+    expect(normalizeToolName('sam-mcp-1/replace_library_file')).toBe('replace_library_file');
+  });
+
+  it('handles dotted and colon separators', () => {
+    expect(normalizeToolName('sam-mcp.upload_to_library')).toBe('upload_to_library');
+    expect(normalizeToolName('sam-mcp:display_from_library')).toBe('display_from_library');
+  });
+
+  it('preserves single underscores inside the tool name', () => {
+    expect(normalizeToolName('display_from_library')).toBe('display_from_library');
+    expect(normalizeToolName('sam-mcp/display_from_library')).toBe('display_from_library');
+  });
+
   it('returns built-in tool names unchanged', () => {
     expect(normalizeToolName('Read')).toBe('Read');
   });

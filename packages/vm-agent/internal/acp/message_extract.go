@@ -3,6 +3,7 @@ package acp
 import (
 	"encoding/json"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -10,6 +11,27 @@ import (
 	acpsdk "github.com/coder/acp-go-sdk"
 	"github.com/google/uuid"
 )
+
+// toolNameSepRe matches the namespace separators different agent adapters use to
+// prefix a tool identifier: Claude `mcp__<server>__<tool>` (double underscore),
+// Codex `<server>/<tool>` (slash), and `.`/`:` used by others. Single `_` is NOT
+// a separator (it is common inside tool names, e.g. display_from_library). Mirror
+// of the web normalizeToolName separator set.
+var toolNameSepRe = regexp.MustCompile(`__|/|\.|:`)
+
+// normalizeToolNameBase reduces a raw tool identifier to its base tool name,
+// independent of the agent's separator convention. Splits on any known separator
+// and returns the last non-empty segment (or the input unchanged when there is
+// none). Delimiter-agnostic so new adapter conventions work without new code.
+func normalizeToolNameBase(name string) string {
+	parts := toolNameSepRe.Split(name, -1)
+	for i := len(parts) - 1; i >= 0; i-- {
+		if parts[i] != "" {
+			return parts[i]
+		}
+	}
+	return name
+}
 
 // maxToolContentSize is the maximum size (in bytes) for diff oldText/newText
 // fields to prevent excessive storage. Configurable via MAX_TOOL_CONTENT_SIZE.
@@ -277,17 +299,28 @@ func marshalRawContent(contents []acpsdk.ToolCallContent) []json.RawMessage {
 //
 // Primary source: the ACP `_meta.claudeCode.toolName` extension, which the
 // claude-agent-acp adapter sets on both the initial tool_call and every
-// tool_call_update. Fallback: the mcp__<server>__<tool> title convention that
-// non-Claude adapters (e.g. codex) pass through as the ACP title. Returns ""
-// when neither source yields a name (callers treat "" as "unknown tool").
+// tool_call_update.
+//
+// Title fallback (adapters that set no claudeCode toolName, e.g. Codex): the
+// tool identifier arrives as the ACP title using the adapter's own separator —
+// Claude `mcp__<server>__<tool>`, Codex `<server>/<tool>`. We claim the title as
+// the toolName when it normalizes to one of our known typed-card tools
+// (delimiter-agnostic), or when it follows the legacy mcp__ convention. Scoping
+// the first branch to known tools avoids mistaking an arbitrary human title for
+// a tool identifier. Returns "" when nothing yields a name.
 func extractToolName(meta map[string]any, title string) string {
 	if cc, ok := meta["claudeCode"].(map[string]any); ok {
 		if name, ok := cc["toolName"].(string); ok && name != "" {
 			return name
 		}
 	}
-	// Title-pattern fallback: mcp__<server>__<tool> is the verbatim MCP tool
-	// name some adapters use as the human-readable title.
+	if title == "" {
+		return ""
+	}
+	if rawCaptureToolNames[normalizeToolNameBase(title)] {
+		return title
+	}
+	// Legacy mcp__<server>__<tool> convention (any tool, not just library ones).
 	if strings.HasPrefix(title, "mcp__") && strings.Count(title, "__") >= 2 {
 		return title
 	}
@@ -307,15 +340,11 @@ var rawCaptureToolNames = map[string]bool{
 }
 
 // toolNameNeedsRawCapture reports whether a tool's raw input/output should be
-// persisted for card rendering. Matches on the base tool name (mcp__<server>__
-// prefix stripped).
+// persisted for card rendering. Matches on the base tool name using the
+// delimiter-agnostic normalizer, so every adapter's separator convention
+// (mcp__, /, ., :) resolves to the same base name.
 func toolNameNeedsRawCapture(toolName string) bool {
-	base := toolName
-	if strings.HasPrefix(toolName, "mcp__") {
-		parts := strings.Split(toolName, "__")
-		base = parts[len(parts)-1]
-	}
-	return rawCaptureToolNames[base]
+	return rawCaptureToolNames[normalizeToolNameBase(toolName)]
 }
 
 // marshalRawField serializes a tool's raw input/output value to JSON for

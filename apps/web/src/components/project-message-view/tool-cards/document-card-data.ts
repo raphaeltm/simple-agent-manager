@@ -11,17 +11,30 @@ export const DOCUMENT_CARD_TOOLS = new Set([
 ]);
 
 /**
- * Normalize a raw tool name to its base form. MCP tool names arrive as
- * `mcp__<server>__<tool>`; built-in tools arrive verbatim. Returns the last
- * `__`-delimited segment (the tool name) or the input unchanged.
+ * Namespace separators used by different agent adapters to prefix a tool
+ * identifier: Claude uses `mcp__<server>__<tool>` (double underscore), Codex
+ * uses `<server>/<tool>` (slash), others may use `.` or `:`. Single `_` is NOT
+ * a separator (it is common inside tool names, e.g. `display_from_library`).
+ */
+const TOOL_NAME_SEPARATORS = /__|\/|\.|:/;
+
+/**
+ * Normalize a raw tool identifier to its base tool name, independent of the
+ * agent's namespace-separator convention. Splits on any known separator
+ * (`__`, `/`, `.`, `:`) and returns the last non-empty segment (the tool name),
+ * or the input unchanged when there is no separator.
+ *
+ * Delimiter-agnostic on purpose: matching a specific prefix (`mcp__`) is
+ * user-agent sniffing — every new adapter forces a new special case. Splitting
+ * on the separator set handles `mcp__sam-mcp__display_from_library`,
+ * `sam-mcp/display_from_library`, `sam-mcp-1/display_from_library`,
+ * `sam-mcp.display_from_library`, and bare `display_from_library` with no new
+ * code, and future adapters for free.
  */
 export function normalizeToolName(toolName: string | undefined): string | undefined {
   if (!toolName) return undefined;
-  if (toolName.startsWith('mcp__')) {
-    const parts = toolName.split('__');
-    return parts[parts.length - 1] || toolName;
-  }
-  return toolName;
+  const segments = toolName.split(TOOL_NAME_SEPARATORS).filter(Boolean);
+  return segments.length > 0 ? segments[segments.length - 1] : toolName;
 }
 
 /** Render state for a DocumentCard, chosen from the tool call's status + payload. */

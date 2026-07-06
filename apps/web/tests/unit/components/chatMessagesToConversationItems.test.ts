@@ -8,7 +8,11 @@
  */
 import { describe, expect, it } from 'vitest';
 
+import type { ToolCallItem } from '@simple-agent-manager/acp-client';
+
 import { chatMessagesToConversationItems } from '../../../src/components/project-message-view';
+import { DocumentCard } from '../../../src/components/project-message-view/tool-cards/DocumentCard';
+import { matchToolCard } from '../../../src/components/project-message-view/tool-cards/registry';
 import type { ChatMessageResponse } from '../../../src/lib/api';
 
 // ---------------------------------------------------------------------------
@@ -823,5 +827,64 @@ describe('chatMessagesToConversationItems', () => {
     expect(tool.rawOutput?.[0]?.type).toBe('text');
     expect(tool.rawOutput?.[0]?.text).toContain('format-c.png');
     expect(tool.rawOutput?.[0]?.text).toContain('Landscape hero');
+  });
+
+  it('recovers document-card metadata + selects DocumentCard for Codex slash-title rows', () => {
+    // Codex titles MCP tool calls "<server>/<tool>" (slash) and sets no explicit
+    // toolName. Vertical slice: persisted row (slash title, no toolName/rawOutput,
+    // JSON in content) → reconstructed toolName + rawOutput → matchToolCard picks
+    // the DocumentCard. This is the exact production regression for Codex chats.
+    const initial = {
+      toolCallId: 'tc-codex-display',
+      title: 'sam-mcp/display_from_library',
+      kind: 'other',
+      status: 'in_progress',
+    };
+    const result = {
+      toolCallId: 'tc-codex-display',
+      title: 'sam-mcp/display_from_library',
+      kind: 'other',
+      status: 'completed',
+    };
+    const items = chatMessagesToConversationItems([
+      toolMsg({ id: 'codex-display-start', content: '(tool call)', toolMetadata: initial }),
+      toolMsg({
+        id: 'codex-display-done',
+        content: JSON.stringify({
+          fileId: '01KWV7J5N2Q1AGFTMQSNK1RE7B',
+          filename: 'sam-architecture-basic.html',
+          mimeType: 'text/html; charset=utf-8',
+          sizeBytes: 15357,
+          caption: 'Basic SAM architecture visualization render test.',
+        }),
+        toolMetadata: result,
+      }),
+    ]);
+
+    expect(items).toHaveLength(1);
+    const tool = items[0] as ToolCallItem;
+    expect(tool.title).toBe('sam-mcp/display_from_library');
+    expect(tool.toolName).toBe('sam-mcp/display_from_library');
+    const raw = tool.rawOutput as Array<{ type: string; text: string }> | undefined;
+    expect(raw?.[0]?.text).toContain('sam-architecture-basic.html');
+    // Vertical slice through to card selection.
+    expect(matchToolCard(tool)).toBe(DocumentCard);
+  });
+
+  it('falls back to the generic card for a Codex library row with unusable content', () => {
+    // Name matches (slash library tool) but the content is not a document
+    // payload → no fileId → generic card, never a broken empty DocumentCard.
+    const result = {
+      toolCallId: 'tc-codex-bad',
+      title: 'sam-mcp/display_from_library',
+      kind: 'other',
+      status: 'completed',
+    };
+    const items = chatMessagesToConversationItems([
+      toolMsg({ id: 'codex-bad', content: 'the file could not be rendered', toolMetadata: result }),
+    ]);
+
+    const tool = items[0] as ToolCallItem;
+    expect(matchToolCard(tool)).toBeNull();
   });
 });

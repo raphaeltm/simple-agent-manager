@@ -1,6 +1,6 @@
 import type { ToolCallItem } from '@simple-agent-manager/acp-client';
 import { Spinner } from '@simple-agent-manager/ui';
-import { AlertTriangle, FileWarning } from 'lucide-react';
+import { FileWarning } from 'lucide-react';
 import { type FC, useEffect, useMemo, useState } from 'react';
 
 import { downloadLibraryFile, getLibraryFilePreviewUrl } from '../../../lib/api/library';
@@ -192,13 +192,6 @@ export const DocumentCard: FC<DocumentCardProps> = ({ item, projectId }) => {
 
       {isHtml && (
         <div className="text-xs text-fg-muted">Interactive · tap to open</div>
-      )}
-
-      {state === 'unavailable' && (
-        <div className="text-xs text-fg-muted inline-flex items-center gap-1.5">
-          <AlertTriangle size={12} aria-hidden="true" />
-          Preview unavailable
-        </div>
       )}
     </div>
   );

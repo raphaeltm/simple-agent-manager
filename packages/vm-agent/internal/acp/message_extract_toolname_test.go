@@ -248,6 +248,118 @@ func TestExtractMessages_RawField_NilOmitted(t *testing.T) {
 	}
 }
 
+// TestExtractMessages_ToolName_CodexSlashTitle verifies the Codex
+// `<server>/<tool>` title convention is recognized (no _meta.claudeCode) and
+// that the library tool's raw input is captured for card rendering. This is the
+// regression that broke DocumentCard rendering for Codex sessions.
+func TestExtractMessages_ToolName_CodexSlashTitle(t *testing.T) {
+	notif := acpsdk.SessionNotification{
+		SessionId: "sess-1",
+		Update: acpsdk.SessionUpdate{
+			ToolCall: &acpsdk.SessionUpdateToolCall{
+				ToolCallId: "tc-codex",
+				Title:      "sam-mcp/display_from_library",
+				RawInput:   map[string]any{"fileId": "01KWV7J5N2Q1AGFTMQSNK1RE7B", "caption": "render test"},
+			},
+		},
+	}
+
+	meta := unmarshalMeta(t, ExtractMessages(notif))
+	if meta.ToolName != "sam-mcp/display_from_library" {
+		t.Fatalf("expected Codex slash title captured as toolName, got %q", meta.ToolName)
+	}
+	if meta.RawInput == nil {
+		t.Fatalf("expected rawInput captured for Codex library tool, got nil")
+	}
+	var input map[string]any
+	if err := json.Unmarshal(meta.RawInput, &input); err != nil {
+		t.Fatalf("unmarshal rawInput: %v", err)
+	}
+	if input["fileId"] != "01KWV7J5N2Q1AGFTMQSNK1RE7B" {
+		t.Fatalf("expected rawInput.fileId preserved, got %v", input["fileId"])
+	}
+}
+
+// TestExtractMessages_ToolCallUpdate_CodexSlash verifies the Codex result update
+// (slash title, no _meta) captures the tool name and rawOutput payload.
+func TestExtractMessages_ToolCallUpdate_CodexSlash(t *testing.T) {
+	status := acpsdk.ToolCallStatusCompleted
+	title := "sam-mcp/display_from_library"
+	notif := acpsdk.SessionNotification{
+		SessionId: "sess-1",
+		Update: acpsdk.SessionUpdate{
+			ToolCallUpdate: &acpsdk.SessionToolCallUpdate{
+				ToolCallId: "tc-codex",
+				Status:     &status,
+				Title:      &title,
+				RawOutput: []any{
+					map[string]any{"type": "text", "text": `{"fileId":"f-9","filename":"arch.html","mimeType":"text/html","sizeBytes":15357}`},
+				},
+			},
+		},
+	}
+
+	meta := unmarshalMeta(t, ExtractMessages(notif))
+	if meta.ToolName != "sam-mcp/display_from_library" {
+		t.Fatalf("expected Codex slash toolName on update, got %q", meta.ToolName)
+	}
+	if meta.RawOutput == nil {
+		t.Fatalf("expected rawOutput captured for Codex library update, got nil")
+	}
+}
+
+// TestExtractMessages_ToolName_CodexNonLibrarySlash verifies a Codex slash title
+// for a NON-library tool is not claimed as a toolName (no card, no raw capture).
+func TestExtractMessages_ToolName_CodexNonLibrarySlash(t *testing.T) {
+	notif := acpsdk.SessionNotification{
+		SessionId: "sess-1",
+		Update: acpsdk.SessionUpdate{
+			ToolCall: &acpsdk.SessionUpdateToolCall{
+				ToolCallId: "tc-codex-list",
+				Title:      "sam-mcp/list_library_files",
+				RawInput:   map[string]any{"directory": "/docs/"},
+			},
+		},
+	}
+
+	meta := unmarshalMeta(t, ExtractMessages(notif))
+	if meta.ToolName != "" {
+		t.Fatalf("expected non-library Codex slash tool to yield no toolName, got %q", meta.ToolName)
+	}
+	if meta.RawInput != nil {
+		t.Fatalf("expected no raw capture for non-library tool, got %s", meta.RawInput)
+	}
+}
+
+// TestNormalizeToolNameBase covers the delimiter-agnostic normalizer across
+// every adapter separator convention plus the capture gate that keys on it.
+func TestNormalizeToolNameBase(t *testing.T) {
+	cases := []struct {
+		in            string
+		want          string
+		wantRawCapture bool
+	}{
+		{"mcp__sam-mcp__display_from_library", "display_from_library", true},
+		{"sam-mcp/display_from_library", "display_from_library", true},
+		{"sam-mcp-1/replace_library_file", "replace_library_file", true},
+		{"sam-mcp.upload_to_library", "upload_to_library", true},
+		{"sam-mcp:display_from_library", "display_from_library", true},
+		{"display_from_library", "display_from_library", true},
+		{"Read", "Read", false},
+		{"Bash", "Bash", false},
+		{"sam-mcp/list_library_files", "list_library_files", false},
+		{"", "", false},
+	}
+	for _, c := range cases {
+		if got := normalizeToolNameBase(c.in); got != c.want {
+			t.Errorf("normalizeToolNameBase(%q) = %q, want %q", c.in, got, c.want)
+		}
+		if got := toolNameNeedsRawCapture(c.in); got != c.wantRawCapture {
+			t.Errorf("toolNameNeedsRawCapture(%q) = %v, want %v", c.in, got, c.wantRawCapture)
+		}
+	}
+}
+
 // msgsMeta returns the serialized ToolMetadata string of the single extracted
 // message, for substring assertions on the exact wire format.
 func msgsMeta(t *testing.T, notif acpsdk.SessionNotification) string {

@@ -30,14 +30,28 @@ function rawOutput(payload: Record<string, unknown>): unknown {
   return [{ type: 'text', text: JSON.stringify(payload) }];
 }
 
+const readyOutput = rawOutput({ id: 'f-1', filename: 'doc.pdf', mimeType: 'application/pdf', sizeBytes: 10 });
+
 describe('matchToolCard registry', () => {
-  it('returns DocumentCard for the three library document tools', () => {
+  it('returns DocumentCard for the three library document tools (Claude mcp__ form)', () => {
     for (const name of [
       'mcp__sam-mcp__upload_to_library',
       'mcp__sam-mcp__replace_library_file',
       'mcp__sam-mcp__display_from_library',
     ]) {
-      expect(matchToolCard(toolItem({ toolName: name }))).toBe(DocumentCard);
+      expect(matchToolCard(toolItem({ toolName: name, rawOutput: readyOutput }))).toBe(DocumentCard);
+    }
+  });
+
+  it('returns DocumentCard for the Codex slash form (<server>/<tool>)', () => {
+    // Codex has no explicit toolName; the identifier arrives as the ACP title.
+    for (const title of [
+      'sam-mcp/display_from_library',
+      'sam-mcp/upload_to_library',
+      'sam-mcp-1/replace_library_file', // multi-server naming
+      'sam-mcp.display_from_library', // dotted separator
+    ]) {
+      expect(matchToolCard(toolItem({ title, toolName: undefined, rawOutput: readyOutput }))).toBe(DocumentCard);
     }
   });
 
@@ -45,13 +59,33 @@ describe('matchToolCard registry', () => {
     expect(matchToolCard(toolItem({
       title: 'mcp__sam-mcp__display_from_library',
       toolName: undefined,
+      rawOutput: readyOutput,
+    }))).toBe(DocumentCard);
+  });
+
+  it('renders the pending card before output arrives', () => {
+    expect(matchToolCard(toolItem({
+      toolName: 'mcp__sam-mcp__display_from_library',
+      status: 'in_progress',
+      rawOutput: undefined,
     }))).toBe(DocumentCard);
   });
 
   it('falls back (null) for non-document tools and unknown tools', () => {
     expect(matchToolCard(toolItem({ toolName: 'Read' }))).toBeNull();
     expect(matchToolCard(toolItem({ toolName: 'mcp__sam-mcp__list_library_files' }))).toBeNull();
+    expect(matchToolCard(toolItem({ toolName: 'sam-mcp/list_library_files' }))).toBeNull();
     expect(matchToolCard(toolItem({ toolName: undefined }))).toBeNull();
+  });
+
+  it('falls back (null) when the name matches but the payload is unusable (shape authority)', () => {
+    // A completed library tool with no fileId in any payload → generic card,
+    // never a broken empty DocumentCard.
+    expect(matchToolCard(toolItem({
+      toolName: 'mcp__sam-mcp__display_from_library',
+      status: 'completed',
+      rawOutput: rawOutput({ error: 'SOMETHING_ELSE' }),
+    }))).toBeNull();
   });
 });
 
