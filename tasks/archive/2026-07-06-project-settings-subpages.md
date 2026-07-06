@@ -38,7 +38,10 @@ Users need stable deep links to the specific settings area they are trying to fi
 - [x] Add focused Playwright audit coverage for project settings sub-pages with mobile and desktop screenshots.
 - [x] Fix any visual defects found during screenshot inspection.
 - [x] Run focused typecheck, unit tests, API tests, and Playwright audit.
-- [ ] Run `/do` pre-PR validation, specialist review, staging verification, PR creation, CI, merge, and production deploy monitoring.
+
+## Workflow Status
+
+Product implementation is complete. Remaining `/do` workflow gates after task archive are tracked in `.do-state.md`, the PR description, CI checks, staging verification evidence, and production deploy monitoring.
 
 ## Acceptance Criteria
 
