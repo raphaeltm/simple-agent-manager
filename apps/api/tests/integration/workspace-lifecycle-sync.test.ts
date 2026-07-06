@@ -20,6 +20,7 @@ import { describe, expect, it } from 'vitest';
 describe('workspace lifecycle synchronization', () => {
   const lifecycleFile = readFileSync(resolve(process.cwd(), 'src/routes/workspaces/lifecycle.ts'), 'utf8');
   const crudFile = readFileSync(resolve(process.cwd(), 'src/routes/workspaces/crud.ts'), 'utf8');
+  const workspaceCleanupFile = readFileSync(resolve(process.cwd(), 'src/services/workspace-cleanup.ts'), 'utf8');
   const cleanupFile = readFileSync(resolve(process.cwd(), 'src/scheduled/node-cleanup.ts'), 'utf8');
   const nodesFile = readFileSync(resolve(process.cwd(), 'src/services/nodes.ts'), 'utf8');
   const doFile = [
@@ -40,13 +41,15 @@ describe('workspace lifecycle synchronization', () => {
     });
 
     it('delete route calls projectDataService.stopSession', () => {
-      expect(crudFile).toContain('projectDataService.stopSession');
-      expect(crudFile).toContain('workspace.delete_stop_session_failed');
+      expect(crudFile).toContain('cleanupWorkspaceForDeletion');
+      expect(workspaceCleanupFile).toContain('projectDataService.stopSession');
+      expect(workspaceCleanupFile).toContain('workspace.delete_stop_session_failed');
     });
 
     it('delete route cleans up workspace activity', () => {
-      expect(crudFile).toContain('projectDataService.cleanupWorkspaceActivity');
-      expect(crudFile).toContain('workspace.delete_cleanup_activity_failed');
+      expect(crudFile).toContain('cleanupWorkspaceForDeletion');
+      expect(workspaceCleanupFile).toContain('projectDataService.cleanupWorkspaceActivity');
+      expect(workspaceCleanupFile).toContain('workspace.delete_cleanup_activity_failed');
     });
   });
 
