@@ -327,12 +327,15 @@ func extractToolName(meta map[string]any, title string) string {
 	return ""
 }
 
-// rawCaptureToolNames is the set of tool names (base form, after stripping the
-// mcp__<server>__ prefix) whose rawInput/rawOutput are captured into ToolMeta.
+// rawCaptureToolNames is the set of base tool names (separator-agnostic, see
+// normalizeToolNameBase) whose rawInput/rawOutput are captured into ToolMeta.
 // Restricting capture to the tools that render typed cards keeps other tools'
 // arguments — Bash command strings, Write file contents — out of persisted chat
 // metadata (data minimization: those would otherwise survive compact-mode
 // stripping and be returned in every chat load).
+//
+// Keep in sync with DOCUMENT_CARD_TOOLS in
+// apps/web/src/components/project-message-view/tool-cards/document-card-data.ts.
 var rawCaptureToolNames = map[string]bool{
 	"upload_to_library":    true,
 	"replace_library_file": true,

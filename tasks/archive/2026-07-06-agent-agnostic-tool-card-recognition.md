@@ -26,31 +26,31 @@ Project chat is 100% through Cloudflare now: browser ↔ Worker/ProjectData DO v
 ## Implementation checklist
 
 ### A. Web — recognition + graceful fallback
-- [ ] `document-card-data.ts`: rewrite `normalizeToolName` to split on `/__|\/|\.|:/` and return last non-empty segment (keep `mcp__` behavior as a subset). Keep `DOCUMENT_CARD_TOOLS` canonical.
-- [ ] `types.ts`: replace `inferMcpToolNameFromTitle` with a delimiter-agnostic `inferToolNameFromTitle` that returns the title when `normalizeToolName(title)` ∈ `DOCUMENT_CARD_TOOLS` (also keep the legacy `mcp__` check). This makes `legacyDocumentRawOutput(toolName, msg.content)` fire for Codex (reconstruct payload from `content`).
-- [ ] `registry.ts`: `matchToolCard` — after name match, run `extractDocumentCardData(item)`; return null when `state === 'unavailable'` → generic fallback.
-- [ ] `DocumentCard.tsx`: remove the now-unreachable `unavailable` render branch (matchToolCard gates it out) to avoid dead code; confirm ready/pending/tombstone tiers intact.
+- [x] `document-card-data.ts`: rewrite `normalizeToolName` to split on `/__|\/|\.|:/` and return last non-empty segment (keep `mcp__` behavior as a subset). Keep `DOCUMENT_CARD_TOOLS` canonical.
+- [x] `types.ts`: replace `inferMcpToolNameFromTitle` with a delimiter-agnostic `inferToolNameFromTitle` that returns the title when `normalizeToolName(title)` ∈ `DOCUMENT_CARD_TOOLS` (also keep the legacy `mcp__` check). This makes `legacyDocumentRawOutput(toolName, msg.content)` fire for Codex (reconstruct payload from `content`).
+- [x] `registry.ts`: `matchToolCard` — after name match, run `extractDocumentCardData(item)`; return null when `state === 'unavailable'` → generic fallback.
+- [x] `DocumentCard.tsx`: remove the now-unreachable `unavailable` render branch (matchToolCard gates it out) to avoid dead code; confirm ready/pending/tombstone tiers intact.
 
 ### B. VM agent — fidelity capture
-- [ ] `message_extract.go`: add package-level `toolNameSepRe = regexp.MustCompile(\`__|/|\.|:\`)` + `normalizeToolNameBase(name)` (last non-empty segment).
-- [ ] `extractToolName`: keep `claudeCode` primary; broaden title fallback to return the title when `rawCaptureToolNames[normalizeToolNameBase(title)]` OR the legacy `mcp__…__` pattern holds.
-- [ ] `toolNameNeedsRawCapture`: use `normalizeToolNameBase` so slash/dotted forms match `rawCaptureToolNames`. Keep the name allowlist (data-minimization).
-- [ ] Keep `rawCaptureToolNames` (Go) in sync with `DOCUMENT_CARD_TOOLS` (web).
+- [x] `message_extract.go`: add package-level `toolNameSepRe = regexp.MustCompile(\`__|/|\.|:\`)` + `normalizeToolNameBase(name)` (last non-empty segment).
+- [x] `extractToolName`: keep `claudeCode` primary; broaden title fallback to return the title when `rawCaptureToolNames[normalizeToolNameBase(title)]` OR the legacy `mcp__…__` pattern holds.
+- [x] `toolNameNeedsRawCapture`: use `normalizeToolNameBase` so slash/dotted forms match `rawCaptureToolNames`. Keep the name allowlist (data-minimization).
+- [x] Keep `rawCaptureToolNames` (Go) in sync with `DOCUMENT_CARD_TOOLS` (web).
 
 ## Tests
-- [ ] TS unit (`document-card-data.test.ts`): `normalizeToolName` for `mcp__`, `/`, `.`, bare, multi-server (`sam-mcp-1/...`) forms.
-- [ ] TS unit: `matchToolCard` renders DocumentCard for slash Codex item with valid payload; returns null (generic) for malformed payload.
-- [ ] TS vertical slice (`chatMessagesToConversationItems.test.ts`): Codex `ChatMessageResponse` (slash title, no `toolName`, JSON in `content`, no `rawOutput`) → reconstructs rawOutput → matchToolCard → DocumentCard renderable. Malformed content → generic.
-- [ ] TS (`DocumentCard.test.tsx`): update for removed `unavailable` branch if asserted.
-- [ ] Go (`message_extract_toolname_test.go`): table-driven `extractToolName` + `toolNameNeedsRawCapture` for claudeCode meta, `mcp__` title, `sam-mcp/` slash title, dotted, bare, and unrelated (Bash) not captured.
-- [ ] Playwright visual audit (rule 17): DocumentCard in project chat, mobile 375 + desktop 1280, Codex slash names, long filename, missing mimeType, tombstone; assert no overflow + graceful fallback.
+- [x] TS unit (`document-card-data.test.ts`): `normalizeToolName` for `mcp__`, `/`, `.`, bare, multi-server (`sam-mcp-1/...`) forms.
+- [x] TS unit: `matchToolCard` renders DocumentCard for slash Codex item with valid payload; returns null (generic) for malformed payload.
+- [x] TS vertical slice (`chatMessagesToConversationItems.test.ts`): Codex `ChatMessageResponse` (slash title, no `toolName`, JSON in `content`, no `rawOutput`) → reconstructs rawOutput → matchToolCard → DocumentCard renderable. Malformed content → generic.
+- [x] TS (`DocumentCard.test.tsx`): update for removed `unavailable` branch if asserted.
+- [x] Go (`message_extract_toolname_test.go`): table-driven `extractToolName` + `toolNameNeedsRawCapture` for claudeCode meta, `mcp__` title, `sam-mcp/` slash title, dotted, bare, and unrelated (Bash) not captured.
+- [x] Playwright visual audit (rule 17): DocumentCard in project chat, mobile 375 + desktop 1280, Codex slash names, long filename, missing mimeType, tombstone; assert no overflow + graceful fallback.
 
 ## Acceptance criteria
-- [ ] Codex `display_from_library` renders the DocumentCard in project chat (live + reload).
-- [ ] Claude `mcp__` path still renders (no regression).
-- [ ] Malformed/absent payload falls back to the generic card, never a broken empty card.
-- [ ] New agent delimiters work with no code change; new library tools require only the two-set update.
-- [ ] vm-agent captures `toolName` + `rawInput/rawOutput` for Codex library tools (compact-mode inline render).
+- [x] Codex `display_from_library` renders the DocumentCard in project chat (live + reload).
+- [x] Claude `mcp__` path still renders (no regression).
+- [x] Malformed/absent payload falls back to the generic card, never a broken empty card.
+- [x] New agent delimiters work with no code change; new library tools require only the two-set update.
+- [x] vm-agent captures `toolName` + `rawInput/rawOutput` for Codex library tools (compact-mode inline render).
 
 ## Staging (rule 27 — vm-agent change)
 Delete all staging nodes → deploy staging → fresh node → NEW Codex project chat → call `display_from_library`, verify DocumentCard renders inline (compact + after reload); verify Claude still works; verify a forced bad payload falls back to generic.

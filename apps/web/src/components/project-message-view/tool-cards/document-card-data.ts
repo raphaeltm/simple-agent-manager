@@ -1,8 +1,11 @@
 import type { ToolCallItem } from '@simple-agent-manager/acp-client';
 
 /**
- * Library tool names (base form, after stripping the mcp__<server>__ prefix)
+ * Library tool names (base form, separator-agnostic — see normalizeToolName)
  * that render as a DocumentCard.
+ *
+ * Keep in sync with rawCaptureToolNames in
+ * packages/vm-agent/internal/acp/message_extract.go.
  */
 export const DOCUMENT_CARD_TOOLS = new Set([
   'upload_to_library',

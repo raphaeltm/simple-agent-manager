@@ -6,9 +6,8 @@
  *
  * These tests exercise the actual runtime behaviour of every branch.
  */
-import { describe, expect, it } from 'vitest';
-
 import type { ToolCallItem } from '@simple-agent-manager/acp-client';
+import { describe, expect, it } from 'vitest';
 
 import { chatMessagesToConversationItems } from '../../../src/components/project-message-view';
 import { DocumentCard } from '../../../src/components/project-message-view/tool-cards/DocumentCard';
