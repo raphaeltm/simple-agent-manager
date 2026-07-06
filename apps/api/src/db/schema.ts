@@ -81,6 +81,18 @@ export const users = sqliteTable('users', {
 });
 
 // =============================================================================
+// Platform Settings
+// =============================================================================
+export const platformSettings = sqliteTable('platform_settings', {
+  key: text('key').primaryKey(),
+  value: text('value').notNull(),
+  updatedAt: text('updated_at')
+    .notNull()
+    .default(sql`CURRENT_TIMESTAMP`),
+  updatedBy: text('updated_by').references(() => users.id, { onDelete: 'set null' }),
+});
+
+// =============================================================================
 // Sessions (BetterAuth)
 // =============================================================================
 export const sessions = sqliteTable(

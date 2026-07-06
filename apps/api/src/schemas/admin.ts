@@ -8,6 +8,10 @@ export const AdminUserRoleSchema = v.object({
   role: v.picklist(['admin', 'user']),
 });
 
+export const UpdateSignupApprovalConfigSchema = v.object({
+  requireApproval: v.boolean(),
+});
+
 export const AnalyticsForwardSchema = v.object({
   startDate: v.optional(v.string()),
   endDate: v.optional(v.string()),

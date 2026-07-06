@@ -10,6 +10,7 @@ import type { Env } from './env';
 import { createModuleLogger } from './lib/logger';
 import { readResponseJson } from './lib/runtime-validation';
 import { getBetterAuthSecret } from './lib/secrets';
+import { isSignupApprovalRequired } from './services/signup-approval';
 
 const log = createModuleLogger('auth');
 
@@ -320,7 +321,7 @@ export function createAuth(env: Env) {
       user: {
         create: {
           before: async (user) => {
-            if (env.REQUIRE_APPROVAL !== 'true') {
+            if (!(await isSignupApprovalRequired(env))) {
               // Open registration — defaults are fine (role='user', status='active')
               return { data: user };
             }

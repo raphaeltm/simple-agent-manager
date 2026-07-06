@@ -30,6 +30,12 @@ vi.mock('../../../src/auth', () => ({
 }));
 
 vi.mock('../../../src/lib/logger', () => ({
+  createModuleLogger: () => ({
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+  }),
   log: {
     debug: vi.fn(),
     info: vi.fn(),

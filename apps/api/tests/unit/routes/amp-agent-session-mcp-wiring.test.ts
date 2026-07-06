@@ -92,7 +92,17 @@ vi.mock('drizzle-orm/d1', () => ({
   drizzle: () => {
     let selectCount = 0;
     return {
-      select: () => {
+      select: (fields?: Record<string, unknown>) => {
+        if (fields && 'value' in fields) {
+          return {
+            from: () => ({
+              where: () => ({
+                get: () => Promise.resolve(undefined),
+              }),
+            }),
+          };
+        }
+
         selectCount += 1;
         return {
           from: () => ({
