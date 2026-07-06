@@ -337,14 +337,14 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
     }
   }
 
-  // 4. Orphan cleanup: task-created workspaces still running after task ended (TDF-7)
+  // 4. Orphan cleanup: task-created workspaces still active after task ended (TDF-7)
   //    Only checks workspaces that were EVER associated with a task (via tasks.workspace_id).
   //    User-created workspaces (never referenced by any task) are excluded — they are
   //    intentionally long-lived and not orphans.
   const orphanedWorkspaces = await env.DATABASE.prepare(
     `SELECT w.id, w.node_id, w.user_id, w.status, w.created_at, w.project_id, w.chat_session_id
      FROM workspaces w
-     WHERE w.status = 'running'
+     WHERE w.status IN ('running', 'creating', 'recovery')
        AND EXISTS (
          SELECT 1 FROM tasks t
          WHERE t.workspace_id = w.id

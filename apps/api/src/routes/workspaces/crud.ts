@@ -12,17 +12,17 @@ import { getAuth, getUserId, requireApproved,requireAuth } from '../../middlewar
 import { errors } from '../../middleware/error';
 import { requireProjectCapability } from '../../middleware/project-auth';
 import { CreateWorkspaceSchema,jsonValidator, UpdateWorkspacePortsPublicSchema, UpdateWorkspaceSchema } from '../../schemas';
-import { startComputeTracking, stopComputeTracking } from '../../services/compute-usage';
+import { startComputeTracking } from '../../services/compute-usage';
 import { signPortAccessToken } from '../../services/jwt';
 import { getRuntimeLimits } from '../../services/limits';
 import {
-  deleteWorkspaceOnNode,
   getWorkspacePortsOnNode,
   waitForNodeAgentReady,
 } from '../../services/node-agent';
 import { createNodeRecord, provisionNode } from '../../services/nodes';
 import * as projectDataService from '../../services/project-data';
 import { recordNodeRoutingMetric } from '../../services/telemetry';
+import { cleanupWorkspaceForDeletion } from '../../services/workspace-cleanup';
 import { resolveUniqueWorkspaceDisplayName } from '../../services/workspace-names';
 import { requireRepositoryUserAccess } from '../projects/_helpers';
 import { getOwnedNode, getOwnedWorkspace, scheduleWorkspaceCreateOnNode } from './_helpers';
@@ -469,41 +469,13 @@ crudRoutes.delete('/:id', requireAuth(), requireApproved(), async (c) => {
 
   const workspace = await getOwnedWorkspace(db, workspaceId, userId);
 
-  if (workspace.nodeId) {
-    const node = await getOwnedNode(db, workspace.nodeId, userId);
-    if (node.status === 'running' && node.healthStatus !== 'unhealthy') {
-      try {
-        await deleteWorkspaceOnNode(workspace.nodeId, workspace.id, c.env, userId);
-      } catch (e) {
-        log.error('workspace.delete_on_node_failed', { workspaceId: workspace.id, nodeId: workspace.nodeId, error: String(e) });
-      }
-    }
-  }
-
-  // Stop the chat session and clean up activity tracking before deleting (best-effort)
-  if (workspace.projectId && workspace.chatSessionId) {
-    c.executionCtx.waitUntil(
-      projectDataService.stopSession(c.env, workspace.projectId, workspace.chatSessionId)
-        .catch((e) => { log.warn('workspace.delete_stop_session_failed', { workspaceId: workspace.id, sessionId: workspace.chatSessionId, error: String(e) }); })
-    );
-    c.executionCtx.waitUntil(
-      projectDataService.cleanupWorkspaceActivity(c.env, workspace.projectId, workspace.id)
-        .catch((e) => { log.warn('workspace.delete_cleanup_activity_failed', { workspaceId: workspace.id, error: String(e) }); })
-    );
-  }
-
-  // Close compute metering before deleting the workspace row (best-effort)
-  try {
-    await stopComputeTracking(db, workspace.id);
-  } catch (e) {
-    log.warn('workspace.compute_tracking_stop_failed', { workspaceId: workspace.id, error: String(e) });
-  }
-
-  await db.delete(schema.agentSessions).where(eq(schema.agentSessions.workspaceId, workspace.id));
-
-  await db
-    .delete(schema.workspaces)
-    .where(and(eq(schema.workspaces.id, workspace.id), eq(schema.workspaces.userId, userId)));
+  await cleanupWorkspaceForDeletion({
+    db,
+    env: c.env,
+    workspace,
+    userId,
+    waitUntil: (promise) => c.executionCtx.waitUntil(promise),
+  });
 
   return c.json({ success: true });
 });

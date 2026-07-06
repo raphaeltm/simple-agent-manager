@@ -148,14 +148,15 @@ export async function seedTask(
     workspaceId?: string;
     autoProvisionedNodeId?: string;
     executionStep?: string;
+    taskMode?: string;
     startedAt?: string;
     updatedAt?: string;
   },
 ): Promise<void> {
   const updatedAt = opts?.updatedAt ?? new Date().toISOString();
   await env.DATABASE.prepare(
-    `INSERT OR IGNORE INTO tasks (id, project_id, user_id, title, status, workspace_id, auto_provisioned_node_id, execution_step, started_at, created_by, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?)`,
+    `INSERT OR IGNORE INTO tasks (id, project_id, user_id, title, status, workspace_id, auto_provisioned_node_id, execution_step, task_mode, started_at, created_by, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?)`,
   )
     .bind(
       taskId,
@@ -166,6 +167,7 @@ export async function seedTask(
       opts?.workspaceId ?? null,
       opts?.autoProvisionedNodeId ?? null,
       opts?.executionStep ?? null,
+      opts?.taskMode ?? 'task',
       opts?.startedAt ?? null,
       userId,
       updatedAt,

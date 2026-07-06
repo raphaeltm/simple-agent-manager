@@ -96,6 +96,38 @@ describe('runNodeCleanupSweep — vertical slice', () => {
       expect(events[0].message).toContain('Orphaned workspace stopped');
     });
 
+    it('stops orphaned recovery workspace so it no longer blocks node cleanup forever', async () => {
+      await seedBaseData();
+      const nodeId = 'node-nc-orphan-recovery-ws';
+      const wsId = 'ws-nc-orphan-recovery';
+      const taskId = 'task-nc-orphan-recovery-completed';
+      const oldDate = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+
+      await seedNode(nodeId, USER_ID);
+      await seedWorkspace(wsId, nodeId, USER_ID, {
+        projectId: PROJECT_ID,
+        status: 'recovery',
+        chatSessionId: 'session-nc-recovery',
+        createdAt: oldDate,
+      });
+      await seedTask(taskId, PROJECT_ID, USER_ID, {
+        status: 'completed',
+        workspaceId: wsId,
+      });
+
+      const testEnv = {
+        ...env,
+        ORPHANED_WORKSPACE_GRACE_PERIOD_MS: '1000',
+      } as unknown as Env;
+
+      const result = await runNodeCleanupSweep(testEnv);
+
+      expect(result.orphanedWorkspacesFlagged).toBeGreaterThanOrEqual(1);
+
+      const ws = await getWorkspaceStatus(wsId);
+      expect(ws?.status).toBe('stopped');
+    });
+
     it('does not stop workspace with an active task', async () => {
       await seedBaseData();
       const nodeId = 'node-nc-active-task';

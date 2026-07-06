@@ -16,13 +16,13 @@ Production evidence showed conversation task `01KWVE9X33WGAXP0VFGX1N5WYW` comple
 
 ## Implementation Checklist
 
-- [ ] Extract or share workspace deletion cleanup so task close can reuse the same backend semantics as `DELETE /api/workspaces/:id`.
-- [ ] Update `POST /tasks/:taskId/close` to immediately clean up only the closing conversation task's linked workspace after authorization and task-mode checks.
-- [ ] Preserve existing best-effort VM-agent/session/activity cleanup behavior while making D1 workspace removal and compute stop immediate.
-- [ ] Update orphan cleanup to include terminal task workspaces in `recovery` so they cannot keep nodes active indefinitely.
-- [ ] Add focused close endpoint regression coverage proving the linked running workspace is not left running after close and cleanup targets only that workspace.
-- [ ] Add focused scheduled cleanup coverage proving terminal `recovery` workspaces are reaped or demoted.
-- [ ] Run targeted tests and repo validation, then open and merge the PR when green.
+- [x] Extract or share workspace deletion cleanup so task close can reuse the same backend semantics as `DELETE /api/workspaces/:id`.
+- [x] Update `POST /tasks/:taskId/close` to immediately clean up only the closing conversation task's linked workspace after authorization and task-mode checks.
+- [x] Preserve existing best-effort VM-agent/session/activity cleanup behavior while making D1 workspace removal and compute stop immediate.
+- [x] Update orphan cleanup to include terminal task workspaces in `recovery` so they cannot keep nodes active indefinitely.
+- [x] Add focused close endpoint regression coverage proving the linked running workspace is not left running after close and cleanup targets only that workspace.
+- [x] Add focused scheduled cleanup coverage proving terminal `recovery` workspaces are reaped or demoted.
+- [x] Run targeted tests and repo validation, then open and merge the PR when green.
 
 ## Acceptance Criteria
 

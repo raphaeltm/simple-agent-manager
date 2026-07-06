@@ -293,6 +293,41 @@ describe('runNodeCleanupSweep', () => {
     });
   });
 
+  describe('orphaned task workspace cleanup', () => {
+    it('stops terminal task workspaces in recovery so they stop counting as active forever', async () => {
+      const { stopWorkspaceOnNode } = await import('../../src/services/node-agent');
+      const createdAt = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+
+      const responses = new Map<string, unknown[]>();
+      responses.set('n.warm_since IS NOT NULL', []);
+      responses.set('auto_provisioned_node_id', []);
+      responses.set("WHERE n.status = 'stopped'", []);
+      responses.set("w.status IN ('running', 'creating', 'recovery')", [
+        {
+          id: 'ws-recovery-orphan',
+          node_id: 'node-recovery-orphan',
+          user_id: 'user-1',
+          status: 'recovery',
+          created_at: createdAt,
+          project_id: null,
+          chat_session_id: null,
+        },
+      ]);
+      responses.set('n.warm_since IS NULL', []);
+
+      const env = createMockEnv(responses);
+      const result = await runNodeCleanupSweep(env);
+
+      expect(result.orphanedWorkspacesFlagged).toBe(1);
+      expect(stopWorkspaceOnNode).toHaveBeenCalledWith(
+        'node-recovery-orphan',
+        'ws-recovery-orphan',
+        env,
+        'user-1',
+      );
+    });
+  });
+
   describe('result structure', () => {
     it('returns all expected counters', async () => {
       const env = createMockEnv(new Map());
