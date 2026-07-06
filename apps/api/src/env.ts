@@ -746,5 +746,7 @@ export interface Env {
   SANDBOX_ENABLED?: string; // Kill switch for sandbox routes (default: false)
   SANDBOX_EXEC_TIMEOUT_MS?: string; // Default exec timeout in ms (default: 30000)
   SANDBOX_GIT_TIMEOUT_MS?: string; // Git checkout timeout in ms (default: 120000)
+  SANDBOX_SETUP_PROBE_TIMEOUT_MS?: string; // Admin setup-flow probe timeout in ms (default: 15000)
+  SANDBOX_PROBE_OUTPUT_MAX_CHARS?: string; // Max returned probe output chars (default: 4000)
   SANDBOX_SLEEP_AFTER?: string; // Container sleep-after duration (default: 10m)
 }

@@ -1,12 +1,16 @@
 # Cloudflare Sandbox SDK base image — includes the /container-server/sandbox
 # binary that exposes the HTTP API used by getSandbox()/exec()/readFile()/etc.
 # IMPORTANT: The image tag MUST match the @cloudflare/sandbox npm package version.
-FROM docker.io/cloudflare/sandbox:0.9.2
+FROM docker.io/cloudflare/sandbox:0.12.1
 
 # The base image already includes Node.js 20, Bun, git, curl, and common tools.
 # Add any extra tools needed for SAM agent workloads here.
 RUN apt-get update && apt-get install -y --no-install-recommends jq && \
     rm -rf /var/lib/apt/lists/*
+
+# Staging spike tools for guided subscription setup.
+# Productionizing this should pin and verify CLI versions explicitly.
+RUN npm install -g @openai/codex@0.142.5 @anthropic-ai/claude-code@2.1.201
 
 # Create workspace directory (base image may already have it, but ensure it exists)
 RUN mkdir -p /workspace
