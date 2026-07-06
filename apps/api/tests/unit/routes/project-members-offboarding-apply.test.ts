@@ -83,6 +83,7 @@ function makeMember(
 }
 
 function makePlan(overrides: Partial<schema.ProjectMemberOffboardingPlan> = {}) {
+  const now = Date.now();
   return {
     id: 'off_plan',
     projectId: 'proj-1',
@@ -90,8 +91,8 @@ function makePlan(overrides: Partial<schema.ProjectMemberOffboardingPlan> = {}) 
     requestedBy: 'owner-user',
     status: 'preview',
     resourceSummaryJson: '{}',
-    createdAt: '2026-07-05T00:00:00.000Z',
-    expiresAt: '2026-07-06T01:00:00.000Z',
+    createdAt: new Date(now - 60_000).toISOString(),
+    expiresAt: new Date(now + 60 * 60_000).toISOString(),
     appliedAt: null,
     ...overrides,
   };

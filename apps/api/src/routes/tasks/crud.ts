@@ -50,6 +50,7 @@ import {
   isExecutableTaskStatus,
   isTaskStatus,
 } from '../../services/task-status';
+import { cleanupWorkspaceForDeletion } from '../../services/workspace-cleanup';
 import {
   appendStatusEvent,
   computeBlockedForTask,
@@ -697,6 +698,10 @@ crudRoutes.post('/:taskId/close', requireAuth(), requireApproved(), async (c) =>
   await requireProjectCapability(db, projectId, userId, 'task:write');
   const task = await requireOwnedTaskById(db, taskId, userId);
 
+  if (task.projectId !== projectId) {
+    throw errors.notFound('Task');
+  }
+
   // Only conversation-mode tasks can be closed via this endpoint
   if (task.taskMode !== 'conversation') {
     throw errors.badRequest('Only conversation-mode tasks can be closed via this endpoint. Use complete_task for task-mode tasks.');
@@ -731,19 +736,29 @@ crudRoutes.post('/:taskId/close', requireAuth(), requireApproved(), async (c) =>
     ).catch(() => { /* best-effort */ })
   );
 
-  // Stop the DO session if the task has a workspace with a chat session (best-effort)
+  // Immediately clean up the linked workspace so Archive has the same
+  // user-visible lifecycle semantics as Complete & Delete.
   if (task.workspaceId) {
-    c.executionCtx.waitUntil(
-      (async () => {
-        const [ws] = await db.select({ chatSessionId: schema.workspaces.chatSessionId })
-          .from(schema.workspaces)
-          .where(eq(schema.workspaces.id, task.workspaceId!))
-          .limit(1);
-        if (ws?.chatSessionId) {
-          await projectDataService.stopSession(c.env, projectId, ws.chatSessionId);
-        }
-      })().catch((e) => { log.error('task.close_session_stop_failed', { taskId, projectId, error: String(e) }); })
-    );
+    const [workspace] = await db
+      .select()
+      .from(schema.workspaces)
+      .where(and(
+        eq(schema.workspaces.id, task.workspaceId),
+        eq(schema.workspaces.userId, userId),
+        eq(schema.workspaces.projectId, projectId)
+      ))
+      .limit(1);
+
+    if (workspace) {
+      await cleanupWorkspaceForDeletion({
+        db,
+        env: c.env,
+        workspace,
+        userId,
+        waitUntil: (promise) => c.executionCtx.waitUntil(promise),
+        logContext: { taskId, projectId, closePath: 'conversation' },
+      });
+    }
   }
 
   log.info('task.conversation_closed', { taskId, projectId, userId });
