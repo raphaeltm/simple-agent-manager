@@ -45,15 +45,17 @@ export function useAttachments(projectId: string, setSubmitError: (e: string | n
     }
   }, [projectId]);
 
-  const handleChatFilesSelected = useCallback((files: FileList | null) => {
-    if (!files || files.length === 0) return;
+  const handleChatFilesSelected = useCallback((files: File[] | FileList | null) => {
+    if (!files || ('length' in files && files.length === 0)) return;
+    const fileArray = Array.from(files);
+    if (fileArray.length === 0) return;
     const maxFiles = ATTACHMENT_DEFAULTS.MAX_FILES;
     const maxBytes = ATTACHMENT_DEFAULTS.UPLOAD_MAX_BYTES;
     const batchMax = ATTACHMENT_DEFAULTS.UPLOAD_BATCH_MAX_BYTES;
     const newFiles: AttachmentUploadState[] = [];
     const currentTotal = chatAttachments.reduce((sum, a) => sum + a.file.size, 0);
     let runningTotal = currentTotal;
-    for (const file of Array.from(files)) {
+    for (const file of fileArray) {
       if (chatAttachments.length + newFiles.length >= maxFiles) {
         setSubmitError(`Maximum ${maxFiles} files allowed`);
         break;

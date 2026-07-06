@@ -20,7 +20,7 @@ export function FollowUpInput({
   value: string;
   onChange: (v: string) => void;
   onSend: () => void;
-  onUploadFiles?: (files: FileList) => void;
+  onUploadFiles?: (files: File[] | FileList) => void;
   sending: boolean;
   uploading?: boolean;
   placeholder: string;
@@ -43,7 +43,9 @@ export function FollowUpInput({
         slashCommands={slashCommands}
         agentProfiles={agentProfiles}
         onFilesSelected={onUploadFiles ? (files) => {
-          if (files && files.length > 0) onUploadFiles(files);
+          if (!files) return;
+          const arr = Array.from(files);
+          if (arr.length > 0) onUploadFiles(arr);
         } : undefined}
         showShortcutHint={!isMobile}
       />

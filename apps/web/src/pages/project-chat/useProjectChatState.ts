@@ -521,7 +521,8 @@ export function useProjectChatState() {
 
   const handleSubmit = async () => {
     const trimmed = message.trim();
-    if (!trimmed) return;
+    const hasCompletedAttachments = attachments.chatAttachments.some((a) => a.status === 'complete');
+    if (!trimmed && !hasCompletedAttachments) return;
     if (!hasCloudCredentials) {
       setSubmitError('Cloud credentials required. Connect a cloud provider in Settings, or ask your admin to enable platform trial.');
       return;
@@ -538,7 +539,7 @@ export function useProjectChatState() {
 
       const attachmentRefs = getCompletedAttachmentRefs(attachments.chatAttachments);
       const baseRequest = buildBaseSubmitRequest({
-        message: trimmed,
+        message: trimmed || 'See attached files',
         agentProfileId: submitProfileId,
         skillId: selectedSkillId,
         selectedAgentType,

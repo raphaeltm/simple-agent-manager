@@ -1,12 +1,15 @@
 import type { MentionPaletteHandle, SlashCommand, SlashCommandPaletteHandle } from '@simple-agent-manager/acp-client';
 import { MentionPalette, SlashCommandPalette, VoiceButton } from '@simple-agent-manager/acp-client';
 import type { AgentProfile, AgentSkill } from '@simple-agent-manager/shared';
-import { Paperclip, X } from 'lucide-react';
+import { Paperclip, Upload, X } from 'lucide-react';
 import type { MutableRefObject } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { formatFileSize } from '../../lib/file-utils';
 import { SkillSelector } from '../skills/SkillSelector';
+
+/** Character threshold above which pasted plain text is auto-converted to a file attachment. */
+const PASTE_TEXT_THRESHOLD = 3000;
 
 export interface ProjectChatComposerAttachment {
   file: File;
@@ -29,7 +32,7 @@ interface ProjectChatComposerProps {
   selectedSkillId?: string | null;
   onSkillChange?: (skillId: string | null) => void;
   attachments?: ProjectChatComposerAttachment[];
-  onFilesSelected?: (files: FileList | null) => void;
+  onFilesSelected?: (files: File[] | FileList | null) => void;
   onRemoveAttachment?: (index: number) => void;
   fileInputRef?: MutableRefObject<HTMLInputElement | null>;
   uploading?: boolean;
@@ -141,9 +144,98 @@ export function ProjectChatComposer({
     [cursorPos, mentionTriggerIndex, onChange, value],
   );
 
-  const handleFilesSelected = useCallback((files: FileList | null) => {
+  const pasteCounterRef = useRef({ image: 0, text: 0 });
+  const [dragOver, setDragOver] = useState(false);
+  const dragCounterRef = useRef(0);
+
+  const handleFilesSelected = useCallback((files: File[] | FileList | null) => {
     onFilesSelected?.(files);
     if (internalFileInputRef.current) internalFileInputRef.current.value = '';
+  }, [onFilesSelected]);
+
+  const handlePaste = useCallback((event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    if (!onFilesSelected) return;
+    const clipboardData = event.clipboardData;
+
+    // Check for pasted files (images, etc.)
+    const pastedFiles: File[] = [];
+    if (clipboardData.files.length > 0) {
+      for (const file of Array.from(clipboardData.files)) {
+        pasteCounterRef.current.image += 1;
+        const ext = file.type.split('/')[1] ?? 'png';
+        const safeName = `pasted-image-${pasteCounterRef.current.image}.${ext}`;
+        pastedFiles.push(new File([file], safeName, { type: file.type }));
+      }
+    } else {
+      // Check for items with kind === 'file' (screenshots)
+      for (const item of Array.from(clipboardData.items)) {
+        if (item.kind === 'file') {
+          const file = item.getAsFile();
+          if (file) {
+            pasteCounterRef.current.image += 1;
+            const ext = file.type.split('/')[1] ?? 'png';
+            const safeName = `pasted-image-${pasteCounterRef.current.image}.${ext}`;
+            pastedFiles.push(new File([file], safeName, { type: file.type }));
+          }
+        }
+      }
+    }
+
+    if (pastedFiles.length > 0) {
+      event.preventDefault();
+      onFilesSelected(pastedFiles);
+      return;
+    }
+
+    // Check for long text paste
+    const text = clipboardData.getData('text/plain');
+    if (text && text.length > PASTE_TEXT_THRESHOLD) {
+      event.preventDefault();
+      pasteCounterRef.current.text += 1;
+      const fileName = `pasted-text-${pasteCounterRef.current.text}.txt`;
+      const file = new File([text], fileName, { type: 'text/plain' });
+      onFilesSelected([file]);
+      // Insert auto-note if textarea is empty
+      if (!value.trim()) {
+        onChange(`See ${fileName}`);
+      }
+    }
+  }, [onFilesSelected, onChange, value]);
+
+  const handleDragEnter = useCallback((event: React.DragEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    dragCounterRef.current += 1;
+    if (event.dataTransfer.types.includes('Files')) {
+      setDragOver(true);
+    }
+  }, []);
+
+  const handleDragLeave = useCallback((event: React.DragEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    dragCounterRef.current -= 1;
+    if (dragCounterRef.current <= 0) {
+      dragCounterRef.current = 0;
+      setDragOver(false);
+    }
+  }, []);
+
+  const handleDragOver = useCallback((event: React.DragEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+  }, []);
+
+  const handleDrop = useCallback((event: React.DragEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    dragCounterRef.current = 0;
+    setDragOver(false);
+    if (!onFilesSelected) return;
+    const files = event.dataTransfer.files;
+    if (files.length > 0) {
+      onFilesSelected(Array.from(files));
+    }
   }, [onFilesSelected]);
 
   const handleKeyDown = useCallback((event: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -155,10 +247,25 @@ export function ProjectChatComposer({
     }
   }, [disabled, onSend, sending]);
 
-  const sendDisabled = sending || disabled || !value.trim() || uploading;
+  const hasCompletedAttachments = attachments.some((a) => a.status === 'complete');
+  const sendDisabled = sending || disabled || (!value.trim() && !hasCompletedAttachments) || uploading;
 
   return (
-    <>
+    <div
+      className="relative"
+      onDragEnter={onFilesSelected ? handleDragEnter : undefined}
+      onDragLeave={onFilesSelected ? handleDragLeave : undefined}
+      onDragOver={onFilesSelected ? handleDragOver : undefined}
+      onDrop={onFilesSelected ? handleDrop : undefined}
+    >
+      {dragOver && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center rounded-lg border-2 border-dashed border-accent bg-accent/10 backdrop-blur-[2px]">
+          <div className="flex flex-col items-center gap-2 text-accent">
+            <Upload size={28} />
+            <span className="text-sm font-medium">Drop files to attach</span>
+          </div>
+        </div>
+      )}
       {slashCommands.length > 0 && (
         <SlashCommandPalette
           ref={slashPaletteRef}
@@ -269,6 +376,7 @@ export function ProjectChatComposer({
           }}
           onSelect={(event) => setCursorPos(event.currentTarget.selectionStart ?? 0)}
           onKeyDown={handleKeyDown}
+          onPaste={handlePaste}
           placeholder={placeholder}
           disabled={sending || disabled}
           rows={1}
@@ -302,6 +410,6 @@ export function ProjectChatComposer({
           Press Ctrl+Enter to send, Enter for new line
         </div>
       )}
-    </>
+    </div>
   );
 }

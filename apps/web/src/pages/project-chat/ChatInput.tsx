@@ -69,7 +69,7 @@ type ChatInputProps = Readonly<{
   suggestProfileName: (agentType: string | null, workType: TaskMode | null) => string;
   slashCommands?: SlashCommand[];
   attachments?: ChatAttachmentDisplay[];
-  onFilesSelected?: (files: FileList | null) => void;
+  onFilesSelected?: (files: File[] | FileList | null) => void;
   onRemoveAttachment?: (index: number) => void;
   fileInputRef?: MutableRefObject<HTMLInputElement | null>;
   uploading?: boolean;
