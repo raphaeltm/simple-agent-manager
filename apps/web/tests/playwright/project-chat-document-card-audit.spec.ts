@@ -76,6 +76,34 @@ function docToolMsg(opts: {
   };
 }
 
+/**
+ * Codex persists library tool calls with a `<server>/<tool>` slash title and NO
+ * explicit toolName; the result JSON lives in the message content (no dedicated
+ * rawOutput). This is the exact production regression shape — the card must be
+ * recovered from the title + content.
+ */
+function codexReconstructMsg(opts: {
+  id: string;
+  sequence: number;
+  title: string;
+  content: string;
+}) {
+  return {
+    id: opts.id,
+    sessionId: SESSION_ID,
+    role: 'tool',
+    content: opts.content,
+    toolMetadata: {
+      toolCallId: opts.id,
+      status: 'completed',
+      title: opts.title,
+      // No toolName, no rawOutput — recovered from title + content.
+    },
+    createdAt: Date.now() - 40_000 + opts.sequence * 1000,
+    sequence: opts.sequence,
+  };
+}
+
 const LONG_CAPTION =
   'This is the auth flow explainer written last week. Section 3 (token refresh) is the part that answers your question about why concurrent workspaces were racing on the refresh token — the rest is background context you can skim.';
 
@@ -128,6 +156,40 @@ const MOCK_MESSAGES = [
   },
 ];
 
+// Codex session: separate short list so the virtualized mobile view keeps every
+// card in the window. Exercises the agent-agnostic recognition fix directly.
+const CODEX_MESSAGES = [
+  {
+    id: 'codex-user-1',
+    sessionId: SESSION_ID,
+    role: 'user',
+    content: 'Render the architecture prototype.',
+    toolMetadata: null,
+    createdAt: Date.now() - 50_000,
+    sequence: 1,
+  },
+  // Slash title, no toolName/rawOutput — recovered from title + content JSON.
+  codexReconstructMsg({
+    id: 'codex-html',
+    sequence: 2,
+    title: 'sam-mcp/display_from_library',
+    content: JSON.stringify({
+      fileId: 'codex-html',
+      filename: 'sam-architecture-basic.html',
+      mimeType: 'text/html; charset=utf-8',
+      sizeBytes: 15357,
+      caption: 'Basic SAM architecture visualization render test.',
+    }),
+  }),
+  // Unusable content → generic fallback, never a broken empty document card.
+  codexReconstructMsg({
+    id: 'codex-bad',
+    sequence: 3,
+    title: 'sam-mcp/display_from_library',
+    content: 'the file could not be rendered',
+  }),
+];
+
 async function setupMocks(page: Page) {
   await page.addInitScript(() => {
     localStorage.setItem('sam-onboarding-wizard-dismissed-test-user', 'true');
@@ -170,6 +232,31 @@ async function renderAndAudit(page: Page, name: string) {
   await assertNoOverflow(page);
 }
 
+async function setupCodexMocks(page: Page) {
+  await page.addInitScript(() => {
+    localStorage.setItem('sam-onboarding-wizard-dismissed-test-user', 'true');
+  });
+  await setupProjectChatMocks(page, {
+    projectId: PROJECT_ID,
+    project: MOCK_PROJECT,
+    session: MOCK_SESSION,
+    messages: CODEX_MESSAGES,
+  });
+}
+
+async function renderAndAuditCodex(page: Page, name: string) {
+  await page.goto(`/projects/${PROJECT_ID}/chat/${SESSION_ID}`);
+
+  // Slash-title Codex library call is recovered as a DocumentCard (the fix).
+  await expect(page.getByRole('button', { name: 'Open sam-architecture-basic.html' })).toBeVisible();
+  await expect(page.getByText('Basic SAM architecture visualization render test.')).toBeVisible();
+  // Unusable content → generic tool card, so no openable document button for it.
+  expect(await page.getByRole('button', { name: /Open .*could not be rendered/ }).count()).toBe(0);
+
+  await screenshot(page, name);
+  await assertNoOverflow(page);
+}
+
 test.describe('Project Chat Document Cards — Mobile', () => {
   test('renders tiered document cards without overflow', async ({ page }) => {
     await setupMocks(page);
@@ -183,5 +270,21 @@ test.describe('Project Chat Document Cards — Desktop', () => {
   test('renders tiered document cards without overflow', async ({ page }) => {
     await setupMocks(page);
     await renderAndAudit(page, 'project-chat-document-cards-desktop');
+  });
+});
+
+test.describe('Codex slash-title document cards — Mobile', () => {
+  test('recovers the DocumentCard and falls back on bad payloads', async ({ page }) => {
+    await setupCodexMocks(page);
+    await renderAndAuditCodex(page, 'project-chat-codex-document-cards-mobile');
+  });
+});
+
+test.describe('Codex slash-title document cards — Desktop', () => {
+  test.use({ viewport: { width: 1280, height: 800 }, isMobile: false });
+
+  test('recovers the DocumentCard and falls back on bad payloads', async ({ page }) => {
+    await setupCodexMocks(page);
+    await renderAndAuditCodex(page, 'project-chat-codex-document-cards-desktop');
   });
 });
