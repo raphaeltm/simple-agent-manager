@@ -181,10 +181,17 @@ const CODEX_MESSAGES = [
       caption: 'Basic SAM architecture visualization render test.',
     }),
   }),
+  // fileId present but no mimeType → icon-only document card (no inline preview).
+  codexReconstructMsg({
+    id: 'codex-nomime',
+    sequence: 3,
+    title: 'sam-mcp/display_from_library',
+    content: JSON.stringify({ fileId: 'codex-nomime', filename: 'notes-no-mimetype.txt', sizeBytes: 42 }),
+  }),
   // Unusable content → generic fallback, never a broken empty document card.
   codexReconstructMsg({
     id: 'codex-bad',
-    sequence: 3,
+    sequence: 4,
     title: 'sam-mcp/display_from_library',
     content: 'the file could not be rendered',
   }),
@@ -250,6 +257,8 @@ async function renderAndAuditCodex(page: Page, name: string) {
   // Slash-title Codex library call is recovered as a DocumentCard (the fix).
   await expect(page.getByRole('button', { name: 'Open sam-architecture-basic.html' })).toBeVisible();
   await expect(page.getByText('Basic SAM architecture visualization render test.')).toBeVisible();
+  // fileId without mimeType still renders as an (icon-only) document card.
+  await expect(page.getByRole('button', { name: 'Open notes-no-mimetype.txt' })).toBeVisible();
   // Unusable content → generic tool card, so no openable document button for it.
   expect(await page.getByRole('button', { name: /Open .*could not be rendered/ }).count()).toBe(0);
 

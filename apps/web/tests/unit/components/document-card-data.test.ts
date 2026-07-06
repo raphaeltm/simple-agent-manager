@@ -2,6 +2,7 @@ import type { ToolCallItem } from '@simple-agent-manager/acp-client';
 import { describe, expect, it } from 'vitest';
 
 import {
+  DOCUMENT_CARD_TOOLS,
   extractDocumentCardData,
   normalizeToolName,
 } from '../../../src/components/project-message-view/tool-cards/document-card-data';
@@ -48,6 +49,14 @@ describe('normalizeToolName', () => {
 
   it('returns built-in tool names unchanged', () => {
     expect(normalizeToolName('Read')).toBe('Read');
+  });
+
+  it('returns the server segment (not a card tool) for trailing-separator inputs', () => {
+    // Degenerate titles resolve to the server name, which is NOT a document tool,
+    // so recognition safely declines rather than matching.
+    expect(normalizeToolName('sam-mcp/')).toBe('sam-mcp');
+    expect(normalizeToolName('mcp__sam-mcp__')).toBe('sam-mcp');
+    expect(DOCUMENT_CARD_TOOLS.has(normalizeToolName('sam-mcp/') as string)).toBe(false);
   });
 
   it('returns undefined for undefined', () => {
@@ -146,5 +155,15 @@ describe('extractDocumentCardData', () => {
     }));
 
     expect(data).toMatchObject({ state: 'ready', fileId: 'f-obj', fileName: 'x.md' });
+  });
+
+  it('tolerates a raw JSON string rawOutput (adapter robustness)', () => {
+    const data = extractDocumentCardData(toolItem({
+      toolName: 'mcp__sam-mcp__display_from_library',
+      rawInput: { fileId: 'f-str' },
+      rawOutput: JSON.stringify({ fileId: 'f-str', filename: 'y.md', mimeType: 'text/markdown', sizeBytes: 12 }),
+    }));
+
+    expect(data).toMatchObject({ state: 'ready', fileId: 'f-str', fileName: 'y.md' });
   });
 });

@@ -870,6 +870,29 @@ describe('chatMessagesToConversationItems', () => {
     expect(matchToolCard(tool)).toBe(DocumentCard);
   });
 
+  it('recovers the card when the VM agent stored an empty-string toolName', () => {
+    // Pre-fix nodes emit ToolName:"" (omitted) for slash tools; a resurrected
+    // row could carry an explicit empty string. The `&& meta.toolName` guard must
+    // fall through to title inference rather than treating "" as the discriminator.
+    const result = {
+      toolCallId: 'tc-codex-empty',
+      title: 'sam-mcp/display_from_library',
+      toolName: '',
+      kind: 'other',
+      status: 'completed',
+    };
+    const items = chatMessagesToConversationItems([
+      toolMsg({
+        id: 'codex-empty',
+        content: JSON.stringify({ fileId: 'f-empty', filename: 'e.html', mimeType: 'text/html', sizeBytes: 5 }),
+        toolMetadata: result,
+      }),
+    ]);
+    const tool = items[0] as ToolCallItem;
+    expect(tool.toolName).toBe('sam-mcp/display_from_library');
+    expect(matchToolCard(tool)).toBe(DocumentCard);
+  });
+
   it('falls back to the generic card for a Codex library row with unusable content', () => {
     // Name matches (slash library tool) but the content is not a document
     // payload → no fileId → generic card, never a broken empty DocumentCard.

@@ -331,6 +331,29 @@ func TestExtractMessages_ToolName_CodexNonLibrarySlash(t *testing.T) {
 	}
 }
 
+// TestExtractMessages_ToolName_BareTitle verifies a bare library tool name used
+// directly as the title (no server prefix) is recognized.
+func TestExtractMessages_ToolName_BareTitle(t *testing.T) {
+	notif := acpsdk.SessionNotification{
+		SessionId: "sess-1",
+		Update: acpsdk.SessionUpdate{
+			ToolCall: &acpsdk.SessionUpdateToolCall{
+				ToolCallId: "tc-bare",
+				Title:      "display_from_library",
+				RawInput:   map[string]any{"fileId": "f-bare"},
+			},
+		},
+	}
+
+	meta := unmarshalMeta(t, ExtractMessages(notif))
+	if meta.ToolName != "display_from_library" {
+		t.Fatalf("expected bare tool name recognized, got %q", meta.ToolName)
+	}
+	if meta.RawInput == nil {
+		t.Fatalf("expected rawInput captured for bare library tool, got nil")
+	}
+}
+
 // TestNormalizeToolNameBase covers the delimiter-agnostic normalizer across
 // every adapter separator convention plus the capture gate that keys on it.
 func TestNormalizeToolNameBase(t *testing.T) {
@@ -348,6 +371,8 @@ func TestNormalizeToolNameBase(t *testing.T) {
 		{"Read", "Read", false},
 		{"Bash", "Bash", false},
 		{"sam-mcp/list_library_files", "list_library_files", false},
+		{"sam-mcp/", "sam-mcp", false},     // trailing separator → server segment, not a card tool
+		{"mcp__sam-mcp__", "sam-mcp", false}, // trailing double-underscore
 		{"", "", false},
 	}
 	for _, c := range cases {

@@ -50,6 +50,7 @@ describe('matchToolCard registry', () => {
       'sam-mcp/upload_to_library',
       'sam-mcp-1/replace_library_file', // multi-server naming
       'sam-mcp.display_from_library', // dotted separator
+      'sam-mcp:display_from_library', // colon separator
     ]) {
       expect(matchToolCard(toolItem({ title, toolName: undefined, rawOutput: readyOutput }))).toBe(DocumentCard);
     }
