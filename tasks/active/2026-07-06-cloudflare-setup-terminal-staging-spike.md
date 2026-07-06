@@ -16,6 +16,13 @@ This is a spike. Do not expose a user-facing production setup flow, and do not m
 - OpenAI Codex docs support `codex login --device-auth`, file-backed credentials under `CODEX_HOME`, and `cli_auth_credentials_store = "file"`.
 - Existing workspace terminals are workspace-scoped and should not be reused directly for setup sessions.
 - Initial staging deploy proved the Sandbox image/CLI install path builds, but the admin probe routes stayed disabled because the deploy pipeline did not pass `SANDBOX_*` GitHub environment variables into generated Wrangler env config.
+- Second staging deploy propagated `SANDBOX_ENABLED=true`, `SANDBOX_SETUP_PROBE_TIMEOUT_MS=15000`, and `SANDBOX_PROBE_OUTPUT_MAX_CHARS=4000` into the live `sam-api-staging` Worker.
+- Live admin status check returned `enabled=true`, `bindingAvailable=true`, `execTimeoutMs=30000`, `setupProbeTimeoutMs=15000`, and `sleepAfter=10m`.
+- Live CLI probe in Cloudflare Sandbox returned Node `v22.22.3`, npm `10.9.8`, Codex CLI `0.142.5`, and Claude Code `2.1.201`.
+- Live Codex setup probe reached the device-code flow and timed out after printing `https://auth.openai.com/codex/device` plus a one-time code; no completed `auth.json` token summary was produced.
+- Live Claude setup-token probe timed out with empty stdout/stderr under non-interactive `exec`; a real browser terminal/PTTY flow is likely required to evaluate Claude token entry/output behavior.
+- Live terminal probe upgraded to WebSocket (`101`) and accepted xterm-style binary terminal input; the PTY echoed a marker from a shell in `/workspace`.
+- Creating several separate Sandbox IDs during the probe triggered `Maximum number of running container instances exceeded`; the design needs one setup sandbox/session per user flow, explicit cleanup/lifecycle controls, and concurrency limits.
 
 ## Implementation Checklist
 
@@ -26,8 +33,8 @@ This is a spike. Do not expose a user-facing production setup flow, and do not m
 - [x] Run focused local validation.
 - [x] Deploy the branch to staging through `deploy-staging.yml` and confirm the Cloudflare deploy job succeeds.
 - [x] Add deploy-pipeline support for staging `SANDBOX_*` Worker vars.
-- [ ] Exercise staging probes and record exact results.
-- [ ] Upload a findings report to the SAM library.
+- [x] Exercise staging probes and record exact results.
+- [x] Upload a findings report to the SAM library.
 
 ## Acceptance Criteria
 
@@ -41,6 +48,7 @@ This is a spike. Do not expose a user-facing production setup flow, and do not m
 
 - Idea `01KRPWSZWFT0Y06DH9VEXC7CYQ`
 - SAM task `01KWWMYSBC1PWGNJ3VXEVSTTMD`
+- SAM library file `01KWWT4Y2TKP16NJT37B3BD5Z0`
 - `apps/api/src/routes/admin-sandbox.ts`
 - `apps/api/Dockerfile.sandbox`
 - `apps/api/wrangler.toml`
