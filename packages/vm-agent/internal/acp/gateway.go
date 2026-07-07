@@ -93,6 +93,10 @@ type MessageReportEntry struct {
 	Content      string
 	ToolMetadata string
 	Timestamp    string
+	// Origin marks how the message was produced. Empty/"user" for normal user
+	// messages; "system" for SAM-injected content (e.g. the get_instructions
+	// reminder) that the UI collapses. Sourced from the ACP block _meta marker.
+	Origin string
 }
 
 // GatewayConfig holds configuration for the ACP gateway and SessionHost.

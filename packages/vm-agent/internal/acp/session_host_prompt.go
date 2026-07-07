@@ -355,6 +355,7 @@ func (h *SessionHost) injectUserMessageNotifications(sessionID acpsdk.SessionId,
 					Role:         m.Role,
 					Content:      m.Content,
 					ToolMetadata: m.ToolMetadata,
+					Origin:       m.Origin,
 				}); err != nil {
 					slog.Warn("messagereport: enqueue synthetic user message failed (non-blocking)",
 						"messageId", m.MessageID, "error", err)
