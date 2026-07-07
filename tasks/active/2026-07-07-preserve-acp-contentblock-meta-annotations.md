@@ -91,8 +91,58 @@ survives to (a) the agent CLI and (b) the live user-message mirror broadcast. No
   `packages/vm-agent/` change that normally requires infra verification (rule 22/13/27); since that
   is skipped, the PR must be labeled `needs-human-review` and MUST NOT be self-merged.
 
+## Outcome / key finding (in-session test surfaced an SDK limitation)
+
+Implementing + testing this slice uncovered a blocking constraint that the earlier
+struct-level research (reading `ContentBlockText`'s fields) missed:
+
+**`acp-go-sdk` v0.13.5's `ContentBlock.MarshalJSON()` for the text variant deliberately
+reconstructs the wire object as ONLY `{type, text}` — dropping `_meta` AND `annotations`.**
+(`types_gen.go:1473+`; the text branch builds `nm := {type, text}` and returns it.) This is
+the exact serializer used BOTH when the SDK sends a prompt to the agent CLI (`acpConn.Prompt`)
+AND when it marshals `SessionNotification` blocks for the mirror broadcast.
+
+Consequences:
+- `parsePromptBlocks` READING `_meta`/`annotations` inbound works (the incoming JSON-RPC params
+  are unmarshaled into our own struct — proven by test). ✅
+- The marker CANNOT be carried OUTWARD on the ACP content block with this SDK: the agent CLI
+  never receives it (fine — we don't need it to), and the SDK-marshaled mirror broadcast strips
+  it too. ❌
+- **Design correction:** the origin-tagging consumer slice must NOT rely on the ACP block's
+  `_meta` surviving. It must read the inbound marker (via `parsePromptBlocks`) and propagate
+  `origin` through the vm-agent's OWN mirror/persistence fields (e.g. `ExtractedMessage.Origin` +
+  a distinct broadcast envelope field), then DO column + web consume that.
+
+## What this PR ships (revised)
+
+- `parsePromptBlocks` preserves inbound `_meta`/`annotations` (the requested foundation; makes the
+  marker available in-process for the future consumer).
+- Characterization tests that CODIFY the SDK stripping constraint so it cannot silently regress:
+  - `TestContentBlockMarshal_DropsMetaAndAnnotations` — root cause (SDK marshaler).
+  - `TestInjectUserMessageNotifications_SDKMarshalStripsMarker` — real mirror path drops it.
+  These fail loudly if a future SDK bump starts preserving the fields (→ revisit whether the
+  marker can ride the ACP block directly).
+
+## Checklist status
+
+- [x] Widen `parsePromptBlocks` to preserve `_meta`/`annotations` (inbound read).
+- [~] Marker-convention constant — DEFERRED to the consumer slice (avoid an unconsumed symbol);
+      convention documented here + in the idea instead.
+- [x] Go unit tests: inbound preservation (3 tests) + outbound-strip characterization (2 tests).
+- [x] `go build ./...`, `go vet ./internal/acp`, `go test ./internal/acp/...`, gofmt — all green.
+
+## Follow-up slices (updated by this finding)
+
+1. Producer: task-runner emits the injected instruction as a separate block carrying the marker
+   in the JSON-RPC prompt params (`prompt[i]._meta` / `annotations.audience`).
+2. Consumer: vm-agent reads the marker via `parsePromptBlocks`, sets `origin` on
+   `ExtractedMessage` + a SAM-owned broadcast field (NOT the SDK block); additive DO `origin`
+   column excluded from FTS/dedup.
+3. Web: render the origin=system user-message segment collapsed with a chevron.
+
 ## References
 
 - Idea `01KWYF4H28MM5T679P55BMZXMT`
 - `.claude/rules/23-cross-boundary-contract-tests.md`, `.claude/rules/10-e2e-verification.md`
 - ACP extensibility: https://agentclientprotocol.com/protocol/extensibility
+- acp-go-sdk v0.13.5 `types_gen.go` `ContentBlock.MarshalJSON` (text variant strips `_meta`/`annotations`)

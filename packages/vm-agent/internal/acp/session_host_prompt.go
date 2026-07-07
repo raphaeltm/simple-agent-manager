@@ -278,11 +278,20 @@ func (h *SessionHost) currentACPSession() (*acpsdk.ClientSideConnection, acpsdk.
 }
 
 func parsePromptBlocks(params json.RawMessage) ([]acpsdk.ContentBlock, string, string, error) {
+	// `_meta` and `annotations` are ACP-standard, optional fields on a text content
+	// block (see agentclientprotocol.com/protocol/extensibility). They carry
+	// implementation-specific metadata (e.g. a SAM "this block is system-injected"
+	// marker, or `annotations.audience: ["assistant"]`). We must preserve them so they
+	// survive BOTH to the agent CLI (`acpConn.Prompt`) and to the user-message mirror
+	// broadcast (`injectUserMessageNotifications`). Using `acpsdk.TextBlock(text)` here
+	// would silently drop them — it only sets Text+Type.
 	var promptParams struct {
 		MessageID string `json:"messageId"`
 		Prompt    []struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
+			Type        string              `json:"type"`
+			Text        string              `json:"text"`
+			Meta        map[string]any      `json:"_meta,omitempty"`
+			Annotations *acpsdk.Annotations `json:"annotations,omitempty"`
 		} `json:"prompt"`
 	}
 	if err := json.Unmarshal(params, &promptParams); err != nil {
@@ -295,7 +304,12 @@ func parsePromptBlocks(params json.RawMessage) ([]acpsdk.ContentBlock, string, s
 		if p.Type != "text" || p.Text == "" {
 			continue
 		}
-		blocks = append(blocks, acpsdk.TextBlock(p.Text))
+		blocks = append(blocks, acpsdk.ContentBlock{Text: &acpsdk.ContentBlockText{
+			Type:        "text",
+			Text:        p.Text,
+			Meta:        p.Meta,
+			Annotations: p.Annotations,
+		}})
 		if firstTextContent == "" {
 			firstTextContent = p.Text
 		}
