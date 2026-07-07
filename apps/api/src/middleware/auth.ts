@@ -54,7 +54,7 @@ function resolveSessionStatus(rawStatus: unknown, userId: string): UserStatus {
 }
 
 type AuthSession = NonNullable<
-  Awaited<ReturnType<ReturnType<typeof createAuth>['api']['getSession']>>
+  Awaited<ReturnType<Awaited<ReturnType<typeof createAuth>>['api']['getSession']>>
 >;
 
 /**
@@ -87,7 +87,7 @@ function buildAuthContext(session: AuthSession): AuthContext {
  */
 export function requireAuth(): MiddlewareHandler<{ Bindings: Env }> {
   return async (c: Context<{ Bindings: Env }>, next: Next) => {
-    const auth = createAuth(c.env);
+    const auth = await createAuth(c.env);
     const session = await auth.api.getSession({
       headers: c.req.raw.headers,
     });
@@ -110,7 +110,7 @@ export function requireAuth(): MiddlewareHandler<{ Bindings: Env }> {
 export function optionalAuth(): MiddlewareHandler<{ Bindings: Env }> {
   return async (c: Context<{ Bindings: Env }>, next: Next) => {
     try {
-      const auth = createAuth(c.env);
+      const auth = await createAuth(c.env);
       const session = await auth.api.getSession({
         headers: c.req.raw.headers,
       });

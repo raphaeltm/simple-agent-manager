@@ -6,7 +6,6 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { expectJsonRecord, optionalJsonRecord } from '../lib/runtime-validation';
-import { getWebhookSecret } from '../lib/secrets';
 import { ulid } from '../lib/ulid';
 import { AppError, errors } from '../middleware/error';
 import { verifyWebhookSignature } from '../services/github-app';
@@ -18,6 +17,7 @@ import {
 } from '../services/github-installation-accounts';
 import { getStoredInstallationId } from '../services/github-installation-ids';
 import { handleGitHubEventForTriggers } from '../services/github-trigger-handler';
+import { getGitHubWebhookSecret } from '../services/platform-config';
 
 type GitHubContext = Context<{ Bindings: Env }>;
 
@@ -31,7 +31,10 @@ export async function handleGitHubWebhook(c: GitHubContext): Promise<Response> {
     throw errors.unauthorized('Missing webhook signature');
   }
 
-  const webhookSecret = getWebhookSecret(c.env);
+  const webhookSecret = await getGitHubWebhookSecret(c.env);
+  if (!webhookSecret) {
+    throw errors.internal('GitHub webhook secret is not configured');
+  }
   const isValid = await verifyWebhookSignature(payload, signature, webhookSecret);
   if (!isValid) {
     throw errors.unauthorized('Invalid webhook signature');

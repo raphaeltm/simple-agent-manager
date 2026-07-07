@@ -39,6 +39,7 @@ import {
   summarizeInstallationRows,
 } from '../services/github-route-helpers';
 import { getGitHubUserAccessToken } from '../services/github-user-access-token';
+import { getGitHubAppConfig } from '../services/platform-config';
 import { handleGitHubWebhook } from './github-webhook';
 
 const githubRoutes = new Hono<{ Bindings: Env }>();
@@ -86,13 +87,12 @@ githubRoutes.get('/installations', requireAuth(), requireApproved(), async (c) =
 
 /**
  * GET /api/github/install-url - Get GitHub App installation URL
- * Requires GITHUB_APP_SLUG env var per constitution principle XI (no hardcoded values).
+ * Requires GitHub App slug from runtime config or environment fallback.
  */
 githubRoutes.get('/install-url', requireAuth(), requireApproved(), async (c) => {
-  // The app slug must be configured via environment variable
-  const appSlug = c.env.GITHUB_APP_SLUG;
+  const appSlug = (await getGitHubAppConfig(c.env))?.slug;
   if (!appSlug) {
-    throw errors.internal('GITHUB_APP_SLUG environment variable not configured');
+    throw errors.internal('GitHub App slug is not configured');
   }
   const url = `https://github.com/apps/${appSlug}/installations/new`;
   return c.json({ url });

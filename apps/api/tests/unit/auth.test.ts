@@ -16,6 +16,7 @@ type SessionAfterHook = (session: { userId?: string | null }) => Promise<void>;
 
 interface BetterAuthOptions {
   account?: { encryptOAuthTokens?: boolean };
+  socialProviders?: Record<string, unknown>;
   databaseHooks?: {
     user?: {
       create?: {
@@ -46,6 +47,20 @@ vi.mock('better-auth', () => ({
 
 vi.mock('drizzle-orm/d1', () => ({
   drizzle: mocks.drizzle,
+}));
+
+vi.mock('../../src/services/platform-config', () => ({
+  getGitHubOAuthConfig: async (env: { GITHUB_CLIENT_ID?: string; GITHUB_CLIENT_SECRET?: string }) =>
+    env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET
+      ? { clientId: env.GITHUB_CLIENT_ID, clientSecret: env.GITHUB_CLIENT_SECRET }
+      : null,
+  getGoogleLoginOAuthConfig: async (env: {
+    GOOGLE_LOGIN_CLIENT_ID?: string;
+    GOOGLE_LOGIN_CLIENT_SECRET?: string;
+  }) =>
+    env.GOOGLE_LOGIN_CLIENT_ID && env.GOOGLE_LOGIN_CLIENT_SECRET
+      ? { clientId: env.GOOGLE_LOGIN_CLIENT_ID, clientSecret: env.GOOGLE_LOGIN_CLIENT_SECRET }
+      : null,
 }));
 
 function fakeEnv(requireApproval = 'true') {
@@ -79,7 +94,7 @@ function installExistingUsersQuery(existingUsers: Array<{ id: string }>) {
 
 async function getBeforeCreateHook(): Promise<BeforeCreateHook> {
   const { createAuth } = await import('../../src/auth');
-  createAuth(fakeEnv() as never);
+  await createAuth(fakeEnv() as never);
 
   const hook = capturedOptions?.databaseHooks?.user?.create?.before;
   if (!hook) {
@@ -107,7 +122,7 @@ function makeSelfHealDb(opts?: { changes?: number; throwOnRun?: boolean }) {
 
 async function getSessionAfterHook(env: Record<string, unknown>): Promise<SessionAfterHook> {
   const { createAuth } = await import('../../src/auth');
-  createAuth(env as never);
+  await createAuth(env as never);
 
   const hook = capturedOptions?.databaseHooks?.session?.create?.after;
   if (!hook) {
@@ -133,10 +148,45 @@ describe('BetterAuth configuration', () => {
   it('enables OAuth token encryption (encryptOAuthTokens: true)', async () => {
     const { createAuth } = await import('../../src/auth');
 
-    createAuth(fakeEnv() as never);
+    await createAuth(fakeEnv() as never);
 
     expect(capturedOptions).toBeDefined();
     expect(capturedOptions?.account?.encryptOAuthTokens).toBe(true);
+  });
+
+  it('omits social providers when no OAuth config is available', async () => {
+    const { createAuth } = await import('../../src/auth');
+    await createAuth({
+      ...fakeEnv(),
+      GITHUB_CLIENT_ID: undefined,
+      GITHUB_CLIENT_SECRET: undefined,
+    } as never);
+
+    expect(capturedOptions?.socialProviders).toEqual({});
+  });
+
+  it('adds Google social provider when the login client is configured', async () => {
+    const { createAuth } = await import('../../src/auth');
+    await createAuth({
+      ...fakeEnv(),
+      GOOGLE_LOGIN_CLIENT_ID: 'google-login-client',
+      GOOGLE_LOGIN_CLIENT_SECRET: 'google-login-secret',
+    } as never);
+
+    expect(capturedOptions?.socialProviders).toHaveProperty('github');
+    expect(capturedOptions?.socialProviders).toHaveProperty('google');
+  });
+
+  it('does NOT add Google login from the infra Google client', async () => {
+    const { createAuth } = await import('../../src/auth');
+    await createAuth({
+      ...fakeEnv(),
+      // Infra/GCP Google creds present, but no login client — login must stay off.
+      GOOGLE_CLIENT_ID: 'google-infra-client',
+      GOOGLE_CLIENT_SECRET: 'google-infra-secret',
+    } as never);
+
+    expect(capturedOptions?.socialProviders).not.toHaveProperty('google');
   });
 
   it('promotes the first real user when only the trial sentinel exists', async () => {

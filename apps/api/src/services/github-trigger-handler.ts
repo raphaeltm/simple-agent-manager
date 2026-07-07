@@ -25,6 +25,7 @@ import {
   type GitHubWebhookEvent,
   parseWebhookPayload,
 } from './github-trigger-filter';
+import { areGitHubTriggersConfigured } from './platform-config';
 import { submitTriggeredTask } from './trigger-submit';
 import { renderTemplate } from './trigger-template';
 
@@ -55,7 +56,7 @@ export async function handleGitHubEventForTriggers(
 
   // GitHub App webhooks are considered enabled when the signing secret exists.
   // GITHUB_TRIGGERS_ENABLED remains an explicit kill switch for emergency disable.
-  if (!areGitHubTriggersEnabled(env)) {
+  if (!(await areGitHubTriggersConfigured(env))) {
     return { processed: false, deliveryId, matchedTriggers: 0, reason: 'feature_disabled' };
   }
 
@@ -153,13 +154,6 @@ export async function handleGitHubEventForTriggers(
   }
 
   return { processed: totalMatched > 0, deliveryId, matchedTriggers: totalMatched };
-}
-
-function areGitHubTriggersEnabled(env: Env): boolean {
-  if (env.GITHUB_TRIGGERS_ENABLED === 'false') {
-    return false;
-  }
-  return env.GITHUB_TRIGGERS_ENABLED === 'true' || Boolean(env.GITHUB_WEBHOOK_SECRET);
 }
 
 async function processTriggersForProject(

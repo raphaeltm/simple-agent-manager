@@ -10,6 +10,7 @@ import type { Env } from './env';
 import { createModuleLogger } from './lib/logger';
 import { readResponseJson } from './lib/runtime-validation';
 import { getBetterAuthSecret } from './lib/secrets';
+import { getGitHubOAuthConfig, getGoogleLoginOAuthConfig } from './services/platform-config';
 import { isSignupApprovalRequired } from './services/signup-approval';
 
 const log = createModuleLogger('auth');
@@ -98,9 +99,14 @@ function expiresAtFromSeconds(seconds: number | undefined): Date | undefined {
 }
 
 export async function refreshGitHubAccessToken(env: Env, refreshToken: string) {
+  const githubOAuth = await getGitHubOAuthConfig(env);
+  if (!githubOAuth) {
+    throw new Error('GitHub OAuth is not configured');
+  }
+
   const requestBody = new URLSearchParams();
-  requestBody.set('client_id', env.GITHUB_CLIENT_ID);
-  requestBody.set('client_secret', env.GITHUB_CLIENT_SECRET);
+  requestBody.set('client_id', githubOAuth.clientId);
+  requestBody.set('client_secret', githubOAuth.clientSecret);
   requestBody.set('grant_type', 'refresh_token');
   requestBody.set('refresh_token', refreshToken);
 
@@ -189,10 +195,103 @@ export function selectPrimaryGitHubEmail(
  * Create BetterAuth instance with Cloudflare D1 + KV configuration.
  * Uses GitHub OAuth as the social provider.
  */
-export function createAuth(env: Env) {
+export async function createAuth(env: Env) {
   const db = drizzle(env.DATABASE, { schema });
   // Sentinel id is env-overridable; fall back to the shared constant.
   const sentinelId = env.TRIAL_ANONYMOUS_USER_ID ?? TRIAL_ANONYMOUS_USER_ID;
+  const githubOAuth = await getGitHubOAuthConfig(env);
+  const googleOAuth = await getGoogleLoginOAuthConfig(env);
+  const socialProviders: Record<string, unknown> = {};
+  const trustedProviders: string[] = [];
+
+  if (githubOAuth) {
+    trustedProviders.push('github');
+    socialProviders.github = {
+      clientId: githubOAuth.clientId,
+      clientSecret: githubOAuth.clientSecret,
+      scope: ['read:user', 'user:email', 'read:org'],
+      refreshAccessToken: (refreshToken: string) => refreshGitHubAccessToken(env, refreshToken),
+      // Ensure existing linked users are refreshed with latest provider profile data on sign-in.
+      overrideUserInfoOnSignIn: true,
+      // Custom getUserInfo to ensure we persist the account's primary email when available.
+      getUserInfo: async (token: { accessToken?: string }) => {
+        const accessToken = token.accessToken;
+        if (!accessToken) {
+          log.error('missing_github_access_token');
+          return null;
+        }
+
+        const userRes = await fetch('https://api.github.com/user', {
+          headers: githubApiHeaders(accessToken),
+        });
+        if (!userRes.ok) {
+          log.error('github_user_fetch_failed', { status: userRes.status });
+          return null;
+        }
+
+        const user = await readResponseJson(userRes, githubUserSchema, 'github.user');
+        let email = normalizeEmail(user.email);
+
+        // Resolve the user's primary email from /user/emails.
+        // OAuth apps need user:email scope. GitHub Apps need "Email addresses" user permission.
+        try {
+          const emailsRes = await fetch('https://api.github.com/user/emails', {
+            headers: githubApiHeaders(accessToken),
+          });
+          if (emailsRes.ok) {
+            const emailsData = await readResponseJson(emailsRes, v.array(githubEmailSchema), 'github.user_emails');
+            email = selectPrimaryGitHubEmail(email, emailsData);
+          } else {
+            const errorBody = await emailsRes.text();
+            if (emailsRes.status === 403 || emailsRes.status === 404) {
+              log.error('github_emails_unavailable', {
+                status: emailsRes.status,
+                hint: 'Ensure GitHub App user permission "Email addresses" is read-only or OAuth app has user:email scope',
+                responseBody: errorBody,
+              });
+            } else {
+              log.error('github_emails_fetch_failed', { status: emailsRes.status, responseBody: errorBody });
+            }
+          }
+        } catch (err) {
+          log.error('github_emails_fetch_exception', { error: err instanceof Error ? err.message : String(err) });
+        }
+
+        // Last resort: use GitHub noreply email
+        if (!email && user.login && user.id) {
+          email = `${user.id}+${user.login}@users.noreply.github.com`;
+        }
+
+        if (!email) {
+          return null;
+        }
+
+        return {
+          user: {
+            id: String(user.id),
+            email,
+            name: (user.name || user.login || '').trim(),
+            image: user.avatar_url || undefined,
+            emailVerified: true,
+          },
+          data: {
+            githubId: String(user.id),
+            avatarUrl: user.avatar_url || undefined,
+          },
+        };
+      },
+    };
+  }
+
+  if (googleOAuth) {
+    trustedProviders.push('google');
+    socialProviders.google = {
+      clientId: googleOAuth.clientId,
+      clientSecret: googleOAuth.clientSecret,
+      scope: ['openid', 'email', 'profile'],
+      overrideUserInfoOnSignIn: true,
+    };
+  }
 
   return betterAuth({
     database: drizzleAdapter(db, {
@@ -216,83 +315,7 @@ export function createAuth(env: Env) {
         maxAge: 5 * 60, // 5 minutes
       },
     },
-    socialProviders: {
-      github: {
-        clientId: env.GITHUB_CLIENT_ID,
-        clientSecret: env.GITHUB_CLIENT_SECRET,
-        scope: ['read:user', 'user:email', 'read:org'],
-        refreshAccessToken: (refreshToken) => refreshGitHubAccessToken(env, refreshToken),
-        // Ensure existing linked users are refreshed with latest provider profile data on sign-in.
-        overrideUserInfoOnSignIn: true,
-        // Custom getUserInfo to ensure we persist the account's primary email when available.
-        getUserInfo: async (token) => {
-          const accessToken = token.accessToken;
-          if (!accessToken) {
-            log.error('missing_github_access_token');
-            return null;
-          }
-
-          const userRes = await fetch('https://api.github.com/user', {
-            headers: githubApiHeaders(accessToken),
-          });
-          if (!userRes.ok) {
-            log.error('github_user_fetch_failed', { status: userRes.status });
-            return null;
-          }
-
-          const user = await readResponseJson(userRes, githubUserSchema, 'github.user');
-          let email = normalizeEmail(user.email);
-
-          // Resolve the user's primary email from /user/emails.
-          // OAuth apps need user:email scope. GitHub Apps need "Email addresses" user permission.
-          try {
-            const emailsRes = await fetch('https://api.github.com/user/emails', {
-              headers: githubApiHeaders(accessToken),
-            });
-            if (emailsRes.ok) {
-              const emailsData = await readResponseJson(emailsRes, v.array(githubEmailSchema), 'github.user_emails');
-              email = selectPrimaryGitHubEmail(email, emailsData);
-            } else {
-              const errorBody = await emailsRes.text();
-              if (emailsRes.status === 403 || emailsRes.status === 404) {
-                log.error('github_emails_unavailable', {
-                  status: emailsRes.status,
-                  hint: 'Ensure GitHub App user permission "Email addresses" is read-only or OAuth app has user:email scope',
-                  responseBody: errorBody,
-                });
-              } else {
-                log.error('github_emails_fetch_failed', { status: emailsRes.status, responseBody: errorBody });
-              }
-            }
-          } catch (err) {
-            log.error('github_emails_fetch_exception', { error: err instanceof Error ? err.message : String(err) });
-          }
-
-          // Last resort: use GitHub noreply email
-          if (!email && user.login && user.id) {
-            email = `${user.id}+${user.login}@users.noreply.github.com`;
-          }
-
-          if (!email) {
-            return null;
-          }
-
-          return {
-            user: {
-              id: String(user.id),
-              email,
-              name: (user.name || user.login || '').trim(),
-              image: user.avatar_url || undefined,
-              emailVerified: true,
-            },
-            data: {
-              githubId: String(user.id),
-              avatarUrl: user.avatar_url || undefined,
-            },
-          };
-        },
-      },
-    },
+    socialProviders,
     user: {
       additionalFields: {
         githubId: {
@@ -388,7 +411,7 @@ export function createAuth(env: Env) {
       encryptOAuthTokens: true,
       accountLinking: {
         enabled: true,
-        trustedProviders: ['github'],
+        trustedProviders,
       },
     },
   });
@@ -397,4 +420,4 @@ export function createAuth(env: Env) {
 /**
  * Type for the auth instance.
  */
-export type Auth = ReturnType<typeof createAuth>;
+export type Auth = Awaited<ReturnType<typeof createAuth>>;

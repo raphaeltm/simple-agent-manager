@@ -6,6 +6,7 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { readResponseJson } from '../lib/runtime-validation';
 import { AppError } from '../middleware/error';
+import { getGitHubAppConfig } from './platform-config';
 
 const githubErrorSchema = v.object({
   message: v.optional(v.string()),
@@ -266,14 +267,18 @@ function concatBytes(...arrays: Uint8Array[]): Uint8Array {
  * This JWT is used to authenticate as the GitHub App.
  */
 export async function generateAppJWT(env: Env): Promise<string> {
-  const pemKey = decodePrivateKey(env.GITHUB_APP_PRIVATE_KEY);
+  const config = await getGitHubAppConfig(env);
+  if (!config) {
+    throw new AppError(500, 'GITHUB_APP_NOT_CONFIGURED', 'GitHub App credentials are not configured');
+  }
+  const pemKey = decodePrivateKey(config.privateKey);
   const privateKey = await importPKCS8(pemKey, 'RS256');
   const now = Math.floor(Date.now() / 1000);
 
   return new SignJWT({})
     .setProtectedHeader({ alg: 'RS256' })
     .setIssuedAt(now - 60) // 1 minute in the past to account for clock drift
-    .setIssuer(env.GITHUB_APP_ID)
+    .setIssuer(config.appId)
     .setExpirationTime(now + 600) // 10 minutes
     .sign(privateKey);
 }

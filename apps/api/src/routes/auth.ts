@@ -18,7 +18,7 @@ const authRoutes = new Hono<{ Bindings: Env }>();
  */
 authRoutes.on(['GET', 'POST'], '/*', async (c) => {
   try {
-    const auth = createAuth(c.env);
+    const auth = await createAuth(c.env);
     const response = await auth.handler(c.req.raw);
 
     // Log auth errors to Worker logs for debugging
@@ -41,7 +41,7 @@ authRoutes.on(['GET', 'POST'], '/*', async (c) => {
  * Returns user profile with GitHub info
  */
 authRoutes.get('/me', async (c) => {
-  const auth = createAuth(c.env);
+  const auth = await createAuth(c.env);
   const session = await auth.api.getSession({
     headers: c.req.raw.headers,
   });

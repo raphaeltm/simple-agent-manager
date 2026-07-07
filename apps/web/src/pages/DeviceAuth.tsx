@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router';
 
 import { useAuth } from '../components/AuthProvider';
+import { useLoginProviders } from '../hooks/useLoginProviders';
 import { useToast } from '../hooks/useToast';
 import { approveDeviceCode } from '../lib/api';
 import { authClient } from '../lib/auth';
@@ -20,16 +21,17 @@ export function DeviceAuth() {
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { isAuthenticated, isLoading } = useAuth();
+  const providers = useLoginProviders();
   const toast = useToast();
 
   useEffect(() => {
     setCode(initialCode);
   }, [initialCode]);
 
-  const handleLogin = async () => {
+  const handleLogin = async (provider: 'github' | 'google') => {
     const returnPath = `/device${code ? `?code=${encodeURIComponent(normalizeCode(code))}` : ''}`;
     await authClient.signIn.social({
-      provider: 'github',
+      provider,
       callbackURL: window.location.origin + returnPath,
     });
   };
@@ -41,7 +43,7 @@ export function DeviceAuth() {
       return;
     }
     if (!isAuthenticated) {
-      await handleLogin();
+      await handleLogin('github');
       return;
     }
 
@@ -89,14 +91,43 @@ export function DeviceAuth() {
                 className="font-mono tracking-wide"
               />
             </label>
-            <Button
-              variant="primary"
-              onClick={handleApprove}
-              disabled={isLoading || submitting || !code.trim()}
-              className="w-full"
-            >
-              {isAuthenticated ? (submitting ? 'Authorizing...' : 'Authorize') : 'Log in to approve'}
-            </Button>
+            {isAuthenticated ? (
+              <Button
+                variant="primary"
+                onClick={handleApprove}
+                disabled={isLoading || submitting || !code.trim()}
+                className="w-full"
+              >
+                {submitting ? 'Authorizing...' : 'Authorize'}
+              </Button>
+            ) : (
+              <div className="space-y-2">
+                <Button
+                  variant="primary"
+                  onClick={handleApprove}
+                  disabled={isLoading || submitting || !code.trim()}
+                  className="w-full"
+                >
+                  Log in with GitHub
+                </Button>
+                {providers.google && (
+                  <Button
+                    variant="secondary"
+                    onClick={() => handleLogin('google')}
+                    disabled={isLoading || submitting || !code.trim()}
+                    className="w-full"
+                  >
+                    <span
+                      aria-hidden="true"
+                      className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-white text-sm font-semibold text-[#1a73e8]"
+                    >
+                      G
+                    </span>
+                    Log in with Google
+                  </Button>
+                )}
+              </div>
+            )}
           </div>
         )}
       </section>

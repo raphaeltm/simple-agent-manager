@@ -93,8 +93,8 @@ function authEnv(overrides?: Record<string, unknown>) {
 
 type SessionAfterHook = (session: { userId?: string | null }) => Promise<void>;
 
-function getSessionAfterHook(overrides?: Record<string, unknown>): SessionAfterHook {
-  const auth = createAuth(authEnv(overrides) as never);
+async function getSessionAfterHook(overrides?: Record<string, unknown>): Promise<SessionAfterHook> {
+  const auth = await createAuth(authEnv(overrides) as never);
   const hook = (
     auth.options as {
       databaseHooks?: { session?: { create?: { after?: SessionAfterHook } } };
@@ -172,7 +172,7 @@ describe('session.create.after — login-time self-heal (real D1)', () => {
 
   it('promotes the sole real user on login', async () => {
     await insertUser('real-1', { role: 'user', status: 'active' });
-    const hook = getSessionAfterHook();
+    const hook = await getSessionAfterHook();
 
     await hook({ userId: 'real-1' });
 
@@ -182,7 +182,7 @@ describe('session.create.after — login-time self-heal (real D1)', () => {
 
   it('is idempotent — a second login is a no-op', async () => {
     await insertUser('real-1', { role: 'user', status: 'active' });
-    const hook = getSessionAfterHook();
+    const hook = await getSessionAfterHook();
 
     await hook({ userId: 'real-1' });
     await hook({ userId: 'real-1' });
@@ -193,7 +193,7 @@ describe('session.create.after — login-time self-heal (real D1)', () => {
   it('does not promote when another real user already exists', async () => {
     await insertUser('real-1', { role: 'user', status: 'active' });
     await insertUser('real-2', { role: 'user', status: 'pending' });
-    const hook = getSessionAfterHook();
+    const hook = await getSessionAfterHook();
 
     await hook({ userId: 'real-2' });
 
@@ -203,7 +203,7 @@ describe('session.create.after — login-time self-heal (real D1)', () => {
   it('does not promote when a non-system superadmin exists', async () => {
     await insertUser('admin-1', { role: 'superadmin', status: 'active' });
     await insertUser('real-1', { role: 'user', status: 'active' });
-    const hook = getSessionAfterHook();
+    const hook = await getSessionAfterHook();
 
     await hook({ userId: 'real-1' });
 
@@ -212,7 +212,7 @@ describe('session.create.after — login-time self-heal (real D1)', () => {
 
   it('never promotes a suspended user, even as sole operator', async () => {
     await insertUser('real-1', { role: 'user', status: 'suspended' });
-    const hook = getSessionAfterHook();
+    const hook = await getSessionAfterHook();
 
     await hook({ userId: 'real-1' });
 
@@ -221,7 +221,7 @@ describe('session.create.after — login-time self-heal (real D1)', () => {
 
   it('promotes a sole pending user on login (edge case 10)', async () => {
     await insertUser('real-1', { role: 'user', status: 'pending' });
-    const hook = getSessionAfterHook();
+    const hook = await getSessionAfterHook();
 
     await hook({ userId: 'real-1' });
 
@@ -231,7 +231,7 @@ describe('session.create.after — login-time self-heal (real D1)', () => {
   it('promotes the sole user even when REQUIRE_APPROVAL is unset (open registration)', async () => {
     await insertUser('real-1', { role: 'user', status: 'active' });
     // Omit REQUIRE_APPROVAL entirely — the self-heal is ungated and must still fire.
-    const hook = getSessionAfterHook({ REQUIRE_APPROVAL: undefined });
+    const hook = await getSessionAfterHook({ REQUIRE_APPROVAL: undefined });
 
     await hook({ userId: 'real-1' });
 
@@ -239,7 +239,7 @@ describe('session.create.after — login-time self-heal (real D1)', () => {
   });
 
   it('never mutates the sentinel even if its id is passed as the login user', async () => {
-    const hook = getSessionAfterHook();
+    const hook = await getSessionAfterHook();
 
     await hook({ userId: TRIAL_ANONYMOUS_USER_ID });
 
@@ -256,7 +256,7 @@ describe('session.create.after — login-time self-heal (real D1)', () => {
     ).run();
     await insertUser('real-1', { role: 'user', status: 'active' });
 
-    const hook = getSessionAfterHook({ TRIAL_ANONYMOUS_USER_ID: 'custom_sentinel' });
+    const hook = await getSessionAfterHook({ TRIAL_ANONYMOUS_USER_ID: 'custom_sentinel' });
     await hook({ userId: 'real-1' });
 
     expect(await getUser('real-1')).toMatchObject({ role: 'superadmin', status: 'active' });

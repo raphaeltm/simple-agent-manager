@@ -17,11 +17,20 @@ These are Cloudflare Worker secrets set during deployment:
 | `JWT_PRIVATE_KEY`         | RSA-2048 key for signing workspace and callback tokens                                   |
 | `JWT_PUBLIC_KEY`          | RSA-2048 key for token verification (exposed via JWKS)                                   |
 | `CF_API_TOKEN`            | Cloudflare deploy, DNS, Origin CA certificate issuance, observability, and AI Gateway operations (requires Account → SSL and Certificates → Edit)  |
-| `GITHUB_CLIENT_ID/SECRET` | OAuth authentication                                                                     |
-| `GITHUB_APP_*`            | GitHub App for repository access                                                         |
-| `GITHUB_WEBHOOK_SECRET`   | GitHub App webhook HMAC verification; set from GitHub Actions secret `GH_WEBHOOK_SECRET` |
 
-Security keys are automatically generated and persisted by Pulumi on first deployment. Cloudflare and GitHub secrets are external inputs supplied through GitHub Actions and mapped into Worker secrets by the deploy scripts. They never appear in source control.
+Security keys are automatically generated and persisted by Pulumi on first deployment. Cloudflare secrets remain Worker secrets because they are deployment trust roots. GitHub App/OAuth, GitHub webhook, and Google OAuth credentials can be supplied either as optional environment fallbacks or through the first-run/superadmin platform config UI; runtime values are stored encrypted in D1 and override environment fallbacks. They never appear in source control.
+
+### Platform Integration Credentials
+
+Admin-managed integration secrets stored encrypted in D1:
+
+| Credential                | Purpose                                  | Resolution order                 |
+| ------------------------- | ---------------------------------------- | -------------------------------- |
+| GitHub OAuth client secret | GitHub sign-in and OAuth refresh         | Runtime D1 → Worker env → unset  |
+| GitHub App private key     | Installation tokens for repository access | Runtime D1 → Worker env → unset  |
+| GitHub webhook secret      | GitHub App webhook HMAC verification     | Runtime D1 → Worker env → unset  |
+| Google login OAuth client secret | Google sign-in (BetterAuth social login) | Runtime D1 → Worker env (`GOOGLE_LOGIN_CLIENT_SECRET`) → unset |
+| Google infra OAuth client secret | GCP deployment authorization flows (separate client from login) | Worker env (`GOOGLE_CLIENT_SECRET`) → unset |
 
 ### User Credentials
 

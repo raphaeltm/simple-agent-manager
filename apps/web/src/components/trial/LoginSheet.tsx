@@ -21,6 +21,7 @@ import { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 
 import { useIsMobile } from '../../hooks/useIsMobile';
+import { useLoginProviders } from '../../hooks/useLoginProviders';
 import { authClient } from '../../lib/auth';
 
 interface LoginSheetProps {
@@ -42,10 +43,19 @@ async function defaultSignIn(returnTo: string): Promise<void> {
   });
 }
 
+async function defaultGoogleSignIn(returnTo: string): Promise<void> {
+  await authClient.signIn.social({
+    provider: 'google',
+    callbackURL: returnTo,
+  });
+}
+
 export function LoginSheet({ isOpen, onClose, trialId, onSignIn }: LoginSheetProps) {
   const isMobile = useIsMobile();
+  const providers = useLoginProviders();
   const panelRef = useRef<HTMLDivElement>(null);
   const primaryCtaRef = useRef<HTMLButtonElement>(null);
+  const googleCtaRef = useRef<HTMLButtonElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
 
   // Esc to close + focus management.
@@ -60,15 +70,15 @@ export function LoginSheet({ isOpen, onClose, trialId, onSignIn }: LoginSheetPro
       }
       // Focus trap: cycle between primary CTA and close button on Tab.
       if (e.key === 'Tab') {
-        const primary = primaryCtaRef.current;
-        const close = closeButtonRef.current;
-        if (!primary || !close) return;
-        if (e.shiftKey && document.activeElement === primary) {
+        const focusables = [primaryCtaRef.current, googleCtaRef.current, closeButtonRef.current].filter(Boolean);
+        const currentIndex = focusables.findIndex((element) => element === document.activeElement);
+        if (currentIndex === -1) return;
+        if (e.shiftKey && currentIndex === 0) {
           e.preventDefault();
-          close.focus();
-        } else if (!e.shiftKey && document.activeElement === close) {
+          focusables[focusables.length - 1]?.focus();
+        } else if (!e.shiftKey && currentIndex === focusables.length - 1) {
           e.preventDefault();
-          primary.focus();
+          focusables[0]?.focus();
         }
       }
     };
@@ -107,6 +117,15 @@ export function LoginSheet({ isOpen, onClose, trialId, onSignIn }: LoginSheetPro
       // stays open so the user can retry.
       // eslint-disable-next-line no-console -- user-visible failure path
       console.error('Trial LoginSheet: GitHub sign-in failed', err);
+    }
+  };
+
+  const handleGoogleSignIn = async () => {
+    try {
+      await defaultGoogleSignIn(returnTo);
+    } catch (err) {
+      // eslint-disable-next-line no-console -- user-visible failure path
+      console.error('Trial LoginSheet: Google sign-in failed', err);
     }
   };
 
@@ -195,6 +214,31 @@ export function LoginSheet({ isOpen, onClose, trialId, onSignIn }: LoginSheetPro
           </svg>
           Continue with GitHub
         </button>
+        {providers.google && (
+          <button
+            ref={googleCtaRef}
+            type="button"
+            onClick={handleGoogleSignIn}
+            data-testid="trial-login-google"
+            data-return-to={returnTo}
+            className="
+              mt-3 inline-flex items-center justify-center gap-2
+              min-h-14 px-5 rounded-lg
+              border border-border-default bg-surface text-fg-primary font-semibold
+              hover:bg-surface-hover
+              focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2
+              transition-colors
+            "
+          >
+            <span
+              aria-hidden="true"
+              className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-white text-sm font-semibold text-[#1a73e8]"
+            >
+              G
+            </span>
+            Continue with Google
+          </button>
+        )}
       </div>
     </div>,
     document.body,

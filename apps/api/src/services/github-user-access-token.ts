@@ -56,7 +56,7 @@ async function getDirectGitHubUserAccessTokenWithHeaders(
   flow: string
 ): Promise<string | null> {
   try {
-    const auth = createAuth(env);
+    const auth = await createAuth(env);
     const token = await auth.api.getAccessToken({
       headers,
       body: { providerId: 'github', userId },

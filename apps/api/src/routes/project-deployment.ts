@@ -34,6 +34,7 @@ import { toSanitizedAppError } from '../services/gcp-errors';
 import { listGcpProjects } from '../services/gcp-setup';
 import { signIdentityToken } from '../services/jwt';
 import { validateMcpToken } from '../services/mcp-token';
+import { getGoogleInfraOAuthConfig } from '../services/platform-config';
 
 const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
@@ -58,7 +59,8 @@ projectDeploymentRoutes.get(
     const projectId = c.req.param('id');
     const userId = getUserId(c);
 
-    if (!c.env.GOOGLE_CLIENT_ID || !c.env.GOOGLE_CLIENT_SECRET) {
+    const googleOAuth = await getGoogleInfraOAuthConfig(c.env);
+    if (!googleOAuth) {
       throw errors.badRequest('Google OAuth is not configured on this SAM instance');
     }
 
@@ -79,7 +81,7 @@ projectDeploymentRoutes.get(
 
     const redirectUri = `https://api.${c.env.BASE_DOMAIN}/api/deployment/gcp/callback`;
     const params = new URLSearchParams({
-      client_id: c.env.GOOGLE_CLIENT_ID,
+      client_id: googleOAuth.clientId,
       redirect_uri: redirectUri,
       response_type: 'code',
       scope: 'https://www.googleapis.com/auth/cloud-platform',
@@ -177,7 +179,7 @@ projectDeploymentRoutes.post(
 
     const body = c.req.valid('json');
 
-    if (!c.env.GOOGLE_CLIENT_ID || !c.env.GOOGLE_CLIENT_SECRET) {
+    if (!(await getGoogleInfraOAuthConfig(c.env))) {
       throw errors.badRequest('Google OAuth is not configured on this SAM instance');
     }
 
@@ -465,7 +467,8 @@ gcpDeployCallbackRoute.get(
     const sessionUserId = getUserId(c);
     const appBaseUrl = `https://app.${c.env.BASE_DOMAIN}`;
 
-    if (!c.env.GOOGLE_CLIENT_ID || !c.env.GOOGLE_CLIENT_SECRET) {
+    const googleOAuth = await getGoogleInfraOAuthConfig(c.env);
+    if (!googleOAuth) {
       throw errors.badRequest('Google OAuth is not configured');
     }
 
@@ -537,8 +540,8 @@ gcpDeployCallbackRoute.get(
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
         code,
-        client_id: c.env.GOOGLE_CLIENT_ID,
-        client_secret: c.env.GOOGLE_CLIENT_SECRET,
+        client_id: googleOAuth.clientId,
+        client_secret: googleOAuth.clientSecret,
         redirect_uri: redirectUri,
         grant_type: 'authorization_code',
       }),

@@ -31,6 +31,14 @@ vi.mock('drizzle-orm/d1', () => ({
   drizzle: () => mockDb,
 }));
 
+vi.mock('../../../src/services/platform-config', () => ({
+  getGitHubOAuthConfig: async (env: { GITHUB_CLIENT_ID?: string; GITHUB_CLIENT_SECRET?: string }) =>
+    env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET
+      ? { clientId: env.GITHUB_CLIENT_ID, clientSecret: env.GITHUB_CLIENT_SECRET }
+      : null,
+  getGoogleLoginOAuthConfig: async () => null,
+}));
+
 import { createAuth } from '../../../src/auth';
 import {
   assertSessionUserApproved,
@@ -51,8 +59,8 @@ function testEnv(requireApproval: 'true' | 'false') {
 
 type UserCreateBeforeHook = (user: Record<string, unknown>) => Promise<{ data: Record<string, unknown> }>;
 
-function getUserCreateBeforeHook(requireApproval: 'true' | 'false'): UserCreateBeforeHook {
-  const auth = createAuth(testEnv(requireApproval) as never);
+async function getUserCreateBeforeHook(requireApproval: 'true' | 'false'): Promise<UserCreateBeforeHook> {
+  const auth = await createAuth(testEnv(requireApproval) as never);
   const hook = (
     auth.options as {
       databaseHooks?: { user?: { create?: { before?: UserCreateBeforeHook } } };
@@ -131,7 +139,7 @@ describe('signup approval runtime config', () => {
       updatedBy: 'admin-1',
     });
 
-    const openHook = getUserCreateBeforeHook('true');
+    const openHook = await getUserCreateBeforeHook('true');
     await expect(openHook({ id: 'new-open-user' })).resolves.toEqual({
       data: { id: 'new-open-user' },
     });
@@ -141,7 +149,7 @@ describe('signup approval runtime config', () => {
       updatedBy: 'admin-1',
     });
 
-    const gatedHook = getUserCreateBeforeHook('false');
+    const gatedHook = await getUserCreateBeforeHook('false');
     await expect(gatedHook({ id: 'new-pending-user' })).resolves.toEqual({
       data: { id: 'new-pending-user', role: 'user', status: 'pending' },
     });

@@ -65,10 +65,10 @@ export interface Env {
   BASE_DOMAIN: string;
   VERSION: string;
   // Secrets
-  GITHUB_CLIENT_ID: string;
-  GITHUB_CLIENT_SECRET: string;
-  GITHUB_APP_ID: string;
-  GITHUB_APP_PRIVATE_KEY: string;
+  GITHUB_CLIENT_ID?: string;
+  GITHUB_CLIENT_SECRET?: string;
+  GITHUB_APP_ID?: string;
+  GITHUB_APP_PRIVATE_KEY?: string;
   GITHUB_APP_SLUG?: string; // GitHub App slug for install URL
   CF_API_TOKEN: string;
   CF_ZONE_ID: string;
@@ -80,6 +80,10 @@ export interface Env {
   BETTER_AUTH_SECRET?: string; // BetterAuth session management
   CREDENTIAL_ENCRYPTION_KEY?: string; // AES-GCM user credential encryption
   GITHUB_WEBHOOK_SECRET?: string; // GitHub webhook HMAC verification
+  SETUP_TOKEN?: string; // Plaintext first-run setup token, dashboard-readable while setup is incomplete
+  SETUP_FORCE?: string; // "true" reopens /setup for lockout recovery
+  SETUP_RATE_LIMIT_MAX_ATTEMPTS?: string; // Max setup-token attempts per identifier/window (default: 10)
+  SETUP_RATE_LIMIT_WINDOW_SECONDS?: string; // Setup-token attempt window in seconds (default: 900)
   // Deployment signing keys (Ed25519 — separate from callback JWT)
   DEPLOY_SIGNING_PRIVATE_KEY?: string; // Base64-encoded Ed25519 private key for payload signing
   DEPLOY_SIGNING_PUBLIC_KEY?: string; // Base64-encoded Ed25519 public key delivered to deployment nodes
@@ -491,9 +495,17 @@ export interface Env {
   CODEX_REFRESH_UPSTREAM_TIMEOUT_MS?: string; // Upstream request timeout (default: 10000)
   CODEX_CLIENT_ID?: string; // OpenAI OAuth client_id (default: app_EMoamEEZ73f0CkXaXp7hrann)
   CODEX_EXPECTED_SCOPES?: string; // Comma-separated scope allowlist; unset = default allowlist enforced (openid,profile,email,offline_access); empty string disables validation
-  // Google OAuth (for GCP OIDC integration)
+  // Google OAuth for GCP/infra authorization flows (cloud-platform scope,
+  // redirect /auth/google/callback + /api/deployment/gcp/callback).
+  // NOT the login client — see GOOGLE_LOGIN_* below.
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
+  // Google OAuth for user login (BetterAuth "Sign in with Google" social
+  // provider; redirect /api/auth/callback/google, openid/email/profile scopes).
+  // Kept separate from the infra client above so configuring sign-in never
+  // rewires GCP access. Optional; also configurable via the first-run setup wizard.
+  GOOGLE_LOGIN_CLIENT_ID?: string;
+  GOOGLE_LOGIN_CLIENT_SECRET?: string;
   // GCP OIDC configuration
   GCP_IDENTITY_TOKEN_EXPIRY_SECONDS?: string;
   GCP_TOKEN_CACHE_TTL_SECONDS?: string;
