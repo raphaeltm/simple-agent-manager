@@ -44,6 +44,18 @@ export type {
   RepositoryListResponse,
 } from './github';
 
+// Repo Browse (remote-branch git browser + diff)
+export type {
+  RepoBranch,
+  RepoBranchesResponse,
+  RepoCompareFile,
+  RepoCompareFileStatus,
+  RepoCompareResponse,
+  RepoFileContent,
+  RepoTreeEntry,
+  RepoTreeResponse,
+} from './repo-browse';
+
 // Workspace & Node
 export type {
   BootLogEntry,

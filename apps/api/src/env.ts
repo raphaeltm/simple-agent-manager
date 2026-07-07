@@ -715,6 +715,9 @@ export interface Env {
   ARTIFACTS_TOKEN_TTL_SECONDS?: string;
   /** Max Artifacts repos per user (default: 50). */
   ARTIFACTS_MAX_REPOS_PER_USER?: string;
+  // Repo Browse (Files tab — remote-branch git browser + diff)
+  /** Max bytes to inline as text in the file viewer; larger files stream via rawUrl (default: 1000000). */
+  REPO_BROWSE_MAX_INLINE_BYTES?: string;
   // SAM Agent (Top-Level Agent) configuration
   SAM_MODEL?: string; // LLM model (default: claude-sonnet-4-20250514)
   SAM_MAX_TOKENS?: string; // Max output tokens per turn (default: 4096)

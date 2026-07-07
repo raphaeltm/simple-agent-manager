@@ -9,6 +9,7 @@ import { crudRoutes } from './crud';
 import { devcontainerConfigRoutes } from './devcontainer-configs';
 import { fileProxyRoutes } from './files';
 import { projectMembersRoutes } from './members';
+import { repoBrowseRoutes } from './repo-browse';
 import { repositoryAccessRoutes } from './repository-access';
 
 const projectsRoutes = new Hono<{ Bindings: Env }>();
@@ -21,5 +22,6 @@ projectsRoutes.route('/', credentialHealthRoutes);
 projectsRoutes.route('/', devcontainerConfigRoutes);
 projectsRoutes.route('/', repositoryAccessRoutes);
 projectsRoutes.route('/', projectMembersRoutes);
+projectsRoutes.route('/', repoBrowseRoutes);
 
 export { projectsRoutes };
