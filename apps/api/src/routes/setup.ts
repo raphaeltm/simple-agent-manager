@@ -1,5 +1,5 @@
-import { Hono } from 'hono';
 import type { Context } from 'hono';
+import { Hono } from 'hono';
 
 import type { Env } from '../env';
 import { AppError, errors } from '../middleware/error';
@@ -7,10 +7,10 @@ import {
   getPlatformConfigStatus,
   isSetupCompleted,
   isSetupTokenConfigured,
+  type PlatformIntegrationInput,
   savePlatformIntegrationConfig,
   setSetupCompleted,
   verifySetupToken,
-  type PlatformIntegrationInput,
 } from '../services/platform-config';
 import {
   validatePlatformIntegrationInput,

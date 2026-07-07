@@ -5,8 +5,8 @@ import { getUserId, requireApproved, requireAuth, requireSuperadmin } from '../m
 import { errors } from '../middleware/error';
 import {
   getPlatformConfigStatus,
-  savePlatformIntegrationConfig,
   type PlatformIntegrationInput,
+  savePlatformIntegrationConfig,
 } from '../services/platform-config';
 import { validatePlatformIntegrationInput } from '../services/platform-config-validation';
 
