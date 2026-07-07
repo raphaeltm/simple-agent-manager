@@ -7,8 +7,8 @@ import { getUserId } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { requireProjectAccess } from '../../middleware/project-auth';
 import { getExternalInstallationId } from '../../services/github-installation-ids';
-import { resolveRepoBrowser } from '../../services/repo-browse';
 import type { RepoBrowser } from '../../services/repo-browse';
+import { resolveRepoBrowser } from '../../services/repo-browse';
 import { requireProjectInstallation, requireRepositoryUserAccess } from './_helpers';
 
 const repoBrowseRoutes = new Hono<{ Bindings: Env }>();

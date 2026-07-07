@@ -175,7 +175,7 @@ export const BrowseView: FC<BrowseViewProps> = ({ projectId, ref, path, onNaviga
     };
   }, [projectId, ref]);
 
-  const entries = tree?.entries ?? [];
+  const entries = useMemo(() => tree?.entries ?? [], [tree]);
   const isFile = useMemo(
     () => entries.some((e) => e.path === path && e.type === 'blob'),
     [entries, path]
