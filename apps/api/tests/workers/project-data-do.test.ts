@@ -433,6 +433,26 @@ describe('ProjectData Durable Object', () => {
       expect(stored).toHaveLength(3);
     });
 
+    it('persists and returns the origin marker for SAM-injected messages', async () => {
+      const stub = getStub('project-batch-origin');
+      const sessionId = await stub.createSession(null, null);
+
+      const injectedId = crypto.randomUUID();
+      const normalId = crypto.randomUUID();
+      const result = await stub.persistMessageBatch(sessionId, [
+        { messageId: normalId, role: 'user', content: 'my task', toolMetadata: null, timestamp: new Date().toISOString() },
+        { messageId: injectedId, role: 'user', content: 'call get_instructions', toolMetadata: null, timestamp: new Date().toISOString(), origin: 'system' },
+      ]);
+      expect(result.persisted).toBe(2);
+
+      const { messages: stored } = await stub.getMessages(sessionId);
+      const injected = stored.find((m) => m.id === injectedId);
+      const normal = stored.find((m) => m.id === normalId);
+      expect(injected?.origin).toBe('system');
+      // A normal user message has no system origin (null/undefined/"user").
+      expect(normal?.origin ?? null).not.toBe('system');
+    });
+
     it('deduplicates messages by messageId', async () => {
       const stub = getStub('project-batch-dedup');
       const sessionId = await stub.createSession(null, null);

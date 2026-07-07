@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  buildInjectedInstructions,
   buildTaskAgentSessionLabel,
   buildTaskInitialPrompt,
   handleAgentSession,
@@ -228,17 +229,24 @@ describe('TaskRunner agent-session helpers', () => {
     expect(buildTaskAgentSessionLabel('x'.repeat(45))).toBe(`Task: ${'x'.repeat(40)}`);
   });
 
-  it('builds the initial prompt with task content, attachments, profile prompt, and MCP instructions', () => {
+  it('builds the visible initial prompt with task content, attachments, and profile prompt (no injected reminder)', () => {
     const prompt = buildTaskInitialPrompt(makeState());
 
     expect(prompt).toContain('Exercise the TaskRunner agent-session path.');
     expect(prompt).toContain('/workspaces/.private/evidence.txt');
     expect(prompt).toContain('123 bytes, text/plain');
     expect(prompt).toContain('Use the backend implementation profile.');
-    expect(prompt).toContain('get_instructions');
-    expect(prompt.indexOf('Use the backend implementation profile.')).toBeLessThan(
-      prompt.indexOf('IMPORTANT:'),
-    );
+    // The get_instructions reminder is now a SEPARATE origin="system" injected
+    // block (buildInjectedInstructions), NOT part of the visible user message.
+    expect(prompt).not.toContain('get_instructions');
+    expect(prompt).not.toContain('IMPORTANT:');
+  });
+
+  it('builds the injected system instructions containing the get_instructions reminder', () => {
+    const injected = buildInjectedInstructions();
+    expect(injected).toContain('get_instructions');
+    expect(injected).toContain('IMPORTANT:');
+    expect(injected).toContain('sam-mcp');
   });
 
   it('redacts persisted MCP tokens from status snapshots', () => {
@@ -318,6 +326,9 @@ describe('handleAgentSession', () => {
         permissionMode: 'auto-edit',
       }),
       { projectId: 'project-1', taskId: 'task-1', taskMode: 'task' },
+      // Injected system instructions (get_instructions reminder) sent as a
+      // separate origin="system" prompt block.
+      expect.stringContaining('get_instructions'),
     );
 
     expect(state.stepResults.agentSessionId).toBe('agent-session-new');

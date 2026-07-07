@@ -98,6 +98,8 @@ export interface ChatMessageResponse {
   toolMetadata: Record<string, unknown> | null;
   createdAt: number;
   sequence?: number | null;
+  /** "system" for SAM-injected messages the UI collapses; absent for normal messages. */
+  origin?: string | null;
 }
 
 /** Persisted session state snapshot from the DO (for catch-up on page load). */

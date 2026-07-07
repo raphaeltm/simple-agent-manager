@@ -401,6 +401,7 @@ function toProjectDataMessages(body: MessageBatchBody) {
     toolMetadata: m.toolMetadata ? safeParseJson(m.toolMetadata) : null,
     timestamp: m.timestamp,
     sequence: m.sequence,
+    origin: m.origin ?? null,
   }));
 }
 

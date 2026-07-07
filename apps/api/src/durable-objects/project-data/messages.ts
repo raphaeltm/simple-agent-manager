@@ -150,6 +150,7 @@ export function persistMessageBatch(
     toolMetadata: string | null;
     timestamp: string;
     sequence?: number;
+    origin?: string | null;
   }>
 ): {
   persisted: number;
@@ -161,6 +162,7 @@ export function persistMessageBatch(
     toolMetadata: unknown;
     createdAt: number;
     sequence: number;
+    origin: string | null;
   }>;
   workspaceId: string | null;
   firstUserContent: string | null;
@@ -195,6 +197,7 @@ export function persistMessageBatch(
     toolMetadata: unknown;
     createdAt: number;
     sequence: number;
+    origin: string | null;
   }> = [];
 
   // Track user message content seen within this batch to avoid redundant
@@ -249,16 +252,18 @@ export function persistMessageBatch(
 
     const createdAt = new Date(msg.timestamp).getTime() || now;
     const sequence = msg.sequence ?? nextSeq++;
+    const origin = msg.origin ?? null;
     sql.exec(
-      `INSERT INTO chat_messages (id, session_id, role, content, tool_metadata, created_at, sequence)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO chat_messages (id, session_id, role, content, tool_metadata, created_at, sequence, origin)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       msg.messageId,
       sessionId,
       msg.role,
       msg.content,
       msg.toolMetadata,
       createdAt,
-      sequence
+      sequence,
+      origin
     );
     persisted++;
     persistedMessages.push({
@@ -268,6 +273,7 @@ export function persistMessageBatch(
       toolMetadata: msg.toolMetadata ? JSON.parse(msg.toolMetadata) : null,
       createdAt,
       sequence,
+      origin,
     });
   }
 
@@ -351,7 +357,7 @@ export function getMessages(
   compactOptions?: CompactMessageOptions
 ): { messages: Record<string, unknown>[]; hasMore: boolean } {
   let query =
-    'SELECT id, session_id, role, content, tool_metadata, created_at, sequence FROM chat_messages WHERE session_id = ?';
+    'SELECT id, session_id, role, content, tool_metadata, created_at, sequence, origin FROM chat_messages WHERE session_id = ?';
   const params: (string | number)[] = [sessionId];
 
   if (before !== null) {

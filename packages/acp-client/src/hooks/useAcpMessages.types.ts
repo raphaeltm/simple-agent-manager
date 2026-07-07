@@ -6,6 +6,14 @@ export interface UserMessage {
   id: string;
   text: string;
   timestamp: number;
+  /**
+   * "system" for SAM-injected content (e.g. the get_instructions reminder) that
+   * the UI collapses behind a disclosure; "user"/undefined for normal messages.
+   * Only populated from the persisted (DB) path today — the live ACP broadcast
+   * strips the marker (acp-go-sdk ContentBlock.MarshalJSON), so live-session
+   * hiding is a follow-up.
+   */
+  origin?: 'user' | 'system';
 }
 
 export interface AgentMessage {
