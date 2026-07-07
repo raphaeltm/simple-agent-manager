@@ -43,13 +43,13 @@ Implement the locked first-run admin setup design: deploy with only Cloudflare c
   - [x] Ping token endpoints where feasible without logging secrets.
   - [x] Prevent marking setup complete when no usable login provider is configured.
   - [x] Add lockout recovery tests for `SETUP_FORCE=true` reopening setup after completion.
-- [ ] Add UI:
-  - [ ] Build first-run `/setup` wizard gated by `SETUP_TOKEN`.
-  - [ ] Build ongoing superadmin config UI using the same backend store and source readout.
-  - [ ] Show per-integration effective source: set here / set via GitHub secret / not configured.
-  - [ ] Add Google sign-in buttons to `Landing.tsx`, `LoginSheet.tsx`, and `DeviceAuth.tsx`.
-  - [ ] Wire auth client plugin support needed for the new login surfaces.
-  - [ ] Run required Playwright visual audit for changed UI surfaces on mobile and desktop.
+- [x] Add UI:
+  - [x] Build first-run `/setup` wizard gated by `SETUP_TOKEN`.
+  - [x] Build ongoing superadmin config UI using the same backend store and source readout.
+  - [x] Show per-integration effective source: set here / set via GitHub secret / not configured.
+  - [x] Add Google sign-in buttons to `Landing.tsx`, `LoginSheet.tsx`, and `DeviceAuth.tsx`.
+  - [x] Wire auth client support needed for the new login surfaces.
+  - [x] Run required Playwright visual audit for changed UI surfaces on mobile and desktop.
 - [x] Update deploy pipeline:
   - [x] Make `GITHUB_*` optional in `apps/api/src/env.ts`.
   - [x] Make `GITHUB_*` optional in `scripts/deploy/configure-secrets.sh`.

@@ -42,10 +42,18 @@ async function defaultSignIn(returnTo: string): Promise<void> {
   });
 }
 
+async function defaultGoogleSignIn(returnTo: string): Promise<void> {
+  await authClient.signIn.social({
+    provider: 'google',
+    callbackURL: returnTo,
+  });
+}
+
 export function LoginSheet({ isOpen, onClose, trialId, onSignIn }: LoginSheetProps) {
   const isMobile = useIsMobile();
   const panelRef = useRef<HTMLDivElement>(null);
   const primaryCtaRef = useRef<HTMLButtonElement>(null);
+  const googleCtaRef = useRef<HTMLButtonElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
 
   // Esc to close + focus management.
@@ -60,15 +68,15 @@ export function LoginSheet({ isOpen, onClose, trialId, onSignIn }: LoginSheetPro
       }
       // Focus trap: cycle between primary CTA and close button on Tab.
       if (e.key === 'Tab') {
-        const primary = primaryCtaRef.current;
-        const close = closeButtonRef.current;
-        if (!primary || !close) return;
-        if (e.shiftKey && document.activeElement === primary) {
+        const focusables = [primaryCtaRef.current, googleCtaRef.current, closeButtonRef.current].filter(Boolean);
+        const currentIndex = focusables.findIndex((element) => element === document.activeElement);
+        if (currentIndex === -1) return;
+        if (e.shiftKey && currentIndex === 0) {
           e.preventDefault();
-          close.focus();
-        } else if (!e.shiftKey && document.activeElement === close) {
+          focusables[focusables.length - 1]?.focus();
+        } else if (!e.shiftKey && currentIndex === focusables.length - 1) {
           e.preventDefault();
-          primary.focus();
+          focusables[0]?.focus();
         }
       }
     };
@@ -107,6 +115,15 @@ export function LoginSheet({ isOpen, onClose, trialId, onSignIn }: LoginSheetPro
       // stays open so the user can retry.
       // eslint-disable-next-line no-console -- user-visible failure path
       console.error('Trial LoginSheet: GitHub sign-in failed', err);
+    }
+  };
+
+  const handleGoogleSignIn = async () => {
+    try {
+      await defaultGoogleSignIn(returnTo);
+    } catch (err) {
+      // eslint-disable-next-line no-console -- user-visible failure path
+      console.error('Trial LoginSheet: Google sign-in failed', err);
     }
   };
 
@@ -194,6 +211,29 @@ export function LoginSheet({ isOpen, onClose, trialId, onSignIn }: LoginSheetPro
             <path d="M12 .5C5.73.5.5 5.73.5 12c0 5.08 3.29 9.39 7.86 10.92.58.11.79-.25.79-.56v-2.05c-3.2.7-3.87-1.36-3.87-1.36-.52-1.33-1.27-1.68-1.27-1.68-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.18 1.76 1.18 1.02 1.75 2.68 1.25 3.33.95.1-.74.4-1.25.72-1.53-2.56-.29-5.25-1.28-5.25-5.7 0-1.26.45-2.29 1.18-3.1-.12-.29-.51-1.46.11-3.04 0 0 .97-.31 3.17 1.18A11 11 0 0112 6.8c.98.01 1.97.13 2.9.39 2.2-1.49 3.17-1.18 3.17-1.18.62 1.58.23 2.75.11 3.04.74.81 1.18 1.84 1.18 3.1 0 4.43-2.69 5.41-5.26 5.69.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0023.5 12C23.5 5.73 18.27.5 12 .5z" />
           </svg>
           Continue with GitHub
+        </button>
+        <button
+          ref={googleCtaRef}
+          type="button"
+          onClick={handleGoogleSignIn}
+          data-testid="trial-login-google"
+          data-return-to={returnTo}
+          className="
+            mt-3 inline-flex items-center justify-center gap-2
+            min-h-14 px-5 rounded-lg
+            border border-border-default bg-surface text-fg-primary font-semibold
+            hover:bg-surface-hover
+            focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2
+            transition-colors
+          "
+        >
+          <span
+            aria-hidden="true"
+            className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-white text-sm font-semibold text-[#1a73e8]"
+          >
+            G
+          </span>
+          Continue with Google
         </button>
       </div>
     </div>,

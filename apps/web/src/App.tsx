@@ -18,6 +18,7 @@ import { AdminCosts } from './pages/AdminCosts';
 import { AdminErrors } from './pages/AdminErrors';
 import { AdminLogs } from './pages/AdminLogs';
 import { AdminOverview } from './pages/AdminOverview';
+import { AdminPlatformConfig } from './pages/AdminPlatformConfig';
 import { AdminPlatformCredentials } from './pages/AdminPlatformCredentials';
 import { AdminStream } from './pages/AdminStream';
 import { AdminTrials } from './pages/AdminTrials';
@@ -68,6 +69,7 @@ import { SettingsConnections } from './pages/SettingsConnections';
 import { SettingsCredentials } from './pages/SettingsCredentials';
 import { SettingsGitHub } from './pages/SettingsGitHub';
 import { SettingsNotifications } from './pages/SettingsNotifications';
+import { Setup } from './pages/Setup';
 import { TaskDetail } from './pages/TaskDetail';
 import { Tools } from './pages/Tools';
 import { ToolsCli } from './pages/ToolsCli';
@@ -109,6 +111,7 @@ export default function App() {
                 {/* SAM prototype — public, no auth */}
                 <Route path="/sam" element={<SamPrototype />} />
                 <Route path="/device" element={<DeviceAuth />} />
+                <Route path="/setup" element={<Setup />} />
                 {/* Harness for Playwright audits — mounts trial components with mock data */}
                 <Route path="/__test/trial-chat-gate" element={<TrialChatGateHarness />} />
                 {/* Protected routes with AppShell (persistent navigation) */}
@@ -180,6 +183,7 @@ export default function App() {
                   <Route path="/admin" element={<Admin />}>
                     <Route index element={<Navigate to="users" replace />} />
                     <Route path="users" element={<AdminUsers />} />
+                    <Route path="integrations" element={<AdminPlatformConfig />} />
                     <Route path="credentials" element={<AdminPlatformCredentials />} />
                     <Route path="ai-proxy" element={<AdminAIProxy />} />
                     <Route path="trials" element={<AdminTrials />} />

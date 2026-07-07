@@ -6,6 +6,12 @@ export type {
   BillingMode,
   CostByModel,
   CostSummaryResponse,
+  PlatformConfigFieldStatus,
+  PlatformConfigSource,
+  PlatformConfigStatus,
+  PlatformConfigStatusResponse,
+  PlatformIntegrationConfigInput,
+  PlatformIntegrationStatus,
 } from './admin';
 export type {
   AiUsageByDay,
@@ -41,6 +47,7 @@ export {
   fetchAdminErrorTrends,
   fetchAdminHealth,
   fetchAdminNodeUsage,
+  fetchAdminPlatformConfig,
   fetchAdminTrialsConfig,
   fetchAdminUserComputeUsage,
   fetchAdminUserNodeUsage,
@@ -64,6 +71,7 @@ export {
   removeAdminUserQuota,
   resetAIProxyConfig,
   updateAdminDefaultQuota,
+  updateAdminPlatformConfig,
   updateAdminTrialsConfig,
   updateAdminUserQuota,
   updateAIProxyBillingMode,
@@ -367,6 +375,18 @@ export {
   stopChatSession,
   summarizeSession,
 } from './sessions';
+export type {
+  SetupCompleteResponse,
+  SetupStatusResponse,
+  SetupVerifyResponse,
+} from './setup';
+export {
+  completeSetup,
+  fetchSetupConfig,
+  fetchSetupStatus,
+  saveSetupConfig,
+  verifySetupToken,
+} from './setup';
 export type {
   ListProjectTasksParams,
   RequestAttachmentUploadResponse,

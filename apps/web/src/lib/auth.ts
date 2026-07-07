@@ -26,6 +26,17 @@ export async function signInWithGitHub() {
 }
 
 /**
+ * Sign in with Google OAuth.
+ * Redirects to Google for authentication.
+ */
+export async function signInWithGoogle() {
+  await authClient.signIn.social({
+    provider: 'google',
+    callbackURL: window.location.origin + '/dashboard',
+  });
+}
+
+/**
  * Sign out the current user.
  * Clears session and redirects to home.
  */
@@ -45,4 +56,3 @@ export async function signOut() {
  */
 export const useSession: typeof authClient.useSession =
   authClient.useSession;
-
