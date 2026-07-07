@@ -71,23 +71,8 @@ jobs:
           if [ "$HAS_PULUMI_CONFIG_PASSPHRASE" != "true" ]; then
             MISSING="$MISSING\n  - secrets.PULUMI_CONFIG_PASSPHRASE"
           fi
-          if [ "$HAS_GH_CLIENT_ID" != "true" ]; then
-            MISSING="$MISSING\n  - secrets.GH_CLIENT_ID"
-          fi
-          if [ "$HAS_GH_CLIENT_SECRET" != "true" ]; then
-            MISSING="$MISSING\n  - secrets.GH_CLIENT_SECRET"
-          fi
-          if [ "$HAS_GH_APP_ID" != "true" ]; then
-            MISSING="$MISSING\n  - secrets.GH_APP_ID"
-          fi
-          if [ "$HAS_GH_APP_PRIVATE_KEY" != "true" ]; then
-            MISSING="$MISSING\n  - secrets.GH_APP_PRIVATE_KEY"
-          fi
-          if [ "$HAS_GH_APP_SLUG" != "true" ]; then
-            MISSING="$MISSING\n  - secrets.GH_APP_SLUG"
-          fi
-          if [ "$HAS_GH_WEBHOOK_SECRET" != "true" ]; then
-            MISSING="$MISSING\n  - secrets.GH_WEBHOOK_SECRET"
+          if [ "$HAS_GH_CLIENT_ID" != "true" ] || [ "$HAS_GH_CLIENT_SECRET" != "true" ] || [ "$HAS_GH_APP_ID" != "true" ] || [ "$HAS_GH_APP_PRIVATE_KEY" != "true" ] || [ "$HAS_GH_APP_SLUG" != "true" ] || [ "$HAS_GH_WEBHOOK_SECRET" != "true" ]; then
+            echo "::notice::GitHub App/OAuth secrets are incomplete — deploy will continue and admins can configure integrations through /setup or the superadmin platform config UI."
           fi
           if [ "$HAS_CF_ORIGIN_CA_KEY" != "true" ]; then
             echo "::notice::CF_ORIGIN_CA_KEY not set — using CF_API_TOKEN for Origin CA certs. If Pulumi fails with error 1016, ensure your API token has Zone > SSL and Certificates > Edit permission."

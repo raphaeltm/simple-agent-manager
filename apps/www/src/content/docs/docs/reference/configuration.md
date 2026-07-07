@@ -26,12 +26,12 @@ These are Cloudflare Worker secrets, set during deployment. Pulumi auto-generate
 | `CF_ACCOUNT_ID`                            | Cloudflare account ID                                                                                          |
 | `DEVCONTAINER_CACHE_CLOUDFLARE_API_TOKEN`  | Optional narrower Cloudflare token for managed devcontainer registry credentials                               |
 | `DEVCONTAINER_CACHE_CLOUDFLARE_ACCOUNT_ID` | Optional Cloudflare account override for managed devcontainer registry credentials                             |
-| `GITHUB_CLIENT_ID`                         | GitHub App client ID for OAuth                                                                                 |
-| `GITHUB_CLIENT_SECRET`                     | GitHub App client secret for OAuth                                                                             |
-| `GITHUB_APP_ID`                            | GitHub App ID for installation tokens                                                                          |
-| `GITHUB_APP_PRIVATE_KEY`                   | GitHub App private key (PEM or base64)                                                                         |
-| `GITHUB_APP_SLUG`                          | GitHub App URL slug                                                                                            |
-| `GITHUB_WEBHOOK_SECRET`                    | GitHub App webhook HMAC secret; set from GitHub Actions secret `GH_WEBHOOK_SECRET`                             |
+| `GITHUB_CLIENT_ID`                         | Optional fallback GitHub App client ID for OAuth; runtime admin config takes precedence                         |
+| `GITHUB_CLIENT_SECRET`                     | Optional fallback GitHub App client secret for OAuth; runtime admin config takes precedence                     |
+| `GITHUB_APP_ID`                            | Optional fallback GitHub App ID for installation tokens; runtime admin config takes precedence                  |
+| `GITHUB_APP_PRIVATE_KEY`                   | Optional fallback GitHub App private key (PEM or base64); runtime admin config takes precedence                 |
+| `GITHUB_APP_SLUG`                          | Optional fallback GitHub App URL slug; runtime admin config takes precedence                                    |
+| `GITHUB_WEBHOOK_SECRET`                    | Optional fallback GitHub App webhook HMAC secret; runtime admin config takes precedence                         |
 | `TRIAL_CLAIM_TOKEN_SECRET`                 | Trial onboarding HMAC secret (auto-generated)                                                                  |
 
 ## Worker Variables
@@ -57,10 +57,10 @@ Set in GitHub Settings → Environments → production:
 characters of the domain's SHA-256 hash. The self-host onboarding flow fills it
 in for you.
 
-Required GitHub Actions secrets include `CF_API_TOKEN`, `CF_ACCOUNT_ID`, `CF_ZONE_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `PULUMI_CONFIG_PASSPHRASE`, `GH_CLIENT_ID`, `GH_CLIENT_SECRET`, `GH_APP_ID`, `GH_APP_PRIVATE_KEY`, `GH_APP_SLUG`, and `GH_WEBHOOK_SECRET`. Deploy signing keys are generated and persisted by Pulumi during deployment; GitHub Environment values are only needed for explicit key overrides.
+Required GitHub Actions secrets include `CF_API_TOKEN`, `CF_ACCOUNT_ID`, `CF_ZONE_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, and `PULUMI_CONFIG_PASSPHRASE`. GitHub App/OAuth secrets (`GH_CLIENT_ID`, `GH_CLIENT_SECRET`, `GH_APP_ID`, `GH_APP_PRIVATE_KEY`, `GH_APP_SLUG`, `GH_WEBHOOK_SECRET`) and Google OAuth secrets are optional environment fallbacks; fresh deployments can set them through `/setup` instead. Deploy signing keys are generated and persisted by Pulumi during deployment; GitHub Environment values are only needed for explicit key overrides.
 
 :::note[Naming convention]
-GitHub App secrets use `GH_*` prefix (e.g., `GH_CLIENT_ID`, `GH_WEBHOOK_SECRET`) because GitHub Actions secret names cannot start with `GITHUB_*`. The deploy workflow maps those `GH_*` secrets to `GITHUB_*` Worker secrets.
+GitHub App secrets use `GH_*` prefix (e.g., `GH_CLIENT_ID`, `GH_WEBHOOK_SECRET`) because GitHub Actions secret names cannot start with `GITHUB_*`. When present, the deploy workflow maps those `GH_*` secrets to `GITHUB_*` Worker secrets. Runtime admin config in D1 is resolved first, then these environment fallbacks, then unset.
 :::
 
 ## Feature Flags

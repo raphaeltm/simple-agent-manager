@@ -31,12 +31,13 @@ describe('deploy reusable workflow', () => {
     }
   });
 
-  it('fails preflight before secret configuration when GitHub webhook secret is missing', () => {
+  it('does not fail preflight when GitHub integration secrets are missing', () => {
     const validationBlock = stepBlock('Check Required Configuration');
 
     expect(validationBlock).toContain('HAS_GH_WEBHOOK_SECRET');
-    expect(validationBlock).toContain('MISSING="$MISSING\\n  - secrets.GH_WEBHOOK_SECRET"');
-    expect(validationBlock).not.toContain('GH_WEBHOOK_SECRET not set');
+    expect(validationBlock).toContain('GitHub App/OAuth secrets are incomplete');
+    expect(validationBlock).not.toContain('MISSING="$MISSING\\n  - secrets.GH_WEBHOOK_SECRET"');
+    expect(validationBlock).not.toContain('MISSING="$MISSING\\n  - secrets.GH_CLIENT_ID"');
   });
 
   it('uses the derived prefix for AI Gateway creation', () => {

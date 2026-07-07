@@ -15,6 +15,7 @@
  */
 
 import { execSync } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
@@ -40,6 +41,7 @@ const TAIL_WORKER_WRANGLER_TOML_PATH = resolve(
 );
 const DEPLOY_STATE_DIR = resolve(import.meta.dirname, '../../.wrangler');
 const FIRST_DEPLOY_MARKER = resolve(DEPLOY_STATE_DIR, 'tail-worker-first-deploy');
+const SETUP_TOKEN_BYTES = 24;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -64,6 +66,14 @@ function ensureTomlMap(value: unknown, path: string): TOML.JsonMap {
     throw new Error(`${path} must be a TOML table`);
   }
   return value as TOML.JsonMap;
+}
+
+function generateSetupToken(): string {
+  return randomBytes(SETUP_TOKEN_BYTES).toString('base64url');
+}
+
+function cloudflareWorkerVariablesUrl(accountId: string, workerName: string, environment: string): string {
+  return `https://dash.cloudflare.com/${accountId}/workers/services/view/${workerName}/${environment}/settings/variables`;
 }
 
 // ============================================================================
@@ -289,6 +299,7 @@ export function generateApiWorkerEnv(
     );
   }
   const includeArtifactsBinding = artifactsBindingEnabled && !!staticBindings.artifacts;
+  const workerName = DEPLOYMENT_CONFIG.resources.workerName(stack);
   const tailWorkerName = DEPLOYMENT_CONFIG.resources.tailWorkerName(stack);
   const analyticsDataset = `${DEPLOYMENT_CONFIG.prefix}_analytics`;
   const analyticsEngineDatasets = staticBindings.analytics_engine_datasets?.map((dataset) =>
@@ -297,7 +308,7 @@ export function generateApiWorkerEnv(
 
   const envConfig: WranglerEnvConfig = {
     // Worker name derived from config
-    name: DEPLOYMENT_CONFIG.resources.workerName(stack),
+    name: workerName,
 
     // Account ID for authentication
     account_id: outputs.cloudflareAccountId,
@@ -359,6 +370,10 @@ export function generateApiWorkerEnv(
       ENVIRONMENT: DEPLOYMENT_CONFIG.getEnvironmentFromStack(stack),
       // Artifacts is disabled by default and enabled only with the generated binding.
       ARTIFACTS_ENABLED: includeArtifactsBinding ? 'true' : 'false',
+      // Plaintext by design: first-run admins read this once from the CF dashboard.
+      // Do not print the value in workflow logs; setup.completed gates it after use.
+      SETUP_TOKEN: generateSetupToken(),
+      ...(process.env.SETUP_FORCE === 'true' ? { SETUP_FORCE: 'true' } : {}),
     },
 
     // Dynamic bindings from Pulumi outputs
@@ -498,6 +513,14 @@ async function main(): Promise<void> {
   );
   saveWranglerToml(config);
   console.log(`Updated wrangler.toml [env.${envKey}]`);
+  console.log(
+    `Setup token is available in Cloudflare dashboard variables: ${cloudflareWorkerVariablesUrl(
+      outputs.cloudflareAccountId,
+      DEPLOYMENT_CONFIG.resources.workerName(stack),
+      envKey
+    )}`
+  );
+  console.log('Setup token value was intentionally not printed.');
 
   // Generate env section for tail worker
   syncTailWorkerConfig(stack, outputs.cloudflareAccountId, envKey);

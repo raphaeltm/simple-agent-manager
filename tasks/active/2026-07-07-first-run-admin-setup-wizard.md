@@ -50,12 +50,12 @@ Implement the locked first-run admin setup design: deploy with only Cloudflare c
   - [ ] Add Google sign-in buttons to `Landing.tsx`, `LoginSheet.tsx`, and `DeviceAuth.tsx`.
   - [ ] Wire auth client plugin support needed for the new login surfaces.
   - [ ] Run required Playwright visual audit for changed UI surfaces on mobile and desktop.
-- [ ] Update deploy pipeline:
-  - [ ] Make `GITHUB_*` optional in `apps/api/src/env.ts`.
-  - [ ] Make `GITHUB_*` optional in `scripts/deploy/configure-secrets.sh`.
-  - [ ] Generate/set `SETUP_TOKEN` plaintext `[vars]` through `scripts/deploy/sync-wrangler-config.ts`.
-  - [ ] Ensure deploy/Actions output prints only the Cloudflare dashboard variables deep link.
-  - [ ] Update public self-hosting/security docs with the new setup flow and static OAuth redirect guidance.
+- [x] Update deploy pipeline:
+  - [x] Make `GITHUB_*` optional in `apps/api/src/env.ts`.
+  - [x] Make `GITHUB_*` optional in `scripts/deploy/configure-secrets.sh`.
+  - [x] Generate/set `SETUP_TOKEN` plaintext `[vars]` through `scripts/deploy/sync-wrangler-config.ts`.
+  - [x] Ensure deploy/Actions output prints only the Cloudflare dashboard variables deep link.
+  - [x] Update public self-hosting/security docs with the new setup flow and static OAuth redirect guidance.
 - [ ] Validate end to end:
   - [ ] Run lint, typecheck, test, build, migration safety, and relevant package tests.
   - [ ] Run specialist reviews: task-completion-validator, cloudflare-specialist, security-auditor, env-validator, constitution-validator, ui-ux-specialist, test-engineer, doc-sync-validator.

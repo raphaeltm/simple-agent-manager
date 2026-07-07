@@ -155,11 +155,11 @@ set_worker_secret "JWT_PUBLIC_KEY" "$JWT_PUBLIC_KEY" "$ENVIRONMENT" "true" || FA
 
 # Configure purpose-specific secret overrides.
 # BETTER_AUTH_SECRET and CREDENTIAL_ENCRYPTION_KEY fall back to ENCRYPTION_KEY.
-# GITHUB_WEBHOOK_SECRET is required by the self-hosted GitHub App webhook setup.
+# GITHUB_WEBHOOK_SECRET is optional. If absent, admins can set it in first-run setup/admin UI.
 set_worker_secret "BETTER_AUTH_SECRET" "${BETTER_AUTH_SECRET:-}" "$ENVIRONMENT" "false"
 set_worker_secret "CREDENTIAL_ENCRYPTION_KEY" "${CREDENTIAL_ENCRYPTION_KEY:-}" "$ENVIRONMENT" "false"
 # GitHub Actions secret names cannot start with GITHUB_, so CI passes GH_WEBHOOK_SECRET.
-set_worker_secret "GITHUB_WEBHOOK_SECRET" "${GH_WEBHOOK_SECRET:-${GITHUB_WEBHOOK_SECRET:-}}" "$ENVIRONMENT" "true" || FAILED=true
+set_worker_secret "GITHUB_WEBHOOK_SECRET" "${GH_WEBHOOK_SECRET:-${GITHUB_WEBHOOK_SECRET:-}}" "$ENVIRONMENT" "false"
 
 # Configure Cloudflare secrets (required for DNS and observability operations)
 set_worker_secret "CF_API_TOKEN" "${CF_API_TOKEN:-}" "$ENVIRONMENT" "true" || FAILED=true
@@ -177,14 +177,17 @@ set_worker_secret "DEPLOY_SIGNING_PUBLIC_KEY" "${DEPLOY_SIGNING_PUBLIC_KEY:-}" "
 set_worker_secret "DEVCONTAINER_CACHE_CLOUDFLARE_API_TOKEN" "${DEVCONTAINER_CACHE_CLOUDFLARE_API_TOKEN:-}" "$ENVIRONMENT" "false"
 set_worker_secret "DEVCONTAINER_CACHE_CLOUDFLARE_ACCOUNT_ID" "${DEVCONTAINER_CACHE_CLOUDFLARE_ACCOUNT_ID:-}" "$ENVIRONMENT" "false"
 
-# Configure GitHub secrets (required - platform is useless without authentication)
+# Configure GitHub secrets (optional compatibility path).
+# Fresh forks can deploy with Cloudflare credentials only, then configure GitHub
+# through /setup or the superadmin platform config UI. Existing deployments keep
+# working because runtime config falls back to these Worker secrets when present.
 # GH_* env vars (GitHub Actions does not allow GITHUB_* secret names) are mapped to GITHUB_* Worker secrets.
 # See CLAUDE.md "Env Var Naming: GH_ vs GITHUB_" and .claude/rules/07-env-and-urls.md.
-set_worker_secret "GITHUB_CLIENT_ID" "${GH_CLIENT_ID:-}" "$ENVIRONMENT" "true" || FAILED=true
-set_worker_secret "GITHUB_CLIENT_SECRET" "${GH_CLIENT_SECRET:-}" "$ENVIRONMENT" "true" || FAILED=true
-set_worker_secret "GITHUB_APP_ID" "${GH_APP_ID:-}" "$ENVIRONMENT" "true" || FAILED=true
-set_worker_secret "GITHUB_APP_PRIVATE_KEY" "${GH_APP_PRIVATE_KEY:-}" "$ENVIRONMENT" "true" || FAILED=true
-set_worker_secret "GITHUB_APP_SLUG" "${GH_APP_SLUG:-}" "$ENVIRONMENT" "true" || FAILED=true
+set_worker_secret "GITHUB_CLIENT_ID" "${GH_CLIENT_ID:-}" "$ENVIRONMENT" "false"
+set_worker_secret "GITHUB_CLIENT_SECRET" "${GH_CLIENT_SECRET:-}" "$ENVIRONMENT" "false"
+set_worker_secret "GITHUB_APP_ID" "${GH_APP_ID:-}" "$ENVIRONMENT" "false"
+set_worker_secret "GITHUB_APP_PRIVATE_KEY" "${GH_APP_PRIVATE_KEY:-}" "$ENVIRONMENT" "false"
+set_worker_secret "GITHUB_APP_SLUG" "${GH_APP_SLUG:-}" "$ENVIRONMENT" "false"
 
 # Configure trial onboarding claim/fingerprint HMAC secret (Pulumi-managed, persists across deploys).
 # Required when trials are enabled; harmless when trials are disabled (cookies just aren't issued).

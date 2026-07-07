@@ -108,6 +108,26 @@ describe('sync wrangler config', () => {
     expect(envConfig.vars).toMatchObject({ ARTIFACTS_ENABLED: 'true' });
   });
 
+  it('generates a plaintext setup token var without requiring an input secret', () => {
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+
+    const envConfig = generateApiWorkerEnv({}, outputs, 'prod', false, false);
+
+    expect(envConfig.vars?.SETUP_TOKEN).toEqual(expect.any(String));
+    expect(String(envConfig.vars?.SETUP_TOKEN).length).toBeGreaterThan(20);
+  });
+
+  it('includes SETUP_FORCE only when explicitly requested', () => {
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+
+    expect(generateApiWorkerEnv({}, outputs, 'prod', false, false).vars).not.toHaveProperty('SETUP_FORCE');
+
+    vi.stubEnv('SETUP_FORCE', 'true');
+    expect(generateApiWorkerEnv({}, outputs, 'prod', false, false).vars).toMatchObject({
+      SETUP_FORCE: 'true',
+    });
+  });
+
   it('fails when Artifacts is enabled without a top-level binding declaration', () => {
     vi.stubEnv('RESOURCE_PREFIX', 's123abc');
 
