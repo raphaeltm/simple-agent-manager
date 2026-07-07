@@ -58,7 +58,7 @@ Implement the locked first-run admin setup design: deploy with only Cloudflare c
   - [x] Update public self-hosting/security docs with the new setup flow and static OAuth redirect guidance.
 - [ ] Validate end to end:
   - [x] Run lint, typecheck, test, build, migration safety, and relevant package tests.
-  - [ ] Run specialist reviews: task-completion-validator, cloudflare-specialist, security-auditor, env-validator, constitution-validator, ui-ux-specialist, test-engineer, doc-sync-validator.
+  - [x] Run specialist reviews: task-completion-validator, cloudflare-specialist, security-auditor, env-validator, constitution-validator, ui-ux-specialist, test-engineer, doc-sync-validator.
   - [ ] Deploy to staging and verify existing GitHub users, project creation, chat, and task submission still work.
   - [ ] Verify `/setup` route and Google login buttons are reachable on staging without breaking existing auth.
 
@@ -76,6 +76,28 @@ Implement the locked first-run admin setup design: deploy with only Cloudflare c
 - `npx tsx --check scripts/deploy/sync-wrangler-config.ts` — passed.
 - `pnpm --filter @simple-agent-manager/web exec playwright test tests/playwright/platform-config-audit.spec.ts` — passed across mobile and desktop projects.
 - Playwright screenshots for `/setup`, `/admin/integrations`, landing login, device auth, and trial login are in `apps/web/.codex/tmp/playwright-screenshots/`.
+- Review fixes after the full-suite run:
+  - `scripts/deploy/types.ts` now classifies GitHub integration secrets as optional, matching `configure-secrets.sh` and the reusable workflow.
+  - Removed the setup config GET route that accepted `token` as a query parameter; setup token exchange now stays in POST bodies.
+  - `/api/setup/status` returns 410 Gone after setup completion unless `SETUP_FORCE=true`, so the public setup surface closes fully.
+  - Setup token rate-limit attempts/window are configurable through `SETUP_RATE_LIMIT_MAX_ATTEMPTS` and `SETUP_RATE_LIMIT_WINDOW_SECONDS`.
+- Post-review targeted validation:
+  - `pnpm --filter @simple-agent-manager/api test -- tests/unit/services/platform-config.test.ts tests/unit/routes/setup.test.ts` — passed.
+  - `pnpm --filter @simple-agent-manager/api typecheck` — passed.
+  - `pnpm vitest run scripts/quality/sync-wrangler-config.test.ts scripts/quality/deploy-reusable-workflow.test.ts scripts/quality/deployment-workflow-hardening.test.ts apps/api/tests/unit/dead-code-removal.test.ts` — passed.
+  - `npx tsx --check scripts/deploy/sync-wrangler-config.ts` — passed.
+  - `pnpm quality:ast-checks` — passed with existing warnings only, 0 errors.
+
+## Specialist Review Notes
+
+- `task-completion-validator`: passed after fixing optional deploy metadata, closing `/setup/status` with 410, and removing token-in-query setup access. Staging acceptance remains the only open gate.
+- `cloudflare-specialist`: passed. Setup token throttling uses atomic D1 row updates, not KV; migrations are additive/reuse existing tables; Wrangler binding checks pass; `SETUP_TOKEN` is a plaintext `[vars]` value by design.
+- `security-auditor`: passed after token-in-query removal. Integration secrets stay encrypted in `platform_credentials`; the deploy path prints only the Cloudflare variables dashboard URL; setup closes after completion and can only be reopened through explicit `SETUP_FORCE=true`.
+- `env-validator`: passed. GitHub integration secrets are optional across Env typing, deploy scripts, workflow metadata, docs, and fallback resolver behavior. `GH_*` to `GITHUB_*` mapping remains backward compatible.
+- `constitution-validator`: passed after making setup rate-limit values configurable. External GitHub/Google OAuth endpoints remain code constants because they are provider API endpoints, not deployment-specific configuration.
+- `ui-ux-specialist`: passed. The selected UI uses one shared integration form under two gates (`/setup` and `/admin/integrations`) to avoid drift; Playwright mobile/desktop screenshots cover setup, admin integrations, and all login surfaces.
+- `test-engineer`: passed. Coverage includes resolver fallback and bad-row resilience, setup route state transitions/rate limiting, conditional auth providers, deployment config generation, and Playwright UI reachability.
+- `doc-sync-validator`: passed. Self-hosting, configuration, and security docs now describe runtime setup, optional GitHub fallbacks, Google OAuth, setup recovery, and static redirect requirements.
 
 ## Acceptance Criteria
 
