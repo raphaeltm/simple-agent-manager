@@ -1249,6 +1249,7 @@ func (a *messageReporterAdapter) Enqueue(entry acp.MessageReportEntry) error {
 		Content:      entry.Content,
 		ToolMetadata: entry.ToolMetadata,
 		Timestamp:    entry.Timestamp,
+		Origin:       entry.Origin,
 	})
 }
 

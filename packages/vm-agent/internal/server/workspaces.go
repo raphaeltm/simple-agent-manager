@@ -988,6 +988,10 @@ func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request)
 		ProjectID        string               `json:"projectId,omitempty"`
 		TaskID           string               `json:"taskId,omitempty"`
 		TaskMode         string               `json:"taskMode,omitempty"`
+		// InjectedInstructions is SAM-managed system-injected prompt text (e.g. the
+		// get_instructions reminder). Delivered to the agent as model input but
+		// mirrored as a separate origin="system" user message the UI collapses.
+		InjectedInstructions string `json:"injectedInstructions,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -1077,7 +1081,7 @@ func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request)
 
 	// Start agent and send initial prompt in a background goroutine.
 	// The endpoint returns 202 immediately — the agent runs asynchronously.
-	go s.startAgentWithPrompt(host, workspaceID, sessionID, body.AgentType, body.InitialPrompt)
+	go s.startAgentWithPrompt(host, workspaceID, sessionID, body.AgentType, body.InitialPrompt, body.InjectedInstructions)
 
 	writeJSON(w, http.StatusAccepted, map[string]interface{}{
 		"status":    "starting",
@@ -1087,7 +1091,7 @@ func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request)
 
 // startAgentWithPrompt runs SelectAgent and then sends the initial prompt.
 // Called as a goroutine from handleStartAgentSession.
-func (s *Server) startAgentWithPrompt(host *acp.SessionHost, workspaceID, sessionID, agentType, initialPrompt string) {
+func (s *Server) startAgentWithPrompt(host *acp.SessionHost, workspaceID, sessionID, agentType, initialPrompt, injectedInstructions string) {
 	ctx := context.Background()
 
 	// Idempotency: if the host is already prompting, a prompt is in progress —
@@ -1128,11 +1132,26 @@ func (s *Server) startAgentWithPrompt(host *acp.SessionHost, workspaceID, sessio
 		"agentType": agentType,
 	})
 
-	// Build JSON-RPC params matching what HandlePrompt expects.
+	// Build JSON-RPC params matching what HandlePrompt expects. The visible task
+	// prompt is one block; SAM-injected instructions (e.g. the get_instructions
+	// reminder) are a SEPARATE block carrying the origin marker in _meta. Both are
+	// sent to the agent as model input, but the injected block is mirrored as a
+	// distinct origin="system" user message the UI collapses. The marker rides the
+	// INBOUND JSON-RPC params (parsed by parsePromptBlocks) — it is read in-process
+	// before any SDK marshaling, so it reaches persistence even though the SDK
+	// strips _meta on outbound serialization.
+	promptBlocks := []map[string]interface{}{
+		{"type": "text", "text": initialPrompt},
+	}
+	if strings.TrimSpace(injectedInstructions) != "" {
+		promptBlocks = append(promptBlocks, map[string]interface{}{
+			"type":  "text",
+			"text":  injectedInstructions,
+			"_meta": map[string]interface{}{acp.MetaOriginKey: acp.OriginSystem},
+		})
+	}
 	promptParams, _ := json.Marshal(map[string]interface{}{
-		"prompt": []map[string]string{
-			{"type": "text", "text": initialPrompt},
-		},
+		"prompt": promptBlocks,
 	})
 	syntheticReqID, _ := json.Marshal("server-initiated-1")
 
