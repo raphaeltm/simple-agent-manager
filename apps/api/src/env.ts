@@ -82,6 +82,8 @@ export interface Env {
   GITHUB_WEBHOOK_SECRET?: string; // GitHub webhook HMAC verification
   SETUP_TOKEN?: string; // Plaintext first-run setup token, dashboard-readable while setup is incomplete
   SETUP_FORCE?: string; // "true" reopens /setup for lockout recovery
+  SETUP_RATE_LIMIT_MAX_ATTEMPTS?: string; // Max setup-token attempts per identifier/window (default: 10)
+  SETUP_RATE_LIMIT_WINDOW_SECONDS?: string; // Setup-token attempt window in seconds (default: 900)
   // Deployment signing keys (Ed25519 — separate from callback JWT)
   DEPLOY_SIGNING_PRIVATE_KEY?: string; // Base64-encoded Ed25519 private key for payload signing
   DEPLOY_SIGNING_PUBLIC_KEY?: string; // Base64-encoded Ed25519 public key delivered to deployment nodes

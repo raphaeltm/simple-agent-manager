@@ -157,6 +157,19 @@ describe('platform config resolver', () => {
     await expect(verifySetupToken(env, 'setup-token', '198.51.100.2')).resolves.toEqual({ ok: true });
   });
 
+  it('uses configured setup token rate limit values', async () => {
+    const env = createEnv({
+      SETUP_RATE_LIMIT_MAX_ATTEMPTS: '1',
+      SETUP_RATE_LIMIT_WINDOW_SECONDS: '60',
+    });
+
+    await expect(verifySetupToken(env, 'wrong', '203.0.113.7')).resolves.toMatchObject({ status: 401 });
+    await expect(verifySetupToken(env, 'setup-token', '203.0.113.7')).resolves.toMatchObject({
+      ok: false,
+      status: 429,
+    });
+  });
+
   it('SETUP_FORCE reopens setup even after setup.completed=true', async () => {
     const env = createEnv();
     await env.DATABASE.prepare(

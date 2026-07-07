@@ -91,12 +91,17 @@ const ENV_KEYS = {
   googleClientSecret: 'GOOGLE_CLIENT_SECRET',
 } as const;
 
-const SETUP_RATE_LIMIT_WINDOW_SECONDS = 15 * 60;
-const SETUP_RATE_LIMIT_MAX_ATTEMPTS = 10;
+const DEFAULT_SETUP_RATE_LIMIT_WINDOW_SECONDS = 15 * 60;
+const DEFAULT_SETUP_RATE_LIMIT_MAX_ATTEMPTS = 10;
 
 function envValue(env: Env, key: keyof Env): string | null {
   const value = env[key];
   return typeof value === 'string' && value.trim() ? value : null;
+}
+
+function positiveIntegerEnv(env: Env, key: keyof Env, fallback: number): number {
+  const parsed = Number.parseInt(envValue(env, key) ?? '', 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 function unset(): ResolvedPlatformValue {
@@ -481,7 +486,13 @@ export async function verifySetupToken(
   }
 
   const now = Math.floor(Date.now() / 1000);
-  const windowStart = now - SETUP_RATE_LIMIT_WINDOW_SECONDS;
+  const windowSeconds = positiveIntegerEnv(
+    env,
+    'SETUP_RATE_LIMIT_WINDOW_SECONDS',
+    DEFAULT_SETUP_RATE_LIMIT_WINDOW_SECONDS
+  );
+  const maxAttempts = positiveIntegerEnv(env, 'SETUP_RATE_LIMIT_MAX_ATTEMPTS', DEFAULT_SETUP_RATE_LIMIT_MAX_ATTEMPTS);
+  const windowStart = now - windowSeconds;
   const key = `setup.rateLimit.${await stableHash(identifier || 'unknown')}`;
 
   await env.DATABASE.prepare(
@@ -502,7 +513,7 @@ export async function verifySetupToken(
          CAST(json_extract(value, '$.windowStart') AS INTEGER) < ?
          OR CAST(json_extract(value, '$.count') AS INTEGER) < ?
        )`
-  ).bind(windowStart, now, key, windowStart, SETUP_RATE_LIMIT_MAX_ATTEMPTS).run();
+  ).bind(windowStart, now, key, windowStart, maxAttempts).run();
 
   if (!result.meta.changes || result.meta.changes === 0) {
     return { ok: false, status: 429, message: 'Too many setup token attempts. Try again later.' };
