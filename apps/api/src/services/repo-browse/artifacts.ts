@@ -39,6 +39,84 @@ function countPatchLines(patch: string): { additions: number; deletions: number 
 }
 
 /**
+ * Recursively collect blob/tree entries at `ref` using isomorphic-git's `walk`.
+ *
+ * CRITICAL: isomorphic-git's walk PRUNES recursion into a node's children when
+ * `map` returns `null` (`_walk`: `if (parent !== null) { iterate(children) }`).
+ * Every node we want to descend past — the root and any tree — MUST return a
+ * non-null value (`undefined`), or the walk stops there. Returning `null` from
+ * the root yields a completely empty tree. Exported so a real-git regression
+ * test can exercise the recursion (the class-level tests mock `git.walk`).
+ */
+export async function collectTreeEntries(fs: IsoFs, dir: string, ref: string): Promise<RepoTreeEntry[]> {
+  const entries: RepoTreeEntry[] = [];
+  await git.walk({
+    fs,
+    dir,
+    trees: [git.TREE({ ref })],
+    map: async (filepath, [entry]) => {
+      if (filepath === '.' || !entry) return undefined; // recurse into children
+      const type = await entry.type();
+      if (type !== 'blob' && type !== 'tree') return null; // prune gitlinks/commits
+      entries.push({ path: filepath, name: basename(filepath), type, size: null });
+      return undefined; // record this node, but keep descending into subtrees
+    },
+  });
+  return entries;
+}
+
+/**
+ * Two-tree diff walk between `baseOid` and `headOid`. Same recursion rule as
+ * {@link collectTreeEntries}: trees must return `undefined` so nested changed
+ * files are reached. Bounded by `fileCap` to protect Worker CPU/memory.
+ */
+export async function collectCompareFiles(
+  fs: IsoFs,
+  dir: string,
+  baseOid: string,
+  headOid: string,
+  fileCap: number
+): Promise<{ files: RepoCompareFile[]; truncated: boolean }> {
+  let truncated = false;
+  const files: RepoCompareFile[] = [];
+  await git.walk({
+    fs,
+    dir,
+    trees: [git.TREE({ ref: baseOid }), git.TREE({ ref: headOid })],
+    map: async (filepath, [a, b]) => {
+      if (filepath === '.') return undefined; // recurse into root children
+      const aType = a ? await a.type() : null;
+      const bType = b ? await b.type() : null;
+      if (aType === 'tree' || bType === 'tree') return undefined; // descend into subtree
+      const aOid = a ? await a.oid() : null;
+      const bOid = b ? await b.oid() : null;
+      if (aOid === bOid) return undefined;
+      if (files.length >= fileCap) {
+        truncated = true;
+        return undefined;
+      }
+
+      const aBytes = aOid ? (await git.readBlob({ fs, dir, oid: aOid })).blob : new Uint8Array();
+      const bBytes = bOid ? (await git.readBlob({ fs, dir, oid: bOid })).blob : new Uint8Array();
+      const status = !aOid ? 'added' : !bOid ? 'removed' : 'modified';
+
+      if (isBinaryBytes(aBytes) || isBinaryBytes(bBytes)) {
+        files.push({ path: filepath, status, additions: 0, deletions: 0, patch: null, patchTruncated: false, isBinary: true });
+        return undefined;
+      }
+      const aText = new TextDecoder().decode(aBytes);
+      const bText = new TextDecoder().decode(bBytes);
+      const patch = createPatch(filepath, aText, bText);
+      const { additions, deletions } = countPatchLines(patch);
+      files.push({ path: filepath, status, additions, deletions, patch, patchTruncated: false, isBinary: false });
+      return undefined;
+    },
+  });
+  files.sort((x, y) => x.path.localeCompare(y.path));
+  return { files, truncated };
+}
+
+/**
  * Cloudflare Artifacts implementation of {@link RepoBrowser} using isomorphic-git
  * in the Worker runtime. Artifacts does NOT support partial-clone `filter`, so we
  * use shallow (`depth: 1`) single-branch clone/fetch into an in-memory fs and read
@@ -114,19 +192,7 @@ export class ArtifactsRepoBrowser implements RepoBrowser {
 
   async listTree(ref: string): Promise<RepoTreeResponse> {
     const fs = await this.cloneRef(ref);
-    const entries: RepoTreeEntry[] = [];
-    await git.walk({
-      fs,
-      dir: DIR,
-      trees: [git.TREE({ ref })],
-      map: async (filepath, [entry]) => {
-        if (filepath === '.' || !entry) return null;
-        const type = await entry.type();
-        if (type !== 'blob' && type !== 'tree') return null;
-        entries.push({ path: filepath, name: basename(filepath), type, size: null });
-        return null;
-      },
-    });
+    const entries = await collectTreeEntries(fs, DIR, ref);
     return { ref, path: '', entries, truncated: false };
   }
 
@@ -168,47 +234,7 @@ export class ArtifactsRepoBrowser implements RepoBrowser {
       .catch(() => git.resolveRef({ fs, dir: DIR, ref: head }));
 
     const fileCap = maxCompareFiles(this.env);
-    let truncated = false;
-    const files: RepoCompareFile[] = [];
-    await git.walk({
-      fs,
-      dir: DIR,
-      trees: [git.TREE({ ref: baseOid }), git.TREE({ ref: headOid })],
-      map: async (filepath, [a, b]) => {
-        if (filepath === '.') return null;
-        const aType = a ? await a.type() : null;
-        const bType = b ? await b.type() : null;
-        if (aType === 'tree' || bType === 'tree') return null; // walk auto-recurses
-        const aOid = a ? await a.oid() : null;
-        const bOid = b ? await b.oid() : null;
-        if (aOid === bOid) return null;
-        // Bound Worker CPU/memory: stop materializing diffs past the cap.
-        if (files.length >= fileCap) {
-          truncated = true;
-          return null;
-        }
-
-        const aBytes = aOid ? (await git.readBlob({ fs, dir: DIR, oid: aOid })).blob : new Uint8Array();
-        const bBytes = bOid ? (await git.readBlob({ fs, dir: DIR, oid: bOid })).blob : new Uint8Array();
-        const status = !aOid ? 'added' : !bOid ? 'removed' : 'modified';
-
-        if (isBinaryBytes(aBytes) || isBinaryBytes(bBytes)) {
-          files.push({
-            path: filepath, status, additions: 0, deletions: 0,
-            patch: null, patchTruncated: false, isBinary: true,
-          });
-          return null;
-        }
-        const aText = new TextDecoder().decode(aBytes);
-        const bText = new TextDecoder().decode(bBytes);
-        const patch = createPatch(filepath, aText, bText);
-        const { additions, deletions } = countPatchLines(patch);
-        files.push({ path: filepath, status, additions, deletions, patch, patchTruncated: false, isBinary: false });
-        return null;
-      },
-    });
-
-    files.sort((x, y) => x.path.localeCompare(y.path));
+    const { files, truncated } = await collectCompareFiles(fs, DIR, baseOid, headOid, fileCap);
     return {
       base,
       head,
