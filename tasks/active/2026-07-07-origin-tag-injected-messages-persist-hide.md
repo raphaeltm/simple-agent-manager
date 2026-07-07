@@ -101,3 +101,23 @@ Web:
   web `lib/api/sessions.ts`, `project-message-view/types.ts`, `AcpConversationItemView.tsx`,
   acp-client `useAcpMessages.types.ts`
 - Rules: 23 (contract), 31 (migration safety), 35 (vertical slice), 44 (dual-write/outbox), 17 (visual)
+
+## Implementation status (2026-07-07)
+
+All layers implemented + committed. Local validation:
+- Go (vm-agent): build, `go vet`, `go test ./internal/acp ./internal/messagereport` GREEN; new tests
+  (marker extraction, outbox persist/forward+omitempty, migration idempotency). gofmt clean on all
+  touched files. `internal/server` has one FAIL that is ENVIRONMENTAL ONLY (`docker` not in sandbox
+  PATH — `TestBootstrapLifecycle_SessionsUseDetectedUser`), unrelated to this change.
+- API: `pnpm --filter api typecheck` GREEN; task-runner prompt/agent-session unit tests updated + GREEN;
+  `pnpm quality:migration-safety` + `quality:do-migration-safety` GREEN (additive column, no DROP).
+- Web: `pnpm --filter web typecheck` GREEN; new collapse component test GREEN.
+- DO vertical-slice test (`tests/workers/project-data-do.test.ts` "persists and returns the origin
+  marker") written; the Miniflare **workers pool crashes in this sandbox** ("Worker exited
+  unexpectedly") for ALL workers tests including pre-existing ones — an environment limitation, so it
+  will run in CI, not locally here.
+- Lint: warnings only (pre-existing patterns); no new errors.
+
+Staging + merge SKIPPED per user instruction → PR is `needs-human-review`, not self-merged. Human must
+staging-verify end-to-end (submit a task; confirm the get_instructions reminder renders collapsed on
+reload) before merge.
