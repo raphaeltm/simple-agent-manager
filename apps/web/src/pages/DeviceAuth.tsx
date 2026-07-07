@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router';
 
 import { useAuth } from '../components/AuthProvider';
+import { useLoginProviders } from '../hooks/useLoginProviders';
 import { useToast } from '../hooks/useToast';
 import { approveDeviceCode } from '../lib/api';
 import { authClient } from '../lib/auth';
@@ -20,6 +21,7 @@ export function DeviceAuth() {
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { isAuthenticated, isLoading } = useAuth();
+  const providers = useLoginProviders();
   const toast = useToast();
 
   useEffect(() => {
@@ -108,20 +110,22 @@ export function DeviceAuth() {
                 >
                   Log in with GitHub
                 </Button>
-                <Button
-                  variant="secondary"
-                  onClick={() => handleLogin('google')}
-                  disabled={isLoading || submitting || !code.trim()}
-                  className="w-full"
-                >
-                  <span
-                    aria-hidden="true"
-                    className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-white text-sm font-semibold text-[#1a73e8]"
+                {providers.google && (
+                  <Button
+                    variant="secondary"
+                    onClick={() => handleLogin('google')}
+                    disabled={isLoading || submitting || !code.trim()}
+                    className="w-full"
                   >
-                    G
-                  </span>
-                  Log in with Google
-                </Button>
+                    <span
+                      aria-hidden="true"
+                      className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-white text-sm font-semibold text-[#1a73e8]"
+                    >
+                      G
+                    </span>
+                    Log in with Google
+                  </Button>
+                )}
               </div>
             )}
           </div>

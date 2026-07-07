@@ -3,6 +3,7 @@ import { useEffect, useRef } from 'react';
 import { useLocation,useNavigate } from 'react-router';
 
 import { useAuth } from '../components/AuthProvider';
+import { useLoginProviders } from '../hooks/useLoginProviders';
 import { signInWithGitHub, signInWithGoogle } from '../lib/auth';
 
 const PUBLIC_WEBSITE_URL =
@@ -15,6 +16,7 @@ const AGENTS = ['Claude Code', 'OpenAI Codex', 'Gemini CLI', 'Mistral Vibe'];
  */
 export function Landing() {
   const { isAuthenticated, isLoading } = useAuth();
+  const providers = useLoginProviders();
   const navigate = useNavigate();
   const location = useLocation();
   // Capture state.from once on mount to avoid double-navigation when
@@ -77,10 +79,12 @@ export function Landing() {
           <GitHubIcon />
           Sign in with GitHub
         </Button>
-        <Button onClick={handleGoogleSignIn} variant="secondary" size="lg" className="w-full mb-3">
-          <GoogleMark />
-          Sign in with Google
-        </Button>
+        {providers.google && (
+          <Button onClick={handleGoogleSignIn} variant="secondary" size="lg" className="w-full mb-3">
+            <GoogleMark />
+            Sign in with Google
+          </Button>
+        )}
 
         <p className="text-xs text-fg-muted mb-6">
           Bring your own cloud &mdash; your infrastructure, your costs.

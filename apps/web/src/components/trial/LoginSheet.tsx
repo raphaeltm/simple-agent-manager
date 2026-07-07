@@ -21,6 +21,7 @@ import { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 
 import { useIsMobile } from '../../hooks/useIsMobile';
+import { useLoginProviders } from '../../hooks/useLoginProviders';
 import { authClient } from '../../lib/auth';
 
 interface LoginSheetProps {
@@ -51,6 +52,7 @@ async function defaultGoogleSignIn(returnTo: string): Promise<void> {
 
 export function LoginSheet({ isOpen, onClose, trialId, onSignIn }: LoginSheetProps) {
   const isMobile = useIsMobile();
+  const providers = useLoginProviders();
   const panelRef = useRef<HTMLDivElement>(null);
   const primaryCtaRef = useRef<HTMLButtonElement>(null);
   const googleCtaRef = useRef<HTMLButtonElement>(null);
@@ -212,29 +214,31 @@ export function LoginSheet({ isOpen, onClose, trialId, onSignIn }: LoginSheetPro
           </svg>
           Continue with GitHub
         </button>
-        <button
-          ref={googleCtaRef}
-          type="button"
-          onClick={handleGoogleSignIn}
-          data-testid="trial-login-google"
-          data-return-to={returnTo}
-          className="
-            mt-3 inline-flex items-center justify-center gap-2
-            min-h-14 px-5 rounded-lg
-            border border-border-default bg-surface text-fg-primary font-semibold
-            hover:bg-surface-hover
-            focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2
-            transition-colors
-          "
-        >
-          <span
-            aria-hidden="true"
-            className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-white text-sm font-semibold text-[#1a73e8]"
+        {providers.google && (
+          <button
+            ref={googleCtaRef}
+            type="button"
+            onClick={handleGoogleSignIn}
+            data-testid="trial-login-google"
+            data-return-to={returnTo}
+            className="
+              mt-3 inline-flex items-center justify-center gap-2
+              min-h-14 px-5 rounded-lg
+              border border-border-default bg-surface text-fg-primary font-semibold
+              hover:bg-surface-hover
+              focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2
+              transition-colors
+            "
           >
-            G
-          </span>
-          Continue with Google
-        </button>
+            <span
+              aria-hidden="true"
+              className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-white text-sm font-semibold text-[#1a73e8]"
+            >
+              G
+            </span>
+            Continue with Google
+          </button>
+        )}
       </div>
     </div>,
     document.body,

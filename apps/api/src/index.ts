@@ -565,6 +565,18 @@ app.get('/api/config/artifacts-enabled', (c) => {
   return c.json({ enabled: c.env.ARTIFACTS_ENABLED === 'true' && !!c.env.ARTIFACTS });
 });
 
+// Public config — which login providers are configured, so the login surfaces
+// only render a provider button when that provider is actually usable. Google
+// here means the LOGIN client (getGoogleLoginOAuthConfig), never the infra/GCP one.
+app.get('/api/config/login-providers', async (c) => {
+  const { getGitHubOAuthConfig, getGoogleLoginOAuthConfig } = await import('./services/platform-config');
+  const [github, google] = await Promise.all([
+    getGitHubOAuthConfig(c.env),
+    getGoogleLoginOAuthConfig(c.env),
+  ]);
+  return c.json({ github: github !== null, google: google !== null });
+});
+
 // JWKS endpoint (must be at root level)
 // Add cache headers per constitution principle XI
 app.get('/.well-known/jwks.json', async (c) => {

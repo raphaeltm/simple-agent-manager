@@ -61,12 +61,15 @@ async function respondJson(route: Route, status: number, body: unknown) {
   });
 }
 
-async function setupMocks(page: Page, authenticated = true) {
+async function setupMocks(page: Page, authenticated = true, googleLogin = true) {
   await page.route('**/api/**', async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
 
     if (path === '/api/auth/get-session') return respondJson(route, 200, authenticated ? ADMIN_USER : null);
+    if (path === '/api/config/login-providers') {
+      return respondJson(route, 200, { github: true, google: googleLogin });
+    }
     if (path === '/api/dashboard/active-tasks') return respondJson(route, 200, { tasks: [] });
     if (path === '/api/trial-status') return respondJson(route, 200, { isTrial: false });
     if (path === '/api/projects') return respondJson(route, 200, { projects: [], total: 0 });
@@ -144,5 +147,21 @@ test.describe('Platform config first-run and admin UI', () => {
     await expect(page.getByTestId('trial-login-google')).toBeVisible();
     await assertNoOverflow(page);
     await screenshot(page, 'platform-config-trial-login-sheet');
+  });
+
+  test('login surfaces hide Google when the login client is not configured', async ({ page }) => {
+    await setupMocks(page, false, false);
+
+    await page.goto('/');
+    await expect(page.getByRole('button', { name: 'Sign in with GitHub' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Sign in with Google' })).toHaveCount(0);
+
+    await page.goto('/device?code=ABCD-1234');
+    await expect(page.getByRole('button', { name: 'Log in with GitHub' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Log in with Google' })).toHaveCount(0);
+
+    await page.goto('/__test/trial-chat-gate?ideas=3&loginOpen=1');
+    await expect(page.getByTestId('trial-login-github')).toBeVisible();
+    await expect(page.getByTestId('trial-login-google')).toHaveCount(0);
   });
 });

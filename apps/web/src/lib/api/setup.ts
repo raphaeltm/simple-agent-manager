@@ -22,6 +22,16 @@ export interface SetupCompleteResponse {
   status: PlatformConfigStatus;
 }
 
+export interface LoginProvidersResponse {
+  github: boolean;
+  google: boolean;
+}
+
+/** Public: which login providers are configured (Google = the login client). */
+export async function fetchLoginProviders(): Promise<LoginProvidersResponse> {
+  return request<LoginProvidersResponse>('/api/config/login-providers');
+}
+
 export async function fetchSetupStatus(): Promise<SetupStatusResponse> {
   return request<SetupStatusResponse>('/api/setup/status');
 }
