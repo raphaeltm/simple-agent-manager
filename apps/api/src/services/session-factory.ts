@@ -4,6 +4,7 @@ import { createAuth } from '../auth';
 import type { Env } from '../env';
 import { getBetterAuthSecret } from '../lib/secrets';
 import { errors } from '../middleware/error';
+import { assertSessionUserApproved } from './signup-approval';
 
 const DEFAULT_SESSION_DURATION_SECONDS = 7 * 24 * 60 * 60;
 
@@ -84,7 +85,7 @@ export async function buildSessionLoginResponse(
   env: Env,
   user: SessionFactoryUser,
 ): Promise<Response> {
-  assertUserCanCreateSession(env, user);
+  await assertUserCanCreateSession(env, user);
   const { cookieHeader, sessionCookie } = await createSessionCookieForUser(env, user.id);
   return new Response(
     JSON.stringify({
@@ -102,16 +103,6 @@ export async function buildSessionLoginResponse(
   );
 }
 
-export function assertUserCanCreateSession(env: Env, user: SessionFactoryUser): void {
-  if (env.REQUIRE_APPROVAL !== 'true') {
-    return;
-  }
-
-  const isAdmin = user.role === 'superadmin' || user.role === 'admin';
-  if (user.status === 'suspended') {
-    throw errors.forbidden('Your account has been suspended');
-  }
-  if (user.status !== 'active' && !isAdmin) {
-    throw errors.forbidden('Your account is pending admin approval');
-  }
+export async function assertUserCanCreateSession(env: Env, user: SessionFactoryUser): Promise<void> {
+  await assertSessionUserApproved(env, user);
 }

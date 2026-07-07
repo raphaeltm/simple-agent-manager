@@ -9,14 +9,36 @@ import type { Env } from '../env';
 import { getUserId,requireApproved, requireAuth, requireSuperadmin } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { rateLimit } from '../middleware/rate-limit';
-import { AdminLogQuerySchema,AdminUserActionSchema, AdminUserRoleSchema, jsonValidator } from '../schemas';
+import { AdminLogQuerySchema,AdminUserActionSchema, AdminUserRoleSchema, jsonValidator, UpdateSignupApprovalConfigSchema } from '../schemas';
 import { getRuntimeLimits } from '../services/limits';
 import { CfApiError,getErrorTrends, getHealthSummary, getLogQueryRateLimit, queryCloudflareLogs, queryErrors } from '../services/observability';
+import { getSignupApprovalConfig, setSignupApprovalConfig } from '../services/signup-approval';
 
 const adminRoutes = new Hono<{ Bindings: Env }>();
 
 // All admin routes require auth + approval + superadmin
 adminRoutes.use('/*', requireAuth(), requireApproved(), requireSuperadmin());
+
+/**
+ * GET /api/admin/signup-approval - Read runtime signup approval config
+ */
+adminRoutes.get('/signup-approval', async (c) => {
+  const config = await getSignupApprovalConfig(c.env);
+  return c.json({ config });
+});
+
+/**
+ * PUT /api/admin/signup-approval - Update runtime signup approval config
+ * Body: { requireApproval: boolean }
+ */
+adminRoutes.put('/signup-approval', jsonValidator(UpdateSignupApprovalConfigSchema), async (c) => {
+  const body = c.req.valid('json');
+  const config = await setSignupApprovalConfig(c.env, {
+    requireApproval: body.requireApproval,
+    updatedBy: getUserId(c),
+  });
+  return c.json({ config });
+});
 
 /**
  * GET /api/admin/users - List all users

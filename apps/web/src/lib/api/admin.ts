@@ -7,7 +7,9 @@ import type {
   ListPlatformCredentialsResponse,
   LogQueryResponse,
   PlatformCredentialResponse,
+  SignupApprovalConfigResponse,
   UpdatePlatformCredentialRequest,
+  UpdateSignupApprovalConfigRequest,
   UserRole,
   UserStatus,
 } from '@simple-agent-manager/shared';
@@ -39,6 +41,19 @@ export async function changeUserRole(
   return request<{ id: string; role: UserRole }>(`/api/admin/users/${userId}/role`, {
     method: 'PATCH',
     body: JSON.stringify({ role }),
+  });
+}
+
+export async function fetchSignupApprovalConfig(): Promise<SignupApprovalConfigResponse> {
+  return request<SignupApprovalConfigResponse>('/api/admin/signup-approval');
+}
+
+export async function updateSignupApprovalConfig(
+  body: UpdateSignupApprovalConfigRequest
+): Promise<SignupApprovalConfigResponse> {
+  return request<SignupApprovalConfigResponse>('/api/admin/signup-approval', {
+    method: 'PUT',
+    body: JSON.stringify(body),
   });
 }
 

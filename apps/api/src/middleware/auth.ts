@@ -5,7 +5,8 @@ import { createAuth } from '../auth';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { expectJsonRecord } from '../lib/runtime-validation';
-import { AppError, errors } from './error';
+import { assertUserAllowedBySignupApproval, isSignupApprovalRequired } from '../services/signup-approval';
+import { errors } from './error';
 
 /**
  * Extended context with authenticated user.
@@ -133,7 +134,7 @@ export function optionalAuth(): MiddlewareHandler<{ Bindings: Env }> {
  */
 export function requireApproved(): MiddlewareHandler<{ Bindings: Env }> {
   return async (c: Context<{ Bindings: Env }>, next: Next) => {
-    if (c.env.REQUIRE_APPROVAL !== 'true') {
+    if (!(await isSignupApprovalRequired(c.env))) {
       await next();
       return;
     }
@@ -154,12 +155,8 @@ export function requireApproved(): MiddlewareHandler<{ Bindings: Env }> {
       return;
     }
 
-    if (auth.user.status === 'suspended') {
-      throw errors.forbidden('Your account has been suspended');
-    }
-
-    // Default: pending
-    throw new AppError(403, 'APPROVAL_REQUIRED', 'Your account is pending admin approval');
+    assertUserAllowedBySignupApproval(true, auth.user);
+    await next();
   };
 }
 

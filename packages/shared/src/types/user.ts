@@ -46,6 +46,23 @@ export interface AdminUserRoleRequest {
   role: Exclude<UserRole, 'superadmin'>;
 }
 
+export type SignupApprovalConfigSource = 'environment' | 'runtime';
+
+export interface SignupApprovalConfig {
+  requireApproval: boolean;
+  source: SignupApprovalConfigSource;
+  updatedAt: string | null;
+  updatedBy: string | null;
+}
+
+export interface SignupApprovalConfigResponse {
+  config: SignupApprovalConfig;
+}
+
+export interface UpdateSignupApprovalConfigRequest {
+  requireApproval: boolean;
+}
+
 // =============================================================================
 // Credential
 // =============================================================================

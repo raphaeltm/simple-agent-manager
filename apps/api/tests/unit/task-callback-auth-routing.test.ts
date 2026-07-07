@@ -75,6 +75,12 @@ vi.mock('../../src/services/jwt', () => ({
 }));
 
 vi.mock('../../src/lib/logger', () => ({
+  createModuleLogger: () => ({
+    debug: vi.fn(),
+    error: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+  }),
   log: {
     debug: vi.fn(),
     error: vi.fn(),

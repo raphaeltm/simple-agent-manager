@@ -56,6 +56,7 @@ export {
   fetchAnalyticsGeo,
   fetchAnalyticsRetention,
   fetchAnalyticsWebsiteTraffic,
+  fetchSignupApprovalConfig,
   getAdminLogStreamUrl,
   listAdminUsers,
   listPlatformCredentials,
@@ -68,6 +69,7 @@ export {
   updateAIProxyBillingMode,
   updateAIProxyConfig,
   updatePlatformCredential,
+  updateSignupApprovalConfig,
 } from './admin';
 export {
   createAgentProfile,

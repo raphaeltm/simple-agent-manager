@@ -60,15 +60,21 @@ function fakeEnv(requireApproval = 'true') {
 }
 
 function installExistingUsersQuery(existingUsers: Array<{ id: string }>) {
+  const get = vi.fn(async () => undefined);
   const all = vi.fn(async () => existingUsers);
   const limit = vi.fn(() => ({ all }));
   const where = vi.fn(() => ({ limit }));
   const from = vi.fn(() => ({ where }));
-  const select = vi.fn(() => ({ from }));
+  const select = vi.fn((fields?: Record<string, unknown>) => {
+    if (fields && 'value' in fields) {
+      return { from: vi.fn(() => ({ where: vi.fn(() => ({ get })) })) };
+    }
+    return { from };
+  });
 
   mocks.drizzle.mockReturnValue({ select });
 
-  return { all, from, limit, select, where };
+  return { all, from, get, limit, select, where };
 }
 
 async function getBeforeCreateHook(): Promise<BeforeCreateHook> {
