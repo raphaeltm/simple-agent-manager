@@ -408,11 +408,7 @@ export function ProjectOnboardingWizard({
         taskMode: kickoffMode,
         agentProfileId: selectedKickoffProfileId,
       });
-      const destination =
-        kickoffMode === 'conversation'
-          ? `/projects/${project.id}/chat/${result.sessionId}`
-          : `/projects/${project.id}/tasks/${result.taskId}`;
-      navigate(destination);
+      navigate(`/projects/${project.id}/chat/${result.sessionId}`);
     } catch (error) {
       if (isNotApprovedError(error)) {
         setKickoffError(

@@ -350,7 +350,7 @@ describe('ProjectOnboardingWizard', () => {
     await screen.findByRole('heading', { name: 'Kick off your first work' });
   }
 
-  it('task kickoff submits and navigates to the task page', async () => {
+  it('task kickoff submits and navigates to the chat session', async () => {
     mockSubmitTask.mockResolvedValue({ taskId: 'task-1', sessionId: 'sess-1' });
     await advanceToKickoff();
 
@@ -360,7 +360,7 @@ describe('ProjectOnboardingWizard', () => {
         'proj-1',
         expect.objectContaining({ taskMode: 'task' })
       );
-      expect(mockNavigate).toHaveBeenCalledWith('/projects/proj-1/tasks/task-1');
+      expect(mockNavigate).toHaveBeenCalledWith('/projects/proj-1/chat/sess-1');
     });
   });
 
