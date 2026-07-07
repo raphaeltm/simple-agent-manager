@@ -13,8 +13,9 @@ AI coding agents need real development environments — not sandboxes. SAM gives
 
 <CardGrid>
   <Card title="Bring Your Own Cloud" icon="cloud">
-    You provide your Hetzner, Scaleway, or GCP API token. VMs run on your infrastructure, billed to
-    your account. The platform never stores your cloud credentials as environment variables.
+    You connect Hetzner, Scaleway, or GCP cloud credentials. When you bring your own cloud, VMs run
+    on your infrastructure and are billed to your account. The platform never stores your cloud
+    credentials as environment variables.
   </Card>
   <Card title="Serverless Control Plane" icon="rocket">
     The API runs on Cloudflare Workers — zero infrastructure to manage. D1 for storage, KV for
@@ -33,8 +34,8 @@ AI coding agents need real development environments — not sandboxes. SAM gives
 ## How It Works
 
 1. **Sign in** with GitHub via the web UI
-2. **Add your cloud provider token** in Settings (Hetzner, Scaleway, or GCP)
-3. **Configure agent credentials** — add API keys for your preferred AI coding agents
+2. **Add your cloud provider credentials** in Settings (Hetzner, Scaleway, or GCP)
+3. **Configure agent credentials** for your preferred AI coding agents
 4. **Install the GitHub App** on your repositories
 5. **Create a project** — link a GitHub repo to start working
 6. **Describe your idea** — tell SAM what you want done; it provisions a VM, creates a workspace, and runs the agent autonomously
