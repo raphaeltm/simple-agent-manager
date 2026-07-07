@@ -42,15 +42,15 @@ collision detection — those are separate follow-ups tracked in the idea.
 
 ## Implementation checklist
 
-- [ ] `branch-name.ts:116` — change `taskId.slice(0, 6)` to `taskId.slice(-6)`.
-- [ ] Update the file header doc comment: keep the uniqueness intent but describe
+- [x] `branch-name.ts:116` — change `taskId.slice(0, 6)` to `taskId.slice(-6)`.
+- [x] Update the file header doc comment: keep the uniqueness intent but describe
       it accurately (random ULID tail, not a front slice).
-- [ ] Update the algorithm step comment (step 6, "first 6 chars") to "last 6 chars".
-- [ ] Update existing unit tests: expected suffix `-01jk9m` → `-345678`.
-- [ ] Add regression test: two ULIDs sharing the same first-6 prefix
+- [x] Update the algorithm step comment (step 6, "first 6 chars") to "last 6 chars".
+- [x] Update existing unit tests: expected suffix `-01jk9m` → `-345678`.
+- [x] Add regression test: two ULIDs sharing the same first-6 prefix
       (`01KWY6885SCSJGGHZXYY7494VN`, `01KWY6JJBN05GNJ83N0QQV4VJA`) with the SAME
       message produce DIFFERENT branch names (asserts the collision is fixed).
-- [ ] `pnpm lint && pnpm typecheck && pnpm test && pnpm build` green.
+- [x] `pnpm lint && pnpm typecheck && pnpm test && pnpm build` green.
 
 ## Acceptance criteria
 

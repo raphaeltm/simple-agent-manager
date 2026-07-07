@@ -2,7 +2,12 @@
  * Branch name generation service.
  *
  * Generates human-readable git branch names from user messages.
- * Uses task ID suffix for guaranteed uniqueness (no TOCTOU race).
+ * Appends the RANDOM tail of the task ULID for uniqueness (no TOCTOU race).
+ *
+ * NOTE: the suffix must come from the random portion of the ULID, not its
+ * timestamp prefix. A ULID is 10 timestamp chars + 16 random chars; the first
+ * chars carry only coarse time bits, so two tasks created in the same window
+ * would share them and collide. Slicing from the END keeps real entropy.
  *
  * See: specs/022-simplified-chat-ux/research.md (R6)
  */
@@ -99,7 +104,7 @@ interface BranchNameOptions {
  * 3. Split into words, filter stop words
  * 4. Take first N meaningful words
  * 5. Join with hyphens
- * 6. Append short task ID suffix (first 6 chars, lowercased)
+ * 6. Append short task ID suffix (last 6 chars of the ULID random tail, lowercased)
  * 7. Prefix with configurable prefix
  * 8. Truncate to max length
  * 9. Ensure valid git ref name
@@ -112,8 +117,10 @@ export function generateBranchName(
   const prefix = options.prefix ?? DEFAULT_PREFIX;
   const maxLength = options.maxLength ?? DEFAULT_MAX_LENGTH;
 
-  // Short task ID suffix (first 6 chars of ULID, lowercased)
-  const idSuffix = taskId.slice(0, 6).toLowerCase();
+  // Short task ID suffix (last 6 chars of the ULID random tail, lowercased).
+  // Must slice from the END: the leading ULID chars are timestamp bits with no
+  // entropy, so tasks created close in time would collide (see file header).
+  const idSuffix = taskId.slice(-6).toLowerCase();
 
   // Step 1: Lowercase
   let text = message.toLowerCase();
