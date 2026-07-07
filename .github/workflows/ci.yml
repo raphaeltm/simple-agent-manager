@@ -22,6 +22,12 @@ concurrency:
 jobs:
   changes:
     name: Detect Changes
+    # Fork bypass: on a push to main in a fork (self-host), skip all of CI so
+    # auto-deploy is not gated on the full suite. Pull requests always run CI
+    # (any repo), and the canonical repo always runs CI. Because every other job
+    # depends on `changes` (directly via `needs`, or explicitly via this same
+    # guard), skipping `changes` cascades a skip across the whole workflow.
+    if: github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager'
     timeout-minutes: 5
     runs-on: ubuntu-latest
     outputs:
@@ -104,6 +110,7 @@ jobs:
 
   ui-compliance:
     name: UI Compliance
+    if: github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager'
     timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
@@ -124,6 +131,7 @@ jobs:
 
   lint:
     name: Lint
+    if: github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager'
     timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
@@ -144,6 +152,7 @@ jobs:
 
   typecheck:
     name: Type Check
+    if: github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager'
     timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
@@ -167,6 +176,7 @@ jobs:
 
   test:
     name: Test
+    if: github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager'
     timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
@@ -190,6 +200,7 @@ jobs:
 
   build:
     name: Build
+    if: github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager'
     timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
@@ -211,7 +222,9 @@ jobs:
   playwright-visual:
     name: Playwright Visual Tests
     needs: [changes]
-    if: needs.changes.outputs.web-ui == 'true'
+    # Visual audits are informational and only relevant to reviewing a change.
+    # Restrict to pull requests so they never run on push to main.
+    if: github.event_name == 'pull_request' && needs.changes.outputs.web-ui == 'true'
     timeout-minutes: 45
     runs-on: ubuntu-latest
     steps:
@@ -269,6 +282,7 @@ jobs:
 
   deploy-scripts:
     name: Validate Deploy Scripts
+    if: github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager'
     timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
@@ -299,6 +313,7 @@ jobs:
 
   code-quality:
     name: Code Quality Checks
+    if: github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager'
     timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
@@ -331,6 +346,7 @@ jobs:
 
   pulumi-infra:
     name: Pulumi Infrastructure Tests
+    if: github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager'
     timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
