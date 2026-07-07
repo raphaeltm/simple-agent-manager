@@ -382,7 +382,6 @@ export type {
 } from './setup';
 export {
   completeSetup,
-  fetchSetupConfig,
   fetchSetupStatus,
   saveSetupConfig,
   verifySetupToken,

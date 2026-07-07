@@ -112,16 +112,6 @@ setupRoutes.post('/verify', async (c) => {
   return c.json({ ok: true, status: await getPlatformConfigStatus(c.env) });
 });
 
-setupRoutes.get('/config', async (c) => {
-  await assertSetupOpen(c.env);
-  const token = c.req.query('token');
-  if (!token) {
-    throw errors.badRequest('Setup token is required');
-  }
-  await assertSetupToken(c.env, token, clientIdentifier(c));
-  return c.json({ status: await getPlatformConfigStatus(c.env) });
-});
-
 setupRoutes.put('/config', async (c) => {
   await assertSetupOpen(c.env);
   const { token, config } = await parseSetupBody(c);

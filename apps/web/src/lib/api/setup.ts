@@ -33,11 +33,6 @@ export async function verifySetupToken(token: string): Promise<SetupVerifyRespon
   });
 }
 
-export async function fetchSetupConfig(token: string): Promise<PlatformConfigStatusResponse> {
-  const params = new URLSearchParams({ token });
-  return request<PlatformConfigStatusResponse>(`/api/setup/config?${params.toString()}`);
-}
-
 export async function saveSetupConfig(
   token: string,
   config: PlatformIntegrationConfigInput,
