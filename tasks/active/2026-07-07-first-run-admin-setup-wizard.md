@@ -2,7 +2,16 @@
 
 - SAM Task: 01KWXSRDQTPR8B1JMAS02YP119
 - SAM Idea: 01KWXQ0104CCE3KPPZ62H2MQSD
-- Output branch: sam/execute-task-using-skill-01kwxs
+- Output branch: sam/execute-task-using-skill-01kwxs (PR opened from sam/use-sam-mcp-tools-01kwy6 → #1528)
+
+## Follow-up work during review (2026-07-07)
+
+Raphaël exercised the Google login button on staging and found two issues; both fixed in PR #1528:
+
+1. **`redirect_uri_mismatch`** — login and infra/GCP flows shared one Google OAuth client via `getGoogleOAuthConfig` (`GOOGLE_CLIENT_ID/SECRET`). Split into `getGoogleLoginOAuthConfig` (login store → `GOOGLE_LOGIN_CLIENT_ID/SECRET` env; redirect `/api/auth/callback/google`; used by `auth.ts`) vs `getGoogleInfraOAuthConfig` (`GOOGLE_CLIENT_ID/SECRET` env; used by `google-auth.ts`, `project-deployment.ts`, `gcp.ts`). Added `GOOGLE_LOGIN_*` to env typing, `configure-secrets.sh`, `.env.example`, `wrangler.toml`, and docs. Regression tests assert login/infra resolve independently and infra creds never enable login.
+2. **Google button showed unconditionally** — added public `GET /api/config/login-providers` (`github`/`google` = whether each *login* client is configured) + `useLoginProviders` hook gating the "Sign in with Google" button on Landing/LoginSheet/DeviceAuth. Defaults GitHub visible + Google hidden (fail-safe). Backend regression test proves infra-only Google → `google:false`; Playwright asserts button visible when configured and absent when not.
+
+Staging (deploy run 28889004470, commit 484169bbf): `/api/config/login-providers` → `{github:true,google:false}`; landing shows only "Sign in with GitHub" (Google hidden until a login client is configured via `/admin/integrations` or `GOOGLE_LOGIN_*`). Admin can configure the login client at `/admin/integrations`.
 
 ## Problem Statement
 
