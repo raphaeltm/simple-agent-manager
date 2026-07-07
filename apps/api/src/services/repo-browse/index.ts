@@ -46,6 +46,9 @@ export async function resolveRepoBrowser(opts: {
       repoId: project.artifactsRepoId,
       defaultBranch: project.defaultBranch,
       env,
+      // Prefer the stored clone URL; the Artifacts binding's get().remote is
+      // empty on staging, which crashes isomorphic-git in extractAuthFromUrl.
+      storedRemoteUrl: project.repository,
     });
   }
 

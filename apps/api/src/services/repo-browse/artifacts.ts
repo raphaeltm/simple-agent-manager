@@ -51,7 +51,15 @@ export class ArtifactsRepoBrowser implements RepoBrowser {
   constructor(
     private readonly repoId: string,
     private readonly defaultBranch: string,
-    private readonly env: Env
+    private readonly env: Env,
+    /**
+     * Stored clone URL (`project.repository`, captured from `create().remote` at
+     * project creation). Preferred over the Artifacts binding's `get().remote`,
+     * which has been observed to come back empty/undefined on staging — an empty
+     * URL makes isomorphic-git throw `TypeError: reading 'split'` in
+     * `extractAuthFromUrl`. Mirrors the fallback in `routes/workspaces/runtime.ts`.
+     */
+    private readonly storedRemoteUrl?: string | null
   ) {}
 
   private async info(): Promise<ArtifactsRepoInfo> {
@@ -63,7 +71,12 @@ export class ArtifactsRepoBrowser implements RepoBrowser {
         const ttl = parseInt(this.env.ARTIFACTS_TOKEN_TTL_SECONDS || '', 10) || DEFAULT_ARTIFACTS_TOKEN_TTL;
         const token = await repo.createToken('read', ttl);
         const onAuth: OnAuth = () => ({ username: 'x', password: token.plaintext });
-        return { remote: repo.remote, onAuth };
+        // Prefer the stored clone URL; `get().remote` is empty on staging.
+        const remote = this.storedRemoteUrl || repo.remote;
+        if (!remote) {
+          throw errors.badRequest('Artifacts repository has no resolvable clone URL');
+        }
+        return { remote, onAuth };
       })();
     }
     return this.infoPromise;
@@ -212,6 +225,8 @@ export function createArtifactsRepoBrowser(opts: {
   repoId: string;
   defaultBranch: string;
   env: Env;
+  /** Stored clone URL (`project.repository`); preferred over `get().remote`. */
+  storedRemoteUrl?: string | null;
 }): ArtifactsRepoBrowser {
-  return new ArtifactsRepoBrowser(opts.repoId, opts.defaultBranch, opts.env);
+  return new ArtifactsRepoBrowser(opts.repoId, opts.defaultBranch, opts.env, opts.storedRemoteUrl);
 }

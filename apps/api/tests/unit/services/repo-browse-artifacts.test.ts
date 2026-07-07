@@ -222,3 +222,51 @@ describe('ArtifactsRepoBrowser.listBranches edge cases', () => {
     expect(onAuth()).toEqual({ username: 'x', password: 'read-token' });
   });
 });
+
+// Regression: the Artifacts binding's get().remote comes back empty on staging
+// (unlike create().remote). An undefined URL crashed isomorphic-git deep inside
+// extractAuthFromUrl with `TypeError: reading 'split'` → 500 on /repo/branches.
+// The browser must prefer the stored project.repository clone URL. Mirrors the
+// fallback in routes/workspaces/runtime.ts.
+describe('ArtifactsRepoBrowser stored clone URL fallback (empty get().remote)', () => {
+  function envWithRemote(remote: string | undefined): Env {
+    return makeEnv({
+      ARTIFACTS: {
+        get: vi.fn().mockResolvedValue({
+          remote,
+          defaultBranch: 'main',
+          createToken: vi.fn().mockResolvedValue({ plaintext: 'read-token' }),
+        }),
+      },
+    } as unknown as Partial<Env>);
+  }
+  const STORED = 'https://acct.artifacts.cloudflare.net/git/default/potato.git';
+
+  it('uses the stored clone URL when get().remote is empty', async () => {
+    iso.listServerRefs.mockResolvedValue([{ ref: 'refs/heads/main' }]);
+    const b = new ArtifactsRepoBrowser('repo-1', 'main', envWithRemote(''), STORED);
+    await b.listBranches();
+    expect(iso.listServerRefs.mock.calls[0][0].url).toBe(STORED);
+  });
+
+  it('uses the stored clone URL when get().remote is undefined', async () => {
+    iso.listServerRefs.mockResolvedValue([{ ref: 'refs/heads/main' }]);
+    const b = new ArtifactsRepoBrowser('repo-1', 'main', envWithRemote(undefined), STORED);
+    await b.listBranches();
+    expect(iso.listServerRefs.mock.calls[0][0].url).toBe(STORED);
+  });
+
+  it('prefers the stored clone URL even when get().remote is present', async () => {
+    iso.listServerRefs.mockResolvedValue([{ ref: 'refs/heads/main' }]);
+    // get().remote is the default non-empty makeEnv value
+    const b = new ArtifactsRepoBrowser('repo-1', 'main', makeEnv(), STORED);
+    await b.listBranches();
+    expect(iso.listServerRefs.mock.calls[0][0].url).toBe(STORED);
+  });
+
+  it('throws a clean 400 (not the isomorphic-git TypeError) when no clone URL is resolvable', async () => {
+    const b = new ArtifactsRepoBrowser('repo-1', 'main', envWithRemote(''), null);
+    await expect(b.listBranches()).rejects.toThrow(/clone URL/i);
+    expect(iso.listServerRefs).not.toHaveBeenCalled();
+  });
+});
