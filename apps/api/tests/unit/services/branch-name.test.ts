@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import { generateBranchName } from '../../../src/services/branch-name';
 
-const TASK_ID = '01JK9M2X4NABCDEF12345678';
+// Canonical 26-char ULID (10 timestamp + 16 random chars). Last 6 = '345678'.
+const TASK_ID = '01JK9M2X4NABCDEF1234345678';
 
 describe('generateBranchName', () => {
   it('generates a slug from a simple message', () => {
@@ -94,8 +95,9 @@ describe('generateBranchName', () => {
   });
 
   it('lowercases the task ID suffix', () => {
-    // Last 6 chars contain uppercase letters so lowercasing is actually exercised.
-    const upperTaskId = '01JK9M2X4NABCDEF12RSTVWX';
+    // Canonical 26-char ULID whose last 6 chars are uppercase letters, so
+    // lowercasing is actually exercised.
+    const upperTaskId = '01JK9M2X4NABCDEF1234RSTVWX';
     const result = generateBranchName('test', upperTaskId);
     expect(result).toMatch(/-rstvwx$/);
   });
