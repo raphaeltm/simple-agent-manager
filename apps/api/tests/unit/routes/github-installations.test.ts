@@ -103,6 +103,7 @@ describe('GitHub App installation sharing', () => {
     GITHUB_CLIENT_SECRET: 'secret',
     GITHUB_APP_ID: 'app-id',
     GITHUB_APP_PRIVATE_KEY: 'key',
+    GITHUB_WEBHOOK_SECRET: 'webhook-secret',
     ENCRYPTION_KEY: 'webhook-secret',
   } as Env;
 

@@ -1,12 +1,10 @@
 import { TRIAL_ANONYMOUS_USER_ID } from '@simple-agent-manager/shared';
 
 import type { Env } from '../env';
-import { createModuleLogger } from '../lib/logger';
+import { log } from '../lib/logger';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import { ulid } from '../lib/ulid';
 import { decrypt, encrypt } from './encryption';
-
-const log = createModuleLogger('platform-config');
 
 export type PlatformConfigSource = 'runtime' | 'environment' | 'unset';
 
@@ -106,11 +104,17 @@ function unset(): ResolvedPlatformValue {
 }
 
 async function readSetting(env: Env, key: string): Promise<ResolvedPlatformValue> {
-  const row = await env.DATABASE.prepare(
+  const prepared = env.DATABASE?.prepare?.(
     'SELECT value, updated_at AS updatedAt, updated_by AS updatedBy FROM platform_settings WHERE key = ?'
-  ).bind(key).first<{ value: string; updatedAt: string; updatedBy: string | null }>();
+  );
+  const statement = prepared && typeof prepared.bind === 'function' ? prepared.bind(key) : null;
+  if (!statement || typeof statement.first !== 'function') {
+    return unset();
+  }
 
-  if (!row || !row.value.trim()) {
+  const row = await statement.first<{ value: string; updatedAt: string; updatedBy: string | null }>();
+
+  if (!row || typeof row.value !== 'string' || !row.value.trim()) {
     return unset();
   }
   return {
@@ -150,22 +154,32 @@ async function resolveSecret(
   kind: string,
   environmentKey: keyof Env
 ): Promise<ResolvedPlatformValue> {
-  const rows = await env.DATABASE.prepare(
+  const prepared = env.DATABASE?.prepare?.(
     `SELECT id, encrypted_token AS encryptedToken, iv, updated_at AS updatedAt, created_by AS updatedBy
      FROM platform_credentials
      WHERE credential_type = ? AND provider = ? AND credential_kind = ? AND is_enabled = 1
      ORDER BY updated_at DESC, created_at DESC`
-  ).bind(INTEGRATION_CREDENTIAL_TYPE, provider, kind).all<{
-    id: string;
-    encryptedToken: string;
-    iv: string;
-    updatedAt: string;
-    updatedBy: string | null;
-  }>();
+  );
+  const statement = prepared && typeof prepared.bind === 'function'
+    ? prepared.bind(INTEGRATION_CREDENTIAL_TYPE, provider, kind)
+    : null;
 
-  const encryptionKey = getCredentialEncryptionKey(env);
-  for (const row of rows.results ?? []) {
+  const rows = typeof statement?.all === 'function'
+    ? await statement.all<{
+        id: string;
+        encryptedToken: string;
+        iv: string;
+        updatedAt: string;
+        updatedBy: string | null;
+      }>()
+    : { results: [] };
+  const runtimeRows = rows.results ?? [];
+  const encryptionKey = runtimeRows.length > 0 ? getCredentialEncryptionKey(env) : null;
+  for (const row of runtimeRows) {
     try {
+      if (!encryptionKey) {
+        break;
+      }
       const value = await decrypt(row.encryptedToken, row.iv, encryptionKey);
       if (value.trim()) {
         return {
@@ -176,7 +190,7 @@ async function resolveSecret(
         };
       }
     } catch (err) {
-      log.error('runtime_secret_decrypt_failed', {
+      log.error('platform-config.runtime_secret_decrypt_failed', {
         id: row.id,
         provider,
         kind,
