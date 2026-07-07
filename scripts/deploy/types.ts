@@ -299,14 +299,10 @@ export interface CloudflareWorker {
 // runs. Do not treat this list as the manual GitHub Environment prerequisite
 // list: several platform-owned secrets are generated and persisted in Pulumi
 // state, then copied to Worker secrets by scripts/deploy/configure-secrets.sh.
+// GitHub App/OAuth values are optional compatibility fallbacks because runtime
+// platform config can now provide them after first-run setup.
 
 export const REQUIRED_SECRETS = [
-  'GITHUB_CLIENT_ID',
-  'GITHUB_CLIENT_SECRET',
-  'GITHUB_APP_ID',
-  'GITHUB_APP_PRIVATE_KEY',
-  'GITHUB_APP_SLUG',
-  'GITHUB_WEBHOOK_SECRET',
   'CF_API_TOKEN',
   'CF_ZONE_ID',
   'CF_ACCOUNT_ID',
@@ -322,6 +318,12 @@ export const REQUIRED_SECRETS = [
 // Users provide their own tokens via Settings UI, stored encrypted per-user.
 // See docs/architecture/credential-security.md
 export const OPTIONAL_SECRETS = [
+  'GITHUB_CLIENT_ID',
+  'GITHUB_CLIENT_SECRET',
+  'GITHUB_APP_ID',
+  'GITHUB_APP_PRIVATE_KEY',
+  'GITHUB_APP_SLUG',
+  'GITHUB_WEBHOOK_SECRET',
   'GOOGLE_CLIENT_ID',
   'GOOGLE_CLIENT_SECRET',
   'SEGMENT_WRITE_KEY',
