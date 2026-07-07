@@ -64,7 +64,7 @@ describe('DeviceAuth', () => {
     mocks.authState = { isAuthenticated: false, isLoading: false };
     renderDevice('/device?code=LMNO-2222');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Log in to approve' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Log in with GitHub' }));
 
     await waitFor(() => expect(mocks.signInSocial).toHaveBeenCalledWith({
       provider: 'github',
