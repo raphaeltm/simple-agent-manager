@@ -123,6 +123,37 @@ describe('setup routes', () => {
     await expect(res.json()).resolves.toMatchObject({ error: 'SETUP_CLOSED' });
   });
 
+  it('returns 410 for setup status once setup.completed is true', async () => {
+    const env = createEnv();
+    await env.DATABASE.prepare(
+      `INSERT INTO platform_settings (key, value, updated_by)
+       VALUES ('setup.completed', 'true', 'admin-1')`
+    ).run();
+
+    const res = await createApp().request('/api/setup/status', {}, env);
+
+    expect(res.status).toBe(410);
+    await expect(res.json()).resolves.toMatchObject({ error: 'SETUP_CLOSED' });
+  });
+
+  it('reopens setup when SETUP_FORCE is true', async () => {
+    const env = createEnv({ SETUP_FORCE: 'true' });
+    await env.DATABASE.prepare(
+      `INSERT INTO platform_settings (key, value, updated_by)
+       VALUES ('setup.completed', 'true', 'admin-1')`
+    ).run();
+
+    const res = await createApp().request('/api/setup/status', {}, env);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      completed: false,
+      open: true,
+      forced: true,
+      tokenConfigured: true,
+    });
+  });
+
   it('validates at least one login provider before completing setup', async () => {
     const res = await createApp().request(
       '/api/setup/complete',

@@ -97,6 +97,9 @@ async function assertSetupToken(env: Env, token: string, identifier: string): Pr
 
 setupRoutes.get('/status', async (c) => {
   const completed = await isSetupCompleted(c.env);
+  if (completed) {
+    throw setupClosed();
+  }
   return c.json({
     completed,
     open: !completed,

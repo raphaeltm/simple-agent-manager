@@ -35,6 +35,10 @@ export function Setup() {
       })
       .catch((err) => {
         if (!active) return;
+        if (err instanceof ApiClientError && err.code === 'SETUP_CLOSED') {
+          setSetupStatus({ completed: true, open: false, forced: false, tokenConfigured: false });
+          return;
+        }
         setError(err instanceof Error ? err.message : 'Failed to load setup status');
       })
       .finally(() => {
