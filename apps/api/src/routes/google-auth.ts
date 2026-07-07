@@ -6,6 +6,7 @@ import { log } from '../lib/logger';
 import { expectJsonRecord, maybeJsonRecord, readResponseJson } from '../lib/runtime-validation';
 import { getUserId,requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
+import { getGoogleOAuthConfig } from '../services/platform-config';
 
 const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
@@ -25,7 +26,8 @@ const googleTokenResponseSchema = v.object({
  * Requires the user to already be authenticated via GitHub OAuth.
  */
 googleAuthRoutes.get('/authorize', requireAuth(), requireApproved(), async (c) => {
-  if (!c.env.GOOGLE_CLIENT_ID || !c.env.GOOGLE_CLIENT_SECRET) {
+  const googleOAuth = await getGoogleOAuthConfig(c.env);
+  if (!googleOAuth) {
     throw errors.badRequest('Google OAuth is not configured on this SAM instance');
   }
 
@@ -39,7 +41,7 @@ googleAuthRoutes.get('/authorize', requireAuth(), requireApproved(), async (c) =
 
   const redirectUri = `https://api.${c.env.BASE_DOMAIN}/auth/google/callback`;
   const params = new URLSearchParams({
-    client_id: c.env.GOOGLE_CLIENT_ID,
+    client_id: googleOAuth.clientId,
     redirect_uri: redirectUri,
     response_type: 'code',
     scope: 'https://www.googleapis.com/auth/cloud-platform',
@@ -60,7 +62,8 @@ googleAuthRoutes.get('/callback', requireAuth(), requireApproved(), async (c) =>
   const sessionUserId = getUserId(c);
   const appBaseUrl = `https://app.${c.env.BASE_DOMAIN}`;
 
-  if (!c.env.GOOGLE_CLIENT_ID || !c.env.GOOGLE_CLIENT_SECRET) {
+  const googleOAuth = await getGoogleOAuthConfig(c.env);
+  if (!googleOAuth) {
     throw errors.badRequest('Google OAuth is not configured');
   }
 
@@ -118,8 +121,8 @@ googleAuthRoutes.get('/callback', requireAuth(), requireApproved(), async (c) =>
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
       code,
-      client_id: c.env.GOOGLE_CLIENT_ID,
-      client_secret: c.env.GOOGLE_CLIENT_SECRET,
+      client_id: googleOAuth.clientId,
+      client_secret: googleOAuth.clientSecret,
       redirect_uri: redirectUri,
       grant_type: 'authorization_code',
     }),

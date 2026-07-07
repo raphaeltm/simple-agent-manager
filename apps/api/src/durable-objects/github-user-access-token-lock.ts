@@ -56,7 +56,7 @@ export class GitHubUserAccessTokenLock extends DurableObject<Env> {
 
   private async getAccessToken(payload: v.InferOutput<typeof requestSchema>): Promise<Response> {
     try {
-      const auth = createAuth(this.env);
+      const auth = await createAuth(this.env);
       const token = await auth.api.getAccessToken({
         headers: new Headers(payload.headers),
         body: { providerId: 'github', userId: payload.userId },

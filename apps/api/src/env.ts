@@ -65,10 +65,10 @@ export interface Env {
   BASE_DOMAIN: string;
   VERSION: string;
   // Secrets
-  GITHUB_CLIENT_ID: string;
-  GITHUB_CLIENT_SECRET: string;
-  GITHUB_APP_ID: string;
-  GITHUB_APP_PRIVATE_KEY: string;
+  GITHUB_CLIENT_ID?: string;
+  GITHUB_CLIENT_SECRET?: string;
+  GITHUB_APP_ID?: string;
+  GITHUB_APP_PRIVATE_KEY?: string;
   GITHUB_APP_SLUG?: string; // GitHub App slug for install URL
   CF_API_TOKEN: string;
   CF_ZONE_ID: string;
@@ -80,6 +80,8 @@ export interface Env {
   BETTER_AUTH_SECRET?: string; // BetterAuth session management
   CREDENTIAL_ENCRYPTION_KEY?: string; // AES-GCM user credential encryption
   GITHUB_WEBHOOK_SECRET?: string; // GitHub webhook HMAC verification
+  SETUP_TOKEN?: string; // Plaintext first-run setup token, dashboard-readable while setup is incomplete
+  SETUP_FORCE?: string; // "true" reopens /setup for lockout recovery
   // Deployment signing keys (Ed25519 — separate from callback JWT)
   DEPLOY_SIGNING_PRIVATE_KEY?: string; // Base64-encoded Ed25519 private key for payload signing
   DEPLOY_SIGNING_PUBLIC_KEY?: string; // Base64-encoded Ed25519 public key delivered to deployment nodes

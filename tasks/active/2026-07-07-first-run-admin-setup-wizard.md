@@ -25,24 +25,24 @@ Implement the locked first-run admin setup design: deploy with only Cloudflare c
 
 ## Implementation Checklist
 
-- [ ] Add setup state machine backend:
-  - [ ] Add `setup.completed` setting helpers with `SETUP_FORCE=true` override semantics.
-  - [ ] Add unauthenticated `/setup` API routes for status, token verification/config load, save/validate, and complete.
-  - [ ] Implement atomic setup token compare rate limiting using D1 row update/transaction semantics or DO storage, not KV.
-  - [ ] Return 410 Gone for setup APIs once complete unless `SETUP_FORCE=true`.
-  - [ ] Add combined-route tests proving `/setup` is pre-auth and closes after completion.
-- [ ] Add runtime platform config resolver:
-  - [ ] Generalize D1 -> env -> unset resolution for settings and encrypted credentials with `source: 'runtime' | 'environment' | 'unset'`.
-  - [ ] Store integration secrets in encrypted `platform_credentials`; store non-secrets in `platform_settings`.
-  - [ ] Route GitHub OAuth client ID/secret, GitHub App ID/private key/slug, GitHub webhook secret, OAuth refresh, and Google OAuth client ID/secret through the resolver.
-  - [ ] Make `createAuth` async and update all call sites and types.
-  - [ ] Build BetterAuth social providers conditionally, including Google only when configured.
-  - [ ] Add resolver tests for runtime override, env fallback, unset, disabled/bad-row resilience, and secret masking/source metadata.
-- [ ] Add safety rails:
-  - [ ] Validate GitHub/Google formats before saving/completing setup.
-  - [ ] Ping token endpoints where feasible without logging secrets.
-  - [ ] Prevent marking setup complete when no usable login provider is configured.
-  - [ ] Add lockout recovery tests for `SETUP_FORCE=true` reopening setup after completion.
+- [x] Add setup state machine backend:
+  - [x] Add `setup.completed` setting helpers with `SETUP_FORCE=true` override semantics.
+  - [x] Add unauthenticated `/setup` API routes for status, token verification/config load, save/validate, and complete.
+  - [x] Implement atomic setup token compare rate limiting using D1 row update/transaction semantics or DO storage, not KV.
+  - [x] Return 410 Gone for setup APIs once complete unless `SETUP_FORCE=true`.
+  - [x] Add combined-route tests proving `/setup` is pre-auth and closes after completion.
+- [x] Add runtime platform config resolver:
+  - [x] Generalize D1 -> env -> unset resolution for settings and encrypted credentials with `source: 'runtime' | 'environment' | 'unset'`.
+  - [x] Store integration secrets in encrypted `platform_credentials`; store non-secrets in `platform_settings`.
+  - [x] Route GitHub OAuth client ID/secret, GitHub App ID/private key/slug, GitHub webhook secret, OAuth refresh, and Google OAuth client ID/secret through the resolver.
+  - [x] Make `createAuth` async and update all call sites and types.
+  - [x] Build BetterAuth social providers conditionally, including Google only when configured.
+  - [x] Add resolver tests for runtime override, env fallback, unset, disabled/bad-row resilience, and secret masking/source metadata.
+- [x] Add safety rails:
+  - [x] Validate GitHub/Google formats before saving/completing setup.
+  - [x] Ping token endpoints where feasible without logging secrets.
+  - [x] Prevent marking setup complete when no usable login provider is configured.
+  - [x] Add lockout recovery tests for `SETUP_FORCE=true` reopening setup after completion.
 - [ ] Add UI:
   - [ ] Build first-run `/setup` wizard gated by `SETUP_TOKEN`.
   - [ ] Build ongoing superadmin config UI using the same backend store and source readout.

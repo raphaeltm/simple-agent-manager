@@ -25,7 +25,7 @@ export async function createSessionCookieForUser(
   env: Env,
   userId: string,
 ): Promise<CreatedSessionCookie> {
-  const auth = createAuth(env);
+  const auth = await createAuth(env);
   const ctx = await auth.$context;
   const session = await ctx.internalAdapter.createSession(
     userId,
@@ -73,7 +73,7 @@ export async function createSessionCookieForUser(
 }
 
 export async function getAuthenticatedUser(c: Context<{ Bindings: Env }>): Promise<{ id: string }> {
-  const auth = createAuth(c.env);
+  const auth = await createAuth(c.env);
   const session = await auth.api.getSession({ headers: c.req.raw.headers });
   if (!session?.user) {
     throw errors.unauthorized('Not authenticated');

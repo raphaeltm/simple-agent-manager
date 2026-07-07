@@ -42,6 +42,7 @@ import { adminCcBackfillRoutes } from './routes/admin-cc-backfill';
 import { adminCostRoutes } from './routes/admin-costs';
 import { adminGithubInstallationLeakSweepRoutes } from './routes/admin-github-installation-leak-sweep';
 import { adminGithubRepoIdBackfillRoutes } from './routes/admin-github-repo-id-backfill';
+import { adminPlatformConfigRoutes } from './routes/admin-platform-config';
 import { adminPlatformCredentialRoutes } from './routes/admin-platform-credentials';
 import { adminQuotaRoutes } from './routes/admin-quotas';
 import { adminSandboxRoutes } from './routes/admin-sandbox';
@@ -108,6 +109,7 @@ import { registryPushCredentialsCallbackRoute } from './routes/projects/registry
 import { providersRoutes } from './routes/providers';
 import { resolutionStatusRoute } from './routes/resolution-status';
 import { samRoutes } from './routes/sam';
+import { setupRoutes } from './routes/setup';
 import { skillRuntimeRoutes } from './routes/skill-runtime';
 import { skillRoutes } from './routes/skills';
 import { taskCallbackRoute, tasksRoutes } from './routes/tasks';
@@ -328,7 +330,7 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
 
   // --- Standard session/terminal-token authentication (non-port or fallback) ---
   if (!userId) {
-    const auth = createAuth(c.env);
+    const auth = await createAuth(c.env);
     const session = await auth.api.getSession({ headers: c.req.raw.headers });
     userId = session?.user.id ?? null;
   }
@@ -590,6 +592,7 @@ app.route('/api/auth', codexRefreshRoutes);
 app.route('/api/auth', apiTokenRoutes);
 app.route('/api/auth', deviceFlowRoutes);
 app.route('/api/auth', authRoutes);
+app.route('/api/setup', setupRoutes);
 app.route('/api/credentials', resolutionStatusRoute);
 app.route('/api/credentials', credentialsRoutes);
 app.route('/api/cc', ccRoutes);
@@ -658,6 +661,7 @@ app.route('/api/admin', adminRoutes);
 app.route('/api/admin/ai-proxy', adminAIProxyRoutes);
 app.route('/api/admin/analytics', adminAnalyticsRoutes);
 app.route('/api/admin/analytics/ai-usage', adminAiUsageRoutes);
+app.route('/api/admin/platform-config', adminPlatformConfigRoutes);
 app.route('/api/admin/platform-credentials', adminPlatformCredentialRoutes);
 app.route('/api/admin/trials', adminTrialsRoutes);
 app.route('/api/admin/quotas', adminQuotaRoutes);
