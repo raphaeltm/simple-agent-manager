@@ -41,3 +41,4 @@ Browsing is read-only and requires access to the project. For GitHub-backed proj
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `REPO_BROWSE_MAX_INLINE_BYTES` | `1000000` | Max bytes to inline as text in the file viewer; larger files stream as a download. |
+| `REPO_BROWSE_MAX_COMPARE_FILES` | `300` | Max changed files returned by an Artifacts diff before the result is truncated. |

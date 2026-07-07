@@ -2,10 +2,17 @@ import type { Env } from '../../env';
 
 /** Default cap for inlining text file content; larger files stream via rawUrl. */
 export const DEFAULT_REPO_BROWSE_MAX_INLINE_BYTES = 1_000_000;
+/** Default cap on changed files returned by a compare (bounds Worker CPU/memory). */
+export const DEFAULT_REPO_BROWSE_MAX_COMPARE_FILES = 300;
 
 export function maxInlineBytes(env: Env): number {
   const parsed = parseInt(env.REPO_BROWSE_MAX_INLINE_BYTES || '', 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_REPO_BROWSE_MAX_INLINE_BYTES;
+}
+
+export function maxCompareFiles(env: Env): number {
+  const parsed = parseInt(env.REPO_BROWSE_MAX_COMPARE_FILES || '', 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_REPO_BROWSE_MAX_COMPARE_FILES;
 }
 
 export function basename(path: string): string {

@@ -135,3 +135,36 @@ describe('GitHubRepoBrowser.getRawFile', () => {
     expect(contentType).toBe('image/png');
   });
 });
+
+describe('GitHubRepoBrowser edge cases', () => {
+  it('treats non-base64 encoding (GitHub >1MB) as tooLarge', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(Response.json({ type: 'file', size: 1_100_000, encoding: 'none' }))
+    );
+    const f = await makeBrowser().getFile('main', 'large.bin');
+    expect(f.tooLarge).toBe(true);
+    expect(f.content).toBeNull();
+  });
+
+  it('maps GitHub statuses "changed" and "copied" to "modified"', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        Response.json({
+          files: [
+            { filename: 'a.ts', status: 'changed', additions: 1, deletions: 0, patch: '@@ x @@' },
+            { filename: 'b.ts', status: 'copied', previous_filename: 'c.ts', additions: 0, deletions: 0, patch: '@@ y @@' },
+          ],
+        })
+      )
+    );
+    const res = await makeBrowser().compare('main', 'feat');
+    expect(res.files.map((f) => f.status)).toEqual(['modified', 'modified']);
+  });
+
+  it('throws on a 404 file', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status: 404 })));
+    await expect(makeBrowser().getFile('main', 'missing.txt')).rejects.toThrow(/not found/i);
+  });
+});

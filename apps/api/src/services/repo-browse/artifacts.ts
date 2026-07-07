@@ -14,7 +14,7 @@ import type { Env } from '../../env';
 import { errors } from '../../middleware/error';
 import { MemoryFS } from './memory-fs';
 import type { RepoBrowser } from './types';
-import { basename, guessContentType, isBinaryBytes, maxInlineBytes } from './util';
+import { basename, guessContentType, isBinaryBytes, maxCompareFiles, maxInlineBytes } from './util';
 
 const DEFAULT_ARTIFACTS_TOKEN_TTL = 3600;
 const DIR = '/repo';
@@ -73,7 +73,9 @@ export class ArtifactsRepoBrowser implements RepoBrowser {
   private async cloneRef(ref: string): Promise<IsoFs> {
     const { remote, onAuth } = await this.info();
     const fs = new MemoryFS() as unknown as IsoFs;
-    await git.clone({ fs, http, dir: DIR, url: remote, ref, singleBranch: true, depth: 1, onAuth });
+    // noCheckout: we read objects via walk/readBlob, never the working tree — this
+    // avoids writing a second copy of every blob into the in-memory fs.
+    await git.clone({ fs, http, dir: DIR, url: remote, ref, singleBranch: true, depth: 1, noCheckout: true, onAuth });
     return fs;
   }
 
@@ -144,7 +146,7 @@ export class ArtifactsRepoBrowser implements RepoBrowser {
   async compare(base: string, head: string): Promise<RepoCompareResponse> {
     const { remote, onAuth } = await this.info();
     const fs = new MemoryFS() as unknown as IsoFs;
-    await git.clone({ fs, http, dir: DIR, url: remote, ref: base, singleBranch: true, depth: 1, onAuth });
+    await git.clone({ fs, http, dir: DIR, url: remote, ref: base, singleBranch: true, depth: 1, noCheckout: true, onAuth });
     await git.fetch({ fs, http, dir: DIR, url: remote, ref: head, singleBranch: true, depth: 1, onAuth });
 
     const baseOid = await git.resolveRef({ fs, dir: DIR, ref: base });
@@ -152,6 +154,8 @@ export class ArtifactsRepoBrowser implements RepoBrowser {
       .resolveRef({ fs, dir: DIR, ref: `refs/remotes/origin/${head}` })
       .catch(() => git.resolveRef({ fs, dir: DIR, ref: head }));
 
+    const fileCap = maxCompareFiles(this.env);
+    let truncated = false;
     const files: RepoCompareFile[] = [];
     await git.walk({
       fs,
@@ -165,6 +169,11 @@ export class ArtifactsRepoBrowser implements RepoBrowser {
         const aOid = a ? await a.oid() : null;
         const bOid = b ? await b.oid() : null;
         if (aOid === bOid) return null;
+        // Bound Worker CPU/memory: stop materializing diffs past the cap.
+        if (files.length >= fileCap) {
+          truncated = true;
+          return null;
+        }
 
         const aBytes = aOid ? (await git.readBlob({ fs, dir: DIR, oid: aOid })).blob : new Uint8Array();
         const bBytes = bOid ? (await git.readBlob({ fs, dir: DIR, oid: bOid })).blob : new Uint8Array();
@@ -194,7 +203,7 @@ export class ArtifactsRepoBrowser implements RepoBrowser {
       totalAdditions: files.reduce((n, f) => n + f.additions, 0),
       totalDeletions: files.reduce((n, f) => n + f.deletions, 0),
       filesChanged: files.length,
-      truncated: false,
+      truncated,
     };
   }
 }

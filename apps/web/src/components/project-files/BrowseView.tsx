@@ -25,6 +25,16 @@ interface DirChild {
   size?: number | null;
 }
 
+const linkBtnStyle: React.CSSProperties = {
+  background: 'none',
+  border: 'none',
+  padding: 0,
+  color: 'var(--color-accent, #2563eb)',
+  textDecoration: 'underline',
+  cursor: 'pointer',
+  fontSize: 13,
+};
+
 function isMarkdownPath(p: string): boolean {
   const lower = p.toLowerCase();
   return lower.endsWith('.md') || lower.endsWith('.mdx');
@@ -56,7 +66,7 @@ function Breadcrumbs({ path, onNavigate }: { path: string; onNavigate: (p: strin
   let acc = '';
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 2, fontSize: 13, padding: '8px 12px' }}>
-      <button type="button" className="link" onClick={() => onNavigate('')}>
+      <button type="button" style={linkBtnStyle} onClick={() => onNavigate('')}>
         /
       </button>
       {parts.map((part, i) => {
@@ -67,8 +77,7 @@ function Breadcrumbs({ path, onNavigate }: { path: string; onNavigate: (p: strin
             <ChevronRight size={12} style={{ opacity: 0.5 }} />
             <button
               type="button"
-              className="link"
-              style={{ overflowWrap: 'anywhere' }}
+              style={{ ...linkBtnStyle, overflowWrap: 'anywhere' }}
               onClick={() => onNavigate(target)}
               disabled={i === parts.length - 1}
             >
@@ -118,7 +127,7 @@ const FileViewer: FC<{ projectId: string; ref: string; path: string }> = ({ proj
     if (isMarkdownPath(path) && !showRawMarkdown) {
       return (
         <div style={{ padding: 12 }}>
-          <button type="button" className="link" style={{ fontSize: 12, marginBottom: 8 }} onClick={() => setShowRawMarkdown(true)}>
+          <button type="button" style={{ ...linkBtnStyle, marginBottom: 8 }} onClick={() => setShowRawMarkdown(true)}>
             View source
           </button>
           <RenderedMarkdown content={file.content} />
@@ -128,7 +137,7 @@ const FileViewer: FC<{ projectId: string; ref: string; path: string }> = ({ proj
     return (
       <div style={{ padding: 12 }}>
         {isMarkdownPath(path) && (
-          <button type="button" className="link" style={{ fontSize: 12, marginBottom: 8 }} onClick={() => setShowRawMarkdown(false)}>
+          <button type="button" style={{ ...linkBtnStyle, marginBottom: 8 }} onClick={() => setShowRawMarkdown(false)}>
             View rendered
           </button>
         )}
@@ -164,6 +173,7 @@ export const BrowseView: FC<BrowseViewProps> = ({ projectId, ref, path, onNaviga
     let cancelled = false;
     setLoading(true);
     setError(null);
+    setQuery(''); // reset stale search when switching branch
     getRepoTree(projectId, ref)
       .then((t) => !cancelled && setTree(t))
       .catch((err: unknown) =>
@@ -214,7 +224,7 @@ export const BrowseView: FC<BrowseViewProps> = ({ projectId, ref, path, onNaviga
           aria-label="Search files by name"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          style={{ flex: 1, minWidth: 0, background: 'transparent', border: 'none', color: 'inherit', outline: 'none', fontSize: 14 }}
+          style={{ flex: 1, minWidth: 0, background: 'transparent', border: 'none', color: 'inherit', fontSize: 14 }}
         />
       </div>
 

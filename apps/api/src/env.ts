@@ -718,6 +718,8 @@ export interface Env {
   // Repo Browse (Files tab — remote-branch git browser + diff)
   /** Max bytes to inline as text in the file viewer; larger files stream via rawUrl (default: 1000000). */
   REPO_BROWSE_MAX_INLINE_BYTES?: string;
+  /** Max changed files returned by an Artifacts compare before truncating (default: 300). */
+  REPO_BROWSE_MAX_COMPARE_FILES?: string;
   // SAM Agent (Top-Level Agent) configuration
   SAM_MODEL?: string; // LLM model (default: claude-sonnet-4-20250514)
   SAM_MAX_TOKENS?: string; // Max output tokens per turn (default: 4096)

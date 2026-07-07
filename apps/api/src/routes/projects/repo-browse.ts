@@ -13,19 +13,35 @@ import { requireProjectInstallation, requireRepositoryUserAccess } from './_help
 
 const repoBrowseRoutes = new Hono<{ Bindings: Env }>();
 
-/** Reject empty refs and obvious traversal. Refs/paths are passed to the provider. */
+/** Allowed characters in a git ref/branch name (rejects control chars, whitespace, CRLF, NUL). */
+const VALID_REF = /^[A-Za-z0-9._\-/]+$/;
+/**
+ * MIME types the browser will execute as script if served inline. We force these
+ * to octet-stream + attachment so a committed .svg/.html cannot run as stored XSS
+ * on the api origin. Mirrors apps/api/src/routes/library.ts.
+ */
+const DANGEROUS_MIMES = ['text/html', 'application/javascript', 'application/xhtml+xml', 'image/svg+xml', 'text/xml'];
+
+/** Validate a git ref: non-empty, no `..`, only ref-safe characters. */
+function validateRef(ref: string, label = 'ref'): string {
+  if (!VALID_REF.test(ref) || ref.split('/').includes('..')) {
+    throw errors.badRequest(`${label} contains invalid characters`);
+  }
+  return ref;
+}
+
 function requireRef(c: Context): string {
   const ref = c.req.query('ref');
   if (!ref) throw errors.badRequest('ref query parameter is required');
-  return ref;
+  return validateRef(ref);
 }
 
 function requirePath(c: Context): string {
   const path = c.req.query('path');
   if (!path) throw errors.badRequest('path query parameter is required');
   const normalized = path.replace(/^\/+/, '');
-  if (normalized.split('/').some((s) => s === '..')) {
-    throw errors.badRequest('path must not contain ".." segments');
+  if (normalized.split('/').some((s) => s === '..' || s === '.')) {
+    throw errors.badRequest('path must not contain "." or ".." segments');
   }
   return normalized;
 }
@@ -82,14 +98,21 @@ repoBrowseRoutes.get('/:id/repo/file', async (c) => {
   return c.json(file);
 });
 
-/** GET /:id/repo/raw?ref=&path= — raw file bytes (images, binary, oversized). */
+/** GET /:id/repo/raw?ref=&path= — raw file bytes (images, binary, oversized).
+ *  Script-capable MIME types are forced to a download so a committed .svg/.html
+ *  cannot execute as stored XSS on the api origin. */
 repoBrowseRoutes.get('/:id/repo/raw', async (c) => {
   const { browser } = await resolveBrowser(c);
-  const { bytes, contentType } = await browser.getRawFile(requireRef(c), requirePath(c));
+  const path = requirePath(c);
+  const { bytes, contentType } = await browser.getRawFile(requireRef(c), path);
+  const safe = DANGEROUS_MIMES.includes(contentType.toLowerCase());
+  const filename = (path.split('/').pop() || 'file').replace(/[^\x20-\x7E]|["\\;]/g, '_');
   return new Response(bytes as unknown as BodyInit, {
     headers: {
-      'Content-Type': contentType,
+      'Content-Type': safe ? 'application/octet-stream' : contentType,
       'Content-Length': String(bytes.length),
+      'Content-Disposition': `${safe ? 'attachment' : 'inline'}; filename="${filename}"`,
+      'Content-Security-Policy': "default-src 'none'; sandbox",
       'X-Content-Type-Options': 'nosniff',
     },
   });
@@ -100,7 +123,9 @@ repoBrowseRoutes.get('/:id/repo/compare', async (c) => {
   const { project, browser } = await resolveBrowser(c);
   const head = c.req.query('head');
   if (!head) throw errors.badRequest('head query parameter is required');
-  const base = c.req.query('base') || project.defaultBranch;
+  validateRef(head, 'head');
+  const rawBase = c.req.query('base');
+  const base = rawBase ? validateRef(rawBase, 'base') : project.defaultBranch;
   return c.json(await browser.compare(base, head));
 });
 

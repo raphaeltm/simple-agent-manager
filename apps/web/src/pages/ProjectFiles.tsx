@@ -151,7 +151,10 @@ export const ProjectFiles: FC = () => {
           <button
             type="button"
             role="tab"
+            id="files-tab-changes"
+            aria-controls="files-tabpanel"
             aria-selected={mode === 'changes'}
+            aria-disabled={onDefault}
             disabled={onDefault}
             title={onDefault ? 'Select a non-default branch to see changes' : undefined}
             onClick={() => update({ mode: 'changes' })}
@@ -162,6 +165,8 @@ export const ProjectFiles: FC = () => {
           <button
             type="button"
             role="tab"
+            id="files-tab-browse"
+            aria-controls="files-tabpanel"
             aria-selected={mode === 'browse'}
             onClick={() => update({ mode: 'browse' })}
             style={tabStyle(mode === 'browse', false)}
@@ -171,11 +176,17 @@ export const ProjectFiles: FC = () => {
         </div>
       </div>
 
-      {mode === 'changes' && !onDefault ? (
-        <ChangesView projectId={projectId} head={ref} base={base} onOpenFile={openFileInBrowse} />
-      ) : (
-        <BrowseView projectId={projectId} ref={ref} path={path} onNavigate={(p) => update({ mode: 'browse', path: p })} />
-      )}
+      <div
+        role="tabpanel"
+        id="files-tabpanel"
+        aria-labelledby={mode === 'changes' && !onDefault ? 'files-tab-changes' : 'files-tab-browse'}
+      >
+        {mode === 'changes' && !onDefault ? (
+          <ChangesView projectId={projectId} head={ref} base={base} onOpenFile={openFileInBrowse} />
+        ) : (
+          <BrowseView projectId={projectId} ref={ref} path={path} onNavigate={(p) => update({ mode: 'browse', path: p })} />
+        )}
+      </div>
     </div>
   );
 };

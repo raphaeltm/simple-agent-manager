@@ -17,6 +17,23 @@ interface ChangesViewProps {
   onOpenFile: (path: string) => void;
 }
 
+const linkBtnStyle: React.CSSProperties = {
+  background: 'none',
+  border: 'none',
+  padding: 0,
+  color: 'var(--color-accent, #2563eb)',
+  textDecoration: 'underline',
+  cursor: 'pointer',
+  fontSize: 12,
+};
+
+const STATUS_LABEL_FULL: Record<RepoCompareFile['status'], string> = {
+  added: 'added',
+  modified: 'modified',
+  removed: 'removed',
+  renamed: 'renamed',
+};
+
 const STATUS_LABEL: Record<RepoCompareFile['status'], string> = {
   added: 'A',
   modified: 'M',
@@ -61,6 +78,7 @@ const FileRow: FC<{ file: RepoCompareFile; onOpenFile: (path: string) => void }>
         >
           {STATUS_LABEL[file.status]}
         </span>
+        <span className="sr-only">{STATUS_LABEL_FULL[file.status]} — </span>
         <span style={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere', fontSize: 13 }}>{file.path}</span>
         <span style={{ color: 'var(--color-success, #16a34a)', fontSize: 12 }}>+{file.additions}</span>
         <span style={{ color: 'var(--color-error, #dc2626)', fontSize: 12 }}>−{file.deletions}</span>
@@ -70,24 +88,25 @@ const FileRow: FC<{ file: RepoCompareFile; onOpenFile: (path: string) => void }>
           {file.isBinary ? (
             <p style={{ color: 'var(--text-secondary, #999)', fontSize: 13, padding: 8 }}>
               Binary file — no textual diff.{' '}
-              <button type="button" className="link" onClick={() => onOpenFile(file.path)}>
+              <button type="button" style={linkBtnStyle} onClick={() => onOpenFile(file.path)}>
                 View file
               </button>
             </p>
           ) : file.patchTruncated || !file.patch ? (
             <p style={{ color: 'var(--text-secondary, #999)', fontSize: 13, padding: 8 }}>
               Diff too large to display.{' '}
-              <button type="button" className="link" onClick={() => onOpenFile(file.path)}>
+              <button type="button" style={linkBtnStyle} onClick={() => onOpenFile(file.path)}>
                 View file
               </button>
             </p>
           ) : (
             <>
-              <DiffRenderer diff={file.patch} />
+              <div style={{ overflowX: 'auto' }}>
+                <DiffRenderer diff={file.patch} />
+              </div>
               <button
                 type="button"
-                className="link"
-                style={{ fontSize: 12, marginTop: 6 }}
+                style={{ ...linkBtnStyle, marginTop: 6 }}
                 onClick={() => onOpenFile(file.path)}
               >
                 View whole file

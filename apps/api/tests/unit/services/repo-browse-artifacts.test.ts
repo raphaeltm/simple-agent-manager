@@ -151,4 +151,74 @@ describe('ArtifactsRepoBrowser.compare (two-tree diff + real diff patches)', () 
     const res = await browser().compare('main', 'feat');
     expect(res.files[0]).toMatchObject({ path: 'img.png', isBinary: true, patch: null });
   });
+
+  it('caps the number of changed files and reports truncation', async () => {
+    iso.resolveRef.mockImplementation(async ({ ref }: { ref: string }) => (ref === 'main' ? 'baseOid' : 'headOid'));
+    iso.readBlob.mockImplementation(async ({ oid }: { oid: string }) => ({ blob: enc(`${oid}\n`) }));
+    iso.walk.mockImplementation(async ({ map }: { map: (fp: string, e: unknown[]) => Promise<unknown> }) => {
+      await map('a.ts', [entry('blob', 'a1'), entry('blob', 'a2')]);
+      await map('b.ts', [entry('blob', 'b1'), entry('blob', 'b2')]);
+      return [];
+    });
+    const res = await browser(makeEnv({ REPO_BROWSE_MAX_COMPARE_FILES: '1' })).compare('main', 'feat');
+    expect(res.files).toHaveLength(1);
+    expect(res.truncated).toBe(true);
+  });
+
+  it('skips tree-type entries during the compare walk', async () => {
+    iso.resolveRef.mockImplementation(async ({ ref }: { ref: string }) => (ref === 'main' ? 'baseOid' : 'headOid'));
+    iso.readBlob.mockImplementation(async ({ oid }: { oid: string }) => ({ blob: oid === 'x' ? enc('old\n') : enc('new\n') }));
+    iso.walk.mockImplementation(async ({ map }: { map: (fp: string, e: unknown[]) => Promise<unknown> }) => {
+      await map('src', [entry('tree', 't1'), entry('tree', 't2')]); // directory pair — skipped
+      await map('src/f.ts', [entry('blob', 'x'), entry('blob', 'y')]);
+      return [];
+    });
+    const res = await browser().compare('main', 'feat');
+    expect(res.files.map((f) => f.path)).toEqual(['src/f.ts']);
+  });
+
+  it('falls back to the direct ref when the remote-tracking ref is absent', async () => {
+    iso.resolveRef.mockImplementation(async ({ ref }: { ref: string }) => {
+      if (ref === 'main') return 'baseOid';
+      if (ref.startsWith('refs/remotes/')) throw new Error('not found');
+      return 'headOid';
+    });
+    iso.walk.mockImplementation(async () => []);
+    await expect(browser().compare('main', 'feat')).resolves.toMatchObject({ head: 'feat' });
+    expect(iso.resolveRef).toHaveBeenCalledWith(expect.objectContaining({ ref: 'feat' }));
+  });
+});
+
+describe('ArtifactsRepoBrowser.listTree edge cases', () => {
+  it('skips null entries in the walk', async () => {
+    iso.walk.mockImplementation(async ({ map }: { map: (fp: string, e: unknown[]) => Promise<unknown> }) => {
+      await map('src/a.ts', [null]);
+      await map('src/b.ts', [entry('blob', 'b1')]);
+      return [];
+    });
+    const res = await browser().listTree('main');
+    expect(res.entries.map((e) => e.path)).toEqual(['src/b.ts']);
+  });
+});
+
+describe('ArtifactsRepoBrowser.listBranches edge cases', () => {
+  it('returns an empty list for a repo with no branches', async () => {
+    iso.listServerRefs.mockResolvedValue([]);
+    const res = await browser().listBranches();
+    expect(res.branches).toEqual([]);
+  });
+
+  it('omits the default marker when refs lack the default branch', async () => {
+    iso.listServerRefs.mockResolvedValue([{ ref: 'refs/heads/feat' }, { ref: 'refs/heads/dev' }]);
+    const res = await browser().listBranches();
+    expect(res.branches.map((b) => b.name)).toEqual(['dev', 'feat']);
+    expect(res.branches.every((b) => !b.isDefault)).toBe(true);
+  });
+
+  it('supplies Basic x:<read-token> auth to isomorphic-git', async () => {
+    iso.listServerRefs.mockResolvedValue([{ ref: 'refs/heads/main' }]);
+    await browser().listBranches();
+    const onAuth = iso.listServerRefs.mock.calls[0][0].onAuth as () => unknown;
+    expect(onAuth()).toEqual({ username: 'x', password: 'read-token' });
+  });
 });

@@ -109,4 +109,43 @@ describe('ProjectFiles', () => {
     await user.selectOptions(select, 'feat');
     expect(await screen.findByText(/up to date with/i)).toBeInTheDocument();
   });
+
+  it('shows an error when branches fail to load', async () => {
+    const api = await import('../../src/lib/api');
+    (api.getRepoBranches as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('boom'));
+    renderFiles();
+    expect(await screen.findByRole('alert')).toHaveTextContent(/failed to load branches/i);
+  });
+
+  it('toggles a markdown file between rendered and source', async () => {
+    const user = userEvent.setup();
+    renderFiles();
+    await user.click(await screen.findByText('README.md'));
+    expect(await screen.findByTestId('md')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /view source/i }));
+    expect(await screen.findByTestId('code')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /view rendered/i }));
+    expect(await screen.findByTestId('md')).toBeInTheDocument();
+  });
+
+  it('navigates from a diff to Browse mode via "view whole file"', async () => {
+    const user = userEvent.setup();
+    renderFiles();
+    await user.selectOptions(await screen.findByRole('combobox', { name: 'Branch' }), 'feat');
+    await user.click(await screen.findByRole('button', { name: /src\/a\.ts/ }));
+    await user.click(await screen.findByRole('button', { name: /view whole file/i }));
+    await waitFor(() =>
+      expect(screen.getByRole('tab', { name: 'Browse' })).toHaveAttribute('aria-selected', 'true')
+    );
+  });
+
+  it('shows a truncation warning when the tree is truncated', async () => {
+    const api = await import('../../src/lib/api');
+    (api.getRepoTree as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ref: 'main', path: '', truncated: true,
+      entries: [{ path: 'a.ts', name: 'a.ts', type: 'blob', size: 5 }],
+    });
+    renderFiles();
+    expect(await screen.findByText(/tree truncated/i)).toBeInTheDocument();
+  });
 });
