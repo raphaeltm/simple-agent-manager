@@ -57,10 +57,25 @@ Implement the locked first-run admin setup design: deploy with only Cloudflare c
   - [x] Ensure deploy/Actions output prints only the Cloudflare dashboard variables deep link.
   - [x] Update public self-hosting/security docs with the new setup flow and static OAuth redirect guidance.
 - [ ] Validate end to end:
-  - [ ] Run lint, typecheck, test, build, migration safety, and relevant package tests.
+  - [x] Run lint, typecheck, test, build, migration safety, and relevant package tests.
   - [ ] Run specialist reviews: task-completion-validator, cloudflare-specialist, security-auditor, env-validator, constitution-validator, ui-ux-specialist, test-engineer, doc-sync-validator.
   - [ ] Deploy to staging and verify existing GitHub users, project creation, chat, and task submission still work.
   - [ ] Verify `/setup` route and Google login buttons are reachable on staging without breaking existing auth.
+
+## Validation Log
+
+- `pnpm typecheck` — passed.
+- `pnpm lint` — passed with existing warnings only.
+- `pnpm test` — passed across all packages.
+- `pnpm build` — passed after rerunning without concurrent test/build output writes.
+- `pnpm quality:migration-safety` — passed.
+- `pnpm quality:do-migration-safety` — passed.
+- `pnpm quality:wrangler-bindings` — passed.
+- `pnpm quality:ast-checks` — passed with existing warnings only, 0 errors.
+- `pnpm vitest run scripts/quality/sync-wrangler-config.test.ts scripts/quality/deploy-reusable-workflow.test.ts scripts/quality/deployment-workflow-hardening.test.ts` — passed.
+- `npx tsx --check scripts/deploy/sync-wrangler-config.ts` — passed.
+- `pnpm --filter @simple-agent-manager/web exec playwright test tests/playwright/platform-config-audit.spec.ts` — passed across mobile and desktop projects.
+- Playwright screenshots for `/setup`, `/admin/integrations`, landing login, device auth, and trial login are in `apps/web/.codex/tmp/playwright-screenshots/`.
 
 ## Acceptance Criteria
 
