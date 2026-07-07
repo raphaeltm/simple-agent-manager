@@ -48,10 +48,12 @@ describe('Initial prompt construction with systemPromptAppend', () => {
 
     expect(prompt).toContain('Fix the login bug');
     expect(prompt).toContain('Focus on implementation. Write tests for all changes.');
-    // System prompt should appear before the MCP instructions separator
-    const systemPromptIndex = prompt.indexOf('Focus on implementation');
-    const separatorIndex = prompt.indexOf('---');
-    expect(systemPromptIndex).toBeLessThan(separatorIndex);
+    // The get_instructions reminder is now a SEPARATE injected block, so the
+    // visible prompt no longer carries the "---" separator or the reminder.
+    expect(prompt).not.toContain('---');
+    expect(prompt).not.toContain('IMPORTANT:');
+    // systemPromptAppend is the trailing segment of the visible prompt.
+    expect(prompt.trimEnd().endsWith('Focus on implementation. Write tests for all changes.')).toBe(true);
   });
 
   it('produces no suffix when systemPromptAppend is null', () => {
@@ -116,15 +118,15 @@ describe('Initial prompt construction with systemPromptAppend', () => {
     expect(prompt).toContain('data.csv');
     expect(prompt).toContain('Decompose tasks. Do not write code directly.');
 
-    // Order: task content → attachments → system prompt → MCP instructions
+    // Order in the visible prompt: task content → attachments → system prompt.
+    // The get_instructions reminder is now a separate injected block, not here.
     const taskIndex = prompt.indexOf('Analyze the data');
     const attachmentIndex = prompt.indexOf('data.csv');
     const systemPromptIndex = prompt.indexOf('Decompose tasks');
-    const mcpIndex = prompt.indexOf('IMPORTANT:');
 
     expect(taskIndex).toBeLessThan(attachmentIndex);
     expect(attachmentIndex).toBeLessThan(systemPromptIndex);
-    expect(systemPromptIndex).toBeLessThan(mcpIndex);
+    expect(prompt).not.toContain('IMPORTANT:');
   });
 
   it('falls back to taskTitle when taskDescription is null', () => {

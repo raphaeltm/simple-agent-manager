@@ -636,6 +636,15 @@ export const MIGRATIONS: Migration[] = [
       sql.exec(`CREATE INDEX IF NOT EXISTS idx_chat_sessions_created_by ON chat_sessions(created_by_user_id)`);
     },
   },
+  {
+    // Origin tag for SAM-injected messages (e.g. the get_instructions reminder)
+    // so the UI can collapse them. Additive column; NULL/absent = normal user
+    // message. No DROP/recreate (rule 31 — chat_messages is a CASCADE parent).
+    name: '024-chat-message-origin',
+    run: (sql) => {
+      sql.exec(`ALTER TABLE chat_messages ADD COLUMN origin TEXT`);
+    },
+  },
 ];
 
 /**

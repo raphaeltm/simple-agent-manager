@@ -29,8 +29,18 @@ export function buildTaskInitialPrompt(state: TaskRunnerState): string {
     ? `\n\n${state.config.systemPromptAppend}`
     : '';
 
+  return `${taskContent}${attachmentContext}${systemPromptSuffix}`;
+}
+
+/**
+ * SAM-injected instruction text delivered ALONGSIDE the visible task prompt as a
+ * separate, origin="system" prompt block. The agent still receives it as model
+ * input (so it calls get_instructions), but the vm-agent mirrors it as a
+ * collapsed user message instead of visible chat noise. Kept out of
+ * {@link buildTaskInitialPrompt} so the visible message stays clean.
+ */
+export function buildInjectedInstructions(): string {
   return (
-    `${taskContent}${attachmentContext}${systemPromptSuffix}\n\n---\n\n` +
     `IMPORTANT: Before starting any work, you MUST call the \`get_instructions\` tool from the sam-mcp MCP server. ` +
     `This provides your task context, project information, output branch name, and instructions for reporting progress. ` +
     `Do not proceed until you have called this tool and read its response.`
@@ -232,6 +242,7 @@ export async function handleAgentSession(
         taskId: state.taskId,
         taskMode: state.config.taskMode,
       },
+      buildInjectedInstructions(),
     );
 
     state.stepResults.agentStarted = true;

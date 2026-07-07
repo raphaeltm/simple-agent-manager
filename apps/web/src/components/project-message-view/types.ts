@@ -226,7 +226,13 @@ export function chatMessagesToConversationItems(msgs: ChatMessageResponse[]): Co
   const toolCallMap = new Map<string, number>(); // toolCallId → index in acc
   const items = dedupedMsgs.reduce<ConversationItem[]>((acc, msg) => {
     if (msg.role === 'user') {
-      acc.push({ kind: 'user_message', id: msg.id, text: msg.content, timestamp: msg.createdAt });
+      acc.push({
+        kind: 'user_message',
+        id: msg.id,
+        text: msg.content,
+        timestamp: msg.createdAt,
+        origin: msg.origin === 'system' ? 'system' : 'user',
+      });
     } else if (msg.role === 'assistant') {
       // Merge consecutive assistant chunks into one item (same as groupMessages logic)
       const last = acc[acc.length - 1];

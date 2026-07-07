@@ -348,9 +348,16 @@ export async function startAgentSessionOnNode(
   userId: string,
   mcpServer?: McpServerConfig,
   overrides?: AgentSessionOverrides,
-  taskContext?: AgentSessionTaskContext
+  taskContext?: AgentSessionTaskContext,
+  injectedInstructions?: string
 ): Promise<unknown> {
   const body: Record<string, unknown> = { agentType, initialPrompt };
+  if (injectedInstructions != null && injectedInstructions !== '') {
+    // SAM-injected system instructions delivered as a separate origin="system"
+    // prompt block (see buildInjectedInstructions). The agent reads it as model
+    // input; the UI collapses the mirrored message.
+    body.injectedInstructions = injectedInstructions;
+  }
   if (mcpServer) {
     body.mcpServers = [
       {

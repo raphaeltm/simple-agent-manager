@@ -16,6 +16,8 @@ const ChatMessageRowSchema = v.object({
   tool_metadata: v.nullable(v.string()),
   created_at: v.number(),
   sequence: v.nullable(v.number()),
+  // Added by migration 0NN; optional so rows/SELECTs without it still parse.
+  origin: v.optional(v.nullable(v.string())),
 });
 
 export function parseChatMessageRow(row: unknown): {
@@ -26,6 +28,7 @@ export function parseChatMessageRow(row: unknown): {
   toolMetadata: unknown;
   createdAt: number;
   sequence: number | null;
+  origin: string | null;
 } {
   const r = parseRow(ChatMessageRowSchema, row, 'chat_message');
   return {
@@ -36,6 +39,7 @@ export function parseChatMessageRow(row: unknown): {
     toolMetadata: safeParseJson(r.tool_metadata),
     createdAt: r.created_at,
     sequence: r.sequence,
+    origin: r.origin ?? null,
   };
 }
 
@@ -58,6 +62,7 @@ export function parseChatMessageRowCompact(row: unknown, options?: CompactMessag
   toolMetadata: unknown;
   createdAt: number;
   sequence: number | null;
+  origin: string | null;
 } {
   const r = parseRow(ChatMessageRowSchema, row, 'chat_message');
   const parsed = safeParseJson(r.tool_metadata);
@@ -70,6 +75,7 @@ export function parseChatMessageRowCompact(row: unknown, options?: CompactMessag
     toolMetadata,
     createdAt: r.created_at,
     sequence: r.sequence,
+    origin: r.origin ?? null,
   };
 }
 
