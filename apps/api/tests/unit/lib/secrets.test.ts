@@ -1,6 +1,6 @@
 import { describe, expect,it } from 'vitest';
 
-import { getBetterAuthSecret, getCredentialEncryptionKey, getWebhookSecret } from '../../../src/lib/secrets';
+import { getBetterAuthSecret, getCredentialEncryptionKey } from '../../../src/lib/secrets';
 
 describe('Secret key resolution helpers', () => {
   const baseEnv = {
@@ -34,17 +34,6 @@ describe('Secret key resolution helpers', () => {
     });
   });
 
-  describe('getWebhookSecret', () => {
-    it('returns GITHUB_WEBHOOK_SECRET when set', () => {
-      expect(getWebhookSecret({ ...baseEnv, GITHUB_WEBHOOK_SECRET: 'dedicated-webhook-secret' }))
-        .toBe('dedicated-webhook-secret');
-    });
-
-    it('falls back to ENCRYPTION_KEY when GITHUB_WEBHOOK_SECRET is not set', () => {
-      expect(getWebhookSecret(baseEnv)).toBe('shared-fallback-key');
-    });
-  });
-
   describe('empty-string fallback', () => {
     it('falls back to ENCRYPTION_KEY when BETTER_AUTH_SECRET is empty string', () => {
       expect(getBetterAuthSecret({ ...baseEnv, BETTER_AUTH_SECRET: '' }))
@@ -56,30 +45,23 @@ describe('Secret key resolution helpers', () => {
         .toBe('shared-fallback-key');
     });
 
-    it('falls back to ENCRYPTION_KEY when GITHUB_WEBHOOK_SECRET is empty string', () => {
-      expect(getWebhookSecret({ ...baseEnv, GITHUB_WEBHOOK_SECRET: '' }))
-        .toBe('shared-fallback-key');
-    });
   });
 
   describe('isolation', () => {
-    it('each helper returns a different key when all three are set', () => {
+    it('each helper returns a different key when both overrides are set', () => {
       const env = {
         ENCRYPTION_KEY: 'shared',
         BETTER_AUTH_SECRET: 'auth-key',
         CREDENTIAL_ENCRYPTION_KEY: 'cred-key',
-        GITHUB_WEBHOOK_SECRET: 'webhook-key',
       };
 
       expect(getBetterAuthSecret(env)).toBe('auth-key');
       expect(getCredentialEncryptionKey(env)).toBe('cred-key');
-      expect(getWebhookSecret(env)).toBe('webhook-key');
     });
 
     it('all helpers return ENCRYPTION_KEY when no overrides are set', () => {
       expect(getBetterAuthSecret(baseEnv)).toBe('shared-fallback-key');
       expect(getCredentialEncryptionKey(baseEnv)).toBe('shared-fallback-key');
-      expect(getWebhookSecret(baseEnv)).toBe('shared-fallback-key');
     });
   });
 });
