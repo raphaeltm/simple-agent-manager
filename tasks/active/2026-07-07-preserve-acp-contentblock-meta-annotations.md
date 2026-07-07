@@ -80,10 +80,14 @@ survives to (a) the agent CLI and (b) the live user-message mirror broadcast. No
 
 ## Acceptance criteria
 
-- [ ] A prompt block carrying `_meta`/`annotations` retains them after `parsePromptBlocks` (proven by test).
-- [ ] The live user-message mirror broadcast carries the same `_meta`/`annotations` (proven by test).
-- [ ] Existing prompt behavior is unchanged for text-only blocks (regression test green).
-- [ ] No new field is added to `ExtractedMessage`/reporter/DO in this PR (no dead cross-boundary wiring).
+- [x] A prompt block carrying `_meta`/`annotations` retains them after `parsePromptBlocks` (proven by test).
+- [~] ~~The live user-message mirror broadcast carries the same `_meta`/`annotations`~~ — SUPERSEDED by
+  the SDK finding (see "Outcome / key finding"). The SDK marshaler strips these outward, so the mirror
+  broadcast CANNOT carry them. The test now proves the strip constraint instead
+  (`TestInjectUserMessageNotifications_SDKMarshalStripsMarker`); origin propagation moves to the
+  consumer slice via the vm-agent's own fields.
+- [x] Existing prompt behavior is unchanged for text-only blocks (regression test green).
+- [x] No new field is added to `ExtractedMessage`/reporter/DO in this PR (no dead cross-boundary wiring).
 
 ## Constraints
 
