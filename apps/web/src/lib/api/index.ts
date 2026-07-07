@@ -344,6 +344,13 @@ export {
   upsertProjectRuntimeFile,
 } from './projects';
 export { getProviderCatalog } from './providers';
+export {
+  getRepoBranches,
+  getRepoCompare,
+  getRepoFile,
+  getRepoTree,
+  repoRawUrl,
+} from './repo-browse';
 export type {
   ActivityEventResponse,
   ActivityEventsListResponse,

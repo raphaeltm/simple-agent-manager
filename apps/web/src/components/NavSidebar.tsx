@@ -6,6 +6,7 @@ import {
   ChevronDown,
   ChevronRight,
   Clock,
+  FileCode,
   FolderKanban,
   FolderOpen,
   Home,
@@ -50,6 +51,7 @@ export const GLOBAL_NAV_ITEMS: NavItem[] = [
 export const PROJECT_NAV_ITEMS: NavItem[] = [
   { label: 'Chat', path: 'chat', icon: <MessageSquare size={18} /> },
   // { label: 'Agent', path: 'agent', icon: <Bot size={18} /> }, // Hidden — experimental, not ready for users yet
+  { label: 'Files', path: 'files', icon: <FileCode size={18} /> },
   { label: 'Library', path: 'library', icon: <FolderOpen size={18} /> },
   { label: 'Ideas', path: 'ideas', icon: <Lightbulb size={18} /> },
   { label: 'Deployments', path: 'deployments', icon: <Rocket size={18} /> },

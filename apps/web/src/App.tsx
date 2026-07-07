@@ -40,6 +40,7 @@ import { ProjectAgentChat } from './pages/ProjectAgentChat';
 import { ProjectCreate } from './pages/ProjectCreate';
 import { ProjectDeploymentEnvironmentDetail } from './pages/ProjectDeploymentEnvironmentDetail';
 import { ProjectDeployments } from './pages/ProjectDeployments';
+import { ProjectFiles } from './pages/ProjectFiles';
 import { ProjectInvite } from './pages/ProjectInvite';
 import { ProjectLibrary } from './pages/ProjectLibrary';
 import { ProjectNotifications } from './pages/ProjectNotifications';
@@ -129,6 +130,7 @@ export default function App() {
                     <Route path="chat/:sessionId" element={<ProjectChat />} />
                     <Route path="agent" element={<ProjectAgentChat />} />
                     <Route path="library" element={<ProjectLibrary />} />
+                    <Route path="files" element={<ProjectFiles />} />
                     <Route path="ideas" element={<IdeasPage />} />
                     <Route path="deployments" element={<ProjectDeployments />} />
                     <Route
