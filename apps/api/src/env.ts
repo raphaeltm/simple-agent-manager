@@ -495,9 +495,17 @@ export interface Env {
   CODEX_REFRESH_UPSTREAM_TIMEOUT_MS?: string; // Upstream request timeout (default: 10000)
   CODEX_CLIENT_ID?: string; // OpenAI OAuth client_id (default: app_EMoamEEZ73f0CkXaXp7hrann)
   CODEX_EXPECTED_SCOPES?: string; // Comma-separated scope allowlist; unset = default allowlist enforced (openid,profile,email,offline_access); empty string disables validation
-  // Google OAuth (for GCP OIDC integration)
+  // Google OAuth for GCP/infra authorization flows (cloud-platform scope,
+  // redirect /auth/google/callback + /api/deployment/gcp/callback).
+  // NOT the login client — see GOOGLE_LOGIN_* below.
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
+  // Google OAuth for user login (BetterAuth "Sign in with Google" social
+  // provider; redirect /api/auth/callback/google, openid/email/profile scopes).
+  // Kept separate from the infra client above so configuring sign-in never
+  // rewires GCP access. Optional; also configurable via the first-run setup wizard.
+  GOOGLE_LOGIN_CLIENT_ID?: string;
+  GOOGLE_LOGIN_CLIENT_SECRET?: string;
   // GCP OIDC configuration
   GCP_IDENTITY_TOKEN_EXPIRY_SECONDS?: string;
   GCP_TOKEN_CACHE_TTL_SECONDS?: string;

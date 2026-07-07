@@ -10,7 +10,7 @@ import type { Env } from './env';
 import { createModuleLogger } from './lib/logger';
 import { readResponseJson } from './lib/runtime-validation';
 import { getBetterAuthSecret } from './lib/secrets';
-import { getGitHubOAuthConfig, getGoogleOAuthConfig } from './services/platform-config';
+import { getGitHubOAuthConfig, getGoogleLoginOAuthConfig } from './services/platform-config';
 import { isSignupApprovalRequired } from './services/signup-approval';
 
 const log = createModuleLogger('auth');
@@ -200,7 +200,7 @@ export async function createAuth(env: Env) {
   // Sentinel id is env-overridable; fall back to the shared constant.
   const sentinelId = env.TRIAL_ANONYMOUS_USER_ID ?? TRIAL_ANONYMOUS_USER_ID;
   const githubOAuth = await getGitHubOAuthConfig(env);
-  const googleOAuth = await getGoogleOAuthConfig(env);
+  const googleOAuth = await getGoogleLoginOAuthConfig(env);
   const socialProviders: Record<string, unknown> = {};
   const trustedProviders: string[] = [];
 

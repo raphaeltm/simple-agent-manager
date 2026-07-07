@@ -34,7 +34,7 @@ import { toSanitizedAppError } from '../services/gcp-errors';
 import { listGcpProjects } from '../services/gcp-setup';
 import { signIdentityToken } from '../services/jwt';
 import { validateMcpToken } from '../services/mcp-token';
-import { getGoogleOAuthConfig } from '../services/platform-config';
+import { getGoogleInfraOAuthConfig } from '../services/platform-config';
 
 const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
@@ -59,7 +59,7 @@ projectDeploymentRoutes.get(
     const projectId = c.req.param('id');
     const userId = getUserId(c);
 
-    const googleOAuth = await getGoogleOAuthConfig(c.env);
+    const googleOAuth = await getGoogleInfraOAuthConfig(c.env);
     if (!googleOAuth) {
       throw errors.badRequest('Google OAuth is not configured on this SAM instance');
     }
@@ -179,7 +179,7 @@ projectDeploymentRoutes.post(
 
     const body = c.req.valid('json');
 
-    if (!(await getGoogleOAuthConfig(c.env))) {
+    if (!(await getGoogleInfraOAuthConfig(c.env))) {
       throw errors.badRequest('Google OAuth is not configured on this SAM instance');
     }
 
@@ -467,7 +467,7 @@ gcpDeployCallbackRoute.get(
     const sessionUserId = getUserId(c);
     const appBaseUrl = `https://app.${c.env.BASE_DOMAIN}`;
 
-    const googleOAuth = await getGoogleOAuthConfig(c.env);
+    const googleOAuth = await getGoogleInfraOAuthConfig(c.env);
     if (!googleOAuth) {
       throw errors.badRequest('Google OAuth is not configured');
     }

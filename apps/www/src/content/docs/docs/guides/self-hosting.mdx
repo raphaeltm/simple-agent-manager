@@ -71,7 +71,7 @@ Pulumi uses the R2 S3 keys for its state backend. The deploy workflow creates th
 
 ## Step 4: Create GitHub App
 
-You can deploy SAM before creating a GitHub App. On first deploy, SAM generates a one-time `SETUP_TOKEN` Worker variable and the workflow prints a Cloudflare dashboard link where you can read it. Open `https://app.yourdomain.com/setup`, paste that token, and configure GitHub App, GitHub OAuth, and Google OAuth credentials in the setup wizard. The values are stored in SAM's encrypted platform credential store and can be rotated later by a superadmin.
+You can deploy SAM before creating a GitHub App. On first deploy, SAM generates a one-time `SETUP_TOKEN` Worker variable and the workflow prints a Cloudflare dashboard link where you can read it. Open `https://app.yourdomain.com/setup`, paste that token, and configure GitHub App, GitHub OAuth, and Google **login** OAuth credentials in the setup wizard. The Google login client must have `https://api.yourdomain.com/api/auth/callback/google` registered as an authorized redirect URI, and is a separate OAuth client from any Google/GCP infrastructure credentials (`GOOGLE_CLIENT_ID`). The values are stored in SAM's encrypted platform credential store and can be rotated later by a superadmin.
 
 If you prefer to create the GitHub App first, use the wizard below to create it with all settings pre-filled. Enter your domain, click through to GitHub, and paste the generated values into `/setup` or set the optional `GH_*` GitHub Environment secrets before deploy.
 
@@ -122,8 +122,10 @@ instead of choosing a generic prefix.
 | `GH_APP_PRIVATE_KEY`                       | Optional GitHub App private key (PEM or base64); can be configured in `/setup`     |
 | `GH_APP_SLUG`                              | Optional GitHub App URL slug; can be configured in `/setup` instead                |
 | `GH_WEBHOOK_SECRET`                        | Optional GitHub App webhook secret; can be configured in `/setup` instead          |
-| `GOOGLE_CLIENT_ID`                         | Optional Google OAuth client ID; can be configured in `/setup` instead             |
-| `GOOGLE_CLIENT_SECRET`                     | Optional Google OAuth client secret; can be configured in `/setup` instead         |
+| `GOOGLE_LOGIN_CLIENT_ID`                   | Optional Google **login** OAuth client ID (Sign in with Google); can be configured in `/setup` instead. Register redirect URI `https://api.yourdomain.com/api/auth/callback/google` |
+| `GOOGLE_LOGIN_CLIENT_SECRET`               | Optional Google **login** OAuth client secret; can be configured in `/setup` instead                                                                                               |
+| `GOOGLE_CLIENT_ID`                         | Optional Google **infra/GCP** OAuth client ID for GCP deployment authorization (separate client from login; NOT set via `/setup`)                                                    |
+| `GOOGLE_CLIENT_SECRET`                     | Optional Google **infra/GCP** OAuth client secret (separate client from login; NOT set via `/setup`)                                                                                |
 | `CF_AIG_TOKEN`                             | Optional narrower Cloudflare AI Gateway Unified Billing token                      |
 | `DEVCONTAINER_CACHE_CLOUDFLARE_API_TOKEN`  | Optional narrower Cloudflare token for managed devcontainer registry credentials   |
 | `DEVCONTAINER_CACHE_CLOUDFLARE_ACCOUNT_ID` | Optional Cloudflare account override for managed devcontainer registry credentials |

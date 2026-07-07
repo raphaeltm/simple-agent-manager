@@ -84,8 +84,8 @@ export function PlatformIntegrationConfigForm({
         </IntegrationSection>
 
         <IntegrationSection
-          title="Google OAuth"
-          description="Enables Google sign-in without requiring GitHub accounts."
+          title="Google sign-in (OAuth)"
+          description="A dedicated Google OAuth client for user login — separate from any Google/GCP infrastructure credentials. Register the redirect URI /api/auth/callback/google on this client."
           status={status.integrations.googleOAuth}
         >
           <TextField

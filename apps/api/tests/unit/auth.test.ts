@@ -54,9 +54,12 @@ vi.mock('../../src/services/platform-config', () => ({
     env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET
       ? { clientId: env.GITHUB_CLIENT_ID, clientSecret: env.GITHUB_CLIENT_SECRET }
       : null,
-  getGoogleOAuthConfig: async (env: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string }) =>
-    env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET
-      ? { clientId: env.GOOGLE_CLIENT_ID, clientSecret: env.GOOGLE_CLIENT_SECRET }
+  getGoogleLoginOAuthConfig: async (env: {
+    GOOGLE_LOGIN_CLIENT_ID?: string;
+    GOOGLE_LOGIN_CLIENT_SECRET?: string;
+  }) =>
+    env.GOOGLE_LOGIN_CLIENT_ID && env.GOOGLE_LOGIN_CLIENT_SECRET
+      ? { clientId: env.GOOGLE_LOGIN_CLIENT_ID, clientSecret: env.GOOGLE_LOGIN_CLIENT_SECRET }
       : null,
 }));
 
@@ -162,16 +165,28 @@ describe('BetterAuth configuration', () => {
     expect(capturedOptions?.socialProviders).toEqual({});
   });
 
-  it('adds Google social provider when configured', async () => {
+  it('adds Google social provider when the login client is configured', async () => {
     const { createAuth } = await import('../../src/auth');
     await createAuth({
       ...fakeEnv(),
-      GOOGLE_CLIENT_ID: 'google-client',
-      GOOGLE_CLIENT_SECRET: 'google-secret',
+      GOOGLE_LOGIN_CLIENT_ID: 'google-login-client',
+      GOOGLE_LOGIN_CLIENT_SECRET: 'google-login-secret',
     } as never);
 
     expect(capturedOptions?.socialProviders).toHaveProperty('github');
     expect(capturedOptions?.socialProviders).toHaveProperty('google');
+  });
+
+  it('does NOT add Google login from the infra Google client', async () => {
+    const { createAuth } = await import('../../src/auth');
+    await createAuth({
+      ...fakeEnv(),
+      // Infra/GCP Google creds present, but no login client — login must stay off.
+      GOOGLE_CLIENT_ID: 'google-infra-client',
+      GOOGLE_CLIENT_SECRET: 'google-infra-secret',
+    } as never);
+
+    expect(capturedOptions?.socialProviders).not.toHaveProperty('google');
   });
 
   it('promotes the first real user when only the trial sentinel exists', async () => {

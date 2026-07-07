@@ -16,7 +16,7 @@ import { encrypt } from '../services/encryption';
 import { sanitizeGcpError, toSanitizedAppError } from '../services/gcp-errors';
 import { listGcpProjects, runGcpSetup } from '../services/gcp-setup';
 import { verifyGcpOidcSetup } from '../services/gcp-sts';
-import { getGoogleOAuthConfig } from '../services/platform-config';
+import { getGoogleInfraOAuthConfig } from '../services/platform-config';
 import { serializeCredentialToken } from '../services/provider-credentials';
 
 const gcpRoutes = new Hono<{ Bindings: Env }>();
@@ -66,7 +66,7 @@ gcpRoutes.post('/setup', jsonValidator(GcpSetupSchema), async (c) => {
   const body = c.req.valid('json');
 
   // Validate Google OAuth is configured
-  if (!(await getGoogleOAuthConfig(c.env))) {
+  if (!(await getGoogleInfraOAuthConfig(c.env))) {
     throw errors.badRequest('Google OAuth is not configured on this SAM instance');
   }
 

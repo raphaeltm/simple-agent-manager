@@ -4,6 +4,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Env } from '../../../src/env';
 import { generateEncryptionKey } from '../../../src/services/encryption';
 import {
+  getGoogleInfraOAuthConfig,
+  getGoogleLoginOAuthConfig,
   getPlatformConfigStatus,
   isSetupCompleted,
   resolvePlatformConfig,
@@ -77,8 +79,12 @@ function createEnv(overrides: Partial<Env> = {}): Env {
     GITHUB_APP_PRIVATE_KEY: 'env-private-key',
     GITHUB_APP_SLUG: 'env-app-slug',
     GITHUB_WEBHOOK_SECRET: 'env-webhook-secret',
-    GOOGLE_CLIENT_ID: 'env-google-client',
-    GOOGLE_CLIENT_SECRET: 'env-google-secret',
+    // Infra/GCP Google client (kept separate from login).
+    GOOGLE_CLIENT_ID: 'env-google-infra-client',
+    GOOGLE_CLIENT_SECRET: 'env-google-infra-secret',
+    // Login Google client (BetterAuth social sign-in).
+    GOOGLE_LOGIN_CLIENT_ID: 'env-google-login-client',
+    GOOGLE_LOGIN_CLIENT_SECRET: 'env-google-login-secret',
     SETUP_TOKEN: 'setup-token',
     ...overrides,
   } as Env;
@@ -93,7 +99,42 @@ describe('platform config resolver', () => {
     const config = await resolvePlatformConfig(createEnv());
     expect(config.github.clientId).toMatchObject({ value: 'env-gh-client', source: 'environment' });
     expect(config.github.clientSecret).toMatchObject({ value: 'env-gh-secret', source: 'environment' });
-    expect(config.google.clientId).toMatchObject({ value: 'env-google-client', source: 'environment' });
+    expect(config.google.clientId).toMatchObject({ value: 'env-google-login-client', source: 'environment' });
+  });
+
+  it('resolves login Google and infra Google from independent env vars', async () => {
+    const env = createEnv();
+
+    // Login Google resolves from GOOGLE_LOGIN_* (and the setup-wizard store).
+    const login = await getGoogleLoginOAuthConfig(env);
+    expect(login).toEqual({ clientId: 'env-google-login-client', clientSecret: 'env-google-login-secret' });
+
+    // Infra/GCP Google resolves from GOOGLE_* directly.
+    const infra = await getGoogleInfraOAuthConfig(env);
+    expect(infra).toEqual({ clientId: 'env-google-infra-client', clientSecret: 'env-google-infra-secret' });
+
+    // Saving a login Google client via the setup wizard must NOT change infra.
+    await savePlatformIntegrationConfig(
+      env,
+      { google: { clientId: 'runtime-login-client', clientSecret: 'runtime-login-secret' } },
+      'admin-1'
+    );
+    expect(await getGoogleLoginOAuthConfig(env)).toEqual({
+      clientId: 'runtime-login-client',
+      clientSecret: 'runtime-login-secret',
+    });
+    // Infra is unaffected by the login-store write.
+    expect(await getGoogleInfraOAuthConfig(env)).toEqual({
+      clientId: 'env-google-infra-client',
+      clientSecret: 'env-google-infra-secret',
+    });
+  });
+
+  it('returns null for login Google when only infra Google env is set', async () => {
+    const env = createEnv({ GOOGLE_LOGIN_CLIENT_ID: undefined, GOOGLE_LOGIN_CLIENT_SECRET: undefined });
+    // Infra creds present, but login must not borrow them.
+    expect(await getGoogleInfraOAuthConfig(env)).not.toBeNull();
+    expect(await getGoogleLoginOAuthConfig(env)).toBeNull();
   });
 
   it('uses runtime settings and encrypted secrets before environment fallback', async () => {

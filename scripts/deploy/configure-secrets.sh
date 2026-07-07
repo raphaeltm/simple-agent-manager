@@ -197,14 +197,25 @@ if [ -z "$PULUMI_TRIAL_CLAIM_TOKEN_SECRET" ] && [ -n "${PULUMI_STACK:-}" ]; then
 fi
 set_worker_secret "TRIAL_CLAIM_TOKEN_SECRET" "$PULUMI_TRIAL_CLAIM_TOKEN_SECRET" "$ENVIRONMENT" "true" || FAILED=true
 
-# Configure Google OAuth secrets (optional — only needed for GCP OIDC integration)
+# Configure Google INFRA OAuth secrets (optional — only needed for GCP OIDC integration)
 GOOGLE_CLIENT_ID="${GOOGLE_CLIENT_ID:-}"
 GOOGLE_CLIENT_SECRET="${GOOGLE_CLIENT_SECRET:-}"
 if [ -n "$GOOGLE_CLIENT_ID" ] && [ -n "$GOOGLE_CLIENT_SECRET" ]; then
   set_worker_secret "GOOGLE_CLIENT_ID" "$GOOGLE_CLIENT_ID" "$ENVIRONMENT" "true" || FAILED=true
   set_worker_secret "GOOGLE_CLIENT_SECRET" "$GOOGLE_CLIENT_SECRET" "$ENVIRONMENT" "true" || FAILED=true
 else
-  echo -e "${YELLOW}ℹ  Skipping Google OAuth secrets (GOOGLE_CLIENT_ID/SECRET not set — GCP OIDC integration disabled)${NC}"
+  echo -e "${YELLOW}ℹ  Skipping Google infra OAuth secrets (GOOGLE_CLIENT_ID/SECRET not set — GCP OIDC integration disabled)${NC}"
+fi
+
+# Configure Google LOGIN OAuth secrets (optional env fallback — the setup wizard is the
+# primary path; these are a separate OAuth client from the infra one above)
+GOOGLE_LOGIN_CLIENT_ID="${GOOGLE_LOGIN_CLIENT_ID:-}"
+GOOGLE_LOGIN_CLIENT_SECRET="${GOOGLE_LOGIN_CLIENT_SECRET:-}"
+if [ -n "$GOOGLE_LOGIN_CLIENT_ID" ] && [ -n "$GOOGLE_LOGIN_CLIENT_SECRET" ]; then
+  set_worker_secret "GOOGLE_LOGIN_CLIENT_ID" "$GOOGLE_LOGIN_CLIENT_ID" "$ENVIRONMENT" "true" || FAILED=true
+  set_worker_secret "GOOGLE_LOGIN_CLIENT_SECRET" "$GOOGLE_LOGIN_CLIENT_SECRET" "$ENVIRONMENT" "true" || FAILED=true
+else
+  echo -e "${YELLOW}ℹ  Skipping Google login OAuth secrets (GOOGLE_LOGIN_CLIENT_ID/SECRET not set — configure Google sign-in via /setup)${NC}"
 fi
 
 # Configure R2 S3-compatible API credentials (optional — only needed for task attachment uploads)

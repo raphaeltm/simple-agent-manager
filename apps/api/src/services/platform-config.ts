@@ -87,8 +87,11 @@ const ENV_KEYS = {
   githubAppPrivateKey: 'GITHUB_APP_PRIVATE_KEY',
   githubAppSlug: 'GITHUB_APP_SLUG',
   githubWebhookSecret: 'GITHUB_WEBHOOK_SECRET',
-  googleClientId: 'GOOGLE_CLIENT_ID',
-  googleClientSecret: 'GOOGLE_CLIENT_SECRET',
+  // Login Google OAuth client (BetterAuth social sign-in). Distinct from the
+  // infra/GCP Google client (GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET) — different
+  // OAuth app, redirect URI (/api/auth/callback/google), and scopes.
+  googleClientId: 'GOOGLE_LOGIN_CLIENT_ID',
+  googleClientSecret: 'GOOGLE_LOGIN_CLIENT_SECRET',
 } as const;
 
 const DEFAULT_SETUP_RATE_LIMIT_WINDOW_SECONDS = 15 * 60;
@@ -350,10 +353,35 @@ export async function getGitHubOAuthConfig(env: Env): Promise<{ clientId: string
   return { clientId: config.github.clientId.value, clientSecret: config.github.clientSecret.value };
 }
 
-export async function getGoogleOAuthConfig(env: Env): Promise<{ clientId: string; clientSecret: string } | null> {
+/**
+ * Login Google OAuth client — the BetterAuth "Sign in with Google" social
+ * provider. Resolved from the setup-wizard platform store first, then the
+ * login-specific GOOGLE_LOGIN_CLIENT_ID/GOOGLE_LOGIN_CLIENT_SECRET env fallback.
+ * Its redirect URI is `https://api.{BASE_DOMAIN}/api/auth/callback/google`.
+ *
+ * This is intentionally SEPARATE from the infra/GCP Google client
+ * (getGoogleInfraOAuthConfig) so configuring Google sign-in never rewires GCP
+ * infrastructure access — they are different OAuth apps with different redirect
+ * URIs and scopes.
+ */
+export async function getGoogleLoginOAuthConfig(env: Env): Promise<{ clientId: string; clientSecret: string } | null> {
   const config = await resolvePlatformConfig(env);
   if (!config.google.clientId.value || !config.google.clientSecret.value) return null;
   return { clientId: config.google.clientId.value, clientSecret: config.google.clientSecret.value };
+}
+
+/**
+ * Infra/GCP Google OAuth client — used for GCP deployment authorization flows
+ * (cloud-platform scope; redirect URIs `/auth/google/callback` and
+ * `/api/deployment/gcp/callback`). Reads GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET
+ * from the environment directly and does NOT consult the setup-wizard platform
+ * store, so it is never affected by the login Google configuration.
+ */
+export async function getGoogleInfraOAuthConfig(env: Env): Promise<{ clientId: string; clientSecret: string } | null> {
+  const clientId = envValue(env, 'GOOGLE_CLIENT_ID');
+  const clientSecret = envValue(env, 'GOOGLE_CLIENT_SECRET');
+  if (!clientId || !clientSecret) return null;
+  return { clientId, clientSecret };
 }
 
 export async function getGitHubAppConfig(env: Env): Promise<{

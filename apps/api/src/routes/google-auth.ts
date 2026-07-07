@@ -6,7 +6,7 @@ import { log } from '../lib/logger';
 import { expectJsonRecord, maybeJsonRecord, readResponseJson } from '../lib/runtime-validation';
 import { getUserId,requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
-import { getGoogleOAuthConfig } from '../services/platform-config';
+import { getGoogleInfraOAuthConfig } from '../services/platform-config';
 
 const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
@@ -26,7 +26,7 @@ const googleTokenResponseSchema = v.object({
  * Requires the user to already be authenticated via GitHub OAuth.
  */
 googleAuthRoutes.get('/authorize', requireAuth(), requireApproved(), async (c) => {
-  const googleOAuth = await getGoogleOAuthConfig(c.env);
+  const googleOAuth = await getGoogleInfraOAuthConfig(c.env);
   if (!googleOAuth) {
     throw errors.badRequest('Google OAuth is not configured on this SAM instance');
   }
@@ -62,7 +62,7 @@ googleAuthRoutes.get('/callback', requireAuth(), requireApproved(), async (c) =>
   const sessionUserId = getUserId(c);
   const appBaseUrl = `https://app.${c.env.BASE_DOMAIN}`;
 
-  const googleOAuth = await getGoogleOAuthConfig(c.env);
+  const googleOAuth = await getGoogleInfraOAuthConfig(c.env);
   if (!googleOAuth) {
     throw errors.badRequest('Google OAuth is not configured');
   }
