@@ -164,9 +164,10 @@ func TestInjectUserMessageNotifications_SDKMarshalStripsMarker(t *testing.T) {
 	defer host.Stop()
 
 	block := acpsdk.ContentBlock{Text: &acpsdk.ContentBlockText{
-		Type: "text",
-		Text: "call get_instructions",
-		Meta: map[string]any{"sam.origin": "system"},
+		Type:        "text",
+		Text:        "call get_instructions",
+		Meta:        map[string]any{"sam.origin": "system"},
+		Annotations: &acpsdk.Annotations{Audience: []acpsdk.Role{acpsdk.RoleAssistant}},
 	}}
 
 	host.injectUserMessageNotifications(acpsdk.SessionId("sess"), []acpsdk.ContentBlock{block}, "msg-1")
@@ -201,6 +202,9 @@ func TestInjectUserMessageNotifications_SDKMarshalStripsMarker(t *testing.T) {
 		}
 		if len(tb.Meta) != 0 {
 			t.Fatalf("unexpected: mirror preserved _meta (%v) — SDK behavior changed, revisit design", tb.Meta)
+		}
+		if tb.Annotations != nil {
+			t.Fatalf("unexpected: mirror preserved annotations (%v) — SDK behavior changed, revisit design", tb.Annotations)
 		}
 	}
 	if !sawUserUpdate {
