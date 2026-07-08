@@ -26,6 +26,8 @@ describe('cf-container runtime spike contracts', () => {
     expect(index).toContain("nodeRuntime === 'cf-container'");
     expect(index).toContain("c.env.SANDBOX_ENABLED !== 'true'");
     expect(index).toContain('getSandbox(c.env.SANDBOX, sandboxId');
+    expect(index).toContain("headers.get('upgrade')?.toLowerCase() === 'websocket'");
+    expect(index).toContain('sandbox.wsConnect(containerRequest, vmAgentPort)');
     expect(index).toContain('sandbox.containerFetch(');
     expect(index).toContain("metric: 'ws_proxy_route'");
   });

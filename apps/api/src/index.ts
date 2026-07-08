@@ -457,16 +457,19 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
       c.env
     );
 
-    const response = await sandbox.containerFetch(
-      new Request(containerUrl.toString(), {
-        method: c.req.raw.method,
-        headers,
-        body: c.req.raw.body,
-        // @ts-expect-error — Cloudflare Workers support duplex for streaming request bodies
-        duplex: c.req.raw.body ? 'half' : undefined,
-      }),
-      vmAgentPort
-    );
+    const containerRequest = new Request(containerUrl.toString(), {
+      method: c.req.raw.method,
+      headers,
+      body: c.req.raw.body,
+      // @ts-expect-error — Cloudflare Workers support duplex for streaming request bodies
+      duplex: c.req.raw.body ? 'half' : undefined,
+    });
+    const isWebSocketUpgrade =
+      headers.get('upgrade')?.toLowerCase() === 'websocket' &&
+      headers.get('connection')?.toLowerCase().includes('upgrade');
+    const response = isWebSocketUpgrade
+      ? await sandbox.wsConnect(containerRequest, vmAgentPort)
+      : await sandbox.containerFetch(containerRequest, vmAgentPort);
 
     if (targetPort !== null) {
       const responseHeaders = new Headers(response.headers);
