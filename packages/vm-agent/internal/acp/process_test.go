@@ -1,11 +1,14 @@
 package acp
 
 import (
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 )
 
 func TestIsSecretEnvVar(t *testing.T) {
@@ -304,5 +307,67 @@ func TestStartLocalProcessRunsWithoutDockerExec(t *testing.T) {
 	}
 	if proc.containerID != "" {
 		t.Fatalf("local process containerID=%q, want empty", proc.containerID)
+	}
+}
+
+// TestTryStartLocalProcessDanglingSymlinkIsENOENT verifies that a bin whose
+// path resolves but whose target does not yet exist (the standalone-container
+// npm-install settle race) surfaces as syscall.ENOENT — the exact condition
+// startLocalProcess retries on.
+func TestTryStartLocalProcessDanglingSymlinkIsENOENT(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	link := filepath.Join(dir, "agent-bin")
+	target := filepath.Join(dir, "not-yet-here")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	_, err := tryStartLocalProcess(ProcessConfig{AcpCommand: link})
+	if err == nil {
+		t.Fatal("expected error for dangling symlink, got nil")
+	}
+	if !errors.Is(err, syscall.ENOENT) {
+		t.Fatalf("error = %v, want ENOENT-classified", err)
+	}
+}
+
+// TestStartLocalProcessRetriesUntilBinaryMaterializes proves the settle-race
+// fix: the bin symlink is initially dangling (ENOENT on exec) and only becomes
+// executable partway through the retry window. startLocalProcess must recover
+// and start the process rather than failing on the first ENOENT. This is the
+// regression test — on the pre-fix single-attempt code it fails.
+func TestStartLocalProcessRetriesUntilBinaryMaterializes(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	link := filepath.Join(dir, "agent-bin")
+	target := filepath.Join(dir, "real-bin")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	// Materialize the target after a couple of retry cycles, mimicking the
+	// overlayfs/npm settle delay.
+	go func() {
+		time.Sleep(DefaultLocalExecSettleDelay * 2)
+		script := "#!/bin/sh\nprintf '%s' settle-ok\n"
+		_ = os.WriteFile(target, []byte(script), 0o755)
+	}()
+
+	proc, err := startLocalProcess(ProcessConfig{AcpCommand: link})
+	if err != nil {
+		t.Fatalf("startLocalProcess did not recover from settle race: %v", err)
+	}
+	output, err := io.ReadAll(proc.Stdout())
+	if err != nil {
+		t.Fatalf("read stdout: %v", err)
+	}
+	if err := proc.Wait(); err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+	if string(output) != "settle-ok" {
+		t.Fatalf("stdout=%q, want settle-ok", string(output))
 	}
 }
