@@ -59,8 +59,21 @@ The spike has answered the feasibility question through the admin-only launcher.
   - `pnpm --filter @simple-agent-manager/web typecheck`
   - `pnpm --filter @simple-agent-manager/web exec eslint src/lib/api/sessions.ts src/lib/api/index.ts src/components/agent-profiles/ProfileFormDialog.tsx src/pages/project-chat/useProjectChatState.ts src/pages/project-chat/ChatInput.tsx tests/unit/pages/project-chat.test.tsx tests/unit/components/agent-profiles.test.tsx`
   - `pnpm --filter @simple-agent-manager/web exec playwright test tests/playwright/project-chat-composer-audit.spec.ts`
+- Productionized path broad gates passed on 2026-07-08 after aligning stale API contract tests:
+  - `pnpm --filter @simple-agent-manager/api exec vitest run tests/unit/cf-container-runtime-contract.test.ts tests/unit/services/agent-profiles.test.ts`
+  - `pnpm test` (19 turbo tasks, API 395 files / 5,869 tests, Web 216 files / 2,646 tests)
+  - `pnpm typecheck`
+  - `pnpm lint` (existing warning backlog only)
+  - `pnpm build`
+- Specialist review notes on 2026-07-08:
+  - Cloudflare specialist: no local blockers found. Sandbox remains behind `SANDBOX_ENABLED`, uses `cloudflare/sandbox:0.12.1` / `standard-1`, and D1/runtime changes are additive. Staging Cloudflare verification remains required.
+  - Security auditor: no high/critical findings. The user-facing start route keeps auth, approval, project capability, and repository access gates; callback/MCP tokens are generated through existing services; grep/review found no new secret logging.
+  - Constitution validator: no Principle XI blocker found. New internal URLs derive from `BASE_DOMAIN`; sandbox and heartbeat values remain env-configurable; fixed literals are protocol/runtime flags.
+  - Test engineer: local coverage is adequate for resolver decisions, instant-session sequencing, start-route behavior, source-level boundary contracts, web runtime submit branching, and Playwright UI audit. Live staging measurement remains the remaining acceptance gap.
+  - UI/UX specialist: selected the inline wizard runtime step with compact profile runtime badges over a hidden profile-only setting or a separate composer-level runtime toggle. Playwright screenshots cover iPhone SE, iPhone 14, and desktop runtime wizard states with no layout failures.
+  - Task-completion validator: WARN, not archive-ready. Local productionized implementation and quality gates are covered, but staging deployment, live cf-container measurement, idea append, and draft PR update remain open.
 - Historical spike push blocker is resolved for the continuation branch; current commits have pushed to `sam/execute-task-using-skill-2cs1ky`.
-- Remaining follow-up gates: specialist reviews, staging deployment, live cf-container measurement, append results to idea `01KWY8E8W1J4F3AC3QAETT2RAT`, update draft PR #1544, and stop without merging.
+- Remaining follow-up gates: staging deployment, live cf-container measurement, append results to idea `01KWY8E8W1J4F3AC3QAETT2RAT`, update draft PR #1544, and stop without merging.
 
 ## Acceptance Criteria
 

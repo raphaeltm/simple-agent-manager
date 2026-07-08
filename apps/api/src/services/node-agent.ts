@@ -29,7 +29,8 @@ interface NodeAgentRequestOptions extends RequestInit {
 }
 
 function requestInitWithoutSignal(options: RequestInit): RequestInit {
-  const { signal: _signal, ...serializableOptions } = options;
+  const serializableOptions = { ...options };
+  delete serializableOptions.signal;
   return serializableOptions;
 }
 

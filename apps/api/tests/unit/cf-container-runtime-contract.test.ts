@@ -43,23 +43,28 @@ describe('cf-container runtime spike contracts', () => {
     expect(nodeAgent).toContain('new Request(containerUrl.toString(), requestInitWithoutSignal(options))');
   });
 
-  it('keeps the admin launcher superadmin-only and on the existing Sandbox substrate', () => {
-    const route = read('routes/admin-sandbox.ts');
+  it('launches instant chat sessions through the authenticated start route and Sandbox substrate', () => {
+    const adminRoute = read('routes/admin-sandbox.ts');
+    const chatStartRoute = read('routes/chat-start.ts');
+    const launcher = read('services/instant-session.ts');
 
-    expect(route).toContain("adminSandboxRoutes.use('/*', requireAuth(), requireApproved(), requireSuperadmin())");
-    expect(route).toContain("adminSandboxRoutes.post('/cf-vm-agent/start'");
-    expect(route).toContain("NODE_ROLE: 'standalone'");
-    expect(route).toContain('const standaloneEnv = {');
-    expect(route).toContain("runCfVmAgentPhase('install'");
-    expect(route).toContain("runCfVmAgentPhase('start'");
-    expect(route).toContain('nohup env ${envAssignments} /usr/local/bin/vm-agent');
-    expect(route).toContain('/tmp/vm-agent.log');
-    expect(route).toContain("runtime: 'cf-container'");
-    expect(route).toContain('signNodeCallbackToken');
-    expect(route).toContain('signCallbackToken');
-    expect(route).toContain('createWorkspaceOnNode');
-    expect(route).toContain('createAcpSession');
-    expect(route).toContain('createAgentSessionOnNode');
-    expect(route).toContain('startAgentSessionOnNode');
+    expect(adminRoute).toContain("adminSandboxRoutes.use('/*', requireAuth(), requireApproved(), requireSuperadmin())");
+    expect(chatStartRoute).toContain("chatStartRoutes.post('/start', requireAuth(), requireApproved()");
+    expect(chatStartRoute).toContain('resolveWorkspaceRuntime');
+    expect(chatStartRoute).toContain("runtime.runtime !== 'cf-container'");
+    expect(chatStartRoute).toContain('launchInstantSession');
+    expect(launcher).toContain("NODE_ROLE: 'standalone'");
+    expect(launcher).toContain('const standaloneEnv = {');
+    expect(launcher).toContain("runSandboxPhase('install'");
+    expect(launcher).toContain("runSandboxPhase('start'");
+    expect(launcher).toContain('nohup env ${envAssignments} /usr/local/bin/vm-agent');
+    expect(launcher).toContain('/tmp/vm-agent.log');
+    expect(launcher).toContain("runtime: 'cf-container'");
+    expect(launcher).toContain('signNodeCallbackToken');
+    expect(launcher).toContain('signCallbackToken');
+    expect(launcher).toContain('createWorkspaceOnNode');
+    expect(launcher).toContain('createAcpSession');
+    expect(launcher).toContain('createAgentSessionOnNode');
+    expect(launcher).toContain('startAgentSessionOnNode');
   });
 });
