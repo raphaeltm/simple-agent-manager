@@ -40,9 +40,55 @@ func main() {
 	// Branch on node role
 	if cfg.IsDeploymentMode() {
 		runDeploymentMode(cfg)
+	} else if cfg.IsStandaloneMode() {
+		runStandaloneMode(cfg)
 	} else {
 		runWorkspaceMode(cfg)
 	}
+}
+
+// runStandaloneMode starts the agent inside a single Cloudflare Container.
+// It intentionally skips host provisioning, cloud-init bootstrap, Docker,
+// devcontainers, TLS setup, DNS setup, and port scanning. The container DO
+// provides bootstrap/config via environment variables and proxies plain HTTP.
+func runStandaloneMode(cfg *config.Config) {
+	slog.Info("Starting in standalone mode",
+		"workspaceId", cfg.WorkspaceID,
+		"workspaceDir", cfg.WorkspaceDir)
+
+	srv, err := server.New(cfg)
+	if err != nil {
+		slog.Error("Failed to create server", "error", err)
+		os.Exit(1)
+	}
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
+	errCh := make(chan error, 1)
+	go func() {
+		if err := srv.Start(); err != nil {
+			errCh <- err
+		}
+	}()
+
+	srv.SendNodeReady()
+
+	select {
+	case err := <-errCh:
+		slog.Error("Server error", "error", err)
+		os.Exit(1)
+	case sig := <-sigCh:
+		slog.Info("Received signal, shutting down standalone agent...", "signal", sig)
+		srv.StopAllWorkspacesAndSessions()
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := srv.Stop(ctx); err != nil {
+		slog.Error("Error during shutdown", "error", err)
+	}
+	slog.Info("VM Agent (standalone mode) stopped")
 }
 
 // runDeploymentMode starts the agent in deployment mode.

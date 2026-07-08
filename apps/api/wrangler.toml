@@ -58,6 +58,7 @@ TRIGGER_NAME_MAX_LENGTH = "100"
 # Cloudflare Sandbox SDK prototype (admin-only, kill switch — default disabled)
 # Set to "true" via Worker secret to enable on specific environments.
 # SANDBOX_ENABLED = "false"
+# SANDBOX_EXEC_TIMEOUT_MS = "180000"
 # Trial Onboarding (zero-friction URL-to-workspace)
 # See docs/guides/trial-configuration.md for the full tunable list.
 TRIAL_MONTHLY_CAP = "1500"
@@ -233,7 +234,7 @@ new_sqlite_classes = ["ProjectAgent"]  # Per-project AI tech lead; SQLite-backed
 [[containers]]
 class_name = "SandboxDO"
 image = "./Dockerfile.sandbox"
-instance_type = "basic"
+instance_type = "standard-1"
 max_instances = 3
 
 [[durable_objects.bindings]]

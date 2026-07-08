@@ -192,6 +192,25 @@ type AgentProcess struct {
 	waitDone chan struct{} // closed when cmd.Wait() returns
 }
 
+// ProcessLauncher starts an ACP agent process. The docker implementation keeps
+// the existing devcontainer behavior; the local implementation is used by the
+// Cloudflare Container standalone spike.
+type ProcessLauncher interface {
+	Start(ProcessConfig) (*AgentProcess, error)
+}
+
+type DockerExecLauncher struct{}
+
+func (DockerExecLauncher) Start(cfg ProcessConfig) (*AgentProcess, error) {
+	return startProcessWithMode(cfg, true)
+}
+
+type LocalLauncher struct{}
+
+func (LocalLauncher) Start(cfg ProcessConfig) (*AgentProcess, error) {
+	return startProcessWithMode(cfg, false)
+}
+
 // ProcessConfig holds configuration for spawning an agent process.
 type ProcessConfig struct {
 	// ContainerID is the Docker container to exec into.
@@ -218,6 +237,21 @@ type ProcessConfig struct {
 // The process is placed in its own process group (Setpgid) so that Stop()
 // can signal the entire tree reliably.
 func StartProcess(cfg ProcessConfig) (*AgentProcess, error) {
+	return DockerExecLauncher{}.Start(cfg)
+}
+
+func StartLocalProcess(cfg ProcessConfig) (*AgentProcess, error) {
+	return LocalLauncher{}.Start(cfg)
+}
+
+func startProcessWithMode(cfg ProcessConfig, dockerExec bool) (*AgentProcess, error) {
+	if dockerExec {
+		return startDockerExecProcess(cfg)
+	}
+	return startLocalProcess(cfg)
+}
+
+func startDockerExecProcess(cfg ProcessConfig) (*AgentProcess, error) {
 	// Build docker exec command: docker exec -i [-u user] [-w dir] [-e VAR=val...] [--env-file path] container command args...
 	args := []string{"exec", "-i"}
 
@@ -321,6 +355,63 @@ func StartProcess(cfg ProcessConfig) (*AgentProcess, error) {
 		stderr:          stderr,
 		containerID:     cfg.ContainerID,
 		envFilePath:     envFilePath,
+		startTime:       time.Now(),
+		stopGracePeriod: gracePeriod,
+		stopTimeout:     stopTimeout,
+		waitDone:        make(chan struct{}),
+	}, nil
+}
+
+func startLocalProcess(cfg ProcessConfig) (*AgentProcess, error) {
+	cmd := exec.Command(cfg.AcpCommand, cfg.AcpArgs...)
+	cmd.Env = append(os.Environ(), cfg.EnvVars...)
+	if cfg.WorkDir != "" {
+		cmd.Dir = cfg.WorkDir
+	}
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create stdin pipe: %w", err)
+	}
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		stdin.Close()
+		return nil, fmt.Errorf("failed to create stdout pipe: %w", err)
+	}
+
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		stdin.Close()
+		stdout.Close()
+		return nil, fmt.Errorf("failed to create stderr pipe: %w", err)
+	}
+
+	if err := cmd.Start(); err != nil {
+		stdin.Close()
+		stdout.Close()
+		stderr.Close()
+		return nil, fmt.Errorf("failed to start local agent process: %w", err)
+	}
+
+	slog.Info("ACP local agent process started", "command", cfg.AcpCommand, "pid", cmd.Process.Pid)
+
+	gracePeriod := cfg.StopGracePeriod
+	if gracePeriod <= 0 {
+		gracePeriod = DefaultStopGracePeriod
+	}
+	stopTimeout := cfg.StopTimeout
+	if stopTimeout <= 0 {
+		stopTimeout = DefaultStopTimeout
+	}
+
+	return &AgentProcess{
+		agentType:       cfg.AcpCommand,
+		cmd:             cmd,
+		stdin:           stdin,
+		stdout:          stdout,
+		stderr:          stderr,
 		startTime:       time.Now(),
 		stopGracePeriod: gracePeriod,
 		stopTimeout:     stopTimeout,

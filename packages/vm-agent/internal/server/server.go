@@ -305,7 +305,13 @@ func New(cfg *config.Config) (*Server, error) {
 	containerWorkDir := "/workspace" // host fallback
 	containerUser := ""
 
-	if cfg.ContainerMode {
+	if cfg.IsStandaloneMode() {
+		containerWorkDir = cfg.WorkspaceDir
+		if containerWorkDir == "" {
+			containerWorkDir = "/workspace"
+		}
+		slog.Info("Standalone mode enabled: PTY and ACP sessions will run locally", "workDir", containerWorkDir)
+	} else if cfg.ContainerMode {
 		discovery := container.NewDiscovery(container.Config{
 			LabelKey:    cfg.ContainerLabelKey,
 			LabelValue:  cfg.ContainerLabelValue,
@@ -329,6 +335,7 @@ func New(cfg *config.Config) (*Server, error) {
 		WorkDir:           containerWorkDir,
 		ContainerResolver: containerResolver,
 		ContainerUser:     containerUser,
+		ProcessGroup:      cfg.IsStandaloneMode(),
 		GracePeriod:       cfg.PTYOrphanGracePeriod,
 		BufferSize:        cfg.PTYOutputBufferSize,
 	})
@@ -340,6 +347,11 @@ func New(cfg *config.Config) (*Server, error) {
 		MaxQueueSize:  cfg.ErrorReportMaxQueueSize,
 		HTTPTimeout:   cfg.ErrorReportHTTPTimeout,
 	})
+
+	var processLauncher acp.ProcessLauncher
+	if cfg.IsStandaloneMode() {
+		processLauncher = acp.LocalLauncher{}
+	}
 
 	// Build ACP gateway configuration
 	acpGatewayConfig := acp.GatewayConfig{
@@ -356,6 +368,7 @@ func New(cfg *config.Config) (*Server, error) {
 		ContainerResolver:              containerResolver,
 		ContainerUser:                  containerUser,
 		ContainerWorkDir:               containerWorkDir,
+		ProcessLauncher:                processLauncher,
 		GitTokenFetcher:                nil, // set below after server construction
 		FileExecTimeout:                cfg.GitExecTimeout,
 		FileMaxSize:                    cfg.GitFileMaxSize,
@@ -773,7 +786,7 @@ func (s *Server) UpdateAfterBootstrap(cfg *config.Config) {
 // StartPortScanner starts port scanning for a workspace if enabled.
 // Called after bootstrap completes and the container is available.
 func (s *Server) StartPortScanner(workspaceID string) {
-	if !s.config.PortScanEnabled || !s.config.ContainerMode {
+	if !s.config.PortScanEnabled || !s.config.ContainerMode || s.config.IsStandaloneMode() {
 		return
 	}
 
