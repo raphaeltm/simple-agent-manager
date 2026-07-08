@@ -17,16 +17,6 @@ interface ChangesViewProps {
   onOpenFile: (path: string) => void;
 }
 
-const linkBtnStyle: React.CSSProperties = {
-  background: 'none',
-  border: 'none',
-  padding: 0,
-  color: 'var(--color-accent, #2563eb)',
-  textDecoration: 'underline',
-  cursor: 'pointer',
-  fontSize: 12,
-};
-
 const STATUS_LABEL_FULL: Record<RepoCompareFile['status'], string> = {
   added: 'added',
   modified: 'modified',
@@ -42,10 +32,10 @@ const STATUS_LABEL: Record<RepoCompareFile['status'], string> = {
 };
 
 const STATUS_COLOR: Record<RepoCompareFile['status'], string> = {
-  added: 'var(--color-success, #16a34a)',
-  modified: 'var(--color-warning, #ca8a04)',
-  removed: 'var(--color-error, #dc2626)',
-  renamed: 'var(--color-info, #2563eb)',
+  added: 'var(--sam-color-success)',
+  modified: 'var(--sam-color-warning)',
+  removed: 'var(--sam-color-danger)',
+  renamed: 'var(--sam-color-info)',
 };
 
 const FileRow: FC<{ file: RepoCompareFile; onOpenFile: (path: string) => void }> = ({
@@ -54,59 +44,57 @@ const FileRow: FC<{ file: RepoCompareFile; onOpenFile: (path: string) => void }>
 }) => {
   const [expanded, setExpanded] = useState(false);
   return (
-    <div style={{ borderBottom: '1px solid var(--border-subtle, #2a2a2a)' }}>
+    <div className="border-b border-border-default">
       <button
         type="button"
         onClick={() => setExpanded((e) => !e)}
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          width: '100%',
-          padding: '10px 12px',
-          background: 'transparent',
-          border: 'none',
-          cursor: 'pointer',
-          textAlign: 'left',
-          color: 'var(--text-primary, #e5e5e5)',
-        }}
+        className="w-full flex items-center gap-2 px-3 py-2.5 min-h-[44px] bg-transparent border-none cursor-pointer text-left text-fg-primary hover:bg-surface-hover transition-colors"
       >
-        {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+        {expanded ? <ChevronDown size={14} className="shrink-0 text-fg-muted" /> : <ChevronRight size={14} className="shrink-0 text-fg-muted" />}
         <span
           aria-hidden
-          style={{ color: STATUS_COLOR[file.status], fontFamily: 'monospace', fontWeight: 600, width: 14 }}
+          className="text-xs font-mono font-semibold w-4 text-center shrink-0"
+          style={{ color: STATUS_COLOR[file.status] }}
         >
           {STATUS_LABEL[file.status]}
         </span>
         <span className="sr-only">{STATUS_LABEL_FULL[file.status]} — </span>
-        <span style={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere', fontSize: 13 }}>{file.path}</span>
-        <span style={{ color: 'var(--color-success, #16a34a)', fontSize: 12 }}>+{file.additions}</span>
-        <span style={{ color: 'var(--color-error, #dc2626)', fontSize: 12 }}>−{file.deletions}</span>
+        <span className="flex-1 min-w-0 break-all text-[13px]">{file.path}</span>
+        <span className="text-xs tabular-nums text-success shrink-0">+{file.additions}</span>
+        <span className="text-xs tabular-nums text-danger shrink-0">−{file.deletions}</span>
       </button>
       {expanded && (
-        <div style={{ padding: '0 8px 8px' }}>
+        <div className="px-2 pb-2">
           {file.isBinary ? (
-            <p style={{ color: 'var(--text-secondary, #999)', fontSize: 13, padding: 8 }}>
+            <p className="text-fg-muted text-[13px] p-2">
               Binary file — no textual diff.{' '}
-              <button type="button" style={linkBtnStyle} onClick={() => onOpenFile(file.path)}>
+              <button
+                type="button"
+                className="bg-transparent border-none p-0 text-accent underline cursor-pointer text-xs"
+                onClick={() => onOpenFile(file.path)}
+              >
                 View file
               </button>
             </p>
           ) : file.patchTruncated || !file.patch ? (
-            <p style={{ color: 'var(--text-secondary, #999)', fontSize: 13, padding: 8 }}>
+            <p className="text-fg-muted text-[13px] p-2">
               Diff too large to display.{' '}
-              <button type="button" style={linkBtnStyle} onClick={() => onOpenFile(file.path)}>
+              <button
+                type="button"
+                className="bg-transparent border-none p-0 text-accent underline cursor-pointer text-xs"
+                onClick={() => onOpenFile(file.path)}
+              >
                 View file
               </button>
             </p>
           ) : (
             <>
-              <div style={{ overflowX: 'auto' }}>
+              <div className="overflow-x-auto">
                 <DiffRenderer diff={file.patch} />
               </div>
               <button
                 type="button"
-                style={{ ...linkBtnStyle, marginTop: 6 }}
+                className="bg-transparent border-none p-0 text-accent underline cursor-pointer text-xs mt-1.5"
                 onClick={() => onOpenFile(file.path)}
               >
                 View whole file
@@ -152,24 +140,24 @@ export const ChangesView: FC<ChangesViewProps> = ({ projectId, head, base, onOpe
 
   if (loading && !data) {
     return (
-      <div style={{ display: 'flex', justifyContent: 'center', padding: 40 }}>
+      <div className="flex justify-center p-10">
         <Spinner />
       </div>
     );
   }
   if (error) {
     return (
-      <p role="alert" style={{ color: 'var(--color-error, #dc2626)', padding: 16 }}>
+      <p role="alert" className="p-4 text-danger-fg">
         {error}
       </p>
     );
   }
   if (!data || data.files.length === 0) {
     return (
-      <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-secondary, #999)' }}>
-        <FileDiff size={28} style={{ opacity: 0.5 }} />
-        <p style={{ marginTop: 8 }}>
-          No changes — <code>{head}</code> is up to date with <code>{base}</code>.
+      <div className="text-center p-10 text-fg-muted">
+        <FileDiff size={28} className="opacity-50 mx-auto" />
+        <p className="mt-2">
+          No changes — <code className="text-fg-primary">{head}</code> is up to date with <code className="text-fg-primary">{base}</code>.
         </p>
       </div>
     );
@@ -177,26 +165,14 @@ export const ChangesView: FC<ChangesViewProps> = ({ projectId, head, base, onOpe
 
   return (
     <div>
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 12,
-          padding: '10px 12px',
-          fontSize: 13,
-          color: 'var(--text-secondary, #999)',
-          borderBottom: '1px solid var(--border-subtle, #2a2a2a)',
-        }}
-      >
+      <div className="flex items-center gap-3 px-3 py-2.5 text-[13px] text-fg-muted border-b border-border-default">
         <span>
-          Comparing <code>{base}</code> ← <code>{head}</code>
+          Comparing <code className="text-fg-primary">{base}</code> ← <code className="text-fg-primary">{head}</code>
         </span>
-        <span style={{ marginLeft: 'auto', color: 'var(--color-success, #16a34a)' }}>
-          +{data.totalAdditions}
-        </span>
-        <span style={{ color: 'var(--color-error, #dc2626)' }}>−{data.totalDeletions}</span>
+        <span className="ml-auto text-xs tabular-nums text-success">+{data.totalAdditions}</span>
+        <span className="text-xs tabular-nums text-danger">−{data.totalDeletions}</span>
       </div>
-      <p style={{ padding: '6px 12px', fontSize: 12, color: 'var(--text-secondary, #999)' }}>
+      <p className="px-3 py-1.5 text-xs text-fg-muted">
         {summary}
         {data.truncated ? ' (list truncated — very large diff)' : ''}
       </p>
