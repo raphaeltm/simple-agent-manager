@@ -23,7 +23,7 @@ describe('cf-container runtime spike contracts', () => {
   it('routes cf-container workspace hostnames through the Sandbox binding behind the kill switch', () => {
     const index = read('index.ts');
 
-    expect(index).toContain("workspace.nodeRuntime === 'cf-container'");
+    expect(index).toContain("nodeRuntime === 'cf-container'");
     expect(index).toContain("c.env.SANDBOX_ENABLED !== 'true'");
     expect(index).toContain('getSandbox(c.env.SANDBOX, sandboxId');
     expect(index).toContain('sandbox.containerFetch(');

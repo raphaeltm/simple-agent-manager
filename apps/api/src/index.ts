@@ -362,16 +362,22 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
     .select({
       nodeId: schema.workspaces.nodeId,
       status: schema.workspaces.status,
-      nodeRuntime: schema.nodes.runtime,
     })
     .from(schema.workspaces)
-    .leftJoin(schema.nodes, eq(schema.workspaces.nodeId, schema.nodes.id))
     .where(and(eq(schema.workspaces.id, workspaceId), eq(schema.workspaces.userId, userId)))
     .get();
 
   if (!workspace) {
     return c.json({ error: 'NOT_FOUND', message: 'Workspace not found' }, 404);
   }
+
+  const nodeRuntime = workspace.nodeId
+    ? (await db
+        .select({ runtime: schema.nodes.runtime })
+        .from(schema.nodes)
+        .where(eq(schema.nodes.id, workspace.nodeId))
+        .get())?.runtime ?? 'vm'
+    : 'vm';
 
   if (workspace.status !== 'running' && workspace.status !== 'recovery') {
     // Allow boot-log WebSocket during creation for real-time streaming
@@ -388,7 +394,7 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
     return portAccessRedirect;
   }
 
-  if (workspace.nodeRuntime === 'cf-container') {
+  if (nodeRuntime === 'cf-container') {
     if (c.env.SANDBOX_ENABLED !== 'true') {
       return c.json({ error: 'SANDBOX_DISABLED', message: 'Container workspace runtime is disabled' }, 503);
     }

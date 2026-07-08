@@ -85,6 +85,8 @@ export async function waitForNodeAgentReady(nodeId: string, env: Env): Promise<v
     } catch (err) {
       if (err instanceof Error && err.message.startsWith('request timeout after ')) {
         lastError = err.message;
+      } else if (err instanceof Error && err.message.startsWith('Request timed out after ')) {
+        lastError = err.message.replace('Request timed out after ', 'request timeout after ');
       } else if (err instanceof Error && err.name === 'AbortError') {
         lastError = `request timeout after ${requestTimeoutMs}ms`;
       } else {
@@ -197,6 +199,10 @@ async function fetchNodeAgent(
   options: RequestInit,
   requestTimeoutMs: number
 ): Promise<Response> {
+  if (!env.DATABASE || typeof env.DATABASE.prepare !== 'function') {
+    return fetchWithTimeout(url, options, requestTimeoutMs);
+  }
+
   const db = drizzle(env.DATABASE, { schema });
   const node = await db
     .select({ runtime: schema.nodes.runtime })
