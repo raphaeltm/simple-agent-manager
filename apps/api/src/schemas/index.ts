@@ -129,6 +129,7 @@ export {
   ProjectDeploymentSetupSchema,
   SaveCachedCommandsSchema,
   SendChatMessageSchema,
+  StartChatSessionSchema,
   TerminalRequestSchema,
   TtsRequestSchema,
   UIStandardUpsertSchema,

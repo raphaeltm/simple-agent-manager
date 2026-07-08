@@ -60,6 +60,7 @@ import { apiTokenRoutes } from './routes/api-tokens';
 import { authRoutes } from './routes/auth';
 import { bootstrapRoutes } from './routes/bootstrap';
 import { cachedCommandRoutes } from './routes/cached-commands';
+import { chatStartRoutes } from './routes/chat-start';
 import { chatRoutes } from './routes/chat';
 import { chatsRoutes } from './routes/chats';
 import { cliRoutes } from './routes/cli';
@@ -742,6 +743,7 @@ app.route('/api/projects', composePublishReleaseCallbackRoute); // Must be befor
 app.route('/api/projects', deploymentPublishJobCallbackRoute); // Must be before projectsRoutes — uses callback JWT, not session auth
 app.route('/api/projects', projectsRoutes);
 app.route('/api/projects/:projectId/tasks', tasksRoutes);
+app.route('/api/projects/:projectId/sessions', chatStartRoutes);
 app.route('/api/projects/:projectId/sessions', chatRoutes);
 app.route('/api/projects/:projectId/cached-commands', cachedCommandRoutes);
 app.route('/api/projects/:projectId/activity', activityRoutes);
