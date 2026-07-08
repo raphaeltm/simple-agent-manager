@@ -19,11 +19,11 @@ This is a feasibility spike, not a production feature. The PR must be opened as 
 
 ## Implementation Checklist
 
-- [ ] Re-apply Sandbox image/config prior art: `cloudflare/sandbox:0.12.1`, `standard-1`, spike env handling for `SANDBOX_EXEC_TIMEOUT_MS`, with `SANDBOX_ENABLED` remaining default off.
-- [ ] Add `vm-agent` standalone mode config and `runStandaloneMode` in `packages/vm-agent/main.go`.
-- [ ] Introduce a `ProcessLauncher` abstraction in ACP process spawning with `dockerExec` preserving current behavior and `local` spawning directly with process-group cleanup and secret-safe env handling.
-- [ ] Route PTY sessions through the same launcher choice or equivalent local/docker abstraction without regressing Docker PTY behavior.
-- [ ] Wire standalone workspace runtime: local filesystem workspace, no provision/bootstrap/devcontainer/docker/TLS/DNS/port-scanner, plain HTTP to the container DO, and env-provided control-plane/bootstrap/callback config.
+- [x] Re-apply Sandbox image/config prior art: `cloudflare/sandbox:0.12.1`, `standard-1`, spike env handling for `SANDBOX_EXEC_TIMEOUT_MS`, with `SANDBOX_ENABLED` remaining default off.
+- [x] Add `vm-agent` standalone mode config and `runStandaloneMode` in `packages/vm-agent/main.go`.
+- [x] Introduce a `ProcessLauncher` abstraction in ACP process spawning with `dockerExec` preserving current behavior and `local` spawning directly with process-group cleanup and secret-safe env handling.
+- [x] Route PTY sessions through the same launcher choice or equivalent local/docker abstraction without regressing Docker PTY behavior.
+- [x] Wire standalone workspace runtime: local filesystem workspace, no provision/bootstrap/devcontainer/docker/TLS/DNS/port-scanner, plain HTTP to the container DO, and env-provided control-plane/bootstrap/callback config.
 - [ ] Add virtual node registration for a single-workspace `runtime: 'cf-container'` node behind `SANDBOX_ENABLED`; reuse existing node heartbeat/status fields and keep `workspaces.node_id` populated.
 - [ ] Add routing from `ws-{id}.BASE_DOMAIN` through Worker to the `SANDBOX` container DO for `cf-container` workspaces only.
 - [ ] Preserve callback JWT authentication for all VM-agent callbacks and add/adjust contract tests for Worker ↔ vm-agent/container DO boundaries.
