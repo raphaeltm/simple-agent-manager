@@ -855,6 +855,26 @@ describe('ProjectData Durable Object', () => {
       expect(messages[0]!.content).toBe('Initial prompt');
       expect(hasMore).toBe(true);
     });
+
+    it('reconstructs the current plan from the latest durable plan message', async () => {
+      const stub = getStub('project-msg-plan-source');
+      const sessionId = await stub.createSession(null, null);
+      const stalePlan = [{ content: 'Old cached step', status: 'pending' }];
+      const latestPlan = [
+        { content: 'Inspect persisted plan rows', status: 'completed' },
+        { content: 'Render the restored plan', status: 'in_progress' },
+      ];
+
+      await stub.persistMessage(sessionId, 'plan', JSON.stringify(stalePlan), null, 'plan-old');
+      await stub.persistMessage(sessionId, 'assistant', 'Working between plan updates', null);
+      await stub.persistMessage(sessionId, 'plan', JSON.stringify(latestPlan), null, 'plan-new');
+
+      const persistedPlan = await stub.getLatestPersistedPlan(sessionId);
+
+      expect(persistedPlan).not.toBeNull();
+      expect(persistedPlan!.currentPlan).toEqual(latestPlan);
+      expect(persistedPlan!.planUpdatedAt).toEqual(expect.any(Number));
+    });
   });
 
   // =========================================================================

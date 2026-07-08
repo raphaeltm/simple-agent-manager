@@ -21,13 +21,14 @@ describe('useActivityVerifyTimer', () => {
   });
 
   it('verifies activity through the lightweight session state endpoint', async () => {
+    const currentPlan = [{ content: 'Hydrate through state endpoint', status: 'in_progress' as const }];
     getChatSessionStateMock.mockResolvedValue({
       state: {
         activity: 'idle',
         activityAt: 1000,
         statusError: null,
-        currentPlan: null,
-        planUpdatedAt: null,
+        currentPlan,
+        planUpdatedAt: 1200,
         promptStartedAt: null,
         agentType: null,
         lastStopReason: null,
@@ -36,6 +37,7 @@ describe('useActivityVerifyTimer', () => {
       agentType: null,
     });
     const onVerifiedIdle = vi.fn();
+    const onStateSnapshot = vi.fn();
 
     const { result } = renderHook(() => useActivityVerifyTimer({
       projectId: 'proj-1',
@@ -43,6 +45,7 @@ describe('useActivityVerifyTimer', () => {
       delayMs: 1000,
       logMessage: 'verify failed',
       onVerifiedIdle,
+      onStateSnapshot,
     }));
 
     act(() => {
@@ -59,5 +62,9 @@ describe('useActivityVerifyTimer', () => {
       { signal: expect.any(AbortSignal) },
     );
     expect(onVerifiedIdle).toHaveBeenCalledOnce();
+    expect(onStateSnapshot).toHaveBeenCalledWith(expect.objectContaining({
+      currentPlan,
+      planUpdatedAt: 1200,
+    }));
   });
 });

@@ -140,7 +140,7 @@ function Ring({ active, size }: { active: boolean; size: number }) {
 export interface CompletionDockProps {
   /** True while the agent is producing output (agentActivity !== 'idle'). */
   working: boolean;
-  /** True when a plan exists to reveal the plan pill (only shown while working). */
+  /** True when a plan exists to reveal the plan pill. */
   hasPlan: boolean;
   /** Interrupt the running prompt (wired to lc.handleCancelPrompt). */
   onInterrupt: () => void;
@@ -284,13 +284,17 @@ export function CompletionDock({
           />
         </svg>
 
-        {/* Left cluster: plan pill (only while working, only if a plan exists) */}
-        {working && hasPlan && (
+        {/* Left cluster: plan pill */}
+        {hasPlan && (
           <button
             type="button"
             onClick={onOpenPlan}
             aria-label="View plan"
-            className="pointer-events-auto absolute flex items-center gap-1 text-xs rounded-md px-2 py-1 border border-[rgba(34,197,94,0.2)] bg-[rgba(34,197,94,0.06)] text-fg-primary cursor-pointer focus-visible:outline-2 focus-visible:outline-focus-ring focus-visible:-outline-offset-2"
+            className={`pointer-events-auto absolute flex items-center gap-1 text-xs rounded-md px-2 py-1 border text-fg-primary cursor-pointer focus-visible:outline-2 focus-visible:outline-focus-ring focus-visible:-outline-offset-2 ${
+              working
+                ? 'border-[rgba(34,197,94,0.2)] bg-[rgba(34,197,94,0.06)]'
+                : 'border-[rgba(148,163,184,0.22)] bg-[rgba(148,163,184,0.06)] opacity-75'
+            }`}
             style={{ left: 12, top: yB + (BAR_H - 26) / 2, zIndex: 2 }}
           >
             <ListTodo size={13} />

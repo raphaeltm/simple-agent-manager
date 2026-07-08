@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   sendFollowUpPrompt: vi.fn(),
   cancelAgentPrompt: vi.fn(),
   uploadSessionFiles: vi.fn(),
+  connectionState: 'connected' as 'connected' | 'disconnected',
 }));
 
 vi.mock('../../../src/lib/api', async (importOriginal) => ({
@@ -36,7 +37,7 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
 }));
 
 vi.mock('../../../src/hooks/useChatWebSocket', () => ({
-  useChatWebSocket: () => ({ connectionState: 'connected' as const, wsRef: { current: null }, retry: vi.fn() }),
+  useChatWebSocket: () => ({ connectionState: mocks.connectionState, wsRef: { current: null }, retry: vi.fn() }),
 }));
 vi.mock('../../../src/hooks/useTokenRefresh', () => ({
   useTokenRefresh: () => ({ token: null }),
@@ -56,6 +57,10 @@ vi.mock('../../../src/components/project-message-view/useConnectionRecovery', ()
     resumeAndSend: vi.fn(),
   }),
 }));
+vi.mock('../../../src/components/project-message-view/types', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/components/project-message-view/types')>()),
+  CHAT_FALLBACK_POLL_MS: 1,
+}));
 
 import { useSessionLifecycle } from '../../../src/components/project-message-view/useSessionLifecycle';
 
@@ -69,14 +74,35 @@ function sessionResponse(status: string) {
   return { id: 'sess-1', workspaceId: null, topic: 'T', status, messageCount: 1, createdAt: Date.now(), updatedAt: Date.now() };
 }
 
-function detail(messages: Msg[], hasMore: boolean, status = 'stopped') {
-  return { session: sessionResponse(status), messages, hasMore, state: { activity: 'idle', activityAt: Date.now(), statusError: null, currentPlan: null } };
+function detail(
+  messages: Msg[],
+  hasMore: boolean,
+  status = 'stopped',
+  currentPlan: Array<{ content: string; status: string }> | null = null,
+  planUpdatedAt: number | null = null,
+) {
+  return {
+    session: sessionResponse(status),
+    messages,
+    hasMore,
+    state: {
+      activity: 'idle',
+      activityAt: Date.now(),
+      statusError: null,
+      currentPlan,
+      planUpdatedAt,
+      promptStartedAt: null,
+      agentType: null,
+      lastStopReason: null,
+    },
+  };
 }
 
 describe('useSessionLifecycle loading semantics', () => {
   beforeEach(() => {
     vi.useRealTimers();
     vi.clearAllMocks();
+    mocks.connectionState = 'connected';
   });
   afterEach(() => {
     vi.clearAllTimers();
@@ -93,6 +119,21 @@ describe('useSessionLifecycle loading semantics', () => {
         limit: DEFAULT_CHAT_SESSION_MESSAGE_MAX,
       });
     });
+  });
+
+  it('rehydrates a plan-only state change between fallback polls', async () => {
+    mocks.connectionState = 'disconnected';
+    const messages = [msg('a', 1000)];
+    const plan = [{ content: 'Recovered from poll state', status: 'in_progress' }];
+    mocks.getChatSession
+      .mockResolvedValueOnce(detail(messages, false, 'active', null, null))
+      .mockResolvedValue(detail(messages, false, 'active', plan, 2000));
+
+    const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false));
+
+    await waitFor(() => expect(result.current.session?.status).toBe('active'));
+
+    await waitFor(() => expect(result.current.currentPlan).toEqual(plan));
   });
 
   describe('loadUntil', () => {
