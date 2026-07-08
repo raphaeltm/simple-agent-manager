@@ -789,6 +789,9 @@ func (h *SessionHost) ensureAgentInstalled(ctx context.Context, info agentComman
 	if info.installCmd == "" {
 		return nil
 	}
+	if h.config.ProcessLauncher != nil {
+		return nil
+	}
 
 	containerID, err := h.config.ContainerResolver()
 	if err != nil {

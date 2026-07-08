@@ -185,6 +185,25 @@ func TestNewSessionHost_Defaults(t *testing.T) {
 	host.Stop()
 }
 
+func TestSessionHostEnsureAgentInstalledSkipsForCustomLauncher(t *testing.T) {
+	t.Parallel()
+
+	host := NewSessionHost(SessionHostConfig{
+		GatewayConfig: GatewayConfig{
+			ProcessLauncher: LocalLauncher{},
+		},
+	})
+	defer host.Stop()
+
+	err := host.ensureAgentInstalled(context.Background(), agentCommandInfo{
+		command:    "claude",
+		installCmd: "npm install -g @anthropic-ai/claude-code",
+	})
+	if err != nil {
+		t.Fatalf("ensureAgentInstalled() error = %v, want nil", err)
+	}
+}
+
 func TestSessionHost_AttachDetachViewer(t *testing.T) {
 	t.Parallel()
 
