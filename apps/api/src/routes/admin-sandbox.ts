@@ -393,6 +393,11 @@ adminSandboxRoutes.post('/cf-vm-agent/start', async (c) => {
     nodeId: node.id,
     projectId: body.projectId,
     userId,
+    // Inherit the project's GitHub App installation so the workspace can mint a
+    // repo-scoped git token (/:id/git-token requires workspace.installationId).
+    // Without this the agent gets "Workspace has no GitHub installation" (404)
+    // and runs without git access.
+    installationId: project.installationId ?? undefined,
     name: workspaceName,
     displayName: workspaceName,
     normalizedDisplayName: workspaceName.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
