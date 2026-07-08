@@ -29,8 +29,8 @@ This is a feasibility spike, not a production feature. The PR must be opened as 
 - [x] Preserve callback JWT authentication for all VM-agent callbacks and add/adjust contract tests for Worker ↔ vm-agent/container DO boundaries.
 - [x] Add a vertical-slice/capability test covering cf-container workspace creation/routing/heartbeat state with realistic mocked D1/DO boundaries.
 - [x] Add measurement support/reporting for cold start, node-register time, heartbeat arrival, WebSocket-proxy round-trip latency, and one chat session transcript/evidence.
-- [ ] Run local quality gates, specialist reviews, staging deployment, live staging verification, and append results to idea `01KWY8E8W1J4F3AC3QAETT2RAT`.
-- [ ] Open a draft PR on `sam/execute-task-using-skill-2cs1ky`, add `needs-human-review`, and stop without merging.
+- [x] Run local quality gates, specialist reviews, staging deployment, live staging verification, and append results to idea `01KWY8E8W1J4F3AC3QAETT2RAT`.
+- [x] Open a draft PR on `sam/execute-task-using-skill-2cs1ky`, add `needs-human-review`, and stop without merging.
 
 ## Productionization Continuation Checklist
 
@@ -44,7 +44,7 @@ The spike has answered the feasibility question through the admin-only launcher.
 - [x] Add unit or vertical-slice tests covering resolver decisions, instant-session launch sequencing, and chat start endpoint behavior across realistic mocked boundaries.
 - [x] Add web UI controls for runtime selection where users edit profiles/skills and a chat start affordance for starting a cf-container session.
 - [x] Run Playwright visual audit for changed web surfaces at mobile and desktop sizes.
-- [ ] Re-run local quality gates, specialist reviews, and staging verification on the productionized path.
+- [x] Re-run local quality gates, specialist reviews, and staging verification on the productionized path.
 
 ## Validation Notes
 
@@ -72,8 +72,22 @@ The spike has answered the feasibility question through the admin-only launcher.
   - Test engineer: local coverage is adequate for resolver decisions, instant-session sequencing, start-route behavior, source-level boundary contracts, web runtime submit branching, and Playwright UI audit. Live staging measurement remains the remaining acceptance gap.
   - UI/UX specialist: selected the inline wizard runtime step with compact profile runtime badges over a hidden profile-only setting or a separate composer-level runtime toggle. Playwright screenshots cover iPhone SE, iPhone 14, and desktop runtime wizard states with no layout failures.
   - Task-completion validator: WARN, not archive-ready. Local productionized implementation and quality gates are covered, but staging deployment, live cf-container measurement, idea append, and draft PR update remain open.
+- Staging productionized-path verification passed on 2026-07-08:
+  - GitHub Actions staging deploy workflow `28980055879` passed; deploy job completed in 7m38s with health check and smoke-tests completed in 2m1s.
+  - Live staging used `https://api.sammy.party` and `https://app.sammy.party` with the staging smoke token.
+  - Temporary explicit `cf-container` profile was created on project `hono` (`01KTKXZ4ZZAT6MJFXRW1ZTQ7RB`) and deleted after launch.
+  - `POST /api/projects/01KTKXZ4ZZAT6MJFXRW1ZTQ7RB/sessions/start` returned `201` in 16,674 ms with `{ runtime: 'cf-container', reason: 'explicit-cf-container' }`.
+  - Session `291d3716-4a74-4158-b744-c825649f326d`, workspace `01KX1Y90YX0450Q081DP9MH752`, virtual node `01KX1Y90SCV0X04N58V7W65KPR`, ACP session `01KX1Y9A9P2884SAX3TX15DHTX`.
+  - Returned timings: setup 10,831 ms; install 7,879 ms; agent-ready/heartbeat wait 174 ms; workspace create 642 ms; ACP session create 642 ms; ACP session start 288 ms.
+  - Account-map verification showed node `status='running'`, `healthStatus='healthy'`, `vmLocation='cf-container'`, `cloudProvider='cloudflare'`, `vmSize='standard-1'`, heartbeat `2026-07-08T22:42:25.962Z`, and workspace `nodeId` populated.
+  - Browser verification loaded the live staging chat URL with no unexpected console errors and rendered assistant marker `SAM_CF_CONTAINER_SMOKE_OK`; screenshot evidence at `apps/web/.codex/tmp/staging-evidence/cf-container-live-final-291d3716-4a74-4158-b744-c825649f326d.png`.
+  - Browser WebSockets observed notification, ProjectData session, and workspace ACP sockets; direct browser open to `wss://ws-01kx1y90yx0450q081dp9mh752.sammy.party/agent/ws?...` succeeded in 2,191 ms.
+  - Transcript persisted 4 messages (`user`, `user`, `assistant`, `assistant`); assistant chunks combined to `SAM_CF_CONTAINER_SMOKE_OK`.
+  - `pnpm quality:observability-noise` completed with no significant noise detected; D1 check skipped because `OBSERVABILITY_DB_ID` was unset and Workers telemetry skipped with API 403.
+  - Results appended to idea `01KWY8E8W1J4F3AC3QAETT2RAT`.
+  - Final task-completion validation: PASS for the requested draft-PR handoff. Do not archive/merge automatically; human review remains required.
 - Historical spike push blocker is resolved for the continuation branch; current commits have pushed to `sam/execute-task-using-skill-2cs1ky`.
-- Remaining follow-up gates: staging deployment, live cf-container measurement, append results to idea `01KWY8E8W1J4F3AC3QAETT2RAT`, update draft PR #1544, and stop without merging.
+- Draft PR #1544 remains open, draft, labeled `needs-human-review`, and unmerged.
 
 ## Acceptance Criteria
 
