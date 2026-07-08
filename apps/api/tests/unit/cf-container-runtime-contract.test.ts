@@ -50,7 +50,10 @@ describe('cf-container runtime spike contracts', () => {
     expect(route).toContain("adminSandboxRoutes.post('/cf-vm-agent/start'");
     expect(route).toContain("NODE_ROLE: 'standalone'");
     expect(route).toContain('const standaloneEnv = {');
-    expect(route).toContain('env: standaloneEnv');
+    expect(route).toContain("runCfVmAgentPhase('install'");
+    expect(route).toContain("runCfVmAgentPhase('start'");
+    expect(route).toContain('nohup env ${envAssignments} /usr/local/bin/vm-agent');
+    expect(route).toContain('/tmp/vm-agent.log');
     expect(route).toContain("runtime: 'cf-container'");
     expect(route).toContain('signNodeCallbackToken');
     expect(route).toContain('signCallbackToken');

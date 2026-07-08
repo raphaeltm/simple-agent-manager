@@ -16,6 +16,7 @@ import { Hono } from 'hono';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
+import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
 import { getUserId, requireApproved, requireAuth, requireSuperadmin } from '../middleware/auth';
 import { errors } from '../middleware/error';
@@ -70,6 +71,37 @@ async function getSandboxInstance(env: Env, sandboxId: string) {
     throw errors.internal(
       `Failed to initialize Sandbox SDK: ${err instanceof Error ? err.message : String(err)}`
     );
+  }
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+async function runCfVmAgentPhase<T>(
+  phase: string,
+  detail: { nodeId?: string; workspaceId?: string; sandboxId?: string },
+  fn: () => Promise<T>
+): Promise<T> {
+  const start = Date.now();
+  log.info('cf_vm_agent_phase_start', { phase, ...detail });
+  try {
+    const result = await fn();
+    log.info('cf_vm_agent_phase_success', {
+      phase,
+      durationMs: Date.now() - start,
+      ...detail,
+    });
+    return result;
+  } catch (err) {
+    log.error('cf_vm_agent_phase_error', {
+      phase,
+      durationMs: Date.now() - start,
+      error: err instanceof Error ? err.message : String(err),
+      errorName: err instanceof Error ? err.name : undefined,
+      ...detail,
+    });
+    throw err;
   }
 }
 
@@ -383,16 +415,21 @@ adminSandboxRoutes.post('/cf-vm-agent/start', async (c) => {
     : 8080;
   const controlPlaneUrl = `https://api.${c.env.BASE_DOMAIN}`;
 
+  const phaseDetail = { nodeId: node.id, workspaceId, sandboxId };
   const installStart = Date.now();
-  const install = await sandbox.exec(
-    [
-      'set -e',
-      `curl -fsSL "${controlPlaneUrl}/api/agent/download?os=linux&arch=amd64" -o /usr/local/bin/vm-agent`,
-      'chmod +x /usr/local/bin/vm-agent',
-      'mkdir -p /workspace /var/lib/vm-agent',
-      '/usr/local/bin/vm-agent --help >/dev/null 2>&1 || true',
-    ].join('\n'),
-    { timeout: config.execTimeoutMs }
+  const install = await runCfVmAgentPhase('install', phaseDetail, () =>
+    sandbox.exec(
+      [
+        'set -e',
+        'mkdir -p /workspace /var/lib/vm-agent',
+        `curl -fsSL "${controlPlaneUrl}/api/agent/download?os=linux&arch=amd64" -o /usr/local/bin/vm-agent.tmp`,
+        'chmod +x /usr/local/bin/vm-agent.tmp',
+        'mv /usr/local/bin/vm-agent.tmp /usr/local/bin/vm-agent',
+        '/usr/local/bin/vm-agent --help >/dev/null 2>&1 || true',
+        'ls -l /usr/local/bin/vm-agent',
+      ].join('\n'),
+      { timeout: config.execTimeoutMs }
+    )
   );
   const installDurationMs = Date.now() - installStart;
   if (!install.success) {
@@ -416,28 +453,45 @@ adminSandboxRoutes.post('/cf-vm-agent/start', async (c) => {
     VM_AGENT_PROTOCOL: 'http',
     COOKIE_SECURE: 'true',
   };
-  await sandbox.setEnvVars(standaloneEnv);
-
-  const process = await sandbox.startProcess('/usr/local/bin/vm-agent', {
-    processId: `vm-agent-${node.id.toLowerCase()}`,
-    cwd: '/workspace',
-    env: standaloneEnv,
-    autoCleanup: false,
-  });
+  const processId = `vm-agent-${node.id.toLowerCase()}`;
+  const envAssignments = Object.entries(standaloneEnv)
+    .map(([key, value]) => `${key}=${shellQuote(value)}`)
+    .join(' ');
+  const start = await runCfVmAgentPhase('start', phaseDetail, () =>
+    sandbox.exec(
+      [
+        'set -e',
+        'test -x /usr/local/bin/vm-agent',
+        `cd ${shellQuote('/workspace')}`,
+        `nohup env ${envAssignments} /usr/local/bin/vm-agent > /tmp/vm-agent.log 2>&1 &`,
+        'pid=$!',
+        `echo "$pid" > ${shellQuote(`/tmp/${processId}.pid`)}`,
+        'sleep 0.2',
+        'if ! kill -0 "$pid" 2>/dev/null; then cat /tmp/vm-agent.log >&2 || true; exit 1; fi',
+        'echo "$pid"',
+      ].join('\n'),
+      { timeout: config.execTimeoutMs }
+    )
+  );
+  if (!start.success) {
+    throw errors.internal(`vm-agent start failed: ${start.stderr || start.stdout}`);
+  }
 
   const agentReadyStart = Date.now();
-  await waitForNodeAgentReady(node.id, c.env);
+  await runCfVmAgentPhase('wait_for_ready', phaseDetail, () => waitForNodeAgentReady(node.id, c.env));
   const agentReadyDurationMs = Date.now() - agentReadyStart;
 
   const workspaceCreateStart = Date.now();
   const workspaceCallbackToken = await signCallbackToken(workspaceId, c.env);
-  await createWorkspaceOnNode(node.id, c.env, userId, {
-    workspaceId,
-    repository: body.repository,
-    branch,
-    callbackToken: workspaceCallbackToken,
-    lightweight: true,
-  });
+  await runCfVmAgentPhase('create_workspace', phaseDetail, () =>
+    createWorkspaceOnNode(node.id, c.env, userId, {
+      workspaceId,
+      repository: body.repository,
+      branch,
+      callbackToken: workspaceCallbackToken,
+      lightweight: true,
+    })
+  );
   const workspaceCreateDurationMs = Date.now() - workspaceCreateStart;
 
   await db
@@ -451,7 +505,7 @@ adminSandboxRoutes.post('/cf-vm-agent/start', async (c) => {
     projectId: body.projectId,
     chatSessionId,
     sandboxId,
-    processId: process.id,
+    processId,
     runtime: 'cf-container',
     workspaceUrl: `https://ws-${workspaceId.toLowerCase()}.${c.env.BASE_DOMAIN}`,
     timings: {
