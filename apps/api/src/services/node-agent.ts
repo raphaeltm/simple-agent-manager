@@ -28,6 +28,11 @@ interface NodeAgentRequestOptions extends RequestInit {
   requestTimeoutMs?: number;
 }
 
+function requestInitWithoutSignal(options: RequestInit): RequestInit {
+  const { signal: _signal, ...serializableOptions } = options;
+  return serializableOptions;
+}
+
 export function getNodeAgentReadyTimeoutMs(env: { NODE_AGENT_READY_TIMEOUT_MS?: string }): number {
   const parsed = env.NODE_AGENT_READY_TIMEOUT_MS
     ? Number.parseInt(env.NODE_AGENT_READY_TIMEOUT_MS, 10)
@@ -229,18 +234,25 @@ async function fetchNodeAgent(
   containerUrl.hostname = 'localhost';
   containerUrl.port = String(vmAgentPort);
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), requestTimeoutMs);
+  let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
   try {
-    return await sandbox.containerFetch(
-      new Request(containerUrl.toString(), {
-        ...options,
-        signal: controller.signal,
+    const response = await Promise.race([
+      sandbox.containerFetch(
+        new Request(containerUrl.toString(), requestInitWithoutSignal(options)),
+        vmAgentPort
+      ),
+      new Promise<Response>((_resolve, reject) => {
+        timeoutHandle = setTimeout(
+          () => reject(new Error(`Request timed out after ${requestTimeoutMs}ms`)),
+          requestTimeoutMs
+        );
       }),
-      vmAgentPort
-    );
+    ]);
+    return response;
   } finally {
-    clearTimeout(timeout);
+    if (timeoutHandle) {
+      clearTimeout(timeoutHandle);
+    }
   }
 }
 

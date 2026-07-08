@@ -37,6 +37,8 @@ describe('cf-container runtime spike contracts', () => {
     expect(nodeAgent).toContain("env.SANDBOX_ENABLED !== 'true'");
     expect(nodeAgent).toContain('getSandbox(env.SANDBOX, nodeId.toLowerCase()');
     expect(nodeAgent).toContain('sandbox.containerFetch(');
+    expect(nodeAgent).toContain('function requestInitWithoutSignal');
+    expect(nodeAgent).toContain('new Request(containerUrl.toString(), requestInitWithoutSignal(options))');
   });
 
   it('keeps the admin launcher superadmin-only and on the existing Sandbox substrate', () => {
