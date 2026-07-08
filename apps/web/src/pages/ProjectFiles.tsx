@@ -83,21 +83,21 @@ export const ProjectFiles: FC = () => {
 
   if (loadingBranches && !branches) {
     return (
-      <div style={{ display: 'flex', justifyContent: 'center', padding: 40 }}>
+      <div className="flex justify-center p-10">
         <Spinner />
       </div>
     );
   }
   if (branchesError) {
     return (
-      <p role="alert" style={{ color: 'var(--color-error, #dc2626)', padding: 24 }}>
+      <p role="alert" className="p-6 text-danger-fg">
         {branchesError}
       </p>
     );
   }
   if (!branches || branches.length === 0 || !projectId) {
     return (
-      <p style={{ padding: 24, color: 'var(--text-secondary, #999)' }}>
+      <p className="p-6 text-fg-muted">
         No branches found for this repository.
       </p>
     );
@@ -106,37 +106,17 @@ export const ProjectFiles: FC = () => {
   const onDefault = ref === defaultBranch;
 
   return (
-    <div style={{ height: '100%', overflow: 'auto' }}>
-      <div
-        style={{
-          position: 'sticky',
-          top: 0,
-          zIndex: 1,
-          display: 'flex',
-          flexWrap: 'wrap',
-          alignItems: 'center',
-          gap: 8,
-          padding: '10px 12px',
-          background: 'var(--bg-primary, #1a1a1a)',
-          borderBottom: '1px solid var(--border-subtle, #2a2a2a)',
-        }}
-      >
-        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-          <GitBranch size={16} style={{ opacity: 0.7 }} />
+    <div className="h-full overflow-auto">
+      {/* Sticky header bar */}
+      <div className="sticky top-0 z-10 flex flex-wrap items-center gap-2 px-3 py-2.5 bg-surface border-b border-border-default">
+        <label className="inline-flex items-center gap-1.5 min-w-0">
+          <GitBranch size={14} className="text-fg-muted shrink-0" />
           <span className="sr-only">Branch</span>
           <select
             aria-label="Branch"
             value={ref}
             onChange={(e) => onSelectBranch(e.target.value)}
-            style={{
-              maxWidth: 220,
-              background: 'var(--bg-secondary, #242424)',
-              color: 'inherit',
-              border: '1px solid var(--border-subtle, #2a2a2a)',
-              borderRadius: 6,
-              padding: '4px 8px',
-              fontSize: 13,
-            }}
+            className="max-w-[220px] text-[13px] rounded-md px-2 py-1 border border-border-default text-fg-primary bg-canvas focus:outline-none focus:ring-1 focus:ring-accent"
           >
             {branches.map((b) => (
               <option key={b.name} value={b.name}>
@@ -147,7 +127,7 @@ export const ProjectFiles: FC = () => {
           </select>
         </label>
 
-        <div role="tablist" aria-label="View mode" style={{ display: 'inline-flex', gap: 4, marginLeft: 'auto' }}>
+        <div role="tablist" aria-label="View mode" className="inline-flex gap-1 ml-auto">
           <button
             type="button"
             role="tab"
@@ -158,7 +138,11 @@ export const ProjectFiles: FC = () => {
             disabled={onDefault}
             title={onDefault ? 'Select a non-default branch to see changes' : undefined}
             onClick={() => update({ mode: 'changes' })}
-            style={tabStyle(mode === 'changes', onDefault)}
+            className={`text-[13px] px-3 py-1 rounded-md border cursor-pointer transition-colors
+              ${mode === 'changes'
+                ? 'bg-accent text-fg-on-accent border-accent'
+                : 'bg-canvas text-fg-muted border-border-default hover:text-fg-primary hover:bg-surface-hover'}
+              ${onDefault ? 'opacity-50 cursor-not-allowed' : ''}`}
           >
             Changes
           </button>
@@ -169,7 +153,10 @@ export const ProjectFiles: FC = () => {
             aria-controls="files-tabpanel"
             aria-selected={mode === 'browse'}
             onClick={() => update({ mode: 'browse' })}
-            style={tabStyle(mode === 'browse', false)}
+            className={`text-[13px] px-3 py-1 rounded-md border cursor-pointer transition-colors
+              ${mode === 'browse'
+                ? 'bg-accent text-fg-on-accent border-accent'
+                : 'bg-canvas text-fg-muted border-border-default hover:text-fg-primary hover:bg-surface-hover'}`}
           >
             Browse
           </button>
@@ -190,16 +177,3 @@ export const ProjectFiles: FC = () => {
     </div>
   );
 };
-
-function tabStyle(active: boolean, disabled: boolean): React.CSSProperties {
-  return {
-    padding: '4px 12px',
-    fontSize: 13,
-    borderRadius: 6,
-    border: '1px solid var(--border-subtle, #2a2a2a)',
-    background: active ? 'var(--color-accent, #2563eb)' : 'var(--bg-secondary, #242424)',
-    color: active ? '#fff' : 'var(--text-primary, #e5e5e5)',
-    cursor: disabled ? 'not-allowed' : 'pointer',
-    opacity: disabled ? 0.5 : 1,
-  };
-}

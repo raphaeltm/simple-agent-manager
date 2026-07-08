@@ -137,8 +137,11 @@ const IDLE_STATE = {
   activity: 'idle',
   activityAt: NOW,
   statusError: null,
-  currentPlan: null,
-  planUpdatedAt: null,
+  currentPlan: [
+    { content: 'Keep the last plan visible while idle', status: 'completed' },
+    { content: 'Wait for the next follow-up', status: 'pending' },
+  ],
+  planUpdatedAt: NOW - 30000,
   promptStartedAt: null,
   agentType: 'claude-code',
   lastStopReason: null,
@@ -226,11 +229,12 @@ for (const theme of ['dark', 'light'] as const) {
   test.describe(`CompletionDock — ${theme} — Desktop`, () => {
     test.use({ viewport: { width: 1280, height: 800 }, isMobile: false });
 
-    test('idle: grey Archive control', async ({ page }) => {
+    test('idle: grey Archive control + plan pill', async ({ page }) => {
       await seedTheme(page, theme);
       await setupApiMocks(page, { working: false });
       await gotoChat(page);
       await expect(page.getByRole('button', { name: 'Archive conversation' })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'View plan' })).toBeVisible();
       await screenshot(page, `completion-dock-idle-${theme}-desktop`);
       await assertNoOverflow(page);
 
@@ -253,11 +257,12 @@ for (const theme of ['dark', 'light'] as const) {
   });
 
   test.describe(`CompletionDock — ${theme} — Mobile`, () => {
-    test('idle: grey Archive control', async ({ page }) => {
+    test('idle: grey Archive control + plan pill', async ({ page }) => {
       await seedTheme(page, theme);
       await setupApiMocks(page, { working: false });
       await gotoChat(page);
       await expect(page.getByRole('button', { name: 'Archive conversation' })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'View plan' })).toBeVisible();
       await screenshot(page, `completion-dock-idle-${theme}-mobile`);
       await assertNoOverflow(page);
 

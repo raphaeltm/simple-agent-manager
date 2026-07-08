@@ -7,7 +7,7 @@
  * - Plan button restoration in project chat
  * - Staleness auto-heal for stuck "prompting" states
  */
-import type { SessionStateSnapshot } from '@simple-agent-manager/shared';
+import type { PlanEntry, SessionStateSnapshot } from '@simple-agent-manager/shared';
 
 import { createModuleLogger } from '../../lib/logger';
 
@@ -173,6 +173,40 @@ export function getSessionState(
     lastStopReason: (row.last_stop_reason as string) || null,
     agentType: (row.agent_type as string) || null,
   };
+}
+
+export interface PersistedPlanSnapshot {
+  currentPlan: PlanEntry[] | null;
+  planUpdatedAt: number | null;
+}
+
+export function getLatestPersistedPlan(
+  sql: SqlStorage,
+  sessionId: string,
+): PersistedPlanSnapshot | null {
+  const row = sql
+    .exec(
+      `SELECT content, created_at
+       FROM chat_messages
+       WHERE session_id = ? AND role = 'plan'
+       ORDER BY created_at DESC, sequence DESC
+       LIMIT 1`,
+      sessionId,
+    )
+    .toArray()[0];
+
+  if (!row || typeof row.content !== 'string') return null;
+
+  try {
+    const parsed = JSON.parse(row.content);
+    if (!Array.isArray(parsed)) return null;
+    return {
+      currentPlan: parsed as PlanEntry[],
+      planUpdatedAt: (row.created_at as number) || null,
+    };
+  } catch {
+    return null;
+  }
 }
 
 // --- Staleness Reconciliation ---

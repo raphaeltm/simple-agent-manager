@@ -86,6 +86,7 @@ function isProjectSubActive(subPath: string, projectId: string, pathname: string
 
 const FOCUS_RING = 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring';
 const NAV_ITEM_BASE = `flex items-center gap-3 pl-[10px] pr-3 py-2 rounded-sm no-underline text-sm font-medium border-l-2 transition-all duration-150 ${FOCUS_RING}`;
+const NAV_ITEM_BASE_ICON = `flex items-center justify-center px-0 py-2 rounded-sm no-underline text-sm font-medium border-l-2 transition-all duration-150 ${FOCUS_RING}`;
 const NAV_ITEM_ACTIVE = 'text-accent border-l-accent bg-[var(--sam-chrome-accent-active-subtle)]';
 const NAV_ITEM_INACTIVE = 'text-fg-muted border-l-transparent hover:text-fg-primary hover:bg-[var(--sam-chrome-accent-hover-subtle)]';
 const SECTION_DIVIDER = 'mt-2 pt-2 before:content-[\'\'] before:block before:h-px before:mb-2 before:bg-[linear-gradient(90deg,transparent,var(--sam-chrome-accent-divider),transparent)]';
@@ -98,9 +99,11 @@ interface NavSidebarProps {
   /** Rendered below Infrastructure in global nav views */
   projectListSection?: ReactNode;
   projectHealthElement?: ReactNode;
+  /** Collapse to a 56px icon rail (Focus Mode) — hides labels, centers icons */
+  iconOnly?: boolean;
 }
 
-export function NavSidebar({ className, projectName, showGlobalNav, onToggleGlobalNav, projectListSection, projectHealthElement }: NavSidebarProps) {
+export function NavSidebar({ className, projectName, showGlobalNav, onToggleGlobalNav, projectListSection, projectHealthElement, iconOnly }: NavSidebarProps) {
   const location = useLocation();
   const { isSuperadmin } = useAuth();
   const { needsOnboarding, openOnboarding } = useOnboarding();
@@ -109,9 +112,38 @@ export function NavSidebar({ className, projectName, showGlobalNav, onToggleGlob
   const projectId = extractProjectId(location.pathname);
   const insideProject = Boolean(projectId);
 
+  // Shared item class: centered icon-only in Focus rail, full label otherwise.
+  const itemClass = (active: boolean) =>
+    `${iconOnly ? NAV_ITEM_BASE_ICON : NAV_ITEM_BASE} ${active ? NAV_ITEM_ACTIVE : NAV_ITEM_INACTIVE}`;
+
   // Collapsible Infrastructure section — identical in the project-context global
   // panel and the standalone global sidebar. Extracted so the markup lives once.
-  const infraSection = (
+  const infraItems = [
+    { label: 'Nodes', path: '/nodes', icon: <Server size={18} /> },
+    { label: 'Workspaces', path: '/workspaces', icon: <Monitor size={18} /> },
+  ];
+
+  // In the Focus icon rail there is no room for a collapsible header — render
+  // the infra destinations directly as icon links so they remain reachable.
+  const infraSection = iconOnly ? (
+    <div className={SECTION_DIVIDER}>
+      {infraItems.map((item) => {
+        const active = isActive(item.path, location.pathname);
+        return (
+          <Link
+            key={item.path}
+            to={item.path}
+            aria-current={active ? 'page' : undefined}
+            aria-label={item.label}
+            title={item.label}
+            className={itemClass(active)}
+          >
+            {item.icon}
+          </Link>
+        );
+      })}
+    </div>
+  ) : (
     <div className={SECTION_DIVIDER}>
       <button
         onClick={() => setInfraOpen(!infraOpen)}
@@ -124,10 +156,7 @@ export function NavSidebar({ className, projectName, showGlobalNav, onToggleGlob
       </button>
       {infraOpen && (
         <div id="infra-nav-panel" className="flex flex-col gap-1">
-          {[
-            { label: 'Nodes', path: '/nodes', icon: <Server size={18} /> },
-            { label: 'Workspaces', path: '/workspaces', icon: <Monitor size={18} /> },
-          ].map((item) => {
+          {infraItems.map((item) => {
             const active = isActive(item.path, location.pathname);
             return (
               <Link
@@ -153,10 +182,12 @@ export function NavSidebar({ className, projectName, showGlobalNav, onToggleGlob
     <div className={SECTION_DIVIDER}>
       <button
         onClick={openOnboarding}
-        className={`${NAV_ITEM_BASE} text-accent border-l-accent bg-[var(--sam-chrome-accent-soft)] hover:bg-[var(--sam-chrome-accent-active)]`}
+        aria-label="Complete Setup"
+        title={iconOnly ? 'Complete Setup' : undefined}
+        className={`${iconOnly ? NAV_ITEM_BASE_ICON : NAV_ITEM_BASE} text-accent border-l-accent bg-[var(--sam-chrome-accent-soft)] hover:bg-[var(--sam-chrome-accent-active)]`}
       >
         <PlayCircle size={18} />
-        Complete Setup
+        {!iconOnly && 'Complete Setup'}
       </button>
     </div>
   );
@@ -184,17 +215,20 @@ export function NavSidebar({ className, projectName, showGlobalNav, onToggleGlob
             {/* Toggle to global nav */}
             <button
               onClick={onToggleGlobalNav}
-              className={`flex items-center gap-2 px-3 py-2.5 rounded-sm bg-transparent border-none text-sm text-fg-muted hover:text-fg-primary hover:bg-[var(--sam-chrome-accent-hover-subtle)] cursor-pointer transition-all duration-150 ${FOCUS_RING}`}
+              className={`flex items-center gap-2 ${iconOnly ? 'justify-center px-0' : 'px-3'} py-2.5 rounded-sm bg-transparent border-none text-sm text-fg-muted hover:text-fg-primary hover:bg-[var(--sam-chrome-accent-hover-subtle)] cursor-pointer transition-all duration-150 ${FOCUS_RING}`}
               aria-label="Show global navigation"
+              title={iconOnly ? 'Back to Projects' : undefined}
             >
               <ArrowLeft size={16} />
-              <span>Back to Projects</span>
+              {!iconOnly && <span>Back to Projects</span>}
             </button>
 
             {/* Project name header */}
-            <div className="px-3 py-2 text-xs font-semibold text-fg-muted uppercase tracking-wider truncate" title={projectName}>
-              {projectName || 'Project'}
-            </div>
+            {!iconOnly && (
+              <div className="px-3 py-2 text-xs font-semibold text-fg-muted uppercase tracking-wider truncate" title={projectName}>
+                {projectName || 'Project'}
+              </div>
+            )}
 
             {projectHealthElement && (
               <div className="px-1 pb-1">
@@ -210,12 +244,12 @@ export function NavSidebar({ className, projectName, showGlobalNav, onToggleGlob
                   key={item.path}
                   to={`/projects/${projectId}/${item.path}`}
                   aria-current={active ? 'page' : undefined}
-                  className={`${NAV_ITEM_BASE} ${
-                    active ? NAV_ITEM_ACTIVE : NAV_ITEM_INACTIVE
-                  }`}
+                  aria-label={iconOnly ? item.label : undefined}
+                  title={iconOnly ? item.label : undefined}
+                  className={itemClass(active)}
                 >
                   {item.icon}
-                  {item.label}
+                  {!iconOnly && item.label}
                 </Link>
               );
             })}
@@ -231,11 +265,12 @@ export function NavSidebar({ className, projectName, showGlobalNav, onToggleGlob
             {/* Toggle back to project nav */}
             <button
               onClick={onToggleGlobalNav}
-              className={`flex items-center gap-2 px-3 py-2.5 rounded-sm bg-transparent border-none text-sm text-fg-muted hover:text-fg-primary hover:bg-[var(--sam-chrome-accent-hover-subtle)] cursor-pointer transition-all duration-150 ${FOCUS_RING}`}
+              className={`flex items-center gap-2 ${iconOnly ? 'justify-center px-0' : 'px-3'} py-2.5 rounded-sm bg-transparent border-none text-sm text-fg-muted hover:text-fg-primary hover:bg-[var(--sam-chrome-accent-hover-subtle)] cursor-pointer transition-all duration-150 ${FOCUS_RING}`}
               aria-label={`Back to ${projectName || 'project'} navigation`}
+              title={iconOnly ? `Back to ${projectName || 'Project'}` : undefined}
             >
               <ArrowRight size={16} />
-              <span className="truncate">Back to {projectName || 'Project'}</span>
+              {!iconOnly && <span className="truncate">Back to {projectName || 'Project'}</span>}
             </button>
 
             {/* Global nav items */}
@@ -246,12 +281,12 @@ export function NavSidebar({ className, projectName, showGlobalNav, onToggleGlob
                   key={item.path}
                   to={item.path}
                   aria-current={active ? 'page' : undefined}
-                  className={`${NAV_ITEM_BASE} ${
-                    active ? NAV_ITEM_ACTIVE : NAV_ITEM_INACTIVE
-                  }`}
+                  aria-label={iconOnly ? item.label : undefined}
+                  title={iconOnly ? item.label : undefined}
+                  className={itemClass(active)}
                 >
                   {item.icon}
-                  {item.label}
+                  {!iconOnly && item.label}
                 </Link>
               );
             })}
@@ -260,8 +295,8 @@ export function NavSidebar({ className, projectName, showGlobalNav, onToggleGlob
 
             {onboardingResume}
 
-            {/* Project list — in global panel within project context */}
-            {projectListSection}
+            {/* Project list — hidden in the Focus rail (too wide for 56px) */}
+            {!iconOnly && projectListSection}
           </nav>
         </div>
       </div>
@@ -282,12 +317,12 @@ export function NavSidebar({ className, projectName, showGlobalNav, onToggleGlob
             key={item.path}
             to={item.path}
             aria-current={active ? 'page' : undefined}
-            className={`${NAV_ITEM_BASE} ${
-              active ? NAV_ITEM_ACTIVE : NAV_ITEM_INACTIVE
-            }`}
+            aria-label={iconOnly ? item.label : undefined}
+            title={iconOnly ? item.label : undefined}
+            className={itemClass(active)}
           >
             {item.icon}
-            {item.label}
+            {!iconOnly && item.label}
           </Link>
         );
       })}
@@ -296,8 +331,8 @@ export function NavSidebar({ className, projectName, showGlobalNav, onToggleGlob
 
       {onboardingResume}
 
-      {/* Project list — in standalone global nav */}
-      {projectListSection}
+      {/* Project list — hidden in the Focus rail (too wide for 56px) */}
+      {!iconOnly && projectListSection}
     </nav>
   );
 }

@@ -1,19 +1,9 @@
-import {
-  AlertCircle,
-  CheckCircle2,
-  CirclePause,
-  HelpCircle,
-  ListTodo,
-  Loader2,
-  MessageSquare,
-  User2,
-  XCircle,
-} from 'lucide-react';
+import { AlertCircle, ListTodo, MessageSquare, User2 } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 import type { ChatSessionResponse } from '../../lib/api';
 import {
-  type AttentionState,
+  ATTENTION_ICON,
   formatRelativeTime,
   getAttentionState,
   getLastActivity,
@@ -30,23 +20,6 @@ function getCreatorLabel(session: ChatSessionResponse): string | null {
   return creator?.name?.trim() || creator?.email?.split('@')[0] || 'Member';
 }
 
-// ---------------------------------------------------------------------------
-// Attention state -> icon + color mapping (uses design tokens)
-// ---------------------------------------------------------------------------
-
-const ATTENTION_ICON_MAP: Record<AttentionState, {
-  icon: typeof HelpCircle;
-  color: string;
-  label: string;
-}> = {
-  needs_input: { icon: HelpCircle, color: 'var(--sam-color-warning, #f59e0b)', label: 'Needs input' },
-  error:       { icon: AlertCircle, color: 'var(--sam-color-danger, #ef4444)', label: 'Error' },
-  active:      { icon: Loader2, color: 'var(--sam-color-success)', label: 'Running' },
-  idle:        { icon: CirclePause, color: 'var(--sam-color-warning, #f59e0b)', label: 'Idle' },
-  completed:   { icon: CheckCircle2, color: 'var(--sam-color-fg-muted)', label: 'Completed' },
-  failed:      { icon: XCircle, color: 'var(--sam-color-danger, #ef4444)', label: 'Failed' },
-  stopped:     { icon: CirclePause, color: 'var(--sam-color-fg-muted)', label: 'Stopped' },
-};
 
 export function SessionItem({
   session,
@@ -82,7 +55,7 @@ export function SessionItem({
   // Icon config — blocked overrides normal attention state
   const iconConfig = blockedBadge
     ? { icon: AlertCircle, color: 'var(--sam-color-danger, #ef4444)', label: 'Blocked' }
-    : ATTENTION_ICON_MAP[attentionState];
+    : ATTENTION_ICON[attentionState];
 
   const StatusIcon = iconConfig.icon;
   const ModeIcon = mode === 'task' ? ListTodo : MessageSquare;

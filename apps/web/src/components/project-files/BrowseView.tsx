@@ -25,16 +25,6 @@ interface DirChild {
   size?: number | null;
 }
 
-const linkBtnStyle: React.CSSProperties = {
-  background: 'none',
-  border: 'none',
-  padding: 0,
-  color: 'var(--color-accent, #2563eb)',
-  textDecoration: 'underline',
-  cursor: 'pointer',
-  fontSize: 13,
-};
-
 function isMarkdownPath(p: string): boolean {
   const lower = p.toLowerCase();
   return lower.endsWith('.md') || lower.endsWith('.mdx');
@@ -65,21 +55,27 @@ function Breadcrumbs({ path, onNavigate }: { path: string; onNavigate: (p: strin
   const parts = path ? path.split('/') : [];
   let acc = '';
   return (
-    <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 2, fontSize: 13, padding: '8px 12px' }}>
-      <button type="button" style={linkBtnStyle} onClick={() => onNavigate('')}>
+    <div className="flex flex-wrap items-center gap-0.5 text-[13px] px-3 py-2">
+      <button
+        type="button"
+        onClick={() => onNavigate('')}
+        className="bg-transparent border-none p-0 text-accent underline cursor-pointer text-[13px]"
+      >
         /
       </button>
       {parts.map((part, i) => {
         acc = acc ? `${acc}/${part}` : part;
         const target = acc;
+        const isLast = i === parts.length - 1;
         return (
-          <span key={target} style={{ display: 'inline-flex', alignItems: 'center', gap: 2, minWidth: 0 }}>
-            <ChevronRight size={12} style={{ opacity: 0.5 }} />
+          <span key={target} className="inline-flex items-center gap-0.5 min-w-0">
+            <ChevronRight size={12} className="text-fg-muted" />
             <button
               type="button"
-              style={{ ...linkBtnStyle, overflowWrap: 'anywhere' }}
               onClick={() => onNavigate(target)}
-              disabled={i === parts.length - 1}
+              disabled={isLast}
+              className={`bg-transparent border-none p-0 cursor-pointer text-[13px] break-all
+                ${isLast ? 'text-fg-primary font-medium' : 'text-accent underline'}`}
             >
               {part}
             </button>
@@ -113,21 +109,25 @@ const FileViewer: FC<{ projectId: string; ref: string; path: string }> = ({ proj
 
   if (loading) {
     return (
-      <div style={{ display: 'flex', justifyContent: 'center', padding: 40 }}>
+      <div className="flex justify-center p-10">
         <Spinner />
       </div>
     );
   }
   if (error) {
-    return <p role="alert" style={{ color: 'var(--color-error, #dc2626)', padding: 16 }}>{error}</p>;
+    return <p role="alert" className="p-4 text-danger-fg">{error}</p>;
   }
   if (!file) return null;
 
   if (file.content !== null) {
     if (isMarkdownPath(path) && !showRawMarkdown) {
       return (
-        <div style={{ padding: 12 }}>
-          <button type="button" style={{ ...linkBtnStyle, marginBottom: 8 }} onClick={() => setShowRawMarkdown(true)}>
+        <div className="p-3">
+          <button
+            type="button"
+            className="bg-transparent border-none p-0 text-accent underline cursor-pointer text-xs mb-2"
+            onClick={() => setShowRawMarkdown(true)}
+          >
             View source
           </button>
           <RenderedMarkdown content={file.content} />
@@ -135,9 +135,13 @@ const FileViewer: FC<{ projectId: string; ref: string; path: string }> = ({ proj
       );
     }
     return (
-      <div style={{ padding: 12 }}>
+      <div className="p-3">
         {isMarkdownPath(path) && (
-          <button type="button" style={{ ...linkBtnStyle, marginBottom: 8 }} onClick={() => setShowRawMarkdown(false)}>
+          <button
+            type="button"
+            className="bg-transparent border-none p-0 text-accent underline cursor-pointer text-xs mb-2"
+            onClick={() => setShowRawMarkdown(false)}
+          >
             View rendered
           </button>
         )}
@@ -151,12 +155,12 @@ const FileViewer: FC<{ projectId: string; ref: string; path: string }> = ({ proj
     return <ImageViewer src={raw} fileName={path} fileSize={file.size} />;
   }
   return (
-    <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-secondary, #999)' }}>
-      <FileIcon size={28} style={{ opacity: 0.5 }} />
-      <p style={{ marginTop: 8 }}>
+    <div className="text-center p-10 text-fg-muted">
+      <FileIcon size={28} className="opacity-50 mx-auto" />
+      <p className="mt-2">
         {file.tooLarge ? 'File is too large to display inline' : 'Binary file'} ({formatFileSize(file.size)})
       </p>
-      <a href={raw} download style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 8 }}>
+      <a href={raw} download className="inline-flex items-center gap-1.5 mt-2 text-accent underline">
         <Download size={16} /> Download
       </a>
     </div>
@@ -202,36 +206,39 @@ export const BrowseView: FC<BrowseViewProps> = ({ projectId, ref, path, onNaviga
 
   if (loading && !tree) {
     return (
-      <div style={{ display: 'flex', justifyContent: 'center', padding: 40 }}>
+      <div className="flex justify-center p-10">
         <Spinner />
       </div>
     );
   }
   if (error) {
-    return <p role="alert" style={{ color: 'var(--color-error, #dc2626)', padding: 16 }}>{error}</p>;
+    return <p role="alert" className="p-4 text-danger-fg">{error}</p>;
   }
   if (entries.length === 0) {
-    return <p style={{ padding: 24, textAlign: 'center', color: 'var(--text-secondary, #999)' }}>This repository is empty.</p>;
+    return <p className="p-6 text-center text-fg-muted">This repository is empty.</p>;
   }
 
   return (
     <div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px' }}>
-        <Search size={16} style={{ opacity: 0.6 }} />
-        <input
-          type="search"
-          placeholder="Search files by name…"
-          aria-label="Search files by name"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          style={{ flex: 1, minWidth: 0, background: 'transparent', border: 'none', color: 'inherit', fontSize: 14 }}
-        />
+      {/* Search bar */}
+      <div className="px-3 py-2 border-b border-border-default">
+        <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-inset">
+          <Search size={14} className="text-fg-muted shrink-0" />
+          <input
+            type="search"
+            placeholder="Search files by name..."
+            aria-label="Search files by name"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            className="flex-1 min-w-0 bg-transparent border-none text-fg-primary text-sm outline-none placeholder:text-fg-muted"
+          />
+        </div>
       </div>
 
       {query.trim() ? (
         <div>
           {searchResults.length === 0 ? (
-            <p style={{ padding: 16, color: 'var(--text-secondary, #999)' }}>No files match “{query}”.</p>
+            <p className="p-4 text-fg-muted text-sm">No files match &ldquo;{query}&rdquo;.</p>
           ) : (
             searchResults.map((r) => (
               <button
@@ -241,10 +248,10 @@ export const BrowseView: FC<BrowseViewProps> = ({ projectId, ref, path, onNaviga
                   setQuery('');
                   onNavigate(r.path);
                 }}
-                style={rowStyle}
+                className="w-full flex items-center gap-2 px-3 py-2.5 min-h-[44px] bg-transparent border-none border-b border-border-default text-left cursor-pointer text-fg-primary hover:bg-surface-hover transition-colors"
               >
-                <FileText size={16} style={{ opacity: 0.7 }} />
-                <span style={{ overflowWrap: 'anywhere', fontSize: 13 }}>{r.path}</span>
+                <FileText size={14} className="text-fg-muted shrink-0" />
+                <span className="break-all text-[13px]">{r.path}</span>
               </button>
             ))
           )}
@@ -258,25 +265,30 @@ export const BrowseView: FC<BrowseViewProps> = ({ projectId, ref, path, onNaviga
         <>
           <Breadcrumbs path={path} onNavigate={onNavigate} />
           {tree?.truncated && (
-            <p style={{ padding: '4px 12px', fontSize: 12, color: 'var(--color-warning, #ca8a04)' }}>
+            <p className="px-3 py-1 text-xs text-warning-fg">
               Tree truncated — some files are not listed.
             </p>
           )}
           {dirChildren.length === 0 ? (
-            <p style={{ padding: 16, color: 'var(--text-secondary, #999)' }}>This folder is empty.</p>
+            <p className="p-4 text-fg-muted text-sm">This folder is empty.</p>
           ) : (
             dirChildren.map((child) => (
-              <button key={child.path} type="button" onClick={() => onNavigate(child.path)} style={rowStyle}>
+              <button
+                key={child.path}
+                type="button"
+                onClick={() => onNavigate(child.path)}
+                className="w-full flex items-center gap-2.5 px-3 py-2.5 min-h-[44px] bg-transparent border-none border-b border-border-default text-left cursor-pointer text-fg-primary hover:bg-surface-hover transition-colors"
+              >
                 {child.type === 'tree' ? (
-                  <Folder size={16} style={{ color: 'var(--color-info, #2563eb)' }} />
+                  <Folder size={16} className="shrink-0 text-accent" />
                 ) : isImageFile(child.name) ? (
-                  <ImageIcon size={16} style={{ opacity: 0.7 }} />
+                  <ImageIcon size={16} className="shrink-0 text-info" />
                 ) : (
-                  <FileText size={16} style={{ opacity: 0.7 }} />
+                  <FileText size={16} className="shrink-0 text-fg-muted" />
                 )}
-                <span style={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere', fontSize: 14 }}>{child.name}</span>
+                <span className="flex-1 min-w-0 break-all text-sm">{child.name}</span>
                 {child.type === 'blob' && typeof child.size === 'number' && (
-                  <span style={{ fontSize: 12, color: 'var(--text-secondary, #999)' }}>{formatFileSize(child.size)}</span>
+                  <span className="text-xs text-fg-muted shrink-0 tabular-nums">{formatFileSize(child.size)}</span>
                 )}
               </button>
             ))
@@ -285,18 +297,4 @@ export const BrowseView: FC<BrowseViewProps> = ({ projectId, ref, path, onNaviga
       )}
     </div>
   );
-};
-
-const rowStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: 8,
-  width: '100%',
-  padding: '10px 12px',
-  background: 'transparent',
-  border: 'none',
-  borderBottom: '1px solid var(--border-subtle, #2a2a2a)',
-  cursor: 'pointer',
-  textAlign: 'left',
-  color: 'var(--text-primary, #e5e5e5)',
 };
