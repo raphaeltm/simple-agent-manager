@@ -50,7 +50,6 @@ export function FocusStrip({
   sessions,
   selectedSessionId,
   onSelect,
-  onFork,
   taskInfoMap,
   onShowHierarchy,
   onNewChat,
@@ -58,7 +57,6 @@ export function FocusStrip({
   sessions: ChatSessionListItem[];
   selectedSessionId: string | null;
   onSelect: (id: string) => void;
-  onFork?: (session: ChatSessionResponse) => void;
   taskInfoMap: Map<string, TaskInfo>;
   onShowHierarchy?: (taskId: string) => void;
   onNewChat: () => void;
@@ -156,7 +154,6 @@ export function FocusStrip({
               session={tooltip.session}
               selectedSessionId={selectedSessionId}
               onSelect={onSelect}
-              onFork={onFork}
               taskInfoMap={taskInfoMap}
               onShowHierarchy={onShowHierarchy}
             />

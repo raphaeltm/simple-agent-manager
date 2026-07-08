@@ -250,7 +250,6 @@ export function ProjectChat() {
               sessions={state.filteredRecent}
               selectedSessionId={state.sessionId ?? null}
               onSelect={state.handleSelect}
-              onFork={state.handleFork}
               taskInfoMap={state.taskInfoMap}
               onShowHierarchy={handleShowHierarchy}
               onNewChat={state.handleNewChat}
