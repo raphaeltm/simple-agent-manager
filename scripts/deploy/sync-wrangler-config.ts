@@ -364,6 +364,13 @@ export function generateApiWorkerEnv(
       ...(process.env.HETZNER_BASE_IMAGE
         ? { HETZNER_BASE_IMAGE: process.env.HETZNER_BASE_IMAGE }
         : {}),
+      ...(process.env.SANDBOX_ENABLED ? { SANDBOX_ENABLED: process.env.SANDBOX_ENABLED } : {}),
+      ...(process.env.SANDBOX_EXEC_TIMEOUT_MS
+        ? { SANDBOX_EXEC_TIMEOUT_MS: process.env.SANDBOX_EXEC_TIMEOUT_MS }
+        : {}),
+      ...(process.env.SANDBOX_VM_AGENT_PORT
+        ? { SANDBOX_VM_AGENT_PORT: process.env.SANDBOX_VM_AGENT_PORT }
+        : {}),
       // AI Gateway ID matches the resource prefix (created by configure-ai-gateway.sh)
       AI_GATEWAY_ID: DEPLOYMENT_CONFIG.prefix,
       // Analytics Engine dataset — derived from prefix so forks don't co-mingle data
