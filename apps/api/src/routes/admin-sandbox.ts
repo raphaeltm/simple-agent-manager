@@ -399,7 +399,7 @@ adminSandboxRoutes.post('/cf-vm-agent/start', async (c) => {
     throw errors.internal(`vm-agent install failed: ${install.stderr || install.stdout}`);
   }
 
-  await sandbox.setEnvVars({
+  const standaloneEnv = {
     NODE_ROLE: 'standalone',
     NODE_ID: node.id,
     WORKSPACE_ID: workspaceId,
@@ -415,11 +415,13 @@ adminSandboxRoutes.post('/cf-vm-agent/start', async (c) => {
     VM_AGENT_PORT: String(vmAgentPort),
     VM_AGENT_PROTOCOL: 'http',
     COOKIE_SECURE: 'true',
-  });
+  };
+  await sandbox.setEnvVars(standaloneEnv);
 
   const process = await sandbox.startProcess('/usr/local/bin/vm-agent', {
     processId: `vm-agent-${node.id.toLowerCase()}`,
     cwd: '/workspace',
+    env: standaloneEnv,
     autoCleanup: false,
   });
 

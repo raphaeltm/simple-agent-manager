@@ -49,6 +49,8 @@ describe('cf-container runtime spike contracts', () => {
     expect(route).toContain("adminSandboxRoutes.use('/*', requireAuth(), requireApproved(), requireSuperadmin())");
     expect(route).toContain("adminSandboxRoutes.post('/cf-vm-agent/start'");
     expect(route).toContain("NODE_ROLE: 'standalone'");
+    expect(route).toContain('const standaloneEnv = {');
+    expect(route).toContain('env: standaloneEnv');
     expect(route).toContain("runtime: 'cf-container'");
     expect(route).toContain('signNodeCallbackToken');
     expect(route).toContain('signCallbackToken');
