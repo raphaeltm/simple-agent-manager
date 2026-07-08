@@ -1,9 +1,10 @@
-import { AGENT_EFFORT_LEVELS } from '@simple-agent-manager/shared';
+import { AGENT_EFFORT_LEVELS, AGENT_PROFILE_RUNTIMES } from '@simple-agent-manager/shared';
 import * as v from 'valibot';
 
 const GitHubCliPermissionLevelSchema = v.picklist(['none', 'read', 'write']);
 const GitHubCliContentsPermissionLevelSchema = v.picklist(['read', 'write']);
 const AgentEffortSchema = v.picklist([...AGENT_EFFORT_LEVELS]);
+const AgentProfileRuntimeSchema = v.picklist([...AGENT_PROFILE_RUNTIMES]);
 
 const GitHubCliPolicySchema = v.object({
   mode: v.picklist(['inherit', 'custom']),
@@ -31,6 +32,7 @@ export const CreateAgentProfileSchema = v.object({
   provider: v.optional(v.nullable(v.string())),
   vmLocation: v.optional(v.nullable(v.string())),
   workspaceProfile: v.optional(v.nullable(v.string())),
+  runtime: v.optional(v.nullable(AgentProfileRuntimeSchema)),
   devcontainerConfigName: v.optional(v.nullable(v.string())),
   taskMode: v.optional(v.nullable(v.string())),
   githubCliPolicy: v.optional(v.nullable(GitHubCliPolicySchema)),
@@ -50,6 +52,7 @@ export const UpdateAgentProfileSchema = v.object({
   provider: v.optional(v.nullable(v.string())),
   vmLocation: v.optional(v.nullable(v.string())),
   workspaceProfile: v.optional(v.nullable(v.string())),
+  runtime: v.optional(v.nullable(AgentProfileRuntimeSchema)),
   devcontainerConfigName: v.optional(v.nullable(v.string())),
   taskMode: v.optional(v.nullable(v.string())),
   githubCliPolicy: v.optional(v.nullable(GitHubCliPolicySchema)),

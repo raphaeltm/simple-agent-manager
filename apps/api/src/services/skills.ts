@@ -5,7 +5,7 @@ import type {
   ResolvedSkillProfile,
   UpdateSkillRequest,
 } from '@simple-agent-manager/shared';
-import { isAgentEffort, isAgentEffortSupported, isValidAgentType } from '@simple-agent-manager/shared';
+import { isAgentEffort, isAgentEffortSupported, isAgentProfileRuntime, isValidAgentType } from '@simple-agent-manager/shared';
 import { and, eq, isNull, or } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
 
@@ -287,6 +287,7 @@ export async function resolveSkillProfile(
     provider: skill?.provider ?? profile.provider,
     vmLocation: skill?.vmLocation ?? profile.vmLocation,
     workspaceProfile: skill?.workspaceProfile ?? profile.workspaceProfile,
+    runtime: isAgentProfileRuntime(skill?.runtime) ? skill.runtime : profile.runtime,
     devcontainerConfigName: skill?.devcontainerConfigName ?? profile.devcontainerConfigName,
     taskMode: skill?.taskMode ?? profile.taskMode,
     resourceRequirementsJson: skill?.resourceRequirementsJson ?? null,

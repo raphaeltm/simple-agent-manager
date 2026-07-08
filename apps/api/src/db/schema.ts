@@ -1108,6 +1108,8 @@ export const agentProfiles = sqliteTable(
     provider: text('provider'),
     vmLocation: text('vm_location'),
     workspaceProfile: text('workspace_profile'),
+    /** Runtime preference: null = automatic, 'vm' = cloud VM, 'cf-container' = Cloudflare Container. */
+    runtime: text('runtime'),
     /** Devcontainer config name override. null = inherit from project/platform defaults. */
     devcontainerConfigName: text('devcontainer_config_name'),
     taskMode: text('task_mode'),
@@ -1164,6 +1166,7 @@ export const skills = sqliteTable(
     provider: text('provider'),
     vmLocation: text('vm_location'),
     workspaceProfile: text('workspace_profile'),
+    runtime: text('runtime'),
     devcontainerConfigName: text('devcontainer_config_name'),
     taskMode: text('task_mode').default('task'),
     resourceRequirementsJson: text('resource_requirements_json'),
