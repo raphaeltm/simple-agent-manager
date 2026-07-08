@@ -366,6 +366,15 @@ func startLocalProcess(cfg ProcessConfig) (*AgentProcess, error) {
 	cmd := exec.Command(cfg.AcpCommand, cfg.AcpArgs...)
 	cmd.Env = append(os.Environ(), cfg.EnvVars...)
 	if cfg.WorkDir != "" {
+		// In standalone (cf-container) mode the vm-agent owns the local
+		// filesystem and there is no devcontainer to create the workspace
+		// mount, so the configured work dir (derived as /workspaces/<repo>)
+		// may not exist. Create it before exec — otherwise Go's forkExec
+		// chdir fails with ENOENT, which is misreported as
+		// "fork/exec <binary>: no such file or directory" (the binary is fine).
+		if err := os.MkdirAll(cfg.WorkDir, 0o755); err != nil {
+			return nil, fmt.Errorf("failed to ensure local work dir %q: %w", cfg.WorkDir, err)
+		}
 		cmd.Dir = cfg.WorkDir
 	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
