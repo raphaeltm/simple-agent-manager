@@ -185,19 +185,34 @@ func TestNewSessionHost_Defaults(t *testing.T) {
 	host.Stop()
 }
 
-func TestSessionHostEnsureAgentInstalledSkipsForCustomLauncher(t *testing.T) {
+// TestSessionHostEnsureAgentInstalledLocalFastPath verifies that in
+// standalone/local mode (custom ProcessLauncher, no ContainerResolver) the
+// local install path is taken. Using a command that already exists on PATH
+// exercises the fast path (returns nil without running the install script).
+// Critically, ContainerResolver is nil here — if the code incorrectly fell
+// through to the docker install path it would panic, so a nil return proves
+// the local branch was used.
+func TestSessionHostEnsureAgentInstalledLocalFastPath(t *testing.T) {
 	t.Parallel()
+
+	// Pick a binary guaranteed to be on PATH in the test/CI environment.
+	existing := "sh"
+	if _, err := exec.LookPath(existing); err != nil {
+		t.Skipf("%q not on PATH in this environment", existing)
+	}
 
 	host := NewSessionHost(SessionHostConfig{
 		GatewayConfig: GatewayConfig{
 			ProcessLauncher: LocalLauncher{},
+			// ContainerResolver deliberately nil: the docker path would panic.
 		},
 	})
 	defer host.Stop()
 
 	err := host.ensureAgentInstalled(context.Background(), agentCommandInfo{
-		command:    "claude",
-		installCmd: "npm install -g @anthropic-ai/claude-code",
+		command:    existing,
+		installCmd: "npm install -g @zed-industries/claude-agent-acp",
+		isNpmBased: true,
 	})
 	if err != nil {
 		t.Fatalf("ensureAgentInstalled() error = %v, want nil", err)

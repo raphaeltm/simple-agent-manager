@@ -789,8 +789,12 @@ func (h *SessionHost) ensureAgentInstalled(ctx context.Context, info agentComman
 	if info.installCmd == "" {
 		return nil
 	}
+	// Standalone / cf-container mode configures a custom ProcessLauncher and has
+	// no devcontainer ContainerResolver. Install the ACP adapter locally (same
+	// hardcoded install script) instead of via docker exec.
 	if h.config.ProcessLauncher != nil {
-		return nil
+		h.broadcastAgentStatus(StatusInstalling, info.command, "")
+		return installAgentBinaryLocal(ctx, info)
 	}
 
 	containerID, err := h.config.ContainerResolver()

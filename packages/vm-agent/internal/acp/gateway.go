@@ -804,6 +804,60 @@ func installAgentBinary(ctx context.Context, containerID string, info agentComma
 	return nil
 }
 
+// installAgentBinaryLocal installs the ACP adapter binary in the LOCAL process
+// namespace (standalone / cf-container mode), mirroring installAgentBinary but
+// without docker exec. In standalone mode the vm-agent runs INSIDE the container,
+// so agents are installed and spawned in the same filesystem/PID namespace and
+// resolved via the vm-agent's own $PATH (see startLocalProcess). The install
+// script is the same hardcoded literal from getAgentCommandInfo — never derived
+// from external input.
+func installAgentBinaryLocal(ctx context.Context, info agentCommandInfo) error {
+	// Fast path: check without mutex. exec.LookPath matches how startLocalProcess
+	// resolves the command, so this is the correct "already installed" check.
+	if _, err := exec.LookPath(info.command); err == nil {
+		slog.Info("Agent binary is already installed (local)", "command", info.command)
+		return nil
+	}
+
+	// Slow path: acquire mutex to serialize installs (shared with docker path).
+	agentInstallMu.Lock()
+	defer agentInstallMu.Unlock()
+
+	// Bail out if context was cancelled while waiting for the mutex.
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+
+	// Double-check after acquiring mutex — another goroutine may have installed it.
+	if _, err := exec.LookPath(info.command); err == nil {
+		slog.Info("Agent binary was installed by another goroutine (local)", "command", info.command)
+		return nil
+	}
+
+	slog.Info("Agent binary not found locally, installing", "command", info.command)
+
+	// For npm-based installs, clean up stale partial install directories left
+	// by previous failed npm installs (same rationale as the docker path).
+	if info.isNpmBased {
+		cleanupScript := fmt.Sprintf(
+			`rm -rf /usr/local/lib/node_modules/@zed-industries/.%s-* /usr/local/share/nvm/versions/node/*/lib/node_modules/@zed-industries/.%s-* 2>/dev/null; true`,
+			info.command, info.command,
+		)
+		cleanupCmd := exec.CommandContext(ctx, "sh", "-c", cleanupScript)
+		_ = cleanupCmd.Run() // best-effort cleanup
+	}
+
+	installScript := agentInstallScript(info)
+	installCmd := exec.CommandContext(ctx, "sh", "-c", installScript)
+	output, err := installCmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("local install command failed: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+
+	slog.Info("Agent binary installed successfully (local)", "command", info.command)
+	return nil
+}
+
 func agentInstallScript(info agentCommandInfo) string {
 	if !info.isNpmBased {
 		return info.installCmd
