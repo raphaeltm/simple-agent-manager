@@ -11,10 +11,17 @@
  * Kill switch: SANDBOX_ENABLED env var (default: false).
  */
 import { Hono } from 'hono';
+import { eq } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/d1';
 
+import * as schema from '../db/schema';
 import type { Env } from '../env';
-import { requireApproved, requireAuth, requireSuperadmin } from '../middleware/auth';
+import { ulid } from '../lib/ulid';
+import { getUserId, requireApproved, requireAuth, requireSuperadmin } from '../middleware/auth';
 import { errors } from '../middleware/error';
+import { signNodeCallbackToken } from '../services/jwt';
+import { createNodeRecord } from '../services/nodes';
+import * as projectDataService from '../services/project-data';
 
 const adminSandboxRoutes = new Hono<{ Bindings: Env }>();
 
@@ -280,6 +287,154 @@ adminSandboxRoutes.get('/exec-stream', async (c) => {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
       Connection: 'keep-alive',
+    },
+  });
+});
+
+/**
+ * POST /api/admin/sandbox/cf-vm-agent/start — start the Step 2 vm-agent spike.
+ *
+ * Creates a virtual cf-container node + single workspace, downloads the staged
+ * vm-agent binary inside the Sandbox container, and starts NODE_ROLE=standalone.
+ */
+adminSandboxRoutes.post('/cf-vm-agent/start', async (c) => {
+  requireSandbox(c.env);
+  const config = getSandboxConfig(c.env);
+  const userId = getUserId(c);
+  const body = await c.req.json<{
+    projectId: string;
+    repository: string;
+    branch?: string;
+    workspaceName?: string;
+    sandboxId?: string;
+  }>();
+
+  if (!body.projectId || typeof body.projectId !== 'string') {
+    throw errors.badRequest('projectId is required');
+  }
+  if (!body.repository || typeof body.repository !== 'string') {
+    throw errors.badRequest('repository is required');
+  }
+
+  const db = drizzle(c.env.DATABASE, { schema });
+  const project = await db.query.projects.findFirst({
+    where: (projects, { eq }) => eq(projects.id, body.projectId),
+  });
+  if (!project) {
+    throw errors.notFound('Project not found');
+  }
+
+  const branch = body.branch?.trim() || 'main';
+  const workspaceName = body.workspaceName?.trim() || 'CF Container Spike';
+  const startedAt = Date.now();
+
+  const node = await createNodeRecord(c.env, {
+    userId,
+    credentialAttributionUserId: userId,
+    credentialAttributionSource: 'platform',
+    name: `${workspaceName} Node`,
+    vmSize: 'standard-1',
+    vmLocation: 'cf-container',
+    cloudProvider: 'cloudflare',
+    heartbeatStaleAfterSeconds: c.env.NODE_HEARTBEAT_STALE_SECONDS
+      ? parseInt(c.env.NODE_HEARTBEAT_STALE_SECONDS, 10)
+      : 180,
+    runtime: 'cf-container',
+  });
+
+  const workspaceId = ulid();
+  const now = new Date().toISOString();
+  await db.insert(schema.workspaces).values({
+    id: workspaceId,
+    nodeId: node.id,
+    projectId: body.projectId,
+    userId,
+    name: workspaceName,
+    displayName: workspaceName,
+    normalizedDisplayName: workspaceName.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+    repository: body.repository,
+    branch,
+    status: 'creating',
+    vmSize: 'standard-1',
+    vmLocation: 'cf-container',
+    workspaceProfile: 'lightweight',
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  const chatSessionId = await projectDataService.createSession(
+    c.env,
+    body.projectId,
+    workspaceId,
+    workspaceName,
+    null,
+    userId
+  );
+  await db
+    .update(schema.workspaces)
+    .set({ chatSessionId, updatedAt: now })
+    .where(eq(schema.workspaces.id, workspaceId));
+
+  const sandboxId = body.sandboxId?.trim() || node.id.toLowerCase();
+  const sandbox = await getSandboxInstance(c.env, sandboxId);
+  const nodeCallbackToken = await signNodeCallbackToken(node.id, c.env);
+  const vmAgentPort = c.env.SANDBOX_VM_AGENT_PORT
+    ? parseInt(c.env.SANDBOX_VM_AGENT_PORT, 10)
+    : 8080;
+  const controlPlaneUrl = `https://api.${c.env.BASE_DOMAIN}`;
+
+  const installStart = Date.now();
+  const install = await sandbox.exec(
+    [
+      'set -e',
+      `curl -fsSL "${controlPlaneUrl}/api/agent/download?os=linux&arch=amd64" -o /usr/local/bin/vm-agent`,
+      'chmod +x /usr/local/bin/vm-agent',
+      'mkdir -p /workspace /var/lib/vm-agent',
+      '/usr/local/bin/vm-agent --help >/dev/null 2>&1 || true',
+    ].join('\n'),
+    { timeout: config.execTimeoutMs }
+  );
+  const installDurationMs = Date.now() - installStart;
+  if (!install.success) {
+    throw errors.internal(`vm-agent install failed: ${install.stderr || install.stdout}`);
+  }
+
+  await sandbox.setEnvVars({
+    NODE_ROLE: 'standalone',
+    NODE_ID: node.id,
+    WORKSPACE_ID: workspaceId,
+    PROJECT_ID: body.projectId,
+    CHAT_SESSION_ID: chatSessionId,
+    CONTROL_PLANE_URL: controlPlaneUrl,
+    CALLBACK_TOKEN: nodeCallbackToken,
+    REPOSITORY: body.repository,
+    BRANCH: branch,
+    WORKSPACE_DIR: '/workspace',
+    CONTAINER_MODE: 'false',
+    PORT_SCAN_ENABLED: 'false',
+    VM_AGENT_PORT: String(vmAgentPort),
+    VM_AGENT_PROTOCOL: 'http',
+    COOKIE_SECURE: 'true',
+  });
+
+  const process = await sandbox.startProcess('/usr/local/bin/vm-agent', {
+    processId: `vm-agent-${node.id.toLowerCase()}`,
+    cwd: '/workspace',
+    autoCleanup: false,
+  });
+
+  return c.json({
+    nodeId: node.id,
+    workspaceId,
+    projectId: body.projectId,
+    chatSessionId,
+    sandboxId,
+    processId: process.id,
+    runtime: 'cf-container',
+    workspaceUrl: `https://ws-${workspaceId.toLowerCase()}.${c.env.BASE_DOMAIN}`,
+    timings: {
+      setupDurationMs: Date.now() - startedAt,
+      installDurationMs,
     },
   });
 });

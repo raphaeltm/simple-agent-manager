@@ -527,6 +527,30 @@ func (s *Server) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		},
 	})
 
+	if s.config.IsStandaloneMode() {
+		s.casWorkspaceStatus(body.WorkspaceID, []string{"creating"}, "running")
+		if strings.TrimSpace(body.CallbackToken) != "" {
+			ctx, cancel := context.WithTimeout(context.Background(), s.config.WorkspaceReadyCallbackTimeout)
+			err := s.notifyWorkspaceReady(ctx, body.WorkspaceID, strings.TrimSpace(body.CallbackToken), "running")
+			cancel()
+			if err != nil {
+				s.markReadyCallbackPending(body.WorkspaceID, "running")
+				slog.Warn("Standalone workspace ready callback failed; will retry on heartbeat",
+					"workspace", body.WorkspaceID, "error", err)
+			}
+		}
+		s.appendNodeEvent(body.WorkspaceID, "info", "workspace.created", "Standalone workspace runtime created", map[string]interface{}{
+			"workspaceId": body.WorkspaceID,
+			"repository":  body.Repository,
+			"branch":      branch,
+		})
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"workspaceId": runtime.ID,
+			"status":      "running",
+		})
+		return
+	}
+
 	s.workspaceMu.Lock()
 	if runtime.ProvisioningActive {
 		s.workspaceMu.Unlock()

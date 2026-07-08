@@ -31,6 +31,8 @@ export interface CreateNodeInput {
   nodeRole?: 'workspace' | 'deployment';
   /** 'shared' (default) or 'exclusive'. Exclusive deployment nodes accept one environment. */
   nodeMode?: 'shared' | 'exclusive';
+  /** Runtime substrate. Defaults to traditional VM. */
+  runtime?: 'vm' | 'cf-container';
 }
 
 export interface ProvisionedNode {
@@ -41,6 +43,7 @@ export interface ProvisionedNode {
   vmSize: string;
   vmLocation: string;
   cloudProvider: string | null;
+  runtime: string;
   ipAddress: string | null;
   lastHeartbeatAt: string | null;
   healthStatus: string;
@@ -93,6 +96,7 @@ export async function createNodeRecord(env: Env, input: CreateNodeInput): Promis
     heartbeatStaleAfterSeconds: input.heartbeatStaleAfterSeconds,
     nodeRole: input.nodeRole ?? 'workspace',
     nodeMode: input.nodeMode ?? 'shared',
+    runtime: input.runtime ?? 'vm',
     createdAt: now,
     updatedAt: now,
   });
@@ -105,6 +109,7 @@ export async function createNodeRecord(env: Env, input: CreateNodeInput): Promis
     vmSize: input.vmSize,
     vmLocation: input.vmLocation,
     cloudProvider: input.cloudProvider ?? null,
+    runtime: input.runtime ?? 'vm',
     ipAddress: null,
     lastHeartbeatAt: null,
     healthStatus: 'stale',

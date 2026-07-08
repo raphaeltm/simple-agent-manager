@@ -765,4 +765,5 @@ export interface Env {
   SANDBOX_EXEC_TIMEOUT_MS?: string; // Default exec timeout in ms (default: 30000)
   SANDBOX_GIT_TIMEOUT_MS?: string; // Git checkout timeout in ms (default: 120000)
   SANDBOX_SLEEP_AFTER?: string; // Container sleep-after duration (default: 10m)
+  SANDBOX_VM_AGENT_PORT?: string; // vm-agent standalone HTTP port inside Sandbox container (default: 8080)
 }

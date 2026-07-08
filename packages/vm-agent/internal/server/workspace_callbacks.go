@@ -166,3 +166,33 @@ func (s *Server) notifyWorkspaceProvisioningFailed(
 		return nil
 	})
 }
+
+func (s *Server) notifyWorkspaceReady(ctx context.Context, workspaceID, callbackToken, status string) error {
+	if callbackToken == "" {
+		return fmt.Errorf("callback token is empty")
+	}
+	if status == "" {
+		status = "running"
+	}
+	body, err := json.Marshal(map[string]string{"status": status})
+	if err != nil {
+		return fmt.Errorf("failed to encode ready request body: %w", err)
+	}
+	endpoint := strings.TrimRight(s.config.ControlPlaneURL, "/") + "/api/workspaces/" + workspaceID + "/ready"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("failed to create ready request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+callbackToken)
+	res, err := s.controlPlaneHTTPClient(s.config.WorkspaceReadyCallbackTimeout).Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to call ready endpoint: %w", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		respBody, _ := io.ReadAll(io.LimitReader(res.Body, 8*1024))
+		return fmt.Errorf("ready endpoint returned HTTP %d: %s", res.StatusCode, strings.TrimSpace(string(respBody)))
+	}
+	return nil
+}

@@ -908,6 +908,8 @@ export const nodes = sqliteTable(
     nodeRole: text('node_role').notNull().default('workspace'),
     /** 'shared' = eligible for multi-tenant placement; 'exclusive' = one deployment environment only. */
     nodeMode: text('node_mode').notNull().default('shared'),
+    /** Runtime substrate: 'vm' (default) or 'cf-container' for the Sandbox spike. */
+    runtime: text('runtime').notNull().default('vm'),
     errorMessage: text('error_message'),
     createdAt: text('created_at')
       .notNull()
@@ -918,6 +920,7 @@ export const nodes = sqliteTable(
   },
   (table) => ({
     userIdIdx: index('idx_nodes_user_id').on(table.userId),
+    runtimeIdx: index('idx_nodes_runtime').on(table.runtime),
   })
 );
 

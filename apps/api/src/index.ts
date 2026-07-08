@@ -362,8 +362,10 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
     .select({
       nodeId: schema.workspaces.nodeId,
       status: schema.workspaces.status,
+      nodeRuntime: schema.nodes.runtime,
     })
     .from(schema.workspaces)
+    .leftJoin(schema.nodes, eq(schema.workspaces.nodeId, schema.nodes.id))
     .where(and(eq(schema.workspaces.id, workspaceId), eq(schema.workspaces.userId, userId)))
     .get();
 
@@ -384,6 +386,92 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
   // This ensures the cookie is only set after the D1 ownership check passes.
   if (portAccessRedirect) {
     return portAccessRedirect;
+  }
+
+  if (workspace.nodeRuntime === 'cf-container') {
+    if (c.env.SANDBOX_ENABLED !== 'true') {
+      return c.json({ error: 'SANDBOX_DISABLED', message: 'Container workspace runtime is disabled' }, 503);
+    }
+    if (!c.env.SANDBOX) {
+      return c.json({ error: 'SANDBOX_UNAVAILABLE', message: 'Sandbox binding is unavailable' }, 503);
+    }
+
+    const sandboxId = (workspace.nodeId || workspaceId).toLowerCase();
+    const vmAgentPort = c.env.SANDBOX_VM_AGENT_PORT
+      ? parseInt(c.env.SANDBOX_VM_AGENT_PORT, 10)
+      : 8080;
+    const { getSandbox } = await import('@cloudflare/sandbox');
+    const sandbox = getSandbox(c.env.SANDBOX, sandboxId, { normalizeId: true });
+    const containerUrl = new URL(c.req.url);
+    containerUrl.protocol = 'http:';
+    containerUrl.hostname = 'localhost';
+    containerUrl.port = String(vmAgentPort);
+
+    if (targetPort !== null) {
+      const subPath = url.pathname === '/' ? '' : url.pathname;
+      containerUrl.pathname = `/workspaces/${workspaceId}/ports/${targetPort}${subPath}`;
+      containerUrl.searchParams.delete('port_token');
+      try {
+        const { token } = await signTerminalToken('port-proxy', workspaceId, c.env);
+        containerUrl.searchParams.set('token', token);
+      } catch (err) {
+        log.error('cf_container_port_proxy_token_error', {
+          workspaceId,
+          ...serializeError(err),
+        });
+        return c.json({ error: 'TOKEN_ERROR', message: 'Failed to generate port proxy token' }, 500);
+      }
+    }
+
+    const headers = new Headers(c.req.raw.headers);
+    headers.delete('x-sam-node-id');
+    headers.delete('x-sam-workspace-id');
+    headers.delete('x-forwarded-host');
+    headers.set('X-SAM-Node-Id', workspace.nodeId || workspaceId);
+    headers.set('X-SAM-Workspace-Id', workspaceId);
+    headers.set('X-Forwarded-Host', hostname);
+    headers.set('X-Forwarded-Proto', 'https');
+
+    log.info('ws_proxy_cf_container_route', {
+      workspaceId,
+      nodeId: workspace.nodeId || workspaceId,
+      sandboxId,
+      vmAgentPort,
+      targetPort,
+      publicPortAccess,
+      method: c.req.raw.method,
+      path: url.pathname,
+    });
+    recordNodeRoutingMetric(
+      {
+        metric: 'ws_proxy_route',
+        nodeId: workspace.nodeId || workspaceId,
+        workspaceId,
+      },
+      c.env
+    );
+
+    const response = await sandbox.containerFetch(
+      new Request(containerUrl.toString(), {
+        method: c.req.raw.method,
+        headers,
+        body: c.req.raw.body,
+        // @ts-expect-error — Cloudflare Workers support duplex for streaming request bodies
+        duplex: c.req.raw.body ? 'half' : undefined,
+      }),
+      vmAgentPort
+    );
+
+    if (targetPort !== null) {
+      const responseHeaders = new Headers(response.headers);
+      responseHeaders.delete('set-cookie');
+      return new Response(response.body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: responseHeaders,
+      });
+    }
+    return response;
   }
 
   // Proxy to the VM agent via its proxied (orange-clouded) backend hostname.

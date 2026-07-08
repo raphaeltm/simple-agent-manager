@@ -1,8 +1,11 @@
 import type { Env } from '../env';
+import * as schema from '../db/schema';
 import { expectJsonRecord } from '../lib/runtime-validation';
 import { fetchWithTimeout, getTimeoutMs } from './fetch-timeout';
 import { signNodeManagementToken, signTerminalToken } from './jwt';
 import { recordNodeRoutingMetric } from './telemetry';
+import { eq } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/d1';
 
 const DEFAULT_NODE_AGENT_REQUEST_TIMEOUT_MS = 30_000;
 
@@ -64,7 +67,7 @@ export async function waitForNodeAgentReady(nodeId: string, env: Env): Promise<v
     try {
       const requestTimeoutError = `request timeout after ${requestTimeoutMs}ms`;
       const response = await Promise.race([
-        fetch(healthUrl, { method: 'GET', signal: controller.signal }),
+        fetchNodeAgent(nodeId, env, healthUrl, { method: 'GET', signal: controller.signal }, requestTimeoutMs),
         new Promise<Response>((_resolve, reject) => {
           timeoutHandle = setTimeout(() => {
             controller.abort();
@@ -142,14 +145,7 @@ async function nodeAgentRequest(
     env.NODE_AGENT_REQUEST_TIMEOUT_MS,
     DEFAULT_NODE_AGENT_REQUEST_TIMEOUT_MS
   );
-  const response = await fetchWithTimeout(
-    url,
-    {
-      ...options,
-      headers,
-    },
-    requestTimeoutMs
-  );
+  const response = await fetchNodeAgent(nodeId, env, url, { ...options, headers }, requestTimeoutMs);
 
   recordNodeRoutingMetric(
     {
@@ -190,6 +186,54 @@ async function nodeAgentRequest(
         ? `Node Agent returned invalid JSON: ${err.message}`
         : 'Node Agent returned invalid JSON'
     );
+  }
+}
+
+async function fetchNodeAgent(
+  nodeId: string,
+  env: Env,
+  url: string,
+  options: RequestInit,
+  requestTimeoutMs: number
+): Promise<Response> {
+  const db = drizzle(env.DATABASE, { schema });
+  const node = await db
+    .select({ runtime: schema.nodes.runtime })
+    .from(schema.nodes)
+    .where(eq(schema.nodes.id, nodeId))
+    .get();
+
+  if (node?.runtime !== 'cf-container') {
+    return fetchWithTimeout(url, options, requestTimeoutMs);
+  }
+
+  if (env.SANDBOX_ENABLED !== 'true') {
+    throw new Error('Container workspace runtime is disabled');
+  }
+  if (!env.SANDBOX) {
+    throw new Error('SANDBOX binding is unavailable');
+  }
+
+  const vmAgentPort = env.SANDBOX_VM_AGENT_PORT ? parseInt(env.SANDBOX_VM_AGENT_PORT, 10) : 8080;
+  const { getSandbox } = await import('@cloudflare/sandbox');
+  const sandbox = getSandbox(env.SANDBOX, nodeId.toLowerCase(), { normalizeId: true });
+  const containerUrl = new URL(url);
+  containerUrl.protocol = 'http:';
+  containerUrl.hostname = 'localhost';
+  containerUrl.port = String(vmAgentPort);
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), requestTimeoutMs);
+  try {
+    return await sandbox.containerFetch(
+      new Request(containerUrl.toString(), {
+        ...options,
+        signal: controller.signal,
+      }),
+      vmAgentPort
+    );
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
