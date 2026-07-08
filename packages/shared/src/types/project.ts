@@ -13,7 +13,7 @@ import type { VMSize, WorkspaceProfile, WorkspaceResponse } from './workspace';
 export type ProjectStatus = 'active' | 'detached';
 
 /** Git repository provider for a project. */
-export type RepoProvider = 'github' | 'artifacts';
+export type RepoProvider = 'github' | 'artifacts' | 'gitlab';
 
 /**
  * Per-project agent defaults. Keys are agent types (claude-code, openai-codex, etc.).
@@ -38,9 +38,9 @@ export interface Project {
   installationId: string | null;
   repository: string;
   defaultBranch: string;
-  /** Repo provider: 'github' (default) or 'artifacts'. */
+  /** Repo provider: 'github' (default), 'artifacts', or 'gitlab'. */
   repoProvider: RepoProvider;
-  /** Cloudflare Artifacts repo ID. Null for GitHub-backed projects. */
+  /** Cloudflare Artifacts repo ID. Null for GitHub/GitLab-backed projects. */
   artifactsRepoId?: string | null;
   defaultVmSize?: VMSize | null;
   defaultAgentType?: string | null;
@@ -107,14 +107,16 @@ export interface ProjectDetailResponse extends Project {
 export interface CreateProjectRequest {
   name: string;
   description?: string;
-  /** Required for GitHub projects. Null/omitted for Artifacts. */
+  /** Required for GitHub projects. Null/omitted for Artifacts/GitLab. */
   installationId?: string;
-  /** Required for GitHub projects. Auto-generated for Artifacts. */
+  /** Required for GitHub projects. Auto-generated for Artifacts, server-derived for GitLab. */
   repository?: string;
   githubRepoId?: number;
   githubRepoNodeId?: string;
+  /** Required for GitLab projects. Numeric GitLab project ID selected by the user. */
+  gitlabProjectId?: number;
   defaultBranch?: string;
-  /** Repo provider: 'github' (default) or 'artifacts'. */
+  /** Repo provider: 'github' (default), 'artifacts', or 'gitlab'. */
   repoProvider?: RepoProvider;
 }
 
@@ -357,11 +359,7 @@ export type ProjectMemberOffboardingResourceKind =
   | 'node'
   | 'deployment_environment'
   | 'project_attachment';
-export type ProjectMemberOffboardingCredentialSource =
-  | 'user'
-  | 'project'
-  | 'platform'
-  | 'unknown';
+export type ProjectMemberOffboardingCredentialSource = 'user' | 'project' | 'platform' | 'unknown';
 export type ProjectMemberOffboardingAction =
   | 'reattach_to_project'
   | 'break_and_flag'
@@ -518,4 +516,8 @@ export const ARTIFACTS_DEFAULTS = {
 } as const;
 
 /** Valid repo provider values. */
-export const VALID_REPO_PROVIDERS: readonly RepoProvider[] = ['github', 'artifacts'] as const;
+export const VALID_REPO_PROVIDERS: readonly RepoProvider[] = [
+  'github',
+  'artifacts',
+  'gitlab',
+] as const;

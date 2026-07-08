@@ -17,10 +17,14 @@ import (
 )
 
 type gitTokenResponse struct {
+	Provider  string `json:"provider,omitempty"`
 	Token     string `json:"token"`
 	ExpiresAt string `json:"expiresAt"`
 	// CloneURL is set for Artifacts-backed projects. Empty for GitHub projects.
-	CloneURL string `json:"cloneUrl,omitempty"`
+	CloneURL       string `json:"cloneUrl,omitempty"`
+	Host           string `json:"host,omitempty"`
+	Username       string `json:"username,omitempty"`
+	RepositoryPath string `json:"repositoryPath,omitempty"`
 }
 
 func (s *Server) handleGitCredential(w http.ResponseWriter, r *http.Request) {
@@ -36,7 +40,12 @@ func (s *Server) handleGitCredential(w http.ResponseWriter, r *http.Request) {
 
 	bearerToken := bearerTokenFromHeader(r.Header.Get("Authorization"))
 	requestedHost := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("host")))
-	if requestedHost != "" && !gitrepo.IsKnownGitHost(requestedHost) {
+	requestedPath := strings.TrimSpace(r.URL.Query().Get("path"))
+	if requestedHost != "" && !s.isAllowedCredentialHostForWorkspace(workspaceID, requestedHost) {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if requestedPath != "" && !s.isAllowedCredentialPathForWorkspace(workspaceID, requestedPath) {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
@@ -52,16 +61,30 @@ func (s *Server) handleGitCredential(w http.ResponseWriter, r *http.Request) {
 	// Artifacts clone URLs use username "x"; GitHub uses "x-access-token".
 	host := "github.com"
 	username := "x-access-token"
+	repositoryPath := strings.TrimSpace(resp.RepositoryPath)
 	if resp.CloneURL != "" {
 		if parsed, parseErr := url.Parse(resp.CloneURL); parseErr == nil && parsed.Host != "" {
 			host = parsed.Host
 			if gitrepo.IsArtifactsHost(parsed.Host) {
 				username = "x"
 			}
+			if repositoryPath == "" {
+				repositoryPath = strings.Trim(strings.TrimSuffix(parsed.Path, ".git"), "/")
+			}
 		}
+	}
+	if resp.Host != "" {
+		host = strings.ToLower(strings.TrimSpace(resp.Host))
+	}
+	if resp.Username != "" {
+		username = strings.TrimSpace(resp.Username)
 	}
 
 	if requestedHost != "" && !credentialHostMatchesRequest(host, requestedHost) {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if requestedPath != "" && repositoryPath != "" && !credentialPathMatchesRequest(repositoryPath, requestedPath) {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
@@ -84,6 +107,49 @@ func credentialHostMatchesRequest(resolvedHost, requestedHost string) bool {
 		return requestedHost == resolvedHost
 	}
 	return requestedHost == resolvedHost
+}
+
+func (s *Server) isAllowedCredentialHostForWorkspace(workspaceID, requestedHost string) bool {
+	requestedHost = strings.ToLower(strings.TrimSpace(requestedHost))
+	if requestedHost == "" || gitrepo.IsKnownGitHost(requestedHost) {
+		return true
+	}
+	if runtime, ok := s.getWorkspaceRuntime(workspaceID); ok {
+		return strings.EqualFold(strings.TrimSpace(runtime.RepositoryHost), requestedHost)
+	}
+	return strings.EqualFold(strings.TrimSpace(s.config.RepositoryHost), requestedHost)
+}
+
+func (s *Server) isAllowedCredentialPathForWorkspace(workspaceID, requestedPath string) bool {
+	requestedPath = strings.TrimSpace(requestedPath)
+	if requestedPath == "" {
+		return true
+	}
+	runtime, ok := s.getWorkspaceRuntime(workspaceID)
+	if !ok {
+		return true
+	}
+	if !strings.EqualFold(strings.TrimSpace(runtime.RepoProvider), "gitlab") {
+		return true
+	}
+	repositoryPath := strings.TrimSpace(runtime.RepositoryPath)
+	if repositoryPath == "" {
+		return true
+	}
+	return credentialPathMatchesRequest(repositoryPath, requestedPath)
+}
+
+func credentialPathMatchesRequest(repositoryPath, requestedPath string) bool {
+	normalize := func(path string) string {
+		path = strings.TrimSpace(path)
+		path = strings.TrimPrefix(path, "/")
+		path = strings.TrimSuffix(path, ".git")
+		path = strings.TrimSuffix(path, "/")
+		return strings.ToLower(path)
+	}
+	repositoryPath = normalize(repositoryPath)
+	requestedPath = normalize(requestedPath)
+	return repositoryPath != "" && requestedPath != "" && repositoryPath == requestedPath
 }
 
 func (s *Server) fetchGitToken(ctx context.Context) (string, error) {

@@ -43,6 +43,11 @@ import {
 import { getExternalInstallationId } from '../../services/github-installation-ids';
 import { backfillProjectGithubRepoId } from '../../services/github-repo-id-backfill';
 import { getGitHubUserAccessTokenForOwner } from '../../services/github-user-access-token';
+import {
+  getProjectGitLabRepository,
+  requireGitLabUserAccessTokenForOwner,
+  verifyGitLabProjectAccess,
+} from '../../services/gitlab';
 import { persistError } from '../../services/observability';
 import { resolveProjectAgentDefault } from '../../services/project-agent-defaults';
 import * as projectDataService from '../../services/project-data';
@@ -1297,6 +1302,39 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
       token: tokenSecret,
       expiresAt: tokenResult.expiresAt ?? tokenResult.expires_at,
       cloneUrl,
+    });
+  }
+
+  if (repoProvider === 'gitlab') {
+    if (!workspace.projectId) {
+      throw errors.forbidden('GitLab workspace has no project');
+    }
+    const metadata = await getProjectGitLabRepository(db, workspace.projectId);
+    if (!metadata) {
+      throw errors.forbidden('GitLab repository metadata is missing');
+    }
+    const accessToken = await requireGitLabUserAccessTokenForOwner(
+      c.env,
+      workspace.userId,
+      'workspace-git-token'
+    );
+    const verified = await verifyGitLabProjectAccess(c.env, accessToken, metadata.gitlabProjectId);
+    if (
+      verified.host !== metadata.host ||
+      verified.gitlabProjectId !== metadata.gitlabProjectId ||
+      verified.pathWithNamespace !== metadata.pathWithNamespace
+    ) {
+      throw errors.forbidden('GitLab repository access has changed; repository no longer matches');
+    }
+
+    return c.json({
+      provider: 'gitlab',
+      token: accessToken,
+      expiresAt: null,
+      cloneUrl: metadata.httpUrlToRepo,
+      host: metadata.host,
+      username: 'oauth2',
+      repositoryPath: metadata.pathWithNamespace,
     });
   }
 

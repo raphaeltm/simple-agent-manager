@@ -12,7 +12,7 @@ import { ModelSelect } from '../ModelSelect';
 
 export type SetupStatus = 'pending' | 'done' | 'skipped';
 export type FieldErrors = Partial<
-  Record<'name' | 'repository' | 'githubRepoId' | 'general', string>
+  Record<'name' | 'repository' | 'githubRepoId' | 'gitlabProjectId' | 'general', string>
 >;
 
 export interface ProfileDraft {
@@ -69,6 +69,9 @@ export function mapProjectCreateError(error: unknown): FieldErrors {
   }
   if (error.message.includes('repository ID')) {
     return { githubRepoId: 'This GitHub repository is already linked to another project.' };
+  }
+  if (error.message.includes('GitLab')) {
+    return { gitlabProjectId: error.message };
   }
   if (error.message.includes('repository')) {
     return { repository: 'This repository is already linked to another project.' };

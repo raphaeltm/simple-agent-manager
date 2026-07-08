@@ -39,6 +39,10 @@ type WorkspaceMetadata struct {
 	ContainerLabelVal      string `json:"containerLabelValue"`
 	WorkspaceDir           string `json:"workspaceDir"`
 	CallbackToken          string `json:"callbackToken,omitempty"`
+	RepoProvider           string `json:"repoProvider,omitempty"`
+	CloneURL               string `json:"cloneUrl,omitempty"`
+	RepositoryHost         string `json:"repositoryHost,omitempty"`
+	RepositoryPath         string `json:"repositoryPath,omitempty"`
 	Lightweight            bool   `json:"lightweight"`
 	DevcontainerConfigName string `json:"devcontainerConfigName,omitempty"`
 	UpdatedAt              string `json:"updatedAt"`
@@ -144,6 +148,7 @@ func (s *Store) migrate() error {
 		migrateV6,
 		migrateV7,
 		migrateV8,
+		migrateV9,
 	}
 
 	for i := version; i < len(migrations); i++ {
@@ -224,10 +229,12 @@ func (s *Store) UpsertWorkspaceMetadata(meta WorkspaceMetadata) error {
 
 	_, err = s.db.Exec(
 		`INSERT OR REPLACE INTO workspace_metadata
-			(workspace_id, repository, branch, container_work_dir, container_user, container_label_value, workspace_dir, callback_token, lightweight, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			(workspace_id, repository, branch, container_work_dir, container_user, container_label_value, workspace_dir, callback_token, repo_provider, clone_url, repository_host, repository_path, lightweight, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		meta.WorkspaceID, meta.Repository, meta.Branch, meta.ContainerWorkDir,
-		meta.ContainerUser, meta.ContainerLabelVal, meta.WorkspaceDir, callbackToken, meta.Lightweight, meta.UpdatedAt,
+		meta.ContainerUser, meta.ContainerLabelVal, meta.WorkspaceDir, callbackToken,
+		meta.RepoProvider, meta.CloneURL, meta.RepositoryHost, meta.RepositoryPath,
+		meta.Lightweight, meta.UpdatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("upsert workspace metadata: %w", err)
@@ -243,11 +250,13 @@ func (s *Store) GetWorkspaceMetadata(workspaceID string) (*WorkspaceMetadata, er
 
 	var m WorkspaceMetadata
 	err := s.db.QueryRow(
-		`SELECT workspace_id, repository, branch, container_work_dir, container_user, container_label_value, workspace_dir, callback_token, lightweight, updated_at
+		`SELECT workspace_id, repository, branch, container_work_dir, container_user, container_label_value, workspace_dir, callback_token, repo_provider, clone_url, repository_host, repository_path, lightweight, updated_at
 		FROM workspace_metadata WHERE workspace_id = ?`,
 		workspaceID,
 	).Scan(&m.WorkspaceID, &m.Repository, &m.Branch, &m.ContainerWorkDir,
-		&m.ContainerUser, &m.ContainerLabelVal, &m.WorkspaceDir, &m.CallbackToken, &m.Lightweight, &m.UpdatedAt)
+		&m.ContainerUser, &m.ContainerLabelVal, &m.WorkspaceDir, &m.CallbackToken,
+		&m.RepoProvider, &m.CloneURL, &m.RepositoryHost, &m.RepositoryPath,
+		&m.Lightweight, &m.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -482,6 +491,17 @@ func migrateV6(db *sql.DB) error {
 // callback auth survives VM-agent restart and runtime hydration.
 func migrateV7(db *sql.DB) error {
 	_, err := db.Exec(`ALTER TABLE workspace_metadata ADD COLUMN callback_token TEXT NOT NULL DEFAULT ''`)
+	return err
+}
+
+// migrateV9 adds provider-aware git source metadata for non-GitHub repositories.
+func migrateV9(db *sql.DB) error {
+	_, err := db.Exec(`
+		ALTER TABLE workspace_metadata ADD COLUMN repo_provider TEXT NOT NULL DEFAULT '';
+		ALTER TABLE workspace_metadata ADD COLUMN clone_url TEXT NOT NULL DEFAULT '';
+		ALTER TABLE workspace_metadata ADD COLUMN repository_host TEXT NOT NULL DEFAULT '';
+		ALTER TABLE workspace_metadata ADD COLUMN repository_path TEXT NOT NULL DEFAULT '';
+	`)
 	return err
 }
 

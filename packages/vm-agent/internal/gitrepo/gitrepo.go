@@ -47,6 +47,12 @@ func IsArtifactsHost(host string) bool {
 		strings.HasSuffix(host, ".artifacts.cloudflare.net")
 }
 
+func HostMatches(expected, requested string) bool {
+	expected = strings.ToLower(strings.TrimSpace(expected))
+	requested = strings.ToLower(strings.TrimSpace(requested))
+	return expected != "" && requested != "" && expected == requested
+}
+
 // IsKnownGitHost returns true if host is one SAM vends tokens for.
 func IsKnownGitHost(host string) bool {
 	return IsGitHubCredentialHost(host) || IsArtifactsHost(host)

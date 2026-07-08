@@ -120,6 +120,10 @@ type Config struct {
 	BootstrapToken     string
 	Repository         string
 	Branch             string
+	RepoProvider       string
+	CloneURL           string
+	RepositoryHost     string
+	RepositoryPath     string
 	WorkspaceDir       string
 	BootstrapStatePath string
 	BootstrapMaxWait   time.Duration

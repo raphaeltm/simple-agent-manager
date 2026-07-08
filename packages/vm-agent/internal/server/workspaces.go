@@ -466,6 +466,10 @@ func (s *Server) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		WorkspaceID            string `json:"workspaceId"`
 		Repository             string `json:"repository"`
 		Branch                 string `json:"branch"`
+		RepoProvider           string `json:"repoProvider,omitempty"`
+		CloneURL               string `json:"cloneUrl,omitempty"`
+		RepositoryHost         string `json:"repositoryHost,omitempty"`
+		RepositoryPath         string `json:"repositoryPath,omitempty"`
 		CallbackToken          string `json:"callbackToken,omitempty"`
 		GitUserName            string `json:"gitUserName,omitempty"`
 		GitUserEmail           string `json:"gitUserEmail,omitempty"`
@@ -517,6 +521,10 @@ func (s *Server) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		GitUserName:            strings.TrimSpace(body.GitUserName),
 		GitUserEmail:           strings.TrimSpace(body.GitUserEmail),
 		GitHubID:               strings.TrimSpace(body.GitHubID),
+		RepoProvider:           strings.TrimSpace(body.RepoProvider),
+		CloneURL:               strings.TrimSpace(body.CloneURL),
+		RepositoryHost:         strings.TrimSpace(body.RepositoryHost),
+		RepositoryPath:         strings.TrimSpace(body.RepositoryPath),
 		Lightweight:            body.Lightweight,
 		DevcontainerConfigName: devcontainerConfigName,
 		DevcontainerCache: DevcontainerCacheCredentials{

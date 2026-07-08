@@ -644,6 +644,43 @@ export const projectGithubRepositories = sqliteTable(
   })
 );
 
+export const projectGitlabRepositories = sqliteTable(
+  'project_gitlab_repositories',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    host: text('host').notNull(),
+    gitlabProjectId: integer('gitlab_project_id').notNull(),
+    pathWithNamespace: text('path_with_namespace').notNull(),
+    webUrl: text('web_url'),
+    httpUrlToRepo: text('http_url_to_repo').notNull(),
+    defaultBranch: text('default_branch').notNull(),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    projectUnique: uniqueIndex('idx_project_gitlab_repos_project').on(table.projectId),
+    userHostProjectUnique: uniqueIndex('idx_project_gitlab_repos_user_host_project').on(
+      table.userId,
+      table.host,
+      table.gitlabProjectId
+    ),
+    projectUserIdx: index('idx_project_gitlab_repos_project_user').on(
+      table.projectId,
+      table.userId
+    ),
+  })
+);
+
 // =============================================================================
 // Project Deployment Credentials (GCP OIDC for Defang deployments)
 // Note: This table stores GCP WIF configuration (project IDs, service account

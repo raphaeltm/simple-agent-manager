@@ -165,6 +165,156 @@ func TestHandleGitCredentialRespectsRequestedHostProvider(t *testing.T) {
 	}
 }
 
+func TestHandleGitCredentialGitLabRespectsRequestedPath(t *testing.T) {
+	t.Parallel()
+
+	var controlPlaneCalls atomic.Int32
+	controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		controlPlaneCalls.Add(1)
+		if r.URL.Path != "/api/workspaces/ws-gitlab/git-token" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if r.Header.Get("Authorization") != "Bearer gitlab-callback-token" {
+			t.Fatalf("unexpected Authorization header: %q", r.Header.Get("Authorization"))
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"provider":"gitlab",
+			"token":"gl_token",
+			"expiresAt":null,
+			"cloneUrl":"https://gitlab.com/group/project.git",
+			"host":"gitlab.com",
+			"username":"oauth2",
+			"repositoryPath":"group/project"
+		}`))
+	}))
+	defer controlPlane.Close()
+
+	s := &Server{
+		config: &config.Config{
+			ControlPlaneURL: controlPlane.URL,
+			WorkspaceID:     "ws-gitlab",
+			CallbackToken:   "gitlab-callback-token",
+		},
+		workspaces: map[string]*WorkspaceRuntime{
+			"ws-gitlab": {
+				ID:             "ws-gitlab",
+				CallbackToken:  "gitlab-callback-token",
+				RepoProvider:   "gitlab",
+				RepositoryHost: "gitlab.com",
+				RepositoryPath: "group/project",
+			},
+		},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/git-credential?workspaceId=ws-gitlab&host=gitlab.com&path=group/project.git", nil)
+	req.Header.Set("Authorization", "Bearer gitlab-callback-token")
+
+	rec := httptest.NewRecorder()
+	s.handleGitCredential(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	want := "protocol=https\nhost=gitlab.com\nusername=oauth2\npassword=gl_token\n\n"
+	if rec.Body.String() != want {
+		t.Fatalf("unexpected body:\n%s\nwant:\n%s", rec.Body.String(), want)
+	}
+
+	wrongPathReq := httptest.NewRequest(http.MethodGet, "/git-credential?workspaceId=ws-gitlab&host=gitlab.com&path=other/project.git", nil)
+	wrongPathReq.Header.Set("Authorization", "Bearer gitlab-callback-token")
+
+	wrongPathRec := httptest.NewRecorder()
+	s.handleGitCredential(wrongPathRec, wrongPathReq)
+
+	if wrongPathRec.Code != http.StatusNoContent {
+		t.Fatalf("expected 204 for wrong path, got %d: %s", wrongPathRec.Code, wrongPathRec.Body.String())
+	}
+	if controlPlaneCalls.Load() != 1 {
+		t.Fatalf("wrong path should not fetch a second token, got %d calls", controlPlaneCalls.Load())
+	}
+}
+
+func TestTryCreateGitLabMergeRequestUsesWorkspaceToken(t *testing.T) {
+	t.Parallel()
+
+	var sawTokenRequest atomic.Bool
+	var sawMergeRequest atomic.Bool
+	api := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/workspaces/ws-gitlab/git-token":
+			sawTokenRequest.Store(true)
+			if r.Method != http.MethodPost {
+				t.Fatalf("expected token POST, got %s", r.Method)
+			}
+			if r.Header.Get("Authorization") != "Bearer gitlab-callback-token" {
+				t.Fatalf("unexpected token Authorization header: %q", r.Header.Get("Authorization"))
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"provider":"gitlab","token":"gl_token","expiresAt":null}`))
+		case strings.Contains(r.RequestURI, "/api/v4/projects/group%2Fproject/merge_requests"):
+			sawMergeRequest.Store(true)
+			if r.Method != http.MethodPost {
+				t.Fatalf("expected MR POST, got %s", r.Method)
+			}
+			if r.Header.Get("Authorization") != "Bearer gl_token" {
+				t.Fatalf("unexpected MR Authorization header: %q", r.Header.Get("Authorization"))
+			}
+			if err := r.ParseForm(); err != nil {
+				t.Fatalf("parse MR form: %v", err)
+			}
+			if r.Form.Get("source_branch") != "sam/feature" {
+				t.Fatalf("unexpected source_branch: %q", r.Form.Get("source_branch"))
+			}
+			if r.Form.Get("target_branch") != "main" {
+				t.Fatalf("unexpected target_branch: %q", r.Form.Get("target_branch"))
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"web_url":"https://gitlab.example/group/project/-/merge_requests/7","iid":7}`))
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.RequestURI)
+		}
+	}))
+	defer api.Close()
+
+	host := strings.TrimPrefix(api.URL, "https://")
+	s := &Server{
+		config: &config.Config{
+			ControlPlaneURL: api.URL,
+		},
+		httpClient: api.Client(),
+		workspaces: map[string]*WorkspaceRuntime{
+			"ws-gitlab": {
+				ID:            "ws-gitlab",
+				CallbackToken: "gitlab-callback-token",
+			},
+		},
+	}
+	runtime := &WorkspaceRuntime{
+		ID:             "ws-gitlab",
+		Branch:         "main",
+		RepoProvider:   "gitlab",
+		RepositoryHost: host,
+		RepositoryPath: "group/project",
+	}
+
+	mrURL, iid := s.tryCreateGitLabMergeRequest(runtime, "sam/feature")
+
+	if mrURL != "https://gitlab.example/group/project/-/merge_requests/7" {
+		t.Fatalf("unexpected MR URL: %q", mrURL)
+	}
+	if iid != 7 {
+		t.Fatalf("unexpected MR iid: %d", iid)
+	}
+	if !sawTokenRequest.Load() {
+		t.Fatal("expected token request")
+	}
+	if !sawMergeRequest.Load() {
+		t.Fatal("expected merge request")
+	}
+}
+
 func TestHandleGitCredentialAllowsLocalExchangeWithoutCallbackBearer(t *testing.T) {
 	t.Parallel()
 

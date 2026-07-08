@@ -15,6 +15,7 @@ const mockCreateAgentProfile = vi.fn();
 const mockCreateTrigger = vi.fn();
 const mockListAgents = vi.fn().mockResolvedValue({ agents: [] });
 const mockListBranches = vi.fn().mockResolvedValue([{ name: 'main' }, { name: 'develop' }]);
+const mockListGitLabBranches = vi.fn().mockResolvedValue([{ name: 'main' }, { name: 'develop' }]);
 const mockSubmitTask = vi.fn();
 
 vi.mock('../../../src/lib/api', async (importOriginal) => ({
@@ -24,6 +25,7 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
   createTrigger: (...args: unknown[]) => mockCreateTrigger(...args),
   listAgents: (...args: unknown[]) => mockListAgents(...args),
   listBranches: (...args: unknown[]) => mockListBranches(...args),
+  listGitLabBranches: (...args: unknown[]) => mockListGitLabBranches(...args),
   submitTask: (...args: unknown[]) => mockSubmitTask(...args),
 }));
 
@@ -65,6 +67,47 @@ vi.mock('../../../src/components/BranchSelector', () => ({
   ),
 }));
 
+vi.mock('../../../src/components/GitLabProjectSelector', () => ({
+  GitLabProjectSelector: ({
+    value,
+    onChange,
+    onProjectSelect,
+    id,
+  }: {
+    value: string;
+    onChange: (v: string) => void;
+    onProjectSelect: (project: {
+      id: number;
+      pathWithNamespace: string;
+      name: string;
+      private: boolean;
+      defaultBranch: string;
+      webUrl: string | null;
+      httpUrlToRepo: string | null;
+    }) => void;
+    id?: string;
+  }) => (
+    <input
+      id={id}
+      data-testid="gitlab-project-selector"
+      value={value}
+      onChange={(e) => {
+        const pathWithNamespace = e.target.value;
+        onChange(pathWithNamespace);
+        onProjectSelect({
+          id: 123,
+          pathWithNamespace,
+          name: 'project',
+          private: true,
+          defaultBranch: 'main',
+          webUrl: 'https://gitlab.com/group/project',
+          httpUrlToRepo: 'https://gitlab.com/group/project.git',
+        });
+      }}
+    />
+  ),
+}));
+
 const INSTALLATIONS = [
   { id: 'inst-1', accountName: 'test-org', accountType: 'Organization' as const },
 ];
@@ -101,13 +144,15 @@ function renderWizard(props = {}) {
 }
 
 /** Walk the intro steps (welcome → how-sam-works → provider) to the connect step. */
-async function advanceToConnect(provider: 'github' | 'artifacts' = 'github') {
+async function advanceToConnect(provider: 'github' | 'artifacts' | 'gitlab' = 'github') {
   fireEvent.click(screen.getByRole('button', { name: /Get started/ }));
   await screen.findByRole('heading', { name: 'How SAM works' });
   fireEvent.click(screen.getByRole('button', { name: /Continue/ }));
   await screen.findByRole('heading', { name: /Where should your code live/ });
   if (provider === 'artifacts') {
     fireEvent.click(screen.getByText('Let SAM host the repository'));
+  } else if (provider === 'gitlab') {
+    fireEvent.click(screen.getByText('Connect a GitLab project'));
   }
   fireEvent.click(screen.getByRole('button', { name: /Continue/ }));
   await screen.findByRole('heading', {
@@ -124,6 +169,7 @@ describe('ProjectOnboardingWizard', () => {
     mockCreateTrigger.mockReset();
     mockListAgents.mockReset().mockResolvedValue({ agents: MOCK_AGENTS });
     mockListBranches.mockReset().mockResolvedValue([{ name: 'main' }, { name: 'develop' }]);
+    mockListGitLabBranches.mockReset().mockResolvedValue([{ name: 'main' }, { name: 'develop' }]);
     mockSubmitTask.mockReset();
   });
 
@@ -167,6 +213,16 @@ describe('ProjectOnboardingWizard', () => {
 
     expect(screen.getByText('Connect a GitHub repository')).toBeInTheDocument();
     expect(screen.queryByText('Let SAM host the repository')).not.toBeInTheDocument();
+  });
+
+  it('shows the GitLab option only when GitLab is enabled', async () => {
+    renderWizard({ gitlabEnabled: true });
+    fireEvent.click(screen.getByRole('button', { name: /Get started/ }));
+    await screen.findByRole('heading', { name: 'How SAM works' });
+    fireEvent.click(screen.getByRole('button', { name: /Continue/ }));
+    await screen.findByRole('heading', { name: /Where should your code live/ });
+
+    expect(screen.getByText('Connect a GitLab project')).toBeInTheDocument();
   });
 
   /* ─── SAM (Artifacts) connect path ─── */
@@ -234,6 +290,39 @@ describe('ProjectOnboardingWizard', () => {
     renderWizard({ installations: [] });
     await advanceToConnect('github');
     expect(screen.getByText(/Install the GitHub App/)).toBeInTheDocument();
+  });
+
+  it('creates a GitLab project with the selected project id', async () => {
+    mockCreateProject.mockResolvedValue({
+      ...MOCK_PROJECT,
+      repoProvider: 'gitlab',
+      repository: 'group/project',
+    });
+    renderWizard({ gitlabEnabled: true });
+    await advanceToConnect('gitlab');
+
+    fireEvent.change(screen.getByTestId('gitlab-project-selector'), {
+      target: { value: 'group/project' },
+    });
+
+    await waitFor(() => {
+      expect(mockListGitLabBranches).toHaveBeenCalledWith(123);
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Create project/ }));
+
+    await waitFor(() => {
+      expect(mockCreateProject).toHaveBeenCalledWith(
+        expect.objectContaining({
+          repoProvider: 'gitlab',
+          gitlabProjectId: 123,
+          defaultBranch: 'main',
+        })
+      );
+    });
+    const payload = mockCreateProject.mock.calls[0]![0] as Record<string, unknown>;
+    expect(payload.installationId).toBeUndefined();
+    expect(payload.repository).toBeUndefined();
   });
 
   it('displays name-conflict error from a 409 response', async () => {

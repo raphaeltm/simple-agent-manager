@@ -111,6 +111,10 @@ type ProvisionState struct {
 	GitUserName            string
 	GitUserEmail           string
 	GitHubID               string
+	RepoProvider           string
+	CloneURL               string
+	RepositoryHost         string
+	RepositoryPath         string
 	ProjectEnvVars         []ProjectRuntimeEnvVar
 	ProjectFiles           []ProjectRuntimeFile
 	Lightweight            bool   // Skip devcontainer build, use fallback image for faster startup
@@ -305,6 +309,10 @@ func PrepareWorkspace(ctx context.Context, cfg *config.Config, state ProvisionSt
 		GitUserEmail:  strings.TrimSpace(state.GitUserEmail),
 		GitHubID:      strings.TrimSpace(state.GitHubID),
 	}
+	cfg.RepoProvider = strings.TrimSpace(state.RepoProvider)
+	cfg.CloneURL = strings.TrimSpace(state.CloneURL)
+	cfg.RepositoryHost = strings.TrimSpace(state.RepositoryHost)
+	cfg.RepositoryPath = strings.TrimSpace(state.RepositoryPath)
 
 	// Create a named Docker volume for container-mode workspaces.
 	volumeName := ""
@@ -777,13 +785,13 @@ func ensureRepositoryReady(ctx context.Context, cfg *config.Config, state *boots
 		branch = "main"
 	}
 
-	repoURL := normalizeRepoURL(cfg.Repository)
+	repoURL := normalizeRepoURL(firstNonEmptyString(cfg.CloneURL, cfg.Repository))
 	cloneToken := ""
 	if state != nil {
 		cloneToken = state.GitHubToken
 	}
 
-	cloneURL, err := withGitHubToken(repoURL, cloneToken)
+	cloneURL, err := withGitToken(repoURL, cloneToken, cfg)
 	if err != nil {
 		return fmt.Errorf("failed to prepare clone URL: %w", err)
 	}
@@ -1903,7 +1911,7 @@ func writeDefaultDevcontainerConfigForMode(cfg *config.Config, volumeName, credH
 	// containerEnv so the helper is available during devcontainer lifecycle hooks.
 	credLines := ""
 	if credHelperHostPath != "" {
-		credLines = fmt.Sprintf(",\n  \"mounts\": [\"%s\"],\n  \"containerEnv\": {\n    \"GIT_CONFIG_COUNT\": \"1\",\n    \"GIT_CONFIG_KEY_0\": \"credential.helper\",\n    \"GIT_CONFIG_VALUE_0\": \"%s\"\n  }", credentialHelperMountEntry(credHelperHostPath), credentialHelperContainerPath)
+		credLines = fmt.Sprintf(",\n  \"mounts\": [\"%s\"],\n  \"containerEnv\": {\n    \"GIT_CONFIG_COUNT\": \"2\",\n    \"GIT_CONFIG_KEY_0\": \"credential.helper\",\n    \"GIT_CONFIG_VALUE_0\": \"%s\",\n    \"GIT_CONFIG_KEY_1\": \"credential.useHttpPath\",\n    \"GIT_CONFIG_VALUE_1\": \"true\"\n  }", credentialHelperMountEntry(credHelperHostPath), credentialHelperContainerPath)
 	}
 
 	featuresLine := ""
@@ -2063,7 +2071,7 @@ func ensureGitCredentialHelper(ctx context.Context, cfg *config.Config) error {
 	if cfg.Repository == "" {
 		return nil
 	}
-	if !needsCredentialHelper(cfg.Repository) {
+	if !needsCredentialHelperForConfig(cfg) {
 		slog.Info("Repository does not need credential helper, skipping setup", "repository", cfg.Repository)
 		return nil
 	}
@@ -2223,6 +2231,7 @@ func renderGitCredentialHelperScript(cfg *config.Config) (string, error) {
 	if workspaceID := strings.TrimSpace(cfg.WorkspaceID); workspaceID != "" {
 		query = "?workspaceId=" + url.QueryEscape(workspaceID)
 	}
+	allowedGitLabHost := strings.TrimSpace(cfg.RepositoryHost)
 
 	// When TLS is enabled on the VM agent, the credential helper must use https://
 	// with -k (skip cert verification) because the TLS cert is issued for the
@@ -2246,25 +2255,43 @@ if [ "$action" != "get" ]; then
 fi
 
 requested_host=""
+requested_path=""
 while IFS= read -r line; do
   [ -z "$line" ] && break
   case "$line" in
     host=*) requested_host="${line#host=}" ;;
+    path=*) requested_path="${line#path=}" ;;
   esac
 done
 
 case "$requested_host" in
   ""|github.com|api.github.com|artifacts.cloudflare.net|*.artifacts.cloudflare.net) ;;
-  *) exit 0 ;;
+  *)
+    allowed_gitlab_host=%s
+    if [ -z "$allowed_gitlab_host" ] || [ "$requested_host" != "$allowed_gitlab_host" ]; then
+      exit 0
+    fi
+    ;;
 esac
 
 credential_query="%s"
+url_encode_query_value() {
+  printf '%%s' "$1" | sed 's/%%/%%25/g; s/&/%%26/g; s/=/%%3D/g; s/?/%%3F/g; s/#/%%23/g; s/+/%%2B/g; s/ /%%20/g'
+}
 if [ -n "$requested_host" ]; then
-  encoded_host=$(printf '%%s' "$requested_host" | sed 's/%%/%%25/g; s/&/%%26/g; s/=/%%3D/g; s/?/%%3F/g; s/#/%%23/g; s/+/%%2B/g; s/ /%%20/g')
+  encoded_host=$(url_encode_query_value "$requested_host")
   if [ -n "$credential_query" ]; then
     credential_query="${credential_query}&host=${encoded_host}"
   else
     credential_query="?host=${encoded_host}"
+  fi
+fi
+if [ -n "$requested_path" ]; then
+  encoded_path=$(url_encode_query_value "$requested_path")
+  if [ -n "$credential_query" ]; then
+    credential_query="${credential_query}&path=${encoded_path}"
+  else
+    credential_query="?path=${encoded_path}"
   fi
 fi
 
@@ -2287,7 +2314,7 @@ for target in host.docker.internal "$gateway" 172.17.0.1; do
 done
 
 exit 0
-`, query, curlTLSFlag, scheme, cfg.Port), nil
+`, shellSingleQuote(allowedGitLabHost), query, curlTLSFlag, scheme, cfg.Port), nil
 }
 
 // sanitizeWorkspaceID strips characters that are not alphanumeric or hyphens
@@ -2320,7 +2347,7 @@ const credentialHelperContainerPath = "/usr/local/bin/git-credential-sam"
 //
 // Returns the host path of the written file, or empty string if skipped.
 func writeCredentialHelperToHost(cfg *config.Config) (string, error) {
-	if !needsCredentialHelper(cfg.Repository) {
+	if !needsCredentialHelperForConfig(cfg) {
 		slog.Info("Repository does not need credential helper, skipping host-side write", "repository", cfg.Repository)
 		return "", nil
 	}
@@ -2407,9 +2434,11 @@ func credentialHelperMountEntry(hostPath string) string {
 // these values will collide. See tasks/backlog/2026-03-31-git-config-count-collision.md.
 func credentialHelperContainerEnv() map[string]string {
 	return map[string]string{
-		"GIT_CONFIG_COUNT":   "1",
+		"GIT_CONFIG_COUNT":   "2",
 		"GIT_CONFIG_KEY_0":   "credential.helper",
 		"GIT_CONFIG_VALUE_0": credentialHelperContainerPath,
+		"GIT_CONFIG_KEY_1":   "credential.useHttpPath",
+		"GIT_CONFIG_VALUE_1": "true",
 	}
 }
 
@@ -2495,7 +2524,10 @@ func findDevcontainerID(ctx context.Context, cfg *config.Config) (string, error)
 }
 
 func configureGitCredentialHelper(ctx context.Context, containerID, helperPath string) error {
-	return configureSystemGit(ctx, containerID, "credential.helper", helperPath, "git credential helper")
+	if err := configureSystemGit(ctx, containerID, "credential.helper", helperPath, "git credential helper"); err != nil {
+		return err
+	}
+	return configureSystemGit(ctx, containerID, "credential.useHttpPath", "true", "git credential useHttpPath")
 }
 
 func configureSystemGit(ctx context.Context, containerID, key, value, label string) error {
@@ -3095,6 +3127,10 @@ func normalizeRepoURL(repo string) string {
 }
 
 func withGitHubToken(repoURL, token string) (string, error) {
+	return withGitToken(repoURL, token, nil)
+}
+
+func withGitToken(repoURL, token string, cfg *config.Config) (string, error) {
 	if token == "" {
 		return repoURL, nil
 	}
@@ -3109,17 +3145,32 @@ func withGitHubToken(repoURL, token string) (string, error) {
 
 	// Only inject credentials for hosts we actually vend tokens for.
 	host := strings.ToLower(u.Host)
-	if !gitrepo.IsKnownGitHost(host) {
+	isGitLabHost := cfg != nil &&
+		strings.EqualFold(strings.TrimSpace(cfg.RepoProvider), "gitlab") &&
+		strings.EqualFold(strings.TrimSpace(cfg.RepositoryHost), host)
+	if !gitrepo.IsKnownGitHost(host) && !isGitLabHost {
 		return repoURL, nil
 	}
 
-	// For GitHub repos use "x-access-token" username; for Artifacts use "x".
+	// For GitHub repos use "x-access-token"; for Artifacts use "x"; for
+	// GitLab OAuth use the conventional "oauth2" username.
 	username := "x-access-token"
 	if gitrepo.IsArtifactsHost(host) {
 		username = "x"
+	} else if isGitLabHost {
+		username = "oauth2"
 	}
 	u.User = url.UserPassword(username, token)
 	return u.String(), nil
+}
+
+func firstNonEmptyString(vals ...string) string {
+	for _, val := range vals {
+		if strings.TrimSpace(val) != "" {
+			return strings.TrimSpace(val)
+		}
+	}
+	return ""
 }
 
 // needsCredentialHelper returns true if the repo requires a git credential
@@ -3135,6 +3186,16 @@ func needsCredentialHelper(repo string) bool {
 	}
 	host := strings.ToLower(u.Host)
 	return gitrepo.IsKnownGitHost(host)
+}
+
+func needsCredentialHelperForConfig(cfg *config.Config) bool {
+	if cfg == nil {
+		return false
+	}
+	if strings.TrimSpace(cfg.RepositoryHost) != "" && strings.EqualFold(strings.TrimSpace(cfg.RepoProvider), "gitlab") {
+		return true
+	}
+	return needsCredentialHelper(firstNonEmptyString(cfg.CloneURL, cfg.Repository))
 }
 
 func redactSecret(input, secret string) string {

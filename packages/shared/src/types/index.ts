@@ -44,6 +44,9 @@ export type {
   RepositoryListResponse,
 } from './github';
 
+// GitLab
+export type { GitLabProject, GitLabProjectListResponse } from './gitlab';
+
 // Repo Browse (remote-branch git browser + diff)
 export type {
   RepoBranch,
