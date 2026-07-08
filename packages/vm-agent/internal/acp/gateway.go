@@ -18,6 +18,8 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+const localShellPath = "/bin/sh"
+
 // BootLogReporter sends structured log entries to the control plane.
 // It must be non-nil and have a valid token for logging to work.
 type BootLogReporter interface {
@@ -843,12 +845,12 @@ func installAgentBinaryLocal(ctx context.Context, info agentCommandInfo) error {
 			`rm -rf /usr/local/lib/node_modules/@zed-industries/.%s-* /usr/local/share/nvm/versions/node/*/lib/node_modules/@zed-industries/.%s-* 2>/dev/null; true`,
 			info.command, info.command,
 		)
-		cleanupCmd := exec.CommandContext(ctx, "sh", "-c", cleanupScript)
+		cleanupCmd := exec.CommandContext(ctx, localShellPath, "-c", cleanupScript)
 		_ = cleanupCmd.Run() // best-effort cleanup
 	}
 
 	installScript := agentInstallScript(info)
-	installCmd := exec.CommandContext(ctx, "sh", "-c", installScript)
+	installCmd := exec.CommandContext(ctx, localShellPath, "-c", installScript)
 	output, err := installCmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("local install command failed: %w: %s", err, strings.TrimSpace(string(output)))

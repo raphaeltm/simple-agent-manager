@@ -10,6 +10,7 @@ import (
 // standaloneGitCredentialHelperPath is where the standalone git credential
 // helper script is installed inside the Cloudflare Container.
 const standaloneGitCredentialHelperPath = "/usr/local/bin/git-credential-sam"
+const standaloneGitBinaryPath = "/usr/bin/git"
 
 // standaloneGitCredentialHelperScript is a git credential helper for standalone
 // (cf-container) mode. Unlike the devcontainer helper, the agent runs in the
@@ -47,10 +48,10 @@ func ConfigureStandaloneGitCredentialHelper() {
 
 	// Prefer system config so the helper applies regardless of HOME/user. Fall
 	// back to global if the system gitconfig is not writable.
-	if out, err := exec.Command("git", "config", "--system", "credential.helper", standaloneGitCredentialHelperPath).CombinedOutput(); err != nil {
+	if out, err := exec.Command(standaloneGitBinaryPath, "config", "--system", "credential.helper", standaloneGitCredentialHelperPath).CombinedOutput(); err != nil {
 		slog.Warn("standalone git: system credential.helper config failed, trying global",
 			"error", err, "output", strings.TrimSpace(string(out)))
-		if out2, err2 := exec.Command("git", "config", "--global", "credential.helper", standaloneGitCredentialHelperPath).CombinedOutput(); err2 != nil {
+		if out2, err2 := exec.Command(standaloneGitBinaryPath, "config", "--global", "credential.helper", standaloneGitCredentialHelperPath).CombinedOutput(); err2 != nil {
 			slog.Warn("standalone git: global credential.helper config failed; agent git auth unavailable",
 				"error", err2, "output", strings.TrimSpace(string(out2)))
 			return
