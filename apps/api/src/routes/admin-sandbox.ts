@@ -21,7 +21,12 @@ import { ulid } from '../lib/ulid';
 import { getUserId, requireApproved, requireAuth, requireSuperadmin } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { signCallbackToken, signNodeCallbackToken } from '../services/jwt';
-import { createWorkspaceOnNode, startAgentSessionOnNode, waitForNodeAgentReady } from '../services/node-agent';
+import {
+  createAgentSessionOnNode,
+  createWorkspaceOnNode,
+  startAgentSessionOnNode,
+  waitForNodeAgentReady,
+} from '../services/node-agent';
 import { createNodeRecord } from '../services/nodes';
 import * as projectDataService from '../services/project-data';
 
@@ -523,6 +528,18 @@ adminSandboxRoutes.post('/cf-vm-agent/start', async (c) => {
   const acpSessionCreateDurationMs = Date.now() - acpSessionCreateStart;
 
   const acpSessionStartStart = Date.now();
+  await runCfVmAgentPhase('create_vm_agent_session', phaseDetail, () =>
+    createAgentSessionOnNode(
+      node.id,
+      workspaceId,
+      acpSession.id,
+      workspaceName,
+      c.env,
+      userId,
+      chatSessionId,
+      body.projectId
+    )
+  );
   await runCfVmAgentPhase('start_acp_session', phaseDetail, () =>
     startAgentSessionOnNode(
       node.id,

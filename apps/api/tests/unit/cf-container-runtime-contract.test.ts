@@ -59,6 +59,7 @@ describe('cf-container runtime spike contracts', () => {
     expect(route).toContain('signCallbackToken');
     expect(route).toContain('createWorkspaceOnNode');
     expect(route).toContain('createAcpSession');
+    expect(route).toContain('createAgentSessionOnNode');
     expect(route).toContain('startAgentSessionOnNode');
   });
 });
