@@ -14,6 +14,11 @@ port = 8787
 [vars]
 BASE_DOMAIN = "workspaces.example.com"
 VERSION = "0.1.0"
+# SPIKE (throwaway branch, do not merge): enable the admin-only Sandbox prototype
+# so the CF-container Claude-Code feasibility probe can run on staging.
+SANDBOX_ENABLED = "true"
+# Raised so a runtime `npm i -g @anthropic-ai/claude-code` fits inside one exec.
+SANDBOX_EXEC_TIMEOUT_MS = "180000"
 MAX_NODES_PER_USER = "10"
 MAX_WORKSPACES_PER_NODE = "3"
 MAX_AGENT_SESSIONS_PER_WORKSPACE = "10"
@@ -233,7 +238,9 @@ new_sqlite_classes = ["ProjectAgent"]  # Per-project AI tech lead; SQLite-backed
 [[containers]]
 class_name = "SandboxDO"
 image = "./Dockerfile.sandbox"
-instance_type = "basic"
+# SPIKE: raised from "basic" (1 GiB) to give Claude Code memory headroom for the
+# feasibility probe. standard-1 = 1/2 vCPU / 4 GiB / 8 GB disk.
+instance_type = "standard-1"
 max_instances = 3
 
 [[durable_objects.bindings]]
