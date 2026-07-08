@@ -16,15 +16,15 @@ Plans are durably persisted, but the project chat UI does not reliably show them
 
 ## Implementation Checklist
 
-- [ ] Add a durable ProjectData helper to read the latest `role='plan'` message and parse it as the source-of-truth plan snapshot.
-- [ ] Enrich chat detail and lightweight state responses with the durable plan, using `session_state.currentPlan` as a fast cache/fallback.
-- [ ] Include plan identity in the fallback poll fingerprint.
-- [ ] Make plan hydration unconditional in the web lifecycle so null/empty plan state clears the UI.
-- [ ] Hydrate `currentPlan` from `useActivityVerifyTimer` state responses.
-- [ ] Decouple `CompletionDock` plan pill rendering from `working` and style idle plan visibility appropriately.
-- [ ] Add regression tests for plan-only poll updates, reload from durable plan messages when the state mirror is stale/missing, and idle plan pill visibility.
-- [ ] Run targeted and full local quality checks plus required Playwright visual audit.
-- [ ] Run local specialist reviews required by `/do`.
+- [x] Add a durable ProjectData helper to read the latest `role='plan'` message and parse it as the source-of-truth plan snapshot.
+- [x] Enrich chat detail and lightweight state responses with the durable plan, using `session_state.currentPlan` as a fast cache/fallback.
+- [x] Include plan identity in the fallback poll fingerprint.
+- [x] Make plan hydration unconditional in the web lifecycle so null/empty plan state clears the UI.
+- [x] Hydrate `currentPlan` from `useActivityVerifyTimer` state responses.
+- [x] Decouple `CompletionDock` plan pill rendering from `working` and style idle plan visibility appropriately.
+- [x] Add regression tests for plan-only poll updates, reload from durable plan messages when the state mirror is stale/missing, and idle plan pill visibility.
+- [x] Run targeted and full local quality checks plus required Playwright visual audit.
+- [x] Run local specialist reviews required by `/do`.
 - [ ] Skip staging by explicit human authorization, create PR, merge after CI, monitor production deployment, and verify production.
 
 ## Acceptance Criteria

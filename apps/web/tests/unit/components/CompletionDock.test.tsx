@@ -147,23 +147,10 @@ describe('CompletionDock', () => {
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
   });
 
-  it('shows the plan pill only while working and a plan exists, and opens the plan', async () => {
+  it('keeps the plan pill visible while activity transitions from working to idle', async () => {
     const user = userEvent.setup();
     const onOpenPlan = vi.fn();
     const { rerender } = render(
-      <CompletionDock
-        working={false}
-        hasPlan
-        onInterrupt={vi.fn()}
-        onArchive={vi.fn()}
-        onOpenPlan={onOpenPlan}
-      />,
-    );
-    // Idle: no plan pill even when a plan exists.
-    expect(screen.queryByRole('button', { name: 'View plan' })).not.toBeInTheDocument();
-
-    // Working + plan: pill appears and opens the plan modal.
-    rerender(
       <CompletionDock
         working
         hasPlan
@@ -172,6 +159,18 @@ describe('CompletionDock', () => {
         onOpenPlan={onOpenPlan}
       />,
     );
+    expect(screen.getByRole('button', { name: 'View plan' })).toBeInTheDocument();
+
+    rerender(
+      <CompletionDock
+        working={false}
+        hasPlan
+        onInterrupt={vi.fn()}
+        onArchive={vi.fn()}
+        onOpenPlan={onOpenPlan}
+      />,
+    );
+
     const pill = screen.getByRole('button', { name: 'View plan' });
     await user.click(pill);
     expect(onOpenPlan).toHaveBeenCalledTimes(1);

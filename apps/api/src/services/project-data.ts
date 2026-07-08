@@ -541,6 +541,16 @@ export async function getSessionState(
   return stub.getSessionState(sessionId);
 }
 
+/** Get the latest durable plan message snapshot for a chat session. */
+export async function getLatestPersistedPlan(
+  env: Env,
+  projectId: string,
+  sessionId: string,
+) {
+  const stub = await getStub(env, projectId);
+  return stub.getLatestPersistedPlan(sessionId);
+}
+
 /**
  * Update heartbeats for all active ACP sessions on a node within a project.
  * Called from the node heartbeat handler to keep ACP sessions alive.

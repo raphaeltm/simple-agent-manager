@@ -18,6 +18,30 @@ import { useConnectionRecovery } from './useConnectionRecovery';
 
 type FilePanelState = { mode: 'browse' | 'view' | 'diff' | 'git-status'; path?: string; line?: number | null } | null;
 
+function parsePlanContent(content: string): SessionStateSnapshot['currentPlan'] | null {
+  try {
+    const parsed = JSON.parse(content);
+    return Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function hashPlanContent(plan: SessionStateSnapshot['currentPlan']): string {
+  if (!plan) return 'none';
+  const serialized = JSON.stringify(plan);
+  let hash = 0;
+  for (let i = 0; i < serialized.length; i += 1) {
+    hash = ((hash << 5) - hash + serialized.charCodeAt(i)) | 0;
+  }
+  return `${plan.length}:${hash.toString(36)}`;
+}
+
+function getPlanFingerprint(state: SessionStateSnapshot | null | undefined): string {
+  if (!state) return 'no-state';
+  return state.planUpdatedAt ? `updated:${state.planUpdatedAt}` : `content:${hashPlanContent(state.currentPlan)}`;
+}
+
 export interface UseSessionLifecycleResult {
   session: ChatSessionResponse | null;
   messages: ChatMessageResponse[];
@@ -93,12 +117,18 @@ export function useSessionLifecycle(
   const [promptStartedAt, setPromptStartedAt] = useState<number | null>(null);
   const clearActivity = useCallback(() => { setAgentActivity('idle'); setPromptStartedAt(null); }, []);
 
+  const hydratePlan = useCallback((s: SessionStateSnapshot | null | undefined) => {
+    if (!s) return;
+    setCurrentPlan(s.currentPlan ?? null);
+  }, []);
+
   const { startVerifyDecayTimer, stopVerifyDecayTimer } = useActivityVerifyTimer({
     projectId,
     sessionId,
     delayMs: IDLE_TIMEOUT_MS,
     logMessage: 'Agent activity verify failed; re-arming timer',
     onVerifiedIdle: clearActivity,
+    onStateSnapshot: hydratePlan,
   });
 
   const hydrateState = useCallback((s: SessionStateSnapshot | null | undefined) => {
@@ -111,8 +141,8 @@ export function useSessionLifecycle(
       clearActivity();
       stopVerifyDecayTimer();
     }
-    if (s.currentPlan) setCurrentPlan(s.currentPlan);
-  }, [clearActivity, startVerifyDecayTimer, stopVerifyDecayTimer]);
+    hydratePlan(s);
+  }, [clearActivity, hydratePlan, startVerifyDecayTimer, stopVerifyDecayTimer]);
 
   const [filePanel, setFilePanel] = useState<FilePanelState>(null);
 
@@ -140,7 +170,8 @@ export function useSessionLifecycle(
       setMessages((prev) => mergeMessages(prev, [msg], 'append'));
 
       if (msg.role === 'plan' && msg.content) {
-        try { const parsed = JSON.parse(msg.content); if (Array.isArray(parsed)) setCurrentPlan(parsed); } catch { /* ignore */ }
+        const parsed = parsePlanContent(msg.content);
+        if (parsed) setCurrentPlan(parsed);
       }
       // Streaming agent output: show 'responding' heuristic, but arm the SHARED
       // verify-before-decay timer instead of a blind decay. The blind timer used to
@@ -307,7 +338,8 @@ export function useSessionLifecycle(
         const newLastId = data.messages[data.messages.length - 1]?.id ?? '';
         const taskStatus = data.session.task?.status ?? '';
         const agentSessId = data.session.agentSessionId ?? '';
-        const fingerprint = `${data.messages.length}:${newLastId}:${data.session.status}:${taskStatus}:${agentSessId}`;
+        const planFingerprint = getPlanFingerprint(data.state);
+        const fingerprint = `${data.messages.length}:${newLastId}:${data.session.status}:${taskStatus}:${agentSessId}:${planFingerprint}`;
         if (fingerprint !== lastPollFingerprint) {
           lastPollFingerprint = fingerprint;
           setSession(data.session);
