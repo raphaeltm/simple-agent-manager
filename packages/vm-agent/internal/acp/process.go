@@ -6,7 +6,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -363,43 +362,7 @@ func startDockerExecProcess(cfg ProcessConfig) (*AgentProcess, error) {
 	}, nil
 }
 
-// localExecSettleAttempts / localExecSettleDelay bound the retry when a
-// freshly-installed agent binary is briefly not execve-able in standalone
-// (cf-container) mode. After npm reports success, LookPath can resolve the bin
-// symlink a moment before its target is fully materialized on the container's
-// overlay filesystem, so the first fork/exec returns ENOENT even though the
-// binary becomes valid milliseconds later. Retrying briefly absorbs that race
-// without masking a genuinely missing binary (bounded, then surfaced).
-const (
-	DefaultLocalExecSettleAttempts = 12
-	DefaultLocalExecSettleDelay    = 250 * time.Millisecond
-)
-
 func startLocalProcess(cfg ProcessConfig) (*AgentProcess, error) {
-	var lastErr error
-	for attempt := 1; attempt <= DefaultLocalExecSettleAttempts; attempt++ {
-		proc, err := tryStartLocalProcess(cfg)
-		if err == nil {
-			return proc, nil
-		}
-		// Only the post-install settle race yields ENOENT; any other failure
-		// (permission, pipe error, genuinely-missing binary after retries) is
-		// returned immediately or after the bounded window.
-		if !errors.Is(err, syscall.ENOENT) {
-			return nil, err
-		}
-		lastErr = err
-		if attempt < DefaultLocalExecSettleAttempts {
-			slog.Warn("local agent exec returned ENOENT, retrying after settle",
-				"command", cfg.AcpCommand, "attempt", attempt,
-				"maxAttempts", DefaultLocalExecSettleAttempts)
-			time.Sleep(DefaultLocalExecSettleDelay)
-		}
-	}
-	return nil, lastErr
-}
-
-func tryStartLocalProcess(cfg ProcessConfig) (*AgentProcess, error) {
 	cmd := exec.Command(cfg.AcpCommand, cfg.AcpArgs...)
 	cmd.Env = append(os.Environ(), cfg.EnvVars...)
 	if cfg.WorkDir != "" {
