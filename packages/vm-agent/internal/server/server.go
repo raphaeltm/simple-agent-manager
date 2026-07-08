@@ -1130,6 +1130,14 @@ func (s *Server) getOrCreateReporter(workspaceID, projectID, chatSessionID strin
 	s.messageReportersMu.RLock()
 	if r, ok := s.messageReporters[workspaceID]; ok {
 		s.messageReportersMu.RUnlock()
+		// The boot-time reporter is created before the workspace callback token
+		// is available, and standalone mode never runs bootstrap's
+		// setTokenAllReporters. Refresh the token from the workspace runtime on
+		// access so the reporter can authenticate its message POSTs (otherwise
+		// it fails with "no auth token" and chat messages never persist).
+		if token := s.workspaceCallbackToken(workspaceID); token != "" {
+			r.SetToken(token)
+		}
 		return r
 	}
 	s.messageReportersMu.RUnlock()
