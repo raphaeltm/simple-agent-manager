@@ -1,11 +1,12 @@
-import type { Env } from '../env';
+import { eq } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/d1';
+
 import * as schema from '../db/schema';
+import type { Env } from '../env';
 import { expectJsonRecord } from '../lib/runtime-validation';
 import { fetchWithTimeout, getTimeoutMs } from './fetch-timeout';
 import { signNodeManagementToken, signTerminalToken } from './jwt';
 import { recordNodeRoutingMetric } from './telemetry';
-import { eq } from 'drizzle-orm';
-import { drizzle } from 'drizzle-orm/d1';
 
 const DEFAULT_NODE_AGENT_REQUEST_TIMEOUT_MS = 30_000;
 

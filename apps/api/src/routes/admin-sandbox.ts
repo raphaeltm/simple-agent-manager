@@ -10,9 +10,9 @@
  *
  * Kill switch: SANDBOX_ENABLED env var (default: false).
  */
-import { Hono } from 'hono';
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
+import { Hono } from 'hono';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
@@ -306,7 +306,6 @@ adminSandboxRoutes.post('/cf-vm-agent/start', async (c) => {
     repository: string;
     branch?: string;
     workspaceName?: string;
-    sandboxId?: string;
   }>();
 
   if (!body.projectId || typeof body.projectId !== 'string') {
@@ -375,7 +374,7 @@ adminSandboxRoutes.post('/cf-vm-agent/start', async (c) => {
     .set({ chatSessionId, updatedAt: now })
     .where(eq(schema.workspaces.id, workspaceId));
 
-  const sandboxId = body.sandboxId?.trim() || node.id.toLowerCase();
+  const sandboxId = node.id.toLowerCase();
   const sandbox = await getSandboxInstance(c.env, sandboxId);
   const nodeCallbackToken = await signNodeCallbackToken(node.id, c.env);
   const vmAgentPort = c.env.SANDBOX_VM_AGENT_PORT
