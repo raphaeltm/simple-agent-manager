@@ -312,13 +312,9 @@ export class ProjectData extends DurableObject<Env> {
       { sessionId: chatSessionId, activity, promptStartedAt: extra?.promptStartedAt ?? null }, chatSessionId);
   }
 
-  getSessionState(sessionId: string) {
-    return sessionState.getSessionState(this.sql, sessionId);
-  }
+  getSessionState(sessionId: string) { return sessionState.getSessionState(this.sql, sessionId); }
 
-  getLatestPersistedPlan(sessionId: string) {
-    return sessionState.getLatestPersistedPlan(this.sql, sessionId);
-  }
+  getLatestPersistedPlan(sessionId: string) { return sessionState.getLatestPersistedPlan(this.sql, sessionId); }
 
   async forkAcpSession(sessionId: string, contextSummary: string) {
     return acpSessions.forkAcpSession(this.sql, this.env, sessionId, contextSummary, this.getProjectId());
