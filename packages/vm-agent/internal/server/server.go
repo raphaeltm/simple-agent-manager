@@ -541,6 +541,7 @@ func New(cfg *config.Config) (*Server, error) {
 			ContainerUser:       strings.TrimSpace(cfg.ContainerUser),
 			CallbackToken:       strings.TrimSpace(cfg.CallbackToken),
 			ProjectID:           strings.TrimSpace(cfg.ProjectID),
+			Lightweight:          cfg.IsStandaloneMode(),
 			PTY:                 ptyManager,
 		}
 	}
