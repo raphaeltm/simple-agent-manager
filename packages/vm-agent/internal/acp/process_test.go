@@ -1,6 +1,7 @@
 package acp
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -276,5 +277,32 @@ func TestStartProcess_NoSecretsNoEnvFile(t *testing.T) {
 
 	if len(secrets) != 0 {
 		t.Errorf("expected no secrets in non-secret env vars, got %d: %v", len(secrets), secrets)
+	}
+}
+
+func TestStartLocalProcessRunsWithoutDockerExec(t *testing.T) {
+	t.Parallel()
+
+	proc, err := StartLocalProcess(ProcessConfig{
+		AcpCommand: "/bin/sh",
+		AcpArgs:    []string{"-c", "printf '%s' \"$SAM_TEST_VALUE\""},
+		EnvVars:    []string{"SAM_TEST_VALUE=local-ok"},
+	})
+	if err != nil {
+		t.Fatalf("StartLocalProcess returned error: %v", err)
+	}
+
+	output, err := io.ReadAll(proc.Stdout())
+	if err != nil {
+		t.Fatalf("failed to read stdout: %v", err)
+	}
+	if err := proc.Wait(); err != nil {
+		t.Fatalf("process wait returned error: %v", err)
+	}
+	if string(output) != "local-ok" {
+		t.Fatalf("stdout=%q, want local-ok", string(output))
+	}
+	if proc.containerID != "" {
+		t.Fatalf("local process containerID=%q, want empty", proc.containerID)
 	}
 }

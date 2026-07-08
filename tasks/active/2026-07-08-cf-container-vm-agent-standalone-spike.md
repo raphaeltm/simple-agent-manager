@@ -26,8 +26,8 @@ This is a feasibility spike, not a production feature. The PR must be opened as 
 - [x] Wire standalone workspace runtime: local filesystem workspace, no provision/bootstrap/devcontainer/docker/TLS/DNS/port-scanner, plain HTTP to the container DO, and env-provided control-plane/bootstrap/callback config.
 - [x] Add virtual node registration for a single-workspace `runtime: 'cf-container'` node behind `SANDBOX_ENABLED`; reuse existing node heartbeat/status fields and keep `workspaces.node_id` populated.
 - [x] Add routing from `ws-{id}.BASE_DOMAIN` through Worker to the `SANDBOX` container DO for `cf-container` workspaces only.
-- [ ] Preserve callback JWT authentication for all VM-agent callbacks and add/adjust contract tests for Worker ↔ vm-agent/container DO boundaries.
-- [ ] Add a vertical-slice/capability test covering cf-container workspace creation/routing/heartbeat state with realistic mocked D1/DO boundaries.
+- [x] Preserve callback JWT authentication for all VM-agent callbacks and add/adjust contract tests for Worker ↔ vm-agent/container DO boundaries.
+- [x] Add a vertical-slice/capability test covering cf-container workspace creation/routing/heartbeat state with realistic mocked D1/DO boundaries.
 - [ ] Add measurement support/reporting for cold start, node-register time, heartbeat arrival, WebSocket-proxy round-trip latency, and one chat session transcript/evidence.
 - [ ] Run local quality gates, specialist reviews, staging deployment, live staging verification, and append results to idea `01KWY8E8W1J4F3AC3QAETT2RAT`.
 - [ ] Open a draft PR on `sam/execute-task-using-skill-2cs1ky`, add `needs-human-review`, and stop without merging.
