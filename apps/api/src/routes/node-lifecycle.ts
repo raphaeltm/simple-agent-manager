@@ -4,7 +4,7 @@
  * These endpoints are called by the VM agent (ready, heartbeat, errors) or
  * the browser (token) and use callback JWT auth rather than user session auth.
  */
-import { and, desc, eq, isNull, sql } from 'drizzle-orm';
+import { and, desc, eq, isNull, ne, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
@@ -117,7 +117,13 @@ nodeLifecycleRoutes.post('/:id/ready', async (c) => {
           and(
             eq(schema.workspaces.nodeId, nodeId),
             eq(schema.workspaces.status, 'creating'),
-            isNull(schema.workspaces.dispatchedAt)
+            isNull(schema.workspaces.dispatchedAt),
+            // cf-container (standalone) workspaces are provisioned by their own
+            // launch flow with a lightweight profile. Re-dispatching them here
+            // via createWorkspaceOnNode omits `lightweight`, so the VM agent
+            // rejects it with a 409 profile conflict and the workspace is
+            // wrongly marked `error`. Never re-dispatch cf-container workspaces.
+            ne(schema.workspaces.vmLocation, 'cf-container')
           )
         );
 
