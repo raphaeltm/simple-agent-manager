@@ -509,8 +509,22 @@ func (s *Server) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) {
 
 	repository := strings.TrimSpace(body.Repository)
 	devcontainerConfigName := strings.TrimSpace(body.DevcontainerConfigName)
-	if s.maybeHandleDuplicateWorkspaceCreate(w, body.WorkspaceID, repository, branch, devcontainerConfigName, body.Lightweight) {
-		return
+	if !s.config.IsStandaloneMode() {
+		if s.maybeHandleDuplicateWorkspaceCreate(w, body.WorkspaceID, repository, branch, devcontainerConfigName, body.Lightweight) {
+			return
+		}
+	} else {
+		s.workspaceMu.RLock()
+		conflict := workspaceCreateConflict(s.workspaces[body.WorkspaceID], repository, branch, devcontainerConfigName, body.Lightweight)
+		s.workspaceMu.RUnlock()
+		if conflict != "" {
+			writeJSON(w, http.StatusConflict, map[string]interface{}{
+				"error":       "workspace_conflict",
+				"message":     conflict,
+				"workspaceId": body.WorkspaceID,
+			})
+			return
+		}
 	}
 
 	runtime := s.upsertWorkspaceRuntime(body.WorkspaceID, repository, branch, "creating", strings.TrimSpace(body.CallbackToken), workspaceRuntimeOpts{
