@@ -21,7 +21,7 @@ import { ulid } from '../lib/ulid';
 import { getUserId, requireApproved, requireAuth, requireSuperadmin } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { signCallbackToken, signNodeCallbackToken } from '../services/jwt';
-import { createWorkspaceOnNode, waitForNodeAgentReady } from '../services/node-agent';
+import { createWorkspaceOnNode, startAgentSessionOnNode, waitForNodeAgentReady } from '../services/node-agent';
 import { createNodeRecord } from '../services/nodes';
 import * as projectDataService from '../services/project-data';
 
@@ -339,6 +339,8 @@ adminSandboxRoutes.post('/cf-vm-agent/start', async (c) => {
     repository: string;
     branch?: string;
     workspaceName?: string;
+    agentType?: string;
+    initialPrompt?: string;
   }>();
 
   if (!body.projectId || typeof body.projectId !== 'string') {
@@ -358,6 +360,11 @@ adminSandboxRoutes.post('/cf-vm-agent/start', async (c) => {
 
   const branch = body.branch?.trim() || 'main';
   const workspaceName = body.workspaceName?.trim() || 'CF Container Spike';
+  const agentType =
+    body.agentType?.trim() || project.defaultAgentType || c.env.DEFAULT_TASK_AGENT_TYPE || 'claude-code';
+  const initialPrompt =
+    body.initialPrompt?.trim()
+    || 'Spike verification only: reply with one short sentence confirming this cf-container vm-agent chat session works.';
   const startedAt = Date.now();
 
   const node = await createNodeRecord(c.env, {
@@ -494,6 +501,41 @@ adminSandboxRoutes.post('/cf-vm-agent/start', async (c) => {
   );
   const workspaceCreateDurationMs = Date.now() - workspaceCreateStart;
 
+  const acpSessionCreateStart = Date.now();
+  const acpSession = await runCfVmAgentPhase('create_acp_session', phaseDetail, () =>
+    projectDataService.createAcpSession(
+      c.env,
+      body.projectId,
+      chatSessionId,
+      initialPrompt,
+      agentType
+    )
+  );
+  await runCfVmAgentPhase('assign_acp_session', phaseDetail, () =>
+    projectDataService.transitionAcpSession(c.env, body.projectId, acpSession.id, 'assigned', {
+      actorType: 'system',
+      actorId: userId,
+      reason: 'CF container spike workspace assigned',
+      workspaceId,
+      nodeId: node.id,
+    })
+  );
+  const acpSessionCreateDurationMs = Date.now() - acpSessionCreateStart;
+
+  const acpSessionStartStart = Date.now();
+  await runCfVmAgentPhase('start_acp_session', phaseDetail, () =>
+    startAgentSessionOnNode(
+      node.id,
+      workspaceId,
+      acpSession.id,
+      agentType,
+      initialPrompt,
+      c.env,
+      userId
+    )
+  );
+  const acpSessionStartDurationMs = Date.now() - acpSessionStartStart;
+
   await db
     .update(schema.workspaces)
     .set({ dispatchedAt: new Date().toISOString(), updatedAt: new Date().toISOString() })
@@ -504,6 +546,8 @@ adminSandboxRoutes.post('/cf-vm-agent/start', async (c) => {
     workspaceId,
     projectId: body.projectId,
     chatSessionId,
+    acpSessionId: acpSession.id,
+    agentType,
     sandboxId,
     processId,
     runtime: 'cf-container',
@@ -513,6 +557,8 @@ adminSandboxRoutes.post('/cf-vm-agent/start', async (c) => {
       installDurationMs,
       agentReadyDurationMs,
       workspaceCreateDurationMs,
+      acpSessionCreateDurationMs,
+      acpSessionStartDurationMs,
     },
   });
 });
