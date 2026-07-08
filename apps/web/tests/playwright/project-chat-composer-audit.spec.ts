@@ -43,6 +43,7 @@ function makeAgentProfile(overrides: Record<string, unknown>) {
     systemPromptAppend: null,
     maxTurns: null,
     timeoutMinutes: null,
+    runtime: null,
     vmSizeOverride: null,
     provider: null,
     vmLocation: null,
@@ -89,6 +90,7 @@ const SKILLS = [
     systemPromptAppend: null,
     maxTurns: null,
     timeoutMinutes: null,
+    runtime: null,
     vmSizeOverride: 'large',
     provider: null,
     vmLocation: null,
@@ -418,6 +420,13 @@ test.describe('Project chat composer audit', () => {
       page,
       `project-chat-profile-wizard-single-work-type-${getProjectSuffix(testInfo.project.name)}`
     );
+
+    await chooseWizardOption(page, /Chat and explore/i);
+    await expect(page.getByText('Where should it run?')).toBeVisible();
+    await captureComposerAudit(
+      page,
+      `project-chat-profile-wizard-single-runtime-${getProjectSuffix(testInfo.project.name)}`
+    );
   });
 
   test('multi-agent no-profile state gates composer and opens wizard', async ({
@@ -454,7 +463,7 @@ test.describe('Project chat composer audit', () => {
     await newButtons.last().click();
     await chooseWizardOption(page, /OpenAI Codex/i);
     await chooseWizardOption(page, /Chat and explore/i);
-    await chooseWizardOption(page, /Medium/i);
+    await chooseWizardOption(page, /Instant container/i);
     await page.getByLabel('Profile name').fill('Codex');
     await page.getByRole('button', { name: /Create profile/i }).click();
 

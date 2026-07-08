@@ -1,3 +1,5 @@
+import type { AgentProfileRuntime } from '@simple-agent-manager/shared';
+
 import { request } from './client';
 
 // =============================================================================
@@ -273,6 +275,44 @@ export async function createChatSession(
   data: { workspaceId?: string; topic?: string } = {}
 ): Promise<{ id: string }> {
   return request<{ id: string }>(`/api/projects/${projectId}/sessions`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export interface StartInstantChatSessionRequest {
+  message: string;
+  agentProfileId?: string;
+  skillId?: string;
+}
+
+export interface StartInstantChatSessionResponse {
+  status: 'running';
+  runtime: {
+    runtime: AgentProfileRuntime;
+    reason: string;
+  };
+  sessionId: string;
+  workspaceId: string;
+  nodeId: string;
+  agentSessionId: string;
+  acpSessionId: string;
+  workspaceUrl: string;
+  timings: {
+    setupDurationMs: number;
+    installDurationMs: number;
+    agentReadyDurationMs: number;
+    workspaceCreateDurationMs: number;
+    acpSessionCreateDurationMs: number;
+    acpSessionStartDurationMs: number;
+  };
+}
+
+export async function startInstantChatSession(
+  projectId: string,
+  data: StartInstantChatSessionRequest
+): Promise<StartInstantChatSessionResponse> {
+  return request<StartInstantChatSessionResponse>(`/api/projects/${projectId}/sessions/start`, {
     method: 'POST',
     body: JSON.stringify(data),
   });

@@ -42,8 +42,8 @@ The spike has answered the feasibility question through the admin-only launcher.
 - [x] Remove the admin-only `/api/admin/sandbox/cf-vm-agent/start` launcher after the user-facing start path exists, keeping diagnostic sandbox routes.
 - [x] Add a user-facing chat/session start endpoint that launches a `cf-container` session through the extracted service and preserves task/session auth boundaries.
 - [x] Add unit or vertical-slice tests covering resolver decisions, instant-session launch sequencing, and chat start endpoint behavior across realistic mocked boundaries.
-- [ ] Add web UI controls for runtime selection where users edit profiles/skills and a chat start affordance for starting a cf-container session.
-- [ ] Run Playwright visual audit for changed web surfaces at mobile and desktop sizes.
+- [x] Add web UI controls for runtime selection where users edit profiles/skills and a chat start affordance for starting a cf-container session.
+- [x] Run Playwright visual audit for changed web surfaces at mobile and desktop sizes.
 - [ ] Re-run local quality gates, specialist reviews, and staging verification on the productionized path.
 
 ## Validation Notes
@@ -54,8 +54,13 @@ The spike has answered the feasibility question through the admin-only launcher.
   - `pnpm --filter @simple-agent-manager/api lint` (existing warning backlog only)
   - `pnpm build`
   - `cd packages/vm-agent && go test ./...`
-- Current blocker: GitHub push is blocked because the only available GitHub credential is `simple-agent-manager[bot]` via `GH_TOKEN`, and GitHub reports no repository permission for `raphaeltm/simple-agent-manager` (`viewerPermission` is empty). `git push` failed with HTTP 403 after local commit `dcc77b7a4`.
-- Blocked follow-up gates: push latest commit, trigger staging deploy, run the live cf-container measurement, append results to idea `01KWY8E8W1J4F3AC3QAETT2RAT`, and open the required draft PR with `needs-human-review`.
+- Productionization continuation gates passed on 2026-07-08:
+  - `pnpm --filter @simple-agent-manager/web exec vitest run tests/unit/pages/project-chat.test.tsx tests/unit/components/agent-profiles.test.tsx`
+  - `pnpm --filter @simple-agent-manager/web typecheck`
+  - `pnpm --filter @simple-agent-manager/web exec eslint src/lib/api/sessions.ts src/lib/api/index.ts src/components/agent-profiles/ProfileFormDialog.tsx src/pages/project-chat/useProjectChatState.ts src/pages/project-chat/ChatInput.tsx tests/unit/pages/project-chat.test.tsx tests/unit/components/agent-profiles.test.tsx`
+  - `pnpm --filter @simple-agent-manager/web exec playwright test tests/playwright/project-chat-composer-audit.spec.ts`
+- Historical spike push blocker is resolved for the continuation branch; current commits have pushed to `sam/execute-task-using-skill-2cs1ky`.
+- Remaining follow-up gates: specialist reviews, staging deployment, live cf-container measurement, append results to idea `01KWY8E8W1J4F3AC3QAETT2RAT`, update draft PR #1544, and stop without merging.
 
 ## Acceptance Criteria
 

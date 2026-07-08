@@ -1,4 +1,4 @@
-import type { AgentInfo, AgentProfile, CreateAgentProfileRequest, ProviderCatalog, Task, TaskMode, UpdateAgentProfileRequest, VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
+import type { AgentInfo, AgentProfile, AgentProfileRuntime, CreateAgentProfileRequest, ProviderCatalog, Task, TaskMode, UpdateAgentProfileRequest, VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
 import { DEFAULT_VM_SIZE, DEFAULT_WORKSPACE_PROFILE } from '@simple-agent-manager/shared';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
@@ -21,6 +21,7 @@ import {
   listChatSessions,
   listCredentials,
   listProjectTasks,
+  startInstantChatSession,
   submitTask,
   summarizeSession,
   updateAgentProfile,
@@ -57,7 +58,7 @@ export interface PendingDerived {
   summaryLoading: boolean;
 }
 
-export type ProfileWizardStep = 'agent' | 'work-type' | 'vm-size' | 'name';
+export type ProfileWizardStep = 'agent' | 'work-type' | 'runtime' | 'vm-size' | 'name';
 export type SessionScope = 'my' | 'all';
 
 export interface ProfileWizardState {
@@ -65,6 +66,7 @@ export interface ProfileWizardState {
   step: ProfileWizardStep;
   selectedAgentType: string | null;
   workType: TaskMode | null;
+  runtime: AgentProfileRuntime | null;
   vmSize: VMSize | null;
   profileName: string;
   saving: boolean;
@@ -131,6 +133,7 @@ export function useProjectChatState() {
     step: 'agent',
     selectedAgentType: null,
     workType: null,
+    runtime: null,
     vmSize: null,
     profileName: '',
     saving: false,
@@ -442,7 +445,8 @@ export function useProjectChatState() {
       step: soleAgent ? 'work-type' : 'agent',
       selectedAgentType: initialAgentType,
       workType: initialWorkType,
-      vmSize: DEFAULT_VM_SIZE,
+      runtime: 'cf-container',
+      vmSize: null,
       profileName: '',
       saving: false,
       error: null,
@@ -483,6 +487,7 @@ export function useProjectChatState() {
       return null;
     }
     const workType = profileWizard.workType ?? 'conversation';
+    const runtime = profileWizard.runtime ?? (workType === 'conversation' ? 'cf-container' : 'vm');
     const vmSize = profileWizard.vmSize ?? DEFAULT_VM_SIZE;
     setProfileWizard((current) => ({ ...current, saving: true, error: null }));
     try {
@@ -490,9 +495,10 @@ export function useProjectChatState() {
         name,
         description: workType === 'task' ? 'Write code and open pull requests' : 'Chat and explore with a lightweight workspace',
         agentType,
-        vmSizeOverride: vmSize,
-        workspaceProfile: workType === 'conversation' ? 'lightweight' : 'full',
-        taskMode: workType,
+        runtime,
+        vmSizeOverride: runtime === 'cf-container' ? null : vmSize,
+        workspaceProfile: runtime === 'cf-container' ? 'lightweight' : workType === 'conversation' ? 'lightweight' : 'full',
+        taskMode: runtime === 'cf-container' ? 'conversation' : workType,
       });
       setProfileWizard((current) => ({ ...current, open: false, saving: false, error: null }));
       return profile;
@@ -504,7 +510,7 @@ export function useProjectChatState() {
       }));
       return null;
     }
-  }, [agentProfiles, configuredAgents, createProfile, profileWizard.profileName, profileWizard.selectedAgentType, profileWizard.vmSize, profileWizard.workType]);
+  }, [agentProfiles, configuredAgents, createProfile, profileWizard.profileName, profileWizard.runtime, profileWizard.selectedAgentType, profileWizard.vmSize, profileWizard.workType]);
 
   const resolveProfileIdForSubmit = useCallback(async () => {
     if (selectedProfileId) return selectedProfileId;
@@ -522,10 +528,6 @@ export function useProjectChatState() {
   const handleSubmit = async () => {
     const trimmed = message.trim();
     if (!trimmed) return;
-    if (!hasCloudCredentials) {
-      setSubmitError('Cloud credentials required. Connect a cloud provider in Settings, or ask your admin to enable platform trial.');
-      return;
-    }
     if (attachments.chatUploading) {
       setSubmitError('Please wait for file uploads to complete');
       return;
@@ -536,7 +538,35 @@ export function useProjectChatState() {
       const submitProfileId = await resolveProfileIdForSubmit();
       if (!submitProfileId) return;
 
+      const selectedProfile = agentProfiles.find((profile) => profile.id === submitProfileId) ?? null;
+      const selectedSkill = selectedSkillId
+        ? skills.find((skill) => skill.id === selectedSkillId) ?? null
+        : null;
       const attachmentRefs = getCompletedAttachmentRefs(attachments.chatAttachments);
+      const selectedRuntime = selectedSkill?.runtime ?? selectedProfile?.runtime ?? null;
+      const requiresTaskSubmission = attachmentRefs.length > 0 || pendingDerived !== null || executeIdeaIdRef.current !== null;
+      const useInstantSession = selectedRuntime === 'cf-container' && !requiresTaskSubmission;
+
+      if (useInstantSession) {
+        const result = await startInstantChatSession(projectId, {
+          message: trimmed,
+          agentProfileId: submitProfileId,
+          skillId: selectedSkillId ?? undefined,
+        });
+        setMessage('');
+        setPendingDerived(null);
+        attachments.clearAttachments();
+        newChatIntentRef.current = false;
+        navigate(`/projects/${projectId}/chat/${result.sessionId}`, { replace: true });
+        void loadSessions();
+        return;
+      }
+
+      if (!hasCloudCredentials) {
+        setSubmitError('Cloud credentials required. Connect a cloud provider in Settings, or ask your admin to enable platform trial.');
+        return;
+      }
+
       const baseRequest = buildBaseSubmitRequest({
         message: trimmed,
         agentProfileId: submitProfileId,
