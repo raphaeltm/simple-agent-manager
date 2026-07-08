@@ -90,7 +90,7 @@ The linked SAM idea is `01KV7ZFD6HZS5N7J45VA798KN1`, "GitLab integration using p
 - Focused web unit tests pass for GitLab onboarding state and payload propagation.
 - Focused VM Go tests pass for bootstrap credential helper behavior, persistence, workspace metadata, git credential host/path checks, and GitLab MR creation.
 - Project onboarding Playwright audit passes on iPhone SE and desktop viewports.
-- Full `packages/vm-agent/internal/server` Go package test is not runnable in this workspace because `docker` is missing; the failing test is Docker-dependent and not GitLab-specific.
+- Full `packages/vm-agent/internal/server` Go package test passes after installing Docker locally and running `dockerd` on `/tmp/sam-docker.sock`.
 - Staging validation is intentionally skipped by user instruction.
 
 ## Review Notes
