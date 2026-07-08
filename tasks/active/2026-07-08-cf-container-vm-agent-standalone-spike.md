@@ -32,6 +32,20 @@ This is a feasibility spike, not a production feature. The PR must be opened as 
 - [ ] Run local quality gates, specialist reviews, staging deployment, live staging verification, and append results to idea `01KWY8E8W1J4F3AC3QAETT2RAT`.
 - [ ] Open a draft PR on `sam/execute-task-using-skill-2cs1ky`, add `needs-human-review`, and stop without merging.
 
+## Productionization Continuation Checklist
+
+The spike has answered the feasibility question through the admin-only launcher. Continue on the same draft PR by wiring the validated runtime into the normal chat/profile flow while keeping the PR unmerged for human review.
+
+- [ ] Add a user-visible runtime discriminator to agent profiles and skills (`vm` / `cf-container`) with migration, schema, API, shared type, validation, and mapper coverage.
+- [ ] Add a runtime resolver that preserves existing VM behavior when `SANDBOX_ENABLED` is off, honors explicit profile runtime, and defaults zero-config/platform-credential users to `cf-container` while leaving BYO-cloud users on `vm`.
+- [ ] Extract reusable Sandbox helpers and an instant-session launch service from the validated admin spike sequence.
+- [ ] Remove the admin-only `/api/admin/sandbox/cf-vm-agent/start` launcher after the user-facing start path exists, keeping diagnostic sandbox routes.
+- [ ] Add a user-facing chat/session start endpoint that launches a `cf-container` session through the extracted service and preserves task/session auth boundaries.
+- [ ] Add unit or vertical-slice tests covering resolver decisions, instant-session launch sequencing, and chat start endpoint behavior across realistic mocked boundaries.
+- [ ] Add web UI controls for runtime selection where users edit profiles/skills and a chat start affordance for starting a cf-container session.
+- [ ] Run Playwright visual audit for changed web surfaces at mobile and desktop sizes.
+- [ ] Re-run local quality gates, specialist reviews, and staging verification on the productionized path.
+
 ## Validation Notes
 
 - Local gates passed on 2026-07-08:
