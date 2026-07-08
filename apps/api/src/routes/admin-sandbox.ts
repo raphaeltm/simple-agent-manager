@@ -19,7 +19,8 @@ import type { Env } from '../env';
 import { ulid } from '../lib/ulid';
 import { getUserId, requireApproved, requireAuth, requireSuperadmin } from '../middleware/auth';
 import { errors } from '../middleware/error';
-import { signNodeCallbackToken } from '../services/jwt';
+import { signCallbackToken, signNodeCallbackToken } from '../services/jwt';
+import { createWorkspaceOnNode, waitForNodeAgentReady } from '../services/node-agent';
 import { createNodeRecord } from '../services/nodes';
 import * as projectDataService from '../services/project-data';
 
@@ -422,6 +423,26 @@ adminSandboxRoutes.post('/cf-vm-agent/start', async (c) => {
     autoCleanup: false,
   });
 
+  const agentReadyStart = Date.now();
+  await waitForNodeAgentReady(node.id, c.env);
+  const agentReadyDurationMs = Date.now() - agentReadyStart;
+
+  const workspaceCreateStart = Date.now();
+  const workspaceCallbackToken = await signCallbackToken(workspaceId, c.env);
+  await createWorkspaceOnNode(node.id, c.env, userId, {
+    workspaceId,
+    repository: body.repository,
+    branch,
+    callbackToken: workspaceCallbackToken,
+    lightweight: true,
+  });
+  const workspaceCreateDurationMs = Date.now() - workspaceCreateStart;
+
+  await db
+    .update(schema.workspaces)
+    .set({ dispatchedAt: new Date().toISOString(), updatedAt: new Date().toISOString() })
+    .where(eq(schema.workspaces.id, workspaceId));
+
   return c.json({
     nodeId: node.id,
     workspaceId,
@@ -434,6 +455,8 @@ adminSandboxRoutes.post('/cf-vm-agent/start', async (c) => {
     timings: {
       setupDurationMs: Date.now() - startedAt,
       installDurationMs,
+      agentReadyDurationMs,
+      workspaceCreateDurationMs,
     },
   });
 });

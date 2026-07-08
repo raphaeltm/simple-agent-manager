@@ -46,5 +46,8 @@ describe('cf-container runtime spike contracts', () => {
     expect(route).toContain("adminSandboxRoutes.post('/cf-vm-agent/start'");
     expect(route).toContain("NODE_ROLE: 'standalone'");
     expect(route).toContain("runtime: 'cf-container'");
+    expect(route).toContain('signNodeCallbackToken');
+    expect(route).toContain('signCallbackToken');
+    expect(route).toContain('createWorkspaceOnNode');
   });
 });
