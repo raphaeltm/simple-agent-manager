@@ -8,6 +8,18 @@ FROM docker.io/cloudflare/sandbox:0.12.1
 RUN apt-get update && apt-get install -y --no-install-recommends jq && \
     rm -rf /var/lib/apt/lists/*
 
+# Pre-bake the Claude Code ACP adapter (and CLI) into the image. In standalone
+# (cf-container) mode the vm-agent runs the ACP adapter directly. Installing it
+# at BUILD time — rather than via runtime `npm install -g` inside the running
+# container — avoids a CF Sandbox / gVisor overlay filesystem visibility gap
+# where a freshly runtime-installed binary is not execve-able by the vm-agent
+# process for several seconds after npm reports success. Image-layer files are
+# fully materialized at container boot, so ensureAgentInstalled hits the
+# already-installed fast path and startLocalProcess execs immediately.
+# Aligns with the spike constraint of a single prebuilt image.
+RUN npm install -g @zed-industries/claude-agent-acp @anthropic-ai/claude-code && \
+    npm cache clean --force
+
 # Create workspace directory (base image may already have it, but ensure it exists)
 RUN mkdir -p /workspace
 WORKDIR /workspace
