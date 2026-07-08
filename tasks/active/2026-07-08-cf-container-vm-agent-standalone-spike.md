@@ -28,9 +28,20 @@ This is a feasibility spike, not a production feature. The PR must be opened as 
 - [x] Add routing from `ws-{id}.BASE_DOMAIN` through Worker to the `SANDBOX` container DO for `cf-container` workspaces only.
 - [x] Preserve callback JWT authentication for all VM-agent callbacks and add/adjust contract tests for Worker ↔ vm-agent/container DO boundaries.
 - [x] Add a vertical-slice/capability test covering cf-container workspace creation/routing/heartbeat state with realistic mocked D1/DO boundaries.
-- [ ] Add measurement support/reporting for cold start, node-register time, heartbeat arrival, WebSocket-proxy round-trip latency, and one chat session transcript/evidence.
+- [x] Add measurement support/reporting for cold start, node-register time, heartbeat arrival, WebSocket-proxy round-trip latency, and one chat session transcript/evidence.
 - [ ] Run local quality gates, specialist reviews, staging deployment, live staging verification, and append results to idea `01KWY8E8W1J4F3AC3QAETT2RAT`.
 - [ ] Open a draft PR on `sam/execute-task-using-skill-2cs1ky`, add `needs-human-review`, and stop without merging.
+
+## Validation Notes
+
+- Local gates passed on 2026-07-08:
+  - `pnpm test` (19 turbo tasks, API 391 files / 5,858 tests)
+  - `pnpm --filter @simple-agent-manager/api typecheck`
+  - `pnpm --filter @simple-agent-manager/api lint` (existing warning backlog only)
+  - `pnpm build`
+  - `cd packages/vm-agent && go test ./...`
+- Current blocker: GitHub push is blocked because the only available GitHub credential is `simple-agent-manager[bot]` via `GH_TOKEN`, and GitHub reports no repository permission for `raphaeltm/simple-agent-manager` (`viewerPermission` is empty). `git push` failed with HTTP 403 after local commit `dcc77b7a4`.
+- Blocked follow-up gates: push latest commit, trigger staging deploy, run the live cf-container measurement, append results to idea `01KWY8E8W1J4F3AC3QAETT2RAT`, and open the required draft PR with `needs-human-review`.
 
 ## Acceptance Criteria
 
