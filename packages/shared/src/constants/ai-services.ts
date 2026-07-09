@@ -231,6 +231,12 @@ const OPENAI_CODEX_PREMIUM_PROFILE = {
   | 'fallbackGroup'
 >;
 
+const OPENAI_GPT56_PREVIEW_PROFILE = {
+  contextWindow: 1000000,
+  toolCallSupport: 'excellent',
+  intendedRole: 'workspace-agent',
+} satisfies Pick<ModelDefinition, 'contextWindow' | 'toolCallSupport' | 'intendedRole'>;
+
 /** Models available through the SAM Platform AI proxy.
  * This is the single source of truth — the DEFAULT_AI_PROXY_ALLOWED_MODELS
  * string and the UI dropdown both derive from this list.
@@ -424,9 +430,7 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     tier: 'premium',
     costPer1kInputTokens: 0.005,
     costPer1kOutputTokens: 0.03,
-    contextWindow: 1000000,
-    toolCallSupport: 'excellent',
-    intendedRole: 'workspace-agent',
+    ...OPENAI_GPT56_PREVIEW_PROFILE,
     fallbackGroup: 'openai-premium',
   }),
   openAIModel({
@@ -435,9 +439,7 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     tier: 'premium',
     costPer1kInputTokens: 0.0025,
     costPer1kOutputTokens: 0.015,
-    contextWindow: 1000000,
-    toolCallSupport: 'excellent',
-    intendedRole: 'workspace-agent',
+    ...OPENAI_GPT56_PREVIEW_PROFILE,
     fallbackGroup: 'openai-premium',
   }),
   openAIModel({
@@ -446,9 +448,7 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     tier: 'standard',
     costPer1kInputTokens: 0.001,
     costPer1kOutputTokens: 0.006,
-    contextWindow: 1000000,
-    toolCallSupport: 'excellent',
-    intendedRole: 'workspace-agent',
+    ...OPENAI_GPT56_PREVIEW_PROFILE,
     fallbackGroup: 'openai-standard',
   }),
   // GPT-5.5 series (current flagship)
