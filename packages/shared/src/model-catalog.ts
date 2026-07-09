@@ -106,20 +106,17 @@ const CLAUDE_MODELS: ModelGroup[] = [
 // ---------------------------------------------------------------------------
 
 const CODEX_MODELS: ModelGroup[] = [
-  {
-    label: 'GPT-5 (Latest)',
-    models: [
-      { id: 'gpt-5.6-sol', name: 'GPT-5.6 Sol (Preview)', group: 'GPT-5 (Latest)' },
-      { id: 'gpt-5.6-terra', name: 'GPT-5.6 Terra (Preview)', group: 'GPT-5 (Latest)' },
-      { id: 'gpt-5.6-luna', name: 'GPT-5.6 Luna (Preview)', group: 'GPT-5 (Latest)' },
-      { id: 'gpt-5.5-pro', name: 'GPT-5.5 Pro', group: 'GPT-5 (Latest)' },
-      { id: 'gpt-5.5', name: 'GPT-5.5', group: 'GPT-5 (Latest)' },
-      { id: 'gpt-5.4-pro', name: 'GPT-5.4 Pro', group: 'GPT-5 (Latest)' },
-      { id: 'gpt-5.4', name: 'GPT-5.4', group: 'GPT-5 (Latest)' },
-      { id: 'gpt-5.4-mini', name: 'GPT-5.4 Mini', group: 'GPT-5 (Latest)' },
-      { id: 'gpt-5.4-nano', name: 'GPT-5.4 Nano', group: 'GPT-5 (Latest)' },
-    ],
-  },
+  modelGroup('GPT-5 (Latest)', [
+    { id: 'gpt-5.6-sol', name: 'GPT-5.6 Sol (Preview)' },
+    { id: 'gpt-5.6-terra', name: 'GPT-5.6 Terra (Preview)' },
+    { id: 'gpt-5.6-luna', name: 'GPT-5.6 Luna (Preview)' },
+    { id: 'gpt-5.5-pro', name: 'GPT-5.5 Pro' },
+    { id: 'gpt-5.5', name: 'GPT-5.5' },
+    { id: 'gpt-5.4-pro', name: 'GPT-5.4 Pro' },
+    { id: 'gpt-5.4', name: 'GPT-5.4' },
+    { id: 'gpt-5.4-mini', name: 'GPT-5.4 Mini' },
+    { id: 'gpt-5.4-nano', name: 'GPT-5.4 Nano' },
+  ]),
   {
     label: 'Reasoning',
     models: [

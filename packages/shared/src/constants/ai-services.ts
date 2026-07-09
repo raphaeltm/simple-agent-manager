@@ -237,6 +237,19 @@ const OPENAI_GPT56_PREVIEW_PROFILE = {
   intendedRole: 'workspace-agent',
 } satisfies Pick<ModelDefinition, 'contextWindow' | 'toolCallSupport' | 'intendedRole'>;
 
+const OPENAI_GPT56_PREVIEW_MODELS = [
+  ['gpt-5.6-sol', 'GPT-5.6 Sol', 'premium', 0.005, 0.03, 'openai-premium'],
+  ['gpt-5.6-terra', 'GPT-5.6 Terra', 'premium', 0.0025, 0.015, 'openai-premium'],
+  ['gpt-5.6-luna', 'GPT-5.6 Luna', 'standard', 0.001, 0.006, 'openai-standard'],
+] as const satisfies readonly [
+  string,
+  string,
+  PlatformAIModelTier,
+  number,
+  number,
+  string,
+][];
+
 /** Models available through the SAM Platform AI proxy.
  * This is the single source of truth — the DEFAULT_AI_PROXY_ALLOWED_MODELS
  * string and the UI dropdown both derive from this list.
@@ -424,33 +437,18 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
   }),
   // --- OpenAI (via AI Gateway) ---
   // GPT-5.6 preview series
-  openAIModel({
-    id: 'gpt-5.6-sol',
-    label: 'GPT-5.6 Sol',
-    tier: 'premium',
-    costPer1kInputTokens: 0.005,
-    costPer1kOutputTokens: 0.03,
-    ...OPENAI_GPT56_PREVIEW_PROFILE,
-    fallbackGroup: 'openai-premium',
-  }),
-  openAIModel({
-    id: 'gpt-5.6-terra',
-    label: 'GPT-5.6 Terra',
-    tier: 'premium',
-    costPer1kInputTokens: 0.0025,
-    costPer1kOutputTokens: 0.015,
-    ...OPENAI_GPT56_PREVIEW_PROFILE,
-    fallbackGroup: 'openai-premium',
-  }),
-  openAIModel({
-    id: 'gpt-5.6-luna',
-    label: 'GPT-5.6 Luna',
-    tier: 'standard',
-    costPer1kInputTokens: 0.001,
-    costPer1kOutputTokens: 0.006,
-    ...OPENAI_GPT56_PREVIEW_PROFILE,
-    fallbackGroup: 'openai-standard',
-  }),
+  ...OPENAI_GPT56_PREVIEW_MODELS.map(
+    ([id, label, tier, costPer1kInputTokens, costPer1kOutputTokens, fallbackGroup]) =>
+      openAIModel({
+        id,
+        label,
+        tier,
+        costPer1kInputTokens,
+        costPer1kOutputTokens,
+        ...OPENAI_GPT56_PREVIEW_PROFILE,
+        fallbackGroup,
+      })
+  ),
   // GPT-5.5 series (current flagship)
   openAIModel({
     id: 'gpt-5.5-pro',
