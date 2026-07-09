@@ -11,7 +11,8 @@ import { seedTheme } from './audit-helpers';
 // time from the session-detail response's `state.activity` field. So to render
 // the WORKING morph (red Interrupt + spinner ring + Plan pill + elapsed) we mock
 // the session detail with `state.activity === 'prompting'`; to render the IDLE
-// morph (grey Archive) we omit `state` (defaults to idle) on an active session.
+// morph (grey Archive) we use an idle state on an active taskless instant
+// session, matching the Cloudflare Container chat path.
 //
 // Captured at mobile (375x667) and desktop (1280x800), dark (sam) and light
 // (sam-light), both dock states, asserting no horizontal overflow.
@@ -76,19 +77,7 @@ function makeSession() {
     cleanupAt: null,
     agentSessionId: 'agent-sess-1',
     agentType: 'claude-code',
-    // Conversation-mode task embed — the dock's Archive morph is only wired for
-    // conversation-mode sessions the caller can close (task-mode never archives).
-    task: {
-      id: 'task-conv-1',
-      status: 'in_progress',
-      taskMode: 'conversation',
-      executionStep: null,
-      errorMessage: null,
-      outputBranch: null,
-      outputPrUrl: null,
-      outputSummary: null,
-      finalizedAt: null,
-    },
+    task: null,
   };
 }
 

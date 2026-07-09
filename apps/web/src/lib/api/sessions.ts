@@ -321,8 +321,8 @@ export async function startInstantChatSession(
 export async function stopChatSession(
   projectId: string,
   sessionId: string
-): Promise<{ status: string }> {
-  return request<{ status: string }>(`/api/projects/${projectId}/sessions/${sessionId}/stop`, {
+): Promise<{ status: string; workspaceDeleted?: boolean }> {
+  return request<{ status: string; workspaceDeleted?: boolean }>(`/api/projects/${projectId}/sessions/${sessionId}/stop`, {
     method: 'POST',
   });
 }

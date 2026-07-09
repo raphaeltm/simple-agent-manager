@@ -37,6 +37,7 @@ const mocks = vi.hoisted(() => ({
   listProjectTasks: vi.fn(),
   submitTask: vi.fn(),
   startInstantChatSession: vi.fn(),
+  stopChatSession: vi.fn(),
   getProjectTask: vi.fn(),
   summarizeSession: vi.fn(),
   getTranscribeApiUrl: vi.fn(() => 'https://api.test.com/api/transcribe'),
@@ -59,6 +60,7 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
   listProjectTasks: mocks.listProjectTasks,
   submitTask: mocks.submitTask,
   startInstantChatSession: mocks.startInstantChatSession,
+  stopChatSession: mocks.stopChatSession,
   getProjectTask: mocks.getProjectTask,
   summarizeSession: mocks.summarizeSession,
   getTranscribeApiUrl: mocks.getTranscribeApiUrl,
@@ -1103,6 +1105,18 @@ describe('ProjectChat close conversation button', () => {
     endedAt: null,
     createdAt: Date.now() - 60000,
   };
+  const IDLE_SESSION_WITHOUT_TASK = {
+    id: 'session-instant-idle',
+    workspaceId: 'ws-instant-idle',
+    topic: 'Idle instant conversation',
+    status: 'active' as const,
+    isIdle: true,
+    taskId: null,
+    messageCount: 2,
+    startedAt: Date.now() - 60000,
+    endedAt: null,
+    createdAt: Date.now() - 60000,
+  };
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -1113,6 +1127,7 @@ describe('ProjectChat close conversation button', () => {
     mocks.listAgentProfiles.mockResolvedValue([]);
     mocks.availableCommands = [];
     mocks.closeConversationTask.mockResolvedValue({});
+    mocks.stopChatSession.mockResolvedValue({ status: 'stopped', workspaceDeleted: true });
     mocks.listProjectTasks.mockResolvedValue({ tasks: [], nextCursor: null });
   });
 
@@ -1140,6 +1155,31 @@ describe('ProjectChat close conversation button', () => {
     await waitFor(() => {
       expect(mocks.closeConversationTask).toHaveBeenCalledWith(PROJECT_ID, 'task-conv-1');
     });
+    expect(mocks.stopChatSession).not.toHaveBeenCalled();
+  });
+
+  it('stops the chat session for idle taskless instant sessions', async () => {
+    mocks.listChatSessions.mockResolvedValue({
+      sessions: [IDLE_SESSION_WITHOUT_TASK],
+      total: 1,
+    });
+
+    renderProjectChat(`/projects/${PROJECT_ID}/chat/${IDLE_SESSION_WITHOUT_TASK.id}`);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('message-view')).toBeInTheDocument();
+    });
+
+    expect(capturedMessageViewProps.current).toHaveProperty('onCloseConversation');
+
+    await act(async () => {
+      (capturedMessageViewProps.current?.onCloseConversation as () => void)();
+    });
+
+    await waitFor(() => {
+      expect(mocks.stopChatSession).toHaveBeenCalledWith(PROJECT_ID, 'session-instant-idle');
+    });
+    expect(mocks.closeConversationTask).not.toHaveBeenCalled();
   });
 
   it('passes loaded agent profiles and slash commands to active session follow-ups', async () => {

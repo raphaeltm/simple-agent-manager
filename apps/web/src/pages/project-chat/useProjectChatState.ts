@@ -22,6 +22,7 @@ import {
   listCredentials,
   listProjectTasks,
   startInstantChatSession,
+  stopChatSession,
   submitTask,
   summarizeSession,
   updateAgentProfile,
@@ -720,11 +721,15 @@ export function useProjectChatState() {
 
   const handleCloseConversation = useCallback(async () => {
     const selectedSession = sessions.find((s) => s.id === sessionId);
-    if (!selectedSession?.taskId) return;
+    if (!selectedSession) return;
     setClosingConversation(true);
     setCloseError(null);
     try {
-      await closeConversationTask(projectId, selectedSession.taskId);
+      if (selectedSession.taskId) {
+        await closeConversationTask(projectId, selectedSession.taskId);
+      } else {
+        await stopChatSession(projectId, selectedSession.id);
+      }
       void loadSessions();
     } catch (err) {
       console.warn('Failed to close conversation:', err);
