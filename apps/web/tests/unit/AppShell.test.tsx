@@ -53,6 +53,32 @@ vi.mock('../../src/lib/api', async (importOriginal) => ({
   listNodes: vi.fn().mockResolvedValue([]),
 }));
 
+vi.mock('../../src/components/NotificationCenter', () => ({
+  NotificationCenter: () => <button type="button" aria-label="Notifications" />,
+}));
+
+vi.mock('../../src/components/RecentChatsDropdown', () => ({
+  RecentChatsDropdown: () => <button type="button" aria-label="Recent chats" />,
+}));
+
+vi.mock('../../src/components/GlobalAudioPlayer', () => ({
+  GlobalAudioPlayer: () => null,
+}));
+
+vi.mock('../../src/components/onboarding/choose-path/ChoosePathWizard', () => ({
+  ChoosePathWizard: () => null,
+}));
+
+vi.mock('../../src/components/GlobalCommandPalette', () => ({
+  GlobalCommandPalette: ({ onClose }: { onClose: () => void }) => (
+    <div role="dialog" aria-label="Command palette">
+      <button type="button" onClick={onClose}>
+        Close
+      </button>
+    </div>
+  ),
+}));
+
 beforeEach(() => {
   matchMediaMatches = false;
   mockAuthState = {
