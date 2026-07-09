@@ -4,10 +4,15 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
-const apiRoot = join(fileURLToPath(new URL('.', import.meta.url)), '../../src');
+const apiPackageRoot = join(fileURLToPath(new URL('.', import.meta.url)), '../..');
+const apiRoot = join(apiPackageRoot, 'src');
 
 function read(relPath: string): string {
   return readFileSync(join(apiRoot, relPath), 'utf8');
+}
+
+function readPackage(relPath: string): string {
+  return readFileSync(join(apiPackageRoot, relPath), 'utf8');
 }
 
 describe('cf-container runtime spike contracts', () => {
@@ -83,5 +88,12 @@ describe('cf-container runtime spike contracts', () => {
     expect(launcher).toContain('createAcpSession');
     expect(launcher).toContain('createAgentSessionOnNode');
     expect(launcher).toContain('startAgentSessionOnNode');
+  });
+
+  it('preinstalls GitHub CLI in the cf-container image for PR workflows', () => {
+    const dockerfile = readPackage('Dockerfile.sandbox');
+
+    expect(dockerfile).toContain('githubcli-archive-keyring.gpg');
+    expect(dockerfile).toContain('apt-get install -y --no-install-recommends gh');
   });
 });
