@@ -1,7 +1,7 @@
 import type { VmAgentContainer, VmAgentContainerLaunchConfig, VmAgentContainerLaunchSecrets } from '../durable-objects/vm-agent-container';
 import type { Env } from '../env';
-import { log } from '../lib/logger';
 import { errors } from '../middleware/error';
+import { runCloudflareRuntimePhase } from './cloudflare-runtime-phase';
 
 export interface VmAgentContainerConfig {
   enabled: boolean;
@@ -78,24 +78,14 @@ export async function runContainerPhase<T>(
   detail: { nodeId?: string; workspaceId?: string; containerId?: string },
   fn: () => Promise<T>
 ): Promise<T> {
-  const start = Date.now();
-  log.info('vm_agent_container_phase_start', { phase, ...detail });
-  try {
-    const result = await fn();
-    log.info('vm_agent_container_phase_success', {
-      phase,
-      durationMs: Date.now() - start,
-      ...detail,
-    });
-    return result;
-  } catch (err) {
-    log.error('vm_agent_container_phase_error', {
-      phase,
-      durationMs: Date.now() - start,
-      error: err instanceof Error ? err.message : String(err),
-      errorName: err instanceof Error ? err.name : undefined,
-      ...detail,
-    });
-    throw err;
-  }
+  return runCloudflareRuntimePhase(
+    {
+      start: 'vm_agent_container_phase_start',
+      success: 'vm_agent_container_phase_success',
+      error: 'vm_agent_container_phase_error',
+    },
+    phase,
+    detail,
+    fn
+  );
 }

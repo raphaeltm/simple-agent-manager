@@ -1,6 +1,6 @@
 import type { Env } from '../env';
-import { log } from '../lib/logger';
 import { errors } from '../middleware/error';
+import { runCloudflareRuntimePhase } from './cloudflare-runtime-phase';
 
 export function getSandboxConfig(env: Env) {
   return {
@@ -78,24 +78,14 @@ export async function runSandboxPhase<T>(
   detail: { nodeId?: string; workspaceId?: string; sandboxId?: string },
   fn: () => Promise<T>
 ): Promise<T> {
-  const start = Date.now();
-  log.info('cf_vm_agent_phase_start', { phase, ...detail });
-  try {
-    const result = await fn();
-    log.info('cf_vm_agent_phase_success', {
-      phase,
-      durationMs: Date.now() - start,
-      ...detail,
-    });
-    return result;
-  } catch (err) {
-    log.error('cf_vm_agent_phase_error', {
-      phase,
-      durationMs: Date.now() - start,
-      error: err instanceof Error ? err.message : String(err),
-      errorName: err instanceof Error ? err.name : undefined,
-      ...detail,
-    });
-    throw err;
-  }
+  return runCloudflareRuntimePhase(
+    {
+      start: 'cf_vm_agent_phase_start',
+      success: 'cf_vm_agent_phase_success',
+      error: 'cf_vm_agent_phase_error',
+    },
+    phase,
+    detail,
+    fn
+  );
 }
