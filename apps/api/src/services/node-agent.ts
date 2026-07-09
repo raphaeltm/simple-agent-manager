@@ -7,6 +7,7 @@ import { expectJsonRecord } from '../lib/runtime-validation';
 import { fetchWithTimeout, getTimeoutMs } from './fetch-timeout';
 import { signNodeManagementToken, signTerminalToken } from './jwt';
 import { recordNodeRoutingMetric } from './telemetry';
+import { fetchVmAgentContainer, getVmAgentContainerConfig } from './vm-agent-container';
 
 const DEFAULT_NODE_AGENT_REQUEST_TIMEOUT_MS = 30_000;
 
@@ -221,16 +222,15 @@ export async function fetchNodeAgent(
     return fetchWithTimeout(url, options, requestTimeoutMs);
   }
 
-  if (env.SANDBOX_ENABLED !== 'true') {
+  const config = getVmAgentContainerConfig(env);
+  if (!config.enabled) {
     throw new Error('Container workspace runtime is disabled');
   }
-  if (!env.SANDBOX) {
-    throw new Error('SANDBOX binding is unavailable');
+  if (!env.VM_AGENT_CONTAINER) {
+    throw new Error('VM_AGENT_CONTAINER binding is unavailable');
   }
 
-  const vmAgentPort = env.SANDBOX_VM_AGENT_PORT ? parseInt(env.SANDBOX_VM_AGENT_PORT, 10) : 8080;
-  const { getSandbox } = await import('@cloudflare/sandbox');
-  const sandbox = getSandbox(env.SANDBOX, nodeId.toLowerCase(), { normalizeId: true });
+  const vmAgentPort = config.vmAgentPort;
   const containerUrl = new URL(url);
   containerUrl.protocol = 'http:';
   containerUrl.hostname = 'localhost';
@@ -239,7 +239,9 @@ export async function fetchNodeAgent(
   let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
   try {
     const response = await Promise.race([
-      sandbox.containerFetch(
+      fetchVmAgentContainer(
+        env,
+        nodeId,
         new Request(containerUrl.toString(), requestInitWithoutSignal(options)),
         vmAgentPort
       ),
@@ -667,7 +669,7 @@ export async function nodeAgentRawRequest(
 
   const DEFAULT_EXPORT_TIMEOUT_MS = 60_000;
   const timeoutMs = getTimeoutMs(env.NODE_AGENT_REQUEST_TIMEOUT_MS, DEFAULT_EXPORT_TIMEOUT_MS);
-  return fetchWithTimeout(url, { method: 'GET', headers }, timeoutMs);
+  return fetchNodeAgent(nodeId, env, url, { method: 'GET', headers }, timeoutMs);
 }
 
 export async function getWorkspacePortsOnNode(
@@ -700,7 +702,9 @@ export async function getWorkspacePortsOnNode(
     env.NODE_AGENT_REQUEST_TIMEOUT_MS,
     DEFAULT_NODE_AGENT_REQUEST_TIMEOUT_MS
   );
-  const response = await fetchWithTimeout(
+  const response = await fetchNodeAgent(
+    nodeId,
+    env,
     url,
     {
       method: 'GET',

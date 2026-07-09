@@ -1,0 +1,21 @@
+FROM docker.io/library/node:20-bookworm-slim
+
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends ca-certificates curl git jq openssh-client procps wget; \
+    mkdir -p -m 755 /etc/apt/keyrings; \
+    wget -qO- https://cli.github.com/packages/githubcli-archive-keyring.gpg > /etc/apt/keyrings/githubcli-archive-keyring.gpg; \
+    chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg; \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends gh; \
+    rm -rf /var/lib/apt/lists/*
+
+RUN npm install -g @zed-industries/claude-agent-acp @anthropic-ai/claude-code && \
+    npm cache clean --force
+
+COPY container-entrypoints/vm-agent-bootstrap.sh /usr/local/bin/vm-agent-bootstrap
+RUN chmod +x /usr/local/bin/vm-agent-bootstrap && mkdir -p /workspaces /var/lib/vm-agent
+
+WORKDIR /workspaces
+ENTRYPOINT ["/usr/local/bin/vm-agent-bootstrap"]

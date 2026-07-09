@@ -14,7 +14,7 @@ import { GcpApiError, sanitizeGcpError } from './gcp-errors';
 import { signNodeCallbackToken } from './jwt';
 import { persistError } from './observability';
 import { createProviderForUser } from './provider-credentials';
-import { destroySandboxInstance } from './sandbox';
+import { destroyVmAgentContainer } from './vm-agent-container';
 
 const NODE_ERROR_MESSAGE_MAX_LENGTH = 500;
 
@@ -418,8 +418,8 @@ export async function stopNodeResources(nodeId: string, userId: string, env: Env
   }
 
   if (node.runtime === 'cf-container') {
-    await destroySandboxInstance(env, node.id.toLowerCase(), { nodeId: node.id }).catch((err) => {
-      log.error('node_stop.cf_sandbox_destroy_failed', { nodeId, ...serializeError(err) });
+    await destroyVmAgentContainer(env, node.id).catch((err) => {
+      log.error('node_stop.cf_container_destroy_failed', { nodeId, ...serializeError(err) });
       throw err;
     });
   }

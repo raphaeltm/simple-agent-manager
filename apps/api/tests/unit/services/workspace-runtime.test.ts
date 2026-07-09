@@ -3,30 +3,30 @@ import { describe, expect, it } from 'vitest';
 import { decideWorkspaceRuntime } from '../../../src/services/workspace-runtime';
 
 describe('decideWorkspaceRuntime', () => {
-  it('forces vm when the sandbox kill switch is disabled', () => {
+  it('forces vm when the container kill switch is disabled', () => {
     expect(
       decideWorkspaceRuntime({
-        sandboxEnabled: false,
+        containerEnabled: false,
         explicitRuntime: 'cf-container',
         credentialSource: 'platform',
       })
     ).toEqual({ runtime: 'vm', reason: 'sandbox-disabled' });
   });
 
-  it('honors explicit vm runtime when sandbox is enabled', () => {
+  it('honors explicit vm runtime when container runtime is enabled', () => {
     expect(
       decideWorkspaceRuntime({
-        sandboxEnabled: true,
+        containerEnabled: true,
         explicitRuntime: 'vm',
         credentialSource: 'platform',
       })
     ).toEqual({ runtime: 'vm', reason: 'explicit-vm' });
   });
 
-  it('honors explicit cf-container runtime when sandbox is enabled', () => {
+  it('honors explicit cf-container runtime when container runtime is enabled', () => {
     expect(
       decideWorkspaceRuntime({
-        sandboxEnabled: true,
+        containerEnabled: true,
         explicitRuntime: 'cf-container',
         credentialSource: 'user',
       })
@@ -36,7 +36,7 @@ describe('decideWorkspaceRuntime', () => {
   it('keeps user cloud credential work on vm by default', () => {
     expect(
       decideWorkspaceRuntime({
-        sandboxEnabled: true,
+        containerEnabled: true,
         credentialSource: 'user',
       })
     ).toEqual({ runtime: 'vm', reason: 'user-cloud-credential' });
@@ -45,7 +45,7 @@ describe('decideWorkspaceRuntime', () => {
   it('keeps project cloud credential work on vm by default', () => {
     expect(
       decideWorkspaceRuntime({
-        sandboxEnabled: true,
+        containerEnabled: true,
         credentialSource: 'project',
       })
     ).toEqual({ runtime: 'vm', reason: 'project-cloud-credential' });
@@ -54,7 +54,7 @@ describe('decideWorkspaceRuntime', () => {
   it('uses cf-container for platform-credential zero-config users', () => {
     expect(
       decideWorkspaceRuntime({
-        sandboxEnabled: true,
+        containerEnabled: true,
         credentialSource: 'platform',
       })
     ).toEqual({ runtime: 'cf-container', reason: 'zero-config' });
@@ -63,7 +63,7 @@ describe('decideWorkspaceRuntime', () => {
   it('uses cf-container when no cloud credential exists', () => {
     expect(
       decideWorkspaceRuntime({
-        sandboxEnabled: true,
+        containerEnabled: true,
         credentialSource: null,
       })
     ).toEqual({ runtime: 'cf-container', reason: 'zero-config' });

@@ -1,7 +1,7 @@
 // Re-export Durable Object classes for Cloudflare Workers runtime
 export { AdminLogs } from './durable-objects/admin-logs';
 export { AiTokenBudgetCounter } from './durable-objects/ai-token-budget-counter';
-// Sandbox SDK DO class — re-exported from @cloudflare/sandbox (experimental prototype)
+// Sandbox SDK DO class — retained for experimental toolbox/diagnostics use only.
 export { CodexRefreshLock } from './durable-objects/codex-refresh-lock';
 export { GitHubUserAccessTokenLock } from './durable-objects/github-user-access-token-lock';
 export { NodeLifecycle } from './durable-objects/node-lifecycle';
@@ -14,6 +14,7 @@ export { TaskRunner } from './durable-objects/task-runner';
 export { TrialCounter } from './durable-objects/trial-counter';
 export { TrialEventBus } from './durable-objects/trial-event-bus';
 export { TrialOrchestrator } from './durable-objects/trial-orchestrator';
+export { VmAgentContainer } from './durable-objects/vm-agent-container';
 export type { Env } from './env';
 export { Sandbox as SandboxDO } from '@cloudflare/sandbox';
 
@@ -139,6 +140,7 @@ import { GcpApiError, sanitizeGcpError } from './services/gcp-errors';
 import { signTerminalToken, verifyPortAccessToken, verifyTerminalToken } from './services/jwt';
 import { recordNodeRoutingMetric } from './services/telemetry';
 import { checkProvisioningTimeouts } from './services/timeout';
+import { fetchVmAgentContainer, getVmAgentContainerConfig } from './services/vm-agent-container';
 import { migrateOrphanedWorkspaces } from './services/workspace-migration';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -396,19 +398,16 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
   }
 
   if (nodeRuntime === 'cf-container') {
-    if (c.env.SANDBOX_ENABLED !== 'true') {
-      return c.json({ error: 'SANDBOX_DISABLED', message: 'Container workspace runtime is disabled' }, 503);
+    const containerConfig = getVmAgentContainerConfig(c.env);
+    if (!containerConfig.enabled) {
+      return c.json({ error: 'CF_CONTAINER_DISABLED', message: 'Container workspace runtime is disabled' }, 503);
     }
-    if (!c.env.SANDBOX) {
-      return c.json({ error: 'SANDBOX_UNAVAILABLE', message: 'Sandbox binding is unavailable' }, 503);
+    if (!c.env.VM_AGENT_CONTAINER) {
+      return c.json({ error: 'CF_CONTAINER_UNAVAILABLE', message: 'VM agent container binding is unavailable' }, 503);
     }
 
-    const sandboxId = (workspace.nodeId || workspaceId).toLowerCase();
-    const vmAgentPort = c.env.SANDBOX_VM_AGENT_PORT
-      ? parseInt(c.env.SANDBOX_VM_AGENT_PORT, 10)
-      : 8080;
-    const { getSandbox } = await import('@cloudflare/sandbox');
-    const sandbox = getSandbox(c.env.SANDBOX, sandboxId, { normalizeId: true });
+    const containerId = workspace.nodeId || workspaceId;
+    const vmAgentPort = containerConfig.vmAgentPort;
     const containerUrl = new URL(c.req.url);
     containerUrl.protocol = 'http:';
     containerUrl.hostname = 'localhost';
@@ -441,8 +440,8 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
 
     log.info('ws_proxy_cf_container_route', {
       workspaceId,
-      nodeId: workspace.nodeId || workspaceId,
-      sandboxId,
+      nodeId: containerId,
+      containerId,
       vmAgentPort,
       targetPort,
       publicPortAccess,
@@ -452,7 +451,7 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
     recordNodeRoutingMetric(
       {
         metric: 'ws_proxy_route',
-        nodeId: workspace.nodeId || workspaceId,
+        nodeId: containerId,
         workspaceId,
       },
       c.env
@@ -465,12 +464,7 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
       // @ts-expect-error — Cloudflare Workers support duplex for streaming request bodies
       duplex: c.req.raw.body ? 'half' : undefined,
     });
-    const isWebSocketUpgrade =
-      headers.get('upgrade')?.toLowerCase() === 'websocket' &&
-      headers.get('connection')?.toLowerCase().includes('upgrade');
-    const response = isWebSocketUpgrade
-      ? await sandbox.wsConnect(containerRequest, vmAgentPort)
-      : await sandbox.containerFetch(containerRequest, vmAgentPort);
+    const response = await fetchVmAgentContainer(c.env, containerId, containerRequest, vmAgentPort);
 
     if (targetPort !== null) {
       const responseHeaders = new Headers(response.headers);

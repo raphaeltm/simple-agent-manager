@@ -25,15 +25,13 @@ const mocks = vi.hoisted(() => ({
     persistMessage: vi.fn(),
     transitionAcpSession: vi.fn(),
   },
-  sandbox: {
-    destroySandboxInstance: vi.fn(),
-    getSandboxConfig: vi.fn(),
-    getSandboxInstance: vi.fn(),
-    requireSandbox: vi.fn(),
-    runSandboxPhase: vi.fn(),
-    shellQuote: vi.fn(),
+  container: {
+    destroyVmAgentContainer: vi.fn(),
+    getVmAgentContainerConfig: vi.fn(),
+    launchVmAgentContainer: vi.fn(),
+    requireVmAgentContainer: vi.fn(),
+    runContainerPhase: vi.fn(),
   },
-  sandboxExec: vi.fn(),
   ulid: vi.fn(),
 }));
 
@@ -42,7 +40,7 @@ vi.mock('../../../src/services/mcp-token', () => mocks.mcp);
 vi.mock('../../../src/services/node-agent', () => mocks.nodeAgent);
 vi.mock('../../../src/services/nodes', () => mocks.nodes);
 vi.mock('../../../src/services/project-data', () => mocks.projectData);
-vi.mock('../../../src/services/sandbox', () => mocks.sandbox);
+vi.mock('../../../src/services/vm-agent-container', () => mocks.container);
 vi.mock('../../../src/lib/ulid', () => ({ ulid: mocks.ulid }));
 
 import { launchInstantSession } from '../../../src/services/instant-session';
@@ -80,9 +78,9 @@ const project = {
 const env = {
   BASE_DOMAIN: 'example.com',
   KV: {},
-  SANDBOX_ENABLED: 'true',
-  SANDBOX_EXEC_TIMEOUT_MS: '30000',
-  SANDBOX_VM_AGENT_PORT: '8080',
+  CF_CONTAINER_ENABLED: 'true',
+  CF_CONTAINER_PORT_READY_TIMEOUT_MS: '30000',
+  CF_CONTAINER_VM_AGENT_PORT: '8080',
 } as never;
 
 describe('launchInstantSession', () => {
@@ -102,12 +100,10 @@ describe('launchInstantSession', () => {
     mocks.projectData.createSession.mockResolvedValue('chat-session-1');
     mocks.projectData.persistMessage.mockResolvedValue(undefined);
     mocks.projectData.transitionAcpSession.mockResolvedValue({});
-    mocks.sandbox.getSandboxConfig.mockReturnValue({ execTimeoutMs: 30_000 });
-    mocks.sandbox.destroySandboxInstance.mockResolvedValue(undefined);
-    mocks.sandboxExec.mockResolvedValue({ success: true, stdout: 'ok', stderr: '' });
-    mocks.sandbox.getSandboxInstance.mockResolvedValue({ exec: mocks.sandboxExec });
-    mocks.sandbox.runSandboxPhase.mockImplementation((_phase, _detail, fn) => fn());
-    mocks.sandbox.shellQuote.mockImplementation((value: string) => `'${value}'`);
+    mocks.container.getVmAgentContainerConfig.mockReturnValue({ vmAgentPort: 8080, enabled: true, sleepAfter: '10m' });
+    mocks.container.destroyVmAgentContainer.mockResolvedValue(undefined);
+    mocks.container.launchVmAgentContainer.mockResolvedValue(undefined);
+    mocks.container.runContainerPhase.mockImplementation((_phase, _detail, fn) => fn());
   });
 
   it('creates a linked cf-container workspace, ACP session, and running agent session', async () => {
@@ -190,23 +186,32 @@ describe('launchInstantSession', () => {
       { url: 'https://api.example.com/mcp', token: 'mcp-token' },
       { model: 'claude-sonnet-4-5-20250929', effort: 'auto' }
     );
-    const sandboxCommands = mocks.sandboxExec.mock.calls
-      .map(([command]) => String(command))
-      .join('\n');
-    expect(sandboxCommands).toContain("mkdir -p '/workspaces/repo' /var/lib/vm-agent");
-    expect(sandboxCommands).toContain("WORKSPACE_DIR='/workspaces/repo'");
-    expect(sandboxCommands).toContain("CONTAINER_WORK_DIR='/workspaces/repo'");
-    expect(sandboxCommands).toContain('cd /var/lib/vm-agent');
-    expect(sandboxCommands).not.toContain("cd '/workspaces/repo'");
-    expect(sandboxCommands).not.toContain('/workspaces/workspace');
+    expect(mocks.container.launchVmAgentContainer).toHaveBeenCalledWith(
+      expect.anything(),
+      'node-1',
+      expect.objectContaining({
+        nodeId: 'node-1',
+        workspaceId: 'workspace-1',
+        projectId: 'project-1',
+        chatSessionId: 'chat-session-1',
+        repository: 'owner/repo',
+        branch: 'main',
+        workspaceDir: '/workspaces/repo',
+        controlPlaneUrl: 'https://api.example.com',
+        vmAgentPort: 8080,
+      }),
+      { nodeCallbackToken: 'node-callback-token' }
+    );
+    const launchConfig = mocks.container.launchVmAgentContainer.mock.calls[0][2];
+    expect(JSON.stringify(launchConfig)).not.toContain('node-callback-token');
     expect(updates.at(-1)).toMatchObject({ dispatchedAt: expect.any(String) });
   });
 
-  it('honors a configured Sandbox workspace base directory', async () => {
+  it('honors a configured raw container workspace base directory', async () => {
     const { db } = makeDb();
     const envWithWorkspaceBase = {
       ...(env as Record<string, unknown>),
-      SANDBOX_WORKSPACE_BASE_DIR: '/workspace-root',
+      CF_CONTAINER_WORKSPACE_BASE_DIR: '/workspace-root',
     } as never;
 
     await launchInstantSession(db as never, envWithWorkspaceBase, {
@@ -217,13 +222,13 @@ describe('launchInstantSession', () => {
       agentType: 'claude-code',
     });
 
-    const sandboxCommands = mocks.sandboxExec.mock.calls
-      .map(([command]) => String(command))
-      .join('\n');
-    expect(sandboxCommands).toContain("mkdir -p '/workspace-root/custom-repo' /var/lib/vm-agent");
-    expect(sandboxCommands).toContain("WORKSPACE_DIR='/workspace-root/custom-repo'");
-    expect(sandboxCommands).toContain("CONTAINER_WORK_DIR='/workspace-root/custom-repo'");
-    expect(sandboxCommands).toContain('cd /var/lib/vm-agent');
-    expect(sandboxCommands).not.toContain("cd '/workspace-root/custom-repo'");
+    expect(mocks.container.launchVmAgentContainer).toHaveBeenCalledWith(
+      expect.anything(),
+      'node-1',
+      expect.objectContaining({
+        workspaceDir: '/workspace-root/custom-repo',
+      }),
+      expect.anything()
+    );
   });
 });

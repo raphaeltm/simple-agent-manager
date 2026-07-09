@@ -1,4 +1,5 @@
 import type { Sandbox } from '@cloudflare/sandbox';
+import type { VmAgentContainer } from './durable-objects/vm-agent-container';
 
 // Cloudflare bindings type
 export interface Env {
@@ -59,7 +60,9 @@ export interface Env {
   SAM_SESSION: DurableObjectNamespace;
   PROJECT_AGENT: DurableObjectNamespace;
   AI_TOKEN_BUDGET_COUNTER?: DurableObjectNamespace;
-  // Sandbox SDK (experimental — admin-only prototype for CF Containers agent runtime)
+  // Raw Cloudflare Container for productized instant-session vm-agent runtime
+  VM_AGENT_CONTAINER?: DurableObjectNamespace<VmAgentContainer>;
+  // Sandbox SDK (experimental toolbox/diagnostics substrate, not the product vm-agent supervisor)
   SANDBOX?: DurableObjectNamespace<Sandbox>;
   // Environment variables
   BASE_DOMAIN: string;
@@ -761,7 +764,12 @@ export interface Env {
   SAM_FILE_CONTENT_MAX_BYTES?: string; // Max file size for get_file_content (default: 1048576)
 
   // Sandbox SDK (experimental — admin-only prototype)
-  SANDBOX_ENABLED?: string; // Kill switch for sandbox routes (default: false)
+  CF_CONTAINER_ENABLED?: string; // Kill switch for raw Cloudflare Container instant sessions (default: false)
+  CF_CONTAINER_SLEEP_AFTER?: string; // Container sleep-after duration (default: 10m)
+  CF_CONTAINER_VM_AGENT_PORT?: string; // vm-agent standalone HTTP port inside the raw container (default: 8080)
+  CF_CONTAINER_PORT_READY_TIMEOUT_MS?: string; // Max time to wait for vm-agent port readiness (default: 30000)
+  CF_CONTAINER_WORKSPACE_BASE_DIR?: string; // Base checkout dir inside raw container (default: /workspaces)
+  SANDBOX_ENABLED?: string; // Legacy/fallback kill switch for sandbox routes and older staging config (default: false)
   SANDBOX_EXEC_TIMEOUT_MS?: string; // Default exec timeout in ms (default: 30000)
   SANDBOX_GIT_TIMEOUT_MS?: string; // Git checkout timeout in ms (default: 120000)
   SANDBOX_SLEEP_AFTER?: string; // Container sleep-after duration (default: 10m)

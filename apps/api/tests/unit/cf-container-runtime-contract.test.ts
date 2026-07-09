@@ -25,19 +25,21 @@ describe('cf-container runtime spike contracts', () => {
     expect(schema).toContain("nodeId: text('node_id').references(() => nodes.id");
   });
 
-  it('routes cf-container workspace hostnames through the Sandbox binding behind the kill switch', () => {
+  it('routes cf-container workspace hostnames through the raw Container binding behind the kill switch', () => {
     const index = read('index.ts');
+    const containerService = read('services/vm-agent-container.ts');
 
     expect(index).toContain("nodeRuntime === 'cf-container'");
-    expect(index).toContain("c.env.SANDBOX_ENABLED !== 'true'");
-    expect(index).toContain('getSandbox(c.env.SANDBOX, sandboxId');
-    expect(index).toContain("headers.get('upgrade')?.toLowerCase() === 'websocket'");
-    expect(index).toContain('sandbox.wsConnect(containerRequest, vmAgentPort)');
-    expect(index).toContain('sandbox.containerFetch(');
+    expect(index).toContain('getVmAgentContainerConfig(c.env)');
+    expect(index).toContain('!c.env.VM_AGENT_CONTAINER');
+    expect(index).toContain('fetchVmAgentContainer(c.env, containerId, containerRequest, vmAgentPort)');
+    expect(containerService).toContain("request.headers.get('upgrade')?.toLowerCase() === 'websocket'");
+    expect(containerService).toContain('return container.fetch(request)');
+    expect(containerService).toContain('return container.proxyHttp(request, port)');
     expect(index).toContain("metric: 'ws_proxy_route'");
   });
 
-  it('routes Worker-to-vm-agent service calls through Sandbox for cf-container nodes only', () => {
+  it('routes Worker-to-vm-agent service calls through raw Container for cf-container nodes only', () => {
     const nodeAgent = read('services/node-agent.ts');
     const workspaceTools = read('routes/mcp/workspace-tools.ts');
     const libraryTools = read('routes/mcp/library-tools.ts');
@@ -46,11 +48,12 @@ describe('cf-container runtime spike contracts', () => {
     const nodesRoute = read('routes/nodes.ts');
 
     expect(nodeAgent).toContain("node?.runtime !== 'cf-container'");
-    expect(nodeAgent).toContain("env.SANDBOX_ENABLED !== 'true'");
-    expect(nodeAgent).toContain('getSandbox(env.SANDBOX, nodeId.toLowerCase()');
-    expect(nodeAgent).toContain('sandbox.containerFetch(');
+    expect(nodeAgent).toContain('getVmAgentContainerConfig(env)');
+    expect(nodeAgent).toContain('!env.VM_AGENT_CONTAINER');
+    expect(nodeAgent).toContain('fetchVmAgentContainer(');
     expect(nodeAgent).toContain('function requestInitWithoutSignal');
     expect(nodeAgent).toContain('new Request(containerUrl.toString(), requestInitWithoutSignal(options))');
+    expect(nodeAgent).toContain("return fetchNodeAgent(nodeId, env, url, { method: 'GET', headers }, timeoutMs)");
     expect(workspaceTools).toContain("import { fetchNodeAgent } from '../../services/node-agent'");
     expect(workspaceTools).toContain('fetchNodeAgent(nodeId, env, vmUrl, fetchOpts, timeoutMs)');
     expect(libraryTools).toContain("import { fetchNodeAgent } from '../../services/node-agent'");
@@ -64,7 +67,7 @@ describe('cf-container runtime spike contracts', () => {
     expect(nodesRoute).toContain('fetchNodeAgent(nodeId, c.env, vmUrl.toString()');
   });
 
-  it('launches instant chat sessions through the authenticated start route and Sandbox substrate', () => {
+  it('launches instant chat sessions through the authenticated start route and raw Container substrate', () => {
     const adminRoute = read('routes/admin-sandbox.ts');
     const chatStartRoute = read('routes/chat-start.ts');
     const launcher = read('services/instant-session.ts');
@@ -74,13 +77,12 @@ describe('cf-container runtime spike contracts', () => {
     expect(chatStartRoute).toContain('resolveWorkspaceRuntime');
     expect(chatStartRoute).toContain("runtime.runtime !== 'cf-container'");
     expect(chatStartRoute).toContain('launchInstantSession');
-    expect(launcher).toContain("NODE_ROLE: 'standalone'");
-    expect(launcher).toContain('SANDBOX_WORKSPACE_BASE_DIR');
-    expect(launcher).toContain('const standaloneEnv = {');
-    expect(launcher).toContain("runSandboxPhase('install'");
-    expect(launcher).toContain("runSandboxPhase('start'");
-    expect(launcher).toContain('nohup env ${envAssignments} /usr/local/bin/vm-agent');
-    expect(launcher).toContain('/tmp/vm-agent.log');
+    const containerDo = read('durable-objects/vm-agent-container.ts');
+    expect(containerDo).toContain("NODE_ROLE: 'standalone'");
+    expect(launcher).toContain('CF_CONTAINER_WORKSPACE_BASE_DIR');
+    expect(launcher).toContain('launchVmAgentContainer(');
+    expect(launcher).toContain("runContainerPhase('launch'");
+    expect(launcher).not.toContain('nohup env');
     expect(launcher).toContain("runtime: 'cf-container'");
     expect(launcher).toContain('signNodeCallbackToken');
     expect(launcher).toContain('signCallbackToken');
@@ -90,9 +92,26 @@ describe('cf-container runtime spike contracts', () => {
     expect(launcher).toContain('startAgentSessionOnNode');
   });
 
-  it('preinstalls GitHub CLI in the cf-container image for PR workflows', () => {
-    const dockerfile = readPackage('Dockerfile.sandbox');
+  it('marks raw container lifecycle exits visibly instead of silently resuming', () => {
+    const containerDo = read('durable-objects/vm-agent-container.ts');
 
+    expect(containerDo).toContain('override async onStop');
+    expect(containerDo).toContain("if (status === 'expired')");
+    expect(containerDo).toContain('override async onError');
+    expect(containerDo).toContain('override async onActivityExpired');
+    expect(containerDo).toContain("Container idle timeout expired; start a new instant session.");
+    expect(containerDo).toContain("return new Response('Container is stopped; create a new instant session.', { status: 410 })");
+    expect(containerDo).toContain("await this.ctx.storage.put('launchConfig', config)");
+    expect(containerDo).toContain('nodeCallbackToken: string');
+    expect(containerDo).toContain('CALLBACK_TOKEN: secrets.nodeCallbackToken');
+    expect(containerDo).toContain("status === 'stopped' ? 'stopped' : 'error'");
+    expect(containerDo).not.toContain('await this.startAndWaitForPorts({\\n      ports: config.vmAgentPort,\\n      startOptions: config');
+  });
+
+  it('uses a raw vm-agent container image for PR workflows', () => {
+    const dockerfile = readPackage('Dockerfile.vm-agent-container');
+
+    expect(dockerfile).toContain('ENTRYPOINT ["/usr/local/bin/vm-agent-bootstrap"]');
     expect(dockerfile).toContain('githubcli-archive-keyring.gpg');
     expect(dockerfile).toContain('apt-get install -y --no-install-recommends gh');
   });

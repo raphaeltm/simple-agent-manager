@@ -10,7 +10,7 @@ type Db = ReturnType<typeof drizzle<typeof schema>>;
 export type WorkspaceRuntime = AgentProfileRuntime;
 
 export interface WorkspaceRuntimeDecisionInput {
-  sandboxEnabled: boolean;
+  containerEnabled: boolean;
   explicitRuntime?: AgentProfileRuntime | null;
   credentialSource?: CredentialSource | null;
 }
@@ -27,7 +27,7 @@ export interface WorkspaceRuntimeDecision {
 }
 
 export function decideWorkspaceRuntime(input: WorkspaceRuntimeDecisionInput): WorkspaceRuntimeDecision {
-  if (!input.sandboxEnabled) {
+  if (!input.containerEnabled) {
     return { runtime: 'vm', reason: 'sandbox-disabled' };
   }
 
@@ -50,7 +50,7 @@ export function decideWorkspaceRuntime(input: WorkspaceRuntimeDecisionInput): Wo
 
 export async function resolveWorkspaceRuntime(
   db: Db,
-  env: Pick<Env, 'SANDBOX_ENABLED'>,
+  env: Pick<Env, 'CF_CONTAINER_ENABLED' | 'SANDBOX_ENABLED'>,
   input: {
     userId: string;
     projectId?: string | null;
@@ -58,8 +58,8 @@ export async function resolveWorkspaceRuntime(
     explicitRuntime?: AgentProfileRuntime | null;
   }
 ): Promise<WorkspaceRuntimeDecision> {
-  if (env.SANDBOX_ENABLED !== 'true') {
-    return decideWorkspaceRuntime({ sandboxEnabled: false, explicitRuntime: input.explicitRuntime });
+  if ((env.CF_CONTAINER_ENABLED ?? env.SANDBOX_ENABLED) !== 'true') {
+    return decideWorkspaceRuntime({ containerEnabled: false, explicitRuntime: input.explicitRuntime });
   }
 
   const credential = await resolveCredentialSource(
@@ -70,7 +70,7 @@ export async function resolveWorkspaceRuntime(
   );
 
   return decideWorkspaceRuntime({
-    sandboxEnabled: true,
+    containerEnabled: true,
     explicitRuntime: input.explicitRuntime,
     credentialSource: credential?.credentialSource ?? null,
   });

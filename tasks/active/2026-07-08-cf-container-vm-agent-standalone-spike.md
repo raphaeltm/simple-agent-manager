@@ -65,6 +65,21 @@ Follow-up implementation checklist:
 - [x] Reuse `fetchNodeAgent` for MCP workspace tools, file proxy routes, library upload/download helpers, local-forward proxying, and node log streaming so `runtime='cf-container'` nodes route through Sandbox.
 - [x] Add/extend focused tests for repo-specific instant-session workdirs, Sandbox-aware proxy surfaces, standalone clone-before-ready behavior, standalone local workspace info, token-redacted clone specs, and standalone workspace exec args.
 
+## Raw Container Pivot Follow-up: Remove Sandbox Supervision from Product Runtime
+
+The 2026-07-09 product pivot replaces the user-facing instant-session supervisor path with raw Cloudflare Containers while preserving the standalone vm-agent work from the spike. The Sandbox SDK remains only for admin/toolbox diagnostics.
+
+Implementation checklist:
+
+- [x] Add `VmAgentContainer extends Container` as a raw Cloudflare Container Durable Object with a vm-agent bootstrap entrypoint.
+- [x] Store non-secret per-instance launch config in DO storage and pass callback tokens only through per-start env vars.
+- [x] Replace product `getSandbox()`/`sandbox.exec()`/`nohup` launch supervision with `VM_AGENT_CONTAINER.launch(...)`.
+- [x] Route cf-container workspace HTTP/WebSocket proxying through the raw container DO path.
+- [x] Route Worker-to-vm-agent service calls through shared runtime-aware transport, including `nodeAgentRawRequest()` and `getWorkspacePortsOnNode()`.
+- [x] Destroy raw containers from the existing node/workspace stop path.
+- [x] Define lifecycle/idle semantics: stopped containers return 410, idle expiry marks workspace/node/session visibly expired/error-like and stops instead of silently restarting.
+- [x] Add/update focused API tests for raw routing, launch config/env propagation, lifecycle/idle handling, and raw-request/ports routing.
+
 ## Validation Notes
 
 - Local gates passed on 2026-07-08:
@@ -120,6 +135,11 @@ Follow-up implementation checklist:
   - Constitution Principle XI: no blocker. Internal URLs derive from `BASE_DOMAIN`; request timeouts use existing env-configurable helpers; the new Sandbox checkout base is configurable via `SANDBOX_WORKSPACE_BASE_DIR` with `/workspaces` as the default.
   - Go review: no local blocker. Standalone execution uses direct `exec.CommandContext` with argv arrays rather than shell interpolation; Docker behavior remains behind the non-standalone branch; focused tests cover local exec, clone ordering, and unsafe workdir rejection.
   - Test coverage: focused API and Go tests cover the screenshot regressions locally. Full staging verification is still required before treating the live productionized path as fully revalidated.
+- Raw Container pivot local validation on 2026-07-09:
+  - `pnpm --filter @simple-agent-manager/api typecheck` passed.
+  - `pnpm --filter @simple-agent-manager/api exec eslint src/durable-objects/vm-agent-container.ts src/services/vm-agent-container.ts src/services/instant-session.ts src/services/node-agent.ts src/services/nodes.ts src/services/workspace-runtime.ts src/index.ts tests/unit/cf-container-runtime-contract.test.ts tests/unit/services/instant-session.test.ts tests/unit/services/workspace-runtime.test.ts tests/unit/services/node-agent-ports-auth.test.ts` passed.
+  - `pnpm --filter @simple-agent-manager/api exec vitest run tests/unit/cf-container-runtime-contract.test.ts tests/unit/services/instant-session.test.ts tests/unit/services/workspace-runtime.test.ts tests/unit/services/node-agent-ports-auth.test.ts tests/unit/routes/chat-start.test.ts tests/unit/routes/mcp-library-tools.test.ts` passed (6 files / 57 tests).
+  - `pnpm exec eslint scripts/deploy/sync-wrangler-config.ts` passed.
 
 ## Acceptance Criteria
 

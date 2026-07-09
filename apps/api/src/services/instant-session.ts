@@ -7,7 +7,6 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
-import { errors } from '../middleware/error';
 import { signCallbackToken, signNodeCallbackToken } from './jwt';
 import { generateMcpToken, revokeMcpToken, storeMcpToken } from './mcp-token';
 import {
@@ -19,15 +18,14 @@ import {
 } from './node-agent';
 import { createNodeRecord } from './nodes';
 import * as projectDataService from './project-data';
-import {
-  destroySandboxInstance,
-  getSandboxConfig,
-  getSandboxInstance,
-  requireSandbox,
-  runSandboxPhase,
-  shellQuote,
-} from './sandbox';
 import { truncateTitle } from './task-title';
+import {
+  destroyVmAgentContainer,
+  getVmAgentContainerConfig,
+  launchVmAgentContainer,
+  requireVmAgentContainer,
+  runContainerPhase,
+} from './vm-agent-container';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -53,7 +51,7 @@ export interface LaunchInstantSessionResult {
   agentSessionId: string;
   acpSessionId: string;
   agentType: string;
-  sandboxId: string;
+  containerId: string;
   processId: string;
   workspaceUrl: string;
   timings: {
@@ -99,13 +97,15 @@ function repositoryDirectoryName(repository: string): string {
   return safeName || 'workspace';
 }
 
-function sandboxWorkspaceBaseDir(env: Env): string {
-  const configured = env.SANDBOX_WORKSPACE_BASE_DIR?.trim().replace(/\/+$/g, '');
+function containerWorkspaceBaseDir(env: Env): string {
+  const configured = (env.CF_CONTAINER_WORKSPACE_BASE_DIR || env.SANDBOX_WORKSPACE_BASE_DIR)
+    ?.trim()
+    .replace(/\/+$/g, '');
   return configured || '/workspaces';
 }
 
-function sandboxWorkspaceDir(env: Env, repository: string): string {
-  const baseDir = sandboxWorkspaceBaseDir(env);
+function containerWorkspaceDir(env: Env, repository: string): string {
+  const baseDir = containerWorkspaceBaseDir(env);
   const repoDir = repositoryDirectoryName(repository);
   return baseDir === '/' ? `/${repoDir}` : `${baseDir}/${repoDir}`;
 }
@@ -119,9 +119,9 @@ export async function launchInstantSession(
   env: Env,
   input: LaunchInstantSessionInput
 ): Promise<LaunchInstantSessionResult> {
-  requireSandbox(env);
+  requireVmAgentContainer(env);
 
-  const config = getSandboxConfig(env);
+  const config = getVmAgentContainerConfig(env);
   const startedAt = Date.now();
   const branch = input.branch?.trim() || input.project.defaultBranch || 'main';
   const workspaceName = getWorkspaceName(input);
@@ -183,84 +183,44 @@ export async function launchInstantSession(
     .set({ chatSessionId, updatedAt: now })
     .where(eq(schema.workspaces.id, workspaceId));
 
-  const sandboxId = node.id.toLowerCase();
-  const sandbox = await getSandboxInstance(env, sandboxId);
+  const containerId = node.id.toLowerCase();
   const nodeCallbackToken = await signNodeCallbackToken(node.id, env);
-  const vmAgentPort = env.SANDBOX_VM_AGENT_PORT ? parseInt(env.SANDBOX_VM_AGENT_PORT, 10) : 8080;
+  const vmAgentPort = config.vmAgentPort;
   const controlPlaneUrl = `https://api.${env.BASE_DOMAIN}`;
-  const phaseDetail = { nodeId: node.id, workspaceId, sandboxId };
-  const workspaceDir = sandboxWorkspaceDir(env, input.project.repository);
+  const phaseDetail = { nodeId: node.id, workspaceId, containerId };
+  const workspaceDir = containerWorkspaceDir(env, input.project.repository);
 
   try {
-    const installStart = Date.now();
-    const install = await runSandboxPhase('install', phaseDetail, () =>
-      sandbox.exec(
-        [
-          'set -e',
-          `mkdir -p ${shellQuote(workspaceDir)} /var/lib/vm-agent`,
-          `curl -fsSL "${controlPlaneUrl}/api/agent/download?os=linux&arch=amd64" -o /usr/local/bin/vm-agent.tmp`,
-          'chmod +x /usr/local/bin/vm-agent.tmp',
-          'mv /usr/local/bin/vm-agent.tmp /usr/local/bin/vm-agent',
-          '/usr/local/bin/vm-agent --help >/dev/null 2>&1 || true',
-          'ls -l /usr/local/bin/vm-agent',
-        ].join('\n'),
-        { timeout: config.execTimeoutMs }
+    const launchStart = Date.now();
+    await runContainerPhase('launch', phaseDetail, () =>
+      launchVmAgentContainer(
+        env,
+        node.id,
+        {
+          nodeId: node.id,
+          workspaceId,
+          projectId: input.project.id,
+          chatSessionId,
+          repository: input.project.repository,
+          branch,
+          workspaceDir,
+          controlPlaneUrl,
+          vmAgentPort,
+        },
+        {
+          nodeCallbackToken,
+        }
       )
     );
-    const installDurationMs = Date.now() - installStart;
-    if (!install.success) {
-      throw errors.internal(`vm-agent install failed: ${install.stderr || install.stdout}`);
-    }
-
-    const standaloneEnv = {
-      NODE_ROLE: 'standalone',
-      NODE_ID: node.id,
-      WORKSPACE_ID: workspaceId,
-      PROJECT_ID: input.project.id,
-      CHAT_SESSION_ID: chatSessionId,
-      CONTROL_PLANE_URL: controlPlaneUrl,
-      CALLBACK_TOKEN: nodeCallbackToken,
-      REPOSITORY: input.project.repository,
-      BRANCH: branch,
-      WORKSPACE_DIR: workspaceDir,
-      CONTAINER_WORK_DIR: workspaceDir,
-      CONTAINER_MODE: 'false',
-      PORT_SCAN_ENABLED: 'false',
-      VM_AGENT_PORT: String(vmAgentPort),
-      VM_AGENT_PROTOCOL: 'http',
-      COOKIE_SECURE: 'true',
-    };
-    const processId = `vm-agent-${node.id.toLowerCase()}`;
-    const envAssignments = Object.entries(standaloneEnv)
-      .map(([key, value]) => `${key}=${shellQuote(value)}`)
-      .join(' ');
-    const start = await runSandboxPhase('start', phaseDetail, () =>
-      sandbox.exec(
-        [
-          'set -e',
-          'test -x /usr/local/bin/vm-agent',
-          'cd /var/lib/vm-agent',
-          `nohup env ${envAssignments} /usr/local/bin/vm-agent > /tmp/vm-agent.log 2>&1 &`,
-          'pid=$!',
-          `echo "$pid" > ${shellQuote(`/tmp/${processId}.pid`)}`,
-          'sleep 0.2',
-          'if ! kill -0 "$pid" 2>/dev/null; then cat /tmp/vm-agent.log >&2 || true; exit 1; fi',
-          'echo "$pid"',
-        ].join('\n'),
-        { timeout: config.execTimeoutMs }
-      )
-    );
-    if (!start.success) {
-      throw errors.internal(`vm-agent start failed: ${start.stderr || start.stdout}`);
-    }
+    const launchDurationMs = Date.now() - launchStart;
 
     const agentReadyStart = Date.now();
-    await runSandboxPhase('wait_for_ready', phaseDetail, () => waitForNodeAgentReady(node.id, env));
+    await runContainerPhase('wait_for_ready', phaseDetail, () => waitForNodeAgentReady(node.id, env));
     const agentReadyDurationMs = Date.now() - agentReadyStart;
 
     const workspaceCreateStart = Date.now();
     const workspaceCallbackToken = await signCallbackToken(workspaceId, env);
-    await runSandboxPhase('create_workspace', phaseDetail, () =>
+    await runContainerPhase('create_workspace', phaseDetail, () =>
       createWorkspaceOnNode(node.id, env, input.userId, {
         workspaceId,
         repository: input.project.repository,
@@ -303,7 +263,7 @@ export async function launchInstantSession(
         env
       );
 
-      await runSandboxPhase('create_vm_agent_session', phaseDetail, () =>
+      await runContainerPhase('create_vm_agent_session', phaseDetail, () =>
         createAgentSessionOnNode(
           node.id,
           workspaceId,
@@ -334,7 +294,7 @@ export async function launchInstantSession(
       throw err;
     }
 
-    const acpSession = await runSandboxPhase('create_acp_session', phaseDetail, () =>
+    const acpSession = await runContainerPhase('create_acp_session', phaseDetail, () =>
       projectDataService.createAcpSession(
         env,
         input.project.id,
@@ -346,7 +306,7 @@ export async function launchInstantSession(
         agentSessionId
       )
     );
-    await runSandboxPhase('assign_acp_session', phaseDetail, () =>
+    await runContainerPhase('assign_acp_session', phaseDetail, () =>
       projectDataService.transitionAcpSession(env, input.project.id, acpSession.id, 'assigned', {
         actorType: 'system',
         actorId: input.userId,
@@ -358,7 +318,7 @@ export async function launchInstantSession(
     const acpSessionCreateDurationMs = Date.now() - acpSessionCreateStart;
 
     const acpSessionStartStart = Date.now();
-    await runSandboxPhase('start_acp_session', phaseDetail, () =>
+    await runContainerPhase('start_acp_session', phaseDetail, () =>
       startAgentSessionOnNode(
         node.id,
         workspaceId,
@@ -374,7 +334,7 @@ export async function launchInstantSession(
         input.overrides
       )
     );
-    await runSandboxPhase('mark_acp_session_running', phaseDetail, () =>
+    await runContainerPhase('mark_acp_session_running', phaseDetail, () =>
       projectDataService.transitionAcpSession(env, input.project.id, acpSession.id, 'running', {
         actorType: 'system',
         actorId: input.userId,
@@ -397,13 +357,13 @@ export async function launchInstantSession(
       agentSessionId,
       acpSessionId: acpSession.id,
       agentType: input.agentType,
-      sandboxId,
-      processId,
+      containerId,
+      processId: containerId,
       runtime: 'cf-container',
       workspaceUrl: `https://ws-${workspaceId.toLowerCase()}.${env.BASE_DOMAIN}`,
       timings: {
         setupDurationMs: Date.now() - startedAt,
-        installDurationMs,
+        installDurationMs: launchDurationMs,
         agentReadyDurationMs,
         workspaceCreateDurationMs,
         acpSessionCreateDurationMs,
@@ -442,11 +402,11 @@ export async function launchInstantSession(
           error: errorMessage(updateErr),
         });
       });
-    await destroySandboxInstance(env, sandboxId, phaseDetail).catch((destroyErr) => {
-      log.error('instant_session.sandbox_destroy_after_failure_failed', {
+    await destroyVmAgentContainer(env, containerId).catch((destroyErr) => {
+      log.error('instant_session.container_destroy_after_failure_failed', {
         nodeId: node.id,
         workspaceId,
-        sandboxId,
+        containerId,
         error: errorMessage(destroyErr),
       });
     });
