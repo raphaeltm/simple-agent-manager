@@ -417,6 +417,40 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     fallbackGroup: 'anthropic-premium',
   }),
   // --- OpenAI (via AI Gateway) ---
+  // GPT-5.6 preview series
+  openAIModel({
+    id: 'gpt-5.6-sol',
+    label: 'GPT-5.6 Sol',
+    tier: 'premium',
+    costPer1kInputTokens: 0.005,
+    costPer1kOutputTokens: 0.03,
+    contextWindow: 1000000,
+    toolCallSupport: 'excellent',
+    intendedRole: 'workspace-agent',
+    fallbackGroup: 'openai-premium',
+  }),
+  openAIModel({
+    id: 'gpt-5.6-terra',
+    label: 'GPT-5.6 Terra',
+    tier: 'premium',
+    costPer1kInputTokens: 0.0025,
+    costPer1kOutputTokens: 0.015,
+    contextWindow: 1000000,
+    toolCallSupport: 'excellent',
+    intendedRole: 'workspace-agent',
+    fallbackGroup: 'openai-premium',
+  }),
+  openAIModel({
+    id: 'gpt-5.6-luna',
+    label: 'GPT-5.6 Luna',
+    tier: 'standard',
+    costPer1kInputTokens: 0.001,
+    costPer1kOutputTokens: 0.006,
+    contextWindow: 1000000,
+    toolCallSupport: 'excellent',
+    intendedRole: 'workspace-agent',
+    fallbackGroup: 'openai-standard',
+  }),
   // GPT-5.5 series (current flagship)
   openAIModel({
     id: 'gpt-5.5-pro',
