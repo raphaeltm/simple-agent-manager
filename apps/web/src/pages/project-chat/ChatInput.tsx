@@ -67,6 +67,29 @@ function getRuntimeSummary(runtime: AgentProfileRuntime | null) {
   return 'Auto runtime';
 }
 
+function getRuntimeBadgeTitle(runtime: AgentProfileRuntime): string {
+  return runtime === 'cf-container' ? 'Instant container profile' : 'Cloud VM profile';
+}
+
+function RuntimeBadge({ runtime }: Readonly<{ runtime: AgentProfileRuntime }>) {
+  const isInstant = runtime === 'cf-container';
+  const Icon = isInstant ? Zap : Server;
+  return (
+    <span
+      className={[
+        'inline-flex shrink-0 items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-semibold uppercase leading-none',
+        isInstant
+          ? 'border-accent/30 bg-accent/10 text-accent'
+          : 'border-info/30 bg-info-tint text-info-fg',
+      ].join(' ')}
+      title={getRuntimeBadgeTitle(runtime)}
+    >
+      <Icon size={11} aria-hidden="true" />
+      {getRuntimeLabel(runtime)}
+    </span>
+  );
+}
+
 type ChatInputProps = Readonly<{
   value: string;
   onChange: (v: string) => void;
@@ -149,7 +172,7 @@ function getWizardDescription(step: ProfileWizardStep, providerContext: string) 
   const descriptions: Record<ProfileWizardStep, string> = {
     agent: 'Choose the agent this profile should use.',
     'work-type': 'Pick whether this profile should work independently or stay conversational.',
-    runtime: 'Choose the startup path for this profile.',
+    runtime: 'Choose Instant for quick chat, or Cloud VM for heavier work.',
     'vm-size': providerContext ? `Specs are from ${providerContext}.` : 'Choose a general machine tier.',
     name: 'Use a short name that will be easy to pick later.',
   };
@@ -275,11 +298,7 @@ export function ChatInput({
               title={profile.name}
             >
               <span className="truncate">{profile.name}</span>
-              {profile.runtime && (
-                <span className="shrink-0 rounded-sm bg-page px-1.5 py-0.5 text-[10px] uppercase text-fg-muted">
-                  {getRuntimeLabel(profile.runtime)}
-                </span>
-              )}
+              {profile.runtime && <RuntimeBadge runtime={profile.runtime} />}
             </button>
           ))}
           {selectedProfile && (
@@ -364,7 +383,7 @@ export function ChatInput({
                   icon={<Wrench size={20} />}
                   title="Build and open PRs"
                   description="Best when you want the agent to make changes, run checks, and carry the task to a pull request."
-                  onClick={() => onUpdateProfileWizard({ workType: 'task', runtime: 'vm', vmSize: profileWizard.vmSize ?? DEFAULT_VM_SIZE })}
+                  onClick={() => onUpdateProfileWizard({ workType: 'task', runtime: null, vmSize: profileWizard.vmSize ?? DEFAULT_VM_SIZE })}
                   disabled={profileWizard.saving}
                 />
                 <WorkTypeCard
@@ -372,7 +391,7 @@ export function ChatInput({
                   icon={<MessageSquare size={20} />}
                   title="Chat and explore"
                   description="Best for questions, planning, code reading, and lighter back-and-forth work."
-                  onClick={() => onUpdateProfileWizard({ workType: 'conversation', runtime: 'cf-container', vmSize: null })}
+                  onClick={() => onUpdateProfileWizard({ workType: 'conversation', runtime: null, vmSize: null })}
                   disabled={profileWizard.saving}
                 />
               </div>
@@ -384,7 +403,7 @@ export function ChatInput({
                   selected={profileWizard.runtime === 'cf-container'}
                   icon={<Zap size={20} />}
                   title="Instant container"
-                  description="Starts a conversational workspace without a separate provisioning step."
+                  description="Starts a chat workspace in a Cloudflare Container without a VM provisioning step."
                   onClick={() => onUpdateProfileWizard({ runtime: 'cf-container', vmSize: null, workType: 'conversation' })}
                   disabled={profileWizard.saving}
                 />

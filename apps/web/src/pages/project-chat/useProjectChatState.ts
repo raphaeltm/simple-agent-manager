@@ -439,13 +439,12 @@ export function useProjectChatState() {
   const openProfileWizard = useCallback(() => {
     const soleAgent = configuredAgents.length === 1 ? configuredAgents[0] : null;
     const initialAgentType = soleAgent?.id ?? selectedAgentType ?? configuredAgents[0]?.id ?? null;
-    const initialWorkType: TaskMode = 'conversation';
     setProfileWizard({
       open: true,
       step: soleAgent ? 'work-type' : 'agent',
       selectedAgentType: initialAgentType,
-      workType: initialWorkType,
-      runtime: 'cf-container',
+      workType: null,
+      runtime: null,
       vmSize: null,
       profileName: '',
       saving: false,

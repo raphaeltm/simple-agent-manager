@@ -62,12 +62,14 @@ const AGENT_PROFILES = [
     id: 'profile-codex',
     name: 'Codex',
     description: 'Use for focused implementation and code review.',
+    runtime: 'cf-container',
   }),
   makeAgentProfile({
     id: 'profile-open-code',
     name: 'Open Code',
     description: 'Profile with a multi-word name and a longer description for wrapping.',
     agentType: 'opencode',
+    runtime: 'vm',
   }),
   makeAgentProfile({
     id: 'profile-long-name',
@@ -360,7 +362,9 @@ test.describe('Project chat composer audit', () => {
       `Implement shared composer behavior with unicode π, emoji, HTML-like <button>, and ${'very long wrapping text '.repeat(16)}`
     );
 
-    await expect(page.getByRole('button', { name: 'Codex', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: /Codex\s+Instant/i })).toBeVisible();
+    await expect(page.getByTitle('Instant container profile')).toBeVisible();
+    await expect(page.getByTitle('Cloud VM profile')).toBeVisible();
     await captureComposerAudit(
       page,
       `project-chat-composer-new-long-${getProjectSuffix(testInfo.project.name)}`
@@ -452,7 +456,9 @@ test.describe('Project chat composer audit', () => {
   }, testInfo) => {
     await openMockedChat(page, 'duplicate');
 
-    await expect(page.getByRole('button', { name: 'Codex', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: /Codex\s+Instant/i })).toBeVisible();
+    await expect(page.getByTitle('Instant container profile')).toBeVisible();
+    await expect(page.getByTitle('Cloud VM profile')).toBeVisible();
     await expect(page.getByRole('button', { name: /Long reusable profile name/ })).toBeVisible();
     await captureComposerAudit(
       page,

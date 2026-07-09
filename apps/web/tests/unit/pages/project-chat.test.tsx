@@ -959,6 +959,39 @@ describe('ProjectChat profile setup wizard', () => {
     });
   });
 
+  it('creates an instant chat profile through the explicit runtime step', async () => {
+    mocks.listAgents.mockResolvedValue(AGENTS_SINGLE);
+
+    renderProjectChat();
+
+    await openProfileWizardFromGate();
+    expect(screen.getByText('What kind of work?')).toBeInTheDocument();
+
+    chooseWorkType(/Chat and explore/i);
+
+    expect(screen.getByText('Where should it run?')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Instant container/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Cloud VM/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Next/i })).toBeDisabled();
+
+    chooseRuntime(/Instant container/i);
+
+    await createProfileFromWizard({
+      defaultName: 'Claude Code Chat',
+      profileName: 'Fast Chat',
+      expectedPayload: {
+        agentType: 'claude-code',
+        runtime: 'cf-container',
+        vmSizeOverride: null,
+        workspaceProfile: 'lightweight',
+        taskMode: 'conversation',
+      },
+    });
+
+    expect(await screen.findByText('Fast Chat')).toBeInTheDocument();
+    expect(await screen.findByTitle('Instant container profile')).toBeInTheDocument();
+  });
+
   it('gates multiple agents behind the setup wizard and creates a profile', async () => {
     mocks.listAgents.mockResolvedValue(AGENTS_MULTI);
 
@@ -1324,6 +1357,7 @@ describe('ProjectChat agent profile selection', () => {
     await waitFor(() => {
       expect(screen.getByTitle('Instant Chat')).toBeInTheDocument();
     });
+    expect(screen.getByTitle('Instant container profile')).toBeInTheDocument();
 
     const textarea = screen.getByPlaceholderText('Describe what you want the agent to do...');
     fireEvent.change(textarea, { target: { value: 'Read the repo and summarize it' } });
