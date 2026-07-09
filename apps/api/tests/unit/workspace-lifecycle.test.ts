@@ -213,11 +213,13 @@ describe('/ready route — inline DO notification (TDF-5)', () => {
   });
 
   it('maps running status correctly', () => {
-    expect(readyHandler).toContain("nextStatus === 'running' ? 'running'");
+    expect(readyHandler).toContain('getTaskRunnerReadyStatus(nextStatus)');
+    expect(routeSource).toContain("if (status === 'running') return 'running'");
   });
 
   it('maps recovery status correctly', () => {
-    expect(readyHandler).toContain("nextStatus === 'recovery' ? 'recovery'");
+    expect(readyHandler).toContain('getTaskRunnerReadyStatus(nextStatus)');
+    expect(routeSource).toContain("if (status === 'recovery') return 'recovery'");
   });
 
   it('references TDF-5 in comment', () => {

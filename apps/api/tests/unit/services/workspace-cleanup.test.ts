@@ -6,6 +6,7 @@ import { cleanupWorkspaceForDeletion } from '../../../src/services/workspace-cle
 
 const mocks = vi.hoisted(() => ({
   deleteWorkspaceOnNode: vi.fn(),
+  stopNodeResources: vi.fn(),
   stopComputeTracking: vi.fn(),
   stopSession: vi.fn(),
   cleanupWorkspaceActivity: vi.fn(),
@@ -13,6 +14,9 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('../../../src/services/node-agent', () => ({
   deleteWorkspaceOnNode: (...args: unknown[]) => mocks.deleteWorkspaceOnNode(...args),
+}));
+vi.mock('../../../src/services/nodes', () => ({
+  stopNodeResources: (...args: unknown[]) => mocks.stopNodeResources(...args),
 }));
 vi.mock('../../../src/services/compute-usage', () => ({
   stopComputeTracking: (...args: unknown[]) => mocks.stopComputeTracking(...args),
@@ -84,6 +88,7 @@ describe('cleanupWorkspaceForDeletion', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.deleteWorkspaceOnNode.mockResolvedValue(undefined);
+    mocks.stopNodeResources.mockResolvedValue(undefined);
     mocks.stopComputeTracking.mockResolvedValue(undefined);
     mocks.stopSession.mockResolvedValue(undefined);
     mocks.cleanupWorkspaceActivity.mockResolvedValue(undefined);
@@ -108,9 +113,49 @@ describe('cleanupWorkspaceForDeletion', () => {
       env,
       'user-cleanup-1',
     );
+    expect(mocks.stopNodeResources).not.toHaveBeenCalled();
     expect(mocks.stopComputeTracking).toHaveBeenCalledWith(db, 'ws-cleanup-1');
     expect(deletedTables).toEqual(['agent_sessions', 'workspaces']);
     expect(waitUntil).toHaveBeenCalledTimes(2);
+  });
+
+  it('destroys cf-container nodes instead of only deleting the workspace inside the container', async () => {
+    const { db, deletedTables } = buildDb([{
+      status: 'running',
+      healthStatus: 'healthy',
+      runtime: 'cf-container',
+    }]);
+    const env = {} as Env;
+
+    await cleanupWorkspaceForDeletion({
+      db: db as never,
+      env,
+      workspace: workspace({ vmLocation: 'cf-container' }),
+      userId: 'user-cleanup-1',
+    });
+
+    expect(mocks.stopNodeResources).toHaveBeenCalledWith('node-cleanup-1', 'user-cleanup-1', env);
+    expect(mocks.deleteWorkspaceOnNode).not.toHaveBeenCalled();
+    expect(deletedTables).toEqual(['agent_sessions', 'workspaces']);
+  });
+
+  it('still requests cf-container destruction when the node heartbeat is unhealthy', async () => {
+    const { db } = buildDb([{
+      status: 'error',
+      healthStatus: 'unhealthy',
+      runtime: 'cf-container',
+    }]);
+    const env = {} as Env;
+
+    await cleanupWorkspaceForDeletion({
+      db: db as never,
+      env,
+      workspace: workspace({ vmLocation: 'cf-container' }),
+      userId: 'user-cleanup-1',
+    });
+
+    expect(mocks.stopNodeResources).toHaveBeenCalledWith('node-cleanup-1', 'user-cleanup-1', env);
+    expect(mocks.deleteWorkspaceOnNode).not.toHaveBeenCalled();
   });
 
   it('still deletes D1 workspace state when the node delete call fails', async () => {

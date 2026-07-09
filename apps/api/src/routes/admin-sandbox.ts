@@ -1,12 +1,12 @@
 /**
- * Admin Sandbox SDK prototype routes.
+ * Admin Sandbox SDK debugging routes.
  *
  * Experimental admin-only endpoints for prototyping Cloudflare Sandbox SDK
  * capabilities (exec, file I/O, git checkout, backup/restore, streaming).
  * NOT exposed to regular users — gated behind requireSuperadmin().
  *
- * These routes exist solely to measure and evaluate whether the Sandbox SDK
- * is viable for SAM project-level and top-level agents.
+ * The user-facing instant-session launch lives in services/instant-session.ts
+ * plus the project chat start endpoint.
  *
  * Kill switch: SANDBOX_ENABLED env var (default: false).
  */
@@ -15,55 +15,15 @@ import { Hono } from 'hono';
 import type { Env } from '../env';
 import { requireApproved, requireAuth, requireSuperadmin } from '../middleware/auth';
 import { errors } from '../middleware/error';
+import {
+  getSandboxConfig,
+  getSandboxInstance,
+  requireSandbox,
+} from '../services/sandbox';
 
 const adminSandboxRoutes = new Hono<{ Bindings: Env }>();
 
 adminSandboxRoutes.use('/*', requireAuth(), requireApproved(), requireSuperadmin());
-
-/** Resolve sandbox configuration from env vars with defaults. */
-function getSandboxConfig(env: Env) {
-  return {
-    enabled: env.SANDBOX_ENABLED === 'true',
-    execTimeoutMs: parseInt(env.SANDBOX_EXEC_TIMEOUT_MS || '30000', 10),
-    gitTimeoutMs: parseInt(env.SANDBOX_GIT_TIMEOUT_MS || '120000', 10),
-    sleepAfter: env.SANDBOX_SLEEP_AFTER || '10m',
-  };
-}
-
-/** Guard: check that sandbox is enabled and binding exists. */
-function requireSandbox(env: Env): void {
-  const config = getSandboxConfig(env);
-  if (!config.enabled) {
-    throw errors.badRequest('Sandbox prototype is disabled. Set SANDBOX_ENABLED=true to enable.');
-  }
-  if (!env.SANDBOX) {
-    throw errors.badRequest(
-      'SANDBOX binding not available. The Containers binding may not be configured on this environment.'
-    );
-  }
-}
-
-/**
- * Helper to get a sandbox instance via the SDK.
- *
- * The Sandbox SDK uses `getSandbox(env.Sandbox, id)` to obtain a proxy.
- * Since the SDK may not be available in all environments (e.g., Miniflare),
- * we dynamically import it and handle failures gracefully.
- */
-async function getSandboxInstance(env: Env, sandboxId: string) {
-  try {
-    // Dynamic import — @cloudflare/sandbox may not be available in all envs
-    const { getSandbox } = await import('@cloudflare/sandbox');
-    if (!env.SANDBOX) {
-      throw errors.badRequest('SANDBOX binding not available.');
-    }
-    return getSandbox(env.SANDBOX, sandboxId);
-  } catch (err) {
-    throw errors.internal(
-      `Failed to initialize Sandbox SDK: ${err instanceof Error ? err.message : String(err)}`
-    );
-  }
-}
 
 /**
  * GET /api/admin/sandbox/status — Check sandbox availability and config.

@@ -1,8 +1,13 @@
+import { eq } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/d1';
+
+import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { expectJsonRecord } from '../lib/runtime-validation';
 import { fetchWithTimeout, getTimeoutMs } from './fetch-timeout';
 import { signNodeManagementToken, signTerminalToken } from './jwt';
 import { recordNodeRoutingMetric } from './telemetry';
+import { fetchVmAgentContainer, getVmAgentContainerConfig } from './vm-agent-container';
 
 const DEFAULT_NODE_AGENT_REQUEST_TIMEOUT_MS = 30_000;
 
@@ -22,6 +27,12 @@ interface NodeAgentRequestOptions extends RequestInit {
   userId: string;
   workspaceId?: string | null;
   requestTimeoutMs?: number;
+}
+
+function requestInitWithoutSignal(options: RequestInit): RequestInit {
+  const serializableOptions = { ...options };
+  delete serializableOptions.signal;
+  return serializableOptions;
 }
 
 export function getNodeAgentReadyTimeoutMs(env: { NODE_AGENT_READY_TIMEOUT_MS?: string }): number {
@@ -46,6 +57,10 @@ export function getNodeAgentReadyPollIntervalMs(env: {
   return parsed;
 }
 
+export function getNodeAgentRequestTimeoutMs(env: { NODE_AGENT_REQUEST_TIMEOUT_MS?: string }): number {
+  return getTimeoutMs(env.NODE_AGENT_REQUEST_TIMEOUT_MS, DEFAULT_NODE_AGENT_REQUEST_TIMEOUT_MS);
+}
+
 export async function waitForNodeAgentReady(nodeId: string, env: Env): Promise<void> {
   const timeoutMs = getNodeAgentReadyTimeoutMs(env);
   const pollIntervalMs = getNodeAgentReadyPollIntervalMs(env);
@@ -64,7 +79,7 @@ export async function waitForNodeAgentReady(nodeId: string, env: Env): Promise<v
     try {
       const requestTimeoutError = `request timeout after ${requestTimeoutMs}ms`;
       const response = await Promise.race([
-        fetch(healthUrl, { method: 'GET', signal: controller.signal }),
+        fetchNodeAgent(nodeId, env, healthUrl, { method: 'GET', signal: controller.signal }, requestTimeoutMs),
         new Promise<Response>((_resolve, reject) => {
           timeoutHandle = setTimeout(() => {
             controller.abort();
@@ -81,6 +96,8 @@ export async function waitForNodeAgentReady(nodeId: string, env: Env): Promise<v
     } catch (err) {
       if (err instanceof Error && err.message.startsWith('request timeout after ')) {
         lastError = err.message;
+      } else if (err instanceof Error && err.message.startsWith('Request timed out after ')) {
+        lastError = err.message.replace('Request timed out after ', 'request timeout after ');
       } else if (err instanceof Error && err.name === 'AbortError') {
         lastError = `request timeout after ${requestTimeoutMs}ms`;
       } else {
@@ -138,18 +155,8 @@ async function nodeAgentRequest(
     env
   );
 
-  const requestTimeoutMs = options.requestTimeoutMs ?? getTimeoutMs(
-    env.NODE_AGENT_REQUEST_TIMEOUT_MS,
-    DEFAULT_NODE_AGENT_REQUEST_TIMEOUT_MS
-  );
-  const response = await fetchWithTimeout(
-    url,
-    {
-      ...options,
-      headers,
-    },
-    requestTimeoutMs
-  );
+  const requestTimeoutMs = options.requestTimeoutMs ?? getNodeAgentRequestTimeoutMs(env);
+  const response = await fetchNodeAgent(nodeId, env, url, { ...options, headers }, requestTimeoutMs);
 
   recordNodeRoutingMetric(
     {
@@ -190,6 +197,66 @@ async function nodeAgentRequest(
         ? `Node Agent returned invalid JSON: ${err.message}`
         : 'Node Agent returned invalid JSON'
     );
+  }
+}
+
+export async function fetchNodeAgent(
+  nodeId: string,
+  env: Env,
+  url: string,
+  options: RequestInit,
+  requestTimeoutMs: number
+): Promise<Response> {
+  if (!env.DATABASE || typeof env.DATABASE.prepare !== 'function') {
+    return fetchWithTimeout(url, options, requestTimeoutMs);
+  }
+
+  const db = drizzle(env.DATABASE, { schema });
+  const node = await db
+    .select({ runtime: schema.nodes.runtime })
+    .from(schema.nodes)
+    .where(eq(schema.nodes.id, nodeId))
+    .get();
+
+  if (node?.runtime !== 'cf-container') {
+    return fetchWithTimeout(url, options, requestTimeoutMs);
+  }
+
+  const config = getVmAgentContainerConfig(env);
+  if (!config.enabled) {
+    throw new Error('Container workspace runtime is disabled');
+  }
+  if (!env.VM_AGENT_CONTAINER) {
+    throw new Error('VM_AGENT_CONTAINER binding is unavailable');
+  }
+
+  const vmAgentPort = config.vmAgentPort;
+  const containerUrl = new URL(url);
+  containerUrl.protocol = 'http:';
+  containerUrl.hostname = 'localhost';
+  containerUrl.port = String(vmAgentPort);
+
+  let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+  try {
+    const response = await Promise.race([
+      fetchVmAgentContainer(
+        env,
+        nodeId,
+        new Request(containerUrl.toString(), requestInitWithoutSignal(options)),
+        vmAgentPort
+      ),
+      new Promise<Response>((_resolve, reject) => {
+        timeoutHandle = setTimeout(
+          () => reject(new Error(`Request timed out after ${requestTimeoutMs}ms`)),
+          requestTimeoutMs
+        );
+      }),
+    ]);
+    return response;
+  } finally {
+    if (timeoutHandle) {
+      clearTimeout(timeoutHandle);
+    }
   }
 }
 
@@ -602,7 +669,7 @@ export async function nodeAgentRawRequest(
 
   const DEFAULT_EXPORT_TIMEOUT_MS = 60_000;
   const timeoutMs = getTimeoutMs(env.NODE_AGENT_REQUEST_TIMEOUT_MS, DEFAULT_EXPORT_TIMEOUT_MS);
-  return fetchWithTimeout(url, { method: 'GET', headers }, timeoutMs);
+  return fetchNodeAgent(nodeId, env, url, { method: 'GET', headers }, timeoutMs);
 }
 
 export async function getWorkspacePortsOnNode(
@@ -635,7 +702,9 @@ export async function getWorkspacePortsOnNode(
     env.NODE_AGENT_REQUEST_TIMEOUT_MS,
     DEFAULT_NODE_AGENT_REQUEST_TIMEOUT_MS
   );
-  const response = await fetchWithTimeout(
+  const response = await fetchNodeAgent(
+    nodeId,
+    env,
     url,
     {
       method: 'GET',

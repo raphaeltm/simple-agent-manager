@@ -13,6 +13,13 @@ import (
 	"github.com/workspace/vm-agent/internal/callbackretry"
 )
 
+const (
+	authorizationHeaderName = "Authorization"
+	bearerTokenPrefix       = "Bearer "
+	contentTypeHeaderName   = "Content-Type"
+	jsonContentType         = "application/json"
+)
+
 // SyncCredential sends an updated credential back to the control plane.
 // This is called after a session ends when the agent used file-based credential
 // injection (e.g. codex-acp auth.json) and the credential may have been refreshed.
@@ -63,8 +70,8 @@ func (s *Server) SyncCredential(
 		if err != nil {
 			return fmt.Errorf("build credential-sync request: %w", err)
 		}
-		req.Header.Set("Authorization", "Bearer "+callbackToken)
-		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set(authorizationHeaderName, bearerTokenPrefix+callbackToken)
+		req.Header.Set(contentTypeHeaderName, jsonContentType)
 
 		resp, err := s.controlPlaneHTTPClient(0).Do(req)
 		if err != nil {
@@ -137,8 +144,8 @@ func (s *Server) notifyWorkspaceProvisioningFailed(
 		if err != nil {
 			return fmt.Errorf("build provisioning-failed request: %w", err)
 		}
-		req.Header.Set("Authorization", "Bearer "+trimmedCallbackToken)
-		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set(authorizationHeaderName, bearerTokenPrefix+trimmedCallbackToken)
+		req.Header.Set(contentTypeHeaderName, jsonContentType)
 
 		resp, err := s.controlPlaneHTTPClient(0).Do(req)
 		if err != nil {
@@ -165,4 +172,34 @@ func (s *Server) notifyWorkspaceProvisioningFailed(
 
 		return nil
 	})
+}
+
+func (s *Server) notifyWorkspaceReady(ctx context.Context, workspaceID, callbackToken, status string) error {
+	if callbackToken == "" {
+		return fmt.Errorf("callback token is empty")
+	}
+	if status == "" {
+		status = "running"
+	}
+	body, err := json.Marshal(map[string]string{"status": status})
+	if err != nil {
+		return fmt.Errorf("failed to encode ready request body: %w", err)
+	}
+	endpoint := strings.TrimRight(s.config.ControlPlaneURL, "/") + "/api/workspaces/" + workspaceID + "/ready"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("failed to create ready request: %w", err)
+	}
+	req.Header.Set(contentTypeHeaderName, jsonContentType)
+	req.Header.Set(authorizationHeaderName, bearerTokenPrefix+callbackToken)
+	res, err := s.controlPlaneHTTPClient(s.config.WorkspaceReadyCallbackTimeout).Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to call ready endpoint: %w", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		respBody, _ := io.ReadAll(io.LimitReader(res.Body, 8*1024))
+		return fmt.Errorf("ready endpoint returned HTTP %d: %s", res.StatusCode, strings.TrimSpace(string(respBody)))
+	}
+	return nil
 }

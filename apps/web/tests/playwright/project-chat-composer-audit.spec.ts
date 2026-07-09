@@ -43,6 +43,7 @@ function makeAgentProfile(overrides: Record<string, unknown>) {
     systemPromptAppend: null,
     maxTurns: null,
     timeoutMinutes: null,
+    runtime: null,
     vmSizeOverride: null,
     provider: null,
     vmLocation: null,
@@ -61,12 +62,14 @@ const AGENT_PROFILES = [
     id: 'profile-codex',
     name: 'Codex',
     description: 'Use for focused implementation and code review.',
+    runtime: 'cf-container',
   }),
   makeAgentProfile({
     id: 'profile-open-code',
     name: 'Open Code',
     description: 'Profile with a multi-word name and a longer description for wrapping.',
     agentType: 'opencode',
+    runtime: 'vm',
   }),
   makeAgentProfile({
     id: 'profile-long-name',
@@ -89,6 +92,7 @@ const SKILLS = [
     systemPromptAppend: null,
     maxTurns: null,
     timeoutMinutes: null,
+    runtime: null,
     vmSizeOverride: 'large',
     provider: null,
     vmLocation: null,
@@ -358,7 +362,9 @@ test.describe('Project chat composer audit', () => {
       `Implement shared composer behavior with unicode π, emoji, HTML-like <button>, and ${'very long wrapping text '.repeat(16)}`
     );
 
-    await expect(page.getByRole('button', { name: 'Codex', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: /Codex\s+Instant/i })).toBeVisible();
+    await expect(page.getByTitle('Instant container profile')).toBeVisible();
+    await expect(page.getByTitle('Cloud VM profile')).toBeVisible();
     await captureComposerAudit(
       page,
       `project-chat-composer-new-long-${getProjectSuffix(testInfo.project.name)}`
@@ -418,6 +424,13 @@ test.describe('Project chat composer audit', () => {
       page,
       `project-chat-profile-wizard-single-work-type-${getProjectSuffix(testInfo.project.name)}`
     );
+
+    await chooseWizardOption(page, /Chat and explore/i);
+    await expect(page.getByText('Where should it run?')).toBeVisible();
+    await captureComposerAudit(
+      page,
+      `project-chat-profile-wizard-single-runtime-${getProjectSuffix(testInfo.project.name)}`
+    );
   });
 
   test('multi-agent no-profile state gates composer and opens wizard', async ({
@@ -443,7 +456,9 @@ test.describe('Project chat composer audit', () => {
   }, testInfo) => {
     await openMockedChat(page, 'duplicate');
 
-    await expect(page.getByRole('button', { name: 'Codex', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: /Codex\s+Instant/i })).toBeVisible();
+    await expect(page.getByTitle('Instant container profile')).toBeVisible();
+    await expect(page.getByTitle('Cloud VM profile')).toBeVisible();
     await expect(page.getByRole('button', { name: /Long reusable profile name/ })).toBeVisible();
     await captureComposerAudit(
       page,
@@ -454,7 +469,7 @@ test.describe('Project chat composer audit', () => {
     await newButtons.last().click();
     await chooseWizardOption(page, /OpenAI Codex/i);
     await chooseWizardOption(page, /Chat and explore/i);
-    await chooseWizardOption(page, /Medium/i);
+    await chooseWizardOption(page, /Instant container/i);
     await page.getByLabel('Profile name').fill('Codex');
     await page.getByRole('button', { name: /Create profile/i }).click();
 

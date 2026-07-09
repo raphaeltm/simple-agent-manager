@@ -18,6 +18,8 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+const localShellPath = "/bin/sh"
+
 // BootLogReporter sends structured log entries to the control plane.
 // It must be non-nil and have a valid token for logging to work.
 type BootLogReporter interface {
@@ -127,6 +129,9 @@ type GatewayConfig struct {
 	ContainerUser string
 	// ContainerWorkDir is the working directory inside the container.
 	ContainerWorkDir string
+	// ProcessLauncher starts ACP subprocesses. Nil uses Docker exec, preserving
+	// the traditional VM/devcontainer path.
+	ProcessLauncher ProcessLauncher
 	// GitTokenFetcher returns a fresh GitHub installation token for the
 	// workspace. It is called at ACP session start to inject GH_TOKEN into
 	// the agent process. If nil or returns error, GH_TOKEN is omitted.
@@ -798,6 +803,60 @@ func installAgentBinary(ctx context.Context, containerID string, info agentComma
 	}
 
 	slog.Info("Agent binary installed successfully", "command", info.command)
+	return nil
+}
+
+// installAgentBinaryLocal installs the ACP adapter binary in the LOCAL process
+// namespace (standalone / cf-container mode), mirroring installAgentBinary but
+// without docker exec. In standalone mode the vm-agent runs INSIDE the container,
+// so agents are installed and spawned in the same filesystem/PID namespace and
+// resolved via the vm-agent's own $PATH (see startLocalProcess). The install
+// script is the same hardcoded literal from getAgentCommandInfo — never derived
+// from external input.
+func installAgentBinaryLocal(ctx context.Context, info agentCommandInfo) error {
+	// Fast path: check without mutex. exec.LookPath matches how startLocalProcess
+	// resolves the command, so this is the correct "already installed" check.
+	if _, err := exec.LookPath(info.command); err == nil {
+		slog.Info("Agent binary is already installed (local)", "command", info.command)
+		return nil
+	}
+
+	// Slow path: acquire mutex to serialize installs (shared with docker path).
+	agentInstallMu.Lock()
+	defer agentInstallMu.Unlock()
+
+	// Bail out if context was cancelled while waiting for the mutex.
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+
+	// Double-check after acquiring mutex — another goroutine may have installed it.
+	if _, err := exec.LookPath(info.command); err == nil {
+		slog.Info("Agent binary was installed by another goroutine (local)", "command", info.command)
+		return nil
+	}
+
+	slog.Info("Agent binary not found locally, installing", "command", info.command)
+
+	// For npm-based installs, clean up stale partial install directories left
+	// by previous failed npm installs (same rationale as the docker path).
+	if info.isNpmBased {
+		cleanupScript := fmt.Sprintf(
+			`rm -rf /usr/local/lib/node_modules/@zed-industries/.%s-* /usr/local/share/nvm/versions/node/*/lib/node_modules/@zed-industries/.%s-* 2>/dev/null; true`,
+			info.command, info.command,
+		)
+		cleanupCmd := exec.CommandContext(ctx, localShellPath, "-c", cleanupScript)
+		_ = cleanupCmd.Run() // best-effort cleanup
+	}
+
+	installScript := agentInstallScript(info)
+	installCmd := exec.CommandContext(ctx, localShellPath, "-c", installScript)
+	output, err := installCmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("local install command failed: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+
+	slog.Info("Agent binary installed successfully (local)", "command", info.command)
 	return nil
 }
 

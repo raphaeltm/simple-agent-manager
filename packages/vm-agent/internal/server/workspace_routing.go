@@ -205,7 +205,7 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 			metadataChanged = true
 		}
 		if runtime.ContainerWorkDir == "" {
-			runtime.ContainerWorkDir = deriveContainerWorkDirForRepo(runtime.WorkspaceDir, runtime.Repository)
+			runtime.ContainerWorkDir = s.defaultContainerWorkDir(runtime.WorkspaceDir, runtime.Repository)
 			metadataChanged = true
 		}
 		if runtime.ContainerUser == "" {
@@ -279,7 +279,7 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 	}
 	containerWorkDir := persistedContainerWorkDir
 	if containerWorkDir == "" {
-		containerWorkDir = deriveContainerWorkDirForRepo(workspaceDir, effectiveRepo)
+		containerWorkDir = s.defaultContainerWorkDir(workspaceDir, effectiveRepo)
 	}
 	containerUser := persistedContainerUser
 	if containerUser == "" {
@@ -529,6 +529,15 @@ func deriveContainerWorkDirForRepo(workspaceDir, repository string) string {
 		return filepath.Join("/workspaces", repoDir)
 	}
 	return deriveContainerWorkDir(workspaceDir)
+}
+
+func (s *Server) defaultContainerWorkDir(workspaceDir, repository string) string {
+	if s != nil && s.config != nil && s.config.IsStandaloneMode() {
+		if configured := strings.TrimSpace(s.config.ContainerWorkDir); configured != "" {
+			return configured
+		}
+	}
+	return deriveContainerWorkDirForRepo(workspaceDir, repository)
 }
 
 func deriveContainerWorkDir(workspaceDir string) string {

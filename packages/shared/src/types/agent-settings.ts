@@ -163,6 +163,13 @@ export function isAgentEffortSupported(agentType: string, effort: AgentEffort): 
   return getSupportedEffortsForAgent(agentType).includes(effort);
 }
 
+export const AGENT_PROFILE_RUNTIMES = ['vm', 'cf-container'] as const;
+export type AgentProfileRuntime = (typeof AGENT_PROFILE_RUNTIMES)[number];
+
+export function isAgentProfileRuntime(value: unknown): value is AgentProfileRuntime {
+  return typeof value === 'string' && (AGENT_PROFILE_RUNTIMES as readonly string[]).includes(value);
+}
+
 // =============================================================================
 // Agent Profiles (per-project role definitions)
 // =============================================================================
@@ -185,6 +192,8 @@ export interface AgentProfile {
   provider: string | null;
   vmLocation: string | null;
   workspaceProfile: string | null;
+  /** Workspace runtime preference. null = auto-resolve from environment/profile/user tier. */
+  runtime: AgentProfileRuntime | null;
   /** Devcontainer config name (subdirectory under .devcontainer/). null = auto-discover default. */
   devcontainerConfigName: string | null;
   taskMode: string | null;
@@ -210,6 +219,8 @@ export interface CreateAgentProfileRequest {
   provider?: string | null;
   vmLocation?: string | null;
   workspaceProfile?: string | null;
+  /** Workspace runtime preference. null/omitted = automatic. */
+  runtime?: AgentProfileRuntime | null;
   /** Devcontainer config name (subdirectory under .devcontainer/). null = auto-discover default. */
   devcontainerConfigName?: string | null;
   taskMode?: string | null;
@@ -232,6 +243,8 @@ export interface UpdateAgentProfileRequest {
   provider?: string | null;
   vmLocation?: string | null;
   workspaceProfile?: string | null;
+  /** Workspace runtime preference. null = automatic. */
+  runtime?: AgentProfileRuntime | null;
   /** Devcontainer config name (subdirectory under .devcontainer/). null = auto-discover default. */
   devcontainerConfigName?: string | null;
   taskMode?: string | null;
@@ -254,6 +267,8 @@ export interface ResolvedAgentProfile {
   provider: string | null;
   vmLocation: string | null;
   workspaceProfile: string | null;
+  /** Workspace runtime preference. null = automatic. */
+  runtime: AgentProfileRuntime | null;
   /** Devcontainer config name (subdirectory under .devcontainer/). null = auto-discover default. */
   devcontainerConfigName: string | null;
   taskMode: string | null;

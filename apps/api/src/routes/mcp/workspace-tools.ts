@@ -19,6 +19,7 @@ import {
   signPortAccessToken,
   signTerminalToken,
 } from '../../services/jwt';
+import { fetchNodeAgent } from '../../services/node-agent';
 import {
   INTERNAL_ERROR,
   INVALID_PARAMS,
@@ -110,6 +111,8 @@ function vmAgentToolUrl(
 }
 
 async function fetchVmAgentJson(
+  env: Env,
+  nodeId: string,
   vmUrl: string,
   method: 'GET' | 'POST',
   headers: Record<string, string>,
@@ -129,7 +132,7 @@ async function fetchVmAgentJson(
     fetchOpts.body = JSON.stringify(body);
   }
 
-  const res = await fetch(vmUrl, fetchOpts);
+  const res = await fetchNodeAgent(nodeId, env, vmUrl, fetchOpts, timeoutMs);
 
   if (!res.ok) {
     const errText = await res.text().catch(() => 'unknown error');
@@ -168,7 +171,7 @@ export async function proxyToVmAgent(
     Authorization: `Bearer ${token}`,
   };
 
-  return fetchVmAgentJson(vmUrl, method, headers, body, timeoutMs);
+  return fetchVmAgentJson(env, workspace.nodeId, vmUrl, method, headers, body, timeoutMs);
 }
 
 /**
@@ -197,7 +200,7 @@ export async function proxyToVmAgentWithNodeManagement(
     'X-SAM-Workspace-Id': workspaceId,
   };
 
-  return fetchVmAgentJson(vmUrl, method, headers, body, timeoutMs);
+  return fetchVmAgentJson(env, workspace.nodeId, vmUrl, method, headers, body, timeoutMs);
 }
 
 export async function startBuildPublishJobOnVm(
@@ -216,6 +219,8 @@ export async function startBuildPublishJobOnVm(
   const vmUrl = vmAgentUrlForPath(env, nodeId, path);
   const timeoutMs = timeoutOverrideMs ?? getWorkspaceToolTimeout(env);
   return fetchVmAgentJson(
+    env,
+    nodeId,
     vmUrl,
     'POST',
     {

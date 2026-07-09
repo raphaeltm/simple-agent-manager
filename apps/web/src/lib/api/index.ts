@@ -366,6 +366,8 @@ export type {
   SessionStateSnapshot,
   SessionSummaryItem,
   SessionSummaryResponse,
+  StartInstantChatSessionRequest,
+  StartInstantChatSessionResponse,
 } from './sessions';
 export {
   cancelAgentPrompt,
@@ -379,6 +381,7 @@ export {
   listChatSessions,
   resetIdleTimer,
   sendFollowUpPrompt,
+  startInstantChatSession,
   stopChatSession,
   summarizeSession,
 } from './sessions';

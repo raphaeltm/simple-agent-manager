@@ -93,11 +93,12 @@ const (
 const (
 	RoleWorkspace  = "workspace"
 	RoleDeployment = "deployment"
+	RoleStandalone = "standalone"
 )
 
 // Config holds all configuration values for the VM Agent.
 type Config struct {
-	// Node role: "workspace" (default) or "deployment"
+	// Node role: "workspace" (default), "deployment", or "standalone"
 	Role string
 
 	// Server settings
@@ -585,10 +586,10 @@ func Load() (*Config, error) {
 
 	// Validate Role enum
 	switch cfg.Role {
-	case RoleWorkspace, RoleDeployment:
+	case RoleWorkspace, RoleDeployment, RoleStandalone:
 		// valid
 	default:
-		return nil, fmt.Errorf("NODE_ROLE must be %q or %q, got %q", RoleWorkspace, RoleDeployment, cfg.Role)
+		return nil, fmt.Errorf("NODE_ROLE must be %q, %q, or %q, got %q", RoleWorkspace, RoleDeployment, RoleStandalone, cfg.Role)
 	}
 
 	// Validate TaskMode enum (workspace mode only)
@@ -615,6 +616,12 @@ func Load() (*Config, error) {
 // IsDeploymentMode returns true if the agent is running in deployment role.
 func (c *Config) IsDeploymentMode() bool {
 	return c.Role == RoleDeployment
+}
+
+// IsStandaloneMode returns true if the agent is running directly inside a
+// single-workspace container without Docker/devcontainer indirection.
+func (c *Config) IsStandaloneMode() bool {
+	return c.Role == RoleStandalone
 }
 
 func deriveWorkspaceDir(workspaceBaseDir, repository string) string {

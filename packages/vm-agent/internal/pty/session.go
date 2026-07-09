@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/creack/pty"
@@ -98,6 +99,7 @@ type SessionConfig struct {
 	OnClose          func()
 	ContainerID      string // If set, exec into this Docker container
 	ContainerUser    string // User to run as inside the container
+	ProcessGroup     bool   // If true, start in a new process group and kill by negative PGID
 	OutputBufferSize int    // Ring buffer capacity in bytes (0 = default)
 }
 
@@ -144,6 +146,10 @@ func NewSession(cfg SessionConfig) (*Session, error) {
 		if cfg.WorkDir != "" {
 			cmd.Dir = cfg.WorkDir
 		}
+	}
+
+	if cfg.ProcessGroup {
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	}
 
 	// Start PTY
@@ -252,7 +258,16 @@ func (s *Session) Close() error {
 
 	// Kill process if still running
 	if s.Cmd.Process != nil {
-		_ = s.Cmd.Process.Kill()
+		if s.Cmd.SysProcAttr != nil && s.Cmd.SysProcAttr.Setpgid {
+			pgid := s.Cmd.Process.Pid
+			if err := syscall.Kill(-pgid, syscall.SIGTERM); err == nil {
+				_, _ = s.Cmd.Process.Wait()
+				return nil
+			}
+		}
+		if s.Cmd.Process != nil {
+			_ = s.Cmd.Process.Kill()
+		}
 		_, _ = s.Cmd.Process.Wait()
 	}
 

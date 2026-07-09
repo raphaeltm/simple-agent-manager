@@ -1,16 +1,37 @@
 # Cloudflare Sandbox SDK base image — includes the /container-server/sandbox
 # binary that exposes the HTTP API used by getSandbox()/exec()/readFile()/etc.
 # IMPORTANT: The image tag MUST match the @cloudflare/sandbox npm package version.
-FROM docker.io/cloudflare/sandbox:0.9.2
+FROM docker.io/cloudflare/sandbox:0.12.1
 
 # The base image already includes Node.js 20, Bun, git, curl, and common tools.
-# Add any extra tools needed for SAM agent workloads here.
-RUN apt-get update && apt-get install -y --no-install-recommends jq && \
+# Add extra tools needed for SAM agent workloads here. The normal VM runtime
+# can install GitHub CLI during devcontainer bootstrap; standalone cf-container
+# sessions skip that bootstrap path, so the image must include gh for PR flows.
+# Pre-bake the Claude Code ACP adapter (and CLI) into the image. In standalone
+# (cf-container) mode the vm-agent runs the ACP adapter directly. Installing it
+# at BUILD time — rather than via runtime `npm install -g` inside the running
+# container — avoids a CF Sandbox / gVisor overlay filesystem visibility gap
+# where a freshly runtime-installed binary is not execve-able by the vm-agent
+# process for several seconds after npm reports success. Image-layer files are
+# fully materialized at container boot, so ensureAgentInstalled hits the
+# already-installed fast path and startLocalProcess execs immediately.
+# Aligns with the spike constraint of a single prebuilt image.
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends ca-certificates jq wget; \
+    mkdir -p -m 755 /etc/apt/keyrings; \
+    wget -qO- https://cli.github.com/packages/githubcli-archive-keyring.gpg > /etc/apt/keyrings/githubcli-archive-keyring.gpg; \
+    chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg; \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends gh; \
+    npm install -g @zed-industries/claude-agent-acp @anthropic-ai/claude-code; \
+    npm cache clean --force; \
+    mkdir -p /workspaces; \
     rm -rf /var/lib/apt/lists/*
 
-# Create workspace directory (base image may already have it, but ensure it exists)
-RUN mkdir -p /workspace
-WORKDIR /workspace
+# Create workspace root (base image may already have it, but ensure it exists)
+WORKDIR /workspaces
 
 # Do NOT override ENTRYPOINT — the base image sets ENTRYPOINT ["/container-server/sandbox"]
 # which starts the HTTP API server. CMD is optional (runs as child process of sandbox binary).

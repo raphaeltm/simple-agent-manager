@@ -171,6 +171,9 @@ importers:
       '@aws-sdk/s3-request-presigner':
         specifier: 3.1033.0
         version: 3.1033.0
+      '@cloudflare/containers':
+        specifier: 0.3.7
+        version: 0.3.7
       '@cloudflare/sandbox':
         specifier: ^0.12.1
         version: 0.12.1(@xterm/xterm@5.5.0)

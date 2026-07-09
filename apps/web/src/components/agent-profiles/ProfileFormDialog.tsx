@@ -1,6 +1,7 @@
 import type {
   AgentEffort,
   AgentProfile,
+  AgentProfileRuntime,
   CreateAgentProfileRequest,
   GitHubCliPermissionLevel,
   GitHubCliPolicy,
@@ -64,6 +65,12 @@ const VM_SIZES = [
   { value: 'small', label: 'Small' },
   { value: 'medium', label: 'Medium' },
   { value: 'large', label: 'Large' },
+] as const;
+
+const RUNTIMES = [
+  { value: '', label: 'Auto' },
+  { value: 'cf-container', label: 'Instant container' },
+  { value: 'vm', label: 'Cloud VM' },
 ] as const;
 
 const WORKSPACE_PROFILES = [
@@ -225,8 +232,14 @@ function executionSummary(maxTurns: string, systemPromptAppend: string): string 
   return joinOrDefault([maxTurns && `${maxTurns} turns`, systemPromptAppend.trim() && 'custom prompt']);
 }
 
-function infraSummary(vmSize: string, workspaceProfile: string, taskMode: string): string {
-  return joinOrDefault([vmSize && `${vmSize} VM`, workspaceProfile, taskMode], ' · ');
+function runtimeSummary(runtime: string): string | false {
+  if (runtime === 'cf-container') return 'Instant container';
+  if (runtime === 'vm') return 'Cloud VM';
+  return false;
+}
+
+function infraSummary(vmSize: string, workspaceProfile: string, taskMode: string, runtime: string): string {
+  return joinOrDefault([runtimeSummary(runtime), vmSize && `${vmSize} VM`, workspaceProfile, taskMode], ' · ');
 }
 
 // ---------------------------------------------------------------------------
@@ -251,6 +264,7 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
   const [systemPromptAppend, setSystemPromptAppend] = useState('');
   const [maxTurns, setMaxTurns] = useState('');
   const [timeoutMinutes, setTimeoutMinutes] = useState('');
+  const [runtime, setRuntime] = useState('');
   const [vmSizeOverride, setVmSizeOverride] = useState('');
   const [workspaceProfile, setWorkspaceProfile] = useState('');
   const [devcontainerConfigName, setDevcontainerConfigName] = useState('');
@@ -266,6 +280,7 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
   // Reset form when opening/closing or when profile changes
   useEffect(() => {
     if (isOpen && profile) {
+      const profileRuntime = profile.runtime ?? '';
       setName(profile.name);
       setDescription(profile.description ?? '');
       setAgentType(profile.agentType);
@@ -275,10 +290,11 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
       setSystemPromptAppend(profile.systemPromptAppend ?? '');
       setMaxTurns(profile.maxTurns != null ? String(profile.maxTurns) : '');
       setTimeoutMinutes(profile.timeoutMinutes != null ? String(profile.timeoutMinutes) : '');
-      setVmSizeOverride(profile.vmSizeOverride ?? '');
-      setWorkspaceProfile(profile.workspaceProfile ?? '');
-      setDevcontainerConfigName(profile.devcontainerConfigName ?? '');
-      setTaskMode(profile.taskMode ?? '');
+      setRuntime(profileRuntime);
+      setVmSizeOverride(profileRuntime === 'cf-container' ? '' : profile.vmSizeOverride ?? '');
+      setWorkspaceProfile(profileRuntime === 'cf-container' ? 'lightweight' : profile.workspaceProfile ?? '');
+      setDevcontainerConfigName(profileRuntime === 'cf-container' ? '' : profile.devcontainerConfigName ?? '');
+      setTaskMode(profileRuntime === 'cf-container' ? 'conversation' : profile.taskMode ?? '');
       setGithubCliPolicy(profile.githubCliPolicy ?? DEFAULT_GITHUB_CLI_POLICY);
     } else if (isOpen) {
       setName('');
@@ -290,6 +306,7 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
       setSystemPromptAppend('');
       setMaxTurns('');
       setTimeoutMinutes('');
+      setRuntime('');
       setVmSizeOverride('');
       setWorkspaceProfile('');
       setDevcontainerConfigName('');
@@ -353,6 +370,7 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
         systemPromptAppend: systemPromptAppend.trim() || null,
         maxTurns: maxTurns ? parseInt(maxTurns, 10) : null,
         timeoutMinutes: timeoutMinutes ? parseInt(timeoutMinutes, 10) : null,
+        runtime: runtime ? (runtime as AgentProfileRuntime) : null,
         vmSizeOverride: vmSizeOverride || null,
         workspaceProfile: workspaceProfile || null,
         devcontainerConfigName:
@@ -381,6 +399,18 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
       },
     }));
   };
+
+  const handleRuntimeChange = (value: string) => {
+    setRuntime(value);
+    if (value === 'cf-container') {
+      setVmSizeOverride('');
+      setWorkspaceProfile('lightweight');
+      setDevcontainerConfigName('');
+      setTaskMode('conversation');
+    }
+  };
+
+  const isInstantRuntime = runtime === 'cf-container';
 
   return (
     <Dialog isOpen={isOpen} onClose={onClose} maxWidth="lg">
@@ -584,9 +614,17 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
 
         <Section
           title="Infrastructure"
-          summary={infraSummary(vmSizeOverride, workspaceProfile, taskMode)}
+          summary={infraSummary(vmSizeOverride, workspaceProfile, taskMode, runtime)}
         >
           <div className="grid gap-3 sm:grid-cols-2">
+            <SelectField
+              label="Runtime"
+              value={runtime}
+              onChange={handleRuntimeChange}
+              options={RUNTIMES}
+              disabled={saving}
+            />
+
             <SelectField
               label={<>VM Size{providerContext && <span className="font-normal ml-1">({providerContext})</span>}</>}
               value={vmSizeOverride}
@@ -597,7 +635,7 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
                   ? formatVmSizeOption(vs.value as VMSize, activeCatalog?.sizes[vs.value as VMSize] ?? null)
                   : vs.label,
               }))}
-              disabled={saving}
+              disabled={saving || isInstantRuntime}
             />
 
             <SelectField
@@ -605,10 +643,10 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
               value={workspaceProfile}
               onChange={setWorkspaceProfile}
               options={WORKSPACE_PROFILES}
-              disabled={saving}
+              disabled={saving || isInstantRuntime}
             />
 
-            {workspaceProfile !== 'lightweight' && (
+            {!isInstantRuntime && workspaceProfile !== 'lightweight' && (
               <label className="grid gap-1.5">
                 <span className="text-sm text-fg-muted">Devcontainer Config</span>
                 <Input
@@ -625,7 +663,7 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
               value={taskMode}
               onChange={setTaskMode}
               options={TASK_MODES}
-              disabled={saving}
+              disabled={saving || isInstantRuntime}
             />
           </div>
         </Section>

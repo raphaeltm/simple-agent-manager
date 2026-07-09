@@ -12,6 +12,7 @@ import {
   signLocalForwardToken,
   verifyLocalForwardToken,
 } from '../../services/jwt';
+import { fetchNodeAgent, getNodeAgentRequestTimeoutMs } from '../../services/node-agent';
 import { getOwnedWorkspace, isActiveWorkspaceStatus } from './_helpers';
 
 const localForwardRoutes = new Hono<{ Bindings: Env }>();
@@ -204,14 +205,14 @@ async function handleLocalForwardProxy(c: Context<{ Bindings: Env }>) {
   headers.set('X-Forwarded-Proto', 'http');
   headers.set('X-Forwarded-For', c.req.header('CF-Connecting-IP') ?? '');
 
-  const response = await fetch(vmUrl.toString(), {
+  const response = await fetchNodeAgent(claims.nodeId, c.env, vmUrl.toString(), {
     method: c.req.raw.method,
     headers,
     body: c.req.raw.body,
     redirect: 'manual',
     // @ts-expect-error Cloudflare Workers support streaming request bodies.
     duplex: c.req.raw.body ? 'half' : undefined,
-  });
+  }, getNodeAgentRequestTimeoutMs(c.env));
 
   return new Response(response.body, {
     status: response.status,

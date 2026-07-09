@@ -25,6 +25,7 @@ import {
   validateDirectory,
 } from '../../services/file-library';
 import { signTerminalToken } from '../../services/jwt';
+import { fetchNodeAgent } from '../../services/node-agent';
 import {
   INTERNAL_ERROR,
   INVALID_PARAMS,
@@ -35,6 +36,17 @@ import {
 } from './_helpers';
 
 type AppDb = DrizzleD1Database<typeof schema>;
+
+interface WorkspaceUploadInput {
+  env: Env;
+  vmBaseUrl: string;
+  nodeId: string;
+  workspaceId: string;
+  userId: string;
+  filename: string;
+  data: ArrayBuffer;
+  targetPath: string;
+}
 
 // ─── Configurable defaults (Constitution Principle XI) ──────────────────────
 
@@ -148,15 +160,8 @@ async function resolveWorkspaceVmUrl(
 /**
  * Upload a file to the workspace via VM agent multipart upload.
  */
-async function uploadToWorkspace(
-  env: Env,
-  vmBaseUrl: string,
-  workspaceId: string,
-  userId: string,
-  filename: string,
-  data: ArrayBuffer,
-  targetPath: string,
-): Promise<void> {
+async function uploadToWorkspace(input: WorkspaceUploadInput): Promise<void> {
+  const { env, vmBaseUrl, nodeId, workspaceId, userId, filename, data, targetPath } = input;
   const { token } = await signTerminalToken(userId, workspaceId, env);
   const url = `${vmBaseUrl}/workspaces/${encodeURIComponent(workspaceId)}/files/upload`;
 
@@ -165,12 +170,11 @@ async function uploadToWorkspace(
   formData.append('files', new Blob([data]), filename);
 
   // Use Authorization header for server-to-server calls (not query param)
-  const res = await fetch(url, {
+  const res = await fetchNodeAgent(nodeId, env, url, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
     body: formData,
-    signal: AbortSignal.timeout(getTransferTimeout(env)),
-  });
+  }, getTransferTimeout(env));
 
   if (!res.ok) {
     const text = await res.text().catch(() => 'unknown');
@@ -185,6 +189,7 @@ async function uploadToWorkspace(
 async function downloadFromWorkspace(
   env: Env,
   vmBaseUrl: string,
+  nodeId: string,
   workspaceId: string,
   userId: string,
   filePath: string,
@@ -194,10 +199,9 @@ async function downloadFromWorkspace(
   const url = `${vmBaseUrl}/workspaces/${encodeURIComponent(workspaceId)}/files/download?${params.toString()}`;
 
   // Use Authorization header for server-to-server calls (not query param)
-  const res = await fetch(url, {
+  const res = await fetchNodeAgent(nodeId, env, url, {
     headers: { Authorization: `Bearer ${token}` },
-    signal: AbortSignal.timeout(getTransferTimeout(env)),
-  });
+  }, getTransferTimeout(env));
 
   if (!res.ok) {
     const text = await res.text().catch(() => 'unknown');
@@ -334,15 +338,16 @@ export async function handleDownloadLibraryFile(
     }
 
     // Upload to workspace
-    await uploadToWorkspace(
+    await uploadToWorkspace({
       env,
-      vmResult.vmBaseUrl,
-      tokenData.workspaceId,
-      tokenData.userId,
-      file.filename,
+      vmBaseUrl: vmResult.vmBaseUrl,
+      nodeId: vmResult.nodeId,
+      workspaceId: tokenData.workspaceId,
+      userId: tokenData.userId,
+      filename: file.filename,
       data,
-      targetDir,
-    );
+      targetPath: targetDir,
+    });
 
     const downloadedTo = `${targetDir}/${file.filename}`;
 
@@ -404,6 +409,7 @@ export async function handleUploadToLibrary(
     const { data, contentType } = await downloadFromWorkspace(
       env,
       vmResult.vmBaseUrl,
+      vmResult.nodeId,
       tokenData.workspaceId,
       tokenData.userId,
       filePath.trim(),
@@ -549,6 +555,7 @@ export async function handleReplaceLibraryFile(
     const { data, contentType } = await downloadFromWorkspace(
       env,
       vmResult.vmBaseUrl,
+      vmResult.nodeId,
       tokenData.workspaceId,
       tokenData.userId,
       filePath.trim(),

@@ -9,6 +9,7 @@ import {
   DEFAULT_AGENT_EFFORT,
   isAgentEffort,
   isAgentEffortSupported,
+  isAgentProfileRuntime,
   isValidAgentType,
 } from '@simple-agent-manager/shared';
 import { and, eq, isNull, or } from 'drizzle-orm';
@@ -272,6 +273,7 @@ export async function resolveAgentProfile(
       provider: p.provider,
       vmLocation: p.vmLocation,
       workspaceProfile: p.workspaceProfile,
+      runtime: isAgentProfileRuntime(p.runtime) ? p.runtime : null,
       devcontainerConfigName: p.devcontainerConfigName,
       taskMode: p.taskMode,
       githubCliPolicy: parseGitHubCliPolicy(p.githubCliPolicy),
@@ -294,6 +296,7 @@ export async function resolveAgentProfile(
       provider: null,
       vmLocation: null,
       workspaceProfile: null,
+      runtime: null,
       devcontainerConfigName: null,
       taskMode: null,
       githubCliPolicy: null,
@@ -371,6 +374,7 @@ export async function resolveAgentProfile(
     provider: null,
     vmLocation: null,
     workspaceProfile: null,
+    runtime: null,
     devcontainerConfigName: null,
     taskMode: null,
     githubCliPolicy: null,

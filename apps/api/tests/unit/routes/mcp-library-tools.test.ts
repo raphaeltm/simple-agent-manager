@@ -49,6 +49,14 @@ vi.mock('../../../src/services/jwt', () => ({
 const mockFetch = vi.fn();
 vi.stubGlobal('fetch', mockFetch);
 
+const mockFetchNodeAgent = vi.fn(
+  (_nodeId: string, _env: Env, url: string, options: RequestInit) => mockFetch(url, options),
+);
+vi.mock('../../../src/services/node-agent', () => ({
+  fetchNodeAgent: (...args: Parameters<typeof mockFetchNodeAgent>) => mockFetchNodeAgent(...args),
+  getNodeAgentRequestTimeoutMs: () => 30_000,
+}));
+
 function createMockD1() {
   const stmt = {
     bind: vi.fn().mockReturnThis(),
