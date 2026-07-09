@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"strings"
 )
 
 const dockerBinaryPath = "/usr/bin/docker"
@@ -37,9 +38,30 @@ func standaloneWorkspaceCommandPath(command string) (string, error) {
 	}
 }
 
-func (s *Server) workspaceExecCommand(ctx context.Context, containerID, user, workDir string, args ...string) (*exec.Cmd, error) {
+func validateWorkspaceExecArgs(args []string) error {
 	if len(args) == 0 {
-		return nil, fmt.Errorf("workspace exec command is required")
+		return fmt.Errorf("workspace exec command is required")
+	}
+	if _, err := standaloneWorkspaceCommandPath(args[0]); err != nil {
+		return err
+	}
+	for _, arg := range args {
+		if strings.ContainsRune(arg, '\x00') {
+			return fmt.Errorf("workspace exec argument contains NUL byte")
+		}
+	}
+	return nil
+}
+
+func dockerWorkspaceExecCommand(ctx context.Context, dockerArgs []string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, dockerBinaryPath)
+	cmd.Args = append([]string{dockerBinaryPath}, dockerArgs...)
+	return cmd
+}
+
+func (s *Server) workspaceExecCommand(ctx context.Context, containerID, user, workDir string, args ...string) (*exec.Cmd, error) {
+	if err := validateWorkspaceExecArgs(args); err != nil {
+		return nil, err
 	}
 
 	if s.isStandaloneWorkspaceExec() {
@@ -63,5 +85,5 @@ func (s *Server) workspaceExecCommand(ctx context.Context, containerID, user, wo
 	}
 	dockerArgs = append(dockerArgs, containerID)
 	dockerArgs = append(dockerArgs, args...)
-	return exec.CommandContext(ctx, dockerBinaryPath, dockerArgs...), nil
+	return dockerWorkspaceExecCommand(ctx, dockerArgs), nil
 }

@@ -174,7 +174,10 @@ func (s *Server) handleListWorkspaces(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{"workspaces": result})
 }
 
-const timeRFC3339 = "2006-01-02T15:04:05Z07:00"
+const (
+	timeRFC3339                = "2006-01-02T15:04:05Z07:00"
+	workspaceIDRequiredMessage = "workspaceId is required"
+)
 
 func workspaceCreateConflict(runtime *WorkspaceRuntime, repository, branch, devcontainerConfigName string, lightweight bool) string {
 	if runtime == nil {
@@ -481,7 +484,7 @@ type createWorkspaceRequest struct {
 
 func validateCreateWorkspaceRequest(body createWorkspaceRequest) (int, string) {
 	if body.WorkspaceID == "" {
-		return http.StatusBadRequest, "workspaceId is required"
+		return http.StatusBadRequest, workspaceIDRequiredMessage
 	}
 	if name := body.DevcontainerConfigName; name != "" {
 		if strings.Contains(name, "/") || strings.Contains(name, "\\") || strings.Contains(name, "..") {
@@ -694,7 +697,7 @@ func (s *Server) handleAsyncWorkspaceCreate(
 func (s *Server) handleStopWorkspace(w http.ResponseWriter, r *http.Request) {
 	workspaceID := r.PathValue("workspaceId")
 	if workspaceID == "" {
-		writeError(w, http.StatusBadRequest, "workspaceId is required")
+		writeError(w, http.StatusBadRequest, workspaceIDRequiredMessage)
 		return
 	}
 
@@ -745,7 +748,7 @@ func (s *Server) handleStopWorkspace(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleRestartWorkspace(w http.ResponseWriter, r *http.Request) {
 	workspaceID := r.PathValue("workspaceId")
 	if workspaceID == "" {
-		writeError(w, http.StatusBadRequest, "workspaceId is required")
+		writeError(w, http.StatusBadRequest, workspaceIDRequiredMessage)
 		return
 	}
 
@@ -784,7 +787,7 @@ func (s *Server) handleRestartWorkspace(w http.ResponseWriter, r *http.Request) 
 func (s *Server) handleRebuildWorkspace(w http.ResponseWriter, r *http.Request) {
 	workspaceID := r.PathValue("workspaceId")
 	if workspaceID == "" {
-		writeError(w, http.StatusBadRequest, "workspaceId is required")
+		writeError(w, http.StatusBadRequest, workspaceIDRequiredMessage)
 		return
 	}
 
@@ -824,7 +827,7 @@ func (s *Server) handleRebuildWorkspace(w http.ResponseWriter, r *http.Request) 
 func (s *Server) handleDeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 	workspaceID := r.PathValue("workspaceId")
 	if workspaceID == "" {
-		writeError(w, http.StatusBadRequest, "workspaceId is required")
+		writeError(w, http.StatusBadRequest, workspaceIDRequiredMessage)
 		return
 	}
 
@@ -867,7 +870,7 @@ func (s *Server) handleDeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleListTabs(w http.ResponseWriter, r *http.Request) {
 	workspaceID := r.PathValue("workspaceId")
 	if workspaceID == "" {
-		writeError(w, http.StatusBadRequest, "workspaceId is required")
+		writeError(w, http.StatusBadRequest, workspaceIDRequiredMessage)
 		return
 	}
 
@@ -905,7 +908,7 @@ type enrichedSession struct {
 func (s *Server) handleListAgentSessions(w http.ResponseWriter, r *http.Request) {
 	workspaceID := r.PathValue("workspaceId")
 	if workspaceID == "" {
-		writeError(w, http.StatusBadRequest, "workspaceId is required")
+		writeError(w, http.StatusBadRequest, workspaceIDRequiredMessage)
 		return
 	}
 	// Accept both workspace session cookies (browser) and management tokens (control plane).
@@ -942,7 +945,7 @@ func (s *Server) handleListAgentSessions(w http.ResponseWriter, r *http.Request)
 func (s *Server) handleCreateAgentSession(w http.ResponseWriter, r *http.Request) {
 	workspaceID := r.PathValue("workspaceId")
 	if workspaceID == "" {
-		writeError(w, http.StatusBadRequest, "workspaceId is required")
+		writeError(w, http.StatusBadRequest, workspaceIDRequiredMessage)
 		return
 	}
 	if !s.requireNodeManagementAuth(w, r, workspaceID) {
