@@ -110,9 +110,15 @@ describe('cf-container runtime spike contracts', () => {
 
   it('uses a raw vm-agent container image for PR workflows', () => {
     const dockerfile = readPackage('Dockerfile.vm-agent-container');
+    const bootstrap = readPackage('container-entrypoints/vm-agent-bootstrap.sh');
 
     expect(dockerfile).toContain('ENTRYPOINT ["/usr/local/bin/vm-agent-bootstrap"]');
     expect(dockerfile).toContain('githubcli-archive-keyring.gpg');
     expect(dockerfile).toContain('apt-get install -y --no-install-recommends gh');
+    expect(dockerfile).toContain('USER node');
+    expect(dockerfile).toContain('chown -R node:node /workspaces /var/lib/vm-agent');
+    expect(bootstrap).toContain('agent_bin_dir="/var/lib/vm-agent/bin"');
+    expect(bootstrap).toContain('curl -fsSL "${CONTROL_PLANE_URL}/api/agent/download?os=linux&arch=amd64" -o "$tmp"');
+    expect(bootstrap).not.toContain('/usr/local/bin/vm-agent.tmp');
   });
 });
