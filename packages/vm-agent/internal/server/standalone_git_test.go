@@ -58,3 +58,27 @@ func TestStandaloneGitCredentialHelperIgnoresStoreAction(t *testing.T) {
 		t.Fatalf("expected no output for store action, got %q", out)
 	}
 }
+
+func TestStandaloneCloneSpecStripsEmbeddedCredentials(t *testing.T) {
+	t.Parallel()
+
+	spec, err := standaloneCloneSpecForURL(
+		"https://x:art_token@acct.artifacts.cloudflare.net/git/default/repo.git",
+		&gitTokenResponse{Token: "art_token"},
+	)
+	if err != nil {
+		t.Fatalf("standaloneCloneSpecForURL returned error: %v", err)
+	}
+	if spec.URL != "https://acct.artifacts.cloudflare.net/git/default/repo.git" {
+		t.Fatalf("clone URL = %q", spec.URL)
+	}
+	if strings.Contains(spec.URL, "art_token") {
+		t.Fatalf("clone URL leaked token: %q", spec.URL)
+	}
+	if spec.Username != "x" {
+		t.Fatalf("username = %q, want x", spec.Username)
+	}
+	if spec.Token != "art_token" {
+		t.Fatalf("token = %q, want art_token", spec.Token)
+	}
+}

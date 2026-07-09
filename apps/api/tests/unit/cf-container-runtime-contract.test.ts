@@ -34,6 +34,11 @@ describe('cf-container runtime spike contracts', () => {
 
   it('routes Worker-to-vm-agent service calls through Sandbox for cf-container nodes only', () => {
     const nodeAgent = read('services/node-agent.ts');
+    const workspaceTools = read('routes/mcp/workspace-tools.ts');
+    const libraryTools = read('routes/mcp/library-tools.ts');
+    const projectFiles = read('routes/projects/files.ts');
+    const localForward = read('routes/workspaces/local-forward.ts');
+    const nodesRoute = read('routes/nodes.ts');
 
     expect(nodeAgent).toContain("node?.runtime !== 'cf-container'");
     expect(nodeAgent).toContain("env.SANDBOX_ENABLED !== 'true'");
@@ -41,6 +46,17 @@ describe('cf-container runtime spike contracts', () => {
     expect(nodeAgent).toContain('sandbox.containerFetch(');
     expect(nodeAgent).toContain('function requestInitWithoutSignal');
     expect(nodeAgent).toContain('new Request(containerUrl.toString(), requestInitWithoutSignal(options))');
+    expect(workspaceTools).toContain("import { fetchNodeAgent } from '../../services/node-agent'");
+    expect(workspaceTools).toContain('fetchNodeAgent(nodeId, env, vmUrl, fetchOpts, timeoutMs)');
+    expect(libraryTools).toContain("import { fetchNodeAgent } from '../../services/node-agent'");
+    expect(libraryTools).toContain('fetchNodeAgent(');
+    expect(projectFiles).toContain("import { fetchNodeAgent } from '../../services/node-agent'");
+    expect(projectFiles).toContain('fetchNodeAgent(');
+    expect(localForward).toContain(
+      "import { fetchNodeAgent, getNodeAgentRequestTimeoutMs } from '../../services/node-agent'"
+    );
+    expect(localForward).toContain('fetchNodeAgent(');
+    expect(nodesRoute).toContain('fetchNodeAgent(nodeId, c.env, vmUrl.toString()');
   });
 
   it('launches instant chat sessions through the authenticated start route and Sandbox substrate', () => {
@@ -54,6 +70,7 @@ describe('cf-container runtime spike contracts', () => {
     expect(chatStartRoute).toContain("runtime.runtime !== 'cf-container'");
     expect(chatStartRoute).toContain('launchInstantSession');
     expect(launcher).toContain("NODE_ROLE: 'standalone'");
+    expect(launcher).toContain('SANDBOX_WORKSPACE_BASE_DIR');
     expect(launcher).toContain('const standaloneEnv = {');
     expect(launcher).toContain("runSandboxPhase('install'");
     expect(launcher).toContain("runSandboxPhase('start'");

@@ -171,11 +171,11 @@ func TestMcpWorkspaceInfo_WorkspaceNotRunning(t *testing.T) {
 
 	// Workspace exists but is in "stopped" status.
 	s.workspaces["ws-stopped"] = &WorkspaceRuntime{
-		ID:        "ws-stopped",
-		Status:    "stopped",
+		ID:         "ws-stopped",
+		Status:     "stopped",
 		Repository: "octo/repo",
-		Branch:    "main",
-		CreatedAt: time.Now().Add(-10 * time.Minute),
+		Branch:     "main",
+		CreatedAt:  time.Now().Add(-10 * time.Minute),
 	}
 
 	rec := mcpGET(t, s, "/workspaces/ws-stopped/mcp/workspace-info", "ws-stopped", true, s.handleMcpWorkspaceInfo)
@@ -192,11 +192,11 @@ func TestMcpWorkspaceInfo_ContainerModeDisabled(t *testing.T) {
 	s.config.ContainerMode = false
 
 	s.workspaces["ws-001"] = &WorkspaceRuntime{
-		ID:        "ws-001",
-		Status:    "running",
+		ID:         "ws-001",
+		Status:     "running",
 		Repository: "octo/fallback-repo",
-		Branch:    "feature-branch",
-		CreatedAt: time.Now().Add(-5 * time.Minute),
+		Branch:     "feature-branch",
+		CreatedAt:  time.Now().Add(-5 * time.Minute),
 	}
 
 	// Container mode is off — resolveContainerForWorkspace returns "container mode is not enabled".
@@ -204,6 +204,39 @@ func TestMcpWorkspaceInfo_ContainerModeDisabled(t *testing.T) {
 
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("expected 500 when container mode disabled, got %d (body: %s)", rec.Code, rec.Body.String())
+	}
+}
+
+func TestMcpWorkspaceInfo_StandaloneUsesLocalWorkspace(t *testing.T) {
+	t.Parallel()
+	s := mcpTestServer(t, "https://api.example.com")
+	workDir := t.TempDir()
+	s.config.Role = config.RoleStandalone
+	s.config.WorkspaceDir = workDir
+	s.config.ContainerWorkDir = workDir
+
+	s.workspaces["ws-standalone"] = &WorkspaceRuntime{
+		ID:               "ws-standalone",
+		Status:           "running",
+		Repository:       "octo/repo",
+		Branch:           "main",
+		WorkspaceDir:     workDir,
+		ContainerWorkDir: workDir,
+		CreatedAt:        time.Now().Add(-5 * time.Minute),
+	}
+
+	rec := mcpGET(t, s, "/workspaces/ws-standalone/mcp/workspace-info", "ws-standalone", true, s.handleMcpWorkspaceInfo)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for standalone workspace info, got %d (body: %s)", rec.Code, rec.Body.String())
+	}
+
+	var resp McpWorkspaceInfoResponse
+	decodeJSON(t, rec, &resp)
+	if resp.WorkDir != workDir {
+		t.Fatalf("workDir = %q, want %q", resp.WorkDir, workDir)
+	}
+	if resp.Branch != "main" {
+		t.Fatalf("branch = %q, want main", resp.Branch)
 	}
 }
 

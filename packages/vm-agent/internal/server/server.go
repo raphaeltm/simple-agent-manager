@@ -11,7 +11,6 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -541,7 +540,7 @@ func New(cfg *config.Config) (*Server, error) {
 			ContainerUser:       strings.TrimSpace(cfg.ContainerUser),
 			CallbackToken:       strings.TrimSpace(cfg.CallbackToken),
 			ProjectID:           strings.TrimSpace(cfg.ProjectID),
-			Lightweight:          cfg.IsStandaloneMode(),
+			Lightweight:         cfg.IsStandaloneMode(),
 			PTY:                 ptyManager,
 		}
 	}
@@ -1495,15 +1494,19 @@ func (s *Server) gitPushWorkspaceChanges(workspaceID string, skipPR bool) gitPus
 
 	// Helper to run git commands in the container
 	runGit := func(args ...string) (string, error) {
-		cmdArgs := []string{"exec"}
-		if user != "" {
-			cmdArgs = append(cmdArgs, "-u", user)
+		timeout := s.config.GitExecTimeout
+		if timeout <= 0 {
+			timeout = 30 * time.Second
 		}
-		cmdArgs = append(cmdArgs, "-w", workDir, containerID, "git")
-		cmdArgs = append(cmdArgs, args...)
-		cmd := exec.Command("docker", cmdArgs...)
-		output, err := cmd.CombinedOutput()
-		return strings.TrimSpace(string(output)), err
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+
+		stdout, stderr, err := s.execInContainer(ctx, containerID, user, workDir, append([]string{"git"}, args...)...)
+		output := strings.TrimSpace(stdout)
+		if strings.TrimSpace(stderr) != "" {
+			output = strings.TrimSpace(output + "\n" + strings.TrimSpace(stderr))
+		}
+		return output, err
 	}
 
 	// Check for uncommitted changes
@@ -1569,19 +1572,22 @@ func (s *Server) gitPushWorkspaceChanges(workspaceID string, skipPR bool) gitPus
 // tryCreatePR attempts to create a GitHub PR using gh CLI inside the container.
 // Returns (prURL, prNumber) on success, or ("", 0) on failure.
 func (s *Server) tryCreatePR(containerID, workDir, user string) (string, int) {
-	cmdArgs := []string{"exec"}
-	if user != "" {
-		cmdArgs = append(cmdArgs, "-u", user)
+	timeout := s.config.GitExecTimeout
+	if timeout <= 0 {
+		timeout = 30 * time.Second
 	}
-	cmdArgs = append(cmdArgs, "-w", workDir, containerID,
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	stdout, stderr, err := s.execInContainer(ctx, containerID, user, workDir,
 		"gh", "pr", "create",
 		"--fill",
 		"--head", "HEAD",
 	)
-
-	cmd := exec.Command("docker", cmdArgs...)
-	output, err := cmd.CombinedOutput()
-	outputStr := strings.TrimSpace(string(output))
+	outputStr := strings.TrimSpace(stdout)
+	if strings.TrimSpace(stderr) != "" {
+		outputStr = strings.TrimSpace(outputStr + "\n" + strings.TrimSpace(stderr))
+	}
 	if err != nil {
 		// Check if a PR already exists
 		if strings.Contains(outputStr, "already exists") {
@@ -1611,20 +1617,20 @@ func (s *Server) tryCreatePR(containerID, workDir, user string) (string, int) {
 
 // getExistingPRURL looks up the existing PR URL for the current branch.
 func (s *Server) getExistingPRURL(containerID, workDir, user string) (string, int) {
-	cmdArgs := []string{"exec"}
-	if user != "" {
-		cmdArgs = append(cmdArgs, "-u", user)
+	timeout := s.config.GitExecTimeout
+	if timeout <= 0 {
+		timeout = 30 * time.Second
 	}
-	cmdArgs = append(cmdArgs, "-w", workDir, containerID,
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	output, _, err := s.execInContainer(ctx, containerID, user, workDir,
 		"gh", "pr", "view", "--json", "url,number", "--jq", ".url",
 	)
-
-	cmd := exec.Command("docker", cmdArgs...)
-	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", 0
 	}
-	return strings.TrimSpace(string(output)), 0
+	return strings.TrimSpace(output), 0
 }
 
 // openSQLiteDB opens a SQLite database connection with WAL mode and

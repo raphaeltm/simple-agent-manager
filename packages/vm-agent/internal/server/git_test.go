@@ -1,9 +1,11 @@
 package server
 
 import (
+	"context"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -426,5 +428,46 @@ exit 1
 	}
 	if user != "node" {
 		t.Fatalf("user = %q, want %q", user, "node")
+	}
+}
+
+func TestResolveContainerForWorkspaceStandaloneUsesLocalWorkDir(t *testing.T) {
+	t.Parallel()
+
+	workDir := t.TempDir()
+	s := &Server{
+		config: &config.Config{
+			Role:              config.RoleStandalone,
+			WorkspaceDir:      workDir,
+			ContainerWorkDir:  workDir,
+			ContainerCacheTTL: time.Second,
+		},
+		workspaces: map[string]*WorkspaceRuntime{
+			"ws-standalone": {
+				ID:               "ws-standalone",
+				Status:           "running",
+				WorkspaceDir:     workDir,
+				ContainerWorkDir: workDir,
+			},
+		},
+	}
+
+	containerID, resolvedWorkDir, user, err := s.resolveContainerForWorkspace("ws-standalone")
+	if err != nil {
+		t.Fatalf("resolveContainerForWorkspace() error = %v", err)
+	}
+	if containerID != "" {
+		t.Fatalf("containerID = %q, want empty for standalone mode", containerID)
+	}
+	if resolvedWorkDir != workDir {
+		t.Fatalf("workDir = %q, want %q", resolvedWorkDir, workDir)
+	}
+
+	stdout, stderr, err := s.execInContainer(context.Background(), containerID, user, resolvedWorkDir, "pwd")
+	if err != nil {
+		t.Fatalf("execInContainer() error = %v stderr=%q", err, stderr)
+	}
+	if got := strings.TrimSpace(stdout); got != workDir {
+		t.Fatalf("local exec pwd = %q, want %q", got, workDir)
 	}
 }

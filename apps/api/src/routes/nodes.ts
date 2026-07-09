@@ -21,6 +21,8 @@ import { cleanupAppRouteDNSRecords } from '../services/dns';
 import { signNodeManagementToken } from '../services/jwt';
 import { getRuntimeLimits } from '../services/limits';
 import {
+  fetchNodeAgent,
+  getNodeAgentRequestTimeoutMs,
   getNodeLogsFromNode,
   getNodeSystemInfoFromNode,
   listNodeContainersFromNode,
@@ -566,10 +568,10 @@ nodesRoutes.get('/:id/logs/stream', async (c) => {
   headers.delete('x-sam-node-id');
   headers.set('X-SAM-Node-Id', nodeId);
 
-  return fetch(vmUrl.toString(), {
+  return fetchNodeAgent(nodeId, c.env, vmUrl.toString(), {
     method: 'GET',
     headers,
-  });
+  }, getNodeAgentRequestTimeoutMs(c.env));
 });
 
 /**

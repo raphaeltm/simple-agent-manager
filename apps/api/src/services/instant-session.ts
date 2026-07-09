@@ -75,6 +75,39 @@ function getWorkspaceName(input: LaunchInstantSessionInput): string {
   return truncateTitle(source, DEFAULT_TASK_TITLE_MAX_LENGTH) || 'Instant Chat';
 }
 
+function repositoryDirectoryName(repository: string): string {
+  let repo = repository.trim();
+  if (!repo) return 'workspace';
+
+  if (repo.includes('://')) {
+    try {
+      repo = new URL(repo).pathname;
+    } catch {
+      // Fall back to path splitting below.
+    }
+  }
+
+  const rawName = repo
+    .split('/')
+    .filter(Boolean)
+    .at(-1)
+    ?.replace(/\.git$/i, '')
+    .trim();
+  const safeName = rawName?.replace(/[^a-zA-Z0-9._-]/g, '-').replace(/^-+|-+$/g, '');
+  return safeName || 'workspace';
+}
+
+function sandboxWorkspaceBaseDir(env: Env): string {
+  const configured = env.SANDBOX_WORKSPACE_BASE_DIR?.trim().replace(/\/+$/g, '');
+  return configured || '/workspaces';
+}
+
+function sandboxWorkspaceDir(env: Env, repository: string): string {
+  const baseDir = sandboxWorkspaceBaseDir(env);
+  const repoDir = repositoryDirectoryName(repository);
+  return baseDir === '/' ? `/${repoDir}` : `${baseDir}/${repoDir}`;
+}
+
 export async function launchInstantSession(
   db: Db,
   env: Env,
@@ -150,13 +183,14 @@ export async function launchInstantSession(
   const vmAgentPort = env.SANDBOX_VM_AGENT_PORT ? parseInt(env.SANDBOX_VM_AGENT_PORT, 10) : 8080;
   const controlPlaneUrl = `https://api.${env.BASE_DOMAIN}`;
   const phaseDetail = { nodeId: node.id, workspaceId, sandboxId };
+  const workspaceDir = sandboxWorkspaceDir(env, input.project.repository);
 
   const installStart = Date.now();
   const install = await runSandboxPhase('install', phaseDetail, () =>
     sandbox.exec(
       [
         'set -e',
-        'mkdir -p /workspace /var/lib/vm-agent',
+        `mkdir -p ${shellQuote(workspaceDir)} /var/lib/vm-agent`,
         `curl -fsSL "${controlPlaneUrl}/api/agent/download?os=linux&arch=amd64" -o /usr/local/bin/vm-agent.tmp`,
         'chmod +x /usr/local/bin/vm-agent.tmp',
         'mv /usr/local/bin/vm-agent.tmp /usr/local/bin/vm-agent',
@@ -181,7 +215,8 @@ export async function launchInstantSession(
     CALLBACK_TOKEN: nodeCallbackToken,
     REPOSITORY: input.project.repository,
     BRANCH: branch,
-    WORKSPACE_DIR: '/workspace',
+    WORKSPACE_DIR: workspaceDir,
+    CONTAINER_WORK_DIR: workspaceDir,
     CONTAINER_MODE: 'false',
     PORT_SCAN_ENABLED: 'false',
     VM_AGENT_PORT: String(vmAgentPort),
@@ -197,7 +232,7 @@ export async function launchInstantSession(
       [
         'set -e',
         'test -x /usr/local/bin/vm-agent',
-        `cd ${shellQuote('/workspace')}`,
+        `cd ${shellQuote(workspaceDir)}`,
         `nohup env ${envAssignments} /usr/local/bin/vm-agent > /tmp/vm-agent.log 2>&1 &`,
         'pid=$!',
         `echo "$pid" > ${shellQuote(`/tmp/${processId}.pid`)}`,

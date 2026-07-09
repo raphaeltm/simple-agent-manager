@@ -20,9 +20,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends jq && \
 RUN npm install -g @zed-industries/claude-agent-acp @anthropic-ai/claude-code && \
     npm cache clean --force
 
-# Create workspace directory (base image may already have it, but ensure it exists)
-RUN mkdir -p /workspace
-WORKDIR /workspace
+# Create workspace root (base image may already have it, but ensure it exists)
+RUN mkdir -p /workspaces
+WORKDIR /workspaces
 
 # Do NOT override ENTRYPOINT — the base image sets ENTRYPOINT ["/container-server/sandbox"]
 # which starts the HTTP API server. CMD is optional (runs as child process of sandbox binary).

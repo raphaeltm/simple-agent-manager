@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -364,6 +363,28 @@ func (s *Server) resolveContainerForWorkspace(workspaceID string) (containerID, 
 		return "", "", "", fmt.Errorf("workspace is not running/recovery (status: %s)", runtime.Status)
 	}
 
+	if s.config.IsStandaloneMode() {
+		workDir = strings.TrimSpace(runtime.ContainerWorkDir)
+		if workDir == "" {
+			workDir = strings.TrimSpace(runtime.WorkspaceDir)
+		}
+		if workDir == "" {
+			workDir = strings.TrimSpace(s.config.ContainerWorkDir)
+		}
+		if workDir == "" {
+			workDir = strings.TrimSpace(s.config.WorkspaceDir)
+		}
+		if workDir == "" {
+			workDir = "/workspaces"
+		}
+
+		user = strings.TrimSpace(runtime.ContainerUser)
+		if user == "" {
+			user = strings.TrimSpace(s.config.ContainerUser)
+		}
+		return "", workDir, user, nil
+	}
+
 	resolver := s.ptyManagerContainerResolverForLabel(runtime.ContainerLabelValue)
 	if resolver == nil {
 		return "", "", "", fmt.Errorf("container mode is not enabled")
@@ -393,17 +414,10 @@ func (s *Server) resolveContainerForWorkspace(workspaceID string) (containerID, 
 // execInContainer runs a command inside a devcontainer and returns stdout.
 // Uses docker exec with optional user and workdir flags.
 func (s *Server) execInContainer(ctx context.Context, containerID, user, workDir string, args ...string) (stdout string, stderr string, err error) {
-	dockerArgs := []string{"exec", "-i"}
-	if user != "" {
-		dockerArgs = append(dockerArgs, "-u", user)
+	cmd, err := s.workspaceExecCommand(ctx, containerID, user, workDir, args...)
+	if err != nil {
+		return "", "", err
 	}
-	if workDir != "" {
-		dockerArgs = append(dockerArgs, "-w", workDir)
-	}
-	dockerArgs = append(dockerArgs, containerID)
-	dockerArgs = append(dockerArgs, args...)
-
-	cmd := exec.CommandContext(ctx, "docker", dockerArgs...)
 
 	var stdoutBuf, stderrBuf bytes.Buffer
 	cmd.Stdout = &stdoutBuf

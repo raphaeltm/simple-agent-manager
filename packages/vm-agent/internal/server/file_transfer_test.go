@@ -1,15 +1,18 @@
 package server
 
 import (
+	"context"
 	"strings"
 	"testing"
+
+	"github.com/workspace/vm-agent/internal/config"
 )
 
-// TestFileDownloadDockerArgs_DashSeparator verifies that the docker exec args
+// TestFileDownloadWorkspaceExecArgs_DashSeparator verifies that workspace exec args
 // for file download include "--" before the file path. This prevents paths
 // starting with "-" from being interpreted as flags by cat.
-// This matches the pattern already used in handleFileRaw (files.go).
-func TestFileDownloadDockerArgs_DashSeparator(t *testing.T) {
+func TestFileDownloadWorkspaceExecArgs_DashSeparator(t *testing.T) {
+	s := &Server{config: &config.Config{}}
 	tests := []struct {
 		name      string
 		user      string
@@ -43,19 +46,14 @@ func TestFileDownloadDockerArgs_DashSeparator(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			// Replicate the docker args construction from handleFileDownload.
-			dockerArgs := []string{"exec", "-i"}
-			if tc.user != "" {
-				dockerArgs = append(dockerArgs, "-u", tc.user)
+			cmd, err := s.workspaceExecCommand(context.Background(), tc.container, tc.user, tc.workDir, "cat", "--", tc.filePath)
+			if err != nil {
+				t.Fatalf("workspaceExecCommand returned error: %v", err)
 			}
-			if tc.workDir != "" {
-				dockerArgs = append(dockerArgs, "-w", tc.workDir)
-			}
-			dockerArgs = append(dockerArgs, tc.container, "cat", "--", tc.filePath)
 
 			// Verify "--" appears between "cat" and the file path.
 			catIdx := -1
-			for i, arg := range dockerArgs {
+			for i, arg := range cmd.Args {
 				if arg == "cat" {
 					catIdx = i
 					break
@@ -64,13 +62,13 @@ func TestFileDownloadDockerArgs_DashSeparator(t *testing.T) {
 			if catIdx == -1 {
 				t.Fatal("'cat' not found in docker args")
 			}
-			if catIdx+1 >= len(dockerArgs) || dockerArgs[catIdx+1] != "--" {
+			if catIdx+1 >= len(cmd.Args) || cmd.Args[catIdx+1] != "--" {
 				t.Errorf("expected '--' immediately after 'cat', got args: %s",
-					strings.Join(dockerArgs, " "))
+					strings.Join(cmd.Args, " "))
 			}
-			if dockerArgs[len(dockerArgs)-1] != tc.filePath {
+			if cmd.Args[len(cmd.Args)-1] != tc.filePath {
 				t.Errorf("expected file path %q as last arg, got %q",
-					tc.filePath, dockerArgs[len(dockerArgs)-1])
+					tc.filePath, cmd.Args[len(cmd.Args)-1])
 			}
 		})
 	}

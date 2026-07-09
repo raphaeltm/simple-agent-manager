@@ -25,6 +25,7 @@ import {
   validateDirectory,
 } from '../../services/file-library';
 import { signTerminalToken } from '../../services/jwt';
+import { fetchNodeAgent } from '../../services/node-agent';
 import {
   INTERNAL_ERROR,
   INVALID_PARAMS,
@@ -151,6 +152,7 @@ async function resolveWorkspaceVmUrl(
 async function uploadToWorkspace(
   env: Env,
   vmBaseUrl: string,
+  nodeId: string,
   workspaceId: string,
   userId: string,
   filename: string,
@@ -165,12 +167,11 @@ async function uploadToWorkspace(
   formData.append('files', new Blob([data]), filename);
 
   // Use Authorization header for server-to-server calls (not query param)
-  const res = await fetch(url, {
+  const res = await fetchNodeAgent(nodeId, env, url, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
     body: formData,
-    signal: AbortSignal.timeout(getTransferTimeout(env)),
-  });
+  }, getTransferTimeout(env));
 
   if (!res.ok) {
     const text = await res.text().catch(() => 'unknown');
@@ -185,6 +186,7 @@ async function uploadToWorkspace(
 async function downloadFromWorkspace(
   env: Env,
   vmBaseUrl: string,
+  nodeId: string,
   workspaceId: string,
   userId: string,
   filePath: string,
@@ -194,10 +196,9 @@ async function downloadFromWorkspace(
   const url = `${vmBaseUrl}/workspaces/${encodeURIComponent(workspaceId)}/files/download?${params.toString()}`;
 
   // Use Authorization header for server-to-server calls (not query param)
-  const res = await fetch(url, {
+  const res = await fetchNodeAgent(nodeId, env, url, {
     headers: { Authorization: `Bearer ${token}` },
-    signal: AbortSignal.timeout(getTransferTimeout(env)),
-  });
+  }, getTransferTimeout(env));
 
   if (!res.ok) {
     const text = await res.text().catch(() => 'unknown');
@@ -337,6 +338,7 @@ export async function handleDownloadLibraryFile(
     await uploadToWorkspace(
       env,
       vmResult.vmBaseUrl,
+      vmResult.nodeId,
       tokenData.workspaceId,
       tokenData.userId,
       file.filename,
@@ -404,6 +406,7 @@ export async function handleUploadToLibrary(
     const { data, contentType } = await downloadFromWorkspace(
       env,
       vmResult.vmBaseUrl,
+      vmResult.nodeId,
       tokenData.workspaceId,
       tokenData.userId,
       filePath.trim(),
@@ -549,6 +552,7 @@ export async function handleReplaceLibraryFile(
     const { data, contentType } = await downloadFromWorkspace(
       env,
       vmResult.vmBaseUrl,
+      vmResult.nodeId,
       tokenData.workspaceId,
       tokenData.userId,
       filePath.trim(),

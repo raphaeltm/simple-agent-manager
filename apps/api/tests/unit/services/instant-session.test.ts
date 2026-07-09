@@ -32,6 +32,7 @@ const mocks = vi.hoisted(() => ({
     runSandboxPhase: vi.fn(),
     shellQuote: vi.fn(),
   },
+  sandboxExec: vi.fn(),
   ulid: vi.fn(),
 }));
 
@@ -86,9 +87,7 @@ const env = {
 describe('launchInstantSession', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.ulid
-      .mockReturnValueOnce('workspace-1')
-      .mockReturnValueOnce('agent-session-1');
+    mocks.ulid.mockReturnValueOnce('workspace-1').mockReturnValueOnce('agent-session-1');
     mocks.jwt.signCallbackToken.mockResolvedValue('workspace-callback-token');
     mocks.jwt.signNodeCallbackToken.mockResolvedValue('node-callback-token');
     mocks.mcp.generateMcpToken.mockReturnValue('mcp-token');
@@ -103,9 +102,8 @@ describe('launchInstantSession', () => {
     mocks.projectData.persistMessage.mockResolvedValue(undefined);
     mocks.projectData.transitionAcpSession.mockResolvedValue({});
     mocks.sandbox.getSandboxConfig.mockReturnValue({ execTimeoutMs: 30_000 });
-    mocks.sandbox.getSandboxInstance.mockResolvedValue({
-      exec: vi.fn().mockResolvedValue({ success: true, stdout: 'ok', stderr: '' }),
-    });
+    mocks.sandboxExec.mockResolvedValue({ success: true, stdout: 'ok', stderr: '' });
+    mocks.sandbox.getSandboxInstance.mockResolvedValue({ exec: mocks.sandboxExec });
     mocks.sandbox.runSandboxPhase.mockImplementation((_phase, _detail, fn) => fn());
     mocks.sandbox.shellQuote.mockImplementation((value: string) => `'${value}'`);
   });
@@ -131,11 +129,14 @@ describe('launchInstantSession', () => {
       agentSessionId: 'agent-session-1',
     });
 
-    expect(mocks.nodes.createNodeRecord).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
-      runtime: 'cf-container',
-      vmLocation: 'cf-container',
-      credentialAttributionSource: 'platform',
-    }));
+    expect(mocks.nodes.createNodeRecord).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        runtime: 'cf-container',
+        vmLocation: 'cf-container',
+        credentialAttributionSource: 'platform',
+      })
+    );
     expect(inserts[0]).toMatchObject({
       id: 'workspace-1',
       nodeId: 'node-1',
@@ -187,6 +188,38 @@ describe('launchInstantSession', () => {
       { url: 'https://api.example.com/mcp', token: 'mcp-token' },
       { model: 'claude-sonnet-4-5-20250929', effort: 'auto' }
     );
+    const sandboxCommands = mocks.sandboxExec.mock.calls
+      .map(([command]) => String(command))
+      .join('\n');
+    expect(sandboxCommands).toContain("mkdir -p '/workspaces/repo' /var/lib/vm-agent");
+    expect(sandboxCommands).toContain("WORKSPACE_DIR='/workspaces/repo'");
+    expect(sandboxCommands).toContain("CONTAINER_WORK_DIR='/workspaces/repo'");
+    expect(sandboxCommands).toContain("cd '/workspaces/repo'");
+    expect(sandboxCommands).not.toContain('/workspaces/workspace');
     expect(updates.at(-1)).toMatchObject({ dispatchedAt: expect.any(String) });
+  });
+
+  it('honors a configured Sandbox workspace base directory', async () => {
+    const { db } = makeDb();
+    const envWithWorkspaceBase = {
+      ...(env as Record<string, unknown>),
+      SANDBOX_WORKSPACE_BASE_DIR: '/workspace-root',
+    } as never;
+
+    await launchInstantSession(db as never, envWithWorkspaceBase, {
+      project: { ...project, repository: 'https://github.com/owner/custom-repo.git' } as never,
+      userId: 'user-1',
+      initialPrompt: 'prompt',
+      displayMessage: 'prompt',
+      agentType: 'claude-code',
+    });
+
+    const sandboxCommands = mocks.sandboxExec.mock.calls
+      .map(([command]) => String(command))
+      .join('\n');
+    expect(sandboxCommands).toContain("mkdir -p '/workspace-root/custom-repo' /var/lib/vm-agent");
+    expect(sandboxCommands).toContain("WORKSPACE_DIR='/workspace-root/custom-repo'");
+    expect(sandboxCommands).toContain("CONTAINER_WORK_DIR='/workspace-root/custom-repo'");
+    expect(sandboxCommands).toContain("cd '/workspace-root/custom-repo'");
   });
 });

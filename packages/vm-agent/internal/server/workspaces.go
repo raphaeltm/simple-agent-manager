@@ -542,6 +542,26 @@ func (s *Server) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) {
 	})
 
 	if s.config.IsStandaloneMode() {
+		if err := s.prepareStandaloneWorkspaceRuntime(r.Context(), runtime); err != nil {
+			s.casWorkspaceStatus(body.WorkspaceID, []string{"creating"}, "error")
+			errorMsg := err.Error()
+			callbackToken := strings.TrimSpace(body.CallbackToken)
+			if callbackToken != "" {
+				ctx, cancel := context.WithTimeout(context.Background(), s.config.WorkspaceReadyCallbackTimeout)
+				if callbackErr := s.notifyWorkspaceProvisioningFailed(ctx, body.WorkspaceID, callbackToken, errorMsg); callbackErr != nil {
+					slog.Error("Standalone provisioning-failed callback error", "workspace", body.WorkspaceID, "error", callbackErr)
+				}
+				cancel()
+			}
+			s.appendNodeEvent(body.WorkspaceID, "error", "workspace.provisioning_failed", "Standalone workspace provisioning failed", map[string]interface{}{
+				"workspaceId": body.WorkspaceID,
+				"repository":  body.Repository,
+				"branch":      branch,
+				"error":       errorMsg,
+			})
+			writeError(w, http.StatusInternalServerError, errorMsg)
+			return
+		}
 		s.casWorkspaceStatus(body.WorkspaceID, []string{"creating"}, "running")
 		if strings.TrimSpace(body.CallbackToken) != "" {
 			ctx, cancel := context.WithTimeout(context.Background(), s.config.WorkspaceReadyCallbackTimeout)
