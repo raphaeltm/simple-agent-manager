@@ -487,7 +487,7 @@ func (h *SessionHost) finishPromptWithError(promptCtx context.Context, reqID jso
 	}
 
 	if isCrashPromptError(err) && !errors.Is(promptCtx.Err(), context.DeadlineExceeded) {
-		agentType, stderr, proc, _, ok := h.beginCrashRecovery(reqID, info.viewerID)
+		agentType, stderr, proc, _, ok := h.beginCrashRecovery(reqID, info.viewerID, err)
 		if ok {
 			slog.Warn("ACP Prompt failed because agent disconnected; deferring to crash recovery", "error", err, "agentType", agentType)
 			h.reportLifecycle("warn", "ACP agent crashed during prompt; attempting LoadSession recovery", map[string]interface{}{

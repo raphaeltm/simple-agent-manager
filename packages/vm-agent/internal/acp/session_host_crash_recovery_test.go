@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -271,7 +272,7 @@ func TestSessionHost_RecoveryNotifyOnceDoesNotWrapLaterNormalPrompt(t *testing.T
 	defer host.Stop()
 
 	_, completed, errs := armRecoverablePrompt(t, host, "claude-code", 10*time.Second, false)
-	agentType, _, _, notify, ok := host.beginCrashRecovery(json.RawMessage(`"req-1"`), "viewer-1")
+	agentType, _, _, notify, ok := host.beginCrashRecovery(json.RawMessage(`"req-1"`), "viewer-1", errors.New("peer disconnected before response"))
 	if !ok {
 		t.Fatal("beginCrashRecovery failed")
 	}
@@ -319,6 +320,39 @@ func TestSessionHost_CodexCrashRecovery_ReportsRecovered(t *testing.T) {
 	defer host.Stop()
 
 	assertSuccessfulRecoveryReportsRecovered(t, host, "openai-codex", "codex recovery did not report recovered")
+}
+
+func TestSessionHost_CrashRecoveryReportsDiagnosticError(t *testing.T) {
+	host := newRecoveryTestHost(t, 30*time.Second)
+	defer host.Stop()
+
+	oldProc, _, _ := armRecoverablePrompt(t, host, "openai-codex", 10*time.Second, true)
+	host.config.ContainerResolver = func() (string, error) { return "container", nil }
+	var startCount atomic.Int32
+	host.config.StartProcess = countingSpawn(t, &startCount)
+
+	completed := make(chan string, 2)
+	errs := make(chan error, 2)
+	host.config.OnPromptComplete = func(stopReason string, promptErr error) {
+		completed <- stopReason
+		errs <- promptErr
+	}
+
+	go host.monitorProcessExit(context.Background(), oldProc, "openai-codex", &agentCredential{credentialKind: "api-key"}, nil)
+	finishWithPeerDisconnect(host)
+
+	expectCompletion(t, completed, crashRecoveredStopReason, 2*time.Second, "crash recovery did not report recovered")
+	select {
+	case err := <-errs:
+		if err == nil {
+			t.Fatal("promptErr = nil, want recovered crash diagnostic")
+		}
+		if !strings.Contains(err.Error(), "peer disconnected before response") {
+			t.Fatalf("promptErr = %q, want peer disconnect diagnostic", err.Error())
+		}
+	case <-time.After(time.Second):
+		t.Fatal("missing recovered crash diagnostic")
+	}
 }
 
 // TestSessionHost_CrashRecovery_MaxRestartExhausted proves that exceeding the

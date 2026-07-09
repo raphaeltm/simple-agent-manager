@@ -123,9 +123,16 @@ func (h *SessionHost) monitorProcessExit(ctx context.Context, process agentProce
 	h.broadcastAgentStatus(StatusRecovered, agentType, "")
 	h.broadcastAgentCrashReport(h.crashReport(crashRecovery, true, ""))
 	if recoveryNotify != nil {
-		recoveryNotify(crashRecoveredStopReason, nil)
+		recoveryNotify(crashRecoveredStopReason, crashRecoveryError(crashRecovery))
 	}
 	h.reportActivity("idle")
+}
+
+func crashRecoveryError(snapshot crashRecoverySnapshot) error {
+	if snapshot.recoveryErr == "" {
+		return nil
+	}
+	return fmt.Errorf("%s", snapshot.recoveryErr)
 }
 
 func agentExitInfo(err error) string {

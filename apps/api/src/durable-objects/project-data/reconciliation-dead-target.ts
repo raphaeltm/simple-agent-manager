@@ -18,7 +18,7 @@ interface DeadTargetCandidate {
   taskId: string;
   acpSessionId: string;
   idleDurationMs: number;
-  action: 'checkin' | 'observe_prompt' | 'cancel_prompt';
+  action: 'checkin' | 'observe_prompt' | 'cancel_prompt' | 'recovery_checkin';
   promptAgeMs: number | null;
 }
 

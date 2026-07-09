@@ -77,8 +77,12 @@ type recoveryNotify func(stopReason string, err error)
 // Returns recovery episode state when recovery is available. agentType and stderr are
 // returned even when recovery is unavailable so the caller can use them without
 // re-acquiring locks.
-func (h *SessionHost) beginCrashRecovery(reqID json.RawMessage, viewerID string) (string, string, agentProcess, recoveryNotify, bool) {
+func (h *SessionHost) beginCrashRecovery(reqID json.RawMessage, viewerID string, cause error) (string, string, agentProcess, recoveryNotify, bool) {
 	stderr := redactAgentDiagnosticText(h.peekStderr())
+	crashError := ""
+	if cause != nil {
+		crashError = truncateString(redactAgentDiagnosticText(cause.Error()), 1000)
+	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
@@ -100,6 +104,7 @@ func (h *SessionHost) beginCrashRecovery(reqID json.RawMessage, viewerID string)
 	h.crashRecoveryInProgress = true
 	h.crashStderr = stderr
 	h.crashAgentType = agentType
+	h.crashError = crashError
 	h.crashPromptReqID = append(json.RawMessage(nil), reqID...)
 	h.crashPromptViewerID = viewerID
 	h.status = HostStarting
@@ -112,6 +117,7 @@ type crashRecoverySnapshot struct {
 	inProgress     bool
 	stderr         string
 	agentType      string
+	recoveryErr    string
 	promptReqID    json.RawMessage
 	promptViewerID string
 }
@@ -121,6 +127,7 @@ func (h *SessionHost) crashRecoverySnapshotLocked() crashRecoverySnapshot {
 		inProgress:     h.crashRecoveryInProgress,
 		stderr:         h.crashStderr,
 		agentType:      h.crashAgentType,
+		recoveryErr:    h.crashError,
 		promptReqID:    append(json.RawMessage(nil), h.crashPromptReqID...),
 		promptViewerID: h.crashPromptViewerID,
 	}
@@ -130,6 +137,7 @@ func (h *SessionHost) clearCrashRecoveryLocked() {
 	h.crashRecoveryInProgress = false
 	h.crashStderr = ""
 	h.crashAgentType = ""
+	h.crashError = ""
 	h.crashPromptReqID = nil
 	h.crashPromptViewerID = ""
 }

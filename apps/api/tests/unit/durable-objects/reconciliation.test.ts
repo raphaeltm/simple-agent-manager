@@ -8,6 +8,7 @@ import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { runMigrations } from '../../../src/durable-objects/migrations';
+import { recordActivityEventInternal } from '../../../src/durable-objects/project-data/activity';
 import { computeProjectDataAlarmTime } from '../../../src/durable-objects/project-data/alarm-schedule';
 import {
   createAttentionMarker,
@@ -30,15 +31,21 @@ vi.mock('../../../src/services/node-agent', () => ({
 
 /** Helper to create a D1Database mock with configurable task queries */
 function createMockD1(
-  taskRows: Record<string, { task_mode: string; status: string }> = {},
-  workspaceRows: Record<string, {
-    node_id: string | null;
-    user_id: string;
-    project_id?: string | null;
-    node_status?: string | null;
-    health_status?: string | null;
-    last_heartbeat_at?: string | null;
-  }> = {},
+  taskRows: Record<
+    string,
+    { task_mode: string; status: string; error_message?: string | null }
+  > = {},
+  workspaceRows: Record<
+    string,
+    {
+      node_id: string | null;
+      user_id: string;
+      project_id?: string | null;
+      node_status?: string | null;
+      health_status?: string | null;
+      last_heartbeat_at?: string | null;
+    }
+  > = {}
 ) {
   const runCalls: Array<{ query: string; args: unknown[] }> = [];
   return {
@@ -102,78 +109,89 @@ describe('Task Reconciliation Module', () => {
   });
 
   /** Helper to set up a task-mode session with idle cleanup and workspace activity */
-  function setupTaskSession(opts: {
-    sessionId?: string;
-    workspaceId?: string;
-    taskId?: string;
-    lastActivityAt?: number;
-    acpSessionId?: string;
-    withIdleCleanup?: boolean;
-  } = {}) {
+  function setupTaskSession(
+    opts: {
+      sessionId?: string;
+      workspaceId?: string;
+      taskId?: string;
+      lastActivityAt?: number;
+      acpSessionId?: string;
+      withIdleCleanup?: boolean;
+    } = {}
+  ) {
     const sessionId = opts.sessionId ?? 'session-1';
     const workspaceId = opts.workspaceId ?? 'ws-1';
     const taskId = opts.taskId ?? 'task-1';
-    const lastActivityAt = opts.lastActivityAt ?? (now - FIVE_MINUTES - 1000);
+    const lastActivityAt = opts.lastActivityAt ?? now - FIVE_MINUTES - 1000;
     const acpSessionId = opts.acpSessionId ?? 'acp-1';
     const withIdleCleanup = opts.withIdleCleanup ?? true;
 
     // Create chat session
     db.prepare(
       `INSERT INTO chat_sessions (id, workspace_id, task_id, topic, status, message_count, started_at, created_at, updated_at)
-       VALUES (?, ?, ?, 'Test', 'active', 0, ?, ?, ?)`,
+       VALUES (?, ?, ?, 'Test', 'active', 0, ?, ?, ?)`
     ).run(sessionId, workspaceId, taskId, now - 600000, now - 600000, now - 600000);
 
     if (withIdleCleanup) {
       db.prepare(
         `INSERT INTO idle_cleanup_schedule (session_id, workspace_id, task_id, cleanup_at, created_at, retry_count)
-         VALUES (?, ?, ?, ?, ?, 0)`,
+         VALUES (?, ?, ?, ?, ?, 0)`
       ).run(sessionId, workspaceId, taskId, now + 900000, now - 600000);
     }
 
     // Create workspace activity
     db.prepare(
       `INSERT INTO workspace_activity (workspace_id, session_id, last_message_at, last_terminal_activity_at, created_at)
-       VALUES (?, ?, ?, 0, ?)`,
+       VALUES (?, ?, ?, 0, ?)`
     ).run(workspaceId, sessionId, lastActivityAt, lastActivityAt);
 
     // Create ACP session
     db.prepare(
       `INSERT INTO acp_sessions (id, chat_session_id, status, agent_type, created_at, updated_at)
-       VALUES (?, ?, 'running', 'claude_code', ?, ?)`,
+       VALUES (?, ?, 'running', 'claude_code', ?, ?)`
     ).run(acpSessionId, sessionId, now - 600000, now - 600000);
 
     // Link ACP session to workspace
-    db.prepare(
-      `UPDATE acp_sessions SET workspace_id = ? WHERE id = ?`,
-    ).run(workspaceId, acpSessionId);
+    db.prepare(`UPDATE acp_sessions SET workspace_id = ? WHERE id = ?`).run(
+      workspaceId,
+      acpSessionId
+    );
   }
 
   function envWithRows(
-    taskRows: Record<string, { task_mode: string; status: string }> = {},
-    workspaceRows: Record<string, { node_id: string | null; user_id: string }> = {},
+    taskRows: Record<
+      string,
+      { task_mode: string; status: string; error_message?: string | null }
+    > = {},
+    workspaceRows: Record<string, { node_id: string | null; user_id: string }> = {}
   ): ProjectDataEnv {
     return { DATABASE: createMockD1(taskRows, workspaceRows) } as unknown as ProjectDataEnv;
   }
 
   async function candidatesForTask(taskMode: string, status: string) {
     setupTaskSession();
-    return getReconciliationCandidates(sql, envWithRows({
-      'task-1': { task_mode: taskMode, status },
-    }));
+    return getReconciliationCandidates(
+      sql,
+      envWithRows({
+        'task-1': { task_mode: taskMode, status },
+      })
+    );
   }
 
   function setAcpHeartbeat(acpSessionId = 'acp-1', heartbeatAt = now) {
     db.prepare(
-      `UPDATE acp_sessions SET node_id = 'node-1', last_heartbeat_at = ? WHERE id = ?`,
+      `UPDATE acp_sessions SET node_id = 'node-1', last_heartbeat_at = ? WHERE id = ?`
     ).run(heartbeatAt, acpSessionId);
   }
 
-  function setSessionActivity(opts: {
-    acpSessionId?: string;
-    activity?: string;
-    activityAt?: number;
-    promptStartedAt?: number | null;
-  } = {}) {
+  function setSessionActivity(
+    opts: {
+      acpSessionId?: string;
+      activity?: string;
+      activityAt?: number;
+      promptStartedAt?: number | null;
+    } = {}
+  ) {
     const acpSessionId = opts.acpSessionId ?? 'acp-1';
     const activity = opts.activity ?? 'prompting';
     const activityAt = opts.activityAt ?? now;
@@ -184,8 +202,52 @@ describe('Task Reconciliation Module', () => {
        ON CONFLICT(session_id) DO UPDATE SET
          activity = excluded.activity,
          activity_at = excluded.activity_at,
-         prompt_started_at = excluded.prompt_started_at`,
+         prompt_started_at = excluded.prompt_started_at`
     ).run(acpSessionId, activity, activityAt, promptStartedAt);
+  }
+
+  function recordRecoverableErrorEvent(
+    opts: {
+      sessionId?: string;
+      workspaceId?: string;
+      taskId?: string;
+      errorMessage?: string;
+      createdAt?: number;
+    } = {}
+  ) {
+    const sessionId = opts.sessionId ?? 'session-1';
+    const workspaceId = opts.workspaceId ?? 'ws-1';
+    const taskId = opts.taskId ?? 'task-1';
+    const errorMessage =
+      opts.errorMessage ??
+      'Agent process disconnected during prompt; SAM recovered the session automatically.';
+
+    if (opts.createdAt === undefined) {
+      recordActivityEventInternal(
+        sql,
+        'task.agent_error_recoverable',
+        'workspace_callback',
+        workspaceId,
+        workspaceId,
+        sessionId,
+        taskId,
+        JSON.stringify({ errorMessage })
+      );
+      return;
+    }
+
+    db.prepare(
+      `INSERT INTO activity_events (id, event_type, actor_type, actor_id, workspace_id, session_id, task_id, payload, created_at)
+       VALUES (?, 'task.agent_error_recoverable', 'workspace_callback', ?, ?, ?, ?, ?, ?)`
+    ).run(
+      `event-${taskId}-${opts.createdAt}`,
+      workspaceId,
+      workspaceId,
+      sessionId,
+      taskId,
+      JSON.stringify({ errorMessage }),
+      opts.createdAt
+    );
   }
 
   describe('getReconciliationCandidates', () => {
@@ -203,9 +265,12 @@ describe('Task Reconciliation Module', () => {
     it('selects task-mode sessions even when idle cleanup schedule is missing', async () => {
       setupTaskSession({ withIdleCleanup: false });
 
-      const candidates = await getReconciliationCandidates(sql, envWithRows({
-        'task-1': { task_mode: 'task', status: 'in_progress' },
-      }));
+      const candidates = await getReconciliationCandidates(
+        sql,
+        envWithRows({
+          'task-1': { task_mode: 'task', status: 'in_progress' },
+        })
+      );
 
       expect(candidates).toHaveLength(1);
       expect(candidates[0]).toMatchObject({
@@ -218,6 +283,61 @@ describe('Task Reconciliation Module', () => {
 
     it('excludes conversation-mode tasks', async () => {
       const candidates = await candidatesForTask('conversation', 'in_progress');
+      expect(candidates).toHaveLength(0);
+    });
+
+    it('selects conversation-mode sessions with a recoverable agent error and no later activity', async () => {
+      setupTaskSession();
+      recordRecoverableErrorEvent({
+        errorMessage:
+          'Agent process disconnected during prompt; SAM recovered the session automatically. Diagnostic: peer disconnected before response with api_key=sk-secret1234567890',
+      });
+
+      const candidates = await getReconciliationCandidates(
+        sql,
+        envWithRows({
+          'task-1': { task_mode: 'conversation', status: 'in_progress' },
+        })
+      );
+
+      expect(candidates).toHaveLength(1);
+      expect(candidates[0]).toMatchObject({
+        sessionId: 'session-1',
+        taskId: 'task-1',
+        workspaceId: 'ws-1',
+        acpSessionId: 'acp-1',
+        action: 'recovery_checkin',
+        recoveryErrorMessage: expect.stringContaining('peer disconnected before response'),
+      });
+    });
+
+    it('excludes conversation-mode recoverable errors that have newer activity', async () => {
+      const lastActivityAt = now - FIVE_MINUTES - 1000;
+      setupTaskSession({ lastActivityAt });
+      recordRecoverableErrorEvent({ createdAt: lastActivityAt - 1 });
+
+      const candidates = await getReconciliationCandidates(
+        sql,
+        envWithRows({
+          'task-1': { task_mode: 'conversation', status: 'in_progress' },
+        })
+      );
+
+      expect(candidates).toHaveLength(0);
+    });
+
+    it('defers conversation recovery prompts while a prompt is already in flight', async () => {
+      setupTaskSession();
+      recordRecoverableErrorEvent();
+      setSessionActivity({ activity: 'prompting', promptStartedAt: now - THIRTY_MINUTES - 1000 });
+
+      const candidates = await getReconciliationCandidates(
+        sql,
+        envWithRows({
+          'task-1': { task_mode: 'conversation', status: 'in_progress' },
+        })
+      );
+
       expect(candidates).toHaveLength(0);
     });
 
@@ -242,9 +362,12 @@ describe('Task Reconciliation Module', () => {
         reason: 'Waiting for user input',
         expiresAt: now + 7200000,
       });
-      const candidates = await getReconciliationCandidates(sql, envWithRows({
-        'task-1': { task_mode: 'task', status: 'in_progress' },
-      }));
+      const candidates = await getReconciliationCandidates(
+        sql,
+        envWithRows({
+          'task-1': { task_mode: 'task', status: 'in_progress' },
+        })
+      );
       expect(candidates).toHaveLength(0);
     });
 
@@ -259,9 +382,12 @@ describe('Task Reconciliation Module', () => {
         reason: 'Agent idle — SAM check-in sent',
         expiresAt: now + ONE_MINUTE,
       });
-      const candidates = await getReconciliationCandidates(sql, envWithRows({
-        'task-1': { task_mode: 'task', status: 'in_progress' },
-      }));
+      const candidates = await getReconciliationCandidates(
+        sql,
+        envWithRows({
+          'task-1': { task_mode: 'task', status: 'in_progress' },
+        })
+      );
       expect(candidates).toHaveLength(0);
     });
 
@@ -271,7 +397,9 @@ describe('Task Reconciliation Module', () => {
       const mockDb = createMockD1({
         'task-1': { task_mode: 'task', status: 'in_progress' },
       });
-      const env = { DATABASE: mockDb } as unknown as import('../../../src/durable-objects/project-data/types').Env;
+      const env = {
+        DATABASE: mockDb,
+      } as unknown as import('../../../src/durable-objects/project-data/types').Env;
 
       const candidates = await getReconciliationCandidates(sql, env);
       expect(candidates).toHaveLength(0);
@@ -285,7 +413,9 @@ describe('Task Reconciliation Module', () => {
       const mockDb = createMockD1({
         'task-1': { task_mode: 'task', status: 'in_progress' },
       });
-      const env = { DATABASE: mockDb } as unknown as import('../../../src/durable-objects/project-data/types').Env;
+      const env = {
+        DATABASE: mockDb,
+      } as unknown as import('../../../src/durable-objects/project-data/types').Env;
 
       const candidates = await getReconciliationCandidates(sql, env);
       expect(candidates).toHaveLength(0);
@@ -295,11 +425,11 @@ describe('Task Reconciliation Module', () => {
       // Create a session without task_id (conversation mode)
       db.exec(
         `INSERT INTO chat_sessions (id, workspace_id, task_id, topic, status, message_count, started_at, created_at, updated_at)
-         VALUES ('session-conv', 'ws-conv', NULL, 'Conv', 'active', 0, ${now}, ${now}, ${now})`,
+         VALUES ('session-conv', 'ws-conv', NULL, 'Conv', 'active', 0, ${now}, ${now}, ${now})`
       );
       db.exec(
         `INSERT INTO idle_cleanup_schedule (session_id, workspace_id, task_id, cleanup_at, created_at, retry_count)
-         VALUES ('session-conv', 'ws-conv', NULL, ${now + 900000}, ${now}, 0)`,
+         VALUES ('session-conv', 'ws-conv', NULL, ${now + 900000}, ${now}, 0)`
       );
 
       const candidates = await getReconciliationCandidates(sql, envWithRows());
@@ -370,7 +500,7 @@ describe('Task Reconciliation Module', () => {
       setupTaskSession();
       const env = envWithRows(
         { 'task-1': { task_mode: 'task', status: 'in_progress' } },
-        { 'ws-1': { node_id: 'node-1', user_id: 'user-1' } },
+        { 'ws-1': { node_id: 'node-1', user_id: 'user-1' } }
       );
       const broadcastEvent = vi.fn();
 
@@ -379,7 +509,9 @@ describe('Task Reconciliation Module', () => {
       expect(processed).toBe(1);
 
       // Check the message was persisted
-      const messages = db.prepare('SELECT * FROM chat_messages WHERE session_id = ?').all('session-1');
+      const messages = db
+        .prepare('SELECT * FROM chat_messages WHERE session_id = ?')
+        .all('session-1');
       expect(messages).toHaveLength(1);
       const msg = messages[0] as Record<string, unknown>;
       expect(msg.role).toBe('user');
@@ -394,20 +526,86 @@ describe('Task Reconciliation Module', () => {
       expect(metadata.kind).toBe('reconciliation_checkin');
     });
 
+    it('persists a non-expiring conversation recovery check-in with diagnostic context', async () => {
+      const { sendPromptToAgentOnNode } = await import('../../../src/services/node-agent');
+      setupTaskSession();
+      recordRecoverableErrorEvent({
+        errorMessage:
+          'Agent process disconnected during prompt; SAM recovered the session automatically. Diagnostic: peer disconnected before response',
+      });
+      const env = envWithRows(
+        { 'task-1': { task_mode: 'conversation', status: 'in_progress' } },
+        { 'ws-1': { node_id: 'node-1', user_id: 'user-1' } }
+      );
+      const broadcastEvent = vi.fn();
+
+      const processed = await processReconciliationCandidates(sql, env, broadcastEvent);
+
+      expect(processed).toBe(1);
+
+      const messages = db
+        .prepare('SELECT * FROM chat_messages WHERE session_id = ?')
+        .all('session-1');
+      expect(messages).toHaveLength(1);
+      const msg = messages[0] as Record<string, unknown>;
+      expect(msg.role).toBe('user');
+      expect(msg.content).toContain('SAM Orchestrator Recovery');
+      expect(msg.content).toContain('peer disconnected before response');
+      expect(msg.content).not.toContain('sk-secret1234567890');
+      expect(msg.content).toContain('continue from where you left off');
+
+      const metadata = JSON.parse(msg.tool_metadata as string);
+      expect(metadata).toMatchObject({
+        source: 'sam_orchestrator',
+        kind: 'reconciliation_checkin',
+        recovery: 'conversation_error',
+      });
+
+      const markers = db
+        .prepare(
+          `SELECT * FROM session_attention_markers WHERE session_id = ? AND kind = 'reconciliation_checkin'`
+        )
+        .all('session-1');
+      expect(markers).toHaveLength(1);
+      const marker = markers[0] as Record<string, unknown>;
+      expect(marker.expires_at).toBeNull();
+      expect(marker.reason).toContain('recovery check-in sent');
+
+      const events = db
+        .prepare(
+          `SELECT * FROM activity_events WHERE event_type = 'reconciliation.recovery_checkin_sent'`
+        )
+        .all();
+      expect(events).toHaveLength(1);
+
+      expect(vi.mocked(sendPromptToAgentOnNode)).toHaveBeenCalledWith(
+        'node-1',
+        'ws-1',
+        'acp-1',
+        expect.stringContaining('SAM Orchestrator Recovery'),
+        expect.anything(),
+        'user-1',
+        undefined,
+        { requestTimeoutMs: 5000 }
+      );
+    });
+
     it('creates reconciliation_checkin attention marker with deadline', async () => {
       setupTaskSession();
       const env = envWithRows(
         { 'task-1': { task_mode: 'task', status: 'in_progress' } },
-        { 'ws-1': { node_id: 'node-1', user_id: 'user-1' } },
+        { 'ws-1': { node_id: 'node-1', user_id: 'user-1' } }
       );
       const broadcastEvent = vi.fn();
 
       await processReconciliationCandidates(sql, env, broadcastEvent);
 
       // Check the attention marker was created
-      const markers = db.prepare(
-        `SELECT * FROM session_attention_markers WHERE session_id = ? AND kind = 'reconciliation_checkin'`,
-      ).all('session-1');
+      const markers = db
+        .prepare(
+          `SELECT * FROM session_attention_markers WHERE session_id = ? AND kind = 'reconciliation_checkin'`
+        )
+        .all('session-1');
       expect(markers).toHaveLength(1);
       const marker = markers[0] as Record<string, unknown>;
       expect(marker.source).toBe('sam_orchestrator');
@@ -421,21 +619,27 @@ describe('Task Reconciliation Module', () => {
       setupTaskSession();
       const mockDb = createMockD1(
         { 'task-1': { task_mode: 'task', status: 'in_progress' } },
-        { 'ws-1': { node_id: 'node-1', user_id: 'user-1' } },
+        { 'ws-1': { node_id: 'node-1', user_id: 'user-1' } }
       );
-      const env = { DATABASE: mockDb } as unknown as import('../../../src/durable-objects/project-data/types').Env;
+      const env = {
+        DATABASE: mockDb,
+      } as unknown as import('../../../src/durable-objects/project-data/types').Env;
       const broadcastEvent = vi.fn();
 
       await processReconciliationCandidates(sql, env, broadcastEvent);
 
       // Should broadcast message.new
-      const msgEvents = broadcastEvent.mock.calls.filter(([type]: string[]) => type === 'message.new');
+      const msgEvents = broadcastEvent.mock.calls.filter(
+        ([type]: string[]) => type === 'message.new'
+      );
       expect(msgEvents).toHaveLength(1);
       expect(msgEvents[0][1].role).toBe('user');
       expect(msgEvents[0][1].toolMetadata.source).toBe('sam_orchestrator');
 
       // Should broadcast attention.created
-      const attnEvents = broadcastEvent.mock.calls.filter(([type]: string[]) => type === 'attention.created');
+      const attnEvents = broadcastEvent.mock.calls.filter(
+        ([type]: string[]) => type === 'attention.created'
+      );
       expect(attnEvents).toHaveLength(1);
       expect(attnEvents[0][1].kind).toBe('reconciliation_checkin');
     });
@@ -444,16 +648,18 @@ describe('Task Reconciliation Module', () => {
       setupTaskSession();
       const mockDb = createMockD1(
         { 'task-1': { task_mode: 'task', status: 'in_progress' } },
-        { 'ws-1': { node_id: 'node-1', user_id: 'user-1' } },
+        { 'ws-1': { node_id: 'node-1', user_id: 'user-1' } }
       );
-      const env = { DATABASE: mockDb } as unknown as import('../../../src/durable-objects/project-data/types').Env;
+      const env = {
+        DATABASE: mockDb,
+      } as unknown as import('../../../src/durable-objects/project-data/types').Env;
       const broadcastEvent = vi.fn();
 
       await processReconciliationCandidates(sql, env, broadcastEvent);
 
-      const events = db.prepare(
-        `SELECT * FROM activity_events WHERE event_type = 'reconciliation.checkin_sent'`,
-      ).all();
+      const events = db
+        .prepare(`SELECT * FROM activity_events WHERE event_type = 'reconciliation.checkin_sent'`)
+        .all();
       expect(events).toHaveLength(1);
     });
 
@@ -469,10 +675,10 @@ describe('Task Reconciliation Module', () => {
         expiresAt: now + ONE_MINUTE,
       });
 
-      const mockDb = createMockD1(
-        { 'task-1': { task_mode: 'task', status: 'in_progress' } },
-      );
-      const env = { DATABASE: mockDb } as unknown as import('../../../src/durable-objects/project-data/types').Env;
+      const mockDb = createMockD1({ 'task-1': { task_mode: 'task', status: 'in_progress' } });
+      const env = {
+        DATABASE: mockDb,
+      } as unknown as import('../../../src/durable-objects/project-data/types').Env;
       const broadcastEvent = vi.fn();
 
       const processed = await processReconciliationCandidates(sql, env, broadcastEvent);
@@ -484,7 +690,9 @@ describe('Task Reconciliation Module', () => {
       const mockDb = createMockD1({
         'task-1': { task_mode: 'task', status: 'completed' },
       });
-      const env = { DATABASE: mockDb } as unknown as import('../../../src/durable-objects/project-data/types').Env;
+      const env = {
+        DATABASE: mockDb,
+      } as unknown as import('../../../src/durable-objects/project-data/types').Env;
       const broadcastEvent = vi.fn();
 
       const processed = await processReconciliationCandidates(sql, env, broadcastEvent);
@@ -496,9 +704,11 @@ describe('Task Reconciliation Module', () => {
       setupTaskSession();
       const mockDb = createMockD1(
         { 'task-1': { task_mode: 'task', status: 'in_progress' } },
-        { 'ws-1': { node_id: 'node-1', user_id: 'user-1' } },
+        { 'ws-1': { node_id: 'node-1', user_id: 'user-1' } }
       );
-      const env = { DATABASE: mockDb } as unknown as import('../../../src/durable-objects/project-data/types').Env;
+      const env = {
+        DATABASE: mockDb,
+      } as unknown as import('../../../src/durable-objects/project-data/types').Env;
       const broadcastEvent = vi.fn();
 
       await processReconciliationCandidates(sql, env, broadcastEvent);
@@ -511,7 +721,7 @@ describe('Task Reconciliation Module', () => {
         expect.anything(),
         'user-1',
         undefined,
-        { requestTimeoutMs: 5000 },
+        { requestTimeoutMs: 5000 }
       );
     });
 
@@ -522,26 +732,33 @@ describe('Task Reconciliation Module', () => {
       setupTaskSession();
       const mockDb = createMockD1(
         { 'task-1': { task_mode: 'task', status: 'in_progress' } },
-        { 'ws-1': { node_id: 'node-1', user_id: 'user-1' } },
+        { 'ws-1': { node_id: 'node-1', user_id: 'user-1' } }
       );
-      const env = { DATABASE: mockDb } as unknown as import('../../../src/durable-objects/project-data/types').Env;
+      const env = {
+        DATABASE: mockDb,
+      } as unknown as import('../../../src/durable-objects/project-data/types').Env;
       const broadcastEvent = vi.fn();
 
       const processed = await processReconciliationCandidates(sql, env, broadcastEvent);
       expect(processed).toBe(1);
 
       // Message and marker should still exist despite send failure
-      const messages = db.prepare('SELECT * FROM chat_messages WHERE session_id = ?').all('session-1');
+      const messages = db
+        .prepare('SELECT * FROM chat_messages WHERE session_id = ?')
+        .all('session-1');
       expect(messages).toHaveLength(1);
 
-      const markers = db.prepare(
-        `SELECT * FROM session_attention_markers WHERE session_id = ? AND kind = 'reconciliation_checkin'`,
-      ).all('session-1');
+      const markers = db
+        .prepare(
+          `SELECT * FROM session_attention_markers WHERE session_id = ? AND kind = 'reconciliation_checkin'`
+        )
+        .all('session-1');
       expect(markers).toHaveLength(1);
     });
 
     it('fails dead-node candidates without attempting VM delivery', async () => {
-      const { sendPromptToAgentOnNode, cancelAgentSessionOnNode } = await import('../../../src/services/node-agent');
+      const { sendPromptToAgentOnNode, cancelAgentSessionOnNode } =
+        await import('../../../src/services/node-agent');
       setupTaskSession();
       const mockDb = createMockD1(
         { 'task-1': { task_mode: 'task', status: 'in_progress' } },
@@ -554,7 +771,7 @@ describe('Task Reconciliation Module', () => {
             health_status: 'unhealthy',
             last_heartbeat_at: null,
           },
-        },
+        }
       );
       const env = { DATABASE: mockDb } as unknown as ProjectDataEnv;
       const broadcastEvent = vi.fn();
@@ -566,21 +783,29 @@ describe('Task Reconciliation Module', () => {
       expect(processed).toBe(1);
       expect(vi.mocked(sendPromptToAgentOnNode)).not.toHaveBeenCalled();
       expect(vi.mocked(cancelAgentSessionOnNode)).not.toHaveBeenCalled();
-      expect(db.prepare(`SELECT status FROM chat_sessions WHERE id = 'session-1'`).get()).toMatchObject({
+      expect(
+        db.prepare(`SELECT status FROM chat_sessions WHERE id = 'session-1'`).get()
+      ).toMatchObject({
         status: 'failed',
       });
-      expect(db.prepare(`SELECT * FROM chat_messages WHERE session_id = 'session-1'`).all()).toHaveLength(0);
-      const runCalls = (mockDb as unknown as { __runCalls: Array<{ query: string; args: unknown[] }> }).__runCalls;
-      expect(runCalls).toEqual(expect.arrayContaining([
-        expect.objectContaining({
-          query: expect.stringContaining('WHERE id = ? AND project_id = ?'),
-          args: expect.arrayContaining(['task-1', 'project-1']),
-        }),
-        expect.objectContaining({
-          query: expect.stringContaining('WHERE id = ? AND project_id = ?'),
-          args: expect.arrayContaining(['ws-1', 'project-1']),
-        }),
-      ]));
+      expect(
+        db.prepare(`SELECT * FROM chat_messages WHERE session_id = 'session-1'`).all()
+      ).toHaveLength(0);
+      const runCalls = (
+        mockDb as unknown as { __runCalls: Array<{ query: string; args: unknown[] }> }
+      ).__runCalls;
+      expect(runCalls).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            query: expect.stringContaining('WHERE id = ? AND project_id = ?'),
+            args: expect.arrayContaining(['task-1', 'project-1']),
+          }),
+          expect.objectContaining({
+            query: expect.stringContaining('WHERE id = ? AND project_id = ?'),
+            args: expect.arrayContaining(['ws-1', 'project-1']),
+          }),
+        ])
+      );
     });
 
     it('gives no-node workspaces a terminal disposition so they are not selected again', async () => {
@@ -588,7 +813,7 @@ describe('Task Reconciliation Module', () => {
       setupTaskSession();
       const env = envWithRows(
         { 'task-1': { task_mode: 'task', status: 'in_progress' } },
-        { 'ws-1': { node_id: null, user_id: 'user-1' } },
+        { 'ws-1': { node_id: null, user_id: 'user-1' } }
       );
 
       const firstPass = await processReconciliationCandidates(sql, env, vi.fn());
@@ -597,13 +822,16 @@ describe('Task Reconciliation Module', () => {
       expect(firstPass).toBe(1);
       expect(secondPass).toBe(0);
       expect(vi.mocked(sendPromptToAgentOnNode)).not.toHaveBeenCalled();
-      expect(db.prepare(`SELECT status FROM chat_sessions WHERE id = 'session-1'`).get()).toMatchObject({
+      expect(
+        db.prepare(`SELECT status FROM chat_sessions WHERE id = 'session-1'`).get()
+      ).toMatchObject({
         status: 'failed',
       });
     });
 
     it('terminally handles dead-node observe and cancel candidates without touching unrelated newer sessions', async () => {
-      const { sendPromptToAgentOnNode, cancelAgentSessionOnNode } = await import('../../../src/services/node-agent');
+      const { sendPromptToAgentOnNode, cancelAgentSessionOnNode } =
+        await import('../../../src/services/node-agent');
       setupTaskSession({
         sessionId: 'observe-session',
         workspaceId: 'observe-ws',
@@ -654,7 +882,7 @@ describe('Task Reconciliation Module', () => {
               last_heartbeat_at: null,
             },
             'newer-ws': { node_id: 'healthy-node', user_id: 'user-1' },
-          },
+          }
         ),
         TASK_RECONCILIATION_PROMPT_SOFT_STALL_MS: String(THIRTY_MINUTES),
         TASK_RECONCILIATION_PROMPT_HARD_STALL_MS: String(TWO_HOURS),
@@ -667,13 +895,19 @@ describe('Task Reconciliation Module', () => {
       expect(secondPass).toBe(0);
       expect(vi.mocked(sendPromptToAgentOnNode)).not.toHaveBeenCalled();
       expect(vi.mocked(cancelAgentSessionOnNode)).not.toHaveBeenCalled();
-      expect(db.prepare(`SELECT status FROM chat_sessions WHERE id = 'observe-session'`).get()).toMatchObject({
+      expect(
+        db.prepare(`SELECT status FROM chat_sessions WHERE id = 'observe-session'`).get()
+      ).toMatchObject({
         status: 'failed',
       });
-      expect(db.prepare(`SELECT status FROM chat_sessions WHERE id = 'cancel-session'`).get()).toMatchObject({
+      expect(
+        db.prepare(`SELECT status FROM chat_sessions WHERE id = 'cancel-session'`).get()
+      ).toMatchObject({
         status: 'failed',
       });
-      expect(db.prepare(`SELECT status FROM chat_sessions WHERE id = 'newer-session'`).get()).toMatchObject({
+      expect(
+        db.prepare(`SELECT status FROM chat_sessions WHERE id = 'newer-session'`).get()
+      ).toMatchObject({
         status: 'active',
       });
     });
@@ -682,15 +916,18 @@ describe('Task Reconciliation Module', () => {
       const { sendPromptToAgentOnNode } = await import('../../../src/services/node-agent');
       let markerExistedAtSend = false;
       vi.mocked(sendPromptToAgentOnNode).mockImplementationOnce(async () => {
-        markerExistedAtSend = db.prepare(
-          `SELECT COUNT(*) AS count FROM session_attention_markers WHERE kind = 'reconciliation_checkin'`,
-        ).get<{ count: number }>()!.count === 1;
+        markerExistedAtSend =
+          db
+            .prepare(
+              `SELECT COUNT(*) AS count FROM session_attention_markers WHERE kind = 'reconciliation_checkin'`
+            )
+            .get<{ count: number }>()!.count === 1;
         throw new Error('network error');
       });
       setupTaskSession();
       const env = envWithRows(
         { 'task-1': { task_mode: 'task', status: 'in_progress' } },
-        { 'ws-1': { node_id: 'node-1', user_id: 'user-1' } },
+        { 'ws-1': { node_id: 'node-1', user_id: 'user-1' } }
       );
       const waitUntilPromises: Promise<unknown>[] = [];
 
@@ -706,8 +943,18 @@ describe('Task Reconciliation Module', () => {
 
     it('processes multiple concurrent candidates independently', async () => {
       // Set up two idle task-mode sessions
-      setupTaskSession({ sessionId: 'session-1', workspaceId: 'ws-1', taskId: 'task-1', acpSessionId: 'acp-1' });
-      setupTaskSession({ sessionId: 'session-2', workspaceId: 'ws-2', taskId: 'task-2', acpSessionId: 'acp-2' });
+      setupTaskSession({
+        sessionId: 'session-1',
+        workspaceId: 'ws-1',
+        taskId: 'task-1',
+        acpSessionId: 'acp-1',
+      });
+      setupTaskSession({
+        sessionId: 'session-2',
+        workspaceId: 'ws-2',
+        taskId: 'task-2',
+        acpSessionId: 'acp-2',
+      });
 
       const mockDb = createMockD1(
         {
@@ -717,9 +964,11 @@ describe('Task Reconciliation Module', () => {
         {
           'ws-1': { node_id: 'node-1', user_id: 'user-1' },
           'ws-2': { node_id: 'node-2', user_id: 'user-2' },
-        },
+        }
       );
-      const env = { DATABASE: mockDb } as unknown as import('../../../src/durable-objects/project-data/types').Env;
+      const env = {
+        DATABASE: mockDb,
+      } as unknown as import('../../../src/durable-objects/project-data/types').Env;
       const broadcastEvent = vi.fn();
 
       const processed = await processReconciliationCandidates(sql, env, broadcastEvent);
@@ -731,9 +980,11 @@ describe('Task Reconciliation Module', () => {
       expect(msgs1).toHaveLength(1);
       expect(msgs2).toHaveLength(1);
 
-      const markers = db.prepare(
-        `SELECT * FROM session_attention_markers WHERE kind = 'reconciliation_checkin' AND resolved_at IS NULL`,
-      ).all();
+      const markers = db
+        .prepare(
+          `SELECT * FROM session_attention_markers WHERE kind = 'reconciliation_checkin' AND resolved_at IS NULL`
+        )
+        .all();
       expect(markers).toHaveLength(2);
     });
 
@@ -786,13 +1037,14 @@ describe('Task Reconciliation Module', () => {
     });
 
     it('does not create a visible check-in for an in-flight prompt below the hard threshold', async () => {
-      const { cancelAgentSessionOnNode, sendPromptToAgentOnNode } = await import('../../../src/services/node-agent');
+      const { cancelAgentSessionOnNode, sendPromptToAgentOnNode } =
+        await import('../../../src/services/node-agent');
       setupTaskSession({ lastActivityAt: now - FIVE_MINUTES - 1000 });
       setSessionActivity({ promptStartedAt: now - THIRTY_MINUTES - 1000 });
       const env = {
         ...envWithRows(
           { 'task-1': { task_mode: 'task', status: 'in_progress' } },
-          { 'ws-1': { node_id: 'node-1', user_id: 'user-1' } },
+          { 'ws-1': { node_id: 'node-1', user_id: 'user-1' } }
         ),
         TASK_RECONCILIATION_PROMPT_SOFT_STALL_MS: String(THIRTY_MINUTES),
         TASK_RECONCILIATION_PROMPT_HARD_STALL_MS: String(TWO_HOURS),
@@ -804,21 +1056,32 @@ describe('Task Reconciliation Module', () => {
       expect(processed).toBe(1);
       expect(vi.mocked(sendPromptToAgentOnNode)).not.toHaveBeenCalled();
       expect(vi.mocked(cancelAgentSessionOnNode)).not.toHaveBeenCalled();
-      expect(db.prepare('SELECT * FROM chat_messages WHERE session_id = ?').all('session-1')).toHaveLength(0);
-      expect(db.prepare(`SELECT * FROM session_attention_markers WHERE kind = 'reconciliation_checkin'`).all()).toHaveLength(0);
-      expect(db.prepare(
-        `SELECT * FROM activity_events WHERE event_type = 'reconciliation.prompt_in_flight_observed'`,
-      ).all()).toHaveLength(1);
+      expect(
+        db.prepare('SELECT * FROM chat_messages WHERE session_id = ?').all('session-1')
+      ).toHaveLength(0);
+      expect(
+        db
+          .prepare(`SELECT * FROM session_attention_markers WHERE kind = 'reconciliation_checkin'`)
+          .all()
+      ).toHaveLength(0);
+      expect(
+        db
+          .prepare(
+            `SELECT * FROM activity_events WHERE event_type = 'reconciliation.prompt_in_flight_observed'`
+          )
+          .all()
+      ).toHaveLength(1);
     });
 
     it('requests prompt cancellation before creating any check-in marker for hard-stalled prompts', async () => {
-      const { cancelAgentSessionOnNode, sendPromptToAgentOnNode } = await import('../../../src/services/node-agent');
+      const { cancelAgentSessionOnNode, sendPromptToAgentOnNode } =
+        await import('../../../src/services/node-agent');
       setupTaskSession({ lastActivityAt: now - FIVE_MINUTES - 1000 });
       setSessionActivity({ promptStartedAt: now - TWO_HOURS - 1000 });
       const env = {
         ...envWithRows(
           { 'task-1': { task_mode: 'task', status: 'in_progress' } },
-          { 'ws-1': { node_id: 'node-1', user_id: 'user-1' } },
+          { 'ws-1': { node_id: 'node-1', user_id: 'user-1' } }
         ),
         TASK_RECONCILIATION_PROMPT_SOFT_STALL_MS: String(THIRTY_MINUTES),
         TASK_RECONCILIATION_PROMPT_HARD_STALL_MS: String(TWO_HOURS),
@@ -834,25 +1097,36 @@ describe('Task Reconciliation Module', () => {
         'acp-1',
         expect.anything(),
         'user-1',
-        { requestTimeoutMs: 5000 },
+        { requestTimeoutMs: 5000 }
       );
       expect(vi.mocked(sendPromptToAgentOnNode)).not.toHaveBeenCalled();
-      expect(db.prepare('SELECT * FROM chat_messages WHERE session_id = ?').all('session-1')).toHaveLength(0);
-      expect(db.prepare(`SELECT * FROM session_attention_markers WHERE kind = 'reconciliation_checkin'`).all()).toHaveLength(0);
-      expect(db.prepare(
-        `SELECT * FROM activity_events WHERE event_type = 'reconciliation.prompt_cancel_requested'`,
-      ).all()).toHaveLength(1);
+      expect(
+        db.prepare('SELECT * FROM chat_messages WHERE session_id = ?').all('session-1')
+      ).toHaveLength(0);
+      expect(
+        db
+          .prepare(`SELECT * FROM session_attention_markers WHERE kind = 'reconciliation_checkin'`)
+          .all()
+      ).toHaveLength(0);
+      expect(
+        db
+          .prepare(
+            `SELECT * FROM activity_events WHERE event_type = 'reconciliation.prompt_cancel_requested'`
+          )
+          .all()
+      ).toHaveLength(1);
     });
 
     it('repairs stale prompting mirror when the VM reports no prompt in flight during hard-stall cancel', async () => {
-      const { cancelAgentSessionOnNode, sendPromptToAgentOnNode } = await import('../../../src/services/node-agent');
+      const { cancelAgentSessionOnNode, sendPromptToAgentOnNode } =
+        await import('../../../src/services/node-agent');
       vi.mocked(cancelAgentSessionOnNode).mockResolvedValueOnce({ success: false, status: 409 });
       setupTaskSession({ lastActivityAt: now - FIVE_MINUTES - 1000 });
       setSessionActivity({ promptStartedAt: now - TWO_HOURS - 1000 });
       const env = {
         ...envWithRows(
           { 'task-1': { task_mode: 'task', status: 'in_progress' } },
-          { 'ws-1': { node_id: 'node-1', user_id: 'user-1' } },
+          { 'ws-1': { node_id: 'node-1', user_id: 'user-1' } }
         ),
         TASK_RECONCILIATION_PROMPT_SOFT_STALL_MS: String(THIRTY_MINUTES),
         TASK_RECONCILIATION_PROMPT_HARD_STALL_MS: String(TWO_HOURS),
@@ -862,7 +1136,9 @@ describe('Task Reconciliation Module', () => {
       const firstPass = await processReconciliationCandidates(sql, env, broadcastEvent);
       expect(firstPass).toBe(1);
       expect(vi.mocked(sendPromptToAgentOnNode)).not.toHaveBeenCalled();
-      expect(db.prepare(`SELECT activity FROM session_state WHERE session_id = 'acp-1'`).get()).toMatchObject({
+      expect(
+        db.prepare(`SELECT activity FROM session_state WHERE session_id = 'acp-1'`).get()
+      ).toMatchObject({
         activity: 'idle',
       });
 
@@ -876,40 +1152,48 @@ describe('Task Reconciliation Module', () => {
         expect.anything(),
         'user-1',
         undefined,
-        { requestTimeoutMs: 5000 },
+        { requestTimeoutMs: 5000 }
       );
     });
   });
 
   describe('computeReconciliationAlarmTime', () => {
     it('returns null when no task-mode sessions exist', () => {
-      const env = { DATABASE: createMockD1() } as unknown as import('../../../src/durable-objects/project-data/types').Env;
+      const env = {
+        DATABASE: createMockD1(),
+      } as unknown as import('../../../src/durable-objects/project-data/types').Env;
       const time = computeReconciliationAlarmTime(sql, env);
       expect(time).toBeNull();
     });
 
     it('returns earliest activity + idle threshold for eligible sessions', () => {
       setupTaskSession({ lastActivityAt: now - 60000 }); // 1 minute ago
-      const env = { DATABASE: createMockD1() } as unknown as import('../../../src/durable-objects/project-data/types').Env;
+      const env = {
+        DATABASE: createMockD1(),
+      } as unknown as import('../../../src/durable-objects/project-data/types').Env;
 
       const time = computeReconciliationAlarmTime(sql, env);
       expect(time).not.toBeNull();
       // Should fire at lastActivityAt + 5 minutes
-      expect(time).toBe((now - 60000) + FIVE_MINUTES);
+      expect(time).toBe(now - 60000 + FIVE_MINUTES);
     });
 
     it('returns earliest activity + idle threshold when idle cleanup schedule is missing', () => {
       setupTaskSession({ lastActivityAt: now - 60000, withIdleCleanup: false });
-      const env = { DATABASE: createMockD1() } as unknown as import('../../../src/durable-objects/project-data/types').Env;
+      const env = {
+        DATABASE: createMockD1(),
+      } as unknown as import('../../../src/durable-objects/project-data/types').Env;
 
       const time = computeReconciliationAlarmTime(sql, env);
-      expect(time).toBe((now - 60000) + FIVE_MINUTES);
+      expect(time).toBe(now - 60000 + FIVE_MINUTES);
     });
 
     it('returns at least 10 seconds in the future', () => {
       // Activity was 10 minutes ago — alarm time would be in the past
       setupTaskSession({ lastActivityAt: now - 10 * 60 * 1000 });
-      const env = { DATABASE: createMockD1() } as unknown as import('../../../src/durable-objects/project-data/types').Env;
+      const env = {
+        DATABASE: createMockD1(),
+      } as unknown as import('../../../src/durable-objects/project-data/types').Env;
 
       const time = computeReconciliationAlarmTime(sql, env);
       expect(time).not.toBeNull();
@@ -939,7 +1223,9 @@ describe('Task Reconciliation Module', () => {
         source: 'sam_orchestrator',
         expiresAt: now + ONE_MINUTE,
       });
-      const env = { DATABASE: createMockD1() } as unknown as import('../../../src/durable-objects/project-data/types').Env;
+      const env = {
+        DATABASE: createMockD1(),
+      } as unknown as import('../../../src/durable-objects/project-data/types').Env;
 
       const time = computeReconciliationAlarmTime(sql, env);
       expect(time).toBeNull();
@@ -954,7 +1240,7 @@ describe('Task Reconciliation Module', () => {
       } as unknown as import('../../../src/durable-objects/project-data/types').Env;
 
       const time = computeReconciliationAlarmTime(sql, env);
-      expect(time).toBe((now - 60000) + customIdleMs);
+      expect(time).toBe(now - 60000 + customIdleMs);
     });
 
     it('schedules prompt-in-flight sessions at the soft threshold first', () => {
@@ -994,21 +1280,21 @@ describe('Task Reconciliation Module', () => {
 
       const time = computeProjectDataAlarmTime(sql, env);
 
-      expect(time).toBe((now - 60000) + FIVE_MINUTES);
+      expect(time).toBe(now - 60000 + FIVE_MINUTES);
     });
 
     it('keeps workspace idle check ahead of healthy heartbeat timeout', () => {
       db.prepare(
         `INSERT INTO chat_sessions (id, workspace_id, task_id, topic, status, message_count, started_at, created_at, updated_at)
-         VALUES ('session-workspace', 'ws-workspace', NULL, 'Workspace', 'active', 0, ?, ?, ?)`,
+         VALUES ('session-workspace', 'ws-workspace', NULL, 'Workspace', 'active', 0, ?, ?, ?)`
       ).run(now - 600000, now - 600000, now - 600000);
       db.prepare(
         `INSERT INTO workspace_activity (workspace_id, session_id, last_message_at, last_terminal_activity_at, created_at)
-         VALUES ('ws-workspace', 'session-workspace', ?, 0, ?)`,
+         VALUES ('ws-workspace', 'session-workspace', ?, 0, ?)`
       ).run(now - 4 * 60 * 1000, now - 4 * 60 * 1000);
       db.prepare(
         `INSERT INTO acp_sessions (id, chat_session_id, status, agent_type, workspace_id, node_id, last_heartbeat_at, created_at, updated_at)
-         VALUES ('acp-workspace', 'session-workspace', 'running', 'claude_code', 'ws-workspace', 'node-1', ?, ?, ?)`,
+         VALUES ('acp-workspace', 'session-workspace', 'running', 'claude_code', 'ws-workspace', 'node-1', ?, ?, ?)`
       ).run(now, now - 600000, now - 600000);
       const env = { DATABASE: createMockD1() } as unknown as ProjectDataEnv;
 
@@ -1041,18 +1327,22 @@ describe('Task Reconciliation Module', () => {
       // The marker's 1-minute deadline is the safety net.
 
       // Verify marker exists
-      const before = db.prepare(
-        `SELECT * FROM session_attention_markers WHERE session_id = ? AND resolved_at IS NULL`,
-      ).all('session-1');
+      const before = db
+        .prepare(
+          `SELECT * FROM session_attention_markers WHERE session_id = ? AND resolved_at IS NULL`
+        )
+        .all('session-1');
       expect(before).toHaveLength(1);
 
       // Simulate agent message resolving markers
       const resolved = resolveAttentionMarkers(sql, 'session-1', 'msg-1', 'human', 'human_message');
       expect(resolved).toBe(1);
 
-      const after = db.prepare(
-        `SELECT * FROM session_attention_markers WHERE session_id = ? AND resolved_at IS NULL`,
-      ).all('session-1');
+      const after = db
+        .prepare(
+          `SELECT * FROM session_attention_markers WHERE session_id = ? AND resolved_at IS NULL`
+        )
+        .all('session-1');
       expect(after).toHaveLength(0);
     });
   });
@@ -1093,10 +1383,12 @@ describe('Task Reconciliation Module', () => {
       expect(resolved).toBe(1);
 
       // Verify marker is now resolved
-      const rows = db.prepare(
-        `SELECT resolved_at, resolved_by_actor_type, resolved_reason
-         FROM session_attention_markers WHERE id = ?`,
-      ).all(marker.id);
+      const rows = db
+        .prepare(
+          `SELECT resolved_at, resolved_by_actor_type, resolved_reason
+         FROM session_attention_markers WHERE id = ?`
+        )
+        .all(marker.id);
       expect(rows).toHaveLength(1);
       expect((rows[0] as Record<string, unknown>).resolved_at).toBeTruthy();
       expect((rows[0] as Record<string, unknown>).resolved_by_actor_type).toBe('system');
@@ -1125,7 +1417,9 @@ describe('Task Reconciliation Module', () => {
       const mockDb = createMockD1({
         'task-1': { task_mode: 'task', status: 'cancelled' },
       });
-      const env = { DATABASE: mockDb } as unknown as import('../../../src/durable-objects/project-data/types').Env;
+      const env = {
+        DATABASE: mockDb,
+      } as unknown as import('../../../src/durable-objects/project-data/types').Env;
 
       const candidates = await getReconciliationCandidates(sql, env);
       expect(candidates).toHaveLength(0);

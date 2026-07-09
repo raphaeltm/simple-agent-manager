@@ -811,7 +811,7 @@ func TestSessionHost_BeginCrashRecoveryRequiresLoadSession(t *testing.T) {
 	host.agentSupportsLoadSession = false
 	host.mu.Unlock()
 
-	if _, _, _, _, ok := host.beginCrashRecovery(json.RawMessage(`"req-1"`), "viewer-1"); ok {
+	if _, _, _, _, ok := host.beginCrashRecovery(json.RawMessage(`"req-1"`), "viewer-1", nil); ok {
 		t.Fatal("beginCrashRecovery succeeded without LoadSession support")
 	}
 
@@ -819,7 +819,7 @@ func TestSessionHost_BeginCrashRecoveryRequiresLoadSession(t *testing.T) {
 	host.agentSupportsLoadSession = true
 	host.mu.Unlock()
 
-	agentType, _, _, _, ok := host.beginCrashRecovery(json.RawMessage(`"req-1"`), "viewer-1")
+	agentType, _, _, _, ok := host.beginCrashRecovery(json.RawMessage(`"req-1"`), "viewer-1", nil)
 	if !ok {
 		t.Fatal("beginCrashRecovery failed with LoadSession support")
 	}

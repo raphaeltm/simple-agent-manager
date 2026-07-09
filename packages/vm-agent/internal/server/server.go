@@ -1280,11 +1280,15 @@ func (s *Server) makeTaskCompletionCallback(
 		}
 
 		if stopReason == "recovered" {
+			body := awaitingFollowupCallbackBody(gitPushResult{})
+			if errorMessage := recoveredPromptErrorMessage(promptErr); errorMessage != "" {
+				body["errorMessage"] = errorMessage
+			}
 			s.postTaskCallback(
 				callbackURL,
 				taskID,
 				s.callbackTokenForWorkspace(workspaceID),
-				awaitingFollowupCallbackBody(gitPushResult{}),
+				body,
 			)
 			return
 		}
@@ -1360,6 +1364,14 @@ func taskCallbackErrorMessage(promptErr error) string {
 		return ""
 	}
 	return redactTaskCallbackDiagnosticText(promptErr.Error())
+}
+
+func recoveredPromptErrorMessage(promptErr error) string {
+	detail := taskCallbackErrorMessage(promptErr)
+	if detail == "" {
+		return ""
+	}
+	return "Agent process disconnected during prompt; SAM recovered the session automatically. Diagnostic: " + detail
 }
 
 func redactTaskCallbackDiagnosticText(text string) string {

@@ -104,6 +104,34 @@ func TestTaskCompletionCallbackTreatsCrashRecoveryAsAwaitingFollowup(t *testing.
 	}
 }
 
+func TestTaskCompletionCallbackIncludesRecoveredCrashDiagnostic(t *testing.T) {
+	t.Parallel()
+
+	body := runTaskCompletionCallback(
+		t,
+		config.TaskModeConversation,
+		"recovered",
+		errors.New("peer disconnected before response with api_key=sk-secret1234567890"),
+	)
+
+	if body["toStatus"] != nil {
+		t.Fatalf("toStatus = %v, want no terminal task status", body["toStatus"])
+	}
+	if body["executionStep"] != "awaiting_followup" {
+		t.Fatalf("executionStep = %v, want awaiting_followup", body["executionStep"])
+	}
+	errorMessage, ok := body["errorMessage"].(string)
+	if !ok || errorMessage == "" {
+		t.Fatalf("errorMessage = %v, want non-empty string", body["errorMessage"])
+	}
+	if !strings.Contains(errorMessage, "SAM recovered the session automatically") {
+		t.Fatalf("errorMessage = %q, want recovered diagnostic", errorMessage)
+	}
+	if strings.Contains(errorMessage, "sk-secret1234567890") {
+		t.Fatalf("errorMessage leaked secret: %q", errorMessage)
+	}
+}
+
 func TestTaskCompletionCallbackTreatsConversationErrorStopReasonAsRecoverable(t *testing.T) {
 	t.Parallel()
 
