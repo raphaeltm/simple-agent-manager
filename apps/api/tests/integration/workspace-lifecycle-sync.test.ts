@@ -18,9 +18,15 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 describe('workspace lifecycle synchronization', () => {
-  const lifecycleFile = readFileSync(resolve(process.cwd(), 'src/routes/workspaces/lifecycle.ts'), 'utf8');
+  const lifecycleFile = readFileSync(
+    resolve(process.cwd(), 'src/routes/workspaces/lifecycle.ts'),
+    'utf8'
+  );
   const crudFile = readFileSync(resolve(process.cwd(), 'src/routes/workspaces/crud.ts'), 'utf8');
-  const workspaceCleanupFile = readFileSync(resolve(process.cwd(), 'src/services/workspace-cleanup.ts'), 'utf8');
+  const workspaceCleanupFile = readFileSync(
+    resolve(process.cwd(), 'src/services/workspace-cleanup.ts'),
+    'utf8'
+  );
   const cleanupFile = readFileSync(resolve(process.cwd(), 'src/scheduled/node-cleanup.ts'), 'utf8');
   const nodesFile = readFileSync(resolve(process.cwd(), 'src/services/nodes.ts'), 'utf8');
   const doFile = [
@@ -31,12 +37,12 @@ describe('workspace lifecycle synchronization', () => {
 
   describe('workspace stop → session stop synchronization', () => {
     it('stop route calls projectDataService.stopSession', () => {
-      expect(lifecycleFile).toContain('projectDataService.stopSession');
+      expect(lifecycleFile).toMatch(/projectDataService\s*\.\s*stopSession/);
       expect(lifecycleFile).toContain('workspace.stop_session_failed');
     });
 
     it('stop route cleans up workspace activity', () => {
-      expect(lifecycleFile).toContain('projectDataService.cleanupWorkspaceActivity');
+      expect(lifecycleFile).toMatch(/projectDataService\s*\.\s*cleanupWorkspaceActivity/);
       expect(lifecycleFile).toContain('workspace.cleanup_activity_failed');
     });
 

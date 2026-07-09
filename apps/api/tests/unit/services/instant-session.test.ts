@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => ({
     transitionAcpSession: vi.fn(),
   },
   sandbox: {
+    destroySandboxInstance: vi.fn(),
     getSandboxConfig: vi.fn(),
     getSandboxInstance: vi.fn(),
     requireSandbox: vi.fn(),
@@ -102,6 +103,7 @@ describe('launchInstantSession', () => {
     mocks.projectData.persistMessage.mockResolvedValue(undefined);
     mocks.projectData.transitionAcpSession.mockResolvedValue({});
     mocks.sandbox.getSandboxConfig.mockReturnValue({ execTimeoutMs: 30_000 });
+    mocks.sandbox.destroySandboxInstance.mockResolvedValue(undefined);
     mocks.sandboxExec.mockResolvedValue({ success: true, stdout: 'ok', stderr: '' });
     mocks.sandbox.getSandboxInstance.mockResolvedValue({ exec: mocks.sandboxExec });
     mocks.sandbox.runSandboxPhase.mockImplementation((_phase, _detail, fn) => fn());
@@ -194,7 +196,8 @@ describe('launchInstantSession', () => {
     expect(sandboxCommands).toContain("mkdir -p '/workspaces/repo' /var/lib/vm-agent");
     expect(sandboxCommands).toContain("WORKSPACE_DIR='/workspaces/repo'");
     expect(sandboxCommands).toContain("CONTAINER_WORK_DIR='/workspaces/repo'");
-    expect(sandboxCommands).toContain("cd '/workspaces/repo'");
+    expect(sandboxCommands).toContain('cd /var/lib/vm-agent');
+    expect(sandboxCommands).not.toContain("cd '/workspaces/repo'");
     expect(sandboxCommands).not.toContain('/workspaces/workspace');
     expect(updates.at(-1)).toMatchObject({ dispatchedAt: expect.any(String) });
   });
@@ -220,6 +223,7 @@ describe('launchInstantSession', () => {
     expect(sandboxCommands).toContain("mkdir -p '/workspace-root/custom-repo' /var/lib/vm-agent");
     expect(sandboxCommands).toContain("WORKSPACE_DIR='/workspace-root/custom-repo'");
     expect(sandboxCommands).toContain("CONTAINER_WORK_DIR='/workspace-root/custom-repo'");
-    expect(sandboxCommands).toContain("cd '/workspace-root/custom-repo'");
+    expect(sandboxCommands).toContain('cd /var/lib/vm-agent');
+    expect(sandboxCommands).not.toContain("cd '/workspace-root/custom-repo'");
   });
 });

@@ -6,6 +6,7 @@ import { type drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { ulid } from '../lib/ulid';
+import { log } from '../lib/logger';
 import { errors } from '../middleware/error';
 import { signCallbackToken, signNodeCallbackToken } from './jwt';
 import { generateMcpToken, revokeMcpToken, storeMcpToken } from './mcp-token';
@@ -19,6 +20,7 @@ import {
 import { createNodeRecord } from './nodes';
 import * as projectDataService from './project-data';
 import {
+  destroySandboxInstance,
   getSandboxConfig,
   getSandboxInstance,
   requireSandbox,
@@ -108,6 +110,10 @@ function sandboxWorkspaceDir(env: Env, repository: string): string {
   return baseDir === '/' ? `/${repoDir}` : `${baseDir}/${repoDir}`;
 }
 
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
 export async function launchInstantSession(
   db: Db,
   env: Env,
@@ -185,222 +191,265 @@ export async function launchInstantSession(
   const phaseDetail = { nodeId: node.id, workspaceId, sandboxId };
   const workspaceDir = sandboxWorkspaceDir(env, input.project.repository);
 
-  const installStart = Date.now();
-  const install = await runSandboxPhase('install', phaseDetail, () =>
-    sandbox.exec(
-      [
-        'set -e',
-        `mkdir -p ${shellQuote(workspaceDir)} /var/lib/vm-agent`,
-        `curl -fsSL "${controlPlaneUrl}/api/agent/download?os=linux&arch=amd64" -o /usr/local/bin/vm-agent.tmp`,
-        'chmod +x /usr/local/bin/vm-agent.tmp',
-        'mv /usr/local/bin/vm-agent.tmp /usr/local/bin/vm-agent',
-        '/usr/local/bin/vm-agent --help >/dev/null 2>&1 || true',
-        'ls -l /usr/local/bin/vm-agent',
-      ].join('\n'),
-      { timeout: config.execTimeoutMs }
-    )
-  );
-  const installDurationMs = Date.now() - installStart;
-  if (!install.success) {
-    throw errors.internal(`vm-agent install failed: ${install.stderr || install.stdout}`);
-  }
-
-  const standaloneEnv = {
-    NODE_ROLE: 'standalone',
-    NODE_ID: node.id,
-    WORKSPACE_ID: workspaceId,
-    PROJECT_ID: input.project.id,
-    CHAT_SESSION_ID: chatSessionId,
-    CONTROL_PLANE_URL: controlPlaneUrl,
-    CALLBACK_TOKEN: nodeCallbackToken,
-    REPOSITORY: input.project.repository,
-    BRANCH: branch,
-    WORKSPACE_DIR: workspaceDir,
-    CONTAINER_WORK_DIR: workspaceDir,
-    CONTAINER_MODE: 'false',
-    PORT_SCAN_ENABLED: 'false',
-    VM_AGENT_PORT: String(vmAgentPort),
-    VM_AGENT_PROTOCOL: 'http',
-    COOKIE_SECURE: 'true',
-  };
-  const processId = `vm-agent-${node.id.toLowerCase()}`;
-  const envAssignments = Object.entries(standaloneEnv)
-    .map(([key, value]) => `${key}=${shellQuote(value)}`)
-    .join(' ');
-  const start = await runSandboxPhase('start', phaseDetail, () =>
-    sandbox.exec(
-      [
-        'set -e',
-        'test -x /usr/local/bin/vm-agent',
-        `cd ${shellQuote(workspaceDir)}`,
-        `nohup env ${envAssignments} /usr/local/bin/vm-agent > /tmp/vm-agent.log 2>&1 &`,
-        'pid=$!',
-        `echo "$pid" > ${shellQuote(`/tmp/${processId}.pid`)}`,
-        'sleep 0.2',
-        'if ! kill -0 "$pid" 2>/dev/null; then cat /tmp/vm-agent.log >&2 || true; exit 1; fi',
-        'echo "$pid"',
-      ].join('\n'),
-      { timeout: config.execTimeoutMs }
-    )
-  );
-  if (!start.success) {
-    throw errors.internal(`vm-agent start failed: ${start.stderr || start.stdout}`);
-  }
-
-  const agentReadyStart = Date.now();
-  await runSandboxPhase('wait_for_ready', phaseDetail, () => waitForNodeAgentReady(node.id, env));
-  const agentReadyDurationMs = Date.now() - agentReadyStart;
-
-  const workspaceCreateStart = Date.now();
-  const workspaceCallbackToken = await signCallbackToken(workspaceId, env);
-  await runSandboxPhase('create_workspace', phaseDetail, () =>
-    createWorkspaceOnNode(node.id, env, input.userId, {
-      workspaceId,
-      repository: input.project.repository,
-      branch,
-      callbackToken: workspaceCallbackToken,
-      lightweight: true,
-    })
-  );
-  const workspaceCreateDurationMs = Date.now() - workspaceCreateStart;
-
-  const agentSessionId = ulid();
-  const acpSessionCreateStart = Date.now();
-  await db.insert(schema.agentSessions).values({
-    id: agentSessionId,
-    workspaceId,
-    userId: input.userId,
-    status: 'running',
-    label: workspaceName,
-    agentType: input.agentType,
-    createdAt: now,
-    updatedAt: now,
-  });
-
-  let mcpToken: string | null = null;
   try {
-    const token = generateMcpToken();
-    mcpToken = token;
-    await storeMcpToken(
-      env.KV,
-      token,
-      {
-        taskId: '',
-        projectId: input.project.id,
-        userId: input.userId,
-        workspaceId,
-        chatSessionId,
-        agentSessionId,
-        createdAt: new Date().toISOString(),
-      },
-      env
+    const installStart = Date.now();
+    const install = await runSandboxPhase('install', phaseDetail, () =>
+      sandbox.exec(
+        [
+          'set -e',
+          `mkdir -p ${shellQuote(workspaceDir)} /var/lib/vm-agent`,
+          `curl -fsSL "${controlPlaneUrl}/api/agent/download?os=linux&arch=amd64" -o /usr/local/bin/vm-agent.tmp`,
+          'chmod +x /usr/local/bin/vm-agent.tmp',
+          'mv /usr/local/bin/vm-agent.tmp /usr/local/bin/vm-agent',
+          '/usr/local/bin/vm-agent --help >/dev/null 2>&1 || true',
+          'ls -l /usr/local/bin/vm-agent',
+        ].join('\n'),
+        { timeout: config.execTimeoutMs }
+      )
     );
+    const installDurationMs = Date.now() - installStart;
+    if (!install.success) {
+      throw errors.internal(`vm-agent install failed: ${install.stderr || install.stdout}`);
+    }
 
-    await runSandboxPhase('create_vm_agent_session', phaseDetail, () =>
-      createAgentSessionOnNode(
+    const standaloneEnv = {
+      NODE_ROLE: 'standalone',
+      NODE_ID: node.id,
+      WORKSPACE_ID: workspaceId,
+      PROJECT_ID: input.project.id,
+      CHAT_SESSION_ID: chatSessionId,
+      CONTROL_PLANE_URL: controlPlaneUrl,
+      CALLBACK_TOKEN: nodeCallbackToken,
+      REPOSITORY: input.project.repository,
+      BRANCH: branch,
+      WORKSPACE_DIR: workspaceDir,
+      CONTAINER_WORK_DIR: workspaceDir,
+      CONTAINER_MODE: 'false',
+      PORT_SCAN_ENABLED: 'false',
+      VM_AGENT_PORT: String(vmAgentPort),
+      VM_AGENT_PROTOCOL: 'http',
+      COOKIE_SECURE: 'true',
+    };
+    const processId = `vm-agent-${node.id.toLowerCase()}`;
+    const envAssignments = Object.entries(standaloneEnv)
+      .map(([key, value]) => `${key}=${shellQuote(value)}`)
+      .join(' ');
+    const start = await runSandboxPhase('start', phaseDetail, () =>
+      sandbox.exec(
+        [
+          'set -e',
+          'test -x /usr/local/bin/vm-agent',
+          'cd /var/lib/vm-agent',
+          `nohup env ${envAssignments} /usr/local/bin/vm-agent > /tmp/vm-agent.log 2>&1 &`,
+          'pid=$!',
+          `echo "$pid" > ${shellQuote(`/tmp/${processId}.pid`)}`,
+          'sleep 0.2',
+          'if ! kill -0 "$pid" 2>/dev/null; then cat /tmp/vm-agent.log >&2 || true; exit 1; fi',
+          'echo "$pid"',
+        ].join('\n'),
+        { timeout: config.execTimeoutMs }
+      )
+    );
+    if (!start.success) {
+      throw errors.internal(`vm-agent start failed: ${start.stderr || start.stdout}`);
+    }
+
+    const agentReadyStart = Date.now();
+    await runSandboxPhase('wait_for_ready', phaseDetail, () => waitForNodeAgentReady(node.id, env));
+    const agentReadyDurationMs = Date.now() - agentReadyStart;
+
+    const workspaceCreateStart = Date.now();
+    const workspaceCallbackToken = await signCallbackToken(workspaceId, env);
+    await runSandboxPhase('create_workspace', phaseDetail, () =>
+      createWorkspaceOnNode(node.id, env, input.userId, {
+        workspaceId,
+        repository: input.project.repository,
+        branch,
+        callbackToken: workspaceCallbackToken,
+        lightweight: true,
+      })
+    );
+    const workspaceCreateDurationMs = Date.now() - workspaceCreateStart;
+
+    const agentSessionId = ulid();
+    const acpSessionCreateStart = Date.now();
+    await db.insert(schema.agentSessions).values({
+      id: agentSessionId,
+      workspaceId,
+      userId: input.userId,
+      status: 'running',
+      label: workspaceName,
+      agentType: input.agentType,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    let mcpToken: string | null = null;
+    try {
+      const token = generateMcpToken();
+      mcpToken = token;
+      await storeMcpToken(
+        env.KV,
+        token,
+        {
+          taskId: '',
+          projectId: input.project.id,
+          userId: input.userId,
+          workspaceId,
+          chatSessionId,
+          agentSessionId,
+          createdAt: new Date().toISOString(),
+        },
+        env
+      );
+
+      await runSandboxPhase('create_vm_agent_session', phaseDetail, () =>
+        createAgentSessionOnNode(
+          node.id,
+          workspaceId,
+          agentSessionId,
+          workspaceName,
+          env,
+          input.userId,
+          chatSessionId,
+          input.project.id,
+          {
+            url: `https://api.${env.BASE_DOMAIN}/mcp`,
+            token,
+          }
+        )
+      );
+    } catch (err) {
+      if (mcpToken) {
+        await revokeMcpToken(env.KV, mcpToken).catch(() => {});
+      }
+      await db
+        .update(schema.agentSessions)
+        .set({
+          status: 'error',
+          errorMessage: err instanceof Error ? err.message : 'Failed to create agent session',
+          updatedAt: new Date().toISOString(),
+        })
+        .where(eq(schema.agentSessions.id, agentSessionId));
+      throw err;
+    }
+
+    const acpSession = await runSandboxPhase('create_acp_session', phaseDetail, () =>
+      projectDataService.createAcpSession(
+        env,
+        input.project.id,
+        chatSessionId,
+        null,
+        input.agentType,
+        null,
+        0,
+        agentSessionId
+      )
+    );
+    await runSandboxPhase('assign_acp_session', phaseDetail, () =>
+      projectDataService.transitionAcpSession(env, input.project.id, acpSession.id, 'assigned', {
+        actorType: 'system',
+        actorId: input.userId,
+        reason: 'CF container instant session assigned',
+        workspaceId,
+        nodeId: node.id,
+      })
+    );
+    const acpSessionCreateDurationMs = Date.now() - acpSessionCreateStart;
+
+    const acpSessionStartStart = Date.now();
+    await runSandboxPhase('start_acp_session', phaseDetail, () =>
+      startAgentSessionOnNode(
         node.id,
         workspaceId,
         agentSessionId,
-        workspaceName,
+        input.agentType,
+        input.initialPrompt,
         env,
         input.userId,
-        chatSessionId,
-        input.project.id,
         {
           url: `https://api.${env.BASE_DOMAIN}/mcp`,
-          token,
-        }
+          token: mcpToken,
+        },
+        input.overrides
       )
     );
-  } catch (err) {
-    if (mcpToken) {
-      await revokeMcpToken(env.KV, mcpToken).catch(() => {});
-    }
+    await runSandboxPhase('mark_acp_session_running', phaseDetail, () =>
+      projectDataService.transitionAcpSession(env, input.project.id, acpSession.id, 'running', {
+        actorType: 'system',
+        actorId: input.userId,
+        reason: 'CF container instant session started',
+        acpSdkSessionId: agentSessionId,
+      })
+    );
+    const acpSessionStartDurationMs = Date.now() - acpSessionStartStart;
+
     await db
-      .update(schema.agentSessions)
+      .update(schema.workspaces)
+      .set({ dispatchedAt: new Date().toISOString(), updatedAt: new Date().toISOString() })
+      .where(eq(schema.workspaces.id, workspaceId));
+
+    return {
+      nodeId: node.id,
+      workspaceId,
+      projectId: input.project.id,
+      chatSessionId,
+      agentSessionId,
+      acpSessionId: acpSession.id,
+      agentType: input.agentType,
+      sandboxId,
+      processId,
+      runtime: 'cf-container',
+      workspaceUrl: `https://ws-${workspaceId.toLowerCase()}.${env.BASE_DOMAIN}`,
+      timings: {
+        setupDurationMs: Date.now() - startedAt,
+        installDurationMs,
+        agentReadyDurationMs,
+        workspaceCreateDurationMs,
+        acpSessionCreateDurationMs,
+        acpSessionStartDurationMs,
+      },
+    };
+  } catch (err) {
+    const message = errorMessage(err);
+    const failedAt = new Date().toISOString();
+    await db
+      .update(schema.workspaces)
       .set({
         status: 'error',
-        errorMessage: err instanceof Error ? err.message : 'Failed to create agent session',
-        updatedAt: new Date().toISOString(),
+        errorMessage: message,
+        updatedAt: failedAt,
       })
-      .where(eq(schema.agentSessions.id, agentSessionId));
+      .where(eq(schema.workspaces.id, workspaceId))
+      .catch((updateErr) => {
+        log.warn('instant_session.workspace_error_update_failed', {
+          workspaceId,
+          error: errorMessage(updateErr),
+        });
+      });
+    await db
+      .update(schema.nodes)
+      .set({
+        status: 'error',
+        healthStatus: 'unhealthy',
+        errorMessage: message,
+        updatedAt: failedAt,
+      })
+      .where(eq(schema.nodes.id, node.id))
+      .catch((updateErr) => {
+        log.warn('instant_session.node_error_update_failed', {
+          nodeId: node.id,
+          error: errorMessage(updateErr),
+        });
+      });
+    await destroySandboxInstance(env, sandboxId, phaseDetail).catch((destroyErr) => {
+      log.error('instant_session.sandbox_destroy_after_failure_failed', {
+        nodeId: node.id,
+        workspaceId,
+        sandboxId,
+        error: errorMessage(destroyErr),
+      });
+    });
     throw err;
   }
-
-  const acpSession = await runSandboxPhase('create_acp_session', phaseDetail, () =>
-    projectDataService.createAcpSession(
-      env,
-      input.project.id,
-      chatSessionId,
-      null,
-      input.agentType,
-      null,
-      0,
-      agentSessionId
-    )
-  );
-  await runSandboxPhase('assign_acp_session', phaseDetail, () =>
-    projectDataService.transitionAcpSession(env, input.project.id, acpSession.id, 'assigned', {
-      actorType: 'system',
-      actorId: input.userId,
-      reason: 'CF container instant session assigned',
-      workspaceId,
-      nodeId: node.id,
-    })
-  );
-  const acpSessionCreateDurationMs = Date.now() - acpSessionCreateStart;
-
-  const acpSessionStartStart = Date.now();
-  await runSandboxPhase('start_acp_session', phaseDetail, () =>
-    startAgentSessionOnNode(
-      node.id,
-      workspaceId,
-      agentSessionId,
-      input.agentType,
-      input.initialPrompt,
-      env,
-      input.userId,
-      {
-        url: `https://api.${env.BASE_DOMAIN}/mcp`,
-        token: mcpToken,
-      },
-      input.overrides
-    )
-  );
-  await runSandboxPhase('mark_acp_session_running', phaseDetail, () =>
-    projectDataService.transitionAcpSession(env, input.project.id, acpSession.id, 'running', {
-      actorType: 'system',
-      actorId: input.userId,
-      reason: 'CF container instant session started',
-      acpSdkSessionId: agentSessionId,
-    })
-  );
-  const acpSessionStartDurationMs = Date.now() - acpSessionStartStart;
-
-  await db
-    .update(schema.workspaces)
-    .set({ dispatchedAt: new Date().toISOString(), updatedAt: new Date().toISOString() })
-    .where(eq(schema.workspaces.id, workspaceId));
-
-  return {
-    nodeId: node.id,
-    workspaceId,
-    projectId: input.project.id,
-    chatSessionId,
-    agentSessionId,
-    acpSessionId: acpSession.id,
-    agentType: input.agentType,
-    sandboxId,
-    processId,
-    runtime: 'cf-container',
-    workspaceUrl: `https://ws-${workspaceId.toLowerCase()}.${env.BASE_DOMAIN}`,
-    timings: {
-      setupDurationMs: Date.now() - startedAt,
-      installDurationMs,
-      agentReadyDurationMs,
-      workspaceCreateDurationMs,
-      acpSessionCreateDurationMs,
-      acpSessionStartDurationMs,
-    },
-  };
 }

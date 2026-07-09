@@ -37,6 +37,37 @@ export async function getSandboxInstance(env: Env, sandboxId: string) {
   }
 }
 
+async function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(message)), ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+export async function destroySandboxInstance(
+  env: Env,
+  sandboxId: string,
+  detail: { nodeId?: string; workspaceId?: string; sandboxId?: string } = {}
+): Promise<void> {
+  requireSandbox(env);
+  const config = getSandboxConfig(env);
+  const sandbox = await getSandboxInstance(env, sandboxId);
+  await runSandboxPhase('destroy', { sandboxId, ...detail }, () =>
+    withTimeout(
+      sandbox.destroy(),
+      config.execTimeoutMs,
+      `Sandbox destroy timed out after ${config.execTimeoutMs}ms`
+    )
+  );
+}
+
 export function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }

@@ -7,7 +7,11 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { getUserId, requireApproved, requireAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
-import { parseOptionalBody, WorkspaceErrorSchema,WorkspaceStatusUpdateSchema } from '../../schemas';
+import {
+  parseOptionalBody,
+  WorkspaceErrorSchema,
+  WorkspaceStatusUpdateSchema,
+} from '../../schemas';
 import { writeBootLogs } from '../../services/boot-log';
 import { stopComputeTracking } from '../../services/compute-usage';
 import {
@@ -15,6 +19,7 @@ import {
   restartWorkspaceOnNode,
   stopWorkspaceOnNode,
 } from '../../services/node-agent';
+import { stopNodeResources } from '../../services/nodes';
 import * as projectDataService from '../../services/project-data';
 import { requireRepositoryOwnerAccess } from '../projects/_helpers';
 import {
@@ -27,6 +32,14 @@ import {
 } from './_helpers';
 
 const lifecycleRoutes = new Hono<{ Bindings: Env }>();
+const CF_CONTAINER_STOPPABLE_WORKSPACE_STATUSES = new Set([
+  'running',
+  'recovery',
+  'creating',
+  'error',
+  'stopping',
+]);
+const CF_CONTAINER_STOPPABLE_NODE_STATUSES = new Set(['running', 'creating', 'error']);
 
 async function requireWorkspaceRestartGitHubAccess(
   env: Env,
@@ -58,12 +71,22 @@ lifecycleRoutes.post('/:id/stop', requireAuth(), requireApproved(), async (c) =>
   if (!workspace.nodeId) {
     throw errors.badRequest('Workspace is not attached to a node');
   }
-  if (!isActiveWorkspaceStatus(workspace.status)) {
-    throw errors.badRequest(`Workspace is ${workspace.status}`);
-  }
 
   const node = await getOwnedNode(db, workspace.nodeId, userId);
-  assertNodeOperational(node, 'stop workspace');
+  const isCfContainerNode = node.runtime === 'cf-container';
+  const canStopWorkspace =
+    isActiveWorkspaceStatus(workspace.status) ||
+    (isCfContainerNode && CF_CONTAINER_STOPPABLE_WORKSPACE_STATUSES.has(workspace.status));
+  if (!canStopWorkspace) {
+    throw errors.badRequest(`Workspace is ${workspace.status}`);
+  }
+  if (isCfContainerNode) {
+    if (!CF_CONTAINER_STOPPABLE_NODE_STATUSES.has(node.status)) {
+      throw errors.badRequest(`Cannot stop workspace: node is ${node.status}`);
+    }
+  } else {
+    assertNodeOperational(node, 'stop workspace');
+  }
 
   await db
     .update(schema.workspaces)
@@ -74,30 +97,58 @@ lifecycleRoutes.post('/:id/stop', requireAuth(), requireApproved(), async (c) =>
     (async () => {
       const innerDb = drizzle(c.env.DATABASE, { schema });
       try {
-        await stopWorkspaceOnNode(workspace.nodeId!, workspace.id, c.env, userId);
-        await innerDb
-          .update(schema.workspaces)
-          .set({
-            status: 'stopped',
-            errorMessage: null,
-            updatedAt: new Date().toISOString(),
-          })
-          .where(eq(schema.workspaces.id, workspace.id));
+        if (isCfContainerNode) {
+          if (node.status === 'running' && isActiveWorkspaceStatus(workspace.status)) {
+            await stopWorkspaceOnNode(workspace.nodeId!, workspace.id, c.env, userId).catch((e) => {
+              log.warn('workspace.cf_container_agent_stop_failed', {
+                workspaceId: workspace.id,
+                nodeId: workspace.nodeId,
+                error: String(e),
+              });
+            });
+          }
+          await stopNodeResources(workspace.nodeId!, userId, c.env);
+          await innerDb
+            .update(schema.agentSessions)
+            .set({
+              status: 'stopped',
+              stoppedAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            })
+            .where(eq(schema.agentSessions.workspaceId, workspace.id));
+        } else {
+          await stopWorkspaceOnNode(workspace.nodeId!, workspace.id, c.env, userId);
+          await innerDb
+            .update(schema.workspaces)
+            .set({
+              status: 'stopped',
+              errorMessage: null,
+              updatedAt: new Date().toISOString(),
+            })
+            .where(eq(schema.workspaces.id, workspace.id));
+
+          // Schedule automatic deletion after TTL
+          try {
+            const doId = c.env.NODE_LIFECYCLE.idFromName(workspace.nodeId!);
+            const stub = c.env.NODE_LIFECYCLE.get(doId);
+            await (
+              stub as unknown as import('../../durable-objects/node-lifecycle').NodeLifecycle
+            ).scheduleWorkspaceDeletion(workspace.id, userId);
+          } catch (e) {
+            log.warn('workspace.schedule_deletion_failed', {
+              workspaceId: workspace.id,
+              error: String(e),
+            });
+          }
+        }
 
         // Stop compute usage metering (best-effort)
         await stopComputeTracking(innerDb, workspace.id).catch((e) => {
-          log.warn('workspace.compute_tracking_stop_failed', { workspaceId: workspace.id, error: String(e) });
+          log.warn('workspace.compute_tracking_stop_failed', {
+            workspaceId: workspace.id,
+            error: String(e),
+          });
         });
-
-        // Schedule automatic deletion after TTL
-        try {
-          const doId = c.env.NODE_LIFECYCLE.idFromName(workspace.nodeId!);
-          const stub = c.env.NODE_LIFECYCLE.get(doId);
-          await (stub as unknown as import('../../durable-objects/node-lifecycle').NodeLifecycle)
-            .scheduleWorkspaceDeletion(workspace.id, userId);
-        } catch (e) {
-          log.warn('workspace.schedule_deletion_failed', { workspaceId: workspace.id, error: String(e) });
-        }
       } catch (err) {
         await innerDb
           .update(schema.workspaces)
@@ -114,22 +165,49 @@ lifecycleRoutes.post('/:id/stop', requireAuth(), requireApproved(), async (c) =>
   // Stop the chat session and clean up activity tracking (best-effort)
   if (workspace.projectId && workspace.chatSessionId) {
     c.executionCtx.waitUntil(
-      projectDataService.stopSession(c.env, workspace.projectId, workspace.chatSessionId)
-        .catch((e) => { log.warn('workspace.stop_session_failed', { workspaceId: workspace.id, sessionId: workspace.chatSessionId, error: String(e) }); })
+      projectDataService
+        .stopSession(c.env, workspace.projectId, workspace.chatSessionId)
+        .catch((e) => {
+          log.warn('workspace.stop_session_failed', {
+            workspaceId: workspace.id,
+            sessionId: workspace.chatSessionId,
+            error: String(e),
+          });
+        })
     );
     c.executionCtx.waitUntil(
-      projectDataService.cleanupWorkspaceActivity(c.env, workspace.projectId, workspace.id)
-        .catch((e) => { log.warn('workspace.cleanup_activity_failed', { workspaceId: workspace.id, error: String(e) }); })
+      projectDataService
+        .cleanupWorkspaceActivity(c.env, workspace.projectId, workspace.id)
+        .catch((e) => {
+          log.warn('workspace.cleanup_activity_failed', {
+            workspaceId: workspace.id,
+            error: String(e),
+          });
+        })
     );
   }
 
   // Record activity event for workspace stop
   if (workspace.projectId) {
     c.executionCtx.waitUntil(
-      projectDataService.recordActivityEvent(
-        c.env, workspace.projectId, 'workspace.stopped', 'user', userId,
-        workspace.id, null, null, null
-      ).catch((e) => { log.warn('workspace.activity_stopped_failed', { workspaceId: workspace.id, error: String(e) }); })
+      projectDataService
+        .recordActivityEvent(
+          c.env,
+          workspace.projectId,
+          'workspace.stopped',
+          'user',
+          userId,
+          workspace.id,
+          null,
+          null,
+          null
+        )
+        .catch((e) => {
+          log.warn('workspace.activity_stopped_failed', {
+            workspaceId: workspace.id,
+            error: String(e),
+          });
+        })
     );
   }
 
@@ -157,8 +235,9 @@ lifecycleRoutes.post('/:id/restart', requireAuth(), requireApproved(), async (c)
   try {
     const doId = c.env.NODE_LIFECYCLE.idFromName(workspace.nodeId!);
     const stub = c.env.NODE_LIFECYCLE.get(doId);
-    await (stub as unknown as import('../../durable-objects/node-lifecycle').NodeLifecycle)
-      .cancelWorkspaceDeletion(workspace.id);
+    await (
+      stub as unknown as import('../../durable-objects/node-lifecycle').NodeLifecycle
+    ).cancelWorkspaceDeletion(workspace.id);
   } catch (e) {
     log.warn('workspace.cancel_deletion_failed', { workspaceId: workspace.id, error: String(e) });
   }
@@ -191,10 +270,24 @@ lifecycleRoutes.post('/:id/restart', requireAuth(), requireApproved(), async (c)
   // Record activity event for workspace restart
   if (workspace.projectId) {
     c.executionCtx.waitUntil(
-      projectDataService.recordActivityEvent(
-        c.env, workspace.projectId, 'workspace.restarted', 'user', userId,
-        workspace.id, null, null, null
-      ).catch((e) => { log.warn('workspace.activity_restarted_failed', { workspaceId: workspace.id, error: String(e) }); })
+      projectDataService
+        .recordActivityEvent(
+          c.env,
+          workspace.projectId,
+          'workspace.restarted',
+          'user',
+          userId,
+          workspace.id,
+          null,
+          null,
+          null
+        )
+        .catch((e) => {
+          log.warn('workspace.activity_restarted_failed', {
+            workspaceId: workspace.id,
+            error: String(e),
+          });
+        })
     );
   }
 
@@ -287,10 +380,7 @@ lifecycleRoutes.post('/:id/ready', async (c) => {
     updateValues.workspaceProfile = body.workspaceProfile;
   }
 
-  await db
-    .update(schema.workspaces)
-    .set(updateValues)
-    .where(eq(schema.workspaces.id, workspaceId));
+  await db.update(schema.workspaces).set(updateValues).where(eq(schema.workspaces.id, workspaceId));
 
   // Notify TaskRunner DO inline if a task is associated with this workspace.
   // TDF-5: moved from waitUntil() to inline await so the VM agent gets an error
@@ -308,9 +398,8 @@ lifecycleRoutes.post('/:id/ready', async (c) => {
 
   if (readyTask) {
     const { advanceTaskRunnerWorkspaceReady } = await import('../../services/task-runner-do');
-    const readyStatus = nextStatus === 'running' ? 'running'
-      : nextStatus === 'recovery' ? 'recovery'
-      : 'error';
+    const readyStatus =
+      nextStatus === 'running' ? 'running' : nextStatus === 'recovery' ? 'recovery' : 'error';
     await advanceTaskRunnerWorkspaceReady(c.env, readyTask.id, readyStatus, null);
   }
 

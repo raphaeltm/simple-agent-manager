@@ -14,6 +14,7 @@ import { GcpApiError, sanitizeGcpError } from './gcp-errors';
 import { signNodeCallbackToken } from './jwt';
 import { persistError } from './observability';
 import { createProviderForUser } from './provider-credentials';
+import { destroySandboxInstance } from './sandbox';
 
 const NODE_ERROR_MESSAGE_MAX_LENGTH = 500;
 
@@ -83,9 +84,10 @@ export async function createNodeRecord(env: Env, input: CreateNodeInput): Promis
     id: nodeId,
     userId: input.userId,
     credentialAttributionUserId: input.credentialAttributionUserId ?? input.userId,
-    credentialAttributionProjectId: input.credentialAttributionSource === 'project'
-      ? (input.credentialAttributionProjectId ?? null)
-      : null,
+    credentialAttributionProjectId:
+      input.credentialAttributionSource === 'project'
+        ? (input.credentialAttributionProjectId ?? null)
+        : null,
     credentialAttributionSource: input.credentialAttributionSource ?? 'user',
     name: input.name,
     status: 'creating',
@@ -168,9 +170,10 @@ export async function provisionNode(
   const targetProvider = (node.cloudProvider as CredentialProvider | null) ?? undefined;
   let attemptedProvider = targetProvider;
   const attributionUserId = node.credentialAttributionUserId ?? node.userId;
-  const attributionProjectId = node.credentialAttributionSource === 'project'
-    ? (node.credentialAttributionProjectId ?? taskContext?.projectId ?? null)
-    : null;
+  const attributionProjectId =
+    node.credentialAttributionSource === 'project'
+      ? (node.credentialAttributionProjectId ?? taskContext?.projectId ?? null)
+      : null;
 
   try {
     const providerResult = await createProviderForUser(
@@ -198,7 +201,8 @@ export async function provisionNode(
         cloudProvider: providerResult.providerName,
         credentialSource: providerResult.credentialSource,
         credentialAttributionUserId: attributionUserId,
-        credentialAttributionProjectId: providerResult.credentialSource === 'project' ? attributionProjectId : null,
+        credentialAttributionProjectId:
+          providerResult.credentialSource === 'project' ? attributionProjectId : null,
         credentialAttributionSource: providerResult.credentialSource,
         updatedAt: new Date().toISOString(),
       })
@@ -275,7 +279,8 @@ export async function provisionNode(
           cloudProvider: providerResult.providerName,
           credentialSource: providerResult.credentialSource,
           credentialAttributionUserId: attributionUserId,
-          credentialAttributionProjectId: providerResult.credentialSource === 'project' ? attributionProjectId : null,
+          credentialAttributionProjectId:
+            providerResult.credentialSource === 'project' ? attributionProjectId : null,
           credentialAttributionSource: providerResult.credentialSource,
           providerInstanceId: vm.id,
           status: 'creating',
@@ -304,7 +309,8 @@ export async function provisionNode(
         cloudProvider: providerResult.providerName,
         credentialSource: providerResult.credentialSource,
         credentialAttributionUserId: attributionUserId,
-        credentialAttributionProjectId: providerResult.credentialSource === 'project' ? attributionProjectId : null,
+        credentialAttributionProjectId:
+          providerResult.credentialSource === 'project' ? attributionProjectId : null,
         credentialAttributionSource: providerResult.credentialSource,
         providerInstanceId: vm.id,
         ipAddress: vm.ip,
@@ -411,13 +417,21 @@ export async function stopNodeResources(nodeId: string, userId: string, env: Env
     return;
   }
 
+  if (node.runtime === 'cf-container') {
+    await destroySandboxInstance(env, node.id.toLowerCase(), { nodeId: node.id }).catch((err) => {
+      log.error('node_stop.cf_sandbox_destroy_failed', { nodeId, ...serializeError(err) });
+      throw err;
+    });
+  }
+
   // Delete the cloud provider server since stopped nodes cannot be restarted
   if (node.providerInstanceId) {
     const targetProvider = (node.cloudProvider as CredentialProvider | null) ?? undefined;
     const attributionUserId = node.credentialAttributionUserId ?? userId;
-    const attributionProjectId = node.credentialAttributionSource === 'project'
-      ? (node.credentialAttributionProjectId ?? null)
-      : null;
+    const attributionProjectId =
+      node.credentialAttributionSource === 'project'
+        ? (node.credentialAttributionProjectId ?? null)
+        : null;
     const providerResult = await createProviderForUser(
       db,
       attributionUserId,
@@ -500,9 +514,10 @@ export async function deleteNodeResources(
   if (node.providerInstanceId) {
     const targetProvider = (node.cloudProvider as CredentialProvider | null) ?? undefined;
     const attributionUserId = node.credentialAttributionUserId ?? userId;
-    const attributionProjectId = node.credentialAttributionSource === 'project'
-      ? (node.credentialAttributionProjectId ?? null)
-      : null;
+    const attributionProjectId =
+      node.credentialAttributionSource === 'project'
+        ? (node.credentialAttributionProjectId ?? null)
+        : null;
     const providerResult2 = await createProviderForUser(
       db,
       attributionUserId,
@@ -563,18 +578,17 @@ function truncateNodeErrorMessage(message: string): string {
  * not cascade workspace status; callers must update workspace rows only after
  * external resources have actually been removed.
  */
-export async function deleteNodeResourcesStrict(nodeId: string, userId: string, env: Env): Promise<void> {
+export async function deleteNodeResourcesStrict(
+  nodeId: string,
+  userId: string,
+  env: Env
+): Promise<void> {
   const db = drizzle(env.DATABASE, { schema });
 
   const rows = await db
     .select()
     .from(schema.nodes)
-    .where(
-      and(
-        eq(schema.nodes.id, nodeId),
-        eq(schema.nodes.userId, userId)
-      )
-    )
+    .where(and(eq(schema.nodes.id, nodeId), eq(schema.nodes.userId, userId)))
     .limit(1);
 
   const node = rows[0];
@@ -585,9 +599,10 @@ export async function deleteNodeResourcesStrict(nodeId: string, userId: string, 
   if (node.providerInstanceId) {
     const targetProvider = (node.cloudProvider as CredentialProvider | null) ?? undefined;
     const attributionUserId = node.credentialAttributionUserId ?? userId;
-    const attributionProjectId = node.credentialAttributionSource === 'project'
-      ? (node.credentialAttributionProjectId ?? null)
-      : null;
+    const attributionProjectId =
+      node.credentialAttributionSource === 'project'
+        ? (node.credentialAttributionProjectId ?? null)
+        : null;
     const providerResult = await createProviderForUser(
       db,
       attributionUserId,
@@ -617,7 +632,8 @@ export async function deleteNodeResourcesStrict(nodeId: string, userId: string, 
         cloudProvider: providerResult.providerName,
         credentialSource: providerResult.credentialSource,
         credentialAttributionUserId: attributionUserId,
-        credentialAttributionProjectId: providerResult.credentialSource === 'project' ? attributionProjectId : null,
+        credentialAttributionProjectId:
+          providerResult.credentialSource === 'project' ? attributionProjectId : null,
         credentialAttributionSource: providerResult.credentialSource,
         updatedAt: new Date().toISOString(),
       })
@@ -647,7 +663,10 @@ export async function deleteNodeResourcesStrict(nodeId: string, userId: string, 
           userId,
         });
       } catch (obsErr) {
-        log.error('node_delete.strict_dns_observability_failed', { nodeId, ...serializeError(obsErr) });
+        log.error('node_delete.strict_dns_observability_failed', {
+          nodeId,
+          ...serializeError(obsErr),
+        });
       }
     }
   }
