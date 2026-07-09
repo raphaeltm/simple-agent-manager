@@ -51,25 +51,28 @@ func TestFileDownloadWorkspaceExecArgs_DashSeparator(t *testing.T) {
 				t.Fatalf("workspaceExecCommand returned error: %v", err)
 			}
 
-			// Verify "--" appears between "cat" and the file path.
-			catIdx := -1
-			for i, arg := range cmd.Args {
-				if arg == "cat" {
-					catIdx = i
-					break
-				}
-			}
-			if catIdx == -1 {
-				t.Fatal("'cat' not found in docker args")
-			}
-			if catIdx+1 >= len(cmd.Args) || cmd.Args[catIdx+1] != "--" {
-				t.Errorf("expected '--' immediately after 'cat', got args: %s",
-					strings.Join(cmd.Args, " "))
-			}
-			if cmd.Args[len(cmd.Args)-1] != tc.filePath {
-				t.Errorf("expected file path %q as last arg, got %q",
-					tc.filePath, cmd.Args[len(cmd.Args)-1])
-			}
+			assertCatDashSeparator(t, cmd.Args, tc.filePath)
 		})
+	}
+}
+
+func assertCatDashSeparator(t *testing.T, args []string, filePath string) {
+	t.Helper()
+
+	catIdx := -1
+	for i, arg := range args {
+		if arg == "cat" {
+			catIdx = i
+			break
+		}
+	}
+	if catIdx == -1 {
+		t.Fatal("'cat' not found in docker args")
+	}
+	if catIdx+1 >= len(args) || args[catIdx+1] != "--" {
+		t.Errorf("expected '--' immediately after 'cat', got args: %s", strings.Join(args, " "))
+	}
+	if args[len(args)-1] != filePath {
+		t.Errorf("expected file path %q as last arg, got %q", filePath, args[len(args)-1])
 	}
 }

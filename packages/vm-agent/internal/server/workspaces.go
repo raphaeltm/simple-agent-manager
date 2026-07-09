@@ -461,73 +461,46 @@ func (s *Server) applyProvisionedContainerUser(workspaceID string, detected stri
 	s.rebuildWorkspacePTYManager(runtime)
 }
 
-func (s *Server) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		WorkspaceID            string `json:"workspaceId"`
-		Repository             string `json:"repository"`
-		Branch                 string `json:"branch"`
-		CallbackToken          string `json:"callbackToken,omitempty"`
-		GitUserName            string `json:"gitUserName,omitempty"`
-		GitUserEmail           string `json:"gitUserEmail,omitempty"`
-		GitHubID               string `json:"githubId,omitempty"`
-		Lightweight            bool   `json:"lightweight,omitempty"`
-		DevcontainerConfigName string `json:"devcontainerConfigName,omitempty"`
-		DevcontainerCache      struct {
-			Registry string `json:"registry,omitempty"`
-			Username string `json:"username,omitempty"`
-			Password string `json:"password,omitempty"`
-			Ref      string `json:"ref,omitempty"`
-		} `json:"devcontainerCache,omitempty"`
-	}
+type createWorkspaceRequest struct {
+	WorkspaceID            string `json:"workspaceId"`
+	Repository             string `json:"repository"`
+	Branch                 string `json:"branch"`
+	CallbackToken          string `json:"callbackToken,omitempty"`
+	GitUserName            string `json:"gitUserName,omitempty"`
+	GitUserEmail           string `json:"gitUserEmail,omitempty"`
+	GitHubID               string `json:"githubId,omitempty"`
+	Lightweight            bool   `json:"lightweight,omitempty"`
+	DevcontainerConfigName string `json:"devcontainerConfigName,omitempty"`
+	DevcontainerCache      struct {
+		Registry string `json:"registry,omitempty"`
+		Username string `json:"username,omitempty"`
+		Password string `json:"password,omitempty"`
+		Ref      string `json:"ref,omitempty"`
+	} `json:"devcontainerCache,omitempty"`
+}
 
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-
+func validateCreateWorkspaceRequest(body createWorkspaceRequest) (int, string) {
 	if body.WorkspaceID == "" {
-		writeError(w, http.StatusBadRequest, "workspaceId is required")
-		return
+		return http.StatusBadRequest, "workspaceId is required"
 	}
-
-	// Reject devcontainerConfigName values that could escape the .devcontainer/ directory.
 	if name := body.DevcontainerConfigName; name != "" {
 		if strings.Contains(name, "/") || strings.Contains(name, "\\") || strings.Contains(name, "..") {
-			writeError(w, http.StatusBadRequest, "devcontainerConfigName must not contain path separators or '..'")
-			return
+			return http.StatusBadRequest, "devcontainerConfigName must not contain path separators or '..'"
 		}
 	}
+	return http.StatusOK, ""
+}
 
-	if !s.requireNodeManagementAuth(w, r, body.WorkspaceID) {
-		return
-	}
-
-	branch := strings.TrimSpace(body.Branch)
+func createWorkspaceBranch(rawBranch string) string {
+	branch := strings.TrimSpace(rawBranch)
 	if branch == "" {
-		branch = "main"
+		return "main"
 	}
+	return branch
+}
 
-	repository := strings.TrimSpace(body.Repository)
-	devcontainerConfigName := strings.TrimSpace(body.DevcontainerConfigName)
-	if !s.config.IsStandaloneMode() {
-		if s.maybeHandleDuplicateWorkspaceCreate(w, body.WorkspaceID, repository, branch, devcontainerConfigName, body.Lightweight) {
-			return
-		}
-	} else {
-		s.workspaceMu.RLock()
-		conflict := workspaceCreateConflict(s.workspaces[body.WorkspaceID], repository, branch, devcontainerConfigName, body.Lightweight)
-		s.workspaceMu.RUnlock()
-		if conflict != "" {
-			writeJSON(w, http.StatusConflict, map[string]interface{}{
-				"error":       "workspace_conflict",
-				"message":     conflict,
-				"workspaceId": body.WorkspaceID,
-			})
-			return
-		}
-	}
-
-	runtime := s.upsertWorkspaceRuntime(body.WorkspaceID, repository, branch, "creating", strings.TrimSpace(body.CallbackToken), workspaceRuntimeOpts{
+func createWorkspaceRuntimeOptions(body createWorkspaceRequest, devcontainerConfigName string) workspaceRuntimeOpts {
+	return workspaceRuntimeOpts{
 		GitUserName:            strings.TrimSpace(body.GitUserName),
 		GitUserEmail:           strings.TrimSpace(body.GitUserEmail),
 		GitHubID:               strings.TrimSpace(body.GitHubID),
@@ -539,52 +512,147 @@ func (s *Server) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) {
 			Password: strings.TrimSpace(body.DevcontainerCache.Password),
 			Ref:      strings.TrimSpace(body.DevcontainerCache.Ref),
 		},
-	})
+	}
+}
 
-	if s.config.IsStandaloneMode() {
-		if err := s.prepareStandaloneWorkspaceRuntime(r.Context(), runtime); err != nil {
-			s.casWorkspaceStatus(body.WorkspaceID, []string{"creating"}, "error")
-			errorMsg := err.Error()
-			callbackToken := strings.TrimSpace(body.CallbackToken)
-			if callbackToken != "" {
-				ctx, cancel := context.WithTimeout(context.Background(), s.config.WorkspaceReadyCallbackTimeout)
-				if callbackErr := s.notifyWorkspaceProvisioningFailed(ctx, body.WorkspaceID, callbackToken, errorMsg); callbackErr != nil {
-					slog.Error("Standalone provisioning-failed callback error", "workspace", body.WorkspaceID, "error", callbackErr)
-				}
-				cancel()
-			}
-			s.appendNodeEvent(body.WorkspaceID, "error", "workspace.provisioning_failed", "Standalone workspace provisioning failed", map[string]interface{}{
-				"workspaceId": body.WorkspaceID,
-				"repository":  body.Repository,
-				"branch":      branch,
-				"error":       errorMsg,
-			})
-			writeError(w, http.StatusInternalServerError, errorMsg)
-			return
-		}
-		s.casWorkspaceStatus(body.WorkspaceID, []string{"creating"}, "running")
-		if strings.TrimSpace(body.CallbackToken) != "" {
-			ctx, cancel := context.WithTimeout(context.Background(), s.config.WorkspaceReadyCallbackTimeout)
-			err := s.notifyWorkspaceReady(ctx, body.WorkspaceID, strings.TrimSpace(body.CallbackToken), "running")
-			cancel()
-			if err != nil {
-				s.markReadyCallbackPending(body.WorkspaceID, "running")
-				slog.Warn("Standalone workspace ready callback failed; will retry on heartbeat",
-					"workspace", body.WorkspaceID, "error", err)
-			}
-		}
-		s.appendNodeEvent(body.WorkspaceID, "info", "workspace.created", "Standalone workspace runtime created", map[string]interface{}{
-			"workspaceId": body.WorkspaceID,
-			"repository":  body.Repository,
-			"branch":      branch,
-		})
-		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"workspaceId": runtime.ID,
-			"status":      "running",
-		})
+func workspaceCreateEventDetail(body createWorkspaceRequest, branch string) map[string]interface{} {
+	return map[string]interface{}{
+		"workspaceId": body.WorkspaceID,
+		"repository":  body.Repository,
+		"branch":      branch,
+	}
+}
+
+func (s *Server) hasWorkspaceCreateConflict(
+	w http.ResponseWriter,
+	body createWorkspaceRequest,
+	repository string,
+	branch string,
+	devcontainerConfigName string,
+) bool {
+	if !s.config.IsStandaloneMode() {
+		return s.maybeHandleDuplicateWorkspaceCreate(w, body.WorkspaceID, repository, branch, devcontainerConfigName, body.Lightweight)
+	}
+
+	s.workspaceMu.RLock()
+	conflict := workspaceCreateConflict(s.workspaces[body.WorkspaceID], repository, branch, devcontainerConfigName, body.Lightweight)
+	s.workspaceMu.RUnlock()
+	if conflict == "" {
+		return false
+	}
+	writeJSON(w, http.StatusConflict, map[string]interface{}{
+		"error":       "workspace_conflict",
+		"message":     conflict,
+		"workspaceId": body.WorkspaceID,
+	})
+	return true
+}
+
+func (s *Server) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) {
+	var body createWorkspaceRequest
+
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
+	if status, message := validateCreateWorkspaceRequest(body); message != "" {
+		writeError(w, status, message)
+		return
+	}
+
+	if !s.requireNodeManagementAuth(w, r, body.WorkspaceID) {
+		return
+	}
+
+	branch := createWorkspaceBranch(body.Branch)
+	repository := strings.TrimSpace(body.Repository)
+	devcontainerConfigName := strings.TrimSpace(body.DevcontainerConfigName)
+	if s.hasWorkspaceCreateConflict(w, body, repository, branch, devcontainerConfigName) {
+		return
+	}
+
+	runtime := s.upsertWorkspaceRuntime(
+		body.WorkspaceID,
+		repository,
+		branch,
+		"creating",
+		strings.TrimSpace(body.CallbackToken),
+		createWorkspaceRuntimeOptions(body, devcontainerConfigName),
+	)
+
+	if s.config.IsStandaloneMode() {
+		s.handleStandaloneWorkspaceCreate(w, r, body, runtime, branch)
+		return
+	}
+
+	s.handleAsyncWorkspaceCreate(w, body, runtime, branch)
+}
+
+func (s *Server) handleStandaloneWorkspaceCreate(
+	w http.ResponseWriter,
+	r *http.Request,
+	body createWorkspaceRequest,
+	runtime *WorkspaceRuntime,
+	branch string,
+) {
+	if err := s.prepareStandaloneWorkspaceRuntime(r.Context(), runtime); err != nil {
+		s.handleStandaloneWorkspaceCreateFailure(w, body, branch, err.Error())
+		return
+	}
+
+	s.casWorkspaceStatus(body.WorkspaceID, []string{"creating"}, "running")
+	s.notifyStandaloneWorkspaceReady(body)
+	s.appendNodeEvent(body.WorkspaceID, "info", "workspace.created", "Standalone workspace runtime created", workspaceCreateEventDetail(body, branch))
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"workspaceId": runtime.ID,
+		"status":      "running",
+	})
+}
+
+func (s *Server) handleStandaloneWorkspaceCreateFailure(
+	w http.ResponseWriter,
+	body createWorkspaceRequest,
+	branch string,
+	errorMsg string,
+) {
+	s.casWorkspaceStatus(body.WorkspaceID, []string{"creating"}, "error")
+	callbackToken := strings.TrimSpace(body.CallbackToken)
+	if callbackToken != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), s.config.WorkspaceReadyCallbackTimeout)
+		if callbackErr := s.notifyWorkspaceProvisioningFailed(ctx, body.WorkspaceID, callbackToken, errorMsg); callbackErr != nil {
+			slog.Error("Standalone provisioning-failed callback error", "workspace", body.WorkspaceID, "error", callbackErr)
+		}
+		cancel()
+	}
+	detail := workspaceCreateEventDetail(body, branch)
+	detail["error"] = errorMsg
+	s.appendNodeEvent(body.WorkspaceID, "error", "workspace.provisioning_failed", "Standalone workspace provisioning failed", detail)
+	writeError(w, http.StatusInternalServerError, errorMsg)
+}
+
+func (s *Server) notifyStandaloneWorkspaceReady(body createWorkspaceRequest) {
+	callbackToken := strings.TrimSpace(body.CallbackToken)
+	if callbackToken == "" {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), s.config.WorkspaceReadyCallbackTimeout)
+	err := s.notifyWorkspaceReady(ctx, body.WorkspaceID, callbackToken, "running")
+	cancel()
+	if err != nil {
+		s.markReadyCallbackPending(body.WorkspaceID, "running")
+		slog.Warn("Standalone workspace ready callback failed; will retry on heartbeat",
+			"workspace", body.WorkspaceID, "error", err)
+	}
+}
+
+func (s *Server) handleAsyncWorkspaceCreate(
+	w http.ResponseWriter,
+	body createWorkspaceRequest,
+	runtime *WorkspaceRuntime,
+	branch string,
+) {
 	s.workspaceMu.Lock()
 	if runtime.ProvisioningActive {
 		s.workspaceMu.Unlock()
@@ -605,18 +673,8 @@ func (s *Server) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) {
 	// At workspace creation time, we only have workspaceID but not session context.
 	// For boot-time reporters (auto-provisioned task nodes), the reporter was
 	// already created with the correct workspaceID at server startup.
-
-	s.appendNodeEvent(body.WorkspaceID, "info", "workspace.provisioning", "Workspace provisioning started", map[string]interface{}{
-		"workspaceId": body.WorkspaceID,
-		"repository":  body.Repository,
-		"branch":      branch,
-	})
-
-	detail := map[string]interface{}{
-		"workspaceId": body.WorkspaceID,
-		"repository":  body.Repository,
-		"branch":      branch,
-	}
+	detail := workspaceCreateEventDetail(body, branch)
+	s.appendNodeEvent(body.WorkspaceID, "info", "workspace.provisioning", "Workspace provisioning started", detail)
 	s.startWorkspaceProvision(
 		runtime,
 		provisionRuntime,

@@ -364,24 +364,7 @@ func (s *Server) resolveContainerForWorkspace(workspaceID string) (containerID, 
 	}
 
 	if s.config.IsStandaloneMode() {
-		workDir = strings.TrimSpace(runtime.ContainerWorkDir)
-		if workDir == "" {
-			workDir = strings.TrimSpace(runtime.WorkspaceDir)
-		}
-		if workDir == "" {
-			workDir = strings.TrimSpace(s.config.ContainerWorkDir)
-		}
-		if workDir == "" {
-			workDir = strings.TrimSpace(s.config.WorkspaceDir)
-		}
-		if workDir == "" {
-			workDir = "/workspaces"
-		}
-
-		user = strings.TrimSpace(runtime.ContainerUser)
-		if user == "" {
-			user = strings.TrimSpace(s.config.ContainerUser)
-		}
+		workDir, user = s.resolveStandaloneWorkspaceExecContext(runtime)
 		return "", workDir, user, nil
 	}
 
@@ -409,6 +392,15 @@ func (s *Server) resolveContainerForWorkspace(workspaceID string) (containerID, 
 	}
 
 	return containerID, workDir, user, nil
+}
+
+func (s *Server) resolveStandaloneWorkspaceExecContext(runtime *WorkspaceRuntime) (workDir, user string) {
+	workDir = standaloneWorkspaceWorkDir(runtime, s.config.WorkspaceDir, s.config.ContainerWorkDir)
+	user = strings.TrimSpace(runtime.ContainerUser)
+	if user == "" {
+		user = strings.TrimSpace(s.config.ContainerUser)
+	}
+	return workDir, user
 }
 
 // execInContainer runs a command inside a devcontainer and returns stdout.

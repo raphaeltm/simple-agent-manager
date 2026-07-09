@@ -68,6 +68,41 @@ function normalizeWorkspaceName(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, '-');
 }
 
+function stripGitSuffix(value: string): string {
+  return value.toLowerCase().endsWith('.git') ? value.slice(0, -4) : value;
+}
+
+function isRepositoryDirectoryChar(char: string): boolean {
+  return /^[a-zA-Z0-9._-]$/.test(char);
+}
+
+function trimDashes(value: string): string {
+  let start = 0;
+  let end = value.length;
+  while (start < end && value[start] === '-') start += 1;
+  while (end > start && value[end - 1] === '-') end -= 1;
+  return value.slice(start, end);
+}
+
+function toSafeRepositoryDirectoryName(value: string): string {
+  return trimDashes(
+    [...value]
+      .map((char) => isRepositoryDirectoryChar(char) ? char : '-')
+      .join('')
+  );
+}
+
+function lastNonEmptyPathSegment(value: string): string {
+  const parts = value.split('/');
+  for (let index = parts.length - 1; index >= 0; index -= 1) {
+    const segment = parts[index];
+    if (segment) {
+      return segment;
+    }
+  }
+  return '';
+}
+
 function getWorkspaceName(input: LaunchInstantSessionInput): string {
   const requested = input.workspaceName?.trim();
   if (requested) return requested;
@@ -87,20 +122,24 @@ function repositoryDirectoryName(repository: string): string {
     }
   }
 
-  const rawName = repo
-    .split('/')
-    .filter(Boolean)
-    .at(-1)
-    ?.replace(/\.git$/i, '')
-    .trim();
-  const safeName = rawName?.replace(/[^a-zA-Z0-9._-]/g, '-').replace(/^-+|-+$/g, '');
+  const rawName = stripGitSuffix(repo
+    ? lastNonEmptyPathSegment(repo)
+    : ''
+  ).trim();
+  const safeName = toSafeRepositoryDirectoryName(rawName);
   return safeName || 'workspace';
 }
 
+function stripTrailingSlashes(value: string): string {
+  let end = value.length;
+  while (end > 1 && value[end - 1] === '/') end -= 1;
+  return value.slice(0, end);
+}
+
 function containerWorkspaceBaseDir(env: Env): string {
-  const configured = (env.CF_CONTAINER_WORKSPACE_BASE_DIR || env.SANDBOX_WORKSPACE_BASE_DIR)
-    ?.trim()
-    .replace(/\/+$/g, '');
+  const configured = stripTrailingSlashes(
+    (env.CF_CONTAINER_WORKSPACE_BASE_DIR || env.SANDBOX_WORKSPACE_BASE_DIR)?.trim() ?? ''
+  );
   return configured || '/workspaces';
 }
 
@@ -135,7 +174,7 @@ export async function launchInstantSession(
     vmLocation: 'cf-container',
     cloudProvider: 'cloudflare',
     heartbeatStaleAfterSeconds: env.NODE_HEARTBEAT_STALE_SECONDS
-      ? parseInt(env.NODE_HEARTBEAT_STALE_SECONDS, 10)
+      ? Number.parseInt(env.NODE_HEARTBEAT_STALE_SECONDS, 10)
       : 180,
     runtime: 'cf-container',
   });

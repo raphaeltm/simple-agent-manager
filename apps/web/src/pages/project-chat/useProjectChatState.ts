@@ -74,6 +74,22 @@ export interface ProfileWizardState {
   error: string | null;
 }
 
+function resolveWizardRuntime(workType: TaskMode, runtime: AgentProfileRuntime | null): AgentProfileRuntime {
+  if (runtime) return runtime;
+  return workType === 'conversation' ? 'cf-container' : 'vm';
+}
+
+function resolveWizardWorkspaceProfile(runtime: AgentProfileRuntime, workType: TaskMode): WorkspaceProfile {
+  if (runtime === 'cf-container') return 'lightweight';
+  if (workType === 'conversation') return 'lightweight';
+  return 'full';
+}
+
+function resolveWizardTaskMode(runtime: AgentProfileRuntime, workType: TaskMode): TaskMode {
+  if (runtime === 'cf-container') return 'conversation';
+  return workType;
+}
+
 const FORK_MESSAGE_TEMPLATE = `Use the SAM MCP tools (get_session_messages, search_messages) to review the previous session for full context about what was done and what needs to happen next.
 Use get_session_messages with the parent project ID and parent session ID below before relying on title or phrase search.
 
@@ -487,7 +503,7 @@ export function useProjectChatState() {
       return null;
     }
     const workType = profileWizard.workType ?? 'conversation';
-    const runtime = profileWizard.runtime ?? (workType === 'conversation' ? 'cf-container' : 'vm');
+    const runtime = resolveWizardRuntime(workType, profileWizard.runtime);
     const vmSize = profileWizard.vmSize ?? DEFAULT_VM_SIZE;
     setProfileWizard((current) => ({ ...current, saving: true, error: null }));
     try {
@@ -497,8 +513,8 @@ export function useProjectChatState() {
         agentType,
         runtime,
         vmSizeOverride: runtime === 'cf-container' ? null : vmSize,
-        workspaceProfile: runtime === 'cf-container' ? 'lightweight' : workType === 'conversation' ? 'lightweight' : 'full',
-        taskMode: runtime === 'cf-container' ? 'conversation' : workType,
+        workspaceProfile: resolveWizardWorkspaceProfile(runtime, workType),
+        taskMode: resolveWizardTaskMode(runtime, workType),
       });
       setProfileWizard((current) => ({ ...current, open: false, saving: false, error: null }));
       return profile;
@@ -558,7 +574,7 @@ export function useProjectChatState() {
         attachments.clearAttachments();
         newChatIntentRef.current = false;
         navigate(`/projects/${projectId}/chat/${result.sessionId}`, { replace: true });
-        void loadSessions();
+        loadSessions().catch(() => undefined);
         return;
       }
 

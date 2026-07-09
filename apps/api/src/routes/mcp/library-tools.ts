@@ -37,6 +37,17 @@ import {
 
 type AppDb = DrizzleD1Database<typeof schema>;
 
+interface WorkspaceUploadInput {
+  env: Env;
+  vmBaseUrl: string;
+  nodeId: string;
+  workspaceId: string;
+  userId: string;
+  filename: string;
+  data: ArrayBuffer;
+  targetPath: string;
+}
+
 // ─── Configurable defaults (Constitution Principle XI) ──────────────────────
 
 /** Default directory in workspace for downloaded library files. Override via LIBRARY_MCP_DOWNLOAD_DIR. */
@@ -149,16 +160,8 @@ async function resolveWorkspaceVmUrl(
 /**
  * Upload a file to the workspace via VM agent multipart upload.
  */
-async function uploadToWorkspace(
-  env: Env,
-  vmBaseUrl: string,
-  nodeId: string,
-  workspaceId: string,
-  userId: string,
-  filename: string,
-  data: ArrayBuffer,
-  targetPath: string,
-): Promise<void> {
+async function uploadToWorkspace(input: WorkspaceUploadInput): Promise<void> {
+  const { env, vmBaseUrl, nodeId, workspaceId, userId, filename, data, targetPath } = input;
   const { token } = await signTerminalToken(userId, workspaceId, env);
   const url = `${vmBaseUrl}/workspaces/${encodeURIComponent(workspaceId)}/files/upload`;
 
@@ -335,16 +338,16 @@ export async function handleDownloadLibraryFile(
     }
 
     // Upload to workspace
-    await uploadToWorkspace(
+    await uploadToWorkspace({
       env,
-      vmResult.vmBaseUrl,
-      vmResult.nodeId,
-      tokenData.workspaceId,
-      tokenData.userId,
-      file.filename,
+      vmBaseUrl: vmResult.vmBaseUrl,
+      nodeId: vmResult.nodeId,
+      workspaceId: tokenData.workspaceId,
+      userId: tokenData.userId,
+      filename: file.filename,
       data,
-      targetDir,
-    );
+      targetPath: targetDir,
+    });
 
     const downloadedTo = `${targetDir}/${file.filename}`;
 

@@ -158,7 +158,51 @@ func TestCreateWorkspaceStandaloneClonesBeforeRunning(t *testing.T) {
 	workDir := filepath.Join(t.TempDir(), "repo")
 	var readyCalled atomic.Bool
 
-	controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	controlPlane := newStandaloneCloneControlPlane(t, workspaceID, workDir, &readyCalled)
+	defer controlPlane.Close()
+
+	s := newWorkspaceCreateServer(t, controlPlane.URL, validator)
+	s.config.Role = config.RoleStandalone
+	s.config.WorkspaceID = workspaceID
+	s.config.WorkspaceDir = workDir
+	s.config.ContainerWorkDir = workDir
+	s.config.WorkspaceReadyCallbackTimeout = time.Second
+
+	var cloneCalled atomic.Bool
+	installStandaloneCloneGitStub(t, s, workspaceID, workDir, &cloneCalled)
+
+	token := signWorkspaceCreateNodeToken(t, privateKey, "node-1", workspaceID)
+	rec := postCreateWorkspaceWithRepository(t, s, token, workspaceID, "owner/repo")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected standalone create status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !cloneCalled.Load() {
+		t.Fatal("expected standalone create to clone repository")
+	}
+	if !readyCalled.Load() {
+		t.Fatal("expected standalone create to notify ready after clone")
+	}
+	runtime, ok := s.getWorkspaceRuntime(workspaceID)
+	if !ok {
+		t.Fatal("workspace runtime missing")
+	}
+	if runtime.Status != "running" {
+		t.Fatalf("workspace status = %q, want running", runtime.Status)
+	}
+	if runtime.ContainerWorkDir != workDir {
+		t.Fatalf("container workdir = %q, want %q", runtime.ContainerWorkDir, workDir)
+	}
+}
+
+func newStandaloneCloneControlPlane(
+	t *testing.T,
+	workspaceID string,
+	workDir string,
+	readyCalled *atomic.Bool,
+) *httptest.Server {
+	t.Helper()
+
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/workspaces/" + workspaceID + "/git-token":
 			_, _ = w.Write([]byte(`{"token":"git-token"}`))
@@ -172,18 +216,19 @@ func TestCreateWorkspaceStandaloneClonesBeforeRunning(t *testing.T) {
 			http.NotFound(w, r)
 		}
 	}))
-	defer controlPlane.Close()
+}
 
-	s := newWorkspaceCreateServer(t, controlPlane.URL, validator)
-	s.config.Role = config.RoleStandalone
-	s.config.WorkspaceID = workspaceID
-	s.config.WorkspaceDir = workDir
-	s.config.ContainerWorkDir = workDir
-	s.config.WorkspaceReadyCallbackTimeout = time.Second
+func installStandaloneCloneGitStub(
+	t *testing.T,
+	s *Server,
+	workspaceID string,
+	workDir string,
+	cloneCalled *atomic.Bool,
+) {
+	t.Helper()
 
 	originalRunGit := runStandaloneGitCommand
-	defer func() { runStandaloneGitCommand = originalRunGit }()
-	var cloneCalled atomic.Bool
+	t.Cleanup(func() { runStandaloneGitCommand = originalRunGit })
 	runStandaloneGitCommand = func(_ context.Context, _ string, env []string, args ...string) (string, error) {
 		joinedArgs := strings.Join(args, " ")
 		if !strings.Contains(joinedArgs, "clone") {
@@ -207,28 +252,6 @@ func TestCreateWorkspaceStandaloneClonesBeforeRunning(t *testing.T) {
 		}
 		cloneCalled.Store(true)
 		return "", nil
-	}
-
-	token := signWorkspaceCreateNodeToken(t, privateKey, "node-1", workspaceID)
-	rec := postCreateWorkspaceWithRepository(t, s, token, workspaceID, "owner/repo")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected standalone create status 200, got %d body=%s", rec.Code, rec.Body.String())
-	}
-	if !cloneCalled.Load() {
-		t.Fatal("expected standalone create to clone repository")
-	}
-	if !readyCalled.Load() {
-		t.Fatal("expected standalone create to notify ready after clone")
-	}
-	runtime, ok := s.getWorkspaceRuntime(workspaceID)
-	if !ok {
-		t.Fatal("workspace runtime missing")
-	}
-	if runtime.Status != "running" {
-		t.Fatalf("workspace status = %q, want running", runtime.Status)
-	}
-	if runtime.ContainerWorkDir != workDir {
-		t.Fatalf("container workdir = %q, want %q", runtime.ContainerWorkDir, workDir)
 	}
 }
 

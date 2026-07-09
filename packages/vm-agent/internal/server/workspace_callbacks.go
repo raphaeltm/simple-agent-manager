@@ -13,6 +13,13 @@ import (
 	"github.com/workspace/vm-agent/internal/callbackretry"
 )
 
+const (
+	authorizationHeaderName = "Authorization"
+	bearerTokenPrefix       = "Bearer "
+	contentTypeHeaderName   = "Content-Type"
+	jsonContentType         = "application/json"
+)
+
 // SyncCredential sends an updated credential back to the control plane.
 // This is called after a session ends when the agent used file-based credential
 // injection (e.g. codex-acp auth.json) and the credential may have been refreshed.
@@ -63,8 +70,8 @@ func (s *Server) SyncCredential(
 		if err != nil {
 			return fmt.Errorf("build credential-sync request: %w", err)
 		}
-		req.Header.Set("Authorization", "Bearer "+callbackToken)
-		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set(authorizationHeaderName, bearerTokenPrefix+callbackToken)
+		req.Header.Set(contentTypeHeaderName, jsonContentType)
 
 		resp, err := s.controlPlaneHTTPClient(0).Do(req)
 		if err != nil {
@@ -137,8 +144,8 @@ func (s *Server) notifyWorkspaceProvisioningFailed(
 		if err != nil {
 			return fmt.Errorf("build provisioning-failed request: %w", err)
 		}
-		req.Header.Set("Authorization", "Bearer "+trimmedCallbackToken)
-		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set(authorizationHeaderName, bearerTokenPrefix+trimmedCallbackToken)
+		req.Header.Set(contentTypeHeaderName, jsonContentType)
 
 		resp, err := s.controlPlaneHTTPClient(0).Do(req)
 		if err != nil {
@@ -183,8 +190,8 @@ func (s *Server) notifyWorkspaceReady(ctx context.Context, workspaceID, callback
 	if err != nil {
 		return fmt.Errorf("failed to create ready request: %w", err)
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+callbackToken)
+	req.Header.Set(contentTypeHeaderName, jsonContentType)
+	req.Header.Set(authorizationHeaderName, bearerTokenPrefix+callbackToken)
 	res, err := s.controlPlaneHTTPClient(s.config.WorkspaceReadyCallbackTimeout).Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to call ready endpoint: %w", err)

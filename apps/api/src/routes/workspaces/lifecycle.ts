@@ -41,6 +41,12 @@ const CF_CONTAINER_STOPPABLE_WORKSPACE_STATUSES = new Set([
 ]);
 const CF_CONTAINER_STOPPABLE_NODE_STATUSES = new Set(['running', 'creating', 'error']);
 
+function getTaskRunnerReadyStatus(status: string): 'running' | 'recovery' | 'error' {
+  if (status === 'running') return 'running';
+  if (status === 'recovery') return 'recovery';
+  return 'error';
+}
+
 async function requireWorkspaceRestartGitHubAccess(
   env: Env,
   db: ReturnType<typeof drizzle<typeof schema>>,
@@ -398,8 +404,7 @@ lifecycleRoutes.post('/:id/ready', async (c) => {
 
   if (readyTask) {
     const { advanceTaskRunnerWorkspaceReady } = await import('../../services/task-runner-do');
-    const readyStatus =
-      nextStatus === 'running' ? 'running' : nextStatus === 'recovery' ? 'recovery' : 'error';
+    const readyStatus = getTaskRunnerReadyStatus(nextStatus);
     await advanceTaskRunnerWorkspaceReady(c.env, readyTask.id, readyStatus, null);
   }
 

@@ -251,8 +251,24 @@ func startProcessWithMode(cfg ProcessConfig, dockerExec bool) (*AgentProcess, er
 	return startLocalProcess(cfg)
 }
 
-func startDockerExecProcess(cfg ProcessConfig) (*AgentProcess, error) {
-	// Build docker exec command: docker exec -i [-u user] [-w dir] [-e VAR=val...] [--env-file path] container command args...
+type processPipes struct {
+	stdin  io.WriteCloser
+	stdout io.ReadCloser
+	stderr io.ReadCloser
+}
+
+func splitProcessEnvVars(envVars []string) (secrets []string, nonSecrets []string) {
+	for _, env := range envVars {
+		if isSecretEnvVar(env) {
+			secrets = append(secrets, env)
+		} else {
+			nonSecrets = append(nonSecrets, env)
+		}
+	}
+	return secrets, nonSecrets
+}
+
+func buildDockerExecArgs(cfg ProcessConfig) ([]string, string, error) {
 	args := []string{"exec", "-i"}
 
 	if cfg.ContainerUser != "" {
@@ -265,14 +281,7 @@ func startDockerExecProcess(cfg ProcessConfig) (*AgentProcess, error) {
 	// Separate secret env vars from non-secret ones. Secrets are written to
 	// a tmpfs-backed file and passed via --env-file to avoid exposing them
 	// in /proc/<pid>/cmdline on the host.
-	var secrets, nonSecrets []string
-	for _, env := range cfg.EnvVars {
-		if isSecretEnvVar(env) {
-			secrets = append(secrets, env)
-		} else {
-			nonSecrets = append(nonSecrets, env)
-		}
-	}
+	secrets, nonSecrets := splitProcessEnvVars(cfg.EnvVars)
 
 	for _, env := range nonSecrets {
 		args = append(args, "-e", env)
@@ -284,7 +293,7 @@ func startDockerExecProcess(cfg ProcessConfig) (*AgentProcess, error) {
 	if len(secrets) > 0 {
 		path, err := writeSecretEnvFile(secrets)
 		if err != nil {
-			return nil, fmt.Errorf("failed to write secret env file: %w", err)
+			return nil, "", fmt.Errorf("failed to write secret env file: %w", err)
 		}
 		envFilePath = path
 		args = append(args, "--env-file", envFilePath)
@@ -292,6 +301,56 @@ func startDockerExecProcess(cfg ProcessConfig) (*AgentProcess, error) {
 
 	args = append(args, cfg.ContainerID, cfg.AcpCommand)
 	args = append(args, cfg.AcpArgs...)
+	return args, envFilePath, nil
+}
+
+func openProcessPipes(cmd *exec.Cmd, envFilePath string) (processPipes, error) {
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		removeEnvFile(envFilePath)
+		return processPipes{}, fmt.Errorf("failed to create stdin pipe: %w", err)
+	}
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		stdin.Close()
+		removeEnvFile(envFilePath)
+		return processPipes{}, fmt.Errorf("failed to create stdout pipe: %w", err)
+	}
+
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		stdin.Close()
+		stdout.Close()
+		removeEnvFile(envFilePath)
+		return processPipes{}, fmt.Errorf("failed to create stderr pipe: %w", err)
+	}
+	return processPipes{stdin: stdin, stdout: stdout, stderr: stderr}, nil
+}
+
+func closeProcessPipes(pipes processPipes) {
+	if pipes.stdin != nil {
+		pipes.stdin.Close()
+	}
+	if pipes.stdout != nil {
+		pipes.stdout.Close()
+	}
+	if pipes.stderr != nil {
+		pipes.stderr.Close()
+	}
+}
+
+func removeEnvFile(path string) {
+	if path != "" {
+		os.Remove(path)
+	}
+}
+
+func startDockerExecProcess(cfg ProcessConfig) (*AgentProcess, error) {
+	args, envFilePath, err := buildDockerExecArgs(cfg)
+	if err != nil {
+		return nil, err
+	}
 
 	cmd := exec.Command("docker", args...)
 
@@ -299,40 +358,14 @@ func startDockerExecProcess(cfg ProcessConfig) (*AgentProcess, error) {
 	// tree (docker exec CLI + its children) via negative PGID in Stop().
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
-	stdin, err := cmd.StdinPipe()
+	pipes, err := openProcessPipes(cmd, envFilePath)
 	if err != nil {
-		if envFilePath != "" {
-			os.Remove(envFilePath)
-		}
-		return nil, fmt.Errorf("failed to create stdin pipe: %w", err)
-	}
-
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		stdin.Close()
-		if envFilePath != "" {
-			os.Remove(envFilePath)
-		}
-		return nil, fmt.Errorf("failed to create stdout pipe: %w", err)
-	}
-
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		stdin.Close()
-		stdout.Close()
-		if envFilePath != "" {
-			os.Remove(envFilePath)
-		}
-		return nil, fmt.Errorf("failed to create stderr pipe: %w", err)
+		return nil, err
 	}
 
 	if err := cmd.Start(); err != nil {
-		stdin.Close()
-		stdout.Close()
-		stderr.Close()
-		if envFilePath != "" {
-			os.Remove(envFilePath)
-		}
+		closeProcessPipes(pipes)
+		removeEnvFile(envFilePath)
 		return nil, fmt.Errorf("failed to start agent process: %w", err)
 	}
 
@@ -350,9 +383,9 @@ func startDockerExecProcess(cfg ProcessConfig) (*AgentProcess, error) {
 	return &AgentProcess{
 		agentType:       cfg.AcpCommand,
 		cmd:             cmd,
-		stdin:           stdin,
-		stdout:          stdout,
-		stderr:          stderr,
+		stdin:           pipes.stdin,
+		stdout:          pipes.stdout,
+		stderr:          pipes.stderr,
 		containerID:     cfg.ContainerID,
 		envFilePath:     envFilePath,
 		startTime:       time.Now(),

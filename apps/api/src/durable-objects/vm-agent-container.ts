@@ -32,7 +32,7 @@ export class VmAgentContainer extends Container<Env> {
 
   constructor(ctx: DurableObjectState<Record<string, never>>, env: Env) {
     super(ctx, env);
-    const configuredPort = parseInt(env.CF_CONTAINER_VM_AGENT_PORT || env.SANDBOX_VM_AGENT_PORT || '', 10);
+    const configuredPort = Number.parseInt(env.CF_CONTAINER_VM_AGENT_PORT || env.SANDBOX_VM_AGENT_PORT || '', 10);
     if (Number.isFinite(configuredPort) && configuredPort > 0) {
       this.defaultPort = configuredPort;
       this.requiredPorts = [configuredPort];
@@ -141,7 +141,7 @@ export class VmAgentContainer extends Container<Env> {
 
   private getPortReadyTimeoutMs(): number {
     const raw = this.env.CF_CONTAINER_PORT_READY_TIMEOUT_MS || this.env.SANDBOX_EXEC_TIMEOUT_MS;
-    const parsed = raw ? parseInt(raw, 10) : 30_000;
+    const parsed = raw ? Number.parseInt(raw, 10) : 30_000;
     return Number.isFinite(parsed) && parsed > 0 ? parsed : 30_000;
   }
 

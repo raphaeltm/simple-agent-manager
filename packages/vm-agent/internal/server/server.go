@@ -1480,6 +1480,22 @@ type gitPushResult struct {
 	Error                 string
 }
 
+func (s *Server) runWorkspaceGitCommand(containerID, workDir, user string, args ...string) (string, error) {
+	timeout := s.config.GitExecTimeout
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	stdout, stderr, err := s.execInContainer(ctx, containerID, user, workDir, append([]string{"git"}, args...)...)
+	output := strings.TrimSpace(stdout)
+	if strings.TrimSpace(stderr) != "" {
+		output = strings.TrimSpace(output + "\n" + strings.TrimSpace(stderr))
+	}
+	return output, err
+}
+
 // gitPushWorkspaceChanges runs git status/add/commit/push inside the workspace
 // container and optionally creates a PR. When skipPR is true (conversation mode),
 // the PR creation step is skipped — the human controls when to create PRs.
@@ -1492,25 +1508,8 @@ func (s *Server) gitPushWorkspaceChanges(workspaceID string, skipPR bool) gitPus
 		return result
 	}
 
-	// Helper to run git commands in the container
-	runGit := func(args ...string) (string, error) {
-		timeout := s.config.GitExecTimeout
-		if timeout <= 0 {
-			timeout = 30 * time.Second
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), timeout)
-		defer cancel()
-
-		stdout, stderr, err := s.execInContainer(ctx, containerID, user, workDir, append([]string{"git"}, args...)...)
-		output := strings.TrimSpace(stdout)
-		if strings.TrimSpace(stderr) != "" {
-			output = strings.TrimSpace(output + "\n" + strings.TrimSpace(stderr))
-		}
-		return output, err
-	}
-
 	// Check for uncommitted changes
-	statusOutput, err := runGit("status", "--porcelain")
+	statusOutput, err := s.runWorkspaceGitCommand(containerID, workDir, user, "status", "--porcelain")
 	if err != nil {
 		result.Error = fmt.Sprintf("git status failed: %s", err)
 		return result
@@ -1518,7 +1517,7 @@ func (s *Server) gitPushWorkspaceChanges(workspaceID string, skipPR bool) gitPus
 
 	if statusOutput == "" {
 		// No changes — nothing to push. Check if there are unpushed commits.
-		logOutput, logErr := runGit("log", "--oneline", "@{push}..", "--")
+		logOutput, logErr := s.runWorkspaceGitCommand(containerID, workDir, user, "log", "--oneline", "@{push}..", "--")
 		if logErr != nil || strings.TrimSpace(logOutput) == "" {
 			slog.Info("No changes or unpushed commits", "workspaceId", workspaceID)
 			return result
@@ -1528,13 +1527,13 @@ func (s *Server) gitPushWorkspaceChanges(workspaceID string, skipPR bool) gitPus
 		result.HasUncommittedChanges = true
 
 		// Stage all changes
-		if _, err := runGit("add", "-A"); err != nil {
+		if _, err := s.runWorkspaceGitCommand(containerID, workDir, user, "add", "-A"); err != nil {
 			result.Error = fmt.Sprintf("git add failed: %s", err)
 			return result
 		}
 
 		// Commit
-		commitOutput, err := runGit("commit", "-m", "chore: save agent work\n\nAuto-committed by SAM on agent completion.")
+		commitOutput, err := s.runWorkspaceGitCommand(containerID, workDir, user, "commit", "-m", "chore: save agent work\n\nAuto-committed by SAM on agent completion.")
 		if err != nil {
 			result.Error = fmt.Sprintf("git commit failed: %s: %s", err, commitOutput)
 			return result
@@ -1542,15 +1541,15 @@ func (s *Server) gitPushWorkspaceChanges(workspaceID string, skipPR bool) gitPus
 	}
 
 	// Get the commit SHA
-	sha, _ := runGit("rev-parse", "HEAD")
+	sha, _ := s.runWorkspaceGitCommand(containerID, workDir, user, "rev-parse", "HEAD")
 	result.CommitSha = sha
 
 	// Get the current branch name
-	branchOutput, _ := runGit("rev-parse", "--abbrev-ref", "HEAD")
+	branchOutput, _ := s.runWorkspaceGitCommand(containerID, workDir, user, "rev-parse", "--abbrev-ref", "HEAD")
 	result.BranchName = branchOutput
 
 	// Push
-	pushOutput, err := runGit("push", "--set-upstream", "origin", "HEAD")
+	pushOutput, err := s.runWorkspaceGitCommand(containerID, workDir, user, "push", "--set-upstream", "origin", "HEAD")
 	if err != nil {
 		result.Error = fmt.Sprintf("git push failed: %s: %s", err, pushOutput)
 		return result

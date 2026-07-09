@@ -153,6 +153,23 @@ export interface BaseProfileUpdateInput extends BaseProfileWriteInput {
   taskMode?: string | null;
 }
 
+const BASE_PROFILE_UPDATE_FIELDS = [
+  'description',
+  'agentType',
+  'model',
+  'permissionMode',
+  'systemPromptAppend',
+  'maxTurns',
+  'timeoutMinutes',
+  'vmSizeOverride',
+  'provider',
+  'vmLocation',
+  'workspaceProfile',
+  'runtime',
+  'devcontainerConfigName',
+  'taskMode',
+] as const;
+
 /**
  * Copy any defined base fields from an update request onto a partial update object.
  * Only fields present (`!== undefined`) on the request are applied, preserving the
@@ -164,20 +181,11 @@ export function applyBaseProfileUpdates<T extends Record<string, unknown>>(
 ): T {
   const set = updates as Record<string, unknown>;
   if (body.name !== undefined) set.name = body.name.trim();
-  if (body.description !== undefined) set.description = body.description;
-  if (body.agentType !== undefined) set.agentType = body.agentType;
-  if (body.model !== undefined) set.model = body.model;
   if (body.effort !== undefined) set.effort = body.effort ?? DEFAULT_AGENT_EFFORT;
-  if (body.permissionMode !== undefined) set.permissionMode = body.permissionMode;
-  if (body.systemPromptAppend !== undefined) set.systemPromptAppend = body.systemPromptAppend;
-  if (body.maxTurns !== undefined) set.maxTurns = body.maxTurns;
-  if (body.timeoutMinutes !== undefined) set.timeoutMinutes = body.timeoutMinutes;
-  if (body.vmSizeOverride !== undefined) set.vmSizeOverride = body.vmSizeOverride;
-  if (body.provider !== undefined) set.provider = body.provider;
-  if (body.vmLocation !== undefined) set.vmLocation = body.vmLocation;
-  if (body.workspaceProfile !== undefined) set.workspaceProfile = body.workspaceProfile;
-  if (body.runtime !== undefined) set.runtime = body.runtime;
-  if (body.devcontainerConfigName !== undefined) set.devcontainerConfigName = body.devcontainerConfigName;
-  if (body.taskMode !== undefined) set.taskMode = body.taskMode;
+  for (const field of BASE_PROFILE_UPDATE_FIELDS) {
+    if (body[field] !== undefined) {
+      set[field] = body[field];
+    }
+  }
   return updates;
 }

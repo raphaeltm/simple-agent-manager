@@ -57,53 +57,34 @@ func validateStandaloneWorkspaceWorkDir(workDir string) (string, error) {
 	return clean, nil
 }
 
-func (s *Server) prepareStandaloneWorkspaceRuntime(ctx context.Context, runtime *WorkspaceRuntime) error {
-	if runtime == nil {
-		return fmt.Errorf("workspace runtime is required")
+func standaloneRepositoryPresent(workDir string) (bool, error) {
+	if _, err := os.Stat(filepath.Join(workDir, ".git")); err == nil {
+		return true, nil
+	} else if os.IsNotExist(err) {
+		return false, nil
+	} else {
+		return false, fmt.Errorf("failed to inspect standalone repository: %w", err)
 	}
+}
 
-	workDir := standaloneWorkspaceWorkDir(runtime, s.config.WorkspaceDir, s.config.ContainerWorkDir)
-	var err error
-	workDir, err = validateStandaloneWorkspaceWorkDir(workDir)
-	if err != nil {
-		return err
-	}
+func noopStandaloneCloneCredentialCleanup() {
+	// No temporary credential helper was created, so there is nothing to remove.
+}
 
-	if err := os.MkdirAll(filepath.Dir(workDir), 0o755); err != nil {
-		return fmt.Errorf("failed to create standalone workspace parent directory: %w", err)
-	}
-
+func (s *Server) updateStandaloneRuntimeWorkDir(runtime *WorkspaceRuntime, workDir string) *WorkspaceRuntime {
 	s.workspaceMu.Lock()
+	defer s.workspaceMu.Unlock()
+
 	if current := s.workspaces[runtime.ID]; current != nil {
 		current.WorkspaceDir = workDir
 		current.ContainerWorkDir = workDir
 		current.ContainerLabelValue = workDir
-		runtime = current
+		return current
 	}
-	s.workspaceMu.Unlock()
-	s.rebuildWorkspacePTYManager(runtime)
+	return runtime
+}
 
-	repository := strings.TrimSpace(runtime.Repository)
-	if repository == "" {
-		if err := os.MkdirAll(workDir, 0o755); err != nil {
-			return fmt.Errorf("failed to create standalone workspace directory: %w", err)
-		}
-		s.persistWorkspaceMetadata(runtime)
-		return nil
-	}
-
-	if _, err := os.Stat(filepath.Join(workDir, ".git")); err == nil {
-		slog.Info("Standalone repository already present, skipping clone", "workspace", runtime.ID, "workDir", workDir)
-		s.persistWorkspaceMetadata(runtime)
-		return nil
-	} else if err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("failed to inspect standalone repository: %w", err)
-	}
-
-	if err := os.RemoveAll(workDir); err != nil {
-		return fmt.Errorf("failed to clean standalone workspace directory: %w", err)
-	}
-
+func (s *Server) cloneStandaloneRepository(ctx context.Context, runtime *WorkspaceRuntime, workDir string) error {
 	cloneSpec, err := s.standaloneCloneSpec(ctx, runtime)
 	if err != nil {
 		return err
@@ -125,6 +106,7 @@ func (s *Server) prepareStandaloneWorkspaceRuntime(ctx context.Context, runtime 
 		args = append([]string{"-c", "credential.helper=" + helperPath}, args...)
 	}
 
+	repository := strings.TrimSpace(runtime.Repository)
 	slog.Info("Cloning standalone repository", "workspace", runtime.ID, "repository", repository, "branch", branch, "workDir", workDir)
 	output, err := runStandaloneGitCommand(ctx, "", extraEnv, args...)
 	if err != nil {
@@ -133,6 +115,54 @@ func (s *Server) prepareStandaloneWorkspaceRuntime(ctx context.Context, runtime 
 
 	if output, err := runStandaloneGitCommand(ctx, "", nil, "-C", workDir, "remote", "set-url", "origin", cloneSpec.URL); err != nil {
 		return fmt.Errorf("failed to sanitize standalone repository origin URL: %w: %s", err, output)
+	}
+	return nil
+}
+
+func (s *Server) prepareStandaloneWorkspaceRuntime(ctx context.Context, runtime *WorkspaceRuntime) error {
+	if runtime == nil {
+		return fmt.Errorf("workspace runtime is required")
+	}
+
+	workDir := standaloneWorkspaceWorkDir(runtime, s.config.WorkspaceDir, s.config.ContainerWorkDir)
+	var err error
+	workDir, err = validateStandaloneWorkspaceWorkDir(workDir)
+	if err != nil {
+		return err
+	}
+
+	if err := os.MkdirAll(filepath.Dir(workDir), 0o755); err != nil {
+		return fmt.Errorf("failed to create standalone workspace parent directory: %w", err)
+	}
+
+	runtime = s.updateStandaloneRuntimeWorkDir(runtime, workDir)
+	s.rebuildWorkspacePTYManager(runtime)
+
+	repository := strings.TrimSpace(runtime.Repository)
+	if repository == "" {
+		if err := os.MkdirAll(workDir, 0o755); err != nil {
+			return fmt.Errorf("failed to create standalone workspace directory: %w", err)
+		}
+		s.persistWorkspaceMetadata(runtime)
+		return nil
+	}
+
+	repositoryPresent, err := standaloneRepositoryPresent(workDir)
+	if err != nil {
+		return err
+	}
+	if repositoryPresent {
+		slog.Info("Standalone repository already present, skipping clone", "workspace", runtime.ID, "workDir", workDir)
+		s.persistWorkspaceMetadata(runtime)
+		return nil
+	}
+
+	if err := os.RemoveAll(workDir); err != nil {
+		return fmt.Errorf("failed to clean standalone workspace directory: %w", err)
+	}
+
+	if err := s.cloneStandaloneRepository(ctx, runtime, workDir); err != nil {
+		return err
 	}
 
 	s.persistWorkspaceMetadata(runtime)
@@ -200,26 +230,26 @@ func standaloneCloneSpecForURL(repositoryURL string, tokenResponse *gitTokenResp
 
 func standaloneCloneCredentialEnv(spec standaloneCloneSpec) ([]string, func(), error) {
 	if strings.TrimSpace(spec.Token) == "" || strings.TrimSpace(spec.Host) == "" {
-		return nil, func() {}, nil
+		return nil, noopStandaloneCloneCredentialCleanup, nil
 	}
 
 	helper, err := os.CreateTemp("", "sam-standalone-git-credential-*")
 	if err != nil {
-		return nil, func() {}, fmt.Errorf("failed to create standalone git credential helper: %w", err)
+		return nil, noopStandaloneCloneCredentialCleanup, fmt.Errorf("failed to create standalone git credential helper: %w", err)
 	}
 	helperPath := helper.Name()
 	if _, err := helper.WriteString(standaloneCloneCredentialHelperScript); err != nil {
 		_ = helper.Close()
 		_ = os.Remove(helperPath)
-		return nil, func() {}, fmt.Errorf("failed to write standalone git credential helper: %w", err)
+		return nil, noopStandaloneCloneCredentialCleanup, fmt.Errorf("failed to write standalone git credential helper: %w", err)
 	}
 	if err := helper.Close(); err != nil {
 		_ = os.Remove(helperPath)
-		return nil, func() {}, fmt.Errorf("failed to close standalone git credential helper: %w", err)
+		return nil, noopStandaloneCloneCredentialCleanup, fmt.Errorf("failed to close standalone git credential helper: %w", err)
 	}
 	if err := os.Chmod(helperPath, 0o700); err != nil {
 		_ = os.Remove(helperPath)
-		return nil, func() {}, fmt.Errorf("failed to chmod standalone git credential helper: %w", err)
+		return nil, noopStandaloneCloneCredentialCleanup, fmt.Errorf("failed to chmod standalone git credential helper: %w", err)
 	}
 
 	username := strings.TrimSpace(spec.Username)

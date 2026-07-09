@@ -1,4 +1,5 @@
 import type { Sandbox } from '@cloudflare/sandbox';
+
 import type { VmAgentContainer } from './durable-objects/vm-agent-container';
 
 // Cloudflare bindings type

@@ -12,7 +12,7 @@ export interface VmAgentContainerConfig {
 export function getVmAgentContainerConfig(env: Env): VmAgentContainerConfig {
   return {
     enabled: (env.CF_CONTAINER_ENABLED ?? env.SANDBOX_ENABLED) === 'true',
-    vmAgentPort: parseInt(env.CF_CONTAINER_VM_AGENT_PORT || env.SANDBOX_VM_AGENT_PORT || '8080', 10),
+    vmAgentPort: Number.parseInt(env.CF_CONTAINER_VM_AGENT_PORT || env.SANDBOX_VM_AGENT_PORT || '8080', 10),
     sleepAfter: env.CF_CONTAINER_SLEEP_AFTER || env.SANDBOX_SLEEP_AFTER || '10m',
   };
 }

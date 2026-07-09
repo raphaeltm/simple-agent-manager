@@ -27,11 +27,11 @@ import * as chatPersistence from '../services/chat-persistence';
 import { persistError } from '../services/observability';
 import * as projectDataService from '../services/project-data';
 import { isTaskStatus } from '../services/task-status';
-import { cleanupWorkspaceForDeletion } from '../services/workspace-cleanup';
 import { resolveChatAgentState } from './chat-agent-state';
 import { getChatSessionRouteContext } from './chat-route-context';
 import { enrichSessionsWithCreators, getSessionListScope, requireSessionCreator } from './chat-session-ownership';
 import { chatStateRoutes } from './chat-state';
+import { registerChatStopRoute } from './chat-stop';
 import { resolveLiveAgentSessionForChat } from './chat-workspace-resolver';
 
 const chatRoutes = new Hono<{ Bindings: Env }>();
@@ -462,67 +462,7 @@ chatRoutes.get('/:sessionId/messages/:messageId/tool-content', async (c) => {
   return c.json({ content });
 });
 
-/**
- * POST /api/projects/:projectId/sessions/:sessionId/stop
- * Stop a chat session.
- */
-chatRoutes.post('/:sessionId/stop', async (c) => {
-  const userId = getUserId(c);
-  const projectId = requireRouteParam(c, 'projectId');
-  const sessionId = requireRouteParam(c, 'sessionId');
-  const db = drizzle(c.env.DATABASE, { schema });
-
-  await requireProjectCapability(db, projectId, userId, 'task:write');
-  const session = await requireSessionCreator(c.env, projectId, sessionId, userId);
-
-  const taskId = typeof session.taskId === 'string' && session.taskId.length > 0
-    ? session.taskId
-    : null;
-  const workspaceId = typeof session.workspaceId === 'string' && session.workspaceId.length > 0
-    ? session.workspaceId
-    : null;
-
-  let workspace: schema.Workspace | undefined;
-  if (!taskId && workspaceId) {
-    const [workspaceById] = await db
-      .select()
-      .from(schema.workspaces)
-      .where(and(
-        eq(schema.workspaces.id, workspaceId),
-        eq(schema.workspaces.userId, userId),
-        eq(schema.workspaces.projectId, projectId)
-      ))
-      .limit(1);
-    workspace = workspaceById;
-  }
-
-  if (!taskId && !workspace) {
-    const [workspaceBySession] = await db
-      .select()
-      .from(schema.workspaces)
-      .where(and(
-        eq(schema.workspaces.chatSessionId, sessionId),
-        eq(schema.workspaces.userId, userId),
-        eq(schema.workspaces.projectId, projectId)
-      ))
-      .limit(1);
-    workspace = workspaceBySession;
-  }
-
-  if (!taskId && workspace) {
-    await cleanupWorkspaceForDeletion({
-      db,
-      env: c.env,
-      workspace,
-      userId,
-      logContext: { projectId, sessionId, stopPath: 'session' },
-    });
-  } else {
-    await chatPersistence.stopChatSession(c.env, projectId, sessionId);
-  }
-
-  return c.json({ status: 'stopped', workspaceDeleted: Boolean(!taskId && workspace) });
-});
+registerChatStopRoute(chatRoutes);
 
 /**
  * POST /api/projects/:projectId/sessions/:sessionId/idle-reset

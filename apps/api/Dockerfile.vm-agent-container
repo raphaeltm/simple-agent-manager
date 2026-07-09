@@ -9,13 +9,15 @@ RUN set -eux; \
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list; \
     apt-get update; \
     apt-get install -y --no-install-recommends gh; \
+    npm install -g @zed-industries/claude-agent-acp @anthropic-ai/claude-code; \
+    npm cache clean --force; \
     rm -rf /var/lib/apt/lists/*
 
-RUN npm install -g @zed-industries/claude-agent-acp @anthropic-ai/claude-code && \
-    npm cache clean --force
-
 COPY container-entrypoints/vm-agent-bootstrap.sh /usr/local/bin/vm-agent-bootstrap
-RUN chmod +x /usr/local/bin/vm-agent-bootstrap && mkdir -p /workspaces /var/lib/vm-agent
+RUN chmod +x /usr/local/bin/vm-agent-bootstrap && \
+    mkdir -p /workspaces /var/lib/vm-agent && \
+    chown -R node:node /workspaces /var/lib/vm-agent
 
+USER node
 WORKDIR /workspaces
 ENTRYPOINT ["/usr/local/bin/vm-agent-bootstrap"]

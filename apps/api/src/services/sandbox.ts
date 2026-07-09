@@ -5,8 +5,8 @@ import { errors } from '../middleware/error';
 export function getSandboxConfig(env: Env) {
   return {
     enabled: env.SANDBOX_ENABLED === 'true',
-    execTimeoutMs: parseInt(env.SANDBOX_EXEC_TIMEOUT_MS || '30000', 10),
-    gitTimeoutMs: parseInt(env.SANDBOX_GIT_TIMEOUT_MS || '120000', 10),
+    execTimeoutMs: Number.parseInt(env.SANDBOX_EXEC_TIMEOUT_MS || '30000', 10),
+    gitTimeoutMs: Number.parseInt(env.SANDBOX_GIT_TIMEOUT_MS || '120000', 10),
     sleepAfter: env.SANDBOX_SLEEP_AFTER || '10m',
   };
 }
@@ -69,7 +69,8 @@ export async function destroySandboxInstance(
 }
 
 export function shellQuote(value: string): string {
-  return `'${value.replace(/'/g, `'\\''`)}'`;
+  const escapedSingleQuote = String.raw`'\''`;
+  return `'${value.replaceAll("'", escapedSingleQuote)}'`;
 }
 
 export async function runSandboxPhase<T>(
