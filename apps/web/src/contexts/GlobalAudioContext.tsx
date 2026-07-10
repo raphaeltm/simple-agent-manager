@@ -4,6 +4,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from 'react';
@@ -405,25 +406,48 @@ export function GlobalAudioProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const value: GlobalAudioContextValue = {
-    state,
-    sourceLabel,
-    sourceHref,
-    sourceText,
-    currentTime,
-    duration,
-    playbackRate,
-    error,
-    startPlayback,
-    play,
-    pause,
-    stop,
-    toggle,
-    seekTo,
-    skipForward,
-    skipBackward,
-    setPlaybackRate,
-  };
+  // Memoized so consumers (and any useCallback/useEffect depending on this
+  // context) do not churn identity on unrelated provider re-renders.
+  const value: GlobalAudioContextValue = useMemo(
+    () => ({
+      state,
+      sourceLabel,
+      sourceHref,
+      sourceText,
+      currentTime,
+      duration,
+      playbackRate,
+      error,
+      startPlayback,
+      play,
+      pause,
+      stop,
+      toggle,
+      seekTo,
+      skipForward,
+      skipBackward,
+      setPlaybackRate,
+    }),
+    [
+      state,
+      sourceLabel,
+      sourceHref,
+      sourceText,
+      currentTime,
+      duration,
+      playbackRate,
+      error,
+      startPlayback,
+      play,
+      pause,
+      stop,
+      toggle,
+      seekTo,
+      skipForward,
+      skipBackward,
+      setPlaybackRate,
+    ]
+  );
 
   return (
     <GlobalAudioContext.Provider value={value}>

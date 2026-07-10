@@ -1,5 +1,5 @@
 import { ToastContainer, type ToastData, type ToastVariant } from '@simple-agent-manager/ui';
-import { createContext, type FC, type ReactNode,useCallback, useContext, useRef, useState } from 'react';
+import { createContext, type FC, type ReactNode,useCallback, useContext, useMemo, useRef, useState } from 'react';
 
 /**
  * Default auto-dismiss duration (milliseconds).
@@ -72,8 +72,13 @@ export const ToastProvider: FC<{ children: ReactNode }> = ({ children }) => {
   const info = useCallback((message: string) => addToast({ message, variant: 'info' }), [addToast]);
   const warning = useCallback((message: string) => addToast({ message, variant: 'warning' }), [addToast]);
 
+  const value = useMemo<ToastContextValue>(
+    () => ({ addToast, success, error, info, warning }),
+    [addToast, success, error, info, warning]
+  );
+
   return (
-    <ToastContext.Provider value={{ addToast, success, error, info, warning }}>
+    <ToastContext.Provider value={value}>
       {children}
       <ToastContainer toasts={toasts} onDismiss={dismiss} />
     </ToastContext.Provider>

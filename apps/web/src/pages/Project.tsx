@@ -1,6 +1,6 @@
 import type { GitHubInstallation, ProjectDetailResponse } from '@simple-agent-manager/shared';
 import { Alert, PageLayout, Spinner } from '@simple-agent-manager/ui';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Outlet, useLocation, useParams } from 'react-router';
 
 import { useAppShell } from '../components/AppShell';
@@ -22,14 +22,26 @@ export function Project() {
   // Chat routes get a full-bleed layout (no PageLayout wrapper)
   const isChatRoute = /\/(chat|agent)(\/|$)/.test(location.pathname);
 
+  // Track whether we have successfully loaded data at least once for the
+  // current projectId. After the first load, reloads (e.g. after saving
+  // settings) skip the loading spinner so the existing Outlet tree stays
+  // mounted (stale-while-revalidate).
+  const hasLoadedForIdRef = useRef<string | null>(null);
+
   const loadProject = useCallback(async () => {
     if (!projectId) return;
     try {
       setError(null);
-      setProjectLoading(true);
+      // Only show the full-screen spinner on the very first load for this
+      // projectId. Subsequent reloads keep existing content visible.
+      if (hasLoadedForIdRef.current !== projectId) {
+        setProjectLoading(true);
+      }
       setProject(await getProject(projectId));
+      hasLoadedForIdRef.current = projectId;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load project');
+      hasLoadedForIdRef.current = projectId;
     } finally {
       setProjectLoading(false);
     }
@@ -49,12 +61,15 @@ export function Project() {
     return () => setProjectName(undefined);
   }, [project?.name, setProjectName]);
 
-  const contextValue = {
-    projectId: projectId!,
-    project,
-    installations,
-    reload: loadProject,
-  };
+  const contextValue = useMemo(
+    () => ({
+      projectId: projectId!,
+      project,
+      installations,
+      reload: loadProject,
+    }),
+    [projectId, project, installations, loadProject]
+  );
 
   if (!projectId) {
     return (

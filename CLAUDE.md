@@ -177,6 +177,7 @@ Environment-specific `[env.*]` sections are NOT checked into the repository. The
 - **No strategy docs in this repo** — this is a public repository; business/marketing/competitive strategy documents are intentionally kept out of it. Do not create a `strategy/` directory.
 - **Playwright visual audit required for UI changes** — any PR touching `apps/web/`, `packages/ui/`, or `packages/terminal/` must run Playwright visual tests with diverse mock data on mobile (375px) and desktop (1280px) viewports. See `.claude/rules/17-ui-visual-testing.md`.
 - **No duplicate UI controls** — before adding any new settings control or form field, search for existing controls managing the same API field. Consolidate into one canonical location. See `.claude/rules/24-no-duplicate-ui-controls.md`.
+- **Stale-while-revalidate UI** — context provider values must be memoized (ESLint-enforced), loading spinners may only gate rendering when there is no data yet, refetches must never unmount visible content, and new fetch surfaces in `apps/web/` use TanStack Query. See `.claude/rules/48-stale-while-revalidate-ui.md`.
 
 ## Agent Authentication
 

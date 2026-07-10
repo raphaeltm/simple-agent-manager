@@ -1,5 +1,5 @@
 import type { ProjectMembersResponse } from '@simple-agent-manager/shared';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -381,6 +381,45 @@ describe('ProjectMembersSection', () => {
       });
     });
     expect(mocks.success).toHaveBeenCalledWith('You left the project');
+  });
+
+  it('refetch does NOT unmount member list — content stays visible while reload is pending (stale-while-revalidate)', async () => {
+    // Regression: before the stale-while-revalidate fix, every load() call
+    // set loading=true which swapped the member list for a spinner, unmounting
+    // all visible content.  After the fix, the spinner only gates the first
+    // render (when data is null); subsequent refetches keep existing data
+    // visible.
+
+    const user = userEvent.setup();
+    render(<ProjectMembersSection projectId="proj-1" />);
+
+    // Wait for initial load — member names are visible
+    await screen.findByText('Owner');
+    expect(screen.getByText('Admin')).toBeInTheDocument();
+
+    // Replace getProjectMembers with a deferred promise so the refetch stays
+    // in flight for the duration of our assertions.
+    let resolveRefetch!: (value: ProjectMembersResponse) => void;
+    mocks.getProjectMembers.mockImplementation(
+      () => new Promise<ProjectMembersResponse>((resolve) => { resolveRefetch = resolve; }),
+    );
+
+    // Trigger a refetch via the Refresh button, which calls load() directly.
+    await user.click(screen.getByRole('button', { name: /refresh/i }));
+
+    // While the refetch is still pending, the existing member data MUST
+    // remain visible — not replaced by a spinner.
+    expect(screen.getByText('Owner')).toBeInTheDocument();
+    expect(screen.getByText('Admin')).toBeInTheDocument();
+
+    // Resolve the deferred refetch so the test can clean up.
+    await act(async () => {
+      resolveRefetch(makeMembersResponse());
+    });
+
+    // Data is still visible after the refetch completes.
+    expect(screen.getByText('Owner')).toBeInTheDocument();
+    expect(screen.getByText('Admin')).toBeInTheDocument();
   });
 
   it('shows retry guidance for stale or expired offboarding plans', async () => {

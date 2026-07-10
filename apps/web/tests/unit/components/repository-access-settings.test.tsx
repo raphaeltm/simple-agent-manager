@@ -113,13 +113,14 @@ describe('RepositoryAccessSettings', () => {
     expect(screen.getByText(/No additional repositories\./)).toBeInTheDocument();
   });
 
-  it('shows an error toast when loading repository access fails', async () => {
+  it('shows an inline error when loading repository access fails (stale-while-revalidate)', async () => {
     mocks.listProjectRepositories.mockRejectedValue(new Error('boom'));
 
     render(<RepositoryAccessSettings project={makeProject()} />);
 
+    // Error is rendered inline, not via toast (stale-while-revalidate pattern)
     await waitFor(() => {
-      expect(mockToast.error).toHaveBeenCalledWith('Failed to load repository access');
+      expect(screen.getByText('Failed to load repository access')).toBeInTheDocument();
     });
   });
 

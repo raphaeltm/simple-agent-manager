@@ -66,21 +66,27 @@ export function ProjectTasks() {
     }, { replace: true });
   }, [setSearchParams]);
 
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [hasLoaded, setHasLoaded] = useState(false);
+
   const loadTasks = useCallback(async () => {
     try {
-      setTasksLoading(true);
+      if (!hasLoaded) setTasksLoading(true);
+      setLoadError(null);
       const response = await listProjectTasks(projectId, {
         status: filters.status,
         minPriority: filters.minPriority,
         sort: filters.sort,
       });
       setTasks(response.tasks);
+      setHasLoaded(true);
     } catch {
-      toast.error('Failed to load tasks');
+      setLoadError('Failed to load tasks');
     } finally {
       setTasksLoading(false);
     }
-  }, [projectId, filters.status, filters.minPriority, filters.sort, toast]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- toast removed per stale-while-revalidate rule; hasLoaded is read for first-load guard only
+  }, [projectId, filters.status, filters.minPriority, filters.sort]);
 
   useEffect(() => { void loadTasks(); }, [loadTasks]);
 
@@ -172,6 +178,9 @@ export function ProjectTasks() {
           onCancel={() => setShowTaskCreate(false)}
         />
       </Dialog>
+
+      {/* Load error */}
+      {loadError && <div className="text-xs text-danger">{loadError}</div>}
 
       {/* Needs attention */}
       <NeedsAttentionSection tasks={tasks} projectId={projectId} />

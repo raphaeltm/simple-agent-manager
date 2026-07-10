@@ -1,6 +1,6 @@
 import type { CredentialResponse } from '@simple-agent-manager/shared';
 import { Alert, Breadcrumb, PageLayout, Tabs } from '@simple-agent-manager/ui';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Outlet } from 'react-router';
 
 import { listCredentials } from '../lib/api';
@@ -61,7 +61,7 @@ export function Settings() {
       <div className="grid gap-4 mt-4">
         <Tabs tabs={tabs} basePath="/settings" />
 
-        <SettingsContext.Provider value={{ credentials, loading, reload: loadCredentials }}>
+        <SettingsContext.Provider value={useMemo(() => ({ credentials, loading, reload: loadCredentials }), [credentials, loading, loadCredentials])}>
           <Outlet />
         </SettingsContext.Provider>
       </div>

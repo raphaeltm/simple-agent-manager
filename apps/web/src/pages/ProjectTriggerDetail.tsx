@@ -105,10 +105,13 @@ export function ProjectTriggerDetail() {
     }
   }, [projectId, triggerId]);
 
+  const [execError, setExecError] = useState<string | null>(null);
+
   const loadExecutions = useCallback(async (cursor: string | null = null) => {
     if (!triggerId) return;
     const offset = cursor ? Number.parseInt(cursor, 10) : 0;
     setExecLoading(true);
+    setExecError(null);
     try {
       const resp = await listTriggerExecutions(projectId, triggerId, {
         limit: EXECUTIONS_PER_PAGE,
@@ -122,11 +125,12 @@ export function ProjectTriggerDetail() {
       setNextExecutionCursor(resp.nextCursor ?? null);
       setHasMore(Boolean(resp.nextCursor));
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to load executions');
+      setExecError(err instanceof Error ? err.message : 'Failed to load executions');
     } finally {
       setExecLoading(false);
     }
-  }, [projectId, triggerId, toast]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- toast removed per stale-while-revalidate rule
+  }, [projectId, triggerId]);
 
   useEffect(() => {
     loadTrigger().catch(() => undefined);
@@ -143,7 +147,8 @@ export function ProjectTriggerDetail() {
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to run trigger');
     }
-  }, [projectId, triggerId, toast, loadTrigger, loadExecutions]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- toast removed per stale-while-revalidate rule
+  }, [projectId, triggerId, loadTrigger, loadExecutions]);
 
   const handleTogglePause = useCallback(async () => {
     if (!trigger || !triggerId) return;
@@ -156,7 +161,8 @@ export function ProjectTriggerDetail() {
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to update trigger');
     }
-  }, [trigger, projectId, triggerId, toast, loadTrigger]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- toast removed per stale-while-revalidate rule
+  }, [trigger, projectId, triggerId, loadTrigger]);
 
   const handleDelete = useCallback(async () => {
     if (!triggerId) return;
@@ -167,7 +173,8 @@ export function ProjectTriggerDetail() {
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to delete trigger');
     }
-  }, [projectId, triggerId, toast, navigate]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- toast removed per stale-while-revalidate rule
+  }, [projectId, triggerId, navigate]);
 
   // Compute success rate from loaded executions
   const successRate = useMemo(() => {
@@ -347,6 +354,7 @@ export function ProjectTriggerDetail() {
       {/* Execution history */}
       <div>
         <h2 className="sam-type-section-heading mb-4">Execution History</h2>
+        {execError && <div className="text-xs text-danger mb-2">{execError}</div>}
         <ExecutionHistory
           executions={executions}
           loading={execLoading}

@@ -78,22 +78,25 @@ export function RepositoryAccessSettings({ project }: { project: Project }) {
   const [discovering, setDiscovering] = useState(false);
   const [discovered, setDiscovered] = useState(false);
 
+  const [loadError, setLoadError] = useState<string | null>(null);
+
   const load = useCallback(async () => {
     if (!githubBacked) {
       setLoading(false);
       return;
     }
     try {
-      setLoading(true);
+      setLoadError(null);
       const response = await listProjectRepositories(projectId);
       setPrimaryRepository(response.primaryRepository);
       setRepositories(response.repositories);
     } catch {
-      toast.error('Failed to load repository access');
+      setLoadError('Failed to load repository access');
     } finally {
       setLoading(false);
     }
-  }, [githubBacked, projectId, toast]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- toast removed per stale-while-revalidate rule
+  }, [githubBacked, projectId]);
 
   useEffect(() => {
     void load();
@@ -179,7 +182,11 @@ export function RepositoryAccessSettings({ project }: { project: Project }) {
         </p>
       </div>
 
-      {loading ? (
+      {loadError && repositories.length === 0 && (
+        <div className="text-xs text-danger">{loadError}</div>
+      )}
+
+      {loading && repositories.length === 0 ? (
         <div className="flex items-center gap-2">
           <Spinner size="sm" />
           <span className="text-xs text-fg-muted">Loading repository access&hellip;</span>

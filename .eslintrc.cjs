@@ -56,6 +56,12 @@ module.exports = {
       rules: {
         'react/react-in-jsx-scope': 'off',
         'react/prop-types': 'off',
+        // Context provider values MUST be memoized. An inline object/array in
+        // <X.Provider value={{...}}> gets a new identity every render, forcing
+        // every consumer to re-render and re-creating every useCallback that
+        // depends on the context — this caused app-wide refetch/hide loops.
+        // See .claude/rules/48-stale-while-revalidate-ui.md
+        'react/jsx-no-constructed-context-values': 'error',
         // Start a11y rules as warnings — fix violations incrementally
         'jsx-a11y/click-events-have-key-events': 'warn',
         'jsx-a11y/no-static-element-interactions': 'warn',
