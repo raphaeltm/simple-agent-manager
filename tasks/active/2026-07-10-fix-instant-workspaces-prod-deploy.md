@@ -23,10 +23,10 @@ The instant workspaces UI is missing in production because PR #1544 merged to `m
 
 ## Checklist
 
-- [ ] Reproduce or directly verify the VM-agent test failure mode locally.
-- [ ] Patch the test or its test-only harness to remove timing dependence without weakening production behavior.
-- [ ] Run focused VM-agent tests for the affected package.
-- [ ] Run broader VM-agent Go tests with race detector if local toolchain allows.
+- [x] Reproduce or directly verify the VM-agent test failure mode locally.
+- [x] Patch the test or its test-only harness to remove timing dependence without weakening production behavior.
+- [x] Run focused VM-agent tests for the affected package.
+- [x] Run broader VM-agent Go tests with race detector if local toolchain allows.
 - [ ] Push a PR and verify GitHub CI turns green.
 - [ ] Deploy to staging and verify the instant-workspaces schema/UI evidence on staging.
 - [ ] Merge once checks and staging pass.
