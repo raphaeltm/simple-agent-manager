@@ -25,6 +25,11 @@ vi.mock('../../../src/services/task-runner', () => ({
   cleanupTaskRun: (...args: unknown[]) => cleanupTaskRunSpy(...args),
 }));
 
+const terminalCleanupSpy = vi.fn().mockResolvedValue(undefined);
+vi.mock('../../../src/services/task-terminal-cleanup', () => ({
+  cleanupTerminalTaskResources: (...args: unknown[]) => terminalCleanupSpy(...args),
+}));
+
 // Track calls to syncTriggerExecutionStatus
 const syncTriggerSpy = vi.fn().mockResolvedValue(undefined);
 vi.mock('../../../src/services/trigger-execution-sync', () => ({
@@ -143,11 +148,10 @@ describe('complete_task cleanup behavior', () => {
     // Wait for background work to complete
     await Promise.allSettled(ctx._promises);
 
-    // Verify session stop was called
-    expect(stopSessionSpy).toHaveBeenCalledWith(env, 'proj-456', 'session-xyz');
-
-    // Verify workspace cleanup was triggered
-    expect(cleanupTaskRunSpy).toHaveBeenCalledWith('task-123', env);
+    expect(terminalCleanupSpy).toHaveBeenCalledWith(env, 'task-123', {
+      status: 'completed',
+      logContext: { source: 'mcp.complete_task', workspaceId: 'ws-abc' },
+    });
 
     // Non-mission tasks must not wake ProjectOrchestrator.
     expect(notifyTaskEventSpy).not.toHaveBeenCalled();
@@ -180,6 +184,7 @@ describe('complete_task cleanup behavior', () => {
     // Session stop and cleanup should NOT be called
     expect(stopSessionSpy).not.toHaveBeenCalled();
     expect(cleanupTaskRunSpy).not.toHaveBeenCalled();
+    expect(terminalCleanupSpy).not.toHaveBeenCalled();
   });
 
   it('task-mode complete_task syncs trigger execution status', async () => {
@@ -232,7 +237,7 @@ describe('complete_task cleanup behavior', () => {
     expect(cleanupTaskRunSpy).not.toHaveBeenCalled();
   });
 
-  it('task-mode complete_task skips stopSession when workspace has no chatSessionId', async () => {
+  it('task-mode complete_task delegates terminal cleanup to the shared cleanup helper', async () => {
     mockD1._stmt.first.mockResolvedValueOnce({
       task_mode: 'task',
       user_id: 'user-789',
@@ -242,23 +247,19 @@ describe('complete_task cleanup behavior', () => {
       mission_id: null,
     });
     mockD1._stmt.run.mockResolvedValue({ success: true, meta: { changes: 1 } });
-    // Workspace exists but has no linked chat session
-    mockD1._stmt.raw.mockResolvedValueOnce([[null]]);
-
     const env = createMockEnv(mockD1);
     const ctx = createMockExecutionCtx();
 
     await handleCompleteTask(1, { summary: 'Done' }, tokenData, env, ctx);
     await Promise.allSettled(ctx._promises);
 
-    // stopSession should NOT be called when chatSessionId is null
-    expect(stopSessionSpy).not.toHaveBeenCalled();
-
-    // cleanupTaskRun should still run
-    expect(cleanupTaskRunSpy).toHaveBeenCalledWith('task-123', env);
+    expect(terminalCleanupSpy).toHaveBeenCalledWith(env, 'task-123', {
+      status: 'completed',
+      logContext: { source: 'mcp.complete_task', workspaceId: 'ws-abc' },
+    });
   });
 
-  it('task-mode complete_task still runs cleanupTaskRun when stopSession fails', async () => {
+  it('task-mode complete_task still completes when terminal cleanup fails in waitUntil', async () => {
     mockD1._stmt.first.mockResolvedValueOnce({
       task_mode: 'task',
       user_id: 'user-789',
@@ -268,10 +269,7 @@ describe('complete_task cleanup behavior', () => {
       mission_id: null,
     });
     mockD1._stmt.run.mockResolvedValue({ success: true, meta: { changes: 1 } });
-    mockD1._stmt.raw.mockResolvedValueOnce([['session-xyz']]);
-
-    // Make stopSession throw
-    stopSessionSpy.mockRejectedValueOnce(new Error('DO unavailable'));
+    terminalCleanupSpy.mockRejectedValueOnce(new Error('container unavailable'));
 
     const env = createMockEnv(mockD1);
     const ctx = createMockExecutionCtx();
@@ -281,10 +279,9 @@ describe('complete_task cleanup behavior', () => {
 
     await Promise.allSettled(ctx._promises);
 
-    // stopSession was attempted and failed
-    expect(stopSessionSpy).toHaveBeenCalled();
-
-    // cleanupTaskRun still ran despite stopSession failure — prevents VM leaks
-    expect(cleanupTaskRunSpy).toHaveBeenCalledWith('task-123', env);
+    expect(terminalCleanupSpy).toHaveBeenCalledWith(env, 'task-123', {
+      status: 'completed',
+      logContext: { source: 'mcp.complete_task', workspaceId: 'ws-abc' },
+    });
   });
 });

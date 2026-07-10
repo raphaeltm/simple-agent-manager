@@ -32,14 +32,23 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { deleteWorkspaceOnNode, stopWorkspaceOnNode } from '../services/node-agent';
-import { deleteNodeResources } from '../services/nodes';
+import { deleteNodeResources, stopNodeResources } from '../services/nodes';
 import { persistError } from '../services/observability';
 import * as projectDataService from '../services/project-data';
+
+const DEFAULT_CF_CONTAINER_TERMINAL_TASK_SWEEP_LIMIT = 25;
 
 function parseMs(value: string | undefined, fallback: number): number {
   if (!value) return fallback;
   const parsed = parseInt(value, 10);
   if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return parsed;
+}
+
+function parsePositiveInt(value: string | undefined, fallback: number): number {
+  if (!value) return fallback;
+  const parsed = parseInt(value, 10);
+  if (!Number.isInteger(parsed) || parsed <= 0) return fallback;
   return parsed;
 }
 
@@ -50,6 +59,7 @@ export interface NodeCleanupResult {
   orphanedWorkspacesFlagged: number;
   orphanedNodesFlagged: number;
   stoppedWorkspacesDeleted: number;
+  cfContainersDestroyed: number;
   errors: number;
 }
 
@@ -136,12 +146,88 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
     orphanedWorkspacesFlagged: 0,
     orphanedNodesFlagged: 0,
     stoppedWorkspacesDeleted: 0,
+    cfContainersDestroyed: 0,
     errors: 0,
   };
 
   const gracePeriodMs = parseMs(env.NODE_WARM_GRACE_PERIOD_MS, DEFAULT_NODE_WARM_GRACE_PERIOD_MS);
   const maxLifetimeMs = parseMs(env.MAX_AUTO_NODE_LIFETIME_MS, DEFAULT_MAX_AUTO_NODE_LIFETIME_MS);
   const orphanGracePeriodMs = parseMs(env.ORPHANED_WORKSPACE_GRACE_PERIOD_MS, DEFAULT_ORPHANED_WORKSPACE_GRACE_PERIOD_MS);
+  const cfContainerSweepLimit = parsePositiveInt(
+    env.CF_CONTAINER_TERMINAL_TASK_SWEEP_LIMIT,
+    DEFAULT_CF_CONTAINER_TERMINAL_TASK_SWEEP_LIMIT
+  );
+
+  // Control-loop budget: this cf-container safety net selects at most
+  // CF_CONTAINER_TERMINAL_TASK_SWEEP_LIMIT terminal task-backed containers per
+  // 5-minute cron run. Each candidate gets one Container destroy request through
+  // stopNodeResources(), and success marks the node/workspaces deleted so it
+  // leaves the candidate set.
+  const terminalCfContainerWorkspaces = await env.DATABASE.prepare(
+    `SELECT DISTINCT n.id as node_id, n.user_id, w.id as workspace_id, t.id as task_id, t.status as task_status
+     FROM nodes n
+     INNER JOIN workspaces w ON w.node_id = n.id
+     INNER JOIN tasks t ON t.workspace_id = w.id
+     WHERE n.runtime = 'cf-container'
+       AND n.status NOT IN ('deleted', 'stopped')
+       AND n.node_role = 'workspace'
+       AND w.status IN ('running', 'creating', 'recovery', 'sleeping', 'stopped')
+       AND t.status IN ('completed', 'failed', 'cancelled')
+       AND NOT EXISTS (
+         SELECT 1 FROM tasks active
+         WHERE active.workspace_id = w.id
+           AND active.status IN ('queued', 'delegated', 'in_progress')
+       )
+       AND t.updated_at < ?
+     ORDER BY t.updated_at ASC
+     LIMIT ?`
+  ).bind(new Date(now.getTime() - orphanGracePeriodMs).toISOString(), cfContainerSweepLimit).all<{
+    node_id: string;
+    user_id: string;
+    workspace_id: string;
+    task_id: string;
+    task_status: string;
+  }>();
+
+  for (const candidate of terminalCfContainerWorkspaces.results) {
+    try {
+      log.warn('node_cleanup.cf_container_terminal_task_destroying', {
+        nodeId: candidate.node_id,
+        workspaceId: candidate.workspace_id,
+        taskId: candidate.task_id,
+        taskStatus: candidate.task_status,
+      });
+
+      await stopNodeResources(candidate.node_id, candidate.user_id, env);
+
+      await persistError(env.OBSERVABILITY_DATABASE, {
+        source: 'api',
+        level: 'warn',
+        message: 'Destroyed cf-container node left behind after terminal task',
+        context: {
+          recoveryType: 'cf_container_terminal_task_cleanup',
+          nodeId: candidate.node_id,
+          workspaceId: candidate.workspace_id,
+          taskId: candidate.task_id,
+          taskStatus: candidate.task_status,
+          gracePeriodMs: orphanGracePeriodMs,
+        },
+        userId: candidate.user_id,
+        nodeId: candidate.node_id,
+        workspaceId: candidate.workspace_id,
+      });
+
+      result.cfContainersDestroyed++;
+    } catch (err) {
+      log.error('node_cleanup.cf_container_terminal_task_destroy_failed', {
+        nodeId: candidate.node_id,
+        workspaceId: candidate.workspace_id,
+        taskId: candidate.task_id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      result.errors++;
+    }
+  }
 
   // 1. Find stale warm nodes with running workspace counts in a single query
   //    to avoid N+1 per-node workspace count lookups.

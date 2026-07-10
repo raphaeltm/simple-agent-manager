@@ -337,6 +337,27 @@ export async function cleanupOnFailure(
 ): Promise<void> {
   const now = new Date().toISOString();
 
+  if (state.stepResults.workspaceId && state.stepResults.nodeId) {
+    const node = await rc.env.DATABASE.prepare(
+      `SELECT runtime FROM nodes WHERE id = ? AND user_id = ?`
+    ).bind(state.stepResults.nodeId, state.userId).first<{ runtime: string | null }>();
+
+    if (node?.runtime === 'cf-container') {
+      try {
+        const { cleanupTaskRun } = await import('../../services/task-runner');
+        await cleanupTaskRun(state.taskId, rc.env, state.config.projectScaling?.warmNodeTimeoutMs);
+      } catch (err) {
+        log.error('task_runner_do.cleanup.cf_container_cleanup_failed', {
+          taskId: state.taskId,
+          nodeId: state.stepResults.nodeId,
+          workspaceId: state.stepResults.workspaceId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+      return;
+    }
+  }
+
   // Stop workspace if one was created
   if (state.stepResults.workspaceId && state.stepResults.nodeId) {
     try {

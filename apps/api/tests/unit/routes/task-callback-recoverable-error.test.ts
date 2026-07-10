@@ -71,6 +71,10 @@ vi.mock('../../../src/services/project-data', () => ({
   stopSession: vi.fn().mockResolvedValue(undefined),
 }));
 
+vi.mock('../../../src/services/task-terminal-cleanup', () => ({
+  cleanupTerminalTaskResources: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock('../../../src/services/notification', () => ({
   getProjectName: vi.fn().mockResolvedValue('Recoverable Project'),
   notifyTaskComplete: vi.fn().mockResolvedValue(undefined),
@@ -219,7 +223,9 @@ describe('task callback recoverable errors', () => {
     );
   });
 
-  it('still stops the chat session for terminal failed callbacks', async () => {
+  it('schedules terminal cleanup for failed callbacks', async () => {
+    const { cleanupTerminalTaskResources } = await import('../../../src/services/task-terminal-cleanup');
+
     const res = await postCallback(app, {
       toStatus: 'failed',
       reason: 'Agent prompt failed',
@@ -230,10 +236,15 @@ describe('task callback recoverable errors', () => {
 
     await flushWaitUntil();
 
-    expect(projectDataService.stopSession).toHaveBeenCalledWith(
+    expect(cleanupTerminalTaskResources).toHaveBeenCalledWith(
       expect.anything(),
-      'proj-recoverable',
-      'chat-recoverable'
+      'task-recoverable',
+      {
+        status: 'failed',
+        errorMessage: 'fatal error',
+        logContext: { projectId: 'proj-recoverable', source: 'task.callback' },
+      }
     );
+    expect(projectDataService.stopSession).not.toHaveBeenCalled();
   });
 });

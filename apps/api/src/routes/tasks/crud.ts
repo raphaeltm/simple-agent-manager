@@ -50,6 +50,7 @@ import {
   isExecutableTaskStatus,
   isTaskStatus,
 } from '../../services/task-status';
+import { cleanupTerminalTaskResources } from '../../services/task-terminal-cleanup';
 import { cleanupWorkspaceForDeletion } from '../../services/workspace-cleanup';
 import {
   appendStatusEvent,
@@ -455,26 +456,22 @@ crudRoutes.post('/:taskId/status', requireAuth(), requireApproved(), jsonValidat
     ).catch((e) => { log.warn('task.activity_event_failed', { taskId, error: String(e) }); })
   );
 
-  // On terminal states, stop/fail the chat session (best-effort).
+  // On terminal states, stop/fail the chat session and tear down task runtime resources.
   if (body.toStatus === 'completed' || body.toStatus === 'failed' || body.toStatus === 'cancelled') {
-    if (updatedTask.workspaceId && updatedTask.projectId) {
-      c.executionCtx.waitUntil(
-        (async () => {
-          const [ws] = await db
-            .select({ chatSessionId: schema.workspaces.chatSessionId })
-            .from(schema.workspaces)
-            .where(eq(schema.workspaces.id, updatedTask.workspaceId!))
-            .limit(1);
-          if (ws?.chatSessionId) {
-            if (body.toStatus === 'failed') {
-              await projectDataService.failSession(c.env, updatedTask.projectId, ws.chatSessionId, updatedTask.errorMessage ?? null);
-            } else {
-              await projectDataService.stopSession(c.env, updatedTask.projectId, ws.chatSessionId);
-            }
-          }
-        })().catch((e) => { log.error('task.session_stop_failed', { taskId, projectId: updatedTask.projectId, error: String(e) }); })
-      );
-    }
+    c.executionCtx.waitUntil(
+      cleanupTerminalTaskResources(c.env, taskId, {
+        status: body.toStatus,
+        errorMessage: updatedTask.errorMessage,
+        logContext: { projectId, source: 'tasks.status' },
+      }).catch((e) => {
+        log.error('task.terminal_cleanup_failed', {
+          taskId,
+          projectId: updatedTask.projectId,
+          status: body.toStatus,
+          error: String(e),
+        });
+      })
+    );
   }
 
   const nextBlocked = await computeBlockedForTask(db, updatedTask.id);

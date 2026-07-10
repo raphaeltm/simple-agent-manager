@@ -21,16 +21,50 @@ Cloudflare Container-backed SAM workspaces (`runtime = 'cf-container'`) run a st
 
 ## Implementation Checklist
 
-- [ ] Add a shared task terminal cleanup helper that stops/fails ProjectData sessions and invokes `cleanupTaskRun()` for terminal task states.
-- [ ] Update `cleanupTaskRun()` so cf-container nodes call `stopNodeResources()`/`destroyVmAgentContainer()` deterministically and skip VM warm-node cleanup.
-- [ ] Update terminal task paths (`complete_task`, task callback, user status transition, stop_subtask, TaskRunner failure cleanup as needed) so cf-container task work receives runtime teardown for completed, failed, and cancelled states.
-- [ ] Add regression tests that assert cf-container cleanup invokes the runtime destroy path, not only task/workspace status updates.
-- [ ] Add regression tests for each changed terminal path proving cleanup is scheduled before/with terminal handling.
-- [ ] Evaluate and, if low-risk, add a bounded cf-container orphan sweep/max-lifetime path with Rule 47 I/O budget and escape path. If not added, document the reason and residual risk.
+- [x] Add a shared task terminal cleanup helper that stops/fails ProjectData sessions and invokes `cleanupTaskRun()` for terminal task states.
+- [x] Update `cleanupTaskRun()` so cf-container nodes call `stopNodeResources()`/`destroyVmAgentContainer()` deterministically and skip VM warm-node cleanup.
+- [x] Update terminal task paths (`complete_task`, task callback, user status transition, stop_subtask, TaskRunner failure cleanup as needed) so cf-container task work receives runtime teardown for completed, failed, and cancelled states.
+- [x] Add regression tests that assert cf-container cleanup invokes the runtime destroy path, not only task/workspace status updates.
+- [x] Add regression tests for each changed terminal path proving cleanup is scheduled before/with terminal handling.
+- [x] Evaluate and, if low-risk, add a bounded cf-container orphan sweep/max-lifetime path with Rule 47 I/O budget and escape path. If not added, document the reason and residual risk.
 - [ ] Run targeted API tests plus lint/typecheck/build gates required by `/do`.
 - [ ] Run specialist reviews: task-completion-validator, cloudflare-specialist, constitution-validator, test-engineer.
 - [ ] Deploy to staging with coordination checks, run a task-backed cf-container session through changed terminal states, and verify container teardown through Cloudflare API/log evidence.
 - [ ] Update related SAM idea/backlog state with PR number and teardown evidence.
+
+## Audit Results
+
+| Terminal path | Pre-fix result | Post-fix result |
+| --- | --- | --- |
+| MCP `complete_task` (`apps/api/src/routes/mcp/task-tools.ts`) | Scheduled a local `stopSessionAndCleanup()` wrapper. Runtime cleanup depended on VM-oriented `cleanupTaskRun()` and did not destroy cf-container task nodes. | Schedules `cleanupTerminalTaskResources()` in `waitUntil()`, which stops the ProjectData session then calls `cleanupTaskRun()`. `cleanupTaskRun()` now detects `nodes.runtime = 'cf-container'` and calls `stopNodeResources()`. |
+| Task callback terminal statuses (`apps/api/src/routes/tasks/callback.ts`) | `completed` called `cleanupTaskRun()`; `failed` and `cancelled` intentionally kept workspaces alive, which leaks paid cf-container task nodes. | All terminal statuses schedule `cleanupTerminalTaskResources()` with status/error context. |
+| User/API task status transition (`apps/api/src/routes/tasks/crud.ts`) | Stopped/failed ProjectData session only; no runtime cleanup. | All terminal statuses schedule `cleanupTerminalTaskResources()`. |
+| SAM `stop_subtask` (`apps/api/src/durable-objects/sam-session/tools/stop-subtask.ts`) | Stopped agent session and marked task cancelled; no container destroy. | After cancellation DB update, calls `cleanupTerminalTaskResources()` and returns an error if runtime cleanup fails. |
+| TaskRunner failure cleanup (`apps/api/src/durable-objects/task-runner/state-machine.ts`) | `cleanupOnFailure()` did VM stop/warm cleanup directly before delegating to `cleanupTaskRun()` for auto-provisioned nodes. | Detects cf-container nodes and routes through `cleanupTaskRun()` immediately, avoiding VM stop/warm behavior. |
+| Session archive/close (`apps/api/src/routes/chat-stop.ts`) | Skipped workspace cleanup for task-linked sessions. | Task-linked stop cancels executable tasks when needed and calls `cleanupTerminalTaskResources()`. Taskless sessions still use `cleanupWorkspaceForDeletion()`. |
+| Workspace deletion (`apps/api/src/services/workspace-cleanup.ts`) | Already routed cf-container workspaces to `stopNodeResources()`. | No change needed. |
+| Workspace/project deletion via node cleanup | `deleteNodeResources()` did not destroy cf-container DOs. | Added a bounded scheduled safety sweep for terminal task-backed cf-container nodes that calls `stopNodeResources()`. |
+| Idle/max lifetime | `VmAgentContainer` already has DO idle timeout and active-work max deadline. | Added D1-backed last-resort sweep: max `CF_CONTAINER_TERMINAL_TASK_SWEEP_LIMIT` terminal task-backed cf-container candidates per cron run (default 25), one stop/destroy call each, successful stop marks node/workspaces deleted so candidates escape the set. |
+
+## Verification
+
+- `pnpm --filter @simple-agent-manager/api test -- tests/unit/services/task-runner-cleanup.test.ts tests/unit/routes/mcp-complete-task-cleanup.test.ts tests/unit/routes/task-callback-recoverable-error.test.ts tests/unit/durable-objects/sam-tools-phase-b.test.ts tests/unit/routes/chat-session-stop-cleanup.test.ts tests/unit/task-runner-completion.test.ts` — passed, 47 tests.
+- `pnpm --filter @simple-agent-manager/api test -- tests/unit/node-cleanup.test.ts tests/unit/services/task-runner-cleanup.test.ts tests/workers/scheduled-node-cleanup.test.ts` — passed, 14 tests.
+- `pnpm --filter @simple-agent-manager/api test` — passed, 399 files / 5,888 tests.
+- `pnpm --filter @simple-agent-manager/api typecheck` — passed.
+- `pnpm --filter @simple-agent-manager/api build` — passed.
+- `pnpm --filter @simple-agent-manager/api lint` — passed with existing warnings.
+- `pnpm --filter @simple-agent-manager/api exec eslint ...changed files...` — passed with three existing non-null assertion warnings.
+- `pnpm --filter @simple-agent-manager/api exec vitest run --config vitest.workers.config.ts tests/workers/scheduled-node-cleanup.test.ts` — blocked by `workerd` signal 11 before importing tests while loading `@cloudflare/containers`; no assertions ran.
+
+## Specialist Review Evidence
+
+| Reviewer | Status | Outcome |
+| --- | --- | --- |
+| task-completion-validator | DEFERRED | Implementation checklist and local tests match the task file. Remaining task acceptance gap is staging verification: task-backed cf-container terminal paths still need live Cloudflare evidence before archive/complete. |
+| cloudflare-specialist | PASS | D1 queries are parameterized, the cron sweep has a bounded configurable limit (`CF_CONTAINER_TERMINAL_TASK_SWEEP_LIMIT`), candidates escape by `stopNodeResources()` marking node/workspaces deleted, and no Wrangler/migration changes are required. Local worker-pool verification is blocked by `workerd` signal 11 before import. |
+| constitution-validator | PASS | New operational limit uses env override with default; no hardcoded URLs/timeouts/deployment identifiers added. Default value is isolated as `DEFAULT_CF_CONTAINER_TERMINAL_TASK_SWEEP_LIMIT`. |
+| test-engineer | PASS | Runtime-boundary regression exists in `task-runner-cleanup.test.ts`; terminal entry-point delegation tests cover MCP completion, failed callbacks, SAM stop_subtask, and chat stop/archive; cron fallback test asserts `stopNodeResources()` and configured sweep limit. Staging remains required for live Cloudflare Container teardown. |
 
 ## Acceptance Criteria
 

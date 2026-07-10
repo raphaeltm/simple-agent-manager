@@ -21,7 +21,7 @@ import * as notificationService from '../../services/notification';
 import * as projectDataService from '../../services/project-data';
 import * as orchestratorService from '../../services/project-orchestrator';
 import { recomputeMissionSchedulerStates } from '../../services/scheduler-state-sync';
-import { cleanupTaskRun } from '../../services/task-runner';
+import { cleanupTerminalTaskResources } from '../../services/task-terminal-cleanup';
 import { syncTriggerExecutionStatus } from '../../services/trigger-execution-sync';
 import {
   ACTIVE_STATUSES,
@@ -466,11 +466,14 @@ export async function handleCompleteTask(
     }
   }
 
-  // Stop the ProjectData chat session and trigger workspace cleanup in the background.
-  // This mirrors the terminal-callback cleanup path in callback.ts.
+  // Stop/fail ProjectData session state and trigger runtime cleanup in the background.
+  // This mirrors other terminal task cleanup paths.
   if (executionCtx) {
     executionCtx.waitUntil(
-      stopSessionAndCleanup(env, tokenData).catch((err) => {
+      cleanupTerminalTaskResources(env, tokenData.taskId, {
+        status: 'completed',
+        logContext: { source: 'mcp.complete_task', workspaceId: tokenData.workspaceId },
+      }).catch((err) => {
         log.error('mcp.complete_task.cleanup_failed', {
           taskId: tokenData.taskId,
           error: err instanceof Error ? err.message : String(err),
@@ -488,35 +491,6 @@ export async function handleCompleteTask(
   return jsonRpcSuccess(requestId, {
     content: [{ type: 'text', text: 'Task marked as completed.' }],
   });
-}
-
-/**
- * Stop the chat session in ProjectData and trigger workspace cleanup.
- * Runs in waitUntil — non-blocking for the MCP response.
- */
-async function stopSessionAndCleanup(env: Env, tokenData: McpTokenData): Promise<void> {
-  const db = drizzle(env.DATABASE, { schema });
-
-  // Look up the chat session linked to this workspace
-  const [ws] = await db
-    .select({ chatSessionId: schema.workspaces.chatSessionId })
-    .from(schema.workspaces)
-    .where(eq(schema.workspaces.id, tokenData.workspaceId))
-    .limit(1);
-
-  if (ws?.chatSessionId) {
-    try {
-      await projectDataService.stopSession(env, tokenData.projectId, ws.chatSessionId);
-    } catch (err) {
-      log.warn('mcp.complete_task.session_stop_failed', {
-        taskId: tokenData.taskId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
-
-  // cleanupTaskRun must always run regardless of session-stop outcome — it prevents VM leaks.
-  await cleanupTaskRun(tokenData.taskId, env);
 }
 
 export async function handleListTasks(
