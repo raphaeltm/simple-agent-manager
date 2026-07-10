@@ -48,9 +48,9 @@ import { resolveProjectAgentDefault } from '../../services/project-agent-default
 import * as projectDataService from '../../services/project-data';
 import { extractScalewaySecretKey } from '../../services/provider-credentials';
 import { bridgeAgentActivity } from '../../services/trial/bridge';
+import { getWorkspaceRuntimeAssets } from '../../services/workspace-runtime-assets';
 import { getDecryptedAgentKey, getDecryptedCredential } from '../credentials';
 import { assertRepositoryAccess } from '../projects/_helpers';
-import { getWorkspaceRuntimeAssets } from '../../services/workspace-runtime-assets';
 import { safeParseJson, verifyWorkspaceCallbackAuth } from './_helpers';
 
 /** Agent types eligible for AI proxy credential fallback (module-scope for isolate reuse). */
