@@ -87,9 +87,11 @@ describe('cf-container runtime spike contracts', () => {
     expect(launcher).toContain('signNodeCallbackToken');
     expect(launcher).toContain('signCallbackToken');
     expect(launcher).toContain('createWorkspaceOnNode');
-    expect(launcher).toContain('createAcpSession');
-    expect(launcher).toContain('createAgentSessionOnNode');
-    expect(launcher).toContain('startAgentSessionOnNode');
+    expect(launcher).toContain('startSamAwareAgentSession');
+    const bootstrap = read('services/agent-session-bootstrap.ts');
+    expect(bootstrap).toContain('createAcpSession');
+    expect(bootstrap).toContain('createAgentSessionOnNode');
+    expect(bootstrap).toContain('startAgentSessionOnNode');
   });
 
   it('marks raw container lifecycle exits visibly instead of silently resuming', () => {

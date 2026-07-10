@@ -68,12 +68,14 @@ vi.mock('../../../src/services/node-agent', () => ({
   createWorkspaceOnNode: createWorkspaceOnNodeMock,
 }));
 
-const { generateMcpTokenMock, storeMcpTokenMock } = vi.hoisted(() => ({
+const { generateMcpTokenMock, revokeMcpTokenMock, storeMcpTokenMock } = vi.hoisted(() => ({
   generateMcpTokenMock: vi.fn(() => 'mcp_tok_fixture_abc123'),
+  revokeMcpTokenMock: vi.fn(async () => {}),
   storeMcpTokenMock: vi.fn(async () => {}),
 }));
 vi.mock('../../../src/services/mcp-token', () => ({
   generateMcpToken: generateMcpTokenMock,
+  revokeMcpToken: revokeMcpTokenMock,
   storeMcpToken: storeMcpTokenMock,
 }));
 
@@ -189,7 +191,7 @@ describe('handleDiscoveryAgentStart — VM agent boot', () => {
     expect(state.agentSessionCreatedOnVm).toBe(true);
   });
 
-  it('mints + stores an MCP token keyed on trialId (synthetic taskId)', async () => {
+  it('mints + stores a taskless trial MCP token keyed by context', async () => {
     const ctx = makeCtx();
     const rc = makeRc(ctx, []);
     const state = makeState();
@@ -200,8 +202,8 @@ describe('handleDiscoveryAgentStart — VM agent boot', () => {
     expect(storeMcpTokenMock).toHaveBeenCalledTimes(1);
     const [, token, data] = storeMcpTokenMock.mock.calls[0];
     expect(token).toBe('mcp_tok_fixture_abc123');
-    // Trial synthetic taskId = trialId.
-    expect((data as { taskId: string }).taskId).toBe(state.trialId);
+    expect((data as { taskId: string }).taskId).toBe('');
+    expect((data as { contextType: string }).contextType).toBe('trial');
     expect((data as { projectId: string }).projectId).toBe('proj_X');
     expect((data as { workspaceId: string }).workspaceId).toBe('ws_X');
 
