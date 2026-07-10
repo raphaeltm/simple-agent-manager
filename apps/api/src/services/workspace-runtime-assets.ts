@@ -129,7 +129,10 @@ async function validateProfileId(
       )
     )
     .limit(1);
-  return rows[0]?.id ?? null;
+  if (!rows[0]) {
+    throw errors.forbidden('Agent profile is not valid for workspace');
+  }
+  return rows[0].id;
 }
 
 async function validateSkillId(
@@ -149,7 +152,10 @@ async function validateSkillId(
       )
     )
     .limit(1);
-  return rows[0]?.id ?? null;
+  if (!rows[0]) {
+    throw errors.forbidden('Skill is not valid for workspace');
+  }
+  return rows[0].id;
 }
 
 async function resolveProjectAssets(

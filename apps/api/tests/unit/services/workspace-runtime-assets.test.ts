@@ -157,4 +157,28 @@ describe('workspace runtime asset resolver', () => {
       )
     ).rejects.toMatchObject({ statusCode: 403 });
   });
+
+  it('fails closed when supplied agentSessionId references a profile outside the workspace project', async () => {
+    const db = makeDbWithLimitAwareness([
+      [{ id: 'ws-1', userId: 'user-1', projectId: 'project-1', agentProfileHint: null }],
+      [{ id: 'ws-1', userId: 'user-1', projectId: 'project-1', agentProfileHint: null }],
+      [{
+        id: 'agent-session-1',
+        workspaceId: 'ws-1',
+        userId: 'user-1',
+        profileId: 'profile-from-other-project',
+        skillId: null,
+      }],
+      [],
+      [],
+    ]);
+
+    await expect(
+      getWorkspaceRuntimeAssets(
+        db as never,
+        { workspaceId: 'ws-1', agentSessionId: 'agent-session-1' },
+        'enc-key'
+      )
+    ).rejects.toMatchObject({ statusCode: 403 });
+  });
 });
