@@ -95,7 +95,7 @@ func (s *Server) provisionWorkspaceRuntime(ctx context.Context, runtime *Workspa
 		slog.Warn("Proceeding without git token", "workspace", runtime.ID, "error", err)
 	}
 
-	runtimeAssets, err := s.fetchProjectRuntimeAssetsForWorkspace(provisionCtx, runtime.ID, callbackToken)
+	runtimeAssets, err := s.fetchProjectRuntimeAssetsForWorkspace(provisionCtx, runtime.ID, callbackToken, "")
 	if err != nil {
 		return false, fmt.Errorf("failed to fetch project runtime assets: %w", err)
 	}
@@ -176,7 +176,7 @@ func (s *Server) recoverWorkspaceRuntime(ctx context.Context, runtime *Workspace
 		}
 	}
 
-	runtimeAssets, assetsErr := s.fetchProjectRuntimeAssetsForWorkspace(recoveryCtx, runtime.ID, callbackToken)
+	runtimeAssets, assetsErr := s.fetchProjectRuntimeAssetsForWorkspace(recoveryCtx, runtime.ID, callbackToken, "")
 	if assetsErr != nil {
 		return fmt.Errorf("failed to fetch project runtime assets: %w", assetsErr)
 	}

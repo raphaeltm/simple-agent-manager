@@ -223,6 +223,9 @@ type ProcessConfig struct {
 	AcpArgs []string
 	// EnvVars are environment variables to set (e.g., "ANTHROPIC_API_KEY=sk-...").
 	EnvVars []string
+	// SecretEnvKeys marks env var names that must be treated as secret even if
+	// their names do not match SAM's secret-name heuristic.
+	SecretEnvKeys map[string]bool
 	// WorkDir is the working directory inside the container.
 	WorkDir string
 	// StopGracePeriod is how long Stop() waits after SIGTERM before SIGKILL.
@@ -257,9 +260,11 @@ type processPipes struct {
 	stderr io.ReadCloser
 }
 
-func splitProcessEnvVars(envVars []string) (secrets []string, nonSecrets []string) {
+func splitProcessEnvVars(envVars []string, explicitSecretKeys map[string]bool) (secrets []string, nonSecrets []string) {
 	for _, env := range envVars {
-		if isSecretEnvVar(env) {
+		key, _, ok := strings.Cut(env, "=")
+		explicitSecret := ok && explicitSecretKeys != nil && explicitSecretKeys[key]
+		if explicitSecret || isSecretEnvVar(env) {
 			secrets = append(secrets, env)
 		} else {
 			nonSecrets = append(nonSecrets, env)
@@ -281,7 +286,7 @@ func buildDockerExecArgs(cfg ProcessConfig) ([]string, string, error) {
 	// Separate secret env vars from non-secret ones. Secrets are written to
 	// a tmpfs-backed file and passed via --env-file to avoid exposing them
 	// in /proc/<pid>/cmdline on the host.
-	secrets, nonSecrets := splitProcessEnvVars(cfg.EnvVars)
+	secrets, nonSecrets := splitProcessEnvVars(cfg.EnvVars, cfg.SecretEnvKeys)
 
 	for _, env := range nonSecrets {
 		args = append(args, "-e", env)

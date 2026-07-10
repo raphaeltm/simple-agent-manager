@@ -48,16 +48,17 @@ func (h *SessionHost) startAgentWithSessionMode(ctx context.Context, agentType s
 }
 
 type agentStartup struct {
-	containerID string
-	info        agentCommandInfo
-	envVars     []string
-	settings    *agentSettingsPayload
+	containerID  string
+	info         agentCommandInfo
+	envVars      []string
+	secretEnvKey map[string]bool
+	settings     *agentSettingsPayload
 }
 
 func (h *SessionHost) prepareAgentStartup(ctx context.Context, agentType string, cred *agentCredential, settings *agentSettingsPayload) (*agentStartup, error) {
 	var containerID string
+	var err error
 	if h.config.ContainerResolver != nil {
-		var err error
 		containerID, err = h.config.ContainerResolver()
 		if err != nil {
 			return nil, fmt.Errorf("failed to discover devcontainer: %w", err)
@@ -66,9 +67,14 @@ func (h *SessionHost) prepareAgentStartup(ctx context.Context, agentType string,
 
 	info := getAgentCommandInfo(agentType, cred.credentialKind)
 	envVars := h.resolveAgentEnvVars(ctx, containerID)
+	secretEnvKeys := make(map[string]bool)
+	envVars, err = h.applyRuntimeAssets(ctx, containerID, envVars, secretEnvKeys)
+	if err != nil {
+		return nil, err
+	}
 	h.trackCredentialInjection(info, cred)
 
-	envVars, settings, err := h.injectAgentCredential(ctx, containerID, agentType, cred, settings, info, envVars)
+	envVars, settings, err = h.injectAgentCredential(ctx, containerID, agentType, cred, settings, info, envVars)
 	if err != nil {
 		return nil, err
 	}
@@ -76,11 +82,34 @@ func (h *SessionHost) prepareAgentStartup(ctx context.Context, agentType string,
 	h.applyPermissionMode(settings)
 
 	return &agentStartup{
-		containerID: containerID,
-		info:        info,
-		envVars:     envVars,
-		settings:    settings,
+		containerID:  containerID,
+		info:         info,
+		envVars:      envVars,
+		secretEnvKey: secretEnvKeys,
+		settings:     settings,
 	}, nil
+}
+
+func (h *SessionHost) applyRuntimeAssets(ctx context.Context, containerID string, envVars []string, secretEnvKeys map[string]bool) ([]string, error) {
+	if h.config.RuntimeAssetsProvider == nil {
+		return envVars, nil
+	}
+	assets, err := h.config.RuntimeAssetsProvider(ctx)
+	if err != nil {
+		return envVars, fmt.Errorf("failed to fetch runtime assets: %w", err)
+	}
+	if containerID == "" {
+		if err := applyStandaloneRuntimeFiles(h.config.ContainerWorkDir, assets.Files); err != nil {
+			return envVars, fmt.Errorf("failed to apply runtime files: %w", err)
+		}
+	} else if len(assets.Files) > 0 {
+		return envVars, fmt.Errorf("runtime file provider is only supported for standalone sessions")
+	}
+	envVars, err = appendRuntimeEnvVars(envVars, secretEnvKeys, assets.EnvVars)
+	if err != nil {
+		return envVars, err
+	}
+	return envVars, nil
 }
 
 func (h *SessionHost) resolveAgentEnvVars(ctx context.Context, containerID string) []string {
@@ -435,6 +464,7 @@ func (h *SessionHost) startAgentProcess(startup *agentStartup) (agentProcess, er
 		AcpCommand:    startup.info.command,
 		AcpArgs:       startup.info.args,
 		EnvVars:       startup.envVars,
+		SecretEnvKeys: startup.secretEnvKey,
 		WorkDir:       h.config.ContainerWorkDir,
 	})
 }
