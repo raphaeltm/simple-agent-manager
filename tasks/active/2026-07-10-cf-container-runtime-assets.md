@@ -39,7 +39,7 @@ This must be fixed without putting user runtime assets or secrets into Cloudflar
 - [x] Update Docker exec env handling to honor explicit secret metadata in addition to existing name heuristics.
 - [x] Preserve existing task-backed VM/devcontainer behavior and add targeted regression coverage.
 - [x] Run focused API and Go tests, then the full required quality suite.
-- [ ] Run specialist reviews: task-completion-validator, cloudflare-specialist, go-specialist, security-auditor, constitution-validator, and test-engineer.
+- [x] Run specialist reviews: task-completion-validator, cloudflare-specialist, go-specialist, security-auditor, constitution-validator, and test-engineer.
 - [ ] Coordinate staging deployment, deploy via `deploy-staging.yml`, verify migrations via CF API, create a staging profile/skill with env/file/secret assets, start a real Instant cf-container session, verify asset presence without echoing secret values, confirm no launch-env secret leakage, and clean up.
 - [ ] Open PR, wait for CI, merge when green, monitor production deploy, and update idea `01KX4KRS8FNYYJQXWDS0QDM0EF` with PR/merge status.
 
