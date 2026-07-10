@@ -27,6 +27,7 @@ The instant workspaces UI is missing in production because PR #1544 merged to `m
 - [x] Patch the test or its test-only harness to remove timing dependence without weakening production behavior.
 - [x] Run focused VM-agent tests for the affected package.
 - [x] Run broader VM-agent Go tests with race detector if local toolchain allows.
+- [x] Run repository lint, typecheck, build, and full test suite.
 - [ ] Push a PR and verify GitHub CI turns green.
 - [ ] Deploy to staging and verify the instant-workspaces schema/UI evidence on staging.
 - [ ] Merge once checks and staging pass.
@@ -40,3 +41,12 @@ The instant workspaces UI is missing in production because PR #1544 merged to `m
 - Production D1 includes `0088_node_runtime.sql` and `0089_profile_skill_runtime.sql`.
 - Production app bundle includes the instant runtime UI strings/enums.
 - The UI exposes the instant workspace runtime option after production deploy.
+
+## Validation
+
+- `go test -race ./internal/server` passed in `packages/vm-agent`.
+- `go test -race ./...` passed in `packages/vm-agent`.
+- `pnpm lint` passed with existing warnings only.
+- `pnpm typecheck` passed.
+- `pnpm build` passed.
+- `pnpm test` passed: API `396` files / `5876` tests, web `216` files / `2649` tests.
