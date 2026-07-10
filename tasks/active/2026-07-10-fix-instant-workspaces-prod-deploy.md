@@ -50,3 +50,6 @@ The instant workspaces UI is missing in production because PR #1544 merged to `m
 - `pnpm typecheck` passed.
 - `pnpm build` passed.
 - `pnpm test` passed: API `396` files / `5876` tests, web `216` files / `2649` tests.
+- PR opened: https://github.com/raphaeltm/simple-agent-manager/pull/1551.
+- PR CI first run confirmed the previously failing `VM Agent Test` passes; the remaining preflight evidence failure was PR-body metadata and the PR body has been corrected for the next CI run.
+- Staging deploy triggered: https://github.com/raphaeltm/simple-agent-manager/actions/runs/29079865769.
