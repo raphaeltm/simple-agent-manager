@@ -49,7 +49,7 @@ export async function resolveLiveWorkspaceForSession(
         eq(schema.workspaces.chatSessionId, sessionId),
         eq(schema.workspaces.projectId, projectId),
         eq(schema.workspaces.userId, userId),
-        inArray(schema.workspaces.status, ['running', 'recovery'])
+        inArray(schema.workspaces.status, ['running', 'recovery', 'sleeping'])
       )
     )
     .limit(1);
@@ -107,6 +107,12 @@ export async function resolveLiveAgentSessionForChat(
   // Verify the node is still reachable — prevents requests to destroyed VMs
   // whose DNS records no longer exist (would loop back via wildcard DNS).
   // D1 nodes.status uses 'running' for healthy nodes (not 'active'/'warm', which are DO states).
+  if (workspace.nodeStatus === 'sleeping') {
+    // Phase 3 of idea 01KX4KSXEXQMP41KS34TW9EN01 will wake and rehydrate the
+    // cf-container before forwarding this prompt.
+    throw errors.conflict('The workspace container is asleep. Send a new message after wake/rehydrate support lands.');
+  }
+
   if (workspace.nodeStatus !== 'running') {
     throw errors.conflict(
       'The workspace node is no longer running. Start a new chat to create a fresh workspace.'

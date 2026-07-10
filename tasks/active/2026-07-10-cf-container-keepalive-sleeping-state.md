@@ -19,13 +19,13 @@ The current `VmAgentContainer.onActivityExpired()` path is terminal: it records 
 
 ## Implementation Checklist
 
-- [ ] Add configurable defaults/constants for cf-container sleep and active-work keepalive ceiling, raising the default sleepAfter from 10m to 1-2h.
-- [ ] Add `VmAgentContainer` active-work lifecycle APIs that mark work started/ended, call `renewActivityTimeout()`, and enforce a defensive max active-work deadline.
-- [ ] Wire initial prompt, follow-up prompt, cancel, and stop paths through container lifecycle signals for cf-container nodes.
-- [ ] Change idle expiration to record a distinct sleeping lifecycle state without marking node/workspace/agent_session rows as crash/error.
-- [ ] Return a clear "container is asleep" response for sleeping containers while Phase 3 wake/rehydrate is deferred, with a code comment referencing idea `01KX4KSXEXQMP41KS34TW9EN01` Phase 3.
-- [ ] Update cf-container runtime contract tests for keepalive start/end, raised default, non-terminal sleeping classification, and the temporary sleeping response.
-- [ ] Run focused tests for the changed API runtime contracts, then the required quality suite.
+- [x] Add configurable defaults/constants for cf-container sleep and active-work keepalive ceiling, raising the default sleepAfter from 10m to 1-2h.
+- [x] Add `VmAgentContainer` active-work lifecycle APIs that mark work started/ended, call `renewActivityTimeout()`, and enforce a defensive max active-work deadline.
+- [x] Wire initial prompt, follow-up prompt, cancel, and stop paths through container lifecycle signals for cf-container nodes.
+- [x] Change idle expiration to record a distinct sleeping lifecycle state without marking node/workspace/agent_session rows as crash/error.
+- [x] Return a clear "container is asleep" response for sleeping containers while Phase 3 wake/rehydrate is deferred, with a code comment referencing idea `01KX4KSXEXQMP41KS34TW9EN01` Phase 3.
+- [x] Update cf-container runtime contract tests for keepalive start/end, raised default, non-terminal sleeping classification, and the temporary sleeping response.
+- [x] Run focused tests for the changed API runtime contracts, then the required quality suite.
 - [ ] Deploy to staging with coordination checks, start an instant cf-container session, run a long prompt past the old 10 minute window, and verify idle expiry no longer records an error.
 
 ## Acceptance Criteria

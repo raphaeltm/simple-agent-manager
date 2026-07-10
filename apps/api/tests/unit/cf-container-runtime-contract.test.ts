@@ -92,19 +92,57 @@ describe('cf-container runtime spike contracts', () => {
     expect(launcher).toContain('startAgentSessionOnNode');
   });
 
-  it('marks raw container lifecycle exits visibly instead of silently resuming', () => {
+  it('keeps active raw container prompt work alive with a bounded renewActivityTimeout loop', () => {
     const containerDo = read('durable-objects/vm-agent-container.ts');
+    const containerService = read('services/vm-agent-container.ts');
+    const nodeAgent = read('services/node-agent.ts');
+    const activityCallback = read('routes/projects/agent-activity-callback.ts');
+    const acpSessionsRoute = read('routes/projects/acp-sessions.ts');
+
+    expect(containerDo).toContain("export const DEFAULT_CF_CONTAINER_SLEEP_AFTER = '1h'");
+    expect(containerService).toContain('DEFAULT_CF_CONTAINER_SLEEP_AFTER');
+    expect(containerDo).toContain('DEFAULT_CF_CONTAINER_ACTIVE_WORK_MAX_MS');
+    expect(containerDo).toContain('DEFAULT_CF_CONTAINER_KEEPALIVE_RENEW_INTERVAL_MS');
+    expect(containerDo).toContain('async markActiveWorkStarted');
+    expect(containerDo).toContain('async markActiveWorkEnded');
+    expect(containerDo).toContain('async renewActiveWorkKeepalive');
+    expect(containerDo).toContain('this.renewActivityTimeout()');
+    expect(containerDo).toContain('await this.schedule(Math.max(1, Math.ceil(delayMs / 1000)), KEEPALIVE_CALLBACK)');
+    expect(containerDo).toContain("endReason: 'keepalive_deadline_exceeded'");
+    expect(nodeAgent).toContain('markVmAgentContainerActiveWorkStarted(env, nodeId');
+    expect(nodeAgent).toContain("reason: 'start_agent_session'");
+    expect(nodeAgent).toContain("reason: 'send_prompt'");
+    expect(nodeAgent).toContain("markVmAgentContainerActiveWorkEndedBestEffort(env, nodeId, 'cancel_agent_session')");
+    expect(nodeAgent).toContain("markVmAgentContainerActiveWorkEndedBestEffort(env, nodeId, 'stop_agent_session')");
+    expect(activityCallback).toContain("body.activity === 'idle' || body.activity === 'error'");
+    expect(acpSessionsRoute).toContain("body.status === 'completed' || body.status === 'failed'");
+  });
+
+  it('classifies raw container idle expiration as sleeping instead of crash/error', () => {
+    const containerDo = read('durable-objects/vm-agent-container.ts');
+    const chatResolver = read('routes/chat-workspace-resolver.ts');
 
     expect(containerDo).toContain('override async onStop');
-    expect(containerDo).toContain("if (status === 'expired')");
+    expect(containerDo).toContain("if (status === 'expired' || status === 'sleeping')");
     expect(containerDo).toContain('override async onError');
     expect(containerDo).toContain('override async onActivityExpired');
-    expect(containerDo).toContain("Container idle timeout expired; start a new instant session.");
+    expect(containerDo).toContain("await this.markRuntimeSleeping('Container idle timeout expired; container is sleeping.')");
+    expect(containerDo).toContain("await this.ctx.storage.put('lifecycleStatus', 'sleeping' satisfies LifecycleStatus)");
+    expect(containerDo).toContain("status: 'sleeping'");
+    expect(containerDo).toContain('Container is asleep; wake/rehydrate is not implemented yet.');
+    expect(containerDo).toContain('Phase 3 of idea 01KX4KSXEXQMP41KS34TW9EN01');
+    expect(containerDo).toContain("return new Response(SLEEPING_RESPONSE, { status: 503 })");
+    expect(chatResolver).toContain("inArray(schema.workspaces.status, ['running', 'recovery', 'sleeping'])");
+    expect(chatResolver).toContain("workspace.nodeStatus === 'sleeping'");
+    expect(chatResolver).toContain('The workspace container is asleep.');
+    expect(chatResolver).toContain('Phase 3 of idea 01KX4KSXEXQMP41KS34TW9EN01');
     expect(containerDo).toContain("return new Response('Container is stopped; create a new instant session.', { status: 410 })");
     expect(containerDo).toContain("await this.ctx.storage.put('launchConfig', config)");
     expect(containerDo).toContain('nodeCallbackToken: string');
     expect(containerDo).toContain('CALLBACK_TOKEN: secrets.nodeCallbackToken');
     expect(containerDo).toContain("status === 'stopped' ? 'stopped' : 'error'");
+    expect(containerDo).not.toContain("Container idle timeout expired; start a new instant session.");
+    expect(containerDo).not.toContain("await this.markRuntimeEnded('expired'");
     expect(containerDo).not.toContain('await this.startAndWaitForPorts({\\n      ports: config.vmAgentPort,\\n      startOptions: config');
   });
 
