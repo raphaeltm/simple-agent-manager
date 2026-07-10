@@ -22,6 +22,81 @@ import {
   sanitizeUserInput,
 } from './_helpers';
 
+type InstructionContextType = 'task' | 'conversation' | 'trial' | 'direct-workspace';
+
+interface ResolvedInstructionContext {
+  type: InstructionContextType;
+  task?: schema.Task;
+  session?: Record<string, unknown> | null;
+  chatSessionId?: string | null;
+  workspaceId?: string | null;
+  agentSessionId?: string | null;
+}
+
+function inferInstructionContextType(tokenData: McpTokenData): InstructionContextType {
+  if (tokenData.contextType) return tokenData.contextType;
+  if (tokenData.taskId) return 'task';
+  if (tokenData.chatSessionId) return 'conversation';
+  return 'direct-workspace';
+}
+
+export async function resolveInstructionContext(
+  tokenData: McpTokenData,
+  env: Env,
+): Promise<{ ok: true; context: ResolvedInstructionContext } | { ok: false; message: string }> {
+  const contextType = inferInstructionContextType(tokenData);
+
+  if (contextType === 'task') {
+    if (!tokenData.taskId) {
+      return { ok: false, message: 'Task context missing taskId' };
+    }
+    const db = drizzle(env.DATABASE, { schema });
+    const taskRows = await db
+      .select()
+      .from(schema.tasks)
+      .where(
+        and(
+          eq(schema.tasks.id, tokenData.taskId),
+          eq(schema.tasks.projectId, tokenData.projectId),
+        ),
+      )
+      .limit(1);
+
+    const task = taskRows[0];
+    if (!task) {
+      return { ok: false, message: 'Task not found' };
+    }
+    return { ok: true, context: { type: 'task', task } };
+  }
+
+  if (!tokenData.projectId || !tokenData.workspaceId) {
+    return { ok: false, message: 'Instruction context missing projectId or workspaceId' };
+  }
+
+  if (contextType === 'conversation' && !tokenData.chatSessionId) {
+    return { ok: false, message: 'Conversation context missing chatSessionId' };
+  }
+
+  const session = tokenData.chatSessionId
+    ? await projectDataService.getSession(env, tokenData.projectId, tokenData.chatSessionId).catch(() => null)
+    : null;
+
+  if (contextType === 'conversation' && !session) {
+    return { ok: false, message: 'Conversation session not found' };
+  }
+
+  return {
+    ok: true,
+    context: {
+      type: contextType,
+      session,
+      chatSessionId: tokenData.chatSessionId ?? null,
+      workspaceId: tokenData.workspaceId,
+      agentSessionId: tokenData.agentSessionId ?? null,
+    },
+  };
+}
+
 export async function handleGetInstructions(
   requestId: string | number | null,
   tokenData: McpTokenData,
@@ -29,22 +104,11 @@ export async function handleGetInstructions(
 ): Promise<JsonRpcResponse> {
   const db = drizzle(env.DATABASE, { schema });
 
-  // Fetch task
-  const taskRows = await db
-    .select()
-    .from(schema.tasks)
-    .where(
-      and(
-        eq(schema.tasks.id, tokenData.taskId),
-        eq(schema.tasks.projectId, tokenData.projectId),
-      ),
-    )
-    .limit(1);
-
-  const task = taskRows[0];
-  if (!task) {
-    return jsonRpcError(requestId, INTERNAL_ERROR, 'Task not found');
+  const resolved = await resolveInstructionContext(tokenData, env);
+  if (!resolved.ok) {
+    return jsonRpcError(requestId, INTERNAL_ERROR, resolved.message);
   }
+  const { context } = resolved;
 
   // Fetch project
   const projectRows = await db
@@ -90,7 +154,7 @@ export async function handleGetInstructions(
   // Build knowledge-related instructions based on whether knowledge exists
   const knowledgeInstructions = buildKnowledgeInstructions(
     knowledgeContext.length > 0,
-    task.taskMode === 'conversation',
+    context.type === 'conversation' || context.task?.taskMode === 'conversation',
   );
 
   // Retrieve active project policies (Phase 4: Policy Propagation).
@@ -113,17 +177,40 @@ export async function handleGetInstructions(
   }
 
   const policyDirectives = formatPolicyDirectives(policyContext);
-  const policyInstructions = buildPolicyInstructions(policyContext.length > 0, task.taskMode === 'conversation');
+  const policyInstructions = buildPolicyInstructions(
+    policyContext.length > 0,
+    context.type === 'conversation' || context.task?.taskMode === 'conversation'
+  );
+
+  const isConversation = context.type === 'conversation' || context.task?.taskMode === 'conversation';
 
   const result = {
-    task: {
-      id: task.id,
-      title: task.title,
-      description: task.description,
-      status: task.status,
-      priority: task.priority,
-      outputBranch: task.outputBranch,
+    context: {
+      type: context.type,
+      chatSessionId: context.chatSessionId ?? undefined,
+      workspaceId: context.workspaceId ?? tokenData.workspaceId,
+      agentSessionId: context.agentSessionId ?? tokenData.agentSessionId,
     },
+    ...(context.task
+      ? {
+          task: {
+            id: context.task.id,
+            title: context.task.title,
+            description: context.task.description,
+            status: context.task.status,
+            priority: context.task.priority,
+            outputBranch: context.task.outputBranch,
+          },
+        }
+      : {}),
+    ...(context.session
+      ? {
+          session: {
+            id: context.chatSessionId,
+            topic: typeof context.session.topic === 'string' ? context.session.topic : null,
+          },
+        }
+      : {}),
     project: {
       id: project.id,
       name: project.name,
@@ -136,7 +223,7 @@ export async function handleGetInstructions(
       'After reading this response, check whether the current chat session topic/title accurately reflects the actual work. '
       + 'If the title is stale, generic, copied from a fork such as "get details from previous session", or the session changes direction later, '
       + 'call the SAM MCP `update_session_topic` tool with a concise descriptive topic.',
-      ...(task.taskMode === 'conversation'
+      ...(isConversation
         ? [
             'You are in a conversation with a human. Respond to their messages directly.',
             'Use the SAM MCP `dispatch_task` tool to spawn follow-up work to other agents when needed.',

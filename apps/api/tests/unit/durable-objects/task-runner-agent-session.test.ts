@@ -14,14 +14,18 @@ import type {
 const {
   createAgentSessionOnNodeMock,
   createAcpSessionMock,
+  dbAgentSessionIds,
   insertedAgentSessions,
+  revokeMcpTokenMock,
   startAgentSessionOnNodeMock,
   storeMcpTokenMock,
   transitionAcpSessionMock,
 } = vi.hoisted(() => ({
   createAgentSessionOnNodeMock: vi.fn(async () => undefined),
   createAcpSessionMock: vi.fn(async () => ({ id: 'acp-session-1' })),
+  dbAgentSessionIds: new Set<string>(),
   insertedAgentSessions: [] as Array<Record<string, unknown>>,
+  revokeMcpTokenMock: vi.fn(async () => undefined),
   startAgentSessionOnNodeMock: vi.fn(async () => undefined),
   storeMcpTokenMock: vi.fn(async () => undefined),
   transitionAcpSessionMock: vi.fn(async () => undefined),
@@ -33,6 +37,7 @@ vi.mock('../../../src/lib/ulid', () => ({
 
 vi.mock('../../../src/services/mcp-token', () => ({
   generateMcpToken: () => 'mcp-token-new',
+  revokeMcpToken: revokeMcpTokenMock,
   storeMcpToken: storeMcpTokenMock,
 }));
 
@@ -43,16 +48,35 @@ vi.mock('../../../src/services/node-agent', () => ({
 
 vi.mock('../../../src/services/project-data', () => ({
   createAcpSession: createAcpSessionMock,
+  getAcpSession: vi.fn(async () => null),
   persistMessage: vi.fn(async () => undefined),
   transitionAcpSession: transitionAcpSessionMock,
 }));
 
 vi.mock('drizzle-orm/d1', () => ({
   drizzle: () => ({
+    select: () => ({
+      from: () => ({
+        where: () => ({
+          limit: async () => {
+            const existingId = [...dbAgentSessionIds][0];
+            return existingId ? [{ id: existingId }] : [];
+          },
+        }),
+      }),
+    }),
     insert: () => ({
       values: async (row: Record<string, unknown>) => {
         insertedAgentSessions.push(row);
+        if (typeof row.id === 'string') {
+          dbAgentSessionIds.add(row.id);
+        }
       },
+    }),
+    update: () => ({
+      set: () => ({
+        where: async () => undefined,
+      }),
     }),
   }),
 }));
@@ -235,6 +259,7 @@ describe('TaskRunner agent-session helpers', () => {
 describe('handleAgentSession', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    dbAgentSessionIds.clear();
     insertedAgentSessions.length = 0;
   });
 
@@ -263,6 +288,7 @@ describe('handleAgentSession', () => {
       'user-1',
       'chat-1',
       'project-1',
+      { url: 'https://api.example.test/mcp', token: 'mcp-token-new' },
     );
 
     expect(storeMcpTokenMock).toHaveBeenCalledWith(
@@ -321,11 +347,22 @@ describe('handleAgentSession', () => {
     const { rc } = makeContext({
       existingAgentSessionIds: new Set(['agent-session-existing']),
     });
+    dbAgentSessionIds.add('agent-session-existing');
 
     await handleAgentSession(state, rc);
 
     expect(insertedAgentSessions).toHaveLength(0);
-    expect(createAgentSessionOnNodeMock).not.toHaveBeenCalled();
+    expect(createAgentSessionOnNodeMock).toHaveBeenCalledWith(
+      'node-1',
+      'workspace-1',
+      'agent-session-existing',
+      'Task: Fix runtime orchestration coverage with ',
+      expect.objectContaining({ BASE_DOMAIN: 'example.test' }),
+      'user-1',
+      'chat-1',
+      'project-1',
+      { url: 'https://api.example.test/mcp', token: 'mcp-token-new' },
+    );
     expect(startAgentSessionOnNodeMock).toHaveBeenCalledOnce();
     expect(state.stepResults.agentSessionId).toBe('agent-session-existing');
   });

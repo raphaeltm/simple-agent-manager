@@ -24,6 +24,10 @@ export interface McpTokenEnv {
   MCP_TOKEN_MAX_LIFETIME_SECONDS?: string;
 }
 
+export type McpInstructionContextType = 'task' | 'conversation' | 'trial' | 'direct-workspace';
+
+export type McpTaskMode = 'task' | 'conversation';
+
 /** Data stored alongside each MCP token in KV */
 export interface McpTokenData {
   /**
@@ -32,6 +36,8 @@ export interface McpTokenData {
    * task guard on `!tokenData.taskId` which correctly rejects empty strings.
    */
   taskId: string;
+  contextType?: McpInstructionContextType;
+  taskMode?: McpTaskMode;
   projectId: string;
   userId: string;
   workspaceId: string;

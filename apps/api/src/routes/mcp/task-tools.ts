@@ -81,6 +81,46 @@ export async function handleUpdateTaskStatus(
   }
 
   const db = drizzle(env.DATABASE, { schema });
+  const trimmedMessage = message.trim();
+
+  if (!tokenData.taskId || tokenData.contextType === 'conversation' || tokenData.contextType === 'direct-workspace' || tokenData.contextType === 'trial') {
+    try {
+      await projectDataService.recordActivityEvent(
+        env,
+        tokenData.projectId,
+        `${tokenData.contextType ?? 'session'}.progress`,
+        'agent',
+        tokenData.agentSessionId ?? tokenData.workspaceId,
+        tokenData.workspaceId,
+        tokenData.chatSessionId ?? null,
+        null,
+        {
+          message: trimmedMessage.slice(0, getMcpLimits(env).activityMessageMaxLength),
+          contextType: tokenData.contextType ?? 'conversation',
+        }
+      );
+    } catch (err) {
+      log.warn('mcp.update_task_status.taskless_activity_event_failed', {
+        projectId: tokenData.projectId,
+        workspaceId: tokenData.workspaceId,
+        chatSessionId: tokenData.chatSessionId,
+        contextType: tokenData.contextType,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+
+    log.info('mcp.update_task_status.taskless', {
+      projectId: tokenData.projectId,
+      workspaceId: tokenData.workspaceId,
+      chatSessionId: tokenData.chatSessionId,
+      contextType: tokenData.contextType,
+      message: trimmedMessage.slice(0, getMcpLimits(env).logMessageMaxLength),
+    });
+
+    return jsonRpcSuccess(requestId, {
+      content: [{ type: 'text', text: 'Progress update recorded.' }],
+    });
+  }
 
   // Verify task exists, belongs to this project, and is in an active state
   const taskRows = await db
@@ -124,7 +164,7 @@ export async function handleUpdateTaskStatus(
           actorId: tokenData.workspaceId,
           metadata: {
             taskId: tokenData.taskId,
-            message: message.trim().slice(0, getMcpLimits(env).activityMessageMaxLength),
+            message: trimmedMessage.slice(0, getMcpLimits(env).activityMessageMaxLength),
           },
         }),
       })
@@ -143,7 +183,6 @@ export async function handleUpdateTaskStatus(
         notificationService.getProjectName(env, tokenData.projectId),
         notificationService.getChatSessionId(env, tokenData.workspaceId),
       ]);
-      const trimmedMessage = message.trim();
       const maxFullBodyLength =
         Number.parseInt(env.NOTIFICATION_FULL_BODY_LENGTH || '', 10) ||
         DEFAULT_NOTIFICATION_FULL_BODY_LENGTH;
@@ -170,7 +209,7 @@ export async function handleUpdateTaskStatus(
   log.info('mcp.update_task_status', {
     taskId: tokenData.taskId,
     projectId: tokenData.projectId,
-    message: message.trim().slice(0, getMcpLimits(env).logMessageMaxLength),
+    message: trimmedMessage.slice(0, getMcpLimits(env).logMessageMaxLength),
   });
 
   return jsonRpcSuccess(requestId, {

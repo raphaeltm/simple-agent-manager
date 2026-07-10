@@ -706,19 +706,20 @@ export async function handleDiscoveryAgentStart(
 
   // Step 3: mint + store the MCP token so the VM agent can call MCP tools
   // (add_knowledge, create_idea) on behalf of this trial. Trials have no task
-  // row in D1, so we pass the trialId as the synthetic taskId — this keeps
-  // rate-limit keying (per-trial) and audit logging working without needing
-  // a schema change to McpTokenData.
+  // row in D1, so use an explicit trial context instead of a synthetic task row.
   if (!state.mcpToken) {
     const token = generateMcpToken();
     await storeMcpToken(
       rc.env.KV,
       token,
       {
-        taskId: state.trialId,
+        taskId: '',
+        contextType: 'trial',
         projectId,
         userId,
         workspaceId,
+        chatSessionId: resolvedChatSessionId,
+        agentSessionId: resolvedAcpSessionId,
         createdAt: new Date().toISOString(),
       },
       rc.env,
