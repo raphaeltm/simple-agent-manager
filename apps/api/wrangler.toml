@@ -55,8 +55,9 @@ MAX_TRIGGERS_PER_PROJECT = "10"
 CRON_MIN_INTERVAL_MINUTES = "15"
 CRON_TEMPLATE_MAX_LENGTH = "8000"
 TRIGGER_NAME_MAX_LENGTH = "100"
-# Cloudflare Sandbox SDK prototype (admin-only, kill switch — default disabled)
-# Set to "true" via Worker secret to enable on specific environments.
+# Cloudflare Container instant-session runtime.
+# Generated deployment envs default CF_CONTAINER_ENABLED to "true";
+# set it to "false" via GitHub environment variable or Worker var to force VM runtime.
 # CF_CONTAINER_ENABLED = "false"
 # CF_CONTAINER_PORT_READY_TIMEOUT_MS = "180000"
 # Trial Onboarding (zero-friction URL-to-workspace)

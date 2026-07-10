@@ -76,7 +76,11 @@ function generateSetupToken(): string {
   return randomBytes(SETUP_TOKEN_BYTES).toString('base64url');
 }
 
-function cloudflareWorkerVariablesUrl(accountId: string, workerName: string, environment: string): string {
+function cloudflareWorkerVariablesUrl(
+  accountId: string,
+  workerName: string,
+  environment: string
+): string {
   return `https://dash.cloudflare.com/${accountId}/workers/services/view/${workerName}/${environment}/settings/variables`;
 }
 
@@ -323,6 +327,7 @@ function getApiWorkerVars(
   includeArtifactsBinding: boolean
 ): Record<string, string> {
   return {
+    CF_CONTAINER_ENABLED: 'true',
     ...(topLevel.vars || {}),
     BASE_DOMAIN: outputs.stackSummary.baseDomain,
     VERSION: DEPLOYMENT_CONFIG.version,

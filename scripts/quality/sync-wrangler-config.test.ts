@@ -85,6 +85,31 @@ describe('sync wrangler config', () => {
     });
   });
 
+  it('enables Cloudflare Container runtime by default and allows explicit opt-out', () => {
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+
+    expect(generateApiWorkerEnv({}, outputs, 'prod', false, false).vars).toMatchObject({
+      CF_CONTAINER_ENABLED: 'true',
+    });
+
+    expect(
+      generateApiWorkerEnv(
+        { vars: { CF_CONTAINER_ENABLED: 'false' } },
+        outputs,
+        'prod',
+        false,
+        false
+      ).vars
+    ).toMatchObject({
+      CF_CONTAINER_ENABLED: 'false',
+    });
+
+    vi.stubEnv('CF_CONTAINER_ENABLED', 'false');
+    expect(generateApiWorkerEnv({}, outputs, 'prod', false, false).vars).toMatchObject({
+      CF_CONTAINER_ENABLED: 'false',
+    });
+  });
+
   it('omits Artifacts binding and disables runtime flag when Artifacts is not enabled', () => {
     vi.stubEnv('RESOURCE_PREFIX', 's123abc');
 
@@ -121,7 +146,9 @@ describe('sync wrangler config', () => {
   it('includes SETUP_FORCE only when explicitly requested', () => {
     vi.stubEnv('RESOURCE_PREFIX', 's123abc');
 
-    expect(generateApiWorkerEnv({}, outputs, 'prod', false, false).vars).not.toHaveProperty('SETUP_FORCE');
+    expect(generateApiWorkerEnv({}, outputs, 'prod', false, false).vars).not.toHaveProperty(
+      'SETUP_FORCE'
+    );
 
     vi.stubEnv('SETUP_FORCE', 'true');
     expect(generateApiWorkerEnv({}, outputs, 'prod', false, false).vars).toMatchObject({

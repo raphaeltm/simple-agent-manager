@@ -10,32 +10,33 @@ user-invocable: false
 
 Uses `GH_*` prefix because GitHub Actions secret names cannot start with `GITHUB_*`.
 
-| Type     | Name                       | Required                                |
-| -------- | -------------------------- | --------------------------------------- |
-| Variable | `BASE_DOMAIN`              | Yes                                     |
-| Variable | `RESOURCE_PREFIX`          | No (default: `sam`)                     |
-| Variable | `PULUMI_STATE_BUCKET`      | No (default: `sam-pulumi-state`)        |
-| Secret   | `CF_API_TOKEN`             | Yes (requires Account → SSL and Certificates → Edit for Origin CA)  |
-| Secret   | `CF_ACCOUNT_ID`            | Yes                                     |
-| Secret   | `CF_ZONE_ID`               | Yes                                     |
-| Secret   | `DEVCONTAINER_CACHE_CLOUDFLARE_API_TOKEN` | No (falls back to `CF_API_TOKEN`)       |
-| Secret   | `DEVCONTAINER_CACHE_CLOUDFLARE_ACCOUNT_ID` | No (falls back to `CF_ACCOUNT_ID`)      |
-| Secret   | `R2_ACCESS_KEY_ID`         | Yes                                     |
-| Secret   | `R2_SECRET_ACCESS_KEY`     | Yes                                     |
-| Secret   | `PULUMI_CONFIG_PASSPHRASE` | Yes                                     |
-| Secret   | `GH_CLIENT_ID`             | Yes                                     |
-| Secret   | `GH_CLIENT_SECRET`         | Yes                                     |
-| Secret   | `GH_APP_ID`                | Yes                                     |
-| Secret   | `GH_APP_PRIVATE_KEY`       | Yes                                     |
-| Secret   | `GH_APP_SLUG`              | Yes                                     |
-| Secret   | `GH_WEBHOOK_SECRET`        | Yes when GitHub App webhooks are active |
-| Secret   | `ENCRYPTION_KEY`           | No (auto-generated)                     |
-| Secret   | `JWT_PRIVATE_KEY`          | No (auto-generated)                     |
-| Secret   | `JWT_PUBLIC_KEY`           | No (auto-generated)                     |
-| Secret   | `DEPLOY_SIGNING_PRIVATE_KEY` | No (auto-generated; override only)    |
-| Secret   | `DEPLOY_SIGNING_PUBLIC_KEY`  | No (derived during deploy; override only) |
-| Secret   | `TRIAL_CLAIM_TOKEN_SECRET` | No (auto-generated)                     |
-| Variable | `ORIGIN_CA_CERT_VALIDITY_DAYS` | No (default: 7)                    |
+| Type     | Name                                       | Required                                                           |
+| -------- | ------------------------------------------ | ------------------------------------------------------------------ |
+| Variable | `BASE_DOMAIN`                              | Yes                                                                |
+| Variable | `RESOURCE_PREFIX`                          | No (default: `sam`)                                                |
+| Variable | `PULUMI_STATE_BUCKET`                      | No (default: `sam-pulumi-state`)                                   |
+| Variable | `CF_CONTAINER_ENABLED`                     | No (default: `true`; set `false` to force VM runtime)              |
+| Secret   | `CF_API_TOKEN`                             | Yes (requires Account → SSL and Certificates → Edit for Origin CA) |
+| Secret   | `CF_ACCOUNT_ID`                            | Yes                                                                |
+| Secret   | `CF_ZONE_ID`                               | Yes                                                                |
+| Secret   | `DEVCONTAINER_CACHE_CLOUDFLARE_API_TOKEN`  | No (falls back to `CF_API_TOKEN`)                                  |
+| Secret   | `DEVCONTAINER_CACHE_CLOUDFLARE_ACCOUNT_ID` | No (falls back to `CF_ACCOUNT_ID`)                                 |
+| Secret   | `R2_ACCESS_KEY_ID`                         | Yes                                                                |
+| Secret   | `R2_SECRET_ACCESS_KEY`                     | Yes                                                                |
+| Secret   | `PULUMI_CONFIG_PASSPHRASE`                 | Yes                                                                |
+| Secret   | `GH_CLIENT_ID`                             | Yes                                                                |
+| Secret   | `GH_CLIENT_SECRET`                         | Yes                                                                |
+| Secret   | `GH_APP_ID`                                | Yes                                                                |
+| Secret   | `GH_APP_PRIVATE_KEY`                       | Yes                                                                |
+| Secret   | `GH_APP_SLUG`                              | Yes                                                                |
+| Secret   | `GH_WEBHOOK_SECRET`                        | Yes when GitHub App webhooks are active                            |
+| Secret   | `ENCRYPTION_KEY`                           | No (auto-generated)                                                |
+| Secret   | `JWT_PRIVATE_KEY`                          | No (auto-generated)                                                |
+| Secret   | `JWT_PUBLIC_KEY`                           | No (auto-generated)                                                |
+| Secret   | `DEPLOY_SIGNING_PRIVATE_KEY`               | No (auto-generated; override only)                                 |
+| Secret   | `DEPLOY_SIGNING_PUBLIC_KEY`                | No (derived during deploy; override only)                          |
+| Secret   | `TRIAL_CLAIM_TOKEN_SECRET`                 | No (auto-generated)                                                |
+| Variable | `ORIGIN_CA_CERT_VALIDITY_DAYS`             | No (default: 7)                                                    |
 
 `ORIGIN_CA_CERT` and `ORIGIN_CA_KEY` are legacy rotation inputs for nodes provisioned before per-node Origin CA CSR signing. They are not required for new node provisioning.
 
@@ -61,6 +62,11 @@ See `apps/api/.env.example` for the full list. Key variables:
 
 - `WRANGLER_PORT` — Local dev port (default: 8787)
 - `BASE_DOMAIN` — Set automatically by sync scripts
+- `CF_CONTAINER_ENABLED` — Enables Cloudflare Container instant-session runtime in generated deployment envs (default: `true`; set `false` to force VM runtime)
+- `CF_CONTAINER_SLEEP_AFTER` — Container idle sleep duration for instant-session runtime (default: `10m`)
+- `CF_CONTAINER_VM_AGENT_PORT` — vm-agent standalone HTTP port inside the raw container (default: `8080`)
+- `CF_CONTAINER_PORT_READY_TIMEOUT_MS` — Max wait for vm-agent port readiness (default: `30000`)
+- `CF_CONTAINER_WORKSPACE_BASE_DIR` — Base checkout directory inside raw containers (default: `/workspaces`)
 
 ### Devcontainer Cache
 

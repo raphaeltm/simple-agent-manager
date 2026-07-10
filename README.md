@@ -97,7 +97,7 @@ SAM deploys automatically via GitHub Actions. Fork, configure, push. For the com
 
 ### Prerequisites
 
-- A [Cloudflare account](https://dash.cloudflare.com/sign-up) (Workers Paid plan, $5/mo)
+- A [Cloudflare account](https://dash.cloudflare.com/sign-up) (Workers Paid plan, $5/mo) with a token that includes Containers permission
 - A domain with nameservers pointing to Cloudflare
 - A [GitHub App](https://simple-agent-manager.org/docs/guides/self-hosting/#github-setup) for OAuth + repo access
 
@@ -105,7 +105,7 @@ SAM deploys automatically via GitHub Actions. Fork, configure, push. For the com
 
 1. **Fork this repository**
 2. **Create a GitHub Environment** named `production` in your fork's Settings > Environments
-3. **Add the required secrets** (Cloudflare API token, GitHub App credentials, etc. — see the [Self-Hosting Guide](https://simple-agent-manager.org/docs/guides/self-hosting/) for the full list)
+3. **Add the required secrets** (Cloudflare API token with `Containers: Edit`, GitHub App credentials, etc. — see the [Self-Hosting Guide](https://simple-agent-manager.org/docs/guides/self-hosting/) for the full list)
 4. **Push to `main`** — GitHub Actions provisions all infrastructure, deploys the API + UI, runs migrations, and verifies health
 
 Your instance is live at `app.{your-domain}`. Users sign in with GitHub and provide their own cloud provider API token (Hetzner, Scaleway, or GCP) to create workspaces.
