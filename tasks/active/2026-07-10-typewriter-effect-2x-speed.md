@@ -31,8 +31,8 @@ slow. The user wants it twice as fast.
 
 ## Implementation checklist
 
-- [ ] `TypewriterText.tsx`: change default `charDelayMs = 20` → `10` and update JSDoc.
-- [ ] `useStreamingReveal.ts`: change default `charDelayMs = 20` → `10` and update JSDoc.
+- [x] `TypewriterText.tsx`: change default `charDelayMs = 20` → `10` and update JSDoc.
+- [x] `useStreamingReveal.ts`: change default `charDelayMs = 20` → `10` and update JSDoc.
 - [ ] Run `pnpm --filter @simple-agent-manager/acp-client typecheck` / lint / test / build.
 
 ## Acceptance criteria

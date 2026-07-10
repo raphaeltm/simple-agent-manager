@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { usePrefersReducedMotion } from './usePrefersReducedMotion';
 
 export interface UseStreamingRevealOptions {
-  /** Milliseconds per character reveal. Default: 20. */
+  /** Milliseconds per character reveal. Default: 10. */
   charDelayMs?: number;
 }
 
@@ -21,7 +21,7 @@ export function useStreamingReveal(
   animated: boolean,
   options: UseStreamingRevealOptions = {}
 ): { revealedText: string; isRevealing: boolean } {
-  const { charDelayMs = 20 } = options;
+  const { charDelayMs = 10 } = options;
 
   const [revealIndex, setRevealIndex] = useState(animated ? 0 : fullText.length);
   const rafIdRef = useRef(0);
