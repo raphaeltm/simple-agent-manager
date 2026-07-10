@@ -113,6 +113,7 @@ describe('cf-container runtime spike contracts', () => {
     expect(nodeAgent).toContain("reason: 'start_agent_session'");
     expect(nodeAgent).toContain("reason: 'send_prompt'");
     expect(nodeAgent).toContain("markVmAgentContainerActiveWorkEndedBestEffort(env, nodeId, 'cancel_agent_session')");
+    expect(nodeAgent).toContain("markVmAgentContainerActiveWorkEndedBestEffort(env, nodeId, 'cancel_agent_session_no_prompt')");
     expect(nodeAgent).toContain("markVmAgentContainerActiveWorkEndedBestEffort(env, nodeId, 'stop_agent_session')");
     expect(activityCallback).toContain("body.activity === 'idle' || body.activity === 'error'");
     expect(acpSessionsRoute).toContain("body.status === 'completed' || body.status === 'failed'");

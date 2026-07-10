@@ -545,6 +545,9 @@ export async function cancelAgentSessionOnNode(
     // Extract HTTP status from error message (format: "Node Agent request failed: 409 ...")
     const statusMatch = msg.match(/failed:\s*(\d{3})/);
     const status = statusMatch?.[1] ? parseInt(statusMatch[1], 10) : 500;
+    if (status === 409) {
+      await markVmAgentContainerActiveWorkEndedBestEffort(env, nodeId, 'cancel_agent_session_no_prompt');
+    }
     return { success: false, status };
   }
 }
