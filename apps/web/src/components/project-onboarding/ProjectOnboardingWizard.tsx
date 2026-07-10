@@ -97,14 +97,12 @@ export function ProjectOnboardingWizard({
     description: 'Default profile for project conversations',
     agentType: '',
     model: '',
-    useCustomGithubPolicy: false,
   });
   const [taskProfile, setTaskProfile] = useState<ProfileDraft>({
     name: 'Task profile',
     description: 'Default profile for project tasks',
     agentType: '',
     model: '',
-    useCustomGithubPolicy: false,
   });
   const [triggerForm, setTriggerForm] = useState({
     name: 'Daily project check-in',
