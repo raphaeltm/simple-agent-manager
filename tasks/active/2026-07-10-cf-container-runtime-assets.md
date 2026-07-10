@@ -27,11 +27,11 @@ This must be fixed without putting user runtime assets or secrets into Cloudflar
 
 ## Implementation Checklist
 
-- [ ] Add `agent_profile_id` and `skill_id` nullable columns to `agent_sessions` with schema/migration updates.
-- [ ] Extend `startSamAwareAgentSession()` input/insert/update paths to persist optional taskless runtime context, and wire `launchInstantSession()` to pass resolved `agentProfileId` and `skillId`.
-- [ ] Extract workspace runtime asset resolution into an API service that accepts `{ workspaceId, agentSessionId? }`, preserves project < profile < skill precedence, validates project/user ownership, falls back to task and workspace context, and fails closed on invalid session context.
-- [ ] Update `GET /api/workspaces/:id/runtime-assets` to use the service and optional `agentSessionId` query while preserving workspace-scoped callback auth and node-token rejection.
-- [ ] Add/adjust API tests for project-only assets, task profile/skill fallback, taskless agent-session context, invalid session context, secret metadata, node-token rejection, and instant launch not embedding asset values in container config.
+- [x] Add `agent_profile_id` and `skill_id` nullable columns to `agent_sessions` with schema/migration updates.
+- [x] Extend `startSamAwareAgentSession()` input/insert/update paths to persist optional taskless runtime context, and wire `launchInstantSession()` to pass resolved `agentProfileId` and `skillId`.
+- [x] Extract workspace runtime asset resolution into an API service that accepts `{ workspaceId, agentSessionId? }`, preserves project < profile < skill precedence, validates project/user ownership, falls back to task and workspace context, and fails closed on invalid session context.
+- [x] Update `GET /api/workspaces/:id/runtime-assets` to use the service and optional `agentSessionId` query while preserving workspace-scoped callback auth and node-token rejection.
+- [x] Add/adjust API tests for project-only assets, task profile/skill fallback, taskless agent-session context, invalid session context, secret metadata, node-token rejection, and instant launch not embedding asset values in container config.
 - [ ] Preserve `IsSecret` through Go runtime asset structs and bootstrap structs.
 - [ ] Add runtime-neutral or shared Go helpers for env key validation and standalone runtime file path normalization/application, including `~/...` behavior, traversal rejection, atomic writes where practical, `0600` for secret files, and safe errors/logs.
 - [ ] Add a per-session vm-agent runtime asset provider/fetcher that calls `/runtime-assets?agentSessionId=<sessionID>` with the workspace callback token outside `sessionHostMu`.

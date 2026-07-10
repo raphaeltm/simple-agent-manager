@@ -278,6 +278,8 @@ export async function launchInstantSession(
       chatSessionId,
       label: workspaceName,
       agentType: input.agentType,
+      agentProfileId: input.agentProfileId ?? null,
+      skillId: input.skillId ?? null,
       visibleInitialPrompt: input.initialPrompt,
       promptKind: 'conversation',
       overrides: input.overrides,

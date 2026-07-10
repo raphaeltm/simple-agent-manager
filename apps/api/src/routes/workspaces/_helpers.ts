@@ -1,4 +1,3 @@
-import type { WorkspaceRuntimeAssetsResponse } from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import type { Context } from 'hono';
@@ -11,14 +10,6 @@ import { expectJsonRecord } from '../../lib/runtime-validation';
 import { errors } from '../../middleware/error';
 import { signCallbackToken,verifyCallbackToken } from '../../services/jwt';
 import { createWorkspaceOnNode } from '../../services/node-agent';
-import {
-  getProfileRuntimeAssets,
-  getSkillRuntimeAssets,
-  mergeRuntimeAssetRows,
-  resolveRuntimeEnvRows,
-  resolveRuntimeFileRows,
-  type RuntimeAssetRows,
-} from '../../services/profile-runtime-assets';
 
 export const ACTIVE_WORKSPACE_STATUSES = new Set(['running', 'recovery'] as const);
 
@@ -140,138 +131,6 @@ export async function verifyWorkspaceCallbackAuth(
   }
 
   throw errors.forbidden('Insufficient token scope');
-}
-
-export async function getWorkspaceRuntimeAssets(
-  db: ReturnType<typeof drizzle<typeof schema>>,
-  workspaceId: string,
-  encryptionKey: string
-): Promise<WorkspaceRuntimeAssetsResponse> {
-  const workspaceRows = await db
-    .select({ id: schema.workspaces.id, userId: schema.workspaces.userId, projectId: schema.workspaces.projectId })
-    .from(schema.workspaces)
-    .where(eq(schema.workspaces.id, workspaceId))
-    .limit(1);
-
-  const workspace = workspaceRows[0];
-  if (!workspace) {
-    throw errors.notFound('Workspace');
-  }
-
-  if (!workspace.projectId) {
-    return {
-      workspaceId: workspace.id,
-      envVars: [],
-      files: [],
-    };
-  }
-
-  const [envRows, fileRows] = await Promise.all([
-    db
-      .select({
-        key: schema.projectRuntimeEnvVars.envKey,
-        storedValue: schema.projectRuntimeEnvVars.storedValue,
-        valueIv: schema.projectRuntimeEnvVars.valueIv,
-        isSecret: schema.projectRuntimeEnvVars.isSecret,
-      })
-      .from(schema.projectRuntimeEnvVars)
-      .where(
-        and(
-          eq(schema.projectRuntimeEnvVars.projectId, workspace.projectId),
-          eq(schema.projectRuntimeEnvVars.userId, workspace.userId)
-        )
-      ),
-    db
-      .select({
-        path: schema.projectRuntimeFiles.filePath,
-        storedContent: schema.projectRuntimeFiles.storedContent,
-        contentIv: schema.projectRuntimeFiles.contentIv,
-        isSecret: schema.projectRuntimeFiles.isSecret,
-      })
-      .from(schema.projectRuntimeFiles)
-      .where(
-        and(
-          eq(schema.projectRuntimeFiles.projectId, workspace.projectId),
-          eq(schema.projectRuntimeFiles.userId, workspace.userId)
-        )
-      ),
-  ]);
-
-  const projectAssets: RuntimeAssetRows = {
-    envVars: await resolveRuntimeEnvRows(envRows, encryptionKey),
-    files: await resolveRuntimeFileRows(fileRows, encryptionKey),
-  };
-
-  const taskRuntimeIds = await getWorkspaceTaskRuntimeIds(db, workspace.id, workspace.projectId, workspace.userId);
-  const profileAssets = taskRuntimeIds.profileId
-    ? await getProfileRuntimeAssets(db, taskRuntimeIds.profileId, workspace.userId, encryptionKey)
-    : { envVars: [], files: [] };
-  const skillAssets = taskRuntimeIds.skillId
-    ? await getSkillRuntimeAssets(db, taskRuntimeIds.skillId, workspace.userId, encryptionKey)
-    : { envVars: [], files: [] };
-  const mergedAssets = mergeRuntimeAssetRows(projectAssets, profileAssets, skillAssets);
-
-  return {
-    workspaceId: workspace.id,
-    envVars: mergedAssets.envVars,
-    files: mergedAssets.files,
-  };
-}
-
-async function getWorkspaceTaskRuntimeIds(
-  db: ReturnType<typeof drizzle<typeof schema>>,
-  workspaceId: string,
-  projectId: string,
-  userId: string
-): Promise<{ profileId: string | null; skillId: string | null }> {
-  const taskRows = await db
-    .select({ profileId: schema.tasks.agentProfileHint, skillId: schema.tasks.skillId })
-    .from(schema.tasks)
-    .where(
-      and(
-        eq(schema.tasks.workspaceId, workspaceId),
-        eq(schema.tasks.projectId, projectId),
-        eq(schema.tasks.userId, userId)
-      )
-    )
-    .limit(1);
-
-  const profileId = taskRows[0]?.profileId;
-  const skillId = taskRows[0]?.skillId;
-
-  const [profileRows, skillRows] = await Promise.all([
-    profileId
-      ? db
-        .select({ id: schema.agentProfiles.id })
-        .from(schema.agentProfiles)
-        .where(
-          and(
-            eq(schema.agentProfiles.id, profileId),
-            eq(schema.agentProfiles.projectId, projectId),
-            eq(schema.agentProfiles.userId, userId)
-          )
-        )
-        .limit(1)
-      : Promise.resolve([]),
-    skillId
-      ? db
-        .select({ id: schema.skills.id })
-        .from(schema.skills)
-        .where(
-          and(
-            eq(schema.skills.id, skillId),
-            eq(schema.skills.projectId, projectId),
-            eq(schema.skills.userId, userId)
-          )
-        )
-        .limit(1)
-      : Promise.resolve([]),
-  ]);
-
-  return {
-    profileId: profileRows[0]?.id ?? null,
-    skillId: skillRows[0]?.id ?? null,
-  };
 }
 
 export async function scheduleWorkspaceCreateOnNode(

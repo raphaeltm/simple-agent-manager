@@ -31,6 +31,8 @@ export interface SamAwareAgentStartInput {
   agentSessionId?: string | null;
   label: string | null;
   agentType: string;
+  agentProfileId?: string | null;
+  skillId?: string | null;
   visibleInitialPrompt: string;
   promptKind: McpInstructionContextType;
   taskContext?: {
@@ -82,6 +84,8 @@ async function ensureAgentSessionRow(
       .set({
         status: 'running',
         errorMessage: null,
+        agentProfileId: input.agentProfileId ?? undefined,
+        skillId: input.skillId ?? undefined,
         updatedAt: new Date().toISOString(),
       })
       .where(eq(schema.agentSessions.id, agentSessionId));
@@ -96,6 +100,8 @@ async function ensureAgentSessionRow(
     status: 'running',
     label: input.label,
     agentType: input.agentType,
+    agentProfileId: input.agentProfileId ?? null,
+    skillId: input.skillId ?? null,
     createdAt: now,
     updatedAt: now,
   });

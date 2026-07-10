@@ -126,6 +126,7 @@ describe('launchInstantSession', () => {
       displayMessage: 'clean prompt',
       agentType: 'claude-code',
       agentProfileId: 'profile-1',
+      skillId: 'skill-1',
       overrides: { model: 'claude-sonnet-4-5-20250929', effort: 'auto' },
     });
 
@@ -174,6 +175,8 @@ describe('launchInstantSession', () => {
       workspaceId: 'workspace-1',
       status: 'running',
       agentType: 'claude-code',
+      agentProfileId: 'profile-1',
+      skillId: 'skill-1',
     });
     expect(mocks.mcp.storeMcpToken).toHaveBeenCalledWith(
       expect.anything(),
@@ -232,6 +235,8 @@ describe('launchInstantSession', () => {
     );
     const launchConfig = mocks.container.launchVmAgentContainer.mock.calls[0][2];
     expect(JSON.stringify(launchConfig)).not.toContain('node-callback-token');
+    expect(JSON.stringify(launchConfig)).not.toContain('profile-1');
+    expect(JSON.stringify(launchConfig)).not.toContain('skill-1');
     expect(updates.at(-1)).toMatchObject({ dispatchedAt: expect.any(String) });
   });
 

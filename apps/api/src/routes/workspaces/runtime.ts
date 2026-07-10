@@ -50,7 +50,8 @@ import { extractScalewaySecretKey } from '../../services/provider-credentials';
 import { bridgeAgentActivity } from '../../services/trial/bridge';
 import { getDecryptedAgentKey, getDecryptedCredential } from '../credentials';
 import { assertRepositoryAccess } from '../projects/_helpers';
-import { getWorkspaceRuntimeAssets, safeParseJson, verifyWorkspaceCallbackAuth } from './_helpers';
+import { getWorkspaceRuntimeAssets } from '../../services/workspace-runtime-assets';
+import { safeParseJson, verifyWorkspaceCallbackAuth } from './_helpers';
 
 /** Agent types eligible for AI proxy credential fallback (module-scope for isolate reuse). */
 const PROXY_ELIGIBLE_AGENTS: ReadonlySet<string> = new Set(
@@ -1188,9 +1189,10 @@ runtimeRoutes.get('/:id/runtime-assets', async (c) => {
   const workspaceId = c.req.param('id');
   await verifyWorkspaceCallbackAuth(c, workspaceId);
   const db = drizzle(c.env.DATABASE, { schema });
+  const agentSessionId = c.req.query('agentSessionId')?.trim() || null;
   const assets = await getWorkspaceRuntimeAssets(
     db,
-    workspaceId,
+    { workspaceId, agentSessionId },
     getCredentialEncryptionKey(c.env)
   );
   return c.json(assets);
