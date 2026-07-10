@@ -1,6 +1,12 @@
 import { expect, type Page, test } from '@playwright/test';
 
-import { assertNoOverflow, makeMockUser, screenshot, seedTheme, setupAuditRoutes } from './audit-helpers';
+import {
+  assertNoOverflow,
+  makeMockUser,
+  screenshot,
+  seedTheme,
+  setupAuditRoutes,
+} from './audit-helpers';
 
 const MOCK_USER = makeMockUser({
   email: 'test@example.com',
@@ -10,7 +16,11 @@ const MOCK_USER = makeMockUser({
 });
 
 const INSTALLATIONS = [
-  { id: 'inst-1', accountName: 'a-fairly-long-github-organization-name-inc', accountType: 'Organization' },
+  {
+    id: 'inst-1',
+    accountName: 'a-fairly-long-github-organization-name-inc',
+    accountType: 'Organization',
+  },
   { id: 'inst-2', accountName: 'personal-account', accountType: 'User' },
 ];
 
@@ -35,7 +45,7 @@ const CREATED_PROJECT = {
 
 async function setupMocks(
   page: Page,
-  opts: { installations?: unknown[]; artifactsEnabled?: boolean } = {},
+  opts: { installations?: unknown[]; artifactsEnabled?: boolean } = {}
 ) {
   const { installations = INSTALLATIONS, artifactsEnabled = true } = opts;
   await setupAuditRoutes(page, (path, respond) => {
@@ -43,13 +53,17 @@ async function setupMocks(
     if (path.endsWith('/api/github/repositories')) {
       return respond(200, { repositories: [], failedInstallations: [] });
     }
-    if (path.endsWith('/api/config/artifacts-enabled')) return respond(200, { enabled: artifactsEnabled });
+    if (path.endsWith('/api/config/artifacts-enabled'))
+      return respond(200, { enabled: artifactsEnabled });
     if (path.endsWith('/api/agents')) return respond(200, { agents: AGENTS });
-    if (path.endsWith('/api/credentials')) return respond(200, [{ provider: 'hetzner', status: 'valid' }]);
+    if (path.endsWith('/api/credentials'))
+      return respond(200, [{ provider: 'hetzner', status: 'valid' }]);
     if (path.endsWith('/api/trial/status')) return respond(200, { available: false });
     // App-shell surfaces that load on every authed page.
-    if (path.endsWith('/api/projects')) return respond(200, { projects: [], total: 0, hasMore: false });
-    if (path.endsWith('/api/notifications')) return respond(200, { notifications: [], unreadCount: 0, hasMore: false });
+    if (path.endsWith('/api/projects'))
+      return respond(200, { projects: [], total: 0, hasMore: false });
+    if (path.endsWith('/api/notifications'))
+      return respond(200, { notifications: [], unreadCount: 0, hasMore: false });
     return undefined;
   });
   // Project creation (POST) — registered after the catch-all so it wins for /api/projects.
@@ -60,7 +74,9 @@ async function setupMocks(
     return route.fulfill({ status: 200, json: { projects: [], total: 0, hasMore: false } });
   });
   // Register auth last so it wins over the catch-all (last route registered wins).
-  await page.route('**/api/auth/get-session', (route) => route.fulfill({ status: 200, json: MOCK_USER }));
+  await page.route('**/api/auth/get-session', (route) =>
+    route.fulfill({ status: 200, json: MOCK_USER })
+  );
 }
 
 async function gotoWizard(page: Page) {
@@ -134,6 +150,11 @@ test.describe('Project onboarding wizard', () => {
     await expect(page.getByRole('heading', { name: /Schedule automation/ })).toBeVisible();
     await expect(nav.getByRole('button', { name: /Create trigger/ })).toBeVisible();
     await screenshot(page, 'onboarding-06-automation');
+    await assertNoOverflow(page);
+    await page.locator('.sam-main-content').evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+    });
+    await screenshot(page, 'onboarding-06-automation-lower');
     await assertNoOverflow(page);
   });
 
