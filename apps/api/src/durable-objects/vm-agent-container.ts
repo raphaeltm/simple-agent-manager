@@ -314,6 +314,8 @@ export class VmAgentContainer extends Container<Env> {
       return;
     }
 
+    await this.markActiveWorkEnded('container_idle_sleeping');
+
     const now = new Date().toISOString();
     const db = drizzle(this.env.DATABASE, { schema });
 
