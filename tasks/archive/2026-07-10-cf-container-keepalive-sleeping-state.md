@@ -26,7 +26,18 @@ The current `VmAgentContainer.onActivityExpired()` path is terminal: it records 
 - [x] Return a clear "container is asleep" response for sleeping containers while Phase 3 wake/rehydrate is deferred, with a code comment referencing idea `01KX4KSXEXQMP41KS34TW9EN01` Phase 3.
 - [x] Update cf-container runtime contract tests for keepalive start/end, raised default, non-terminal sleeping classification, and the temporary sleeping response.
 - [x] Run focused tests for the changed API runtime contracts, then the required quality suite.
-- [ ] Deploy to staging with coordination checks, start an instant cf-container session, run a long prompt past the old 10 minute window, and verify idle expiry no longer records an error.
+- [x] Deploy to staging with coordination checks, start an instant cf-container session, run a long prompt past the old 10 minute window, and verify idle expiry no longer records an error.
+
+## Staging Verification
+
+- Deployed branch `sam/implement-phases-1-2-japy3a` with deploy-staging run `29118210240`; confirmed it was the latest successful staging deploy before verification.
+- Created temporary cf-container profile `01KX6SXFKG5CHVQY33QNECY749` on staging project `01KTKXZ4ZZAT6MJFXRW1ZTQ7RB`, then started instant session `9ed3611f-257c-47e3-8fc2-3c7b592fd772`.
+- Started cf-container node `01KX6SXZ74CJVTZAJ0TYG17T0C`, workspace `01KX6SXZC0YJQ151B8SGHZR6ND`, and agent session `01KX6SYA37P35JKTXG313KQP8Z`.
+- After an 11 minute quiet interval with no direct session traffic, D1 showed node/workspace/agent session still `running`, node `healthy`, and all error fields `null`; the node heartbeat was current at `2026-07-10T20:19:38.685Z`.
+- Confirmed staging had no `CF_CONTAINER_SLEEP_AFTER` or `SANDBOX_SLEEP_AFTER` binding, so the deployed branch used the new `DEFAULT_CF_CONTAINER_SLEEP_AFTER = '1h'`.
+- Cancelled the prompt path, waited 65 minutes for real idle expiry, and verified D1 showed node/workspace/agent session all `sleeping`, all error fields `null`, and `updated_at = 2026-07-10T21:21:34.707Z`.
+- Verified a follow-up prompt against the sleeping session returned HTTP 409 with `The workspace container is asleep. Send a new message after wake/rehydrate support lands.`, not the previous terminal 410 response.
+- Deleted temporary profile `01KX6SXFKG5CHVQY33QNECY749` and test node `01KX6SXZ74CJVTZAJ0TYG17T0C` through the staging API.
 
 ## Acceptance Criteria
 
