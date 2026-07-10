@@ -5,6 +5,10 @@
  * and starting the agent with the initial prompt.
  */
 import { log } from '../../lib/logger';
+import {
+  buildAgentStartPromptPayload,
+  buildVisibleInitialPrompt,
+} from '../../services/agent-bootstrap-prompt';
 import { transitionToInProgress } from './state-machine';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
 
@@ -13,28 +17,20 @@ export function buildTaskAgentSessionLabel(taskTitle: string): string {
 }
 
 export function buildTaskInitialPrompt(state: TaskRunnerState): string {
-  const taskContent = state.config.taskDescription || state.config.taskTitle;
+  return buildAgentStartPromptPayload({
+    message: state.config.taskDescription || state.config.taskTitle,
+    attachments: state.config.attachments,
+    systemPromptAppend: state.config.systemPromptAppend,
+    contextType: 'task',
+  });
+}
 
-  let attachmentContext = '';
-  if (state.config.attachments?.length) {
-    const fileList = state.config.attachments
-      .map((a) => `- \`/workspaces/.private/${a.filename}\` (${a.size} bytes, ${a.contentType})`)
-      .join('\n');
-    attachmentContext =
-      `\n\n## Attached Files\n\nThe following files have been uploaded to the workspace:\n${fileList}\n` +
-      `\nThese files are available at the paths listed above. Read them to understand the task context.\n`;
-  }
-
-  const systemPromptSuffix = state.config.systemPromptAppend
-    ? `\n\n${state.config.systemPromptAppend}`
-    : '';
-
-  return (
-    `${taskContent}${attachmentContext}${systemPromptSuffix}\n\n---\n\n` +
-    `IMPORTANT: Before starting any work, you MUST call the \`get_instructions\` tool from the sam-mcp MCP server. ` +
-    `This provides your task context, project information, output branch name, and instructions for reporting progress. ` +
-    `Do not proceed until you have called this tool and read its response.`
-  );
+function buildVisibleTaskInitialPrompt(state: TaskRunnerState): string {
+  return buildVisibleInitialPrompt({
+    message: state.config.taskDescription || state.config.taskTitle,
+    attachments: state.config.attachments,
+    systemPromptAppend: state.config.systemPromptAppend,
+  });
 }
 
 export async function handleAgentSession(
@@ -64,176 +60,48 @@ export async function handleAgentSession(
     }
   }
 
-  if (!sessionId) {
-    const { ulid } = await import('../../lib/ulid');
-    const { createAgentSessionOnNode } = await import('../../services/node-agent');
-    const { drizzle } = await import('drizzle-orm/d1');
-    const schema = await import('../../db/schema');
-
-    const db = drizzle(rc.env.DATABASE, { schema });
-    sessionId = ulid();
-    const sessionLabel = buildTaskAgentSessionLabel(state.config.taskTitle);
-    const now = new Date().toISOString();
-
-    const agentType = state.config.agentType || rc.env.DEFAULT_TASK_AGENT_TYPE || 'opencode';
-
-    await db.insert(schema.agentSessions).values({
-      id: sessionId,
-      workspaceId: state.stepResults.workspaceId,
-      userId: state.userId,
-      status: 'running',
-      label: sessionLabel,
-      agentType,
-      createdAt: now,
-      updatedAt: now,
-    });
-
-    state.stepResults.agentSessionId = sessionId;
-    await rc.ctx.storage.put('state', state);
-
-    await createAgentSessionOnNode(
-      state.stepResults.nodeId,
-      state.stepResults.workspaceId,
-      sessionId,
-      sessionLabel,
-      rc.env,
-      state.userId,
-      state.stepResults.chatSessionId,
-      state.projectId,
-    );
-
-    // Create ACP session in ProjectData DO so the chat session can find its agentSessionId.
-    // Without this, the browser has no ACP session to connect to and shows "Agent offline".
-    if (state.stepResults.chatSessionId && state.projectId) {
-      const projectDataService = await import('../../services/project-data');
-      try {
-        // Use the D1 agent session ID as the ACP session ID so the browser
-        // passes the correct sessionId to the VM agent WebSocket endpoint.
-        const acpSession = await projectDataService.createAcpSession(
-          rc.env,
-          state.projectId,
-          state.stepResults.chatSessionId,
-          null, // initialPrompt — already sent to the VM agent directly
-          agentType,
-          null, // parentSessionId
-          0,    // forkDepth
-          sessionId, // use D1 agent session ID as ACP session ID
-        );
-        // Transition to assigned (links workspace + node)
-        await projectDataService.transitionAcpSession(
-          rc.env,
-          state.projectId,
-          acpSession.id,
-          'assigned',
-          {
-            actorType: 'system',
-            actorId: 'task-runner',
-            reason: 'Task runner assigned agent session to workspace',
-            workspaceId: state.stepResults.workspaceId,
-            nodeId: state.stepResults.nodeId,
-          },
-        );
-        // Transition to running (agent session created on node)
-        await projectDataService.transitionAcpSession(
-          rc.env,
-          state.projectId,
-          acpSession.id,
-          'running',
-          {
-            actorType: 'system',
-            actorId: 'task-runner',
-            reason: 'Agent session started on node',
-            acpSdkSessionId: sessionId,
-          },
-        );
-        log.info('task_runner_do.step.acp_session_created', {
-          taskId: state.taskId,
-          acpSessionId: acpSession.id,
-          chatSessionId: state.stepResults.chatSessionId,
-          projectId: state.projectId,
-        });
-      } catch (err) {
-        // ACP session creation failure is non-fatal for the task itself —
-        // the agent will still run, but the browser won't have live ACP connection.
-        log.error('task_runner_do.step.acp_session_create_failed', {
-          taskId: state.taskId,
-          chatSessionId: state.stepResults.chatSessionId,
-          projectId: state.projectId,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
-    }
-
-    log.info('task_runner_do.step.agent_session_created', {
-      taskId: state.taskId,
-      agentSessionId: sessionId,
-      workspaceId: state.stepResults.workspaceId,
-      nodeId: state.stepResults.nodeId,
-    });
-  }
-
-  // Step 2: Generate MCP token for agent platform awareness (skip if already created)
-  if (!state.stepResults.mcpToken) {
-    const { generateMcpToken, storeMcpToken } = await import('../../services/mcp-token');
-    const mcpToken = generateMcpToken();
-    await storeMcpToken(
-      rc.env.KV,
-      mcpToken,
-      {
-        taskId: state.taskId,
-        projectId: state.projectId,
-        userId: state.userId,
-        workspaceId: state.stepResults.workspaceId!,
-        createdAt: new Date().toISOString(),
-      },
-      rc.env,
-    );
-    state.stepResults.mcpToken = mcpToken;
-    await rc.ctx.storage.put('state', state);
-
-    log.info('task_runner_do.step.mcp_token_created', {
-      taskId: state.taskId,
-      projectId: state.projectId,
-    });
-  }
-
-  // Step 3: Start the agent with the initial prompt (skip if already started)
+  // Step 2: Start the SAM-aware agent session (skip if already started)
   // This two-step approach ensures that if create succeeds but start fails,
   // a retry will skip creation and retry only the start call.
   if (!state.stepResults.agentStarted) {
-    const { startAgentSessionOnNode } = await import('../../services/node-agent');
+    const { drizzle } = await import('drizzle-orm/d1');
+    const schema = await import('../../db/schema');
+    const { startSamAwareAgentSession } = await import('../../services/agent-session-bootstrap');
+    const db = drizzle(rc.env.DATABASE, { schema });
     const agentType = state.config.agentType || rc.env.DEFAULT_TASK_AGENT_TYPE || 'opencode';
-    const initialPrompt = buildTaskInitialPrompt(state);
-
-    // Construct MCP server URL for agent platform awareness
-    const mcpServerUrl = `https://api.${rc.env.BASE_DOMAIN}/mcp`;
-
-    await startAgentSessionOnNode(
-      state.stepResults.nodeId,
-      state.stepResults.workspaceId,
-      sessionId,
+    const result = await startSamAwareAgentSession(db, rc.env, {
+      nodeId: state.stepResults.nodeId,
+      workspaceId: state.stepResults.workspaceId,
+      projectId: state.projectId,
+      userId: state.userId,
+      chatSessionId: state.stepResults.chatSessionId,
+      agentSessionId: sessionId,
+      label: buildTaskAgentSessionLabel(state.config.taskTitle),
       agentType,
-      initialPrompt,
-      rc.env,
-      state.userId,
-      {
-        url: mcpServerUrl,
-        token: state.stepResults.mcpToken!,
+      visibleInitialPrompt: buildVisibleTaskInitialPrompt(state),
+      promptKind: 'task',
+      taskContext: {
+        taskId: state.taskId,
+        taskMode: state.config.taskMode,
+        outputBranch: state.config.outputBranch,
       },
-      {
+      overrides: {
         model: state.config.model,
         effort: state.config.effort,
         permissionMode: state.config.permissionMode,
         opencodeProvider: state.config.opencodeProvider,
         opencodeBaseUrl: state.config.opencodeBaseUrl,
       },
-      {
-        projectId: state.projectId,
-        taskId: state.taskId,
-        taskMode: state.config.taskMode,
+      existingMcpToken: state.stepResults.mcpToken,
+      actor: {
+        type: 'system',
+        id: 'task-runner',
+        reasonPrefix: 'Task runner agent session',
       },
-    );
+    });
 
+    state.stepResults.agentSessionId = result.agentSessionId;
+    state.stepResults.mcpToken = result.mcpToken;
     state.stepResults.agentStarted = true;
     await rc.ctx.storage.put('state', state);
 

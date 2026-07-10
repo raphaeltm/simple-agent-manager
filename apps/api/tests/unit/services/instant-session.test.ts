@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   projectData: {
     createAcpSession: vi.fn(),
     createSession: vi.fn(),
+    getAcpSession: vi.fn(),
     persistMessage: vi.fn(),
     transitionAcpSession: vi.fn(),
   },
@@ -64,6 +65,13 @@ function makeDb() {
           return { where: vi.fn().mockResolvedValue(undefined) };
         }),
       })),
+      select: vi.fn(() => ({
+        from: vi.fn(() => ({
+          where: vi.fn(() => ({
+            limit: vi.fn().mockResolvedValue([]),
+          })),
+        })),
+      })),
     },
   };
 }
@@ -90,6 +98,7 @@ describe('launchInstantSession', () => {
     mocks.jwt.signCallbackToken.mockResolvedValue('workspace-callback-token');
     mocks.jwt.signNodeCallbackToken.mockResolvedValue('node-callback-token');
     mocks.mcp.generateMcpToken.mockReturnValue('mcp-token');
+    mocks.mcp.revokeMcpToken.mockResolvedValue(undefined);
     mocks.mcp.storeMcpToken.mockResolvedValue(undefined);
     mocks.nodeAgent.createAgentSessionOnNode.mockResolvedValue({});
     mocks.nodeAgent.createWorkspaceOnNode.mockResolvedValue({});
@@ -97,6 +106,7 @@ describe('launchInstantSession', () => {
     mocks.nodeAgent.waitForNodeAgentReady.mockResolvedValue(undefined);
     mocks.nodes.createNodeRecord.mockResolvedValue({ id: 'node-1' });
     mocks.projectData.createAcpSession.mockResolvedValue({ id: 'agent-session-1' });
+    mocks.projectData.getAcpSession.mockResolvedValue(null);
     mocks.projectData.createSession.mockResolvedValue('chat-session-1');
     mocks.projectData.persistMessage.mockResolvedValue(undefined);
     mocks.projectData.transitionAcpSession.mockResolvedValue({});
@@ -165,6 +175,20 @@ describe('launchInstantSession', () => {
       status: 'running',
       agentType: 'claude-code',
     });
+    expect(mocks.mcp.storeMcpToken).toHaveBeenCalledWith(
+      expect.anything(),
+      'mcp-token',
+      expect.objectContaining({
+        taskId: '',
+        contextType: 'conversation',
+        taskMode: 'conversation',
+        projectId: 'project-1',
+        workspaceId: 'workspace-1',
+        chatSessionId: 'chat-session-1',
+        agentSessionId: 'agent-session-1',
+      }),
+      expect.anything()
+    );
     expect(mocks.projectData.createAcpSession).toHaveBeenCalledWith(
       expect.anything(),
       'project-1',
@@ -180,11 +204,15 @@ describe('launchInstantSession', () => {
       'workspace-1',
       'agent-session-1',
       'claude-code',
-      'enriched prompt',
+      expect.stringContaining('enriched prompt'),
       expect.anything(),
       'user-1',
       { url: 'https://api.example.com/mcp', token: 'mcp-token' },
-      { model: 'claude-sonnet-4-5-20250929', effort: 'auto' }
+      { model: 'claude-sonnet-4-5-20250929', effort: 'auto' },
+      undefined
+    );
+    expect(mocks.nodeAgent.startAgentSessionOnNode.mock.calls[0][4]).toContain(
+      'MUST call the `get_instructions` tool'
     );
     expect(mocks.container.launchVmAgentContainer).toHaveBeenCalledWith(
       expect.anything(),

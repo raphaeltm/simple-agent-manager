@@ -7,13 +7,11 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
+import { startSamAwareAgentSession } from './agent-session-bootstrap';
 import { signCallbackToken, signNodeCallbackToken } from './jwt';
-import { generateMcpToken, revokeMcpToken, storeMcpToken } from './mcp-token';
 import {
   type AgentSessionOverrides,
-  createAgentSessionOnNode,
   createWorkspaceOnNode,
-  startAgentSessionOnNode,
   waitForNodeAgentReady,
 } from './node-agent';
 import { createNodeRecord } from './nodes';
@@ -270,118 +268,35 @@ export async function launchInstantSession(
     );
     const workspaceCreateDurationMs = Date.now() - workspaceCreateStart;
 
-    const agentSessionId = ulid();
     const acpSessionCreateStart = Date.now();
-    await db.insert(schema.agentSessions).values({
-      id: agentSessionId,
+    const phaseDurations = new Map<string, number>();
+    const bootstrapResult = await startSamAwareAgentSession(db, env, {
+      nodeId: node.id,
       workspaceId,
+      projectId: input.project.id,
       userId: input.userId,
-      status: 'running',
+      chatSessionId,
       label: workspaceName,
       agentType: input.agentType,
-      createdAt: now,
-      updatedAt: now,
+      visibleInitialPrompt: input.initialPrompt,
+      promptKind: 'conversation',
+      overrides: input.overrides,
+      actor: {
+        type: 'system',
+        id: input.userId,
+        reasonPrefix: 'CF container instant session',
+      },
+      runPhase: async (name, fn) => {
+        const phaseStart = Date.now();
+        const result = await runContainerPhase(name, phaseDetail, fn);
+        phaseDurations.set(name, Date.now() - phaseStart);
+        return result;
+      },
     });
-
-    let mcpToken: string | null = null;
-    try {
-      const token = generateMcpToken();
-      mcpToken = token;
-      await storeMcpToken(
-        env.KV,
-        token,
-        {
-          taskId: '',
-          projectId: input.project.id,
-          userId: input.userId,
-          workspaceId,
-          chatSessionId,
-          agentSessionId,
-          createdAt: new Date().toISOString(),
-        },
-        env
-      );
-
-      await runContainerPhase('create_vm_agent_session', phaseDetail, () =>
-        createAgentSessionOnNode(
-          node.id,
-          workspaceId,
-          agentSessionId,
-          workspaceName,
-          env,
-          input.userId,
-          chatSessionId,
-          input.project.id,
-          {
-            url: `https://api.${env.BASE_DOMAIN}/mcp`,
-            token,
-          }
-        )
-      );
-    } catch (err) {
-      if (mcpToken) {
-        await revokeMcpToken(env.KV, mcpToken).catch(() => {});
-      }
-      await db
-        .update(schema.agentSessions)
-        .set({
-          status: 'error',
-          errorMessage: err instanceof Error ? err.message : 'Failed to create agent session',
-          updatedAt: new Date().toISOString(),
-        })
-        .where(eq(schema.agentSessions.id, agentSessionId));
-      throw err;
-    }
-
-    const acpSession = await runContainerPhase('create_acp_session', phaseDetail, () =>
-      projectDataService.createAcpSession(
-        env,
-        input.project.id,
-        chatSessionId,
-        null,
-        input.agentType,
-        null,
-        0,
-        agentSessionId
-      )
-    );
-    await runContainerPhase('assign_acp_session', phaseDetail, () =>
-      projectDataService.transitionAcpSession(env, input.project.id, acpSession.id, 'assigned', {
-        actorType: 'system',
-        actorId: input.userId,
-        reason: 'CF container instant session assigned',
-        workspaceId,
-        nodeId: node.id,
-      })
-    );
     const acpSessionCreateDurationMs = Date.now() - acpSessionCreateStart;
-
-    const acpSessionStartStart = Date.now();
-    await runContainerPhase('start_acp_session', phaseDetail, () =>
-      startAgentSessionOnNode(
-        node.id,
-        workspaceId,
-        agentSessionId,
-        input.agentType,
-        input.initialPrompt,
-        env,
-        input.userId,
-        {
-          url: `https://api.${env.BASE_DOMAIN}/mcp`,
-          token: mcpToken,
-        },
-        input.overrides
-      )
-    );
-    await runContainerPhase('mark_acp_session_running', phaseDetail, () =>
-      projectDataService.transitionAcpSession(env, input.project.id, acpSession.id, 'running', {
-        actorType: 'system',
-        actorId: input.userId,
-        reason: 'CF container instant session started',
-        acpSdkSessionId: agentSessionId,
-      })
-    );
-    const acpSessionStartDurationMs = Date.now() - acpSessionStartStart;
+    const acpSessionStartDurationMs =
+      (phaseDurations.get('start_acp_session') ?? 0) +
+      (phaseDurations.get('mark_acp_session_running') ?? 0);
 
     await db
       .update(schema.workspaces)
@@ -393,8 +308,8 @@ export async function launchInstantSession(
       workspaceId,
       projectId: input.project.id,
       chatSessionId,
-      agentSessionId,
-      acpSessionId: acpSession.id,
+      agentSessionId: bootstrapResult.agentSessionId,
+      acpSessionId: bootstrapResult.acpSessionId ?? bootstrapResult.agentSessionId,
       agentType: input.agentType,
       containerId,
       processId: containerId,

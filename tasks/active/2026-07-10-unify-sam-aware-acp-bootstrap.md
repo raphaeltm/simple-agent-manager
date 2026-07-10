@@ -21,27 +21,27 @@ This means instant agents can start with tool access but without SAM knowledge d
 
 ## Implementation Checklist
 
-- [ ] Create `apps/api/src/services/agent-bootstrap-prompt.ts` with shared visible-prompt and SAM bootstrap prompt helpers.
-- [ ] Update TaskRunner prompt construction to use the shared prompt builder while preserving current combined prompt output.
-- [ ] Extend `McpTokenData` with optional `contextType: 'task' | 'conversation' | 'trial' | 'direct-workspace'` and optional `taskMode`, preserving legacy token compatibility.
-- [ ] Refactor `handleGetInstructions()` into context resolution plus payload building.
-- [ ] Implement `resolveInstructionContext()` for:
-  - [ ] task tokens with a real task row;
-  - [ ] conversation tokens resolved from `projectId`, `chatSessionId`, `workspaceId`, and `agentSessionId`;
-  - [ ] trial tokens without a task row;
-  - [ ] direct-workspace tokens without a task row;
-  - [ ] malformed taskless tokens that fail closed.
-- [ ] Ensure knowledge and policy directives are retrieved for both task-backed and taskless project contexts.
-- [ ] Make `handleUpdateTaskStatus()` graceful for taskless session contexts by recording a ProjectData activity/progress event where possible instead of returning `Task not found`.
-- [ ] Create `apps/api/src/services/agent-session-bootstrap.ts` with `SamAwareAgentStartInput`, `SamAwareAgentStartResult`, and `startSamAwareAgentSession()`.
-- [ ] Move shared D1 agent session row creation/reuse, MCP token mint/reuse/store, VM-agent session registration, ProjectData ACP creation/transitions, prompt building, and VM-agent start into the bootstrap service.
-- [ ] Update TaskRunner agent-session step to call `startSamAwareAgentSession()` using existing step-state IDs/tokens for retry idempotency.
-- [ ] Update `launchInstantSession()` to call `startSamAwareAgentSession()` after container launch, readiness, and lightweight workspace creation, preserving `runContainerPhase()` timing hooks.
-- [ ] Do not create fake task rows and do not move SAM instruction policy into vm-agent.
-- [ ] Add unit tests proving TaskRunner prompt output remains compatible.
-- [ ] Add behavioral tests for each instruction context branch and malformed taskless token failure.
-- [ ] Add taskless `update_task_status` tests.
-- [ ] Add a vertical-slice instant-session test proving the VM-agent start payload includes the shared bootstrap reminder and a taskless token can successfully call `get_instructions`.
+- [x] Create `apps/api/src/services/agent-bootstrap-prompt.ts` with shared visible-prompt and SAM bootstrap prompt helpers.
+- [x] Update TaskRunner prompt construction to use the shared prompt builder while preserving current combined prompt output.
+- [x] Extend `McpTokenData` with optional `contextType: 'task' | 'conversation' | 'trial' | 'direct-workspace'` and optional `taskMode`, preserving legacy token compatibility.
+- [x] Refactor `handleGetInstructions()` into context resolution plus payload building.
+- [x] Implement `resolveInstructionContext()` for:
+  - [x] task tokens with a real task row;
+  - [x] conversation tokens resolved from `projectId`, `chatSessionId`, `workspaceId`, and `agentSessionId`;
+  - [x] trial tokens without a task row;
+  - [x] direct-workspace tokens without a task row;
+  - [x] malformed taskless tokens that fail closed.
+- [x] Ensure knowledge and policy directives are retrieved for both task-backed and taskless project contexts.
+- [x] Make `handleUpdateTaskStatus()` graceful for taskless session contexts by recording a ProjectData activity/progress event where possible instead of returning `Task not found`.
+- [x] Create `apps/api/src/services/agent-session-bootstrap.ts` with `SamAwareAgentStartInput`, `SamAwareAgentStartResult`, and `startSamAwareAgentSession()`.
+- [x] Move shared D1 agent session row creation/reuse, MCP token mint/reuse/store, VM-agent session registration, ProjectData ACP creation/transitions, prompt building, and VM-agent start into the bootstrap service.
+- [x] Update TaskRunner agent-session step to call `startSamAwareAgentSession()` using existing step-state IDs/tokens for retry idempotency.
+- [x] Update `launchInstantSession()` to call `startSamAwareAgentSession()` after container launch, readiness, and lightweight workspace creation, preserving `runContainerPhase()` timing hooks.
+- [x] Do not create fake task rows and do not move SAM instruction policy into vm-agent.
+- [x] Add unit tests proving TaskRunner prompt output remains compatible.
+- [x] Add behavioral tests for each instruction context branch and malformed taskless token failure.
+- [x] Add taskless `update_task_status` tests.
+- [x] Add a vertical-slice instant-session test proving the VM-agent start payload includes the shared bootstrap reminder and a taskless token can successfully call `get_instructions`.
 
 ## Acceptance Criteria
 
