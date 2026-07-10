@@ -45,14 +45,46 @@ This means instant agents can start with tool access but without SAM knowledge d
 
 ## Acceptance Criteria
 
-- [ ] Instant `cf-container` sessions receive the same SAM bootstrap instruction contract as TaskRunner task sessions.
-- [ ] An instant session agent can call `get_instructions` successfully even with no task row.
-- [ ] TaskRunner task sessions preserve current behavior and retry idempotency.
-- [ ] Runtime provisioning remains separate from Worker/control-plane agent bootstrap policy.
-- [ ] Prompt strings are not copied across TaskRunner and instant-session paths.
-- [ ] `node-agent.ts` remains a transport client, not a SAM policy owner.
-- [ ] Automated tests cover task-backed and taskless context resolution, taskless status updates, and instant-session start payload behavior.
-- [ ] Staging verification starts a real instant `cf-container` session and confirms `get_instructions` succeeds with project knowledge/policies and no `Task not found`.
+- [x] Instant `cf-container` sessions receive the same SAM bootstrap instruction contract as TaskRunner task sessions.
+- [x] An instant session agent can call `get_instructions` successfully even with no task row.
+- [x] TaskRunner task sessions preserve current behavior and retry idempotency.
+- [x] Runtime provisioning remains separate from Worker/control-plane agent bootstrap policy.
+- [x] Prompt strings are not copied across TaskRunner and instant-session paths.
+- [x] `node-agent.ts` remains a transport client, not a SAM policy owner.
+- [x] Automated tests cover task-backed and taskless context resolution, taskless status updates, and instant-session start payload behavior.
+- [x] Staging verification starts a real instant `cf-container` session and confirms `get_instructions` succeeds with project knowledge/policies and no `Task not found`.
+
+## Validation Evidence
+
+- Local validation: `pnpm lint && pnpm typecheck && pnpm test && pnpm build` passed.
+- Targeted API validation: `pnpm --filter @simple-agent-manager/api test -- tests/unit/durable-objects/task-runner-agent-session.test.ts tests/unit/cf-container-runtime-contract.test.ts tests/unit/durable-objects/trial-orchestrator-agent-boot.test.ts tests/unit/routes/mcp-instruction-context.test.ts` passed.
+- Staging deploy coordination: waited for concurrent staging run `29116157441`, then redeployed this branch in run `29116784175`; deploy and smoke tests passed.
+- Pre-verification branch check: latest successful `deploy-staging.yml` run was `29116784175` for `sam/implement-sam-idea-01kx4hff2y66rw1v7tvv1ztp7x-zmesab`.
+- Live staging verification: started real instant `cf-container` session `151ac3ae-7e14-464f-8271-78b19b692f1d` in project `hono` with runtime `cf-container`; verifier observed marker `SAM_BOOTSTRAP_GET_INSTRUCTIONS_OK_1783710982052`, `hasTaskNotFound=false`, `hasKnowledgeEvidence=true`, and `hasPolicyEvidence=true`.
+- Evidence artifacts: `apps/web/.codex/tmp/staging-evidence/sam-bootstrap-151ac3ae-7e14-464f-8271-78b19b692f1d.json` and `.png` were generated locally and left ignored.
+
+## Task Completion Validation Report
+
+**Task**: `tasks/archive/2026-07-10-unify-sam-aware-acp-bootstrap.md`  
+**Branch**: `sam/implement-sam-idea-01kx4hff2y66rw1v7tvv1ztp7x-zmesab`  
+**Date**: 2026-07-10
+
+### Verdict: PASS
+
+| Check | Status | Issues |
+|-------|--------|--------|
+| A: Research -> Checklist | PASS | 0 findings without checklist items |
+| B: Checklist -> Diff | PASS | 0 checked items missing from diff |
+| C: Criteria -> Tests | PASS | 0 criteria without test or manual verification |
+| D: UI -> Backend | N/A | No UI input changes |
+| E: Multi-Resource | N/A | No provider/resource selection change |
+| F: Vertical Slice | PASS | Instant-session start payload and live staging flow verified |
+
+### Notes
+
+- The diff covers TaskRunner, instant-session, MCP token metadata, `get_instructions`, `update_task_status`, direct-workspace and trial token writers, shared prompt/bootstrap services, and focused tests.
+- Unit tests cover all resolver context branches and taskless status updates. Instant-session tests assert the shared bootstrap prompt and taskless MCP token context.
+- Live staging verification covers the full production-like path from API session start through cf-container runtime, ACP/agent session bootstrap, taskless MCP `get_instructions`, and project knowledge/policy response.
 
 ## References
 
