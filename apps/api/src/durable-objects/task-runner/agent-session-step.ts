@@ -93,6 +93,14 @@ export async function handleAgentSession(
         opencodeBaseUrl: state.config.opencodeBaseUrl,
       },
       existingMcpToken: state.stepResults.mcpToken,
+      onAgentSessionId: async (agentSessionId) => {
+        state.stepResults.agentSessionId = agentSessionId;
+        await rc.ctx.storage.put('state', state);
+      },
+      onMcpToken: async (mcpToken) => {
+        state.stepResults.mcpToken = mcpToken;
+        await rc.ctx.storage.put('state', state);
+      },
       actor: {
         type: 'system',
         id: 'task-runner',

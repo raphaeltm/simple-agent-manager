@@ -40,6 +40,8 @@ export interface SamAwareAgentStartInput {
   } | null;
   overrides?: AgentSessionOverrides;
   existingMcpToken?: string | null;
+  onAgentSessionId?: (agentSessionId: string) => Promise<void>;
+  onMcpToken?: (mcpToken: string) => Promise<void>;
   actor: {
     type: 'system' | 'user';
     id: string | null;
@@ -74,7 +76,17 @@ async function ensureAgentSessionRow(
     .where(eq(schema.agentSessions.id, agentSessionId))
     .limit(1);
 
-  if (existing[0]) return;
+  if (existing[0]) {
+    await db
+      .update(schema.agentSessions)
+      .set({
+        status: 'running',
+        errorMessage: null,
+        updatedAt: new Date().toISOString(),
+      })
+      .where(eq(schema.agentSessions.id, agentSessionId));
+    return;
+  }
 
   const now = new Date().toISOString();
   await db.insert(schema.agentSessions).values({
@@ -102,6 +114,7 @@ export async function startSamAwareAgentSession(
     await runMaybePhased(input, 'create_agent_session_row', () =>
       ensureAgentSessionRow(db, input, agentSessionId)
     );
+    await input.onAgentSessionId?.(agentSessionId);
 
     if (generatedMcpToken) {
       await runMaybePhased(input, 'store_mcp_token', () =>
@@ -122,6 +135,7 @@ export async function startSamAwareAgentSession(
           env
         )
       );
+      await input.onMcpToken?.(mcpToken);
     }
 
     await runMaybePhased(input, 'create_vm_agent_session', () =>
