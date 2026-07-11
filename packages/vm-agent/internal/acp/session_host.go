@@ -277,6 +277,7 @@ type SessionHost struct {
 	crashRecoveryInProgress bool
 	crashStderr             string
 	crashAgentType          string
+	crashSessionID          string
 	crashPromptReqID        json.RawMessage
 	crashPromptViewerID     string
 

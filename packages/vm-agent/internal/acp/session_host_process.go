@@ -99,6 +99,9 @@ func (h *SessionHost) monitorProcessExit(ctx context.Context, process agentProce
 	loadSessionID := ""
 	if intentionalPromptCancel || crashRecovery.inProgress {
 		loadSessionID = previousAcpSessionID
+		if loadSessionID == "" {
+			loadSessionID = crashRecovery.sessionID
+		}
 	}
 	if !h.restartAgentLocked(ctx, agentType, cred, settings, loadSessionID, crashRecovery, recoveryNotify) {
 		return

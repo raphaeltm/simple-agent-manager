@@ -994,6 +994,42 @@ func TestSessionHost_FinishPromptWithPeerDisconnectBeginsCrashRecovery(t *testin
 	}
 }
 
+func TestSessionHost_FinishPromptWithPeerDisconnectUsesPromptStartPrerequisitesAfterLiveStateClears(t *testing.T) {
+	t.Parallel()
+
+	host := newTestSessionHost(t)
+	defer host.Stop()
+	host.mu.Lock()
+	host.agentType = "openai-codex"
+	host.sessionID = "acp-session-before-disconnect"
+	host.agentSupportsLoadSession = true
+	host.mu.Unlock()
+
+	captured := host.captureCrashRecoveryPrerequisites()
+	host.mu.Lock()
+	host.clearCurrentAgentSessionLocked()
+	host.mu.Unlock()
+
+	host.finishPromptWithError(
+		context.Background(),
+		json.RawMessage(`"req-race"`),
+		promptStartInfo{startedAt: time.Now(), viewerID: "viewer-1", recovery: captured},
+		errors.New(`{"code":-32603,"message":"Internal error","data":{"error":"peer disconnected before response"}}`),
+	)
+
+	host.mu.RLock()
+	defer host.mu.RUnlock()
+	if !host.crashRecoveryInProgress {
+		t.Fatal("crashRecoveryInProgress = false after live prerequisites cleared, want true")
+	}
+	if host.crashSessionID != "acp-session-before-disconnect" {
+		t.Fatalf("crashSessionID = %q, want prompt-start session ID", host.crashSessionID)
+	}
+	if host.crashAgentType != "openai-codex" {
+		t.Fatalf("crashAgentType = %q, want openai-codex", host.crashAgentType)
+	}
+}
+
 func TestSessionHost_FinishPromptWithUnrecoverablePeerDisconnectReportsActionableFailure(t *testing.T) {
 	t.Parallel()
 
@@ -1048,6 +1084,9 @@ func TestSessionHost_FinishPromptWithUnrecoverablePeerDisconnectReportsActionabl
 			}
 			if strings.Contains(report.Stderr, "sk-secret1234567890") {
 				t.Fatalf("crash report leaked secret: %q", report.Stderr)
+			}
+			if report.RecoveryError != "LoadSession recovery is unavailable; missing prerequisites: loadSessionCapability" {
+				t.Fatalf("recoveryError = %q, want missing LoadSession capability diagnostic", report.RecoveryError)
 			}
 		}
 
