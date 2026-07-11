@@ -134,7 +134,10 @@ describe('Workspaces page', () => {
     });
   });
 
-  it('shows error message on API failure', async () => {
+  it('surfaces load error instead of empty state when initial load fails', async () => {
+    // Regression: a failed initial load left isLoading=false with no data, so the
+    // render gate fell through to the "No workspaces yet" empty state — telling the
+    // user they have zero workspaces when the request actually errored.
     mocks.listWorkspaces.mockRejectedValue(new Error('Network error'));
 
     renderWithQuery(
@@ -143,11 +146,35 @@ describe('Workspaces page', () => {
       </MemoryRouter>
     );
 
-    // useQuery with retry:false will report error state;
-    // verify the page still renders without crashing
+    // The error message must appear...
+    expect(await screen.findByText('Network error')).toBeInTheDocument();
+    // ...and the misleading empty state must NOT.
+    expect(screen.queryByText('No workspaces yet')).not.toBeInTheDocument();
+  });
+
+  it('keeps stale data visible when a background refetch fails (does not show error)', async () => {
+    // First load succeeds with data.
+    mocks.listWorkspaces.mockResolvedValue([runningWorkspace]);
+
+    const { queryClient } = renderWithQuery(
+      <MemoryRouter>
+        <Workspaces />
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByText('My Workspace')).toBeInTheDocument();
+
+    // Next fetch (background refetch) fails.
+    mocks.listWorkspaces.mockRejectedValueOnce(new Error('Refetch boom'));
+    void queryClient.invalidateQueries({ queryKey: ['workspaces'] });
+
     await waitFor(() => {
-      expect(mocks.listWorkspaces).toHaveBeenCalled();
+      // The stale content stays mounted and the error is NOT surfaced,
+      // because data is present.
+      expect(screen.getByText('My Workspace')).toBeInTheDocument();
     });
+    expect(screen.queryByText('Refetch boom')).not.toBeInTheDocument();
+    expect(screen.queryByText('No workspaces yet')).not.toBeInTheDocument();
   });
 
   it('has page title', async () => {

@@ -30,6 +30,8 @@ export function Workspaces() {
     data: workspaces,
     isLoading,
     isFetching,
+    isError,
+    error: queryError,
   } = useQuery<WorkspaceResponse[]>({
     queryKey: workspacesKeys.list(statusFilter || undefined),
     queryFn: () => listWorkspaces(statusFilter || undefined),
@@ -102,6 +104,13 @@ export function Workspaces() {
             <SkeletonCard key={i} lines={2} />
           ))}
         </div>
+      ) : isError && sortedWorkspaces.length === 0 ? (
+        // Initial load failed with no cached data: surface the error instead of
+        // a misleading "No workspaces yet" empty state. A background refetch
+        // failure while stale data is present keeps the data mounted (below).
+        <Alert variant="error">
+          {queryError instanceof Error ? queryError.message : 'Failed to load workspaces'}
+        </Alert>
       ) : sortedWorkspaces.length === 0 ? (
         <EmptyState
           icon={<Monitor size={48} />}

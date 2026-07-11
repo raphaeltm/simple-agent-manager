@@ -35,6 +35,8 @@ export function Nodes() {
     data: nodes,
     isLoading: nodesLoading,
     isFetching: nodesFetching,
+    isError: nodesError,
+    error: nodesQueryError,
   } = useQuery<NodeResponse[]>({
     queryKey: nodesKeys.list(),
     queryFn: listNodes,
@@ -216,6 +218,13 @@ export function Nodes() {
             <SkeletonCard key={i} lines={3} />
           ))}
         </div>
+      ) : nodesError && sortedNodes.length === 0 ? (
+        // Initial load failed with no cached data: surface the error instead of
+        // a misleading "No nodes yet" empty state. A background refetch failure
+        // while stale data is present keeps the data mounted (below).
+        <Alert variant="error">
+          {nodesQueryError instanceof Error ? nodesQueryError.message : 'Failed to load nodes'}
+        </Alert>
       ) : sortedNodes.length === 0 ? (
         <EmptyState
           icon={<Server size={48} />}

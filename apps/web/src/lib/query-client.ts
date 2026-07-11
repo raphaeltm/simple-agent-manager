@@ -17,6 +17,10 @@ import { QueryClient } from '@tanstack/react-query';
  *  - `isFetching && data` means a background refetch is in progress; keep the
  *    stale content mounted and optionally show a subtle refresh indicator.
  *  - NEVER hide already-rendered content behind a spinner during a refetch.
+ *  - `isError && !data` means the initial load failed with nothing cached; show
+ *    an error, NOT an empty state — an "empty" list on a failed load is a lie.
+ *  - `isError && data` means a background refetch failed but stale data exists;
+ *    keep the stale content mounted (do not replace it with an error).
  */
 export const queryClient = new QueryClient({
   defaultOptions: {

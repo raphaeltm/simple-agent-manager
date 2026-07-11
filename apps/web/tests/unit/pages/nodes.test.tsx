@@ -109,6 +109,58 @@ describe('Nodes page', () => {
     expect(await screen.findByTestId('node-detail-page')).toBeInTheDocument();
   });
 
+  it('surfaces load error instead of empty state when initial load fails', async () => {
+    // Regression: a failed initial load left nodesLoading=false with no data, so
+    // the render gate fell through to the "No nodes yet" empty state — telling the
+    // user they have zero nodes when the request actually errored.
+    mocks.listNodes.mockRejectedValue(new Error('Nodes network error'));
+
+    renderWithQuery(
+      <MemoryRouter>
+        <Nodes />
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByText('Nodes network error')).toBeInTheDocument();
+    expect(screen.queryByText('No nodes yet')).not.toBeInTheDocument();
+  });
+
+  it('keeps stale nodes visible when a background refetch fails (does not show error)', async () => {
+    mocks.listNodes.mockResolvedValue([
+      {
+        id: 'node-1',
+        name: 'Persisted Node',
+        status: 'running',
+        healthStatus: 'healthy',
+        vmSize: 'medium',
+        vmLocation: 'nbg1',
+        ipAddress: '1.1.1.1',
+        lastHeartbeatAt: '2026-01-01T00:00:00.000Z',
+        heartbeatStaleAfterSeconds: 180,
+        errorMessage: null,
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      },
+    ]);
+
+    const { queryClient } = renderWithQuery(
+      <MemoryRouter>
+        <Nodes />
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByText('Persisted Node')).toBeInTheDocument();
+
+    mocks.listNodes.mockRejectedValueOnce(new Error('Nodes refetch boom'));
+    void queryClient.invalidateQueries({ queryKey: ['nodes'] });
+
+    await waitFor(() => {
+      expect(screen.getByText('Persisted Node')).toBeInTheDocument();
+    });
+    expect(screen.queryByText('Nodes refetch boom')).not.toBeInTheDocument();
+    expect(screen.queryByText('No nodes yet')).not.toBeInTheDocument();
+  });
+
   it('keeps stale node list visible during background refetch', async () => {
     // First load
     mocks.listNodes.mockResolvedValue([
