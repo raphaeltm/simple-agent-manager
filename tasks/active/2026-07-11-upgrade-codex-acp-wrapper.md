@@ -37,15 +37,15 @@ This is not an AI Gateway feature. Gateway mocks were useful only to prove ACP c
 
 ## Implementation Checklist
 
-- [ ] Update OpenAI Codex agent catalog install metadata in `packages/shared/src/agents.ts` from `@zed-industries/codex-acp` to `@agentclientprotocol/codex-acp`.
-- [ ] Update VM-agent OpenAI Codex install command strings in `packages/vm-agent/internal/acp/gateway.go` to install `@agentclientprotocol/codex-acp`.
-- [ ] Preserve the `codex-acp` command name and sandbox override behavior.
-- [ ] Preserve OAuth auth-file injection for `openai-codex` `oauth-token` credentials.
-- [ ] Preserve API-key env injection for `openai-codex` `api-key` credentials.
-- [ ] Update focused Go tests in `packages/vm-agent/internal/acp/gateway_test.go` to assert the new install command for both credential kinds.
-- [ ] Add or update TypeScript unit coverage for the shared agent catalog install command if existing coverage does not assert it.
-- [ ] Search for non-historical references to the old package and update only active runtime/test metadata, not archived specs/tasks unless they would mislead active behavior.
-- [ ] Run targeted local tests for shared agent metadata and VM-agent ACP command metadata.
+- [x] Update OpenAI Codex agent catalog install metadata in `packages/shared/src/agents.ts` from `@zed-industries/codex-acp` to `@agentclientprotocol/codex-acp`.
+- [x] Update VM-agent OpenAI Codex install command strings in `packages/vm-agent/internal/acp/gateway.go` to install `@agentclientprotocol/codex-acp`.
+- [x] Preserve the `codex-acp` command name and sandbox override behavior.
+- [x] Preserve OAuth auth-file injection for `openai-codex` `oauth-token` credentials.
+- [x] Preserve API-key env injection for `openai-codex` `api-key` credentials.
+- [x] Update focused Go tests in `packages/vm-agent/internal/acp/gateway_test.go` to assert the new install command for both credential kinds.
+- [x] Add or update TypeScript unit coverage for the shared agent catalog install command if existing coverage does not assert it.
+- [x] Search for non-historical references to the old package and update only active runtime/test metadata, not archived specs/tasks unless they would mislead active behavior.
+- [x] Run targeted local tests for shared agent metadata and VM-agent ACP command metadata.
 - [ ] Run broader validation required by `/do`.
 - [ ] Deploy the branch to staging.
 - [ ] Use Playwright staging auth with `SAM_PLAYWRIGHT_PRIMARY_USER` to start a primary user's project conversation with OpenAI Codex using a standard smaller/default model, then verify the agent responds.

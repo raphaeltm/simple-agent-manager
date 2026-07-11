@@ -883,6 +883,8 @@ type agentCommandInfo struct {
 	authFilePath  string // relative to home dir, e.g. ".codex/auth.json" (only when injectionMode == "auth-file")
 }
 
+const codexACPInstallCommand = "npm install -g @agentclientprotocol/codex-acp"
+
 // getAgentCommandInfo returns the ACP command, args, env var name, and install command for a given agent type.
 // These match the agent catalog defined in packages/shared/src/agents.ts.
 // The credentialKind parameter determines which environment variable to use for Claude Code.
@@ -908,13 +910,13 @@ func getAgentCommandInfo(agentType string, credentialKind string) agentCommandIn
 				command:       "codex-acp",
 				args:          codexSandboxArgs,
 				envVarName:    "",
-				installCmd:    "npm install -g @zed-industries/codex-acp",
+				installCmd:    codexACPInstallCommand,
 				isNpmBased:    true,
 				injectionMode: "auth-file",
 				authFilePath:  ".codex/auth.json",
 			}
 		}
-		return agentCommandInfo{"codex-acp", codexSandboxArgs, "OPENAI_API_KEY", "npm install -g @zed-industries/codex-acp", true, "", ""}
+		return agentCommandInfo{"codex-acp", codexSandboxArgs, "OPENAI_API_KEY", codexACPInstallCommand, true, "", ""}
 	case "google-gemini":
 		return agentCommandInfo{"gemini", []string{"--acp"}, "GEMINI_API_KEY", "npm install -g @google/gemini-cli", true, "", ""}
 	case "mistral-vibe":

@@ -50,7 +50,7 @@ func TestGetAgentCommandInfo_OAuthToken(t *testing.T) {
 			credentialKind:    "oauth-token",
 			wantCommand:       "codex-acp",
 			wantEnvVar:        "",
-			wantInstallCmd:    "npm install -g @zed-industries/codex-acp",
+			wantInstallCmd:    "npm install -g @agentclientprotocol/codex-acp",
 			wantInjectionMode: "auth-file",
 			wantAuthFilePath:  ".codex/auth.json",
 			wantArgs:          []string{"-c", `sandbox_mode="danger-full-access"`},
@@ -61,7 +61,7 @@ func TestGetAgentCommandInfo_OAuthToken(t *testing.T) {
 			credentialKind: "api-key",
 			wantCommand:    "codex-acp",
 			wantEnvVar:     "OPENAI_API_KEY",
-			wantInstallCmd: "npm install -g @zed-industries/codex-acp",
+			wantInstallCmd: "npm install -g @agentclientprotocol/codex-acp",
 			wantArgs:       []string{"-c", `sandbox_mode="danger-full-access"`},
 		},
 		{
@@ -274,7 +274,7 @@ func TestGetAgentCommandInfoOpenAICodex(t *testing.T) {
 	if info.envVarName != "OPENAI_API_KEY" {
 		t.Fatalf("envVarName=%q, want %q", info.envVarName, "OPENAI_API_KEY")
 	}
-	if info.installCmd != "npm install -g @zed-industries/codex-acp" {
+	if info.installCmd != "npm install -g @agentclientprotocol/codex-acp" {
 		t.Fatalf("installCmd=%q, unexpected", info.installCmd)
 	}
 	if info.injectionMode != "" {
@@ -300,6 +300,9 @@ func TestGetAgentCommandInfoOpenAICodexOAuth(t *testing.T) {
 	}
 	if info.envVarName != "" {
 		t.Fatalf("envVarName=%q, want empty for auth-file injection", info.envVarName)
+	}
+	if info.installCmd != "npm install -g @agentclientprotocol/codex-acp" {
+		t.Fatalf("installCmd=%q, unexpected", info.installCmd)
 	}
 	if len(info.args) != 2 || info.args[0] != "-c" || info.args[1] != `sandbox_mode="danger-full-access"` {
 		t.Fatalf("args=%v, want [-c sandbox_mode=\"danger-full-access\"]", info.args)
