@@ -16,7 +16,8 @@ const ChatMessageRowSchema = v.object({
   tool_metadata: v.nullable(v.string()),
   created_at: v.number(),
   sequence: v.nullable(v.number()),
-  // Added by migration 0NN; optional so rows/SELECTs without it still parse.
+  // Added by migration 024-chat-message-origin; optional so pre-migration rows
+  // and SELECTs that omit the column still parse (defaults to null → 'user').
   origin: v.optional(v.nullable(v.string())),
 });
 

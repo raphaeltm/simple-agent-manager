@@ -1284,7 +1284,9 @@ func (s *Server) startAgentWithPrompt(host *acp.SessionHost, workspaceID, sessio
 
 	// HandlePrompt blocks until the agent completes. The OnPromptComplete
 	// callback fires automatically, handling git push and task status updates.
-	host.HandlePrompt(ctx, syntheticReqID, promptParams, "server")
+	// trustedSource=true: this is the SAM-built initial task prompt, the only
+	// legitimate origin=system producer (the injected instructions block).
+	host.HandlePrompt(ctx, syntheticReqID, promptParams, "server", true)
 }
 
 // handleSendPrompt sends a follow-up prompt to a running agent session.
@@ -1358,7 +1360,9 @@ func (s *Server) handleSendPrompt(w http.ResponseWriter, r *http.Request) {
 	})
 
 	// Dispatch asynchronously — HandlePrompt blocks until the agent completes.
-	go host.HandlePrompt(context.Background(), syntheticReqID, promptParams, "control-plane")
+	// trustedSource=false: a follow-up carries the user's own message text and
+	// must not be able to mark itself origin=system.
+	go host.HandlePrompt(context.Background(), syntheticReqID, promptParams, "control-plane", false)
 
 	writeJSON(w, http.StatusAccepted, map[string]interface{}{
 		"status":    "prompting",

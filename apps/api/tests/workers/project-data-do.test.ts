@@ -631,6 +631,40 @@ describe('ProjectData Durable Object', () => {
       expect(session!.topic).toBe('Deploy my app to staging');
     });
 
+    it('does not auto-capture topic from a SAM-injected (origin=system) user message', async () => {
+      const stub = getStub('project-batch-topic-system-excluded');
+      const sessionId = await stub.createSession(null, null);
+
+      // A batch whose only user message is system-injected must NOT set the topic —
+      // the injected get_instructions reminder is not the user's conversation subject.
+      await stub.persistMessageBatch(sessionId, [
+        {
+          messageId: crypto.randomUUID(),
+          role: 'user',
+          content: 'IMPORTANT: you MUST call get_instructions before starting',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+          origin: 'system',
+        },
+      ]);
+
+      const session = await stub.getSession(sessionId);
+      expect(session!.topic ?? null).toBeNull();
+
+      // A subsequent real user message DOES set the topic.
+      await stub.persistMessageBatch(sessionId, [
+        {
+          messageId: crypto.randomUUID(),
+          role: 'user',
+          content: 'Refactor the auth module',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
+      ]);
+      const after = await stub.getSession(sessionId);
+      expect(after!.topic).toBe('Refactor the auth module');
+    });
+
     it('does not overwrite existing topic', async () => {
       const stub = getStub('project-batch-keep-topic');
       const sessionId = await stub.createSession(null, 'Existing topic');

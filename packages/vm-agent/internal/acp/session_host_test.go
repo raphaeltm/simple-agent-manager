@@ -2148,7 +2148,7 @@ func TestHandlePrompt_InjectsSyntheticUserMessage(t *testing.T) {
 	reqID, _ := json.Marshal(42)
 
 	// HandlePrompt is blocking but will return quickly because Prompt() fails.
-	host.HandlePrompt(context.Background(), reqID, promptParams, "viewer-1")
+	host.HandlePrompt(context.Background(), reqID, promptParams, "viewer-1", false)
 
 	// Verify: the replay buffer should contain the synthetic user_message_chunk.
 	host.bufMu.RLock()
@@ -2213,6 +2213,66 @@ func TestHandlePrompt_InjectsSyntheticUserMessage(t *testing.T) {
 	}
 }
 
+// A browser viewer prompt (trustedSource=false) must NOT be able to mark its own
+// content origin=system via the ACP _meta marker — the marker is stripped so the
+// reported message has an empty Origin. Only the SAM control-plane initial prompt
+// (trustedSource=true) may set origin=system. This closes the evasion where a
+// viewer could hide their content from search/dedup/topic/attention.
+func TestHandlePrompt_OriginMarkerHonoredOnlyForTrustedSource(t *testing.T) {
+	t.Parallel()
+
+	reportedOrigin := func(trusted bool) string {
+		reporter := &mockMessageReporter{}
+		host := NewSessionHost(SessionHostConfig{
+			GatewayConfig: GatewayConfig{
+				SessionID:       "test-session",
+				WorkspaceID:     "test-workspace",
+				MessageReporter: reporter,
+			},
+			MessageBufferSize: 100,
+			ViewerSendBuffer:  32,
+		})
+		defer host.Stop()
+
+		agentReader, clientWriter := io.Pipe()
+		clientReader, agentWriter := io.Pipe()
+		agentWriter.Close()
+		agentReader.Close()
+		acpConn := acpsdk.NewClientSideConnection(&sessionHostClient{host: host}, clientWriter, clientReader)
+
+		host.mu.Lock()
+		host.acpConn = acpConn
+		host.sessionID = "acp-session-origin"
+		host.status = HostReady
+		host.mu.Unlock()
+
+		// A prompt block carrying the SAM system-origin marker in _meta.
+		promptParams, _ := json.Marshal(map[string]any{
+			"messageId": "origin-msg-001",
+			"prompt": []map[string]any{
+				{"type": "text", "text": "sneaky content", "_meta": map[string]any{MetaOriginKey: OriginSystem}},
+			},
+		})
+		reqID, _ := json.Marshal(77)
+		host.HandlePrompt(context.Background(), reqID, promptParams, "viewer-1", trusted)
+
+		for _, m := range reporter.Messages() {
+			if m.MessageID == "origin-msg-001" && m.Role == "user" {
+				return m.Origin
+			}
+		}
+		t.Fatalf("reporter missing user message (trusted=%v)", trusted)
+		return ""
+	}
+
+	if got := reportedOrigin(false); got != "" {
+		t.Fatalf("untrusted viewer prompt: Origin = %q, want empty (marker must be stripped)", got)
+	}
+	if got := reportedOrigin(true); got != OriginSystem {
+		t.Fatalf("trusted control-plane prompt: Origin = %q, want %q", got, OriginSystem)
+	}
+}
+
 func TestHandlePrompt_MultiBlockPrompt_InjectsAllBlocks(t *testing.T) {
 	t.Parallel()
 
@@ -2254,7 +2314,7 @@ func TestHandlePrompt_MultiBlockPrompt_InjectsAllBlocks(t *testing.T) {
 	})
 	reqID, _ := json.Marshal(43)
 
-	host.HandlePrompt(context.Background(), reqID, promptParams, "viewer-1")
+	host.HandlePrompt(context.Background(), reqID, promptParams, "viewer-1", false)
 
 	// Both text blocks should be reported.
 	msgs := reporter.Messages()
@@ -2314,7 +2374,7 @@ func TestHandlePrompt_NoReporter_StillBuffers(t *testing.T) {
 	})
 	reqID, _ := json.Marshal(44)
 
-	host.HandlePrompt(context.Background(), reqID, promptParams, "viewer-1")
+	host.HandlePrompt(context.Background(), reqID, promptParams, "viewer-1", false)
 
 	// Buffer should have the synthetic user message even without a reporter.
 	host.bufMu.RLock()

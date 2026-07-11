@@ -66,7 +66,11 @@ API + DO:
       `message-persistence.ts`) write `origin`.
 - [x] additive migration in `durable-objects/migrations.ts` (ADD COLUMN origin, default 'user').
 - [x] read path returns `origin`; row parser includes it.
-- [ ] Vitest (Miniflare) vertical-slice test: POST messages with origin=system → GET returns origin.
+- [x] Vitest (Miniflare) vertical-slice test: POST messages with origin=system → GET returns origin
+      (`project-data-do.test.ts` "persists and returns the origin marker", plus new topic-exclusion
+      regression + attention-exclusion regression in `attention-markers.test.ts`). Written; runs in
+      CI — local workerd (miniflare 4.20260329) SIGSEGVs before collection on ANY worker test
+      (reproduced on unrelated `mailbox-do.test.ts`), so this suite is CI-gated locally.
 
 Web:
 
@@ -92,6 +96,44 @@ Additional end-to-end slices:
 - [x] The web collapses an origin=system user message and shows normal messages unchanged (component test).
 - [x] Migration is additive (no DROP); `pnpm quality:migration-safety` passes.
 - [x] Existing messages (no origin) default to 'user' and render normally (regression).
+
+## Specialist review findings (2026-07-11) and resolutions
+
+Ran 9 local specialist reviewers (go, cloudflare, security, constitution, test, ui-ux, doc-sync, env,
+task-completion). Fixes applied on this branch:
+
+- **[CRITICAL ui-ux] invisible focus ring** — `AcpConversationItemView` summary used the undefined
+  Tailwind token `ring-accent-primary`; changed to `ring-focus-ring` (WCAG 2.4.7).
+- **[HIGH security] browser-spoofable origin marker** — a browser viewer `session/prompt` could carry
+  `_meta["sam.origin"]="system"` and hide its own content from search/dedup/topic/attention.
+  `HandlePrompt` now takes `trustedSource`; the marker is stripped (`stripInjectedOriginMarker`) from
+  untrusted (gateway/browser + follow-up) prompts and honored ONLY for the SAM initial task prompt.
+  Regression test `TestHandlePrompt_OriginMarkerHonoredOnlyForTrustedSource`.
+- **[HIGH cloudflare] message.new omitted origin** — single-message broadcast now emits `origin: null`
+  (this path only persists browser/RPC user messages) to keep the payload shape aligned with
+  `messages.batch`.
+- **[HIGH test] coverage gaps** — added: dedup-bypass regression for system origin
+  (`useAcpMessages.test.ts`), `chatMessagesToConversationItems` origin mapping matrix, DO auto-topic
+  exclusion regression, and attention-resolution exclusion regression.
+- **[HIGH ui-ux] Playwright flakiness** — audit now waits for the disclosure to mount, uses boolean
+  `open` assertions, and a robust `details summary` selector.
+- **[HIGH doc-sync] docs** — added CLAUDE.md "Recent Changes" entry and updated the public
+  architecture `overview.md` `chat_messages` description. Spec files left unchanged (rule 01: outside
+  active spec context).
+- **[LOW doc] migration comment** `0NN` → `024-chat-message-origin` in `row-schemas/messages.ts`.
+
+Reviewed and intentionally NOT changed (documented rationale):
+- **[MEDIUM security] FTS query-time origin filter** — not needed: `chat_messages_grouped` is written
+  only by `materializeSession`, which already excludes `origin=system`, so system rows never enter the
+  FTS index; the non-materialized fallback (`searchMessagesLike`) has an explicit origin filter. Adding
+  a filter on grouped rows would be redundant and incorrect (grouped rows have no 1:1 origin).
+- **[MEDIUM security] POST /:id/messages accepts origin=system from callback-token holders** — the
+  container subprocess has no callback token (confirmed by security-auditor), so the trust boundary is
+  the vm-agent, which is now hardened. The reporter is the legitimate origin=system producer.
+- **[MEDIUM cloudflare] picklist `'user'`** — harmless: read paths treat `'user'`≡NULL; the vm-agent
+  never emits `'user'`. Kept for schema clarity.
+- **[LOW constitution] hardcoded `sam-mcp`/`get_instructions`** — SAM-owned agent instruction prose,
+  not an operational/deployment identifier; env-configurability is out of scope for this feature.
 
 ## Release constraints
 

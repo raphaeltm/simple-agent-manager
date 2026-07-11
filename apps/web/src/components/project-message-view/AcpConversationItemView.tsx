@@ -62,7 +62,7 @@ export function CollapsedInjectedMessage({ text }: { text: string }) {
     <div className="flex justify-end mb-4">
       <details className="sam-injected-message group max-w-[92%] sm:max-w-[80%] min-w-0 rounded-lg border border-border-default overflow-hidden">
         <summary
-          className="cursor-pointer select-none list-none min-h-11 px-3 py-2 text-xs flex items-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-primary"
+          className="cursor-pointer select-none list-none min-h-11 px-3 py-2 text-xs flex items-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus-ring"
           style={{ color: 'var(--sam-color-fg-muted)' }}
         >
           <span

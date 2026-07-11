@@ -112,7 +112,7 @@ func TestHandlePromptRetriesTransientProviderErrorThenSucceeds(t *testing.T) {
 		}
 	}
 
-	host.HandlePrompt(context.Background(), json.RawMessage(`1`), promptRetryParams(), "viewer-1")
+	host.HandlePrompt(context.Background(), json.RawMessage(`1`), promptRetryParams(), "viewer-1", false)
 	completed.Wait()
 
 	if got := server.RequestCount(); got != 2 {
@@ -150,7 +150,7 @@ func TestHandlePromptExhaustsTransientProviderRetriesBeforeFailure(t *testing.T)
 		errCh <- nil
 	}
 
-	host.HandlePrompt(context.Background(), json.RawMessage(`2`), promptRetryParams(), "viewer-1")
+	host.HandlePrompt(context.Background(), json.RawMessage(`2`), promptRetryParams(), "viewer-1", false)
 	if err := <-errCh; err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +185,7 @@ func TestHandlePromptDoesNotRetryNonRetryableError(t *testing.T) {
 		errCh <- nil
 	}
 
-	host.HandlePrompt(context.Background(), json.RawMessage(`3`), promptRetryParams(), "viewer-1")
+	host.HandlePrompt(context.Background(), json.RawMessage(`3`), promptRetryParams(), "viewer-1", false)
 	if err := <-errCh; err != nil {
 		t.Fatal(err)
 	}

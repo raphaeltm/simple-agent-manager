@@ -65,6 +65,25 @@ describe('chatMessagesToConversationItems', () => {
     });
   });
 
+  it('maps origin=system user message to a system-origin item (collapsed in UI)', () => {
+    const input = [msg({ role: 'user', content: 'call get_instructions', origin: 'system' })];
+    const items = chatMessagesToConversationItems(input);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ kind: 'user_message', origin: 'system' });
+  });
+
+  it.each([
+    ['explicit user', 'user' as const, 'user'],
+    ['null (pre-migration)', null, 'user'],
+    ['undefined (old message)', undefined, 'user'],
+    ['system', 'system' as const, 'system'],
+  ])('user message with origin %s maps to item origin %s', (_label, origin, expected) => {
+    const input = [msg({ role: 'user', content: 'x', origin })];
+    const items = chatMessagesToConversationItems(input);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ kind: 'user_message', origin: expected });
+  });
+
   it('gives user_message item the message id and createdAt timestamp', () => {
     const m = msg({ id: 'u-1', role: 'user', content: 'hi', createdAt: 12345 });
     const items = chatMessagesToConversationItems([m]);

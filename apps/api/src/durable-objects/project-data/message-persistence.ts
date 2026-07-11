@@ -80,6 +80,11 @@ export async function persistMessageWithSideEffects(
       toolMetadata: parseToolMetadata(toolMetadata, sessionId),
       createdAt: result.now,
       sequence: result.sequence,
+      // The single-message path only persists browser/RPC user messages, which
+      // are never system-injected — origin is always null here. Emitting it
+      // keeps the message.new payload shape aligned with messages.batch (which
+      // carries origin) so live consumers see a stable contract.
+      origin: null,
     },
     sessionId
   );

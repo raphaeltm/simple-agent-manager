@@ -80,14 +80,18 @@ async function setup(page: Page) {
 
 async function audit(page: Page, viewport: 'mobile' | 'desktop') {
   await setup(page);
-  await expect(page.getByText(USER_TEXT)).toBeVisible();
   const disclosure = page.locator('details.sam-injected-message');
-  await expect(disclosure).not.toHaveAttribute('open', '');
+  // Wait for the chat to render before asserting — avoids flakiness on slow CI
+  // workers where goto resolves before the message list mounts.
+  await expect(disclosure).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText(USER_TEXT)).toBeVisible();
+  // `open` is a boolean attribute — a collapsed <details> has no `open` attribute.
+  await expect(disclosure).not.toHaveAttribute('open');
   await expect(page.getByText(INJECTED_TEXT)).not.toBeVisible();
-  const summary = page.getByText('Show system context');
+  const summary = disclosure.locator('summary');
   await expect(summary).toBeVisible();
   if (viewport === 'mobile') {
-    expect((await summary.locator('xpath=..').boundingBox())?.height).toBeGreaterThanOrEqual(44);
+    expect((await summary.boundingBox())?.height).toBeGreaterThanOrEqual(44);
   }
   await assertNoOverflow(page);
   await screenshot(page, `project-chat-system-context-collapsed-${viewport}`);

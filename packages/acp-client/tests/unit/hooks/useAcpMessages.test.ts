@@ -925,6 +925,37 @@ describe('useAcpMessages user_message_chunk (LoadSession replay)', () => {
     }
   });
 
+  it('does NOT dedup a system-origin user_message_chunk against a normal user message with the same text', () => {
+    const { result } = renderHook(() => useAcpMessages());
+
+    // addUserMessage adds a normal (origin=undefined) user message for instant UX.
+    act(() => {
+      result.current.addUserMessage('call get_instructions');
+    });
+    expect(result.current.items).toHaveLength(1);
+
+    // A same-text but system-origin chunk must NOT be deduped — origin is part of
+    // the match key, so injected content is preserved as a distinct collapsed item.
+    act(() => {
+      result.current.processMessage(
+        sessionUpdateMessage(
+          {
+            sessionUpdate: 'user_message_chunk',
+            content: { type: 'text', text: 'call get_instructions' },
+          },
+          'system'
+        )
+      );
+    });
+
+    expect(result.current.items).toHaveLength(2);
+    const injected = result.current.items[1]!;
+    expect(injected.kind).toBe('user_message');
+    if (injected.kind === 'user_message') {
+      expect(injected.origin).toBe('system');
+    }
+  });
+
   it('allows user_message_chunk with different text through dedup', () => {
     const { result } = renderHook(() => useAcpMessages());
 

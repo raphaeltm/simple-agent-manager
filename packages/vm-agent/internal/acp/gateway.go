@@ -437,7 +437,9 @@ func (g *Gateway) handleMessage(ctx context.Context, data []byte) {
 
 	switch rpcMsg.Method {
 	case "session/prompt":
-		go g.host.HandlePrompt(ctx, rpcMsg.ID, rpcMsg.Params, g.viewerID)
+		// trustedSource=false: a browser viewer prompt must not be able to carry
+		// the SAM system-origin marker (would hide content from search/dedup).
+		go g.host.HandlePrompt(ctx, rpcMsg.ID, rpcMsg.Params, g.viewerID, false)
 	case "session/cancel":
 		// Cancel the in-flight prompt context. Also forward to agent stdin
 		// so the agent process itself can react to the cancellation signal.

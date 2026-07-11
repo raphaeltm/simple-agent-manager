@@ -80,6 +80,20 @@ const (
 	OriginSystem  = "system"
 )
 
+// stripInjectedOriginMarker removes the SAM system-origin marker from prompt
+// blocks that did not arrive from a trusted control-plane source. Browser viewer
+// prompts must not be able to mark their own content as origin=system, which
+// would hide it from search, dedup, topic inference, and attention. The blocks
+// are freshly constructed per request (see parsePromptBlocks), so mutating their
+// Meta maps in place is safe and shares nothing.
+func stripInjectedOriginMarker(blocks []acpsdk.ContentBlock) {
+	for _, b := range blocks {
+		if b.Text != nil && b.Text.Meta != nil {
+			delete(b.Text.Meta, MetaOriginKey)
+		}
+	}
+}
+
 // contentBlockOrigin returns the SAM origin marker from a content block's _meta,
 // or "" when absent/not a string. Safe on a nil Text pointer / nil Meta map.
 func contentBlockOrigin(block acpsdk.ContentBlock) string {
