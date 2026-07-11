@@ -120,9 +120,10 @@ func (s *Server) sessionSnapshotHandlerInput(w http.ResponseWriter, r *http.Requ
 		return nil, false
 	}
 	var body struct {
-		ChatSessionID string `json:"chatSessionId"`
-		Runtime       string `json:"runtime"`
-		AgentType     string `json:"agentType"`
+		ChatSessionID          string `json:"chatSessionId"`
+		Runtime                string `json:"runtime"`
+		AgentType              string `json:"agentType"`
+		WorkspaceCallbackToken string `json:"workspaceCallbackToken"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -132,6 +133,14 @@ func (s *Server) sessionSnapshotHandlerInput(w http.ResponseWriter, r *http.Requ
 	if body.ChatSessionID == "" {
 		writeError(w, http.StatusBadRequest, "chatSessionId is required")
 		return nil, false
+	}
+	// A freshly-woken container never ran create-workspace, so its
+	// runtime.CallbackToken (the workspace-scoped token used by the message
+	// reporter and the snapshot callbacks) is unset. Persist the token the
+	// control plane provides on the restore request so chat replies and
+	// snapshot callbacks can authenticate after a wake.
+	if wsToken := strings.TrimSpace(body.WorkspaceCallbackToken); wsToken != "" {
+		s.upsertWorkspaceRuntime(workspaceID, "", "", "", wsToken)
 	}
 	runtime, ok := s.getWorkspaceRuntime(workspaceID)
 	if !ok {

@@ -5,7 +5,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { signNodeCallbackToken, signNodeManagementToken } from '../services/jwt';
+import { signCallbackToken, signNodeCallbackToken, signNodeManagementToken } from '../services/jwt';
 
 export const DEFAULT_CF_CONTAINER_SLEEP_AFTER = '1h';
 export const DEFAULT_CF_CONTAINER_ACTIVE_WORK_MAX_MS = 2 * 60 * 60 * 1000;
@@ -354,6 +354,12 @@ export class VmAgentContainer extends Container<Env> {
     const callbackToken = await signNodeCallbackToken(config.nodeId, this.env);
     await this.launch(config, { nodeCallbackToken: callbackToken });
 
+    // The fresh container never ran create-workspace, so its workspace-scoped
+    // runtime.CallbackToken is unset. The message reporter and snapshot
+    // callbacks require it (they do NOT fall back to the node-scoped token), so
+    // pass it on the restore request; without it, restored sessions accept a
+    // prompt but silently discard the agent's reply ("no auth token").
+    const workspaceCallbackToken = await signCallbackToken(config.workspaceId, this.env);
     const { token } = await signNodeManagementToken(workspace.userId, config.nodeId, config.workspaceId, this.env);
     const restoreUrl = new URL(`http://localhost:${config.vmAgentPort}/workspaces/${config.workspaceId}/agent-sessions/${agentSession.id}/restore`);
     const restoreResponse = await this.containerFetch(
@@ -369,6 +375,7 @@ export class VmAgentContainer extends Container<Env> {
           chatSessionId: workspace.chatSessionId,
           runtime: 'cf-container',
           agentType: agentSession.agentType,
+          workspaceCallbackToken,
         }),
       }),
       config.vmAgentPort
