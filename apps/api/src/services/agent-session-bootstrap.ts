@@ -5,7 +5,7 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
-import { buildAgentStartPromptPayload } from './agent-bootstrap-prompt';
+import { buildSamBootstrapInstructions } from './agent-bootstrap-prompt';
 import {
   generateMcpToken,
   type McpInstructionContextType,
@@ -130,7 +130,9 @@ export async function startSamAwareAgentSession(
           {
             taskId: input.taskContext?.taskId ?? '',
             contextType: input.promptKind,
-            taskMode: input.taskContext?.taskMode ?? (input.promptKind === 'conversation' ? 'conversation' : undefined),
+            taskMode:
+              input.taskContext?.taskMode ??
+              (input.promptKind === 'conversation' ? 'conversation' : undefined),
             projectId: input.projectId,
             userId: input.userId,
             workspaceId: input.workspaceId,
@@ -159,7 +161,7 @@ export async function startSamAwareAgentSession(
           token: mcpToken,
         }
       )
-    )
+    );
 
     let acpSessionId: string | null = null;
     try {
@@ -175,10 +177,7 @@ export async function startSamAwareAgentSession(
       });
     }
 
-    const initialPrompt = buildAgentStartPromptPayload({
-      message: input.visibleInitialPrompt,
-      contextType: input.promptKind,
-    });
+    const injectedInstructions = buildSamBootstrapInstructions({ contextType: input.promptKind });
 
     await runMaybePhased(input, 'start_acp_session', () =>
       startAgentSessionOnNode(
@@ -186,7 +185,7 @@ export async function startSamAwareAgentSession(
         input.workspaceId,
         agentSessionId,
         input.agentType,
-        initialPrompt,
+        input.visibleInitialPrompt,
         env,
         input.userId,
         {
@@ -200,19 +199,26 @@ export async function startSamAwareAgentSession(
               taskId: input.taskContext.taskId,
               taskMode: input.taskContext.taskMode,
             }
-          : undefined
+          : undefined,
+        injectedInstructions
       )
     );
 
     const runningAcpSessionId = acpSessionId;
     if (runningAcpSessionId) {
       await runMaybePhased(input, 'mark_acp_session_running', () =>
-        projectDataService.transitionAcpSession(env, input.projectId, runningAcpSessionId, 'running', {
-          actorType: input.actor.type,
-          actorId: input.actor.id,
-          reason: `${input.actor.reasonPrefix} started`,
-          acpSdkSessionId: agentSessionId,
-        })
+        projectDataService.transitionAcpSession(
+          env,
+          input.projectId,
+          runningAcpSessionId,
+          'running',
+          {
+            actorType: input.actor.type,
+            actorId: input.actor.id,
+            reason: `${input.actor.reasonPrefix} started`,
+            acpSdkSessionId: agentSessionId,
+          }
+        )
       );
     }
 
@@ -246,7 +252,9 @@ async function ensureAcpSessionWithEnv(
 ): Promise<string | null> {
   if (!input.chatSessionId) return null;
 
-  const existing = await projectDataService.getAcpSession(env, input.projectId, agentSessionId).catch(() => null);
+  const existing = await projectDataService
+    .getAcpSession(env, input.projectId, agentSessionId)
+    .catch(() => null);
   if (existing?.id) return existing.id;
 
   const acpSession = await projectDataService.createAcpSession(

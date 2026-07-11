@@ -41,9 +41,7 @@ export function resolveCompactMessageOptions(env: Env): CompactMessageOptions {
   const parsed = Number.parseInt(env.DOCUMENT_CARD_RAW_OUTPUT_MAX_BYTES || '', 10);
   return {
     documentCardRawOutputMaxBytes:
-      Number.isFinite(parsed) && parsed > 0
-        ? parsed
-        : DEFAULT_DOCUMENT_CARD_RAW_OUTPUT_MAX_BYTES,
+      Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_DOCUMENT_CARD_RAW_OUTPUT_MAX_BYTES,
   };
 }
 
@@ -205,6 +203,7 @@ export function persistMessageBatch(
   const seenUserContent = new Set<string>();
 
   for (const msg of messages) {
+    const origin = msg.origin ?? null;
     const existing = sql
       .exec('SELECT id FROM chat_messages WHERE id = ?', msg.messageId)
       .toArray()[0];
@@ -224,7 +223,7 @@ export function persistMessageBatch(
     // persistMessageBatch (VM agent batch path) because the WebSocket handler
     // persists synchronously on receipt, while the batch arrives after the VM
     // agent processes the prompt, extracts messages, and flushes (~2-5s later).
-    if (msg.role === 'user') {
+    if (msg.role === 'user' && origin !== 'system') {
       if (seenUserContent.has(msg.content)) {
         duplicates++;
         continue;
@@ -252,7 +251,6 @@ export function persistMessageBatch(
 
     const createdAt = new Date(msg.timestamp).getTime() || now;
     const sequence = msg.sequence ?? nextSeq++;
-    const origin = msg.origin ?? null;
     sql.exec(
       `INSERT INTO chat_messages (id, session_id, role, content, tool_metadata, created_at, sequence, origin)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -290,7 +288,9 @@ export function persistMessageBatch(
     );
 
     if (!session.topic) {
-      const firstUserMsg = messages.find((m) => m.role === 'user');
+      const firstUserMsg = messages.find(
+        (m) => m.role === 'user' && (m.origin ?? null) !== 'system'
+      );
       if (firstUserMsg) {
         firstUserContent = firstUserMsg.content;
         const truncatedTopic =
@@ -532,7 +532,10 @@ function searchMessagesLike(
   onlyNonMaterialized: boolean = false
 ): SearchResult[] {
   const escapedQuery = query.replace(/[%_\\]/g, '\\$&');
-  const conditions: string[] = ["m.content LIKE ? ESCAPE '\\'"];
+  const conditions: string[] = [
+    "m.content LIKE ? ESCAPE '\\'",
+    "COALESCE(m.origin, 'user') != 'system'",
+  ];
   const params: (string | number)[] = [`%${escapedQuery}%`];
 
   if (sessionId) {

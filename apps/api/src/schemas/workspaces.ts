@@ -69,7 +69,7 @@ const MessageEntrySchema = v.object({
   timestamp: v.string(),
   sequence: v.optional(v.number()),
   // "system" for SAM-injected messages the UI collapses; absent for normal messages.
-  origin: v.optional(v.nullable(v.string())),
+  origin: v.optional(v.nullable(v.picklist(['user', 'system']))),
 });
 
 export const MessageBatchSchema = v.object({

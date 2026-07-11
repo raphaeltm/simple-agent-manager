@@ -48,7 +48,9 @@ export class ProjectData extends DurableObject<Env> {
     super(ctx, env);
     this.sql = ctx.storage.sql;
     ctx.blockConcurrencyWhile(async () => {
-      this.ctx.storage.transactionSync(() => { runMigrations(this.sql); });
+      this.ctx.storage.transactionSync(() => {
+        runMigrations(this.sql);
+      });
     });
   }
 
@@ -62,19 +64,58 @@ export class ProjectData extends DurableObject<Env> {
   ensureProjectId(projectId: string): void {
     if (this.cachedProjectId === projectId) return;
     const existing = this.getProjectId();
-    if (existing) { this.cachedProjectId = existing; return; }
-    this.sql.exec('INSERT OR IGNORE INTO do_meta (key, value) VALUES (?, ?)', 'projectId', projectId);
+    if (existing) {
+      this.cachedProjectId = existing;
+      return;
+    }
+    this.sql.exec(
+      'INSERT OR IGNORE INTO do_meta (key, value) VALUES (?, ?)',
+      'projectId',
+      projectId
+    );
     this.cachedProjectId = projectId;
   }
 
-  async createSession(workspaceId: string | null, topic: string | null, taskId: string | null = null, createdByUserId: string | null = null): Promise<string> {
-    const { id, now } = sessions.createSession(this.sql, this.env, workspaceId, topic, taskId, createdByUserId);
+  async createSession(
+    workspaceId: string | null,
+    topic: string | null,
+    taskId: string | null = null,
+    createdByUserId: string | null = null
+  ): Promise<string> {
+    const { id, now } = sessions.createSession(
+      this.sql,
+      this.env,
+      workspaceId,
+      topic,
+      taskId,
+      createdByUserId
+    );
     if (workspaceId) {
-      this.recalculateAlarm().catch((err) => log.warn('schedule_workspace_idle_alarm_failed', { workspaceId, ...serializeError(err) }));
+      this.recalculateAlarm().catch((err) =>
+        log.warn('schedule_workspace_idle_alarm_failed', { workspaceId, ...serializeError(err) })
+      );
     }
-    activity.recordActivityEventInternal(this.sql, 'session.started', createdByUserId ? 'user' : 'system', createdByUserId, workspaceId, id, taskId, null);
+    activity.recordActivityEventInternal(
+      this.sql,
+      'session.started',
+      createdByUserId ? 'user' : 'system',
+      createdByUserId,
+      workspaceId,
+      id,
+      taskId,
+      null
+    );
     this.scheduleSummarySync();
-    this.broadcastEvent('session.created', { id, workspaceId, taskId, createdByUserId, topic, status: 'active', messageCount: 0, createdAt: now });
+    this.broadcastEvent('session.created', {
+      id,
+      workspaceId,
+      taskId,
+      createdByUserId,
+      topic,
+      status: 'active',
+      messageCount: 0,
+      createdAt: now,
+    });
     return id;
   }
 
@@ -90,10 +131,22 @@ export class ProjectData extends DurableObject<Env> {
   async stopSession(sessionId: string): Promise<void> {
     const result = sessions.stopSession(this.sql, sessionId);
     if (result) {
-      activity.recordActivityEventInternal(this.sql, 'session.stopped', 'system', null, result.workspaceId, sessionId, null, JSON.stringify({ message_count: result.messageCount }));
+      activity.recordActivityEventInternal(
+        this.sql,
+        'session.stopped',
+        'system',
+        null,
+        result.workspaceId,
+        sessionId,
+        null,
+        JSON.stringify({ message_count: result.messageCount })
+      );
     }
-    try { materialization.materializeSession(this.sql, sessionId); }
-    catch (e) { log.error('materialize_session_on_stop_failed', { sessionId, error: String(e) }); }
+    try {
+      materialization.materializeSession(this.sql, sessionId);
+    } catch (e) {
+      log.error('materialize_session_on_stop_failed', { sessionId, error: String(e) });
+    }
     this.scheduleSummarySync();
     this.broadcastEvent('session.stopped', { sessionId }, sessionId);
   }
@@ -101,23 +154,64 @@ export class ProjectData extends DurableObject<Env> {
   async failSession(sessionId: string, errorMessage: string | null = null): Promise<void> {
     const result = sessions.failSession(this.sql, sessionId);
     if (result) {
-      activity.recordActivityEventInternal(this.sql, 'session.failed', 'system', null, result.workspaceId, sessionId, null, JSON.stringify({ message_count: result.messageCount, error: errorMessage }));
+      activity.recordActivityEventInternal(
+        this.sql,
+        'session.failed',
+        'system',
+        null,
+        result.workspaceId,
+        sessionId,
+        null,
+        JSON.stringify({ message_count: result.messageCount, error: errorMessage })
+      );
     }
-    try { materialization.materializeSession(this.sql, sessionId); }
-    catch (e) { log.error('materialize_session_on_fail_failed', { sessionId, error: String(e) }); }
+    try {
+      materialization.materializeSession(this.sql, sessionId);
+    } catch (e) {
+      log.error('materialize_session_on_fail_failed', { sessionId, error: String(e) });
+    }
     this.scheduleSummarySync();
     this.broadcastEvent('session.failed', { sessionId }, sessionId);
   }
 
-  async persistMessage(sessionId: string, role: string, content: string, toolMetadata: string | null, messageId?: string): Promise<string> {
-    return messagePersistence.persistMessageWithSideEffects(this.sql, this.env, this.messagePersistenceHooks(), sessionId, role, content, toolMetadata, messageId);
+  async persistMessage(
+    sessionId: string,
+    role: string,
+    content: string,
+    toolMetadata: string | null,
+    messageId?: string
+  ): Promise<string> {
+    return messagePersistence.persistMessageWithSideEffects(
+      this.sql,
+      this.env,
+      this.messagePersistenceHooks(),
+      sessionId,
+      role,
+      content,
+      toolMetadata,
+      messageId
+    );
   }
 
   async persistMessageBatch(
     sessionId: string,
-    batchMessages: Array<{ messageId: string; role: string; content: string; toolMetadata: string | null; timestamp: string; sequence?: number }>
+    batchMessages: Array<{
+      messageId: string;
+      role: string;
+      content: string;
+      toolMetadata: string | null;
+      timestamp: string;
+      sequence?: number;
+      origin?: string | null;
+    }>
   ): Promise<messagePersistence.MessageBatchPersistenceResult> {
-    return messagePersistence.persistMessageBatchWithSideEffects(this.sql, this.env, this.messagePersistenceHooks(), sessionId, batchMessages);
+    return messagePersistence.persistMessageBatchWithSideEffects(
+      this.sql,
+      this.env,
+      this.messagePersistenceHooks(),
+      sessionId,
+      batchMessages
+    );
   }
 
   private messagePersistenceHooks(): messagePersistence.MessagePersistenceHooks {
@@ -130,11 +224,22 @@ export class ProjectData extends DurableObject<Env> {
 
   async linkSessionToWorkspace(sessionId: string, workspaceId: string): Promise<void> {
     sessions.linkSessionToWorkspace(this.sql, sessionId, workspaceId);
-    this.recalculateAlarm().catch((err) => log.warn('schedule_workspace_idle_alarm_after_link_failed', { workspaceId, ...serializeError(err) }));
+    this.recalculateAlarm().catch((err) =>
+      log.warn('schedule_workspace_idle_alarm_after_link_failed', {
+        workspaceId,
+        ...serializeError(err),
+      })
+    );
     this.broadcastEvent('session.updated', { sessionId, workspaceId }, sessionId);
   }
 
-  async listSessions(status: string | null, limit: number = 20, offset: number = 0, taskId: string | null = null, createdByUserId: string | null = null): Promise<{ sessions: Record<string, unknown>[]; total: number }> {
+  async listSessions(
+    status: string | null,
+    limit: number = 20,
+    offset: number = 0,
+    taskId: string | null = null,
+    createdByUserId: string | null = null
+  ): Promise<{ sessions: Record<string, unknown>[]; total: number }> {
     const result = sessions.listSessions(this.sql, status, limit, offset, taskId, createdByUserId);
     return { sessions: result.sessions.map((s) => this.addBaseDomain(s)), total: result.total };
   }
@@ -148,9 +253,25 @@ export class ProjectData extends DurableObject<Env> {
     return result ? this.addBaseDomain(result) : null;
   }
 
-  async getMessages(sessionId: string, limit: number = 1000, before: number | null = null, roles?: string[], compact: boolean = false, order: 'asc' | 'desc' = 'desc') {
+  async getMessages(
+    sessionId: string,
+    limit: number = 1000,
+    before: number | null = null,
+    roles?: string[],
+    compact: boolean = false,
+    order: 'asc' | 'desc' = 'desc'
+  ) {
     const compactOptions = compact ? messages.resolveCompactMessageOptions(this.env) : undefined;
-    return messages.getMessages(this.sql, sessionId, limit, before, roles, compact, order, compactOptions);
+    return messages.getMessages(
+      this.sql,
+      sessionId,
+      limit,
+      before,
+      roles,
+      compact,
+      order,
+      compactOptions
+    );
   }
 
   async getMessageToolContent(sessionId: string, messageId: string): Promise<unknown[] | null> {
@@ -161,19 +282,39 @@ export class ProjectData extends DurableObject<Env> {
     return messages.getMessageCount(this.sql, sessionId, roles);
   }
 
-  searchMessages(query: string, sessionId: string | null = null, roles: string[] | null = null, limit: number = 10) {
+  searchMessages(
+    query: string,
+    sessionId: string | null = null,
+    roles: string[] | null = null,
+    limit: number = 10
+  ) {
     return messages.searchMessages(this.sql, query, sessionId, roles, limit);
   }
 
-  materializeSession(sessionId: string): void { materialization.materializeSession(this.sql, sessionId); }
-  materializeAllStopped(limit: number = 50) { return materialization.materializeAllStopped(this.sql, limit); }
+  materializeSession(sessionId: string): void {
+    materialization.materializeSession(this.sql, sessionId);
+  }
+  materializeAllStopped(limit: number = 50) {
+    return materialization.materializeAllStopped(this.sql, limit);
+  }
 
-  async linkSessionIdea(sessionId: string, taskId: string, context: string | null): Promise<void> { ideas.linkSessionIdea(this.sql, sessionId, taskId, context); }
-  async unlinkSessionIdea(sessionId: string, taskId: string): Promise<void> { ideas.unlinkSessionIdea(this.sql, sessionId, taskId); }
-  getIdeasForSession(sessionId: string) { return ideas.getIdeasForSession(this.sql, sessionId); }
-  getSessionsForIdea(taskId: string) { return ideas.getSessionsForIdea(this.sql, taskId); }
+  async linkSessionIdea(sessionId: string, taskId: string, context: string | null): Promise<void> {
+    ideas.linkSessionIdea(this.sql, sessionId, taskId, context);
+  }
+  async unlinkSessionIdea(sessionId: string, taskId: string): Promise<void> {
+    ideas.unlinkSessionIdea(this.sql, sessionId, taskId);
+  }
+  getIdeasForSession(sessionId: string) {
+    return ideas.getIdeasForSession(this.sql, sessionId);
+  }
+  getSessionsForIdea(taskId: string) {
+    return ideas.getSessionsForIdea(this.sql, taskId);
+  }
 
-  async cacheCommands(agentType: string, cmds: Array<{ name: string; description: string }>): Promise<void> {
+  async cacheCommands(
+    agentType: string,
+    cmds: Array<{ name: string; description: string }>
+  ): Promise<void> {
     this.ctx.storage.transactionSync(() => {
       commands.saveCachedCommands(this.sql, agentType, cmds);
     });
@@ -183,14 +324,36 @@ export class ProjectData extends DurableObject<Env> {
     return commands.getCachedCommands(this.sql, agentType);
   }
 
-  async recordActivityEvent(eventType: string, actorType: string, actorId: string | null, workspaceId: string | null, sessionId: string | null, taskId: string | null, payload: string | null): Promise<string> {
-    const id = activity.recordActivityEventInternal(this.sql, eventType, actorType, actorId, workspaceId, sessionId, taskId, payload);
+  async recordActivityEvent(
+    eventType: string,
+    actorType: string,
+    actorId: string | null,
+    workspaceId: string | null,
+    sessionId: string | null,
+    taskId: string | null,
+    payload: string | null
+  ): Promise<string> {
+    const id = activity.recordActivityEventInternal(
+      this.sql,
+      eventType,
+      actorType,
+      actorId,
+      workspaceId,
+      sessionId,
+      taskId,
+      payload
+    );
     this.scheduleSummarySync();
     this.broadcastEvent('activity.new', { eventType, id });
     return id;
   }
 
-  async listActivityEvents(eventType: string | null, limit: number = 50, before: number | null = null, sessionId: string | null = null) {
+  async listActivityEvents(
+    eventType: string | null,
+    limit: number = 50,
+    before: number | null = null,
+    sessionId: string | null = null
+  ) {
     return activity.listActivityEvents(this.sql, eventType, limit, before, sessionId);
   }
 
@@ -199,11 +362,25 @@ export class ProjectData extends DurableObject<Env> {
     this.broadcastEvent('session.agent_completed', { sessionId, agentCompletedAt: now }, sessionId);
   }
 
-  updateTerminalActivity(workspaceId: string, sessionId: string | null): void { activity.updateTerminalActivity(this.sql, workspaceId, sessionId); }
-  cleanupWorkspaceActivity(workspaceId: string): void { activity.cleanupWorkspaceActivity(this.sql, workspaceId); }
+  updateTerminalActivity(workspaceId: string, sessionId: string | null): void {
+    activity.updateTerminalActivity(this.sql, workspaceId, sessionId);
+  }
+  cleanupWorkspaceActivity(workspaceId: string): void {
+    activity.cleanupWorkspaceActivity(this.sql, workspaceId);
+  }
 
-  async scheduleIdleCleanup(sessionId: string, workspaceId: string, taskId: string | null): Promise<{ cleanupAt: number }> {
-    const result = idleCleanup.scheduleIdleCleanup(this.sql, this.env, sessionId, workspaceId, taskId);
+  async scheduleIdleCleanup(
+    sessionId: string,
+    workspaceId: string,
+    taskId: string | null
+  ): Promise<{ cleanupAt: number }> {
+    const result = idleCleanup.scheduleIdleCleanup(
+      this.sql,
+      this.env,
+      sessionId,
+      workspaceId,
+      taskId
+    );
     await this.recalculateAlarm();
     return result;
   }
@@ -219,17 +396,36 @@ export class ProjectData extends DurableObject<Env> {
     return result;
   }
 
-  async getCleanupAt(sessionId: string): Promise<number | null> { return idleCleanup.getCleanupAt(this.sql, sessionId); }
+  async getCleanupAt(sessionId: string): Promise<number | null> {
+    return idleCleanup.getCleanupAt(this.sql, sessionId);
+  }
 
-  async createAttentionMarker(opts: attention.CreateAttentionMarkerOpts): Promise<{ id: string; createdAt: number; expiresAt: number | null }> {
+  async createAttentionMarker(
+    opts: attention.CreateAttentionMarkerOpts
+  ): Promise<{ id: string; createdAt: number; expiresAt: number | null }> {
     const result = attention.createAttentionMarker(this.sql, opts);
     await this.recalculateAlarm();
-    this.broadcastEvent('attention.created', { sessionId: opts.sessionId, markerId: result.id, kind: opts.kind }, opts.sessionId);
+    this.broadcastEvent(
+      'attention.created',
+      { sessionId: opts.sessionId, markerId: result.id, kind: opts.kind },
+      opts.sessionId
+    );
     return result;
   }
 
-  async resolveSessionAttentionMarkers(sessionId: string, resolvedByMessageId: string | null, actorType: string = 'human', reason: string = 'human_message'): Promise<number> {
-    const count = attention.resolveAttentionMarkers(this.sql, sessionId, resolvedByMessageId, actorType, reason);
+  async resolveSessionAttentionMarkers(
+    sessionId: string,
+    resolvedByMessageId: string | null,
+    actorType: string = 'human',
+    reason: string = 'human_message'
+  ): Promise<number> {
+    const count = attention.resolveAttentionMarkers(
+      this.sql,
+      sessionId,
+      resolvedByMessageId,
+      actorType,
+      reason
+    );
     if (count > 0) {
       await this.recalculateAlarm();
       this.broadcastEvent('attention.resolved', { sessionId, count, reason }, sessionId);
@@ -245,20 +441,54 @@ export class ProjectData extends DurableObject<Env> {
     return attention.listActiveAttentionMarkers(this.sql, sessionId);
   }
 
-  async createAcpSession(opts: { chatSessionId: string; initialPrompt: string | null; agentType: string | null; parentSessionId?: string | null; forkDepth?: number; id?: string }) {
+  async createAcpSession(opts: {
+    chatSessionId: string;
+    initialPrompt: string | null;
+    agentType: string | null;
+    parentSessionId?: string | null;
+    forkDepth?: number;
+    id?: string;
+  }) {
     const result = acpSessions.createAcpSession(this.sql, opts);
     const projectId = this.getProjectId();
-    log.info('acp_session.created', { sessionId: result.id, chatSessionId: opts.chatSessionId, projectId, parentSessionId: opts.parentSessionId ?? null, forkDepth: opts.forkDepth ?? 0 });
+    log.info('acp_session.created', {
+      sessionId: result.id,
+      chatSessionId: opts.chatSessionId,
+      projectId,
+      parentSessionId: opts.parentSessionId ?? null,
+      forkDepth: opts.forkDepth ?? 0,
+    });
     return result;
   }
 
-  async getAcpSession(sessionId: string) { return acpSessions.getAcpSession(this.sql, sessionId); }
+  async getAcpSession(sessionId: string) {
+    return acpSessions.getAcpSession(this.sql, sessionId);
+  }
 
-  async listAcpSessions(opts?: { chatSessionId?: string; status?: AcpSessionStatus; nodeId?: string; limit?: number; offset?: number }) {
+  async listAcpSessions(opts?: {
+    chatSessionId?: string;
+    status?: AcpSessionStatus;
+    nodeId?: string;
+    limit?: number;
+    offset?: number;
+  }) {
     return acpSessions.listAcpSessions(this.sql, opts);
   }
 
-  async transitionAcpSession(sessionId: string, toStatus: AcpSessionStatus, opts: { actorType: AcpSessionEventActorType; actorId?: string | null; reason?: string | null; metadata?: Record<string, unknown> | null; workspaceId?: string; nodeId?: string; acpSdkSessionId?: string; errorMessage?: string }) {
+  async transitionAcpSession(
+    sessionId: string,
+    toStatus: AcpSessionStatus,
+    opts: {
+      actorType: AcpSessionEventActorType;
+      actorId?: string | null;
+      reason?: string | null;
+      metadata?: Record<string, unknown> | null;
+      workspaceId?: string;
+      nodeId?: string;
+      acpSdkSessionId?: string;
+      errorMessage?: string;
+    }
+  ) {
     const projectId = this.getProjectId();
     const result = acpSessions.transitionAcpSession(this.sql, sessionId, toStatus, opts, projectId);
     if (toStatus === 'assigned' || toStatus === 'running') await this.scheduleHeartbeatAlarm();
@@ -287,12 +517,16 @@ export class ProjectData extends DurableObject<Env> {
     await this.scheduleHeartbeatAlarm();
   }
 
-  async reportActivity(sessionId: string, activity: string, extra?: {
-    promptStartedAt?: number | null;
-    agentType?: string | null;
-    restartCount?: number | null;
-    statusError?: string | null;
-  }): Promise<void> {
+  async reportActivity(
+    sessionId: string,
+    activity: string,
+    extra?: {
+      promptStartedAt?: number | null;
+      agentType?: string | null;
+      restartCount?: number | null;
+      statusError?: string | null;
+    }
+  ): Promise<void> {
     sessionState.upsertActivityState(this.sql, sessionId, {
       activity,
       promptStartedAt: extra?.promptStartedAt,
@@ -303,25 +537,42 @@ export class ProjectData extends DurableObject<Env> {
 
     // Resolve ACP → chat session ID: browser sockets are tagged with the
     // chat session ID, but the VM agent reports using the ACP session ID.
-    const acpRow = this.sql.exec(
-      'SELECT chat_session_id FROM acp_sessions WHERE id = ?', sessionId,
-    ).toArray()[0];
+    const acpRow = this.sql
+      .exec('SELECT chat_session_id FROM acp_sessions WHERE id = ?', sessionId)
+      .toArray()[0];
     const chatSessionId = (acpRow?.chat_session_id as string | undefined) ?? sessionId;
 
-    this.broadcastEvent('session.activity',
-      { sessionId: chatSessionId, activity, promptStartedAt: extra?.promptStartedAt ?? null }, chatSessionId);
+    this.broadcastEvent(
+      'session.activity',
+      { sessionId: chatSessionId, activity, promptStartedAt: extra?.promptStartedAt ?? null },
+      chatSessionId
+    );
   }
 
-  getSessionState(sessionId: string) { return sessionState.getSessionState(this.sql, sessionId); }
+  getSessionState(sessionId: string) {
+    return sessionState.getSessionState(this.sql, sessionId);
+  }
 
-  getLatestPersistedPlan(sessionId: string) { return sessionState.getLatestPersistedPlan(this.sql, sessionId); }
+  getLatestPersistedPlan(sessionId: string) {
+    return sessionState.getLatestPersistedPlan(this.sql, sessionId);
+  }
 
   async forkAcpSession(sessionId: string, contextSummary: string) {
-    return acpSessions.forkAcpSession(this.sql, this.env, sessionId, contextSummary, this.getProjectId());
+    return acpSessions.forkAcpSession(
+      this.sql,
+      this.env,
+      sessionId,
+      contextSummary,
+      this.getProjectId()
+    );
   }
 
-  async getAcpSessionLineage(sessionId: string) { return acpSessions.getAcpSessionLineage(this.sql, sessionId); }
-  async listAcpSessionsByNode(nodeId: string, statuses: AcpSessionStatus[]) { return acpSessions.listAcpSessionsByNode(this.sql, nodeId, statuses); }
+  async getAcpSessionLineage(sessionId: string) {
+    return acpSessions.getAcpSessionLineage(this.sql, sessionId);
+  }
+  async listAcpSessionsByNode(nodeId: string, statuses: AcpSessionStatus[]) {
+    return acpSessions.listAcpSessionsByNode(this.sql, nodeId, statuses);
+  }
 
   /** Update heartbeats for all active ACP sessions on a node. Called from node heartbeat handler. */
   async updateNodeHeartbeats(nodeId: string): Promise<number> {
@@ -331,19 +582,34 @@ export class ProjectData extends DurableObject<Env> {
   }
 
   async getSummary(): Promise<SummaryData> {
-    const activeCountRow = this.sql.exec("SELECT COUNT(*) as cnt FROM chat_sessions WHERE status = 'active'").toArray()[0];
-    const lastActivityRow = this.sql.exec('SELECT MAX(created_at) as latest FROM activity_events').toArray()[0];
-    const latest = lastActivityRow ? parseMaxLatest(lastActivityRow, 'project_data.last_activity') : null;
+    const activeCountRow = this.sql
+      .exec("SELECT COUNT(*) as cnt FROM chat_sessions WHERE status = 'active'")
+      .toArray()[0];
+    const lastActivityRow = this.sql
+      .exec('SELECT MAX(created_at) as latest FROM activity_events')
+      .toArray()[0];
+    const latest = lastActivityRow
+      ? parseMaxLatest(lastActivityRow, 'project_data.last_activity')
+      : null;
     const lastActivity = latest ? new Date(latest).toISOString() : new Date().toISOString();
-    return { lastActivityAt: lastActivity, activeSessionCount: activeCountRow ? parseCountCnt(activeCountRow, 'project_data.active_sessions') : 0 };
+    return {
+      lastActivityAt: lastActivity,
+      activeSessionCount: activeCountRow
+        ? parseCountCnt(activeCountRow, 'project_data.active_sessions')
+        : 0,
+    };
   }
 
   // --- DO Alarm Handler ---
 
   async alarm(): Promise<void> {
-    const timedOut = await acpSessions.checkHeartbeatTimeouts(this.sql, this.env, async (sessionId, toStatus, opts) => {
-      await this.transitionAcpSession(sessionId, toStatus, opts);
-    });
+    const timedOut = await acpSessions.checkHeartbeatTimeouts(
+      this.sql,
+      this.env,
+      async (sessionId, toStatus, opts) => {
+        await this.transitionAcpSession(sessionId, toStatus, opts);
+      }
+    );
 
     // For conversation-mode sessions, couple agent death to workspace death.
     // Stop workspaces whose ACP sessions timed out to prevent zombie state.
@@ -356,7 +622,9 @@ export class ProjectData extends DurableObject<Env> {
             const taskRow = this.env.DATABASE
               ? await this.env.DATABASE.prepare(
                   `SELECT task_mode FROM tasks WHERE workspace_id = ? AND status IN ('in_progress', 'delegated') LIMIT 1`
-                ).bind(entry.workspaceId).first<{ task_mode: string | null }>()
+                )
+                  .bind(entry.workspaceId)
+                  .first<{ task_mode: string | null }>()
               : null;
 
             if (taskRow?.task_mode === 'conversation') {
@@ -377,10 +645,17 @@ export class ProjectData extends DurableObject<Env> {
         })
       );
     }
-    await idleCleanup.checkWorkspaceIdleTimeouts(this.sql, this.env, this.getProjectId(),
+    await idleCleanup.checkWorkspaceIdleTimeouts(
+      this.sql,
+      this.env,
+      this.getProjectId(),
       (workspaceId) => idleCleanup.deleteWorkspaceInD1(this.env.DATABASE, workspaceId),
-      (type, payload, sid) => this.broadcastEvent(type, payload, sid), () => this.scheduleSummarySync());
-    await idleCleanup.processExpiredCleanups(this.sql, this.env,
+      (type, payload, sid) => this.broadcastEvent(type, payload, sid),
+      () => this.scheduleSummarySync()
+    );
+    await idleCleanup.processExpiredCleanups(
+      this.sql,
+      this.env,
       (taskId) => idleCleanup.completeTaskInD1(this.env.DATABASE, taskId),
       async (workspaceId) => {
         await idleCleanup.stopWorkspaceInD1(this.env.DATABASE, workspaceId);
@@ -389,48 +664,62 @@ export class ProjectData extends DurableObject<Env> {
           const workerEnv = this.env as unknown as import('../../env').Env;
           const wsRow = await workerEnv.DATABASE.prepare(
             'SELECT node_id, user_id FROM workspaces WHERE id = ?'
-          ).bind(workspaceId).first<{ node_id: string | null; user_id: string }>();
+          )
+            .bind(workspaceId)
+            .first<{ node_id: string | null; user_id: string }>();
           if (wsRow?.node_id) {
             const doId = workerEnv.NODE_LIFECYCLE.idFromName(wsRow.node_id);
             const stub = workerEnv.NODE_LIFECYCLE.get(doId);
-            await (stub as unknown as import('../node-lifecycle').NodeLifecycle)
-              .scheduleWorkspaceDeletion(workspaceId, wsRow.user_id);
+            await (
+              stub as unknown as import('../node-lifecycle').NodeLifecycle
+            ).scheduleWorkspaceDeletion(workspaceId, wsRow.user_id);
           }
         } catch {
           // Best-effort — cron safety-net will catch it
         }
       },
-      (type, payload, sid) => this.broadcastEvent(type, payload, sid), () => this.scheduleSummarySync());
+      (type, payload, sid) => this.broadcastEvent(type, payload, sid),
+      () => this.scheduleSummarySync()
+    );
 
     // Task-mode reconciliation: check-in on idle task agents
     try {
       await reconciliation.processReconciliationCandidates(
-        this.sql, this.env,
+        this.sql,
+        this.env,
         (type, payload, sid) => this.broadcastEvent(type, payload, sid),
-        { waitUntil: (promise) => this.ctx.waitUntil(promise), projectId: this.getProjectId() },
+        { waitUntil: (promise) => this.ctx.waitUntil(promise), projectId: this.getProjectId() }
       );
     } catch (err) {
-      log.error('alarm.reconciliation_failed', { error: err instanceof Error ? err.message : String(err) });
+      log.error('alarm.reconciliation_failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
 
     await attentionExpiry.processExpiredAttentionMarkers(
       this.sql,
       this.env,
-      (sessionId, errorMessage) => this.failSession(sessionId, errorMessage),
+      (sessionId, errorMessage) => this.failSession(sessionId, errorMessage)
     );
 
     // Session state staleness: auto-heal stuck "prompting" states
     try {
       const staleThresholdMs = sessionState.parseActivityStaleThreshold(
-        this.env.SESSION_ACTIVITY_STALE_THRESHOLD_MS,
+        this.env.SESSION_ACTIVITY_STALE_THRESHOLD_MS
       );
       const healedSessionIds = sessionState.reconcileStaleActivity(this.sql, staleThresholdMs);
       for (const healedId of healedSessionIds) {
         const healedChatId = sessionState.resolveActivityChatSessionId(this.sql, healedId);
-        this.broadcastEvent('session.activity', { sessionId: healedChatId, activity: 'idle', promptStartedAt: null }, healedChatId);
+        this.broadcastEvent(
+          'session.activity',
+          { sessionId: healedChatId, activity: 'idle', promptStartedAt: null },
+          healedChatId
+        );
       }
     } catch (err) {
-      log.error('alarm.stale_activity_reconciliation_failed', { error: err instanceof Error ? err.message : String(err) });
+      log.error('alarm.stale_activity_reconciliation_failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
 
     // Mailbox delivery sweep: expire stale messages and re-queue unacked ones
@@ -447,12 +736,14 @@ export class ProjectData extends DurableObject<Env> {
     const url = new URL(request.url);
     if (url.pathname === '/ws') {
       const upgradeHeader = request.headers.get('Upgrade');
-      if (!upgradeHeader || upgradeHeader.toLowerCase() !== 'websocket') return new Response('Expected WebSocket upgrade', { status: 426 });
+      if (!upgradeHeader || upgradeHeader.toLowerCase() !== 'websocket')
+        return new Response('Expected WebSocket upgrade', { status: 426 });
       const pair = new WebSocketPair();
       const sessionId = url.searchParams.get('sessionId');
       const tags: string[] = [];
       if (sessionId) {
-        if (!/^[0-9a-f-]{36}$/i.test(sessionId)) return new Response('Invalid sessionId format', { status: 400 });
+        if (!/^[0-9a-f-]{36}$/i.test(sessionId))
+          return new Response('Invalid sessionId format', { status: 400 });
         tags.push(`session:${sessionId}`);
       }
       this.ctx.acceptWebSocket(pair[1], tags);
@@ -466,12 +757,23 @@ export class ProjectData extends DurableObject<Env> {
     try {
       const parsed: unknown = JSON.parse(message);
       const msg = expectJsonRecord(parsed, 'project-data.websocket.message');
-      if (msg.type === 'ping') { ws.send(JSON.stringify({ type: 'pong' })); return; }
+      if (msg.type === 'ping') {
+        ws.send(JSON.stringify({ type: 'pong' }));
+        return;
+      }
       if (msg.type === 'message.send') {
         const rawSessionId = msg.sessionId;
         const rawContent = msg.content;
         const rawRole = msg.role;
-        if (!rawSessionId || typeof rawSessionId !== 'string' || !rawContent || typeof rawContent !== 'string') { ws.send(JSON.stringify({ type: 'error', message: 'Missing sessionId or content' })); return; }
+        if (
+          !rawSessionId ||
+          typeof rawSessionId !== 'string' ||
+          !rawContent ||
+          typeof rawContent !== 'string'
+        ) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Missing sessionId or content' }));
+          return;
+        }
         const sessionId = rawSessionId;
         const content = rawContent;
         // Validate session tag
@@ -480,35 +782,82 @@ export class ProjectData extends DurableObject<Env> {
         if (wsSessionTag) {
           const wsSessionId = wsSessionTag.slice('session:'.length);
           if (wsSessionId !== sessionId) {
-            log.error('websocket_session_mismatch', { wsSessionId, messageSessionId: sessionId, action: 'rejected' });
-            ws.send(JSON.stringify({ type: 'error', message: `Session mismatch: WebSocket connected to session ${wsSessionId}, but message targets ${sessionId}` }));
+            log.error('websocket_session_mismatch', {
+              wsSessionId,
+              messageSessionId: sessionId,
+              action: 'rejected',
+            });
+            ws.send(
+              JSON.stringify({
+                type: 'error',
+                message: `Session mismatch: WebSocket connected to session ${wsSessionId}, but message targets ${sessionId}`,
+              })
+            );
             return;
           }
         }
         // Validate session exists and is active
-        const targetSession = this.sql.exec('SELECT id, status FROM chat_sessions WHERE id = ?', sessionId).toArray()[0];
-        if (!targetSession) { ws.send(JSON.stringify({ type: 'error', message: `Session ${sessionId} not found` })); return; }
-        if (targetSession.status !== 'active') { ws.send(JSON.stringify({ type: 'error', message: `Session ${sessionId} is ${targetSession.status}, not active` })); return; }
+        const targetSession = this.sql
+          .exec('SELECT id, status FROM chat_sessions WHERE id = ?', sessionId)
+          .toArray()[0];
+        if (!targetSession) {
+          ws.send(JSON.stringify({ type: 'error', message: `Session ${sessionId} not found` }));
+          return;
+        }
+        if (targetSession.status !== 'active') {
+          ws.send(
+            JSON.stringify({
+              type: 'error',
+              message: `Session ${sessionId} is ${targetSession.status}, not active`,
+            })
+          );
+          return;
+        }
         const sanitizedRole = rawRole === 'user' ? 'user' : 'user'; // Only allow user role
         const trimmed = content.trim();
-        if (!trimmed || trimmed.length > 2000) { ws.send(JSON.stringify({ type: 'error', message: 'Message must be 1-2000 characters' })); return; }
+        if (!trimmed || trimmed.length > 2000) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Message must be 1-2000 characters' }));
+          return;
+        }
         try {
           const messageId = await this.persistMessage(sessionId, sanitizedRole, trimmed, null);
           ws.send(JSON.stringify({ type: 'message.ack', messageId, sessionId }));
         } catch (err) {
-          ws.send(JSON.stringify({ type: 'error', message: err instanceof Error ? err.message : 'Failed to persist message' }));
+          ws.send(
+            JSON.stringify({
+              type: 'error',
+              message: err instanceof Error ? err.message : 'Failed to persist message',
+            })
+          );
         }
       }
-    } catch { /* Ignore non-JSON messages */ }
+    } catch {
+      /* Ignore non-JSON messages */
+    }
   }
 
-  async webSocketClose(ws: WebSocket, _code: number, _reason: string, _wasClean: boolean): Promise<void> { ws.close(); }
-  async webSocketError(ws: WebSocket, _error: unknown): Promise<void> { ws.close(); }
+  async webSocketClose(
+    ws: WebSocket,
+    _code: number,
+    _reason: string,
+    _wasClean: boolean
+  ): Promise<void> {
+    ws.close();
+  }
+  async webSocketError(ws: WebSocket, _error: unknown): Promise<void> {
+    ws.close();
+  }
 
   // --- Knowledge Graph ---
 
   async createKnowledgeEntity(name: string, entityType: string, description: string | null) {
-    const { id, now } = knowledge.createEntity(this.sql, this.env, name, entityType as Parameters<typeof knowledge.createEntity>[3], description);
+    const { id, now } = knowledge.createEntity(
+      this.sql,
+      this.env,
+      name,
+      entityType as Parameters<typeof knowledge.createEntity>[3],
+      description
+    );
     this.broadcastEvent('knowledge.entity.created', { id, name, entityType });
     return { id, createdAt: now };
   }
@@ -525,8 +874,15 @@ export class ProjectData extends DurableObject<Env> {
     return knowledge.listEntities(this.sql, entityType, limit, offset);
   }
 
-  async updateKnowledgeEntity(entityId: string, updates: { name?: string; entityType?: string; description?: string | null }) {
-    const result = knowledge.updateEntity(this.sql, entityId, updates as Parameters<typeof knowledge.updateEntity>[2]);
+  async updateKnowledgeEntity(
+    entityId: string,
+    updates: { name?: string; entityType?: string; description?: string | null }
+  ) {
+    const result = knowledge.updateEntity(
+      this.sql,
+      entityId,
+      updates as Parameters<typeof knowledge.updateEntity>[2]
+    );
     this.broadcastEvent('knowledge.entity.updated', { entityId });
     return result;
   }
@@ -536,13 +892,31 @@ export class ProjectData extends DurableObject<Env> {
     this.broadcastEvent('knowledge.entity.deleted', { entityId });
   }
 
-  async addKnowledgeObservation(entityId: string, content: string, confidence: number, sourceType: string, sourceSessionId: string | null) {
-    const { id, now } = knowledge.addObservation(this.sql, this.env, entityId, content, confidence, sourceType as Parameters<typeof knowledge.addObservation>[5], sourceSessionId);
+  async addKnowledgeObservation(
+    entityId: string,
+    content: string,
+    confidence: number,
+    sourceType: string,
+    sourceSessionId: string | null
+  ) {
+    const { id, now } = knowledge.addObservation(
+      this.sql,
+      this.env,
+      entityId,
+      content,
+      confidence,
+      sourceType as Parameters<typeof knowledge.addObservation>[5],
+      sourceSessionId
+    );
     this.broadcastEvent('knowledge.observation.added', { id, entityId });
     return { id, createdAt: now };
   }
 
-  async updateKnowledgeObservation(observationId: string, newContent: string, confidence: number | null) {
+  async updateKnowledgeObservation(
+    observationId: string,
+    newContent: string,
+    confidence: number | null
+  ) {
     const result = knowledge.updateObservation(this.sql, observationId, newContent, confidence);
     this.broadcastEvent('knowledge.observation.updated', { id: result.id });
     return result;
@@ -561,7 +935,12 @@ export class ProjectData extends DurableObject<Env> {
     return knowledge.getObservationsForEntity(this.sql, entityId, includeInactive);
   }
 
-  async searchKnowledgeObservations(query: string, entityType: string | null, minConfidence: number | null, limit: number) {
+  async searchKnowledgeObservations(
+    query: string,
+    entityType: string | null,
+    minConfidence: number | null,
+    limit: number
+  ) {
     return knowledge.searchObservations(this.sql, query, entityType, minConfidence, limit);
   }
 
@@ -573,8 +952,19 @@ export class ProjectData extends DurableObject<Env> {
     return knowledge.getAllHighConfidenceKnowledge(this.sql, minConfidence, limit);
   }
 
-  async createKnowledgeRelation(sourceEntityId: string, targetEntityId: string, relationType: string, description: string | null) {
-    const result = knowledge.createRelation(this.sql, sourceEntityId, targetEntityId, relationType as Parameters<typeof knowledge.createRelation>[3], description);
+  async createKnowledgeRelation(
+    sourceEntityId: string,
+    targetEntityId: string,
+    relationType: string,
+    description: string | null
+  ) {
+    const result = knowledge.createRelation(
+      this.sql,
+      sourceEntityId,
+      targetEntityId,
+      relationType as Parameters<typeof knowledge.createRelation>[3],
+      description
+    );
     this.broadcastEvent('knowledge.relation.created', { id: result.id });
     return result;
   }
@@ -583,17 +973,36 @@ export class ProjectData extends DurableObject<Env> {
     return knowledge.getRelated(this.sql, entityId, relationType);
   }
 
-  async flagKnowledgeContradiction(existingObservationId: string, newObservation: string, sourceSessionId: string | null) {
-    return knowledge.flagContradiction(this.sql, this.env, existingObservationId, newObservation, sourceSessionId);
+  async flagKnowledgeContradiction(
+    existingObservationId: string,
+    newObservation: string,
+    sourceSessionId: string | null
+  ) {
+    return knowledge.flagContradiction(
+      this.sql,
+      this.env,
+      existingObservationId,
+      newObservation,
+      sourceSessionId
+    );
   }
 
   // --- Agent Mailbox (Durable Messaging) ---
 
-  async enqueueMailboxMessage(opts: Parameters<typeof mailbox.enqueueMessage>[1]): Promise<ReturnType<typeof mailbox.enqueueMessage>> {
+  async enqueueMailboxMessage(
+    opts: Parameters<typeof mailbox.enqueueMessage>[1]
+  ): Promise<ReturnType<typeof mailbox.enqueueMessage>> {
     const msg = mailbox.enqueueMessage(this.sql, opts);
-    this.broadcastEvent('mailbox.enqueued', { messageId: msg.id, messageClass: msg.messageClass, targetSessionId: msg.targetSessionId });
+    this.broadcastEvent('mailbox.enqueued', {
+      messageId: msg.id,
+      messageClass: msg.messageClass,
+      targetSessionId: msg.targetSessionId,
+    });
     this.recalculateAlarm().catch((err) =>
-      log.warn('schedule_mailbox_alarm_failed', { messageId: msg.id, error: err instanceof Error ? err.message : String(err) }),
+      log.warn('schedule_mailbox_alarm_failed', {
+        messageId: msg.id,
+        error: err instanceof Error ? err.message : String(err),
+      })
     );
     return msg;
   }
@@ -646,21 +1055,44 @@ export class ProjectData extends DurableObject<Env> {
 
   // --- Mission State & Handoffs ---
 
-  async createMissionStateEntry(missionId: string, entryType: string, title: string, content: string | null, sourceTaskId: string | null, limits: import('@simple-agent-manager/shared').MissionStateLimits) {
-    const result = missionState.createMissionStateEntry(this.sql, missionId, entryType as Parameters<typeof missionState.createMissionStateEntry>[2], title, content, sourceTaskId, limits);
+  async createMissionStateEntry(
+    missionId: string,
+    entryType: string,
+    title: string,
+    content: string | null,
+    sourceTaskId: string | null,
+    limits: import('@simple-agent-manager/shared').MissionStateLimits
+  ) {
+    const result = missionState.createMissionStateEntry(
+      this.sql,
+      missionId,
+      entryType as Parameters<typeof missionState.createMissionStateEntry>[2],
+      title,
+      content,
+      sourceTaskId,
+      limits
+    );
     this.broadcastEvent('mission.state.created', { id: result.id, missionId, entryType });
     return result;
   }
 
   async getMissionStateEntries(missionId: string, entryType: string | null) {
-    return missionState.getMissionStateEntries(this.sql, missionId, entryType as Parameters<typeof missionState.getMissionStateEntries>[2] | undefined);
+    return missionState.getMissionStateEntries(
+      this.sql,
+      missionId,
+      entryType as Parameters<typeof missionState.getMissionStateEntries>[2] | undefined
+    );
   }
 
   async getMissionStateEntry(entryId: string) {
     return missionState.getMissionStateEntry(this.sql, entryId);
   }
 
-  async updateMissionStateEntry(entryId: string, updates: { title?: string; content?: string | null }, limits: import('@simple-agent-manager/shared').MissionStateLimits) {
+  async updateMissionStateEntry(
+    entryId: string,
+    updates: { title?: string; content?: string | null },
+    limits: import('@simple-agent-manager/shared').MissionStateLimits
+  ) {
     missionState.updateMissionStateEntry(this.sql, entryId, updates, limits);
     this.broadcastEvent('mission.state.updated', { id: entryId });
   }
@@ -672,13 +1104,34 @@ export class ProjectData extends DurableObject<Env> {
   }
 
   async createHandoffPacket(
-    missionId: string, fromTaskId: string, toTaskId: string | null,
-    summary: string, facts: unknown[], openQuestions: string[],
-    artifactRefs: unknown[], suggestedActions: string[],
-    limits: import('@simple-agent-manager/shared').HandoffLimits,
+    missionId: string,
+    fromTaskId: string,
+    toTaskId: string | null,
+    summary: string,
+    facts: unknown[],
+    openQuestions: string[],
+    artifactRefs: unknown[],
+    suggestedActions: string[],
+    limits: import('@simple-agent-manager/shared').HandoffLimits
   ) {
-    const result = missionState.createHandoffPacket(this.sql, missionId, fromTaskId, toTaskId, summary, facts, openQuestions, artifactRefs, suggestedActions, limits);
-    this.broadcastEvent('mission.handoff.created', { id: result.id, missionId, fromTaskId, toTaskId });
+    const result = missionState.createHandoffPacket(
+      this.sql,
+      missionId,
+      fromTaskId,
+      toTaskId,
+      summary,
+      facts,
+      openQuestions,
+      artifactRefs,
+      suggestedActions,
+      limits
+    );
+    this.broadcastEvent('mission.handoff.created', {
+      id: result.id,
+      missionId,
+      fromTaskId,
+      toTaskId,
+    });
     return result;
   }
 
@@ -702,9 +1155,18 @@ export class ProjectData extends DurableObject<Env> {
     content: string,
     source: import('@simple-agent-manager/shared').PolicySource,
     sourceSessionId: string | null,
-    confidence: number,
+    confidence: number
   ) {
-    const result = policies.createPolicy(this.sql, this.env, category, title, content, source, sourceSessionId, confidence);
+    const result = policies.createPolicy(
+      this.sql,
+      this.env,
+      category,
+      title,
+      content,
+      source,
+      sourceSessionId,
+      confidence
+    );
     this.broadcastEvent('policy.created', { id: result.id, category, title });
     return result;
   }
@@ -717,7 +1179,16 @@ export class ProjectData extends DurableObject<Env> {
     return policies.listPolicies(this.sql, category, activeOnly, limit, offset);
   }
 
-  async updatePolicy(policyId: string, updates: { title?: string; content?: string; category?: import('@simple-agent-manager/shared').PolicyCategory; active?: boolean; confidence?: number }) {
+  async updatePolicy(
+    policyId: string,
+    updates: {
+      title?: string;
+      content?: string;
+      category?: import('@simple-agent-manager/shared').PolicyCategory;
+      active?: boolean;
+      confidence?: number;
+    }
+  ) {
     const result = policies.updatePolicy(this.sql, policyId, updates);
     if (result) this.broadcastEvent('policy.updated', { id: policyId });
     return result;
@@ -738,7 +1209,10 @@ export class ProjectData extends DurableObject<Env> {
   private addBaseDomain(row: Record<string, unknown>): Record<string, unknown> {
     const workspaceId = typeof row.workspaceId === 'string' ? row.workspaceId : null;
     const baseDomain = this.env.BASE_DOMAIN;
-    return { ...row, workspaceUrl: workspaceId && baseDomain ? `https://ws-${workspaceId}.${baseDomain}` : null };
+    return {
+      ...row,
+      workspaceUrl: workspaceId && baseDomain ? `https://ws-${workspaceId}.${baseDomain}` : null,
+    };
   }
 
   private async recalculateAlarm(): Promise<void> {
@@ -757,14 +1231,31 @@ export class ProjectData extends DurableObject<Env> {
       const sessionSockets = this.ctx.getWebSockets(`session:${sessionId}`);
       const allSockets = this.ctx.getWebSockets();
       const sent = new Set<WebSocket>();
-      for (const ws of sessionSockets) { try { ws.send(message); sent.add(ws); } catch { /* closed */ } }
+      for (const ws of sessionSockets) {
+        try {
+          ws.send(message);
+          sent.add(ws);
+        } catch {
+          /* closed */
+        }
+      }
       for (const ws of allSockets) {
         if (sent.has(ws)) continue;
         if (this.ctx.getTags(ws).some((t) => t.startsWith('session:'))) continue;
-        try { ws.send(message); } catch { /* closed */ }
+        try {
+          ws.send(message);
+        } catch {
+          /* closed */
+        }
       }
     } else {
-      for (const ws of this.ctx.getWebSockets()) { try { ws.send(message); } catch { /* closed */ } }
+      for (const ws of this.ctx.getWebSockets()) {
+        try {
+          ws.send(message);
+        } catch {
+          /* closed */
+        }
+      }
     }
   }
 
@@ -773,23 +1264,42 @@ export class ProjectData extends DurableObject<Env> {
     if (this.summarySyncTimer !== null) clearTimeout(this.summarySyncTimer);
     this.summarySyncTimer = setTimeout(async () => {
       this.summarySyncTimer = null;
-      try { await this.syncSummaryToD1(); } catch (err) { log.error('summary_sync_to_d1_failed', serializeError(err)); }
+      try {
+        await this.syncSummaryToD1();
+      } catch (err) {
+        log.error('summary_sync_to_d1_failed', serializeError(err));
+      }
     }, debounceMs);
   }
 
   private async syncSummaryToD1(): Promise<void> {
     const projectId = this.getProjectId();
-    if (!projectId) { log.warn('summary_sync_skipped_no_project_id'); return; }
+    if (!projectId) {
+      log.warn('summary_sync_skipped_no_project_id');
+      return;
+    }
     const summary = await this.getSummary();
     try {
-      await this.env.DATABASE.prepare('UPDATE projects SET last_activity_at = ?, active_session_count = ?, updated_at = ? WHERE id = ?')
-        .bind(summary.lastActivityAt, summary.activeSessionCount, new Date().toISOString(), projectId).run();
-    } catch (err) { log.error('d1_summary_sync_failed', { projectId, ...serializeError(err) }); }
+      await this.env.DATABASE.prepare(
+        'UPDATE projects SET last_activity_at = ?, active_session_count = ?, updated_at = ? WHERE id = ?'
+      )
+        .bind(
+          summary.lastActivityAt,
+          summary.activeSessionCount,
+          new Date().toISOString(),
+          projectId
+        )
+        .run();
+    } catch (err) {
+      log.error('d1_summary_sync_failed', { projectId, ...serializeError(err) });
+    }
 
     // Sync session summaries to D1 for cross-project queries
     try {
       await this.syncSessionSummariesToD1(projectId);
-    } catch (err) { log.error('d1_session_summary_sync_failed', { projectId, ...serializeError(err) }); }
+    } catch (err) {
+      log.error('d1_session_summary_sync_failed', { projectId, ...serializeError(err) });
+    }
   }
 
   /** Batch-sync session metadata from DO SQLite to D1 session_summaries table. */

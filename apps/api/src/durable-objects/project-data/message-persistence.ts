@@ -119,7 +119,7 @@ export async function persistMessageBatchWithSideEffects(
 
   const latestMessageAt = result.persistedMessages.reduce(
     (latest, message) => Math.max(latest, message.createdAt),
-    0,
+    0
   );
   if (latestMessageAt > 0) {
     sessionState.refreshWorkingActivityForChatSession(sql, sessionId, latestMessageAt);
@@ -147,9 +147,9 @@ async function resolveAttentionForRoles(
   sql: SqlStorage,
   hooks: MessagePersistenceHooks,
   sessionId: string,
-  persistedMessages: Array<{ id: string; role: string }>
+  persistedMessages: Array<{ id: string; role: string; origin?: string | null }>
 ): Promise<void> {
-  const firstUserMsg = persistedMessages.find((m) => m.role === 'user');
+  const firstUserMsg = persistedMessages.find((m) => m.role === 'user' && m.origin !== 'system');
   const firstAssistantMsg = persistedMessages.find((m) => m.role === 'assistant');
   let resolved = 0;
   let reason: string | null = null;

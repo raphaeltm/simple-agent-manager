@@ -1208,6 +1208,22 @@ func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request)
 	})
 }
 
+func buildInitialPromptParams(initialPrompt, injectedInstructions string) ([]byte, error) {
+	promptBlocks := []map[string]interface{}{
+		{"type": "text", "text": initialPrompt},
+	}
+	if strings.TrimSpace(injectedInstructions) != "" {
+		promptBlocks = append(promptBlocks, map[string]interface{}{
+			"type":  "text",
+			"text":  injectedInstructions,
+			"_meta": map[string]interface{}{acp.MetaOriginKey: acp.OriginSystem},
+		})
+	}
+	return json.Marshal(map[string]interface{}{
+		"prompt": promptBlocks,
+	})
+}
+
 // startAgentWithPrompt runs SelectAgent and then sends the initial prompt.
 // Called as a goroutine from handleStartAgentSession.
 func (s *Server) startAgentWithPrompt(host *acp.SessionHost, workspaceID, sessionID, agentType, initialPrompt, injectedInstructions string) {
@@ -1259,19 +1275,11 @@ func (s *Server) startAgentWithPrompt(host *acp.SessionHost, workspaceID, sessio
 	// INBOUND JSON-RPC params (parsed by parsePromptBlocks) — it is read in-process
 	// before any SDK marshaling, so it reaches persistence even though the SDK
 	// strips _meta on outbound serialization.
-	promptBlocks := []map[string]interface{}{
-		{"type": "text", "text": initialPrompt},
+	promptParams, err := buildInitialPromptParams(initialPrompt, injectedInstructions)
+	if err != nil {
+		slog.Error("Failed to encode initial prompt", "workspace", workspaceID, "session", sessionID, "error", err)
+		return
 	}
-	if strings.TrimSpace(injectedInstructions) != "" {
-		promptBlocks = append(promptBlocks, map[string]interface{}{
-			"type":  "text",
-			"text":  injectedInstructions,
-			"_meta": map[string]interface{}{acp.MetaOriginKey: acp.OriginSystem},
-		})
-	}
-	promptParams, _ := json.Marshal(map[string]interface{}{
-		"prompt": promptBlocks,
-	})
 	syntheticReqID, _ := json.Marshal("server-initiated-1")
 
 	// HandlePrompt blocks until the agent completes. The OnPromptComplete

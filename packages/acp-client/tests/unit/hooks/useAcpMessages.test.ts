@@ -3,11 +3,11 @@ import { act, renderHook } from '@testing-library/react';
 import { useAcpMessages } from '../../../src/hooks/useAcpMessages';
 import type { AcpMessage } from '../../../src/hooks/useAcpSession';
 
-function sessionUpdateMessage(update: Record<string, unknown>): AcpMessage {
+function sessionUpdateMessage(update: Record<string, unknown>, origin?: string): AcpMessage {
   return {
     jsonrpc: '2.0',
     method: 'session/update',
-    params: { update },
+    params: { update, ...(origin ? { origin } : {}) },
   } as AcpMessage;
 }
 
@@ -19,7 +19,8 @@ describe('useAcpMessages tool call parsing', () => {
       agentType: 'claude-code',
       recovered: true,
       message: 'Claude Code exited unexpectedly. SAM restored the saved ACP session.',
-      attribution: "The crash points to a bug in Claude Code's agent process, not SAM's workspace runner.",
+      attribution:
+        "The crash points to a bug in Claude Code's agent process, not SAM's workspace runner.",
       stderr: 'peer disconnected before response',
       stderrTruncated: false,
       suggestion: 'Review stderr before sharing it with Anthropic support.',
@@ -45,18 +46,20 @@ describe('useAcpMessages tool call parsing', () => {
     const { result } = renderHook(() => useAcpMessages());
 
     act(() => {
-      result.current.processMessage(sessionUpdateMessage({
-        sessionUpdate: 'tool_call',
-        toolCallId: 'tc-1',
-        title: '`pwd`',
-        status: 'completed',
-        content: [
-          {
-            type: 'terminal',
-            output: [{ type: 'text', text: '/workspaces/hono' }],
-          },
-        ],
-      }));
+      result.current.processMessage(
+        sessionUpdateMessage({
+          sessionUpdate: 'tool_call',
+          toolCallId: 'tc-1',
+          title: '`pwd`',
+          status: 'completed',
+          content: [
+            {
+              type: 'terminal',
+              output: [{ type: 'text', text: '/workspaces/hono' }],
+            },
+          ],
+        })
+      );
     });
 
     const item = result.current.items.find((entry) => entry.kind === 'tool_call');
@@ -77,26 +80,28 @@ describe('useAcpMessages tool call parsing', () => {
     const { result } = renderHook(() => useAcpMessages());
 
     act(() => {
-      result.current.processMessage(sessionUpdateMessage({
-        sessionUpdate: 'tool_call',
-        toolCallId: 'tc-2',
-        title: 'Terminal execute',
-        status: 'in_progress',
-      }));
+      result.current.processMessage(
+        sessionUpdateMessage({
+          sessionUpdate: 'tool_call',
+          toolCallId: 'tc-2',
+          title: 'Terminal execute',
+          status: 'in_progress',
+        })
+      );
 
-      result.current.processMessage(sessionUpdateMessage({
-        sessionUpdate: 'tool_call_update',
-        toolCallId: 'tc-2',
-        status: 'completed',
-        content: [
-          {
-            type: 'content',
-            content: [
-              { type: 'text', text: 'Command completed successfully' },
-            ],
-          },
-        ],
-      }));
+      result.current.processMessage(
+        sessionUpdateMessage({
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'tc-2',
+          status: 'completed',
+          content: [
+            {
+              type: 'content',
+              content: [{ type: 'text', text: 'Command completed successfully' }],
+            },
+          ],
+        })
+      );
     });
 
     const item = result.current.items.find(
@@ -120,24 +125,33 @@ describe('useAcpMessages tool call parsing', () => {
 
     act(() => {
       // Initial call: adapter sends _meta.claudeCode.toolName + rawInput (args)
-      result.current.processMessage(sessionUpdateMessage({
-        sessionUpdate: 'tool_call',
-        toolCallId: 'tc-doc',
-        title: 'Display document',
-        status: 'pending',
-        _meta: { claudeCode: { toolName: 'mcp__sam-mcp__display_from_library' } },
-        rawInput: { fileId: 'file-1', caption: 'the auth doc' },
-      }));
+      result.current.processMessage(
+        sessionUpdateMessage({
+          sessionUpdate: 'tool_call',
+          toolCallId: 'tc-doc',
+          title: 'Display document',
+          status: 'pending',
+          _meta: { claudeCode: { toolName: 'mcp__sam-mcp__display_from_library' } },
+          rawInput: { fileId: 'file-1', caption: 'the auth doc' },
+        })
+      );
 
       // Result update: adapter sends toolName + rawOutput (MCP content array),
       // but no rawInput. rawInput must survive.
-      result.current.processMessage(sessionUpdateMessage({
-        sessionUpdate: 'tool_call_update',
-        toolCallId: 'tc-doc',
-        status: 'completed',
-        _meta: { claudeCode: { toolName: 'mcp__sam-mcp__display_from_library' } },
-        rawOutput: [{ type: 'text', text: '{"fileId":"file-1","filename":"auth.md","mimeType":"text/markdown","sizeBytes":1234}' }],
-      }));
+      result.current.processMessage(
+        sessionUpdateMessage({
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'tc-doc',
+          status: 'completed',
+          _meta: { claudeCode: { toolName: 'mcp__sam-mcp__display_from_library' } },
+          rawOutput: [
+            {
+              type: 'text',
+              text: '{"fileId":"file-1","filename":"auth.md","mimeType":"text/markdown","sizeBytes":1234}',
+            },
+          ],
+        })
+      );
     });
 
     const item = result.current.items.find(
@@ -158,22 +172,26 @@ describe('useAcpMessages tool call parsing', () => {
     const { result } = renderHook(() => useAcpMessages());
 
     act(() => {
-      result.current.processMessage(sessionUpdateMessage({
-        sessionUpdate: 'tool_call',
-        toolCallId: 'tc-keep',
-        title: 'Upload document',
-        status: 'in_progress',
-        _meta: { claudeCode: { toolName: 'mcp__sam-mcp__upload_to_library' } },
-        rawInput: { filePath: '/tmp/doc.md' },
-        rawOutput: [{ type: 'text', text: '{"fileId":"f-keep"}' }],
-      }));
+      result.current.processMessage(
+        sessionUpdateMessage({
+          sessionUpdate: 'tool_call',
+          toolCallId: 'tc-keep',
+          title: 'Upload document',
+          status: 'in_progress',
+          _meta: { claudeCode: { toolName: 'mcp__sam-mcp__upload_to_library' } },
+          rawInput: { filePath: '/tmp/doc.md' },
+          rawOutput: [{ type: 'text', text: '{"fileId":"f-keep"}' }],
+        })
+      );
 
       // A bare status change with no _meta / rawInput / rawOutput.
-      result.current.processMessage(sessionUpdateMessage({
-        sessionUpdate: 'tool_call_update',
-        toolCallId: 'tc-keep',
-        status: 'completed',
-      }));
+      result.current.processMessage(
+        sessionUpdateMessage({
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'tc-keep',
+          status: 'completed',
+        })
+      );
     });
 
     const item = result.current.items.find(
@@ -200,14 +218,16 @@ describe('useAcpMessages available_commands_update', () => {
     const { result } = renderHook(() => useAcpMessages());
 
     act(() => {
-      result.current.processMessage(sessionUpdateMessage({
-        sessionUpdate: 'available_commands_update',
-        availableCommands: [
-          { name: 'compact', description: 'Compress conversation context' },
-          { name: 'model', description: 'Switch between models' },
-          { name: 'help' },
-        ],
-      }));
+      result.current.processMessage(
+        sessionUpdateMessage({
+          sessionUpdate: 'available_commands_update',
+          availableCommands: [
+            { name: 'compact', description: 'Compress conversation context' },
+            { name: 'model', description: 'Switch between models' },
+            { name: 'help' },
+          ],
+        })
+      );
     });
 
     expect(result.current.availableCommands).toHaveLength(3);
@@ -233,24 +253,26 @@ describe('useAcpMessages available_commands_update', () => {
     const { result } = renderHook(() => useAcpMessages());
 
     act(() => {
-      result.current.processMessage(sessionUpdateMessage({
-        sessionUpdate: 'available_commands_update',
-        availableCommands: [
-          { name: 'compact', description: 'First' },
-          { name: 'model', description: 'Second' },
-        ],
-      }));
+      result.current.processMessage(
+        sessionUpdateMessage({
+          sessionUpdate: 'available_commands_update',
+          availableCommands: [
+            { name: 'compact', description: 'First' },
+            { name: 'model', description: 'Second' },
+          ],
+        })
+      );
     });
 
     expect(result.current.availableCommands).toHaveLength(2);
 
     act(() => {
-      result.current.processMessage(sessionUpdateMessage({
-        sessionUpdate: 'available_commands_update',
-        availableCommands: [
-          { name: 'review', description: 'Review code' },
-        ],
-      }));
+      result.current.processMessage(
+        sessionUpdateMessage({
+          sessionUpdate: 'available_commands_update',
+          availableCommands: [{ name: 'review', description: 'Review code' }],
+        })
+      );
     });
 
     expect(result.current.availableCommands).toHaveLength(1);
@@ -261,12 +283,12 @@ describe('useAcpMessages available_commands_update', () => {
     const { result } = renderHook(() => useAcpMessages());
 
     act(() => {
-      result.current.processMessage(sessionUpdateMessage({
-        sessionUpdate: 'available_commands_update',
-        availableCommands: [
-          { name: 'compact', description: 'Compress' },
-        ],
-      }));
+      result.current.processMessage(
+        sessionUpdateMessage({
+          sessionUpdate: 'available_commands_update',
+          availableCommands: [{ name: 'compact', description: 'Compress' }],
+        })
+      );
     });
 
     expect(result.current.items).toHaveLength(0);
@@ -276,10 +298,12 @@ describe('useAcpMessages available_commands_update', () => {
     const { result } = renderHook(() => useAcpMessages());
 
     act(() => {
-      result.current.processMessage(sessionUpdateMessage({
-        sessionUpdate: 'available_commands_update',
-        // No availableCommands field
-      }));
+      result.current.processMessage(
+        sessionUpdateMessage({
+          sessionUpdate: 'available_commands_update',
+          // No availableCommands field
+        })
+      );
     });
 
     expect(result.current.availableCommands).toEqual([]);
@@ -291,33 +315,35 @@ describe('useAcpMessages config_option_update', () => {
     const { result } = renderHook(() => useAcpMessages());
 
     act(() => {
-      result.current.processMessage(sessionUpdateMessage({
-        sessionUpdate: 'config_option_update',
-        configOptions: [
-          {
-            id: 'mode',
-            name: 'Mode',
-            category: 'mode',
-            type: 'select',
-            currentValue: 'bypassPermissions',
-            options: [
-              { value: 'default', name: 'Default' },
-              { value: 'bypassPermissions', name: 'Bypass Permissions' },
-            ],
-          },
-          {
-            id: 'model',
-            name: 'Model',
-            category: 'model',
-            type: 'select',
-            currentValue: 'claude-opus-4-6',
-            options: [
-              { value: 'default', name: 'Default' },
-              { value: 'claude-opus-4-6', name: 'Opus 4.6' },
-            ],
-          },
-        ],
-      }));
+      result.current.processMessage(
+        sessionUpdateMessage({
+          sessionUpdate: 'config_option_update',
+          configOptions: [
+            {
+              id: 'mode',
+              name: 'Mode',
+              category: 'mode',
+              type: 'select',
+              currentValue: 'bypassPermissions',
+              options: [
+                { value: 'default', name: 'Default' },
+                { value: 'bypassPermissions', name: 'Bypass Permissions' },
+              ],
+            },
+            {
+              id: 'model',
+              name: 'Model',
+              category: 'model',
+              type: 'select',
+              currentValue: 'claude-opus-4-6',
+              options: [
+                { value: 'default', name: 'Default' },
+                { value: 'claude-opus-4-6', name: 'Opus 4.6' },
+              ],
+            },
+          ],
+        })
+      );
     });
 
     expect(result.current.items).toEqual([]);
@@ -327,10 +353,12 @@ describe('useAcpMessages config_option_update', () => {
     const { result } = renderHook(() => useAcpMessages());
 
     act(() => {
-      result.current.processMessage(sessionUpdateMessage({
-        sessionUpdate: 'future_update',
-        payload: 'keep visible',
-      }));
+      result.current.processMessage(
+        sessionUpdateMessage({
+          sessionUpdate: 'future_update',
+          payload: 'keep visible',
+        })
+      );
     });
 
     expect(result.current.items).toHaveLength(1);
@@ -351,10 +379,12 @@ describe('useAcpMessages clear', () => {
     // Add some messages
     act(() => {
       result.current.addUserMessage('Hello');
-      result.current.processMessage(sessionUpdateMessage({
-        sessionUpdate: 'agent_message_chunk',
-        content: { type: 'text', text: 'Hi there' },
-      }));
+      result.current.processMessage(
+        sessionUpdateMessage({
+          sessionUpdate: 'agent_message_chunk',
+          content: { type: 'text', text: 'Hi there' },
+        })
+      );
     });
 
     expect(result.current.items).toHaveLength(2);
@@ -376,10 +406,12 @@ describe('useAcpMessages clear', () => {
 
     // Set some commands
     act(() => {
-      result.current.processMessage(sessionUpdateMessage({
-        sessionUpdate: 'available_commands_update',
-        availableCommands: [{ name: 'compact', description: 'Compress' }],
-      }));
+      result.current.processMessage(
+        sessionUpdateMessage({
+          sessionUpdate: 'available_commands_update',
+          availableCommands: [{ name: 'compact', description: 'Compress' }],
+        })
+      );
     });
 
     // Add and clear messages
@@ -426,10 +458,12 @@ describe('useAcpMessages starts empty (no persistence)', () => {
 
     act(() => {
       result.current.addUserMessage('First');
-      result.current.processMessage(sessionUpdateMessage({
-        sessionUpdate: 'agent_message_chunk',
-        content: { type: 'text', text: 'Response' },
-      }));
+      result.current.processMessage(
+        sessionUpdateMessage({
+          sessionUpdate: 'agent_message_chunk',
+          content: { type: 'text', text: 'Response' },
+        })
+      );
     });
 
     expect(result.current.items).toHaveLength(2);
@@ -446,14 +480,18 @@ describe('useAcpMessages prepareForReplay', () => {
     // Populate some state
     act(() => {
       result.current.addUserMessage('Hello');
-      result.current.processMessage(sessionUpdateMessage({
-        sessionUpdate: 'agent_message_chunk',
-        content: { type: 'text', text: 'Hi there' },
-      }));
-      result.current.processMessage(sessionUpdateMessage({
-        sessionUpdate: 'available_commands_update',
-        availableCommands: [{ name: 'compact', description: 'Compress' }],
-      }));
+      result.current.processMessage(
+        sessionUpdateMessage({
+          sessionUpdate: 'agent_message_chunk',
+          content: { type: 'text', text: 'Hi there' },
+        })
+      );
+      result.current.processMessage(
+        sessionUpdateMessage({
+          sessionUpdate: 'available_commands_update',
+          availableCommands: [{ name: 'compact', description: 'Compress' }],
+        })
+      );
     });
 
     expect(result.current.items).toHaveLength(2);
@@ -491,14 +529,18 @@ describe('useAcpMessages prepareForReplay', () => {
 
     // Simulate replayed messages arriving
     act(() => {
-      result.current.processMessage(sessionUpdateMessage({
-        sessionUpdate: 'user_message_chunk',
-        content: { type: 'text', text: 'Replayed user message' },
-      }));
-      result.current.processMessage(sessionUpdateMessage({
-        sessionUpdate: 'agent_message_chunk',
-        content: { type: 'text', text: 'Replayed agent message' },
-      }));
+      result.current.processMessage(
+        sessionUpdateMessage({
+          sessionUpdate: 'user_message_chunk',
+          content: { type: 'text', text: 'Replayed user message' },
+        })
+      );
+      result.current.processMessage(
+        sessionUpdateMessage({
+          sessionUpdate: 'agent_message_chunk',
+          content: { type: 'text', text: 'Replayed agent message' },
+        })
+      );
     });
 
     expect(result.current.items).toHaveLength(2);
@@ -541,10 +583,12 @@ describe('useAcpMessages memory safety: item cap', () => {
 
     act(() => {
       for (let i = 0; i < 600; i++) {
-        result.current.processMessage(sessionUpdateMessage({
-          sessionUpdate: 'user_message_chunk',
-          content: { type: 'text', text: `Replayed ${i}` },
-        }));
+        result.current.processMessage(
+          sessionUpdateMessage({
+            sessionUpdate: 'user_message_chunk',
+            content: { type: 'text', text: `Replayed ${i}` },
+          })
+        );
       }
     });
 
@@ -556,12 +600,14 @@ describe('useAcpMessages memory safety: item cap', () => {
 
     act(() => {
       for (let i = 0; i < 600; i++) {
-        result.current.processMessage(sessionUpdateMessage({
-          sessionUpdate: 'tool_call',
-          toolCallId: `tc-${i}`,
-          title: `Tool ${i}`,
-          status: 'completed',
-        }));
+        result.current.processMessage(
+          sessionUpdateMessage({
+            sessionUpdate: 'tool_call',
+            toolCallId: `tc-${i}`,
+            title: `Tool ${i}`,
+            status: 'completed',
+          })
+        );
       }
     });
 
@@ -577,10 +623,12 @@ describe('useAcpMessages memory safety: text length cap', () => {
     const chunk = 'x'.repeat(10_000);
     act(() => {
       for (let i = 0; i < 60; i++) {
-        result.current.processMessage(sessionUpdateMessage({
-          sessionUpdate: 'agent_message_chunk',
-          content: { type: 'text', text: chunk },
-        }));
+        result.current.processMessage(
+          sessionUpdateMessage({
+            sessionUpdate: 'agent_message_chunk',
+            content: { type: 'text', text: chunk },
+          })
+        );
       }
     });
 
@@ -600,10 +648,12 @@ describe('useAcpMessages memory safety: text length cap', () => {
     const chunk = 'y'.repeat(10_000);
     act(() => {
       for (let i = 0; i < 60; i++) {
-        result.current.processMessage(sessionUpdateMessage({
-          sessionUpdate: 'agent_thought_chunk',
-          content: { type: 'text', text: chunk },
-        }));
+        result.current.processMessage(
+          sessionUpdateMessage({
+            sessionUpdate: 'agent_thought_chunk',
+            content: { type: 'text', text: chunk },
+          })
+        );
       }
     });
 
@@ -629,17 +679,21 @@ describe('useAcpMessages efficient updates', () => {
     const userMessage = itemsAfterUser[0];
 
     act(() => {
-      result.current.processMessage(sessionUpdateMessage({
-        sessionUpdate: 'agent_message_chunk',
-        content: { type: 'text', text: 'First ' },
-      }));
+      result.current.processMessage(
+        sessionUpdateMessage({
+          sessionUpdate: 'agent_message_chunk',
+          content: { type: 'text', text: 'First ' },
+        })
+      );
     });
 
     act(() => {
-      result.current.processMessage(sessionUpdateMessage({
-        sessionUpdate: 'agent_message_chunk',
-        content: { type: 'text', text: 'Second' },
-      }));
+      result.current.processMessage(
+        sessionUpdateMessage({
+          sessionUpdate: 'agent_message_chunk',
+          content: { type: 'text', text: 'Second' },
+        })
+      );
     });
 
     // Should have 2 items: user message + streaming agent message
@@ -659,35 +713,37 @@ describe('useAcpMessages efficient updates', () => {
 
     // Add multiple tool calls
     act(() => {
-      result.current.processMessage(sessionUpdateMessage({
-        sessionUpdate: 'tool_call',
-        toolCallId: 'tc-1',
-        title: 'First Tool',
-        status: 'in_progress',
-      }));
-      result.current.processMessage(sessionUpdateMessage({
-        sessionUpdate: 'tool_call',
-        toolCallId: 'tc-2',
-        title: 'Second Tool',
-        status: 'in_progress',
-      }));
+      result.current.processMessage(
+        sessionUpdateMessage({
+          sessionUpdate: 'tool_call',
+          toolCallId: 'tc-1',
+          title: 'First Tool',
+          status: 'in_progress',
+        })
+      );
+      result.current.processMessage(
+        sessionUpdateMessage({
+          sessionUpdate: 'tool_call',
+          toolCallId: 'tc-2',
+          title: 'Second Tool',
+          status: 'in_progress',
+        })
+      );
     });
 
     // Update the first tool call
     act(() => {
-      result.current.processMessage(sessionUpdateMessage({
-        sessionUpdate: 'tool_call_update',
-        toolCallId: 'tc-1',
-        status: 'completed',
-      }));
+      result.current.processMessage(
+        sessionUpdateMessage({
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'tc-1',
+          status: 'completed',
+        })
+      );
     });
 
-    const tc1 = result.current.items.find(
-      (i) => i.kind === 'tool_call' && i.toolCallId === 'tc-1'
-    );
-    const tc2 = result.current.items.find(
-      (i) => i.kind === 'tool_call' && i.toolCallId === 'tc-2'
-    );
+    const tc1 = result.current.items.find((i) => i.kind === 'tool_call' && i.toolCallId === 'tc-1');
+    const tc2 = result.current.items.find((i) => i.kind === 'tool_call' && i.toolCallId === 'tc-2');
     expect(tc1?.kind === 'tool_call' && tc1.status).toBe('completed');
     expect(tc2?.kind === 'tool_call' && tc2.status).toBe('in_progress');
   });
@@ -697,12 +753,14 @@ describe('useAcpMessages efficient updates', () => {
 
     // Add a tool call, then flood with enough messages to prune it
     act(() => {
-      result.current.processMessage(sessionUpdateMessage({
-        sessionUpdate: 'tool_call',
-        toolCallId: 'tc-old',
-        title: 'Old Tool',
-        status: 'in_progress',
-      }));
+      result.current.processMessage(
+        sessionUpdateMessage({
+          sessionUpdate: 'tool_call',
+          toolCallId: 'tc-old',
+          title: 'Old Tool',
+          status: 'in_progress',
+        })
+      );
       for (let i = 0; i < 600; i++) {
         result.current.addUserMessage(`Flood ${i}`);
       }
@@ -717,11 +775,13 @@ describe('useAcpMessages efficient updates', () => {
     // Updating the pruned tool call should not throw or add items
     const countBefore = result.current.items.length;
     act(() => {
-      result.current.processMessage(sessionUpdateMessage({
-        sessionUpdate: 'tool_call_update',
-        toolCallId: 'tc-old',
-        status: 'completed',
-      }));
+      result.current.processMessage(
+        sessionUpdateMessage({
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'tc-old',
+          status: 'completed',
+        })
+      );
     });
     expect(result.current.items.length).toBe(countBefore);
   });
@@ -740,7 +800,10 @@ describe('useAcpMessages efficient updates', () => {
     act(() => {
       result.current.processMessage({
         jsonrpc: '2.0',
-        result: { stopReason: 'end', usage: { inputTokens: 10, outputTokens: 20, totalTokens: 30 } },
+        result: {
+          stopReason: 'end',
+          usage: { inputTokens: 10, outputTokens: 20, totalTokens: 30 },
+        },
       });
     });
 
@@ -756,10 +819,12 @@ describe('useAcpMessages user_message_chunk (LoadSession replay)', () => {
     const { result } = renderHook(() => useAcpMessages());
 
     act(() => {
-      result.current.processMessage(sessionUpdateMessage({
-        sessionUpdate: 'user_message_chunk',
-        content: { type: 'text', text: 'What is 2+2?' },
-      }));
+      result.current.processMessage(
+        sessionUpdateMessage({
+          sessionUpdate: 'user_message_chunk',
+          content: { type: 'text', text: 'What is 2+2?' },
+        })
+      );
     });
 
     expect(result.current.items).toHaveLength(1);
@@ -770,14 +835,40 @@ describe('useAcpMessages user_message_chunk (LoadSession replay)', () => {
     }
   });
 
+  it('preserves SAM-owned origin on live injected user messages', () => {
+    const { result } = renderHook(() => useAcpMessages());
+
+    act(() => {
+      result.current.processMessage(
+        sessionUpdateMessage(
+          {
+            sessionUpdate: 'user_message_chunk',
+            content: { type: 'text', text: 'Injected context' },
+          },
+          'system'
+        )
+      );
+    });
+
+    expect(result.current.items).toMatchObject([
+      {
+        kind: 'user_message',
+        text: 'Injected context',
+        origin: 'system',
+      },
+    ]);
+  });
+
   it('ignores empty user_message_chunk content', () => {
     const { result } = renderHook(() => useAcpMessages());
 
     act(() => {
-      result.current.processMessage(sessionUpdateMessage({
-        sessionUpdate: 'user_message_chunk',
-        content: { type: 'text', text: '' },
-      }));
+      result.current.processMessage(
+        sessionUpdateMessage({
+          sessionUpdate: 'user_message_chunk',
+          content: { type: 'text', text: '' },
+        })
+      );
     });
 
     expect(result.current.items).toHaveLength(0);
@@ -787,14 +878,18 @@ describe('useAcpMessages user_message_chunk (LoadSession replay)', () => {
     const { result } = renderHook(() => useAcpMessages());
 
     act(() => {
-      result.current.processMessage(sessionUpdateMessage({
-        sessionUpdate: 'user_message_chunk',
-        content: { type: 'text', text: 'Hello' },
-      }));
-      result.current.processMessage(sessionUpdateMessage({
-        sessionUpdate: 'agent_message_chunk',
-        content: { type: 'text', text: 'Hi there!' },
-      }));
+      result.current.processMessage(
+        sessionUpdateMessage({
+          sessionUpdate: 'user_message_chunk',
+          content: { type: 'text', text: 'Hello' },
+        })
+      );
+      result.current.processMessage(
+        sessionUpdateMessage({
+          sessionUpdate: 'agent_message_chunk',
+          content: { type: 'text', text: 'Hi there!' },
+        })
+      );
     });
 
     expect(result.current.items).toHaveLength(2);
@@ -814,10 +909,12 @@ describe('useAcpMessages user_message_chunk (LoadSession replay)', () => {
     expect(result.current.items).toHaveLength(1);
 
     act(() => {
-      result.current.processMessage(sessionUpdateMessage({
-        sessionUpdate: 'user_message_chunk',
-        content: { type: 'text', text: 'Fix the bug' },
-      }));
+      result.current.processMessage(
+        sessionUpdateMessage({
+          sessionUpdate: 'user_message_chunk',
+          content: { type: 'text', text: 'Fix the bug' },
+        })
+      );
     });
 
     // Should still be 1 — the duplicate was suppressed.
@@ -837,10 +934,12 @@ describe('useAcpMessages user_message_chunk (LoadSession replay)', () => {
 
     // A different user_message_chunk should NOT be deduped.
     act(() => {
-      result.current.processMessage(sessionUpdateMessage({
-        sessionUpdate: 'user_message_chunk',
-        content: { type: 'text', text: 'Different message from replay' },
-      }));
+      result.current.processMessage(
+        sessionUpdateMessage({
+          sessionUpdate: 'user_message_chunk',
+          content: { type: 'text', text: 'Different message from replay' },
+        })
+      );
     });
 
     expect(result.current.items).toHaveLength(2);
@@ -852,10 +951,12 @@ describe('useAcpMessages user_message_chunk (LoadSession replay)', () => {
     // During LoadSession replay, there's no prior addUserMessage call —
     // user_message_chunk should go through normally.
     act(() => {
-      result.current.processMessage(sessionUpdateMessage({
-        sessionUpdate: 'user_message_chunk',
-        content: { type: 'text', text: 'Replayed user message' },
-      }));
+      result.current.processMessage(
+        sessionUpdateMessage({
+          sessionUpdate: 'user_message_chunk',
+          content: { type: 'text', text: 'Replayed user message' },
+        })
+      );
     });
 
     expect(result.current.items).toHaveLength(1);

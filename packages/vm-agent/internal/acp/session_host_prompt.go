@@ -332,10 +332,17 @@ func (h *SessionHost) injectUserMessageNotifications(sessionID acpsdk.SessionId,
 			SessionId: sessionID,
 			Update:    acpsdk.UpdateUserMessage(block),
 		}
-		data, marshalErr := json.Marshal(map[string]interface{}{
+		params := map[string]any{
+			"sessionId": sessionID,
+			"update":    notif.Update,
+		}
+		if origin := contentBlockOrigin(block); origin != "" {
+			params["origin"] = origin
+		}
+		data, marshalErr := json.Marshal(map[string]any{
 			"jsonrpc": "2.0",
 			"method":  "session/update",
-			"params":  notif,
+			"params":  params,
 		})
 		if marshalErr != nil {
 			slog.Error("Failed to marshal synthetic user_message_chunk", "error", marshalErr)
