@@ -4,11 +4,12 @@
 
 Cloudflare Container instant workspaces lose their local disk after sleep. That currently means harness-native session state under `$HOME` and uncommitted repository work disappear when a sleeping cf-container workspace wakes. Phase 3a of idea `01KX4KSXEXQMP41KS34TW9EN01` must add a runtime-neutral hibernate/restore contract and wire the first consumer to the cf-container runtime.
 
-Hard constraints from Raphaël, 2026-07-11:
-- Open a draft PR only.
-- Do not merge.
-- Do not deploy to staging or mutate staging.
-- Verification is local only.
+Updated authorization from Raphaël, 2026-07-11:
+
+- The earlier draft-only and no-staging hold is superseded.
+- Complete the full `/do` workflow on existing PR #1562.
+- Staging end-to-end verification is required before merge.
+- Merge only after every required gate passes, then monitor production deployment.
 
 ## Research Findings
 
@@ -36,8 +37,9 @@ Hard constraints from Raphaël, 2026-07-11:
 - [x] Run migration safety checks: `pnpm quality:migration-safety` and `pnpm quality:do-migration-safety`.
 - [x] Run local quality gates: `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm build`, and package-specific tests.
 - [x] Run local specialist review skills and address findings.
-- [ ] Open draft PR with `needs-human-review`, explicit no-merge/no-staging language, and local-only verification evidence.
-- [ ] Append idea `01KX4KSXEXQMP41KS34TW9EN01` with branch, draft PR, and deferred staging/merge status. Leave the idea open.
+- [x] Opened draft PR with the earlier local-only evidence.
+- [ ] Replace draft-only evidence with completed specialist, staging, and preflight evidence; remove `needs-human-review` only after all reviews pass.
+- [ ] Update idea `01KX4KSXEXQMP41KS34TW9EN01` with final PR, staging, merge, and deployment evidence.
 
 ## Verification Notes
 
@@ -70,4 +72,11 @@ Hard constraints from Raphaël, 2026-07-11:
 - Ungraceful kills or expired/missing snapshots degrade visibly to existing transcript/fork behavior.
 - Timeouts for transfer work are progress/idle watchdogs, not fixed wall-clock caps.
 - Tests cover edge cases for public-repo privacy, huge files, repo operation states, missing/corrupt artifacts, retention expiry, and no secret leakage in logs/events.
-- The PR is draft-only, not merged, and staging verification is explicitly deferred per instruction.
+- PR #1562 passes local, specialist, CI, staging E2E, merge, and production-deploy gates under the superseding authorization.
+
+## Continuation Findings (PR #1562 landing pass)
+
+- The original Git WIP bundle path mutated the user's real index and branch; remediation now builds the snapshot commit from a temporary Git index and tests exact status/HEAD/branch preservation.
+- Restore checked out a temporary branch and attempted to delete it while current; remediation now imports the advertised bundle ref, materializes its tree, and leaves WIP uncommitted on the original branch.
+- R2 cleanup was not provisioned. Pulumi now owns a prefix-scoped lifecycle rule, and its positive TTL configuration is injected into the Worker so application expiry and object deletion stay aligned.
+- The initial PR exceeded the API file-size gate and omitted preflight/specialist evidence markers; the node snapshot wrappers are extracted and durable PR evidence must be added after final reviewers complete.
