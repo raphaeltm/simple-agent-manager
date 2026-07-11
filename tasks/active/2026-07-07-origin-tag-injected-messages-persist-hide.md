@@ -75,7 +75,7 @@ Web:
 - [x] `chatMessagesToConversationItems` sets origin.
 - [x] `AcpConversationItemView` renders origin=system user message collapsed (chevron/disclosure).
 - [x] Component test: origin=system renders collapsed; origin=user renders normally.
-- [ ] Playwright visual audit (mobile+desktop) for the collapsed state (rule 17).
+- [x] Playwright visual audit (mobile+desktop) for the collapsed state (rule 17).
 
 Additional end-to-end slices:
 
@@ -83,15 +83,15 @@ Additional end-to-end slices:
 - [x] Origin survives duplicate/status-only retries and appears in batch broadcast payloads.
 - [x] System-origin content bypasses user-content dedup and is excluded from LIKE/FTS search and topic/attention semantics.
 - [x] Old messages without origin map to normal user messages.
-- [ ] Add/run Playwright audits at 375px and 1280px with long injected and mixed content.
+- [x] Add/run Playwright audits at 375px and 1280px with long injected and mixed content.
 
 ## Acceptance criteria
 
-- [ ] A prompt block with `_meta.sam.origin=system` is persisted with `origin='system'` (Go + DO tests).
-- [ ] The persisted-message read path returns `origin` (Miniflare test).
-- [ ] The web collapses an origin=system user message and shows normal messages unchanged (component test).
-- [ ] Migration is additive (no DROP); `pnpm quality:migration-safety` passes.
-- [ ] Existing messages (no origin) default to 'user' and render normally (regression).
+- [x] A prompt block with `_meta.sam.origin=system` is persisted with `origin='system'` (Go + DO tests).
+- [x] The persisted-message read path returns `origin` (Miniflare test).
+- [x] The web collapses an origin=system user message and shows normal messages unchanged (component test).
+- [x] Migration is additive (no DROP); `pnpm quality:migration-safety` passes.
+- [x] Existing messages (no origin) default to 'user' and render normally (regression).
 
 ## Release constraints
 
