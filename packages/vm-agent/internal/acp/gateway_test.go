@@ -26,7 +26,7 @@ func TestGetAgentCommandInfo_OAuthToken(t *testing.T) {
 			credentialKind: "oauth-token",
 			wantCommand:    "claude-agent-acp",
 			wantEnvVar:     "CLAUDE_CODE_OAUTH_TOKEN",
-			wantInstallCmd: "npm install -g @zed-industries/claude-agent-acp",
+			wantInstallCmd: "npm install -g @agentclientprotocol/claude-agent-acp@0.58.1",
 		},
 		{
 			name:           "Claude Code with API key",
@@ -34,7 +34,7 @@ func TestGetAgentCommandInfo_OAuthToken(t *testing.T) {
 			credentialKind: "api-key",
 			wantCommand:    "claude-agent-acp",
 			wantEnvVar:     "ANTHROPIC_API_KEY",
-			wantInstallCmd: "npm install -g @zed-industries/claude-agent-acp",
+			wantInstallCmd: "npm install -g @agentclientprotocol/claude-agent-acp@0.58.1",
 		},
 		{
 			name:           "Claude Code with empty credential kind defaults to API key",
@@ -42,7 +42,7 @@ func TestGetAgentCommandInfo_OAuthToken(t *testing.T) {
 			credentialKind: "",
 			wantCommand:    "claude-agent-acp",
 			wantEnvVar:     "ANTHROPIC_API_KEY",
-			wantInstallCmd: "npm install -g @zed-industries/claude-agent-acp",
+			wantInstallCmd: "npm install -g @agentclientprotocol/claude-agent-acp@0.58.1",
 		},
 		{
 			name:              "OpenAI Codex with OAuth uses auth-file injection",
@@ -50,7 +50,7 @@ func TestGetAgentCommandInfo_OAuthToken(t *testing.T) {
 			credentialKind:    "oauth-token",
 			wantCommand:       "codex-acp",
 			wantEnvVar:        "",
-			wantInstallCmd:    "npm install -g @agentclientprotocol/codex-acp",
+			wantInstallCmd:    "npm install -g @agentclientprotocol/codex-acp@1.1.2",
 			wantInjectionMode: "auth-file",
 			wantAuthFilePath:  ".codex/auth.json",
 			wantArgs:          []string{"-c", `sandbox_mode="danger-full-access"`},
@@ -61,7 +61,7 @@ func TestGetAgentCommandInfo_OAuthToken(t *testing.T) {
 			credentialKind: "api-key",
 			wantCommand:    "codex-acp",
 			wantEnvVar:     "OPENAI_API_KEY",
-			wantInstallCmd: "npm install -g @agentclientprotocol/codex-acp",
+			wantInstallCmd: "npm install -g @agentclientprotocol/codex-acp@1.1.2",
 			wantArgs:       []string{"-c", `sandbox_mode="danger-full-access"`},
 		},
 		{
@@ -70,7 +70,7 @@ func TestGetAgentCommandInfo_OAuthToken(t *testing.T) {
 			credentialKind: "oauth-token",
 			wantCommand:    "gemini",
 			wantEnvVar:     "GEMINI_API_KEY",
-			wantInstallCmd: "npm install -g @google/gemini-cli",
+			wantInstallCmd: "npm install -g @google/gemini-cli@0.50.0",
 		},
 		{
 			name:           "Mistral Vibe uses API key",
@@ -78,7 +78,7 @@ func TestGetAgentCommandInfo_OAuthToken(t *testing.T) {
 			credentialKind: "api-key",
 			wantCommand:    "vibe-acp",
 			wantEnvVar:     "MISTRAL_API_KEY",
-			wantInstallCmd: `curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh && UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install mistral-vibe==2.7.0 --python 3.12 --quiet`,
+			wantInstallCmd: `curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh && UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install mistral-vibe==2.19.1 --python 3.12 --quiet`,
 		},
 		{
 			name:           "Amp uses API key",
@@ -86,7 +86,7 @@ func TestGetAgentCommandInfo_OAuthToken(t *testing.T) {
 			credentialKind: "api-key",
 			wantCommand:    "acp-amp",
 			wantEnvVar:     "AMP_API_KEY",
-			wantInstallCmd: `curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh && UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install acp-amp==0.1.3 --with agent-client-protocol==0.7.1 --with amp-sdk==0.1.2 --with pydantic==2.12.5 --with pydantic-core==2.41.5 --with annotated-types==0.7.0 --with typing-inspection==0.4.2 --with typing-extensions==4.15.0 --python 3.12 --quiet && npm install -g @sourcegraph/amp`,
+			wantInstallCmd: `curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh && UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install acp-amp==0.1.3 --with agent-client-protocol==0.7.1 --with amp-sdk==0.1.2 --with pydantic==2.12.5 --with pydantic-core==2.41.5 --with annotated-types==0.7.0 --with typing-inspection==0.4.2 --with typing-extensions==4.15.0 --python 3.12 --quiet && npm install -g @ampcode/cli@0.0.1783785389-g0da70d`,
 		},
 	}
 
@@ -256,7 +256,7 @@ func TestGetAgentCommandInfoClaudeCode(t *testing.T) {
 	if info.envVarName != "ANTHROPIC_API_KEY" {
 		t.Fatalf("envVarName=%q, want %q", info.envVarName, "ANTHROPIC_API_KEY")
 	}
-	if info.installCmd != "npm install -g @zed-industries/claude-agent-acp" {
+	if info.installCmd != "npm install -g @agentclientprotocol/claude-agent-acp@0.58.1" {
 		t.Fatalf("installCmd=%q, unexpected", info.installCmd)
 	}
 	if info.args != nil {
@@ -274,7 +274,7 @@ func TestGetAgentCommandInfoOpenAICodex(t *testing.T) {
 	if info.envVarName != "OPENAI_API_KEY" {
 		t.Fatalf("envVarName=%q, want %q", info.envVarName, "OPENAI_API_KEY")
 	}
-	if info.installCmd != "npm install -g @agentclientprotocol/codex-acp" {
+	if info.installCmd != "npm install -g @agentclientprotocol/codex-acp@1.1.2" {
 		t.Fatalf("installCmd=%q, unexpected", info.installCmd)
 	}
 	if info.injectionMode != "" {
@@ -301,7 +301,7 @@ func TestGetAgentCommandInfoOpenAICodexOAuth(t *testing.T) {
 	if info.envVarName != "" {
 		t.Fatalf("envVarName=%q, want empty for auth-file injection", info.envVarName)
 	}
-	if info.installCmd != "npm install -g @agentclientprotocol/codex-acp" {
+	if info.installCmd != "npm install -g @agentclientprotocol/codex-acp@1.1.2" {
 		t.Fatalf("installCmd=%q, unexpected", info.installCmd)
 	}
 	if len(info.args) != 2 || info.args[0] != "-c" || info.args[1] != `sandbox_mode="danger-full-access"` {
@@ -314,7 +314,7 @@ func TestAgentInstallScriptCleansBrokenGitHubCLIRepoBeforeNpmBootstrap(t *testin
 
 	info := agentCommandInfo{
 		command:    "claude-agent-acp",
-		installCmd: "npm install -g @zed-industries/claude-agent-acp",
+		installCmd: "npm install -g @agentclientprotocol/claude-agent-acp@0.58.1",
 		isNpmBased: true,
 	}
 
@@ -326,7 +326,7 @@ func TestAgentInstallScriptCleansBrokenGitHubCLIRepoBeforeNpmBootstrap(t *testin
 		`node_major="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)"`,
 		"npm install -g n",
 		"n 22",
-		"npm install -g @zed-industries/claude-agent-acp",
+		"npm install -g @agentclientprotocol/claude-agent-acp@0.58.1",
 	} {
 		if !strings.Contains(script, want) {
 			t.Fatalf("agentInstallScript missing %q in %q", want, script)
@@ -359,7 +359,7 @@ func TestGetAgentCommandInfoMistralVibe(t *testing.T) {
 	if info.envVarName != "MISTRAL_API_KEY" {
 		t.Fatalf("envVarName=%q, want %q", info.envVarName, "MISTRAL_API_KEY")
 	}
-	wantInstall := `curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh && UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install mistral-vibe==2.7.0 --python 3.12 --quiet`
+	wantInstall := `curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh && UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install mistral-vibe==2.19.1 --python 3.12 --quiet`
 	if info.installCmd != wantInstall {
 		t.Fatalf("installCmd=%q, want %q", info.installCmd, wantInstall)
 	}
@@ -405,7 +405,7 @@ func TestGetAgentCommandInfoAmp(t *testing.T) {
 	for _, want := range []string{
 		"uv tool install acp-amp==0.1.3",
 		"--with amp-sdk==0.1.2",
-		"npm install -g @sourcegraph/amp",
+		"npm install -g @ampcode/cli@0.0.1783785389-g0da70d",
 		"Patched acp-amp: error handling + MCP config wrapping",
 		"visibility default to private",
 	} {
@@ -414,7 +414,7 @@ func TestGetAgentCommandInfoAmp(t *testing.T) {
 		}
 	}
 	if !info.isNpmBased {
-		t.Fatalf("isNpmBased=false, want true (amp chains npm install for @sourcegraph/amp)")
+		t.Fatalf("isNpmBased=false, want true (amp chains npm install for @ampcode/cli@0.0.1783785389-g0da70d)")
 	}
 	if len(info.args) != 1 || info.args[0] != "run" {
 		t.Fatalf("args=%v, want [run]", info.args)
@@ -444,7 +444,7 @@ func TestAgentInstallScriptAmpIncludesNodeBootstrap(t *testing.T) {
 
 	info := getAgentCommandInfo("amp", "api-key")
 	script := agentInstallScript(info)
-	// Amp is isNpmBased=true because it chains `npm install -g @sourcegraph/amp`.
+	// Amp is isNpmBased=true because it chains `npm install -g @ampcode/cli@0.0.1783785389-g0da70d`.
 	// agentInstallScript must prepend the Node.js bootstrap preamble so npm is
 	// available in devcontainers that don't ship with Node.js.
 	if !strings.Contains(script, "apt-get install") {
@@ -454,7 +454,7 @@ func TestAgentInstallScriptAmpIncludesNodeBootstrap(t *testing.T) {
 	if !strings.Contains(script, "uv tool install acp-amp") {
 		t.Fatalf("agentInstallScript lost the uv install portion")
 	}
-	if !strings.Contains(script, "npm install -g @sourcegraph/amp") {
+	if !strings.Contains(script, "npm install -g @ampcode/cli@0.0.1783785389-g0da70d") {
 		t.Fatalf("agentInstallScript lost the npm install portion")
 	}
 }

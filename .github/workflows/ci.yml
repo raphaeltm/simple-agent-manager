@@ -311,6 +311,9 @@ jobs:
       - name: Validate wrangler binding consistency
         run: pnpm quality:wrangler-bindings
 
+      - name: Validate agent install manifest consistency
+        run: pnpm quality:agent-install-manifest
+
   code-quality:
     name: Code Quality Checks
     if: github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager'

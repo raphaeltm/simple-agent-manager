@@ -1,0 +1,57 @@
+[
+  {
+    "agentType": "claude-code",
+    "method": "npm",
+    "package": "@agentclientprotocol/claude-agent-acp",
+    "version": "0.58.1",
+    "bin": "claude-agent-acp"
+  },
+  {
+    "agentType": "openai-codex",
+    "method": "npm",
+    "package": "@agentclientprotocol/codex-acp",
+    "version": "1.1.2",
+    "bin": "codex-acp"
+  },
+  {
+    "agentType": "google-gemini",
+    "method": "npm",
+    "package": "@google/gemini-cli",
+    "version": "0.50.0",
+    "bin": "gemini"
+  },
+  {
+    "agentType": "mistral-vibe",
+    "method": "uv-tool",
+    "package": "mistral-vibe",
+    "version": "2.19.1",
+    "bin": "vibe-acp",
+    "python": "3.12"
+  },
+  {
+    "agentType": "opencode",
+    "method": "npm",
+    "package": "opencode-ai",
+    "version": "1.17.18",
+    "bin": "opencode"
+  },
+  {
+    "agentType": "amp",
+    "method": "uv-tool",
+    "package": "acp-amp",
+    "version": "0.1.3",
+    "bin": "acp-amp",
+    "python": "3.12",
+    "extraPackages": [
+      "agent-client-protocol==0.7.1",
+      "amp-sdk==0.1.2",
+      "pydantic==2.12.5",
+      "pydantic-core==2.41.5",
+      "annotated-types==0.7.0",
+      "typing-inspection==0.4.2",
+      "typing-extensions==4.15.0"
+    ],
+    "npmCompanion": { "package": "@ampcode/cli", "version": "0.0.1783785389-g0da70d" },
+    "postInstallHook": "amp-sdk-patch"
+  }
+]

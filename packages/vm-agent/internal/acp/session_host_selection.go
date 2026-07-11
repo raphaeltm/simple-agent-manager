@@ -114,6 +114,7 @@ func (h *SessionHost) failAgentSelection(agentType, source, message string, err 
 		detail = err.Error()
 	}
 	h.reportAgentError(agentType, source, message, detail)
+	h.persistAgentSelectionFailure(agentType, message)
 }
 
 func (h *SessionHost) reportCredentialFetched(agentType string, cred *agentCredential) {
