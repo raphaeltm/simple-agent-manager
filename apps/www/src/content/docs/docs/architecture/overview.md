@@ -66,14 +66,14 @@ graph TD
 
 Every request to `*.domain` passes through the same Cloudflare Worker. The `Host` header determines routing:
 
-| Pattern | Destination | How |
-|---------|-------------|-----|
-| `app.{domain}` | Cloudflare Pages | Worker proxies to `{project}.pages.dev` |
-| `api.{domain}` | Worker API routes | Direct handling by Hono router |
-| `ws-{id}.{domain}` | VM Agent on port 8443 | Worker proxies via `{nodeId}.vm.{domain}` backend hostname |
-| `ws-{id}--{port}.{domain}` | Workspace port proxy | Worker proxies to dev server running on `{port}` |
+| Pattern                                     | Destination             | How                                                                              |
+| ------------------------------------------- | ----------------------- | -------------------------------------------------------------------------------- |
+| `app.{domain}`                              | Cloudflare Pages        | Worker proxies to `{project}.pages.dev`                                          |
+| `api.{domain}`                              | Worker API routes       | Direct handling by Hono router                                                   |
+| `ws-{id}.{domain}`                          | VM Agent on port 8443   | Worker proxies via `{nodeId}.vm.{domain}` backend hostname                       |
+| `ws-{id}--{port}.{domain}`                  | Workspace port proxy    | Worker proxies to dev server running on `{port}`                                 |
 | `r{N}-{service}-{port}-{env}.apps.{domain}` | Deployment public route | DNS-only A record points at the deployment node; node-local Caddy terminates TLS |
-| `*.{domain}` (other) | 404 | No matching route |
+| `*.{domain}` (other)                        | 404                     | No matching route                                                                |
 
 :::note[Why backend hostnames?]
 Cloudflare Workers can't fetch IP addresses directly (Error 1003). Node backend DNS records (`{nodeId}.vm.{domain}` → VM IP) are created so the Worker can proxy through hostnames, with `*.vm.{domain}` excluded from the Worker route.
@@ -101,22 +101,22 @@ The API Worker (`apps/api/`) is a Hono application handling:
 
 ### Key Route Groups
 
-| Route | Purpose |
-|-------|---------|
-| `/api/auth/*` | GitHub OAuth sign-in/out, sessions |
-| `/api/nodes/*` | Node CRUD, lifecycle, health callbacks |
-| `/api/workspaces/*` | Workspace CRUD, lifecycle, boot logs, agent sessions |
-| `/api/projects/*` | Project CRUD, runtime config, ideas, chat sessions, file proxy |
-| `/api/credentials/*` | Cloud provider + agent API key management |
-| `/api/notifications/*` | Notification list, read/dismiss, preferences, WebSocket |
-| `/api/tasks/*` | Idea submission, lifecycle, status updates |
-| `/api/github/*` | GitHub App installations, repos |
-| `/api/terminal/token` | Workspace JWT for WebSocket auth |
-| `/api/agent/*` | VM Agent binary download |
-| `/api/bootstrap/:token` | One-time credential injection |
-| `/api/admin/*` | Admin dashboard, error logs, real-time log stream |
-| `/api/tts/*` | Text-to-speech synthesis |
-| `/api/transcribe` | Voice-to-text transcription |
+| Route                   | Purpose                                                        |
+| ----------------------- | -------------------------------------------------------------- |
+| `/api/auth/*`           | GitHub OAuth sign-in/out, sessions                             |
+| `/api/nodes/*`          | Node CRUD, lifecycle, health callbacks                         |
+| `/api/workspaces/*`     | Workspace CRUD, lifecycle, boot logs, agent sessions           |
+| `/api/projects/*`       | Project CRUD, runtime config, ideas, chat sessions, file proxy |
+| `/api/credentials/*`    | Cloud provider + agent API key management                      |
+| `/api/notifications/*`  | Notification list, read/dismiss, preferences, WebSocket        |
+| `/api/tasks/*`          | Idea submission, lifecycle, status updates                     |
+| `/api/github/*`         | GitHub App installations, repos                                |
+| `/api/terminal/token`   | Workspace JWT for WebSocket auth                               |
+| `/api/agent/*`          | VM Agent binary download                                       |
+| `/api/bootstrap/:token` | One-time credential injection                                  |
+| `/api/admin/*`          | Admin dashboard, error logs, real-time log stream              |
+| `/api/tts/*`            | Text-to-speech synthesis                                       |
+| `/api/transcribe`       | Voice-to-text transcription                                    |
 
 ## Data Layer — Hybrid D1 + Durable Objects
 
@@ -124,22 +124,22 @@ SAM uses a hybrid storage model: **D1** for cross-project queries and **Durable 
 
 ### D1 (Cross-Project Queries)
 
-| Binding | Purpose |
-|---------|---------|
-| `DATABASE` | Users, projects, nodes, workspaces, ideas, credentials |
-| `OBSERVABILITY_DATABASE` | Error storage for admin dashboard |
+| Binding                  | Purpose                                                |
+| ------------------------ | ------------------------------------------------------ |
+| `DATABASE`               | Users, projects, nodes, workspaces, ideas, credentials |
+| `OBSERVABILITY_DATABASE` | Error storage for admin dashboard                      |
 
 D1 stores platform-level data that needs to be queried across projects (e.g., "show all my ideas" on the dashboard).
 
 ### Durable Objects (Per-Project Data)
 
-| Binding | Scope | Storage | Purpose |
-|---------|-------|---------|---------|
-| `PROJECT_DATA` | Per project | SQLite | Chat sessions, messages, activity events, ACP sessions |
-| `NODE_LIFECYCLE` | Per node | KV | Warm pool state machine (active → warm → destroying) |
-| `TASK_RUNNER` | Per idea | KV | Multi-step idea execution orchestration via alarm callbacks |
-| `ADMIN_LOGS` | Singleton | KV | Real-time log broadcast to admin WebSocket clients |
-| `NOTIFICATION` | Per user | KV | Notification delivery and state management |
+| Binding          | Scope       | Storage | Purpose                                                     |
+| ---------------- | ----------- | ------- | ----------------------------------------------------------- |
+| `PROJECT_DATA`   | Per project | SQLite  | Chat sessions, messages, activity events, ACP sessions      |
+| `NODE_LIFECYCLE` | Per node    | KV      | Warm pool state machine (active → warm → destroying)        |
+| `TASK_RUNNER`    | Per idea    | KV      | Multi-step idea execution orchestration via alarm callbacks |
+| `ADMIN_LOGS`     | Singleton   | KV      | Real-time log broadcast to admin WebSocket clients          |
+| `NOTIFICATION`   | Per user    | KV      | Notification delivery and state management                  |
 
 ### Why Hybrid?
 
@@ -149,11 +149,11 @@ Summary data flows back from DOs to D1 via debounced sync (e.g., `last_activity_
 
 ### Other Bindings
 
-| Service | Binding | Purpose |
-|---------|---------|---------|
-| **KV** | `KV` | Auth sessions, bootstrap tokens, boot logs, MCP tokens |
-| **R2** | `R2` | VM Agent binaries, TTS audio cache, Pulumi state |
-| **Workers AI** | `AI` | Idea title generation, transcription, TTS, context summarization |
+| Service        | Binding | Purpose                                                          |
+| -------------- | ------- | ---------------------------------------------------------------- |
+| **KV**         | `KV`    | Auth sessions, bootstrap tokens, boot logs, MCP tokens           |
+| **R2**         | `R2`    | VM Agent binaries, TTS audio cache, Pulumi state                 |
+| **Workers AI** | `AI`    | Idea title generation, transcription, TTS, context summarization |
 
 ## Durable Objects Deep Dive
 
@@ -162,6 +162,7 @@ Summary data flows back from DOs to D1 via debounced sync (e.g., `last_activity_
 Each project gets one `ProjectData` Durable Object instance, accessed via `env.PROJECT_DATA.idFromName(projectId)`.
 
 **Embedded SQLite tables:**
+
 - `chat_sessions` — session metadata, lifecycle status, message counts
 - `chat_messages` — append-only streaming token log; each row is one streaming chunk from Claude Code, not a logical message. Consecutive same-role tokens (assistant, tool, thinking) are grouped into logical messages at the API and UI layers. The `origin` column tags SAM-injected content (e.g. the `get_instructions` reminder) as `system` (NULL/absent = normal `user` message); `origin=system` rows are excluded from grouping/materialization, full-text search, topic auto-capture, and attention resolution, and are rendered collapsed in the chat UI.
 - `chat_messages_grouped` — materialized grouped messages, populated when a session stops by concatenating consecutive same-role tokens. Source for FTS5 full-text search.
@@ -173,6 +174,7 @@ Each project gets one `ProjectData` Durable Object instance, accessed via `env.P
 - `acp_session_events` — ACP session state transition history
 
 **Key features:**
+
 - Hibernatable WebSockets for zero-idle-cost real-time chat
 - Heartbeat-based VM failure detection via DO alarms
 - Session forking with parent lineage tracking
@@ -237,16 +239,16 @@ stateDiagram-v2
 
 The VM Agent (`packages/vm-agent/`) is a Go binary running on each node:
 
-| Subsystem | Package | Responsibility |
-|-----------|---------|---------------|
-| PTY Manager | `internal/pty/` | Terminal multiplexing, ring buffer replay |
-| Container Manager | `internal/container/` | Docker exec, devcontainer CLI |
-| ACP Gateway | `internal/acp/` | Agent protocol, streaming responses, notification serialization |
-| Port Scanner | `internal/ports/` | Auto-detect listening ports, build proxy URLs |
-| JWT Validator | `internal/auth/` | Validates workspace JWTs via JWKS endpoint |
-| Persistence | `internal/persistence/` | SQLite tab/session storage |
-| Boot Logger | `internal/bootlog/` | Reports provisioning progress |
-| Message Reporter | `internal/messagereport/` | Outbox-based message relay to control plane |
+| Subsystem         | Package                   | Responsibility                                                  |
+| ----------------- | ------------------------- | --------------------------------------------------------------- |
+| PTY Manager       | `internal/pty/`           | Terminal multiplexing, ring buffer replay                       |
+| Container Manager | `internal/container/`     | Docker exec, devcontainer CLI                                   |
+| ACP Gateway       | `internal/acp/`           | Agent protocol, streaming responses, notification serialization |
+| Port Scanner      | `internal/ports/`         | Auto-detect listening ports, build proxy URLs                   |
+| JWT Validator     | `internal/auth/`          | Validates workspace JWTs via JWKS endpoint                      |
+| Persistence       | `internal/persistence/`   | SQLite tab/session storage                                      |
+| Boot Logger       | `internal/bootlog/`       | Reports provisioning progress                                   |
+| Message Reporter  | `internal/messagereport/` | Outbox-based message relay to control plane                     |
 
 ## Deployment Pipeline
 
@@ -269,13 +271,13 @@ CI runs lint, typecheck, tests, and build on every push. The deploy workflow onl
 
 ## Key Design Decisions
 
-| Decision | Rationale |
-|----------|-----------|
-| Single Worker as API + reverse proxy | Simplifies infrastructure — one Worker handles everything |
-| Hybrid D1 + Durable Objects | D1 for cross-project reads, DOs for high-throughput project-scoped writes |
-| User-provided cloud tokens (BYOC) | Users own their infrastructure and costs |
-| Callback-driven provisioning | VMs POST `/ready` when bootstrapped — no polling |
-| Dynamic DNS per workspace | Instant subdomain resolution; cleaned up on stop |
-| Alarm-driven execution orchestration | Idempotent steps with exponential backoff; no long-running processes |
-| No credentials in cloud-init | Bootstrap tokens for secure credential injection |
-| Multi-provider abstraction | Unified VM size/lifecycle API across Hetzner, Scaleway, and GCP |
+| Decision                             | Rationale                                                                 |
+| ------------------------------------ | ------------------------------------------------------------------------- |
+| Single Worker as API + reverse proxy | Simplifies infrastructure — one Worker handles everything                 |
+| Hybrid D1 + Durable Objects          | D1 for cross-project reads, DOs for high-throughput project-scoped writes |
+| User-provided cloud tokens (BYOC)    | Users own their infrastructure and costs                                  |
+| Callback-driven provisioning         | VMs POST `/ready` when bootstrapped — no polling                          |
+| Dynamic DNS per workspace            | Instant subdomain resolution; cleaned up on stop                          |
+| Alarm-driven execution orchestration | Idempotent steps with exponential backoff; no long-running processes      |
+| No credentials in cloud-init         | Bootstrap tokens for secure credential injection                          |
+| Multi-provider abstraction           | Unified VM size/lifecycle API across Hetzner, Scaleway, and GCP           |
