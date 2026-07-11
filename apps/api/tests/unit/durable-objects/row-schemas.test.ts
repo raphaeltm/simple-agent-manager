@@ -10,7 +10,7 @@
  * - Aggregate helpers extract the correct scalar value
  */
 import * as v from 'valibot';
-import { describe, expect,it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import {
   parseAcpSessionHeartbeatCheck,
@@ -28,7 +28,6 @@ import {
   parseIdeaSessionDetail,
   parseIdleCleanupSchedule,
   parseInboxMessageRow,
-  parseMaterializationCheck,
   parseMaterializationCheck,
   parseMaterializationToken,
   parseMaxLatest,

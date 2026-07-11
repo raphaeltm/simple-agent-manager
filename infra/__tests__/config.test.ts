@@ -2,8 +2,9 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { getRegisteredResources } from './setup';
 
 type ConfigModule = typeof import('../resources/config');
+type ConfigReader = ConfigModule['ConfigReader'];
 
-class FakeConfig implements ConfigModule['ConfigReader'] {
+class FakeConfig implements ConfigReader {
   constructor(private readonly values: Record<string, string | undefined>) {}
 
   get(key: string): string | undefined {

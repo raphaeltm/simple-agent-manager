@@ -436,7 +436,7 @@ export const MIGRATIONS: Migration[] = [
     run: (sql) => {
       // Extend the existing session_inbox table (migration 015) into a full
       // durable mailbox with message classes, delivery state machine, and ack tracking.
-      // Uses ALTER TABLE ADD COLUMN — safe, no DROP TABLE.
+      // Uses ALTER TABLE ADD COLUMN so existing mailbox rows are preserved.
 
       // message_class: escalating urgency (notify, deliver, interrupt, preempt_and_replan, shutdown_with_final_prompt)
       try { sql.exec(`ALTER TABLE session_inbox ADD COLUMN message_class TEXT NOT NULL DEFAULT 'notify'`); } catch { /* already exists */ }
