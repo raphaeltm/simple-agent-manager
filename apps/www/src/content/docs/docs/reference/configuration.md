@@ -207,6 +207,7 @@ SAM loads OpenCode Zen and OpenCode Go model choices through the authenticated m
 | `STUCK_TASK_MAX_CANDIDATES_PER_SWEEP`             | `100`              | Maximum active tasks inspected by each recovery sweep                                 |
 | `TASK_LIVENESS_MAX_ACP_SESSIONS`                  | `5`                | Maximum task-scoped ACP sessions inspected per liveness probe                         |
 | `TASK_LIVENESS_PROBE_TIMEOUT_MS`                  | `5000` (5 sec)     | Per-candidate timeout for the ACP liveness probe; a timeout is inconclusive (never fails a task) |
+| `TASK_RUN_ABSOLUTE_CEILING_MS`                    | `86400000` (24 hr) | Absolute runaway-cost ceiling; fails even a task with a demonstrably live runtime     |
 | `CLAUDE_CODE_COMPACTION_LOOP_DETECTOR_ENABLED`     | `true`             | Enable Claude Code compaction-loop shutdown from recent message evidence              |
 | `CLAUDE_CODE_COMPACTION_LOOP_RECENT_MESSAGE_LIMIT` | `40`               | Recent task-session messages to inspect for compaction-loop evidence                  |
 | `CLAUDE_CODE_COMPACTION_LOOP_WINDOW_MESSAGES`      | `20`               | Rolling recent-message window used for compaction-loop detection                      |
@@ -220,7 +221,7 @@ SAM loads OpenCode Zen and OpenCode Go model choices through the authenticated m
 | `TASK_RECONCILIATION_PROMPT_HARD_STALL_MS`         | `7200000` (2 hr)   | In-flight prompt hard-stall threshold before SAM requests prompt cancellation         |
 | `TASK_RECONCILIATION_MIN_ALARM_DELAY_MS`           | `10000` (10 sec)   | Minimum delay before the next reconciliation alarm can fire                           |
 
-> **Liveness-gated recovery.** Stuck-task recovery for `in_progress` tasks (including task-mode work paused at the `awaiting_followup` execution step) is gated on **task-scoped** liveness — a live workspace, a healthy node with a recent heartbeat, **and** an active task-scoped ACP session. A shared-node heartbeat alone is never sufficient. Consequently, `TASK_RUN_HARD_TIMEOUT_MS` and `TASK_RUN_MAX_EXECUTION_MS` bound the point at which a task with **no** proven live runtime is failed; a task with a demonstrably live runtime is preserved past those thresholds rather than terminated on elapsed time alone. When liveness cannot be determined (probe timeout or error), the task is left untouched (fail-safe).
+> **Liveness-gated recovery.** Stuck-task recovery for `in_progress` tasks (including task-mode work paused at the `awaiting_followup` execution step) is gated on **task-scoped** liveness — a live workspace, a healthy node with a recent heartbeat, **and** an active task-scoped ACP session. A shared-node heartbeat alone is never sufficient. Consequently, `TASK_RUN_HARD_TIMEOUT_MS` and `TASK_RUN_MAX_EXECUTION_MS` bound the point at which a task with **no** proven live runtime is failed; a task with a demonstrably live runtime is preserved past those thresholds, but remains bounded by `TASK_RUN_ABSOLUTE_CEILING_MS` (24 hours by default) as a runaway-cost backstop. When liveness cannot be determined (probe timeout or error), the task is left untouched (fail-safe) until it reaches that absolute ceiling.
 
 ## Node & Workspace Readiness
 

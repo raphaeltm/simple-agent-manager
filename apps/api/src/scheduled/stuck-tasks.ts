@@ -28,6 +28,7 @@ import {
   DEFAULT_TASK_DO_MISMATCH_GRACE_MS,
   DEFAULT_TASK_LIVENESS_MAX_ACP_SESSIONS,
   DEFAULT_TASK_LIVENESS_PROBE_TIMEOUT_MS,
+  DEFAULT_TASK_RUN_ABSOLUTE_CEILING_MS,
   DEFAULT_TASK_RUN_HARD_TIMEOUT_MS,
   DEFAULT_TASK_RUN_MAX_EXECUTION_MS,
   DEFAULT_TASK_STUCK_DELEGATED_TIMEOUT_MS,
@@ -304,6 +305,7 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
   const delegatedTimeoutMs = parseMs(env.TASK_STUCK_DELEGATED_TIMEOUT_MS, DEFAULT_TASK_STUCK_DELEGATED_TIMEOUT_MS);
   const maxExecutionMs = parseMs(env.TASK_RUN_MAX_EXECUTION_MS, DEFAULT_TASK_RUN_MAX_EXECUTION_MS);
   const hardTimeoutMs = parseMs(env.TASK_RUN_HARD_TIMEOUT_MS, DEFAULT_TASK_RUN_HARD_TIMEOUT_MS);
+  const absoluteCeilingMs = parseMs(env.TASK_RUN_ABSOLUTE_CEILING_MS, DEFAULT_TASK_RUN_ABSOLUTE_CEILING_MS);
   const mismatchGraceMs = parseMs(env.TASK_DO_MISMATCH_GRACE_MS, DEFAULT_TASK_DO_MISMATCH_GRACE_MS);
   const maxCandidates = parseMs(env.STUCK_TASK_MAX_CANDIDATES_PER_SWEEP, DEFAULT_STUCK_TASK_MAX_CANDIDATES_PER_SWEEP);
 
@@ -312,6 +314,13 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
       hardTimeoutMs,
       maxExecutionMs,
       message: 'TASK_RUN_HARD_TIMEOUT_MS is <= TASK_RUN_MAX_EXECUTION_MS — heartbeat grace window is effectively zero',
+    });
+  }
+
+  if (absoluteCeilingMs <= hardTimeoutMs) {
+    log.warn('stuck_task.misconfigured_absolute_ceiling', {
+      absoluteCeilingMs,
+      hardTimeoutMs,
     });
   }
 
@@ -409,6 +418,11 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
           const startedAt = task.started_at ? new Date(task.started_at).getTime() : updatedAt;
           const executionMs = now.getTime() - startedAt;
           if (executionMs > maxExecutionMs) {
+            if (executionMs > absoluteCeilingMs) {
+              isStuck = true;
+              reason = `Task exceeded the absolute runaway-cost ceiling of ${Math.round(absoluteCeilingMs / 60000)} minutes; live-runtime tasks are bounded to prevent unbounded compute.${stepInfo}`;
+              break;
+            }
             const liveness = await probeLiveness();
             if (liveness.live || !liveness.conclusive) {
               if (liveness.live) {

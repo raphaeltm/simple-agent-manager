@@ -558,6 +558,136 @@ describe('recoverStuckTasks', () => {
     });
   });
 
+  describe('absolute runaway-cost ceiling', () => {
+    it('fails a live task past the absolute runaway-cost ceiling without probing liveness', async () => {
+      const now = Date.now();
+      const startedAt = new Date(now - 25 * 60 * 60 * 1000).toISOString();
+      const recentHeartbeat = new Date(now - 30 * 1000).toISOString();
+      const responses = new Map<string, { results: unknown[]; changes?: number }>();
+      responses.set("status IN ('queued', 'delegated', 'in_progress')", {
+        results: [
+          {
+            id: 'task-absolute-ceiling',
+            project_id: 'proj-1',
+            user_id: 'user-1',
+            status: 'in_progress',
+            execution_step: 'running',
+            updated_at: startedAt,
+            started_at: startedAt,
+            workspace_id: 'ws-1',
+            auto_provisioned_node_id: 'node-1',
+          },
+        ],
+      });
+      responses.set('w.chat_session_id', {
+        results: [
+          {
+            workspace_status: 'running',
+            chat_session_id: 'chat-1',
+            node_id: 'node-1',
+            node_status: 'running',
+            health_status: 'healthy',
+            last_heartbeat_at: recentHeartbeat,
+          },
+        ],
+      });
+      responses.set('node_id, status FROM workspaces', {
+        results: [{ id: 'ws-1', node_id: 'node-1', status: 'running' }],
+      });
+      responses.set('status, health_status FROM nodes', {
+        results: [{ id: 'node-1', status: 'running', health_status: 'healthy' }],
+      });
+      responses.set("UPDATE tasks SET status = 'failed'", { results: [], changes: 1 });
+      const env = createMockEnv(responses);
+      const result = await recoverStuckTasks(env);
+      expect(result.failedInProgress).toBe(1);
+      expect(result.heartbeatSkipped).toBe(0);
+      expect(projectDataMocks.listAcpSessions).not.toHaveBeenCalled();
+      expect(syncTriggerExecutionMock).toHaveBeenCalledWith(
+        env.DATABASE,
+        'task-absolute-ceiling',
+        'failed',
+        expect.stringContaining('absolute runaway-cost ceiling')
+      );
+    });
+
+    it('preserves a live task below the absolute runaway-cost ceiling', async () => {
+      const now = Date.now();
+      const startedAt = new Date(now - 23 * 60 * 60 * 1000).toISOString();
+      const recentHeartbeat = new Date(now - 30 * 1000).toISOString();
+      const responses = new Map<string, { results: unknown[]; changes?: number }>();
+      responses.set("status IN ('queued', 'delegated', 'in_progress')", {
+        results: [
+          {
+            id: 'task-below-absolute-ceiling',
+            project_id: 'proj-1',
+            user_id: 'user-1',
+            status: 'in_progress',
+            execution_step: 'running',
+            updated_at: startedAt,
+            started_at: startedAt,
+            workspace_id: 'ws-1',
+            auto_provisioned_node_id: 'node-1',
+          },
+        ],
+      });
+      responses.set('w.chat_session_id', {
+        results: [
+          {
+            workspace_status: 'running',
+            chat_session_id: 'chat-1',
+            node_id: 'node-1',
+            node_status: 'running',
+            health_status: 'healthy',
+            last_heartbeat_at: recentHeartbeat,
+          },
+        ],
+      });
+      const result = await recoverStuckTasks(createMockEnv(responses));
+      expect(result.failedInProgress).toBe(0);
+      expect(result.heartbeatSkipped).toBe(1);
+    });
+
+    it('falls back to the default absolute ceiling for an invalid zero value', async () => {
+      const now = Date.now();
+      const startedAt = new Date(now - 23 * 60 * 60 * 1000).toISOString();
+      const recentHeartbeat = new Date(now - 30 * 1000).toISOString();
+      const responses = new Map<string, { results: unknown[]; changes?: number }>();
+      responses.set("status IN ('queued', 'delegated', 'in_progress')", {
+        results: [
+          {
+            id: 'task-invalid-absolute-ceiling',
+            project_id: 'proj-1',
+            user_id: 'user-1',
+            status: 'in_progress',
+            execution_step: 'running',
+            updated_at: startedAt,
+            started_at: startedAt,
+            workspace_id: 'ws-1',
+            auto_provisioned_node_id: 'node-1',
+          },
+        ],
+      });
+      responses.set('w.chat_session_id', {
+        results: [
+          {
+            workspace_status: 'running',
+            chat_session_id: 'chat-1',
+            node_id: 'node-1',
+            node_status: 'running',
+            health_status: 'healthy',
+            last_heartbeat_at: recentHeartbeat,
+          },
+        ],
+      });
+      const result = await recoverStuckTasks(
+        createMockEnv(responses, { TASK_RUN_ABSOLUTE_CEILING_MS: '0' })
+      );
+      expect(result.failedInProgress).toBe(0);
+      expect(result.heartbeatSkipped).toBe(1);
+    });
+  });
+
   describe('hard timeout enforcement', () => {
     it('preserves a genuinely live task past the hard timeout', async () => {
       const now = Date.now();

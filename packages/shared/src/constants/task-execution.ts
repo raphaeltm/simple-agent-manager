@@ -30,6 +30,9 @@ export const DEFAULT_TASK_RUN_MAX_EXECUTION_MS = 4 * 60 * 60 * 1000; // 4 hours
  * Override via TASK_RUN_HARD_TIMEOUT_MS env var. */
 export const DEFAULT_TASK_RUN_HARD_TIMEOUT_MS = 8 * 60 * 60 * 1000; // 8 hours
 
+/** Absolute runaway-cost backstop (ms) that bounds even demonstrably live tasks. */
+export const DEFAULT_TASK_RUN_ABSOLUTE_CEILING_MS = 24 * 60 * 60 * 1000;
+
 /** Default threshold (ms) for a task stuck in 'queued' status. Override via TASK_STUCK_QUEUED_TIMEOUT_MS env var.
  * Must be > TASK_RUNNER_AGENT_READY_TIMEOUT_MS (15 min) to avoid the stuck-task cron killing tasks
  * that are legitimately waiting for cloud-init to finish. Cloud-init takes 8-12 min on Hetzner.
