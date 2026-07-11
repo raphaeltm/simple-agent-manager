@@ -155,7 +155,7 @@ describe('stuck-tasks DO health checks (TDF-7)', () => {
 
   it('checks DO health for non-stuck tasks at half threshold', () => {
     expect(stuckTasksSource).toContain('halfThreshold');
-    expect(stuckTasksSource).toContain('timeForCheck > halfThreshold');
+    expect(stuckTasksSource).toContain('timeForCheck > Math.min(halfThreshold, mismatchGraceMs)');
   });
 
   it('uses started_at for in_progress tasks (consistent time base)', () => {
