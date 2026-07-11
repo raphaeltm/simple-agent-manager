@@ -16,6 +16,10 @@ RUN set -eux; \
     npm cache clean --force; \
     rm -rf /var/lib/apt/lists/*
 
+# Build prerequisite: container-artifacts/ is gitignored and generated at deploy
+# time by `make -C packages/vm-agent prepare-container` (see deploy-reusable.yml).
+# A local `docker build` / `wrangler dev` of this image must run that target first,
+# or the two COPY lines below fail with "file not found in build context".
 COPY container-entrypoints/vm-agent-bootstrap.sh /usr/local/bin/vm-agent-bootstrap
 COPY container-artifacts/vm-agent-linux-amd64 /usr/local/bin/vm-agent
 COPY container-artifacts/vm-agent-version.json /etc/sam/vm-agent-version.json

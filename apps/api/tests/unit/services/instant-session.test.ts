@@ -148,10 +148,20 @@ describe('launchInstantSession', () => {
         containerLaunchDurationMs: expect.any(Number),
         setupDurationMs: expect.any(Number),
         installDurationMs: expect.any(Number),
+        agentReadyDurationMs: expect.any(Number),
+        workspaceCreateDurationMs: expect.any(Number),
+        acpSessionCreateDurationMs: expect.any(Number),
+        acpSessionStartDurationMs: expect.any(Number),
       })
     );
     expect(result.timings.setupDurationMs).toBe(result.timings.totalDurationMs);
     expect(result.timings.installDurationMs).toBe(result.timings.containerLaunchDurationMs);
+    // Bounded phase timings must be non-negative and never exceed the total.
+    expect(result.timings.preContainerDurationMs).toBeGreaterThanOrEqual(0);
+    expect(result.timings.containerLaunchDurationMs).toBeGreaterThanOrEqual(0);
+    expect(result.timings.preContainerDurationMs).toBeLessThanOrEqual(
+      result.timings.totalDurationMs
+    );
 
     expect(mocks.nodes.createNodeRecord).toHaveBeenCalledWith(
       expect.anything(),
@@ -258,6 +268,31 @@ describe('launchInstantSession', () => {
     expect(JSON.stringify(launchConfig)).not.toContain('profile-1');
     expect(JSON.stringify(launchConfig)).not.toContain('skill-1');
     expect(updates.at(-1)).toMatchObject({ dispatchedAt: expect.any(String) });
+  });
+
+  it('marks the workspace error and destroys the container when launch fails', async () => {
+    const { db, updates } = makeDb();
+    mocks.nodeAgent.waitForNodeAgentReady.mockRejectedValueOnce(
+      new Error('agent never became ready')
+    );
+
+    await expect(
+      launchInstantSession(db as never, env, {
+        project,
+        userId: 'user-1',
+        initialPrompt: 'prompt',
+        displayMessage: 'prompt',
+        agentType: 'claude-code',
+        agentProfileId: 'profile-1',
+        skillId: 'skill-1',
+        overrides: { model: 'claude-sonnet-4-5-20250929', effort: 'auto' },
+      })
+    ).rejects.toThrow('agent never became ready');
+
+    // The best-effort cleanup must tear down the launched container and mark
+    // the workspace errored so a failed cold start does not leak resources.
+    expect(mocks.container.destroyVmAgentContainer).toHaveBeenCalledWith(env, 'node-1');
+    expect(updates).toContainEqual(expect.objectContaining({ status: 'error' }));
   });
 
   it('honors a configured raw container workspace base directory', async () => {

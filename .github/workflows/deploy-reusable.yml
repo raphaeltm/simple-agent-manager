@@ -779,7 +779,11 @@ jobs:
       # ========================================
       - name: Build VM Agent
         if: ${{ inputs.dry_run != true && inputs.skip_agent != true }}
-        run: make -C packages/vm-agent build-all
+        # Pin VERSION to the deploy commit so R2 binaries report the same
+        # version string as the container-baked binary (prepare-container above).
+        run: |
+          BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          make -C packages/vm-agent build-all VERSION="$GITHUB_SHA" BUILD_DATE="$BUILD_DATE"
 
       - name: Upload VM Agent Binaries
         if: ${{ inputs.dry_run != true && inputs.skip_agent != true }}

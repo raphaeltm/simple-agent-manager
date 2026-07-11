@@ -101,22 +101,22 @@ The API Worker (`apps/api/`) is a Hono application handling:
 
 ### Key Route Groups
 
-| Route                   | Purpose                                                        |
-| ----------------------- | -------------------------------------------------------------- |
-| `/api/auth/*`           | GitHub OAuth sign-in/out, sessions                             |
-| `/api/nodes/*`          | Node CRUD, lifecycle, health callbacks                         |
-| `/api/workspaces/*`     | Workspace CRUD, lifecycle, boot logs, agent sessions           |
-| `/api/projects/*`       | Project CRUD, runtime config, ideas, chat sessions, file proxy |
-| `/api/credentials/*`    | Cloud provider + agent API key management                      |
-| `/api/notifications/*`  | Notification list, read/dismiss, preferences, WebSocket        |
-| `/api/tasks/*`          | Idea submission, lifecycle, status updates                     |
-| `/api/github/*`         | GitHub App installations, repos                                |
-| `/api/terminal/token`   | Workspace JWT for WebSocket auth                               |
-| `/api/agent/*`          | VM Agent binary download                                       |
-| `/api/bootstrap/:token` | One-time credential injection                                  |
-| `/api/admin/*`          | Admin dashboard, error logs, real-time log stream              |
-| `/api/tts/*`            | Text-to-speech synthesis                                       |
-| `/api/transcribe`       | Voice-to-text transcription                                    |
+| Route                   | Purpose                                                                        |
+| ----------------------- | ------------------------------------------------------------------------------ |
+| `/api/auth/*`           | GitHub OAuth sign-in/out, sessions                                             |
+| `/api/nodes/*`          | Node CRUD, lifecycle, health callbacks                                         |
+| `/api/workspaces/*`     | Workspace CRUD, lifecycle, boot logs, agent sessions                           |
+| `/api/projects/*`       | Project CRUD, runtime config, ideas, chat sessions, file proxy                 |
+| `/api/credentials/*`    | Cloud provider + agent API key management                                      |
+| `/api/notifications/*`  | Notification list, read/dismiss, preferences, WebSocket                        |
+| `/api/tasks/*`          | Idea submission, lifecycle, status updates                                     |
+| `/api/github/*`         | GitHub App installations, repos                                                |
+| `/api/terminal/token`   | Workspace JWT for WebSocket auth                                               |
+| `/api/agent/*`          | VM Agent binary download (VM/cloud-init path; container image has it baked in) |
+| `/api/bootstrap/:token` | One-time credential injection                                                  |
+| `/api/admin/*`          | Admin dashboard, error logs, real-time log stream                              |
+| `/api/tts/*`            | Text-to-speech synthesis                                                       |
+| `/api/transcribe`       | Voice-to-text transcription                                                    |
 
 ## Data Layer — Hybrid D1 + Durable Objects
 
@@ -260,7 +260,7 @@ graph TD
     P2["Phase 2: Configuration"] --> P3
     P2 -.- P2D["Sync wrangler.toml, read security keys"]
     P3["Phase 3: Application"] --> P4
-    P3 -.- P3D["Build → Deploy Worker → Deploy Pages → Migrations → Secrets"]
+    P3 -.- P3D["Build → Bake vm-agent into container image → Deploy Worker → Deploy Pages → Migrations → Secrets"]
     P4["Phase 4: VM Agent"] --> P5
     P4 -.- P4D["Build Go (multi-arch) → Upload to R2"]
     P5["Phase 5: Validation"]

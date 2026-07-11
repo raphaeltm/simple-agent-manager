@@ -42,7 +42,13 @@ prepare-container: build-linux-amd64
 	@mkdir -p $(CONTAINER_ARTIFACT_DIR)
 	@cp bin/$(BINARY_NAME)-linux-amd64 $(CONTAINER_ARTIFACT_DIR)/vm-agent-linux-amd64
 	@chmod 0755 $(CONTAINER_ARTIFACT_DIR)/vm-agent-linux-amd64
-	@SHA256=$$(sha256sum $(CONTAINER_ARTIFACT_DIR)/vm-agent-linux-amd64 | cut -d' ' -f1); \
+	@if command -v sha256sum >/dev/null 2>&1; then \
+		SHA256=$$(sha256sum $(CONTAINER_ARTIFACT_DIR)/vm-agent-linux-amd64 | cut -d' ' -f1); \
+	elif command -v shasum >/dev/null 2>&1; then \
+		SHA256=$$(shasum -a 256 $(CONTAINER_ARTIFACT_DIR)/vm-agent-linux-amd64 | cut -d' ' -f1); \
+	else \
+		echo "ERROR: neither sha256sum nor shasum is available" >&2; exit 1; \
+	fi; \
 		printf '{"version":"%s","buildDate":"%s","sha256":"sha256:%s"}\n' \
 		  '$(VERSION)' '$(BUILD_DATE)' "$$SHA256" > $(CONTAINER_ARTIFACT_DIR)/vm-agent-version.json
 

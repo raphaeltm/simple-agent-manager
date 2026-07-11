@@ -76,6 +76,7 @@ describe('deploy reusable workflow', () => {
     const prepare = stepBlock('Prepare Versioned VM Agent Container Artifact');
     const prepareIndex = workflow.indexOf('- name: Prepare Versioned VM Agent Container Artifact');
     const deployIndex = workflow.indexOf('- name: Deploy API Worker');
+    const goSetupIndex = workflow.indexOf('- name: Setup Go for Container Runtime');
 
     expect(prepare).toContain('make -C packages/vm-agent prepare-container');
     expect(prepare).toContain('VERSION="$GITHUB_SHA"');
@@ -83,5 +84,18 @@ describe('deploy reusable workflow', () => {
     expect(prepare).not.toContain('secrets.');
     expect(prepareIndex).toBeGreaterThan(-1);
     expect(prepareIndex).toBeLessThan(deployIndex);
+    // Go must be set up before the container artifact is built, otherwise the
+    // `make prepare-container` (and the later `build-all`) steps fail at runtime.
+    expect(goSetupIndex).toBeGreaterThan(-1);
+    expect(goSetupIndex).toBeLessThan(prepareIndex);
+  });
+
+  it('versions the R2 vm-agent binaries with the same commit SHA as the container binary', () => {
+    const build = stepBlock('Build VM Agent');
+
+    // Both the container-baked binary and the R2-uploaded binaries must report
+    // the deploy commit SHA so a running agent can be correlated to its artifact.
+    expect(build).toContain('make -C packages/vm-agent build-all');
+    expect(build).toContain('VERSION="$GITHUB_SHA"');
   });
 });
