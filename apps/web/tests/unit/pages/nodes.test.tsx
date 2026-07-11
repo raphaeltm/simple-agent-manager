@@ -1,6 +1,8 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { renderWithQuery } from '../../test-utils/query-test-utils';
 
 const mocks = vi.hoisted(() => ({
   listNodes: vi.fn(),
@@ -61,7 +63,7 @@ describe('Nodes page', () => {
   });
 
   it('renders node list', async () => {
-    render(
+    renderWithQuery(
       <MemoryRouter>
         <Nodes />
       </MemoryRouter>
@@ -76,7 +78,7 @@ describe('Nodes page', () => {
   });
 
   it('supports create-node flow and navigates to node detail', async () => {
-    render(
+    renderWithQuery(
       <MemoryRouter initialEntries={['/nodes']}>
         <Routes>
           <Route path="/nodes" element={<Nodes />} />
@@ -105,5 +107,137 @@ describe('Nodes page', () => {
     });
 
     expect(await screen.findByTestId('node-detail-page')).toBeInTheDocument();
+  });
+
+  it('surfaces load error instead of empty state when initial load fails', async () => {
+    // Regression: a failed initial load left nodesLoading=false with no data, so
+    // the render gate fell through to the "No nodes yet" empty state — telling the
+    // user they have zero nodes when the request actually errored.
+    mocks.listNodes.mockRejectedValue(new Error('Nodes network error'));
+
+    renderWithQuery(
+      <MemoryRouter>
+        <Nodes />
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByText('Nodes network error')).toBeInTheDocument();
+    expect(screen.queryByText('No nodes yet')).not.toBeInTheDocument();
+  });
+
+  it('falls back to a friendly message when the load error has no message', async () => {
+    // Guard against a blank error Alert when the API error carries an empty message
+    // (e.g. a 500 whose body has an `error` code but no `message`).
+    mocks.listNodes.mockRejectedValue(new Error(''));
+
+    renderWithQuery(
+      <MemoryRouter>
+        <Nodes />
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByText('Failed to load nodes')).toBeInTheDocument();
+    expect(screen.queryByText('No nodes yet')).not.toBeInTheDocument();
+  });
+
+  it('keeps stale nodes visible when a background refetch fails (does not show error)', async () => {
+    mocks.listNodes.mockResolvedValue([
+      {
+        id: 'node-1',
+        name: 'Persisted Node',
+        status: 'running',
+        healthStatus: 'healthy',
+        vmSize: 'medium',
+        vmLocation: 'nbg1',
+        ipAddress: '1.1.1.1',
+        lastHeartbeatAt: '2026-01-01T00:00:00.000Z',
+        heartbeatStaleAfterSeconds: 180,
+        errorMessage: null,
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      },
+    ]);
+
+    const { queryClient } = renderWithQuery(
+      <MemoryRouter>
+        <Nodes />
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByText('Persisted Node')).toBeInTheDocument();
+
+    mocks.listNodes.mockRejectedValueOnce(new Error('Nodes refetch boom'));
+    void queryClient.invalidateQueries({ queryKey: ['nodes'] });
+
+    await waitFor(() => {
+      expect(screen.getByText('Persisted Node')).toBeInTheDocument();
+    });
+    expect(screen.queryByText('Nodes refetch boom')).not.toBeInTheDocument();
+    expect(screen.queryByText('No nodes yet')).not.toBeInTheDocument();
+  });
+
+  it('keeps stale node list visible during background refetch', async () => {
+    // First load
+    mocks.listNodes.mockResolvedValue([
+      {
+        id: 'node-1',
+        name: 'Stale Node',
+        status: 'running',
+        healthStatus: 'healthy',
+        vmSize: 'medium',
+        vmLocation: 'nbg1',
+        ipAddress: '1.1.1.1',
+        lastHeartbeatAt: '2026-01-01T00:00:00.000Z',
+        heartbeatStaleAfterSeconds: 180,
+        errorMessage: null,
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      },
+    ]);
+
+    const { queryClient } = renderWithQuery(
+      <MemoryRouter>
+        <Nodes />
+      </MemoryRouter>
+    );
+
+    // Wait for initial data
+    expect(await screen.findByText('Stale Node')).toBeInTheDocument();
+
+    // Set up a slow second fetch to simulate background refetch
+    let resolveRefetch: (value: unknown) => void;
+    const refetchPromise = new Promise((resolve) => {
+      resolveRefetch = resolve;
+    });
+    mocks.listNodes.mockReturnValueOnce(refetchPromise);
+
+    // Trigger a refetch
+    void queryClient.invalidateQueries({ queryKey: ['nodes'] });
+
+    // Content must stay visible while refetch is in-flight
+    expect(screen.getByText('Stale Node')).toBeInTheDocument();
+
+    // Resolve with updated data
+    resolveRefetch!([
+      {
+        id: 'node-1',
+        name: 'Fresh Node',
+        status: 'running',
+        healthStatus: 'healthy',
+        vmSize: 'medium',
+        vmLocation: 'nbg1',
+        ipAddress: '1.1.1.1',
+        lastHeartbeatAt: '2026-01-01T00:00:00.000Z',
+        heartbeatStaleAfterSeconds: 180,
+        errorMessage: null,
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      },
+    ]);
+
+    // Eventually the new data replaces the stale data
+    await waitFor(() => {
+      expect(screen.getByText('Fresh Node')).toBeInTheDocument();
+    });
   });
 });

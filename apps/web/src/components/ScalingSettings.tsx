@@ -158,7 +158,8 @@ export function ScalingSettings({
     } finally {
       setSavingLocation(false);
     }
-  }, [projectId, selectedProvider, selectedLocation, reload, toast]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- toast removed per stale-while-revalidate rule
+  }, [projectId, selectedProvider, selectedLocation, reload]);
 
   const handleSaveScaling = useCallback(async () => {
     setSavingScaling(true);
@@ -172,7 +173,8 @@ export function ScalingSettings({
     } finally {
       setSavingScaling(false);
     }
-  }, [projectId, scalingValues, nodeIdleTimeoutMs, reload, toast]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- toast removed per stale-while-revalidate rule
+  }, [projectId, scalingValues, nodeIdleTimeoutMs, reload]);
 
   const locations = selectedProvider ? (PROVIDER_LOCATIONS[selectedProvider] ?? []) : [];
 

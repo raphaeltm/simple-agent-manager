@@ -269,6 +269,7 @@ export function ProjectMembersSection({ projectId }: { projectId: string }) {
   const toast = useToast();
   const [data, setData] = useState<ProjectMembersResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [revokingId, setRevokingId] = useState<string | null>(null);
   const [decidingId, setDecidingId] = useState<string | null>(null);
@@ -290,7 +291,9 @@ export function ProjectMembersSection({ projectId }: { projectId: string }) {
 
   const load = useCallback(async () => {
     try {
-      setLoading(true);
+      // Only show loading spinner on first load (no data yet)
+      if (!data) setLoading(true);
+      setLoadError(null);
       const [members, health] = await Promise.all([
         getProjectMembers(projectId),
         getProjectCredentialAttributionHealth(projectId).catch(() => null),
@@ -298,11 +301,12 @@ export function ProjectMembersSection({ projectId }: { projectId: string }) {
       setData(members);
       setCredentialHealth(health);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to load members');
+      setLoadError(err instanceof Error ? err.message : 'Failed to load members');
     } finally {
       setLoading(false);
     }
-  }, [projectId, toast]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `data` is read for first-load guard only; `toast` removed per stale-while-revalidate rule
+  }, [projectId]);
 
   useEffect(() => {
     void load();
@@ -525,12 +529,16 @@ export function ProjectMembersSection({ projectId }: { projectId: string }) {
         </Button>
       </div>
 
-      {loading ? (
+      {loadError && !data && (
+        <div className="text-xs text-danger">{loadError}</div>
+      )}
+
+      {loading && !data ? (
         <div className="flex items-center gap-2">
           <Spinner size="sm" />
           <span className="text-xs text-fg-muted">Loading members&hellip;</span>
         </div>
-      ) : (
+      ) : data ? (
         <div className="grid gap-4 min-w-0 lg:grid-cols-[minmax(0,1fr)_minmax(18rem,0.8fr)]">
           <div className="grid gap-3 min-w-0">
             {credentialHealth && multiplayerTransitionActive && (
@@ -649,7 +657,7 @@ export function ProjectMembersSection({ projectId }: { projectId: string }) {
             )}
           </div>
         </div>
-      )}
+      ) : null}
       <ConfirmDialog
         isOpen={Boolean(transferTarget)}
         onClose={() => {

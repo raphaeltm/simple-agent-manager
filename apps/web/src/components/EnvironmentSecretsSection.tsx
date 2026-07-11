@@ -32,16 +32,20 @@ export function EnvironmentSecretsSection({
   const [deletingName, setDeletingName] = useState<string | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
 
+  const [loadError, setLoadError] = useState<string | null>(null);
+
   const loadSecrets = useCallback(async () => {
     try {
+      setLoadError(null);
       const resp = await listDeploymentSecrets(projectId, environmentId);
       setSecrets(resp.secrets);
     } catch {
-      toast.error('Failed to load secrets');
+      setLoadError('Failed to load secrets');
     } finally {
       setLoading(false);
     }
-  }, [projectId, environmentId, toast]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- toast removed per stale-while-revalidate rule
+  }, [projectId, environmentId]);
 
   useEffect(() => {
     loadSecrets().catch(() => {
@@ -83,11 +87,19 @@ export function EnvironmentSecretsSection({
     }
   };
 
-  if (loading) {
+  if (loading && secrets.length === 0 && !loadError) {
     return (
       <div className="flex items-center gap-2" role="status">
         <Spinner size="sm" />
         <span className="text-sm text-fg-muted">Loading secrets...</span>
+      </div>
+    );
+  }
+
+  if (loadError && secrets.length === 0) {
+    return (
+      <div className="grid gap-3">
+        <div className="text-xs text-danger">{loadError}</div>
       </div>
     );
   }

@@ -1,83 +1,101 @@
 import type { CredentialProvider,NodeResponse, ProviderCatalog, VMSize, WorkspaceResponse } from '@simple-agent-manager/shared';
 import { DEFAULT_VM_LOCATION,PROVIDER_LABELS } from '@simple-agent-manager/shared';
 import { Alert, Button, EmptyState, PageLayout, Select, SkeletonCard, Spinner } from '@simple-agent-manager/ui';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Server } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 
 import { NodeCard } from '../components/node/NodeCard';
 import { VmSizeCard } from '../components/vm/VmSizeCard';
 import { createNode, deleteNode, getProviderCatalog, listNodes, listWorkspaces, stopNode } from '../lib/api';
+import { workspacesKeys } from './Workspaces';
+
+/** Stable query key factory for node-related queries. */
+export const nodesKeys = {
+  all: ['nodes'] as const,
+  list: () => ['nodes', 'list'] as const,
+  catalog: () => ['nodes', 'catalog'] as const,
+};
 
 export function Nodes() {
   const navigate = useNavigate();
-  const [nodes, setNodes] = useState<NodeResponse[]>([]);
-  const [workspaces, setWorkspaces] = useState<WorkspaceResponse[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [isRefreshing, setIsRefreshing] = useState(false);
+  const queryClient = useQueryClient();
+
   const [creating, setCreating] = useState(false);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [newNodeSize, setNewNodeSize] = useState<VMSize>('medium');
   const [newNodeLocation, setNewNodeLocation] = useState(DEFAULT_VM_LOCATION);
-  const [catalogs, setCatalogs] = useState<ProviderCatalog[]>([]);
   const [selectedProvider, setSelectedProvider] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const hasLoadedRef = useRef(false);
 
-  const activeCatalog = catalogs.find((c) => c.provider === selectedProvider);
+  // --- Data fetching via TanStack Query ---
 
-  const loadData = useCallback(async () => {
-    if (hasLoadedRef.current) {
-      setIsRefreshing(true);
+  const {
+    data: nodes,
+    isLoading: nodesLoading,
+    isFetching: nodesFetching,
+    isError: nodesError,
+    error: nodesQueryError,
+  } = useQuery<NodeResponse[]>({
+    queryKey: nodesKeys.list(),
+    queryFn: listNodes,
+    refetchInterval: 10_000,
+  });
+
+  const { data: workspaces } = useQuery<WorkspaceResponse[]>({
+    queryKey: workspacesKeys.list(undefined),
+    queryFn: () => listWorkspaces(),
+    refetchInterval: 10_000,
+  });
+
+  const { data: catalogData } = useQuery<{ catalogs: ProviderCatalog[] }>({
+    queryKey: nodesKeys.catalog(),
+    queryFn: getProviderCatalog,
+    staleTime: 60_000, // catalog rarely changes; keep longer
+  });
+
+  const catalogs = catalogData?.catalogs ?? [];
+
+  // Auto-select first provider once catalog loads, if nothing selected yet
+  const effectiveProvider = selectedProvider || catalogs[0]?.provider || '';
+  const activeCatalog = catalogs.find((c) => c.provider === effectiveProvider);
+
+  // --- Derived state ---
+
+  const isLoading = nodesLoading;
+  const isRefreshing = nodesFetching && !!nodes;
+
+  const sortedNodes = useMemo(
+    () => [...(nodes ?? [])].sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
+    [nodes]
+  );
+
+  const workspacesByNode = useMemo(() => {
+    const map = new Map<string, WorkspaceResponse[]>();
+    for (const ws of (workspaces ?? [])) {
+      if (ws.nodeId) {
+        const existing = map.get(ws.nodeId) ?? [];
+        existing.push(ws);
+        map.set(ws.nodeId, existing);
+      }
     }
-    try {
-      setError(null);
-      const [nodesResponse, workspacesResponse] = await Promise.all([
-        listNodes(),
-        listWorkspaces(),
-      ]);
-      setNodes(nodesResponse);
-      setWorkspaces(workspacesResponse);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load nodes');
-    } finally {
-      hasLoadedRef.current = true;
-      setLoading(false);
-      setIsRefreshing(false);
-    }
-  }, []);
+    return map;
+  }, [workspaces]);
 
-  useEffect(() => {
-    void loadData();
-    const interval = window.setInterval(() => {
-      void loadData();
-    }, 10000);
-
-    // Load provider catalog for location/size data
-    getProviderCatalog()
-      .then((resp) => {
-        setCatalogs(resp.catalogs);
-        const first = resp.catalogs[0];
-        if (first) {
-          setSelectedProvider(first.provider);
-          setNewNodeLocation(first.defaultLocation);
-        }
-      })
-      .catch(() => { /* catalog unavailable, use fallbacks */ });
-
-    return () => window.clearInterval(interval);
-  }, [loadData]);
+  // --- Mutation handlers ---
 
   const handleCreateNode = async () => {
     try {
       setCreating(true);
       setError(null);
       const timestamp = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '').toLowerCase();
+      const provider = effectiveProvider;
       const created = await createNode({
         name: `node-${timestamp}`,
         vmSize: newNodeSize,
         vmLocation: newNodeLocation,
-        ...(selectedProvider ? { provider: selectedProvider as CredentialProvider } : {}),
+        ...(provider ? { provider: provider as CredentialProvider } : {}),
       });
       setShowCreateForm(false);
       navigate(`/nodes/${created.id}`);
@@ -91,14 +109,14 @@ export function Nodes() {
   const handleStopNode = async (id: string) => {
     try {
       await stopNode(id);
-      void loadData();
+      void queryClient.invalidateQueries({ queryKey: nodesKeys.all });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to stop node');
     }
   };
 
   const handleDeleteNode = async (id: string) => {
-    const targetNode = nodes.find((n) => n.id === id);
+    const targetNode = (nodes ?? []).find((n) => n.id === id);
     if (targetNode?.nodeRole === 'deployment') {
       const envs = targetNode.deploymentEnvironments ?? [];
       const envSummary = envs.length > 0
@@ -111,7 +129,7 @@ export function Nodes() {
     }
     try {
       await deleteNode(id);
-      void loadData();
+      void queryClient.invalidateQueries({ queryKey: nodesKeys.all });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete node');
     }
@@ -120,23 +138,6 @@ export function Nodes() {
   const handleCreateWorkspace = (nodeId: string) => {
     navigate(`/nodes/${nodeId}`);
   };
-
-  const sortedNodes = useMemo(
-    () => [...nodes].sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
-    [nodes]
-  );
-
-  const workspacesByNode = useMemo(() => {
-    const map = new Map<string, WorkspaceResponse[]>();
-    for (const ws of workspaces) {
-      if (ws.nodeId) {
-        const existing = map.get(ws.nodeId) ?? [];
-        existing.push(ws);
-        map.set(ws.nodeId, existing);
-      }
-    }
-    return map;
-  }, [workspaces]);
 
   return (
     <PageLayout title="Nodes" maxWidth="xl">
@@ -157,7 +158,7 @@ export function Nodes() {
           {catalogs.length > 1 && (
             <div>
               <label htmlFor="node-provider" className="block text-fg-muted font-medium mb-1" style={{ fontSize: 'var(--sam-type-secondary-size)' }}>Cloud Provider</label>
-              <Select id="node-provider" value={selectedProvider} onChange={(e) => {
+              <Select id="node-provider" value={effectiveProvider} onChange={(e) => {
                 const p = e.target.value;
                 setSelectedProvider(p);
                 const cat = catalogs.find((c) => c.provider === p);
@@ -211,12 +212,19 @@ export function Nodes() {
         </div>
       )}
 
-      {loading && nodes.length === 0 ? (
+      {isLoading && !((nodes ?? []).length > 0) ? (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {Array.from({ length: 3 }, (_, i) => (
             <SkeletonCard key={i} lines={3} />
           ))}
         </div>
+      ) : nodesError && sortedNodes.length === 0 ? (
+        // Initial load failed with no cached data: surface the error instead of
+        // a misleading "No nodes yet" empty state. A background refetch failure
+        // while stale data is present keeps the data mounted (below).
+        <Alert variant="error">
+          {(nodesQueryError instanceof Error && nodesQueryError.message) || 'Failed to load nodes'}
+        </Alert>
       ) : sortedNodes.length === 0 ? (
         <EmptyState
           icon={<Server size={48} />}

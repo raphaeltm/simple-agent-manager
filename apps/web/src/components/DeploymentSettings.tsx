@@ -29,6 +29,7 @@ export function DeploymentSettings({ projectId, compact = false }: DeploymentSet
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [loading, setLoading] = useState(true);
+  const [hasLoaded, setHasLoaded] = useState(false);
   const [deploymentCred, setDeploymentCred] = useState<ProjectDeploymentGcpResponse | null>(null);
 
   // Setup flow state
@@ -47,12 +48,13 @@ export function DeploymentSettings({ projectId, compact = false }: DeploymentSet
 
   const loadDeploymentCred = useCallback(async () => {
     try {
-      setLoading(true);
       const resp = await getProjectDeploymentGcp(projectId);
       setDeploymentCred(resp);
+      setHasLoaded(true);
     } catch {
       // Not configured
       setDeploymentCred({ connected: false });
+      setHasLoaded(true);
     } finally {
       setLoading(false);
     }
@@ -103,7 +105,8 @@ export function DeploymentSettings({ projectId, compact = false }: DeploymentSet
           setPhase('idle');
         });
     }
-  }, [searchParams, setSearchParams, projectId, toast]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- toast removed per stale-while-revalidate rule
+  }, [searchParams, setSearchParams, projectId]);
 
   const handleConnectGcp = () => {
     // Redirect to OAuth
@@ -146,7 +149,7 @@ export function DeploymentSettings({ projectId, compact = false }: DeploymentSet
     }
   };
 
-  if (loading) {
+  if (loading && !hasLoaded) {
     return (
       <section className="glass-surface rounded-lg p-4 grid gap-3">
         <HeadingTag className={`${headingClass} m-0 text-fg-primary`}>

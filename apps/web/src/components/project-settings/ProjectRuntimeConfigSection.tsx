@@ -31,17 +31,22 @@ export function ProjectRuntimeConfigSection({ projectId }: ProjectRuntimeConfigS
   const [fileContentInput, setFileContentInput] = useState('');
   const [fileSecretInput, setFileSecretInput] = useState(false);
 
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [hasLoaded, setHasLoaded] = useState(false);
+
   const loadRuntimeConfig = useCallback(async () => {
     try {
-      setRuntimeConfigLoading(true);
+      setLoadError(null);
       const config = await getProjectRuntimeConfig(projectId);
       setRuntimeConfig(config);
+      setHasLoaded(true);
     } catch {
-      toast.error('Failed to load runtime config');
+      setLoadError('Failed to load runtime config');
     } finally {
       setRuntimeConfigLoading(false);
     }
-  }, [projectId, toast]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- toast removed per stale-while-revalidate rule
+  }, [projectId]);
 
   useEffect(() => {
     void loadRuntimeConfig();
@@ -125,7 +130,11 @@ export function ProjectRuntimeConfigSection({ projectId }: ProjectRuntimeConfigS
     <section className="glass-surface rounded-lg p-4 grid gap-3">
       <h2 className="sam-type-section-heading m-0 text-fg-primary">Runtime Config</h2>
 
-      {runtimeConfigLoading ? (
+      {loadError && !hasLoaded && (
+        <div className="text-xs text-danger">{loadError}</div>
+      )}
+
+      {runtimeConfigLoading && !hasLoaded ? (
         <div className="flex items-center gap-2">
           <Spinner size="sm" />
           <span>Loading runtime config...</span>
