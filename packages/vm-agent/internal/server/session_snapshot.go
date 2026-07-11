@@ -305,6 +305,11 @@ func (s *Server) restoreSessionSnapshot(ctx context.Context, runtime *WorkspaceR
 		if strings.TrimSpace(agentType) == "" {
 			return nil, fmt.Errorf("agent type is required to restore a standalone session")
 		}
+		// Prime the per-workspace message reporter before the agent starts.
+		// handleCreateAgentSession does this on the normal path; the restore path
+		// skipped it, so the restored agent's output had no reporter to enqueue
+		// to and chat replies were silently dropped after a wake.
+		s.primeRestoredMessageReporter(runtime, chatSessionID)
 		session, _, createErr := s.agentSessions.Create(runtime.ID, sessionID, "Restored session", "restore:"+sessionID)
 		if createErr != nil {
 			return nil, fmt.Errorf("recreate restored agent session: %w", createErr)
@@ -321,6 +326,33 @@ func (s *Server) restoreSessionSnapshot(ctx context.Context, runtime *WorkspaceR
 	}
 	_ = s.reportSnapshotRestoreResult(ctx, runtime.ID, chatSessionID, "restored", "", callbackToken)
 	return map[string]interface{}{"status": "restored", "degradation": restore.Degradation}, nil
+}
+
+// primeRestoredMessageReporter ensures the per-workspace message reporter exists
+// and is bound to the restored chat session before the agent starts producing
+// output. handleCreateAgentSession does this on the normal path; the restore
+// path must replicate it or the restored agent's replies are never enqueued and
+// are silently dropped after a wake.
+func (s *Server) primeRestoredMessageReporter(runtime *WorkspaceRuntime, chatSessionID string) {
+	if runtime == nil {
+		return
+	}
+	chatSessionID = strings.TrimSpace(chatSessionID)
+	projectID := strings.TrimSpace(runtime.ProjectID)
+	if projectID == "" {
+		projectID = strings.TrimSpace(s.config.ProjectID)
+	}
+	if projectID == "" || chatSessionID == "" {
+		return
+	}
+	s.workspaceMu.Lock()
+	if rt, ok := s.workspaces[runtime.ID]; ok && strings.TrimSpace(rt.ProjectID) == "" {
+		rt.ProjectID = projectID
+	}
+	s.workspaceMu.Unlock()
+	if reporter := s.getOrCreateReporter(runtime.ID, projectID, chatSessionID); reporter != nil {
+		reporter.SetSessionID(chatSessionID)
+	}
 }
 
 func (s *Server) prepareSnapshot(ctx context.Context, workspaceID, sessionID, chatSessionID, runtimeName, token string) (*snapshotPrepareResponse, error) {
