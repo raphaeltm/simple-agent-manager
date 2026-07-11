@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 
 	acpsdk "github.com/coder/acp-go-sdk"
@@ -46,20 +48,30 @@ func (h *SessionHost) startAgentWithSessionMode(ctx context.Context, agentType s
 }
 
 type agentStartup struct {
-	containerID string
-	info        agentCommandInfo
-	envVars     []string
-	settings    *agentSettingsPayload
+	containerID  string
+	info         agentCommandInfo
+	envVars      []string
+	secretEnvKey map[string]bool
+	settings     *agentSettingsPayload
 }
 
 func (h *SessionHost) prepareAgentStartup(ctx context.Context, agentType string, cred *agentCredential, settings *agentSettingsPayload) (*agentStartup, error) {
-	containerID, err := h.config.ContainerResolver()
-	if err != nil {
-		return nil, fmt.Errorf("failed to discover devcontainer: %w", err)
+	var containerID string
+	var err error
+	if h.config.ContainerResolver != nil {
+		containerID, err = h.config.ContainerResolver()
+		if err != nil {
+			return nil, fmt.Errorf("failed to discover devcontainer: %w", err)
+		}
 	}
 
 	info := getAgentCommandInfo(agentType, cred.credentialKind)
 	envVars := h.resolveAgentEnvVars(ctx, containerID)
+	secretEnvKeys := make(map[string]bool)
+	envVars, err = h.applyRuntimeAssets(ctx, containerID, envVars, secretEnvKeys)
+	if err != nil {
+		return nil, err
+	}
 	h.trackCredentialInjection(info, cred)
 
 	envVars, settings, err = h.injectAgentCredential(ctx, containerID, agentType, cred, settings, info, envVars)
@@ -70,15 +82,41 @@ func (h *SessionHost) prepareAgentStartup(ctx context.Context, agentType string,
 	h.applyPermissionMode(settings)
 
 	return &agentStartup{
-		containerID: containerID,
-		info:        info,
-		envVars:     envVars,
-		settings:    settings,
+		containerID:  containerID,
+		info:         info,
+		envVars:      envVars,
+		secretEnvKey: secretEnvKeys,
+		settings:     settings,
 	}, nil
 }
 
+func (h *SessionHost) applyRuntimeAssets(ctx context.Context, containerID string, envVars []string, secretEnvKeys map[string]bool) ([]string, error) {
+	if h.config.RuntimeAssetsProvider == nil {
+		return envVars, nil
+	}
+	assets, err := h.config.RuntimeAssetsProvider(ctx)
+	if err != nil {
+		return envVars, fmt.Errorf("failed to fetch runtime assets: %w", err)
+	}
+	if containerID == "" {
+		if err := applyStandaloneRuntimeFiles(h.config.ContainerWorkDir, assets.Files); err != nil {
+			return envVars, fmt.Errorf("failed to apply runtime files: %w", err)
+		}
+	} else if len(assets.Files) > 0 {
+		return envVars, fmt.Errorf("runtime file provider is only supported for standalone sessions")
+	}
+	envVars, err = appendRuntimeEnvVars(envVars, secretEnvKeys, assets.EnvVars)
+	if err != nil {
+		return envVars, err
+	}
+	return envVars, nil
+}
+
 func (h *SessionHost) resolveAgentEnvVars(ctx context.Context, containerID string) []string {
-	envVars := ReadContainerEnvFiles(ctx, containerID)
+	var envVars []string
+	if containerID != "" {
+		envVars = ReadContainerEnvFiles(ctx, containerID)
+	}
 	for _, fallback := range h.config.SAMEnvFallback {
 		key, _, ok := strings.Cut(fallback, "=")
 		if ok && !hasEnvVar(envVars, key) {
@@ -163,6 +201,24 @@ func (h *SessionHost) injectAuthFileCredential(
 	info agentCommandInfo,
 	envVars []string,
 ) ([]string, error) {
+	if containerID == "" {
+		path := info.authFilePath
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(h.config.ContainerWorkDir, path)
+		}
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			return envVars, fmt.Errorf("failed to create auth file directory: %w", err)
+		}
+		if err := os.WriteFile(path, []byte(cred.credential), 0o600); err != nil {
+			return envVars, fmt.Errorf("failed to write auth file: %w", err)
+		}
+		envVars = append(envVars, "NO_BROWSER=1")
+		slog.Info("Injected auth file locally", "path", path)
+		if refreshEnv, ok := h.codexRefreshProxyEnv(agentType, cred); ok {
+			envVars = append(envVars, refreshEnv)
+		}
+		return envVars, nil
+	}
 	if err := writeAuthFileToContainer(ctx, containerID, h.config.ContainerUser, info.authFilePath, cred.credential); err != nil {
 		return envVars, fmt.Errorf("failed to write auth file: %w", err)
 	}
@@ -328,6 +384,9 @@ func (h *SessionHost) applyPermissionMode(settings *agentSettingsPayload) {
 }
 
 func (h *SessionHost) writeAgentStartupConfig(ctx context.Context, agentType string, cred *agentCredential, startup *agentStartup) error {
+	if startup.containerID == "" {
+		return nil
+	}
 	if agentType == "openai-codex" {
 		h.writeCodexStartupConfig(ctx, cred, startup)
 	}
@@ -395,12 +454,17 @@ func (h *SessionHost) startAgentProcess(startup *agentStartup) (agentProcess, er
 	if h.config.StartProcess != nil {
 		return h.config.StartProcess(startup)
 	}
-	return StartProcess(ProcessConfig{
+	launcher := h.config.ProcessLauncher
+	if launcher == nil {
+		launcher = DockerExecLauncher{}
+	}
+	return launcher.Start(ProcessConfig{
 		ContainerID:   startup.containerID,
 		ContainerUser: h.config.ContainerUser,
 		AcpCommand:    startup.info.command,
 		AcpArgs:       startup.info.args,
 		EnvVars:       startup.envVars,
+		SecretEnvKeys: startup.secretEnvKey,
 		WorkDir:       h.config.ContainerWorkDir,
 	})
 }

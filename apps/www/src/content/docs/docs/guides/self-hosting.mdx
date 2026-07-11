@@ -15,7 +15,7 @@ This guide walks you through deploying Simple Agent Manager to your own infrastr
 | **GitHub account**       | Authentication, CI/CD     | Free tier            |
 | **Domain on Cloudflare** | Workspace URLs            | Any registrar        |
 
-**Workers Paid** is required because SAM uses Durable Objects for real-time chat, task execution, and node lifecycle. Go to **Workers & Pages** in the Cloudflare dashboard to upgrade. You also need **R2** enabled for Pulumi state and **Analytics Engine** enabled (free): **Workers & Pages** → **Analytics Engine** → **Enable**.
+**Workers Paid** is required because SAM uses Durable Objects for real-time chat, task execution, and node lifecycle, and Cloudflare Containers for the default instant-session runtime. Go to **Workers & Pages** in the Cloudflare dashboard to upgrade. You also need **R2** enabled for Pulumi state and **Analytics Engine** enabled (free): **Workers & Pages** → **Analytics Engine** → **Enable**.
 
 You do **not** need a shared cloud provider account. Users provide their own [Hetzner API token](https://console.hetzner.cloud/), [Scaleway API key](https://console.scaleway.com/iam/api-keys), or GCP configuration through the Settings UI. GCP support also requires optional Google OAuth configuration on the SAM instance.
 
@@ -57,7 +57,7 @@ In the Cloudflare account from Step 1, enable R2 first if it is not already acti
 
 Set **Zone Resources** to your specific domain and **Account Resources** to your account.
 
-The default deploy configures AI Gateway and writes Analytics Engine data, so keep the **AI Gateway** permission and enable **Analytics Engine** even if every user brings their own model keys. The current API Worker config also includes the experimental Sandbox binding, so **Containers: Edit** is required for the default Worker deploy. The **Account → SSL and Certificates → Edit** permission is required for issuing per-node Origin CA certificates used for VM-agent TLS — without it, new nodes cannot obtain a TLS certificate and will fail to boot.
+The default deploy configures AI Gateway and writes Analytics Engine data, so keep the **AI Gateway** permission and enable **Analytics Engine** even if every user brings their own model keys. SAM also enables the Cloudflare Container instant-session runtime by default, so **Containers: Edit** is required for the default Worker deploy. The **Account → SSL and Certificates → Edit** permission is required for issuing per-node Origin CA certificates used for VM-agent TLS — without it, new nodes cannot obtain a TLS certificate and will fail to boot.
 
 **Optional — SAM-hosted repositories (experimental):** SAM can create and host Git repositories for projects directly on [Cloudflare Artifacts](https://developers.cloudflare.com/artifacts/) (currently in beta), letting users start a project without connecting GitHub. If your Cloudflare account has Artifacts access, add an **Account → Artifacts → Edit** permission to the token. The deploy **auto-detects** whether the token can reach the Artifacts REST API and enables the SAM-hosted project option only when it can — so it is safe to add the permission if it is available, or omit it entirely with no effect. To force the behavior regardless of detection, set the `ARTIFACTS_BINDING_ENABLED` GitHub Actions **variable** to `true` or `false`.
 
@@ -97,10 +97,11 @@ In your fork: Settings → Environments → New environment → name it `product
 
 **Environment variables:**
 
-| Variable          | Description                               | Example       |
-| ----------------- | ----------------------------------------- | ------------- |
-| `BASE_DOMAIN`     | Your domain                               | `example.com` |
-| `RESOURCE_PREFIX` | Domain-derived Cloudflare resource prefix | `sa379a6`     |
+| Variable               | Description                                                                                   | Example       |
+| ---------------------- | --------------------------------------------------------------------------------------------- | ------------- |
+| `BASE_DOMAIN`          | Your domain                                                                                   | `example.com` |
+| `RESOURCE_PREFIX`      | Domain-derived Cloudflare resource prefix                                                     | `sa379a6`     |
+| `CF_CONTAINER_ENABLED` | Optional instant-session runtime toggle. Defaults to `true`; set `false` to force VM runtime. | `false`       |
 
 The guided setup generates `RESOURCE_PREFIX` from `BASE_DOMAIN` as `s` plus the
 first six hex characters of the domain's SHA-256 hash. Use that generated value
@@ -108,33 +109,33 @@ instead of choosing a generic prefix.
 
 **Environment secrets:**
 
-| Secret                                     | Description                                                                        |
-| ------------------------------------------ | ---------------------------------------------------------------------------------- |
-| `CF_API_TOKEN`                             | Cloudflare API token                                                               |
-| `CF_ACCOUNT_ID`                            | Cloudflare account ID (32-char hex)                                                |
-| `CF_ZONE_ID`                               | Domain zone ID (32-char hex)                                                       |
-| `R2_ACCESS_KEY_ID`                         | R2 API token access key                                                            |
-| `R2_SECRET_ACCESS_KEY`                     | R2 API token secret key                                                            |
-| `PULUMI_CONFIG_PASSPHRASE`                 | Generated passphrase                                                               |
-| `GH_CLIENT_ID`                             | Optional GitHub App client ID; can be configured in `/setup` instead               |
-| `GH_CLIENT_SECRET`                         | Optional GitHub App client secret; can be configured in `/setup` instead           |
-| `GH_APP_ID`                                | Optional GitHub App ID; can be configured in `/setup` instead                      |
-| `GH_APP_PRIVATE_KEY`                       | Optional GitHub App private key (PEM or base64); can be configured in `/setup`     |
-| `GH_APP_SLUG`                              | Optional GitHub App URL slug; can be configured in `/setup` instead                |
-| `GH_WEBHOOK_SECRET`                        | Optional GitHub App webhook secret; can be configured in `/setup` instead          |
+| Secret                                     | Description                                                                                                                                                                         |
+| ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CF_API_TOKEN`                             | Cloudflare API token                                                                                                                                                                |
+| `CF_ACCOUNT_ID`                            | Cloudflare account ID (32-char hex)                                                                                                                                                 |
+| `CF_ZONE_ID`                               | Domain zone ID (32-char hex)                                                                                                                                                        |
+| `R2_ACCESS_KEY_ID`                         | R2 API token access key                                                                                                                                                             |
+| `R2_SECRET_ACCESS_KEY`                     | R2 API token secret key                                                                                                                                                             |
+| `PULUMI_CONFIG_PASSPHRASE`                 | Generated passphrase                                                                                                                                                                |
+| `GH_CLIENT_ID`                             | Optional GitHub App client ID; can be configured in `/setup` instead                                                                                                                |
+| `GH_CLIENT_SECRET`                         | Optional GitHub App client secret; can be configured in `/setup` instead                                                                                                            |
+| `GH_APP_ID`                                | Optional GitHub App ID; can be configured in `/setup` instead                                                                                                                       |
+| `GH_APP_PRIVATE_KEY`                       | Optional GitHub App private key (PEM or base64); can be configured in `/setup`                                                                                                      |
+| `GH_APP_SLUG`                              | Optional GitHub App URL slug; can be configured in `/setup` instead                                                                                                                 |
+| `GH_WEBHOOK_SECRET`                        | Optional GitHub App webhook secret; can be configured in `/setup` instead                                                                                                           |
 | `GOOGLE_LOGIN_CLIENT_ID`                   | Optional Google **login** OAuth client ID (Sign in with Google); can be configured in `/setup` instead. Register redirect URI `https://api.yourdomain.com/api/auth/callback/google` |
-| `GOOGLE_LOGIN_CLIENT_SECRET`               | Optional Google **login** OAuth client secret; can be configured in `/setup` instead                                                                                               |
-| `GITLAB_HOST`                              | Optional GitLab OAuth host, such as `https://gitlab.com`; can be configured in `/setup` instead. Register redirect URI `https://api.yourdomain.com/api/auth/callback/gitlab`       |
-| `GITLAB_CLIENT_ID`                         | Optional GitLab OAuth application ID; can be configured in `/setup` instead                                                                                                       |
-| `GITLAB_CLIENT_SECRET`                     | Optional GitLab OAuth secret; can be configured in `/setup` instead                                                                                                               |
-| `GOOGLE_CLIENT_ID`                         | Optional Google **infra/GCP** OAuth client ID for GCP deployment authorization (separate client from login; NOT set via `/setup`)                                                    |
+| `GOOGLE_LOGIN_CLIENT_SECRET`               | Optional Google **login** OAuth client secret; can be configured in `/setup` instead                                                                                                |
+| `GITLAB_HOST`                              | Optional GitLab OAuth host, such as `https://gitlab.com`; can be configured in `/setup` instead. Register redirect URI `https://api.yourdomain.com/api/auth/callback/gitlab`        |
+| `GITLAB_CLIENT_ID`                         | Optional GitLab OAuth application ID; can be configured in `/setup` instead                                                                                                        |
+| `GITLAB_CLIENT_SECRET`                     | Optional GitLab OAuth secret; can be configured in `/setup` instead                                                                                                                |
+| `GOOGLE_CLIENT_ID`                         | Optional Google **infra/GCP** OAuth client ID for GCP deployment authorization (separate client from login; NOT set via `/setup`)                                                   |
 | `GOOGLE_CLIENT_SECRET`                     | Optional Google **infra/GCP** OAuth client secret (separate client from login; NOT set via `/setup`)                                                                                |
-| `CF_AIG_TOKEN`                             | Optional narrower Cloudflare AI Gateway Unified Billing token                      |
-| `DEVCONTAINER_CACHE_CLOUDFLARE_API_TOKEN`  | Optional narrower Cloudflare token for managed devcontainer registry credentials   |
-| `DEVCONTAINER_CACHE_CLOUDFLARE_ACCOUNT_ID` | Optional Cloudflare account override for managed devcontainer registry credentials |
+| `CF_AIG_TOKEN`                             | Optional narrower Cloudflare AI Gateway Unified Billing token                                                                                                                       |
+| `DEVCONTAINER_CACHE_CLOUDFLARE_API_TOKEN`  | Optional narrower Cloudflare token for managed devcontainer registry credentials                                                                                                    |
+| `DEVCONTAINER_CACHE_CLOUDFLARE_ACCOUNT_ID` | Optional Cloudflare account override for managed devcontainer registry credentials                                                                                                  |
 
 :::note
-GitHub App secrets use `GH_*` prefix because GitHub Actions secret names cannot start with `GITHUB_*`. When present, the deployment workflow maps those `GH_*` secrets to `GITHUB_*` Worker secrets and SAM uses them as environment fallbacks. Google login and GitLab OAuth fallback secrets are passed through with their normal names. Values saved in `/setup` or the superadmin platform config UI take precedence.
+GitHub App secrets use `GH_*` prefix because GitHub Actions secret names cannot start with `GITHUB_*`. When present, the deployment workflow maps those `GH_*` secrets to `GITHUB_*` Worker secrets and SAM uses them as environment fallbacks. Values saved in `/setup` or the superadmin platform config UI take precedence.
 :::
 
 :::note
@@ -209,7 +210,7 @@ To remove all resources: Actions → Teardown → Run workflow → type `DELETE`
 | Cloudflare R2      | 10GB storage     | $0.015/GB/month |
 | Cloudflare Pages   | Unlimited        | Free            |
 
-The Workers Paid plan ($5/month) is required for Durable Objects. Beyond the base plan, usage-based costs stay within free tier allowances for small to medium usage.
+The Workers Paid plan ($5/month) is required for Durable Objects and Cloudflare Containers. Beyond the base plan, usage-based costs stay within free tier allowances for small to medium usage.
 
 ### User VM Costs
 
@@ -264,7 +265,7 @@ Upgrade to the **Workers Paid plan** ($5/month). Go to **Workers & Pages** → u
 
 ### Containers Forbidden
 
-Your API token is missing the **Account → Containers → Edit** permission. Edit the token and add it.
+Your API token is missing the **Account → Containers → Edit** permission. SAM enables Cloudflare Container instant sessions by default, so edit the token and add the permission. To deploy without the container runtime, set the GitHub environment variable `CF_CONTAINER_ENABLED=false` and re-run the workflow.
 
 ### SSL Handshake Failure
 

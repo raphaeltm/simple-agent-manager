@@ -93,6 +93,7 @@ func TestCallbackTokenRefresh(t *testing.T) {
 }
 
 func TestRunDetachedDeploymentApplyCancelsAfterIdleProgress(t *testing.T) {
+	jobID := applyJobID("env-1", 7)
 	releaseRequested := make(chan struct{})
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(r.URL.Path, "/deploy-release") {
@@ -128,10 +129,34 @@ func TestRunDetachedDeploymentApplyCancelsAfterIdleProgress(t *testing.T) {
 		EnvironmentID:   "env-1",
 		NodeID:          "node-1",
 		ControlPlaneURL: ts.URL,
-		CallbackToken:   "callback-token",
+		CallbackToken:   "",
 		HTTPClient:      deploy.NewArtifactHTTPClient(deploy.ArtifactHTTPClientConfig{}),
 		ApplyProgress:   s.persistApplyProgress,
 	})
+
+	// Keep the idle watchdog alive until FetchAndApply reaches the intended
+	// stalled section. Otherwise a loaded CI runner can spend the whole 40ms
+	// budget before the fetch goroutine reaches the test HTTP server.
+	stopProgress := make(chan struct{})
+	var stopProgressOnce sync.Once
+	stopProgressPump := func() {
+		stopProgressOnce.Do(func() {
+			close(stopProgress)
+		})
+	}
+	defer stopProgressPump()
+	go func() {
+		ticker := time.NewTicker(5 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stopProgress:
+				return
+			case <-ticker.C:
+				s.signalApplyProgress(jobID)
+			}
+		}
+	}()
 
 	done := make(chan struct{})
 	go func() {
@@ -141,6 +166,7 @@ func TestRunDetachedDeploymentApplyCancelsAfterIdleProgress(t *testing.T) {
 
 	select {
 	case <-releaseRequested:
+		stopProgressPump()
 	case <-time.After(time.Second):
 		t.Fatal("deploy-release endpoint was not requested")
 	}
@@ -150,7 +176,7 @@ func TestRunDetachedDeploymentApplyCancelsAfterIdleProgress(t *testing.T) {
 		t.Fatal("apply watchdog did not cancel stalled apply")
 	}
 
-	job, err := store.GetJob(applyJobID("env-1", 7))
+	job, err := store.GetJob(jobID)
 	if err != nil {
 		t.Fatalf("GetJob: %v", err)
 	}

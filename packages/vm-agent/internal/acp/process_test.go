@@ -1,6 +1,7 @@
 package acp
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -186,6 +187,41 @@ func TestEnvFileOperations(t *testing.T) {
 		}
 	})
 
+	t.Run("ExplicitSecretEnvKeysUseEnvFile", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origDir := envFileDir
+		envFileDir = tmpDir
+		defer func() { envFileDir = origDir }()
+
+		cfg := ProcessConfig{
+			ContainerID: "test-container",
+			AcpCommand:  "test-agent",
+			EnvVars: []string{
+				"CUSTOM_VALUE=super-secret",
+				"SAM_WORKSPACE_ID=ws-123",
+			},
+			SecretEnvKeys: map[string]bool{"CUSTOM_VALUE": true},
+		}
+
+		args, envFilePath, err := buildDockerExecArgs(cfg)
+		if err != nil {
+			t.Fatalf("buildDockerExecArgs returned error: %v", err)
+		}
+		defer os.Remove(envFilePath)
+
+		argsStr := strings.Join(args, " ")
+		if strings.Contains(argsStr, "super-secret") {
+			t.Fatalf("explicit secret value leaked into docker args: %s", argsStr)
+		}
+		content, err := os.ReadFile(envFilePath)
+		if err != nil {
+			t.Fatalf("read env file: %v", err)
+		}
+		if string(content) != "CUSTOM_VALUE=super-secret\n" {
+			t.Fatalf("env file content = %q", string(content))
+		}
+	})
+
 	t.Run("EnvFileFailureIsFatal", func(t *testing.T) {
 		origDir := envFileDir
 		envFileDir = "/nonexistent/path"
@@ -276,5 +312,69 @@ func TestStartProcess_NoSecretsNoEnvFile(t *testing.T) {
 
 	if len(secrets) != 0 {
 		t.Errorf("expected no secrets in non-secret env vars, got %d: %v", len(secrets), secrets)
+	}
+}
+
+func TestStartLocalProcessRunsWithoutDockerExec(t *testing.T) {
+	t.Parallel()
+
+	proc, err := StartLocalProcess(ProcessConfig{
+		AcpCommand: "/bin/sh",
+		AcpArgs:    []string{"-c", "printf '%s' \"$SAM_TEST_VALUE\""},
+		EnvVars:    []string{"SAM_TEST_VALUE=local-ok"},
+	})
+	if err != nil {
+		t.Fatalf("StartLocalProcess returned error: %v", err)
+	}
+
+	output, err := io.ReadAll(proc.Stdout())
+	if err != nil {
+		t.Fatalf("failed to read stdout: %v", err)
+	}
+	if err := proc.Wait(); err != nil {
+		t.Fatalf("process wait returned error: %v", err)
+	}
+	if string(output) != "local-ok" {
+		t.Fatalf("stdout=%q, want local-ok", string(output))
+	}
+	if proc.containerID != "" {
+		t.Fatalf("local process containerID=%q, want empty", proc.containerID)
+	}
+}
+
+// TestStartLocalProcessCreatesMissingWorkDir is the regression test for the
+// standalone cf-container chdir bug: the ACP process work dir is derived as
+// /workspaces/<repo>, which does not exist in standalone mode. Before the fix,
+// Go's forkExec chdir failed with ENOENT (misreported as a missing binary).
+// startLocalProcess must create the work dir and run the process in it.
+func TestStartLocalProcessCreatesMissingWorkDir(t *testing.T) {
+	t.Parallel()
+
+	// A nested, not-yet-created dir mimicking /workspaces/<repo>.
+	workDir := filepath.Join(t.TempDir(), "workspaces", "some-repo")
+	if _, err := os.Stat(workDir); !os.IsNotExist(err) {
+		t.Fatalf("precondition: work dir should not exist yet")
+	}
+
+	proc, err := StartLocalProcess(ProcessConfig{
+		AcpCommand: "/bin/sh",
+		AcpArgs:    []string{"-c", "pwd"},
+		WorkDir:    workDir,
+	})
+	if err != nil {
+		t.Fatalf("StartLocalProcess with missing work dir: %v", err)
+	}
+	output, err := io.ReadAll(proc.Stdout())
+	if err != nil {
+		t.Fatalf("read stdout: %v", err)
+	}
+	if err := proc.Wait(); err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+	if info, statErr := os.Stat(workDir); statErr != nil || !info.IsDir() {
+		t.Fatalf("work dir was not created: stat err=%v", statErr)
+	}
+	if got := strings.TrimSpace(string(output)); got != workDir {
+		t.Fatalf("process cwd=%q, want %q", got, workDir)
 	}
 }

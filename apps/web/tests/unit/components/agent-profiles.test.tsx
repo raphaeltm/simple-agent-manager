@@ -62,6 +62,7 @@ const makeProfile = (overrides: Partial<AgentProfile> = {}): AgentProfile => ({
   vmLocation: null,
   workspaceProfile: null,
   taskMode: 'task',
+  runtime: null,
   isBuiltin: false,
   createdAt: '2026-03-15T00:00:00Z',
   updatedAt: '2026-03-15T00:00:00Z',
@@ -416,6 +417,28 @@ describe('ProfileFormDialog', () => {
           maxTurns: null,
           timeoutMinutes: null,
           vmSizeOverride: null,
+        }),
+      );
+    });
+  });
+
+  it('saves instant runtime with lightweight conversation settings', async () => {
+    const user = userEvent.setup();
+    render(
+      <ProfileFormDialog isOpen={true} onClose={defaultOnClose} onSave={defaultOnSave} projectId="proj-test-1" />, { wrapper: Wrapper },
+    );
+    await user.type(screen.getByPlaceholderText('e.g. Fast Implementer'), 'Instant Chat');
+    await user.click(screen.getByText('Infrastructure'));
+    await user.selectOptions(screen.getByLabelText('Runtime'), 'cf-container');
+    await user.click(screen.getByText('Create Profile'));
+    await waitFor(() => {
+      expect(defaultOnSave).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: 'Instant Chat',
+          runtime: 'cf-container',
+          vmSizeOverride: null,
+          workspaceProfile: 'lightweight',
+          taskMode: 'conversation',
         }),
       );
     });

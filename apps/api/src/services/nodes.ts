@@ -14,6 +14,7 @@ import { GcpApiError, sanitizeGcpError } from './gcp-errors';
 import { signNodeCallbackToken } from './jwt';
 import { persistError } from './observability';
 import { createProviderForUser } from './provider-credentials';
+import { destroyVmAgentContainer } from './vm-agent-container';
 
 const NODE_ERROR_MESSAGE_MAX_LENGTH = 500;
 
@@ -31,6 +32,8 @@ export interface CreateNodeInput {
   nodeRole?: 'workspace' | 'deployment';
   /** 'shared' (default) or 'exclusive'. Exclusive deployment nodes accept one environment. */
   nodeMode?: 'shared' | 'exclusive';
+  /** Runtime substrate. Defaults to traditional VM. */
+  runtime?: 'vm' | 'cf-container';
 }
 
 export interface ProvisionedNode {
@@ -41,6 +44,7 @@ export interface ProvisionedNode {
   vmSize: string;
   vmLocation: string;
   cloudProvider: string | null;
+  runtime: string;
   ipAddress: string | null;
   lastHeartbeatAt: string | null;
   healthStatus: string;
@@ -80,9 +84,10 @@ export async function createNodeRecord(env: Env, input: CreateNodeInput): Promis
     id: nodeId,
     userId: input.userId,
     credentialAttributionUserId: input.credentialAttributionUserId ?? input.userId,
-    credentialAttributionProjectId: input.credentialAttributionSource === 'project'
-      ? (input.credentialAttributionProjectId ?? null)
-      : null,
+    credentialAttributionProjectId:
+      input.credentialAttributionSource === 'project'
+        ? (input.credentialAttributionProjectId ?? null)
+        : null,
     credentialAttributionSource: input.credentialAttributionSource ?? 'user',
     name: input.name,
     status: 'creating',
@@ -93,6 +98,7 @@ export async function createNodeRecord(env: Env, input: CreateNodeInput): Promis
     heartbeatStaleAfterSeconds: input.heartbeatStaleAfterSeconds,
     nodeRole: input.nodeRole ?? 'workspace',
     nodeMode: input.nodeMode ?? 'shared',
+    runtime: input.runtime ?? 'vm',
     createdAt: now,
     updatedAt: now,
   });
@@ -105,6 +111,7 @@ export async function createNodeRecord(env: Env, input: CreateNodeInput): Promis
     vmSize: input.vmSize,
     vmLocation: input.vmLocation,
     cloudProvider: input.cloudProvider ?? null,
+    runtime: input.runtime ?? 'vm',
     ipAddress: null,
     lastHeartbeatAt: null,
     healthStatus: 'stale',
@@ -163,9 +170,10 @@ export async function provisionNode(
   const targetProvider = (node.cloudProvider as CredentialProvider | null) ?? undefined;
   let attemptedProvider = targetProvider;
   const attributionUserId = node.credentialAttributionUserId ?? node.userId;
-  const attributionProjectId = node.credentialAttributionSource === 'project'
-    ? (node.credentialAttributionProjectId ?? taskContext?.projectId ?? null)
-    : null;
+  const attributionProjectId =
+    node.credentialAttributionSource === 'project'
+      ? (node.credentialAttributionProjectId ?? taskContext?.projectId ?? null)
+      : null;
 
   try {
     const providerResult = await createProviderForUser(
@@ -193,7 +201,8 @@ export async function provisionNode(
         cloudProvider: providerResult.providerName,
         credentialSource: providerResult.credentialSource,
         credentialAttributionUserId: attributionUserId,
-        credentialAttributionProjectId: providerResult.credentialSource === 'project' ? attributionProjectId : null,
+        credentialAttributionProjectId:
+          providerResult.credentialSource === 'project' ? attributionProjectId : null,
         credentialAttributionSource: providerResult.credentialSource,
         updatedAt: new Date().toISOString(),
       })
@@ -270,7 +279,8 @@ export async function provisionNode(
           cloudProvider: providerResult.providerName,
           credentialSource: providerResult.credentialSource,
           credentialAttributionUserId: attributionUserId,
-          credentialAttributionProjectId: providerResult.credentialSource === 'project' ? attributionProjectId : null,
+          credentialAttributionProjectId:
+            providerResult.credentialSource === 'project' ? attributionProjectId : null,
           credentialAttributionSource: providerResult.credentialSource,
           providerInstanceId: vm.id,
           status: 'creating',
@@ -299,7 +309,8 @@ export async function provisionNode(
         cloudProvider: providerResult.providerName,
         credentialSource: providerResult.credentialSource,
         credentialAttributionUserId: attributionUserId,
-        credentialAttributionProjectId: providerResult.credentialSource === 'project' ? attributionProjectId : null,
+        credentialAttributionProjectId:
+          providerResult.credentialSource === 'project' ? attributionProjectId : null,
         credentialAttributionSource: providerResult.credentialSource,
         providerInstanceId: vm.id,
         ipAddress: vm.ip,
@@ -406,13 +417,21 @@ export async function stopNodeResources(nodeId: string, userId: string, env: Env
     return;
   }
 
+  if (node.runtime === 'cf-container') {
+    await destroyVmAgentContainer(env, node.id).catch((err) => {
+      log.error('node_stop.cf_container_destroy_failed', { nodeId, ...serializeError(err) });
+      throw err;
+    });
+  }
+
   // Delete the cloud provider server since stopped nodes cannot be restarted
   if (node.providerInstanceId) {
     const targetProvider = (node.cloudProvider as CredentialProvider | null) ?? undefined;
     const attributionUserId = node.credentialAttributionUserId ?? userId;
-    const attributionProjectId = node.credentialAttributionSource === 'project'
-      ? (node.credentialAttributionProjectId ?? null)
-      : null;
+    const attributionProjectId =
+      node.credentialAttributionSource === 'project'
+        ? (node.credentialAttributionProjectId ?? null)
+        : null;
     const providerResult = await createProviderForUser(
       db,
       attributionUserId,
@@ -495,9 +514,10 @@ export async function deleteNodeResources(
   if (node.providerInstanceId) {
     const targetProvider = (node.cloudProvider as CredentialProvider | null) ?? undefined;
     const attributionUserId = node.credentialAttributionUserId ?? userId;
-    const attributionProjectId = node.credentialAttributionSource === 'project'
-      ? (node.credentialAttributionProjectId ?? null)
-      : null;
+    const attributionProjectId =
+      node.credentialAttributionSource === 'project'
+        ? (node.credentialAttributionProjectId ?? null)
+        : null;
     const providerResult2 = await createProviderForUser(
       db,
       attributionUserId,
@@ -552,98 +572,169 @@ function truncateNodeErrorMessage(message: string): string {
     : message;
 }
 
-/**
- * Strict node teardown for cleanup paths where hiding a failed cloud delete is
- * worse than surfacing a stale D1 row. Unlike deleteNodeResources(), this does
- * not cascade workspace status; callers must update workspace rows only after
- * external resources have actually been removed.
- */
-export async function deleteNodeResourcesStrict(nodeId: string, userId: string, env: Env): Promise<void> {
-  const db = drizzle(env.DATABASE, { schema });
+type NodeDb = ReturnType<typeof drizzle<typeof schema>>;
+type NodeRow = typeof schema.nodes.$inferSelect;
+type ProviderForUserResult = NonNullable<Awaited<ReturnType<typeof createProviderForUser>>>;
 
+async function requireStrictNode(db: NodeDb, nodeId: string, userId: string): Promise<NodeRow> {
   const rows = await db
     .select()
     .from(schema.nodes)
-    .where(
-      and(
-        eq(schema.nodes.id, nodeId),
-        eq(schema.nodes.userId, userId)
-      )
-    )
+    .where(and(eq(schema.nodes.id, nodeId), eq(schema.nodes.userId, userId)))
     .limit(1);
 
   const node = rows[0];
   if (!node) {
     throw new Error(`Node ${nodeId} not found for strict deletion`);
   }
+  return node;
+}
 
-  if (node.providerInstanceId) {
-    const targetProvider = (node.cloudProvider as CredentialProvider | null) ?? undefined;
-    const attributionUserId = node.credentialAttributionUserId ?? userId;
-    const attributionProjectId = node.credentialAttributionSource === 'project'
+function getStrictNodeCredentialContext(node: NodeRow, userId: string) {
+  const targetProvider = (node.cloudProvider as CredentialProvider | null) ?? undefined;
+  const attributionUserId = node.credentialAttributionUserId ?? userId;
+  const attributionProjectId =
+    node.credentialAttributionSource === 'project'
       ? (node.credentialAttributionProjectId ?? null)
       : null;
-    const providerResult = await createProviderForUser(
-      db,
-      attributionUserId,
-      getCredentialEncryptionKey(env),
-      env,
-      targetProvider,
-      attributionProjectId
+  return { targetProvider, attributionUserId, attributionProjectId };
+}
+
+async function requireStrictNodeProvider(
+  db: NodeDb,
+  node: NodeRow,
+  userId: string,
+  env: Env
+): Promise<ProviderForUserResult> {
+  const { targetProvider, attributionUserId, attributionProjectId } =
+    getStrictNodeCredentialContext(node, userId);
+  const providerResult = await createProviderForUser(
+    db,
+    attributionUserId,
+    getCredentialEncryptionKey(env),
+    env,
+    targetProvider,
+    attributionProjectId
+  );
+  if (!providerResult) {
+    throw new Error(
+      `Cloud provider credentials missing for strict node deletion: node=${node.id} provider=${node.cloudProvider ?? 'unknown'} instance=${node.providerInstanceId}`
     );
-    if (!providerResult) {
-      throw new Error(
-        `Cloud provider credentials missing for strict node deletion: node=${nodeId} provider=${node.cloudProvider ?? 'unknown'} instance=${node.providerInstanceId}`
-      );
-    }
-
-    if (!targetProvider) {
-      const vm = await providerResult.provider.getVM(node.providerInstanceId);
-      if (!vm) {
-        throw new Error(
-          `Cannot strictly delete node ${nodeId}: provider ${providerResult.providerName} does not contain VM ${node.providerInstanceId}`
-        );
-      }
-    }
-
-    await db
-      .update(schema.nodes)
-      .set({
-        cloudProvider: providerResult.providerName,
-        credentialSource: providerResult.credentialSource,
-        credentialAttributionUserId: attributionUserId,
-        credentialAttributionProjectId: providerResult.credentialSource === 'project' ? attributionProjectId : null,
-        credentialAttributionSource: providerResult.credentialSource,
-        updatedAt: new Date().toISOString(),
-      })
-      .where(eq(schema.nodes.id, node.id));
-
-    await providerResult.provider.deleteVM(node.providerInstanceId);
   }
+  return providerResult;
+}
 
-  if (node.backendDnsRecordId) {
+async function ensureStrictNodeBelongsToProvider(
+  node: NodeRow,
+  providerResult: ProviderForUserResult,
+  targetProvider: CredentialProvider | undefined
+): Promise<void> {
+  if (targetProvider || !node.providerInstanceId) return;
+
+  const vm = await providerResult.provider.getVM(node.providerInstanceId);
+  if (!vm) {
+    throw new Error(
+      `Cannot strictly delete node ${node.id}: provider ${providerResult.providerName} does not contain VM ${node.providerInstanceId}`
+    );
+  }
+}
+
+async function deleteStrictProviderInstance(
+  db: NodeDb,
+  node: NodeRow,
+  userId: string,
+  env: Env
+): Promise<void> {
+  if (!node.providerInstanceId) return;
+
+  const credentialContext = getStrictNodeCredentialContext(node, userId);
+  const providerResult = await requireStrictNodeProvider(db, node, userId, env);
+  await ensureStrictNodeBelongsToProvider(
+    node,
+    providerResult,
+    credentialContext.targetProvider
+  );
+
+  await db
+    .update(schema.nodes)
+    .set({
+      cloudProvider: providerResult.providerName,
+      credentialSource: providerResult.credentialSource,
+      credentialAttributionUserId: credentialContext.attributionUserId,
+      credentialAttributionProjectId:
+        providerResult.credentialSource === 'project'
+          ? credentialContext.attributionProjectId
+          : null,
+      credentialAttributionSource: providerResult.credentialSource,
+      updatedAt: new Date().toISOString(),
+    })
+    .where(eq(schema.nodes.id, node.id));
+
+  await providerResult.provider.deleteVM(node.providerInstanceId);
+}
+
+async function persistStrictDnsCleanupError(
+  env: Env,
+  input: {
+    nodeId: string;
+    userId: string;
+    backendDnsRecordId: string;
+    err: unknown;
+  }
+): Promise<void> {
+  await persistError(env.OBSERVABILITY_DATABASE, {
+    source: 'api',
+    level: 'error',
+    message: `Strict node DNS cleanup failed: ${input.err instanceof Error ? input.err.message : String(input.err)}`,
+    stack: input.err instanceof Error ? input.err.stack : undefined,
+    context: {
+      component: 'node-deletion',
+      recoveryType: 'strict_node_dns_cleanup_failure',
+      nodeId: input.nodeId,
+      backendDnsRecordId: input.backendDnsRecordId,
+    },
+    nodeId: input.nodeId,
+    userId: input.userId,
+  });
+}
+
+async function deleteStrictNodeDnsRecord(node: NodeRow, userId: string, env: Env): Promise<void> {
+  if (!node.backendDnsRecordId) return;
+
+  try {
+    await deleteDNSRecord(node.backendDnsRecordId, env);
+  } catch (err) {
+    log.error('node_delete.strict_dns_cleanup_failed', { nodeId: node.id, ...serializeError(err) });
     try {
-      await deleteDNSRecord(node.backendDnsRecordId, env);
-    } catch (err) {
-      log.error('node_delete.strict_dns_cleanup_failed', { nodeId, ...serializeError(err) });
-      try {
-        await persistError(env.OBSERVABILITY_DATABASE, {
-          source: 'api',
-          level: 'error',
-          message: `Strict node DNS cleanup failed: ${err instanceof Error ? err.message : String(err)}`,
-          stack: err instanceof Error ? err.stack : undefined,
-          context: {
-            component: 'node-deletion',
-            recoveryType: 'strict_node_dns_cleanup_failure',
-            nodeId,
-            backendDnsRecordId: node.backendDnsRecordId,
-          },
-          nodeId,
-          userId,
-        });
-      } catch (obsErr) {
-        log.error('node_delete.strict_dns_observability_failed', { nodeId, ...serializeError(obsErr) });
-      }
+      await persistStrictDnsCleanupError(env, {
+        nodeId: node.id,
+        userId,
+        backendDnsRecordId: node.backendDnsRecordId,
+        err,
+      });
+    } catch (obsErr) {
+      log.error('node_delete.strict_dns_observability_failed', {
+        nodeId: node.id,
+        ...serializeError(obsErr),
+      });
     }
   }
+}
+
+/**
+ * Strict node teardown for cleanup paths where hiding a failed cloud delete is
+ * worse than surfacing a stale D1 row. Unlike deleteNodeResources(), this does
+ * not cascade workspace status; callers must update workspace rows only after
+ * external resources have actually been removed.
+ */
+export async function deleteNodeResourcesStrict(
+  nodeId: string,
+  userId: string,
+  env: Env
+): Promise<void> {
+  const db = drizzle(env.DATABASE, { schema });
+  const node = await requireStrictNode(db, nodeId, userId);
+
+  await deleteStrictProviderInstance(db, node, userId, env);
+  await deleteStrictNodeDnsRecord(node, userId, env);
 }

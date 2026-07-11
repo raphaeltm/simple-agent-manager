@@ -1,6 +1,8 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { renderWithQuery } from '../../test-utils/query-test-utils';
 
 const mocks = vi.hoisted(() => ({
   listWorkspaces: vi.fn(),
@@ -63,47 +65,44 @@ describe('Workspaces page', () => {
   });
 
   it('renders workspace list', async () => {
-    render(
+    renderWithQuery(
       <MemoryRouter>
         <Workspaces />
       </MemoryRouter>
     );
 
-    await waitFor(() => {
-      expect(mocks.listWorkspaces).toHaveBeenCalled();
-    });
-
-    expect(screen.getByText('My Workspace')).toBeInTheDocument();
+    expect(await screen.findByText('My Workspace')).toBeInTheDocument();
     expect(screen.getByText('Stopped WS')).toBeInTheDocument();
   });
 
   it('shows empty state when no workspaces', async () => {
     mocks.listWorkspaces.mockResolvedValue([]);
 
-    render(
+    renderWithQuery(
       <MemoryRouter>
         <Workspaces />
       </MemoryRouter>
     );
 
-    await waitFor(() => {
-      expect(mocks.listWorkspaces).toHaveBeenCalled();
-    });
-
-    expect(screen.getByText('No workspaces yet')).toBeInTheDocument();
+    expect(await screen.findByText('No workspaces yet')).toBeInTheDocument();
   });
 
   it('shows filtered empty state message', async () => {
     mocks.listWorkspaces.mockResolvedValue([]);
 
-    render(
+    renderWithQuery(
       <MemoryRouter>
         <Workspaces />
       </MemoryRouter>
     );
 
+    // Wait for initial load to complete
     await waitFor(() => {
       expect(mocks.listWorkspaces).toHaveBeenCalled();
+    });
+    // Wait for loading skeleton to disappear (query settled)
+    await waitFor(() => {
+      expect(screen.queryByRole('status', { name: /loading/i })).not.toBeInTheDocument();
     });
 
     const select = screen.getByLabelText('Filter by status');
@@ -113,11 +112,11 @@ describe('Workspaces page', () => {
       expect(mocks.listWorkspaces).toHaveBeenCalledWith('running');
     });
 
-    expect(screen.getByText('No matching workspaces')).toBeInTheDocument();
+    expect(await screen.findByText('No matching workspaces')).toBeInTheDocument();
   });
 
   it('filters workspaces by status', async () => {
-    render(
+    renderWithQuery(
       <MemoryRouter>
         <Workspaces />
       </MemoryRouter>
@@ -135,44 +134,84 @@ describe('Workspaces page', () => {
     });
   });
 
-  it('shows error message on API failure', async () => {
+  it('surfaces load error instead of empty state when initial load fails', async () => {
+    // Regression: a failed initial load left isLoading=false with no data, so the
+    // render gate fell through to the "No workspaces yet" empty state — telling the
+    // user they have zero workspaces when the request actually errored.
     mocks.listWorkspaces.mockRejectedValue(new Error('Network error'));
 
-    render(
+    renderWithQuery(
       <MemoryRouter>
         <Workspaces />
       </MemoryRouter>
     );
 
+    // The error message must appear...
+    expect(await screen.findByText('Network error')).toBeInTheDocument();
+    // ...and the misleading empty state must NOT.
+    expect(screen.queryByText('No workspaces yet')).not.toBeInTheDocument();
+  });
+
+  it('falls back to a friendly message when the load error has no message', async () => {
+    // ApiClientError sets Error.message from the response body's `message` field,
+    // which can be empty (e.g. a 500 with only an `error` code). Guard against a
+    // blank error Alert by falling back to friendly copy.
+    mocks.listWorkspaces.mockRejectedValue(new Error(''));
+
+    renderWithQuery(
+      <MemoryRouter>
+        <Workspaces />
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByText('Failed to load workspaces')).toBeInTheDocument();
+    expect(screen.queryByText('No workspaces yet')).not.toBeInTheDocument();
+  });
+
+  it('keeps stale data visible when a background refetch fails (does not show error)', async () => {
+    // First load succeeds with data.
+    mocks.listWorkspaces.mockResolvedValue([runningWorkspace]);
+
+    const { queryClient } = renderWithQuery(
+      <MemoryRouter>
+        <Workspaces />
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByText('My Workspace')).toBeInTheDocument();
+
+    // Next fetch (background refetch) fails.
+    mocks.listWorkspaces.mockRejectedValueOnce(new Error('Refetch boom'));
+    void queryClient.invalidateQueries({ queryKey: ['workspaces'] });
+
     await waitFor(() => {
-      expect(screen.getByText('Network error')).toBeInTheDocument();
+      // The stale content stays mounted and the error is NOT surfaced,
+      // because data is present.
+      expect(screen.getByText('My Workspace')).toBeInTheDocument();
     });
+    expect(screen.queryByText('Refetch boom')).not.toBeInTheDocument();
+    expect(screen.queryByText('No workspaces yet')).not.toBeInTheDocument();
   });
 
   it('has page title', async () => {
-    render(
+    renderWithQuery(
       <MemoryRouter>
         <Workspaces />
       </MemoryRouter>
     );
-
-    await waitFor(() => {
-      expect(mocks.listWorkspaces).toHaveBeenCalled();
-    });
 
     expect(screen.getByText('Workspaces')).toBeInTheDocument();
   });
 
   it('calls deleteWorkspace and reloads when delete action is used', async () => {
-    render(
+    renderWithQuery(
       <MemoryRouter>
         <Workspaces />
       </MemoryRouter>
     );
 
-    await waitFor(() => {
-      expect(mocks.listWorkspaces).toHaveBeenCalled();
-    });
+    // Wait for data to render
+    expect(await screen.findByText('My Workspace')).toBeInTheDocument();
 
     // Open the overflow menu for the running workspace
     const menus = screen.getAllByRole('button', { name: /actions for/i });
@@ -189,15 +228,14 @@ describe('Workspaces page', () => {
   it('shows error when delete fails', async () => {
     mocks.deleteWorkspace.mockRejectedValue(new Error('Delete failed'));
 
-    render(
+    renderWithQuery(
       <MemoryRouter>
         <Workspaces />
       </MemoryRouter>
     );
 
-    await waitFor(() => {
-      expect(mocks.listWorkspaces).toHaveBeenCalled();
-    });
+    // Wait for data to render
+    expect(await screen.findByText('My Workspace')).toBeInTheDocument();
 
     const menus = screen.getAllByRole('button', { name: /actions for/i });
     fireEvent.click(menus[0]);
@@ -207,6 +245,41 @@ describe('Workspaces page', () => {
 
     await waitFor(() => {
       expect(screen.getByText('Delete failed')).toBeInTheDocument();
+    });
+  });
+
+  it('keeps stale content visible during background refetch (stale-while-revalidate)', async () => {
+    // First load succeeds with data
+    mocks.listWorkspaces.mockResolvedValue([runningWorkspace]);
+
+    const { queryClient } = renderWithQuery(
+      <MemoryRouter>
+        <Workspaces />
+      </MemoryRouter>
+    );
+
+    // Wait for initial data to render
+    expect(await screen.findByText('My Workspace')).toBeInTheDocument();
+
+    // Now make the next fetch slow to simulate a background refetch
+    let resolveRefetch: (value: unknown) => void;
+    const refetchPromise = new Promise((resolve) => {
+      resolveRefetch = resolve;
+    });
+    mocks.listWorkspaces.mockReturnValueOnce(refetchPromise);
+
+    // Trigger a refetch via query invalidation (same key, same filter)
+    void queryClient.invalidateQueries({ queryKey: ['workspaces'] });
+
+    // Content must stay visible while refetch is in-flight
+    expect(screen.getByText('My Workspace')).toBeInTheDocument();
+
+    // Resolve with updated data
+    resolveRefetch!([{ ...runningWorkspace, displayName: 'Updated Workspace' }]);
+
+    // Eventually the new data replaces the stale data
+    await waitFor(() => {
+      expect(screen.getByText('Updated Workspace')).toBeInTheDocument();
     });
   });
 });

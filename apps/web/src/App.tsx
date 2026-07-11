@@ -1,3 +1,4 @@
+import { QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter, Navigate, Outlet, Route, Routes } from 'react-router';
 
 import { AppShell } from './components/AppShell';
@@ -8,6 +9,7 @@ import { ProtectedRoute } from './components/ProtectedRoute';
 import { GlobalAudioProvider } from './contexts/GlobalAudioContext';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { ToastProvider } from './hooks/useToast';
+import { queryClient } from './lib/query-client';
 import { AccountMap } from './pages/AccountMap';
 import { Admin } from './pages/Admin';
 import { AdminAIProxy } from './pages/AdminAIProxy';
@@ -97,6 +99,7 @@ export default function App() {
   return (
     <ErrorBoundary>
       <ThemeProvider>
+        <QueryClientProvider client={queryClient}>
         <AuthProvider>
           <ToastProvider>
             <GlobalAudioProvider>
@@ -217,6 +220,7 @@ export default function App() {
             </GlobalAudioProvider>
           </ToastProvider>
         </AuthProvider>
+        </QueryClientProvider>
       </ThemeProvider>
     </ErrorBoundary>
   );

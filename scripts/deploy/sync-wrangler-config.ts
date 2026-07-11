@@ -76,7 +76,11 @@ function generateSetupToken(): string {
   return randomBytes(SETUP_TOKEN_BYTES).toString('base64url');
 }
 
-function cloudflareWorkerVariablesUrl(accountId: string, workerName: string, environment: string): string {
+function cloudflareWorkerVariablesUrl(
+  accountId: string,
+  workerName: string,
+  environment: string
+): string {
   return `https://dash.cloudflare.com/${accountId}/workers/services/view/${workerName}/${environment}/settings/variables`;
 }
 
@@ -289,6 +293,104 @@ export async function resolveArtifactsBindingEnabled(
   return probeAvailable;
 }
 
+type StaticBindings = ReturnType<typeof extractStaticBindings>;
+
+function getApiWorkerRoutes(baseDomain: string): NonNullable<WranglerEnvConfig['routes']> {
+  return [
+    {
+      pattern: `api.${baseDomain}/*`,
+      zone_name: baseDomain,
+    },
+    {
+      pattern: `*.${baseDomain}/*`,
+      zone_name: baseDomain,
+    },
+  ];
+}
+
+function getOptionalProcessEnvVars(names: readonly string[]): Record<string, string> {
+  const vars: Record<string, string> = {};
+  for (const name of names) {
+    const value = process.env[name];
+    if (value) {
+      vars[name] = value;
+    }
+  }
+  return vars;
+}
+
+function getApiWorkerVars(
+  topLevel: WranglerToml,
+  outputs: PulumiOutputs,
+  stack: string,
+  analyticsDataset: string,
+  includeArtifactsBinding: boolean
+): Record<string, string> {
+  return {
+    CF_CONTAINER_ENABLED: 'true',
+    ...(topLevel.vars || {}),
+    BASE_DOMAIN: outputs.stackSummary.baseDomain,
+    VERSION: DEPLOYMENT_CONFIG.version,
+    PAGES_PROJECT_NAME: outputs.pagesName,
+    R2_BUCKET_NAME: outputs.r2Name,
+    ...getOptionalProcessEnvVars([
+      'REQUIRE_APPROVAL',
+      'HETZNER_BASE_IMAGE',
+      'CF_CONTAINER_ENABLED',
+      'CF_CONTAINER_PORT_READY_TIMEOUT_MS',
+      'CF_CONTAINER_VM_AGENT_PORT',
+      'SANDBOX_ENABLED',
+      'SANDBOX_EXEC_TIMEOUT_MS',
+      'SANDBOX_VM_AGENT_PORT',
+    ]),
+    // AI Gateway ID matches the resource prefix (created by configure-ai-gateway.sh)
+    AI_GATEWAY_ID: DEPLOYMENT_CONFIG.prefix,
+    // Analytics Engine dataset — derived from prefix so forks don't co-mingle data
+    ANALYTICS_DATASET: analyticsDataset,
+    // Marketing Pages project — used when the wildcard Worker route intercepts www.*
+    WWW_PAGES_PROJECT_NAME: `${DEPLOYMENT_CONFIG.prefix}-www`,
+    // Deployment environment — used by trial runner to choose agent type + model
+    ENVIRONMENT: DEPLOYMENT_CONFIG.getEnvironmentFromStack(stack),
+    // Artifacts is disabled by default and enabled only with the generated binding.
+    ARTIFACTS_ENABLED: includeArtifactsBinding ? 'true' : 'false',
+    // Plaintext by design: first-run admins read this once from the CF dashboard.
+    // Do not print the value in workflow logs; setup.completed gates it after use.
+    SETUP_TOKEN: generateSetupToken(),
+    ...(process.env.SETUP_FORCE === 'true' ? { SETUP_FORCE: 'true' } : {}),
+  };
+}
+
+function getAnalyticsEngineDatasets(
+  staticBindings: StaticBindings,
+  analyticsDataset: string
+): AnalyticsEngineDatasetBinding[] | undefined {
+  return staticBindings.analytics_engine_datasets?.map((dataset) =>
+    dataset.binding === 'ANALYTICS' ? { ...dataset, dataset: analyticsDataset } : dataset
+  );
+}
+
+function getStaticApiWorkerBindings(
+  staticBindings: StaticBindings,
+  analyticsEngineDatasets: AnalyticsEngineDatasetBinding[] | undefined,
+  includeArtifactsBinding: boolean
+): Partial<WranglerEnvConfig> {
+  return {
+    ...(staticBindings.durable_objects ? { durable_objects: staticBindings.durable_objects } : {}),
+    ...(staticBindings.ai ? { ai: staticBindings.ai } : {}),
+    ...(analyticsEngineDatasets ? { analytics_engine_datasets: analyticsEngineDatasets } : {}),
+    ...(staticBindings.migrations ? { migrations: staticBindings.migrations } : {}),
+    ...(staticBindings.containers ? { containers: staticBindings.containers } : {}),
+    ...(includeArtifactsBinding ? { artifacts: staticBindings.artifacts } : {}),
+  };
+}
+
+function getTailConsumers(
+  includeTailConsumers: boolean,
+  tailWorkerName: string
+): Partial<WranglerEnvConfig> {
+  return includeTailConsumers ? { tail_consumers: [{ service: tailWorkerName }] } : {};
+}
+
 export function generateApiWorkerEnv(
   topLevel: WranglerToml,
   outputs: PulumiOutputs,
@@ -306,9 +408,7 @@ export function generateApiWorkerEnv(
   const workerName = DEPLOYMENT_CONFIG.resources.workerName(stack);
   const tailWorkerName = DEPLOYMENT_CONFIG.resources.tailWorkerName(stack);
   const analyticsDataset = `${DEPLOYMENT_CONFIG.prefix}_analytics`;
-  const analyticsEngineDatasets = staticBindings.analytics_engine_datasets?.map((dataset) =>
-    dataset.binding === 'ANALYTICS' ? { ...dataset, dataset: analyticsDataset } : dataset
-  );
+  const analyticsEngineDatasets = getAnalyticsEngineDatasets(staticBindings, analyticsDataset);
 
   const envConfig: WranglerEnvConfig = {
     // Worker name derived from config
@@ -333,16 +433,7 @@ export function generateApiWorkerEnv(
     //
     // Health checks additionally use D1 heartbeat queries as defense-in-depth
     // (see task-runner.ts handleNodeAgentReady and verifyNodeAgentHealthy).
-    routes: [
-      {
-        pattern: `api.${outputs.stackSummary.baseDomain}/*`,
-        zone_name: outputs.stackSummary.baseDomain,
-      },
-      {
-        pattern: `*.${outputs.stackSummary.baseDomain}/*`,
-        zone_name: outputs.stackSummary.baseDomain,
-      },
-    ],
+    routes: getApiWorkerRoutes(outputs.stackSummary.baseDomain),
 
     // Workers Observability
     observability: {
@@ -354,31 +445,7 @@ export function generateApiWorkerEnv(
     },
 
     // Vars: merge top-level defaults with dynamic overrides
-    vars: {
-      ...(topLevel.vars || {}),
-      BASE_DOMAIN: outputs.stackSummary.baseDomain,
-      VERSION: DEPLOYMENT_CONFIG.version,
-      PAGES_PROJECT_NAME: outputs.pagesName,
-      R2_BUCKET_NAME: outputs.r2Name,
-      ...(process.env.REQUIRE_APPROVAL ? { REQUIRE_APPROVAL: process.env.REQUIRE_APPROVAL } : {}),
-      ...(process.env.HETZNER_BASE_IMAGE
-        ? { HETZNER_BASE_IMAGE: process.env.HETZNER_BASE_IMAGE }
-        : {}),
-      // AI Gateway ID matches the resource prefix (created by configure-ai-gateway.sh)
-      AI_GATEWAY_ID: DEPLOYMENT_CONFIG.prefix,
-      // Analytics Engine dataset — derived from prefix so forks don't co-mingle data
-      ANALYTICS_DATASET: analyticsDataset,
-      // Marketing Pages project — used when the wildcard Worker route intercepts www.*
-      WWW_PAGES_PROJECT_NAME: `${DEPLOYMENT_CONFIG.prefix}-www`,
-      // Deployment environment — used by trial runner to choose agent type + model
-      ENVIRONMENT: DEPLOYMENT_CONFIG.getEnvironmentFromStack(stack),
-      // Artifacts is disabled by default and enabled only with the generated binding.
-      ARTIFACTS_ENABLED: includeArtifactsBinding ? 'true' : 'false',
-      // Plaintext by design: first-run admins read this once from the CF dashboard.
-      // Do not print the value in workflow logs; setup.completed gates it after use.
-      SETUP_TOKEN: generateSetupToken(),
-      ...(process.env.SETUP_FORCE === 'true' ? { SETUP_FORCE: 'true' } : {}),
-    },
+    vars: getApiWorkerVars(topLevel, outputs, stack, analyticsDataset, includeArtifactsBinding),
 
     // Dynamic bindings from Pulumi outputs
     d1_databases: [
@@ -399,15 +466,10 @@ export function generateApiWorkerEnv(
     r2_buckets: [{ binding: 'R2', bucket_name: outputs.r2Name }],
 
     // Static bindings copied from top-level config
-    ...(staticBindings.durable_objects ? { durable_objects: staticBindings.durable_objects } : {}),
-    ...(staticBindings.ai ? { ai: staticBindings.ai } : {}),
-    ...(analyticsEngineDatasets ? { analytics_engine_datasets: analyticsEngineDatasets } : {}),
-    ...(staticBindings.migrations ? { migrations: staticBindings.migrations } : {}),
-    ...(staticBindings.containers ? { containers: staticBindings.containers } : {}),
-    ...(includeArtifactsBinding ? { artifacts: staticBindings.artifacts } : {}),
+    ...getStaticApiWorkerBindings(staticBindings, analyticsEngineDatasets, includeArtifactsBinding),
 
     // Tail consumers (conditional — omitted on first deploy when tail worker doesn't exist)
-    ...(includeTailConsumers ? { tail_consumers: [{ service: tailWorkerName }] } : {}),
+    ...getTailConsumers(includeTailConsumers, tailWorkerName),
   };
 
   return envConfig;

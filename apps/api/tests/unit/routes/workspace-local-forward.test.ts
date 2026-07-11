@@ -64,6 +64,11 @@ vi.mock('@cloudflare/sandbox', () => ({
   Sandbox: MockSandbox,
 }));
 
+vi.mock('@cloudflare/containers', () => ({
+  Container: class {},
+  switchPort: vi.fn((request: Request) => request),
+}));
+
 vi.mock('drizzle-orm/d1', () => ({
   drizzle: vi.fn(makeDrizzleDB),
 }));

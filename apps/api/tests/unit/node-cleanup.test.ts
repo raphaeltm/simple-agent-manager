@@ -13,6 +13,7 @@ import { runNodeCleanupSweep } from '../../src/scheduled/node-cleanup';
 // Mock deleteNodeResources
 vi.mock('../../src/services/nodes', () => ({
   deleteNodeResources: vi.fn().mockResolvedValue(undefined),
+  stopNodeResources: vi.fn().mockResolvedValue(undefined),
 }));
 
 // Mock node-agent service
@@ -57,7 +58,10 @@ function mockPreparedStatement(results: unknown[] = []) {
  * Create a minimal mock Env with D1 database stubs.
  * The `prepareResponses` map lets you configure SQL query responses by substring match.
  */
-function createMockEnv(prepareResponses: Map<string, unknown[]> = new Map()): Env {
+function createMockEnv(
+  prepareResponses: Map<string, unknown[]> = new Map(),
+  overrides: Partial<Env> = {},
+): Env {
   const mockDb = {
     prepare: vi.fn((sql: string) => {
       if (sql.includes("WHERE n.status = 'stopped'")) {
@@ -86,6 +90,7 @@ function createMockEnv(prepareResponses: Map<string, unknown[]> = new Map()): En
     } as unknown as D1Database,
     NODE_WARM_GRACE_PERIOD_MS: '2100000', // 35 min
     MAX_AUTO_NODE_LIFETIME_MS: '14400000', // 4 hours
+    ...overrides,
   } as unknown as Env;
 }
 
@@ -340,8 +345,44 @@ describe('runNodeCleanupSweep', () => {
         orphanedWorkspacesFlagged: 0,
         orphanedNodesFlagged: 0,
         stoppedWorkspacesDeleted: 0,
+        cfContainersDestroyed: 0,
         errors: 0,
       });
+    });
+  });
+
+  describe('cf-container terminal task sweep', () => {
+    it('destroys bounded terminal cf-container task candidates', async () => {
+      const { stopNodeResources } = await import('../../src/services/nodes');
+      const responses = new Map<string, unknown[]>();
+      responses.set("n.runtime = 'cf-container'", [
+        {
+          node_id: 'node-cf-1',
+          user_id: 'user-cf-1',
+          workspace_id: 'workspace-cf-1',
+          task_id: 'task-cf-1',
+          task_status: 'failed',
+        },
+      ]);
+
+      const env = createMockEnv(responses, {
+        CF_CONTAINER_TERMINAL_TASK_SWEEP_LIMIT: '3',
+      });
+
+      const result = await runNodeCleanupSweep(env);
+
+      expect(stopNodeResources).toHaveBeenCalledWith('node-cf-1', 'user-cf-1', env);
+      expect(result.cfContainersDestroyed).toBe(1);
+
+      const prepare = env.DATABASE.prepare as unknown as ReturnType<typeof vi.fn>;
+      const cfQueryIndex = prepare.mock.calls.findIndex(([sql]) =>
+        String(sql).includes("n.runtime = 'cf-container'"),
+      );
+      expect(cfQueryIndex).toBeGreaterThanOrEqual(0);
+      const cfStatement = prepare.mock.results[cfQueryIndex]?.value as {
+        bind: ReturnType<typeof vi.fn>;
+      };
+      expect(cfStatement.bind.mock.calls[0]?.[1]).toBe(3);
     });
   });
 });

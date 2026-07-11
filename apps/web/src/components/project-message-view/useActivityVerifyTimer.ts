@@ -9,6 +9,7 @@ interface ActivityVerifyTimerOptions {
   delayMs: number;
   logMessage: string;
   onVerifiedIdle: () => void;
+  onStateSnapshot?: (state: Awaited<ReturnType<typeof getChatSessionState>>['state']) => void;
 }
 
 export function useActivityVerifyTimer({
@@ -17,6 +18,7 @@ export function useActivityVerifyTimer({
   delayMs,
   logMessage,
   onVerifiedIdle,
+  onStateSnapshot,
 }: ActivityVerifyTimerOptions) {
   const timerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const verifyAbortRef = useRef<AbortController | null>(null);
@@ -41,6 +43,7 @@ export function useActivityVerifyTimer({
             signal: abortController.signal,
           });
           if (abortController.signal.aborted) return;
+          onStateSnapshot?.(data.state);
           const activity = data.state?.activity;
           if (isWorkingActivity(activity)) {
             nullStateVerifyCountRef.current = 0;
@@ -62,7 +65,7 @@ export function useActivityVerifyTimer({
     };
 
     armVerifyTimer();
-  }, [delayMs, logMessage, onVerifiedIdle, projectId, sessionId, stopVerifyDecayTimer]);
+  }, [delayMs, logMessage, onStateSnapshot, onVerifiedIdle, projectId, sessionId, stopVerifyDecayTimer]);
 
   useEffect(() => stopVerifyDecayTimer, [stopVerifyDecayTimer]);
 

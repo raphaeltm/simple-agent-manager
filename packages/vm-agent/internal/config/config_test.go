@@ -1067,3 +1067,21 @@ func TestProviderOverride(t *testing.T) {
 		t.Fatalf("Provider=%q, want %q", cfg.Provider, "hetzner")
 	}
 }
+
+func TestStandaloneRole(t *testing.T) {
+	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+	t.Setenv("NODE_ROLE", RoleStandalone)
+	t.Setenv("NODE_ID", "node-123")
+	t.Setenv("WORKSPACE_ID", "ws-123")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if !cfg.IsStandaloneMode() {
+		t.Fatal("expected standalone mode")
+	}
+	if cfg.IsDeploymentMode() {
+		t.Fatal("standalone mode must not be deployment mode")
+	}
+}

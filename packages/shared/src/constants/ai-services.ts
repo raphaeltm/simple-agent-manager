@@ -231,6 +231,25 @@ const OPENAI_CODEX_PREMIUM_PROFILE = {
   | 'fallbackGroup'
 >;
 
+const OPENAI_GPT56_PREVIEW_PROFILE = {
+  contextWindow: 1000000,
+  toolCallSupport: 'excellent',
+  intendedRole: 'workspace-agent',
+} satisfies Pick<ModelDefinition, 'contextWindow' | 'toolCallSupport' | 'intendedRole'>;
+
+const OPENAI_GPT56_PREVIEW_MODELS = [
+  ['gpt-5.6-sol', 'GPT-5.6 Sol', 'premium', 0.005, 0.03, 'openai-premium'],
+  ['gpt-5.6-terra', 'GPT-5.6 Terra', 'premium', 0.0025, 0.015, 'openai-premium'],
+  ['gpt-5.6-luna', 'GPT-5.6 Luna', 'standard', 0.001, 0.006, 'openai-standard'],
+] as const satisfies readonly [
+  string,
+  string,
+  PlatformAIModelTier,
+  number,
+  number,
+  string,
+][];
+
 /** Models available through the SAM Platform AI proxy.
  * This is the single source of truth — the DEFAULT_AI_PROXY_ALLOWED_MODELS
  * string and the UI dropdown both derive from this list.
@@ -417,6 +436,19 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     fallbackGroup: 'anthropic-premium',
   }),
   // --- OpenAI (via AI Gateway) ---
+  // GPT-5.6 preview series
+  ...OPENAI_GPT56_PREVIEW_MODELS.map(
+    ([id, label, tier, costPer1kInputTokens, costPer1kOutputTokens, fallbackGroup]) =>
+      openAIModel({
+        id,
+        label,
+        tier,
+        costPer1kInputTokens,
+        costPer1kOutputTokens,
+        ...OPENAI_GPT56_PREVIEW_PROFILE,
+        fallbackGroup,
+      })
+  ),
   // GPT-5.5 series (current flagship)
   openAIModel({
     id: 'gpt-5.5-pro',

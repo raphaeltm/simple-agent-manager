@@ -1,5 +1,5 @@
 import type { UserRole, UserStatus } from '@simple-agent-manager/shared';
-import { createContext, type ReactNode, useContext, useEffect, useRef, useState } from 'react';
+import { createContext, type ReactNode, useContext, useEffect, useMemo, useRef, useState } from 'react';
 
 import { setUserId } from '../lib/analytics';
 import { GITHUB_REAUTH_REQUIRED_EVENT } from '../lib/api/client';
@@ -68,9 +68,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const role = (sessionUser?.role as UserRole) ?? 'user';
   const status = (sessionUser?.status as UserStatus) ?? 'active';
 
-  const enrichedUser: User | null = user
-    ? { ...user, role, status }
-    : null;
+  const enrichedUser: User | null = useMemo(
+    () => (user ? { ...user, role, status } : null),
+    [user, role, status]
+  );
 
   // Sync authenticated userId to analytics tracker
   useEffect(() => {
@@ -95,14 +96,22 @@ export function AuthProvider({ children }: AuthProviderProps) {
     await signOut();
   };
 
-  const value: AuthContextValue = {
-    user: enrichedUser,
-    isLoading: isPending,
-    isAuthenticated: !!user,
-    isSuperadmin: role === 'superadmin',
-    isApproved: status === 'active' || role === 'superadmin' || role === 'admin',
-    isRefetching: isRefetching ?? false,
-  };
+  const isAuthenticated = !!user;
+  const isSuperadmin = role === 'superadmin';
+  const isApproved = status === 'active' || role === 'superadmin' || role === 'admin';
+  const effectiveIsRefetching = isRefetching ?? false;
+
+  const value: AuthContextValue = useMemo(
+    () => ({
+      user: enrichedUser,
+      isLoading: isPending,
+      isAuthenticated,
+      isSuperadmin,
+      isApproved,
+      isRefetching: effectiveIsRefetching,
+    }),
+    [enrichedUser, isPending, isAuthenticated, isSuperadmin, isApproved, effectiveIsRefetching]
+  );
 
   return (
     <AuthContext.Provider value={value}>

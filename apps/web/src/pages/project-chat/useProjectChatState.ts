@@ -1,4 +1,4 @@
-import type { AgentInfo, AgentProfile, CreateAgentProfileRequest, ProviderCatalog, Task, TaskMode, UpdateAgentProfileRequest, VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
+import type { AgentInfo, AgentProfile, AgentProfileRuntime, CreateAgentProfileRequest, ProviderCatalog, Task, TaskMode, UpdateAgentProfileRequest, VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
 import { DEFAULT_VM_SIZE, DEFAULT_WORKSPACE_PROFILE } from '@simple-agent-manager/shared';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
@@ -21,6 +21,8 @@ import {
   listChatSessions,
   listCredentials,
   listProjectTasks,
+  startInstantChatSession,
+  stopChatSession,
   submitTask,
   summarizeSession,
   updateAgentProfile,
@@ -57,7 +59,7 @@ export interface PendingDerived {
   summaryLoading: boolean;
 }
 
-export type ProfileWizardStep = 'agent' | 'work-type' | 'vm-size' | 'name';
+export type ProfileWizardStep = 'agent' | 'work-type' | 'runtime' | 'vm-size' | 'name';
 export type SessionScope = 'my' | 'all';
 
 export interface ProfileWizardState {
@@ -65,10 +67,27 @@ export interface ProfileWizardState {
   step: ProfileWizardStep;
   selectedAgentType: string | null;
   workType: TaskMode | null;
+  runtime: AgentProfileRuntime | null;
   vmSize: VMSize | null;
   profileName: string;
   saving: boolean;
   error: string | null;
+}
+
+function resolveWizardRuntime(workType: TaskMode, runtime: AgentProfileRuntime | null): AgentProfileRuntime {
+  if (runtime) return runtime;
+  return workType === 'conversation' ? 'cf-container' : 'vm';
+}
+
+function resolveWizardWorkspaceProfile(runtime: AgentProfileRuntime, workType: TaskMode): WorkspaceProfile {
+  if (runtime === 'cf-container') return 'lightweight';
+  if (workType === 'conversation') return 'lightweight';
+  return 'full';
+}
+
+function resolveWizardTaskMode(runtime: AgentProfileRuntime, workType: TaskMode): TaskMode {
+  if (runtime === 'cf-container') return 'conversation';
+  return workType;
 }
 
 const FORK_MESSAGE_TEMPLATE = `Use the SAM MCP tools (get_session_messages, search_messages) to review the previous session for full context about what was done and what needs to happen next.
@@ -131,6 +150,7 @@ export function useProjectChatState() {
     step: 'agent',
     selectedAgentType: null,
     workType: null,
+    runtime: null,
     vmSize: null,
     profileName: '',
     saving: false,
@@ -436,13 +456,13 @@ export function useProjectChatState() {
   const openProfileWizard = useCallback(() => {
     const soleAgent = configuredAgents.length === 1 ? configuredAgents[0] : null;
     const initialAgentType = soleAgent?.id ?? selectedAgentType ?? configuredAgents[0]?.id ?? null;
-    const initialWorkType: TaskMode = 'conversation';
     setProfileWizard({
       open: true,
       step: soleAgent ? 'work-type' : 'agent',
       selectedAgentType: initialAgentType,
-      workType: initialWorkType,
-      vmSize: DEFAULT_VM_SIZE,
+      workType: null,
+      runtime: null,
+      vmSize: null,
       profileName: '',
       saving: false,
       error: null,
@@ -483,6 +503,7 @@ export function useProjectChatState() {
       return null;
     }
     const workType = profileWizard.workType ?? 'conversation';
+    const runtime = resolveWizardRuntime(workType, profileWizard.runtime);
     const vmSize = profileWizard.vmSize ?? DEFAULT_VM_SIZE;
     setProfileWizard((current) => ({ ...current, saving: true, error: null }));
     try {
@@ -490,9 +511,10 @@ export function useProjectChatState() {
         name,
         description: workType === 'task' ? 'Write code and open pull requests' : 'Chat and explore with a lightweight workspace',
         agentType,
-        vmSizeOverride: vmSize,
-        workspaceProfile: workType === 'conversation' ? 'lightweight' : 'full',
-        taskMode: workType,
+        runtime,
+        vmSizeOverride: runtime === 'cf-container' ? null : vmSize,
+        workspaceProfile: resolveWizardWorkspaceProfile(runtime, workType),
+        taskMode: resolveWizardTaskMode(runtime, workType),
       });
       setProfileWizard((current) => ({ ...current, open: false, saving: false, error: null }));
       return profile;
@@ -504,7 +526,7 @@ export function useProjectChatState() {
       }));
       return null;
     }
-  }, [agentProfiles, configuredAgents, createProfile, profileWizard.profileName, profileWizard.selectedAgentType, profileWizard.vmSize, profileWizard.workType]);
+  }, [agentProfiles, configuredAgents, createProfile, profileWizard.profileName, profileWizard.runtime, profileWizard.selectedAgentType, profileWizard.vmSize, profileWizard.workType]);
 
   const resolveProfileIdForSubmit = useCallback(async () => {
     if (selectedProfileId) return selectedProfileId;
@@ -522,10 +544,6 @@ export function useProjectChatState() {
   const handleSubmit = async () => {
     const trimmed = message.trim();
     if (!trimmed) return;
-    if (!hasCloudCredentials) {
-      setSubmitError('Cloud credentials required. Connect a cloud provider in Settings, or ask your admin to enable platform trial.');
-      return;
-    }
     if (attachments.chatUploading) {
       setSubmitError('Please wait for file uploads to complete');
       return;
@@ -536,7 +554,35 @@ export function useProjectChatState() {
       const submitProfileId = await resolveProfileIdForSubmit();
       if (!submitProfileId) return;
 
+      const selectedProfile = agentProfiles.find((profile) => profile.id === submitProfileId) ?? null;
+      const selectedSkill = selectedSkillId
+        ? skills.find((skill) => skill.id === selectedSkillId) ?? null
+        : null;
       const attachmentRefs = getCompletedAttachmentRefs(attachments.chatAttachments);
+      const selectedRuntime = selectedSkill?.runtime ?? selectedProfile?.runtime ?? null;
+      const requiresTaskSubmission = attachmentRefs.length > 0 || pendingDerived !== null || executeIdeaIdRef.current !== null;
+      const useInstantSession = selectedRuntime === 'cf-container' && !requiresTaskSubmission;
+
+      if (useInstantSession) {
+        const result = await startInstantChatSession(projectId, {
+          message: trimmed,
+          agentProfileId: submitProfileId,
+          skillId: selectedSkillId ?? undefined,
+        });
+        setMessage('');
+        setPendingDerived(null);
+        attachments.clearAttachments();
+        newChatIntentRef.current = false;
+        navigate(`/projects/${projectId}/chat/${result.sessionId}`, { replace: true });
+        loadSessions().catch(() => undefined);
+        return;
+      }
+
+      if (!hasCloudCredentials) {
+        setSubmitError('Cloud credentials required. Connect a cloud provider in Settings, or ask your admin to enable platform trial.');
+        return;
+      }
+
       const baseRequest = buildBaseSubmitRequest({
         message: trimmed,
         agentProfileId: submitProfileId,
@@ -691,11 +737,15 @@ export function useProjectChatState() {
 
   const handleCloseConversation = useCallback(async () => {
     const selectedSession = sessions.find((s) => s.id === sessionId);
-    if (!selectedSession?.taskId) return;
+    if (!selectedSession) return;
     setClosingConversation(true);
     setCloseError(null);
     try {
-      await closeConversationTask(projectId, selectedSession.taskId);
+      if (selectedSession.taskId) {
+        await closeConversationTask(projectId, selectedSession.taskId);
+      } else {
+        await stopChatSession(projectId, selectedSession.id);
+      }
       void loadSessions();
     } catch (err) {
       console.warn('Failed to close conversation:', err);

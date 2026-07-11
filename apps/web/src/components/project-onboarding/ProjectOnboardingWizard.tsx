@@ -97,14 +97,12 @@ export function ProjectOnboardingWizard({
     description: 'Default profile for project conversations',
     agentType: '',
     model: '',
-    useCustomGithubPolicy: false,
   });
   const [taskProfile, setTaskProfile] = useState<ProfileDraft>({
     name: 'Task profile',
     description: 'Default profile for project tasks',
     agentType: '',
     model: '',
-    useCustomGithubPolicy: false,
   });
   const [triggerForm, setTriggerForm] = useState({
     name: 'Daily project check-in',
@@ -133,15 +131,31 @@ export function ProjectOnboardingWizard({
   // Once a project exists, steps before "conversation" are locked (can't re-create).
   const lockedBeforeIndex = project ? stepIndex('conversation') : 0;
 
+  useEffect(() => {
+    const shellScroller = document.querySelector<HTMLElement>('.sam-main-content');
+    if (!shellScroller) return;
+    if (typeof shellScroller.scrollTo === 'function') {
+      shellScroller.scrollTo({ top: 0, left: 0 });
+      return;
+    }
+    shellScroller.scrollTop = 0;
+    shellScroller.scrollLeft = 0;
+  }, [step]);
+
   const goToStep = (id: OnboardingStepId) => {
     // Clear step-scoped setup errors so a failed Create attempt on one step does
     // not surface under a different step's form.
     setSetupError(null);
     setStep(id);
   };
-  const goNext = () =>
-    goToStep(ONBOARDING_STEPS[Math.min(currentIndex + 1, ONBOARDING_STEPS.length - 1)]!.id);
-  const goBack = () => goToStep(ONBOARDING_STEPS[Math.max(currentIndex - 1, 0)]!.id);
+  const goNext = () => {
+    const nextStep = ONBOARDING_STEPS[Math.min(currentIndex + 1, ONBOARDING_STEPS.length - 1)];
+    if (nextStep) goToStep(nextStep.id);
+  };
+  const goBack = () => {
+    const previousStep = ONBOARDING_STEPS[Math.max(currentIndex - 1, 0)];
+    if (previousStep) goToStep(previousStep.id);
+  };
 
   /* ─── Connect handlers ─── */
 

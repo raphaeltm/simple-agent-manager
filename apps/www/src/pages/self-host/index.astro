@@ -29,6 +29,7 @@ const cfPermissions = [
   { type: 'Account', resource: 'Cloudflare Pages', access: 'Edit' },
   { type: 'Account', resource: 'AI Gateway', access: 'Edit' },
   { type: 'Account', resource: 'Containers', access: 'Edit' },
+  { type: 'Account', resource: 'SSL and Certificates', access: 'Edit' },
   { type: 'Zone', resource: 'DNS', access: 'Edit' },
   { type: 'Zone', resource: 'Workers Routes', access: 'Edit' },
   { type: 'Zone', resource: 'SSL and Certificates', access: 'Edit' },
@@ -84,7 +85,7 @@ const cfPermissions = [
           <div class="sh-prereqs">
             <div class="sh-prereq">
               <h3>Cloudflare account</h3>
-              <p>Workers Paid plan ($5/mo) for Durable Objects, with R2 and Analytics Engine enabled.</p>
+              <p>Workers Paid plan ($5/mo) for Durable Objects and Cloudflare Containers, with R2 and Analytics Engine enabled.</p>
             </div>
             <div class="sh-prereq">
               <h3>GitHub account</h3>
@@ -274,7 +275,7 @@ const cfPermissions = [
                 <li><b>DNS · Workers Routes</b> Auto-creates the <code>api.</code>, <code>app.</code>, and per-workspace <code>ws-…</code> hostnames and points each at the right Worker.</li>
                 <li><b>SSL and Certificates</b> Issues the Origin CA certificate so Cloudflare trusts the agent VMs you provision.</li>
                 <li><b>AI Gateway</b> Created by the default deploy so SAM-managed AI and unified billing can be enabled without changing token permissions later.</li>
-                <li><b>Containers</b> Required by the current API Worker config for the experimental Sandbox binding, even if you leave that feature disabled.</li>
+                <li><b>Containers</b> Required by the default Cloudflare Container instant-session runtime. Set <code>CF_CONTAINER_ENABLED=false</code> if you want to force VM runtime instead.</li>
                 <li><b>Workers Observability (read-only)</b> Powers the in-app logs and error views so you can debug your own instance.</li>
                 <li><b>Zone (read-only)</b> Lets Pulumi look up your domain. It never changes zone settings.</li>
               </ul>

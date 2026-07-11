@@ -340,6 +340,10 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   const sessionOwnerLabel = lc.session?.createdBy?.name?.trim()
     || lc.session?.createdBy?.email?.split('@')[0]
     || 'the creator';
+  const canArchiveSession = Boolean(
+    onCloseConversation &&
+    (lc.taskEmbed?.taskMode === 'conversation' || (!lc.taskEmbed?.id && lc.session?.status === 'active'))
+  );
 
   // Initial load — only show full spinner when no data exists yet
   if (lc.loading && lc.messages.length === 0 && !lc.session) {
@@ -481,9 +485,9 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
       {/* Lifecycle control — a single always-mounted dock while the session is
           active. Its center button morphs between a red Interrupt (working) and
           a grey Archive (idle), so the control never disappears even when the
-          `agentActivity` signal is stale. Archive is only wired for
-          conversation-mode sessions the caller can close. */}
-      {isActive && canWriteSession && ((lc.taskEmbed?.taskMode === 'conversation' && onCloseConversation) || lc.agentActivity !== 'idle') && (
+          `agentActivity` signal is stale. Archive is wired for
+          conversation-mode tasks and taskless instant sessions the caller can close. */}
+      {isActive && canWriteSession && (canArchiveSession || lc.agentActivity !== 'idle') && (
         <CompletionDock
           working={lc.agentActivity !== 'idle'}
           hasPlan={!!planItem}

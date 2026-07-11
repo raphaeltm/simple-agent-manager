@@ -1,8 +1,4 @@
-import type {
-  AgentInfo,
-  CreateAgentProfileRequest,
-  GitHubCliPolicy,
-} from '@simple-agent-manager/shared';
+import type { AgentInfo, CreateAgentProfileRequest } from '@simple-agent-manager/shared';
 import { Input } from '@simple-agent-manager/ui';
 
 import { ApiClientError } from '../../lib/api';
@@ -20,27 +16,12 @@ export interface ProfileDraft {
   description: string;
   agentType: string;
   model: string;
-  useCustomGithubPolicy: boolean;
 }
 
 export interface CreatedProfiles {
   conversation?: { id: string };
   task?: { id: string };
 }
-
-/* ───────── Constants ───────── */
-
-const CUSTOM_GITHUB_CLI_POLICY: GitHubCliPolicy = {
-  mode: 'custom',
-  repositoryScope: 'project',
-  permissions: {
-    contents: 'write',
-    pullRequests: 'write',
-    issues: 'write',
-    actions: 'read',
-    packages: 'read',
-  },
-};
 
 /* ───────── Helpers ───────── */
 
@@ -98,7 +79,6 @@ export function profilePayload(
     agentType: draft.agentType,
     model: draft.model.trim() || null,
     taskMode,
-    ...(draft.useCustomGithubPolicy ? { githubCliPolicy: CUSTOM_GITHUB_CLI_POLICY } : {}),
   };
 }
 
@@ -198,18 +178,6 @@ export function ProfileSetupPanel({
           disabled={disabled || !draft.agentType}
           placeholder="Use profile default"
         />
-      </label>
-      <label className="flex min-h-11 items-start gap-2 rounded-md border border-border-default p-3 text-sm text-fg-muted">
-        <input
-          type="checkbox"
-          checked={draft.useCustomGithubPolicy}
-          onChange={(event) =>
-            onChange({ ...draft, useCustomGithubPolicy: event.currentTarget.checked })
-          }
-          disabled={disabled}
-          className="mt-1"
-        />
-        <span>Use a custom GitHub CLI policy for this project repository.</span>
       </label>
     </section>
   );

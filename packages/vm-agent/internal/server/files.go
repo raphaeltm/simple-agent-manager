@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"mime"
 	"net/http"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -319,19 +318,14 @@ func (s *Server) handleFileRaw(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'")
 	}
 
-	// Stream the file content directly from docker exec to the response writer.
+	// Stream the file content directly from workspace exec to the response writer.
 	// This avoids buffering the entire file in memory.
 	// Uses direct args (no shell) — cat receives filePath as a single argument.
-	dockerArgs := []string{"exec", "-i"}
-	if user != "" {
-		dockerArgs = append(dockerArgs, "-u", user)
+	cmd, cmdErr := s.workspaceExecCommand(ctx, containerID, user, workDir, "cat", "--", filePath)
+	if cmdErr != nil {
+		slog.Error("Error creating raw file command", "path", filePath, "workspace", workspaceID, "error", cmdErr)
+		return
 	}
-	if workDir != "" {
-		dockerArgs = append(dockerArgs, "-w", workDir)
-	}
-	dockerArgs = append(dockerArgs, containerID, "cat", "--", filePath)
-
-	cmd := exec.CommandContext(ctx, "docker", dockerArgs...)
 	cmd.Stdout = w
 	var stderrBuf bytes.Buffer
 	cmd.Stderr = &stderrBuf

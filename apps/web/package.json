@@ -26,6 +26,7 @@
     "@simple-agent-manager/terminal": "workspace:*",
     "@simple-agent-manager/ui": "workspace:*",
     "@tailwindcss/vite": "4.2.3",
+    "@tanstack/react-query": "^5.101.2",
     "@xyflow/react": "12.10.2",
     "better-auth": "catalog:",
     "d3-scale": "4.0.2",

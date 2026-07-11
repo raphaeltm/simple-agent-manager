@@ -299,7 +299,6 @@ export async function createAuth(env: Env) {
       clientId: gitlabOAuth.clientId,
       clientSecret: gitlabOAuth.clientSecret,
       issuer: gitlabOAuth.host,
-      scope: ['read_user'],
       overrideUserInfoOnSignIn: true,
     };
   }

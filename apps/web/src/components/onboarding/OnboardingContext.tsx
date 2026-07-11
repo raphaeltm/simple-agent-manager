@@ -1,4 +1,4 @@
-import { createContext, type ReactNode,useCallback, useContext, useEffect, useState } from 'react';
+import { createContext, type ReactNode,useCallback, useContext, useEffect, useMemo, useState } from 'react';
 
 import {
   listAgentCredentials,
@@ -135,10 +135,13 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
   // the background credential-status fetch (which can take several seconds).
   const showOverlay = overlayOpen && !dismissed;
 
+  const value = useMemo<OnboardingContextValue>(
+    () => ({ needsOnboarding, showOverlay, openOnboarding, dismissOnboarding, loading }),
+    [needsOnboarding, showOverlay, openOnboarding, dismissOnboarding, loading]
+  );
+
   return (
-    <OnboardingContext.Provider
-      value={{ needsOnboarding, showOverlay, openOnboarding, dismissOnboarding, loading }}
-    >
+    <OnboardingContext.Provider value={value}>
       {children}
     </OnboardingContext.Provider>
   );

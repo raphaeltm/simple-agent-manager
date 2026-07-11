@@ -31,6 +31,7 @@ import { resolveChatAgentState } from './chat-agent-state';
 import { getChatSessionRouteContext } from './chat-route-context';
 import { enrichSessionsWithCreators, getSessionListScope, requireSessionCreator } from './chat-session-ownership';
 import { chatStateRoutes } from './chat-state';
+import { registerChatStopRoute } from './chat-stop';
 import { resolveLiveAgentSessionForChat } from './chat-workspace-resolver';
 
 const chatRoutes = new Hono<{ Bindings: Env }>();
@@ -461,22 +462,7 @@ chatRoutes.get('/:sessionId/messages/:messageId/tool-content', async (c) => {
   return c.json({ content });
 });
 
-/**
- * POST /api/projects/:projectId/sessions/:sessionId/stop
- * Stop a chat session.
- */
-chatRoutes.post('/:sessionId/stop', async (c) => {
-  const userId = getUserId(c);
-  const projectId = requireRouteParam(c, 'projectId');
-  const sessionId = requireRouteParam(c, 'sessionId');
-  const db = drizzle(c.env.DATABASE, { schema });
-
-  await requireProjectCapability(db, projectId, userId, 'task:write');
-
-  await chatPersistence.stopChatSession(c.env, projectId, sessionId);
-
-  return c.json({ status: 'stopped' });
-});
+registerChatStopRoute(chatRoutes);
 
 /**
  * POST /api/projects/:projectId/sessions/:sessionId/idle-reset

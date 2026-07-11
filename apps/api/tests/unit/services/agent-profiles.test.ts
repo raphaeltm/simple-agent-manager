@@ -287,6 +287,7 @@ describe('Agent Profile Service', () => {
         maxTurns: 50,
         timeoutMinutes: 120,
         vmSizeOverride: 'cx22',
+        runtime: null,
         provider: null,
         vmLocation: null,
         workspaceProfile: null,

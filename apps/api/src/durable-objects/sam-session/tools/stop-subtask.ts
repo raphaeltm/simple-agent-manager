@@ -12,7 +12,7 @@ import type { Env } from '../../../env';
 import { log } from '../../../lib/logger';
 import { ulid } from '../../../lib/ulid';
 import { stopAgentSessionOnNode } from '../../../services/node-agent';
-import * as projectDataService from '../../../services/project-data';
+import { cleanupTerminalTaskResources } from '../../../services/task-terminal-cleanup';
 import type { AnthropicToolDef, ToolContext } from '../types';
 
 const ACTIVE_STATUSES = ['queued', 'provisioning', 'running', 'awaiting_followup'];
@@ -138,20 +138,18 @@ export async function stopSubtask(
     return { error: 'Failed to update task status.' };
   }
 
-  // Stop chat session (best-effort)
-  if (task.workspaceId && task.projectId) {
-    try {
-      const [ws] = await db
-        .select({ chatSessionId: schema.workspaces.chatSessionId })
-        .from(schema.workspaces)
-        .where(eq(schema.workspaces.id, task.workspaceId))
-        .limit(1);
-      if (ws?.chatSessionId) {
-        await projectDataService.stopSession(env, task.projectId, ws.chatSessionId);
-      }
-    } catch {
-      // Best-effort
-    }
+  try {
+    await cleanupTerminalTaskResources(env, taskId, {
+      status: 'cancelled',
+      errorMessage: 'Stopped by user via SAM',
+      logContext: { projectId: task.projectId, source: 'sam.stop_subtask' },
+    });
+  } catch (err) {
+    log.error('sam.stop_subtask.terminal_cleanup_failed', {
+      taskId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return { error: 'Task was cancelled, but runtime cleanup failed. Retry cleanup from the task page.' };
   }
 
   log.info('sam.stop_subtask.completed', { taskId, previousStatus: task.status });

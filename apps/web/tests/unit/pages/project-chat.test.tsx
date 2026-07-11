@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   listAgents: vi.fn(),
   listAgentProfiles: vi.fn(),
+  listSkills: vi.fn().mockResolvedValue([]),
   createAgentProfile: vi.fn().mockImplementation((_projectId: string, data: Record<string, unknown>) => Promise.resolve({
     id: 'created-profile',
     projectId: 'proj-1',
@@ -24,6 +25,7 @@ const mocks = vi.hoisted(() => ({
     workspaceProfile: (data.workspaceProfile as string | null | undefined) ?? null,
     devcontainerConfigName: null,
     taskMode: (data.taskMode as string | null | undefined) ?? null,
+    runtime: (data.runtime as string | null | undefined) ?? null,
     isBuiltin: false,
     createdAt: '2026-05-28T00:00:00.000Z',
     updatedAt: '2026-05-28T00:00:00.000Z',
@@ -34,6 +36,8 @@ const mocks = vi.hoisted(() => ({
   getProviderCatalog: vi.fn(),
   listProjectTasks: vi.fn(),
   submitTask: vi.fn(),
+  startInstantChatSession: vi.fn(),
+  stopChatSession: vi.fn(),
   getProjectTask: vi.fn(),
   summarizeSession: vi.fn(),
   getTranscribeApiUrl: vi.fn(() => 'https://api.test.com/api/transcribe'),
@@ -47,6 +51,7 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../src/lib/api')>()),
   listAgents: mocks.listAgents,
   listAgentProfiles: mocks.listAgentProfiles,
+  listSkills: mocks.listSkills,
   createAgentProfile: mocks.createAgentProfile,
   listChatSessions: mocks.listChatSessions,
   listCredentials: mocks.listCredentials,
@@ -54,6 +59,8 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
   getProviderCatalog: mocks.getProviderCatalog,
   listProjectTasks: mocks.listProjectTasks,
   submitTask: mocks.submitTask,
+  startInstantChatSession: mocks.startInstantChatSession,
+  stopChatSession: mocks.stopChatSession,
   getProjectTask: mocks.getProjectTask,
   summarizeSession: mocks.summarizeSession,
   getTranscribeApiUrl: mocks.getTranscribeApiUrl,
@@ -284,6 +291,7 @@ function makeAgentProfile(overrides: Record<string, unknown> = {}) {
     workspaceProfile: null,
     devcontainerConfigName: null,
     taskMode: null,
+    runtime: null,
     isBuiltin: false,
     createdAt: '2026-03-15T00:00:00Z',
     updatedAt: '2026-03-15T00:00:00Z',
@@ -363,6 +371,11 @@ function chooseWorkType(workType: RegExp) {
   fireEvent.click(screen.getByRole('button', { name: /Next/i }));
 }
 
+function chooseRuntime(runtime: RegExp) {
+  fireEvent.click(screen.getByRole('button', { name: runtime }));
+  fireEvent.click(screen.getByRole('button', { name: /Next/i }));
+}
+
 function chooseVmSize(size: RegExp = /Medium/i) {
   fireEvent.click(screen.getByRole('button', { name: size }));
   fireEvent.click(screen.getByRole('button', { name: /Next/i }));
@@ -394,6 +407,7 @@ async function openWizardVmStep(agentName = /Claude Code/i, workType = /Chat and
   await openProfileWizardFromGate();
   chooseAgent(agentName);
   chooseWorkType(workType);
+  chooseRuntime(/Cloud VM/i);
 }
 describe('ProjectChat new chat button', () => {
   beforeEach(() => {
@@ -403,6 +417,7 @@ describe('ProjectChat new chat button', () => {
     mocks.getProviderCatalog.mockResolvedValue({ catalogs: [] });
     mocks.listAgents.mockResolvedValue(AGENTS_SINGLE);
     mocks.listAgentProfiles.mockResolvedValue([makeAgentProfile()]);
+    mocks.listSkills.mockResolvedValue([]);
     mocks.availableCommands = [];
     mocks.listProjectTasks.mockResolvedValue({ tasks: [], nextCursor: null });
     mocks.summarizeSession.mockResolvedValue({
@@ -818,6 +833,7 @@ describe('ProjectChat voice input', () => {
     mocks.getProviderCatalog.mockResolvedValue({ catalogs: [] });
     mocks.listAgents.mockResolvedValue(AGENTS_SINGLE);
     mocks.listAgentProfiles.mockResolvedValue([makeAgentProfile()]);
+    mocks.listSkills.mockResolvedValue([]);
     mocks.listProjectTasks.mockResolvedValue({ tasks: [], nextCursor: null });
   });
 
@@ -873,6 +889,7 @@ describe('ProjectChat profile setup wizard', () => {
     mocks.getTrialStatus.mockResolvedValue({ available: false });
     mocks.getProviderCatalog.mockResolvedValue({ catalogs: [] });
     mocks.listAgentProfiles.mockResolvedValue([]);
+    mocks.listSkills.mockResolvedValue([]);
     mocks.listChatSessions.mockResolvedValue({ sessions: [], total: 0 });
     mocks.listProjectTasks.mockResolvedValue({ tasks: [], nextCursor: null });
     mocks.submitTask.mockResolvedValue({
@@ -917,6 +934,7 @@ describe('ProjectChat profile setup wizard', () => {
     expect(screen.queryByText('Which agent?')).not.toBeInTheDocument();
 
     chooseWorkType(/Build and open PRs/i);
+    chooseRuntime(/Cloud VM/i);
     chooseVmSize(/Medium/i);
 
     await createProfileFromWizard({
@@ -924,6 +942,7 @@ describe('ProjectChat profile setup wizard', () => {
       profileName: 'Claude Builder',
       expectedPayload: {
         agentType: 'claude-code',
+        runtime: 'vm',
         vmSizeOverride: 'medium',
         workspaceProfile: 'full',
         taskMode: 'task',
@@ -942,6 +961,39 @@ describe('ProjectChat profile setup wizard', () => {
     });
   });
 
+  it('creates an instant chat profile through the explicit runtime step', async () => {
+    mocks.listAgents.mockResolvedValue(AGENTS_SINGLE);
+
+    renderProjectChat();
+
+    await openProfileWizardFromGate();
+    expect(screen.getByText('What kind of work?')).toBeInTheDocument();
+
+    chooseWorkType(/Chat and explore/i);
+
+    expect(screen.getByText('Where should it run?')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Instant container/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Cloud VM/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Next/i })).toBeDisabled();
+
+    chooseRuntime(/Instant container/i);
+
+    await createProfileFromWizard({
+      defaultName: 'Claude Code Chat',
+      profileName: 'Fast Chat',
+      expectedPayload: {
+        agentType: 'claude-code',
+        runtime: 'cf-container',
+        vmSizeOverride: null,
+        workspaceProfile: 'lightweight',
+        taskMode: 'conversation',
+      },
+    });
+
+    expect(await screen.findByText('Fast Chat')).toBeInTheDocument();
+    expect(await screen.findByTitle('Instant container profile')).toBeInTheDocument();
+  });
+
   it('gates multiple agents behind the setup wizard and creates a profile', async () => {
     mocks.listAgents.mockResolvedValue(AGENTS_MULTI);
 
@@ -952,6 +1004,7 @@ describe('ProjectChat profile setup wizard', () => {
     fireEvent.click(screen.getByRole('button', { name: /Create profile/i }));
     chooseAgent(/OpenAI Codex/i);
     chooseWorkType(/Build and open PRs/i);
+    chooseRuntime(/Cloud VM/i);
     chooseVmSize(/Large/i);
 
     await createProfileFromWizard({
@@ -959,6 +1012,7 @@ describe('ProjectChat profile setup wizard', () => {
       profileName: 'Codex Builder',
       expectedPayload: {
         agentType: 'openai-codex',
+        runtime: 'vm',
         vmSizeOverride: 'large',
         workspaceProfile: 'full',
         taskMode: 'task',
@@ -1026,6 +1080,7 @@ describe('ProjectChat profile setup wizard', () => {
     fireEvent.click(newButtons[newButtons.length - 1]);
     chooseAgent(/OpenAI Codex/i);
     chooseWorkType(/Build and open PRs/i);
+    chooseRuntime(/Cloud VM/i);
     chooseVmSize();
     fireEvent.change(screen.getByLabelText('Profile name'), { target: { value: 'Codex Builder' } });
     const createButtons = screen.getAllByRole('button', { name: /Create profile/i });
@@ -1050,6 +1105,18 @@ describe('ProjectChat close conversation button', () => {
     endedAt: null,
     createdAt: Date.now() - 60000,
   };
+  const IDLE_SESSION_WITHOUT_TASK = {
+    id: 'session-instant-idle',
+    workspaceId: 'ws-instant-idle',
+    topic: 'Idle instant conversation',
+    status: 'active' as const,
+    isIdle: true,
+    taskId: null,
+    messageCount: 2,
+    startedAt: Date.now() - 60000,
+    endedAt: null,
+    createdAt: Date.now() - 60000,
+  };
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -1060,6 +1127,7 @@ describe('ProjectChat close conversation button', () => {
     mocks.listAgentProfiles.mockResolvedValue([]);
     mocks.availableCommands = [];
     mocks.closeConversationTask.mockResolvedValue({});
+    mocks.stopChatSession.mockResolvedValue({ status: 'stopped', workspaceDeleted: true });
     mocks.listProjectTasks.mockResolvedValue({ tasks: [], nextCursor: null });
   });
 
@@ -1087,6 +1155,31 @@ describe('ProjectChat close conversation button', () => {
     await waitFor(() => {
       expect(mocks.closeConversationTask).toHaveBeenCalledWith(PROJECT_ID, 'task-conv-1');
     });
+    expect(mocks.stopChatSession).not.toHaveBeenCalled();
+  });
+
+  it('stops the chat session for idle taskless instant sessions', async () => {
+    mocks.listChatSessions.mockResolvedValue({
+      sessions: [IDLE_SESSION_WITHOUT_TASK],
+      total: 1,
+    });
+
+    renderProjectChat(`/projects/${PROJECT_ID}/chat/${IDLE_SESSION_WITHOUT_TASK.id}`);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('message-view')).toBeInTheDocument();
+    });
+
+    expect(capturedMessageViewProps.current).toHaveProperty('onCloseConversation');
+
+    await act(async () => {
+      (capturedMessageViewProps.current?.onCloseConversation as () => void)();
+    });
+
+    await waitFor(() => {
+      expect(mocks.stopChatSession).toHaveBeenCalledWith(PROJECT_ID, 'session-instant-idle');
+    });
+    expect(mocks.closeConversationTask).not.toHaveBeenCalled();
   });
 
   it('passes loaded agent profiles and slash commands to active session follow-ups', async () => {
@@ -1220,6 +1313,7 @@ describe('ProjectChat agent profile selection', () => {
     mocks.getProviderCatalog.mockResolvedValue({ catalogs: [] });
     mocks.listAgents.mockResolvedValue(AGENTS_SINGLE);
     mocks.listAgentProfiles.mockResolvedValue(TEST_PROFILES);
+    mocks.listSkills.mockResolvedValue([]);
     mocks.listChatSessions.mockResolvedValue({ sessions: [], total: 0 });
     mocks.listProjectTasks.mockResolvedValue({ tasks: [], nextCursor: null });
     mocks.submitTask.mockResolvedValue({
@@ -1254,6 +1348,72 @@ describe('ProjectChat agent profile selection', () => {
         message: 'Build a feature',
         agentProfileId: 'prof-2',
       }));
+    });
+  });
+
+  it('starts an instant session for a cf-container profile without cloud credentials', async () => {
+    mocks.listCredentials.mockResolvedValue([]);
+    mocks.listAgentProfiles.mockResolvedValue([
+      makeAgentProfile({
+        id: 'prof-instant',
+        name: 'Instant Chat',
+        runtime: 'cf-container',
+        workspaceProfile: 'lightweight',
+        taskMode: 'conversation',
+      }),
+    ]);
+    mocks.listChatSessions
+      .mockResolvedValueOnce({ sessions: [], total: 0 })
+      .mockResolvedValue({
+        sessions: [{
+          ...SESSION_1,
+          id: 'session-instant',
+          workspaceId: 'ws-instant',
+          topic: 'Read the repo and summarize it',
+        }],
+        total: 1,
+      });
+    mocks.startInstantChatSession.mockResolvedValue({
+      status: 'running',
+      runtime: { runtime: 'cf-container', reason: 'explicit-cf-container' },
+      sessionId: 'session-instant',
+      workspaceId: 'ws-instant',
+      nodeId: 'node-instant',
+      agentSessionId: 'agent-session-instant',
+      acpSessionId: 'acp-session-instant',
+      workspaceUrl: 'https://ws-instant.example.test',
+      timings: {
+        setupDurationMs: 100,
+        installDurationMs: 20,
+        agentReadyDurationMs: 20,
+        workspaceCreateDurationMs: 20,
+        acpSessionCreateDurationMs: 20,
+        acpSessionStartDurationMs: 20,
+      },
+    });
+
+    renderProjectChat();
+
+    await waitFor(() => {
+      expect(screen.getByTitle('Instant Chat')).toBeInTheDocument();
+    });
+    expect(screen.getByTitle('Instant container profile')).toBeInTheDocument();
+
+    const textarea = screen.getByPlaceholderText('Describe what you want the agent to do...');
+    fireEvent.change(textarea, { target: { value: 'Read the repo and summarize it' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => {
+      expect(mocks.startInstantChatSession).toHaveBeenCalledWith(PROJECT_ID, {
+        message: 'Read the repo and summarize it',
+        agentProfileId: 'prof-instant',
+        skillId: undefined,
+      });
+    });
+    expect(mocks.submitTask).not.toHaveBeenCalled();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('message-view')).toHaveTextContent('session-instant');
     });
   });
 

@@ -27,9 +27,17 @@ describe('model-catalog', () => {
     it('returns grouped models for openai-codex', () => {
       const groups = getModelGroupsForAgent('openai-codex');
       expect(groups.length).toBeGreaterThanOrEqual(2);
-      expect(groups[0]!.models.some((m) => m.id === 'gpt-5.5-pro')).toBe(true);
-      expect(groups[0]!.models.some((m) => m.id === 'gpt-5.5')).toBe(true);
-      expect(groups[0]!.models.some((m) => m.id === 'gpt-5.4')).toBe(true);
+      const latestModels = groups[0]?.models.map((model) => model.id) ?? [];
+      expect(latestModels).toEqual(
+        expect.arrayContaining([
+          'gpt-5.6-sol',
+          'gpt-5.6-terra',
+          'gpt-5.6-luna',
+          'gpt-5.5-pro',
+          'gpt-5.5',
+          'gpt-5.4',
+        ])
+      );
     });
 
     it('returns grouped models for mistral-vibe', () => {
@@ -165,7 +173,9 @@ describe('model-catalog', () => {
     });
 
     it('returns true for a codex model under openai-codex', () => {
-      expect(isKnownModel('openai-codex', 'gpt-5.5-pro')).toBe(true);
+      expect(isKnownModel('openai-codex', 'gpt-5.6-sol')).toBe(true);
+      expect(isKnownModel('openai-codex', 'gpt-5.6-terra')).toBe(true);
+      expect(isKnownModel('openai-codex', 'gpt-5.6-luna')).toBe(true);
     });
 
     it('returns false for a custom/unknown model', () => {

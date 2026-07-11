@@ -11,7 +11,8 @@ import { seedTheme } from './audit-helpers';
 // time from the session-detail response's `state.activity` field. So to render
 // the WORKING morph (red Interrupt + spinner ring + Plan pill + elapsed) we mock
 // the session detail with `state.activity === 'prompting'`; to render the IDLE
-// morph (grey Archive) we omit `state` (defaults to idle) on an active session.
+// morph (grey Archive) we use an idle state on an active taskless instant
+// session, matching the Cloudflare Container chat path.
 //
 // Captured at mobile (375x667) and desktop (1280x800), dark (sam) and light
 // (sam-light), both dock states, asserting no horizontal overflow.
@@ -76,19 +77,7 @@ function makeSession() {
     cleanupAt: null,
     agentSessionId: 'agent-sess-1',
     agentType: 'claude-code',
-    // Conversation-mode task embed — the dock's Archive morph is only wired for
-    // conversation-mode sessions the caller can close (task-mode never archives).
-    task: {
-      id: 'task-conv-1',
-      status: 'in_progress',
-      taskMode: 'conversation',
-      executionStep: null,
-      errorMessage: null,
-      outputBranch: null,
-      outputPrUrl: null,
-      outputSummary: null,
-      finalizedAt: null,
-    },
+    task: null,
   };
 }
 
@@ -137,8 +126,11 @@ const IDLE_STATE = {
   activity: 'idle',
   activityAt: NOW,
   statusError: null,
-  currentPlan: null,
-  planUpdatedAt: null,
+  currentPlan: [
+    { content: 'Keep the last plan visible while idle', status: 'completed' },
+    { content: 'Wait for the next follow-up', status: 'pending' },
+  ],
+  planUpdatedAt: NOW - 30000,
   promptStartedAt: null,
   agentType: 'claude-code',
   lastStopReason: null,
@@ -226,11 +218,12 @@ for (const theme of ['dark', 'light'] as const) {
   test.describe(`CompletionDock — ${theme} — Desktop`, () => {
     test.use({ viewport: { width: 1280, height: 800 }, isMobile: false });
 
-    test('idle: grey Archive control', async ({ page }) => {
+    test('idle: grey Archive control + plan pill', async ({ page }) => {
       await seedTheme(page, theme);
       await setupApiMocks(page, { working: false });
       await gotoChat(page);
       await expect(page.getByRole('button', { name: 'Archive conversation' })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'View plan' })).toBeVisible();
       await screenshot(page, `completion-dock-idle-${theme}-desktop`);
       await assertNoOverflow(page);
 
@@ -253,11 +246,12 @@ for (const theme of ['dark', 'light'] as const) {
   });
 
   test.describe(`CompletionDock — ${theme} — Mobile`, () => {
-    test('idle: grey Archive control', async ({ page }) => {
+    test('idle: grey Archive control + plan pill', async ({ page }) => {
       await seedTheme(page, theme);
       await setupApiMocks(page, { working: false });
       await gotoChat(page);
       await expect(page.getByRole('button', { name: 'Archive conversation' })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'View plan' })).toBeVisible();
       await screenshot(page, `completion-dock-idle-${theme}-mobile`);
       await assertNoOverflow(page);
 

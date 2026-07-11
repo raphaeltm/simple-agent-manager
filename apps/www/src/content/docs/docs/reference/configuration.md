@@ -13,58 +13,59 @@ This reference covers the most important configuration variables. For the comple
 
 These are Cloudflare Worker secrets, set during deployment. Pulumi auto-generates security keys on first deploy.
 
-| Secret                                     | Description                                                                                                    |
-| ------------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
-| `ENCRYPTION_KEY`                           | AES-256-GCM key for credential encryption (auto-generated)                                                     |
-| `JWT_PRIVATE_KEY`                          | RSA-2048 private key for signing tokens (auto-generated)                                                       |
-| `JWT_PUBLIC_KEY`                           | RSA-2048 public key for token verification (exposed via JWKS)                                                  |
-| `DEPLOY_SIGNING_PRIVATE_KEY`               | Ed25519 private key for signing deployment apply payloads (auto-generated)                                     |
-| `DEPLOY_SIGNING_PUBLIC_KEY`                | Ed25519 public key derived during deployment for deployment node verification (auto-generated)                  |
-| `CF_API_TOKEN`                             | Cloudflare API token for infrastructure, DNS, Origin CA certificate issuance, observability, AI Gateway, and admin logs. Requires **Account → SSL and Certificates → Edit**.  |
-| `CF_AIG_TOKEN`                             | Optional narrower Cloudflare AI Gateway Unified Billing token                                                  |
-| `CF_ZONE_ID`                               | Cloudflare zone ID for DNS record management                                                                   |
-| `CF_ACCOUNT_ID`                            | Cloudflare account ID                                                                                          |
-| `DEVCONTAINER_CACHE_CLOUDFLARE_API_TOKEN`  | Optional narrower Cloudflare token for managed devcontainer registry credentials                               |
-| `DEVCONTAINER_CACHE_CLOUDFLARE_ACCOUNT_ID` | Optional Cloudflare account override for managed devcontainer registry credentials                             |
-| `GITHUB_CLIENT_ID`                         | Optional fallback GitHub App client ID for OAuth; runtime admin config takes precedence                         |
-| `GITHUB_CLIENT_SECRET`                     | Optional fallback GitHub App client secret for OAuth; runtime admin config takes precedence                     |
-| `GITHUB_APP_ID`                            | Optional fallback GitHub App ID for installation tokens; runtime admin config takes precedence                  |
-| `GITHUB_APP_PRIVATE_KEY`                   | Optional fallback GitHub App private key (PEM or base64); runtime admin config takes precedence                 |
-| `GITHUB_APP_SLUG`                          | Optional fallback GitHub App URL slug; runtime admin config takes precedence                                    |
-| `GITHUB_WEBHOOK_SECRET`                    | Optional fallback GitHub App webhook HMAC secret; runtime admin config takes precedence                         |
-| `GITLAB_HOST`                              | Optional fallback GitLab OAuth host, such as `https://gitlab.com`; runtime admin config takes precedence        |
-| `GITLAB_CLIENT_ID`                         | Optional fallback GitLab OAuth application ID; runtime admin config takes precedence                            |
-| `GITLAB_CLIENT_SECRET`                     | Optional fallback GitLab OAuth secret; runtime admin config takes precedence                                    |
-| `TRIAL_CLAIM_TOKEN_SECRET`                 | Trial onboarding HMAC secret (auto-generated)                                                                  |
+| Secret                                     | Description                                                                                                                                                                                                                  |
+| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ENCRYPTION_KEY`                           | AES-256-GCM key for credential encryption (auto-generated)                                                                                                                                                                   |
+| `JWT_PRIVATE_KEY`                          | RSA-2048 private key for signing tokens (auto-generated)                                                                                                                                                                     |
+| `JWT_PUBLIC_KEY`                           | RSA-2048 public key for token verification (exposed via JWKS)                                                                                                                                                                |
+| `DEPLOY_SIGNING_PRIVATE_KEY`               | Ed25519 private key for signing deployment apply payloads (auto-generated)                                                                                                                                                   |
+| `DEPLOY_SIGNING_PUBLIC_KEY`                | Ed25519 public key derived during deployment for deployment node verification (auto-generated)                                                                                                                               |
+| `CF_API_TOKEN`                             | Cloudflare API token for infrastructure, DNS, Origin CA certificate issuance, observability, AI Gateway, Containers, and admin logs. Requires **Account → Containers → Edit** and **Account → SSL and Certificates → Edit**. |
+| `CF_AIG_TOKEN`                             | Optional narrower Cloudflare AI Gateway Unified Billing token                                                                                                                                                                |
+| `CF_ZONE_ID`                               | Cloudflare zone ID for DNS record management                                                                                                                                                                                 |
+| `CF_ACCOUNT_ID`                            | Cloudflare account ID                                                                                                                                                                                                        |
+| `DEVCONTAINER_CACHE_CLOUDFLARE_API_TOKEN`  | Optional narrower Cloudflare token for managed devcontainer registry credentials                                                                                                                                             |
+| `DEVCONTAINER_CACHE_CLOUDFLARE_ACCOUNT_ID` | Optional Cloudflare account override for managed devcontainer registry credentials                                                                                                                                           |
+| `GITHUB_CLIENT_ID`                         | Optional fallback GitHub App client ID for OAuth; runtime admin config takes precedence                                                                                                                                      |
+| `GITHUB_CLIENT_SECRET`                     | Optional fallback GitHub App client secret for OAuth; runtime admin config takes precedence                                                                                                                                  |
+| `GITHUB_APP_ID`                            | Optional fallback GitHub App ID for installation tokens; runtime admin config takes precedence                                                                                                                               |
+| `GITHUB_APP_PRIVATE_KEY`                   | Optional fallback GitHub App private key (PEM or base64); runtime admin config takes precedence                                                                                                                              |
+| `GITHUB_APP_SLUG`                          | Optional fallback GitHub App URL slug; runtime admin config takes precedence                                                                                                                                                 |
+| `GITHUB_WEBHOOK_SECRET`                    | Optional fallback GitHub App webhook HMAC secret; runtime admin config takes precedence                                                                                                                                      |
+| `GITLAB_HOST`                              | Optional fallback GitLab OAuth host, such as `https://gitlab.com`; runtime admin config takes precedence                                                                                                                     |
+| `GITLAB_CLIENT_ID`                         | Optional fallback GitLab OAuth application ID; runtime admin config takes precedence                                                                                                                                         |
+| `GITLAB_CLIENT_SECRET`                     | Optional fallback GitLab OAuth secret; runtime admin config takes precedence                                                                                                                                                 |
+| `TRIAL_CLAIM_TOKEN_SECRET`                 | Trial onboarding HMAC secret (auto-generated)                                                                                                                                                                                |
 
 ## Worker Variables
 
 Set as `[vars]` in `wrangler.toml` or as environment variables:
 
-| Variable                          | Default | Description                                                                 |
-| --------------------------------- | ------- | --------------------------------------------------------------------------- |
-| `BASE_DOMAIN`                     | —       | Root domain for the deployment (e.g., `example.com`)                        |
-| `VERSION`                         | —       | Deployment version string                                                   |
-| `SETUP_TOKEN`                     | —       | Plaintext first-run setup token generated during deploy and readable in the Cloudflare dashboard while setup is incomplete |
-| `SETUP_FORCE`                     | _(unset)_ | Set to `true` to reopen `/setup` for lockout recovery                       |
-| `SETUP_RATE_LIMIT_MAX_ATTEMPTS`   | `10`    | Max setup-token attempts per identifier/window                              |
-| `SETUP_RATE_LIMIT_WINDOW_SECONDS` | `900`   | Setup-token attempt window in seconds                                       |
+| Variable                          | Default   | Description                                                                                                                |
+| --------------------------------- | --------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `BASE_DOMAIN`                     | —         | Root domain for the deployment (e.g., `example.com`)                                                                       |
+| `VERSION`                         | —         | Deployment version string                                                                                                  |
+| `SETUP_TOKEN`                     | —         | Plaintext first-run setup token generated during deploy and readable in the Cloudflare dashboard while setup is incomplete |
+| `SETUP_FORCE`                     | _(unset)_ | Set to `true` to reopen `/setup` for lockout recovery                                                                      |
+| `SETUP_RATE_LIMIT_MAX_ATTEMPTS`   | `10`      | Max setup-token attempts per identifier/window                                                                             |
+| `SETUP_RATE_LIMIT_WINDOW_SECONDS` | `900`     | Setup-token attempt window in seconds                                                                                      |
 
 ## GitHub Environment Variables
 
 Set in GitHub Settings → Environments → production:
 
-| Variable              | Description                                    | Example                |
-| --------------------- | ---------------------------------------------- | ---------------------- |
-| `BASE_DOMAIN`         | Deployment domain                              | `example.com`          |
-| `RESOURCE_PREFIX`     | Domain-derived Cloudflare resource name prefix | `sa379a6`              |
-| `PULUMI_STATE_BUCKET` | R2 bucket for Pulumi state                     | `sa379a6-pulumi-state` |
+| Variable               | Description                                                                                                    | Example                |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------- | ---------------------- |
+| `BASE_DOMAIN`          | Deployment domain                                                                                              | `example.com`          |
+| `RESOURCE_PREFIX`      | Domain-derived Cloudflare resource name prefix                                                                 | `sa379a6`              |
+| `PULUMI_STATE_BUCKET`  | R2 bucket for Pulumi state                                                                                     | `sa379a6-pulumi-state` |
+| `CF_CONTAINER_ENABLED` | Optional instant-session runtime toggle. Generated deploys default to `true`; set `false` to force VM runtime. | `false`                |
 
 `RESOURCE_PREFIX` is generated from `BASE_DOMAIN` as `s` plus the first six hex
 characters of the domain's SHA-256 hash. The self-host onboarding flow fills it
 in for you.
 
-Required GitHub Actions secrets include `CF_API_TOKEN`, `CF_ACCOUNT_ID`, `CF_ZONE_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, and `PULUMI_CONFIG_PASSPHRASE`. GitHub App/OAuth secrets (`GH_CLIENT_ID`, `GH_CLIENT_SECRET`, `GH_APP_ID`, `GH_APP_PRIVATE_KEY`, `GH_APP_SLUG`, `GH_WEBHOOK_SECRET`), the Google **login** OAuth secrets (`GOOGLE_LOGIN_CLIENT_ID`, `GOOGLE_LOGIN_CLIENT_SECRET`), and GitLab OAuth secrets (`GITLAB_HOST`, `GITLAB_CLIENT_ID`, `GITLAB_CLIENT_SECRET`) are optional environment fallbacks; fresh deployments can set them through `/setup` instead. The Google **infra/GCP** OAuth secrets (`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`) are a separate client used only for GCP deployment authorization and are not part of the `/setup` wizard. Deploy signing keys are generated and persisted by Pulumi during deployment; GitHub Environment values are only needed for explicit key overrides.
+Required GitHub Actions secrets include `CF_API_TOKEN`, `CF_ACCOUNT_ID`, `CF_ZONE_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, and `PULUMI_CONFIG_PASSPHRASE`. GitHub App/OAuth secrets (`GH_CLIENT_ID`, `GH_CLIENT_SECRET`, `GH_APP_ID`, `GH_APP_PRIVATE_KEY`, `GH_APP_SLUG`, `GH_WEBHOOK_SECRET`) and the Google **login** OAuth secrets (`GOOGLE_LOGIN_CLIENT_ID`, `GOOGLE_LOGIN_CLIENT_SECRET`) are optional environment fallbacks; fresh deployments can set them through `/setup` instead. The Google **infra/GCP** OAuth secrets (`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`) are a separate client used only for GCP deployment authorization and are not part of the `/setup` wizard. Deploy signing keys are generated and persisted by Pulumi during deployment; GitHub Environment values are only needed for explicit key overrides.
 
 :::note[Naming convention]
 GitHub App secrets use `GH_*` prefix (e.g., `GH_CLIENT_ID`, `GH_WEBHOOK_SECRET`) because GitHub Actions secret names cannot start with `GITHUB_*`. When present, the deploy workflow maps those `GH_*` secrets to `GITHUB_*` Worker secrets. Runtime admin config in D1 is resolved first, then these environment fallbacks, then unset.
@@ -72,12 +73,13 @@ GitHub App secrets use `GH_*` prefix (e.g., `GH_CLIENT_ID`, `GH_WEBHOOK_SECRET`)
 
 ## Feature Flags
 
-| Variable                         | Default                   | Description                                                                                                                                                                                                                      |
-| -------------------------------- | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `REQUIRE_APPROVAL`               | _(unset)_                 | Default signup approval gate. Superadmins can override it at runtime in Admin → Users without redeploying; when no runtime override exists, this value is used. The first genuine human becomes superadmin regardless of this flag — see [First Login & Admin Access](/docs/guides/self-hosting/#first-login--admin-access).                               |
-| `TRIAL_ANONYMOUS_USER_ID`        | `system_anonymous_trials` | Id of the internal anonymous-trial sentinel user, excluded from first-user superadmin checks. Override only if your deployment uses a different sentinel id.                                                                     |
-| `CAPACITY_SIZE_FALLBACK_ENABLED` | `true`                    | When a new node's VM size is exhausted on transient capacity, descend the size chain (large→medium→small). Only applies to default-derived sizes (project/platform default), never user-requested sizes. Set `false` to disable. |
-| `ORIGIN_CA_CERT_VALIDITY_DAYS`   | `7`                       | Validity for per-node Cloudflare Origin CA certificates issued from node-generated CSRs. Must be one of Cloudflare's supported values: 7, 30, 90, 365, 730, 1095, or 5475.                                                     |
+| Variable                         | Default                   | Description                                                                                                                                                                                                                                                                                                                  |
+| -------------------------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CF_CONTAINER_ENABLED`           | `true`                    | Enables Cloudflare Container instant sessions for matching profiles and zero-config runtime selection. Set `false` to force cloud VM runtime.                                                                                                                                                                                |
+| `REQUIRE_APPROVAL`               | _(unset)_                 | Default signup approval gate. Superadmins can override it at runtime in Admin → Users without redeploying; when no runtime override exists, this value is used. The first genuine human becomes superadmin regardless of this flag — see [First Login & Admin Access](/docs/guides/self-hosting/#first-login--admin-access). |
+| `TRIAL_ANONYMOUS_USER_ID`        | `system_anonymous_trials` | Id of the internal anonymous-trial sentinel user, excluded from first-user superadmin checks. Override only if your deployment uses a different sentinel id.                                                                                                                                                                 |
+| `CAPACITY_SIZE_FALLBACK_ENABLED` | `true`                    | When a new node's VM size is exhausted on transient capacity, descend the size chain (large→medium→small). Only applies to default-derived sizes (project/platform default), never user-requested sizes. Set `false` to disable.                                                                                             |
+| `ORIGIN_CA_CERT_VALIDITY_DAYS`   | `7`                       | Validity for per-node Cloudflare Origin CA certificates issued from node-generated CSRs. Must be one of Cloudflare's supported values: 7, 30, 90, 365, 730, 1095, or 5475.                                                                                                                                                   |
 
 ## AI Idea Title Generation
 
@@ -144,21 +146,21 @@ SAM loads OpenCode Zen and OpenCode Go model choices through the authenticated m
 
 ## ACP Protocol (VM Agent)
 
-| Variable                           | Default | Description                                                      |
-| ---------------------------------- | ------- | ---------------------------------------------------------------- |
-| `ACP_MESSAGE_BUFFER_SIZE`          | `5000`  | Buffer size for ACP messages                                     |
-| `ACP_STDERR_BUFFER_BYTES`          | `4096`  | Agent stderr bytes retained for crash reports                    |
-| `ACP_PING_INTERVAL`                | `30s`   | WebSocket keepalive ping interval                                |
-| `ACP_PONG_TIMEOUT`                 | `10s`   | Pong response timeout                                            |
-| `ACP_TASK_PROMPT_TIMEOUT`          | `6h`    | Task execution prompt timeout                                    |
-| `ACP_PROMPT_RETRY_MAX_RETRIES`     | `2`     | Max transient provider prompt retries after the initial attempt  |
-| `ACP_PROMPT_RETRY_INITIAL_BACKOFF` | `15s`   | Initial backoff before retrying transient provider prompt errors |
-| `ACP_PROMPT_RETRY_MAX_BACKOFF`     | `2m`    | Max exponential backoff for transient provider prompt retries    |
-| `ACTIVITY_REREPORT_INTERVAL`       | `60s`   | Re-send prompting activity while a prompt is active              |
+| Variable                            | Default | Description                                                      |
+| ----------------------------------- | ------- | ---------------------------------------------------------------- |
+| `ACP_MESSAGE_BUFFER_SIZE`           | `5000`  | Buffer size for ACP messages                                     |
+| `ACP_STDERR_BUFFER_BYTES`           | `4096`  | Agent stderr bytes retained for crash reports                    |
+| `ACP_PING_INTERVAL`                 | `30s`   | WebSocket keepalive ping interval                                |
+| `ACP_PONG_TIMEOUT`                  | `10s`   | Pong response timeout                                            |
+| `ACP_TASK_PROMPT_TIMEOUT`           | `6h`    | Task execution prompt timeout                                    |
+| `ACP_PROMPT_RETRY_MAX_RETRIES`      | `2`     | Max transient provider prompt retries after the initial attempt  |
+| `ACP_PROMPT_RETRY_INITIAL_BACKOFF`  | `15s`   | Initial backoff before retrying transient provider prompt errors |
+| `ACP_PROMPT_RETRY_MAX_BACKOFF`      | `2m`    | Max exponential backoff for transient provider prompt retries    |
+| `ACTIVITY_REREPORT_INTERVAL`        | `60s`   | Re-send prompting activity while a prompt is active              |
 | `ACTIVITY_TERMINAL_REPORT_ATTEMPTS` | `5`     | Retry attempts for terminal activity reports                     |
-| `ACTIVITY_TERMINAL_REPORT_BACKOFF` | `1s`    | Backoff between terminal activity report retries                 |
-| `ACP_IDLE_SUSPEND_TIMEOUT`         | `30m`   | Idle session auto-suspend timeout                                |
-| `ACP_NOTIF_SERIALIZE_TIMEOUT`      | `5s`    | Notification serialization timeout                               |
+| `ACTIVITY_TERMINAL_REPORT_BACKOFF`  | `1s`    | Backoff between terminal activity report retries                 |
+| `ACP_IDLE_SUSPEND_TIMEOUT`          | `30m`   | Idle session auto-suspend timeout                                |
+| `ACP_NOTIF_SERIALIZE_TIMEOUT`       | `5s`    | Notification serialization timeout                               |
 
 ## MCP (Agent Tools)
 
@@ -198,23 +200,23 @@ SAM loads OpenCode Zen and OpenCode Go model choices through the authenticated m
 
 ## Idea Execution Timeouts
 
-| Variable                                   | Default            | Description                                                                           |
-| ------------------------------------------ | ------------------ | ------------------------------------------------------------------------------------- |
-| `TASK_RUN_MAX_EXECUTION_MS`                | `14400000` (4 hr)  | Max task execution time                                                               |
-| `TASK_STUCK_QUEUED_TIMEOUT_MS`             | `600000` (10 min)  | Timeout for tasks stuck in queued state                                               |
-| `TASK_STUCK_DELEGATED_TIMEOUT_MS`          | `1860000` (31 min) | Timeout for tasks stuck in delegated state                                            |
-| `CLAUDE_CODE_COMPACTION_LOOP_DETECTOR_ENABLED` | `true`        | Enable Claude Code compaction-loop shutdown from recent message evidence              |
-| `CLAUDE_CODE_COMPACTION_LOOP_RECENT_MESSAGE_LIMIT` | `40`      | Recent task-session messages to inspect for compaction-loop evidence                  |
-| `CLAUDE_CODE_COMPACTION_LOOP_WINDOW_MESSAGES` | `20`          | Rolling recent-message window used for compaction-loop detection                      |
-| `CLAUDE_CODE_COMPACTION_LOOP_MIN_PAIRS`    | `3`                | Minimum `Compacting...` / `Compacting completed` marker pairs before failing a task   |
-| `TASK_CALLBACK_TIMEOUT_MS`                 | `10000`            | Callback response timeout                                                             |
-| `TASK_CALLBACK_RETRY_MAX_ATTEMPTS`         | `3`                | Max callback retry attempts                                                           |
-| `TASK_RUN_CLEANUP_DELAY_MS`                | `5000`             | Delay before task cleanup                                                             |
-| `TASK_RECONCILIATION_IDLE_MS`              | `300000` (5 min)   | Idle threshold before SAM sends a visible task check-in                               |
-| `TASK_RECONCILIATION_RESPONSE_DEADLINE_MS` | `60000` (1 min)    | Response deadline after a visible task check-in                                       |
-| `TASK_RECONCILIATION_PROMPT_SOFT_STALL_MS` | `1800000` (30 min) | In-flight prompt observation threshold before a non-interrupting reconciliation event |
-| `TASK_RECONCILIATION_PROMPT_HARD_STALL_MS` | `7200000` (2 hr)   | In-flight prompt hard-stall threshold before SAM requests prompt cancellation         |
-| `TASK_RECONCILIATION_MIN_ALARM_DELAY_MS`   | `10000` (10 sec)   | Minimum delay before the next reconciliation alarm can fire                           |
+| Variable                                           | Default            | Description                                                                           |
+| -------------------------------------------------- | ------------------ | ------------------------------------------------------------------------------------- |
+| `TASK_RUN_MAX_EXECUTION_MS`                        | `14400000` (4 hr)  | Max task execution time                                                               |
+| `TASK_STUCK_QUEUED_TIMEOUT_MS`                     | `600000` (10 min)  | Timeout for tasks stuck in queued state                                               |
+| `TASK_STUCK_DELEGATED_TIMEOUT_MS`                  | `1860000` (31 min) | Timeout for tasks stuck in delegated state                                            |
+| `CLAUDE_CODE_COMPACTION_LOOP_DETECTOR_ENABLED`     | `true`             | Enable Claude Code compaction-loop shutdown from recent message evidence              |
+| `CLAUDE_CODE_COMPACTION_LOOP_RECENT_MESSAGE_LIMIT` | `40`               | Recent task-session messages to inspect for compaction-loop evidence                  |
+| `CLAUDE_CODE_COMPACTION_LOOP_WINDOW_MESSAGES`      | `20`               | Rolling recent-message window used for compaction-loop detection                      |
+| `CLAUDE_CODE_COMPACTION_LOOP_MIN_PAIRS`            | `3`                | Minimum `Compacting...` / `Compacting completed` marker pairs before failing a task   |
+| `TASK_CALLBACK_TIMEOUT_MS`                         | `10000`            | Callback response timeout                                                             |
+| `TASK_CALLBACK_RETRY_MAX_ATTEMPTS`                 | `3`                | Max callback retry attempts                                                           |
+| `TASK_RUN_CLEANUP_DELAY_MS`                        | `5000`             | Delay before task cleanup                                                             |
+| `TASK_RECONCILIATION_IDLE_MS`                      | `300000` (5 min)   | Idle threshold before SAM sends a visible task check-in                               |
+| `TASK_RECONCILIATION_RESPONSE_DEADLINE_MS`         | `60000` (1 min)    | Response deadline after a visible task check-in                                       |
+| `TASK_RECONCILIATION_PROMPT_SOFT_STALL_MS`         | `1800000` (30 min) | In-flight prompt observation threshold before a non-interrupting reconciliation event |
+| `TASK_RECONCILIATION_PROMPT_HARD_STALL_MS`         | `7200000` (2 hr)   | In-flight prompt hard-stall threshold before SAM requests prompt cancellation         |
+| `TASK_RECONCILIATION_MIN_ALARM_DELAY_MS`           | `10000` (10 sec)   | Minimum delay before the next reconciliation alarm can fire                           |
 
 ## Node & Workspace Readiness
 
@@ -227,34 +229,34 @@ SAM loads OpenCode Zen and OpenCode Go model choices through the authenticated m
 
 ## App Deployment Routing
 
-| Variable                                   | Default                                | Description                                                           |
-| ------------------------------------------ | -------------------------------------- | --------------------------------------------------------------------- |
-| `DEPLOY_PAYLOAD_EXPIRY_SECONDS`            | `3600`                                 | Signed deployment apply payload lifetime                              |
-| `DEPLOYMENT_ROUTE_PORT_BASE`               | `35000`                                | First node-local loopback port reserved for app routes                |
-| `DEPLOYMENT_ROUTE_PORT_SPAN`               | `100`                                  | Number of loopback ports reserved per deployment environment          |
-| `AGENT_DEPLOYMENT_RESERVED_ENVIRONMENT_NAMES` | `prod,production`                   | Comma-separated environment names agents cannot create through MCP    |
-| `MAX_ENVIRONMENTS_PER_DEPLOYMENT_NODE`     | `5`                                    | Maximum deployment environments to place on one deployment node       |
-| `DEPLOYMENT_DEFAULT_VM_SIZE`               | `small`                                | Default VM size for deployment nodes                                  |
-| `DEPLOYMENT_MODEL_RUNNER_VM_SIZE`          | `medium`                               | VM size for deployment nodes that need Docker Model Runner            |
-| `DEPLOYMENT_DEFAULT_MEMORY_LIMIT_MB`       | `256`                                  | Default per-service memory limit for compose-publish releases         |
-| `DEPLOYMENT_LOG_MAX_SIZE`                  | `10m`                                  | Default json-file log max-size for compose-publish releases           |
-| `DEPLOYMENT_LOG_MAX_FILE`                  | `3`                                    | Default json-file log max-file for compose-publish releases           |
-| `MCP_DEPLOYMENT_COMPOSE_PREVIEW_MAX_BYTES` | `128000`                               | Max Compose YAML size accepted by deployment route preview MCP tool   |
-| `BUILD_PUBLISH_TOOL_TIMEOUT_MS`            | `1260000`                              | Worker-to-VM proxy timeout for `build_and_publish`                    |
-| `DEPLOY_ACME_EMAIL`                        | _(unset)_                              | Optional ACME contact email emitted into deployment-node Caddy config |
-| `DEPLOY_ACME_CA`                           | _(unset)_                              | Optional ACME CA directory override, useful for Let's Encrypt staging |
-| `DOH_RESOLVER_URL`                         | `https://cloudflare-dns.com/dns-query` | DNS-over-HTTPS resolver used to verify deployment custom domains      |
-| `DOH_TIMEOUT_MS`                           | `10000`                                | Timeout for deployment custom-domain DNS verification lookups         |
-| `DEPLOY_COMPOSE_CMD`                       | `docker compose`                       | Docker Compose command used by the deployment engine                  |
-| `DEPLOY_HEALTH_TIMEOUT`                    | `5m`                                   | Deployment health-check timeout used by the VM agent                  |
-| `DEPLOY_RUNTIME_TIMEOUT`                   | `15m`                                  | VM-agent max time for deployment-node host dependency setup           |
-| `DEPLOY_TEARDOWN_TIMEOUT`                  | `2m`                                   | VM-agent max time for deployment environment teardown (stop/start)    |
-| `DEPLOY_APPLY_IDLE_TIMEOUT`                | `15m`                                  | VM-agent idle watchdog for deployment apply (no-progress only)        |
-| `DEPLOY_BUILD_PUBLISH_TIMEOUT`             | `20m`                                  | VM-agent max time for host build + push + release publish             |
-| `DEPLOY_ARTIFACT_DIAL_TIMEOUT`             | `30s`                                  | VM-agent TCP dial timeout for artifact downloads                      |
-| `DEPLOY_ARTIFACT_TLS_HANDSHAKE_TIMEOUT`    | `15s`                                  | VM-agent TLS handshake timeout for artifact downloads                 |
-| `DEPLOY_ARTIFACT_RESPONSE_HEADER_TIMEOUT`  | `60s`                                  | VM-agent first-response-header timeout for artifact downloads         |
-| `DEPLOY_ARTIFACT_IDLE_TIMEOUT`             | `2m`                                   | VM-agent idle watchdog for artifact body-read progress                |
+| Variable                                      | Default                                | Description                                                           |
+| --------------------------------------------- | -------------------------------------- | --------------------------------------------------------------------- |
+| `DEPLOY_PAYLOAD_EXPIRY_SECONDS`               | `3600`                                 | Signed deployment apply payload lifetime                              |
+| `DEPLOYMENT_ROUTE_PORT_BASE`                  | `35000`                                | First node-local loopback port reserved for app routes                |
+| `DEPLOYMENT_ROUTE_PORT_SPAN`                  | `100`                                  | Number of loopback ports reserved per deployment environment          |
+| `AGENT_DEPLOYMENT_RESERVED_ENVIRONMENT_NAMES` | `prod,production`                      | Comma-separated environment names agents cannot create through MCP    |
+| `MAX_ENVIRONMENTS_PER_DEPLOYMENT_NODE`        | `5`                                    | Maximum deployment environments to place on one deployment node       |
+| `DEPLOYMENT_DEFAULT_VM_SIZE`                  | `small`                                | Default VM size for deployment nodes                                  |
+| `DEPLOYMENT_MODEL_RUNNER_VM_SIZE`             | `medium`                               | VM size for deployment nodes that need Docker Model Runner            |
+| `DEPLOYMENT_DEFAULT_MEMORY_LIMIT_MB`          | `256`                                  | Default per-service memory limit for compose-publish releases         |
+| `DEPLOYMENT_LOG_MAX_SIZE`                     | `10m`                                  | Default json-file log max-size for compose-publish releases           |
+| `DEPLOYMENT_LOG_MAX_FILE`                     | `3`                                    | Default json-file log max-file for compose-publish releases           |
+| `MCP_DEPLOYMENT_COMPOSE_PREVIEW_MAX_BYTES`    | `128000`                               | Max Compose YAML size accepted by deployment route preview MCP tool   |
+| `BUILD_PUBLISH_TOOL_TIMEOUT_MS`               | `1260000`                              | Worker-to-VM proxy timeout for `build_and_publish`                    |
+| `DEPLOY_ACME_EMAIL`                           | _(unset)_                              | Optional ACME contact email emitted into deployment-node Caddy config |
+| `DEPLOY_ACME_CA`                              | _(unset)_                              | Optional ACME CA directory override, useful for Let's Encrypt staging |
+| `DOH_RESOLVER_URL`                            | `https://cloudflare-dns.com/dns-query` | DNS-over-HTTPS resolver used to verify deployment custom domains      |
+| `DOH_TIMEOUT_MS`                              | `10000`                                | Timeout for deployment custom-domain DNS verification lookups         |
+| `DEPLOY_COMPOSE_CMD`                          | `docker compose`                       | Docker Compose command used by the deployment engine                  |
+| `DEPLOY_HEALTH_TIMEOUT`                       | `5m`                                   | Deployment health-check timeout used by the VM agent                  |
+| `DEPLOY_RUNTIME_TIMEOUT`                      | `15m`                                  | VM-agent max time for deployment-node host dependency setup           |
+| `DEPLOY_TEARDOWN_TIMEOUT`                     | `2m`                                   | VM-agent max time for deployment environment teardown (stop/start)    |
+| `DEPLOY_APPLY_IDLE_TIMEOUT`                   | `15m`                                  | VM-agent idle watchdog for deployment apply (no-progress only)        |
+| `DEPLOY_BUILD_PUBLISH_TIMEOUT`                | `20m`                                  | VM-agent max time for host build + push + release publish             |
+| `DEPLOY_ARTIFACT_DIAL_TIMEOUT`                | `30s`                                  | VM-agent TCP dial timeout for artifact downloads                      |
+| `DEPLOY_ARTIFACT_TLS_HANDSHAKE_TIMEOUT`       | `15s`                                  | VM-agent TLS handshake timeout for artifact downloads                 |
+| `DEPLOY_ARTIFACT_RESPONSE_HEADER_TIMEOUT`     | `60s`                                  | VM-agent first-response-header timeout for artifact downloads         |
+| `DEPLOY_ARTIFACT_IDLE_TIMEOUT`                | `2m`                                   | VM-agent idle watchdog for artifact body-read progress                |
 
 ## Platform Limits
 
@@ -268,16 +270,16 @@ SAM loads OpenCode Zen and OpenCode Go model choices through the authenticated m
 
 ## Durable Object Limits
 
-| Variable                                  | Default            | Description                                                               |
-| ----------------------------------------- | ------------------ | ------------------------------------------------------------------------- |
-| `MAX_SESSIONS_PER_PROJECT`                | `10000`            | Max chat sessions per project                                             |
-| `MAX_MESSAGES_PER_SESSION`                | `100000`           | Max messages per chat session                                             |
-| `DOCUMENT_CARD_RAW_OUTPUT_MAX_BYTES`      | `16384`            | Max compact metadata bytes preserved for library document cards           |
-| `MESSAGE_SIZE_THRESHOLD`                  | `102400`           | Max message size in bytes                                                 |
-| `ACTIVITY_RETENTION_DAYS`                 | `90`               | Days to retain activity events                                            |
-| `SESSION_IDLE_TIMEOUT_MINUTES`            | `60`               | Idle session timeout                                                      |
-| `SESSION_ACTIVITY_STALE_THRESHOLD_MS`     | `300000` (5 min)   | Evidence threshold before stale working activity can be healed to idle    |
-| `DO_SUMMARY_SYNC_DEBOUNCE_MS`             | `5000`             | Debounce for DO-to-D1 summary sync                                        |
+| Variable                              | Default          | Description                                                            |
+| ------------------------------------- | ---------------- | ---------------------------------------------------------------------- |
+| `MAX_SESSIONS_PER_PROJECT`            | `10000`          | Max chat sessions per project                                          |
+| `MAX_MESSAGES_PER_SESSION`            | `100000`         | Max messages per chat session                                          |
+| `DOCUMENT_CARD_RAW_OUTPUT_MAX_BYTES`  | `16384`          | Max compact metadata bytes preserved for library document cards        |
+| `MESSAGE_SIZE_THRESHOLD`              | `102400`         | Max message size in bytes                                              |
+| `ACTIVITY_RETENTION_DAYS`             | `90`             | Days to retain activity events                                         |
+| `SESSION_IDLE_TIMEOUT_MINUTES`        | `60`             | Idle session timeout                                                   |
+| `SESSION_ACTIVITY_STALE_THRESHOLD_MS` | `300000` (5 min) | Evidence threshold before stale working activity can be healed to idle |
+| `DO_SUMMARY_SYNC_DEBOUNCE_MS`         | `5000`           | Debounce for DO-to-D1 summary sync                                     |
 
 ## Durable Object Retry
 
@@ -319,11 +321,11 @@ SAM loads OpenCode Zen and OpenCode Go model choices through the authenticated m
 
 ## VM TLS
 
-| Variable            | Default  | Description                                |
-| ------------------- | -------- | ------------------------------------------ |
-| `VM_AGENT_PROTOCOL` | `https`  | Protocol for VM agent communication        |
-| `VM_AGENT_PORT`     | `8443`   | VM agent listening port                    |
-| `ORIGIN_CA_CERT_VALIDITY_DAYS` | `7` | Validity for per-node Origin CA certificates signed by the API Worker |
+| Variable                       | Default | Description                                                           |
+| ------------------------------ | ------- | --------------------------------------------------------------------- |
+| `VM_AGENT_PROTOCOL`            | `https` | Protocol for VM agent communication                                   |
+| `VM_AGENT_PORT`                | `8443`  | VM agent listening port                                               |
+| `ORIGIN_CA_CERT_VALIDITY_DAYS` | `7`     | Validity for per-node Origin CA certificates signed by the API Worker |
 
 New nodes generate `/etc/sam/tls/origin-ca-key.pem` locally in cloud-init and fetch only the signed certificate from `POST /api/nodes/:id/origin-ca-certificate` (`packages/cloud-init/src/template.ts`, `apps/api/src/routes/node-lifecycle.ts`). Legacy `ORIGIN_CA_CERT` and `ORIGIN_CA_KEY` Worker secrets are not required for new node provisioning.
 
@@ -362,10 +364,10 @@ Applied via cloud-init on each node:
 
 ## Project Files (Remote-Branch Git Browser)
 
-| Variable                        | Default           | Description                                                        |
-| ------------------------------- | ----------------- | ----------------------------------------------------------------- |
-| `REPO_BROWSE_MAX_INLINE_BYTES`  | `1000000` (1 MB)  | Max bytes to inline as text in the file viewer; larger stream raw |
-| `REPO_BROWSE_MAX_COMPARE_FILES` | `300`             | Max changed files in an Artifacts diff before truncation          |
+| Variable                        | Default          | Description                                                       |
+| ------------------------------- | ---------------- | ----------------------------------------------------------------- |
+| `REPO_BROWSE_MAX_INLINE_BYTES`  | `1000000` (1 MB) | Max bytes to inline as text in the file viewer; larger stream raw |
+| `REPO_BROWSE_MAX_COMPARE_FILES` | `300`            | Max changed files in an Artifacts diff before truncation          |
 
 ## MCP Idea Tools
 

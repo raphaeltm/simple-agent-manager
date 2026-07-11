@@ -169,6 +169,10 @@ type SessionHostConfig struct {
 	// StartProcess is an internal test hook. Production code leaves it nil and
 	// uses StartProcess via startAgentProcess.
 	StartProcess func(*agentStartup) (agentProcess, error)
+
+	// RuntimeAssetsProvider fetches resolved project/profile/skill runtime assets
+	// for standalone sessions. It must not log or persist secret values.
+	RuntimeAssetsProvider RuntimeAssetsProvider
 }
 
 // BufferedMessage holds a single message in the replay buffer.
@@ -788,6 +792,13 @@ func findModelConfigOptionID(options []acpsdk.SessionConfigOption) (acpsdk.Sessi
 func (h *SessionHost) ensureAgentInstalled(ctx context.Context, info agentCommandInfo) error {
 	if info.installCmd == "" {
 		return nil
+	}
+	// Standalone / cf-container mode configures a custom ProcessLauncher and has
+	// no devcontainer ContainerResolver. Install the ACP adapter locally (same
+	// hardcoded install script) instead of via docker exec.
+	if h.config.ProcessLauncher != nil {
+		h.broadcastAgentStatus(StatusInstalling, info.command, "")
+		return installAgentBinaryLocal(ctx, info)
 	}
 
 	containerID, err := h.config.ContainerResolver()

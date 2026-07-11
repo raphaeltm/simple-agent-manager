@@ -317,22 +317,26 @@ function MemoryCard({ entity, projectId, onRefresh }: { entity: KnowledgeEntity;
     setDetail({ ...result.entity, observations: result.observations, relations: result.relations });
   };
 
+  const [detailError, setDetailError] = useState<string | null>(null);
+
   useEffect(() => {
     if (!expanded || detail) return;
     let cancelled = false;
     setLoadingDetail(true);
+    setDetailError(null);
     getKnowledgeEntity(projectId, entity.id)
       .then((result) => {
         if (!cancelled) setDetail({ ...result.entity, observations: result.observations, relations: result.relations });
       })
       .catch((error) => {
-        if (!cancelled) toast.error(error instanceof Error ? error.message : 'Failed to load observations');
+        if (!cancelled) setDetailError(error instanceof Error ? error.message : 'Failed to load observations');
       })
       .finally(() => {
         if (!cancelled) setLoadingDetail(false);
       });
     return () => { cancelled = true; };
-  }, [detail, entity.id, expanded, projectId, toast]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- toast removed per stale-while-revalidate rule
+  }, [detail, entity.id, expanded, projectId]);
 
   const handleSavedEntity = async () => {
     setEditing(false);
@@ -414,8 +418,9 @@ function MemoryCard({ entity, projectId, onRefresh }: { entity: KnowledgeEntity;
 
         {expanded && !editing && (
           <div className="mt-3 space-y-2 border-t border-[color-mix(in_srgb,var(--sam-form-border)_80%,transparent)] pt-3">
+            {detailError && <p className="m-0 text-sm text-danger">{detailError}</p>}
             {loadingDetail && <p className="m-0 text-sm text-fg-muted">Loading observations...</p>}
-            {!loadingDetail && observations.length === 0 && (
+            {!loadingDetail && !detailError && observations.length === 0 && (
               <div className={`${GLASS_CARD_MUTED} p-3 text-sm text-fg-muted`}>No observations attached to this entity.</div>
             )}
             {observations.map((observation) => (

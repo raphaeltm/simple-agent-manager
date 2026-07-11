@@ -108,7 +108,7 @@ export function PlatformIntegrationConfigForm({
 
         <IntegrationSection
           title="GitLab OAuth"
-          description="Stores the GitLab OAuth application for GitLab login and repository access."
+          description="Stores the GitLab OAuth application for GitLab sign-in."
           status={status.integrations.gitlabOAuth}
         >
           <TextField

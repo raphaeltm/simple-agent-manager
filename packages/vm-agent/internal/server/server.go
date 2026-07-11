@@ -11,7 +11,6 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -305,7 +304,13 @@ func New(cfg *config.Config) (*Server, error) {
 	containerWorkDir := "/workspace" // host fallback
 	containerUser := ""
 
-	if cfg.ContainerMode {
+	if cfg.IsStandaloneMode() {
+		containerWorkDir = cfg.WorkspaceDir
+		if containerWorkDir == "" {
+			containerWorkDir = "/workspace"
+		}
+		slog.Info("Standalone mode enabled: PTY and ACP sessions will run locally", "workDir", containerWorkDir)
+	} else if cfg.ContainerMode {
 		discovery := container.NewDiscovery(container.Config{
 			LabelKey:    cfg.ContainerLabelKey,
 			LabelValue:  cfg.ContainerLabelValue,
@@ -329,6 +334,7 @@ func New(cfg *config.Config) (*Server, error) {
 		WorkDir:           containerWorkDir,
 		ContainerResolver: containerResolver,
 		ContainerUser:     containerUser,
+		ProcessGroup:      cfg.IsStandaloneMode(),
 		GracePeriod:       cfg.PTYOrphanGracePeriod,
 		BufferSize:        cfg.PTYOutputBufferSize,
 	})
@@ -340,6 +346,11 @@ func New(cfg *config.Config) (*Server, error) {
 		MaxQueueSize:  cfg.ErrorReportMaxQueueSize,
 		HTTPTimeout:   cfg.ErrorReportHTTPTimeout,
 	})
+
+	var processLauncher acp.ProcessLauncher
+	if cfg.IsStandaloneMode() {
+		processLauncher = acp.LocalLauncher{}
+	}
 
 	// Build ACP gateway configuration
 	acpGatewayConfig := acp.GatewayConfig{
@@ -356,6 +367,7 @@ func New(cfg *config.Config) (*Server, error) {
 		ContainerResolver:              containerResolver,
 		ContainerUser:                  containerUser,
 		ContainerWorkDir:               containerWorkDir,
+		ProcessLauncher:                processLauncher,
 		GitTokenFetcher:                nil, // set below after server construction
 		FileExecTimeout:                cfg.GitExecTimeout,
 		FileMaxSize:                    cfg.GitFileMaxSize,
@@ -528,6 +540,7 @@ func New(cfg *config.Config) (*Server, error) {
 			ContainerUser:       strings.TrimSpace(cfg.ContainerUser),
 			CallbackToken:       strings.TrimSpace(cfg.CallbackToken),
 			ProjectID:           strings.TrimSpace(cfg.ProjectID),
+			Lightweight:         cfg.IsStandaloneMode(),
 			PTY:                 ptyManager,
 		}
 	}
@@ -773,7 +786,7 @@ func (s *Server) UpdateAfterBootstrap(cfg *config.Config) {
 // StartPortScanner starts port scanning for a workspace if enabled.
 // Called after bootstrap completes and the container is available.
 func (s *Server) StartPortScanner(workspaceID string) {
-	if !s.config.PortScanEnabled || !s.config.ContainerMode {
+	if !s.config.PortScanEnabled || !s.config.ContainerMode || s.config.IsStandaloneMode() {
 		return
 	}
 
@@ -1116,6 +1129,14 @@ func (s *Server) getOrCreateReporter(workspaceID, projectID, chatSessionID strin
 	s.messageReportersMu.RLock()
 	if r, ok := s.messageReporters[workspaceID]; ok {
 		s.messageReportersMu.RUnlock()
+		// The boot-time reporter is created before the workspace callback token
+		// is available, and standalone mode never runs bootstrap's
+		// setTokenAllReporters. Refresh the token from the workspace runtime on
+		// access so the reporter can authenticate its message POSTs (otherwise
+		// it fails with "no auth token" and chat messages never persist).
+		if token := s.workspaceCallbackToken(workspaceID); token != "" {
+			r.SetToken(token)
+		}
 		return r
 	}
 	s.messageReportersMu.RUnlock()
@@ -1459,6 +1480,22 @@ type gitPushResult struct {
 	Error                 string
 }
 
+func (s *Server) runWorkspaceGitCommand(containerID, workDir, user string, args ...string) (string, error) {
+	timeout := s.config.GitExecTimeout
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	stdout, stderr, err := s.execInContainer(ctx, containerID, user, workDir, append([]string{"git"}, args...)...)
+	output := strings.TrimSpace(stdout)
+	if strings.TrimSpace(stderr) != "" {
+		output = strings.TrimSpace(output + "\n" + strings.TrimSpace(stderr))
+	}
+	return output, err
+}
+
 // gitPushWorkspaceChanges runs git status/add/commit/push inside the workspace
 // container and optionally creates a PR. When skipPR is true (conversation mode),
 // the PR creation step is skipped — the human controls when to create PRs.
@@ -1471,21 +1508,8 @@ func (s *Server) gitPushWorkspaceChanges(workspaceID string, skipPR bool) gitPus
 		return result
 	}
 
-	// Helper to run git commands in the container
-	runGit := func(args ...string) (string, error) {
-		cmdArgs := []string{"exec"}
-		if user != "" {
-			cmdArgs = append(cmdArgs, "-u", user)
-		}
-		cmdArgs = append(cmdArgs, "-w", workDir, containerID, "git")
-		cmdArgs = append(cmdArgs, args...)
-		cmd := exec.Command("docker", cmdArgs...)
-		output, err := cmd.CombinedOutput()
-		return strings.TrimSpace(string(output)), err
-	}
-
 	// Check for uncommitted changes
-	statusOutput, err := runGit("status", "--porcelain")
+	statusOutput, err := s.runWorkspaceGitCommand(containerID, workDir, user, "status", "--porcelain")
 	if err != nil {
 		result.Error = fmt.Sprintf("git status failed: %s", err)
 		return result
@@ -1493,7 +1517,7 @@ func (s *Server) gitPushWorkspaceChanges(workspaceID string, skipPR bool) gitPus
 
 	if statusOutput == "" {
 		// No changes — nothing to push. Check if there are unpushed commits.
-		logOutput, logErr := runGit("log", "--oneline", "@{push}..", "--")
+		logOutput, logErr := s.runWorkspaceGitCommand(containerID, workDir, user, "log", "--oneline", "@{push}..", "--")
 		if logErr != nil || strings.TrimSpace(logOutput) == "" {
 			slog.Info("No changes or unpushed commits", "workspaceId", workspaceID)
 			return result
@@ -1503,13 +1527,13 @@ func (s *Server) gitPushWorkspaceChanges(workspaceID string, skipPR bool) gitPus
 		result.HasUncommittedChanges = true
 
 		// Stage all changes
-		if _, err := runGit("add", "-A"); err != nil {
+		if _, err := s.runWorkspaceGitCommand(containerID, workDir, user, "add", "-A"); err != nil {
 			result.Error = fmt.Sprintf("git add failed: %s", err)
 			return result
 		}
 
 		// Commit
-		commitOutput, err := runGit("commit", "-m", "chore: save agent work\n\nAuto-committed by SAM on agent completion.")
+		commitOutput, err := s.runWorkspaceGitCommand(containerID, workDir, user, "commit", "-m", "chore: save agent work\n\nAuto-committed by SAM on agent completion.")
 		if err != nil {
 			result.Error = fmt.Sprintf("git commit failed: %s: %s", err, commitOutput)
 			return result
@@ -1517,15 +1541,15 @@ func (s *Server) gitPushWorkspaceChanges(workspaceID string, skipPR bool) gitPus
 	}
 
 	// Get the commit SHA
-	sha, _ := runGit("rev-parse", "HEAD")
+	sha, _ := s.runWorkspaceGitCommand(containerID, workDir, user, "rev-parse", "HEAD")
 	result.CommitSha = sha
 
 	// Get the current branch name
-	branchOutput, _ := runGit("rev-parse", "--abbrev-ref", "HEAD")
+	branchOutput, _ := s.runWorkspaceGitCommand(containerID, workDir, user, "rev-parse", "--abbrev-ref", "HEAD")
 	result.BranchName = branchOutput
 
 	// Push
-	pushOutput, err := runGit("push", "--set-upstream", "origin", "HEAD")
+	pushOutput, err := s.runWorkspaceGitCommand(containerID, workDir, user, "push", "--set-upstream", "origin", "HEAD")
 	if err != nil {
 		result.Error = fmt.Sprintf("git push failed: %s: %s", err, pushOutput)
 		return result
@@ -1547,19 +1571,22 @@ func (s *Server) gitPushWorkspaceChanges(workspaceID string, skipPR bool) gitPus
 // tryCreatePR attempts to create a GitHub PR using gh CLI inside the container.
 // Returns (prURL, prNumber) on success, or ("", 0) on failure.
 func (s *Server) tryCreatePR(containerID, workDir, user string) (string, int) {
-	cmdArgs := []string{"exec"}
-	if user != "" {
-		cmdArgs = append(cmdArgs, "-u", user)
+	timeout := s.config.GitExecTimeout
+	if timeout <= 0 {
+		timeout = 30 * time.Second
 	}
-	cmdArgs = append(cmdArgs, "-w", workDir, containerID,
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	stdout, stderr, err := s.execInContainer(ctx, containerID, user, workDir,
 		"gh", "pr", "create",
 		"--fill",
 		"--head", "HEAD",
 	)
-
-	cmd := exec.Command("docker", cmdArgs...)
-	output, err := cmd.CombinedOutput()
-	outputStr := strings.TrimSpace(string(output))
+	outputStr := strings.TrimSpace(stdout)
+	if strings.TrimSpace(stderr) != "" {
+		outputStr = strings.TrimSpace(outputStr + "\n" + strings.TrimSpace(stderr))
+	}
 	if err != nil {
 		// Check if a PR already exists
 		if strings.Contains(outputStr, "already exists") {
@@ -1589,20 +1616,20 @@ func (s *Server) tryCreatePR(containerID, workDir, user string) (string, int) {
 
 // getExistingPRURL looks up the existing PR URL for the current branch.
 func (s *Server) getExistingPRURL(containerID, workDir, user string) (string, int) {
-	cmdArgs := []string{"exec"}
-	if user != "" {
-		cmdArgs = append(cmdArgs, "-u", user)
+	timeout := s.config.GitExecTimeout
+	if timeout <= 0 {
+		timeout = 30 * time.Second
 	}
-	cmdArgs = append(cmdArgs, "-w", workDir, containerID,
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	output, _, err := s.execInContainer(ctx, containerID, user, workDir,
 		"gh", "pr", "view", "--json", "url,number", "--jq", ".url",
 	)
-
-	cmd := exec.Command("docker", cmdArgs...)
-	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", 0
 	}
-	return strings.TrimSpace(string(output)), 0
+	return strings.TrimSpace(output), 0
 }
 
 // openSQLiteDB opens a SQLite database connection with WAL mode and

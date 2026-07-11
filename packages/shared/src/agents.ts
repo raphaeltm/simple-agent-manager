@@ -101,7 +101,7 @@ export const AGENT_CATALOG: readonly AgentDefinition[] = [
     acpArgs: [],
     supportsAcp: true,
     credentialHelpUrl: 'https://platform.openai.com/api-keys',
-    installCommand: 'npx --yes @zed-industries/codex-acp --version',
+    installCommand: 'npx --yes @agentclientprotocol/codex-acp --version',
     oauthSupport: {
       envVarName: 'CODEX_AUTH_JSON',
       setupInstructions: 'Run "codex login" on your local machine and sign in with your ChatGPT account, then paste the contents of ~/.codex/auth.json',

@@ -1,7 +1,7 @@
 import type { SlashCommand } from '@simple-agent-manager/acp-client';
-import type { AgentInfo, AgentProfile, AgentSkill, ProviderCatalog, TaskMode, UpdateAgentProfileRequest, VMSize } from '@simple-agent-manager/shared';
-import { VM_SIZE_LABELS } from '@simple-agent-manager/shared';
-import { Check, ChevronRight, MessageSquare, Monitor, Plus, Settings, Wrench } from 'lucide-react';
+import type { AgentInfo, AgentProfile, AgentProfileRuntime, AgentSkill, ProviderCatalog, TaskMode, UpdateAgentProfileRequest, VMSize } from '@simple-agent-manager/shared';
+import { DEFAULT_VM_SIZE, VM_SIZE_LABELS } from '@simple-agent-manager/shared';
+import { Check, ChevronRight, MessageSquare, Monitor, Plus, Server, Settings, Wrench, Zap } from 'lucide-react';
 import type { MutableRefObject, ReactNode } from 'react';
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
@@ -21,15 +21,30 @@ interface ChatAttachmentDisplay {
 }
 
 const VM_SIZES: VMSize[] = ['small', 'medium', 'large'];
-const WIZARD_STEPS: ProfileWizardStep[] = ['agent', 'work-type', 'vm-size', 'name'];
+const WIZARD_STEPS: ProfileWizardStep[] = ['agent', 'work-type', 'runtime', 'vm-size', 'name'];
 
-function getWizardStepNumber(step: ProfileWizardStep, skipAgent: boolean) {
-  const visibleSteps: ProfileWizardStep[] = skipAgent ? ['work-type', 'vm-size', 'name'] : WIZARD_STEPS;
+function getWizardSteps(skipAgent: boolean, runtime: AgentProfileRuntime | null) {
+  return WIZARD_STEPS.filter((step) => {
+    if (skipAgent && step === 'agent') return false;
+    if (runtime === 'cf-container' && step === 'vm-size') return false;
+    return true;
+  });
+}
+
+function getWizardStepNumber(step: ProfileWizardStep, visibleSteps: ProfileWizardStep[]) {
   return Math.max(1, visibleSteps.indexOf(step) + 1);
 }
 
-function getWizardTotalSteps(skipAgent: boolean) {
-  return skipAgent ? 3 : 4;
+function getWizardNextStep(step: ProfileWizardStep, visibleSteps: ProfileWizardStep[]) {
+  const index = visibleSteps.indexOf(step);
+  if (index < 0 || index >= visibleSteps.length - 1) return null;
+  return visibleSteps[index + 1] ?? null;
+}
+
+function getWizardPreviousStep(step: ProfileWizardStep, visibleSteps: ProfileWizardStep[]) {
+  const index = visibleSteps.indexOf(step);
+  if (index <= 0) return null;
+  return visibleSteps[index - 1] ?? null;
 }
 
 function getAgentInitial(agent: AgentInfo) {
@@ -38,6 +53,41 @@ function getAgentInitial(agent: AgentInfo) {
 
 function getVmSizeLabel(size: VMSize) {
   return VM_SIZE_LABELS[size]?.label ?? `${size.charAt(0).toUpperCase()}${size.slice(1)}`;
+}
+
+function getRuntimeLabel(runtime: AgentProfileRuntime | null) {
+  if (runtime === 'cf-container') return 'Instant';
+  if (runtime === 'vm') return 'VM';
+  return 'Auto';
+}
+
+function getRuntimeSummary(runtime: AgentProfileRuntime | null) {
+  if (runtime === 'cf-container') return 'Instant container';
+  if (runtime === 'vm') return 'Cloud VM';
+  return 'Auto runtime';
+}
+
+function getRuntimeBadgeTitle(runtime: AgentProfileRuntime): string {
+  return runtime === 'cf-container' ? 'Instant container profile' : 'Cloud VM profile';
+}
+
+function RuntimeBadge({ runtime }: Readonly<{ runtime: AgentProfileRuntime }>) {
+  const isInstant = runtime === 'cf-container';
+  const Icon = isInstant ? Zap : Server;
+  return (
+    <span
+      className={[
+        'inline-flex shrink-0 items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-semibold uppercase leading-none',
+        isInstant
+          ? 'border-accent/30 bg-accent/10 text-accent'
+          : 'border-info/30 bg-info-tint text-info-fg',
+      ].join(' ')}
+      title={getRuntimeBadgeTitle(runtime)}
+    >
+      <Icon size={11} aria-hidden="true" />
+      {getRuntimeLabel(runtime)}
+    </span>
+  );
 }
 
 type ChatInputProps = Readonly<{
@@ -89,6 +139,7 @@ function getComposerPlaceholder({
 function canAdvanceWizard(profileWizard: ProfileWizardState) {
   if (profileWizard.step === 'agent') return Boolean(profileWizard.selectedAgentType);
   if (profileWizard.step === 'work-type') return Boolean(profileWizard.workType);
+  if (profileWizard.step === 'runtime') return Boolean(profileWizard.runtime);
   if (profileWizard.step === 'vm-size') return Boolean(profileWizard.vmSize);
   return Boolean(profileWizard.profileName.trim());
 }
@@ -102,16 +153,15 @@ function getProfileButtonClass(selected: boolean) {
   ].join(' ');
 }
 
-function getWizardBackLabel(step: ProfileWizardStep, skipAgentStep: boolean) {
-  if (step === 'agent') return 'Cancel';
-  if (skipAgentStep && step === 'work-type') return 'Cancel';
-  return 'Back';
+function getWizardBackLabel(step: ProfileWizardStep, visibleSteps: ProfileWizardStep[]) {
+  return getWizardPreviousStep(step, visibleSteps) ? 'Back' : 'Cancel';
 }
 
 function getWizardTitle(step: ProfileWizardStep) {
   const titles: Record<ProfileWizardStep, string> = {
     agent: 'Which agent?',
     'work-type': 'What kind of work?',
+    runtime: 'Where should it run?',
     'vm-size': 'VM size',
     name: 'Name the profile',
   };
@@ -122,6 +172,7 @@ function getWizardDescription(step: ProfileWizardStep, providerContext: string) 
   const descriptions: Record<ProfileWizardStep, string> = {
     agent: 'Choose the agent this profile should use.',
     'work-type': 'Pick whether this profile should work independently or stay conversational.',
+    runtime: 'Choose Instant for quick chat, or Cloud VM for heavier work.',
     'vm-size': providerContext ? `Specs are from ${providerContext}.` : 'Choose a general machine tier.',
     name: 'Use a short name that will be easy to pick later.',
   };
@@ -183,41 +234,38 @@ export function ChatInput({
   const canProceed = canAdvanceWizard(profileWizard);
 
   const selectedWizardAgent = agents.find((agent) => agent.id === profileWizard.selectedAgentType) ?? agents[0] ?? null;
-  const selectedWizardSize = profileWizard.vmSize ?? 'medium';
-  const stepNumber = getWizardStepNumber(profileWizard.step, skipAgentStep);
-  const totalSteps = getWizardTotalSteps(skipAgentStep);
+  const selectedWizardSize = profileWizard.vmSize ?? DEFAULT_VM_SIZE;
+  const visibleWizardSteps = getWizardSteps(skipAgentStep, profileWizard.runtime);
+  const stepNumber = getWizardStepNumber(profileWizard.step, visibleWizardSteps);
+  const totalSteps = visibleWizardSteps.length;
 
   const updateWizardStep = (step: ProfileWizardStep) => onUpdateProfileWizard({ step });
 
   const handleWizardNext = () => {
     if (!canProceed || profileWizard.saving) return;
-    if (profileWizard.step === 'agent') {
-      updateWizardStep('work-type');
+    const nextStep = getWizardNextStep(profileWizard.step, visibleWizardSteps);
+    if (!nextStep) {
+      void onCreateProfileFromWizard();
       return;
     }
-    if (profileWizard.step === 'work-type') {
-      updateWizardStep('vm-size');
-      return;
-    }
-    if (profileWizard.step === 'vm-size') {
+    if (nextStep === 'name') {
       onUpdateProfileWizard({
         step: 'name',
         profileName: profileWizard.profileName.trim() || suggestProfileName(profileWizard.selectedAgentType, profileWizard.workType),
       });
       return;
     }
-    void onCreateProfileFromWizard();
+    updateWizardStep(nextStep);
   };
 
   const handleWizardBack = () => {
     if (profileWizard.saving) return;
-    if (profileWizard.step === 'agent' || (skipAgentStep && profileWizard.step === 'work-type')) {
+    const previousStep = getWizardPreviousStep(profileWizard.step, visibleWizardSteps);
+    if (!previousStep) {
       onCloseProfileWizard();
       return;
     }
-    if (profileWizard.step === 'work-type') updateWizardStep('agent');
-    else if (profileWizard.step === 'vm-size') updateWizardStep('work-type');
-    else updateWizardStep('vm-size');
+    updateWizardStep(previousStep);
   };
 
   const renderVmSizeDetail = (size: VMSize) => {
@@ -250,6 +298,7 @@ export function ChatInput({
               title={profile.name}
             >
               <span className="truncate">{profile.name}</span>
+              {profile.runtime && <RuntimeBadge runtime={profile.runtime} />}
             </button>
           ))}
           {selectedProfile && (
@@ -334,7 +383,7 @@ export function ChatInput({
                   icon={<Wrench size={20} />}
                   title="Build and open PRs"
                   description="Best when you want the agent to make changes, run checks, and carry the task to a pull request."
-                  onClick={() => onUpdateProfileWizard({ workType: 'task' })}
+                  onClick={() => onUpdateProfileWizard({ workType: 'task', runtime: null, vmSize: profileWizard.vmSize ?? DEFAULT_VM_SIZE })}
                   disabled={profileWizard.saving}
                 />
                 <WorkTypeCard
@@ -342,7 +391,28 @@ export function ChatInput({
                   icon={<MessageSquare size={20} />}
                   title="Chat and explore"
                   description="Best for questions, planning, code reading, and lighter back-and-forth work."
-                  onClick={() => onUpdateProfileWizard({ workType: 'conversation' })}
+                  onClick={() => onUpdateProfileWizard({ workType: 'conversation', runtime: null, vmSize: null })}
+                  disabled={profileWizard.saving}
+                />
+              </div>
+            )}
+
+            {profileWizard.step === 'runtime' && (
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <WorkTypeCard
+                  selected={profileWizard.runtime === 'cf-container'}
+                  icon={<Zap size={20} />}
+                  title="Instant container"
+                  description="Starts a chat workspace in a Cloudflare Container without a VM provisioning step."
+                  onClick={() => onUpdateProfileWizard({ runtime: 'cf-container', vmSize: null, workType: 'conversation' })}
+                  disabled={profileWizard.saving}
+                />
+                <WorkTypeCard
+                  selected={profileWizard.runtime === 'vm'}
+                  icon={<Server size={20} />}
+                  title="Cloud VM"
+                  description="Uses the project's cloud provisioning path for larger or longer-running work."
+                  onClick={() => onUpdateProfileWizard({ runtime: 'vm', vmSize: profileWizard.vmSize ?? DEFAULT_VM_SIZE })}
                   disabled={profileWizard.saving}
                 />
               </div>
@@ -392,7 +462,8 @@ export function ChatInput({
                 <div className="text-xs text-fg-muted">
                   Summary: <strong className="text-fg-secondary">{selectedWizardAgent?.name ?? 'Agent'}</strong> ·{' '}
                   {profileWizard.workType === 'task' ? 'Build and open PRs' : 'Chat and explore'} ·{' '}
-                  {getVmSizeLabel(selectedWizardSize)} VM
+                  {getRuntimeSummary(profileWizard.runtime)}
+                  {profileWizard.runtime !== 'cf-container' && <> · {getVmSizeLabel(selectedWizardSize)} VM</>}
                 </div>
               </div>
             )}
@@ -404,7 +475,7 @@ export function ChatInput({
                 disabled={profileWizard.saving}
                 className="min-h-[44px] rounded-md border border-border-default bg-transparent px-3 py-2 text-sm text-fg-muted hover:text-fg-primary disabled:opacity-50"
               >
-                {getWizardBackLabel(profileWizard.step, skipAgentStep)}
+                {getWizardBackLabel(profileWizard.step, visibleWizardSteps)}
               </button>
               <button
                 type="button"

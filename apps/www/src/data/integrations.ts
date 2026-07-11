@@ -30,6 +30,38 @@ export interface Integration {
   models?: string[];
 }
 
+function titleDescriptionItem(title: string, description: string): { title: string; description: string } {
+  return { title, description };
+}
+
+function faqItem(question: string, answer: string): { question: string; answer: string } {
+  return { question, answer };
+}
+
+const workersAiMarketingFields = {
+  tagline: 'Built-in edge AI for platform features',
+  description:
+    "SAM runs on Cloudflare Workers, and Workers AI provides edge inference for platform features. SAM uses Workers AI for task title generation, text-to-speech, and context summarization without requiring a separate model API key.",
+  seoTitle: 'Built-in AI with Cloudflare Workers AI | SAM',
+  seoDescription:
+    'SAM includes Cloudflare Workers AI for task titles, text-to-speech, and summarization. Built into the platform with no separate model key.',
+} satisfies Pick<Integration, 'tagline' | 'description' | 'seoTitle' | 'seoDescription'>;
+
+const workersAiNoSeparateModelKeyFeature = titleDescriptionItem(
+  'No Separate Model Key',
+  'Workers AI is part of SAM\'s Cloudflare deployment — no additional model API key is needed for task titles and TTS.',
+);
+
+const workersAiSelfHostedUseCase = titleDescriptionItem(
+  'Self-hosted AI platform',
+  'When self-hosting SAM on the Workers Paid plan, Workers AI powers platform features without a separate model API key.',
+);
+
+const workersAiApiKeyFaq = faqItem(
+  'Does Workers AI require a separate API key?',
+  'No — Workers AI is available through the Cloudflare account that runs SAM. Self-hosting SAM still requires the Workers Paid plan because the default deployment uses Durable Objects and Cloudflare Containers.',
+);
+
 export const categories = [
   { id: 'ai-agents' as const, label: 'AI Coding Agents', description: 'Run any coding agent on your infrastructure' },
   { id: 'cloud-providers' as const, label: 'Cloud Providers', description: 'Bring your own cloud — your VMs, your data' },
@@ -361,16 +393,11 @@ export const integrations: Integration[] = [
     shortName: 'Workers AI',
     category: 'ai-models',
     categoryLabel: 'AI Models',
-    tagline: 'Free AI inference built into the platform',
-    description:
-      "SAM runs on Cloudflare Workers, and Workers AI provides free AI inference at the edge. SAM uses Workers AI for task title generation, text-to-speech, and context summarization — all included with the platform at no extra cost.",
+    ...workersAiMarketingFields,
     color: '#F6821F',
     logoPath: '/images/integrations/cloudflare.svg',
-    seoTitle: 'Free AI with Cloudflare Workers AI | SAM',
-    seoDescription:
-      'SAM includes free AI inference via Cloudflare Workers AI — task titles, text-to-speech, and summarization at no extra cost. Built into the platform.',
     features: [
-      { title: 'Zero Extra Cost', description: 'Workers AI inference is included with SAM — no API keys needed for built-in features like task titles and TTS.' },
+      workersAiNoSeparateModelKeyFeature,
       { title: 'Edge Inference', description: 'Models run at Cloudflare\'s edge — low latency for platform features, no cold starts.' },
       { title: 'Multiple Models', description: 'Llama 4, Gemma 4, GLM-4.7, Qwen 3, and Deepgram for different tasks — SAM picks the right model automatically.' },
       { title: 'AI Gateway', description: 'All inference is routed through Cloudflare AI Gateway for rate limiting, analytics, and reliability.' },
@@ -384,10 +411,10 @@ export const integrations: Integration[] = [
     useCases: [
       { title: 'Zero-config AI features', description: 'Task title generation, text-to-speech for messages, and context summarization work out of the box.' },
       { title: 'AI proxy gateway', description: 'Route LLM requests through SAM\'s AI proxy for rate limiting, token budgets, and centralized analytics.' },
-      { title: 'Self-hosted AI platform', description: 'When self-hosting SAM on Cloudflare\'s free tier, Workers AI provides AI capabilities without any API key costs.' },
+      workersAiSelfHostedUseCase,
     ],
     faq: [
-      { question: 'Is Workers AI really free?', answer: 'Yes — Cloudflare provides a generous free tier for Workers AI inference. SAM\'s built-in features (task titles, TTS, summarization) use this free tier.' },
+      workersAiApiKeyFaq,
       { question: 'Can I use Workers AI for my coding agents?', answer: 'Workers AI powers platform features, not the coding agents themselves. Agents use their own models (Claude, GPT, Gemini, Devstral) via their respective API keys.' },
       { question: 'What models does SAM use?', answer: 'Llama 4 Scout 17B for general inference, GLM-4.7 Flash for task titles, Gemma 4 26B for context summarization, Qwen 3 30B for complex tasks, and Deepgram Aura 2 for text-to-speech.' },
     ],

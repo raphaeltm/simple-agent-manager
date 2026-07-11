@@ -24,6 +24,7 @@ type Manager struct {
 	workDir            string
 	containerResolver  ContainerResolver
 	containerUser      string
+	processGroup       bool
 	maxSessionsPerUser int           // Maximum sessions allowed per user (0 = unlimited)
 	gracePeriod        time.Duration // How long orphaned sessions survive before cleanup (0 = disabled)
 	bufferSize         int           // Output ring buffer capacity per session in bytes
@@ -37,6 +38,7 @@ type ManagerConfig struct {
 	WorkDir            string
 	ContainerResolver  ContainerResolver
 	ContainerUser      string
+	ProcessGroup       bool          // Start sessions in their own process group for local standalone mode
 	MaxSessionsPerUser int           // Maximum sessions allowed per user (0 = unlimited)
 	GracePeriod        time.Duration // How long orphaned sessions survive before cleanup (0 = disabled)
 	BufferSize         int           // Output ring buffer capacity per session in bytes
@@ -60,6 +62,7 @@ func NewManager(cfg ManagerConfig) *Manager {
 		workDir:            cfg.WorkDir,
 		containerResolver:  cfg.ContainerResolver,
 		containerUser:      cfg.ContainerUser,
+		processGroup:       cfg.ProcessGroup,
 		maxSessionsPerUser: cfg.MaxSessionsPerUser,
 		gracePeriod:        gracePeriod,
 		bufferSize:         bufferSize,
@@ -126,6 +129,7 @@ func (m *Manager) CreateSessionWithID(sessionID, userID string, rows, cols int, 
 		}(),
 		ContainerID:      containerID,
 		ContainerUser:    m.containerUser,
+		ProcessGroup:     m.processGroup,
 		OutputBufferSize: m.bufferSize,
 		OnClose: func() {
 			m.removeSession(sessionID)

@@ -311,6 +311,36 @@ describe('ProjectOnboardingWizard', () => {
     await screen.findByRole('heading', { name: 'Kick off your first work' });
   });
 
+  it('builds the trigger schedule from friendly onboarding controls', async () => {
+    mockCreateTrigger.mockResolvedValue({ id: 'trigger-1' });
+    await advanceToSetup();
+    fireEvent.click(screen.getByRole('button', { name: /Skip/ })); // conversation → task
+    await screen.findByRole('heading', { name: 'Set up a task agent' });
+    fireEvent.click(screen.getByRole('button', { name: /Skip/ })); // task → automation
+    await screen.findByRole('heading', { name: /Schedule automation/ });
+
+    expect(screen.getByRole('radiogroup', { name: 'Schedule frequency' })).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText('0 9 * * *')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('radio', { name: /Weekdays/ }));
+    fireEvent.change(screen.getByLabelText('Time'), { target: { value: '13:30' } });
+    fireEvent.change(screen.getByLabelText('Timezone'), {
+      target: { value: 'America/New_York' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Create trigger/ }));
+
+    await waitFor(() => {
+      expect(mockCreateTrigger).toHaveBeenCalledWith(
+        'proj-1',
+        expect.objectContaining({
+          cronExpression: '30 13 * * 1-5',
+          cronTimezone: 'America/New_York',
+          sourceType: 'cron',
+        })
+      );
+    });
+  });
+
   it('shows the loadError with a working Retry on the connect step', async () => {
     const onRetry = vi.fn();
     renderWizard({ loadError: 'Failed to load installations', onRetryInstallations: onRetry });

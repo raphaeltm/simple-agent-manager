@@ -134,6 +134,8 @@ agentSessionRoutes.post('/:id/agent-sessions', requireAuth(), requireApproved(),
           // MCP tools query tasks by this ID and would get "Task not found". Empty string
           // is falsy so tools guarding on !tokenData.taskId correctly reject early.
           taskId: '',
+          contextType: workspace.chatSessionId ? 'conversation' : 'direct-workspace',
+          taskMode: workspace.chatSessionId ? 'conversation' : undefined,
           projectId: workspace.projectId,
           userId,
           workspaceId: workspace.id,

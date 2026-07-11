@@ -55,6 +55,21 @@ describe('TypewriterText', () => {
       expect(container.textContent).toContain('Hello');
     });
 
+    it('reveals at the default 10ms/char cadence when charDelayMs is omitted', () => {
+      // Regression guard for the default reveal speed. The 10-char string is
+      // fully revealed after 110ms only if the default is <= 11ms/char. A
+      // revert to the old 20ms default would reveal just 5 chars here.
+      const { container } = render(
+        <TypewriterText text="HelloWorld" animated={true} />
+      );
+
+      expect(container.textContent).toBe('');
+
+      act(() => { raf.advanceTime(110); });
+
+      expect(container.textContent).toContain('HelloWorld');
+    });
+
     it('queues new characters when text grows', () => {
       const { container, rerender } = render(
         <TypewriterText text="Hi" animated={true} charDelayMs={10} />

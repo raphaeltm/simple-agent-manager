@@ -54,3 +54,5 @@ Before committing UI mutation code:
 - [ ] No `window.location.reload()` after any API call (unless error recovery or auth)
 - [ ] Already-displayed data stays visible during refetch
 - [ ] Mutation success triggers React state update or callback, not page reload
+
+See also `.claude/rules/48-stale-while-revalidate-ui.md` — the broader rule covering memoized context values, loader dependency hygiene, and stale-while-revalidate rendering.

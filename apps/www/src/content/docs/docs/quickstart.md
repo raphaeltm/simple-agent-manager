@@ -32,6 +32,7 @@ Alternatively, you can manually create a workspace: click **New Workspace** from
 Once running, click the workspace to open a browser-based terminal. The devcontainer includes git, Docker, and your repo cloned and ready.
 
 To start Claude Code:
+
 ```bash
 claude login    # Authenticate with your Claude subscription
 claude          # Start coding
@@ -44,7 +45,7 @@ To deploy your own SAM instance:
 ### Prerequisites
 
 - A domain with DNS managed by Cloudflare
-- A Cloudflare account with **Workers Paid plan** ($5/month, required for Durable Objects)
+- A Cloudflare account with **Workers Paid plan** ($5/month, required for Durable Objects and Cloudflare Containers)
 - A GitHub account
 
 ### Quick Deploy
@@ -55,6 +56,7 @@ To deploy your own SAM instance:
 4. **Push to main** — deployment is automatic via GitHub Actions + Pulumi
 
 The deployment workflow:
+
 - Provisions Cloudflare infrastructure (D1, KV, R2, DNS)
 - Deploys the API Worker and Web UI
 - Builds and uploads VM Agent binaries

@@ -5,8 +5,8 @@
 // service worker APIs (skipWaiting, clients, install/activate/fetch events).
 const sw = self as unknown as ServiceWorkerGlobalScope;
 
-const SHELL_CACHE = 'sam-shell-v1';
-const RUNTIME_CACHE = 'sam-runtime-v1';
+const SHELL_CACHE = 'sam-shell-v2';
+const RUNTIME_CACHE = 'sam-runtime-v2';
 const OFFLINE_URL = '/offline.html';
 const APP_SHELL: string[] = [
   '/',

@@ -119,22 +119,13 @@ describe('profilePayload', () => {
     description: 'A description',
     agentType: 'claude-code',
     model: 'claude-sonnet-4-5-20250514',
-    useCustomGithubPolicy: false,
   };
 
-  it('omits githubCliPolicy when useCustomGithubPolicy is false', () => {
+  it('omits githubCliPolicy for onboarding-created profiles', () => {
     const result = profilePayload(base, 'task');
     expect(result).not.toHaveProperty('githubCliPolicy');
     expect(result.taskMode).toBe('task');
     expect(result.name).toBe('Test Profile');
-  });
-
-  it('includes githubCliPolicy when useCustomGithubPolicy is true', () => {
-    const result = profilePayload({ ...base, useCustomGithubPolicy: true }, 'conversation');
-    expect(result.githubCliPolicy).toBeDefined();
-    expect(result.githubCliPolicy?.mode).toBe('custom');
-    expect(result.githubCliPolicy?.repositoryScope).toBe('project');
-    expect(result.taskMode).toBe('conversation');
   });
 
   it('trims name and description', () => {

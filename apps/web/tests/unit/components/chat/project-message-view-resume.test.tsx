@@ -137,6 +137,27 @@ describe('ProjectMessageView — auto-resume', () => {
     mockResumeAgentSession.mockResolvedValue({ id: AGENT_SESSION_ID, status: 'running' });
   });
 
+  it('keeps the archive dock visible for idle taskless instant sessions', async () => {
+    const onCloseConversation = vi.fn();
+
+    render(
+      <ProjectMessageView
+        projectId={PROJECT_ID}
+        sessionId={SESSION_ID}
+        onCloseConversation={onCloseConversation}
+      />
+    );
+
+    const archiveButton = await screen.findByRole('button', { name: /^archive conversation$/i });
+    expect(archiveButton).toBeInTheDocument();
+
+    fireEvent.click(archiveButton);
+    const archiveActions = await screen.findAllByRole('button', { name: /^archive conversation$/i });
+    fireEvent.click(archiveActions[archiveActions.length - 1]);
+
+    expect(onCloseConversation).toHaveBeenCalledOnce();
+  });
+
   it('calls resumeAgentSession when sending follow-up to idle session', async () => {
     render(
       <ProjectMessageView

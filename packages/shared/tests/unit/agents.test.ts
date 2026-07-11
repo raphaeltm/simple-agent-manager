@@ -55,6 +55,16 @@ describe('AGENT_CATALOG', () => {
     expect(gemini!.oauthSupport).toBeUndefined();
   });
 
+  it('uses the maintained Codex ACP wrapper for OpenAI Codex', () => {
+    const codex = AGENT_CATALOG.find((a) => a.id === 'openai-codex');
+    expect(codex).toMatchObject({
+      acpCommand: 'codex-acp',
+      installCommand: 'npx --yes @agentclientprotocol/codex-acp --version',
+      supportsAcp: true,
+    });
+    expect(codex?.oauthSupport?.envVarName).toBe('CODEX_AUTH_JSON');
+  });
+
   it('opencode has no OAuth support', () => {
     const opencode = AGENT_CATALOG.find((a) => a.id === 'opencode');
     expect(opencode!.oauthSupport).toBeUndefined();
