@@ -62,9 +62,7 @@ export function getNodeAgentReadyPollIntervalMs(env: {
   return parsed;
 }
 
-export function getNodeAgentRequestTimeoutMs(env: {
-  NODE_AGENT_REQUEST_TIMEOUT_MS?: string;
-}): number {
+export function getNodeAgentRequestTimeoutMs(env: { NODE_AGENT_REQUEST_TIMEOUT_MS?: string }): number {
   return getTimeoutMs(env.NODE_AGENT_REQUEST_TIMEOUT_MS, DEFAULT_NODE_AGENT_REQUEST_TIMEOUT_MS);
 }
 
@@ -86,13 +84,7 @@ export async function waitForNodeAgentReady(nodeId: string, env: Env): Promise<v
     try {
       const requestTimeoutError = `request timeout after ${requestTimeoutMs}ms`;
       const response = await Promise.race([
-        fetchNodeAgent(
-          nodeId,
-          env,
-          healthUrl,
-          { method: 'GET', signal: controller.signal },
-          requestTimeoutMs
-        ),
+        fetchNodeAgent(nodeId, env, healthUrl, { method: 'GET', signal: controller.signal }, requestTimeoutMs),
         new Promise<Response>((_resolve, reject) => {
           timeoutHandle = setTimeout(() => {
             controller.abort();
@@ -169,13 +161,7 @@ async function nodeAgentRequest(
   );
 
   const requestTimeoutMs = options.requestTimeoutMs ?? getNodeAgentRequestTimeoutMs(env);
-  const response = await fetchNodeAgent(
-    nodeId,
-    env,
-    url,
-    { ...options, headers },
-    requestTimeoutMs
-  );
+  const response = await fetchNodeAgent(nodeId, env, url, { ...options, headers }, requestTimeoutMs);
 
   recordNodeRoutingMetric(
     {
