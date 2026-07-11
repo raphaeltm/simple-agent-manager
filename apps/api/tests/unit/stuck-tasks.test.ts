@@ -294,6 +294,36 @@ describe('recoverStuckTasks', () => {
   });
 
   describe('heartbeat-aware in_progress recovery', () => {
+    it('preserves the task when task-scoped liveness cannot be read', async () => {
+      const now = Date.now();
+      const old = new Date(now - 5 * 60 * 60 * 1000).toISOString();
+      const recentHeartbeat = new Date(now - 30 * 1000).toISOString();
+      const responses = new Map<string, { results: unknown[]; changes?: number }>();
+      responses.set('status IN (\'queued\', \'delegated\', \'in_progress\')', {
+        results: [{
+          id: 'task-liveness-unknown',
+          project_id: 'proj-1',
+          user_id: 'user-1',
+          status: 'in_progress',
+          execution_step: 'running',
+          updated_at: old,
+          started_at: old,
+          workspace_id: 'ws-1',
+          auto_provisioned_node_id: 'node-1',
+        }],
+      });
+      responses.set('w.chat_session_id', {
+        results: [{ workspace_status: 'running', chat_session_id: 'chat-1', node_id: 'node-1', node_status: 'running', health_status: 'healthy', last_heartbeat_at: recentHeartbeat }],
+      });
+      projectDataMocks.listAcpSessions.mockRejectedValueOnce(new Error('ProjectData unavailable'));
+
+      const env = createMockEnv(responses);
+      const result = await recoverStuckTasks(env);
+
+      expect(result.failedInProgress).toBe(0);
+      expect(result.errors).toBe(0);
+    });
+
     it('skips in_progress tasks when node heartbeat is recent', async () => {
       const now = Date.now();
       // Task started 5 hours ago (past 4h limit)

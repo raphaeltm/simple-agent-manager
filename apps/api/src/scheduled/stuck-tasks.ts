@@ -451,9 +451,9 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
               isStuck = true;
               reason = `TaskRunner orchestration completed but task runtime is gone (${liveness.reason}).`;
             }
-            // DO thinks it's done but D1 status is still transient — log for investigation.
-            // Only record once: check if we already have a recent mismatch record for this task.
-            // The stuck timeout will eventually fail the task, so this is informational only.
+            // Reconcile only with conclusive dead-runtime evidence. Live or unknown
+            // task-scoped runtime state remains active and is logged for investigation.
+            // Deduplicate the persisted mismatch signal independently of reconciliation.
             log.warn('stuck_task.do_completed_but_task_active', {
               taskId: task.id,
               taskStatus: task.status,
