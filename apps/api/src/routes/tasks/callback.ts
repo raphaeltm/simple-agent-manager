@@ -221,20 +221,21 @@ taskCallbackRoute.post('/:projectId/tasks/:taskId/status/callback', jsonValidato
 
   // On terminal states, stop/fail the chat session and handle workspace/container cleanup.
   if (body.toStatus === 'completed' || body.toStatus === 'failed' || body.toStatus === 'cancelled') {
-    c.executionCtx.waitUntil(
-      cleanupTerminalTaskResources(c.env, taskId, {
+    try {
+      await cleanupTerminalTaskResources(c.env, taskId, {
         status: body.toStatus,
         errorMessage: updatedTask.errorMessage,
         logContext: { projectId, source: 'task.callback' },
-      }).catch((e) => {
-        log.error('task.callback_terminal_cleanup_failed', {
-          taskId,
-          projectId: updatedTask.projectId,
-          status: body.toStatus,
-          error: String(e),
-        });
-      })
-    );
+      });
+    } catch (e) {
+      log.error('task.callback_terminal_cleanup_failed', {
+        taskId,
+        projectId: updatedTask.projectId,
+        status: body.toStatus,
+        error: String(e),
+      });
+      throw e;
+    }
 
     // Emit notifications for terminal task states (best-effort)
     if (c.env.NOTIFICATION) {

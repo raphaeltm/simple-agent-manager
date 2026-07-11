@@ -259,7 +259,7 @@ describe('complete_task cleanup behavior', () => {
     });
   });
 
-  it('task-mode complete_task still completes when terminal cleanup fails in waitUntil', async () => {
+  it('task-mode complete_task fails instead of reporting success when terminal cleanup fails', async () => {
     mockD1._stmt.first.mockResolvedValueOnce({
       task_mode: 'task',
       user_id: 'user-789',
@@ -274,10 +274,9 @@ describe('complete_task cleanup behavior', () => {
     const env = createMockEnv(mockD1);
     const ctx = createMockExecutionCtx();
 
-    const result = await handleCompleteTask(1, { summary: 'Done' }, tokenData, env, ctx);
-    expect(result.result).toBeDefined();
-
-    await Promise.allSettled(ctx._promises);
+    await expect(handleCompleteTask(1, { summary: 'Done' }, tokenData, env, ctx)).rejects.toThrow(
+      'container unavailable'
+    );
 
     expect(terminalCleanupSpy).toHaveBeenCalledWith(env, 'task-123', {
       status: 'completed',

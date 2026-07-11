@@ -27,8 +27,8 @@ Cloudflare Container-backed SAM workspaces (`runtime = 'cf-container'`) run a st
 - [x] Add regression tests that assert cf-container cleanup invokes the runtime destroy path, not only task/workspace status updates.
 - [x] Add regression tests for each changed terminal path proving cleanup is scheduled before/with terminal handling.
 - [x] Evaluate and, if low-risk, add a bounded cf-container orphan sweep/max-lifetime path with Rule 47 I/O budget and escape path. If not added, document the reason and residual risk.
-- [ ] Run targeted API tests plus lint/typecheck/build gates required by `/do`.
-- [ ] Run specialist reviews: task-completion-validator, cloudflare-specialist, constitution-validator, test-engineer.
+- [x] Run targeted API tests plus lint/typecheck/build gates required by `/do`.
+- [x] Run specialist reviews: task-completion-validator, cloudflare-specialist, constitution-validator, test-engineer.
 - [ ] Deploy to staging with coordination checks, run a task-backed cf-container session through changed terminal states, and verify container teardown through Cloudflare API/log evidence.
 - [ ] Update related SAM idea/backlog state with PR number and teardown evidence.
 
@@ -36,9 +36,9 @@ Cloudflare Container-backed SAM workspaces (`runtime = 'cf-container'`) run a st
 
 | Terminal path | Pre-fix result | Post-fix result |
 | --- | --- | --- |
-| MCP `complete_task` (`apps/api/src/routes/mcp/task-tools.ts`) | Scheduled a local `stopSessionAndCleanup()` wrapper. Runtime cleanup depended on VM-oriented `cleanupTaskRun()` and did not destroy cf-container task nodes. | Schedules `cleanupTerminalTaskResources()` in `waitUntil()`, which stops the ProjectData session then calls `cleanupTaskRun()`. `cleanupTaskRun()` now detects `nodes.runtime = 'cf-container'` and calls `stopNodeResources()`. |
-| Task callback terminal statuses (`apps/api/src/routes/tasks/callback.ts`) | `completed` called `cleanupTaskRun()`; `failed` and `cancelled` intentionally kept workspaces alive, which leaks paid cf-container task nodes. | All terminal statuses schedule `cleanupTerminalTaskResources()` with status/error context. |
-| User/API task status transition (`apps/api/src/routes/tasks/crud.ts`) | Stopped/failed ProjectData session only; no runtime cleanup. | All terminal statuses schedule `cleanupTerminalTaskResources()`. |
+| MCP `complete_task` (`apps/api/src/routes/mcp/task-tools.ts`) | Scheduled a local `stopSessionAndCleanup()` wrapper. Runtime cleanup depended on VM-oriented `cleanupTaskRun()` and did not destroy cf-container task nodes. | Awaits `cleanupTerminalTaskResources()` before reporting completion. `cleanupTaskRun()` now detects `nodes.runtime = 'cf-container'` and calls `stopNodeResources()`. |
+| Task callback terminal statuses (`apps/api/src/routes/tasks/callback.ts`) | `completed` called `cleanupTaskRun()`; `failed` and `cancelled` intentionally kept workspaces alive, which leaks paid cf-container task nodes. | All terminal statuses await `cleanupTerminalTaskResources()` with status/error context before returning terminal callback success. |
+| User/API task status transition (`apps/api/src/routes/tasks/crud.ts`) | Stopped/failed ProjectData session only; no runtime cleanup. Staging delegated-cancel verification showed `cancelled` while cf-container node stayed `running` when cleanup was backgrounded. | All terminal statuses await `cleanupTerminalTaskResources()`; cleanup failure propagates instead of returning terminal success while the runtime remains alive. |
 | SAM `stop_subtask` (`apps/api/src/durable-objects/sam-session/tools/stop-subtask.ts`) | Stopped agent session and marked task cancelled; no container destroy. | After cancellation DB update, calls `cleanupTerminalTaskResources()` and returns an error if runtime cleanup fails. |
 | TaskRunner failure cleanup (`apps/api/src/durable-objects/task-runner/state-machine.ts`) | `cleanupOnFailure()` did VM stop/warm cleanup directly before delegating to `cleanupTaskRun()` for auto-provisioned nodes. | Detects cf-container nodes and routes through `cleanupTaskRun()` immediately, avoiding VM stop/warm behavior. |
 | Session archive/close (`apps/api/src/routes/chat-stop.ts`) | Skipped workspace cleanup for task-linked sessions. | Task-linked stop cancels executable tasks when needed and calls `cleanupTerminalTaskResources()`. Taskless sessions still use `cleanupWorkspaceForDeletion()`. |
@@ -50,12 +50,14 @@ Cloudflare Container-backed SAM workspaces (`runtime = 'cf-container'`) run a st
 
 - `pnpm --filter @simple-agent-manager/api test -- tests/unit/services/task-runner-cleanup.test.ts tests/unit/routes/mcp-complete-task-cleanup.test.ts tests/unit/routes/task-callback-recoverable-error.test.ts tests/unit/durable-objects/sam-tools-phase-b.test.ts tests/unit/routes/chat-session-stop-cleanup.test.ts tests/unit/task-runner-completion.test.ts` — passed, 47 tests.
 - `pnpm --filter @simple-agent-manager/api test -- tests/unit/node-cleanup.test.ts tests/unit/services/task-runner-cleanup.test.ts tests/workers/scheduled-node-cleanup.test.ts` — passed, 14 tests.
+- `pnpm --filter @simple-agent-manager/api test -- tests/unit/routes/mcp-complete-task-cleanup.test.ts tests/unit/routes/task-callback-recoverable-error.test.ts tests/unit/services/task-runner-cleanup.test.ts tests/unit/routes/chat-session-stop-cleanup.test.ts tests/unit/node-cleanup.test.ts` — passed after staging found background cleanup was insufficient, 25 tests.
 - `pnpm --filter @simple-agent-manager/api test` — passed, 399 files / 5,888 tests.
 - `pnpm --filter @simple-agent-manager/api typecheck` — passed.
 - `pnpm --filter @simple-agent-manager/api build` — passed.
 - `pnpm --filter @simple-agent-manager/api lint` — passed with existing warnings.
 - `pnpm --filter @simple-agent-manager/api exec eslint ...changed files...` — passed with three existing non-null assertion warnings.
 - `pnpm --filter @simple-agent-manager/api exec vitest run --config vitest.workers.config.ts tests/workers/scheduled-node-cleanup.test.ts` — blocked by `workerd` signal 11 before importing tests while loading `@cloudflare/containers`; no assertions ran.
+- Staging run `https://github.com/raphaeltm/simple-agent-manager/actions/runs/29131354575` deployed `bf88767d8` successfully. Live verification created cf-container nodes `01KX788ZNFNV0D8FFWSZPFSC8S`, `01KX78FX70W108VR5NH1GAGFBS`, and `01KX78PZ339ABDN8F86MMRW138`; D1 confirmed all three reached `status='deleted'` after explicit session cleanup. A delegated terminal task (`01KX78QNH1JNT8FYDQ3CPH6WXK`) reproduced the remaining gap on the deployed build: task `cancelled`, workspace/node still `running` after the cleanup delay. Follow-up patch changes terminal routes from background `waitUntil()` to awaited cleanup and requires redeploy/retest.
 
 ## Specialist Review Evidence
 

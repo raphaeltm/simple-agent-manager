@@ -222,7 +222,7 @@ export async function handleCompleteTask(
   params: Record<string, unknown>,
   tokenData: McpTokenData,
   env: Env,
-  executionCtx?: { waitUntil(p: Promise<unknown>): void }
+  _executionCtx?: { waitUntil(p: Promise<unknown>): void }
 ): Promise<JsonRpcResponse> {
   const summary = typeof params.summary === 'string' ? params.summary.trim() : null;
   const evidenceValidation =
@@ -466,20 +466,20 @@ export async function handleCompleteTask(
     }
   }
 
-  // Stop/fail ProjectData session state and trigger runtime cleanup in the background.
-  // This mirrors other terminal task cleanup paths.
-  if (executionCtx) {
-    executionCtx.waitUntil(
-      cleanupTerminalTaskResources(env, tokenData.taskId, {
-        status: 'completed',
-        logContext: { source: 'mcp.complete_task', workspaceId: tokenData.workspaceId },
-      }).catch((err) => {
-        log.error('mcp.complete_task.cleanup_failed', {
-          taskId: tokenData.taskId,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      })
-    );
+  // Stop/fail ProjectData session state and tear down runtime resources before
+  // reporting terminal success, so cf-container billing cannot depend on
+  // best-effort waitUntil completion.
+  try {
+    await cleanupTerminalTaskResources(env, tokenData.taskId, {
+      status: 'completed',
+      logContext: { source: 'mcp.complete_task', workspaceId: tokenData.workspaceId },
+    });
+  } catch (err) {
+    log.error('mcp.complete_task.cleanup_failed', {
+      taskId: tokenData.taskId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    throw err;
   }
 
   log.info('mcp.complete_task', {

@@ -458,20 +458,21 @@ crudRoutes.post('/:taskId/status', requireAuth(), requireApproved(), jsonValidat
 
   // On terminal states, stop/fail the chat session and tear down task runtime resources.
   if (body.toStatus === 'completed' || body.toStatus === 'failed' || body.toStatus === 'cancelled') {
-    c.executionCtx.waitUntil(
-      cleanupTerminalTaskResources(c.env, taskId, {
+    try {
+      await cleanupTerminalTaskResources(c.env, taskId, {
         status: body.toStatus,
         errorMessage: updatedTask.errorMessage,
         logContext: { projectId, source: 'tasks.status' },
-      }).catch((e) => {
-        log.error('task.terminal_cleanup_failed', {
-          taskId,
-          projectId: updatedTask.projectId,
-          status: body.toStatus,
-          error: String(e),
-        });
-      })
-    );
+      });
+    } catch (e) {
+      log.error('task.terminal_cleanup_failed', {
+        taskId,
+        projectId: updatedTask.projectId,
+        status: body.toStatus,
+        error: String(e),
+      });
+      throw e;
+    }
   }
 
   const nextBlocked = await computeBlockedForTask(db, updatedTask.id);
