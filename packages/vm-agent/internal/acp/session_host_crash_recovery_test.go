@@ -321,6 +321,36 @@ func TestSessionHost_CodexCrashRecovery_ReportsRecovered(t *testing.T) {
 	assertSuccessfulRecoveryReportsRecovered(t, host, "openai-codex", "codex recovery did not report recovered")
 }
 
+func TestSessionHost_CodexCrashRecovery_LoadsCapturedSessionAfterLivePrerequisitesClear(t *testing.T) {
+	host := newRecoveryTestHost(t, 30*time.Second)
+	defer host.Stop()
+
+	oldProc, _, _ := armRecoverablePrompt(t, host, "openai-codex", 10*time.Second, true)
+	captured := host.captureCrashRecoveryPrerequisites()
+	host.mu.Lock()
+	host.sessionID = ""
+	host.agentSupportsLoadSession = false
+	host.mu.Unlock()
+
+	var startCount atomic.Int32
+	completed := startRecoveryMonitor(t, host, oldProc, "openai-codex", countingSpawn(t, &startCount))
+	host.finishPromptWithError(
+		context.Background(),
+		json.RawMessage(`"req-captured"`),
+		promptStartInfo{startedAt: time.Now(), viewerID: "viewer-1", recovery: captured},
+		errors.New(`{"code":-32603,"message":"Internal error","data":{"error":"peer disconnected before response"}}`),
+	)
+
+	expectCompletion(t, completed, crashRecoveredStopReason, 2*time.Second, "captured-session LoadSession recovery did not complete")
+	assertNoSecondCompletion(t, completed)
+	if oldProc.stopCount.Load() != 1 {
+		t.Fatalf("Stop count = %d, want 1", oldProc.stopCount.Load())
+	}
+	if startCount.Load() != 1 {
+		t.Fatalf("restart count = %d, want one LoadSession restart", startCount.Load())
+	}
+}
+
 // TestSessionHost_CrashRecovery_MaxRestartExhausted proves that exceeding the
 // restart budget while a crash recovery episode is in flight resolves the
 // stranded prompt to a terminal "fatal_error" instead of leaving it recovering. No
