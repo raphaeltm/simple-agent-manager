@@ -84,3 +84,11 @@ The ACP peer closes JSON-RPC first: SAM receives `peer disconnected before respo
 - Recovery requires `LoadSession`; it never silently falls back to `NewSession`.
 - Truly unrecoverable cases identify missing `acpSessionId`, `loadSessionCapability`, and/or `agentType` without exposing credentials.
 - Users receive recovered status or an explicit terminal error; no silent stall is introduced.
+
+## Post-Mortem
+
+- **What broke**: Long codex (openai-codex) prompts with tool/permission activity that lost their agent process mid-prompt were terminally failed with `-32603 "peer disconnected before response"` and marked as failed tasks, even though the ACP session was LoadSession-recoverable. 63→52→55 warnings/week and 3–8 terminal task failures/week over the observability windows in idea `01KVQAAPSZQAAM85FZYQHVNRNV`.
+- **Root cause**: `finishPromptWithError` read the **live** `h.sessionID` / `h.agentSupportsLoadSession` at handler time. When the process exited mid-prompt, `monitorProcessExit` cleared those live fields *before* the blocked `Prompt` RPC returned the peer-disconnect error, so `beginCrashRecovery` saw an empty session ID and routed a recoverable prompt into the unrecoverable terminal branch.
+- **Class of bug**: Deferred completion/error handler reads live mutable state that a concurrent cleanup goroutine can clear between operation start and handler execution. The live read looks correct and only fails under a specific goroutine ordering (process-exit-then-error).
+- **Why it wasn't caught**: Tests set live fields and never modelled the concurrent `monitorProcessExit` clearing them before the error handler ran, so the race-ordering path had zero coverage. Component tests with fully-populated live state passed while the real ordering failed.
+- **Process fix (this PR)**: Added `.claude/rules/49-capture-prerequisites-before-async-completion.md` — deferred handlers must capture their prerequisites at operation start (under the cleanup lock), merge live-first/captured-as-fallback, scope captured fallbacks to the active episode, keep the terminal path explicit+sanitized, and add a discriminating regression test that clears live state after capture. Targets the whole class, not just this ACP instance.
