@@ -447,7 +447,10 @@ async function resolveWorkspaceGitSource(
     state.projectId
   );
   if (!metadata) {
-    return { repoProvider, cloneUrl: null, repositoryHost: null, repositoryPath: null };
+    throw Object.assign(
+      new Error(`GitLab repository metadata is missing for project ${state.projectId}`),
+      { permanent: true }
+    );
   }
 
   return {
