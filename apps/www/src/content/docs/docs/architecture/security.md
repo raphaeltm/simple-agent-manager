@@ -30,7 +30,7 @@ Admin-managed integration secrets stored encrypted in D1:
 | GitHub App private key     | Installation tokens for repository access | Runtime D1 → Worker env → unset  |
 | GitHub webhook secret      | GitHub App webhook HMAC verification     | Runtime D1 → Worker env → unset  |
 | Google login OAuth client secret | Google sign-in (BetterAuth social login) | Runtime D1 → Worker env (`GOOGLE_LOGIN_CLIENT_SECRET`) → unset |
-| GitLab OAuth client secret | GitLab sign-in and future repository access | Runtime D1 → Worker env (`GITLAB_CLIENT_SECRET`) → unset |
+| GitLab OAuth client secret | GitLab sign-in and repository access | Runtime D1 → Worker env (`GITLAB_CLIENT_SECRET`) → unset |
 | Google infra OAuth client secret | GCP deployment authorization flows (separate client from login) | Worker env (`GOOGLE_CLIENT_SECRET`) → unset |
 
 ### User Credentials

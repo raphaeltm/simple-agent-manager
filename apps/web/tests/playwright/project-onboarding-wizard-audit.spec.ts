@@ -81,7 +81,9 @@ async function setupMocks(
     }
     if (path.endsWith('/api/gitlab/projects')) return respond(200, { projects: GITLAB_PROJECTS });
     if (path.endsWith('/api/gitlab/branches')) {
-      return respond(200, { branches: [{ name: 'main' }, { name: 'feature/agent-ready' }] });
+      // The real GET /api/gitlab/branches route returns a bare array (c.json(branches)),
+      // matching the listGitLabBranches client contract — not an object wrapper.
+      return respond(200, [{ name: 'main' }, { name: 'feature/agent-ready' }]);
     }
     if (path.endsWith('/api/config/artifacts-enabled'))
       return respond(200, { enabled: artifactsEnabled });

@@ -110,3 +110,24 @@ The linked SAM idea is `01KV7ZFD6HZS5N7J45VA798KN1`, "GitLab integration using p
 - VM credential responses are constrained by host and GitLab repository path, with `credential.useHttpPath=true` configured.
 - GitLab repository metadata now stores the bare host required by Git/VM paths while continuing to use the platform config origin for OAuth/API calls.
 - Known WIP deferrals: GitLab-specific member/invite repository access routes and GitLab webhook/task trigger support are not included in this stacked PR.
+
+## Phase 5 Specialist Review (2026-07-11 continuation)
+
+All 8 required local reviewers were re-run successfully (prior session could not launch them due to a `bwrap` sandbox failure). In-scope findings fixed in this continuation:
+
+- **task-completion-validator / test-engineer (CRITICAL/HIGH):** `POST /api/projects` GitLab branch had no direct route-level behavioral test. Added `apps/api/tests/unit/routes/project-gitlab-creation.test.ts` (9 scenarios: happy path + sidecar persistence, missing id 400, no-token 401, insufficient-access 403, not-found 404, non-default branch exists/absent, duplicate 409, sidecar-insert rollback).
+- **constitution-validator / cloudflare-specialist (HIGH/MED, Principle XI):** `gitlabFetch` had no timeout. Added `GITLAB_API_TIMEOUT_MS` env (default `DEFAULT_GITLAB_API_TIMEOUT_MS=30_000`) via shared `fetchWithTimeout`; documented in `env.ts` and `.env.example`.
+- **security-auditor / go-specialist (HIGH):** `isAllowedCredentialPathForWorkspace` failed open (`return true`) for unregistered workspaces. Now falls back to `s.config` RepoProvider/RepositoryPath, mirroring `isAllowedCredentialHostForWorkspace` (preserves standalone mode, does not fail open). Added `TestIsAllowedCredentialPathForWorkspaceFallsBackToConfig`.
+- **test-engineer (H1):** Added `verifyGitLabProjectAccess` error-branch tests (<Developer → 403, 404 → not-found, group-access inheritance).
+- **ui-ux-specialist (H2):** Playwright audit `/api/gitlab/branches` mock returned an object wrapper; real route returns a bare array. Fixed the mock so screenshot evidence reflects real branch population.
+- **doc-sync-validator (HIGH/MED):** Removed stale "future" qualifier from `security.md` GitLab row; documented required `read_user`+`api` GitLab OAuth scopes in `self-hosting.mdx`.
+
+Verified-correct (no fix needed): the VM-agent create-workspace cross-boundary field mapping is consistent camelCase across `node-agent.ts` → Go `createWorkspaceRequest` json tags → shared `CreateWorkspaceAgentRequestSchema` (no snake/camel mismatch).
+
+Deferred to explicit later stack layers (documented, not blocking this draft):
+
+- MR-layer hardening (go-specialist HIGH): `RepositoryHost` URL validation + a dedicated external HTTP client for GitLab MR API calls. `RepositoryHost` is trusted platform config (not user input) and comprehensive MR/change-request handling is the later MR/control-plane layer.
+- Hardcoded GitLab OAuth scopes (constitution/security MED): kept at parity with the existing hardcoded GitHub scopes; scope narrowing can follow.
+- GitLabProjectSelector keyboard/ARIA combobox + no-results/provider-reset polish (ui H1/M2): later discovery/UX layer; matches existing BranchSelector/RepoSelector pattern.
+- Per-request config/D1 lookup de-duplication in the GitLab path (cloudflare MED): later optimization.
+- Fail-closed VM credential exchange when host/path are omitted on the request side; per-user OAuth refresh serialization; stale-host/account token lifecycle: later security layer.

@@ -77,6 +77,7 @@ export interface Env {
   GITLAB_HOST?: string; // Optional GitLab OAuth host fallback, e.g. https://gitlab.com
   GITLAB_CLIENT_ID?: string;
   GITLAB_CLIENT_SECRET?: string;
+  GITLAB_API_TIMEOUT_MS?: string; // Timeout for GitLab API calls in ms (default: 30000)
   CF_API_TOKEN: string;
   CF_ZONE_ID: string;
   CF_ACCOUNT_ID: string;

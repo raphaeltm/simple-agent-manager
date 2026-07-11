@@ -10,9 +10,14 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { readResponseJson } from '../lib/runtime-validation';
 import { AppError, errors } from '../middleware/error';
+import { fetchWithTimeout, getTimeoutMs } from './fetch-timeout';
 import { getGitLabOAuthConfig } from './platform-config';
 
 const MIN_GITLAB_WRITE_ACCESS_LEVEL = 30; // Developer
+
+// Bound every GitLab API call so a slow or unreachable GitLab host cannot hold a
+// Cloudflare Worker open indefinitely. Configurable via GITLAB_API_TIMEOUT_MS.
+const DEFAULT_GITLAB_API_TIMEOUT_MS = 30_000;
 
 const gitlabAccessSchema = v.object({
   access_level: v.number(),
@@ -215,10 +220,15 @@ async function gitlabFetch(
   if (!headers.has('Accept')) {
     headers.set('Accept', 'application/json');
   }
-  return fetch(`${apiBaseUrl}${pathAndQuery}`, {
-    ...init,
-    headers,
-  });
+  const timeoutMs = getTimeoutMs(env.GITLAB_API_TIMEOUT_MS, DEFAULT_GITLAB_API_TIMEOUT_MS);
+  return fetchWithTimeout(
+    `${apiBaseUrl}${pathAndQuery}`,
+    {
+      ...init,
+      headers,
+    },
+    timeoutMs
+  );
 }
 
 function encodeProjectId(projectId: number | string): string {

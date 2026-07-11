@@ -62,4 +62,57 @@ describe('verifyGitLabProjectAccess', () => {
       defaultBranch: 'main',
     });
   });
+
+  it('rejects a project when the user has less than Developer access', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: 123,
+          path_with_namespace: 'group/project',
+          name: 'project',
+          visibility: 'private',
+          default_branch: 'main',
+          // Reporter (20) is below the Developer (30) write threshold.
+          permissions: { project_access: { access_level: 20 } },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } }
+      )
+    );
+
+    await expect(verifyGitLabProjectAccess({} as Env, 'gl_token', 123)).rejects.toMatchObject({
+      statusCode: 403,
+    });
+  });
+
+  it('surfaces a 404 from GitLab as a not-found error, not a 500', async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(new Response('{"message":"404 Project Not Found"}', { status: 404 }));
+
+    await expect(verifyGitLabProjectAccess({} as Env, 'gl_token', 999)).rejects.toMatchObject({
+      statusCode: 404,
+    });
+  });
+
+  it('inherits group access when project access is below the threshold', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: 123,
+          path_with_namespace: 'group/project',
+          name: 'project',
+          visibility: 'private',
+          default_branch: 'main',
+          permissions: {
+            project_access: { access_level: 10 },
+            group_access: { access_level: 40 },
+          },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } }
+      )
+    );
+
+    const metadata = await verifyGitLabProjectAccess({} as Env, 'gl_token', 123);
+    expect(metadata.gitlabProjectId).toBe(123);
+  });
 });

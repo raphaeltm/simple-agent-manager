@@ -236,6 +236,51 @@ func TestHandleGitCredentialGitLabRespectsRequestedPath(t *testing.T) {
 	}
 }
 
+func TestIsAllowedCredentialPathForWorkspaceFallsBackToConfig(t *testing.T) {
+	t.Parallel()
+
+	// Standalone / unregistered-workspace mode: the workspace is not in the
+	// runtime map, so the gate must enforce the process config's GitLab path
+	// binding rather than failing open.
+	gitlab := &Server{
+		config: &config.Config{
+			RepoProvider:   "gitlab",
+			RepositoryPath: "group/project",
+		},
+		workspaces: map[string]*WorkspaceRuntime{},
+	}
+	if !gitlab.isAllowedCredentialPathForWorkspace("ws-unknown", "group/project.git") {
+		t.Fatal("matching path against config binding should be allowed")
+	}
+	if gitlab.isAllowedCredentialPathForWorkspace("ws-unknown", "other/project.git") {
+		t.Fatal("mismatched path must be blocked via config fallback, not fail open")
+	}
+
+	// Non-GitLab config: path gating does not apply (GitHub/Artifacts credentials
+	// are host-scoped), so any requested path is permitted.
+	github := &Server{
+		config:     &config.Config{RepoProvider: "github"},
+		workspaces: map[string]*WorkspaceRuntime{},
+	}
+	if !github.isAllowedCredentialPathForWorkspace("ws-unknown", "any/path.git") {
+		t.Fatal("non-gitlab config should not gate on path")
+	}
+
+	// A registered runtime takes precedence over the process config.
+	scoped := &Server{
+		config: &config.Config{RepoProvider: "gitlab", RepositoryPath: "config/path"},
+		workspaces: map[string]*WorkspaceRuntime{
+			"ws-a": {ID: "ws-a", RepoProvider: "gitlab", RepositoryPath: "runtime/path"},
+		},
+	}
+	if !scoped.isAllowedCredentialPathForWorkspace("ws-a", "runtime/path.git") {
+		t.Fatal("runtime binding path should be allowed")
+	}
+	if scoped.isAllowedCredentialPathForWorkspace("ws-a", "config/path.git") {
+		t.Fatal("runtime binding must override the config fallback")
+	}
+}
+
 func TestTryCreateGitLabMergeRequestUsesWorkspaceToken(t *testing.T) {
 	t.Parallel()
 

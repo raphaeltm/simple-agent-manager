@@ -125,18 +125,25 @@ func (s *Server) isAllowedCredentialPathForWorkspace(workspaceID, requestedPath 
 	if requestedPath == "" {
 		return true
 	}
-	runtime, ok := s.getWorkspaceRuntime(workspaceID)
-	if !ok {
+	// Resolve the provider/path this workspace is bound to. When the workspace is
+	// not registered in the runtime map (standalone single-workspace mode, or a
+	// request racing with runtime setup), fall back to the process config instead
+	// of failing open — mirroring isAllowedCredentialHostForWorkspace.
+	provider, repositoryPath := s.credentialPathBinding(workspaceID)
+	if !strings.EqualFold(provider, "gitlab") {
 		return true
 	}
-	if !strings.EqualFold(strings.TrimSpace(runtime.RepoProvider), "gitlab") {
-		return true
-	}
-	repositoryPath := strings.TrimSpace(runtime.RepositoryPath)
 	if repositoryPath == "" {
 		return true
 	}
 	return credentialPathMatchesRequest(repositoryPath, requestedPath)
+}
+
+func (s *Server) credentialPathBinding(workspaceID string) (provider, repositoryPath string) {
+	if runtime, ok := s.getWorkspaceRuntime(workspaceID); ok {
+		return strings.TrimSpace(runtime.RepoProvider), strings.TrimSpace(runtime.RepositoryPath)
+	}
+	return strings.TrimSpace(s.config.RepoProvider), strings.TrimSpace(s.config.RepositoryPath)
 }
 
 func credentialPathMatchesRequest(repositoryPath, requestedPath string) bool {
