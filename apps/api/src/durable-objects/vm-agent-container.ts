@@ -5,7 +5,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { signCallbackToken, signNodeManagementToken } from '../services/jwt';
+import { signNodeCallbackToken, signNodeManagementToken } from '../services/jwt';
 
 export const DEFAULT_CF_CONTAINER_SLEEP_AFTER = '1h';
 export const DEFAULT_CF_CONTAINER_ACTIVE_WORK_MAX_MS = 2 * 60 * 60 * 1000;
@@ -345,7 +345,13 @@ export class VmAgentContainer extends Container<Env> {
     });
 
     await this.ctx.storage.put('lifecycleStatus', 'launching' satisfies LifecycleStatus);
-    const callbackToken = await signCallbackToken(config.workspaceId, this.env);
+    // The container's CALLBACK_TOKEN must be node-scoped to match the initial
+    // launch (see launchInstantSession): the vm-agent uses it for node callbacks
+    // (error/activity/message reporting) which reject workspace-scoped tokens.
+    // Using a workspace-scoped token here caused restored sessions to accept a
+    // prompt (200) but silently fail to report the agent's reply back (403
+    // "Insufficient token scope"), so no answer appeared after wake.
+    const callbackToken = await signNodeCallbackToken(config.nodeId, this.env);
     await this.launch(config, { nodeCallbackToken: callbackToken });
 
     const { token } = await signNodeManagementToken(workspace.userId, config.nodeId, config.workspaceId, this.env);
