@@ -1,6 +1,8 @@
 package server
 
 import (
+	"archive/tar"
+	"bytes"
 	"context"
 	"io"
 	"net/http"
@@ -110,4 +112,30 @@ func gitOutput(t *testing.T, dir string, args ...string) string {
 		t.Fatalf("git %v failed: %v\n%s", args, err, out)
 	}
 	return strings.TrimSpace(string(out))
+}
+
+func TestDownloadAndExtractTarRejectsExistingHomeSymlink(t *testing.T) {
+	home := t.TempDir()
+	outside := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := os.Symlink(outside, filepath.Join(home, "linked")); err != nil {
+		t.Fatal(err)
+	}
+	var tarBody bytes.Buffer
+	tw := tar.NewWriter(&tarBody)
+	writeTarFile(t, tw, "linked/credential", "secret")
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(tarBody.Bytes())
+	}))
+	defer server.Close()
+	s := &Server{config: &config.Config{ControlPlaneURL: server.URL}}
+	if err := s.downloadAndExtractTar(context.Background(), server.URL, "token", time.Second); err == nil || !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("error = %v, want symlink rejection", err)
+	}
+	if _, err := os.Stat(filepath.Join(outside, "credential")); !os.IsNotExist(err) {
+		t.Fatalf("outside credential stat err = %v, want not exist", err)
+	}
 }

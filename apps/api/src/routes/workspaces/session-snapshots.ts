@@ -127,7 +127,8 @@ sessionSnapshotRoutes.put('/:id/session-snapshot/artifacts/:artifact', async (c)
     throw errors.forbidden('Snapshot chat session does not match workspace');
   }
   const contentLength = c.req.header('content-length');
-  if (contentLength) {
+  if (!contentLength) throw errors.badRequest('Snapshot artifact Content-Length is required');
+  {
     const parsed = Number.parseInt(contentLength, 10);
     if (!Number.isFinite(parsed) || parsed < 0) throw errors.badRequest('Invalid Content-Length');
     if (parsed > getSessionSnapshotConfig(c.env).totalBudgetBytes) {
@@ -159,11 +160,43 @@ sessionSnapshotRoutes.post('/:id/session-snapshot/complete', async (c) => {
   const degradation = requiredStringField(body, 'degradation') as SessionSnapshotDegradation;
   if (!COMPLETE_STATUSES.has(status)) throw errors.badRequest('Invalid snapshot status');
   if (!DEGRADATIONS.has(degradation)) throw errors.badRequest('Invalid snapshot degradation');
-  const manifest = expectJsonRecord(body.manifest, 'snapshot manifest') as unknown as SessionSnapshotManifest;
-  const artifactSizes = expectJsonRecord(body.artifactSizes ?? {}, 'snapshot artifact sizes') as {
-    homeBytes?: number;
-    wipBytes?: number;
-  };
+  const manifestRecord = expectJsonRecord(body.manifest, 'snapshot manifest');
+  const manifest = manifestRecord as unknown as SessionSnapshotManifest;
+  if (
+    manifest.version !== 1 ||
+    manifest.chatSessionId !== chatSessionId ||
+    manifest.workspaceId !== workspaceId
+  ) {
+    throw errors.badRequest('Snapshot manifest identity does not match request');
+  }
+  const manifestArtifacts = expectJsonRecord(
+    manifestRecord.artifacts ?? {},
+    'snapshot manifest artifacts'
+  );
+  const artifactSizes: { homeBytes?: number; wipBytes?: number } = {};
+  for (const [artifact, sizeKey] of [
+    ['home', 'homeBytes'],
+    ['wip', 'wipBytes'],
+  ] as const) {
+    if (!(artifact in manifestArtifacts)) continue;
+    const artifactRecord = expectJsonRecord(
+      manifestArtifacts[artifact],
+      'snapshot ' + artifact + ' artifact'
+    );
+    const claimedSize = artifactRecord.sizeBytes;
+    if (typeof claimedSize !== 'number' || !Number.isSafeInteger(claimedSize) || claimedSize < 0) {
+      throw errors.badRequest('Snapshot ' + artifact + ' size is invalid');
+    }
+    const object = await c.env.R2.head(buildSessionSnapshotR2Key(c.env, chatSessionId, artifact));
+    if (!object) throw errors.badRequest('Snapshot ' + artifact + ' artifact is missing');
+    if (object.size !== claimedSize)
+      throw errors.badRequest('Snapshot ' + artifact + ' size does not match upload');
+    artifactSizes[sizeKey] = object.size;
+  }
+  const totalArtifactBytes = (artifactSizes.homeBytes ?? 0) + (artifactSizes.wipBytes ?? 0);
+  if (totalArtifactBytes > getSessionSnapshotConfig(c.env).totalBudgetBytes) {
+    throw errors.badRequest('Snapshot artifacts exceed configured total budget');
+  }
 
   await completeSessionSnapshot(db, c.env, {
     workspaceId,

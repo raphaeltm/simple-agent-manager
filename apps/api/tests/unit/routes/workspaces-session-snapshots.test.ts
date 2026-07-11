@@ -53,6 +53,7 @@ describe('workspaces session snapshot callback routes', () => {
   const r2 = {
     put: vi.fn(),
     get: vi.fn(),
+    head: vi.fn(),
   };
   const runtimeBindings = {
     DATABASE: {} as any,
@@ -194,5 +195,71 @@ describe('workspaces session snapshot callback routes', () => {
 
     expect(res.status).toBe(403);
     expect(mocks.prepareSessionSnapshot).not.toHaveBeenCalled();
+  });
+
+  it('rejects artifact uploads without an authoritative Content-Length', async () => {
+    const res = await app.request(
+      '/api/workspaces/WS_1/session-snapshot/artifacts/home?chatSessionId=chat-1',
+      {
+        method: 'PUT',
+        headers: { Authorization: 'Bearer callback-token' },
+        body: 'home',
+      },
+      runtimeBindings
+    );
+    expect(res.status).toBe(400);
+    expect(r2.put).not.toHaveBeenCalled();
+  });
+
+  it('derives completion sizes from R2 and rejects manifest identity mismatches', async () => {
+    r2.head.mockImplementation(async (key: string) =>
+      key.endsWith('home.tar') ? { size: 4 } : key.endsWith('wip.bundle') ? { size: 3 } : null
+    );
+    const body = {
+      chatSessionId: 'chat-1',
+      agentSessionId: 'agent-session-1',
+      runtime: 'cf-container',
+      status: 'available',
+      degradation: 'none',
+      baseCommit: 'abc123',
+      artifactSizes: { homeBytes: 999, wipBytes: 999 },
+      manifest: {
+        version: 1,
+        chatSessionId: 'chat-1',
+        workspaceId: 'WS_1',
+        agentSessionId: 'agent-session-1',
+        status: 'available',
+        degradation: 'none',
+        skipped: [],
+        artifacts: { home: { sizeBytes: 4 }, wip: { sizeBytes: 3 } },
+        createdAt: '2026-07-11T00:00:00.000Z',
+      },
+    };
+    const ok = await app.request(
+      '/api/workspaces/WS_1/session-snapshot/complete',
+      {
+        method: 'POST',
+        headers: { Authorization: 'Bearer callback-token', 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+      runtimeBindings
+    );
+    expect(ok.status).toBe(200);
+    expect(mocks.completeSessionSnapshot).toHaveBeenCalledWith(
+      expect.anything(),
+      runtimeBindings,
+      expect.objectContaining({ artifactSizes: { homeBytes: 4, wipBytes: 3 } })
+    );
+
+    const mismatch = await app.request(
+      '/api/workspaces/WS_1/session-snapshot/complete',
+      {
+        method: 'POST',
+        headers: { Authorization: 'Bearer callback-token', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...body, manifest: { ...body.manifest, workspaceId: 'WS_OTHER' } }),
+      },
+      runtimeBindings
+    );
+    expect(mismatch.status).toBe(400);
   });
 });

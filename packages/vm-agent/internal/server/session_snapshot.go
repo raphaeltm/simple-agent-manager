@@ -567,6 +567,10 @@ func (s *Server) uploadSnapshotFile(ctx context.Context, uploadPath, filePath, t
 		return 0, "", err
 	}
 	defer file.Close()
+	fileInfo, err := file.Stat()
+	if err != nil {
+		return 0, "", err
+	}
 	h := sha256.New()
 	reader := &countingReader{r: file, hash: h}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, target, newIdleReader(reader, idleTimeout))
@@ -574,6 +578,7 @@ func (s *Server) uploadSnapshotFile(ctx context.Context, uploadPath, filePath, t
 		return 0, "", err
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
+	req.ContentLength = fileInfo.Size()
 	res, err := s.controlPlaneHTTPClient(0).Do(req)
 	if err != nil {
 		return 0, "", err
@@ -614,6 +619,9 @@ func (s *Server) downloadAndExtractTar(ctx context.Context, downloadPath, token 
 		relTarget, relErr := filepath.Rel(home, target)
 		if relErr != nil || relTarget == ".." || strings.HasPrefix(relTarget, ".."+string(filepath.Separator)) {
 			continue
+		}
+		if err := rejectSymlinkPath(home, target); err != nil {
+			return err
 		}
 		if header.Typeflag != tar.TypeDir && header.Typeflag != tar.TypeReg && header.Typeflag != tar.TypeRegA {
 			continue
@@ -750,4 +758,26 @@ func choosePositiveDurationMs(value int64, fallback time.Duration) time.Duration
 		return time.Duration(value) * time.Millisecond
 	}
 	return fallback
+}
+
+func rejectSymlinkPath(root, target string) error {
+	rel, err := filepath.Rel(root, target)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("snapshot target is outside home")
+	}
+	current := root
+	for _, part := range strings.Split(rel, string(filepath.Separator)) {
+		current = filepath.Join(current, part)
+		info, statErr := os.Lstat(current)
+		if os.IsNotExist(statErr) {
+			continue
+		}
+		if statErr != nil {
+			return statErr
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("snapshot target traverses symlink: %s", rel)
+		}
+	}
+	return nil
 }
