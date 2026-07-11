@@ -23,29 +23,36 @@ Cloudflare-container instant sessions run the vm-agent as a non-root user, but o
 
 ## Implementation Checklist
 
-- [ ] Add a schema-validated, pinned structured agent install manifest with no free-form shell fields.
-- [ ] Generate and commit the Go runtime install table from that manifest, including a deterministic sync check that rejects manual drift.
-- [ ] Remove the dead TypeScript `installCommand` field and update catalog tests/spec references to the structured source.
-- [ ] Preserve named Go hooks for vetted custom post-install behavior such as Amp's Python patches.
-- [ ] Pin all catalog installer package versions and migrate Amp to `@ampcode/cli`.
-- [ ] Add a standalone-only user-writable `SAM_AGENT_HOME` layout for npm and uv tools, with the same bin directory used by install detection and process launch.
-- [ ] Keep devcontainer installation root-based, while generalizing npm partial-install cleanup to the selected package rather than one vendor scope.
-- [ ] Generate the cf-container pre-bake install plan from the same manifest and bake the supported catalog set into `Dockerfile.vm-agent-container`.
-- [ ] Expose a deterministic cf-container supported-agent manifest/contract so image capability cannot silently diverge from the catalog.
-- [ ] Persist agent-selection failures to the durable session error state and add a user-visible system chat message, without leaking sensitive installer details.
-- [ ] Add focused Go and TypeScript tests covering manifest validation/sync, rootless standalone installs, devcontainer behavior, pre-bake coverage, cleanup paths, and failure persistence.
-- [ ] Update relevant public architecture/runtime documentation and reconcile the older binary-install hardening task.
+- [x] Add a schema-validated, pinned structured agent install manifest with no free-form shell fields.
+- [x] Keep the committed Go runtime install table synchronized with the manifest through a deterministic CI check that rejects manual drift.
+- [x] Remove the dead TypeScript `installCommand` field and update catalog tests/spec references to the structured source.
+- [x] Preserve named Go hooks for vetted custom post-install behavior such as Amp's Python patches.
+- [x] Pin all catalog installer package versions and migrate Amp to `@ampcode/cli`.
+- [x] Add a standalone-only user-writable `SAM_AGENT_HOME` layout for npm and uv tools, with the same bin directory used by install detection and process launch.
+- [x] Keep devcontainer installation root-based, while generalizing npm partial-install cleanup to the selected package rather than one vendor scope.
+- [x] Synchronize the cf-container pre-bake plan with the same manifest in CI and bake the supported catalog set into `Dockerfile.vm-agent-container`.
+- [x] Expose a deterministic cf-container supported-agent manifest/contract so image capability cannot silently diverge from the catalog.
+- [x] Persist agent-selection failures to the durable session error state and add a user-visible system chat message, without leaking sensitive installer details.
+- [x] Add focused Go and TypeScript tests covering manifest validation/sync, rootless standalone installs, devcontainer behavior, pre-bake coverage, cleanup paths, and failure persistence.
+- [x] Reconcile the older binary-install hardening task; no public behavior documentation changes are required for this internal runtime fix.
 
 ## Acceptance Criteria
 
-- [ ] Every catalog agent has a pinned, structured install specification shared by generation outputs; CI fails on catalog/runtime/image drift.
-- [ ] Standalone installs never require writes to root-owned global npm or uv paths, and installed binaries are discoverable by both the fast path and launched process.
-- [ ] Devcontainer installs retain the documented root/npm-bootstrap behavior and do not receive a conflicting global npm prefix.
-- [ ] The cf-container image pre-bakes every supported catalog agent that fits the measured image budget, or explicitly records any measured exclusion with a tested rootless fallback.
-- [ ] Amp installs the maintained `@ampcode/cli` package at a pinned version and its ACP bridge post-install behavior remains covered.
-- [ ] An install/selection failure produces durable failed/error session state plus a visible system message while preserving existing BootLog/error reporting.
-- [ ] Local Go/TypeScript tests and the repository quality suite pass.
-- [ ] The PR documents that staging was intentionally skipped and remains unmerged per explicit instruction.
+- [x] Every catalog agent has a pinned, structured install specification shared by generation outputs; CI fails on catalog/runtime/image drift.
+- [x] Standalone installs never require writes to root-owned global npm or uv paths, and installed binaries are discoverable by both the fast path and launched process.
+- [x] Devcontainer installs retain the documented root/npm-bootstrap behavior and do not receive a conflicting global npm prefix.
+- [x] The cf-container image pre-bakes every supported catalog agent that fits the measured image budget, or explicitly records any measured exclusion with a tested rootless fallback.
+- [x] Amp installs the maintained `@ampcode/cli` package at a pinned version and its ACP bridge post-install behavior remains covered.
+- [x] An install/selection failure produces durable failed/error session state plus a visible system message while preserving existing BootLog/error reporting.
+- [x] Local Go/TypeScript tests and the repository quality suite pass.
+- [x] The PR documents that staging was intentionally skipped and remains unmerged per explicit instruction.
+
+## Verification Evidence
+
+- Local Node 22 cf-container image built successfully with all six agent stacks and the Amp hook.
+- Image size: 735,871,006 bytes (0.736 GB), below the 8 GB standard-1 disk budget.
+- Non-root runtime user resolved all catalog binaries and completed a real rootless global npm fallback install under `SAM_AGENT_HOME`.
+- Staging intentionally skipped by explicit user instruction.
 
 ## References
 
