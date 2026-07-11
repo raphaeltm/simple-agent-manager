@@ -30,7 +30,7 @@ Cloudflare Container-backed SAM workspaces (`runtime = 'cf-container'`) run a st
 - [x] Run targeted API tests plus lint/typecheck/build gates required by `/do`.
 - [x] Run specialist reviews: task-completion-validator, cloudflare-specialist, constitution-validator, test-engineer.
 - [x] Deploy to staging with coordination checks, run a task-backed cf-container session through changed terminal states, and verify container teardown through Cloudflare API/log evidence.
-- [ ] Update related SAM idea/backlog state with PR number and teardown evidence.
+- [x] Update related SAM idea/backlog state with PR number and teardown evidence.
 
 ## Audit Results
 
@@ -64,10 +64,14 @@ Cloudflare Container-backed SAM workspaces (`runtime = 'cf-container'`) run a st
 
 | Reviewer | Status | Outcome |
 | --- | --- | --- |
-| task-completion-validator | DEFERRED | Implementation checklist and local tests match the task file. Remaining task acceptance gap is staging verification: task-backed cf-container terminal paths still need live Cloudflare evidence before archive/complete. |
+| task-completion-validator | PASS | Implementation checklist, local tests, PR #1560, and staging teardown evidence match the task file. |
 | cloudflare-specialist | PASS | D1 queries are parameterized, the cron sweep has a bounded configurable limit (`CF_CONTAINER_TERMINAL_TASK_SWEEP_LIMIT`), candidates escape by `stopNodeResources()` marking node/workspaces deleted, and no Wrangler/migration changes are required. Local worker-pool verification is blocked by `workerd` signal 11 before import. |
 | constitution-validator | PASS | New operational limit uses env override with default; no hardcoded URLs/timeouts/deployment identifiers added. Default value is isolated as `DEFAULT_CF_CONTAINER_TERMINAL_TASK_SWEEP_LIMIT`. |
 | test-engineer | PASS | Runtime-boundary regression exists in `task-runner-cleanup.test.ts`; terminal entry-point delegation tests cover MCP completion, failed callbacks, SAM stop_subtask, and chat stop/archive; cron fallback test asserts `stopNodeResources()` and configured sweep limit. Staging remains required for live Cloudflare Container teardown. |
+
+## Backlog Update
+
+- Linked related SAM idea `01KX4HFF2Y66RW1V7TVV1ZTP7X` with PR #1560 and staging evidence for delegated task `01KX79TJ55K0PVAHT4AF47SJQQ`, workspace `01KX79SN1T97P7FT4884ECKHPM`, and cf-container node `01KX79SMWCETHGBW8SDPHG14EF` deleted at `2026-07-11T00:39:35.022Z`.
 
 ## Acceptance Criteria
 
