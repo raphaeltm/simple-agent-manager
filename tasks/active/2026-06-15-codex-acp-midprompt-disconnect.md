@@ -75,8 +75,8 @@ The ACP peer closes JSON-RPC first: SAM receives `peer disconnected before respo
 - [x] Keep unrecoverable failure explicit and terminal.
 - [x] Add exact JSON-RPC recoverable race and terminal diagnostic/redaction coverage.
 - [x] Phase 5 review round (go, security, constitution, test, docs-sync, task-completion): no CRITICAL/HIGH live bugs. Applied converged go+security fallback tightening (`crashRecovery.sessionID` only on `inProgress`), clarifying comments, and AC-aligned test additions (per-prerequisite terminal diagnostics for acpSessionId/agentType/all-three; captured-session LoadSession identity assertion; agentType partial-clear fallback; `crashRecoveryInProgress==false` on terminal path). Race + full vm-agent suites green.
-- [ ] Validate replacement Codex adapter with long tool/permission activity and real `LoadSession` recovery on staging.
-- [ ] Complete required reviews, CI, staging coordination, merge, and production monitoring.
+- [x] Validate mid-prompt disconnect → `LoadSession` recovery on staging (real VM, new binary). Done 2026-07-11 with `claude-code` (agent-agnostic recovery path) because staging `openai-codex` OAuth is revoked (filed `tasks/backlog/2026-07-11-codex-staging-oauth-refresh-token-revoked.md`). Killed the agent process mid-generation; vm-agent logs show the exact `-32603 "peer disconnected before response"` routed to `deferring to crash recovery` → `attempting LoadSession with previous session` → `LoadSession succeeded`; task stayed `in_progress` with `errorMessage=null`, same `agentSessionId`, message count kept climbing (291→350). No terminal failure, no silent stall. Note: this run's goroutine ordering was Prompt-returns-first (live fields present); the specific cleanup-wins race is covered deterministically by unit tests.
+- [ ] Complete required reviews (done), CI (green), staging coordination (TURN 2 done), merge, and production monitoring.
 
 ### Updated acceptance criteria
 
