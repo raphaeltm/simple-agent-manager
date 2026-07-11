@@ -22,16 +22,16 @@ TaskRunner Durable Objects mark orchestration complete after handing an agent a 
 
 ## Implementation checklist
 
-- [ ] Add a bounded task-liveness probe correlating workspace state, task-scoped agent-session freshness, and node heartbeat; shared-node heartbeat is never sufficient alone.
-- [ ] Keep thresholds and per-run candidate/I/O limits configurable with shared `DEFAULT_*` constants and environment fallbacks.
-- [ ] Promptly reconcile DO-completed+D1-active work only when composite liveness proves workspace/agent gone, with sanitized context and a clear terminal state.
-- [ ] Preserve live long-running task/conversation sessions and priority 2 recoverable `awaiting_followup`.
-- [ ] Cover queued, delegated, in_progress, and awaiting_followup status/step semantics with task/conversation distinctions.
-- [ ] Close `aborted_by_recovery` by re-reading D1 and ensuring it is terminal before DO completion without overwriting a concurrent legitimate terminal callback.
-- [ ] Make terminal side effects idempotent across cron, DO recovery, and callbacks: event, trigger sync, session state, cleanup, repeated callback.
-- [ ] Correct diagnostic timing and bound/deduplicate control-loop I/O.
-- [ ] Add unit and cross-runtime Miniflare/D1/DO tests for dead mismatch, live negative case, recovery interleaving, terminal callback/idempotency, and mode/status variants.
-- [ ] Update public docs/environment references if configuration changes.
+- [x] Add a bounded task-liveness probe correlating workspace state, task-scoped agent-session freshness, and node heartbeat; shared-node heartbeat is never sufficient alone.
+- [x] Keep thresholds and per-run candidate/I/O limits configurable with shared `DEFAULT_*` constants and environment fallbacks.
+- [x] Promptly reconcile DO-completed+D1-active work only when composite liveness proves workspace/agent gone, with sanitized context and a clear terminal state.
+- [x] Preserve live long-running task/conversation sessions and priority 2 recoverable `awaiting_followup`.
+- [x] Cover queued, delegated, in_progress, and awaiting_followup status/step semantics with task/conversation distinctions.
+- [x] Close `aborted_by_recovery` by re-reading D1 and ensuring it is terminal before DO completion without overwriting a concurrent legitimate terminal callback.
+- [x] Make repeated same-terminal callbacks idempotent and reuse terminal cleanup; remaining cross-path verification is tracked below.
+- [ ] Correct diagnostic timing and finish bounding/deduplicating control-loop I/O.
+- [ ] Complete unit and cross-runtime regressions for recovery interleaving and callback idempotency (dead mismatch and live negative coverage added).
+- [x] Update public docs/environment references for new configuration.
 - [ ] Rebase after priority 2 merges and preserve—not duplicate—its recovery behavior.
 - [ ] Run focused/full validation, control-loop checks, and Cloudflare/security/constitution/test/docs-sync/control-loop/task-completion reviews.
 - [ ] Wait for staging turns 1–4 and unrelated deployments, query staging state/logs, deploy, and verify.

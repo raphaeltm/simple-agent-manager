@@ -41,6 +41,15 @@ export const DEFAULT_TASK_STUCK_QUEUED_TIMEOUT_MS = 20 * 60 * 1000; // 20 minute
  * Set to 31 minutes (1 min buffer above workspace ready timeout). */
 export const DEFAULT_TASK_STUCK_DELEGATED_TIMEOUT_MS = 31 * 60 * 1000; // 31 minutes
 
+/** Minimum age before reconciling a completed TaskRunner DO against active D1 state. */
+export const DEFAULT_TASK_DO_MISMATCH_GRACE_MS = 5 * 60 * 1000;
+
+/** Maximum active task rows inspected by one stuck-task cron invocation. */
+export const DEFAULT_STUCK_TASK_MAX_CANDIDATES_PER_SWEEP = 100;
+
+/** Maximum ACP sessions read while proving task-scoped runtime liveness. */
+export const DEFAULT_TASK_LIVENESS_MAX_ACP_SESSIONS = 5;
+
 // =============================================================================
 // TaskRunner DO Defaults (Alarm-Driven Orchestration — TDF-2)
 // =============================================================================

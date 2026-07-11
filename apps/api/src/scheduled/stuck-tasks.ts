@@ -24,6 +24,9 @@
  */
 import {
   DEFAULT_NODE_HEARTBEAT_STALE_SECONDS,
+  DEFAULT_STUCK_TASK_MAX_CANDIDATES_PER_SWEEP,
+  DEFAULT_TASK_DO_MISMATCH_GRACE_MS,
+  DEFAULT_TASK_LIVENESS_MAX_ACP_SESSIONS,
   DEFAULT_TASK_RUN_HARD_TIMEOUT_MS,
   DEFAULT_TASK_RUN_MAX_EXECUTION_MS,
   DEFAULT_TASK_STUCK_DELEGATED_TIMEOUT_MS,
@@ -100,6 +103,83 @@ export interface RecoveryDiagnostics {
     retryCount: number | null;
     lastStepAt: number | null;
   } | null;
+}
+
+export interface TaskRuntimeLiveness {
+  live: boolean;
+  conclusive: boolean;
+  reason: string;
+  workspaceStatus: string | null;
+  nodeId: string | null;
+  activeAcpSessionId: string | null;
+}
+
+const LIVE_WORKSPACE_STATUSES = new Set(['running', 'recovery']);
+const ACTIVE_ACP_STATUSES = new Set(['assigned', 'running']);
+
+/** Prove task-scoped liveness. A shared-node heartbeat is never sufficient. */
+export async function getTaskRuntimeLiveness(
+  env: Env,
+  task: { project_id: string; workspace_id: string | null },
+): Promise<TaskRuntimeLiveness> {
+  const dead = (reason: string, workspaceStatus: string | null, nodeId: string | null): TaskRuntimeLiveness => ({
+    live: false, conclusive: true, reason, workspaceStatus, nodeId, activeAcpSessionId: null,
+  });
+  if (!task.workspace_id) return dead('workspace_missing', null, null);
+
+  const row = await env.DATABASE.prepare(
+    `SELECT w.status AS workspace_status, w.chat_session_id, w.node_id,
+            n.status AS node_status, n.health_status, n.last_heartbeat_at
+     FROM workspaces w
+     LEFT JOIN nodes n ON n.id = w.node_id
+     WHERE w.id = ?
+     LIMIT 1`
+  ).bind(task.workspace_id).first<{
+    workspace_status: string;
+    chat_session_id: string | null;
+    node_id: string | null;
+    node_status: string | null;
+    health_status: string | null;
+    last_heartbeat_at: string | null;
+  }>();
+
+  if (!row) return dead('workspace_missing', null, null);
+  if (!LIVE_WORKSPACE_STATUSES.has(row.workspace_status)) {
+    return dead(`workspace_${row.workspace_status}`, row.workspace_status, row.node_id);
+  }
+  if (!row.chat_session_id || !row.node_id) {
+    return { live: false, conclusive: false, reason: 'workspace_runtime_identity_incomplete', workspaceStatus: row.workspace_status, nodeId: row.node_id, activeAcpSessionId: null };
+  }
+
+  const staleSeconds = parseInt(env.NODE_HEARTBEAT_STALE_SECONDS || '', 10) || DEFAULT_NODE_HEARTBEAT_STALE_SECONDS;
+  const staleMs = staleSeconds * 1000;
+  const nodeHeartbeatAt = row.last_heartbeat_at ? new Date(row.last_heartbeat_at).getTime() : Number.NaN;
+  if (row.node_status !== 'running' || row.health_status !== 'healthy' || !Number.isFinite(nodeHeartbeatAt) || Date.now() - nodeHeartbeatAt > staleMs) {
+    return dead('node_not_live', row.workspace_status, row.node_id);
+  }
+
+  try {
+    const limit = parseMs(env.TASK_LIVENESS_MAX_ACP_SESSIONS, DEFAULT_TASK_LIVENESS_MAX_ACP_SESSIONS);
+    const { sessions } = await projectDataService.listAcpSessions(env, task.project_id, {
+      chatSessionId: row.chat_session_id,
+      limit,
+    });
+    const active = sessions.find((session) => {
+      if (!ACTIVE_ACP_STATUSES.has(session.status) || session.workspaceId !== task.workspace_id) return false;
+      const heartbeatAt = session.lastHeartbeatAt ?? session.updatedAt ?? session.startedAt ?? session.createdAt;
+      return Number.isFinite(heartbeatAt) && Date.now() - heartbeatAt <= staleMs;
+    });
+    if (active) {
+      return { live: true, conclusive: true, reason: 'task_acp_session_live', workspaceStatus: row.workspace_status, nodeId: row.node_id, activeAcpSessionId: active.id };
+    }
+    return dead('task_acp_session_not_live', row.workspace_status, row.node_id);
+  } catch (err) {
+    log.warn('stuck_task.liveness_probe_failed', {
+      workspaceId: task.workspace_id,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return { live: false, conclusive: false, reason: 'task_liveness_unknown', workspaceStatus: row.workspace_status, nodeId: row.node_id, activeAcpSessionId: null };
+  }
 }
 
 /**
@@ -204,6 +284,8 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
   const delegatedTimeoutMs = parseMs(env.TASK_STUCK_DELEGATED_TIMEOUT_MS, DEFAULT_TASK_STUCK_DELEGATED_TIMEOUT_MS);
   const maxExecutionMs = parseMs(env.TASK_RUN_MAX_EXECUTION_MS, DEFAULT_TASK_RUN_MAX_EXECUTION_MS);
   const hardTimeoutMs = parseMs(env.TASK_RUN_HARD_TIMEOUT_MS, DEFAULT_TASK_RUN_HARD_TIMEOUT_MS);
+  const mismatchGraceMs = parseMs(env.TASK_DO_MISMATCH_GRACE_MS, DEFAULT_TASK_DO_MISMATCH_GRACE_MS);
+  const maxCandidates = parseMs(env.STUCK_TASK_MAX_CANDIDATES_PER_SWEEP, DEFAULT_STUCK_TASK_MAX_CANDIDATES_PER_SWEEP);
 
   if (hardTimeoutMs <= maxExecutionMs) {
     log.warn('stuck_task.misconfigured_hard_timeout', {
@@ -219,9 +301,10 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
     `SELECT id, project_id, user_id, status, execution_step, updated_at, started_at,
             workspace_id, auto_provisioned_node_id
      FROM tasks
-     WHERE status IN ('queued', 'delegated', 'in_progress')
-     ORDER BY updated_at ASC`
-  ).all<{
+     WHERE (status IN ('queued', 'delegated', 'in_progress') OR status = 'awaiting_followup')
+     ORDER BY updated_at ASC
+     LIMIT ?`
+  ).bind(maxCandidates).all<{
     id: string;
     project_id: string;
     user_id: string;
@@ -290,28 +373,18 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
             reason = `Task stuck in 'delegated' for ${Math.round(elapsedMs / 1000)}s (threshold: ${Math.round(delegatedTimeoutMs / 1000)}s).${stepInfo} Workspace may have failed to start.`;
           }
           break;
-        case 'in_progress': {
+        case 'in_progress':
+        case 'awaiting_followup': {
           const startedAt = task.started_at ? new Date(task.started_at).getTime() : updatedAt;
           const executionMs = now.getTime() - startedAt;
           if (executionMs > maxExecutionMs) {
-            // Hard timeout: absolute ceiling that cannot be bypassed by heartbeat.
-            // Past this point, the task is killed regardless of node health.
-            if (executionMs > hardTimeoutMs) {
-              isStuck = true;
-              reason = `Task exceeded hard timeout of ${Math.round(hardTimeoutMs / 60000)} minutes (no heartbeat grace).${stepInfo}`;
-              break;
-            }
-
-            // Soft timeout (4h-8h window): check if the VM agent is still alive via heartbeat.
-            // A recent heartbeat means the agent is actively working — allow grace period.
-            const nodeIdToCheck = await getTaskNodeId(env, task);
-            if (nodeIdToCheck) {
-              const staleSeconds = parseInt(env.NODE_HEARTBEAT_STALE_SECONDS || '', 10) || DEFAULT_NODE_HEARTBEAT_STALE_SECONDS;
-              const heartbeatRecent = await isNodeHeartbeatRecent(env, nodeIdToCheck, staleSeconds);
-              if (heartbeatRecent) {
+            const liveness = await getTaskRuntimeLiveness(env, task);
+            if (liveness.live || !liveness.conclusive) {
+              if (liveness.live) {
                 log.info('stuck_task.skipped_active_heartbeat', {
                   taskId: task.id,
-                  nodeId: nodeIdToCheck,
+                  nodeId: liveness.nodeId,
+                  activeAcpSessionId: liveness.activeAcpSessionId,
                   executionMs,
                   maxExecutionMs,
                   hardTimeoutMs,
@@ -324,22 +397,22 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
                   context: {
                     recoveryType: 'stuck_task_heartbeat_skip',
                     taskId: task.id,
-                    nodeId: nodeIdToCheck,
+                    nodeId: liveness.nodeId,
+                    activeAcpSessionId: liveness.activeAcpSessionId,
                     executionMs,
                     maxExecutionMs,
                     hardTimeoutMs,
                   },
                   userId: task.user_id,
-                  nodeId: nodeIdToCheck,
+                  nodeId: liveness.nodeId,
                 });
-
                 result.heartbeatSkipped++;
-                break;
               }
+              break;
             }
-
             isStuck = true;
-            reason = `Task exceeded max execution time of ${Math.round(maxExecutionMs / 60000)} minutes.${stepInfo}`;
+            const threshold = executionMs > hardTimeoutMs ? hardTimeoutMs : maxExecutionMs;
+            reason = `Task runtime is no longer live after ${Math.round(threshold / 60000)} minutes. Last liveness result: ${liveness.reason}.${stepInfo}`;
           }
           break;
         }
@@ -366,13 +439,18 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
         halfThreshold = maxExecutionMs / 2;
       }
 
-      if (timeForCheck > halfThreshold) {
+      if (timeForCheck > Math.min(halfThreshold, mismatchGraceMs)) {
         try {
           const doId = env.TASK_RUNNER.idFromName(task.id);
           const stub = env.TASK_RUNNER.get(doId) as DurableObjectStub<TaskRunner>;
           const doStatus = await stub.getStatus();
 
           if (doStatus && doStatus.completed && task.status !== 'failed' && task.status !== 'completed') {
+            const liveness = await getTaskRuntimeLiveness(env, task);
+            if (liveness.conclusive && !liveness.live) {
+              isStuck = true;
+              reason = `TaskRunner orchestration completed but task runtime is gone (${liveness.reason}).`;
+            }
             // DO thinks it's done but D1 status is still transient — log for investigation.
             // Only record once: check if we already have a recent mismatch record for this task.
             // The stuck timeout will eventually fail the task, so this is informational only.
@@ -414,7 +492,7 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
           // DO unreachable — not necessarily an error (may not have been created yet)
         }
       }
-      continue;
+      if (!isStuck) continue;
     }
 
     try {
@@ -489,7 +567,7 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
       await db.insert(schema.taskStatusEvents).values({
         id: ulid(),
         taskId: task.id,
-        fromStatus: task.status as 'queued' | 'delegated' | 'in_progress',
+        fromStatus: task.status as 'queued' | 'delegated' | 'in_progress' | 'awaiting_followup',
         toStatus: 'failed',
         actorType: 'system',
         actorId: null,
@@ -550,6 +628,7 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
         case 'queued': result.failedQueued++; break;
         case 'delegated': result.failedDelegated++; break;
         case 'in_progress':
+        case 'awaiting_followup':
           result.failedInProgress++;
           if (compactionLoopRecovery) result.failedCompactionLoops++;
           break;
@@ -580,48 +659,4 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
   }
 
   return result;
-}
-
-/**
- * Look up the node ID for a task — via its workspace or auto-provisioned node.
- * Best-effort: returns null if no node can be found.
- */
-async function getTaskNodeId(
-  env: Env,
-  task: { workspace_id: string | null; auto_provisioned_node_id: string | null }
-): Promise<string | null> {
-  if (task.workspace_id) {
-    try {
-      const ws = await env.DATABASE.prepare(
-        `SELECT node_id FROM workspaces WHERE id = ?`
-      ).bind(task.workspace_id).first<{ node_id: string | null }>();
-      if (ws?.node_id) return ws.node_id;
-    } catch {
-      // Best-effort
-    }
-  }
-  return task.auto_provisioned_node_id;
-}
-
-/**
- * Check whether a node's heartbeat is recent (within staleSeconds).
- * Returns false if the node has no heartbeat or it's stale.
- */
-async function isNodeHeartbeatRecent(
-  env: Env,
-  nodeId: string,
-  staleSeconds: number
-): Promise<boolean> {
-  try {
-    const node = await env.DATABASE.prepare(
-      `SELECT last_heartbeat_at FROM nodes WHERE id = ?`
-    ).bind(nodeId).first<{ last_heartbeat_at: string | null }>();
-
-    if (!node?.last_heartbeat_at) return false;
-
-    const heartbeatAge = (Date.now() - new Date(node.last_heartbeat_at).getTime()) / 1000;
-    return heartbeatAge < staleSeconds;
-  } catch {
-    return false;
-  }
 }

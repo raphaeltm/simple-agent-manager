@@ -10,10 +10,11 @@
  * - Heartbeat grace period for in_progress tasks
  * - Diagnostic gathering (workspace/node status from D1)
  */
-import { env } from 'cloudflare:test';
+import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
 import type { Env } from '../../src/env';
+import type { TaskRunner, TaskRunnerState } from '../../src/durable-objects/task-runner';
 import { gatherDiagnostics, recoverStuckTasks } from '../../src/scheduled/stuck-tasks';
 import {
   seedInstallation,
@@ -69,6 +70,85 @@ async function getObservabilityEvents(taskId: string): Promise<{ message: string
 }
 
 describe('recoverStuckTasks — vertical slice', () => {
+  describe('DO-completed D1-active reconciliation', () => {
+    it('fails promptly when the task workspace is demonstrably gone', async () => {
+      await seedBaseData();
+      const taskId = 'task-st-do-mismatch-dead';
+      const nodeId = 'node-st-do-mismatch-dead';
+      const workspaceId = 'ws-st-do-mismatch-dead';
+      const oldDate = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+
+      await seedNode(nodeId, USER_ID, { status: 'deleted', healthStatus: 'stale' });
+      await seedWorkspace(workspaceId, nodeId, USER_ID, {
+        projectId: PROJECT_ID,
+        status: 'deleted',
+      });
+      await seedTask(taskId, PROJECT_ID, USER_ID, {
+        status: 'in_progress',
+        executionStep: 'awaiting_followup',
+        startedAt: oldDate,
+        updatedAt: oldDate,
+        workspaceId,
+        taskMode: 'conversation',
+      });
+
+      const stub = env.TASK_RUNNER.get(
+        env.TASK_RUNNER.idFromName(taskId),
+      ) as DurableObjectStub<TaskRunner>;
+      await stub.start({
+        taskId,
+        projectId: PROJECT_ID,
+        userId: USER_ID,
+        config: {
+          vmSize: 'small',
+          vmLocation: 'nbg1',
+          branch: 'main',
+          defaultBranch: 'main',
+          preferredNodeId: null,
+          userName: null,
+          userEmail: null,
+          githubId: null,
+          taskTitle: 'Dead conversation',
+          taskDescription: null,
+          repository: 'test/repo',
+          installationId: INSTALL_ID,
+          outputBranch: null,
+          projectDefaultVmSize: null,
+          chatSessionId: null,
+          agentType: 'codex',
+          workspaceProfile: null,
+          devcontainerConfigName: null,
+          cloudProvider: null,
+          taskMode: 'conversation',
+          model: null,
+          permissionMode: null,
+          opencodeProvider: null,
+          opencodeBaseUrl: null,
+          systemPromptAppend: null,
+          attachments: null,
+        },
+      });
+      await runInDurableObject(stub, async (instance) => {
+        const state = await instance.ctx.storage.get<TaskRunnerState>('state');
+        if (!state) throw new Error('TaskRunner state missing');
+        state.completed = true;
+        state.currentStep = 'running';
+        await instance.ctx.storage.put('state', state);
+      });
+
+      const result = await recoverStuckTasks({
+        ...env,
+        TASK_DO_MISMATCH_GRACE_MS: '60000',
+      } as unknown as Env);
+
+      expect(result.failedInProgress).toBe(1);
+      const task = await getTaskStatus(taskId);
+      expect(task?.status).toBe('failed');
+      expect(task?.error_message).toContain('runtime is gone');
+      expect(task?.error_message).toContain('workspace_deleted');
+    });
+  });
+
   describe('stuck queued task detection', () => {
     it('fails a task stuck in queued past timeout and records status event', async () => {
       await seedBaseData();

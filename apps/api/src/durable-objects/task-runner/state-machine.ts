@@ -121,12 +121,26 @@ export async function transitionToInProgress(
   ).bind(now, now, state.taskId).run();
 
   if (!result.meta.changes || result.meta.changes === 0) {
+    const authoritative = await rc.env.DATABASE.prepare(
+      `SELECT status FROM tasks WHERE id = ?`
+    ).bind(state.taskId).first<{ status: string }>();
     log.warn('task_runner_do.aborted_by_recovery', {
       taskId: state.taskId,
       step: 'in_progress_transition',
+      authoritativeStatus: authoritative?.status ?? null,
     });
-    state.completed = true;
-    await rc.ctx.storage.put('state', state);
+    if (authoritative?.status === 'in_progress') {
+      state.currentStep = 'running';
+      state.completed = true;
+      await rc.ctx.storage.put('state', state);
+      return;
+    }
+    if (!authoritative || ['completed', 'failed', 'cancelled'].includes(authoritative.status)) {
+      state.completed = true;
+      await rc.ctx.storage.put('state', state);
+      return;
+    }
+    await failTask(state, 'Task orchestration was superseded before agent handoff completed.', rc);
     return;
   }
 

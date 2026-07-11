@@ -28,6 +28,7 @@ const { projectDataMocks } = vi.hoisted(() => ({
   projectDataMocks: {
     getMessages: vi.fn(),
     listSessions: vi.fn(),
+    listAcpSessions: vi.fn(),
     failSession: vi.fn(),
   },
 }));
@@ -110,6 +111,15 @@ describe('recoverStuckTasks', () => {
     vi.clearAllMocks();
     projectDataMocks.getMessages.mockResolvedValue({ messages: [], hasMore: false });
     projectDataMocks.listSessions.mockResolvedValue({ sessions: [], total: 0 });
+    projectDataMocks.listAcpSessions.mockResolvedValue({
+      sessions: [{
+        id: 'acp-live',
+        status: 'running',
+        workspaceId: 'ws-1',
+        lastHeartbeatAt: Date.now(),
+      }],
+      total: 1,
+    });
     projectDataMocks.failSession.mockResolvedValue(undefined);
   });
 
@@ -317,6 +327,9 @@ describe('recoverStuckTasks', () => {
       responses.set('last_heartbeat_at FROM nodes', {
         results: [{ last_heartbeat_at: recentHeartbeat }],
       });
+      responses.set('w.chat_session_id', {
+        results: [{ workspace_status: 'running', chat_session_id: 'chat-1', node_id: 'node-1', node_status: 'running', health_status: 'healthy', last_heartbeat_at: recentHeartbeat }],
+      });
 
       const env = createMockEnv(responses);
       const result = await recoverStuckTasks(env);
@@ -354,6 +367,9 @@ describe('recoverStuckTasks', () => {
       responses.set('last_heartbeat_at FROM nodes', {
         results: [{ last_heartbeat_at: staleHeartbeat }],
       });
+      responses.set('w.chat_session_id', {
+        results: [{ workspace_status: 'running', chat_session_id: 'chat-1', node_id: 'node-1', node_status: 'running', health_status: 'healthy', last_heartbeat_at: staleHeartbeat }],
+      });
       // Workspace status for diagnostics
       responses.set('node_id, status FROM workspaces', {
         results: [{ id: 'ws-1', node_id: 'node-1', status: 'running' }],
@@ -379,7 +395,7 @@ describe('recoverStuckTasks', () => {
         env.DATABASE,
         'task-1',
         'failed',
-        expect.stringContaining('max execution time'),
+        expect.stringContaining('runtime is no longer live'),
       );
     });
 
@@ -423,7 +439,7 @@ describe('recoverStuckTasks', () => {
   });
 
   describe('hard timeout enforcement', () => {
-    it('kills tasks past hard timeout even with fresh heartbeat', async () => {
+    it('preserves a genuinely live task past the hard timeout', async () => {
       const now = Date.now();
       // Task started 9 hours ago (past 8h hard timeout)
       const startedAt = new Date(now - 9 * 60 * 60 * 1000).toISOString();
@@ -455,6 +471,9 @@ describe('recoverStuckTasks', () => {
       responses.set('last_heartbeat_at FROM nodes', {
         results: [{ last_heartbeat_at: recentHeartbeat }],
       });
+      responses.set('w.chat_session_id', {
+        results: [{ workspace_status: 'running', chat_session_id: 'chat-1', node_id: 'node-1', node_status: 'running', health_status: 'healthy', last_heartbeat_at: recentHeartbeat }],
+      });
       // Workspace status for diagnostics
       responses.set('node_id, status FROM workspaces', {
         results: [{ id: 'ws-1', node_id: 'node-1', status: 'running' }],
@@ -472,16 +491,9 @@ describe('recoverStuckTasks', () => {
       const env = createMockEnv(responses);
       const result = await recoverStuckTasks(env);
 
-      // Hard timeout should override the heartbeat grace
-      expect(result.failedInProgress).toBe(1);
-      expect(result.heartbeatSkipped).toBe(0);
-
-      // Verify heartbeat was NOT consulted — the hard timeout short-circuits
-      const db = env.DATABASE as unknown as { prepare: ReturnType<typeof vi.fn> };
-      const heartbeatCall = db.prepare.mock.calls.find(
-        ([sql]: [string]) => sql.includes('last_heartbeat_at'),
-      );
-      expect(heartbeatCall).toBeUndefined();
+      expect(result.failedInProgress).toBe(0);
+      expect(result.heartbeatSkipped).toBe(1);
+      expect(projectDataMocks.listAcpSessions).toHaveBeenCalled();
     });
 
     it('preserves heartbeat grace between soft and hard timeout', async () => {
@@ -513,6 +525,9 @@ describe('recoverStuckTasks', () => {
       });
       responses.set('last_heartbeat_at FROM nodes', {
         results: [{ last_heartbeat_at: recentHeartbeat }],
+      });
+      responses.set('w.chat_session_id', {
+        results: [{ workspace_status: 'running', chat_session_id: 'chat-1', node_id: 'node-1', node_status: 'running', health_status: 'healthy', last_heartbeat_at: recentHeartbeat }],
       });
 
       const env = createMockEnv(responses);
