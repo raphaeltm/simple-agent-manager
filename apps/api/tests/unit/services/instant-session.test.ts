@@ -178,6 +178,12 @@ describe('launchInstantSession', () => {
       agentProfileId: 'profile-1',
       skillId: 'skill-1',
     });
+    expect(updates).toContainEqual(
+      expect.objectContaining({
+        agentProfileId: 'profile-1',
+        skillId: 'skill-1',
+      })
+    );
     expect(mocks.mcp.storeMcpToken).toHaveBeenCalledWith(
       expect.anything(),
       'mcp-token',
