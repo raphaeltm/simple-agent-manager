@@ -46,7 +46,7 @@ This is not an AI Gateway feature. Gateway mocks were useful only to prove ACP c
 - [x] Add or update TypeScript unit coverage for the shared agent catalog install command if existing coverage does not assert it.
 - [x] Search for non-historical references to the old package and update only active runtime/test metadata, not archived specs/tasks unless they would mislead active behavior.
 - [x] Run targeted local tests for shared agent metadata and VM-agent ACP command metadata.
-- [ ] Run broader validation required by `/do`.
+- [x] Run broader validation required by `/do`.
 - [ ] Deploy the branch to staging.
 - [ ] Use Playwright staging auth with `SAM_PLAYWRIGHT_PRIMARY_USER` to start a primary user's project conversation with OpenAI Codex using a standard smaller/default model, then verify the agent responds.
 - [ ] Open the PR, wait for CI, merge when green, and monitor production deploy.
