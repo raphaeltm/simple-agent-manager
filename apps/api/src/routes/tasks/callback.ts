@@ -14,12 +14,12 @@ import { jsonValidator, UpdateTaskStatusSchema } from '../../schemas';
 import { verifyCallbackToken } from '../../services/jwt';
 import * as notificationService from '../../services/notification';
 import * as projectDataService from '../../services/project-data';
-import { cleanupTaskRun } from '../../services/task-runner';
 import {
   canTransitionTaskStatus,
   getAllowedTaskTransitions,
   isTaskStatus,
 } from '../../services/task-status';
+import { cleanupTerminalTaskResourcesOrThrow } from '../../services/task-terminal-cleanup';
 import {
   computeBlockedForTask,
   setTaskStatus,
@@ -219,32 +219,15 @@ taskCallbackRoute.post('/:projectId/tasks/:taskId/status/callback', jsonValidato
     ).catch((e) => { log.warn('task.callback_activity_event_failed', { taskId, error: String(e) }); })
   );
 
-  // On terminal states, stop the chat session and handle workspace cleanup.
+  // On terminal states, stop/fail the chat session and handle workspace/container cleanup.
   if (body.toStatus === 'completed' || body.toStatus === 'failed' || body.toStatus === 'cancelled') {
-    // Stop the chat session in ProjectData DO (best-effort).
-    // chatSessionId lives on the workspace, not the task — look it up.
-    if (updatedTask.workspaceId && updatedTask.projectId) {
-      c.executionCtx.waitUntil(
-        (async () => {
-          const [ws] = await db
-            .select({ chatSessionId: schema.workspaces.chatSessionId })
-            .from(schema.workspaces)
-            .where(eq(schema.workspaces.id, updatedTask.workspaceId!))
-            .limit(1);
-          if (ws?.chatSessionId) {
-            await projectDataService.stopSession(c.env, updatedTask.projectId, ws.chatSessionId);
-          }
-        })().catch((e) => { log.error('task.callback_session_stop_failed', { taskId, projectId: updatedTask.projectId, error: String(e) }); })
-      );
-    }
-
-    // On clean completion, auto-trigger workspace cleanup (destroy workspace + optionally node).
-    // On failure/cancellation, keep workspace alive for debugging.
-    if (body.toStatus === 'completed') {
-      c.executionCtx.waitUntil(
-        cleanupTaskRun(taskId, c.env).catch((e) => { log.error('task.cleanup_failed', { taskId, error: String(e) }); })
-      );
-    }
+    await cleanupTerminalTaskResourcesOrThrow(c.env, taskId, {
+      status: body.toStatus,
+      errorMessage: updatedTask.errorMessage,
+      projectId,
+      failureLogEvent: 'task.callback_terminal_cleanup_failed',
+      logContext: { projectId, source: 'task.callback' },
+    });
 
     // Emit notifications for terminal task states (best-effort)
     if (c.env.NOTIFICATION) {

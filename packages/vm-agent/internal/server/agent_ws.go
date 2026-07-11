@@ -252,6 +252,7 @@ func (s *Server) getOrCreateSessionHost(hostKey, workspaceID, sessionID string, 
 	cfg.OnPromptComplete = nil
 
 	cfg.GitTokenFetcher = s.gitHubTokenFetcherForWorkspace(workspaceID)
+	var runtimeAssetsProvider acp.RuntimeAssetsProvider
 
 	// Use per-workspace message reporter to prevent cross-workspace contamination.
 	// Lock ordering: sessionHostMu → messageReportersMu → Reporter.mu
@@ -346,6 +347,9 @@ func (s *Server) getOrCreateSessionHost(hostKey, workspaceID, sessionID string, 
 		if resolver := s.ptyManagerContainerResolverForLabel(runtime.ContainerLabelValue); resolver != nil {
 			cfg.ContainerResolver = resolver
 		}
+		if runtime.Lightweight && s.config != nil && s.config.IsStandaloneMode() {
+			runtimeAssetsProvider = s.runtimeAssetsProviderForWorkspaceSession(workspaceID, sessionID)
+		}
 	}
 
 	// Inject per-session MCP servers. Check in-memory map first (fast path),
@@ -375,6 +379,7 @@ func (s *Server) getOrCreateSessionHost(hostKey, workspaceID, sessionID string, 
 		ViewerSendBuffer:      s.config.ACPViewerSendBuffer,
 		StderrBufferBytes:     s.config.ACPStderrBufferBytes,
 		NotifSerializeTimeout: s.config.ACPNotifSerializeTimeout,
+		RuntimeAssetsProvider: runtimeAssetsProvider,
 	}
 	host := acp.NewSessionHost(hostCfg)
 	s.sessionHosts[hostKey] = host

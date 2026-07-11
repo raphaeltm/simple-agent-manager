@@ -9,7 +9,9 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -216,6 +218,85 @@ func TestSessionHostEnsureAgentInstalledLocalFastPath(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("ensureAgentInstalled() error = %v, want nil", err)
+	}
+}
+
+func TestPrepareAgentStartupAppliesStandaloneRuntimeAssets(t *testing.T) {
+	t.Parallel()
+
+	workDir := t.TempDir()
+	host := NewSessionHost(SessionHostConfig{
+		GatewayConfig: GatewayConfig{
+			SessionID:        "test-session",
+			WorkspaceID:      "test-workspace",
+			ContainerWorkDir: workDir,
+			ProcessLauncher:  LocalLauncher{},
+			SAMEnvFallback:   []string{"SAM_WORKSPACE_ID=test-workspace"},
+		},
+		RuntimeAssetsProvider: func(context.Context) (RuntimeAssets, error) {
+			return RuntimeAssets{
+				EnvVars: []RuntimeEnvVar{{
+					Key:      "CUSTOM_VALUE",
+					Value:    "secret-runtime-value",
+					IsSecret: true,
+				}},
+				Files: []RuntimeFile{{
+					Path:    ".sam-runtime-test.txt",
+					Content: "runtime-file-present",
+				}},
+			}, nil
+		},
+	})
+	defer host.Stop()
+
+	startup, err := host.prepareAgentStartup(context.Background(), "claude-code", &agentCredential{
+		credential:     "agent-key",
+		credentialKind: "api-key",
+	}, nil)
+	if err != nil {
+		t.Fatalf("prepareAgentStartup returned error: %v", err)
+	}
+
+	if !hasEnvVar(startup.envVars, "CUSTOM_VALUE") {
+		t.Fatalf("runtime env var was not added: %v", startup.envVars)
+	}
+	if !startup.secretEnvKey["CUSTOM_VALUE"] {
+		t.Fatalf("runtime secret metadata was not preserved")
+	}
+	content, err := os.ReadFile(filepath.Join(workDir, ".sam-runtime-test.txt"))
+	if err != nil {
+		t.Fatalf("runtime file was not written: %v", err)
+	}
+	if string(content) != "runtime-file-present" {
+		t.Fatalf("runtime file content = %q", string(content))
+	}
+}
+
+func TestPrepareAgentStartupRuntimeAssetFailurePreventsStart(t *testing.T) {
+	t.Parallel()
+
+	host := NewSessionHost(SessionHostConfig{
+		GatewayConfig: GatewayConfig{
+			SessionID:        "test-session",
+			WorkspaceID:      "test-workspace",
+			ContainerWorkDir: t.TempDir(),
+			ProcessLauncher:  LocalLauncher{},
+		},
+		RuntimeAssetsProvider: func(context.Context) (RuntimeAssets, error) {
+			return RuntimeAssets{}, errors.New("runtime asset fetch failed")
+		},
+	})
+	defer host.Stop()
+
+	_, err := host.prepareAgentStartup(context.Background(), "claude-code", &agentCredential{
+		credential:     "agent-key",
+		credentialKind: "api-key",
+	}, nil)
+	if err == nil {
+		t.Fatal("expected runtime asset provider failure to prevent startup")
+	}
+	if !strings.Contains(err.Error(), "runtime asset fetch failed") {
+		t.Fatalf("error = %v", err)
 	}
 }
 

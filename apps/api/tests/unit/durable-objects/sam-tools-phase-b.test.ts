@@ -59,6 +59,10 @@ vi.mock('../../../src/services/project-data', () => ({
   enqueueMailboxMessage: vi.fn().mockResolvedValue({ id: 'msg-123' }),
 }));
 
+vi.mock('../../../src/services/task-terminal-cleanup', () => ({
+  cleanupTerminalTaskResources: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock('../../../src/services/task-runner-do', () => ({
   startTaskRunnerDO: vi.fn().mockResolvedValue(undefined),
 }));
@@ -205,6 +209,7 @@ describe('stop_subtask', () => {
   });
 
   it('stops an owned running task without workspace', async () => {
+    const { cleanupTerminalTaskResources } = await import('../../../src/services/task-terminal-cleanup');
     const ctx = buildCtx();
     // Task found, running, no workspace — should stop successfully
     queueD1Result(ctx._db._statement, [
@@ -215,6 +220,15 @@ describe('stop_subtask', () => {
     expect(r.stopped).toBe(true);
     expect(r.taskId).toBe('task-1');
     expect(r.previousStatus).toBe('running');
+    expect(cleanupTerminalTaskResources).toHaveBeenCalledWith(
+      ctx.env,
+      'task-1',
+      {
+        status: 'cancelled',
+        errorMessage: 'Stopped by user via SAM',
+        logContext: { projectId: 'proj-1', source: 'sam.stop_subtask' },
+      }
+    );
   });
 });
 

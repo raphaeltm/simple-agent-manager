@@ -7,6 +7,7 @@ import { AppError } from '../../../src/middleware/error';
 
 const mocks = vi.hoisted(() => ({
   cleanupWorkspaceForDeletion: vi.fn(),
+  cleanupTerminalTaskResources: vi.fn(),
   getSession: vi.fn(),
   requireProjectCapability: vi.fn(),
   stopSession: vi.fn(),
@@ -44,6 +45,9 @@ vi.mock('../../../src/services/project-data', () => ({
 vi.mock('../../../src/services/workspace-cleanup', () => ({
   cleanupWorkspaceForDeletion: (...args: unknown[]) => mocks.cleanupWorkspaceForDeletion(...args),
 }));
+vi.mock('../../../src/services/task-terminal-cleanup', () => ({
+  cleanupTerminalTaskResources: (...args: unknown[]) => mocks.cleanupTerminalTaskResources(...args),
+}));
 
 import { chatRoutes } from '../../../src/routes/chat';
 
@@ -57,7 +61,17 @@ function buildDb(selectResults: unknown[][]) {
     return chain;
   });
 
-  return { select };
+  const update = vi.fn(() => ({
+    set: vi.fn(() => ({
+      where: vi.fn(() => Promise.resolve()),
+    })),
+  }));
+
+  const insert = vi.fn(() => ({
+    values: vi.fn(() => Promise.resolve()),
+  }));
+
+  return { insert, select, update };
 }
 
 function createApp() {
@@ -76,6 +90,7 @@ describe('POST /api/projects/:projectId/sessions/:sessionId/stop cleanup', () =>
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.cleanupWorkspaceForDeletion.mockResolvedValue(undefined);
+    mocks.cleanupTerminalTaskResources.mockResolvedValue(undefined);
     mocks.requireProjectCapability.mockResolvedValue({ id: 'project-stop-1' });
     mocks.stopSession.mockResolvedValue(undefined);
   });
@@ -123,8 +138,14 @@ describe('POST /api/projects/:projectId/sessions/:sessionId/stop cleanup', () =>
     expect(mocks.stopSession).not.toHaveBeenCalled();
   });
 
-  it('preserves task-backed session semantics by stopping only the session', async () => {
-    const db = buildDb([]);
+  it('tears down task-backed session runtime resources', async () => {
+    const db = buildDb([[
+      {
+        id: 'task-1',
+        status: 'in_progress',
+        errorMessage: null,
+      },
+    ]]);
     vi.mocked(drizzle).mockReturnValue(db as never);
     mocks.getSession.mockResolvedValue({
       id: 'session-task-backed-1',
@@ -144,9 +165,22 @@ describe('POST /api/projects/:projectId/sessions/:sessionId/stop cleanup', () =>
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
       status: 'stopped',
-      workspaceDeleted: false,
+      workspaceDeleted: true,
     });
     expect(mocks.cleanupWorkspaceForDeletion).not.toHaveBeenCalled();
-    expect(mocks.stopSession).toHaveBeenCalledWith(expect.anything(), 'project-stop-1', 'session-task-backed-1');
+    expect(mocks.stopSession).not.toHaveBeenCalled();
+    expect(mocks.cleanupTerminalTaskResources).toHaveBeenCalledWith(
+      expect.anything(),
+      'task-1',
+      {
+        status: 'cancelled',
+        errorMessage: 'Archived by user',
+        logContext: {
+          projectId: 'project-stop-1',
+          sessionId: 'session-task-backed-1',
+          stopPath: 'task-session',
+        },
+      }
+    );
   });
 });

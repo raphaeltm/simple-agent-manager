@@ -187,6 +187,41 @@ func TestEnvFileOperations(t *testing.T) {
 		}
 	})
 
+	t.Run("ExplicitSecretEnvKeysUseEnvFile", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		origDir := envFileDir
+		envFileDir = tmpDir
+		defer func() { envFileDir = origDir }()
+
+		cfg := ProcessConfig{
+			ContainerID: "test-container",
+			AcpCommand:  "test-agent",
+			EnvVars: []string{
+				"CUSTOM_VALUE=super-secret",
+				"SAM_WORKSPACE_ID=ws-123",
+			},
+			SecretEnvKeys: map[string]bool{"CUSTOM_VALUE": true},
+		}
+
+		args, envFilePath, err := buildDockerExecArgs(cfg)
+		if err != nil {
+			t.Fatalf("buildDockerExecArgs returned error: %v", err)
+		}
+		defer os.Remove(envFilePath)
+
+		argsStr := strings.Join(args, " ")
+		if strings.Contains(argsStr, "super-secret") {
+			t.Fatalf("explicit secret value leaked into docker args: %s", argsStr)
+		}
+		content, err := os.ReadFile(envFilePath)
+		if err != nil {
+			t.Fatalf("read env file: %v", err)
+		}
+		if string(content) != "CUSTOM_VALUE=super-secret\n" {
+			t.Fatalf("env file content = %q", string(content))
+		}
+	})
+
 	t.Run("EnvFileFailureIsFatal", func(t *testing.T) {
 		origDir := envFileDir
 		envFileDir = "/nonexistent/path"

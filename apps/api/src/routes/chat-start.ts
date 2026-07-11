@@ -1,5 +1,6 @@
 import type { CredentialProvider } from '@simple-agent-manager/shared';
 import { isValidProvider } from '@simple-agent-manager/shared';
+import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
@@ -89,6 +90,16 @@ chatStartRoutes.post('/start', requireAuth(), requireApproved(), jsonValidator(S
       permissionMode: resolvedProfile?.permissionMode ?? null,
     },
   });
+  if (resolvedProfile?.profileId || resolvedProfile?.skillId) {
+    await db
+      .update(schema.agentSessions)
+      .set({
+        agentProfileId: resolvedProfile.profileId ?? null,
+        skillId: resolvedProfile.skillId ?? null,
+        updatedAt: new Date().toISOString(),
+      })
+      .where(eq(schema.agentSessions.id, result.agentSessionId));
+  }
 
   return c.json({
     status: 'running',

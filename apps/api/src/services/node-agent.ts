@@ -7,7 +7,12 @@ import { expectJsonRecord } from '../lib/runtime-validation';
 import { fetchWithTimeout, getTimeoutMs } from './fetch-timeout';
 import { signNodeManagementToken, signTerminalToken } from './jwt';
 import { recordNodeRoutingMetric } from './telemetry';
-import { fetchVmAgentContainer, getVmAgentContainerConfig } from './vm-agent-container';
+import {
+  fetchVmAgentContainer,
+  getVmAgentContainerConfig,
+  markVmAgentContainerActiveWorkEndedBestEffort,
+  markVmAgentContainerActiveWorkStarted,
+} from './vm-agent-container';
 
 const DEFAULT_NODE_AGENT_REQUEST_TIMEOUT_MS = 30_000;
 
@@ -448,17 +453,27 @@ export async function startAgentSessionOnNode(
       body.taskMode = taskContext.taskMode;
     }
   }
-  return nodeAgentRequest(
-    nodeId,
-    env,
-    `/workspaces/${workspaceId}/agent-sessions/${sessionId}/start`,
-    {
-      method: 'POST',
-      userId,
-      workspaceId,
-      body: JSON.stringify(body),
-    }
-  );
+  await markVmAgentContainerActiveWorkStarted(env, nodeId, {
+    workspaceId,
+    agentSessionId: sessionId,
+    reason: 'start_agent_session',
+  });
+  try {
+    return await nodeAgentRequest(
+      nodeId,
+      env,
+      `/workspaces/${workspaceId}/agent-sessions/${sessionId}/start`,
+      {
+        method: 'POST',
+        userId,
+        workspaceId,
+        body: JSON.stringify(body),
+      }
+    );
+  } catch (err) {
+    await markVmAgentContainerActiveWorkEndedBestEffort(env, nodeId, 'start_agent_session_failed');
+    throw err;
+  }
 }
 
 export async function sendPromptToAgentOnNode(
@@ -474,18 +489,28 @@ export async function sendPromptToAgentOnNode(
   const body: { prompt: string; messageId?: string } = { prompt };
   if (messageId) body.messageId = messageId;
 
-  return nodeAgentRequest(
-    nodeId,
-    env,
-    `/workspaces/${workspaceId}/agent-sessions/${sessionId}/prompt`,
-    {
-      method: 'POST',
-      userId,
-      workspaceId,
-      requestTimeoutMs: options?.requestTimeoutMs,
-      body: JSON.stringify(body),
-    }
-  );
+  await markVmAgentContainerActiveWorkStarted(env, nodeId, {
+    workspaceId,
+    agentSessionId: sessionId,
+    reason: 'send_prompt',
+  });
+  try {
+    return await nodeAgentRequest(
+      nodeId,
+      env,
+      `/workspaces/${workspaceId}/agent-sessions/${sessionId}/prompt`,
+      {
+        method: 'POST',
+        userId,
+        workspaceId,
+        requestTimeoutMs: options?.requestTimeoutMs,
+        body: JSON.stringify(body),
+      }
+    );
+  } catch (err) {
+    await markVmAgentContainerActiveWorkEndedBestEffort(env, nodeId, 'send_prompt_failed');
+    throw err;
+  }
 }
 
 /**
@@ -513,12 +538,16 @@ export async function cancelAgentSessionOnNode(
         requestTimeoutMs: options?.requestTimeoutMs,
       }
     );
+    await markVmAgentContainerActiveWorkEndedBestEffort(env, nodeId, 'cancel_agent_session');
     return { success: true, status: 200 };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     // Extract HTTP status from error message (format: "Node Agent request failed: 409 ...")
     const statusMatch = msg.match(/failed:\s*(\d{3})/);
     const status = statusMatch?.[1] ? parseInt(statusMatch[1], 10) : 500;
+    if (status === 409) {
+      await markVmAgentContainerActiveWorkEndedBestEffort(env, nodeId, 'cancel_agent_session_no_prompt');
+    }
     return { success: false, status };
   }
 }
@@ -530,16 +559,20 @@ export async function stopAgentSessionOnNode(
   env: Env,
   userId: string
 ): Promise<unknown> {
-  return nodeAgentRequest(
-    nodeId,
-    env,
-    `/workspaces/${workspaceId}/agent-sessions/${sessionId}/stop`,
-    {
-      method: 'POST',
-      userId,
-      workspaceId,
-    }
-  );
+  try {
+    return await nodeAgentRequest(
+      nodeId,
+      env,
+      `/workspaces/${workspaceId}/agent-sessions/${sessionId}/stop`,
+      {
+        method: 'POST',
+        userId,
+        workspaceId,
+      }
+    );
+  } finally {
+    await markVmAgentContainerActiveWorkEndedBestEffort(env, nodeId, 'stop_agent_session');
+  }
 }
 
 export async function suspendAgentSessionOnNode(

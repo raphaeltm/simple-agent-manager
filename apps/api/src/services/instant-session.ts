@@ -278,6 +278,8 @@ export async function launchInstantSession(
       chatSessionId,
       label: workspaceName,
       agentType: input.agentType,
+      agentProfileId: input.agentProfileId ?? null,
+      skillId: input.skillId ?? null,
       visibleInitialPrompt: input.initialPrompt,
       promptKind: 'conversation',
       overrides: input.overrides,
@@ -293,6 +295,16 @@ export async function launchInstantSession(
         return result;
       },
     });
+    if (input.agentProfileId || input.skillId) {
+      await db
+        .update(schema.agentSessions)
+        .set({
+          agentProfileId: input.agentProfileId ?? null,
+          skillId: input.skillId ?? null,
+          updatedAt: new Date().toISOString(),
+        })
+        .where(eq(schema.agentSessions.id, bootstrapResult.agentSessionId));
+    }
     const acpSessionCreateDurationMs = Date.now() - acpSessionCreateStart;
     const acpSessionStartDurationMs =
       (phaseDurations.get('start_acp_session') ?? 0) +

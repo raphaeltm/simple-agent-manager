@@ -1,5 +1,15 @@
-import type { VmAgentContainer, VmAgentContainerLaunchConfig, VmAgentContainerLaunchSecrets } from '../durable-objects/vm-agent-container';
+import { eq } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/d1';
+
+import * as schema from '../db/schema';
+import {
+  DEFAULT_CF_CONTAINER_SLEEP_AFTER,
+  type VmAgentContainer,
+  type VmAgentContainerLaunchConfig,
+  type VmAgentContainerLaunchSecrets,
+} from '../durable-objects/vm-agent-container';
 import type { Env } from '../env';
+import { log } from '../lib/logger';
 import { errors } from '../middleware/error';
 import { runCloudflareRuntimePhase } from './cloudflare-runtime-phase';
 
@@ -13,7 +23,7 @@ export function getVmAgentContainerConfig(env: Env): VmAgentContainerConfig {
   return {
     enabled: (env.CF_CONTAINER_ENABLED ?? env.SANDBOX_ENABLED) === 'true',
     vmAgentPort: Number.parseInt(env.CF_CONTAINER_VM_AGENT_PORT || env.SANDBOX_VM_AGENT_PORT || '8080', 10),
-    sleepAfter: env.CF_CONTAINER_SLEEP_AFTER || env.SANDBOX_SLEEP_AFTER || '10m',
+    sleepAfter: env.CF_CONTAINER_SLEEP_AFTER || env.SANDBOX_SLEEP_AFTER || DEFAULT_CF_CONTAINER_SLEEP_AFTER,
   };
 }
 
@@ -71,6 +81,60 @@ export async function destroyVmAgentContainer(env: Env, nodeId: string): Promise
 export async function stopVmAgentContainer(env: Env, nodeId: string): Promise<void> {
   const container = getVmAgentContainer(env, nodeId);
   await container.stopForUser();
+}
+
+async function isCfContainerNode(env: Env, nodeId: string): Promise<boolean> {
+  if (!env.DATABASE || typeof env.DATABASE.prepare !== 'function') {
+    return false;
+  }
+  const db = drizzle(env.DATABASE, { schema });
+  const node = await db
+    .select({ runtime: schema.nodes.runtime })
+    .from(schema.nodes)
+    .where(eq(schema.nodes.id, nodeId))
+    .get();
+  return node?.runtime === 'cf-container';
+}
+
+export async function markVmAgentContainerActiveWorkStarted(
+  env: Env,
+  nodeId: string,
+  input: { workspaceId: string; agentSessionId: string; reason: string }
+): Promise<void> {
+  if (!(await isCfContainerNode(env, nodeId))) {
+    return;
+  }
+  const container = getVmAgentContainer(env, nodeId);
+  await container.markActiveWorkStarted(input);
+}
+
+export async function markVmAgentContainerActiveWorkEnded(
+  env: Env,
+  nodeId: string,
+  reason: string
+): Promise<void> {
+  if (!(await isCfContainerNode(env, nodeId))) {
+    return;
+  }
+  const container = getVmAgentContainer(env, nodeId);
+  await container.markActiveWorkEnded(reason);
+}
+
+export async function markVmAgentContainerActiveWorkEndedBestEffort(
+  env: Env,
+  nodeId: string | null | undefined,
+  reason: string
+): Promise<void> {
+  if (!nodeId) {
+    return;
+  }
+  await markVmAgentContainerActiveWorkEnded(env, nodeId, reason).catch((err) => {
+    log.warn('vm_agent_container_active_work_end_failed', {
+      nodeId,
+      reason,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  });
 }
 
 export async function runContainerPhase<T>(

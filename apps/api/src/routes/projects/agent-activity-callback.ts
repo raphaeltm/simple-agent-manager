@@ -7,6 +7,7 @@ import { errors } from '../../middleware/error';
 import { AcpSessionActivityReportSchema, jsonValidator } from '../../schemas';
 import { verifyCallbackToken } from '../../services/jwt';
 import * as projectDataService from '../../services/project-data';
+import { markVmAgentContainerActiveWorkEndedBestEffort } from '../../services/vm-agent-container';
 
 /**
  * Agent activity callback route — mounted BEFORE projectsRoutes in index.ts
@@ -68,6 +69,13 @@ agentActivityCallbackRoute.post(
       restartCount: body.restartCount,
       statusError: body.statusError,
     });
+    if (body.activity === 'idle' || body.activity === 'error') {
+      await markVmAgentContainerActiveWorkEndedBestEffort(
+        c.env,
+        existing.nodeId,
+        `agent_activity_${body.activity}`
+      );
+    }
     return c.body(null, 204);
   },
 );

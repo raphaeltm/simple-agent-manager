@@ -95,13 +95,15 @@ type bootstrapState struct {
 }
 
 type ProjectRuntimeEnvVar struct {
-	Key   string
-	Value string
+	Key      string
+	Value    string
+	IsSecret bool
 }
 
 type ProjectRuntimeFile struct {
-	Path    string
-	Content string
+	Path     string
+	Content  string
+	IsSecret bool
 }
 
 // ProvisionState carries optional credential and git identity data used when

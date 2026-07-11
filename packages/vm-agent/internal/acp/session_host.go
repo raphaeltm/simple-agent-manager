@@ -169,6 +169,10 @@ type SessionHostConfig struct {
 	// StartProcess is an internal test hook. Production code leaves it nil and
 	// uses StartProcess via startAgentProcess.
 	StartProcess func(*agentStartup) (agentProcess, error)
+
+	// RuntimeAssetsProvider fetches resolved project/profile/skill runtime assets
+	// for standalone sessions. It must not log or persist secret values.
+	RuntimeAssetsProvider RuntimeAssetsProvider
 }
 
 // BufferedMessage holds a single message in the replay buffer.

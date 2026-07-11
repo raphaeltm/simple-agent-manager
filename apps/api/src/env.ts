@@ -199,6 +199,7 @@ export interface Env {
   MAX_AUTO_NODE_LIFETIME_MS?: string;
   NODE_WARM_GRACE_PERIOD_MS?: string;
   ORPHANED_WORKSPACE_GRACE_PERIOD_MS?: string;
+  CF_CONTAINER_TERMINAL_TASK_SWEEP_LIMIT?: string; // Max terminal cf-container nodes to destroy per cron run (default: 25)
   // Workspace idle timeout (global default, overridable per-project)
   WORKSPACE_IDLE_TIMEOUT_MS?: string;
   // Auto-delete stopped workspaces after this TTL (default: 300000 = 5 minutes)
@@ -766,7 +767,9 @@ export interface Env {
 
   // Raw Cloudflare Container instant-session runtime
   CF_CONTAINER_ENABLED?: string; // Kill switch for raw Cloudflare Container instant sessions (generated deploy default: true)
-  CF_CONTAINER_SLEEP_AFTER?: string; // Container sleep-after duration (default: 10m)
+  CF_CONTAINER_SLEEP_AFTER?: string; // Container sleep-after duration (default: 1h)
+  CF_CONTAINER_ACTIVE_WORK_MAX_MS?: string; // Max active-work keepalive duration before defensive expiry (default: 7200000)
+  CF_CONTAINER_KEEPALIVE_RENEW_INTERVAL_MS?: string; // Active-work renewActivityTimeout interval (default: 300000)
   CF_CONTAINER_VM_AGENT_PORT?: string; // vm-agent standalone HTTP port inside the raw container (default: 8080)
   CF_CONTAINER_PORT_READY_TIMEOUT_MS?: string; // Max time to wait for vm-agent port readiness (default: 30000)
   CF_CONTAINER_WORKSPACE_BASE_DIR?: string; // Base checkout dir inside raw container (default: /workspaces)

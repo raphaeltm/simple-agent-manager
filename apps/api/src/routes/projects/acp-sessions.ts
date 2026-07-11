@@ -14,6 +14,7 @@ import { errors } from '../../middleware/error';
 import { requireProjectAccess, requireProjectCapability } from '../../middleware/project-auth';
 import { AcpSessionAssignSchema, AcpSessionForkSchema,AcpSessionHeartbeatSchema, AcpSessionStatusReportSchema, CreateAcpSessionSchema, jsonValidator } from '../../schemas';
 import * as projectDataService from '../../services/project-data';
+import { markVmAgentContainerActiveWorkEndedBestEffort } from '../../services/vm-agent-container';
 
 /** Default max ACP prompt size (256 KB). Override via MAX_ACP_PROMPT_BYTES env var. */
 const DEFAULT_MAX_ACP_PROMPT_BYTES = 262144;
@@ -188,7 +189,7 @@ acpSessionRoutes.post('/:id/acp-sessions/:sessionId/status', jsonValidator(AcpSe
   }
 
   // Validate node matches assigned node
-  await verifySessionNode(c.env, projectId, sessionId, body.nodeId, userId, 'status');
+  const existing = await verifySessionNode(c.env, projectId, sessionId, body.nodeId, userId, 'status');
 
   const session = await projectDataService.transitionAcpSession(
     c.env,
@@ -203,6 +204,14 @@ acpSessionRoutes.post('/:id/acp-sessions/:sessionId/status', jsonValidator(AcpSe
       errorMessage: body.errorMessage,
     }
   );
+
+  if (body.status === 'completed' || body.status === 'failed') {
+    await markVmAgentContainerActiveWorkEndedBestEffort(
+      c.env,
+      existing.nodeId,
+      `acp_status_${body.status}`
+    );
+  }
 
   return c.json(session);
 });

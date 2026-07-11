@@ -63,12 +63,18 @@ vi.mock('drizzle-orm/d1', () => ({
 }));
 
 vi.mock('../../../src/services/jwt', () => ({
-  verifyCallbackToken: vi.fn().mockResolvedValue({ workspace: 'ws-recoverable', type: 'callback', scope: 'workspace' }),
+  verifyCallbackToken: vi
+    .fn()
+    .mockResolvedValue({ workspace: 'ws-recoverable', type: 'callback', scope: 'workspace' }),
 }));
 
 vi.mock('../../../src/services/project-data', () => ({
   recordActivityEvent: vi.fn().mockResolvedValue(undefined),
   stopSession: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock('../../../src/services/task-terminal-cleanup', () => ({
+  cleanupTerminalTaskResourcesOrThrow: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('../../../src/services/notification', () => ({
@@ -104,7 +110,10 @@ async function createTestApp(): Promise<Hono> {
     if (err instanceof AppError) {
       return c.json(err.toJSON(), err.statusCode as 400 | 401 | 403 | 404 | 409 | 500);
     }
-    return c.json({ error: 'INTERNAL_ERROR', message: err instanceof Error ? err.message : String(err) }, 500);
+    return c.json(
+      { error: 'INTERNAL_ERROR', message: err instanceof Error ? err.message : String(err) },
+      500
+    );
   });
   return app;
 }
@@ -219,7 +228,10 @@ describe('task callback recoverable errors', () => {
     );
   });
 
-  it('still stops the chat session for terminal failed callbacks', async () => {
+  it('schedules terminal cleanup for failed callbacks', async () => {
+    const { cleanupTerminalTaskResourcesOrThrow } =
+      await import('../../../src/services/task-terminal-cleanup');
+
     const res = await postCallback(app, {
       toStatus: 'failed',
       reason: 'Agent prompt failed',
@@ -230,10 +242,17 @@ describe('task callback recoverable errors', () => {
 
     await flushWaitUntil();
 
-    expect(projectDataService.stopSession).toHaveBeenCalledWith(
+    expect(cleanupTerminalTaskResourcesOrThrow).toHaveBeenCalledWith(
       expect.anything(),
-      'proj-recoverable',
-      'chat-recoverable'
+      'task-recoverable',
+      {
+        status: 'failed',
+        errorMessage: 'fatal error',
+        projectId: 'proj-recoverable',
+        failureLogEvent: 'task.callback_terminal_cleanup_failed',
+        logContext: { projectId: 'proj-recoverable', source: 'task.callback' },
+      }
     );
+    expect(projectDataService.stopSession).not.toHaveBeenCalled();
   });
 });
