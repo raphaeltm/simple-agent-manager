@@ -368,6 +368,43 @@ describe('recoverStuckTasks', () => {
       expect(result.failedInProgress).toBe(0);
     });
 
+    it('preserves a live task-mode task paused at the awaiting_followup step', async () => {
+      // A task-mode task that called complete_task in conversation flow keeps
+      // status 'in_progress' with execution_step 'awaiting_followup'. With a live
+      // workspace + node + task-scoped ACP session it must NOT be failed, even
+      // past the execution limit — awaiting-followup is an intentional pause.
+      const now = Date.now();
+      const startedAt = new Date(now - 5 * 60 * 60 * 1000).toISOString();
+      const recentHeartbeat = new Date(now - 30 * 1000).toISOString();
+
+      const responses = new Map<string, { results: unknown[]; changes?: number }>();
+      responses.set('status IN (\'queued\', \'delegated\', \'in_progress\')', {
+        results: [
+          {
+            id: 'task-1',
+            project_id: 'proj-1',
+            user_id: 'user-1',
+            status: 'in_progress',
+            execution_step: 'awaiting_followup',
+            updated_at: startedAt,
+            started_at: startedAt,
+            workspace_id: 'ws-1',
+            auto_provisioned_node_id: 'node-1',
+          },
+        ],
+      });
+      responses.set('w.chat_session_id', {
+        results: [{ workspace_status: 'running', chat_session_id: 'chat-1', node_id: 'node-1', node_status: 'running', health_status: 'healthy', last_heartbeat_at: recentHeartbeat }],
+      });
+
+      const env = createMockEnv(responses);
+      const result = await recoverStuckTasks(env);
+
+      // Default listAcpSessions mock returns a live running session for ws-1.
+      expect(result.failedInProgress).toBe(0);
+      expect(result.heartbeatSkipped).toBe(1);
+    });
+
     it('fails in_progress tasks when node heartbeat is stale', async () => {
       const now = Date.now();
       const startedAt = new Date(now - 5 * 60 * 60 * 1000).toISOString();

@@ -27,6 +27,7 @@ import {
   DEFAULT_STUCK_TASK_MAX_CANDIDATES_PER_SWEEP,
   DEFAULT_TASK_DO_MISMATCH_GRACE_MS,
   DEFAULT_TASK_LIVENESS_MAX_ACP_SESSIONS,
+  DEFAULT_TASK_LIVENESS_PROBE_TIMEOUT_MS,
   DEFAULT_TASK_RUN_HARD_TIMEOUT_MS,
   DEFAULT_TASK_RUN_MAX_EXECUTION_MS,
   DEFAULT_TASK_STUCK_DELEGATED_TIMEOUT_MS,
@@ -160,10 +161,29 @@ export async function getTaskRuntimeLiveness(
 
   try {
     const limit = parseMs(env.TASK_LIVENESS_MAX_ACP_SESSIONS, DEFAULT_TASK_LIVENESS_MAX_ACP_SESSIONS);
-    const { sessions } = await projectDataService.listAcpSessions(env, task.project_id, {
-      chatSessionId: row.chat_session_id,
-      limit,
-    });
+    // Bound the ProjectData DO probe so a slow/unresponsive DO cannot stall the
+    // control-loop sweep (rule 47). A timeout is inconclusive, never fatal.
+    const probeTimeoutMs = parseMs(env.TASK_LIVENESS_PROBE_TIMEOUT_MS, DEFAULT_TASK_LIVENESS_PROBE_TIMEOUT_MS);
+    const TIMEOUT = Symbol('liveness_probe_timeout');
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const probe = await Promise.race([
+      projectDataService.listAcpSessions(env, task.project_id, {
+        chatSessionId: row.chat_session_id,
+        limit,
+      }),
+      new Promise<typeof TIMEOUT>((resolve) => {
+        timer = setTimeout(() => resolve(TIMEOUT), probeTimeoutMs);
+      }),
+    ]);
+    if (timer) clearTimeout(timer);
+    if (probe === TIMEOUT) {
+      log.warn('stuck_task.liveness_probe_timeout', {
+        workspaceId: task.workspace_id,
+        probeTimeoutMs,
+      });
+      return { live: false, conclusive: false, reason: 'task_liveness_timeout', workspaceStatus: row.workspace_status, nodeId: row.node_id, activeAcpSessionId: null };
+    }
+    const { sessions } = probe;
     const active = sessions.find((session) => {
       if (!ACTIVE_ACP_STATUSES.has(session.status) || session.workspaceId !== task.workspace_id) return false;
       const heartbeatAt = session.lastHeartbeatAt ?? session.updatedAt ?? session.startedAt ?? session.createdAt;
@@ -301,7 +321,7 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
     `SELECT id, project_id, user_id, status, execution_step, updated_at, started_at,
             workspace_id, auto_provisioned_node_id
      FROM tasks
-     WHERE (status IN ('queued', 'delegated', 'in_progress') OR status = 'awaiting_followup')
+     WHERE status IN ('queued', 'delegated', 'in_progress')
      ORDER BY updated_at ASC
      LIMIT ?`
   ).bind(maxCandidates).all<{
@@ -359,6 +379,15 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
       });
     }
 
+    // Compute task-scoped liveness at most once per candidate: both the
+    // in_progress timeout gate and the DO-completed mismatch gate below may need
+    // it, and each probe is a bounded ProjectData DO call (rule 47 — I/O budget).
+    let cachedLiveness: TaskRuntimeLiveness | null = null;
+    const probeLiveness = async (): Promise<TaskRuntimeLiveness> => {
+      cachedLiveness ??= await getTaskRuntimeLiveness(env, task);
+      return cachedLiveness;
+    };
+
     if (!isStuck) {
       switch (task.status) {
         case 'queued':
@@ -373,12 +402,14 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
             reason = `Task stuck in 'delegated' for ${Math.round(elapsedMs / 1000)}s (threshold: ${Math.round(delegatedTimeoutMs / 1000)}s).${stepInfo} Workspace may have failed to start.`;
           }
           break;
-        case 'in_progress':
-        case 'awaiting_followup': {
+        case 'in_progress': {
+          // A task-mode task legitimately paused at execution_step
+          // 'awaiting_followup' keeps status 'in_progress'; it is protected here
+          // by the same liveness gate (a live workspace/agent is never failed).
           const startedAt = task.started_at ? new Date(task.started_at).getTime() : updatedAt;
           const executionMs = now.getTime() - startedAt;
           if (executionMs > maxExecutionMs) {
-            const liveness = await getTaskRuntimeLiveness(env, task);
+            const liveness = await probeLiveness();
             if (liveness.live || !liveness.conclusive) {
               if (liveness.live) {
                 log.info('stuck_task.skipped_active_heartbeat', {
@@ -446,7 +477,7 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
           const doStatus = await stub.getStatus();
 
           if (doStatus && doStatus.completed && task.status !== 'failed' && task.status !== 'completed') {
-            const liveness = await getTaskRuntimeLiveness(env, task);
+            const liveness = await probeLiveness();
             if (liveness.conclusive && !liveness.live) {
               isStuck = true;
               reason = `TaskRunner orchestration completed but task runtime is gone (${liveness.reason}).`;
@@ -498,7 +529,7 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
     try {
       // Gather diagnostic context before recovery
       const diagnosticElapsedMs =
-        (task.status === 'in_progress' || task.status === 'awaiting_followup') && task.started_at
+        task.status === 'in_progress' && task.started_at
           ? now.getTime() - new Date(task.started_at).getTime()
           : elapsedMs;
       const diagnostics = await gatherDiagnostics(env, task, diagnosticElapsedMs, reason);
@@ -571,7 +602,7 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
       await db.insert(schema.taskStatusEvents).values({
         id: ulid(),
         taskId: task.id,
-        fromStatus: task.status as 'queued' | 'delegated' | 'in_progress' | 'awaiting_followup',
+        fromStatus: task.status as 'queued' | 'delegated' | 'in_progress',
         toStatus: 'failed',
         actorType: 'system',
         actorId: null,
@@ -632,7 +663,6 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
         case 'queued': result.failedQueued++; break;
         case 'delegated': result.failedDelegated++; break;
         case 'in_progress':
-        case 'awaiting_followup':
           result.failedInProgress++;
           if (compactionLoopRecovery) result.failedCompactionLoops++;
           break;

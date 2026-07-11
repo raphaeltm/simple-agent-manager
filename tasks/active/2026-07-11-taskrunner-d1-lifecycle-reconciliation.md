@@ -32,10 +32,37 @@ TaskRunner Durable Objects mark orchestration complete after handing an agent a 
 - [x] Correct diagnostic timing and bound control-loop candidates, ACP-session reads, and observability dedupe lookups.
 - [x] Add unit and cross-runtime regressions for recovery interleaving, callback idempotency, dead mismatch, and live negative behavior.
 - [x] Update public docs/environment references for new configuration.
-- [ ] Rebase after priority 2 merges and preserve—not duplicate—its recovery behavior.
-- [ ] Run focused/full validation, control-loop checks, and Cloudflare/security/constitution/test/docs-sync/control-loop/task-completion reviews.
+- [ ] Rebase after priority 2 merges and preserve—not duplicate—its recovery behavior. (P2 `01KX8SWC9DEMHCA8RSPZN5W1V1` has NOT landed; rebased onto current main instead. Coordination flagged on PR #1567.)
+- [x] Run focused/full validation, control-loop checks, and Cloudflare/security/constitution/test/docs-sync/control-loop/task-completion reviews. (See "Review fixes" below.)
 - [ ] Wait for staging turns 1–4 and unrelated deployments, query staging state/logs, deploy, and verify.
-- [ ] Open PR, pass CI, merge, monitor production deploy/evidence, and update idea `01KT90PKF6167SXZ9YZY0R26MM`.
+- [ ] Open PR (#1567), pass CI, merge, monitor production deploy/evidence, and update idea `01KT90PKF6167SXZ9YZY0R26MM`. (PR open; CI/staging/merge pending.)
+
+## Review fixes (2026-07-11, local specialist reviewers on PR #1567)
+
+Constitution: PASS. Cloudflare + task-completion: FAIL with confirmed real bugs in
+the recovered work, all fixed:
+
+1. `awaiting_followup` is a `TaskExecutionStep`, NOT a `TaskStatus`
+   (`packages/shared/src/types/task.ts`; writers set `execution_step`, never
+   `status` — `task-tools.ts:264`, `callback.ts:157`). Removed the dead
+   `status='awaiting_followup'` candidate-query OR (which also defeated the index),
+   switch case, `fromStatus` cast, `failedInProgress` counter case, and
+   diagnostic-timing branch. Real production rows are `in_progress` +
+   `execution_step='awaiting_followup'`, still handled by the `in_progress` case.
+2. Rule 47: added `TASK_LIVENESS_PROBE_TIMEOUT_MS` (default 5s) bounding the
+   ProjectData DO liveness probe; a timeout is inconclusive (fail-safe), never
+   fatal. Cached the per-candidate liveness result so the in_progress gate and the
+   DO-mismatch gate probe at most once.
+3. Two pre-existing workers-pool tests were silently broken by the code change and
+   never caught because the workers pool does not run in CI (see backlog
+   `2026-07-11-workers-pool-tests-not-run-in-ci.md`). Fixed both assertions; the
+   live-skip vertical slice is deferred to that backlog task (workerd could not run
+   in the task workspace to verify DO-seeded ACP sessions).
+4. Added CI-verified node-pool regressions: a live task-mode `awaiting_followup`
+   task is preserved; state-machine `aborted_by_recovery` Branch 1 (concurrent
+   recovery advanced D1 to `in_progress` → DO completes as running, no `failTask`).
+5. Fixed lint (import sort). Documented the liveness-gated recovery semantic
+   (live tasks are preserved past the hard ceiling) in `configuration.md`.
 
 ## Acceptance criteria
 

@@ -13,8 +13,8 @@
 import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
-import type { Env } from '../../src/env';
 import type { TaskRunner, TaskRunnerState } from '../../src/durable-objects/task-runner';
+import type { Env } from '../../src/env';
 import { gatherDiagnostics, recoverStuckTasks } from '../../src/scheduled/stuck-tasks';
 import {
   seedInstallation,
@@ -249,20 +249,28 @@ describe('recoverStuckTasks — vertical slice', () => {
 
       const task = await getTaskStatus(taskId);
       expect(task?.status).toBe('failed');
-      expect(task?.error_message).toContain('hard timeout');
+      // Past the hard timeout with no provable live runtime (no workspace), the
+      // task is failed through the liveness gate with a sanitized reason.
+      expect(task?.error_message).toContain('no longer live');
+      expect(task?.error_message).toContain('workspace_missing');
     });
   });
 
-  describe('heartbeat grace period', () => {
-    it('skips in_progress task with recent heartbeat', async () => {
+  describe('liveness grace period', () => {
+    it('preserves an in_progress task whose runtime identity is incomplete (fail-safe)', async () => {
+      // A running workspace with a fresh node heartbeat but no resolvable
+      // task-scoped runtime identity yields an INCONCLUSIVE liveness result.
+      // Fail-safe: the task must be left untouched, never failed on node
+      // heartbeat alone (the production regression this fix targets).
       await seedBaseData();
-      const taskId = 'task-st-heartbeat-skip';
+      const taskId = 'task-st-liveness-inconclusive';
       const nodeId = 'node-st-heartbeat';
       const fiveHoursAgo = new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString();
 
       await seedNode(nodeId, USER_ID, {
-        lastHeartbeatAt: new Date().toISOString(), // very recent heartbeat
+        lastHeartbeatAt: new Date().toISOString(), // very recent node heartbeat
       });
+      // Running workspace but no chat_session_id → runtime identity incomplete.
       await seedWorkspace('ws-st-heartbeat', nodeId, USER_ID, {
         projectId: PROJECT_ID,
         status: 'running',
@@ -286,9 +294,9 @@ describe('recoverStuckTasks — vertical slice', () => {
 
       const result = await recoverStuckTasks(testEnv);
 
-      expect(result.heartbeatSkipped).toBeGreaterThanOrEqual(1);
-
-      // Task should still be in_progress
+      // Inconclusive liveness is never fatal: the task is preserved, and a
+      // shared-node heartbeat alone does NOT count as a task-scoped skip.
+      expect(result.failedInProgress).toBe(0);
       const task = await getTaskStatus(taskId);
       expect(task?.status).toBe('in_progress');
     });

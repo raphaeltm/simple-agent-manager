@@ -50,6 +50,14 @@ export const DEFAULT_STUCK_TASK_MAX_CANDIDATES_PER_SWEEP = 100;
 /** Maximum ACP sessions read while proving task-scoped runtime liveness. */
 export const DEFAULT_TASK_LIVENESS_MAX_ACP_SESSIONS = 5;
 
+/**
+ * Per-candidate timeout for the task-scoped ACP liveness probe (a ProjectData DO
+ * call) inside the stuck-task control loop. A healthy runtime answers in
+ * milliseconds; past this bound the probe is treated as inconclusive (fail-safe:
+ * never fails a task on a slow/unresponsive DO). Keeps the sweep's worst-case
+ * wall time bounded (rule 47 — control-loop I/O budget). */
+export const DEFAULT_TASK_LIVENESS_PROBE_TIMEOUT_MS = 5 * 1000;
+
 // =============================================================================
 // TaskRunner DO Defaults (Alarm-Driven Orchestration — TDF-2)
 // =============================================================================

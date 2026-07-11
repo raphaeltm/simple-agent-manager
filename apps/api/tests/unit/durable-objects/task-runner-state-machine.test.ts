@@ -349,6 +349,30 @@ describe('transitionToInProgress', () => {
     expect(state.completed).toBe(true);
     expect(storageWrites.at(-1)).toMatchObject({ completed: true });
   });
+
+  it('completes the DO as running when a concurrent recovery already advanced D1 to in_progress', async () => {
+    // aborted_by_recovery Branch 1: the optimistic delegated->in_progress UPDATE
+    // finds 0 rows because a concurrent path already set the row to 'in_progress'.
+    // The DO must converge on 'running' WITHOUT failing the task or overwriting D1.
+    const { dbState, rc, storageWrites } = createContext();
+    seedTask(dbState, {
+      status: 'in_progress',
+      execution_step: 'running',
+    });
+    const state = makeState();
+
+    await transitionToInProgress(state, rc);
+
+    expect(dbState.tasks.get('task-1')).toMatchObject({
+      status: 'in_progress',
+      execution_step: 'running',
+    });
+    // No new status event and no failTask side effect — D1 is left as-is.
+    expect(dbState.statusEvents).toHaveLength(0);
+    expect(state.currentStep).toBe('running');
+    expect(state.completed).toBe(true);
+    expect(storageWrites.at(-1)).toMatchObject({ currentStep: 'running', completed: true });
+  });
 });
 
 describe('failTask', () => {
