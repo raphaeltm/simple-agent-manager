@@ -19,14 +19,14 @@ The runtime boundary is fixed: the container launch environment remains minimal.
 
 ## Implementation Checklist
 
-- [ ] Replace the coarse setup/install aliases with bounded phase timings covering pre-container records/session preparation, launch RPC, container start/port readiness, agent registration/heartbeat, repository materialization, ACP session creation, and ACP start.
-- [ ] Add container-internal bootstrap timing telemetry that distinguishes baked-binary validation/start from any explicitly supported fallback, without logging secrets.
-- [ ] Build the Linux AMD64 vm-agent before Wrangler deploy and bake it into `Dockerfile.vm-agent-container`; remove the mandatory fresh-container download path.
-- [ ] Preserve a safe, explicit rollback/recovery mechanism tied to a configurable/versioned artifact rather than silently accepting a mismatched or missing binary.
-- [ ] Add image/build SHA and vm-agent version observability to launch/ready telemetry and the deploy summary; keep version values generated from the deployment commit.
-- [ ] Integrate the build into reusable staging/production/self-host deployment flow with generated defaults and optional configuration overrides, not new manual secrets or environment prerequisites.
-- [ ] Preserve the minimal launch-env and ACP-start runtime-assets boundary from PR #1561; add contract tests that fail if runtime assets or user secrets move into the image/launch config.
-- [ ] Add unit/contract/deployment tests for phase timing invariants, baked binary presence/versioning, workflow ordering, rollback behavior, and no-secret image inputs.
+- [x] Replace the coarse setup/install aliases with bounded phase timings covering pre-container records/session preparation, launch RPC, container start/port readiness, agent registration/heartbeat, repository materialization, ACP session creation, and ACP start.
+- [x] Add container-internal bootstrap timing telemetry that distinguishes baked-binary validation/start from any explicitly supported fallback, without logging secrets.
+- [x] Build the Linux AMD64 vm-agent before Wrangler deploy and bake it into `Dockerfile.vm-agent-container`; remove the mandatory fresh-container download path.
+- [x] Preserve a safe, explicit rollback/recovery mechanism tied to a configurable/versioned artifact rather than silently accepting a mismatched or missing binary.
+- [x] Add image/build SHA and vm-agent version observability to launch/ready telemetry and the deploy summary; keep version values generated from the deployment commit.
+- [x] Integrate the build into reusable staging/production/self-host deployment flow with generated defaults and optional configuration overrides, not new manual secrets or environment prerequisites.
+- [x] Preserve the minimal launch-env and ACP-start runtime-assets boundary from PR #1561; add contract tests that fail if runtime assets or user secrets move into the image/launch config.
+- [x] Add unit/contract/deployment tests for phase timing invariants, baked binary presence/versioning, workflow ordering, rollback behavior, and no-secret image inputs.
 - [ ] Rebase on main after priority task `01KX8ST0S21H18QGN2NV5PQ45W` merges and reconcile `VmAgentContainer` lifecycle/session setup changes.
 - [ ] Run lint, typecheck, tests, build, targeted Go tests, and local container startup/benchmark validation.
 - [ ] Run Cloudflare, Go, security, constitution, env, doc-sync, deployment/test, and task-completion specialist reviews; address all blocking findings.
