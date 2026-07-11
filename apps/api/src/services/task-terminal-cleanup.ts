@@ -15,6 +15,29 @@ export interface TerminalTaskCleanupOptions {
   logContext?: Record<string, unknown>;
 }
 
+export interface TerminalTaskCleanupOrThrowOptions extends TerminalTaskCleanupOptions {
+  projectId: string;
+  failureLogEvent: string;
+}
+
+export async function cleanupTerminalTaskResourcesOrThrow(
+  env: Env,
+  taskId: string,
+  options: TerminalTaskCleanupOrThrowOptions
+): Promise<void> {
+  try {
+    await cleanupTerminalTaskResources(env, taskId, options);
+  } catch (err) {
+    log.error(options.failureLogEvent, {
+      taskId,
+      projectId: options.projectId,
+      status: options.status,
+      error: String(err),
+    });
+    throw err;
+  }
+}
+
 export async function cleanupTerminalTaskResources(
   env: Env,
   taskId: string,

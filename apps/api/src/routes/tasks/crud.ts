@@ -8,26 +8,23 @@ import {
   type TaskTriggerInfo,
 } from '@simple-agent-manager/shared';
 import type { SQL } from 'drizzle-orm';
-import {
-  and,
-  count,
-  desc,
-  eq,
-  gte,
-  lt,
-} from 'drizzle-orm';
+import { and, count, desc, eq, gte, lt } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
-import { toDependencyResponse,toTaskResponse } from '../../lib/mappers';
+import { toDependencyResponse, toTaskResponse } from '../../lib/mappers';
 import { parsePositiveInt, requireRouteParam } from '../../lib/route-helpers';
 import { ulid } from '../../lib/ulid';
-import { getUserId, requireApproved,requireAuth } from '../../middleware/auth';
+import { getUserId, requireApproved, requireAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
-import { requireOwnedTask, requireOwnedWorkspace, requireProjectCapability } from '../../middleware/project-auth';
+import {
+  requireOwnedTask,
+  requireOwnedWorkspace,
+  requireProjectCapability,
+} from '../../middleware/project-auth';
 import {
   CreateTaskDependencySchema,
   CreateTaskSchema,
@@ -36,21 +33,21 @@ import {
   UpdateTaskSchema,
   UpdateTaskStatusSchema,
 } from '../../schemas';
-import { resolveTaskAgentProfileHint, resolveTaskAgentProfileHints } from '../../services/agent-profile-display';
+import {
+  resolveTaskAgentProfileHint,
+  resolveTaskAgentProfileHints,
+} from '../../services/agent-profile-display';
 import { cronToHumanReadable } from '../../services/cron-utils';
 import { getRuntimeLimits } from '../../services/limits';
 import * as projectDataService from '../../services/project-data';
-import {
-  type TaskDependencyEdge,
-  wouldCreateTaskDependencyCycle,
-} from '../../services/task-graph';
+import { type TaskDependencyEdge, wouldCreateTaskDependencyCycle } from '../../services/task-graph';
 import {
   canTransitionTaskStatus,
   getAllowedTaskTransitions,
   isExecutableTaskStatus,
   isTaskStatus,
 } from '../../services/task-status';
-import { cleanupTerminalTaskResources } from '../../services/task-terminal-cleanup';
+import { cleanupTerminalTaskResourcesOrThrow } from '../../services/task-terminal-cleanup';
 import { cleanupWorkspaceForDeletion } from '../../services/workspace-cleanup';
 import {
   appendStatusEvent,
@@ -84,72 +81,74 @@ async function toDisplayTaskResponse(
 // The callback route has been extracted to callback.ts (mounted before projectsRoutes).
 // See .claude/rules/06-api-patterns.md and docs/notes/2026-05-12-task-callback-middleware-leak-postmortem.md.
 
-crudRoutes.post('/', requireAuth(), requireApproved(), jsonValidator(CreateTaskSchema), async (c) => {
-  const userId = getUserId(c);
-  const projectId = requireRouteParam(c, 'projectId');
-  const db = drizzle(c.env.DATABASE, { schema });
-  const limits = getRuntimeLimits(c.env);
-  const body = c.req.valid('json');
+crudRoutes.post(
+  '/',
+  requireAuth(),
+  requireApproved(),
+  jsonValidator(CreateTaskSchema),
+  async (c) => {
+    const userId = getUserId(c);
+    const projectId = requireRouteParam(c, 'projectId');
+    const db = drizzle(c.env.DATABASE, { schema });
+    const limits = getRuntimeLimits(c.env);
+    const body = c.req.valid('json');
 
-  const project = await requireProjectCapability(db, projectId, userId, 'task:write');
+    const project = await requireProjectCapability(db, projectId, userId, 'task:write');
 
-  const title = body.title?.trim();
-  if (!title) {
-    throw errors.badRequest('title is required');
-  }
-
-  const [taskCountRow] = await db
-    .select({ count: count() })
-    .from(schema.tasks)
-    .where(eq(schema.tasks.projectId, project.id));
-
-  if ((taskCountRow?.count ?? 0) >= limits.maxTasksPerProject) {
-    throw errors.badRequest(`Maximum ${limits.maxTasksPerProject} tasks allowed per project`);
-  }
-
-  let parentTaskId: string | null = null;
-  if (body.parentTaskId) {
-    const parent = await requireProjectTaskById(db, project.id, body.parentTaskId);
-    if (parent.projectId !== project.id) {
-      throw errors.badRequest('parentTaskId must reference a task in the same project');
+    const title = body.title?.trim();
+    if (!title) {
+      throw errors.badRequest('title is required');
     }
-    parentTaskId = parent.id;
+
+    const [taskCountRow] = await db
+      .select({ count: count() })
+      .from(schema.tasks)
+      .where(eq(schema.tasks.projectId, project.id));
+
+    if ((taskCountRow?.count ?? 0) >= limits.maxTasksPerProject) {
+      throw errors.badRequest(`Maximum ${limits.maxTasksPerProject} tasks allowed per project`);
+    }
+
+    let parentTaskId: string | null = null;
+    if (body.parentTaskId) {
+      const parent = await requireProjectTaskById(db, project.id, body.parentTaskId);
+      if (parent.projectId !== project.id) {
+        throw errors.badRequest('parentTaskId must reference a task in the same project');
+      }
+      parentTaskId = parent.id;
+    }
+
+    const now = new Date().toISOString();
+    const taskId = ulid();
+
+    await db.insert(schema.tasks).values({
+      id: taskId,
+      projectId: project.id,
+      userId,
+      parentTaskId,
+      workspaceId: null,
+      title,
+      description: body.description?.trim() || null,
+      status: 'draft',
+      priority: body.priority ?? 0,
+      agentProfileHint: body.agentProfileHint?.trim() || null,
+      createdBy: userId,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    await appendStatusEvent(db, taskId, null, 'draft', 'user', userId, 'Task created');
+
+    const rows = await db.select().from(schema.tasks).where(eq(schema.tasks.id, taskId)).limit(1);
+
+    const task = rows[0];
+    if (!task) {
+      throw errors.internal('Failed to load created task');
+    }
+
+    return c.json(await toDisplayTaskResponse(db, task, projectId, userId), 201);
   }
-
-  const now = new Date().toISOString();
-  const taskId = ulid();
-
-  await db.insert(schema.tasks).values({
-    id: taskId,
-    projectId: project.id,
-    userId,
-    parentTaskId,
-    workspaceId: null,
-    title,
-    description: body.description?.trim() || null,
-    status: 'draft',
-    priority: body.priority ?? 0,
-    agentProfileHint: body.agentProfileHint?.trim() || null,
-    createdBy: userId,
-    createdAt: now,
-    updatedAt: now,
-  });
-
-  await appendStatusEvent(db, taskId, null, 'draft', 'user', userId, 'Task created');
-
-  const rows = await db
-    .select()
-    .from(schema.tasks)
-    .where(eq(schema.tasks.id, taskId))
-    .limit(1);
-
-  const task = rows[0];
-  if (!task) {
-    throw errors.internal('Failed to load created task');
-  }
-
-  return c.json(await toDisplayTaskResponse(db, task, projectId, userId), 201);
-});
+);
 
 crudRoutes.get('/', requireAuth(), requireApproved(), async (c) => {
   const userId = getUserId(c);
@@ -175,9 +174,7 @@ crudRoutes.get('/', requireAuth(), requireApproved(), async (c) => {
   const limit = Math.min(requestedLimit, limits.taskListMaxPageSize);
   const cursor = c.req.query('cursor')?.trim();
 
-  const conditions: SQL[] = [
-    eq(schema.tasks.projectId, projectId),
-  ];
+  const conditions: SQL[] = [eq(schema.tasks.projectId, projectId)];
 
   if (requestedStatus) {
     conditions.push(eq(schema.tasks.status, requestedStatus));
@@ -200,7 +197,11 @@ crudRoutes.get('/', requireAuth(), requireApproved(), async (c) => {
   if (sort === 'updatedAtDesc') {
     query = query.orderBy(desc(schema.tasks.updatedAt), desc(schema.tasks.id));
   } else if (sort === 'priorityDesc') {
-    query = query.orderBy(desc(schema.tasks.priority), desc(schema.tasks.updatedAt), desc(schema.tasks.id));
+    query = query.orderBy(
+      desc(schema.tasks.priority),
+      desc(schema.tasks.updatedAt),
+      desc(schema.tasks.id)
+    );
   } else {
     query = query.orderBy(desc(schema.tasks.createdAt), desc(schema.tasks.id));
   }
@@ -222,7 +223,9 @@ crudRoutes.get('/', requireAuth(), requireApproved(), async (c) => {
       toTaskResponse(
         task,
         blockedSet.has(task.id),
-        task.agentProfileHint ? (displayProfileHints.get(task.agentProfileHint) ?? task.agentProfileHint) : null
+        task.agentProfileHint
+          ? (displayProfileHints.get(task.agentProfileHint) ?? task.agentProfileHint)
+          : null
       )
     ),
     nextCursor: hasNextPage ? (tasks[tasks.length - 1]?.id ?? null) : null,
@@ -307,86 +310,85 @@ crudRoutes.get('/:taskId', requireAuth(), requireApproved(), async (c) => {
   return c.json(response);
 });
 
-crudRoutes.patch('/:taskId', requireAuth(), requireApproved(), jsonValidator(UpdateTaskSchema), async (c) => {
-  const userId = getUserId(c);
-  const projectId = requireRouteParam(c, 'projectId');
-  const taskId = requireRouteParam(c, 'taskId');
-  const db = drizzle(c.env.DATABASE, { schema });
-  const body = c.req.valid('json');
+crudRoutes.patch(
+  '/:taskId',
+  requireAuth(),
+  requireApproved(),
+  jsonValidator(UpdateTaskSchema),
+  async (c) => {
+    const userId = getUserId(c);
+    const projectId = requireRouteParam(c, 'projectId');
+    const taskId = requireRouteParam(c, 'taskId');
+    const db = drizzle(c.env.DATABASE, { schema });
+    const body = c.req.valid('json');
 
-  await requireProjectCapability(db, projectId, userId, 'task:write');
-  const task = await requireProjectTaskById(db, projectId, taskId);
+    await requireProjectCapability(db, projectId, userId, 'task:write');
+    const task = await requireProjectTaskById(db, projectId, taskId);
 
-  if (
-    body.title === undefined &&
-    body.description === undefined &&
-    body.priority === undefined &&
-    body.parentTaskId === undefined
-  ) {
-    throw errors.badRequest('At least one field is required');
-  }
-
-  const nextValues: Partial<schema.NewTask> = {
-    updatedAt: new Date().toISOString(),
-  };
-
-  if (body.title !== undefined) {
-    const title = body.title.trim();
-    if (!title) {
-      throw errors.badRequest('title cannot be empty');
+    if (
+      body.title === undefined &&
+      body.description === undefined &&
+      body.priority === undefined &&
+      body.parentTaskId === undefined
+    ) {
+      throw errors.badRequest('At least one field is required');
     }
-    nextValues.title = title;
-  }
 
-  if (body.description !== undefined) {
-    nextValues.description = body.description?.trim() || null;
-  }
+    const nextValues: Partial<schema.NewTask> = {
+      updatedAt: new Date().toISOString(),
+    };
 
-  if (body.priority !== undefined) {
-    if (!Number.isInteger(body.priority)) {
-      throw errors.badRequest('priority must be an integer');
+    if (body.title !== undefined) {
+      const title = body.title.trim();
+      if (!title) {
+        throw errors.badRequest('title cannot be empty');
+      }
+      nextValues.title = title;
     }
-    nextValues.priority = body.priority;
-  }
 
-  if (body.parentTaskId !== undefined) {
-    if (body.parentTaskId === null) {
-      nextValues.parentTaskId = null;
-    } else {
-      const parentTaskId = body.parentTaskId.trim();
-      if (!parentTaskId) {
-        throw errors.badRequest('parentTaskId cannot be empty');
-      }
-      if (parentTaskId === task.id) {
-        throw errors.badRequest('Task cannot be its own parent');
-      }
-      const parent = await requireProjectTaskById(db, projectId, parentTaskId);
-      if (parent.projectId !== projectId) {
-        throw errors.badRequest('parentTaskId must reference a task in the same project');
-      }
-      nextValues.parentTaskId = parent.id;
+    if (body.description !== undefined) {
+      nextValues.description = body.description?.trim() || null;
     }
+
+    if (body.priority !== undefined) {
+      if (!Number.isInteger(body.priority)) {
+        throw errors.badRequest('priority must be an integer');
+      }
+      nextValues.priority = body.priority;
+    }
+
+    if (body.parentTaskId !== undefined) {
+      if (body.parentTaskId === null) {
+        nextValues.parentTaskId = null;
+      } else {
+        const parentTaskId = body.parentTaskId.trim();
+        if (!parentTaskId) {
+          throw errors.badRequest('parentTaskId cannot be empty');
+        }
+        if (parentTaskId === task.id) {
+          throw errors.badRequest('Task cannot be its own parent');
+        }
+        const parent = await requireProjectTaskById(db, projectId, parentTaskId);
+        if (parent.projectId !== projectId) {
+          throw errors.badRequest('parentTaskId must reference a task in the same project');
+        }
+        nextValues.parentTaskId = parent.id;
+      }
+    }
+
+    await db.update(schema.tasks).set(nextValues).where(eq(schema.tasks.id, task.id));
+
+    const rows = await db.select().from(schema.tasks).where(eq(schema.tasks.id, task.id)).limit(1);
+
+    const updatedTask = rows[0];
+    if (!updatedTask) {
+      throw errors.notFound('Task');
+    }
+
+    const blocked = await computeBlockedForTask(db, updatedTask.id);
+    return c.json(await toDisplayTaskResponse(db, updatedTask, projectId, userId, blocked));
   }
-
-  await db
-    .update(schema.tasks)
-    .set(nextValues)
-    .where(eq(schema.tasks.id, task.id));
-
-  const rows = await db
-    .select()
-    .from(schema.tasks)
-    .where(eq(schema.tasks.id, task.id))
-    .limit(1);
-
-  const updatedTask = rows[0];
-  if (!updatedTask) {
-    throw errors.notFound('Task');
-  }
-
-  const blocked = await computeBlockedForTask(db, updatedTask.id);
-  return c.json(await toDisplayTaskResponse(db, updatedTask, projectId, userId, blocked));
-});
+);
 
 crudRoutes.delete('/:taskId', requireAuth(), requireApproved(), async (c) => {
   const userId = getUserId(c);
@@ -411,155 +413,177 @@ crudRoutes.delete('/:taskId', requireAuth(), requireApproved(), async (c) => {
   return c.json({ success: true });
 });
 
-crudRoutes.post('/:taskId/status', requireAuth(), requireApproved(), jsonValidator(UpdateTaskStatusSchema), async (c) => {
-  const userId = getUserId(c);
-  const projectId = requireRouteParam(c, 'projectId');
-  const taskId = requireRouteParam(c, 'taskId');
-  const db = drizzle(c.env.DATABASE, { schema });
-  const body = c.req.valid('json');
+crudRoutes.post(
+  '/:taskId/status',
+  requireAuth(),
+  requireApproved(),
+  jsonValidator(UpdateTaskStatusSchema),
+  async (c) => {
+    const userId = getUserId(c);
+    const projectId = requireRouteParam(c, 'projectId');
+    const taskId = requireRouteParam(c, 'taskId');
+    const db = drizzle(c.env.DATABASE, { schema });
+    const body = c.req.valid('json');
 
-  await requireProjectCapability(db, projectId, userId, 'task:write');
-  const task = await requireProjectTaskById(db, projectId, taskId);
+    await requireProjectCapability(db, projectId, userId, 'task:write');
+    const task = await requireProjectTaskById(db, projectId, taskId);
 
-  if (!isTaskStatus(body.toStatus)) {
-    throw errors.badRequest('Invalid toStatus value');
-  }
+    if (!isTaskStatus(body.toStatus)) {
+      throw errors.badRequest('Invalid toStatus value');
+    }
 
-  const blocked = await computeBlockedForTask(db, task.id);
-  if (blocked && isExecutableTaskStatus(body.toStatus)) {
-    throw errors.conflict('Task is blocked by unresolved dependencies');
-  }
+    const blocked = await computeBlockedForTask(db, task.id);
+    if (blocked && isExecutableTaskStatus(body.toStatus)) {
+      throw errors.conflict('Task is blocked by unresolved dependencies');
+    }
 
-  if (!isTaskStatus(task.status)) {
-    throw errors.badRequest(`Invalid task status in database: ${task.status}`);
-  }
+    if (!isTaskStatus(task.status)) {
+      throw errors.badRequest(`Invalid task status in database: ${task.status}`);
+    }
 
-  if (!canTransitionTaskStatus(task.status, body.toStatus)) {
-    throw errors.conflict(
-      `Invalid transition ${task.status} -> ${body.toStatus}. Allowed: ${getAllowedTaskTransitions(task.status).join(', ') || 'none'}`
+    if (!canTransitionTaskStatus(task.status, body.toStatus)) {
+      throw errors.conflict(
+        `Invalid transition ${task.status} -> ${body.toStatus}. Allowed: ${getAllowedTaskTransitions(task.status).join(', ') || 'none'}`
+      );
+    }
+
+    const updatedTask = await setTaskStatus(db, task, body.toStatus, 'user', userId, {
+      reason: body.reason,
+      outputSummary: body.outputSummary,
+      outputBranch: body.outputBranch,
+      outputPrUrl: body.outputPrUrl,
+      errorMessage: body.errorMessage,
+    });
+
+    // Record activity event for task status change
+    c.executionCtx.waitUntil(
+      projectDataService
+        .recordActivityEvent(
+          c.env,
+          projectId,
+          `task.${body.toStatus}`,
+          'user',
+          userId,
+          null,
+          null,
+          taskId,
+          { title: task.title, fromStatus: task.status, toStatus: body.toStatus }
+        )
+        .catch((e) => {
+          log.warn('task.activity_event_failed', { taskId, error: String(e) });
+        })
     );
-  }
 
-  const updatedTask = await setTaskStatus(db, task, body.toStatus, 'user', userId, {
-    reason: body.reason,
-    outputSummary: body.outputSummary,
-    outputBranch: body.outputBranch,
-    outputPrUrl: body.outputPrUrl,
-    errorMessage: body.errorMessage,
-  });
-
-  // Record activity event for task status change
-  c.executionCtx.waitUntil(
-    projectDataService.recordActivityEvent(
-      c.env, projectId, `task.${body.toStatus}`, 'user', userId,
-      null, null, taskId, { title: task.title, fromStatus: task.status, toStatus: body.toStatus }
-    ).catch((e) => { log.warn('task.activity_event_failed', { taskId, error: String(e) }); })
-  );
-
-  // On terminal states, stop/fail the chat session and tear down task runtime resources.
-  if (body.toStatus === 'completed' || body.toStatus === 'failed' || body.toStatus === 'cancelled') {
-    try {
-      await cleanupTerminalTaskResources(c.env, taskId, {
+    // On terminal states, stop/fail the chat session and tear down task runtime resources.
+    if (
+      body.toStatus === 'completed' ||
+      body.toStatus === 'failed' ||
+      body.toStatus === 'cancelled'
+    ) {
+      await cleanupTerminalTaskResourcesOrThrow(c.env, taskId, {
         status: body.toStatus,
         errorMessage: updatedTask.errorMessage,
+        projectId,
+        failureLogEvent: 'task.terminal_cleanup_failed',
         logContext: { projectId, source: 'tasks.status' },
       });
-    } catch (e) {
-      log.error('task.terminal_cleanup_failed', {
-        taskId,
-        projectId: updatedTask.projectId,
-        status: body.toStatus,
-        error: String(e),
-      });
-      throw e;
     }
-  }
 
-  const nextBlocked = await computeBlockedForTask(db, updatedTask.id);
-  return c.json(await toDisplayTaskResponse(db, updatedTask, projectId, userId, nextBlocked));
-});
+    const nextBlocked = await computeBlockedForTask(db, updatedTask.id);
+    return c.json(await toDisplayTaskResponse(db, updatedTask, projectId, userId, nextBlocked));
+  }
+);
 
 // NOTE: The task callback route (POST /:taskId/status/callback) has been
 // extracted to callback.ts and mounted BEFORE projectsRoutes in index.ts
 // to avoid the Hono middleware scope leak from projectsRoutes.use('/*', requireAuth()).
 // See: docs/notes/2026-05-12-task-callback-middleware-leak-postmortem.md
 
-crudRoutes.post('/:taskId/dependencies', requireAuth(), requireApproved(), jsonValidator(CreateTaskDependencySchema), async (c) => {
-  const userId = getUserId(c);
-  const projectId = requireRouteParam(c, 'projectId');
-  const taskId = requireRouteParam(c, 'taskId');
-  const db = drizzle(c.env.DATABASE, { schema });
-  const limits = getRuntimeLimits(c.env);
-  const body = c.req.valid('json');
+crudRoutes.post(
+  '/:taskId/dependencies',
+  requireAuth(),
+  requireApproved(),
+  jsonValidator(CreateTaskDependencySchema),
+  async (c) => {
+    const userId = getUserId(c);
+    const projectId = requireRouteParam(c, 'projectId');
+    const taskId = requireRouteParam(c, 'taskId');
+    const db = drizzle(c.env.DATABASE, { schema });
+    const limits = getRuntimeLimits(c.env);
+    const body = c.req.valid('json');
 
-  await requireProjectCapability(db, projectId, userId, 'task:write');
-  const task = await requireProjectTaskById(db, projectId, taskId);
-  const dependsOnTaskId = body.dependsOnTaskId?.trim();
+    await requireProjectCapability(db, projectId, userId, 'task:write');
+    const task = await requireProjectTaskById(db, projectId, taskId);
+    const dependsOnTaskId = body.dependsOnTaskId?.trim();
 
-  if (!dependsOnTaskId) {
-    throw errors.badRequest('dependsOnTaskId is required');
-  }
+    if (!dependsOnTaskId) {
+      throw errors.badRequest('dependsOnTaskId is required');
+    }
 
-  if (dependsOnTaskId === task.id) {
-    throw errors.badRequest('Task cannot depend on itself');
-  }
+    if (dependsOnTaskId === task.id) {
+      throw errors.badRequest('Task cannot depend on itself');
+    }
 
-  const dependencyTask = await requireProjectTaskById(db, projectId, dependsOnTaskId);
-  if (dependencyTask.projectId !== projectId) {
-    throw errors.badRequest('Dependency task must belong to the same project');
-  }
+    const dependencyTask = await requireProjectTaskById(db, projectId, dependsOnTaskId);
+    if (dependencyTask.projectId !== projectId) {
+      throw errors.badRequest('Dependency task must belong to the same project');
+    }
 
-  const [dependencyCountRow] = await db
-    .select({ count: count() })
-    .from(schema.taskDependencies)
-    .where(eq(schema.taskDependencies.taskId, task.id));
+    const [dependencyCountRow] = await db
+      .select({ count: count() })
+      .from(schema.taskDependencies)
+      .where(eq(schema.taskDependencies.taskId, task.id));
 
-  if ((dependencyCountRow?.count ?? 0) >= limits.maxTaskDependenciesPerTask) {
-    throw errors.badRequest(
-      `Maximum ${limits.maxTaskDependenciesPerTask} dependencies allowed per task`
+    if ((dependencyCountRow?.count ?? 0) >= limits.maxTaskDependenciesPerTask) {
+      throw errors.badRequest(
+        `Maximum ${limits.maxTaskDependenciesPerTask} dependencies allowed per task`
+      );
+    }
+
+    const projectEdges = await db
+      .select({
+        taskId: schema.taskDependencies.taskId,
+        dependsOnTaskId: schema.taskDependencies.dependsOnTaskId,
+      })
+      .from(schema.taskDependencies)
+      .innerJoin(schema.tasks, eq(schema.tasks.id, schema.taskDependencies.taskId))
+      .where(eq(schema.tasks.projectId, projectId));
+
+    const edges: TaskDependencyEdge[] = projectEdges.map((edge) => ({
+      taskId: edge.taskId,
+      dependsOnTaskId: edge.dependsOnTaskId,
+    }));
+
+    if (wouldCreateTaskDependencyCycle(task.id, dependencyTask.id, edges)) {
+      throw errors.conflict('Dependency would create a cycle');
+    }
+
+    const now = new Date().toISOString();
+    try {
+      await db.insert(schema.taskDependencies).values({
+        taskId: task.id,
+        dependsOnTaskId: dependencyTask.id,
+        createdBy: userId,
+        createdAt: now,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.toLowerCase().includes('unique')) {
+        throw errors.conflict('Dependency already exists');
+      }
+      throw error;
+    }
+
+    return c.json(
+      {
+        taskId: task.id,
+        dependsOnTaskId: dependencyTask.id,
+        createdAt: now,
+      },
+      201
     );
   }
-
-  const projectEdges = await db
-    .select({
-      taskId: schema.taskDependencies.taskId,
-      dependsOnTaskId: schema.taskDependencies.dependsOnTaskId,
-    })
-    .from(schema.taskDependencies)
-    .innerJoin(schema.tasks, eq(schema.tasks.id, schema.taskDependencies.taskId))
-    .where(eq(schema.tasks.projectId, projectId));
-
-  const edges: TaskDependencyEdge[] = projectEdges.map((edge) => ({
-    taskId: edge.taskId,
-    dependsOnTaskId: edge.dependsOnTaskId,
-  }));
-
-  if (wouldCreateTaskDependencyCycle(task.id, dependencyTask.id, edges)) {
-    throw errors.conflict('Dependency would create a cycle');
-  }
-
-  const now = new Date().toISOString();
-  try {
-    await db.insert(schema.taskDependencies).values({
-      taskId: task.id,
-      dependsOnTaskId: dependencyTask.id,
-      createdBy: userId,
-      createdAt: now,
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (message.toLowerCase().includes('unique')) {
-      throw errors.conflict('Dependency already exists');
-    }
-    throw error;
-  }
-
-  return c.json({
-    taskId: task.id,
-    dependsOnTaskId: dependencyTask.id,
-    createdAt: now,
-  }, 201);
-});
+);
 
 crudRoutes.delete('/:taskId/dependencies', requireAuth(), requireApproved(), async (c) => {
   const userId = getUserId(c);
@@ -592,61 +616,71 @@ crudRoutes.delete('/:taskId/dependencies', requireAuth(), requireApproved(), asy
   return c.json({ success: true });
 });
 
-crudRoutes.post('/:taskId/delegate', requireAuth(), requireApproved(), jsonValidator(DelegateTaskSchema), async (c) => {
-  const userId = getUserId(c);
-  const projectId = requireRouteParam(c, 'projectId');
-  const taskId = requireRouteParam(c, 'taskId');
-  const db = drizzle(c.env.DATABASE, { schema });
-  const body = c.req.valid('json');
+crudRoutes.post(
+  '/:taskId/delegate',
+  requireAuth(),
+  requireApproved(),
+  jsonValidator(DelegateTaskSchema),
+  async (c) => {
+    const userId = getUserId(c);
+    const projectId = requireRouteParam(c, 'projectId');
+    const taskId = requireRouteParam(c, 'taskId');
+    const db = drizzle(c.env.DATABASE, { schema });
+    const body = c.req.valid('json');
 
-  await requireProjectCapability(db, projectId, userId, 'task:write');
-  const task = await requireOwnedTask(db, projectId, taskId, userId);
+    await requireProjectCapability(db, projectId, userId, 'task:write');
+    const task = await requireOwnedTask(db, projectId, taskId, userId);
 
-  if (task.status !== 'ready') {
-    throw errors.conflict('Only ready tasks can be delegated');
+    if (task.status !== 'ready') {
+      throw errors.conflict('Only ready tasks can be delegated');
+    }
+
+    const blocked = await computeBlockedForTask(db, task.id);
+    if (blocked) {
+      throw errors.conflict('Blocked tasks cannot be delegated');
+    }
+
+    const workspaceId = body.workspaceId?.trim();
+    if (!workspaceId) {
+      throw errors.badRequest('workspaceId is required');
+    }
+
+    const workspace = await requireOwnedWorkspace(db, workspaceId, userId);
+    if (workspace.status !== 'running') {
+      throw errors.badRequest('Workspace must be running to accept delegated tasks');
+    }
+
+    const now = new Date().toISOString();
+
+    await db
+      .update(schema.tasks)
+      .set({
+        workspaceId: workspace.id,
+        status: 'delegated',
+        updatedAt: now,
+      })
+      .where(eq(schema.tasks.id, task.id));
+
+    await appendStatusEvent(
+      db,
+      task.id,
+      task.status as TaskStatus,
+      'delegated',
+      'user',
+      userId,
+      'Delegated to workspace'
+    );
+
+    const rows = await db.select().from(schema.tasks).where(eq(schema.tasks.id, task.id)).limit(1);
+
+    const updatedTask = rows[0];
+    if (!updatedTask) {
+      throw errors.notFound('Task');
+    }
+
+    return c.json(await toDisplayTaskResponse(db, updatedTask, projectId, userId));
   }
-
-  const blocked = await computeBlockedForTask(db, task.id);
-  if (blocked) {
-    throw errors.conflict('Blocked tasks cannot be delegated');
-  }
-
-  const workspaceId = body.workspaceId?.trim();
-  if (!workspaceId) {
-    throw errors.badRequest('workspaceId is required');
-  }
-
-  const workspace = await requireOwnedWorkspace(db, workspaceId, userId);
-  if (workspace.status !== 'running') {
-    throw errors.badRequest('Workspace must be running to accept delegated tasks');
-  }
-
-  const now = new Date().toISOString();
-
-  await db
-    .update(schema.tasks)
-    .set({
-      workspaceId: workspace.id,
-      status: 'delegated',
-      updatedAt: now,
-    })
-    .where(eq(schema.tasks.id, task.id));
-
-  await appendStatusEvent(db, task.id, task.status as TaskStatus, 'delegated', 'user', userId, 'Delegated to workspace');
-
-  const rows = await db
-    .select()
-    .from(schema.tasks)
-    .where(eq(schema.tasks.id, task.id))
-    .limit(1);
-
-  const updatedTask = rows[0];
-  if (!updatedTask) {
-    throw errors.notFound('Task');
-  }
-
-  return c.json(await toDisplayTaskResponse(db, updatedTask, projectId, userId));
-});
+);
 
 crudRoutes.get('/:taskId/events', requireAuth(), requireApproved(), async (c) => {
   const userId = getUserId(c);
@@ -702,36 +736,45 @@ crudRoutes.post('/:taskId/close', requireAuth(), requireApproved(), async (c) =>
 
   // Only conversation-mode tasks can be closed via this endpoint
   if (task.taskMode !== 'conversation') {
-    throw errors.badRequest('Only conversation-mode tasks can be closed via this endpoint. Use complete_task for task-mode tasks.');
+    throw errors.badRequest(
+      'Only conversation-mode tasks can be closed via this endpoint. Use complete_task for task-mode tasks.'
+    );
   }
 
   // Only active tasks can be closed
   const closableStatuses: TaskStatus[] = ['in_progress', 'delegated'];
   if (!closableStatuses.includes(task.status as TaskStatus)) {
-    throw errors.badRequest(`Task cannot be closed from status '${task.status}'. Must be in_progress or delegated.`);
+    throw errors.badRequest(
+      `Task cannot be closed from status '${task.status}'. Must be in_progress or delegated.`
+    );
   }
 
   const now = new Date().toISOString();
 
-  await db.update(schema.tasks)
+  await db
+    .update(schema.tasks)
     .set({ status: 'completed', completedAt: now, updatedAt: now })
     .where(eq(schema.tasks.id, taskId));
 
-  await appendStatusEvent(db, taskId, task.status as TaskStatus, 'completed', 'user', userId, 'Conversation closed by user');
+  await appendStatusEvent(
+    db,
+    taskId,
+    task.status as TaskStatus,
+    'completed',
+    'user',
+    userId,
+    'Conversation closed by user'
+  );
 
   // Record activity event (best-effort)
   c.executionCtx.waitUntil(
-    projectDataService.recordActivityEvent(
-      c.env,
-      projectId,
-      'task.completed',
-      'user',
-      userId,
-      null,
-      null,
-      taskId,
-      { reason: 'Conversation closed by user' }
-    ).catch(() => { /* best-effort */ })
+    projectDataService
+      .recordActivityEvent(c.env, projectId, 'task.completed', 'user', userId, null, null, taskId, {
+        reason: 'Conversation closed by user',
+      })
+      .catch(() => {
+        /* best-effort */
+      })
   );
 
   // Immediately clean up the linked workspace so Archive has the same
@@ -740,11 +783,13 @@ crudRoutes.post('/:taskId/close', requireAuth(), requireApproved(), async (c) =>
     const [workspace] = await db
       .select()
       .from(schema.workspaces)
-      .where(and(
-        eq(schema.workspaces.id, task.workspaceId),
-        eq(schema.workspaces.userId, userId),
-        eq(schema.workspaces.projectId, projectId)
-      ))
+      .where(
+        and(
+          eq(schema.workspaces.id, task.workspaceId),
+          eq(schema.workspaces.userId, userId),
+          eq(schema.workspaces.projectId, projectId)
+        )
+      )
       .limit(1);
 
     if (workspace) {

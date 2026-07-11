@@ -16,17 +16,27 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 describe('task completion callback handling source contract', () => {
-  const callbackRouteFile = readFileSync(resolve(process.cwd(), 'src/routes/tasks/callback.ts'), 'utf8');
+  const callbackRouteFile = readFileSync(
+    resolve(process.cwd(), 'src/routes/tasks/callback.ts'),
+    'utf8'
+  );
   const crudRouteFile = readFileSync(resolve(process.cwd(), 'src/routes/tasks/crud.ts'), 'utf8');
-  const taskRunnerFile = readFileSync(resolve(process.cwd(), 'src/services/task-runner.ts'), 'utf8');
+  const taskRunnerFile = readFileSync(
+    resolve(process.cwd(), 'src/services/task-runner.ts'),
+    'utf8'
+  );
 
   it('imports shared terminal cleanup in callback route', () => {
-    expect(callbackRouteFile).toContain("import { cleanupTerminalTaskResources } from '../../services/task-terminal-cleanup'");
+    expect(callbackRouteFile).toContain(
+      "import { cleanupTerminalTaskResourcesOrThrow } from '../../services/task-terminal-cleanup'"
+    );
   });
 
   it('callback endpoint triggers terminal cleanup on all terminal statuses', () => {
-    expect(callbackRouteFile).toContain('cleanupTerminalTaskResources(c.env, taskId');
-    expect(callbackRouteFile).toContain("body.toStatus === 'completed' || body.toStatus === 'failed' || body.toStatus === 'cancelled'");
+    expect(callbackRouteFile).toContain('cleanupTerminalTaskResourcesOrThrow(c.env, taskId');
+    expect(callbackRouteFile).toContain("body.toStatus === 'completed'");
+    expect(callbackRouteFile).toContain("body.toStatus === 'failed'");
+    expect(callbackRouteFile).toContain("body.toStatus === 'cancelled'");
   });
 
   it('passes terminal status and error message to cleanup helper', () => {
@@ -48,16 +58,16 @@ describe('task completion callback handling source contract', () => {
     expect(taskRunnerFile).toContain('cleanupAutoProvisionedNode');
   });
 
-  it('completion flow is best-effort (wrapped in catch with logging)', () => {
-    const callbackSection = callbackRouteFile.slice(
-      callbackRouteFile.indexOf("status/callback'"),
-    );
-    expect(callbackSection).toContain('.catch((e) =>');
-    expect(callbackSection).toContain('cleanupTerminalTaskResources(c.env, taskId');
+  it('completion flow awaits terminal cleanup before success', () => {
+    const callbackSection = callbackRouteFile.slice(callbackRouteFile.indexOf("status/callback'"));
+    expect(callbackSection).toContain('await cleanupTerminalTaskResourcesOrThrow(c.env, taskId');
+    expect(callbackSection).toContain("failureLogEvent: 'task.callback_terminal_cleanup_failed'");
   });
 
   it('user-initiated status change also schedules terminal cleanup', () => {
-    expect(crudRouteFile).toContain('cleanupTerminalTaskResources(c.env, taskId');
-    expect(crudRouteFile).toContain("body.toStatus === 'completed' || body.toStatus === 'failed' || body.toStatus === 'cancelled'");
+    expect(crudRouteFile).toContain('cleanupTerminalTaskResourcesOrThrow(c.env, taskId');
+    expect(crudRouteFile).toContain("body.toStatus === 'completed'");
+    expect(crudRouteFile).toContain("body.toStatus === 'failed'");
+    expect(crudRouteFile).toContain("body.toStatus === 'cancelled'");
   });
 });
