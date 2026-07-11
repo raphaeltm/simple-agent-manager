@@ -166,6 +166,7 @@ export async function persistMessageBatch(
     toolMetadata: Record<string, unknown> | null;
     timestamp: string;
     sequence?: number;
+    origin?: string | null;
   }>
 ): Promise<{
   persisted: number;
@@ -184,6 +185,10 @@ export async function persistMessageBatch(
       toolMetadata: m.toolMetadata ? JSON.stringify(m.toolMetadata) : null,
       timestamp: m.timestamp,
       sequence: m.sequence,
+      // origin ("system" for SAM-injected messages) MUST be forwarded to the DO
+      // so the persisted message can be collapsed in the UI and excluded from
+      // dedup/search/topic/attention. Dropping it here silently loses the tag.
+      origin: m.origin ?? null,
     }))
   );
 }
