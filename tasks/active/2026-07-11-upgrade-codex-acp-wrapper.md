@@ -47,8 +47,8 @@ This is not an AI Gateway feature. Gateway mocks were useful only to prove ACP c
 - [x] Search for non-historical references to the old package and update only active runtime/test metadata, not archived specs/tasks unless they would mislead active behavior.
 - [x] Run targeted local tests for shared agent metadata and VM-agent ACP command metadata.
 - [x] Run broader validation required by `/do`.
-- [ ] Deploy the branch to staging.
-- [ ] Use Playwright staging auth with `SAM_PLAYWRIGHT_PRIMARY_USER` to start a primary user's project conversation with OpenAI Codex using a standard smaller/default model, then verify the agent responds.
+- [x] Deploy the branch to staging.
+- [x] Use Playwright staging auth with `SAM_PLAYWRIGHT_PRIMARY_USER` to start a primary user's project conversation with OpenAI Codex using a standard smaller/default model, then verify the agent responds.
 - [ ] Open the PR, wait for CI, merge when green, and monitor production deploy.
 
 ## Acceptance Criteria
@@ -71,3 +71,36 @@ This is not an AI Gateway feature. Gateway mocks were useful only to prove ACP c
 - Runtime startup config: `packages/vm-agent/internal/acp/session_host_startup.go`
 - Shared agent catalog: `packages/shared/src/agents.ts`
 - VM-agent tests: `packages/vm-agent/internal/acp/gateway_test.go`
+
+## Validation Notes
+
+- Local validation:
+  - `pnpm --filter @simple-agent-manager/shared test -- agents.test.ts`
+  - `PATH=/tmp/go1.26.5/bin:$PATH go test ./internal/acp -run 'TestGetAgentCommandInfo'`
+  - `PATH=/tmp/go1.26.5/bin:$PATH go vet ./internal/acp`
+  - `pnpm lint && pnpm typecheck && pnpm test && pnpm build`
+- Full `PATH=/tmp/go1.26.5/bin:$PATH go test ./...` in `packages/vm-agent` was attempted but blocked by unrelated local environment failures:
+  - `internal/deploy` caddy reload test hit `text file busy`.
+  - `internal/pty` and `internal/server` tests require a `docker` executable that is not installed in this environment.
+- Staging deployment:
+  - GitHub Actions run: `29152080272`
+  - Branch: `upgrade-codex-acp-wrapper`
+  - Deploy and smoke-test jobs passed.
+  - R2 VM-agent binaries were updated after deploy:
+    - `agents/vm-agent-linux-amd64` last modified `2026-07-11T12:13:25.515Z`
+    - `agents/vm-agent-linux-arm64` last modified `2026-07-11T12:13:27.632Z`
+- Staging Codex conversation smoke:
+  - Project: `01KTKXZ4ZZAT6MJFXRW1ZTQ7RB` (`hono`)
+  - Temporary Codex profile: `01KX8HWC5MRC8S8S0R9HCGDQAP` (`openai-codex`, `gpt-5.4-mini`, `runtime=vm`, `workspaceProfile=lightweight`)
+  - Task: `01KX8HWY9KV9Y2Y0HGKV60DDM6`
+  - Session: `4ec3b559-d365-4aba-bdf6-76cb22a1ba3b`
+  - Fresh staging node: `01KX8HX18MDAP26MWR2NHHYN6B`
+  - Workspace: `01KX8J4S7H087V8ZW5T8DZ2B6K`
+  - Observed assistant stream included `CODEX_ACP_STAGING_OK_20260711`, proving a standard Codex session starts and responds through the upgraded ACP wrapper.
+  - Cleanup: stopped the session, confirmed workspace status `stopped`, and deleted the temporary Codex profile. The task is terminal with status `cancelled` because stopping a conversation archives the running task after the successful smoke response.
+- Live app Playwright verification:
+  - Installed missing local Playwright Chromium browser/dependencies for this workspace.
+  - Authenticated against `https://api.sammy.party/api/auth/token-login` with `SAM_PLAYWRIGHT_PRIMARY_USER`.
+  - Opened `https://app.sammy.party/projects/01KTKXZ4ZZAT6MJFXRW1ZTQ7RB/chat/4ec3b559-d365-4aba-bdf6-76cb22a1ba3b`.
+  - Asserted the page body contains `CODEX_ACP_STAGING_OK_20260711`.
+  - Screenshot: `.codex/tmp/playwright-screenshots/codex-acp-staging-chat.png`.
