@@ -520,6 +520,46 @@ export async function sendPromptToAgentOnNode(
   }
 }
 
+export async function hibernateAgentSessionOnNode(
+  nodeId: string,
+  workspaceId: string,
+  sessionId: string,
+  env: Env,
+  userId: string,
+  input: {
+    chatSessionId: string;
+    runtime: string;
+  }
+): Promise<unknown> {
+  return nodeAgentRequest(nodeId, env, `/workspaces/${workspaceId}/agent-sessions/${sessionId}/hibernate`, {
+    method: 'POST',
+    userId,
+    workspaceId,
+    requestTimeoutMs: getNodeAgentRequestTimeoutMs(env),
+    body: JSON.stringify(input),
+  });
+}
+
+export async function restoreAgentSessionOnNode(
+  nodeId: string,
+  workspaceId: string,
+  sessionId: string,
+  env: Env,
+  userId: string,
+  input: {
+    chatSessionId: string;
+    runtime: string;
+  }
+): Promise<unknown> {
+  return nodeAgentRequest(nodeId, env, `/workspaces/${workspaceId}/agent-sessions/${sessionId}/restore`, {
+    method: 'POST',
+    userId,
+    workspaceId,
+    requestTimeoutMs: getNodeAgentRequestTimeoutMs(env),
+    body: JSON.stringify(input),
+  });
+}
+
 /**
  * Cancel a running prompt on an agent session.
  * Returns { success, status } instead of throwing on non-2xx responses,

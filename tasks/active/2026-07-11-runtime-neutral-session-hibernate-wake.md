@@ -23,15 +23,15 @@ Hard constraints from Raphaël, 2026-07-11:
 
 ## Implementation Checklist
 
-- [ ] Add additive D1 schema/migration for runtime-neutral session snapshots: canonical chat session key, R2 keys, manifest/degradation, expiry, and restore diagnostics.
-- [ ] Add env-configurable defaults for snapshot TTL, size budgets, per-entry thresholds, progress idle watchdogs, and R2 key prefix.
-- [ ] Add Worker snapshot service for deterministic one-snapshot-per-session R2 keys, metadata persistence, retention checks, cleanup hooks, and visible degradation state.
-- [ ] Add VM-agent callback/API endpoints with callback JWT auth for snapshot upload/download coordination, mounted outside browser-session middleware.
-- [ ] Add VM-agent hibernate implementation: git WIP bundle, `$HOME` tar with generic cache exclusions, size/skip manifest, progress idle watchdogs, and no remote push.
-- [ ] Add VM-agent restore implementation: restore `$HOME`, restore WIP bundle with soft reset to base, re-run runtime injection afterward, and report visible degraded results.
-- [ ] Wire cf-container hibernate on control handback before sleep is allowed.
-- [ ] Wire cf-container wake before proxying a sleeping container and before follow-up prompt dispatch; fall back visibly when no snapshot exists or restore fails.
-- [ ] Update follow-up prompt handling so a fresh vm-agent can rebuild a `SessionHost` and attempt native harness resume from restored `$HOME`.
+- [x] Add additive D1 schema/migration for runtime-neutral session snapshots: canonical chat session key, R2 keys, manifest/degradation, expiry, and restore diagnostics.
+- [x] Add env-configurable defaults for snapshot TTL, size budgets, per-entry thresholds, progress idle watchdogs, and R2 key prefix.
+- [x] Add Worker snapshot service for deterministic one-snapshot-per-session R2 keys, metadata persistence, retention checks, cleanup hooks, and visible degradation state.
+- [x] Add VM-agent callback/API endpoints with callback JWT auth for snapshot upload/download coordination, mounted outside browser-session middleware.
+- [x] Add VM-agent hibernate implementation: git WIP bundle, `$HOME` tar with generic cache exclusions, size/skip manifest, progress idle watchdogs, and no remote push.
+- [x] Add VM-agent restore implementation: restore `$HOME`, restore WIP bundle with soft reset to base, re-run runtime injection afterward, and report visible degraded results.
+- [x] Wire cf-container hibernate on control handback before sleep is allowed.
+- [x] Wire cf-container wake before proxying a sleeping container and before follow-up prompt dispatch; fall back visibly when no snapshot exists or restore fails.
+- [x] Update follow-up prompt handling so a fresh vm-agent can rebuild a `SessionHost` and attempt native harness resume from restored `$HOME`.
 - [ ] Add local tests: Worker service/unit tests, Miniflare/DO integration tests, VM-agent Go tests including `go test -race`, and a vertical-slice test covering Worker → DO → vm-agent → R2 state.
 - [ ] Run migration safety checks: `pnpm quality:migration-safety` and `pnpm quality:do-migration-safety`.
 - [ ] Run local quality gates: `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm build`, and package-specific tests.

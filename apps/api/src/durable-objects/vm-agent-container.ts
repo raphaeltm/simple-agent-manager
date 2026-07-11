@@ -1,10 +1,11 @@
 import { Container, switchPort } from '@cloudflare/containers';
-import { eq } from 'drizzle-orm';
+import { desc, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { signCallbackToken, signNodeManagementToken } from '../services/jwt';
 
 export const DEFAULT_CF_CONTAINER_SLEEP_AFTER = '1h';
 export const DEFAULT_CF_CONTAINER_ACTIVE_WORK_MAX_MS = 2 * 60 * 60 * 1000;
@@ -45,7 +46,7 @@ interface ActiveWorkState {
 
 const ACTIVE_WORK_KEY = 'activeWork';
 const KEEPALIVE_CALLBACK = 'renewActiveWorkKeepalive';
-const SLEEPING_RESPONSE = 'Container is asleep; wake/rehydrate is not implemented yet.';
+const WAKE_DEGRADED_RESPONSE = 'Workspace woke with degraded snapshot restore; retry the prompt or fork from transcript history.';
 
 export class VmAgentContainer extends Container<Env> {
   defaultPort = 8080;
@@ -111,9 +112,10 @@ export class VmAgentContainer extends Container<Env> {
     const state = await this.getState();
     const lifecycleStatus = await this.ctx.storage.get<LifecycleStatus>('lifecycleStatus');
     if (lifecycleStatus === 'sleeping') {
-      // Phase 3 of idea 01KX4KSXEXQMP41KS34TW9EN01 will replace this temporary
-      // response with wake/rehydrate before proxying the request.
-      return new Response(SLEEPING_RESPONSE, { status: 503 });
+      const wake = await this.wakeFromSnapshot();
+      if (!wake.ok) {
+        return new Response(wake.message || WAKE_DEGRADED_RESPONSE, { status: 503 });
+      }
     }
     if (state.status === 'stopped' || state.status === 'stopped_with_code') {
       return new Response('Container is stopped; create a new instant session.', { status: 410 });
@@ -235,9 +237,10 @@ export class VmAgentContainer extends Container<Env> {
     const state = await this.getState();
     const lifecycleStatus = await this.ctx.storage.get<LifecycleStatus>('lifecycleStatus');
     if (lifecycleStatus === 'sleeping') {
-      // Phase 3 of idea 01KX4KSXEXQMP41KS34TW9EN01 will replace this temporary
-      // response with wake/rehydrate before proxying the request.
-      return new Response(SLEEPING_RESPONSE, { status: 503 });
+      const wake = await this.wakeFromSnapshot();
+      if (!wake.ok) {
+        return new Response(wake.message || WAKE_DEGRADED_RESPONSE, { status: 503 });
+      }
     }
     if (state.status === 'stopped' || state.status === 'stopped_with_code') {
       return new Response('Container is stopped; create a new instant session.', { status: 410 });
@@ -297,6 +300,116 @@ export class VmAgentContainer extends Container<Env> {
     const raw = this.env.CF_CONTAINER_KEEPALIVE_RENEW_INTERVAL_MS;
     const parsed = raw ? Number.parseInt(raw, 10) : DEFAULT_CF_CONTAINER_KEEPALIVE_RENEW_INTERVAL_MS;
     return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_CF_CONTAINER_KEEPALIVE_RENEW_INTERVAL_MS;
+  }
+
+  private async wakeFromSnapshot(): Promise<{ ok: boolean; message?: string }> {
+    const config = await this.ctx.storage.get<VmAgentContainerLaunchConfig>('launchConfig');
+    if (!config) {
+      return { ok: false, message: 'Container launch configuration is unavailable.' };
+    }
+    const db = drizzle(this.env.DATABASE, { schema });
+    const workspace = await db
+      .select({
+        userId: schema.workspaces.userId,
+        chatSessionId: schema.workspaces.chatSessionId,
+      })
+      .from(schema.workspaces)
+      .where(eq(schema.workspaces.id, config.workspaceId))
+      .get();
+    if (!workspace?.chatSessionId) {
+      return { ok: false, message: 'Workspace session metadata is unavailable.' };
+    }
+    const agentSession = await db
+      .select({ id: schema.agentSessions.id })
+      .from(schema.agentSessions)
+      .where(eq(schema.agentSessions.workspaceId, config.workspaceId))
+      .orderBy(desc(schema.agentSessions.updatedAt))
+      .get();
+    if (!agentSession) {
+      return { ok: false, message: 'Agent session metadata is unavailable.' };
+    }
+
+    log.info('vm_agent_container_wake_started', {
+      nodeId: config.nodeId,
+      workspaceId: config.workspaceId,
+      chatSessionId: workspace.chatSessionId,
+      agentSessionId: agentSession.id,
+    });
+
+    await this.ctx.storage.put('lifecycleStatus', 'launching' satisfies LifecycleStatus);
+    const callbackToken = await signCallbackToken(config.workspaceId, this.env);
+    await this.launch(config, { nodeCallbackToken: callbackToken });
+
+    const { token } = await signNodeManagementToken(workspace.userId, config.nodeId, config.workspaceId, this.env);
+    const restoreUrl = new URL(`http://localhost:${config.vmAgentPort}/workspaces/${config.workspaceId}/agent-sessions/${agentSession.id}/restore`);
+    const restoreResponse = await this.containerFetch(
+      new Request(restoreUrl.toString(), {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          'X-SAM-Node-Id': config.nodeId,
+          'X-SAM-Workspace-Id': config.workspaceId,
+        },
+        body: JSON.stringify({
+          chatSessionId: workspace.chatSessionId,
+          runtime: 'cf-container',
+        }),
+      }),
+      config.vmAgentPort
+    );
+    const restoreBody = await restoreResponse.text().catch(() => '');
+    if (!restoreResponse.ok) {
+      await this.markWakeDegraded(config, restoreBody || `restore failed with HTTP ${restoreResponse.status}`);
+      return { ok: false, message: restoreBody || 'Session restore failed.' };
+    }
+
+    const now = new Date().toISOString();
+    await db.update(schema.nodes).set({
+      status: 'running',
+      healthStatus: 'healthy',
+      errorMessage: null,
+      updatedAt: now,
+    }).where(eq(schema.nodes.id, config.nodeId));
+    await db.update(schema.workspaces).set({
+      status: 'running',
+      errorMessage: null,
+      updatedAt: now,
+    }).where(eq(schema.workspaces.id, config.workspaceId));
+    await db.update(schema.agentSessions).set({
+      status: 'running',
+      errorMessage: null,
+      updatedAt: now,
+    }).where(eq(schema.agentSessions.id, agentSession.id));
+    await this.ctx.storage.put('lifecycleStatus', 'running' satisfies LifecycleStatus);
+
+    log.info('vm_agent_container_wake_completed', {
+      nodeId: config.nodeId,
+      workspaceId: config.workspaceId,
+      chatSessionId: workspace.chatSessionId,
+      agentSessionId: agentSession.id,
+    });
+    return { ok: true };
+  }
+
+  private async markWakeDegraded(config: VmAgentContainerLaunchConfig, message: string): Promise<void> {
+    const now = new Date().toISOString();
+    const db = drizzle(this.env.DATABASE, { schema });
+    await db.update(schema.workspaces).set({
+      status: 'recovery',
+      errorMessage: message,
+      updatedAt: now,
+    }).where(eq(schema.workspaces.id, config.workspaceId));
+    await db.update(schema.agentSessions).set({
+      status: 'error',
+      errorMessage: message,
+      updatedAt: now,
+    }).where(eq(schema.agentSessions.workspaceId, config.workspaceId));
+    log.warn('vm_agent_container_wake_degraded', {
+      nodeId: config.nodeId,
+      workspaceId: config.workspaceId,
+      message,
+    });
   }
 
   private async replaceKeepaliveSchedule(delayMs: number): Promise<void> {

@@ -1,11 +1,15 @@
+import { eq } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
+import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { extractBearerToken } from '../../lib/auth-helpers';
 import { log } from '../../lib/logger';
 import { errors } from '../../middleware/error';
 import { AcpSessionActivityReportSchema, jsonValidator } from '../../schemas';
 import { verifyCallbackToken } from '../../services/jwt';
+import { hibernateAgentSessionOnNode } from '../../services/node-agent';
 import * as projectDataService from '../../services/project-data';
 import { markVmAgentContainerActiveWorkEndedBestEffort } from '../../services/vm-agent-container';
 
@@ -70,6 +74,41 @@ agentActivityCallbackRoute.post(
       statusError: body.statusError,
     });
     if (body.activity === 'idle' || body.activity === 'error') {
+      if (body.activity === 'idle' && existing.workspaceId && existing.nodeId && existing.acpSdkSessionId) {
+        const db = drizzle(c.env.DATABASE, { schema });
+        const workspace = await db
+          .select({
+            id: schema.workspaces.id,
+            userId: schema.workspaces.userId,
+            chatSessionId: schema.workspaces.chatSessionId,
+            runtime: schema.nodes.runtime,
+          })
+          .from(schema.workspaces)
+          .leftJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))
+          .where(eq(schema.workspaces.id, existing.workspaceId))
+          .get();
+        if (workspace?.runtime === 'cf-container' && workspace.chatSessionId) {
+          await hibernateAgentSessionOnNode(
+            existing.nodeId,
+            existing.workspaceId,
+            existing.acpSdkSessionId,
+            c.env,
+            workspace.userId,
+            {
+              chatSessionId: workspace.chatSessionId,
+              runtime: 'cf-container',
+            }
+          ).catch((err) => {
+            log.warn('acp_activity.session_snapshot_failed', {
+              projectId,
+              sessionId,
+              workspaceId: existing.workspaceId,
+              nodeId: existing.nodeId,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          });
+        }
+      }
       await markVmAgentContainerActiveWorkEndedBestEffort(
         c.env,
         existing.nodeId,

@@ -140,6 +140,11 @@ export interface Env {
   COMPOSE_IMAGE_ARTIFACT_CLEANUP_BATCH_SIZE?: string; // Max abandoned compose artifacts to delete per cleanup run (default: 50)
   COMPOSE_IMAGE_ARTIFACT_CLEANUP_INTERVAL_HOURS?: string; // Minimum hours between R2 cleanup scans from cron (default: 24)
   COMPOSE_IMAGE_ARTIFACT_CLEANUP_LAST_RUN_KV_KEY?: string; // KV key for cleanup interval gating
+  SESSION_SNAPSHOT_TTL_DAYS?: string; // Runtime hibernate snapshot retention (default: 7)
+  SESSION_SNAPSHOT_R2_PREFIX?: string; // R2 key prefix for runtime hibernate snapshots
+  SESSION_SNAPSHOT_TOTAL_BUDGET_BYTES?: string; // Max combined home/WIP snapshot size (default: 104857600)
+  SESSION_SNAPSHOT_ENTRY_THRESHOLD_BYTES?: string; // Max individual file/dir included by vm-agent scanner (default: 52428800)
+  SESSION_SNAPSHOT_TRANSFER_IDLE_TIMEOUT_MS?: string; // No-progress upload/download watchdog window (default: 30000)
   DEPLOY_ACME_EMAIL?: string; // Contact email for deployment-node ACME certificates
   DEPLOY_ACME_CA?: string; // ACME CA directory override for deployment nodes
   DEPLOY_COMPOSE_CMD?: string; // Docker Compose command override on deployment nodes
