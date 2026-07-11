@@ -27,6 +27,7 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { stopWorkspaceOnNode } from './node-agent';
 import * as nodeLifecycleService from './node-lifecycle';
+import { stopNodeResources } from './nodes';
 
 function getCleanupDelayMs(env: Env): number {
   const value = env.TASK_RUN_CLEANUP_DELAY_MS;
@@ -78,6 +79,25 @@ export async function cleanupTaskRun(
   }
 
   log.info('task_run.cleanup.started', { taskId, workspaceId: task.workspaceId, nodeId: workspace.nodeId });
+
+  const [node] = await db
+    .select({
+      id: schema.nodes.id,
+      runtime: schema.nodes.runtime,
+    })
+    .from(schema.nodes)
+    .where(and(eq(schema.nodes.id, workspace.nodeId), eq(schema.nodes.userId, task.userId)))
+    .limit(1);
+
+  if (node?.runtime === 'cf-container') {
+    await stopNodeResources(workspace.nodeId, task.userId, env);
+    log.info('task_run.cleanup.cf_container_destroyed', {
+      taskId,
+      workspaceId: workspace.id,
+      nodeId: workspace.nodeId,
+    });
+    return;
+  }
 
   // Stop the workspace (idempotent: only if still running/recovery)
   if (workspace.status === 'running' || workspace.status === 'recovery') {

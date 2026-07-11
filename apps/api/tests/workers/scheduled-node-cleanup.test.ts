@@ -14,7 +14,7 @@
  * - Stale warm nodes: error is caught (no Hetzner), counted in result
  */
 import { env } from 'cloudflare:test';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../src/env';
 import { runNodeCleanupSweep } from '../../src/scheduled/node-cleanup';
@@ -49,6 +49,12 @@ async function getWorkspaceStatus(wsId: string): Promise<{ status: string } | nu
     .first<{ status: string }>();
 }
 
+async function getNodeRuntimeStatus(nodeId: string): Promise<{ status: string; runtime: string } | null> {
+  return env.DATABASE.prepare('SELECT status, runtime FROM nodes WHERE id = ?')
+    .bind(nodeId)
+    .first<{ status: string; runtime: string }>();
+}
+
 async function getObservabilityEvents(recoveryType: string): Promise<{ id: string; message: string }[]> {
   const result = await env.OBSERVABILITY_DATABASE.prepare(
     `SELECT id, message FROM platform_errors WHERE context LIKE ? ORDER BY created_at DESC`,
@@ -58,6 +64,55 @@ async function getObservabilityEvents(recoveryType: string): Promise<{ id: strin
 
 describe('runNodeCleanupSweep — vertical slice', () => {
   describe('orphaned workspace stopping (Phase 3)', () => {
+    it('destroys cf-container terminal task workspaces instead of leaving the container active', async () => {
+      await seedBaseData();
+      const nodeId = 'node-nc-cf-terminal';
+      const wsId = 'ws-nc-cf-terminal';
+      const taskId = 'task-nc-cf-terminal';
+      const oldDate = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+      const destroyForUser = vi.fn().mockResolvedValue(undefined);
+
+      await seedNode(nodeId, USER_ID, {
+        status: 'running',
+        createdAt: oldDate,
+        updatedAt: oldDate,
+      });
+      await env.DATABASE.prepare(
+        `UPDATE nodes SET runtime = 'cf-container' WHERE id = ?`,
+      ).bind(nodeId).run();
+      await seedWorkspace(wsId, nodeId, USER_ID, {
+        projectId: PROJECT_ID,
+        status: 'running',
+        chatSessionId: 'session-nc-cf-terminal',
+        createdAt: oldDate,
+      });
+      await seedTask(taskId, PROJECT_ID, USER_ID, {
+        status: 'completed',
+        workspaceId: wsId,
+        updatedAt: oldDate,
+      });
+
+      const testEnv = {
+        ...env,
+        CF_CONTAINER_ENABLED: 'true',
+        VM_AGENT_CONTAINER: {
+          idFromName: (id: string) => id,
+          get: () => ({ destroyForUser }),
+        },
+        ORPHANED_WORKSPACE_GRACE_PERIOD_MS: '1000',
+      } as unknown as Env;
+
+      const result = await runNodeCleanupSweep(testEnv);
+
+      expect(destroyForUser).toHaveBeenCalledTimes(1);
+      expect(result.cfContainersDestroyed).toBeGreaterThanOrEqual(1);
+      expect(await getWorkspaceStatus(wsId)).toMatchObject({ status: 'deleted' });
+      expect(await getNodeRuntimeStatus(nodeId)).toMatchObject({
+        status: 'deleted',
+        runtime: 'cf-container',
+      });
+    });
+
     it('stops orphaned workspace (completed task, running workspace past grace period)', async () => {
       await seedBaseData();
       const nodeId = 'node-nc-orphan-ws';
@@ -345,6 +400,7 @@ describe('runNodeCleanupSweep — vertical slice', () => {
         orphanedWorkspacesFlagged: expect.any(Number),
         orphanedNodesFlagged: expect.any(Number),
         stoppedWorkspacesDeleted: expect.any(Number),
+        cfContainersDestroyed: expect.any(Number),
         errors: expect.any(Number),
       });
     });

@@ -32,14 +32,23 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { deleteWorkspaceOnNode, stopWorkspaceOnNode } from '../services/node-agent';
-import { deleteNodeResources } from '../services/nodes';
+import { deleteNodeResources, stopNodeResources } from '../services/nodes';
 import { persistError } from '../services/observability';
 import * as projectDataService from '../services/project-data';
 
+const DEFAULT_CF_CONTAINER_TERMINAL_TASK_SWEEP_LIMIT = 25;
+
 function parseMs(value: string | undefined, fallback: number): number {
   if (!value) return fallback;
-  const parsed = parseInt(value, 10);
+  const parsed = Number.parseInt(value, 10);
   if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return parsed;
+}
+
+function parsePositiveInt(value: string | undefined, fallback: number): number {
+  if (!value) return fallback;
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isInteger(parsed) || parsed <= 0) return fallback;
   return parsed;
 }
 
@@ -50,6 +59,7 @@ export interface NodeCleanupResult {
   orphanedWorkspacesFlagged: number;
   orphanedNodesFlagged: number;
   stoppedWorkspacesDeleted: number;
+  cfContainersDestroyed: number;
   errors: number;
 }
 
@@ -108,7 +118,8 @@ async function destroyAutoProvisionedNodeForCleanup(
     await persistError(env.OBSERVABILITY_DATABASE, {
       source: 'api',
       level: 'error',
-      message: options.failureMessagePrefix + ': ' + (err instanceof Error ? err.message : String(err)),
+      message:
+        options.failureMessagePrefix + ': ' + (err instanceof Error ? err.message : String(err)),
       stack: err instanceof Error ? err.stack : undefined,
       context: {
         recoveryType: options.failureRecoveryType,
@@ -136,12 +147,93 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
     orphanedWorkspacesFlagged: 0,
     orphanedNodesFlagged: 0,
     stoppedWorkspacesDeleted: 0,
+    cfContainersDestroyed: 0,
     errors: 0,
   };
 
   const gracePeriodMs = parseMs(env.NODE_WARM_GRACE_PERIOD_MS, DEFAULT_NODE_WARM_GRACE_PERIOD_MS);
   const maxLifetimeMs = parseMs(env.MAX_AUTO_NODE_LIFETIME_MS, DEFAULT_MAX_AUTO_NODE_LIFETIME_MS);
-  const orphanGracePeriodMs = parseMs(env.ORPHANED_WORKSPACE_GRACE_PERIOD_MS, DEFAULT_ORPHANED_WORKSPACE_GRACE_PERIOD_MS);
+  const orphanGracePeriodMs = parseMs(
+    env.ORPHANED_WORKSPACE_GRACE_PERIOD_MS,
+    DEFAULT_ORPHANED_WORKSPACE_GRACE_PERIOD_MS
+  );
+  const cfContainerSweepLimit = parsePositiveInt(
+    env.CF_CONTAINER_TERMINAL_TASK_SWEEP_LIMIT,
+    DEFAULT_CF_CONTAINER_TERMINAL_TASK_SWEEP_LIMIT
+  );
+
+  // Control-loop budget: this cf-container safety net selects at most
+  // CF_CONTAINER_TERMINAL_TASK_SWEEP_LIMIT terminal task-backed containers per
+  // 5-minute cron run. Each candidate gets one Container destroy request through
+  // stopNodeResources(), and success marks the node/workspaces deleted so it
+  // leaves the candidate set.
+  const terminalCfContainerWorkspaces = await env.DATABASE.prepare(
+    `SELECT DISTINCT n.id as node_id, n.user_id, w.id as workspace_id, t.id as task_id, t.status as task_status
+     FROM nodes n
+     INNER JOIN workspaces w ON w.node_id = n.id
+     INNER JOIN tasks t ON t.workspace_id = w.id
+     WHERE n.runtime = 'cf-container'
+       AND n.status NOT IN ('deleted', 'stopped')
+       AND n.node_role = 'workspace'
+       AND w.status IN ('running', 'creating', 'recovery', 'sleeping', 'stopped')
+       AND t.status IN ('completed', 'failed', 'cancelled')
+       AND NOT EXISTS (
+         SELECT 1 FROM tasks active
+         WHERE active.workspace_id = w.id
+           AND active.status IN ('queued', 'delegated', 'in_progress')
+       )
+       AND t.updated_at < ?
+     ORDER BY t.updated_at ASC
+     LIMIT ?`
+  )
+    .bind(new Date(now.getTime() - orphanGracePeriodMs).toISOString(), cfContainerSweepLimit)
+    .all<{
+      node_id: string;
+      user_id: string;
+      workspace_id: string;
+      task_id: string;
+      task_status: string;
+    }>();
+
+  for (const candidate of terminalCfContainerWorkspaces.results) {
+    try {
+      log.warn('node_cleanup.cf_container_terminal_task_destroying', {
+        nodeId: candidate.node_id,
+        workspaceId: candidate.workspace_id,
+        taskId: candidate.task_id,
+        taskStatus: candidate.task_status,
+      });
+
+      await stopNodeResources(candidate.node_id, candidate.user_id, env);
+
+      await persistError(env.OBSERVABILITY_DATABASE, {
+        source: 'api',
+        level: 'warn',
+        message: 'Destroyed cf-container node left behind after terminal task',
+        context: {
+          recoveryType: 'cf_container_terminal_task_cleanup',
+          nodeId: candidate.node_id,
+          workspaceId: candidate.workspace_id,
+          taskId: candidate.task_id,
+          taskStatus: candidate.task_status,
+          gracePeriodMs: orphanGracePeriodMs,
+        },
+        userId: candidate.user_id,
+        nodeId: candidate.node_id,
+        workspaceId: candidate.workspace_id,
+      });
+
+      result.cfContainersDestroyed++;
+    } catch (err) {
+      log.error('node_cleanup.cf_container_terminal_task_destroy_failed', {
+        nodeId: candidate.node_id,
+        workspaceId: candidate.workspace_id,
+        taskId: candidate.task_id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      result.errors++;
+    }
+  }
 
   // 1. Find stale warm nodes with running workspace counts in a single query
   //    to avoid N+1 per-node workspace count lookups.
@@ -156,12 +248,14 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
        AND n.status = 'running'
        AND n.node_role = 'workspace'
      GROUP BY n.id, n.user_id, n.warm_since`
-  ).bind(staleThreshold).all<{
-    id: string;
-    user_id: string;
-    warm_since: string;
-    running_ws_count: number;
-  }>();
+  )
+    .bind(staleThreshold)
+    .all<{
+      id: string;
+      user_id: string;
+      warm_since: string;
+      running_ws_count: number;
+    }>();
 
   for (const node of staleWarmNodesWithCounts.results) {
     if (node.running_ws_count > 0) {
@@ -174,7 +268,11 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
     }
 
     try {
-      log.info('node_cleanup.destroying_stale_warm', { nodeId: node.id, userId: node.user_id, warmSince: node.warm_since });
+      log.info('node_cleanup.destroying_stale_warm', {
+        nodeId: node.id,
+        userId: node.user_id,
+        warmSince: node.warm_since,
+      });
 
       await deleteNodeResources(node.id, node.user_id, env);
 
@@ -194,7 +292,12 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
       });
       await db
         .update(schema.nodes)
-        .set({ status: 'deleted', warmSince: null, healthStatus: 'stale', updatedAt: now.toISOString() })
+        .set({
+          status: 'deleted',
+          warmSince: null,
+          healthStatus: 'stale',
+          updatedAt: now.toISOString(),
+        })
         .where(eq(schema.nodes.id, node.id));
       result.staleDestroyed++;
     } catch (err) {
@@ -240,13 +343,15 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
        AND n.node_role = 'workspace'
        AND n.created_at < ?
      GROUP BY n.id, n.user_id, n.status, n.created_at`
-  ).bind(lifetimeThreshold).all<{
-    id: string;
-    user_id: string;
-    status: string;
-    created_at: string;
-    active_ws_count: number;
-  }>();
+  )
+    .bind(lifetimeThreshold)
+    .all<{
+      id: string;
+      user_id: string;
+      status: string;
+      created_at: string;
+      active_ws_count: number;
+    }>();
 
   for (const node of autoProvisionedNodesWithCounts.results) {
     if (node.active_ws_count > 0) {
@@ -266,7 +371,8 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
     const destroyed = await destroyAutoProvisionedNodeForCleanup(db, env, now.toISOString(), node, {
       logEvent: 'node_cleanup.destroying_max_lifetime',
       failureLogEvent: 'node_cleanup.max_lifetime_destroy_failed',
-      successMessage: 'Destroyed auto-provisioned node exceeding max lifetime (no active workspaces)',
+      successMessage:
+        'Destroyed auto-provisioned node exceeding max lifetime (no active workspaces)',
       failureMessagePrefix: 'Failed to destroy max-lifetime node',
       recoveryType: 'max_lifetime_node_cleanup',
       failureRecoveryType: 'max_lifetime_node_cleanup_failure',
@@ -295,14 +401,16 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
        AND n.node_role = 'workspace'
        AND n.created_at < ?
      GROUP BY n.id, n.user_id, n.status, n.created_at, n.updated_at`
-  ).bind(stoppedHandoffThreshold).all<{
-    id: string;
-    user_id: string;
-    status: string;
-    created_at: string;
-    updated_at: string;
-    active_ws_count: number;
-  }>();
+  )
+    .bind(stoppedHandoffThreshold)
+    .all<{
+      id: string;
+      user_id: string;
+      status: string;
+      created_at: string;
+      updated_at: string;
+      active_ws_count: number;
+    }>();
 
   for (const node of stoppedHandoffNodes.results) {
     if (node.active_ws_count > 0) {
@@ -356,15 +464,17 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
            AND t.status IN ('queued', 'delegated', 'in_progress')
        )
        AND w.created_at < ?`
-  ).bind(new Date(now.getTime() - orphanGracePeriodMs).toISOString()).all<{
-    id: string;
-    node_id: string | null;
-    user_id: string;
-    status: string;
-    created_at: string;
-    project_id: string | null;
-    chat_session_id: string | null;
-  }>();
+  )
+    .bind(new Date(now.getTime() - orphanGracePeriodMs).toISOString())
+    .all<{
+      id: string;
+      node_id: string | null;
+      user_id: string;
+      status: string;
+      created_at: string;
+      project_id: string | null;
+      chat_session_id: string | null;
+    }>();
 
   for (const ws of orphanedWorkspaces.results) {
     log.warn('node_cleanup.orphaned_workspace_stopping', {
@@ -378,7 +488,10 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
       // Stop workspace on VM agent (best-effort)
       if (ws.node_id) {
         await stopWorkspaceOnNode(ws.node_id, ws.id, env, ws.user_id).catch((e) => {
-          log.warn('node_cleanup.orphan_stop_on_node_failed', { workspaceId: ws.id, error: String(e) });
+          log.warn('node_cleanup.orphan_stop_on_node_failed', {
+            workspaceId: ws.id,
+            error: String(e),
+          });
         });
       }
 
@@ -391,10 +504,16 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
       // Stop the chat session and clean up activity tracking
       if (ws.project_id && ws.chat_session_id) {
         await projectDataService.stopSession(env, ws.project_id, ws.chat_session_id).catch((e) => {
-          log.warn('node_cleanup.orphan_session_stop_failed', { workspaceId: ws.id, error: String(e) });
+          log.warn('node_cleanup.orphan_session_stop_failed', {
+            workspaceId: ws.id,
+            error: String(e),
+          });
         });
         await projectDataService.cleanupWorkspaceActivity(env, ws.project_id, ws.id).catch((e) => {
-          log.warn('node_cleanup.orphan_activity_cleanup_failed', { workspaceId: ws.id, error: String(e) });
+          log.warn('node_cleanup.orphan_activity_cleanup_failed', {
+            workspaceId: ws.id,
+            error: String(e),
+          });
         });
       }
 
@@ -415,7 +534,10 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
 
       result.orphanedWorkspacesFlagged++;
     } catch (e) {
-      log.error('node_cleanup.orphan_workspace_stop_failed', { workspaceId: ws.id, error: String(e) });
+      log.error('node_cleanup.orphan_workspace_stop_failed', {
+        workspaceId: ws.id,
+        error: String(e),
+      });
       result.errors++;
     }
   }
@@ -435,13 +557,15 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
          WHERE w.node_id = n.id
            AND w.status IN ('running', 'creating', 'recovery')
        )`
-  ).bind(new Date(now.getTime() - orphanGracePeriodMs).toISOString()).all<{
-    id: string;
-    user_id: string;
-    status: string;
-    updated_at: string;
-    warm_since: string | null;
-  }>();
+  )
+    .bind(new Date(now.getTime() - orphanGracePeriodMs).toISOString())
+    .all<{
+      id: string;
+      user_id: string;
+      status: string;
+      updated_at: string;
+      warm_since: string | null;
+    }>();
 
   for (const node of orphanedNodes.results) {
     log.warn('node_cleanup.orphaned_node_detected', {
@@ -477,18 +601,23 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
      WHERE w.status = 'stopped'
        AND w.updated_at < ?
      LIMIT 50`
-  ).bind(stoppedGraceThreshold).all<{
-    id: string;
-    node_id: string | null;
-    user_id: string;
-  }>();
+  )
+    .bind(stoppedGraceThreshold)
+    .all<{
+      id: string;
+      node_id: string | null;
+      user_id: string;
+    }>();
 
   for (const ws of staleStoppedWorkspaces.results) {
     try {
       // Delete on VM agent (best-effort — node may be gone)
       if (ws.node_id) {
         await deleteWorkspaceOnNode(ws.node_id, ws.id, env, ws.user_id).catch((e) => {
-          log.warn('node_cleanup.stale_stopped_delete_on_node_failed', { workspaceId: ws.id, error: String(e) });
+          log.warn('node_cleanup.stale_stopped_delete_on_node_failed', {
+            workspaceId: ws.id,
+            error: String(e),
+          });
         });
       }
 
@@ -500,7 +629,10 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
 
       result.stoppedWorkspacesDeleted++;
     } catch (e) {
-      log.error('node_cleanup.stale_stopped_workspace_delete_failed', { workspaceId: ws.id, error: String(e) });
+      log.error('node_cleanup.stale_stopped_workspace_delete_failed', {
+        workspaceId: ws.id,
+        error: String(e),
+      });
       result.errors++;
     }
   }
