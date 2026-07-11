@@ -29,7 +29,7 @@ Cloudflare Container-backed SAM workspaces (`runtime = 'cf-container'`) run a st
 - [x] Evaluate and, if low-risk, add a bounded cf-container orphan sweep/max-lifetime path with Rule 47 I/O budget and escape path. If not added, document the reason and residual risk.
 - [x] Run targeted API tests plus lint/typecheck/build gates required by `/do`.
 - [x] Run specialist reviews: task-completion-validator, cloudflare-specialist, constitution-validator, test-engineer.
-- [ ] Deploy to staging with coordination checks, run a task-backed cf-container session through changed terminal states, and verify container teardown through Cloudflare API/log evidence.
+- [x] Deploy to staging with coordination checks, run a task-backed cf-container session through changed terminal states, and verify container teardown through Cloudflare API/log evidence.
 - [ ] Update related SAM idea/backlog state with PR number and teardown evidence.
 
 ## Audit Results
@@ -57,7 +57,8 @@ Cloudflare Container-backed SAM workspaces (`runtime = 'cf-container'`) run a st
 - `pnpm --filter @simple-agent-manager/api lint` — passed with existing warnings.
 - `pnpm --filter @simple-agent-manager/api exec eslint ...changed files...` — passed with three existing non-null assertion warnings.
 - `pnpm --filter @simple-agent-manager/api exec vitest run --config vitest.workers.config.ts tests/workers/scheduled-node-cleanup.test.ts` — blocked by `workerd` signal 11 before importing tests while loading `@cloudflare/containers`; no assertions ran.
-- Staging run `https://github.com/raphaeltm/simple-agent-manager/actions/runs/29131354575` deployed `bf88767d8` successfully. Live verification created cf-container nodes `01KX788ZNFNV0D8FFWSZPFSC8S`, `01KX78FX70W108VR5NH1GAGFBS`, and `01KX78PZ339ABDN8F86MMRW138`; D1 confirmed all three reached `status='deleted'` after explicit session cleanup. A delegated terminal task (`01KX78QNH1JNT8FYDQ3CPH6WXK`) reproduced the remaining gap on the deployed build: task `cancelled`, workspace/node still `running` after the cleanup delay. Follow-up patch changes terminal routes from background `waitUntil()` to awaited cleanup and requires redeploy/retest.
+- Staging run `https://github.com/raphaeltm/simple-agent-manager/actions/runs/29131354575` deployed `bf88767d8` successfully. Live verification created cf-container nodes `01KX788ZNFNV0D8FFWSZPFSC8S`, `01KX78FX70W108VR5NH1GAGFBS`, and `01KX78PZ339ABDN8F86MMRW138`; D1 confirmed all three reached `status='deleted'` after explicit session cleanup. A delegated terminal task (`01KX78QNH1JNT8FYDQ3CPH6WXK`) reproduced the remaining gap on the deployed build: task `cancelled`, workspace/node still `running` after the cleanup delay. Follow-up patch changed terminal routes from background `waitUntil()` to awaited cleanup.
+- Staging run `https://github.com/raphaeltm/simple-agent-manager/actions/runs/29132642474` deployed `4190fc68f` successfully. Fixed-build verification created cf-container node `01KX79SMWCETHGBW8SDPHG14EF`, workspace `01KX79SN1T97P7FT4884ECKHPM`, and delegated task `01KX79TJ55K0PVAHT4AF47SJQQ`. Cancelling the delegated task returned `200`; D1 then showed task `cancelled`, workspace `stopped`, and node `status='deleted'` at `2026-07-11T00:39:35.022Z`. Observability `platform_errors` showed ACP activity for the same node/workspace before teardown, proving the container was live before cleanup.
 
 ## Specialist Review Evidence
 
