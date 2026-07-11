@@ -40,7 +40,7 @@ This must be fixed without putting user runtime assets or secrets into Cloudflar
 - [x] Preserve existing task-backed VM/devcontainer behavior and add targeted regression coverage.
 - [x] Run focused API and Go tests, then the full required quality suite.
 - [x] Run specialist reviews: task-completion-validator, cloudflare-specialist, go-specialist, security-auditor, constitution-validator, and test-engineer.
-- [ ] Coordinate staging deployment, deploy via `deploy-staging.yml`, verify migrations via CF API, create a staging profile/skill with env/file/secret assets, start a real Instant cf-container session, verify asset presence without echoing secret values, confirm no launch-env secret leakage, and clean up.
+- [x] Coordinate staging deployment, deploy via `deploy-staging.yml`, verify migrations via CF API, create a staging profile/skill with env/file/secret assets, start a real Instant cf-container session, verify asset presence without echoing secret values, confirm no launch-env secret leakage, and clean up.
 - [ ] Open PR, wait for CI, merge when green, monitor production deploy, and update idea `01KX4KRS8FNYYJQXWDS0QDM0EF` with PR/merge status.
 
 ## Acceptance Criteria
@@ -62,3 +62,22 @@ This must be fixed without putting user runtime assets or secrets into Cloudflar
 - Related merged PRs: #1557 and #1559
 - Key API files: `apps/api/src/routes/workspaces/runtime.ts`, `apps/api/src/routes/workspaces/_helpers.ts`, `apps/api/src/services/instant-session.ts`, `apps/api/src/services/agent-session-bootstrap.ts`, `apps/api/src/db/schema.ts`
 - Key vm-agent files: `packages/vm-agent/internal/server/project_runtime_assets.go`, `packages/vm-agent/internal/server/agent_ws.go`, `packages/vm-agent/internal/acp/session_host_startup.go`, `packages/vm-agent/internal/acp/process.go`, `packages/vm-agent/internal/bootstrap/bootstrap.go`
+
+## Verification Log
+
+- Local validation after the final route-level persistence fix:
+  - `pnpm lint` passed with existing warnings only.
+  - `pnpm typecheck` passed.
+  - `pnpm --filter @simple-agent-manager/api test` passed: 399 files, 5890 tests.
+  - `pnpm test` passed: 19 tasks successful.
+  - `pnpm build` passed: 9 tasks successful.
+  - `cd packages/vm-agent && go test ./...` passed.
+- Staging deploy coordination:
+  - Checked `deploy-staging.yml` active/queued runs before triggering: none.
+  - Deployed branch with GitHub Actions run `29133446080`; deploy and smoke-test jobs passed.
+- Staging runtime-asset probe:
+  - Temporary project `01KX7B3C7CYPWNE15CA9XZDT6X`, profile `01KX7B3HZ284ZKKS2TFY3A0B4A`, workspace `01KX7B41RNHKX4WQFEB9GRT49V`, agent session `01KX7B4BXP6KJZ2VYN9AMP7MYP`.
+  - Immediate D1 query confirmed `agent_sessions.agent_profile_id = 01KX7B3HZ284ZKKS2TFY3A0B4A` and `workspaces.agent_profile_hint = 01KX7B3HZ284ZKKS2TFY3A0B4A`.
+  - The cf-container `claude-code` agent ran the runtime asset check and returned assistant chunks `RUNTIME` + `_ASSETS_OK`, proving `SAM_RUNTIME_ASSET_TEST`, secret env presence, and `.sam-runtime-assets/staging-check.txt` were available.
+  - The secret value `staging-secret-do-not-print-01kx4krs8fny-claude` was not observed in session messages during polling.
+  - Temporary staging project/workspace cleanup confirmed: zero projects with name prefix `Runtime Assets Staging`.
