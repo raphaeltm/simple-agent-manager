@@ -135,6 +135,34 @@ Reviewed and intentionally NOT changed (documented rationale):
 - **[LOW constitution] hardcoded `sam-mcp`/`get_instructions`** — SAM-owned agent instruction prose,
   not an operational/deployment identifier; env-configurability is out of scope for this feature.
 
+## Post-mortem — origin dropped at the service boundary (found on staging E2E)
+
+- **What broke:** On staging, the SAM-injected reminder was correctly split into its own user message,
+  but it persisted with `origin=null` — so it rendered as a normal (uncollapsed) user message instead
+  of collapsed system context. The feature was visibly broken end-to-end despite all local gates green.
+- **Root cause:** `apps/api/src/services/project-data.ts:persistMessageBatch` re-maps batch messages
+  before the DO RPC and did not include `origin` (neither the param type nor the `messages.map(...)`).
+  The vm-agent sent `origin=system`, `routes/workspaces/runtime.ts:toProjectDataMessages` forwarded it,
+  but this intermediate service layer silently dropped it before the DO INSERT.
+- **Class of bug:** Missing propagation across an intermediate boundary that no test exercised. The
+  vm-agent tests mock the reporter; the DO worker tests call the stub directly; the API route tests
+  don't traverse the service→stub hop. Compounded by CI **not running the DO worker suite at all**
+  (`test:workers` is absent from `ci.yml`) and that suite SIGSEGV-ing locally — so the DO-side origin
+  tests ran nowhere.
+- **Why not caught:** No vertical-slice test crossed runtime.ts → project-data service → DO stub
+  (rule 35/10). Local + CI both skipped the worker suite; only real staging E2E exercised the full path.
+- **Process fix (this PR):** Added a Node-pool service-layer regression test
+  (`tests/unit/services/project-data-retry.test.ts` → "forwards origin to the DO stub in
+  persistMessageBatch") that runs in CI and fails on the pre-fix code. Filed
+  `tasks/backlog/2026-07-11-ci-does-not-run-do-worker-tests.md` to make the DO worker suite run in CI.
+
+## Staging coordination note
+
+Priority-1's branch (`sam/implement-phase-3a-idea-04cwjb`) re-deployed staging at 18:58 (after its
+own turn and after my 18:48 deploy), overwriting my Worker + vm-agent binary. My first E2E attempt
+tested priority-1's code (main-based concatenation), not mine. Re-deployed my branch (19:26) and
+re-verified against my own code; that is when the service-boundary bug surfaced.
+
 ## Release constraints
 
 - Coordinate staging as turn 3 of 5: priorities `01KX8ST0S21H18QGN2NV5PQ45W` and `01KX8SWC9DEMHCA8RSPZN5W1V1` must finish staging first, and Actions must be clear.
