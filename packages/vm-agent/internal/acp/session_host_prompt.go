@@ -278,11 +278,28 @@ func (h *SessionHost) currentACPSession() (*acpsdk.ClientSideConnection, acpsdk.
 }
 
 func parsePromptBlocks(params json.RawMessage) ([]acpsdk.ContentBlock, string, string, error) {
+	// `_meta` and `annotations` are ACP-standard, optional fields on a text content
+	// block (see agentclientprotocol.com/protocol/extensibility). They can carry
+	// implementation-specific metadata (e.g. a SAM "this block is system-injected"
+	// marker, or `annotations.audience: ["assistant"]`). We preserve them here so the
+	// marker is available IN-PROCESS on the returned blocks slice for a future consumer
+	// (mirror/persistence origin-tagging); `acpsdk.TextBlock(text)` would drop them (it
+	// only sets Text+Type).
+	//
+	// IMPORTANT: these fields do NOT survive OUTWARD over either ACP transport. Both
+	// `acpConn.Prompt` (to the agent CLI) and the mirror broadcast serialize each block
+	// via `acpsdk.ContentBlock.MarshalJSON`, whose text variant re-emits only {type,text}
+	// — stripping `_meta`/`annotations`. So the marker cannot ride the ACP block to the
+	// agent or to viewers; a consumer must propagate origin via the vm-agent's own
+	// fields. See TestContentBlockMarshal_DropsMetaAndAnnotations and
+	// TestInjectUserMessageNotifications_SDKMarshalStripsMarker.
 	var promptParams struct {
 		MessageID string `json:"messageId"`
 		Prompt    []struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
+			Type        string              `json:"type"`
+			Text        string              `json:"text"`
+			Meta        map[string]any      `json:"_meta,omitempty"`
+			Annotations *acpsdk.Annotations `json:"annotations,omitempty"`
 		} `json:"prompt"`
 	}
 	if err := json.Unmarshal(params, &promptParams); err != nil {
@@ -295,7 +312,12 @@ func parsePromptBlocks(params json.RawMessage) ([]acpsdk.ContentBlock, string, s
 		if p.Type != "text" || p.Text == "" {
 			continue
 		}
-		blocks = append(blocks, acpsdk.TextBlock(p.Text))
+		blocks = append(blocks, acpsdk.ContentBlock{Text: &acpsdk.ContentBlockText{
+			Type:        "text",
+			Text:        p.Text,
+			Meta:        p.Meta,
+			Annotations: p.Annotations,
+		}})
 		if firstTextContent == "" {
 			firstTextContent = p.Text
 		}
