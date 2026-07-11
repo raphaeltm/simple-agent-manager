@@ -53,7 +53,7 @@ describe('AgentCrashReportView', () => {
     expect(copiedReport).toContain('stderr truncated: yes');
     expect(copiedReport).toContain('fatal: peer disconnected before response');
     expect(copiedReport).not.toContain('sk-secret');
-    expect(screen.getByRole('button', { name: 'Copied' })).not.toBeNull();
+    expect(await screen.findByRole('button', { name: 'Copied' })).not.toBeNull();
   });
 
   it('shows copy failure feedback when clipboard is unavailable', async () => {
