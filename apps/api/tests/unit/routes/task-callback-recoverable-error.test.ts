@@ -259,6 +259,7 @@ describe('task callback recoverable errors', () => {
   it('accepts a repeated same-terminal callback and reruns idempotent cleanup', async () => {
     const { cleanupTerminalTaskResourcesOrThrow } =
       await import('../../../src/services/task-terminal-cleanup');
+    const { setTaskStatus } = await import('../../../src/routes/tasks/_helpers');
     mocks.task.status = 'failed';
     mocks.task.errorMessage = 'fatal error';
 
@@ -280,5 +281,7 @@ describe('task callback recoverable errors', () => {
         logContext: { projectId: 'proj-recoverable', source: 'task.callback.idempotent' },
       }
     );
+    // Idempotency invariant: the already-terminal row is NOT written again.
+    expect(setTaskStatus).not.toHaveBeenCalled();
   });
 });

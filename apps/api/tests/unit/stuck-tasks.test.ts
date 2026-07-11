@@ -466,6 +466,59 @@ describe('recoverStuckTasks', () => {
       );
     });
 
+    it('fails an in_progress task when the node is healthy but the task-scoped ACP session is gone', async () => {
+      // The exact production regression: a HEALTHY node with a RECENT heartbeat
+      // is not proof the task is alive. When the task-scoped ACP session is
+      // absent/stale, reconciliation must still fail the task — a shared-node
+      // heartbeat cannot independently suppress it.
+      const now = Date.now();
+      const startedAt = new Date(now - 5 * 60 * 60 * 1000).toISOString();
+      const recentHeartbeat = new Date(now - 30 * 1000).toISOString(); // node very much alive
+
+      const responses = new Map<string, { results: unknown[]; changes?: number }>();
+      responses.set('status IN (\'queued\', \'delegated\', \'in_progress\')', {
+        results: [
+          {
+            id: 'task-1',
+            project_id: 'proj-1',
+            user_id: 'user-1',
+            status: 'in_progress',
+            execution_step: 'running',
+            updated_at: startedAt,
+            started_at: startedAt,
+            workspace_id: 'ws-1',
+            auto_provisioned_node_id: 'node-1',
+          },
+        ],
+      });
+      responses.set('w.chat_session_id', {
+        results: [{ workspace_status: 'running', chat_session_id: 'chat-1', node_id: 'node-1', node_status: 'running', health_status: 'healthy', last_heartbeat_at: recentHeartbeat }],
+      });
+      responses.set('node_id, status FROM workspaces', {
+        results: [{ id: 'ws-1', node_id: 'node-1', status: 'running' }],
+      });
+      responses.set('status, health_status FROM nodes', {
+        results: [{ id: 'node-1', status: 'running', health_status: 'healthy' }],
+      });
+      responses.set('UPDATE tasks SET status = \'failed\'', { results: [], changes: 1 });
+
+      // No live task-scoped ACP session, despite the healthy node.
+      projectDataMocks.listAcpSessions.mockResolvedValueOnce({ sessions: [], total: 0 });
+
+      const env = createMockEnv(responses);
+      const result = await recoverStuckTasks(env);
+
+      expect(result.failedInProgress).toBe(1);
+      expect(result.heartbeatSkipped).toBe(0);
+      // Failure is driven by the ACP-session check, not the node heartbeat.
+      expect(syncTriggerExecutionMock).toHaveBeenCalledWith(
+        env.DATABASE,
+        'task-1',
+        'failed',
+        expect.stringContaining('task_acp_session_not_live'),
+      );
+    });
+
     it('fails in_progress tasks with no node (no heartbeat to check)', async () => {
       const now = Date.now();
       const startedAt = new Date(now - 5 * 60 * 60 * 1000).toISOString();
@@ -654,14 +707,14 @@ describe('recoverStuckTasks', () => {
       expect(result.heartbeatSkipped).toBe(0);
     });
 
-    it('respects custom hard timeout from env var', async () => {
+    it('respects custom hard timeout from env var in the failure threshold', async () => {
       const now = Date.now();
-      // Custom hard timeout: 2 hours (7200000ms)
-      // Task started 3 hours ago — past custom hard timeout
+      // Custom hard timeout: 2 hours (7200000ms → 120 min).
+      // Task started 3 hours ago — past custom hard timeout, with a dead runtime
+      // (no workspace). The custom hard-timeout value must surface as the
+      // threshold in the sanitized failure reason (would be 480 min on default).
       const startedAt = new Date(now - 3 * 60 * 60 * 1000).toISOString();
       const updatedAt = new Date(now - 3 * 60 * 60 * 1000).toISOString();
-      // Fresh heartbeat — would normally grant grace
-      const recentHeartbeat = new Date(now - 30 * 1000).toISOString();
 
       const responses = new Map<string, { results: unknown[]; changes?: number }>();
       responses.set('status IN (\'queued\', \'delegated\', \'in_progress\')', {
@@ -674,22 +727,10 @@ describe('recoverStuckTasks', () => {
             execution_step: 'running',
             updated_at: updatedAt,
             started_at: startedAt,
-            workspace_id: 'ws-1',
+            workspace_id: null,
             auto_provisioned_node_id: 'node-1',
           },
         ],
-      });
-      responses.set('node_id FROM workspaces', {
-        results: [{ node_id: 'node-1' }],
-      });
-      responses.set('last_heartbeat_at FROM nodes', {
-        results: [{ last_heartbeat_at: recentHeartbeat }],
-      });
-      responses.set('node_id, status FROM workspaces', {
-        results: [{ id: 'ws-1', node_id: 'node-1', status: 'running' }],
-      });
-      responses.set('status, health_status FROM nodes', {
-        results: [{ id: 'node-1', status: 'running', health_status: 'healthy' }],
       });
       responses.set('UPDATE tasks SET status = \'failed\'', {
         results: [],
@@ -703,9 +744,16 @@ describe('recoverStuckTasks', () => {
       });
       const result = await recoverStuckTasks(env);
 
-      // 3h task > 2h custom hard timeout — killed despite fresh heartbeat
+      // 3h task > 2h custom hard timeout, no live runtime → failed.
       expect(result.failedInProgress).toBe(1);
       expect(result.heartbeatSkipped).toBe(0);
+      // The custom 2h ceiling (120 min) is honored in the reason, not the 480 default.
+      expect(syncTriggerExecutionMock).toHaveBeenCalledWith(
+        env.DATABASE,
+        'task-custom',
+        'failed',
+        expect.stringContaining('120 minutes'),
+      );
     });
   });
 
