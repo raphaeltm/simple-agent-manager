@@ -315,6 +315,9 @@ export interface StartInstantChatSessionResponse {
   acpSessionId: string;
   workspaceUrl: string;
   timings: {
+    totalDurationMs: number;
+    preContainerDurationMs: number;
+    containerLaunchDurationMs: number;
     setupDurationMs: number;
     installDurationMs: number;
     agentReadyDurationMs: number;

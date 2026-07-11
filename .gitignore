@@ -13,6 +13,8 @@ packages/cli/coverage.out
 
 # Generated Go binaries
 packages/cli/bin/
+packages/vm-agent/bin/
+apps/api/container-artifacts/
 
 # Environment files
 .env

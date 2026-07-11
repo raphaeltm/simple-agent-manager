@@ -450,6 +450,24 @@ jobs:
           VITE_PUBLIC_WEBSITE_URL: ${{ vars.PUBLIC_WEBSITE_URL || '' }}
           VITE_FEATURE_MULTI_TERMINAL: 'true'
 
+      # Bake the deployment-built vm-agent before Wrangler builds the raw container.
+      - name: Setup Go for Container Runtime
+        if: ${{ inputs.dry_run != true }}
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Prepare Versioned VM Agent Container Artifact
+        if: ${{ inputs.dry_run != true }}
+        run: |
+          BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          make -C packages/vm-agent prepare-container VERSION="$GITHUB_SHA" BUILD_DATE="$BUILD_DATE"
+          cat apps/api/container-artifacts/vm-agent-version.json
+          echo "### CF Container runtime artifact" >> "$GITHUB_STEP_SUMMARY"
+          echo '```json' >> "$GITHUB_STEP_SUMMARY"
+          cat apps/api/container-artifacts/vm-agent-version.json >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
       # Deploy API worker first (without tail_consumers on first deploy)
       - name: Deploy API Worker
         if: ${{ inputs.dry_run != true }}
@@ -759,12 +777,6 @@ jobs:
       # ========================================
       # Phase 4: VM Agent
       # ========================================
-      - name: Setup Go
-        if: ${{ inputs.dry_run != true }}
-        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
-        with:
-          go-version: ${{ env.GO_VERSION }}
-
       - name: Build VM Agent
         if: ${{ inputs.dry_run != true && inputs.skip_agent != true }}
         run: make -C packages/vm-agent build-all

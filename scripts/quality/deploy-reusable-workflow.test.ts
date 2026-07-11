@@ -70,4 +70,17 @@ describe('deploy reusable workflow', () => {
       expect(block).toContain('Wrangler detected non-inherited bindings');
     }
   });
+
+  it('builds and versions the container vm-agent before Wrangler deploy', () => {
+    const prepare = stepBlock('Prepare Versioned VM Agent Container Artifact');
+    const prepareIndex = workflow.indexOf('- name: Prepare Versioned VM Agent Container Artifact');
+    const deployIndex = workflow.indexOf('- name: Deploy API Worker');
+
+    expect(prepare).toContain('make -C packages/vm-agent prepare-container');
+    expect(prepare).toContain('VERSION="$GITHUB_SHA"');
+    expect(prepare).toContain('vm-agent-version.json');
+    expect(prepare).not.toContain('secrets.');
+    expect(prepareIndex).toBeGreaterThan(-1);
+    expect(prepareIndex).toBeLessThan(deployIndex);
+  });
 });

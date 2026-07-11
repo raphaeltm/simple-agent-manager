@@ -32,8 +32,12 @@ describe('cf-container runtime spike contracts', () => {
     expect(index).toContain("nodeRuntime === 'cf-container'");
     expect(index).toContain('getVmAgentContainerConfig(c.env)');
     expect(index).toContain('!c.env.VM_AGENT_CONTAINER');
-    expect(index).toContain('fetchVmAgentContainer(c.env, containerId, containerRequest, vmAgentPort)');
-    expect(containerService).toContain("request.headers.get('upgrade')?.toLowerCase() === 'websocket'");
+    expect(index).toContain(
+      'fetchVmAgentContainer(c.env, containerId, containerRequest, vmAgentPort)'
+    );
+    expect(containerService).toContain(
+      "request.headers.get('upgrade')?.toLowerCase() === 'websocket'"
+    );
     expect(containerService).toContain('return container.fetch(request)');
     expect(containerService).toContain('return container.proxyHttp(request, port)');
     expect(index).toContain("metric: 'ws_proxy_route'");
@@ -52,8 +56,12 @@ describe('cf-container runtime spike contracts', () => {
     expect(nodeAgent).toContain('!env.VM_AGENT_CONTAINER');
     expect(nodeAgent).toContain('fetchVmAgentContainer(');
     expect(nodeAgent).toContain('function requestInitWithoutSignal');
-    expect(nodeAgent).toContain('new Request(containerUrl.toString(), requestInitWithoutSignal(options))');
-    expect(nodeAgent).toContain("return fetchNodeAgent(nodeId, env, url, { method: 'GET', headers }, timeoutMs)");
+    expect(nodeAgent).toContain(
+      'new Request(containerUrl.toString(), requestInitWithoutSignal(options))'
+    );
+    expect(nodeAgent).toContain(
+      "return fetchNodeAgent(nodeId, env, url, { method: 'GET', headers }, timeoutMs)"
+    );
     expect(workspaceTools).toContain("import { fetchNodeAgent } from '../../services/node-agent'");
     expect(workspaceTools).toContain('fetchNodeAgent(nodeId, env, vmUrl, fetchOpts, timeoutMs)');
     expect(libraryTools).toContain("import { fetchNodeAgent } from '../../services/node-agent'");
@@ -72,8 +80,12 @@ describe('cf-container runtime spike contracts', () => {
     const chatStartRoute = read('routes/chat-start.ts');
     const launcher = read('services/instant-session.ts');
 
-    expect(adminRoute).toContain("adminSandboxRoutes.use('/*', requireAuth(), requireApproved(), requireSuperadmin())");
-    expect(chatStartRoute).toContain("chatStartRoutes.post('/start', requireAuth(), requireApproved()");
+    expect(adminRoute).toContain(
+      "adminSandboxRoutes.use('/*', requireAuth(), requireApproved(), requireSuperadmin())"
+    );
+    expect(chatStartRoute).toContain(
+      "chatStartRoutes.post('/start', requireAuth(), requireApproved()"
+    );
     expect(chatStartRoute).toContain('resolveWorkspaceRuntime');
     expect(chatStartRoute).toContain("runtime.runtime !== 'cf-container'");
     expect(chatStartRoute).toContain('launchInstantSession');
@@ -109,14 +121,22 @@ describe('cf-container runtime spike contracts', () => {
     expect(containerDo).toContain('async markActiveWorkEnded');
     expect(containerDo).toContain('async renewActiveWorkKeepalive');
     expect(containerDo).toContain('this.renewActivityTimeout()');
-    expect(containerDo).toContain('await this.schedule(Math.max(1, Math.ceil(delayMs / 1000)), KEEPALIVE_CALLBACK)');
+    expect(containerDo).toContain(
+      'await this.schedule(Math.max(1, Math.ceil(delayMs / 1000)), KEEPALIVE_CALLBACK)'
+    );
     expect(containerDo).toContain("endReason: 'keepalive_deadline_exceeded'");
     expect(nodeAgent).toContain('markVmAgentContainerActiveWorkStarted(env, nodeId');
     expect(nodeAgent).toContain("reason: 'start_agent_session'");
     expect(nodeAgent).toContain("reason: 'send_prompt'");
-    expect(nodeAgent).toContain("markVmAgentContainerActiveWorkEndedBestEffort(env, nodeId, 'cancel_agent_session')");
-    expect(nodeAgent).toContain("markVmAgentContainerActiveWorkEndedBestEffort(env, nodeId, 'cancel_agent_session_no_prompt')");
-    expect(nodeAgent).toContain("markVmAgentContainerActiveWorkEndedBestEffort(env, nodeId, 'stop_agent_session')");
+    expect(nodeAgent).toContain(
+      "markVmAgentContainerActiveWorkEndedBestEffort(env, nodeId, 'cancel_agent_session')"
+    );
+    expect(nodeAgent).toContain(
+      "markVmAgentContainerActiveWorkEndedBestEffort(env, nodeId, 'cancel_agent_session_no_prompt')"
+    );
+    expect(nodeAgent).toContain(
+      "markVmAgentContainerActiveWorkEndedBestEffort(env, nodeId, 'stop_agent_session')"
+    );
     expect(activityCallback).toContain("body.activity === 'idle' || body.activity === 'error'");
     expect(acpSessionsRoute).toContain("body.status === 'completed' || body.status === 'failed'");
   });
@@ -129,26 +149,44 @@ describe('cf-container runtime spike contracts', () => {
     expect(containerDo).toContain("if (status === 'expired' || status === 'sleeping')");
     expect(containerDo).toContain('override async onError');
     expect(containerDo).toContain('override async onActivityExpired');
-    expect(containerDo).toContain("await this.markRuntimeSleeping('Container idle timeout expired; container is sleeping.')");
-    expect(containerDo).toContain("await this.ctx.storage.put('lifecycleStatus', 'sleeping' satisfies LifecycleStatus)");
+    expect(containerDo).toContain(
+      "await this.markRuntimeSleeping('Container idle timeout expired; container is sleeping.')"
+    );
+    expect(containerDo).toContain(
+      "await this.ctx.storage.put('lifecycleStatus', 'sleeping' satisfies LifecycleStatus)"
+    );
     expect(containerDo).toContain("status: 'sleeping'");
     expect(containerDo).toContain("if (lifecycleStatus === 'sleeping')");
     expect(containerDo).toContain('const wake = await this.ensureAwake()');
     expect(containerDo).toContain('WAKE_DEGRADED_RESPONSE');
-    expect(containerDo).toContain("await this.ctx.storage.put('lifecycleStatus', 'launching' satisfies LifecycleStatus)");
-    expect(containerDo).toContain("await this.ctx.storage.put('lifecycleStatus', 'running' satisfies LifecycleStatus)");
-    expect(chatResolver).toContain("inArray(schema.workspaces.status, ['running', 'recovery', 'sleeping'])");
-    expect(chatResolver).toContain("workspace.nodeStatus !== 'running' && workspace.nodeStatus !== 'sleeping'");
+    expect(containerDo).toContain(
+      "await this.ctx.storage.put('lifecycleStatus', 'launching' satisfies LifecycleStatus)"
+    );
+    expect(containerDo).toContain(
+      "await this.ctx.storage.put('lifecycleStatus', 'running' satisfies LifecycleStatus)"
+    );
+    expect(chatResolver).toContain(
+      "inArray(schema.workspaces.status, ['running', 'recovery', 'sleeping'])"
+    );
+    expect(chatResolver).toContain(
+      "workspace.nodeStatus !== 'running' && workspace.nodeStatus !== 'sleeping'"
+    );
     expect(chatResolver).toContain("inArray(schema.agentSessions.status, ['running', 'sleeping'])");
     expect(chatResolver).not.toContain('The workspace container is asleep.');
-    expect(containerDo).toContain("return new Response('Container is stopped; create a new instant session.', { status: 410 })");
+    expect(containerDo).toContain(
+      "return new Response('Container is stopped; create a new instant session.', { status: 410 })"
+    );
     expect(containerDo).toContain("await this.ctx.storage.put('launchConfig', config)");
     expect(containerDo).toContain('nodeCallbackToken: string');
     expect(containerDo).toContain('CALLBACK_TOKEN: secrets.nodeCallbackToken');
     expect(containerDo).toContain("status === 'stopped' ? 'stopped' : 'error'");
-    expect(containerDo).not.toContain("Container idle timeout expired; start a new instant session.");
+    expect(containerDo).not.toContain(
+      'Container idle timeout expired; start a new instant session.'
+    );
     expect(containerDo).not.toContain("await this.markRuntimeEnded('expired'");
-    expect(containerDo).not.toContain('await this.startAndWaitForPorts({\\n      ports: config.vmAgentPort,\\n      startOptions: config');
+    expect(containerDo).not.toContain(
+      'await this.startAndWaitForPorts({\\n      ports: config.vmAgentPort,\\n      startOptions: config'
+    );
   });
 
   it('uses a raw vm-agent container image for PR workflows', () => {
@@ -156,12 +194,46 @@ describe('cf-container runtime spike contracts', () => {
     const bootstrap = readPackage('container-entrypoints/vm-agent-bootstrap.sh');
 
     expect(dockerfile).toContain('ENTRYPOINT ["/usr/local/bin/vm-agent-bootstrap"]');
+    expect(dockerfile).toContain(
+      'COPY container-artifacts/vm-agent-linux-amd64 /usr/local/bin/vm-agent'
+    );
+    expect(dockerfile).toContain(
+      'COPY container-artifacts/vm-agent-version.json /etc/sam/vm-agent-version.json'
+    );
     expect(dockerfile).toContain('githubcli-archive-keyring.gpg');
     expect(dockerfile).toContain('apt-get install -y --no-install-recommends gh');
+    expect(dockerfile).toContain('@agentclientprotocol/codex-acp');
     expect(dockerfile).toContain('USER node');
     expect(dockerfile).toContain('chown -R node:node /workspaces /var/lib/vm-agent');
-    expect(bootstrap).toContain('agent_bin_dir="/var/lib/vm-agent/bin"');
-    expect(bootstrap).toContain('curl -fsSL "${CONTROL_PLANE_URL}/api/agent/download?os=linux&arch=amd64" -o "$tmp"');
-    expect(bootstrap).not.toContain('/usr/local/bin/vm-agent.tmp');
+    expect(bootstrap).toContain('agent_bin="${VM_AGENT_BIN:-/usr/local/bin/vm-agent}"');
+    expect(bootstrap).toContain('vm_agent_container_bootstrap_ready');
+    expect(bootstrap).toContain('baked_artifact_missing');
+    expect(bootstrap).not.toContain('/api/agent/download');
+    expect(bootstrap).not.toContain('curl ');
+  });
+
+  it('bakes no secrets into the container image (no ARG or secret-bearing ENV)', () => {
+    const dockerfile = readPackage('Dockerfile.vm-agent-container');
+
+    // Build args and env layers are the two Docker primitives that embed secrets
+    // in image layers. The runtime-asset boundary requires neither.
+    expect(dockerfile).not.toMatch(/\nARG /);
+    expect(dockerfile).not.toMatch(/\nENV .*(TOKEN|KEY|SECRET|CREDENTIAL|CALLBACK|PASSWORD)/i);
+    expect(dockerfile).not.toContain('--build-arg');
+    // The image must not reference user/project/profile/skill runtime values.
+    expect(dockerfile).not.toContain('CALLBACK_TOKEN');
+  });
+
+  it('bakes only build-metadata (version/buildDate/sha256) into vm-agent-version.json', () => {
+    const makefile = readFileSync(join(apiPackageRoot, '../../packages/vm-agent/Makefile'), 'utf8');
+
+    // The version file the bootstrap emits as telemetry must contain only
+    // non-secret build metadata keys.
+    expect(makefile).toContain(
+      `printf '{"version":"%s","buildDate":"%s","sha256":"sha256:%s"}\\n'`
+    );
+    for (const secretKey of ['token', 'credential', 'secret', 'callback', 'apiKey']) {
+      expect(makefile).not.toContain(`"${secretKey}"`);
+    }
   });
 });

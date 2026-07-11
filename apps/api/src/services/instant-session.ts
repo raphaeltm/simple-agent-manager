@@ -53,6 +53,9 @@ export interface LaunchInstantSessionResult {
   processId: string;
   workspaceUrl: string;
   timings: {
+    totalDurationMs: number;
+    preContainerDurationMs: number;
+    containerLaunchDurationMs: number;
     setupDurationMs: number;
     installDurationMs: number;
     agentReadyDurationMs: number;
@@ -84,9 +87,7 @@ function trimDashes(value: string): string {
 
 function toSafeRepositoryDirectoryName(value: string): string {
   return trimDashes(
-    [...value]
-      .map((char) => isRepositoryDirectoryChar(char) ? char : '-')
-      .join('')
+    [...value].map((char) => (isRepositoryDirectoryChar(char) ? char : '-')).join('')
   );
 }
 
@@ -120,10 +121,7 @@ function repositoryDirectoryName(repository: string): string {
     }
   }
 
-  const rawName = stripGitSuffix(repo
-    ? lastNonEmptyPathSegment(repo)
-    : ''
-  ).trim();
+  const rawName = stripGitSuffix(repo ? lastNonEmptyPathSegment(repo) : '').trim();
   const safeName = toSafeRepositoryDirectoryName(rawName);
   return safeName || 'workspace';
 }
@@ -252,7 +250,9 @@ export async function launchInstantSession(
     const launchDurationMs = Date.now() - launchStart;
 
     const agentReadyStart = Date.now();
-    await runContainerPhase('wait_for_ready', phaseDetail, () => waitForNodeAgentReady(node.id, env));
+    await runContainerPhase('wait_for_ready', phaseDetail, () =>
+      waitForNodeAgentReady(node.id, env)
+    );
     const agentReadyDurationMs = Date.now() - agentReadyStart;
 
     const workspaceCreateStart = Date.now();
@@ -315,6 +315,21 @@ export async function launchInstantSession(
       .set({ dispatchedAt: new Date().toISOString(), updatedAt: new Date().toISOString() })
       .where(eq(schema.workspaces.id, workspaceId));
 
+    const totalDurationMs = Date.now() - startedAt;
+    const preContainerDurationMs = launchStart - startedAt;
+    const timings = {
+      totalDurationMs,
+      preContainerDurationMs,
+      containerLaunchDurationMs: launchDurationMs,
+      setupDurationMs: totalDurationMs,
+      installDurationMs: launchDurationMs,
+      agentReadyDurationMs,
+      workspaceCreateDurationMs,
+      acpSessionCreateDurationMs,
+      acpSessionStartDurationMs,
+    };
+    log.info('instant_session.cold_start_complete', { ...phaseDetail, ...timings });
+
     return {
       nodeId: node.id,
       workspaceId,
@@ -327,14 +342,7 @@ export async function launchInstantSession(
       processId: containerId,
       runtime: 'cf-container',
       workspaceUrl: `https://ws-${workspaceId.toLowerCase()}.${env.BASE_DOMAIN}`,
-      timings: {
-        setupDurationMs: Date.now() - startedAt,
-        installDurationMs: launchDurationMs,
-        agentReadyDurationMs,
-        workspaceCreateDurationMs,
-        acpSessionCreateDurationMs,
-        acpSessionStartDurationMs,
-      },
+      timings,
     };
   } catch (err) {
     const message = errorMessage(err);

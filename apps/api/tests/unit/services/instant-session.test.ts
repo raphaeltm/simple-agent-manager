@@ -110,7 +110,11 @@ describe('launchInstantSession', () => {
     mocks.projectData.createSession.mockResolvedValue('chat-session-1');
     mocks.projectData.persistMessage.mockResolvedValue(undefined);
     mocks.projectData.transitionAcpSession.mockResolvedValue({});
-    mocks.container.getVmAgentContainerConfig.mockReturnValue({ vmAgentPort: 8080, enabled: true, sleepAfter: '10m' });
+    mocks.container.getVmAgentContainerConfig.mockReturnValue({
+      vmAgentPort: 8080,
+      enabled: true,
+      sleepAfter: '10m',
+    });
     mocks.container.destroyVmAgentContainer.mockResolvedValue(undefined);
     mocks.container.launchVmAgentContainer.mockResolvedValue(undefined);
     mocks.container.runContainerPhase.mockImplementation((_phase, _detail, fn) => fn());
@@ -137,6 +141,17 @@ describe('launchInstantSession', () => {
       chatSessionId: 'chat-session-1',
       agentSessionId: 'agent-session-1',
     });
+    expect(result.timings).toEqual(
+      expect.objectContaining({
+        totalDurationMs: expect.any(Number),
+        preContainerDurationMs: expect.any(Number),
+        containerLaunchDurationMs: expect.any(Number),
+        setupDurationMs: expect.any(Number),
+        installDurationMs: expect.any(Number),
+      })
+    );
+    expect(result.timings.setupDurationMs).toBe(result.timings.totalDurationMs);
+    expect(result.timings.installDurationMs).toBe(result.timings.containerLaunchDurationMs);
 
     expect(mocks.nodes.createNodeRecord).toHaveBeenCalledWith(
       expect.anything(),
