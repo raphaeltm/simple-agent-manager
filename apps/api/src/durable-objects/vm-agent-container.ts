@@ -92,7 +92,6 @@ export class VmAgentContainer extends Container<Env> {
           PORT_SCAN_ENABLED: 'false',
           VM_AGENT_PORT: String(config.vmAgentPort),
           VM_AGENT_PROTOCOL: 'http',
-          DEFAULT_DEVCONTAINER_CONFIG_PATH: '/var/lib/vm-agent/default-devcontainer.json',
           COOKIE_SECURE: 'true',
         },
         labels: {

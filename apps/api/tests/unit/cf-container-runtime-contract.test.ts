@@ -145,7 +145,6 @@ describe('cf-container runtime spike contracts', () => {
     expect(containerDo).toContain("await this.ctx.storage.put('launchConfig', config)");
     expect(containerDo).toContain('nodeCallbackToken: string');
     expect(containerDo).toContain('CALLBACK_TOKEN: secrets.nodeCallbackToken');
-    expect(containerDo).toContain("DEFAULT_DEVCONTAINER_CONFIG_PATH: '/var/lib/vm-agent/default-devcontainer.json'");
     expect(containerDo).toContain("status === 'stopped' ? 'stopped' : 'error'");
     expect(containerDo).not.toContain("Container idle timeout expired; start a new instant session.");
     expect(containerDo).not.toContain("await this.markRuntimeEnded('expired'");
@@ -159,7 +158,6 @@ describe('cf-container runtime spike contracts', () => {
     expect(dockerfile).toContain('ENTRYPOINT ["/usr/local/bin/vm-agent-bootstrap"]');
     expect(dockerfile).toContain('githubcli-archive-keyring.gpg');
     expect(dockerfile).toContain('apt-get install -y --no-install-recommends gh');
-    expect(dockerfile).toContain('@devcontainers/cli');
     expect(dockerfile).toContain('USER node');
     expect(dockerfile).toContain('chown -R node:node /workspaces /var/lib/vm-agent');
     expect(bootstrap).toContain('agent_bin_dir="/var/lib/vm-agent/bin"');
