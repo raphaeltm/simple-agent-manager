@@ -71,9 +71,17 @@ function makeApp() {
 }
 
 describe('chatStartRoutes', () => {
+  const db = {
+    update: vi.fn(() => ({
+      set: vi.fn(() => ({
+        where: vi.fn().mockResolvedValue(undefined),
+      })),
+    })),
+  };
+
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.drizzle.mockReturnValue({ id: 'db' });
+    mocks.drizzle.mockReturnValue(db);
     mocks.auth.getUserId.mockReturnValue('user-1');
     mocks.projectAuth.requireProjectCapability.mockResolvedValue({
       id: 'project-1',
@@ -129,13 +137,20 @@ describe('chatStartRoutes', () => {
     expect(body.runtime.runtime).toBe('cf-container');
     expect(mocks.repoAccess.requireRepositoryUserAccess).toHaveBeenCalledOnce();
     expect(mocks.instant.launchInstantSession).toHaveBeenCalledWith(
-      { id: 'db' },
+      db,
       expect.anything(),
       expect.objectContaining({
         initialPrompt: 'enriched hello\n\nPrefer concise answers.',
         displayMessage: 'hello',
         agentProfileId: 'profile-1',
         agentType: 'claude-code',
+      })
+    );
+    expect(db.update).toHaveBeenCalledOnce();
+    expect(db.update.mock.results[0]?.value.set).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentProfileId: 'profile-1',
+        skillId: null,
       })
     );
   });
