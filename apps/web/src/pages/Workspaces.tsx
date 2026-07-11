@@ -109,7 +109,7 @@ export function Workspaces() {
         // a misleading "No workspaces yet" empty state. A background refetch
         // failure while stale data is present keeps the data mounted (below).
         <Alert variant="error">
-          {queryError instanceof Error ? queryError.message : 'Failed to load workspaces'}
+          {(queryError instanceof Error && queryError.message) || 'Failed to load workspaces'}
         </Alert>
       ) : sortedWorkspaces.length === 0 ? (
         <EmptyState

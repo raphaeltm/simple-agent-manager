@@ -223,7 +223,7 @@ export function Nodes() {
         // a misleading "No nodes yet" empty state. A background refetch failure
         // while stale data is present keeps the data mounted (below).
         <Alert variant="error">
-          {nodesQueryError instanceof Error ? nodesQueryError.message : 'Failed to load nodes'}
+          {(nodesQueryError instanceof Error && nodesQueryError.message) || 'Failed to load nodes'}
         </Alert>
       ) : sortedNodes.length === 0 ? (
         <EmptyState

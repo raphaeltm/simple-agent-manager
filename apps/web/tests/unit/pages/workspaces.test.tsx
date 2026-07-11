@@ -152,6 +152,22 @@ describe('Workspaces page', () => {
     expect(screen.queryByText('No workspaces yet')).not.toBeInTheDocument();
   });
 
+  it('falls back to a friendly message when the load error has no message', async () => {
+    // ApiClientError sets Error.message from the response body's `message` field,
+    // which can be empty (e.g. a 500 with only an `error` code). Guard against a
+    // blank error Alert by falling back to friendly copy.
+    mocks.listWorkspaces.mockRejectedValue(new Error(''));
+
+    renderWithQuery(
+      <MemoryRouter>
+        <Workspaces />
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByText('Failed to load workspaces')).toBeInTheDocument();
+    expect(screen.queryByText('No workspaces yet')).not.toBeInTheDocument();
+  });
+
   it('keeps stale data visible when a background refetch fails (does not show error)', async () => {
     // First load succeeds with data.
     mocks.listWorkspaces.mockResolvedValue([runningWorkspace]);

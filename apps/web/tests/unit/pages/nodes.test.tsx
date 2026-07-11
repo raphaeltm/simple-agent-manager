@@ -125,6 +125,21 @@ describe('Nodes page', () => {
     expect(screen.queryByText('No nodes yet')).not.toBeInTheDocument();
   });
 
+  it('falls back to a friendly message when the load error has no message', async () => {
+    // Guard against a blank error Alert when the API error carries an empty message
+    // (e.g. a 500 whose body has an `error` code but no `message`).
+    mocks.listNodes.mockRejectedValue(new Error(''));
+
+    renderWithQuery(
+      <MemoryRouter>
+        <Nodes />
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByText('Failed to load nodes')).toBeInTheDocument();
+    expect(screen.queryByText('No nodes yet')).not.toBeInTheDocument();
+  });
+
   it('keeps stale nodes visible when a background refetch fails (does not show error)', async () => {
     mocks.listNodes.mockResolvedValue([
       {
