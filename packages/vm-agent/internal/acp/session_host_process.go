@@ -99,6 +99,14 @@ func (h *SessionHost) monitorProcessExit(ctx context.Context, process agentProce
 	loadSessionID := ""
 	if intentionalPromptCancel || crashRecovery.inProgress {
 		loadSessionID = previousAcpSessionID
+		// Fall back to the captured crash-recovery session ID only during an
+		// active crash-recovery episode. The captured ID is meaningful for
+		// LoadSession resume; scoping to inProgress keeps intentional cancels
+		// from ever resuming a stale recovery session and makes the invariant
+		// explicit for future refactors.
+		if loadSessionID == "" && crashRecovery.inProgress {
+			loadSessionID = crashRecovery.sessionID
+		}
 	}
 	if !h.restartAgentLocked(ctx, agentType, cred, settings, loadSessionID, crashRecovery, recoveryNotify) {
 		return
