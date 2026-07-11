@@ -221,9 +221,12 @@ export async function failTask(
     return;
   }
 
-  // Fail the task
+  // Fail the task. The status predicate makes this idempotent against a
+  // concurrent terminal transition that lands between the check above and this
+  // write — never clobber an already-terminal row (completed/failed/cancelled).
   await rc.env.DATABASE.prepare(
-    `UPDATE tasks SET status = 'failed', execution_step = NULL, error_message = ?, completed_at = ?, updated_at = ? WHERE id = ?`
+    `UPDATE tasks SET status = 'failed', execution_step = NULL, error_message = ?, completed_at = ?, updated_at = ?
+     WHERE id = ? AND status NOT IN ('completed', 'failed', 'cancelled')`
   ).bind(errorMessage, now, now, state.taskId).run();
 
   // Sync trigger execution status (best-effort) — without this, cron triggers
