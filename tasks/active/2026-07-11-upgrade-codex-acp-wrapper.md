@@ -105,3 +105,7 @@ This is not an AI Gateway feature. Gateway mocks were useful only to prove ACP c
   - Asserted the page body contains `CODEX_ACP_STAGING_OK_20260711`.
   - Screenshot: `.codex/tmp/playwright-screenshots/codex-acp-staging-chat.png`.
   - Regression navigation check opened `/dashboard`, `/projects`, and `/settings` on `app.sammy.party`; all returned HTTP 200, rendered non-empty bodies, and produced zero actionable console/page errors.
+- PR verification:
+  - PR `#1563` opened for `upgrade-codex-acp-wrapper`.
+  - Initial CI run passed code/test/VM-agent checks but preflight evaluated the original PR body classification from the pull request event payload.
+  - PR body was corrected to classify this as cross-component, security-sensitive, and infra work, with official OpenAI docs and npm package source URLs listed in External References.
