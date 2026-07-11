@@ -104,3 +104,4 @@ This is not an AI Gateway feature. Gateway mocks were useful only to prove ACP c
   - Opened `https://app.sammy.party/projects/01KTKXZ4ZZAT6MJFXRW1ZTQ7RB/chat/4ec3b559-d365-4aba-bdf6-76cb22a1ba3b`.
   - Asserted the page body contains `CODEX_ACP_STAGING_OK_20260711`.
   - Screenshot: `.codex/tmp/playwright-screenshots/codex-acp-staging-chat.png`.
+  - Regression navigation check opened `/dashboard`, `/projects`, and `/settings` on `app.sammy.party`; all returned HTTP 200, rendered non-empty bodies, and produced zero actionable console/page errors.
