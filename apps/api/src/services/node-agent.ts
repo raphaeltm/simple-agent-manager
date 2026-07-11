@@ -125,7 +125,7 @@ export async function waitForNodeAgentReady(nodeId: string, env: Env): Promise<v
   throw new Error(`Node Agent not reachable at ${healthUrl} within ${timeoutMs}ms.${details}`);
 }
 
-async function nodeAgentRequest(
+export async function nodeAgentRequest(
   nodeId: string,
   env: Env,
   path: string,
@@ -520,45 +520,7 @@ export async function sendPromptToAgentOnNode(
   }
 }
 
-export async function hibernateAgentSessionOnNode(
-  nodeId: string,
-  workspaceId: string,
-  sessionId: string,
-  env: Env,
-  userId: string,
-  input: {
-    chatSessionId: string;
-    runtime: string;
-  }
-): Promise<unknown> {
-  return nodeAgentRequest(nodeId, env, `/workspaces/${workspaceId}/agent-sessions/${sessionId}/hibernate`, {
-    method: 'POST',
-    userId,
-    workspaceId,
-    requestTimeoutMs: getNodeAgentRequestTimeoutMs(env),
-    body: JSON.stringify(input),
-  });
-}
-
-export async function restoreAgentSessionOnNode(
-  nodeId: string,
-  workspaceId: string,
-  sessionId: string,
-  env: Env,
-  userId: string,
-  input: {
-    chatSessionId: string;
-    runtime: string;
-  }
-): Promise<unknown> {
-  return nodeAgentRequest(nodeId, env, `/workspaces/${workspaceId}/agent-sessions/${sessionId}/restore`, {
-    method: 'POST',
-    userId,
-    workspaceId,
-    requestTimeoutMs: getNodeAgentRequestTimeoutMs(env),
-    body: JSON.stringify(input),
-  });
-}
+export { hibernateAgentSessionOnNode, restoreAgentSessionOnNode } from './node-agent-session-snapshots';
 
 /**
  * Cancel a running prompt on an agent session.

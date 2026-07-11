@@ -46,7 +46,7 @@ type snapshotRestoreResponse struct {
 	Config      struct {
 		TransferIdleTimeoutMs int64 `json:"transferIdleTimeoutMs"`
 	} `json:"config"`
-	Download    struct {
+	Download struct {
 		Home     string `json:"home"`
 		WIP      string `json:"wip"`
 		Manifest string `json:"manifest"`
@@ -365,7 +365,6 @@ func (s *Server) doSnapshotJSON(ctx context.Context, method, workspaceID, path, 
 	}
 	return nil
 }
-
 func createWIPBundle(ctx context.Context, workDir string, entryThreshold int64) (string, string, []snapshotSkippedEntry, error) {
 	if ok, err := standaloneRepositoryPresent(workDir); err != nil || !ok {
 		if err != nil {
@@ -387,15 +386,36 @@ func createWIPBundle(ctx context.Context, workDir string, entryThreshold int64) 
 	if strings.TrimSpace(status) == "" {
 		return base, "", nil, nil
 	}
+
+	indexFile, err := os.CreateTemp("", "sam-session-index-*")
+	if err != nil {
+		return base, "", nil, err
+	}
+	indexPath := indexFile.Name()
+	_ = indexFile.Close()
+	_ = os.Remove(indexPath)
+	defer os.Remove(indexPath)
+	gitEnv := []string{"GIT_INDEX_FILE=" + indexPath}
+	if _, err := runStandaloneGitCommand(ctx, workDir, gitEnv, "read-tree", "HEAD"); err != nil {
+		return base, "", nil, fmt.Errorf("initialize snapshot index: %w", err)
+	}
+	if _, err := runStandaloneGitCommand(ctx, workDir, gitEnv, "add", "-A"); err != nil {
+		return base, "", nil, fmt.Errorf("stage snapshot index: %w", err)
+	}
 	skipped := skipOversizedUntracked(workDir, entryThreshold)
-	_, _ = runStandaloneGitCommand(ctx, workDir, nil, "add", "-A")
 	for _, entry := range skipped {
 		if entry.Path != "" {
-			_, _ = runStandaloneGitCommand(ctx, workDir, nil, "reset", "--", entry.Path)
+			_, _ = runStandaloneGitCommand(ctx, workDir, gitEnv, "reset", "--", entry.Path)
 		}
 	}
-	if _, err := runStandaloneGitCommand(ctx, workDir, nil, "commit", "--no-verify", "-m", "SAM session snapshot"); err != nil {
-		return base, "", skipped, fmt.Errorf("create temporary snapshot commit: %w", err)
+	tree, err := runStandaloneGitCommand(ctx, workDir, gitEnv, "write-tree")
+	if err != nil {
+		return base, "", skipped, fmt.Errorf("write snapshot tree: %w", err)
+	}
+	commitEnv := append(gitEnv, "GIT_AUTHOR_NAME=SAM Snapshot", "GIT_AUTHOR_EMAIL=snapshot@localhost", "GIT_COMMITTER_NAME=SAM Snapshot", "GIT_COMMITTER_EMAIL=snapshot@localhost")
+	commit, err := runStandaloneGitCommand(ctx, workDir, commitEnv, "commit-tree", tree, "-p", base, "-m", "SAM session snapshot")
+	if err != nil {
+		return base, "", skipped, fmt.Errorf("create snapshot commit: %w", err)
 	}
 	bundle, err := os.CreateTemp("", "sam-session-wip-*.bundle")
 	if err != nil {
@@ -403,15 +423,20 @@ func createWIPBundle(ctx context.Context, workDir string, entryThreshold int64) 
 	}
 	bundlePath := bundle.Name()
 	_ = bundle.Close()
-	if _, err := runStandaloneGitCommand(ctx, workDir, nil, "bundle", "create", bundlePath, base+"..HEAD"); err != nil {
-		_, _ = runStandaloneGitCommand(ctx, workDir, nil, "reset", "--mixed", base)
+	snapshotRef := "refs/sam/session-snapshot/" + strings.TrimSuffix(filepath.Base(bundlePath), ".bundle")
+	if _, err := runStandaloneGitCommand(ctx, workDir, nil, "update-ref", snapshotRef, commit); err != nil {
+		_ = os.Remove(bundlePath)
+		return base, "", skipped, fmt.Errorf("create snapshot ref: %w", err)
+	}
+	defer func() {
+		_, _ = runStandaloneGitCommand(context.Background(), workDir, nil, "update-ref", "-d", snapshotRef)
+	}()
+	if _, err := runStandaloneGitCommand(ctx, workDir, nil, "bundle", "create", bundlePath, snapshotRef); err != nil {
 		_ = os.Remove(bundlePath)
 		return base, "", skipped, fmt.Errorf("create git bundle: %w", err)
 	}
-	_, _ = runStandaloneGitCommand(ctx, workDir, nil, "reset", "--mixed", base)
 	return base, bundlePath, skipped, nil
 }
-
 func gitOperationInProgress(workDir string) bool {
 	gitDir := filepath.Join(workDir, ".git")
 	for _, marker := range []string{"MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-merge", "rebase-apply"} {
@@ -643,18 +668,25 @@ func (s *Server) downloadAndRestoreWIP(ctx context.Context, downloadPath, token 
 		return closeErr
 	}
 	defer os.Remove(tmpPath)
-	if _, err := runStandaloneGitCommand(ctx, workDir, nil, "fetch", tmpPath, "HEAD:sam-session-restore"); err != nil {
+	heads, err := runStandaloneGitCommand(ctx, workDir, nil, "bundle", "list-heads", tmpPath)
+	if err != nil {
 		return err
 	}
-	if _, err := runStandaloneGitCommand(ctx, workDir, nil, "checkout", "sam-session-restore"); err != nil {
+	fields := strings.Fields(heads)
+	if len(fields) < 2 {
+		return fmt.Errorf("snapshot bundle has no restorable ref")
+	}
+	if _, err := runStandaloneGitCommand(ctx, workDir, nil, "fetch", tmpPath, fields[1]); err != nil {
+		return err
+	}
+	if _, err := runStandaloneGitCommand(ctx, workDir, nil, "read-tree", "--reset", "-u", "FETCH_HEAD"); err != nil {
 		return err
 	}
 	if strings.TrimSpace(baseCommit) != "" {
-		if _, err := runStandaloneGitCommand(ctx, workDir, nil, "reset", "--soft", baseCommit); err != nil {
+		if _, err := runStandaloneGitCommand(ctx, workDir, nil, "reset", "--mixed", baseCommit); err != nil {
 			return err
 		}
 	}
-	_, _ = runStandaloneGitCommand(ctx, workDir, nil, "branch", "-D", "sam-session-restore")
 	return nil
 }
 

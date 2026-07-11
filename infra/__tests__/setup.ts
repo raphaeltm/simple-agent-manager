@@ -69,6 +69,17 @@ vi.mock('@pulumi/cloudflare', async (importOriginal) => {
         super(name, args, opts);
       }
     },
+    R2BucketLifecycle: class extends actual.R2BucketLifecycle {
+      constructor(name: string, args: ResourceInputs, opts?: pulumi.CustomResourceOptions) {
+        resourceRecorder.record(
+          'cloudflare:index/r2BucketLifecycle:R2BucketLifecycle',
+          name,
+          args,
+          opts
+        );
+        super(name, args, opts);
+      }
+    },
     Record: class extends actual.Record {
       constructor(name: string, args: ResourceInputs, opts?: pulumi.CustomResourceOptions) {
         resourceRecorder.record('cloudflare:index/record:Record', name, args, opts);

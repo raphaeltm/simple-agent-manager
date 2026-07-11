@@ -11,6 +11,7 @@ function makeValidOutputs(): PulumiOutputs {
     kvId: 'kv-789',
     kvName: 'sa379a6-prod-sessions',
     r2Name: 'sa379a6-prod-assets',
+    sessionSnapshotTtlDays: 7,
     cloudflareAccountId: 'cf-account-abc',
     pagesName: 'sa379a6-web-prod',
     dnsIds: { api: 'dns-1', app: 'dns-2', wildcard: 'dns-3' },
