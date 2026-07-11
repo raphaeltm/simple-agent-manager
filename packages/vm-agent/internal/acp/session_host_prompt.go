@@ -39,6 +39,11 @@ func (h *SessionHost) HandlePrompt(ctx context.Context, reqID json.RawMessage, p
 	defer close(promptDone)
 
 	promptStart := time.Now()
+	// Capture recovery prerequisites (session ID, agent type, LoadSession
+	// capability, process) BEFORE dispatching the prompt. If the agent process
+	// exits mid-prompt, a concurrent monitorProcessExit can clear these live
+	// fields before the blocked Prompt returns "peer disconnected"; the captured
+	// snapshot lets finishPromptWithError still begin LoadSession recovery.
 	recovery := h.captureCrashRecoveryPrerequisites()
 	h.markPromptStarted(promptReq.sessionID, len(promptReq.blocks), viewerID)
 	resp, err := h.promptWithTransientRetry(promptCtx, promptReq, promptStart)

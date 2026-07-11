@@ -73,6 +73,12 @@ func redactAgentDiagnosticText(text string) string {
 
 type recoveryNotify func(stopReason string, err error)
 
+// crashRecoveryPrerequisites snapshots the fields required to begin LoadSession
+// recovery. It is captured at prompt start so recovery can still proceed if a
+// concurrent monitorProcessExit clears the live fields before the blocked Prompt
+// returns the peer-disconnect error. process is a fallback used only when the
+// live h.process has already been cleared/replaced — it is not a general
+// "process to stop" reference.
 type crashRecoveryPrerequisites struct {
 	sessionID           string
 	agentType           string
@@ -285,6 +291,10 @@ func (h *SessionHost) crashReport(snapshot crashRecoverySnapshot, recovered bool
 		message = fmt.Sprintf("The %s agent crashed unexpectedly. SAM could not recover the session automatically.", displayName)
 	}
 
+	// snapshot.sessionID (the ACP session UUID) is intentionally NOT included in
+	// the broadcast crash report: it is an internal recovery identifier and must
+	// not be exposed to browser viewers. Only redacted stderr and fixed-token
+	// diagnostics are surfaced.
 	return AgentCrashReportMessage{
 		Type:            MsgAgentCrashReport,
 		AgentType:       agentType,

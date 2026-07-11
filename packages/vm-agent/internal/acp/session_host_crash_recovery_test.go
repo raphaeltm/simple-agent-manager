@@ -349,6 +349,16 @@ func TestSessionHost_CodexCrashRecovery_LoadsCapturedSessionAfterLivePrerequisit
 	if startCount.Load() != 1 {
 		t.Fatalf("restart count = %d, want one LoadSession restart", startCount.Load())
 	}
+	// The resumed ACP session ID must equal the captured (prompt-start) session
+	// ID: recovery must LoadSession the exact prior conversation, never a fresh
+	// NewSession. establishACPSession sets h.sessionID to the LoadSession target,
+	// so a wrong/empty target would surface here.
+	host.mu.RLock()
+	resumed := string(host.sessionID)
+	host.mu.RUnlock()
+	if resumed != "acp-session-1" {
+		t.Fatalf("resumed sessionID = %q, want captured prompt-start ID acp-session-1 (LoadSession must reuse the captured session, not NewSession)", resumed)
+	}
 }
 
 // TestSessionHost_CrashRecovery_MaxRestartExhausted proves that exceeding the

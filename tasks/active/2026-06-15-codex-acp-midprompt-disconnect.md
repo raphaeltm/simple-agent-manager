@@ -74,6 +74,7 @@ The ACP peer closes JSON-RPC first: SAM receives `peer disconnected before respo
 - [x] Add sanitized diagnostics naming each truly missing prerequisite.
 - [x] Keep unrecoverable failure explicit and terminal.
 - [x] Add exact JSON-RPC recoverable race and terminal diagnostic/redaction coverage.
+- [x] Phase 5 review round (go, security, constitution, test, docs-sync, task-completion): no CRITICAL/HIGH live bugs. Applied converged go+security fallback tightening (`crashRecovery.sessionID` only on `inProgress`), clarifying comments, and AC-aligned test additions (per-prerequisite terminal diagnostics for acpSessionId/agentType/all-three; captured-session LoadSession identity assertion; agentType partial-clear fallback; `crashRecoveryInProgress==false` on terminal path). Race + full vm-agent suites green.
 - [ ] Validate replacement Codex adapter with long tool/permission activity and real `LoadSession` recovery on staging.
 - [ ] Complete required reviews, CI, staging coordination, merge, and production monitoring.
 
