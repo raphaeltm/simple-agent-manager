@@ -497,7 +497,11 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
 
     try {
       // Gather diagnostic context before recovery
-      const diagnostics = await gatherDiagnostics(env, task, elapsedMs, reason);
+      const diagnosticElapsedMs =
+        (task.status === 'in_progress' || task.status === 'awaiting_followup') && task.started_at
+          ? now.getTime() - new Date(task.started_at).getTime()
+          : elapsedMs;
+      const diagnostics = await gatherDiagnostics(env, task, diagnosticElapsedMs, reason);
 
       log.warn('stuck_task.recovering', {
         taskId: task.id,
@@ -505,7 +509,7 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
         userId: task.user_id,
         status: task.status,
         executionStep: task.execution_step,
-        elapsedMs,
+        elapsedMs: diagnosticElapsedMs,
         reason,
         recoveryType: compactionLoopRecovery ? 'claude_code_compaction_loop' : 'stuck_task',
         compactionLoop: compactionLoopRecovery?.evidence,
@@ -525,7 +529,7 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
             : { recoveryType: 'stuck_task' }),
           taskStatus: task.status,
           executionStep: task.execution_step,
-          elapsedMs,
+          elapsedMs: diagnosticElapsedMs,
           compactionLoop: compactionLoopRecovery ? {
             sessionId: compactionLoopRecovery.sessionId,
             agentSessionId: compactionLoopRecovery.agentSessionId,

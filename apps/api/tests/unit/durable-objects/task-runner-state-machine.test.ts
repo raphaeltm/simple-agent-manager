@@ -99,6 +99,10 @@ function createD1Database(state: ReturnType<typeof createD1State>) {
     prepare: vi.fn((sql: string) => ({
       bind: (...params: unknown[]) => ({
         first: async () => {
+          if (sql.includes('SELECT status FROM tasks WHERE id = ?')) {
+            const task = state.tasks.get(String(params[0]));
+            return task ? { status: task.status } : null;
+          }
           if (sql.includes('SELECT status, mission_id FROM tasks WHERE id = ?')) {
             const task = state.tasks.get(String(params[0]));
             return task ? { status: task.status, mission_id: task.mission_id } : null;
@@ -320,6 +324,30 @@ describe('transitionToInProgress', () => {
     expect(state.currentStep).toBe('agent_session');
     expect(state.completed).toBe(true);
     expect(storageWrites.at(-1)).toMatchObject({ currentStep: 'agent_session', completed: true });
+  });
+
+  it('makes D1 terminal before completing the DO when recovery leaves an active non-delegated row', async () => {
+    const { dbState, rc, storageWrites } = createContext();
+    seedTask(dbState, {
+      status: 'queued',
+      execution_step: 'agent_session',
+    });
+    const state = makeState();
+
+    await transitionToInProgress(state, rc);
+
+    expect(dbState.tasks.get('task-1')).toMatchObject({
+      status: 'failed',
+      execution_step: null,
+      error_message: 'Task orchestration was superseded before agent handoff completed.',
+    });
+    expect(dbState.statusEvents).toContainEqual(expect.objectContaining({
+      task_id: 'task-1',
+      from_status: 'queued',
+      to_status: 'failed',
+    }));
+    expect(state.completed).toBe(true);
+    expect(storageWrites.at(-1)).toMatchObject({ completed: true });
   });
 });
 

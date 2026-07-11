@@ -29,8 +29,8 @@ TaskRunner Durable Objects mark orchestration complete after handing an agent a 
 - [x] Cover queued, delegated, in_progress, and awaiting_followup status/step semantics with task/conversation distinctions.
 - [x] Close `aborted_by_recovery` by re-reading D1 and ensuring it is terminal before DO completion without overwriting a concurrent legitimate terminal callback.
 - [x] Make repeated same-terminal callbacks idempotent and reuse terminal cleanup; remaining cross-path verification is tracked below.
-- [ ] Correct diagnostic timing and finish bounding/deduplicating control-loop I/O.
-- [ ] Complete unit and cross-runtime regressions for recovery interleaving and callback idempotency (dead mismatch and live negative coverage added).
+- [x] Correct diagnostic timing and bound control-loop candidates, ACP-session reads, and observability dedupe lookups.
+- [x] Add unit and cross-runtime regressions for recovery interleaving, callback idempotency, dead mismatch, and live negative behavior.
 - [x] Update public docs/environment references for new configuration.
 - [ ] Rebase after priority 2 merges and preserve—not duplicate—its recovery behavior.
 - [ ] Run focused/full validation, control-loop checks, and Cloudflare/security/constitution/test/docs-sync/control-loop/task-completion reviews.
