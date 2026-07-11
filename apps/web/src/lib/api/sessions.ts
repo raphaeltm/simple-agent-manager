@@ -98,6 +98,8 @@ export interface ChatMessageResponse {
   toolMetadata: Record<string, unknown> | null;
   createdAt: number;
   sequence?: number | null;
+  /** "system" for SAM-injected messages the UI collapses; absent for normal messages. */
+  origin?: 'user' | 'system' | null;
 }
 
 /** Persisted session state snapshot from the DO (for catch-up on page load). */
@@ -185,7 +187,8 @@ export async function getRecentChats(
 ): Promise<RecentChatsApiResponse> {
   const searchParams = new URLSearchParams();
   if (params.limit !== undefined) searchParams.set('limit', String(params.limit));
-  if (params.staleThreshold !== undefined) searchParams.set('staleThreshold', String(params.staleThreshold));
+  if (params.staleThreshold !== undefined)
+    searchParams.set('staleThreshold', String(params.staleThreshold));
 
   const qs = searchParams.toString();
   return request<RecentChatsApiResponse>(qs ? `/api/chats/recent?${qs}` : '/api/chats/recent');
@@ -222,7 +225,10 @@ export async function getChatSession(
     ? `/api/projects/${projectId}/sessions/${sessionId}?${qs}`
     : `/api/projects/${projectId}/sessions/${sessionId}`;
 
-  return request<ChatSessionDetailResponse>(endpoint, params.signal ? { signal: params.signal } : {});
+  return request<ChatSessionDetailResponse>(
+    endpoint,
+    params.signal ? { signal: params.signal } : {}
+  );
 }
 
 export async function getChatSessionState(
@@ -239,7 +245,14 @@ export async function getChatSessionState(
 export async function listChatMessages(
   projectId: string,
   sessionId: string,
-  params: { limit?: number; before?: number; roles?: string[]; compact?: boolean; order?: 'asc' | 'desc'; signal?: AbortSignal } = {}
+  params: {
+    limit?: number;
+    before?: number;
+    roles?: string[];
+    compact?: boolean;
+    order?: 'asc' | 'desc';
+    signal?: AbortSignal;
+  } = {}
 ): Promise<ChatMessagesListResponse> {
   const searchParams = new URLSearchParams();
   if (params.limit !== undefined) searchParams.set('limit', String(params.limit));
@@ -253,7 +266,10 @@ export async function listChatMessages(
     ? `/api/projects/${projectId}/sessions/${sessionId}/messages?${qs}`
     : `/api/projects/${projectId}/sessions/${sessionId}/messages`;
 
-  return request<ChatMessagesListResponse>(endpoint, params.signal ? { signal: params.signal } : {});
+  return request<ChatMessagesListResponse>(
+    endpoint,
+    params.signal ? { signal: params.signal } : {}
+  );
 }
 
 /**
@@ -322,9 +338,12 @@ export async function stopChatSession(
   projectId: string,
   sessionId: string
 ): Promise<{ status: string; workspaceDeleted?: boolean }> {
-  return request<{ status: string; workspaceDeleted?: boolean }>(`/api/projects/${projectId}/sessions/${sessionId}/stop`, {
-    method: 'POST',
-  });
+  return request<{ status: string; workspaceDeleted?: boolean }>(
+    `/api/projects/${projectId}/sessions/${sessionId}/stop`,
+    {
+      method: 'POST',
+    }
+  );
 }
 
 // Context summarization (conversation forking)
@@ -349,9 +368,12 @@ export async function resetIdleTimer(
   projectId: string,
   sessionId: string
 ): Promise<{ cleanupAt: number }> {
-  return request<{ cleanupAt: number }>(`/api/projects/${projectId}/sessions/${sessionId}/idle-reset`, {
-    method: 'POST',
-  });
+  return request<{ cleanupAt: number }>(
+    `/api/projects/${projectId}/sessions/${sessionId}/idle-reset`,
+    {
+      method: 'POST',
+    }
+  );
 }
 
 /** Send a follow-up prompt to the running agent via the REST API. */

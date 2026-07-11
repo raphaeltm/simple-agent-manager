@@ -213,16 +213,15 @@ describe('launchInstantSession', () => {
       'workspace-1',
       'agent-session-1',
       'claude-code',
-      expect.stringContaining('enriched prompt'),
+      'enriched prompt',
       expect.anything(),
       'user-1',
       { url: 'https://api.example.com/mcp', token: 'mcp-token' },
       { model: 'claude-sonnet-4-5-20250929', effort: 'auto' },
-      undefined
+      undefined,
+      expect.stringContaining('MUST call')
     );
-    expect(mocks.nodeAgent.startAgentSessionOnNode.mock.calls[0][4]).toContain(
-      'MUST call the `get_instructions` tool'
-    );
+    expect(mocks.nodeAgent.startAgentSessionOnNode.mock.calls[0][4]).toBe('enriched prompt');
     expect(mocks.container.launchVmAgentContainer).toHaveBeenCalledWith(
       expect.anything(),
       'node-1',

@@ -14,8 +14,15 @@ import (
 
 // HandlePrompt routes a session/prompt request through the ACP SDK.
 // Only one prompt runs at a time — concurrent requests are serialized.
-func (h *SessionHost) HandlePrompt(ctx context.Context, reqID json.RawMessage, params json.RawMessage, viewerID string) {
-	promptReq, ok := h.preparePromptRequest(params, viewerID, reqID)
+//
+// trustedSource distinguishes a SAM control-plane prompt (the initial task
+// prompt / injected instructions built server-side) from a browser viewer
+// prompt relayed over the WebSocket gateway. The SAM system-origin marker
+// (_meta["sam.origin"]="system") is only honored from a trusted source; an
+// untrusted browser prompt must not be able to mark its own content as
+// origin=system (which would hide it from search, dedup, topic, and attention).
+func (h *SessionHost) HandlePrompt(ctx context.Context, reqID json.RawMessage, params json.RawMessage, viewerID string, trustedSource bool) {
+	promptReq, ok := h.preparePromptRequest(params, viewerID, reqID, trustedSource)
 	if !ok {
 		return
 	}
@@ -251,7 +258,7 @@ type promptStartInfo struct {
 	recovery  crashRecoveryPrerequisites
 }
 
-func (h *SessionHost) preparePromptRequest(params json.RawMessage, viewerID string, reqID json.RawMessage) (preparedPromptRequest, bool) {
+func (h *SessionHost) preparePromptRequest(params json.RawMessage, viewerID string, reqID json.RawMessage, trustedSource bool) (preparedPromptRequest, bool) {
 	acpConn, sessionID := h.currentACPSession()
 	if acpConn == nil || sessionID == acpsdk.SessionId("") {
 		slog.Warn("Prompt request received but no ACP session active")
@@ -269,6 +276,13 @@ func (h *SessionHost) preparePromptRequest(params json.RawMessage, viewerID stri
 	if len(blocks) == 0 {
 		h.sendJSONRPCErrorToViewer(viewerID, reqID, -32602, "Empty prompt")
 		return preparedPromptRequest{}, false
+	}
+	// Defense-in-depth: only a trusted control-plane prompt may carry the SAM
+	// system-origin marker. Strip it from any untrusted (browser viewer) prompt
+	// so a viewer cannot mark their own content as origin=system to evade
+	// search/dedup/topic/attention.
+	if !trustedSource {
+		stripInjectedOriginMarker(blocks)
 	}
 	return preparedPromptRequest{
 		acpConn:          acpConn,
@@ -340,10 +354,17 @@ func (h *SessionHost) injectUserMessageNotifications(sessionID acpsdk.SessionId,
 			SessionId: sessionID,
 			Update:    acpsdk.UpdateUserMessage(block),
 		}
-		data, marshalErr := json.Marshal(map[string]interface{}{
+		params := map[string]any{
+			"sessionId": sessionID,
+			"update":    notif.Update,
+		}
+		if origin := contentBlockOrigin(block); origin != "" {
+			params["origin"] = origin
+		}
+		data, marshalErr := json.Marshal(map[string]any{
 			"jsonrpc": "2.0",
 			"method":  "session/update",
-			"params":  notif,
+			"params":  params,
 		})
 		if marshalErr != nil {
 			slog.Error("Failed to marshal synthetic user_message_chunk", "error", marshalErr)
@@ -363,6 +384,7 @@ func (h *SessionHost) injectUserMessageNotifications(sessionID acpsdk.SessionId,
 					Role:         m.Role,
 					Content:      m.Content,
 					ToolMetadata: m.ToolMetadata,
+					Origin:       m.Origin,
 				}); err != nil {
 					slog.Warn("messagereport: enqueue synthetic user message failed (non-blocking)",
 						"messageId", m.MessageID, "error", err)

@@ -53,10 +53,48 @@ export function SystemMessageBubble({ text }: { text: string }) {
   );
 }
 
+/** Renders a SAM-injected (origin="system") user message collapsed behind a
+ *  native <details> disclosure with a chevron, so injected instructions (e.g. the
+ *  get_instructions reminder) don't clutter the chat. Right-aligned to match the
+ *  user-message column. Expandable to reveal the exact injected text. */
+export function CollapsedInjectedMessage({ text }: { text: string }) {
+  return (
+    <div className="flex justify-end mb-4">
+      <details className="sam-injected-message group max-w-[92%] sm:max-w-[80%] min-w-0 rounded-lg border border-border-default overflow-hidden">
+        <summary
+          className="cursor-pointer select-none list-none min-h-11 px-3 py-2 text-xs flex items-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus-ring"
+          style={{ color: 'var(--sam-color-fg-muted)' }}
+        >
+          <span
+            aria-hidden="true"
+            className="sam-injected-chevron transition-transform group-open:rotate-90"
+          >
+            ▸
+          </span>
+          <span>Show system context</span>
+        </summary>
+        <pre
+          className="text-xs whitespace-pre-wrap break-words m-0 px-3 py-2 font-mono leading-relaxed border-t border-border-default"
+          style={{ color: 'var(--sam-color-fg-muted)' }}
+        >
+          {text}
+        </pre>
+      </details>
+    </div>
+  );
+}
+
 /** Renders a single ACP ConversationItem using the shared acp-client components.
  *  When `animateText` is true for agent_message items, MessageBubble renders with
  *  per-character fade-in animation via TypewriterText. */
-export function AcpConversationItemView({ item, onFileClick, onLoadToolContent, animateText, animateUserMessage, projectId }: {
+export function AcpConversationItemView({
+  item,
+  onFileClick,
+  onLoadToolContent,
+  animateText,
+  animateUserMessage,
+  projectId,
+}: {
   item: ConversationItem;
   onFileClick?: (path: string, line?: number | null) => void;
   onLoadToolContent?: (messageId: string) => Promise<ToolCallContentItem[]>;
@@ -69,24 +107,28 @@ export function AcpConversationItemView({ item, onFileClick, onLoadToolContent, 
 }) {
   const globalAudio = useGlobalAudio();
 
-  const handlePlayAudio = item.kind === 'agent_message'
-    ? () => {
-        const ttsApiUrl = getTtsUrl();
-        const ttsStorageId = item.id;
-        if (ttsApiUrl && ttsStorageId) {
-          globalAudio.startPlayback({
-            text: item.text,
-            ttsApiUrl,
-            ttsStorageId,
-            label: 'Chat message',
-            sourceText: item.text.slice(0, 200),
-          });
+  const handlePlayAudio =
+    item.kind === 'agent_message'
+      ? () => {
+          const ttsApiUrl = getTtsUrl();
+          const ttsStorageId = item.id;
+          if (ttsApiUrl && ttsStorageId) {
+            globalAudio.startPlayback({
+              text: item.text,
+              ttsApiUrl,
+              ttsStorageId,
+              label: 'Chat message',
+              sourceText: item.text.slice(0, 200),
+            });
+          }
         }
-      }
-    : undefined;
+      : undefined;
 
   switch (item.kind) {
     case 'user_message':
+      if (item.origin === 'system') {
+        return <CollapsedInjectedMessage text={item.text} />;
+      }
       if (animateUserMessage) {
         return (
           <div className="flex justify-end mb-4">
@@ -128,7 +170,11 @@ export function AcpConversationItemView({ item, onFileClick, onLoadToolContent, 
           toolCall={item}
           onFileClick={onFileClick}
           onLoadContent={onLoadToolContent}
-          className={item.contentLoaded === false ? 'glass-surface rounded-md border-border-default' : undefined}
+          className={
+            item.contentLoaded === false
+              ? 'glass-surface rounded-md border-border-default'
+              : undefined
+          }
         />
       );
     }

@@ -56,6 +56,44 @@ describe('project-data Durable Object retry', () => {
     expect(stub.getMessages).toHaveBeenLastCalledWith('chat-1', 100, null, undefined, true, 'desc');
   });
 
+  // Regression for the missing-propagation bug where the service layer re-mapped
+  // batch messages before the DO RPC and silently dropped `origin`. This boundary
+  // is not covered by vm-agent tests or DO worker tests (which call the stub
+  // directly), so a service-layer unit test is the one that would have caught it.
+  it('forwards origin to the DO stub in persistMessageBatch', async () => {
+    const stub = {
+      ensureProjectId: vi.fn().mockResolvedValue(undefined),
+      persistMessageBatch: vi.fn().mockResolvedValue({ persisted: 2, duplicates: 0 }),
+    };
+
+    await svc.persistMessageBatch(makeEnv(stub), 'proj-1', 'chat-1', [
+      {
+        messageId: 'm-visible',
+        role: 'user',
+        content: 'do the task',
+        toolMetadata: null,
+        timestamp: new Date().toISOString(),
+      },
+      {
+        messageId: 'm-injected',
+        role: 'user',
+        content: 'IMPORTANT: call get_instructions',
+        toolMetadata: null,
+        timestamp: new Date().toISOString(),
+        origin: 'system',
+      },
+    ]);
+
+    expect(stub.persistMessageBatch).toHaveBeenCalledTimes(1);
+    const forwarded = stub.persistMessageBatch.mock.calls[0][1] as Array<{
+      messageId: string;
+      origin?: string | null;
+    }>;
+    expect(forwarded.find((m) => m.messageId === 'm-injected')?.origin).toBe('system');
+    // A normal message with no origin forwards as null (not undefined/dropped).
+    expect(forwarded.find((m) => m.messageId === 'm-visible')?.origin).toBeNull();
+  });
+
   it('surfaces the reset error after max attempts are exhausted', async () => {
     const stub = {
       ensureProjectId: vi.fn().mockResolvedValue(undefined),

@@ -32,6 +32,8 @@ type Message struct {
 	Content      string `json:"content"`
 	ToolMetadata string `json:"toolMetadata,omitempty"` // JSON string
 	Timestamp    string `json:"timestamp"`
+	// Origin is "system" for SAM-injected messages the UI collapses; empty otherwise.
+	Origin string `json:"origin,omitempty"`
 }
 
 // Reporter batches chat messages from the SQLite outbox and POSTs them to
@@ -279,9 +281,9 @@ func (r *Reporter) Enqueue(msg Message) error {
 	// INSERT OR IGNORE for crash-recovery dedup on message_id UNIQUE constraint.
 	_, err := r.db.Exec(
 		`INSERT OR IGNORE INTO message_outbox
-			(message_id, session_id, role, content, tool_metadata, created_at)
-		VALUES (?, ?, ?, ?, ?, ?)`,
-		msg.MessageID, sessionID, msg.Role, msg.Content, msg.ToolMetadata, msg.Timestamp,
+			(message_id, session_id, role, content, tool_metadata, created_at, origin)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		msg.MessageID, sessionID, msg.Role, msg.Content, msg.ToolMetadata, msg.Timestamp, msg.Origin,
 	)
 	if err != nil {
 		return fmt.Errorf("messagereport: insert outbox: %w", err)
@@ -360,11 +362,12 @@ type outboxRow struct {
 	content      string
 	toolMetadata sql.NullString
 	createdAt    string
+	origin       sql.NullString
 }
 
 func (r *Reporter) readBatch() ([]outboxRow, error) {
 	rows, err := r.db.Query(
-		`SELECT id, message_id, session_id, role, content, tool_metadata, created_at
+		`SELECT id, message_id, session_id, role, content, tool_metadata, created_at, origin
 		 FROM message_outbox
 		 ORDER BY id ASC
 		 LIMIT ?`,
@@ -378,7 +381,7 @@ func (r *Reporter) readBatch() ([]outboxRow, error) {
 	var batch []outboxRow
 	for rows.Next() {
 		var row outboxRow
-		if err := rows.Scan(&row.id, &row.messageID, &row.sessionID, &row.role, &row.content, &row.toolMetadata, &row.createdAt); err != nil {
+		if err := rows.Scan(&row.id, &row.messageID, &row.sessionID, &row.role, &row.content, &row.toolMetadata, &row.createdAt, &row.origin); err != nil {
 			return nil, err
 		}
 		candidate := append(append([]outboxRow(nil), batch...), row)
@@ -404,6 +407,7 @@ type apiMessage struct {
 	ToolMetadata string `json:"toolMetadata,omitempty"`
 	Timestamp    string `json:"timestamp"`
 	Sequence     int64  `json:"sequence"`
+	Origin       string `json:"origin,omitempty"`
 }
 
 func rowToAPIMessage(row outboxRow) apiMessage {
@@ -417,6 +421,9 @@ func rowToAPIMessage(row outboxRow) apiMessage {
 	}
 	if row.toolMetadata.Valid {
 		m.ToolMetadata = row.toolMetadata.String
+	}
+	if row.origin.Valid {
+		m.Origin = row.origin.String
 	}
 	return m
 }
