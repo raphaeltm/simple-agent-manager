@@ -198,28 +198,29 @@ SAM loads OpenCode Zen and OpenCode Go model choices through the authenticated m
 
 ## Idea Execution Timeouts
 
-| Variable                                           | Default            | Description                                                                           |
-| -------------------------------------------------- | ------------------ | ------------------------------------------------------------------------------------- |
-| `TASK_RUN_MAX_EXECUTION_MS`                        | `14400000` (4 hr)  | Max task execution time                                                               |
-| `TASK_STUCK_QUEUED_TIMEOUT_MS`                     | `1200000` (20 min) | Timeout for tasks stuck in queued state                                               |
-| `TASK_STUCK_DELEGATED_TIMEOUT_MS`                  | `1860000` (31 min) | Timeout for tasks stuck in delegated state                                            |
-| `TASK_DO_MISMATCH_GRACE_MS`                       | `300000` (5 min)   | Minimum age before reconciling completed TaskRunner state with task-scoped liveness   |
-| `STUCK_TASK_MAX_CANDIDATES_PER_SWEEP`             | `100`              | Maximum active tasks inspected by each recovery sweep                                 |
-| `TASK_LIVENESS_MAX_ACP_SESSIONS`                  | `5`                | Maximum task-scoped ACP sessions inspected per liveness probe                         |
-| `TASK_LIVENESS_PROBE_TIMEOUT_MS`                  | `5000` (5 sec)     | Per-candidate timeout for the ACP liveness probe; a timeout is inconclusive (never fails a task) |
-| `TASK_RUN_ABSOLUTE_CEILING_MS`                    | `86400000` (24 hr) | Absolute runaway-cost ceiling; fails even a task with a demonstrably live runtime     |
-| `CLAUDE_CODE_COMPACTION_LOOP_DETECTOR_ENABLED`     | `true`             | Enable Claude Code compaction-loop shutdown from recent message evidence              |
-| `CLAUDE_CODE_COMPACTION_LOOP_RECENT_MESSAGE_LIMIT` | `40`               | Recent task-session messages to inspect for compaction-loop evidence                  |
-| `CLAUDE_CODE_COMPACTION_LOOP_WINDOW_MESSAGES`      | `20`               | Rolling recent-message window used for compaction-loop detection                      |
-| `CLAUDE_CODE_COMPACTION_LOOP_MIN_PAIRS`            | `3`                | Minimum `Compacting...` / `Compacting completed` marker pairs before failing a task   |
-| `TASK_CALLBACK_TIMEOUT_MS`                         | `10000`            | Callback response timeout                                                             |
-| `TASK_CALLBACK_RETRY_MAX_ATTEMPTS`                 | `3`                | Max callback retry attempts                                                           |
-| `TASK_RUN_CLEANUP_DELAY_MS`                        | `5000`             | Delay before task cleanup                                                             |
-| `TASK_RECONCILIATION_IDLE_MS`                      | `300000` (5 min)   | Idle threshold before SAM sends a visible task check-in                               |
-| `TASK_RECONCILIATION_RESPONSE_DEADLINE_MS`         | `60000` (1 min)    | Response deadline after a visible task check-in                                       |
-| `TASK_RECONCILIATION_PROMPT_SOFT_STALL_MS`         | `1800000` (30 min) | In-flight prompt observation threshold before a non-interrupting reconciliation event |
-| `TASK_RECONCILIATION_PROMPT_HARD_STALL_MS`         | `7200000` (2 hr)   | In-flight prompt hard-stall threshold before SAM requests prompt cancellation         |
-| `TASK_RECONCILIATION_MIN_ALARM_DELAY_MS`           | `10000` (10 sec)   | Minimum delay before the next reconciliation alarm can fire                           |
+| Variable                                           | Default                                | Description                                                                                      |
+| -------------------------------------------------- | -------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `TASK_RUN_MAX_EXECUTION_MS`                        | `14400000` (4 hr)                      | Max task execution time                                                                          |
+| `TASK_STUCK_QUEUED_TIMEOUT_MS`                     | `1200000` (20 min)                     | Timeout for tasks stuck in queued state                                                          |
+| `TASK_STUCK_DELEGATED_TIMEOUT_MS`                  | `1860000` (31 min)                     | Timeout for tasks stuck in delegated state                                                       |
+| `TASK_DO_MISMATCH_GRACE_MS`                        | `300000` (5 min)                       | Minimum age before reconciling completed TaskRunner state with task-scoped liveness              |
+| `STUCK_TASK_MAX_CANDIDATES_PER_SWEEP`              | `100`                                  | Maximum active tasks inspected by each recovery sweep                                            |
+| `STUCK_TASK_SCAN_CURSOR_KV_KEY`                    | `scheduled:stuck-tasks:scan-cursor:v1` | KV key used to resume bounded recovery scans fairly across active tasks                          |
+| `TASK_LIVENESS_MAX_ACP_SESSIONS`                   | `5`                                    | Maximum task-scoped ACP sessions inspected per liveness probe                                    |
+| `TASK_LIVENESS_PROBE_TIMEOUT_MS`                   | `5000` (5 sec)                         | Per-candidate timeout for the ACP liveness probe; a timeout is inconclusive (never fails a task) |
+| `TASK_RUN_ABSOLUTE_CEILING_MS`                     | `86400000` (24 hr)                     | Absolute runaway-cost ceiling; fails even a task with a demonstrably live runtime                |
+| `CLAUDE_CODE_COMPACTION_LOOP_DETECTOR_ENABLED`     | `true`                                 | Enable Claude Code compaction-loop shutdown from recent message evidence                         |
+| `CLAUDE_CODE_COMPACTION_LOOP_RECENT_MESSAGE_LIMIT` | `40`                                   | Recent task-session messages to inspect for compaction-loop evidence                             |
+| `CLAUDE_CODE_COMPACTION_LOOP_WINDOW_MESSAGES`      | `20`                                   | Rolling recent-message window used for compaction-loop detection                                 |
+| `CLAUDE_CODE_COMPACTION_LOOP_MIN_PAIRS`            | `3`                                    | Minimum `Compacting...` / `Compacting completed` marker pairs before failing a task              |
+| `TASK_CALLBACK_TIMEOUT_MS`                         | `10000`                                | Callback response timeout                                                                        |
+| `TASK_CALLBACK_RETRY_MAX_ATTEMPTS`                 | `3`                                    | Max callback retry attempts                                                                      |
+| `TASK_RUN_CLEANUP_DELAY_MS`                        | `5000`                                 | Delay before task cleanup                                                                        |
+| `TASK_RECONCILIATION_IDLE_MS`                      | `300000` (5 min)                       | Idle threshold before SAM sends a visible task check-in                                          |
+| `TASK_RECONCILIATION_RESPONSE_DEADLINE_MS`         | `60000` (1 min)                        | Response deadline after a visible task check-in                                                  |
+| `TASK_RECONCILIATION_PROMPT_SOFT_STALL_MS`         | `1800000` (30 min)                     | In-flight prompt observation threshold before a non-interrupting reconciliation event            |
+| `TASK_RECONCILIATION_PROMPT_HARD_STALL_MS`         | `7200000` (2 hr)                       | In-flight prompt hard-stall threshold before SAM requests prompt cancellation                    |
+| `TASK_RECONCILIATION_MIN_ALARM_DELAY_MS`           | `10000` (10 sec)                       | Minimum delay before the next reconciliation alarm can fire                                      |
 
 > **Liveness-gated recovery.** Stuck-task recovery for `in_progress` tasks (including task-mode work paused at the `awaiting_followup` execution step) is gated on **task-scoped** liveness — a live workspace, a healthy node with a recent heartbeat, **and** an active task-scoped ACP session. A shared-node heartbeat alone is never sufficient. Consequently, `TASK_RUN_HARD_TIMEOUT_MS` and `TASK_RUN_MAX_EXECUTION_MS` bound the point at which a task with **no** proven live runtime is failed; a task with a demonstrably live runtime is preserved past those thresholds, but remains bounded by `TASK_RUN_ABSOLUTE_CEILING_MS` (24 hours by default) as a runaway-cost backstop. When liveness cannot be determined (probe timeout or error), the task is left untouched (fail-safe) until it reaches that absolute ceiling.
 

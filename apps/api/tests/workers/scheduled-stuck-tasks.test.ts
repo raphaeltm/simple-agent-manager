@@ -9,6 +9,7 @@
  * - Optimistic locking (task advanced between SELECT and UPDATE)
  * - Heartbeat grace period for in_progress tasks
  * - Diagnostic gathering (workspace/node status from D1)
+ * - Bounded D1 discovery resumes and wraps through a real KV cursor
  */
 import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
@@ -206,6 +207,62 @@ describe('recoverStuckTasks — vertical slice', () => {
       expect(eventsAfterSecondSweep.filter((event) => event.to_status === 'failed')).toHaveLength(
         1
       );
+    });
+
+    it('selects a fresh dead runtime first, then resumes and wraps to an older active row', async () => {
+      await seedBaseData();
+      const oldQueuedTaskId = 'task-st-cursor-old-queued';
+      const deadTaskId = 'task-st-cursor-new-dead';
+      const nodeId = 'node-st-cursor-new-dead';
+      const workspaceId = 'ws-st-cursor-new-dead';
+      const twentyMinutesAgo = new Date(Date.now() - 20 * 60 * 1000).toISOString();
+      const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+      const oneMinuteAgo = new Date(Date.now() - 60 * 1000).toISOString();
+
+      await seedTask(oldQueuedTaskId, PROJECT_ID, USER_ID, {
+        status: 'queued',
+        executionStep: 'node_selection',
+        updatedAt: twentyMinutesAgo,
+      });
+      await seedNode(nodeId, USER_ID, { status: 'deleted', healthStatus: 'stale' });
+      await seedWorkspace(workspaceId, nodeId, USER_ID, {
+        projectId: PROJECT_ID,
+        status: 'deleted',
+      });
+      await seedTask(deadTaskId, PROJECT_ID, USER_ID, {
+        status: 'in_progress',
+        executionStep: 'running',
+        startedAt: tenMinutesAgo,
+        updatedAt: oneMinuteAgo,
+        workspaceId,
+      });
+
+      const testEnv = {
+        ...env,
+        STUCK_TASK_MAX_CANDIDATES_PER_SWEEP: '1',
+        STUCK_TASK_SCAN_CURSOR_KV_KEY: 'test:stuck-task-cursor:fresh-then-wrap',
+        TASK_DO_MISMATCH_GRACE_MS: '1000',
+        TASK_STUCK_QUEUED_TIMEOUT_MS: '3600000',
+      } as unknown as Env;
+
+      const firstSweep = await recoverStuckTasks(testEnv);
+      expect(firstSweep).toMatchObject({
+        candidatesScanned: 1,
+        candidateCursorLoaded: false,
+        failedInProgress: 1,
+        deadRuntimeReconciled: 1,
+      });
+      expect((await getTaskStatus(deadTaskId))?.status).toBe('failed');
+      expect((await getTaskStatus(oldQueuedTaskId))?.status).toBe('queued');
+
+      const secondSweep = await recoverStuckTasks(testEnv);
+      expect(secondSweep).toMatchObject({
+        candidatesScanned: 1,
+        candidateCursorLoaded: true,
+        candidateCursorWrapped: true,
+        failedQueued: 0,
+      });
+      expect((await getTaskStatus(oldQueuedTaskId))?.status).toBe('queued');
     });
   });
 

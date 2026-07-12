@@ -50,6 +50,9 @@ export const DEFAULT_TASK_DO_MISMATCH_GRACE_MS = 5 * 60 * 1000;
 /** Maximum active task rows inspected by one stuck-task cron invocation. */
 export const DEFAULT_STUCK_TASK_MAX_CANDIDATES_PER_SWEEP = 100;
 
+/** KV key used to resume the bounded stuck-task scan without starving later rows. */
+export const DEFAULT_STUCK_TASK_SCAN_CURSOR_KV_KEY = 'scheduled:stuck-tasks:scan-cursor:v1';
+
 /** Maximum ACP sessions read while proving task-scoped runtime liveness. */
 export const DEFAULT_TASK_LIVENESS_MAX_ACP_SESSIONS = 5;
 

@@ -88,6 +88,8 @@ See `apps/api/.env.example` for the full list. Key variables:
 - `MAX_PROJECTS_PER_USER` — Runtime project cap
 - `MAX_TASKS_PER_PROJECT` — Runtime task cap per project
 - `MAX_TASK_DEPENDENCIES_PER_TASK` — Runtime dependency-edge cap per task
+- `STUCK_TASK_MAX_CANDIDATES_PER_SWEEP` — Maximum active task rows inspected by one five-minute recovery sweep (default: 100)
+- `STUCK_TASK_SCAN_CURSOR_KV_KEY` — KV key used to resume the bounded recovery scan fairly across active rows (default: `scheduled:stuck-tasks:scan-cursor:v1`)
 - `PROJECT_INVITE_TOKEN_BYTES` — Random bytes used for generated project invite link tokens (default: 32)
 - `PROJECT_INVITE_DEFAULT_EXPIRY_DAYS` — Default lifetime for project invite links created without an explicit expiry (default: 7)
 - `PROJECT_INVITE_MAX_EXPIRY_DAYS` — Maximum allowed project invite link lifetime (default: 30)

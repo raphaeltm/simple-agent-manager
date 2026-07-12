@@ -25,6 +25,7 @@
 import {
   DEFAULT_NODE_HEARTBEAT_STALE_SECONDS,
   DEFAULT_STUCK_TASK_MAX_CANDIDATES_PER_SWEEP,
+  DEFAULT_STUCK_TASK_SCAN_CURSOR_KV_KEY,
   DEFAULT_TASK_DO_MISMATCH_GRACE_MS,
   DEFAULT_TASK_LIVENESS_MAX_ACP_SESSIONS,
   DEFAULT_TASK_LIVENESS_PROBE_TIMEOUT_MS,
@@ -84,7 +85,36 @@ export interface StuckTaskResult {
   doHealthMissing: number;
   doHealthErrors: number;
   deadRuntimeReconciled: number;
+  candidatesScanned: number;
+  candidateCursorLoaded: boolean;
+  candidateCursorWrapped: boolean;
+  candidateCursorErrors: number;
   errors: number;
+}
+
+export interface StuckTaskCandidate {
+  id: string;
+  project_id: string;
+  user_id: string;
+  status: string;
+  execution_step: string | null;
+  updated_at: string;
+  started_at: string | null;
+  workspace_id: string | null;
+  auto_provisioned_node_id: string | null;
+}
+
+export interface StuckTaskScanCursor {
+  updatedAt: string;
+  taskId: string;
+}
+
+export interface StuckTaskCandidateSelection {
+  tasks: StuckTaskCandidate[];
+  nextCursor: StuckTaskScanCursor | null;
+  cursorLoaded: boolean;
+  wrapped: boolean;
+  cursorErrors: number;
 }
 
 export interface TaskRunnerProbeResult {
@@ -155,10 +185,155 @@ export interface TaskReconciliationDiagnostics {
   decision: TaskReconciliationDecision;
   liveness: TaskRuntimeLiveness | null;
   taskRunner: TaskRunnerProbeResult;
+  candidateScan: {
+    limit: number;
+    selectedCount: number;
+    selected: boolean;
+    position: number | null;
+    cursorLoaded: boolean;
+    wrapped: boolean;
+    cursorErrors: number;
+  };
 }
 
 const LIVE_WORKSPACE_STATUSES = new Set(['running', 'recovery']);
 const ACTIVE_ACP_STATUSES = new Set(['assigned', 'running']);
+
+function stuckTaskScanCursorKey(env: Env): string {
+  return env.STUCK_TASK_SCAN_CURSOR_KV_KEY?.trim() || DEFAULT_STUCK_TASK_SCAN_CURSOR_KV_KEY;
+}
+
+function parseStuckTaskScanCursor(raw: string | null): StuckTaskScanCursor | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as Partial<StuckTaskScanCursor>;
+    if (
+      typeof parsed.updatedAt !== 'string' ||
+      !Number.isFinite(Date.parse(parsed.updatedAt)) ||
+      typeof parsed.taskId !== 'string' ||
+      parsed.taskId.length === 0 ||
+      parsed.taskId.length > 128
+    ) {
+      return null;
+    }
+    return { updatedAt: parsed.updatedAt, taskId: parsed.taskId };
+  } catch {
+    return null;
+  }
+}
+
+const STUCK_TASK_CANDIDATE_COLUMNS = `id, project_id, user_id, status, execution_step, updated_at, started_at,
+       workspace_id, auto_provisioned_node_id`;
+
+/**
+ * Select one bounded, fair page of active tasks. A KV cursor prevents old live
+ * or inconclusive rows from permanently starving later dead rows. The first
+ * cursorless page starts at the newest active rows, then subsequent sweeps
+ * continue in ascending order and wrap at the end.
+ */
+export async function selectStuckTaskCandidates(
+  env: Env,
+  maxCandidates: number
+): Promise<StuckTaskCandidateSelection> {
+  const key = stuckTaskScanCursorKey(env);
+  let cursor: StuckTaskScanCursor | null = null;
+  let cursorLoaded = false;
+  let cursorErrors = 0;
+
+  try {
+    const rawCursor = await env.KV.get(key);
+    cursor = parseStuckTaskScanCursor(rawCursor);
+    cursorLoaded = cursor !== null;
+    if (rawCursor && !cursor) {
+      cursorErrors++;
+      log.warn('stuck_task.invalid_scan_cursor', { key });
+    }
+  } catch (err) {
+    cursorErrors++;
+    log.warn('stuck_task.scan_cursor_read_failed', {
+      key,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  let tasks: StuckTaskCandidate[];
+  if (cursor) {
+    const forward = await env.DATABASE.prepare(
+      `SELECT ${STUCK_TASK_CANDIDATE_COLUMNS}
+       FROM tasks
+       WHERE status IN ('queued', 'delegated', 'in_progress')
+         AND (updated_at > ? OR (updated_at = ? AND id > ?))
+       ORDER BY updated_at ASC, id ASC
+       LIMIT ?`
+    )
+      .bind(cursor.updatedAt, cursor.updatedAt, cursor.taskId, maxCandidates)
+      .all<StuckTaskCandidate>();
+    tasks = forward.results;
+  } else {
+    // On rollout (or after a deliberately cleared cursor), examine the newest
+    // bounded page first so a fresh dead-runtime mismatch is not delayed behind
+    // a historical backlog. The persisted cursor makes later pages fair.
+    const newest = await env.DATABASE.prepare(
+      `SELECT ${STUCK_TASK_CANDIDATE_COLUMNS}
+       FROM (
+         SELECT ${STUCK_TASK_CANDIDATE_COLUMNS}
+         FROM tasks
+         WHERE status IN ('queued', 'delegated', 'in_progress')
+         ORDER BY updated_at DESC, id DESC
+         LIMIT ?
+       )
+       ORDER BY updated_at ASC, id ASC`
+    )
+      .bind(maxCandidates)
+      .all<StuckTaskCandidate>();
+    tasks = newest.results;
+  }
+
+  let wrapped = false;
+  if (cursor && tasks.length < maxCandidates) {
+    const remaining = maxCandidates - tasks.length;
+    const wrap = await env.DATABASE.prepare(
+      `SELECT ${STUCK_TASK_CANDIDATE_COLUMNS}
+       FROM tasks
+       WHERE status IN ('queued', 'delegated', 'in_progress')
+         AND (updated_at < ? OR (updated_at = ? AND id <= ?))
+       ORDER BY updated_at ASC, id ASC
+       LIMIT ?`
+    )
+      .bind(cursor.updatedAt, cursor.updatedAt, cursor.taskId, remaining)
+      .all<StuckTaskCandidate>();
+    if (wrap.results.length > 0) {
+      wrapped = true;
+      tasks.push(...wrap.results);
+    }
+  }
+
+  const last = tasks.at(-1);
+  return {
+    tasks,
+    nextCursor: last ? { updatedAt: last.updated_at, taskId: last.id } : null,
+    cursorLoaded,
+    wrapped,
+    cursorErrors,
+  };
+}
+
+export async function persistStuckTaskScanCursor(
+  env: Env,
+  cursor: StuckTaskScanCursor
+): Promise<boolean> {
+  const key = stuckTaskScanCursorKey(env);
+  try {
+    await env.KV.put(key, JSON.stringify(cursor));
+    return true;
+  } catch (err) {
+    log.warn('stuck_task.scan_cursor_write_failed', {
+      key,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return false;
+  }
+}
 
 /** Bound and classify the cross-DO status RPC used by reconciliation diagnostics. */
 export async function probeTaskRunnerStatus(
@@ -408,6 +583,10 @@ export async function getTaskReconciliationDiagnostics(
     DEFAULT_TASK_STUCK_DELEGATED_TIMEOUT_MS
   );
   const maxExecutionMs = parseMs(env.TASK_RUN_MAX_EXECUTION_MS, DEFAULT_TASK_RUN_MAX_EXECUTION_MS);
+  const maxCandidates = parseMs(
+    env.STUCK_TASK_MAX_CANDIDATES_PER_SWEEP,
+    DEFAULT_STUCK_TASK_MAX_CANDIDATES_PER_SWEEP
+  );
 
   let timeForCheck = elapsedMs;
   let halfThreshold = mismatchGraceMs;
@@ -424,10 +603,14 @@ export async function getTaskReconciliationDiagnostics(
   const eligibilityThresholdMs = Math.min(halfThreshold, mismatchGraceMs);
   const active = ['queued', 'delegated', 'in_progress'].includes(task.status);
   const eligible = active && timeForCheck > eligibilityThresholdMs;
-  const [taskRunner, liveness] = await Promise.all([
+  const [taskRunner, liveness, candidateSelection] = await Promise.all([
     probeTaskRunnerStatus(env, task.id),
     task.status === 'in_progress' ? getTaskRuntimeLiveness(env, task) : Promise.resolve(null),
+    selectStuckTaskCandidates(env, maxCandidates),
   ]);
+  const candidateIndex = candidateSelection.tasks.findIndex(
+    (candidate) => candidate.id === task.id
+  );
 
   let decision: TaskReconciliationDecision;
   if (!active) {
@@ -455,6 +638,15 @@ export async function getTaskReconciliationDiagnostics(
     decision,
     liveness,
     taskRunner,
+    candidateScan: {
+      limit: maxCandidates,
+      selectedCount: candidateSelection.tasks.length,
+      selected: candidateIndex >= 0,
+      position: candidateIndex >= 0 ? candidateIndex + 1 : null,
+      cursorLoaded: candidateSelection.cursorLoaded,
+      wrapped: candidateSelection.wrapped,
+      cursorErrors: candidateSelection.cursorErrors,
+    },
   };
 }
 
@@ -554,6 +746,10 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
     doHealthMissing: 0,
     doHealthErrors: 0,
     deadRuntimeReconciled: 0,
+    candidatesScanned: 0,
+    candidateCursorLoaded: false,
+    candidateCursorWrapped: false,
+    candidateCursorErrors: 0,
     errors: 0,
   };
 
@@ -593,32 +789,15 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
     });
   }
 
-  // Find stuck tasks via raw SQL — include workspace_id and auto_provisioned_node_id
-  // for diagnostic context capture.
-  const stuckTasks = await env.DATABASE.prepare(
-    `SELECT id, project_id, user_id, status, execution_step, updated_at, started_at,
-            workspace_id, auto_provisioned_node_id
-     FROM tasks
-     WHERE status IN ('queued', 'delegated', 'in_progress')
-     ORDER BY updated_at ASC
-     LIMIT ?`
-  )
-    .bind(maxCandidates)
-    .all<{
-      id: string;
-      project_id: string;
-      user_id: string;
-      status: string;
-      execution_step: string | null;
-      updated_at: string;
-      started_at: string | null;
-      workspace_id: string | null;
-      auto_provisioned_node_id: string | null;
-    }>();
+  const candidateSelection = await selectStuckTaskCandidates(env, maxCandidates);
+  result.candidatesScanned = candidateSelection.tasks.length;
+  result.candidateCursorLoaded = candidateSelection.cursorLoaded;
+  result.candidateCursorWrapped = candidateSelection.wrapped;
+  result.candidateCursorErrors = candidateSelection.cursorErrors;
 
   const db = drizzle(env.DATABASE, { schema });
 
-  for (const task of stuckTasks.results) {
+  for (const task of candidateSelection.tasks) {
     const updatedAt = new Date(task.updated_at).getTime();
     const elapsedMs = now.getTime() - updatedAt;
     let isStuck = false;
@@ -1016,6 +1195,13 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
 
       result.errors++;
     }
+  }
+
+  if (
+    candidateSelection.nextCursor &&
+    !(await persistStuckTaskScanCursor(env, candidateSelection.nextCursor))
+  ) {
+    result.candidateCursorErrors++;
   }
 
   return result;

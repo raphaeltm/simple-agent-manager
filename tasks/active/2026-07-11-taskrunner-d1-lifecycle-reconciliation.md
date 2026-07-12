@@ -72,6 +72,8 @@ the recovered work, all fixed:
 - TaskRunner status probes are bounded and classified as `ok`, `missing`, `timeout`, or `error`; cron summaries expose missing/error/reconciled counters.
 - A superadmin-only, read-only diagnostics endpoint reports the exact eligibility, liveness, TaskRunner probe, and decision for one task before any staging mutation.
 - Unit coverage proves missing/error TaskRunner RPC outcomes still reconcile a deleted runtime. A Worker D1/DO vertical slice also asserts the second sweep is a no-op; local `workerd` currently exits with SIGSEGV before importing Worker tests, so that file remains for CI/staging verification.
+- The follow-up staging mismatch was correctly classified as `reconcile_dead_runtime` but remained active across the 16:30 and 16:35 UTC sweeps. The bounded query always reread the same 100 oldest active rows, so live/inconclusive historical rows could permanently starve later dead rows.
+- Recovery now persists a configurable KV scan cursor, starts a cursorless rollout at the newest bounded page, resumes after the prior page, and wraps fairly. Cron summaries expose scan count/cursor state/errors, and the read-only endpoint reports whether and where the next page selects the inspected task.
 
 ## Acceptance criteria
 

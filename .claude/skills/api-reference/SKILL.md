@@ -63,7 +63,7 @@ user-invocable: false
 ## Administration (Superadmin Only)
 
 - `GET /api/admin/tasks/stuck` — List tasks currently in transient states
-- `GET /api/admin/tasks/:taskId/reconciliation-diagnostics` — Read the TaskRunner probe, task-scoped runtime liveness, eligibility threshold, and reconciliation decision without mutating task state
+- `GET /api/admin/tasks/:taskId/reconciliation-diagnostics` — Read the TaskRunner probe, task-scoped runtime liveness, eligibility threshold, reconciliation decision, and whether/where the bounded cursor page selects the task, without mutating task state
 - `GET /api/admin/tasks/recent-failures` — List recent failed tasks with error details
 
 ## Agent Sessions

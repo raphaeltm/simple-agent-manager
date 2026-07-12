@@ -12,8 +12,10 @@ import type { Env } from '../../src/env';
 import { detectClaudeCodeCompactionLoop } from '../../src/scheduled/claude-code-compaction-loop';
 import {
   getTaskReconciliationDiagnostics,
+  persistStuckTaskScanCursor,
   probeTaskRunnerStatus,
   recoverStuckTasks,
+  selectStuckTaskCandidates,
 } from '../../src/scheduled/stuck-tasks';
 import { persistError } from '../../src/services/observability';
 import { cleanupTaskRun } from '../../src/services/task-runner';
@@ -98,9 +100,16 @@ function createMockEnv(
           : vi.fn().mockResolvedValue(taskRunnerStatus),
     }),
   };
+  const kvStore = new Map<string, string>();
 
   return {
     DATABASE: mockDb,
+    KV: {
+      get: vi.fn(async (key: string) => kvStore.get(key) ?? null),
+      put: vi.fn(async (key: string, value: string) => {
+        kvStore.set(key, value);
+      }),
+    } as unknown as KVNamespace,
     OBSERVABILITY_DATABASE: {
       prepare: vi.fn().mockReturnValue(mockPreparedStatement()),
     } as unknown as D1Database,
@@ -1115,11 +1124,7 @@ describe('recoverStuckTasks', () => {
 
     it('classifies a bounded TaskRunner status timeout', async () => {
       const neverResolves = new Promise<never>(() => undefined);
-      const env = createMockEnv(
-        new Map(),
-        { TASK_LIVENESS_PROBE_TIMEOUT_MS: '1' },
-        neverResolves,
-      );
+      const env = createMockEnv(new Map(), { TASK_LIVENESS_PROBE_TIMEOUT_MS: '1' }, neverResolves);
 
       const probe = await probeTaskRunnerStatus(env, 'task-do-timeout');
 
@@ -1156,7 +1161,116 @@ describe('recoverStuckTasks', () => {
         decision: 'reconcile_dead_runtime',
         liveness: { conclusive: true, live: false, reason: 'workspace_deleted' },
         taskRunner: { outcome: 'missing', status: null },
+        candidateScan: {
+          limit: 100,
+          selectedCount: 1,
+          selected: true,
+          position: 1,
+          cursorLoaded: false,
+          wrapped: false,
+          cursorErrors: 0,
+        },
       });
+    });
+
+    it('persists a bounded scan cursor and resumes after it on the next sweep', async () => {
+      const candidateConfig = {
+        results: [
+          {
+            id: 'task-oldest-page',
+            project_id: 'proj-1',
+            user_id: 'user-1',
+            status: 'in_progress',
+            execution_step: 'running',
+            updated_at: '2026-07-12T10:00:00.000Z',
+            started_at: '2026-07-12T09:00:00.000Z',
+            workspace_id: 'ws-live',
+            auto_provisioned_node_id: null,
+          },
+        ],
+      };
+      const responses = new Map<string, { results: unknown[]; changes?: number }>([
+        ["status IN ('queued', 'delegated', 'in_progress')", candidateConfig],
+      ]);
+      const env = createMockEnv(responses);
+
+      const first = await selectStuckTaskCandidates(env, 1);
+      expect(first).toMatchObject({
+        cursorLoaded: false,
+        wrapped: false,
+        tasks: [{ id: 'task-oldest-page' }],
+        nextCursor: {
+          updatedAt: '2026-07-12T10:00:00.000Z',
+          taskId: 'task-oldest-page',
+        },
+      });
+      expect(String(vi.mocked(env.DATABASE.prepare).mock.calls[0]?.[0])).toContain(
+        'ORDER BY updated_at DESC, id DESC'
+      );
+      expect(first.nextCursor).not.toBeNull();
+      if (!first.nextCursor) throw new Error('Expected a scan cursor');
+      expect(await persistStuckTaskScanCursor(env, first.nextCursor)).toBe(true);
+
+      candidateConfig.results = [
+        {
+          ...candidateConfig.results[0],
+          id: 'task-next-page',
+          updated_at: '2026-07-12T11:00:00.000Z',
+        },
+      ];
+      const second = await selectStuckTaskCandidates(env, 1);
+
+      expect(second).toMatchObject({
+        cursorLoaded: true,
+        tasks: [{ id: 'task-next-page' }],
+      });
+      expect(String(vi.mocked(env.DATABASE.prepare).mock.calls[1]?.[0])).toContain(
+        '(updated_at > ? OR (updated_at = ? AND id > ?))'
+      );
+    });
+
+    it('wraps to the oldest active row after reaching the cursor tail', async () => {
+      const cursor = {
+        updatedAt: '2026-07-12T12:00:00.000Z',
+        taskId: 'task-cursor-tail',
+      };
+      const wrappedTask = {
+        id: 'task-oldest-active',
+        project_id: 'proj-1',
+        user_id: 'user-1',
+        status: 'in_progress',
+        execution_step: 'running',
+        updated_at: '2026-07-12T08:00:00.000Z',
+        started_at: '2026-07-12T07:00:00.000Z',
+        workspace_id: 'ws-oldest',
+        auto_provisioned_node_id: null,
+      };
+      const prepare = vi.fn((sql: string) =>
+        mockPreparedStatement(sql.includes('updated_at > ?') ? [] : [wrappedTask])
+      );
+      const env = {
+        DATABASE: { prepare } as unknown as D1Database,
+        KV: {
+          get: vi.fn().mockResolvedValue(JSON.stringify(cursor)),
+          put: vi.fn(),
+        } as unknown as KVNamespace,
+      } as Env;
+
+      const selection = await selectStuckTaskCandidates(env, 1);
+
+      expect(selection).toMatchObject({
+        cursorLoaded: true,
+        wrapped: true,
+        tasks: [{ id: 'task-oldest-active' }],
+        nextCursor: {
+          updatedAt: wrappedTask.updated_at,
+          taskId: wrappedTask.id,
+        },
+      });
+      expect(prepare).toHaveBeenCalledTimes(2);
+      expect(String(prepare.mock.calls[1]?.[0])).toContain(
+        '(updated_at < ? OR (updated_at = ? AND id <= ?))'
+      );
     });
   });
 
@@ -1177,6 +1291,10 @@ describe('recoverStuckTasks', () => {
         doHealthMissing: 0,
         doHealthErrors: 0,
         deadRuntimeReconciled: 0,
+        candidatesScanned: 0,
+        candidateCursorLoaded: false,
+        candidateCursorWrapped: false,
+        candidateCursorErrors: 0,
         errors: 0,
       });
     });
