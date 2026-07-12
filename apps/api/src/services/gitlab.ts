@@ -124,7 +124,13 @@ function availableAccessToken(token: TokenResult, flow: string, userId: string):
   return token.accessToken;
 }
 
-export async function getGitLabUserAccessTokenWithHeaders(
+const lockedTokenResponseSchema = v.object({
+  accessToken: v.nullable(v.string()),
+  accessTokenExpiresAt: v.nullable(v.string()),
+  scopes: v.optional(v.array(v.string())),
+});
+
+async function getDirectGitLabUserAccessTokenWithHeaders(
   env: Env,
   headers: Headers,
   userId: string,
@@ -136,6 +142,68 @@ export async function getGitLabUserAccessTokenWithHeaders(
       headers,
       body: { providerId: 'gitlab', userId },
     });
+    log.info('gitlab.user_access_token.lookup', {
+      flow,
+      userId,
+      tokenPresent: Boolean(token.accessToken),
+      scopes: token.scopes,
+    });
+    return availableAccessToken(token, flow, userId);
+  } catch (err) {
+    log.warn('gitlab.user_access_token_unavailable', {
+      flow,
+      userId,
+      tokenPresent: false,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  }
+}
+
+/**
+ * Resolve the user's GitLab OAuth access token, serializing lookup/refresh per
+ * user through the GitLabUserAccessTokenLock Durable Object. GitLab refresh
+ * tokens are rotating and single-use — two concurrent refreshes replay a
+ * consumed refresh token and revoke the whole token family upstream, so the
+ * entire BetterAuth getAccessToken call must run inside the per-user lock.
+ * Falls back to the direct (unlocked) path only when the DO binding is absent
+ * (local dev / Miniflare without the binding configured).
+ */
+export async function getGitLabUserAccessTokenWithHeaders(
+  env: Env,
+  headers: Headers,
+  userId: string,
+  flow: string
+): Promise<string | null> {
+  if (!env.GITLAB_USER_ACCESS_TOKEN_LOCK) {
+    return getDirectGitLabUserAccessTokenWithHeaders(env, headers, userId, flow);
+  }
+  try {
+    const id = env.GITLAB_USER_ACCESS_TOKEN_LOCK.idFromName(userId);
+    const stub = env.GITLAB_USER_ACCESS_TOKEN_LOCK.get(id);
+    const response = await stub.fetch('https://gitlab-user-access-token-lock/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        userId,
+        flow,
+        headers: Array.from(headers.entries()),
+      }),
+    });
+    if (!response.ok) {
+      log.warn('gitlab.user_access_token_unavailable', {
+        flow,
+        userId,
+        tokenPresent: false,
+        status: response.status,
+      });
+      return null;
+    }
+    const token = await readResponseJson(
+      response,
+      lockedTokenResponseSchema,
+      'gitlab.user_access_token.locked'
+    );
     log.info('gitlab.user_access_token.lookup', {
       flow,
       userId,
@@ -268,7 +336,12 @@ function gitLabRepositoryHost(configHost: string): string {
   try {
     return new URL(trimmed).host.toLowerCase();
   } catch {
-    return trimmed.replace(/^https?:\/\//i, '').split('/')[0]?.toLowerCase() ?? trimmed;
+    return (
+      trimmed
+        .replace(/^https?:\/\//i, '')
+        .split('/')[0]
+        ?.toLowerCase() ?? trimmed
+    );
   }
 }
 
@@ -281,7 +354,10 @@ function gitLabWebOrigin(configHost: string): string {
   }
 }
 
-function mapProjectMetadata(configHost: string, project: GitLabProjectApi): GitLabRepositoryMetadata {
+function mapProjectMetadata(
+  configHost: string,
+  project: GitLabProjectApi
+): GitLabRepositoryMetadata {
   const defaultBranch = project.default_branch?.trim();
   const pathWithNamespace = project.path_with_namespace.trim();
   if (!defaultBranch) {

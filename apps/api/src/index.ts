@@ -4,6 +4,7 @@ export { AiTokenBudgetCounter } from './durable-objects/ai-token-budget-counter'
 // Sandbox SDK DO class — retained for experimental toolbox/diagnostics use only.
 export { CodexRefreshLock } from './durable-objects/codex-refresh-lock';
 export { GitHubUserAccessTokenLock } from './durable-objects/github-user-access-token-lock';
+export { GitLabUserAccessTokenLock } from './durable-objects/gitlab-user-access-token-lock';
 export { NodeLifecycle } from './durable-objects/node-lifecycle';
 export { NotificationService } from './durable-objects/notification';
 export { ProjectAgent } from './durable-objects/project-agent';

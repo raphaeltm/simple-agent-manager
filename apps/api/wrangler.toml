@@ -144,6 +144,11 @@ class_name = "CodexRefreshLock"
 name = "GITHUB_USER_ACCESS_TOKEN_LOCK"
 class_name = "GitHubUserAccessTokenLock"
 
+# Durable Object for per-user GitLab OAuth user-token refresh serialization
+[[durable_objects.bindings]]
+name = "GITLAB_USER_ACCESS_TOKEN_LOCK"
+class_name = "GitLabUserAccessTokenLock"
+
 # Durable Object for trial-onboarding monthly cap counter (singleton; keyed by YYYY-MM)
 [[durable_objects.bindings]]
 name = "TRIAL_COUNTER"
@@ -264,6 +269,10 @@ class_name = "VmAgentContainer"
 [[migrations]]
 tag = "v16"
 new_sqlite_classes = ["VmAgentContainer"]  # Raw Cloudflare Container DO for instant-session vm-agent
+
+[[migrations]]
+tag = "v17"
+new_classes = ["GitLabUserAccessTokenLock"]  # Stateless per-user mutex for BetterAuth GitLab OAuth refresh (rotating single-use refresh tokens)
 
 # Analytics Engine for usage tracking (Phase 1 — server-side analytics)
 [[analytics_engine_datasets]]

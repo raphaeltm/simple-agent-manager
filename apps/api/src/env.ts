@@ -54,6 +54,7 @@ export interface Env {
   NOTIFICATION: DurableObjectNamespace;
   CODEX_REFRESH_LOCK: DurableObjectNamespace;
   GITHUB_USER_ACCESS_TOKEN_LOCK: DurableObjectNamespace;
+  GITLAB_USER_ACCESS_TOKEN_LOCK?: DurableObjectNamespace;
   TRIAL_COUNTER: DurableObjectNamespace;
   TRIAL_EVENT_BUS: DurableObjectNamespace;
   TRIAL_ORCHESTRATOR: DurableObjectNamespace;
