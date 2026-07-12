@@ -125,4 +125,4 @@ Every user-visible chat must have exactly one Task. `taskMode` controls schedule
 - `apps/www/src/content/docs/docs/architecture/overview.md`
 - `tasks/archive/2026-07-10-cf-container-task-teardown-audit.md`
 - `tasks/archive/2026-05-12-session-state-task-failure-reconciliation.md`
-- PRs `#1557`, `#1560`, `#1561`, and `#974`
+- PRs `#1557`, `#1560`, `#1561`, `#974`, and implementation PR `#1572`
