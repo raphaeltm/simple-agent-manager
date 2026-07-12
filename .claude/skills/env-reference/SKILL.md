@@ -12,13 +12,13 @@ Uses `GH_*` prefix because GitHub Actions secret names cannot start with `GITHUB
 
 | Type     | Name                                       | Required                                                           |
 | -------- | ------------------------------------------ | ------------------------------------------------------------------ |
-| Variable | `BASE_DOMAIN`                              | Yes                                                                |
+| Variable | `BASE_DOMAIN`                              | Yes (zone apex or installation-specific deployment subdomain)      |
 | Variable | `RESOURCE_PREFIX`                          | No (default: `sam`)                                                |
 | Variable | `PULUMI_STATE_BUCKET`                      | No (default: `sam-pulumi-state`)                                   |
 | Variable | `CF_CONTAINER_ENABLED`                     | No (default: `true`; set `false` to force VM runtime)              |
 | Secret   | `CF_API_TOKEN`                             | Yes (requires Account → SSL and Certificates → Edit for Origin CA) |
 | Secret   | `CF_ACCOUNT_ID`                            | Yes                                                                |
-| Secret   | `CF_ZONE_ID`                               | Yes                                                                |
+| Secret   | `CF_ZONE_ID`                               | Yes (ID of the parent Cloudflare zone)                             |
 | Secret   | `DEVCONTAINER_CACHE_CLOUDFLARE_API_TOKEN`  | No (falls back to `CF_API_TOKEN`)                                  |
 | Secret   | `DEVCONTAINER_CACHE_CLOUDFLARE_ACCOUNT_ID` | No (falls back to `CF_ACCOUNT_ID`)                                 |
 | Secret   | `R2_ACCESS_KEY_ID`                         | Yes                                                                |
@@ -61,7 +61,7 @@ See `apps/api/.env.example` for the full list. Key variables:
 ### Core
 
 - `WRANGLER_PORT` — Local dev port (default: 8787)
-- `BASE_DOMAIN` — Set automatically by sync scripts
+- `BASE_DOMAIN` — Deployment domain; may be the zone apex or a namespaced subdomain for multiple installations in one zone
 - `CF_CONTAINER_ENABLED` — Enables Cloudflare Container instant-session runtime in generated deployment envs (default: `true`; set `false` to force VM runtime)
 - `CF_CONTAINER_SLEEP_AFTER` — Container idle sleep duration for instant-session runtime (default: `10m`)
 - `CF_CONTAINER_VM_AGENT_PORT` — vm-agent standalone HTTP port inside the raw container (default: `8080`)

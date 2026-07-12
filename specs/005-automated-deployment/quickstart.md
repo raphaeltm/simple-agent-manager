@@ -33,9 +33,9 @@ SAM uses subdomains (`api.`, `app.`, `*.`) under your `BASE_DOMAIN`. Your domain
 4. Wait for propagation (typically 1-2 hours, up to 24 hours)
 5. Cloudflare will show status as **Active** once propagation completes
 
-> **Important: Use a top-level domain as `BASE_DOMAIN`**, not a subdomain (e.g., use `example.com`, not `sam.example.com`). Cloudflare's free Universal SSL certificate covers `example.com` and `*.example.com` but does **not** cover nested wildcards like `*.sam.example.com`. Using a subdomain requires the Advanced Certificate Manager add-on ($10/month).
+> **Choose the `BASE_DOMAIN` deliberately.** A zone apex such as `example.com` is the simplest option. To run multiple independent SAM installations in one Cloudflare zone, use a distinct deployment subdomain for each installation (for example, `dev-a.example.com` and `dev-b.example.com`) and the same `CF_ZONE_ID` for `example.com`. Each full `BASE_DOMAIN` derives a distinct resource prefix and fully qualified DNS namespace.
 >
-> If you want to keep your domain for other uses, the root domain is not used by SAM — only `api.`, `app.`, and `*.` subdomains are created. You can continue hosting other sites on the root domain.
+> Cloudflare Universal SSL on a full zone normally does not cover deeper hostnames such as `app.dev-a.example.com` or `*.dev-a.example.com`. Namespaced installations require Total TLS, Advanced Certificate Manager, or equivalent custom certificate coverage. The bare deployment domain is not used by SAM — only its `api.`, `app.`, and wildcard subdomains are created.
 
 > **DNSSEC**: If your registrar has DNSSEC enabled, disable it **before** changing nameservers. DNSSEC with mismatched nameservers will block DNS resolution.
 
@@ -328,7 +328,7 @@ dig app.example.com
 
 **Error**: `sslv3 alert handshake failure` when accessing `api.YOUR_DOMAIN`
 
-**Solution**: If using a subdomain as `BASE_DOMAIN` (e.g., `sam.example.com`), the free Universal SSL certificate does not cover nested wildcards (`*.sam.example.com`). Use a top-level domain as `BASE_DOMAIN` instead.
+**Solution**: If using a subdomain as `BASE_DOMAIN` (e.g., `dev-a.example.com`), verify certificate coverage for deeper SAM hostnames such as `api.dev-a.example.com` and `*.dev-a.example.com`. Enable Total TLS, Advanced Certificate Manager, or equivalent custom certificate coverage.
 
 ### OAuth Redirect URI Mismatch
 

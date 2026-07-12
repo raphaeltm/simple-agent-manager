@@ -21,7 +21,11 @@ You do **not** need a shared cloud provider account. Users provide their own [He
 
 ## Step 1: Choose Your Domain and Cloudflare Account
 
-Use a top-level domain as `BASE_DOMAIN` (e.g., `example.com`), not a subdomain (`sam.example.com`). Cloudflare's free Universal SSL covers `*.example.com` but not nested wildcards like `*.sam.example.com`. The root domain is not used by SAM — only `api.`, `app.`, and `*.` subdomains are created.
+Choose a deployment domain for `BASE_DOMAIN`. The simplest option is the Cloudflare zone apex (for example, `example.com`). You can also run multiple independent SAM installations in one zone by giving each installation a different subdomain, such as `dev-a.example.com` and `dev-b.example.com`, while using the same `CF_ZONE_ID` for `example.com`. Each deployment then creates namespaced hostnames such as `app.dev-a.example.com`, `api.dev-a.example.com`, and `ws-*.dev-a.example.com`, and derives distinct Cloudflare resource names from its full `BASE_DOMAIN`.
+
+:::caution[TLS for namespaced installations]
+Cloudflare Universal SSL on a full zone normally covers the apex and first-level subdomains, not deeper hostnames such as `app.dev-a.example.com` or `*.dev-a.example.com`. Before using a subdomain as `BASE_DOMAIN`, enable certificate coverage for those hostnames with Total TLS, Advanced Certificate Manager, or an equivalent custom certificate.
+:::
 
 Copy your Cloudflare account ID from the dashboard URL. In a URL like `https://dash.cloudflare.com/<account-id>/<domain>`, the account ID is the 32-character value immediately after `dash.cloudflare.com/`.
 
@@ -97,11 +101,11 @@ In your fork: Settings → Environments → New environment → name it `product
 
 **Environment variables:**
 
-| Variable               | Description                                                                                   | Example       |
-| ---------------------- | --------------------------------------------------------------------------------------------- | ------------- |
-| `BASE_DOMAIN`          | Your domain                                                                                   | `example.com` |
-| `RESOURCE_PREFIX`      | Domain-derived Cloudflare resource prefix                                                     | `sa379a6`     |
-| `CF_CONTAINER_ENABLED` | Optional instant-session runtime toggle. Defaults to `true`; set `false` to force VM runtime. | `false`       |
+| Variable               | Description                                                                                   | Example             |
+| ---------------------- | --------------------------------------------------------------------------------------------- | ------------------- |
+| `BASE_DOMAIN`          | Deployment domain: zone apex or an installation-specific subdomain                            | `dev-a.example.com` |
+| `RESOURCE_PREFIX`      | Domain-derived Cloudflare resource prefix                                                     | `sa379a6`           |
+| `CF_CONTAINER_ENABLED` | Optional instant-session runtime toggle. Defaults to `true`; set `false` to force VM runtime. | `false`             |
 
 The guided setup generates `RESOURCE_PREFIX` from `BASE_DOMAIN` as `s` plus the
 first six hex characters of the domain's SHA-256 hash. Use that generated value
@@ -113,7 +117,7 @@ instead of choosing a generic prefix.
 | ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `CF_API_TOKEN`                             | Cloudflare API token                                                                                                                                                                |
 | `CF_ACCOUNT_ID`                            | Cloudflare account ID (32-char hex)                                                                                                                                                 |
-| `CF_ZONE_ID`                               | Domain zone ID (32-char hex)                                                                                                                                                        |
+| `CF_ZONE_ID`                               | Parent Cloudflare zone ID (32-char hex); shared by namespaced installations in the same zone                                                                                        |
 | `R2_ACCESS_KEY_ID`                         | R2 API token access key                                                                                                                                                             |
 | `R2_SECRET_ACCESS_KEY`                     | R2 API token secret key                                                                                                                                                             |
 | `PULUMI_CONFIG_PASSPHRASE`                 | Generated passphrase                                                                                                                                                                |
@@ -266,11 +270,11 @@ Your API token is missing the **Account → Containers → Edit** permission. SA
 
 ### SSL Handshake Failure
 
-If using a subdomain as `BASE_DOMAIN` (e.g., `sam.example.com`), the free Universal SSL certificate does not cover nested wildcards (`*.sam.example.com`). Use a top-level domain as `BASE_DOMAIN` instead.
+If using a subdomain as `BASE_DOMAIN` (e.g., `dev-a.example.com`), verify that Cloudflare has issued a certificate covering the deeper SAM hostnames. Universal SSL on a full zone normally does not cover `app.dev-a.example.com` or `*.dev-a.example.com`; enable Total TLS, Advanced Certificate Manager, or an equivalent custom certificate.
 
 ### DNS Record Already Exists
 
-If you changed `BASE_DOMAIN`, old DNS records from a previous deployment may conflict. Go to Cloudflare DNS and delete the stale `api`, `app`, and `*` records, then re-run the deploy.
+If you changed `BASE_DOMAIN`, old DNS records from a previous deployment may conflict. Go to Cloudflare DNS and delete only the stale fully qualified records owned by that installation (for example, `api.dev-a.example.com`, `app.dev-a.example.com`, and `*.dev-a.example.com`), then re-run the deploy. Do not delete records belonging to another installation in the same zone.
 
 ### "D1_ERROR: no such table"
 

@@ -94,13 +94,13 @@ Local development uses `.dev.vars`.
 
 ## URL Construction Rules
 
-When constructing URLs using `BASE_DOMAIN`, you MUST use the correct subdomain prefix. The root domain does NOT serve any application.
+When constructing URLs using `BASE_DOMAIN`, you MUST use the correct subdomain prefix. `BASE_DOMAIN` is the deployment domain and may be either the Cloudflare zone apex or an installation-specific subdomain. `CF_ZONE_ID` identifies the parent zone. The bare deployment domain does NOT serve any application.
 
-| Destination   | URL Pattern                       | Example                                         |
-| ------------- | --------------------------------- | ----------------------------------------------- |
-| **Web UI**    | `https://app.${BASE_DOMAIN}/...`  | `https://app.simple-agent-manager.org/settings` |
-| **API**       | `https://api.${BASE_DOMAIN}/...`  | `https://api.simple-agent-manager.org/health`   |
-| **Workspace** | `https://ws-${id}.${BASE_DOMAIN}` | `https://ws-abc123.simple-agent-manager.org`    |
+| Destination   | URL Pattern                       | Example                                  |
+| ------------- | --------------------------------- | ---------------------------------------- |
+| **Web UI**    | `https://app.${BASE_DOMAIN}/...`  | `https://app.dev-a.example.com/settings` |
+| **API**       | `https://api.${BASE_DOMAIN}/...`  | `https://api.dev-a.example.com/health`   |
+| **Workspace** | `https://ws-${id}.${BASE_DOMAIN}` | `https://ws-abc123.dev-a.example.com`    |
 
 **NEVER** use `https://${BASE_DOMAIN}/...` (bare root domain) for redirects or links.
 

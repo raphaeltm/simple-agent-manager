@@ -40,7 +40,7 @@ Set as `[vars]` in `wrangler.toml` or as environment variables:
 
 | Variable                          | Default   | Description                                                                                                                |
 | --------------------------------- | --------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `BASE_DOMAIN`                     | —         | Root domain for the deployment (e.g., `example.com`)                                                                       |
+| `BASE_DOMAIN`                     | —         | Deployment domain: zone apex or installation-specific subdomain (e.g., `example.com` or `dev-a.example.com`)               |
 | `VERSION`                         | —         | Deployment version string                                                                                                  |
 | `SETUP_TOKEN`                     | —         | Plaintext first-run setup token generated during deploy and readable in the Cloudflare dashboard while setup is incomplete |
 | `SETUP_FORCE`                     | _(unset)_ | Set to `true` to reopen `/setup` for lockout recovery                                                                      |
@@ -53,14 +53,20 @@ Set in GitHub Settings → Environments → production:
 
 | Variable               | Description                                                                                                    | Example                |
 | ---------------------- | -------------------------------------------------------------------------------------------------------------- | ---------------------- |
-| `BASE_DOMAIN`          | Deployment domain                                                                                              | `example.com`          |
+| `BASE_DOMAIN`          | Zone apex or installation-specific deployment subdomain                                                        | `dev-a.example.com`    |
 | `RESOURCE_PREFIX`      | Domain-derived Cloudflare resource name prefix                                                                 | `sa379a6`              |
 | `PULUMI_STATE_BUCKET`  | R2 bucket for Pulumi state                                                                                     | `sa379a6-pulumi-state` |
 | `CF_CONTAINER_ENABLED` | Optional instant-session runtime toggle. Generated deploys default to `true`; set `false` to force VM runtime. | `false`                |
 
 `RESOURCE_PREFIX` is generated from `BASE_DOMAIN` as `s` plus the first six hex
 characters of the domain's SHA-256 hash. The self-host onboarding flow fills it
-in for you.
+in for you. Distinct `BASE_DOMAIN` values therefore give installations in the
+same Cloudflare account and zone distinct resource prefixes.
+
+`CF_ZONE_ID` always identifies the parent Cloudflare zone. For example,
+`BASE_DOMAIN=dev-a.example.com` still uses the zone ID for `example.com`.
+Namespaced deployments require TLS coverage for deeper hostnames such as
+`app.dev-a.example.com` and `*.dev-a.example.com`.
 
 Required GitHub Actions secrets include `CF_API_TOKEN`, `CF_ACCOUNT_ID`, `CF_ZONE_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, and `PULUMI_CONFIG_PASSPHRASE`. GitHub App/OAuth secrets (`GH_CLIENT_ID`, `GH_CLIENT_SECRET`, `GH_APP_ID`, `GH_APP_PRIVATE_KEY`, `GH_APP_SLUG`, `GH_WEBHOOK_SECRET`) and the Google **login** OAuth secrets (`GOOGLE_LOGIN_CLIENT_ID`, `GOOGLE_LOGIN_CLIENT_SECRET`) are optional environment fallbacks; fresh deployments can set them through `/setup` instead. The Google **infra/GCP** OAuth secrets (`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`) are a separate client used only for GCP deployment authorization and are not part of the `/setup` wizard. Deploy signing keys are generated and persisted by Pulumi during deployment; GitHub Environment values are only needed for explicit key overrides.
 
