@@ -47,7 +47,7 @@ The first groundwork slice should make a deployment such as `dev-a.sammy.party` 
 - [x] Run focused tests for infra, Wrangler generation, and API DNS helpers.
 - [x] Run the full lint, typecheck, test, and build suite.
 - [x] Complete Cloudflare, environment-variable, constitution, documentation-sync, test-quality, and task-completion specialist reviews.
-- [ ] Perform required staging and real-VM infrastructure verification without overlapping another active staging deployment.
+- [x] Perform required staging and real-VM infrastructure verification without overlapping another active staging deployment.
 - [ ] Open a draft PR and stop without marking it ready or merging it.
 
 ## Acceptance criteria
@@ -83,6 +83,15 @@ The first groundwork slice should make a deployment such as `dev-a.sammy.party` 
 | `doc-sync-validator`        | ADDRESSED | Parent-zone terminology findings fixed in `e895a0137`; docs build passes.                                                                                                       |
 | `test-engineer`             | ADDRESSED | Cleanup and integrated nested Pulumi wiring hardening added in `704cb5748`; no remaining findings.                                                                              |
 | `task-completion-validator` | PASS      | Checks A–F pass; deferred architecture and pending release gates are explicit.                                                                                                  |
+
+## Staging verification evidence
+
+- GitHub Actions run `29189719745` deployed the branch to staging successfully; Cloudflare deployment and all 12 smoke tests passed.
+- Cloudflare DNS resolved the expected apex deployment names: `api.sammy.party`, `app.sammy.party`, and `*.sammy.party` were proxied to the API Worker/Pages targets.
+- Authenticated Playwright verification loaded dashboard, projects, settings, and health successfully with no console or page errors.
+- Disposable workspace `01KXAZYGM50FRQCQD9WH4FKY72` on node `01KXAZYG77GVVHEJVPXKBEM512` reached `running`; its public Worker proxy returned a healthy backend response, terminal WebSocket opened and received data, an agent-session host completed create/list/stop, and workspace/node/DNS cleanup succeeded.
+- A second cold node (`01KXB0HJ5Q6Y37RD2X7R5DBPYA`) repeated the first-heartbeat measurement: provider `running` at `2026-07-12T11:14:06.558Z`, first heartbeat at `2026-07-12T11:16:22.302Z` (135.7 seconds). Diagnostics showed the overage occurred during ordinary VM/cloud-init package setup before the branch's routing path; DNS, origin TLS, and authenticated Worker-to-VM proxying were healthy in the full-path run. Its workspace/node records and backend DNS record were removed after measurement.
+- Observability noise check passed. D1 noise inspection was unavailable because `OBSERVABILITY_DB_ID` was unset, and Cloudflare telemetry was unavailable to the token (403); the deployment workflow, smoke suite, browser flow, real VM, DNS, TLS, WebSocket, session lifecycle, and cleanup supplied the release evidence for this bounded infrastructure slice.
 
 ## References
 
