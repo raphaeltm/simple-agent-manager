@@ -1,5 +1,5 @@
 import { DEFAULT_TASK_TITLE_MAX_LENGTH } from '@simple-agent-manager/shared';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -49,7 +49,7 @@ export async function ensureSessionTaskBacked(
     const rows = await db
       .select()
       .from(schema.tasks)
-      .where(eq(schema.tasks.id, existingTaskId))
+      .where(and(eq(schema.tasks.id, existingTaskId), eq(schema.tasks.projectId, input.projectId)))
       .limit(1);
     if (rows[0]) {
       if (!rows[0].chatSessionId) {
