@@ -91,6 +91,7 @@ The first groundwork slice should make a deployment such as `dev-a.sammy.party` 
 
 - Round 1 found an invalid assumption that each installation prefix also created an account-level `workers.dev` subdomain, plus insufficient sibling-installation isolation evidence and over-broad documentation claims. Commit `88b1e34f7` replaced those CNAMEs with proxied originless `AAAA 100::` records, added sibling route/resource and runtime cleanup isolation tests, fixed lint/preflight evidence, and narrowed the public contract.
 - Round 2 used three fresh, extremely critical local reviewers covering Cloudflare routing, installation isolation, and test/documentation evidence. All three returned `SATISFIED` for the bounded groundwork scope with no remaining demonstrated correctness or false-contract blocker.
+- Post-review validation passed all 19 Turbo tasks, including 5,922 API tests, 2,668 web tests, 49 infrastructure tests, and the documentation build. The live draft PR body also passes both preflight and specialist-review evidence checks with every reviewer in an accepted state.
 - The reviewers retained a promotion gate: before moving the PR out of draft, deploy a real nested installation and verify deep-subdomain edge TLS and live routing. Full lifecycle work must also order route/DNS activation and teardown so an apex wildcard cannot receive nested traffic during gaps.
 
 ## Staging verification evidence
