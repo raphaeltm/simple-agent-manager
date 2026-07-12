@@ -21,7 +21,7 @@ import {
 } from './resources/dns';
 import { originCaCertPem, originCaKeyPem } from './resources/origin-ca';
 import { pagesProject, pagesProjectName, pagesCustomDomain } from './resources/pages';
-import { accountId, baseDomain } from './resources/config';
+import { accountId, baseDomain, zoneId } from './resources/config';
 
 // Export resource references for internal use
 export {
@@ -77,3 +77,4 @@ export const stackSummary = {
 
 // Export Cloudflare account ID for wrangler.toml
 export const cloudflareAccountId = accountId;
+export const cloudflareZoneId = zoneId;

@@ -368,6 +368,7 @@ export interface PulumiOutputs {
     };
   };
   cloudflareAccountId: string;
+  cloudflareZoneId: string;
   pagesName: string;
 }
 

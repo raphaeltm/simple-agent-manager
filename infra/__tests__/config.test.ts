@@ -70,6 +70,12 @@ describe('infra config parsing', () => {
     });
   });
 
+  it('derives different resource identities for installations sharing one zone', () => {
+    expect(configModule.derivePrefix('dev-a.example.com')).not.toBe(
+      configModule.derivePrefix('dev-b.example.com')
+    );
+  });
+
   it.each([
     ['cloudflareAccountId', undefined, 'Missing required Pulumi config'],
     ['cloudflareAccountId', '   ', 'must not be empty'],

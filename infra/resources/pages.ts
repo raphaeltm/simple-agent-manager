@@ -1,5 +1,5 @@
 import * as cloudflare from '@pulumi/cloudflare';
-import { accountId, baseDomain, pagesProductionBranch, prefix, stack } from './config';
+import { accountId, deploymentHostnames, pagesProductionBranch, prefix, stack } from './config';
 
 export const pagesProject = new cloudflare.PagesProject(`${prefix}-pages-project`, {
   accountId: accountId,
@@ -12,7 +12,7 @@ export const pagesProject = new cloudflare.PagesProject(`${prefix}-pages-project
 export const pagesCustomDomain = new cloudflare.PagesDomain(`${prefix}-pages-domain`, {
   accountId: accountId,
   projectName: pagesProject.name,
-  name: `app.${baseDomain}`,
+  name: deploymentHostnames.app,
 });
 
 export const pagesProjectName = pagesProject.name;

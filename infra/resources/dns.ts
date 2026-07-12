@@ -1,14 +1,14 @@
 import * as cloudflare from '@pulumi/cloudflare';
 import * as pulumi from '@pulumi/pulumi';
 import { pagesProject } from './pages';
-import { zoneId, baseDomain, prefix, stack } from './config';
+import { deploymentHostnames, zoneId, prefix, stack } from './config';
 
 const apiWorkerHostname = `${prefix}-api-${stack}.${prefix}.workers.dev`;
 
 // API subdomain (api.example.com -> Worker)
 export const apiDnsRecord = new cloudflare.Record(`${prefix}-dns-api`, {
   zoneId: zoneId,
-  name: `api`,
+  name: deploymentHostnames.api,
   type: 'CNAME',
   content: apiWorkerHostname,
   proxied: true,
@@ -23,7 +23,7 @@ export const apiDnsRecord = new cloudflare.Record(`${prefix}-dns-api`, {
 // CNAME to someone else's Pages project.
 export const appDnsRecord = new cloudflare.Record(`${prefix}-dns-app`, {
   zoneId: zoneId,
-  name: `app`,
+  name: deploymentHostnames.app,
   type: 'CNAME',
   content: pagesProject.subdomain,
   proxied: true,
@@ -34,7 +34,7 @@ export const appDnsRecord = new cloudflare.Record(`${prefix}-dns-app`, {
 // Wildcard subdomain (*.example.com -> Worker for workspace routing)
 export const wildcardDnsRecord = new cloudflare.Record(`${prefix}-dns-wildcard`, {
   zoneId: zoneId,
-  name: `*`,
+  name: deploymentHostnames.wildcard,
   type: 'CNAME',
   content: apiWorkerHostname,
   proxied: true,
@@ -58,7 +58,7 @@ export const wildcardDnsRecord = new cloudflare.Record(`${prefix}-dns-wildcard`,
  */
 export const vmRouteExclusion = new cloudflare.WorkersRoute(`${prefix}-route-vm-exclusion`, {
   zoneId: zoneId,
-  pattern: `*.vm.${baseDomain}/*`,
+  pattern: `${deploymentHostnames.vmWildcard}/*`,
   // No scriptName → route exclusion (requests bypass Worker, go to origin)
 });
 
@@ -69,7 +69,7 @@ export const dnsRecordIds = {
 };
 
 export const dnsHostnames = {
-  api: pulumi.interpolate`api.${baseDomain}`,
-  app: pulumi.interpolate`app.${baseDomain}`,
-  vmBackend: pulumi.interpolate`*.vm.${baseDomain}`,
+  api: pulumi.output(deploymentHostnames.api),
+  app: pulumi.output(deploymentHostnames.app),
+  vmBackend: pulumi.output(deploymentHostnames.vmWildcard),
 };

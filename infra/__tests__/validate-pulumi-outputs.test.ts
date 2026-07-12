@@ -13,6 +13,7 @@ function makeValidOutputs(): PulumiOutputs {
     r2Name: 'sa379a6-prod-assets',
     sessionSnapshotTtlDays: 7,
     cloudflareAccountId: 'cf-account-abc',
+    cloudflareZoneId: 'cf-zone-def',
     pagesName: 'sa379a6-web-prod',
     dnsIds: { api: 'dns-1', app: 'dns-2', wildcard: 'dns-3' },
     hostnames: { api: 'api.example.com', app: 'app.example.com' },
@@ -40,6 +41,12 @@ describe('validatePulumiOutputs', () => {
     outputs.kvId = undefined;
     outputs.r2Name = null;
     expect(() => validatePulumiOutputs(outputs)).toThrow(/KV Namespace ID.*R2 Bucket Name/s);
+  });
+
+  it('throws when the Cloudflare zone ID is missing', () => {
+    const outputs = makeValidOutputs();
+    outputs.cloudflareZoneId = '';
+    expect(() => validatePulumiOutputs(outputs)).toThrow(/Cloudflare Zone ID/);
   });
 
   it('throws when stackSummary.baseDomain is missing', () => {

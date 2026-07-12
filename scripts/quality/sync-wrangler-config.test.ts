@@ -36,6 +36,7 @@ const outputs: PulumiOutputs = {
     },
   },
   cloudflareAccountId: 'account-id',
+  cloudflareZoneId: 'zone-id',
   pagesName: 'prefix-web-prod',
 };
 
@@ -83,6 +84,34 @@ describe('sync wrangler config', () => {
       ANALYTICS_DATASET: 'sa379a6_analytics',
       WWW_PAGES_PROJECT_NAME: 'sa379a6-www',
     });
+  });
+
+  it('binds nested deployment-domain routes to the configured Cloudflare zone ID', () => {
+    vi.stubEnv('BASE_DOMAIN', 'dev-a.example.com');
+    const nestedOutputs: PulumiOutputs = {
+      ...outputs,
+      hostnames: {
+        api: 'api.dev-a.example.com',
+        app: 'app.dev-a.example.com',
+      },
+      stackSummary: {
+        ...outputs.stackSummary,
+        baseDomain: 'dev-a.example.com',
+      },
+    };
+
+    const envConfig = generateApiWorkerEnv({}, nestedOutputs, 'prod', false, false);
+
+    expect(envConfig.routes).toEqual([
+      {
+        pattern: 'api.dev-a.example.com/*',
+        zone_id: 'zone-id',
+      },
+      {
+        pattern: '*.dev-a.example.com/*',
+        zone_id: 'zone-id',
+      },
+    ]);
   });
 
   it('enables Cloudflare Container runtime by default and allows explicit opt-out', () => {

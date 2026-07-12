@@ -21,7 +21,7 @@ describe('DNS Records Resources', () => {
     );
     expect(apiRecord.inputs).toMatchObject({
       zoneId: 'test-zone-id-000000000000000000000',
-      name: 'api',
+      name: 'api.example.com',
       type: 'CNAME',
       content: expectedWorkerHost,
       proxied: true,
@@ -34,7 +34,7 @@ describe('DNS Records Resources', () => {
     );
     expect(wildcardRecord.inputs).toMatchObject({
       zoneId: 'test-zone-id-000000000000000000000',
-      name: '*',
+      name: '*.example.com',
       type: 'CNAME',
       content: expectedWorkerHost,
       proxied: true,
@@ -54,7 +54,7 @@ describe('DNS Records Resources', () => {
 
     expect(appRecord.inputs).toMatchObject({
       zoneId: 'test-zone-id-000000000000000000000',
-      name: 'app',
+      name: 'app.example.com',
       type: 'CNAME',
       proxied: true,
       ttl: 1,

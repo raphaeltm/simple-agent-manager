@@ -118,6 +118,7 @@ export function validatePulumiOutputs(outputs: unknown): asserts outputs is Pulu
     { key: 'r2Name', label: 'R2 Bucket Name' },
     { key: 'sessionSnapshotTtlDays', label: 'Session Snapshot TTL Days' },
     { key: 'cloudflareAccountId', label: 'Cloudflare Account ID' },
+    { key: 'cloudflareZoneId', label: 'Cloudflare Zone ID' },
     { key: 'pagesName', label: 'Pages Project Name' },
   ];
 
@@ -299,15 +300,18 @@ export async function resolveArtifactsBindingEnabled(
 
 type StaticBindings = ReturnType<typeof extractStaticBindings>;
 
-function getApiWorkerRoutes(baseDomain: string): NonNullable<WranglerEnvConfig['routes']> {
+function getApiWorkerRoutes(
+  baseDomain: string,
+  zoneId: string
+): NonNullable<WranglerEnvConfig['routes']> {
   return [
     {
       pattern: `api.${baseDomain}/*`,
-      zone_name: baseDomain,
+      zone_id: zoneId,
     },
     {
       pattern: `*.${baseDomain}/*`,
-      zone_name: baseDomain,
+      zone_id: zoneId,
     },
   ];
 }
@@ -440,7 +444,7 @@ export function generateApiWorkerEnv(
     //
     // Health checks additionally use D1 heartbeat queries as defense-in-depth
     // (see task-runner.ts handleNodeAgentReady and verifyNodeAgentHealthy).
-    routes: getApiWorkerRoutes(outputs.stackSummary.baseDomain),
+    routes: getApiWorkerRoutes(outputs.stackSummary.baseDomain, outputs.cloudflareZoneId),
 
     // Workers Observability
     observability: {

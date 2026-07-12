@@ -24,7 +24,7 @@
 import * as cloudflare from '@pulumi/cloudflare';
 import * as pulumi from '@pulumi/pulumi';
 import * as tls from '@pulumi/tls';
-import { baseDomain } from './config';
+import { baseDomain, deploymentHostnames } from './config';
 
 /**
  * RSA-2048 private key for the Origin CA certificate.
@@ -45,10 +45,10 @@ const originCaKey = new tls.PrivateKey(
 const originCaCsr = new tls.CertRequest('origin-ca-csr', {
   privateKeyPem: originCaKey.privateKeyPem,
   subject: {
-    commonName: `*.${baseDomain}`,
+    commonName: deploymentHostnames.wildcard,
     organization: 'Simple Agent Manager',
   },
-  dnsNames: [`*.${baseDomain}`, `*.vm.${baseDomain}`, baseDomain],
+  dnsNames: [deploymentHostnames.wildcard, deploymentHostnames.vmWildcard, baseDomain],
 });
 
 /**
@@ -60,7 +60,7 @@ const originCaCert = new cloudflare.OriginCaCertificate(
   'origin-ca-cert',
   {
     csr: originCaCsr.certRequestPem,
-    hostnames: [`*.${baseDomain}`, `*.vm.${baseDomain}`, baseDomain],
+    hostnames: [deploymentHostnames.wildcard, deploymentHostnames.vmWildcard, baseDomain],
     requestType: 'origin-rsa',
     requestedValidity: 5475, // 15 years
   },

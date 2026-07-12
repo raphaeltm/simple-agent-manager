@@ -1,6 +1,8 @@
 import * as crypto from 'node:crypto';
 import * as pulumi from '@pulumi/pulumi';
 
+import { buildDeploymentHostnames } from './deployment-hostnames';
+
 export const DEFAULT_R2_LOCATION = 'WNAM';
 export const SUPPORTED_R2_LOCATIONS = ['WNAM', 'ENAM', 'WEUR', 'EEUR', 'APAC', 'OC'] as const;
 export type R2Location = (typeof SUPPORTED_R2_LOCATIONS)[number];
@@ -61,6 +63,7 @@ const infraConfig = parseInfraConfig(pulumiConfig, pulumi.getStack());
 export const accountId = infraConfig.accountId;
 export const zoneId = infraConfig.zoneId;
 export const baseDomain = infraConfig.baseDomain;
+export const deploymentHostnames = buildDeploymentHostnames(baseDomain);
 export const stack = infraConfig.stack;
 export const prefix = infraConfig.prefix;
 export const r2Location = infraConfig.r2Location;
