@@ -45,7 +45,7 @@ The first groundwork slice should make a deployment such as `dev-a.sammy.party` 
 - [x] Update public self-hosting and configuration documentation with the one-zone/multiple-installations model and nested TLS requirements.
 - [x] Update environment-variable reference/instructions where `BASE_DOMAIN` is incorrectly described as necessarily being the zone apex.
 - [x] Run focused tests for infra, Wrangler generation, and API DNS helpers.
-- [ ] Run the full lint, typecheck, test, and build suite.
+- [x] Run the full lint, typecheck, test, and build suite.
 - [ ] Complete Cloudflare, environment-variable, constitution, documentation-sync, test-quality, and task-completion specialist reviews.
 - [ ] Perform required staging and real-VM infrastructure verification without overlapping another active staging deployment.
 - [ ] Open a draft PR and stop without marking it ready or merging it.
