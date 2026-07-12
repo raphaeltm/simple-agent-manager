@@ -40,6 +40,7 @@ const mocks = vi.hoisted(() => ({
   stopChatSession: vi.fn(),
   getProjectTask: vi.fn(),
   summarizeSession: vi.fn(),
+  prepareForkSession: vi.fn(),
   getTranscribeApiUrl: vi.fn(() => 'https://api.test.com/api/transcribe'),
   closeConversationTask: vi.fn(),
   availableCommands: [] as Array<{ name: string; description: string; source: 'client' | 'static' | 'cached' | 'agent' }>,
@@ -63,6 +64,7 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
   stopChatSession: mocks.stopChatSession,
   getProjectTask: mocks.getProjectTask,
   summarizeSession: mocks.summarizeSession,
+  prepareForkSession: mocks.prepareForkSession,
   getTranscribeApiUrl: mocks.getTranscribeApiUrl,
   closeConversationTask: mocks.closeConversationTask,
   linkSessionIdea: vi.fn().mockResolvedValue(undefined),
@@ -420,6 +422,11 @@ describe('ProjectChat new chat button', () => {
     mocks.listSkills.mockResolvedValue([]);
     mocks.availableCommands = [];
     mocks.listProjectTasks.mockResolvedValue({ tasks: [], nextCursor: null });
+    mocks.prepareForkSession.mockResolvedValue({
+      parentTaskId: 'task-1', parentSessionId: 'session-with-task',
+      parentBranch: 'sam/fix-login-bug', sessionLabel: 'Fix the login bug',
+      summary: 'Summary of previous session', messageCount: 10, repaired: false,
+    });
     mocks.summarizeSession.mockResolvedValue({
       summary: 'Summary of previous session',
       messageCount: 10,
@@ -691,7 +698,7 @@ describe('ProjectChat new chat button', () => {
     expect((textarea as HTMLTextAreaElement).value).toContain('Parent task ID: task-1');
 
     await waitFor(() => {
-      expect(mocks.summarizeSession).toHaveBeenCalledWith(PROJECT_ID, SESSION_WITH_TASK.id);
+      expect(mocks.prepareForkSession).toHaveBeenCalledWith(PROJECT_ID, SESSION_WITH_TASK.id);
       expect(screen.queryByText('Loading context...')).not.toBeInTheDocument();
     });
 

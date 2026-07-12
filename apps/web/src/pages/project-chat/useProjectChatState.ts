@@ -644,6 +644,17 @@ export function useProjectChatState() {
   /** Prepare canonical fork lineage on the server, then open the new-chat composer. */
   const handleFork = useCallback((session: ChatSessionResponse) => {
     setSubmitError(null);
+    const provisionalLabel = session.topic ? stripMarkdown(session.topic) : "Chat " + session.id.slice(0, 8);
+    newChatIntentRef.current = true;
+    setPendingDerived({
+      type: "fork", parentSessionId: session.id, parentSessionLabel: provisionalLabel,
+      parentTaskId: session.task?.id ?? session.taskId ?? "",
+      parentBranch: session.task?.outputBranch ?? undefined,
+      contextSummary: "", summaryLoading: true,
+    });
+    setMessage(FORK_MESSAGE_TEMPLATE);
+    setProvisioning(null);
+    navigate("/projects/" + projectId + "/chat", { replace: true });
     void prepareForkSession(projectId, session.id)
       .then((result) => {
         const sessionLabel = stripMarkdown(result.sessionLabel);
@@ -653,6 +664,7 @@ export function useProjectChatState() {
           `Parent session ID: ${result.parentSessionId}`,
           `Parent task ID: ${result.parentTaskId}`,
         ].join("\n");
+        newChatIntentRef.current = true;
         setPendingDerived({
           type: "fork",
           parentSessionId: result.parentSessionId,
@@ -665,7 +677,6 @@ export function useProjectChatState() {
           ].filter(Boolean).join("\n"),
           summaryLoading: false,
         });
-        newChatIntentRef.current = true;
         executeIdeaIdRef.current = null;
         setMessage(`${FORK_MESSAGE_TEMPLATE}${forkContext}\n\n`);
         setProvisioning(null);

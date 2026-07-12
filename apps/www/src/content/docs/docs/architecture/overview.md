@@ -160,6 +160,7 @@ Summary data flows back from DOs to D1 via debounced sync (e.g., `last_activity_
 ### ProjectData DO
 
 Each project gets one `ProjectData` Durable Object instance, accessed via `env.PROJECT_DATA.idFromName(projectId)`.
+nEvery user-visible chat session has exactly one backing D1 Task. `taskMode` controls autonomous task versus human-controlled conversation lifecycle semantics; it never controls whether the Task exists. D1 `tasks.chat_session_id` and ProjectData `chat_sessions.task_id` form a bidirectional soft link. Because the stores cannot share a transaction, creation and legacy repair are idempotent and retain compatibility readers while reconciliation is in progress.
 
 **Embedded SQLite tables:**
 
