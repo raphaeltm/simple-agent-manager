@@ -92,6 +92,17 @@ export type GitLabRepositoryMetadata = {
   defaultBranch: string;
 };
 
+/** GitLabRepositoryMetadata plus the owning user, as stored in D1. */
+export type StoredGitLabRepositoryMetadata = GitLabRepositoryMetadata & {
+  userId: string;
+};
+
+export type GitLabAccessTokenResult = {
+  accessToken: string;
+  /** ISO timestamp of access-token expiry, or null when the provider did not report one. */
+  accessTokenExpiresAt: string | null;
+};
+
 type TokenResult = {
   accessToken: string | null | undefined;
   accessTokenExpiresAt?: Date | string | null;
@@ -106,22 +117,27 @@ function isExpired(expiresAt: Date | string | null | undefined): boolean {
   return Number.isFinite(expiresAtMs) && expiresAtMs <= Date.now();
 }
 
-function availableAccessToken(token: TokenResult, flow: string, userId: string): string | null {
+function availableAccessToken(
+  token: TokenResult,
+  flow: string,
+  userId: string
+): GitLabAccessTokenResult | null {
   if (!token.accessToken) {
     return null;
   }
+  const expiresAtIso = token.accessTokenExpiresAt
+    ? new Date(token.accessTokenExpiresAt).toISOString()
+    : null;
   if (isExpired(token.accessTokenExpiresAt)) {
     log.warn('gitlab.user_access_token_expired', {
       flow,
       userId,
       tokenPresent: true,
-      accessTokenExpiresAt: token.accessTokenExpiresAt
-        ? new Date(token.accessTokenExpiresAt).toISOString()
-        : null,
+      accessTokenExpiresAt: expiresAtIso,
     });
     return null;
   }
-  return token.accessToken;
+  return { accessToken: token.accessToken, accessTokenExpiresAt: expiresAtIso };
 }
 
 const lockedTokenResponseSchema = v.object({
@@ -130,12 +146,12 @@ const lockedTokenResponseSchema = v.object({
   scopes: v.optional(v.array(v.string())),
 });
 
-async function getDirectGitLabUserAccessTokenWithHeaders(
+async function getDirectGitLabUserAccessTokenResultWithHeaders(
   env: Env,
   headers: Headers,
   userId: string,
   flow: string
-): Promise<string | null> {
+): Promise<GitLabAccessTokenResult | null> {
   try {
     const auth = await createAuth(env);
     const token = await auth.api.getAccessToken({
@@ -169,14 +185,22 @@ async function getDirectGitLabUserAccessTokenWithHeaders(
  * Falls back to the direct (unlocked) path only when the DO binding is absent
  * (local dev / Miniflare without the binding configured).
  */
-export async function getGitLabUserAccessTokenWithHeaders(
+export async function getGitLabUserAccessTokenResultWithHeaders(
   env: Env,
   headers: Headers,
   userId: string,
   flow: string
-): Promise<string | null> {
+): Promise<GitLabAccessTokenResult | null> {
   if (!env.GITLAB_USER_ACCESS_TOKEN_LOCK) {
-    return getDirectGitLabUserAccessTokenWithHeaders(env, headers, userId, flow);
+    // Without the DO lock, concurrent refreshes can replay a consumed rotating
+    // refresh token and revoke the token family upstream. Acceptable only in
+    // local dev / test harnesses that lack the binding — never in deployment.
+    log.warn('gitlab.user_access_token_lock_binding_absent', {
+      flow,
+      userId,
+      action: 'unserialized_direct_lookup',
+    });
+    return getDirectGitLabUserAccessTokenResultWithHeaders(env, headers, userId, flow);
   }
   try {
     const id = env.GITLAB_USER_ACCESS_TOKEN_LOCK.idFromName(userId);
@@ -222,6 +246,16 @@ export async function getGitLabUserAccessTokenWithHeaders(
   }
 }
 
+export async function getGitLabUserAccessTokenWithHeaders(
+  env: Env,
+  headers: Headers,
+  userId: string,
+  flow: string
+): Promise<string | null> {
+  const result = await getGitLabUserAccessTokenResultWithHeaders(env, headers, userId, flow);
+  return result?.accessToken ?? null;
+}
+
 export async function getGitLabUserAccessToken(
   c: Context<{ Bindings: Env }>,
   userId: string
@@ -257,15 +291,24 @@ export async function requireGitLabUserAccessTokenForOwner(
   userId: string,
   flow = 'owner-callback'
 ): Promise<string> {
-  const accessToken = await getGitLabUserAccessTokenForOwner(env, userId, flow);
-  if (!accessToken) {
+  const result = await requireGitLabUserAccessTokenResultForOwner(env, userId, flow);
+  return result.accessToken;
+}
+
+export async function requireGitLabUserAccessTokenResultForOwner(
+  env: Env,
+  userId: string,
+  flow = 'owner-callback'
+): Promise<GitLabAccessTokenResult> {
+  const result = await getGitLabUserAccessTokenResultWithHeaders(env, new Headers(), userId, flow);
+  if (!result) {
     throw new AppError(
       401,
       'GITLAB_REAUTH_REQUIRED',
       'Your GitLab authorization has expired - please sign out and back in'
     );
   }
-  return accessToken;
+  return result;
 }
 
 async function getGitLabApiBase(env: Env): Promise<{ host: string; apiBaseUrl: string }> {
@@ -578,9 +621,10 @@ export async function ensureGitLabBranchExists(input: {
 export async function getProjectGitLabRepository(
   db: ReturnType<typeof drizzle<typeof schema>>,
   projectId: string
-): Promise<GitLabRepositoryMetadata | null> {
+): Promise<StoredGitLabRepositoryMetadata | null> {
   const rows = await db
     .select({
+      userId: schema.projectGitlabRepositories.userId,
       host: schema.projectGitlabRepositories.host,
       gitlabProjectId: schema.projectGitlabRepositories.gitlabProjectId,
       pathWithNamespace: schema.projectGitlabRepositories.pathWithNamespace,
@@ -594,6 +638,7 @@ export async function getProjectGitLabRepository(
   const row = rows[0];
   return row
     ? {
+        userId: row.userId,
         host: row.host,
         gitlabProjectId: row.gitlabProjectId,
         pathWithNamespace: row.pathWithNamespace,

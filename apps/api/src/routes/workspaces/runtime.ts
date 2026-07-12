@@ -45,7 +45,7 @@ import { backfillProjectGithubRepoId } from '../../services/github-repo-id-backf
 import { getGitHubUserAccessTokenForOwner } from '../../services/github-user-access-token';
 import {
   getProjectGitLabRepository,
-  requireGitLabUserAccessTokenForOwner,
+  requireGitLabUserAccessTokenResultForOwner,
   verifyGitLabProjectAccess,
 } from '../../services/gitlab';
 import { persistError } from '../../services/observability';
@@ -1316,12 +1316,29 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
     if (!metadata) {
       throw errors.forbidden('GitLab repository metadata is missing');
     }
-    const accessToken = await requireGitLabUserAccessTokenForOwner(
+    if (metadata.userId !== workspace.userId) {
+      // The stored GitLab repo binding belongs to a different user than the
+      // workspace owner — vending the owner's OAuth token against another
+      // user's binding would cross a tenant boundary. Fail closed.
+      log.error('workspace_git_token.gitlab_user_mismatch', {
+        workspaceId: workspace.id,
+        projectId: workspace.projectId,
+        workspaceUserId: workspace.userId,
+        metadataUserId: metadata.userId,
+        action: 'rejected',
+      });
+      throw errors.forbidden('GitLab repository is not linked for this workspace owner');
+    }
+    const tokenResult = await requireGitLabUserAccessTokenResultForOwner(
       c.env,
       workspace.userId,
       'workspace-git-token'
     );
-    const verified = await verifyGitLabProjectAccess(c.env, accessToken, metadata.gitlabProjectId);
+    const verified = await verifyGitLabProjectAccess(
+      c.env,
+      tokenResult.accessToken,
+      metadata.gitlabProjectId
+    );
     if (
       verified.host !== metadata.host ||
       verified.gitlabProjectId !== metadata.gitlabProjectId ||
@@ -1332,8 +1349,8 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
 
     return c.json({
       provider: 'gitlab',
-      token: accessToken,
-      expiresAt: null,
+      token: tokenResult.accessToken,
+      expiresAt: tokenResult.accessTokenExpiresAt,
       cloneUrl: metadata.httpUrlToRepo,
       host: metadata.host,
       username: 'oauth2',

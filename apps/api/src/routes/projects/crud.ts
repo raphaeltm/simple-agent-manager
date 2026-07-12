@@ -1096,6 +1096,11 @@ crudRoutes.delete('/:id', async (c) => {
       .delete(schema.projectGithubRepositories)
       .where(eq(schema.projectGithubRepositories.projectId, projectId)),
   );
+  statements.push(
+    db
+      .delete(schema.projectGitlabRepositories)
+      .where(eq(schema.projectGitlabRepositories.projectId, projectId)),
+  );
 
   // Detach workspaces (ALTER TABLE FK ON DELETE SET NULL is not enforced)
   statements.push(

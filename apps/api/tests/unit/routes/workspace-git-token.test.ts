@@ -16,7 +16,7 @@ const mocks = vi.hoisted(() => ({
   verifyWorkspaceCallbackAuth: vi.fn(),
   backfillProjectGithubRepoId: vi.fn(),
   getProjectGitLabRepository: vi.fn(),
-  requireGitLabUserAccessTokenForOwner: vi.fn(),
+  requireGitLabUserAccessTokenResultForOwner: vi.fn(),
   verifyGitLabProjectAccess: vi.fn(),
   and: vi.fn((...clauses: unknown[]) => ({ op: 'and', clauses })),
   eq: vi.fn((left: unknown, right: unknown) => ({ op: 'eq', left, right })),
@@ -67,7 +67,7 @@ vi.mock('../../../src/services/github-repo-id-backfill', () => ({
 }));
 vi.mock('../../../src/services/gitlab', () => ({
   getProjectGitLabRepository: mocks.getProjectGitLabRepository,
-  requireGitLabUserAccessTokenForOwner: mocks.requireGitLabUserAccessTokenForOwner,
+  requireGitLabUserAccessTokenResultForOwner: mocks.requireGitLabUserAccessTokenResultForOwner,
   verifyGitLabProjectAccess: mocks.verifyGitLabProjectAccess,
 }));
 
@@ -184,6 +184,7 @@ describe('workspace git-token GitHub scoping', () => {
       expiresAt: '2026-06-06T19:00:00.000Z',
     });
     mocks.getProjectGitLabRepository.mockResolvedValue({
+      userId: 'user-1',
       host: 'gitlab.example.com',
       gitlabProjectId: 123,
       pathWithNamespace: 'group/project',
@@ -191,7 +192,10 @@ describe('workspace git-token GitHub scoping', () => {
       httpUrlToRepo: 'https://gitlab.example.com/group/project.git',
       defaultBranch: 'main',
     });
-    mocks.requireGitLabUserAccessTokenForOwner.mockResolvedValue('gitlab-oauth-token');
+    mocks.requireGitLabUserAccessTokenResultForOwner.mockResolvedValue({
+      accessToken: 'gitlab-oauth-token',
+      accessTokenExpiresAt: '2026-07-12T12:00:00.000Z',
+    });
     mocks.verifyGitLabProjectAccess.mockResolvedValue({
       host: 'gitlab.example.com',
       gitlabProjectId: 123,
@@ -260,7 +264,7 @@ describe('workspace git-token GitHub scoping', () => {
     await expect(res.json()).resolves.toEqual({
       provider: 'gitlab',
       token: 'gitlab-oauth-token',
-      expiresAt: null,
+      expiresAt: '2026-07-12T12:00:00.000Z',
       cloneUrl: 'https://gitlab.example.com/group/project.git',
       host: 'gitlab.example.com',
       username: 'oauth2',
@@ -272,6 +276,61 @@ describe('workspace git-token GitHub scoping', () => {
       123
     );
     expect(mocks.getInstallationToken).not.toHaveBeenCalled();
+  });
+
+  it('passes through a null GitLab token expiry when the provider does not report one', async () => {
+    limitResponses.push(
+      [workspaceRow()],
+      [
+        githubProjectRow({
+          repoProvider: 'gitlab',
+          githubRepoId: null,
+          repository: 'group/project',
+        }),
+      ]
+    );
+    mocks.requireGitLabUserAccessTokenResultForOwner.mockResolvedValue({
+      accessToken: 'gitlab-oauth-token',
+      accessTokenExpiresAt: null,
+    });
+
+    const res = await app.request('/ws/ws-1/git-token', { method: 'POST' }, mockEnv);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      provider: 'gitlab',
+      token: 'gitlab-oauth-token',
+      expiresAt: null,
+    });
+  });
+
+  it('rejects GitLab token exchange when the stored repo binding belongs to a different user', async () => {
+    limitResponses.push(
+      [workspaceRow()],
+      [
+        githubProjectRow({
+          repoProvider: 'gitlab',
+          githubRepoId: null,
+          repository: 'group/project',
+        }),
+      ]
+    );
+    mocks.getProjectGitLabRepository.mockResolvedValue({
+      userId: 'user-2',
+      host: 'gitlab.example.com',
+      gitlabProjectId: 123,
+      pathWithNamespace: 'group/project',
+      webUrl: 'https://gitlab.example.com/group/project',
+      httpUrlToRepo: 'https://gitlab.example.com/group/project.git',
+      defaultBranch: 'main',
+    });
+
+    const res = await app.request('/ws/ws-1/git-token', { method: 'POST' }, mockEnv);
+
+    expect(res.status).toBe(403);
+    // Fail closed BEFORE any token is minted or upstream access re-verified.
+    expect(mocks.requireGitLabUserAccessTokenResultForOwner).not.toHaveBeenCalled();
+    expect(mocks.verifyGitLabProjectAccess).not.toHaveBeenCalled();
   });
 
   it('rejects GitLab token exchange when re-verified repository identity drifts', async () => {
