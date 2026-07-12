@@ -1,5 +1,8 @@
 FROM docker.io/library/node:20-bookworm-slim
 
+LABEL org.opencontainers.image.title="SAM vm-agent instant runtime" \
+      org.opencontainers.image.description="Secret-free runtime image; user assets are applied at ACP session start"
+
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends ca-certificates curl git jq openssh-client procps wget; \
@@ -9,14 +12,21 @@ RUN set -eux; \
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list; \
     apt-get update; \
     apt-get install -y --no-install-recommends gh; \
-    npm install -g @zed-industries/claude-agent-acp @anthropic-ai/claude-code; \
+    npm install -g @zed-industries/claude-agent-acp @anthropic-ai/claude-code @agentclientprotocol/codex-acp; \
     npm cache clean --force; \
     rm -rf /var/lib/apt/lists/*
 
+# Build prerequisite: container-artifacts/ is gitignored and generated at deploy
+# time by `make -C packages/vm-agent prepare-container` (see deploy-reusable.yml).
+# A local `docker build` / `wrangler dev` of this image must run that target first,
+# or the two COPY lines below fail with "file not found in build context".
 COPY container-entrypoints/vm-agent-bootstrap.sh /usr/local/bin/vm-agent-bootstrap
-RUN chmod +x /usr/local/bin/vm-agent-bootstrap && \
+COPY container-artifacts/vm-agent-linux-amd64 /usr/local/bin/vm-agent
+COPY container-artifacts/vm-agent-version.json /etc/sam/vm-agent-version.json
+RUN chmod +x /usr/local/bin/vm-agent-bootstrap /usr/local/bin/vm-agent && \
     mkdir -p /workspaces /var/lib/vm-agent && \
-    chown -R node:node /workspaces /var/lib/vm-agent
+    touch /usr/local/bin/git-credential-sam && \
+    chown -R node:node /workspaces /var/lib/vm-agent /usr/local/bin/git-credential-sam
 
 USER node
 WORKDIR /workspaces

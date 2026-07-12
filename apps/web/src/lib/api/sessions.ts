@@ -315,7 +315,12 @@ export interface StartInstantChatSessionResponse {
   acpSessionId: string;
   workspaceUrl: string;
   timings: {
+    totalDurationMs: number;
+    preContainerDurationMs: number;
+    containerLaunchDurationMs: number;
+    /** @deprecated backward-compat alias for totalDurationMs; prefer totalDurationMs. */
     setupDurationMs: number;
+    /** @deprecated backward-compat alias for containerLaunchDurationMs; prefer containerLaunchDurationMs. */
     installDurationMs: number;
     agentReadyDurationMs: number;
     workspaceCreateDurationMs: number;
