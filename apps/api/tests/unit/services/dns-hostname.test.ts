@@ -4,6 +4,7 @@ import type { Env } from '../../../src/env';
 import {
   createDNSRecord,
   createNodeBackendDNSRecord,
+  cleanupWorkspaceDNSRecords,
   getBackendHostname,
   getNodeBackendHostname,
   getWorkspaceUrl,
@@ -92,5 +93,25 @@ describe('DNS hostname construction', () => {
     expect(JSON.parse(String(request.body))).toMatchObject({
       name: 'node-1.vm.dev-a.example.com',
     });
+  });
+
+  it('cleans up canonical nested workspace and VM hostnames plus the legacy backend name', async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ result: [] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      )
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(cleanupWorkspaceDNSRecords('WORKSPACE-1', nestedDomainEnv)).resolves.toBe(0);
+
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([
+      'https://api.cloudflare.com/client/v4/zones/zone-id/dns_records?name=ws-workspace-1.dev-a.example.com',
+      'https://api.cloudflare.com/client/v4/zones/zone-id/dns_records?name=vm-workspace-1.dev-a.example.com',
+      'https://api.cloudflare.com/client/v4/zones/zone-id/dns_records?name=workspace-1.vm.dev-a.example.com',
+    ]);
   });
 });
