@@ -8,8 +8,8 @@ import { getUserId } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireProjectCapability } from '../middleware/project-auth';
 import * as projectDataService from '../services/project-data';
-import { ensureSessionTaskBacked } from '../services/session-task-repair';
 import { getSummarizeConfig, summarizeSession } from '../services/session-summarize';
+import { ensureSessionTaskBacked } from '../services/session-task-repair';
 import { requireSessionCreator } from './chat-session-ownership';
 
 const chatForkRoutes = new Hono<{ Bindings: Env }>();

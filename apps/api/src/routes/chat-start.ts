@@ -16,8 +16,8 @@ import { jsonValidator, StartChatSessionSchema } from '../schemas';
 import { launchInstantSession } from '../services/instant-session';
 import { enrichMessageWithMentions } from '../services/mention-enrichment';
 import { resolveSkillProfile } from '../services/skills';
-import { resolveWorkspaceRuntime } from '../services/workspace-runtime';
 import { truncateTitle } from '../services/task-title';
+import { resolveWorkspaceRuntime } from '../services/workspace-runtime';
 import { requireRepositoryUserAccess } from './projects/_helpers';
 
 const DEFAULT_MAX_MESSAGE_LENGTH = 16_000;

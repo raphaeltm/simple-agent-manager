@@ -18,7 +18,7 @@ function makeEnv() {
   const limits: number[] = [];
   const updates: Array<{ taskId: string; sessionId: string }> = [];
   const database = {
-    prepare: vi.fn((sql: string) => ({
+    prepare: vi.fn((_sql: string) => ({
       bind: (...args: unknown[]) => ({
         all: async () => {
           limits.push(Number(args[0]));

@@ -1,3 +1,4 @@
+import { DEFAULT_TASK_TITLE_MAX_LENGTH } from '@simple-agent-manager/shared';
 import { eq } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
 
@@ -7,7 +8,6 @@ import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
 import * as projectDataService from './project-data';
 import { truncateTitle } from './task-title';
-import { DEFAULT_TASK_TITLE_MAX_LENGTH } from '@simple-agent-manager/shared';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
