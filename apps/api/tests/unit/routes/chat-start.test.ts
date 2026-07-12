@@ -72,6 +72,7 @@ function makeApp() {
 
 describe('chatStartRoutes', () => {
   const db = {
+    insert: vi.fn(() => ({ values: vi.fn().mockResolvedValue(undefined) })),
     update: vi.fn(() => ({
       set: vi.fn(() => ({
         where: vi.fn().mockResolvedValue(undefined),
@@ -107,8 +108,11 @@ describe('chatStartRoutes', () => {
       runtime: 'cf-container',
       reason: 'explicit-cf-container',
     });
-    mocks.mention.enrichMessageWithMentions.mockResolvedValue({ enrichedMessage: 'enriched hello' });
+    mocks.mention.enrichMessageWithMentions.mockResolvedValue({
+      enrichedMessage: 'enriched hello',
+    });
     mocks.instant.launchInstantSession.mockResolvedValue({
+      taskId: 'task-1',
       chatSessionId: 'chat-session-1',
       workspaceId: 'workspace-1',
       nodeId: 'node-1',
@@ -132,7 +136,12 @@ describe('chatStartRoutes', () => {
     );
 
     expect(res.status).toBe(201);
-    const body = await res.json<{ sessionId: string; runtime: { runtime: string } }>();
+    const body = await res.json<{
+      taskId: string;
+      sessionId: string;
+      runtime: { runtime: string };
+    }>();
+    expect(body.taskId).toBe('task-1');
     expect(body.sessionId).toBe('chat-session-1');
     expect(body.runtime.runtime).toBe('cf-container');
     expect(mocks.repoAccess.requireRepositoryUserAccess).toHaveBeenCalledOnce();
@@ -146,8 +155,8 @@ describe('chatStartRoutes', () => {
         agentType: 'claude-code',
       })
     );
-    expect(db.update).toHaveBeenCalledOnce();
-    expect(db.update.mock.results[0]?.value.set).toHaveBeenCalledWith(
+    expect(db.update).toHaveBeenCalledTimes(2);
+    expect(db.update.mock.results[1]?.value.set).toHaveBeenCalledWith(
       expect.objectContaining({
         agentProfileId: 'profile-1',
         skillId: null,

@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => ({
     getAcpSession: vi.fn(),
     persistMessage: vi.fn(),
     transitionAcpSession: vi.fn(),
+    failSession: vi.fn(),
   },
   container: {
     destroyVmAgentContainer: vi.fn(),
@@ -110,6 +111,7 @@ describe('launchInstantSession', () => {
     mocks.projectData.createSession.mockResolvedValue('chat-session-1');
     mocks.projectData.persistMessage.mockResolvedValue(undefined);
     mocks.projectData.transitionAcpSession.mockResolvedValue({});
+    mocks.projectData.failSession.mockResolvedValue(undefined);
     mocks.container.getVmAgentContainerConfig.mockReturnValue({
       vmAgentPort: 8080,
       enabled: true,
@@ -124,6 +126,7 @@ describe('launchInstantSession', () => {
     const { db, inserts, updates } = makeDb();
 
     const result = await launchInstantSession(db as never, env, {
+      taskId: 'task-1',
       project,
       userId: 'user-1',
       initialPrompt: 'enriched prompt',
@@ -184,7 +187,7 @@ describe('launchInstantSession', () => {
       'project-1',
       'workspace-1',
       'clean prompt',
-      null,
+      'task-1',
       'user-1'
     );
     expect(mocks.projectData.persistMessage).toHaveBeenCalledWith(
@@ -213,7 +216,7 @@ describe('launchInstantSession', () => {
       expect.anything(),
       'mcp-token',
       expect.objectContaining({
-        taskId: '',
+        taskId: 'task-1',
         contextType: 'conversation',
         taskMode: 'conversation',
         projectId: 'project-1',
@@ -243,7 +246,7 @@ describe('launchInstantSession', () => {
       'user-1',
       { url: 'https://api.example.com/mcp', token: 'mcp-token' },
       { model: 'claude-sonnet-4-5-20250929', effort: 'auto' },
-      undefined,
+      { projectId: 'project-1', taskId: 'task-1', taskMode: 'conversation' },
       expect.stringContaining('MUST call')
     );
     expect(mocks.nodeAgent.startAgentSessionOnNode.mock.calls[0][4]).toBe('enriched prompt');
@@ -267,7 +270,10 @@ describe('launchInstantSession', () => {
     expect(JSON.stringify(launchConfig)).not.toContain('node-callback-token');
     expect(JSON.stringify(launchConfig)).not.toContain('profile-1');
     expect(JSON.stringify(launchConfig)).not.toContain('skill-1');
-    expect(updates.at(-1)).toMatchObject({ dispatchedAt: expect.any(String) });
+    expect(updates).toContainEqual(expect.objectContaining({ dispatchedAt: expect.any(String) }));
+    expect(updates).toContainEqual(
+      expect.objectContaining({ status: 'in_progress', workspaceId: 'workspace-1' })
+    );
   });
 
   it('marks the workspace error and destroys the container when launch fails', async () => {
@@ -278,6 +284,7 @@ describe('launchInstantSession', () => {
 
     await expect(
       launchInstantSession(db as never, env, {
+        taskId: 'task-1',
         project,
         userId: 'user-1',
         initialPrompt: 'prompt',
@@ -303,6 +310,7 @@ describe('launchInstantSession', () => {
     } as never;
 
     await launchInstantSession(db as never, envWithWorkspaceBase, {
+      taskId: 'task-1',
       project: { ...project, repository: 'https://github.com/owner/custom-repo.git' } as never,
       userId: 'user-1',
       initialPrompt: 'prompt',

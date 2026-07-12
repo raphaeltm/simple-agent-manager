@@ -389,20 +389,17 @@ export const projectMembers = sqliteTable(
   })
 );
 
-export const projectOwnershipTransfers = sqliteTable(
-  'project_ownership_transfers',
-  {
-    id: text('id').primaryKey(),
-    projectId: text('project_id').notNull(),
-    fromUserId: text('from_user_id').notNull(),
-    toUserId: text('to_user_id').notNull(),
-    initiatedBy: text('initiated_by').notNull(),
-    completedAt: text('completed_at'),
-    createdAt: text('created_at')
-      .notNull()
-      .default(sql`CURRENT_TIMESTAMP`),
-  }
-);
+export const projectOwnershipTransfers = sqliteTable('project_ownership_transfers', {
+  id: text('id').primaryKey(),
+  projectId: text('project_id').notNull(),
+  fromUserId: text('from_user_id').notNull(),
+  toUserId: text('to_user_id').notNull(),
+  initiatedBy: text('initiated_by').notNull(),
+  completedAt: text('completed_at'),
+  createdAt: text('created_at')
+    .notNull()
+    .default(sql`CURRENT_TIMESTAMP`),
+});
 
 export const projectMemberOffboardingPlans = sqliteTable(
   'project_member_offboarding_plans',
@@ -729,6 +726,8 @@ export const tasks = sqliteTable(
     userId: text('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
+    /** Soft cross-store link to the ProjectData chat session backing this task. */
+    chatSessionId: text('chat_session_id'),
     /** Null for top-level tasks; set for agent-dispatched sub-tasks (dispatch depth > 0). No FK — parent may be in another project's scope. */
     parentTaskId: text('parent_task_id'),
     /** Null until a workspace is assigned during task execution. Set by TaskRunner DO. */
@@ -768,9 +767,14 @@ export const tasks = sqliteTable(
     /** Whether the agent credential came from the user or the platform. */
     agentCredentialSource: text('agent_credential_source').default('user'), // 'user' | 'project' | 'platform'
     /** User whose credential attribution is pinned for this task tree. */
-    credentialAttributionUserId: text('credential_attribution_user_id').references(() => users.id, { onDelete: 'set null' }),
+    credentialAttributionUserId: text('credential_attribution_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
     /** Project scope used when credentialAttributionSource is 'project'. */
-    credentialAttributionProjectId: text('credential_attribution_project_id').references(() => projects.id, { onDelete: 'set null' }),
+    credentialAttributionProjectId: text('credential_attribution_project_id').references(
+      () => projects.id,
+      { onDelete: 'set null' }
+    ),
     /** Root-pinned credential attribution source: 'user' | 'project' | 'platform'. */
     credentialAttributionSource: text('credential_attribution_source').default('user'),
     credentialBlockedReason: text('credential_blocked_reason'),
@@ -815,6 +819,9 @@ export const tasks = sqliteTable(
     ),
     projectCreatedAtIdx: index('idx_tasks_project_created_at').on(table.projectId, table.createdAt),
     projectUserIdx: index('idx_tasks_project_user').on(table.projectId, table.userId),
+    chatSessionIdUnique: uniqueIndex('idx_tasks_chat_session_id_unique')
+      .on(table.chatSessionId)
+      .where(sql`chat_session_id IS NOT NULL`),
     missionIdIdx: index('idx_tasks_mission_id')
       .on(table.missionId)
       .where(sql`mission_id IS NOT NULL`),
@@ -896,9 +903,14 @@ export const nodes = sqliteTable(
     /** 'user' = provisioned with user's own credential; 'platform' = provisioned with platform credential. */
     credentialSource: text('credential_source').default('user'),
     /** User whose credential attribution was used to provision this node. */
-    credentialAttributionUserId: text('credential_attribution_user_id').references(() => users.id, { onDelete: 'set null' }),
+    credentialAttributionUserId: text('credential_attribution_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
     /** Project scope used when credentialAttributionSource is 'project'. */
-    credentialAttributionProjectId: text('credential_attribution_project_id').references(() => projects.id, { onDelete: 'set null' }),
+    credentialAttributionProjectId: text('credential_attribution_project_id').references(
+      () => projects.id,
+      { onDelete: 'set null' }
+    ),
     /** Credential attribution source used at node creation: 'user' | 'project' | 'platform'. */
     credentialAttributionSource: text('credential_attribution_source').default('user'),
     offboardingStatus: text('offboarding_status'),
@@ -1079,7 +1091,9 @@ export const sessionSnapshots = sqliteTable(
       .default(sql`CURRENT_TIMESTAMP`),
   },
   (table) => ({
-    chatSessionIdUnique: uniqueIndex('idx_session_snapshots_chat_session_id').on(table.chatSessionId),
+    chatSessionIdUnique: uniqueIndex('idx_session_snapshots_chat_session_id').on(
+      table.chatSessionId
+    ),
     workspaceIdIdx: index('idx_session_snapshots_workspace_id').on(table.workspaceId),
     expiresAtIdx: index('idx_session_snapshots_expires_at').on(table.expiresAt),
   })

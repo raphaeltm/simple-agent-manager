@@ -304,6 +304,7 @@ export interface StartInstantChatSessionRequest {
 
 export interface StartInstantChatSessionResponse {
   status: 'running';
+  taskId: string;
   runtime: {
     runtime: AgentProfileRuntime;
     reason: string;
