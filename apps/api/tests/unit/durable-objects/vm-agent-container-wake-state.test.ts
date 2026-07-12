@@ -36,6 +36,9 @@ function makeFake(opts: {
     containerFetch,
     wakeFromSnapshot,
     defaultPort: 8080,
+    wakeChain: Promise.resolve(),
+    ensureAwake: (VmAgentContainer.prototype as unknown as { ensureAwake: unknown })
+      .ensureAwake,
     ctx: { storage: { get: vi.fn().mockResolvedValue(opts.lifecycleStatus) } },
   };
   return { fake, getState, containerFetch, wakeFromSnapshot };
@@ -92,5 +95,47 @@ describe('VmAgentContainer.proxyHttp wake state re-read', () => {
     expect(wakeFromSnapshot).not.toHaveBeenCalled();
     expect(containerFetch).not.toHaveBeenCalled();
     expect(res.status).toBe(410);
+  });
+});
+
+describe('VmAgentContainer.ensureAwake concurrency (rule 45)', () => {
+  it('wakes a sleeping container exactly once under two concurrent requests', async () => {
+    // Shared, mutable container state so the mock models a real wake: the first
+    // wake flips lifecycleStatus to running, and getState follows it.
+    const shared = { lifecycle: 'sleeping' as string };
+
+    const getState = vi.fn(async () => ({
+      status: shared.lifecycle === 'running' ? 'running' : 'stopped',
+    }));
+    const containerFetch = vi.fn().mockResolvedValue(new Response('proxied', { status: 200 }));
+    const wakeFromSnapshot = vi.fn(async () => {
+      // Simulate the async launch+restore so the two requests interleave across
+      // this await; the second must observe the running state and NOT re-wake.
+      await new Promise((r) => setTimeout(r, 20));
+      shared.lifecycle = 'running';
+      return { ok: true };
+    });
+
+    const fake = {
+      getState,
+      containerFetch,
+      wakeFromSnapshot,
+      defaultPort: 8080,
+      wakeChain: Promise.resolve(),
+      ensureAwake: (VmAgentContainer.prototype as unknown as { ensureAwake: unknown }).ensureAwake,
+      ctx: { storage: { get: vi.fn(async () => shared.lifecycle) } },
+    };
+
+    const [a, b] = await Promise.all([
+      callProxyHttp(fake, new Request('http://container/prompt', { method: 'POST' })),
+      callProxyHttp(fake, new Request('http://container/prompt', { method: 'POST' })),
+    ]);
+
+    // The one-time launch+restore fired exactly once despite two concurrent
+    // requests; both requests were proxied to the now-running container.
+    expect(wakeFromSnapshot).toHaveBeenCalledTimes(1);
+    expect(containerFetch).toHaveBeenCalledTimes(2);
+    expect(a.status).toBe(200);
+    expect(b.status).toBe(200);
   });
 });

@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -343,6 +344,11 @@ func (s *Server) primeRestoredMessageReporter(runtime *WorkspaceRuntime, chatSes
 		projectID = strings.TrimSpace(s.config.ProjectID)
 	}
 	if projectID == "" || chatSessionID == "" {
+		// Without a project + chat session the reporter cannot be created, so
+		// the restored agent's output would be silently dropped. Log loudly so
+		// this failure mode is diagnosable instead of invisible.
+		slog.Warn("Restored session message reporter not primed: missing project or chat session",
+			"workspaceId", runtime.ID, "hasProjectID", projectID != "", "hasChatSessionID", chatSessionID != "")
 		return
 	}
 	s.workspaceMu.Lock()

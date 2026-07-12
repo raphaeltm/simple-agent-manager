@@ -54,6 +54,12 @@ export class VmAgentContainer extends Container<Env> {
   sleepAfter = DEFAULT_CF_CONTAINER_SLEEP_AFTER;
   enableInternet = true;
 
+  // Serializes wake-from-snapshot so two concurrent requests to a sleeping
+  // container do not both launch a fresh container + restore. DO request
+  // handlers interleave across `await`, so the sleeping-check + wake must run
+  // as one critical section (see .claude/rules/45).
+  private wakeChain: Promise<unknown> = Promise.resolve();
+
   constructor(ctx: DurableObjectState<Record<string, never>>, env: Env) {
     super(ctx, env);
     const configuredPort = Number.parseInt(env.CF_CONTAINER_VM_AGENT_PORT || env.SANDBOX_VM_AGENT_PORT || '', 10);
@@ -112,7 +118,7 @@ export class VmAgentContainer extends Container<Env> {
     let state = await this.getState();
     const lifecycleStatus = await this.ctx.storage.get<LifecycleStatus>('lifecycleStatus');
     if (lifecycleStatus === 'sleeping') {
-      const wake = await this.wakeFromSnapshot();
+      const wake = await this.ensureAwake();
       if (!wake.ok) {
         return new Response(wake.message || WAKE_DEGRADED_RESPONSE, { status: 503 });
       }
@@ -242,7 +248,7 @@ export class VmAgentContainer extends Container<Env> {
     let state = await this.getState();
     const lifecycleStatus = await this.ctx.storage.get<LifecycleStatus>('lifecycleStatus');
     if (lifecycleStatus === 'sleeping') {
-      const wake = await this.wakeFromSnapshot();
+      const wake = await this.ensureAwake();
       if (!wake.ok) {
         return new Response(wake.message || WAKE_DEGRADED_RESPONSE, { status: 503 });
       }
@@ -308,6 +314,29 @@ export class VmAgentContainer extends Container<Env> {
     const raw = this.env.CF_CONTAINER_KEEPALIVE_RENEW_INTERVAL_MS;
     const parsed = raw ? Number.parseInt(raw, 10) : DEFAULT_CF_CONTAINER_KEEPALIVE_RENEW_INTERVAL_MS;
     return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_CF_CONTAINER_KEEPALIVE_RENEW_INTERVAL_MS;
+  }
+
+  /**
+   * Wake a sleeping container exactly once under concurrency. Serializes on
+   * `wakeChain` and re-reads `lifecycleStatus` inside the critical section, so a
+   * second request that arrives while the first is waking sees `running` and
+   * skips a duplicate launch/restore instead of racing it (see rule 45).
+   */
+  private async ensureAwake(): Promise<{ ok: boolean; message?: string }> {
+    const run = this.wakeChain.then(async () => {
+      const status = await this.ctx.storage.get<LifecycleStatus>('lifecycleStatus');
+      if (status !== 'sleeping') {
+        return { ok: true };
+      }
+      return this.wakeFromSnapshot();
+    });
+    // Keep the chain alive even if this wake rejects, so a failure does not
+    // permanently wedge all future wakes.
+    this.wakeChain = run.then(
+      () => undefined,
+      () => undefined
+    );
+    return run;
   }
 
   private async wakeFromSnapshot(): Promise<{ ok: boolean; message?: string }> {
