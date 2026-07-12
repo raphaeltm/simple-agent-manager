@@ -116,12 +116,16 @@ export function validatePulumiOutputs(outputs: unknown): asserts outputs is Pulu
     { key: 'observabilityD1DatabaseName', label: 'Observability D1 Database Name' },
     { key: 'kvId', label: 'KV Namespace ID' },
     { key: 'r2Name', label: 'R2 Bucket Name' },
+    { key: 'sessionSnapshotTtlDays', label: 'Session Snapshot TTL Days' },
     { key: 'cloudflareAccountId', label: 'Cloudflare Account ID' },
     { key: 'pagesName', label: 'Pages Project Name' },
   ];
 
   const missing = required.filter(({ key }) => {
     const value = record[key];
+    if (key === 'sessionSnapshotTtlDays') {
+      return typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0;
+    }
     return typeof value !== 'string' || value.length === 0;
   });
 
@@ -333,11 +337,14 @@ function getApiWorkerVars(
     VERSION: DEPLOYMENT_CONFIG.version,
     PAGES_PROJECT_NAME: outputs.pagesName,
     R2_BUCKET_NAME: outputs.r2Name,
+    SESSION_SNAPSHOT_TTL_DAYS: String(outputs.sessionSnapshotTtlDays),
     ...getOptionalProcessEnvVars([
       'REQUIRE_APPROVAL',
       'HETZNER_BASE_IMAGE',
       'CF_CONTAINER_ENABLED',
+      'CF_CONTAINER_SLEEP_AFTER',
       'CF_CONTAINER_PORT_READY_TIMEOUT_MS',
+      'CF_CONTAINER_WAKE_TIMEOUT_MS',
       'CF_CONTAINER_VM_AGENT_PORT',
       'SANDBOX_ENABLED',
       'SANDBOX_EXEC_TIMEOUT_MS',

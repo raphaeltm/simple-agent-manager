@@ -26,6 +26,12 @@ vi.mock('../../../src/services/node-agent', () => ({
   stopWorkspaceOnNode: vi.fn(),
 }));
 
+vi.mock('../../../src/services/node-agent-diagnostics', () => ({
+  getNodeLogsFromNode: (...args: unknown[]) => mockGetNodeLogsFromNode(...args),
+  listNodeContainersFromNode: (...args: unknown[]) => mockListNodeContainersFromNode(...args),
+  getNodeSystemInfoFromNode: vi.fn(),
+}));
+
 vi.mock('../../../src/services/nodes', () => ({
   createNodeRecord: vi.fn(),
   deleteNodeResources: vi.fn(),

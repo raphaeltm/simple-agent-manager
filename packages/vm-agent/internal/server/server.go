@@ -1027,6 +1027,8 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /workspaces/{workspaceId}/agent-sessions/{sessionId}/suspend", s.handleSuspendAgentSession)
 	mux.HandleFunc("POST /workspaces/{workspaceId}/agent-sessions/{sessionId}/resume", s.handleResumeAgentSession)
 	mux.HandleFunc("POST /workspaces/{workspaceId}/agent-sessions/{sessionId}/prompt", s.handleSendPrompt)
+	mux.HandleFunc("POST /workspaces/{workspaceId}/agent-sessions/{sessionId}/hibernate", s.handleHibernateAgentSession)
+	mux.HandleFunc("POST /workspaces/{workspaceId}/agent-sessions/{sessionId}/restore", s.handleRestoreAgentSession)
 	mux.HandleFunc("GET /workspaces/{workspaceId}/tabs", s.handleListTabs)
 
 	// Git integration (browser-authenticated via workspace session/token)

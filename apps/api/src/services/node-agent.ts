@@ -15,6 +15,7 @@ import {
 } from './vm-agent-container';
 
 const DEFAULT_NODE_AGENT_REQUEST_TIMEOUT_MS = 30_000;
+const DEFAULT_CF_CONTAINER_WAKE_TIMEOUT_MS = 120_000;
 
 const DEFAULT_NODE_AGENT_READY_TIMEOUT_MS = 900_000; // 15 min — cloud-init takes 8-12 min on Hetzner
 const DEFAULT_NODE_AGENT_READY_POLL_INTERVAL_MS = 5000;
@@ -64,6 +65,10 @@ export function getNodeAgentReadyPollIntervalMs(env: {
 
 export function getNodeAgentRequestTimeoutMs(env: { NODE_AGENT_REQUEST_TIMEOUT_MS?: string }): number {
   return getTimeoutMs(env.NODE_AGENT_REQUEST_TIMEOUT_MS, DEFAULT_NODE_AGENT_REQUEST_TIMEOUT_MS);
+}
+
+export function getCfContainerWakeTimeoutMs(env: { CF_CONTAINER_WAKE_TIMEOUT_MS?: string }): number {
+  return getTimeoutMs(env.CF_CONTAINER_WAKE_TIMEOUT_MS, DEFAULT_CF_CONTAINER_WAKE_TIMEOUT_MS);
 }
 
 export async function waitForNodeAgentReady(nodeId: string, env: Env): Promise<void> {
@@ -125,7 +130,7 @@ export async function waitForNodeAgentReady(nodeId: string, env: Env): Promise<v
   throw new Error(`Node Agent not reachable at ${healthUrl} within ${timeoutMs}ms.${details}`);
 }
 
-async function nodeAgentRequest(
+export async function nodeAgentRequest(
   nodeId: string,
   env: Env,
   path: string,
@@ -520,6 +525,8 @@ export async function sendPromptToAgentOnNode(
   }
 }
 
+export { hibernateAgentSessionOnNode, restoreAgentSessionOnNode } from './node-agent-session-snapshots';
+
 /**
  * Cancel a running prompt on an agent session.
  * Returns { success, status } instead of throwing on non-2xx responses,
@@ -653,41 +660,6 @@ export async function listNodeEventsOnNode(
     events: payload.events,
     nextCursor: typeof payload.nextCursor === 'string' ? payload.nextCursor : null,
   };
-}
-
-export async function getNodeSystemInfoFromNode(
-  nodeId: string,
-  env: Env,
-  userId: string
-): Promise<unknown> {
-  return nodeAgentRequest(nodeId, env, '/system-info', {
-    method: 'GET',
-    userId,
-  });
-}
-
-export async function getNodeLogsFromNode(
-  nodeId: string,
-  env: Env,
-  userId: string,
-  queryString: string
-): Promise<unknown> {
-  const path = queryString ? `/logs?${queryString}` : '/logs';
-  return nodeAgentRequest(nodeId, env, path, {
-    method: 'GET',
-    userId,
-  });
-}
-
-export async function listNodeContainersFromNode(
-  nodeId: string,
-  env: Env,
-  userId: string
-): Promise<unknown> {
-  return nodeAgentRequest(nodeId, env, '/containers', {
-    method: 'GET',
-    userId,
-  });
 }
 
 /**

@@ -37,7 +37,7 @@ import {
   getNodeLogsFromNode,
   getNodeSystemInfoFromNode,
   listNodeContainersFromNode,
-} from '../services/node-agent';
+} from '../services/node-agent-diagnostics';
 import { deleteNodeResources } from '../services/nodes';
 import { registerDeploymentEnvironmentLifecycleRoutes } from './deployment-environment-lifecycle';
 

@@ -27,7 +27,7 @@ import {
   type DeploymentRouteTargetOptions,
 } from '../../services/deployment-routing';
 import { getRuntimeLimits } from '../../services/limits';
-import { getNodeLogsFromNode } from '../../services/node-agent';
+import { getNodeLogsFromNode } from '../../services/node-agent-diagnostics';
 import { byteLength, PROJECT_ENV_KEY_PATTERN } from '../projects/_helpers';
 import {
   INTERNAL_ERROR,

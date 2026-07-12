@@ -76,6 +76,12 @@ vi.mock('../../../src/services/node-agent', () => ({
     mockTeardownDeploymentEnvironmentOnNode(...args),
 }));
 
+vi.mock('../../../src/services/node-agent-diagnostics', () => ({
+  getNodeLogsFromNode: (...args: unknown[]) => mockGetNodeLogsFromNode(...args),
+  getNodeSystemInfoFromNode: (...args: unknown[]) => mockGetNodeSystemInfoFromNode(...args),
+  listNodeContainersFromNode: (...args: unknown[]) => mockListNodeContainersFromNode(...args),
+}));
+
 vi.mock('../../../src/services/deployment-control', () => ({
   DEPLOYMENT_ENVIRONMENT_NAME_RE: /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/,
   encodeAllowedDeployProfileIds: vi.fn(() => null),

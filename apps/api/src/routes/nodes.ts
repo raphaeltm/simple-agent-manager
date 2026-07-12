@@ -23,13 +23,15 @@ import { getRuntimeLimits } from '../services/limits';
 import {
   fetchNodeAgent,
   getNodeAgentRequestTimeoutMs,
-  getNodeLogsFromNode,
-  getNodeSystemInfoFromNode,
-  listNodeContainersFromNode,
   listNodeEventsOnNode,
   nodeAgentRawRequest,
   stopWorkspaceOnNode,
 } from '../services/node-agent';
+import {
+  getNodeLogsFromNode,
+  getNodeSystemInfoFromNode,
+  listNodeContainersFromNode,
+} from '../services/node-agent-diagnostics';
 import { createNodeRecord, deleteNodeResources, provisionNode, stopNodeResources } from '../services/nodes';
 import { recordNodeRoutingMetric } from '../services/telemetry';
 

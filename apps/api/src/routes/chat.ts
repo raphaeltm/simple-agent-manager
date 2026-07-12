@@ -517,14 +517,18 @@ chatRoutes.post('/:sessionId/prompt', async (c) => {
   const { enrichedMessage } = await enrichMessageWithMentions(content, db, projectId, userId, c.env);
 
   // Forward the prompt to the VM agent
-  const { sendPromptToAgentOnNode } = await import('../services/node-agent');
+  const { getCfContainerWakeTimeoutMs, sendPromptToAgentOnNode } = await import('../services/node-agent');
   const result = await sendPromptToAgentOnNode(
     workspace.nodeId,
     workspace.id,
     agentSession.id,
     enrichedMessage,
     c.env,
-    userId
+    userId,
+    undefined,
+    workspace.nodeStatus === 'sleeping'
+      ? { requestTimeoutMs: getCfContainerWakeTimeoutMs(c.env) }
+      : undefined
   );
 
   return c.json(expectJsonRecord(result, 'chat.agent_prompt_result'));
