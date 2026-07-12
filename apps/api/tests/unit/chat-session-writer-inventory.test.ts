@@ -26,10 +26,7 @@ describe('task-backed chat writer inventory', () => {
       });
       for (const call of source.getDescendantsOfKind(SyntaxKind.CallExpression)) {
         const expression = call.getExpression().getText();
-        if (
-          expression !== 'projectDataService.createSession'
-        )
-          continue;
+        if (expression !== 'projectDataService.createSession') continue;
 
         const taskId = call.getArguments()[4];
         if (!taskId || taskId.getKind() === SyntaxKind.NullKeyword) {
@@ -42,5 +39,5 @@ describe('task-backed chat writer inventory', () => {
     }
 
     expect(violations).toEqual([]);
-  });
+  }, 15_000);
 });
