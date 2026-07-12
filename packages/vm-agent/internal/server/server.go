@@ -1606,7 +1606,16 @@ func (s *Server) tryCreateGitLabMergeRequest(runtime *WorkspaceRuntime, sourceBr
 		return "", 0
 	}
 
-	resp, err := s.fetchGitTokenResponseForWorkspace(context.Background(), runtime.ID, "")
+	// Bound the entire MR flow (token fetch + create + 409 lookup) so a dead or
+	// slow GitLab host cannot stall task completion. Mirrors tryCreatePR.
+	timeout := s.config.GitExecTimeout
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	resp, err := s.fetchGitTokenResponseForWorkspace(ctx, runtime.ID, "")
 	if err != nil {
 		slog.Warn("GitLab MR creation skipped: token fetch failed", "workspaceID", runtime.ID, "error", err)
 		return "", 0
@@ -1622,7 +1631,7 @@ func (s *Server) tryCreateGitLabMergeRequest(runtime *WorkspaceRuntime, sourceBr
 		url.PathEscape(repositoryPath),
 	)
 	req, err := http.NewRequestWithContext(
-		context.Background(),
+		ctx,
 		http.MethodPost,
 		endpoint,
 		strings.NewReader(form.Encode()),
@@ -1645,11 +1654,11 @@ func (s *Server) tryCreateGitLabMergeRequest(runtime *WorkspaceRuntime, sourceBr
 	body, _ := io.ReadAll(io.LimitReader(httpResp.Body, 8*1024))
 	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
 		if httpResp.StatusCode == http.StatusConflict {
-			if existingURL, existingIID := s.getExistingGitLabMergeRequest(runtime, host, repositoryPath, sourceBranch, targetBranch, resp.Token); existingURL != "" {
+			if existingURL, existingIID := s.getExistingGitLabMergeRequest(ctx, runtime, host, repositoryPath, sourceBranch, targetBranch, resp.Token); existingURL != "" {
 				return existingURL, existingIID
 			}
 		}
-		slog.Warn("GitLab MR create returned non-success", "workspaceID", runtime.ID, "status", httpResp.StatusCode, "body", strings.TrimSpace(string(body)))
+		slog.Warn("GitLab MR create returned non-success", "workspaceID", runtime.ID, "status", httpResp.StatusCode, "body", redactTaskCallbackDiagnosticText(strings.TrimSpace(string(body))))
 		return "", 0
 	}
 	var payload gitlabMergeRequestResponse
@@ -1660,7 +1669,7 @@ func (s *Server) tryCreateGitLabMergeRequest(runtime *WorkspaceRuntime, sourceBr
 	return payload.WebURL, payload.IID
 }
 
-func (s *Server) getExistingGitLabMergeRequest(runtime *WorkspaceRuntime, host, repositoryPath, sourceBranch, targetBranch, token string) (string, int) {
+func (s *Server) getExistingGitLabMergeRequest(ctx context.Context, runtime *WorkspaceRuntime, host, repositoryPath, sourceBranch, targetBranch, token string) (string, int) {
 	params := url.Values{}
 	params.Set("state", "opened")
 	params.Set("source_branch", sourceBranch)
@@ -1672,7 +1681,7 @@ func (s *Server) getExistingGitLabMergeRequest(runtime *WorkspaceRuntime, host, 
 		url.PathEscape(repositoryPath),
 		params.Encode(),
 	)
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, endpoint, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		slog.Warn("GitLab MR lookup request build failed", "workspaceID", runtime.ID, "error", err)
 		return "", 0

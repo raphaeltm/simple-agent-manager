@@ -2233,7 +2233,9 @@ func renderGitCredentialHelperScript(cfg *config.Config) (string, error) {
 	if workspaceID := strings.TrimSpace(cfg.WorkspaceID); workspaceID != "" {
 		query = "?workspaceId=" + url.QueryEscape(workspaceID)
 	}
-	allowedGitLabHost := strings.TrimSpace(cfg.RepositoryHost)
+	// Hostnames are case-insensitive; normalize once here and lowercase the
+	// requested host in the shell so the comparison cannot fail on casing.
+	allowedGitLabHost := strings.ToLower(strings.TrimSpace(cfg.RepositoryHost))
 
 	// When TLS is enabled on the VM agent, the credential helper must use https://
 	// with -k (skip cert verification) because the TLS cert is issued for the
@@ -2270,7 +2272,8 @@ case "$requested_host" in
   ""|github.com|api.github.com|artifacts.cloudflare.net|*.artifacts.cloudflare.net) ;;
   *)
     allowed_gitlab_host=%s
-    if [ -z "$allowed_gitlab_host" ] || [ "$requested_host" != "$allowed_gitlab_host" ]; then
+    requested_host_lower=$(printf '%%s' "$requested_host" | tr '[:upper:]' '[:lower:]')
+    if [ -z "$allowed_gitlab_host" ] || [ "$requested_host_lower" != "$allowed_gitlab_host" ]; then
       exit 0
     fi
     ;;

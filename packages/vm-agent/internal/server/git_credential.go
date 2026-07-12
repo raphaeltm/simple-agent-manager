@@ -163,8 +163,15 @@ func (s *Server) isAllowedCredentialPathForWorkspace(workspaceID, requestedPath 
 	if !strings.EqualFold(provider, "gitlab") {
 		return true
 	}
+	// Fail closed: a gitlab-bound workspace with no bound repository path cannot
+	// verify the request, so refuse rather than vend a broad user OAuth token.
+	// (The response-side gate re-checks this against the control-plane-resolved
+	// path, but the pre-fetch gate must not be the weaker of the two.)
 	if repositoryPath == "" {
-		return true
+		slog.Warn("Git credential path check refused: gitlab-bound workspace has no bound repository path",
+			"workspaceID", workspaceID,
+		)
+		return false
 	}
 	return credentialPathMatchesRequest(repositoryPath, requestedPath)
 }

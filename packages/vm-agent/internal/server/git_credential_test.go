@@ -279,6 +279,26 @@ func TestIsAllowedCredentialPathForWorkspaceFallsBackToConfig(t *testing.T) {
 	if scoped.isAllowedCredentialPathForWorkspace("ws-a", "config/path.git") {
 		t.Fatal("runtime binding must override the config fallback")
 	}
+
+	// Fail-closed: a gitlab-bound workspace whose bound repository path is
+	// empty (misconfiguration) must refuse every requested path — never fall
+	// open to "any path allowed".
+	emptyRuntime := &Server{
+		config: &config.Config{RepoProvider: "gitlab", RepositoryPath: "config/path"},
+		workspaces: map[string]*WorkspaceRuntime{
+			"ws-empty": {ID: "ws-empty", RepoProvider: "gitlab", RepositoryPath: ""},
+		},
+	}
+	if emptyRuntime.isAllowedCredentialPathForWorkspace("ws-empty", "group/project.git") {
+		t.Fatal("gitlab runtime with empty bound path must fail closed")
+	}
+	emptyConfig := &Server{
+		config:     &config.Config{RepoProvider: "gitlab", RepositoryPath: ""},
+		workspaces: map[string]*WorkspaceRuntime{},
+	}
+	if emptyConfig.isAllowedCredentialPathForWorkspace("ws-unknown", "group/project.git") {
+		t.Fatal("gitlab config fallback with empty bound path must fail closed")
+	}
 }
 
 // TestHandleGitCredentialGitLabFailClosedWithoutHostOrPath verifies the
@@ -491,6 +511,84 @@ func TestTryCreateGitLabMergeRequestUsesWorkspaceToken(t *testing.T) {
 	}
 	if !sawMergeRequest.Load() {
 		t.Fatal("expected merge request")
+	}
+}
+
+// TestTryCreateGitLabMergeRequestFallsBackToExistingOn409 verifies that when
+// GitLab rejects the MR create with 409 (an MR already exists for the source
+// branch), the agent looks up the existing open MR and returns its URL/IID
+// instead of reporting a failure.
+func TestTryCreateGitLabMergeRequestFallsBackToExistingOn409(t *testing.T) {
+	t.Parallel()
+
+	var sawCreateAttempt atomic.Bool
+	var sawLookup atomic.Bool
+	api := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/workspaces/ws-gitlab/git-token":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"provider":"gitlab","token":"gl_token","expiresAt":null}`))
+		case strings.Contains(r.RequestURI, "/api/v4/projects/group%2Fproject/merge_requests") && r.Method == http.MethodPost:
+			sawCreateAttempt.Store(true)
+			w.WriteHeader(http.StatusConflict)
+			_, _ = w.Write([]byte(`{"message":["Another open merge request already exists for this source branch"]}`))
+		case strings.Contains(r.RequestURI, "/api/v4/projects/group%2Fproject/merge_requests") && r.Method == http.MethodGet:
+			sawLookup.Store(true)
+			if r.Header.Get("Authorization") != "Bearer gl_token" {
+				t.Fatalf("unexpected lookup Authorization header: %q", r.Header.Get("Authorization"))
+			}
+			q := r.URL.Query()
+			if q.Get("state") != "opened" {
+				t.Fatalf("unexpected state param: %q", q.Get("state"))
+			}
+			if q.Get("source_branch") != "sam/feature" {
+				t.Fatalf("unexpected source_branch param: %q", q.Get("source_branch"))
+			}
+			if q.Get("target_branch") != "main" {
+				t.Fatalf("unexpected target_branch param: %q", q.Get("target_branch"))
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[{"web_url":"https://gitlab.example/group/project/-/merge_requests/9","iid":9}]`))
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.RequestURI)
+		}
+	}))
+	defer api.Close()
+
+	host := strings.TrimPrefix(api.URL, "https://")
+	s := &Server{
+		config: &config.Config{
+			ControlPlaneURL: api.URL,
+		},
+		httpClient: api.Client(),
+		workspaces: map[string]*WorkspaceRuntime{
+			"ws-gitlab": {
+				ID:            "ws-gitlab",
+				CallbackToken: "gitlab-callback-token",
+			},
+		},
+	}
+	runtime := &WorkspaceRuntime{
+		ID:             "ws-gitlab",
+		Branch:         "main",
+		RepoProvider:   "gitlab",
+		RepositoryHost: host,
+		RepositoryPath: "group/project",
+	}
+
+	mrURL, iid := s.tryCreateGitLabMergeRequest(runtime, "sam/feature")
+
+	if mrURL != "https://gitlab.example/group/project/-/merge_requests/9" {
+		t.Fatalf("unexpected MR URL: %q", mrURL)
+	}
+	if iid != 9 {
+		t.Fatalf("unexpected MR iid: %d", iid)
+	}
+	if !sawCreateAttempt.Load() {
+		t.Fatal("expected MR create attempt")
+	}
+	if !sawLookup.Load() {
+		t.Fatal("expected existing-MR lookup after 409")
 	}
 }
 
