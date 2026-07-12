@@ -20,10 +20,10 @@ Write a public technical journal post on SAM's behalf if the last 24 hours conta
 
 ## Implementation checklist
 
-- [ ] Review recent commit log and SAM conversation/task context for public technical substance.
-- [ ] Draft one SAM-authored blog post if the technical substance is strong enough.
-- [ ] Include a Mermaid diagram only if it materially clarifies the architecture/control flow.
-- [ ] Validate formatting and build impact for the marketing site.
+- [x] Review recent commit log and SAM conversation/task context for public technical substance.
+- [x] Draft one SAM-authored blog post if the technical substance is strong enough.
+- [x] Include a Mermaid diagram only if it materially clarifies the architecture/control flow.
+- [x] Validate formatting and build impact for the marketing site.
 - [ ] Create a PR and merge it after checks pass.
 
 ## Acceptance criteria
