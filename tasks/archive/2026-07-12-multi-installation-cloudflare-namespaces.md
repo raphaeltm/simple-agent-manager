@@ -46,7 +46,7 @@ The first groundwork slice should make a deployment such as `dev-a.sammy.party` 
 - [x] Update environment-variable reference/instructions where `BASE_DOMAIN` is incorrectly described as necessarily being the zone apex.
 - [x] Run focused tests for infra, Wrangler generation, and API DNS helpers.
 - [x] Run the full lint, typecheck, test, and build suite.
-- [ ] Complete Cloudflare, environment-variable, constitution, documentation-sync, test-quality, and task-completion specialist reviews.
+- [x] Complete Cloudflare, environment-variable, constitution, documentation-sync, test-quality, and task-completion specialist reviews.
 - [ ] Perform required staging and real-VM infrastructure verification without overlapping another active staging deployment.
 - [ ] Open a draft PR and stop without marking it ready or merging it.
 
@@ -72,6 +72,17 @@ The first groundwork slice should make a deployment such as `dev-a.sammy.party` 
 - **Principle III — Documentation Excellence:** update canonical public self-hosting/configuration docs with actual supported behavior and certificate constraints.
 - **Principle XI — No Hardcoded Values:** derive all hostnames from `BASE_DOMAIN` and bind routes using the configured `CF_ZONE_ID`/Pulumi output.
 - Primary risks are DNS collisions, orphaned records, route attachment to the wrong zone, TLS coverage gaps, and accidental changes to existing production/staging hostnames.
+
+## Specialist review evidence
+
+| Reviewer                    | Status    | Outcome                                                                                                                                                                         |
+| --------------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cloudflare-specialist`     | PASS      | FQDN DNS, parent-zone routes, Pages, Origin CA, and output validation are sound. The pre-existing wildcard Worker/Pages overlap remains deferred with shared ingress ownership. |
+| `env-validator`             | PASS      | No new variable or secret mapping is required; `BASE_DOMAIN` and `CF_ZONE_ID` semantics are consistent.                                                                         |
+| `constitution-validator`    | PASS      | All installation identities derive from `BASE_DOMAIN` and `CF_ZONE_ID`; no new hardcoded deployment values.                                                                     |
+| `doc-sync-validator`        | ADDRESSED | Parent-zone terminology findings fixed in `e895a0137`; docs build passes.                                                                                                       |
+| `test-engineer`             | ADDRESSED | Cleanup and integrated nested Pulumi wiring hardening added in `704cb5748`; no remaining findings.                                                                              |
+| `task-completion-validator` | PASS      | Checks A–F pass; deferred architecture and pending release gates are explicit.                                                                                                  |
 
 ## References
 
