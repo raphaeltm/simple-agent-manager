@@ -27,10 +27,10 @@ The runtime boundary is fixed: the container launch environment remains minimal.
 - [x] Integrate the build into reusable staging/production/self-host deployment flow with generated defaults and optional configuration overrides, not new manual secrets or environment prerequisites.
 - [x] Preserve the minimal launch-env and ACP-start runtime-assets boundary from PR #1561; add contract tests that fail if runtime assets or user secrets move into the image/launch config.
 - [x] Add unit/contract/deployment tests for phase timing invariants, baked binary presence/versioning, workflow ordering, rollback behavior, and no-secret image inputs.
-- [ ] Rebase on main after priority task `01KX8ST0S21H18QGN2NV5PQ45W` merges and reconcile `VmAgentContainer` lifecycle/session setup changes.
-- [ ] Run lint, typecheck, tests, build, targeted Go tests, and local container startup/benchmark validation.
-- [ ] Run Cloudflare, Go, security, constitution, env, doc-sync, deployment/test, and task-completion specialist reviews; address all blocking findings.
-- [ ] Wait for priority tasks 1–3 to complete their staging turns and for GitHub Actions staging queue to be empty, using exact ten-minute sleep/recheck loops while blocked.
+- [x] Rebase on main after priority task `01KX8ST0S21H18QGN2NV5PQ45W` merges and reconcile `VmAgentContainer` lifecycle/session setup changes.
+- [x] Run lint, typecheck, tests, build, targeted Go tests, and local container startup/benchmark validation.
+- [x] Run Cloudflare, Go, security, constitution, env, doc-sync, deployment/test, and task-completion specialist reviews; address all blocking findings.
+- [x] Wait for priority tasks 1–3 to complete their staging turns and for GitHub Actions staging queue to be empty, using exact ten-minute sleep/recheck loops while blocked.
 - [ ] Query staging Cloudflare state/logs, deploy the branch, create a fresh container, exercise an actual ACP session, and record every phase plus total cold-start latency.
 - [ ] Clean up fresh staging test resources.
 - [ ] If total remains above five seconds, append evidence and the next bounded dominant-phase slice to idea `01KX6JK8ZFC1EFWGYQENRMFWFK` rather than claiming the target was met.
@@ -64,3 +64,12 @@ The runtime boundary is fixed: the container launch environment remains minimal.
 - `.claude/rules/25-review-merge-gate.md`
 - `.claude/rules/32-cf-api-debugging.md`
 - `.claude/rules/35-vertical-slice-testing.md`
+
+## Post-Rebase Validation (2026-07-12)
+
+- Rebased linearly onto `ad7044fde` (PR #1562); the rebased tree matches the previously reviewed merge resolution exactly.
+- `pnpm lint`, `pnpm typecheck`, `pnpm test`, and `pnpm build` passed. The full test run included 404 API files / 5,918 tests and 217 web files / 2,668 tests.
+- Targeted cold-start tests passed: 16 API contract/timing/bootstrap tests and 7 deploy-workflow tests.
+- `/usr/local/go/bin/go test ./...` passed for the full vm-agent module under Go 1.25.0.
+- `make -C packages/vm-agent prepare-container VERSION=local-rebase-3bf1a466d` generated the Linux/amd64 binary and version metadata successfully.
+- The actual `Dockerfile.vm-agent-container` built locally. A standalone probe using the normal entrypoint emitted `vm_agent_container_bootstrap_ready` in 3 ms with the baked version/sha256, remained running, and returned `{"status":"healthy"}` from `/health`; the probe container was removed.
