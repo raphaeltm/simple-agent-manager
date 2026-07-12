@@ -133,21 +133,47 @@ chatStartRoutes.post(
       createdAt: now,
     });
 
-    const result = await launchInstantSession(db, c.env, {
-      taskId,
-      project,
-      userId,
-      initialPrompt,
-      displayMessage: message,
-      agentType,
-      agentProfileId: resolvedProfile?.profileId ?? null,
-      skillId: resolvedProfile?.skillId ?? null,
-      overrides: {
-        model: resolvedProfile?.model ?? null,
-        effort: resolvedProfile?.effort ?? null,
-        permissionMode: resolvedProfile?.permissionMode ?? null,
-      },
-    });
+    let result: Awaited<ReturnType<typeof launchInstantSession>>;
+    try {
+      result = await launchInstantSession(db, c.env, {
+        taskId,
+        project,
+        userId,
+        initialPrompt,
+        displayMessage: message,
+        agentType,
+        agentProfileId: resolvedProfile?.profileId ?? null,
+        skillId: resolvedProfile?.skillId ?? null,
+        overrides: {
+          model: resolvedProfile?.model ?? null,
+          effort: resolvedProfile?.effort ?? null,
+          permissionMode: resolvedProfile?.permissionMode ?? null,
+        },
+      });
+    } catch (err) {
+      const failedAt = new Date().toISOString();
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      await db
+        .update(schema.tasks)
+        .set({
+          status: 'failed',
+          executionStep: 'launch_failed',
+          errorMessage,
+          updatedAt: failedAt,
+        })
+        .where(eq(schema.tasks.id, taskId));
+      await db.insert(schema.taskStatusEvents).values({
+        id: ulid(),
+        taskId,
+        fromStatus: 'queued',
+        toStatus: 'failed',
+        actorType: 'system',
+        actorId: null,
+        reason: errorMessage,
+        createdAt: failedAt,
+      });
+      throw err;
+    }
     await db
       .update(schema.tasks)
       .set({ chatSessionId: result.chatSessionId, updatedAt: new Date().toISOString() })
