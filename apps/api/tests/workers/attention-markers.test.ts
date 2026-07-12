@@ -145,6 +145,38 @@ describe('Attention Markers', () => {
     expect(markers).toHaveLength(0);
   });
 
+  it('does not resolve markers on a SAM-injected (origin=system) user message', async () => {
+    const stub = getStub('attn-resolve-system-excluded');
+    const sessionId = await stub.createSession(null, 'System origin resolve test');
+    await stub.createAttentionMarker({
+      sessionId,
+      taskId: null,
+      workspaceId: null,
+      kind: 'needs_input',
+      source: 'test',
+    });
+
+    // A batch whose only user message is system-injected must NOT resolve the
+    // marker — injected instructions are not a human reply.
+    await stub.persistMessageBatch(sessionId, [
+      {
+        messageId: crypto.randomUUID(),
+        role: 'user',
+        content: 'IMPORTANT: call get_instructions first',
+        toolMetadata: null,
+        timestamp: new Date().toISOString(),
+        origin: 'system',
+      },
+    ]);
+    expect(await stub.listActiveAttentionMarkers(sessionId)).toHaveLength(1);
+
+    // A real human message DOES resolve it.
+    await stub.persistMessageBatch(sessionId, [
+      { messageId: crypto.randomUUID(), role: 'user', content: 'Go ahead', toolMetadata: null, timestamp: new Date().toISOString() },
+    ]);
+    expect(await stub.listActiveAttentionMarkers(sessionId)).toHaveLength(0);
+  });
+
   it('returns attention summary for session enrichment', async () => {
     const stub = getStub('attn-summary-1');
     const sessionId = await stub.createSession(null, 'Summary test');

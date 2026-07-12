@@ -1,20 +1,18 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  buildAgentStartPromptPayload,
   buildSamBootstrapInstructions,
   buildVisibleInitialPrompt,
 } from '../../../src/services/agent-bootstrap-prompt';
 
 describe('agent bootstrap prompt helpers', () => {
-  it('builds the TaskRunner-compatible combined start prompt', () => {
-    const prompt = buildAgentStartPromptPayload({
+  it('builds the visible prompt with attachment context and system-prompt append, without the reminder', () => {
+    const prompt = buildVisibleInitialPrompt({
       message: 'Fix the issue',
       attachments: [
         { filename: 'report.txt', size: 42, contentType: 'text/plain' },
       ],
       systemPromptAppend: 'Use the existing code style.',
-      contextType: 'task',
     });
 
     expect(prompt).toBe(
@@ -23,12 +21,10 @@ describe('agent bootstrap prompt helpers', () => {
       'The following files have been uploaded to the workspace:\n' +
       '- `/workspaces/.private/report.txt` (42 bytes, text/plain)\n' +
       '\nThese files are available at the paths listed above. Read them to understand the task context.\n' +
-      '\n\nUse the existing code style.\n\n' +
-      '---\n\n' +
-      'IMPORTANT: Before starting any work, you MUST call the `get_instructions` tool from the sam-mcp MCP server. ' +
-      'This provides your task context, project information, output branch name, and instructions for reporting progress. ' +
-      'Do not proceed until you have called this tool and read its response.'
+      '\n\nUse the existing code style.'
     );
+    // The SAM bootstrap reminder is injected separately, never in the visible prompt.
+    expect(prompt).not.toContain('get_instructions');
   });
 
   it('keeps visible user prompt separate from SAM bootstrap instructions', () => {

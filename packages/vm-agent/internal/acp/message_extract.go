@@ -67,6 +67,45 @@ type ExtractedMessage struct {
 	Role         string `json:"role"`
 	Content      string `json:"content"`
 	ToolMetadata string `json:"toolMetadata,omitempty"` // JSON string
+	// Origin is "system" when the source ACP block carried the SAM system-injected
+	// marker (_meta["sam.origin"]="system"); empty otherwise. The control plane
+	// persists it so the UI can collapse injected content.
+	Origin string `json:"origin,omitempty"`
+}
+
+// MetaOriginKey is the ACP content-block _meta key SAM uses to mark a prompt
+// block as system-injected. OriginSystem is its value for injected content.
+const (
+	MetaOriginKey = "sam.origin"
+	OriginSystem  = "system"
+)
+
+// stripInjectedOriginMarker removes the SAM system-origin marker from prompt
+// blocks that did not arrive from a trusted control-plane source. Browser viewer
+// prompts must not be able to mark their own content as origin=system, which
+// would hide it from search, dedup, topic inference, and attention. The blocks
+// are freshly constructed per request (see parsePromptBlocks), so mutating their
+// Meta maps in place is safe and shares nothing.
+func stripInjectedOriginMarker(blocks []acpsdk.ContentBlock) {
+	for _, b := range blocks {
+		if b.Text != nil && b.Text.Meta != nil {
+			delete(b.Text.Meta, MetaOriginKey)
+		}
+	}
+}
+
+// contentBlockOrigin returns the SAM origin marker from a content block's _meta,
+// or "" when absent/not a string. Safe on a nil Text pointer / nil Meta map.
+func contentBlockOrigin(block acpsdk.ContentBlock) string {
+	if block.Text == nil {
+		return ""
+	}
+	if v, ok := block.Text.Meta[MetaOriginKey]; ok {
+		if s, ok := v.(string); ok {
+			return s
+		}
+	}
+	return ""
 }
 
 // ToolMeta holds structured tool call metadata serialized as JSON into
@@ -118,6 +157,7 @@ func ExtractMessages(notif acpsdk.SessionNotification) []ExtractedMessage {
 				MessageID: uuid.NewString(),
 				Role:      "user",
 				Content:   text,
+				Origin:    contentBlockOrigin(u.UserMessageChunk.Content),
 			})
 		}
 	}

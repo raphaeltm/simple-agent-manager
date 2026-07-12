@@ -6,6 +6,13 @@ export interface UserMessage {
   id: string;
   text: string;
   timestamp: number;
+  /**
+   * "system" for SAM-injected content (e.g. the get_instructions reminder) that
+   * the UI collapses behind a disclosure; "user"/undefined for normal messages.
+   * Populated by both persisted RPC messages and the vm-agent SAM-owned live
+   * broadcast envelope. ACP _meta remains intentionally unused because the SDK strips it.
+   */
+  origin?: 'user' | 'system';
 }
 
 export interface AgentMessage {

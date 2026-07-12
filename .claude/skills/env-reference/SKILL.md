@@ -66,7 +66,13 @@ See `apps/api/.env.example` for the full list. Key variables:
 - `CF_CONTAINER_SLEEP_AFTER` — Container idle sleep duration for instant-session runtime (default: `10m`)
 - `CF_CONTAINER_VM_AGENT_PORT` — vm-agent standalone HTTP port inside the raw container (default: `8080`)
 - `CF_CONTAINER_PORT_READY_TIMEOUT_MS` — Max wait for vm-agent port readiness (default: `30000`)
-- `CF_CONTAINER_WORKSPACE_BASE_DIR` — Base checkout directory inside raw containers (default: `/workspaces`)
+- `$1
+- `SESSION_SNAPSHOT_TTL_DAYS` — Retention for hibernated session snapshots; deployment also provisions matching R2 prefix expiration (default: `7`)
+- `SESSION_SNAPSHOT_TOTAL_BUDGET_BYTES` — Maximum bytes accepted for one snapshot artifact (default: `104857600`)
+- `SESSION_SNAPSHOT_ENTRY_THRESHOLD_BYTES` — Per-file threshold before snapshot content is visibly skipped (default: `52428800`)
+- `SESSION_SNAPSHOT_TRANSFER_IDLE_TIMEOUT_MS` — Progress-idle timeout for snapshot upload/download (default: `30000`)
+- `SESSION_SNAPSHOT_JSON_BODY_MAX_BYTES` — Maximum snapshot coordination JSON body (default: `262144`)
+- `SESSION_SNAPSHOT_R2_PREFIX` — Private R2 object prefix for session snapshots (default: `session-snapshots`)
 
 ### Devcontainer Cache
 

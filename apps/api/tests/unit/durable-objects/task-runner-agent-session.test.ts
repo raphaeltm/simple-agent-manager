@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  buildInjectedInstructions,
   buildTaskAgentSessionLabel,
   buildTaskInitialPrompt,
   handleAgentSession,
@@ -155,10 +156,12 @@ function makeState(overrides: Partial<TaskRunnerState> = {}): TaskRunnerState {
   };
 }
 
-function makeContext(opts: {
-  existingAgentSessionIds?: Set<string>;
-  transitionChanges?: number;
-} = {}) {
+function makeContext(
+  opts: {
+    existingAgentSessionIds?: Set<string>;
+    transitionChanges?: number;
+  } = {}
+) {
   const existingAgentSessionIds = opts.existingAgentSessionIds ?? new Set<string>();
   const transitionChanges = opts.transitionChanges ?? 1;
   const storageWrites: TaskRunnerState[] = [];
@@ -228,17 +231,24 @@ describe('TaskRunner agent-session helpers', () => {
     expect(buildTaskAgentSessionLabel('x'.repeat(45))).toBe(`Task: ${'x'.repeat(40)}`);
   });
 
-  it('builds the initial prompt with task content, attachments, profile prompt, and MCP instructions', () => {
+  it('builds the visible initial prompt with task content, attachments, and profile prompt (no injected reminder)', () => {
     const prompt = buildTaskInitialPrompt(makeState());
 
     expect(prompt).toContain('Exercise the TaskRunner agent-session path.');
     expect(prompt).toContain('/workspaces/.private/evidence.txt');
     expect(prompt).toContain('123 bytes, text/plain');
     expect(prompt).toContain('Use the backend implementation profile.');
-    expect(prompt).toContain('get_instructions');
-    expect(prompt.indexOf('Use the backend implementation profile.')).toBeLessThan(
-      prompt.indexOf('IMPORTANT:'),
-    );
+    // The get_instructions reminder is now a SEPARATE origin="system" injected
+    // block (buildInjectedInstructions), NOT part of the visible user message.
+    expect(prompt).not.toContain('get_instructions');
+    expect(prompt).not.toContain('IMPORTANT:');
+  });
+
+  it('builds the injected system instructions containing the get_instructions reminder', () => {
+    const injected = buildInjectedInstructions();
+    expect(injected).toContain('get_instructions');
+    expect(injected).toContain('IMPORTANT:');
+    expect(injected).toContain('sam-mcp');
   });
 
   it('redacts persisted MCP tokens from status snapshots', () => {
@@ -288,7 +298,7 @@ describe('handleAgentSession', () => {
       'user-1',
       'chat-1',
       'project-1',
-      { url: 'https://api.example.test/mcp', token: 'mcp-token-new' },
+      { url: 'https://api.example.test/mcp', token: 'mcp-token-new' }
     );
 
     expect(storeMcpTokenMock).toHaveBeenCalledWith(
@@ -300,7 +310,7 @@ describe('handleAgentSession', () => {
         userId: 'user-1',
         workspaceId: 'workspace-1',
       }),
-      expect.objectContaining({ BASE_DOMAIN: 'example.test' }),
+      expect.objectContaining({ BASE_DOMAIN: 'example.test' })
     );
 
     expect(startAgentSessionOnNodeMock).toHaveBeenCalledWith(
@@ -318,7 +328,15 @@ describe('handleAgentSession', () => {
         permissionMode: 'auto-edit',
       }),
       { projectId: 'project-1', taskId: 'task-1', taskMode: 'task' },
+      // Injected system instructions (get_instructions reminder) sent as a
+      // separate origin="system" prompt block.
+      expect.stringContaining('get_instructions')
     );
+
+    const startArgs = startAgentSessionOnNodeMock.mock.calls[0]!;
+    expect(startArgs[4]).not.toContain('get_instructions');
+    expect(startArgs[4]).toContain('Exercise the TaskRunner agent-session path.');
+    expect(startArgs[10]).toContain('get_instructions');
 
     expect(state.stepResults.agentSessionId).toBe('agent-session-new');
     expect(state.stepResults.mcpToken).toBe('mcp-token-new');
@@ -333,7 +351,9 @@ describe('handleAgentSession', () => {
         reason: 'Agent session agent-session-new created. Task execution started.',
       },
     ]);
-    expect(storageWrites.some((write) => write.stepResults.mcpToken === 'mcp-token-new')).toBe(true);
+    expect(storageWrites.some((write) => write.stepResults.mcpToken === 'mcp-token-new')).toBe(
+      true
+    );
     expect(storageWrites.at(-1)?.completed).toBe(true);
   });
 
@@ -361,7 +381,7 @@ describe('handleAgentSession', () => {
       'user-1',
       'chat-1',
       'project-1',
-      { url: 'https://api.example.test/mcp', token: 'mcp-token-new' },
+      { url: 'https://api.example.test/mcp', token: 'mcp-token-new' }
     );
     expect(startAgentSessionOnNodeMock).toHaveBeenCalledOnce();
     expect(state.stepResults.agentSessionId).toBe('agent-session-existing');

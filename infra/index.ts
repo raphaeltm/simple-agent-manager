@@ -10,7 +10,7 @@ import {
   observabilityDatabaseName,
 } from './resources/database';
 import { kvNamespace, kvNamespaceId, kvNamespaceName } from './resources/kv';
-import { r2Bucket, r2BucketName } from './resources/storage';
+import { r2Bucket, r2BucketLifecycle, r2BucketName } from './resources/storage';
 import {
   apiDnsRecord,
   appDnsRecord,
@@ -29,6 +29,7 @@ export {
   observabilityDatabase,
   kvNamespace,
   r2Bucket,
+  r2BucketLifecycle,
   pagesProject,
   pagesCustomDomain,
   apiDnsRecord,
@@ -45,6 +46,7 @@ export const observabilityD1DatabaseName = observabilityDatabaseName;
 export const kvId = kvNamespaceId;
 export const kvName = kvNamespaceName;
 export const r2Name = r2BucketName;
+export { sessionSnapshotTtlDays } from './resources/config';
 export const pagesName = pagesProjectName;
 export const dnsIds = dnsRecordIds;
 export const hostnames = dnsHostnames;

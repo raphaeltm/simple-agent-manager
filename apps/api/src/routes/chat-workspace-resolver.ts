@@ -76,7 +76,7 @@ export async function resolveLiveWorkspaceForSession(
 }
 
 /**
- * Resolve the live workspace AND its running agent session for a chat action
+ * Resolve the live workspace AND its resumable agent session for a chat action
  * (e.g. /prompt, /cancel), enforcing tenant scoping at every layer.
  *
  * Consolidates the shared resolution path used by the /prompt and /cancel
@@ -91,7 +91,7 @@ export async function resolveLiveWorkspaceForSession(
 export async function resolveLiveAgentSessionForChat(
   db: ChatDb,
   { projectId, sessionId, userId }: { projectId: string; sessionId: string; userId: string }
-): Promise<{ workspace: { id: string; nodeId: string }; agentSession: { id: string } }> {
+): Promise<{ workspace: { id: string; nodeId: string; nodeStatus: string }; agentSession: { id: string } }> {
   // Find the workspace linked to this chat session, scoped to the owning
   // project + user (see resolveLiveWorkspaceForSession). The node join also
   // verifies the node is still active: when a node is destroyed (e.g., after
@@ -107,13 +107,11 @@ export async function resolveLiveAgentSessionForChat(
   // Verify the node is still reachable — prevents requests to destroyed VMs
   // whose DNS records no longer exist (would loop back via wildcard DNS).
   // D1 nodes.status uses 'running' for healthy nodes (not 'active'/'warm', which are DO states).
-  if (workspace.nodeStatus === 'sleeping') {
-    // Phase 3 of idea 01KX4KSXEXQMP41KS34TW9EN01 will wake and rehydrate the
-    // cf-container before forwarding this prompt.
-    throw errors.conflict('The workspace container is asleep. Send a new message after wake/rehydrate support lands.');
-  }
-
-  if (workspace.nodeStatus !== 'running') {
+  // A request routed to a sleeping cf-container is the wake signal: the
+  // container proxy launches a fresh runtime and restores its latest snapshot
+  // before forwarding the request. Preserve the fail-fast guard for every
+  // other non-running node state.
+  if (workspace.nodeStatus !== 'running' && workspace.nodeStatus !== 'sleeping') {
     throw errors.conflict(
       'The workspace node is no longer running. Start a new chat to create a fresh workspace.'
     );
@@ -128,7 +126,7 @@ export async function resolveLiveAgentSessionForChat(
       and(
         eq(schema.agentSessions.workspaceId, workspace.id),
         eq(schema.agentSessions.userId, userId),
-        eq(schema.agentSessions.status, 'running')
+        inArray(schema.agentSessions.status, ['running', 'sleeping'])
       )
     )
     .limit(1);
@@ -137,5 +135,5 @@ export async function resolveLiveAgentSessionForChat(
     throw errors.notFound('No running agent session found');
   }
 
-  return { workspace: { id: workspace.id, nodeId: workspace.nodeId }, agentSession };
+  return { workspace: { id: workspace.id, nodeId: workspace.nodeId, nodeStatus: workspace.nodeStatus }, agentSession };
 }

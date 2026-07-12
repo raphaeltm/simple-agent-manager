@@ -353,6 +353,7 @@ export interface PulumiOutputs {
   kvId: string;
   kvName: string;
   r2Name: string;
+  sessionSnapshotTtlDays: number;
   dnsIds: {
     api: string;
     app: string;

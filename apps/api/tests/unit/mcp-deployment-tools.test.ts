@@ -31,6 +31,12 @@ vi.mock('../../src/services/node-agent', () => ({
   getNodeLogsFromNode: (...args: unknown[]) => mockGetNodeLogsFromNode(...args),
 }));
 
+vi.mock('../../src/services/node-agent-diagnostics', () => ({
+  getNodeLogsFromNode: (...args: unknown[]) => mockGetNodeLogsFromNode(...args),
+  getNodeSystemInfoFromNode: vi.fn(),
+  listNodeContainersFromNode: vi.fn(),
+}));
+
 const schema = await import('../../src/db/schema');
 const {
   handleCreateDeploymentEnvironment,

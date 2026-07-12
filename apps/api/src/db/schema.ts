@@ -1045,6 +1045,47 @@ export const agentSessions = sqliteTable(
 );
 
 // =============================================================================
+// Runtime-neutral Session Snapshots
+// =============================================================================
+export const sessionSnapshots = sqliteTable(
+  'session_snapshots',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id').references(() => projects.id, { onDelete: 'set null' }),
+    workspaceId: text('workspace_id').references(() => workspaces.id, { onDelete: 'set null' }),
+    nodeId: text('node_id').references(() => nodes.id, { onDelete: 'set null' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    chatSessionId: text('chat_session_id').notNull(),
+    agentSessionId: text('agent_session_id'),
+    runtime: text('runtime').notNull(),
+    status: text('status').notNull().default('pending'),
+    degradation: text('degradation').notNull().default('none'),
+    homeR2Key: text('home_r2_key'),
+    wipR2Key: text('wip_r2_key'),
+    manifestR2Key: text('manifest_r2_key').notNull(),
+    baseCommit: text('base_commit'),
+    expiresAt: text('expires_at').notNull(),
+    manifestJson: text('manifest_json'),
+    restoreStatus: text('restore_status'),
+    restoreMessage: text('restore_message'),
+    restoredAt: text('restored_at'),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    chatSessionIdUnique: uniqueIndex('idx_session_snapshots_chat_session_id').on(table.chatSessionId),
+    workspaceIdIdx: index('idx_session_snapshots_workspace_id').on(table.workspaceId),
+    expiresAtIdx: index('idx_session_snapshots_expires_at').on(table.expiresAt),
+  })
+);
+
+// =============================================================================
 // Agent Settings (per-user, per-agent configuration)
 // =============================================================================
 export const agentSettings = sqliteTable(
@@ -1545,6 +1586,8 @@ export type Workspace = typeof workspaces.$inferSelect;
 export type NewWorkspace = typeof workspaces.$inferInsert;
 export type AgentSession = typeof agentSessions.$inferSelect;
 export type NewAgentSession = typeof agentSessions.$inferInsert;
+export type SessionSnapshot = typeof sessionSnapshots.$inferSelect;
+export type NewSessionSnapshot = typeof sessionSnapshots.$inferInsert;
 export type UIStandard = typeof uiStandards.$inferSelect;
 export type NewUIStandard = typeof uiStandards.$inferInsert;
 export type ThemeToken = typeof themeTokens.$inferSelect;

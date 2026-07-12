@@ -136,9 +136,24 @@ describe('Message Materialization', () => {
 
       const result = groupTokens(tokens);
       expect(result).toHaveLength(4);
-      expect(result[0]).toEqual({ id: 'tok-1', role: 'user', content: 'Fix the auth', createdAt: 1000 });
-      expect(result[1]).toEqual({ id: 'tok-2', role: 'assistant', content: 'I will fix the auth refactor now.', createdAt: 2000 });
-      expect(result[2]).toEqual({ id: 'tok-5', role: 'tool', content: 'Reading auth.ts', createdAt: 3000 });
+      expect(result[0]).toEqual({
+        id: 'tok-1',
+        role: 'user',
+        content: 'Fix the auth',
+        createdAt: 1000,
+      });
+      expect(result[1]).toEqual({
+        id: 'tok-2',
+        role: 'assistant',
+        content: 'I will fix the auth refactor now.',
+        createdAt: 2000,
+      });
+      expect(result[2]).toEqual({
+        id: 'tok-5',
+        role: 'tool',
+        content: 'Reading auth.ts',
+        createdAt: 3000,
+      });
       expect(result[3]).toEqual({ id: 'tok-7', role: 'user', content: 'Thanks', createdAt: 4000 });
     });
 
@@ -217,7 +232,9 @@ describe('Message Materialization', () => {
       }
       const start = Math.max(0, matchIdx - 80);
       const end = Math.min(content.length, matchIdx + query.length + 120);
-      return (start > 0 ? '...' : '') + content.slice(start, end) + (end < content.length ? '...' : '');
+      return (
+        (start > 0 ? '...' : '') + content.slice(start, end) + (end < content.length ? '...' : '')
+      );
     }
 
     it('should extract snippet around match with context', () => {
@@ -259,7 +276,7 @@ describe('Message Materialization', () => {
 
   describe('Migration 011', () => {
     it('should be the 11th migration', () => {
-      expect(MIGRATIONS).toHaveLength(23);
+      expect(MIGRATIONS).toHaveLength(24);
       expect(MIGRATIONS[10].name).toBe('011-message-materialization-fts5');
     });
 
@@ -275,9 +292,15 @@ describe('Message Materialization', () => {
       MIGRATIONS[10].run(mockSql);
 
       // Should create chat_messages_grouped table (with IF NOT EXISTS for idempotency)
-      expect(execLog.some((q) => q.includes('chat_messages_grouped') && q.includes('CREATE TABLE'))).toBe(true);
+      expect(
+        execLog.some((q) => q.includes('chat_messages_grouped') && q.includes('CREATE TABLE'))
+      ).toBe(true);
       // Should create FTS5 virtual table
-      expect(execLog.some((q) => q.includes('chat_messages_grouped_fts') && q.includes('CREATE VIRTUAL TABLE'))).toBe(true);
+      expect(
+        execLog.some(
+          (q) => q.includes('chat_messages_grouped_fts') && q.includes('CREATE VIRTUAL TABLE')
+        )
+      ).toBe(true);
       expect(execLog.some((q) => q.includes('fts5'))).toBe(true);
       // Should add materialized_at column
       expect(execLog.some((q) => q.includes('materialized_at'))).toBe(true);

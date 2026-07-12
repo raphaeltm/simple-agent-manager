@@ -73,18 +73,65 @@ func redactAgentDiagnosticText(text string) string {
 
 type recoveryNotify func(stopReason string, err error)
 
+// crashRecoveryPrerequisites snapshots the fields required to begin LoadSession
+// recovery. It is captured at prompt start so recovery can still proceed if a
+// concurrent monitorProcessExit clears the live fields before the blocked Prompt
+// returns the peer-disconnect error. process is a fallback used only when the
+// live h.process has already been cleared/replaced — it is not a general
+// "process to stop" reference.
+type crashRecoveryPrerequisites struct {
+	sessionID           string
+	agentType           string
+	supportsLoadSession bool
+	process             agentProcess
+}
+
+func (h *SessionHost) captureCrashRecoveryPrerequisites() crashRecoveryPrerequisites {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return crashRecoveryPrerequisites{
+		sessionID:           string(h.sessionID),
+		agentType:           h.agentType,
+		supportsLoadSession: h.agentSupportsLoadSession,
+		process:             h.process,
+	}
+}
+
 // beginCrashRecovery attempts to start LoadSession-based recovery after an agent crash.
 // Returns recovery episode state when recovery is available. agentType and stderr are
 // returned even when recovery is unavailable so the caller can use them without
 // re-acquiring locks.
 func (h *SessionHost) beginCrashRecovery(reqID json.RawMessage, viewerID string) (string, string, agentProcess, recoveryNotify, bool) {
+	agentType, stderr, process, _, notify, ok := h.beginCrashRecoveryWithPrerequisites(reqID, viewerID, crashRecoveryPrerequisites{})
+	return agentType, stderr, process, notify, ok
+}
+
+func (h *SessionHost) beginCrashRecoveryWithPrerequisites(reqID json.RawMessage, viewerID string, captured crashRecoveryPrerequisites) (string, string, agentProcess, []string, recoveryNotify, bool) {
 	stderr := redactAgentDiagnosticText(h.peekStderr())
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	agentType := h.agentType
-	if h.sessionID == "" || !h.agentSupportsLoadSession || agentType == "" {
-		return agentType, stderr, nil, nil, false
+	prerequisites := crashRecoveryPrerequisites{
+		sessionID:           string(h.sessionID),
+		agentType:           h.agentType,
+		supportsLoadSession: h.agentSupportsLoadSession,
+		process:             h.process,
+	}
+	if prerequisites.sessionID == "" {
+		prerequisites.sessionID = captured.sessionID
+	}
+	if prerequisites.agentType == "" {
+		prerequisites.agentType = captured.agentType
+	}
+	if !prerequisites.supportsLoadSession {
+		prerequisites.supportsLoadSession = captured.supportsLoadSession
+	}
+	if prerequisites.process == nil {
+		prerequisites.process = captured.process
+	}
+	missing := missingCrashRecoveryPrerequisites(prerequisites)
+	if len(missing) > 0 {
+		return prerequisites.agentType, stderr, nil, missing, nil, false
 	}
 
 	once := &sync.Once{}
@@ -93,25 +140,41 @@ func (h *SessionHost) beginCrashRecovery(reqID json.RawMessage, viewerID string)
 			h.notifyPromptComplete(stopReason, err)
 		})
 	}
-	process := h.process
+	process := prerequisites.process
 	if process != nil {
 		process.SetRecoveryNotify(notify)
 	}
 	h.crashRecoveryInProgress = true
 	h.crashStderr = stderr
-	h.crashAgentType = agentType
+	h.crashAgentType = prerequisites.agentType
+	h.crashSessionID = prerequisites.sessionID
 	h.crashPromptReqID = append(json.RawMessage(nil), reqID...)
 	h.crashPromptViewerID = viewerID
 	h.status = HostStarting
 	h.statusErr = ""
 	h.armCrashRecoveryWatchdogLocked(notify)
-	return agentType, stderr, process, notify, true
+	return prerequisites.agentType, stderr, process, nil, notify, true
+}
+
+func missingCrashRecoveryPrerequisites(prerequisites crashRecoveryPrerequisites) []string {
+	missing := make([]string, 0, 3)
+	if prerequisites.sessionID == "" {
+		missing = append(missing, "acpSessionId")
+	}
+	if !prerequisites.supportsLoadSession {
+		missing = append(missing, "loadSessionCapability")
+	}
+	if prerequisites.agentType == "" {
+		missing = append(missing, "agentType")
+	}
+	return missing
 }
 
 type crashRecoverySnapshot struct {
 	inProgress     bool
 	stderr         string
 	agentType      string
+	sessionID      string
 	promptReqID    json.RawMessage
 	promptViewerID string
 }
@@ -121,6 +184,7 @@ func (h *SessionHost) crashRecoverySnapshotLocked() crashRecoverySnapshot {
 		inProgress:     h.crashRecoveryInProgress,
 		stderr:         h.crashStderr,
 		agentType:      h.crashAgentType,
+		sessionID:      h.crashSessionID,
 		promptReqID:    append(json.RawMessage(nil), h.crashPromptReqID...),
 		promptViewerID: h.crashPromptViewerID,
 	}
@@ -130,6 +194,7 @@ func (h *SessionHost) clearCrashRecoveryLocked() {
 	h.crashRecoveryInProgress = false
 	h.crashStderr = ""
 	h.crashAgentType = ""
+	h.crashSessionID = ""
 	h.crashPromptReqID = nil
 	h.crashPromptViewerID = ""
 }
@@ -226,6 +291,10 @@ func (h *SessionHost) crashReport(snapshot crashRecoverySnapshot, recovered bool
 		message = fmt.Sprintf("The %s agent crashed unexpectedly. SAM could not recover the session automatically.", displayName)
 	}
 
+	// snapshot.sessionID (the ACP session UUID) is intentionally NOT included in
+	// the broadcast crash report: it is an internal recovery identifier and must
+	// not be exposed to browser viewers. Only redacted stderr and fixed-token
+	// diagnostics are surfaced.
 	return AgentCrashReportMessage{
 		Type:            MsgAgentCrashReport,
 		AgentType:       agentType,

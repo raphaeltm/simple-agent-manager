@@ -6,7 +6,7 @@
  */
 import { log } from '../../lib/logger';
 import {
-  buildAgentStartPromptPayload,
+  buildSamBootstrapInstructions,
   buildVisibleInitialPrompt,
 } from '../../services/agent-bootstrap-prompt';
 import { transitionToInProgress } from './state-machine';
@@ -17,12 +17,11 @@ export function buildTaskAgentSessionLabel(taskTitle: string): string {
 }
 
 export function buildTaskInitialPrompt(state: TaskRunnerState): string {
-  return buildAgentStartPromptPayload({
-    message: state.config.taskDescription || state.config.taskTitle,
-    attachments: state.config.attachments,
-    systemPromptAppend: state.config.systemPromptAppend,
-    contextType: 'task',
-  });
+  return buildVisibleTaskInitialPrompt(state);
+}
+
+export function buildInjectedInstructions(): string {
+  return buildSamBootstrapInstructions({ contextType: 'task' });
 }
 
 function buildVisibleTaskInitialPrompt(state: TaskRunnerState): string {
@@ -35,7 +34,7 @@ function buildVisibleTaskInitialPrompt(state: TaskRunnerState): string {
 
 export async function handleAgentSession(
   state: TaskRunnerState,
-  rc: TaskRunnerContext,
+  rc: TaskRunnerContext
 ): Promise<void> {
   await rc.updateD1ExecutionStep(state.taskId, 'agent_session');
 
@@ -47,9 +46,9 @@ export async function handleAgentSession(
 
   // Step 1: Create the agent session (skip if already created on a previous attempt)
   if (sessionId) {
-    const existing = await rc.env.DATABASE.prepare(
-      `SELECT id FROM agent_sessions WHERE id = ?`
-    ).bind(sessionId).first<{ id: string }>();
+    const existing = await rc.env.DATABASE.prepare(`SELECT id FROM agent_sessions WHERE id = ?`)
+      .bind(sessionId)
+      .first<{ id: string }>();
 
     if (!existing) {
       // StepResults had a sessionId but it's gone from D1 — reset and recreate

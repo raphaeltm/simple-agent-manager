@@ -32,21 +32,16 @@ export function materializeSession(sql: SqlStorage, sessionId: string): void {
   if (!session) return;
   const { materializedAt } = parseMaterializationCheck(session);
   if (materializedAt !== null) return;
-
   const tokens = sql
     .exec(
-      'SELECT id, role, content, created_at FROM chat_messages WHERE session_id = ? ORDER BY created_at ASC, sequence ASC',
+      "SELECT id, role, content, created_at FROM chat_messages WHERE session_id = ? AND COALESCE(origin, 'user') != 'system' ORDER BY created_at ASC, sequence ASC",
       sessionId
     )
     .toArray()
     .map((row) => parseMaterializationToken(row));
 
   if (tokens.length === 0) {
-    sql.exec(
-      'UPDATE chat_sessions SET materialized_at = ? WHERE id = ?',
-      Date.now(),
-      sessionId
-    );
+    sql.exec('UPDATE chat_sessions SET materialized_at = ? WHERE id = ?', Date.now(), sessionId);
     return;
   }
 
@@ -54,11 +49,7 @@ export function materializeSession(sql: SqlStorage, sessionId: string): void {
   const grouped: Array<{ id: string; role: string; content: string; createdAt: number }> = [];
   for (const token of tokens) {
     const last = grouped[grouped.length - 1];
-    if (
-      last &&
-      last.role === token.role &&
-      GROUPABLE_ROLES.has(token.role)
-    ) {
+    if (last && last.role === token.role && GROUPABLE_ROLES.has(token.role)) {
       last.content += token.content;
     } else {
       grouped.push({
@@ -97,11 +88,7 @@ export function materializeSession(sql: SqlStorage, sessionId: string): void {
     }
   }
 
-  sql.exec(
-    'UPDATE chat_sessions SET materialized_at = ? WHERE id = ?',
-    Date.now(),
-    sessionId
-  );
+  sql.exec('UPDATE chat_sessions SET materialized_at = ? WHERE id = ?', Date.now(), sessionId);
 }
 
 /**
@@ -135,7 +122,9 @@ export function materializeAllStopped(
   }
 
   const remainingRow = sql
-    .exec(`SELECT COUNT(*) as count FROM chat_sessions WHERE status = 'stopped' AND materialized_at IS NULL`)
+    .exec(
+      `SELECT COUNT(*) as count FROM chat_sessions WHERE status = 'stopped' AND materialized_at IS NULL`
+    )
     .toArray()[0];
   const remaining = remainingRow ? parseCount(remainingRow, 'materialization.remaining') : 0;
 

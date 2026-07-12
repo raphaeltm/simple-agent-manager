@@ -46,6 +46,7 @@ describe('infra config parsing', () => {
       stack: 'staging',
       r2Location: configModule.DEFAULT_R2_LOCATION,
       pagesProductionBranch: configModule.DEFAULT_PAGES_PRODUCTION_BRANCH,
+      sessionSnapshotTtlDays: configModule.DEFAULT_SESSION_SNAPSHOT_TTL_DAYS,
     });
     expect(parsed.prefix).toBe(configModule.derivePrefix('example.com'));
   });
@@ -56,6 +57,7 @@ describe('infra config parsing', () => {
         resourcePrefix: 'fork',
         r2Location: 'WEUR',
         pagesProductionBranch: 'release/2026-06',
+        sessionSnapshotTtlDays: '14',
       }),
       'prod'
     );
@@ -64,6 +66,7 @@ describe('infra config parsing', () => {
       prefix: 'fork',
       r2Location: 'WEUR',
       pagesProductionBranch: 'release/2026-06',
+      sessionSnapshotTtlDays: 14,
     });
   });
 
@@ -76,6 +79,8 @@ describe('infra config parsing', () => {
     ['baseDomain', '   ', 'must not be empty'],
     ['resourcePrefix', '   ', 'must not be empty'],
     ['pagesProductionBranch', '   ', 'must not be empty'],
+    ['sessionSnapshotTtlDays', '0', 'must be a positive integer'],
+    ['sessionSnapshotTtlDays', '1.5', 'must be a positive integer'],
   ])('fails fast for invalid %s config', (key, value, expectedMessage) => {
     const beforeResourceCount = getRegisteredResources().length;
 

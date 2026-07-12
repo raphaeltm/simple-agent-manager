@@ -55,9 +55,18 @@ export interface PromptResultPayload {
   usage?: TokenUsage;
 }
 
-const TOOL_STATUSES = new Set<ToolCallItem['status']>(['pending', 'in_progress', 'completed', 'failed']);
+const TOOL_STATUSES = new Set<ToolCallItem['status']>([
+  'pending',
+  'in_progress',
+  'completed',
+  'failed',
+]);
 const PLAN_PRIORITIES = new Set<PlanItem['entries'][number]['priority']>(['high', 'medium', 'low']);
-const PLAN_STATUSES = new Set<PlanItem['entries'][number]['status']>(['pending', 'in_progress', 'completed']);
+const PLAN_STATUSES = new Set<PlanItem['entries'][number]['status']>([
+  'pending',
+  'in_progress',
+  'completed',
+]);
 
 export function getSessionUpdate(params: unknown): SessionUpdate | null {
   const record = maybeJsonRecord(params);
@@ -66,9 +75,15 @@ export function getSessionUpdate(params: unknown): SessionUpdate | null {
   return update as SessionUpdate;
 }
 
+export function getSessionMessageOrigin(params: unknown): 'system' | undefined {
+  const record = maybeJsonRecord(params);
+  return record?.origin === 'system' ? 'system' : undefined;
+}
+
 export function isAgentCrashReport(value: unknown): value is AgentCrashReportPayload {
   const record = maybeJsonRecord(value);
-  return record !== null &&
+  return (
+    record !== null &&
     record.type === 'agent_crash_report' &&
     typeof record.agentType === 'string' &&
     typeof record.recovered === 'boolean' &&
@@ -78,7 +93,8 @@ export function isAgentCrashReport(value: unknown): value is AgentCrashReportPay
     typeof record.suggestion === 'string' &&
     typeof record.timestamp === 'string' &&
     (record.stderr === undefined || typeof record.stderr === 'string') &&
-    (record.recoveryError === undefined || typeof record.recoveryError === 'string');
+    (record.recoveryError === undefined || typeof record.recoveryError === 'string')
+  );
 }
 
 export function getTextContent(update: SessionUpdate): string {
@@ -127,7 +143,11 @@ function extractToolName(update: SessionUpdate): string | undefined {
     return claudeCode.toolName;
   }
   const title = update.title;
-  if (typeof title === 'string' && title.startsWith('mcp__') && (title.match(/__/g)?.length ?? 0) >= 2) {
+  if (
+    typeof title === 'string' &&
+    title.startsWith('mcp__') &&
+    (title.match(/__/g)?.length ?? 0) >= 2
+  ) {
     return title;
   }
   return undefined;
@@ -155,11 +175,13 @@ export function asPromptResult(value: unknown): PromptResultPayload | null {
   const usage = maybeJsonRecord(record.usage);
   return {
     stopReason: typeof record.stopReason === 'string' ? record.stopReason : undefined,
-    usage: usage ? {
-      inputTokens: typeof usage.inputTokens === 'number' ? usage.inputTokens : 0,
-      outputTokens: typeof usage.outputTokens === 'number' ? usage.outputTokens : 0,
-      totalTokens: typeof usage.totalTokens === 'number' ? usage.totalTokens : 0,
-    } : undefined,
+    usage: usage
+      ? {
+          inputTokens: typeof usage.inputTokens === 'number' ? usage.inputTokens : 0,
+          outputTokens: typeof usage.outputTokens === 'number' ? usage.outputTokens : 0,
+          totalTokens: typeof usage.totalTokens === 'number' ? usage.totalTokens : 0,
+        }
+      : undefined,
   };
 }
 
@@ -167,13 +189,13 @@ function isToolStatus(value: unknown): value is ToolCallItem['status'] {
   return typeof value === 'string' && TOOL_STATUSES.has(value as ToolCallItem['status']);
 }
 
-function parseToolContent(value: unknown): Array<{ type: string } & Record<string, unknown>> | undefined {
+function parseToolContent(
+  value: unknown
+): Array<{ type: string } & Record<string, unknown>> | undefined {
   if (!Array.isArray(value)) return undefined;
   return value.flatMap((entry) => {
     const record = maybeJsonRecord(entry);
-    return record && typeof record.type === 'string'
-      ? [{ type: record.type, ...record }]
-      : [];
+    return record && typeof record.type === 'string' ? [{ type: record.type, ...record }] : [];
   });
 }
 
@@ -182,10 +204,12 @@ function parseLocations(value: unknown): Array<{ path: string; line?: number | n
   return value.flatMap((entry) => {
     const record = maybeJsonRecord(entry);
     if (!record || typeof record.path !== 'string') return [];
-    return [{
-      path: record.path,
-      line: typeof record.line === 'number' || record.line === null ? record.line : undefined,
-    }];
+    return [
+      {
+        path: record.path,
+        line: typeof record.line === 'number' || record.line === null ? record.line : undefined,
+      },
+    ];
   });
 }
 
@@ -202,20 +226,29 @@ function parsePlanEntry(value: unknown): PlanItem['entries'] {
   return [{ content: record.content, priority: record.priority, status: record.status }];
 }
 
-function parseAvailableCommand(value: unknown): Array<{ name: string; description?: string; input?: unknown }> {
+function parseAvailableCommand(
+  value: unknown
+): Array<{ name: string; description?: string; input?: unknown }> {
   const record = maybeJsonRecord(value);
   if (!record || typeof record.name !== 'string') return [];
-  return [{
-    name: record.name,
-    description: typeof record.description === 'string' ? record.description : '',
-    input: record.input,
-  }];
+  return [
+    {
+      name: record.name,
+      description: typeof record.description === 'string' ? record.description : '',
+      input: record.input,
+    },
+  ];
 }
 
 function isPlanPriority(value: unknown): value is PlanItem['entries'][number]['priority'] {
-  return typeof value === 'string' && PLAN_PRIORITIES.has(value as PlanItem['entries'][number]['priority']);
+  return (
+    typeof value === 'string' &&
+    PLAN_PRIORITIES.has(value as PlanItem['entries'][number]['priority'])
+  );
 }
 
 function isPlanStatus(value: unknown): value is PlanItem['entries'][number]['status'] {
-  return typeof value === 'string' && PLAN_STATUSES.has(value as PlanItem['entries'][number]['status']);
+  return (
+    typeof value === 'string' && PLAN_STATUSES.has(value as PlanItem['entries'][number]['status'])
+  );
 }

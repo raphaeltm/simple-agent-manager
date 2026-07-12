@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   requireProjectCapability: vi.fn(),
   sendPromptToAgentOnNode: vi.fn(),
   cancelAgentSessionOnNode: vi.fn(),
+  getCfContainerWakeTimeoutMs: vi.fn(() => 120_000),
   enrichMessageWithMentions: vi.fn(),
   parseOptionalBody: vi.fn(),
 }));
@@ -80,6 +81,7 @@ vi.mock('../../../src/schemas', () => ({
 vi.mock('../../../src/services/node-agent', () => ({
   sendPromptToAgentOnNode: mocks.sendPromptToAgentOnNode,
   cancelAgentSessionOnNode: mocks.cancelAgentSessionOnNode,
+  getCfContainerWakeTimeoutMs: mocks.getCfContainerWakeTimeoutMs,
 }));
 
 vi.mock('../../../src/services/mention-enrichment', () => ({
@@ -236,7 +238,24 @@ describe('POST /sessions/:sessionId/prompt', () => {
     expect(response.status).toBe(200);
     expect(mocks.sendPromptToAgentOnNode).toHaveBeenCalledWith(
       'node-1', 'ws-1', 'agent-sess-1',
-      'hello agent', expect.anything(), 'user-1',
+      'hello agent', expect.anything(), 'user-1', undefined, undefined,
+    );
+  });
+
+  it('uses the extended wake budget for a sleeping session', async () => {
+    setupDrizzle({
+      workspace: { id: 'ws-1', nodeId: 'node-1', nodeStatus: 'sleeping' },
+      agentSession: { id: 'agent-sess-1' },
+    });
+    mocks.sendPromptToAgentOnNode.mockResolvedValue({ ok: true });
+
+    const response = await postPrompt();
+
+    expect(response.status).toBe(200);
+    expect(mocks.sendPromptToAgentOnNode).toHaveBeenCalledWith(
+      'node-1', 'ws-1', 'agent-sess-1',
+      'hello agent', expect.anything(), 'user-1', undefined,
+      { requestTimeoutMs: 120_000 },
     );
   });
 
