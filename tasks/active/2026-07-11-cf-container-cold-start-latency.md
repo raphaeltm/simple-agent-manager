@@ -31,9 +31,9 @@ The runtime boundary is fixed: the container launch environment remains minimal.
 - [x] Run lint, typecheck, tests, build, targeted Go tests, and local container startup/benchmark validation.
 - [x] Run Cloudflare, Go, security, constitution, env, doc-sync, deployment/test, and task-completion specialist reviews; address all blocking findings.
 - [x] Wait for priority tasks 1–3 to complete their staging turns and for GitHub Actions staging queue to be empty, using exact ten-minute sleep/recheck loops while blocked.
-- [ ] Query staging Cloudflare state/logs, deploy the branch, create a fresh container, exercise an actual ACP session, and record every phase plus total cold-start latency.
-- [ ] Clean up fresh staging test resources.
-- [ ] If total remains above five seconds, append evidence and the next bounded dominant-phase slice to idea `01KX6JK8ZFC1EFWGYQENRMFWFK` rather than claiming the target was met.
+- [x] Query staging Cloudflare state/logs, deploy the branch, create a fresh container, exercise an actual ACP session, and record every phase plus total cold-start latency.
+- [x] Clean up fresh staging test resources.
+- [x] If total remains above five seconds, append evidence and the next bounded dominant-phase slice to idea `01KX6JK8ZFC1EFWGYQENRMFWFK` rather than claiming the target was met.
 - [ ] Open PR, wait for all CI gates, merge only when green, and monitor production deployment to completion.
 
 ## Acceptance Criteria
@@ -73,3 +73,13 @@ The runtime boundary is fixed: the container launch environment remains minimal.
 - `/usr/local/go/bin/go test ./...` passed for the full vm-agent module under Go 1.25.0.
 - `make -C packages/vm-agent prepare-container VERSION=local-rebase-3bf1a466d` generated the Linux/amd64 binary and version metadata successfully.
 - The actual `Dockerfile.vm-agent-container` built locally. A standalone probe using the normal entrypoint emitted `vm_agent_container_bootstrap_ready` in 3 ms with the baked version/sha256, remained running, and returned `{"status":"healthy"}` from `/health`; the probe container was removed.
+
+## Staging Validation (2026-07-12)
+
+- Staging deployment run `29185746568` passed, including Cloudflare deploy, pre-migration backup/counts, post-migration data-integrity verification, health check, and Playwright smoke tests.
+- The deployed version was commit `fc22f3e80c8ab436cab63e3e50fdf1008b24554c`; the baked vm-agent artifact reported `sha256:3653de9b288c7bed684b72dc84fd0f033835f0170cf19e58a479b9984554e949`, and the published `VmAgentContainer` image digest was `sha256:b50c3fb289b42c39284ea07dd85f7af073119953aeaf4b6ee7a53dba1a04d408`.
+- A genuinely fresh launch created node `01KXAQFTDZBGFGPX5XZ0RSYTC9`, workspace `01KXAQFTJW9YVZCVB1A8T5JXJP`, and chat session `1637b2b0-a9cb-4e56-b0ad-5c7733dc4fa1`. The start API returned HTTP 201 and the agent completed a real response.
+- Cold-start timing improved from the **16,674 ms** baseline to **9,161 ms** server-side: **7,513 ms / 45.1% faster**. Bounded phases were pre-container 724 ms, container launch 2,584 ms, agent-ready 567 ms, workspace create 2,898 ms, ACP session create 2,237 ms, and ACP session start 842 ms. Client-observed request time was 13.408 seconds.
+- Authenticated browser checks for dashboard, the new session, and project agent settings all returned HTTP 200; the session content rendered and there were no unexpected console, page, or network errors. The staging API health endpoint returned HTTP 200 with `status: healthy`.
+- Because total latency remains above five seconds, the measured result and the next dominant slices (workspace creation, container launch, and ACP session creation) were appended to SAM idea `01KX6JK8ZFC1EFWGYQENRMFWFK`.
+- The temporary session was stopped through the product API; staging D1 confirmed the node status is `deleted` and the workspace row is gone. `pnpm quality:observability-noise` reported no significant log noise (D1 and Workers telemetry checks were unavailable in this environment and skipped explicitly).
