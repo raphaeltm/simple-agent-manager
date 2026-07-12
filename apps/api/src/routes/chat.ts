@@ -17,6 +17,7 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { requireRouteParam } from '../lib/route-helpers';
+import { ulid } from '../lib/ulid';
 import { expectJsonRecord } from '../lib/runtime-validation';
 import { getAuth, getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
@@ -242,9 +243,21 @@ chatRoutes.post('/', async (c) => {
   const workspaceId = body.workspaceId?.trim() || null;
   const topic = body.topic?.trim() || null;
 
-  const sessionId = await chatPersistence.createChatSession(c.env, projectId, workspaceId, topic, userId);
+  const taskId = ulid();
+  const now = new Date().toISOString();
+  await db.insert(schema.tasks).values({
+    id: taskId, projectId, userId, title: topic || "Conversation",
+    status: "queued", executionStep: "session_persistence", taskMode: "conversation",
+    triggeredBy: "user", credentialAttributionUserId: userId,
+    credentialAttributionSource: "user", createdBy: userId, createdAt: now, updatedAt: now,
+  });
+  const sessionId = await chatPersistence.createChatSession(
+    c.env, projectId, workspaceId, topic, taskId, userId
+  );
+  await db.update(schema.tasks).set({ chatSessionId: sessionId, workspaceId, updatedAt: now })
+    .where(eq(schema.tasks.id, taskId));
 
-  return c.json({ id: sessionId }, 201);
+  return c.json({ id: sessionId, sessionId, taskId }, 201);
 });
 
 /**

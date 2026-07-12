@@ -135,6 +135,7 @@ import { runTrialExpireSweep } from './scheduled/trial-expire';
 import { runTrialRolloverAudit } from './scheduled/trial-rollover';
 import { runTrialWaitlistCleanup } from './scheduled/trial-waitlist-cleanup';
 import { runTriggerExecutionCleanup } from './scheduled/trigger-execution-cleanup';
+import { runSessionTaskReconciliation } from './scheduled/session-task-reconciliation';
 import { runMonthlyCostAggregation } from './services/ai-monthly-cost-cron';
 import { GcpApiError, sanitizeGcpError } from './services/gcp-errors';
 import { signTerminalToken, verifyPortAccessToken, verifyTerminalToken } from './services/jwt';
@@ -950,6 +951,8 @@ export default {
 
     // Recover stale trigger executions and purge old logs
     const triggerCleanup = await runTriggerExecutionCleanup(env);
+    // Repair a bounded page of legacy taskless user-visible chat sessions.
+    const sessionTaskRepair = await runSessionTaskReconciliation(env);
 
     // Clean up abandoned R2 compose image artifacts. The cleanup module is
     // interval-gated through KV so the 5-minute sweep does not scan R2 every run.
@@ -989,6 +992,11 @@ export default {
       triggerExecStaleQueuedRecovered: triggerCleanup.staleQueuedRecovered,
       triggerExecRetentionPurged: triggerCleanup.retentionPurged,
       triggerExecCleanupErrors: triggerCleanup.errors,
+      sessionTaskRepairScanned: sessionTaskRepair.scanned,
+      sessionTaskRepairRepaired: sessionTaskRepair.repaired,
+      sessionTaskRepairReused: sessionTaskRepair.reused,
+      sessionTaskRepairErrors: sessionTaskRepair.errors,
+      sessionTaskRepairResidual: sessionTaskRepair.residual,
       composeArtifactCleanupSkipped: composeArtifactCleanup.skipped,
       composeArtifactCleanupSkipReason: composeArtifactCleanup.skipReason,
       composeArtifactCleanupScanned: composeArtifactCleanup.scannedObjects,
