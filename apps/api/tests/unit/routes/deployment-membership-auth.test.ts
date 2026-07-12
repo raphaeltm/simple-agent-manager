@@ -143,6 +143,12 @@ vi.mock('../../../src/services/node-agent', () => ({
   teardownDeploymentEnvironmentOnNode: vi.fn(),
 }));
 
+vi.mock('../../../src/services/node-agent-diagnostics', () => ({
+  getNodeLogsFromNode: (...args: unknown[]) => mockGetNodeLogsFromNode(...args),
+  getNodeSystemInfoFromNode: vi.fn(),
+  listNodeContainersFromNode: vi.fn(),
+}));
+
 vi.mock('../../../src/services/deployment-provisioning', () => ({
   provisionDeploymentNode: vi.fn(),
 }));

@@ -133,7 +133,7 @@ describe('cf-container runtime spike contracts', () => {
     expect(containerDo).toContain("await this.ctx.storage.put('lifecycleStatus', 'sleeping' satisfies LifecycleStatus)");
     expect(containerDo).toContain("status: 'sleeping'");
     expect(containerDo).toContain("if (lifecycleStatus === 'sleeping')");
-    expect(containerDo).toContain('const wake = await this.wakeFromSnapshot()');
+    expect(containerDo).toContain('const wake = await this.ensureAwake()');
     expect(containerDo).toContain('WAKE_DEGRADED_RESPONSE');
     expect(containerDo).toContain("await this.ctx.storage.put('lifecycleStatus', 'launching' satisfies LifecycleStatus)");
     expect(containerDo).toContain("await this.ctx.storage.put('lifecycleStatus', 'running' satisfies LifecycleStatus)");
