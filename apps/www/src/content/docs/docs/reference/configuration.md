@@ -68,6 +68,12 @@ same Cloudflare account and zone distinct resource prefixes.
 Namespaced deployments require TLS coverage for deeper hostnames such as
 `app.dev-a.example.com` and `*.dev-a.example.com`.
 
+Sibling nested deployment domains have disjoint Worker route namespaces. An
+apex SAM deployment still owns the greedy `*.example.com/*` route, however, so
+it can receive nested hostnames during nested-route provisioning or teardown.
+Do not claim strong isolation between an apex installation and nested
+installations until the shared-ingress ownership layer is implemented.
+
 Required GitHub Actions secrets include `CF_API_TOKEN`, `CF_ACCOUNT_ID`, `CF_ZONE_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, and `PULUMI_CONFIG_PASSPHRASE`. GitHub App/OAuth secrets (`GH_CLIENT_ID`, `GH_CLIENT_SECRET`, `GH_APP_ID`, `GH_APP_PRIVATE_KEY`, `GH_APP_SLUG`, `GH_WEBHOOK_SECRET`) and the Google **login** OAuth secrets (`GOOGLE_LOGIN_CLIENT_ID`, `GOOGLE_LOGIN_CLIENT_SECRET`) are optional environment fallbacks; fresh deployments can set them through `/setup` instead. The Google **infra/GCP** OAuth secrets (`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`) are a separate client used only for GCP deployment authorization and are not part of the `/setup` wizard. Deploy signing keys are generated and persisted by Pulumi during deployment; GitHub Environment values are only needed for explicit key overrides.
 
 :::note[Naming convention]

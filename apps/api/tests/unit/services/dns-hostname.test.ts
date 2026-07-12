@@ -2,9 +2,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
 import {
+  cleanupWorkspaceDNSRecords,
   createDNSRecord,
   createNodeBackendDNSRecord,
-  cleanupWorkspaceDNSRecords,
   getBackendHostname,
   getNodeBackendHostname,
   getWorkspaceUrl,
@@ -112,6 +112,65 @@ describe('DNS hostname construction', () => {
       'https://api.cloudflare.com/client/v4/zones/zone-id/dns_records?name=ws-workspace-1.dev-a.example.com',
       'https://api.cloudflare.com/client/v4/zones/zone-id/dns_records?name=vm-workspace-1.dev-a.example.com',
       'https://api.cloudflare.com/client/v4/zones/zone-id/dns_records?name=workspace-1.vm.dev-a.example.com',
+    ]);
+  });
+
+  it('isolates cleanup for the same workspace ID across sibling installations', async () => {
+    const recordsByName = new Map([
+      [
+        'ws-workspace-1.dev-a.example.com',
+        {
+          id: 'dev-a-record',
+          name: 'ws-workspace-1.dev-a.example.com',
+          type: 'A',
+          content: '203.0.113.10',
+          proxied: true,
+        },
+      ],
+      [
+        'ws-workspace-1.dev-b.example.com',
+        {
+          id: 'dev-b-record',
+          name: 'ws-workspace-1.dev-b.example.com',
+          type: 'A',
+          content: '203.0.113.11',
+          proxied: true,
+        },
+      ],
+    ]);
+    const fetchMock = vi
+      .fn()
+      .mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+        if (init?.method === 'DELETE') {
+          return Promise.resolve(
+            new Response(JSON.stringify({ result: { id: String(input).split('/').at(-1) } }), {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            })
+          );
+        }
+
+        const name = new URL(String(input)).searchParams.get('name') ?? '';
+        const record = recordsByName.get(name);
+        return Promise.resolve(
+          new Response(JSON.stringify({ result: record ? [record] : [] }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        );
+      });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const installationBEnv = { ...nestedDomainEnv, BASE_DOMAIN: 'dev-b.example.com' };
+    await expect(cleanupWorkspaceDNSRecords('WORKSPACE-1', nestedDomainEnv)).resolves.toBe(1);
+    await expect(cleanupWorkspaceDNSRecords('WORKSPACE-1', installationBEnv)).resolves.toBe(1);
+
+    const deleteUrls = fetchMock.mock.calls
+      .filter(([, init]) => init?.method === 'DELETE')
+      .map(([url]) => String(url));
+    expect(deleteUrls).toEqual([
+      'https://api.cloudflare.com/client/v4/zones/zone-id/dns_records/dev-a-record',
+      'https://api.cloudflare.com/client/v4/zones/zone-id/dns_records/dev-b-record',
     ]);
   });
 });

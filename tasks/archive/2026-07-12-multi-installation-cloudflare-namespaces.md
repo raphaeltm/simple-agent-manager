@@ -26,6 +26,7 @@ The first groundwork slice should make a deployment such as `dev-a.sammy.party` 
 - On a full Cloudflare zone, free Universal SSL covers only the apex and first-level subdomains. Nested public hosts require Total TLS/Advanced Certificate Manager or explicitly managed certificates. This PR must document that tradeoff rather than imply nested deployment domains are cost-free at the certificate layer.
 - The retained DNS cleanup incident in `tasks/archive/2026-06-13-app-route-dns-and-environment-teardown-cleanup.md` shows that creation and cleanup must use one canonical hostname derivation; stale historical schemes left orphaned DNS records.
 - The current task does **not** implement agent environment leasing, credential brokering, safe arbitrary-stack teardown, or the future flat hostname layout (`app--namespace.zone`). Those remain follow-up slices.
+- An apex installation's greedy Worker wildcard can receive nested installation traffic during route provisioning/teardown. Sibling nested installations are disjoint, but strong apex-plus-nested isolation remains shared-ingress follow-up work.
 
 ## External references
 
@@ -49,6 +50,8 @@ The first groundwork slice should make a deployment such as `dev-a.sammy.party` 
 - [x] Complete Cloudflare, environment-variable, constitution, documentation-sync, test-quality, and task-completion specialist reviews.
 - [x] Perform required staging and real-VM infrastructure verification without overlapping another active staging deployment.
 - [x] Open draft PR [#1571](https://github.com/raphaeltm/simple-agent-manager/pull/1571) and stop without marking it ready or merging it.
+- [x] Replace the invalid per-prefix `workers.dev` CNAME assumption with Cloudflare's documented proxied originless DNS records.
+- [x] Add sibling-installation route, hostname, and runtime cleanup isolation tests after critical local review.
 
 ## Acceptance criteria
 

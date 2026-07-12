@@ -12,9 +12,7 @@ describe('DNS Records Resources', () => {
     pagesModule = await import('../resources/pages');
   });
 
-  it('registers API and wildcard records as proxied worker CNAMEs', () => {
-    const expectedWorkerHost = `${configModule.prefix}-api-${configModule.stack}.${configModule.prefix}.workers.dev`;
-
+  it('registers API and wildcard records as proxied originless Worker Route records', () => {
     const apiRecord = findRegisteredResource(
       `${configModule.prefix}-dns-api`,
       'cloudflare:index/record:Record'
@@ -22,8 +20,8 @@ describe('DNS Records Resources', () => {
     expect(apiRecord.inputs).toMatchObject({
       zoneId: 'test-zone-id-000000000000000000000',
       name: 'api.example.com',
-      type: 'CNAME',
-      content: expectedWorkerHost,
+      type: 'AAAA',
+      content: '100::',
       proxied: true,
       ttl: 1,
     });
@@ -35,8 +33,8 @@ describe('DNS Records Resources', () => {
     expect(wildcardRecord.inputs).toMatchObject({
       zoneId: 'test-zone-id-000000000000000000000',
       name: '*.example.com',
-      type: 'CNAME',
-      content: expectedWorkerHost,
+      type: 'AAAA',
+      content: '100::',
       proxied: true,
       ttl: 1,
     });

@@ -1,16 +1,20 @@
 import * as cloudflare from '@pulumi/cloudflare';
 import * as pulumi from '@pulumi/pulumi';
 import { pagesProject } from './pages';
-import { deploymentHostnames, zoneId, prefix, stack } from './config';
+import { deploymentHostnames, zoneId, prefix } from './config';
 
-const apiWorkerHostname = `${prefix}-api-${stack}.${prefix}.workers.dev`;
+// Reserved IPv6 discard address recommended by Cloudflare for proxied,
+// originless DNS records used only to activate Worker Routes. A workers.dev
+// hostname cannot be derived from the installation prefix because the second
+// label is configured once per Cloudflare account, not once per Worker.
+const ORIGINLESS_WORKER_ADDRESS = '100::';
 
 // API subdomain (api.example.com -> Worker)
 export const apiDnsRecord = new cloudflare.Record(`${prefix}-dns-api`, {
   zoneId: zoneId,
   name: deploymentHostnames.api,
-  type: 'CNAME',
-  content: apiWorkerHostname,
+  type: 'AAAA',
+  content: ORIGINLESS_WORKER_ADDRESS,
   proxied: true,
   ttl: 1,
   comment: `${prefix.toUpperCase()} API - managed by Pulumi`,
@@ -35,8 +39,8 @@ export const appDnsRecord = new cloudflare.Record(`${prefix}-dns-app`, {
 export const wildcardDnsRecord = new cloudflare.Record(`${prefix}-dns-wildcard`, {
   zoneId: zoneId,
   name: deploymentHostnames.wildcard,
-  type: 'CNAME',
-  content: apiWorkerHostname,
+  type: 'AAAA',
+  content: ORIGINLESS_WORKER_ADDRESS,
   proxied: true,
   ttl: 1,
   comment: `${prefix.toUpperCase()} Workspaces - managed by Pulumi`,

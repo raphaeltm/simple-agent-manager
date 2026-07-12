@@ -21,7 +21,11 @@ You do **not** need a shared cloud provider account. Users provide their own [He
 
 ## Step 1: Choose Your Domain and Cloudflare Account
 
-Choose a deployment domain for `BASE_DOMAIN`. The simplest option is the Cloudflare zone apex (for example, `example.com`). You can also run multiple independent SAM installations in one zone by giving each installation a different subdomain, such as `dev-a.example.com` and `dev-b.example.com`, while using the same `CF_ZONE_ID` for `example.com`. Each deployment then creates namespaced hostnames such as `app.dev-a.example.com`, `api.dev-a.example.com`, and `ws-*.dev-a.example.com`, and derives distinct Cloudflare resource names from its full `BASE_DOMAIN`.
+Choose a deployment domain for `BASE_DOMAIN`. The simplest option is the Cloudflare zone apex (for example, `example.com`). The deployment foundation also supports sibling namespaced installations such as `dev-a.example.com` and `dev-b.example.com` using the same `CF_ZONE_ID` for `example.com`. Each deployment creates distinct hostnames such as `app.dev-a.example.com`, `api.dev-a.example.com`, and `ws-*.dev-a.example.com`, and derives distinct Cloudflare resource names from its full `BASE_DOMAIN`.
+
+:::caution[Shared-zone ingress boundary]
+Do not yet treat an apex SAM installation and nested SAM installations as strongly isolated environments. The apex installation's greedy `*.example.com/*` Worker route can receive nested hostnames while a more-specific nested route is being created or after it is removed. Sibling nested installations (`dev-a` and `dev-b`) have disjoint route namespaces, but running them beside an apex SAM installation still requires the planned shared-ingress ownership layer. This release lays the DNS/resource foundation; it does not yet provide automated per-agent environment leasing or safe arbitrary-stack teardown.
+:::
 
 :::caution[TLS for namespaced installations]
 Cloudflare Universal SSL on a full zone normally covers the apex and first-level subdomains, not deeper hostnames such as `app.dev-a.example.com` or `*.dev-a.example.com`. Before using a subdomain as `BASE_DOMAIN`, enable certificate coverage for those hostnames with Total TLS, Advanced Certificate Manager, or an equivalent custom certificate.

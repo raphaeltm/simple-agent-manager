@@ -114,6 +114,50 @@ describe('sync wrangler config', () => {
     ]);
   });
 
+  it('keeps sibling installation routes and Worker identities disjoint in one zone', () => {
+    const makeNestedOutputs = (baseDomain: string, pagesName: string): PulumiOutputs => ({
+      ...outputs,
+      pagesName,
+      hostnames: {
+        api: `api.${baseDomain}`,
+        app: `app.${baseDomain}`,
+      },
+      stackSummary: {
+        ...outputs.stackSummary,
+        baseDomain,
+      },
+    });
+
+    vi.stubEnv('RESOURCE_PREFIX', 'dev-a-prefix');
+    const installationA = generateApiWorkerEnv(
+      {},
+      makeNestedOutputs('dev-a.example.com', 'dev-a-web-prod'),
+      'prod',
+      false,
+      false
+    );
+
+    vi.stubEnv('RESOURCE_PREFIX', 'dev-b-prefix');
+    const installationB = generateApiWorkerEnv(
+      {},
+      makeNestedOutputs('dev-b.example.com', 'dev-b-web-prod'),
+      'prod',
+      false,
+      false
+    );
+
+    expect(installationA.name).not.toBe(installationB.name);
+    expect(installationA.routes).not.toEqual(installationB.routes);
+    expect([...(installationA.routes ?? []), ...(installationB.routes ?? [])]).toEqual(
+      expect.arrayContaining([
+        { pattern: 'api.dev-a.example.com/*', zone_id: 'zone-id' },
+        { pattern: '*.dev-a.example.com/*', zone_id: 'zone-id' },
+        { pattern: 'api.dev-b.example.com/*', zone_id: 'zone-id' },
+        { pattern: '*.dev-b.example.com/*', zone_id: 'zone-id' },
+      ])
+    );
+  });
+
   it('enables Cloudflare Container runtime by default and allows explicit opt-out', () => {
     vi.stubEnv('RESOURCE_PREFIX', 's123abc');
 
