@@ -28,6 +28,7 @@ import { persistError } from '../services/observability';
 import * as projectDataService from '../services/project-data';
 import { isTaskStatus } from '../services/task-status';
 import { resolveChatAgentState } from './chat-agent-state';
+import { chatForkRoutes } from './chat-fork';
 import { getChatSessionRouteContext } from './chat-route-context';
 import { enrichSessionsWithCreators, getSessionListScope, requireSessionCreator } from './chat-session-ownership';
 import { chatStateRoutes } from './chat-state';
@@ -274,6 +275,7 @@ chatRoutes.get('/ws', async (c) => {
  * Read the lightweight ACP activity snapshot for a chat session.
  */
 chatRoutes.route('/', chatStateRoutes);
+chatRoutes.route('/', chatForkRoutes);
 
 /**
  * GET /api/projects/:projectId/sessions/:sessionId

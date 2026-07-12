@@ -21,6 +21,7 @@ import {
   listChatSessions,
   listCredentials,
   listProjectTasks,
+  prepareForkSession,
   startInstantChatSession,
   stopChatSession,
   submitTask,
@@ -640,55 +641,38 @@ export function useProjectChatState() {
     navigate(`/projects/${projectId}/chat/${id}`);
   };
 
-  /** Navigate to new chat screen with fork context pre-filled. */
+  /** Prepare canonical fork lineage on the server, then open the new-chat composer. */
   const handleFork = useCallback((session: ChatSessionResponse) => {
-    const taskId = session.task?.id ?? session.taskId;
-    if (!taskId) return;
-    const sessionLabel = session.topic ? stripMarkdown(session.topic) : `Chat ${session.id.slice(0, 8)}`;
-    const forkContext = [
-      `Previous session: "${sessionLabel}"`,
-      `Parent project ID: ${projectId}`,
-      `Parent session ID: ${session.id}`,
-      `Parent task ID: ${taskId}`,
-    ].join('\n');
-    const prefilled = `${FORK_MESSAGE_TEMPLATE}${forkContext}\n\n`;
-
-    const derived: PendingDerived = {
-      type: 'fork',
-      parentSessionId: session.id,
-      parentSessionLabel: sessionLabel,
-      parentTaskId: taskId,
-      parentBranch: session.task?.outputBranch ?? undefined,
-      contextSummary: '',
-      summaryLoading: true,
-    };
-    setPendingDerived(derived);
-    newChatIntentRef.current = true;
-    executeIdeaIdRef.current = null;
-    setMessage(prefilled);
     setSubmitError(null);
-    setProvisioning(null);
-    navigate(`/projects/${projectId}/chat`, { replace: true });
-
-    void summarizeSession(projectId, session.id)
+    void prepareForkSession(projectId, session.id)
       .then((result) => {
-        setPendingDerived((prev) => prev?.parentSessionId === session.id
-          ? {
-              ...prev,
-              contextSummary: [
-                `## Fork Context`,
-                forkContext,
-                '',
-                result.summary ? `## Previous Session Summary\n${result.summary}` : '',
-              ].filter(Boolean).join('\n'),
-              summaryLoading: false,
-            }
-          : prev);
+        const sessionLabel = stripMarkdown(result.sessionLabel);
+        const forkContext = [
+          `Previous session: "${sessionLabel}"`,
+          `Parent project ID: ${projectId}`,
+          `Parent session ID: ${result.parentSessionId}`,
+          `Parent task ID: ${result.parentTaskId}`,
+        ].join("\n");
+        setPendingDerived({
+          type: "fork",
+          parentSessionId: result.parentSessionId,
+          parentSessionLabel: sessionLabel,
+          parentTaskId: result.parentTaskId,
+          parentBranch: result.parentBranch ?? undefined,
+          contextSummary: [
+            "## Fork Context", forkContext, "",
+            result.summary ? `## Previous Session Summary\n${result.summary}` : "",
+          ].filter(Boolean).join("\n"),
+          summaryLoading: false,
+        });
+        newChatIntentRef.current = true;
+        executeIdeaIdRef.current = null;
+        setMessage(`${FORK_MESSAGE_TEMPLATE}${forkContext}\n\n`);
+        setProvisioning(null);
+        navigate(`/projects/${projectId}/chat`, { replace: true });
       })
-      .catch(() => {
-        setPendingDerived((prev) => prev?.parentSessionId === session.id
-          ? { ...prev, summaryLoading: false }
-          : prev);
+      .catch((err: unknown) => {
+        setSubmitError(err instanceof Error ? err.message : "Unable to prepare fork");
       });
   }, [navigate, projectId]);
 
