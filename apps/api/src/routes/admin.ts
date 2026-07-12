@@ -1,4 +1,9 @@
-import type { PlatformErrorLevel,PlatformErrorSource, UserRole, UserStatus } from '@simple-agent-manager/shared';
+import type {
+  PlatformErrorLevel,
+  PlatformErrorSource,
+  UserRole,
+  UserStatus,
+} from '@simple-agent-manager/shared';
 import { desc, eq, inArray } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
@@ -6,12 +11,26 @@ import { Hono } from 'hono';
 import * as schema from '../db/schema';
 import type { ProjectData as ProjectDataDO } from '../durable-objects/project-data';
 import type { Env } from '../env';
-import { getUserId,requireApproved, requireAuth, requireSuperadmin } from '../middleware/auth';
+import { getUserId, requireApproved, requireAuth, requireSuperadmin } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { rateLimit } from '../middleware/rate-limit';
-import { AdminLogQuerySchema,AdminUserActionSchema, AdminUserRoleSchema, jsonValidator, UpdateSignupApprovalConfigSchema } from '../schemas';
+import { getTaskReconciliationDiagnostics } from '../scheduled/stuck-tasks';
+import {
+  AdminLogQuerySchema,
+  AdminUserActionSchema,
+  AdminUserRoleSchema,
+  jsonValidator,
+  UpdateSignupApprovalConfigSchema,
+} from '../schemas';
 import { getRuntimeLimits } from '../services/limits';
-import { CfApiError,getErrorTrends, getHealthSummary, getLogQueryRateLimit, queryCloudflareLogs, queryErrors } from '../services/observability';
+import {
+  CfApiError,
+  getErrorTrends,
+  getHealthSummary,
+  getLogQueryRateLimit,
+  queryCloudflareLogs,
+  queryErrors,
+} from '../services/observability';
 import { getSignupApprovalConfig, setSignupApprovalConfig } from '../services/signup-approval';
 
 const adminRoutes = new Hono<{ Bindings: Env }>();
@@ -197,6 +216,18 @@ adminRoutes.get('/tasks/stuck', async (c) => {
 });
 
 /**
+ * GET /api/admin/tasks/:taskId/reconciliation-diagnostics - Explain the
+ * read-only evidence and decision used by scheduled task reconciliation.
+ */
+adminRoutes.get('/tasks/:taskId/reconciliation-diagnostics', async (c) => {
+  const { taskId } = c.req.param();
+  const diagnostics = await getTaskReconciliationDiagnostics(c.env, taskId);
+
+  if (!diagnostics) throw errors.notFound('Task');
+  return c.json({ diagnostics });
+});
+
+/**
  * GET /api/admin/tasks/recent-failures - List recently failed tasks with error details
  *
  * Returns the most recent failed tasks for debugging delegation issues.
@@ -272,8 +303,8 @@ adminRoutes.get('/observability/errors', async (c) => {
   }
 
   const result = await queryErrors(c.env.OBSERVABILITY_DATABASE, {
-    source: source && source !== 'all' ? source as PlatformErrorSource : undefined,
-    level: level && level !== 'all' ? level as PlatformErrorLevel : undefined,
+    source: source && source !== 'all' ? (source as PlatformErrorSource) : undefined,
+    level: level && level !== 'all' ? (level as PlatformErrorLevel) : undefined,
     search: search || undefined,
     startTime: startTime ? new Date(startTime).getTime() : undefined,
     endTime: endTime ? new Date(endTime).getTime() : undefined,
@@ -327,7 +358,8 @@ adminRoutes.get('/observability/trends', async (c) => {
  *
  * Body: { timeRange: { start, end }, levels?, search?, limit?, cursor? }
  */
-adminRoutes.post('/observability/logs/query',
+adminRoutes.post(
+  '/observability/logs/query',
   // Per-admin KV-based rate limiting (1-minute window)
   async (c, next) => {
     const limiter = rateLimit({
@@ -339,54 +371,59 @@ adminRoutes.post('/observability/logs/query',
   },
   jsonValidator(AdminLogQuerySchema),
   async (c) => {
-  if (!c.env.CF_API_TOKEN || !c.env.CF_ACCOUNT_ID) {
-    throw errors.badRequest('Cloudflare API credentials not configured. Set CF_API_TOKEN and CF_ACCOUNT_ID.');
-  }
+    if (!c.env.CF_API_TOKEN || !c.env.CF_ACCOUNT_ID) {
+      throw errors.badRequest(
+        'Cloudflare API credentials not configured. Set CF_API_TOKEN and CF_ACCOUNT_ID.'
+      );
+    }
 
-  const body = c.req.valid('json');
+    const body = c.req.valid('json');
 
-  // Validate dates
-  const startDate = new Date(body.timeRange.start);
-  const endDate = new Date(body.timeRange.end);
-  if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
-    throw errors.badRequest('timeRange start and end must be valid ISO 8601 dates');
-  }
+    // Validate dates
+    const startDate = new Date(body.timeRange.start);
+    const endDate = new Date(body.timeRange.end);
+    if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+      throw errors.badRequest('timeRange start and end must be valid ISO 8601 dates');
+    }
 
-  // Validate levels
-  if (body.levels) {
-    const validLogLevels = new Set(['error', 'warn', 'info', 'debug', 'log']);
-    for (const level of body.levels) {
-      if (!validLogLevels.has(level)) {
-        throw errors.badRequest(`Invalid level: ${level}. Must be one of: error, warn, info, debug, log`);
+    // Validate levels
+    if (body.levels) {
+      const validLogLevels = new Set(['error', 'warn', 'info', 'debug', 'log']);
+      for (const level of body.levels) {
+        if (!validLogLevels.has(level)) {
+          throw errors.badRequest(
+            `Invalid level: ${level}. Must be one of: error, warn, info, debug, log`
+          );
+        }
       }
     }
-  }
 
-  // Validate limit
-  if (body.limit !== undefined && (body.limit < 1 || body.limit > 500)) {
-    throw errors.badRequest('limit must be between 1 and 500');
-  }
-
-  try {
-    const result = await queryCloudflareLogs({
-      cfApiToken: c.env.CF_API_TOKEN,
-      cfAccountId: c.env.CF_ACCOUNT_ID,
-      timeRange: { start: body.timeRange.start, end: body.timeRange.end },
-      levels: body.levels ?? undefined,
-      search: body.search || undefined,
-      limit: body.limit,
-      cursor: body.cursor || undefined,
-      queryId: body.queryId || undefined,
-    });
-
-    return c.json(result);
-  } catch (err) {
-    if (err instanceof CfApiError) {
-      return c.json({ error: 'CF_API_ERROR', message: err.message }, 502);
+    // Validate limit
+    if (body.limit !== undefined && (body.limit < 1 || body.limit > 500)) {
+      throw errors.badRequest('limit must be between 1 and 500');
     }
-    throw err;
+
+    try {
+      const result = await queryCloudflareLogs({
+        cfApiToken: c.env.CF_API_TOKEN,
+        cfAccountId: c.env.CF_ACCOUNT_ID,
+        timeRange: { start: body.timeRange.start, end: body.timeRange.end },
+        levels: body.levels ?? undefined,
+        search: body.search || undefined,
+        limit: body.limit,
+        cursor: body.cursor || undefined,
+        queryId: body.queryId || undefined,
+      });
+
+      return c.json(result);
+    } catch (err) {
+      if (err instanceof CfApiError) {
+        return c.json({ error: 'CF_API_ERROR', message: err.message }, 502);
+      }
+      throw err;
+    }
   }
-});
+);
 
 /**
  * GET /api/admin/observability/logs/stream - WebSocket upgrade for real-time log stream
@@ -465,7 +502,10 @@ adminRoutes.post('/backfill-session-summaries', async (c) => {
       const stub = c.env.PROJECT_DATA.get(doId) as DurableObjectStub<ProjectDataDO>;
 
       // List all sessions from the DO (up to 1000)
-      const result = await stub.listSessions(null, 1000, 0) as { sessions: Record<string, unknown>[]; total: number };
+      const result = (await stub.listSessions(null, 1000, 0)) as {
+        sessions: Record<string, unknown>[];
+        total: number;
+      };
 
       if (result.sessions.length === 0) continue;
 

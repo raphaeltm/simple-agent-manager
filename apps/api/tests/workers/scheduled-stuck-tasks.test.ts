@@ -42,30 +42,41 @@ async function getTaskStatus(taskId: string): Promise<{
   execution_step: string | null;
 } | null> {
   return env.DATABASE.prepare(
-    'SELECT status, error_message, completed_at, execution_step FROM tasks WHERE id = ?',
+    'SELECT status, error_message, completed_at, execution_step FROM tasks WHERE id = ?'
   )
     .bind(taskId)
     .first();
 }
 
-async function getTaskStatusEvents(taskId: string): Promise<{
-  from_status: string | null;
-  to_status: string;
-  actor_type: string;
-  reason: string | null;
-}[]> {
+async function getTaskStatusEvents(taskId: string): Promise<
+  {
+    from_status: string | null;
+    to_status: string;
+    actor_type: string;
+    reason: string | null;
+  }[]
+> {
   const result = await env.DATABASE.prepare(
-    'SELECT from_status, to_status, actor_type, reason FROM task_status_events WHERE task_id = ? ORDER BY created_at',
+    'SELECT from_status, to_status, actor_type, reason FROM task_status_events WHERE task_id = ? ORDER BY created_at'
   )
     .bind(taskId)
-    .all<{ from_status: string | null; to_status: string; actor_type: string; reason: string | null }>();
+    .all<{
+      from_status: string | null;
+      to_status: string;
+      actor_type: string;
+      reason: string | null;
+    }>();
   return result.results;
 }
 
-async function getObservabilityEvents(taskId: string): Promise<{ message: string; context: string }[]> {
+async function getObservabilityEvents(
+  taskId: string
+): Promise<{ message: string; context: string }[]> {
   const result = await env.OBSERVABILITY_DATABASE.prepare(
-    `SELECT message, context FROM platform_errors WHERE context LIKE ? ORDER BY created_at DESC`,
-  ).bind(`%${taskId}%`).all<{ message: string; context: string }>();
+    `SELECT message, context FROM platform_errors WHERE context LIKE ? ORDER BY created_at DESC`
+  )
+    .bind(`%${taskId}%`)
+    .all<{ message: string; context: string }>();
   return result.results;
 }
 
@@ -93,7 +104,7 @@ describe('recoverStuckTasks — vertical slice', () => {
       });
 
       const stub = env.TASK_RUNNER.get(
-        env.TASK_RUNNER.idFromName(taskId),
+        env.TASK_RUNNER.idFromName(taskId)
       ) as DurableObjectStub<TaskRunner>;
       await stub.start({
         taskId,
@@ -146,6 +157,55 @@ describe('recoverStuckTasks — vertical slice', () => {
       expect(task?.status).toBe('failed');
       expect(task?.error_message).toContain('runtime is gone');
       expect(task?.error_message).toContain('workspace_deleted');
+    });
+
+    it('reconciles a dead runtime when TaskRunner state is missing and stays terminal', async () => {
+      await seedBaseData();
+      const taskId = 'task-st-do-missing-dead';
+      const nodeId = 'node-st-do-missing-dead';
+      const workspaceId = 'ws-st-do-missing-dead';
+      const oldDate = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+
+      await seedNode(nodeId, USER_ID, { status: 'deleted', healthStatus: 'stale' });
+      await seedWorkspace(workspaceId, nodeId, USER_ID, {
+        projectId: PROJECT_ID,
+        status: 'deleted',
+      });
+      await seedTask(taskId, PROJECT_ID, USER_ID, {
+        status: 'in_progress',
+        executionStep: 'running',
+        startedAt: oldDate,
+        updatedAt: oldDate,
+        workspaceId,
+      });
+
+      const testEnv = {
+        ...env,
+        TASK_DO_MISMATCH_GRACE_MS: '60000',
+      } as unknown as Env;
+      const firstSweep = await recoverStuckTasks(testEnv);
+
+      expect(firstSweep).toMatchObject({
+        failedInProgress: 1,
+        doHealthChecked: 1,
+        doHealthMissing: 1,
+        doHealthErrors: 0,
+        deadRuntimeReconciled: 1,
+      });
+      const task = await getTaskStatus(taskId);
+      expect(task?.status).toBe('failed');
+      expect(task?.error_message).toContain('workspace_deleted');
+
+      const eventsAfterFirstSweep = await getTaskStatusEvents(taskId);
+      expect(eventsAfterFirstSweep.filter((event) => event.to_status === 'failed')).toHaveLength(1);
+
+      const secondSweep = await recoverStuckTasks(testEnv);
+      expect(secondSweep.deadRuntimeReconciled).toBe(0);
+      expect(secondSweep.failedInProgress).toBe(0);
+      const eventsAfterSecondSweep = await getTaskStatusEvents(taskId);
+      expect(eventsAfterSecondSweep.filter((event) => event.to_status === 'failed')).toHaveLength(
+        1
+      );
     });
   });
 
@@ -316,7 +376,7 @@ describe('recoverStuckTasks — vertical slice', () => {
       // Advance the task to 'delegated' just before recovery runs
       // This simulates the TaskRunner DO advancing the task between SELECT and UPDATE
       await env.DATABASE.prepare(
-        "UPDATE tasks SET status = 'delegated', updated_at = datetime('now') WHERE id = ?",
+        "UPDATE tasks SET status = 'delegated', updated_at = datetime('now') WHERE id = ?"
       )
         .bind(taskId)
         .run();
@@ -424,7 +484,7 @@ describe('gatherDiagnostics', () => {
         auto_provisioned_node_id: null,
       },
       120000,
-      'Test reason',
+      'Test reason'
     );
 
     expect(diagnostics.taskId).toBe('task-st-diag');
@@ -448,7 +508,7 @@ describe('gatherDiagnostics', () => {
         auto_provisioned_node_id: null,
       },
       60000,
-      'Test reason',
+      'Test reason'
     );
 
     expect(diagnostics.workspaceStatus).toBeNull();
@@ -457,7 +517,10 @@ describe('gatherDiagnostics', () => {
 
   it('falls back to autoProvisionedNodeId when workspace has no node', async () => {
     await seedUser('user-st-diag2');
-    await seedNode('node-st-auto', 'user-st-diag2', { status: 'creating', healthStatus: 'unknown' });
+    await seedNode('node-st-auto', 'user-st-diag2', {
+      status: 'creating',
+      healthStatus: 'unknown',
+    });
 
     const diagnostics = await gatherDiagnostics(
       env as unknown as Env,
@@ -469,7 +532,7 @@ describe('gatherDiagnostics', () => {
         auto_provisioned_node_id: 'node-st-auto',
       },
       90000,
-      'Test auto-prov',
+      'Test auto-prov'
     );
 
     expect(diagnostics.nodeId).toBe('node-st-auto');

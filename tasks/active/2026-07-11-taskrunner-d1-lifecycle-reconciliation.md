@@ -64,10 +64,19 @@ the recovered work, all fixed:
 5. Fixed lint (import sort). Documented the liveness-gated recovery semantic
    (live tasks are preserved past the hard ceiling) in `configuration.md`.
 
+## Staging failure and follow-up (2026-07-12)
+
+- The original PR branch deployed successfully and passed browser/API regression checks, but a controlled one-row D1 mismatch remained `in_progress` across three five-minute cron boundaries while its workspace was `deleted`.
+- `TaskRunner.completed` records successful orchestration handoff, not later agent completion. A missing/unreachable TaskRunner state must therefore remain diagnostic evidence; it cannot veto reconciliation when task-scoped runtime liveness is conclusively dead.
+- Recovery now runs first in the five-minute operational sweep, before provisioning, migration, and node-cleanup phases can fail and suppress it.
+- TaskRunner status probes are bounded and classified as `ok`, `missing`, `timeout`, or `error`; cron summaries expose missing/error/reconciled counters.
+- A superadmin-only, read-only diagnostics endpoint reports the exact eligibility, liveness, TaskRunner probe, and decision for one task before any staging mutation.
+- Unit coverage proves missing/error TaskRunner RPC outcomes still reconcile a deleted runtime. A Worker D1/DO vertical slice also asserts the second sweep is a no-op; local `workerd` currently exits with SIGSEGV before importing Worker tests, so that file remains for CI/staging verification.
+
 ## Acceptance criteria
 
 - Demonstrably dead DO-completed+D1-active work reaches terminal D1 promptly with sanitized diagnostics.
-- Concrete live workspace/agent evidence prevents early failure regardless of elapsed duration.
+- Concrete live workspace/agent evidence prevents early failure below the configurable absolute runaway-cost ceiling.
 - Shared-node heartbeat and stale running session status cannot independently suppress reconciliation.
 - Recovery/callback interleavings converge on one terminal state with idempotent side effects.
 - Task/conversation awaiting-followup semantics remain intentional.

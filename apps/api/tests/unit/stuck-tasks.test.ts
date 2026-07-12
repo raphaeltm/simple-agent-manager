@@ -6,11 +6,15 @@
  * 2. In-progress tasks with stale heartbeats ARE marked as stuck
  * 3. Tasks without a node are treated as stuck (no heartbeat to check)
  */
-import { beforeEach,describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../src/env';
 import { detectClaudeCodeCompactionLoop } from '../../src/scheduled/claude-code-compaction-loop';
-import { recoverStuckTasks } from '../../src/scheduled/stuck-tasks';
+import {
+  getTaskReconciliationDiagnostics,
+  probeTaskRunnerStatus,
+  recoverStuckTasks,
+} from '../../src/scheduled/stuck-tasks';
 import { persistError } from '../../src/services/observability';
 import { cleanupTaskRun } from '../../src/services/task-runner';
 
@@ -69,6 +73,7 @@ function mockPreparedStatement(results: unknown[] = [], changes = 1) {
 function createMockEnv(
   prepareResponses: Map<string, { results: unknown[]; changes?: number }> = new Map(),
   envOverrides: Partial<Record<string, string>> = {},
+  taskRunnerStatus: unknown | Error = null
 ): Env {
   const mockDb = {
     prepare: vi.fn((sql: string) => {
@@ -87,7 +92,10 @@ function createMockEnv(
   const mockTaskRunnerDO = {
     idFromName: vi.fn().mockReturnValue({ toString: () => 'do-id' }),
     get: vi.fn().mockReturnValue({
-      getStatus: vi.fn().mockResolvedValue(null),
+      getStatus:
+        taskRunnerStatus instanceof Error
+          ? vi.fn().mockRejectedValue(taskRunnerStatus)
+          : vi.fn().mockResolvedValue(taskRunnerStatus),
     }),
   };
 
@@ -112,12 +120,14 @@ describe('recoverStuckTasks', () => {
     projectDataMocks.getMessages.mockResolvedValue({ messages: [], hasMore: false });
     projectDataMocks.listSessions.mockResolvedValue({ sessions: [], total: 0 });
     projectDataMocks.listAcpSessions.mockResolvedValue({
-      sessions: [{
-        id: 'acp-live',
-        status: 'running',
-        workspaceId: 'ws-1',
-        lastHeartbeatAt: Date.now(),
-      }],
+      sessions: [
+        {
+          id: 'acp-live',
+          status: 'running',
+          workspaceId: 'ws-1',
+          lastHeartbeatAt: Date.now(),
+        },
+      ],
       total: 1,
     });
     projectDataMocks.failSession.mockResolvedValue(undefined);
@@ -135,7 +145,7 @@ describe('recoverStuckTasks', () => {
           { role: 'system', content: 'Compacting...' },
           { role: 'system', content: 'Compacting completed' },
         ],
-        { windowMessages: 6, minPairs: 3 },
+        { windowMessages: 6, minPairs: 3 }
       );
 
       expect(evidence.detected).toBe(true);
@@ -150,7 +160,7 @@ describe('recoverStuckTasks', () => {
           { role: 'assistant', content: 'I made progress after compaction.' },
           { role: 'system', content: 'Compacting completed' },
         ],
-        { windowMessages: 3, minPairs: 2 },
+        { windowMessages: 3, minPairs: 2 }
       );
 
       expect(evidence.detected).toBe(false);
@@ -163,7 +173,7 @@ describe('recoverStuckTasks', () => {
       const now = Date.now();
       const recent = new Date(now - 30 * 1000).toISOString();
       const responses = new Map<string, { results: unknown[]; changes?: number }>();
-      responses.set('status IN (\'queued\', \'delegated\', \'in_progress\')', {
+      responses.set("status IN ('queued', 'delegated', 'in_progress')", {
         results: [
           {
             id: 'task-compaction-loop',
@@ -190,7 +200,7 @@ describe('recoverStuckTasks', () => {
       responses.set('status, health_status FROM nodes', {
         results: [{ id: 'node-1', status: 'running', health_status: 'healthy' }],
       });
-      responses.set('UPDATE tasks SET status = \'failed\'', {
+      responses.set("UPDATE tasks SET status = 'failed'", {
         results: [],
         changes: 1,
       });
@@ -223,19 +233,19 @@ describe('recoverStuckTasks', () => {
         null,
         ['assistant', 'system', 'tool'],
         false,
-        'desc',
+        'desc'
       );
       expect(projectDataMocks.failSession).toHaveBeenCalledWith(
         env,
         'proj-1',
         'chat-session-1',
-        expect.stringContaining('Claude Code compaction loop detected'),
+        expect.stringContaining('Claude Code compaction loop detected')
       );
       expect(syncTriggerExecutionMock).toHaveBeenCalledWith(
         env.DATABASE,
         'task-compaction-loop',
         'failed',
-        expect.stringContaining('Claude Code compaction loop detected'),
+        expect.stringContaining('Claude Code compaction loop detected')
       );
       expect(cleanupTaskRun).toHaveBeenCalledWith('task-compaction-loop', env);
       expect(persistError).toHaveBeenCalledWith(
@@ -257,14 +267,14 @@ describe('recoverStuckTasks', () => {
               }),
             }),
           }),
-        }),
+        })
       );
     });
 
     it('does not fail a fresh in-progress task without a running Claude Code agent session', async () => {
       const recent = new Date(Date.now() - 30 * 1000).toISOString();
       const responses = new Map<string, { results: unknown[]; changes?: number }>();
-      responses.set('status IN (\'queued\', \'delegated\', \'in_progress\')', {
+      responses.set("status IN ('queued', 'delegated', 'in_progress')", {
         results: [
           {
             id: 'task-opencode',
@@ -299,21 +309,32 @@ describe('recoverStuckTasks', () => {
       const old = new Date(now - 5 * 60 * 60 * 1000).toISOString();
       const recentHeartbeat = new Date(now - 30 * 1000).toISOString();
       const responses = new Map<string, { results: unknown[]; changes?: number }>();
-      responses.set('status IN (\'queued\', \'delegated\', \'in_progress\')', {
-        results: [{
-          id: 'task-liveness-unknown',
-          project_id: 'proj-1',
-          user_id: 'user-1',
-          status: 'in_progress',
-          execution_step: 'running',
-          updated_at: old,
-          started_at: old,
-          workspace_id: 'ws-1',
-          auto_provisioned_node_id: 'node-1',
-        }],
+      responses.set("status IN ('queued', 'delegated', 'in_progress')", {
+        results: [
+          {
+            id: 'task-liveness-unknown',
+            project_id: 'proj-1',
+            user_id: 'user-1',
+            status: 'in_progress',
+            execution_step: 'running',
+            updated_at: old,
+            started_at: old,
+            workspace_id: 'ws-1',
+            auto_provisioned_node_id: 'node-1',
+          },
+        ],
       });
       responses.set('w.chat_session_id', {
-        results: [{ workspace_status: 'running', chat_session_id: 'chat-1', node_id: 'node-1', node_status: 'running', health_status: 'healthy', last_heartbeat_at: recentHeartbeat }],
+        results: [
+          {
+            workspace_status: 'running',
+            chat_session_id: 'chat-1',
+            node_id: 'node-1',
+            node_status: 'running',
+            health_status: 'healthy',
+            last_heartbeat_at: recentHeartbeat,
+          },
+        ],
       });
       projectDataMocks.listAcpSessions.mockRejectedValueOnce(new Error('ProjectData unavailable'));
 
@@ -334,7 +355,7 @@ describe('recoverStuckTasks', () => {
 
       const responses = new Map<string, { results: unknown[]; changes?: number }>();
       // Query to find stuck tasks
-      responses.set('status IN (\'queued\', \'delegated\', \'in_progress\')', {
+      responses.set("status IN ('queued', 'delegated', 'in_progress')", {
         results: [
           {
             id: 'task-1',
@@ -358,7 +379,16 @@ describe('recoverStuckTasks', () => {
         results: [{ last_heartbeat_at: recentHeartbeat }],
       });
       responses.set('w.chat_session_id', {
-        results: [{ workspace_status: 'running', chat_session_id: 'chat-1', node_id: 'node-1', node_status: 'running', health_status: 'healthy', last_heartbeat_at: recentHeartbeat }],
+        results: [
+          {
+            workspace_status: 'running',
+            chat_session_id: 'chat-1',
+            node_id: 'node-1',
+            node_status: 'running',
+            health_status: 'healthy',
+            last_heartbeat_at: recentHeartbeat,
+          },
+        ],
       });
 
       const env = createMockEnv(responses);
@@ -378,7 +408,7 @@ describe('recoverStuckTasks', () => {
       const recentHeartbeat = new Date(now - 30 * 1000).toISOString();
 
       const responses = new Map<string, { results: unknown[]; changes?: number }>();
-      responses.set('status IN (\'queued\', \'delegated\', \'in_progress\')', {
+      responses.set("status IN ('queued', 'delegated', 'in_progress')", {
         results: [
           {
             id: 'task-1',
@@ -394,7 +424,16 @@ describe('recoverStuckTasks', () => {
         ],
       });
       responses.set('w.chat_session_id', {
-        results: [{ workspace_status: 'running', chat_session_id: 'chat-1', node_id: 'node-1', node_status: 'running', health_status: 'healthy', last_heartbeat_at: recentHeartbeat }],
+        results: [
+          {
+            workspace_status: 'running',
+            chat_session_id: 'chat-1',
+            node_id: 'node-1',
+            node_status: 'running',
+            health_status: 'healthy',
+            last_heartbeat_at: recentHeartbeat,
+          },
+        ],
       });
 
       const env = createMockEnv(responses);
@@ -413,7 +452,7 @@ describe('recoverStuckTasks', () => {
       const staleHeartbeat = new Date(now - 10 * 60 * 1000).toISOString();
 
       const responses = new Map<string, { results: unknown[]; changes?: number }>();
-      responses.set('status IN (\'queued\', \'delegated\', \'in_progress\')', {
+      responses.set("status IN ('queued', 'delegated', 'in_progress')", {
         results: [
           {
             id: 'task-1',
@@ -435,7 +474,16 @@ describe('recoverStuckTasks', () => {
         results: [{ last_heartbeat_at: staleHeartbeat }],
       });
       responses.set('w.chat_session_id', {
-        results: [{ workspace_status: 'running', chat_session_id: 'chat-1', node_id: 'node-1', node_status: 'running', health_status: 'healthy', last_heartbeat_at: staleHeartbeat }],
+        results: [
+          {
+            workspace_status: 'running',
+            chat_session_id: 'chat-1',
+            node_id: 'node-1',
+            node_status: 'running',
+            health_status: 'healthy',
+            last_heartbeat_at: staleHeartbeat,
+          },
+        ],
       });
       // Workspace status for diagnostics
       responses.set('node_id, status FROM workspaces', {
@@ -446,7 +494,7 @@ describe('recoverStuckTasks', () => {
         results: [{ id: 'node-1', status: 'running', health_status: 'healthy' }],
       });
       // Task update (mark as failed)
-      responses.set('UPDATE tasks SET status = \'failed\'', {
+      responses.set("UPDATE tasks SET status = 'failed'", {
         results: [],
         changes: 1,
       });
@@ -462,7 +510,7 @@ describe('recoverStuckTasks', () => {
         env.DATABASE,
         'task-1',
         'failed',
-        expect.stringContaining('runtime is no longer live'),
+        expect.stringContaining('runtime is no longer live')
       );
     });
 
@@ -476,7 +524,7 @@ describe('recoverStuckTasks', () => {
       const recentHeartbeat = new Date(now - 30 * 1000).toISOString(); // node very much alive
 
       const responses = new Map<string, { results: unknown[]; changes?: number }>();
-      responses.set('status IN (\'queued\', \'delegated\', \'in_progress\')', {
+      responses.set("status IN ('queued', 'delegated', 'in_progress')", {
         results: [
           {
             id: 'task-1',
@@ -492,7 +540,16 @@ describe('recoverStuckTasks', () => {
         ],
       });
       responses.set('w.chat_session_id', {
-        results: [{ workspace_status: 'running', chat_session_id: 'chat-1', node_id: 'node-1', node_status: 'running', health_status: 'healthy', last_heartbeat_at: recentHeartbeat }],
+        results: [
+          {
+            workspace_status: 'running',
+            chat_session_id: 'chat-1',
+            node_id: 'node-1',
+            node_status: 'running',
+            health_status: 'healthy',
+            last_heartbeat_at: recentHeartbeat,
+          },
+        ],
       });
       responses.set('node_id, status FROM workspaces', {
         results: [{ id: 'ws-1', node_id: 'node-1', status: 'running' }],
@@ -500,7 +557,7 @@ describe('recoverStuckTasks', () => {
       responses.set('status, health_status FROM nodes', {
         results: [{ id: 'node-1', status: 'running', health_status: 'healthy' }],
       });
-      responses.set('UPDATE tasks SET status = \'failed\'', { results: [], changes: 1 });
+      responses.set("UPDATE tasks SET status = 'failed'", { results: [], changes: 1 });
 
       // No live task-scoped ACP session, despite the healthy node.
       projectDataMocks.listAcpSessions.mockResolvedValueOnce({ sessions: [], total: 0 });
@@ -515,7 +572,7 @@ describe('recoverStuckTasks', () => {
         env.DATABASE,
         'task-1',
         'failed',
-        expect.stringContaining('task_acp_session_not_live'),
+        expect.stringContaining('task_acp_session_not_live')
       );
     });
 
@@ -525,7 +582,7 @@ describe('recoverStuckTasks', () => {
       const updatedAt = new Date(now - 5 * 60 * 60 * 1000).toISOString();
 
       const responses = new Map<string, { results: unknown[]; changes?: number }>();
-      responses.set('status IN (\'queued\', \'delegated\', \'in_progress\')', {
+      responses.set("status IN ('queued', 'delegated', 'in_progress')", {
         results: [
           {
             id: 'task-1',
@@ -545,7 +602,7 @@ describe('recoverStuckTasks', () => {
         results: [],
       });
       // Task update
-      responses.set('UPDATE tasks SET status = \'failed\'', {
+      responses.set("UPDATE tasks SET status = 'failed'", {
         results: [],
         changes: 1,
       });
@@ -698,7 +755,7 @@ describe('recoverStuckTasks', () => {
       const recentHeartbeat = new Date(now - 30 * 1000).toISOString();
 
       const responses = new Map<string, { results: unknown[]; changes?: number }>();
-      responses.set('status IN (\'queued\', \'delegated\', \'in_progress\')', {
+      responses.set("status IN ('queued', 'delegated', 'in_progress')", {
         results: [
           {
             id: 'task-hard',
@@ -722,7 +779,16 @@ describe('recoverStuckTasks', () => {
         results: [{ last_heartbeat_at: recentHeartbeat }],
       });
       responses.set('w.chat_session_id', {
-        results: [{ workspace_status: 'running', chat_session_id: 'chat-1', node_id: 'node-1', node_status: 'running', health_status: 'healthy', last_heartbeat_at: recentHeartbeat }],
+        results: [
+          {
+            workspace_status: 'running',
+            chat_session_id: 'chat-1',
+            node_id: 'node-1',
+            node_status: 'running',
+            health_status: 'healthy',
+            last_heartbeat_at: recentHeartbeat,
+          },
+        ],
       });
       // Workspace status for diagnostics
       responses.set('node_id, status FROM workspaces', {
@@ -733,7 +799,7 @@ describe('recoverStuckTasks', () => {
         results: [{ id: 'node-1', status: 'running', health_status: 'healthy' }],
       });
       // Task update (mark as failed)
-      responses.set('UPDATE tasks SET status = \'failed\'', {
+      responses.set("UPDATE tasks SET status = 'failed'", {
         results: [],
         changes: 1,
       });
@@ -755,7 +821,7 @@ describe('recoverStuckTasks', () => {
       const recentHeartbeat = new Date(now - 30 * 1000).toISOString();
 
       const responses = new Map<string, { results: unknown[]; changes?: number }>();
-      responses.set('status IN (\'queued\', \'delegated\', \'in_progress\')', {
+      responses.set("status IN ('queued', 'delegated', 'in_progress')", {
         results: [
           {
             id: 'task-grace',
@@ -777,7 +843,16 @@ describe('recoverStuckTasks', () => {
         results: [{ last_heartbeat_at: recentHeartbeat }],
       });
       responses.set('w.chat_session_id', {
-        results: [{ workspace_status: 'running', chat_session_id: 'chat-1', node_id: 'node-1', node_status: 'running', health_status: 'healthy', last_heartbeat_at: recentHeartbeat }],
+        results: [
+          {
+            workspace_status: 'running',
+            chat_session_id: 'chat-1',
+            node_id: 'node-1',
+            node_status: 'running',
+            health_status: 'healthy',
+            last_heartbeat_at: recentHeartbeat,
+          },
+        ],
       });
 
       const env = createMockEnv(responses);
@@ -797,7 +872,7 @@ describe('recoverStuckTasks', () => {
       const staleHeartbeat = new Date(now - 10 * 60 * 1000).toISOString();
 
       const responses = new Map<string, { results: unknown[]; changes?: number }>();
-      responses.set('status IN (\'queued\', \'delegated\', \'in_progress\')', {
+      responses.set("status IN ('queued', 'delegated', 'in_progress')", {
         results: [
           {
             id: 'task-stale-grace',
@@ -824,7 +899,7 @@ describe('recoverStuckTasks', () => {
       responses.set('status, health_status FROM nodes', {
         results: [{ id: 'node-1', status: 'running', health_status: 'healthy' }],
       });
-      responses.set('UPDATE tasks SET status = \'failed\'', {
+      responses.set("UPDATE tasks SET status = 'failed'", {
         results: [],
         changes: 1,
       });
@@ -847,7 +922,7 @@ describe('recoverStuckTasks', () => {
       const updatedAt = new Date(now - 3 * 60 * 60 * 1000).toISOString();
 
       const responses = new Map<string, { results: unknown[]; changes?: number }>();
-      responses.set('status IN (\'queued\', \'delegated\', \'in_progress\')', {
+      responses.set("status IN ('queued', 'delegated', 'in_progress')", {
         results: [
           {
             id: 'task-custom',
@@ -862,7 +937,7 @@ describe('recoverStuckTasks', () => {
           },
         ],
       });
-      responses.set('UPDATE tasks SET status = \'failed\'', {
+      responses.set("UPDATE tasks SET status = 'failed'", {
         results: [],
         changes: 1,
       });
@@ -882,7 +957,7 @@ describe('recoverStuckTasks', () => {
         env.DATABASE,
         'task-custom',
         'failed',
-        expect.stringContaining('120 minutes'),
+        expect.stringContaining('120 minutes')
       );
     });
   });
@@ -894,7 +969,7 @@ describe('recoverStuckTasks', () => {
       const updatedAt = new Date(now - 11 * 60 * 1000).toISOString();
 
       const responses = new Map<string, { results: unknown[]; changes?: number }>();
-      responses.set('status IN (\'queued\', \'delegated\', \'in_progress\')', {
+      responses.set("status IN ('queued', 'delegated', 'in_progress')", {
         results: [
           {
             id: 'task-q',
@@ -909,7 +984,7 @@ describe('recoverStuckTasks', () => {
           },
         ],
       });
-      responses.set('UPDATE tasks SET status = \'failed\'', { results: [], changes: 1 });
+      responses.set("UPDATE tasks SET status = 'failed'", { results: [], changes: 1 });
 
       const env = createMockEnv(responses);
       const result = await recoverStuckTasks(env);
@@ -923,7 +998,7 @@ describe('recoverStuckTasks', () => {
       const updatedAt = new Date(now - 32 * 60 * 1000).toISOString();
 
       const responses = new Map<string, { results: unknown[]; changes?: number }>();
-      responses.set('status IN (\'queued\', \'delegated\', \'in_progress\')', {
+      responses.set("status IN ('queued', 'delegated', 'in_progress')", {
         results: [
           {
             id: 'task-d',
@@ -938,7 +1013,7 @@ describe('recoverStuckTasks', () => {
           },
         ],
       });
-      responses.set('UPDATE tasks SET status = \'failed\'', { results: [], changes: 1 });
+      responses.set("UPDATE tasks SET status = 'failed'", { results: [], changes: 1 });
 
       const env = createMockEnv(responses);
       const result = await recoverStuckTasks(env);
@@ -947,11 +1022,149 @@ describe('recoverStuckTasks', () => {
     });
   });
 
+  describe('prompt dead-runtime reconciliation', () => {
+    function deadRuntimeResponses(taskId: string) {
+      const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+      return new Map<string, { results: unknown[]; changes?: number }>([
+        [
+          "status IN ('queued', 'delegated', 'in_progress')",
+          {
+            results: [
+              {
+                id: taskId,
+                project_id: 'proj-1',
+                user_id: 'user-1',
+                status: 'in_progress',
+                execution_step: 'running',
+                updated_at: tenMinutesAgo,
+                started_at: tenMinutesAgo,
+                workspace_id: 'ws-deleted',
+                auto_provisioned_node_id: 'node-deleted',
+              },
+            ],
+          },
+        ],
+        [
+          'w.chat_session_id',
+          {
+            results: [
+              {
+                workspace_status: 'deleted',
+                chat_session_id: 'chat-1',
+                node_id: 'node-deleted',
+                node_status: 'deleted',
+                health_status: 'stale',
+                last_heartbeat_at: tenMinutesAgo,
+              },
+            ],
+          },
+        ],
+        [
+          'node_id, status FROM workspaces',
+          {
+            results: [{ id: 'ws-deleted', node_id: 'node-deleted', status: 'deleted' }],
+          },
+        ],
+        [
+          'status, health_status FROM nodes',
+          {
+            results: [{ id: 'node-deleted', status: 'deleted', health_status: 'stale' }],
+          },
+        ],
+        ["UPDATE tasks SET status = 'failed'", { results: [], changes: 1 }],
+      ]);
+    }
+
+    it('fails a conclusively dead runtime even when TaskRunner state is missing', async () => {
+      const env = createMockEnv(deadRuntimeResponses('task-do-missing'), {
+        TASK_DO_MISMATCH_GRACE_MS: '60000',
+      });
+
+      const result = await recoverStuckTasks(env);
+
+      expect(result.failedInProgress).toBe(1);
+      expect(result.deadRuntimeReconciled).toBe(1);
+      expect(result.doHealthMissing).toBe(1);
+      expect(syncTriggerExecutionMock).toHaveBeenCalledWith(
+        env.DATABASE,
+        'task-do-missing',
+        'failed',
+        expect.stringContaining('workspace_deleted')
+      );
+    });
+
+    it('fails a conclusively dead runtime and records the TaskRunner RPC failure', async () => {
+      const env = createMockEnv(
+        deadRuntimeResponses('task-do-error'),
+        { TASK_DO_MISMATCH_GRACE_MS: '60000' },
+        new Error('TaskRunner RPC unavailable')
+      );
+
+      const result = await recoverStuckTasks(env);
+
+      expect(result.failedInProgress).toBe(1);
+      expect(result.deadRuntimeReconciled).toBe(1);
+      expect(result.doHealthErrors).toBe(1);
+      expect(syncTriggerExecutionMock).toHaveBeenCalledWith(
+        env.DATABASE,
+        'task-do-error',
+        'failed',
+        expect.stringContaining('workspace_deleted')
+      );
+    });
+
+    it('classifies a bounded TaskRunner status timeout', async () => {
+      const neverResolves = new Promise<never>(() => undefined);
+      const env = createMockEnv(
+        new Map(),
+        { TASK_LIVENESS_PROBE_TIMEOUT_MS: '1' },
+        neverResolves,
+      );
+
+      const probe = await probeTaskRunnerStatus(env, 'task-do-timeout');
+
+      expect(probe).toMatchObject({
+        outcome: 'timeout',
+        status: null,
+        error: expect.stringContaining('exceeded 1ms'),
+      });
+    });
+
+    it('reports the exact read-only reconciliation decision for admins', async () => {
+      const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+      const responses = deadRuntimeResponses('task-admin-diagnostics');
+      responses.set('FROM tasks\n     WHERE id = ?', {
+        results: [
+          {
+            id: 'task-admin-diagnostics',
+            project_id: 'proj-1',
+            status: 'in_progress',
+            execution_step: 'running',
+            started_at: tenMinutesAgo,
+            updated_at: tenMinutesAgo,
+            workspace_id: 'ws-deleted',
+          },
+        ],
+      });
+      const env = createMockEnv(responses, { TASK_DO_MISMATCH_GRACE_MS: '60000' });
+
+      const diagnostics = await getTaskReconciliationDiagnostics(env, 'task-admin-diagnostics');
+
+      expect(diagnostics).toMatchObject({
+        taskId: 'task-admin-diagnostics',
+        eligible: true,
+        decision: 'reconcile_dead_runtime',
+        liveness: { conclusive: true, live: false, reason: 'workspace_deleted' },
+        taskRunner: { outcome: 'missing', status: null },
+      });
+    });
+  });
+
   describe('result structure', () => {
     it('returns all expected counters including heartbeatSkipped', async () => {
-      const env = createMockEnv(new Map([
-        ['status IN (\'queued\', \'delegated\', \'in_progress\')', { results: [] }],
-      ]));
+      const env = createMockEnv(
+        new Map([["status IN ('queued', 'delegated', 'in_progress')", { results: [] }]])
+      );
       const result = await recoverStuckTasks(env);
 
       expect(result).toEqual({
@@ -961,6 +1174,9 @@ describe('recoverStuckTasks', () => {
         failedCompactionLoops: 0,
         heartbeatSkipped: 0,
         doHealthChecked: 0,
+        doHealthMissing: 0,
+        doHealthErrors: 0,
+        deadRuntimeReconciled: 0,
         errors: 0,
       });
     });

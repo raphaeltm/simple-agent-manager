@@ -375,11 +375,13 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
   }
 
   const nodeRuntime = workspace.nodeId
-    ? (await db
-        .select({ runtime: schema.nodes.runtime })
-        .from(schema.nodes)
-        .where(eq(schema.nodes.id, workspace.nodeId))
-        .get())?.runtime ?? 'vm'
+    ? ((
+        await db
+          .select({ runtime: schema.nodes.runtime })
+          .from(schema.nodes)
+          .where(eq(schema.nodes.id, workspace.nodeId))
+          .get()
+      )?.runtime ?? 'vm')
     : 'vm';
 
   if (workspace.status !== 'running' && workspace.status !== 'recovery') {
@@ -400,10 +402,16 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
   if (nodeRuntime === 'cf-container') {
     const containerConfig = getVmAgentContainerConfig(c.env);
     if (!containerConfig.enabled) {
-      return c.json({ error: 'CF_CONTAINER_DISABLED', message: 'Container workspace runtime is disabled' }, 503);
+      return c.json(
+        { error: 'CF_CONTAINER_DISABLED', message: 'Container workspace runtime is disabled' },
+        503
+      );
     }
     if (!c.env.VM_AGENT_CONTAINER) {
-      return c.json({ error: 'CF_CONTAINER_UNAVAILABLE', message: 'VM agent container binding is unavailable' }, 503);
+      return c.json(
+        { error: 'CF_CONTAINER_UNAVAILABLE', message: 'VM agent container binding is unavailable' },
+        503
+      );
     }
 
     const containerId = workspace.nodeId || workspaceId;
@@ -425,7 +433,10 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
           workspaceId,
           ...serializeError(err),
         });
-        return c.json({ error: 'TOKEN_ERROR', message: 'Failed to generate port proxy token' }, 500);
+        return c.json(
+          { error: 'TOKEN_ERROR', message: 'Failed to generate port proxy token' },
+          500
+        );
       }
     }
 
@@ -661,7 +672,8 @@ app.get('/api/config/artifacts-enabled', (c) => {
 // only render a provider button when that provider is actually usable. Google
 // here means the LOGIN client (getGoogleLoginOAuthConfig), never the infra/GCP one.
 app.get('/api/config/login-providers', async (c) => {
-  const { getGitHubOAuthConfig, getGoogleLoginOAuthConfig } = await import('./services/platform-config');
+  const { getGitHubOAuthConfig, getGoogleLoginOAuthConfig } =
+    await import('./services/platform-config');
   const [github, google] = await Promise.all([
     getGitHubOAuthConfig(c.env),
     getGoogleLoginOAuthConfig(c.env),
@@ -929,6 +941,10 @@ export default {
     }
 
     // 5-minute operational sweep
+    // Recover stuck tasks first so an unrelated cleanup failure cannot suppress
+    // the task lifecycle safety net for another five-minute interval.
+    const stuckTasks = await recoverStuckTasks(env);
+
     // Check for stuck provisioning workspaces
     const timedOut = await checkProvisioningTimeouts(env.DATABASE, env, env.OBSERVABILITY_DATABASE);
 
@@ -938,9 +954,6 @@ export default {
 
     // Clean up stale warm nodes and expired auto-provisioned nodes
     const nodeCleanup = await runNodeCleanupSweep(env);
-
-    // Recover stuck tasks (queued/delegated/in_progress past timeout)
-    const stuckTasks = await recoverStuckTasks(env);
 
     // Purge expired observability errors (retention + row count limits)
     const observabilityPurge = await runObservabilityPurge(env);
@@ -979,6 +992,9 @@ export default {
       stuckTasksHeartbeatSkipped: stuckTasks.heartbeatSkipped,
       stuckTaskErrors: stuckTasks.errors,
       stuckTaskDoHealthChecked: stuckTasks.doHealthChecked,
+      stuckTaskDoHealthMissing: stuckTasks.doHealthMissing,
+      stuckTaskDoHealthErrors: stuckTasks.doHealthErrors,
+      stuckTaskDeadRuntimeReconciled: stuckTasks.deadRuntimeReconciled,
       observabilityPurgedByAge: observabilityPurge.deletedByAge,
       observabilityPurgedByCount: observabilityPurge.deletedByCount,
       cronTriggersChecked: cronTriggers.checked,

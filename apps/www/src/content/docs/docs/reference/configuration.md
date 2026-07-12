@@ -201,7 +201,7 @@ SAM loads OpenCode Zen and OpenCode Go model choices through the authenticated m
 | Variable                                           | Default            | Description                                                                           |
 | -------------------------------------------------- | ------------------ | ------------------------------------------------------------------------------------- |
 | `TASK_RUN_MAX_EXECUTION_MS`                        | `14400000` (4 hr)  | Max task execution time                                                               |
-| `TASK_STUCK_QUEUED_TIMEOUT_MS`                     | `600000` (10 min)  | Timeout for tasks stuck in queued state                                               |
+| `TASK_STUCK_QUEUED_TIMEOUT_MS`                     | `1200000` (20 min) | Timeout for tasks stuck in queued state                                               |
 | `TASK_STUCK_DELEGATED_TIMEOUT_MS`                  | `1860000` (31 min) | Timeout for tasks stuck in delegated state                                            |
 | `TASK_DO_MISMATCH_GRACE_MS`                       | `300000` (5 min)   | Minimum age before reconciling completed TaskRunner state with task-scoped liveness   |
 | `STUCK_TASK_MAX_CANDIDATES_PER_SWEEP`             | `100`              | Maximum active tasks inspected by each recovery sweep                                 |

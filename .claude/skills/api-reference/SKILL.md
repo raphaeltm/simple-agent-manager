@@ -60,6 +60,12 @@ user-invocable: false
 - `POST /api/projects/:projectId/tasks/:taskId/delegate` — Delegate ready+unblocked task to owned running workspace
 - `GET /api/projects/:projectId/tasks/:taskId/events` — List append-only task status events
 
+## Administration (Superadmin Only)
+
+- `GET /api/admin/tasks/stuck` — List tasks currently in transient states
+- `GET /api/admin/tasks/:taskId/reconciliation-diagnostics` — Read the TaskRunner probe, task-scoped runtime liveness, eligibility threshold, and reconciliation decision without mutating task state
+- `GET /api/admin/tasks/recent-failures` — List recent failed tasks with error details
+
 ## Agent Sessions
 
 - `GET /api/workspaces/:id/agent-sessions` — List workspace agent sessions

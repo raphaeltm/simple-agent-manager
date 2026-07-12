@@ -45,7 +45,10 @@ import { persistError } from '../services/observability';
 import * as projectDataService from '../services/project-data';
 import { cleanupTaskRun } from '../services/task-runner';
 import { syncTriggerExecutionStatus } from '../services/trigger-execution-sync';
-import { type CompactionLoopRecovery, detectTaskCompactionLoop } from './claude-code-compaction-loop';
+import {
+  type CompactionLoopRecovery,
+  detectTaskCompactionLoop,
+} from './claude-code-compaction-loop';
 
 function parseMs(value: string | undefined, fallback: number): number {
   if (!value) return fallback;
@@ -78,7 +81,22 @@ export interface StuckTaskResult {
   failedCompactionLoops: number;
   heartbeatSkipped: number;
   doHealthChecked: number;
+  doHealthMissing: number;
+  doHealthErrors: number;
+  deadRuntimeReconciled: number;
   errors: number;
+}
+
+export interface TaskRunnerProbeResult {
+  outcome: 'ok' | 'missing' | 'timeout' | 'error';
+  status: {
+    completed: boolean;
+    currentStep: string;
+    retryCount: number;
+    lastStepAt: number;
+  } | null;
+  error: string | null;
+  durationMs: number;
 }
 
 /**
@@ -99,11 +117,13 @@ export interface RecoveryDiagnostics {
   nodeHealthStatus: string | null;
   autoProvisionedNodeId: string | null;
   doState: {
+    outcome: TaskRunnerProbeResult['outcome'];
     exists: boolean;
     completed: boolean | null;
     currentStep: string | null;
     retryCount: number | null;
     lastStepAt: number | null;
+    error: string | null;
   } | null;
 }
 
@@ -116,16 +136,114 @@ export interface TaskRuntimeLiveness {
   activeAcpSessionId: string | null;
 }
 
+export type TaskReconciliationDecision =
+  | 'not_active'
+  | 'within_grace'
+  | 'reconcile_dead_runtime'
+  | 'preserve_live_runtime'
+  | 'preserve_inconclusive_runtime'
+  | 'observe_orchestration';
+
+export interface TaskReconciliationDiagnostics {
+  taskId: string;
+  status: string;
+  executionStep: string | null;
+  workspaceId: string | null;
+  elapsedMs: number;
+  eligibilityThresholdMs: number;
+  eligible: boolean;
+  decision: TaskReconciliationDecision;
+  liveness: TaskRuntimeLiveness | null;
+  taskRunner: TaskRunnerProbeResult;
+}
+
 const LIVE_WORKSPACE_STATUSES = new Set(['running', 'recovery']);
 const ACTIVE_ACP_STATUSES = new Set(['assigned', 'running']);
+
+/** Bound and classify the cross-DO status RPC used by reconciliation diagnostics. */
+export async function probeTaskRunnerStatus(
+  env: Env,
+  taskId: string
+): Promise<TaskRunnerProbeResult> {
+  const startedAt = Date.now();
+  const probeTimeoutMs = parseMs(
+    env.TASK_LIVENESS_PROBE_TIMEOUT_MS,
+    DEFAULT_TASK_LIVENESS_PROBE_TIMEOUT_MS
+  );
+  const timeout = Symbol('task_runner_probe_timeout');
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  try {
+    const doId = env.TASK_RUNNER.idFromName(taskId);
+    const stub = env.TASK_RUNNER.get(doId) as DurableObjectStub<TaskRunner>;
+    const result = await Promise.race([
+      stub.getStatus(),
+      new Promise<typeof timeout>((resolve) => {
+        timer = setTimeout(() => resolve(timeout), probeTimeoutMs);
+      }),
+    ]);
+
+    if (result === timeout) {
+      log.warn('stuck_task.task_runner_probe_timeout', { taskId, probeTimeoutMs });
+      return {
+        outcome: 'timeout',
+        status: null,
+        error: `TaskRunner status probe exceeded ${probeTimeoutMs}ms`,
+        durationMs: Date.now() - startedAt,
+      };
+    }
+
+    if (!result) {
+      log.warn('stuck_task.task_runner_state_missing', { taskId });
+      return {
+        outcome: 'missing',
+        status: null,
+        error: null,
+        durationMs: Date.now() - startedAt,
+      };
+    }
+
+    return {
+      outcome: 'ok',
+      status: {
+        completed: result.completed,
+        currentStep: result.currentStep,
+        retryCount: result.retryCount,
+        lastStepAt: result.lastStepAt,
+      },
+      error: null,
+      durationMs: Date.now() - startedAt,
+    };
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    log.warn('stuck_task.task_runner_probe_failed', { taskId, error });
+    return {
+      outcome: 'error',
+      status: null,
+      error,
+      durationMs: Date.now() - startedAt,
+    };
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 /** Prove task-scoped liveness. A shared-node heartbeat is never sufficient. */
 export async function getTaskRuntimeLiveness(
   env: Env,
-  task: { project_id: string; workspace_id: string | null },
+  task: { project_id: string; workspace_id: string | null }
 ): Promise<TaskRuntimeLiveness> {
-  const dead = (reason: string, workspaceStatus: string | null, nodeId: string | null): TaskRuntimeLiveness => ({
-    live: false, conclusive: true, reason, workspaceStatus, nodeId, activeAcpSessionId: null,
+  const dead = (
+    reason: string,
+    workspaceStatus: string | null,
+    nodeId: string | null
+  ): TaskRuntimeLiveness => ({
+    live: false,
+    conclusive: true,
+    reason,
+    workspaceStatus,
+    nodeId,
+    activeAcpSessionId: null,
   });
   if (!task.workspace_id) return dead('workspace_missing', null, null);
 
@@ -136,35 +254,58 @@ export async function getTaskRuntimeLiveness(
      LEFT JOIN nodes n ON n.id = w.node_id
      WHERE w.id = ?
      LIMIT 1`
-  ).bind(task.workspace_id).first<{
-    workspace_status: string;
-    chat_session_id: string | null;
-    node_id: string | null;
-    node_status: string | null;
-    health_status: string | null;
-    last_heartbeat_at: string | null;
-  }>();
+  )
+    .bind(task.workspace_id)
+    .first<{
+      workspace_status: string;
+      chat_session_id: string | null;
+      node_id: string | null;
+      node_status: string | null;
+      health_status: string | null;
+      last_heartbeat_at: string | null;
+    }>();
 
   if (!row) return dead('workspace_missing', null, null);
   if (!LIVE_WORKSPACE_STATUSES.has(row.workspace_status)) {
     return dead(`workspace_${row.workspace_status}`, row.workspace_status, row.node_id);
   }
   if (!row.chat_session_id || !row.node_id) {
-    return { live: false, conclusive: false, reason: 'workspace_runtime_identity_incomplete', workspaceStatus: row.workspace_status, nodeId: row.node_id, activeAcpSessionId: null };
+    return {
+      live: false,
+      conclusive: false,
+      reason: 'workspace_runtime_identity_incomplete',
+      workspaceStatus: row.workspace_status,
+      nodeId: row.node_id,
+      activeAcpSessionId: null,
+    };
   }
 
-  const staleSeconds = parseInt(env.NODE_HEARTBEAT_STALE_SECONDS || '', 10) || DEFAULT_NODE_HEARTBEAT_STALE_SECONDS;
+  const staleSeconds =
+    parseInt(env.NODE_HEARTBEAT_STALE_SECONDS || '', 10) || DEFAULT_NODE_HEARTBEAT_STALE_SECONDS;
   const staleMs = staleSeconds * 1000;
-  const nodeHeartbeatAt = row.last_heartbeat_at ? new Date(row.last_heartbeat_at).getTime() : Number.NaN;
-  if (row.node_status !== 'running' || row.health_status !== 'healthy' || !Number.isFinite(nodeHeartbeatAt) || Date.now() - nodeHeartbeatAt > staleMs) {
+  const nodeHeartbeatAt = row.last_heartbeat_at
+    ? new Date(row.last_heartbeat_at).getTime()
+    : Number.NaN;
+  if (
+    row.node_status !== 'running' ||
+    row.health_status !== 'healthy' ||
+    !Number.isFinite(nodeHeartbeatAt) ||
+    Date.now() - nodeHeartbeatAt > staleMs
+  ) {
     return dead('node_not_live', row.workspace_status, row.node_id);
   }
 
   try {
-    const limit = parseMs(env.TASK_LIVENESS_MAX_ACP_SESSIONS, DEFAULT_TASK_LIVENESS_MAX_ACP_SESSIONS);
+    const limit = parseMs(
+      env.TASK_LIVENESS_MAX_ACP_SESSIONS,
+      DEFAULT_TASK_LIVENESS_MAX_ACP_SESSIONS
+    );
     // Bound the ProjectData DO probe so a slow/unresponsive DO cannot stall the
     // control-loop sweep (rule 47). A timeout is inconclusive, never fatal.
-    const probeTimeoutMs = parseMs(env.TASK_LIVENESS_PROBE_TIMEOUT_MS, DEFAULT_TASK_LIVENESS_PROBE_TIMEOUT_MS);
+    const probeTimeoutMs = parseMs(
+      env.TASK_LIVENESS_PROBE_TIMEOUT_MS,
+      DEFAULT_TASK_LIVENESS_PROBE_TIMEOUT_MS
+    );
     const TIMEOUT = Symbol('liveness_probe_timeout');
     let timer: ReturnType<typeof setTimeout> | undefined;
     const probe = await Promise.race([
@@ -182,16 +323,32 @@ export async function getTaskRuntimeLiveness(
         workspaceId: task.workspace_id,
         probeTimeoutMs,
       });
-      return { live: false, conclusive: false, reason: 'task_liveness_timeout', workspaceStatus: row.workspace_status, nodeId: row.node_id, activeAcpSessionId: null };
+      return {
+        live: false,
+        conclusive: false,
+        reason: 'task_liveness_timeout',
+        workspaceStatus: row.workspace_status,
+        nodeId: row.node_id,
+        activeAcpSessionId: null,
+      };
     }
     const { sessions } = probe;
     const active = sessions.find((session) => {
-      if (!ACTIVE_ACP_STATUSES.has(session.status) || session.workspaceId !== task.workspace_id) return false;
-      const heartbeatAt = session.lastHeartbeatAt ?? session.updatedAt ?? session.startedAt ?? session.createdAt;
+      if (!ACTIVE_ACP_STATUSES.has(session.status) || session.workspaceId !== task.workspace_id)
+        return false;
+      const heartbeatAt =
+        session.lastHeartbeatAt ?? session.updatedAt ?? session.startedAt ?? session.createdAt;
       return Number.isFinite(heartbeatAt) && Date.now() - heartbeatAt <= staleMs;
     });
     if (active) {
-      return { live: true, conclusive: true, reason: 'task_acp_session_live', workspaceStatus: row.workspace_status, nodeId: row.node_id, activeAcpSessionId: active.id };
+      return {
+        live: true,
+        conclusive: true,
+        reason: 'task_acp_session_live',
+        workspaceStatus: row.workspace_status,
+        nodeId: row.node_id,
+        activeAcpSessionId: active.id,
+      };
     }
     return dead('task_acp_session_not_live', row.workspace_status, row.node_id);
   } catch (err) {
@@ -199,8 +356,106 @@ export async function getTaskRuntimeLiveness(
       workspaceId: task.workspace_id,
       error: err instanceof Error ? err.message : String(err),
     });
-    return { live: false, conclusive: false, reason: 'task_liveness_unknown', workspaceStatus: row.workspace_status, nodeId: row.node_id, activeAcpSessionId: null };
+    return {
+      live: false,
+      conclusive: false,
+      reason: 'task_liveness_unknown',
+      workspaceStatus: row.workspace_status,
+      nodeId: row.node_id,
+      activeAcpSessionId: null,
+    };
   }
+}
+
+/**
+ * Explain the evidence the scheduled reconciler would use for one task.
+ * This helper is deliberately read-only so superadmins can inspect live state
+ * without mutating D1 or either Durable Object.
+ */
+export async function getTaskReconciliationDiagnostics(
+  env: Env,
+  taskId: string
+): Promise<TaskReconciliationDiagnostics | null> {
+  const task = await env.DATABASE.prepare(
+    `SELECT id, project_id, status, execution_step, started_at, updated_at, workspace_id
+     FROM tasks
+     WHERE id = ?
+     LIMIT 1`
+  )
+    .bind(taskId)
+    .first<{
+      id: string;
+      project_id: string;
+      status: string;
+      execution_step: string | null;
+      started_at: string | null;
+      updated_at: string;
+      workspace_id: string | null;
+    }>();
+
+  if (!task) return null;
+
+  const now = Date.now();
+  const updatedAt = new Date(task.updated_at).getTime();
+  const elapsedMs = now - updatedAt;
+  const mismatchGraceMs = parseMs(env.TASK_DO_MISMATCH_GRACE_MS, DEFAULT_TASK_DO_MISMATCH_GRACE_MS);
+  const queuedTimeoutMs = parseMs(
+    env.TASK_STUCK_QUEUED_TIMEOUT_MS,
+    DEFAULT_TASK_STUCK_QUEUED_TIMEOUT_MS
+  );
+  const delegatedTimeoutMs = parseMs(
+    env.TASK_STUCK_DELEGATED_TIMEOUT_MS,
+    DEFAULT_TASK_STUCK_DELEGATED_TIMEOUT_MS
+  );
+  const maxExecutionMs = parseMs(env.TASK_RUN_MAX_EXECUTION_MS, DEFAULT_TASK_RUN_MAX_EXECUTION_MS);
+
+  let timeForCheck = elapsedMs;
+  let halfThreshold = mismatchGraceMs;
+  if (task.status === 'queued') {
+    halfThreshold = queuedTimeoutMs / 2;
+  } else if (task.status === 'delegated') {
+    halfThreshold = delegatedTimeoutMs / 2;
+  } else if (task.status === 'in_progress') {
+    const startedAt = task.started_at ? new Date(task.started_at).getTime() : updatedAt;
+    timeForCheck = now - startedAt;
+    halfThreshold = maxExecutionMs / 2;
+  }
+
+  const eligibilityThresholdMs = Math.min(halfThreshold, mismatchGraceMs);
+  const active = ['queued', 'delegated', 'in_progress'].includes(task.status);
+  const eligible = active && timeForCheck > eligibilityThresholdMs;
+  const [taskRunner, liveness] = await Promise.all([
+    probeTaskRunnerStatus(env, task.id),
+    task.status === 'in_progress' ? getTaskRuntimeLiveness(env, task) : Promise.resolve(null),
+  ]);
+
+  let decision: TaskReconciliationDecision;
+  if (!active) {
+    decision = 'not_active';
+  } else if (!eligible) {
+    decision = 'within_grace';
+  } else if (liveness?.conclusive && !liveness.live) {
+    decision = 'reconcile_dead_runtime';
+  } else if (liveness?.live) {
+    decision = 'preserve_live_runtime';
+  } else if (task.status === 'in_progress') {
+    decision = 'preserve_inconclusive_runtime';
+  } else {
+    decision = 'observe_orchestration';
+  }
+
+  return {
+    taskId: task.id,
+    status: task.status,
+    executionStep: task.execution_step,
+    workspaceId: task.workspace_id,
+    elapsedMs: timeForCheck,
+    eligibilityThresholdMs,
+    eligible,
+    decision,
+    liveness,
+    taskRunner,
+  };
 }
 
 /**
@@ -217,7 +472,8 @@ export async function gatherDiagnostics(
     auto_provisioned_node_id: string | null;
   },
   elapsedMs: number,
-  reason: string
+  reason: string,
+  taskRunnerProbe?: TaskRunnerProbeResult
 ): Promise<RecoveryDiagnostics> {
   const diagnostics: RecoveryDiagnostics = {
     taskId: task.id,
@@ -239,7 +495,9 @@ export async function gatherDiagnostics(
     try {
       const wsResult = await env.DATABASE.prepare(
         `SELECT id, node_id, status FROM workspaces WHERE id = ?`
-      ).bind(task.workspace_id).first<{ id: string; node_id: string | null; status: string }>();
+      )
+        .bind(task.workspace_id)
+        .first<{ id: string; node_id: string | null; status: string }>();
 
       if (wsResult) {
         diagnostics.workspaceStatus = wsResult.status;
@@ -256,7 +514,9 @@ export async function gatherDiagnostics(
     try {
       const nodeResult = await env.DATABASE.prepare(
         `SELECT id, status, health_status FROM nodes WHERE id = ?`
-      ).bind(nodeIdToCheck).first<{ id: string; status: string; health_status: string | null }>();
+      )
+        .bind(nodeIdToCheck)
+        .first<{ id: string; status: string; health_status: string | null }>();
 
       if (nodeResult) {
         diagnostics.nodeId = nodeResult.id;
@@ -268,23 +528,16 @@ export async function gatherDiagnostics(
     }
   }
 
-  // Query TaskRunner DO state
-  try {
-    const doId = env.TASK_RUNNER.idFromName(task.id);
-    const stub = env.TASK_RUNNER.get(doId) as DurableObjectStub<TaskRunner>;
-    const doStatus = await stub.getStatus();
-
-    diagnostics.doState = {
-      exists: doStatus !== null,
-      completed: doStatus?.completed ?? null,
-      currentStep: doStatus?.currentStep ?? null,
-      retryCount: doStatus?.retryCount ?? null,
-      lastStepAt: doStatus?.lastStepAt ?? null,
-    };
-  } catch {
-    // DO may not exist or may be unreachable
-    diagnostics.doState = { exists: false, completed: null, currentStep: null, retryCount: null, lastStepAt: null };
-  }
+  const probe = taskRunnerProbe ?? (await probeTaskRunnerStatus(env, task.id));
+  diagnostics.doState = {
+    outcome: probe.outcome,
+    exists: probe.outcome === 'ok',
+    completed: probe.status?.completed ?? null,
+    currentStep: probe.status?.currentStep ?? null,
+    retryCount: probe.status?.retryCount ?? null,
+    lastStepAt: probe.status?.lastStepAt ?? null,
+    error: probe.error,
+  };
 
   return diagnostics;
 }
@@ -298,22 +551,38 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
     failedCompactionLoops: 0,
     heartbeatSkipped: 0,
     doHealthChecked: 0,
+    doHealthMissing: 0,
+    doHealthErrors: 0,
+    deadRuntimeReconciled: 0,
     errors: 0,
   };
 
-  const queuedTimeoutMs = parseMs(env.TASK_STUCK_QUEUED_TIMEOUT_MS, DEFAULT_TASK_STUCK_QUEUED_TIMEOUT_MS);
-  const delegatedTimeoutMs = parseMs(env.TASK_STUCK_DELEGATED_TIMEOUT_MS, DEFAULT_TASK_STUCK_DELEGATED_TIMEOUT_MS);
+  const queuedTimeoutMs = parseMs(
+    env.TASK_STUCK_QUEUED_TIMEOUT_MS,
+    DEFAULT_TASK_STUCK_QUEUED_TIMEOUT_MS
+  );
+  const delegatedTimeoutMs = parseMs(
+    env.TASK_STUCK_DELEGATED_TIMEOUT_MS,
+    DEFAULT_TASK_STUCK_DELEGATED_TIMEOUT_MS
+  );
   const maxExecutionMs = parseMs(env.TASK_RUN_MAX_EXECUTION_MS, DEFAULT_TASK_RUN_MAX_EXECUTION_MS);
   const hardTimeoutMs = parseMs(env.TASK_RUN_HARD_TIMEOUT_MS, DEFAULT_TASK_RUN_HARD_TIMEOUT_MS);
-  const absoluteCeilingMs = parseMs(env.TASK_RUN_ABSOLUTE_CEILING_MS, DEFAULT_TASK_RUN_ABSOLUTE_CEILING_MS);
+  const absoluteCeilingMs = parseMs(
+    env.TASK_RUN_ABSOLUTE_CEILING_MS,
+    DEFAULT_TASK_RUN_ABSOLUTE_CEILING_MS
+  );
   const mismatchGraceMs = parseMs(env.TASK_DO_MISMATCH_GRACE_MS, DEFAULT_TASK_DO_MISMATCH_GRACE_MS);
-  const maxCandidates = parseMs(env.STUCK_TASK_MAX_CANDIDATES_PER_SWEEP, DEFAULT_STUCK_TASK_MAX_CANDIDATES_PER_SWEEP);
+  const maxCandidates = parseMs(
+    env.STUCK_TASK_MAX_CANDIDATES_PER_SWEEP,
+    DEFAULT_STUCK_TASK_MAX_CANDIDATES_PER_SWEEP
+  );
 
   if (hardTimeoutMs <= maxExecutionMs) {
     log.warn('stuck_task.misconfigured_hard_timeout', {
       hardTimeoutMs,
       maxExecutionMs,
-      message: 'TASK_RUN_HARD_TIMEOUT_MS is <= TASK_RUN_MAX_EXECUTION_MS — heartbeat grace window is effectively zero',
+      message:
+        'TASK_RUN_HARD_TIMEOUT_MS is <= TASK_RUN_MAX_EXECUTION_MS — heartbeat grace window is effectively zero',
     });
   }
 
@@ -333,17 +602,19 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
      WHERE status IN ('queued', 'delegated', 'in_progress')
      ORDER BY updated_at ASC
      LIMIT ?`
-  ).bind(maxCandidates).all<{
-    id: string;
-    project_id: string;
-    user_id: string;
-    status: string;
-    execution_step: string | null;
-    updated_at: string;
-    started_at: string | null;
-    workspace_id: string | null;
-    auto_provisioned_node_id: string | null;
-  }>();
+  )
+    .bind(maxCandidates)
+    .all<{
+      id: string;
+      project_id: string;
+      user_id: string;
+      status: string;
+      execution_step: string | null;
+      updated_at: string;
+      started_at: string | null;
+      workspace_id: string | null;
+      auto_provisioned_node_id: string | null;
+    }>();
 
   const db = drizzle(env.DATABASE, { schema });
 
@@ -353,10 +624,9 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
     let isStuck = false;
     let reason = '';
     let compactionLoopRecovery: CompactionLoopRecovery | null = null;
+    let deadRuntimeRecovery = false;
 
-    const stepInfo = task.execution_step
-      ? ` Last step: ${describeStep(task.execution_step)}.`
-      : '';
+    const stepInfo = task.execution_step ? ` Last step: ${describeStep(task.execution_step)}.` : '';
 
     try {
       compactionLoopRecovery = await detectTaskCompactionLoop(env, task);
@@ -395,6 +665,21 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
     const probeLiveness = async (): Promise<TaskRuntimeLiveness> => {
       cachedLiveness ??= await getTaskRuntimeLiveness(env, task);
       return cachedLiveness;
+    };
+    let cachedTaskRunnerProbe: TaskRunnerProbeResult | null = null;
+    const probeTaskRunner = async (): Promise<TaskRunnerProbeResult> => {
+      if (!cachedTaskRunnerProbe) {
+        cachedTaskRunnerProbe = await probeTaskRunnerStatus(env, task.id);
+        result.doHealthChecked++;
+        if (cachedTaskRunnerProbe.outcome === 'missing') result.doHealthMissing++;
+        if (
+          cachedTaskRunnerProbe.outcome === 'error' ||
+          cachedTaskRunnerProbe.outcome === 'timeout'
+        ) {
+          result.doHealthErrors++;
+        }
+      }
+      return cachedTaskRunnerProbe;
     };
 
     if (!isStuck) {
@@ -485,56 +770,68 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
       }
 
       if (timeForCheck > Math.min(halfThreshold, mismatchGraceMs)) {
-        try {
-          const doId = env.TASK_RUNNER.idFromName(task.id);
-          const stub = env.TASK_RUNNER.get(doId) as DurableObjectStub<TaskRunner>;
-          const doStatus = await stub.getStatus();
+        const doProbe = await probeTaskRunner();
+        const doStatus = doProbe.status;
+        const liveness = task.status === 'in_progress' ? await probeLiveness() : null;
 
-          if (doStatus && doStatus.completed && task.status !== 'failed' && task.status !== 'completed') {
-            const liveness = await probeLiveness();
-            if (liveness.conclusive && !liveness.live) {
-              isStuck = true;
-              reason = `TaskRunner orchestration completed but task runtime is gone (${liveness.reason}).`;
-            }
-            // Reconcile only with conclusive dead-runtime evidence. Live or unknown
-            // task-scoped runtime state remains active and is logged for investigation.
-            // Deduplicate the persisted mismatch signal independently of reconciliation.
-            log.warn('stuck_task.do_completed_but_task_active', {
-              taskId: task.id,
-              taskStatus: task.status,
-              doCurrentStep: doStatus.currentStep,
-              doRetryCount: doStatus.retryCount,
-            });
+        // TaskRunner.completed means orchestration handed off successfully, not
+        // that the agent later finalized D1. Conclusive task-scoped runtime death
+        // is therefore authoritative after the mismatch grace; the DO RPC remains
+        // best-effort diagnostic evidence and cannot strand an immortal row.
+        if (liveness?.conclusive && !liveness.live) {
+          isStuck = true;
+          deadRuntimeRecovery = true;
+          reason = `Task runtime is conclusively gone after reconciliation grace (${liveness.reason}).`;
+          log.warn('stuck_task.dead_runtime_reconciliation', {
+            taskId: task.id,
+            taskStatus: task.status,
+            executionStep: task.execution_step,
+            livenessReason: liveness.reason,
+            taskRunnerProbeOutcome: doProbe.outcome,
+            taskRunnerCompleted: doStatus?.completed ?? null,
+            timeForCheck,
+          });
+        }
 
-            // Deduplicate: only persist if no recent mismatch record exists for this task
-            const recentMismatch = await env.OBSERVABILITY_DATABASE.prepare(
-              `SELECT id FROM platform_errors
+        if (doStatus?.completed) {
+          // Reconcile only with conclusive dead-runtime evidence. Live or unknown
+          // task-scoped runtime state remains active and is logged for investigation.
+          // Deduplicate the persisted mismatch signal independently of reconciliation.
+          log.warn('stuck_task.do_completed_but_task_active', {
+            taskId: task.id,
+            taskStatus: task.status,
+            doCurrentStep: doStatus.currentStep,
+            doRetryCount: doStatus.retryCount,
+          });
+
+          // Deduplicate: only persist if no recent mismatch record exists for this task
+          const recentMismatch = await env.OBSERVABILITY_DATABASE.prepare(
+            `SELECT id FROM platform_errors
                WHERE context LIKE ? AND timestamp > ?
                LIMIT 1`
-            ).bind(`%do_task_status_mismatch%${task.id}%`, Date.now() - 30 * 60 * 1000).first();
+          )
+            .bind(`%do_task_status_mismatch%${task.id}%`, Date.now() - 30 * 60 * 1000)
+            .first();
 
-            if (!recentMismatch) {
-              await persistError(env.OBSERVABILITY_DATABASE, {
-                source: 'api',
-                level: 'warn',
-                message: `TaskRunner DO completed but task still in '${task.status}' — possible D1 update failure`,
-                context: {
-                  recoveryType: 'do_task_status_mismatch',
-                  taskId: task.id,
-                  taskStatus: task.status,
-                  executionStep: task.execution_step,
-                  doCurrentStep: doStatus.currentStep,
-                  doRetryCount: doStatus.retryCount,
-                  timeForCheck,
-                },
-                userId: task.user_id,
-              });
-            }
+          if (!recentMismatch) {
+            await persistError(env.OBSERVABILITY_DATABASE, {
+              source: 'api',
+              level: 'warn',
+              message: `TaskRunner DO completed but task still in '${task.status}' — possible D1 update failure`,
+              context: {
+                recoveryType: 'do_task_status_mismatch',
+                taskId: task.id,
+                taskStatus: task.status,
+                executionStep: task.execution_step,
+                doCurrentStep: doStatus.currentStep,
+                doRetryCount: doStatus.retryCount,
+                timeForCheck,
+                taskRunnerProbeOutcome: doProbe.outcome,
+                livenessReason: liveness?.reason ?? null,
+              },
+              userId: task.user_id,
+            });
           }
-
-          result.doHealthChecked++;
-        } catch {
-          // DO unreachable — not necessarily an error (may not have been created yet)
         }
       }
       if (!isStuck) continue;
@@ -546,7 +843,13 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
         task.status === 'in_progress' && task.started_at
           ? now.getTime() - new Date(task.started_at).getTime()
           : elapsedMs;
-      const diagnostics = await gatherDiagnostics(env, task, diagnosticElapsedMs, reason);
+      const diagnostics = await gatherDiagnostics(
+        env,
+        task,
+        diagnosticElapsedMs,
+        reason,
+        cachedTaskRunnerProbe ?? undefined
+      );
 
       log.warn('stuck_task.recovering', {
         taskId: task.id,
@@ -575,12 +878,14 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
           taskStatus: task.status,
           executionStep: task.execution_step,
           elapsedMs: diagnosticElapsedMs,
-          compactionLoop: compactionLoopRecovery ? {
-            sessionId: compactionLoopRecovery.sessionId,
-            agentSessionId: compactionLoopRecovery.agentSessionId,
-            recentMessageLimit: compactionLoopRecovery.recentMessageLimit,
-            evidence: compactionLoopRecovery.evidence,
-          } : null,
+          compactionLoop: compactionLoopRecovery
+            ? {
+                sessionId: compactionLoopRecovery.sessionId,
+                agentSessionId: compactionLoopRecovery.agentSessionId,
+                recentMessageLimit: compactionLoopRecovery.recentMessageLimit,
+                evidence: compactionLoopRecovery.evidence,
+              }
+            : null,
           workspaceId: diagnostics.workspaceId,
           workspaceStatus: diagnostics.workspaceStatus,
           nodeId: diagnostics.nodeId,
@@ -602,7 +907,9 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
       const updateResult = await env.DATABASE.prepare(
         `UPDATE tasks SET status = 'failed', execution_step = NULL, error_message = ?, completed_at = ?, updated_at = ?
          WHERE id = ? AND status = ?`
-      ).bind(reason, nowIso, nowIso, task.id, task.status).run();
+      )
+        .bind(reason, nowIso, nowIso, task.id, task.status)
+        .run();
 
       if (!updateResult.meta.changes || updateResult.meta.changes === 0) {
         // Task was advanced by the DO between our SELECT and UPDATE — skip
@@ -674,10 +981,15 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
       }
 
       switch (task.status) {
-        case 'queued': result.failedQueued++; break;
-        case 'delegated': result.failedDelegated++; break;
+        case 'queued':
+          result.failedQueued++;
+          break;
+        case 'delegated':
+          result.failedDelegated++;
+          break;
         case 'in_progress':
           result.failedInProgress++;
+          if (deadRuntimeRecovery) result.deadRuntimeReconciled++;
           if (compactionLoopRecovery) result.failedCompactionLoops++;
           break;
       }
