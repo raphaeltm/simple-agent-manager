@@ -105,7 +105,7 @@ Add these **Environment variables** (visible in UI):
 
 | Variable              | Description                                               | Example                |
 | --------------------- | --------------------------------------------------------- | ---------------------- |
-| `BASE_DOMAIN`         | Your base domain                                          | `example.com`          |
+| `BASE_DOMAIN`         | Zone apex or installation-specific deployment subdomain   | `dev-a.example.com`    |
 | `RESOURCE_PREFIX`     | Domain-derived resource naming prefix (optional override) | `sa379a6`              |
 | `PULUMI_STATE_BUCKET` | State bucket name (optional)                              | `sa379a6-pulumi-state` |
 
@@ -113,20 +113,20 @@ Add these **Environment variables** (visible in UI):
 
 Add these **Environment secrets**:
 
-| Secret Name                | Value                                    |
-| -------------------------- | ---------------------------------------- |
-| `CF_API_TOKEN`             | Your Cloudflare API token                |
-| `CF_ACCOUNT_ID`            | Your Cloudflare account ID (32-char hex) |
-| `CF_ZONE_ID`               | Your domain's zone ID (32-char hex)      |
-| `R2_ACCESS_KEY_ID`         | R2 API token access key                  |
-| `R2_SECRET_ACCESS_KEY`     | R2 API token secret key                  |
-| `PULUMI_CONFIG_PASSPHRASE` | Your generated passphrase                |
-| `GH_CLIENT_ID`             | GitHub OAuth App client ID               |
-| `GH_CLIENT_SECRET`         | GitHub OAuth App client secret           |
-| `GH_APP_ID`                | GitHub App ID                            |
-| `GH_APP_PRIVATE_KEY`       | GitHub App private key (base64 encoded)  |
-| `GH_APP_SLUG`              | GitHub App slug (URL name)               |
-| `GH_WEBHOOK_SECRET`        | GitHub webhook secret (see Step 7)       |
+| Secret Name                | Value                                                         |
+| -------------------------- | ------------------------------------------------------------- |
+| `CF_API_TOKEN`             | Your Cloudflare API token                                     |
+| `CF_ACCOUNT_ID`            | Your Cloudflare account ID (32-char hex)                      |
+| `CF_ZONE_ID`               | Parent zone ID containing the deployment domain (32-char hex) |
+| `R2_ACCESS_KEY_ID`         | R2 API token access key                                       |
+| `R2_SECRET_ACCESS_KEY`     | R2 API token secret key                                       |
+| `PULUMI_CONFIG_PASSPHRASE` | Your generated passphrase                                     |
+| `GH_CLIENT_ID`             | GitHub OAuth App client ID                                    |
+| `GH_CLIENT_SECRET`         | GitHub OAuth App client secret                                |
+| `GH_APP_ID`                | GitHub App ID                                                 |
+| `GH_APP_PRIVATE_KEY`       | GitHub App private key (base64 encoded)                       |
+| `GH_APP_SLUG`              | GitHub App slug (URL name)                                    |
+| `GH_WEBHOOK_SECRET`        | GitHub webhook secret (see Step 7)                            |
 
 > **Naming Convention**: GitHub secrets use `GH_*` prefix because GitHub reserves `GITHUB_*` for its own variables. The deployment workflow maps `GH_*` → `GITHUB_*` when setting Cloudflare Worker secrets.
 
@@ -340,7 +340,7 @@ dig app.example.com
 
 **Error**: `An A, AAAA, or CNAME record with that host already exists`
 
-**Solution**: If you changed `BASE_DOMAIN`, old DNS records from the previous deployment may conflict. Go to Cloudflare DNS and delete the stale `api`, `app`, and `*` records created by the previous deploy, then re-run.
+**Solution**: If you changed `BASE_DOMAIN`, old DNS records from the previous deployment may conflict. Go to Cloudflare DNS and delete only the stale fully qualified records owned by that installation (for example, `api.dev-a.example.com`, `app.dev-a.example.com`, and `*.dev-a.example.com`), then re-run.
 
 ### Resource Already Exists
 
@@ -358,26 +358,26 @@ Pulumi tracks state and handles existing resources. If you see conflicts:
 
 | Variable              | Required | Description                                                                                         |
 | --------------------- | -------- | --------------------------------------------------------------------------------------------------- |
-| `BASE_DOMAIN`         | Yes      | Your base domain (e.g., `example.com`)                                                              |
+| `BASE_DOMAIN`         | Yes      | Deployment domain: zone apex or installation-specific subdomain (e.g., `dev-a.example.com`)         |
 | `RESOURCE_PREFIX`     | No       | Prefix for resources (defaults to `s` plus the first six hex chars of `BASE_DOMAIN`'s SHA-256 hash) |
 | `PULUMI_STATE_BUCKET` | No       | State bucket name (defaults to `{prefix}-pulumi-state`)                                             |
 
 ### Required Secrets
 
-| Secret                     | Description                                |
-| -------------------------- | ------------------------------------------ |
-| `CF_API_TOKEN`             | Cloudflare API token with full permissions |
-| `CF_ACCOUNT_ID`            | 32-character Cloudflare account ID         |
-| `CF_ZONE_ID`               | 32-character zone ID for your domain       |
-| `R2_ACCESS_KEY_ID`         | R2 S3-compatible access key                |
-| `R2_SECRET_ACCESS_KEY`     | R2 S3-compatible secret key                |
-| `PULUMI_CONFIG_PASSPHRASE` | Passphrase for state encryption            |
-| `GH_CLIENT_ID`             | GitHub OAuth App client ID                 |
-| `GH_CLIENT_SECRET`         | GitHub OAuth App client secret             |
-| `GH_APP_ID`                | GitHub App ID                              |
-| `GH_APP_PRIVATE_KEY`       | GitHub App private key (base64 encoded)    |
-| `GH_APP_SLUG`              | GitHub App slug (URL name)                 |
-| `GH_WEBHOOK_SECRET`        | Webhook signature verification secret      |
+| Secret                     | Description                                                  |
+| -------------------------- | ------------------------------------------------------------ |
+| `CF_API_TOKEN`             | Cloudflare API token with full permissions                   |
+| `CF_ACCOUNT_ID`            | 32-character Cloudflare account ID                           |
+| `CF_ZONE_ID`               | 32-character parent-zone ID containing the deployment domain |
+| `R2_ACCESS_KEY_ID`         | R2 S3-compatible access key                                  |
+| `R2_SECRET_ACCESS_KEY`     | R2 S3-compatible secret key                                  |
+| `PULUMI_CONFIG_PASSPHRASE` | Passphrase for state encryption                              |
+| `GH_CLIENT_ID`             | GitHub OAuth App client ID                                   |
+| `GH_CLIENT_SECRET`         | GitHub OAuth App client secret                               |
+| `GH_APP_ID`                | GitHub App ID                                                |
+| `GH_APP_PRIVATE_KEY`       | GitHub App private key (base64 encoded)                      |
+| `GH_APP_SLUG`              | GitHub App slug (URL name)                                   |
+| `GH_WEBHOOK_SECRET`        | Webhook signature verification secret                        |
 
 ### Auto-Generated Secrets
 
