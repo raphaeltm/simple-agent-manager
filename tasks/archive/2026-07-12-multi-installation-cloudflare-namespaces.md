@@ -87,7 +87,15 @@ The first groundwork slice should make a deployment such as `dev-a.sammy.party` 
 | `test-engineer`             | ADDRESSED | Cleanup and integrated nested Pulumi wiring hardening added in `704cb5748`; no remaining findings.                                                                              |
 | `task-completion-validator` | PASS      | Checks A–F pass; deferred architecture and pending release gates are explicit.                                                                                                  |
 
+## Critical local review loop
+
+- Round 1 found an invalid assumption that each installation prefix also created an account-level `workers.dev` subdomain, plus insufficient sibling-installation isolation evidence and over-broad documentation claims. Commit `88b1e34f7` replaced those CNAMEs with proxied originless `AAAA 100::` records, added sibling route/resource and runtime cleanup isolation tests, fixed lint/preflight evidence, and narrowed the public contract.
+- Round 2 used three fresh, extremely critical local reviewers covering Cloudflare routing, installation isolation, and test/documentation evidence. All three returned `SATISFIED` for the bounded groundwork scope with no remaining demonstrated correctness or false-contract blocker.
+- The reviewers retained a promotion gate: before moving the PR out of draft, deploy a real nested installation and verify deep-subdomain edge TLS and live routing. Full lifecycle work must also order route/DNS activation and teardown so an apex wildcard cannot receive nested traffic during gaps.
+
 ## Staging verification evidence
+
+> The staging run below predates the `CNAME` to originless `AAAA 100::` hardening in `88b1e34f7`. It remains evidence for the unchanged route/runtime path, but a fresh nested-domain deployment is required before the PR can be promoted out of draft.
 
 - GitHub Actions run `29189719745` deployed the branch to staging successfully; Cloudflare deployment and all 12 smoke tests passed.
 - Cloudflare DNS resolved the expected apex deployment names: `api.sammy.party`, `app.sammy.party`, and `*.sammy.party` were proxied to the API Worker/Pages targets.
