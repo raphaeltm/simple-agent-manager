@@ -48,7 +48,7 @@ The first groundwork slice should make a deployment such as `dev-a.sammy.party` 
 - [x] Run the full lint, typecheck, test, and build suite.
 - [x] Complete Cloudflare, environment-variable, constitution, documentation-sync, test-quality, and task-completion specialist reviews.
 - [x] Perform required staging and real-VM infrastructure verification without overlapping another active staging deployment.
-- [ ] Open a draft PR and stop without marking it ready or merging it.
+- [x] Open draft PR [#1571](https://github.com/raphaeltm/simple-agent-manager/pull/1571) and stop without marking it ready or merging it.
 
 ## Acceptance criteria
 
