@@ -21,6 +21,11 @@ const requestSchema = v.object({
  * consumed refresh token revokes the entire token family upstream. The read
  * happens inside this DO lock because reading before acquiring the lock would
  * let overlapping callers race with the same stale refresh token.
+ *
+ * Refresh-aware rate limiting is tracked in
+ * tasks/backlog/2026-07-12-gitlab-token-lock-rate-limit.md — most calls are
+ * cached reads for git credential fetches, so a naive per-call limit would
+ * throttle legitimate git operations.
  */
 export class GitLabUserAccessTokenLock extends DurableObject<Env> {
   private refreshLock: Promise<unknown> = Promise.resolve();
