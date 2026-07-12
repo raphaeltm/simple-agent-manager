@@ -34,7 +34,7 @@ The runtime boundary is fixed: the container launch environment remains minimal.
 - [x] Query staging Cloudflare state/logs, deploy the branch, create a fresh container, exercise an actual ACP session, and record every phase plus total cold-start latency.
 - [x] Clean up fresh staging test resources.
 - [x] If total remains above five seconds, append evidence and the next bounded dominant-phase slice to idea `01KX6JK8ZFC1EFWGYQENRMFWFK` rather than claiming the target was met.
-- [ ] Open PR, wait for all CI gates, merge only when green, and monitor production deployment to completion.
+- [x] Open PR, wait for all CI gates, merge only when green, and monitor production deployment to completion.
 
 ## Acceptance Criteria
 
@@ -83,3 +83,11 @@ The runtime boundary is fixed: the container launch environment remains minimal.
 - Authenticated browser checks for dashboard, the new session, and project agent settings all returned HTTP 200; the session content rendered and there were no unexpected console, page, or network errors. The staging API health endpoint returned HTTP 200 with `status: healthy`.
 - Because total latency remains above five seconds, the measured result and the next dominant slices (workspace creation, container launch, and ACP session creation) were appended to SAM idea `01KX6JK8ZFC1EFWGYQENRMFWFK`.
 - The temporary session was stopped through the product API; staging D1 confirmed the node status is `deleted` and the workspace row is gone. `pnpm quality:observability-noise` reported no significant log noise (D1 and Workers telemetry checks were unavailable in this environment and skipped explicitly).
+
+## Production Validation (2026-07-12)
+
+- PR #1566 merged as `085943af9ccb69462277badd6d74dbdb5e6d3398` after every required check was green. A transient GHCR `ECONNRESET` in the devcontainer volume-mount job was diagnosed from logs and the actual assertion passed on retry.
+- Post-merge main CI run `29187049270` passed. Production deployment run `29187250585` then passed configuration validation, Cloudflare deployment, backups, migrations, blocking post-migration data-integrity verification, binary uploads, and health checks.
+- The production artifact reports version `085943af9ccb69462277badd6d74dbdb5e6d3398` and `sha256:32629127f263428f44972c25a6834f6170d340e71a8c723f568153dab1798b19`; the published production `VmAgentContainer` image digest is `sha256:3310ce14f07186253611f80a83e3b0298e3aebfd466fa04b31f455757c8d7e52`.
+- Independent post-deploy checks returned HTTP 200 from `https://api.simple-agent-manager.org/health` with `status: healthy` and from `https://app.simple-agent-manager.org/`.
+- The task remains in `tasks/active` until the user explicitly confirms completion, as required by `.claude/rules/09-task-tracking.md`.
