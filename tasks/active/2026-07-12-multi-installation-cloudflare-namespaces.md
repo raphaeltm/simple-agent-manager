@@ -35,16 +35,16 @@ The first groundwork slice should make a deployment such as `dev-a.sammy.party` 
 
 ## Implementation checklist
 
-- [ ] Add failing tests for fully qualified Pulumi DNS names when `BASE_DOMAIN` is nested under the Cloudflare zone.
-- [ ] Centralize Pulumi deployment hostname derivation so DNS, Pages, route exclusions, and exported hostnames use the same values.
-- [ ] Export `cloudflareZoneId` from Pulumi and validate/type it as a required deployment output.
-- [ ] Generate Wrangler API/workspace routes with `zone_id`, never `zone_name=BASE_DOMAIN`.
-- [ ] Add failing API DNS tests for fully qualified workspace and VM backend record names.
-- [ ] Make runtime DNS creation use `ws-{id}.${BASE_DOMAIN}` and `{nodeId}.vm.${BASE_DOMAIN}` while preserving cleanup symmetry.
-- [ ] Verify domain-derived resource prefixes differ for two installation deployment domains in the same zone.
-- [ ] Update public self-hosting and configuration documentation with the one-zone/multiple-installations model and nested TLS requirements.
-- [ ] Update environment-variable reference/instructions where `BASE_DOMAIN` is incorrectly described as necessarily being the zone apex.
-- [ ] Run focused tests for infra, Wrangler generation, and API DNS helpers.
+- [x] Add failing tests for fully qualified Pulumi DNS names when `BASE_DOMAIN` is nested under the Cloudflare zone.
+- [x] Centralize Pulumi deployment hostname derivation so DNS, Pages, route exclusions, and exported hostnames use the same values.
+- [x] Export `cloudflareZoneId` from Pulumi and validate/type it as a required deployment output.
+- [x] Generate Wrangler API/workspace routes with `zone_id`, never `zone_name=BASE_DOMAIN`.
+- [x] Add failing API DNS tests for fully qualified workspace and VM backend record names.
+- [x] Make runtime DNS creation use `ws-{id}.${BASE_DOMAIN}` and `{nodeId}.vm.${BASE_DOMAIN}` while preserving cleanup symmetry.
+- [x] Verify domain-derived resource prefixes differ for two installation deployment domains in the same zone.
+- [x] Update public self-hosting and configuration documentation with the one-zone/multiple-installations model and nested TLS requirements.
+- [x] Update environment-variable reference/instructions where `BASE_DOMAIN` is incorrectly described as necessarily being the zone apex.
+- [x] Run focused tests for infra, Wrangler generation, and API DNS helpers.
 - [ ] Run the full lint, typecheck, test, and build suite.
 - [ ] Complete Cloudflare, environment-variable, constitution, documentation-sync, test-quality, and task-completion specialist reviews.
 - [ ] Perform required staging and real-VM infrastructure verification without overlapping another active staging deployment.
