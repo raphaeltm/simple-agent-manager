@@ -47,68 +47,31 @@ function modelGroup(label: string, models: Array<Omit<ModelDefinition, 'group'>>
 // ---------------------------------------------------------------------------
 
 const CLAUDE_MODELS: ModelGroup[] = [
-  {
-    label: 'Claude 5 (Frontier)',
-    models: [
-      { id: 'claude-fable-5', name: 'Claude Fable 5 (1M context)', group: 'Claude 5 (Frontier)' },
-      { id: 'claude-sonnet-5', name: 'Claude Sonnet 5 (1M context)', group: 'Claude 5 (Frontier)' },
-    ],
-  },
-  {
-    label: 'Claude 4 (1M context)',
-    models: [
-      {
-        id: 'claude-opus-4-8[1m]',
-        name: 'Claude Opus 4.8 (1M context)',
-        group: 'Claude 4 (1M context)',
-      },
-      {
-        id: 'claude-opus-4-7[1m]',
-        name: 'Claude Opus 4.7 (1M context)',
-        group: 'Claude 4 (1M context)',
-      },
-      {
-        id: 'claude-opus-4-6[1m]',
-        name: 'Claude Opus 4.6 (1M context)',
-        group: 'Claude 4 (1M context)',
-      },
-      {
-        id: 'claude-sonnet-4-6[1m]',
-        name: 'Claude Sonnet 4.6 (1M context)',
-        group: 'Claude 4 (1M context)',
-      },
-    ],
-  },
-  {
-    label: 'Claude 4 (Latest)',
-    models: [
-      { id: 'claude-opus-4-8', name: 'Claude Opus 4.8', group: 'Claude 4 (Latest)' },
-      { id: 'claude-opus-4-7', name: 'Claude Opus 4.7', group: 'Claude 4 (Latest)' },
-      { id: 'claude-opus-4-6', name: 'Claude Opus 4.6', group: 'Claude 4 (Latest)' },
-      { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6', group: 'Claude 4 (Latest)' },
-      { id: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5', group: 'Claude 4 (Latest)' },
-    ],
-  },
-  {
-    label: 'Claude 4 (Earlier)',
-    models: [
-      {
-        id: 'claude-opus-4-5-20251101',
-        name: 'Claude Opus 4.5',
-        group: 'Claude 4 (Earlier)',
-      },
-      {
-        id: 'claude-opus-4-1-20250805',
-        name: 'Claude Opus 4.1 (deprecated; retires Aug 5, 2026)',
-        group: 'Claude 4 (Earlier)',
-      },
-      {
-        id: 'claude-sonnet-4-5-20250929',
-        name: 'Claude Sonnet 4.5',
-        group: 'Claude 4 (Earlier)',
-      },
-    ],
-  },
+  modelGroup('Claude 5 (Frontier)', [
+    { id: 'claude-fable-5', name: 'Claude Fable 5 (1M context)' },
+    { id: 'claude-sonnet-5', name: 'Claude Sonnet 5 (1M context)' },
+  ]),
+  modelGroup('Claude 4 (1M context)', [
+    { id: 'claude-opus-4-8[1m]', name: 'Claude Opus 4.8 (1M context)' },
+    { id: 'claude-opus-4-7[1m]', name: 'Claude Opus 4.7 (1M context)' },
+    { id: 'claude-opus-4-6[1m]', name: 'Claude Opus 4.6 (1M context)' },
+    { id: 'claude-sonnet-4-6[1m]', name: 'Claude Sonnet 4.6 (1M context)' },
+  ]),
+  modelGroup('Claude 4 (Latest)', [
+    { id: 'claude-opus-4-8', name: 'Claude Opus 4.8' },
+    { id: 'claude-opus-4-7', name: 'Claude Opus 4.7' },
+    { id: 'claude-opus-4-6', name: 'Claude Opus 4.6' },
+    { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6' },
+    { id: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5' },
+  ]),
+  modelGroup('Claude 4 (Earlier)', [
+    { id: 'claude-opus-4-5-20251101', name: 'Claude Opus 4.5' },
+    {
+      id: 'claude-opus-4-1-20250805',
+      name: 'Claude Opus 4.1 (deprecated; retires Aug 5, 2026)',
+    },
+    { id: 'claude-sonnet-4-5-20250929', name: 'Claude Sonnet 4.5' },
+  ]),
 ];
 
 // ---------------------------------------------------------------------------
@@ -130,38 +93,21 @@ const CODEX_MODELS: ModelGroup[] = [
   modelGroup('Codex Preview (ChatGPT)', [
     { id: 'gpt-5.3-codex-spark', name: 'GPT-5.3 Codex Spark (ChatGPT Pro preview)' },
   ]),
-  {
-    label: 'Reasoning',
-    models: [
-      { id: 'o4-mini', name: 'O4 Mini', group: 'Reasoning' },
-      { id: 'o3', name: 'O3', group: 'Reasoning' },
-    ],
-  },
-  {
-    label: 'GPT-5 (Legacy)',
-    models: [
-      {
-        id: 'gpt-5.3-codex',
-        name: 'GPT-5.3 Codex (deprecated for ChatGPT sign-in)',
-        group: 'GPT-5 (Legacy)',
-      },
-      {
-        id: 'gpt-5.2-codex',
-        name: 'GPT-5.2 Codex (deprecated for ChatGPT sign-in)',
-        group: 'GPT-5 (Legacy)',
-      },
-      { id: 'gpt-5.1-codex-max', name: 'GPT-5.1 Codex Max', group: 'GPT-5 (Legacy)' },
-      { id: 'gpt-5.1-codex-mini', name: 'GPT-5.1 Codex Mini', group: 'GPT-5 (Legacy)' },
-      { id: 'gpt-5-mini', name: 'GPT-5 Mini', group: 'GPT-5 (Legacy)' },
-    ],
-  },
-  {
-    label: 'GPT-4.1 (Legacy)',
-    models: [
-      { id: 'gpt-4.1', name: 'GPT-4.1', group: 'GPT-4.1 (Legacy)' },
-      { id: 'gpt-4.1-mini', name: 'GPT-4.1 Mini', group: 'GPT-4.1 (Legacy)' },
-    ],
-  },
+  modelGroup('Reasoning', [
+    { id: 'o4-mini', name: 'O4 Mini' },
+    { id: 'o3', name: 'O3' },
+  ]),
+  modelGroup('GPT-5 (Legacy)', [
+    { id: 'gpt-5.3-codex', name: 'GPT-5.3 Codex (deprecated for ChatGPT sign-in)' },
+    { id: 'gpt-5.2-codex', name: 'GPT-5.2 Codex (deprecated for ChatGPT sign-in)' },
+    { id: 'gpt-5.1-codex-max', name: 'GPT-5.1 Codex Max' },
+    { id: 'gpt-5.1-codex-mini', name: 'GPT-5.1 Codex Mini' },
+    { id: 'gpt-5-mini', name: 'GPT-5 Mini' },
+  ]),
+  modelGroup('GPT-4.1 (Legacy)', [
+    { id: 'gpt-4.1', name: 'GPT-4.1' },
+    { id: 'gpt-4.1-mini', name: 'GPT-4.1 Mini' },
+  ]),
 ];
 
 // ---------------------------------------------------------------------------
@@ -248,46 +194,22 @@ const OPENCODE_MODELS: ModelGroup[] = [
 // ---------------------------------------------------------------------------
 
 const MISTRAL_MODELS: ModelGroup[] = [
-  {
-    label: 'Frontier (Latest)',
-    models: [
-      { id: 'mistral-medium-3-5-2604', name: 'Mistral Medium 3.5', group: 'Frontier (Latest)' },
-      { id: 'mistral-small-2603', name: 'Mistral Small 4', group: 'Frontier (Latest)' },
-      { id: 'mistral-large-2512', name: 'Mistral Large 3', group: 'Frontier (Latest)' },
-    ],
-  },
-  {
-    label: 'Coding',
-    models: [{ id: 'codestral-2508', name: 'Codestral', group: 'Coding' }],
-  },
-  {
-    label: 'Legacy / Deprecated',
-    models: [
-      {
-        id: 'mistral-medium-2508',
-        name: 'Mistral Medium 3.1 (legacy)',
-        group: 'Legacy / Deprecated',
-      },
-      {
-        id: 'devstral-2512',
-        name: 'Devstral 2 (deprecated)',
-        group: 'Legacy / Deprecated',
-      },
-      {
-        id: 'magistral-medium-2509',
-        name: 'Magistral Medium 1.2 (deprecated)',
-        group: 'Legacy / Deprecated',
-      },
-    ],
-  },
-  {
-    label: 'Edge / Efficient',
-    models: [
-      { id: 'ministral-14b-2512', name: 'Ministral 3 14B', group: 'Edge / Efficient' },
-      { id: 'ministral-8b-2512', name: 'Ministral 3 8B', group: 'Edge / Efficient' },
-      { id: 'ministral-3b-2512', name: 'Ministral 3 3B', group: 'Edge / Efficient' },
-    ],
-  },
+  modelGroup('Frontier (Latest)', [
+    { id: 'mistral-medium-3-5-2604', name: 'Mistral Medium 3.5' },
+    { id: 'mistral-small-2603', name: 'Mistral Small 4' },
+    { id: 'mistral-large-2512', name: 'Mistral Large 3' },
+  ]),
+  modelGroup('Coding', [{ id: 'codestral-2508', name: 'Codestral' }]),
+  modelGroup('Legacy / Deprecated', [
+    { id: 'mistral-medium-2508', name: 'Mistral Medium 3.1 (legacy)' },
+    { id: 'devstral-2512', name: 'Devstral 2 (deprecated)' },
+    { id: 'magistral-medium-2509', name: 'Magistral Medium 1.2 (deprecated)' },
+  ]),
+  modelGroup('Edge / Efficient', [
+    { id: 'ministral-14b-2512', name: 'Ministral 3 14B' },
+    { id: 'ministral-8b-2512', name: 'Ministral 3 8B' },
+    { id: 'ministral-3b-2512', name: 'Ministral 3 3B' },
+  ]),
 ];
 
 // ---------------------------------------------------------------------------
@@ -295,38 +217,16 @@ const MISTRAL_MODELS: ModelGroup[] = [
 // ---------------------------------------------------------------------------
 
 const GEMINI_MODELS: ModelGroup[] = [
-  {
-    label: 'Gemini 3 (Latest)',
-    models: [
-      { id: 'gemini-3.5-flash', name: 'Gemini 3.5 Flash', group: 'Gemini 3 (Latest)' },
-      {
-        id: 'gemini-3.1-pro-preview',
-        name: 'Gemini 3.1 Pro Preview',
-        group: 'Gemini 3 (Latest)',
-      },
-      { id: 'gemini-3.1-flash-lite', name: 'Gemini 3.1 Flash-Lite', group: 'Gemini 3 (Latest)' },
-    ],
-  },
-  {
-    label: 'Gemini 2.5 (Retiring Oct 16, 2026)',
-    models: [
-      {
-        id: 'gemini-2.5-pro',
-        name: 'Gemini 2.5 Pro',
-        group: 'Gemini 2.5 (Retiring Oct 16, 2026)',
-      },
-      {
-        id: 'gemini-2.5-flash',
-        name: 'Gemini 2.5 Flash',
-        group: 'Gemini 2.5 (Retiring Oct 16, 2026)',
-      },
-      {
-        id: 'gemini-2.5-flash-lite',
-        name: 'Gemini 2.5 Flash-Lite',
-        group: 'Gemini 2.5 (Retiring Oct 16, 2026)',
-      },
-    ],
-  },
+  modelGroup('Gemini 3 (Latest)', [
+    { id: 'gemini-3.5-flash', name: 'Gemini 3.5 Flash' },
+    { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro Preview' },
+    { id: 'gemini-3.1-flash-lite', name: 'Gemini 3.1 Flash-Lite' },
+  ]),
+  modelGroup('Gemini 2.5 (Retiring Oct 16, 2026)', [
+    { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro' },
+    { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
+    { id: 'gemini-2.5-flash-lite', name: 'Gemini 2.5 Flash-Lite' },
+  ]),
 ];
 
 // ---------------------------------------------------------------------------
