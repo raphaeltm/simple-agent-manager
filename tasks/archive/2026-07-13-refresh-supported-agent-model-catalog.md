@@ -25,7 +25,7 @@ SAM's shared static agent model catalog has drifted from current provider and ag
 - [x] Synchronize the OpenCode static fallback with active `opencode` and `opencode-go` Models.dev entries, preserving provider-qualified IDs and source display names.
 - [x] Update focused shared tests to assert exact critical IDs, lifecycle removals, provider-qualified OpenCode coverage, no duplicate IDs, and platform-proxy versus agent-only selection invariants.
 - [x] Confirm no API route/service or UI contract shape changed; existing consumers continue to receive `ModelGroup[]`.
-- [ ] Run focused shared/API/web checks and the repository quality suite required by `/do`.
+- [x] Run focused shared/API/web checks and the repository quality suite required by `/do`.
 - [ ] Complete task validation and specialist review, deploy/verify staging, open the PR, wait for green CI, merge, and monitor production deployment.
 
 ## Acceptance Criteria
