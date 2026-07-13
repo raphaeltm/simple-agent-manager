@@ -72,6 +72,7 @@ export class TaskRunner extends DurableObject<Env> {
     if (existing) {
       // Idempotent: if already started, don't re-initialize.
       // This can happen if the route retries after a timeout.
+      await this.ensureAlarm(existing);
       log.warn('task_runner_do.start.already_initialized', {
         taskId: input.taskId,
         currentStep: existing.currentStep,
@@ -115,10 +116,12 @@ export class TaskRunner extends DurableObject<Env> {
       completed: false,
     };
 
-    await this.ctx.storage.put('state', state);
-
-    // Fire first alarm immediately (0ms delay)
-    await this.ctx.storage.setAlarm(now);
+    // Commit the state and first alarm together. A readable state must prove
+    // that the orchestration wake-up was durably scheduled as well.
+    await this.ctx.storage.transaction(async (transaction) => {
+      await transaction.put('state', state);
+      await transaction.setAlarm(now);
+    });
 
     log.info('task_runner_do.started', {
       taskId: input.taskId,
@@ -162,6 +165,25 @@ export class TaskRunner extends DurableObject<Env> {
   async getStatus(): Promise<TaskRunnerState | null> {
     const state = await this.getState();
     return redactTaskRunnerStatus(state);
+  }
+
+  /**
+   * Confirm that a task run was initialized and repair a missing wake-up.
+   * Used after an ambiguous start RPC and by webhook reconciliation.
+   */
+  async ensureStarted(): Promise<boolean> {
+    const state = await this.getState();
+    if (!state) return false;
+    await this.ensureAlarm(state);
+    return true;
+  }
+
+  private async ensureAlarm(state: TaskRunnerState): Promise<void> {
+    const isTerminal =
+      state.completed || state.currentStep === 'running' || state.currentStep === 'awaiting_followup';
+    if (!isTerminal && (await this.ctx.storage.getAlarm()) === null) {
+      await this.ctx.storage.setAlarm(Date.now());
+    }
   }
 
   // =========================================================================

@@ -11,7 +11,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { ulid } from '../lib/ulid';
-import { getTaskRunnerStatus } from './task-runner-do';
+import { ensureTaskRunnerStarted } from './task-runner-do';
 import { getWebhookTriggerLimits } from './webhook-trigger-config';
 import {
   generateWebhookToken,
@@ -279,7 +279,7 @@ async function isLinkedExecutionDurable(
 ): Promise<boolean> {
   if (!task) return false;
   if (['delegated', 'in_progress', 'completed'].includes(task.status)) return true;
-  return Boolean(await getTaskRunnerStatus(env, task.id));
+  return ensureTaskRunnerStarted(env, task.id);
 }
 
 async function repairWebhookDeliveryAccepted(

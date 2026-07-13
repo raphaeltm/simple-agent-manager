@@ -1,5 +1,5 @@
 import type { Env } from '../env';
-import { getTaskRunnerStatus } from './task-runner-do';
+import { ensureTaskRunnerStarted } from './task-runner-do';
 import { getWebhookTriggerLimits } from './webhook-trigger-config';
 import { finishWebhookDelivery } from './webhook-trigger-store';
 
@@ -38,7 +38,7 @@ async function failStaleWebhookDelivery(
 
 async function hasStartedTaskRunner(env: Env, delivery: StaleWebhookDelivery): Promise<boolean> {
   if (!delivery.taskId) return false;
-  return Boolean(await getTaskRunnerStatus(env, delivery.taskId));
+  return ensureTaskRunnerStarted(env, delivery.taskId);
 }
 
 async function acceptDurableDelivery(env: Env, delivery: StaleWebhookDelivery): Promise<boolean> {

@@ -32,8 +32,15 @@ import { requireRepositoryOwnerAccess } from '../routes/projects/_helpers';
 import { generateBranchName } from './branch-name';
 import * as projectDataService from './project-data';
 import { parseSkillResourceRequirementsJson, resolveSkillProfile } from './skills';
-import { getTaskRunnerStatus, startTaskRunnerDO } from './task-runner-do';
+import { ensureTaskRunnerStarted, startTaskRunnerDO } from './task-runner-do';
 import { generateTaskTitle, getTaskTitleConfig } from './task-title';
+import {
+  type SubmittedTriggerTask,
+  TriggerTaskSubmissionPendingError,
+} from './trigger-submission';
+
+export { TriggerTaskSubmissionPendingError } from './trigger-submission';
+export type SubmitTriggeredTaskResult = SubmittedTriggerTask;
 
 export interface SubmitTriggeredTaskInput {
   /** The trigger that's firing. */
@@ -60,12 +67,6 @@ export interface SubmitTriggeredTaskInput {
   triggerName: string;
 }
 
-export interface SubmitTriggeredTaskResult {
-  taskId: string;
-  sessionId: string;
-  branchName: string;
-}
-
 /**
  * Submit a task from a trigger execution. Resolves project config,
  * user credentials, agent profile, and starts the TaskRunner DO.
@@ -73,7 +74,7 @@ export interface SubmitTriggeredTaskResult {
 export async function submitTriggeredTask(
   env: Env,
   input: SubmitTriggeredTaskInput
-): Promise<SubmitTriggeredTaskResult> {
+): Promise<SubmittedTriggerTask> {
   const db = drizzle(env.DATABASE, { schema });
 
   // Resolve project config
@@ -338,9 +339,9 @@ export async function submitTriggeredTask(
         vmSizeSource,
       });
     } catch (startError) {
-      let durableStart = false;
+      let durableStart: boolean;
       try {
-        durableStart = Boolean(await getTaskRunnerStatus(env, taskId));
+        durableStart = await ensureTaskRunnerStarted(env, taskId);
       } catch (statusError) {
         log.warn('trigger_submit.task_runner_status_check_failed', {
           taskId,
@@ -348,6 +349,7 @@ export async function submitTriggeredTask(
           triggerExecutionId: input.triggerExecutionId,
           error: statusError instanceof Error ? statusError.message : String(statusError),
         });
+        throw new TriggerTaskSubmissionPendingError({ taskId, sessionId, branchName });
       }
       if (!durableStart) throw startError;
       log.warn('trigger_submit.task_runner_start_ack_lost', {
@@ -357,6 +359,7 @@ export async function submitTriggeredTask(
       });
     }
   } catch (err) {
+    if (err instanceof TriggerTaskSubmissionPendingError) throw err;
     const failedAt = new Date().toISOString();
     const errorMsg = err instanceof Error ? err.message : String(err);
     await db

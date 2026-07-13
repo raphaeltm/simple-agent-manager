@@ -257,7 +257,7 @@ async function processTriggersForProject(
         ).rendered,
     });
 
-    if (result.outcome === 'submitted') {
+    if (result.outcome === 'submitted' || result.outcome === 'pending') {
       await recordDelivery(db, {
         id: `${deliveryId}:${trigger.id}`,
         eventType: event.event,
@@ -267,7 +267,8 @@ async function processTriggersForProject(
         senderLogin: event.sender?.login,
         matchedTriggerId: trigger.id,
         decision: 'matched',
-        decisionReason: `task:${result.taskId}`,
+        decisionReason:
+          result.outcome === 'pending' ? `task:${result.taskId}:pending` : `task:${result.taskId}`,
         createdAt: now,
       });
 
@@ -276,6 +277,7 @@ async function processTriggersForProject(
         deliveryId,
         executionId: result.executionId,
         taskId: result.taskId,
+        submissionPending: result.outcome === 'pending',
         eventType: event.event,
         action: event.action,
       });

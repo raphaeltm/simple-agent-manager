@@ -9,6 +9,10 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { ulid } from '../lib/ulid';
+import {
+  type SubmittedTriggerTask,
+  TriggerTaskSubmissionPendingError,
+} from './trigger-submission';
 import { submitTriggeredTask } from './trigger-submit';
 
 export type TriggerTaskSubmitter = typeof submitTriggeredTask;
@@ -18,6 +22,13 @@ type AdmissionSkipReason = Extract<TriggerSkipReason, 'still_running' | 'concurr
 export type TriggerAdmissionResult =
   | {
       outcome: 'submitted';
+      executionId: string;
+      taskId: string;
+      sessionId: string;
+      branchName: string;
+    }
+  | {
+      outcome: 'pending';
       executionId: string;
       taskId: string;
       sessionId: string;
@@ -81,6 +92,37 @@ async function recordSkippedExecution(
   const [insertResult] = await env.DATABASE.batch([insert, increment]);
   if (!insertResult?.meta.changes) throw new Error('Failed to record skipped trigger execution');
   return executionId;
+}
+
+async function recordTaskBoundary(
+  env: Env,
+  trigger: schema.TriggerRow,
+  executionId: string,
+  submitted: SubmittedTriggerTask,
+  now: string
+): Promise<void> {
+  try {
+    await env.DATABASE.batch([
+      env.DATABASE.prepare(
+        `UPDATE trigger_executions SET task_id = ?, status = 'running'
+         WHERE id = ? AND trigger_id = ? AND project_id = ?`
+      ).bind(submitted.taskId, executionId, trigger.id, trigger.projectId),
+      env.DATABASE.prepare(
+        `UPDATE triggers SET last_triggered_at = ?, trigger_count = trigger_count + 1, updated_at = ?
+         WHERE id = ? AND project_id = ?`
+      ).bind(now, now, trigger.id, trigger.projectId),
+    ]);
+  } catch (error) {
+    // The task boundary already succeeded. Preserve that fact so callers do not
+    // retry and double-submit; task lifecycle sync can reconcile the execution.
+    log.error('trigger_admission.submitted_state_sync_failed', {
+      triggerId: trigger.id,
+      executionId,
+      taskId: submitted.taskId,
+      projectId: trigger.projectId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
 async function classifyReservationFailure(
@@ -209,30 +251,20 @@ export async function admitAndSubmitTriggerExecution(
       triggerName: trigger.name,
     });
 
-    try {
-      await env.DATABASE.batch([
-        env.DATABASE.prepare(
-          `UPDATE trigger_executions SET task_id = ?, status = 'running'
-           WHERE id = ? AND trigger_id = ? AND project_id = ?`
-        ).bind(submitted.taskId, executionId, trigger.id, trigger.projectId),
-        env.DATABASE.prepare(
-          `UPDATE triggers SET last_triggered_at = ?, trigger_count = trigger_count + 1, updated_at = ?
-           WHERE id = ? AND project_id = ?`
-        ).bind(now, now, trigger.id, trigger.projectId),
-      ]);
-    } catch (error) {
-      // The task boundary already succeeded. Preserve that fact so callers do not
-      // retry and double-submit; task lifecycle sync can reconcile the execution.
-      log.error('trigger_admission.submitted_state_sync_failed', {
-        triggerId: trigger.id,
-        executionId,
-        taskId: submitted.taskId,
-        projectId: trigger.projectId,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
+    await recordTaskBoundary(env, trigger, executionId, submitted, now);
     return { outcome: 'submitted', executionId, ...submitted };
   } catch (error) {
+    if (error instanceof TriggerTaskSubmissionPendingError) {
+      await recordTaskBoundary(env, trigger, executionId, error.submission, now);
+      log.warn('trigger_admission.submission_pending', {
+        triggerId: trigger.id,
+        executionId,
+        taskId: error.submission.taskId,
+        projectId: trigger.projectId,
+        eventType: input.eventType,
+      });
+      return { outcome: 'pending', executionId, ...error.submission };
+    }
     const message = error instanceof Error ? error.message : String(error);
     await env.DATABASE.prepare(
       `UPDATE trigger_executions SET status = 'failed', error_message = ?, completed_at = ?

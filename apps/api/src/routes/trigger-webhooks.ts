@@ -333,6 +333,15 @@ async function handleWebhookIngress(
         202
       );
     }
+    if (admission.outcome === 'pending') {
+      log.warn('webhook_trigger.submission_pending', {
+        triggerId: resolved.trigger.id,
+        deliveryId: delivery.id,
+        executionId: admission.executionId,
+        taskId: admission.taskId,
+      });
+      return publicError(503, 'Webhook is still processing');
+    }
     if (admission.outcome === 'skipped') {
       await finalize(admission.reason, 202, admission.executionId);
       return c.json({ accepted: true, skipped: admission.reason, deliveryId: delivery.id }, 202);

@@ -103,12 +103,13 @@ async function processTrigger(
   });
 
   await advanceNextFireAt(db, trigger);
-  if (result.outcome === 'submitted') {
+  if (result.outcome === 'submitted' || result.outcome === 'pending') {
     log.info('cron_sweep.fired', {
       triggerId: trigger.id,
       executionId: result.executionId,
       taskId: result.taskId,
       projectId: trigger.projectId,
+      submissionPending: result.outcome === 'pending',
     });
     return 'fired';
   }

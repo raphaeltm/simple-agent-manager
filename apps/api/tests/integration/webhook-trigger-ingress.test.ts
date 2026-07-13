@@ -6,6 +6,7 @@ import type { Env } from '../../src/env';
 import { createTriggerWebhookRoutes } from '../../src/routes/trigger-webhooks';
 import { runTriggerExecutionCleanup } from '../../src/scheduled/trigger-execution-cleanup';
 import type { TriggerTaskSubmitter } from '../../src/services/trigger-admission';
+import { TriggerTaskSubmissionPendingError } from '../../src/services/trigger-submission';
 import { reconcileStaleWebhookDeliveries } from '../../src/services/webhook-delivery-reconciliation';
 import {
   generateWebhookToken,
@@ -158,6 +159,7 @@ describe('generic webhook ingress vertical slice', () => {
         idFromName: (taskId: string) => taskId,
         get: (taskId: string) => ({
           getStatus: async () => taskRunnerStates.get(taskId) ?? null,
+          ensureStarted: async () => taskRunnerStates.has(taskId),
         }),
       },
     } as Env;
@@ -786,6 +788,48 @@ describe('generic webhook ingress vertical slice', () => {
       status: 'running',
     });
     expect(sqlite.prepare('SELECT status FROM tasks').get()).toEqual({ status: 'queued' });
+  });
+
+  it('keeps an ambiguous TaskRunner start pending until durable state is observable', async () => {
+    const submitter = vi.fn<TriggerTaskSubmitter>(async (_env, input) => {
+      const taskId = `task-${input.triggerExecutionId}`;
+      sqlite
+        .prepare('INSERT INTO tasks (id, trigger_execution_id) VALUES (?, ?)')
+        .run(taskId, input.triggerExecutionId);
+      throw new TriggerTaskSubmissionPendingError({
+        taskId,
+        sessionId: `session-${input.triggerExecutionId}`,
+        branchName: 'sam/pending-start',
+      });
+    });
+    const app = appWith(submitter);
+    const request = () =>
+      deliveryRequest(token, { deployment: { id: 'dep-pending-start' } }, 'pending-start');
+
+    const first = await app.request(request(), undefined, env);
+    expect(first.status).toBe(503);
+    expect(sqlite.prepare('SELECT outcome FROM webhook_deliveries').get()).toEqual({
+      outcome: 'processing',
+    });
+    const execution = sqlite
+      .prepare('SELECT id, status, task_id FROM trigger_executions')
+      .get() as { id: string; status: string; task_id: string };
+    expect(execution).toMatchObject({ status: 'running', task_id: `task-${execution.id}` });
+
+    expect((await app.request(request(), undefined, env)).status).toBe(503);
+    expect(submitter).toHaveBeenCalledOnce();
+
+    taskRunnerStates.set(execution.task_id, {
+      taskId: execution.task_id,
+      currentStep: 'node_selection',
+    });
+    const repaired = await app.request(request(), undefined, env);
+    expect(repaired.status).toBe(202);
+    expect(await repaired.json()).toMatchObject({ accepted: true, duplicate: true });
+    expect(submitter).toHaveBeenCalledOnce();
+    expect(sqlite.prepare('SELECT outcome FROM webhook_deliveries').get()).toEqual({
+      outcome: 'accepted',
+    });
   });
 
   it('does not resubmit a linked failed task when delivery finalization was unavailable', async () => {

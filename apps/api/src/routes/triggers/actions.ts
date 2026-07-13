@@ -115,8 +115,13 @@ actionRoutes.post('/:triggerId/run', async (c) => {
         .rendered;
     },
   });
-  if (admission.outcome === 'submitted') {
-    log.info('trigger.manual_run', { triggerId, projectId, taskId: admission.taskId });
+  if (admission.outcome === 'submitted' || admission.outcome === 'pending') {
+    log.info('trigger.manual_run', {
+      triggerId,
+      projectId,
+      taskId: admission.taskId,
+      submissionPending: admission.outcome === 'pending',
+    });
     return c.json(admission, 202);
   }
   if (admission.outcome === 'skipped') {

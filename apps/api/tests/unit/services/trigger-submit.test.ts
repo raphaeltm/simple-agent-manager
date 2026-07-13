@@ -11,7 +11,7 @@ import { describe, expect, it, vi } from 'vitest';
 // =============================================================================
 vi.mock('../../../src/services/task-runner-do', () => ({
   startTaskRunnerDO: vi.fn().mockResolvedValue(undefined),
-  getTaskRunnerStatus: vi.fn().mockResolvedValue(null),
+  ensureTaskRunnerStarted: vi.fn().mockResolvedValue(false),
 }));
 
 vi.mock('../../../src/services/project-data', () => ({
@@ -152,7 +152,7 @@ describe('submitTriggeredTask', () => {
       providerName: 'hetzner',
     });
     vi.mocked(taskRunnerDo.startTaskRunnerDO).mockResolvedValue(undefined);
-    vi.mocked(taskRunnerDo.getTaskRunnerStatus).mockResolvedValue(null);
+    vi.mocked(taskRunnerDo.ensureTaskRunnerStarted).mockResolvedValue(false);
   });
 
   it('creates a task with trigger metadata fields', async () => {
@@ -218,10 +218,7 @@ describe('submitTriggeredTask', () => {
     vi.mocked(taskRunnerDo.startTaskRunnerDO).mockRejectedValueOnce(
       new Error('TaskRunner response was lost')
     );
-    vi.mocked(taskRunnerDo.getTaskRunnerStatus).mockResolvedValueOnce({
-      taskId: 'ULID000001',
-      currentStep: 'node_selection',
-    });
+    vi.mocked(taskRunnerDo.ensureTaskRunnerStarted).mockResolvedValueOnce(true);
 
     const { submitTriggeredTask } = await import('../../../src/services/trigger-submit');
     const result = await submitTriggeredTask({} as any, defaultInput);
@@ -231,7 +228,10 @@ describe('submitTriggeredTask', () => {
       sessionId: 'session-001',
       branchName: 'sam/daily-review-abc123',
     });
-    expect(taskRunnerDo.getTaskRunnerStatus).toHaveBeenCalledWith(expect.anything(), 'ULID000001');
+    expect(taskRunnerDo.ensureTaskRunnerStarted).toHaveBeenCalledWith(
+      expect.anything(),
+      'ULID000001'
+    );
     expect(mockUpdateSetWhere).not.toHaveBeenCalled();
     expect(projectData.stopSession).not.toHaveBeenCalled();
   });
@@ -247,13 +247,39 @@ describe('submitTriggeredTask', () => {
       'TaskRunner unavailable'
     );
 
-    expect(taskRunnerDo.getTaskRunnerStatus).toHaveBeenCalledWith(expect.anything(), 'ULID000001');
+    expect(taskRunnerDo.ensureTaskRunnerStarted).toHaveBeenCalledWith(
+      expect.anything(),
+      'ULID000001'
+    );
     expect(mockUpdateSetWhere).toHaveBeenCalledOnce();
     expect(projectData.stopSession).toHaveBeenCalledWith(
       expect.anything(),
       'project-1',
       'session-001'
     );
+  });
+
+  it('keeps the task and session intact when TaskRunner confirmation is unavailable', async () => {
+    queueTriggerSubmitLookups();
+    vi.mocked(taskRunnerDo.startTaskRunnerDO).mockRejectedValueOnce(
+      new Error('TaskRunner response was lost')
+    );
+    vi.mocked(taskRunnerDo.ensureTaskRunnerStarted).mockRejectedValueOnce(
+      new Error('TaskRunner status unavailable')
+    );
+
+    const { submitTriggeredTask } = await import('../../../src/services/trigger-submit');
+    await expect(submitTriggeredTask({} as any, defaultInput)).rejects.toMatchObject({
+      name: 'TriggerTaskSubmissionPendingError',
+      submission: {
+        taskId: 'ULID000001',
+        sessionId: 'session-001',
+        branchName: 'sam/daily-review-abc123',
+      },
+    });
+
+    expect(mockUpdateSetWhere).not.toHaveBeenCalled();
+    expect(projectData.stopSession).not.toHaveBeenCalled();
   });
 
   it('persists resolved skill metadata for trigger submissions', async () => {
