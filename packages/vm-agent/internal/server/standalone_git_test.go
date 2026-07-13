@@ -1,6 +1,8 @@
 package server
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,6 +14,11 @@ import (
 // with the given argv[1] and stdin, returning trimmed stdout.
 func runStandaloneCredScript(t *testing.T, arg, stdin, ghToken string) string {
 	t.Helper()
+	return runStandaloneCredScriptWithEnv(t, arg, stdin, map[string]string{"GH_TOKEN": ghToken})
+}
+
+func runStandaloneCredScriptWithEnv(t *testing.T, arg, stdin string, env map[string]string) string {
+	t.Helper()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "git-credential-sam")
 	if err := os.WriteFile(path, []byte(standaloneGitCredentialHelperScript), 0o755); err != nil {
@@ -19,7 +26,10 @@ func runStandaloneCredScript(t *testing.T, arg, stdin, ghToken string) string {
 	}
 	cmd := exec.Command("/bin/sh", path, arg)
 	cmd.Stdin = strings.NewReader(stdin)
-	cmd.Env = append(os.Environ(), "GH_TOKEN="+ghToken)
+	cmd.Env = os.Environ()
+	for key, value := range env {
+		cmd.Env = append(cmd.Env, key+"="+value)
+	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("run script: %v (out=%q)", err, out)
@@ -40,6 +50,64 @@ func TestStandaloneGitCredentialHelperRejectsNonGitHubHost(t *testing.T) {
 	out := runStandaloneCredScript(t, "get", "protocol=https\nhost=evil.example.com\n\n", "ghs_secret123")
 	if out != "" {
 		t.Fatalf("expected no creds for non-github host, got %q", out)
+	}
+}
+
+func TestStandaloneGitCredentialHelperDelegatesGitLabToLocalExchange(t *testing.T) {
+	t.Parallel()
+
+	var gotWorkspaceID string
+	var gotHost string
+	var gotPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/git-credential" {
+			t.Fatalf("request path = %q, want /git-credential", r.URL.Path)
+		}
+		gotWorkspaceID = r.URL.Query().Get("workspaceId")
+		gotHost = r.URL.Query().Get("host")
+		gotPath = r.URL.Query().Get("path")
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		_, _ = w.Write([]byte("username=oauth2\npassword=gl_token\n"))
+	}))
+	t.Cleanup(server.Close)
+
+	out := runStandaloneCredScriptWithEnv(t, "get", "protocol=https\nhost=gitlab.com\npath=group/project.git\n\n", map[string]string{
+		"SAM_WORKSPACE_ID":            "ws-gitlab",
+		"SAM_GIT_CREDENTIAL_ENDPOINT": server.URL + "/git-credential",
+		"GH_TOKEN":                    "ghs_should_not_be_used",
+	})
+
+	if !strings.Contains(out, "username=oauth2") || !strings.Contains(out, "password=gl_token") {
+		t.Fatalf("expected delegated gitlab creds, got %q", out)
+	}
+	if gotWorkspaceID != "ws-gitlab" {
+		t.Fatalf("workspaceId query = %q, want ws-gitlab", gotWorkspaceID)
+	}
+	if gotHost != "gitlab.com" {
+		t.Fatalf("host query = %q, want gitlab.com", gotHost)
+	}
+	if gotPath != "group/project.git" {
+		t.Fatalf("path query = %q, want group/project.git", gotPath)
+	}
+}
+
+func TestStandaloneGitCredentialHelperRequiresPathForGitLab(t *testing.T) {
+	t.Parallel()
+	called := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+	}))
+	t.Cleanup(server.Close)
+
+	out := runStandaloneCredScriptWithEnv(t, "get", "protocol=https\nhost=gitlab.com\n\n", map[string]string{
+		"SAM_WORKSPACE_ID":            "ws-gitlab",
+		"SAM_GIT_CREDENTIAL_ENDPOINT": server.URL + "/git-credential",
+	})
+	if out != "" {
+		t.Fatalf("expected no creds without path, got %q", out)
+	}
+	if called {
+		t.Fatal("credential endpoint should not be called without a path")
 	}
 }
 
