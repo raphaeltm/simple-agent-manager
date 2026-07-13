@@ -36,6 +36,8 @@ export interface TriggerAdmissionInput {
   renderPrompt: (executionId: string, sequenceNumber: number) => string;
   /** Durable hook used to link source admission state before external submission begins. */
   beforeSubmit?: (executionId: string) => Promise<void>;
+  /** Source lease fence invoked by the submitter immediately before task creation. */
+  beforeTaskCreate?: (executionId: string) => Promise<void>;
 }
 
 async function consecutiveFailureCount(
@@ -195,6 +197,10 @@ export async function admitAndSubmitTriggerExecution(
 
     await input.beforeSubmit?.(executionId);
 
+    const beforeTaskCreate = input.beforeTaskCreate;
+    const assertSubmissionLease = beforeTaskCreate
+      ? () => beforeTaskCreate(executionId)
+      : undefined;
     const submitted = await submitter(env, {
       triggerId: trigger.id,
       triggerExecutionId: executionId,
@@ -207,6 +213,8 @@ export async function admitAndSubmitTriggerExecution(
       taskMode: (trigger.taskMode ?? 'task') as 'task' | 'conversation',
       vmSizeOverride: trigger.vmSizeOverride,
       triggerName: trigger.name,
+      beforeTaskCreate: assertSubmissionLease,
+      beforeTaskStart: assertSubmissionLease,
     });
 
     try {

@@ -817,6 +817,9 @@ export const tasks = sqliteTable(
     ),
     projectCreatedAtIdx: index('idx_tasks_project_created_at').on(table.projectId, table.createdAt),
     projectUserIdx: index('idx_tasks_project_user').on(table.projectId, table.userId),
+    triggerExecutionIdIdx: index('idx_tasks_trigger_execution_id')
+      .on(table.triggerExecutionId)
+      .where(sql`trigger_execution_id IS NOT NULL`),
     missionIdIdx: index('idx_tasks_mission_id')
       .on(table.missionId)
       .where(sql`mission_id IS NOT NULL`),
@@ -1915,6 +1918,8 @@ export const webhookDeliveries = sqliteTable(
     outcome: text('outcome').notNull(),
     httpStatus: integer('http_status').notNull(),
     bodyBytes: integer('body_bytes').notNull(),
+    processingToken: text('processing_token'),
+    processingHeartbeatAt: text('processing_heartbeat_at'),
     executionId: text('execution_id').references(() => triggerExecutions.id, {
       onDelete: 'set null',
     }),

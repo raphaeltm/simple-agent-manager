@@ -260,7 +260,7 @@ describe('ProjectTriggers', () => {
       await user.click(screen.getByRole('button', { name: /add filter/i }));
       await user.type(screen.getByLabelText(/filter 1 path/i), 'deployment.status');
       await user.selectOptions(screen.getByLabelText(/filter 1 operator/i), 'equals');
-      await user.type(screen.getByLabelText(/filter 1 value/i), 'failed');
+      await user.type(screen.getByLabelText(/^filter 1 value$/i), 'failed');
       await user.type(
         screen.getByLabelText(/prompt template/i),
         'Investigate the failed deployment'

@@ -182,6 +182,16 @@ export function WebhookTriggerPanel({ projectId, trigger, onRotated }: WebhookTr
                   <p className="m-0 mt-0.5 text-xs text-fg-muted truncate">
                     {new Date(delivery.receivedAt).toLocaleString()} · {delivery.bodyBytes} bytes
                   </p>
+                  {delivery.executionId && (
+                    <p className="m-0 mt-1 text-xs text-fg-muted break-all">
+                      Execution <code title={delivery.executionId}>{delivery.executionId}</code>
+                    </p>
+                  )}
+                  {delivery.errorCode && (
+                    <p className="m-0 mt-1 text-xs text-danger break-all">
+                      Error <code>{delivery.errorCode}</code>
+                    </p>
+                  )}
                 </div>
                 <span className="text-xs text-fg-muted self-center">
                   {delivery.outcome === 'processing'

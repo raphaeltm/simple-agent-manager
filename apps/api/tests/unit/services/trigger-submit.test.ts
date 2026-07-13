@@ -173,6 +173,36 @@ describe('submitTriggeredTask', () => {
     expect(insertCall.credentialAttributionSource).toBe('user');
   });
 
+  it('checks source fencing before task creation and external execution', async () => {
+    queueTriggerSubmitLookups();
+    const beforeTaskCreate = vi.fn().mockResolvedValue(undefined);
+    const beforeTaskStart = vi.fn().mockResolvedValue(undefined);
+
+    const { submitTriggeredTask } = await import('../../../src/services/trigger-submit');
+    await submitTriggeredTask({} as any, {
+      ...defaultInput,
+      beforeTaskCreate,
+      beforeTaskStart,
+    });
+
+    expect(beforeTaskCreate).toHaveBeenCalledOnce();
+    expect(beforeTaskStart).toHaveBeenCalledOnce();
+    const createFenceOrder = beforeTaskCreate.mock.invocationCallOrder[0];
+    const taskInsertOrder = mockInsertValues.mock.invocationCallOrder[0];
+    const startFenceOrder = beforeTaskStart.mock.invocationCallOrder[0];
+    const taskRunnerOrder = vi.mocked(taskRunnerDo.startTaskRunnerDO).mock.invocationCallOrder[0];
+    if (
+      createFenceOrder === undefined ||
+      taskInsertOrder === undefined ||
+      startFenceOrder === undefined ||
+      taskRunnerOrder === undefined
+    ) {
+      throw new Error('Expected submission boundary calls');
+    }
+    expect(createFenceOrder).toBeLessThan(taskInsertOrder);
+    expect(startFenceOrder).toBeLessThan(taskRunnerOrder);
+  });
+
   it('pins project credential attribution for member A trigger even if another member edited it', async () => {
     providerCredentialMocks.resolveCredentialSource.mockResolvedValueOnce({
       credentialSource: 'project',
@@ -191,7 +221,7 @@ describe('submitTriggeredTask', () => {
       expect.anything(),
       'member-a',
       undefined,
-      'project-1',
+      'project-1'
     );
     const insertCall = mockInsertValues.mock.calls[0]![0];
     expect(insertCall.credentialAttributionUserId).toBe('member-a');
@@ -205,7 +235,7 @@ describe('submitTriggeredTask', () => {
         credentialAttributionProjectId: 'project-1',
         credentialAttributionSource: 'project',
         cloudProvider: 'hetzner',
-      }),
+      })
     );
   });
 

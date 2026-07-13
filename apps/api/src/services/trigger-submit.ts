@@ -58,6 +58,10 @@ export interface SubmitTriggeredTaskInput {
   vmSizeOverride: string | null;
   /** Trigger name (for branch naming). */
   triggerName: string;
+  /** Optional source lease fence, invoked immediately before the durable task insert. */
+  beforeTaskCreate?: () => Promise<void>;
+  /** Optional source lease fence, renewed immediately before starting external execution. */
+  beforeTaskStart?: () => Promise<void>;
 }
 
 export interface SubmitTriggeredTaskResult {
@@ -185,6 +189,8 @@ export async function submitTriggeredTask(
 
   const now = new Date().toISOString();
 
+  await input.beforeTaskCreate?.();
+
   // Create task in D1 with trigger metadata
   await db.insert(schema.tasks).values({
     id: taskId,
@@ -285,6 +291,7 @@ export async function submitTriggeredTask(
 
   // Start TaskRunner DO
   try {
+    await input.beforeTaskStart?.();
     await requireRepositoryOwnerAccess(
       env,
       db,

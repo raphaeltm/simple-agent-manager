@@ -4,6 +4,22 @@ import { Plus, Trash2 } from 'lucide-react';
 const FOCUS_RING =
   'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring';
 
+type FilterValueType = 'string' | 'number' | 'boolean' | 'null';
+
+function getFilterValueType(value: WebhookTriggerFilter['value']): FilterValueType {
+  if (value === null) return 'null';
+  if (typeof value === 'number') return 'number';
+  if (typeof value === 'boolean') return 'boolean';
+  return 'string';
+}
+
+function defaultFilterValue(type: FilterValueType): WebhookTriggerFilter['value'] {
+  if (type === 'number') return 0;
+  if (type === 'boolean') return true;
+  if (type === 'null') return null;
+  return '';
+}
+
 interface WebhookTriggerFieldsProps {
   sourceLabel: string;
   includedHeaders: string;
@@ -88,7 +104,7 @@ export function WebhookTriggerFields({
         {filters.map((filter, index) => (
           <div
             key={index}
-            className="grid grid-cols-1 sm:grid-cols-[1fr_9rem_1fr_auto] gap-2 items-end"
+            className="grid grid-cols-1 sm:grid-cols-[1fr_8rem_7rem_1fr_auto] gap-2 items-end"
           >
             <label className="text-xs text-fg-muted">
               Path
@@ -120,17 +136,62 @@ export function WebhookTriggerFields({
               </select>
             </label>
             {filter.operator === 'exists' ? (
-              <span />
+              <span className="sm:col-span-2" />
             ) : (
-              <label className="text-xs text-fg-muted">
-                Value
-                <input
-                  aria-label={`Filter ${index + 1} value`}
-                  value={String(filter.value ?? '')}
-                  onChange={(event) => updateFilter(index, { value: event.target.value })}
-                  className={`mt-1 w-full px-2 py-1.5 rounded-md text-sm text-fg-primary ${FOCUS_RING}`}
-                />
-              </label>
+              <>
+                <label className="text-xs text-fg-muted">
+                  Type
+                  <select
+                    aria-label={`Filter ${index + 1} value type`}
+                    value={getFilterValueType(filter.value)}
+                    onChange={(event) => {
+                      const valueType = event.target.value as FilterValueType;
+                      updateFilter(index, { value: defaultFilterValue(valueType) });
+                    }}
+                    className={`mt-1 w-full px-2 py-1.5 rounded-md text-sm text-fg-primary ${FOCUS_RING}`}
+                  >
+                    <option value="string">Text</option>
+                    <option value="number">Number</option>
+                    <option value="boolean">Boolean</option>
+                    <option value="null">Null</option>
+                  </select>
+                </label>
+                <label className="text-xs text-fg-muted">
+                  Value
+                  {getFilterValueType(filter.value) === 'boolean' ? (
+                    <select
+                      aria-label={`Filter ${index + 1} value`}
+                      value={String(filter.value)}
+                      onChange={(event) =>
+                        updateFilter(index, { value: event.target.value === 'true' })
+                      }
+                      className={`mt-1 w-full px-2 py-1.5 rounded-md text-sm text-fg-primary ${FOCUS_RING}`}
+                    >
+                      <option value="true">True</option>
+                      <option value="false">False</option>
+                    </select>
+                  ) : getFilterValueType(filter.value) === 'null' ? (
+                    <span className="mt-1 flex min-h-9 items-center px-2 text-sm text-fg-muted">
+                      null
+                    </span>
+                  ) : (
+                    <input
+                      aria-label={`Filter ${index + 1} value`}
+                      type={getFilterValueType(filter.value) === 'number' ? 'number' : 'text'}
+                      value={String(filter.value ?? '')}
+                      onChange={(event) =>
+                        updateFilter(index, {
+                          value:
+                            getFilterValueType(filter.value) === 'number'
+                              ? Number(event.target.value)
+                              : event.target.value,
+                        })
+                      }
+                      className={`mt-1 w-full px-2 py-1.5 rounded-md text-sm text-fg-primary ${FOCUS_RING}`}
+                    />
+                  )}
+                </label>
+              </>
             )}
             <button
               type="button"

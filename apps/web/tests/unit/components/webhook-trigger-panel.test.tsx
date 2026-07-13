@@ -104,6 +104,17 @@ describe('WebhookTriggerPanel', () => {
                 receivedAt: '2026-07-13T00:00:00.000Z',
                 processedAt: '2026-07-13T00:00:00.000Z',
               },
+              {
+                id: 'delivery-4',
+                triggerId: 'trigger-1',
+                outcome: 'internal_error',
+                httpStatus: 503,
+                bodyBytes: 80,
+                executionId: 'execution-failed',
+                errorCode: 'submission_failed',
+                receivedAt: '2026-07-12T23:59:00.000Z',
+                processedAt: '2026-07-12T23:59:01.000Z',
+              },
             ],
             nextCursor: '2026-07-13T00:00:00.000Z',
           }
@@ -122,8 +133,11 @@ describe('WebhookTriggerPanel', () => {
 
     expect(await screen.findByText('duplicate')).toBeInTheDocument();
     expect(screen.getByText('filtered')).toBeInTheDocument();
+    expect(screen.getByText('submission_failed')).toBeInTheDocument();
+    expect(screen.getByText('execution-failed')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /load more/i }));
     expect(await screen.findByText('accepted')).toBeInTheDocument();
+    expect(screen.getByText('execution-1')).toBeInTheDocument();
     expect(listWebhookDeliveries).toHaveBeenLastCalledWith(
       'project-1',
       'trigger-1',

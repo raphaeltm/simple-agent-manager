@@ -35,6 +35,7 @@ import {
   finishWebhookDelivery,
   linkWebhookDeliveryExecution,
   recordWebhookRejectedDelivery,
+  refreshWebhookDeliveryLease,
 } from '../services/webhook-trigger-store';
 
 class BodyTooLargeError extends Error {}
@@ -264,12 +265,14 @@ async function handleWebhookIngress(
       triggerId: resolved.trigger.id,
       outcome,
       httpStatus,
+      processingToken: delivery.processingToken,
       executionId,
       errorCode,
     });
   };
 
   let externallySubmitted = false;
+  let submittedExecutionId: string | undefined;
   try {
     const filterResult = evaluateWebhookFilters(
       body,
@@ -291,7 +294,21 @@ async function handleWebhookIngress(
         triggeredBy: 'webhook',
         scheduledAt: receivedAt,
         beforeSubmit: (executionId) =>
-          linkWebhookDeliveryExecution(c.env, resolved.trigger.id, delivery.id, executionId),
+          linkWebhookDeliveryExecution(
+            c.env,
+            resolved.trigger.id,
+            delivery.id,
+            executionId,
+            delivery.processingToken
+          ),
+        beforeTaskCreate: (executionId) =>
+          refreshWebhookDeliveryLease(
+            c.env,
+            resolved.trigger.id,
+            delivery.id,
+            executionId,
+            delivery.processingToken
+          ),
         renderPrompt: (executionId, sequenceNumber) => {
           const context = buildWebhookContext({
             body,
@@ -315,6 +332,7 @@ async function handleWebhookIngress(
 
     if (admission.outcome === 'submitted') {
       externallySubmitted = true;
+      submittedExecutionId = admission.executionId;
       await finalize('accepted', 202, admission.executionId);
       return c.json(
         { accepted: true, deliveryId: delivery.id, executionId: admission.executionId },
@@ -346,6 +364,21 @@ async function handleWebhookIngress(
       deliveryId: delivery.id,
       errorType: error instanceof Error ? error.name : 'UnknownError',
     });
+    if (externallySubmitted && submittedExecutionId) {
+      await finalize('accepted', 202, submittedExecutionId).catch((reconciliationError) => {
+        log.error('webhook_trigger.delivery_reconciliation_failed', {
+          triggerId: resolved.trigger.id,
+          deliveryId: delivery.id,
+          executionId: submittedExecutionId,
+          errorType:
+            reconciliationError instanceof Error ? reconciliationError.name : 'UnknownError',
+        });
+      });
+      return c.json(
+        { accepted: true, deliveryId: delivery.id, executionId: submittedExecutionId },
+        202
+      );
+    }
     return publicError(503, 'Webhook could not be processed');
   }
 }

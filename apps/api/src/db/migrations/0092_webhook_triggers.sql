@@ -13,6 +13,10 @@ SET next_execution_sequence = COALESCE(
   1
 );
 
+CREATE INDEX idx_tasks_trigger_execution_id
+  ON tasks(trigger_execution_id)
+  WHERE trigger_execution_id IS NOT NULL;
+
 CREATE TABLE webhook_trigger_configs (
   trigger_id TEXT PRIMARY KEY REFERENCES triggers(id) ON DELETE CASCADE,
   token_hash TEXT NOT NULL,
@@ -38,6 +42,8 @@ CREATE TABLE webhook_deliveries (
   outcome TEXT NOT NULL,
   http_status INTEGER NOT NULL,
   body_bytes INTEGER NOT NULL,
+  processing_token TEXT,
+  processing_heartbeat_at TEXT,
   execution_id TEXT REFERENCES trigger_executions(id) ON DELETE SET NULL,
   error_code TEXT,
   received_at TEXT NOT NULL,

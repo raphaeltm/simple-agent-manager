@@ -28,6 +28,7 @@ import {
 
 import type { Env } from '../env';
 import { createModuleLogger } from '../lib/logger';
+import { reconcileStaleWebhookDeliveries } from '../services/webhook-delivery-reconciliation';
 import { purgeExpiredWebhookDeliveries } from '../services/webhook-trigger-store';
 
 const log = createModuleLogger('trigger-execution-cleanup');
@@ -304,6 +305,8 @@ export async function runTriggerExecutionCleanup(env: Env): Promise<TriggerExecu
   let webhookDeliveriesPurged = 0;
   let webhookCleanupErrors = 0;
   try {
+    const reconciled = await reconcileStaleWebhookDeliveries(env);
+    if (reconciled > 0) log.info('webhook_deliveries_reconciled', { count: reconciled });
     webhookDeliveriesPurged = await purgeExpiredWebhookDeliveries(env);
   } catch (error) {
     webhookCleanupErrors = 1;
