@@ -435,6 +435,32 @@ func TestHandleGitCredentialGitLabResponseFailClosed(t *testing.T) {
 	}
 }
 
+// newGitLabMRTestServer builds the Server and WorkspaceRuntime shared by the
+// tryCreateGitLabMergeRequest tests, wired to the given TLS test API acting as
+// both control plane (token vending) and GitLab host.
+func newGitLabMRTestServer(api *httptest.Server) (*Server, *WorkspaceRuntime) {
+	s := &Server{
+		config: &config.Config{
+			ControlPlaneURL: api.URL,
+		},
+		httpClient: api.Client(),
+		workspaces: map[string]*WorkspaceRuntime{
+			"ws-gitlab": {
+				ID:            "ws-gitlab",
+				CallbackToken: "gitlab-callback-token",
+			},
+		},
+	}
+	runtime := &WorkspaceRuntime{
+		ID:             "ws-gitlab",
+		Branch:         "main",
+		RepoProvider:   "gitlab",
+		RepositoryHost: strings.TrimPrefix(api.URL, "https://"),
+		RepositoryPath: "group/project",
+	}
+	return s, runtime
+}
+
 func TestTryCreateGitLabMergeRequestUsesWorkspaceToken(t *testing.T) {
 	t.Parallel()
 
@@ -477,26 +503,7 @@ func TestTryCreateGitLabMergeRequestUsesWorkspaceToken(t *testing.T) {
 	}))
 	defer api.Close()
 
-	host := strings.TrimPrefix(api.URL, "https://")
-	s := &Server{
-		config: &config.Config{
-			ControlPlaneURL: api.URL,
-		},
-		httpClient: api.Client(),
-		workspaces: map[string]*WorkspaceRuntime{
-			"ws-gitlab": {
-				ID:            "ws-gitlab",
-				CallbackToken: "gitlab-callback-token",
-			},
-		},
-	}
-	runtime := &WorkspaceRuntime{
-		ID:             "ws-gitlab",
-		Branch:         "main",
-		RepoProvider:   "gitlab",
-		RepositoryHost: host,
-		RepositoryPath: "group/project",
-	}
+	s, runtime := newGitLabMRTestServer(api)
 
 	mrURL, iid := s.tryCreateGitLabMergeRequest(runtime, "sam/feature")
 
@@ -555,26 +562,7 @@ func TestTryCreateGitLabMergeRequestFallsBackToExistingOn409(t *testing.T) {
 	}))
 	defer api.Close()
 
-	host := strings.TrimPrefix(api.URL, "https://")
-	s := &Server{
-		config: &config.Config{
-			ControlPlaneURL: api.URL,
-		},
-		httpClient: api.Client(),
-		workspaces: map[string]*WorkspaceRuntime{
-			"ws-gitlab": {
-				ID:            "ws-gitlab",
-				CallbackToken: "gitlab-callback-token",
-			},
-		},
-	}
-	runtime := &WorkspaceRuntime{
-		ID:             "ws-gitlab",
-		Branch:         "main",
-		RepoProvider:   "gitlab",
-		RepositoryHost: host,
-		RepositoryPath: "group/project",
-	}
+	s, runtime := newGitLabMRTestServer(api)
 
 	mrURL, iid := s.tryCreateGitLabMergeRequest(runtime, "sam/feature")
 
