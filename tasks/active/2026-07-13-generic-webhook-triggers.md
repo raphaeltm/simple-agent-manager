@@ -85,6 +85,8 @@ public webhook request
 
 Process synchronously through durable admission/submission and final delivery outcome before returning `202`. `waitUntil` may handle non-critical telemetry only. Returning after a pending row while retaining no raw body would acknowledge work that cannot be replayed. If real staging latency misses sender timeouts, Cloudflare Queue plus encrypted short-lived payload storage is a separate follow-up architecture, not a hidden best-effort fallback.
 
+An idempotency key owns one submission attempt. A processing reservation can be recovered only while it has no linked execution. Linking the delivery to its execution is the permanent submission boundary: later same-key requests may observe or repair that execution, but never clear the link or invoke the submitter again. If TaskRunner durably accepted an ambiguous start, its Durable Object state repairs the audit to `accepted`; if the linked attempt failed before a durable start, the same key remains failed and a sender must use a new key for an intentional new attempt.
+
 ### Credential and payload posture
 
 - Generate a prefixed 256-bit bearer token; store only a domain-separated keyed HMAC hash and a non-sensitive suffix. Return the token once on create/rotation.
@@ -196,7 +198,7 @@ Use D1 batch/conditional statements for atomic create/config, rotation, delivery
 - [x] Project editors can create/edit a webhook trigger with explicit profile, prompt, concurrency policy, source label, allowlisted headers, and bounded deterministic filters.
 - [x] The bearer credential is 256-bit, shown once, keyed-hash-only at rest, masked thereafter, immediately rotatable, and absent from URLs/logs/analytics/database audit/UI persistent cache.
 - [ ] Valid bounded JSON produces exactly one durable delivery, execution, task, ProjectData session/prompt, and TaskRunner dispatch through existing infrastructure.
-- [x] Invalid auth reveals no trigger/project existence. Oversize/content/JSON errors are bounded. Persistence failure fails closed and is retryable.
+- [x] Invalid auth reveals no trigger/project existence. Oversize/content/JSON errors are bounded. Persistence failure fails closed; pre-link failures can retry the same key, while a linked retry never resubmits.
 - [x] Idempotency and concurrent admission do not double-submit or exceed `skipIfRunning`/`maxConcurrent`; future execution sequence values are unique and monotonic.
 - [x] Cron, GitHub, webhook, and manual sources use shared admission; existing cron schedule semantics and GitHub matching remain green; manual provenance is correct.
 - [x] Delivery history distinguishes accepted, duplicate, filtered, paused/disabled, rate-limited, concurrency-skipped, configuration, and internal-error outcomes without storing the raw body.

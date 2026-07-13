@@ -176,6 +176,7 @@ export interface CreateWebhookDeliveryInput {
 export type WebhookDeliveryReservation =
   | { disposition: 'reserved'; id: string; processingToken: string; retry: boolean }
   | { disposition: 'duplicate'; id: string; executionId?: string }
+  | { disposition: 'failed'; id: string; executionId: string }
   | { disposition: 'in_flight'; id: string };
 
 interface ProcessingDelivery {
@@ -183,7 +184,6 @@ interface ProcessingDelivery {
   executionId: string | null;
   processingHeartbeatAt: string;
   processingToken: string;
-  receivedAt: string;
 }
 
 interface LinkedWebhookTask {
@@ -204,7 +204,8 @@ async function reserveRetry(
         SET outcome = 'processing', http_status = 0, body_bytes = ?, received_at = ?,
             processing_token = ?, processing_heartbeat_at = ?, processed_at = NULL,
             expires_at = ?, execution_id = NULL, error_code = NULL
-      WHERE id = ? AND trigger_id = ? AND outcome = ? AND request_fingerprint = ?`
+      WHERE id = ? AND trigger_id = ? AND outcome = ? AND request_fingerprint = ?
+        AND execution_id IS NULL`
   )
     .bind(
       input.bodyBytes,
@@ -221,107 +222,28 @@ async function reserveRetry(
   return Boolean(result.meta.changes);
 }
 
-async function reserveFailedLinkedTaskRetry(
-  env: Env,
-  input: CreateWebhookDeliveryInput,
-  duplicate: ProcessingDelivery & { executionId: string },
-  task: LinkedWebhookTask,
-  expiresAt: string,
-  processingToken: string
-): Promise<boolean> {
-  const results = await env.DATABASE.batch([
-    env.DATABASE.prepare(
-      `UPDATE trigger_executions
-          SET status = 'failed',
-              error_message = COALESCE(error_message, 'Linked webhook task failed'),
-              completed_at = COALESCE(completed_at, ?)
-        WHERE id = ? AND trigger_id = ? AND status IN ('queued', 'running')`
-    ).bind(input.receivedAt, duplicate.executionId, input.triggerId),
-    env.DATABASE.prepare(
-      `UPDATE webhook_deliveries
-          SET outcome = 'processing', http_status = 0, body_bytes = ?, received_at = ?,
-              processing_token = ?, processing_heartbeat_at = ?, processed_at = NULL,
-              expires_at = ?, execution_id = NULL, error_code = NULL
-        WHERE id = ? AND trigger_id = ? AND outcome = 'processing'
-          AND request_fingerprint = ? AND processing_token = ?
-          AND processing_heartbeat_at = ?
-          AND EXISTS (
-            SELECT 1 FROM tasks
-             WHERE id = ? AND trigger_execution_id = ? AND status IN ('failed', 'cancelled')
-          )`
-    ).bind(
-      input.bodyBytes,
-      input.receivedAt,
-      processingToken,
-      input.receivedAt,
-      expiresAt,
-      duplicate.id,
-      input.triggerId,
-      input.requestFingerprint,
-      duplicate.processingToken,
-      duplicate.processingHeartbeatAt,
-      task.id,
-      duplicate.executionId
-    ),
-  ]);
-  return Boolean(results.at(-1)?.meta.changes);
-}
-
-async function recoverStaleProcessingDelivery(
+async function recoverStaleUnlinkedDelivery(
   env: Env,
   input: CreateWebhookDeliveryInput,
   duplicate: ProcessingDelivery,
   expiresAt: string,
-  processingToken: string,
-  linkedTask: LinkedWebhookTask | null = null
+  processingToken: string
 ): Promise<boolean> {
   const cutoff = Date.now() - getWebhookTriggerLimits(env).deliveryProcessingLeaseSeconds * 1000;
-  if (new Date(duplicate.processingHeartbeatAt).getTime() > cutoff) return false;
+  if (new Date(duplicate.processingHeartbeatAt).getTime() > cutoff || duplicate.executionId) {
+    return false;
+  }
 
-  const statements: D1PreparedStatement[] = [];
-  if (duplicate.executionId && linkedTask) {
-    statements.push(
-      env.DATABASE.prepare(
-        `UPDATE tasks
-            SET status = 'failed', error_message = 'Webhook delivery processing lease expired',
-                completed_at = ?, updated_at = ?
-          WHERE id = ? AND trigger_execution_id = ? AND status IN ('draft', 'ready', 'queued')`
-      ).bind(input.receivedAt, input.receivedAt, linkedTask.id, duplicate.executionId)
-    );
-  }
-  if (duplicate.executionId) {
-    statements.push(
-      env.DATABASE.prepare(
-        `UPDATE trigger_executions
-            SET status = 'failed', error_message = 'Webhook delivery processing lease expired',
-                completed_at = ?
-          WHERE id = ? AND trigger_id = ? AND status = 'queued'
-            ${linkedTask ? "AND EXISTS (SELECT 1 FROM tasks WHERE id = ? AND trigger_execution_id = ? AND status = 'failed')" : 'AND NOT EXISTS (SELECT 1 FROM tasks WHERE trigger_execution_id = ?)'} `
-      ).bind(
-        input.receivedAt,
-        duplicate.executionId,
-        input.triggerId,
-        ...(linkedTask ? [linkedTask.id, duplicate.executionId] : [duplicate.executionId])
-      )
-    );
-  }
-  statements.push(
-    env.DATABASE.prepare(
-      `UPDATE webhook_deliveries
+  const result = await env.DATABASE.prepare(
+    `UPDATE webhook_deliveries
           SET body_bytes = ?, received_at = ?, expires_at = ?, execution_id = NULL,
               processing_token = ?, processing_heartbeat_at = ?, processed_at = NULL,
               http_status = 0, error_code = NULL
         WHERE id = ? AND trigger_id = ? AND outcome = 'processing'
           AND request_fingerprint = ? AND processing_token = ?
-          AND processing_heartbeat_at = ?
-          ${
-            duplicate.executionId
-              ? linkedTask
-                ? "AND EXISTS (SELECT 1 FROM tasks WHERE id = ? AND trigger_execution_id = ? AND status = 'failed')"
-                : 'AND NOT EXISTS (SELECT 1 FROM tasks WHERE trigger_execution_id = ?)'
-              : ''
-          }`
-    ).bind(
+          AND processing_heartbeat_at = ? AND execution_id IS NULL`
+  )
+    .bind(
       input.bodyBytes,
       input.receivedAt,
       expiresAt,
@@ -331,16 +253,74 @@ async function recoverStaleProcessingDelivery(
       input.triggerId,
       input.requestFingerprint,
       duplicate.processingToken,
-      duplicate.processingHeartbeatAt,
-      ...(duplicate.executionId
-        ? linkedTask
-          ? [linkedTask.id, duplicate.executionId]
-          : [duplicate.executionId]
-        : [])
+      duplicate.processingHeartbeatAt
     )
-  );
-  const results = await env.DATABASE.batch(statements);
-  return Boolean(results.at(-1)?.meta.changes);
+    .run();
+  return Boolean(result.meta.changes);
+}
+
+function isStaleProcessingDelivery(env: Env, delivery: ProcessingDelivery): boolean {
+  const cutoff = Date.now() - getWebhookTriggerLimits(env).deliveryProcessingLeaseSeconds * 1000;
+  return new Date(delivery.processingHeartbeatAt).getTime() <= cutoff;
+}
+
+async function findLinkedWebhookTask(
+  env: Env,
+  executionId: string
+): Promise<LinkedWebhookTask | null> {
+  return env.DATABASE.prepare('SELECT id, status FROM tasks WHERE trigger_execution_id = ? LIMIT 1')
+    .bind(executionId)
+    .first<LinkedWebhookTask>();
+}
+
+async function isLinkedExecutionDurable(
+  env: Env,
+  task: LinkedWebhookTask | null
+): Promise<boolean> {
+  if (!task) return false;
+  if (['delegated', 'in_progress', 'completed'].includes(task.status)) return true;
+  return Boolean(await getTaskRunnerStatus(env, task.id));
+}
+
+async function repairWebhookDeliveryAccepted(
+  env: Env,
+  triggerId: string,
+  deliveryId: string,
+  executionId: string
+): Promise<boolean> {
+  const result = await env.DATABASE.prepare(
+    `UPDATE webhook_deliveries
+        SET outcome = 'accepted', http_status = 202, error_code = NULL, processed_at = ?,
+            processing_token = NULL, processing_heartbeat_at = NULL
+      WHERE id = ? AND trigger_id = ? AND outcome = 'internal_error' AND execution_id = ?`
+  )
+    .bind(new Date().toISOString(), deliveryId, triggerId, executionId)
+    .run();
+  return Boolean(result.meta.changes);
+}
+
+async function failLinkedProcessingDelivery(
+  env: Env,
+  input: CreateWebhookDeliveryInput,
+  delivery: ProcessingDelivery & { executionId: string }
+): Promise<boolean> {
+  const result = await env.DATABASE.prepare(
+    `UPDATE webhook_deliveries
+        SET outcome = 'internal_error', http_status = 503, error_code = 'submission_failed',
+            processed_at = ?, processing_token = NULL, processing_heartbeat_at = NULL
+      WHERE id = ? AND trigger_id = ? AND outcome = 'processing' AND execution_id = ?
+        AND processing_token = ? AND processing_heartbeat_at = ?`
+  )
+    .bind(
+      input.receivedAt,
+      delivery.id,
+      input.triggerId,
+      delivery.executionId,
+      delivery.processingToken,
+      delivery.processingHeartbeatAt
+    )
+    .run();
+  return Boolean(result.meta.changes);
 }
 
 export async function createWebhookDelivery(
@@ -380,7 +360,7 @@ export async function createWebhookDelivery(
   const duplicate = await env.DATABASE.prepare(
     `SELECT id, outcome, request_fingerprint,
             execution_id AS executionId, processing_token AS processingToken,
-            processing_heartbeat_at AS processingHeartbeatAt, received_at AS receivedAt
+            processing_heartbeat_at AS processingHeartbeatAt
        FROM webhook_deliveries
       WHERE trigger_id = ? AND idempotency_key_hash = ?`
   )
@@ -392,16 +372,33 @@ export async function createWebhookDelivery(
       executionId: string | null;
       processingToken: string | null;
       processingHeartbeatAt: string | null;
-      receivedAt: string;
     }>();
   if (!duplicate) throw new Error('Webhook delivery deduplication failed');
 
   if (duplicate.request_fingerprint === input.requestFingerprint) {
-    if (
-      duplicate.outcome === 'internal_error' &&
-      (await reserveRetry(env, input, duplicate.id, expiresAt, duplicate.outcome, processingToken))
-    ) {
-      return { disposition: 'reserved', id: duplicate.id, processingToken, retry: true };
+    if (duplicate.outcome === 'internal_error') {
+      if (duplicate.executionId) {
+        const linkedTask = await findLinkedWebhookTask(env, duplicate.executionId);
+        if (await isLinkedExecutionDurable(env, linkedTask)) {
+          await repairWebhookDeliveryAccepted(
+            env,
+            input.triggerId,
+            duplicate.id,
+            duplicate.executionId
+          );
+          return {
+            disposition: 'duplicate',
+            id: duplicate.id,
+            executionId: duplicate.executionId,
+          };
+        }
+        return { disposition: 'failed', id: duplicate.id, executionId: duplicate.executionId };
+      }
+      if (
+        await reserveRetry(env, input, duplicate.id, expiresAt, duplicate.outcome, processingToken)
+      ) {
+        return { disposition: 'reserved', id: duplicate.id, processingToken, retry: true };
+      }
     }
     if (duplicate.outcome === 'processing') {
       if (!duplicate.processingToken || !duplicate.processingHeartbeatAt) {
@@ -412,36 +409,9 @@ export async function createWebhookDelivery(
         processingToken: duplicate.processingToken,
         processingHeartbeatAt: duplicate.processingHeartbeatAt,
       };
-      let linkedTask: LinkedWebhookTask | null = null;
       if (duplicate.executionId) {
-        linkedTask = await env.DATABASE.prepare(
-          'SELECT id, status FROM tasks WHERE trigger_execution_id = ? LIMIT 1'
-        )
-          .bind(duplicate.executionId)
-          .first<LinkedWebhookTask>();
-        if (
-          linkedTask &&
-          (linkedTask.status === 'failed' || linkedTask.status === 'cancelled') &&
-          (await reserveFailedLinkedTaskRetry(
-            env,
-            input,
-            { ...processingDelivery, executionId: duplicate.executionId },
-            linkedTask,
-            expiresAt,
-            processingToken
-          ))
-        ) {
-          return { disposition: 'reserved', id: duplicate.id, processingToken, retry: true };
-        }
-
-        const taskRunnerStarted =
-          linkedTask?.status === 'queued'
-            ? Boolean(await getTaskRunnerStatus(env, linkedTask.id))
-            : false;
-        const taskAdvanced =
-          linkedTask !== null &&
-          ['delegated', 'in_progress', 'completed'].includes(linkedTask.status);
-        if (linkedTask && (taskRunnerStarted || taskAdvanced)) {
+        const linkedTask = await findLinkedWebhookTask(env, duplicate.executionId);
+        if (await isLinkedExecutionDurable(env, linkedTask)) {
           await finishWebhookDelivery(env, {
             id: duplicate.id,
             triggerId: input.triggerId,
@@ -456,15 +426,26 @@ export async function createWebhookDelivery(
             executionId: duplicate.executionId,
           };
         }
+        const linkedSubmissionFailed =
+          linkedTask !== null && ['failed', 'cancelled'].includes(linkedTask.status);
+        if (
+          (linkedSubmissionFailed || isStaleProcessingDelivery(env, processingDelivery)) &&
+          (await failLinkedProcessingDelivery(env, input, {
+            ...processingDelivery,
+            executionId: duplicate.executionId,
+          }))
+        ) {
+          return { disposition: 'failed', id: duplicate.id, executionId: duplicate.executionId };
+        }
+        return { disposition: 'in_flight', id: duplicate.id };
       }
       if (
-        await recoverStaleProcessingDelivery(
+        await recoverStaleUnlinkedDelivery(
           env,
           input,
           processingDelivery,
           expiresAt,
-          processingToken,
-          linkedTask
+          processingToken
         )
       ) {
         return { disposition: 'reserved', id: duplicate.id, processingToken, retry: true };
@@ -558,23 +539,6 @@ export async function linkWebhookDeliveryExecution(
     .bind(executionId, deliveryId, triggerId, processingToken)
     .run();
   if (!result.meta.changes) throw new Error('Webhook delivery execution link failed');
-}
-
-export async function refreshWebhookDeliveryLease(
-  env: Env,
-  triggerId: string,
-  deliveryId: string,
-  executionId: string,
-  processingToken: string
-): Promise<void> {
-  const result = await env.DATABASE.prepare(
-    `UPDATE webhook_deliveries SET processing_heartbeat_at = ?
-      WHERE id = ? AND trigger_id = ? AND outcome = 'processing'
-        AND processing_token = ? AND execution_id = ?`
-  )
-    .bind(new Date().toISOString(), deliveryId, triggerId, processingToken, executionId)
-    .run();
-  if (!result.meta.changes) throw new Error('Webhook delivery processing lease lost');
 }
 
 export async function recordWebhookRejectedDelivery(

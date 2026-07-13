@@ -242,6 +242,59 @@ describe('trigger execution cleanup (vertical slice, real D1)', () => {
   // Stale queued recovery
   // -------------------------------------------------------------------------
   describe('stale queued execution recovery', () => {
+    it('preserves a stale execution while its webhook delivery lease is active', async () => {
+      await seedBaseData();
+      const executionId = 'exec-q-webhook-active-001';
+      const taskId = 'task-q-webhook-active-001';
+      const now = new Date().toISOString();
+
+      await seedTask(taskId, PROJECT_ID, USER_ID, { status: 'queued' });
+      await seedTriggerExecution(executionId, TRIGGER_ID, PROJECT_ID, {
+        status: 'queued',
+        taskId,
+        startedAt: TWO_HOURS_AGO,
+        createdAt: TWO_HOURS_AGO,
+      });
+      await env.DATABASE.prepare('UPDATE tasks SET trigger_execution_id = ? WHERE id = ?')
+        .bind(executionId, taskId)
+        .run();
+      await env.DATABASE.prepare(
+        `INSERT INTO webhook_deliveries
+          (id, trigger_id, request_fingerprint, outcome, http_status, body_bytes,
+           processing_token, processing_heartbeat_at, execution_id, received_at, expires_at)
+         VALUES (?, ?, ?, 'processing', 0, 42, ?, ?, ?, ?, ?)`
+      )
+        .bind(
+          'delivery-q-webhook-active-001',
+          TRIGGER_ID,
+          'active-fingerprint',
+          'active-processing-token',
+          now,
+          executionId,
+          now,
+          new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+        )
+        .run();
+
+      await runTriggerExecutionCleanup(
+        buildEnv({
+          TASK_RUNNER: {
+            idFromName: () => taskId,
+            get: () => ({
+              getStatus: async () => ({ taskId, currentStep: 'node_selection' }),
+            }),
+          } as Env['TASK_RUNNER'],
+        })
+      );
+
+      expect((await getExecution(executionId))?.status).toBe('queued');
+      expect(
+        await env.DATABASE.prepare('SELECT outcome FROM webhook_deliveries WHERE id = ?')
+          .bind('delivery-q-webhook-active-001')
+          .first()
+      ).toEqual({ outcome: 'processing' });
+    });
+
     it('recovers queued execution with no linked task', async () => {
       await seedBaseData();
 

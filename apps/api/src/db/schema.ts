@@ -1939,6 +1939,9 @@ export const webhookDeliveries = sqliteTable(
       .where(sql`idempotency_key_hash IS NOT NULL`),
     expiresIdx: index('idx_webhook_deliveries_expires').on(table.expiresAt),
     executionIdx: index('idx_webhook_deliveries_execution').on(table.executionId),
+    processingHeartbeatIdx: index('idx_webhook_deliveries_processing_heartbeat')
+      .on(table.processingHeartbeatAt, table.id)
+      .where(sql`outcome = 'processing' AND processing_token IS NOT NULL`),
   })
 );
 

@@ -233,6 +233,22 @@ describe('runTriggerExecutionCleanup', () => {
   });
 
   describe('webhook delivery retention', () => {
+    it('reconciles webhook leases before excluding them from generic stale recovery', async () => {
+      const db = createMockDb();
+
+      await runTriggerExecutionCleanup(createMockEnv({ DATABASE: db }));
+
+      expect(db._calls[0]?.sql).toContain('FROM webhook_deliveries d');
+      const staleQueries = db._calls.filter(
+        ({ sql }) => sql.includes('FROM trigger_executions') && sql.includes('WHERE status = ?')
+      );
+      expect(staleQueries).toHaveLength(2);
+      for (const query of staleQueries) {
+        expect(query.sql).toContain('NOT EXISTS');
+        expect(query.sql).toContain("d.outcome = 'processing'");
+      }
+    });
+
     it('includes purged webhook deliveries in sweep statistics', async () => {
       mockPurgeExpiredWebhookDeliveries.mockResolvedValueOnce(4);
 

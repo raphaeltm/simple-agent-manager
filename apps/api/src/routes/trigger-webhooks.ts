@@ -35,7 +35,6 @@ import {
   finishWebhookDelivery,
   linkWebhookDeliveryExecution,
   recordWebhookRejectedDelivery,
-  refreshWebhookDeliveryLease,
 } from '../services/webhook-trigger-store';
 
 class BodyTooLargeError extends Error {}
@@ -253,6 +252,9 @@ async function handleWebhookIngress(
   if (delivery.disposition === 'in_flight') {
     return publicError(503, 'Webhook is still processing');
   }
+  if (delivery.disposition === 'failed') {
+    return publicError(503, 'Webhook could not be processed');
+  }
 
   const finalize = async (
     outcome: WebhookDeliveryOutcome,
@@ -301,14 +303,6 @@ async function handleWebhookIngress(
             executionId,
             delivery.processingToken
           ),
-        beforeTaskCreate: (executionId) =>
-          refreshWebhookDeliveryLease(
-            c.env,
-            resolved.trigger.id,
-            delivery.id,
-            executionId,
-            delivery.processingToken
-          ),
         renderPrompt: (executionId, sequenceNumber) => {
           const context = buildWebhookContext({
             body,
@@ -348,7 +342,10 @@ async function handleWebhookIngress(
       return c.json({ accepted: true, inactive: true, deliveryId: delivery.id }, 202);
     }
 
-    await finalize('internal_error', 503, admission.executionId, 'submission_failed');
+    // Preserve the durable linkage only if beforeSubmit committed it. Passing the
+    // execution ID here would make a failed linkage look submitted and prevent a
+    // safe pre-submission retry.
+    await finalize('internal_error', 503, undefined, 'submission_failed');
     log.error('webhook_trigger.ingest_failed', {
       triggerId: resolved.trigger.id,
       deliveryId: delivery.id,

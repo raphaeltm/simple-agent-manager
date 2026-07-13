@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../src/env';
 import { createTriggerWebhookRoutes } from '../../src/routes/trigger-webhooks';
+import { runTriggerExecutionCleanup } from '../../src/scheduled/trigger-execution-cleanup';
 import type { TriggerTaskSubmitter } from '../../src/services/trigger-admission';
 import { reconcileStaleWebhookDeliveries } from '../../src/services/webhook-delivery-reconciliation';
 import {
@@ -592,7 +593,7 @@ describe('generic webhook ingress vertical slice', () => {
     ]);
   });
 
-  it('fails closed with retryable status when the submission boundary rejects', async () => {
+  it('never resubmits a linked failed execution under the same idempotency key', async () => {
     const submitter = vi.fn<TriggerTaskSubmitter>(async () => {
       if (submitter.mock.calls.length === 1) throw new Error('TaskRunner unavailable');
       return { taskId: 'task-retry', sessionId: 'session-retry', branchName: 'sam/retry' };
@@ -627,13 +628,17 @@ describe('generic webhook ingress vertical slice', () => {
       undefined,
       env
     );
-    expect(retry.status).toBe(202);
-    expect(await retry.json()).toMatchObject({ accepted: true });
+    expect(retry.status).toBe(503);
+    expect(submitter).toHaveBeenCalledOnce();
+
+    const newAttempt = await app.request(
+      deliveryRequest(token, requestBody, 'submission-failure-new-attempt'),
+      undefined,
+      env
+    );
+    expect(newAttempt.status).toBe(202);
+    expect(await newAttempt.json()).toMatchObject({ accepted: true });
     expect(submitter).toHaveBeenCalledTimes(2);
-    expect(sqlite.prepare('SELECT outcome, http_status FROM webhook_deliveries').get()).toEqual({
-      outcome: 'accepted',
-      http_status: 202,
-    });
     expect(
       rows<{ status: string; sequence_number: number }>(
         sqlite,
@@ -697,7 +702,6 @@ describe('generic webhook ingress vertical slice', () => {
     } as D1Database;
     const submitter = vi.fn<TriggerTaskSubmitter>(async (_env, input) => {
       const taskId = `task-${input.triggerExecutionId}`;
-      await input.beforeTaskCreate?.();
       sqlite
         .prepare('INSERT INTO tasks (id, trigger_execution_id) VALUES (?, ?)')
         .run(taskId, input.triggerExecutionId);
@@ -737,7 +741,39 @@ describe('generic webhook ingress vertical slice', () => {
     });
   });
 
-  it('retries when task startup failed and delivery finalization was unavailable', async () => {
+  it('repairs an ambiguous submission from TaskRunner state without resubmitting', async () => {
+    const submitter = vi.fn<TriggerTaskSubmitter>(async (_env, input) => {
+      const taskId = `task-${input.triggerExecutionId}`;
+      sqlite
+        .prepare('INSERT INTO tasks (id, trigger_execution_id) VALUES (?, ?)')
+        .run(taskId, input.triggerExecutionId);
+      taskRunnerStates.set(taskId, { taskId, currentStep: 'node_selection' });
+      throw new Error('TaskRunner response was lost');
+    });
+    const app = appWith(submitter);
+    const request = () =>
+      deliveryRequest(token, { deployment: { id: 'dep-ambiguous' } }, 'ambiguous-submission');
+
+    expect((await app.request(request(), undefined, env)).status).toBe(503);
+    expect(sqlite.prepare('SELECT outcome FROM webhook_deliveries').get()).toEqual({
+      outcome: 'internal_error',
+    });
+
+    const retry = await app.request(request(), undefined, env);
+
+    expect(retry.status).toBe(202);
+    expect(await retry.json()).toMatchObject({
+      accepted: true,
+      duplicate: true,
+      executionId: expect.any(String),
+    });
+    expect(submitter).toHaveBeenCalledOnce();
+    expect(sqlite.prepare('SELECT outcome FROM webhook_deliveries').get()).toEqual({
+      outcome: 'accepted',
+    });
+  });
+
+  it('does not resubmit a linked failed task when delivery finalization was unavailable', async () => {
     const database = env.DATABASE;
     let failedFinalizations = 2;
     env.DATABASE = {
@@ -755,19 +791,11 @@ describe('generic webhook ingress vertical slice', () => {
       },
     } as D1Database;
     const submitter = vi.fn<TriggerTaskSubmitter>(async (_env, input) => {
-      await input.beforeTaskCreate?.();
       const taskId = `task-${input.triggerExecutionId}`;
-      const status = submitter.mock.calls.length === 1 ? 'failed' : 'queued';
       sqlite
         .prepare('INSERT INTO tasks (id, trigger_execution_id, status) VALUES (?, ?, ?)')
-        .run(taskId, input.triggerExecutionId, status);
-      if (status === 'failed') throw new Error('TaskRunner startup failed');
-      taskRunnerStates.set(taskId, { taskId, currentStep: 'node_selection' });
-      return {
-        taskId,
-        sessionId: `session-${input.triggerExecutionId}`,
-        branchName: 'sam/task-runner-retry',
-      };
+        .run(taskId, input.triggerExecutionId, 'failed');
+      throw new Error('TaskRunner startup failed');
     });
     const app = appWith(submitter);
     const request = () =>
@@ -780,14 +808,13 @@ describe('generic webhook ingress vertical slice', () => {
 
     const retry = await app.request(request(), undefined, env);
 
-    expect(retry.status).toBe(202);
-    expect(submitter).toHaveBeenCalledTimes(2);
+    expect(retry.status).toBe(503);
+    expect(submitter).toHaveBeenCalledOnce();
     expect(sqlite.prepare('SELECT outcome FROM webhook_deliveries').get()).toEqual({
-      outcome: 'accepted',
+      outcome: 'internal_error',
     });
     expect(rows<{ status: string }>(sqlite, 'SELECT status FROM tasks ORDER BY rowid')).toEqual([
       { status: 'failed' },
-      { status: 'queued' },
     ]);
   });
 
@@ -839,7 +866,46 @@ describe('generic webhook ingress vertical slice', () => {
     expect(recovered).not.toMatchObject({ processingToken: original.processingToken });
   });
 
-  it('fences a live owner that resumes after its processing lease is taken over', async () => {
+  it('does not reclaim an unlinked delivery when its observed heartbeat changes', async () => {
+    env.WEBHOOK_DELIVERY_PROCESSING_LEASE_SECONDS = '1';
+    const original = await createWebhookDelivery(env, {
+      triggerId: TRIGGER_ID,
+      idempotencyKeyHash: 'heartbeat-race-key',
+      requestFingerprint: 'heartbeat-race-fingerprint',
+      bodyBytes: 12,
+      receivedAt: new Date(Date.now() - 5_000).toISOString(),
+    });
+    const database = env.DATABASE;
+    let heartbeatChanged = false;
+    env.DATABASE = {
+      ...database,
+      prepare: (sql: string) => {
+        if (!heartbeatChanged && sql.includes('SET body_bytes = ?')) {
+          heartbeatChanged = true;
+          sqlite
+            .prepare('UPDATE webhook_deliveries SET processing_heartbeat_at = ?')
+            .run(new Date().toISOString());
+        }
+        return database.prepare(sql);
+      },
+    } as D1Database;
+
+    const raced = await createWebhookDelivery(env, {
+      triggerId: TRIGGER_ID,
+      idempotencyKeyHash: 'heartbeat-race-key',
+      requestFingerprint: 'heartbeat-race-fingerprint',
+      bodyBytes: 12,
+      receivedAt: new Date().toISOString(),
+    });
+
+    expect(original.disposition).toBe('reserved');
+    expect(raced).toMatchObject({ disposition: 'in_flight', id: original.id });
+    expect(sqlite.prepare('SELECT outcome FROM webhook_deliveries').get()).toEqual({
+      outcome: 'processing',
+    });
+  });
+
+  it('never takes over a linked delivery when its original owner resumes', async () => {
     env.WEBHOOK_DELIVERY_PROCESSING_LEASE_SECONDS = '1';
     let releaseFirst!: () => void;
     const firstGate = new Promise<void>((resolve) => {
@@ -851,7 +917,6 @@ describe('generic webhook ingress vertical slice', () => {
     });
     let durableSubmissions = 0;
     const submitter = vi.fn<TriggerTaskSubmitter>(async (_env, input) => {
-      await input.beforeTaskCreate?.();
       const taskId = `task-${input.triggerExecutionId}`;
       sqlite
         .prepare('INSERT INTO tasks (id, trigger_execution_id) VALUES (?, ?)')
@@ -860,7 +925,7 @@ describe('generic webhook ingress vertical slice', () => {
         firstEntered();
         await firstGate;
       }
-      await input.beforeTaskStart?.();
+      taskRunnerStates.set(taskId, { taskId, currentStep: 'node_selection' });
       durableSubmissions += 1;
       return {
         taskId,
@@ -881,21 +946,23 @@ describe('generic webhook ingress vertical slice', () => {
     const takeover = await app.request(request(), undefined, env);
     releaseFirst();
     const original = await originalResponse;
+    const repaired = await app.request(request(), undefined, env);
 
-    expect(takeover.status).toBe(202);
-    expect(original.status).toBe(503);
-    expect(submitter).toHaveBeenCalledTimes(2);
+    expect(takeover.status).toBe(503);
+    expect(original.status).toBe(202);
+    expect(repaired.status).toBe(202);
+    expect(await repaired.json()).toMatchObject({ accepted: true, duplicate: true });
+    expect(submitter).toHaveBeenCalledOnce();
     expect(durableSubmissions).toBe(1);
     expect(sqlite.prepare('SELECT outcome FROM webhook_deliveries').get()).toEqual({
       outcome: 'accepted',
     });
     expect(rows<{ status: string }>(sqlite, 'SELECT status FROM tasks ORDER BY rowid')).toEqual([
-      { status: 'failed' },
       { status: 'queued' },
     ]);
   });
 
-  it('reclaims a stale task insert only when TaskRunner has no durable state', async () => {
+  it('fails a stale linked audit without mutating or resubmitting its task', async () => {
     env.WEBHOOK_DELIVERY_PROCESSING_LEASE_SECONDS = '1';
     const receivedAt = new Date(Date.now() - 5_000).toISOString();
     const original = await createWebhookDelivery(env, {
@@ -935,13 +1002,20 @@ describe('generic webhook ingress vertical slice', () => {
       receivedAt: new Date().toISOString(),
     });
 
-    expect(recovered).toMatchObject({ disposition: 'reserved', id: original.id, retry: true });
+    expect(recovered).toMatchObject({
+      disposition: 'failed',
+      id: original.id,
+      executionId: 'execution-orphaned',
+    });
     expect(sqlite.prepare("SELECT status FROM tasks WHERE id = 'task-orphaned'").get()).toEqual({
-      status: 'failed',
+      status: 'queued',
     });
     expect(
       sqlite.prepare("SELECT status FROM trigger_executions WHERE id = 'execution-orphaned'").get()
-    ).toEqual({ status: 'failed' });
+    ).toEqual({ status: 'queued' });
+    expect(
+      sqlite.prepare('SELECT outcome FROM webhook_deliveries WHERE id = ?').get(original.id)
+    ).toEqual({ outcome: 'internal_error' });
   });
 
   it('reconciles a stale no-key audit after TaskRunner starts durably', async () => {
@@ -978,6 +1052,99 @@ describe('generic webhook ingress vertical slice', () => {
     expect(
       sqlite.prepare('SELECT outcome, http_status, execution_id FROM webhook_deliveries').get()
     ).toEqual({ outcome: 'accepted', http_status: 202, execution_id: 'execution-no-key' });
+  });
+
+  it('fails only the stale delivery audit when no durable TaskRunner state exists', async () => {
+    env.WEBHOOK_DELIVERY_PROCESSING_LEASE_SECONDS = '1';
+    const receivedAt = new Date(Date.now() - 5_000).toISOString();
+    const delivery = await createWebhookDelivery(env, {
+      triggerId: TRIGGER_ID,
+      idempotencyKeyHash: null,
+      requestFingerprint: 'stale-audit-fingerprint',
+      bodyBytes: 12,
+      receivedAt,
+    });
+    expect(delivery.disposition).toBe('reserved');
+    if (delivery.disposition !== 'reserved') throw new Error('Expected reservation');
+    sqlite
+      .prepare(
+        `INSERT INTO trigger_executions
+          (id, trigger_id, project_id, status, sequence_number, created_at)
+         VALUES ('execution-stale-audit', ?, 'project-1', 'queued', 1, ?)`
+      )
+      .run(TRIGGER_ID, receivedAt);
+    sqlite
+      .prepare('UPDATE webhook_deliveries SET execution_id = ? WHERE id = ?')
+      .run('execution-stale-audit', delivery.id);
+    sqlite
+      .prepare(
+        `INSERT INTO tasks (id, trigger_execution_id, status)
+         VALUES ('task-stale-audit', 'execution-stale-audit', 'queued')`
+      )
+      .run();
+
+    expect(await reconcileStaleWebhookDeliveries(env)).toBe(1);
+    expect(
+      sqlite.prepare('SELECT outcome FROM webhook_deliveries WHERE id = ?').get(delivery.id)
+    ).toEqual({ outcome: 'internal_error' });
+    expect(
+      sqlite
+        .prepare("SELECT status FROM trigger_executions WHERE id = 'execution-stale-audit'")
+        .get()
+    ).toEqual({ status: 'queued' });
+    expect(sqlite.prepare("SELECT status FROM tasks WHERE id = 'task-stale-audit'").get()).toEqual({
+      status: 'queued',
+    });
+  });
+
+  it('keeps generic cleanup from failing an execution with an active delivery lease', async () => {
+    const createdAt = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+    const heartbeatAt = new Date().toISOString();
+    sqlite
+      .prepare(
+        `INSERT INTO trigger_executions
+          (id, trigger_id, project_id, status, task_id, sequence_number, created_at)
+         VALUES ('execution-active-lease', ?, 'project-1', 'queued',
+                 'task-active-lease', 1, ?)`
+      )
+      .run(TRIGGER_ID, createdAt);
+    sqlite
+      .prepare(
+        `INSERT INTO tasks (id, trigger_execution_id, status)
+         VALUES ('task-active-lease', 'execution-active-lease', 'queued')`
+      )
+      .run();
+    sqlite
+      .prepare(
+        `INSERT INTO webhook_deliveries
+          (id, trigger_id, request_fingerprint, outcome, http_status, body_bytes,
+           processing_token, processing_heartbeat_at, execution_id, received_at, expires_at)
+         VALUES ('delivery-active-lease', ?, 'active-lease-fingerprint', 'processing', 0, 12,
+                 'active-lease-token', ?, 'execution-active-lease', ?, ?)`
+      )
+      .run(
+        TRIGGER_ID,
+        heartbeatAt,
+        createdAt,
+        new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+      );
+    taskRunnerStates.set('task-active-lease', {
+      taskId: 'task-active-lease',
+      currentStep: 'node_selection',
+    });
+
+    await runTriggerExecutionCleanup(env);
+
+    expect(
+      sqlite
+        .prepare("SELECT status FROM trigger_executions WHERE id = 'execution-active-lease'")
+        .get()
+    ).toEqual({ status: 'queued' });
+    expect(
+      sqlite
+        .prepare("SELECT outcome FROM webhook_deliveries WHERE id = 'delivery-active-lease'")
+        .get()
+    ).toEqual({ outcome: 'processing' });
   });
 
   it('uses a composite cursor so equal timestamps are never skipped', async () => {

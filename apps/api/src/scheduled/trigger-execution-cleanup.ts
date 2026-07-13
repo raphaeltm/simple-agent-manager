@@ -116,6 +116,10 @@ async function recoverStaleExecutionsByStatus(
          FROM trigger_executions
          WHERE status = ?
            AND COALESCE(started_at, created_at) <= ?
+           AND NOT EXISTS (
+             SELECT 1 FROM webhook_deliveries d
+              WHERE d.execution_id = trigger_executions.id AND d.outcome = 'processing'
+           )
          LIMIT ?`
       )
       .bind(status, cutoff, batchSize)
@@ -180,7 +184,11 @@ async function recoverStaleExecutionsByStatus(
         .prepare(
           `UPDATE trigger_executions
            SET status = 'failed', error_message = ?, completed_at = ?
-           WHERE id = ? AND status = ?`
+           WHERE id = ? AND status = ?
+             AND NOT EXISTS (
+               SELECT 1 FROM webhook_deliveries d
+                WHERE d.execution_id = trigger_executions.id AND d.outcome = 'processing'
+             )`
         )
         .bind(reason, now, exec.id, status)
     );
@@ -289,6 +297,17 @@ export async function runTriggerExecutionCleanup(env: Env): Promise<TriggerExecu
     DEFAULT_TRIGGER_STALE_RECOVERY_BATCH_SIZE
   );
 
+  let webhookCleanupErrors = 0;
+  try {
+    const reconciled = await reconcileStaleWebhookDeliveries(env);
+    if (reconciled > 0) log.info('webhook_deliveries_reconciled', { count: reconciled });
+  } catch (error) {
+    webhookCleanupErrors += 1;
+    log.error('webhook_delivery_reconciliation_failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
   const staleRunning = await recoverStaleExecutionsByStatus(
     env.DATABASE,
     'running',
@@ -303,13 +322,10 @@ export async function runTriggerExecutionCleanup(env: Env): Promise<TriggerExecu
   );
   const retention = await purgeOldTriggerExecutions(env.DATABASE, retentionDays);
   let webhookDeliveriesPurged = 0;
-  let webhookCleanupErrors = 0;
   try {
-    const reconciled = await reconcileStaleWebhookDeliveries(env);
-    if (reconciled > 0) log.info('webhook_deliveries_reconciled', { count: reconciled });
     webhookDeliveriesPurged = await purgeExpiredWebhookDeliveries(env);
   } catch (error) {
-    webhookCleanupErrors = 1;
+    webhookCleanupErrors += 1;
     log.error('webhook_delivery_purge_failed', {
       error: error instanceof Error ? error.message : String(error),
     });

@@ -63,3 +63,7 @@ CREATE INDEX idx_webhook_deliveries_expires
 
 CREATE INDEX idx_webhook_deliveries_execution
   ON webhook_deliveries(execution_id);
+
+CREATE INDEX idx_webhook_deliveries_processing_heartbeat
+  ON webhook_deliveries(processing_heartbeat_at, id)
+  WHERE outcome = 'processing' AND processing_token IS NOT NULL;
