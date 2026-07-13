@@ -60,6 +60,7 @@ export const TriggerForm: FC<TriggerFormProps> = ({ open, onClose, editTrigger, 
   const { projectId } = useProjectContext();
   const templateRef = useRef<HTMLTextAreaElement>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
+  const shouldRestoreFocusRef = useRef(true);
   const isEdit = Boolean(editTrigger);
 
   // Form state
@@ -102,10 +103,11 @@ export const TriggerForm: FC<TriggerFormProps> = ({ open, onClose, editTrigger, 
 
   useEffect(() => {
     if (!open) return;
+    shouldRestoreFocusRef.current = true;
     returnFocusRef.current =
       document.activeElement instanceof HTMLElement ? document.activeElement : null;
     return () => {
-      returnFocusRef.current?.focus();
+      if (shouldRestoreFocusRef.current) returnFocusRef.current?.focus();
       returnFocusRef.current = null;
     };
   }, [open]);
@@ -280,6 +282,9 @@ export const TriggerForm: FC<TriggerFormProps> = ({ open, onClose, editTrigger, 
         credential = created.webhookCredential;
         toast.success('Trigger created');
       }
+      // The one-time credential dialog becomes the active modal after creation.
+      // Let it claim focus instead of returning focus to the form opener.
+      shouldRestoreFocusRef.current = !credential;
       onSaved?.(credential);
       onClose();
     } catch (err) {

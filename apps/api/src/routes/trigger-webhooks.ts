@@ -264,7 +264,16 @@ async function handleWebhookIngress(
 
 export function createTriggerWebhookRoutes(submitter?: TriggerTaskSubmitter) {
   const routes = new Hono<{ Bindings: Env }>();
-  routes.post('/ingest', (c) => handleWebhookIngress(c, submitter));
+  routes.post('/ingest', async (c) => {
+    try {
+      return await handleWebhookIngress(c, submitter);
+    } catch (error) {
+      log.error('webhook_trigger.ingest_internal_error', {
+        errorType: error instanceof Error ? error.name : 'UnknownError',
+      });
+      return publicError(503, 'Webhook could not be processed');
+    }
+  });
   return routes;
 }
 

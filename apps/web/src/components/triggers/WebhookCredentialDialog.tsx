@@ -25,8 +25,7 @@ export function WebhookCredentialDialog({ credential, onClose }: WebhookCredenti
   );
 
   useEffect(() => {
-    const frame = requestAnimationFrame(() => acknowledgmentRef.current?.focus());
-    return () => cancelAnimationFrame(frame);
+    acknowledgmentRef.current?.focus();
   }, []);
 
   const copy = async (label: string, value: string) => {

@@ -175,12 +175,13 @@ Use D1 batch/conditional statements for atomic create/config, rotation, delivery
 - `pnpm typecheck`: 16/16 tasks passed.
 - `pnpm test`: 19/19 tasks passed; API 409 files / 5,945 tests and web 218 files / 2,671 tests passed.
 - `pnpm build`: 9/9 tasks passed, including the public webhook guide.
-- Webhook SQLite vertical slice: 9/9 passed, including authenticated submission, filtering, deduplication, concurrency, retryable failure/same-key retry, configuration error, and rotation.
-- Trigger-focused API tests: 59 passed. Trigger-focused web tests: 14 passed. Real-D1 scheduled cleanup coverage passed.
+- Webhook SQLite vertical slice: 13/13 passed, including public-envelope limits, authenticated submission, filtering, deduplication, paused/rate-limited outcomes, both concurrency policies, durable persistence failure, retryable submission failure/same-key retry, configuration error, and rotation.
+- Trigger-focused API tests: 63 passed. Trigger-focused web tests: 14 passed. Real-D1 scheduled cleanup coverage passed.
 - Playwright audit: 26 applicable cases passed at 375x667 and 1280x800; 26 cross-project cases intentionally skipped. Screenshots cover webhook credential create/rotation, preview/filter results, all delivery outcomes, empty history, long/special text, and pagination with overflow assertions.
 - UI rubric: visual hierarchy 5/5, interaction clarity 5/5, mobile quality 5/5, accessibility 4/5, consistency 5/5 (24/25). The one-point accessibility reserve reflects automated/behavioral coverage without a dedicated assistive-technology staging pass yet.
 - `quality:wrangler-bindings`, `quality:ast-checks`, `quality:file-sizes`, `quality:migration-safety`, `quality:do-migration-safety`, `quality:source-contract-tests`, and `quality:observability-noise`: passed (external observability queries skipped where credentials were unavailable; local noise checks passed).
 - `openapi:check` and `git diff --check`: passed.
+- Task-completion validation: PASS across research/checklist coverage, checked-item implementation, acceptance/test mapping, UI/backend field propagation, source-discriminated resources, and the SQLite-backed vertical slice. The concrete ProjectData/TaskRunner adapter remains a staging gate by design.
 
 ## Primary data-flow trace to verify
 

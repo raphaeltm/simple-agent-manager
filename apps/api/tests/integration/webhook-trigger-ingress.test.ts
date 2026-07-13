@@ -72,6 +72,23 @@ function deliveryRequest(token: string, body: Record<string, unknown>, idempoten
   });
 }
 
+function rawDeliveryRequest(
+  token: string,
+  body: BodyInit,
+  options: { contentType?: string; idempotencyKey?: string } = {}
+) {
+  const headers = new Headers({ Authorization: `Bearer ${token}` });
+  if (options.contentType !== undefined) headers.set('Content-Type', options.contentType);
+  if (options.idempotencyKey !== undefined) {
+    headers.set('Idempotency-Key', options.idempotencyKey);
+  }
+  return new Request('https://api.example.test/api/webhooks/ingest', {
+    method: 'POST',
+    headers,
+    body,
+  });
+}
+
 describe('generic webhook ingress vertical slice', () => {
   let sqlite: Database.Database;
   let token: string;
@@ -254,6 +271,83 @@ describe('generic webhook ingress vertical slice', () => {
     });
   });
 
+  it('hides disabled ingress and rejects invalid request envelopes before persistence', async () => {
+    const submitter = vi.fn<TriggerTaskSubmitter>();
+    const app = appWith(submitter);
+
+    env.WEBHOOK_TRIGGERS_ENABLED = 'false';
+    expect(
+      (await app.request(deliveryRequest(token, { ok: true }, 'disabled'), undefined, env)).status
+    ).toBe(404);
+    env.WEBHOOK_TRIGGERS_ENABLED = 'true';
+
+    const unsupported = await app.request(
+      rawDeliveryRequest(token, '{}', { contentType: 'text/plain' }),
+      undefined,
+      env
+    );
+    expect(unsupported.status).toBe(415);
+
+    const invalidJson = await app.request(
+      rawDeliveryRequest(token, '["not-an-object"]', { contentType: 'application/json' }),
+      undefined,
+      env
+    );
+    expect(invalidJson.status).toBe(400);
+
+    env.WEBHOOK_TRIGGER_MAX_BODY_BYTES = '8';
+    const oversized = await app.request(
+      rawDeliveryRequest(token, '{"too":"large"}', { contentType: 'application/json' }),
+      undefined,
+      env
+    );
+    expect(oversized.status).toBe(413);
+    delete env.WEBHOOK_TRIGGER_MAX_BODY_BYTES;
+
+    env.WEBHOOK_TRIGGER_MAX_IDEMPOTENCY_KEY_LENGTH = '4';
+    const longIdempotencyKey = await app.request(
+      deliveryRequest(token, { ok: true }, 'too-long'),
+      undefined,
+      env
+    );
+    expect(longIdempotencyKey.status).toBe(400);
+
+    expect(submitter).not.toHaveBeenCalled();
+    expect(sqlite.prepare('SELECT COUNT(*) AS count FROM webhook_deliveries').get()).toEqual({
+      count: 0,
+    });
+  });
+
+  it('returns a bounded retryable response when durable delivery persistence fails', async () => {
+    const submitter = vi.fn<TriggerTaskSubmitter>();
+    const database = env.DATABASE;
+    env.DATABASE = {
+      ...database,
+      prepare: (sql: string) => {
+        if (sql.includes('INSERT OR IGNORE INTO webhook_deliveries')) {
+          throw new Error('D1 unavailable');
+        }
+        return database.prepare(sql);
+      },
+    } as D1Database;
+
+    const response = await appWith(submitter).request(
+      deliveryRequest(token, { deployment: { id: 'dep-d1-failure' } }, 'd1-failure'),
+      undefined,
+      env
+    );
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      accepted: false,
+      message: 'Webhook could not be processed',
+    });
+    expect(submitter).not.toHaveBeenCalled();
+    expect(sqlite.prepare('SELECT COUNT(*) AS count FROM webhook_deliveries').get()).toEqual({
+      count: 0,
+    });
+  });
+
   it('records a configuration error when the target profile is missing', async () => {
     sqlite.prepare('UPDATE triggers SET agent_profile_id = NULL WHERE id = ?').run(TRIGGER_ID);
     const submitter = vi.fn<TriggerTaskSubmitter>();
@@ -280,6 +374,53 @@ describe('generic webhook ingress vertical slice', () => {
     expect(sqlite.prepare('SELECT COUNT(*) AS count FROM trigger_executions').get()).toEqual({
       count: 0,
     });
+  });
+
+  it('audits inactive and rate-limited deliveries without extra submissions', async () => {
+    const submitter = vi.fn<TriggerTaskSubmitter>(async () => ({
+      taskId: 'task-active',
+      sessionId: 'session-active',
+      branchName: 'sam/active',
+    }));
+    const app = appWith(submitter);
+
+    sqlite.prepare("UPDATE triggers SET status = 'paused' WHERE id = ?").run(TRIGGER_ID);
+    const inactive = await app.request(
+      deliveryRequest(token, { deployment: { id: 'dep-paused' } }, 'paused'),
+      undefined,
+      env
+    );
+    expect(inactive.status).toBe(202);
+    expect(await inactive.json()).toMatchObject({ accepted: true, inactive: true });
+
+    sqlite.prepare("UPDATE triggers SET status = 'active' WHERE id = ?").run(TRIGGER_ID);
+    env.KV = createMemoryKv();
+    env.WEBHOOK_TRIGGER_RATE_LIMIT_PER_MINUTE = '1';
+    const accepted = await app.request(
+      deliveryRequest(token, { deployment: { id: 'dep-active' } }, 'rate-first'),
+      undefined,
+      env
+    );
+    const limited = await app.request(
+      deliveryRequest(token, { deployment: { id: 'dep-limited' } }, 'rate-second'),
+      undefined,
+      env
+    );
+
+    expect(accepted.status).toBe(202);
+    expect(limited.status).toBe(429);
+    expect(await limited.json()).toEqual({ accepted: false, message: 'Too many requests' });
+    expect(submitter).toHaveBeenCalledOnce();
+    expect(
+      rows<{ outcome: string; error_code: string | null }>(
+        sqlite,
+        'SELECT outcome, error_code FROM webhook_deliveries ORDER BY received_at, id'
+      )
+    ).toEqual([
+      { outcome: 'inactive', error_code: 'paused' },
+      { outcome: 'accepted', error_code: null },
+      { outcome: 'rate_limited', error_code: 'rate_limited' },
+    ]);
   });
 
   it('reserves one execution and records a monotonic skipped attempt under concurrency', async () => {
@@ -317,6 +458,47 @@ describe('generic webhook ingress vertical slice', () => {
     ).toEqual([
       { status: 'running', skip_reason: null, sequence_number: 1 },
       { status: 'skipped', skip_reason: 'still_running', sequence_number: 2 },
+    ]);
+  });
+
+  it('enforces maxConcurrent when skipIfRunning is disabled', async () => {
+    sqlite
+      .prepare('UPDATE triggers SET skip_if_running = 0, max_concurrent = 1 WHERE id = ?')
+      .run(TRIGGER_ID);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const submitter = vi.fn<TriggerTaskSubmitter>(async () => {
+      await gate;
+      return { taskId: 'task-max', sessionId: 'session-max', branchName: 'sam/max' };
+    });
+    const app = appWith(submitter);
+    const firstPromise = app.request(
+      deliveryRequest(token, { deployment: { id: 'dep-max-a' } }, 'max-a'),
+      undefined,
+      env
+    );
+    await vi.waitFor(() => expect(submitter).toHaveBeenCalledOnce());
+
+    const second = await app.request(
+      deliveryRequest(token, { deployment: { id: 'dep-max-b' } }, 'max-b'),
+      undefined,
+      env
+    );
+    expect(await second.json()).toMatchObject({ accepted: true, skipped: 'concurrent_limit' });
+    release();
+    expect((await firstPromise).status).toBe(202);
+
+    expect(submitter).toHaveBeenCalledOnce();
+    expect(
+      rows<{ status: string; skip_reason: string | null; sequence_number: number }>(
+        sqlite,
+        'SELECT status, skip_reason, sequence_number FROM trigger_executions ORDER BY sequence_number'
+      )
+    ).toEqual([
+      { status: 'running', skip_reason: null, sequence_number: 1 },
+      { status: 'skipped', skip_reason: 'concurrent_limit', sequence_number: 2 },
     ]);
   });
 
