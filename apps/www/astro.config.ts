@@ -23,8 +23,7 @@ export default defineConfig({
         },
       ],
       editLink: {
-        baseUrl:
-          'https://github.com/raphaeltm/simple-agent-manager/edit/main/apps/www/',
+        baseUrl: 'https://github.com/raphaeltm/simple-agent-manager/edit/main/apps/www/',
       },
       sidebar: [
         {
@@ -42,6 +41,7 @@ export default defineConfig({
             { slug: 'docs/guides/idea-execution' },
             { slug: 'docs/guides/chat-features' },
             { slug: 'docs/guides/notifications' },
+            { slug: 'docs/guides/webhook-triggers' },
             { slug: 'docs/guides/creating-workspaces' },
             { slug: 'docs/guides/app-deployments' },
             { slug: 'docs/guides/self-hosting' },
@@ -51,10 +51,7 @@ export default defineConfig({
         {
           label: 'Architecture',
           collapsed: true,
-          items: [
-            { slug: 'docs/architecture/overview' },
-            { slug: 'docs/architecture/security' },
-          ],
+          items: [{ slug: 'docs/architecture/overview' }, { slug: 'docs/architecture/security' }],
         },
         {
           label: 'Reference',

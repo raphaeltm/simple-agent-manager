@@ -19,10 +19,11 @@ import type { Env } from '../../../src/env';
 
 // Mock auth middleware — pass through, inject auth context
 vi.mock('../../../src/middleware/auth', () => ({
-  requireAuth: () => vi.fn((c: any, next: any) => {
-    c.set('auth', { user: { id: 'test-user-id', name: 'Test User', email: 'test@example.com' } });
-    return next();
-  }),
+  requireAuth: () =>
+    vi.fn((c: any, next: any) => {
+      c.set('auth', { user: { id: 'test-user-id', name: 'Test User', email: 'test@example.com' } });
+      return next();
+    }),
   requireApproved: () => vi.fn((_c: any, next: any) => next()),
   getAuth: (c: any) => c.get('auth') ?? { user: { id: 'test-user-id' } },
   getUserId: () => 'test-user-id',
@@ -41,7 +42,9 @@ vi.mock('../../../src/middleware/project-auth', () => ({
 }));
 
 // Mock the cron utilities
-const mockValidateCron = vi.fn().mockReturnValue({ valid: true, humanReadable: 'Every day at 9:00 AM' });
+const mockValidateCron = vi
+  .fn()
+  .mockReturnValue({ valid: true, humanReadable: 'Every day at 9:00 AM' });
 vi.mock('../../../src/services/cron-utils', () => ({
   validateCronExpression: (...args: any[]) => mockValidateCron(...args),
   cronToNextFire: vi.fn().mockReturnValue('2026-04-10T09:00:00.000Z'),
@@ -50,7 +53,9 @@ vi.mock('../../../src/services/cron-utils', () => ({
 
 // Mock the template engine
 vi.mock('../../../src/services/trigger-template', () => ({
-  renderTemplate: vi.fn().mockReturnValue({ rendered: 'Review PRs for Daily Review', warnings: [] }),
+  renderTemplate: vi
+    .fn()
+    .mockReturnValue({ rendered: 'Review PRs for Daily Review', warnings: [] }),
   buildCronContext: vi.fn().mockReturnValue({}),
 }));
 
@@ -70,6 +75,10 @@ vi.mock('../../../src/services/project-multiplayer', () => ({
     hasPendingAccessRequest: false,
     multiplayerActive: false,
   }),
+}));
+
+vi.mock('../../../src/services/credential-attribution-health', () => ({
+  buildCredentialAttributionForTriggers: vi.fn().mockResolvedValue(new Map()),
 }));
 
 // Mock ulid
@@ -105,6 +114,7 @@ vi.mock('drizzle-orm/d1', () => ({
           });
         }),
         offset: vi.fn(() => makeThenable(resolveValue)),
+        get: vi.fn(async () => (await resolveValue())[0]),
         then: (resolve: any, reject?: any) => resolveValue().then(resolve, reject),
       };
       return obj;
@@ -123,8 +133,9 @@ vi.mock('drizzle-orm/d1', () => ({
         })),
       })),
       delete: vi.fn(() => ({
-        where: vi.fn(() => Promise.resolve()),
+        where: vi.fn(() => Promise.resolve({ meta: { changes: 0 } })),
       })),
+      batch: vi.fn(async (statements: Promise<unknown>[]) => Promise.all(statements)),
     };
   },
 }));
@@ -169,7 +180,10 @@ describe('Trigger Routes', () => {
     app.onError((err, c) => {
       const appError = err as { statusCode?: number; error?: string; message?: string };
       if (typeof appError.statusCode === 'number' && typeof appError.error === 'string') {
-        return c.json({ error: appError.error, message: appError.message }, appError.statusCode as any);
+        return c.json(
+          { error: appError.error, message: appError.message },
+          appError.statusCode as any
+        );
       }
       return c.json({ error: 'INTERNAL_ERROR', message: (err as Error).message }, 500);
     });
@@ -183,30 +197,33 @@ describe('Trigger Routes', () => {
     it('creates a cron trigger successfully', async () => {
       // Queue: name uniqueness check, trigger count, read-back after insert
       queryResults = [
-        [],                        // name uniqueness: no existing trigger with same name
-        [{ count: 0 }],           // trigger count: below limit
-        [{                         // read-back of created trigger
-          id: 'ULID000001',
-          projectId: 'test-project-id',
-          userId: 'test-user-id',
-          name: 'Daily Review',
-          description: null,
-          status: 'active',
-          sourceType: 'cron',
-          cronExpression: '0 9 * * *',
-          cronTimezone: 'UTC',
-          skipIfRunning: true,
-          promptTemplate: 'Review PRs for today',
-          agentProfileId: null,
-          taskMode: 'task',
-          vmSizeOverride: null,
-          maxConcurrent: 1,
-          nextFireAt: '2026-04-10T09:00:00.000Z',
-          lastTriggeredAt: null,
-          triggerCount: 0,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        }],
+        [], // name uniqueness: no existing trigger with same name
+        [{ count: 0 }], // trigger count: below limit
+        [
+          {
+            // read-back of created trigger
+            id: 'ULID000001',
+            projectId: 'test-project-id',
+            userId: 'test-user-id',
+            name: 'Daily Review',
+            description: null,
+            status: 'active',
+            sourceType: 'cron',
+            cronExpression: '0 9 * * *',
+            cronTimezone: 'UTC',
+            skipIfRunning: true,
+            promptTemplate: 'Review PRs for today',
+            agentProfileId: null,
+            taskMode: 'task',
+            vmSizeOverride: null,
+            maxConcurrent: 1,
+            nextFireAt: '2026-04-10T09:00:00.000Z',
+            lastTriggeredAt: null,
+            triggerCount: 0,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          },
+        ],
       ];
 
       const res = await app.request(
@@ -233,7 +250,7 @@ describe('Trigger Routes', () => {
       expect(json.cronHumanReadable).toBeDefined();
     });
 
-    it('rejects non-cron source type', async () => {
+    it('requires webhook configuration and an explicit profile', async () => {
       const res = await app.request(
         REQUEST_PATH,
         {
@@ -250,7 +267,93 @@ describe('Trigger Routes', () => {
 
       expect(res.status).toBe(400);
       const json = await res.json();
-      expect(json.message).toContain('Only cron');
+      expect(json.message).toContain('webhookConfig and agentProfileId are required');
+    });
+
+    it('creates webhook config atomically and returns the raw credential once', async () => {
+      const now = new Date().toISOString();
+      queryResults = [
+        [{ id: 'profile-webhook' }],
+        [],
+        [{ count: 0 }],
+        [
+          {
+            id: 'ULID000001',
+            projectId: 'test-project-id',
+            userId: 'test-user-id',
+            name: 'Deployment failures',
+            description: null,
+            status: 'active',
+            sourceType: 'webhook',
+            cronExpression: null,
+            cronTimezone: null,
+            skipIfRunning: true,
+            promptTemplate: 'Investigate {{webhook.payload}}',
+            agentProfileId: 'profile-webhook',
+            skillId: null,
+            taskMode: 'task',
+            vmSizeOverride: null,
+            maxConcurrent: 1,
+            nextFireAt: null,
+            lastTriggeredAt: null,
+            triggerCount: 0,
+            nextExecutionSequence: 1,
+            credentialBlockedReason: null,
+            credentialBlockedAt: null,
+            credentialBlockedBy: null,
+            createdAt: now,
+            updatedAt: now,
+          },
+        ],
+        [
+          {
+            triggerId: 'ULID000001',
+            tokenHash: 'keyed-hash-only',
+            tokenLastFour: 'abcd',
+            tokenCreatedAt: now,
+            tokenRotatedAt: null,
+            sourceLabel: 'release-system',
+            filterMode: 'all',
+            filtersJson: '[]',
+            includedHeadersJson: '["x-event-type"]',
+            createdAt: now,
+            updatedAt: now,
+          },
+        ],
+      ];
+
+      const res = await app.request(
+        REQUEST_PATH,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: 'Deployment failures',
+            sourceType: 'webhook',
+            promptTemplate: 'Investigate {{webhook.payload}}',
+            agentProfileId: 'profile-webhook',
+            webhookConfig: {
+              sourceLabel: 'release-system',
+              includedHeaders: ['x-event-type'],
+            },
+          }),
+        },
+        { ...env, ENCRYPTION_KEY: 'test-key' }
+      );
+
+      expect(res.status).toBe(201);
+      const json = await res.json();
+      expect(json.webhookCredential).toMatchObject({
+        endpointUrl: 'http://localhost/api/webhooks/ingest',
+        headerName: 'Authorization',
+      });
+      expect(json.webhookCredential.token).toMatch(/^sam_wh_[A-Za-z0-9_-]{43}$/);
+      expect(json.webhookConfig).toMatchObject({
+        sourceLabel: 'release-system',
+        includedHeaders: ['x-event-type'],
+        tokenLastFour: 'abcd',
+      });
+      expect(json.webhookConfig).not.toHaveProperty('tokenHash');
     });
 
     it('rejects missing cron expression for cron source', async () => {
@@ -341,7 +444,7 @@ describe('Trigger Routes', () => {
     it('rejects duplicate trigger name', async () => {
       // Queue: name uniqueness check returns existing trigger
       queryResults = [
-        [{ id: 'existing-trigger' }],  // name conflict
+        [{ id: 'existing-trigger' }], // name conflict
       ];
 
       const res = await app.request(
@@ -372,15 +475,11 @@ describe('Trigger Routes', () => {
     it('returns an empty list for project with no triggers', async () => {
       // Queue: trigger list query returns empty, count returns 0
       queryResults = [
-        [],              // triggers list
+        [], // triggers list
         [{ count: 0 }], // total count
       ];
 
-      const res = await app.request(
-        REQUEST_PATH,
-        { method: 'GET' },
-        env
-      );
+      const res = await app.request(REQUEST_PATH, { method: 'GET' }, env);
 
       expect(res.status).toBe(200);
       const json = await res.json();
@@ -396,11 +495,7 @@ describe('Trigger Routes', () => {
       // Queue: trigger lookup returns empty
       queryResults = [[]];
 
-      const res = await app.request(
-        `${REQUEST_PATH}/nonexistent`,
-        { method: 'GET' },
-        env
-      );
+      const res = await app.request(`${REQUEST_PATH}/nonexistent`, { method: 'GET' }, env);
 
       expect(res.status).toBe(404);
     });
@@ -413,11 +508,7 @@ describe('Trigger Routes', () => {
     it('returns 404 for nonexistent trigger', async () => {
       queryResults = [[]];
 
-      const res = await app.request(
-        `${REQUEST_PATH}/nonexistent/test`,
-        { method: 'POST' },
-        env
-      );
+      const res = await app.request(`${REQUEST_PATH}/nonexistent/test`, { method: 'POST' }, env);
 
       expect(res.status).toBe(404);
     });
@@ -430,11 +521,7 @@ describe('Trigger Routes', () => {
     it('returns 404 for nonexistent trigger', async () => {
       queryResults = [[]];
 
-      const res = await app.request(
-        `${REQUEST_PATH}/nonexistent/run`,
-        { method: 'POST' },
-        env
-      );
+      const res = await app.request(`${REQUEST_PATH}/nonexistent/run`, { method: 'POST' }, env);
 
       expect(res.status).toBe(404);
     });
@@ -447,11 +534,7 @@ describe('Trigger Routes', () => {
     it('returns 404 for nonexistent trigger', async () => {
       queryResults = [[]];
 
-      const res = await app.request(
-        `${REQUEST_PATH}/nonexistent`,
-        { method: 'DELETE' },
-        env
-      );
+      const res = await app.request(`${REQUEST_PATH}/nonexistent`, { method: 'DELETE' }, env);
 
       expect(res.status).toBe(404);
     });
@@ -494,7 +577,14 @@ describe('Trigger Routes', () => {
     it('deletes a completed execution successfully', async () => {
       // Queue: execution lookup (completed)
       queryResults = [
-        [{ id: 'exec-1', status: 'completed', triggerId: 'trigger-1', projectId: 'test-project-id' }],
+        [
+          {
+            id: 'exec-1',
+            status: 'completed',
+            triggerId: 'trigger-1',
+            projectId: 'test-project-id',
+          },
+        ],
       ];
 
       const res = await app.request(
@@ -544,10 +634,7 @@ describe('Trigger Routes', () => {
 
     it('returns cleaned: 0 when no stuck executions exist', async () => {
       // Queue: trigger lookup, stuck execution query (empty)
-      queryResults = [
-        [{ id: 'trigger-1', projectId: 'test-project-id' }],
-        [],
-      ];
+      queryResults = [[{ id: 'trigger-1', projectId: 'test-project-id' }], []];
 
       const res = await app.request(
         `${REQUEST_PATH}/trigger-1/executions/cleanup`,

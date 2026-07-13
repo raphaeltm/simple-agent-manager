@@ -19,6 +19,7 @@ The reference covers:
   - Timeouts (heartbeat, Hetzner API, Cloudflare API, Node Agent)
   - Audio/Transcription settings
   - Client error reporting settings
+  - Generic webhook trigger limits, rate damping, and audit retention
 - VM Agent Environment Variables:
   - Container/User settings
   - Git operations (timeouts, worktree limits)

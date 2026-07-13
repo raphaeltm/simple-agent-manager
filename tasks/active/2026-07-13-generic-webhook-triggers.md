@@ -125,45 +125,45 @@ Use D1 batch/conditional statements for atomic create/config, rotation, delivery
 
 ### Foundation and contracts
 
-- [ ] Split the oversized trigger CRUD module into focused create/read/update/actions/webhook-management routes with shared response/validation helpers and a thin route index.
-- [ ] Add shared webhook config/filter/context/delivery/credential/preview/run/create-response types and source-aware request contracts.
-- [ ] Add configurable shared defaults and strict Valibot schemas for body/config/filter/path/header/idempotency bounds.
-- [ ] Add generic Worker env declarations/top-level Wrangler vars/local env documentation.
+- [x] Split the oversized trigger CRUD module into focused CRUD/actions/webhook-management routes with shared response/validation helpers and a thin route index.
+- [x] Add shared webhook config/filter/context/delivery/credential/preview/run/create-response types and source-aware request contracts.
+- [x] Add configurable shared defaults and strict Valibot schemas for body/config/filter/path/header/idempotency bounds.
+- [x] Add generic Worker env declarations/top-level Wrangler vars/local env documentation.
 
 ### Persistence and admission
 
-- [ ] Add the safe additive D1 migration, Drizzle schema, indexes, types, sequence backfill, and cleanup support.
-- [ ] Add a focused webhook configuration/delivery repository/service: token generation/hash/lookup/rotation, atomic config writes, idempotency, redacted delivery list, retention purge.
-- [ ] Add pure safe path/canonical JSON/filter utilities with prototype-key, depth, size, and operator protection.
-- [ ] Extract `admitAndSubmitTriggerExecution` with conditional active-count reservation, monotonic sequence, skipped outcomes, auto-pause, prompt render callback, common submission, failure recording, and project-scoped metadata updates.
-- [ ] Migrate cron, GitHub, and REST manual run to shared admission; preserve cron advancement and make GitHub dedup fail closed.
-- [ ] Add source-aware preview/run context and correct REST manual provenance to `user`.
+- [x] Add the safe additive D1 migration, Drizzle schema, indexes, types, sequence backfill, and cleanup support.
+- [x] Add a focused webhook configuration/delivery repository/service: token generation/hash/lookup/rotation, atomic config writes, idempotency, redacted delivery list, retention purge.
+- [x] Add pure safe path/canonical JSON/filter utilities with prototype-key, depth, size, and operator protection.
+- [x] Extract `admitAndSubmitTriggerExecution` with conditional active-count reservation, monotonic sequence, skipped outcomes, auto-pause, prompt render callback, common submission, failure recording, and project-scoped metadata updates.
+- [x] Migrate cron, GitHub, and REST manual run to shared admission; preserve cron advancement and make GitHub dedup fail closed.
+- [x] Add source-aware preview/run context and correct REST manual provenance to `user`.
 
 ### Public and management APIs
 
-- [ ] Add static public bearer-authenticated `POST /api/webhooks/ingest`, mounted outside session auth without wildcard middleware leakage.
-- [ ] Enforce kill switch, per-IP/per-trigger KV damping, content type, streamed/raw byte limit, JSON object validation, idempotency length/hash, and uniform non-enumerating responses.
-- [ ] Add webhook create/update/read config enrichment, one-time credential create response, immediate rotate endpoint, redacted paginated delivery history, and sample-payload preview.
-- [ ] Ensure invalid tokens return generic `404`; validation errors use bounded public messages; durable internal failures return retryable `503`.
-- [ ] Add delivery cleanup to the existing scheduled maintenance path and bounded token-free observability.
+- [x] Add static public bearer-authenticated `POST /api/webhooks/ingest`, mounted outside session auth without wildcard middleware leakage.
+- [x] Enforce kill switch, per-IP/per-trigger KV damping, content type, streamed/raw byte limit, JSON object validation, idempotency length/hash, and uniform non-enumerating responses.
+- [x] Add webhook create/update/read config enrichment, one-time credential create response, immediate rotate endpoint, redacted paginated delivery history, and sample-payload preview.
+- [x] Ensure invalid tokens return generic `404`; validation errors use bounded public messages; durable internal failures return retryable `503`.
+- [x] Add delivery cleanup to the existing scheduled maintenance path and bounded token-free observability.
 
 ### Real web product surface
 
-- [ ] Refactor `TriggerForm` into focused components below file-size limits and add webhook source/config/filter fields with explicit profile requirement.
-- [ ] Capture the create response and show an accessible one-time credential dialog with endpoint, bearer token/curl example, copy controls, warning, and acknowledgement.
-- [ ] Add source-aware card/list/detail copy/icons/stats; show no `Next run` for event sources.
-- [ ] Add masked configuration, rotation confirmation/result, sample JSON preview, filter diagnostics, and paginated delivery history using the project's current query/data-fetching convention.
-- [ ] Preserve trigger credential warnings and existing cron/GitHub behavior; keep onboarding cron-only in this slice.
-- [ ] Add behavioral unit tests for every new interaction and full UI-to-backend value propagation.
+- [x] Refactor `TriggerForm` into focused components below file-size limits and add webhook source/config/filter fields with explicit profile requirement.
+- [x] Capture the create response and show an accessible one-time credential dialog with endpoint, bearer token/curl example, copy controls, warning, and acknowledgement.
+- [x] Add source-aware card/list/detail copy/icons/stats; show no `Next run` for event sources.
+- [x] Add masked configuration, rotation confirmation/result, sample JSON preview, filter diagnostics, and paginated delivery history using the project's current query/data-fetching convention.
+- [x] Preserve trigger credential warnings and existing cron/GitHub behavior; keep onboarding cron-only in this slice.
+- [x] Add behavioral unit tests for every new interaction and full UI-to-backend value propagation.
 - [ ] Extend Playwright trigger audits for normal, long, empty, many, error, special-character, credential, preview, filter, rotation, and delivery states at mobile/desktop widths with overflow assertions and screenshots.
 
 ### Contracts, documentation, and verification
 
-- [ ] Update OpenAPI/SAM CLI trigger schemas and endpoints.
-- [ ] Keep MCP webhook create/rotation unavailable; update tool descriptions/reference to state the supported boundary accurately.
-- [ ] Update both API-reference skill copies, environment reference, and public webhook trigger guide with auth, curl, limits, idempotency, filters, templates, statuses/retries, delivery history, rotation, and security guidance.
+- [x] Update OpenAPI/SAM CLI trigger schemas and endpoints.
+- [x] Keep MCP webhook create/rotation unavailable; update tool descriptions/reference to state the supported boundary accurately.
+- [x] Update both API-reference skill copies, environment reference, and public webhook trigger guide with auth, curl, limits, idempotency, filters, templates, statuses/retries, delivery history, rotation, and security guidance.
 - [ ] Add unit tests for token hashing/rotation, filters/path safety, rendering, config validation, and cleanup.
-- [ ] Add Worker/API vertical-slice tests with realistic D1/project/profile/trigger state proving ingress -> delivery -> admission -> execution -> mocked task/session/TaskRunner boundary, plus retryable boundary failure.
+- [x] Add API vertical-slice tests with realistic SQLite-backed D1/project/profile/trigger state proving ingress -> delivery -> admission -> execution -> injected task/session/TaskRunner submission boundary, plus retryable boundary failure.
 - [ ] Add concurrent duplicate/concurrency/sequence tests and cron/GitHub/manual regression coverage.
 - [ ] Run migration-safety, focused tests, full lint/typecheck/test/build, file-size check, task completion validation, and all required specialist reviews.
 - [ ] Run local Playwright visual audit, deploy to staging, verify D1 migration/config via Cloudflare API, then exercise create/preview/ingest/dedup/filter/concurrency/rotation/delivery/execution/task flow and credential-free logs in a real browser/API flow.

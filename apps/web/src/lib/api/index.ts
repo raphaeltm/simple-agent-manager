@@ -385,17 +385,8 @@ export {
   stopChatSession,
   summarizeSession,
 } from './sessions';
-export type {
-  SetupCompleteResponse,
-  SetupStatusResponse,
-  SetupVerifyResponse,
-} from './setup';
-export {
-  completeSetup,
-  fetchSetupStatus,
-  saveSetupConfig,
-  verifySetupToken,
-} from './setup';
+export type { SetupCompleteResponse, SetupStatusResponse, SetupVerifyResponse } from './setup';
+export { completeSetup, fetchSetupStatus, saveSetupConfig, verifySetupToken } from './setup';
 export type {
   ListProjectTasksParams,
   RequestAttachmentUploadResponse,
@@ -430,6 +421,9 @@ export {
   getTrigger,
   listTriggerExecutions,
   listTriggers,
+  listWebhookDeliveries,
+  previewWebhookTrigger,
+  rotateWebhookTriggerToken,
   runTrigger,
   testTrigger,
   updateTrigger,

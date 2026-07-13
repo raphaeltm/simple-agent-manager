@@ -47,7 +47,7 @@ export interface SubmitTriggeredTaskInput {
   /** The rendered prompt to use as the task description. */
   renderedPrompt: string;
   /** How the task was triggered (e.g., 'cron'). */
-  triggeredBy: 'cron' | 'webhook' | 'github';
+  triggeredBy: 'user' | 'cron' | 'webhook' | 'github';
   /** Agent profile ID to use (from trigger config). */
   agentProfileId: string | null;
   /** Skill ID to use (from trigger config). */
@@ -88,20 +88,34 @@ export async function submitTriggeredTask(
   }
 
   // Resolve agent profile if specified
-  const resolvedProfile = input.agentProfileId || input.skillId
-    ? await resolveSkillProfile(db, input.projectId, input.agentProfileId, input.skillId, input.userId, env)
-    : null;
-  const skillResourceRequirements = parseSkillResourceRequirementsJson(resolvedProfile?.resourceRequirementsJson);
+  const resolvedProfile =
+    input.agentProfileId || input.skillId
+      ? await resolveSkillProfile(
+          db,
+          input.projectId,
+          input.agentProfileId,
+          input.skillId,
+          input.userId,
+          env
+        )
+      : null;
+  const skillResourceRequirements = parseSkillResourceRequirementsJson(
+    resolvedProfile?.resourceRequirementsJson
+  );
 
   // VM config precedence: trigger override → profile → project default → platform default
-  const vmSizeSource = input.vmSizeOverride ? 'trigger' as const
-    : resolvedProfile?.vmSizeOverride ? 'agent-profile' as const
-    : project.defaultVmSize ? 'project' as const
-    : 'platform' as const;
-  const vmSize: VMSize = (input.vmSizeOverride as VMSize | null)
-    ?? (resolvedProfile?.vmSizeOverride as VMSize | null)
-    ?? (project.defaultVmSize as VMSize | null)
-    ?? DEFAULT_VM_SIZE;
+  const vmSizeSource = input.vmSizeOverride
+    ? ('trigger' as const)
+    : resolvedProfile?.vmSizeOverride
+      ? ('agent-profile' as const)
+      : project.defaultVmSize
+        ? ('project' as const)
+        : ('platform' as const);
+  const vmSize: VMSize =
+    (input.vmSizeOverride as VMSize | null) ??
+    (resolvedProfile?.vmSizeOverride as VMSize | null) ??
+    (project.defaultVmSize as VMSize | null) ??
+    DEFAULT_VM_SIZE;
 
   const profileProvider =
     typeof resolvedProfile?.provider === 'string' && isValidProvider(resolvedProfile.provider)
@@ -111,32 +125,35 @@ export async function submitTriggeredTask(
     typeof project.defaultProvider === 'string' && isValidProvider(project.defaultProvider)
       ? project.defaultProvider
       : null;
-  const provider: CredentialProvider | null =
-    profileProvider
-    ?? projectDefaultProvider
-    ?? null;
+  const provider: CredentialProvider | null = profileProvider ?? projectDefaultProvider ?? null;
 
   const { resolveCredentialSource } = await import('./provider-credentials');
-  const credResult = await resolveCredentialSource(db, input.userId, provider ?? undefined, input.projectId);
+  const credResult = await resolveCredentialSource(
+    db,
+    input.userId,
+    provider ?? undefined,
+    input.projectId
+  );
   if (!credResult) {
     throw new Error(`No cloud provider credentials available for trigger ${input.triggerId}`);
   }
   const effectiveProvider = provider ?? credResult.providerName;
 
   const vmLocation: VMLocation =
-    (resolvedProfile?.vmLocation as VMLocation | null)
-    ?? (project.defaultLocation as VMLocation | null)
-    ?? (provider ? (getDefaultLocationForProvider(provider) as VMLocation | null) : null)
-    ?? DEFAULT_VM_LOCATION;
+    (resolvedProfile?.vmLocation as VMLocation | null) ??
+    (project.defaultLocation as VMLocation | null) ??
+    (provider ? (getDefaultLocationForProvider(provider) as VMLocation | null) : null) ??
+    DEFAULT_VM_LOCATION;
 
   const workspaceProfile: WorkspaceProfile =
-    (resolvedProfile?.workspaceProfile as WorkspaceProfile | null)
-    ?? (project.defaultWorkspaceProfile as WorkspaceProfile | null)
-    ?? DEFAULT_WORKSPACE_PROFILE;
+    (resolvedProfile?.workspaceProfile as WorkspaceProfile | null) ??
+    (project.defaultWorkspaceProfile as WorkspaceProfile | null) ??
+    DEFAULT_WORKSPACE_PROFILE;
 
-  const taskMode: TaskMode = input.taskMode
-    ?? (resolvedProfile?.taskMode as TaskMode | null)
-    ?? (workspaceProfile === 'lightweight' ? 'conversation' : 'task');
+  const taskMode: TaskMode =
+    input.taskMode ??
+    (resolvedProfile?.taskMode as TaskMode | null) ??
+    (workspaceProfile === 'lightweight' ? 'conversation' : 'task');
 
   // Generate branch name from trigger name + date
   const branchPrefix = env.BRANCH_NAME_PREFIX || 'sam/';
@@ -163,7 +180,7 @@ export async function submitTriggeredTask(
       agentProfileId: resolvedProfile?.profileId ?? undefined,
       projectId: input.projectId,
       userId: input.userId,
-    },
+    }
   );
 
   const now = new Date().toISOString();
@@ -192,7 +209,8 @@ export async function submitTriggeredTask(
     resourceRequirementsSource: resolvedReservation.source,
     resolvedReservationJson: JSON.stringify(resolvedReservation),
     credentialAttributionUserId: input.userId,
-    credentialAttributionProjectId: credResult.credentialSource === 'project' ? input.projectId : null,
+    credentialAttributionProjectId:
+      credResult.credentialSource === 'project' ? input.projectId : null,
     credentialAttributionSource: credResult.credentialSource,
     createdBy: input.userId,
     createdAt: now,
@@ -235,8 +253,13 @@ export async function submitTriggeredTask(
   } catch (err) {
     const failedAt = new Date().toISOString();
     const errorMsg = err instanceof Error ? err.message : String(err);
-    await db.update(schema.tasks)
-      .set({ status: 'failed', errorMessage: `Session creation failed: ${errorMsg}`, updatedAt: failedAt })
+    await db
+      .update(schema.tasks)
+      .set({
+        status: 'failed',
+        errorMessage: `Session creation failed: ${errorMsg}`,
+        updatedAt: failedAt,
+      })
       .where(eq(schema.tasks.id, taskId));
     await db.insert(schema.taskStatusEvents).values({
       id: ulid(),
@@ -291,7 +314,8 @@ export async function submitTriggeredTask(
       workspaceProfile,
       cloudProvider: effectiveProvider,
       credentialAttributionUserId: input.userId,
-      credentialAttributionProjectId: credResult.credentialSource === 'project' ? input.projectId : null,
+      credentialAttributionProjectId:
+        credResult.credentialSource === 'project' ? input.projectId : null,
       credentialAttributionSource: credResult.credentialSource,
       taskMode,
       model: resolvedProfile?.model ?? null,
@@ -315,8 +339,13 @@ export async function submitTriggeredTask(
   } catch (err) {
     const failedAt = new Date().toISOString();
     const errorMsg = err instanceof Error ? err.message : String(err);
-    await db.update(schema.tasks)
-      .set({ status: 'failed', errorMessage: `Task runner startup failed: ${errorMsg}`, updatedAt: failedAt })
+    await db
+      .update(schema.tasks)
+      .set({
+        status: 'failed',
+        errorMessage: `Task runner startup failed: ${errorMsg}`,
+        updatedAt: failedAt,
+      })
       .where(eq(schema.tasks.id, taskId));
     await db.insert(schema.taskStatusEvents).values({
       id: ulid(),

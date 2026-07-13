@@ -21,6 +21,7 @@ import { useNavigate, useParams } from 'react-router';
 import { ExecutionHistory } from '../components/triggers/ExecutionHistory';
 import { TriggerCredentialWarning } from '../components/triggers/TriggerCredentialWarning';
 import { TriggerForm } from '../components/triggers/TriggerForm';
+import { WebhookTriggerPanel } from '../components/triggers/WebhookTriggerPanel';
 import { useToast } from '../hooks/useToast';
 import {
   deleteTrigger,
@@ -107,30 +108,33 @@ export function ProjectTriggerDetail() {
 
   const [execError, setExecError] = useState<string | null>(null);
 
-  const loadExecutions = useCallback(async (cursor: string | null = null) => {
-    if (!triggerId) return;
-    const offset = cursor ? Number.parseInt(cursor, 10) : 0;
-    setExecLoading(true);
-    setExecError(null);
-    try {
-      const resp = await listTriggerExecutions(projectId, triggerId, {
-        limit: EXECUTIONS_PER_PAGE,
-        offset: Number.isFinite(offset) ? offset : 0,
-      });
-      if (cursor) {
-        setExecutions((prev) => [...prev, ...resp.executions]);
-      } else {
-        setExecutions(resp.executions);
+  const loadExecutions = useCallback(
+    async (cursor: string | null = null) => {
+      if (!triggerId) return;
+      const offset = cursor ? Number.parseInt(cursor, 10) : 0;
+      setExecLoading(true);
+      setExecError(null);
+      try {
+        const resp = await listTriggerExecutions(projectId, triggerId, {
+          limit: EXECUTIONS_PER_PAGE,
+          offset: Number.isFinite(offset) ? offset : 0,
+        });
+        if (cursor) {
+          setExecutions((prev) => [...prev, ...resp.executions]);
+        } else {
+          setExecutions(resp.executions);
+        }
+        setNextExecutionCursor(resp.nextCursor ?? null);
+        setHasMore(Boolean(resp.nextCursor));
+      } catch (err) {
+        setExecError(err instanceof Error ? err.message : 'Failed to load executions');
+      } finally {
+        setExecLoading(false);
       }
-      setNextExecutionCursor(resp.nextCursor ?? null);
-      setHasMore(Boolean(resp.nextCursor));
-    } catch (err) {
-      setExecError(err instanceof Error ? err.message : 'Failed to load executions');
-    } finally {
-      setExecLoading(false);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- toast removed per stale-while-revalidate rule
-  }, [projectId, triggerId]);
+      // eslint-disable-next-line react-hooks/exhaustive-deps -- toast removed per stale-while-revalidate rule
+    },
+    [projectId, triggerId]
+  );
 
   useEffect(() => {
     loadTrigger().catch(() => undefined);
@@ -212,7 +216,10 @@ export function ProjectTriggerDetail() {
     );
   }
 
-  const statusCfg = STATUS_CONFIG[trigger.status] ?? { color: 'var(--sam-color-fg-muted)', label: 'Disabled' };
+  const statusCfg = STATUS_CONFIG[trigger.status] ?? {
+    color: 'var(--sam-color-fg-muted)',
+    label: 'Disabled',
+  };
   const handleLoadMore = () => {
     loadExecutions(nextExecutionCursor).catch(() => undefined);
   };
@@ -244,15 +251,22 @@ export function ProjectTriggerDetail() {
               style={{ backgroundColor: statusCfg.color }}
               aria-label={`Status: ${statusCfg.label}`}
             />
-            <h1 className="sam-type-page-title m-0 min-w-0 max-w-full whitespace-normal [overflow-wrap:anywhere]">{trigger.name}</h1>
+            <h1 className="sam-type-page-title m-0 min-w-0 max-w-full whitespace-normal [overflow-wrap:anywhere]">
+              {trigger.name}
+            </h1>
           </div>
           {trigger.description && (
-            <p className="sam-type-secondary text-fg-muted mt-1 mb-0 [overflow-wrap:anywhere]">{trigger.description}</p>
+            <p className="sam-type-secondary text-fg-muted mt-1 mb-0 [overflow-wrap:anywhere]">
+              {trigger.description}
+            </p>
           )}
           <p className="text-sm text-fg-muted mt-2 mb-0 flex flex-wrap items-center gap-1.5">
             <Clock size={14} aria-hidden="true" />
-            {trigger.cronHumanReadable ?? trigger.cronExpression}
-            {trigger.cronTimezone !== 'UTC' && ` (${trigger.cronTimezone.replace(/_/g, ' ')})`}
+            {trigger.sourceType === 'webhook'
+              ? trigger.webhookConfig?.sourceLabel || 'Generic webhook'
+              : trigger.sourceType === 'github'
+                ? `GitHub ${trigger.githubConfig?.eventType?.replace(/_/g, ' ') ?? 'event'}`
+                : (trigger.cronHumanReadable ?? trigger.cronExpression)}
           </p>
         </div>
 
@@ -273,7 +287,9 @@ export function ProjectTriggerDetail() {
             aria-label={trigger.status === 'paused' ? 'Resume' : 'Pause'}
           >
             <Pause size={14} aria-hidden="true" />
-            <span className="hidden sm:inline">{trigger.status === 'paused' ? 'Resume' : 'Pause'}</span>
+            <span className="hidden sm:inline">
+              {trigger.status === 'paused' ? 'Resume' : 'Pause'}
+            </span>
           </button>
           <button
             onClick={() => setFormOpen(true)}
@@ -294,26 +310,37 @@ export function ProjectTriggerDetail() {
         </div>
       </div>
 
-      {trigger.credentialAttribution?.multiplayerActive && trigger.credentialAttribution.hasPersonalWarning && (
-        <div className="mb-6">
-          <TriggerCredentialWarning trigger={trigger} />
-        </div>
-      )}
+      {trigger.credentialAttribution?.multiplayerActive &&
+        trigger.credentialAttribution.hasPersonalWarning && (
+          <div className="mb-6">
+            <TriggerCredentialWarning trigger={trigger} />
+          </div>
+        )}
 
       {/* Summary cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-8">
         {/* Next run */}
         <div className="border border-border-default rounded-lg p-4">
-          <p className="text-xs font-medium text-fg-muted uppercase tracking-wider m-0 mb-1">Next Run</p>
+          <p className="text-xs font-medium text-fg-muted uppercase tracking-wider m-0 mb-1">
+            {trigger.sourceType === 'cron' ? 'Next Run' : 'Source'}
+          </p>
           <p className="text-sm text-fg-primary m-0 flex items-center gap-1.5">
             <Calendar size={14} aria-hidden="true" />
-            {trigger.nextFireAt ? formatDateFull(trigger.nextFireAt) : 'Not scheduled'}
+            {trigger.sourceType === 'cron'
+              ? trigger.nextFireAt
+                ? formatDateFull(trigger.nextFireAt)
+                : 'Not scheduled'
+              : trigger.sourceType === 'webhook'
+                ? 'Incoming webhook'
+                : 'GitHub event'}
           </p>
         </div>
 
         {/* Last run */}
         <div className="border border-border-default rounded-lg p-4">
-          <p className="text-xs font-medium text-fg-muted uppercase tracking-wider m-0 mb-1">Last Run</p>
+          <p className="text-xs font-medium text-fg-muted uppercase tracking-wider m-0 mb-1">
+            Last Run
+          </p>
           {lastRun ? (
             <div className="flex items-center gap-1.5 text-sm">
               {lastRun.status === 'completed' ? (
@@ -322,7 +349,9 @@ export function ProjectTriggerDetail() {
                 <XCircle size={14} className="text-danger" aria-hidden="true" />
               )}
               <span className="text-fg-primary">{formatDateFull(lastRun.scheduledAt)}</span>
-              <span className="text-fg-muted">({formatDuration(lastRun.startedAt, lastRun.completedAt)})</span>
+              <span className="text-fg-muted">
+                ({formatDuration(lastRun.startedAt, lastRun.completedAt)})
+              </span>
             </div>
           ) : (
             <p className="text-sm text-fg-muted m-0">Never run</p>
@@ -331,7 +360,9 @@ export function ProjectTriggerDetail() {
 
         {/* Success rate */}
         <div className="border border-border-default rounded-lg p-4">
-          <p className="text-xs font-medium text-fg-muted uppercase tracking-wider m-0 mb-1">Success Rate</p>
+          <p className="text-xs font-medium text-fg-muted uppercase tracking-wider m-0 mb-1">
+            Success Rate
+          </p>
           {successRate !== null ? (
             <div>
               <p className="text-sm text-fg-primary m-0 mb-1">{successRate}%</p>
@@ -340,7 +371,12 @@ export function ProjectTriggerDetail() {
                   className="h-full rounded-full transition-all duration-300"
                   style={{
                     width: `${successRate}%`,
-                    backgroundColor: successRate >= 80 ? 'var(--sam-color-success)' : successRate >= 50 ? 'var(--sam-color-warning)' : 'var(--sam-color-danger)',
+                    backgroundColor:
+                      successRate >= 80
+                        ? 'var(--sam-color-success)'
+                        : successRate >= 50
+                          ? 'var(--sam-color-warning)'
+                          : 'var(--sam-color-danger)',
                   }}
                 />
               </div>
@@ -373,16 +409,57 @@ export function ProjectTriggerDetail() {
           <ConfigRow label="Source Type" value={trigger.sourceType} />
           {trigger.sourceType === 'github' ? (
             <>
-              <ConfigRow label="GitHub Event" value={trigger.githubConfig?.eventType?.replace(/_/g, ' ') ?? '—'} />
-              <ConfigRow label="Actions" value={trigger.githubConfig?.filters.actions?.join(', ') ?? 'Any'} />
-              <ConfigRow label="Required Labels" value={trigger.githubConfig?.filters.labels?.join(', ') ?? 'None'} />
-              <ConfigRow label="Command Prefix" value={trigger.githubConfig?.filters.commandPrefix ?? 'None'} />
-              <ConfigRow label="Branches" value={trigger.githubConfig?.filters.branches?.join(', ') ?? 'Any'} />
-              <ConfigRow label="Ignored Actors" value={trigger.githubConfig?.filters.ignoreActors?.join(', ') ?? 'None'} />
+              <ConfigRow
+                label="GitHub Event"
+                value={trigger.githubConfig?.eventType?.replace(/_/g, ' ') ?? '—'}
+              />
+              <ConfigRow
+                label="Actions"
+                value={trigger.githubConfig?.filters.actions?.join(', ') ?? 'Any'}
+              />
+              <ConfigRow
+                label="Required Labels"
+                value={trigger.githubConfig?.filters.labels?.join(', ') ?? 'None'}
+              />
+              <ConfigRow
+                label="Command Prefix"
+                value={trigger.githubConfig?.filters.commandPrefix ?? 'None'}
+              />
+              <ConfigRow
+                label="Branches"
+                value={trigger.githubConfig?.filters.branches?.join(', ') ?? 'Any'}
+              />
+              <ConfigRow
+                label="Ignored Actors"
+                value={trigger.githubConfig?.filters.ignoreActors?.join(', ') ?? 'None'}
+              />
+            </>
+          ) : trigger.sourceType === 'webhook' ? (
+            <>
+              <ConfigRow
+                label="Source Label"
+                value={trigger.webhookConfig?.sourceLabel ?? 'None'}
+              />
+              <ConfigRow
+                label="Token"
+                value={`••••${trigger.webhookConfig?.tokenLastFour ?? '—'}`}
+              />
+              <ConfigRow label="Filter Mode" value={trigger.webhookConfig?.filterMode ?? 'all'} />
+              <ConfigRow
+                label="Filters"
+                value={String(trigger.webhookConfig?.filters.length ?? 0)}
+              />
+              <ConfigRow
+                label="Included Headers"
+                value={trigger.webhookConfig?.includedHeaders.join(', ') || 'None'}
+              />
             </>
           ) : (
             <>
-              <ConfigRow label="Schedule" value={trigger.cronHumanReadable ?? trigger.cronExpression ?? '—'} />
+              <ConfigRow
+                label="Schedule"
+                value={trigger.cronHumanReadable ?? trigger.cronExpression ?? '—'}
+              />
               <ConfigRow label="Timezone" value={trigger.cronTimezone} />
             </>
           )}
@@ -394,6 +471,14 @@ export function ProjectTriggerDetail() {
           <ConfigRow label="Created" value={formatDateFull(trigger.createdAt)} />
         </div>
       </div>
+
+      {trigger.sourceType === 'webhook' && (
+        <WebhookTriggerPanel
+          projectId={projectId}
+          trigger={trigger}
+          onRotated={() => void loadTrigger()}
+        />
+      )}
 
       {/* Edit form */}
       <TriggerForm
@@ -419,8 +504,8 @@ export function ProjectTriggerDetail() {
           >
             <h3 className="sam-type-card-title m-0 mb-2">Delete trigger?</h3>
             <p className="text-sm text-fg-muted mb-4">
-              This will permanently delete &ldquo;{trigger.name}&rdquo; and all its execution history.
-              This action cannot be undone.
+              This will permanently delete &ldquo;{trigger.name}&rdquo; and all its execution
+              history. This action cannot be undone.
             </p>
             <div className="flex justify-end gap-3">
               <button
@@ -430,7 +515,10 @@ export function ProjectTriggerDetail() {
                 Cancel
               </button>
               <button
-                onClick={() => { setConfirmDelete(false); void handleDelete(); }}
+                onClick={() => {
+                  setConfirmDelete(false);
+                  void handleDelete();
+                }}
                 className={`px-4 py-2 text-sm font-medium text-fg-on-accent bg-danger hover:bg-danger/90 border-none rounded-md cursor-pointer ${FOCUS_RING}`}
               >
                 Delete
@@ -451,7 +539,9 @@ function ConfigRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center justify-between px-4 py-3">
       <span className="text-sm text-fg-muted">{label}</span>
-      <span className="text-sm text-fg-primary font-medium truncate max-w-[60%] text-right">{value}</span>
+      <span className="text-sm text-fg-primary font-medium truncate max-w-[60%] text-right">
+        {value}
+      </span>
     </div>
   );
 }

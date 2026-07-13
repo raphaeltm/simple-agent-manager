@@ -41,7 +41,10 @@ function responseSchema(path: string, method: 'get' | 'post', status: string): S
   const operation = samCliOpenApiDocument.paths[path]?.[method];
   expect(operation, `Missing ${method.toUpperCase()} ${path}`).toBeDefined();
   const content = operation?.responses[status]?.content?.['application/json'];
-  expect(content, `Missing JSON response ${status} for ${method.toUpperCase()} ${path}`).toBeDefined();
+  expect(
+    content,
+    `Missing JSON response ${status} for ${method.toUpperCase()} ${path}`
+  ).toBeDefined();
   return content?.schema as SchemaLike;
 }
 
@@ -71,7 +74,10 @@ describe('SAM CLI OpenAPI contract', () => {
 
   it('declares every CLI-facing path and method', () => {
     for (const [path, method] of requiredOperations) {
-      expect(samCliOpenApiDocument.paths[path]?.[method], `${method.toUpperCase()} ${path}`).toBeDefined();
+      expect(
+        samCliOpenApiDocument.paths[path]?.[method],
+        `${method.toUpperCase()} ${path}`
+      ).toBeDefined();
     }
   });
 
@@ -95,6 +101,12 @@ describe('SAM CLI OpenAPI contract', () => {
     const trigger = schema('Trigger');
     expect(property(trigger, 'cronExpression').type).toBe('string');
     expect(property(trigger, 'nextFireAt').format).toBe('date-time');
+    expect(refName(property(trigger, 'webhookConfig'))).toBe('WebhookTriggerConfig');
+
+    const webhookConfig = schema('WebhookTriggerConfig');
+    expect(refName(arrayItem(property(webhookConfig, 'filters')))).toBe('WebhookTriggerFilter');
+    expect(property(webhookConfig, 'tokenLastFour').type).toBe('string');
+    expect(webhookConfig.properties?.token).toBeUndefined();
 
     const activity = schema('ActivityEvent');
     expect(property(activity, 'eventType').type).toBe('string');
@@ -106,7 +118,10 @@ describe('SAM CLI OpenAPI contract', () => {
   });
 
   it('keeps the checked artifact in sync with the source document', async () => {
-    const artifact = await readFile(new URL('../../../openapi/sam-cli.openapi.json', import.meta.url), 'utf8');
+    const artifact = await readFile(
+      new URL('../../../openapi/sam-cli.openapi.json', import.meta.url),
+      'utf8'
+    );
     const parsed = JSON.parse(artifact) as OpenApiDocument;
     expect(parsed).toEqual(samCliOpenApiDocument);
   });

@@ -132,6 +132,24 @@ SAM loads OpenCode Zen and OpenCode Go model choices through the authenticated m
 | `NOTIFICATION_PAGE_SIZE`                | `50`                   | Default page size for notification list              |
 | `MAX_NOTIFICATION_PAGE_SIZE`            | `100`                  | Max allowed page size                                |
 
+## Generic Webhook Triggers
+
+| Variable                                      | Default | Description                                                  |
+| --------------------------------------------- | ------- | ------------------------------------------------------------ |
+| `WEBHOOK_TRIGGERS_ENABLED`                    | `true`  | Public generic webhook ingress kill switch                   |
+| `WEBHOOK_TRIGGER_MAX_BODY_BYTES`              | `65536` | Maximum JSON request body size                               |
+| `WEBHOOK_TRIGGER_MAX_FILTERS`                 | `10`    | Maximum deterministic filters per trigger                    |
+| `WEBHOOK_TRIGGER_MAX_FILTER_PATH_LENGTH`      | `200`   | Maximum configured filter dot-path length                    |
+| `WEBHOOK_TRIGGER_MAX_FILTER_PATH_DEPTH`       | `8`     | Maximum filter nesting depth at evaluation time              |
+| `WEBHOOK_TRIGGER_MAX_INCLUDED_HEADERS`        | `10`    | Maximum safe request headers copied into template context    |
+| `WEBHOOK_TRIGGER_MAX_IDEMPOTENCY_KEY_LENGTH`  | `200`   | Maximum accepted `Idempotency-Key` length                    |
+| `WEBHOOK_TRIGGER_RATE_LIMIT_PER_MINUTE`       | `60`    | Per-trigger accepted request limit in each configured window |
+| `WEBHOOK_INVALID_TOKEN_RATE_LIMIT_PER_MINUTE` | `30`    | Invalid-token request limit per client IP/window             |
+| `WEBHOOK_RATE_LIMIT_WINDOW_SECONDS`           | `60`    | Fixed rate-limit window length                               |
+| `WEBHOOK_DELIVERY_RETENTION_DAYS`             | `7`     | Retention for redacted delivery audit metadata               |
+
+Webhook tokens use the existing `ENCRYPTION_KEY` as keyed-hash material and do not require a separate deployment secret. See [Webhook Triggers](/docs/guides/webhook-triggers/) for request, credential, filtering, and audit behavior.
+
 ## ACP Session Lifecycle
 
 | Variable                                | Default          | Description                                          |

@@ -389,20 +389,17 @@ export const projectMembers = sqliteTable(
   })
 );
 
-export const projectOwnershipTransfers = sqliteTable(
-  'project_ownership_transfers',
-  {
-    id: text('id').primaryKey(),
-    projectId: text('project_id').notNull(),
-    fromUserId: text('from_user_id').notNull(),
-    toUserId: text('to_user_id').notNull(),
-    initiatedBy: text('initiated_by').notNull(),
-    completedAt: text('completed_at'),
-    createdAt: text('created_at')
-      .notNull()
-      .default(sql`CURRENT_TIMESTAMP`),
-  }
-);
+export const projectOwnershipTransfers = sqliteTable('project_ownership_transfers', {
+  id: text('id').primaryKey(),
+  projectId: text('project_id').notNull(),
+  fromUserId: text('from_user_id').notNull(),
+  toUserId: text('to_user_id').notNull(),
+  initiatedBy: text('initiated_by').notNull(),
+  completedAt: text('completed_at'),
+  createdAt: text('created_at')
+    .notNull()
+    .default(sql`CURRENT_TIMESTAMP`),
+});
 
 export const projectMemberOffboardingPlans = sqliteTable(
   'project_member_offboarding_plans',
@@ -768,9 +765,14 @@ export const tasks = sqliteTable(
     /** Whether the agent credential came from the user or the platform. */
     agentCredentialSource: text('agent_credential_source').default('user'), // 'user' | 'project' | 'platform'
     /** User whose credential attribution is pinned for this task tree. */
-    credentialAttributionUserId: text('credential_attribution_user_id').references(() => users.id, { onDelete: 'set null' }),
+    credentialAttributionUserId: text('credential_attribution_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
     /** Project scope used when credentialAttributionSource is 'project'. */
-    credentialAttributionProjectId: text('credential_attribution_project_id').references(() => projects.id, { onDelete: 'set null' }),
+    credentialAttributionProjectId: text('credential_attribution_project_id').references(
+      () => projects.id,
+      { onDelete: 'set null' }
+    ),
     /** Root-pinned credential attribution source: 'user' | 'project' | 'platform'. */
     credentialAttributionSource: text('credential_attribution_source').default('user'),
     credentialBlockedReason: text('credential_blocked_reason'),
@@ -896,9 +898,14 @@ export const nodes = sqliteTable(
     /** 'user' = provisioned with user's own credential; 'platform' = provisioned with platform credential. */
     credentialSource: text('credential_source').default('user'),
     /** User whose credential attribution was used to provision this node. */
-    credentialAttributionUserId: text('credential_attribution_user_id').references(() => users.id, { onDelete: 'set null' }),
+    credentialAttributionUserId: text('credential_attribution_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
     /** Project scope used when credentialAttributionSource is 'project'. */
-    credentialAttributionProjectId: text('credential_attribution_project_id').references(() => projects.id, { onDelete: 'set null' }),
+    credentialAttributionProjectId: text('credential_attribution_project_id').references(
+      () => projects.id,
+      { onDelete: 'set null' }
+    ),
     /** Credential attribution source used at node creation: 'user' | 'project' | 'platform'. */
     credentialAttributionSource: text('credential_attribution_source').default('user'),
     offboardingStatus: text('offboarding_status'),
@@ -1079,7 +1086,9 @@ export const sessionSnapshots = sqliteTable(
       .default(sql`CURRENT_TIMESTAMP`),
   },
   (table) => ({
-    chatSessionIdUnique: uniqueIndex('idx_session_snapshots_chat_session_id').on(table.chatSessionId),
+    chatSessionIdUnique: uniqueIndex('idx_session_snapshots_chat_session_id').on(
+      table.chatSessionId
+    ),
     workspaceIdIdx: index('idx_session_snapshots_workspace_id').on(table.workspaceId),
     expiresAtIdx: index('idx_session_snapshots_expires_at').on(table.expiresAt),
   })
@@ -1740,6 +1749,8 @@ export const triggers = sqliteTable(
     maxConcurrent: integer('max_concurrent').notNull().default(1),
     lastTriggeredAt: text('last_triggered_at'),
     triggerCount: integer('trigger_count').notNull().default(0),
+    /** Monotonic sequence for every execution attempt, including skipped attempts. */
+    nextExecutionSequence: integer('next_execution_sequence').notNull().default(1),
     nextFireAt: text('next_fire_at'),
     credentialBlockedReason: text('credential_blocked_reason'),
     credentialBlockedAt: text('credential_blocked_at'),
@@ -1856,6 +1867,77 @@ export const githubWebhookDeliveries = sqliteTable(
 
 export type GitHubWebhookDeliveryRow = typeof githubWebhookDeliveries.$inferSelect;
 export type NewGitHubWebhookDeliveryRow = typeof githubWebhookDeliveries.$inferInsert;
+
+// =============================================================================
+// Generic Webhook Trigger Configs
+// =============================================================================
+export const webhookTriggerConfigs = sqliteTable(
+  'webhook_trigger_configs',
+  {
+    triggerId: text('trigger_id')
+      .primaryKey()
+      .references(() => triggers.id, { onDelete: 'cascade' }),
+    tokenHash: text('token_hash').notNull(),
+    tokenLastFour: text('token_last_four').notNull(),
+    tokenCreatedAt: text('token_created_at').notNull(),
+    tokenRotatedAt: text('token_rotated_at'),
+    sourceLabel: text('source_label'),
+    filterMode: text('filter_mode').notNull().default('all'),
+    filtersJson: text('filters_json').notNull().default('[]'),
+    includedHeadersJson: text('included_headers_json').notNull().default('[]'),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    tokenHashUnique: uniqueIndex('idx_webhook_trigger_configs_token_hash').on(table.tokenHash),
+  })
+);
+
+export type WebhookTriggerConfigRow = typeof webhookTriggerConfigs.$inferSelect;
+export type NewWebhookTriggerConfigRow = typeof webhookTriggerConfigs.$inferInsert;
+
+// =============================================================================
+// Generic Webhook Deliveries (bounded audit metadata; never stores raw payload)
+// =============================================================================
+export const webhookDeliveries = sqliteTable(
+  'webhook_deliveries',
+  {
+    id: text('id').primaryKey(),
+    triggerId: text('trigger_id')
+      .notNull()
+      .references(() => triggers.id, { onDelete: 'cascade' }),
+    idempotencyKeyHash: text('idempotency_key_hash'),
+    requestFingerprint: text('request_fingerprint').notNull(),
+    outcome: text('outcome').notNull(),
+    httpStatus: integer('http_status').notNull(),
+    bodyBytes: integer('body_bytes').notNull(),
+    executionId: text('execution_id').references(() => triggerExecutions.id, {
+      onDelete: 'set null',
+    }),
+    errorCode: text('error_code'),
+    receivedAt: text('received_at').notNull(),
+    processedAt: text('processed_at'),
+    expiresAt: text('expires_at').notNull(),
+  },
+  (table) => ({
+    triggerReceivedIdx: index('idx_webhook_deliveries_trigger_received').on(
+      table.triggerId,
+      table.receivedAt
+    ),
+    idempotencyUnique: uniqueIndex('idx_webhook_deliveries_trigger_idempotency')
+      .on(table.triggerId, table.idempotencyKeyHash)
+      .where(sql`idempotency_key_hash IS NOT NULL`),
+    expiresIdx: index('idx_webhook_deliveries_expires').on(table.expiresAt),
+    executionIdx: index('idx_webhook_deliveries_execution').on(table.executionId),
+  })
+);
+
+export type WebhookDeliveryRow = typeof webhookDeliveries.$inferSelect;
+export type NewWebhookDeliveryRow = typeof webhookDeliveries.$inferInsert;
 
 // =============================================================================
 // Platform Credentials (admin-managed fallback keys)

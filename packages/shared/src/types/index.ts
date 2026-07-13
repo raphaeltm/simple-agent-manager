@@ -386,6 +386,7 @@ export {
 // Triggers (Event-Driven Agent Triggers)
 export type {
   CreateGitHubTriggerRequest,
+  CreateTriggerResponse,
   CreateTriggerRequest,
   CronTemplateContext,
   CronValidationResult,
@@ -395,16 +396,30 @@ export type {
   GitHubTriggerFilters,
   ListTriggerExecutionsResponse,
   ListTriggersResponse,
+  ListWebhookDeliveriesResponse,
+  RunTriggerRequest,
   Trigger,
   TriggeredBy,
   TriggerExecution,
   TriggerExecutionResponse,
   TriggerExecutionStatus,
   TriggerResponse,
+  TriggerPreviewRequest,
+  TriggerPreviewResponse,
   TriggerSkipReason,
   TriggerSourceType,
   TriggerStatus,
   UpdateTriggerRequest,
+  WebhookCredential,
+  WebhookDelivery,
+  WebhookDeliveryOutcome,
+  WebhookFilterMode,
+  WebhookFilterOperator,
+  WebhookFilterResult,
+  WebhookTemplateContext,
+  WebhookTriggerConfig,
+  WebhookTriggerConfigInput,
+  WebhookTriggerFilter,
 } from './trigger';
 export {
   GITHUB_TRIGGER_EVENT_TYPES,
@@ -413,6 +428,9 @@ export {
   TRIGGER_SOURCE_TYPES,
   TRIGGER_STATUSES,
   TRIGGERED_BY_VALUES,
+  WEBHOOK_DELIVERY_OUTCOMES,
+  WEBHOOK_FILTER_MODES,
+  WEBHOOK_FILTER_OPERATORS,
 } from './trigger';
 
 // Compute Usage
