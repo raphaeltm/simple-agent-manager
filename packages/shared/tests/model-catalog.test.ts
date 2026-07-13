@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
+import { AGENT_TYPE_VALUES } from '../src/agents';
 import { PLATFORM_AI_MODELS } from '../src/constants/ai-services';
-import { getModelGroupsForAgent, getModelsForAgent, isKnownModel } from '../src/model-catalog';
+import {
+  CODEX_CHATGPT_ONLY_MODEL_IDS,
+  getModelGroupsForAgent,
+  getModelsForAgent,
+  isKnownModel,
+} from '../src/model-catalog';
 
 const CLAUDE_CODE_1M_SELECTOR_SUFFIX = '[1m]';
 
@@ -27,24 +33,35 @@ describe('model-catalog', () => {
     it('returns grouped models for openai-codex', () => {
       const groups = getModelGroupsForAgent('openai-codex');
       expect(groups.length).toBeGreaterThanOrEqual(2);
-      const latestModels = groups[0]?.models.map((model) => model.id) ?? [];
-      expect(latestModels).toEqual(
+      const allModelIds = groups.flatMap((group) => group.models.map((model) => model.id));
+      expect(allModelIds).toEqual(
         expect.arrayContaining([
           'gpt-5.6-sol',
           'gpt-5.6-terra',
           'gpt-5.6-luna',
+          'gpt-5.3-codex-spark',
           'gpt-5.5-pro',
           'gpt-5.5',
           'gpt-5.4',
         ])
       );
+      const namesById = new Map(
+        getModelsForAgent('openai-codex').map((model) => [model.id, model.name])
+      );
+      expect(namesById.get('gpt-5.6-sol')).toBe('GPT-5.6 Sol');
+      expect(namesById.get('gpt-5.3-codex-spark')).toContain('ChatGPT Pro preview');
     });
 
     it('returns grouped models for mistral-vibe', () => {
       const groups = getModelGroupsForAgent('mistral-vibe');
       expect(groups.length).toBeGreaterThanOrEqual(2);
       const allModels = groups.flatMap((g) => g.models);
-      expect(allModels.some((m) => m.id === 'devstral-2-2512')).toBe(true);
+      expect(allModels.some((m) => m.id === 'devstral-2512')).toBe(true);
+      expect(allModels.some((m) => m.id === 'magistral-medium-2509')).toBe(true);
+      expect(allModels.some((m) => m.id === 'ministral-14b-2512')).toBe(true);
+      expect(allModels.some((m) => m.id === 'devstral-2-2512')).toBe(false);
+      expect(allModels.some((m) => m.id === 'magistral-medium-1-2-2509')).toBe(false);
+      expect(allModels.some((m) => m.id === 'ministral-3-14b-2512')).toBe(false);
     });
 
     it('returns grouped models for google-gemini', () => {
@@ -53,6 +70,10 @@ describe('model-catalog', () => {
       const allModels = groups.flatMap((g) => g.models);
       expect(allModels.some((m) => m.id === 'gemini-2.5-pro')).toBe(true);
       expect(allModels.some((m) => m.id === 'gemini-3.5-flash')).toBe(true);
+      expect(allModels.some((m) => m.id === 'gemini-3.1-pro-preview')).toBe(true);
+      expect(allModels.some((m) => m.id === 'gemini-3.1-flash-lite')).toBe(true);
+      expect(allModels.some((m) => m.id === 'gemini-3.1-pro')).toBe(false);
+      expect(allModels.some((m) => m.id === 'gemini-2.0-flash')).toBe(false);
     });
 
     it('returns empty array for unknown agent type', () => {
@@ -67,19 +88,38 @@ describe('model-catalog', () => {
         expect.arrayContaining(['OpenCode Zen', 'OpenCode Go'])
       );
       expect(allModels.some((m) => m.id === 'opencode/claude-sonnet-4-6')).toBe(true);
+      expect(allModels.some((m) => m.id === 'opencode/claude-fable-5')).toBe(true);
+      expect(allModels.some((m) => m.id === 'opencode/gpt-5.6-sol')).toBe(true);
       expect(allModels.some((m) => m.id === 'opencode-go/glm-5.2')).toBe(true);
+    });
+
+    it('defines static groups only for supported agents with source-backed catalogs', () => {
+      const catalogedAgents = AGENT_TYPE_VALUES.filter(
+        (agentType) => getModelGroupsForAgent(agentType).length > 0
+      );
+
+      expect(catalogedAgents).toEqual([
+        'claude-code',
+        'openai-codex',
+        'google-gemini',
+        'mistral-vibe',
+        'opencode',
+      ]);
+      expect(getModelGroupsForAgent('amp')).toEqual([]);
     });
   });
 
   describe('getModelsForAgent', () => {
     it('returns flat list of models for claude-code', () => {
       const models = getModelsForAgent('claude-code');
-      expect(models.length).toBeGreaterThanOrEqual(14);
+      expect(models.length).toBeGreaterThanOrEqual(13);
       expect(models.some((m) => m.id === 'claude-fable-5')).toBe(true);
       expect(models.some((m) => m.id === 'claude-sonnet-5')).toBe(true);
       expect(models.some((m) => m.id === 'claude-opus-4-8')).toBe(true);
       expect(models.some((m) => m.id === 'claude-opus-4-7')).toBe(true);
       expect(models.some((m) => m.id === 'claude-sonnet-4-6')).toBe(true);
+      expect(models.some((m) => m.id === 'claude-sonnet-4-20250514')).toBe(false);
+      expect(models.find((m) => m.id === 'claude-opus-4-1-20250805')?.name).toContain('deprecated');
     });
 
     it('lists the current Claude Code 1M context choices', () => {
@@ -116,10 +156,14 @@ describe('model-catalog', () => {
   describe('cross-catalog invariant', () => {
     it('every platform-routed claude-code and openai-codex dropdown model has a PLATFORM_AI_MODELS entry', () => {
       const platformIds = new Set(PLATFORM_AI_MODELS.map((m) => m.id));
+      const codexChatGptOnlyIds = new Set<string>(CODEX_CHATGPT_ONLY_MODEL_IDS);
       for (const agentType of ['claude-code', 'openai-codex'] as const) {
         const dropdown = getModelsForAgent(agentType);
         for (const model of dropdown) {
           if (agentType === 'claude-code' && isClaudeCode1mSelector(model.id)) {
+            continue;
+          }
+          if (agentType === 'openai-codex' && codexChatGptOnlyIds.has(model.id)) {
             continue;
           }
 
@@ -128,6 +172,16 @@ describe('model-catalog', () => {
             `${agentType} dropdown model ${model.id} missing from PLATFORM_AI_MODELS`
           ).toBe(true);
         }
+      }
+    });
+
+    it('keeps ChatGPT-only Codex selectors out of raw platform proxy model IDs', () => {
+      const platformIds = new Set(PLATFORM_AI_MODELS.map((model) => model.id));
+
+      expect(CODEX_CHATGPT_ONLY_MODEL_IDS).toEqual(['gpt-5.3-codex-spark']);
+      for (const modelId of CODEX_CHATGPT_ONLY_MODEL_IDS) {
+        expect(isKnownModel('openai-codex', modelId)).toBe(true);
+        expect(platformIds.has(modelId)).toBe(false);
       }
     });
 
@@ -176,6 +230,7 @@ describe('model-catalog', () => {
       expect(isKnownModel('openai-codex', 'gpt-5.6-sol')).toBe(true);
       expect(isKnownModel('openai-codex', 'gpt-5.6-terra')).toBe(true);
       expect(isKnownModel('openai-codex', 'gpt-5.6-luna')).toBe(true);
+      expect(isKnownModel('openai-codex', 'gpt-5.3-codex-spark')).toBe(true);
     });
 
     it('returns false for a custom/unknown model', () => {

@@ -18,13 +18,13 @@ SAM's shared static agent model catalog has drifted from current provider and ag
 
 ## Implementation Checklist
 
-- [ ] Refresh Claude Code groups: keep current models/selectors, remove retired Sonnet 4, and clearly label deprecated Opus 4.1.
-- [ ] Refresh Codex groups and display names from the Codex model page, including a clearly scoped GPT-5.3 Codex Spark preview entry and removal of stale GPT-5.6 preview labels.
-- [ ] Refresh Gemini CLI IDs and lifecycle groups: correct Gemini 3.1 Pro Preview, add supported Flash Lite choices where justified, and remove retired Gemini 2.0.
-- [ ] Correct Mistral API IDs and reorganize current versus legacy/deprecated Vibe choices without removing still-useful documented models.
-- [ ] Synchronize the OpenCode static fallback with active `opencode` and `opencode-go` Models.dev entries, preserving provider-qualified IDs and source display names.
-- [ ] Update focused shared tests to assert exact critical IDs, lifecycle removals, provider-qualified OpenCode coverage, no duplicate IDs, and platform-proxy versus agent-only selection invariants.
-- [ ] Update any affected API route/service or UI contract tests if catalog grouping or agent-only exceptions require it.
+- [x] Refresh Claude Code groups: keep current models/selectors, remove retired Sonnet 4, and clearly label deprecated Opus 4.1.
+- [x] Refresh Codex groups and display names from the Codex model page, including a clearly scoped GPT-5.3 Codex Spark preview entry and removal of stale GPT-5.6 preview labels.
+- [x] Refresh Gemini CLI IDs and lifecycle groups: correct Gemini 3.1 Pro Preview, add supported Flash Lite choices where justified, and remove retired Gemini 2.0.
+- [x] Correct Mistral API IDs and reorganize current versus legacy/deprecated Vibe choices without removing still-useful documented models.
+- [x] Synchronize the OpenCode static fallback with active `opencode` and `opencode-go` Models.dev entries, preserving provider-qualified IDs and source display names.
+- [x] Update focused shared tests to assert exact critical IDs, lifecycle removals, provider-qualified OpenCode coverage, no duplicate IDs, and platform-proxy versus agent-only selection invariants.
+- [x] Confirm no API route/service or UI contract shape changed; existing consumers continue to receive `ModelGroup[]`.
 - [ ] Run focused shared/API/web checks and the repository quality suite required by `/do`.
 - [ ] Complete task validation and specialist review, deploy/verify staging, open the PR, wait for green CI, merge, and monitor production deployment.
 

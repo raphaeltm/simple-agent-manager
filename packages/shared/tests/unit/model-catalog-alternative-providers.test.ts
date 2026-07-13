@@ -5,7 +5,9 @@ import { getModelGroupsForAgent, getModelsForAgent, isKnownModel } from '../../s
 const OPENCODE_CONSUMERS = ['opencode'] as const;
 
 const EXPECTED_OPENCODE_MODELS = [
+  'opencode/claude-fable-5',
   'opencode/claude-sonnet-4-6',
+  'opencode/gpt-5.6-sol',
   'opencode/gpt-5.5-pro',
   'opencode-go/glm-5.2',
   'opencode-go/qwen3.7-plus',
@@ -60,5 +62,31 @@ describe('OpenCode model catalog entries', () => {
       const ids = getModelsForAgent(agentType).map((model) => model.id);
       expect(new Set(ids).size, `${agentType} has duplicate model ids`).toBe(ids.length);
     }
+  });
+
+  it('matches the active Models.dev fallback snapshot size for each provider', () => {
+    const models = getModelsForAgent('opencode');
+    const zenModels = models.filter((model) => model.id.startsWith('opencode/'));
+    const goModels = models.filter((model) => model.id.startsWith('opencode-go/'));
+
+    expect(zenModels).toHaveLength(55);
+    expect(goModels).toHaveLength(13);
+  });
+
+  it('excludes entries currently marked deprecated by Models.dev', () => {
+    const ids = new Set(getModelsForAgent('opencode').map((model) => model.id));
+
+    expect(ids.has('opencode/ring-2.6-1t-free')).toBe(false);
+    expect(ids.has('opencode/gemini-3-pro')).toBe(false);
+    expect(ids.has('opencode-go/glm-5')).toBe(false);
+    expect(ids.has('opencode-go/qwen3.5-plus')).toBe(false);
+  });
+
+  it('preserves current Models.dev display names in the static fallback', () => {
+    const namesById = new Map(getModelsForAgent('opencode').map((model) => [model.id, model.name]));
+
+    expect(namesById.get('opencode/minimax-m3')).toBe('MiniMax-M3');
+    expect(namesById.get('opencode-go/minimax-m3')).toBe('MiniMax-M3');
+    expect(namesById.get('opencode/gemini-3.1-pro')).toBe('Gemini 3.1 Pro Preview');
   });
 });
