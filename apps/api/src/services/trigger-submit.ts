@@ -32,7 +32,7 @@ import { requireRepositoryOwnerAccess } from '../routes/projects/_helpers';
 import { generateBranchName } from './branch-name';
 import * as projectDataService from './project-data';
 import { parseSkillResourceRequirementsJson, resolveSkillProfile } from './skills';
-import { startTaskRunnerDO } from './task-runner-do';
+import { getTaskRunnerStatus, startTaskRunnerDO } from './task-runner-do';
 import { generateTaskTitle, getTaskTitleConfig } from './task-title';
 
 export interface SubmitTriggeredTaskInput {
@@ -292,50 +292,70 @@ export async function submitTriggeredTask(
       input.userId,
       `trigger-${input.triggeredBy}`
     );
-    await startTaskRunnerDO(env, {
-      taskId,
-      projectId: input.projectId,
-      userId: input.userId,
-      vmSize,
-      vmLocation,
-      branch,
-      defaultBranch: project.defaultBranch,
-      userName: userRow?.name ?? null,
-      userEmail: userRow?.email ?? null,
-      githubId: userRow?.githubId ?? null,
-      taskTitle,
-      taskDescription: input.renderedPrompt,
-      repository: project.repository,
-      installationId: project.installationId,
-      outputBranch: branchName,
-      projectDefaultVmSize: project.defaultVmSize as VMSize | null,
-      chatSessionId: sessionId,
-      agentType: resolvedProfile?.agentType ?? project.defaultAgentType ?? null,
-      workspaceProfile,
-      cloudProvider: effectiveProvider,
-      credentialAttributionUserId: input.userId,
-      credentialAttributionProjectId:
-        credResult.credentialSource === 'project' ? input.projectId : null,
-      credentialAttributionSource: credResult.credentialSource,
-      taskMode,
-      model: resolvedProfile?.model ?? null,
-      effort: resolvedProfile?.effort ?? null,
-      permissionMode: resolvedProfile?.permissionMode ?? null,
-      // OpenCode settings: VM agent fetches user-level settings via callback
-      opencodeProvider: null,
-      opencodeBaseUrl: null,
-      systemPromptAppend: resolvedProfile?.systemPromptAppend ?? null,
-      agentProfileHint: resolvedProfile?.profileId ?? null,
-      projectScaling: {
-        taskExecutionTimeoutMs: project.taskExecutionTimeoutMs ?? null,
-        maxWorkspacesPerNode: project.maxWorkspacesPerNode ?? null,
-        nodeCpuThresholdPercent: project.nodeCpuThresholdPercent ?? null,
-        nodeMemoryThresholdPercent: project.nodeMemoryThresholdPercent ?? null,
-        warmNodeTimeoutMs: project.warmNodeTimeoutMs ?? null,
-      },
-      resolvedReservation,
-      vmSizeSource,
-    });
+    try {
+      await startTaskRunnerDO(env, {
+        taskId,
+        projectId: input.projectId,
+        userId: input.userId,
+        vmSize,
+        vmLocation,
+        branch,
+        defaultBranch: project.defaultBranch,
+        userName: userRow?.name ?? null,
+        userEmail: userRow?.email ?? null,
+        githubId: userRow?.githubId ?? null,
+        taskTitle,
+        taskDescription: input.renderedPrompt,
+        repository: project.repository,
+        installationId: project.installationId,
+        outputBranch: branchName,
+        projectDefaultVmSize: project.defaultVmSize as VMSize | null,
+        chatSessionId: sessionId,
+        agentType: resolvedProfile?.agentType ?? project.defaultAgentType ?? null,
+        workspaceProfile,
+        cloudProvider: effectiveProvider,
+        credentialAttributionUserId: input.userId,
+        credentialAttributionProjectId:
+          credResult.credentialSource === 'project' ? input.projectId : null,
+        credentialAttributionSource: credResult.credentialSource,
+        taskMode,
+        model: resolvedProfile?.model ?? null,
+        effort: resolvedProfile?.effort ?? null,
+        permissionMode: resolvedProfile?.permissionMode ?? null,
+        // OpenCode settings: VM agent fetches user-level settings via callback
+        opencodeProvider: null,
+        opencodeBaseUrl: null,
+        systemPromptAppend: resolvedProfile?.systemPromptAppend ?? null,
+        agentProfileHint: resolvedProfile?.profileId ?? null,
+        projectScaling: {
+          taskExecutionTimeoutMs: project.taskExecutionTimeoutMs ?? null,
+          maxWorkspacesPerNode: project.maxWorkspacesPerNode ?? null,
+          nodeCpuThresholdPercent: project.nodeCpuThresholdPercent ?? null,
+          nodeMemoryThresholdPercent: project.nodeMemoryThresholdPercent ?? null,
+          warmNodeTimeoutMs: project.warmNodeTimeoutMs ?? null,
+        },
+        resolvedReservation,
+        vmSizeSource,
+      });
+    } catch (startError) {
+      let durableStart = false;
+      try {
+        durableStart = Boolean(await getTaskRunnerStatus(env, taskId));
+      } catch (statusError) {
+        log.warn('trigger_submit.task_runner_status_check_failed', {
+          taskId,
+          triggerId: input.triggerId,
+          triggerExecutionId: input.triggerExecutionId,
+          error: statusError instanceof Error ? statusError.message : String(statusError),
+        });
+      }
+      if (!durableStart) throw startError;
+      log.warn('trigger_submit.task_runner_start_ack_lost', {
+        taskId,
+        triggerId: input.triggerId,
+        triggerExecutionId: input.triggerExecutionId,
+      });
+    }
   } catch (err) {
     const failedAt = new Date().toISOString();
     const errorMsg = err instanceof Error ? err.message : String(err);

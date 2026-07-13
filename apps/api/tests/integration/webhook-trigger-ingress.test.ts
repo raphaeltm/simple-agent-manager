@@ -741,20 +741,31 @@ describe('generic webhook ingress vertical slice', () => {
     });
   });
 
-  it('repairs an ambiguous submission from TaskRunner state without resubmitting', async () => {
+  it('repairs a durable linked attempt from TaskRunner state without resubmitting', async () => {
     const submitter = vi.fn<TriggerTaskSubmitter>(async (_env, input) => {
       const taskId = `task-${input.triggerExecutionId}`;
       sqlite
         .prepare('INSERT INTO tasks (id, trigger_execution_id) VALUES (?, ?)')
         .run(taskId, input.triggerExecutionId);
       taskRunnerStates.set(taskId, { taskId, currentStep: 'node_selection' });
-      throw new Error('TaskRunner response was lost');
+      return {
+        taskId,
+        sessionId: `session-${input.triggerExecutionId}`,
+        branchName: 'sam/durable-repair',
+      };
     });
     const app = appWith(submitter);
     const request = () =>
       deliveryRequest(token, { deployment: { id: 'dep-ambiguous' } }, 'ambiguous-submission');
 
-    expect((await app.request(request(), undefined, env)).status).toBe(503);
+    expect((await app.request(request(), undefined, env)).status).toBe(202);
+    sqlite
+      .prepare(
+        `UPDATE webhook_deliveries
+            SET outcome = 'internal_error', http_status = 503, error_code = 'submission_failed'
+          WHERE id = (SELECT id FROM webhook_deliveries LIMIT 1)`
+      )
+      .run();
     expect(sqlite.prepare('SELECT outcome FROM webhook_deliveries').get()).toEqual({
       outcome: 'internal_error',
     });
@@ -771,6 +782,10 @@ describe('generic webhook ingress vertical slice', () => {
     expect(sqlite.prepare('SELECT outcome FROM webhook_deliveries').get()).toEqual({
       outcome: 'accepted',
     });
+    expect(sqlite.prepare('SELECT status FROM trigger_executions').get()).toEqual({
+      status: 'running',
+    });
+    expect(sqlite.prepare('SELECT status FROM tasks').get()).toEqual({ status: 'queued' });
   });
 
   it('does not resubmit a linked failed task when delivery finalization was unavailable', async () => {

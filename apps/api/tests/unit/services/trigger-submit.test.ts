@@ -11,6 +11,7 @@ import { describe, expect, it, vi } from 'vitest';
 // =============================================================================
 vi.mock('../../../src/services/task-runner-do', () => ({
   startTaskRunnerDO: vi.fn().mockResolvedValue(undefined),
+  getTaskRunnerStatus: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock('../../../src/services/project-data', () => ({
@@ -90,6 +91,7 @@ vi.mock('drizzle-orm', () => ({
 }));
 
 import * as projectHelpers from '../../../src/routes/projects/_helpers';
+import * as projectData from '../../../src/services/project-data';
 import * as taskRunnerDo from '../../../src/services/task-runner-do';
 import type { SubmitTriggeredTaskInput } from '../../../src/services/trigger-submit';
 
@@ -149,6 +151,8 @@ describe('submitTriggeredTask', () => {
       credentialSource: 'user',
       providerName: 'hetzner',
     });
+    vi.mocked(taskRunnerDo.startTaskRunnerDO).mockResolvedValue(undefined);
+    vi.mocked(taskRunnerDo.getTaskRunnerStatus).mockResolvedValue(null);
   });
 
   it('creates a task with trigger metadata fields', async () => {
@@ -206,6 +210,49 @@ describe('submitTriggeredTask', () => {
         credentialAttributionSource: 'project',
         cloudProvider: 'hetzner',
       })
+    );
+  });
+
+  it('treats a lost TaskRunner acknowledgement as success when DO state is durable', async () => {
+    queueTriggerSubmitLookups();
+    vi.mocked(taskRunnerDo.startTaskRunnerDO).mockRejectedValueOnce(
+      new Error('TaskRunner response was lost')
+    );
+    vi.mocked(taskRunnerDo.getTaskRunnerStatus).mockResolvedValueOnce({
+      taskId: 'ULID000001',
+      currentStep: 'node_selection',
+    });
+
+    const { submitTriggeredTask } = await import('../../../src/services/trigger-submit');
+    const result = await submitTriggeredTask({} as any, defaultInput);
+
+    expect(result).toMatchObject({
+      taskId: 'ULID000001',
+      sessionId: 'session-001',
+      branchName: 'sam/daily-review-abc123',
+    });
+    expect(taskRunnerDo.getTaskRunnerStatus).toHaveBeenCalledWith(expect.anything(), 'ULID000001');
+    expect(mockUpdateSetWhere).not.toHaveBeenCalled();
+    expect(projectData.stopSession).not.toHaveBeenCalled();
+  });
+
+  it('fails the task and session when TaskRunner has no durable state', async () => {
+    queueTriggerSubmitLookups();
+    vi.mocked(taskRunnerDo.startTaskRunnerDO).mockRejectedValueOnce(
+      new Error('TaskRunner unavailable')
+    );
+
+    const { submitTriggeredTask } = await import('../../../src/services/trigger-submit');
+    await expect(submitTriggeredTask({} as any, defaultInput)).rejects.toThrow(
+      'TaskRunner unavailable'
+    );
+
+    expect(taskRunnerDo.getTaskRunnerStatus).toHaveBeenCalledWith(expect.anything(), 'ULID000001');
+    expect(mockUpdateSetWhere).toHaveBeenCalledOnce();
+    expect(projectData.stopSession).toHaveBeenCalledWith(
+      expect.anything(),
+      'project-1',
+      'session-001'
     );
   });
 
