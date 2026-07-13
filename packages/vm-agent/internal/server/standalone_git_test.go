@@ -45,6 +45,35 @@ func TestStandaloneGitCredentialHelperServesTokenForGitHub(t *testing.T) {
 	}
 }
 
+func TestWriteStandaloneGitCredentialHelperRestoresExecutableMode(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "git-credential-sam")
+	if err := os.WriteFile(path, []byte("old helper"), 0o644); err != nil {
+		t.Fatalf("seed helper: %v", err)
+	}
+
+	if err := writeStandaloneGitCredentialHelper(path); err != nil {
+		t.Fatalf("write helper: %v", err)
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat helper: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o755 {
+		t.Fatalf("helper mode = %o, want 755", got)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read helper: %v", err)
+	}
+	if !strings.Contains(string(data), "SAM_WORKSPACE_ID") {
+		t.Fatalf("helper script was not written: %q", string(data))
+	}
+}
+
 func TestStandaloneGitCredentialHelperRejectsNonGitHubHost(t *testing.T) {
 	t.Parallel()
 	out := runStandaloneCredScript(t, "get", "protocol=https\nhost=evil.example.com\n\n", "ghs_secret123")

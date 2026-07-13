@@ -1,6 +1,7 @@
 package server
 
 import (
+	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -70,7 +71,7 @@ curl -fsS --max-time 5 \
 // commands (clone, ls-remote, fetch, push) authenticate in standalone mode.
 // Failures are non-fatal — the agent can still run without git access.
 func ConfigureStandaloneGitCredentialHelper() {
-	if err := os.WriteFile(standaloneGitCredentialHelperPath, []byte(standaloneGitCredentialHelperScript), 0o755); err != nil {
+	if err := writeStandaloneGitCredentialHelper(standaloneGitCredentialHelperPath); err != nil {
 		slog.Warn("standalone git: failed to write credential helper; agent git auth unavailable", "error", err)
 		return
 	}
@@ -96,4 +97,17 @@ func ConfigureStandaloneGitCredentialHelper() {
 	}
 
 	slog.Info("standalone git: credential helper configured", "path", standaloneGitCredentialHelperPath)
+}
+
+func writeStandaloneGitCredentialHelper(path string) error {
+	if err := os.WriteFile(path, []byte(standaloneGitCredentialHelperScript), 0o755); err != nil {
+		return fmt.Errorf("write helper: %w", err)
+	}
+	// os.WriteFile only applies the mode when creating the file. A restored
+	// Cloudflare Container snapshot can already contain this helper as 0644, so
+	// chmod after every write to guarantee git can execute it.
+	if err := os.Chmod(path, 0o755); err != nil {
+		return fmt.Errorf("chmod helper: %w", err)
+	}
+	return nil
 }
