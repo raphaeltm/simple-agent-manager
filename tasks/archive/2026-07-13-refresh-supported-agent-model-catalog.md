@@ -39,6 +39,12 @@ SAM's shared static agent model catalog has drifted from current provider and ag
 - Focused tests cover the updated catalog and all touched contracts; lint, typecheck, tests, and build pass.
 - The PR is green, merged, and the production deployment succeeds.
 
+## Delivery Status
+
+- Staging run [29240302020](https://github.com/raphaeltm/simple-agent-manager/actions/runs/29240302020) passed deployment, data-integrity checks, health checks, and 12/12 Playwright smoke tests using a temporary migration-compatible integration branch because shared staging had already advanced to unmerged Durable Object migration `v17`.
+- Authenticated staging responses exactly matched this catalog for Claude, Codex, Gemini, and Mistral; OpenCode had zero ID/name/group diff against the current Models.dev response.
+- PR [#1574](https://github.com/raphaeltm/simple-agent-manager/pull/1574) is open with `needs-human-review`: local specialist reviewer processes were interrupted before reporting, so the mandatory review gate requires a human decision even though the same checklists subsequently passed locally.
+
 ## References
 
 - Anthropic models overview: https://platform.claude.com/docs/en/about-claude/models/overview
