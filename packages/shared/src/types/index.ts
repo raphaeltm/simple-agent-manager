@@ -386,8 +386,8 @@ export {
 // Triggers (Event-Driven Agent Triggers)
 export type {
   CreateGitHubTriggerRequest,
-  CreateTriggerResponse,
   CreateTriggerRequest,
+  CreateTriggerResponse,
   CronTemplateContext,
   CronValidationResult,
   GitHubTemplateContext,
@@ -403,9 +403,9 @@ export type {
   TriggerExecution,
   TriggerExecutionResponse,
   TriggerExecutionStatus,
-  TriggerResponse,
   TriggerPreviewRequest,
   TriggerPreviewResponse,
+  TriggerResponse,
   TriggerSkipReason,
   TriggerSourceType,
   TriggerStatus,

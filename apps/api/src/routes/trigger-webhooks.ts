@@ -1,5 +1,5 @@
 import type { WebhookDeliveryOutcome } from '@simple-agent-manager/shared';
-import { Hono, type Context } from 'hono';
+import { type Context, Hono } from 'hono';
 
 import type { Env } from '../env';
 import { log } from '../lib/logger';
@@ -14,14 +14,14 @@ import {
 } from '../services/trigger-admission';
 import { renderTemplate } from '../services/trigger-template';
 import {
+  areWebhookTriggersEnabled,
+  getWebhookTriggerLimits,
+} from '../services/webhook-trigger-config';
+import {
   fingerprintWebhookRequest,
   hashWebhookIdempotencyKey,
   hasWebhookTokenPrefix,
 } from '../services/webhook-trigger-crypto';
-import {
-  areWebhookTriggersEnabled,
-  getWebhookTriggerLimits,
-} from '../services/webhook-trigger-config';
 import {
   buildWebhookContext,
   evaluateWebhookFilters,
@@ -41,15 +41,15 @@ async function readBoundedBody(request: Request, maxBytes: number): Promise<Uint
   if (!reader) return new Uint8Array();
   const chunks: Uint8Array[] = [];
   let size = 0;
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    size += value.byteLength;
+  let chunk = await reader.read();
+  while (!chunk.done) {
+    size += chunk.value.byteLength;
     if (size > maxBytes) {
       await reader.cancel();
       throw new BodyTooLargeError();
     }
-    chunks.push(value);
+    chunks.push(chunk.value);
+    chunk = await reader.read();
   }
   const body = new Uint8Array(size);
   let offset = 0;
@@ -119,9 +119,6 @@ async function handleWebhookIngress(
 
   const resolved = await findWebhookTriggerByToken(c.env, token);
   if (!resolved) return invalidTokenResponse(c.env, c.req.raw, limits);
-  if (!resolved.trigger.agentProfileId) {
-    return publicError(503, 'Webhook trigger is not configured');
-  }
 
   if (!c.req.header('Content-Type')?.toLowerCase().startsWith('application/json')) {
     return publicError(415, 'Content-Type must be application/json');
@@ -162,7 +159,7 @@ async function handleWebhookIngress(
     bodyBytes: bodyBytes.byteLength,
     receivedAt,
   });
-  if (!delivery.created) {
+  if (delivery.disposition === 'duplicate') {
     return c.json({ accepted: true, duplicate: true, deliveryId: delivery.id }, 202);
   }
 
@@ -181,6 +178,11 @@ async function handleWebhookIngress(
       errorCode,
     });
   };
+
+  if (!resolved.trigger.agentProfileId) {
+    await finalize('configuration_error', 503, undefined, 'missing_agent_profile');
+    return publicError(503, 'Webhook trigger is not configured');
+  }
 
   if (
     await isRateLimited(

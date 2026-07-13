@@ -11,12 +11,12 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { ulid } from '../lib/ulid';
+import { getWebhookTriggerLimits } from './webhook-trigger-config';
 import {
   generateWebhookToken,
   getWebhookTokenLastFour,
   hashWebhookToken,
 } from './webhook-trigger-crypto';
-import { getWebhookTriggerLimits } from './webhook-trigger-config';
 import { normalizeIncludedHeaders } from './webhook-trigger-payload';
 
 export interface WebhookTokenMaterial {
@@ -187,10 +187,14 @@ export interface CreateWebhookDeliveryInput {
   receivedAt: string;
 }
 
+export type WebhookDeliveryReservation =
+  | { disposition: 'reserved'; id: string; retry: boolean }
+  | { disposition: 'duplicate'; id: string };
+
 export async function createWebhookDelivery(
   env: Env,
   input: CreateWebhookDeliveryInput
-): Promise<{ id: string; created: boolean }> {
+): Promise<WebhookDeliveryReservation> {
   const id = ulid();
   const expiresAt = new Date(
     new Date(input.receivedAt).getTime() +
@@ -200,7 +204,7 @@ export async function createWebhookDelivery(
     `INSERT OR IGNORE INTO webhook_deliveries
       (id, trigger_id, idempotency_key_hash, request_fingerprint, outcome, http_status,
        body_bytes, received_at, expires_at)
-     VALUES (?, ?, ?, ?, 'internal_error', 503, ?, ?, ?)`
+     VALUES (?, ?, ?, ?, 'processing', 0, ?, ?, ?)`
   )
     .bind(
       id,
@@ -213,15 +217,34 @@ export async function createWebhookDelivery(
     )
     .run();
 
-  if (result.meta.changes) return { id, created: true };
+  if (result.meta.changes) return { disposition: 'reserved', id, retry: false };
   if (!input.idempotencyKeyHash) throw new Error('Webhook delivery persistence failed');
 
   const duplicate = await env.DATABASE.prepare(
-    'SELECT id FROM webhook_deliveries WHERE trigger_id = ? AND idempotency_key_hash = ?'
+    `SELECT id, outcome, request_fingerprint
+       FROM webhook_deliveries
+      WHERE trigger_id = ? AND idempotency_key_hash = ?`
   )
     .bind(input.triggerId, input.idempotencyKeyHash)
-    .first<{ id: string }>();
+    .first<{ id: string; outcome: string; request_fingerprint: string }>();
   if (!duplicate) throw new Error('Webhook delivery deduplication failed');
+
+  if (
+    duplicate.outcome === 'internal_error' &&
+    duplicate.request_fingerprint === input.requestFingerprint
+  ) {
+    const retry = await env.DATABASE.prepare(
+      `UPDATE webhook_deliveries
+          SET outcome = 'processing', http_status = 0, body_bytes = ?, received_at = ?,
+              processed_at = NULL, expires_at = ?, execution_id = NULL, error_code = NULL
+        WHERE id = ? AND trigger_id = ? AND outcome = 'internal_error'`
+    )
+      .bind(input.bodyBytes, input.receivedAt, expiresAt, duplicate.id, input.triggerId)
+      .run();
+    if (retry.meta.changes) {
+      return { disposition: 'reserved', id: duplicate.id, retry: true };
+    }
+  }
 
   const duplicateId = ulid();
   const duplicateResult = await env.DATABASE.prepare(
@@ -241,7 +264,7 @@ export async function createWebhookDelivery(
     )
     .run();
   if (!duplicateResult.meta.changes) throw new Error('Webhook duplicate audit persistence failed');
-  return { id: duplicateId, created: false };
+  return { disposition: 'duplicate', id: duplicateId };
 }
 
 export async function finishWebhookDelivery(

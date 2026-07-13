@@ -29,7 +29,7 @@ curl --request POST 'https://api.example.com/api/webhooks/ingest' \
   --data '{"deployment":{"status":"failed","id":"1234"}}'
 ```
 
-The request must use `Content-Type: application/json`, and the top-level value must be an object. Put the token in the `Authorization` header—not the URL or query string. `Idempotency-Key` is optional; when supplied, retries with the same key for the same trigger are accepted without creating another execution.
+The request must use `Content-Type: application/json`, and the top-level value must be an object. Put the token in the `Authorization` header—not the URL or query string. `Idempotency-Key` is optional; when supplied, repeated successful deliveries with the same key are accepted without creating another execution. An identical delivery that received `503` may retry with the same key; reusing a key for a different payload is treated as a duplicate.
 
 Successful admission returns HTTP `202`. The response indicates whether the delivery created an execution, was filtered, was a duplicate, or was skipped by trigger policy. Invalid credentials return a uniform `404`; overload protection can return `429`, and a durable submission failure returns `503`.
 

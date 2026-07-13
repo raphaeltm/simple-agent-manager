@@ -1,9 +1,10 @@
 import type { Sandbox } from '@cloudflare/sandbox';
 
 import type { VmAgentContainer } from './durable-objects/vm-agent-container';
+import type { WebhookTriggerEnv } from './webhook-trigger-env';
 
 // Cloudflare bindings type
-export interface Env {
+export interface Env extends WebhookTriggerEnv {
   // D1 Database
   DATABASE: D1Database;
   // KV for sessions
@@ -630,17 +631,6 @@ export interface Env {
   TRIGGER_AUTO_PAUSE_AFTER_FAILURES?: string; // Auto-pause after N consecutive failures (default: 3)
   CRON_SWEEP_ENABLED?: string; // Kill switch: "false" to disable cron sweep (default: enabled)
   GITHUB_TRIGGERS_ENABLED?: string; // Optional override: "false" disables, "true" enables; GH webhook secret enables by default
-  WEBHOOK_TRIGGERS_ENABLED?: string; // Kill switch: "false" disables generic webhook ingress (default: enabled)
-  WEBHOOK_TRIGGER_MAX_BODY_BYTES?: string; // Max raw JSON body size (default: 65536)
-  WEBHOOK_TRIGGER_MAX_FILTERS?: string; // Max deterministic filters per trigger (default: 10)
-  WEBHOOK_TRIGGER_MAX_FILTER_PATH_LENGTH?: string; // Max filter dot-path length (default: 200)
-  WEBHOOK_TRIGGER_MAX_FILTER_PATH_DEPTH?: string; // Max filter dot-path depth (default: 8)
-  WEBHOOK_TRIGGER_MAX_INCLUDED_HEADERS?: string; // Max request headers copied to context (default: 10)
-  WEBHOOK_TRIGGER_MAX_IDEMPOTENCY_KEY_LENGTH?: string; // Max Idempotency-Key length (default: 200)
-  WEBHOOK_TRIGGER_RATE_LIMIT_PER_MINUTE?: string; // Per-trigger KV abuse damping (default: 60)
-  WEBHOOK_INVALID_TOKEN_RATE_LIMIT_PER_MINUTE?: string; // Invalid-token attempts per IP/minute (default: 30)
-  WEBHOOK_RATE_LIMIT_WINDOW_SECONDS?: string; // KV abuse-damping window (default: 60)
-  WEBHOOK_DELIVERY_RETENTION_DAYS?: string; // Days to retain delivery audit metadata (default: 7)
   TRIGGER_NAME_MAX_LENGTH?: string; // Max trigger name length (default: 100)
   TRIGGER_MAX_CONCURRENT_LIMIT?: string; // Upper bound for maxConcurrent per trigger (default: 10)
   // Trigger execution cleanup

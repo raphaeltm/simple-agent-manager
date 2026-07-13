@@ -179,7 +179,9 @@ export function WebhookTriggerPanel({ projectId, trigger, onRotated }: WebhookTr
                   </p>
                 </div>
                 <span className="text-xs text-fg-muted self-center">
-                  HTTP {delivery.httpStatus}
+                  {delivery.outcome === 'processing'
+                    ? 'In progress'
+                    : `HTTP ${delivery.httpStatus}`}
                 </span>
               </div>
             ))}

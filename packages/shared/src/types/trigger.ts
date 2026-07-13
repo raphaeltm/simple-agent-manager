@@ -387,6 +387,7 @@ export interface WebhookFilterResult {
 }
 
 export const WEBHOOK_DELIVERY_OUTCOMES = [
+  'processing',
   'accepted',
   'duplicate',
   'filtered',

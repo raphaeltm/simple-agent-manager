@@ -11,34 +11,30 @@ import type {
   WebhookCredential,
   WebhookTriggerFilter,
 } from '@simple-agent-manager/shared';
-import {
-  DEFAULT_CRON_TEMPLATE_MAX_LENGTH,
-  DEFAULT_TRIGGER_DESCRIPTION_MAX_LENGTH,
-  DEFAULT_TRIGGER_MAX_CONCURRENT_LIMIT,
-  DEFAULT_TRIGGER_NAME_MAX_LENGTH,
-} from '@simple-agent-manager/shared';
 import { Button, Spinner } from '@simple-agent-manager/ui';
-import { ChevronDown, ChevronRight, X } from 'lucide-react';
+import { X } from 'lucide-react';
 import { type FC, useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { useToast } from '../../hooks/useToast';
 import { createTrigger, listAgentProfiles, updateTrigger } from '../../lib/api';
 import { useProjectContext } from '../../pages/ProjectContext';
+import { GitHubTriggerFields } from './GitHubTriggerFields';
 import { SchedulePicker } from './SchedulePicker';
-import { TriggerCredentialWarning } from './TriggerCredentialWarning';
 import {
   buildGitHubFilters,
   CRON_TEMPLATE_VARIABLES,
   FOCUS_RING,
-  GITHUB_EVENT_OPTIONS,
   GITHUB_TEMPLATE_VARIABLES,
   joinList,
   splitList,
-  VM_SIZES,
   WEBHOOK_TEMPLATE_VARIABLES,
 } from './trigger-form-support';
+import { TriggerAdvancedOptions } from './TriggerAdvancedOptions';
+import { TriggerCredentialWarning } from './TriggerCredentialWarning';
+import { TriggerIdentityFields } from './TriggerIdentityFields';
 import { TriggerProfileSelect } from './TriggerProfileSelect';
+import { TriggerPromptTemplate } from './TriggerPromptTemplate';
 import { TriggerSourceSelector } from './TriggerSourceSelector';
 import { WebhookTriggerFields } from './WebhookTriggerFields';
 
@@ -379,43 +375,12 @@ export const TriggerForm: FC<TriggerFormProps> = ({ open, onClose, editTrigger, 
 
         {/* Form content */}
         <div className="p-4 space-y-6">
-          {/* Name */}
-          <div>
-            <label
-              htmlFor="trigger-name"
-              className="block text-sm font-medium text-fg-primary mb-1"
-            >
-              Name
-            </label>
-            <input
-              id="trigger-name"
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Daily code review"
-              className={`w-full px-3 py-2 rounded-md text-fg-primary text-sm ${FOCUS_RING}`}
-              maxLength={DEFAULT_TRIGGER_NAME_MAX_LENGTH}
-            />
-          </div>
-
-          {/* Description */}
-          <div>
-            <label
-              htmlFor="trigger-description"
-              className="block text-sm font-medium text-fg-primary mb-1"
-            >
-              Description <span className="text-fg-muted font-normal">(optional)</span>
-            </label>
-            <input
-              id="trigger-description"
-              type="text"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="Runs a daily code review on the main branch"
-              className={`w-full px-3 py-2 rounded-md text-fg-primary text-sm ${FOCUS_RING}`}
-              maxLength={DEFAULT_TRIGGER_DESCRIPTION_MAX_LENGTH}
-            />
-          </div>
+          <TriggerIdentityFields
+            description={description}
+            name={name}
+            onDescriptionChange={setDescription}
+            onNameChange={setName}
+          />
 
           <TriggerSourceSelector value={sourceType} disabled={isEdit} onChange={setSourceType} />
 
@@ -451,299 +416,52 @@ export const TriggerForm: FC<TriggerFormProps> = ({ open, onClose, editTrigger, 
               />
             </div>
           ) : (
-            <div className="space-y-4">
-              <div>
-                <label
-                  htmlFor="github-event-type"
-                  className="block text-sm font-medium text-fg-primary mb-1"
-                >
-                  GitHub event
-                </label>
-                <select
-                  id="github-event-type"
-                  value={githubEventType}
-                  onChange={(e) => setGitHubEventType(e.target.value as GitHubTriggerEventType)}
-                  disabled={isEdit}
-                  className={`w-full px-3 py-2 rounded-md text-fg-primary text-sm ${FOCUS_RING}`}
-                >
-                  {GITHUB_EVENT_OPTIONS.map((eventOption) => (
-                    <option key={eventOption.value} value={eventOption.value}>
-                      {eventOption.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label
-                    htmlFor="github-actions"
-                    className="block text-sm font-medium text-fg-primary mb-1"
-                  >
-                    Actions
-                  </label>
-                  <input
-                    id="github-actions"
-                    type="text"
-                    value={githubActions}
-                    onChange={(e) => setGitHubActions(e.target.value)}
-                    placeholder="opened, labeled, created"
-                    disabled={isEdit}
-                    className={`w-full px-3 py-2 rounded-md text-fg-primary text-sm ${FOCUS_RING}`}
-                  />
-                </div>
-                <div>
-                  <label
-                    htmlFor="github-ignore-actors"
-                    className="block text-sm font-medium text-fg-primary mb-1"
-                  >
-                    Ignore actors
-                  </label>
-                  <input
-                    id="github-ignore-actors"
-                    type="text"
-                    value={githubIgnoreActors}
-                    onChange={(e) => setGitHubIgnoreActors(e.target.value)}
-                    placeholder="dependabot[bot]"
-                    disabled={isEdit}
-                    className={`w-full px-3 py-2 rounded-md text-fg-primary text-sm ${FOCUS_RING}`}
-                  />
-                </div>
-              </div>
-
-              {(githubEventType === 'issues' || githubEventType === 'pull_request') && (
-                <div>
-                  <label
-                    htmlFor="github-labels"
-                    className="block text-sm font-medium text-fg-primary mb-1"
-                  >
-                    Required labels
-                  </label>
-                  <input
-                    id="github-labels"
-                    type="text"
-                    value={githubLabels}
-                    onChange={(e) => setGitHubLabels(e.target.value)}
-                    placeholder="needs-agent, bug"
-                    disabled={isEdit}
-                    className={`w-full px-3 py-2 rounded-md text-fg-primary text-sm ${FOCUS_RING}`}
-                  />
-                </div>
-              )}
-
-              {githubEventType === 'issue_comment' && (
-                <div>
-                  <label
-                    htmlFor="github-command-prefix"
-                    className="block text-sm font-medium text-fg-primary mb-1"
-                  >
-                    Command prefix
-                  </label>
-                  <input
-                    id="github-command-prefix"
-                    type="text"
-                    value={githubCommandPrefix}
-                    onChange={(e) => setGitHubCommandPrefix(e.target.value)}
-                    placeholder="/sam"
-                    disabled={isEdit}
-                    className={`w-full px-3 py-2 rounded-md text-fg-primary text-sm ${FOCUS_RING}`}
-                  />
-                </div>
-              )}
-
-              {(githubEventType === 'pull_request' || githubEventType === 'push') && (
-                <div>
-                  <label
-                    htmlFor="github-branches"
-                    className="block text-sm font-medium text-fg-primary mb-1"
-                  >
-                    Branches
-                  </label>
-                  <input
-                    id="github-branches"
-                    type="text"
-                    value={githubBranches}
-                    onChange={(e) => setGitHubBranches(e.target.value)}
-                    placeholder="main, develop"
-                    disabled={isEdit}
-                    className={`w-full px-3 py-2 rounded-md text-fg-primary text-sm ${FOCUS_RING}`}
-                  />
-                </div>
-              )}
-
-              {githubEventType !== 'push' && (
-                <div>
-                  <label
-                    htmlFor="github-body-contains"
-                    className="block text-sm font-medium text-fg-primary mb-1"
-                  >
-                    Text contains
-                  </label>
-                  <input
-                    id="github-body-contains"
-                    type="text"
-                    value={githubBodyContains}
-                    onChange={(e) => setGitHubBodyContains(e.target.value)}
-                    placeholder="optional keyword"
-                    disabled={isEdit}
-                    className={`w-full px-3 py-2 rounded-md text-fg-primary text-sm ${FOCUS_RING}`}
-                  />
-                </div>
-              )}
-
-              {githubEventType === 'pull_request' && (
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={githubIgnoreDrafts}
-                    onChange={(e) => setGitHubIgnoreDrafts(e.target.checked)}
-                    disabled={isEdit}
-                    className="rounded border-border-default"
-                  />
-                  <span className="text-sm text-fg-primary">Ignore draft pull requests</span>
-                </label>
-              )}
-            </div>
+            <GitHubTriggerFields
+              actions={githubActions}
+              bodyContains={githubBodyContains}
+              branches={githubBranches}
+              commandPrefix={githubCommandPrefix}
+              disabled={isEdit}
+              eventType={githubEventType}
+              ignoreActors={githubIgnoreActors}
+              ignoreDrafts={githubIgnoreDrafts}
+              labels={githubLabels}
+              onActionsChange={setGitHubActions}
+              onBodyContainsChange={setGitHubBodyContains}
+              onBranchesChange={setGitHubBranches}
+              onCommandPrefixChange={setGitHubCommandPrefix}
+              onEventTypeChange={setGitHubEventType}
+              onIgnoreActorsChange={setGitHubIgnoreActors}
+              onIgnoreDraftsChange={setGitHubIgnoreDrafts}
+              onLabelsChange={setGitHubLabels}
+            />
           )}
 
-          {/* Prompt Template */}
-          <div>
-            <h3 className="text-sm font-medium text-fg-primary mb-2">Prompt Template</h3>
-            <div className="flex flex-col md:flex-row gap-3">
-              <div className="flex-1 min-w-0">
-                <textarea
-                  ref={templateRef}
-                  value={promptTemplate}
-                  onChange={(e) => setPromptTemplate(e.target.value)}
-                  placeholder={promptPlaceholder}
-                  rows={6}
-                  maxLength={DEFAULT_CRON_TEMPLATE_MAX_LENGTH}
-                  className={`w-full px-3 py-2 rounded-md text-fg-primary text-sm font-mono resize-y ${FOCUS_RING}`}
-                  aria-label="Prompt template"
-                />
-                <p className="text-xs text-fg-muted mt-1 m-0">
-                  {promptTemplate.length}/{DEFAULT_CRON_TEMPLATE_MAX_LENGTH} characters
-                </p>
-              </div>
-              {/* Variable sidebar */}
-              <div className="md:w-48 shrink-0">
-                <p className="text-xs font-medium text-fg-muted mb-2 m-0">Available Variables</p>
-                <div className="space-y-2 max-h-48 overflow-y-auto">
-                  {templateVariables.map((group) => (
-                    <div key={group.group}>
-                      <p className="text-xs font-semibold text-fg-muted uppercase tracking-wider mb-1 m-0">
-                        {group.group}
-                      </p>
-                      {group.vars.map((v) => (
-                        <button
-                          key={v}
-                          onClick={() => insertVariable(v)}
-                          className={`block w-full text-left px-2 py-1 text-xs font-mono text-accent hover:bg-surface-hover rounded cursor-pointer bg-transparent border-none ${FOCUS_RING}`}
-                          title={`Insert {{${v}}}`}
-                        >
-                          {`{{${v}}}`}
-                        </button>
-                      ))}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
+          <TriggerPromptTemplate
+            onChange={setPromptTemplate}
+            onInsertVariable={insertVariable}
+            placeholder={promptPlaceholder}
+            textareaRef={templateRef}
+            value={promptTemplate}
+            variables={templateVariables}
+          />
 
-          {/* Advanced Options */}
-          <div>
-            <button
-              onClick={() => setAdvancedOpen(!advancedOpen)}
-              className={`flex items-center gap-2 text-sm font-medium text-fg-muted hover:text-fg-primary bg-transparent border-none cursor-pointer p-0 ${FOCUS_RING}`}
-              aria-expanded={advancedOpen}
-            >
-              {advancedOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-              Advanced Options
-            </button>
-            {advancedOpen && (
-              <div className="mt-3 space-y-4 pl-6">
-                {/* Skip if running */}
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={skipIfRunning}
-                    onChange={(e) => setSkipIfRunning(e.target.checked)}
-                    className="rounded border-border-default"
-                  />
-                  <span className="text-sm text-fg-primary">
-                    Skip if previous execution still running
-                  </span>
-                </label>
-
-                {/* Max concurrent */}
-                <div>
-                  <label htmlFor="max-concurrent" className="block text-sm text-fg-primary mb-1">
-                    Max concurrent runs
-                  </label>
-                  <input
-                    id="max-concurrent"
-                    type="number"
-                    min={1}
-                    max={DEFAULT_TRIGGER_MAX_CONCURRENT_LIMIT}
-                    value={maxConcurrent}
-                    onChange={(e) =>
-                      setMaxConcurrent(
-                        Math.min(
-                          DEFAULT_TRIGGER_MAX_CONCURRENT_LIMIT,
-                          Math.max(1, parseInt(e.target.value, 10) || 1)
-                        )
-                      )
-                    }
-                    className={`w-20 px-2 py-1.5 rounded-md text-fg-primary text-sm ${FOCUS_RING}`}
-                  />
-                </div>
-
-                {sourceType !== 'webhook' && (
-                  <TriggerProfileSelect
-                    profiles={profiles}
-                    value={agentProfileId}
-                    onChange={setAgentProfileId}
-                  />
-                )}
-
-                {/* VM size */}
-                <div>
-                  <label htmlFor="vm-size" className="block text-sm text-fg-primary mb-1">
-                    VM size
-                  </label>
-                  <select
-                    id="vm-size"
-                    value={vmSizeOverride}
-                    onChange={(e) => setVmSizeOverride(e.target.value)}
-                    className={`px-2 py-1.5 rounded-md text-fg-primary text-sm ${FOCUS_RING}`}
-                  >
-                    {VM_SIZES.map((s) => (
-                      <option key={s.value} value={s.value}>
-                        {s.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Task mode */}
-                <div>
-                  <label htmlFor="task-mode" className="block text-sm text-fg-primary mb-1">
-                    Task mode
-                  </label>
-                  <select
-                    id="task-mode"
-                    value={taskMode}
-                    onChange={(e) => setTaskMode(e.target.value as 'task' | 'conversation')}
-                    className={`px-2 py-1.5 rounded-md text-fg-primary text-sm ${FOCUS_RING}`}
-                  >
-                    <option value="task">Task (run once, complete)</option>
-                    <option value="conversation">Conversation (interactive)</option>
-                  </select>
-                </div>
-              </div>
-            )}
-          </div>
+          <TriggerAdvancedOptions
+            agentProfileId={agentProfileId}
+            maxConcurrent={maxConcurrent}
+            onAgentProfileChange={setAgentProfileId}
+            onMaxConcurrentChange={setMaxConcurrent}
+            onOpenChange={setAdvancedOpen}
+            onSkipIfRunningChange={setSkipIfRunning}
+            onTaskModeChange={setTaskMode}
+            onVmSizeChange={setVmSizeOverride}
+            open={advancedOpen}
+            profiles={profiles}
+            skipIfRunning={skipIfRunning}
+            sourceType={sourceType}
+            taskMode={taskMode}
+            vmSize={vmSizeOverride}
+          />
         </div>
 
         {/* Footer actions */}

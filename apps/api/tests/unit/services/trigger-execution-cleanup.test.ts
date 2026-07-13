@@ -10,6 +10,11 @@ vi.mock('../../../src/lib/logger', () => ({
   createModuleLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
 
+const mockPurgeExpiredWebhookDeliveries = vi.hoisted(() => vi.fn().mockResolvedValue(0));
+vi.mock('../../../src/services/webhook-trigger-store', () => ({
+  purgeExpiredWebhookDeliveries: mockPurgeExpiredWebhookDeliveries,
+}));
+
 import {
   DEFAULT_TRIGGER_EXECUTION_LOG_RETENTION_DAYS,
   DEFAULT_TRIGGER_STALE_EXECUTION_TIMEOUT_MS,
@@ -185,6 +190,7 @@ function makeStaleExec(overrides: Partial<StaleRow> = {}): StaleRow {
 describe('runTriggerExecutionCleanup', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockPurgeExpiredWebhookDeliveries.mockResolvedValue(0);
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-04-11T12:00:00Z'));
   });
@@ -223,6 +229,27 @@ describe('runTriggerExecutionCleanup', () => {
       await runTriggerExecutionCleanup(env);
 
       expect(db.prepare).toHaveBeenCalled();
+    });
+  });
+
+  describe('webhook delivery retention', () => {
+    it('includes purged webhook deliveries in sweep statistics', async () => {
+      mockPurgeExpiredWebhookDeliveries.mockResolvedValueOnce(4);
+
+      const stats = await runTriggerExecutionCleanup(createMockEnv());
+
+      expect(stats.webhookDeliveriesPurged).toBe(4);
+      expect(stats.errors).toBe(0);
+      expect(mockPurgeExpiredWebhookDeliveries).toHaveBeenCalledOnce();
+    });
+
+    it('records a cleanup error without aborting the execution sweep', async () => {
+      mockPurgeExpiredWebhookDeliveries.mockRejectedValueOnce(new Error('D1 unavailable'));
+
+      const stats = await runTriggerExecutionCleanup(createMockEnv());
+
+      expect(stats.webhookDeliveriesPurged).toBe(0);
+      expect(stats.errors).toBe(1);
     });
   });
 

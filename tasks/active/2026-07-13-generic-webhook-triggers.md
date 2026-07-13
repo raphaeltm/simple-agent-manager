@@ -155,19 +155,32 @@ Use D1 batch/conditional statements for atomic create/config, rotation, delivery
 - [x] Add masked configuration, rotation confirmation/result, sample JSON preview, filter diagnostics, and paginated delivery history using the project's current query/data-fetching convention.
 - [x] Preserve trigger credential warnings and existing cron/GitHub behavior; keep onboarding cron-only in this slice.
 - [x] Add behavioral unit tests for every new interaction and full UI-to-backend value propagation.
-- [ ] Extend Playwright trigger audits for normal, long, empty, many, error, special-character, credential, preview, filter, rotation, and delivery states at mobile/desktop widths with overflow assertions and screenshots.
+- [x] Extend Playwright trigger audits for normal, long, empty, many, error, special-character, credential, preview, filter, rotation, and delivery states at mobile/desktop widths with overflow assertions and screenshots.
 
 ### Contracts, documentation, and verification
 
 - [x] Update OpenAPI/SAM CLI trigger schemas and endpoints.
 - [x] Keep MCP webhook create/rotation unavailable; update tool descriptions/reference to state the supported boundary accurately.
 - [x] Update both API-reference skill copies, environment reference, and public webhook trigger guide with auth, curl, limits, idempotency, filters, templates, statuses/retries, delivery history, rotation, and security guidance.
-- [ ] Add unit tests for token hashing/rotation, filters/path safety, rendering, config validation, and cleanup.
+- [x] Add unit tests for token hashing/rotation, filters/path safety, rendering, config validation, and cleanup.
 - [x] Add API vertical-slice tests with realistic SQLite-backed D1/project/profile/trigger state proving ingress -> delivery -> admission -> execution -> injected task/session/TaskRunner submission boundary, plus retryable boundary failure.
-- [ ] Add concurrent duplicate/concurrency/sequence tests and cron/GitHub/manual regression coverage.
+- [x] Add concurrent duplicate/concurrency/sequence tests and cron/GitHub/manual regression coverage.
 - [ ] Run migration-safety, focused tests, full lint/typecheck/test/build, file-size check, task completion validation, and all required specialist reviews.
 - [ ] Run local Playwright visual audit, deploy to staging, verify D1 migration/config via Cloudflare API, then exercise create/preview/ingest/dedup/filter/concurrency/rotation/delivery/execution/task flow and credential-free logs in a real browser/API flow.
 - [ ] Open a draft PR with complete preflight, staging, security, data-flow, and specialist evidence. Stop before ready/merge.
+
+## Local verification evidence
+
+- `pnpm lint`: passed with zero errors (repository baseline warnings remain).
+- `pnpm typecheck`: 16/16 tasks passed.
+- `pnpm test`: 19/19 tasks passed; API 409 files / 5,945 tests and web 218 files / 2,671 tests passed.
+- `pnpm build`: 9/9 tasks passed, including the public webhook guide.
+- Webhook SQLite vertical slice: 9/9 passed, including authenticated submission, filtering, deduplication, concurrency, retryable failure/same-key retry, configuration error, and rotation.
+- Trigger-focused API tests: 59 passed. Trigger-focused web tests: 14 passed. Real-D1 scheduled cleanup coverage passed.
+- Playwright audit: 26 applicable cases passed at 375x667 and 1280x800; 26 cross-project cases intentionally skipped. Screenshots cover webhook credential create/rotation, preview/filter results, all delivery outcomes, empty history, long/special text, and pagination with overflow assertions.
+- UI rubric: visual hierarchy 5/5, interaction clarity 5/5, mobile quality 5/5, accessibility 4/5, consistency 5/5 (24/25). The one-point accessibility reserve reflects automated/behavioral coverage without a dedicated assistive-technology staging pass yet.
+- `quality:wrangler-bindings`, `quality:ast-checks`, `quality:file-sizes`, `quality:migration-safety`, `quality:do-migration-safety`, `quality:source-contract-tests`, and `quality:observability-noise`: passed (external observability queries skipped where credentials were unavailable; local noise checks passed).
+- `openapi:check` and `git diff --check`: passed.
 
 ## Primary data-flow trace to verify
 
@@ -179,17 +192,17 @@ Use D1 batch/conditional statements for atomic create/config, rotation, delivery
 
 ## Acceptance criteria
 
-- [ ] Project editors can create/edit a webhook trigger with explicit profile, prompt, concurrency policy, source label, allowlisted headers, and bounded deterministic filters.
-- [ ] The bearer credential is 256-bit, shown once, keyed-hash-only at rest, masked thereafter, immediately rotatable, and absent from URLs/logs/analytics/database audit/UI persistent cache.
+- [x] Project editors can create/edit a webhook trigger with explicit profile, prompt, concurrency policy, source label, allowlisted headers, and bounded deterministic filters.
+- [x] The bearer credential is 256-bit, shown once, keyed-hash-only at rest, masked thereafter, immediately rotatable, and absent from URLs/logs/analytics/database audit/UI persistent cache.
 - [ ] Valid bounded JSON produces exactly one durable delivery, execution, task, ProjectData session/prompt, and TaskRunner dispatch through existing infrastructure.
-- [ ] Invalid auth reveals no trigger/project existence. Oversize/content/JSON errors are bounded. Persistence failure fails closed and is retryable.
-- [ ] Idempotency and concurrent admission do not double-submit or exceed `skipIfRunning`/`maxConcurrent`; future execution sequence values are unique and monotonic.
-- [ ] Cron, GitHub, webhook, and manual sources use shared admission; existing cron schedule semantics and GitHub matching remain green; manual provenance is correct.
-- [ ] Delivery history distinguishes accepted, duplicate, filtered, paused/disabled, rate-limited, concurrency-skipped, configuration, and internal-error outcomes without storing the raw body.
-- [ ] Preview is source-aware, reports filter diagnostics/context/rendered prompt, and creates no durable work.
-- [ ] Trigger list/detail/form are source-aware, accessible, mobile-first, and have no horizontal overflow under required edge-case datasets.
-- [ ] Migration replays from zero and upgrades existing data without dropping/recreating FK parents or losing cron/GitHub history.
-- [ ] Configuration, OpenAPI, internal API reference, public docs, environment reference, tests, and UI match the shipped contract.
+- [x] Invalid auth reveals no trigger/project existence. Oversize/content/JSON errors are bounded. Persistence failure fails closed and is retryable.
+- [x] Idempotency and concurrent admission do not double-submit or exceed `skipIfRunning`/`maxConcurrent`; future execution sequence values are unique and monotonic.
+- [x] Cron, GitHub, webhook, and manual sources use shared admission; existing cron schedule semantics and GitHub matching remain green; manual provenance is correct.
+- [x] Delivery history distinguishes accepted, duplicate, filtered, paused/disabled, rate-limited, concurrency-skipped, configuration, and internal-error outcomes without storing the raw body.
+- [x] Preview is source-aware, reports filter diagnostics/context/rendered prompt, and creates no durable work.
+- [x] Trigger list/detail/form are source-aware, accessible, mobile-first, and have no horizontal overflow under required edge-case datasets.
+- [x] Migration replays from zero and upgrades existing data without dropping/recreating FK parents or losing cron/GitHub history.
+- [x] Configuration, OpenAPI, internal API reference, public docs, environment reference, tests, and UI match the shipped contract.
 - [ ] Local quality, specialist review, staging deployment, Cloudflare data/log verification, and end-to-end staging behavior pass before the draft PR is opened.
 
 ## Explicit non-goals

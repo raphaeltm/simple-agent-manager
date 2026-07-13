@@ -254,6 +254,34 @@ describe('generic webhook ingress vertical slice', () => {
     });
   });
 
+  it('records a configuration error when the target profile is missing', async () => {
+    sqlite.prepare('UPDATE triggers SET agent_profile_id = NULL WHERE id = ?').run(TRIGGER_ID);
+    const submitter = vi.fn<TriggerTaskSubmitter>();
+
+    const response = await appWith(submitter).request(
+      deliveryRequest(token, { deployment: { id: 'dep-unconfigured' } }, 'unconfigured'),
+      undefined,
+      env
+    );
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      accepted: false,
+      message: 'Webhook trigger is not configured',
+    });
+    expect(submitter).not.toHaveBeenCalled();
+    expect(
+      sqlite.prepare('SELECT outcome, http_status, error_code FROM webhook_deliveries').get()
+    ).toEqual({
+      outcome: 'configuration_error',
+      http_status: 503,
+      error_code: 'missing_agent_profile',
+    });
+    expect(sqlite.prepare('SELECT COUNT(*) AS count FROM trigger_executions').get()).toEqual({
+      count: 0,
+    });
+  });
+
   it('reserves one execution and records a monotonic skipped attempt under concurrency', async () => {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => {
@@ -293,11 +321,14 @@ describe('generic webhook ingress vertical slice', () => {
   });
 
   it('fails closed with retryable status when the submission boundary rejects', async () => {
-    const submitter = vi
-      .fn<TriggerTaskSubmitter>()
-      .mockRejectedValue(new Error('TaskRunner unavailable'));
-    const response = await appWith(submitter).request(
-      deliveryRequest(token, { deployment: { id: 'dep-fail' } }, 'submission-failure'),
+    const submitter = vi.fn<TriggerTaskSubmitter>(async () => {
+      if (submitter.mock.calls.length === 1) throw new Error('TaskRunner unavailable');
+      return { taskId: 'task-retry', sessionId: 'session-retry', branchName: 'sam/retry' };
+    });
+    const app = appWith(submitter);
+    const requestBody = { deployment: { id: 'dep-fail' } };
+    const response = await app.request(
+      deliveryRequest(token, requestBody, 'submission-failure'),
       undefined,
       env
     );
@@ -318,6 +349,54 @@ describe('generic webhook ingress vertical slice', () => {
       status: 'failed',
       error_message: 'TaskRunner unavailable',
     });
+
+    const retry = await app.request(
+      deliveryRequest(token, requestBody, 'submission-failure'),
+      undefined,
+      env
+    );
+    expect(retry.status).toBe(202);
+    expect(await retry.json()).toMatchObject({ accepted: true });
+    expect(submitter).toHaveBeenCalledTimes(2);
+    expect(sqlite.prepare('SELECT outcome, http_status FROM webhook_deliveries').get()).toEqual({
+      outcome: 'accepted',
+      http_status: 202,
+    });
+    expect(
+      rows<{ status: string; sequence_number: number }>(
+        sqlite,
+        'SELECT status, sequence_number FROM trigger_executions ORDER BY sequence_number'
+      )
+    ).toEqual([
+      { status: 'failed', sequence_number: 1 },
+      { status: 'running', sequence_number: 2 },
+    ]);
+  });
+
+  it('does not retry a failed idempotency key with a different payload', async () => {
+    const submitter = vi
+      .fn<TriggerTaskSubmitter>()
+      .mockRejectedValue(new Error('TaskRunner unavailable'));
+    const app = appWith(submitter);
+
+    expect(
+      (
+        await app.request(
+          deliveryRequest(token, { deployment: { id: 'dep-original' } }, 'reused-key'),
+          undefined,
+          env
+        )
+      ).status
+    ).toBe(503);
+    const differentPayload = await app.request(
+      deliveryRequest(token, { deployment: { id: 'dep-different' } }, 'reused-key'),
+      undefined,
+      env
+    );
+
+    expect(differentPayload.status).toBe(202);
+    expect(await differentPayload.json()).toMatchObject({ accepted: true, duplicate: true });
+    expect(submitter).toHaveBeenCalledOnce();
   });
 
   it('rotates keyed token material and invalidates the old credential immediately', async () => {

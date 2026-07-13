@@ -68,6 +68,18 @@ vi.mock('../../../src/services/trigger-submit', () => ({
   }),
 }));
 
+const mockAdmitAndSubmitTriggerExecution = vi.hoisted(() =>
+  vi.fn().mockResolvedValue({
+    outcome: 'submitted',
+    executionId: 'execution-manual-1',
+    taskId: 'task-manual-1',
+    sequenceNumber: 1,
+  })
+);
+vi.mock('../../../src/services/trigger-admission', () => ({
+  admitAndSubmitTriggerExecution: mockAdmitAndSubmitTriggerExecution,
+}));
+
 vi.mock('../../../src/services/project-multiplayer', () => ({
   getProjectMultiplayerState: vi.fn().mockResolvedValue({
     activeMemberCount: 1,
@@ -524,6 +536,45 @@ describe('Trigger Routes', () => {
       const res = await app.request(`${REQUEST_PATH}/nonexistent/run`, { method: 'POST' }, env);
 
       expect(res.status).toBe(404);
+    });
+
+    it('uses source-neutral admission with user provenance', async () => {
+      queryResults = [
+        [
+          {
+            id: 'trigger-1',
+            projectId: 'test-project-id',
+            userId: 'test-user-id',
+            name: 'Manual trigger',
+            description: null,
+            status: 'active',
+            sourceType: 'cron',
+            cronTimezone: 'UTC',
+            promptTemplate: 'Run manually',
+            triggerCount: 0,
+            nextExecutionSequence: 1,
+          },
+        ],
+      ];
+
+      const res = await app.request(
+        `${REQUEST_PATH}/trigger-1/run`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: '{}',
+        },
+        env
+      );
+
+      expect(res.status).toBe(202);
+      expect(mockAdmitAndSubmitTriggerExecution).toHaveBeenCalledOnce();
+      expect(mockAdmitAndSubmitTriggerExecution.mock.calls[0]?.[1]).toMatchObject({
+        eventType: 'manual',
+        triggeredBy: 'user',
+        allowPaused: true,
+        trigger: { id: 'trigger-1' },
+      });
     });
   });
 

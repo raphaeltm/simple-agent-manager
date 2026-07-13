@@ -19,6 +19,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
 
 import { ExecutionHistory } from '../components/triggers/ExecutionHistory';
+import { TriggerConfiguration } from '../components/triggers/TriggerConfiguration';
 import { TriggerCredentialWarning } from '../components/triggers/TriggerCredentialWarning';
 import { TriggerForm } from '../components/triggers/TriggerForm';
 import { WebhookTriggerPanel } from '../components/triggers/WebhookTriggerPanel';
@@ -402,75 +403,7 @@ export function ProjectTriggerDetail() {
         />
       </div>
 
-      {/* Configuration section */}
-      <div className="mt-8">
-        <h2 className="sam-type-section-heading mb-4">Configuration</h2>
-        <div className="border border-border-default rounded-lg divide-y divide-border-default">
-          <ConfigRow label="Source Type" value={trigger.sourceType} />
-          {trigger.sourceType === 'github' ? (
-            <>
-              <ConfigRow
-                label="GitHub Event"
-                value={trigger.githubConfig?.eventType?.replace(/_/g, ' ') ?? '—'}
-              />
-              <ConfigRow
-                label="Actions"
-                value={trigger.githubConfig?.filters.actions?.join(', ') ?? 'Any'}
-              />
-              <ConfigRow
-                label="Required Labels"
-                value={trigger.githubConfig?.filters.labels?.join(', ') ?? 'None'}
-              />
-              <ConfigRow
-                label="Command Prefix"
-                value={trigger.githubConfig?.filters.commandPrefix ?? 'None'}
-              />
-              <ConfigRow
-                label="Branches"
-                value={trigger.githubConfig?.filters.branches?.join(', ') ?? 'Any'}
-              />
-              <ConfigRow
-                label="Ignored Actors"
-                value={trigger.githubConfig?.filters.ignoreActors?.join(', ') ?? 'None'}
-              />
-            </>
-          ) : trigger.sourceType === 'webhook' ? (
-            <>
-              <ConfigRow
-                label="Source Label"
-                value={trigger.webhookConfig?.sourceLabel ?? 'None'}
-              />
-              <ConfigRow
-                label="Token"
-                value={`••••${trigger.webhookConfig?.tokenLastFour ?? '—'}`}
-              />
-              <ConfigRow label="Filter Mode" value={trigger.webhookConfig?.filterMode ?? 'all'} />
-              <ConfigRow
-                label="Filters"
-                value={String(trigger.webhookConfig?.filters.length ?? 0)}
-              />
-              <ConfigRow
-                label="Included Headers"
-                value={trigger.webhookConfig?.includedHeaders.join(', ') || 'None'}
-              />
-            </>
-          ) : (
-            <>
-              <ConfigRow
-                label="Schedule"
-                value={trigger.cronHumanReadable ?? trigger.cronExpression ?? '—'}
-              />
-              <ConfigRow label="Timezone" value={trigger.cronTimezone} />
-            </>
-          )}
-          <ConfigRow label="Task Mode" value={trigger.taskMode} />
-          <ConfigRow label="Skip if Running" value={trigger.skipIfRunning ? 'Yes' : 'No'} />
-          <ConfigRow label="Max Concurrent" value={String(trigger.maxConcurrent)} />
-          <ConfigRow label="VM Size" value={trigger.vmSizeOverride ?? 'Project default'} />
-          <ConfigRow label="Total Runs" value={String(trigger.triggerCount)} />
-          <ConfigRow label="Created" value={formatDateFull(trigger.createdAt)} />
-        </div>
-      </div>
+      <TriggerConfiguration trigger={trigger} />
 
       {trigger.sourceType === 'webhook' && (
         <WebhookTriggerPanel
@@ -527,21 +460,6 @@ export function ProjectTriggerDetail() {
           </div>
         </>
       )}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Config row sub-component
-// ---------------------------------------------------------------------------
-
-function ConfigRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-center justify-between px-4 py-3">
-      <span className="text-sm text-fg-muted">{label}</span>
-      <span className="text-sm text-fg-primary font-medium truncate max-w-[60%] text-right">
-        {value}
-      </span>
     </div>
   );
 }

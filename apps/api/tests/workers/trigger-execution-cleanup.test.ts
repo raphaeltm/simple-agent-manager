@@ -50,10 +50,15 @@ function buildEnv(overrides: Partial<Env> = {}): Env {
 /** Query a trigger execution row by ID. */
 async function getExecution(id: string) {
   const result = await env.DATABASE.prepare(
-    'SELECT id, status, error_message, completed_at FROM trigger_executions WHERE id = ?',
+    'SELECT id, status, error_message, completed_at FROM trigger_executions WHERE id = ?'
   )
     .bind(id)
-    .first<{ id: string; status: string; error_message: string | null; completed_at: string | null }>();
+    .first<{
+      id: string;
+      status: string;
+      error_message: string | null;
+      completed_at: string | null;
+    }>();
   return result;
 }
 
@@ -86,6 +91,7 @@ describe('trigger execution cleanup (vertical slice, real D1)', () => {
         staleRecovered: 0,
         staleQueuedRecovered: 0,
         retentionPurged: 0,
+        webhookDeliveriesPurged: 0,
         errors: 0,
       });
     });
@@ -282,6 +288,60 @@ describe('trigger execution cleanup (vertical slice, real D1)', () => {
   // Retention purge
   // -------------------------------------------------------------------------
   describe('retention purge', () => {
+    it('purges expired webhook delivery metadata without removing recent records', async () => {
+      await seedBaseData();
+      const now = new Date().toISOString();
+      await env.DATABASE.prepare(
+        `INSERT OR IGNORE INTO webhook_trigger_configs
+          (trigger_id, token_hash, token_last_four, token_created_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)`
+      )
+        .bind(TRIGGER_ID, 'cleanup-token-hash', 'hash', now, now, now)
+        .run();
+      await env.DATABASE.batch([
+        env.DATABASE.prepare(
+          `INSERT INTO webhook_deliveries
+            (id, trigger_id, request_fingerprint, outcome, http_status, body_bytes,
+             received_at, processed_at, expires_at)
+           VALUES (?, ?, ?, 'accepted', 202, 42, ?, ?, ?)`
+        ).bind(
+          'delivery-expired-001',
+          TRIGGER_ID,
+          'expired-fingerprint',
+          NINETY_ONE_DAYS_AGO,
+          NINETY_ONE_DAYS_AGO,
+          NINETY_ONE_DAYS_AGO
+        ),
+        env.DATABASE.prepare(
+          `INSERT INTO webhook_deliveries
+            (id, trigger_id, request_fingerprint, outcome, http_status, body_bytes,
+             received_at, processed_at, expires_at)
+           VALUES (?, ?, ?, 'accepted', 202, 42, ?, ?, ?)`
+        ).bind(
+          'delivery-recent-001',
+          TRIGGER_ID,
+          'recent-fingerprint',
+          now,
+          now,
+          new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString()
+        ),
+      ]);
+
+      const stats = await runTriggerExecutionCleanup(buildEnv());
+
+      expect(stats.webhookDeliveriesPurged).toBeGreaterThanOrEqual(1);
+      expect(
+        await env.DATABASE.prepare('SELECT id FROM webhook_deliveries WHERE id = ?')
+          .bind('delivery-expired-001')
+          .first()
+      ).toBeNull();
+      expect(
+        await env.DATABASE.prepare('SELECT id FROM webhook_deliveries WHERE id = ?')
+          .bind('delivery-recent-001')
+          .first()
+      ).not.toBeNull();
+    });
+
     it('purges old completed/failed/skipped executions by created_at', async () => {
       await seedBaseData();
 
@@ -372,7 +432,7 @@ describe('trigger execution cleanup (vertical slice, real D1)', () => {
 
       // Set retention to 7 days — the 10-day-old execution should be purged
       const stats = await runTriggerExecutionCleanup(
-        buildEnv({ TRIGGER_EXECUTION_LOG_RETENTION_DAYS: '7' }),
+        buildEnv({ TRIGGER_EXECUTION_LOG_RETENTION_DAYS: '7' })
       );
 
       expect(stats.retentionPurged).toBeGreaterThanOrEqual(1);

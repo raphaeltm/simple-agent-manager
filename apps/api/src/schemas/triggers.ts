@@ -1,8 +1,8 @@
-import * as v from 'valibot';
 import {
   DEFAULT_WEBHOOK_TRIGGER_MAX_HEADER_NAME_LENGTH,
   DEFAULT_WEBHOOK_TRIGGER_MAX_SOURCE_LABEL_LENGTH,
 } from '@simple-agent-manager/shared';
+import * as v from 'valibot';
 
 const TriggerSourceTypeSchema = v.picklist(['cron', 'webhook', 'github']);
 const TriggerStatusSchema = v.picklist(['active', 'paused', 'disabled']);

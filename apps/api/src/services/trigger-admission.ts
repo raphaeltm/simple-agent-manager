@@ -1,7 +1,7 @@
 import {
   DEFAULT_TRIGGER_AUTO_PAUSE_AFTER_FAILURES,
-  type TriggerSkipReason,
   type TriggeredBy,
+  type TriggerSkipReason,
 } from '@simple-agent-manager/shared';
 
 import type * as schema from '../db/schema';

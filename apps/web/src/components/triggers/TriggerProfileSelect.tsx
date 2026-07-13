@@ -1,4 +1,4 @@
-import { DEFAULT_AGENT_EFFORT, type AgentProfile } from '@simple-agent-manager/shared';
+import { type AgentProfile, DEFAULT_AGENT_EFFORT } from '@simple-agent-manager/shared';
 
 import { EFFORT_LABELS, FOCUS_RING } from './trigger-form-support';
 
