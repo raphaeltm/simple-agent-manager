@@ -354,6 +354,7 @@ describe('Trigger Routes', () => {
       );
 
       expect(res.status).toBe(201);
+      expect(res.headers.get('Cache-Control')).toBe('private, no-store');
       const json = await res.json();
       expect(json.webhookCredential).toMatchObject({
         endpointUrl: 'http://localhost/api/webhooks/ingest',

@@ -210,7 +210,8 @@ describe('ProjectTriggers', () => {
         expect(screen.getByText('Daily Sync')).toBeInTheDocument();
       });
 
-      await user.click(screen.getAllByRole('button', { name: /new trigger/i })[0]);
+      const newTriggerButton = screen.getAllByRole('button', { name: /new trigger/i })[0];
+      await user.click(newTriggerButton);
       await user.type(screen.getByLabelText(/^name$/i), 'SAM comment command');
       await user.click(screen.getByRole('button', { name: /github event/i }));
       await user.clear(screen.getByLabelText(/prompt template/i));
@@ -249,7 +250,8 @@ describe('ProjectTriggers', () => {
       renderTriggers();
       await screen.findByText('Daily Sync');
 
-      await user.click(screen.getAllByRole('button', { name: /new trigger/i })[0]);
+      const newTriggerButton = screen.getAllByRole('button', { name: /new trigger/i })[0];
+      await user.click(newTriggerButton);
       await user.type(screen.getByLabelText(/^name$/i), 'Deployment failures');
       await user.click(screen.getByRole('button', { name: /^webhook/i }));
       await user.selectOptions(screen.getByLabelText(/agent profile/i), 'profile-webhook');
@@ -299,11 +301,16 @@ describe('ProjectTriggers', () => {
       expect(screen.getByRole('button', { name: 'Done' })).toBeDisabled();
 
       await user.click(acknowledgment);
+      await user.tab();
+      expect(screen.getByRole('button', { name: 'Done' })).toHaveFocus();
+      await user.tab();
+      expect(screen.getByRole('button', { name: /copy endpoint/i })).toHaveFocus();
       await user.click(screen.getByRole('button', { name: 'Done' }));
       expect(
         screen.queryByRole('dialog', { name: /save your webhook credential/i })
       ).not.toBeInTheDocument();
       expect(screen.queryByText('sam_wh_one_time_test_token')).not.toBeInTheDocument();
+      expect(newTriggerButton).toHaveFocus();
     });
   });
 });

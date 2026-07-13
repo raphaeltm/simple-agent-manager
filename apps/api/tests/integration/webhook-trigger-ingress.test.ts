@@ -11,13 +11,17 @@ import {
   hashWebhookToken,
 } from '../../src/services/webhook-trigger-crypto';
 import {
+  createWebhookDelivery,
   findWebhookTriggerByToken,
+  listWebhookDeliveries,
+  purgeExpiredWebhookDeliveries,
   rotateWebhookToken,
 } from '../../src/services/webhook-trigger-store';
 import { createMemoryKv, createSqliteD1 } from '../helpers/sqlite-d1';
 
 const SCHEMA = `
 CREATE TABLE projects (id TEXT PRIMARY KEY, name TEXT NOT NULL);
+CREATE TABLE agent_profiles (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, name TEXT NOT NULL);
 CREATE TABLE triggers (
   id TEXT PRIMARY KEY, project_id TEXT NOT NULL, user_id TEXT NOT NULL, name TEXT NOT NULL,
   description TEXT, status TEXT NOT NULL DEFAULT 'active', source_type TEXT NOT NULL,
@@ -33,6 +37,9 @@ CREATE TABLE trigger_executions (
   skip_reason TEXT, task_id TEXT, event_type TEXT, rendered_prompt TEXT, error_message TEXT,
   scheduled_at TEXT, started_at TEXT, completed_at TEXT, sequence_number INTEGER,
   created_at TEXT NOT NULL
+);
+CREATE TABLE tasks (
+  id TEXT PRIMARY KEY, trigger_execution_id TEXT UNIQUE
 );
 CREATE TABLE webhook_trigger_configs (
   trigger_id TEXT PRIMARY KEY, token_hash TEXT NOT NULL UNIQUE, token_last_four TEXT NOT NULL,
@@ -102,6 +109,9 @@ describe('generic webhook ingress vertical slice', () => {
     sqlite
       .prepare('INSERT INTO projects (id, name) VALUES (?, ?)')
       .run('project-1', 'Delivery Project');
+    sqlite
+      .prepare('INSERT INTO agent_profiles (id, project_id, name) VALUES (?, ?, ?)')
+      .run('profile-1', 'project-1', 'Webhook Agent');
     sqlite
       .prepare(
         `INSERT INTO triggers
@@ -423,6 +433,75 @@ describe('generic webhook ingress vertical slice', () => {
     ]);
   });
 
+  it('does not consume an idempotency key while rate-limited', async () => {
+    env.WEBHOOK_TRIGGER_RATE_LIMIT_PER_MINUTE = '1';
+    sqlite
+      .prepare('UPDATE triggers SET skip_if_running = 0, max_concurrent = 2 WHERE id = ?')
+      .run(TRIGGER_ID);
+    const submitter = vi.fn<TriggerTaskSubmitter>(async (_env, input) => ({
+      taskId: `task-${input.triggerExecutionId}`,
+      sessionId: `session-${input.triggerExecutionId}`,
+      branchName: 'sam/rate-retry',
+    }));
+    const app = appWith(submitter);
+    const retryBody = { deployment: { id: 'dep-rate-retry' } };
+
+    expect(
+      (
+        await app.request(
+          deliveryRequest(token, { deployment: { id: 'dep-rate-seed' } }, 'rate-seed'),
+          undefined,
+          env
+        )
+      ).status
+    ).toBe(202);
+    expect(
+      (await app.request(deliveryRequest(token, retryBody, 'rate-retry'), undefined, env)).status
+    ).toBe(429);
+
+    env.KV = createMemoryKv();
+    const retried = await app.request(
+      deliveryRequest(token, retryBody, 'rate-retry'),
+      undefined,
+      env
+    );
+    expect(retried.status).toBe(202);
+    expect(await retried.json()).toMatchObject({ accepted: true });
+    expect(submitter).toHaveBeenCalledTimes(2);
+    expect(
+      sqlite
+        .prepare("SELECT COUNT(*) AS count FROM webhook_deliveries WHERE outcome = 'rate_limited'")
+        .get()
+    ).toEqual({ count: 1 });
+  });
+
+  it('does not consume an idempotency key while configuration is invalid', async () => {
+    sqlite.prepare('UPDATE triggers SET agent_profile_id = NULL WHERE id = ?').run(TRIGGER_ID);
+    const submitter = vi.fn<TriggerTaskSubmitter>(async (_env, input) => ({
+      taskId: `task-${input.triggerExecutionId}`,
+      sessionId: `session-${input.triggerExecutionId}`,
+      branchName: 'sam/config-retry',
+    }));
+    const app = appWith(submitter);
+    const request = () =>
+      deliveryRequest(token, { deployment: { id: 'dep-config-retry' } }, 'config-retry');
+
+    expect((await app.request(request(), undefined, env)).status).toBe(503);
+    sqlite
+      .prepare('UPDATE triggers SET agent_profile_id = ? WHERE id = ?')
+      .run('profile-1', TRIGGER_ID);
+    const retried = await app.request(request(), undefined, env);
+
+    expect(retried.status).toBe(202);
+    expect(await retried.json()).toMatchObject({ accepted: true });
+    expect(submitter).toHaveBeenCalledOnce();
+    expect(
+      rows<{ outcome: string }>(sqlite, 'SELECT outcome FROM webhook_deliveries').map(
+        (row) => row.outcome
+      )
+    ).toEqual(expect.arrayContaining(['configuration_error', 'accepted']));
+  });
+
   it('reserves one execution and records a monotonic skipped attempt under concurrency', async () => {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => {
@@ -555,6 +634,93 @@ describe('generic webhook ingress vertical slice', () => {
     ]);
   });
 
+  it('recovers the same key when processing fails after reservation but before submission', async () => {
+    const database = env.DATABASE;
+    let failLink = true;
+    env.DATABASE = {
+      ...database,
+      prepare: (sql: string) => {
+        if (failLink && sql.includes('UPDATE webhook_deliveries SET execution_id')) {
+          failLink = false;
+          throw new Error('D1 link unavailable');
+        }
+        return database.prepare(sql);
+      },
+    } as D1Database;
+    const submitter = vi.fn<TriggerTaskSubmitter>(async (_env, input) => ({
+      taskId: `task-${input.triggerExecutionId}`,
+      sessionId: `session-${input.triggerExecutionId}`,
+      branchName: 'sam/link-retry',
+    }));
+    const app = appWith(submitter);
+    const request = () =>
+      deliveryRequest(token, { deployment: { id: 'dep-link-retry' } }, 'link-retry');
+
+    expect((await app.request(request(), undefined, env)).status).toBe(503);
+    expect(submitter).not.toHaveBeenCalled();
+    const retried = await app.request(request(), undefined, env);
+
+    expect(retried.status).toBe(202);
+    expect(submitter).toHaveBeenCalledOnce();
+    expect(sqlite.prepare('SELECT outcome FROM webhook_deliveries').get()).toEqual({
+      outcome: 'accepted',
+    });
+  });
+
+  it('does not submit twice when delivery finalization fails after task submission', async () => {
+    const database = env.DATABASE;
+    let failFinalization = true;
+    env.DATABASE = {
+      ...database,
+      prepare: (sql: string) => {
+        if (
+          failFinalization &&
+          sql.includes('UPDATE webhook_deliveries') &&
+          sql.includes('SET outcome = ?')
+        ) {
+          failFinalization = false;
+          throw new Error('D1 finalization unavailable');
+        }
+        return database.prepare(sql);
+      },
+    } as D1Database;
+    const submitter = vi.fn<TriggerTaskSubmitter>(async (_env, input) => {
+      const taskId = `task-${input.triggerExecutionId}`;
+      sqlite
+        .prepare('INSERT INTO tasks (id, trigger_execution_id) VALUES (?, ?)')
+        .run(taskId, input.triggerExecutionId);
+      return {
+        taskId,
+        sessionId: `session-${input.triggerExecutionId}`,
+        branchName: 'sam/finalization-retry',
+      };
+    });
+    const app = appWith(submitter);
+    const request = () =>
+      deliveryRequest(
+        token,
+        { deployment: { id: 'dep-finalization-retry' } },
+        'finalization-retry'
+      );
+
+    expect((await app.request(request(), undefined, env)).status).toBe(503);
+    const retried = await app.request(request(), undefined, env);
+
+    expect(retried.status).toBe(202);
+    expect(await retried.json()).toMatchObject({
+      accepted: true,
+      duplicate: true,
+      executionId: expect.any(String),
+    });
+    expect(submitter).toHaveBeenCalledOnce();
+    expect(
+      sqlite.prepare('SELECT outcome, execution_id FROM webhook_deliveries').get()
+    ).toMatchObject({
+      outcome: 'processing',
+      execution_id: expect.any(String),
+    });
+  });
+
   it('does not retry a failed idempotency key with a different payload', async () => {
     const submitter = vi
       .fn<TriggerTaskSubmitter>()
@@ -579,6 +745,77 @@ describe('generic webhook ingress vertical slice', () => {
     expect(differentPayload.status).toBe(202);
     expect(await differentPayload.json()).toMatchObject({ accepted: true, duplicate: true });
     expect(submitter).toHaveBeenCalledOnce();
+  });
+
+  it('recovers an unsubmitted processing delivery after its lease expires', async () => {
+    env.WEBHOOK_DELIVERY_PROCESSING_LEASE_SECONDS = '1';
+    const original = await createWebhookDelivery(env, {
+      triggerId: TRIGGER_ID,
+      idempotencyKeyHash: 'lease-key',
+      requestFingerprint: 'lease-fingerprint',
+      bodyBytes: 12,
+      receivedAt: new Date(Date.now() - 5_000).toISOString(),
+    });
+    const recovered = await createWebhookDelivery(env, {
+      triggerId: TRIGGER_ID,
+      idempotencyKeyHash: 'lease-key',
+      requestFingerprint: 'lease-fingerprint',
+      bodyBytes: 12,
+      receivedAt: new Date().toISOString(),
+    });
+
+    expect(original).toMatchObject({ disposition: 'reserved', retry: false });
+    expect(recovered).toEqual({ disposition: 'reserved', id: original.id, retry: true });
+  });
+
+  it('uses a composite cursor so equal timestamps are never skipped', async () => {
+    const receivedAt = '2026-07-13T12:00:00.000Z';
+    const expiresAt = '2026-07-20T12:00:00.000Z';
+    for (const id of ['delivery-a', 'delivery-c', 'delivery-b']) {
+      sqlite
+        .prepare(
+          `INSERT INTO webhook_deliveries
+            (id, trigger_id, request_fingerprint, outcome, http_status, body_bytes,
+             received_at, processed_at, expires_at)
+           VALUES (?, ?, ?, 'accepted', 202, 10, ?, ?, ?)`
+        )
+        .run(id, TRIGGER_ID, id, receivedAt, receivedAt, expiresAt);
+    }
+
+    const first = await listWebhookDeliveries(env, TRIGGER_ID, undefined, 2);
+    const second = await listWebhookDeliveries(env, TRIGGER_ID, first.nextCursor ?? undefined, 2);
+
+    expect(first.deliveries.map((delivery) => delivery.id)).toEqual(['delivery-c', 'delivery-b']);
+    expect(second.deliveries.map((delivery) => delivery.id)).toEqual(['delivery-a']);
+    expect(second.nextCursor).toBeNull();
+  });
+
+  it('bounds expired delivery cleanup per pass', async () => {
+    env.WEBHOOK_DELIVERY_CLEANUP_BATCH_SIZE = '2';
+    for (const id of ['expired-a', 'expired-b', 'expired-c']) {
+      sqlite
+        .prepare(
+          `INSERT INTO webhook_deliveries
+            (id, trigger_id, request_fingerprint, outcome, http_status, body_bytes,
+             received_at, processed_at, expires_at)
+           VALUES (?, ?, ?, 'accepted', 202, 10, ?, ?, ?)`
+        )
+        .run(
+          id,
+          TRIGGER_ID,
+          id,
+          '2026-07-01T00:00:00.000Z',
+          '2026-07-01T00:00:00.000Z',
+          '2026-07-02T00:00:00.000Z'
+        );
+    }
+
+    expect(await purgeExpiredWebhookDeliveries(env)).toBe(2);
+    expect(
+      sqlite
+        .prepare("SELECT COUNT(*) AS count FROM webhook_deliveries WHERE id LIKE 'expired-%'")
+        .get()
+    ).toEqual({ count: 1 });
   });
 
   it('rotates keyed token material and invalidates the old credential immediately', async () => {

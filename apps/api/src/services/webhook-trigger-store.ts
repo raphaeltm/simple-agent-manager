@@ -5,7 +5,7 @@ import type {
   WebhookTriggerConfigInput,
   WebhookTriggerFilter,
 } from '@simple-agent-manager/shared';
-import { and, desc, eq, lt } from 'drizzle-orm';
+import { and, desc, eq, lt, or } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -104,6 +104,19 @@ export function webhookConfigValues(
   };
 }
 
+export function webhookConfigUpdateValues(
+  config: WebhookTriggerConfigInput,
+  updatedAt: string
+): Partial<schema.NewWebhookTriggerConfigRow> {
+  return {
+    sourceLabel: config.sourceLabel?.trim() || null,
+    filterMode: config.filterMode ?? 'all',
+    filtersJson: JSON.stringify(config.filters ?? []),
+    includedHeadersJson: JSON.stringify(normalizeIncludedHeaders(config.includedHeaders ?? [])),
+    updatedAt,
+  };
+}
+
 export async function findWebhookTriggerByToken(
   env: Env,
   rawToken: string
@@ -151,34 +164,6 @@ export async function rotateWebhookToken(
   return result.meta.changes ? token : null;
 }
 
-export async function updateWebhookConfig(
-  env: Env,
-  projectId: string,
-  triggerId: string,
-  config: WebhookTriggerConfigInput
-): Promise<boolean> {
-  const now = new Date().toISOString();
-  const result = await env.DATABASE.prepare(
-    `UPDATE webhook_trigger_configs
-       SET source_label = ?, filter_mode = ?, filters_json = ?,
-           included_headers_json = ?, updated_at = ?
-     WHERE trigger_id = ?
-       AND EXISTS (SELECT 1 FROM triggers WHERE id = ? AND project_id = ? AND source_type = 'webhook')`
-  )
-    .bind(
-      config.sourceLabel?.trim() || null,
-      config.filterMode ?? 'all',
-      JSON.stringify(config.filters ?? []),
-      JSON.stringify(normalizeIncludedHeaders(config.includedHeaders ?? [])),
-      now,
-      triggerId,
-      triggerId,
-      projectId
-    )
-    .run();
-  return Boolean(result.meta.changes);
-}
-
 export interface CreateWebhookDeliveryInput {
   triggerId: string;
   idempotencyKeyHash: string | null;
@@ -189,7 +174,84 @@ export interface CreateWebhookDeliveryInput {
 
 export type WebhookDeliveryReservation =
   | { disposition: 'reserved'; id: string; retry: boolean }
-  | { disposition: 'duplicate'; id: string };
+  | { disposition: 'duplicate'; id: string; executionId?: string }
+  | { disposition: 'in_flight'; id: string };
+
+async function reserveRetry(
+  env: Env,
+  input: CreateWebhookDeliveryInput,
+  id: string,
+  expiresAt: string,
+  expectedOutcome: string
+): Promise<boolean> {
+  const result = await env.DATABASE.prepare(
+    `UPDATE webhook_deliveries
+        SET outcome = 'processing', http_status = 0, body_bytes = ?, received_at = ?,
+            processed_at = NULL, expires_at = ?, execution_id = NULL, error_code = NULL
+      WHERE id = ? AND trigger_id = ? AND outcome = ? AND request_fingerprint = ?`
+  )
+    .bind(
+      input.bodyBytes,
+      input.receivedAt,
+      expiresAt,
+      id,
+      input.triggerId,
+      expectedOutcome,
+      input.requestFingerprint
+    )
+    .run();
+  return Boolean(result.meta.changes);
+}
+
+async function recoverStaleProcessingDelivery(
+  env: Env,
+  input: CreateWebhookDeliveryInput,
+  duplicate: { id: string; executionId: string | null; receivedAt: string },
+  expiresAt: string
+): Promise<boolean> {
+  const cutoff = Date.now() - getWebhookTriggerLimits(env).deliveryProcessingLeaseSeconds * 1000;
+  if (new Date(duplicate.receivedAt).getTime() > cutoff) return false;
+
+  const statements: D1PreparedStatement[] = [];
+  if (duplicate.executionId) {
+    const existingTask = await env.DATABASE.prepare(
+      'SELECT id FROM tasks WHERE trigger_execution_id = ? LIMIT 1'
+    )
+      .bind(duplicate.executionId)
+      .first<{ id: string }>();
+    if (existingTask) return false;
+    statements.push(
+      env.DATABASE.prepare(
+        `UPDATE trigger_executions
+            SET status = 'failed', error_message = 'Webhook delivery processing lease expired',
+                completed_at = ?
+          WHERE id = ? AND trigger_id = ? AND status = 'queued'
+            AND NOT EXISTS (SELECT 1 FROM tasks WHERE trigger_execution_id = ?)`
+      ).bind(input.receivedAt, duplicate.executionId, input.triggerId, duplicate.executionId)
+    );
+  }
+  statements.push(
+    env.DATABASE.prepare(
+      `UPDATE webhook_deliveries
+          SET body_bytes = ?, received_at = ?, expires_at = ?, execution_id = NULL,
+              processed_at = NULL, http_status = 0, error_code = NULL
+        WHERE id = ? AND trigger_id = ? AND outcome = 'processing'
+          AND request_fingerprint = ? AND received_at = ?
+          ${duplicate.executionId ? 'AND NOT EXISTS (SELECT 1 FROM tasks WHERE trigger_execution_id = ?)' : ''}`
+    ).bind(
+      input.bodyBytes,
+      input.receivedAt,
+      expiresAt,
+      duplicate.id,
+      input.triggerId,
+      input.requestFingerprint,
+      duplicate.receivedAt,
+      ...(duplicate.executionId ? [duplicate.executionId] : [])
+    )
+  );
+  const results = await env.DATABASE.batch(statements);
+  return Boolean(results.at(-1)?.meta.changes);
+}
 
 export async function createWebhookDelivery(
   env: Env,
@@ -221,28 +283,47 @@ export async function createWebhookDelivery(
   if (!input.idempotencyKeyHash) throw new Error('Webhook delivery persistence failed');
 
   const duplicate = await env.DATABASE.prepare(
-    `SELECT id, outcome, request_fingerprint
+    `SELECT id, outcome, request_fingerprint,
+            execution_id AS executionId, received_at AS receivedAt
        FROM webhook_deliveries
       WHERE trigger_id = ? AND idempotency_key_hash = ?`
   )
     .bind(input.triggerId, input.idempotencyKeyHash)
-    .first<{ id: string; outcome: string; request_fingerprint: string }>();
+    .first<{
+      id: string;
+      outcome: string;
+      request_fingerprint: string;
+      executionId: string | null;
+      receivedAt: string;
+    }>();
   if (!duplicate) throw new Error('Webhook delivery deduplication failed');
 
-  if (
-    duplicate.outcome === 'internal_error' &&
-    duplicate.request_fingerprint === input.requestFingerprint
-  ) {
-    const retry = await env.DATABASE.prepare(
-      `UPDATE webhook_deliveries
-          SET outcome = 'processing', http_status = 0, body_bytes = ?, received_at = ?,
-              processed_at = NULL, expires_at = ?, execution_id = NULL, error_code = NULL
-        WHERE id = ? AND trigger_id = ? AND outcome = 'internal_error'`
-    )
-      .bind(input.bodyBytes, input.receivedAt, expiresAt, duplicate.id, input.triggerId)
-      .run();
-    if (retry.meta.changes) {
+  if (duplicate.request_fingerprint === input.requestFingerprint) {
+    if (
+      duplicate.outcome === 'internal_error' &&
+      (await reserveRetry(env, input, duplicate.id, expiresAt, duplicate.outcome))
+    ) {
       return { disposition: 'reserved', id: duplicate.id, retry: true };
+    }
+    if (duplicate.outcome === 'processing') {
+      if (duplicate.executionId) {
+        const existingTask = await env.DATABASE.prepare(
+          'SELECT id FROM tasks WHERE trigger_execution_id = ? LIMIT 1'
+        )
+          .bind(duplicate.executionId)
+          .first<{ id: string }>();
+        if (existingTask) {
+          return {
+            disposition: 'duplicate',
+            id: duplicate.id,
+            executionId: duplicate.executionId,
+          };
+        }
+      }
+      if (await recoverStaleProcessingDelivery(env, input, duplicate, expiresAt)) {
+        return { disposition: 'reserved', id: duplicate.id, retry: true };
+      }
+      return { disposition: 'in_flight', id: duplicate.id };
     }
   }
 
@@ -280,7 +361,8 @@ export async function finishWebhookDelivery(
 ): Promise<void> {
   const result = await env.DATABASE.prepare(
     `UPDATE webhook_deliveries
-       SET outcome = ?, http_status = ?, execution_id = ?, error_code = ?, processed_at = ?
+       SET outcome = ?, http_status = ?, execution_id = COALESCE(?, execution_id),
+           error_code = ?, processed_at = ?
      WHERE id = ? AND trigger_id = ?`
   )
     .bind(
@@ -296,6 +378,87 @@ export async function finishWebhookDelivery(
   if (!result.meta.changes) throw new Error('Webhook delivery finalization failed');
 }
 
+export async function linkWebhookDeliveryExecution(
+  env: Env,
+  triggerId: string,
+  deliveryId: string,
+  executionId: string
+): Promise<void> {
+  const result = await env.DATABASE.prepare(
+    `UPDATE webhook_deliveries SET execution_id = ?
+      WHERE id = ? AND trigger_id = ? AND outcome = 'processing' AND execution_id IS NULL`
+  )
+    .bind(executionId, deliveryId, triggerId)
+    .run();
+  if (!result.meta.changes) throw new Error('Webhook delivery execution link failed');
+}
+
+export async function recordWebhookRejectedDelivery(
+  env: Env,
+  input: {
+    triggerId: string;
+    outcome: Extract<WebhookDeliveryOutcome, 'configuration_error' | 'rate_limited'>;
+    httpStatus: number;
+    errorCode: string;
+    windowStart: number;
+    receivedAt: string;
+  }
+): Promise<void> {
+  const limits = getWebhookTriggerLimits(env);
+  const expiresAt = new Date(
+    new Date(input.receivedAt).getTime() + limits.deliveryRetentionDays * 86_400_000
+  ).toISOString();
+  const id = `rejected:${input.triggerId}:${input.outcome}:${input.windowStart}`;
+  await env.DATABASE.prepare(
+    `INSERT OR IGNORE INTO webhook_deliveries
+      (id, trigger_id, idempotency_key_hash, request_fingerprint, outcome, http_status,
+       body_bytes, received_at, processed_at, expires_at, error_code)
+     VALUES (?, ?, NULL, ?, ?, ?, 0, ?, ?, ?, ?)`
+  )
+    .bind(
+      id,
+      input.triggerId,
+      input.outcome,
+      input.outcome,
+      input.httpStatus,
+      input.receivedAt,
+      input.receivedAt,
+      expiresAt,
+      input.errorCode
+    )
+    .run();
+}
+
+interface WebhookDeliveryCursor {
+  receivedAt: string;
+  id: string;
+}
+
+export class InvalidWebhookDeliveryCursorError extends Error {
+  constructor() {
+    super('Invalid webhook delivery cursor');
+    this.name = 'InvalidWebhookDeliveryCursorError';
+  }
+}
+
+function encodeDeliveryCursor(cursor: WebhookDeliveryCursor): string {
+  return btoa(JSON.stringify(cursor)).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
+}
+
+function decodeDeliveryCursor(value: string): WebhookDeliveryCursor | null {
+  try {
+    const base64 = value.replaceAll('-', '+').replaceAll('_', '/');
+    const parsed: unknown = JSON.parse(atob(base64));
+    if (!parsed || typeof parsed !== 'object') return null;
+    const record = parsed as Record<string, unknown>;
+    return typeof record.receivedAt === 'string' && typeof record.id === 'string'
+      ? { receivedAt: record.receivedAt, id: record.id }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function listWebhookDeliveries(
   env: Env,
   triggerId: string,
@@ -303,18 +466,26 @@ export async function listWebhookDeliveries(
   limit: number
 ): Promise<ListWebhookDeliveriesResponse> {
   const db = drizzle(env.DATABASE, { schema });
+  const decodedCursor = cursor ? decodeDeliveryCursor(cursor) : null;
+  if (cursor && !decodedCursor) throw new InvalidWebhookDeliveryCursorError();
   const rows = await db
     .select()
     .from(schema.webhookDeliveries)
     .where(
-      cursor
+      decodedCursor
         ? and(
             eq(schema.webhookDeliveries.triggerId, triggerId),
-            lt(schema.webhookDeliveries.receivedAt, cursor)
+            or(
+              lt(schema.webhookDeliveries.receivedAt, decodedCursor.receivedAt),
+              and(
+                eq(schema.webhookDeliveries.receivedAt, decodedCursor.receivedAt),
+                lt(schema.webhookDeliveries.id, decodedCursor.id)
+              )
+            )
           )
         : eq(schema.webhookDeliveries.triggerId, triggerId)
     )
-    .orderBy(desc(schema.webhookDeliveries.receivedAt))
+    .orderBy(desc(schema.webhookDeliveries.receivedAt), desc(schema.webhookDeliveries.id))
     .limit(limit + 1);
   const hasMore = rows.length > limit;
   const page = rows.slice(0, limit);
@@ -330,14 +501,23 @@ export async function listWebhookDeliveries(
       receivedAt: row.receivedAt,
       processedAt: row.processedAt,
     })),
-    nextCursor: hasMore ? (page.at(-1)?.receivedAt ?? null) : null,
+    nextCursor: hasMore
+      ? (() => {
+          const last = page.at(-1);
+          return last ? encodeDeliveryCursor({ receivedAt: last.receivedAt, id: last.id }) : null;
+        })()
+      : null,
   };
 }
 
 export async function purgeExpiredWebhookDeliveries(env: Env): Promise<number> {
-  const db = drizzle(env.DATABASE, { schema });
-  const result = await db
-    .delete(schema.webhookDeliveries)
-    .where(lt(schema.webhookDeliveries.expiresAt, new Date().toISOString()));
-  return Number((result as { meta?: { changes?: number } }).meta?.changes ?? 0);
+  const result = await env.DATABASE.prepare(
+    `DELETE FROM webhook_deliveries WHERE id IN (
+       SELECT id FROM webhook_deliveries WHERE expires_at < ?
+       ORDER BY expires_at, id LIMIT ?
+     )`
+  )
+    .bind(new Date().toISOString(), getWebhookTriggerLimits(env).deliveryCleanupBatchSize)
+    .run();
+  return Number(result.meta.changes ?? 0);
 }

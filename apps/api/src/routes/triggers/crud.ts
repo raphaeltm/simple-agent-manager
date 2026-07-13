@@ -42,7 +42,7 @@ import {
   createWebhookTokenMaterial,
   mergeWebhookConfig,
   toWebhookTriggerConfig,
-  updateWebhookConfig,
+  webhookConfigUpdateValues,
   webhookConfigValues,
 } from '../../services/webhook-trigger-store';
 import { requireProjectTaskRead, requireProjectTaskWrite } from '../task-project-auth';
@@ -304,6 +304,7 @@ crudRoutes.post('/', jsonValidator(CreateTriggerSchema), async (c) => {
       : undefined,
   };
   log.info('trigger.created', { triggerId: id, projectId, sourceType: body.sourceType });
+  if (webhookToken) c.header('Cache-Control', 'private, no-store');
   return c.json(response, 201);
 });
 
@@ -395,7 +396,8 @@ crudRoutes.patch('/:triggerId', jsonValidator(UpdateTriggerSchema), async (c) =>
     throw errors.badRequest('agentProfileId is required for webhook triggers');
   }
   await validateReferences(db, projectId, body.agentProfileId, body.skillId);
-  const updates: Partial<schema.NewTriggerRow> = { updatedAt: new Date().toISOString() };
+  const now = new Date().toISOString();
+  const updates: Partial<schema.NewTriggerRow> = { updatedAt: now };
   if (body.name !== undefined) {
     const name = body.name.trim();
     if (
@@ -408,15 +410,31 @@ crudRoutes.patch('/:triggerId', jsonValidator(UpdateTriggerSchema), async (c) =>
   }
   if (body.description !== undefined) updates.description = body.description?.trim() || null;
   if (body.promptTemplate !== undefined) {
-    if (!body.promptTemplate.trim()) throw errors.badRequest('promptTemplate cannot be empty');
-    updates.promptTemplate = body.promptTemplate;
+    const promptTemplate = body.promptTemplate.trim();
+    if (!promptTemplate) throw errors.badRequest('promptTemplate cannot be empty');
+    if (
+      promptTemplate.length >
+      parsePositiveInt(c.env.CRON_TEMPLATE_MAX_LENGTH, DEFAULT_CRON_TEMPLATE_MAX_LENGTH)
+    ) {
+      throw errors.badRequest('promptTemplate is too long');
+    }
+    updates.promptTemplate = promptTemplate;
   }
   if (body.skipIfRunning !== undefined) updates.skipIfRunning = body.skipIfRunning;
   if (body.agentProfileId !== undefined) updates.agentProfileId = body.agentProfileId;
   if (body.skillId !== undefined) updates.skillId = body.skillId;
   if (body.taskMode !== undefined) updates.taskMode = body.taskMode;
   if (body.vmSizeOverride !== undefined) updates.vmSizeOverride = body.vmSizeOverride;
-  if (body.maxConcurrent !== undefined) updates.maxConcurrent = body.maxConcurrent;
+  if (body.maxConcurrent !== undefined) {
+    const maxConcurrentLimit = parsePositiveInt(
+      c.env.TRIGGER_MAX_CONCURRENT_LIMIT,
+      DEFAULT_TRIGGER_MAX_CONCURRENT_LIMIT
+    );
+    if (body.maxConcurrent < 1 || body.maxConcurrent > maxConcurrentLimit) {
+      throw errors.badRequest(`maxConcurrent must be between 1 and ${maxConcurrentLimit}`);
+    }
+    updates.maxConcurrent = body.maxConcurrent;
+  }
   if (body.cronExpression !== undefined || body.cronTimezone !== undefined) {
     const expression = body.cronExpression ?? trigger.cronExpression ?? undefined;
     const timezone = body.cronTimezone ?? trigger.cronTimezone ?? 'UTC';
@@ -434,10 +452,7 @@ crudRoutes.patch('/:triggerId', jsonValidator(UpdateTriggerSchema), async (c) =>
       updates.nextFireAt = cronToNextFire(trigger.cronExpression, trigger.cronTimezone ?? 'UTC');
     }
   }
-  await db
-    .update(schema.triggers)
-    .set(updates)
-    .where(and(eq(schema.triggers.id, triggerId), eq(schema.triggers.projectId, projectId)));
+  let effectiveWebhookConfig: ReturnType<typeof mergeWebhookConfig> | undefined;
   if (body.webhookConfig) {
     const current = await db
       .select()
@@ -445,15 +460,30 @@ crudRoutes.patch('/:triggerId', jsonValidator(UpdateTriggerSchema), async (c) =>
       .where(eq(schema.webhookTriggerConfigs.triggerId, triggerId))
       .get();
     if (!current) throw errors.notFound('Webhook trigger');
-    const effectiveConfig = mergeWebhookConfig(toWebhookTriggerConfig(current), body.webhookConfig);
+    effectiveWebhookConfig = mergeWebhookConfig(
+      toWebhookTriggerConfig(current),
+      body.webhookConfig
+    );
     const configError = validateWebhookTriggerConfig(
-      effectiveConfig,
+      effectiveWebhookConfig,
       getWebhookTriggerLimits(c.env)
     );
     if (configError) throw errors.badRequest(configError);
-    if (!(await updateWebhookConfig(c.env, projectId, triggerId, effectiveConfig))) {
-      throw errors.notFound('Webhook trigger');
-    }
+  }
+  const triggerUpdate = db
+    .update(schema.triggers)
+    .set(updates)
+    .where(and(eq(schema.triggers.id, triggerId), eq(schema.triggers.projectId, projectId)));
+  if (effectiveWebhookConfig) {
+    await db.batch([
+      triggerUpdate,
+      db
+        .update(schema.webhookTriggerConfigs)
+        .set(webhookConfigUpdateValues(effectiveWebhookConfig, now))
+        .where(eq(schema.webhookTriggerConfigs.triggerId, triggerId)),
+    ]);
+  } else {
+    await triggerUpdate;
   }
   const updated = await db
     .select()

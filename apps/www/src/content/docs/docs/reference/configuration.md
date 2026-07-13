@@ -134,21 +134,30 @@ SAM loads OpenCode Zen and OpenCode Go model choices through the authenticated m
 
 ## Generic Webhook Triggers
 
-| Variable                                      | Default | Description                                                  |
-| --------------------------------------------- | ------- | ------------------------------------------------------------ |
-| `WEBHOOK_TRIGGERS_ENABLED`                    | `true`  | Public generic webhook ingress kill switch                   |
-| `WEBHOOK_TRIGGER_MAX_BODY_BYTES`              | `65536` | Maximum JSON request body size                               |
-| `WEBHOOK_TRIGGER_MAX_FILTERS`                 | `10`    | Maximum deterministic filters per trigger                    |
-| `WEBHOOK_TRIGGER_MAX_FILTER_PATH_LENGTH`      | `200`   | Maximum configured filter dot-path length                    |
-| `WEBHOOK_TRIGGER_MAX_FILTER_PATH_DEPTH`       | `8`     | Maximum filter nesting depth at evaluation time              |
-| `WEBHOOK_TRIGGER_MAX_INCLUDED_HEADERS`        | `10`    | Maximum safe request headers copied into template context    |
-| `WEBHOOK_TRIGGER_MAX_IDEMPOTENCY_KEY_LENGTH`  | `200`   | Maximum accepted `Idempotency-Key` length                    |
-| `WEBHOOK_TRIGGER_RATE_LIMIT_PER_MINUTE`       | `60`    | Per-trigger accepted request limit in each configured window |
-| `WEBHOOK_INVALID_TOKEN_RATE_LIMIT_PER_MINUTE` | `30`    | Invalid-token request limit per client IP/window             |
-| `WEBHOOK_RATE_LIMIT_WINDOW_SECONDS`           | `60`    | Fixed rate-limit window length                               |
-| `WEBHOOK_DELIVERY_RETENTION_DAYS`             | `7`     | Retention for redacted delivery audit metadata               |
+| Variable                                      | Default | Description                                                 |
+| --------------------------------------------- | ------- | ----------------------------------------------------------- |
+| `WEBHOOK_TRIGGERS_ENABLED`                    | `true`  | Public generic webhook ingress kill switch                  |
+| `WEBHOOK_TRIGGER_MAX_BODY_BYTES`              | `65536` | Maximum JSON request body size                              |
+| `WEBHOOK_TRIGGER_MAX_FILTERS`                 | `10`    | Maximum deterministic filters per trigger                   |
+| `WEBHOOK_TRIGGER_MAX_FILTER_PATH_LENGTH`      | `200`   | Maximum configured filter dot-path length                   |
+| `WEBHOOK_TRIGGER_MAX_FILTER_PATH_DEPTH`       | `8`     | Maximum filter nesting depth at evaluation time             |
+| `WEBHOOK_TRIGGER_MAX_INCLUDED_HEADERS`        | `10`    | Maximum safe request headers copied into template context   |
+| `WEBHOOK_TRIGGER_MAX_HEADER_NAME_LENGTH`      | `100`   | Maximum configured included-header name length              |
+| `WEBHOOK_TRIGGER_MAX_SOURCE_LABEL_LENGTH`     | `100`   | Maximum optional source label length                        |
+| `WEBHOOK_TRIGGER_MAX_IDEMPOTENCY_KEY_LENGTH`  | `200`   | Maximum accepted `Idempotency-Key` length                   |
+| `WEBHOOK_INGRESS_RATE_LIMIT_PER_MINUTE`       | `120`   | Best-effort pre-auth request damping per client IP/window   |
+| `WEBHOOK_TRIGGER_RATE_LIMIT_PER_MINUTE`       | `60`    | Best-effort request damping per trigger/window              |
+| `WEBHOOK_INVALID_TOKEN_RATE_LIMIT_PER_MINUTE` | `30`    | Best-effort invalid-token damping per client IP/window      |
+| `WEBHOOK_RATE_LIMIT_WINDOW_SECONDS`           | `60`    | Fixed rate-limit window length                              |
+| `WEBHOOK_DELIVERY_RETENTION_DAYS`             | `7`     | Retention for redacted delivery audit metadata              |
+| `WEBHOOK_DELIVERY_CLEANUP_BATCH_SIZE`         | `500`   | Maximum expired audit rows deleted per cleanup pass         |
+| `WEBHOOK_DELIVERY_DEFAULT_PAGE_SIZE`          | `25`    | Default delivery-history page size                          |
+| `WEBHOOK_DELIVERY_MAX_PAGE_SIZE`              | `100`   | Maximum delivery-history page size                          |
+| `WEBHOOK_DELIVERY_PROCESSING_LEASE_SECONDS`   | `300`   | Lease before an unsubmitted processing delivery can recover |
 
 Webhook tokens use the existing `ENCRYPTION_KEY` as keyed-hash material and do not require a separate deployment secret. See [Webhook Triggers](/docs/guides/webhook-triggers/) for request, credential, filtering, and audit behavior.
+
+Webhook damping uses Cloudflare KV's eventually consistent read-update-write behavior. It reduces accidental bursts and abuse but is not a strict distributed quota.
 
 ## ACP Session Lifecycle
 

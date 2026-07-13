@@ -46,7 +46,7 @@ CREATE TABLE webhook_deliveries (
 );
 
 CREATE INDEX idx_webhook_deliveries_trigger_received
-  ON webhook_deliveries(trigger_id, received_at DESC);
+  ON webhook_deliveries(trigger_id, received_at DESC, id DESC);
 
 CREATE UNIQUE INDEX idx_webhook_deliveries_trigger_idempotency
   ON webhook_deliveries(trigger_id, idempotency_key_hash)

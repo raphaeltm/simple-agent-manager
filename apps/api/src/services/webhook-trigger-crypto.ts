@@ -1,5 +1,7 @@
 const TOKEN_PREFIX = 'sam_wh_';
 const TOKEN_BYTES = 32;
+const TOKEN_VALUE_LENGTH = 43;
+const TOKEN_PATTERN = new RegExp(`^${TOKEN_PREFIX}[A-Za-z0-9_-]{${TOKEN_VALUE_LENGTH}}$`);
 
 type WebhookHashDomain = 'token' | 'idempotency' | 'request';
 
@@ -22,8 +24,8 @@ async function hmac(value: string, secret: string, domain: WebhookHashDomain): P
   return [...new Uint8Array(signature)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
-export function hasWebhookTokenPrefix(token: string): boolean {
-  return token.startsWith(TOKEN_PREFIX);
+export function isWebhookTokenFormat(token: string): boolean {
+  return TOKEN_PATTERN.test(token);
 }
 
 export function generateWebhookToken(): string {

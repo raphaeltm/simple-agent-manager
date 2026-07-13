@@ -2,7 +2,7 @@
 
 ## Status and delivery constraint
 
-- Status: backlog until the implementation branch is created, then active.
+- Status: active on `sam/lets-explore-take-enable-24rm29`; local implementation and hardening gates are green, with specialist re-review and staging verification pending.
 - Delivery: open a draft pull request and stop. Do not mark ready or merge without a later explicit instruction from Raphaël.
 - SAM design record: idea `01KXE21NN5F6QZA42ZB591B4T0`.
 
@@ -175,8 +175,8 @@ Use D1 batch/conditional statements for atomic create/config, rotation, delivery
 - `pnpm typecheck`: 16/16 tasks passed.
 - `pnpm test`: 19/19 tasks passed; API 409 files / 5,945 tests and web 218 files / 2,671 tests passed.
 - `pnpm build`: 9/9 tasks passed, including the public webhook guide.
-- Webhook SQLite vertical slice: 13/13 passed, including public-envelope limits, authenticated submission, filtering, deduplication, paused/rate-limited outcomes, both concurrency policies, durable persistence failure, retryable submission failure/same-key retry, configuration error, and rotation.
-- Trigger-focused API tests: 63 passed. Trigger-focused web tests: 14 passed. Real-D1 scheduled cleanup coverage passed.
+- Webhook SQLite ingress vertical slice: 20/20 passed, including public-envelope limits, authenticated submission, filtering, pre-admission rate/config recovery with the same idempotency key, deduplication, both concurrency policies, pre-submit retry, post-submit finalization recovery without duplicate dispatch, stale processing-lease recovery, composite delivery cursors, and bounded cleanup.
+- Webhook management/config/action API focus: 31/31 passed, including atomic invalid/valid PATCH behavior, mounted preview, source-accurate action context, one-time credential cache prevention, rotation, equal-timestamp pagination, and invalid cursors. Web focus: 10/10 passed, including creation/rotation focus trapping and opener restoration.
 - Playwright audit: 26 applicable cases passed at 375x667 and 1280x800; 26 cross-project cases intentionally skipped. Screenshots cover webhook credential create/rotation, preview/filter results, all delivery outcomes, empty history, long/special text, and pagination with overflow assertions.
 - UI rubric: visual hierarchy 5/5, interaction clarity 5/5, mobile quality 5/5, accessibility 4/5, consistency 5/5 (24/25). The one-point accessibility reserve reflects automated/behavioral coverage without a dedicated assistive-technology staging pass yet.
 - `quality:wrangler-bindings`, `quality:ast-checks`, `quality:file-sizes`, `quality:migration-safety`, `quality:do-migration-safety`, `quality:source-contract-tests`, and `quality:observability-noise`: passed (external observability queries skipped where credentials were unavailable; local noise checks passed).

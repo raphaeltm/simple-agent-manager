@@ -6,12 +6,23 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 interface WebhookCredentialDialogProps {
   credential: WebhookCredential;
   onClose: () => void;
+  returnFocusTarget?: HTMLElement | null;
 }
 
-export function WebhookCredentialDialog({ credential, onClose }: WebhookCredentialDialogProps) {
+const FOCUSABLE =
+  'button:not([disabled]), input:not([disabled]), [href], select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+export function WebhookCredentialDialog({
+  credential,
+  onClose,
+  returnFocusTarget,
+}: WebhookCredentialDialogProps) {
   const [acknowledged, setAcknowledged] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
+  const [copyError, setCopyError] = useState(false);
   const acknowledgmentRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
   const curl = useMemo(
     () =>
       [
@@ -25,13 +36,48 @@ export function WebhookCredentialDialog({ credential, onClose }: WebhookCredenti
   );
 
   useEffect(() => {
+    returnFocusRef.current =
+      returnFocusTarget ??
+      (document.activeElement instanceof HTMLElement ? document.activeElement : null);
     acknowledgmentRef.current?.focus();
-  }, []);
+    return () => returnFocusRef.current?.focus();
+  }, [returnFocusTarget]);
 
   const copy = async (label: string, value: string) => {
-    await navigator.clipboard.writeText(value);
-    setCopied(label);
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(label);
+      setCopyError(false);
+    } catch {
+      setCopyError(true);
+    }
   };
+
+  useEffect(() => {
+    const trapFocus = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && acknowledged) {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const focusable = Array.from(
+        dialogRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? []
+      );
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable.at(-1);
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last?.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first?.focus();
+      }
+    };
+    document.addEventListener('keydown', trapFocus);
+    return () => document.removeEventListener('keydown', trapFocus);
+  }, [acknowledged, onClose]);
 
   return (
     <>
@@ -40,6 +86,7 @@ export function WebhookCredentialDialog({ credential, onClose }: WebhookCredenti
         aria-hidden="true"
       />
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="webhook-credential-title"
@@ -113,6 +160,13 @@ export function WebhookCredentialDialog({ credential, onClose }: WebhookCredenti
             Done
           </Button>
         </div>
+        <p className="sr-only" role="status" aria-live="polite">
+          {copyError
+            ? 'Copy failed. Select and copy the value manually.'
+            : copied
+              ? `${copied} copied.`
+              : ''}
+        </p>
       </div>
     </>
   );

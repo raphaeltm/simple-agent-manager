@@ -19,6 +19,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { buildGitHubContext } from './github-trigger-context';
 import {
   evaluateFilters,
   type GitHubWebhookEvent,
@@ -305,57 +306,6 @@ async function processTriggersForProject(
   }
 
   return matched;
-}
-
-/** Build the template context for a GitHub event. */
-function buildGitHubContext(
-  event: GitHubWebhookEvent,
-  trigger: schema.TriggerRow,
-  project: { id: string; name: string },
-  executionId: string,
-  sequenceNumber: number
-): Record<string, unknown> {
-  const labels = [...(event.issue?.labels ?? []), ...(event.pull_request?.labels ?? [])].map(
-    (l) => l.name
-  );
-
-  // Extract branch for push/PR events
-  let branch = '';
-  if (event.event === 'push' && event.ref) {
-    branch = event.ref.replace(/^refs\/heads\//, '');
-  } else if (event.pull_request?.head?.ref) {
-    branch = event.pull_request.head.ref;
-  }
-
-  return {
-    github: {
-      event: event.event,
-      action: event.action ?? '',
-      actor: event.sender?.login ?? '',
-      repository: event.repository?.full_name ?? '',
-      number: String(event.issue?.number ?? event.pull_request?.number ?? ''),
-      title: event.issue?.title ?? event.pull_request?.title ?? '',
-      body: event.issue?.body ?? event.pull_request?.body ?? '',
-      comment: event.comment?.body ?? '',
-      labels: labels.join(', '),
-      branch,
-      sha: event.head_commit?.id ?? '',
-    },
-    trigger: {
-      id: trigger.id,
-      name: trigger.name,
-      description: trigger.description ?? '',
-      fireCount: String((trigger.triggerCount ?? 0) + 1),
-    },
-    project: {
-      id: project.id,
-      name: project.name,
-    },
-    execution: {
-      id: executionId,
-      sequenceNumber: String(sequenceNumber),
-    },
-  };
 }
 
 /** Update the initial delivery record with final decision details. */

@@ -6,7 +6,7 @@ import {
   getWebhookTokenLastFour,
   hashWebhookIdempotencyKey,
   hashWebhookToken,
-  hasWebhookTokenPrefix,
+  isWebhookTokenFormat,
 } from '../../../src/services/webhook-trigger-crypto';
 
 describe('webhook trigger credentials', () => {
@@ -15,7 +15,10 @@ describe('webhook trigger credentials', () => {
     const second = generateWebhookToken();
     expect(first).toMatch(/^sam_wh_[A-Za-z0-9_-]{43}$/);
     expect(second).not.toBe(first);
-    expect(hasWebhookTokenPrefix(first)).toBe(true);
+    expect(isWebhookTokenFormat(first)).toBe(true);
+    expect(isWebhookTokenFormat('sam_wh_short')).toBe(false);
+    expect(isWebhookTokenFormat(`wrong_${first.slice(7)}`)).toBe(false);
+    expect(isWebhookTokenFormat(`${first}!`)).toBe(false);
     expect(getWebhookTokenLastFour(first)).toBe(first.slice(-4));
   });
 

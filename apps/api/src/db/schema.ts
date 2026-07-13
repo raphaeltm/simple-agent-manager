@@ -1926,7 +1926,8 @@ export const webhookDeliveries = sqliteTable(
   (table) => ({
     triggerReceivedIdx: index('idx_webhook_deliveries_trigger_received').on(
       table.triggerId,
-      table.receivedAt
+      table.receivedAt,
+      table.id
     ),
     idempotencyUnique: uniqueIndex('idx_webhook_deliveries_trigger_idempotency')
       .on(table.triggerId, table.idempotencyKeyHash)

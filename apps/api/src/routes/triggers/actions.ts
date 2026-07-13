@@ -11,9 +11,12 @@ import { expectJsonRecord } from '../../lib/runtime-validation';
 import { ulid } from '../../lib/ulid';
 import { getAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
+import {
+  buildTriggerActionContext,
+  type TriggerActionSourceConfig,
+} from '../../services/trigger-action-context';
 import { admitAndSubmitTriggerExecution } from '../../services/trigger-admission';
-import { buildCronContext, renderTemplate } from '../../services/trigger-template';
-import { buildWebhookContext, selectWebhookHeaders } from '../../services/webhook-trigger-payload';
+import { renderTemplate } from '../../services/trigger-template';
 import { toWebhookTriggerConfig } from '../../services/webhook-trigger-store';
 import { requireProjectTaskRead, requireProjectTaskWrite } from '../task-project-auth';
 
@@ -33,6 +36,31 @@ async function loadTrigger(
   return trigger;
 }
 
+async function loadSourceConfig(
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  trigger: schema.TriggerRow
+): Promise<TriggerActionSourceConfig> {
+  if (trigger.sourceType === 'webhook') {
+    const row = await db
+      .select()
+      .from(schema.webhookTriggerConfigs)
+      .where(eq(schema.webhookTriggerConfigs.triggerId, trigger.id))
+      .get();
+    if (!row) throw errors.notFound('Webhook trigger');
+    return { sourceType: 'webhook', config: toWebhookTriggerConfig(row) };
+  }
+  if (trigger.sourceType === 'github') {
+    const row = await db
+      .select({ eventType: schema.githubTriggerConfigs.eventType })
+      .from(schema.githubTriggerConfigs)
+      .where(eq(schema.githubTriggerConfigs.triggerId, trigger.id))
+      .get();
+    if (!row) throw errors.notFound('GitHub trigger');
+    return { sourceType: 'github', eventType: row.eventType };
+  }
+  return { sourceType: 'cron' };
+}
+
 actionRoutes.post('/:triggerId/test', async (c) => {
   const projectId = requireRouteParam(c, 'projectId');
   const triggerId = requireRouteParam(c, 'triggerId');
@@ -40,20 +68,14 @@ actionRoutes.post('/:triggerId/test', async (c) => {
   const project = await requireProjectTaskRead(db, projectId, getAuth(c).user.id);
   const trigger = await loadTrigger(db, projectId, triggerId);
   const now = new Date();
-  const context = buildCronContext(
-    {
-      id: trigger.id,
-      name: trigger.name,
-      description: trigger.description,
-      triggerCount: trigger.triggerCount,
-      cronTimezone: trigger.cronTimezone ?? 'UTC',
-      projectId: trigger.projectId,
-    },
+  const context = buildTriggerActionContext({
+    trigger,
+    project,
+    source: await loadSourceConfig(db, trigger),
     now,
-    project.name,
-    ulid(),
-    trigger.nextExecutionSequence
-  );
+    executionId: ulid(),
+    sequenceNumber: trigger.nextExecutionSequence,
+  });
   const result = renderTemplate(
     trigger.promptTemplate,
     expectJsonRecord(context, 'trigger.template_context')
@@ -72,15 +94,7 @@ actionRoutes.post('/:triggerId/run', async (c) => {
     input && typeof input === 'object' && !Array.isArray(input)
       ? (input as { payload?: Record<string, unknown>; headers?: Record<string, string> })
       : {};
-  const configRow =
-    trigger.sourceType === 'webhook'
-      ? await db
-          .select()
-          .from(schema.webhookTriggerConfigs)
-          .where(eq(schema.webhookTriggerConfigs.triggerId, trigger.id))
-          .get()
-      : null;
-  const config = configRow ? toWebhookTriggerConfig(configRow) : null;
+  const source = await loadSourceConfig(db, trigger);
   const now = new Date();
   const admission = await admitAndSubmitTriggerExecution(c.env, {
     trigger,
@@ -88,32 +102,15 @@ actionRoutes.post('/:triggerId/run', async (c) => {
     triggeredBy: 'user',
     allowPaused: true,
     renderPrompt: (executionId, sequenceNumber) => {
-      const context = config
-        ? buildWebhookContext({
-            body: preview.payload ?? {},
-            headers: selectWebhookHeaders(preview.headers ?? {}, config.includedHeaders),
-            receivedAt: now.toISOString(),
-            deliveryId: 'manual',
-            sourceLabel: config.sourceLabel,
-            trigger,
-            projectName: project.name,
-            executionId,
-            sequenceNumber,
-          })
-        : buildCronContext(
-            {
-              id: trigger.id,
-              name: trigger.name,
-              description: trigger.description,
-              projectId: trigger.projectId,
-              cronTimezone: trigger.cronTimezone ?? 'UTC',
-              triggerCount: trigger.triggerCount,
-            },
-            now,
-            project.name,
-            executionId,
-            sequenceNumber
-          );
+      const context = buildTriggerActionContext({
+        trigger,
+        project,
+        source,
+        now,
+        executionId,
+        sequenceNumber,
+        preview,
+      });
       return renderTemplate(trigger.promptTemplate, context as unknown as Record<string, unknown>)
         .rendered;
     },

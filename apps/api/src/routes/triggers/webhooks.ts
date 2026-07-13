@@ -18,6 +18,7 @@ import {
   selectWebhookHeaders,
 } from '../../services/webhook-trigger-payload';
 import {
+  InvalidWebhookDeliveryCursorError,
   listWebhookDeliveries,
   rotateWebhookToken,
   toWebhookTriggerConfig,
@@ -61,6 +62,7 @@ webhookRoutes.post('/:triggerId/webhook/rotate', async (c) => {
   await requireProjectTaskWrite(db, projectId, getAuth(c).user.id);
   const token = await rotateWebhookToken(c.env, projectId, triggerId);
   if (!token) throw errors.notFound('Webhook trigger');
+  c.header('Cache-Control', 'private, no-store');
   return c.json({ webhookCredential: credential(c.req.url, token.token) });
 });
 
@@ -70,8 +72,19 @@ webhookRoutes.get('/:triggerId/webhook/deliveries', async (c) => {
   const db = drizzle(c.env.DATABASE, { schema });
   await requireProjectTaskRead(db, projectId, getAuth(c).user.id);
   await loadWebhookTrigger(c.env, projectId, triggerId);
-  const limit = Math.min(parsePositiveInt(c.req.query('limit'), 25), 100);
-  return c.json(await listWebhookDeliveries(c.env, triggerId, c.req.query('cursor'), limit));
+  const limits = getWebhookTriggerLimits(c.env);
+  const limit = Math.min(
+    parsePositiveInt(c.req.query('limit'), limits.deliveryDefaultPageSize),
+    limits.deliveryMaxPageSize
+  );
+  try {
+    return c.json(await listWebhookDeliveries(c.env, triggerId, c.req.query('cursor'), limit));
+  } catch (error) {
+    if (error instanceof InvalidWebhookDeliveryCursorError) {
+      throw errors.badRequest(error.message);
+    }
+    throw error;
+  }
 });
 
 webhookRoutes.post(

@@ -34,6 +34,8 @@ export interface TriggerAdmissionInput {
   scheduledAt?: string;
   allowPaused?: boolean;
   renderPrompt: (executionId: string, sequenceNumber: number) => string;
+  /** Durable hook used to link source admission state before external submission begins. */
+  beforeSubmit?: (executionId: string) => Promise<void>;
 }
 
 async function consecutiveFailureCount(
@@ -191,6 +193,8 @@ export async function admitAndSubmitTriggerExecution(
       .bind(renderedPrompt, executionId, trigger.id)
       .run();
 
+    await input.beforeSubmit?.(executionId);
+
     const submitted = await submitter(env, {
       triggerId: trigger.id,
       triggerExecutionId: executionId,
@@ -205,16 +209,28 @@ export async function admitAndSubmitTriggerExecution(
       triggerName: trigger.name,
     });
 
-    await env.DATABASE.batch([
-      env.DATABASE.prepare(
-        `UPDATE trigger_executions SET task_id = ?, status = 'running'
-         WHERE id = ? AND trigger_id = ? AND project_id = ?`
-      ).bind(submitted.taskId, executionId, trigger.id, trigger.projectId),
-      env.DATABASE.prepare(
-        `UPDATE triggers SET last_triggered_at = ?, trigger_count = trigger_count + 1, updated_at = ?
-         WHERE id = ? AND project_id = ?`
-      ).bind(now, now, trigger.id, trigger.projectId),
-    ]);
+    try {
+      await env.DATABASE.batch([
+        env.DATABASE.prepare(
+          `UPDATE trigger_executions SET task_id = ?, status = 'running'
+           WHERE id = ? AND trigger_id = ? AND project_id = ?`
+        ).bind(submitted.taskId, executionId, trigger.id, trigger.projectId),
+        env.DATABASE.prepare(
+          `UPDATE triggers SET last_triggered_at = ?, trigger_count = trigger_count + 1, updated_at = ?
+           WHERE id = ? AND project_id = ?`
+        ).bind(now, now, trigger.id, trigger.projectId),
+      ]);
+    } catch (error) {
+      // The task boundary already succeeded. Preserve that fact so callers do not
+      // retry and double-submit; task lifecycle sync can reconcile the execution.
+      log.error('trigger_admission.submitted_state_sync_failed', {
+        triggerId: trigger.id,
+        executionId,
+        taskId: submitted.taskId,
+        projectId: trigger.projectId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
     return { outcome: 'submitted', executionId, ...submitted };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

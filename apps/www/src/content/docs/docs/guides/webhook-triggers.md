@@ -29,7 +29,7 @@ curl --request POST 'https://api.example.com/api/webhooks/ingest' \
   --data '{"deployment":{"status":"failed","id":"1234"}}'
 ```
 
-The request must use `Content-Type: application/json`, and the top-level value must be an object. Put the token in the `Authorization` header—not the URL or query string. `Idempotency-Key` is optional; when supplied, repeated successful deliveries with the same key are accepted without creating another execution. An identical delivery that received `503` may retry with the same key; reusing a key for a different payload is treated as a duplicate.
+The request must use `Content-Type: application/json`, and the top-level value must be an object. Put the token in the `Authorization` header—not the URL or query string. `Idempotency-Key` is optional; when supplied, repeated successful deliveries with the same key are accepted without creating another execution. An identical delivery that received a transient `503` before task submission may retry with the same key; a retry after submission returns the linked execution without submitting twice. Rate-limit and configuration rejections happen before an idempotency reservation, so the same key can be retried after the condition clears. Reusing a key for a different payload is treated as a duplicate.
 
 Successful admission returns HTTP `202`. The response indicates whether the delivery created an execution, was filtered, was a duplicate, or was skipped by trigger policy. Invalid credentials return a uniform `404`; overload protection can return `429`, and a durable submission failure returns `503`.
 
@@ -69,11 +69,11 @@ Tokens contain 32 random bytes and use the `sam_wh_` prefix. SAM stores a keyed 
 
 SAM does not retain raw request bodies, arbitrary request headers, bearer tokens, idempotency keys, or rendered prompts in webhook delivery history. The audit contains outcome, HTTP status, byte count, timestamps, and linked execution/error identifiers. Audit records expire automatically; the default retention is seven days.
 
-Disabling or pausing a trigger prevents new webhook work. Per-trigger request damping handles bursts, while the shared trigger admission path enforces skip-if-running, concurrency, durable execution reservation, failure tracking, and task submission for cron, GitHub, webhook, and manual sources.
+Disabling or pausing a trigger prevents new webhook work. Best-effort IP and per-trigger request damping reduces bursts; because Cloudflare KV counters are eventually consistent, it is not a strict distributed quota. The shared trigger admission path enforces skip-if-running, concurrency, durable execution reservation, failure tracking, and task submission for cron, GitHub, webhook, and manual sources.
 
 ## Management API
 
-Authenticated project members can use the same management surface as the UI:
+Authenticated project members can use the same management surface as the UI. Project read access permits preview and redacted history; project write access is required to create, update, or rotate credentials:
 
 | Method  | Endpoint                                                          | Purpose                                                            |
 | ------- | ----------------------------------------------------------------- | ------------------------------------------------------------------ |

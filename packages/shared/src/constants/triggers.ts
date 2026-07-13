@@ -54,26 +54,41 @@ export const DEFAULT_WEBHOOK_TRIGGER_MAX_FILTER_PATH_LENGTH = 200;
 /** Maximum dot-path depth for webhook filters. Override via WEBHOOK_TRIGGER_MAX_FILTER_PATH_DEPTH. */
 export const DEFAULT_WEBHOOK_TRIGGER_MAX_FILTER_PATH_DEPTH = 8;
 
-/** Maximum request headers that may be copied into template context. */
+/** Maximum request headers that may be copied into template context. Override via WEBHOOK_TRIGGER_MAX_INCLUDED_HEADERS. */
 export const DEFAULT_WEBHOOK_TRIGGER_MAX_INCLUDED_HEADERS = 10;
 
-/** Maximum configured header-name length. */
+/** Maximum configured header-name length. Override via WEBHOOK_TRIGGER_MAX_HEADER_NAME_LENGTH. */
 export const DEFAULT_WEBHOOK_TRIGGER_MAX_HEADER_NAME_LENGTH = 100;
 
-/** Maximum source label length. */
+/** Maximum source label length. Override via WEBHOOK_TRIGGER_MAX_SOURCE_LABEL_LENGTH. */
 export const DEFAULT_WEBHOOK_TRIGGER_MAX_SOURCE_LABEL_LENGTH = 100;
 
-/** Maximum incoming idempotency-key length. */
+/** Maximum incoming idempotency-key length. Override via WEBHOOK_TRIGGER_MAX_IDEMPOTENCY_KEY_LENGTH. */
 export const DEFAULT_WEBHOOK_TRIGGER_MAX_IDEMPOTENCY_KEY_LENGTH = 200;
 
-/** Days to retain webhook delivery audit metadata. */
+/** Days to retain webhook delivery audit metadata. Override via WEBHOOK_DELIVERY_RETENTION_DAYS. */
 export const DEFAULT_WEBHOOK_DELIVERY_RETENTION_DAYS = 7;
+
+/** Delivery rows deleted per scheduled cleanup pass. Override via WEBHOOK_DELIVERY_CLEANUP_BATCH_SIZE. */
+export const DEFAULT_WEBHOOK_DELIVERY_CLEANUP_BATCH_SIZE = 500;
+
+/** Default delivery-history page size. Override via WEBHOOK_DELIVERY_DEFAULT_PAGE_SIZE. */
+export const DEFAULT_WEBHOOK_DELIVERY_DEFAULT_PAGE_SIZE = 25;
+
+/** Maximum delivery-history page size. Override via WEBHOOK_DELIVERY_MAX_PAGE_SIZE. */
+export const DEFAULT_WEBHOOK_DELIVERY_MAX_PAGE_SIZE = 100;
+
+/** Seconds before an unfinished delivery reservation may be recovered. Override via WEBHOOK_DELIVERY_PROCESSING_LEASE_SECONDS. */
+export const DEFAULT_WEBHOOK_DELIVERY_PROCESSING_LEASE_SECONDS = 300;
 
 /** Accepted requests per trigger per minute. KV damping; concurrency remains the strict cost guard. */
 export const DEFAULT_WEBHOOK_TRIGGER_RATE_LIMIT_PER_MINUTE = 60;
 
 /** Invalid-token requests per IP per minute. */
 export const DEFAULT_WEBHOOK_INVALID_TOKEN_RATE_LIMIT_PER_MINUTE = 30;
+
+/** All ingress requests per IP/window before token lookup. */
+export const DEFAULT_WEBHOOK_INGRESS_RATE_LIMIT_PER_MINUTE = 120;
 
 /** Fixed-window duration used for webhook abuse damping. */
 export const DEFAULT_WEBHOOK_RATE_LIMIT_WINDOW_SECONDS = 60;
@@ -102,7 +117,12 @@ export const TRIGGER_DEFAULTS = {
   WEBHOOK_TRIGGER_MAX_SOURCE_LABEL_LENGTH: DEFAULT_WEBHOOK_TRIGGER_MAX_SOURCE_LABEL_LENGTH,
   WEBHOOK_TRIGGER_MAX_IDEMPOTENCY_KEY_LENGTH: DEFAULT_WEBHOOK_TRIGGER_MAX_IDEMPOTENCY_KEY_LENGTH,
   WEBHOOK_DELIVERY_RETENTION_DAYS: DEFAULT_WEBHOOK_DELIVERY_RETENTION_DAYS,
+  WEBHOOK_DELIVERY_CLEANUP_BATCH_SIZE: DEFAULT_WEBHOOK_DELIVERY_CLEANUP_BATCH_SIZE,
+  WEBHOOK_DELIVERY_DEFAULT_PAGE_SIZE: DEFAULT_WEBHOOK_DELIVERY_DEFAULT_PAGE_SIZE,
+  WEBHOOK_DELIVERY_MAX_PAGE_SIZE: DEFAULT_WEBHOOK_DELIVERY_MAX_PAGE_SIZE,
+  WEBHOOK_DELIVERY_PROCESSING_LEASE_SECONDS: DEFAULT_WEBHOOK_DELIVERY_PROCESSING_LEASE_SECONDS,
   WEBHOOK_TRIGGER_RATE_LIMIT_PER_MINUTE: DEFAULT_WEBHOOK_TRIGGER_RATE_LIMIT_PER_MINUTE,
   WEBHOOK_INVALID_TOKEN_RATE_LIMIT_PER_MINUTE: DEFAULT_WEBHOOK_INVALID_TOKEN_RATE_LIMIT_PER_MINUTE,
+  WEBHOOK_INGRESS_RATE_LIMIT_PER_MINUTE: DEFAULT_WEBHOOK_INGRESS_RATE_LIMIT_PER_MINUTE,
   WEBHOOK_RATE_LIMIT_WINDOW_SECONDS: DEFAULT_WEBHOOK_RATE_LIMIT_WINDOW_SECONDS,
 } as const;

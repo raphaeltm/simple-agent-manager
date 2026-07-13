@@ -48,7 +48,7 @@ interface TriggerFormProps {
   /** If set, we're editing this trigger. Otherwise, creating new. */
   editTrigger?: TriggerResponse | null;
   /** Called after successful create/update. */
-  onSaved?: (credential?: WebhookCredential) => void;
+  onSaved?: (credential?: WebhookCredential, returnFocusTarget?: HTMLElement | null) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -285,7 +285,7 @@ export const TriggerForm: FC<TriggerFormProps> = ({ open, onClose, editTrigger, 
       // The one-time credential dialog becomes the active modal after creation.
       // Let it claim focus instead of returning focus to the form opener.
       shouldRestoreFocusRef.current = !credential;
-      onSaved?.(credential);
+      onSaved?.(credential, credential ? returnFocusRef.current : undefined);
       onClose();
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to save trigger';

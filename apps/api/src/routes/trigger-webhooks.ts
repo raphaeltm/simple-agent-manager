@@ -7,6 +7,7 @@ import {
   checkRateLimit,
   createRateLimitKey,
   getCurrentWindowStart,
+  isRateLimitReached,
 } from '../middleware/rate-limit';
 import {
   admitAndSubmitTriggerExecution,
@@ -20,7 +21,7 @@ import {
 import {
   fingerprintWebhookRequest,
   hashWebhookIdempotencyKey,
-  hasWebhookTokenPrefix,
+  isWebhookTokenFormat,
 } from '../services/webhook-trigger-crypto';
 import {
   buildWebhookContext,
@@ -32,6 +33,8 @@ import {
   createWebhookDelivery,
   findWebhookTriggerByToken,
   finishWebhookDelivery,
+  linkWebhookDeliveryExecution,
+  recordWebhookRejectedDelivery,
 } from '../services/webhook-trigger-store';
 
 class BodyTooLargeError extends Error {}
@@ -73,16 +76,19 @@ function clientIp(request: Request): string {
   );
 }
 
-async function isRateLimited(
+async function takeRateLimit(
   env: Env,
   prefix: string,
   identifier: string,
   limit: number,
   windowSeconds: number
-): Promise<boolean> {
+): Promise<{ limited: boolean; windowStart: number }> {
   const windowStart = getCurrentWindowStart(windowSeconds);
   const key = createRateLimitKey(prefix, identifier, windowStart);
-  return !(await checkRateLimit(env.KV, key, limit, windowSeconds)).allowed;
+  return {
+    limited: !(await checkRateLimit(env.KV, key, limit, windowSeconds)).allowed,
+    windowStart,
+  };
 }
 
 function publicError(status: 400 | 404 | 413 | 415 | 429 | 503, message: string): Response {
@@ -91,11 +97,10 @@ function publicError(status: 400 | 404 | 413 | 415 | 429 | 503, message: string)
 
 async function invalidTokenResponse(
   env: Env,
-  request: Request,
+  ipKey: string,
   limits: ReturnType<typeof getWebhookTriggerLimits>
 ) {
-  const ipKey = await fingerprintWebhookRequest(clientIp(request), env.ENCRYPTION_KEY);
-  const limited = await isRateLimited(
+  const { limited } = await takeRateLimit(
     env,
     'webhook-invalid',
     ipKey,
@@ -105,6 +110,35 @@ async function invalidTokenResponse(
   return limited ? publicError(429, 'Too many requests') : publicError(404, 'Not found');
 }
 
+async function invalidTokenLimitReached(
+  env: Env,
+  ipKey: string,
+  limits: ReturnType<typeof getWebhookTriggerLimits>
+): Promise<boolean> {
+  const windowStart = getCurrentWindowStart(limits.rateLimitWindowSeconds);
+  return isRateLimitReached(
+    env.KV,
+    createRateLimitKey('webhook-invalid', ipKey, windowStart),
+    limits.invalidTokenRateLimit,
+    windowStart
+  );
+}
+
+async function recordRejected(
+  env: Env,
+  input: Parameters<typeof recordWebhookRejectedDelivery>[1]
+): Promise<void> {
+  try {
+    await recordWebhookRejectedDelivery(env, input);
+  } catch (error) {
+    log.warn('webhook_trigger.rejection_audit_failed', {
+      triggerId: input.triggerId,
+      outcome: input.outcome,
+      errorType: error instanceof Error ? error.name : 'UnknownError',
+    });
+  }
+}
+
 async function handleWebhookIngress(
   c: Context<{ Bindings: Env }>,
   submitter?: TriggerTaskSubmitter
@@ -112,13 +146,59 @@ async function handleWebhookIngress(
   if (!areWebhookTriggersEnabled(c.env)) return publicError(404, 'Not found');
 
   const limits = getWebhookTriggerLimits(c.env);
+  const ipKey = await fingerprintWebhookRequest(clientIp(c.req.raw), c.env.ENCRYPTION_KEY);
+  const ingressRate = await takeRateLimit(
+    c.env,
+    'webhook-ingress',
+    ipKey,
+    limits.ingressRateLimit,
+    limits.rateLimitWindowSeconds
+  );
+  if (ingressRate.limited) return publicError(429, 'Too many requests');
+
   const token = bearerToken(c.req.header('Authorization'));
-  if (!token || !hasWebhookTokenPrefix(token)) {
-    return invalidTokenResponse(c.env, c.req.raw, limits);
+  if (!token || !isWebhookTokenFormat(token)) {
+    return invalidTokenResponse(c.env, ipKey, limits);
+  }
+  if (await invalidTokenLimitReached(c.env, ipKey, limits)) {
+    return publicError(429, 'Too many requests');
   }
 
   const resolved = await findWebhookTriggerByToken(c.env, token);
-  if (!resolved) return invalidTokenResponse(c.env, c.req.raw, limits);
+  if (!resolved) return invalidTokenResponse(c.env, ipKey, limits);
+
+  const receivedAt = new Date().toISOString();
+  const rejectionWindow = getCurrentWindowStart(limits.rateLimitWindowSeconds);
+  if (!resolved.trigger.agentProfileId) {
+    await recordRejected(c.env, {
+      triggerId: resolved.trigger.id,
+      outcome: 'configuration_error',
+      httpStatus: 503,
+      errorCode: 'missing_agent_profile',
+      windowStart: rejectionWindow,
+      receivedAt,
+    });
+    return publicError(503, 'Webhook trigger is not configured');
+  }
+
+  const triggerRate = await takeRateLimit(
+    c.env,
+    'webhook-trigger',
+    resolved.trigger.id,
+    limits.triggerRateLimit,
+    limits.rateLimitWindowSeconds
+  );
+  if (triggerRate.limited) {
+    await recordRejected(c.env, {
+      triggerId: resolved.trigger.id,
+      outcome: 'rate_limited',
+      httpStatus: 429,
+      errorCode: 'rate_limited',
+      windowStart: triggerRate.windowStart,
+      receivedAt,
+    });
+    return publicError(429, 'Too many requests');
+  }
 
   if (!c.req.header('Content-Type')?.toLowerCase().startsWith('application/json')) {
     return publicError(415, 'Content-Type must be application/json');
@@ -149,7 +229,6 @@ async function handleWebhookIngress(
     return publicError(400, 'Idempotency-Key is too long');
   }
 
-  const receivedAt = new Date().toISOString();
   const delivery = await createWebhookDelivery(c.env, {
     triggerId: resolved.trigger.id,
     idempotencyKeyHash: idempotencyKey
@@ -160,7 +239,18 @@ async function handleWebhookIngress(
     receivedAt,
   });
   if (delivery.disposition === 'duplicate') {
-    return c.json({ accepted: true, duplicate: true, deliveryId: delivery.id }, 202);
+    return c.json(
+      {
+        accepted: true,
+        duplicate: true,
+        deliveryId: delivery.id,
+        executionId: delivery.executionId,
+      },
+      202
+    );
+  }
+  if (delivery.disposition === 'in_flight') {
+    return publicError(503, 'Webhook is still processing');
   }
 
   const finalize = async (
@@ -179,87 +269,85 @@ async function handleWebhookIngress(
     });
   };
 
-  if (!resolved.trigger.agentProfileId) {
-    await finalize('configuration_error', 503, undefined, 'missing_agent_profile');
-    return publicError(503, 'Webhook trigger is not configured');
-  }
-
-  if (
-    await isRateLimited(
-      c.env,
-      'webhook-trigger',
-      resolved.trigger.id,
-      limits.triggerRateLimit,
-      limits.rateLimitWindowSeconds
-    )
-  ) {
-    await finalize('rate_limited', 429, undefined, 'rate_limited');
-    return publicError(429, 'Too many requests');
-  }
-
-  const filterResult = evaluateWebhookFilters(
-    body,
-    resolved.config.filters,
-    resolved.config.filterMode,
-    limits.maxFilterPathDepth
-  );
-  if (!filterResult.matched) {
-    await finalize('filtered', 202);
-    return c.json({ accepted: true, filtered: true, deliveryId: delivery.id }, 202);
-  }
-
-  const safeHeaders = selectWebhookHeaders(c.req.raw.headers, resolved.config.includedHeaders);
-  const admission = await admitAndSubmitTriggerExecution(
-    c.env,
-    {
-      trigger: resolved.trigger,
-      eventType: 'webhook',
-      triggeredBy: 'webhook',
-      scheduledAt: receivedAt,
-      renderPrompt: (executionId, sequenceNumber) => {
-        const context = buildWebhookContext({
-          body,
-          headers: safeHeaders,
-          receivedAt,
-          deliveryId: delivery.id,
-          sourceLabel: resolved.config.sourceLabel,
-          trigger: resolved.trigger,
-          projectName: resolved.projectName,
-          executionId,
-          sequenceNumber,
-        });
-        return renderTemplate(
-          resolved.trigger.promptTemplate,
-          context as unknown as Record<string, unknown>
-        ).rendered;
-      },
-    },
-    submitter
-  );
-
-  if (admission.outcome === 'submitted') {
-    await finalize('accepted', 202, admission.executionId);
-    return c.json(
-      { accepted: true, deliveryId: delivery.id, executionId: admission.executionId },
-      202
+  let externallySubmitted = false;
+  try {
+    const filterResult = evaluateWebhookFilters(
+      body,
+      resolved.config.filters,
+      resolved.config.filterMode,
+      limits.maxFilterPathDepth
     );
-  }
-  if (admission.outcome === 'skipped') {
-    await finalize(admission.reason, 202, admission.executionId);
-    return c.json({ accepted: true, skipped: admission.reason, deliveryId: delivery.id }, 202);
-  }
-  if (admission.outcome === 'inactive') {
-    await finalize('inactive', 202, undefined, admission.reason);
-    return c.json({ accepted: true, inactive: true, deliveryId: delivery.id }, 202);
-  }
+    if (!filterResult.matched) {
+      await finalize('filtered', 202);
+      return c.json({ accepted: true, filtered: true, deliveryId: delivery.id }, 202);
+    }
 
-  await finalize('internal_error', 503, admission.executionId, 'submission_failed');
-  log.error('webhook_trigger.ingest_failed', {
-    triggerId: resolved.trigger.id,
-    deliveryId: delivery.id,
-    executionId: admission.executionId,
-  });
-  return publicError(503, 'Webhook could not be processed');
+    const safeHeaders = selectWebhookHeaders(c.req.raw.headers, resolved.config.includedHeaders);
+    const admission = await admitAndSubmitTriggerExecution(
+      c.env,
+      {
+        trigger: resolved.trigger,
+        eventType: 'webhook',
+        triggeredBy: 'webhook',
+        scheduledAt: receivedAt,
+        beforeSubmit: (executionId) =>
+          linkWebhookDeliveryExecution(c.env, resolved.trigger.id, delivery.id, executionId),
+        renderPrompt: (executionId, sequenceNumber) => {
+          const context = buildWebhookContext({
+            body,
+            headers: safeHeaders,
+            receivedAt,
+            deliveryId: delivery.id,
+            sourceLabel: resolved.config.sourceLabel,
+            trigger: resolved.trigger,
+            projectName: resolved.projectName,
+            executionId,
+            sequenceNumber,
+          });
+          return renderTemplate(
+            resolved.trigger.promptTemplate,
+            context as unknown as Record<string, unknown>
+          ).rendered;
+        },
+      },
+      submitter
+    );
+
+    if (admission.outcome === 'submitted') {
+      externallySubmitted = true;
+      await finalize('accepted', 202, admission.executionId);
+      return c.json(
+        { accepted: true, deliveryId: delivery.id, executionId: admission.executionId },
+        202
+      );
+    }
+    if (admission.outcome === 'skipped') {
+      await finalize(admission.reason, 202, admission.executionId);
+      return c.json({ accepted: true, skipped: admission.reason, deliveryId: delivery.id }, 202);
+    }
+    if (admission.outcome === 'inactive') {
+      await finalize('inactive', 202, undefined, admission.reason);
+      return c.json({ accepted: true, inactive: true, deliveryId: delivery.id }, 202);
+    }
+
+    await finalize('internal_error', 503, admission.executionId, 'submission_failed');
+    log.error('webhook_trigger.ingest_failed', {
+      triggerId: resolved.trigger.id,
+      deliveryId: delivery.id,
+      executionId: admission.executionId,
+    });
+    return publicError(503, 'Webhook could not be processed');
+  } catch (error) {
+    if (!externallySubmitted) {
+      await finalize('internal_error', 503, undefined, 'processing_failed').catch(() => {});
+    }
+    log.error('webhook_trigger.ingest_internal_error', {
+      triggerId: resolved.trigger.id,
+      deliveryId: delivery.id,
+      errorType: error instanceof Error ? error.name : 'UnknownError',
+    });
+    return publicError(503, 'Webhook could not be processed');
+  }
 }
 
 export function createTriggerWebhookRoutes(submitter?: TriggerTaskSubmitter) {

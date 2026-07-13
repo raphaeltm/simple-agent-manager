@@ -1,7 +1,3 @@
-import {
-  DEFAULT_WEBHOOK_TRIGGER_MAX_HEADER_NAME_LENGTH,
-  DEFAULT_WEBHOOK_TRIGGER_MAX_SOURCE_LABEL_LENGTH,
-} from '@simple-agent-manager/shared';
 import * as v from 'valibot';
 
 const TriggerSourceTypeSchema = v.picklist(['cron', 'webhook', 'github']);
@@ -56,9 +52,7 @@ const WebhookFilterSchema = v.pipe(
 );
 
 const WebhookConfigValueSchema = v.strictObject({
-  sourceLabel: v.optional(
-    v.pipe(v.string(), v.maxLength(DEFAULT_WEBHOOK_TRIGGER_MAX_SOURCE_LABEL_LENGTH))
-  ),
+  sourceLabel: v.optional(v.string()),
   filterMode: v.optional(v.picklist(['all', 'any'])),
   filters: v.optional(v.array(WebhookFilterSchema)),
   includedHeaders: v.optional(
@@ -67,7 +61,6 @@ const WebhookConfigValueSchema = v.strictObject({
         v.pipe(
           v.string(),
           v.minLength(1),
-          v.maxLength(DEFAULT_WEBHOOK_TRIGGER_MAX_HEADER_NAME_LENGTH),
           v.check(
             (header) =>
               /^[a-z0-9!#$%&'*+.^_`|~-]+$/i.test(header) &&

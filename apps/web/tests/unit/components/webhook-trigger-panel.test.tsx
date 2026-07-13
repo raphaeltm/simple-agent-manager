@@ -156,7 +156,8 @@ describe('WebhookTriggerPanel', () => {
     const onRotated = renderPanel();
     await screen.findByText('duplicate');
 
-    await user.click(screen.getByRole('button', { name: /rotate token/i }));
+    const rotateButton = screen.getByRole('button', { name: /rotate token/i });
+    await user.click(rotateButton);
     expect(window.confirm).toHaveBeenCalledWith(
       'Rotate this token now? The current token will stop working immediately.'
     );
@@ -165,8 +166,15 @@ describe('WebhookTriggerPanel', () => {
     const dialog = await screen.findByRole('dialog', { name: /save your webhook credential/i });
     expect(dialog).toHaveTextContent('sam_wh_rotated_once');
 
-    await user.click(screen.getByRole('checkbox'));
+    const acknowledgment = screen.getByRole('checkbox');
+    expect(acknowledgment).toHaveFocus();
+    await user.click(acknowledgment);
+    await user.tab();
+    expect(screen.getByRole('button', { name: 'Done' })).toHaveFocus();
+    await user.tab();
+    expect(screen.getByRole('button', { name: /copy endpoint/i })).toHaveFocus();
     await user.click(screen.getByRole('button', { name: 'Done' }));
     expect(screen.queryByText('sam_wh_rotated_once')).not.toBeInTheDocument();
+    expect(rotateButton).toHaveFocus();
   });
 });

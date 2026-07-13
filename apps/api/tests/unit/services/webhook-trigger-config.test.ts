@@ -20,6 +20,13 @@ describe('webhook trigger runtime configuration', () => {
       WEBHOOK_TRIGGER_MAX_FILTER_PATH_LENGTH: '12',
       WEBHOOK_TRIGGER_MAX_FILTER_PATH_DEPTH: '2',
       WEBHOOK_TRIGGER_MAX_INCLUDED_HEADERS: '1',
+      WEBHOOK_TRIGGER_MAX_HEADER_NAME_LENGTH: '8',
+      WEBHOOK_TRIGGER_MAX_SOURCE_LABEL_LENGTH: '6',
+      WEBHOOK_INGRESS_RATE_LIMIT_PER_MINUTE: '11',
+      WEBHOOK_DELIVERY_CLEANUP_BATCH_SIZE: '12',
+      WEBHOOK_DELIVERY_DEFAULT_PAGE_SIZE: '13',
+      WEBHOOK_DELIVERY_MAX_PAGE_SIZE: '14',
+      WEBHOOK_DELIVERY_PROCESSING_LEASE_SECONDS: '15',
     } as Env);
 
     expect(
@@ -52,5 +59,18 @@ describe('webhook trigger runtime configuration', () => {
     expect(
       validateWebhookTriggerConfig({ includedHeaders: ['x-event', 'x-request-id'] }, limits)
     ).toContain('at most 1 items');
+    expect(validateWebhookTriggerConfig({ includedHeaders: ['x-request'] }, limits)).toContain(
+      'at most 8 characters'
+    );
+    expect(validateWebhookTriggerConfig({ sourceLabel: 'too-long' }, limits)).toContain(
+      'at most 6 characters'
+    );
+    expect(limits).toMatchObject({
+      ingressRateLimit: 11,
+      deliveryCleanupBatchSize: 12,
+      deliveryDefaultPageSize: 13,
+      deliveryMaxPageSize: 14,
+      deliveryProcessingLeaseSeconds: 15,
+    });
   });
 });

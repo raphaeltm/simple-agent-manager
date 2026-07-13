@@ -36,7 +36,10 @@ export function ProjectTriggers() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [confirmDeleteTarget, setConfirmDeleteTarget] = useState<TriggerResponse | null>(null);
-  const [webhookCredential, setWebhookCredential] = useState<WebhookCredential | null>(null);
+  const [webhookCredential, setWebhookCredential] = useState<{
+    credential: WebhookCredential;
+    returnFocusTarget: HTMLElement | null;
+  } | null>(null);
 
   // URL-driven edit modal — `?edit=triggerId` or `?edit=new`
   const editParam = searchParams.get('edit');
@@ -139,8 +142,9 @@ export function ProjectTriggers() {
   }, []);
 
   const handleSaved = useCallback(
-    (credential?: WebhookCredential) => {
-      if (credential) setWebhookCredential(credential);
+    (credential?: WebhookCredential, returnFocusTarget?: HTMLElement | null) => {
+      if (credential)
+        setWebhookCredential({ credential, returnFocusTarget: returnFocusTarget ?? null });
       void loadTriggers();
     },
     [loadTriggers]
@@ -234,7 +238,8 @@ export function ProjectTriggers() {
 
       {webhookCredential && (
         <WebhookCredentialDialog
-          credential={webhookCredential}
+          credential={webhookCredential.credential}
+          returnFocusTarget={webhookCredential.returnFocusTarget}
           onClose={() => setWebhookCredential(null)}
         />
       )}

@@ -28,7 +28,10 @@ export function WebhookTriggerPanel({ projectId, trigger, onRotated }: WebhookTr
   const [deliveriesLoading, setDeliveriesLoading] = useState(true);
   const [deliveriesLoadingMore, setDeliveriesLoadingMore] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
-  const [credential, setCredential] = useState<WebhookCredential | null>(null);
+  const [credential, setCredential] = useState<{
+    value: WebhookCredential;
+    returnFocusTarget: HTMLElement | null;
+  } | null>(null);
   const [rotating, setRotating] = useState(false);
   const [sample, setSample] = useState('{\n  "event": { "action": "created" }\n}');
   const [preview, setPreview] = useState<TriggerPreviewResponse | null>(null);
@@ -59,12 +62,14 @@ export function WebhookTriggerPanel({ projectId, trigger, onRotated }: WebhookTr
   }, [loadDeliveries]);
 
   const rotate = async () => {
+    const returnFocusTarget =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
     if (!window.confirm('Rotate this token now? The current token will stop working immediately.'))
       return;
     setRotating(true);
     try {
       const response = await rotateWebhookTriggerToken(projectId, trigger.id);
-      setCredential(response.webhookCredential);
+      setCredential({ value: response.webhookCredential, returnFocusTarget });
       onRotated();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Failed to rotate token');
@@ -201,7 +206,11 @@ export function WebhookTriggerPanel({ projectId, trigger, onRotated }: WebhookTr
       </section>
 
       {credential && (
-        <WebhookCredentialDialog credential={credential} onClose={() => setCredential(null)} />
+        <WebhookCredentialDialog
+          credential={credential.value}
+          returnFocusTarget={credential.returnFocusTarget}
+          onClose={() => setCredential(null)}
+        />
       )}
     </div>
   );
