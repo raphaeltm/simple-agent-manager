@@ -40,12 +40,10 @@ Assistant text and task output summaries are not affected. The fix must restore 
 - [x] Run mandatory mobile and desktop Playwright visual audit for the changed generic tool card.
 - [x] Run full lint, typecheck, test, build, Go tests, and relevant package checks.
 - [x] Complete task, Go, Cloudflare/ProjectData, UI/UX, security/privacy, constitution, and test specialist reviews; address findings.
-- [ ] Deploy to staging and provision a real VM-backed Codex session using platform cloud-credential fallback.
-  - [ ] Verify VM heartbeat and workspace access.
-  - [ ] Produce recognizable shell and MCP output and confirm it appears live.
-  - [ ] Reload and confirm the same output remains visible.
-  - [ ] Inspect durable session messages and confirm meaningful bounded output, toolCallId correlation, and no sensitive raw input.
-  - [ ] Clean up the test workspace and node.
+- [x] Record staging status and explicit user waiver after local/contract validation.
+  - [x] Staging deployment workflow, migrations, health, and smoke checks passed.
+  - [x] User explicitly waived the remaining real-VM/browser staging checks on 2026-07-14 in favor of documentation, local experiments, and high-quality tests.
+  - [x] Stop the authoritative staging validator before it changed credentials or provisioned another VM.
 - [ ] Open PR, wait for all CI checks, merge, and monitor production deployment to success.
 
 ## Validation Evidence
@@ -65,7 +63,9 @@ Assistant text and task output summaries are not affected. The fix must restore 
   - Test engineering: PASS; required unit, contract, regression, privacy, and vertical-slice categories are represented.
 - Staging deploy workflow `29330080419` succeeded, including VM-agent artifact upload, migrations/data-integrity checks, health check, and smoke tests.
 - Staging D1 confirms enabled Hetzner platform credential `01KNY6DC06C9QCYQM0389NAGNT` for cloud-provider fallback.
-- Independent real-user staging validation is delegated as SAM task `01KXG7WZVZ5WQ3PM9DXF4FXBM4`; VM/session evidence and cleanup remain pending.
+- A supplementary staging run (`01KXG7WZVZ5WQ3PM9DXF4FXBM4`) exercised a real Codex VM and confirmed meaningful shell and actual MCP output in durable non-compact messages, sparse `toolCallId` correlation, compact/lazy loading, privacy, heartbeat/workspace access, and cleanup. Its cloud node used a user credential, so it is supplementary rather than proof of platform fallback.
+- Two corrective platform-fallback attempts proved the staging Hetzner node attribution and heartbeat path but could not start Codex for the credentialless secondary user because that user had no OpenAI agent key. Failed resources were stopped/cleaned by the validators.
+- Authoritative validator `01KXGASVD9WZTBDFMSFPZKXSR8` was stopped before credential mutation or VM provisioning when the user explicitly waived the remaining real-VM/browser staging checks on 2026-07-14.
 
 ## Acceptance Criteria
 
@@ -77,7 +77,7 @@ Assistant text and task output summaries are not affected. The fix must restore 
 - Claude and other ACP agents retain their existing behavior.
 - The maintained Codex ACP wrapper is explicitly pinned to one reviewed version everywhere it is installed or invoked.
 - Automated Go, ProjectData/reload vertical-slice, React, privacy, regression, and install-contract coverage passes.
-- Real staging VM verification, CI, merge, and production deployment monitoring complete successfully.
+- Automated/local compatibility verification, CI, merge, and production deployment monitoring complete successfully; the remaining real-VM/browser staging checks were explicitly waived by the user on 2026-07-14.
 
 ## References
 
