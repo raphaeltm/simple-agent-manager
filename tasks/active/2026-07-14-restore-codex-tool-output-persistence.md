@@ -20,24 +20,24 @@ Assistant text and task output summaries are not affected. The fix must restore 
 
 ## Implementation Checklist
 
-- [ ] Add a focused, agent-agnostic ACP output normalizer at the VM-agent extraction boundary for recognized safe output shapes.
-  - [ ] Convert bounded `formatted_output` command results into terminal/renderable content and retain exit status semantics.
-  - [ ] Convert bounded MCP `result` content blocks and `error` values into renderable content.
-  - [ ] Preserve existing structured content, file diffs, terminal blocks, and typed document/library metadata.
-  - [ ] Apply the existing configurable content budget and valid UTF-8 truncation behavior.
-- [ ] Keep non-allowlisted `rawInput` excluded and ensure tokens, command arguments, and file contents are neither promoted nor persisted.
-- [ ] Ensure initial calls and later updates correlate by `toolCallId`, including updates with no repeated title/tool name.
-- [ ] Add a bounded live-card fallback for supported safe `rawOutput` shapes so live and durable/reloaded cards show equivalent output.
-- [ ] Preserve compact history and lazy-load behavior; generic output remains in content, not always-returned compact metadata.
-- [ ] Define one reviewed Codex ACP wrapper version and use it consistently in runtime/catalog/container install paths.
-- [ ] Add tests:
-  - [ ] Go extraction fixtures shaped like maintained wrapper 1.1.2 for command stdout/exit, MCP success, and MCP error.
-  - [ ] Go privacy/redaction tests proving non-library raw input and unrelated raw values remain excluded.
-  - [ ] Regression tests for structured ACP content, diffs, terminals, and document/library typed-card metadata.
-  - [ ] ProjectData compact/reload vertical slice showing call/update merge by `toolCallId`, meaningful lazy-loaded output, and no placeholder-only result.
-  - [ ] React tests for live raw-output fallback and persisted normalized output parity.
-  - [ ] Install-contract test proving every maintained-wrapper reference uses the single pinned version.
-- [ ] Run mandatory mobile and desktop Playwright visual audit for the changed generic tool card.
+- [x] Add a focused, agent-agnostic ACP output normalizer at the VM-agent extraction boundary for recognized safe output shapes.
+  - [x] Convert bounded `formatted_output` command results into terminal/renderable content and retain exit status semantics.
+  - [x] Convert bounded MCP `result` content blocks and `error` values into renderable content.
+  - [x] Preserve existing structured content, file diffs, terminal blocks, and typed document/library metadata.
+  - [x] Apply the existing configurable content budget and valid UTF-8 truncation behavior.
+- [x] Keep non-allowlisted `rawInput` excluded and ensure tokens, command arguments, and file contents are neither promoted nor persisted.
+- [x] Ensure initial calls and later updates correlate by `toolCallId`, including updates with no repeated title/tool name.
+- [x] Add a bounded live-card fallback for supported safe `rawOutput` shapes so live and durable/reloaded cards show equivalent output.
+- [x] Preserve compact history and lazy-load behavior; generic output remains in content, not always-returned compact metadata.
+- [x] Define one reviewed Codex ACP wrapper version and use it consistently in runtime/catalog/container install paths.
+- [x] Add tests:
+  - [x] Go extraction fixtures shaped like maintained wrapper 1.1.2 for command stdout/exit, MCP success, and MCP error.
+  - [x] Go privacy/redaction tests proving non-library raw input and unrelated raw values remain excluded.
+  - [x] Regression tests for structured ACP content, diffs, terminals, and document/library typed-card metadata.
+  - [x] ProjectData compact/reload vertical slice showing call/update merge by `toolCallId`, meaningful lazy-loaded output, and no placeholder-only result.
+  - [x] React tests for live raw-output fallback and persisted normalized output parity.
+  - [x] Install-contract test proving every maintained-wrapper reference uses the single pinned version.
+- [x] Run mandatory mobile and desktop Playwright visual audit for the changed generic tool card.
 - [ ] Run full lint, typecheck, test, build, Go tests, and relevant package checks.
 - [ ] Complete task, Go, Cloudflare/ProjectData, UI/UX, security/privacy, constitution, and test specialist reviews; address findings.
 - [ ] Deploy to staging and provision a real VM-backed Codex session using platform cloud-credential fallback.

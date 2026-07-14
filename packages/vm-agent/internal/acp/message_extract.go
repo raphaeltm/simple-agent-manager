@@ -210,8 +210,8 @@ func ExtractMessages(notif acpsdk.SessionNotification) []ExtractedMessage {
 			ToolName:   extractToolName(u.ToolCall.Meta, u.ToolCall.Title),
 			Content:    marshalRawContent(u.ToolCall.Content),
 		}
-		if len(meta.Content) == 0 && len(normalized.content) > 0 {
-			meta.Content = normalized.content
+		if content == "" && len(normalized.content) > 0 {
+			meta.Content = append(meta.Content, normalized.content...)
 			content = normalized.text
 		}
 		if toolNameNeedsRawCapture(meta.ToolName) {
@@ -245,8 +245,8 @@ func ExtractMessages(notif acpsdk.SessionNotification) []ExtractedMessage {
 			ToolCallId: string(u.ToolCallUpdate.ToolCallId),
 			Content:    marshalRawContent(u.ToolCallUpdate.Content),
 		}
-		if len(meta.Content) == 0 && len(normalized.content) > 0 {
-			meta.Content = normalized.content
+		if content == "" && len(normalized.content) > 0 {
+			meta.Content = append(meta.Content, normalized.content...)
 			content = normalized.text
 		}
 		var updateTitle string

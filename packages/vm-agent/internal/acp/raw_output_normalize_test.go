@@ -113,3 +113,27 @@ func TestExtractMessages_StructuredContentWinsOverRawFallback(t *testing.T) {
 		t.Fatal("raw fallback replaced structured ACP content")
 	}
 }
+
+func TestExtractMessages_TerminalReferencePreservedWithRawCommandOutput(t *testing.T) {
+	status := acpsdk.ToolCallStatusCompleted
+	msgs := ExtractMessages(acpsdk.SessionNotification{Update: acpsdk.SessionUpdate{
+		ToolCallUpdate: &acpsdk.SessionToolCallUpdate{
+			ToolCallId: "terminal-reference-1",
+			Status:     &status,
+			Content: []acpsdk.ToolCallContent{{Terminal: &acpsdk.ToolCallContentTerminal{
+				TerminalId: "term-1",
+			}}},
+			RawOutput: map[string]any{"formatted_output": "terminal output survives", "exit_code": 0},
+		},
+	}})
+	meta := unmarshalMeta(t, msgs)
+	if msgs[0].Content != "terminal output survives" {
+		t.Fatalf("expected raw command output, got %q", msgs[0].Content)
+	}
+	if len(meta.Content) != 2 {
+		t.Fatalf("expected terminal reference plus normalized output, got %d items", len(meta.Content))
+	}
+	if !strings.Contains(string(meta.Content[0]), "term-1") || !strings.Contains(string(meta.Content[1]), "terminal output survives") {
+		t.Fatalf("expected both structured terminal reference and normalized output: %s / %s", meta.Content[0], meta.Content[1])
+	}
+}
