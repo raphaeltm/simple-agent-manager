@@ -99,6 +99,26 @@ describe('ToolCallCard', () => {
     expect(screen.getByText('Error: SAM_LIVE_MCP_ERROR_112')).toBeTruthy();
   });
 
+  it('renders useful MCP object fields while redacting sensitive values', () => {
+    const toolCall = createToolCall({
+      content: [],
+      rawOutput: {
+        result: {
+          count: 3,
+          items: [{ name: 'alpha' }],
+          token: 'bearer-secret',
+          command: 'cat /private/file',
+        },
+      },
+    });
+    render(<ToolCallCard toolCall={toolCall} />);
+    fireEvent.click(screen.getByRole('button', { name: /terminal execute/i }));
+    expect(screen.getByText(/count: 3/)).toBeTruthy();
+    expect(screen.getByText(/name: alpha/)).toBeTruthy();
+    expect(screen.getByText(/\[redacted\]/)).toBeTruthy();
+    expect(screen.queryByText(/bearer-secret|cat \/private\/file/)).toBeNull();
+  });
+
   it('does not render arbitrary rawOutput or rawInput', () => {
     const toolCall = createToolCall({
       content: [],

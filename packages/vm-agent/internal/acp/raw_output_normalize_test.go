@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	acpsdk "github.com/coder/acp-go-sdk"
+	"unicode/utf8"
 )
 
 func TestExtractMessages_Codex112CommandRawOutput(t *testing.T) {
@@ -135,5 +136,64 @@ func TestExtractMessages_TerminalReferencePreservedWithRawCommandOutput(t *testi
 	}
 	if !strings.Contains(string(meta.Content[0]), "term-1") || !strings.Contains(string(meta.Content[1]), "terminal output survives") {
 		t.Fatalf("expected both structured terminal reference and normalized output: %s / %s", meta.Content[0], meta.Content[1])
+	}
+}
+
+func TestExtractMessages_MCPTraversalIsBoundedBeforeSerialization(t *testing.T) {
+	status := acpsdk.ToolCallStatusCompleted
+	large := strings.Repeat("界", maxToolContentSize)
+	cycle := map[string]any{}
+	cycle["content"] = cycle
+	msgs := ExtractMessages(acpsdk.SessionNotification{Update: acpsdk.SessionUpdate{
+		ToolCallUpdate: &acpsdk.SessionToolCallUpdate{
+			ToolCallId: "bounded-mcp-1",
+			Status:     &status,
+			RawOutput: map[string]any{"result": []any{
+				map[string]any{"credential": strings.Repeat("secret", maxToolContentSize)},
+				cycle,
+				map[string]any{"text": large},
+				map[string]any{"text": "must-not-overflow-budget"},
+			}},
+		},
+	}})
+	meta := unmarshalMeta(t, msgs)
+	if len(msgs[0].Content) > maxToolContentSize {
+		t.Fatalf("normalized content exceeded budget: %d", len(msgs[0].Content))
+	}
+	if !utf8.ValidString(msgs[0].Content) {
+		t.Fatal("bounded MCP output is not valid UTF-8")
+	}
+	if strings.Contains(msgs[0].Content, "secret") || strings.Contains(msgs[0].Content, "must-not-overflow-budget") {
+		t.Fatal("unknown or over-budget fields leaked into normalized content")
+	}
+	if len(meta.Content) != 1 || len(meta.RawOutput) != 0 {
+		t.Fatalf("expected one bounded content item and no rawOutput: %+v", meta)
+	}
+}
+
+func TestExtractMessages_MCPUnknownObjectIsUsefulAndRedacted(t *testing.T) {
+	status := acpsdk.ToolCallStatusCompleted
+	msgs := ExtractMessages(acpsdk.SessionNotification{Update: acpsdk.SessionUpdate{
+		ToolCallUpdate: &acpsdk.SessionToolCallUpdate{
+			ToolCallId: "object-mcp-1",
+			Status:     &status,
+			RawOutput: map[string]any{"result": map[string]any{
+				"count":   3,
+				"items":   []any{map[string]any{"name": "alpha"}},
+				"token":   "bearer-secret",
+				"command": "cat /private/file",
+			}},
+		},
+	}})
+	content := msgs[0].Content
+	for _, expected := range []string{"count: 3", "name: alpha", "[redacted]"} {
+		if !strings.Contains(content, expected) {
+			t.Fatalf("expected %q in normalized MCP object: %s", expected, content)
+		}
+	}
+	for _, forbidden := range []string{"bearer-secret", "cat /private/file"} {
+		if strings.Contains(content, forbidden) {
+			t.Fatalf("sensitive value %q leaked: %s", forbidden, content)
+		}
 	}
 }
