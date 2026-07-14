@@ -55,9 +55,10 @@ export const ToolCallCard = React.memo(function ToolCallCard({ toolCall, onFileC
   const rawOutputFallback = normalizeRawToolOutput(toolCall.rawOutput);
   const needsLazyLoad = toolCall.contentLoaded === false && !!toolCall.messageId && !!onLoadContent;
   const hasContent = needsLazyLoad || toolCall.content.some(hasRenderableContent) || rawOutputFallback !== null;
-  const displayContent = lazyContent ?? (toolCall.content.length > 0
-    ? toolCall.content
-    : rawOutputFallback ? [rawOutputFallback] : []);
+  let fallbackContent: ToolCallContentItem[] = [];
+  if (rawOutputFallback) fallbackContent = [rawOutputFallback];
+  const persistedOrFallback = toolCall.content.length > 0 ? toolCall.content : fallbackContent;
+  const displayContent = lazyContent ?? persistedOrFallback;
 
   const handleToggle = async () => {
     if (!hasContent) return;

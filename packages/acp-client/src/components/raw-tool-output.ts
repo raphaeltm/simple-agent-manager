@@ -29,43 +29,63 @@ export function normalizeRawToolOutput(rawOutput: unknown): ToolCallContentItem 
   };
 }
 
-function extractRawOutputText(
-  value: unknown,
-  depth = 0,
-  remaining = MAX_ITEM_TEXT_LENGTH
-): string {
+function extractRawOutputText(value: unknown, depth = 0, remaining = MAX_ITEM_TEXT_LENGTH): string {
   if (depth > 5 || remaining <= 0 || value === null || value === undefined) return '';
+  const scalar = extractScalarText(value, remaining);
+  if (scalar !== null) return scalar;
+  if (Array.isArray(value)) return extractArrayText(value, depth, remaining);
+  if (!isJsonRecord(value)) return '';
+  return extractRecordText(value, depth, remaining);
+}
+
+function extractScalarText(value: unknown, remaining: number): string | null {
   if (typeof value === 'string') return value.slice(0, remaining).trim();
   if (typeof value === 'number' || typeof value === 'boolean') {
     return String(value).slice(0, remaining);
   }
-  if (Array.isArray(value)) {
-    let output = '';
-    for (const entry of value) {
-      const text = extractRawOutputText(entry, depth + 1, remaining - output.length);
-      if (!text) continue;
-      output += `${output ? '\n' : ''}${text}`;
-      if (output.length >= remaining) break;
-    }
-    return output.slice(0, remaining);
+  return null;
+}
+
+function extractArrayText(value: unknown[], depth: number, remaining: number): string {
+  let output = '';
+  for (const entry of value) {
+    const text = extractRawOutputText(entry, depth + 1, remaining - output.length);
+    if (!text) continue;
+    output += (output ? '\n' : '') + text;
+    if (output.length >= remaining) break;
   }
-  if (!isJsonRecord(value)) return '';
+  return output.slice(0, remaining);
+}
+
+function extractRecordText(
+  value: Record<string, unknown>,
+  depth: number,
+  remaining: number
+): string {
   for (const key of ['text', 'output', 'content', 'message', 'result']) {
     const text = extractRawOutputText(value[key], depth + 1, remaining);
     if (text) return text;
   }
   let output = '';
-  for (const key of Object.keys(value).sort()) {
+  for (const key of Object.keys(value).sort((left, right) => left.localeCompare(right))) {
     const separator = output ? '\n' : '';
     const budget = remaining - output.length - separator.length;
     if (budget <= 0) break;
-    const text = sensitiveOutputKey(key)
-      ? '[redacted]'
-      : extractRawOutputText(value[key], depth + 1, budget);
+    const text = extractRecordValueText(value, key, depth, budget);
     if (!text) continue;
-    output += `${separator}${key}: ${text}`.slice(0, remaining - output.length);
+    output += (separator + key + ': ' + text).slice(0, remaining - output.length);
   }
   return output;
+}
+
+function extractRecordValueText(
+  value: Record<string, unknown>,
+  key: string,
+  depth: number,
+  budget: number
+): string {
+  if (sensitiveOutputKey(key)) return '[redacted]';
+  return extractRawOutputText(value[key], depth + 1, budget);
 }
 
 function sensitiveOutputKey(key: string): boolean {

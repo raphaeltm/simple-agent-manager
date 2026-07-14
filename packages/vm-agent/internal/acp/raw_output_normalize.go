@@ -69,59 +69,87 @@ func toolOutputValueText(value any, depth, remaining int) string {
 	if depth > 5 || value == nil || remaining <= 0 {
 		return ""
 	}
+	if text, ok := scalarToolOutputText(value, remaining); ok {
+		return text
+	}
 	switch typed := value.(type) {
-	case string:
-		return truncateToByteBudget(typed, remaining)
-	case float64, float32, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, bool:
-		return truncateToByteBudget(fmt.Sprint(typed), remaining)
 	case []any:
-		var builder strings.Builder
-		for _, entry := range typed {
-			budget := remaining - builder.Len()
-			if budget <= 0 {
-				break
-			}
-			if text := strings.TrimSpace(toolOutputValueText(entry, depth+1, budget)); text != "" {
-				if builder.Len() > 0 && builder.Len() < remaining {
-					builder.WriteByte('\n')
-				}
-				builder.WriteString(truncateToByteBudget(text, remaining-builder.Len()))
-			}
-		}
-		return builder.String()
+		return toolOutputArrayText(typed, depth, remaining)
 	case map[string]any:
-		for _, key := range []string{"text", "output", "content", "message", "result"} {
-			if text := strings.TrimSpace(toolOutputValueText(typed[key], depth+1, remaining)); text != "" {
-				return text
-			}
-		}
-		keys := make([]string, 0, len(typed))
-		for key := range typed {
-			keys = append(keys, key)
-		}
-		sort.Strings(keys)
-		var builder strings.Builder
-		for _, key := range keys {
-			budget := remaining - builder.Len()
-			if budget <= 0 {
-				break
-			}
-			text := "[redacted]"
-			if !sensitiveOutputKey(key) {
-				text = strings.TrimSpace(toolOutputValueText(typed[key], depth+1, budget))
-			}
-			if text == "" {
-				continue
-			}
-			if builder.Len() > 0 && builder.Len() < remaining {
-				builder.WriteByte('\n')
-			}
-			builder.WriteString(truncateToByteBudget(key+": "+text, remaining-builder.Len()))
-		}
-		return builder.String()
+		return toolOutputMapText(typed, depth, remaining)
 	default:
 		return ""
 	}
+}
+
+func scalarToolOutputText(value any, remaining int) (string, bool) {
+	switch typed := value.(type) {
+	case string:
+		return truncateToByteBudget(typed, remaining), true
+	case float64, float32, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, bool:
+		return truncateToByteBudget(fmt.Sprint(typed), remaining), true
+	default:
+		return "", false
+	}
+}
+
+func toolOutputArrayText(values []any, depth, remaining int) string {
+	var builder strings.Builder
+	for _, entry := range values {
+		budget := remaining - builder.Len()
+		if budget <= 0 {
+			break
+		}
+		text := strings.TrimSpace(toolOutputValueText(entry, depth+1, budget))
+		appendToolOutputLine(&builder, text, remaining)
+	}
+	return builder.String()
+}
+
+func toolOutputMapText(values map[string]any, depth, remaining int) string {
+	for _, key := range []string{"text", "output", "content", "message", "result"} {
+		text := strings.TrimSpace(toolOutputValueText(values[key], depth+1, remaining))
+		if text != "" {
+			return text
+		}
+	}
+	keys := sortedToolOutputKeys(values)
+	var builder strings.Builder
+	for _, key := range keys {
+		budget := remaining - builder.Len()
+		if budget <= 0 {
+			break
+		}
+		text := toolOutputMapValueText(values, key, depth, budget)
+		appendToolOutputLine(&builder, key+": "+text, remaining)
+	}
+	return builder.String()
+}
+
+func sortedToolOutputKeys(values map[string]any) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func toolOutputMapValueText(values map[string]any, key string, depth, budget int) string {
+	if sensitiveOutputKey(key) {
+		return "[redacted]"
+	}
+	return strings.TrimSpace(toolOutputValueText(values[key], depth+1, budget))
+}
+
+func appendToolOutputLine(builder *strings.Builder, text string, remaining int) {
+	if text == "" {
+		return
+	}
+	if builder.Len() > 0 && builder.Len() < remaining {
+		builder.WriteByte('\n')
+	}
+	builder.WriteString(truncateToByteBudget(text, remaining-builder.Len()))
 }
 
 func sensitiveOutputKey(key string) bool {
