@@ -23,6 +23,8 @@ You do **not** need a shared cloud provider account. Users provide their own [He
 
 Use a top-level domain as `BASE_DOMAIN` (e.g., `example.com`), not a subdomain (`sam.example.com`). Cloudflare's free Universal SSL covers `*.example.com` but not nested wildcards like `*.sam.example.com`. The root domain is not used by SAM — only `api.`, `app.`, and `*.` subdomains are created.
 
+SAM derives a resource namespace from this domain for Worker names, storage resources, and generated hostnames. For a single installation, use the generated `RESOURCE_PREFIX`; do not choose a generic prefix by hand. If you run multiple SAM installations in the same Cloudflare account and DNS zone, give each installation its own validated namespace so app, API, workspace, port, VM, and deployment hostnames do not collide.
+
 Copy your Cloudflare account ID from the dashboard URL. In a URL like `https://dash.cloudflare.com/<account-id>/<domain>`, the account ID is the 32-character value immediately after `dash.cloudflare.com/`.
 
 Open your domain overview at `https://dash.cloudflare.com/<account-id>/<domain>` and copy the Zone ID from the right sidebar.
@@ -82,6 +84,16 @@ The GitHub App needs **Pull requests: Read-only** because it subscribes to the `
 :::caution
 "Request user authorization (OAuth) during installation" must be **unchecked** on the GitHub form. When checked, it disables the Setup URL and breaks post-installation redirects.
 :::
+
+## Platform integrations after deploy
+
+Fresh deployments can keep most platform integration credentials out of GitHub Actions secrets. After the first deploy, open `/setup` with the one-time setup token and configure the integrations users need:
+
+- **GitHub App and GitHub OAuth** for GitHub-backed projects, pull requests, and repository access.
+- **Google login OAuth** for Sign in with Google. This is separate from Google/GCP infrastructure OAuth.
+- **GitLab OAuth** when users need to create GitLab-backed projects and workspaces.
+
+These values are stored encrypted in SAM's platform configuration store and can be updated later by a superadmin without redeploying. Environment secrets remain useful as fallback values and for infrastructure credentials that must exist before the app can boot.
 
 ## Step 5: Generate Pulumi Passphrase
 
@@ -172,6 +184,8 @@ curl https://api.yourdomain.com/health
 Open the Cloudflare dashboard link printed by the workflow, copy the plaintext `SETUP_TOKEN` Worker variable, then open `https://app.yourdomain.com/setup`. The setup page accepts the token only while first-run setup is incomplete. After you save a valid login provider and complete setup, `/setup` returns Gone and future changes move to the superadmin platform config UI.
 
 Open `https://app.yourdomain.com` — you should see the login page with whichever providers you configured.
+
+If you enabled GitLab in platform configuration, create a test project from a GitLab repository and start a lightweight chat before inviting users. That validates the OAuth app, repository metadata propagation, and workspace credential helper path together.
 
 ## First Login & Admin Access
 

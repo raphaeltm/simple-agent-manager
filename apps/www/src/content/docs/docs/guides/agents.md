@@ -5,6 +5,8 @@ description: Configure and use AI coding agents in SAM — Claude Code, OpenAI C
 
 SAM supports six AI coding agents. Each runs inside a workspace container and communicates via the **Agent Communication Protocol (ACP)**.
 
+Agent sessions can run on VM-backed workspaces or, for matching instant-session profiles, on Cloudflare Containers. Self-hosted deployments enable the container runtime by default; use a full workspace profile when the agent needs the repository's complete devcontainer and long-lived VM environment.
+
 ## Supported Agents
 
 ### Claude Code
@@ -110,6 +112,8 @@ When running an agent, you can choose between two workspace profiles:
 - Startup time: 30-120 seconds faster than full profile
 - Best for quick conversations that don't need custom environments
 
+On deployments with `CF_CONTAINER_ENABLED=true`, lightweight/instant sessions can use Cloudflare Containers instead of provisioning a VM first. This is the fastest path for exploratory chat, planning, and small repository-aware tasks. Choose the full profile when the task depends on custom devcontainer setup, heavyweight services, or cloud VM resources.
+
 ## Agent Session Features
 
 ### Real-Time Streaming
@@ -149,6 +153,8 @@ pending → assigned → running → completed/failed/interrupted
 - **Completed**: Agent finished successfully
 - **Failed**: Agent encountered an error
 - **Interrupted**: VM heartbeat lost (detected after 5 minutes of silence)
+
+SAM now backs chat sessions with task records across more runtime paths. In practice, that means forking, archive/complete controls, lineage, and status reporting behave consistently whether the work started as an idea execution, a full task, or an instant chat.
 
 ### MCP Tools
 
