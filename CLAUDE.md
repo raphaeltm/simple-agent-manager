@@ -218,7 +218,7 @@ If the bug is blocking the current task or is a small adjacent fix, fix it in th
 
 Tasks tracked as markdown in `tasks/` (backlog -> active -> archive). See `tasks/README.md` for conventions.
 
-**Dispatching tasks**: When dispatching tasks to other agents, always instruct them to use the `/do` skill, then verify the task actually started with the requested profile and title. Do not wait on failed, queued, missing, or wrong-profile sessions. See `.claude/rules/09-task-tracking.md`.
+**Dispatching tasks**: When dispatching tasks to other agents, always instruct them to use the `/do` skill in prose, for example `Execute this task using the /do skill.` Never start a dispatched task description with `/do` or any slash command; Codex treats that as CLI slash-command syntax and can reject the prompt before SAM bootstrap instructions are processed. Verify the task actually started with the requested profile and title. Do not wait on failed, queued, missing, or wrong-profile sessions. See `.claude/rules/09-task-tracking.md`.
 
 **Read-only investigations**: PR status, PR history, task status, and diagnostic questions are read-only by default. Use SAM MCP, GitHub, logs, and local evidence in the current session. Do not create task files, branches, commits, or PRs unless the user asks for code/config changes or durable artifacts.
 
