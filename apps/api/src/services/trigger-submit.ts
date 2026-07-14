@@ -32,8 +32,15 @@ import { requireRepositoryOwnerAccess } from '../routes/projects/_helpers';
 import { generateBranchName } from './branch-name';
 import * as projectDataService from './project-data';
 import { parseSkillResourceRequirementsJson, resolveSkillProfile } from './skills';
-import { startTaskRunnerDO } from './task-runner-do';
+import { ensureTaskRunnerStarted, startTaskRunnerDO } from './task-runner-do';
 import { generateTaskTitle, getTaskTitleConfig } from './task-title';
+import {
+  type SubmittedTriggerTask,
+  TriggerTaskSubmissionPendingError,
+} from './trigger-submission';
+
+export { TriggerTaskSubmissionPendingError } from './trigger-submission';
+export type SubmitTriggeredTaskResult = SubmittedTriggerTask;
 
 export interface SubmitTriggeredTaskInput {
   /** The trigger that's firing. */
@@ -47,7 +54,7 @@ export interface SubmitTriggeredTaskInput {
   /** The rendered prompt to use as the task description. */
   renderedPrompt: string;
   /** How the task was triggered (e.g., 'cron'). */
-  triggeredBy: 'cron' | 'webhook' | 'github';
+  triggeredBy: 'user' | 'cron' | 'webhook' | 'github';
   /** Agent profile ID to use (from trigger config). */
   agentProfileId: string | null;
   /** Skill ID to use (from trigger config). */
@@ -60,12 +67,6 @@ export interface SubmitTriggeredTaskInput {
   triggerName: string;
 }
 
-export interface SubmitTriggeredTaskResult {
-  taskId: string;
-  sessionId: string;
-  branchName: string;
-}
-
 /**
  * Submit a task from a trigger execution. Resolves project config,
  * user credentials, agent profile, and starts the TaskRunner DO.
@@ -73,7 +74,7 @@ export interface SubmitTriggeredTaskResult {
 export async function submitTriggeredTask(
   env: Env,
   input: SubmitTriggeredTaskInput
-): Promise<SubmitTriggeredTaskResult> {
+): Promise<SubmittedTriggerTask> {
   const db = drizzle(env.DATABASE, { schema });
 
   // Resolve project config
@@ -88,20 +89,34 @@ export async function submitTriggeredTask(
   }
 
   // Resolve agent profile if specified
-  const resolvedProfile = input.agentProfileId || input.skillId
-    ? await resolveSkillProfile(db, input.projectId, input.agentProfileId, input.skillId, input.userId, env)
-    : null;
-  const skillResourceRequirements = parseSkillResourceRequirementsJson(resolvedProfile?.resourceRequirementsJson);
+  const resolvedProfile =
+    input.agentProfileId || input.skillId
+      ? await resolveSkillProfile(
+          db,
+          input.projectId,
+          input.agentProfileId,
+          input.skillId,
+          input.userId,
+          env
+        )
+      : null;
+  const skillResourceRequirements = parseSkillResourceRequirementsJson(
+    resolvedProfile?.resourceRequirementsJson
+  );
 
   // VM config precedence: trigger override → profile → project default → platform default
-  const vmSizeSource = input.vmSizeOverride ? 'trigger' as const
-    : resolvedProfile?.vmSizeOverride ? 'agent-profile' as const
-    : project.defaultVmSize ? 'project' as const
-    : 'platform' as const;
-  const vmSize: VMSize = (input.vmSizeOverride as VMSize | null)
-    ?? (resolvedProfile?.vmSizeOverride as VMSize | null)
-    ?? (project.defaultVmSize as VMSize | null)
-    ?? DEFAULT_VM_SIZE;
+  const vmSizeSource = input.vmSizeOverride
+    ? ('trigger' as const)
+    : resolvedProfile?.vmSizeOverride
+      ? ('agent-profile' as const)
+      : project.defaultVmSize
+        ? ('project' as const)
+        : ('platform' as const);
+  const vmSize: VMSize =
+    (input.vmSizeOverride as VMSize | null) ??
+    (resolvedProfile?.vmSizeOverride as VMSize | null) ??
+    (project.defaultVmSize as VMSize | null) ??
+    DEFAULT_VM_SIZE;
 
   const profileProvider =
     typeof resolvedProfile?.provider === 'string' && isValidProvider(resolvedProfile.provider)
@@ -111,32 +126,35 @@ export async function submitTriggeredTask(
     typeof project.defaultProvider === 'string' && isValidProvider(project.defaultProvider)
       ? project.defaultProvider
       : null;
-  const provider: CredentialProvider | null =
-    profileProvider
-    ?? projectDefaultProvider
-    ?? null;
+  const provider: CredentialProvider | null = profileProvider ?? projectDefaultProvider ?? null;
 
   const { resolveCredentialSource } = await import('./provider-credentials');
-  const credResult = await resolveCredentialSource(db, input.userId, provider ?? undefined, input.projectId);
+  const credResult = await resolveCredentialSource(
+    db,
+    input.userId,
+    provider ?? undefined,
+    input.projectId
+  );
   if (!credResult) {
     throw new Error(`No cloud provider credentials available for trigger ${input.triggerId}`);
   }
   const effectiveProvider = provider ?? credResult.providerName;
 
   const vmLocation: VMLocation =
-    (resolvedProfile?.vmLocation as VMLocation | null)
-    ?? (project.defaultLocation as VMLocation | null)
-    ?? (provider ? (getDefaultLocationForProvider(provider) as VMLocation | null) : null)
-    ?? DEFAULT_VM_LOCATION;
+    (resolvedProfile?.vmLocation as VMLocation | null) ??
+    (project.defaultLocation as VMLocation | null) ??
+    (provider ? (getDefaultLocationForProvider(provider) as VMLocation | null) : null) ??
+    DEFAULT_VM_LOCATION;
 
   const workspaceProfile: WorkspaceProfile =
-    (resolvedProfile?.workspaceProfile as WorkspaceProfile | null)
-    ?? (project.defaultWorkspaceProfile as WorkspaceProfile | null)
-    ?? DEFAULT_WORKSPACE_PROFILE;
+    (resolvedProfile?.workspaceProfile as WorkspaceProfile | null) ??
+    (project.defaultWorkspaceProfile as WorkspaceProfile | null) ??
+    DEFAULT_WORKSPACE_PROFILE;
 
-  const taskMode: TaskMode = input.taskMode
-    ?? (resolvedProfile?.taskMode as TaskMode | null)
-    ?? (workspaceProfile === 'lightweight' ? 'conversation' : 'task');
+  const taskMode: TaskMode =
+    input.taskMode ??
+    (resolvedProfile?.taskMode as TaskMode | null) ??
+    (workspaceProfile === 'lightweight' ? 'conversation' : 'task');
 
   // Generate branch name from trigger name + date
   const branchPrefix = env.BRANCH_NAME_PREFIX || 'sam/';
@@ -163,7 +181,7 @@ export async function submitTriggeredTask(
       agentProfileId: resolvedProfile?.profileId ?? undefined,
       projectId: input.projectId,
       userId: input.userId,
-    },
+    }
   );
 
   const now = new Date().toISOString();
@@ -192,7 +210,8 @@ export async function submitTriggeredTask(
     resourceRequirementsSource: resolvedReservation.source,
     resolvedReservationJson: JSON.stringify(resolvedReservation),
     credentialAttributionUserId: input.userId,
-    credentialAttributionProjectId: credResult.credentialSource === 'project' ? input.projectId : null,
+    credentialAttributionProjectId:
+      credResult.credentialSource === 'project' ? input.projectId : null,
     credentialAttributionSource: credResult.credentialSource,
     createdBy: input.userId,
     createdAt: now,
@@ -235,8 +254,13 @@ export async function submitTriggeredTask(
   } catch (err) {
     const failedAt = new Date().toISOString();
     const errorMsg = err instanceof Error ? err.message : String(err);
-    await db.update(schema.tasks)
-      .set({ status: 'failed', errorMessage: `Session creation failed: ${errorMsg}`, updatedAt: failedAt })
+    await db
+      .update(schema.tasks)
+      .set({
+        status: 'failed',
+        errorMessage: `Session creation failed: ${errorMsg}`,
+        updatedAt: failedAt,
+      })
       .where(eq(schema.tasks.id, taskId));
     await db.insert(schema.taskStatusEvents).values({
       id: ulid(),
@@ -269,54 +293,82 @@ export async function submitTriggeredTask(
       input.userId,
       `trigger-${input.triggeredBy}`
     );
-    await startTaskRunnerDO(env, {
-      taskId,
-      projectId: input.projectId,
-      userId: input.userId,
-      vmSize,
-      vmLocation,
-      branch,
-      defaultBranch: project.defaultBranch,
-      userName: userRow?.name ?? null,
-      userEmail: userRow?.email ?? null,
-      githubId: userRow?.githubId ?? null,
-      taskTitle,
-      taskDescription: input.renderedPrompt,
-      repository: project.repository,
-      installationId: project.installationId,
-      outputBranch: branchName,
-      projectDefaultVmSize: project.defaultVmSize as VMSize | null,
-      chatSessionId: sessionId,
-      agentType: resolvedProfile?.agentType ?? project.defaultAgentType ?? null,
-      workspaceProfile,
-      cloudProvider: effectiveProvider,
-      credentialAttributionUserId: input.userId,
-      credentialAttributionProjectId: credResult.credentialSource === 'project' ? input.projectId : null,
-      credentialAttributionSource: credResult.credentialSource,
-      taskMode,
-      model: resolvedProfile?.model ?? null,
-      effort: resolvedProfile?.effort ?? null,
-      permissionMode: resolvedProfile?.permissionMode ?? null,
-      // OpenCode settings: VM agent fetches user-level settings via callback
-      opencodeProvider: null,
-      opencodeBaseUrl: null,
-      systemPromptAppend: resolvedProfile?.systemPromptAppend ?? null,
-      agentProfileHint: resolvedProfile?.profileId ?? null,
-      projectScaling: {
-        taskExecutionTimeoutMs: project.taskExecutionTimeoutMs ?? null,
-        maxWorkspacesPerNode: project.maxWorkspacesPerNode ?? null,
-        nodeCpuThresholdPercent: project.nodeCpuThresholdPercent ?? null,
-        nodeMemoryThresholdPercent: project.nodeMemoryThresholdPercent ?? null,
-        warmNodeTimeoutMs: project.warmNodeTimeoutMs ?? null,
-      },
-      resolvedReservation,
-      vmSizeSource,
-    });
+    try {
+      await startTaskRunnerDO(env, {
+        taskId,
+        projectId: input.projectId,
+        userId: input.userId,
+        vmSize,
+        vmLocation,
+        branch,
+        defaultBranch: project.defaultBranch,
+        userName: userRow?.name ?? null,
+        userEmail: userRow?.email ?? null,
+        githubId: userRow?.githubId ?? null,
+        taskTitle,
+        taskDescription: input.renderedPrompt,
+        repository: project.repository,
+        installationId: project.installationId,
+        outputBranch: branchName,
+        projectDefaultVmSize: project.defaultVmSize as VMSize | null,
+        chatSessionId: sessionId,
+        agentType: resolvedProfile?.agentType ?? project.defaultAgentType ?? null,
+        workspaceProfile,
+        cloudProvider: effectiveProvider,
+        credentialAttributionUserId: input.userId,
+        credentialAttributionProjectId:
+          credResult.credentialSource === 'project' ? input.projectId : null,
+        credentialAttributionSource: credResult.credentialSource,
+        taskMode,
+        model: resolvedProfile?.model ?? null,
+        effort: resolvedProfile?.effort ?? null,
+        permissionMode: resolvedProfile?.permissionMode ?? null,
+        // OpenCode settings: VM agent fetches user-level settings via callback
+        opencodeProvider: null,
+        opencodeBaseUrl: null,
+        systemPromptAppend: resolvedProfile?.systemPromptAppend ?? null,
+        agentProfileHint: resolvedProfile?.profileId ?? null,
+        projectScaling: {
+          taskExecutionTimeoutMs: project.taskExecutionTimeoutMs ?? null,
+          maxWorkspacesPerNode: project.maxWorkspacesPerNode ?? null,
+          nodeCpuThresholdPercent: project.nodeCpuThresholdPercent ?? null,
+          nodeMemoryThresholdPercent: project.nodeMemoryThresholdPercent ?? null,
+          warmNodeTimeoutMs: project.warmNodeTimeoutMs ?? null,
+        },
+        resolvedReservation,
+        vmSizeSource,
+      });
+    } catch (startError) {
+      let durableStart: boolean;
+      try {
+        durableStart = await ensureTaskRunnerStarted(env, taskId);
+      } catch (statusError) {
+        log.warn('trigger_submit.task_runner_status_check_failed', {
+          taskId,
+          triggerId: input.triggerId,
+          triggerExecutionId: input.triggerExecutionId,
+          error: statusError instanceof Error ? statusError.message : String(statusError),
+        });
+        throw new TriggerTaskSubmissionPendingError({ taskId, sessionId, branchName });
+      }
+      if (!durableStart) throw startError;
+      log.warn('trigger_submit.task_runner_start_ack_lost', {
+        taskId,
+        triggerId: input.triggerId,
+        triggerExecutionId: input.triggerExecutionId,
+      });
+    }
   } catch (err) {
+    if (err instanceof TriggerTaskSubmissionPendingError) throw err;
     const failedAt = new Date().toISOString();
     const errorMsg = err instanceof Error ? err.message : String(err);
-    await db.update(schema.tasks)
-      .set({ status: 'failed', errorMessage: `Task runner startup failed: ${errorMsg}`, updatedAt: failedAt })
+    await db
+      .update(schema.tasks)
+      .set({
+        status: 'failed',
+        errorMessage: `Task runner startup failed: ${errorMsg}`,
+        updatedAt: failedAt,
+      })
       .where(eq(schema.tasks.id, taskId));
     await db.insert(schema.taskStatusEvents).values({
       id: ulid(),

@@ -1,9 +1,10 @@
 import type { Sandbox } from '@cloudflare/sandbox';
 
 import type { VmAgentContainer } from './durable-objects/vm-agent-container';
+import type { WebhookTriggerEnv } from './webhook-trigger-env';
 
 // Cloudflare bindings type
-export interface Env {
+export interface Env extends WebhookTriggerEnv {
   // D1 Database
   DATABASE: D1Database;
   // KV for sessions

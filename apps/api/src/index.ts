@@ -121,6 +121,7 @@ import { terminalRoutes } from './routes/terminal';
 import { transcribeRoutes } from './routes/transcribe';
 import { trialRoutes } from './routes/trial';
 import { trialOnboardingRoutes } from './routes/trial/index';
+import { triggerWebhookRoutes } from './routes/trigger-webhooks';
 import { triggersRoutes } from './routes/triggers';
 import { ttsRoutes } from './routes/tts';
 import { uiGovernanceRoutes } from './routes/ui-governance';
@@ -377,11 +378,13 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
   }
 
   const nodeRuntime = workspace.nodeId
-    ? (await db
-        .select({ runtime: schema.nodes.runtime })
-        .from(schema.nodes)
-        .where(eq(schema.nodes.id, workspace.nodeId))
-        .get())?.runtime ?? 'vm'
+    ? ((
+        await db
+          .select({ runtime: schema.nodes.runtime })
+          .from(schema.nodes)
+          .where(eq(schema.nodes.id, workspace.nodeId))
+          .get()
+      )?.runtime ?? 'vm')
     : 'vm';
 
   if (workspace.status !== 'running' && workspace.status !== 'recovery') {
@@ -402,10 +405,16 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
   if (nodeRuntime === 'cf-container') {
     const containerConfig = getVmAgentContainerConfig(c.env);
     if (!containerConfig.enabled) {
-      return c.json({ error: 'CF_CONTAINER_DISABLED', message: 'Container workspace runtime is disabled' }, 503);
+      return c.json(
+        { error: 'CF_CONTAINER_DISABLED', message: 'Container workspace runtime is disabled' },
+        503
+      );
     }
     if (!c.env.VM_AGENT_CONTAINER) {
-      return c.json({ error: 'CF_CONTAINER_UNAVAILABLE', message: 'VM agent container binding is unavailable' }, 503);
+      return c.json(
+        { error: 'CF_CONTAINER_UNAVAILABLE', message: 'VM agent container binding is unavailable' },
+        503
+      );
     }
 
     const containerId = workspace.nodeId || workspaceId;
@@ -427,7 +436,10 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
           workspaceId,
           ...serializeError(err),
         });
-        return c.json({ error: 'TOKEN_ERROR', message: 'Failed to generate port proxy token' }, 500);
+        return c.json(
+          { error: 'TOKEN_ERROR', message: 'Failed to generate port proxy token' },
+          500
+        );
       }
     }
 
@@ -663,7 +675,8 @@ app.get('/api/config/artifacts-enabled', (c) => {
 // only render a provider button when that provider is actually usable. Google
 // here means the LOGIN client (getGoogleLoginOAuthConfig), never the infra/GCP one.
 app.get('/api/config/login-providers', async (c) => {
-  const { getGitHubOAuthConfig, getGitLabOAuthConfig, getGoogleLoginOAuthConfig } = await import('./services/platform-config');
+  const { getGitHubOAuthConfig, getGitLabOAuthConfig, getGoogleLoginOAuthConfig } =
+    await import('./services/platform-config');
   const [github, google, gitlab] = await Promise.all([
     getGitHubOAuthConfig(c.env),
     getGoogleLoginOAuthConfig(c.env),
@@ -725,6 +738,7 @@ app.route('/api/client-errors', clientErrorsRoutes);
 app.route('/api/cli', cliRoutes);
 app.route('/api/chats', chatsRoutes);
 app.route('/api/t', analyticsIngestRoutes);
+app.route('/api/webhooks', triggerWebhookRoutes);
 // ORDERING IS CRITICAL: Routes using callback JWT auth MUST be mounted before
 // projectsRoutes. projectsRoutes has use('/*', requireAuth()) which leaks to
 // all siblings at the same base path — mounting these routes first causes them
@@ -992,6 +1006,7 @@ export default {
       triggerExecStaleRecovered: triggerCleanup.staleRecovered,
       triggerExecStaleQueuedRecovered: triggerCleanup.staleQueuedRecovered,
       triggerExecRetentionPurged: triggerCleanup.retentionPurged,
+      webhookDeliveriesPurged: triggerCleanup.webhookDeliveriesPurged,
       triggerExecCleanupErrors: triggerCleanup.errors,
       composeArtifactCleanupSkipped: composeArtifactCleanup.skipped,
       composeArtifactCleanupSkipReason: composeArtifactCleanup.skipReason,

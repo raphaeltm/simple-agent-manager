@@ -13,6 +13,7 @@ import type { TaskRunner } from '../../src/durable-objects/task-runner';
 import type { TaskRunnerState } from '../../src/durable-objects/task-runner/types';
 import {
   advanceTaskRunnerWorkspaceReady,
+  ensureTaskRunnerStarted,
   getTaskRunnerStatus,
   startTaskRunnerDO,
 } from '../../src/services/task-runner-do';
@@ -230,6 +231,25 @@ describe('task-runner-do proxy — Worker→DO contract', () => {
   it('getTaskRunnerStatus returns null for uninitialized DO', async () => {
     const status = await getTaskRunnerStatus(env, 'task-status-none-001');
     expect(status).toBeNull();
+  });
+
+  it('ensureTaskRunnerStarted distinguishes an uninitialized DO', async () => {
+    await expect(ensureTaskRunnerStarted(env, 'task-ensure-none-001')).resolves.toBe(false);
+  });
+
+  it('ensureTaskRunnerStarted repairs a missing alarm for durable work', async () => {
+    const taskId = 'task-ensure-alarm-001';
+    await startTaskRunnerDO(env, makeStartInput(taskId));
+    const stub = getStub(taskId);
+    await runInDurableObject(stub, async (instance) => {
+      const state = await instance.ctx.storage.get<TaskRunnerState>('state');
+      expect(state).toBeTruthy();
+      await instance.ctx.storage.deleteAlarm();
+    });
+
+    await expect(ensureTaskRunnerStarted(env, taskId)).resolves.toBe(true);
+    const alarm = await runInDurableObject(stub, (instance) => instance.ctx.storage.getAlarm());
+    expect(alarm).not.toBeNull();
   });
 
   it('getTaskRunnerStatus returns state for initialized DO', async () => {
