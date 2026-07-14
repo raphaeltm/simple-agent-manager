@@ -609,7 +609,7 @@ async function verifyWebhookCreation(page: Page, screenshotName: string) {
   await page.getByRole('button', { name: /add filter/i }).click();
   await page.getByLabel('Filter 1 path').fill('event.action');
   await page.getByLabel('Filter 1 operator').selectOption('equals');
-  await page.getByLabel('Filter 1 value').fill('triggered');
+  await page.getByLabel('Filter 1 value', { exact: true }).fill('triggered');
   await page.getByLabel('Prompt template').fill('Triage: {{webhook.payload}}');
   await page.getByRole('button', { name: 'Create Trigger', exact: true }).click();
   await expect(page.getByRole('dialog', { name: /save your webhook credential/i })).toBeVisible();
