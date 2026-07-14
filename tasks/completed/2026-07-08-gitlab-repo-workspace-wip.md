@@ -1,9 +1,8 @@
-# GitLab Repository And Workspace Support WIP
+# GitLab Repository And Workspace Support
 
 ## Status
 
-Active release-readiness continuation on top of #1545
-(`sam/gitlab-platform-config-wip`).
+Completed and deployed to production on 2026-07-14.
 
 ## Constraints
 
@@ -270,3 +269,30 @@ The task remains active because acceptance criterion seven necessarily cannot
 be complete until the stack is merged in dependency order and the production
 deployment is healthy. Run the final completion validation and archive only
 after that release lifecycle finishes.
+
+## Task Completion Validation (Final, 2026-07-14)
+
+Verdict: **PASS**. Checks A through F pass, and the release-lifecycle condition
+from the pre-merge audit is now satisfied:
+
+- PR #1547 merged into foundation PR #1545, and #1545 merged to `main` in
+  dependency order as `a2b4a013283bb8f1c8b62314ae9adebcbd7b717c`.
+- Refreshed combined-head CI, E2E smoke, exact-head staging deployment, D1
+  integrity checks, and staging smoke tests passed before merge.
+- Post-merge `main` CI run `29324677845` passed the full coverage suite,
+  VM-agent test/integration/E2E suites, and devcontainer volume-mount test.
+- Production run `29325059770` deployed
+  `33db8ec1c63e1406c2535b64a2802c6f918505a7`, one docs-only commit ahead of
+  the feature merge. Infrastructure, Worker/UI deployment, backup, migrations,
+  row-count integrity, VM-agent/CLI publication, and workflow health all
+  passed.
+- Read-only live checks returned HTTP 200 with `status=healthy` from
+  `https://api.simple-agent-manager.org/health` and HTTP 200 HTML from
+  `https://app.simple-agent-manager.org`.
+- The user independently confirmed successful GitLab pushes from both VM and
+  instant-container workspaces. The direct exact-commit staging cycle also
+  verified a temporary branch at
+  `0671c4b73bd6d1a668d47cbadc094c42749255ba`, its exact remote SHA, remote
+  deletion, and clean local teardown.
+
+All acceptance criteria are complete. The task is ready for archival.

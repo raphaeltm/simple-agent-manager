@@ -1,10 +1,13 @@
-# GitLab Platform Config Foundation (WIP)
+# GitLab Platform Config Foundation
 
 ## Problem
 
 SAM has a detailed GitLab integration plan in SAM idea `01KV7ZFD6HZS5N7J45VA798KN1`, but the implementation should start with the new DB-backed platform-level integration config model. GitLab OAuth app credentials should be configurable through first-run setup and superadmin platform config, with runtime D1 values overriding optional environment fallbacks.
 
-This task is intentionally WIP. It must not deploy to staging and must not merge to production.
+This task began as a WIP-only foundation slice. That constraint was preserved
+until the user explicitly superseded it on 2026-07-14 after live GitLab push
+verification in both VM and instant-container workspaces. The foundation then
+shipped as the base of the completed GitLab repository/workspace stack.
 
 ## Scope
 
@@ -64,11 +67,31 @@ Out of scope for this WIP PR:
 - Secret values are encrypted through the existing `platform_credentials` path.
 - Setup completion can treat GitLab OAuth as a sign-in provider once configured.
 - Existing GitHub and Google platform config behavior remains unchanged.
-- The PR is opened as draft/WIP only, with no staging deployment and no merge.
+- The PR remained draft/WIP with no staging deployment or merge until the user
+  explicitly authorized the completed stack for release.
 
 ## References
 
 - SAM idea: `01KV7ZFD6HZS5N7J45VA798KN1`
 - GitLab OAuth docs: https://docs.gitlab.com/integration/oauth_provider/
 - GitLab OAuth token API: https://docs.gitlab.com/api/oauth2/
-- `/do` constraint: WIP PR, no staging, no production merge.
+- Historical `/do` constraint: WIP PR, no staging, no production merge;
+  superseded by the user's explicit 2026-07-14 release authorization.
+
+## Final Release Status (2026-07-14)
+
+- Foundation PR #1545 incorporated repository/workspace PR #1547 in dependency
+  order, passed the refreshed combined CI and exact-head staging deployment,
+  and merged to `main` as `a2b4a013283bb8f1c8b62314ae9adebcbd7b717c`.
+- Post-merge `main` CI run `29324677845` passed all required suites.
+- Production run `29325059770` deployed
+  `33db8ec1c63e1406c2535b64a2802c6f918505a7`, one docs-only commit ahead of
+  the feature merge. Cloudflare deployment, D1 backup/migrations/row-count
+  integrity, Worker/UI rollout, VM-agent/CLI publication, and the workflow
+  health check all passed.
+- Final read-only checks returned HTTP 200 with `status=healthy` from the
+  production API and HTTP 200 HTML from the production web app.
+
+Verdict: **PASS**. The superseded WIP constraint was honored until explicit
+release authorization, and all functional acceptance criteria shipped as part
+of the completed stack.
