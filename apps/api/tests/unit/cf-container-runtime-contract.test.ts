@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
+import { CODEX_ACP_WRAPPER_PACKAGE } from '@simple-agent-manager/shared';
 
 const apiPackageRoot = join(fileURLToPath(new URL('.', import.meta.url)), '../..');
 const apiRoot = join(apiPackageRoot, 'src');
@@ -202,7 +203,18 @@ describe('cf-container runtime spike contracts', () => {
     );
     expect(dockerfile).toContain('githubcli-archive-keyring.gpg');
     expect(dockerfile).toContain('apt-get install -y --no-install-recommends gh');
-    expect(dockerfile).toContain('@agentclientprotocol/codex-acp');
+    expect(dockerfile).toContain(CODEX_ACP_WRAPPER_PACKAGE);
+    const vmGateway = readFileSync(
+      join(apiPackageRoot, '../../packages/vm-agent/internal/acp/gateway.go'),
+      'utf8'
+    );
+    const sharedCatalog = readFileSync(
+      join(apiPackageRoot, '../../packages/shared/src/agents.ts'),
+      'utf8'
+    );
+    expect(vmGateway).toContain('@agentclientprotocol/codex-acp@" + codexACPWrapperVersion');
+    expect(vmGateway).toContain(`codexACPWrapperVersion = "${CODEX_ACP_WRAPPER_PACKAGE.split('@').at(-1)}"`);
+    expect(sharedCatalog).toContain(`CODEX_ACP_WRAPPER_VERSION = '${CODEX_ACP_WRAPPER_PACKAGE.split('@').at(-1)}'`);
     expect(dockerfile).toContain('USER node');
     expect(dockerfile).toContain('chown -R node:node /workspaces /var/lib/vm-agent');
     expect(bootstrap).toContain('agent_bin="${VM_AGENT_BIN:-/usr/local/bin/vm-agent}"');

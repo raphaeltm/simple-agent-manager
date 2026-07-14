@@ -889,7 +889,10 @@ type agentCommandInfo struct {
 	authFilePath  string // relative to home dir, e.g. ".codex/auth.json" (only when injectionMode == "auth-file")
 }
 
-const codexACPInstallCommand = "npm install -g @agentclientprotocol/codex-acp"
+const (
+	codexACPWrapperVersion = "1.1.2"
+	codexACPInstallCommand = "npm install -g @agentclientprotocol/codex-acp@" + codexACPWrapperVersion
+)
 
 // getAgentCommandInfo returns the ACP command, args, env var name, and install command for a given agent type.
 // These match the agent catalog defined in packages/shared/src/agents.ts.

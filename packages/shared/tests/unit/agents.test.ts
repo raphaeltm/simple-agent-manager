@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
   AGENT_CATALOG,
+  CODEX_ACP_WRAPPER_PACKAGE,
+  CODEX_ACP_WRAPPER_VERSION,
   getAgentDefinition,
   isValidAgentType,
 } from '../../src/agents';
@@ -59,10 +61,11 @@ describe('AGENT_CATALOG', () => {
     const codex = AGENT_CATALOG.find((a) => a.id === 'openai-codex');
     expect(codex).toMatchObject({
       acpCommand: 'codex-acp',
-      installCommand: 'npx --yes @agentclientprotocol/codex-acp --version',
+      installCommand: `npx --yes ${CODEX_ACP_WRAPPER_PACKAGE} --version`,
       supportsAcp: true,
     });
     expect(codex?.oauthSupport?.envVarName).toBe('CODEX_AUTH_JSON');
+    expect(CODEX_ACP_WRAPPER_VERSION).toBe('1.1.2');
   });
 
   it('opencode has no OAuth support', () => {
