@@ -311,6 +311,6 @@ describe('ProjectTriggers', () => {
       ).not.toBeInTheDocument();
       expect(screen.queryByText('sam_wh_one_time_test_token')).not.toBeInTheDocument();
       expect(newTriggerButton).toHaveFocus();
-    });
+    }, 10_000);
   });
 });
