@@ -13,7 +13,7 @@ This page summarizes recent changes that affect how people use SAM. Use it as a 
 | Project Files | You can inspect a branch's file tree and diff without opening a VM. | Project **Files** tab |
 | Forkable, task-backed chats | Any chat can be forked, archived, and tracked with task lifecycle behavior. | Project chat sessions |
 | Focus Mode sidebars | Desktop users can collapse navigation and session sidebars for more room while chatting. | Project chat workspace |
-| Generic webhook triggers | External systems can start SAM work by calling a project webhook. | Trigger configuration |
+| GitHub event triggers | GitHub issues, comments, pull requests, and pushes can start SAM work through project triggers. | Project **Triggers** page |
 | First-run setup wizard | New self-hosted installs can configure platform integrations after deploy. | `/setup` on a fresh deployment |
 | Namespaced self-host domains | Multiple SAM installations can share one Cloudflare zone without hostname collisions. | Self-host deployment planning |
 | Default instant container runtime | New self-hosted deployments use Cloudflare Containers for instant sessions by default. | Self-host deployment and agent runtime selection |
@@ -71,11 +71,19 @@ The intended mental model:
 - Focus Mode is for staying with one session.
 - Zen-style collapsed sidebars are for maximum reading and prompt-writing space.
 
-## External systems can trigger SAM work
+## GitHub events can trigger SAM work
 
-Generic webhook triggers let tools outside SAM start agent work by sending a webhook payload. This is useful for events that are not tied to an existing first-party integration yet: monitoring alerts, build system callbacks, internal tools, or scripts.
+Project triggers now cover GitHub events in addition to schedules. A project can start agent work when matching GitHub issues, issue comments, pull requests, or pushes arrive.
 
-When using webhook triggers, document what the payload means in the trigger prompt. Agents can only act on the context they receive, so a good webhook-triggered task should include enough identifying information to reproduce or inspect the event.
+Use this from the project **Triggers** page:
+
+1. Create a trigger.
+2. Choose a GitHub event type.
+3. Add filters such as labels, branches, ignored actors, command prefixes, or draft-PR handling.
+4. Write the prompt template the agent should receive when the event matches.
+5. Choose the agent profile, task mode, and concurrency behavior.
+
+Prompt templates can include event fields such as the actor, repository, issue or PR number, title, body, comment, labels, branch, and SHA. Keep the prompt explicit about what the agent should inspect or change; webhook-triggered tasks are only as useful as the context the trigger passes in.
 
 ## Self-host setup moved more configuration into the app
 
