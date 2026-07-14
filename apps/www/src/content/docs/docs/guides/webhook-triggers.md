@@ -49,7 +49,7 @@ Webhook templates can interpolate:
 | `{{project.id}}`, `{{project.name}}`               | Project identity                               |
 | `{{execution.id}}`, `{{execution.sequenceNumber}}` | Reserved execution identity                    |
 
-Templates are rendered as plain text. Strings keep their original quotes, ampersands, Markdown, and HTML-like characters; SAM does not HTML-entity encode agent prompts. Interpolating a complete object or array, such as `{{webhook.body}}` or `{{webhook.headers}}`, produces canonical compact JSON with deterministic object-key ordering. `null` renders as `null`, while a missing path renders blank and produces a preview warning. An optional source label that has not been configured therefore renders blank. If an interpolated value or the complete prompt exceeds its configured bound, the rendered text includes `[truncated by SAM]` at the truncation point.
+Templates are rendered as plain text. Strings keep their original quotes, ampersands, Markdown, and HTML-like characters; SAM does not HTML-entity encode agent prompts. Interpolating a complete object or array, such as `{{webhook.body}}` or `{{webhook.headers}}`, produces canonical compact JSON with deterministic object-key ordering. `null` renders as `null`, while a missing path renders blank. An optional source label that has not been configured therefore renders blank. If an interpolated value or the complete prompt exceeds its configured bound, the rendered text includes `[truncated by SAM]` at the truncation point.
 
 Use **Preview** on the trigger detail page to test a sample payload, header selection, filters, and rendered prompt without starting work. A manual run accepts the same optional sample context but creates a real execution.
 

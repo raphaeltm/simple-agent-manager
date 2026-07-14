@@ -28,7 +28,7 @@ The user explicitly decided that an unset `webhook.sourceLabel` must remain blan
 - [x] Add the exact reported webhook template/payload as a realistic ingress-to-submission regression test, including `{}` headers and blank source label.
 - [x] Verify existing nested webhook body/header paths and cron/GitHub rendering remain correct.
 - [x] Update public webhook template documentation and internal renderer comments to describe plain-text, structured-value, blank-label, and truncation semantics.
-- [ ] Run focused tests, lint, typecheck, full tests, build, diff checks, and mandatory specialist reviews.
+- [x] Run focused tests, lint, typecheck, full tests, build, diff checks, and mandatory specialist reviews.
 - [ ] Deploy to staging and verify the exact template through authenticated preview plus real webhook ingestion/task prompt persistence.
 - [ ] Open a new PR, wait for every check to pass, squash-merge, and monitor the production deployment and live health.
 
