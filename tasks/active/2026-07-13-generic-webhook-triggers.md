@@ -2,7 +2,7 @@
 
 ## Status and delivery constraint
 
-- Status: active on `sam/lets-pick-work-started-baecxj`, adopted from the orphaned implementation branch and updated with current `main`; local revalidation, specialist review, staging, and CI remain required.
+- Status: active on `sam/lets-pick-work-started-baecxj`, adopted from the orphaned implementation branch and updated with current `main`; local revalidation is complete; specialist review, staging, and CI remain required.
 - Delivery: The user explicitly superseded the prior draft/do-not-merge constraint on 2026-07-14. Open a normal PR, merge only after every `/do` gate passes, deploy to production, and pause for his input on any material UX or architecture uncertainty.
 - SAM design record: idea `01KXE21NN5F6QZA42ZB591B4T0`.
 
@@ -169,13 +169,13 @@ Use D1 batch/conditional statements for atomic create/config, rotation, delivery
 - [x] Add concurrent duplicate/concurrency/sequence tests and cron/GitHub/manual regression coverage.
 - [ ] Run migration-safety, focused tests, full lint/typecheck/test/build, file-size check, task completion validation, and all required specialist reviews.
 - [ ] Run local Playwright visual audit, deploy to staging, verify D1 migration/config via Cloudflare API, then exercise create/preview/ingest/dedup/filter/concurrency/rotation/delivery/execution/task flow and credential-free logs in a real browser/API flow.
-- [ ] Open a draft PR with complete preflight, staging, security, data-flow, and specialist evidence. Stop before ready/merge.
+- [ ] Open a normal PR with complete preflight, staging, security, data-flow, and specialist evidence; merge only after every gate passes, then monitor and verify production.
 
 ## Local verification evidence
 
 - `pnpm lint`: passed with zero errors (repository baseline warnings remain).
 - `pnpm typecheck`: 16/16 tasks passed.
-- `pnpm test`: 19/19 tasks passed; API 409 files / 5,945 tests and web 218 files / 2,671 tests passed.
+- `pnpm test`: 19/19 tasks passed; API 419 files / 6,037 tests and web 219 files / 2,674 tests passed.
 - `pnpm build`: 9/9 tasks passed, including the public webhook guide.
 - Webhook SQLite ingress vertical slice: 20/20 passed, including public-envelope limits, authenticated submission, filtering, pre-admission rate/config recovery with the same idempotency key, deduplication, both concurrency policies, pre-submit retry, post-submit finalization recovery without duplicate dispatch, stale processing-lease recovery, composite delivery cursors, and bounded cleanup.
 - Webhook management/config/action API focus: 31/31 passed, including atomic invalid/valid PATCH behavior, mounted preview, source-accurate action context, one-time credential cache prevention, rotation, equal-timestamp pagination, and invalid cursors. Web focus: 10/10 passed, including creation/rotation focus trapping and opener restoration.
@@ -183,7 +183,7 @@ Use D1 batch/conditional statements for atomic create/config, rotation, delivery
 - UI rubric: visual hierarchy 5/5, interaction clarity 5/5, mobile quality 5/5, accessibility 4/5, consistency 5/5 (24/25). The one-point accessibility reserve reflects automated/behavioral coverage without a dedicated assistive-technology staging pass yet.
 - `quality:wrangler-bindings`, `quality:ast-checks`, `quality:file-sizes`, `quality:migration-safety`, `quality:do-migration-safety`, `quality:source-contract-tests`, and `quality:observability-noise`: passed (external observability queries skipped where credentials were unavailable; local noise checks passed).
 - `openapi:check` and `git diff --check`: passed.
-- Task-completion validation: PASS across research/checklist coverage, checked-item implementation, acceptance/test mapping, UI/backend field propagation, source-discriminated resources, and the SQLite-backed vertical slice. The concrete ProjectData/TaskRunner adapter remains a staging gate by design.
+- Task-completion pre-staging validation: WARN only for the explicit live ProjectData/TaskRunner staging gate; research/checklist coverage, checked-item implementation, acceptance/test mapping, UI/backend field propagation, source-discriminated resources, and the SQLite-backed vertical slice all passed.
 
 ## Primary data-flow trace to verify
 
@@ -206,7 +206,7 @@ Use D1 batch/conditional statements for atomic create/config, rotation, delivery
 - [x] Trigger list/detail/form are source-aware, accessible, mobile-first, and have no horizontal overflow under required edge-case datasets.
 - [x] Migration replays from zero and upgrades existing data without dropping/recreating FK parents or losing cron/GitHub history.
 - [x] Configuration, OpenAPI, internal API reference, public docs, environment reference, tests, and UI match the shipped contract.
-- [ ] Local quality, specialist review, staging deployment, Cloudflare data/log verification, and end-to-end staging behavior pass before the draft PR is opened.
+- [ ] Local quality, specialist review, staging deployment, Cloudflare data/log verification, and end-to-end staging behavior pass before the normal PR is opened.
 
 ## Explicit non-goals
 
