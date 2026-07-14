@@ -5,18 +5,29 @@ description: How SAM handles authentication, encryption, and credential manageme
 
 SAM's security model separates **platform secrets** (managed by operators) from **user credentials** (encrypted per-user in the database).
 
+## Cloud Credential Model (BYOC + Platform Fallback)
+
+SAM supports **Bring-Your-Own-Cloud (BYOC)**: users and self-hosters may store their own Hetzner/Scaleway tokens, encrypted per-user in D1. This is the model for self-hosted deployments and BYO-key users.
+
+However, SAM's own hosted deployment also has an **enabled platform-level cloud credential** (`platform_credentials`, `provider=hetzner`, `credential_type=cloud-provider`). Provider resolution falls back **user credential → platform credential**, so on the hosted (zero-config) platform a user does **not** need their own cloud credential for SAM to provision workspaces or deployment nodes. Self-hosted deployments without a platform credential rely on user-supplied BYOC tokens.
+
 ## Credential Types
 
 ### Platform Secrets
 
 These are Cloudflare Worker secrets set during deployment:
 
-| Secret                    | Purpose                                                                                  |
-| ------------------------- | ---------------------------------------------------------------------------------------- |
-| `ENCRYPTION_KEY`          | AES-256-GCM key for encrypting user credentials                                          |
-| `JWT_PRIVATE_KEY`         | RSA-2048 key for signing workspace and callback tokens                                   |
-| `JWT_PUBLIC_KEY`          | RSA-2048 key for token verification (exposed via JWKS)                                   |
-| `CF_API_TOKEN`            | Cloudflare deploy, DNS, Origin CA certificate issuance, observability, and AI Gateway operations (requires Account → SSL and Certificates → Edit)  |
+| Secret                       | Purpose                                                                                  |
+| ---------------------------- | ---------------------------------------------------------------------------------------- |
+| `ENCRYPTION_KEY`             | AES-256-GCM master key for BetterAuth sessions and user credential encryption            |
+| `BETTER_AUTH_SECRET`         | Optional override for BetterAuth session cookies (falls back to `ENCRYPTION_KEY`)         |
+| `CREDENTIAL_ENCRYPTION_KEY`  | Optional override for user credential encryption (falls back to `ENCRYPTION_KEY`)         |
+| `JWT_PRIVATE_KEY`            | RSA-2048 key for signing workspace and callback tokens                                   |
+| `JWT_PUBLIC_KEY`             | RSA-2048 key for token verification (exposed via JWKS)                                   |
+| `DEPLOY_SIGNING_PRIVATE_KEY` | Ed25519 key for signing deployment apply payloads (auto-generated)                       |
+| `DEPLOY_SIGNING_PUBLIC_KEY`  | Ed25519 key for deployment-node payload verification (auto-generated)                    |
+| `TRIAL_CLAIM_TOKEN_SECRET`   | HMAC secret for trial onboarding claim tokens (auto-generated)                           |
+| `CF_API_TOKEN`               | Cloudflare deploy, DNS, Origin CA certificate issuance, observability, and AI Gateway operations (requires Account → SSL and Certificates → Edit)  |
 
 Security keys are automatically generated and persisted by Pulumi on first deployment. Cloudflare secrets remain Worker secrets because they are deployment trust roots. GitHub App/OAuth, GitHub webhook, Google OAuth, and GitLab OAuth credentials can be supplied either as optional environment fallbacks or through the first-run/superadmin platform config UI; runtime values are stored encrypted in D1 and override environment fallbacks. They never appear in source control.
 
@@ -37,13 +48,14 @@ Admin-managed integration secrets stored encrypted in D1:
 
 User-provided secrets stored encrypted in D1:
 
-| Credential         | Purpose                      | Encryption                     |
-| ------------------ | ---------------------------- | ------------------------------ |
-| Hetzner API token  | VM provisioning              | AES-256-GCM, per-credential IV |
-| Agent API keys     | Claude/OpenAI API access     | AES-256-GCM, per-credential IV |
-| Agent OAuth tokens | Claude Pro/Max subscriptions | AES-256-GCM, per-credential IV |
+| Credential                    | Purpose                                        | Encryption                     |
+| ----------------------------- | ---------------------------------------------- | ------------------------------ |
+| Cloud provider tokens         | VM provisioning (Hetzner, Scaleway)            | AES-256-GCM, per-credential IV |
+| Agent API keys                | Claude, OpenAI, Gemini, and other agent access | AES-256-GCM, per-credential IV |
+| Agent OAuth tokens            | Claude Pro/Max, Codex subscriptions            | AES-256-GCM, per-credential IV |
+| Composable credentials (`cc_*`) | Reusable credential + configuration attachments layered per project/profile | AES-256-GCM, per-credential IV |
 
-User credentials are **never** stored as environment variables or Worker secrets.
+Cloud provider credentials are stored with a `credentialType` of `cloud-provider`; GCP is a **deployment** authorization target, not a workspace VM compute provider (user compute = Hetzner/Scaleway only). User credentials are **never** stored as environment variables or Worker secrets.
 
 ## Authentication Flow
 
@@ -118,7 +130,7 @@ Deployments created before the per-node CSR model may have running nodes that st
 - **Minimal GitHub App permissions** — only Contents (read/write), Metadata (read-only), and Email addresses (read-only)
 - **HTTPS everywhere** — all traffic encrypted via Cloudflare
 - **Session isolation** — each workspace JWT is scoped to a specific workspace ID
-- **No shared cloud credentials** — BYOC model means the platform has no Hetzner access
+- **Per-user credential isolation** — each user's cloud/agent secrets are encrypted with a per-credential IV and are never shared between users
 
 :::caution
 Rotating the `ENCRYPTION_KEY` will make existing encrypted credentials unreadable. Users will need to re-enter their Hetzner tokens and API keys after key rotation.
