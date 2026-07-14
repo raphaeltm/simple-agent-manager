@@ -26,7 +26,7 @@ function canonicalize(value: unknown): unknown {
   if (!isRecord(value)) return value;
   return Object.fromEntries(
     Object.keys(value)
-      .sort()
+      .sort((left, right) => left.localeCompare(right, 'en-US'))
       .map((key) => [key, canonicalize(value[key])])
   );
 }

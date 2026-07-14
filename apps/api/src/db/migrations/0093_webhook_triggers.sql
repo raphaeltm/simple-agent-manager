@@ -11,6 +11,11 @@ SET next_execution_sequence = COALESCE(
     WHERE trigger_executions.trigger_id = triggers.id
   ),
   1
+)
+WHERE EXISTS (
+  SELECT 1
+  FROM trigger_executions
+  WHERE trigger_executions.trigger_id = triggers.id
 );
 
 CREATE INDEX idx_tasks_trigger_execution_id
