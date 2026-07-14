@@ -41,6 +41,7 @@ export default defineConfig({
             { slug: 'docs/guides/agents' },
             { slug: 'docs/guides/idea-execution' },
             { slug: 'docs/guides/chat-features' },
+            { slug: 'docs/guides/recent-product-changes' },
             { slug: 'docs/guides/notifications' },
             { slug: 'docs/guides/creating-workspaces' },
             { slug: 'docs/guides/app-deployments' },
