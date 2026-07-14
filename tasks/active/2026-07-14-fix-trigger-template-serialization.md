@@ -19,15 +19,15 @@ The user explicitly decided that an unset `webhook.sourceLabel` must remain blan
 
 ## Implementation Checklist
 
-- [ ] Add one reusable deterministic JSON serialization utility for nested records and arrays.
-- [ ] Make trigger interpolation type-aware: strings unchanged, numbers/booleans/bigints stringified, objects/arrays canonical JSON, `null` rendered as `null`, and only `undefined` treated as missing.
-- [ ] Remove HTML entity encoding from the plain-text prompt renderer.
-- [ ] Keep an unset webhook source label as the existing empty string.
-- [ ] Preserve per-field and total output bounds while adding an in-band `[truncated by SAM]` marker that fits within each configured limit.
-- [ ] Add unit coverage for deterministic objects/arrays, null, primitives, raw HTML-like/special characters, missing values, and both truncation paths.
-- [ ] Add the exact reported webhook template/payload as a realistic ingress-to-submission regression test, including `{}` headers and blank source label.
-- [ ] Verify existing nested webhook body/header paths and cron/GitHub rendering remain correct.
-- [ ] Update public webhook template documentation and internal renderer comments to describe plain-text, structured-value, blank-label, and truncation semantics.
+- [x] Add one reusable deterministic JSON serialization utility for nested records and arrays.
+- [x] Make trigger interpolation type-aware: strings unchanged, numbers/booleans/bigints stringified, objects/arrays canonical JSON, `null` rendered as `null`, and only `undefined` treated as missing.
+- [x] Remove HTML entity encoding from the plain-text prompt renderer.
+- [x] Keep an unset webhook source label as the existing empty string.
+- [x] Preserve per-field and total output bounds while adding an in-band `[truncated by SAM]` marker that fits within each configured limit.
+- [x] Add unit coverage for deterministic objects/arrays, null, primitives, raw HTML-like/special characters, missing values, and both truncation paths.
+- [x] Add the exact reported webhook template/payload as a realistic ingress-to-submission regression test, including `{}` headers and blank source label.
+- [x] Verify existing nested webhook body/header paths and cron/GitHub rendering remain correct.
+- [x] Update public webhook template documentation and internal renderer comments to describe plain-text, structured-value, blank-label, and truncation semantics.
 - [ ] Run focused tests, lint, typecheck, full tests, build, diff checks, and mandatory specialist reviews.
 - [ ] Deploy to staging and verify the exact template through authenticated preview plus real webhook ingestion/task prompt persistence.
 - [ ] Open a new PR, wait for every check to pass, squash-merge, and monitor the production deployment and live health.
