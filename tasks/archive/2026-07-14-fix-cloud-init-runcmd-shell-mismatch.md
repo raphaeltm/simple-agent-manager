@@ -76,16 +76,16 @@ Source idea: `01KXFZPG6M70PJF72CKFZVK99B`.
       `.claude/rules/06-vm-agent-patterns.md` so scalar `runcmd` entries must be
       POSIX-compatible or invoke Bash explicitly, with tests run under the declared
       interpreter.
-- [ ] Record final validation evidence and complete the post-mortem below.
+- [x] Record final local validation evidence and complete the post-mortem below.
 
 ### Validation
 
 - [x] Focused cloud-init test suite passes.
 - [x] Cloud-init package typecheck and build pass.
-- [ ] Full repository lint, typecheck, test, and build pass.
-- [ ] Task completion and relevant specialist reviews pass.
-- [ ] GitHub CI passes.
-- [ ] Staging is explicitly recorded as skipped by user instruction.
+- [x] Full repository lint, typecheck, test, and build pass.
+- [ ] Task completion and relevant specialist reviews pass (Phase 4/5 gate pending).
+- [ ] GitHub CI passes (Phase 7 gate pending).
+- [x] Staging is explicitly recorded as skipped by user instruction.
 
 ## Acceptance Criteria
 
@@ -162,6 +162,30 @@ interpreter.
 - Cloud-init package typecheck and build passed. Remaining Bash-only syntax in the
   rendered template belongs to `write_files` scripts with explicit
   `#!/bin/bash` shebangs, not scalar `runcmd` entries.
+- Full-repository validation passed: lint 7/7 tasks, typecheck 16/16 tasks, tests
+  19/19 tasks (including 5,975/5,975 API tests), and isolated production build
+  9/9 tasks. Running the full test and build commands concurrently first caused
+  an `apps/www` generated-artifact race; rerunning each command in isolation
+  passed and is the recorded result.
+- No staging deployment or mutation was performed. The user explicitly replaced
+  that gate with the real-`/bin/sh` experiment and high-quality local regression
+  coverage recorded above.
+
+## Task Completion Validation
+
+The mandatory Phase 4 validator passed on 2026-07-14:
+
+| Check                   | Status | Evidence                                                                                                     |
+| ----------------------- | ------ | ------------------------------------------------------------------------------------------------------------ |
+| A: Research → Checklist | PASS   | Every actionable finding maps to the runtime, regression, or process checklist.                              |
+| B: Checklist → Diff     | PASS   | Checked implementation items are present in the template, tests, rule, or recorded red/green experiment.     |
+| C: Criteria → Tests     | PASS   | Rendered workspace and deployment commands execute through real `/bin/sh`; YAML/size coverage remains green. |
+| D: UI → Backend         | N/A    | No UI or API data path changed.                                                                              |
+| E: Multi-Resource       | N/A    | No resource selection logic changed.                                                                         |
+| F: Vertical Slice       | PASS   | The test covers generation, YAML parsing, actual shell execution, and asserted stubbed side effects.         |
+
+The remaining unchecked specialist-review, CI, and merge items are explicitly
+future `/do` gates, not implementation omissions.
 
 ## References
 
