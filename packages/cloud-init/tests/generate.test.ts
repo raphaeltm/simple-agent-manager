@@ -6,10 +6,21 @@
  * NOT sufficient — they hide YAML indentation bugs that truncate certs.
  * See: docs/notes/2026-03-12-tls-yaml-indentation-postmortem.md
  */
-import { describe, it, expect } from 'vitest';
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { describe, expect, it } from 'vitest';
 import YAML from 'yaml';
-import { generateCloudInit, validateCloudInitSize, validateCloudInitVariables, indentForYamlBlock } from '../src/generate';
+
 import type { CloudInitVariables } from '../src/generate';
+import {
+  generateCloudInit,
+  indentForYamlBlock,
+  validateCloudInitSize,
+  validateCloudInitVariables,
+} from '../src/generate';
 
 function baseVariables(overrides?: Partial<CloudInitVariables>): CloudInitVariables {
   return {
@@ -20,6 +31,43 @@ function baseVariables(overrides?: Partial<CloudInitVariables>): CloudInitVariab
     callbackToken: 'cb-token-abc',
     ...overrides,
   };
+}
+
+function runCaddySetupRuncmd(role: 'workspace' | 'deployment') {
+  const config = generateCloudInit(baseVariables({ role }), { validateSize: false });
+  const parsed = YAML.parse(config) as { runcmd: unknown[] };
+  const command = parsed.runcmd.find(
+    (entry) => typeof entry === 'string' && entry.includes('Preparing Caddy paths'),
+  );
+  if (typeof command !== 'string') {
+    throw new Error('Rendered cloud-init is missing the Caddy setup runcmd entry');
+  }
+
+  const scratchDir = mkdtempSync(join(tmpdir(), 'sam-cloud-init-runcmd-'));
+  const binDir = join(scratchDir, 'bin');
+  const commandLog = join(scratchDir, 'commands.log');
+  mkdirSync(binDir);
+
+  for (const executable of ['logger', 'mkdir']) {
+    writeFileSync(
+      join(binDir, executable),
+      `#!/bin/sh\nprintf '%s\\n' "${executable} $*" >> "$COMMAND_LOG"\n`,
+      { mode: 0o755 },
+    );
+  }
+
+  try {
+    const result = spawnSync('/bin/sh', ['-c', command], {
+      encoding: 'utf8',
+      env: { ...process.env, COMMAND_LOG: commandLog, PATH: binDir },
+    });
+    const calls = existsSync(commandLog)
+      ? readFileSync(commandLog, 'utf8').trim().split('\n')
+      : [];
+    return { calls, command, result };
+  } finally {
+    rmSync(scratchDir, { force: true, recursive: true });
+  }
 }
 
 /**
@@ -1810,6 +1858,30 @@ describe('deployment role support', () => {
     expect(runcmd).toContain('vm-agent owns Caddy install/start');
     expect(runcmd).not.toContain('apt-get install -y caddy');
     expect(runcmd).not.toContain('systemctl reload-or-restart caddy');
+  });
+
+  it('runs the workspace Caddy setup entry successfully through cloud-init /bin/sh', () => {
+    const { calls, command, result } = runCaddySetupRuncmd('workspace');
+
+    expect(result.error).toBeUndefined();
+    expect(result.status, result.stderr).toBe(0);
+    expect(command).not.toContain('pipefail');
+    expect(calls).toContain('logger -t sam-boot Skipping Caddy setup for ROLE=workspace');
+    expect(calls.some((call) => call.startsWith('mkdir '))).toBe(false);
+  });
+
+  it('runs the deployment Caddy setup entry successfully through cloud-init /bin/sh', () => {
+    const { calls, command, result } = runCaddySetupRuncmd('deployment');
+
+    expect(result.error).toBeUndefined();
+    expect(result.status, result.stderr).toBe(0);
+    expect(command).not.toContain('pipefail');
+    expect(calls).toContain(
+      'mkdir -p /etc/caddy /var/lib/caddy /var/log/caddy',
+    );
+    expect(calls).toContain(
+      'logger -t sam-boot Caddy paths ready; vm-agent owns Caddy install/start',
+    );
   });
 
   it('starts vm-agent before non-blocking deployment Caddy path setup', () => {

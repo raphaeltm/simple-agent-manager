@@ -140,7 +140,7 @@ runcmd:
 
   - 'logger -t sam-boot "PHASE START: caddy-setup"'
   - |
-    set -euo pipefail
+    set -eu
     ROLE="{{ role }}"
     if [ "$ROLE" = "deployment" ]; then
       logger -t sam-boot "Preparing Caddy paths for deployment node routing"

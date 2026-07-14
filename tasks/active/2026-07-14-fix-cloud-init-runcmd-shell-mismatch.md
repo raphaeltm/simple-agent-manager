@@ -55,33 +55,33 @@ Source idea: `01KXFZPG6M70PJF72CKFZVK99B`.
 
 ### Runtime Fix
 
-- [ ] Replace the Bash-only Caddy `runcmd` option with POSIX-compatible strict
-  mode while preserving fail-fast behavior.
-- [ ] Confirm no other implicit-`/bin/sh` `runcmd` entry uses Bash-only syntax.
+- [x] Replace the Bash-only Caddy `runcmd` option with POSIX-compatible strict
+      mode while preserving fail-fast behavior.
+- [x] Confirm no other implicit-`/bin/sh` `runcmd` entry uses Bash-only syntax.
 
 ### Regression Coverage
 
-- [ ] Add a parsed-YAML test helper that selects the rendered Caddy command rather
-  than reading template source.
-- [ ] Execute the rendered workspace-role command through `/bin/sh` with harmless
-  `logger` and `mkdir` stubs and assert the skip path succeeds without mutation.
-- [ ] Execute the rendered deployment-role command through `/bin/sh` with the
-  same stubs and assert the expected Caddy directories are requested.
-- [ ] Demonstrate locally that the new behavioral test fails against the old
-  `pipefail` command and passes after the fix.
+- [x] Add a parsed-YAML test helper that selects the rendered Caddy command rather
+      than reading template source.
+- [x] Execute the rendered workspace-role command through `/bin/sh` with harmless
+      `logger` and `mkdir` stubs and assert the skip path succeeds without mutation.
+- [x] Execute the rendered deployment-role command through `/bin/sh` with the
+      same stubs and assert the expected Caddy directories are requested.
+- [x] Demonstrate locally that the new behavioral test fails against the old
+      `pipefail` command and passes after the fix.
 
 ### Process and Documentation
 
-- [ ] Extend the path scope and cloud-init guidance in
-  `.claude/rules/06-vm-agent-patterns.md` so scalar `runcmd` entries must be
-  POSIX-compatible or invoke Bash explicitly, with tests run under the declared
-  interpreter.
+- [x] Extend the path scope and cloud-init guidance in
+      `.claude/rules/06-vm-agent-patterns.md` so scalar `runcmd` entries must be
+      POSIX-compatible or invoke Bash explicitly, with tests run under the declared
+      interpreter.
 - [ ] Record final validation evidence and complete the post-mortem below.
 
 ### Validation
 
-- [ ] Focused cloud-init test suite passes.
-- [ ] Cloud-init package typecheck and build pass.
+- [x] Focused cloud-init test suite passes.
+- [x] Cloud-init package typecheck and build pass.
 - [ ] Full repository lint, typecheck, test, and build pass.
 - [ ] Task completion and relevant specialist reviews pass.
 - [ ] GitHub CI passes.
@@ -89,19 +89,19 @@ Source idea: `01KXFZPG6M70PJF72CKFZVK99B`.
 
 ## Acceptance Criteria
 
-- [ ] Both workspace and deployment Caddy setup commands exit successfully under
-  `/bin/sh` in local behavioral tests.
-- [ ] The deployment variant still requests creation of
-  `/etc/caddy`, `/var/lib/caddy`, and `/var/log/caddy`; the workspace variant
-  does not.
-- [ ] Reintroducing `set -o pipefail` makes the behavioral regression test fail
-  on the Ubuntu/Dash contract used by cloud-init.
-- [ ] Generated cloud-init remains valid parsed YAML and within Hetzner's size
-  limit.
-- [ ] Future cloud-init changes receive path-scoped guidance to test rendered
-  commands with their actual interpreter.
+- [x] Both workspace and deployment Caddy setup commands exit successfully under
+      `/bin/sh` in local behavioral tests.
+- [x] The deployment variant still requests creation of
+      `/etc/caddy`, `/var/lib/caddy`, and `/var/log/caddy`; the workspace variant
+      does not.
+- [x] Reintroducing `set -o pipefail` makes the behavioral regression test fail
+      on the Ubuntu/Dash contract used by cloud-init.
+- [x] Generated cloud-init remains valid parsed YAML and within Hetzner's size
+      limit.
+- [x] Future cloud-init changes receive path-scoped guidance to test rendered
+      commands with their actual interpreter.
 - [ ] The PR merges only after local validation, specialist review, and CI are
-  green; no staging deployment is triggered.
+      green; no staging deployment is triggered.
 
 ## Post-Mortem
 
@@ -147,6 +147,21 @@ and require scalar `runcmd` entries to remain POSIX-compatible unless they invok
 Bash explicitly. Changed command blocks must be tested by parsing the rendered
 YAML and executing them with harmless boundary stubs under the declared
 interpreter.
+
+## Local Experiment Evidence
+
+- The runner resolves `/bin/sh` to `/usr/bin/dash`, matching the Ubuntu shell
+  contract that produced the Hetzner failure.
+- Red state: with `set -euo pipefail` still rendered, both new role tests exited
+  status 2 with `/bin/sh: 1: set: Illegal option -o pipefail`; 175 existing tests
+  passed and the 2 new interpreter-contract tests failed.
+- Green state: after changing only that strict-mode line to `set -eu`, all 177
+  cloud-init tests passed. The workspace role logged its skip path without calling
+  `mkdir`; the deployment role requested exactly
+  `mkdir -p /etc/caddy /var/lib/caddy /var/log/caddy`.
+- Cloud-init package typecheck and build passed. Remaining Bash-only syntax in the
+  rendered template belongs to `write_files` scripts with explicit
+  `#!/bin/bash` shebangs, not scalar `runcmd` entries.
 
 ## References
 

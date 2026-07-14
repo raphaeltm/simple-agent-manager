@@ -1,5 +1,6 @@
 ---
 paths:
+  - 'packages/cloud-init/**'
   - 'packages/vm-agent/**'
   - 'scripts/vm/**'
 ---
@@ -36,6 +37,21 @@ When a remote system (VM) is responsible for triggering its own cleanup:
 1. Edit `packages/cloud-init/src/template.ts`
 2. Update variable wiring in `packages/cloud-init/src/generate.ts` when needed
 3. Test cloud-init generation through the workspace provisioning flow
+
+### Runcmd Interpreter Contract
+
+Cloud-init executes scalar `runcmd` entries through `/bin/sh`. On SAM's Ubuntu
+VM images, that is Dash rather than Bash.
+
+1. Keep scalar `runcmd` entries POSIX-compatible. Use `set -eu`; do not use
+   `pipefail`, process substitution, here-strings, Bash arrays, or other
+   Bash-only syntax.
+2. If a command genuinely requires Bash, invoke `/bin/bash` explicitly or write
+   a file with a `#!/bin/bash` shebang and call that file from `runcmd`.
+3. Tests for a changed command block must parse the rendered YAML, extract the
+   actual `runcmd` entry, and execute it under its declared interpreter with
+   harmless stubs for external side effects. String-presence assertions alone do
+   not prove the runtime shell contract.
 
 ## System Git Config in Devcontainers
 
