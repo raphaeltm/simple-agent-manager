@@ -228,7 +228,7 @@ The Workers Paid plan ($5/month) is required for Durable Objects and Cloudflare 
 
 ### User VM Costs
 
-VMs are billed to each user's own cloud provider account. SAM supports Hetzner, Scaleway, and GCP.
+VMs are billed to the cloud provider credential SAM uses for the node. In a typical self-hosted setup, that is each user's own BYOC credential; admins may also configure a platform credential for shared zero-config provisioning. SAM supports Hetzner, Scaleway, and GCP. The example prices below cover the built-in Hetzner and Scaleway size mappings; GCP pricing depends on the selected project, zone, and machine family.
 
 **Hetzner:**
 

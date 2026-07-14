@@ -10,6 +10,7 @@ Generic webhook triggers let external systems submit task context to an agent wi
 Open a project, select **Triggers**, and create a **Webhook** trigger. Configure:
 
 - An explicit agent profile. Webhook triggers do not fall back to an implicit profile.
+- Optionally, a skill to apply as a profile-override layer for triggered runs.
 - A prompt template using the webhook context described below.
 - Optional `all` or `any` payload filters.
 - Optional safe request headers to expose to the prompt.
@@ -21,8 +22,10 @@ SAM shows the raw token only after creation or rotation. Copy it before closing 
 
 Send a JSON object to the shared ingress endpoint shown with the credential:
 
+The ingress endpoint is `https://api.<your-domain>/api/webhooks/ingest` — the credential dialog shows the exact URL for your deployment.
+
 ```bash
-curl --request POST 'https://api.example.com/api/webhooks/ingest' \
+curl --request POST 'https://api.your-domain.com/api/webhooks/ingest' \
   --header "Authorization: Bearer $SAM_WEBHOOK_TOKEN" \
   --header 'Content-Type: application/json' \
   --header 'Idempotency-Key: deployment-1234' \

@@ -15,7 +15,9 @@ These are Cloudflare Worker secrets, set during deployment. Pulumi auto-generate
 
 | Secret                                     | Description                                                                                                                                                                                                                  |
 | ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ENCRYPTION_KEY`                           | AES-256-GCM key for credential encryption (auto-generated)                                                                                                                                                                   |
+| `ENCRYPTION_KEY`                           | AES-256-GCM master key. Used for BetterAuth session cookies and user credential encryption unless a purpose-specific override below is set (auto-generated)                                                                   |
+| `BETTER_AUTH_SECRET`                       | Optional purpose-specific override for BetterAuth session cookie signing/encryption. Falls back to `ENCRYPTION_KEY` when unset (`apps/api/src/lib/secrets.ts`)                                                                |
+| `CREDENTIAL_ENCRYPTION_KEY`                | Optional purpose-specific override for AES-GCM encryption of user cloud/agent credentials. Falls back to `ENCRYPTION_KEY` when unset (`apps/api/src/lib/secrets.ts`)                                                          |
 | `JWT_PRIVATE_KEY`                          | RSA-2048 private key for signing tokens (auto-generated)                                                                                                                                                                     |
 | `JWT_PUBLIC_KEY`                           | RSA-2048 public key for token verification (exposed via JWKS)                                                                                                                                                                |
 | `DEPLOY_SIGNING_PRIVATE_KEY`               | Ed25519 private key for signing deployment apply payloads (auto-generated)                                                                                                                                                   |
@@ -254,6 +256,7 @@ Webhook damping uses Cloudflare KV's eventually consistent read-update-write beh
 | `NODE_AGENT_READY_POLL_INTERVAL_MS`      | `5000`             | Poll interval for agent readiness     |
 | `TASK_RUNNER_WORKSPACE_READY_TIMEOUT_MS` | `1800000` (30 min) | Max wait for workspace-ready callback |
 | `PROVISIONING_TIMEOUT_MS`                | `1800000` (30 min) | Cron marks stuck workspaces as error  |
+| `NODE_HEARTBEAT_STALE_SECONDS`           | `180`              | Seconds without a heartbeat before a node is treated as stale |
 
 ## App Deployment Routing
 
@@ -291,6 +294,7 @@ Webhook damping uses Cloudflare KV's eventually consistent read-update-write beh
 | Variable                           | Default | Description                   |
 | ---------------------------------- | ------- | ----------------------------- |
 | `MAX_NODES_PER_USER`               | `10`    | Max nodes per user            |
+| `MAX_WORKSPACES_PER_NODE`          | `3`     | Max workspaces packed onto one node |
 | `MAX_AGENT_SESSIONS_PER_WORKSPACE` | `10`    | Max concurrent agent sessions |
 | `MAX_PROJECTS_PER_USER`            | `100`   | Max projects per user         |
 | `MAX_TASKS_PER_PROJECT`            | `10000` | Max ideas per project         |
