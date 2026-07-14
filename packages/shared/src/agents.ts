@@ -67,6 +67,9 @@ export interface AgentDefinition {
   };
 }
 
+export const CODEX_ACP_WRAPPER_VERSION = '1.1.2';
+export const CODEX_ACP_WRAPPER_PACKAGE = `@agentclientprotocol/codex-acp@${CODEX_ACP_WRAPPER_VERSION}`;
+
 
 // =============================================================================
 // Agent Catalog
@@ -101,7 +104,7 @@ export const AGENT_CATALOG: readonly AgentDefinition[] = [
     acpArgs: [],
     supportsAcp: true,
     credentialHelpUrl: 'https://platform.openai.com/api-keys',
-    installCommand: 'npx --yes @agentclientprotocol/codex-acp --version',
+    installCommand: `npx --yes ${CODEX_ACP_WRAPPER_PACKAGE} --version`,
     oauthSupport: {
       envVarName: 'CODEX_AUTH_JSON',
       setupInstructions: 'Run "codex login" on your local machine and sign in with your ChatGPT account, then paste the contents of ~/.codex/auth.json',
