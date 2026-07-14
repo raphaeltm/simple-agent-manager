@@ -203,6 +203,7 @@ Trial configuration is currently sourced from `apps/api/.env.example` and `apps/
 
 ### Git Operations
 
+- `GIT_CREDENTIAL_TIMEOUT` — Go duration for credential-helper callbacks to the local VM agent, such as `5s` or `1750ms` (default: `5s`)
 - `GIT_EXEC_TIMEOUT` — Timeout for git commands via docker exec (default: 30s)
 - `GIT_WORKTREE_TIMEOUT` — Timeout for git worktree create/remove (default: 30s)
 - `WORKTREE_CACHE_TTL` — Cache duration for parsed `git worktree list` results (default: 5s)

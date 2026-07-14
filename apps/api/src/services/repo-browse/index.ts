@@ -1,4 +1,4 @@
-import type * as schema from '../../db/schema';
+import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { errors } from '../../middleware/error';
 import { GitHubRepoBrowser } from './github';
@@ -17,10 +17,12 @@ export type { RepoBrowser } from './types';
 export async function resolveRepoBrowser(opts: {
   project: schema.Project;
   env: Env;
+  /** User whose current provider token authorizes provider-backed reads. */
+  userId?: string;
   /** External GitHub installation id (required for GitHub-backed projects). */
   externalInstallationId?: string;
 }): Promise<RepoBrowser> {
-  const { project, env, externalInstallationId } = opts;
+  const { project, env, externalInstallationId, userId } = opts;
   const provider = project.repoProvider ?? 'github';
 
   if (provider === 'github') {
@@ -50,6 +52,23 @@ export async function resolveRepoBrowser(opts: {
       // empty on staging, which crashes isomorphic-git in extractAuthFromUrl.
       storedRemoteUrl: project.repository,
     });
+  }
+
+  if (provider === 'gitlab') {
+    if (!userId) {
+      throw errors.badRequest('GitLab repository browsing requires a user');
+    }
+    const { getProjectGitLabRepository } = await import('../gitlab');
+    const { drizzle } = await import('drizzle-orm/d1');
+    const metadata = await getProjectGitLabRepository(
+      drizzle(env.DATABASE, { schema }),
+      project.id
+    );
+    if (!metadata) {
+      throw errors.badRequest('Project has no GitLab repository metadata');
+    }
+    const { GitLabRepoBrowser } = await import('./gitlab');
+    return new GitLabRepoBrowser(metadata, userId, env);
   }
 
   throw errors.badRequest(`Unsupported repository provider: ${provider}`);

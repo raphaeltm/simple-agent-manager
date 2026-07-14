@@ -52,6 +52,7 @@ function parseIntegrationConfig(value: unknown): PlatformIntegrationInput {
 
   const github = isRecord(value.github) ? value.github : {};
   const google = isRecord(value.google) ? value.google : {};
+  const gitlab = isRecord(value.gitlab) ? value.gitlab : {};
   return {
     github: {
       clientId: optionalString(github.clientId),
@@ -64,6 +65,11 @@ function parseIntegrationConfig(value: unknown): PlatformIntegrationInput {
     google: {
       clientId: optionalString(google.clientId),
       clientSecret: optionalString(google.clientSecret),
+    },
+    gitlab: {
+      host: optionalString(gitlab.host),
+      clientId: optionalString(gitlab.clientId),
+      clientSecret: optionalString(gitlab.clientSecret),
     },
   };
 }

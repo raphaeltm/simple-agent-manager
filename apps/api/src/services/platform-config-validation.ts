@@ -12,7 +12,7 @@ export interface PlatformConfigValidationResult {
   errors: string[];
 }
 
-function present(value: string | null | undefined): boolean {
+function present(value: string | null | undefined): value is string {
   return typeof value === 'string' && value.trim().length > 0;
 }
 
@@ -35,15 +35,34 @@ function validatePem(value: string, errors: string[]): void {
   }
 }
 
-function validateOAuthClientId(value: string, provider: 'GitHub' | 'Google', errors: string[]): void {
+function validateOAuthClientId(value: string, provider: 'GitHub' | 'Google' | 'GitLab', errors: string[]): void {
   if (value.trim().length < 6) {
     errors.push(`${provider} OAuth client id is too short`);
   }
 }
 
-function validateSecret(value: string, provider: 'GitHub' | 'Google', errors: string[]): void {
+function validateSecret(value: string, provider: 'GitHub' | 'Google' | 'GitLab', errors: string[]): void {
   if (value.trim().length < 8) {
     errors.push(`${provider} OAuth client secret is too short`);
+  }
+}
+
+function validateGitLabHost(value: string, errors: string[]): void {
+  let url: URL;
+  try {
+    url = new URL(value.trim());
+  } catch {
+    errors.push('GitLab host must be a valid URL');
+    return;
+  }
+
+  const localhostHosts = ['localhost', '127.0.0.1', '::1', '[::1]'];
+  const isLocalHttp = url.protocol === 'http:' && localhostHosts.includes(url.hostname);
+  if (url.protocol !== 'https:' && !isLocalHttp) {
+    errors.push('GitLab host must use HTTPS unless it points to localhost');
+  }
+  if (url.username || url.password || url.search || url.hash || (url.pathname !== '/' && url.pathname !== '')) {
+    errors.push('GitLab host must not include credentials, a path, query string, or fragment');
   }
 }
 
@@ -94,22 +113,27 @@ export async function validatePlatformIntegrationInput(
   const errors: string[] = [];
   const github = input.github ?? {};
   const google = input.google ?? {};
+  const gitlab = input.gitlab ?? {};
 
-  if (present(github.clientId)) validateOAuthClientId(github.clientId!, 'GitHub', errors);
-  if (present(github.clientSecret)) validateSecret(github.clientSecret!, 'GitHub', errors);
-  if (present(github.appId)) validateIntegerString(github.appId!, 'GitHub App id', errors);
-  if (present(github.appSlug)) validateSlug(github.appSlug!, errors);
-  if (present(github.appPrivateKey)) validatePem(github.appPrivateKey!, errors);
-  if (present(github.webhookSecret) && github.webhookSecret!.trim().length < 16) {
+  if (present(github.clientId)) validateOAuthClientId(github.clientId, 'GitHub', errors);
+  if (present(github.clientSecret)) validateSecret(github.clientSecret, 'GitHub', errors);
+  if (present(github.appId)) validateIntegerString(github.appId, 'GitHub App id', errors);
+  if (present(github.appSlug)) validateSlug(github.appSlug, errors);
+  if (present(github.appPrivateKey)) validatePem(github.appPrivateKey, errors);
+  if (present(github.webhookSecret) && github.webhookSecret.trim().length < 16) {
     errors.push('GitHub webhook secret must be at least 16 characters');
   }
 
-  if (present(google.clientId)) validateOAuthClientId(google.clientId!, 'Google', errors);
-  if (present(google.clientSecret)) validateSecret(google.clientSecret!, 'Google', errors);
+  if (present(google.clientId)) validateOAuthClientId(google.clientId, 'Google', errors);
+  if (present(google.clientSecret)) validateSecret(google.clientSecret, 'Google', errors);
+
+  if (present(gitlab.host)) validateGitLabHost(gitlab.host, errors);
+  if (present(gitlab.clientId)) validateOAuthClientId(gitlab.clientId, 'GitLab', errors);
+  if (present(gitlab.clientSecret)) validateSecret(gitlab.clientSecret, 'GitLab', errors);
 
   if (present(github.clientId) && present(github.clientSecret)) {
     try {
-      const error = await pingGitHubOAuth(github.clientId!, github.clientSecret!);
+      const error = await pingGitHubOAuth(github.clientId, github.clientSecret);
       if (error) errors.push(error);
     } catch (err) {
       log.warn('github_oauth_validation_ping_failed', { error: err instanceof Error ? err.message : String(err) });
@@ -118,7 +142,7 @@ export async function validatePlatformIntegrationInput(
 
   if (present(google.clientId) && present(google.clientSecret)) {
     try {
-      const error = await pingGoogleOAuth(google.clientId!, google.clientSecret!, env.BASE_DOMAIN);
+      const error = await pingGoogleOAuth(google.clientId, google.clientSecret, env.BASE_DOMAIN);
       if (error) errors.push(error);
     } catch (err) {
       log.warn('google_oauth_validation_ping_failed', { error: err instanceof Error ? err.message : String(err) });
@@ -131,7 +155,8 @@ export async function validatePlatformIntegrationInput(
 export function validateSetupCanComplete(config: ResolvedPlatformConfig): PlatformConfigValidationResult {
   const hasGitHub = Boolean(config.github.clientId.value && config.github.clientSecret.value);
   const hasGoogle = Boolean(config.google.clientId.value && config.google.clientSecret.value);
-  if (!hasGitHub && !hasGoogle) {
+  const hasGitLab = Boolean(config.gitlab.host.value && config.gitlab.clientId.value && config.gitlab.clientSecret.value);
+  if (!hasGitHub && !hasGoogle && !hasGitLab) {
     return {
       ok: false,
       errors: ['Configure at least one login provider before completing setup'],

@@ -37,6 +37,17 @@ export async function signInWithGoogle() {
 }
 
 /**
+ * Sign in with GitLab OAuth.
+ * Redirects to the configured GitLab host for authentication.
+ */
+export async function signInWithGitLab() {
+  await authClient.signIn.social({
+    provider: 'gitlab',
+    callbackURL: window.location.origin + '/dashboard',
+  });
+}
+
+/**
  * Sign out the current user.
  * Clears session and redirects to home.
  */

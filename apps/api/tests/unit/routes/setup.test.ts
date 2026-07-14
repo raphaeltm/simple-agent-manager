@@ -201,4 +201,68 @@ describe('setup routes', () => {
     ).first<{ value: string }>();
     expect(row?.value).toBe('true');
   });
+
+  it('completes setup with valid GitLab login config', async () => {
+    const env = createEnv();
+    const res = await createApp().request(
+      '/api/setup/complete',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': '198.51.100.12' },
+        body: JSON.stringify({
+          token: 'setup-token',
+          config: {
+            gitlab: {
+              host: 'https://gitlab.example.com',
+              clientId: 'gitlab-client-id',
+              clientSecret: 'gitlab-client-secret',
+            },
+          },
+        }),
+      },
+      env,
+    );
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      completed: true,
+      status: {
+        integrations: {
+          gitlabOAuth: { configured: true, label: 'set here' },
+        },
+      },
+    });
+  });
+
+  it('rejects invalid GitLab host values', async () => {
+    const res = await createApp().request(
+      '/api/setup/config',
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': '198.51.100.13' },
+        body: JSON.stringify({
+          token: 'setup-token',
+          config: {
+            gitlab: {
+              host: 'http://gitlab.example.com/group',
+              clientId: 'gitlab-client-id',
+              clientSecret: 'gitlab-client-secret',
+            },
+          },
+        }),
+      },
+      createEnv(),
+    );
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({
+      error: 'BAD_REQUEST',
+      details: {
+        errors: [
+          'GitLab host must use HTTPS unless it points to localhost',
+          'GitLab host must not include credentials, a path, query string, or fragment',
+        ],
+      },
+    });
+  });
 });

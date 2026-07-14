@@ -10,6 +10,9 @@ import { getGitHubUserAccessToken } from '../../../src/services/github-user-acce
 const mocks = vi.hoisted(() => ({
   getGitHubUserAccessToken: vi.fn(),
   getUserInstallationRepositories: vi.fn(),
+  getProjectGitLabRepository: vi.fn(),
+  requireGitLabUserAccessToken: vi.fn(),
+  verifyGitLabProjectAccess: vi.fn(),
 }));
 
 vi.mock('../../../src/services/github-user-access-token', () => ({
@@ -18,6 +21,12 @@ vi.mock('../../../src/services/github-user-access-token', () => ({
 
 vi.mock('../../../src/services/github-app', () => ({
   getUserInstallationRepositories: mocks.getUserInstallationRepositories,
+}));
+vi.mock('../../../src/services/gitlab', () => ({
+  getProjectGitLabRepository: mocks.getProjectGitLabRepository,
+  requireGitLabUserAccessToken: mocks.requireGitLabUserAccessToken,
+  requireGitLabUserAccessTokenForOwner: vi.fn(),
+  verifyGitLabProjectAccess: mocks.verifyGitLabProjectAccess,
 }));
 
 /**
@@ -37,7 +46,7 @@ function makeDb(installationRows: Array<Partial<schema.GitHubInstallation>>) {
   } as unknown as Parameters<typeof requireRepositoryUserAccess>[1];
 }
 
-const ctx = {} as Context<{ Bindings: Env }>;
+const ctx = { env: {} as Env } as Context<{ Bindings: Env }>;
 
 function makeProject(overrides: Partial<schema.Project> = {}): schema.Project {
   return {
@@ -68,6 +77,23 @@ const VISIBLE_REPO = {
 describe('requireRepositoryUserAccess', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.getProjectGitLabRepository.mockResolvedValue({
+      host: 'gitlab.example.com',
+      gitlabProjectId: 123,
+      pathWithNamespace: 'group/project',
+      webUrl: 'https://gitlab.example.com/group/project',
+      httpUrlToRepo: 'https://gitlab.example.com/group/project.git',
+      defaultBranch: 'main',
+    });
+    mocks.requireGitLabUserAccessToken.mockResolvedValue('gitlab-token');
+    mocks.verifyGitLabProjectAccess.mockResolvedValue({
+      host: 'gitlab.example.com',
+      gitlabProjectId: 123,
+      pathWithNamespace: 'group/project',
+      webUrl: 'https://gitlab.example.com/group/project',
+      httpUrlToRepo: 'https://gitlab.example.com/group/project.git',
+      defaultBranch: 'main',
+    });
   });
 
   it('skips the gate for non-github (artifacts-backed) projects', async () => {
@@ -79,6 +105,42 @@ describe('requireRepositoryUserAccess', () => {
 
     expect(mocks.getGitHubUserAccessToken).not.toHaveBeenCalled();
     expect(mocks.getUserInstallationRepositories).not.toHaveBeenCalled();
+  });
+
+  it('re-verifies GitLab access and exact repository identity', async () => {
+    const project = makeProject({
+      repoProvider: 'gitlab',
+      installationId: '',
+      repository: 'group/project',
+    });
+
+    await expect(
+      requireRepositoryUserAccess(ctx, makeDb([]), project, 'user-1')
+    ).resolves.toBeUndefined();
+
+    expect(mocks.requireGitLabUserAccessToken).toHaveBeenCalledWith(ctx, 'user-1');
+    expect(mocks.verifyGitLabProjectAccess).toHaveBeenCalledWith(ctx.env, 'gitlab-token', 123);
+    expect(mocks.getGitHubUserAccessToken).not.toHaveBeenCalled();
+  });
+
+  it('rejects GitLab access when the verified repository path drifts', async () => {
+    mocks.verifyGitLabProjectAccess.mockResolvedValue({
+      host: 'gitlab.example.com',
+      gitlabProjectId: 123,
+      pathWithNamespace: 'other/project',
+      webUrl: null,
+      httpUrlToRepo: 'https://gitlab.example.com/other/project.git',
+      defaultBranch: 'main',
+    });
+
+    await expect(
+      requireRepositoryUserAccess(
+        ctx,
+        makeDb([]),
+        makeProject({ repoProvider: 'gitlab', installationId: '' }),
+        'user-1'
+      )
+    ).rejects.toMatchObject({ statusCode: 403 });
   });
 
   it('still runs the gate for a legacy project whose repoProvider is null (falsy guard does not skip)', async () => {
@@ -93,7 +155,10 @@ describe('requireRepositoryUserAccess', () => {
       requireRepositoryUserAccess(
         ctx,
         makeDb([INSTALLATION_ROW]),
-        makeProject({ repoProvider: null as unknown as schema.Project['repoProvider'], githubRepoId: 42 }),
+        makeProject({
+          repoProvider: null as unknown as schema.Project['repoProvider'],
+          githubRepoId: 42,
+        }),
         'user-1'
       )
     ).resolves.toBeUndefined();
@@ -124,7 +189,13 @@ describe('requireRepositoryUserAccess', () => {
   it('rejects with 403 when the bound repository is no longer visible to the user', async () => {
     mocks.getGitHubUserAccessToken.mockResolvedValue('github-user-token');
     mocks.getUserInstallationRepositories.mockResolvedValue([
-      { id: 7, nodeId: 'R_kgDOOther', fullName: 'acme/other-private', private: true, defaultBranch: 'main' },
+      {
+        id: 7,
+        nodeId: 'R_kgDOOther',
+        fullName: 'acme/other-private',
+        private: true,
+        defaultBranch: 'main',
+      },
     ]);
 
     await expect(
@@ -139,12 +210,15 @@ describe('requireRepositoryUserAccess', () => {
     mocks.getGitHubUserAccessToken.mockResolvedValue('github-user-token');
     // User can see a repo with the same full name, but a DIFFERENT id —
     // the repository was deleted and recreated, or the name was re-pointed.
-    mocks.getUserInstallationRepositories.mockResolvedValue([
-      { ...VISIBLE_REPO, id: 999 },
-    ]);
+    mocks.getUserInstallationRepositories.mockResolvedValue([{ ...VISIBLE_REPO, id: 999 }]);
 
     await expect(
-      requireRepositoryUserAccess(ctx, makeDb([INSTALLATION_ROW]), makeProject({ githubRepoId: 42 }), 'user-1')
+      requireRepositoryUserAccess(
+        ctx,
+        makeDb([INSTALLATION_ROW]),
+        makeProject({ githubRepoId: 42 }),
+        'user-1'
+      )
     ).rejects.toMatchObject({
       statusCode: 403,
       message: 'GitHub repository access has changed; repository ID no longer matches',
@@ -156,20 +230,21 @@ describe('requireRepositoryUserAccess', () => {
     mocks.getUserInstallationRepositories.mockResolvedValue([VISIBLE_REPO]);
 
     await expect(
-      requireRepositoryUserAccess(ctx, makeDb([INSTALLATION_ROW]), makeProject({ githubRepoId: 42 }), 'user-1')
+      requireRepositoryUserAccess(
+        ctx,
+        makeDb([INSTALLATION_ROW]),
+        makeProject({ githubRepoId: 42 }),
+        'user-1'
+      )
     ).resolves.toBeUndefined();
 
     // Intersection uses the user OAuth token + the installation's EXTERNAL id.
-    expect(getUserInstallationRepositories).toHaveBeenCalledWith(
-      'github-user-token',
-      '120081765',
-      {
-        flow: 'project-access',
-        userId: 'user-1',
-        installationId: '120081765',
-        repository: 'acme/allowed-private',
-      }
-    );
+    expect(getUserInstallationRepositories).toHaveBeenCalledWith('github-user-token', '120081765', {
+      flow: 'project-access',
+      userId: 'user-1',
+      installationId: '120081765',
+      repository: 'acme/allowed-private',
+    });
   });
 
   it('skips the drift check when the project has no bound githubRepoId (legacy project)', async () => {
@@ -177,7 +252,12 @@ describe('requireRepositoryUserAccess', () => {
     mocks.getUserInstallationRepositories.mockResolvedValue([{ ...VISIBLE_REPO, id: 12345 }]);
 
     await expect(
-      requireRepositoryUserAccess(ctx, makeDb([INSTALLATION_ROW]), makeProject({ githubRepoId: null }), 'user-1')
+      requireRepositoryUserAccess(
+        ctx,
+        makeDb([INSTALLATION_ROW]),
+        makeProject({ githubRepoId: null }),
+        'user-1'
+      )
     ).resolves.toBeUndefined();
   });
 

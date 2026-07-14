@@ -61,6 +61,19 @@ vi.mock('../../src/services/platform-config', () => ({
     env.GOOGLE_LOGIN_CLIENT_ID && env.GOOGLE_LOGIN_CLIENT_SECRET
       ? { clientId: env.GOOGLE_LOGIN_CLIENT_ID, clientSecret: env.GOOGLE_LOGIN_CLIENT_SECRET }
       : null,
+  getGitLabOAuthConfig: async (env: {
+    GITLAB_HOST?: string;
+    GITLAB_CLIENT_ID?: string;
+    GITLAB_CLIENT_SECRET?: string;
+  }) =>
+    env.GITLAB_HOST && env.GITLAB_CLIENT_ID && env.GITLAB_CLIENT_SECRET
+      ? {
+          host: env.GITLAB_HOST,
+          apiBaseUrl: `${env.GITLAB_HOST}/api/v4`,
+          clientId: env.GITLAB_CLIENT_ID,
+          clientSecret: env.GITLAB_CLIENT_SECRET,
+        }
+      : null,
 }));
 
 function fakeEnv(requireApproval = 'true') {
@@ -175,6 +188,25 @@ describe('BetterAuth configuration', () => {
 
     expect(capturedOptions?.socialProviders).toHaveProperty('github');
     expect(capturedOptions?.socialProviders).toHaveProperty('google');
+  });
+
+  it('adds GitLab social provider when GitLab OAuth is configured', async () => {
+    const { createAuth } = await import('../../src/auth');
+    await createAuth({
+      ...fakeEnv(),
+      GITLAB_HOST: 'https://gitlab.example.com',
+      GITLAB_CLIENT_ID: 'gitlab-client-id',
+      GITLAB_CLIENT_SECRET: 'gitlab-client-secret',
+    } as never);
+
+    expect(capturedOptions?.socialProviders).toHaveProperty('github');
+    expect(capturedOptions?.socialProviders).toMatchObject({
+      gitlab: {
+        clientId: 'gitlab-client-id',
+        clientSecret: 'gitlab-client-secret',
+        issuer: 'https://gitlab.example.com',
+      },
+    });
   });
 
   it('does NOT add Google login from the infra Google client', async () => {

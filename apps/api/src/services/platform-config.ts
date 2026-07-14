@@ -28,6 +28,11 @@ export interface ResolvedPlatformConfig {
     clientId: ResolvedPlatformValue;
     clientSecret: ResolvedPlatformValue;
   };
+  gitlab: {
+    host: ResolvedPlatformValue;
+    clientId: ResolvedPlatformValue;
+    clientSecret: ResolvedPlatformValue;
+  };
 }
 
 export interface PlatformConfigStatus {
@@ -38,6 +43,7 @@ export interface PlatformConfigStatus {
     githubApp: IntegrationStatus;
     githubWebhook: IntegrationStatus;
     googleOAuth: IntegrationStatus;
+    gitlabOAuth: IntegrationStatus;
   };
 }
 
@@ -61,6 +67,11 @@ export interface PlatformIntegrationInput {
     clientId?: string;
     clientSecret?: string;
   };
+  gitlab?: {
+    host?: string;
+    clientId?: string;
+    clientSecret?: string;
+  };
 }
 
 export const SETUP_COMPLETED_SETTING_KEY = 'setup.completed';
@@ -71,6 +82,8 @@ const SETTING_KEYS = {
   githubAppId: 'integration.github.appId',
   githubAppSlug: 'integration.github.appSlug',
   googleClientId: 'integration.google.clientId',
+  gitlabHost: 'integration.gitlab.host',
+  gitlabClientId: 'integration.gitlab.clientId',
 } as const;
 
 const SECRET_KINDS = {
@@ -78,6 +91,7 @@ const SECRET_KINDS = {
   githubAppPrivateKey: 'github.appPrivateKey',
   githubWebhookSecret: 'github.webhookSecret',
   googleClientSecret: 'google.clientSecret',
+  gitlabClientSecret: 'gitlab.clientSecret',
 } as const;
 
 const ENV_KEYS = {
@@ -92,6 +106,9 @@ const ENV_KEYS = {
   // OAuth app, redirect URI (/api/auth/callback/google), and scopes.
   googleClientId: 'GOOGLE_LOGIN_CLIENT_ID',
   googleClientSecret: 'GOOGLE_LOGIN_CLIENT_SECRET',
+  gitlabHost: 'GITLAB_HOST',
+  gitlabClientId: 'GITLAB_CLIENT_ID',
+  gitlabClientSecret: 'GITLAB_CLIENT_SECRET',
 } as const;
 
 const DEFAULT_SETUP_RATE_LIMIT_WINDOW_SECONDS = 15 * 60;
@@ -274,6 +291,7 @@ export async function savePlatformIntegrationConfig(
   const by = creatorId(env, updatedBy);
   const github = input.github ?? {};
   const google = input.google ?? {};
+  const gitlab = input.gitlab ?? {};
 
   const githubClientId = trimOptional(github.clientId);
   if (githubClientId) await writeSetting(env, SETTING_KEYS.githubClientId, githubClientId, by);
@@ -286,6 +304,12 @@ export async function savePlatformIntegrationConfig(
 
   const googleClientId = trimOptional(google.clientId);
   if (googleClientId) await writeSetting(env, SETTING_KEYS.googleClientId, googleClientId, by);
+
+  const gitlabHost = trimOptional(gitlab.host);
+  if (gitlabHost) await writeSetting(env, SETTING_KEYS.gitlabHost, gitlabHost, by);
+
+  const gitlabClientId = trimOptional(gitlab.clientId);
+  if (gitlabClientId) await writeSetting(env, SETTING_KEYS.gitlabClientId, gitlabClientId, by);
 
   const githubClientSecret = trimOptional(github.clientSecret);
   if (githubClientSecret) {
@@ -307,6 +331,11 @@ export async function savePlatformIntegrationConfig(
     await upsertSecret(env, 'google', SECRET_KINDS.googleClientSecret, 'Google OAuth client secret', googleClientSecret, by);
   }
 
+  const gitlabClientSecret = trimOptional(gitlab.clientSecret);
+  if (gitlabClientSecret) {
+    await upsertSecret(env, 'gitlab', SECRET_KINDS.gitlabClientSecret, 'GitLab OAuth client secret', gitlabClientSecret, by);
+  }
+
   return resolvePlatformConfig(env);
 }
 
@@ -320,6 +349,9 @@ export async function resolvePlatformConfig(env: Env): Promise<ResolvedPlatformC
     githubWebhookSecret,
     googleClientId,
     googleClientSecret,
+    gitlabHost,
+    gitlabClientId,
+    gitlabClientSecret,
   ] = await Promise.all([
     resolveSetting(env, SETTING_KEYS.githubClientId, ENV_KEYS.githubClientId),
     resolveSecret(env, 'github', SECRET_KINDS.githubClientSecret, ENV_KEYS.githubClientSecret),
@@ -329,6 +361,9 @@ export async function resolvePlatformConfig(env: Env): Promise<ResolvedPlatformC
     resolveSecret(env, 'github', SECRET_KINDS.githubWebhookSecret, ENV_KEYS.githubWebhookSecret),
     resolveSetting(env, SETTING_KEYS.googleClientId, ENV_KEYS.googleClientId),
     resolveSecret(env, 'google', SECRET_KINDS.googleClientSecret, ENV_KEYS.googleClientSecret),
+    resolveSetting(env, SETTING_KEYS.gitlabHost, ENV_KEYS.gitlabHost),
+    resolveSetting(env, SETTING_KEYS.gitlabClientId, ENV_KEYS.gitlabClientId),
+    resolveSecret(env, 'gitlab', SECRET_KINDS.gitlabClientSecret, ENV_KEYS.gitlabClientSecret),
   ]);
 
   return {
@@ -344,6 +379,11 @@ export async function resolvePlatformConfig(env: Env): Promise<ResolvedPlatformC
       clientId: googleClientId,
       clientSecret: googleClientSecret,
     },
+    gitlab: {
+      host: gitlabHost,
+      clientId: gitlabClientId,
+      clientSecret: gitlabClientSecret,
+    },
   };
 }
 
@@ -351,6 +391,32 @@ export async function getGitHubOAuthConfig(env: Env): Promise<{ clientId: string
   const config = await resolvePlatformConfig(env);
   if (!config.github.clientId.value || !config.github.clientSecret.value) return null;
   return { clientId: config.github.clientId.value, clientSecret: config.github.clientSecret.value };
+}
+
+function normalizeBaseUrl(value: string): string {
+  try {
+    const url = new URL(value.trim());
+    return url.origin;
+  } catch {
+    return value.trim().replace(/\/+$/, '');
+  }
+}
+
+export async function getGitLabOAuthConfig(env: Env): Promise<{
+  host: string;
+  apiBaseUrl: string;
+  clientId: string;
+  clientSecret: string;
+} | null> {
+  const config = await resolvePlatformConfig(env);
+  if (!config.gitlab.host.value || !config.gitlab.clientId.value || !config.gitlab.clientSecret.value) return null;
+  const host = normalizeBaseUrl(config.gitlab.host.value);
+  return {
+    host,
+    apiBaseUrl: `${host}/api/v4`,
+    clientId: config.gitlab.clientId.value,
+    clientSecret: config.gitlab.clientSecret.value,
+  };
 }
 
 /**
@@ -426,7 +492,7 @@ export function isSetupTokenConfigured(env: Env): boolean {
 
 function sourceLabel(source: PlatformConfigSource): string {
   if (source === 'runtime') return 'set here';
-  if (source === 'environment') return 'set via GitHub secret';
+  if (source === 'environment') return 'set via environment fallback';
   return 'not configured';
 }
 
@@ -479,6 +545,10 @@ export async function getPlatformConfigStatus(env: Env): Promise<PlatformConfigS
       googleOAuth: integrationStatus(
         { clientId: config.google.clientId, clientSecret: config.google.clientSecret },
         ['clientId', 'clientSecret']
+      ),
+      gitlabOAuth: integrationStatus(
+        { host: config.gitlab.host, clientId: config.gitlab.clientId, clientSecret: config.gitlab.clientSecret },
+        ['host', 'clientId', 'clientSecret']
       ),
     },
   };

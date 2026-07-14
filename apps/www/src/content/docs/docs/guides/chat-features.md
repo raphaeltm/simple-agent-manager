@@ -5,6 +5,8 @@ description: File browsing, conversation forking, voice input, text-to-speech, a
 
 SAM's project pages are chat-first interfaces where you interact with AI coding agents in real-time.
 
+Recent chat updates make the workspace feel more like a persistent work surface: task-backed chats can be forked consistently, SAM-injected setup context is collapsed out of the main conversation, and desktop sidebars can be collapsed when you need more room.
+
 ## Real-Time Streaming
 
 Agent output streams directly to your browser via WebSocket. You see code being written, terminal commands executing, and the agent's thought process as it happens — no waiting for a complete response.
@@ -113,6 +115,8 @@ Agent responses can be played back as audio. SAM uses Deepgram Aura 2 (via Worke
 
 You can branch off from any point in a conversation to explore an alternative approach without losing the original thread.
 
+Forking now applies to task-backed chat sessions broadly, including instant-container and conversation-style sessions. You do not need to know whether the original session started from an idea, a task, or a lightweight chat; if the session is forkable, SAM preserves the lineage and starts the new branch with the right context.
+
 ### How to Fork
 
 1. Hover over a message in the chat history
@@ -151,6 +155,16 @@ Agents can search messages using the `search_messages` MCP tool.
 ## Session Lifecycle
 
 Agent conversations and task sessions stay active until they complete, fail, or are explicitly stopped. The VM agent currently disables automatic idle suspension for these sessions.
+
+SAM also collapses platform-injected setup messages in the chat timeline. Those messages contain project instructions, task context, and policy that the agent received before it started. They remain available for debugging, but they no longer dominate the visible conversation.
+
+## Focus Mode
+
+On desktop, project chat supports collapsible navigation and session sidebars. Use this when a session becomes the main task at hand and the surrounding project chrome is taking too much space.
+
+- Collapse the main navigation when you are staying inside one project.
+- Collapse the session sidebar when you are following one active conversation.
+- Reopen either sidebar when you need to switch projects, sessions, or settings.
 
 ## Command Palette
 

@@ -2,8 +2,8 @@
 
 ## Status and delivery constraint
 
-- Status: active on `sam/lets-explore-take-enable-24rm29`; local implementation and hardening gates are green, with specialist re-review and staging verification pending.
-- Delivery: open a draft pull request and stop. Do not mark ready or merge without a later explicit instruction from Raphaël.
+- Status: active on `sam/lets-pick-work-started-baecxj`, adopted from the orphaned implementation branch and updated with current `main`; local revalidation, specialist review, staging, and CI remain required.
+- Delivery: The user explicitly superseded the prior draft/do-not-merge constraint on 2026-07-14. Open a normal PR, merge only after every `/do` gate passes, deploy to production, and pause for his input on any material UX or architecture uncertainty.
 - SAM design record: idea `01KXE21NN5F6QZA42ZB591B4T0`.
 
 ## Problem

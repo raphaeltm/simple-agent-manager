@@ -10,6 +10,10 @@ import { expectJsonRecord } from '../../lib/runtime-validation';
 import { errors } from '../../middleware/error';
 import { signCallbackToken,verifyCallbackToken } from '../../services/jwt';
 import { createWorkspaceOnNode } from '../../services/node-agent';
+import {
+  resolveWorkspaceGitSource,
+  type WorkspaceGitSourceProject,
+} from '../../services/workspace-git-source';
 
 export const ACTIVE_WORKSPACE_STATUSES = new Set(['running', 'recovery'] as const);
 
@@ -140,6 +144,7 @@ export async function scheduleWorkspaceCreateOnNode(
   userId: string,
   repository: string,
   branch: string,
+  project: WorkspaceGitSourceProject,
   gitUserName?: string | null,
   gitUserEmail?: string | null
 ): Promise<void> {
@@ -153,10 +158,12 @@ export async function scheduleWorkspaceCreateOnNode(
 
   try {
     const callbackToken = await signCallbackToken(workspaceId, env);
+    const gitSource = await resolveWorkspaceGitSource(db, project);
     await createWorkspaceOnNode(nodeId, env, userId, {
       workspaceId,
       repository,
       branch,
+      ...gitSource,
       callbackToken,
       gitUserName,
       gitUserEmail,

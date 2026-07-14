@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Env } from '../../../src/env';
 import { generateEncryptionKey } from '../../../src/services/encryption';
 import {
+  getGitLabOAuthConfig,
   getGoogleInfraOAuthConfig,
   getGoogleLoginOAuthConfig,
   getPlatformConfigStatus,
@@ -79,6 +80,9 @@ function createEnv(overrides: Partial<Env> = {}): Env {
     GITHUB_APP_PRIVATE_KEY: 'env-private-key',
     GITHUB_APP_SLUG: 'env-app-slug',
     GITHUB_WEBHOOK_SECRET: 'env-webhook-secret',
+    GITLAB_HOST: 'https://gitlab.example.com/',
+    GITLAB_CLIENT_ID: 'env-gitlab-client',
+    GITLAB_CLIENT_SECRET: 'env-gitlab-secret',
     // Infra/GCP Google client (kept separate from login).
     GOOGLE_CLIENT_ID: 'env-google-infra-client',
     GOOGLE_CLIENT_SECRET: 'env-google-infra-secret',
@@ -100,6 +104,8 @@ describe('platform config resolver', () => {
     expect(config.github.clientId).toMatchObject({ value: 'env-gh-client', source: 'environment' });
     expect(config.github.clientSecret).toMatchObject({ value: 'env-gh-secret', source: 'environment' });
     expect(config.google.clientId).toMatchObject({ value: 'env-google-login-client', source: 'environment' });
+    expect(config.gitlab.host).toMatchObject({ value: 'https://gitlab.example.com/', source: 'environment' });
+    expect(config.gitlab.clientId).toMatchObject({ value: 'env-gitlab-client', source: 'environment' });
   });
 
   it('resolves login Google and infra Google from independent env vars', async () => {
@@ -152,6 +158,11 @@ describe('platform config resolver', () => {
         clientId: 'runtime-google-client',
         clientSecret: 'runtime-google-secret',
       },
+      gitlab: {
+        host: 'https://gitlab.runtime.example.com/',
+        clientId: 'runtime-gitlab-client',
+        clientSecret: 'runtime-gitlab-secret',
+      },
     }, 'admin-1');
 
     const config = await resolvePlatformConfig(env);
@@ -159,6 +170,56 @@ describe('platform config resolver', () => {
     expect(config.github.clientSecret).toMatchObject({ value: 'runtime-gh-secret', source: 'runtime' });
     expect(config.github.appId).toMatchObject({ value: '98765', source: 'runtime' });
     expect(config.google.clientSecret).toMatchObject({ value: 'runtime-google-secret', source: 'runtime' });
+    expect(config.gitlab.host).toMatchObject({ value: 'https://gitlab.runtime.example.com/', source: 'runtime' });
+    expect(config.gitlab.clientSecret).toMatchObject({ value: 'runtime-gitlab-secret', source: 'runtime' });
+
+    const secretRow = await env.DATABASE.prepare(
+      `SELECT provider, credential_kind AS credentialKind, encrypted_token AS encryptedToken, is_enabled AS isEnabled
+       FROM platform_credentials
+       WHERE credential_type = 'platform-integration' AND provider = 'gitlab'`
+    ).first<{
+      provider: string;
+      credentialKind: string;
+      encryptedToken: string;
+      isEnabled: number;
+    }>();
+    expect(secretRow).toMatchObject({
+      provider: 'gitlab',
+      credentialKind: 'gitlab.clientSecret',
+      isEnabled: 1,
+    });
+    expect(secretRow?.encryptedToken).not.toBe('runtime-gitlab-secret');
+    expect(secretRow?.encryptedToken).not.toContain('runtime-gitlab-secret');
+
+    await expect(getGitLabOAuthConfig(env)).resolves.toEqual({
+      host: 'https://gitlab.runtime.example.com',
+      apiBaseUrl: 'https://gitlab.runtime.example.com/api/v4',
+      clientId: 'runtime-gitlab-client',
+      clientSecret: 'runtime-gitlab-secret',
+    });
+  });
+
+  it('returns null GitLab OAuth config when the host is missing', async () => {
+    const env = createEnv({ GITLAB_HOST: undefined });
+    await expect(getGitLabOAuthConfig(env)).resolves.toBeNull();
+  });
+
+  it('returns null GitLab OAuth config when the client id is missing', async () => {
+    const env = createEnv({ GITLAB_CLIENT_ID: undefined });
+    await expect(getGitLabOAuthConfig(env)).resolves.toBeNull();
+  });
+
+  it('returns null GitLab OAuth config when the client secret is missing', async () => {
+    const env = createEnv({ GITLAB_CLIENT_SECRET: undefined });
+    await expect(getGitLabOAuthConfig(env)).resolves.toBeNull();
+  });
+
+  it('normalizes a GitLab host with a path down to its origin', async () => {
+    const env = createEnv({ GITLAB_HOST: 'https://gitlab.example.com/some/path?x=1' });
+    await expect(getGitLabOAuthConfig(env)).resolves.toMatchObject({
+      host: 'https://gitlab.example.com',
+      apiBaseUrl: 'https://gitlab.example.com/api/v4',
+    });
   });
 
   it('skips an undecryptable runtime secret and falls back to env instead of throwing', async () => {
@@ -182,8 +243,9 @@ describe('platform config resolver', () => {
 
     const status = await getPlatformConfigStatus(env);
     expect(status.integrations.githubOAuth).toMatchObject({ configured: false, label: 'not configured' });
-    expect(status.integrations.githubApp).toMatchObject({ configured: true, label: 'set via GitHub secret' });
+    expect(status.integrations.githubApp).toMatchObject({ configured: true, label: 'set via environment fallback' });
     expect(status.integrations.googleOAuth).toMatchObject({ configured: true, label: 'set here' });
+    expect(status.integrations.gitlabOAuth).toMatchObject({ configured: true, label: 'set via environment fallback' });
   });
 
   it('rate-limits setup token attempts atomically via D1 rows', async () => {

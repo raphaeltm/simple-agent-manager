@@ -731,6 +731,11 @@ jobs:
           SECRET_JWT_PUBLIC_KEY: ${{ secrets.JWT_PUBLIC_KEY }}
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_LOGIN_CLIENT_ID: ${{ secrets.GOOGLE_LOGIN_CLIENT_ID }}
+          GOOGLE_LOGIN_CLIENT_SECRET: ${{ secrets.GOOGLE_LOGIN_CLIENT_SECRET }}
+          GITLAB_HOST: ${{ secrets.GITLAB_HOST }}
+          GITLAB_CLIENT_ID: ${{ secrets.GITLAB_CLIENT_ID }}
+          GITLAB_CLIENT_SECRET: ${{ secrets.GITLAB_CLIENT_SECRET }}
           BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
           CREDENTIAL_ENCRYPTION_KEY: ${{ secrets.CREDENTIAL_ENCRYPTION_KEY }}
           GH_WEBHOOK_SECRET: ${{ secrets.GH_WEBHOOK_SECRET }}

@@ -243,6 +243,7 @@ export {
   listGitHubInstallations,
   listRepositories,
 } from './github';
+export { listGitLabBranches, listGitLabProjects } from './gitlab';
 export {
   addObservation,
   createKnowledgeEntity,

@@ -18,7 +18,7 @@ These are Cloudflare Worker secrets set during deployment:
 | `JWT_PUBLIC_KEY`          | RSA-2048 key for token verification (exposed via JWKS)                                   |
 | `CF_API_TOKEN`            | Cloudflare deploy, DNS, Origin CA certificate issuance, observability, and AI Gateway operations (requires Account → SSL and Certificates → Edit)  |
 
-Security keys are automatically generated and persisted by Pulumi on first deployment. Cloudflare secrets remain Worker secrets because they are deployment trust roots. GitHub App/OAuth, GitHub webhook, and Google OAuth credentials can be supplied either as optional environment fallbacks or through the first-run/superadmin platform config UI; runtime values are stored encrypted in D1 and override environment fallbacks. They never appear in source control.
+Security keys are automatically generated and persisted by Pulumi on first deployment. Cloudflare secrets remain Worker secrets because they are deployment trust roots. GitHub App/OAuth, GitHub webhook, Google OAuth, and GitLab OAuth credentials can be supplied either as optional environment fallbacks or through the first-run/superadmin platform config UI; runtime values are stored encrypted in D1 and override environment fallbacks. They never appear in source control.
 
 ### Platform Integration Credentials
 
@@ -30,6 +30,7 @@ Admin-managed integration secrets stored encrypted in D1:
 | GitHub App private key     | Installation tokens for repository access | Runtime D1 → Worker env → unset  |
 | GitHub webhook secret      | GitHub App webhook HMAC verification     | Runtime D1 → Worker env → unset  |
 | Google login OAuth client secret | Google sign-in (BetterAuth social login) | Runtime D1 → Worker env (`GOOGLE_LOGIN_CLIENT_SECRET`) → unset |
+| GitLab OAuth client secret | GitLab sign-in and repository access | Runtime D1 → Worker env (`GITLAB_CLIENT_SECRET`) → unset |
 | Google infra OAuth client secret | GCP deployment authorization flows (separate client from login) | Worker env (`GOOGLE_CLIENT_SECRET`) → unset |
 
 ### User Credentials
@@ -46,13 +47,13 @@ User credentials are **never** stored as environment variables or Worker secrets
 
 ## Authentication Flow
 
-SAM uses **BetterAuth** with GitHub OAuth for user authentication:
+SAM uses **BetterAuth** with configured OAuth login providers for user authentication:
 
-1. User clicks "Sign in with GitHub"
-2. API redirects to GitHub OAuth
-3. GitHub returns authorization code
+1. User clicks a configured sign-in provider such as GitHub, Google, or GitLab
+2. API redirects to that provider's OAuth flow
+3. The provider returns an authorization code
 4. API exchanges code for access token
-5. API fetches user profile and primary email
+5. API fetches user profile and email
 6. BetterAuth creates/updates user record and session
 7. Session cookie set in browser
 

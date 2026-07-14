@@ -162,6 +162,11 @@ class_name = "CodexRefreshLock"
 name = "GITHUB_USER_ACCESS_TOKEN_LOCK"
 class_name = "GitHubUserAccessTokenLock"
 
+# Durable Object for per-user GitLab OAuth user-token refresh serialization
+[[durable_objects.bindings]]
+name = "GITLAB_USER_ACCESS_TOKEN_LOCK"
+class_name = "GitLabUserAccessTokenLock"
+
 # Durable Object for trial-onboarding monthly cap counter (singleton; keyed by YYYY-MM)
 [[durable_objects.bindings]]
 name = "TRIAL_COUNTER"
@@ -283,6 +288,10 @@ class_name = "VmAgentContainer"
 tag = "v16"
 new_sqlite_classes = ["VmAgentContainer"]  # Raw Cloudflare Container DO for instant-session vm-agent
 
+[[migrations]]
+tag = "v17"
+new_classes = ["GitLabUserAccessTokenLock"]  # Stateless per-user mutex for BetterAuth GitLab OAuth refresh (rotating single-use refresh tokens)
+
 # Analytics Engine for usage tracking (Phase 1 — server-side analytics)
 [[analytics_engine_datasets]]
 binding = "ANALYTICS"
@@ -333,6 +342,9 @@ crons = ["*/5 * * * *", "30 * * * *", "0 3 * * *", "0 4 * * *", "0 5 1 * *"]
 # - GOOGLE_CLIENT_SECRET (optional — Google Cloud Console OAuth client secret for infra/GCP)
 # - GOOGLE_LOGIN_CLIENT_ID (optional — Google login OAuth client ID for "Sign in with Google"; separate client, or set via /setup)
 # - GOOGLE_LOGIN_CLIENT_SECRET (optional — Google login OAuth client secret; separate client, or set via /setup)
+# - GITLAB_HOST (optional — GitLab OAuth host, e.g. https://gitlab.com; or set via /setup)
+# - GITLAB_CLIENT_ID (optional — GitLab OAuth application ID; or set via /setup)
+# - GITLAB_CLIENT_SECRET (optional — GitLab OAuth secret; or set via /setup)
 # - SEGMENT_WRITE_KEY (optional — Segment.io write key, enables Segment event forwarding)
 # - GA4_API_SECRET (optional — Google Analytics 4 API secret, enables GA4 forwarding; NOTE: GA4 Measurement Protocol requires api_secret as a query parameter — ensure outbound request URLs are not logged)
 # - R2_ACCESS_KEY_ID (optional — R2 S3-compatible API token key ID, enables task attachment presigned uploads)

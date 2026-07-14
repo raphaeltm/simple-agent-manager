@@ -4,6 +4,7 @@ export { AiTokenBudgetCounter } from './durable-objects/ai-token-budget-counter'
 // Sandbox SDK DO class — retained for experimental toolbox/diagnostics use only.
 export { CodexRefreshLock } from './durable-objects/codex-refresh-lock';
 export { GitHubUserAccessTokenLock } from './durable-objects/github-user-access-token-lock';
+export { GitLabUserAccessTokenLock } from './durable-objects/gitlab-user-access-token-lock';
 export { NodeLifecycle } from './durable-objects/node-lifecycle';
 export { NotificationService } from './durable-objects/notification';
 export { ProjectAgent } from './durable-objects/project-agent';
@@ -81,6 +82,7 @@ import { deploymentVolumeRoutes } from './routes/deployment-volumes';
 import { deviceFlowRoutes } from './routes/device-flow';
 import { gcpRoutes } from './routes/gcp';
 import { githubRoutes } from './routes/github';
+import { gitlabRoutes } from './routes/gitlab';
 import { googleAuthRoutes } from './routes/google-auth';
 import { knowledgeRoutes } from './routes/knowledge';
 import { libraryRoutes } from './routes/library';
@@ -673,13 +675,14 @@ app.get('/api/config/artifacts-enabled', (c) => {
 // only render a provider button when that provider is actually usable. Google
 // here means the LOGIN client (getGoogleLoginOAuthConfig), never the infra/GCP one.
 app.get('/api/config/login-providers', async (c) => {
-  const { getGitHubOAuthConfig, getGoogleLoginOAuthConfig } =
+  const { getGitHubOAuthConfig, getGitLabOAuthConfig, getGoogleLoginOAuthConfig } =
     await import('./services/platform-config');
-  const [github, google] = await Promise.all([
+  const [github, google, gitlab] = await Promise.all([
     getGitHubOAuthConfig(c.env),
     getGoogleLoginOAuthConfig(c.env),
+    getGitLabOAuthConfig(c.env),
   ]);
-  return c.json({ github: github !== null, google: google !== null });
+  return c.json({ github: github !== null, google: google !== null, gitlab: gitlab !== null });
 });
 
 // JWKS endpoint (must be at root level)
@@ -715,6 +718,7 @@ app.route('/api/credentials', credentialsRoutes);
 app.route('/api/cc', ccRoutes);
 app.route('/api/providers', providersRoutes);
 app.route('/api/github', githubRoutes);
+app.route('/api/gitlab', gitlabRoutes);
 // Callback JWT routes — MUST be before session-auth node routes.
 app.route('/api/nodes', deployReleaseCallbackRoute); // Deploy node fetches signed release payload.
 app.route('/api/nodes', deploymentReleaseEventsCallbackRoute); // Deploy node reports apply events.

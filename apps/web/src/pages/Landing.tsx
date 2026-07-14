@@ -4,7 +4,7 @@ import { useLocation,useNavigate } from 'react-router';
 
 import { useAuth } from '../components/AuthProvider';
 import { useLoginProviders } from '../hooks/useLoginProviders';
-import { signInWithGitHub, signInWithGoogle } from '../lib/auth';
+import { signInWithGitHub, signInWithGitLab, signInWithGoogle } from '../lib/auth';
 
 const PUBLIC_WEBSITE_URL =
   import.meta.env.VITE_PUBLIC_WEBSITE_URL || 'https://simple-agent-manager.org';
@@ -53,6 +53,14 @@ export function Landing() {
     }
   };
 
+  const handleGitLabSignIn = async () => {
+    try {
+      await signInWithGitLab();
+    } catch (error) {
+      console.error('Failed to sign in with GitLab:', error);
+    }
+  };
+
   return (
     <div className="min-h-[var(--sam-app-height)] bg-canvas flex items-center justify-center px-4">
       <div className="w-full max-w-sm text-center">
@@ -75,14 +83,22 @@ export function Landing() {
           ))}
         </div>
 
-        <Button onClick={handleGitHubSignIn} size="lg" className="w-full mb-3">
-          <GitHubIcon />
-          Sign in with GitHub
-        </Button>
+        {providers.github && (
+          <Button onClick={handleGitHubSignIn} size="lg" className="w-full mb-3">
+            <GitHubIcon />
+            Sign in with GitHub
+          </Button>
+        )}
         {providers.google && (
           <Button onClick={handleGoogleSignIn} variant="secondary" size="lg" className="w-full mb-3">
             <GoogleMark />
             Sign in with Google
+          </Button>
+        )}
+        {providers.gitlab && (
+          <Button onClick={handleGitLabSignIn} variant="secondary" size="lg" className="w-full mb-3">
+            <GitLabMark />
+            Sign in with GitLab
           </Button>
         )}
 
@@ -118,6 +134,17 @@ function GoogleMark() {
       className="mr-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-white text-sm font-semibold text-[#1a73e8]"
     >
       G
+    </span>
+  );
+}
+
+function GitLabMark() {
+  return (
+    <span
+      aria-hidden="true"
+      className="mr-2 inline-flex h-5 w-5 items-center justify-center rounded-sm bg-[#fc6d26] text-[10px] font-bold text-white"
+    >
+      GL
     </span>
   );
 }

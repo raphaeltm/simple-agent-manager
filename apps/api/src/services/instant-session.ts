@@ -24,6 +24,7 @@ import {
   requireVmAgentContainer,
   runContainerPhase,
 } from './vm-agent-container';
+import { resolveWorkspaceGitSource } from './workspace-git-source';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -162,6 +163,7 @@ export async function launchInstantSession(
   const startedAt = Date.now();
   const branch = input.branch?.trim() || input.project.defaultBranch || 'main';
   const workspaceName = getWorkspaceName(input);
+  const gitSource = await resolveWorkspaceGitSource(db, input.project);
 
   const node = await createNodeRecord(env, {
     userId: input.userId,
@@ -264,6 +266,10 @@ export async function launchInstantSession(
         workspaceId,
         repository: input.project.repository,
         branch,
+        repoProvider: gitSource.repoProvider,
+        cloneUrl: gitSource.cloneUrl,
+        repositoryHost: gitSource.repositoryHost,
+        repositoryPath: gitSource.repositoryPath,
         callbackToken: workspaceCallbackToken,
         lightweight: true,
       })
