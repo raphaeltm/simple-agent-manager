@@ -33,6 +33,7 @@ import { verifyNodeCallbackAuth } from '../services/node-callback-auth';
 import { persistErrorBatch, type PersistErrorInput } from '../services/observability';
 import { issueNodeOriginCertificate } from '../services/origin-ca-certificates';
 import * as projectDataService from '../services/project-data';
+import { resolveWorkspaceGitSourceByProjectId } from '../services/workspace-git-source';
 
 const nodeLifecycleRoutes = new Hono<{ Bindings: Env }>();
 const NODE_DNS_ERROR_MESSAGE_MAX_LENGTH = 500;
@@ -111,6 +112,7 @@ nodeLifecycleRoutes.post('/:id/ready', async (c) => {
           userId: schema.workspaces.userId,
           repository: schema.workspaces.repository,
           branch: schema.workspaces.branch,
+          projectId: schema.workspaces.projectId,
         })
         .from(schema.workspaces)
         .where(
@@ -132,10 +134,15 @@ nodeLifecycleRoutes.post('/:id/ready', async (c) => {
           // Intentionally workspace-scoped (not signNodeCallbackToken) — this token
           // is for a specific workspace's VM agent callbacks, not node-level operations.
           const callbackToken = await signCallbackToken(workspace.id, c.env);
+          const gitSource = await resolveWorkspaceGitSourceByProjectId(
+            innerDb,
+            workspace.projectId
+          );
           await createWorkspaceOnNode(nodeId, c.env, workspace.userId, {
             workspaceId: workspace.id,
             repository: workspace.repository,
             branch: workspace.branch,
+            ...gitSource,
             callbackToken,
           });
           await innerDb

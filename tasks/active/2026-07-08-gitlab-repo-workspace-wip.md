@@ -2,18 +2,18 @@
 
 ## Status
 
-Active WIP stacked PR branch on top of #1545 (`sam/gitlab-platform-config-wip`).
+Active release-readiness continuation on top of #1545
+(`sam/gitlab-platform-config-wip`).
 
 ## Constraints
 
-- DRAFT PR. DO NOT MARK READY. DO NOT MERGE.
-- DO NOT DEPLOY TO STAGING, DO NOT RUN STAGING VERIFICATION, AND DO NOT MUTATE STAGING. Other agents are actively using staging.
-- Skip /do Phase 6 by explicit user instruction and document that staging was intentionally skipped.
-- Stop /do Phase 7 after updating the draft PR and observing/reporting CI; never merge.
+- The earlier draft/do-not-merge/no-staging constraints were superseded by the
+  user's explicit 2026-07-14 instruction to ship the stack after their live VM
+  and instant-container verification.
+- Run current CI and staging verification before merge, then merge #1547 into
+  #1545 and #1545 into `main` in dependency order.
 - Do not commit a task file directly to main. Keep task records/state on this existing feature branch because the stack is intentionally unmerged.
 - Avoid force-push unless absolutely unavoidable; preserve linear stacked ancestry with normal branch merges.
-- Do not alter or merge PR #1545; consume its published branch head only.
-- Do not create, update, or deploy any staging environment.
 - Use the platform-level GitLab OAuth configuration added in the base PR.
 
 ## Context
@@ -75,7 +75,8 @@ The linked SAM idea is `01KV7ZFD6HZS5N7J45VA798KN1`, "GitLab integration using p
    - Add Go tests for VM credential-helper and create-workspace contract.
    - Run local typecheck/test/build checks.
    - Run local specialist review skills relevant to API/env/security/Go/UI.
-   - Do not deploy or verify on staging.
+   - Deploy the final stack to staging and verify both VM and instant-container
+     GitLab push flows before production merge.
 
 ## Acceptance Criteria
 
@@ -85,7 +86,8 @@ The linked SAM idea is `01KV7ZFD6HZS5N7J45VA798KN1`, "GitLab integration using p
 - Workspaces for GitLab projects receive enough metadata to clone with HTTPS and authenticate through the credential helper.
 - The VM agent does not persist or export static GitLab OAuth tokens.
 - GitLab repo browsing supports branch/tree/file/raw/compare paths through the existing project repo routes.
-- Draft PR is opened on top of #1545, with staging and merge explicitly skipped.
+- The stacked PRs pass current CI and staging verification, then merge in
+  dependency order and deploy successfully to production.
 
 ## Validation Notes
 
@@ -140,3 +142,37 @@ Deferred to explicit later stack layers (documented, not blocking this draft):
   - GitHub/Artifacts keep the empty-allow behavior (the gh wrapper sends `host=github.com` with no path; GitHub tokens are repo-scoped installation tokens, unlike GitLab's broad user OAuth token).
   - Tests: `TestHandleGitCredentialGitLabFailClosedWithoutHostOrPath`, `TestHandleGitCredentialGitLabResponseFailClosed`.
 - **Architecture note correction:** host/path from the credential helper are NOT forwarded to the control plane. The vm-agent sends an empty `{}` body with the callback token to `POST /api/workspaces/:id/git-token`; all host/path filtering is vm-agent-local against the workspace's registered binding and the control-plane-resolved `repositoryPath`.
+
+## 2026-07-14 Production Readiness Continuation
+
+- The user personally confirmed that GitLab branch pushes work from both a
+  staging VM workspace and a staging instant container, then authorized the
+  stacked PRs for production shipping.
+- Pre-merge review found that the normal TaskRunner VM path and instant-session
+  path forwarded GitLab clone metadata, but manual `POST /api/workspaces`
+  dispatch and node-ready replay did not.
+- Added one shared workspace Git source resolver and routed TaskRunner,
+  instant-session, manual workspace creation, and deferred node-ready replay
+  through it.
+- Added vertical-slice regression tests that exercise the real manual and
+  node-ready callers, assert the final VM-agent request, and verify missing
+  GitLab sidecar metadata fails closed before the VM-agent call.
+- Tightened the same-user standalone helper from mode `0755` to `0700`.
+  The container image owns the helper as `node:node`, and both the vm-agent
+  and agent process run as `node`, so broader execute permission is not
+  required.
+
+### Post-Mortem: Omitted GitLab Metadata in Secondary Dispatch Paths
+
+- **Root cause:** GitLab metadata resolution was duplicated inside the two
+  initially targeted runtime paths. Two older workspace dispatch callers
+  continued constructing partial VM-agent requests.
+- **Why tests missed it:** coverage proved the TaskRunner and instant-session
+  payloads but did not enumerate all callers of `createWorkspaceOnNode`,
+  especially the deferred node-ready replay lifecycle.
+- **Class fix:** centralize provider/clone/host/path resolution in
+  `workspace-git-source.ts` and make every project-backed dispatch caller use
+  it.
+- **Process fix:** the cross-boundary contract rule now requires shared request
+  metadata resolution or per-caller behavioral coverage, including deferred
+  paths and a missing-metadata fail-closed scenario.

@@ -100,13 +100,14 @@ func ConfigureStandaloneGitCredentialHelper() {
 }
 
 func writeStandaloneGitCredentialHelper(path string) error {
-	if err := os.WriteFile(path, []byte(standaloneGitCredentialHelperScript), 0o755); err != nil {
+	if err := os.WriteFile(path, []byte(standaloneGitCredentialHelperScript), 0o700); err != nil {
 		return fmt.Errorf("write helper: %w", err)
 	}
 	// os.WriteFile only applies the mode when creating the file. A restored
-	// Cloudflare Container snapshot can already contain this helper as 0644, so
-	// chmod after every write to guarantee git can execute it.
-	if err := os.Chmod(path, 0o755); err != nil {
+	// Cloudflare Container snapshot can already contain this helper with broader
+	// permissions. The vm-agent and agent run as the same node user, so owner-only
+	// access is sufficient and avoids exposing the credential exchange helper.
+	if err := os.Chmod(path, 0o700); err != nil {
 		return fmt.Errorf("chmod helper: %w", err)
 	}
 	return nil

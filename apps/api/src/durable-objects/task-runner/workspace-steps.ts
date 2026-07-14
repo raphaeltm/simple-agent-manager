@@ -391,8 +391,18 @@ async function createWorkspaceOnVmAgent(
 ): Promise<void> {
   const { signCallbackToken } = await import('../../services/jwt');
   const { createWorkspaceOnNode } = await import('../../services/node-agent');
+  const { resolveWorkspaceGitSource } = await import('../../services/workspace-git-source');
   const callbackToken = await signCallbackToken(workspaceId, rc.env);
-  const gitSource = await resolveWorkspaceGitSource(state, rc);
+  const projectRepo = await loadTaskRunnerProjectRepo(state, rc);
+  const { drizzle } = await import('drizzle-orm/d1');
+  const schema = await import('../../db/schema');
+  const gitSource = await resolveWorkspaceGitSource(
+    drizzle(rc.env.DATABASE, { schema }),
+    {
+      id: state.projectId,
+      repoProvider: projectRepo?.repoProvider ?? 'github',
+    }
+  );
 
   const response = await createWorkspaceOnNode(nodeId, rc.env, state.userId, {
     workspaceId,
@@ -417,48 +427,6 @@ async function createWorkspaceOnVmAgent(
       { permanent: true },
     );
   }
-}
-
-async function resolveWorkspaceGitSource(
-  state: TaskRunnerState,
-  rc: TaskRunnerContext,
-): Promise<{
-  repoProvider: 'github' | 'artifacts' | 'gitlab';
-  cloneUrl: string | null;
-  repositoryHost: string | null;
-  repositoryPath: string | null;
-}> {
-  const projectRepo = await loadTaskRunnerProjectRepo(state, rc);
-  const repoProvider = projectRepo?.repoProvider === 'gitlab'
-    ? 'gitlab'
-    : projectRepo?.repoProvider === 'artifacts'
-      ? 'artifacts'
-      : 'github';
-
-  if (repoProvider !== 'gitlab') {
-    return { repoProvider, cloneUrl: null, repositoryHost: null, repositoryPath: null };
-  }
-
-  const { drizzle } = await import('drizzle-orm/d1');
-  const schema = await import('../../db/schema');
-  const { getProjectGitLabRepository } = await import('../../services/gitlab');
-  const metadata = await getProjectGitLabRepository(
-    drizzle(rc.env.DATABASE, { schema }),
-    state.projectId
-  );
-  if (!metadata) {
-    throw Object.assign(
-      new Error(`GitLab repository metadata is missing for project ${state.projectId}`),
-      { permanent: true }
-    );
-  }
-
-  return {
-    repoProvider,
-    cloneUrl: metadata.httpUrlToRepo,
-    repositoryHost: metadata.host,
-    repositoryPath: metadata.pathWithNamespace,
-  };
 }
 
 function isWorkspaceDispatchAck(response: unknown, workspaceId: string): boolean {

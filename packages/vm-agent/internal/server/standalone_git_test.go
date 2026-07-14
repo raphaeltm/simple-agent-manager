@@ -45,7 +45,7 @@ func TestStandaloneGitCredentialHelperServesTokenForGitHub(t *testing.T) {
 	}
 }
 
-func TestWriteStandaloneGitCredentialHelperRestoresExecutableMode(t *testing.T) {
+func TestWriteStandaloneGitCredentialHelperRestoresOwnerOnlyExecutableMode(t *testing.T) {
 	t.Parallel()
 
 	path := filepath.Join(t.TempDir(), "git-credential-sam")
@@ -61,8 +61,8 @@ func TestWriteStandaloneGitCredentialHelperRestoresExecutableMode(t *testing.T) 
 	if err != nil {
 		t.Fatalf("stat helper: %v", err)
 	}
-	if got := info.Mode().Perm(); got != 0o755 {
-		t.Fatalf("helper mode = %o, want 755", got)
+	if got := info.Mode().Perm(); got != 0o700 {
+		t.Fatalf("helper mode = %o, want 700", got)
 	}
 
 	data, err := os.ReadFile(path)
