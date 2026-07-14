@@ -185,3 +185,88 @@ Deferred to explicit later stack layers (documented, not blocking this draft):
 - **Process fix:** the cross-boundary contract rule now requires shared request
   metadata resolution or per-caller behavioral coverage, including deferred
   paths and a missing-metadata fail-closed scenario.
+
+## Exact-Commit Staging Evidence (2026-07-14)
+
+- GitHub Actions staging deployment run
+  `29319573920` completed successfully for exact runtime commit
+  `8231b8fd1f24235438d8109168feb7c3f1652dc7`. The Cloudflare deploy,
+  additive D1 migration/integrity checks, UI deploy, VM-agent binary upload,
+  health check, and final Playwright smoke job all passed.
+- Authenticated live Chromium checks passed for API health, dashboard rendering,
+  project navigation, and Settings. The fresh workspace page showed the bound
+  GitLab repository on `master`, zero git changes, and no console errors before
+  the terminal verification.
+- Manual `POST /api/workspaces` created workspace
+  `01KXFY05EBZ3HBH4DH7JFV2AB9` without a selected node, provisioning fresh
+  Hetzner VM `01KXFY0504EJWKRKYZY6A8PXQ6`. This exercised both the patched
+  manual creation caller and node-ready replay. The VM became healthy and the
+  workspace reached `running` after the node-ready path cloned
+  `https://gitlab.com/serverspresentation2025-group/serverspresentation2025-project.git`.
+- VM debug evidence showed the shared dispatch produced a GitLab clone, wrote
+  and bind-mounted `/usr/local/bin/git-credential-sam`, configured the helper,
+  and marked the workspace ready. In the live devcontainer,
+  `credential.helper=/usr/local/bin/git-credential-sam` and
+  `credential.useHttpPath=true`.
+- A real temporary GitLab branch
+  `sam-staging-verify-8231b8fd1-terminal` was created from `master`, committed
+  at `0671c4b73bd6d1a668d47cbadc094c42749255ba`, and pushed successfully.
+  `git ls-remote` returned that exact SHA and branch. The remote branch was then
+  deleted successfully; a second `git ls-remote` returned no matching ref. The
+  local branch was deleted and final status was clean on
+  `master...origin/master`.
+- The validation workspace and its fresh VM were deleted after the remote and
+  local branch cleanup.
+- Independent Staging Validator task `01KXFXY1XQEX1ANA3VFEMKRF9W` completed a
+  second authenticated browser journey. It passed API health, dashboard,
+  project, and Settings checks with zero console errors; confirmed the GitLab
+  project metadata; provisioned fresh workspace
+  `01KXFYQ4EWY9CKFQBPG17430JY` on Hetzner node
+  `01KXFYQ40N1RW5APSHF9WF15HT`; observed the node become healthy and the
+  workspace reach `running`; and deleted both resources with HTTP 200 followed
+  by D1 absence checks.
+- The independent validator also captured accepted GitLab push output from the
+  completed staging task `01KXFPMSZ704ZP3SG3Z7FN7B0X`. It did not perform the
+  requested temporary push/delete cycle from its own freshly created
+  workspace, so the exact-current-commit terminal push/delete evidence remains
+  the direct validation above rather than an independent duplicate. This is not
+  a release blocker because the direct journey exercised the patched manual and
+  node-ready paths end to end, while the user separately confirmed pushes from
+  both VM and instant-container workspaces.
+- The validator could not select an instant workspace for this project because
+  its `default_workspace_profile` is null; the independent instant check was
+  therefore not applicable to that journey. The user's prior live
+  instant-container confirmation is the non-regression evidence for that path.
+- `pnpm quality:observability-noise` reported no significant log noise. Its D1
+  check was skipped because `OBSERVABILITY_DB_ID` was unavailable and telemetry
+  was skipped after a 403, so this is partial observability evidence rather than
+  a complete gate.
+- One unrelated fresh-node cloud-init warning (`set: Illegal option -o
+  pipefail` under `/bin/sh`) did not prevent vm-agent provisioning. It is
+  tracked separately as SAM backlog idea `01KXFZPG6M70PJF72CKFZVK99B` and is
+  outside this release.
+
+## Task Completion Validation (Pre-Merge, 2026-07-14)
+
+Verdict: **CONDITIONAL PASS**. Checks A through F pass for the implemented
+feature:
+
+- Every scope/research finding maps to an implementation-plan item or an
+  explicit deferral.
+- The shared contracts, D1 sidecar, GitLab service/API/browsing paths, UI
+  selector and payload, task-start access guard, workspace token exchange, and
+  VM credential-helper behavior all have substantive diff coverage.
+- Unit, route, vertical-slice, Go, Playwright, exact-commit staging, and live
+  push/delete evidence cover the first six acceptance criteria.
+- The onboarding selector propagates `gitlabProjectId` through the shared
+  request contract to the project-creation handler and sidecar insert.
+- Provider/resource selection is discriminated by `repoProvider`, GitLab
+  project ID, user, and host; no new ambiguous first-row selection was found.
+- The manual-workspace and deferred node-ready tests exercise real entry-point
+  callers through the final VM-agent payload and include realistic GitLab
+  sidecar state plus fail-closed missing-metadata coverage.
+
+The task remains active because acceptance criterion seven necessarily cannot
+be complete until the stack is merged in dependency order and the production
+deployment is healthy. Run the final completion validation and archive only
+after that release lifecycle finishes.
