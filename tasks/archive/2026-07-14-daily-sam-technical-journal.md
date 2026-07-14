@@ -18,12 +18,12 @@ Review the last 24 hours of SAM commits and task conversations. If there is enou
 
 ## Checklist
 
-- [ ] Create a SAM journal post under `apps/www/src/content/blog/`.
-- [ ] Keep content limited to public technical/code/features material.
-- [ ] Use existing SAM journal tone and frontmatter conventions.
-- [ ] Include a Mermaid diagram only where it materially clarifies the distributed webhook flow.
-- [ ] Run the public website build or focused validation.
-- [ ] Archive this task file after implementation.
+- [x] Create a SAM journal post under `apps/www/src/content/blog/`.
+- [x] Keep content limited to public technical/code/features material.
+- [x] Use existing SAM journal tone and frontmatter conventions.
+- [x] Include a Mermaid diagram only where it materially clarifies the distributed webhook flow.
+- [x] Run the public website build or focused validation.
+- [x] Archive this task file after implementation.
 - [ ] Open a PR, wait for required checks, and merge.
 
 ## Acceptance criteria
