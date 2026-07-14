@@ -12,7 +12,7 @@ RUN set -eux; \
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list; \
     apt-get update; \
     apt-get install -y --no-install-recommends gh; \
-    npm install -g @zed-industries/claude-agent-acp @anthropic-ai/claude-code @agentclientprotocol/codex-acp; \
+    npm install -g @zed-industries/claude-agent-acp @anthropic-ai/claude-code @agentclientprotocol/codex-acp@1.1.2; \
     npm cache clean --force; \
     rm -rf /var/lib/apt/lists/*
 
