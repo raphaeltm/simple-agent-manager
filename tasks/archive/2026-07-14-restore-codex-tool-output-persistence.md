@@ -44,10 +44,12 @@ Assistant text and task output summaries are not affected. The fix must restore 
   - [x] Staging deployment workflow, migrations, health, and smoke checks passed.
   - [x] User explicitly waived the remaining real-VM/browser staging checks on 2026-07-14 in favor of documentation, local experiments, and high-quality tests.
   - [x] Stop the authoritative staging validator before it changed credentials or provisioned another VM.
-- [ ] Open PR, wait for all CI checks, merge, and monitor production deployment to success.
+- [x] Open PR, wait for all CI checks, merge, and monitor production deployment to success.
 
 ## Validation Evidence
 
+- PR #1580 passed every CI, SonarCloud, VM-agent E2E/integration, smoke, Playwright, build, lint, typecheck, and test gate; squash-merged as `b438270c3ebe37c7492ba93a8cf157319fc52d66`.
+- Production deployment workflow `29337644219` completed successfully, including VM-agent artifact publication, D1 backup/migration integrity, API/web deployment, and health checks; production API and web endpoints returned HTTP 200.
 - Focused Go extraction/privacy tests pass for real Codex ACP 1.1.2 command, MCP result/error, sparse update, structured-content, terminal-reference, bounded/cyclic, and sensitive-object cases.
 - Shared install-contract, ACP React rendering, ProjectData compact/lazy reload, and web call/update merge tests pass.
 - Repository lint has no errors (existing warnings only), TypeScript typecheck passes, and the repository test/build pipeline completed without feature errors.
