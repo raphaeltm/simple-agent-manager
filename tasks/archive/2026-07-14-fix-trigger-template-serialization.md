@@ -45,6 +45,14 @@ The user explicitly decided that an unset `webhook.sourceLabel` must remain blan
 - Staging proves the exact reported template reaches the persisted task/session prompt correctly.
 - CI and all required specialist reviews pass; the PR is merged and production deploy succeeds.
 
+## Specialist Review Evidence
+
+- Fresh task-completion-validator review: PASS with no implementation gaps.
+- Fresh cloudflare-specialist review: PASS for Worker compatibility, deterministic bounded serialization, and runtime risk.
+- Fresh test-engineer review: found one LOW gap because the GitHub handler suite did not reach successful rendering. Commit `98387f48b` adds a matching-event path that invokes the production `renderPrompt` callback and asserts quotes, ampersands, Markdown, and HTML-like text remain literal.
+- Post-fix validation: 67 focused renderer/ingress tests, API typecheck, formatting, and ESLint pass.
+- The original interrupted reviewer attempts were superseded by the completed fresh reviews above; their history remains recorded in PR #1585.
+
 ## References
 
 - `tasks/archive/2026-07-13-generic-webhook-triggers.md`
