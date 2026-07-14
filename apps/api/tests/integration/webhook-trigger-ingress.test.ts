@@ -220,6 +220,90 @@ describe('generic webhook ingress vertical slice', () => {
     });
   });
 
+  it('preserves JSON and blank source labels in the reported webhook prompt', async () => {
+    const promptTemplate = `Take a look at the following information, received from a webhook:
+
+---
+
+Received At: {{webhook.receivedAt}}
+
+Source: {{webhook.sourceLabel}}
+
+Payload:
+\`\`\`
+{{webhook.payload}}
+\`\`\`
+
+Body:
+\`\`\`
+{{webhook.body}}
+\`\`\`
+
+Headers: {{webhook.headers}}
+
+---
+
+From that information, I'd like you to derive something interesting to append to the end of the project readme. Then push.`;
+    sqlite
+      .prepare('UPDATE triggers SET prompt_template = ? WHERE id = ?')
+      .run(promptTemplate, TRIGGER_ID);
+    sqlite
+      .prepare(
+        "UPDATE webhook_trigger_configs SET source_label = NULL, included_headers_json = '[]' WHERE trigger_id = ?"
+      )
+      .run(TRIGGER_ID);
+
+    const submitter = vi.fn<TriggerTaskSubmitter>(async (_env, input) => ({
+      taskId: `task-${input.triggerExecutionId}`,
+      sessionId: `session-${input.triggerExecutionId}`,
+      branchName: 'sam/reported-webhook',
+    }));
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-14T14:37:45.437Z'));
+
+    try {
+      const response = await appWith(submitter).request(
+        deliveryRequest(token, { event: { action: 'created' } }, 'reported-delivery'),
+        undefined,
+        env
+      );
+
+      expect(response.status).toBe(202);
+      expect(submitter).toHaveBeenCalledOnce();
+      const blankSource = '';
+      const expectedPrompt = `Take a look at the following information, received from a webhook:
+
+---
+
+Received At: 2026-07-14T14:37:45.437Z
+
+Source: ${blankSource}
+
+Payload:
+\`\`\`
+{"event":{"action":"created"}}
+\`\`\`
+
+Body:
+\`\`\`
+{"event":{"action":"created"}}
+\`\`\`
+
+Headers: {}
+
+---
+
+From that information, I'd like you to derive something interesting to append to the end of the project readme. Then push.`;
+
+      expect(submitter.mock.calls[0]?.[1].renderedPrompt).toBe(expectedPrompt);
+      expect(sqlite.prepare('SELECT rendered_prompt FROM trigger_executions').get()).toEqual({
+        rendered_prompt: expectedPrompt,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('records a duplicate audit entry without submitting a second execution', async () => {
     const submitter = vi.fn<TriggerTaskSubmitter>(async () => ({
       taskId: 'task-1',

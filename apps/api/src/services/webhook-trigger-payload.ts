@@ -4,6 +4,10 @@ import type {
   WebhookTriggerFilter,
 } from '@simple-agent-manager/shared';
 
+import { canonicalJson } from '../lib/canonical-json';
+
+export { canonicalJson } from '../lib/canonical-json';
+
 const FORBIDDEN_PATH_SEGMENTS = new Set(['__proto__', 'prototype', 'constructor']);
 const FORBIDDEN_HEADERS = new Set([
   'authorization',
@@ -19,20 +23,6 @@ const FORBIDDEN_HEADERS = new Set([
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
-
-function canonicalize(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(canonicalize);
-  if (!isRecord(value)) return value;
-  return Object.fromEntries(
-    Object.keys(value)
-      .sort((left, right) => left.localeCompare(right, 'en-US'))
-      .map((key) => [key, canonicalize(value[key])])
-  );
-}
-
-export function canonicalJson(value: Record<string, unknown>): string {
-  return JSON.stringify(canonicalize(value));
 }
 
 export function parseWebhookJsonObject(rawBody: string): Record<string, unknown> | null {
