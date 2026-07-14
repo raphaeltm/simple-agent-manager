@@ -38,8 +38,8 @@ Assistant text and task output summaries are not affected. The fix must restore 
   - [x] React tests for live raw-output fallback and persisted normalized output parity.
   - [x] Install-contract test proving every maintained-wrapper reference uses the single pinned version.
 - [x] Run mandatory mobile and desktop Playwright visual audit for the changed generic tool card.
-- [ ] Run full lint, typecheck, test, build, Go tests, and relevant package checks.
-- [ ] Complete task, Go, Cloudflare/ProjectData, UI/UX, security/privacy, constitution, and test specialist reviews; address findings.
+- [x] Run full lint, typecheck, test, build, Go tests, and relevant package checks.
+- [x] Complete task, Go, Cloudflare/ProjectData, UI/UX, security/privacy, constitution, and test specialist reviews; address findings.
 - [ ] Deploy to staging and provision a real VM-backed Codex session using platform cloud-credential fallback.
   - [ ] Verify VM heartbeat and workspace access.
   - [ ] Produce recognizable shell and MCP output and confirm it appears live.
@@ -47,6 +47,25 @@ Assistant text and task output summaries are not affected. The fix must restore 
   - [ ] Inspect durable session messages and confirm meaningful bounded output, toolCallId correlation, and no sensitive raw input.
   - [ ] Clean up the test workspace and node.
 - [ ] Open PR, wait for all CI checks, merge, and monitor production deployment to success.
+
+## Validation Evidence
+
+- Focused Go extraction/privacy tests pass for real Codex ACP 1.1.2 command, MCP result/error, sparse update, structured-content, terminal-reference, bounded/cyclic, and sensitive-object cases.
+- Shared install-contract, ACP React rendering, ProjectData compact/lazy reload, and web call/update merge tests pass.
+- Repository lint has no errors (existing warnings only), TypeScript typecheck passes, and the repository test/build pipeline completed without feature errors.
+- Broad `go test ./internal/acp/...` exposes two crash-recovery callback timing failures that reproduce unchanged on clean `main`; tracked separately in `tasks/backlog/2026-07-14-stabilize-codex-crash-recovery-reporting-tests.md`. The focused extraction suite passes.
+- Mobile 375×667 and desktop 1280×800 Playwright audits pass with no overflow or interaction regression.
+- Specialist verdicts:
+  - Task completion: implementation complete; lifecycle remains open through staging, PR, merge, and production monitoring.
+  - Go: PASS after bounded deterministic unknown-object rendering.
+  - Security/privacy: PASS after pre-serialization bounds and sensitive-key redaction.
+  - Cloudflare/ProjectData: PASS; no schema/migration/binding changes, compact/lazy semantics preserved.
+  - UI/UX: PASS; live and reloaded presentation is consistent on mobile and desktop.
+  - Constitution: PASS; wrapper version is a centralized protocol compatibility pin and existing content budgets are reused.
+  - Test engineering: PASS; required unit, contract, regression, privacy, and vertical-slice categories are represented.
+- Staging deploy workflow `29330080419` succeeded, including VM-agent artifact upload, migrations/data-integrity checks, health check, and smoke tests.
+- Staging D1 confirms enabled Hetzner platform credential `01KNY6DC06C9QCYQM0389NAGNT` for cloud-provider fallback.
+- Independent real-user staging validation is delegated as SAM task `01KXG7WZVZ5WQ3PM9DXF4FXBM4`; VM/session evidence and cleanup remain pending.
 
 ## Acceptance Criteria
 
