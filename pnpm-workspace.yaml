@@ -45,7 +45,7 @@ catalog:
   execa: 9.6.1
   prism-react-renderer: 2.4.1
   react-markdown: 10.1.0
-  react-virtuoso: 4.18.3
+  react-virtuoso: 4.18.10
   remark-gfm: 4.0.1
 
   # === Terminal ===
