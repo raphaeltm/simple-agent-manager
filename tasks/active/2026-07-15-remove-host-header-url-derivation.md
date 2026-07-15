@@ -26,9 +26,9 @@ The fix must prefer configured deployment origins/domains, preserve existing env
   - trusted configured API URL is used;
   - malicious Host/X-Forwarded-Host is ignored for returned credentials/proxy routing;
   - legacy callback token compatibility remains intact.
-- [ ] Run focused tests, then full quality checks.
-- [ ] Run security/test/constitution specialist reviews and address findings.
-- [ ] Push branch, open PR, wait for CI, and do not merge.
+- [x] Run focused tests, then full quality checks.
+- [x] Run security/test/constitution specialist reviews and address findings.
+- [ ] Push branch, open PR, wait for CI, and do not merge. (final PR/CI step pending)
 
 ## Acceptance Criteria
 
@@ -40,3 +40,5 @@ The fix must prefer configured deployment origins/domains, preserve existing env
 - PR is open and not merged.
 
 - Focused implementation checks passed: trusted origin/webhook/ws-proxy/bootstrap tests and API typecheck.
+- Full local validation passed: `pnpm lint`, `pnpm typecheck`, `pnpm test`, and `pnpm build`.
+- Specialist reviews passed: security-auditor, test-engineer, constitution-validator, cloudflare-specialist, and task-completion-validator found no blocking issues.
