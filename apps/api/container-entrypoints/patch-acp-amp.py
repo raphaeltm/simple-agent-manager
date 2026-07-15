@@ -1,9 +1,12 @@
-from pathlib import Path
+PYTHON_SDK_PATH = "/opt/uv-tools/acp-amp/lib/python3.12/site-packages/acp_amp/driver/python_sdk.py"
+AMP_TYPES_PATH = "/opt/uv-tools/acp-amp/lib/python3.12/site-packages/amp_sdk/types.py"
 
-base = Path('/opt/uv-tools/acp-amp/lib/python3.12/site-packages')
-p = base / 'acp_amp/driver/python_sdk.py'
-t = p.read_text()
-t = t.replace('"message": str(exc)', '"message": str(exc) + (" stderr: " + exc.stderr if hasattr(exc, "stderr") and exc.stderr else "")')
+with open(PYTHON_SDK_PATH, encoding="utf-8") as handle:
+    t = handle.read()
+t = t.replace(
+    "\"message\": str(exc)",
+    "\"message\": str(exc) + (\" stderr: \" + exc.stderr if hasattr(exc, \"stderr\") and exc.stderr else \"\")",
+)
 old = '''        if mcp_config:
             base["mcp_config"] = mcp_config
             base["mcpConfig"] = mcp_config'''
@@ -22,7 +25,14 @@ new = '''        if mcp_config:
             base["mcp_config"] = _wrapped
             base["mcpConfig"] = _wrapped'''
 t = t.replace(old, new)
-p.write_text(t)
-v = base / 'amp_sdk/types.py'
-vt = v.read_text().replace('visibility: Optional[Literal["private", "public", "workspace", "group"]] = "workspace"', 'visibility: Optional[Literal["private", "public", "workspace", "group"]] = "private"')
-v.write_text(vt)
+with open(PYTHON_SDK_PATH, "w", encoding="utf-8") as handle:
+    handle.write(t)
+
+with open(AMP_TYPES_PATH, encoding="utf-8") as handle:
+    vt = handle.read()
+vt = vt.replace(
+    'visibility: Optional[Literal["private", "public", "workspace", "group"]] = "workspace"',
+    'visibility: Optional[Literal["private", "public", "workspace", "group"]] = "private"',
+)
+with open(AMP_TYPES_PATH, "w", encoding="utf-8") as handle:
+    handle.write(vt)
