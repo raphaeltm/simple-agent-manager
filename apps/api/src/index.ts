@@ -419,10 +419,9 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
 
     const containerId = workspace.nodeId || workspaceId;
     const vmAgentPort = containerConfig.vmAgentPort;
-    const containerUrl = new URL(c.req.url);
-    containerUrl.protocol = 'http:';
-    containerUrl.hostname = 'localhost';
-    containerUrl.port = String(vmAgentPort);
+    const containerUrl = new URL(`http://localhost:${vmAgentPort}`);
+    containerUrl.pathname = url.pathname;
+    containerUrl.search = url.search;
 
     if (targetPort !== null) {
       const subPath = url.pathname === '/' ? '' : url.pathname;
@@ -517,10 +516,9 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
   );
   const vmAgentProtocol = c.env.VM_AGENT_PROTOCOL || 'https';
   const vmAgentPort = c.env.VM_AGENT_PORT || '8443';
-  const vmUrl = new URL(c.req.url);
-  vmUrl.protocol = `${vmAgentProtocol}:`;
-  vmUrl.hostname = backendHostname;
-  vmUrl.port = vmAgentPort;
+  const vmUrl = new URL(`${vmAgentProtocol}://${backendHostname}:${vmAgentPort}`);
+  vmUrl.pathname = url.pathname;
+  vmUrl.search = url.search;
 
   // Route port-specific requests to the VM agent's port proxy endpoint.
   // ws-{id}--3000.example.com/foo → {backend}/workspaces/{id}/ports/3000/foo

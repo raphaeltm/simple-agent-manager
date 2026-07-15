@@ -174,6 +174,7 @@ const ROUTE_PATH = '/api/projects/:projectId/triggers';
 const REQUEST_PATH = '/api/projects/test-project-id/triggers';
 
 const env: Env = {
+  BASE_DOMAIN: 'example.com',
   DATABASE: {} as any,
   CRON_TEMPLATE_MAX_LENGTH: undefined,
   MAX_TRIGGERS_PER_PROJECT: undefined,
@@ -357,7 +358,7 @@ describe('Trigger Routes', () => {
       expect(res.headers.get('Cache-Control')).toBe('private, no-store');
       const json = await res.json();
       expect(json.webhookCredential).toMatchObject({
-        endpointUrl: 'http://localhost/api/webhooks/ingest',
+        endpointUrl: 'https://api.example.com/api/webhooks/ingest',
         headerName: 'Authorization',
       });
       expect(json.webhookCredential.token).toMatch(/^sam_wh_[A-Za-z0-9_-]{43}$/);

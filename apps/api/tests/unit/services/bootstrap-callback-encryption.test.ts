@@ -96,7 +96,7 @@ describe('Bootstrap Callback Token Encryption (F-004)', () => {
     expect(body.workspaceId).toBe('ws-enc-test');
   });
 
-  it('falls back to plaintext callbackToken for legacy in-flight tokens', async () => {
+  it('falls back to plaintext callbackToken for legacy in-flight tokens (legacy callback token compatibility)', async () => {
     const { encrypt } = await import('../../../src/services/encryption');
 
     const { ciphertext: encHetzner, iv: ivHetzner } = await encrypt(

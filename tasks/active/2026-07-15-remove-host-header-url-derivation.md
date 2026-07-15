@@ -18,17 +18,17 @@ The fix must prefer configured deployment origins/domains, preserve existing env
 
 ## Checklist
 
-- [ ] Create a small URL/origin helper in `apps/api` for trusted API/public origin derivation from existing env/config (`API_URL` when present, otherwise `https://api.${BASE_DOMAIN}`, with localhost/dev fallback only where needed).
-- [ ] Update webhook credential generation to use trusted configured origin instead of `Request.url`.
-- [ ] Update proxy URL construction to avoid cloning attacker-controlled request origins for VM-agent backend requests.
-- [ ] Audit remaining apps/api `Request.url`/origin constructions and leave non-security-sensitive path/query parsing intact.
-- [ ] Add scenario tests for:
+- [x] Create a small URL/origin helper in `apps/api` for trusted API/public origin derivation from existing env/config (`https://api.${BASE_DOMAIN}` in deployed environments, with localhost/dev fallback only where needed).
+- [x] Update webhook credential generation to use trusted configured origin instead of `Request.url`.
+- [x] Update proxy URL construction to avoid cloning attacker-controlled request origins for VM-agent backend requests.
+- [x] Audit remaining apps/api `Request.url`/origin constructions and leave non-security-sensitive path/query parsing intact.
+- [x] Add scenario tests for:
   - trusted configured API URL is used;
   - malicious Host/X-Forwarded-Host is ignored for returned credentials/proxy routing;
   - legacy callback token compatibility remains intact.
-- [ ] Run focused tests, then full quality checks.
-- [ ] Run security/test/constitution specialist reviews and address findings.
-- [ ] Push branch, open PR, wait for CI, and do not merge.
+- [x] Run focused tests, then full quality checks.
+- [x] Run security/test/constitution specialist reviews and address findings.
+- [ ] Push branch, open PR, wait for CI, and do not merge. (final PR/CI step pending)
 
 ## Acceptance Criteria
 
@@ -38,3 +38,7 @@ The fix must prefer configured deployment origins/domains, preserve existing env
 - Tests cover configured trusted origin, malicious Host/X-Forwarded-Host behavior, and legacy compatibility.
 - CI is green.
 - PR is open and not merged.
+
+- Focused implementation checks passed: trusted origin/webhook/ws-proxy/bootstrap tests and API typecheck.
+- Full local validation passed: `pnpm lint`, `pnpm typecheck`, `pnpm test`, and `pnpm build`.
+- Specialist reviews passed: security-auditor, test-engineer, constitution-validator, cloudflare-specialist, and task-completion-validator found no blocking issues.
