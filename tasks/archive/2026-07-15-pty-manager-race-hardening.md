@@ -13,12 +13,12 @@ The VM agent PTY manager has race-prone lifecycle code around session creation a
 
 ## Implementation checklist
 
-- [ ] Make `CreateSessionWithID` insertion duplicate-safe under the manager mutex.
-- [ ] Make `MaxSessionsPerUser` enforcement atomic with session map insertion.
-- [ ] Guard orphan timer assignment with the session mutex.
-- [ ] Add scenario-driven Go tests for duplicate concurrent session creation and max-session enforcement.
-- [ ] Run `go test -race` for the touched package.
-- [ ] Run Go specialist, test engineer, and security auditor reviews before finalizing.
+- [x] Make `CreateSessionWithID` insertion duplicate-safe under the manager mutex.
+- [x] Make `MaxSessionsPerUser` enforcement atomic with session map insertion.
+- [x] Guard orphan timer assignment with the session mutex.
+- [x] Add scenario-driven Go tests for duplicate concurrent session creation and max-session enforcement.
+- [x] Run `go test -race` for the touched package.
+- [x] Run Go specialist, test engineer, and security auditor reviews before finalizing.
 
 ## Acceptance criteria
 

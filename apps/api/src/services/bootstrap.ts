@@ -12,6 +12,7 @@ import { decrypt, encrypt } from './encryption';
 
 /** KV key prefix for bootstrap tokens */
 const BOOTSTRAP_PREFIX = 'bootstrap:';
+const inFlightRedemptions = new Map<string, Promise<BootstrapTokenData | null>>();
 
 /** Default bootstrap token TTL in seconds (15 minutes) */
 const DEFAULT_BOOTSTRAP_TTL = 900;
@@ -91,33 +92,46 @@ export async function redeemBootstrapToken(
   env: BootstrapEnv
 ): Promise<BootstrapTokenData | null> {
   const key = `${BOOTSTRAP_PREFIX}${token}`;
-
-  const data = await kv.get<BootstrapTokenData>(key, { type: 'json' });
-
-  if (!data) {
+  const existing = inFlightRedemptions.get(key);
+  if (existing) {
     return null;
   }
 
-  // Delete immediately to enforce single-use
-  await kv.delete(key);
+  const redemption = (async () => {
+    const data = await kv.get<BootstrapTokenData>(key, { type: 'json' });
 
-  if (data.encryptedCallbackToken && data.callbackTokenIv) {
-    const callbackToken = await decrypt(
-      data.encryptedCallbackToken,
-      data.callbackTokenIv,
-      getCredentialEncryptionKey(env)
-    );
+    if (!data) {
+      return null;
+    }
 
-    return {
-      ...data,
-      callbackToken,
-    };
+    // Delete immediately to enforce single-use before decrypting or returning credentials.
+    await kv.delete(key);
+
+    if (data.encryptedCallbackToken && data.callbackTokenIv) {
+      const callbackToken = await decrypt(
+        data.encryptedCallbackToken,
+        data.callbackTokenIv,
+        getCredentialEncryptionKey(env)
+      );
+
+      return {
+        ...data,
+        callbackToken,
+      };
+    }
+
+    // Backward compatibility for bootstrap entries written before callback token encryption.
+    if (data.callbackToken) {
+      return data;
+    }
+
+    throw new Error('Bootstrap token data is missing callback token material');
+  })();
+
+  inFlightRedemptions.set(key, redemption);
+  try {
+    return await redemption;
+  } finally {
+    inFlightRedemptions.delete(key);
   }
-
-  // Backward compatibility for bootstrap entries written before callback token encryption.
-  if (data.callbackToken) {
-    return data;
-  }
-
-  throw new Error('Bootstrap token data is missing callback token material');
 }

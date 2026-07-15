@@ -177,6 +177,7 @@ describe('webhook trigger management vertical slice', () => {
       .run(await hashWebhookToken(token, 'management-key'), token.slice(-4), now, now, now);
     env = {
       DATABASE: createSqliteD1(sqlite),
+      BASE_DOMAIN: 'example.com',
       KV: createMemoryKv(),
       ENCRYPTION_KEY: 'management-key',
       WEBHOOK_TRIGGER_MAX_SOURCE_LABEL_LENGTH: '6',
@@ -323,7 +324,9 @@ describe('webhook trigger management vertical slice', () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get('Cache-Control')).toBe('private, no-store');
-    expect((await response.json()).webhookCredential.token).toMatch(/^sam_wh_[A-Za-z0-9_-]{43}$/);
+    const body = await response.json();
+    expect(body.webhookCredential.endpointUrl).toBe('https://api.example.com/api/webhooks/ingest');
+    expect(body.webhookCredential.token).toMatch(/^sam_wh_[A-Za-z0-9_-]{43}$/);
   });
 
   it('paginates equal timestamps with an opaque cursor and rejects malformed cursors', async () => {

@@ -82,20 +82,8 @@ func (m *Manager) CreateSession(userID string, rows, cols int) (*Session, error)
 // CreateSessionWithID creates a new PTY session with a specific ID.
 // This is used for multi-terminal support where the client generates the session ID.
 func (m *Manager) CreateSessionWithID(sessionID, userID string, rows, cols int, workDir string) (*Session, error) {
-	// Check if session already exists
-	m.mu.RLock()
-	if _, exists := m.sessions[sessionID]; exists {
-		m.mu.RUnlock()
-		return nil, fmt.Errorf("session already exists: %s", sessionID)
-	}
-	m.mu.RUnlock()
-
-	// Check session limit for user
-	if m.maxSessionsPerUser > 0 {
-		currentCount := m.SessionCountForUser(userID)
-		if currentCount >= m.maxSessionsPerUser {
-			return nil, fmt.Errorf("maximum sessions reached for user %s: %d", userID, m.maxSessionsPerUser)
-		}
+	if err := m.canCreateSession(sessionID, userID); err != nil {
+		return nil, err
 	}
 
 	if rows <= 0 {
@@ -131,19 +119,55 @@ func (m *Manager) CreateSessionWithID(sessionID, userID string, rows, cols int, 
 		ContainerUser:    m.containerUser,
 		ProcessGroup:     m.processGroup,
 		OutputBufferSize: m.bufferSize,
-		OnClose: func() {
-			m.removeSession(sessionID)
-		},
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	m.mu.Lock()
-	m.sessions[sessionID] = session
-	m.mu.Unlock()
+	if err := m.addSession(session); err != nil {
+		_ = session.Close()
+		return nil, err
+	}
 
 	return session, nil
+}
+
+func (m *Manager) canCreateSession(sessionID, userID string) error {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if _, exists := m.sessions[sessionID]; exists {
+		return fmt.Errorf("session already exists: %s", sessionID)
+	}
+	if m.maxSessionsPerUser > 0 && m.sessionCountForUserLocked(userID) >= m.maxSessionsPerUser {
+		return fmt.Errorf("maximum sessions reached for user %s: %d", userID, m.maxSessionsPerUser)
+	}
+	return nil
+}
+
+func (m *Manager) addSession(session *Session) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, exists := m.sessions[session.ID]; exists {
+		return fmt.Errorf("session already exists: %s", session.ID)
+	}
+	if m.maxSessionsPerUser > 0 && m.sessionCountForUserLocked(session.UserID) >= m.maxSessionsPerUser {
+		return fmt.Errorf("maximum sessions reached for user %s: %d", session.UserID, m.maxSessionsPerUser)
+	}
+	session.onClose = func() {
+		m.removeSession(session.ID)
+	}
+	m.sessions[session.ID] = session
+	return nil
+}
+
+func (m *Manager) sessionCountForUserLocked(userID string) int {
+	count := 0
+	for _, s := range m.sessions {
+		if s.UserID == userID {
+			count++
+		}
+	}
+	return count
 }
 
 // GetSession retrieves a session by ID.
@@ -225,14 +249,7 @@ func (m *Manager) SessionCount() int {
 func (m *Manager) SessionCountForUser(userID string) int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-
-	count := 0
-	for _, s := range m.sessions {
-		if s.UserID == userID {
-			count++
-		}
-	}
-	return count
+	return m.sessionCountForUserLocked(userID)
 }
 
 // GetAllSessions returns all active sessions.
@@ -313,9 +330,12 @@ func (m *Manager) OrphanSession(sessionID string) {
 
 	if m.gracePeriod > 0 {
 		// Start orphan timer — cleanup after grace period.
-		session.orphanTimer = time.AfterFunc(m.gracePeriod, func() {
+		timer := time.AfterFunc(m.gracePeriod, func() {
 			m.cleanupOrphanedSession(sessionID)
 		})
+		session.mu.Lock()
+		session.orphanTimer = timer
+		session.mu.Unlock()
 		slog.Info("Session orphaned, will cleanup after grace period", "sessionID", sessionID, "gracePeriod", m.gracePeriod)
 	} else {
 		slog.Info("Session orphaned, automatic cleanup disabled", "sessionID", sessionID)

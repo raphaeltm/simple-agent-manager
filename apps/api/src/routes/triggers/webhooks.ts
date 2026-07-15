@@ -5,8 +5,8 @@ import { Hono } from 'hono';
 
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
-import { parsePositiveInt } from '../../lib/route-helpers';
-import { requireRouteParam } from '../../lib/route-helpers';
+import { parsePositiveInt, requireRouteParam } from '../../lib/route-helpers';
+import { buildTrustedApiUrl } from '../../lib/trusted-origins';
 import { getAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { jsonValidator, TriggerPreviewSchema } from '../../schemas';
@@ -27,12 +27,12 @@ import { requireProjectTaskRead, requireProjectTaskWrite } from '../task-project
 
 const webhookRoutes = new Hono<{ Bindings: Env }>();
 
-function endpointUrl(requestUrl: string): string {
-  return `${new URL(requestUrl).origin}/api/webhooks/ingest`;
+function endpointUrl(env: Env): string {
+  return buildTrustedApiUrl(env, '/api/webhooks/ingest');
 }
 
-function credential(requestUrl: string, token: string): WebhookCredential {
-  return { endpointUrl: endpointUrl(requestUrl), token, headerName: 'Authorization' };
+function credential(env: Env, token: string): WebhookCredential {
+  return { endpointUrl: endpointUrl(env), token, headerName: 'Authorization' };
 }
 
 async function loadWebhookTrigger(env: Env, projectId: string, triggerId: string) {
@@ -63,7 +63,7 @@ webhookRoutes.post('/:triggerId/webhook/rotate', async (c) => {
   const token = await rotateWebhookToken(c.env, projectId, triggerId);
   if (!token) throw errors.notFound('Webhook trigger');
   c.header('Cache-Control', 'private, no-store');
-  return c.json({ webhookCredential: credential(c.req.url, token.token) });
+  return c.json({ webhookCredential: credential(c.env, token.token) });
 });
 
 webhookRoutes.get('/:triggerId/webhook/deliveries', async (c) => {
