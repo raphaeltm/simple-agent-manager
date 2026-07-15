@@ -18,7 +18,7 @@ The VM agent PTY manager has race-prone lifecycle code around session creation a
 - [x] Guard orphan timer assignment with the session mutex.
 - [x] Add scenario-driven Go tests for duplicate concurrent session creation and max-session enforcement.
 - [x] Run `go test -race` for the touched package.
-- [ ] Run Go specialist, test engineer, and security auditor reviews before finalizing.
+- [x] Run Go specialist, test engineer, and security auditor reviews before finalizing.
 
 ## Acceptance criteria
 
