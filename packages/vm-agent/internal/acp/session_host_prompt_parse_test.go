@@ -186,8 +186,11 @@ func TestInjectUserMessageNotifications_SDKMarshalStripsMarker(t *testing.T) {
 	var sawUserUpdate bool
 	for _, data := range buffered {
 		var env struct {
-			Method string                     `json:"method"`
-			Params acpsdk.SessionNotification `json:"params"`
+			Method string `json:"method"`
+			Params struct {
+				Update acpsdk.SessionUpdate `json:"update"`
+				Origin string               `json:"origin"`
+			} `json:"params"`
 		}
 		if err := json.Unmarshal(data, &env); err != nil {
 			continue
@@ -205,6 +208,9 @@ func TestInjectUserMessageNotifications_SDKMarshalStripsMarker(t *testing.T) {
 		}
 		if tb.Annotations != nil {
 			t.Fatalf("unexpected: mirror preserved annotations (%v) — SDK behavior changed, revisit design", tb.Annotations)
+		}
+		if env.Params.Origin != OriginSystem {
+			t.Fatalf("SAM broadcast origin = %q, want %q", env.Params.Origin, OriginSystem)
 		}
 	}
 	if !sawUserUpdate {

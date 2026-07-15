@@ -249,6 +249,15 @@ export async function ensureBranchExistsOnRemote(
     return;
   }
 
+  const projectRepo = await loadTaskRunnerProjectRepo(state, rc);
+  if (projectRepo?.repoProvider === 'artifacts') {
+    return;
+  }
+  if (projectRepo?.repoProvider === 'gitlab') {
+    await ensureGitLabBranchExistsOnRemote(state, rc, defaultBranch);
+    return;
+  }
+
   // Parse owner/repo from repository string (format: "owner/repo")
   const repoParts = state.config.repository.split('/');
   if (repoParts.length !== 2 || !repoParts[0] || !repoParts[1]) {
@@ -303,6 +312,61 @@ export async function ensureBranchExistsOnRemote(
   }
 }
 
+type TaskRunnerProjectRepo = {
+  repoProvider: string | null;
+};
+
+async function loadTaskRunnerProjectRepo(
+  state: TaskRunnerState,
+  rc: TaskRunnerContext,
+): Promise<TaskRunnerProjectRepo | null> {
+  return rc.env.DATABASE.prepare(
+    `SELECT repo_provider AS repoProvider FROM projects WHERE id = ?`
+  ).bind(state.projectId).first<TaskRunnerProjectRepo>();
+}
+
+async function ensureGitLabBranchExistsOnRemote(
+  state: TaskRunnerState,
+  rc: TaskRunnerContext,
+  defaultBranch: string,
+): Promise<void> {
+  try {
+    const { drizzle } = await import('drizzle-orm/d1');
+    const schema = await import('../../db/schema');
+    const { ensureGitLabBranchExists, getProjectGitLabRepository } = await import('../../services/gitlab');
+    const metadata = await getProjectGitLabRepository(
+      drizzle(rc.env.DATABASE, { schema }),
+      state.projectId
+    );
+    if (!metadata) {
+      log.warn('task_runner_do.ensure_branch.gitlab_metadata_missing', {
+        taskId: state.taskId,
+        projectId: state.projectId,
+      });
+      return;
+    }
+    const created = await ensureGitLabBranchExists({
+      env: rc.env,
+      userId: state.userId,
+      projectId: metadata.gitlabProjectId,
+      branch: state.config.branch,
+      ref: defaultBranch,
+    });
+    if (created) {
+      log.info('task_runner_do.ensure_branch.gitlab_ok', {
+        taskId: state.taskId,
+        branch: state.config.branch,
+      });
+    }
+  } catch (err) {
+    log.warn('task_runner_do.ensure_branch.gitlab_error', {
+      taskId: state.taskId,
+      branch: state.config.branch,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
 type TaskRunnerGitHubInstallation = {
   installationId: string;
   externalInstallationId: string | null;
@@ -327,12 +391,27 @@ async function createWorkspaceOnVmAgent(
 ): Promise<void> {
   const { signCallbackToken } = await import('../../services/jwt');
   const { createWorkspaceOnNode } = await import('../../services/node-agent');
+  const { resolveWorkspaceGitSource } = await import('../../services/workspace-git-source');
   const callbackToken = await signCallbackToken(workspaceId, rc.env);
+  const projectRepo = await loadTaskRunnerProjectRepo(state, rc);
+  const { drizzle } = await import('drizzle-orm/d1');
+  const schema = await import('../../db/schema');
+  const gitSource = await resolveWorkspaceGitSource(
+    drizzle(rc.env.DATABASE, { schema }),
+    {
+      id: state.projectId,
+      repoProvider: projectRepo?.repoProvider ?? 'github',
+    }
+  );
 
   const response = await createWorkspaceOnNode(nodeId, rc.env, state.userId, {
     workspaceId,
     repository: state.config.repository,
     branch: state.config.branch,
+    repoProvider: gitSource.repoProvider,
+    cloneUrl: gitSource.cloneUrl,
+    repositoryHost: gitSource.repositoryHost,
+    repositoryPath: gitSource.repositoryPath,
     callbackToken,
     gitUserName: state.config.userName,
     gitUserEmail: state.config.userEmail,

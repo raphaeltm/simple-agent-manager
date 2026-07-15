@@ -83,6 +83,7 @@ For each subtask that has no unmet dependencies:
 1. **Dispatch it** using `dispatch_task`:
    - Write a clear, self-contained description
    - Include `Execute this task using the /do skill.` in the description
+   - Do not start the description with `/do` or any slash command. Some runtimes, including Codex, parse a leading slash as a CLI command and can reject the prompt before SAM bootstrap instructions are processed.
    - Set appropriate priority (lower number = higher priority)
 
 2. **Record the task ID** in `.workflow-state.md` immediately after dispatch
@@ -93,6 +94,7 @@ For each subtask that has no unmet dependencies:
    - The task/session is not immediately failed, stuck queued, or missing
    - The title/summary matches the intended work, not a generic or hallucinated title
    - The requested profile/agent/skill is reflected, especially `/do` for implementation subtasks
+   - The `/do` instruction is written as prose and the description does not begin with `/do` or another slash command
    - Critical constraints such as branch, `draft PR`, `do not merge`, or required profile survived in the task description
 
    If any of these checks fail, do not wait on the subtask. Re-dispatch with corrected instructions or report the failure with exact status evidence.

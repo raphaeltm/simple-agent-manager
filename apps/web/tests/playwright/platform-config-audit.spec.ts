@@ -17,7 +17,7 @@ const PLATFORM_STATUS = {
     githubOAuth: {
       configured: true,
       source: 'environment',
-      label: 'set via GitHub secret',
+      label: 'set via environment fallback',
       fields: {
         clientId: { configured: true, source: 'environment', updatedAt: null, updatedBy: null },
         clientSecret: { configured: true, source: 'environment', updatedAt: null, updatedBy: null },
@@ -26,7 +26,7 @@ const PLATFORM_STATUS = {
     githubApp: {
       configured: true,
       source: 'environment',
-      label: 'set via GitHub secret',
+      label: 'set via environment fallback',
       fields: {
         appId: { configured: true, source: 'environment', updatedAt: null, updatedBy: null },
         appPrivateKey: { configured: true, source: 'environment', updatedAt: null, updatedBy: null },
@@ -50,6 +50,16 @@ const PLATFORM_STATUS = {
         clientSecret: { configured: true, source: 'runtime', updatedAt: '2026-07-07T00:00:00Z', updatedBy: 'admin-platform-config' },
       },
     },
+    gitlabOAuth: {
+      configured: false,
+      source: 'unset',
+      label: 'not configured',
+      fields: {
+        host: { configured: false, source: 'unset', updatedAt: null, updatedBy: null },
+        clientId: { configured: false, source: 'unset', updatedAt: null, updatedBy: null },
+        clientSecret: { configured: false, source: 'unset', updatedAt: null, updatedBy: null },
+      },
+    },
   },
 };
 
@@ -61,14 +71,14 @@ async function respondJson(route: Route, status: number, body: unknown) {
   });
 }
 
-async function setupMocks(page: Page, authenticated = true, googleLogin = true) {
+async function setupMocks(page: Page, authenticated = true, googleLogin = true, gitlabLogin = true) {
   await page.route('**/api/**', async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
 
     if (path === '/api/auth/get-session') return respondJson(route, 200, authenticated ? ADMIN_USER : null);
     if (path === '/api/config/login-providers') {
-      return respondJson(route, 200, { github: true, google: googleLogin });
+      return respondJson(route, 200, { github: true, google: googleLogin, gitlab: gitlabLogin });
     }
     if (path === '/api/dashboard/active-tasks') return respondJson(route, 200, { tasks: [] });
     if (path === '/api/trial-status') return respondJson(route, 200, { isTrial: false });
@@ -110,7 +120,7 @@ test.describe('Platform config first-run and admin UI', () => {
     await page.getByLabel('Setup token').fill('test-setup-token');
     await page.getByRole('button', { name: 'Verify token' }).click();
     await expect(page.getByTestId('platform-config-form')).toBeVisible();
-    await expect(page.getByText('set via GitHub secret').first()).toBeVisible();
+    await expect(page.getByText('set via environment fallback').first()).toBeVisible();
     await expect(page.getByText('set here').first()).toBeVisible();
     await expect(page.getByText('not configured').first()).toBeVisible();
     await assertNoOverflow(page);
@@ -133,18 +143,21 @@ test.describe('Platform config first-run and admin UI', () => {
     await page.goto('/');
     await expect(page.getByRole('button', { name: 'Sign in with GitHub' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Sign in with Google' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Sign in with GitLab' })).toBeVisible();
     await assertNoOverflow(page);
     await screenshot(page, 'platform-config-landing-login');
 
     await page.goto('/device?code=ABCD-1234');
     await expect(page.getByRole('button', { name: 'Log in with GitHub' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Log in with Google' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Log in with GitLab' })).toBeVisible();
     await assertNoOverflow(page);
     await screenshot(page, 'platform-config-device-login');
 
     await page.goto('/__test/trial-chat-gate?ideas=3&loginOpen=1');
     await expect(page.getByTestId('trial-login-github')).toBeVisible();
     await expect(page.getByTestId('trial-login-google')).toBeVisible();
+    await expect(page.getByTestId('trial-login-gitlab')).toBeVisible();
     await assertNoOverflow(page);
     await screenshot(page, 'platform-config-trial-login-sheet');
   });
@@ -155,13 +168,16 @@ test.describe('Platform config first-run and admin UI', () => {
     await page.goto('/');
     await expect(page.getByRole('button', { name: 'Sign in with GitHub' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Sign in with Google' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Sign in with GitLab' })).toBeVisible();
 
     await page.goto('/device?code=ABCD-1234');
     await expect(page.getByRole('button', { name: 'Log in with GitHub' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Log in with Google' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Log in with GitLab' })).toBeVisible();
 
     await page.goto('/__test/trial-chat-gate?ideas=3&loginOpen=1');
     await expect(page.getByTestId('trial-login-github')).toBeVisible();
     await expect(page.getByTestId('trial-login-google')).toHaveCount(0);
+    await expect(page.getByTestId('trial-login-gitlab')).toBeVisible();
   });
 });

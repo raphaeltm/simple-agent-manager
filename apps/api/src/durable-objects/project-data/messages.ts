@@ -41,9 +41,7 @@ export function resolveCompactMessageOptions(env: Env): CompactMessageOptions {
   const parsed = Number.parseInt(env.DOCUMENT_CARD_RAW_OUTPUT_MAX_BYTES || '', 10);
   return {
     documentCardRawOutputMaxBytes:
-      Number.isFinite(parsed) && parsed > 0
-        ? parsed
-        : DEFAULT_DOCUMENT_CARD_RAW_OUTPUT_MAX_BYTES,
+      Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_DOCUMENT_CARD_RAW_OUTPUT_MAX_BYTES,
   };
 }
 
@@ -150,6 +148,7 @@ export function persistMessageBatch(
     toolMetadata: string | null;
     timestamp: string;
     sequence?: number;
+    origin?: string | null;
   }>
 ): {
   persisted: number;
@@ -161,6 +160,7 @@ export function persistMessageBatch(
     toolMetadata: unknown;
     createdAt: number;
     sequence: number;
+    origin: string | null;
   }>;
   workspaceId: string | null;
   firstUserContent: string | null;
@@ -195,6 +195,7 @@ export function persistMessageBatch(
     toolMetadata: unknown;
     createdAt: number;
     sequence: number;
+    origin: string | null;
   }> = [];
 
   // Track user message content seen within this batch to avoid redundant
@@ -202,6 +203,7 @@ export function persistMessageBatch(
   const seenUserContent = new Set<string>();
 
   for (const msg of messages) {
+    const origin = msg.origin ?? null;
     const existing = sql
       .exec('SELECT id FROM chat_messages WHERE id = ?', msg.messageId)
       .toArray()[0];
@@ -221,7 +223,7 @@ export function persistMessageBatch(
     // persistMessageBatch (VM agent batch path) because the WebSocket handler
     // persists synchronously on receipt, while the batch arrives after the VM
     // agent processes the prompt, extracts messages, and flushes (~2-5s later).
-    if (msg.role === 'user') {
+    if (msg.role === 'user' && origin !== 'system') {
       if (seenUserContent.has(msg.content)) {
         duplicates++;
         continue;
@@ -250,15 +252,16 @@ export function persistMessageBatch(
     const createdAt = new Date(msg.timestamp).getTime() || now;
     const sequence = msg.sequence ?? nextSeq++;
     sql.exec(
-      `INSERT INTO chat_messages (id, session_id, role, content, tool_metadata, created_at, sequence)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO chat_messages (id, session_id, role, content, tool_metadata, created_at, sequence, origin)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       msg.messageId,
       sessionId,
       msg.role,
       msg.content,
       msg.toolMetadata,
       createdAt,
-      sequence
+      sequence,
+      origin
     );
     persisted++;
     persistedMessages.push({
@@ -268,6 +271,7 @@ export function persistMessageBatch(
       toolMetadata: msg.toolMetadata ? JSON.parse(msg.toolMetadata) : null,
       createdAt,
       sequence,
+      origin,
     });
   }
 
@@ -284,7 +288,9 @@ export function persistMessageBatch(
     );
 
     if (!session.topic) {
-      const firstUserMsg = messages.find((m) => m.role === 'user');
+      const firstUserMsg = messages.find(
+        (m) => m.role === 'user' && (m.origin ?? null) !== 'system'
+      );
       if (firstUserMsg) {
         firstUserContent = firstUserMsg.content;
         const truncatedTopic =
@@ -351,7 +357,7 @@ export function getMessages(
   compactOptions?: CompactMessageOptions
 ): { messages: Record<string, unknown>[]; hasMore: boolean } {
   let query =
-    'SELECT id, session_id, role, content, tool_metadata, created_at, sequence FROM chat_messages WHERE session_id = ?';
+    'SELECT id, session_id, role, content, tool_metadata, created_at, sequence, origin FROM chat_messages WHERE session_id = ?';
   const params: (string | number)[] = [sessionId];
 
   if (before !== null) {
@@ -526,7 +532,10 @@ function searchMessagesLike(
   onlyNonMaterialized: boolean = false
 ): SearchResult[] {
   const escapedQuery = query.replace(/[%_\\]/g, '\\$&');
-  const conditions: string[] = ["m.content LIKE ? ESCAPE '\\'"];
+  const conditions: string[] = [
+    "m.content LIKE ? ESCAPE '\\'",
+    "COALESCE(m.origin, 'user') != 'system'",
+  ];
   const params: (string | number)[] = [`%${escapedQuery}%`];
 
   if (sessionId) {

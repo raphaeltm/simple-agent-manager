@@ -28,7 +28,7 @@ export function DeviceAuth() {
     setCode(initialCode);
   }, [initialCode]);
 
-  const handleLogin = async (provider: 'github' | 'google') => {
+  const handleLogin = async (provider: 'github' | 'google' | 'gitlab') => {
     const returnPath = `/device${code ? `?code=${encodeURIComponent(normalizeCode(code))}` : ''}`;
     await authClient.signIn.social({
       provider,
@@ -43,7 +43,15 @@ export function DeviceAuth() {
       return;
     }
     if (!isAuthenticated) {
-      await handleLogin('github');
+      if (providers.github) {
+        await handleLogin('github');
+      } else if (providers.google) {
+        await handleLogin('google');
+      } else if (providers.gitlab) {
+        await handleLogin('gitlab');
+      } else {
+        setError('No login provider is configured.');
+      }
       return;
     }
 
@@ -102,14 +110,16 @@ export function DeviceAuth() {
               </Button>
             ) : (
               <div className="space-y-2">
-                <Button
-                  variant="primary"
-                  onClick={handleApprove}
-                  disabled={isLoading || submitting || !code.trim()}
-                  className="w-full"
-                >
-                  Log in with GitHub
-                </Button>
+                {providers.github && (
+                  <Button
+                    variant="primary"
+                    onClick={handleApprove}
+                    disabled={isLoading || submitting || !code.trim()}
+                    className="w-full"
+                  >
+                    Log in with GitHub
+                  </Button>
+                )}
                 {providers.google && (
                   <Button
                     variant="secondary"
@@ -124,6 +134,22 @@ export function DeviceAuth() {
                       G
                     </span>
                     Log in with Google
+                  </Button>
+                )}
+                {providers.gitlab && (
+                  <Button
+                    variant="secondary"
+                    onClick={() => handleLogin('gitlab')}
+                    disabled={isLoading || submitting || !code.trim()}
+                    className="w-full"
+                  >
+                    <span
+                      aria-hidden="true"
+                      className="inline-flex h-5 w-5 items-center justify-center rounded-sm bg-[#fc6d26] text-[10px] font-bold text-white"
+                    >
+                      GL
+                    </span>
+                    Log in with GitLab
                   </Button>
                 )}
               </div>

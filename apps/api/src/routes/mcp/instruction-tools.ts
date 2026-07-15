@@ -2,7 +2,13 @@
  * MCP instruction tools — get_instructions and request_human_input.
  */
 import type { HumanInputCategory } from '@simple-agent-manager/shared';
-import { HUMAN_INPUT_CATEGORIES, KNOWLEDGE_DEFAULTS, MAX_HUMAN_INPUT_CONTEXT_LENGTH, MAX_HUMAN_INPUT_OPTION_LENGTH, MAX_HUMAN_INPUT_OPTIONS_COUNT } from '@simple-agent-manager/shared';
+import {
+  HUMAN_INPUT_CATEGORIES,
+  KNOWLEDGE_DEFAULTS,
+  MAX_HUMAN_INPUT_CONTEXT_LENGTH,
+  MAX_HUMAN_INPUT_OPTION_LENGTH,
+  MAX_HUMAN_INPUT_OPTIONS_COUNT,
+} from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
@@ -42,7 +48,7 @@ function inferInstructionContextType(tokenData: McpTokenData): InstructionContex
 
 export async function resolveInstructionContext(
   tokenData: McpTokenData,
-  env: Env,
+  env: Env
 ): Promise<{ ok: true; context: ResolvedInstructionContext } | { ok: false; message: string }> {
   const contextType = inferInstructionContextType(tokenData);
 
@@ -55,10 +61,7 @@ export async function resolveInstructionContext(
       .select()
       .from(schema.tasks)
       .where(
-        and(
-          eq(schema.tasks.id, tokenData.taskId),
-          eq(schema.tasks.projectId, tokenData.projectId),
-        ),
+        and(eq(schema.tasks.id, tokenData.taskId), eq(schema.tasks.projectId, tokenData.projectId))
       )
       .limit(1);
 
@@ -78,7 +81,9 @@ export async function resolveInstructionContext(
   }
 
   const session = tokenData.chatSessionId
-    ? await projectDataService.getSession(env, tokenData.projectId, tokenData.chatSessionId).catch(() => null)
+    ? await projectDataService
+        .getSession(env, tokenData.projectId, tokenData.chatSessionId)
+        .catch(() => null)
     : null;
 
   if (contextType === 'conversation' && !session) {
@@ -100,7 +105,7 @@ export async function resolveInstructionContext(
 export async function handleGetInstructions(
   requestId: string | number | null,
   tokenData: McpTokenData,
-  env: Env,
+  env: Env
 ): Promise<JsonRpcResponse> {
   const db = drizzle(env.DATABASE, { schema });
 
@@ -127,12 +132,24 @@ export async function handleGetInstructions(
   // knowledge), we retrieve all observations above a confidence threshold. For typical
   // projects with <50 observations, this is a small amount of text that gives the agent
   // full context about user preferences, project conventions, and decisions.
-  const minConfidence = parseFloat(env.KNOWLEDGE_AUTO_RETRIEVE_MIN_CONFIDENCE || '') || KNOWLEDGE_DEFAULTS.autoRetrieveMinConfidence;
-  const highConfidenceLimit = parseInt(env.KNOWLEDGE_AUTO_RETRIEVE_HIGH_CONFIDENCE_LIMIT || '', 10) || KNOWLEDGE_DEFAULTS.autoRetrieveHighConfidenceLimit;
-  let knowledgeContext: { entityName: string; entityType: string; observation: string; confidence: number }[] = [];
+  const minConfidence =
+    parseFloat(env.KNOWLEDGE_AUTO_RETRIEVE_MIN_CONFIDENCE || '') ||
+    KNOWLEDGE_DEFAULTS.autoRetrieveMinConfidence;
+  const highConfidenceLimit =
+    parseInt(env.KNOWLEDGE_AUTO_RETRIEVE_HIGH_CONFIDENCE_LIMIT || '', 10) ||
+    KNOWLEDGE_DEFAULTS.autoRetrieveHighConfidenceLimit;
+  let knowledgeContext: {
+    entityName: string;
+    entityType: string;
+    observation: string;
+    confidence: number;
+  }[] = [];
   try {
     const allHighConfidence = await projectDataService.getAllHighConfidenceKnowledge(
-      env, tokenData.projectId, minConfidence, highConfidenceLimit,
+      env,
+      tokenData.projectId,
+      minConfidence,
+      highConfidenceLimit
     );
     knowledgeContext = allHighConfidence.map((r) => ({
       entityName: r.entityName,
@@ -154,12 +171,18 @@ export async function handleGetInstructions(
   // Build knowledge-related instructions based on whether knowledge exists
   const knowledgeInstructions = buildKnowledgeInstructions(
     knowledgeContext.length > 0,
-    context.type === 'conversation' || context.task?.taskMode === 'conversation',
+    context.type === 'conversation' || context.task?.taskMode === 'conversation'
   );
 
   // Retrieve active project policies (Phase 4: Policy Propagation).
   // Policies are dynamic rules and preferences that agents must follow.
-  let policyContext: { id: string; category: string; title: string; content: string; confidence: number }[] = [];
+  let policyContext: {
+    id: string;
+    category: string;
+    title: string;
+    content: string;
+    confidence: number;
+  }[] = [];
   try {
     const activePolicies = await projectDataService.getActivePolicies(env, tokenData.projectId);
     policyContext = activePolicies.map((p) => ({
@@ -182,7 +205,8 @@ export async function handleGetInstructions(
     context.type === 'conversation' || context.task?.taskMode === 'conversation'
   );
 
-  const isConversation = context.type === 'conversation' || context.task?.taskMode === 'conversation';
+  const isConversation =
+    context.type === 'conversation' || context.task?.taskMode === 'conversation';
 
   const result = {
     context: {
@@ -220,9 +244,9 @@ export async function handleGetInstructions(
     },
     instructions: [
       'Tool names in these instructions refer to SAM MCP tools from the `sam-mcp` MCP server.',
-      'After reading this response, check whether the current chat session topic/title accurately reflects the actual work. '
-      + 'If the title is stale, generic, copied from a fork such as "get details from previous session", or the session changes direction later, '
-      + 'call the SAM MCP `update_session_topic` tool with a concise descriptive topic.',
+      'After reading this response, check whether the current chat session topic/title accurately reflects the actual work. ' +
+        'If the title is stale, generic, copied from a fork such as "get details from previous session", or the session changes direction later, ' +
+        'call the SAM MCP `update_session_topic` tool with a concise descriptive topic.',
       ...(isConversation
         ? [
             'You are in a conversation with a human. Respond to their messages directly.',
@@ -239,11 +263,18 @@ export async function handleGetInstructions(
           ]),
       ...knowledgeInstructions,
       ...policyInstructions,
-      ...((project.repoProvider === 'artifacts')
+      ...(project.repoProvider === 'artifacts'
         ? [
             'This project uses SAM Git (Cloudflare Artifacts) — NOT GitHub.',
             'Do NOT use `gh pr create`, `gh` CLI, or any GitHub-specific commands.',
             'Push your changes directly to the remote branch. Summarize your changes in the task completion message.',
+          ]
+        : []),
+      ...(project.repoProvider === 'gitlab'
+        ? [
+            'This project uses GitLab — NOT GitHub.',
+            'Do NOT use `gh pr create`, `gh` CLI, or any GitHub-specific commands.',
+            'Push your changes to the remote branch. SAM will create a GitLab merge request from the workspace completion path when applicable.',
           ]
         : []),
     ],
@@ -313,56 +344,56 @@ function buildKnowledgeInstructions(hasKnowledge: boolean, isConversation: boole
 
   // Core directive — MUST, not "you can"
   instructions.push(
-    'You MUST use the knowledge graph to remember important facts about the user and project across sessions.',
+    'You MUST use the knowledge graph to remember important facts about the user and project across sessions.'
   );
 
   // When to SAVE — concrete trigger patterns
   instructions.push(
-    'Save to knowledge graph (via `add_knowledge`) when ANY of these happen: '
-    + '(1) User corrects you or says "don\'t do X" → sourceType "explicit", confidence 0.9+. '
-    + '(2) User states a preference ("I prefer...", "always use...", "never...") → sourceType "explicit", confidence 0.9+. '
-    + '(3) User describes their role, expertise, or background → entityType "expertise". '
-    + '(4) You learn a project convention or architecture decision → entityType "context". '
-    + '(5) User gives feedback on your response style → entityType "preference".',
+    'Save to knowledge graph (via `add_knowledge`) when ANY of these happen: ' +
+      '(1) User corrects you or says "don\'t do X" → sourceType "explicit", confidence 0.9+. ' +
+      '(2) User states a preference ("I prefer...", "always use...", "never...") → sourceType "explicit", confidence 0.9+. ' +
+      '(3) User describes their role, expertise, or background → entityType "expertise". ' +
+      '(4) You learn a project convention or architecture decision → entityType "context". ' +
+      '(5) User gives feedback on your response style → entityType "preference".'
   );
 
   // When to READ — decision-point retrieval (Layer 2)
   instructions.push(
-    'Search knowledge (via `search_knowledge`) BEFORE making key decisions: '
-    + 'before writing content/blogs → search "ContentStyle"; '
-    + 'before choosing libraries/tools → search "CodeQuality"; '
-    + 'before UI layout decisions → search "User" and "mobile"; '
-    + 'before architecture decisions → search "Architecture"; '
-    + 'before pricing/business decisions → search "BusinessStrategy".',
+    'Search knowledge (via `search_knowledge`) BEFORE making key decisions: ' +
+      'before writing content/blogs → search "ContentStyle"; ' +
+      'before choosing libraries/tools → search "CodeQuality"; ' +
+      'before UI layout decisions → search "User" and "mobile"; ' +
+      'before architecture decisions → search "Architecture"; ' +
+      'before pricing/business decisions → search "BusinessStrategy".'
   );
 
   // What NOT to save
   instructions.push(
-    'Do NOT save to knowledge: code patterns derivable from the codebase, git history, ephemeral task details, or things already in CLAUDE.md or project config.',
+    'Do NOT save to knowledge: code patterns derivable from the codebase, git history, ephemeral task details, or things already in CLAUDE.md or project config.'
   );
 
   if (hasKnowledge) {
     // Knowledge exists — tell agent to apply it and maintain it
     instructions.push(
-      'The knowledgeDirectives field above contains stored knowledge from previous sessions. Apply these preferences and facts to your work. '
-      + 'If any observation seems outdated, call `update_knowledge` or `remove_knowledge`. '
-      + 'If you verify an observation is still accurate, call `confirm_knowledge` to keep it fresh.',
+      'The knowledgeDirectives field above contains stored knowledge from previous sessions. Apply these preferences and facts to your work. ' +
+        'If any observation seems outdated, call `update_knowledge` or `remove_knowledge`. ' +
+        'If you verify an observation is still accurate, call `confirm_knowledge` to keep it fresh.'
     );
   } else {
     // Empty knowledge graph — bootstrapping prompt
     instructions.push(
-      'This project has no stored knowledge yet. '
-      + 'Actively look for user preferences, project conventions, and important context to store. '
-      + 'If this is a conversation, ask the user about their preferences when relevant. '
-      + 'You can also search past conversations (via `search_messages`) for user preferences using queries like "prefer", "don\'t want", "I like", "always" to seed the knowledge graph.',
+      'This project has no stored knowledge yet. ' +
+        'Actively look for user preferences, project conventions, and important context to store. ' +
+        'If this is a conversation, ask the user about their preferences when relevant. ' +
+        'You can also search past conversations (via `search_messages`) for user preferences using queries like "prefer", "don\'t want", "I like", "always" to seed the knowledge graph.'
     );
   }
 
   if (isConversation) {
     instructions.push(
-      'You are in a direct conversation — this is the richest source of user knowledge. '
-      + 'Pay close attention to corrections, preferences, and context the user shares. '
-      + 'Store important observations as you go, not just at the end.',
+      'You are in a direct conversation — this is the richest source of user knowledge. ' +
+        'Pay close attention to corrections, preferences, and context the user shares. ' +
+        'Store important observations as you go, not just at the end.'
     );
   }
 
@@ -436,19 +467,19 @@ function buildPolicyInstructions(hasPolicies: boolean, isConversation: boolean):
 
   if (hasPolicies) {
     instructions.push(
-      'The policyDirectives field above contains project policies set by the user. '
-      + 'You MUST follow all rules and constraints. Preferences are softer guidance — follow them unless you have a good reason not to.',
+      'The policyDirectives field above contains project policies set by the user. ' +
+        'You MUST follow all rules and constraints. Preferences are softer guidance — follow them unless you have a good reason not to.'
     );
     instructions.push(
-      'If a user statement contradicts an existing policy, use `update_policy` to update it. '
-      + 'If a policy is no longer relevant, use `remove_policy` to deactivate it.',
+      'If a user statement contradicts an existing policy, use `update_policy` to update it. ' +
+        'If a policy is no longer relevant, use `remove_policy` to deactivate it.'
     );
   }
 
   if (isConversation) {
     instructions.push(
-      'When a user states a rule, constraint, delegation preference, or soft preference, '
-      + 'save it as a project policy via `add_policy` so it applies to all future agents in this project.',
+      'When a user states a rule, constraint, delegation preference, or soft preference, ' +
+        'save it as a project policy via `add_policy` so it applies to all future agents in this project.'
     );
   }
 
@@ -459,18 +490,22 @@ export async function handleRequestHumanInput(
   requestId: string | number | null,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env,
+  env: Env
 ): Promise<JsonRpcResponse> {
   const context = params.context;
   if (typeof context !== 'string' || !context.trim()) {
-    return jsonRpcError(requestId, INVALID_PARAMS, 'context is required and must be a non-empty string');
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      'context is required and must be a non-empty string'
+    );
   }
 
   if (context.length > MAX_HUMAN_INPUT_CONTEXT_LENGTH) {
     return jsonRpcError(
       requestId,
       INVALID_PARAMS,
-      `context exceeds maximum length of ${MAX_HUMAN_INPUT_CONTEXT_LENGTH} characters`,
+      `context exceeds maximum length of ${MAX_HUMAN_INPUT_CONTEXT_LENGTH} characters`
     );
   }
 
@@ -480,8 +515,15 @@ export async function handleRequestHumanInput(
   // Validate category if provided
   let category: HumanInputCategory | null = null;
   if (params.category !== undefined) {
-    if (typeof params.category !== 'string' || !(HUMAN_INPUT_CATEGORIES as readonly string[]).includes(params.category)) {
-      return jsonRpcError(requestId, INVALID_PARAMS, `category must be one of: ${HUMAN_INPUT_CATEGORIES.join(', ')}`);
+    if (
+      typeof params.category !== 'string' ||
+      !(HUMAN_INPUT_CATEGORIES as readonly string[]).includes(params.category)
+    ) {
+      return jsonRpcError(
+        requestId,
+        INVALID_PARAMS,
+        `category must be one of: ${HUMAN_INPUT_CATEGORIES.join(', ')}`
+      );
     }
     category = params.category as HumanInputCategory;
   }
@@ -503,11 +545,13 @@ export async function handleRequestHumanInput(
 
   // Fetch task title (user_id verified against token below)
   const taskRow = await env.DATABASE.prepare(
-    `SELECT user_id, title FROM tasks WHERE id = ? AND project_id = ?`,
-  ).bind(tokenData.taskId, tokenData.projectId).first<{
-    user_id: string;
-    title: string;
-  }>();
+    `SELECT user_id, title FROM tasks WHERE id = ? AND project_id = ?`
+  )
+    .bind(tokenData.taskId, tokenData.projectId)
+    .first<{
+      user_id: string;
+      title: string;
+    }>();
 
   if (!taskRow) {
     return jsonRpcError(requestId, INTERNAL_ERROR, 'Task not found');
@@ -579,6 +623,11 @@ export async function handleRequestHumanInput(
   });
 
   return jsonRpcSuccess(requestId, {
-    content: [{ type: 'text', text: 'Human input request sent. The user has been notified. You may continue working or end your turn.' }],
+    content: [
+      {
+        type: 'text',
+        text: 'Human input request sent. The user has been notified. You may continue working or end your turn.',
+      },
+    ],
   });
 }

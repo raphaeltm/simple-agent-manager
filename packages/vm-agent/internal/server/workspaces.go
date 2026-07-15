@@ -468,6 +468,10 @@ type createWorkspaceRequest struct {
 	WorkspaceID            string `json:"workspaceId"`
 	Repository             string `json:"repository"`
 	Branch                 string `json:"branch"`
+	RepoProvider           string `json:"repoProvider,omitempty"`
+	CloneURL               string `json:"cloneUrl,omitempty"`
+	RepositoryHost         string `json:"repositoryHost,omitempty"`
+	RepositoryPath         string `json:"repositoryPath,omitempty"`
 	CallbackToken          string `json:"callbackToken,omitempty"`
 	GitUserName            string `json:"gitUserName,omitempty"`
 	GitUserEmail           string `json:"gitUserEmail,omitempty"`
@@ -507,6 +511,10 @@ func createWorkspaceRuntimeOptions(body createWorkspaceRequest, devcontainerConf
 		GitUserName:            strings.TrimSpace(body.GitUserName),
 		GitUserEmail:           strings.TrimSpace(body.GitUserEmail),
 		GitHubID:               strings.TrimSpace(body.GitHubID),
+		RepoProvider:           strings.TrimSpace(body.RepoProvider),
+		CloneURL:               strings.TrimSpace(body.CloneURL),
+		RepositoryHost:         strings.TrimSpace(body.RepositoryHost),
+		RepositoryPath:         strings.TrimSpace(body.RepositoryPath),
 		Lightweight:            body.Lightweight,
 		DevcontainerConfigName: devcontainerConfigName,
 		DevcontainerCache: DevcontainerCacheCredentials{
@@ -1107,6 +1115,10 @@ func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request)
 		ProjectID        string               `json:"projectId,omitempty"`
 		TaskID           string               `json:"taskId,omitempty"`
 		TaskMode         string               `json:"taskMode,omitempty"`
+		// InjectedInstructions is SAM-managed system-injected prompt text (e.g. the
+		// get_instructions reminder). Delivered to the agent as model input but
+		// mirrored as a separate origin="system" user message the UI collapses.
+		InjectedInstructions string `json:"injectedInstructions,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -1196,7 +1208,7 @@ func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request)
 
 	// Start agent and send initial prompt in a background goroutine.
 	// The endpoint returns 202 immediately — the agent runs asynchronously.
-	go s.startAgentWithPrompt(host, workspaceID, sessionID, body.AgentType, body.InitialPrompt)
+	go s.startAgentWithPrompt(host, workspaceID, sessionID, body.AgentType, body.InitialPrompt, body.InjectedInstructions)
 
 	writeJSON(w, http.StatusAccepted, map[string]interface{}{
 		"status":    "starting",
@@ -1204,9 +1216,25 @@ func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request)
 	})
 }
 
+func buildInitialPromptParams(initialPrompt, injectedInstructions string) ([]byte, error) {
+	promptBlocks := []map[string]interface{}{
+		{"type": "text", "text": initialPrompt},
+	}
+	if strings.TrimSpace(injectedInstructions) != "" {
+		promptBlocks = append(promptBlocks, map[string]interface{}{
+			"type":  "text",
+			"text":  injectedInstructions,
+			"_meta": map[string]interface{}{acp.MetaOriginKey: acp.OriginSystem},
+		})
+	}
+	return json.Marshal(map[string]interface{}{
+		"prompt": promptBlocks,
+	})
+}
+
 // startAgentWithPrompt runs SelectAgent and then sends the initial prompt.
 // Called as a goroutine from handleStartAgentSession.
-func (s *Server) startAgentWithPrompt(host *acp.SessionHost, workspaceID, sessionID, agentType, initialPrompt string) {
+func (s *Server) startAgentWithPrompt(host *acp.SessionHost, workspaceID, sessionID, agentType, initialPrompt, injectedInstructions string) {
 	ctx := context.Background()
 
 	// Idempotency: if the host is already prompting, a prompt is in progress —
@@ -1247,17 +1275,26 @@ func (s *Server) startAgentWithPrompt(host *acp.SessionHost, workspaceID, sessio
 		"agentType": agentType,
 	})
 
-	// Build JSON-RPC params matching what HandlePrompt expects.
-	promptParams, _ := json.Marshal(map[string]interface{}{
-		"prompt": []map[string]string{
-			{"type": "text", "text": initialPrompt},
-		},
-	})
+	// Build JSON-RPC params matching what HandlePrompt expects. The visible task
+	// prompt is one block; SAM-injected instructions (e.g. the get_instructions
+	// reminder) are a SEPARATE block carrying the origin marker in _meta. Both are
+	// sent to the agent as model input, but the injected block is mirrored as a
+	// distinct origin="system" user message the UI collapses. The marker rides the
+	// INBOUND JSON-RPC params (parsed by parsePromptBlocks) — it is read in-process
+	// before any SDK marshaling, so it reaches persistence even though the SDK
+	// strips _meta on outbound serialization.
+	promptParams, err := buildInitialPromptParams(initialPrompt, injectedInstructions)
+	if err != nil {
+		slog.Error("Failed to encode initial prompt", "workspace", workspaceID, "session", sessionID, "error", err)
+		return
+	}
 	syntheticReqID, _ := json.Marshal("server-initiated-1")
 
 	// HandlePrompt blocks until the agent completes. The OnPromptComplete
 	// callback fires automatically, handling git push and task status updates.
-	host.HandlePrompt(ctx, syntheticReqID, promptParams, "server")
+	// trustedSource=true: this is the SAM-built initial task prompt, the only
+	// legitimate origin=system producer (the injected instructions block).
+	host.HandlePrompt(ctx, syntheticReqID, promptParams, "server", true)
 }
 
 // handleSendPrompt sends a follow-up prompt to a running agent session.
@@ -1331,7 +1368,9 @@ func (s *Server) handleSendPrompt(w http.ResponseWriter, r *http.Request) {
 	})
 
 	// Dispatch asynchronously — HandlePrompt blocks until the agent completes.
-	go host.HandlePrompt(context.Background(), syntheticReqID, promptParams, "control-plane")
+	// trustedSource=false: a follow-up carries the user's own message text and
+	// must not be able to mark itself origin=system.
+	go host.HandlePrompt(context.Background(), syntheticReqID, promptParams, "control-plane", false)
 
 	writeJSON(w, http.StatusAccepted, map[string]interface{}{
 		"status":    "prompting",

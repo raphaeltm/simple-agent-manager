@@ -994,6 +994,85 @@ func TestSessionHost_FinishPromptWithPeerDisconnectBeginsCrashRecovery(t *testin
 	}
 }
 
+func TestSessionHost_FinishPromptWithPeerDisconnectUsesPromptStartPrerequisitesAfterLiveStateClears(t *testing.T) {
+	t.Parallel()
+
+	host := newTestSessionHost(t)
+	defer host.Stop()
+	host.mu.Lock()
+	host.agentType = "openai-codex"
+	host.sessionID = "acp-session-before-disconnect"
+	host.agentSupportsLoadSession = true
+	host.mu.Unlock()
+
+	captured := host.captureCrashRecoveryPrerequisites()
+	host.mu.Lock()
+	host.clearCurrentAgentSessionLocked()
+	host.mu.Unlock()
+
+	host.finishPromptWithError(
+		context.Background(),
+		json.RawMessage(`"req-race"`),
+		promptStartInfo{startedAt: time.Now(), viewerID: "viewer-1", recovery: captured},
+		errors.New(`{"code":-32603,"message":"Internal error","data":{"error":"peer disconnected before response"}}`),
+	)
+
+	host.mu.RLock()
+	defer host.mu.RUnlock()
+	if !host.crashRecoveryInProgress {
+		t.Fatal("crashRecoveryInProgress = false after live prerequisites cleared, want true")
+	}
+	if host.crashSessionID != "acp-session-before-disconnect" {
+		t.Fatalf("crashSessionID = %q, want prompt-start session ID", host.crashSessionID)
+	}
+	if host.crashAgentType != "openai-codex" {
+		t.Fatalf("crashAgentType = %q, want openai-codex", host.crashAgentType)
+	}
+}
+
+// TestSessionHost_FinishPromptRecoveryUsesCapturedAgentTypeWhenLiveAgentTypeCleared
+// exercises the partial-clear merge branch: the live sessionID and LoadSession
+// capability survive, but the live agentType has been cleared. Recovery must
+// fill agentType from the prompt-start capture (not fail), so a LoadSession-
+// capable prompt still recovers with the captured agent type.
+func TestSessionHost_FinishPromptRecoveryUsesCapturedAgentTypeWhenLiveAgentTypeCleared(t *testing.T) {
+	t.Parallel()
+
+	host := newTestSessionHost(t)
+	defer host.Stop()
+	host.mu.Lock()
+	host.agentType = "openai-codex"
+	host.sessionID = "acp-session-live"
+	host.agentSupportsLoadSession = true
+	host.mu.Unlock()
+
+	captured := host.captureCrashRecoveryPrerequisites()
+	// Clear ONLY the live agentType; sessionID and LoadSession capability remain
+	// live and must win over the captured snapshot.
+	host.mu.Lock()
+	host.agentType = ""
+	host.mu.Unlock()
+
+	host.finishPromptWithError(
+		context.Background(),
+		json.RawMessage(`"req-agenttype"`),
+		promptStartInfo{startedAt: time.Now(), viewerID: "viewer-1", recovery: captured},
+		errors.New(`{"code":-32603,"message":"Internal error","data":{"error":"peer disconnected before response"}}`),
+	)
+
+	host.mu.RLock()
+	defer host.mu.RUnlock()
+	if !host.crashRecoveryInProgress {
+		t.Fatal("crashRecoveryInProgress = false when only live agentType was cleared, want true (captured agentType fallback)")
+	}
+	if host.crashAgentType != "openai-codex" {
+		t.Fatalf("crashAgentType = %q, want captured openai-codex", host.crashAgentType)
+	}
+	if host.crashSessionID != "acp-session-live" {
+		t.Fatalf("crashSessionID = %q, want live acp-session-live (live sessionID must win)", host.crashSessionID)
+	}
+}
+
 func TestSessionHost_FinishPromptWithUnrecoverablePeerDisconnectReportsActionableFailure(t *testing.T) {
 	t.Parallel()
 
@@ -1049,6 +1128,9 @@ func TestSessionHost_FinishPromptWithUnrecoverablePeerDisconnectReportsActionabl
 			if strings.Contains(report.Stderr, "sk-secret1234567890") {
 				t.Fatalf("crash report leaked secret: %q", report.Stderr)
 			}
+			if report.RecoveryError != "LoadSession recovery is unavailable; missing prerequisites: loadSessionCapability" {
+				t.Fatalf("recoveryError = %q, want missing LoadSession capability diagnostic", report.RecoveryError)
+			}
 		}
 
 		var rpc struct {
@@ -1070,6 +1152,119 @@ func TestSessionHost_FinishPromptWithUnrecoverablePeerDisconnectReportsActionabl
 	// After an unrecoverable crash the host must be in HostError, not HostReady.
 	if status := host.Status(); status != HostError {
 		t.Fatalf("host.Status() = %s after unrecoverable crash, want %s", status, HostError)
+	}
+
+	// No recovery episode may be left armed on the unrecoverable path: a lingering
+	// crashRecoveryInProgress would let the watchdog fire a second terminal
+	// completion. The terminal error must be the only outcome.
+	host.mu.RLock()
+	inRecovery := host.crashRecoveryInProgress
+	host.mu.RUnlock()
+	if inRecovery {
+		t.Fatal("crashRecoveryInProgress = true after unrecoverable crash, want false (no recovery episode may be armed)")
+	}
+}
+
+// TestSessionHost_UnrecoverablePeerDisconnectNamesEachMissingPrerequisite proves
+// the sanitized terminal diagnostic identifies exactly which recovery
+// prerequisites were absent — for each prerequisite in isolation and for all
+// three together — never leaking the actual session ID value. The existing
+// TestSessionHost_FinishPromptWithUnrecoverablePeerDisconnectReportsActionableFailure
+// covers only the loadSessionCapability-missing permutation.
+func TestSessionHost_UnrecoverablePeerDisconnectNamesEachMissingPrerequisite(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name                string
+		sessionID           string
+		agentType           string
+		supportsLoadSession bool
+		wantMissing         string
+	}{
+		{
+			name:                "only acpSessionId missing",
+			sessionID:           "",
+			agentType:           "openai-codex",
+			supportsLoadSession: true,
+			wantMissing:         "acpSessionId",
+		},
+		{
+			name:                "only agentType missing",
+			sessionID:           "acp-session-1",
+			agentType:           "",
+			supportsLoadSession: true,
+			wantMissing:         "agentType",
+		},
+		{
+			name:                "all three missing",
+			sessionID:           "",
+			agentType:           "",
+			supportsLoadSession: false,
+			wantMissing:         "acpSessionId, loadSessionCapability, agentType",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			host := newTestSessionHost(t)
+			defer host.Stop()
+
+			completed := make(chan string, 1)
+			host.config.OnPromptComplete = func(stopReason string, _ error) { completed <- stopReason }
+			host.mu.Lock()
+			host.agentType = tc.agentType
+			host.sessionID = acpsdk.SessionId(tc.sessionID)
+			host.agentSupportsLoadSession = tc.supportsLoadSession
+			host.mu.Unlock()
+
+			// Empty recovery snapshot: no captured fallback, so the live gaps are
+			// the only prerequisites and the diagnostic must name exactly them.
+			host.finishPromptWithError(
+				context.Background(),
+				json.RawMessage(`"req-diag"`),
+				promptStartInfo{startedAt: time.Now(), viewerID: "viewer-1"},
+				errors.New(`{"code":-32603,"message":"Internal error","data":{"error":"peer disconnected before response"}}`),
+			)
+
+			select {
+			case reason := <-completed:
+				if reason != fatalErrorStopReason {
+					t.Fatalf("stopReason = %q, want %s", reason, fatalErrorStopReason)
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatal("timed out waiting for terminal completion")
+			}
+
+			wantErr := "LoadSession recovery is unavailable; missing prerequisites: " + tc.wantMissing
+			host.bufMu.RLock()
+			foundReport := false
+			for _, msg := range host.messageBuf {
+				var report AgentCrashReportMessage
+				if err := json.Unmarshal(msg.Data, &report); err == nil && report.Type == MsgAgentCrashReport {
+					foundReport = true
+					if report.RecoveryError != wantErr {
+						t.Fatalf("recoveryError = %q, want %q", report.RecoveryError, wantErr)
+					}
+					// The diagnostic must never contain a real session ID value.
+					if tc.sessionID != "" && strings.Contains(report.RecoveryError, tc.sessionID) {
+						t.Fatalf("recoveryError leaked session ID value: %q", report.RecoveryError)
+					}
+				}
+			}
+			host.bufMu.RUnlock()
+			if !foundReport {
+				t.Fatal("missing unrecovered crash report")
+			}
+
+			host.mu.RLock()
+			inRecovery := host.crashRecoveryInProgress
+			host.mu.RUnlock()
+			if inRecovery {
+				t.Fatal("crashRecoveryInProgress = true after terminal diagnostic, want false")
+			}
+		})
 	}
 }
 
@@ -2148,7 +2343,7 @@ func TestHandlePrompt_InjectsSyntheticUserMessage(t *testing.T) {
 	reqID, _ := json.Marshal(42)
 
 	// HandlePrompt is blocking but will return quickly because Prompt() fails.
-	host.HandlePrompt(context.Background(), reqID, promptParams, "viewer-1")
+	host.HandlePrompt(context.Background(), reqID, promptParams, "viewer-1", false)
 
 	// Verify: the replay buffer should contain the synthetic user_message_chunk.
 	host.bufMu.RLock()
@@ -2213,6 +2408,66 @@ func TestHandlePrompt_InjectsSyntheticUserMessage(t *testing.T) {
 	}
 }
 
+// A browser viewer prompt (trustedSource=false) must NOT be able to mark its own
+// content origin=system via the ACP _meta marker — the marker is stripped so the
+// reported message has an empty Origin. Only the SAM control-plane initial prompt
+// (trustedSource=true) may set origin=system. This closes the evasion where a
+// viewer could hide their content from search/dedup/topic/attention.
+func TestHandlePrompt_OriginMarkerHonoredOnlyForTrustedSource(t *testing.T) {
+	t.Parallel()
+
+	reportedOrigin := func(trusted bool) string {
+		reporter := &mockMessageReporter{}
+		host := NewSessionHost(SessionHostConfig{
+			GatewayConfig: GatewayConfig{
+				SessionID:       "test-session",
+				WorkspaceID:     "test-workspace",
+				MessageReporter: reporter,
+			},
+			MessageBufferSize: 100,
+			ViewerSendBuffer:  32,
+		})
+		defer host.Stop()
+
+		agentReader, clientWriter := io.Pipe()
+		clientReader, agentWriter := io.Pipe()
+		agentWriter.Close()
+		agentReader.Close()
+		acpConn := acpsdk.NewClientSideConnection(&sessionHostClient{host: host}, clientWriter, clientReader)
+
+		host.mu.Lock()
+		host.acpConn = acpConn
+		host.sessionID = "acp-session-origin"
+		host.status = HostReady
+		host.mu.Unlock()
+
+		// A prompt block carrying the SAM system-origin marker in _meta.
+		promptParams, _ := json.Marshal(map[string]any{
+			"messageId": "origin-msg-001",
+			"prompt": []map[string]any{
+				{"type": "text", "text": "sneaky content", "_meta": map[string]any{MetaOriginKey: OriginSystem}},
+			},
+		})
+		reqID, _ := json.Marshal(77)
+		host.HandlePrompt(context.Background(), reqID, promptParams, "viewer-1", trusted)
+
+		for _, m := range reporter.Messages() {
+			if m.MessageID == "origin-msg-001" && m.Role == "user" {
+				return m.Origin
+			}
+		}
+		t.Fatalf("reporter missing user message (trusted=%v)", trusted)
+		return ""
+	}
+
+	if got := reportedOrigin(false); got != "" {
+		t.Fatalf("untrusted viewer prompt: Origin = %q, want empty (marker must be stripped)", got)
+	}
+	if got := reportedOrigin(true); got != OriginSystem {
+		t.Fatalf("trusted control-plane prompt: Origin = %q, want %q", got, OriginSystem)
+	}
+}
+
 func TestHandlePrompt_MultiBlockPrompt_InjectsAllBlocks(t *testing.T) {
 	t.Parallel()
 
@@ -2254,7 +2509,7 @@ func TestHandlePrompt_MultiBlockPrompt_InjectsAllBlocks(t *testing.T) {
 	})
 	reqID, _ := json.Marshal(43)
 
-	host.HandlePrompt(context.Background(), reqID, promptParams, "viewer-1")
+	host.HandlePrompt(context.Background(), reqID, promptParams, "viewer-1", false)
 
 	// Both text blocks should be reported.
 	msgs := reporter.Messages()
@@ -2314,7 +2569,7 @@ func TestHandlePrompt_NoReporter_StillBuffers(t *testing.T) {
 	})
 	reqID, _ := json.Marshal(44)
 
-	host.HandlePrompt(context.Background(), reqID, promptParams, "viewer-1")
+	host.HandlePrompt(context.Background(), reqID, promptParams, "viewer-1", false)
 
 	// Buffer should have the synthetic user message even without a reporter.
 	host.bufMu.RLock()

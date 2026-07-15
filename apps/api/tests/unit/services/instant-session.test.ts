@@ -46,9 +46,10 @@ vi.mock('../../../src/lib/ulid', () => ({ ulid: mocks.ulid }));
 
 import { launchInstantSession } from '../../../src/services/instant-session';
 
-function makeDb() {
+function makeDb(selectResults: unknown[][] = []) {
   const inserts: unknown[] = [];
   const updates: unknown[] = [];
+  let selectIndex = 0;
   return {
     inserts,
     updates,
@@ -68,7 +69,9 @@ function makeDb() {
       select: vi.fn(() => ({
         from: vi.fn(() => ({
           where: vi.fn(() => ({
-            limit: vi.fn().mockResolvedValue([]),
+            limit: vi.fn().mockImplementation(() =>
+              Promise.resolve(selectResults[selectIndex++] ?? [])
+            ),
           })),
         })),
       })),
@@ -110,7 +113,11 @@ describe('launchInstantSession', () => {
     mocks.projectData.createSession.mockResolvedValue('chat-session-1');
     mocks.projectData.persistMessage.mockResolvedValue(undefined);
     mocks.projectData.transitionAcpSession.mockResolvedValue({});
-    mocks.container.getVmAgentContainerConfig.mockReturnValue({ vmAgentPort: 8080, enabled: true, sleepAfter: '10m' });
+    mocks.container.getVmAgentContainerConfig.mockReturnValue({
+      vmAgentPort: 8080,
+      enabled: true,
+      sleepAfter: '10m',
+    });
     mocks.container.destroyVmAgentContainer.mockResolvedValue(undefined);
     mocks.container.launchVmAgentContainer.mockResolvedValue(undefined);
     mocks.container.runContainerPhase.mockImplementation((_phase, _detail, fn) => fn());
@@ -137,6 +144,27 @@ describe('launchInstantSession', () => {
       chatSessionId: 'chat-session-1',
       agentSessionId: 'agent-session-1',
     });
+    expect(result.timings).toEqual(
+      expect.objectContaining({
+        totalDurationMs: expect.any(Number),
+        preContainerDurationMs: expect.any(Number),
+        containerLaunchDurationMs: expect.any(Number),
+        setupDurationMs: expect.any(Number),
+        installDurationMs: expect.any(Number),
+        agentReadyDurationMs: expect.any(Number),
+        workspaceCreateDurationMs: expect.any(Number),
+        acpSessionCreateDurationMs: expect.any(Number),
+        acpSessionStartDurationMs: expect.any(Number),
+      })
+    );
+    expect(result.timings.setupDurationMs).toBe(result.timings.totalDurationMs);
+    expect(result.timings.installDurationMs).toBe(result.timings.containerLaunchDurationMs);
+    // Bounded phase timings must be non-negative and never exceed the total.
+    expect(result.timings.preContainerDurationMs).toBeGreaterThanOrEqual(0);
+    expect(result.timings.containerLaunchDurationMs).toBeGreaterThanOrEqual(0);
+    expect(result.timings.preContainerDurationMs).toBeLessThanOrEqual(
+      result.timings.totalDurationMs
+    );
 
     expect(mocks.nodes.createNodeRecord).toHaveBeenCalledWith(
       expect.anything(),
@@ -213,16 +241,15 @@ describe('launchInstantSession', () => {
       'workspace-1',
       'agent-session-1',
       'claude-code',
-      expect.stringContaining('enriched prompt'),
+      'enriched prompt',
       expect.anything(),
       'user-1',
       { url: 'https://api.example.com/mcp', token: 'mcp-token' },
       { model: 'claude-sonnet-4-5-20250929', effort: 'auto' },
-      undefined
+      undefined,
+      expect.stringContaining('MUST call')
     );
-    expect(mocks.nodeAgent.startAgentSessionOnNode.mock.calls[0][4]).toContain(
-      'MUST call the `get_instructions` tool'
-    );
+    expect(mocks.nodeAgent.startAgentSessionOnNode.mock.calls[0][4]).toBe('enriched prompt');
     expect(mocks.container.launchVmAgentContainer).toHaveBeenCalledWith(
       expect.anything(),
       'node-1',
@@ -244,6 +271,75 @@ describe('launchInstantSession', () => {
     expect(JSON.stringify(launchConfig)).not.toContain('profile-1');
     expect(JSON.stringify(launchConfig)).not.toContain('skill-1');
     expect(updates.at(-1)).toMatchObject({ dispatchedAt: expect.any(String) });
+  });
+
+  it('passes GitLab repository metadata to the VM agent create-workspace request', async () => {
+    const gitlabMetadata = {
+      userId: 'user-1',
+      host: 'gitlab.com',
+      gitlabProjectId: 12345,
+      pathWithNamespace: 'group/gitlab-repo',
+      webUrl: 'https://gitlab.com/group/gitlab-repo',
+      httpUrlToRepo: 'https://gitlab.com/group/gitlab-repo.git',
+      defaultBranch: 'main',
+    };
+    const { db } = makeDb([[gitlabMetadata]]);
+
+    await launchInstantSession(db as never, env, {
+      project: {
+        ...project,
+        id: 'gitlab-project-1',
+        repository: 'group/gitlab-repo',
+        repoProvider: 'gitlab',
+        installationId: '',
+      } as never,
+      userId: 'user-1',
+      initialPrompt: 'prompt',
+      displayMessage: 'prompt',
+      agentType: 'claude-code',
+    });
+
+    expect(mocks.nodeAgent.createWorkspaceOnNode).toHaveBeenCalledWith(
+      'node-1',
+      env,
+      'user-1',
+      expect.objectContaining({
+        workspaceId: 'workspace-1',
+        repository: 'group/gitlab-repo',
+        branch: 'main',
+        repoProvider: 'gitlab',
+        cloneUrl: 'https://gitlab.com/group/gitlab-repo.git',
+        repositoryHost: 'gitlab.com',
+        repositoryPath: 'group/gitlab-repo',
+        callbackToken: 'workspace-callback-token',
+        lightweight: true,
+      })
+    );
+  });
+
+  it('marks the workspace error and destroys the container when launch fails', async () => {
+    const { db, updates } = makeDb();
+    mocks.nodeAgent.waitForNodeAgentReady.mockRejectedValueOnce(
+      new Error('agent never became ready')
+    );
+
+    await expect(
+      launchInstantSession(db as never, env, {
+        project,
+        userId: 'user-1',
+        initialPrompt: 'prompt',
+        displayMessage: 'prompt',
+        agentType: 'claude-code',
+        agentProfileId: 'profile-1',
+        skillId: 'skill-1',
+        overrides: { model: 'claude-sonnet-4-5-20250929', effort: 'auto' },
+      })
+    ).rejects.toThrow('agent never became ready');
+
+    // The best-effort cleanup must tear down the launched container and mark
+    // the workspace errored so a failed cold start does not leak resources.
+    expect(mocks.container.destroyVmAgentContainer).toHaveBeenCalledWith(env, 'node-1');
+    expect(updates).toContainEqual(expect.objectContaining({ status: 'error' }));
   });
 
   it('honors a configured raw container workspace base directory', async () => {

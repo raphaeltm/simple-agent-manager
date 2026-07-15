@@ -218,6 +218,19 @@ else
   echo -e "${YELLOW}ℹ  Skipping Google login OAuth secrets (GOOGLE_LOGIN_CLIENT_ID/SECRET not set — configure Google sign-in via /setup)${NC}"
 fi
 
+# Configure GitLab OAuth secrets (optional env fallback — the setup wizard is the
+# primary path; use https://gitlab.com for the public service)
+GITLAB_HOST="${GITLAB_HOST:-}"
+GITLAB_CLIENT_ID="${GITLAB_CLIENT_ID:-}"
+GITLAB_CLIENT_SECRET="${GITLAB_CLIENT_SECRET:-}"
+if [ -n "$GITLAB_HOST" ] && [ -n "$GITLAB_CLIENT_ID" ] && [ -n "$GITLAB_CLIENT_SECRET" ]; then
+  set_worker_secret "GITLAB_HOST" "$GITLAB_HOST" "$ENVIRONMENT" "true" || FAILED=true
+  set_worker_secret "GITLAB_CLIENT_ID" "$GITLAB_CLIENT_ID" "$ENVIRONMENT" "true" || FAILED=true
+  set_worker_secret "GITLAB_CLIENT_SECRET" "$GITLAB_CLIENT_SECRET" "$ENVIRONMENT" "true" || FAILED=true
+else
+  echo -e "${YELLOW}ℹ  Skipping GitLab OAuth secrets (GITLAB_HOST/CLIENT_ID/CLIENT_SECRET not set — configure GitLab via /setup)${NC}"
+fi
+
 # Configure R2 S3-compatible API credentials (optional — only needed for task attachment uploads)
 R2_ACCESS_KEY_ID="${R2_ACCESS_KEY_ID:-}"
 R2_SECRET_ACCESS_KEY="${R2_SECRET_ACCESS_KEY:-}"

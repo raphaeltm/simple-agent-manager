@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -210,8 +211,11 @@ func (e *Engine) ReconcileOnStart(ctx context.Context) error {
 		slog.Warn("deploy.reconcile: failed to fetch current interpolation env; skipping service details",
 			"seq", state.Seq, "error", envErr)
 		e.setObserved(ObservedState{
-			AppliedSeq: state.Seq,
-			Status:     state.Status,
+			AppliedSeq:      state.Seq,
+			Status:          state.Status,
+			RoutingRevision: state.RoutingRevision,
+			RoutingStatus:   state.RoutingStatus,
+			RoutingError:    state.RoutingError,
 		})
 		return nil
 	}
@@ -223,9 +227,12 @@ func (e *Engine) ReconcileOnStart(ctx context.Context) error {
 	}
 
 	e.setObserved(ObservedState{
-		AppliedSeq: state.Seq,
-		Status:     state.Status,
-		Services:   services,
+		AppliedSeq:      state.Seq,
+		Status:          state.Status,
+		RoutingRevision: state.RoutingRevision,
+		RoutingStatus:   state.RoutingStatus,
+		RoutingError:    state.RoutingError,
+		Services:        services,
 	})
 
 	return nil
@@ -607,14 +614,19 @@ func (e *Engine) FetchAndApply(ctx context.Context, pendingSeq int64) error {
 }
 
 func (e *Engine) fetchRelease(ctx context.Context, seq int64) (*ApplyPayload, error) {
-	url := fmt.Sprintf("%s/api/nodes/%s/deploy-release?seq=%d&environmentId=%s",
+	requestURL, err := url.Parse(fmt.Sprintf("%s/api/nodes/%s/deploy-release",
 		strings.TrimRight(e.cfg.ControlPlaneURL, "/"),
-		e.cfg.NodeID,
-		seq,
-		e.cfg.EnvironmentID,
-	)
+		url.PathEscape(e.cfg.NodeID),
+	))
+	if err != nil {
+		return nil, fmt.Errorf("build release URL: %w", err)
+	}
+	query := requestURL.Query()
+	query.Set("seq", fmt.Sprintf("%d", seq))
+	query.Set("environmentId", e.cfg.EnvironmentID)
+	requestURL.RawQuery = query.Encode()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL.String(), nil)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
@@ -642,13 +654,18 @@ func (e *Engine) fetchCurrentInterpolationEnv(ctx context.Context) (map[string]s
 	if strings.TrimSpace(e.cfg.ControlPlaneURL) == "" || strings.TrimSpace(e.getCallbackToken()) == "" {
 		return nil, nil
 	}
-	url := fmt.Sprintf("%s/api/nodes/%s/deployment-env?environmentId=%s",
+	requestURL, err := url.Parse(fmt.Sprintf("%s/api/nodes/%s/deployment-env",
 		strings.TrimRight(e.cfg.ControlPlaneURL, "/"),
-		e.cfg.NodeID,
-		e.cfg.EnvironmentID,
-	)
+		url.PathEscape(e.cfg.NodeID),
+	))
+	if err != nil {
+		return nil, fmt.Errorf("build deployment env URL: %w", err)
+	}
+	query := requestURL.Query()
+	query.Set("environmentId", e.cfg.EnvironmentID)
+	requestURL.RawQuery = query.Encode()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL.String(), nil)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}

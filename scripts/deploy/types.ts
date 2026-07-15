@@ -326,6 +326,11 @@ export const OPTIONAL_SECRETS = [
   'GITHUB_WEBHOOK_SECRET',
   'GOOGLE_CLIENT_ID',
   'GOOGLE_CLIENT_SECRET',
+  'GOOGLE_LOGIN_CLIENT_ID',
+  'GOOGLE_LOGIN_CLIENT_SECRET',
+  'GITLAB_HOST',
+  'GITLAB_CLIENT_ID',
+  'GITLAB_CLIENT_SECRET',
   'SEGMENT_WRITE_KEY',
   'GA4_API_SECRET',
   'GA4_MEASUREMENT_ID',
@@ -348,6 +353,7 @@ export interface PulumiOutputs {
   kvId: string;
   kvName: string;
   r2Name: string;
+  sessionSnapshotTtlDays: number;
   dnsIds: {
     api: string;
     app: string;

@@ -44,6 +44,9 @@ export type {
   RepositoryListResponse,
 } from './github';
 
+// GitLab
+export type { GitLabProject, GitLabProjectListResponse } from './gitlab';
+
 // Repo Browse (remote-branch git browser + diff)
 export type {
   RepoBranch,
@@ -387,6 +390,7 @@ export {
 export type {
   CreateGitHubTriggerRequest,
   CreateTriggerRequest,
+  CreateTriggerResponse,
   CronTemplateContext,
   CronValidationResult,
   GitHubTemplateContext,
@@ -395,16 +399,30 @@ export type {
   GitHubTriggerFilters,
   ListTriggerExecutionsResponse,
   ListTriggersResponse,
+  ListWebhookDeliveriesResponse,
+  RunTriggerRequest,
   Trigger,
   TriggeredBy,
   TriggerExecution,
   TriggerExecutionResponse,
   TriggerExecutionStatus,
+  TriggerPreviewRequest,
+  TriggerPreviewResponse,
   TriggerResponse,
   TriggerSkipReason,
   TriggerSourceType,
   TriggerStatus,
   UpdateTriggerRequest,
+  WebhookCredential,
+  WebhookDelivery,
+  WebhookDeliveryOutcome,
+  WebhookFilterMode,
+  WebhookFilterOperator,
+  WebhookFilterResult,
+  WebhookTemplateContext,
+  WebhookTriggerConfig,
+  WebhookTriggerConfigInput,
+  WebhookTriggerFilter,
 } from './trigger';
 export {
   GITHUB_TRIGGER_EVENT_TYPES,
@@ -413,6 +431,9 @@ export {
   TRIGGER_SOURCE_TYPES,
   TRIGGER_STATUSES,
   TRIGGERED_BY_VALUES,
+  WEBHOOK_DELIVERY_OUTCOMES,
+  WEBHOOK_FILTER_MODES,
+  WEBHOOK_FILTER_OPERATORS,
 } from './trigger';
 
 // Compute Usage

@@ -31,6 +31,12 @@ vi.mock('../../src/services/node-agent', () => ({
   getNodeLogsFromNode: (...args: unknown[]) => mockGetNodeLogsFromNode(...args),
 }));
 
+vi.mock('../../src/services/node-agent-diagnostics', () => ({
+  getNodeLogsFromNode: (...args: unknown[]) => mockGetNodeLogsFromNode(...args),
+  getNodeSystemInfoFromNode: vi.fn(),
+  listNodeContainersFromNode: vi.fn(),
+}));
+
 const schema = await import('../../src/db/schema');
 const {
   handleCreateDeploymentEnvironment,
@@ -152,6 +158,12 @@ function fieldForColumn(column: unknown): string | null {
     [schema.deploymentCustomDomains.verificationError, 'verificationError'],
     [schema.deploymentCustomDomains.verificationStatus, 'verificationStatus'],
     [schema.deploymentCustomDomains.verifiedAt, 'verifiedAt'],
+    [schema.deploymentCustomDomains.verifiedCnameTarget, 'verifiedCnameTarget'],
+    [schema.deploymentCustomDomains.desiredState, 'desiredState'],
+    [schema.deploymentCustomDomains.routingStatus, 'routingStatus'],
+    [schema.deploymentCustomDomains.activationRoutingRevision, 'activationRoutingRevision'],
+    [schema.deploymentCustomDomains.deactivationRoutingRevision, 'deactivationRoutingRevision'],
+    [schema.deploymentCustomDomains.deletedAt, 'deletedAt'],
     [schema.agentProfiles.id, 'id'],
     [schema.agentProfiles.projectId, 'projectId'],
     [schema.deploymentEnvironments.agentDeployDisabledAt, 'agentDeployDisabledAt'],
@@ -712,6 +724,12 @@ describe('deployment MCP tools', () => {
             verificationError: null,
             verificationStatus: 'verified',
             verifiedAt: '2026-06-26T01:05:00Z',
+            verifiedCnameTarget: 'r1-frontend-3000-env-routes.apps.sammy.party',
+            desiredState: 'active',
+            routingStatus: 'active',
+            activationRoutingRevision: 1,
+            deactivationRoutingRevision: null,
+            deletedAt: null,
           },
           {
             createdAt: '2026-06-26T01:10:00Z',
@@ -724,6 +742,12 @@ describe('deployment MCP tools', () => {
             verificationError: null,
             verificationStatus: 'pending',
             verifiedAt: null,
+            verifiedCnameTarget: null,
+            desiredState: 'active',
+            routingStatus: 'pending_dns',
+            activationRoutingRevision: null,
+            deactivationRoutingRevision: null,
+            deletedAt: null,
           },
           {
             createdAt: '2026-06-26T01:20:00Z',
@@ -736,6 +760,12 @@ describe('deployment MCP tools', () => {
             verificationError: null,
             verificationStatus: 'verified',
             verifiedAt: '2026-06-26T01:25:00Z',
+            verifiedCnameTarget: 'r2-old-api-8080-env-routes.apps.sammy.party',
+            desiredState: 'active',
+            routingStatus: 'route_missing',
+            activationRoutingRevision: 1,
+            deactivationRoutingRevision: null,
+            deletedAt: null,
           },
         ],
         deploymentEnvironments: [deploymentEnvironment({ id: 'env-routes', name: 'staging' })],
@@ -803,7 +833,7 @@ describe('deployment MCP tools', () => {
         service: 'frontend',
         url: 'https://app.example.com',
         verificationStatus: 'verified',
-        willBeIncludedInApplyPayload: true,
+        willBeIncludedInRouteConfig: true,
       }),
       expect.objectContaining({
         cnameTarget: 'r1-frontend-3000-env-routes.apps.sammy.party',
@@ -814,7 +844,7 @@ describe('deployment MCP tools', () => {
         service: 'frontend',
         url: 'https://pending.example.com',
         verificationStatus: 'pending',
-        willBeIncludedInApplyPayload: false,
+        willBeIncludedInRouteConfig: false,
       }),
     ]);
     expect(routes.customDomains).toEqual([
@@ -824,14 +854,14 @@ describe('deployment MCP tools', () => {
         routeAvailable: true,
         url: 'https://app.example.com',
         verificationStatus: 'verified',
-        willBeIncludedInApplyPayload: true,
+        willBeIncludedInRouteConfig: true,
       }),
       expect.objectContaining({
         cnameTarget: 'r1-frontend-3000-env-routes.apps.sammy.party',
         hostname: 'pending.example.com',
         routeAvailable: true,
         verificationStatus: 'pending',
-        willBeIncludedInApplyPayload: false,
+        willBeIncludedInRouteConfig: false,
       }),
       expect.objectContaining({
         cnameTarget: null,
@@ -839,7 +869,7 @@ describe('deployment MCP tools', () => {
         routeAvailable: false,
         service: 'old-api',
         verificationStatus: 'verified',
-        willBeIncludedInApplyPayload: false,
+        willBeIncludedInRouteConfig: false,
       }),
     ]);
     expect(JSON.stringify(payload)).not.toContain('composeYaml');

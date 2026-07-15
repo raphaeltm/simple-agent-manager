@@ -12,9 +12,22 @@
 import { afterEach,beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  getCfContainerWakeTimeoutMs,
   getNodeAgentReadyPollIntervalMs,
   getNodeAgentReadyTimeoutMs,
 } from '../../src/services/node-agent';
+
+describe('getCfContainerWakeTimeoutMs', () => {
+  it('defaults to two minutes and accepts a positive override', () => {
+    expect(getCfContainerWakeTimeoutMs({})).toBe(120_000);
+    expect(getCfContainerWakeTimeoutMs({ CF_CONTAINER_WAKE_TIMEOUT_MS: '180000' })).toBe(180_000);
+  });
+
+  it('rejects non-positive and invalid overrides', () => {
+    expect(getCfContainerWakeTimeoutMs({ CF_CONTAINER_WAKE_TIMEOUT_MS: '0' })).toBe(120_000);
+    expect(getCfContainerWakeTimeoutMs({ CF_CONTAINER_WAKE_TIMEOUT_MS: 'invalid' })).toBe(120_000);
+  });
+});
 
 // =============================================================================
 // getNodeAgentReadyTimeoutMs — env var parsing

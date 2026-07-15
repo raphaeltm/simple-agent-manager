@@ -24,6 +24,29 @@ const INSTALLATIONS = [
   { id: 'inst-2', accountName: 'personal-account', accountType: 'User' },
 ];
 
+const GITLAB_PROJECTS = [
+  {
+    id: 123,
+    pathWithNamespace: 'platform-experiments/a-very-long-gitlab-project-name-that-wraps-cleanly',
+    name: 'a-very-long-gitlab-project-name-that-wraps-cleanly',
+    private: true,
+    defaultBranch: 'main',
+    webUrl:
+      'https://gitlab.com/platform-experiments/a-very-long-gitlab-project-name-that-wraps-cleanly',
+    httpUrlToRepo:
+      'https://gitlab.com/platform-experiments/a-very-long-gitlab-project-name-that-wraps-cleanly.git',
+  },
+  {
+    id: 456,
+    pathWithNamespace: 'team/compact',
+    name: 'compact',
+    private: true,
+    defaultBranch: 'develop',
+    webUrl: 'https://gitlab.com/team/compact',
+    httpUrlToRepo: 'https://gitlab.com/team/compact.git',
+  },
+];
+
 const AGENTS = [
   { id: 'claude-code', name: 'Claude Code', configured: true, models: ['claude-sonnet-4-5'] },
   { id: 'openai-codex', name: 'OpenAI Codex', configured: true, models: ['gpt-5'] },
@@ -45,13 +68,22 @@ const CREATED_PROJECT = {
 
 async function setupMocks(
   page: Page,
-  opts: { installations?: unknown[]; artifactsEnabled?: boolean } = {}
+  opts: { installations?: unknown[]; artifactsEnabled?: boolean; gitlabEnabled?: boolean } = {}
 ) {
-  const { installations = INSTALLATIONS, artifactsEnabled = true } = opts;
+  const { installations = INSTALLATIONS, artifactsEnabled = true, gitlabEnabled = false } = opts;
   await setupAuditRoutes(page, (path, respond) => {
+    if (path.endsWith('/api/config/login-providers')) {
+      return respond(200, { github: true, google: false, gitlab: gitlabEnabled });
+    }
     if (path.endsWith('/api/github/installations')) return respond(200, installations);
     if (path.endsWith('/api/github/repositories')) {
       return respond(200, { repositories: [], failedInstallations: [] });
+    }
+    if (path.endsWith('/api/gitlab/projects')) return respond(200, { projects: GITLAB_PROJECTS });
+    if (path.endsWith('/api/gitlab/branches')) {
+      // The real GET /api/gitlab/branches route returns a bare array (c.json(branches)),
+      // matching the listGitLabBranches client contract — not an object wrapper.
+      return respond(200, [{ name: 'main' }, { name: 'feature/agent-ready' }]);
     }
     if (path.endsWith('/api/config/artifacts-enabled'))
       return respond(200, { enabled: artifactsEnabled });
@@ -69,7 +101,19 @@ async function setupMocks(
   // Project creation (POST) — registered after the catch-all so it wins for /api/projects.
   await page.route('**/api/projects', (route) => {
     if (route.request().method() === 'POST') {
-      return route.fulfill({ status: 201, json: CREATED_PROJECT });
+      const body = route.request().postDataJSON() as { repoProvider?: string } | null;
+      return route.fulfill({
+        status: 201,
+        json:
+          body?.repoProvider === 'gitlab'
+            ? {
+                ...CREATED_PROJECT,
+                repository:
+                  'platform-experiments/a-very-long-gitlab-project-name-that-wraps-cleanly',
+                repoProvider: 'gitlab',
+              }
+            : CREATED_PROJECT,
+      });
     }
     return route.fulfill({ status: 200, json: { projects: [], total: 0, hasMore: false } });
   });
@@ -120,6 +164,37 @@ test.describe('Project onboarding wizard', () => {
       .getByPlaceholder('Project name')
       .fill('an-extremely-long-greenfield-project-name-that-should-wrap-not-overflow');
     await screenshot(page, 'onboarding-04-connect-artifacts');
+    await assertNoOverflow(page);
+  });
+
+  test('captures the GitLab provider and project selection path', async ({ page }) => {
+    await setupMocks(page, { gitlabEnabled: true });
+    await gotoWizard(page);
+
+    await page.getByRole('button', { name: /Get started/ }).click();
+    await page.getByRole('button', { name: /Continue/ }).click();
+    await expect(page.getByRole('heading', { name: /Where should your code live/ })).toBeVisible();
+    await expect(page.getByText('Connect a GitLab project')).toBeVisible();
+    await screenshot(page, 'onboarding-gitlab-01-provider');
+    await assertNoOverflow(page);
+
+    await page.getByText('Connect a GitLab project').click();
+    await page.getByRole('button', { name: /Continue/ }).click();
+    await expect(page.getByRole('heading', { name: 'Connect your code' })).toBeVisible();
+    await page.getByLabel('GitLab project').fill('platform-experiments');
+    await expect(
+      page.getByText('platform-experiments/a-very-long-gitlab-project-name-that-wraps-cleanly')
+    ).toBeVisible();
+    await screenshot(page, 'onboarding-gitlab-02-project-list');
+    await assertNoOverflow(page);
+
+    await page
+      .getByText('platform-experiments/a-very-long-gitlab-project-name-that-wraps-cleanly')
+      .click();
+    await expect(page.getByPlaceholder('Project name')).toHaveValue(
+      'a-very-long-gitlab-project-name-that-wraps-cleanly'
+    );
+    await screenshot(page, 'onboarding-gitlab-03-selected-project');
     await assertNoOverflow(page);
   });
 

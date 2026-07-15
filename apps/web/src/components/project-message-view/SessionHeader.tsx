@@ -743,11 +743,17 @@ export function SessionHeader({
       )}
 
       {/* Confirmation dialog for mark-complete action */}
-      <Dialog isOpen={confirmOpen} onClose={() => setConfirmOpen(false)} maxWidth="sm">
-        <h3 id="dialog-title" className="text-base font-semibold text-fg-primary mb-2">
+      <Dialog
+        isOpen={confirmOpen}
+        onClose={() => setConfirmOpen(false)}
+        maxWidth="sm"
+        aria-labelledby="complete-task-title"
+        aria-describedby="complete-task-description"
+      >
+        <h3 id="complete-task-title" className="text-base font-semibold text-fg-primary mb-2">
           Mark task as complete?
         </h3>
-        <p className="text-sm text-fg-muted mb-4">
+        <p id="complete-task-description" className="text-sm text-fg-muted mb-4">
           This will archive the task and delete the workspace. This action cannot be undone.
         </p>
         <div className="flex justify-end gap-2">

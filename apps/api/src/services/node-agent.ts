@@ -15,6 +15,7 @@ import {
 } from './vm-agent-container';
 
 const DEFAULT_NODE_AGENT_REQUEST_TIMEOUT_MS = 30_000;
+const DEFAULT_CF_CONTAINER_WAKE_TIMEOUT_MS = 120_000;
 
 const DEFAULT_NODE_AGENT_READY_TIMEOUT_MS = 900_000; // 15 min — cloud-init takes 8-12 min on Hetzner
 const DEFAULT_NODE_AGENT_READY_POLL_INTERVAL_MS = 5000;
@@ -64,6 +65,10 @@ export function getNodeAgentReadyPollIntervalMs(env: {
 
 export function getNodeAgentRequestTimeoutMs(env: { NODE_AGENT_REQUEST_TIMEOUT_MS?: string }): number {
   return getTimeoutMs(env.NODE_AGENT_REQUEST_TIMEOUT_MS, DEFAULT_NODE_AGENT_REQUEST_TIMEOUT_MS);
+}
+
+export function getCfContainerWakeTimeoutMs(env: { CF_CONTAINER_WAKE_TIMEOUT_MS?: string }): number {
+  return getTimeoutMs(env.CF_CONTAINER_WAKE_TIMEOUT_MS, DEFAULT_CF_CONTAINER_WAKE_TIMEOUT_MS);
 }
 
 export async function waitForNodeAgentReady(nodeId: string, env: Env): Promise<void> {
@@ -125,7 +130,7 @@ export async function waitForNodeAgentReady(nodeId: string, env: Env): Promise<v
   throw new Error(`Node Agent not reachable at ${healthUrl} within ${timeoutMs}ms.${details}`);
 }
 
-async function nodeAgentRequest(
+export async function nodeAgentRequest(
   nodeId: string,
   env: Env,
   path: string,
@@ -273,6 +278,10 @@ export async function createWorkspaceOnNode(
     workspaceId: string;
     repository: string;
     branch: string;
+    repoProvider?: 'github' | 'artifacts' | 'gitlab';
+    cloneUrl?: string | null;
+    repositoryHost?: string | null;
+    repositoryPath?: string | null;
     callbackToken: string;
     gitUserName?: string | null;
     gitUserEmail?: string | null;
@@ -420,9 +429,16 @@ export async function startAgentSessionOnNode(
   userId: string,
   mcpServer?: McpServerConfig,
   overrides?: AgentSessionOverrides,
-  taskContext?: AgentSessionTaskContext
+  taskContext?: AgentSessionTaskContext,
+  injectedInstructions?: string
 ): Promise<unknown> {
   const body: Record<string, unknown> = { agentType, initialPrompt };
+  if (injectedInstructions != null && injectedInstructions !== '') {
+    // SAM-injected system instructions delivered as a separate origin="system"
+    // prompt block (see buildInjectedInstructions). The agent reads it as model
+    // input; the UI collapses the mirrored message.
+    body.injectedInstructions = injectedInstructions;
+  }
   if (mcpServer) {
     body.mcpServers = [
       {
@@ -512,6 +528,8 @@ export async function sendPromptToAgentOnNode(
     throw err;
   }
 }
+
+export { hibernateAgentSessionOnNode, restoreAgentSessionOnNode } from './node-agent-session-snapshots';
 
 /**
  * Cancel a running prompt on an agent session.
@@ -646,41 +664,6 @@ export async function listNodeEventsOnNode(
     events: payload.events,
     nextCursor: typeof payload.nextCursor === 'string' ? payload.nextCursor : null,
   };
-}
-
-export async function getNodeSystemInfoFromNode(
-  nodeId: string,
-  env: Env,
-  userId: string
-): Promise<unknown> {
-  return nodeAgentRequest(nodeId, env, '/system-info', {
-    method: 'GET',
-    userId,
-  });
-}
-
-export async function getNodeLogsFromNode(
-  nodeId: string,
-  env: Env,
-  userId: string,
-  queryString: string
-): Promise<unknown> {
-  const path = queryString ? `/logs?${queryString}` : '/logs';
-  return nodeAgentRequest(nodeId, env, path, {
-    method: 'GET',
-    userId,
-  });
-}
-
-export async function listNodeContainersFromNode(
-  nodeId: string,
-  env: Env,
-  userId: string
-): Promise<unknown> {
-  return nodeAgentRequest(nodeId, env, '/containers', {
-    method: 'GET',
-    userId,
-  });
 }
 
 /**

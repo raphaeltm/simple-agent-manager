@@ -6,6 +6,7 @@ export const SUPPORTED_R2_LOCATIONS = ['WNAM', 'ENAM', 'WEUR', 'EEUR', 'APAC', '
 export type R2Location = (typeof SUPPORTED_R2_LOCATIONS)[number];
 
 export const DEFAULT_PAGES_PRODUCTION_BRANCH = 'main';
+export const DEFAULT_SESSION_SNAPSHOT_TTL_DAYS = 7;
 
 export interface ConfigReader {
   get(key: string): string | undefined;
@@ -20,6 +21,7 @@ export interface InfraConfig {
   prefix: string;
   r2Location: R2Location;
   pagesProductionBranch: string;
+  sessionSnapshotTtlDays: number;
 }
 
 const pulumiConfig = new pulumi.Config();
@@ -37,6 +39,11 @@ export function parseInfraConfig(config: ConfigReader, currentStack: string): In
     r2Location: parseR2Location(optionalNonEmptyConfig(config, 'r2Location')),
     pagesProductionBranch:
       optionalNonEmptyConfig(config, 'pagesProductionBranch') ?? DEFAULT_PAGES_PRODUCTION_BRANCH,
+    sessionSnapshotTtlDays: parsePositiveInteger(
+      optionalNonEmptyConfig(config, 'sessionSnapshotTtlDays'),
+      DEFAULT_SESSION_SNAPSHOT_TTL_DAYS,
+      'sessionSnapshotTtlDays'
+    ),
   };
 }
 
@@ -58,6 +65,7 @@ export const stack = infraConfig.stack;
 export const prefix = infraConfig.prefix;
 export const r2Location = infraConfig.r2Location;
 export const pagesProductionBranch = infraConfig.pagesProductionBranch;
+export const sessionSnapshotTtlDays = infraConfig.sessionSnapshotTtlDays;
 
 export function derivePrefix(domain: string): string {
   const hash = crypto.createHash('sha256').update(domain).digest('hex');
@@ -85,6 +93,15 @@ function optionalNonEmptyConfig(config: ConfigReader, key: string): string | und
     throw new Error(`Pulumi config "${key}" must not be empty when set`);
   }
   return value;
+}
+
+function parsePositiveInteger(value: string | undefined, fallback: number, key: string): number {
+  if (value === undefined) return fallback;
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+    throw new Error('Pulumi config "' + key + '" must be a positive integer');
+  }
+  return parsed;
 }
 
 function parseR2Location(value: string | undefined): R2Location {

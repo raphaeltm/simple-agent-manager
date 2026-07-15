@@ -5,7 +5,7 @@
  * exercising real SQLite storage, DO lifecycle, and migrations.
  */
 import { env } from 'cloudflare:test';
-import { describe, expect,it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import type { ProjectData } from '../../src/durable-objects/project-data';
 
@@ -180,7 +180,12 @@ describe('ProjectData Durable Object', () => {
       const s2 = await stub.createSession(null, 'Stopped task', 'task-combo');
       await stub.stopSession(s2);
 
-      const { sessions: activeTaskCombo, total } = await stub.listSessions('active', 20, 0, 'task-combo');
+      const { sessions: activeTaskCombo, total } = await stub.listSessions(
+        'active',
+        20,
+        0,
+        'task-combo'
+      );
       expect(total).toBe(1);
       expect(activeTaskCombo).toHaveLength(1);
       expect(activeTaskCombo[0]!.id).toBe(s1);
@@ -389,7 +394,11 @@ describe('ProjectData Durable Object', () => {
       const sessionId = await stub.createSession('ws-cleanup', 'Cleanup session');
 
       const before = Date.now();
-      const { cleanupAt: scheduled } = await stub.scheduleIdleCleanup(sessionId, 'ws-cleanup', null);
+      const { cleanupAt: scheduled } = await stub.scheduleIdleCleanup(
+        sessionId,
+        'ws-cleanup',
+        null
+      );
 
       const cleanupAt = await stub.getCleanupAt(sessionId);
       expect(cleanupAt).toBeTruthy();
@@ -420,9 +429,27 @@ describe('ProjectData Durable Object', () => {
       const sessionId = await stub.createSession(null, null);
 
       const messages = [
-        { messageId: crypto.randomUUID(), role: 'user', content: 'Hello', toolMetadata: null, timestamp: new Date().toISOString() },
-        { messageId: crypto.randomUUID(), role: 'assistant', content: 'Hi there', toolMetadata: null, timestamp: new Date().toISOString() },
-        { messageId: crypto.randomUUID(), role: 'user', content: 'How are you?', toolMetadata: null, timestamp: new Date().toISOString() },
+        {
+          messageId: crypto.randomUUID(),
+          role: 'user',
+          content: 'Hello',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
+        {
+          messageId: crypto.randomUUID(),
+          role: 'assistant',
+          content: 'Hi there',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
+        {
+          messageId: crypto.randomUUID(),
+          role: 'user',
+          content: 'How are you?',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
       ];
 
       const result = await stub.persistMessageBatch(sessionId, messages);
@@ -433,6 +460,60 @@ describe('ProjectData Durable Object', () => {
       expect(stored).toHaveLength(3);
     });
 
+    it('persists and returns the origin marker for SAM-injected messages', async () => {
+      const stub = getStub('project-batch-origin');
+      const sessionId = await stub.createSession(null, null);
+
+      const injectedId = crypto.randomUUID();
+      const normalId = crypto.randomUUID();
+      const result = await stub.persistMessageBatch(sessionId, [
+        {
+          messageId: normalId,
+          role: 'user',
+          content: 'my task',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
+        {
+          messageId: injectedId,
+          role: 'user',
+          content: 'call get_instructions',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+          origin: 'system',
+        },
+      ]);
+      expect(result.persisted).toBe(2);
+
+      const parity = await stub.persistMessageBatch(sessionId, [
+        {
+          messageId: injectedId,
+          role: 'user',
+          content: 'status-only retry',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
+        {
+          messageId: crypto.randomUUID(),
+          role: 'user',
+          content: 'call get_instructions',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+          origin: 'system',
+        },
+      ]);
+      expect(parity).toMatchObject({ persisted: 1, duplicates: 1 });
+
+      const { messages: stored } = await stub.getMessages(sessionId);
+      const injected = stored.find((m) => m.id === injectedId);
+      const normal = stored.find((m) => m.id === normalId);
+      expect(injected?.origin).toBe('system');
+      expect(injected?.content).toBe('call get_instructions');
+      expect(stored.filter((m) => m.origin === 'system')).toHaveLength(2);
+      // A normal user message has no system origin (null/undefined/"user").
+      expect(normal?.origin ?? null).not.toBe('system');
+    });
+
     it('deduplicates messages by messageId', async () => {
       const stub = getStub('project-batch-dedup');
       const sessionId = await stub.createSession(null, null);
@@ -440,14 +521,32 @@ describe('ProjectData Durable Object', () => {
 
       // First batch with a unique messageId
       await stub.persistMessageBatch(sessionId, [
-        { messageId: sharedId, role: 'user', content: 'Original', toolMetadata: null, timestamp: new Date().toISOString() },
+        {
+          messageId: sharedId,
+          role: 'user',
+          content: 'Original',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
       ]);
 
       // Second batch with the same messageId + a new one
       const newId = crypto.randomUUID();
       const result = await stub.persistMessageBatch(sessionId, [
-        { messageId: sharedId, role: 'user', content: 'Duplicate attempt', toolMetadata: null, timestamp: new Date().toISOString() },
-        { messageId: newId, role: 'assistant', content: 'New message', toolMetadata: null, timestamp: new Date().toISOString() },
+        {
+          messageId: sharedId,
+          role: 'user',
+          content: 'Duplicate attempt',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
+        {
+          messageId: newId,
+          role: 'assistant',
+          content: 'New message',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
       ]);
 
       expect(result.persisted).toBe(1);
@@ -466,8 +565,20 @@ describe('ProjectData Durable Object', () => {
       const id1 = crypto.randomUUID();
 
       await stub.persistMessageBatch(sessionId, [
-        { messageId: id1, role: 'user', content: 'First', toolMetadata: null, timestamp: new Date().toISOString() },
-        { messageId: crypto.randomUUID(), role: 'assistant', content: 'Second', toolMetadata: null, timestamp: new Date().toISOString() },
+        {
+          messageId: id1,
+          role: 'user',
+          content: 'First',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
+        {
+          messageId: crypto.randomUUID(),
+          role: 'assistant',
+          content: 'Second',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
       ]);
 
       let session = await stub.getSession(sessionId);
@@ -475,8 +586,20 @@ describe('ProjectData Durable Object', () => {
 
       // Batch with 1 duplicate and 1 new
       await stub.persistMessageBatch(sessionId, [
-        { messageId: id1, role: 'user', content: 'Dup', toolMetadata: null, timestamp: new Date().toISOString() },
-        { messageId: crypto.randomUUID(), role: 'user', content: 'Third', toolMetadata: null, timestamp: new Date().toISOString() },
+        {
+          messageId: id1,
+          role: 'user',
+          content: 'Dup',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
+        {
+          messageId: crypto.randomUUID(),
+          role: 'user',
+          content: 'Third',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
       ]);
 
       session = await stub.getSession(sessionId);
@@ -488,12 +611,58 @@ describe('ProjectData Durable Object', () => {
       const sessionId = await stub.createSession(null, null);
 
       await stub.persistMessageBatch(sessionId, [
-        { messageId: crypto.randomUUID(), role: 'assistant', content: 'System init', toolMetadata: null, timestamp: new Date().toISOString() },
-        { messageId: crypto.randomUUID(), role: 'user', content: 'Deploy my app to staging', toolMetadata: null, timestamp: new Date().toISOString() },
+        {
+          messageId: crypto.randomUUID(),
+          role: 'assistant',
+          content: 'System init',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
+        {
+          messageId: crypto.randomUUID(),
+          role: 'user',
+          content: 'Deploy my app to staging',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
       ]);
 
       const session = await stub.getSession(sessionId);
       expect(session!.topic).toBe('Deploy my app to staging');
+    });
+
+    it('does not auto-capture topic from a SAM-injected (origin=system) user message', async () => {
+      const stub = getStub('project-batch-topic-system-excluded');
+      const sessionId = await stub.createSession(null, null);
+
+      // A batch whose only user message is system-injected must NOT set the topic —
+      // the injected get_instructions reminder is not the user's conversation subject.
+      await stub.persistMessageBatch(sessionId, [
+        {
+          messageId: crypto.randomUUID(),
+          role: 'user',
+          content: 'IMPORTANT: you MUST call get_instructions before starting',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+          origin: 'system',
+        },
+      ]);
+
+      const session = await stub.getSession(sessionId);
+      expect(session!.topic ?? null).toBeNull();
+
+      // A subsequent real user message DOES set the topic.
+      await stub.persistMessageBatch(sessionId, [
+        {
+          messageId: crypto.randomUUID(),
+          role: 'user',
+          content: 'Refactor the auth module',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
+      ]);
+      const after = await stub.getSession(sessionId);
+      expect(after!.topic).toBe('Refactor the auth module');
     });
 
     it('does not overwrite existing topic', async () => {
@@ -501,7 +670,13 @@ describe('ProjectData Durable Object', () => {
       const sessionId = await stub.createSession(null, 'Existing topic');
 
       await stub.persistMessageBatch(sessionId, [
-        { messageId: crypto.randomUUID(), role: 'user', content: 'New content', toolMetadata: null, timestamp: new Date().toISOString() },
+        {
+          messageId: crypto.randomUUID(),
+          role: 'user',
+          content: 'New content',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
       ]);
 
       const session = await stub.getSession(sessionId);
@@ -515,12 +690,22 @@ describe('ProjectData Durable Object', () => {
       const toolMeta = JSON.stringify({ tool: 'bash', target: 'ls -la', status: 'success' });
 
       await stub.persistMessageBatch(sessionId, [
-        { messageId: msgId, role: 'assistant', content: 'Running command', toolMetadata: toolMeta, timestamp: new Date().toISOString() },
+        {
+          messageId: msgId,
+          role: 'assistant',
+          content: 'Running command',
+          toolMetadata: toolMeta,
+          timestamp: new Date().toISOString(),
+        },
       ]);
 
       const { messages } = await stub.getMessages(sessionId);
       expect(messages).toHaveLength(1);
-      expect(messages[0]!.toolMetadata).toEqual({ tool: 'bash', target: 'ls -la', status: 'success' });
+      expect(messages[0]!.toolMetadata).toEqual({
+        tool: 'bash',
+        target: 'ls -la',
+        status: 'success',
+      });
     });
 
     it('throws for non-existent session', async () => {
@@ -528,7 +713,13 @@ describe('ProjectData Durable Object', () => {
 
       await expect(
         stub.persistMessageBatch('non-existent-session', [
-          { messageId: crypto.randomUUID(), role: 'user', content: 'Hello', toolMetadata: null, timestamp: new Date().toISOString() },
+          {
+            messageId: crypto.randomUUID(),
+            role: 'user',
+            content: 'Hello',
+            toolMetadata: null,
+            timestamp: new Date().toISOString(),
+          },
         ])
       ).rejects.toThrow(/not found/i);
     });
@@ -543,7 +734,13 @@ describe('ProjectData Durable Object', () => {
       // Attempting to persist messages to a stopped session should throw
       await expect(
         stub.persistMessageBatch(sessionId, [
-          { messageId: crypto.randomUUID(), role: 'user', content: 'Late message', toolMetadata: null, timestamp: new Date().toISOString() },
+          {
+            messageId: crypto.randomUUID(),
+            role: 'user',
+            content: 'Late message',
+            toolMetadata: null,
+            timestamp: new Date().toISOString(),
+          },
         ])
       ).rejects.toThrow(/stopped/i);
     });
@@ -568,12 +765,54 @@ describe('ProjectData Durable Object', () => {
       // arriving within the same millisecond
       const sameTimestamp = new Date().toISOString();
       const messages = [
-        { messageId: crypto.randomUUID(), role: 'assistant' as const, content: 'Hello', toolMetadata: null, timestamp: sameTimestamp, sequence: 1 },
-        { messageId: crypto.randomUUID(), role: 'assistant' as const, content: ' world', toolMetadata: null, timestamp: sameTimestamp, sequence: 2 },
-        { messageId: crypto.randomUUID(), role: 'assistant' as const, content: '!', toolMetadata: null, timestamp: sameTimestamp, sequence: 3 },
-        { messageId: crypto.randomUUID(), role: 'assistant' as const, content: ' How', toolMetadata: null, timestamp: sameTimestamp, sequence: 4 },
-        { messageId: crypto.randomUUID(), role: 'assistant' as const, content: ' are', toolMetadata: null, timestamp: sameTimestamp, sequence: 5 },
-        { messageId: crypto.randomUUID(), role: 'assistant' as const, content: ' you?', toolMetadata: null, timestamp: sameTimestamp, sequence: 6 },
+        {
+          messageId: crypto.randomUUID(),
+          role: 'assistant' as const,
+          content: 'Hello',
+          toolMetadata: null,
+          timestamp: sameTimestamp,
+          sequence: 1,
+        },
+        {
+          messageId: crypto.randomUUID(),
+          role: 'assistant' as const,
+          content: ' world',
+          toolMetadata: null,
+          timestamp: sameTimestamp,
+          sequence: 2,
+        },
+        {
+          messageId: crypto.randomUUID(),
+          role: 'assistant' as const,
+          content: '!',
+          toolMetadata: null,
+          timestamp: sameTimestamp,
+          sequence: 3,
+        },
+        {
+          messageId: crypto.randomUUID(),
+          role: 'assistant' as const,
+          content: ' How',
+          toolMetadata: null,
+          timestamp: sameTimestamp,
+          sequence: 4,
+        },
+        {
+          messageId: crypto.randomUUID(),
+          role: 'assistant' as const,
+          content: ' are',
+          toolMetadata: null,
+          timestamp: sameTimestamp,
+          sequence: 5,
+        },
+        {
+          messageId: crypto.randomUUID(),
+          role: 'assistant' as const,
+          content: ' you?',
+          toolMetadata: null,
+          timestamp: sameTimestamp,
+          sequence: 6,
+        },
       ];
 
       await stub.persistMessageBatch(sessionId, messages);
@@ -599,8 +838,20 @@ describe('ProjectData Durable Object', () => {
 
       // No sequence field — DO should auto-assign
       await stub.persistMessageBatch(sessionId, [
-        { messageId: crypto.randomUUID(), role: 'user', content: 'First', toolMetadata: null, timestamp: new Date().toISOString() },
-        { messageId: crypto.randomUUID(), role: 'assistant', content: 'Second', toolMetadata: null, timestamp: new Date().toISOString() },
+        {
+          messageId: crypto.randomUUID(),
+          role: 'user',
+          content: 'First',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
+        {
+          messageId: crypto.randomUUID(),
+          role: 'assistant',
+          content: 'Second',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
       ]);
 
       const { messages: stored } = await stub.getMessages(sessionId);
@@ -609,7 +860,7 @@ describe('ProjectData Durable Object', () => {
       expect(stored[0]!.sequence).toBeTruthy();
       expect(stored[1]!.sequence).toBeTruthy();
       // Second should have a higher sequence than first
-      expect((stored[1]!.sequence as number)).toBeGreaterThan(stored[0]!.sequence as number);
+      expect(stored[1]!.sequence as number).toBeGreaterThan(stored[0]!.sequence as number);
     });
 
     it('all-duplicate batch does not update session timestamp', async () => {
@@ -618,7 +869,13 @@ describe('ProjectData Durable Object', () => {
       const msgId = crypto.randomUUID();
 
       await stub.persistMessageBatch(sessionId, [
-        { messageId: msgId, role: 'user', content: 'Original', toolMetadata: null, timestamp: new Date().toISOString() },
+        {
+          messageId: msgId,
+          role: 'user',
+          content: 'Original',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
       ]);
 
       const sessionBefore = await stub.getSession(sessionId);
@@ -627,7 +884,13 @@ describe('ProjectData Durable Object', () => {
       await new Promise((r) => setTimeout(r, 10));
 
       const result = await stub.persistMessageBatch(sessionId, [
-        { messageId: msgId, role: 'user', content: 'Duplicate', toolMetadata: null, timestamp: new Date().toISOString() },
+        {
+          messageId: msgId,
+          role: 'user',
+          content: 'Duplicate',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
       ]);
 
       expect(result.persisted).toBe(0);
@@ -647,8 +910,20 @@ describe('ProjectData Durable Object', () => {
 
       // Simulate: VM agent batch includes same user message with a different ID
       const result = await stub.persistMessageBatch(sessionId, [
-        { messageId: crypto.randomUUID(), role: 'user', content: 'Fix the login bug', toolMetadata: null, timestamp: new Date().toISOString() },
-        { messageId: crypto.randomUUID(), role: 'assistant', content: 'Looking into it...', toolMetadata: null, timestamp: new Date().toISOString() },
+        {
+          messageId: crypto.randomUUID(),
+          role: 'user',
+          content: 'Fix the login bug',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
+        {
+          messageId: crypto.randomUUID(),
+          role: 'assistant',
+          content: 'Looking into it...',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
       ]);
 
       // User message should be skipped (content duplicate), assistant should be persisted
@@ -670,7 +945,13 @@ describe('ProjectData Durable Object', () => {
 
       // Batch includes assistant message with same content — should NOT be skipped
       const result = await stub.persistMessageBatch(sessionId, [
-        { messageId: crypto.randomUUID(), role: 'assistant', content: 'I can help with that', toolMetadata: null, timestamp: new Date().toISOString() },
+        {
+          messageId: crypto.randomUUID(),
+          role: 'assistant',
+          content: 'I can help with that',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
       ]);
 
       expect(result.persisted).toBe(1);
@@ -683,12 +964,24 @@ describe('ProjectData Durable Object', () => {
 
       // First batch includes user message
       await stub.persistMessageBatch(sessionId, [
-        { messageId: crypto.randomUUID(), role: 'user', content: 'Fix the bug', toolMetadata: null, timestamp: new Date().toISOString() },
+        {
+          messageId: crypto.randomUUID(),
+          role: 'user',
+          content: 'Fix the bug',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
       ]);
 
       // Second batch (VM agent retry) includes the same user content with a different ID
       const result = await stub.persistMessageBatch(sessionId, [
-        { messageId: crypto.randomUUID(), role: 'user', content: 'Fix the bug', toolMetadata: null, timestamp: new Date().toISOString() },
+        {
+          messageId: crypto.randomUUID(),
+          role: 'user',
+          content: 'Fix the bug',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
       ]);
 
       expect(result.persisted).toBe(0);
@@ -848,7 +1141,7 @@ describe('ProjectData Durable Object', () => {
         null,
         ['user'],
         true,
-        'asc',
+        'asc'
       );
 
       expect(messages).toHaveLength(1);
@@ -1162,7 +1455,7 @@ describe('ProjectData Durable Object', () => {
         {
           messageId: crypto.randomUUID(),
           role: 'assistant',
-          content: 'I\'ll investigate the authentication flow in auth.ts.',
+          content: "I'll investigate the authentication flow in auth.ts.",
           toolMetadata: null,
           timestamp: new Date().toISOString(),
         },
@@ -1229,14 +1522,38 @@ describe('ProjectData Durable Object', () => {
 
       // First batch: 2 messages
       await stub.persistMessageBatch(sessionId, [
-        { messageId: msgId1, role: 'user', content: 'Hello', toolMetadata: null, timestamp: new Date().toISOString() },
-        { messageId: msgId2, role: 'assistant', content: 'Hi', toolMetadata: null, timestamp: new Date().toISOString() },
+        {
+          messageId: msgId1,
+          role: 'user',
+          content: 'Hello',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
+        {
+          messageId: msgId2,
+          role: 'assistant',
+          content: 'Hi',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
       ]);
 
       // Simulated crash recovery: reporter re-sends msgId2 (already persisted) + new msgId3
       const result = await stub.persistMessageBatch(sessionId, [
-        { messageId: msgId2, role: 'assistant', content: 'Hi', toolMetadata: null, timestamp: new Date().toISOString() },
-        { messageId: msgId3, role: 'user', content: 'Thanks', toolMetadata: null, timestamp: new Date().toISOString() },
+        {
+          messageId: msgId2,
+          role: 'assistant',
+          content: 'Hi',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
+        {
+          messageId: msgId3,
+          role: 'user',
+          content: 'Thanks',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
       ]);
 
       expect(result.persisted).toBe(1);
@@ -1254,8 +1571,20 @@ describe('ProjectData Durable Object', () => {
       const sessionId = await stub.createSession('ws-stop', null, 'task-stop');
 
       await stub.persistMessageBatch(sessionId, [
-        { messageId: crypto.randomUUID(), role: 'user', content: 'Build the project', toolMetadata: null, timestamp: new Date().toISOString() },
-        { messageId: crypto.randomUUID(), role: 'assistant', content: 'Building...', toolMetadata: null, timestamp: new Date().toISOString() },
+        {
+          messageId: crypto.randomUUID(),
+          role: 'user',
+          content: 'Build the project',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
+        {
+          messageId: crypto.randomUUID(),
+          role: 'assistant',
+          content: 'Building...',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
       ]);
 
       // Stop session (simulates workspace destruction)
@@ -1304,7 +1633,13 @@ describe('ProjectData Durable Object', () => {
 
       // Persist batch — should also update workspace_activity.last_message_at
       await stub.persistMessageBatch(sessionId, [
-        { messageId: crypto.randomUUID(), role: 'assistant', content: 'Hi there', toolMetadata: null, timestamp: new Date().toISOString() },
+        {
+          messageId: crypto.randomUUID(),
+          role: 'assistant',
+          content: 'Hi there',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
       ]);
 
       const session = await stub.getSession(sessionId);
@@ -1315,7 +1650,11 @@ describe('ProjectData Durable Object', () => {
       const stub = getStub('project-msg-activity-idle-reset');
       const sessionId = await stub.createSession('ws-msg-idle', 'Message idle reset test');
 
-      const { cleanupAt: firstCleanupAt } = await stub.scheduleIdleCleanup(sessionId, 'ws-msg-idle', null);
+      const { cleanupAt: firstCleanupAt } = await stub.scheduleIdleCleanup(
+        sessionId,
+        'ws-msg-idle',
+        null
+      );
       await new Promise((resolve) => setTimeout(resolve, 5));
 
       await stub.persistMessageBatch(sessionId, [
@@ -1452,11 +1791,22 @@ describe('ProjectData Durable Object', () => {
       await stub.persistMessage(sessionId, 'assistant', 'I will fix the auth', null);
       await stub.persistMessage(sessionId, 'assistant', 'entication middleware now.', null);
       await stub.persistMessage(sessionId, 'assistant', ' Let me look at the code.', null);
+      await stub.persistMessageBatch(sessionId, [
+        {
+          messageId: crypto.randomUUID(),
+          role: 'user',
+          content: 'private injected sentinel',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+          origin: 'system',
+        },
+      ]);
 
       // Before stop: search should use LIKE on raw tokens
       const beforeResults = stub.searchMessages('authentication middleware');
       // LIKE on individual tokens may or may not find this — the user message has it
       expect(beforeResults.length).toBeGreaterThanOrEqual(1);
+      expect(stub.searchMessages('private injected sentinel')).toEqual([]);
 
       // Stop session — triggers materialization
       await stub.stopSession(sessionId);
@@ -1472,6 +1822,7 @@ describe('ProjectData Durable Object', () => {
       const assistantResult = afterResults.find((r) => r.role === 'assistant');
       expect(assistantResult).toBeDefined();
       expect(assistantResult!.snippet).toContain('auth');
+      expect(stub.searchMessages('private injected sentinel')).toEqual([]);
     });
 
     it('materializeSession is idempotent', async () => {
@@ -1596,7 +1947,11 @@ describe('ProjectData Durable Object', () => {
 
       const ideas = stub.getIdeasForSession(sessionId);
       expect(ideas).toHaveLength(3);
-      expect(ideas.map((i: { taskId: string }) => i.taskId)).toEqual(['task-a', 'task-b', 'task-c']);
+      expect(ideas.map((i: { taskId: string }) => i.taskId)).toEqual([
+        'task-a',
+        'task-b',
+        'task-c',
+      ]);
     });
 
     it('is idempotent — duplicate links are silently ignored', async () => {
@@ -1737,13 +2092,9 @@ describe('ProjectData Durable Object', () => {
 
     it('replaces commands on re-cache', async () => {
       const stub = getStub('project-cache-cmds-2');
-      await stub.cacheCommands('claude-code', [
-        { name: 'old-cmd', description: 'Old' },
-      ]);
+      await stub.cacheCommands('claude-code', [{ name: 'old-cmd', description: 'Old' }]);
 
-      await stub.cacheCommands('claude-code', [
-        { name: 'new-cmd', description: 'New' },
-      ]);
+      await stub.cacheCommands('claude-code', [{ name: 'new-cmd', description: 'New' }]);
 
       const result = await stub.getCachedCommands('claude-code');
       expect(result).toHaveLength(1);

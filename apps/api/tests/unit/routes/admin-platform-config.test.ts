@@ -1,0 +1,188 @@
+import Database from 'better-sqlite3';
+import { Hono } from 'hono';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import type { Env } from '../../../src/env';
+import { AppError } from '../../../src/middleware/error';
+import { generateEncryptionKey } from '../../../src/services/encryption';
+import { getGitLabOAuthConfig } from '../../../src/services/platform-config';
+
+vi.mock('../../../src/middleware/auth', () => ({
+  requireAuth: () => async (_c: any, next: any) => next(),
+  requireApproved: () => async (_c: any, next: any) => next(),
+  requireSuperadmin: () => async (c: any, next: any) => {
+    if (c.req.header('X-Test-Role') !== 'superadmin') {
+      return c.json({ error: 'FORBIDDEN', message: 'Superadmin required' }, 403);
+    }
+    await next();
+  },
+  getUserId: () => 'superadmin-1',
+}));
+
+const { adminPlatformConfigRoutes } = await import('../../../src/routes/admin-platform-config');
+
+interface SqliteD1Result {
+  meta: { changes: number };
+  results?: unknown[];
+}
+
+function createD1(sqlite: Database.Database): D1Database {
+  return {
+    prepare(sql: string) {
+      const statement = sqlite.prepare(sql);
+      let bindings: unknown[] = [];
+      return {
+        bind(...values: unknown[]) {
+          bindings = values;
+          return this;
+        },
+        async first<T>() {
+          return statement.get(...bindings) as T | null;
+        },
+        async all<T>() {
+          return { results: statement.all(...bindings) as T[] };
+        },
+        async run(): Promise<SqliteD1Result> {
+          const result = statement.run(...bindings);
+          return { meta: { changes: result.changes } };
+        },
+      };
+    },
+  } as unknown as D1Database;
+}
+
+function createEnv(overrides: Partial<Env> = {}): Env {
+  const sqlite = new Database(':memory:');
+  sqlite.exec(`
+    CREATE TABLE users (id TEXT PRIMARY KEY);
+    INSERT INTO users (id) VALUES ('system_anonymous_trials');
+    CREATE TABLE platform_settings (
+      key TEXT PRIMARY KEY NOT NULL,
+      value TEXT NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_by TEXT
+    );
+    CREATE TABLE platform_credentials (
+      id TEXT PRIMARY KEY,
+      credential_type TEXT NOT NULL,
+      provider TEXT,
+      agent_type TEXT,
+      credential_kind TEXT NOT NULL DEFAULT 'api-key',
+      label TEXT NOT NULL,
+      encrypted_token TEXT NOT NULL,
+      iv TEXT NOT NULL,
+      is_enabled INTEGER NOT NULL DEFAULT 1,
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+  return {
+    DATABASE: createD1(sqlite),
+    BASE_DOMAIN: 'example.com',
+    ENCRYPTION_KEY: generateEncryptionKey(),
+    ...overrides,
+  } as Env;
+}
+
+function createApp() {
+  const app = new Hono<{ Bindings: Env }>();
+  app.onError((err, c) => {
+    if (err instanceof AppError) {
+      return c.json(err.toJSON(), err.statusCode);
+    }
+    return c.json({ error: 'INTERNAL_ERROR', message: err.message }, 500);
+  });
+  app.route('/api/admin/platform-config', adminPlatformConfigRoutes);
+  return app;
+}
+
+describe('admin platform config routes', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('persists GitLab OAuth config through the superadmin runtime config endpoint', async () => {
+    const env = createEnv();
+    const res = await createApp().request(
+      '/api/admin/platform-config',
+      {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Test-Role': 'superadmin',
+        },
+        body: JSON.stringify({
+          config: {
+            gitlab: {
+              host: 'https://gitlab.admin.example.com/',
+              clientId: 'gitlab-admin-client',
+              clientSecret: 'gitlab-admin-secret',
+            },
+          },
+        }),
+      },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      status: {
+        integrations: {
+          gitlabOAuth: { configured: true, label: 'set here' },
+        },
+      },
+    });
+
+    const settings = await env.DATABASE.prepare(
+      `SELECT key, value FROM platform_settings WHERE key LIKE 'integration.gitlab.%' ORDER BY key`
+    ).all<{ key: string; value: string }>();
+    expect(settings.results).toEqual([
+      { key: 'integration.gitlab.clientId', value: 'gitlab-admin-client' },
+      { key: 'integration.gitlab.host', value: 'https://gitlab.admin.example.com/' },
+    ]);
+
+    const secretRow = await env.DATABASE.prepare(
+      `SELECT provider, credential_kind AS credentialKind, encrypted_token AS encryptedToken, is_enabled AS isEnabled
+       FROM platform_credentials
+       WHERE credential_type = 'platform-integration' AND provider = 'gitlab'`
+    ).first<{
+      provider: string;
+      credentialKind: string;
+      encryptedToken: string;
+      isEnabled: number;
+    }>();
+    expect(secretRow).toMatchObject({
+      provider: 'gitlab',
+      credentialKind: 'gitlab.clientSecret',
+      isEnabled: 1,
+    });
+    expect(secretRow?.encryptedToken).not.toBe('gitlab-admin-secret');
+    expect(secretRow?.encryptedToken).not.toContain('gitlab-admin-secret');
+
+    await expect(getGitLabOAuthConfig(env)).resolves.toEqual({
+      host: 'https://gitlab.admin.example.com',
+      apiBaseUrl: 'https://gitlab.admin.example.com/api/v4',
+      clientId: 'gitlab-admin-client',
+      clientSecret: 'gitlab-admin-secret',
+    });
+  });
+
+  it('keeps the endpoint behind the superadmin guard', async () => {
+    const res = await createApp().request(
+      '/api/admin/platform-config',
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'X-Test-Role': 'admin' },
+        body: JSON.stringify({ config: { gitlab: { host: 'https://gitlab.example.com' } } }),
+      },
+      createEnv()
+    );
+
+    expect(res.status).toBe(403);
+    await expect(res.json()).resolves.toEqual({
+      error: 'FORBIDDEN',
+      message: 'Superadmin required',
+    });
+  });
+});

@@ -2,6 +2,9 @@ FROM docker.io/library/node:22-bookworm-slim
 
 COPY container-entrypoints/patch-acp-amp.py /tmp/patch-acp-amp.py
 
+LABEL org.opencontainers.image.title="SAM vm-agent instant runtime" \
+      org.opencontainers.image.description="Secret-free runtime image; user assets are applied at ACP session start"
+
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends ca-certificates curl git jq openssh-client procps wget; \
@@ -27,10 +30,17 @@ ENV SAM_AGENT_HOME=/var/lib/vm-agent/agents \
     UV_TOOL_BIN_DIR=/var/lib/vm-agent/agents/bin \
     PATH=/var/lib/vm-agent/agents/bin:/var/lib/vm-agent/agents/npm/bin:/usr/local/bin:/usr/bin:/bin
 
+# Build prerequisite: container-artifacts/ is gitignored and generated at deploy
+# time by `make -C packages/vm-agent prepare-container` (see deploy-reusable.yml).
+# A local `docker build` / `wrangler dev` of this image must run that target first,
+# or the two COPY lines below fail with "file not found in build context".
 COPY container-entrypoints/vm-agent-bootstrap.sh /usr/local/bin/vm-agent-bootstrap
-RUN chmod +x /usr/local/bin/vm-agent-bootstrap && \
+COPY container-artifacts/vm-agent-linux-amd64 /usr/local/bin/vm-agent
+COPY container-artifacts/vm-agent-version.json /etc/sam/vm-agent-version.json
+RUN chmod +x /usr/local/bin/vm-agent-bootstrap /usr/local/bin/vm-agent && \
     mkdir -p /workspaces /var/lib/vm-agent/agents/bin /var/lib/vm-agent/agents/npm /var/lib/vm-agent/agents/uv-tools /var/lib/vm-agent/agents/uv-python && \
-    chown -R node:node /workspaces /var/lib/vm-agent
+    touch /usr/local/bin/git-credential-sam && \
+    chown -R node:node /workspaces /var/lib/vm-agent /usr/local/bin/git-credential-sam
 
 USER node
 WORKDIR /workspaces

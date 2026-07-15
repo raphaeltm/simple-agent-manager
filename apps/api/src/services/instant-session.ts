@@ -24,6 +24,7 @@ import {
   requireVmAgentContainer,
   runContainerPhase,
 } from './vm-agent-container';
+import { resolveWorkspaceGitSource } from './workspace-git-source';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -53,7 +54,12 @@ export interface LaunchInstantSessionResult {
   processId: string;
   workspaceUrl: string;
   timings: {
+    totalDurationMs: number;
+    preContainerDurationMs: number;
+    containerLaunchDurationMs: number;
+    /** @deprecated backward-compat alias for totalDurationMs; prefer totalDurationMs. */
     setupDurationMs: number;
+    /** @deprecated backward-compat alias for containerLaunchDurationMs; prefer containerLaunchDurationMs. */
     installDurationMs: number;
     agentReadyDurationMs: number;
     workspaceCreateDurationMs: number;
@@ -84,9 +90,7 @@ function trimDashes(value: string): string {
 
 function toSafeRepositoryDirectoryName(value: string): string {
   return trimDashes(
-    [...value]
-      .map((char) => isRepositoryDirectoryChar(char) ? char : '-')
-      .join('')
+    [...value].map((char) => (isRepositoryDirectoryChar(char) ? char : '-')).join('')
   );
 }
 
@@ -120,10 +124,7 @@ function repositoryDirectoryName(repository: string): string {
     }
   }
 
-  const rawName = stripGitSuffix(repo
-    ? lastNonEmptyPathSegment(repo)
-    : ''
-  ).trim();
+  const rawName = stripGitSuffix(repo ? lastNonEmptyPathSegment(repo) : '').trim();
   const safeName = toSafeRepositoryDirectoryName(rawName);
   return safeName || 'workspace';
 }
@@ -162,6 +163,7 @@ export async function launchInstantSession(
   const startedAt = Date.now();
   const branch = input.branch?.trim() || input.project.defaultBranch || 'main';
   const workspaceName = getWorkspaceName(input);
+  const gitSource = await resolveWorkspaceGitSource(db, input.project);
 
   const node = await createNodeRecord(env, {
     userId: input.userId,
@@ -252,7 +254,9 @@ export async function launchInstantSession(
     const launchDurationMs = Date.now() - launchStart;
 
     const agentReadyStart = Date.now();
-    await runContainerPhase('wait_for_ready', phaseDetail, () => waitForNodeAgentReady(node.id, env));
+    await runContainerPhase('wait_for_ready', phaseDetail, () =>
+      waitForNodeAgentReady(node.id, env)
+    );
     const agentReadyDurationMs = Date.now() - agentReadyStart;
 
     const workspaceCreateStart = Date.now();
@@ -262,6 +266,10 @@ export async function launchInstantSession(
         workspaceId,
         repository: input.project.repository,
         branch,
+        repoProvider: gitSource.repoProvider,
+        cloneUrl: gitSource.cloneUrl,
+        repositoryHost: gitSource.repositoryHost,
+        repositoryPath: gitSource.repositoryPath,
         callbackToken: workspaceCallbackToken,
         lightweight: true,
       })
@@ -315,6 +323,21 @@ export async function launchInstantSession(
       .set({ dispatchedAt: new Date().toISOString(), updatedAt: new Date().toISOString() })
       .where(eq(schema.workspaces.id, workspaceId));
 
+    const totalDurationMs = Date.now() - startedAt;
+    const preContainerDurationMs = launchStart - startedAt;
+    const timings = {
+      totalDurationMs,
+      preContainerDurationMs,
+      containerLaunchDurationMs: launchDurationMs,
+      setupDurationMs: totalDurationMs,
+      installDurationMs: launchDurationMs,
+      agentReadyDurationMs,
+      workspaceCreateDurationMs,
+      acpSessionCreateDurationMs,
+      acpSessionStartDurationMs,
+    };
+    log.info('instant_session.cold_start_complete', { ...phaseDetail, ...timings });
+
     return {
       nodeId: node.id,
       workspaceId,
@@ -327,14 +350,7 @@ export async function launchInstantSession(
       processId: containerId,
       runtime: 'cf-container',
       workspaceUrl: `https://ws-${workspaceId.toLowerCase()}.${env.BASE_DOMAIN}`,
-      timings: {
-        setupDurationMs: Date.now() - startedAt,
-        installDurationMs: launchDurationMs,
-        agentReadyDurationMs,
-        workspaceCreateDurationMs,
-        acpSessionCreateDurationMs,
-        acpSessionStartDurationMs,
-      },
+      timings,
     };
   } catch (err) {
     const message = errorMessage(err);

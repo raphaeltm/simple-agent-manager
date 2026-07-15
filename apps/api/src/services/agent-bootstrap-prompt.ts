@@ -39,10 +39,3 @@ export function buildSamBootstrapInstructions(_input: {
     `Do not proceed until you have called this tool and read its response.`
   );
 }
-
-export function buildAgentStartPromptPayload(input: BuildVisibleInitialPromptInput & {
-  contextType: McpInstructionContextType;
-}): string {
-  const visiblePrompt = buildVisibleInitialPrompt(input);
-  return `${visiblePrompt}\n\n---\n\n${buildSamBootstrapInstructions({ contextType: input.contextType })}`;
-}

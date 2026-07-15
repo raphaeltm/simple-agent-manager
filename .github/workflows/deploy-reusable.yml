@@ -122,7 +122,7 @@ jobs:
         uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
 
       - name: Setup Node.js
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'pnpm'
@@ -358,7 +358,9 @@ jobs:
           HETZNER_BASE_IMAGE: ${{ vars.HETZNER_BASE_IMAGE }}
           ARTIFACTS_BINDING_ENABLED: ${{ vars.ARTIFACTS_BINDING_ENABLED }}
           CF_CONTAINER_ENABLED: ${{ vars.CF_CONTAINER_ENABLED }}
+          CF_CONTAINER_SLEEP_AFTER: ${{ vars.CF_CONTAINER_SLEEP_AFTER }}
           CF_CONTAINER_PORT_READY_TIMEOUT_MS: ${{ vars.CF_CONTAINER_PORT_READY_TIMEOUT_MS }}
+          CF_CONTAINER_WAKE_TIMEOUT_MS: ${{ vars.CF_CONTAINER_WAKE_TIMEOUT_MS }}
           CF_CONTAINER_VM_AGENT_PORT: ${{ vars.CF_CONTAINER_VM_AGENT_PORT }}
           SANDBOX_ENABLED: ${{ vars.SANDBOX_ENABLED }}
           SANDBOX_EXEC_TIMEOUT_MS: ${{ vars.SANDBOX_EXEC_TIMEOUT_MS }}
@@ -447,6 +449,24 @@ jobs:
           VITE_API_URL: https://api.${{ vars.BASE_DOMAIN }}
           VITE_PUBLIC_WEBSITE_URL: ${{ vars.PUBLIC_WEBSITE_URL || '' }}
           VITE_FEATURE_MULTI_TERMINAL: 'true'
+
+      # Bake the deployment-built vm-agent before Wrangler builds the raw container.
+      - name: Setup Go for Container Runtime
+        if: ${{ inputs.dry_run != true }}
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Prepare Versioned VM Agent Container Artifact
+        if: ${{ inputs.dry_run != true }}
+        run: |
+          BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          make -C packages/vm-agent prepare-container VERSION="$GITHUB_SHA" BUILD_DATE="$BUILD_DATE"
+          cat apps/api/container-artifacts/vm-agent-version.json
+          echo "### CF Container runtime artifact" >> "$GITHUB_STEP_SUMMARY"
+          echo '```json' >> "$GITHUB_STEP_SUMMARY"
+          cat apps/api/container-artifacts/vm-agent-version.json >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
 
       # Deploy API worker first (without tail_consumers on first deploy)
       - name: Deploy API Worker
@@ -711,6 +731,11 @@ jobs:
           SECRET_JWT_PUBLIC_KEY: ${{ secrets.JWT_PUBLIC_KEY }}
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_LOGIN_CLIENT_ID: ${{ secrets.GOOGLE_LOGIN_CLIENT_ID }}
+          GOOGLE_LOGIN_CLIENT_SECRET: ${{ secrets.GOOGLE_LOGIN_CLIENT_SECRET }}
+          GITLAB_HOST: ${{ secrets.GITLAB_HOST }}
+          GITLAB_CLIENT_ID: ${{ secrets.GITLAB_CLIENT_ID }}
+          GITLAB_CLIENT_SECRET: ${{ secrets.GITLAB_CLIENT_SECRET }}
           BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
           CREDENTIAL_ENCRYPTION_KEY: ${{ secrets.CREDENTIAL_ENCRYPTION_KEY }}
           GH_WEBHOOK_SECRET: ${{ secrets.GH_WEBHOOK_SECRET }}
@@ -757,15 +782,13 @@ jobs:
       # ========================================
       # Phase 4: VM Agent
       # ========================================
-      - name: Setup Go
-        if: ${{ inputs.dry_run != true }}
-        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
-        with:
-          go-version: ${{ env.GO_VERSION }}
-
       - name: Build VM Agent
         if: ${{ inputs.dry_run != true && inputs.skip_agent != true }}
-        run: make -C packages/vm-agent build-all
+        # Pin VERSION to the deploy commit so R2 binaries report the same
+        # version string as the container-baked binary (prepare-container above).
+        run: |
+          BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          make -C packages/vm-agent build-all VERSION="$GITHUB_SHA" BUILD_DATE="$BUILD_DATE"
 
       - name: Upload VM Agent Binaries
         if: ${{ inputs.dry_run != true && inputs.skip_agent != true }}

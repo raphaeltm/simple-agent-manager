@@ -7,6 +7,7 @@ import {
   asPromptResult,
   asToolCallPatchUpdate,
   asToolCallUpdate,
+  getSessionMessageOrigin,
   getSessionUpdate,
   getTextContent,
   isAgentCrashReport,
@@ -62,7 +63,11 @@ export type {
  */
 export function useAcpMessages(): AcpMessagesHandle {
   const [items, setItems] = useState<ConversationItem[]>([]);
-  const [usage, setUsage] = useState<TokenUsage>({ inputTokens: 0, outputTokens: 0, totalTokens: 0 });
+  const [usage, setUsage] = useState<TokenUsage>({
+    inputTokens: 0,
+    outputTokens: 0,
+    totalTokens: 0,
+  });
   const [availableCommands, setAvailableCommands] = useState<SlashCommand[]>([]);
 
   // Track the last tool call index for efficient tool_call_update lookups.
@@ -72,19 +77,24 @@ export function useAcpMessages(): AcpMessagesHandle {
 
   const processMessage = useCallback((msg: AcpMessage) => {
     if (isAgentCrashReport(msg)) {
-      setItems((prev) => enforceItemCap([...prev, {
-        kind: 'agent_crash_report',
-        id: nextConversationItemId(),
-        agentType: msg.agentType,
-        recovered: msg.recovered,
-        message: msg.message,
-        attribution: msg.attribution,
-        stderr: msg.stderr,
-        stderrTruncated: msg.stderrTruncated,
-        suggestion: msg.suggestion,
-        recoveryError: msg.recoveryError,
-        timestamp: Date.parse(msg.timestamp) || Date.now(),
-      }]));
+      setItems((prev) =>
+        enforceItemCap([
+          ...prev,
+          {
+            kind: 'agent_crash_report',
+            id: nextConversationItemId(),
+            agentType: msg.agentType,
+            recovered: msg.recovered,
+            message: msg.message,
+            attribution: msg.attribution,
+            stderr: msg.stderr,
+            stderrTruncated: msg.stderrTruncated,
+            suggestion: msg.suggestion,
+            recoveryError: msg.recoveryError,
+            timestamp: Date.parse(msg.timestamp) || Date.now(),
+          },
+        ])
+      );
       return;
     }
 
@@ -94,6 +104,7 @@ export function useAcpMessages(): AcpMessagesHandle {
       if (!update) return;
 
       const now = Date.now();
+      const messageOrigin = getSessionMessageOrigin(msg.params);
 
       switch (update.sessionUpdate) {
         case 'agent_message_chunk': {
@@ -104,9 +115,10 @@ export function useAcpMessages(): AcpMessagesHandle {
               (item) => item.kind === 'agent_message' && (item as AgentMessage).streaming,
               (item) => {
                 const am = item as AgentMessage;
-                const newText = am.text.length + text.length > MAX_ITEM_TEXT_LENGTH
-                  ? am.text // Silently stop appending when cap reached
-                  : am.text + text;
+                const newText =
+                  am.text.length + text.length > MAX_ITEM_TEXT_LENGTH
+                    ? am.text // Silently stop appending when cap reached
+                    : am.text + text;
                 return { ...am, text: newText };
               },
               () => ({
@@ -115,8 +127,8 @@ export function useAcpMessages(): AcpMessagesHandle {
                 text,
                 streaming: true,
                 timestamp: now,
-              }),
-            ),
+              })
+            )
           );
           break;
         }
@@ -129,9 +141,8 @@ export function useAcpMessages(): AcpMessagesHandle {
               (item) => item.kind === 'thinking' && (item as ThinkingItem).active,
               (item) => {
                 const ti = item as ThinkingItem;
-                const newText = ti.text.length + text.length > MAX_ITEM_TEXT_LENGTH
-                  ? ti.text
-                  : ti.text + text;
+                const newText =
+                  ti.text.length + text.length > MAX_ITEM_TEXT_LENGTH ? ti.text : ti.text + text;
                 return { ...ti, text: newText };
               },
               () => ({
@@ -140,8 +151,8 @@ export function useAcpMessages(): AcpMessagesHandle {
                 text,
                 active: true,
                 timestamp: now,
-              }),
-            ),
+              })
+            )
           );
           break;
         }
@@ -164,19 +175,27 @@ export function useAcpMessages(): AcpMessagesHandle {
               for (let i = prev.length - 1; i >= Math.max(0, prev.length - 5); i--) {
                 const item = prev[i];
                 if (!item) continue;
-                if (item.kind === 'user_message' && item.text === text) {
+                if (
+                  item.kind === 'user_message' &&
+                  item.text === text &&
+                  item.origin === messageOrigin
+                ) {
                   return prev; // Already present — skip duplicate
                 }
                 // Stop scanning once we hit a non-user item (agent response
                 // or tool call means the user message is from a prior turn).
                 if (item.kind !== 'user_message') break;
               }
-              return enforceItemCap([...prev, {
-                kind: 'user_message',
-                id: nextConversationItemId(),
-                text,
-                timestamp: now,
-              }]);
+              return enforceItemCap([
+                ...prev,
+                {
+                  kind: 'user_message',
+                  id: nextConversationItemId(),
+                  text,
+                  timestamp: now,
+                  origin: messageOrigin,
+                },
+              ]);
             });
           }
           break;
@@ -262,7 +281,10 @@ export function useAcpMessages(): AcpMessagesHandle {
             const existing = prev.findIndex((i) => i.kind === 'plan');
             const planItem: PlanItem = {
               kind: 'plan',
-              id: existing >= 0 ? (prev[existing]?.id ?? nextConversationItemId()) : nextConversationItemId(),
+              id:
+                existing >= 0
+                  ? (prev[existing]?.id ?? nextConversationItemId())
+                  : nextConversationItemId(),
               entries: plan.entries ?? [],
               timestamp: now,
             };
@@ -303,12 +325,15 @@ export function useAcpMessages(): AcpMessagesHandle {
         default: {
           // Unknown/unsupported update type — render as raw fallback
           setItems((prev) =>
-            enforceItemCap([...prev, {
-              kind: 'raw_fallback',
-              id: nextConversationItemId(),
-              data: update,
-              timestamp: now,
-            }]),
+            enforceItemCap([
+              ...prev,
+              {
+                kind: 'raw_fallback',
+                id: nextConversationItemId(),
+                data: update,
+                timestamp: now,
+              },
+            ])
           );
           break;
         }
@@ -336,12 +361,17 @@ export function useAcpMessages(): AcpMessagesHandle {
   }, []);
 
   const addUserMessage = useCallback((text: string) => {
-    setItems((prev) => enforceItemCap([...prev, {
-      kind: 'user_message',
-      id: nextConversationItemId(),
-      text,
-      timestamp: Date.now(),
-    }]));
+    setItems((prev) =>
+      enforceItemCap([
+        ...prev,
+        {
+          kind: 'user_message',
+          id: nextConversationItemId(),
+          text,
+          timestamp: Date.now(),
+        },
+      ])
+    );
   }, []);
 
   const clear = useCallback(() => {
@@ -357,5 +387,13 @@ export function useAcpMessages(): AcpMessagesHandle {
     lastToolCallIndexRef.current = -1;
   }, []);
 
-  return { items, usage, availableCommands, processMessage, addUserMessage, clear, prepareForReplay };
+  return {
+    items,
+    usage,
+    availableCommands,
+    processMessage,
+    addUserMessage,
+    clear,
+    prepareForReplay,
+  };
 }

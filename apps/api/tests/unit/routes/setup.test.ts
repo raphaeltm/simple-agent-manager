@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Env } from '../../../src/env';
 import { AppError } from '../../../src/middleware/error';
 import { setupRoutes } from '../../../src/routes/setup';
-import { generateEncryptionKey } from '../../../src/services/encryption';
+import { decrypt, generateEncryptionKey } from '../../../src/services/encryption';
 
 function createD1(sqlite: Database.Database): D1Database {
   return {
@@ -28,6 +28,20 @@ function createD1(sqlite: Database.Database): D1Database {
           return { meta: { changes: result.changes } };
         },
       };
+    },
+    async batch(statements: D1PreparedStatement[]) {
+      sqlite.exec('BEGIN');
+      const results: D1Result[] = [];
+      try {
+        for (const statement of statements) {
+          results.push(await statement.run());
+        }
+        sqlite.exec('COMMIT');
+        return results;
+      } catch (err) {
+        sqlite.exec('ROLLBACK');
+        throw err;
+      }
     },
   } as unknown as D1Database;
 }
@@ -201,4 +215,225 @@ describe('setup routes', () => {
     ).first<{ value: string }>();
     expect(row?.value).toBe('true');
   });
+
+  it('completes setup with valid GitLab login config', async () => {
+    const env = createEnv();
+    const res = await createApp().request(
+      '/api/setup/complete',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': '198.51.100.12' },
+        body: JSON.stringify({
+          token: 'setup-token',
+          config: {
+            gitlab: {
+              host: 'https://gitlab.example.com',
+              clientId: 'gitlab-client-id',
+              clientSecret: 'gitlab-client-secret',
+            },
+          },
+        }),
+      },
+      env,
+    );
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      completed: true,
+      status: {
+        integrations: {
+          gitlabOAuth: { configured: true, label: 'set here' },
+        },
+      },
+    });
+  });
+
+  it('rejects invalid GitLab host values', async () => {
+    const res = await createApp().request(
+      '/api/setup/config',
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': '198.51.100.13' },
+        body: JSON.stringify({
+          token: 'setup-token',
+          config: {
+            gitlab: {
+              host: 'http://gitlab.example.com/group',
+              clientId: 'gitlab-client-id',
+              clientSecret: 'gitlab-client-secret',
+            },
+          },
+        }),
+      },
+      createEnv(),
+    );
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({
+      error: 'BAD_REQUEST',
+      details: {
+        errors: [
+          'GitLab host must use HTTPS unless it points to localhost',
+          'GitLab host must not include credentials, a path, query string, or fragment',
+        ],
+      },
+    });
+  });
+
+  it('rejects invalid setup token without writing config', async () => {
+    const env = createEnv();
+    const res = await createApp().request(
+      '/api/setup/complete',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': '198.51.100.14' },
+        body: JSON.stringify({
+          token: 'wrong-token',
+          config: { google: { clientId: 'google-client-id', clientSecret: 'google-client-secret' } },
+        }),
+      },
+      env,
+    );
+
+    expect(res.status).toBe(401);
+    await expect(res.json()).resolves.toMatchObject({ error: 'UNAUTHORIZED' });
+    const written = await env.DATABASE.prepare(
+      "SELECT value FROM platform_settings WHERE key = 'integration.google.clientId'"
+    ).first<{ value: string }>();
+    expect(written).toBeUndefined();
+  });
+
+  it('does not persist partial config when setup completion validation fails', async () => {
+    const env = createEnv({ GITHUB_CLIENT_ID: undefined, GITHUB_CLIENT_SECRET: undefined });
+    const res = await createApp().request(
+      '/api/setup/complete',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': '198.51.100.15' },
+        body: JSON.stringify({ token: 'setup-token', config: { github: { appId: '12345' } } }),
+      },
+      env,
+    );
+
+    expect(res.status).toBe(400);
+    const appId = await env.DATABASE.prepare(
+      "SELECT value FROM platform_settings WHERE key = 'integration.github.appId'"
+    ).first<{ value: string }>();
+    const completed = await env.DATABASE.prepare(
+      "SELECT value FROM platform_settings WHERE key = 'setup.completed'"
+    ).first<{ value: string }>();
+    expect(appId).toBeUndefined();
+    expect(completed).toBeUndefined();
+  });
+
+
+  it('rolls back setup config when the transactional completion write fails', async () => {
+    const env = createEnv();
+    const originalPrepare = env.DATABASE.prepare.bind(env.DATABASE);
+    env.DATABASE.prepare = ((sql: string) => {
+      const statement = originalPrepare(sql);
+      const originalBind = statement.bind.bind(statement);
+      statement.bind = ((...values: unknown[]) => {
+        const bound = originalBind(...values);
+        if (values[0] === 'setup.completed') {
+          const originalRun = bound.run.bind(bound);
+          bound.run = async () => {
+            await originalRun();
+            throw new Error('forced completion write failure');
+          };
+        }
+        return bound;
+      }) as D1PreparedStatement['bind'];
+      return statement;
+    }) as D1Database['prepare'];
+
+    const res = await createApp().request(
+      '/api/setup/complete',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': '198.51.100.17' },
+        body: JSON.stringify({
+          token: 'setup-token',
+          config: { google: { clientId: 'google-client-id', clientSecret: 'google-client-secret' } },
+        }),
+      },
+      env,
+    );
+
+    expect(res.status).toBe(500);
+    const clientId = await env.DATABASE.prepare(
+      "SELECT value FROM platform_settings WHERE key = 'integration.google.clientId'"
+    ).first<{ value: string }>();
+    const completed = await env.DATABASE.prepare(
+      "SELECT value FROM platform_settings WHERE key = 'setup.completed'"
+    ).first<{ value: string }>();
+    expect(clientId).toBeUndefined();
+    expect(completed).toBeUndefined();
+  });
+
+  it('updates the existing platform integration secret row during forced setup completion', async () => {
+    const env = createEnv({ SETUP_FORCE: 'true' });
+    const app = createApp();
+
+    const first = await app.request(
+      '/api/setup/complete',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': '198.51.100.18' },
+        body: JSON.stringify({
+          token: 'setup-token',
+          config: { google: { clientId: 'google-client-id', clientSecret: 'google-client-secret-1' } },
+        }),
+      },
+      env,
+    );
+    expect(first.status).toBe(200);
+
+    const second = await app.request(
+      '/api/setup/complete',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': '198.51.100.19' },
+        body: JSON.stringify({
+          token: 'setup-token',
+          config: { google: { clientId: 'google-client-id', clientSecret: 'google-client-secret-2' } },
+        }),
+      },
+      env,
+    );
+    expect(second.status).toBe(200);
+
+    const rows = await env.DATABASE.prepare(
+      `SELECT encrypted_token AS encryptedToken, iv FROM platform_credentials
+       WHERE credential_type = 'platform-integration'
+         AND provider = 'google'
+         AND credential_kind = 'google.clientSecret'`
+    ).all<{ encryptedToken: string; iv: string }>();
+
+    expect(rows.results).toHaveLength(1);
+    await expect(decrypt(rows.results[0].encryptedToken, rows.results[0].iv, env.ENCRYPTION_KEY)).resolves.toBe(
+      'google-client-secret-2'
+    );
+  });
+
+
+  it('treats replayed setup completion as closed without changing public response shape', async () => {
+    const env = createEnv();
+    const request = {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': '198.51.100.16' },
+      body: JSON.stringify({
+        token: 'setup-token',
+        config: { google: { clientId: 'google-client-id', clientSecret: 'google-client-secret' } },
+      }),
+    };
+
+    const first = await createApp().request('/api/setup/complete', request, env);
+    expect(first.status).toBe(200);
+
+    const second = await createApp().request('/api/setup/complete', request, env);
+    expect(second.status).toBe(410);
+    await expect(second.json()).resolves.toMatchObject({ error: 'SETUP_CLOSED' });
+  });
+
 });

@@ -84,6 +84,22 @@ user-invocable: false
 - `PUT /api/notifications/preferences` — Update a notification preference
 - `GET /api/notifications/ws` — WebSocket upgrade for real-time notification delivery
 
+## Automation Triggers (Project Scoped)
+
+- `POST /api/projects/:projectId/triggers` — Create a cron, GitHub, or generic webhook trigger. Webhook creation requires `agentProfileId` and `webhookConfig`; its response includes a one-time `webhookCredential`.
+- `GET /api/projects/:projectId/triggers` — List triggers with safe source configuration. Webhook tokens are redacted to `tokenLastFour`.
+- `GET /api/projects/:projectId/triggers/:triggerId` — Get trigger details and recent execution history.
+- `PATCH /api/projects/:projectId/triggers/:triggerId` — Update common trigger settings or source-specific webhook configuration.
+- `DELETE /api/projects/:projectId/triggers/:triggerId` — Delete a trigger and cascading source configuration, delivery audit, and execution history.
+- `POST /api/projects/:projectId/triggers/:triggerId/test` — Preview the cron template context.
+- `POST /api/projects/:projectId/triggers/:triggerId/run` — Submit a manual trigger execution. Webhook triggers accept optional `{ payload, headers }` preview context.
+- `POST /api/projects/:projectId/triggers/:triggerId/webhook/preview` — Render a webhook template and evaluate configured filters without creating an execution.
+- `POST /api/projects/:projectId/triggers/:triggerId/webhook/rotate` — Rotate the webhook bearer token and return the replacement once.
+- `GET /api/projects/:projectId/triggers/:triggerId/webhook/deliveries` — List redacted webhook delivery audit metadata (`limit`, `cursor`).
+- `POST /api/webhooks/ingest` — Public generic webhook ingress. Requires `Authorization: Bearer <token>`, `Content-Type: application/json`, and a JSON object body. Supports optional `Idempotency-Key`.
+
+The MCP `create_trigger` tool intentionally creates cron triggers only. Generic webhook creation, filter management, preview, and credential rotation use the authenticated UI/REST surface so one-time credentials can be presented safely.
+
 ## VM Communication (Callback Endpoints)
 
 - `POST /api/nodes/:id/ready` — Node Agent ready callback

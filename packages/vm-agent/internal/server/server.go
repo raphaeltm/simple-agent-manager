@@ -10,6 +10,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -143,6 +144,10 @@ type WorkspaceRuntime struct {
 	ID                     string
 	Repository             string
 	Branch                 string
+	RepoProvider           string
+	CloneURL               string
+	RepositoryHost         string
+	RepositoryPath         string
 	Status                 string
 	CreatedAt              time.Time
 	UpdatedAt              time.Time
@@ -1027,6 +1032,8 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /workspaces/{workspaceId}/agent-sessions/{sessionId}/suspend", s.handleSuspendAgentSession)
 	mux.HandleFunc("POST /workspaces/{workspaceId}/agent-sessions/{sessionId}/resume", s.handleResumeAgentSession)
 	mux.HandleFunc("POST /workspaces/{workspaceId}/agent-sessions/{sessionId}/prompt", s.handleSendPrompt)
+	mux.HandleFunc("POST /workspaces/{workspaceId}/agent-sessions/{sessionId}/hibernate", s.handleHibernateAgentSession)
+	mux.HandleFunc("POST /workspaces/{workspaceId}/agent-sessions/{sessionId}/restore", s.handleRestoreAgentSession)
 	mux.HandleFunc("GET /workspaces/{workspaceId}/tabs", s.handleListTabs)
 
 	// Git integration (browser-authenticated via workspace session/token)
@@ -1270,6 +1277,7 @@ func (a *messageReporterAdapter) Enqueue(entry acp.MessageReportEntry) error {
 		Content:      entry.Content,
 		ToolMetadata: entry.ToolMetadata,
 		Timestamp:    entry.Timestamp,
+		Origin:       entry.Origin,
 	})
 }
 
@@ -1480,6 +1488,11 @@ type gitPushResult struct {
 	Error                 string
 }
 
+type gitlabMergeRequestResponse struct {
+	WebURL string `json:"web_url"`
+	IID    int    `json:"iid"`
+}
+
 func (s *Server) runWorkspaceGitCommand(containerID, workDir, user string, args ...string) (string, error) {
 	timeout := s.config.GitExecTimeout
 	if timeout <= 0 {
@@ -1560,12 +1573,142 @@ func (s *Server) gitPushWorkspaceChanges(workspaceID string, skipPR bool) gitPus
 
 	// Try to create a PR via gh (best-effort) — skip in conversation mode
 	if !skipPR {
-		prURL, prNumber := s.tryCreatePR(containerID, workDir, user)
+		prURL, prNumber := s.tryCreateReviewRequest(workspaceID, containerID, workDir, user, result.BranchName)
 		result.PrURL = prURL
 		result.PrNumber = prNumber
 	}
 
 	return result
+}
+
+func (s *Server) tryCreateReviewRequest(workspaceID, containerID, workDir, user, sourceBranch string) (string, int) {
+	if runtime, ok := s.getWorkspaceRuntime(workspaceID); ok {
+		switch strings.ToLower(strings.TrimSpace(runtime.RepoProvider)) {
+		case "gitlab":
+			return s.tryCreateGitLabMergeRequest(runtime, sourceBranch)
+		case "artifacts":
+			slog.Info("Review request creation skipped for Artifacts workspace", "workspaceID", workspaceID)
+			return "", 0
+		}
+	}
+	return s.tryCreatePR(containerID, workDir, user)
+}
+
+func (s *Server) tryCreateGitLabMergeRequest(runtime *WorkspaceRuntime, sourceBranch string) (string, int) {
+	if runtime == nil {
+		return "", 0
+	}
+	host := strings.TrimSpace(runtime.RepositoryHost)
+	repositoryPath := strings.TrimSpace(runtime.RepositoryPath)
+	targetBranch := strings.TrimSpace(runtime.Branch)
+	if host == "" || repositoryPath == "" || sourceBranch == "" || targetBranch == "" {
+		slog.Warn("GitLab MR creation skipped: repository metadata missing", "workspaceID", runtime.ID)
+		return "", 0
+	}
+
+	// Bound the entire MR flow (token fetch + create + 409 lookup) so a dead or
+	// slow GitLab host cannot stall task completion. Mirrors tryCreatePR.
+	timeout := s.config.GitExecTimeout
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	resp, err := s.fetchGitTokenResponseForWorkspace(ctx, runtime.ID, "")
+	if err != nil {
+		slog.Warn("GitLab MR creation skipped: token fetch failed", "workspaceID", runtime.ID, "error", err)
+		return "", 0
+	}
+
+	form := url.Values{}
+	form.Set("source_branch", sourceBranch)
+	form.Set("target_branch", targetBranch)
+	form.Set("title", fmt.Sprintf("SAM task changes from %s", sourceBranch))
+	endpoint := fmt.Sprintf(
+		"https://%s/api/v4/projects/%s/merge_requests",
+		host,
+		url.PathEscape(repositoryPath),
+	)
+	req, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodPost,
+		endpoint,
+		strings.NewReader(form.Encode()),
+	)
+	if err != nil {
+		slog.Warn("GitLab MR create request build failed", "workspaceID", runtime.ID, "error", err)
+		return "", 0
+	}
+	req.Header.Set("Authorization", "Bearer "+resp.Token)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "application/json")
+
+	httpResp, err := s.controlPlaneHTTPClient(0).Do(req)
+	if err != nil {
+		slog.Warn("GitLab MR create failed", "workspaceID", runtime.ID, "error", err)
+		return "", 0
+	}
+	defer httpResp.Body.Close()
+
+	body, _ := io.ReadAll(io.LimitReader(httpResp.Body, 8*1024))
+	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
+		if httpResp.StatusCode == http.StatusConflict {
+			if existingURL, existingIID := s.getExistingGitLabMergeRequest(ctx, runtime, host, repositoryPath, sourceBranch, targetBranch, resp.Token); existingURL != "" {
+				return existingURL, existingIID
+			}
+		}
+		slog.Warn("GitLab MR create returned non-success", "workspaceID", runtime.ID, "status", httpResp.StatusCode, "body", redactTaskCallbackDiagnosticText(strings.TrimSpace(string(body))))
+		return "", 0
+	}
+	var payload gitlabMergeRequestResponse
+	if err := json.Unmarshal(body, &payload); err != nil {
+		slog.Warn("GitLab MR create response decode failed", "workspaceID", runtime.ID, "error", err)
+		return "", 0
+	}
+	return payload.WebURL, payload.IID
+}
+
+func (s *Server) getExistingGitLabMergeRequest(ctx context.Context, runtime *WorkspaceRuntime, host, repositoryPath, sourceBranch, targetBranch, token string) (string, int) {
+	params := url.Values{}
+	params.Set("state", "opened")
+	params.Set("source_branch", sourceBranch)
+	params.Set("target_branch", targetBranch)
+	params.Set("per_page", "1")
+	endpoint := fmt.Sprintf(
+		"https://%s/api/v4/projects/%s/merge_requests?%s",
+		host,
+		url.PathEscape(repositoryPath),
+		params.Encode(),
+	)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		slog.Warn("GitLab MR lookup request build failed", "workspaceID", runtime.ID, "error", err)
+		return "", 0
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "application/json")
+
+	httpResp, err := s.controlPlaneHTTPClient(0).Do(req)
+	if err != nil {
+		slog.Warn("GitLab MR lookup failed", "workspaceID", runtime.ID, "error", err)
+		return "", 0
+	}
+	defer httpResp.Body.Close()
+	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
+		slog.Warn("GitLab MR lookup returned non-success", "workspaceID", runtime.ID, "status", httpResp.StatusCode)
+		return "", 0
+	}
+	body, _ := io.ReadAll(io.LimitReader(httpResp.Body, 8*1024))
+	var payload []gitlabMergeRequestResponse
+	if err := json.Unmarshal(body, &payload); err != nil {
+		slog.Warn("GitLab MR lookup response decode failed", "workspaceID", runtime.ID, "error", err)
+		return "", 0
+	}
+	if len(payload) == 0 {
+		return "", 0
+	}
+	return payload[0].WebURL, payload[0].IID
 }
 
 // tryCreatePR attempts to create a GitHub PR using gh CLI inside the container.

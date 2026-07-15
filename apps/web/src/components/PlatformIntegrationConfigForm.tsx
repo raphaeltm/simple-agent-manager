@@ -23,6 +23,7 @@ interface PlatformIntegrationConfigFormProps {
 }
 
 const FIELD_LABELS = {
+  host: 'Host URL',
   clientId: 'Client ID',
   clientSecret: 'Client secret',
   appId: 'App ID',
@@ -60,7 +61,7 @@ export function PlatformIntegrationConfigForm({
 
   return (
     <form className="space-y-4" onSubmit={handleSubmit} data-testid="platform-config-form">
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid gap-4 lg:grid-cols-3">
         <IntegrationSection
           title="GitHub OAuth"
           description="Enables GitHub sign-in and user GitHub token refresh."
@@ -101,6 +102,35 @@ export function PlatformIntegrationConfigForm({
             type="password"
             value={values['google.clientSecret'] ?? ''}
             field={status.integrations.googleOAuth.fields.clientSecret}
+            onChange={updateValue}
+          />
+        </IntegrationSection>
+
+        <IntegrationSection
+          title="GitLab OAuth"
+          description="Stores the GitLab OAuth application for GitLab sign-in."
+          status={status.integrations.gitlabOAuth}
+        >
+          <TextField
+            name="gitlab.host"
+            label={FIELD_LABELS.host}
+            value={values['gitlab.host'] ?? ''}
+            field={status.integrations.gitlabOAuth.fields.host}
+            onChange={updateValue}
+          />
+          <TextField
+            name="gitlab.clientId"
+            label={FIELD_LABELS.clientId}
+            value={values['gitlab.clientId'] ?? ''}
+            field={status.integrations.gitlabOAuth.fields.clientId}
+            onChange={updateValue}
+          />
+          <TextField
+            name="gitlab.clientSecret"
+            label={FIELD_LABELS.clientSecret}
+            type="password"
+            value={values['gitlab.clientSecret'] ?? ''}
+            field={status.integrations.gitlabOAuth.fields.clientSecret}
             onChange={updateValue}
           />
         </IntegrationSection>
@@ -310,7 +340,7 @@ function SourceBadge({
 
 function sourceLabel(field?: PlatformConfigFieldStatus): string {
   if (field?.source === 'runtime') return 'set here';
-  if (field?.source === 'environment') return 'set via GitHub secret';
+  if (field?.source === 'environment') return 'set via environment fallback';
   return 'not configured';
 }
 
@@ -328,6 +358,11 @@ function buildConfig(values: FormValues): PlatformIntegrationConfigInput {
     if (key.startsWith('google.')) {
       const field = key.slice('google.'.length) as keyof NonNullable<PlatformIntegrationConfigInput['google']>;
       config.google = { ...config.google, [field]: trimmed };
+    }
+
+    if (key.startsWith('gitlab.')) {
+      const field = key.slice('gitlab.'.length) as keyof NonNullable<PlatformIntegrationConfigInput['gitlab']>;
+      config.gitlab = { ...config.gitlab, [field]: trimmed };
     }
   }
   return config;

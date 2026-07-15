@@ -80,6 +80,8 @@ Fix the race condition in workspace cleanup.
 Execute this task using the /do skill.
 ```
 
+Do **not** start the dispatched task description with `/do` or any other slash command. Slash-command syntax is not portable across agent runtimes: Codex treats a leading `/do` as a Codex CLI command, rejects the first prompt turn as an unknown command, and may never process SAM-injected bootstrap instructions such as `get_instructions`. Always write the task in normal prose and include the `/do` requirement as a sentence, preferably exactly: `Execute this task using the /do skill.`
+
 The receiving agent will then follow the full `/do` workflow: research, task file creation, worktree setup, implementation, quality checks, specialist review, staging deployment, and PR merge.
 
 ### Verify Dispatch Succeeded
@@ -91,6 +93,7 @@ Verification must confirm all of:
 - The task/session actually started and is not failed, stuck queued, or missing
 - The created task title/summary matches the intended work, not a generic or hallucinated title
 - The receiving session is using the requested agent/profile/skill and task mode when those are observable, especially `/do` for implementation work
+- The `/do` instruction survived as prose and the task description does not begin with `/do` or any other slash command
 - The task description still contains the critical constraints you intended to pass along, such as "do not merge", "draft PR", required branch, output branch, required skill, or required profile
 
 If the session failed immediately, never started, launched under the wrong profile/skill/mode, or lost critical constraints, do not wait on it. Re-dispatch with the corrected task/profile/skill/mode or report the dispatch failure with exact status evidence.

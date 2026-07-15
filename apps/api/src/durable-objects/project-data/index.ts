@@ -115,7 +115,7 @@ export class ProjectData extends DurableObject<Env> {
 
   async persistMessageBatch(
     sessionId: string,
-    batchMessages: Array<{ messageId: string; role: string; content: string; toolMetadata: string | null; timestamp: string; sequence?: number }>
+    batchMessages: Array<{ messageId: string; role: string; content: string; toolMetadata: string | null; timestamp: string; sequence?: number; origin?: string | null }>
   ): Promise<messagePersistence.MessageBatchPersistenceResult> {
     return messagePersistence.persistMessageBatchWithSideEffects(this.sql, this.env, this.messagePersistenceHooks(), sessionId, batchMessages);
   }
