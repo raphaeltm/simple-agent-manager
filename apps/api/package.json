@@ -55,7 +55,7 @@
     "drizzle-kit": "0.26.2",
     "eslint": "catalog:",
     "execa": "catalog:",
-    "fast-check": "4.7.0",
+    "fast-check": "4.9.0",
     "typescript": "catalog:",
     "vitest": "catalog:",
     "wrangler": "catalog:"
