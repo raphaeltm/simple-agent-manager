@@ -2,7 +2,6 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { CODEX_ACP_WRAPPER_PACKAGE } from '@simple-agent-manager/shared';
 import { describe, expect, it } from 'vitest';
 
 const apiPackageRoot = join(fileURLToPath(new URL('.', import.meta.url)), '../..');
@@ -14,6 +13,17 @@ function read(relPath: string): string {
 
 function readPackage(relPath: string): string {
   return readFileSync(join(apiPackageRoot, relPath), 'utf8');
+}
+
+function getPinnedAgentPackage(agentType: string): string {
+  const manifest = JSON.parse(
+    readFileSync(join(apiPackageRoot, '../../packages/shared/src/agent-install-manifest.json'), 'utf8')
+  ) as Array<{ agentType: string; package: string; version: string }>;
+  const entry = manifest.find((candidate) => candidate.agentType === agentType);
+  if (!entry) {
+    throw new Error(`Missing agent install manifest entry for ${agentType}`);
+  }
+  return `${entry.package}@${entry.version}`;
 }
 
 describe('cf-container runtime spike contracts', () => {
@@ -193,6 +203,7 @@ describe('cf-container runtime spike contracts', () => {
   it('uses a raw vm-agent container image for PR workflows', () => {
     const dockerfile = readPackage('Dockerfile.vm-agent-container');
     const bootstrap = readPackage('container-entrypoints/vm-agent-bootstrap.sh');
+    const codexACPWrapperPackage = getPinnedAgentPackage('openai-codex');
 
     expect(dockerfile).toContain('ENTRYPOINT ["/usr/local/bin/vm-agent-bootstrap"]');
     expect(dockerfile).toContain(
@@ -203,18 +214,12 @@ describe('cf-container runtime spike contracts', () => {
     );
     expect(dockerfile).toContain('githubcli-archive-keyring.gpg');
     expect(dockerfile).toContain('apt-get install -y --no-install-recommends gh');
-    expect(dockerfile).toContain(CODEX_ACP_WRAPPER_PACKAGE);
+    expect(dockerfile).toContain(codexACPWrapperPackage);
     const vmGateway = readFileSync(
       join(apiPackageRoot, '../../packages/vm-agent/internal/acp/gateway.go'),
       'utf8'
     );
-    const sharedCatalog = readFileSync(
-      join(apiPackageRoot, '../../packages/shared/src/agents.ts'),
-      'utf8'
-    );
-    expect(vmGateway).toContain('@agentclientprotocol/codex-acp@" + codexACPWrapperVersion');
-    expect(vmGateway).toContain(`codexACPWrapperVersion = "${CODEX_ACP_WRAPPER_PACKAGE.split('@').at(-1)}"`);
-    expect(sharedCatalog).toContain(`CODEX_ACP_WRAPPER_VERSION = '${CODEX_ACP_WRAPPER_PACKAGE.split('@').at(-1)}'`);
+    expect(vmGateway).toContain(`npm install -g ${codexACPWrapperPackage}`);
     expect(dockerfile).toContain('USER node');
     expect(dockerfile).toContain('chown -R node:node /workspaces /var/lib/vm-agent');
     expect(bootstrap).toContain('agent_bin="${VM_AGENT_BIN:-/usr/local/bin/vm-agent}"');
