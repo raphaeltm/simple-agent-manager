@@ -336,11 +336,17 @@ export function CompletionDock({
         </button>
       </div>
 
-      <Dialog isOpen={archiveConfirmOpen} onClose={handleCloseArchiveConfirm} maxWidth="sm">
-        <h3 id="dialog-title" className="text-base font-semibold text-fg-primary mb-2">
+      <Dialog
+        isOpen={archiveConfirmOpen}
+        onClose={handleCloseArchiveConfirm}
+        maxWidth="sm"
+        aria-labelledby="archive-conversation-title"
+        aria-describedby="archive-conversation-description"
+      >
+        <h3 id="archive-conversation-title" className="text-base font-semibold text-fg-primary mb-2">
           Archive conversation?
         </h3>
-        <p className="text-sm text-fg-muted mb-4">
+        <p id="archive-conversation-description" className="text-sm text-fg-muted mb-4">
           This will archive the conversation and stop the agent session. Any uncommitted workspace
           progress tied to this conversation may be lost. This action cannot be undone.
         </p>

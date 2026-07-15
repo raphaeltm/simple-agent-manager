@@ -1580,11 +1580,67 @@ describe('ProjectMessageView — inline idle indicator', () => {
     expect(screen.queryByRole('button', { name: 'Interrupt agent' })).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: 'Archive conversation' }));
-    expect(screen.getByRole('dialog')).toBeTruthy();
+    expect(screen.getByRole('dialog', { name: 'Archive conversation?' })).toBeTruthy();
     expect(onClose).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', { name: 'Archive Conversation' }));
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+
+  it('keeps complete-and-delete behind confirmation and surfaces completion errors', async () => {
+    const session = {
+      ...makeSession('sess-complete-error', 'active'),
+      task: {
+        id: 'task-complete-error',
+        status: 'in_progress',
+        taskMode: 'task' as const,
+        executionStep: null,
+        errorMessage: null,
+        outputBranch: null,
+        outputPrUrl: null,
+        outputSummary: null,
+        finalizedAt: null,
+      },
+    };
+    mocks.getChatSession.mockResolvedValue({
+      session,
+      messages: [makeMessage('m1', 'sess-complete-error', 'Working summary')],
+      hasMore: false,
+    });
+    mocks.updateProjectTaskStatus.mockRejectedValueOnce(new Error('Task transition denied'));
+    const onSessionMutated = vi.fn();
+
+    render(
+      <ProjectMessageView
+        projectId="proj-1"
+        sessionId="sess-complete-error"
+        onSessionMutated={onSessionMutated}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Show session details' })).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Show session details' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Complete' })).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Complete' }));
+    expect(screen.getByRole('dialog', { name: 'Mark task as complete?' })).toBeTruthy();
+    expect(mocks.updateProjectTaskStatus).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Complete & Delete' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Task transition denied')).toBeTruthy();
+    });
+    expect(mocks.updateProjectTaskStatus).toHaveBeenCalledWith('proj-1', 'task-complete-error', { toStatus: 'completed' });
+    expect(mocks.deleteWorkspace).not.toHaveBeenCalled();
+    expect(onSessionMutated).not.toHaveBeenCalled();
+    expect(screen.queryByRole('dialog', { name: 'Mark task as complete?' })).toBeNull();
   });
 
   it('does NOT show Archive control for idle task-mode session', async () => {
