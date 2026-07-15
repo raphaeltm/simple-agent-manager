@@ -50,7 +50,7 @@ To deploy your own SAM instance:
 1. **Fork** the [SAM repository](https://github.com/raphaeltm/simple-agent-manager)
 2. **Create a GitHub Environment** named `production` in your fork's Settings
 3. **Add the required secrets** — see the [Self-Hosting Guide](/docs/guides/self-hosting/) for the full list
-4. **Push to main** — deployment is automatic via GitHub Actions + Pulumi
+4. **Run Deploy Production** — in your fork, go to Actions → Deploy Production → Run workflow and choose `main`
 
 The deployment workflow:
 
@@ -59,6 +59,8 @@ The deployment workflow:
 - Builds and uploads VM Agent binaries
 - Runs database migrations
 - Verifies with a health check
+
+For future updates, sync upstream changes into your fork's `main` branch, then run **Deploy Production** again. Pushing to `main` alone does not update a self-hosted instance.
 
 For detailed step-by-step instructions, see the [Self-Hosting Guide](/docs/guides/self-hosting/).
 

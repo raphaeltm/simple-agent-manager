@@ -273,7 +273,7 @@ The VM Agent (`packages/vm-agent/`) is a Go binary running on each node:
 
 ```mermaid
 graph TD
-    PUSH["Push to main"] --> P1
+    TRIGGER["Deploy Production workflow"] --> P1
     P1["Phase 1: Infrastructure<br/>(Pulumi)"] --> P2
     P1 -.- P1D["D1, KV, R2, DNS records"]
     P2["Phase 2: Configuration"] --> P3
@@ -286,7 +286,7 @@ graph TD
     P5 -.- P5D["Health check polling"]
 ```
 
-CI runs lint, typecheck, tests, and build on every push. The deploy workflow only triggers on pushes to `main`.
+CI runs lint, typecheck, tests, and build on pull requests and on canonical-repository `main` pushes. In the canonical repository, Deploy Production runs after successful `main` CI. In self-host forks, `main` push CI is intentionally skipped, so operators update their instance by manually running **Deploy Production** on the fork's `main` branch.
 
 ## Key Design Decisions
 

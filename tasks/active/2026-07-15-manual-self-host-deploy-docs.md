@@ -17,13 +17,13 @@ Current guidance still contains stale “push to main automatically deploys” w
 
 ## Implementation checklist
 
-- [ ] Update public self-host guide with an explicit “Updating an existing self-hosted instance” section: sync/pull upstream into the fork’s `main`, then manually run **Deploy Production** on `main`.
-- [ ] Update public quickstart self-host steps to use manual **Deploy Production** instead of “push to main”.
-- [ ] Update public architecture/local-development wording so auto production deployment is scoped to the canonical repo, while fork/self-host updates use manual deploy.
-- [ ] Update the self-host wizard copy that currently says pushing to `main` triggers the pipeline.
-- [ ] Update README quick deploy copy to avoid stale “fork, configure, push” instructions.
-- [ ] Update internal agent guidance in `CLAUDE.md` so post-merge monitoring remains true for the canonical repo and does not imply all forks deploy automatically on push.
-- [ ] Search for remaining current stale references after edits.
+- [x] Update public self-host guide with an explicit “Updating an existing self-hosted instance” section: sync/pull upstream into the fork’s `main`, then manually run **Deploy Production** on `main`.
+- [x] Update public quickstart self-host steps to use manual **Deploy Production** instead of “push to main”.
+- [x] Update public architecture/local-development wording so auto production deployment is scoped to the canonical repo, while fork/self-host updates use manual deploy.
+- [x] Update the self-host wizard copy that currently says pushing to `main` triggers the pipeline.
+- [x] Update README quick deploy copy to avoid stale “fork, configure, push” instructions.
+- [x] Update internal agent guidance in `CLAUDE.md` so post-merge monitoring remains true for the canonical repo and does not imply all forks deploy automatically on push.
+- [x] Search for remaining current stale references after edits.
 
 ## Acceptance criteria
 

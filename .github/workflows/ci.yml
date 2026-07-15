@@ -22,11 +22,14 @@ concurrency:
 jobs:
   changes:
     name: Detect Changes
-    # Fork bypass: on a push to main in a fork (self-host), skip all of CI so
-    # auto-deploy is not gated on the full suite. Pull requests always run CI
-    # (any repo), and the canonical repo always runs CI. Because every other job
-    # depends on `changes` (directly via `needs`, or explicitly via this same
-    # guard), skipping `changes` cascades a skip across the whole workflow.
+    # Fork bypass: on a push to main in a fork (self-host), skip the canonical
+    # repo's full CI suite. Pull requests always run CI (any repo), and the
+    # canonical repo always runs CI. Fork operators update their running SAM
+    # instance by manually running Deploy Production on main; the workflow_run
+    # production deploy path is for the canonical repository's successful CI.
+    # Because every other job depends on `changes` (directly via `needs`, or
+    # explicitly via this same guard), skipping `changes` cascades a skip across
+    # the whole workflow.
     if: github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager'
     timeout-minutes: 5
     runs-on: ubuntu-latest
