@@ -37,15 +37,15 @@ standalone Cloudflare container runtime path.
 
 ## Implementation Checklist
 
-- [ ] Add standalone/local auth-file target path resolution that mirrors the
+- [x] Add standalone/local auth-file target path resolution that mirrors the
       container behavior: validate relative paths, honor `$CODEX_HOME` for
       `.codex/...`, otherwise resolve under `os.UserHomeDir()`/`$HOME`.
-- [ ] Update local auth-file injection to write Codex OAuth credentials to the
+- [x] Update local auth-file injection to write Codex OAuth credentials to the
       resolved home/CODEX_HOME path instead of `ContainerWorkDir`.
-- [ ] Preserve `0600` file permissions and `0700` parent directory permissions.
-- [ ] Add focused Go regression coverage proving standalone Codex OAuth writes
+- [x] Preserve `0600` file permissions and `0700` parent directory permissions.
+- [x] Add focused Go regression coverage proving standalone Codex OAuth writes
       to home/CODEX_HOME and does not create workspace-local `.codex/auth.json`.
-- [ ] Run focused VM-agent ACP tests.
+- [x] Run focused VM-agent ACP tests.
 - [ ] Run repository validation required by `/do`.
 - [ ] Run local specialist reviews: task-completion-validator,
       cloudflare-specialist, go-specialist, security-auditor,

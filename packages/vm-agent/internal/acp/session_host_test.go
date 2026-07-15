@@ -300,6 +300,109 @@ func TestPrepareAgentStartupRuntimeAssetFailurePreventsStart(t *testing.T) {
 	}
 }
 
+func TestPrepareAgentStartupStandaloneCodexOAuthWritesAuthFileToHome(t *testing.T) {
+	workDir := t.TempDir()
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	t.Setenv("CODEX_HOME", "")
+
+	host := NewSessionHost(SessionHostConfig{
+		GatewayConfig: GatewayConfig{
+			SessionID:        "test-session",
+			WorkspaceID:      "test-workspace",
+			ContainerWorkDir: workDir,
+			ProcessLauncher:  LocalLauncher{},
+		},
+	})
+	defer host.Stop()
+
+	credential := `{"tokens":{"id_token":"id-token","refresh_token":"refresh-token"}}`
+	startup, err := host.prepareAgentStartup(context.Background(), "openai-codex", &agentCredential{
+		credential:     credential,
+		credentialKind: "oauth-token",
+	}, nil)
+	if err != nil {
+		t.Fatalf("prepareAgentStartup returned error: %v", err)
+	}
+
+	if startup.containerID != "" {
+		t.Fatalf("containerID = %q, want standalone empty container", startup.containerID)
+	}
+	if !hasEnvVar(startup.envVars, "NO_BROWSER") {
+		t.Fatalf("NO_BROWSER was not injected: %v", startup.envVars)
+	}
+
+	authPath := filepath.Join(homeDir, ".codex", "auth.json")
+	content, err := os.ReadFile(authPath)
+	if err != nil {
+		t.Fatalf("auth file was not written under home: %v", err)
+	}
+	if string(content) != credential {
+		t.Fatalf("auth file content = %q, want %q", string(content), credential)
+	}
+	assertFileMode(t, filepath.Dir(authPath), 0o700)
+	assertFileMode(t, authPath, 0o600)
+
+	if _, err := os.Stat(filepath.Join(workDir, ".codex", "auth.json")); !os.IsNotExist(err) {
+		t.Fatalf("workspace-local auth file should not exist, stat err = %v", err)
+	}
+}
+
+func TestPrepareAgentStartupStandaloneCodexOAuthHonorsCodexHome(t *testing.T) {
+	workDir := t.TempDir()
+	homeDir := t.TempDir()
+	codexHome := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	t.Setenv("CODEX_HOME", codexHome)
+
+	host := NewSessionHost(SessionHostConfig{
+		GatewayConfig: GatewayConfig{
+			SessionID:        "test-session",
+			WorkspaceID:      "test-workspace",
+			ContainerWorkDir: workDir,
+			ProcessLauncher:  LocalLauncher{},
+		},
+	})
+	defer host.Stop()
+
+	credential := `{"tokens":{"id_token":"id-token","refresh_token":"refresh-token"}}`
+	if _, err := host.prepareAgentStartup(context.Background(), "openai-codex", &agentCredential{
+		credential:     credential,
+		credentialKind: "oauth-token",
+	}, nil); err != nil {
+		t.Fatalf("prepareAgentStartup returned error: %v", err)
+	}
+
+	authPath := filepath.Join(codexHome, "auth.json")
+	content, err := os.ReadFile(authPath)
+	if err != nil {
+		t.Fatalf("auth file was not written under CODEX_HOME: %v", err)
+	}
+	if string(content) != credential {
+		t.Fatalf("auth file content = %q, want %q", string(content), credential)
+	}
+	assertFileMode(t, filepath.Dir(authPath), 0o700)
+	assertFileMode(t, authPath, 0o600)
+
+	if _, err := os.Stat(filepath.Join(homeDir, ".codex", "auth.json")); !os.IsNotExist(err) {
+		t.Fatalf("home auth file should not exist when CODEX_HOME is set, stat err = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(workDir, ".codex", "auth.json")); !os.IsNotExist(err) {
+		t.Fatalf("workspace-local auth file should not exist, stat err = %v", err)
+	}
+}
+
+func assertFileMode(t *testing.T, path string, want os.FileMode) {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat %s: %v", path, err)
+	}
+	if got := info.Mode().Perm(); got != want {
+		t.Fatalf("mode for %s = %o, want %o", path, got, want)
+	}
+}
+
 func TestSessionHost_AttachDetachViewer(t *testing.T) {
 	t.Parallel()
 
