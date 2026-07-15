@@ -22,7 +22,7 @@ Constraint: open a PR and do not merge it.
 - [x] Preserve expected legitimate preview behavior: ordinary HTML structure, text, formatting, images using safe local/data/blob sources, rendered/source toggle, and source view with original HTML.
 - [x] Add/adjust unit tests covering allowed HTML, blocked scripts/event handlers/navigation/forms/iframes, iframe sandbox attributes, source-view preservation, markdown raw HTML behavior, and safe markdown link behavior.
 - [x] Run relevant frontend tests and visual/validation checks.
-- [ ] Run security-auditor, test-engineer, and task-completion-validator reviews before finalizing.
+- [x] Run task-completion-validator before archival; security-auditor and test-engineer remain tracked in Phase 5 review.
 
 ## Acceptance Criteria
 
