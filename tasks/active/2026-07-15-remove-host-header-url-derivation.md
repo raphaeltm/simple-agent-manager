@@ -18,7 +18,7 @@ The fix must prefer configured deployment origins/domains, preserve existing env
 
 ## Checklist
 
-- [x] Create a small URL/origin helper in `apps/api` for trusted API/public origin derivation from existing env/config (`API_URL` when present, otherwise `https://api.${BASE_DOMAIN}`, with localhost/dev fallback only where needed).
+- [x] Create a small URL/origin helper in `apps/api` for trusted API/public origin derivation from existing env/config (`https://api.${BASE_DOMAIN}` in deployed environments, with localhost/dev fallback only where needed).
 - [x] Update webhook credential generation to use trusted configured origin instead of `Request.url`.
 - [x] Update proxy URL construction to avoid cloning attacker-controlled request origins for VM-agent backend requests.
 - [x] Audit remaining apps/api `Request.url`/origin constructions and leave non-security-sensitive path/query parsing intact.
