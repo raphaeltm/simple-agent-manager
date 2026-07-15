@@ -21,6 +21,7 @@ import {
   buildObservedDeploymentUpdate,
   reconcileDeploymentReleaseStatuses,
 } from '../services/deployment-control';
+import { reconcileCustomDomainRoutingObservation } from '../services/deployment-custom-domains';
 import { createNodeBackendDNSRecord, updateDNSRecord } from '../services/dns';
 import {
   shouldRefreshCallbackToken,
@@ -385,6 +386,9 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
           envId: schema.deploymentEnvironments.id,
           status: schema.deploymentEnvironments.status,
           requiresVolumes: schema.deploymentEnvironments.requiresVolumes,
+          observedAppliedSeq: schema.deploymentEnvironments.observedAppliedSeq,
+          desiredRoutingRevision: schema.deploymentEnvironments.desiredRoutingRevision,
+          observedRoutingRevision: schema.deploymentEnvironments.observedRoutingRevision,
         })
         .from(schema.deploymentEnvironments)
         .where(eq(schema.deploymentEnvironments.nodeId, nodeId));
@@ -414,12 +418,13 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
       const stateByEnv = new Map(bodyStates.map((state) => [state.environmentId, state]));
 
       const pendingReleases: Array<{ environmentId: string; seq: number }> = [];
+      const pendingRouteConfigs: Array<{ environmentId: string; revision: number }> = [];
 
       for (const envRow of activeEnvRows) {
         const envId = envRow.envId;
         const bodyState = stateByEnv.get(envId);
         const deploymentState = bodyState ?? null;
-        const appliedSeq = deploymentState?.appliedSeq ?? 0;
+        const appliedSeq = deploymentState?.appliedSeq ?? envRow.observedAppliedSeq ?? 0;
 
         if (deploymentState) {
           const observedUpdate = buildObservedDeploymentUpdate(deploymentState, now);
@@ -443,6 +448,15 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
             );
 
           await reconcileDeploymentReleaseStatuses(db, envId, deploymentState);
+          if (typeof deploymentState.routingRevision === 'number') {
+            await reconcileCustomDomainRoutingObservation(
+              db,
+              envId,
+              Math.floor(deploymentState.routingRevision),
+              deploymentState.routingStatus,
+              now
+            );
+          }
         }
 
         const latestRelease = await db
@@ -488,6 +502,44 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
           }
           pendingReleases.push({ environmentId: envId, seq: latest.version });
         }
+
+        const reportedRoutingRevision =
+          typeof deploymentState?.routingRevision === 'number'
+            ? Math.floor(deploymentState.routingRevision)
+            : (envRow.observedRoutingRevision ?? 0);
+        const desiredRoutingRevision = envRow.desiredRoutingRevision ?? 0;
+        const hasCurrentAppliedRelease = !!latest && appliedSeq > 0 && latest.version <= appliedSeq;
+        if (
+          desiredRoutingRevision > reportedRoutingRevision &&
+          hasCurrentAppliedRelease &&
+          !nodeAlreadyApplying
+        ) {
+          if (envRow.requiresVolumes) {
+            const volumeReadiness = await c.env.DATABASE.prepare(
+              `SELECT
+                 COUNT(*) AS total,
+                 COUNT(CASE WHEN attached_server_id = ? THEN 1 END) AS attached
+               FROM deployment_volumes
+               WHERE environment_id = ?`
+            )
+              .bind(node.providerInstanceId ?? '', envId)
+              .first<{ total: number; attached: number }>();
+            if (
+              !volumeReadiness ||
+              volumeReadiness.total === 0 ||
+              volumeReadiness.attached < volumeReadiness.total
+            ) {
+              log.info('heartbeat.deploy_routes_waiting_for_volume_attach', {
+                nodeId,
+                environmentId: envId,
+                total: volumeReadiness?.total ?? 0,
+                attached: volumeReadiness?.attached ?? 0,
+              });
+              continue;
+            }
+          }
+          pendingRouteConfigs.push({ environmentId: envId, revision: desiredRoutingRevision });
+        }
       }
 
       if (pendingReleases.length > 0) {
@@ -498,6 +550,12 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
         if (pendingReleases.length === 1) {
           response.pendingReleaseSeq = pendingReleases[0]?.seq;
         }
+      }
+      if (pendingRouteConfigs.length > 0) {
+        response.deployment = {
+          ...(response.deployment as Record<string, unknown>),
+          pendingRouteConfigs,
+        };
       }
     } catch (err) {
       log.warn('heartbeat.deploy_release_lookup_failed', {

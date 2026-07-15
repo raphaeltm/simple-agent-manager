@@ -427,8 +427,8 @@ const MOCK_PUBLIC_ROUTES = [
   },
 ];
 
-const MOCK_CUSTOM_DOMAINS = [
-  {
+function customDomain(overrides: Record<string, unknown>) {
+  return {
     id: 'domain-pending',
     environmentId: ENV_ID,
     service: 'web',
@@ -438,43 +438,58 @@ const MOCK_CUSTOM_DOMAINS = [
     verificationStatus: 'pending',
     verificationError: null,
     verifiedAt: null,
+    verifiedCnameTarget: null,
+    desiredState: 'active',
+    routingStatus: 'pending_dns',
+    servingStatus: 'pending_dns',
+    activationRoutingRevision: null,
+    deactivationRoutingRevision: null,
+    deletedAt: null,
     createdBy: 'user-deploy-audit',
     createdAt: '2026-06-18T10:10:00.000Z',
     cnameTarget: 'r1-web-8080-env-staging.apps.sammy.party',
-  },
-  {
+    routeTargetChanged: false,
+    environmentStatus: 'active',
+    desiredRoutingRevision: 3,
+    observedRoutingRevision: 2,
+    observedRoutingStatus: 'active',
+    observedRoutingError: null,
+    ...overrides,
+  };
+}
+
+const MOCK_CUSTOM_DOMAINS = [
+  customDomain({
+    id: 'domain-pending',
+  }),
+  customDomain({
     id: 'domain-long',
-    environmentId: ENV_ID,
-    service: 'web',
-    port: 8080,
-    routeIndex: 0,
     hostname:
       'staging-for-a-very-large-enterprise-customer-with-an-overly-specific-subdomain.customer-portal.example-services.dev',
     verificationStatus: 'failed',
     verificationError:
       'staging-for-a-very-large-enterprise-customer-with-an-overly-specific-subdomain.customer-portal.example-services.dev does not resolve to r1-web-8080-env-staging.apps.sammy.party.',
-    verifiedAt: null,
-    createdBy: 'user-deploy-audit',
+    routingStatus: 'failed',
+    servingStatus: 'dns_failed',
     createdAt: '2026-06-18T10:12:00.000Z',
-    cnameTarget: 'r1-web-8080-env-staging.apps.sammy.party',
-  },
-  {
+  }),
+  customDomain({
     id: 'domain-verified',
-    environmentId: ENV_ID,
     service: 'api',
     port: 3000,
     routeIndex: 1,
     hostname: 'api.customer.example.com',
     verificationStatus: 'verified',
-    verificationError: null,
     verifiedAt: '2026-06-18T10:20:00.000Z',
-    createdBy: 'user-deploy-audit',
+    verifiedCnameTarget: 'r2-api-3000-env-staging.apps.sammy.party',
+    routingStatus: 'active',
+    servingStatus: 'active',
+    activationRoutingRevision: 2,
     createdAt: '2026-06-18T10:15:00.000Z',
     cnameTarget: 'r2-api-3000-env-staging.apps.sammy.party',
-  },
-  {
+  }),
+  customDomain({
     id: 'domain-missing-route',
-    environmentId: ENV_ID,
     service: 'legacy-worker',
     port: 7000,
     routeIndex: 4,
@@ -482,10 +497,13 @@ const MOCK_CUSTOM_DOMAINS = [
     verificationStatus: 'verified',
     verificationError: 'The legacy-worker:7000 public route is not present in the current release.',
     verifiedAt: '2026-06-17T10:20:00.000Z',
-    createdBy: 'user-deploy-audit',
+    verifiedCnameTarget: 'legacy-worker-env-staging.apps.sammy.party',
+    routingStatus: 'route_missing',
+    servingStatus: 'route_missing',
+    activationRoutingRevision: 1,
     createdAt: '2026-06-17T10:15:00.000Z',
     cnameTarget: null,
-  },
+  }),
 ];
 
 const MOCK_SYSTEM_INFO = {

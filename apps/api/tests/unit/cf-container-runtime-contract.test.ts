@@ -73,7 +73,7 @@ describe('cf-container runtime spike contracts', () => {
       "import { fetchNodeAgent, getNodeAgentRequestTimeoutMs } from '../../services/node-agent'"
     );
     expect(localForward).toContain('fetchNodeAgent(');
-    expect(nodesRoute).toContain('fetchNodeAgent(nodeId, c.env, vmUrl.toString()');
+    expect(nodesRoute).toMatch(/fetchNodeAgent\(\s*nodeId,\s*c\.env,\s*vmUrl\.toString\(\)/);
   });
 
   it('launches instant chat sessions through the authenticated start route and raw Container substrate', () => {

@@ -121,6 +121,7 @@ vi.mock('../../../src/services/dns', () => ({
 
 vi.mock('../../../src/services/nodes', () => ({
   deleteNodeResources: (...args: unknown[]) => mockDeleteNodeResources(...args),
+  retireDeletedDeploymentNodeRecord: vi.fn(),
 }));
 
 vi.mock('../../../src/lib/logger', () => ({
@@ -332,6 +333,7 @@ describe('deployment environment observability routes', () => {
         hostname: 'r1-web-8080-env-1.apps.sammy.party',
         hostPort: 36120,
         routeIndex: 0,
+        routesAreLive: true,
       },
       {
         id: 'api:3000:1',
@@ -340,6 +342,7 @@ describe('deployment environment observability routes', () => {
         hostname: 'r2-api-3000-env-1.apps.sammy.party',
         hostPort: 36121,
         routeIndex: 1,
+        routesAreLive: true,
       },
     ]);
     expect(mockRequireProjectCapability).toHaveBeenCalledWith(
@@ -355,7 +358,7 @@ describe('deployment environment observability routes', () => {
     );
   });
 
-  it('hides public route metadata when the environment is stopped', async () => {
+  it('returns inactive public route metadata when the environment is stopped', async () => {
     mockSelectRows([{ id: 'env-1', projectId: 'project-1', nodeId: null, status: 'stopped' }]);
     mockGetEnvironmentPublicRouteTargets.mockResolvedValue([
       {
@@ -374,8 +377,26 @@ describe('deployment environment observability routes', () => {
 
     const body = await response.json<any>();
     expect(response.status, JSON.stringify(body)).toBe(200);
-    expect(body).toEqual({ publicRoutes: [] });
-    expect(mockGetEnvironmentPublicRouteTargets).not.toHaveBeenCalled();
+    expect(body).toEqual({
+      environmentStatus: 'stopped',
+      routesAreLive: false,
+      publicRoutes: [
+        {
+          id: 'web:8080:0',
+          service: 'web',
+          port: 8080,
+          hostname: 'r1-web-8080-env-1.apps.sammy.party',
+          hostPort: 36120,
+          routeIndex: 0,
+          routesAreLive: false,
+        },
+      ],
+    });
+    expect(mockGetEnvironmentPublicRouteTargets).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      'env-1'
+    );
   });
 
   it('returns 404 for public routes when the environment is missing', async () => {

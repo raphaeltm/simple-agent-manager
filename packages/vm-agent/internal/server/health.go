@@ -109,11 +109,17 @@ type deploymentPendingReleaseResponse struct {
 	Seq           int64  `json:"seq"`
 }
 
+type deploymentPendingRouteConfigResponse struct {
+	EnvironmentID string `json:"environmentId"`
+	Revision      int64  `json:"revision"`
+}
+
 type deploymentHeartbeatResponse struct {
 	Environments       *[]deploymentEnvironmentResponse   `json:"environments,omitempty"`
 	RetireEnvironments []deploymentEnvironmentResponse    `json:"retireEnvironments,omitempty"`
-	PendingReleases    []deploymentPendingReleaseResponse `json:"pendingReleases,omitempty"`
-	DeployPubKey       string                             `json:"deployPubKey,omitempty"`
+	PendingReleases     []deploymentPendingReleaseResponse     `json:"pendingReleases,omitempty"`
+	PendingRouteConfigs []deploymentPendingRouteConfigResponse `json:"pendingRouteConfigs,omitempty"`
+	DeployPubKey        string                                 `json:"deployPubKey,omitempty"`
 }
 
 // heartbeatResponse is the expected JSON response from the heartbeat endpoint.
@@ -149,6 +155,15 @@ func (s *Server) sendNodeHeartbeat() {
 				"status":        string(observed.Status),
 				"errorMessage":  observed.ErrorMessage,
 				"services":      observed.Services,
+			}
+			if observed.RoutingRevision > 0 {
+				deployPayload["routingRevision"] = observed.RoutingRevision
+			}
+			if observed.RoutingStatus != "" {
+				deployPayload["routingStatus"] = observed.RoutingStatus
+			}
+			if observed.RoutingError != "" {
+				deployPayload["routingError"] = observed.RoutingError
 			}
 			if observed.DeployStatus != nil {
 				deployPayload["deployStatus"] = observed.DeployStatus
@@ -288,6 +303,28 @@ func (s *Server) sendNodeHeartbeat() {
 				s.runDetachedDeploymentApply(environmentID, seq, engine)
 			}(environmentID, pending.Seq, engine)
 		}
+
+		for _, pending := range hbResp.Deployment.PendingRouteConfigs {
+			environmentID := strings.TrimSpace(pending.EnvironmentID)
+			if environmentID == "" {
+				continue
+			}
+			engine := s.ensureDeployEngine(environmentID)
+			if engine == nil {
+				continue
+			}
+			observed := engine.GetObserved()
+			if pending.Revision <= observed.RoutingRevision {
+				continue
+			}
+			slog.Info("deploy: pending route config detected",
+				"environmentId", environmentID,
+				"pendingRevision", pending.Revision,
+				"observedRevision", observed.RoutingRevision)
+			go func(environmentID string, revision int64, engine *deploy.Engine) {
+				s.runDetachedDeploymentRouteApply(environmentID, revision, engine)
+			}(environmentID, pending.Revision, engine)
+		}
 	}
 
 	// Heartbeat succeeded — connectivity to the control plane is confirmed.
@@ -356,6 +393,26 @@ func (s *Server) runDetachedDeploymentApply(environmentID string, seq int64, eng
 			return
 		}
 	}
+}
+
+
+func (s *Server) runDetachedDeploymentRouteApply(environmentID string, revision int64, engine *deploy.Engine) {
+	jobID := routeConfigJobID(environmentID, revision)
+	s.persistVMJobStart(jobID, vmJobKindRouteConfig, environmentID, vmJobStatusStarting, "accepted")
+
+	idleTimeout := s.config.DeployApplyIdleTimeout
+	if idleTimeout <= 0 {
+		idleTimeout = config.DefaultDeployApplyIdleTimeout
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), idleTimeout)
+	defer cancel()
+
+	if err := engine.FetchAndApplyRoutes(ctx, revision); err != nil {
+		s.persistVMJobComplete(jobID, vmJobStatusFailed, "failed", err.Error(), nil)
+		slog.Error("deploy: fetch and apply route config failed", "environmentId", environmentID, "revision", revision, "error", err)
+		return
+	}
+	s.persistVMJobComplete(jobID, vmJobStatusSucceeded, "succeeded", "", map[string]any{"revision": revision})
 }
 
 // retryPendingReadyCallbacks checks for workspaces whose ready callback was not

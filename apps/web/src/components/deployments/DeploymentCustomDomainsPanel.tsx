@@ -33,12 +33,12 @@ function routeLabel(route: Pick<DeploymentPublicRoute, 'service' | 'port'>): str
   return `${route.service}:${route.port}`;
 }
 
-function routeKey(route: Pick<DeploymentPublicRoute, 'service' | 'port' | 'routeIndex'>): string {
-  return `${route.service}:${route.port}:${route.routeIndex}`;
+function routeKey(route: Pick<DeploymentPublicRoute, 'service' | 'port'>): string {
+  return `${route.service}:${route.port}`;
 }
 
-function domainRouteKey(domain: Pick<DeploymentCustomDomain, 'service' | 'port' | 'routeIndex'>) {
-  return `${domain.service}:${domain.port}:${domain.routeIndex}`;
+function domainRouteKey(domain: Pick<DeploymentCustomDomain, 'service' | 'port'>) {
+  return `${domain.service}:${domain.port}`;
 }
 
 function statusMeta(domain: DeploymentCustomDomain): {
@@ -47,7 +47,49 @@ function statusMeta(domain: DeploymentCustomDomain): {
   tone: string;
   sentence: string;
 } {
-  if (domain.cnameTarget === null) {
+  if (domain.desiredState === 'deactivating' || domain.servingStatus === 'deactivating') {
+    return {
+      badge: 'stale',
+      label: 'Deactivating',
+      tone: 'text-warning',
+      sentence: 'Deletion is requested. SAM is removing this hostname from the deployment node.',
+    };
+  }
+  if (domain.servingStatus === 'active') {
+    return {
+      badge: 'connected',
+      label: 'Active',
+      tone: 'text-success',
+      sentence: 'DNS is verified and the deployment node reports this route config active.',
+    };
+  }
+  if (domain.servingStatus === 'inactive_environment_stopped') {
+    return {
+      badge: 'stale',
+      label: 'Inactive',
+      tone: 'text-fg-muted',
+      sentence:
+        'The domain is preserved, but this deployment environment is not currently serving routes.',
+    };
+  }
+  if (domain.servingStatus === 'activating' || domain.routingStatus === 'activating') {
+    return {
+      badge: 'pending',
+      label: 'Activating',
+      tone: 'text-warning',
+      sentence: 'DNS is verified. SAM is applying this hostname to Caddy on the deployment node.',
+    };
+  }
+  if (domain.servingStatus === 'dns_recheck_required' || domain.routeTargetChanged) {
+    return {
+      badge: 'error',
+      label: 'DNS recheck required',
+      tone: 'text-danger',
+      sentence:
+        'The generated SAM route target changed. Re-check DNS before SAM serves this hostname.',
+    };
+  }
+  if (domain.cnameTarget === null || domain.servingStatus === 'route_missing') {
     return {
       badge: 'error',
       label: 'Route missing',
@@ -55,16 +97,7 @@ function statusMeta(domain: DeploymentCustomDomain): {
       sentence: 'The parent public route is not present in the current release.',
     };
   }
-  if (domain.verificationStatus === 'verified') {
-    return {
-      badge: 'stale',
-      label: 'Verified',
-      tone: 'text-warning',
-      sentence:
-        'DNS is verified. This hostname is added to the deployment node on the next deployment apply.',
-    };
-  }
-  if (domain.verificationStatus === 'failed') {
+  if (domain.verificationStatus === 'failed' || domain.servingStatus === 'dns_failed') {
     return {
       badge: 'error',
       label: 'DNS mismatch',
@@ -89,11 +122,7 @@ function countDomainsForRoute(
 }
 
 function matchesRoute(domain: DeploymentCustomDomain, route: DeploymentPublicRoute): boolean {
-  return (
-    route.service === domain.service &&
-    route.port === domain.port &&
-    route.routeIndex === domain.routeIndex
-  );
+  return route.service === domain.service && route.port === domain.port;
 }
 
 export function DeploymentCustomDomainsPanel({ projectId, environmentId }: Props) {
@@ -109,7 +138,7 @@ export function DeploymentCustomDomainsPanel({ projectId, environmentId }: Props
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    setLoading(true);
+    setLoading((current) => current);
     setError(null);
     try {
       const [routeResponse, domainResponse] = await Promise.all([
@@ -153,7 +182,11 @@ export function DeploymentCustomDomainsPanel({ projectId, environmentId }: Props
   );
   const verifiedCount = domains.filter((domain) => domain.verificationStatus === 'verified').length;
   const attentionCount = domains.filter(
-    (domain) => domain.verificationStatus === 'failed' || domain.cnameTarget === null
+    (domain) =>
+      domain.verificationStatus === 'failed' ||
+      domain.cnameTarget === null ||
+      domain.routeTargetChanged ||
+      domain.desiredState === 'deactivating'
   ).length;
   const pendingCount = domains.filter((domain) => domain.verificationStatus === 'pending').length;
 
@@ -203,9 +236,17 @@ export function DeploymentCustomDomainsPanel({ projectId, environmentId }: Props
     setDeletingId(domain.id);
     setError(null);
     try {
-      await deleteDeploymentCustomDomain(projectId, environmentId, domain.id);
-      setDomains((current) => current.filter((item) => item.id !== domain.id));
-      toast.success('Custom domain deleted');
+      const updated = await deleteDeploymentCustomDomain(projectId, environmentId, domain.id);
+      setDomains((current) =>
+        updated.deletedAt || updated.desiredState === 'deleted'
+          ? current.filter((item) => item.id !== domain.id)
+          : current.map((item) => (item.id === domain.id ? updated : item))
+      );
+      toast.success(
+        updated.desiredState === 'deactivating'
+          ? 'Custom domain deactivation requested'
+          : 'Custom domain deleted'
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete custom domain');
     } finally {
@@ -241,7 +282,7 @@ export function DeploymentCustomDomainsPanel({ projectId, environmentId }: Props
 
       <Alert variant="info">
         Custom domains attach to an existing public route. Add a DNS-only CNAME record, verify DNS,
-        then the verified hostname becomes active on the next deployment apply.
+        then SAM applies the hostname to the deployment node without requiring a new app release.
       </Alert>
 
       {error && (
@@ -250,7 +291,7 @@ export function DeploymentCustomDomainsPanel({ projectId, environmentId }: Props
         </Alert>
       )}
 
-      {routes.length === 0 ? (
+      {routes.length === 0 && domains.length === 0 ? (
         <EmptyState
           title="No public routes"
           body="Submit a release with a public route before adding custom domains."
@@ -293,10 +334,7 @@ export function DeploymentCustomDomainsPanel({ projectId, environmentId }: Props
                       domain={domain}
                       route={
                         routes.find(
-                          (route) =>
-                            route.service === domain.service &&
-                            route.port === domain.port &&
-                            route.routeIndex === domain.routeIndex
+                          (route) => route.service === domain.service && route.port === domain.port
                         ) ?? null
                       }
                       verifying={verifyingId === domain.id}
@@ -333,17 +371,19 @@ export function DeploymentCustomDomainsPanel({ projectId, environmentId }: Props
           </div>
 
           <aside className="grid content-start gap-4">
-            <AddDomainPanel
-              routes={routes}
-              selectedRoute={selectedRoute}
-              selectedRouteId={selectedRoute?.id ?? ''}
-              hostname={hostname}
-              saving={saving}
-              onRouteChange={setSelectedRouteId}
-              onHostnameChange={setHostname}
-              onSubmit={() => void addDomain()}
-              onCopy={(value, label) => void copy(value, label)}
-            />
+            {routes.length > 0 && (
+              <AddDomainPanel
+                routes={routes}
+                selectedRoute={selectedRoute}
+                selectedRouteId={selectedRoute?.id ?? ''}
+                hostname={hostname}
+                saving={saving}
+                onRouteChange={setSelectedRouteId}
+                onHostnameChange={setHostname}
+                onSubmit={() => void addDomain()}
+                onCopy={(value, label) => void copy(value, label)}
+              />
+            )}
             <DnsPolicyPanel />
           </aside>
         </div>
@@ -576,7 +616,7 @@ function DomainCard({
           <IconButton
             label="Open domain"
             onClick={() => window.open(`https://${domain.hostname}`, '_blank', 'noreferrer')}
-            disabled={route === null}
+            disabled={route === null || domain.servingStatus !== 'active'}
           >
             <ExternalLink size={14} />
           </IconButton>
