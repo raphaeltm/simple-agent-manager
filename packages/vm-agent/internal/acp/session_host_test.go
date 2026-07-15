@@ -392,6 +392,68 @@ func TestPrepareAgentStartupStandaloneCodexOAuthHonorsCodexHome(t *testing.T) {
 	}
 }
 
+func TestResolveLocalAuthFileTargetPath(t *testing.T) {
+	homeDir := t.TempDir()
+	codexHome := t.TempDir()
+	t.Setenv("HOME", homeDir)
+
+	tests := []struct {
+		name         string
+		authFilePath string
+		codexHome    string
+		want         string
+		wantErr      string
+	}{
+		{
+			name:         "codex auth path resolves under home when CODEX_HOME is empty",
+			authFilePath: ".codex/auth.json",
+			want:         filepath.Join(homeDir, ".codex", "auth.json"),
+		},
+		{
+			name:         "codex auth path honors CODEX_HOME",
+			authFilePath: ".codex/auth.json",
+			codexHome:    codexHome,
+			want:         filepath.Join(codexHome, "auth.json"),
+		},
+		{
+			name:         "non-codex auth path ignores CODEX_HOME and resolves under home",
+			authFilePath: ".vibe/config.toml",
+			codexHome:    codexHome,
+			want:         filepath.Join(homeDir, ".vibe", "config.toml"),
+		},
+		{
+			name:         "path traversal is rejected",
+			authFilePath: "../auth.json",
+			wantErr:      "invalid authFilePath",
+		},
+		{
+			name:         "shell metacharacter is rejected",
+			authFilePath: ".codex/auth`bad.json",
+			wantErr:      "invalid authFilePath",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("CODEX_HOME", tt.codexHome)
+
+			got, err := resolveLocalAuthFileTargetPath(tt.authFilePath)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("resolveLocalAuthFileTargetPath() error = %v, want containing %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("resolveLocalAuthFileTargetPath() error = %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("resolveLocalAuthFileTargetPath() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func assertFileMode(t *testing.T, path string, want os.FileMode) {
 	t.Helper()
 	info, err := os.Stat(path)

@@ -45,14 +45,39 @@ standalone Cloudflare container runtime path.
 - [x] Preserve `0600` file permissions and `0700` parent directory permissions.
 - [x] Add focused Go regression coverage proving standalone Codex OAuth writes
       to home/CODEX_HOME and does not create workspace-local `.codex/auth.json`.
+      Direct resolver tests also cover non-Codex auth-file paths and invalid path rejection.
 - [x] Run focused VM-agent ACP tests.
-- [ ] Run repository validation required by `/do`.
-- [ ] Run local specialist reviews: task-completion-validator,
-      cloudflare-specialist, go-specialist, security-auditor,
-      constitution-validator, and test-engineer.
-- [ ] Deploy to staging and verify a real instant `cf-container`
-      `openai-codex` session starts and responds.
-- [ ] Open PR, wait for CI, merge when green, monitor production deployment.
+- [x] Run repository validation required by `/do`.
+
+## Validation Evidence
+
+- `pnpm lint` — passed with existing warnings only.
+- `pnpm typecheck` — passed.
+- `pnpm test` — passed: 19 task targets; API 422 files / 6062 tests; web
+  219 files / 2685 tests.
+- `pnpm build` — passed.
+- `git diff --check` — passed.
+- `/tmp/go1.25.0/bin/go test ./internal/acp -run TestPrepareAgentStartupStandaloneCodexOAuth -count=1` — passed.
+- `/tmp/go1.25.0/bin/go test ./internal/acp -count=1` — passed.
+- `/tmp/go1.25.0/bin/go vet ./internal/acp` — passed.
+- `/tmp/go1.25.0/bin/go test -race ./internal/acp -run TestPrepareAgentStartupStandaloneCodexOAuth -count=1` — passed.
+- `/tmp/go1.25.0/bin/go test ./internal/acp -run 'TestPrepareAgentStartupStandaloneCodexOAuth|TestResolveLocalAuthFileTargetPath' -count=1` — passed.
+- `/tmp/go1.25.0/bin/go test ./...` from `packages/vm-agent` — attempted;
+  packages unrelated to this change failed because this environment does not have
+  Docker or Docker Compose (`internal/pty` tests require `docker`;
+  `internal/server` tests require Docker Compose). The touched package passed.
+
+## Remaining Workflow Gates
+
+These are tracked in `.do-state.md` after implementation validation and are not
+part of the archived implementation checklist:
+
+- Run local specialist reviews: task-completion-validator,
+  cloudflare-specialist, go-specialist, security-auditor, constitution-validator,
+  and test-engineer.
+- Deploy to staging and verify a real instant `cf-container` `openai-codex`
+  session starts and responds.
+- Open PR, wait for CI, merge when green, monitor production deployment.
 
 ## Acceptance Criteria
 
@@ -63,7 +88,7 @@ standalone Cloudflare container runtime path.
 - Existing Docker/devcontainer auth-file injection behavior is preserved.
 - A regression test fails on the previous workspace-relative behavior.
 - A real staging `cf-container` Codex session no longer fails `NewSession` with
-  `Authentication required`.
+  `Authentication required` (manual Phase 6 gate tracked in `.do-state.md`).
 
 ## References
 
