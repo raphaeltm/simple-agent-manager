@@ -30,7 +30,7 @@ func makeTestRouteConfigPayload(envID, nodeID string, currentSeq, revision int64
 	return payload
 }
 
-func newTestDiskState(t *testing.T, dir string) *DiskState {
+func newTestRouteDiskState(t *testing.T, dir string) *DiskState {
 	t.Helper()
 	disk, err := NewDiskState(filepath.Join(dir, "state"))
 	if err != nil {
@@ -214,7 +214,7 @@ func TestVerifier_RejectsRouteConfigReplaySeqMismatchAndMutation(t *testing.T) {
 
 func TestEngine_ApplyRoutesUpdatesCaddyWithoutCompose(t *testing.T) {
 	dir := t.TempDir()
-	disk := newTestDiskState(t, dir)
+	disk := newTestRouteDiskState(t, dir)
 	writeTestRelease(t, disk, testAppliedRouteState(7, 1), "services:\n  web:\n    image: nginx\n", "old.example.com {\n\treverse_proxy 127.0.0.1:35000\n}\n")
 
 	composeLog := filepath.Join(dir, "compose.log")
@@ -244,12 +244,12 @@ func TestEngine_ApplyRoutesUpdatesCaddyWithoutCompose(t *testing.T) {
 
 func TestEngine_ApplyRoutesRejectsNoCurrentRelease(t *testing.T) {
 	dir := t.TempDir()
-	disk := newTestDiskState(t, dir)
+	disk := newTestRouteDiskState(t, dir)
 	verifier, priv := newTestRouteVerifier(t)
 	engine := NewEngine(disk, verifier, EngineConfig{EnvironmentID: "env-1", NodeID: "node-1"})
 	payload := makeTestRouteConfigPayload("env-1", "node-1", 7, 2, priv)
 
-	err = engine.ApplyRoutes(context.Background(), payload)
+	err := engine.ApplyRoutes(context.Background(), payload)
 	if err == nil || !strings.Contains(err.Error(), "no current release for route config") {
 		t.Fatalf("expected no-current-release rejection, got: %v", err)
 	}
@@ -257,7 +257,7 @@ func TestEngine_ApplyRoutesRejectsNoCurrentRelease(t *testing.T) {
 
 func TestEngine_ApplyRoutesPersistsRoutingFailureWhenReloadFails(t *testing.T) {
 	dir := t.TempDir()
-	disk := newTestDiskState(t, dir)
+	disk := newTestRouteDiskState(t, dir)
 	writeTestRelease(t, disk, testAppliedRouteState(4, 1), "services:\n  web:\n    image: nginx\n", "old caddy")
 
 	reloadScript := filepath.Join(dir, "reload.sh")
@@ -266,7 +266,7 @@ func TestEngine_ApplyRoutesPersistsRoutingFailureWhenReloadFails(t *testing.T) {
 	engine := newTestRouteEngine(disk, verifier, filepath.Join(dir, "active", "Caddyfile"), reloadScript, "")
 	payload := makeTestRouteConfigPayload("env-1", "node-1", 4, 2, priv)
 
-	err = engine.ApplyRoutes(context.Background(), payload)
+	err := engine.ApplyRoutes(context.Background(), payload)
 	if err == nil || !strings.Contains(err.Error(), "reload Caddy route config") {
 		t.Fatalf("expected reload failure, got: %v", err)
 	}
@@ -285,21 +285,16 @@ func TestEngine_ApplyRoutesPersistsRoutingFailureWhenReloadFails(t *testing.T) {
 
 func TestEngine_ApplyRoutesRejectsReplayBeforeReload(t *testing.T) {
 	dir := t.TempDir()
-	disk := newTestDiskState(t, dir)
+	disk := newTestRouteDiskState(t, dir)
 	writeTestRelease(t, disk, testAppliedRouteState(5, 2), "services:\n  web:\n    image: nginx\n", "old caddy")
 	reloadLog := filepath.Join(dir, "reload.log")
 	reloadScript := filepath.Join(dir, "reload.sh")
 	writeTestScript(t, reloadScript, "#!/bin/sh\necho reload >> \""+reloadLog+"\"\nexit 0\n")
 	verifier, priv := newTestRouteVerifier(t)
-	engine := NewEngine(disk, verifier, EngineConfig{
-		EnvironmentID:  "env-1",
-		NodeID:         "node-1",
-		CaddyfilePath:  filepath.Join(dir, "active", "Caddyfile"),
-		CaddyReloadCmd: reloadScript,
-	})
+	engine := newTestRouteEngine(disk, verifier, filepath.Join(dir, "active", "Caddyfile"), reloadScript, "")
 	payload := makeTestRouteConfigPayload("env-1", "node-1", 5, 2, priv)
 
-	err = engine.ApplyRoutes(context.Background(), payload)
+	err := engine.ApplyRoutes(context.Background(), payload)
 	if err == nil || !strings.Contains(err.Error(), "routing revision replay") {
 		t.Fatalf("expected replay rejection, got: %v", err)
 	}
