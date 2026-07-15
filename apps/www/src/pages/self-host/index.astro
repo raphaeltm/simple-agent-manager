@@ -185,13 +185,15 @@ const cfPermissions = [
             <div class="sh-why-body">
               <p>
                 There's no hosted SAM to sign up for — your fork <strong>is</strong> your deployment.
-                Pushing to <code>main</code> is what triggers the GitHub Actions pipeline that
-                provisions and ships everything onto your own Cloudflare account. You own the code,
-                the infrastructure, and the data end to end.
+                When you want to ship the current <code>main</code> branch, manually run the
+                <strong>Deploy Production</strong> workflow. That pipeline provisions and ships
+                everything onto your own Cloudflare account. You own the code, the infrastructure,
+                and the data end to end.
               </p>
               <p>
                 Forking (rather than cloning) keeps the link to upstream, so you can pull in new SAM
-                releases on your own schedule instead of being upgraded out from under you.
+                releases on your own schedule, then deploy them by running the workflow instead of
+                being upgraded out from under you.
               </p>
             </div>
           </details>

@@ -65,17 +65,17 @@ When the user mentions **app, dashboard, projects, settings, or UI** → look in
 2. **Deploy to staging only when local verification is exhausted** — when the remaining work genuinely needs real OAuth, DNS, or VMs. Partial-feature staging deploys are fine for end-to-end plumbing while the rest is still developed locally. Staging deploys take ~7 minutes via `gh workflow run deploy-staging.yml`.
 3. **Query staging directly via Cloudflare API** — use `$CF_TOKEN` to query D1 (SQL), read/write KV, check DNS records, and inspect Workers. This is the fastest way to verify deploys, debug issues, and understand staging state. **Always check infrastructure state via CF API before guessing at fixes.** See `.claude/rules/32-cf-api-debugging.md` for the full cheat sheet.
 4. **When something fails on staging, QUERY THEN READ LOGS before changing any code** — first query D1/KV/DNS via CF API to understand the data state, then use `wrangler tail`, `/admin/logs`, `/admin/errors`, the Node detail page's log stream, `journalctl -u vm-agent` via SSH, `docker logs` for containers. Never guess-and-redeploy. See `.claude/rules/29-local-first-debugging.md` for the log location matrix.
-5. Merge to main — triggers production deployment.
+5. Merge to main — in this canonical repository, successful `main` CI triggers production deployment. Self-host forks update by manually running Deploy Production on `main`.
 
 Full local-development guide: `apps/www/src/content/docs/docs/guides/local-development.md`.
 
 ## Deployment
 
-Merge to `main` automatically deploys to production via GitHub Actions.
+Merging to `main` in the canonical repository automatically deploys to production after CI succeeds. Self-host forks do not update from a push alone; operators manually run **Deploy Production** on their fork's `main` branch when they want to deploy.
 
-- **CI** (`ci.yml`): lint, typecheck, test, build on all pushes/PRs
+- **CI** (`ci.yml`): lint, typecheck, test, build on pull requests and canonical `main` pushes; fork `main` pushes are intentionally skipped
 - **Deploy Staging** (`deploy-staging.yml`): manual trigger only (`workflow_dispatch`) — agents trigger this explicitly during `/do` Phase 6
-- **Deploy Production** (`deploy.yml`): full Pulumi + Wrangler deployment on push to main
+- **Deploy Production** (`deploy.yml`): full Pulumi + Wrangler deployment after successful canonical `main` CI, or manual `workflow_dispatch` for self-host forks
 - **Teardown** (`teardown.yml`): manual only — destroys all resources
 - **Generated platform secrets**: deployment-owned signing/encryption keys are generated and persisted by Pulumi when practical, then copied to Worker secrets. Do not add manual GitHub Environment prerequisites for values SAM can safely create itself; GitHub secrets for generated keys are override/rotation paths only.
 
@@ -89,7 +89,7 @@ Staging verification means the feature WORKS — not that pages load, not that c
 
 ### Post-Merge Production Deploy Monitoring (MANDATORY)
 
-After merging ANY PR to main, agents MUST monitor the Deploy Production workflow to completion. If the deploy fails, **alert the user immediately** with the failure reason and whether it requires human intervention. Do NOT silently finish the task when the deploy fails — a merged PR is not shipped until the deploy succeeds. See the `/do` workflow Phase 7b for the full procedure.
+After merging ANY PR to main in this canonical repository, agents MUST monitor the Deploy Production workflow to completion. If the deploy fails, **alert the user immediately** with the failure reason and whether it requires human intervention. Do NOT silently finish the task when the deploy fails — a merged PR is not shipped until the deploy succeeds. See the `/do` workflow Phase 7b for the full procedure.
 
 ### Data Integrity Safeguards (CRITICAL)
 
