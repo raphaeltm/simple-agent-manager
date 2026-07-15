@@ -66,3 +66,25 @@ Cloudflare-container instant sessions run the vm-agent as a non-root user, but o
 - `tasks/backlog/2026-03-13-binary-install-security-hardening.md`
 - `.claude/rules/35-vertical-slice-testing.md`
 - `.claude/rules/36-cli-quality.md` (only if CLI code becomes affected)
+
+## Continuation: ACP Startup Failure Reconciliation (2026-07-15)
+
+User explicitly authorized continuing this previously draft/no-staging PR through staging verification and merge. After merging current `main`, the branch now also fixes the raw cf-container instant-session failure mode where vm-agent `/start` returned 202 before ACP `NewSession` actually succeeded.
+
+Additional checklist:
+
+- [x] Merge current `main` into PR branch and preserve the pinned install manifest plus baked vm-agent container artifact path.
+- [x] Make vm-agent report `activity=error` with a redacted `statusError` when agent selection or ACP startup fails before the initial prompt.
+- [x] Make the Worker activity callback reconcile error activity into failed ACP lifecycle state, D1 `agent_sessions.status='error'`, failed chat session state, and ended cf-container active work.
+- [x] Preserve terminal-state idempotency so duplicate late error reports do not re-fail completed/interrupted sessions.
+- [x] Add focused API and Go tests for the callback and redacted error activity payload.
+- [ ] Deploy to staging and verify a real instant cf-container session starts successfully.
+- [ ] Get PR checks green, mark ready if needed, merge, and monitor production deployment.
+
+Validation so far:
+
+- `pnpm --filter @simple-agent-manager/api test -- tests/unit/routes/agent-activity-callback.test.ts tests/unit/acp-session-activity-schema.test.ts tests/unit/vm-agent-cross-boundary-contract.test.ts` passed: 41 tests.
+- `pnpm --filter @simple-agent-manager/api lint` passed with existing warnings only.
+- `pnpm --filter @simple-agent-manager/api typecheck` passed after building `@simple-agent-manager/shared`, `@simple-agent-manager/providers`, and `@simple-agent-manager/cloud-init`.
+- `pnpm exec tsx scripts/quality/check-agent-install-manifest.ts` passed.
+- `/tmp/go/bin/go test ./internal/acp` passed with Go 1.25.0.

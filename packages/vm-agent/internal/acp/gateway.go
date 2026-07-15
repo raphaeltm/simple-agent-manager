@@ -93,6 +93,7 @@ type MessageReportEntry struct {
 	Content      string
 	ToolMetadata string
 	Timestamp    string
+	Origin       string
 }
 
 // GatewayConfig holds configuration for the ACP gateway and SessionHost.
@@ -433,7 +434,7 @@ func (g *Gateway) handleMessage(ctx context.Context, data []byte) {
 
 	switch rpcMsg.Method {
 	case "session/prompt":
-		go g.host.HandlePrompt(ctx, rpcMsg.ID, rpcMsg.Params, g.viewerID)
+		go g.host.HandlePrompt(ctx, rpcMsg.ID, rpcMsg.Params, g.viewerID, false)
 	case "session/cancel":
 		// Cancel the in-flight prompt context. Also forward to agent stdin
 		// so the agent process itself can react to the cancellation signal.
