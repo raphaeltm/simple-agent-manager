@@ -34,7 +34,8 @@ SET routing_status = CASE
   WHEN verification_status = 'verified' THEN 'dns_recheck_required'
   WHEN verification_status = 'failed' THEN 'failed'
   ELSE 'pending_dns'
-END;
+END
+WHERE routing_status = 'pending_dns';
 
 CREATE INDEX idx_deployment_custom_domains_environment_state
   ON deployment_custom_domains(environment_id, desired_state, routing_status);

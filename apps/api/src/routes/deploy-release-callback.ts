@@ -487,7 +487,7 @@ deployReleaseCallbackRoute.get('/:id/deploy-routes', async (c) => {
     throw errors.badRequest('Missing required query parameters: revision, environmentId');
   }
 
-  const routingRevision = parseInt(revisionStr, 10);
+  const routingRevision = Number.parseInt(revisionStr, 10);
   if (!Number.isFinite(routingRevision) || routingRevision <= 0) {
     throw errors.badRequest('Invalid revision parameter');
   }
