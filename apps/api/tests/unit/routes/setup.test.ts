@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Env } from '../../../src/env';
 import { AppError } from '../../../src/middleware/error';
 import { setupRoutes } from '../../../src/routes/setup';
-import { generateEncryptionKey } from '../../../src/services/encryption';
+import { decrypt, generateEncryptionKey } from '../../../src/services/encryption';
 
 function createD1(sqlite: Database.Database): D1Database {
   return {
@@ -370,6 +370,52 @@ describe('setup routes', () => {
     expect(clientId).toBeUndefined();
     expect(completed).toBeUndefined();
   });
+
+  it('updates the existing platform integration secret row during forced setup completion', async () => {
+    const env = createEnv({ SETUP_FORCE: 'true' });
+    const app = createApp();
+
+    const first = await app.request(
+      '/api/setup/complete',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': '198.51.100.18' },
+        body: JSON.stringify({
+          token: 'setup-token',
+          config: { google: { clientId: 'google-client-id', clientSecret: 'google-client-secret-1' } },
+        }),
+      },
+      env,
+    );
+    expect(first.status).toBe(200);
+
+    const second = await app.request(
+      '/api/setup/complete',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': '198.51.100.19' },
+        body: JSON.stringify({
+          token: 'setup-token',
+          config: { google: { clientId: 'google-client-id', clientSecret: 'google-client-secret-2' } },
+        }),
+      },
+      env,
+    );
+    expect(second.status).toBe(200);
+
+    const rows = await env.DATABASE.prepare(
+      `SELECT encrypted_token AS encryptedToken, iv FROM platform_credentials
+       WHERE credential_type = 'platform-integration'
+         AND provider = 'google'
+         AND credential_kind = 'google.clientSecret'`
+    ).all<{ encryptedToken: string; iv: string }>();
+
+    expect(rows.results).toHaveLength(1);
+    await expect(decrypt(rows.results[0].encryptedToken, rows.results[0].iv, env.ENCRYPTION_KEY)).resolves.toBe(
+      'google-client-secret-2'
+    );
+  });
+
 
   it('treats replayed setup completion as closed without changing public response shape', async () => {
     const env = createEnv();

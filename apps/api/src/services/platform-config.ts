@@ -348,7 +348,7 @@ function settingStatement(env: Env, key: string, value: string, updatedBy: strin
   ).bind(key, value, now, updatedBy);
 }
 
-async function secretInsertStatement(
+async function secretUpsertStatement(
   env: Env,
   provider: string,
   kind: string,
@@ -358,6 +358,21 @@ async function secretInsertStatement(
   now: string
 ): Promise<D1PreparedStatement> {
   const encrypted = await encrypt(value, getCredentialEncryptionKey(env));
+  const existing = await env.DATABASE.prepare(
+    `SELECT id FROM platform_credentials
+     WHERE credential_type = ? AND provider = ? AND credential_kind = ?
+     ORDER BY updated_at DESC, created_at DESC
+     LIMIT 1`
+  ).bind(INTEGRATION_CREDENTIAL_TYPE, provider, kind).first<{ id: string }>();
+
+  if (existing) {
+    return env.DATABASE.prepare(
+      `UPDATE platform_credentials
+       SET label = ?, encrypted_token = ?, iv = ?, is_enabled = 1, updated_at = ?
+       WHERE id = ?`
+    ).bind(label, encrypted.ciphertext, encrypted.iv, now, existing.id);
+  }
+
   return env.DATABASE.prepare(
     `INSERT INTO platform_credentials
        (id, credential_type, provider, agent_type, credential_kind, label, encrypted_token, iv, is_enabled, created_by, created_at, updated_at)
@@ -407,27 +422,27 @@ async function buildPlatformIntegrationStatements(
 
   const githubClientSecret = trimOptional(github.clientSecret);
   if (githubClientSecret) {
-    statements.push(await secretInsertStatement(env, 'github', SECRET_KINDS.githubClientSecret, 'GitHub OAuth client secret', githubClientSecret, updatedBy, now));
+    statements.push(await secretUpsertStatement(env, 'github', SECRET_KINDS.githubClientSecret, 'GitHub OAuth client secret', githubClientSecret, updatedBy, now));
   }
 
   const githubAppPrivateKey = trimOptional(github.appPrivateKey);
   if (githubAppPrivateKey) {
-    statements.push(await secretInsertStatement(env, 'github', SECRET_KINDS.githubAppPrivateKey, 'GitHub App private key', githubAppPrivateKey, updatedBy, now));
+    statements.push(await secretUpsertStatement(env, 'github', SECRET_KINDS.githubAppPrivateKey, 'GitHub App private key', githubAppPrivateKey, updatedBy, now));
   }
 
   const githubWebhookSecret = trimOptional(github.webhookSecret);
   if (githubWebhookSecret) {
-    statements.push(await secretInsertStatement(env, 'github', SECRET_KINDS.githubWebhookSecret, 'GitHub webhook secret', githubWebhookSecret, updatedBy, now));
+    statements.push(await secretUpsertStatement(env, 'github', SECRET_KINDS.githubWebhookSecret, 'GitHub webhook secret', githubWebhookSecret, updatedBy, now));
   }
 
   const googleClientSecret = trimOptional(google.clientSecret);
   if (googleClientSecret) {
-    statements.push(await secretInsertStatement(env, 'google', SECRET_KINDS.googleClientSecret, 'Google OAuth client secret', googleClientSecret, updatedBy, now));
+    statements.push(await secretUpsertStatement(env, 'google', SECRET_KINDS.googleClientSecret, 'Google OAuth client secret', googleClientSecret, updatedBy, now));
   }
 
   const gitlabClientSecret = trimOptional(gitlab.clientSecret);
   if (gitlabClientSecret) {
-    statements.push(await secretInsertStatement(env, 'gitlab', SECRET_KINDS.gitlabClientSecret, 'GitLab client secret', gitlabClientSecret, updatedBy, now));
+    statements.push(await secretUpsertStatement(env, 'gitlab', SECRET_KINDS.gitlabClientSecret, 'GitLab client secret', gitlabClientSecret, updatedBy, now));
   }
 
   return statements;
