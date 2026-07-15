@@ -17,11 +17,11 @@ Constraint: open a PR and do not merge it.
 
 ## Implementation Checklist
 
-- [ ] Harden `HtmlViewer` rendered mode by sanitizing user HTML before `srcDoc` and failing closed on scripts, event handlers, forms, iframes/objects/embeds, and navigation-capable URL attributes.
-- [ ] Tighten HTML preview iframe sandbox/CSP so rendered previews cannot execute scripts or open/submit/navigate.
-- [ ] Preserve expected legitimate preview behavior: ordinary HTML structure, text, formatting, images using safe local/data/blob sources, rendered/source toggle, and source view with original HTML.
-- [ ] Add/adjust unit tests covering allowed HTML, blocked scripts/event handlers/navigation/forms/iframes, iframe sandbox attributes, source-view preservation, markdown raw HTML behavior, and safe markdown link behavior.
-- [ ] Run relevant frontend tests and visual/validation checks.
+- [x] Harden `HtmlViewer` rendered mode by sanitizing user HTML before `srcDoc` and failing closed on scripts, event handlers, forms, iframes/objects/embeds, and navigation-capable URL attributes.
+- [x] Tighten HTML preview iframe sandbox/CSP so rendered previews cannot execute scripts or open/submit/navigate.
+- [x] Preserve expected legitimate preview behavior: ordinary HTML structure, text, formatting, images using safe local/data/blob sources, rendered/source toggle, and source view with original HTML.
+- [x] Add/adjust unit tests covering allowed HTML, blocked scripts/event handlers/navigation/forms/iframes, iframe sandbox attributes, source-view preservation, markdown raw HTML behavior, and safe markdown link behavior.
+- [x] Run relevant frontend tests and visual/validation checks.
 - [ ] Run security-auditor, test-engineer, and task-completion-validator reviews before finalizing.
 
 ## Acceptance Criteria

@@ -14,6 +14,8 @@ import {
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
+import { sanitizeUrl } from '../lib/url-utils';
+
 export { MERMAID_SVG_SANITIZE_CONFIG as SVG_SANITIZE_CONFIG } from '@simple-agent-manager/acp-client/mermaid';
 
 // ---------- Mermaid Initialization ----------
@@ -189,7 +191,7 @@ export const RenderedMarkdown: FC<{ content: string; style?: CSSProperties; inli
             </blockquote>
           ),
           a: ({ href, children }) => (
-            <a href={href} target="_blank" rel="noreferrer" className="text-tn-blue" style={{ overflowWrap: 'anywhere' }}>
+            <a href={sanitizeUrl(href ?? '')} target="_blank" rel="noreferrer" className="text-tn-blue" style={{ overflowWrap: 'anywhere' }}>
               {children}
             </a>
           ),
