@@ -63,6 +63,46 @@ function isValidIPv4Address(value: string | null | undefined): value is string {
   });
 }
 
+async function deploymentVolumesReadyForNode(params: {
+  database: Env['DATABASE'];
+  environmentId: string;
+  eventName: string;
+  nodeId: string;
+  providerInstanceId: string | null | undefined;
+  requiresVolumes: boolean;
+}): Promise<boolean> {
+  if (!params.requiresVolumes) {
+    return true;
+  }
+
+  const volumeReadiness = await params.database
+    .prepare(
+      `SELECT
+         COUNT(*) AS total,
+         COUNT(CASE WHEN attached_server_id = ? THEN 1 END) AS attached
+       FROM deployment_volumes
+       WHERE environment_id = ?`
+    )
+    .bind(params.providerInstanceId ?? '', params.environmentId)
+    .first<{ total: number; attached: number }>();
+
+  if (
+    !volumeReadiness ||
+    volumeReadiness.total === 0 ||
+    volumeReadiness.attached < volumeReadiness.total
+  ) {
+    log.info(params.eventName, {
+      nodeId: params.nodeId,
+      environmentId: params.environmentId,
+      total: volumeReadiness?.total ?? 0,
+      attached: volumeReadiness?.attached ?? 0,
+    });
+    return false;
+  }
+
+  return true;
+}
+
 /**
  * POST /:id/token — Issue a node-scoped management token for direct VM Agent access.
  * The browser uses this token to call the VM Agent directly for node-level data
@@ -476,29 +516,17 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
           latest.version > appliedSeq &&
           (latest.status === 'created' || (latest.status === 'applying' && !nodeAlreadyApplying))
         ) {
-          if (envRow.requiresVolumes) {
-            const volumeReadiness = await c.env.DATABASE.prepare(
-              `SELECT
-                 COUNT(*) AS total,
-                 COUNT(CASE WHEN attached_server_id = ? THEN 1 END) AS attached
-               FROM deployment_volumes
-               WHERE environment_id = ?`
-            )
-              .bind(node.providerInstanceId ?? '', envId)
-              .first<{ total: number; attached: number }>();
-            if (
-              !volumeReadiness ||
-              volumeReadiness.total === 0 ||
-              volumeReadiness.attached < volumeReadiness.total
-            ) {
-              log.info('heartbeat.deploy_release_waiting_for_volume_attach', {
-                nodeId,
-                environmentId: envId,
-                total: volumeReadiness?.total ?? 0,
-                attached: volumeReadiness?.attached ?? 0,
-              });
-              continue;
-            }
+          if (
+            !(await deploymentVolumesReadyForNode({
+              database: c.env.DATABASE,
+              environmentId: envId,
+              eventName: 'heartbeat.deploy_release_waiting_for_volume_attach',
+              nodeId,
+              providerInstanceId: node.providerInstanceId,
+              requiresVolumes: envRow.requiresVolumes,
+            }))
+          ) {
+            continue;
           }
           pendingReleases.push({ environmentId: envId, seq: latest.version });
         }
@@ -514,29 +542,17 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
           hasCurrentAppliedRelease &&
           !nodeAlreadyApplying
         ) {
-          if (envRow.requiresVolumes) {
-            const volumeReadiness = await c.env.DATABASE.prepare(
-              `SELECT
-                 COUNT(*) AS total,
-                 COUNT(CASE WHEN attached_server_id = ? THEN 1 END) AS attached
-               FROM deployment_volumes
-               WHERE environment_id = ?`
-            )
-              .bind(node.providerInstanceId ?? '', envId)
-              .first<{ total: number; attached: number }>();
-            if (
-              !volumeReadiness ||
-              volumeReadiness.total === 0 ||
-              volumeReadiness.attached < volumeReadiness.total
-            ) {
-              log.info('heartbeat.deploy_routes_waiting_for_volume_attach', {
-                nodeId,
-                environmentId: envId,
-                total: volumeReadiness?.total ?? 0,
-                attached: volumeReadiness?.attached ?? 0,
-              });
-              continue;
-            }
+          if (
+            !(await deploymentVolumesReadyForNode({
+              database: c.env.DATABASE,
+              environmentId: envId,
+              eventName: 'heartbeat.deploy_routes_waiting_for_volume_attach',
+              nodeId,
+              providerInstanceId: node.providerInstanceId,
+              requiresVolumes: envRow.requiresVolumes,
+            }))
+          ) {
+            continue;
           }
           pendingRouteConfigs.push({ environmentId: envId, revision: desiredRoutingRevision });
         }

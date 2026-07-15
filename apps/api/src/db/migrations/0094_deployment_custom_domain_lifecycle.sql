@@ -33,7 +33,7 @@ UPDATE deployment_custom_domains
 SET routing_status = CASE
   WHEN verification_status = 'verified' THEN 'dns_recheck_required'
   WHEN verification_status = 'failed' THEN 'failed'
-  ELSE 'pending_dns'
+  ELSE routing_status
 END
 WHERE routing_status = 'pending_dns';
 
