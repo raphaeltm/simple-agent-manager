@@ -57,7 +57,15 @@ function releaseDb(manifestJson: string | null) {
 }
 
 function customDomainDb(
-  rows: Array<{ hostname: string; service: string; port: number; verificationStatus?: string }>
+  rows: Array<{
+    hostname: string;
+    service: string;
+    port: number;
+    verificationStatus?: string;
+    verifiedCnameTarget?: string | null;
+    desiredState?: string;
+    deletedAt?: string | null;
+  }>
 ) {
   return {
     select: () => ({
@@ -125,8 +133,22 @@ describe('buildVerifiedCustomRouteTargets', () => {
 
     const customTargets = await buildVerifiedCustomRouteTargets(
       customDomainDb([
-        { hostname: 'App.Customer.Example.com', service: 'web', port: 3000 },
-        { hostname: 'api.customer.example.com', service: 'api', port: 8080 },
+        {
+          hostname: 'App.Customer.Example.com',
+          service: 'web',
+          port: 3000,
+          verifiedCnameTarget: 'r1-web-3000-env-1.apps.sammy.party',
+          desiredState: 'active',
+          deletedAt: null,
+        },
+        {
+          hostname: 'api.customer.example.com',
+          service: 'api',
+          port: 8080,
+          verifiedCnameTarget: 'r2-api-8080-env-1.apps.sammy.party',
+          desiredState: 'active',
+          deletedAt: null,
+        },
       ]),
       'env-1',
       parentRoutes
@@ -150,7 +172,16 @@ describe('buildVerifiedCustomRouteTargets', () => {
 
   it('skips verified custom domains whose parent route no longer exists', async () => {
     const customTargets = await buildVerifiedCustomRouteTargets(
-      customDomainDb([{ hostname: 'old.customer.example.com', service: 'old', port: 3000 }]),
+      customDomainDb([
+        {
+          hostname: 'old.customer.example.com',
+          service: 'old',
+          port: 3000,
+          verifiedCnameTarget: 'r1-old-3000-env-1.apps.sammy.party',
+          desiredState: 'active',
+          deletedAt: null,
+        },
+      ]),
       'env-1',
       [
         {

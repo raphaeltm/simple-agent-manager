@@ -6,6 +6,7 @@ import { environmentPortOffset } from '../../../src/services/deployment-routing'
 
 const mockLimit = vi.fn();
 const mockSignDeployPayload = vi.fn().mockResolvedValue('signed-payload');
+const mockSignRouteConfigPayload = vi.fn().mockResolvedValue('signed-route-config');
 const mockVerifyCallbackToken = vi.fn().mockResolvedValue({
   workspace: 'node-deploy-1',
   type: 'callback',
@@ -18,7 +19,12 @@ const mockBuildVolumeMountDescriptors = vi.fn().mockResolvedValue([]);
 const mockOrderBy = vi.fn().mockResolvedValue([]);
 const mockUpdateSet = vi.fn();
 const mockUpdateWhere = vi.fn();
-let customDomainRows: Array<{ hostname: string; service: string; port: number }> = [];
+let customDomainRows: Array<{
+  hostname: string;
+  service: string;
+  port: number;
+  verifiedCnameTarget?: string | null;
+}> = [];
 const currentProviderServerId = 'provider-server-current';
 
 function createWhereResult() {
@@ -57,6 +63,7 @@ vi.mock('../../../src/services/jwt', () => ({
 
 vi.mock('../../../src/services/deploy-signing', () => ({
   signDeployPayload: (...args: unknown[]) => mockSignDeployPayload(...args),
+  signRouteConfigPayload: (...args: unknown[]) => mockSignRouteConfigPayload(...args),
 }));
 
 vi.mock('../../../src/services/registry-credentials', () => ({
@@ -222,6 +229,7 @@ describe('deploy release callback route', () => {
     mockUpdateWhere.mockResolvedValue(undefined);
     mockVerifyCallbackToken.mockClear();
     mockSignDeployPayload.mockClear();
+    mockSignRouteConfigPayload.mockClear();
     mockMintProjectRegistryCredential.mockReset();
     mockLoadResolvedSecrets.mockReset();
     mockLoadResolvedSecrets.mockResolvedValue({});
@@ -233,6 +241,7 @@ describe('deploy release callback route', () => {
     mockOrderBy.mockResolvedValue([]);
     customDomainRows = [];
     mockSignDeployPayload.mockResolvedValue('signed-payload');
+    mockSignRouteConfigPayload.mockResolvedValue('signed-route-config');
     mockVerifyCallbackToken.mockResolvedValue({
       workspace: 'node-deploy-1',
       type: 'callback',
@@ -354,10 +363,74 @@ describe('deploy release callback route', () => {
     );
   });
 
+  it('serves a signed route-only config for the desired routing revision', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000);
+    mockLimit
+      .mockResolvedValueOnce([{ userId: 'user-1' }])
+      .mockResolvedValueOnce([
+        {
+          id: 'env-1',
+          projectId: 'proj-1',
+          nodeId: 'node-deploy-1',
+          status: 'active',
+          observedAppliedSeq: 7,
+          desiredRoutingRevision: 3,
+          observedRoutingRevision: 2,
+        },
+      ])
+      .mockResolvedValueOnce([
+        { id: 'rel-1', manifest: JSON.stringify(manifest()), version: 7, source: null },
+      ]);
+    customDomainRows = [
+      {
+        hostname: 'App.Customer.Example.com',
+        service: 'web',
+        port: 3000,
+        verifiedCnameTarget: 'r1-web-3000-env-1.apps.sammy.party',
+      },
+    ];
+
+    const response = await createTestApp().request(
+      '/api/nodes/node-deploy-1/deploy-routes?revision=3&environmentId=env-1',
+      { headers: { Authorization: 'Bearer callback-token' } },
+      env()
+    );
+
+    const body = await response.json();
+    expect(response.status, JSON.stringify(body)).toBe(200);
+    expect(body).toMatchObject({
+      environmentId: 'env-1',
+      nodeId: 'node-deploy-1',
+      currentSeq: 7,
+      routingRevision: 3,
+      signature: 'signed-route-config',
+    });
+    expect(body.routes).toContainEqual(
+      expect.objectContaining({ hostname: 'app.customer.example.com', service: 'web' })
+    );
+    expect(mockSignRouteConfigPayload).toHaveBeenCalledWith(
+      expect.objectContaining({
+        environmentId: 'env-1',
+        nodeId: 'node-deploy-1',
+        currentSeq: 7,
+        routingRevision: 3,
+        routes: body.routes,
+      }),
+      expect.anything()
+    );
+  });
+
   it('adds verified custom domains to the signed apply payload without creating user DNS records', async () => {
     vi.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000);
     stubHappyPathDb();
-    customDomainRows = [{ hostname: 'App.Customer.Example.com', service: 'web', port: 3000 }];
+    customDomainRows = [
+      {
+        hostname: 'App.Customer.Example.com',
+        service: 'web',
+        port: 3000,
+        verifiedCnameTarget: 'r1-web-3000-env-1.apps.sammy.party',
+      },
+    ];
     const fetchMock = stubDnsFetch();
 
     const response = await requestDeployRelease();
