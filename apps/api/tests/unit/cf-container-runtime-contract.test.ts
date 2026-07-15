@@ -2,9 +2,9 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import agentInstallManifest from '../../../../packages/shared/src/agent-install-manifest.json';
-
 import { describe, expect, it } from 'vitest';
+
+import agentInstallManifest from '../../../../packages/shared/src/agent-install-manifest.json';
 
 const apiPackageRoot = join(fileURLToPath(new URL('.', import.meta.url)), '../..');
 const apiRoot = join(apiPackageRoot, 'src');
