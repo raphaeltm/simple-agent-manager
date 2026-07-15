@@ -45,14 +45,14 @@ Cloudflare-container instant sessions run the vm-agent as a non-root user, but o
 - [x] Amp installs the maintained `@ampcode/cli` package at a pinned version and its ACP bridge post-install behavior remains covered.
 - [x] An install/selection failure produces durable failed/error session state plus a visible system message while preserving existing BootLog/error reporting.
 - [x] Local Go/TypeScript tests and the repository quality suite pass.
-- [x] The PR documents that staging was intentionally skipped and remains unmerged per explicit instruction.
+- [x] The original no-staging/no-merge constraint was documented; the later 2026-07-15 user instruction explicitly superseded it for staging verification and merge.
 
 ## Verification Evidence
 
 - Local Node 22 cf-container image built successfully with all six agent stacks and the Amp hook.
 - Image size: 735,871,006 bytes (0.736 GB), below the 8 GB standard-1 disk budget.
 - Non-root runtime user resolved all catalog binaries and completed a real rootless global npm fallback install under `SAM_AGENT_HOME`.
-- Staging intentionally skipped by explicit user instruction.
+- Initial staging was intentionally skipped by the original instruction; 2026-07-15 continuation later deployed the PR branch to staging for verification.
 
 ## References
 
@@ -78,7 +78,7 @@ Additional checklist:
 - [x] Make the Worker activity callback reconcile error activity into failed ACP lifecycle state, D1 `agent_sessions.status='error'`, failed chat session state, and ended cf-container active work.
 - [x] Preserve terminal-state idempotency so duplicate late error reports do not re-fail completed/interrupted sessions.
 - [x] Add focused API and Go tests for the callback and redacted error activity payload.
-- [ ] Deploy to staging and verify a real instant cf-container session starts successfully.
+- [x] Deploy to staging and verify a real instant cf-container session starts successfully.
 - [ ] Get PR checks green, mark ready if needed, merge, and monitor production deployment.
 
 Validation so far:
@@ -88,3 +88,11 @@ Validation so far:
 - `pnpm --filter @simple-agent-manager/api typecheck` passed after building `@simple-agent-manager/shared`, `@simple-agent-manager/providers`, and `@simple-agent-manager/cloud-init`.
 - `pnpm exec tsx scripts/quality/check-agent-install-manifest.ts` passed.
 - `/tmp/go/bin/go test ./internal/acp` passed with Go 1.25.0.
+- `pnpm test` passed across the monorepo after updating the cf-container runtime contract test.
+- `pnpm build` passed.
+- `pnpm lint` passed with existing warnings only.
+- `pnpm typecheck` passed.
+- `cd packages/vm-agent && /tmp/go/bin/go test ./...` passed.
+- Staging deploy workflow run `29440536587` completed successfully, including `deploy / Deploy to Cloudflare` and `smoke-tests`.
+- Existing staging token-login Playwright smoke passed against `api.sammy.party`.
+- Temporary staging instant-session smoke passed against `api.sammy.party`: project `01KTKXZ4ZZAT6MJFXRW1ZTQ7RB`, profile `01KX2N3REWHCAT1QDG927BR52M`, session `3f8871f3-a7e2-4a26-8645-6ec2ff427deb`, workspace `01KXKHH4F86Z6B7TRD659ZAWV1`, node `01KXKHH4AM9Z81NBHVN6SEQZ0Q`, ACP/session `01KXKHHCQZ7HM1M0JS2505HV4G`; startup returned `runtime.cf-container` in 10.9s and produced 12 messages including assistant text `pr1565 instant smoke ok`.

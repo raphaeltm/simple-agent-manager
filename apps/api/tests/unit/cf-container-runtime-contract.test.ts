@@ -2,6 +2,8 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import agentInstallManifest from '../../../../packages/shared/src/agent-install-manifest.json';
+
 import { describe, expect, it } from 'vitest';
 
 const apiPackageRoot = join(fileURLToPath(new URL('.', import.meta.url)), '../..');
@@ -16,9 +18,7 @@ function readPackage(relPath: string): string {
 }
 
 function getPinnedAgentPackage(agentType: string): string {
-  const manifest = JSON.parse(
-    readFileSync(join(apiPackageRoot, '../../packages/shared/src/agent-install-manifest.json'), 'utf8')
-  ) as Array<{ agentType: string; package: string; version: string }>;
+  const manifest = agentInstallManifest as Array<{ agentType: string; package: string; version: string }>;
   const entry = manifest.find((candidate) => candidate.agentType === agentType);
   if (!entry) {
     throw new Error(`Missing agent install manifest entry for ${agentType}`);
