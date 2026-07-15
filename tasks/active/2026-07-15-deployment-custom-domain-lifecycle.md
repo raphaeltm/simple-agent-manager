@@ -322,16 +322,16 @@ implemented and tested here.
 - [x] Specialist reviews: task-completion-validator, cloudflare-specialist,
       go-specialist, ui-ux-specialist, security-auditor,
       constitution-validator, test-engineer, doc-sync-validator if docs change.
-      Pre-PR task-completion verdict is WARN only because staging/live DNS
-      verification and local Go execution remain pending.
-- [ ] Staging deploy and live verification:
-  - [ ] verify migration columns/tables through CF API,
-  - [ ] add test custom domain and verify DNS,
-  - [ ] prove it becomes active without a new app release,
-  - [ ] stop environment and confirm preserved inactive domain visibility,
-  - [ ] start replacement node and confirm verified domain restores,
-  - [ ] delete/deactivate domain and prove hostname no longer serves,
-  - [ ] verify no new browser console errors and regression checklist.
+      Pre-PR task-completion verdict was WARN only because staging/live DNS
+      verification and local Go execution were still pending at review time.
+- [x] Staging deploy and live verification:
+  - [x] verify migration columns/tables through CF API,
+  - [x] add test custom domain and verify DNS,
+  - [x] prove it becomes active without a new app release,
+  - [x] stop environment and confirm preserved inactive domain visibility,
+  - [x] start replacement node and confirm verified domain restores,
+  - [x] delete/deactivate domain and prove hostname no longer serves,
+  - [x] verify no new browser console errors and regression checklist.
 
 ### Implementation status — 2026-07-15
 
@@ -345,7 +345,42 @@ implemented and tested here.
 - Local TypeScript/web validation is green. VM-agent Go tests were added, but
   this workspace cannot execute or format Go because `go` and `gofmt` are not
   installed.
-- Staging/live DNS verification is still pending after PR/CI readiness.
+- Staging deploy `29409163762` succeeded for PR head
+  `39b7ccdbe0019395edcffb604dee47590c995a81`; CF API verified the new
+  environment and custom-domain schema in `sam-staging`.
+- Existing volume-backed staging environment `01KVJDV913S8W7KK32HTZTK0H8`
+  verified the Hetzner detach idempotency fix: stop completed with
+  `volumesDetached: 1`, start provisioned replacement node
+  `01KXJPV5P25EG7K7H1DW9G7TTG`, and the volume row attached to provider server
+  `151196607`. The app release on that old environment still restart-looped
+  because its test image exits after printing `hello from sam e2e`; that is
+  unrelated to the volume/provider recovery path.
+- Disposable staging environment `01KXJQ9PBNBJN5YH0FRQT2ETME` verified the full
+  custom-domain lifecycle with hostname
+  `pr1602-cd.178.104.223.13.sslip.io`:
+  - attach returned pending DNS for the `web:8080` parent route,
+  - verify stored CNAME target
+    `r1-web-8080-01kxjq9pbnbjn5yh0frqt2etme.apps.sammy.party` and queued routing
+    revision 1,
+  - node heartbeat observed revision 1 at `2026-07-15T11:19:29.756Z`,
+  - HTTPS to the custom hostname returned `200` from the test app,
+  - stop preserved the domain as `inactive_environment_stopped` and left public
+    routes discoverable with `routesAreLive: false`,
+  - start provisioned replacement node `01KXJR630P1JR9EJ2M6NNS2Z5K`, applied
+    release 1, and restored the domain as active with HTTPS `200`,
+  - delete returned `202`, queued deactivation revision 2, node logs showed
+    `deploy.routes: applied` for revision 2, D1 finalized the row as
+    `deleted/deactivated`, and HTTPS to the custom hostname failed TLS because
+    the site block was gone.
+- Staging browser smoke opened the Domains tab at
+  `/projects/01KJNR9R3TEN3KX1ETE33852R8/deployments/01KXJQ9PBNBJN5YH0FRQT2ETME?tab=domains`
+  with the smoke-token flow; it rendered the Domains tab empty/add state and
+  reported zero console/page errors.
+- Cleanup deleted disposable environment `01KXJQ9PBNBJN5YH0FRQT2ETME`, deleted
+  node `01KXJR630P1JR9EJ2M6NNS2Z5K`, and removed one generated app-route DNS
+  record. CF DNS read-back for
+  `r1-web-8080-01kxjq9pbnbjn5yh0frqt2etme.apps.sammy.party` returned zero
+  records.
 
 ## Acceptance criteria
 
