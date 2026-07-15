@@ -45,7 +45,6 @@ describe('RenderedMarkdown', () => {
     expect(container.style.padding).toBe('32px');
   });
 
-
   it('does not render raw HTML from markdown as DOM', () => {
     const { container } = render(
       <RenderedMarkdown content={'# Report\n\n<script>alert(1)</script><iframe src="https://evil.example"></iframe><span onclick="alert(2)">raw</span>'} />,
@@ -68,8 +67,6 @@ describe('RenderedMarkdown', () => {
     expect(link).toHaveAttribute('rel', 'noreferrer noopener');
   });
 
-
-
   it('preserves relative markdown links for local preview navigation', () => {
     render(<RenderedMarkdown content={'[Section](#section) [Guide](/docs/guide) [Relative](../README.md)'} />);
 
@@ -79,9 +76,10 @@ describe('RenderedMarkdown', () => {
   });
 
   it('fails closed for unsafe markdown link protocols', () => {
-    render(<RenderedMarkdown content={'[bad](javascript:alert(1))'} />);
+    render(<RenderedMarkdown content={'[bad](javascript:alert(1)) [protocol-relative](//evil.example)'} />);
 
     expect(screen.getByRole('link', { name: 'bad' })).toHaveAttribute('href', '#');
+    expect(screen.getByRole('link', { name: 'protocol-relative' })).toHaveAttribute('href', '#');
   });
 
   it('renders syntax-highlighted code blocks', () => {

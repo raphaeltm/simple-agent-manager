@@ -14,14 +14,13 @@ import {
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
-
 const SAFE_MARKDOWN_URL_PROTOCOLS = new Set(['http:', 'https:']);
 
 function sanitizeMarkdownHref(href: string | undefined): string {
   if (!href) return '#';
   const trimmed = href.trim();
   if (!trimmed) return '#';
-  if (trimmed.startsWith('#') || trimmed.startsWith('/') || trimmed.startsWith('./') || trimmed.startsWith('../')) {
+  if (trimmed.startsWith('#') || (trimmed.startsWith('/') && !trimmed.startsWith('//')) || trimmed.startsWith('./') || trimmed.startsWith('../')) {
     return trimmed;
   }
   try {
