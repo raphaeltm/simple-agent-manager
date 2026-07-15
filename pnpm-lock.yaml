@@ -214,8 +214,8 @@ importers:
         specifier: 4.12.14
         version: 4.12.14
       isomorphic-git:
-        specifier: ^1.38.6
-        version: 1.38.6
+        specifier: ^1.38.7
+        version: 1.38.7
       jose:
         specifier: 6.2.3
         version: 6.2.3
@@ -6603,8 +6603,8 @@ packages:
     resolution: {integrity: sha512-LpB/54B+/2J5hqQ7imZHfdU31OlgQqx7ZicVlkm9kzg9/w8GKLEcFfJl/t7DCEDueOyBAD6zCCwTO6Fzs0NoEQ==}
     engines: {node: '>=16'}
 
-  isomorphic-git@1.38.6:
-    resolution: {integrity: sha512-lCmZ1m2R0LqbZ4QATtLCxhwNBQPNJc74R81dfyF90yLqP8xs2DZLedcnkVuRj6th/L2HYoIvWP5lBpS1ooAagw==}
+  isomorphic-git@1.38.7:
+    resolution: {integrity: sha512-2J2rCV7gTgcpscEDT7PjU5shbsKKI10E4RqBlPDI3LmMXDjSKsN2w1jTIKiay14v87sPDfXjJkgp/Rrxc0zlSg==}
     engines: {node: '>=14.17'}
     hasBin: true
 
@@ -14961,7 +14961,7 @@ snapshots:
 
   eventsource@3.0.7:
     dependencies:
-      eventsource-parser: 3.1.0
+      eventsource-parser: 3.0.6
 
   execa@5.1.1:
     dependencies:
@@ -15956,7 +15956,7 @@ snapshots:
 
   isexe@3.1.1: {}
 
-  isomorphic-git@1.38.6:
+  isomorphic-git@1.38.7:
     dependencies:
       async-lock: 1.4.1
       clean-git-ref: 2.0.1
