@@ -19,10 +19,10 @@ The prior "Deep CTO codebase review orchestration" session dispatched remediatio
 
 ## Checklist
 
-- [ ] Inspect current GitHub state for PRs #1595-#1600, including branch names, draft state, mergeability, changed files, and CI.
-- [ ] Create a joint branch from current `main`.
-- [ ] Merge the six PR branches into the joint branch, resolving conflicts deliberately.
-- [ ] Run local validation appropriate to affected files.
+- [x] Inspect current GitHub state for PRs #1595-#1600, including branch names, draft state, mergeability, changed files, and CI.
+- [x] Create a joint branch from current `main`.
+- [x] Merge the six PR branches into the joint branch, resolving conflicts deliberately.
+- [x] Run local validation appropriate to affected files.
 - [ ] Open a temporary joint PR with source PR references and validation plan.
 - [ ] Wait for CI and fix any failures.
 - [ ] Deploy the joint PR branch to staging.
