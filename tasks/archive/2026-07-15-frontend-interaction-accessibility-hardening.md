@@ -65,6 +65,7 @@ Explicit constraint: open a PR but do not merge it.
 - Local visual audit passed for completion dock and portal dropdown surfaces at mobile/desktop viewports using existing Playwright audit specs. Screenshot viewer was unavailable in this sandbox due `bwrap: loopback: Failed RTM_NEWADDR`, so screenshot-backed claims are limited to the passing Playwright assertions and generated artifacts.
 - Full quality gate passed: `pnpm lint && pnpm typecheck && pnpm test && pnpm build`.
 - PR opened and intentionally left unmerged: https://github.com/raphaeltm/simple-agent-manager/pull/1600.
+- PR preflight evidence block validated locally with `pnpm quality:preflight` after setting classifications to `cross-component-change` and `ui-change`.
 - Task-completion validation: PASS. Research findings, implementation checklist, and acceptance criteria are covered by code diff and tests; no new UI-to-backend data path or multi-resource selection was introduced.
 - UI/UX review: PASS. Selected the no-visual-change hardening variant; existing shared components and tokens preserved. Rubric scores: visual hierarchy 5, interaction clarity 5, mobile usability 4, accessibility 5, system consistency 5.
 - Test-quality review: PASS. Added focused interaction tests for Dialog and Dropdown behavior plus a chat lifecycle completion-error regression. Tests follow existing Vitest/Testing Library patterns and exercise boundary behavior through component/API-client mocks with realistic session data.
