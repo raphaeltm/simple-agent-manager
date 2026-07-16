@@ -47,6 +47,10 @@ function positiveInteger(value: string | undefined, fallback: number): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+function cacheKeyComponent(value: string): string {
+  return encodeURIComponent(value);
+}
+
 function credentialCacheIdentity(credential: GcpCredential): string {
   if (credential.authType === 'service-account-key') {
     return `service-account-key:${credential.privateKeyId}`;
@@ -54,12 +58,39 @@ function credentialCacheIdentity(credential: GcpCredential): string {
   return `workload-identity:${credential.gcpProjectNumber}:${credential.wifPoolId}:${credential.wifProviderId}`;
 }
 
+function gcpAccessTokenCachePrefix(userId: string, credential: GcpCredential): string {
+  return `gcp-token:v3:${cacheKeyComponent(userId)}:${cacheKeyComponent(credential.gcpProjectId)}:${cacheKeyComponent(credentialCacheIdentity(credential))}:`;
+}
+
 export function getGcpAccessTokenCacheKey(
   userId: string,
-  _projectId: string,
+  projectId: string,
   credential: GcpCredential,
 ): string {
-  return `gcp-token:v2:${userId}:${credential.gcpProjectId}:${credentialCacheIdentity(credential)}`;
+  return `${gcpAccessTokenCachePrefix(userId, credential)}${cacheKeyComponent(projectId)}`;
+}
+
+/** Clear every project-scoped derivative token for one resolved credential identity. */
+export async function clearGcpAccessTokenCache(
+  env: Env,
+  userId: string,
+  credential: GcpCredential,
+): Promise<void> {
+  const prefix = gcpAccessTokenCachePrefix(userId, credential);
+  let cursor: string | undefined;
+  do {
+    const page = await env.KV.list({ prefix, ...(cursor ? { cursor } : {}) });
+    await Promise.all(page.keys.map((key) => env.KV.delete(key.name)));
+    if (page.list_complete) break;
+    cursor = page.cursor;
+  } while (cursor);
+
+  await Promise.all([
+    env.KV.delete(
+      `gcp-token:v2:${userId}:${credential.gcpProjectId}:${credentialCacheIdentity(credential)}`,
+    ),
+    env.KV.delete(`gcp-token:${userId}:${credential.gcpProjectId}`),
+  ]);
 }
 
 /**

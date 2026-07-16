@@ -1,5 +1,8 @@
+import { DEFAULT_GCP_API_TIMEOUT_MS } from '@simple-agent-manager/shared';
+
 import type { Env } from '../env';
 import { createModuleLogger } from '../lib/logger';
+import { fetchWithTimeout, getTimeoutMs } from './fetch-timeout';
 import type { PlatformIntegrationInput, ResolvedPlatformConfig } from './platform-config';
 
 const log = createModuleLogger('platform-config-validation');
@@ -87,8 +90,13 @@ async function pingGitHubOAuth(clientId: string, clientSecret: string): Promise<
   return null;
 }
 
-async function pingGoogleOAuth(clientId: string, clientSecret: string, redirectUri: string): Promise<string | null> {
-  const response = await fetch(GOOGLE_TOKEN_URL, {
+async function pingGoogleOAuth(
+  clientId: string,
+  clientSecret: string,
+  redirectUri: string,
+  timeoutMs: number,
+): Promise<string | null> {
+  const response = await fetchWithTimeout(GOOGLE_TOKEN_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
@@ -98,7 +106,7 @@ async function pingGoogleOAuth(clientId: string, clientSecret: string, redirectU
       redirect_uri: redirectUri,
       grant_type: 'authorization_code',
     }),
-  });
+  }, timeoutMs);
   const body = await response.json().catch(() => null) as { error?: string } | null;
   if (body?.error === 'invalid_client' || body?.error === 'unauthorized_client') {
     return 'Google OAuth client id/secret were rejected';
@@ -115,6 +123,10 @@ export async function validatePlatformIntegrationInput(
   const google = input.google ?? {};
   const googleInfrastructure = input.googleInfrastructure ?? {};
   const gitlab = input.gitlab ?? {};
+  const googleOAuthTimeoutMs = getTimeoutMs(
+    env.GCP_API_TIMEOUT_MS,
+    DEFAULT_GCP_API_TIMEOUT_MS,
+  );
 
   if (present(github.clientId)) validateOAuthClientId(github.clientId, 'GitHub', errors);
   if (present(github.clientSecret)) validateSecret(github.clientSecret, 'GitHub', errors);
@@ -167,6 +179,7 @@ export async function validatePlatformIntegrationInput(
         google.clientId,
         google.clientSecret,
         `https://api.${env.BASE_DOMAIN}/api/auth/callback/google`,
+        googleOAuthTimeoutMs,
       );
       if (error) errors.push(error);
     } catch (err) {
@@ -180,6 +193,7 @@ export async function validatePlatformIntegrationInput(
         infrastructureClientId,
         infrastructureClientSecret,
         `https://api.${env.BASE_DOMAIN}/auth/google/callback`,
+        googleOAuthTimeoutMs,
       );
       if (error) errors.push(error.replace('Google OAuth', 'Google infrastructure OAuth'));
     } catch (err) {

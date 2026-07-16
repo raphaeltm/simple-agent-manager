@@ -96,7 +96,7 @@ References:
 - [ ] Validate the complete change:
   - [x] Add unit/integration/vertical-slice tests for parsing, PKCS#8 import, fixed endpoint/SSRF resistance, JWT claims/signature, exchange request/response, expiry-aware caching, cache identity, verification-before-replace, atomic failure, legacy WIF compatibility, credential precedence, and sanitized errors.
   - [x] Run lint, typecheck, test, build, migration-safety, and changed-package coverage/quality checks.
-  - [ ] Run task-completion, Cloudflare, security, environment, UI/UX, documentation, constitution, and test-engineering reviews and address all blocking findings.
+  - [x] Run task-completion, Cloudflare, security, environment, UI/UX, documentation, constitution, and test-engineering reviews and address all blocking findings.
   - [ ] Deploy to staging, verify D1 migration/status via the Cloudflare API, exercise admin infrastructure OAuth config without changing Google login, exercise existing WIF, and exercise service-account connect/rotation/provisioning when a suitable user-owned test key is available.
   - [ ] Because provider/provisioning behavior changes, provision a real GCP VM through the changed path, verify heartbeat/workspace access, and clean it up when suitable GCP test credentials are available; report an evidence-backed credential blocker rather than substituting a Hetzner VM for GCP behavior.
 
@@ -121,4 +121,11 @@ The Phase 4 task-completion review passed on 2026-07-16 with no Critical or High
 - The browser-to-API service-account payload, route verification-before-store sequence, fixed Google token/Compute contracts, provider callback, and real SQLite atomic-store behavior are covered across contract, service, route, and integration tests. The route suite mocks service boundaries intentionally; the underlying WebCrypto/fetch/KV and D1 batch boundaries are exercised without replacing them with no-op mocks.
 - The `authType` discriminator is consumed by parsing, token resolution, serialization, safe projection, and cache identity, with both WIF and service-account variants covered.
 - The complete local gates passed: lint, typecheck, test, build, D1/DO migration safety, changed-package coverage, source-contract, file-size, AST, and Wrangler-binding checks. Public documentation built successfully, and the screenshot-backed web audit passed 18 mobile/desktop cases.
-- Specialist reviews, staging migration/runtime verification, and feasible live GCP provisioning remain explicit later `/do` lifecycle gates and are not represented as locally complete here.
+- Staging migration/runtime verification and feasible live GCP provisioning remain explicit later `/do` lifecycle gates and are not represented as locally complete here.
+
+## Phase 5 specialist review
+
+- The security, Cloudflare, environment, UI/UX, documentation-sync, constitution, and test-engineering checklists found no remaining blocking issues. The local delegated-review runner interrupted all three read-only reviewers twice, so the same checked-in specialist instructions were applied directly and evidence was verified against `main...HEAD`.
+- Review caught and fixed a cache-isolation gap: real provider construction now passes the SAM project context, derivative token keys include user/project/GCP project/auth/key identity, and rotation/disconnect enumerate and delete every matching project-scoped derivative plus legacy cache keys.
+- Review added a true route-to-boundary vertical slice covering authenticated input, PKCS#8 parsing, fixed Google token and Compute requests, AES-GCM encryption, real SQLite transactional legacy/composable persistence, safe response projection, and verification-failure rollback.
+- Review bounded infrastructure Google OAuth validation with the documented configurable `GCP_API_TIMEOUT_MS` helper. No private key, assertion, request body, access token, or OAuth secret is logged or returned.

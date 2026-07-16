@@ -30,8 +30,8 @@ import {
 } from '../services/gcp-service-account';
 import { listGcpProjects, runGcpSetup } from '../services/gcp-setup';
 import {
+  clearGcpAccessTokenCache,
   getGcpAccessToken,
-  getGcpAccessTokenCacheKey,
   verifyGcpOidcSetup,
 } from '../services/gcp-sts';
 import { getGoogleInfraOAuthConfig } from '../services/platform-config';
@@ -76,13 +76,16 @@ async function getStoredGcpCredential(env: Env, userId: string): Promise<GcpCred
 async function clearCredentialCache(
   env: Env,
   userId: string,
-  projectId: string,
   credential: GcpCredential,
 ): Promise<void> {
-  await Promise.all([
-    env.KV.delete(getGcpAccessTokenCacheKey(userId, projectId, credential)),
-    env.KV.delete(`gcp-token:${userId}:${credential.gcpProjectId}`),
-  ]);
+  try {
+    await clearGcpAccessTokenCache(env, userId, credential);
+  } catch (err) {
+    log.warn('gcp.token_cache_cleanup_failed', {
+      userId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 }
 
 gcpRoutes.post('/projects', jsonValidator(GcpOAuthHandleSchema), async (c) => {
@@ -139,14 +142,14 @@ gcpRoutes.put(
     try {
       const accessToken = await getGcpAccessToken(
         userId,
-        credential.gcpProjectId,
+        'service-account-setup',
         credential,
         c.env,
       );
       await verifyGcpServiceAccountAccess(credential, accessToken, c.env);
       const stored = await replaceUserGcpCredential(c.env, userId, credential);
       if (previous) {
-        await clearCredentialCache(c.env, userId, previous.gcpProjectId, previous);
+        await clearCredentialCache(c.env, userId, previous);
       }
       return c.json({
         success: true,
@@ -183,7 +186,7 @@ gcpRoutes.post('/setup', jsonValidator(GcpSetupSchema), async (c) => {
     );
     await replaceUserGcpCredential(c.env, userId, credential);
     if (previous) {
-      await clearCredentialCache(c.env, userId, previous.gcpProjectId, previous);
+      await clearCredentialCache(c.env, userId, previous);
     }
 
     try {
@@ -232,7 +235,7 @@ gcpRoutes.post('/verify', async (c) => {
     if (gcpCredential.authType === 'service-account-key') {
       const token = await getGcpAccessToken(
         userId,
-        gcpCredential.gcpProjectId,
+        'verification',
         gcpCredential,
         c.env,
       );

@@ -281,7 +281,7 @@ export async function createProviderForUser(
   }
 
   // --- Fallback: legacy single-table lookup ----------------------------------
-  return createProviderForUserLegacy(db, userId, encryptionKey, env, targetProvider);
+  return createProviderForUserLegacy(db, userId, encryptionKey, env, targetProvider, projectId);
 }
 
 /**
@@ -331,7 +331,8 @@ async function resolveProviderViaCC(
     const gcpCred = parseGcpCredential(ccConfig.token);
     const { getGcpAccessToken } = await import('./gcp-sts');
     const cacheUserId = ccConfig.isPlatform ? `platform:${userId}` : userId;
-    const tokenProvider = () => getGcpAccessToken(cacheUserId, gcpCred.gcpProjectId, gcpCred, env);
+    const cacheProjectId = projectId ?? gcpCred.gcpProjectId;
+    const tokenProvider = () => getGcpAccessToken(cacheUserId, cacheProjectId, gcpCred, env);
     const provider = new GcpProvider(gcpCred.gcpProjectId, tokenProvider, gcpCred.defaultZone);
     return { provider, providerName, credentialSource };
   }
@@ -349,6 +350,7 @@ async function createProviderForUserLegacy(
   encryptionKey: string,
   env: Env & Partial<HetznerCapacityRetryEnv>,
   targetProvider?: CredentialProvider,
+  projectId?: string | null,
 ): Promise<{ provider: Provider; providerName: CredentialProvider; credentialSource: CredentialSource } | null> {
   // 1. Try user's own credential first
   const conditions = [
@@ -373,7 +375,8 @@ async function createProviderForUserLegacy(
     if (providerName === 'gcp') {
       const gcpCred = parseGcpCredential(decryptedToken);
       const { getGcpAccessToken } = await import('./gcp-sts');
-      const tokenProvider = () => getGcpAccessToken(userId, gcpCred.gcpProjectId, gcpCred, env);
+      const cacheProjectId = projectId ?? gcpCred.gcpProjectId;
+      const tokenProvider = () => getGcpAccessToken(userId, cacheProjectId, gcpCred, env);
 
       const provider = new GcpProvider(
         gcpCred.gcpProjectId,
@@ -398,7 +401,8 @@ async function createProviderForUserLegacy(
   if (platformProvider === 'gcp') {
     const gcpCred = parseGcpCredential(decryptedToken);
     const { getGcpAccessToken } = await import('./gcp-sts');
-    const tokenProvider = () => getGcpAccessToken(`platform:${userId}`, gcpCred.gcpProjectId, gcpCred, env);
+    const cacheProjectId = projectId ?? gcpCred.gcpProjectId;
+    const tokenProvider = () => getGcpAccessToken(`platform:${userId}`, cacheProjectId, gcpCred, env);
 
     const provider = new GcpProvider(
       gcpCred.gcpProjectId,

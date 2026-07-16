@@ -14,6 +14,7 @@ import {
   verifyGcpServiceAccountAccess,
 } from '../../../src/services/gcp-service-account';
 import {
+  clearGcpAccessTokenCache,
   getGcpAccessToken,
   getGcpAccessTokenCacheKey,
 } from '../../../src/services/gcp-sts';
@@ -45,6 +46,14 @@ function createKv() {
         puts.push({ key, ttl: options?.expirationTtl });
       }),
       delete: vi.fn(async (key: string) => { values.delete(key); }),
+      list: vi.fn(async (options: { prefix?: string }) => ({
+        keys: Array.from(values.keys())
+          .filter((name) => !options.prefix || name.startsWith(options.prefix))
+          .map((name) => ({ name })),
+        list_complete: true,
+        cursor: '',
+        cacheStatus: null,
+      })),
     } as unknown as KVNamespace,
   };
 }
@@ -159,11 +168,11 @@ describe('service-account verification and caching', () => {
     );
   });
 
-  it('caches only the derivative token and isolates cache identity by key id', async () => {
+  it('isolates derivative tokens by project and key id, then clears every project', async () => {
     const credential = await parseGcpServiceAccountJson(serviceAccountJson(), 'us-central1-a');
     const rotated = { ...credential, privateKeyId: 'key-id-rotated' };
     const kv = createKv();
-    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+    const fetchMock = vi.fn().mockImplementation(async () => new Response(JSON.stringify({
       access_token: 'short-lived-token',
       token_type: 'Bearer',
       expires_in: 3600,
@@ -171,17 +180,24 @@ describe('service-account verification and caching', () => {
     vi.stubGlobal('fetch', fetchMock);
     const env = { KV: kv.namespace } as Env;
 
-    await expect(getGcpAccessToken('user-1', 'transient-context', credential, env))
+    await expect(getGcpAccessToken('user-1', 'project-a', credential, env))
       .resolves.toBe('short-lived-token');
-    await expect(getGcpAccessToken('user-1', 'different-context', credential, env))
+    await expect(getGcpAccessToken('user-1', 'project-a', credential, env))
+      .resolves.toBe('short-lived-token');
+    await expect(getGcpAccessToken('user-1', 'project-b', credential, env))
       .resolves.toBe('short-lived-token');
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(kv.puts[0]?.ttl).toBe(3300);
-    expect(kv.values.get(getGcpAccessTokenCacheKey('user-1', 'ignored', credential)))
-      .toBe('short-lived-token');
-    expect(getGcpAccessTokenCacheKey('user-1', 'ignored', rotated))
-      .not.toBe(getGcpAccessTokenCacheKey('user-1', 'ignored', credential));
-    expect(JSON.stringify(kv.values)).not.toContain(privateKey);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(kv.puts.every(({ ttl }) => ttl === 3300)).toBe(true);
+    const firstKey = getGcpAccessTokenCacheKey('user-1', 'project-a', credential);
+    const secondKey = getGcpAccessTokenCacheKey('user-1', 'project-b', credential);
+    expect(firstKey).not.toBe(secondKey);
+    expect(kv.values.get(firstKey)).toBe('short-lived-token');
+    expect(kv.values.get(secondKey)).toBe('short-lived-token');
+    expect(getGcpAccessTokenCacheKey('user-1', 'project-a', rotated)).not.toBe(firstKey);
+    expect(JSON.stringify(Array.from(kv.values.values()))).not.toContain(privateKey);
+
+    await clearGcpAccessTokenCache(env, 'user-1', credential);
+    expect(kv.values.size).toBe(0);
   });
 });

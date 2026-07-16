@@ -48,7 +48,7 @@ import { resolveForConsumer } from '../services/composable-credentials/resolve';
 import { decrypt, encrypt } from '../services/encryption';
 import { getTimeoutMs } from '../services/fetch-timeout';
 import { deleteUserGcpCredential, replaceUserGcpCredential } from '../services/gcp-credential-store';
-import { getGcpAccessTokenCacheKey } from '../services/gcp-sts';
+import { clearGcpAccessTokenCache } from '../services/gcp-sts';
 import { getPlatformAgentCredential } from '../services/platform-credentials';
 import {
   parseGcpCredential,
@@ -412,14 +412,14 @@ credentialsRoutes.delete('/:provider', async (c) => {
 
     await deleteUserGcpCredential(c.env, userId);
     if (credential) {
-      await Promise.all([
-        c.env.KV.delete(getGcpAccessTokenCacheKey(
+      try {
+        await clearGcpAccessTokenCache(c.env, userId, credential);
+      } catch (err) {
+        log.warn('credentials.gcp_disconnect_cache_cleanup_failed', {
           userId,
-          credential.gcpProjectId,
-          credential,
-        )),
-        c.env.KV.delete(`gcp-token:${userId}:${credential.gcpProjectId}`),
-      ]);
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
     }
     return c.json({ success: true });
   }

@@ -14,7 +14,7 @@ const mocks = vi.hoisted(() => ({
   enforceMutationLimit: vi.fn(),
   getGoogleInfraOAuthConfig: vi.fn(),
   getGcpAccessToken: vi.fn(),
-  getGcpAccessTokenCacheKey: vi.fn(),
+  clearGcpAccessTokenCache: vi.fn(),
   parseServiceAccountJson: vi.fn(),
   replaceUserGcpCredential: vi.fn(),
   runGcpSetup: vi.fn(),
@@ -44,7 +44,7 @@ vi.mock('../../../src/services/gcp-setup', () => ({
 }));
 vi.mock('../../../src/services/gcp-sts', () => ({
   getGcpAccessToken: mocks.getGcpAccessToken,
-  getGcpAccessTokenCacheKey: mocks.getGcpAccessTokenCacheKey,
+  clearGcpAccessTokenCache: mocks.clearGcpAccessTokenCache,
   verifyGcpOidcSetup: mocks.verifyGcpOidcSetup,
 }));
 vi.mock('../../../src/services/platform-config', () => ({
@@ -139,7 +139,7 @@ describe('GCP routes', () => {
       clientSecret: 'infra-secret',
     });
     mocks.getGcpAccessToken.mockResolvedValue('short-lived-access-token');
-    mocks.getGcpAccessTokenCacheKey.mockReturnValue('gcp-token-cache-key');
+    mocks.clearGcpAccessTokenCache.mockResolvedValue(undefined);
     mocks.parseServiceAccountJson.mockResolvedValue(serviceAccountCredential);
     mocks.replaceUserGcpCredential.mockResolvedValue({
       id: 'stored-credential-id',
@@ -195,7 +195,7 @@ describe('GCP routes', () => {
     expect(mocks.parseServiceAccountJson).toHaveBeenCalledWith(uploadedJson, 'us-central1-a');
     expect(mocks.getGcpAccessToken).toHaveBeenCalledWith(
       'test-user-id',
-      'gcp-project-1',
+      'service-account-setup',
       serviceAccountCredential,
       env
     );
