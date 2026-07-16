@@ -5,7 +5,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router';
 
 import { useAvailableCommands } from '../../hooks/useAvailableCommands';
 import { useBootLogStream } from '../../hooks/useBootLogStream';
-import { useProjectWebSocket, type RawSessionEvent } from '../../hooks/useProjectWebSocket';
+import { type RawSessionEvent, useProjectWebSocket } from '../../hooks/useProjectWebSocket';
 import type { ChatSessionListItem, ChatSessionResponse } from '../../lib/api';
 import {
   closeConversationTask,
