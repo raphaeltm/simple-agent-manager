@@ -946,6 +946,9 @@ export default {
     }
 
     // 5-minute operational sweep
+    // Recover stuck tasks first so unrelated cleanup failures cannot suppress lifecycle repair.
+    const stuckTasks = await recoverStuckTasks(env);
+
     // Check for stuck provisioning workspaces
     const timedOut = await checkProvisioningTimeouts(env.DATABASE, env, env.OBSERVABILITY_DATABASE);
 
@@ -955,9 +958,6 @@ export default {
 
     // Clean up stale warm nodes and expired auto-provisioned nodes
     const nodeCleanup = await runNodeCleanupSweep(env);
-
-    // Recover stuck tasks (queued/delegated/in_progress past timeout)
-    const stuckTasks = await recoverStuckTasks(env);
 
     // Purge expired observability errors (retention + row count limits)
     const observabilityPurge = await runObservabilityPurge(env);
