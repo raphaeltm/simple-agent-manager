@@ -1,7 +1,11 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { listSessions } from '../../../src/durable-objects/project-data/sessions';
+import {
+  getSessionsByTaskIds,
+  listSessions,
+} from '../../../src/durable-objects/project-data/sessions';
 import type { Env } from '../../../src/durable-objects/project-data/types';
+import { log } from '../../../src/lib/logger';
 
 type QueryRow = Record<string, unknown>;
 
@@ -51,6 +55,10 @@ function makeSql(sessionRows: QueryRow[], total: number) {
 const env = {} as Env;
 
 describe('ProjectData listSessions resilience', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('returns all sessions and hasMore=false on the happy path', () => {
     const rows = [
       makeSessionRow({ id: 's1', updated_at: 3000 }),
@@ -119,5 +127,91 @@ describe('ProjectData listSessions resilience', () => {
     expect(result.sessions.length).toBeGreaterThanOrEqual(1);
     expect(result.sessions.length).toBeLessThan(3);
     expect(result.hasMore).toBe(true);
+  });
+
+  // The skip log is the whole point of the fix — it surfaces the offending
+  // field in production. Assert it fires with a diagnosable payload.
+  it('logs sessions.list_row_skipped with the row id and error for a bad row', () => {
+    const warn = vi.spyOn(log, 'warn').mockImplementation(() => {});
+    const sql = makeSql(
+      [
+        makeSessionRow({ id: 'good-1', updated_at: 3000 }),
+        makeSessionRow({ id: 'bad-1', updated_at: 2000, started_at: null }),
+      ],
+      2
+    );
+
+    listSessions(sql, env, null, 100, 0);
+
+    expect(warn).toHaveBeenCalledWith(
+      'sessions.list_row_skipped',
+      expect.objectContaining({ rowId: 'bad-1', error: expect.stringContaining('started_at') })
+    );
+    // And a degraded-summary log with the skipped count.
+    expect(warn).toHaveBeenCalledWith(
+      'sessions.list_degraded',
+      expect.objectContaining({ skipped: 1, returned: 1, fetched: 2 })
+    );
+  });
+
+  it('does not emit a degraded log on the clean happy path', () => {
+    const warn = vi.spyOn(log, 'warn').mockImplementation(() => {});
+    const sql = makeSql([makeSessionRow({ id: 's1' })], 1);
+
+    listSessions(sql, env, null, 100, 0);
+
+    expect(warn).not.toHaveBeenCalledWith('sessions.list_degraded', expect.anything());
+    expect(warn).not.toHaveBeenCalledWith('sessions.list_row_skipped', expect.anything());
+  });
+
+  it('handles a malformed AND oversized row in the same page (skip + truncate compound)', () => {
+    const budgetEnv = { SESSIONS_LIST_RPC_BUDGET_BYTES: '400' } as Env;
+    const huge = 'x'.repeat(5000);
+    const sql = makeSql(
+      [
+        makeSessionRow({ id: 'bad', updated_at: 4000, message_count: null }),
+        makeSessionRow({ id: 'big-1', topic: huge, updated_at: 3000 }),
+        makeSessionRow({ id: 'big-2', topic: huge, updated_at: 2000 }),
+      ],
+      3
+    );
+
+    const result = listSessions(sql, budgetEnv, null, 100, 0);
+
+    // Bad row skipped, then budget trims after the first big row.
+    expect(result.sessions.map((s) => s.id)).toEqual(['big-1']);
+    expect(result.hasMore).toBe(true);
+  });
+});
+
+describe('ProjectData getSessionsByTaskIds resilience', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  // HIGH-coverage gap: getSessionsByTaskIds routes through the same tolerant
+  // mapping helper as listSessions but had no test. A malformed row must be
+  // skipped, not throw the whole task-id lookup.
+  it('skips a malformed row instead of throwing', () => {
+    const rows = [
+      makeSessionRow({ id: 'good-1', task_id: 't1' }),
+      makeSessionRow({ id: 'bad-1', task_id: 't1', message_count: null }),
+      makeSessionRow({ id: 'good-2', task_id: 't2' }),
+    ];
+    // getSessionsByTaskIds issues one SELECT ... FROM chat_sessions and per-row
+    // attention lookups; makeSql dispatches both. Count arg is unused here.
+    const sql = makeSql(rows, rows.length);
+
+    let result: Record<string, unknown>[] | undefined;
+    expect(() => {
+      result = getSessionsByTaskIds(sql, ['t1', 't2']);
+    }).not.toThrow();
+
+    expect(result!.map((s) => s.id)).toEqual(['good-1', 'good-2']);
+  });
+
+  it('returns an empty array for no task ids without touching sql', () => {
+    const sql = makeSql([], 0);
+    expect(getSessionsByTaskIds(sql, [])).toEqual([]);
   });
 });

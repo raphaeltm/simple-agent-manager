@@ -172,6 +172,17 @@ This explains ALL the evidence:
   saturated single-threaded DO), not the query — so a "time budget" would not have
   fixed the throw.
 
+### Precision note on the malformed-row mechanism (verified by review)
+The fix is generic to ANY `parseRow` failure, so it does not depend on pinning the
+exact bad-row shape. Note that `chat_sessions.started_at`/`message_count` are
+declared `INTEGER NOT NULL` (`durable-objects/migrations.ts`), so a literal
+SQLite NULL is unlikely to be the real trigger; the more probable real cause is a
+type/shape mismatch (e.g. a value valibot receives as a non-`number`, or a field
+missing after an INSERT column-list change). The tests use `null` only as a
+convenient way to force the same `parseRow` throw. The root cause is therefore a
+hypothesis *class* ("some row fails valibot"), confirmed as the throw site, not a
+pinned byte-level repro (no prod row was dumped this session).
+
 ### Fix implemented
 `apps/api/src/durable-objects/project-data/sessions.ts` `listSessions`:
 1. **Per-row fault isolation (primary):** each row's map+attention enrichment is wrapped;

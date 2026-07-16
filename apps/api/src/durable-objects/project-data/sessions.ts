@@ -264,7 +264,15 @@ function enrichSessionRows(
 
     cumulativeBytes += estimateSessionBytes(enriched);
     if (cumulativeBytes > budgetBytes && sessions.length > 0) {
-      // Exclude this row and everything after it; the caller paginates for more.
+      // Last-resort guard against exceeding Cloudflare's 32 MiB DO-RPC ceiling:
+      // return what fits rather than throwing a serialization overflow (which
+      // would 500 again). NOTE: sessions listing is OFFSET-paginated, so unlike
+      // the cursor-based messages read this truncated tail is NOT cleanly
+      // resumable by a subsequent `offset += limit` request — those rows are
+      // dropped from this response. This is acceptable only because it is
+      // practically unreachable (rows are tiny and capped at `limit` <= 100);
+      // `hasMore` signals the truncation. If sessions ever grow large per-row,
+      // move this read to cursor pagination before relying on the guard.
       truncated = true;
       break;
     }
