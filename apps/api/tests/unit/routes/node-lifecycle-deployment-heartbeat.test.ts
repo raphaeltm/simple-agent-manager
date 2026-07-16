@@ -5,7 +5,14 @@ type Condition = { op: 'eq'; col: string; val: unknown } | { op: 'and'; conds: C
 
 const updates: Array<{ table: unknown; values: Record<string, unknown>; where: unknown }> = [];
 const latestByEnvironment = new Map<string, { version: number; status: string }>();
-let deploymentPlacements: Array<{ envId: string; status?: string; requiresVolumes?: boolean }> = [];
+let deploymentPlacements: Array<{
+  envId: string;
+  status?: string;
+  requiresVolumes?: boolean;
+  observedAppliedSeq?: number | null;
+  desiredRoutingRevision?: number;
+  observedRoutingRevision?: number;
+}> = [];
 const volumeReadinessByEnvironment = new Map<string, { total: number; attached: number }>();
 const currentProviderServerId = 'provider-server-current';
 
@@ -45,6 +52,9 @@ vi.mock('../../../src/db/schema', () => ({
     nodeId: 'deployment_environments.nodeId',
     status: 'deployment_environments.status',
     requiresVolumes: 'deployment_environments.requiresVolumes',
+    observedAppliedSeq: 'deployment_environments.observedAppliedSeq',
+    desiredRoutingRevision: 'deployment_environments.desiredRoutingRevision',
+    observedRoutingRevision: 'deployment_environments.observedRoutingRevision',
     observedDeployment: 'deployment_environments.observedDeployment',
     observedDeploymentAt: 'deployment_environments.observedDeploymentAt',
   },
@@ -76,6 +86,10 @@ vi.mock('../../../src/services/dns', () => ({
 
 vi.mock('../../../src/services/project-data', () => ({
   updateNodeHeartbeats: vi.fn().mockResolvedValue(0),
+}));
+
+vi.mock('../../../src/services/deployment-custom-domains', () => ({
+  reconcileCustomDomainRoutingObservation: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('../../../src/services/deployment-control', async () => {
@@ -299,6 +313,39 @@ describe('node lifecycle deployment heartbeat contract', () => {
     expect(
       deploymentUpdates.some((update) => JSON.stringify(update.where).includes('env-evil'))
     ).toBe(false);
+  });
+
+  it('advertises pending route configs after an app release is already applied', async () => {
+    deploymentPlacements = [
+      {
+        envId: 'env-a',
+        status: 'active',
+        requiresVolumes: false,
+        observedAppliedSeq: 5,
+        desiredRoutingRevision: 3,
+        observedRoutingRevision: 2,
+      },
+    ];
+    latestByEnvironment.set('env-a', { version: 5, status: 'applied' });
+
+    const res = await postHeartbeat({
+      deployment: {
+        environments: [
+          {
+            environmentId: 'env-a',
+            appliedSeq: 5,
+            status: 'applied',
+            routingRevision: 2,
+            routingStatus: 'active',
+          },
+        ],
+      },
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.deployment.pendingReleases).toBeUndefined();
+    expect(body.deployment.pendingRouteConfigs).toEqual([{ environmentId: 'env-a', revision: 3 }]);
   });
 
   it('retires stopped environments without issuing pending releases', async () => {

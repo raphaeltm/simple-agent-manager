@@ -9,6 +9,8 @@ The **Files** tab on a project lets you browse the project's remote git reposito
 
 SAM agents do their work on branches (each task pushes to its own output branch). Previously, seeing those files meant provisioning a workspace. The Files tab lets you review an agent's output — **what changed versus the default branch** — instantly, on mobile, with no VM.
 
+This is now the fastest first stop after an agent finishes: open the output branch in **Changes**, decide whether the work is directionally right, then only open a workspace if you need to run commands or make manual edits.
+
 ## Two modes
 
 Selecting a branch gives you two views:
@@ -29,6 +31,8 @@ On the default branch there are no changes to show, so the view defaults to Brow
 ## Access
 
 Browsing is read-only and requires access to the project. For GitHub-backed projects, access is additionally gated by your own GitHub permission on the repository — the same intersection SAM enforces everywhere, so losing repository access also removes your ability to browse it here.
+
+GitLab-backed project browsing follows the same product model: repository access is user-scoped, and SAM uses the connected user's GitLab authorization rather than borrowing another project member's identity.
 
 ## Notes
 

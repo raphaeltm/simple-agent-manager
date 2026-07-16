@@ -1,7 +1,7 @@
 /**
  * Integration tests for handleGitHubEventForTriggers.
  *
- * These tests mock D1 and submitTriggeredTask at the boundary to verify:
+ * These tests mock D1 and trigger admission at the boundary to verify:
  * - Delivery deduplication
  * - Feature flag gating
  * - Non-matching events do not start tasks
@@ -9,9 +9,12 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-// Mock submitTriggeredTask before importing the handler
-vi.mock('../../../src/services/trigger-submit', () => ({
-  submitTriggeredTask: vi.fn().mockResolvedValue({
+// Mock trigger admission before importing the handler. Success-path tests invoke
+// the supplied renderPrompt callback so the production context/renderer wiring runs.
+vi.mock('../../../src/services/trigger-admission', () => ({
+  admitAndSubmitTriggerExecution: vi.fn().mockResolvedValue({
+    outcome: 'submitted',
+    executionId: 'execution-123',
     taskId: 'task-123',
     sessionId: 'session-456',
     branchName: 'sam/trigger-branch',
@@ -19,7 +22,7 @@ vi.mock('../../../src/services/trigger-submit', () => ({
 }));
 
 import { handleGitHubEventForTriggers } from '../../../src/services/github-trigger-handler';
-import { submitTriggeredTask } from '../../../src/services/trigger-submit';
+import { admitAndSubmitTriggerExecution } from '../../../src/services/trigger-admission';
 
 // ---------------------------------------------------------------------------
 // D1 Mock Infrastructure
@@ -37,6 +40,7 @@ function createMockD1(tables: Record<string, MockRow[]> = {}) {
     run: vi.fn().mockResolvedValue({ meta: { changes: 1 } }),
     all: vi.fn().mockResolvedValue({ results: [] }),
     first: vi.fn().mockResolvedValue(null),
+    raw: vi.fn().mockResolvedValue([]),
   };
 
   const mockDb = {
@@ -105,7 +109,7 @@ describe('handleGitHubEventForTriggers', () => {
     });
     expect(result.processed).toBe(false);
     expect(result.reason).toBe('unsupported_event_type:star');
-    expect(submitTriggeredTask).not.toHaveBeenCalled();
+    expect(admitAndSubmitTriggerExecution).not.toHaveBeenCalled();
   });
 
   it('returns feature_disabled when neither override nor webhook secret is configured', async () => {
@@ -121,7 +125,7 @@ describe('handleGitHubEventForTriggers', () => {
     expect(result.processed).toBe(false);
     expect(result.reason).toBe('feature_disabled');
     expect(result.matchedTriggers).toBe(0);
-    expect(submitTriggeredTask).not.toHaveBeenCalled();
+    expect(admitAndSubmitTriggerExecution).not.toHaveBeenCalled();
   });
 
   it('returns feature_disabled when flag is explicitly "false"', async () => {
@@ -145,7 +149,7 @@ describe('handleGitHubEventForTriggers', () => {
     });
     expect(result.processed).toBe(false);
     expect(result.reason).toBe('unsupported_event_type:star');
-    expect(submitTriggeredTask).not.toHaveBeenCalled();
+    expect(admitAndSubmitTriggerExecution).not.toHaveBeenCalled();
   });
 
   // --- Delivery deduplication ---
@@ -161,7 +165,7 @@ describe('handleGitHubEventForTriggers', () => {
     });
     expect(result.processed).toBe(false);
     expect(result.reason).toBe('duplicate');
-    expect(submitTriggeredTask).not.toHaveBeenCalled();
+    expect(admitAndSubmitTriggerExecution).not.toHaveBeenCalled();
   });
 
   // --- No repository in payload ---
@@ -177,6 +181,79 @@ describe('handleGitHubEventForTriggers', () => {
     });
     expect(result.processed).toBe(false);
     expect(result.reason).toBe('no_repository');
-    expect(submitTriggeredTask).not.toHaveBeenCalled();
+    expect(admitAndSubmitTriggerExecution).not.toHaveBeenCalled();
+  });
+
+  it('renders matching GitHub events as plain text before admission', async () => {
+    const { env, mockStmt } = createMockEnv();
+    const now = '2026-07-14T00:00:00.000Z';
+    const issueBody = 'Quotes "stay" & <script>window.githubExecuted=true</script> **bold**';
+
+    mockStmt.raw
+      .mockResolvedValueOnce([['project-1', 'Project One']])
+      .mockResolvedValueOnce([
+        [
+          'trigger-1',
+          'project-1',
+          'user-1',
+          'GitHub issue trigger',
+          null,
+          'active',
+          'github',
+          null,
+          'UTC',
+          1,
+          'Body: {{github.body}}',
+          null,
+          null,
+          'task',
+          null,
+          1,
+          null,
+          0,
+          1,
+          null,
+          null,
+          null,
+          null,
+          now,
+          now,
+        ],
+      ])
+      .mockResolvedValueOnce([['config-1', 'trigger-1', 'issues', '{}', now, now]]);
+
+    let renderedPrompt = '';
+    vi.mocked(admitAndSubmitTriggerExecution).mockImplementationOnce(async (_env, input) => {
+      renderedPrompt = input.renderPrompt('execution-123', 1);
+      return {
+        outcome: 'submitted',
+        executionId: 'execution-123',
+        taskId: 'task-123',
+        sessionId: 'session-456',
+        branchName: 'sam/trigger-branch',
+      };
+    });
+
+    const result = await handleGitHubEventForTriggers(env, {
+      deliveryId: 'delivery-matched',
+      eventType: 'issues',
+      payload: {
+        ...makeIssuesPayload('opened'),
+        issue: {
+          ...makeIssuesPayload('opened').issue,
+          body: issueBody,
+        },
+      },
+    });
+
+    expect(result).toEqual({
+      processed: true,
+      deliveryId: 'delivery-matched',
+      matchedTriggers: 1,
+    });
+    expect(admitAndSubmitTriggerExecution).toHaveBeenCalledOnce();
+    expect(renderedPrompt).toBe(`Body: ${issueBody}`);
+    expect(renderedPrompt).not.toContain('&quot;');
+    expect(renderedPrompt).not.toContain('[object Object]');
   });
 });

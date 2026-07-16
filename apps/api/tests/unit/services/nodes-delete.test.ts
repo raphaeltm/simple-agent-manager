@@ -53,7 +53,9 @@ vi.mock('../../../src/lib/logger', () => ({
   })),
 }));
 
-const { deleteNodeResources, deleteNodeResourcesStrict } = await import('../../../src/services/nodes');
+const { deleteNodeResources, deleteNodeResourcesStrict, retireDeletedDeploymentNodeRecord } =
+  await import('../../../src/services/nodes');
+const { drizzle } = await import('drizzle-orm/d1');
 
 const ENV = {
   DATABASE: {},
@@ -88,6 +90,32 @@ describe('node resource deletion services', () => {
     await expect(
       deleteNodeResourcesStrict('missing-node', 'user-1', ENV)
     ).rejects.toThrow(/not found for strict deletion/);
+  });
+
+  it('retires deployment node records as tombstones so event history can keep its FK', async () => {
+    const db = drizzle({} as never) as Parameters<typeof retireDeletedDeploymentNodeRecord>[0];
+
+    await retireDeletedDeploymentNodeRecord(db, 'node-1', 'user-1');
+
+    expect(updateCalls).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          nodeId: null,
+          status: 'stopped',
+          observedStatus: 'stopped',
+        }),
+        expect.objectContaining({
+          status: 'deleted',
+        }),
+        expect.objectContaining({
+          status: 'deleted',
+          healthStatus: 'stale',
+          providerInstanceId: null,
+          backendDnsRecordId: null,
+          ipAddress: null,
+        }),
+      ])
+    );
   });
 
   it('does not fail strict compute deletion when DNS cleanup fails after VM deletion', async () => {

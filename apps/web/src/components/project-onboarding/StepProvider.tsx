@@ -1,5 +1,5 @@
 import type { RepoProvider } from '@simple-agent-manager/shared';
-import { Check, Cloud, Github, type LucideIcon } from 'lucide-react';
+import { Check, Cloud, Github, Gitlab, type LucideIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 import { StepHeader, WhyDetails } from './explain';
@@ -22,6 +22,17 @@ const OPTIONS: ProviderOption[] = [
       'SAM reaches your repo through a GitHub App installation.',
       'Task agents push their branch and open a pull request for review.',
       'Best when your team already collaborates on GitHub.',
+    ],
+  },
+  {
+    id: 'gitlab',
+    icon: Gitlab,
+    title: 'Connect a GitLab project',
+    tagline: 'Your code already lives on GitLab.',
+    bullets: [
+      'SAM reaches your repo through your GitLab OAuth connection.',
+      'Task agents clone the project and push their branch back to GitLab.',
+      'Best when your team already collaborates on GitLab.',
     ],
   },
   {
@@ -92,27 +103,31 @@ export function StepProvider({
   value,
   onChange,
   artifactsEnabled = true,
+  gitlabEnabled = false,
   note,
 }: Readonly<{
   value: RepoProvider;
   onChange: (provider: RepoProvider) => void;
   artifactsEnabled?: boolean;
+  gitlabEnabled?: boolean;
   note?: ReactNode;
 }>) {
-  const options = artifactsEnabled
-    ? OPTIONS
-    : OPTIONS.filter((option) => option.id !== 'artifacts');
+  const options = OPTIONS.filter((option) => {
+    if (option.id === 'artifacts') return artifactsEnabled;
+    if (option.id === 'gitlab') return gitlabEnabled;
+    return true;
+  });
   return (
     <div className="grid gap-4">
       <StepHeader
         id="provider"
         title="Where should your code live?"
-        lead="SAM can work against a repository you already have on GitHub, or it can host a brand-new Git repository for you. Both give agents a repo to clone, edit, and push to — the difference is who owns the remote and how finished work is reviewed."
+        lead="SAM can work against a repository you already have on GitHub or GitLab, or it can host a brand-new Git repository for you. Each option gives agents a repo to clone, edit, and push to — the difference is who owns the remote and how finished work is reviewed."
       />
       <div
         role="radiogroup"
         aria-label="Where your code lives"
-        className={`grid gap-3 ${options.length > 1 ? 'sm:grid-cols-2' : ''}`}
+        className={`grid gap-3 ${options.length > 2 ? 'lg:grid-cols-3' : options.length > 1 ? 'sm:grid-cols-2' : ''}`}
       >
         {options.map((option) => (
           <OptionCard
@@ -130,6 +145,11 @@ export function StepProvider({
           already lives there and you want the usual pull-request review flow — SAM mints a
           short-lived, repository-scoped token from your GitHub App installation each time an agent
           runs.
+        </p>
+        <p>
+          <strong className="text-fg-secondary">GitLab</strong> is the right pick when your code
+          already lives there and you want agents to clone and push branches back to GitLab using
+          your current GitLab authorization.
         </p>
         <p>
           <strong className="text-fg-secondary">SAM-hosted (Cloudflare Artifacts)</strong> is the

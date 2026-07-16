@@ -119,10 +119,11 @@ describe('CreateProjectSchema with repoProvider', () => {
 });
 
 describe('RepoProvider type', () => {
-  it('VALID_REPO_PROVIDERS contains both providers', () => {
+  it('VALID_REPO_PROVIDERS contains every supported provider', () => {
     expect(VALID_REPO_PROVIDERS).toContain('github');
     expect(VALID_REPO_PROVIDERS).toContain('artifacts');
-    expect(VALID_REPO_PROVIDERS).toHaveLength(2);
+    expect(VALID_REPO_PROVIDERS).toContain('gitlab');
+    expect(VALID_REPO_PROVIDERS).toHaveLength(3);
   });
 
   it('ARTIFACTS_DEFAULTS has expected values', () => {

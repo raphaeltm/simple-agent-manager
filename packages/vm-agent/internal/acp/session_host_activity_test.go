@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -143,4 +144,60 @@ func snapshotActivities(mu *sync.Mutex, activities *[]string) []string {
 	out := make([]string, len(*activities))
 	copy(out, *activities)
 	return out
+}
+
+func TestErrorActivityIncludesRedactedStatusError(t *testing.T) {
+	t.Parallel()
+
+	payloads := make(chan activityPayload, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload activityPayload
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Errorf("decode activity payload: %v", err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		payloads <- payload
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	host := NewSessionHost(SessionHostConfig{
+		GatewayConfig: GatewayConfig{
+			ProjectID:       "proj-1",
+			NodeID:          "node-1",
+			SessionID:       "acp-1",
+			ControlPlaneURL: server.URL,
+			CallbackToken:   "token",
+			HTTPClient:      server.Client(),
+		},
+	})
+	host.mu.Lock()
+	host.agentType = "openai-codex"
+	host.status = HostError
+	host.statusErr = "ACP NewSession failed: api_key=sk-testsecret1234567890"
+	host.mu.Unlock()
+
+	host.reportActivity("error")
+
+	select {
+	case payload := <-payloads:
+		if payload.Activity != "error" {
+			t.Fatalf("activity = %q, want error", payload.Activity)
+		}
+		if payload.StatusError == nil || *payload.StatusError == "" {
+			t.Fatal("expected redacted statusError on error activity")
+		}
+		if strings.Contains(*payload.StatusError, "sk-testsecret") {
+			t.Fatalf("statusError leaked secret: %q", *payload.StatusError)
+		}
+		if !strings.Contains(*payload.StatusError, "[REDACTED]") {
+			t.Fatalf("statusError = %q, want redaction marker", *payload.StatusError)
+		}
+		if payload.PromptStartedAt != nil {
+			t.Fatalf("PromptStartedAt = %v, want nil for error activity", *payload.PromptStartedAt)
+		}
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("timed out waiting for error activity report")
+	}
 }

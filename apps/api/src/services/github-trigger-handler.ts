@@ -19,14 +19,14 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { ulid } from '../lib/ulid';
+import { buildGitHubContext } from './github-trigger-context';
 import {
   evaluateFilters,
   type GitHubWebhookEvent,
   parseWebhookPayload,
 } from './github-trigger-filter';
 import { areGitHubTriggersConfigured } from './platform-config';
-import { submitTriggeredTask } from './trigger-submit';
+import { admitAndSubmitTriggerExecution } from './trigger-admission';
 import { renderTemplate } from './trigger-template';
 
 export interface HandleGitHubEventInput {
@@ -63,7 +63,12 @@ export async function handleGitHubEventForTriggers(
   // Only process event types we support for triggers
   const supportedEvents = ['issues', 'issue_comment', 'pull_request', 'push'];
   if (!supportedEvents.includes(eventType)) {
-    return { processed: false, deliveryId, matchedTriggers: 0, reason: `unsupported_event_type:${eventType}` };
+    return {
+      processed: false,
+      deliveryId,
+      matchedTriggers: 0,
+      reason: `unsupported_event_type:${eventType}`,
+    };
   }
 
   const db = drizzle(env.DATABASE, { schema });
@@ -77,7 +82,9 @@ export async function handleGitHubEventForTriggers(
     const dedupResult = await env.DATABASE.prepare(
       `INSERT OR IGNORE INTO github_webhook_deliveries (id, event_type, decision, decision_reason, created_at)
        VALUES (?, ?, 'processing', 'pending', ?)`
-    ).bind(deliveryId, eventType, now).run();
+    )
+      .bind(deliveryId, eventType, now)
+      .run();
 
     if (!dedupResult.meta.changes || dedupResult.meta.changes === 0) {
       log.info('github_triggers.duplicate_delivery', { deliveryId, eventType });
@@ -88,15 +95,16 @@ export async function handleGitHubEventForTriggers(
       deliveryId,
       error: err instanceof Error ? err.message : String(err),
     });
-    // Proceed on dedup failure — best-effort, don't block webhook
+    throw err;
   }
 
   // Parse event
   const event = parseWebhookPayload(eventType, payload);
   const repoFullName = event.repository?.full_name?.toLowerCase();
-  const installationId = typeof payload.installation === 'object' && payload.installation !== null
-    ? String((payload.installation as Record<string, unknown>).id ?? '')
-    : undefined;
+  const installationId =
+    typeof payload.installation === 'object' && payload.installation !== null
+      ? String((payload.installation as Record<string, unknown>).id ?? '')
+      : undefined;
 
   if (!repoFullName) {
     await updateDeliveryDecision(db, deliveryId, {
@@ -205,7 +213,10 @@ async function processTriggersForProject(
     try {
       filters = JSON.parse(config.filtersJson) as GitHubTriggerFilters;
     } catch {
-      log.error('github_triggers.invalid_filters_json', { triggerId: trigger.id, filtersJson: config.filtersJson });
+      log.error('github_triggers.invalid_filters_json', {
+        triggerId: trigger.id,
+        filtersJson: config.filtersJson,
+      });
       continue;
     }
 
@@ -234,62 +245,19 @@ async function processTriggersForProject(
       continue;
     }
 
-    // Build template context and render prompt
-    const executionId = ulid();
-    const sequenceNumber = (trigger.triggerCount ?? 0) + 1;
-
-    const context = buildGitHubContext(event, trigger, project, executionId, sequenceNumber);
-    const rendered = renderTemplate(
-      trigger.promptTemplate,
-      context as unknown as Record<string, unknown>
-    );
-
-    // Create execution record
-    await db.insert(schema.triggerExecutions).values({
-      id: executionId,
-      triggerId: trigger.id,
-      projectId: project.id,
-      status: 'queued',
+    const result = await admitAndSubmitTriggerExecution(env, {
+      trigger,
       eventType: `github.${event.event}.${event.action ?? 'unknown'}`,
-      renderedPrompt: rendered.rendered,
+      triggeredBy: 'github',
       scheduledAt: now,
-      startedAt: now,
-      sequenceNumber,
-      createdAt: now,
+      renderPrompt: (executionId, sequenceNumber) =>
+        renderTemplate(
+          trigger.promptTemplate,
+          buildGitHubContext(event, trigger, project, executionId, sequenceNumber)
+        ).rendered,
     });
 
-    // Submit the task
-    try {
-      const result = await submitTriggeredTask(env, {
-        triggerId: trigger.id,
-        triggerExecutionId: executionId,
-        projectId: project.id,
-        userId: trigger.userId,
-        renderedPrompt: rendered.rendered,
-        triggeredBy: 'github',
-        agentProfileId: trigger.agentProfileId,
-        skillId: trigger.skillId,
-        taskMode: (trigger.taskMode ?? 'task') as 'task' | 'conversation',
-        vmSizeOverride: trigger.vmSizeOverride,
-        triggerName: trigger.name,
-      });
-
-      // Update execution with taskId
-      await db
-        .update(schema.triggerExecutions)
-        .set({ taskId: result.taskId, status: 'running' })
-        .where(eq(schema.triggerExecutions.id, executionId));
-
-      // Update trigger metadata
-      await db
-        .update(schema.triggers)
-        .set({
-          lastTriggeredAt: now,
-          triggerCount: sequenceNumber,
-          updatedAt: now,
-        })
-        .where(eq(schema.triggers.id, trigger.id));
-
+    if (result.outcome === 'submitted' || result.outcome === 'pending') {
       await recordDelivery(db, {
         id: `${deliveryId}:${trigger.id}`,
         eventType: event.event,
@@ -299,27 +267,24 @@ async function processTriggersForProject(
         senderLogin: event.sender?.login,
         matchedTriggerId: trigger.id,
         decision: 'matched',
-        decisionReason: `task:${result.taskId}`,
+        decisionReason:
+          result.outcome === 'pending' ? `task:${result.taskId}:pending` : `task:${result.taskId}`,
         createdAt: now,
       });
 
       log.info('github_triggers.matched', {
         triggerId: trigger.id,
         deliveryId,
-        executionId,
+        executionId: result.executionId,
         taskId: result.taskId,
+        submissionPending: result.outcome === 'pending',
         eventType: event.event,
         action: event.action,
       });
 
       matched++;
-    } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : String(err);
-      await db
-        .update(schema.triggerExecutions)
-        .set({ status: 'failed', errorMessage: errorMsg, completedAt: new Date().toISOString() })
-        .where(eq(schema.triggerExecutions.id, executionId));
-
+    } else {
+      const reason = result.outcome === 'failed' ? result.error : result.reason;
       await recordDelivery(db, {
         id: `${deliveryId}:${trigger.id}`,
         eventType: event.event,
@@ -328,73 +293,21 @@ async function processTriggersForProject(
         repositoryFullName: event.repository?.full_name,
         senderLogin: event.sender?.login,
         matchedTriggerId: trigger.id,
-        decision: 'error',
-        decisionReason: errorMsg,
+        decision: result.outcome === 'failed' ? 'error' : 'skipped',
+        decisionReason: reason,
         createdAt: now,
       });
 
-      log.error('github_triggers.submit_failed', {
+      log.info('github_triggers.not_submitted', {
         triggerId: trigger.id,
         deliveryId,
-        executionId,
-        error: errorMsg,
+        outcome: result.outcome,
+        reason,
       });
     }
   }
 
   return matched;
-}
-
-/** Build the template context for a GitHub event. */
-function buildGitHubContext(
-  event: GitHubWebhookEvent,
-  trigger: schema.TriggerRow,
-  project: { id: string; name: string },
-  executionId: string,
-  sequenceNumber: number
-): Record<string, unknown> {
-  const labels = [
-    ...(event.issue?.labels ?? []),
-    ...(event.pull_request?.labels ?? []),
-  ].map((l) => l.name);
-
-  // Extract branch for push/PR events
-  let branch = '';
-  if (event.event === 'push' && event.ref) {
-    branch = event.ref.replace(/^refs\/heads\//, '');
-  } else if (event.pull_request?.head?.ref) {
-    branch = event.pull_request.head.ref;
-  }
-
-  return {
-    github: {
-      event: event.event,
-      action: event.action ?? '',
-      actor: event.sender?.login ?? '',
-      repository: event.repository?.full_name ?? '',
-      number: String(event.issue?.number ?? event.pull_request?.number ?? ''),
-      title: event.issue?.title ?? event.pull_request?.title ?? '',
-      body: event.issue?.body ?? event.pull_request?.body ?? '',
-      comment: event.comment?.body ?? '',
-      labels: labels.join(', '),
-      branch,
-      sha: event.head_commit?.id ?? '',
-    },
-    trigger: {
-      id: trigger.id,
-      name: trigger.name,
-      description: trigger.description ?? '',
-      fireCount: String((trigger.triggerCount ?? 0) + 1),
-    },
-    project: {
-      id: project.id,
-      name: project.name,
-    },
-    execution: {
-      id: executionId,
-      sequenceNumber: String(sequenceNumber),
-    },
-  };
 }
 
 /** Update the initial delivery record with final decision details. */

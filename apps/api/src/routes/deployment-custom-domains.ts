@@ -1,5 +1,5 @@
 /**
- * Custom domain routes for deployment public routes (v1).
+ * Custom domain routes for deployment public routes.
  *
  * Scoped under /api/projects/:projectId/environments/:envId/custom-domains.
  * Auth: session cookie + active project membership/capabilities (browser CRUD
@@ -7,13 +7,12 @@
  *
  * A user attaches their own subdomain (CNAME) to an existing public route of a
  * deployment environment. SAM does NOT create the DNS record — the user points
- * a CNAME at the SAM-owned route hostname. SAM verifies the hostname resolves to
- * that target (or the node IP) via Cloudflare DoH, then includes it as an
- * additional signed RouteTarget on the next apply so node-local Caddy provisions
- * TLS + reverse-proxies it. v1: subdomains only, no wildcards, no TXT challenge.
+ * a CNAME at the SAM-owned route hostname. Verification updates desired routing
+ * configuration; the deployment node observes that desired revision through the
+ * heartbeat route-config flow and applies Caddy without requiring an app release.
  */
 
-import { and, eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 import * as v from 'valibot';
@@ -26,7 +25,13 @@ import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireProjectAccess, requireProjectCapability } from '../middleware/project-auth';
 import { jsonValidator } from '../schemas';
-import { getEnvironmentPublicRouteTargets } from '../services/deployment-custom-domains';
+import {
+  customDomainExpectedTargetChanged,
+  findRouteTargetForDomain,
+  getEnvironmentPublicRouteTargets,
+  recordCustomDomainEvent,
+  requestRoutingRevision,
+} from '../services/deployment-custom-domains';
 import { verifyCustomDomainTarget } from '../services/deployment-domain-verify';
 import type { DeploymentRouteTarget } from '../services/deployment-routing';
 
@@ -66,16 +71,34 @@ const AttachCustomDomainSchema = v.object({
 
 type DeploymentDb = ReturnType<typeof drizzle<typeof schema>>;
 
+type EnvironmentContext = Pick<
+  schema.DeploymentEnvironmentRow,
+  | 'id'
+  | 'projectId'
+  | 'nodeId'
+  | 'status'
+  | 'desiredRoutingRevision'
+  | 'observedRoutingRevision'
+  | 'observedRoutingStatus'
+  | 'observedRoutingError'
+>;
+
 /** Throws notFound when the (projectId, envId) pair does not resolve to an environment. */
 async function requireEnvironment(
   db: DeploymentDb,
   projectId: string,
   envId: string
-): Promise<{ id: string; nodeId: string | null }> {
+): Promise<EnvironmentContext> {
   const [environment] = await db
     .select({
       id: schema.deploymentEnvironments.id,
+      projectId: schema.deploymentEnvironments.projectId,
       nodeId: schema.deploymentEnvironments.nodeId,
+      status: schema.deploymentEnvironments.status,
+      desiredRoutingRevision: schema.deploymentEnvironments.desiredRoutingRevision,
+      observedRoutingRevision: schema.deploymentEnvironments.observedRoutingRevision,
+      observedRoutingStatus: schema.deploymentEnvironments.observedRoutingStatus,
+      observedRoutingError: schema.deploymentEnvironments.observedRoutingError,
     })
     .from(schema.deploymentEnvironments)
     .where(
@@ -122,12 +145,59 @@ async function resolveNodeIp(db: DeploymentDb, nodeId: string | null): Promise<s
   return node?.ipAddress ?? undefined;
 }
 
-/** Serialize a custom-domain row plus the SAM-owned CNAME target the user must set. */
+function environmentCanServeRoutes(environment: EnvironmentContext): boolean {
+  return environment.status === 'active' || environment.status === 'starting';
+}
+
+function deriveServingStatus(
+  row: schema.DeploymentCustomDomainRow,
+  environment: EnvironmentContext,
+  parent: DeploymentRouteTarget | null
+): string {
+  if (row.deletedAt || row.desiredState === 'deleted') {
+    return 'removed';
+  }
+  if (row.desiredState === 'deactivating') {
+    return 'deactivating';
+  }
+  if (row.verificationStatus === 'failed') {
+    return 'dns_failed';
+  }
+  if (row.verificationStatus !== 'verified') {
+    return 'pending_dns';
+  }
+  if (!parent) {
+    return 'route_missing';
+  }
+  if (!row.verifiedCnameTarget || customDomainExpectedTargetChanged(row, parent)) {
+    return 'dns_recheck_required';
+  }
+  if (!environmentCanServeRoutes(environment)) {
+    return 'inactive_environment_stopped';
+  }
+  if (
+    row.activationRoutingRevision &&
+    environment.observedRoutingRevision < row.activationRoutingRevision
+  ) {
+    return 'activating';
+  }
+  if (row.routingStatus === 'active') {
+    return 'active';
+  }
+  return row.routingStatus;
+}
+
+/** Serialize a custom-domain row plus DNS/routing/serving lifecycle context. */
 function toCustomDomainResponse(
   row: schema.DeploymentCustomDomainRow,
-  routes: DeploymentRouteTarget[]
+  routes: DeploymentRouteTarget[],
+  environment: EnvironmentContext
 ) {
-  const parent = routes.find((r) => r.service === row.service && r.containerPort === row.port);
+  const parent = findRouteTargetForDomain(routes, row);
+  const targetChanged = customDomainExpectedTargetChanged(row, parent);
+  const servingStatus = deriveServingStatus(row, environment, parent);
+  const routingStatus =
+    servingStatus === 'inactive_environment_stopped' ? row.routingStatus : servingStatus;
   return {
     id: row.id,
     environmentId: row.environmentId,
@@ -138,11 +208,22 @@ function toCustomDomainResponse(
     verificationStatus: row.verificationStatus,
     verificationError: row.verificationError,
     verifiedAt: row.verifiedAt,
+    verifiedCnameTarget: row.verifiedCnameTarget,
+    desiredState: row.desiredState,
+    routingStatus,
+    servingStatus,
+    activationRoutingRevision: row.activationRoutingRevision,
+    deactivationRoutingRevision: row.deactivationRoutingRevision,
+    deletedAt: row.deletedAt,
     createdBy: row.createdBy,
     createdAt: row.createdAt,
-    // The exact CNAME target the user must point their hostname at. Null when
-    // the parent public route no longer exists in the current release.
     cnameTarget: parent?.hostname ?? null,
+    routeTargetChanged: targetChanged,
+    environmentStatus: environment.status,
+    desiredRoutingRevision: environment.desiredRoutingRevision,
+    observedRoutingRevision: environment.observedRoutingRevision,
+    observedRoutingStatus: environment.observedRoutingStatus,
+    observedRoutingError: environment.observedRoutingError,
   };
 }
 
@@ -154,7 +235,7 @@ const deploymentCustomDomainRoutes = new Hono<{ Bindings: Env }>();
 
 /**
  * POST /api/projects/:projectId/environments/:envId/custom-domains
- * Attach a custom hostname to an existing public route. Persists pending.
+ * Attach a custom hostname to an existing public route. Persists pending DNS.
  */
 deploymentCustomDomainRoutes.post(
   '/:projectId/environments/:envId/custom-domains',
@@ -167,7 +248,7 @@ deploymentCustomDomainRoutes.post(
     const userId = getUserId(c);
     const db = drizzle(c.env.DATABASE, { schema });
     await requireProjectCapability(db, projectId, userId, 'deployment:manage');
-    await requireEnvironment(db, projectId, envId);
+    const environment = await requireEnvironment(db, projectId, envId);
 
     const { service, port, hostname } = c.req.valid('json');
 
@@ -197,7 +278,20 @@ deploymentCustomDomainRoutes.post(
       routeIndex: parent.routeIndex,
       hostname,
       verificationStatus: 'pending',
+      desiredState: 'active',
+      routingStatus: 'pending_dns',
       createdBy: userId,
+    });
+
+    await recordCustomDomainEvent(db, {
+      projectId,
+      environmentId: envId,
+      customDomainId: id,
+      hostname,
+      nodeId: environment.nodeId,
+      eventType: 'custom_domain.attached',
+      message: 'custom domain attached and waiting for DNS verification',
+      detail: { service, port, cnameTarget: parent.route.hostname },
     });
 
     const [created] = await db
@@ -218,13 +312,13 @@ deploymentCustomDomainRoutes.post(
       port,
     });
 
-    return c.json(toCustomDomainResponse(created, routes), 201);
+    return c.json(toCustomDomainResponse(created, routes, environment), 201);
   }
 );
 
 /**
  * GET /api/projects/:projectId/environments/:envId/custom-domains
- * List custom domains for an environment, each with its expected CNAME target.
+ * List non-deleted custom domains for an environment, each with lifecycle state.
  */
 deploymentCustomDomainRoutes.get(
   '/:projectId/environments/:envId/custom-domains',
@@ -236,24 +330,31 @@ deploymentCustomDomainRoutes.get(
     const userId = getUserId(c);
     const db = drizzle(c.env.DATABASE, { schema });
     await requireProjectAccess(db, projectId, userId);
-    await requireEnvironment(db, projectId, envId);
+    const environment = await requireEnvironment(db, projectId, envId);
 
     const [rows, routes] = await Promise.all([
       db
         .select()
         .from(schema.deploymentCustomDomains)
-        .where(eq(schema.deploymentCustomDomains.environmentId, envId))
+        .where(
+          and(
+            eq(schema.deploymentCustomDomains.environmentId, envId),
+            isNull(schema.deploymentCustomDomains.deletedAt)
+          )
+        )
         .orderBy(schema.deploymentCustomDomains.createdAt),
       getEnvironmentPublicRouteTargets(db, c.env, envId),
     ]);
 
-    return c.json({ customDomains: rows.map((row) => toCustomDomainResponse(row, routes)) });
+    return c.json({
+      customDomains: rows.map((row) => toCustomDomainResponse(row, routes, environment)),
+    });
   }
 );
 
 /**
  * POST /api/projects/:projectId/environments/:envId/custom-domains/:domainId/verify
- * Resolve the hostname via Cloudflare DoH and mark it verified or failed.
+ * Resolve the hostname via Cloudflare DoH and queue route-only reconciliation.
  */
 deploymentCustomDomainRoutes.post(
   '/:projectId/environments/:envId/custom-domains/:domainId/verify',
@@ -274,17 +375,25 @@ deploymentCustomDomainRoutes.post(
       .where(
         and(
           eq(schema.deploymentCustomDomains.id, domainId),
-          eq(schema.deploymentCustomDomains.environmentId, envId)
+          eq(schema.deploymentCustomDomains.environmentId, envId),
+          isNull(schema.deploymentCustomDomains.deletedAt)
         )
       )
       .limit(1);
     if (!domain) {
       throw errors.notFound('Custom domain');
     }
+    if (domain.desiredState === 'deactivating' || domain.desiredState === 'deleted') {
+      throw errors.badRequest('Cannot verify a domain that is being removed');
+    }
 
     const routes = await getEnvironmentPublicRouteTargets(db, c.env, envId);
     const parent = findParentRoute(routes, domain.service, domain.port);
     if (!parent) {
+      await db
+        .update(schema.deploymentCustomDomains)
+        .set({ routingStatus: 'route_missing' })
+        .where(eq(schema.deploymentCustomDomains.id, domainId));
       throw errors.badRequest(
         `The public route for service "${domain.service}" on port ${domain.port} no longer exists in this environment's latest release`
       );
@@ -305,21 +414,49 @@ deploymentCustomDomainRoutes.post(
           nodeIp ? ` or ${nodeIp}` : ''
         }. Set a CNAME record pointing ${domain.hostname} at ${parent.route.hostname}.`;
 
+    let activationRoutingRevision: number | null = domain.activationRoutingRevision;
+    if (ok) {
+      activationRoutingRevision = await requestRoutingRevision(db, envId);
+    }
+
     await db
       .update(schema.deploymentCustomDomains)
       .set({
         verificationStatus: ok ? 'verified' : 'failed',
         verificationError,
         verifiedAt: ok ? now : null,
+        verifiedCnameTarget: ok ? parent.route.hostname : domain.verifiedCnameTarget,
+        desiredState: 'active',
+        routingStatus: ok ? 'activating' : 'failed',
+        activationRoutingRevision,
       })
       .where(eq(schema.deploymentCustomDomains.id, domainId));
 
-    const [updated] = await db
-      .select()
-      .from(schema.deploymentCustomDomains)
-      .where(eq(schema.deploymentCustomDomains.id, domainId))
-      .limit(1);
-    if (!updated) {
+    await recordCustomDomainEvent(db, {
+      projectId,
+      environmentId: envId,
+      customDomainId: domainId,
+      hostname: domain.hostname,
+      nodeId: environment.nodeId,
+      routingRevision: activationRoutingRevision,
+      eventType: ok ? 'custom_domain.verify_succeeded' : 'custom_domain.verify_failed',
+      level: ok ? 'info' : 'warn',
+      message: ok
+        ? 'custom domain DNS verified; route activation requested'
+        : 'custom domain DNS verification failed',
+      detail: { cnameTarget: parent.route.hostname, verificationError },
+    });
+
+    const [updatedEnvironment, updated] = await Promise.all([
+      requireEnvironment(db, projectId, envId),
+      db
+        .select()
+        .from(schema.deploymentCustomDomains)
+        .where(eq(schema.deploymentCustomDomains.id, domainId))
+        .limit(1),
+    ]);
+    const updatedDomain = updated[0];
+    if (!updatedDomain) {
       throw errors.internal('Custom domain verification update was not persisted');
     }
 
@@ -329,15 +466,17 @@ deploymentCustomDomainRoutes.post(
       domainId,
       hostname: domain.hostname,
       verified: ok,
+      routingRevision: activationRoutingRevision,
     });
 
-    return c.json(toCustomDomainResponse(updated, routes));
+    return c.json(toCustomDomainResponse(updatedDomain, routes, updatedEnvironment));
   }
 );
 
 /**
  * DELETE /api/projects/:projectId/environments/:envId/custom-domains/:domainId
- * Detach a custom domain. Its site block drops on the next apply.
+ * Request route deactivation. Verified domains stay visible until node observes
+ * the routing revision and removes the live Caddy site block.
  */
 deploymentCustomDomainRoutes.delete(
   '/:projectId/environments/:envId/custom-domains/:domainId',
@@ -350,15 +489,16 @@ deploymentCustomDomainRoutes.delete(
     const userId = getUserId(c);
     const db = drizzle(c.env.DATABASE, { schema });
     await requireProjectCapability(db, projectId, userId, 'deployment:manage');
-    await requireEnvironment(db, projectId, envId);
+    const environment = await requireEnvironment(db, projectId, envId);
 
     const [domain] = await db
-      .select({ id: schema.deploymentCustomDomains.id })
+      .select()
       .from(schema.deploymentCustomDomains)
       .where(
         and(
           eq(schema.deploymentCustomDomains.id, domainId),
-          eq(schema.deploymentCustomDomains.environmentId, envId)
+          eq(schema.deploymentCustomDomains.environmentId, envId),
+          isNull(schema.deploymentCustomDomains.deletedAt)
         )
       )
       .limit(1);
@@ -366,13 +506,71 @@ deploymentCustomDomainRoutes.delete(
       throw errors.notFound('Custom domain');
     }
 
+    const routes = await getEnvironmentPublicRouteTargets(db, c.env, envId);
+    const shouldReconcileRoute =
+      domain.verificationStatus === 'verified' && domain.desiredState !== 'deactivating';
+    const deactivationRoutingRevision = shouldReconcileRoute
+      ? await requestRoutingRevision(db, envId)
+      : domain.deactivationRoutingRevision;
+    const now = new Date().toISOString();
+
     await db
-      .delete(schema.deploymentCustomDomains)
+      .update(schema.deploymentCustomDomains)
+      .set(
+        shouldReconcileRoute
+          ? {
+              desiredState: 'deactivating',
+              routingStatus: 'deactivating',
+              deactivationRoutingRevision,
+            }
+          : {
+              desiredState: 'deleted',
+              routingStatus: 'deactivated',
+              deletedAt: now,
+            }
+      )
       .where(eq(schema.deploymentCustomDomains.id, domainId));
 
-    log.info('deployment_custom_domain.deleted', { projectId, envId, domainId });
+    await recordCustomDomainEvent(db, {
+      projectId,
+      environmentId: envId,
+      customDomainId: domainId,
+      hostname: domain.hostname,
+      nodeId: environment.nodeId,
+      routingRevision: deactivationRoutingRevision,
+      eventType: shouldReconcileRoute
+        ? 'custom_domain.deactivation_requested'
+        : 'custom_domain.deleted_without_live_route',
+      message: shouldReconcileRoute
+        ? 'custom domain deactivation requested'
+        : 'custom domain deleted before route activation',
+    });
 
-    return c.json({ id: domainId, deleted: true });
+    const [updatedEnvironment, updated] = await Promise.all([
+      requireEnvironment(db, projectId, envId),
+      db
+        .select()
+        .from(schema.deploymentCustomDomains)
+        .where(eq(schema.deploymentCustomDomains.id, domainId))
+        .limit(1),
+    ]);
+    const updatedDomain = updated[0];
+    if (!updatedDomain) {
+      throw errors.internal('Custom domain delete update was not persisted');
+    }
+
+    log.info('deployment_custom_domain.deactivation_requested', {
+      projectId,
+      envId,
+      domainId,
+      routingRevision: deactivationRoutingRevision,
+      immediate: !shouldReconcileRoute,
+    });
+
+    return c.json(
+      toCustomDomainResponse(updatedDomain, routes, updatedEnvironment),
+      shouldReconcileRoute ? 202 : 200
+    );
   }
 );
 

@@ -4,6 +4,7 @@ export { AiTokenBudgetCounter } from './durable-objects/ai-token-budget-counter'
 // Sandbox SDK DO class — retained for experimental toolbox/diagnostics use only.
 export { CodexRefreshLock } from './durable-objects/codex-refresh-lock';
 export { GitHubUserAccessTokenLock } from './durable-objects/github-user-access-token-lock';
+export { GitLabUserAccessTokenLock } from './durable-objects/gitlab-user-access-token-lock';
 export { NodeLifecycle } from './durable-objects/node-lifecycle';
 export { NotificationService } from './durable-objects/notification';
 export { ProjectAgent } from './durable-objects/project-agent';
@@ -81,6 +82,7 @@ import { deploymentVolumeRoutes } from './routes/deployment-volumes';
 import { deviceFlowRoutes } from './routes/device-flow';
 import { gcpRoutes } from './routes/gcp';
 import { githubRoutes } from './routes/github';
+import { gitlabRoutes } from './routes/gitlab';
 import { googleAuthRoutes } from './routes/google-auth';
 import { knowledgeRoutes } from './routes/knowledge';
 import { libraryRoutes } from './routes/library';
@@ -119,6 +121,7 @@ import { terminalRoutes } from './routes/terminal';
 import { transcribeRoutes } from './routes/transcribe';
 import { trialRoutes } from './routes/trial';
 import { trialOnboardingRoutes } from './routes/trial/index';
+import { triggerWebhookRoutes } from './routes/trigger-webhooks';
 import { triggersRoutes } from './routes/triggers';
 import { ttsRoutes } from './routes/tts';
 import { uiGovernanceRoutes } from './routes/ui-governance';
@@ -376,11 +379,13 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
   }
 
   const nodeRuntime = workspace.nodeId
-    ? (await db
-        .select({ runtime: schema.nodes.runtime })
-        .from(schema.nodes)
-        .where(eq(schema.nodes.id, workspace.nodeId))
-        .get())?.runtime ?? 'vm'
+    ? ((
+        await db
+          .select({ runtime: schema.nodes.runtime })
+          .from(schema.nodes)
+          .where(eq(schema.nodes.id, workspace.nodeId))
+          .get()
+      )?.runtime ?? 'vm')
     : 'vm';
 
   if (workspace.status !== 'running' && workspace.status !== 'recovery') {
@@ -401,18 +406,23 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
   if (nodeRuntime === 'cf-container') {
     const containerConfig = getVmAgentContainerConfig(c.env);
     if (!containerConfig.enabled) {
-      return c.json({ error: 'CF_CONTAINER_DISABLED', message: 'Container workspace runtime is disabled' }, 503);
+      return c.json(
+        { error: 'CF_CONTAINER_DISABLED', message: 'Container workspace runtime is disabled' },
+        503
+      );
     }
     if (!c.env.VM_AGENT_CONTAINER) {
-      return c.json({ error: 'CF_CONTAINER_UNAVAILABLE', message: 'VM agent container binding is unavailable' }, 503);
+      return c.json(
+        { error: 'CF_CONTAINER_UNAVAILABLE', message: 'VM agent container binding is unavailable' },
+        503
+      );
     }
 
     const containerId = workspace.nodeId || workspaceId;
     const vmAgentPort = containerConfig.vmAgentPort;
-    const containerUrl = new URL(c.req.url);
-    containerUrl.protocol = 'http:';
-    containerUrl.hostname = 'localhost';
-    containerUrl.port = String(vmAgentPort);
+    const containerUrl = new URL(`http://localhost:${vmAgentPort}`);
+    containerUrl.pathname = url.pathname;
+    containerUrl.search = url.search;
 
     if (targetPort !== null) {
       const subPath = url.pathname === '/' ? '' : url.pathname;
@@ -426,7 +436,10 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
           workspaceId,
           ...serializeError(err),
         });
-        return c.json({ error: 'TOKEN_ERROR', message: 'Failed to generate port proxy token' }, 500);
+        return c.json(
+          { error: 'TOKEN_ERROR', message: 'Failed to generate port proxy token' },
+          500
+        );
       }
     }
 
@@ -504,10 +517,9 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
   );
   const vmAgentProtocol = c.env.VM_AGENT_PROTOCOL || 'https';
   const vmAgentPort = c.env.VM_AGENT_PORT || '8443';
-  const vmUrl = new URL(c.req.url);
-  vmUrl.protocol = `${vmAgentProtocol}:`;
-  vmUrl.hostname = backendHostname;
-  vmUrl.port = vmAgentPort;
+  const vmUrl = new URL(`${vmAgentProtocol}://${backendHostname}:${vmAgentPort}`);
+  vmUrl.pathname = url.pathname;
+  vmUrl.search = url.search;
 
   // Route port-specific requests to the VM agent's port proxy endpoint.
   // ws-{id}--3000.example.com/foo → {backend}/workspaces/{id}/ports/3000/foo
@@ -662,12 +674,14 @@ app.get('/api/config/artifacts-enabled', (c) => {
 // only render a provider button when that provider is actually usable. Google
 // here means the LOGIN client (getGoogleLoginOAuthConfig), never the infra/GCP one.
 app.get('/api/config/login-providers', async (c) => {
-  const { getGitHubOAuthConfig, getGoogleLoginOAuthConfig } = await import('./services/platform-config');
-  const [github, google] = await Promise.all([
+  const { getGitHubOAuthConfig, getGitLabOAuthConfig, getGoogleLoginOAuthConfig } =
+    await import('./services/platform-config');
+  const [github, google, gitlab] = await Promise.all([
     getGitHubOAuthConfig(c.env),
     getGoogleLoginOAuthConfig(c.env),
+    getGitLabOAuthConfig(c.env),
   ]);
-  return c.json({ github: github !== null, google: google !== null });
+  return c.json({ github: github !== null, google: google !== null, gitlab: gitlab !== null });
 });
 
 // JWKS endpoint (must be at root level)
@@ -703,6 +717,7 @@ app.route('/api/credentials', credentialsRoutes);
 app.route('/api/cc', ccRoutes);
 app.route('/api/providers', providersRoutes);
 app.route('/api/github', githubRoutes);
+app.route('/api/gitlab', gitlabRoutes);
 // Callback JWT routes — MUST be before session-auth node routes.
 app.route('/api/nodes', deployReleaseCallbackRoute); // Deploy node fetches signed release payload.
 app.route('/api/nodes', deploymentReleaseEventsCallbackRoute); // Deploy node reports apply events.
@@ -722,6 +737,7 @@ app.route('/api/client-errors', clientErrorsRoutes);
 app.route('/api/cli', cliRoutes);
 app.route('/api/chats', chatsRoutes);
 app.route('/api/t', analyticsIngestRoutes);
+app.route('/api/webhooks', triggerWebhookRoutes);
 // ORDERING IS CRITICAL: Routes using callback JWT auth MUST be mounted before
 // projectsRoutes. projectsRoutes has use('/*', requireAuth()) which leaks to
 // all siblings at the same base path — mounting these routes first causes them
@@ -991,6 +1007,7 @@ export default {
       triggerExecStaleRecovered: triggerCleanup.staleRecovered,
       triggerExecStaleQueuedRecovered: triggerCleanup.staleQueuedRecovered,
       triggerExecRetentionPurged: triggerCleanup.retentionPurged,
+      webhookDeliveriesPurged: triggerCleanup.webhookDeliveriesPurged,
       triggerExecCleanupErrors: triggerCleanup.errors,
       sessionTaskRepairScanned: sessionTaskRepair.scanned,
       sessionTaskRepairRepaired: sessionTaskRepair.repaired,

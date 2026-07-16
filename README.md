@@ -93,7 +93,7 @@ For the full architecture with diagrams, see the **[Architecture Overview](https
 
 ## Quick Deploy
 
-SAM deploys automatically via GitHub Actions. Fork, configure, push. For the complete setup guide with detailed steps and troubleshooting, see the **[Self-Hosting Guide](https://simple-agent-manager.org/docs/guides/self-hosting/)**.
+SAM deploys through the **Deploy Production** GitHub Actions workflow in your fork. Fork, configure the `production` environment, then run the workflow manually. For the complete setup guide with detailed steps and troubleshooting, see the **[Self-Hosting Guide](https://simple-agent-manager.org/docs/guides/self-hosting/)**.
 
 ### Prerequisites
 
@@ -106,7 +106,9 @@ SAM deploys automatically via GitHub Actions. Fork, configure, push. For the com
 1. **Fork this repository**
 2. **Create a GitHub Environment** named `production` in your fork's Settings > Environments
 3. **Add the required secrets** (Cloudflare API token with `Containers: Edit`, GitHub App credentials, etc. — see the [Self-Hosting Guide](https://simple-agent-manager.org/docs/guides/self-hosting/) for the full list)
-4. **Push to `main`** — GitHub Actions provisions all infrastructure, deploys the API + UI, runs migrations, and verifies health
+4. **Run Actions → Deploy Production → Run workflow** on `main` — GitHub Actions provisions all infrastructure, deploys the API + UI, runs migrations, and verifies health
+
+To update an existing self-hosted instance, sync upstream changes into your fork's `main` branch, then manually run **Deploy Production** again.
 
 Your instance is live at `app.{your-domain}`. Users sign in with GitHub and provide their own cloud provider API token (Hetzner, Scaleway, or GCP) to create workspaces.
 

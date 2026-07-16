@@ -95,7 +95,15 @@ function ProtectedLayout() {
   );
 }
 
+export const DEV_ONLY_ROUTE_PATHS = ['/sam', '/__test/trial-chat-gate', '/ui-standards'] as const;
+
+export function devOnlyRoutesEnabled() {
+  return import.meta.env.DEV || import.meta.env.MODE === 'test';
+}
+
 export default function App() {
+  const showDevOnlyRoutes = devOnlyRoutesEnabled();
+
   return (
     <ErrorBoundary>
       <ThemeProvider>
@@ -112,12 +120,16 @@ export default function App() {
                 <Route path="/try/cap-exceeded" element={<TryCapExceeded />} />
                 <Route path="/try/waitlist/thanks" element={<TryWaitlistThanks />} />
                 <Route path="/try/:trialId" element={<TryDiscovery />} />
-                {/* SAM prototype — public, no auth */}
-                <Route path="/sam" element={<SamPrototype />} />
                 <Route path="/device" element={<DeviceAuth />} />
                 <Route path="/setup" element={<Setup />} />
-                {/* Harness for Playwright audits — mounts trial components with mock data */}
-                <Route path="/__test/trial-chat-gate" element={<TrialChatGateHarness />} />
+                {showDevOnlyRoutes && (
+                  <>
+                    {/* SAM prototype — local/test only, no auth */}
+                    <Route path="/sam" element={<SamPrototype />} />
+                    {/* Harness for Playwright audits — mounts trial components with mock data */}
+                    <Route path="/__test/trial-chat-gate" element={<TrialChatGateHarness />} />
+                  </>
+                )}
                 {/* Protected routes with AppShell (persistent navigation) */}
                 <Route element={<ProtectedLayout />}>
                   <Route path="/dashboard" element={<Dashboard />} />
@@ -184,7 +196,7 @@ export default function App() {
                   <Route path="/account-map" element={<AccountMap />} />
                   <Route path="/tools" element={<Tools />} />
                   <Route path="/tools/cli" element={<ToolsCli />} />
-                  <Route path="/ui-standards" element={<UiStandards />} />
+                  {showDevOnlyRoutes && <Route path="/ui-standards" element={<UiStandards />} />}
                   <Route path="/admin" element={<Admin />}>
                     <Route index element={<Navigate to="users" replace />} />
                     <Route path="users" element={<AdminUsers />} />

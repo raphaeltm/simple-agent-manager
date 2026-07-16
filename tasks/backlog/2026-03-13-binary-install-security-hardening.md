@@ -24,7 +24,7 @@ Additionally, agent stderr is forwarded to the observability system without cred
 - [ ] Validate `uname -m` output against allowlist in Go `getAgentCommandInfo()` before URL construction
 - [ ] Add credential scrubbing to `reportAgentError` stderr forwarding (all agents)
 - [ ] Add post-download ELF magic byte check for non-npm installs
-- [ ] Add CI lint rule or co-change comment linking `installCommand` in `agents.ts` and `gateway.go`
+- [x] Replace dead TS `installCommand` with a structured pinned manifest and CI synchronization across the catalog, Go runtime, and cf-container image (2026-07-11 unified-agent-installation task)
 
 ## Acceptance Criteria
 

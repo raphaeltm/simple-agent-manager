@@ -197,6 +197,37 @@ describe('volume lifecycle resilience (vertical slice)', () => {
     expect(result).toBeNull();
   });
 
+  it('detach treats Hetzner already-detached 422 as idempotent', async () => {
+    const provider = new HetznerProvider('token', 'fsn1');
+
+    mockFetch
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            error: {
+              code: 'invalid_input',
+              message: 'volume not attached to a server',
+            },
+          }),
+          { status: 422 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ volume: hetznerVolumeResponse() }), { status: 200 }),
+      );
+
+    const result = await provider.detachVolume({
+      volumeId: '42',
+      serverId: '100',
+      location: 'fsn1',
+    });
+
+    expect(result).not.toBeNull();
+    expect(result?.status).toBe('available');
+    expect(result?.attachedServerId).toBeUndefined();
+    expect(fetchCall(mockFetch, 1).url).toContain('/volumes/42');
+  });
+
   it('detach succeeds and returns current volume state', async () => {
     const provider = new HetznerProvider('token', 'fsn1');
 

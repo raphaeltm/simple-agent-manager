@@ -2,6 +2,7 @@ import type {
   AgentInfo,
   AgentProfile,
   GitHubInstallation,
+  GitLabProject,
   Project,
   RepoProvider,
 } from '@simple-agent-manager/shared';
@@ -17,6 +18,7 @@ import {
   createTrigger,
   listAgents,
   listBranches,
+  listGitLabBranches,
   submitTask,
 } from '../../lib/api';
 import {
@@ -48,6 +50,7 @@ import { StepProvider } from './StepProvider';
 interface ProjectOnboardingWizardProps {
   installations: GitHubInstallation[];
   artifactsEnabled?: boolean;
+  gitlabEnabled?: boolean;
   loading?: boolean;
   loadError?: string | null;
   onRetryInstallations?: () => void;
@@ -56,6 +59,7 @@ interface ProjectOnboardingWizardProps {
 export function ProjectOnboardingWizard({
   installations,
   artifactsEnabled = false,
+  gitlabEnabled = false,
   loading = false,
   loadError,
   onRetryInstallations,
@@ -77,6 +81,7 @@ export function ProjectOnboardingWizard({
     repository: '',
     defaultBranch: 'main',
     githubRepoId: undefined as number | undefined,
+    gitlabProjectId: undefined as number | undefined,
   });
   const [branches, setBranches] = useState<Array<{ name: string }>>([]);
   const [branchesLoading, setBranchesLoading] = useState(false);
@@ -181,10 +186,20 @@ export function ProjectOnboardingWizard({
   );
 
   const handleRepositoryChange = (value: string) => {
-    setProjectForm((current) => ({ ...current, repository: value, githubRepoId: undefined }));
+    setProjectForm((current) => ({
+      ...current,
+      repository: value,
+      githubRepoId: undefined,
+      gitlabProjectId: undefined,
+    }));
     setBranches([]);
     setBranchesError(null);
-    setFieldErrors((current) => ({ ...current, repository: undefined, githubRepoId: undefined }));
+    setFieldErrors((current) => ({
+      ...current,
+      repository: undefined,
+      githubRepoId: undefined,
+      gitlabProjectId: undefined,
+    }));
   };
 
   const handleRepoSelect = useCallback(
@@ -204,6 +219,42 @@ export function ProjectOnboardingWizard({
     [fetchBranches, projectForm.installationId, projectNameTouched]
   );
 
+  const handleGitLabProjectSelect = useCallback(
+    (gitlabProject: GitLabProject | null) => {
+      if (!gitlabProject) {
+        setProjectForm((current) => ({ ...current, gitlabProjectId: undefined }));
+        setBranches([]);
+        setBranchesError(null);
+        return;
+      }
+      const nextName = deriveProjectName(gitlabProject.pathWithNamespace);
+      setRepoDefaultBranch(gitlabProject.defaultBranch);
+      setProjectForm((current) => ({
+        ...current,
+        name: projectNameTouched || current.name.trim() ? current.name : nextName,
+        repository: gitlabProject.pathWithNamespace,
+        defaultBranch: gitlabProject.defaultBranch,
+        gitlabProjectId: gitlabProject.id,
+      }));
+      setBranchesLoading(true);
+      setBranches([]);
+      setBranchesError(null);
+      listGitLabBranches(gitlabProject.id)
+        .then((result) => {
+          setBranches(result.length > 0 ? result : [{ name: gitlabProject.defaultBranch }]);
+          if (result.length === 0) {
+            setBranchesError('No branches returned. The default branch is available.');
+          }
+        })
+        .catch(() => {
+          setBranches([{ name: gitlabProject.defaultBranch }]);
+          setBranchesError('Unable to fetch branches. The default branch is available.');
+        })
+        .finally(() => setBranchesLoading(false));
+    },
+    [projectNameTouched]
+  );
+
   const handleInstallationChange = (installationId: string) => {
     setProjectForm((current) => ({
       ...current,
@@ -211,6 +262,7 @@ export function ProjectOnboardingWizard({
       repository: '',
       defaultBranch: 'main',
       githubRepoId: undefined,
+      gitlabProjectId: undefined,
     }));
     setBranches([]);
     setBranchesError(null);
@@ -258,6 +310,23 @@ export function ProjectOnboardingWizard({
         description: projectForm.description.trim() || undefined,
         repoProvider: 'artifacts' as const,
         defaultBranch: 'main',
+      };
+    } else if (repoProvider === 'gitlab') {
+      if (!projectForm.gitlabProjectId) {
+        setFieldErrors({ gitlabProjectId: 'Select a GitLab project.' });
+        return;
+      }
+      if (!projectForm.defaultBranch.trim()) {
+        setFieldErrors({ general: 'Default branch is required.' });
+        setSubmitError('Default branch is required.');
+        return;
+      }
+      payload = {
+        name: projectForm.name.trim(),
+        description: projectForm.description.trim() || undefined,
+        repoProvider: 'gitlab' as const,
+        gitlabProjectId: projectForm.gitlabProjectId,
+        defaultBranch: projectForm.defaultBranch.trim(),
       };
     } else {
       const repository = normalizeRepository(projectForm.repository);
@@ -453,6 +522,7 @@ export function ProjectOnboardingWizard({
           <StepProvider
             value={repoProvider}
             artifactsEnabled={artifactsEnabled}
+            gitlabEnabled={gitlabEnabled}
             onChange={setRepoProvider}
           />
         );
@@ -495,6 +565,7 @@ export function ProjectOnboardingWizard({
             onInstallationChange={handleInstallationChange}
             onRepositoryChange={handleRepositoryChange}
             onRepoSelect={handleRepoSelect}
+            onGitLabProjectSelect={handleGitLabProjectSelect}
             onBranchChange={(value) => setProjectForm((c) => ({ ...c, defaultBranch: value }))}
             onNameChange={(value) => {
               setProjectNameTouched(true);

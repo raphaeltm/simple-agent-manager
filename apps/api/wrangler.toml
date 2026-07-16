@@ -55,6 +55,24 @@ MAX_TRIGGERS_PER_PROJECT = "10"
 CRON_MIN_INTERVAL_MINUTES = "15"
 CRON_TEMPLATE_MAX_LENGTH = "8000"
 TRIGGER_NAME_MAX_LENGTH = "100"
+WEBHOOK_TRIGGERS_ENABLED = "true"
+WEBHOOK_TRIGGER_MAX_BODY_BYTES = "65536"
+WEBHOOK_TRIGGER_MAX_FILTERS = "10"
+WEBHOOK_TRIGGER_MAX_FILTER_PATH_LENGTH = "200"
+WEBHOOK_TRIGGER_MAX_FILTER_PATH_DEPTH = "8"
+WEBHOOK_TRIGGER_MAX_INCLUDED_HEADERS = "10"
+WEBHOOK_TRIGGER_MAX_HEADER_NAME_LENGTH = "100"
+WEBHOOK_TRIGGER_MAX_SOURCE_LABEL_LENGTH = "100"
+WEBHOOK_TRIGGER_MAX_IDEMPOTENCY_KEY_LENGTH = "200"
+WEBHOOK_INGRESS_RATE_LIMIT_PER_MINUTE = "120"
+WEBHOOK_TRIGGER_RATE_LIMIT_PER_MINUTE = "60"
+WEBHOOK_INVALID_TOKEN_RATE_LIMIT_PER_MINUTE = "30"
+WEBHOOK_RATE_LIMIT_WINDOW_SECONDS = "60"
+WEBHOOK_DELIVERY_RETENTION_DAYS = "7"
+WEBHOOK_DELIVERY_CLEANUP_BATCH_SIZE = "500"
+WEBHOOK_DELIVERY_DEFAULT_PAGE_SIZE = "25"
+WEBHOOK_DELIVERY_MAX_PAGE_SIZE = "100"
+WEBHOOK_DELIVERY_PROCESSING_LEASE_SECONDS = "300"
 # Cloudflare Container instant-session runtime.
 # Generated deployment envs default CF_CONTAINER_ENABLED to "true";
 # set it to "false" via GitHub environment variable or Worker var to force VM runtime.
@@ -143,6 +161,11 @@ class_name = "CodexRefreshLock"
 [[durable_objects.bindings]]
 name = "GITHUB_USER_ACCESS_TOKEN_LOCK"
 class_name = "GitHubUserAccessTokenLock"
+
+# Durable Object for per-user GitLab OAuth user-token refresh serialization
+[[durable_objects.bindings]]
+name = "GITLAB_USER_ACCESS_TOKEN_LOCK"
+class_name = "GitLabUserAccessTokenLock"
 
 # Durable Object for trial-onboarding monthly cap counter (singleton; keyed by YYYY-MM)
 [[durable_objects.bindings]]
@@ -265,6 +288,10 @@ class_name = "VmAgentContainer"
 tag = "v16"
 new_sqlite_classes = ["VmAgentContainer"]  # Raw Cloudflare Container DO for instant-session vm-agent
 
+[[migrations]]
+tag = "v17"
+new_classes = ["GitLabUserAccessTokenLock"]  # Stateless per-user mutex for BetterAuth GitLab OAuth refresh (rotating single-use refresh tokens)
+
 # Analytics Engine for usage tracking (Phase 1 — server-side analytics)
 [[analytics_engine_datasets]]
 binding = "ANALYTICS"
@@ -315,6 +342,9 @@ crons = ["*/5 * * * *", "30 * * * *", "0 3 * * *", "0 4 * * *", "0 5 1 * *"]
 # - GOOGLE_CLIENT_SECRET (optional — Google Cloud Console OAuth client secret for infra/GCP)
 # - GOOGLE_LOGIN_CLIENT_ID (optional — Google login OAuth client ID for "Sign in with Google"; separate client, or set via /setup)
 # - GOOGLE_LOGIN_CLIENT_SECRET (optional — Google login OAuth client secret; separate client, or set via /setup)
+# - GITLAB_HOST (optional — GitLab OAuth host, e.g. https://gitlab.com; or set via /setup)
+# - GITLAB_CLIENT_ID (optional — GitLab OAuth application ID; or set via /setup)
+# - GITLAB_CLIENT_SECRET (optional — GitLab OAuth secret; or set via /setup)
 # - SEGMENT_WRITE_KEY (optional — Segment.io write key, enables Segment event forwarding)
 # - GA4_API_SECRET (optional — Google Analytics 4 API secret, enables GA4 forwarding; NOTE: GA4 Measurement Protocol requires api_secret as a query parameter — ensure outbound request URLs are not logged)
 # - R2_ACCESS_KEY_ID (optional — R2 S3-compatible API token key ID, enables task attachment presigned uploads)

@@ -93,10 +93,7 @@ type MessageReportEntry struct {
 	Content      string
 	ToolMetadata string
 	Timestamp    string
-	// Origin marks how the message was produced. Empty/"user" for normal user
-	// messages; "system" for SAM-injected content (e.g. the get_instructions
-	// reminder) that the UI collapses. Sourced from the ACP block _meta marker.
-	Origin string
+	Origin       string
 }
 
 // GatewayConfig holds configuration for the ACP gateway and SessionHost.
@@ -437,8 +434,6 @@ func (g *Gateway) handleMessage(ctx context.Context, data []byte) {
 
 	switch rpcMsg.Method {
 	case "session/prompt":
-		// trustedSource=false: a browser viewer prompt must not be able to carry
-		// the SAM system-origin marker (would hide content from search/dedup).
 		go g.host.HandlePrompt(ctx, rpcMsg.ID, rpcMsg.Params, g.viewerID, false)
 	case "session/cancel":
 		// Cancel the in-flight prompt context. Also forward to agent stdin
@@ -789,8 +784,8 @@ func installAgentBinary(ctx context.Context, containerID string, info agentComma
 	// directories can block subsequent installs with ENOTEMPTY.
 	if info.isNpmBased {
 		cleanupScript := fmt.Sprintf(
-			`rm -rf /usr/local/lib/node_modules/@zed-industries/.%s-* /usr/local/share/nvm/versions/node/*/lib/node_modules/@zed-industries/.%s-* 2>/dev/null; true`,
-			info.command, info.command,
+			`rm -rf /usr/local/lib/node_modules/.%s-* /usr/local/lib/node_modules/*/.%s-* /usr/local/share/nvm/versions/node/*/lib/node_modules/.%s-* /usr/local/share/nvm/versions/node/*/lib/node_modules/*/.%s-* 2>/dev/null; true`,
+			info.command, info.command, info.command, info.command,
 		)
 		cleanupArgs := []string{"exec", "-u", "root", containerID, "sh", "-c", cleanupScript}
 		cleanupCmd := exec.CommandContext(ctx, "docker", cleanupArgs...)
@@ -848,8 +843,8 @@ func installAgentBinaryLocal(ctx context.Context, info agentCommandInfo) error {
 	// by previous failed npm installs (same rationale as the docker path).
 	if info.isNpmBased {
 		cleanupScript := fmt.Sprintf(
-			`rm -rf /usr/local/lib/node_modules/@zed-industries/.%s-* /usr/local/share/nvm/versions/node/*/lib/node_modules/@zed-industries/.%s-* 2>/dev/null; true`,
-			info.command, info.command,
+			`rm -rf /usr/local/lib/node_modules/.%s-* /usr/local/lib/node_modules/*/.%s-* /usr/local/share/nvm/versions/node/*/lib/node_modules/.%s-* /usr/local/share/nvm/versions/node/*/lib/node_modules/*/.%s-* 2>/dev/null; true`,
+			info.command, info.command, info.command, info.command,
 		)
 		cleanupCmd := exec.CommandContext(ctx, localShellPath, "-c", cleanupScript)
 		_ = cleanupCmd.Run() // best-effort cleanup
@@ -889,7 +884,7 @@ type agentCommandInfo struct {
 	authFilePath  string // relative to home dir, e.g. ".codex/auth.json" (only when injectionMode == "auth-file")
 }
 
-const codexACPInstallCommand = "npm install -g @agentclientprotocol/codex-acp"
+const codexACPInstallCommand = "npm install -g @agentclientprotocol/codex-acp@1.1.2"
 
 // getAgentCommandInfo returns the ACP command, args, env var name, and install command for a given agent type.
 // These match the agent catalog defined in packages/shared/src/agents.ts.
@@ -898,9 +893,9 @@ func getAgentCommandInfo(agentType string, credentialKind string) agentCommandIn
 	switch agentType {
 	case "claude-code":
 		if credentialKind == "oauth-token" {
-			return agentCommandInfo{"claude-agent-acp", nil, "CLAUDE_CODE_OAUTH_TOKEN", "npm install -g @zed-industries/claude-agent-acp", true, "", ""}
+			return agentCommandInfo{"claude-agent-acp", nil, "CLAUDE_CODE_OAUTH_TOKEN", "npm install -g @agentclientprotocol/claude-agent-acp@0.58.1", true, "", ""}
 		}
-		return agentCommandInfo{"claude-agent-acp", nil, "ANTHROPIC_API_KEY", "npm install -g @zed-industries/claude-agent-acp", true, "", ""}
+		return agentCommandInfo{"claude-agent-acp", nil, "ANTHROPIC_API_KEY", "npm install -g @agentclientprotocol/claude-agent-acp@0.58.1", true, "", ""}
 	case "openai-codex":
 		// Use -c to override sandbox_mode via codex-acp's config override flag.
 		// This takes the highest priority in the Codex config hierarchy,
@@ -924,15 +919,15 @@ func getAgentCommandInfo(agentType string, credentialKind string) agentCommandIn
 		}
 		return agentCommandInfo{"codex-acp", codexSandboxArgs, "OPENAI_API_KEY", codexACPInstallCommand, true, "", ""}
 	case "google-gemini":
-		return agentCommandInfo{"gemini", []string{"--acp"}, "GEMINI_API_KEY", "npm install -g @google/gemini-cli", true, "", ""}
+		return agentCommandInfo{"gemini", []string{"--acp"}, "GEMINI_API_KEY", "npm install -g @google/gemini-cli@0.50.0", true, "", ""}
 	case "mistral-vibe":
-		return agentCommandInfo{"vibe-acp", nil, "MISTRAL_API_KEY", `curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh && UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install mistral-vibe==2.7.0 --python 3.12 --quiet`, false, "", ""}
+		return agentCommandInfo{"vibe-acp", nil, "MISTRAL_API_KEY", `curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh && UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install mistral-vibe==2.19.1 --python 3.12 --quiet`, false, "", ""}
 	case "opencode":
 		return agentCommandInfo{
 			command:       "opencode",
 			args:          []string{"acp"},
 			envVarName:    "OPENCODE_API_KEY",
-			installCmd:    "npm install -g opencode-ai@1.17.8",
+			installCmd:    "npm install -g opencode-ai@1.17.18",
 			isNpmBased:    true,
 			injectionMode: "",
 			authFilePath:  "",
@@ -942,47 +937,49 @@ func getAgentCommandInfo(agentType string, credentialKind string) agentCommandIn
 			command:    "acp-amp",
 			args:       []string{"run"},
 			envVarName: "AMP_API_KEY",
-			installCmd: `curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh && UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install acp-amp==0.1.3 --with agent-client-protocol==0.7.1 --with amp-sdk==0.1.2 --with pydantic==2.12.5 --with pydantic-core==2.41.5 --with annotated-types==0.7.0 --with typing-inspection==0.4.2 --with typing-extensions==4.15.0 --python 3.12 --quiet && npm install -g @sourcegraph/amp && UV_PYTHON_INSTALL_DIR=/opt/uv-python uv run --python 3.12 python -c "
-import pathlib
-base = '/opt/uv-tools/acp-amp/lib/python3.12/site-packages'
+			installCmd: `curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh && UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install acp-amp==0.1.3 --with agent-client-protocol==0.7.1 --with amp-sdk==0.1.2 --with pydantic==2.12.5 --with pydantic-core==2.41.5 --with annotated-types==0.7.0 --with typing-inspection==0.4.2 --with typing-extensions==4.15.0 --python 3.12 --quiet && npm install -g @ampcode/cli@0.0.1783785389-g0da70d && UV_PYTHON_INSTALL_DIR=/opt/uv-python uv run --python 3.12 python -c "
+PYTHON_SDK_PATH = "/opt/uv-tools/acp-amp/lib/python3.12/site-packages/acp_amp/driver/python_sdk.py"
+AMP_TYPES_PATH = "/opt/uv-tools/acp-amp/lib/python3.12/site-packages/amp_sdk/types.py"
 
 # Patch 1: acp-amp error handling — include ProcessError.stderr in error messages
-p = pathlib.Path(base + '/acp_amp/driver/python_sdk.py')
-t = p.read_text()
-t = t.replace('\"message\": str(exc)', '\"message\": str(exc) + (\" stderr: \" + exc.stderr if hasattr(exc, \"stderr\") and exc.stderr else \"\")')
+with open(PYTHON_SDK_PATH, encoding="utf-8") as handle:
+    t = handle.read()
+t = t.replace('\"message\": str(exc)', '\"message\": str(exc) + (" stderr: " + exc.stderr if hasattr(exc, "stderr") and exc.stderr else "")')
 
 # Patch 2: acp-amp MCP config — wrap raw dict in MCPConfig to fix pydantic Union
 # validation silently producing empty servers when dict keys are server names.
 # Also handle env:None which causes MCPServer validation to reject the entry.
 old_mcp = '''        if mcp_config:
-            base[\"mcp_config\"] = mcp_config
-            base[\"mcpConfig\"] = mcp_config'''
+            base["mcp_config"] = mcp_config
+            base["mcpConfig"] = mcp_config'''
 new_mcp = '''        if mcp_config:
             from amp_sdk.types import MCPConfig
             cleaned = {}
             for _n, _c in mcp_config.items():
                 if isinstance(_c, dict):
                     _cc = dict(_c)
-                    if _cc.get(\"env\") is None:
-                        _cc[\"env\"] = {}
+                    if _cc.get("env") is None:
+                        _cc["env"] = {}
                     cleaned[_n] = _cc
                 else:
                     cleaned[_n] = _c
             _wrapped = MCPConfig(servers=cleaned)
-            base[\"mcp_config\"] = _wrapped
-            base[\"mcpConfig\"] = _wrapped'''
+            base["mcp_config"] = _wrapped
+            base["mcpConfig"] = _wrapped'''
 t = t.replace(old_mcp, new_mcp)
-p.write_text(t)
+with open(PYTHON_SDK_PATH, "w", encoding="utf-8") as handle:
+    handle.write(t)
 print('Patched acp-amp: error handling + MCP config wrapping')
 
 # Patch 3: amp_sdk visibility default — change from workspace to private
-v = pathlib.Path(base + '/amp_sdk/types.py')
-vt = v.read_text()
-vt = vt.replace('visibility: Optional[Literal[\"private\", \"public\", \"workspace\", \"group\"]] = \"workspace\"', 'visibility: Optional[Literal[\"private\", \"public\", \"workspace\", \"group\"]] = \"private\"')
-v.write_text(vt)
+with open(AMP_TYPES_PATH, encoding="utf-8") as handle:
+    vt = handle.read()
+vt = vt.replace('visibility: Optional[Literal["private", "public", "workspace", "group"]] = "workspace"', 'visibility: Optional[Literal["private", "public", "workspace", "group"]] = "private"')
+with open(AMP_TYPES_PATH, "w", encoding="utf-8") as handle:
+    handle.write(vt)
 print('Patched amp_sdk: visibility default to private')
 "`,
-			// isNpmBased must be true because installCmd chains `npm install -g @sourcegraph/amp`
+			// isNpmBased must be true because installCmd chains `npm install -g @ampcode/cli@0.0.1783785389-g0da70d`
 			// after the uv install. The Node.js bootstrap preamble ensures npm is available
 			// inside devcontainers that don't ship with Node.js pre-installed.
 			isNpmBased:    true,

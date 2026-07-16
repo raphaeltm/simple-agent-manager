@@ -37,6 +37,7 @@ vi.mock('../../../src/services/platform-config', () => ({
       ? { clientId: env.GITHUB_CLIENT_ID, clientSecret: env.GITHUB_CLIENT_SECRET }
       : null,
   getGoogleLoginOAuthConfig: async () => null,
+  getGitLabOAuthConfig: async () => null,
 }));
 
 import { createAuth } from '../../../src/auth';

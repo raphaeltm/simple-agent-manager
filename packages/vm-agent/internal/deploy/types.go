@@ -24,8 +24,11 @@ type ReleaseState struct {
 	Status        ApplyStatus `json:"status"`
 	AppliedAt     time.Time   `json:"appliedAt,omitempty"`
 	FailedAt      time.Time   `json:"failedAt,omitempty"`
-	ErrorMessage  string      `json:"errorMessage,omitempty"`
-	ComposeHash   string      `json:"composeHash,omitempty"` // SHA-256 of the rendered compose file
+	ErrorMessage   string      `json:"errorMessage,omitempty"`
+	RoutingRevision int64       `json:"routingRevision,omitempty"`
+	RoutingStatus   string      `json:"routingStatus,omitempty"`
+	RoutingError    string      `json:"routingError,omitempty"`
+	ComposeHash     string      `json:"composeHash,omitempty"` // SHA-256 of the rendered compose file
 	// Host mount roots created for this release's provider-backed volumes.
 	// Persisted so teardown/rollback can unmount even if Compose parsing fails.
 	VolumeMountRoots []string `json:"volumeMountRoots,omitempty"`
@@ -41,10 +44,13 @@ type ServiceState struct {
 
 // ObservedState is sent in the heartbeat to report deployment state.
 type ObservedState struct {
-	AppliedSeq   int64          `json:"appliedSeq"`
-	Status       ApplyStatus    `json:"status"`
-	ErrorMessage string         `json:"errorMessage,omitempty"`
-	Services     []ServiceState `json:"services,omitempty"`
+	AppliedSeq      int64          `json:"appliedSeq"`
+	Status          ApplyStatus    `json:"status"`
+	ErrorMessage    string         `json:"errorMessage,omitempty"`
+	RoutingRevision int64          `json:"routingRevision,omitempty"`
+	RoutingStatus   string         `json:"routingStatus,omitempty"`
+	RoutingError    string         `json:"routingError,omitempty"`
+	Services        []ServiceState `json:"services,omitempty"`
 
 	// Day-2 status model: six independent dimensions
 	DeployStatus *DeploymentStatus `json:"deployStatus,omitempty"`
@@ -68,6 +74,16 @@ type ApplyPayload struct {
 	// Registry credentials for private image pulls. When present, the
 	// deploy engine calls docker login --password-stdin before composePull.
 	RegistryCredentials *RegistryCredentials `json:"registryCredentials,omitempty"`
+}
+
+type RouteConfigPayload struct {
+	EnvironmentID   string        `json:"environmentId"`
+	NodeID          string        `json:"nodeId"`
+	CurrentSeq      int64         `json:"currentSeq"`
+	RoutingRevision int64         `json:"routingRevision"`
+	ExpiresAt       int64         `json:"expiresAt"`
+	Routes          []RouteTarget `json:"routes,omitempty"`
+	Signature       string        `json:"signature"`
 }
 
 type DeploymentEnvResponse struct {
@@ -136,4 +152,13 @@ type SignablePayload struct {
 	InterpolationEnvHash string `json:"interpolationEnvHash"`
 	ArtifactsHash        string `json:"artifactsHash"`
 	VolumeMountsHash     string `json:"volumeMountsHash"`
+}
+
+type SignableRouteConfigPayload struct {
+	EnvironmentID   string `json:"environmentId"`
+	NodeID          string `json:"nodeId"`
+	CurrentSeq      int64  `json:"currentSeq"`
+	RoutingRevision int64  `json:"routingRevision"`
+	ExpiresAt       int64  `json:"expiresAt"`
+	RoutesHash      string `json:"routesHash"`
 }

@@ -34,6 +34,10 @@ type workspaceRuntimeOpts struct {
 	GitUserName            string
 	GitUserEmail           string
 	GitHubID               string
+	RepoProvider           string
+	CloneURL               string
+	RepositoryHost         string
+	RepositoryPath         string
 	Lightweight            bool
 	DevcontainerConfigName string
 	DevcontainerCache      DevcontainerCacheCredentials
@@ -221,6 +225,22 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 		if opt.GitHubID != "" {
 			runtime.GitHubID = opt.GitHubID
 		}
+		if opt.RepoProvider != "" {
+			runtime.RepoProvider = opt.RepoProvider
+			metadataChanged = true
+		}
+		if opt.CloneURL != "" {
+			runtime.CloneURL = opt.CloneURL
+			metadataChanged = true
+		}
+		if opt.RepositoryHost != "" {
+			runtime.RepositoryHost = opt.RepositoryHost
+			metadataChanged = true
+		}
+		if opt.RepositoryPath != "" {
+			runtime.RepositoryPath = opt.RepositoryPath
+			metadataChanged = true
+		}
 		runtime.Lightweight = opt.Lightweight
 		if opt.DevcontainerConfigName != "" {
 			runtime.DevcontainerConfigName = opt.DevcontainerConfigName
@@ -242,6 +262,7 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 	effectiveBranch := branch
 	var persistedWorkspaceDir, persistedContainerWorkDir, persistedContainerLabelValue, persistedContainerUser string
 	var persistedCallbackToken string
+	var persistedRepoProvider, persistedCloneURL, persistedRepositoryHost, persistedRepositoryPath string
 	var persistedLightweight bool
 	var persistedDevcontainerConfigName string
 
@@ -264,6 +285,10 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 			persistedContainerLabelValue = meta.ContainerLabelVal
 			persistedContainerUser = meta.ContainerUser
 			persistedCallbackToken = meta.CallbackToken
+			persistedRepoProvider = meta.RepoProvider
+			persistedCloneURL = meta.CloneURL
+			persistedRepositoryHost = meta.RepositoryHost
+			persistedRepositoryPath = meta.RepositoryPath
 			persistedLightweight = meta.Lightweight
 			persistedDevcontainerConfigName = meta.DevcontainerConfigName
 		}
@@ -292,6 +317,10 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 		ID:                     workspaceID,
 		Repository:             effectiveRepo,
 		Branch:                 effectiveBranch,
+		RepoProvider:           firstNonEmpty(opt.RepoProvider, persistedRepoProvider),
+		CloneURL:               firstNonEmpty(opt.CloneURL, persistedCloneURL),
+		RepositoryHost:         firstNonEmpty(opt.RepositoryHost, persistedRepositoryHost),
+		RepositoryPath:         firstNonEmpty(opt.RepositoryPath, persistedRepositoryPath),
 		Status:                 status,
 		CreatedAt:              time.Now().UTC(),
 		UpdatedAt:              time.Now().UTC(),
@@ -469,6 +498,10 @@ func (s *Server) persistWorkspaceMetadata(runtime *WorkspaceRuntime) {
 		ContainerLabelVal:      runtime.ContainerLabelValue,
 		WorkspaceDir:           runtime.WorkspaceDir,
 		CallbackToken:          runtime.CallbackToken,
+		RepoProvider:           runtime.RepoProvider,
+		CloneURL:               runtime.CloneURL,
+		RepositoryHost:         runtime.RepositoryHost,
+		RepositoryPath:         runtime.RepositoryPath,
 		Lightweight:            runtime.Lightweight,
 		DevcontainerConfigName: runtime.DevcontainerConfigName,
 	}); err != nil {

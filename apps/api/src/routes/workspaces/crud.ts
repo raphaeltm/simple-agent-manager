@@ -455,6 +455,7 @@ crudRoutes.post('/', requireAuth(), requireApproved(), jsonValidator(CreateWorks
         userId,
         resolvedRepository,
         branch,
+        linkedProject,
         auth.user.name,
         auth.user.email
       );

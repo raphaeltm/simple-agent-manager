@@ -1,3 +1,4 @@
+import { ACP_SESSION_VALID_TRANSITIONS } from '@simple-agent-manager/shared';
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
@@ -22,14 +23,34 @@ import { markVmAgentContainerActiveWorkEndedBestEffort } from '../../services/vm
  * Accepts workspace-scoped tokens (the VM agent's callback token).
  *
  * The VM agent calls this endpoint from session_host_reporting.go:reportActivity()
- * to signal "prompting" / "idle" transitions. The signal is ephemeral (no
- * persistence) — it broadcasts to DO WebSocket clients so the UI can show
- * real-time "Agent is working..." indicators.
+ * to signal "prompting" / "idle" / "error" transitions. The callback
+ * persists a durable activity mirror, and terminal error activity also reconciles
+ * ACP/chat/agent-session state so failed startup is visible even before a prompt.
  *
  * See: .claude/rules/06-api-patterns.md (Hono middleware scoping)
  * See: .claude/rules/34-vm-agent-callback-auth.md
  */
 const agentActivityCallbackRoute = new Hono<{ Bindings: Env }>();
+
+const MAX_AGENT_ERROR_MESSAGE_LENGTH = 2048;
+
+function truncateAgentErrorMessage(value: string): string {
+  if (value.length <= MAX_AGENT_ERROR_MESSAGE_LENGTH) return value;
+  return `${value.slice(0, MAX_AGENT_ERROR_MESSAGE_LENGTH - 3)}...`;
+}
+
+function normalizeAgentErrorMessage(statusError: string | null | undefined): string {
+  const detail = truncateAgentErrorMessage(
+    statusError?.trim() || 'Agent reported an error before producing a response'
+  );
+  if (/^agent (startup )?failed/i.test(detail)) return detail;
+  return `Agent failed: ${detail}`;
+}
+
+function canTransitionAcpSessionToFailed(status: string): boolean {
+  const validTargets = (ACP_SESSION_VALID_TRANSITIONS as Record<string, readonly string[]>)[status];
+  return validTargets?.includes('failed') ?? false;
+}
 
 agentActivityCallbackRoute.post(
   '/:id/acp-sessions/:sessionId/activity',
@@ -73,8 +94,65 @@ agentActivityCallbackRoute.post(
       restartCount: body.restartCount,
       statusError: body.statusError,
     });
+    if (body.activity === 'error' && canTransitionAcpSessionToFailed(existing.status)) {
+      const failureMessage = normalizeAgentErrorMessage(body.statusError);
+      const db = drizzle(c.env.DATABASE, { schema });
+
+      await db
+        .update(schema.agentSessions)
+        .set({
+          status: 'error',
+          errorMessage: failureMessage,
+          updatedAt: new Date().toISOString(),
+        })
+        .where(eq(schema.agentSessions.id, sessionId))
+        .catch((err) => {
+          log.warn('acp_activity.agent_session_error_update_failed', {
+            projectId,
+            sessionId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        });
+
+      await projectDataService
+        .transitionAcpSession(c.env, projectId, sessionId, 'failed', {
+          actorType: 'vm-agent',
+          actorId: body.nodeId,
+          reason: 'Agent activity reported error',
+          errorMessage: failureMessage,
+          metadata: {
+            activity: body.activity,
+            agentType: body.agentType ?? existing.agentType ?? null,
+            restartCount: body.restartCount ?? null,
+          },
+        })
+        .catch((err) => {
+          log.warn('acp_activity.acp_session_fail_transition_failed', {
+            projectId,
+            sessionId,
+            fromStatus: existing.status,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        });
+
+      await projectDataService
+        .failSession(c.env, projectId, existing.chatSessionId, failureMessage)
+        .catch((err) => {
+          log.warn('acp_activity.chat_session_fail_failed', {
+            projectId,
+            chatSessionId: existing.chatSessionId,
+            sessionId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        });
+    }
     if (body.activity === 'idle' || body.activity === 'error') {
-      if (body.activity === 'idle' && existing.workspaceId && existing.nodeId && existing.acpSdkSessionId) {
+      if (
+        body.activity === 'idle' &&
+        existing.workspaceId &&
+        existing.nodeId &&
+        existing.acpSdkSessionId
+      ) {
         const db = drizzle(c.env.DATABASE, { schema });
         const workspace = await db
           .select({
@@ -116,7 +194,7 @@ agentActivityCallbackRoute.post(
       );
     }
     return c.body(null, 204);
-  },
+  }
 );
 
 export { agentActivityCallbackRoute };

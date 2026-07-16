@@ -202,12 +202,15 @@ func (h *SessionHost) injectAuthFileCredential(
 	envVars []string,
 ) ([]string, error) {
 	if containerID == "" {
-		path := info.authFilePath
-		if !filepath.IsAbs(path) {
-			path = filepath.Join(h.config.ContainerWorkDir, path)
+		path, err := resolveLocalAuthFileTargetPath(info.authFilePath)
+		if err != nil {
+			return envVars, fmt.Errorf("resolve local auth file target path: %w", err)
 		}
 		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 			return envVars, fmt.Errorf("failed to create auth file directory: %w", err)
+		}
+		if err := os.Chmod(filepath.Dir(path), 0o700); err != nil {
+			return envVars, fmt.Errorf("failed to chmod auth file directory: %w", err)
 		}
 		if err := os.WriteFile(path, []byte(cred.credential), 0o600); err != nil {
 			return envVars, fmt.Errorf("failed to write auth file: %w", err)
@@ -250,6 +253,37 @@ func (h *SessionHost) codexRefreshProxyEnv(agentType string, cred *agentCredenti
 	q.Set("token", h.config.CallbackToken)
 	u.RawQuery = q.Encode()
 	return "CODEX_REFRESH_TOKEN_URL_OVERRIDE=" + u.String(), true
+}
+
+// resolveLocalAuthFileTargetPath resolves file-style agent credentials for
+// standalone/cf-container sessions. The authFilePath contract is the same as
+// writeAuthFileToContainer: paths are relative to the runtime user home
+// directory, except Codex paths under .codex honor CODEX_HOME when present.
+func resolveLocalAuthFileTargetPath(authFilePath string) (string, error) {
+	if err := validateAuthFilePath(authFilePath); err != nil {
+		return "", err
+	}
+	if strings.HasPrefix(authFilePath, ".codex/") || authFilePath == ".codex" {
+		if codexHome := strings.TrimSpace(os.Getenv("CODEX_HOME")); codexHome != "" {
+			rel := strings.TrimPrefix(authFilePath, ".codex/")
+			if rel == ".codex" {
+				rel = ""
+			}
+			return filepath.Join(codexHome, filepath.FromSlash(rel)), nil
+		}
+	}
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(homeDir) == "" {
+		if fallback := strings.TrimSpace(os.Getenv("HOME")); fallback != "" {
+			homeDir = fallback
+		} else if err != nil {
+			return "", fmt.Errorf("resolve user home dir: %w", err)
+		} else {
+			return "", fmt.Errorf("resolve user home dir: empty HOME")
+		}
+	}
+	return filepath.Join(homeDir, filepath.FromSlash(authFilePath)), nil
 }
 
 func (h *SessionHost) injectPassthroughProxyCredential(

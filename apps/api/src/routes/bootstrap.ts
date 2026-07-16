@@ -65,7 +65,16 @@ bootstrapRoutes.post('/:token', bootstrapRateLimit, async (c) => {
   const requestTime = Date.now();
 
   // Attempt to redeem token (get + delete)
-  const tokenData = await redeemBootstrapToken(c.env.KV, token, c.env);
+  let tokenData;
+  try {
+    tokenData = await redeemBootstrapToken(c.env.KV, token, c.env);
+  } catch (err) {
+    log.warn('bootstrap.token_redemption_failed_closed', {
+      error: err instanceof Error ? err.message : String(err),
+      ip,
+    });
+    tokenData = null;
+  }
 
   if (!tokenData) {
     logBootstrapAttempt(false, ip);

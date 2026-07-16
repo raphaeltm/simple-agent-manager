@@ -5,6 +5,7 @@ import { fetchLoginProviders } from '../lib/api/setup';
 export interface LoginProviders {
   github: boolean;
   google: boolean;
+  gitlab: boolean;
 }
 
 /**
@@ -12,19 +13,19 @@ export interface LoginProviders {
  *
  * Defaults show GitHub (the primary path — never hidden by a transient fetch
  * failure) and hide Google until we confirm a login client is configured, so we
- * never render a "Sign in with Google" button that would error on click.
+ * never render provider buttons that would error on click.
  */
 export function useLoginProviders(): LoginProviders {
-  const [providers, setProviders] = useState<LoginProviders>({ github: true, google: false });
+  const [providers, setProviders] = useState<LoginProviders>({ github: true, google: false, gitlab: false });
 
   useEffect(() => {
     let active = true;
     fetchLoginProviders()
       .then((p) => {
-        if (active) setProviders({ github: p.github, google: p.google });
+        if (active) setProviders({ github: p.github, google: p.google, gitlab: p.gitlab });
       })
       .catch(() => {
-        /* keep defaults on failure — GitHub visible, Google hidden */
+        /* keep defaults on failure — GitHub visible, other providers hidden */
       });
     return () => {
       active = false;

@@ -47,6 +47,11 @@ import {
 import { seedArtifactsReadme } from '../../services/artifacts/seed-readme';
 import { encrypt } from '../../services/encryption';
 import { getExternalInstallationId } from '../../services/github-installation-ids';
+import {
+  listGitLabBranches,
+  requireGitLabUserAccessToken,
+  verifyGitLabProjectAccess,
+} from '../../services/gitlab';
 import { getRuntimeLimits } from '../../services/limits';
 import * as projectDataService from '../../services/project-data';
 import { getProjectMultiplayerState } from '../../services/project-multiplayer';
@@ -103,7 +108,12 @@ crudRoutes.post('/', jsonValidator(CreateProjectSchema), async (c) => {
   const body = c.req.valid('json');
 
   const name = body.name?.trim();
-  const repoProvider: RepoProvider = body.repoProvider === 'artifacts' ? 'artifacts' : 'github';
+  const repoProvider: RepoProvider =
+    body.repoProvider === 'artifacts'
+      ? 'artifacts'
+      : body.repoProvider === 'gitlab'
+        ? 'gitlab'
+        : 'github';
   const description = body.description?.trim() || null;
 
   if (!name) {
@@ -256,6 +266,79 @@ crudRoutes.post('/', jsonValidator(CreateProjectSchema), async (c) => {
         error: dbError instanceof Error ? dbError.message : String(dbError),
         action: 'orphaned_artifacts_repo',
       });
+      throw dbError;
+    }
+  } else if (repoProvider === 'gitlab') {
+    // ─── GitLab-backed project ────────────────────────────────────────
+    const gitlabProjectId = typeof body.gitlabProjectId === 'number' ? body.gitlabProjectId : null;
+    if (!gitlabProjectId || !Number.isFinite(gitlabProjectId) || gitlabProjectId <= 0) {
+      throw errors.badRequest('gitlabProjectId is required for GitLab projects');
+    }
+
+    const accessToken = await requireGitLabUserAccessToken(c, userId);
+    const metadata = await verifyGitLabProjectAccess(c.env, accessToken, gitlabProjectId);
+    const selectedBranch = body.defaultBranch?.trim() || metadata.defaultBranch;
+    if (selectedBranch.length > 255 || !/^[a-zA-Z0-9._\-/]+$/.test(selectedBranch)) {
+      throw errors.badRequest(
+        'defaultBranch contains invalid characters. Only alphanumeric, hyphens, underscores, slashes, and dots are allowed (max 255 chars).'
+      );
+    }
+    if (selectedBranch !== metadata.defaultBranch) {
+      const branches = await listGitLabBranches(c.env, accessToken, gitlabProjectId);
+      if (!branches.some((branch) => branch.name === selectedBranch)) {
+        throw errors.badRequest('Selected GitLab branch does not exist');
+      }
+    }
+
+    const duplicateRows = await db
+      .select({ id: schema.projectGitlabRepositories.id })
+      .from(schema.projectGitlabRepositories)
+      .where(
+        and(
+          eq(schema.projectGitlabRepositories.userId, userId),
+          eq(schema.projectGitlabRepositories.host, metadata.host),
+          eq(schema.projectGitlabRepositories.gitlabProjectId, metadata.gitlabProjectId)
+        )
+      )
+      .limit(1);
+    if (duplicateRows[0]) {
+      throw errors.conflict('A project with this GitLab repository already exists');
+    }
+
+    await db.insert(schema.projects).values({
+      id: projectId,
+      userId,
+      name,
+      normalizedName,
+      description,
+      installationId:
+        c.env.TRIAL_ANONYMOUS_INSTALLATION_ID ??
+        'system_anonymous_trials_installation',
+      repository: metadata.pathWithNamespace,
+      defaultBranch: selectedBranch,
+      repoProvider: 'gitlab',
+      createdBy: userId,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    try {
+      await db.insert(schema.projectGitlabRepositories).values({
+        id: ulid(),
+        projectId,
+        userId,
+        host: metadata.host,
+        gitlabProjectId: metadata.gitlabProjectId,
+        pathWithNamespace: metadata.pathWithNamespace,
+        webUrl: metadata.webUrl,
+        httpUrlToRepo: metadata.httpUrlToRepo,
+        defaultBranch: selectedBranch,
+        createdAt: now,
+        updatedAt: now,
+      });
+      await createOwnerProjectMembership(db, projectId, userId, userId, now);
+    } catch (dbError) {
+      await db.delete(schema.projects).where(eq(schema.projects.id, projectId));
       throw dbError;
     }
   } else {
@@ -1012,6 +1095,11 @@ crudRoutes.delete('/:id', async (c) => {
     db
       .delete(schema.projectGithubRepositories)
       .where(eq(schema.projectGithubRepositories.projectId, projectId)),
+  );
+  statements.push(
+    db
+      .delete(schema.projectGitlabRepositories)
+      .where(eq(schema.projectGitlabRepositories.projectId, projectId)),
   );
 
   // Detach workspaces (ALTER TABLE FK ON DELETE SET NULL is not enforced)

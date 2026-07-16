@@ -47,9 +47,10 @@ vi.mock('../../../src/lib/ulid', () => ({ ulid: mocks.ulid }));
 
 import { launchInstantSession } from '../../../src/services/instant-session';
 
-function makeDb() {
+function makeDb(selectResults: unknown[][] = []) {
   const inserts: unknown[] = [];
   const updates: unknown[] = [];
+  let selectIndex = 0;
   return {
     inserts,
     updates,
@@ -69,7 +70,9 @@ function makeDb() {
       select: vi.fn(() => ({
         from: vi.fn(() => ({
           where: vi.fn(() => ({
-            limit: vi.fn().mockResolvedValue([]),
+            limit: vi.fn().mockImplementation(() =>
+              Promise.resolve(selectResults[selectIndex++] ?? [])
+            ),
           })),
         })),
       })),
@@ -273,6 +276,50 @@ describe('launchInstantSession', () => {
     expect(updates).toContainEqual(expect.objectContaining({ dispatchedAt: expect.any(String) }));
     expect(updates).toContainEqual(
       expect.objectContaining({ status: 'in_progress', workspaceId: 'workspace-1' })
+    );
+  });
+
+  it('passes GitLab repository metadata to the VM agent create-workspace request', async () => {
+    const gitlabMetadata = {
+      userId: 'user-1',
+      host: 'gitlab.com',
+      gitlabProjectId: 12345,
+      pathWithNamespace: 'group/gitlab-repo',
+      webUrl: 'https://gitlab.com/group/gitlab-repo',
+      httpUrlToRepo: 'https://gitlab.com/group/gitlab-repo.git',
+      defaultBranch: 'main',
+    };
+    const { db } = makeDb([[gitlabMetadata]]);
+
+    await launchInstantSession(db as never, env, {
+      project: {
+        ...project,
+        id: 'gitlab-project-1',
+        repository: 'group/gitlab-repo',
+        repoProvider: 'gitlab',
+        installationId: '',
+      } as never,
+      userId: 'user-1',
+      initialPrompt: 'prompt',
+      displayMessage: 'prompt',
+      agentType: 'claude-code',
+    });
+
+    expect(mocks.nodeAgent.createWorkspaceOnNode).toHaveBeenCalledWith(
+      'node-1',
+      env,
+      'user-1',
+      expect.objectContaining({
+        workspaceId: 'workspace-1',
+        repository: 'group/gitlab-repo',
+        branch: 'main',
+        repoProvider: 'gitlab',
+        cloneUrl: 'https://gitlab.com/group/gitlab-repo.git',
+        repositoryHost: 'gitlab.com',
+        repositoryPath: 'group/gitlab-repo',
+        callbackToken: 'workspace-callback-token',
+        lightweight: true,
+      })
     );
   });
 

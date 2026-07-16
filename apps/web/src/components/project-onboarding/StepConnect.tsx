@@ -1,8 +1,9 @@
-import type { GitHubInstallation, RepoProvider } from '@simple-agent-manager/shared';
+import type { GitHubInstallation, GitLabProject, RepoProvider } from '@simple-agent-manager/shared';
 import { Alert, Input } from '@simple-agent-manager/ui';
 import { Link } from 'react-router';
 
 import { BranchSelector } from '../BranchSelector';
+import { GitLabProjectSelector } from '../GitLabProjectSelector';
 import { RepoSelector } from '../RepoSelector';
 import { Callout, StepHeader, WhyDetails } from './explain';
 import type { FieldErrors } from './shared';
@@ -17,6 +18,7 @@ interface StepConnectProps {
     repository: string;
     defaultBranch: string;
     githubRepoId: number | undefined;
+    gitlabProjectId: number | undefined;
   };
   branches: Array<{ name: string }>;
   branchesLoading: boolean;
@@ -30,6 +32,7 @@ interface StepConnectProps {
   onRepoSelect: (
     repo: { fullName: string; defaultBranch: string; githubRepoId?: number } | null
   ) => void;
+  onGitLabProjectSelect: (project: GitLabProject | null) => void;
   onBranchChange: (value: string) => void;
   onNameChange: (value: string) => void;
   onDescriptionChange: (value: string) => void;
@@ -97,10 +100,12 @@ export function StepConnect(props: Readonly<StepConnectProps>) {
     onInstallationChange,
     onRepositoryChange,
     onRepoSelect,
+    onGitLabProjectSelect,
     onBranchChange,
   } = props;
 
   const isArtifacts = repoProvider === 'artifacts';
+  const isGitLab = repoProvider === 'gitlab';
 
   const renderRepoSource = () => {
     if (isArtifacts) {
@@ -109,6 +114,45 @@ export function StepConnect(props: Readonly<StepConnectProps>) {
           SAM will host this repository on Cloudflare Artifacts and seed it with a README that
           orients your agents. No GitHub account or app installation is required.
         </Callout>
+      );
+    }
+    if (isGitLab) {
+      return (
+        <>
+          <label htmlFor="project-onboarding-gitlab-project" className="grid gap-1.5">
+            <span className="text-sm text-fg-muted">GitLab project</span>
+            <GitLabProjectSelector
+              id="project-onboarding-gitlab-project"
+              value={projectForm.repository}
+              onChange={onRepositoryChange}
+              onProjectSelect={onGitLabProjectSelect}
+              disabled={creatingProject}
+            />
+            {fieldErrors.gitlabProjectId && (
+              <span
+                id="project-onboarding-gitlab-project-error"
+                className="text-sm text-danger"
+                role="alert"
+              >
+                {fieldErrors.gitlabProjectId}
+              </span>
+            )}
+          </label>
+
+          <label htmlFor="project-onboarding-branch" className="grid gap-1.5">
+            <span className="text-sm text-fg-muted">Branch</span>
+            <BranchSelector
+              id="project-onboarding-branch"
+              branches={branches}
+              value={projectForm.defaultBranch}
+              onChange={onBranchChange}
+              defaultBranch={repoDefaultBranch}
+              loading={branchesLoading}
+              error={branchesError}
+              disabled={creatingProject || !projectForm.gitlabProjectId}
+            />
+          </label>
+        </>
       );
     }
     if (installations.length === 0) {
@@ -197,7 +241,9 @@ export function StepConnect(props: Readonly<StepConnectProps>) {
         lead={
           isArtifacts
             ? 'SAM will create and host a private Git repository for this project. Agents clone it into a fresh, isolated workspace each time they run, and push their work straight back to it.'
-            : 'Pick the repository and branch SAM should use when it starts work. Agents clone this repo into a fresh, isolated workspace each time they run.'
+            : isGitLab
+              ? 'Pick the GitLab project and branch SAM should use when it starts work. Agents clone this project into a fresh, isolated workspace each time they run.'
+              : 'Pick the repository and branch SAM should use when it starts work. Agents clone this repo into a fresh, isolated workspace each time they run.'
         }
       />
 
@@ -226,6 +272,18 @@ export function StepConnect(props: Readonly<StepConnectProps>) {
             There are no pull requests on a SAM-hosted repo: agents push their branch straight to
             the remote and you review the changes there. The default branch starts as{' '}
             <code>main</code>.
+          </p>
+        </WhyDetails>
+      ) : isGitLab ? (
+        <WhyDetails question="How does SAM access GitLab?">
+          <p>
+            SAM uses your GitLab OAuth connection to verify project access before each run, then
+            gives the workspace a short-lived credential-helper path for clone and push. It does not
+            export a static GitLab token into the agent environment.
+          </p>
+          <p>
+            The branch you pick is the base agents branch off of. Each run works on its own branch,
+            so SAM never pushes to your default branch on its own.
           </p>
         </WhyDetails>
       ) : (

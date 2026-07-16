@@ -103,6 +103,31 @@ func TestWithGitHubToken(t *testing.T) {
 	}
 }
 
+func TestWithGitTokenGitLab(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{
+		RepoProvider:   "gitlab",
+		RepositoryHost: "gitlab.com",
+	}
+
+	urlWithToken, err := withGitToken("https://gitlab.com/group/project.git", "gl_token", cfg)
+	if err != nil {
+		t.Fatalf("withGitToken returned error: %v", err)
+	}
+	if urlWithToken != "https://oauth2:gl_token@gitlab.com/group/project.git" {
+		t.Fatalf("unexpected GitLab tokenized url: %s", urlWithToken)
+	}
+
+	otherURL, err := withGitToken("https://gitlab.example.com/group/project.git", "gl_token", cfg)
+	if err != nil {
+		t.Fatalf("withGitToken returned error for other host: %v", err)
+	}
+	if otherURL != "https://gitlab.example.com/group/project.git" {
+		t.Fatalf("expected non-configured GitLab host unchanged, got: %s", otherURL)
+	}
+}
+
 func TestNeedsCredentialHelper(t *testing.T) {
 	t.Parallel()
 
@@ -126,6 +151,24 @@ func TestNeedsCredentialHelper(t *testing.T) {
 				t.Fatalf("needsCredentialHelper(%q) = %v, want %v", tc.repo, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestNeedsCredentialHelperForConfigGitLab(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{
+		RepoProvider:   "gitlab",
+		RepositoryHost: "gitlab.com",
+		CloneURL:       "https://gitlab.com/group/project.git",
+	}
+	if !needsCredentialHelperForConfig(cfg) {
+		t.Fatal("expected GitLab config to require a credential helper")
+	}
+
+	cfg.RepoProvider = "github"
+	if needsCredentialHelperForConfig(cfg) {
+		t.Fatal("non-GitLab config with GitLab host must not require a credential helper")
 	}
 }
 
@@ -157,8 +200,9 @@ func TestRenderGitCredentialHelperScript(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{
-		Port:          8080,
-		CallbackToken: "callback-token-123",
+		Port:                 8080,
+		CallbackToken:        "callback-token-123",
+		GitCredentialTimeout: 1750 * time.Millisecond,
 	}
 
 	script, err := renderGitCredentialHelperScript(cfg)
@@ -168,6 +212,7 @@ func TestRenderGitCredentialHelperScript(t *testing.T) {
 
 	required := []string{
 		`http://${target}:8080/git-credential`,
+		`--max-time 1.75`,
 		"host.docker.internal",
 		"172.17.0.1",
 	}
@@ -263,6 +308,74 @@ func TestRenderGitCredentialHelperScriptHostFiltering(t *testing.T) {
 			}
 			if !strings.Contains(gotURL, tc.wantHostArg) {
 				t.Fatalf("expected requested host in credential request URL, got %q", gotURL)
+			}
+		})
+	}
+}
+
+// TestRenderGitCredentialHelperScriptGitLabHostCaseInsensitive verifies the
+// GitLab host whitelist in the rendered helper compares hostnames
+// case-insensitively (hostnames are case-insensitive per RFC 4343), and that a
+// non-matching host is still rejected.
+func TestRenderGitCredentialHelperScriptGitLabHostCaseInsensitive(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		host     string
+		wantCurl bool
+	}{
+		{name: "exact case", host: "gitlab.example.com", wantCurl: true},
+		{name: "mixed case", host: "GitLab.Example.COM", wantCurl: true},
+		{name: "other host rejected", host: "evil.example.com", wantCurl: false},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			cfg := &config.Config{
+				Port:           8080,
+				CallbackToken:  "callback-token-123",
+				WorkspaceID:    "ws-gl",
+				RepoProvider:   "gitlab",
+				RepositoryHost: "GitLab.Example.com", // mixed case in config too
+			}
+			script, err := renderGitCredentialHelperScript(cfg)
+			if err != nil {
+				t.Fatalf("renderGitCredentialHelperScript returned error: %v", err)
+			}
+
+			tmpDir := t.TempDir()
+			curlLog := filepath.Join(tmpDir, "curl.log")
+			curlPath := filepath.Join(tmpDir, "curl")
+			curlScript := fmt.Sprintf("#!/bin/sh\nlast=\"\"\nfor arg in \"$@\"; do last=\"$arg\"; done\nprintf '%%s\\n' \"$last\" >> %s\nprintf 'protocol=https\\nhost=example.com\\nusername=x\\npassword=token\\n\\n'\n", shellSingleQuote(curlLog))
+			if err := os.WriteFile(curlPath, []byte(curlScript), 0o755); err != nil {
+				t.Fatalf("write curl shim: %v", err)
+			}
+
+			helperPath := filepath.Join(tmpDir, "git-credential-sam")
+			if err := os.WriteFile(helperPath, []byte(script), 0o755); err != nil {
+				t.Fatalf("write helper script: %v", err)
+			}
+			cmd := exec.Command("sh", helperPath, "get")
+			cmd.Stdin = strings.NewReader("protocol=https\nhost=" + tc.host + "\npath=group/project.git\n\n")
+			cmd.Env = append(os.Environ(), "PATH="+tmpDir+":"+os.Getenv("PATH"))
+			output, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("helper script failed: %v\n%s", err, output)
+			}
+
+			logBytes, readErr := os.ReadFile(curlLog)
+			if !tc.wantCurl {
+				if readErr == nil && strings.TrimSpace(string(logBytes)) != "" {
+					t.Fatalf("expected no curl call for %s, got %q", tc.host, string(logBytes))
+				}
+				return
+			}
+			if readErr != nil {
+				t.Fatalf("expected curl call for %s: %v", tc.host, readErr)
 			}
 		})
 	}
@@ -2805,14 +2918,20 @@ func TestCredentialHelperContainerEnv(t *testing.T) {
 	t.Parallel()
 
 	env := credentialHelperContainerEnv()
-	if env["GIT_CONFIG_COUNT"] != "1" {
-		t.Fatalf("expected GIT_CONFIG_COUNT=1, got %q", env["GIT_CONFIG_COUNT"])
+	if env["GIT_CONFIG_COUNT"] != "2" {
+		t.Fatalf("expected GIT_CONFIG_COUNT=2, got %q", env["GIT_CONFIG_COUNT"])
 	}
 	if env["GIT_CONFIG_KEY_0"] != "credential.helper" {
 		t.Fatalf("expected GIT_CONFIG_KEY_0=credential.helper, got %q", env["GIT_CONFIG_KEY_0"])
 	}
 	if env["GIT_CONFIG_VALUE_0"] != credentialHelperContainerPath {
 		t.Fatalf("expected GIT_CONFIG_VALUE_0=%s, got %q", credentialHelperContainerPath, env["GIT_CONFIG_VALUE_0"])
+	}
+	if env["GIT_CONFIG_KEY_1"] != "credential.useHttpPath" {
+		t.Fatalf("expected GIT_CONFIG_KEY_1=credential.useHttpPath, got %q", env["GIT_CONFIG_KEY_1"])
+	}
+	if env["GIT_CONFIG_VALUE_1"] != "true" {
+		t.Fatalf("expected GIT_CONFIG_VALUE_1=true, got %q", env["GIT_CONFIG_VALUE_1"])
 	}
 }
 
@@ -3202,8 +3321,14 @@ func TestWriteCredentialOverrideConfig(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected containerEnv to be a map, got %T", cfg["containerEnv"])
 	}
-	if envMap["GIT_CONFIG_COUNT"] != "1" {
-		t.Fatalf("expected GIT_CONFIG_COUNT=1, got %v", envMap["GIT_CONFIG_COUNT"])
+	if envMap["GIT_CONFIG_COUNT"] != "2" {
+		t.Fatalf("expected GIT_CONFIG_COUNT=2, got %v", envMap["GIT_CONFIG_COUNT"])
+	}
+	if envMap["GIT_CONFIG_KEY_1"] != "credential.useHttpPath" {
+		t.Fatalf("expected GIT_CONFIG_KEY_1=credential.useHttpPath, got %v", envMap["GIT_CONFIG_KEY_1"])
+	}
+	if envMap["GIT_CONFIG_VALUE_1"] != "true" {
+		t.Fatalf("expected GIT_CONFIG_VALUE_1=true, got %v", envMap["GIT_CONFIG_VALUE_1"])
 	}
 }
 
@@ -3416,8 +3541,14 @@ func TestWriteDefaultDevcontainerConfigWithCredentialHelper(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected containerEnv to be a map")
 	}
-	if envMap["GIT_CONFIG_COUNT"] != "1" {
-		t.Fatalf("expected GIT_CONFIG_COUNT=1")
+	if envMap["GIT_CONFIG_COUNT"] != "2" {
+		t.Fatalf("expected GIT_CONFIG_COUNT=2")
+	}
+	if envMap["GIT_CONFIG_KEY_1"] != "credential.useHttpPath" {
+		t.Fatalf("expected GIT_CONFIG_KEY_1=credential.useHttpPath")
+	}
+	if envMap["GIT_CONFIG_VALUE_1"] != "true" {
+		t.Fatalf("expected GIT_CONFIG_VALUE_1=true")
 	}
 }
 

@@ -641,6 +641,43 @@ export const projectGithubRepositories = sqliteTable(
   })
 );
 
+export const projectGitlabRepositories = sqliteTable(
+  'project_gitlab_repositories',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    host: text('host').notNull(),
+    gitlabProjectId: integer('gitlab_project_id').notNull(),
+    pathWithNamespace: text('path_with_namespace').notNull(),
+    webUrl: text('web_url'),
+    httpUrlToRepo: text('http_url_to_repo').notNull(),
+    defaultBranch: text('default_branch').notNull(),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    projectUnique: uniqueIndex('idx_project_gitlab_repos_project').on(table.projectId),
+    userHostProjectUnique: uniqueIndex('idx_project_gitlab_repos_user_host_project').on(
+      table.userId,
+      table.host,
+      table.gitlabProjectId
+    ),
+    projectUserIdx: index('idx_project_gitlab_repos_project_user').on(
+      table.projectId,
+      table.userId
+    ),
+  })
+);
+
 // =============================================================================
 // Project Deployment Credentials (GCP OIDC for Defang deployments)
 // Note: This table stores GCP WIF configuration (project IDs, service account
@@ -822,6 +859,9 @@ export const tasks = sqliteTable(
     chatSessionIdUnique: uniqueIndex('idx_tasks_chat_session_id_unique')
       .on(table.chatSessionId)
       .where(sql`chat_session_id IS NOT NULL`),
+    triggerExecutionIdIdx: index('idx_tasks_trigger_execution_id')
+      .on(table.triggerExecutionId)
+      .where(sql`trigger_execution_id IS NOT NULL`),
     missionIdIdx: index('idx_tasks_mission_id')
       .on(table.missionId)
       .where(sql`mission_id IS NOT NULL`),
@@ -1754,6 +1794,8 @@ export const triggers = sqliteTable(
     maxConcurrent: integer('max_concurrent').notNull().default(1),
     lastTriggeredAt: text('last_triggered_at'),
     triggerCount: integer('trigger_count').notNull().default(0),
+    /** Monotonic sequence for every execution attempt, including skipped attempts. */
+    nextExecutionSequence: integer('next_execution_sequence').notNull().default(1),
     nextFireAt: text('next_fire_at'),
     credentialBlockedReason: text('credential_blocked_reason'),
     credentialBlockedAt: text('credential_blocked_at'),
@@ -1870,6 +1912,83 @@ export const githubWebhookDeliveries = sqliteTable(
 
 export type GitHubWebhookDeliveryRow = typeof githubWebhookDeliveries.$inferSelect;
 export type NewGitHubWebhookDeliveryRow = typeof githubWebhookDeliveries.$inferInsert;
+
+// =============================================================================
+// Generic Webhook Trigger Configs
+// =============================================================================
+export const webhookTriggerConfigs = sqliteTable(
+  'webhook_trigger_configs',
+  {
+    triggerId: text('trigger_id')
+      .primaryKey()
+      .references(() => triggers.id, { onDelete: 'cascade' }),
+    tokenHash: text('token_hash').notNull(),
+    tokenLastFour: text('token_last_four').notNull(),
+    tokenCreatedAt: text('token_created_at').notNull(),
+    tokenRotatedAt: text('token_rotated_at'),
+    sourceLabel: text('source_label'),
+    filterMode: text('filter_mode').notNull().default('all'),
+    filtersJson: text('filters_json').notNull().default('[]'),
+    includedHeadersJson: text('included_headers_json').notNull().default('[]'),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    tokenHashUnique: uniqueIndex('idx_webhook_trigger_configs_token_hash').on(table.tokenHash),
+  })
+);
+
+export type WebhookTriggerConfigRow = typeof webhookTriggerConfigs.$inferSelect;
+export type NewWebhookTriggerConfigRow = typeof webhookTriggerConfigs.$inferInsert;
+
+// =============================================================================
+// Generic Webhook Deliveries (bounded audit metadata; never stores raw payload)
+// =============================================================================
+export const webhookDeliveries = sqliteTable(
+  'webhook_deliveries',
+  {
+    id: text('id').primaryKey(),
+    triggerId: text('trigger_id')
+      .notNull()
+      .references(() => triggers.id, { onDelete: 'cascade' }),
+    idempotencyKeyHash: text('idempotency_key_hash'),
+    requestFingerprint: text('request_fingerprint').notNull(),
+    outcome: text('outcome').notNull(),
+    httpStatus: integer('http_status').notNull(),
+    bodyBytes: integer('body_bytes').notNull(),
+    processingToken: text('processing_token'),
+    processingHeartbeatAt: text('processing_heartbeat_at'),
+    executionId: text('execution_id').references(() => triggerExecutions.id, {
+      onDelete: 'set null',
+    }),
+    errorCode: text('error_code'),
+    receivedAt: text('received_at').notNull(),
+    processedAt: text('processed_at'),
+    expiresAt: text('expires_at').notNull(),
+  },
+  (table) => ({
+    triggerReceivedIdx: index('idx_webhook_deliveries_trigger_received').on(
+      table.triggerId,
+      table.receivedAt,
+      table.id
+    ),
+    idempotencyUnique: uniqueIndex('idx_webhook_deliveries_trigger_idempotency')
+      .on(table.triggerId, table.idempotencyKeyHash)
+      .where(sql`idempotency_key_hash IS NOT NULL`),
+    expiresIdx: index('idx_webhook_deliveries_expires').on(table.expiresAt),
+    executionIdx: index('idx_webhook_deliveries_execution').on(table.executionId),
+    processingHeartbeatIdx: index('idx_webhook_deliveries_processing_heartbeat')
+      .on(table.processingHeartbeatAt, table.id)
+      .where(sql`outcome = 'processing' AND processing_token IS NOT NULL`),
+  })
+);
+
+export type WebhookDeliveryRow = typeof webhookDeliveries.$inferSelect;
+export type NewWebhookDeliveryRow = typeof webhookDeliveries.$inferInsert;
 
 // =============================================================================
 // Platform Credentials (admin-managed fallback keys)
@@ -2159,6 +2278,12 @@ export const deploymentEnvironments = sqliteTable(
     observedServicesJson: text('observed_services_json'),
     observedDeployStatusJson: text('observed_deploy_status_json'),
     observedDiskTelemetryJson: text('observed_disk_telemetry_json'),
+    /** Desired and observed route-only Caddy configuration revision. */
+    desiredRoutingRevision: integer('desired_routing_revision').notNull().default(0),
+    observedRoutingRevision: integer('observed_routing_revision').notNull().default(0),
+    observedRoutingStatus: text('observed_routing_status'),
+    observedRoutingError: text('observed_routing_error'),
+    observedRoutingAt: text('observed_routing_at'),
     observedAt: text('observed_at'),
     /** User-controlled gate for agent-facing app-deployment tools. */
     agentDeployEnabled: integer('agent_deploy_enabled', { mode: 'boolean' })
@@ -2181,6 +2306,10 @@ export const deploymentEnvironments = sqliteTable(
     nodeIdIdx: index('idx_deployment_environments_node_id').on(table.nodeId),
     observedStatusIdx: index('idx_deployment_environments_observed_status').on(
       table.observedStatus
+    ),
+    routingRevisionIdx: index('idx_deployment_environments_routing_revision').on(
+      table.desiredRoutingRevision,
+      table.observedRoutingRevision
     ),
     agentDeployEnabledIdx: index('idx_deployment_environments_agent_deploy_enabled').on(
       table.agentDeployEnabled
@@ -2398,6 +2527,8 @@ export const deploymentPublishJobEvents = sqliteTable(
     nodeId: text('node_id')
       .notNull()
       .references(() => nodes.id, { onDelete: 'cascade' }),
+    /** Immutable node identifier for event history when node FK semantics change. */
+    nodeIdentifier: text('node_identifier'),
     workspaceId: text('workspace_id').notNull(),
     seq: integer('seq').notNull(),
     level: text('level').notNull().default('info'),
@@ -2445,6 +2576,8 @@ export const deploymentReleaseEvents = sqliteTable(
     nodeId: text('node_id')
       .notNull()
       .references(() => nodes.id, { onDelete: 'cascade' }),
+    /** Immutable node identifier for event history when node FK semantics change. */
+    nodeIdentifier: text('node_identifier'),
     seq: integer('seq').notNull(),
     level: text('level').notNull().default('info'),
     eventType: text('event_type').notNull(),
@@ -2541,6 +2674,15 @@ export const deploymentCustomDomains = sqliteTable(
     /** Human-readable reason the last verification attempt failed. */
     verificationError: text('verification_error'),
     verifiedAt: text('verified_at'),
+    /** SAM-owned generated hostname this domain resolved to when verified. */
+    verifiedCnameTarget: text('verified_cname_target'),
+    /** 'active' | 'deactivating' | 'deleted'. */
+    desiredState: text('desired_state').notNull().default('active'),
+    /** Route-application lifecycle status exposed separately from DNS status. */
+    routingStatus: text('routing_status').notNull().default('pending_dns'),
+    activationRoutingRevision: integer('activation_routing_revision'),
+    deactivationRoutingRevision: integer('deactivation_routing_revision'),
+    deletedAt: text('deleted_at'),
     createdBy: text('created_by').references(() => users.id, { onDelete: 'set null' }),
     createdAt: text('created_at')
       .notNull()
@@ -2549,11 +2691,68 @@ export const deploymentCustomDomains = sqliteTable(
   (table) => ({
     hostnameUnique: uniqueIndex('idx_deployment_custom_domains_hostname').on(table.hostname),
     environmentIdIdx: index('idx_deployment_custom_domains_environment_id').on(table.environmentId),
+    environmentStateIdx: index('idx_deployment_custom_domains_environment_state').on(
+      table.environmentId,
+      table.desiredState,
+      table.routingStatus
+    ),
+    activationRevisionIdx: index('idx_deployment_custom_domains_activation_revision').on(
+      table.environmentId,
+      table.activationRoutingRevision
+    ),
+    deactivationRevisionIdx: index('idx_deployment_custom_domains_deactivation_revision').on(
+      table.environmentId,
+      table.deactivationRoutingRevision
+    ),
   })
 );
 
 export type DeploymentCustomDomainRow = typeof deploymentCustomDomains.$inferSelect;
 export type NewDeploymentCustomDomainRow = typeof deploymentCustomDomains.$inferInsert;
+
+export const deploymentCustomDomainEvents = sqliteTable(
+  'deployment_custom_domain_events',
+  {
+    id: text('id').primaryKey(),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    environmentId: text('environment_id')
+      .notNull()
+      .references(() => deploymentEnvironments.id, { onDelete: 'cascade' }),
+    customDomainId: text('custom_domain_id').references(() => deploymentCustomDomains.id, {
+      onDelete: 'set null',
+    }),
+    hostname: text('hostname').notNull(),
+    nodeId: text('node_id').references(() => nodes.id, { onDelete: 'set null' }),
+    nodeIdentifier: text('node_identifier'),
+    routingRevision: integer('routing_revision'),
+    eventType: text('event_type').notNull(),
+    level: text('level').notNull().default('info'),
+    message: text('message').notNull(),
+    detailJson: text('detail_json'),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`(datetime('now'))`),
+  },
+  (table) => ({
+    environmentCreatedAtIdx: index('idx_deployment_custom_domain_events_environment_created_at').on(
+      table.environmentId,
+      table.createdAt
+    ),
+    domainCreatedAtIdx: index('idx_deployment_custom_domain_events_domain_created_at').on(
+      table.customDomainId,
+      table.createdAt
+    ),
+    nodeCreatedAtIdx: index('idx_deployment_custom_domain_events_node_created_at').on(
+      table.nodeIdentifier,
+      table.createdAt
+    ),
+  })
+);
+
+export type DeploymentCustomDomainEventRow = typeof deploymentCustomDomainEvents.$inferSelect;
+export type NewDeploymentCustomDomainEventRow = typeof deploymentCustomDomainEvents.$inferInsert;
 
 // =============================================================================
 // Composable Credentials — three-primitive model (migration 0071)

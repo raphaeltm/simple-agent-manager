@@ -210,9 +210,11 @@ func (h *SessionHost) reportActivity(activity string) {
 		now := time.Now().UnixMilli()
 		payload.PromptStartedAt = &now
 	}
-	// Attach statusErr when prompting and an error is recorded (e.g., from a prior restart).
-	if statusErr != "" && activity == "prompting" {
-		payload.StatusError = &statusErr
+	// Attach a redacted status error for prompting/error states so the control
+	// plane can persist a useful failure reason without leaking credentials.
+	if statusErr != "" && (activity == "prompting" || activity == "error") {
+		redactedStatusErr := truncateString(redactAgentDiagnosticText(statusErr), 2048)
+		payload.StatusError = &redactedStatusErr
 	}
 
 	go func() {

@@ -1,4 +1,4 @@
-import { and, count, desc, eq } from 'drizzle-orm';
+import { and, count, desc, eq, isNull } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../db/schema';
@@ -53,8 +53,14 @@ interface DeploymentRouteCustomDomainDiscovery {
   verifiedAt: string | null;
   createdAt: string;
   cnameTarget: string | null;
+  verifiedCnameTarget: string | null;
+  desiredState: string;
+  routingStatus: string;
+  activationRoutingRevision: number | null;
+  deactivationRoutingRevision: number | null;
   routeAvailable: boolean;
-  willBeIncludedInApplyPayload: boolean;
+  routeTargetChanged: boolean;
+  willBeIncludedInRouteConfig: boolean;
 }
 
 type DeploymentRoutePublicDiscoveryWithCustomDomains = DeploymentRoutePublicDiscovery & {
@@ -138,14 +144,32 @@ async function loadRouteCustomDomains(
       verificationStatus: schema.deploymentCustomDomains.verificationStatus,
       verificationError: schema.deploymentCustomDomains.verificationError,
       verifiedAt: schema.deploymentCustomDomains.verifiedAt,
+      verifiedCnameTarget: schema.deploymentCustomDomains.verifiedCnameTarget,
+      desiredState: schema.deploymentCustomDomains.desiredState,
+      routingStatus: schema.deploymentCustomDomains.routingStatus,
+      activationRoutingRevision: schema.deploymentCustomDomains.activationRoutingRevision,
+      deactivationRoutingRevision: schema.deploymentCustomDomains.deactivationRoutingRevision,
       createdAt: schema.deploymentCustomDomains.createdAt,
     })
     .from(schema.deploymentCustomDomains)
-    .where(eq(schema.deploymentCustomDomains.environmentId, environmentId))
+    .where(
+      and(
+        eq(schema.deploymentCustomDomains.environmentId, environmentId),
+        isNull(schema.deploymentCustomDomains.deletedAt)
+      )
+    )
     .orderBy(schema.deploymentCustomDomains.createdAt);
 
   return domains.map((domain) => {
     const parent = findPublicRoute(routes, domain.service, domain.port);
+    const routeTargetChanged =
+      !!domain.verifiedCnameTarget && !!parent && domain.verifiedCnameTarget !== parent.hostname;
+    const willBeIncludedInRouteConfig =
+      domain.verificationStatus === 'verified' &&
+      domain.desiredState === 'active' &&
+      parent !== null &&
+      !!domain.verifiedCnameTarget &&
+      domain.verifiedCnameTarget === parent.hostname;
     return {
       id: domain.id,
       service: domain.service,
@@ -156,10 +180,16 @@ async function loadRouteCustomDomains(
       verificationStatus: domain.verificationStatus,
       verificationError: domain.verificationError,
       verifiedAt: domain.verifiedAt,
+      verifiedCnameTarget: domain.verifiedCnameTarget,
+      desiredState: domain.desiredState,
+      routingStatus: routeTargetChanged ? 'dns_recheck_required' : domain.routingStatus,
+      activationRoutingRevision: domain.activationRoutingRevision,
+      deactivationRoutingRevision: domain.deactivationRoutingRevision,
       createdAt: domain.createdAt,
       cnameTarget: parent?.hostname ?? null,
       routeAvailable: parent !== null,
-      willBeIncludedInApplyPayload: domain.verificationStatus === 'verified' && parent !== null,
+      routeTargetChanged,
+      willBeIncludedInRouteConfig,
     };
   });
 }

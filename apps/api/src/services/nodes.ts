@@ -566,6 +566,50 @@ export async function deleteNodeResources(
   return result;
 }
 
+export async function retireDeletedDeploymentNodeRecord(
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  nodeId: string,
+  userId: string
+): Promise<void> {
+  const now = new Date().toISOString();
+
+  await db
+    .update(schema.deploymentEnvironments)
+    .set({
+      nodeId: null,
+      status: 'stopped',
+      observedStatus: 'stopped',
+      observedErrorMessage: null,
+      observedAt: now,
+      updatedAt: now,
+    })
+    .where(eq(schema.deploymentEnvironments.nodeId, nodeId));
+
+  await db
+    .update(schema.workspaces)
+    .set({ status: 'deleted', updatedAt: now })
+    .where(and(eq(schema.workspaces.nodeId, nodeId), eq(schema.workspaces.userId, userId)));
+
+  await db
+    .update(schema.nodes)
+    .set({
+      status: 'deleted',
+      healthStatus: 'stale',
+      providerInstanceId: null,
+      backendDnsRecordId: null,
+      ipAddress: null,
+      errorMessage: null,
+      updatedAt: now,
+    })
+    .where(
+      and(
+        eq(schema.nodes.id, nodeId),
+        eq(schema.nodes.userId, userId),
+        eq(schema.nodes.nodeRole, 'deployment')
+      )
+    );
+}
+
 function truncateNodeErrorMessage(message: string): string {
   return message.length > NODE_ERROR_MESSAGE_MAX_LENGTH
     ? message.slice(0, NODE_ERROR_MESSAGE_MAX_LENGTH) + '...'
