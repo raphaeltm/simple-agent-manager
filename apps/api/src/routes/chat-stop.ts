@@ -8,6 +8,7 @@ import { requireRouteParam } from '../lib/route-helpers';
 import { ulid } from '../lib/ulid';
 import { getUserId } from '../middleware/auth';
 import { requireProjectCapability } from '../middleware/project-auth';
+import * as chatPersistence from '../services/chat-persistence';
 import { ensureSessionTaskBacked } from '../services/session-task-repair';
 import { isExecutableTaskStatus, isTaskStatus } from '../services/task-status';
 import {
@@ -138,6 +139,7 @@ export function registerChatStopRoute(chatRoutes: Hono<{ Bindings: Env }>): void
       projectId, sessionId, fallbackUserId: userId,
     });
     await stopTaskBackedSession(c.env, db, backingTask.id, context);
+    await chatPersistence.stopChatSession(c.env, projectId, sessionId);
 
     return c.json({ status: "stopped", workspaceDeleted: true });
   });

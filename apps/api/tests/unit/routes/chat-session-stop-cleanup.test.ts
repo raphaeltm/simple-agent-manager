@@ -134,7 +134,11 @@ describe('POST /api/projects/:projectId/sessions/:sessionId/stop cleanup', () =>
       expect.objectContaining({ status: 'cancelled' })
     );
     expect(mocks.cleanupWorkspaceForDeletion).not.toHaveBeenCalled();
-    expect(mocks.stopSession).not.toHaveBeenCalled();
+    expect(mocks.stopSession).toHaveBeenCalledWith(
+      expect.anything(),
+      'project-stop-1',
+      'session-stop-1'
+    );
   });
 
   it('tears down task-backed session runtime resources', async () => {
@@ -173,7 +177,11 @@ describe('POST /api/projects/:projectId/sessions/:sessionId/stop cleanup', () =>
       workspaceDeleted: true,
     });
     expect(mocks.cleanupWorkspaceForDeletion).not.toHaveBeenCalled();
-    expect(mocks.stopSession).not.toHaveBeenCalled();
+    expect(mocks.stopSession).toHaveBeenCalledWith(
+      expect.anything(),
+      'project-stop-1',
+      'session-task-backed-1'
+    );
     expect(mocks.cleanupTerminalTaskResources).toHaveBeenCalledWith(expect.anything(), 'task-1', {
       status: 'cancelled',
       errorMessage: 'Archived by user',
