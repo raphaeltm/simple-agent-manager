@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
 import { validatePlatformIntegrationInput } from '../../../src/services/platform-config-validation';
@@ -90,5 +90,52 @@ describe('validatePlatformIntegrationInput — GitLab client credentials', () =>
       },
     });
     expect(result).toEqual({ ok: true, errors: [] });
+  });
+});
+
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+describe('validatePlatformIntegrationInput — Google infrastructure OAuth', () => {
+  it('rejects half-configured and ambiguous removal payloads', async () => {
+    await expect(validatePlatformIntegrationInput(env, {
+      googleInfrastructure: { clientId: 'infra-client-id' },
+    })).resolves.toMatchObject({
+      ok: false,
+      errors: ['Google infrastructure OAuth client id and secret must be provided together'],
+    });
+
+    const removal = await validatePlatformIntegrationInput(env, {
+      googleInfrastructure: {
+        remove: true,
+        clientId: 'infra-client-id',
+        clientSecret: 'infra-client-secret',
+      },
+    });
+    expect(removal.ok).toBe(false);
+    expect(removal.errors).toContain(
+      'Google infrastructure OAuth removal cannot include replacement values',
+    );
+  });
+
+  it('validates the pair against the static infrastructure callback', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ error: 'invalid_grant' }),
+      { status: 400, headers: { 'Content-Type': 'application/json' } },
+    ));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(validatePlatformIntegrationInput(env, {
+      googleInfrastructure: {
+        clientId: 'infra-client-id',
+        clientSecret: 'infra-client-secret',
+      },
+    })).resolves.toEqual({ ok: true, errors: [] });
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const body = init.body as URLSearchParams;
+    expect(body.get('redirect_uri')).toBe('https://api.example.com/auth/google/callback');
   });
 });

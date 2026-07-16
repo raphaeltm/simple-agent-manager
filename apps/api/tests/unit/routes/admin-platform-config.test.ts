@@ -48,6 +48,18 @@ function createD1(sqlite: Database.Database): D1Database {
         },
       };
     },
+    async batch(statements: D1PreparedStatement[]) {
+      sqlite.exec('BEGIN');
+      const results: D1Result[] = [];
+      try {
+        for (const statement of statements) results.push(await statement.run());
+        sqlite.exec('COMMIT');
+        return results;
+      } catch (err) {
+        sqlite.exec('ROLLBACK');
+        throw err;
+      }
+    },
   } as unknown as D1Database;
 }
 
@@ -74,6 +86,7 @@ function createEnv(overrides: Partial<Env> = {}): Env {
       is_enabled INTEGER NOT NULL DEFAULT 1,
       created_by TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_by TEXT,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
   `);
@@ -165,6 +178,66 @@ describe('admin platform config routes', () => {
       apiBaseUrl: 'https://gitlab.admin.example.com/api/v4',
       clientId: 'gitlab-admin-client',
       clientSecret: 'gitlab-admin-secret',
+    });
+  });
+
+  it('stores, rotates, and removes infrastructure OAuth as a superadmin without returning the secret', async () => {
+    const env = createEnv({
+      GOOGLE_CLIENT_ID: 'env-infra-client',
+      GOOGLE_CLIENT_SECRET: 'env-infra-secret',
+    });
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(
+      JSON.stringify({ error: 'invalid_grant' }),
+      { status: 400, headers: { 'Content-Type': 'application/json' } },
+    ));
+
+    const save = await createApp().request('/api/admin/platform-config', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'X-Test-Role': 'superadmin' },
+      body: JSON.stringify({
+        config: {
+          googleInfrastructure: {
+            clientId: 'runtime-infra-client',
+            clientSecret: 'runtime-infra-secret',
+          },
+        },
+      }),
+    }, env);
+
+    expect(save.status).toBe(200);
+    const saveBody = await save.text();
+    expect(saveBody).not.toContain('runtime-infra-secret');
+    expect(JSON.parse(saveBody)).toMatchObject({
+      status: {
+        integrations: {
+          googleInfrastructureOAuth: { configured: true, source: 'runtime' },
+          googleOAuth: { configured: false },
+        },
+      },
+    });
+    const secretRow = await env.DATABASE.prepare(
+      `SELECT encrypted_token AS encryptedToken, updated_by AS updatedBy
+       FROM platform_credentials
+       WHERE provider = 'google-infrastructure'`,
+    ).first<{ encryptedToken: string; updatedBy: string }>();
+    expect(secretRow?.encryptedToken).not.toContain('runtime-infra-secret');
+    expect(secretRow?.updatedBy).toBe('superadmin-1');
+
+    const remove = await createApp().request('/api/admin/platform-config', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'X-Test-Role': 'superadmin' },
+      body: JSON.stringify({ config: { googleInfrastructure: { remove: true } } }),
+    }, env);
+    expect(remove.status).toBe(200);
+    await expect(remove.json()).resolves.toMatchObject({
+      status: {
+        integrations: {
+          googleInfrastructureOAuth: {
+            configured: true,
+            source: 'environment',
+          },
+        },
+      },
     });
   });
 

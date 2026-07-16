@@ -29,7 +29,12 @@ const PLATFORM_STATUS = {
       label: 'set via environment fallback',
       fields: {
         appId: { configured: true, source: 'environment', updatedAt: null, updatedBy: null },
-        appPrivateKey: { configured: true, source: 'environment', updatedAt: null, updatedBy: null },
+        appPrivateKey: {
+          configured: true,
+          source: 'environment',
+          updatedAt: null,
+          updatedBy: null,
+        },
         appSlug: { configured: true, source: 'environment', updatedAt: null, updatedBy: null },
       },
     },
@@ -46,8 +51,37 @@ const PLATFORM_STATUS = {
       source: 'runtime',
       label: 'set here',
       fields: {
-        clientId: { configured: true, source: 'runtime', updatedAt: '2026-07-07T00:00:00Z', updatedBy: 'admin-platform-config' },
-        clientSecret: { configured: true, source: 'runtime', updatedAt: '2026-07-07T00:00:00Z', updatedBy: 'admin-platform-config' },
+        clientId: {
+          configured: true,
+          source: 'runtime',
+          updatedAt: '2026-07-07T00:00:00Z',
+          updatedBy: 'admin-platform-config',
+        },
+        clientSecret: {
+          configured: true,
+          source: 'runtime',
+          updatedAt: '2026-07-07T00:00:00Z',
+          updatedBy: 'admin-platform-config',
+        },
+      },
+    },
+    googleInfrastructureOAuth: {
+      configured: true,
+      source: 'runtime',
+      label: 'set here',
+      fields: {
+        clientId: {
+          configured: true,
+          source: 'runtime',
+          updatedAt: '2026-07-16T12:00:00Z',
+          updatedBy: 'admin-platform-config',
+        },
+        clientSecret: {
+          configured: true,
+          source: 'runtime',
+          updatedAt: '2026-07-16T12:00:00Z',
+          updatedBy: 'admin-platform-config',
+        },
       },
     },
     gitlabOAuth: {
@@ -71,12 +105,18 @@ async function respondJson(route: Route, status: number, body: unknown) {
   });
 }
 
-async function setupMocks(page: Page, authenticated = true, googleLogin = true, gitlabLogin = true) {
+async function setupMocks(
+  page: Page,
+  authenticated = true,
+  googleLogin = true,
+  gitlabLogin = true
+) {
   await page.route('**/api/**', async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
 
-    if (path === '/api/auth/get-session') return respondJson(route, 200, authenticated ? ADMIN_USER : null);
+    if (path === '/api/auth/get-session')
+      return respondJson(route, 200, authenticated ? ADMIN_USER : null);
     if (path === '/api/config/login-providers') {
       return respondJson(route, 200, { github: true, google: googleLogin, gitlab: gitlabLogin });
     }
@@ -123,6 +163,7 @@ test.describe('Platform config first-run and admin UI', () => {
     await expect(page.getByText('set via environment fallback').first()).toBeVisible();
     await expect(page.getByText('set here').first()).toBeVisible();
     await expect(page.getByText('not configured').first()).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Google infrastructure OAuth' })).toHaveCount(0);
     await assertNoOverflow(page);
     await screenshot(page, 'platform-config-setup');
   });
@@ -133,6 +174,15 @@ test.describe('Platform config first-run and admin UI', () => {
     await expect(page.getByRole('heading', { name: 'Admin' })).toBeVisible();
     await expect(page.getByTestId('platform-config-form')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Save integrations' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Google infrastructure OAuth' })).toBeVisible();
+    await expect(page.getByText(/\/auth\/google\/callback/)).toBeVisible();
+    await expect(page.getByText(/\/api\/deployment\/gcp\/callback/)).toBeVisible();
+    await expect(page.getByTestId('google-infrastructure-audit')).toContainText(
+      'admin-platform-config'
+    );
+    await expect(
+      page.getByRole('button', { name: 'Remove runtime infrastructure client' })
+    ).toBeVisible();
     await assertNoOverflow(page);
     await screenshot(page, 'platform-config-admin');
   });

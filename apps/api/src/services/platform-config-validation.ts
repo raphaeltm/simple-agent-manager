@@ -35,13 +35,13 @@ function validatePem(value: string, errors: string[]): void {
   }
 }
 
-function validateOAuthClientId(value: string, provider: 'GitHub' | 'Google' | 'GitLab', errors: string[]): void {
+function validateOAuthClientId(value: string, provider: 'GitHub' | 'Google' | 'Google infrastructure' | 'GitLab', errors: string[]): void {
   if (value.trim().length < 6) {
     errors.push(`${provider} OAuth client id is too short`);
   }
 }
 
-function validateSecret(value: string, provider: 'GitHub' | 'Google' | 'GitLab', errors: string[]): void {
+function validateSecret(value: string, provider: 'GitHub' | 'Google' | 'Google infrastructure' | 'GitLab', errors: string[]): void {
   if (value.trim().length < 8) {
     errors.push(`${provider} OAuth client secret is too short`);
   }
@@ -87,7 +87,7 @@ async function pingGitHubOAuth(clientId: string, clientSecret: string): Promise<
   return null;
 }
 
-async function pingGoogleOAuth(clientId: string, clientSecret: string, baseDomain: string): Promise<string | null> {
+async function pingGoogleOAuth(clientId: string, clientSecret: string, redirectUri: string): Promise<string | null> {
   const response = await fetch(GOOGLE_TOKEN_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -95,7 +95,7 @@ async function pingGoogleOAuth(clientId: string, clientSecret: string, baseDomai
       client_id: clientId,
       client_secret: clientSecret,
       code: 'sam-setup-validation',
-      redirect_uri: `https://api.${baseDomain}/api/auth/callback/google`,
+      redirect_uri: redirectUri,
       grant_type: 'authorization_code',
     }),
   });
@@ -113,6 +113,7 @@ export async function validatePlatformIntegrationInput(
   const errors: string[] = [];
   const github = input.github ?? {};
   const google = input.google ?? {};
+  const googleInfrastructure = input.googleInfrastructure ?? {};
   const gitlab = input.gitlab ?? {};
 
   if (present(github.clientId)) validateOAuthClientId(github.clientId, 'GitHub', errors);
@@ -126,6 +127,26 @@ export async function validatePlatformIntegrationInput(
 
   if (present(google.clientId)) validateOAuthClientId(google.clientId, 'Google', errors);
   if (present(google.clientSecret)) validateSecret(google.clientSecret, 'Google', errors);
+
+  const infrastructureClientId = present(googleInfrastructure.clientId)
+    ? googleInfrastructure.clientId
+    : null;
+  const infrastructureClientSecret = present(googleInfrastructure.clientSecret)
+    ? googleInfrastructure.clientSecret
+    : null;
+  const hasInfrastructureClientId = infrastructureClientId !== null;
+  const hasInfrastructureClientSecret = infrastructureClientSecret !== null;
+  if (googleInfrastructure.remove && (hasInfrastructureClientId || hasInfrastructureClientSecret)) {
+    errors.push('Google infrastructure OAuth removal cannot include replacement values');
+  } else if (!googleInfrastructure.remove && hasInfrastructureClientId !== hasInfrastructureClientSecret) {
+    errors.push('Google infrastructure OAuth client id and secret must be provided together');
+  }
+  if (infrastructureClientId !== null) {
+    validateOAuthClientId(infrastructureClientId, 'Google infrastructure', errors);
+  }
+  if (infrastructureClientSecret !== null) {
+    validateSecret(infrastructureClientSecret, 'Google infrastructure', errors);
+  }
 
   if (present(gitlab.host)) validateGitLabHost(gitlab.host, errors);
   if (present(gitlab.clientId)) validateOAuthClientId(gitlab.clientId, 'GitLab', errors);
@@ -142,10 +163,29 @@ export async function validatePlatformIntegrationInput(
 
   if (present(google.clientId) && present(google.clientSecret)) {
     try {
-      const error = await pingGoogleOAuth(google.clientId, google.clientSecret, env.BASE_DOMAIN);
+      const error = await pingGoogleOAuth(
+        google.clientId,
+        google.clientSecret,
+        `https://api.${env.BASE_DOMAIN}/api/auth/callback/google`,
+      );
       if (error) errors.push(error);
     } catch (err) {
       log.warn('google_oauth_validation_ping_failed', { error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  if (infrastructureClientId !== null && infrastructureClientSecret !== null) {
+    try {
+      const error = await pingGoogleOAuth(
+        infrastructureClientId,
+        infrastructureClientSecret,
+        `https://api.${env.BASE_DOMAIN}/auth/google/callback`,
+      );
+      if (error) errors.push(error.replace('Google OAuth', 'Google infrastructure OAuth'));
+    } catch (err) {
+      log.warn('google_infrastructure_oauth_validation_ping_failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 

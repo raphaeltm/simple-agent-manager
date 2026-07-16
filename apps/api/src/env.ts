@@ -534,6 +534,7 @@ export interface Env extends WebhookTriggerEnv {
   GCP_WIF_POOL_ID?: string;
   GCP_WIF_PROVIDER_ID?: string;
   GCP_SERVICE_ACCOUNT_ID?: string;
+  GCP_SERVICE_ACCOUNT_JSON_MAX_BYTES?: string;
   GCP_DEFAULT_ZONE?: string;
   GCP_IMAGE_FAMILY?: string;
   GCP_IMAGE_PROJECT?: string;

@@ -1,6 +1,7 @@
 import type { GcpOidcCredential } from '@simple-agent-manager/shared';
 import {
   DEFAULT_GCP_API_TIMEOUT_MS,
+  GCP_CREDENTIAL_VERSION,
   DEFAULT_GCP_SERVICE_ACCOUNT_ID,
   DEFAULT_GCP_WIF_POOL_ID,
   DEFAULT_GCP_WIF_PROVIDER_ID,
@@ -608,7 +609,9 @@ export async function runGcpSetup(
   onProgress?.('grant_project_roles', 'done');
 
   return {
+    version: GCP_CREDENTIAL_VERSION,
     provider: 'gcp',
+    authType: 'workload-identity',
     gcpProjectId,
     gcpProjectNumber: projectNumber,
     serviceAccountEmail: saEmail,

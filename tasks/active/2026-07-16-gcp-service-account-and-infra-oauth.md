@@ -61,34 +61,34 @@ References:
 
 ## Implementation checklist
 
-- [ ] Add a versioned GCP credential model and legacy compatibility:
-  - [ ] Define explicit `workload-identity` and `service-account-key` variants in shared types and request/response schemas.
-  - [ ] Normalize existing unversioned WIF blobs as `workload-identity` and serialize new WIF writes with the version/discriminator.
-  - [ ] Reject malformed/provider-mismatched variants before a secret reaches `GcpProvider`.
-- [ ] Implement the service-account credential boundary:
-  - [ ] Parse JSON without trusting `token_uri`; require `type=service_account`, project ID, service-account email, private-key ID, and an importable PKCS#8 RSA private key.
-  - [ ] Sign short-lived RS256 assertions and exchange them only at SAM's fixed/allowlisted Google OAuth token endpoint with a configurable timeout and safe scope constant.
-  - [ ] Cache only short-lived access tokens, bound to user/project/auth mode/key identity and capped by Google's returned expiry; never persist access tokens as primary credentials.
-  - [ ] Verify the key and a harmless Compute API permission/readiness call before replacement, with sanitized actionable errors for malformed, revoked, disabled, underprivileged, or API-disabled credentials.
-  - [ ] Add an atomic D1-backed per-principal mutation limit with at-limit and rollover tests for service-account rotation.
-- [ ] Add atomic persistence, rotation, safe projection, and disconnect:
-  - [ ] Add an authenticated GCP service-account save/rotate endpoint and client contract accepting JSON text plus default zone.
-  - [ ] Verify before a single D1 batch replaces the legacy and generated composable credential state; a failed verification or failed batch must leave the prior credential usable.
-  - [ ] Ensure rotation/removal makes superseded private-key ciphertext unreachable and clears matching cached derivatives without attempting to delete the Google-managed key.
-  - [ ] Return only safe GCP metadata to the UI and isolate malformed/undecryptable rows so unrelated credentials still list and resolve.
+- [x] Add a versioned GCP credential model and legacy compatibility:
+  - [x] Define explicit `workload-identity` and `service-account-key` variants in shared types and request/response schemas.
+  - [x] Normalize existing unversioned WIF blobs as `workload-identity` and serialize new WIF writes with the version/discriminator.
+  - [x] Reject malformed/provider-mismatched variants before a secret reaches `GcpProvider`.
+- [x] Implement the service-account credential boundary:
+  - [x] Parse JSON without trusting `token_uri`; require `type=service_account`, project ID, service-account email, private-key ID, and an importable PKCS#8 RSA private key.
+  - [x] Sign short-lived RS256 assertions and exchange them only at SAM's fixed/allowlisted Google OAuth token endpoint with a configurable timeout and safe scope constant.
+  - [x] Cache only short-lived access tokens, bound to user/project/auth mode/key identity and capped by Google's returned expiry; never persist access tokens as primary credentials.
+  - [x] Verify the key and a harmless Compute API permission/readiness call before replacement, with sanitized actionable errors for malformed, revoked, disabled, underprivileged, or API-disabled credentials.
+  - [x] Add an atomic D1-backed per-principal mutation limit with at-limit and rollover tests for service-account rotation.
+- [x] Add atomic persistence, rotation, safe projection, and disconnect:
+  - [x] Add an authenticated GCP service-account save/rotate endpoint and client contract accepting JSON text plus default zone.
+  - [x] Verify before a single D1 batch replaces the legacy and generated composable credential state; a failed verification or failed batch must leave the prior credential usable.
+  - [x] Ensure rotation/removal makes superseded private-key ciphertext unreachable and clears matching cached derivatives without attempting to delete the Google-managed key.
+  - [x] Return only safe GCP metadata to the UI and isolate malformed/undecryptable rows so unrelated credentials still list and resolve.
 - [ ] Extend the GCP settings UX:
-  - [ ] Keep WIF first and visibly recommended; add `Service account JSON` as the warned OAuth-free alternative.
-  - [ ] Support both local JSON file selection and paste, default-zone selection, validation/retry feedback, rotation confirmation, and disconnect wording that accurately describes local vs Google key deletion.
-  - [ ] Show only safe connected metadata (auth mode, project, service-account email, zone, key ID/fingerprint) and never repopulate the JSON/private key.
-  - [ ] Provide copyable least-privilege `gcloud` setup commands for Compute APIs/roles, with Vertex AI explicitly optional and no Project Owner recommendation.
+  - [x] Keep WIF first and visibly recommended; add `Service account JSON` as the warned OAuth-free alternative.
+  - [x] Support both local JSON file selection and paste, default-zone selection, validation/retry feedback, rotation confirmation, and disconnect wording that accurately describes local vs Google key deletion.
+  - [x] Show only safe connected metadata (auth mode, project, service-account email, zone, key ID/fingerprint) and never repopulate the JSON/private key.
+  - [x] Provide copyable least-privilege `gcloud` setup commands for Compute APIs/roles, with Vertex AI explicitly optional and no Project Owner recommendation.
   - [ ] Add component tests and Playwright visual audits for mobile/desktop normal, long, empty, malformed/error, rotation, unicode, and key-policy-warning states.
-- [ ] Add independent runtime infrastructure OAuth configuration:
-  - [ ] Extend platform config types/storage/status with a separate infrastructure Google client ID/secret family and encrypted secret metadata including `updated_at` / `updated_by`.
-  - [ ] Make `getGoogleInfraOAuthConfig` resolve runtime admin config first, then `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`, while `getGoogleLoginOAuthConfig` remains unchanged and independent.
-  - [ ] Validate effective infrastructure ID/secret pairs before one atomic batch; reject half-configured writes and support explicit runtime removal that reveals any environment fallback.
-  - [ ] Add an atomic D1-backed per-superadmin mutation limit for secret rotation.
-  - [ ] Add a clearly labelled admin-only form section with both static callback URIs, source/audit state, rotation, and removal confirmation; never return the secret.
-  - [ ] Add route/service/UI regression tests proving superadmin authorization, precedence, pair atomicity, removal/fallback, secret masking, bad-row fallback, and complete login/infra separation.
+- [x] Add independent runtime infrastructure OAuth configuration:
+  - [x] Extend platform config types/storage/status with a separate infrastructure Google client ID/secret family and encrypted secret metadata including `updated_at` / `updated_by`.
+  - [x] Make `getGoogleInfraOAuthConfig` resolve runtime admin config first, then `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`, while `getGoogleLoginOAuthConfig` remains unchanged and independent.
+  - [x] Validate effective infrastructure ID/secret pairs before one atomic batch; reject half-configured writes and support explicit runtime removal that reveals any environment fallback.
+  - [x] Add an atomic D1-backed per-superadmin mutation limit for secret rotation.
+  - [x] Add a clearly labelled admin-only form section with both static callback URIs, source/audit state, rotation, and removal confirmation; never return the secret.
+  - [x] Add route/service/UI regression tests proving superadmin authorization, precedence, pair atomicity, removal/fallback, secret masking, bad-row fallback, and complete login/infra separation.
 - [ ] Synchronize public documentation and configuration references:
   - [ ] Update self-hosting guidance with the recommended WIF path, OAuth-free service-account path, exact static callbacks, least-privilege roles/APIs, key-policy warning, rotation/removal semantics, and infra OAuth runtime-vs-env behavior.
   - [ ] Update security and configuration references to describe encrypted service-account JSON, non-persistence of derived access tokens, and independent Google login/infrastructure credential families.
