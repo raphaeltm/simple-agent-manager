@@ -49,20 +49,34 @@ The desired v1 product rule is:
 
 ## Implementation Checklist
 
-- [ ] Add/adjust failing API tests proving a member-owned workspace can fetch project/profile/skill runtime assets created by another project member.
-- [ ] Add/adjust failing route tests proving project/profile/skill runtime config APIs update shared project-scoped rows rather than per-user shadow rows.
-- [ ] Add/adjust failing `/git-token` tests proving a member workspace can mint through a project creator's installation row only after member GitHub access is verified.
-- [ ] Add/adjust VM-agent tests proving git-token fetch failures fail early for authenticated repo providers instead of falling through to unauthenticated clone.
-- [ ] Update workspace runtime asset resolution to validate project/resource scope without requiring creator `user_id = workspace.user_id`.
-- [ ] Update project/profile/skill runtime config read/write/delete helpers to use project/resource-scoped predicates; keep current user only as attribution on insert/update.
-- [ ] Update GitHub workspace `/git-token` route to load the project installation row by id, verify running user repo access, then mint scoped installation tokens from the project installation external id.
-- [ ] Update additional GitHub repository access token scope resolution to read project-scoped rows and re-verify running user access before adding repository ids.
-- [ ] Update VM-agent provisioning to fail fast with the git-token fetch error for non-empty authenticated repositories.
-- [ ] Keep nodes user-scoped and avoid broadening personal/global resources.
-- [ ] Run focused API and Go tests.
-- [ ] Run full local quality gates in proportion to the changed packages.
-- [ ] Run local specialist review: task completion validator, Cloudflare/API, security, Go, and test coverage.
-- [ ] Skip staging deployment/verification by explicit user instruction if local vertical slice coverage is thorough; document that in the PR.
+- [x] Add/adjust failing API tests proving a member-owned workspace can fetch project/profile/skill runtime assets created by another project member.
+- [x] Add/adjust failing route tests proving project/profile/skill runtime config APIs update shared project-scoped rows rather than per-user shadow rows.
+- [x] Add/adjust failing `/git-token` tests proving a member workspace can mint through a project creator's installation row only after member GitHub access is verified.
+- [x] Add/adjust VM-agent tests proving git-token fetch failures fail early for authenticated repo providers instead of falling through to unauthenticated clone.
+- [x] Update workspace runtime asset resolution to validate project/resource scope without requiring creator `user_id = workspace.user_id`.
+- [x] Update project/profile/skill runtime config read/write/delete helpers to use project/resource-scoped predicates; keep current user only as attribution on insert/update.
+- [x] Update GitHub workspace `/git-token` route to load the project installation row by id, verify running user repo access, then mint scoped installation tokens from the project installation external id.
+- [x] Update additional GitHub repository access token scope resolution to read project-scoped rows and re-verify running user access before adding repository ids.
+- [x] Update VM-agent provisioning to fail fast with the git-token fetch error for non-empty authenticated repositories.
+- [x] Keep nodes user-scoped and avoid broadening personal/global resources.
+- [x] Run focused API and Go tests.
+- [x] Run full local quality gates in proportion to the changed packages.
+- [x] Run local specialist review: task completion validator, Cloudflare/API, security, Go, and test coverage.
+- [x] Skip staging deployment/verification by explicit user instruction if local vertical slice coverage is thorough; document that in the PR.
+
+## Validation Notes
+
+- Focused API shared-project regressions pass:
+  - `workspace-runtime-assets-shared-project.test.ts`
+  - `profile-runtime-assets.test.ts`
+  - `projects-runtime-config-shared-project.test.ts`
+  - `workspace-git-token.test.ts`
+- Full standalone API suite passes: 428 files / 6078 tests.
+- Targeted VM-agent regression passes with temporary Go 1.25.0 in `/tmp`.
+- Full `packages/vm-agent` `go test ./...` is blocked by unrelated local image prerequisites (`docker`/compose missing); the touched targeted server test passes.
+- Root `pnpm typecheck`, `pnpm lint`, and `pnpm build` pass.
+- Root `pnpm test` exposed unrelated API failures in two files under full turbo concurrency; those two files pass in isolation immediately afterward.
+- Task-completion, API/Cloudflare boundary, security, Go, and test-coverage reviews completed locally; no blocking findings.
 
 ## Acceptance Criteria
 

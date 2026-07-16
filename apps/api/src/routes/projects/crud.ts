@@ -624,7 +624,6 @@ crudRoutes.post('/:id/runtime/env-vars', jsonValidator(UpsertProjectRuntimeEnvVa
     .where(
       and(
         eq(schema.projectRuntimeEnvVars.projectId, project.id),
-        eq(schema.projectRuntimeEnvVars.userId, userId),
         eq(schema.projectRuntimeEnvVars.envKey, envKey)
       )
     )
@@ -636,8 +635,7 @@ crudRoutes.post('/:id/runtime/env-vars', jsonValidator(UpsertProjectRuntimeEnvVa
       .from(schema.projectRuntimeEnvVars)
       .where(
         and(
-          eq(schema.projectRuntimeEnvVars.projectId, project.id),
-          eq(schema.projectRuntimeEnvVars.userId, userId)
+          eq(schema.projectRuntimeEnvVars.projectId, project.id)
         )
       );
 
@@ -698,7 +696,6 @@ crudRoutes.delete('/:id/runtime/env-vars/:envKey', async (c) => {
     .where(
       and(
         eq(schema.projectRuntimeEnvVars.projectId, project.id),
-        eq(schema.projectRuntimeEnvVars.userId, userId),
         eq(schema.projectRuntimeEnvVars.envKey, envKey)
       )
     );
@@ -738,7 +735,6 @@ crudRoutes.post('/:id/runtime/files', jsonValidator(UpsertProjectRuntimeFileSche
     .where(
       and(
         eq(schema.projectRuntimeFiles.projectId, project.id),
-        eq(schema.projectRuntimeFiles.userId, userId),
         eq(schema.projectRuntimeFiles.filePath, path)
       )
     )
@@ -750,8 +746,7 @@ crudRoutes.post('/:id/runtime/files', jsonValidator(UpsertProjectRuntimeFileSche
       .from(schema.projectRuntimeFiles)
       .where(
         and(
-          eq(schema.projectRuntimeFiles.projectId, project.id),
-          eq(schema.projectRuntimeFiles.userId, userId)
+          eq(schema.projectRuntimeFiles.projectId, project.id)
         )
       );
 
@@ -812,7 +807,6 @@ crudRoutes.delete('/:id/runtime/files', async (c) => {
     .where(
       and(
         eq(schema.projectRuntimeFiles.projectId, project.id),
-        eq(schema.projectRuntimeFiles.userId, userId),
         eq(schema.projectRuntimeFiles.filePath, path)
       )
     );
