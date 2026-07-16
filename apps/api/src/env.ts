@@ -1,10 +1,11 @@
 import type { Sandbox } from '@cloudflare/sandbox';
 
 import type { VmAgentContainer } from './durable-objects/vm-agent-container';
+import type { TaskRecoveryEnv } from './task-recovery-env';
 import type { WebhookTriggerEnv } from './webhook-trigger-env';
 
 // Cloudflare bindings type
-export interface Env extends WebhookTriggerEnv {
+export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   // D1 Database
   DATABASE: D1Database;
   // KV for sessions
@@ -223,12 +224,6 @@ export interface Env extends WebhookTriggerEnv {
   TASK_RUN_HARD_TIMEOUT_MS?: string;
   TASK_STUCK_QUEUED_TIMEOUT_MS?: string;
   TASK_STUCK_DELEGATED_TIMEOUT_MS?: string;
-  TASK_DO_MISMATCH_GRACE_MS?: string;
-  STUCK_TASK_MAX_CANDIDATES_PER_SWEEP?: string;
-  STUCK_TASK_SCAN_CURSOR_KV_KEY?: string;
-  TASK_LIVENESS_MAX_ACP_SESSIONS?: string;
-  TASK_LIVENESS_PROBE_TIMEOUT_MS?: string;
-  TASK_RUN_ABSOLUTE_CEILING_MS?: string;
   CLAUDE_CODE_COMPACTION_LOOP_DETECTOR_ENABLED?: string;
   CLAUDE_CODE_COMPACTION_LOOP_RECENT_MESSAGE_LIMIT?: string;
   CLAUDE_CODE_COMPACTION_LOOP_WINDOW_MESSAGES?: string;
