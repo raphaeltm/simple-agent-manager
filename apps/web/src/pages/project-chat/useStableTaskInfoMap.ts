@@ -1,6 +1,5 @@
-import { useCallback, useRef, useState } from 'react';
-
 import type { Task } from '@simple-agent-manager/shared';
+import { useCallback, useRef, useState } from 'react';
 
 import { buildTaskInfoMap, type TaskInfo } from './useTaskGroups';
 

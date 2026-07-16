@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState } from 'react';
 
-import type { ChatSessionListItem } from '../../lib/api';
 import type { RawSessionEvent } from '../../hooks/useProjectWebSocket';
+import type { ChatSessionListItem } from '../../lib/api';
 
 // ---------------------------------------------------------------------------
 // Session event types matching ProjectData DO broadcasts
