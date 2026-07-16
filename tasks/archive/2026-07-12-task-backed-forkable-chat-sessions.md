@@ -29,11 +29,11 @@ Every user-visible chat must have exactly one Task. `taskMode` controls schedule
 
 ## Lifecycle matrix
 
-| Mode/state | Persistence and launch semantics |
-| --- | --- |
-| Conversation | Task/session created first; queued while persisted/provisioning; `in_progress` when agent starts; remains human-controlled until archive/close; terminal launch failures become `failed`. |
-| Task | Same Task/session identity factory; existing TaskRunner autonomous execution/completion behavior remains authoritative. |
-| Legacy taskless chat | Lazily and idempotently materialize a conversation Task, link both stores, preserve transcript/timestamps/runtime attribution, and retain bounded compatibility for old MCP tokens. |
+| Mode/state           | Persistence and launch semantics                                                                                                                                                          |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Conversation         | Task/session created first; queued while persisted/provisioning; `in_progress` when agent starts; remains human-controlled until archive/close; terminal launch failures become `failed`. |
+| Task                 | Same Task/session identity factory; existing TaskRunner autonomous execution/completion behavior remains authoritative.                                                                   |
+| Legacy taskless chat | Lazily and idempotently materialize a conversation Task, link both stores, preserve transcript/timestamps/runtime attribution, and retain bounded compatibility for old MCP tokens.       |
 
 ## Implementation checklist
 
@@ -92,27 +92,29 @@ Every user-visible chat must have exactly one Task. `taskMode` controls schedule
 
 ## Specialist review evidence
 
-
-| Review | Verdict | Evidence |
-| --- | --- | --- |
-| Task completion | PASS after remediation | Cross-referenced research, checklist, diff, entry points, and acceptance criteria; added universal parent-task fork-depth enforcement. |
-| Cloudflare | PASS | Migration 0095 is additive, partial unique index is D1-safe, scheduled repair is bounded/configurable, and `pnpm quality:migration-safety` reports 0 violations. |
-| Security | PASS after remediation | Fork preparation requires project `task:write`; legacy repair preserves the source creator and scopes existing-task lookup to the current project. |
-| Test engineering | PASS | Writer-inventory, repair race/reuse, reconciliation, Instant success/failure, cleanup, Web unit, and screenshot-backed fork-flow coverage pass. |
-| Constitution | PASS | New repair batch size and fork-depth limits use documented environment overrides; no hardcoded internal URLs or deployment identifiers added. |
-| Documentation sync | PASS | Env reference, `.env.example`, public architecture overview, schema, and runtime contract describe the new reconciliation setting and task-backed invariant. |
-| UI/UX | PASS | Existing mobile/desktop Playwright audit passed with editable fork context, responsive layout, and no horizontal overflow. |
+| Review             | Verdict                | Evidence                                                                                                                                                                                  |
+| ------------------ | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Task completion    | PASS after remediation | Cross-referenced research, checklist, diff, entry points, and acceptance criteria; added universal parent-task fork-depth enforcement.                                                    |
+| Cloudflare         | PASS                   | Migration 0095 is additive, partial unique index is D1-safe, scheduled repair is bounded/configurable, and `pnpm quality:migration-safety` reports 136 FK relationships and 0 violations. |
+| Security           | PASS after remediation | Fork preparation requires project `task:write`; legacy repair preserves the source creator and scopes existing-task lookup to the current project.                                        |
+| Test engineering   | PASS                   | Writer-inventory, repair race/reuse, reconciliation, Instant success/failure, cleanup, Web unit, and screenshot-backed fork-flow coverage pass.                                           |
+| Constitution       | PASS                   | New repair batch size and fork-depth limits use documented environment overrides; no hardcoded internal URLs or deployment identifiers added.                                             |
+| Documentation sync | PASS                   | Env reference, `.env.example`, public architecture overview, schema, and runtime contract describe the new reconciliation setting and task-backed invariant.                              |
+| UI/UX              | PASS                   | Existing mobile/desktop Playwright audit passed with editable fork context, responsive layout, and no horizontal overflow.                                                                |
 
 ### Validation summary
 
 - `pnpm lint`: pass (existing warnings only)
 - `pnpm typecheck`: pass
-- `pnpm quality:migration-safety`: pass, 127 FK relationships and 0 violations
-- API suite: 407 files and 5,924 tests passed
+- `pnpm quality:migration-safety`: pass, 136 FK relationships and 0 violations
+- API suite: 426 files and 6,072 tests passed
 - `pnpm build`: pass
-- Targeted post-review API tests: 4 files and 9 tests passed
-- Web suite: all 2,668 assertions passed; one unrelated delayed `TriggerCard` blur-timer teardown error passed 5/5 on isolated rerun
-- Staging: authorized and required; pending Phase 6 acceptance evidence
+- Targeted post-review API tests: direct Instant lineage, context persistence, fork authorization, and repair lifecycle all pass
+- Web suite: 219 files and 2,685 tests passed
+- Staging deploy `29489665677`: green, including migration integrity, health, and smoke
+- Staging Playwright: explicit-profile Instant source forked to child session `8da47aed-527e-4784-bf90-68eb42facfd8`; D1/ProjectData linkage, parent lineage, conversation lifecycle, profile/credential attribution, persisted context, `cf-container` runtime, response, archive, and container cleanup verified
+- Legacy repair: reconciliation materialized task-backed completed and active legacy sessions without transcript loss
+- Observability noise: no significant noise reported; optional D1 and Workers telemetry probes skipped because `OBSERVABILITY_DB_ID` was unset and telemetry returned 403
 - `.claude/rules/14-do-workflow-persistence.md`
 
 ## References

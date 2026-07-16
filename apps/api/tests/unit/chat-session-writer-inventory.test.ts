@@ -19,9 +19,14 @@ describe('task-backed chat writer inventory', () => {
     const srcRoot = resolve(process.cwd(), 'src');
     const project = new Project({ useInMemoryFileSystem: true });
     const violations: string[] = [];
+    let candidateFiles = 0;
 
     for (const file of sourceFiles(srcRoot)) {
-      const source = project.createSourceFile(relative(srcRoot, file), readFileSync(file, 'utf8'), {
+      const contents = readFileSync(file, 'utf8');
+      if (!contents.includes('projectDataService.createSession')) continue;
+      candidateFiles += 1;
+
+      const source = project.createSourceFile(relative(srcRoot, file), contents, {
         overwrite: true,
       });
       for (const call of source.getDescendantsOfKind(SyntaxKind.CallExpression)) {
@@ -38,6 +43,7 @@ describe('task-backed chat writer inventory', () => {
       }
     }
 
+    expect(candidateFiles).toBeGreaterThan(0);
     expect(violations).toEqual([]);
-  }, 15_000);
+  });
 });
