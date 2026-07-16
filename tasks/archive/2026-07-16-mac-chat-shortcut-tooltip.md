@@ -15,12 +15,12 @@ The Send button also needs a hover tooltip showing the same keystroke, automatic
 
 ## Implementation Checklist
 
-- [ ] Add a small, testable platform helper for choosing `Cmd+Enter` on Mac-like platforms and `Ctrl+Enter` elsewhere.
-- [ ] Update `ProjectChatComposer` to use the helper for the visible shortcut hint.
-- [ ] Add a Send button hover tooltip using the same platform-specific shortcut.
-- [ ] Add accessibility metadata for the keyboard shortcut where appropriate.
-- [ ] Extend unit tests to cover Mac and non-Mac shortcut hint/tooltip copy.
-- [ ] Run local validation and Playwright visual audit without staging.
+- [x] Add a small, testable platform helper for choosing `Cmd+Enter` on Mac-like platforms and `Ctrl+Enter` elsewhere.
+- [x] Update `ProjectChatComposer` to use the helper for the visible shortcut hint.
+- [x] Add a Send button hover tooltip using the same platform-specific shortcut.
+- [x] Add accessibility metadata for the keyboard shortcut where appropriate.
+- [x] Extend unit tests to cover Mac and non-Mac shortcut hint/tooltip copy.
+- [x] Run local validation and Playwright visual audit without staging.
 
 ## Acceptance Criteria
 
