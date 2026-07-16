@@ -2,14 +2,13 @@ import { AlertCircle, CheckCircle2, KeyRound } from 'lucide-react';
 import type { FormEvent, ReactNode } from 'react';
 import { useMemo, useState } from 'react';
 
-import { ConfirmDialog } from './ConfirmDialog';
-
 import type {
   PlatformConfigFieldStatus,
   PlatformConfigStatus,
   PlatformIntegrationConfigInput,
   PlatformIntegrationStatus,
 } from '../lib/api';
+import { ConfirmDialog } from './ConfirmDialog';
 
 type FormValues = Record<string, string>;
 

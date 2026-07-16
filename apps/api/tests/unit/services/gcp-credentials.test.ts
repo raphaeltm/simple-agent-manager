@@ -1,6 +1,10 @@
-import { describe, expect,it } from 'vitest';
+import { GCP_CREDENTIAL_VERSION } from '@simple-agent-manager/shared';
+import { describe, expect, it } from 'vitest';
 
-import { buildProviderConfig,serializeCredentialToken } from '../../../src/services/provider-credentials';
+import {
+  buildProviderConfig,
+  serializeCredentialToken,
+} from '../../../src/services/provider-credentials';
 
 describe('GCP credential serialization', () => {
   const gcpFields = {
@@ -12,10 +16,15 @@ describe('GCP credential serialization', () => {
     defaultZone: 'us-central1-a',
   };
 
-  it('should serialize GCP credential as JSON with all 6 fields', () => {
+  it('should serialize a legacy WIF input as the versioned workload-identity shape', () => {
     const result = serializeCredentialToken('gcp', gcpFields);
     const parsed = JSON.parse(result);
-    expect(parsed).toEqual(gcpFields);
+    expect(parsed).toEqual({
+      version: GCP_CREDENTIAL_VERSION,
+      provider: 'gcp',
+      authType: 'workload-identity',
+      ...gcpFields,
+    });
   });
 
   it('should round-trip serialize and parse back correctly', () => {

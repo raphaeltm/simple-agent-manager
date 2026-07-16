@@ -4,9 +4,9 @@ import {
   computeAssembler,
   type CredentialProvider,
   type CredentialSource,
+  GCP_CREDENTIAL_VERSION,
   type GcpCredential,
   type GcpCredentialMetadata,
-  GCP_CREDENTIAL_VERSION,
 } from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
