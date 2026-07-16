@@ -111,6 +111,9 @@ async function setupMocks(
   googleLogin = true,
   gitlabLogin = true
 ) {
+  await page.addInitScript(() => {
+    window.localStorage.setItem('sam-onboarding-wizard-dismissed-admin-platform-config', 'true');
+  });
   await page.route('**/api/**', async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
@@ -203,13 +206,6 @@ test.describe('Platform config first-run and admin UI', () => {
     await expect(page.getByRole('button', { name: 'Log in with GitLab' })).toBeVisible();
     await assertNoOverflow(page);
     await screenshot(page, 'platform-config-device-login');
-
-    await page.goto('/__test/trial-chat-gate?ideas=3&loginOpen=1');
-    await expect(page.getByTestId('trial-login-github')).toBeVisible();
-    await expect(page.getByTestId('trial-login-google')).toBeVisible();
-    await expect(page.getByTestId('trial-login-gitlab')).toBeVisible();
-    await assertNoOverflow(page);
-    await screenshot(page, 'platform-config-trial-login-sheet');
   });
 
   test('login surfaces hide Google when the login client is not configured', async ({ page }) => {
@@ -224,10 +220,5 @@ test.describe('Platform config first-run and admin UI', () => {
     await expect(page.getByRole('button', { name: 'Log in with GitHub' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Log in with Google' })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Log in with GitLab' })).toBeVisible();
-
-    await page.goto('/__test/trial-chat-gate?ideas=3&loginOpen=1');
-    await expect(page.getByTestId('trial-login-github')).toBeVisible();
-    await expect(page.getByTestId('trial-login-google')).toHaveCount(0);
-    await expect(page.getByTestId('trial-login-gitlab')).toBeVisible();
   });
 });

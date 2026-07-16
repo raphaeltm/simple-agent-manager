@@ -76,12 +76,12 @@ References:
   - [x] Verify before a single D1 batch replaces the legacy and generated composable credential state; a failed verification or failed batch must leave the prior credential usable.
   - [x] Ensure rotation/removal makes superseded private-key ciphertext unreachable and clears matching cached derivatives without attempting to delete the Google-managed key.
   - [x] Return only safe GCP metadata to the UI and isolate malformed/undecryptable rows so unrelated credentials still list and resolve.
-- [ ] Extend the GCP settings UX:
+- [x] Extend the GCP settings UX:
   - [x] Keep WIF first and visibly recommended; add `Service account JSON` as the warned OAuth-free alternative.
   - [x] Support both local JSON file selection and paste, default-zone selection, validation/retry feedback, rotation confirmation, and disconnect wording that accurately describes local vs Google key deletion.
   - [x] Show only safe connected metadata (auth mode, project, service-account email, zone, key ID/fingerprint) and never repopulate the JSON/private key.
   - [x] Provide copyable least-privilege `gcloud` setup commands for Compute APIs/roles, with Vertex AI explicitly optional and no Project Owner recommendation.
-  - [ ] Add component tests and Playwright visual audits for mobile/desktop normal, long, empty, malformed/error, rotation, unicode, and key-policy-warning states.
+  - [x] Add component tests and Playwright visual audits for mobile/desktop normal, long, empty, malformed/error, rotation, unicode, and key-policy-warning states.
 - [x] Add independent runtime infrastructure OAuth configuration:
   - [x] Extend platform config types/storage/status with a separate infrastructure Google client ID/secret family and encrypted secret metadata including `updated_at` / `updated_by`.
   - [x] Make `getGoogleInfraOAuthConfig` resolve runtime admin config first, then `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`, while `getGoogleLoginOAuthConfig` remains unchanged and independent.
@@ -89,10 +89,10 @@ References:
   - [x] Add an atomic D1-backed per-superadmin mutation limit for secret rotation.
   - [x] Add a clearly labelled admin-only form section with both static callback URIs, source/audit state, rotation, and removal confirmation; never return the secret.
   - [x] Add route/service/UI regression tests proving superadmin authorization, precedence, pair atomicity, removal/fallback, secret masking, bad-row fallback, and complete login/infra separation.
-- [ ] Synchronize public documentation and configuration references:
-  - [ ] Update self-hosting guidance with the recommended WIF path, OAuth-free service-account path, exact static callbacks, least-privilege roles/APIs, key-policy warning, rotation/removal semantics, and infra OAuth runtime-vs-env behavior.
-  - [ ] Update security and configuration references to describe encrypted service-account JSON, non-persistence of derived access tokens, and independent Google login/infrastructure credential families.
-  - [ ] Update API/env references and code comments without making new deployment-time credentials mandatory.
+- [x] Synchronize public documentation and configuration references:
+  - [x] Update self-hosting guidance with the recommended WIF path, OAuth-free service-account path, exact static callbacks, least-privilege roles/APIs, key-policy warning, rotation/removal semantics, and infra OAuth runtime-vs-env behavior.
+  - [x] Update security and configuration references to describe encrypted service-account JSON, non-persistence of derived access tokens, and independent Google login/infrastructure credential families.
+  - [x] Update API/env references and code comments without making new deployment-time credentials mandatory.
 - [ ] Validate the complete change:
   - [ ] Add unit/integration/vertical-slice tests for parsing, PKCS#8 import, fixed endpoint/SSRF resistance, JWT claims/signature, exchange request/response, expiry-aware caching, cache identity, verification-before-replace, atomic failure, legacy WIF compatibility, credential precedence, and sanitized errors.
   - [ ] Run lint, typecheck, test, build, migration-safety, and changed-package coverage/quality checks.
