@@ -20,7 +20,7 @@ The Send button also needs a hover tooltip showing the same keystroke, automatic
 - [x] Add a Send button hover tooltip using the same platform-specific shortcut.
 - [x] Add accessibility metadata for the keyboard shortcut where appropriate.
 - [x] Extend unit tests to cover Mac and non-Mac shortcut hint/tooltip copy.
-- [ ] Run local validation and Playwright visual audit without staging.
+- [x] Run local validation and Playwright visual audit without staging.
 
 ## Acceptance Criteria
 
