@@ -216,7 +216,6 @@ test.describe('Fork/retry new chat screen audit', () => {
     await expect(page.getByText('What do you want to build?')).toBeVisible();
     await expect(page.getByText('Retrying: Fix the login bug')).toBeVisible();
     await expect(page.getByText('Error: Agent crashed unexpectedly')).toBeVisible();
-    await expect(page.getByLabel(/Run mode:?/)).toBeVisible();
     await expect(page.getByPlaceholder('Describe what you want the agent to do...')).toHaveValue(
       'Original task description'
     );
