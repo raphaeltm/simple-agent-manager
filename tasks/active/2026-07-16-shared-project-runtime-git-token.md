@@ -75,6 +75,11 @@ The desired v1 product rule is:
 - Targeted VM-agent regression passes with temporary Go 1.25.0 in `/tmp`.
 - Full `packages/vm-agent` `go test ./...` is blocked by unrelated local image prerequisites (`docker`/compose missing); the touched targeted server test passes.
 - Root `pnpm typecheck`, `pnpm lint`, and `pnpm build` pass.
+- After rebasing onto latest `origin/main`, the PR-specific CI drift fixes pass locally:
+  - `pnpm lint`
+  - `pnpm quality:file-sizes`
+  - `env GITHUB_EVENT_NAME=pull_request GITHUB_EVENT_PATH=/tmp/pr-event-1607.json pnpm tsx scripts/quality/check-preflight-evidence.ts`
+  - Focused API shared-project regressions and targeted VM-agent git-token regression
 - Root `pnpm test` exposed unrelated API failures in two files under full turbo concurrency; those two files pass in isolation immediately afterward.
 - Task-completion, API/Cloudflare boundary, security, Go, and test-coverage reviews completed locally; no blocking findings.
 

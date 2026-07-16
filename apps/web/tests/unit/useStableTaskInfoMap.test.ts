@@ -1,7 +1,6 @@
+import type { Task, TaskStatus } from '@simple-agent-manager/shared';
 import { act, renderHook } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-
-import type { Task, TaskStatus } from '@simple-agent-manager/shared';
 
 import { useStableTaskInfoMap } from '../../src/pages/project-chat/useStableTaskInfoMap';
 
