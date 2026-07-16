@@ -293,8 +293,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   CACHED_COMMANDS_MAX_DESC_LENGTH?: string;
   MAX_SESSIONS_PER_PROJECT?: string;
   MAX_MESSAGES_PER_SESSION?: string;
-  // Max bytes the sessions-list DO RPC will serialize before trimming + hasMore (default: 24 MiB)
-  SESSIONS_LIST_RPC_BUDGET_BYTES?: string;
+  SESSIONS_LIST_RPC_BUDGET_BYTES?: string; // Max bytes sessions-list DO RPC serializes before trim + hasMore (default 24 MiB)
   DOCUMENT_CARD_RAW_OUTPUT_MAX_BYTES?: string; // Max document-card rawOutput bytes preserved in compact message metadata (default: 16384)
   MESSAGE_SIZE_THRESHOLD?: string;
   ACTIVITY_RETENTION_DAYS?: string;
