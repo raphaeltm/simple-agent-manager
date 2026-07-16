@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  getSession,
   getSessionsByTaskIds,
   listSessions,
 } from '../../../src/durable-objects/project-data/sessions';
-import type { Env } from '../../../src/durable-objects/project-data/types';
 import { log } from '../../../src/lib/logger';
 
 type QueryRow = Record<string, unknown>;
@@ -52,8 +52,6 @@ function makeSql(sessionRows: QueryRow[], total: number) {
   };
 }
 
-const env = {} as Env;
-
 describe('ProjectData listSessions resilience', () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -66,7 +64,7 @@ describe('ProjectData listSessions resilience', () => {
     ];
     const sql = makeSql(rows, 2);
 
-    const result = listSessions(sql, env, null, 100, 0);
+    const result = listSessions(sql, null, 100, 0);
 
     expect(result.total).toBe(2);
     expect(result.sessions.map((s) => s.id)).toEqual(['s1', 's2']);
@@ -74,9 +72,9 @@ describe('ProjectData listSessions resilience', () => {
   });
 
   // REGRESSION: this is the production INTERNAL_ERROR. A single malformed row
-  // (e.g. a legacy row with a NULL in a NOT-NULL-typed field) previously threw
-  // out of `parseChatSessionListRow` and 500'd the whole list. It must now be
-  // skipped, not fatal. This test FAILS on pre-fix code (listSessions throws).
+  // (e.g. a legacy row that fails the valibot schema) previously threw out of
+  // `parseChatSessionListRow` and 500'd the whole list. It must now be skipped,
+  // not fatal. This test FAILS on pre-fix code (listSessions throws).
   it('skips a single malformed row instead of throwing INTERNAL_ERROR', () => {
     const good1 = makeSessionRow({ id: 'good-1', updated_at: 3000 });
     const bad = makeSessionRow({ id: 'bad-1', updated_at: 2500, started_at: null });
@@ -85,7 +83,7 @@ describe('ProjectData listSessions resilience', () => {
 
     let result: ReturnType<typeof listSessions> | undefined;
     expect(() => {
-      result = listSessions(sql, env, null, 100, 0);
+      result = listSessions(sql, null, 100, 0);
     }).not.toThrow();
 
     expect(result!.sessions.map((s) => s.id)).toEqual(['good-1', 'good-2']);
@@ -98,7 +96,7 @@ describe('ProjectData listSessions resilience', () => {
     const bad2 = makeSessionRow({ id: 'bad-2', started_at: null });
     const sql = makeSql([bad1, bad2], 2);
 
-    const result = listSessions(sql, env, null, 100, 0);
+    const result = listSessions(sql, null, 100, 0);
     expect(result.sessions).toEqual([]);
   });
 
@@ -106,26 +104,7 @@ describe('ProjectData listSessions resilience', () => {
     const rows = [makeSessionRow({ id: 's1' }), makeSessionRow({ id: 's2' })];
     const sql = makeSql(rows, 50); // 50 total, only 2 fetched at offset 0
 
-    const result = listSessions(sql, env, null, 2, 0);
-    expect(result.hasMore).toBe(true);
-  });
-
-  it('trims and sets hasMore when the RPC size budget is exceeded', () => {
-    // Tiny budget forces truncation after the first row.
-    const budgetEnv = { SESSIONS_LIST_RPC_BUDGET_BYTES: '300' } as Env;
-    const huge = 'x'.repeat(5000);
-    const rows = [
-      makeSessionRow({ id: 's1', topic: huge, updated_at: 3000 }),
-      makeSessionRow({ id: 's2', topic: huge, updated_at: 2000 }),
-      makeSessionRow({ id: 's3', topic: huge, updated_at: 1000 }),
-    ];
-    const sql = makeSql(rows, 3);
-
-    const result = listSessions(sql, budgetEnv, null, 100, 0);
-
-    // At least the first row is always returned; the rest are trimmed.
-    expect(result.sessions.length).toBeGreaterThanOrEqual(1);
-    expect(result.sessions.length).toBeLessThan(3);
+    const result = listSessions(sql, null, 2, 0);
     expect(result.hasMore).toBe(true);
   });
 
@@ -141,7 +120,7 @@ describe('ProjectData listSessions resilience', () => {
       2
     );
 
-    listSessions(sql, env, null, 100, 0);
+    listSessions(sql, null, 100, 0);
 
     expect(warn).toHaveBeenCalledWith(
       'sessions.list_row_skipped',
@@ -158,29 +137,10 @@ describe('ProjectData listSessions resilience', () => {
     const warn = vi.spyOn(log, 'warn').mockImplementation(() => {});
     const sql = makeSql([makeSessionRow({ id: 's1' })], 1);
 
-    listSessions(sql, env, null, 100, 0);
+    listSessions(sql, null, 100, 0);
 
     expect(warn).not.toHaveBeenCalledWith('sessions.list_degraded', expect.anything());
     expect(warn).not.toHaveBeenCalledWith('sessions.list_row_skipped', expect.anything());
-  });
-
-  it('handles a malformed AND oversized row in the same page (skip + truncate compound)', () => {
-    const budgetEnv = { SESSIONS_LIST_RPC_BUDGET_BYTES: '400' } as Env;
-    const huge = 'x'.repeat(5000);
-    const sql = makeSql(
-      [
-        makeSessionRow({ id: 'bad', updated_at: 4000, message_count: null }),
-        makeSessionRow({ id: 'big-1', topic: huge, updated_at: 3000 }),
-        makeSessionRow({ id: 'big-2', topic: huge, updated_at: 2000 }),
-      ],
-      3
-    );
-
-    const result = listSessions(sql, budgetEnv, null, 100, 0);
-
-    // Bad row skipped, then budget trims after the first big row.
-    expect(result.sessions.map((s) => s.id)).toEqual(['big-1']);
-    expect(result.hasMore).toBe(true);
   });
 });
 
@@ -189,17 +149,14 @@ describe('ProjectData getSessionsByTaskIds resilience', () => {
     vi.restoreAllMocks();
   });
 
-  // HIGH-coverage gap: getSessionsByTaskIds routes through the same tolerant
-  // mapping helper as listSessions but had no test. A malformed row must be
-  // skipped, not throw the whole task-id lookup.
+  // getSessionsByTaskIds routes through the same tolerant mapping helper as
+  // listSessions. A malformed row must be skipped, not throw the whole lookup.
   it('skips a malformed row instead of throwing', () => {
     const rows = [
       makeSessionRow({ id: 'good-1', task_id: 't1' }),
       makeSessionRow({ id: 'bad-1', task_id: 't1', message_count: null }),
       makeSessionRow({ id: 'good-2', task_id: 't2' }),
     ];
-    // getSessionsByTaskIds issues one SELECT ... FROM chat_sessions and per-row
-    // attention lookups; makeSql dispatches both. Count arg is unused here.
     const sql = makeSql(rows, rows.length);
 
     let result: Record<string, unknown>[] | undefined;
@@ -213,5 +170,40 @@ describe('ProjectData getSessionsByTaskIds resilience', () => {
   it('returns an empty array for no task ids without touching sql', () => {
     const sql = makeSql([], 0);
     expect(getSessionsByTaskIds(sql, [])).toEqual([]);
+  });
+});
+
+describe('ProjectData getSession resilience', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  // A malformed row must NOT 500 the hot single-session path (chat-state poll,
+  // deep links, task repair). Degrade to null (caller returns 404) + log.
+  it('returns null and logs instead of throwing for a malformed row', () => {
+    const warn = vi.spyOn(log, 'warn').mockImplementation(() => {});
+    const sql = makeSql([makeSessionRow({ id: 'bad-1', message_count: null })], 1);
+
+    let result: Record<string, unknown> | null | undefined;
+    expect(() => {
+      result = getSession(sql, 'bad-1');
+    }).not.toThrow();
+
+    expect(result).toBeNull();
+    expect(warn).toHaveBeenCalledWith(
+      'sessions.get_row_skipped',
+      expect.objectContaining({ rowId: 'bad-1', error: expect.stringContaining('message_count') })
+    );
+  });
+
+  it('returns the session on the happy path', () => {
+    const sql = makeSql([makeSessionRow({ id: 'ok-1' })], 1);
+    const result = getSession(sql, 'ok-1');
+    expect(result?.id).toBe('ok-1');
+  });
+
+  it('returns null for a missing session', () => {
+    const sql = makeSql([], 0);
+    expect(getSession(sql, 'nope')).toBeNull();
   });
 });

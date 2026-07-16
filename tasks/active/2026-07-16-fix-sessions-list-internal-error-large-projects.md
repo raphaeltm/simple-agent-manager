@@ -183,6 +183,23 @@ convenient way to force the same `parseRow` throw. The root cause is therefore a
 hypothesis *class* ("some row fails valibot"), confirmed as the throw site, not a
 pinned byte-level repro (no prod row was dumped this session).
 
+### Design update after specialist review (2026-07-16)
+Two reviewers flagged the speculative RPC **size budget** (added as defense for
+the never-confirmed "size overflow" hypothesis d): it could still overflow on a
+pathological first row, truncated silently in `getSessionsByTaskIds`, had no
+upper clamp, and — because sessions listing is **offset-paginated** — a truncated
+tail could not be cleanly resumed (silent data loss). Since size was never the
+root cause (the parse throw was), the size budget was **removed entirely**. The
+fix is now purely per-row fault isolation (the verified fix), plus:
+- `getSession` (single-row) now degrades a malformed row to `null` + a
+  `sessions.get_row_skipped` log instead of throwing `INTERNAL_ERROR` — closing
+  the cloudflare-specialist HIGH finding that the same bad row would still 500
+  every direct session load (chat-state poll, deep links, task repair).
+- `hasMore` is computed purely from offset/total (`offset + rows.length < total`).
+- The `SESSIONS_LIST_RPC_BUDGET_BYTES` env var + `Default*` constant were removed
+  (env.ts/types.ts/wrangler.toml/.env.example reverted). Rule 50 §3 updated to
+  say: never bolt a truncating byte-budget onto an offset-paginated read.
+
 ### Fix implemented
 `apps/api/src/durable-objects/project-data/sessions.ts` `listSessions`:
 1. **Per-row fault isolation (primary):** each row's map+attention enrichment is wrapped;

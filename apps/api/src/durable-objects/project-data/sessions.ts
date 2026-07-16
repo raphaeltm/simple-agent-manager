@@ -12,31 +12,6 @@ import {
 import type { Env } from './types';
 import { generateId } from './types';
 
-/**
- * Cloudflare DO RPC has a hard 32 MiB serialization ceiling. We leave an 8 MiB
- * margin for the response envelope, pagination metadata, and JSON structural
- * overhead. The sessions-list payload is normally tiny (<=100 small rows), so
- * this is defense-in-depth against a pathological project rather than a common
- * trim point. Mirrors the budget in `messages.ts`.
- */
-export const DEFAULT_SESSIONS_LIST_RPC_BUDGET_BYTES = 24 * 1024 * 1024; // 24 MiB
-
-function resolveSessionsListRpcBudgetBytes(env: Env | undefined): number {
-  const parsed = Number.parseInt(env?.SESSIONS_LIST_RPC_BUDGET_BYTES || '', 10);
-  return Number.isFinite(parsed) && parsed > 0
-    ? parsed
-    : DEFAULT_SESSIONS_LIST_RPC_BUDGET_BYTES;
-}
-
-function estimateSessionBytes(session: Record<string, unknown>): number {
-  let size = 256; // object overhead + fixed scalar fields
-  for (const value of Object.values(session)) {
-    if (typeof value === 'string') size += value.length * 2; // UTF-16 chars
-    else if (value && typeof value === 'object') size += JSON.stringify(value).length * 2;
-  }
-  return size;
-}
-
 export function createSession(
   sql: SqlStorage,
   env: Env,
@@ -168,7 +143,6 @@ export function linkSessionToWorkspace(
 
 export function listSessions(
   sql: SqlStorage,
-  env: Env | undefined,
   status: string | null,
   limit: number = 20,
   offset: number = 0,
@@ -207,17 +181,18 @@ export function listSessions(
     )
     .toArray();
 
-  // Fault-isolated enrichment + RPC size budget. A single malformed row (e.g. a
-  // legacy row that fails the valibot schema) must NEVER throw and 500 the whole
-  // list — it is skipped and logged so the offending field is diagnosable. See
-  // .claude/rules/41 (tolerate a single bad row) and .claude/rules/44/35.
-  const { sessions, skipped, truncated } = enrichSessionRows(sql, env, rows, 'sessions.list');
+  // Fault-isolated enrichment. A single malformed row (e.g. a legacy row that
+  // fails the valibot schema) must NEVER throw and 500 the whole list — it is
+  // skipped and logged so the offending field is diagnosable in prod. See
+  // .claude/rules/50 (list reads tolerate a single bad row) and .claude/rules/41.
+  const { sessions, skipped } = enrichSessionRows(sql, rows, 'sessions.list');
 
-  // There are more sessions beyond this page either because the offset window
-  // did not reach `total`, or because the size budget trimmed the page.
-  const hasMore = offset + rows.length < total || truncated;
+  // Offset-paginated: there are more sessions beyond this page whenever the
+  // offset window has not reached the total row count. `rows.length` is the raw
+  // SQL-fetched count, unaffected by post-fetch skips, so this stays correct.
+  const hasMore = offset + rows.length < total;
 
-  if (skipped > 0 || truncated) {
+  if (skipped > 0) {
     log.warn('sessions.list_degraded', {
       status,
       taskId,
@@ -226,7 +201,6 @@ export function listSessions(
       fetched: rows.length,
       returned: sessions.length,
       skipped,
-      truncated,
     });
   }
 
@@ -235,51 +209,30 @@ export function listSessions(
 
 /**
  * Map + attention-enrich a set of raw session rows without ever throwing for a
- * single bad row, and stop before exceeding the RPC serialization budget.
- * Returns the successfully-enriched sessions plus diagnostics.
+ * single bad row. A row that fails to parse/enrich is skipped and logged with a
+ * best-effort id + the parser error so the offending field is diagnosable.
+ * Returns the successfully-enriched sessions plus the skipped count.
  */
 function enrichSessionRows(
   sql: SqlStorage,
-  env: Env | undefined,
   rows: Record<string, unknown>[],
   context: string
-): { sessions: Record<string, unknown>[]; skipped: number; truncated: boolean } {
-  const budgetBytes = resolveSessionsListRpcBudgetBytes(env);
+): { sessions: Record<string, unknown>[]; skipped: number } {
   const sessions: Record<string, unknown>[] = [];
   let skipped = 0;
-  let truncated = false;
-  let cumulativeBytes = 0;
 
   for (const row of rows) {
-    let enriched: Record<string, unknown>;
     try {
-      enriched = enrichWithAttention(sql, mapSessionRow(row));
+      sessions.push(enrichWithAttention(sql, mapSessionRow(row)));
     } catch (e) {
       skipped++;
       // Extract a best-effort id for diagnosis without re-triggering the parse.
       const rawId = typeof row.id === 'string' ? row.id : null;
       log.warn(`${context}_row_skipped`, { rowId: rawId, error: String(e) });
-      continue;
     }
-
-    cumulativeBytes += estimateSessionBytes(enriched);
-    if (cumulativeBytes > budgetBytes && sessions.length > 0) {
-      // Last-resort guard against exceeding Cloudflare's 32 MiB DO-RPC ceiling:
-      // return what fits rather than throwing a serialization overflow (which
-      // would 500 again). NOTE: sessions listing is OFFSET-paginated, so unlike
-      // the cursor-based messages read this truncated tail is NOT cleanly
-      // resumable by a subsequent `offset += limit` request — those rows are
-      // dropped from this response. This is acceptable only because it is
-      // practically unreachable (rows are tiny and capped at `limit` <= 100);
-      // `hasMore` signals the truncation. If sessions ever grow large per-row,
-      // move this read to cursor pagination before relying on the guard.
-      truncated = true;
-      break;
-    }
-    sessions.push(enriched);
   }
 
-  return { sessions, skipped, truncated };
+  return { sessions, skipped };
 }
 
 export function getSessionsByTaskIds(
@@ -300,7 +253,7 @@ export function getSessionsByTaskIds(
     .toArray();
 
   // Tolerate a single malformed row rather than throwing the whole lookup.
-  return enrichSessionRows(sql, undefined, rows, 'sessions.by_task_ids').sessions;
+  return enrichSessionRows(sql, rows, 'sessions.by_task_ids').sessions;
 }
 
 export function getSession(
@@ -322,7 +275,18 @@ export function getSession(
 
   const row = rows[0];
   if (!row) return null;
-  return enrichWithAttention(sql, mapSessionRow(row));
+  // A malformed row must NOT 500 this hot single-session path (chat-state
+  // polling, deep links, task repair) — the same class of bad row the list read
+  // now tolerates. Degrade to null (caller returns a clean 404) and log the
+  // offending field for repair, rather than throwing INTERNAL_ERROR. See
+  // .claude/rules/50.
+  try {
+    return enrichWithAttention(sql, mapSessionRow(row));
+  } catch (e) {
+    const rawId = typeof row.id === 'string' ? row.id : sessionId;
+    log.warn('sessions.get_row_skipped', { rowId: rawId, error: String(e) });
+    return null;
+  }
 }
 
 export function updateSessionTopic(

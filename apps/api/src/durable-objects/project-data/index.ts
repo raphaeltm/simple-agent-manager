@@ -135,7 +135,7 @@ export class ProjectData extends DurableObject<Env> {
   }
 
   async listSessions(status: string | null, limit: number = 20, offset: number = 0, taskId: string | null = null, createdByUserId: string | null = null): Promise<{ sessions: Record<string, unknown>[]; total: number; hasMore: boolean }> {
-    const result = sessions.listSessions(this.sql, this.env, status, limit, offset, taskId, createdByUserId);
+    const result = sessions.listSessions(this.sql, status, limit, offset, taskId, createdByUserId);
     return { sessions: result.sessions.map((s) => this.addBaseDomain(s)), total: result.total, hasMore: result.hasMore };
   }
 

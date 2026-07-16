@@ -51,16 +51,25 @@ tell.
    field in production without re-triggering the throw. "Skipped silently" is
    not acceptable — the whole point is to surface the bad row so it can be fixed.
 
-3. **Bound the serialized result for DO RPCs.** If the read returns over a
-   Durable Object RPC, apply an env-configurable size budget with a `Default*`
-   constant (under Cloudflare's 32 MiB DO-RPC ceiling) and return a `hasMore`
-   /continuation signal rather than risking a serialization overflow. Mirror the
-   pattern in `apps/api/src/durable-objects/project-data/messages.ts` and
-   `sessions.ts`.
+3. **Bound the serialized result only when per-row payloads can be large.** A
+   Durable Object RPC has a hard 32 MiB serialization ceiling. If a read can
+   return large per-row payloads (e.g. message content/tool metadata), apply an
+   env-configurable size budget with a `Default*` constant and return a
+   `hasMore`/continuation signal rather than risking overflow — but ONLY with a
+   pagination model that can actually resume the trimmed tail. Cursor pagination
+   (`messages.ts`, keyed by `before: timestamp`) resumes cleanly; **offset
+   pagination cannot** re-fetch a mid-page truncation, so do NOT bolt a
+   truncating byte-budget onto an offset-paginated read — bound the row size on
+   the write path instead. For small, fixed-shape rows (session summaries), a
+   per-page `LIMIT` is sufficient; a byte budget adds silent-data-loss edge
+   cases for no real benefit.
 
-4. **Single-row getters are exempt** from the skip-and-continue requirement (a
-   single-row read has nothing to fall back to), but they must still fail with a
-   diagnosable error, not a bare throw with no context.
+4. **Single-row getters** need not skip-and-continue (there is nothing to fall
+   back to), but a malformed row must NOT surface as an opaque 500. Prefer
+   degrading to `null` (so the caller returns a clean 404) with a structured
+   skip log naming the offending field, over a bare throw that `app.onError`
+   downgrades to `INTERNAL_ERROR`. The canonical example is
+   `sessions.ts:getSession` → `sessions.get_row_skipped`.
 
 ## Required Tests
 
@@ -77,8 +86,11 @@ regression test that:
 
 Before merging a change to any D1/DO-SQLite multi-row read:
 - [ ] Each row's parse/enrichment is isolated; a bad row is skipped + warn-logged
+      (list reads) or degraded to `null` + warn-logged (single-row getters)
 - [ ] The skip log carries a row id + context + parser error (diagnosable)
-- [ ] DO-RPC list reads have an env-configurable size budget + `hasMore`
+- [ ] If per-row payloads can be large AND pagination is cursor-based, a size
+      budget + `hasMore` guards the 32 MiB DO-RPC ceiling (never bolt a
+      truncating budget onto an offset-paginated read)
 - [ ] A discriminating regression test (good/bad/good) exists and fails pre-fix
 
 ## Known Follow-Up
