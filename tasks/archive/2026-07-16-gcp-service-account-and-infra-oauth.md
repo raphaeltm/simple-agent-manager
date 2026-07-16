@@ -94,8 +94,8 @@ References:
   - [x] Update security and configuration references to describe encrypted service-account JSON, non-persistence of derived access tokens, and independent Google login/infrastructure credential families.
   - [x] Update API/env references and code comments without making new deployment-time credentials mandatory.
 - [ ] Validate the complete change:
-  - [ ] Add unit/integration/vertical-slice tests for parsing, PKCS#8 import, fixed endpoint/SSRF resistance, JWT claims/signature, exchange request/response, expiry-aware caching, cache identity, verification-before-replace, atomic failure, legacy WIF compatibility, credential precedence, and sanitized errors.
-  - [ ] Run lint, typecheck, test, build, migration-safety, and changed-package coverage/quality checks.
+  - [x] Add unit/integration/vertical-slice tests for parsing, PKCS#8 import, fixed endpoint/SSRF resistance, JWT claims/signature, exchange request/response, expiry-aware caching, cache identity, verification-before-replace, atomic failure, legacy WIF compatibility, credential precedence, and sanitized errors.
+  - [x] Run lint, typecheck, test, build, migration-safety, and changed-package coverage/quality checks.
   - [ ] Run task-completion, Cloudflare, security, environment, UI/UX, documentation, constitution, and test-engineering reviews and address all blocking findings.
   - [ ] Deploy to staging, verify D1 migration/status via the Cloudflare API, exercise admin infrastructure OAuth config without changing Google login, exercise existing WIF, and exercise service-account connect/rotation/provisioning when a suitable user-owned test key is available.
   - [ ] Because provider/provisioning behavior changes, provision a real GCP VM through the changed path, verify heartbeat/workspace access, and clean it up when suitable GCP test credentials are available; report an evidence-backed credential blocker rather than substituting a Hetzner VM for GCP behavior.
@@ -112,3 +112,13 @@ References:
 - [ ] Every new credential mutation path is superadmin/user scoped as appropriate, rate-limited with an atomic primitive, and covered by authorization/fallback/rotation tests.
 - [ ] Public self-hosting, configuration, and security docs accurately describe both authentication modes, exact static callbacks, least-privilege roles/APIs, key risks, and runtime/environment precedence.
 - [ ] Local quality gates, specialist reviews, required visual audits, staging deployment, and all feasible live GCP validation gates pass before merge.
+
+## Task-completion audit
+
+The Phase 4 task-completion review passed on 2026-07-16 with no Critical or High findings:
+
+- Every research finding maps to an implemented checklist item, including legacy WIF normalization, fixed-endpoint service-account exchange, atomic credential replacement, safe projections, independent login/infrastructure OAuth families, and additive audit metadata.
+- The browser-to-API service-account payload, route verification-before-store sequence, fixed Google token/Compute contracts, provider callback, and real SQLite atomic-store behavior are covered across contract, service, route, and integration tests. The route suite mocks service boundaries intentionally; the underlying WebCrypto/fetch/KV and D1 batch boundaries are exercised without replacing them with no-op mocks.
+- The `authType` discriminator is consumed by parsing, token resolution, serialization, safe projection, and cache identity, with both WIF and service-account variants covered.
+- The complete local gates passed: lint, typecheck, test, build, D1/DO migration safety, changed-package coverage, source-contract, file-size, AST, and Wrangler-binding checks. Public documentation built successfully, and the screenshot-backed web audit passed 18 mobile/desktop cases.
+- Specialist reviews, staging migration/runtime verification, and feasible live GCP provisioning remain explicit later `/do` lifecycle gates and are not represented as locally complete here.
