@@ -70,9 +70,9 @@ function makeDb(selectResults: unknown[][] = []) {
       select: vi.fn(() => ({
         from: vi.fn(() => ({
           where: vi.fn(() => ({
-            limit: vi.fn().mockImplementation(() =>
-              Promise.resolve(selectResults[selectIndex++] ?? [])
-            ),
+            limit: vi
+              .fn()
+              .mockImplementation(() => Promise.resolve(selectResults[selectIndex++] ?? [])),
           })),
         })),
       })),
@@ -134,6 +134,7 @@ describe('launchInstantSession', () => {
       userId: 'user-1',
       initialPrompt: 'enriched prompt',
       displayMessage: 'clean prompt',
+      contextSummary: 'fork context',
       agentType: 'claude-code',
       agentProfileId: 'profile-1',
       skillId: 'skill-1',
@@ -193,7 +194,17 @@ describe('launchInstantSession', () => {
       'task-1',
       'user-1'
     );
-    expect(mocks.projectData.persistMessage).toHaveBeenCalledWith(
+    expect(mocks.projectData.persistMessage).toHaveBeenNthCalledWith(
+      1,
+      expect.anything(),
+      'project-1',
+      'chat-session-1',
+      'system',
+      'fork context',
+      null
+    );
+    expect(mocks.projectData.persistMessage).toHaveBeenNthCalledWith(
+      2,
       expect.anything(),
       'project-1',
       'chat-session-1',

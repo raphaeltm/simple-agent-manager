@@ -164,6 +164,63 @@ describe('chatStartRoutes', () => {
     );
   });
 
+  it('keeps a fork on the direct cf-container path with lineage and inherited attribution', async () => {
+    const parentDb = {
+      ...db,
+      select: vi.fn(() => ({
+        from: vi.fn(() => ({
+          where: vi.fn(() => ({
+            limit: vi.fn().mockResolvedValue([
+              {
+                id: 'parent-task',
+                projectId: 'project-1',
+                userId: 'source-user',
+                parentTaskId: null,
+                credentialAttributionUserId: 'source-user',
+                credentialAttributionProjectId: null,
+                credentialAttributionSource: 'platform',
+              },
+            ]),
+          })),
+        })),
+      })),
+    };
+    mocks.drizzle.mockReturnValueOnce(parentDb);
+    const app = makeApp();
+
+    const res = await app.request(
+      `${BASE_URL}${REQUEST_PATH}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: 'continue the source chat',
+          agentProfileId: 'profile-1',
+          parentTaskId: 'parent-task',
+          contextSummary: ['## Fork Context', 'Source summary'].join(String.fromCharCode(10)),
+        }),
+      },
+      makeEnv()
+    );
+
+    expect(res.status).toBe(201);
+    expect(parentDb.insert.mock.results[0]?.value.values).toHaveBeenCalledWith(
+      expect.objectContaining({
+        parentTaskId: 'parent-task',
+        credentialAttributionUserId: 'source-user',
+        credentialAttributionSource: 'platform',
+      })
+    );
+    expect(mocks.instant.launchInstantSession).toHaveBeenCalledWith(
+      parentDb,
+      expect.anything(),
+      expect.objectContaining({
+        agentProfileId: 'profile-1',
+        contextSummary: ['## Fork Context', 'Source summary'].join(String.fromCharCode(10)),
+      })
+    );
+  });
+
   it('returns conflict when the selected runtime resolves to vm', async () => {
     mocks.runtime.resolveWorkspaceRuntime.mockResolvedValueOnce({
       runtime: 'vm',

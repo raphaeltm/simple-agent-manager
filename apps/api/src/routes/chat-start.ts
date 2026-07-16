@@ -1,7 +1,8 @@
-import type { CredentialProvider } from '@simple-agent-manager/shared';
+import type { CredentialProvider, CredentialSource } from '@simple-agent-manager/shared';
+import { ACP_SESSION_DEFAULTS } from '@simple-agent-manager/shared';
 import { DEFAULT_TASK_TITLE_MAX_LENGTH } from '@simple-agent-manager/shared';
 import { isValidProvider } from '@simple-agent-manager/shared';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
@@ -22,6 +23,16 @@ import { requireRepositoryUserAccess } from './projects/_helpers';
 
 const DEFAULT_MAX_MESSAGE_LENGTH = 16_000;
 
+type Db = ReturnType<typeof drizzle<typeof schema>>;
+
+type ParentLineage = {
+  id: string;
+  userId: string;
+  parentTaskId: string | null;
+  credentialAttributionUserId: string | null;
+  credentialAttributionProjectId: string | null;
+  credentialAttributionSource: string | null;
+};
 const chatStartRoutes = new Hono<{ Bindings: Env }>();
 
 function appendSystemPrompt(
@@ -39,6 +50,49 @@ function resolveProvider(
   if (profileProvider && isValidProvider(profileProvider)) return profileProvider;
   if (projectProvider && isValidProvider(projectProvider)) return projectProvider;
   return null;
+}
+
+async function resolveParentLineage(
+  db: Db,
+  projectId: string,
+  parentTaskId: string | undefined,
+  maxForkDepth: number
+): Promise<ParentLineage | null> {
+  if (!parentTaskId) return null;
+  const [parent] = await db
+    .select({
+      id: schema.tasks.id,
+      projectId: schema.tasks.projectId,
+      userId: schema.tasks.userId,
+      parentTaskId: schema.tasks.parentTaskId,
+      credentialAttributionUserId: schema.tasks.credentialAttributionUserId,
+      credentialAttributionProjectId: schema.tasks.credentialAttributionProjectId,
+      credentialAttributionSource: schema.tasks.credentialAttributionSource,
+    })
+    .from(schema.tasks)
+    .where(eq(schema.tasks.id, parentTaskId))
+    .limit(1);
+  if (!parent) throw errors.notFound('Parent task');
+  if (parent.projectId !== projectId) {
+    throw errors.badRequest('Parent task belongs to a different project');
+  }
+
+  let forkDepth = 1;
+  let ancestorTaskId = parent.parentTaskId;
+  while (ancestorTaskId) {
+    if (forkDepth >= maxForkDepth) {
+      throw errors.badRequest(`Fork depth ${forkDepth + 1} exceeds maximum ${maxForkDepth}`);
+    }
+    const [ancestor] = await db
+      .select({ parentTaskId: schema.tasks.parentTaskId })
+      .from(schema.tasks)
+      .where(and(eq(schema.tasks.id, ancestorTaskId), eq(schema.tasks.projectId, projectId)))
+      .limit(1);
+    if (!ancestor) throw errors.badRequest('Parent task lineage is invalid');
+    ancestorTaskId = ancestor.parentTaskId;
+    forkDepth += 1;
+  }
+  return parent;
 }
 
 chatStartRoutes.post(
@@ -99,6 +153,12 @@ chatStartRoutes.post(
       c.env.DEFAULT_TASK_AGENT_TYPE ??
       'opencode';
 
+    const parentTask = await resolveParentLineage(
+      db,
+      projectId,
+      body.parentTaskId,
+      parsePositiveInt(c.env.ACP_SESSION_MAX_FORK_DEPTH, ACP_SESSION_DEFAULTS.MAX_FORK_DEPTH)
+    );
     const taskId = ulid();
     const now = new Date().toISOString();
     const taskTitle = truncateTitle(message, DEFAULT_TASK_TITLE_MAX_LENGTH) || 'Instant Chat';
@@ -106,6 +166,7 @@ chatStartRoutes.post(
       id: taskId,
       projectId,
       userId,
+      parentTaskId: parentTask?.id ?? null,
       title: taskTitle,
       description: enrichedMessage,
       status: 'queued',
@@ -116,8 +177,11 @@ chatStartRoutes.post(
       skillHint: body.skillId ?? null,
       taskMode: 'conversation',
       triggeredBy: 'user',
-      credentialAttributionUserId: userId,
-      credentialAttributionSource: 'user',
+      credentialAttributionUserId:
+        parentTask?.credentialAttributionUserId ?? parentTask?.userId ?? userId,
+      credentialAttributionProjectId: parentTask?.credentialAttributionProjectId ?? null,
+      credentialAttributionSource:
+        (parentTask?.credentialAttributionSource as CredentialSource | null) ?? 'user',
       createdBy: userId,
       createdAt: now,
       updatedAt: now,
@@ -141,6 +205,7 @@ chatStartRoutes.post(
         userId,
         initialPrompt,
         displayMessage: message,
+        contextSummary: body.contextSummary ?? null,
         agentType,
         agentProfileId: resolvedProfile?.profileId ?? null,
         skillId: resolvedProfile?.skillId ?? null,

@@ -34,6 +34,7 @@ export interface LaunchInstantSessionInput {
   userId: string;
   initialPrompt: string;
   displayMessage?: string | null;
+  contextSummary?: string | null;
   agentType: string;
   agentProfileId?: string | null;
   skillId?: string | null;
@@ -215,6 +216,16 @@ export async function launchInstantSession(
     .update(schema.tasks)
     .set({ chatSessionId, workspaceId, autoProvisionedNodeId: node.id, updatedAt: now })
     .where(eq(schema.tasks.id, input.taskId));
+  if (input.contextSummary) {
+    await projectDataService.persistMessage(
+      env,
+      input.project.id,
+      chatSessionId,
+      'system',
+      input.contextSummary,
+      null
+    );
+  }
   await projectDataService.persistMessage(
     env,
     input.project.id,

@@ -561,7 +561,7 @@ export function useProjectChatState() {
         : null;
       const attachmentRefs = getCompletedAttachmentRefs(attachments.chatAttachments);
       const selectedRuntime = selectedSkill?.runtime ?? selectedProfile?.runtime ?? null;
-      const requiresTaskSubmission = attachmentRefs.length > 0 || pendingDerived !== null || executeIdeaIdRef.current !== null;
+      const requiresTaskSubmission = attachmentRefs.length > 0 || executeIdeaIdRef.current !== null;
       const useInstantSession = selectedRuntime === 'cf-container' && !requiresTaskSubmission;
 
       if (useInstantSession) {
@@ -569,6 +569,8 @@ export function useProjectChatState() {
           message: trimmed,
           agentProfileId: submitProfileId,
           skillId: selectedSkillId ?? undefined,
+          parentTaskId: pendingDerived?.parentTaskId || undefined,
+          contextSummary: pendingDerived?.contextSummary || undefined,
         });
         setMessage('');
         setPendingDerived(null);

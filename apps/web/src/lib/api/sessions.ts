@@ -300,6 +300,8 @@ export interface StartInstantChatSessionRequest {
   message: string;
   agentProfileId?: string;
   skillId?: string;
+  parentTaskId?: string;
+  contextSummary?: string;
 }
 
 export interface StartInstantChatSessionResponse {
