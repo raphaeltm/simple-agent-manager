@@ -110,11 +110,8 @@ describe('workspace git-token GitHub scoping', () => {
       : false;
   }
 
-  function installationRowsOnlyWhenOwnerScoped(whereClause: unknown): unknown[] {
-    if (
-      !hasEqClause(whereClause, 'id', 'inst-row-111') ||
-      !hasEqClause(whereClause, 'user_id', 'user-1')
-    ) {
+  function projectInstallationRows(whereClause: unknown): unknown[] {
+    if (!hasEqClause(whereClause, 'id', 'inst-row-111')) {
       return [];
     }
     return [
@@ -158,7 +155,7 @@ describe('workspace git-token GitHub scoping', () => {
 
   function queueWorkspaceProjectLookup(
     projectOverrides: Record<string, unknown> = {},
-    installationLookup: (whereClause: unknown) => unknown[] = installationRowsOnlyWhenOwnerScoped
+    installationLookup: (whereClause: unknown) => unknown[] = projectInstallationRows
   ) {
     limitResponses.push([workspaceRow()], [githubProjectRow(projectOverrides)], installationLookup);
   }
@@ -769,37 +766,41 @@ describe('workspace git-token GitHub scoping', () => {
     });
   });
 
-  it('rejects a workspace installation row that is not owned by the workspace user', async () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    try {
-      queueWorkspaceProjectLookup({}, (whereClause) => {
+  it('mints through the project installation row when the running member has repo access', async () => {
+    limitResponses.push(
+      [workspaceRow({ userId: 'member-user' })],
+      [githubProjectRow()],
+      (whereClause) => {
         expect(hasEqClause(whereClause, 'id', 'inst-row-111')).toBe(true);
-        expect(hasEqClause(whereClause, 'user_id', 'user-1')).toBe(true);
+        expect(hasEqClause(whereClause, 'user_id', 'member-user')).toBe(false);
         return [
           {
-            installationId: 'user-2:120081765',
+            installationId: 'owner-user:120081765',
             externalInstallationId: '120081765',
-            userId: 'user-2',
+            userId: 'owner-user',
           },
         ];
-      });
+      }
+    );
 
-      const res = await app.request('/ws/ws-1/git-token', { method: 'POST' }, mockEnv);
+    const res = await app.request('/ws/ws-1/git-token', { method: 'POST' }, mockEnv);
 
-      expect(res.status).toBe(404);
-      await expect(res.json()).resolves.toEqual({
-        error: 'NOT_FOUND',
-        message: 'GitHub installation not found',
-      });
-      expect(getInstallationToken).not.toHaveBeenCalled();
-      expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining('workspace_git_token_installation_owner_mismatch')
-      );
-      expect(warnSpy.mock.calls[0]?.[0]).toContain('"expectedUserId":"user-1"');
-      expect(warnSpy.mock.calls[0]?.[0]).toContain('"actualUserId":"user-2"');
-    } finally {
-      warnSpy.mockRestore();
-    }
+    expect(res.status).toBe(200);
+    expect(mocks.getGitHubUserAccessTokenForOwner).toHaveBeenCalledWith(
+      mockEnv,
+      'member-user',
+      'workspace-git-token'
+    );
+    expect(mocks.assertRepositoryAccess).toHaveBeenCalledWith(
+      'github-user-oauth-token',
+      '120081765',
+      'raph/sam',
+      'member-user',
+      'project-access'
+    );
+    expect(getInstallationToken).toHaveBeenCalledWith('120081765', mockEnv, {
+      repositoryIds: [42],
+    });
   });
 
   it('mints a token scoped to the primary repo plus accessible additional Repository Access repos', async () => {
@@ -807,7 +808,7 @@ describe('workspace git-token GitHub scoping', () => {
     // Additional Repository Access entries selected in Project Settings.
     whereResponses.push((whereClause) => {
       expect(hasEqClause(whereClause, 'project_id', 'proj-1')).toBe(true);
-      expect(hasEqClause(whereClause, 'user_id', 'user-1')).toBe(true);
+      expect(hasEqClause(whereClause, 'user_id', 'user-1')).toBe(false);
       return [
         { repository: 'acme/shared-lib', githubRepoId: 7 },
         { repository: 'Acme/Other-Lib', githubRepoId: 8 },

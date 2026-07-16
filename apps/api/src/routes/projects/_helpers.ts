@@ -168,22 +168,12 @@ export async function buildProjectRuntimeConfigResponse(
     db
       .select()
       .from(schema.projectRuntimeEnvVars)
-      .where(
-        and(
-          eq(schema.projectRuntimeEnvVars.projectId, project.id),
-          eq(schema.projectRuntimeEnvVars.userId, project.userId)
-        )
-      )
+      .where(eq(schema.projectRuntimeEnvVars.projectId, project.id))
       .orderBy(schema.projectRuntimeEnvVars.envKey),
     db
       .select()
       .from(schema.projectRuntimeFiles)
-      .where(
-        and(
-          eq(schema.projectRuntimeFiles.projectId, project.id),
-          eq(schema.projectRuntimeFiles.userId, project.userId)
-        )
-      )
+      .where(eq(schema.projectRuntimeFiles.projectId, project.id))
       .orderBy(schema.projectRuntimeFiles.filePath),
   ]);
 

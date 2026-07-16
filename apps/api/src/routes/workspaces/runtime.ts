@@ -591,10 +591,7 @@ async function resolveAdditionalRepositoryIds(input: {
     })
     .from(schema.projectGithubRepositories)
     .where(
-      and(
-        eq(schema.projectGithubRepositories.projectId, input.projectId),
-        eq(schema.projectGithubRepositories.userId, input.userId)
-      )
+      eq(schema.projectGithubRepositories.projectId, input.projectId)
     );
   if (rows.length === 0) {
     return [];
@@ -1381,12 +1378,7 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
       userId: schema.githubInstallations.userId,
     })
     .from(schema.githubInstallations)
-    .where(
-      and(
-        eq(schema.githubInstallations.id, workspace.installationId),
-        eq(schema.githubInstallations.userId, workspace.userId)
-      )
-    )
+    .where(eq(schema.githubInstallations.id, workspace.installationId))
     .limit(1);
 
   const installation = installations[0];
@@ -1401,15 +1393,14 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
     throw errors.notFound('GitHub installation');
   }
   if (installation.userId !== workspace.userId) {
-    log.warn('workspace_git_token_installation_owner_mismatch', {
+    log.info('workspace_git_token_project_installation_shared', {
       workspaceId: workspace.id,
       projectId: workspace.projectId,
       installationRowId: workspace.installationId,
-      expectedUserId: workspace.userId,
-      actualUserId: installation.userId,
-      action: 'rejected',
+      workspaceUserId: workspace.userId,
+      installationOwnerUserId: installation.userId,
+      action: 'allowed_after_user_access_verification',
     });
-    throw errors.notFound('GitHub installation');
   }
 
   if (!repositoryName) {
