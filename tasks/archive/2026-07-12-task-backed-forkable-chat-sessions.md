@@ -4,8 +4,8 @@
 
 - Source idea: `01KXAQH5HA168AMSRC5WH1ZTG2`.
 - SAM task: `01KXAXA54RFEJW1X2VVR6362XG`.
-- **Do not deploy to staging, verify on staging, mutate staging, merge the PR, merge to main, or claim a production release.**
-- Finish with the implementation branch pushed and a clearly marked open, unmerged PR.
+- **Authorization updated 2026-07-16:** the previous no-staging, draft, and do-not-merge constraints are lifted. PR #1572 is authorized for staging verification, readiness, merge after green CI, and production-deploy monitoring.
+- Continue on `sam/use-sam-mcp-tools-3k2ezd`; do not create a competing PR.
 - This work fixes task identity, profile authorization, lineage, forking, and lifecycle consistency. It does not make Docker/Compose publishing executable inside a cf-container.
 
 ## Problem
@@ -75,7 +75,7 @@ Every user-visible chat must have exactly one Task. `taskMode` controls schedule
 - [x] Add UI tests and local Playwright audits for normal, long, empty, many, error, and special-character data at 375x667 and 1280x800; inspect screenshots.
 - [x] Run migration safety, DO migration safety, lint, typecheck, targeted/full tests, build, and diff checks.
 - [x] Run task-completion, Cloudflare, security, test engineering, constitution, doc-sync, and UI/UX specialist reviews; address all correctness findings.
-- [x] Push frequently, rebase on current `origin/main`, open a DO-NOT-MERGE PR with staging explicitly skipped, and monitor/fix all non-staging CI checks.
+- [x] Push frequently, merge current `origin/main`, resolve migration numbering, and monitor/fix all CI checks before staging.
 
 ## Acceptance criteria
 
@@ -87,8 +87,8 @@ Every user-visible chat must have exactly one Task. `taskMode` controls schedule
 - [x] Existing taskless sessions repair and fork without duplicate Tasks or lost transcript history.
 - [x] Archive/Close cleanup is consistent across VM and cf-container sessions.
 - [x] Compatibility readers remain until production telemetry shows no unrepaired taskless sessions.
-- [x] All required local quality gates and specialist reviews pass; staging is explicitly not run.
-- [x] Branch is pushed and PR is open, clearly marked DO NOT MERGE, and left unmerged.
+- [x] All required local quality gates and specialist reviews pass before staging.
+- [ ] Staging acceptance passes, PR is ready with green CI, merged, and production deployment reaches terminal success.
 
 ## Specialist review evidence
 
@@ -96,8 +96,8 @@ Every user-visible chat must have exactly one Task. `taskMode` controls schedule
 | Review | Verdict | Evidence |
 | --- | --- | --- |
 | Task completion | PASS after remediation | Cross-referenced research, checklist, diff, entry points, and acceptance criteria; added universal parent-task fork-depth enforcement. |
-| Cloudflare | PASS | Migration 0092 is additive, partial unique index is D1-safe, scheduled repair is bounded/configurable, and `pnpm quality:migration-safety` reports 0 violations. |
-| Security | PASS after remediation | Fork preparation requires `task:write` plus session creator ownership; repair task lookup now also requires the current project ID. |
+| Cloudflare | PASS | Migration 0095 is additive, partial unique index is D1-safe, scheduled repair is bounded/configurable, and `pnpm quality:migration-safety` reports 0 violations. |
+| Security | PASS after remediation | Fork preparation requires project `task:write`; legacy repair preserves the source creator and scopes existing-task lookup to the current project. |
 | Test engineering | PASS | Writer-inventory, repair race/reuse, reconciliation, Instant success/failure, cleanup, Web unit, and screenshot-backed fork-flow coverage pass. |
 | Constitution | PASS | New repair batch size and fork-depth limits use documented environment overrides; no hardcoded internal URLs or deployment identifiers added. |
 | Documentation sync | PASS | Env reference, `.env.example`, public architecture overview, schema, and runtime contract describe the new reconciliation setting and task-backed invariant. |
@@ -112,7 +112,7 @@ Every user-visible chat must have exactly one Task. `taskMode` controls schedule
 - `pnpm build`: pass
 - Targeted post-review API tests: 4 files and 9 tests passed
 - Web suite: all 2,668 assertions passed; one unrelated delayed `TriggerCard` blur-timer teardown error passed 5/5 on isolated rerun
-- Staging: intentionally not run by explicit user instruction
+- Staging: authorized and required; pending Phase 6 acceptance evidence
 - `.claude/rules/14-do-workflow-persistence.md`
 
 ## References

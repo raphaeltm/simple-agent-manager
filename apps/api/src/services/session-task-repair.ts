@@ -22,6 +22,12 @@ function stringField(row: Record<string, unknown>, key: string): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null;
 }
 
+function repairedTaskStatus(sessionStatus: string | null): 'in_progress' | 'completed' | 'failed' {
+  if (sessionStatus === 'failed') return 'failed';
+  if (sessionStatus === 'stopped') return 'completed';
+  return 'in_progress';
+}
+
 async function findTaskBySession(db: Db, sessionId: string): Promise<schema.Task | null> {
   const rows = await db
     .select()
@@ -75,7 +81,8 @@ export async function ensureSessionTaskBacked(
   const createdAt = stringField(session, 'createdAt') ?? new Date().toISOString();
   const userId = stringField(session, 'createdByUserId') ?? input.fallbackUserId;
   const topic = stringField(session, 'topic') ?? 'Recovered conversation';
-  const status = stringField(session, 'status') === 'failed' ? 'failed' : 'in_progress';
+  const status = repairedTaskStatus(stringField(session, 'status'));
+  const completedAt = status === 'completed' ? stringField(session, 'endedAt') : null;
 
   try {
     await db.insert(schema.tasks).values({
@@ -93,6 +100,7 @@ export async function ensureSessionTaskBacked(
       credentialAttributionUserId: userId,
       credentialAttributionSource: 'user',
       createdBy: userId,
+      completedAt,
       createdAt,
       updatedAt: new Date().toISOString(),
     });

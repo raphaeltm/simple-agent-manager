@@ -119,6 +119,31 @@ describe('ensureSessionTaskBacked', () => {
     );
   });
 
+  it('preserves a stopped legacy session as a completed conversation task', async () => {
+    mocks.projectData.getSession.mockResolvedValueOnce({
+      id: 'session-1',
+      taskId: null,
+      workspaceId: null,
+      createdByUserId: 'user-1',
+      topic: 'Archived conversation',
+      status: 'stopped',
+      createdAt: '2026-07-01T00:00:00.000Z',
+      endedAt: '2026-07-01T01:00:00.000Z',
+    });
+    const { db, inserted } = makeDb([[], [{ id: 'task-repair-1' }]]);
+
+    await ensureSessionTaskBacked(db as never, env, {
+      projectId: 'project-1',
+      sessionId: 'session-1',
+      fallbackUserId: 'fallback-user',
+    });
+
+    expect(inserted[0]).toMatchObject({
+      status: 'completed',
+      completedAt: '2026-07-01T01:00:00.000Z',
+    });
+  });
+
   it('returns an existing backing task without creating another', async () => {
     mocks.projectData.getSession.mockResolvedValueOnce({
       id: 'session-1',

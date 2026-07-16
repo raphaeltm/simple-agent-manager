@@ -10,7 +10,6 @@ import { requireProjectCapability } from '../middleware/project-auth';
 import * as projectDataService from '../services/project-data';
 import { getSummarizeConfig, summarizeSession } from '../services/session-summarize';
 import { ensureSessionTaskBacked } from '../services/session-task-repair';
-import { requireSessionCreator } from './chat-session-ownership';
 
 const chatForkRoutes = new Hono<{ Bindings: Env }>();
 
@@ -21,11 +20,12 @@ chatForkRoutes.post('/:sessionId/fork-prepare', async (c) => {
   const db = drizzle(c.env.DATABASE, { schema });
 
   await requireProjectCapability(db, projectId, userId, 'task:write');
-  const session = await requireSessionCreator(c.env, projectId, sessionId, userId);
+  const session = await projectDataService.getSession(c.env, projectId, sessionId);
+  if (!session) throw errors.notFound('Chat session');
   const parentTask = await ensureSessionTaskBacked(db, c.env, {
     projectId,
     sessionId,
-    fallbackUserId: userId,
+    fallbackUserId: typeof session.createdByUserId === 'string' ? session.createdByUserId : userId,
   });
 
   const { messages } = await projectDataService.getMessages(
