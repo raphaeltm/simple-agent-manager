@@ -32,7 +32,7 @@ TaskRunner Durable Objects mark orchestration complete after handing an agent a 
 - [x] Correct diagnostic timing and bound control-loop candidates, ACP-session reads, and observability dedupe lookups.
 - [x] Add unit and cross-runtime regressions for recovery interleaving, callback idempotency, dead mismatch, and live negative behavior.
 - [x] Update public docs/environment references for new configuration.
-- [ ] Rebase after priority 2 merges and preserve—not duplicate—its recovery behavior. (P2 `01KX8SWC9DEMHCA8RSPZN5W1V1` has NOT landed; rebased onto current main instead. Coordination flagged on PR #1567.)
+- [x] Integrate current main and preserve—not duplicate—its recovery behavior. (Merged current `origin/main` on 2026-07-16; recovery remains first in the five-minute operational sweep.)
 - [x] Run focused/full validation, control-loop checks, and Cloudflare/security/constitution/test/docs-sync/control-loop/task-completion reviews. (See "Review fixes" below.)
 - [ ] Wait for staging turns 1–4 and unrelated deployments, query staging state/logs, deploy, and verify.
 - [ ] Open PR (#1567), pass CI, merge, monitor production deploy/evidence, and update idea `01KT90PKF6167SXZ9YZY0R26MM`. (PR open; CI/staging/merge pending.)
@@ -56,8 +56,8 @@ the recovered work, all fixed:
 3. Two pre-existing workers-pool tests were silently broken by the code change and
    never caught because the workers pool does not run in CI (see backlog
    `2026-07-11-workers-pool-tests-not-run-in-ci.md`). Fixed both assertions; the
-   live-skip vertical slice is deferred to that backlog task (workerd could not run
-   in the task workspace to verify DO-seeded ACP sessions).
+   live-skip vertical slice is deferred to that backlog task. The existing Worker
+   D1/DO reconciliation slice runs successfully in the rescue worktree.
 4. Added CI-verified node-pool regressions: a live task-mode `awaiting_followup`
    task is preserved; state-machine `aborted_by_recovery` Branch 1 (concurrent
    recovery advanced D1 to `in_progress` → DO completes as running, no `failTask`).
@@ -71,7 +71,7 @@ the recovered work, all fixed:
 - Recovery now runs first in the five-minute operational sweep, before provisioning, migration, and node-cleanup phases can fail and suppress it.
 - TaskRunner status probes are bounded and classified as `ok`, `missing`, `timeout`, or `error`; cron summaries expose missing/error/reconciled counters.
 - A superadmin-only, read-only diagnostics endpoint reports the exact eligibility, liveness, TaskRunner probe, and decision for one task before any staging mutation.
-- Unit coverage proves missing/error TaskRunner RPC outcomes still reconcile a deleted runtime. A Worker D1/DO vertical slice also asserts the second sweep is a no-op; local `workerd` currently exits with SIGSEGV before importing Worker tests, so that file remains for CI/staging verification.
+- Unit coverage proves missing/error TaskRunner RPC outcomes still reconcile a deleted runtime. A Worker D1/DO vertical slice also asserts the second sweep is a no-op and passed locally on 2026-07-16.
 - The follow-up staging mismatch was correctly classified as `reconcile_dead_runtime` but remained active across the 16:30 and 16:35 UTC sweeps. The bounded query always reread the same 100 oldest active rows, so live/inconclusive historical rows could permanently starve later dead rows.
 - Recovery now persists a configurable KV scan cursor, starts a cursorless rollout at the newest bounded page, resumes after the prior page, and wraps fairly. Cron summaries expose scan count/cursor state/errors, and the read-only endpoint reports whether and where the next page selects the inspected task.
 
