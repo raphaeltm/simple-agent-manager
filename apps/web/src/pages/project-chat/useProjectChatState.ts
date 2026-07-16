@@ -35,14 +35,6 @@ import {
 import { stripMarkdown } from '../../lib/text-utils';
 import { useProjectContext } from '../ProjectContext';
 import { isRetryOrFork } from './lineageUtils';
-import {
-  FORK_MESSAGE_TEMPLATE,
-  resolveInitialVmSize,
-  resolveWizardRuntime,
-  resolveWizardTaskMode,
-  resolveWizardWorkspaceProfile,
-  selectProfileId,
-} from './profileWizardHelpers';
 import { buildBaseSubmitRequest, getCompletedAttachmentRefs, withAttachmentRefs } from './submitRequest';
 import type { ProvisioningState } from './types';
 import {
@@ -50,7 +42,6 @@ import {
   CHAT_TASK_LIST_LIMIT,
   EXECUTE_IDEA_PROMPT_TEMPLATE,
   isTerminal,
-  SESSION_SYNC_INTERVAL_MS,
   TASK_STATUS_POLL_MS,
 } from './types';
 import { useAttachments } from './useAttachments';
@@ -86,6 +77,35 @@ export interface ProfileWizardState {
   error: string | null;
 }
 
+function resolveWizardRuntime(workType: TaskMode, runtime: AgentProfileRuntime | null): AgentProfileRuntime {
+  if (runtime) return runtime;
+  return workType === 'conversation' ? 'cf-container' : 'vm';
+}
+
+function resolveWizardWorkspaceProfile(runtime: AgentProfileRuntime, workType: TaskMode): WorkspaceProfile {
+  if (runtime === 'cf-container') return 'lightweight';
+  if (workType === 'conversation') return 'lightweight';
+  return 'full';
+}
+
+function resolveWizardTaskMode(runtime: AgentProfileRuntime, workType: TaskMode): TaskMode {
+  if (runtime === 'cf-container') return 'conversation';
+  return workType;
+}
+
+const FORK_MESSAGE_TEMPLATE = `Use the SAM MCP tools (get_session_messages, search_messages) to review the previous session for full context about what was done and what needs to happen next.
+Use get_session_messages with the parent project ID and parent session ID below before relying on title or phrase search.
+
+`;
+
+function resolveInitialVmSize(defaultVmSize: unknown): VMSize {
+  return (defaultVmSize as VMSize | null) ?? DEFAULT_VM_SIZE;
+}
+
+function selectProfileId(current: string | null, profiles: AgentProfile[]) {
+  if (current && profiles.some((profile) => profile.id === current)) return current;
+  return profiles[0]?.id ?? null;
+}
 
 export function useProjectChatState() {
   const navigate = useNavigate();
@@ -353,16 +373,9 @@ export function useProjectChatState() {
   }, [projectId, sessionScope, multiplayerActive, resetSessions, replaceTaskInfoMap]);
 
   const handleSessionEvent = useCallback((raw: RawSessionEvent) => {
-    // session.created deltas cannot be scope-filtered client-side (we don't
-    // know isMine from the wire payload), so fall back to a full refetch when
-    // the user is viewing "My sessions" to let the server apply the filter.
-    if (raw.type === 'session.created' && multiplayerActive && sessionScope === 'my') {
-      void loadSessions();
-      return;
-    }
     const event = rawToSessionEvent(raw);
     if (event) dispatchEvent(event);
-  }, [dispatchEvent, multiplayerActive, sessionScope, loadSessions]);
+  }, [dispatchEvent]);
 
   const { connectionState } = useProjectWebSocket({
     projectId,
@@ -376,13 +389,6 @@ export function useProjectChatState() {
     setLoading(true);
     void loadSessions().finally(() => setLoading(false));
   }, [loadSessions]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Periodic background sync — self-heals if a WebSocket delta was silently dropped
-  useEffect(() => {
-    if (!hasLoadedRef.current) return;
-    const interval = setInterval(() => void loadSessions(), SESSION_SYNC_INTERVAL_MS);
-    return () => clearInterval(interval);
-  }, [loadSessions]);
 
   // Poll task status during provisioning
   useEffect(() => {
@@ -637,13 +643,13 @@ export function useProjectChatState() {
     setProvisioning(null);
   }, [navigate, projectId]);
 
-  const handleSelect = useCallback((id: string) => {
+  const handleSelect = (id: string) => {
     newChatIntentRef.current = false;
     setPendingDerived(null);
     setProvisioning(null);
     setSidebarOpen(false);
     navigate(`/projects/${projectId}/chat/${id}`);
-  }, [navigate, projectId]);
+  };
 
   /** Prepare canonical fork lineage on the server, then open the new-chat composer. */
   const handleFork = useCallback((session: ChatSessionResponse) => {

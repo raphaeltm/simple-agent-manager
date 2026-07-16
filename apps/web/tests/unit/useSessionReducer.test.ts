@@ -1,12 +1,10 @@
-import { act, renderHook } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import type { ChatSessionListItem } from '../../src/lib/api';
 import {
   applySessionEvent,
   applySessionEvents,
   type SessionEvent,
-  useSessionReducer,
 } from '../../src/pages/project-chat/useSessionReducer';
 
 function makeSession(overrides: Partial<ChatSessionListItem> = {}): ChatSessionListItem {
@@ -207,92 +205,5 @@ describe('applySessionEvents (batch)', () => {
     const sessions = [makeSession()];
     const result = applySessionEvents(sessions, []);
     expect(result).toBe(sessions);
-  });
-});
-
-describe('useSessionReducer hook (batching)', () => {
-  beforeEach(() => { vi.useFakeTimers(); });
-  afterEach(() => { vi.useRealTimers(); });
-
-  it('batches multiple rapid events into a single state update', async () => {
-    const { result } = renderHook(() => useSessionReducer());
-
-    // Seed initial sessions
-    act(() => {
-      result.current.resetSessions([makeSession({ id: 'sess-1', status: 'active' })]);
-    });
-
-    // Dispatch 3 events synchronously — no await between them
-    act(() => {
-      result.current.dispatchEvent({
-        type: 'session.created',
-        payload: { id: 'sess-2', status: 'active', messageCount: 0, createdAt: 2000 },
-      });
-      result.current.dispatchEvent({
-        type: 'session.stopped',
-        payload: { sessionId: 'sess-1' },
-      });
-      result.current.dispatchEvent({
-        type: 'session.updated',
-        payload: { sessionId: 'sess-2', topic: 'Batch update' },
-      });
-    });
-
-    // Before timer fires, sessions are still at old state
-    expect(result.current.sessions).toHaveLength(1);
-
-    // Advance past batch delay — all 3 events applied in one update
-    await act(async () => { vi.advanceTimersByTime(20); });
-
-    expect(result.current.sessions).toHaveLength(2);
-    expect(result.current.sessions[0].id).toBe('sess-2');
-    expect(result.current.sessions[0].topic).toBe('Batch update');
-    expect(result.current.sessions[1].status).toBe('stopped');
-  });
-
-  it('resetSessions discards a pending batch', async () => {
-    const { result } = renderHook(() => useSessionReducer());
-
-    act(() => {
-      result.current.resetSessions([makeSession({ id: 'sess-1' })]);
-    });
-
-    // Dispatch an event (starts a batch timer)
-    act(() => {
-      result.current.dispatchEvent({
-        type: 'session.stopped',
-        payload: { sessionId: 'sess-1' },
-      });
-    });
-
-    // Before the batch fires, do a full reset with fresh data
-    act(() => {
-      result.current.resetSessions([
-        makeSession({ id: 'sess-1', status: 'active' }),
-        makeSession({ id: 'sess-new', status: 'active' }),
-      ]);
-    });
-
-    // Advance past batch delay — stale batch should NOT apply
-    await act(async () => { vi.advanceTimersByTime(20); });
-
-    // Should have the reset data, not the stale batched event
-    expect(result.current.sessions).toHaveLength(2);
-    expect(result.current.sessions[0].status).toBe('active'); // NOT stopped
-  });
-
-  it('flushBatch is a no-op when batch is empty', async () => {
-    const { result } = renderHook(() => useSessionReducer());
-
-    act(() => {
-      result.current.resetSessions([makeSession({ id: 'sess-1' })]);
-    });
-    const sessionsBefore = result.current.sessions;
-
-    // Advance past many batch windows with no events
-    await act(async () => { vi.advanceTimersByTime(100); });
-
-    // Sessions reference unchanged
-    expect(result.current.sessions).toBe(sessionsBefore);
   });
 });

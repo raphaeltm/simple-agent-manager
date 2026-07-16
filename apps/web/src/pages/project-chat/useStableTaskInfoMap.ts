@@ -6,8 +6,10 @@ import { buildTaskInfoMap, type TaskInfo } from './useTaskGroups';
 
 /**
  * Maintains a stable `taskInfoMap` reference — only updates the Map when
- * the underlying data actually changes. Prevents downstream memo
- * invalidation when the task list is refetched with identical data.
+ * the underlying data actually changes.
+ *
+ * Also supports incremental single-task updates so that a new session.created
+ * event with a taskId doesn't force a full task list refetch.
  */
 export function useStableTaskInfoMap() {
   const [taskInfoMap, setTaskInfoMap] = useState<Map<string, TaskInfo>>(new Map());
@@ -21,7 +23,28 @@ export function useStableTaskInfoMap() {
     setTaskInfoMap(next);
   }, []);
 
-  return { taskInfoMap, replaceAll };
+  const upsertTask = useCallback((task: Task) => {
+    setTaskInfoMap((prev) => {
+      const existing = prev.get(task.id);
+      const info: TaskInfo = {
+        id: task.id,
+        title: task.title,
+        parentTaskId: task.parentTaskId,
+        status: task.status,
+        blocked: task.blocked ?? false,
+        triggeredBy: task.triggeredBy ?? 'user',
+        dispatchDepth: task.dispatchDepth ?? 0,
+        taskMode: task.taskMode,
+      };
+      if (existing && taskInfoEqual(existing, info)) return prev;
+      const next = new Map(prev);
+      next.set(task.id, info);
+      prevMapRef.current = next;
+      return next;
+    });
+  }, []);
+
+  return { taskInfoMap, replaceAll, upsertTask };
 }
 
 function taskInfoEqual(a: TaskInfo, b: TaskInfo): boolean {
