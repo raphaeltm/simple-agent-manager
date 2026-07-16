@@ -201,7 +201,7 @@ export async function listSessions(
   offset: number = 0,
   taskId: string | null = null,
   createdByUserId: string | null = null
-): Promise<{ sessions: Record<string, unknown>[]; total: number }> {
+): Promise<{ sessions: Record<string, unknown>[]; total: number; hasMore: boolean }> {
   const stub = await getStub(env, projectId);
   return stub.listSessions(status, limit, offset, taskId, createdByUserId);
 }

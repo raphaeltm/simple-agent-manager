@@ -1,6 +1,7 @@
 /**
  * Chat session CRUD, state machine, listing, and search.
  */
+import { log } from '../../lib/logger';
 import { getAttentionSummary } from './attention';
 import {
   parseChatSessionListRow,
@@ -10,6 +11,31 @@ import {
 } from './row-schemas';
 import type { Env } from './types';
 import { generateId } from './types';
+
+/**
+ * Cloudflare DO RPC has a hard 32 MiB serialization ceiling. We leave an 8 MiB
+ * margin for the response envelope, pagination metadata, and JSON structural
+ * overhead. The sessions-list payload is normally tiny (<=100 small rows), so
+ * this is defense-in-depth against a pathological project rather than a common
+ * trim point. Mirrors the budget in `messages.ts`.
+ */
+export const DEFAULT_SESSIONS_LIST_RPC_BUDGET_BYTES = 24 * 1024 * 1024; // 24 MiB
+
+function resolveSessionsListRpcBudgetBytes(env: Env | undefined): number {
+  const parsed = Number.parseInt(env?.SESSIONS_LIST_RPC_BUDGET_BYTES || '', 10);
+  return Number.isFinite(parsed) && parsed > 0
+    ? parsed
+    : DEFAULT_SESSIONS_LIST_RPC_BUDGET_BYTES;
+}
+
+function estimateSessionBytes(session: Record<string, unknown>): number {
+  let size = 256; // object overhead + fixed scalar fields
+  for (const value of Object.values(session)) {
+    if (typeof value === 'string') size += value.length * 2; // UTF-16 chars
+    else if (value && typeof value === 'object') size += JSON.stringify(value).length * 2;
+  }
+  return size;
+}
 
 export function createSession(
   sql: SqlStorage,
@@ -142,12 +168,13 @@ export function linkSessionToWorkspace(
 
 export function listSessions(
   sql: SqlStorage,
+  env: Env | undefined,
   status: string | null,
   limit: number = 20,
   offset: number = 0,
   taskId: string | null = null,
   createdByUserId: string | null = null
-): { sessions: Record<string, unknown>[]; total: number } {
+): { sessions: Record<string, unknown>[]; total: number; hasMore: boolean } {
   const conditions: string[] = [];
   const params: (string | number)[] = [];
 
@@ -169,6 +196,7 @@ export function listSessions(
   const totalRow = sql
     .exec(`SELECT COUNT(*) as cnt FROM chat_sessions ${whereClause}`, ...params)
     .toArray()[0];
+  const total = totalRow ? parseCountCnt(totalRow, 'sessions.list_total') : 0;
 
   const rows = sql
     .exec(
@@ -179,10 +207,71 @@ export function listSessions(
     )
     .toArray();
 
-  return {
-    sessions: rows.map((row) => enrichWithAttention(sql, mapSessionRow(row))),
-    total: totalRow ? parseCountCnt(totalRow, 'sessions.list_total') : 0,
-  };
+  // Fault-isolated enrichment + RPC size budget. A single malformed row (e.g. a
+  // legacy row that fails the valibot schema) must NEVER throw and 500 the whole
+  // list — it is skipped and logged so the offending field is diagnosable. See
+  // .claude/rules/41 (tolerate a single bad row) and .claude/rules/44/35.
+  const { sessions, skipped, truncated } = enrichSessionRows(sql, env, rows, 'sessions.list');
+
+  // There are more sessions beyond this page either because the offset window
+  // did not reach `total`, or because the size budget trimmed the page.
+  const hasMore = offset + rows.length < total || truncated;
+
+  if (skipped > 0 || truncated) {
+    log.warn('sessions.list_degraded', {
+      status,
+      taskId,
+      createdByUserId,
+      total,
+      fetched: rows.length,
+      returned: sessions.length,
+      skipped,
+      truncated,
+    });
+  }
+
+  return { sessions, total, hasMore };
+}
+
+/**
+ * Map + attention-enrich a set of raw session rows without ever throwing for a
+ * single bad row, and stop before exceeding the RPC serialization budget.
+ * Returns the successfully-enriched sessions plus diagnostics.
+ */
+function enrichSessionRows(
+  sql: SqlStorage,
+  env: Env | undefined,
+  rows: Record<string, unknown>[],
+  context: string
+): { sessions: Record<string, unknown>[]; skipped: number; truncated: boolean } {
+  const budgetBytes = resolveSessionsListRpcBudgetBytes(env);
+  const sessions: Record<string, unknown>[] = [];
+  let skipped = 0;
+  let truncated = false;
+  let cumulativeBytes = 0;
+
+  for (const row of rows) {
+    let enriched: Record<string, unknown>;
+    try {
+      enriched = enrichWithAttention(sql, mapSessionRow(row));
+    } catch (e) {
+      skipped++;
+      // Extract a best-effort id for diagnosis without re-triggering the parse.
+      const rawId = typeof row.id === 'string' ? row.id : null;
+      log.warn(`${context}_row_skipped`, { rowId: rawId, error: String(e) });
+      continue;
+    }
+
+    cumulativeBytes += estimateSessionBytes(enriched);
+    if (cumulativeBytes > budgetBytes && sessions.length > 0) {
+      // Exclude this row and everything after it; the caller paginates for more.
+      truncated = true;
+      break;
+    }
+    sessions.push(enriched);
+  }
+
+  return { sessions, skipped, truncated };
 }
 
 export function getSessionsByTaskIds(
@@ -202,7 +291,8 @@ export function getSessionsByTaskIds(
     )
     .toArray();
 
-  return rows.map((row) => enrichWithAttention(sql, mapSessionRow(row)));
+  // Tolerate a single malformed row rather than throwing the whole lookup.
+  return enrichSessionRows(sql, undefined, rows, 'sessions.by_task_ids').sessions;
 }
 
 export function getSession(
