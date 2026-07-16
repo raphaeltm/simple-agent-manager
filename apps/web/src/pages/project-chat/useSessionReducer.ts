@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState } from 'react';
 
-import type { RawSessionEvent } from '../../hooks/useProjectWebSocket';
 import type { ChatSessionListItem } from '../../lib/api';
+import type { RawSessionEvent } from '../../hooks/useProjectWebSocket';
 
 // ---------------------------------------------------------------------------
 // Session event types matching ProjectData DO broadcasts
@@ -225,7 +225,11 @@ function patchSession(
 // React hook: batches rapid WebSocket events into single state updates
 // ---------------------------------------------------------------------------
 
-const BATCH_DELAY_MS = 16; // ~1 frame
+const DEFAULT_SESSION_BATCH_DELAY_MS = 16; // ~1 animation frame
+const BATCH_DELAY_MS = parseInt(
+  import.meta.env.VITE_SESSION_BATCH_DELAY_MS || String(DEFAULT_SESSION_BATCH_DELAY_MS),
+  10,
+);
 
 export function useSessionReducer() {
   const [sessions, setSessions] = useState<ChatSessionListItem[]>([]);
