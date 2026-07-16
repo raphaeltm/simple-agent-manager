@@ -134,6 +134,15 @@ describe('ProjectChatComposer', () => {
     expect(onSend).toHaveBeenCalledTimes(1);
   });
 
+  it('sends with Meta+Enter for Mac keyboard behavior', () => {
+    const onSend = vi.fn();
+    render(<ComposerHarness initialValue="Ship it" onSend={onSend} />);
+
+    fireEvent.keyDown(screen.getByRole('combobox'), { key: 'Enter', metaKey: true });
+
+    expect(onSend).toHaveBeenCalledTimes(1);
+  });
+
   it('shows Ctrl+Enter shortcut hint and Send tooltip on non-Mac platforms', () => {
     mockNavigatorPlatform('Win32');
 
