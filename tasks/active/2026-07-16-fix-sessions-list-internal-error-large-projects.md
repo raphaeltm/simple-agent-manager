@@ -191,4 +191,8 @@ This explains ALL the evidence:
 - [x] All new limits env-configurable with `Default*` constants.
 - [x] Regression tests (node pool) added; the bad-row test fails on pre-fix code.
 - [x] Backlog task filed: tasks/backlog/2026-07-16-observability-mcp-outcome-parsing-gap.md
+- [x] Post-mortem + process-fix: added `.claude/rules/50-list-read-row-fault-isolation.md`
+      (generalizes the single-bad-row class beyond credentials) + backlog audit
+      `tasks/backlog/2026-07-16-project-data-row-fault-isolation-audit.md` for the
+      ~10 sibling `project-data/` reads with the identical unguarded `rows.map(parseRow)`.
 - [ ] Staging verification (blocked: no staging access this session).
