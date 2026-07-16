@@ -188,6 +188,33 @@ func TestBootstrapTimeoutOverride(t *testing.T) {
 	}
 }
 
+func TestGitCredentialTimeoutDefault(t *testing.T) {
+	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+	t.Setenv("WORKSPACE_ID", "ws-123")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.GitCredentialTimeout != DefaultGitCredentialTimeout {
+		t.Fatalf("GitCredentialTimeout=%v, want %v", cfg.GitCredentialTimeout, DefaultGitCredentialTimeout)
+	}
+}
+
+func TestGitCredentialTimeoutOverride(t *testing.T) {
+	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+	t.Setenv("WORKSPACE_ID", "ws-123")
+	t.Setenv("GIT_CREDENTIAL_TIMEOUT", "1750ms")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.GitCredentialTimeout != 1750*time.Millisecond {
+		t.Fatalf("GitCredentialTimeout=%v, want %v", cfg.GitCredentialTimeout, 1750*time.Millisecond)
+	}
+}
+
 func TestDeployRuntimeTimeoutDefault(t *testing.T) {
 	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
 	t.Setenv("NODE_ID", "node-123")
@@ -526,14 +553,28 @@ func splitFirst(s, sep string) []string {
 // validConfig returns a Config with all required fields set to valid values.
 func validConfig() *Config {
 	return &Config{
-		Port:              8080,
-		ControlPlaneURL:   "https://api.example.com",
-		NodeID:            "node-1",
-		SessionMaxCount:   100,
-		DefaultRows:       24,
-		DefaultCols:       80,
-		WSReadBufferSize:  1024,
-		WSWriteBufferSize: 1024,
+		Port:                 8080,
+		ControlPlaneURL:      "https://api.example.com",
+		NodeID:               "node-1",
+		SessionMaxCount:      100,
+		DefaultRows:          24,
+		DefaultCols:          80,
+		WSReadBufferSize:     1024,
+		WSWriteBufferSize:    1024,
+		GitCredentialTimeout: DefaultGitCredentialTimeout,
+	}
+}
+
+func TestValidateGitCredentialTimeout(t *testing.T) {
+	t.Parallel()
+	cfg := validConfig()
+	cfg.GitCredentialTimeout = 0
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("Validate() should return error for GitCredentialTimeout = 0")
+	}
+	if !strings.Contains(err.Error(), "GIT_CREDENTIAL_TIMEOUT") {
+		t.Fatalf("expected GIT_CREDENTIAL_TIMEOUT error, got: %v", err)
 	}
 }
 

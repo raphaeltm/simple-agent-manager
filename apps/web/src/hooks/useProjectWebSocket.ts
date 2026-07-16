@@ -2,28 +2,42 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { expectJsonRecord } from '../lib/runtime-validation';
 
+export type SessionEventType =
+  | 'session.created'
+  | 'session.stopped'
+  | 'session.failed'
+  | 'session.updated'
+  | 'session.agent_completed'
+  | 'session.activity';
+
+export interface RawSessionEvent {
+  type: SessionEventType;
+  payload: Record<string, unknown>;
+}
+
 export type ProjectConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'disconnected';
 
 const BASE_RECONNECT_DELAY = 1000;
 const MAX_RECONNECT_DELAY = 30000;
 const MAX_RETRIES = 10;
 const PING_INTERVAL_MS = 30000;
-/** Debounce rapid session events to avoid excessive API calls. */
-const SESSION_EVENT_DEBOUNCE_MS = 500;
 
-/** Session lifecycle event types the hook listens for. */
-const SESSION_LIFECYCLE_EVENTS = new Set([
+/** Session lifecycle event types the hook routes as typed deltas. */
+const SESSION_DELTA_EVENTS = new Set([
   'session.created',
   'session.stopped',
   'session.failed',
   'session.updated',
   'session.agent_completed',
+  'session.activity',
 ]);
 
 interface UseProjectWebSocketOptions {
   projectId: string;
-  /** Called (debounced) when any session lifecycle event arrives. */
-  onSessionChange: () => void;
+  /** Called with raw session delta events for incremental state updates. */
+  onSessionEvent?: (event: RawSessionEvent) => void;
+  /** Called on reconnect so the consumer can do a full refetch to re-sync. */
+  onReconnected?: () => void;
 }
 
 export interface UseProjectWebSocketReturn {
@@ -34,33 +48,28 @@ export interface UseProjectWebSocketReturn {
  * Project-wide WebSocket hook for sidebar session list updates.
  *
  * Connects WITHOUT a sessionId query param so the socket is "untagged" and
- * receives ALL events broadcast by the ProjectData DO — both project-wide
- * broadcasts and session-scoped broadcasts (which are also sent to untagged
- * sockets). Session lifecycle events trigger a debounced callback to refresh
- * the session list.
+ * receives ALL events broadcast by the ProjectData DO. Session lifecycle
+ * events are forwarded as typed deltas via `onSessionEvent` for incremental
+ * state updates. On reconnect, `onReconnected` is called so the consumer
+ * can do a full refetch to re-sync.
  */
 export function useProjectWebSocket({
   projectId,
-  onSessionChange,
+  onSessionEvent,
+  onReconnected,
 }: UseProjectWebSocketOptions): UseProjectWebSocketReturn {
   const [connectionState, setConnectionState] = useState<ProjectConnectionState>('disconnected');
 
   const wsRef = useRef<WebSocket | null>(null);
   const retriesRef = useRef(0);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const debounceTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const mountedRef = useRef(true);
   const connectRef = useRef<() => void>(() => {});
 
-  const onSessionChangeRef = useRef(onSessionChange);
-  onSessionChangeRef.current = onSessionChange;
-
-  const debouncedSessionChange = useCallback(() => {
-    clearTimeout(debounceTimerRef.current);
-    debounceTimerRef.current = setTimeout(() => {
-      onSessionChangeRef.current();
-    }, SESSION_EVENT_DEBOUNCE_MS);
-  }, []);
+  const onSessionEventRef = useRef(onSessionEvent);
+  onSessionEventRef.current = onSessionEvent;
+  const onReconnectedRef = useRef(onReconnected);
+  onReconnectedRef.current = onReconnected;
 
   const getReconnectDelay = useCallback((attempt: number) => {
     return Math.min(BASE_RECONNECT_DELAY * Math.pow(2, attempt), MAX_RECONNECT_DELAY);
@@ -87,7 +96,8 @@ export function useProjectWebSocket({
   const connect = useCallback(() => {
     if (!mountedRef.current) return;
 
-    setConnectionState(retriesRef.current === 0 ? 'connecting' : 'reconnecting');
+    const isReconnect = retriesRef.current > 0;
+    setConnectionState(isReconnect ? 'reconnecting' : 'connecting');
 
     if (wsRef.current) {
       wsRef.current.close(1000);
@@ -95,7 +105,6 @@ export function useProjectWebSocket({
     }
 
     const API_URL = import.meta.env.VITE_API_URL || '';
-    // No sessionId param — socket is untagged and receives all project events
     const wsUrl = API_URL.replace(/^http/, 'ws') + `/api/projects/${projectId}/sessions/ws`;
 
     try {
@@ -106,8 +115,12 @@ export function useProjectWebSocket({
           ws.close(1000);
           return;
         }
+        const wasReconnect = retriesRef.current > 0;
         retriesRef.current = 0;
         setConnectionState('connected');
+        if (wasReconnect) {
+          onReconnectedRef.current?.();
+        }
       };
 
       ws.onmessage = (event) => {
@@ -115,8 +128,12 @@ export function useProjectWebSocket({
 
         try {
           const data = expectJsonRecord(JSON.parse(String(event.data)), 'project.websocket.message');
-          if (typeof data.type === 'string' && SESSION_LIFECYCLE_EVENTS.has(data.type)) {
-            debouncedSessionChange();
+          const type = typeof data.type === 'string' ? data.type : '';
+          if (SESSION_DELTA_EVENTS.has(type)) {
+            const payload = (typeof data.payload === 'object' && data.payload !== null)
+              ? data.payload as Record<string, unknown>
+              : {};
+            onSessionEventRef.current?.({ type: type as SessionEventType, payload });
           }
         } catch {
           // Ignore malformed messages
@@ -142,7 +159,7 @@ export function useProjectWebSocket({
     } catch {
       scheduleReconnect();
     }
-  }, [projectId, scheduleReconnect, debouncedSessionChange]);
+  }, [projectId, scheduleReconnect]);
 
   connectRef.current = connect;
 
@@ -165,7 +182,6 @@ export function useProjectWebSocket({
     return () => {
       mountedRef.current = false;
       clearTimeout(reconnectTimerRef.current);
-      clearTimeout(debounceTimerRef.current);
       if (wsRef.current) {
         wsRef.current.close(1000);
         wsRef.current = null;

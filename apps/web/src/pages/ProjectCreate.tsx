@@ -3,9 +3,11 @@ import { Breadcrumb, PageLayout } from '@simple-agent-manager/ui';
 import { useCallback, useEffect, useState } from 'react';
 
 import { ProjectOnboardingWizard } from '../components/project-onboarding';
+import { useLoginProviders } from '../hooks/useLoginProviders';
 import { getArtifactsEnabled, listGitHubInstallations } from '../lib/api';
 
 export function ProjectCreate() {
+  const providers = useLoginProviders();
   const [installations, setInstallations] = useState<GitHubInstallation[]>([]);
   const [artifactsEnabled, setArtifactsEnabled] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -43,6 +45,7 @@ export function ProjectCreate() {
         <ProjectOnboardingWizard
           installations={installations}
           artifactsEnabled={artifactsEnabled}
+          gitlabEnabled={providers.gitlab}
           loading={loading}
           loadError={loadError}
           onRetryInstallations={load}

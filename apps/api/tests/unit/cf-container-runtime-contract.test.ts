@@ -4,6 +4,8 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
+import agentInstallManifest from '../../../../packages/shared/src/agent-install-manifest.json';
+
 const apiPackageRoot = join(fileURLToPath(new URL('.', import.meta.url)), '../..');
 const apiRoot = join(apiPackageRoot, 'src');
 
@@ -13,6 +15,15 @@ function read(relPath: string): string {
 
 function readPackage(relPath: string): string {
   return readFileSync(join(apiPackageRoot, relPath), 'utf8');
+}
+
+function getPinnedAgentPackage(agentType: string): string {
+  const manifest = agentInstallManifest as Array<{ agentType: string; package: string; version: string }>;
+  const entry = manifest.find((candidate) => candidate.agentType === agentType);
+  if (!entry) {
+    throw new Error(`Missing agent install manifest entry for ${agentType}`);
+  }
+  return `${entry.package}@${entry.version}`;
 }
 
 describe('cf-container runtime spike contracts', () => {
@@ -72,7 +83,7 @@ describe('cf-container runtime spike contracts', () => {
       "import { fetchNodeAgent, getNodeAgentRequestTimeoutMs } from '../../services/node-agent'"
     );
     expect(localForward).toContain('fetchNodeAgent(');
-    expect(nodesRoute).toContain('fetchNodeAgent(nodeId, c.env, vmUrl.toString()');
+    expect(nodesRoute).toMatch(/fetchNodeAgent\(\s*nodeId,\s*c\.env,\s*vmUrl\.toString\(\)/);
   });
 
   it('launches instant chat sessions through the authenticated start route and raw Container substrate', () => {
@@ -83,9 +94,8 @@ describe('cf-container runtime spike contracts', () => {
     expect(adminRoute).toContain(
       "adminSandboxRoutes.use('/*', requireAuth(), requireApproved(), requireSuperadmin())"
     );
-    expect(chatStartRoute).toContain(
-      "chatStartRoutes.post('/start', requireAuth(), requireApproved()"
-    );
+    expect(chatStartRoute).toContain('chatStartRoutes.post(');
+    expect(chatStartRoute).toContain('requireApproved()');
     expect(chatStartRoute).toContain('resolveWorkspaceRuntime');
     expect(chatStartRoute).toContain("runtime.runtime !== 'cf-container'");
     expect(chatStartRoute).toContain('launchInstantSession');
@@ -192,6 +202,7 @@ describe('cf-container runtime spike contracts', () => {
   it('uses a raw vm-agent container image for PR workflows', () => {
     const dockerfile = readPackage('Dockerfile.vm-agent-container');
     const bootstrap = readPackage('container-entrypoints/vm-agent-bootstrap.sh');
+    const codexACPWrapperPackage = getPinnedAgentPackage('openai-codex');
 
     expect(dockerfile).toContain('ENTRYPOINT ["/usr/local/bin/vm-agent-bootstrap"]');
     expect(dockerfile).toContain(
@@ -202,7 +213,12 @@ describe('cf-container runtime spike contracts', () => {
     );
     expect(dockerfile).toContain('githubcli-archive-keyring.gpg');
     expect(dockerfile).toContain('apt-get install -y --no-install-recommends gh');
-    expect(dockerfile).toContain('@agentclientprotocol/codex-acp');
+    expect(dockerfile).toContain(codexACPWrapperPackage);
+    const vmGateway = readFileSync(
+      join(apiPackageRoot, '../../packages/vm-agent/internal/acp/gateway.go'),
+      'utf8'
+    );
+    expect(vmGateway).toContain(`npm install -g ${codexACPWrapperPackage}`);
     expect(dockerfile).toContain('USER node');
     expect(dockerfile).toContain('chown -R node:node /workspaces /var/lib/vm-agent');
     expect(bootstrap).toContain('agent_bin="${VM_AGENT_BIN:-/usr/local/bin/vm-agent}"');

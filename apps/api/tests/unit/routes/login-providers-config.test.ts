@@ -11,17 +11,18 @@ import { Hono } from 'hono';
 import { describe, expect, it } from 'vitest';
 
 import type { Env } from '../../../src/env';
-import { getGitHubOAuthConfig, getGoogleLoginOAuthConfig } from '../../../src/services/platform-config';
+import { getGitHubOAuthConfig, getGitLabOAuthConfig, getGoogleLoginOAuthConfig } from '../../../src/services/platform-config';
 
 function createApp() {
   const app = new Hono<{ Bindings: Env }>();
   // Replicate the exact handler from src/index.ts
   app.get('/api/config/login-providers', async (c) => {
-    const [github, google] = await Promise.all([
+    const [github, google, gitlab] = await Promise.all([
       getGitHubOAuthConfig(c.env),
       getGoogleLoginOAuthConfig(c.env),
+      getGitLabOAuthConfig(c.env),
     ]);
-    return c.json({ github: github !== null, google: google !== null });
+    return c.json({ github: github !== null, google: google !== null, gitlab: gitlab !== null });
   });
   return app;
 }
@@ -29,24 +30,34 @@ function createApp() {
 async function get(env: Partial<Env>) {
   const res = await createApp().request('/api/config/login-providers', {}, env as Env);
   expect(res.status).toBe(200);
-  return (await res.json()) as { github: boolean; google: boolean };
+  return (await res.json()) as { github: boolean; google: boolean; gitlab: boolean };
 }
 
 describe('GET /api/config/login-providers', () => {
   it('reports both false when nothing is configured', async () => {
-    expect(await get({})).toEqual({ github: false, google: false });
+    expect(await get({})).toEqual({ github: false, google: false, gitlab: false });
   });
 
   it('reports github true when GitHub OAuth is configured', async () => {
     expect(
       await get({ GITHUB_CLIENT_ID: 'gh-id', GITHUB_CLIENT_SECRET: 'gh-secret' })
-    ).toEqual({ github: true, google: false });
+    ).toEqual({ github: true, google: false, gitlab: false });
   });
 
   it('reports google true from the LOGIN client env vars', async () => {
     expect(
       await get({ GOOGLE_LOGIN_CLIENT_ID: 'login-id', GOOGLE_LOGIN_CLIENT_SECRET: 'login-secret' })
-    ).toEqual({ github: false, google: true });
+    ).toEqual({ github: false, google: true, gitlab: false });
+  });
+
+  it('reports gitlab true when GitLab OAuth is configured', async () => {
+    expect(
+      await get({
+        GITLAB_HOST: 'https://gitlab.example.com',
+        GITLAB_CLIENT_ID: 'gitlab-client-id',
+        GITLAB_CLIENT_SECRET: 'gitlab-client-secret',
+      })
+    ).toEqual({ github: false, google: false, gitlab: true });
   });
 
   it('reports google FALSE when only the infra/GCP Google client is set', async () => {
@@ -54,6 +65,6 @@ describe('GET /api/config/login-providers', () => {
     // Google login button.
     expect(
       await get({ GOOGLE_CLIENT_ID: 'infra-id', GOOGLE_CLIENT_SECRET: 'infra-secret' })
-    ).toEqual({ github: false, google: false });
+    ).toEqual({ github: false, google: false, gitlab: false });
   });
 });

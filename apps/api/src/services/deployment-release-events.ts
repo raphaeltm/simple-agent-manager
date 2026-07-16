@@ -72,6 +72,7 @@ export async function appendDeploymentReleaseEvent(
     releaseId,
     releaseVersion,
     nodeId: input.nodeId,
+    nodeIdentifier: input.nodeId,
     seq,
     level: normalizeLevel(input.level),
     eventType: sanitizePublishEventText(input.eventType, 200),

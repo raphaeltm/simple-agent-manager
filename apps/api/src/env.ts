@@ -1,9 +1,10 @@
 import type { Sandbox } from '@cloudflare/sandbox';
 
 import type { VmAgentContainer } from './durable-objects/vm-agent-container';
+import type { WebhookTriggerEnv } from './webhook-trigger-env';
 
 // Cloudflare bindings type
-export interface Env {
+export interface Env extends WebhookTriggerEnv {
   // D1 Database
   DATABASE: D1Database;
   // KV for sessions
@@ -54,6 +55,7 @@ export interface Env {
   NOTIFICATION: DurableObjectNamespace;
   CODEX_REFRESH_LOCK: DurableObjectNamespace;
   GITHUB_USER_ACCESS_TOKEN_LOCK: DurableObjectNamespace;
+  GITLAB_USER_ACCESS_TOKEN_LOCK?: DurableObjectNamespace;
   TRIAL_COUNTER: DurableObjectNamespace;
   TRIAL_EVENT_BUS: DurableObjectNamespace;
   TRIAL_ORCHESTRATOR: DurableObjectNamespace;
@@ -74,6 +76,10 @@ export interface Env {
   GITHUB_APP_ID?: string;
   GITHUB_APP_PRIVATE_KEY?: string;
   GITHUB_APP_SLUG?: string; // GitHub App slug for install URL
+  GITLAB_HOST?: string; // Optional GitLab OAuth host fallback, e.g. https://gitlab.com
+  GITLAB_CLIENT_ID?: string;
+  GITLAB_CLIENT_SECRET?: string;
+  GITLAB_API_TIMEOUT_MS?: string; // Timeout for GitLab API calls in ms (default: 30000)
   CF_API_TOKEN: string;
   CF_ZONE_ID: string;
   CF_ACCOUNT_ID: string;
@@ -644,6 +650,7 @@ export interface Env {
   TRIGGER_EXECUTION_LOG_RETENTION_DAYS?: string; // Days to retain completed/failed/skipped execution logs (default: 90)
   TRIGGER_EXECUTION_CLEANUP_ENABLED?: string; // Kill switch: "false" to disable cleanup sweep (default: enabled)
   TRIGGER_STALE_RECOVERY_BATCH_SIZE?: string; // Max stale executions to recover per sweep (default: 100)
+  SESSION_TASK_REPAIR_BATCH_SIZE?: string; // Max legacy taskless sessions repaired per sweep (default: 25, max: 200)
   // AI Inference Proxy (Cloudflare AI Gateway — Workers AI + Anthropic)
   AI_PROXY_ENABLED?: string; // Kill switch: "false" to disable (default: enabled)
   AI_PROXY_DEFAULT_MODEL?: string; // Default model for OpenCode (default: claude-haiku-4-5-20251001)

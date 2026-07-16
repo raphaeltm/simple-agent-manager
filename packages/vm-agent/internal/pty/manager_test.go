@@ -2,6 +2,8 @@ package pty
 
 import (
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -374,6 +376,93 @@ func TestGetActiveSessionsForUser(t *testing.T) {
 	user2Sessions := m.GetActiveSessionsForUser("user2")
 	if len(user2Sessions) != 1 {
 		t.Fatalf("expected 1 session for user2, got %d", len(user2Sessions))
+	}
+}
+
+func TestCreateSessionWithID_ConcurrentDuplicateCreatesSingleManagedSession(t *testing.T) {
+	m := NewManager(ManagerConfig{
+		DefaultShell: "/bin/sh",
+		DefaultRows:  24,
+		DefaultCols:  80,
+		GracePeriod:  1 * time.Minute,
+		BufferSize:   1024,
+	})
+	defer m.CloseAllSessions()
+
+	const attempts = 8
+	var wg sync.WaitGroup
+	var successes int32
+	errs := make(chan error, attempts)
+
+	for i := 0; i < attempts; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := m.CreateSessionWithID("shared-session", "user1", 24, 80, "")
+			if err == nil {
+				atomic.AddInt32(&successes, 1)
+			}
+			errs <- err
+		}()
+	}
+
+	wg.Wait()
+	close(errs)
+
+	if successes != 1 {
+		t.Fatalf("expected exactly one successful duplicate create, got %d", successes)
+	}
+	if m.SessionCount() != 1 {
+		t.Fatalf("expected one managed session, got %d", m.SessionCount())
+	}
+	for err := range errs {
+		if err != nil && !strings.Contains(err.Error(), "session already exists") {
+			t.Fatalf("expected duplicate session error, got %v", err)
+		}
+	}
+}
+
+func TestCreateSessionWithID_ConcurrentCreatesRespectMaxSessionsPerUser(t *testing.T) {
+	m := NewManager(ManagerConfig{
+		DefaultShell:       "/bin/sh",
+		DefaultRows:        24,
+		DefaultCols:        80,
+		MaxSessionsPerUser: 2,
+		GracePeriod:        1 * time.Minute,
+		BufferSize:         1024,
+	})
+	defer m.CloseAllSessions()
+
+	const attempts = 8
+	var wg sync.WaitGroup
+	var successes int32
+	errs := make(chan error, attempts)
+
+	for i := 0; i < attempts; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			_, err := m.CreateSessionWithID("session-limit-"+string(rune('a'+i)), "user1", 24, 80, "")
+			if err == nil {
+				atomic.AddInt32(&successes, 1)
+			}
+			errs <- err
+		}(i)
+	}
+
+	wg.Wait()
+	close(errs)
+
+	if successes != 2 {
+		t.Fatalf("expected max two successful creates, got %d", successes)
+	}
+	if got := m.SessionCountForUser("user1"); got != 2 {
+		t.Fatalf("expected two managed sessions for user1, got %d", got)
+	}
+	for err := range errs {
+		if err != nil && !strings.Contains(err.Error(), "maximum sessions reached") {
+			t.Fatalf("expected max sessions error, got %v", err)
+		}
 	}
 }
 

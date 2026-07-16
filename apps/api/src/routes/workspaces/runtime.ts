@@ -43,6 +43,11 @@ import {
 import { getExternalInstallationId } from '../../services/github-installation-ids';
 import { backfillProjectGithubRepoId } from '../../services/github-repo-id-backfill';
 import { getGitHubUserAccessTokenForOwner } from '../../services/github-user-access-token';
+import {
+  getProjectGitLabRepository,
+  requireGitLabUserAccessTokenResultForOwner,
+  verifyGitLabProjectAccess,
+} from '../../services/gitlab';
 import { persistError } from '../../services/observability';
 import { resolveProjectAgentDefault } from '../../services/project-agent-defaults';
 import * as projectDataService from '../../services/project-data';
@@ -586,10 +591,7 @@ async function resolveAdditionalRepositoryIds(input: {
     })
     .from(schema.projectGithubRepositories)
     .where(
-      and(
-        eq(schema.projectGithubRepositories.projectId, input.projectId),
-        eq(schema.projectGithubRepositories.userId, input.userId)
-      )
+      eq(schema.projectGithubRepositories.projectId, input.projectId)
     );
   if (rows.length === 0) {
     return [];
@@ -1303,6 +1305,56 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
     });
   }
 
+  if (repoProvider === 'gitlab') {
+    if (!workspace.projectId) {
+      throw errors.forbidden('GitLab workspace has no project');
+    }
+    const metadata = await getProjectGitLabRepository(db, workspace.projectId);
+    if (!metadata) {
+      throw errors.forbidden('GitLab repository metadata is missing');
+    }
+    if (metadata.userId !== workspace.userId) {
+      // The stored GitLab repo binding belongs to a different user than the
+      // workspace owner — vending the owner's OAuth token against another
+      // user's binding would cross a tenant boundary. Fail closed.
+      log.error('workspace_git_token.gitlab_user_mismatch', {
+        workspaceId: workspace.id,
+        projectId: workspace.projectId,
+        workspaceUserId: workspace.userId,
+        metadataUserId: metadata.userId,
+        action: 'rejected',
+      });
+      throw errors.forbidden('GitLab repository is not linked for this workspace owner');
+    }
+    const tokenResult = await requireGitLabUserAccessTokenResultForOwner(
+      c.env,
+      workspace.userId,
+      'workspace-git-token'
+    );
+    const verified = await verifyGitLabProjectAccess(
+      c.env,
+      tokenResult.accessToken,
+      metadata.gitlabProjectId
+    );
+    if (
+      verified.host !== metadata.host ||
+      verified.gitlabProjectId !== metadata.gitlabProjectId ||
+      verified.pathWithNamespace !== metadata.pathWithNamespace
+    ) {
+      throw errors.forbidden('GitLab repository access has changed; repository no longer matches');
+    }
+
+    return c.json({
+      provider: 'gitlab',
+      token: tokenResult.accessToken,
+      expiresAt: tokenResult.accessTokenExpiresAt,
+      cloneUrl: metadata.httpUrlToRepo,
+      host: metadata.host,
+      username: 'oauth2',
+      repositoryPath: metadata.pathWithNamespace,
+    });
+  }
+
   // ─── GitHub token (existing flow) ──────────────────────────────────
   if (!workspace.installationId) {
     throw errors.notFound('Workspace has no GitHub installation');
@@ -1326,12 +1378,7 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
       userId: schema.githubInstallations.userId,
     })
     .from(schema.githubInstallations)
-    .where(
-      and(
-        eq(schema.githubInstallations.id, workspace.installationId),
-        eq(schema.githubInstallations.userId, workspace.userId)
-      )
-    )
+    .where(eq(schema.githubInstallations.id, workspace.installationId))
     .limit(1);
 
   const installation = installations[0];
@@ -1346,15 +1393,14 @@ runtimeRoutes.post('/:id/git-token', async (c) => {
     throw errors.notFound('GitHub installation');
   }
   if (installation.userId !== workspace.userId) {
-    log.warn('workspace_git_token_installation_owner_mismatch', {
+    log.info('workspace_git_token_project_installation_shared', {
       workspaceId: workspace.id,
       projectId: workspace.projectId,
       installationRowId: workspace.installationId,
-      expectedUserId: workspace.userId,
-      actualUserId: installation.userId,
-      action: 'rejected',
+      workspaceUserId: workspace.userId,
+      installationOwnerUserId: installation.userId,
+      action: 'allowed_after_user_access_verification',
     });
-    throw errors.notFound('GitHub installation');
   }
 
   if (!repositoryName) {

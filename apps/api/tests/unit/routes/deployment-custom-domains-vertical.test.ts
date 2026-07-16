@@ -7,6 +7,11 @@ const deploymentEnvironments = {
   id: 'deploymentEnvironments.id',
   projectId: 'deploymentEnvironments.projectId',
   nodeId: 'deploymentEnvironments.nodeId',
+  status: 'deploymentEnvironments.status',
+  desiredRoutingRevision: 'deploymentEnvironments.desiredRoutingRevision',
+  observedRoutingRevision: 'deploymentEnvironments.observedRoutingRevision',
+  observedRoutingStatus: 'deploymentEnvironments.observedRoutingStatus',
+  observedRoutingError: 'deploymentEnvironments.observedRoutingError',
   configUpdatedAt: 'deploymentEnvironments.configUpdatedAt',
 };
 const deploymentCustomDomains = {
@@ -19,8 +24,17 @@ const deploymentCustomDomains = {
   verificationStatus: 'deploymentCustomDomains.verificationStatus',
   verificationError: 'deploymentCustomDomains.verificationError',
   verifiedAt: 'deploymentCustomDomains.verifiedAt',
+  verifiedCnameTarget: 'deploymentCustomDomains.verifiedCnameTarget',
+  desiredState: 'deploymentCustomDomains.desiredState',
+  routingStatus: 'deploymentCustomDomains.routingStatus',
+  activationRoutingRevision: 'deploymentCustomDomains.activationRoutingRevision',
+  deactivationRoutingRevision: 'deploymentCustomDomains.deactivationRoutingRevision',
+  deletedAt: 'deploymentCustomDomains.deletedAt',
   createdBy: 'deploymentCustomDomains.createdBy',
   createdAt: 'deploymentCustomDomains.createdAt',
+};
+const deploymentCustomDomainEvents = {
+  id: 'deploymentCustomDomainEvents.id',
 };
 const deploymentReleases = {
   id: 'deploymentReleases.id',
@@ -53,6 +67,7 @@ const projects = {
 type Condition =
   | { op: 'eq'; col: unknown; val: unknown }
   | { op: 'lt'; col: unknown; val: unknown }
+  | { op: 'isNull'; col: unknown }
   | { op: 'and'; conds: Condition[] }
   | undefined;
 
@@ -60,6 +75,11 @@ interface EnvironmentRow {
   id: string;
   projectId: string;
   nodeId: string | null;
+  status: string;
+  desiredRoutingRevision: number;
+  observedRoutingRevision: number;
+  observedRoutingStatus: string | null;
+  observedRoutingError: string | null;
   configUpdatedAt: string | null;
 }
 
@@ -93,6 +113,12 @@ interface DomainRow {
   verificationStatus: 'pending' | 'verified' | 'failed';
   verificationError: string | null;
   verifiedAt: string | null;
+  verifiedCnameTarget: string | null;
+  desiredState: 'active' | 'deactivating' | 'deleted';
+  routingStatus: string;
+  activationRoutingRevision: number | null;
+  deactivationRoutingRevision: number | null;
+  deletedAt: string | null;
   createdBy: string | null;
   createdAt: string;
 }
@@ -128,9 +154,16 @@ vi.mock('drizzle-orm', () => ({
   desc: (col: unknown) => ({ op: 'desc', col }),
   eq: (col: unknown, val: unknown) => ({ op: 'eq', col, val }),
   lt: (col: unknown, val: unknown) => ({ op: 'lt', col, val }),
+  isNull: (col: unknown) => ({ op: 'isNull', col }),
+  lte: (col: unknown, val: unknown) => ({ op: 'lt', col, val }),
+  sql: (strings: TemplateStringsArray, ...values: unknown[]) => ({
+    sql: strings.join('?'),
+    values,
+  }),
 }));
 
 vi.mock('../../../src/db/schema', () => ({
+  deploymentCustomDomainEvents,
   deploymentCustomDomains,
   deploymentEnvironments,
   deploymentReleases,
@@ -185,9 +218,8 @@ vi.mock('drizzle-orm/d1', () => ({
 }));
 
 const { deployReleaseCallbackRoute } = await import('../../../src/routes/deploy-release-callback');
-const { deploymentCustomDomainRoutes } = await import(
-  '../../../src/routes/deployment-custom-domains'
-);
+const { deploymentCustomDomainRoutes } =
+  await import('../../../src/routes/deployment-custom-domains');
 
 function eqValue(condition: Condition, col: unknown): unknown {
   if (!condition) {
@@ -196,7 +228,7 @@ function eqValue(condition: Condition, col: unknown): unknown {
   if (condition.op === 'eq') {
     return condition.col === col ? condition.val : undefined;
   }
-  if (condition.op === 'lt') {
+  if (condition.op === 'lt' || condition.op === 'isNull') {
     return undefined;
   }
   for (const child of condition.conds) {
@@ -215,7 +247,7 @@ function ltValue(condition: Condition, col: unknown): unknown {
   if (condition.op === 'lt') {
     return condition.col === col ? condition.val : undefined;
   }
-  if (condition.op === 'eq') {
+  if (condition.op === 'eq' || condition.op === 'isNull') {
     return undefined;
   }
   for (const child of condition.conds) {
@@ -321,6 +353,9 @@ function createMockDb() {
     })),
     insert: vi.fn((table: unknown) => ({
       values: vi.fn(async (values: Partial<DomainRow>) => {
+        if (table === deploymentCustomDomainEvents) {
+          return;
+        }
         if (table === deploymentCustomDomains) {
           domainRows.push({
             id: values.id ?? 'domain-1',
@@ -332,6 +367,12 @@ function createMockDb() {
             verificationStatus: values.verificationStatus ?? 'pending',
             verificationError: values.verificationError ?? null,
             verifiedAt: values.verifiedAt ?? null,
+            verifiedCnameTarget: values.verifiedCnameTarget ?? null,
+            desiredState: values.desiredState ?? 'active',
+            routingStatus: values.routingStatus ?? 'pending_dns',
+            activationRoutingRevision: values.activationRoutingRevision ?? null,
+            deactivationRoutingRevision: values.deactivationRoutingRevision ?? null,
+            deletedAt: values.deletedAt ?? null,
             createdBy: values.createdBy ?? 'user-1',
             createdAt: values.createdAt ?? '2026-06-24T00:00:00.000Z',
           });
@@ -339,14 +380,25 @@ function createMockDb() {
       }),
     })),
     update: vi.fn((table: unknown) => ({
-      set: vi.fn((values: Partial<DomainRow> | Partial<ReleaseRow>) => ({
+      set: vi.fn((values: Partial<DomainRow> | Partial<ReleaseRow> | Partial<EnvironmentRow>) => ({
         where: vi.fn(async (condition: Condition) => {
           const rows =
             table === deploymentCustomDomains
               ? (selectRows(table, condition) as DomainRow[])
               : (selectRows(table, condition) as ReleaseRow[]);
           for (const row of rows) {
-            Object.assign(row, values);
+            if (
+              table === deploymentEnvironments &&
+              'desiredRoutingRevision' in values &&
+              typeof values.desiredRoutingRevision !== 'number'
+            ) {
+              (row as EnvironmentRow).desiredRoutingRevision += 1;
+              const rest = { ...values };
+              delete rest.desiredRoutingRevision;
+              Object.assign(row, rest);
+            } else {
+              Object.assign(row, values);
+            }
           }
         }),
       })),
@@ -439,7 +491,17 @@ describe('deployment custom domain attach verify apply flow', () => {
     projectRows = [{ id: 'proj-1', userId: 'user-1' }];
     nodeRows = [{ id: 'node-deploy-1', userId: 'user-1', ipAddress: '203.0.113.10' }];
     envRows = [
-      { id: 'env-1', projectId: 'proj-1', nodeId: 'node-deploy-1', configUpdatedAt: null },
+      {
+        id: 'env-1',
+        projectId: 'proj-1',
+        nodeId: 'node-deploy-1',
+        status: 'active',
+        desiredRoutingRevision: 0,
+        observedRoutingRevision: 0,
+        observedRoutingStatus: null,
+        observedRoutingError: null,
+        configUpdatedAt: null,
+      },
     ];
     releaseRows = [
       {

@@ -55,6 +55,8 @@ export const StartChatSessionSchema = v.object({
   message: v.optional(v.string()),
   agentProfileId: v.optional(v.string()),
   skillId: v.optional(v.string()),
+  parentTaskId: v.optional(v.string()),
+  contextSummary: v.optional(v.string()),
 });
 
 export const LinkTaskToChatSchema = v.object({
@@ -98,18 +100,28 @@ const DeploymentStateSchema = v.object({
   appliedSeq: v.optional(v.number()),
   status: v.optional(v.string()),
   errorMessage: v.optional(v.string()),
+  routingRevision: v.optional(v.number()),
+  routingStatus: v.optional(v.string()),
+  routingError: v.optional(v.string()),
   services: v.optional(v.unknown()),
   deployStatus: v.optional(v.unknown()),
   diskTelemetry: v.optional(v.unknown()),
-  environments: v.optional(v.array(v.object({
-    environmentId: v.string(),
-    appliedSeq: v.optional(v.number()),
-    status: v.optional(v.string()),
-    errorMessage: v.optional(v.string()),
-    services: v.optional(v.unknown()),
-    deployStatus: v.optional(v.unknown()),
-    diskTelemetry: v.optional(v.unknown()),
-  }))),
+  environments: v.optional(
+    v.array(
+      v.object({
+        environmentId: v.string(),
+        appliedSeq: v.optional(v.number()),
+        status: v.optional(v.string()),
+        errorMessage: v.optional(v.string()),
+        routingRevision: v.optional(v.number()),
+        routingStatus: v.optional(v.string()),
+        routingError: v.optional(v.string()),
+        services: v.optional(v.unknown()),
+        deployStatus: v.optional(v.unknown()),
+        diskTelemetry: v.optional(v.unknown()),
+      })
+    )
+  ),
 });
 
 export const NodeHeartbeatSchema = v.object({
@@ -147,7 +159,14 @@ export const UIStandardUpsertSchema = v.object({
   ownerRole: v.string(),
 });
 
-const ComponentCategorySchema = v.picklist(['input', 'navigation', 'feedback', 'layout', 'display', 'overlay']);
+const ComponentCategorySchema = v.picklist([
+  'input',
+  'navigation',
+  'feedback',
+  'layout',
+  'display',
+  'overlay',
+]);
 const ComponentStatusSchema = v.picklist(['draft', 'ready', 'deprecated']);
 
 export const ComponentDefinitionCreateSchema = v.object({
@@ -188,7 +207,13 @@ export const ExceptionRequestCreateSchema = v.object({
   expirationDate: v.string(),
 });
 
-const MigrationWorkItemStatusSchema = v.picklist(['backlog', 'planned', 'in-progress', 'completed', 'verified']);
+const MigrationWorkItemStatusSchema = v.picklist([
+  'backlog',
+  'planned',
+  'in-progress',
+  'completed',
+  'verified',
+]);
 
 export const MigrationWorkItemCreateSchema = v.object({
   standardId: v.string(),

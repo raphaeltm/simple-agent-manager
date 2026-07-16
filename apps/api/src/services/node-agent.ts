@@ -278,6 +278,10 @@ export async function createWorkspaceOnNode(
     workspaceId: string;
     repository: string;
     branch: string;
+    repoProvider?: 'github' | 'artifacts' | 'gitlab';
+    cloneUrl?: string | null;
+    repositoryHost?: string | null;
+    repositoryPath?: string | null;
     callbackToken: string;
     gitUserName?: string | null;
     gitUserEmail?: string | null;

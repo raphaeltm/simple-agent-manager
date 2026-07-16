@@ -114,6 +114,8 @@ func (h *SessionHost) failAgentSelection(agentType, source, message string, err 
 		detail = err.Error()
 	}
 	h.reportAgentError(agentType, source, message, detail)
+	h.persistAgentSelectionFailure(agentType, message)
+	h.reportActivity("error")
 }
 
 func (h *SessionHost) reportCredentialFetched(agentType string, cred *agentCredential) {
@@ -207,12 +209,15 @@ func (h *SessionHost) resolveLoadSessionID(agentType string, previous previousAg
 func (h *SessionHost) startSelectedAgent(ctx context.Context, agentType string, cred *agentCredential, settings *agentSettingsPayload, loadSessionID string) bool {
 	h.mu.Lock()
 	if err := h.startAgent(ctx, agentType, cred, settings, loadSessionID); err != nil {
+		message := err.Error()
 		h.status = HostError
-		h.statusErr = err.Error()
+		h.statusErr = message
 		h.mu.Unlock()
 		slog.Error("Agent start failed", "error", err)
-		h.broadcastAgentStatus(StatusError, agentType, err.Error())
-		h.reportAgentError(agentType, "agent_start", err.Error(), "")
+		h.broadcastAgentStatus(StatusError, agentType, message)
+		h.reportAgentError(agentType, "agent_start", message, "")
+		h.persistAgentSelectionFailure(agentType, message)
+		h.reportActivity("error")
 		return false
 	}
 	h.status = HostReady

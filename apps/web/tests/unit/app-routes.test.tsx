@@ -1,5 +1,5 @@
-import { render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { cleanup, render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../src/components/AuthProvider', () => ({
   AuthProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
@@ -61,6 +61,14 @@ vi.mock('../../src/pages/UiStandards', () => ({
   UiStandards: () => <div data-testid="ui-standards-page" />,
 }));
 
+vi.mock('../../src/pages/SamPrototype', () => ({
+  SamPrototype: () => <div data-testid="sam-prototype-page" />,
+}));
+
+vi.mock('../../src/pages/TrialChatGateHarness', () => ({
+  TrialChatGateHarness: () => <div data-testid="trial-chat-gate-harness-page" />,
+}));
+
 vi.mock('../../src/pages/Projects', () => ({
   Projects: () => <div data-testid="projects-page" />,
 }));
@@ -109,12 +117,17 @@ vi.mock('../../src/pages/ChatSessionView', () => ({
   ChatSessionView: () => <div data-testid="chat-session-page" />,
 }));
 
-import App from '../../src/App';
+import App, { DEV_ONLY_ROUTE_PATHS, devOnlyRoutesEnabled } from '../../src/App';
 
 function renderAt(path: string) {
   window.history.pushState({}, '', path);
   return render(<App />);
 }
+
+afterEach(() => {
+  cleanup();
+  vi.unstubAllEnvs();
+});
 
 describe('App routes', () => {
   it('routes /projects to the Projects page', () => {
@@ -141,4 +154,27 @@ describe('App routes', () => {
     expect(screen.getByTestId('project-detail-page')).toBeInTheDocument();
     expect(screen.getByTestId('task-redirect-page')).toBeInTheDocument();
   });
+
+  it('keeps prototype and test harness routes available in local/test mode', () => {
+    renderAt('/sam');
+    expect(screen.getByTestId('sam-prototype-page')).toBeInTheDocument();
+
+    cleanup();
+    renderAt('/__test/trial-chat-gate');
+    expect(screen.getByTestId('trial-chat-gate-harness-page')).toBeInTheDocument();
+
+    cleanup();
+    renderAt('/ui-standards');
+    expect(screen.getByTestId('ui-standards-page')).toBeInTheDocument();
+  });
+
+  it('disables the inventoried dev-only routes under production env flags', () => {
+    vi.stubEnv('DEV', false);
+    vi.stubEnv('PROD', true);
+    vi.stubEnv('MODE', 'production');
+
+    expect(DEV_ONLY_ROUTE_PATHS).toEqual(['/sam', '/__test/trial-chat-gate', '/ui-standards']);
+    expect(devOnlyRoutesEnabled()).toBe(false);
+  });
+
 });

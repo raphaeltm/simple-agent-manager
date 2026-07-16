@@ -108,7 +108,7 @@ describe('RepositoryAccessSettings', () => {
     await waitFor(() => {
       expect(mocks.listProjectRepositories).toHaveBeenCalledWith('proj-1');
     });
-    expect(screen.getByText('raph/sam')).toBeInTheDocument();
+    expect(await screen.findByText('raph/sam')).toBeInTheDocument();
     expect(screen.getByText('always included')).toBeInTheDocument();
     expect(screen.getByText(/No additional repositories\./)).toBeInTheDocument();
   });

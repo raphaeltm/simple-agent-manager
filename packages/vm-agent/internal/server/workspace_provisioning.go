@@ -59,6 +59,22 @@ func (s *Server) applyDetectedContainerUser(runtime *WorkspaceRuntime, detected 
 	s.rebuildWorkspacePTYManager(runtime)
 }
 
+func workspaceRuntimeRequiresGitToken(runtime *WorkspaceRuntime) bool {
+	if runtime == nil {
+		return false
+	}
+	if strings.TrimSpace(runtime.Repository) == "" && strings.TrimSpace(runtime.CloneURL) == "" {
+		return false
+	}
+
+	switch strings.ToLower(strings.TrimSpace(runtime.RepoProvider)) {
+	case "", "github", "gitlab", "artifacts":
+		return true
+	default:
+		return false
+	}
+}
+
 func (s *Server) provisionWorkspaceRuntime(ctx context.Context, runtime *WorkspaceRuntime) (bool, error) {
 	if runtime == nil {
 		return false, fmt.Errorf("workspace runtime is required")
@@ -73,6 +89,10 @@ func (s *Server) provisionWorkspaceRuntime(ctx context.Context, runtime *Workspa
 	cfg.WorkspaceID = runtime.ID
 	cfg.Repository = strings.TrimSpace(runtime.Repository)
 	cfg.Branch = strings.TrimSpace(runtime.Branch)
+	cfg.RepoProvider = strings.TrimSpace(runtime.RepoProvider)
+	cfg.CloneURL = strings.TrimSpace(runtime.CloneURL)
+	cfg.RepositoryHost = strings.TrimSpace(runtime.RepositoryHost)
+	cfg.RepositoryPath = strings.TrimSpace(runtime.RepositoryPath)
 	cfg.WorkspaceDir = strings.TrimSpace(runtime.WorkspaceDir)
 	cfg.ContainerLabelValue = strings.TrimSpace(runtime.ContainerLabelValue)
 	cfg.ContainerWorkDir = strings.TrimSpace(runtime.ContainerWorkDir)
@@ -92,6 +112,9 @@ func (s *Server) provisionWorkspaceRuntime(ctx context.Context, runtime *Workspa
 
 	gitToken, err := s.fetchGitTokenForWorkspace(provisionCtx, runtime.ID, callbackToken)
 	if err != nil {
+		if workspaceRuntimeRequiresGitToken(runtime) {
+			return false, fmt.Errorf("failed to fetch git token: %w", err)
+		}
 		slog.Warn("Proceeding without git token", "workspace", runtime.ID, "error", err)
 	}
 
@@ -113,6 +136,10 @@ func (s *Server) provisionWorkspaceRuntime(ctx context.Context, runtime *Workspa
 		GitUserName:            runtime.GitUserName,
 		GitUserEmail:           runtime.GitUserEmail,
 		GitHubID:               runtime.GitHubID,
+		RepoProvider:           runtime.RepoProvider,
+		CloneURL:               runtime.CloneURL,
+		RepositoryHost:         runtime.RepositoryHost,
+		RepositoryPath:         runtime.RepositoryPath,
 		ProjectEnvVars:         runtimeAssets.EnvVars,
 		ProjectFiles:           runtimeAssets.Files,
 		Lightweight:            runtime.Lightweight,
@@ -156,6 +183,10 @@ func (s *Server) recoverWorkspaceRuntime(ctx context.Context, runtime *Workspace
 	cfg.WorkspaceID = runtime.ID
 	cfg.Repository = strings.TrimSpace(runtime.Repository)
 	cfg.Branch = strings.TrimSpace(runtime.Branch)
+	cfg.RepoProvider = strings.TrimSpace(runtime.RepoProvider)
+	cfg.CloneURL = strings.TrimSpace(runtime.CloneURL)
+	cfg.RepositoryHost = strings.TrimSpace(runtime.RepositoryHost)
+	cfg.RepositoryPath = strings.TrimSpace(runtime.RepositoryPath)
 	cfg.WorkspaceDir = strings.TrimSpace(runtime.WorkspaceDir)
 	cfg.ContainerLabelValue = strings.TrimSpace(runtime.ContainerLabelValue)
 	cfg.ContainerWorkDir = strings.TrimSpace(runtime.ContainerWorkDir)
@@ -184,6 +215,10 @@ func (s *Server) recoverWorkspaceRuntime(ctx context.Context, runtime *Workspace
 	state.ProjectFiles = runtimeAssets.Files
 	state.Lightweight = runtime.Lightweight
 	state.DevcontainerConfigName = runtime.DevcontainerConfigName
+	state.RepoProvider = runtime.RepoProvider
+	state.CloneURL = runtime.CloneURL
+	state.RepositoryHost = runtime.RepositoryHost
+	state.RepositoryPath = runtime.RepositoryPath
 
 	_, err := prepareWorkspaceForRuntime(recoveryCtx, &cfg, state, nil)
 	if err != nil {

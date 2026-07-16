@@ -55,6 +55,10 @@ const (
 	// DefaultACPTerminalActivityReportBackoff is the delay between terminal
 	// activity report retries. Override via ACTIVITY_TERMINAL_REPORT_BACKOFF.
 	DefaultACPTerminalActivityReportBackoff = time.Second
+
+	// DefaultGitCredentialTimeout bounds credential-helper calls back to the
+	// local VM agent. Override via GIT_CREDENTIAL_TIMEOUT.
+	DefaultGitCredentialTimeout = 5 * time.Second
 )
 
 const (
@@ -121,6 +125,10 @@ type Config struct {
 	BootstrapToken     string
 	Repository         string
 	Branch             string
+	RepoProvider       string
+	CloneURL           string
+	RepositoryHost     string
+	RepositoryPath     string
 	WorkspaceDir       string
 	BootstrapStatePath string
 	BootstrapMaxWait   time.Duration
@@ -235,6 +243,7 @@ type Config struct {
 	MetricsInterval   time.Duration // Resource metrics collection interval (default: 1m)
 
 	// Git integration settings - configurable per constitution principle XI
+	GitCredentialTimeout     time.Duration // Timeout for credential-helper callbacks (env: GIT_CREDENTIAL_TIMEOUT, default: 5s)
 	GitExecTimeout           time.Duration // Timeout for git commands via docker exec (default: 30s)
 	GitFileMaxSize           int           // Max file size in bytes for /git/file (default: 1MB)
 	GitWorktreeTimeout       time.Duration // Timeout for git worktree commands (default: 30s)
@@ -469,6 +478,7 @@ func Load() (*Config, error) {
 		MetricsInterval:   getEnvDuration("METRICS_INTERVAL", time.Minute),
 
 		// Git integration settings - configurable per constitution principle XI
+		GitCredentialTimeout:     getEnvDuration("GIT_CREDENTIAL_TIMEOUT", DefaultGitCredentialTimeout),
 		GitExecTimeout:           getEnvDuration("GIT_EXEC_TIMEOUT", 30*time.Second),
 		GitFileMaxSize:           getEnvInt("GIT_FILE_MAX_SIZE", 1048576), // 1 MB
 		GitWorktreeTimeout:       getEnvDuration("GIT_WORKTREE_TIMEOUT", 30*time.Second),

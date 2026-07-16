@@ -1,5 +1,5 @@
-import { act,renderHook } from '@testing-library/react';
-import { afterEach,beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, renderHook } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useProjectWebSocket } from '../../../src/hooks/useProjectWebSocket';
 
@@ -91,7 +91,7 @@ describe('useProjectWebSocket', () => {
 
   it('connects to the project-wide WebSocket endpoint without sessionId', () => {
     renderHook(() =>
-      useProjectWebSocket({ projectId: PROJECT_ID, onSessionChange: vi.fn() }),
+      useProjectWebSocket({ projectId: PROJECT_ID }),
     );
 
     expect(globalThis.WebSocket).toHaveBeenCalledWith(
@@ -102,7 +102,7 @@ describe('useProjectWebSocket', () => {
 
   it('transitions to connected state on open', () => {
     const { result } = renderHook(() =>
-      useProjectWebSocket({ projectId: PROJECT_ID, onSessionChange: vi.fn() }),
+      useProjectWebSocket({ projectId: PROJECT_ID }),
     );
 
     expect(result.current.connectionState).toBe('connecting');
@@ -111,27 +111,26 @@ describe('useProjectWebSocket', () => {
     expect(result.current.connectionState).toBe('connected');
   });
 
-  it('calls onSessionChange (debounced) when a session lifecycle event arrives', async () => {
-    const onSessionChange = vi.fn();
+  it('calls onSessionEvent with typed payload when a session lifecycle event arrives', () => {
+    const onSessionEvent = vi.fn();
     renderHook(() =>
-      useProjectWebSocket({ projectId: PROJECT_ID, onSessionChange }),
+      useProjectWebSocket({ projectId: PROJECT_ID, onSessionEvent }),
     );
 
     act(() => simulateOpen());
-    act(() => simulateMessage({ type: 'session.created', payload: { id: 'sess-1' } }));
+    act(() => simulateMessage({ type: 'session.created', payload: { id: 'sess-1', status: 'active' } }));
 
-    // Should not fire immediately (debounced)
-    expect(onSessionChange).not.toHaveBeenCalled();
-
-    // Advance past debounce period
-    await act(async () => await vi.advanceTimersByTimeAsync(600));
-    expect(onSessionChange).toHaveBeenCalledTimes(1);
+    expect(onSessionEvent).toHaveBeenCalledTimes(1);
+    expect(onSessionEvent).toHaveBeenCalledWith({
+      type: 'session.created',
+      payload: { id: 'sess-1', status: 'active' },
+    });
   });
 
-  it('debounces multiple rapid events into a single callback', async () => {
-    const onSessionChange = vi.fn();
+  it('forwards each rapid event individually (no debounce — batching is in reducer)', () => {
+    const onSessionEvent = vi.fn();
     renderHook(() =>
-      useProjectWebSocket({ projectId: PROJECT_ID, onSessionChange }),
+      useProjectWebSocket({ projectId: PROJECT_ID, onSessionEvent }),
     );
 
     act(() => simulateOpen());
@@ -142,27 +141,25 @@ describe('useProjectWebSocket', () => {
       simulateMessage({ type: 'session.updated', payload: { sessionId: 'sess-3' } });
     });
 
-    await act(async () => await vi.advanceTimersByTimeAsync(600));
-    expect(onSessionChange).toHaveBeenCalledTimes(1);
+    expect(onSessionEvent).toHaveBeenCalledTimes(3);
   });
 
-  it('ignores non-lifecycle events like message.new', async () => {
-    const onSessionChange = vi.fn();
+  it('ignores non-lifecycle events like message.new', () => {
+    const onSessionEvent = vi.fn();
     renderHook(() =>
-      useProjectWebSocket({ projectId: PROJECT_ID, onSessionChange }),
+      useProjectWebSocket({ projectId: PROJECT_ID, onSessionEvent }),
     );
 
     act(() => simulateOpen());
     act(() => simulateMessage({ type: 'message.new', payload: { content: 'hello' } }));
 
-    await act(async () => await vi.advanceTimersByTimeAsync(600));
-    expect(onSessionChange).not.toHaveBeenCalled();
+    expect(onSessionEvent).not.toHaveBeenCalled();
   });
 
-  it('handles session.agent_completed as a lifecycle event', async () => {
-    const onSessionChange = vi.fn();
+  it('handles session.agent_completed as a lifecycle event', () => {
+    const onSessionEvent = vi.fn();
     renderHook(() =>
-      useProjectWebSocket({ projectId: PROJECT_ID, onSessionChange }),
+      useProjectWebSocket({ projectId: PROJECT_ID, onSessionEvent }),
     );
 
     act(() => simulateOpen());
@@ -173,13 +170,58 @@ describe('useProjectWebSocket', () => {
       }),
     );
 
-    await act(async () => await vi.advanceTimersByTimeAsync(600));
-    expect(onSessionChange).toHaveBeenCalledTimes(1);
+    expect(onSessionEvent).toHaveBeenCalledTimes(1);
+    expect(onSessionEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'session.agent_completed' }),
+    );
+  });
+
+  it('handles session.activity as a lifecycle event', () => {
+    const onSessionEvent = vi.fn();
+    renderHook(() =>
+      useProjectWebSocket({ projectId: PROJECT_ID, onSessionEvent }),
+    );
+
+    act(() => simulateOpen());
+    act(() =>
+      simulateMessage({
+        type: 'session.activity',
+        payload: { sessionId: 'sess-1', activity: 'prompting' },
+      }),
+    );
+
+    expect(onSessionEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it('calls onReconnected after a successful reconnect', async () => {
+    const onReconnected = vi.fn();
+    renderHook(() =>
+      useProjectWebSocket({ projectId: PROJECT_ID, onReconnected }),
+    );
+
+    act(() => simulateOpen());
+    act(() => simulateClose(1006));
+
+    await act(async () => await vi.advanceTimersByTimeAsync(1100));
+    expect(wsInstances).toHaveLength(2);
+
+    act(() => simulateOpen());
+    expect(onReconnected).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not call onReconnected on initial connect', () => {
+    const onReconnected = vi.fn();
+    renderHook(() =>
+      useProjectWebSocket({ projectId: PROJECT_ID, onReconnected }),
+    );
+
+    act(() => simulateOpen());
+    expect(onReconnected).not.toHaveBeenCalled();
   });
 
   it('reconnects with exponential backoff on abnormal close', async () => {
     renderHook(() =>
-      useProjectWebSocket({ projectId: PROJECT_ID, onSessionChange: vi.fn() }),
+      useProjectWebSocket({ projectId: PROJECT_ID }),
     );
 
     act(() => simulateOpen());
@@ -194,7 +236,7 @@ describe('useProjectWebSocket', () => {
 
   it('does not reconnect on normal close (code 1000)', async () => {
     const { result } = renderHook(() =>
-      useProjectWebSocket({ projectId: PROJECT_ID, onSessionChange: vi.fn() }),
+      useProjectWebSocket({ projectId: PROJECT_ID }),
     );
 
     act(() => simulateOpen());
@@ -208,7 +250,7 @@ describe('useProjectWebSocket', () => {
 
   it('sends ping messages to keep connection alive', async () => {
     renderHook(() =>
-      useProjectWebSocket({ projectId: PROJECT_ID, onSessionChange: vi.fn() }),
+      useProjectWebSocket({ projectId: PROJECT_ID }),
     );
 
     act(() => simulateOpen());
@@ -219,10 +261,8 @@ describe('useProjectWebSocket', () => {
 
   it('does not send ping when socket is not open', async () => {
     renderHook(() =>
-      useProjectWebSocket({ projectId: PROJECT_ID, onSessionChange: vi.fn() }),
+      useProjectWebSocket({ projectId: PROJECT_ID }),
     );
-
-    // Socket stays in CONNECTING state (readyState = 0), don't call simulateOpen()
 
     await act(async () => await vi.advanceTimersByTimeAsync(30100));
     expect(latestWs().send).not.toHaveBeenCalled();
@@ -230,7 +270,7 @@ describe('useProjectWebSocket', () => {
 
   it('cleans up WebSocket on unmount', () => {
     const { unmount } = renderHook(() =>
-      useProjectWebSocket({ projectId: PROJECT_ID, onSessionChange: vi.fn() }),
+      useProjectWebSocket({ projectId: PROJECT_ID }),
     );
 
     act(() => simulateOpen());
@@ -240,9 +280,9 @@ describe('useProjectWebSocket', () => {
   });
 
   it('ignores events from a stale (superseded) socket after reconnect', async () => {
-    const onSessionChange = vi.fn();
+    const onSessionEvent = vi.fn();
     renderHook(() =>
-      useProjectWebSocket({ projectId: PROJECT_ID, onSessionChange }),
+      useProjectWebSocket({ projectId: PROJECT_ID, onSessionEvent }),
     );
 
     act(() => simulateOpen());
@@ -259,19 +299,17 @@ describe('useProjectWebSocket', () => {
 
     // Event on the OLD socket should be ignored
     act(() => simulateMessage({ type: 'session.created', payload: { id: 'sess-1' } }, oldWs));
-    await act(async () => await vi.advanceTimersByTimeAsync(600));
-    expect(onSessionChange).not.toHaveBeenCalled();
+    expect(onSessionEvent).not.toHaveBeenCalled();
 
     // Event on the NEW socket should work
     act(() => simulateMessage({ type: 'session.created', payload: { id: 'sess-2' } }, newWs));
-    await act(async () => await vi.advanceTimersByTimeAsync(600));
-    expect(onSessionChange).toHaveBeenCalledTimes(1);
+    expect(onSessionEvent).toHaveBeenCalledTimes(1);
   });
 
   it('reconnects to the new project URL when projectId changes', () => {
     const { rerender } = renderHook(
       ({ projectId }) =>
-        useProjectWebSocket({ projectId, onSessionChange: vi.fn() }),
+        useProjectWebSocket({ projectId }),
       { initialProps: { projectId: 'proj-A' } },
     );
 
@@ -292,43 +330,37 @@ describe('useProjectWebSocket', () => {
 
   it('stops reconnecting after max retries are exhausted', async () => {
     const { result } = renderHook(() =>
-      useProjectWebSocket({ projectId: PROJECT_ID, onSessionChange: vi.fn() }),
+      useProjectWebSocket({ projectId: PROJECT_ID }),
     );
 
-    // Don't call simulateOpen — immediately close each new socket to simulate
-    // repeated connection failures. Each close fires on the latest instance.
     for (let i = 0; i < 10; i++) {
       act(() => simulateClose(1006));
       const delay = Math.min(1000 * Math.pow(2, i), 30000);
       await act(async () => await vi.advanceTimersByTimeAsync(delay + 100));
     }
 
-    // The 11th scheduleReconnect sees retriesRef >= MAX_RETRIES and gives up
     act(() => simulateClose(1006));
 
     expect(result.current.connectionState).toBe('disconnected');
 
     const totalConnections = wsInstances.length;
 
-    // Advance much further — no more reconnects should happen
     await act(async () => await vi.advanceTimersByTimeAsync(60000));
     expect(wsInstances).toHaveLength(totalConnections);
   });
 
-  it('ignores malformed (non-JSON) messages without error', async () => {
-    const onSessionChange = vi.fn();
+  it('ignores malformed (non-JSON) messages without error', () => {
+    const onSessionEvent = vi.fn();
     renderHook(() =>
-      useProjectWebSocket({ projectId: PROJECT_ID, onSessionChange }),
+      useProjectWebSocket({ projectId: PROJECT_ID, onSessionEvent }),
     );
 
     act(() => simulateOpen());
 
-    // Send raw non-JSON string
     act(() => {
       latestWs().onmessage?.(new MessageEvent('message', { data: 'not-json' }));
     });
 
-    await act(async () => await vi.advanceTimersByTimeAsync(600));
-    expect(onSessionChange).not.toHaveBeenCalled();
+    expect(onSessionEvent).not.toHaveBeenCalled();
   });
 });

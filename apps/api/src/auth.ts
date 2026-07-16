@@ -10,7 +10,11 @@ import type { Env } from './env';
 import { createModuleLogger } from './lib/logger';
 import { readResponseJson } from './lib/runtime-validation';
 import { getBetterAuthSecret } from './lib/secrets';
-import { getGitHubOAuthConfig, getGoogleLoginOAuthConfig } from './services/platform-config';
+import {
+  getGitHubOAuthConfig,
+  getGitLabOAuthConfig,
+  getGoogleLoginOAuthConfig,
+} from './services/platform-config';
 import { isSignupApprovalRequired } from './services/signup-approval';
 
 const log = createModuleLogger('auth');
@@ -176,7 +180,9 @@ export function selectPrimaryGitHubEmail(
       primary: Boolean(entry.primary),
       verified: Boolean(entry.verified),
     }))
-    .filter((entry): entry is { email: string; primary: boolean; verified: boolean } => Boolean(entry.email));
+    .filter((entry): entry is { email: string; primary: boolean; verified: boolean } =>
+      Boolean(entry.email)
+    );
 
   const verifiedPrimary = normalizedEmails.find((entry) => entry.primary && entry.verified);
   if (verifiedPrimary) {
@@ -193,7 +199,6 @@ export function selectPrimaryGitHubEmail(
 
 /**
  * Create BetterAuth instance with Cloudflare D1 + KV configuration.
- * Uses GitHub OAuth as the social provider.
  */
 export async function createAuth(env: Env) {
   const db = drizzle(env.DATABASE, { schema });
@@ -201,6 +206,7 @@ export async function createAuth(env: Env) {
   const sentinelId = env.TRIAL_ANONYMOUS_USER_ID ?? TRIAL_ANONYMOUS_USER_ID;
   const githubOAuth = await getGitHubOAuthConfig(env);
   const googleOAuth = await getGoogleLoginOAuthConfig(env);
+  const gitlabOAuth = await getGitLabOAuthConfig(env);
   const socialProviders: Record<string, unknown> = {};
   const trustedProviders: string[] = [];
 
@@ -239,7 +245,11 @@ export async function createAuth(env: Env) {
             headers: githubApiHeaders(accessToken),
           });
           if (emailsRes.ok) {
-            const emailsData = await readResponseJson(emailsRes, v.array(githubEmailSchema), 'github.user_emails');
+            const emailsData = await readResponseJson(
+              emailsRes,
+              v.array(githubEmailSchema),
+              'github.user_emails'
+            );
             email = selectPrimaryGitHubEmail(email, emailsData);
           } else {
             const errorBody = await emailsRes.text();
@@ -250,11 +260,16 @@ export async function createAuth(env: Env) {
                 responseBody: errorBody,
               });
             } else {
-              log.error('github_emails_fetch_failed', { status: emailsRes.status, responseBody: errorBody });
+              log.error('github_emails_fetch_failed', {
+                status: emailsRes.status,
+                responseBody: errorBody,
+              });
             }
           }
         } catch (err) {
-          log.error('github_emails_fetch_exception', { error: err instanceof Error ? err.message : String(err) });
+          log.error('github_emails_fetch_exception', {
+            error: err instanceof Error ? err.message : String(err),
+          });
         }
 
         // Last resort: use GitHub noreply email
@@ -289,6 +304,17 @@ export async function createAuth(env: Env) {
       clientId: googleOAuth.clientId,
       clientSecret: googleOAuth.clientSecret,
       scope: ['openid', 'email', 'profile'],
+      overrideUserInfoOnSignIn: true,
+    };
+  }
+
+  if (gitlabOAuth) {
+    trustedProviders.push('gitlab');
+    socialProviders.gitlab = {
+      clientId: gitlabOAuth.clientId,
+      clientSecret: gitlabOAuth.clientSecret,
+      issuer: gitlabOAuth.host,
+      scope: ['read_user', 'api', 'read_repository', 'write_repository'],
       overrideUserInfoOnSignIn: true,
     };
   }

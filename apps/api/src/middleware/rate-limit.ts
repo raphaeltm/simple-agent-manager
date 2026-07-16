@@ -5,7 +5,7 @@
  * All limits are configurable via environment variables per constitution principle XI.
  */
 
-import type { Context, MiddlewareHandler,Next } from 'hono';
+import type { Context, MiddlewareHandler, Next } from 'hono';
 
 import type { Env } from '../env';
 import { log } from '../lib/logger';
@@ -85,7 +85,11 @@ function getClientIp(c: Context): string {
 /**
  * Create a rate limit key for KV storage.
  */
-export function createRateLimitKey(prefix: string, identifier: string, windowStart: number): string {
+export function createRateLimitKey(
+  prefix: string,
+  identifier: string,
+  windowStart: number
+): string {
   return `ratelimit:${prefix}:${identifier}:${windowStart}`;
 }
 
@@ -133,6 +137,17 @@ export async function checkRateLimit(
   });
 
   return { allowed, remaining, resetAt };
+}
+
+/** Best-effort preflight check that avoids protected work once a KV bucket is exhausted. */
+export async function isRateLimitReached(
+  kv: KVNamespace,
+  key: string,
+  limit: number,
+  windowStart: number
+): Promise<boolean> {
+  const existing = await kv.get<RateLimitEntry>(key, 'json');
+  return Boolean(existing && existing.windowStart === windowStart && existing.count >= limit);
 }
 
 /**
@@ -255,4 +270,3 @@ export function rateLimitTrialCreate(env: Env): MiddlewareHandler<{ Bindings: En
     useIp: true,
   });
 }
-

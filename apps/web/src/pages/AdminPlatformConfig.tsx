@@ -55,7 +55,7 @@ export function AdminPlatformConfig() {
     <div className="space-y-4">
       <div className="max-w-3xl">
         <p className="text-sm text-fg-muted">
-          Configure runtime platform integrations. Values set here are stored in D1 and encrypted platform credentials; existing GitHub secret fallbacks remain active until overridden.
+          Configure runtime platform integrations. Values set here are stored in D1 and encrypted platform credentials; existing environment fallbacks remain active until overridden.
         </p>
       </div>
       {error && <Alert variant="error" onDismiss={() => setError(null)}>{error}</Alert>}

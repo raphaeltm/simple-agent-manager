@@ -1,3 +1,4 @@
+// FILE SIZE EXCEPTION: Pre-existing project chat state hook exceeds the 800-line gate on main; split as follow-up outside shared runtime fix scope.
 import type { AgentInfo, AgentProfile, AgentProfileRuntime, CreateAgentProfileRequest, ProviderCatalog, Task, TaskMode, UpdateAgentProfileRequest, VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
 import { DEFAULT_VM_SIZE, DEFAULT_WORKSPACE_PROFILE } from '@simple-agent-manager/shared';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -5,7 +6,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router';
 
 import { useAvailableCommands } from '../../hooks/useAvailableCommands';
 import { useBootLogStream } from '../../hooks/useBootLogStream';
-import { useProjectWebSocket } from '../../hooks/useProjectWebSocket';
+import { type RawSessionEvent, useProjectWebSocket } from '../../hooks/useProjectWebSocket';
 import type { ChatSessionListItem, ChatSessionResponse } from '../../lib/api';
 import {
   closeConversationTask,
@@ -21,6 +22,7 @@ import {
   listChatSessions,
   listCredentials,
   listProjectTasks,
+  prepareForkSession,
   startInstantChatSession,
   stopChatSession,
   submitTask,
@@ -34,6 +36,14 @@ import {
 import { stripMarkdown } from '../../lib/text-utils';
 import { useProjectContext } from '../ProjectContext';
 import { isRetryOrFork } from './lineageUtils';
+import {
+  FORK_MESSAGE_TEMPLATE,
+  resolveInitialVmSize,
+  resolveWizardRuntime,
+  resolveWizardTaskMode,
+  resolveWizardWorkspaceProfile,
+  selectProfileId,
+} from './profileWizardHelpers';
 import { buildBaseSubmitRequest, getCompletedAttachmentRefs, withAttachmentRefs } from './submitRequest';
 import type { ProvisioningState } from './types';
 import {
@@ -41,11 +51,14 @@ import {
   CHAT_TASK_LIST_LIMIT,
   EXECUTE_IDEA_PROMPT_TEMPLATE,
   isTerminal,
+  SESSION_SYNC_INTERVAL_MS,
   TASK_STATUS_POLL_MS,
 } from './types';
 import { useAttachments } from './useAttachments';
 import { useProjectSkills } from './useProjectSkills';
-import { buildTaskInfoMap, type TaskInfo } from './useTaskGroups';
+import { useSessionReducer } from './useSessionReducer';
+import { rawToSessionEvent } from './useSessionReducer';
+import { useStableTaskInfoMap } from './useStableTaskInfoMap';
 
 /** Pre-filled fork/retry context shown on the new chat screen. */
 export interface PendingDerived {
@@ -74,35 +87,6 @@ export interface ProfileWizardState {
   error: string | null;
 }
 
-function resolveWizardRuntime(workType: TaskMode, runtime: AgentProfileRuntime | null): AgentProfileRuntime {
-  if (runtime) return runtime;
-  return workType === 'conversation' ? 'cf-container' : 'vm';
-}
-
-function resolveWizardWorkspaceProfile(runtime: AgentProfileRuntime, workType: TaskMode): WorkspaceProfile {
-  if (runtime === 'cf-container') return 'lightweight';
-  if (workType === 'conversation') return 'lightweight';
-  return 'full';
-}
-
-function resolveWizardTaskMode(runtime: AgentProfileRuntime, workType: TaskMode): TaskMode {
-  if (runtime === 'cf-container') return 'conversation';
-  return workType;
-}
-
-const FORK_MESSAGE_TEMPLATE = `Use the SAM MCP tools (get_session_messages, search_messages) to review the previous session for full context about what was done and what needs to happen next.
-Use get_session_messages with the parent project ID and parent session ID below before relying on title or phrase search.
-
-`;
-
-function resolveInitialVmSize(defaultVmSize: unknown): VMSize {
-  return (defaultVmSize as VMSize | null) ?? DEFAULT_VM_SIZE;
-}
-
-function selectProfileId(current: string | null, profiles: AgentProfile[]) {
-  if (current && profiles.some((profile) => profile.id === current)) return current;
-  return profiles[0]?.id ?? null;
-}
 
 export function useProjectChatState() {
   const navigate = useNavigate();
@@ -114,7 +98,7 @@ export function useProjectChatState() {
   const executeIdeaId = searchParams.get('executeIdea');
   const executeIdeaIdRef = useRef<string | null>(null);
 
-  const [sessions, setSessions] = useState<ChatSessionListItem[]>([]);
+  const { sessions, dispatchEvent, resetSessions } = useSessionReducer();
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const hasLoadedRef = useRef(false);
@@ -207,7 +191,7 @@ export function useProjectChatState() {
 
   // Task/idea title map for session tagging + task info map for grouping
   const [taskTitleMap, setTaskTitleMap] = useState<Map<string, string>>(new Map());
-  const [taskInfoMap, setTaskInfoMap] = useState<Map<string, TaskInfo>>(new Map());
+  const { taskInfoMap, replaceAll: replaceTaskInfoMap } = useStableTaskInfoMap();
 
   const transcribeApiUrl = useMemo(() => getTranscribeApiUrl(), []);
 
@@ -349,7 +333,7 @@ export function useProjectChatState() {
     try {
       const scope = multiplayerActive ? sessionScope : 'all';
       const sessionResult = await listChatSessions(projectId, { limit: CHAT_SESSION_LIST_LIMIT, scope });
-      setSessions(sessionResult.sessions);
+      resetSessions(sessionResult.sessions);
       hasLoadedRef.current = true;
 
       listProjectTasks(projectId, { limit: CHAT_TASK_LIST_LIMIT })
@@ -357,7 +341,7 @@ export function useProjectChatState() {
           const titleMap = new Map<string, string>();
           for (const t of tasksResult.tasks) titleMap.set(t.id, t.title);
           setTaskTitleMap(titleMap);
-          setTaskInfoMap(buildTaskInfoMap(tasksResult.tasks as Task[]));
+          replaceTaskInfoMap(tasksResult.tasks as Task[]);
         })
         .catch(() => { /* task titles are cosmetic */ });
 
@@ -367,11 +351,24 @@ export function useProjectChatState() {
     } finally {
       setIsRefreshing(false);
     }
-  }, [projectId, sessionScope, multiplayerActive]);
+  }, [projectId, sessionScope, multiplayerActive, resetSessions, replaceTaskInfoMap]);
+
+  const handleSessionEvent = useCallback((raw: RawSessionEvent) => {
+    // session.created deltas cannot be scope-filtered client-side (we don't
+    // know isMine from the wire payload), so fall back to a full refetch when
+    // the user is viewing "My sessions" to let the server apply the filter.
+    if (raw.type === 'session.created' && multiplayerActive && sessionScope === 'my') {
+      void loadSessions();
+      return;
+    }
+    const event = rawToSessionEvent(raw);
+    if (event) dispatchEvent(event);
+  }, [dispatchEvent, multiplayerActive, sessionScope, loadSessions]);
 
   const { connectionState } = useProjectWebSocket({
     projectId,
-    onSessionChange: loadSessions,
+    onSessionEvent: handleSessionEvent,
+    onReconnected: loadSessions,
   });
 
   const realtimeDegraded = connectionState === 'disconnected';
@@ -380,6 +377,14 @@ export function useProjectChatState() {
     setLoading(true);
     void loadSessions().finally(() => setLoading(false));
   }, [loadSessions]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Periodic background sync — self-heals if a WebSocket delta was silently dropped.
+  // Depends on `loading` to defer until the first load completes.
+  useEffect(() => {
+    if (loading) return;
+    const interval = setInterval(() => void loadSessions(), SESSION_SYNC_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, [loading, loadSessions]);
 
   // Poll task status during provisioning
   useEffect(() => {
@@ -560,7 +565,7 @@ export function useProjectChatState() {
         : null;
       const attachmentRefs = getCompletedAttachmentRefs(attachments.chatAttachments);
       const selectedRuntime = selectedSkill?.runtime ?? selectedProfile?.runtime ?? null;
-      const requiresTaskSubmission = attachmentRefs.length > 0 || pendingDerived !== null || executeIdeaIdRef.current !== null;
+      const requiresTaskSubmission = attachmentRefs.length > 0 || executeIdeaIdRef.current !== null;
       const useInstantSession = selectedRuntime === 'cf-container' && !requiresTaskSubmission;
 
       if (useInstantSession) {
@@ -568,6 +573,8 @@ export function useProjectChatState() {
           message: trimmed,
           agentProfileId: submitProfileId,
           skillId: selectedSkillId ?? undefined,
+          parentTaskId: pendingDerived?.parentTaskId || undefined,
+          contextSummary: pendingDerived?.contextSummary || undefined,
         });
         setMessage('');
         setPendingDerived(null);
@@ -632,63 +639,57 @@ export function useProjectChatState() {
     setProvisioning(null);
   }, [navigate, projectId]);
 
-  const handleSelect = (id: string) => {
+  const handleSelect = useCallback((id: string) => {
     newChatIntentRef.current = false;
     setPendingDerived(null);
     setProvisioning(null);
     setSidebarOpen(false);
     navigate(`/projects/${projectId}/chat/${id}`);
-  };
+  }, [navigate, projectId]);
 
-  /** Navigate to new chat screen with fork context pre-filled. */
+  /** Prepare canonical fork lineage on the server, then open the new-chat composer. */
   const handleFork = useCallback((session: ChatSessionResponse) => {
-    const taskId = session.task?.id ?? session.taskId;
-    if (!taskId) return;
-    const sessionLabel = session.topic ? stripMarkdown(session.topic) : `Chat ${session.id.slice(0, 8)}`;
-    const forkContext = [
-      `Previous session: "${sessionLabel}"`,
-      `Parent project ID: ${projectId}`,
-      `Parent session ID: ${session.id}`,
-      `Parent task ID: ${taskId}`,
-    ].join('\n');
-    const prefilled = `${FORK_MESSAGE_TEMPLATE}${forkContext}\n\n`;
-
-    const derived: PendingDerived = {
-      type: 'fork',
-      parentSessionId: session.id,
-      parentSessionLabel: sessionLabel,
-      parentTaskId: taskId,
-      parentBranch: session.task?.outputBranch ?? undefined,
-      contextSummary: '',
-      summaryLoading: true,
-    };
-    setPendingDerived(derived);
-    newChatIntentRef.current = true;
-    executeIdeaIdRef.current = null;
-    setMessage(prefilled);
     setSubmitError(null);
+    const provisionalLabel = session.topic ? stripMarkdown(session.topic) : "Chat " + session.id.slice(0, 8);
+    newChatIntentRef.current = true;
+    setPendingDerived({
+      type: "fork", parentSessionId: session.id, parentSessionLabel: provisionalLabel,
+      parentTaskId: session.task?.id ?? session.taskId ?? "",
+      parentBranch: session.task?.outputBranch ?? undefined,
+      contextSummary: "", summaryLoading: true,
+    });
+    setMessage(FORK_MESSAGE_TEMPLATE);
     setProvisioning(null);
-    navigate(`/projects/${projectId}/chat`, { replace: true });
-
-    void summarizeSession(projectId, session.id)
+    navigate("/projects/" + projectId + "/chat", { replace: true });
+    void prepareForkSession(projectId, session.id)
       .then((result) => {
-        setPendingDerived((prev) => prev?.parentSessionId === session.id
-          ? {
-              ...prev,
-              contextSummary: [
-                `## Fork Context`,
-                forkContext,
-                '',
-                result.summary ? `## Previous Session Summary\n${result.summary}` : '',
-              ].filter(Boolean).join('\n'),
-              summaryLoading: false,
-            }
-          : prev);
+        const sessionLabel = stripMarkdown(result.sessionLabel);
+        const forkContext = [
+          `Previous session: "${sessionLabel}"`,
+          `Parent project ID: ${projectId}`,
+          `Parent session ID: ${result.parentSessionId}`,
+          `Parent task ID: ${result.parentTaskId}`,
+        ].join("\n");
+        newChatIntentRef.current = true;
+        setPendingDerived({
+          type: "fork",
+          parentSessionId: result.parentSessionId,
+          parentSessionLabel: sessionLabel,
+          parentTaskId: result.parentTaskId,
+          parentBranch: result.parentBranch ?? undefined,
+          contextSummary: [
+            "## Fork Context", forkContext, "",
+            result.summary ? `## Previous Session Summary\n${result.summary}` : "",
+          ].filter(Boolean).join("\n"),
+          summaryLoading: false,
+        });
+        executeIdeaIdRef.current = null;
+        setMessage(`${FORK_MESSAGE_TEMPLATE}${forkContext}\n\n`);
+        setProvisioning(null);
+        navigate(`/projects/${projectId}/chat`, { replace: true });
       })
-      .catch(() => {
-        setPendingDerived((prev) => prev?.parentSessionId === session.id
-          ? { ...prev, summaryLoading: false }
-          : prev);
+      .catch((err: unknown) => {
+        setSubmitError(err instanceof Error ? err.message : "Unable to prepare fork");
       });
   }, [navigate, projectId]);
 

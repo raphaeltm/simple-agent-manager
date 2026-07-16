@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import type { ToolCallContentItem,ToolCallItem } from '../hooks/useAcpMessages';
 import { isJsonRecord } from '../runtime-validation';
 import { FileDiffView } from './FileDiffView';
+import { normalizeRawToolOutput } from './raw-tool-output';
 import { TerminalBlock } from './TerminalBlock';
 
 interface ToolCallCardProps {
@@ -51,9 +52,13 @@ export const ToolCallCard = React.memo(function ToolCallCard({ toolCall, onFileC
   const [loading, setLoading] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
 
+  const rawOutputFallback = normalizeRawToolOutput(toolCall.rawOutput);
   const needsLazyLoad = toolCall.contentLoaded === false && !!toolCall.messageId && !!onLoadContent;
-  const hasContent = needsLazyLoad || toolCall.content.some(hasRenderableContent);
-  const displayContent = lazyContent ?? toolCall.content;
+  const hasContent = needsLazyLoad || toolCall.content.some(hasRenderableContent) || rawOutputFallback !== null;
+  let fallbackContent: ToolCallContentItem[] = [];
+  if (rawOutputFallback) fallbackContent = [rawOutputFallback];
+  const persistedOrFallback = toolCall.content.length > 0 ? toolCall.content : fallbackContent;
+  const displayContent = lazyContent ?? persistedOrFallback;
 
   const handleToggle = async () => {
     if (!hasContent) return;

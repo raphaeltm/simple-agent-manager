@@ -214,6 +214,9 @@ func (c *Config) Validate() error {
 
 	// Workspace-specific validations (skip in deployment mode)
 	if !c.IsDeploymentMode() {
+		if c.GitCredentialTimeout <= 0 {
+			errs = append(errs, fmt.Errorf("GIT_CREDENTIAL_TIMEOUT must be > 0, got %s", c.GitCredentialTimeout))
+		}
 		if c.SessionMaxCount < 1 {
 			errs = append(errs, fmt.Errorf("SESSION_MAX_COUNT must be > 0, got %d", c.SessionMaxCount))
 		}

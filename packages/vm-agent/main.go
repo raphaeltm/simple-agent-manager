@@ -66,7 +66,7 @@ func runStandaloneMode(cfg *config.Config) {
 	// GH_TOKEN injected into the agent environment. Without this, the agent's
 	// `git` commands prompt for a username and fail in the non-interactive
 	// container. Non-fatal — the agent can still run without git access.
-	server.ConfigureStandaloneGitCredentialHelper()
+	server.ConfigureStandaloneGitCredentialHelper(cfg.GitCredentialTimeout)
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)

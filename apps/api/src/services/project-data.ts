@@ -215,6 +215,14 @@ export async function getSessionsByTaskIds(
   return stub.getSessionsByTaskIds(taskIds);
 }
 
+export async function linkSessionToTask(
+  env: Env, projectId: string, sessionId: string, taskId: string
+): Promise<boolean> {
+  return callProjectDataWithRetry(env, projectId, 'linkSessionToTask', (stub) =>
+    stub.linkSessionToTask(sessionId, taskId)
+  );
+}
+
 export async function getSession(
   env: Env,
   projectId: string,

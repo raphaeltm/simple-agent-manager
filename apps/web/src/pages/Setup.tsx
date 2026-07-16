@@ -137,7 +137,7 @@ export function Setup() {
           <div>
             <h1 className="text-2xl font-semibold">First-run setup</h1>
             <p className="mt-1 max-w-2xl text-sm text-fg-muted">
-              Enter the setup token from Cloudflare Worker variables, then configure platform sign-in and GitHub automation.
+              Enter the setup token from Cloudflare Worker variables, then configure platform sign-in and repository automation.
             </p>
           </div>
           {setupStatus?.forced && (

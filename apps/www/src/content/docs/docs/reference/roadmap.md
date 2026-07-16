@@ -93,11 +93,16 @@ Agent-first deployment environments:
 
 - DigitalOcean, Vultr, AWS, and expanded provider coverage.
 
-## Planned: Teams & Collaboration
+## Complete: Teams & Collaboration
 
-Support for teams and organizations:
+Shared project collaboration:
 
-- Team workspaces, shared projects, organization management.
+- Project members with owner and admin roles.
+- Invite links and access requests.
+- Member removal and ownership transfer flows with credential impact handling.
+
+## Planned: Billing Integration
+
 - Billing integration.
 
 ## Future Considerations

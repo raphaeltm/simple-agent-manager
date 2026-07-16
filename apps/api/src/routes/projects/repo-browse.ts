@@ -68,7 +68,7 @@ async function resolveBrowser(
     externalInstallationId = getExternalInstallationId(installation);
   }
 
-  const browser = await resolveRepoBrowser({ project, env: c.env, externalInstallationId });
+  const browser = await resolveRepoBrowser({ project, env: c.env, userId, externalInstallationId });
   return { project, browser };
 }
 

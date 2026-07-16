@@ -59,6 +59,10 @@ export const CreateWorkspaceAgentRequestSchema = z.object({
   workspaceId: z.string().min(1),
   repository: z.string(),
   branch: z.string(),
+  repoProvider: z.enum(['github', 'artifacts', 'gitlab']).optional(),
+  cloneUrl: z.string().optional(),
+  repositoryHost: z.string().optional(),
+  repositoryPath: z.string().optional(),
   callbackToken: z.string().optional(),
   gitUserName: z.string().nullish(),
   gitUserEmail: z.string().nullish(),
@@ -94,10 +98,14 @@ export const CreateAgentSessionAgentRequestSchema = z.object({
   label: z.string().nullable(),
   chatSessionId: z.string().optional(),
   projectId: z.string().optional(),
-  mcpServers: z.array(z.object({
-    url: z.string().url(),
-    token: z.string(),
-  })).optional(),
+  mcpServers: z
+    .array(
+      z.object({
+        url: z.string().url(),
+        token: z.string(),
+      })
+    )
+    .optional(),
 });
 
 export type CreateAgentSessionAgentRequest = z.infer<typeof CreateAgentSessionAgentRequestSchema>;
@@ -247,7 +255,9 @@ export const AcpSessionReconciliationResponseSchema = z.object({
   sessions: z.array(AcpSessionReconciliationItemSchema),
 });
 
-export type AcpSessionReconciliationResponse = z.infer<typeof AcpSessionReconciliationResponseSchema>;
+export type AcpSessionReconciliationResponse = z.infer<
+  typeof AcpSessionReconciliationResponseSchema
+>;
 
 // =============================================================================
 // Contract Constants

@@ -91,7 +91,7 @@ SAM does not create those user DNS records.
 
 The API Worker (`apps/api/`) is a Hono application handling:
 
-- **Authentication** — GitHub OAuth via BetterAuth
+- **Authentication** — GitHub, Google, and GitLab OAuth via BetterAuth
 - **Resource management** — CRUD for nodes, workspaces, projects, ideas
 - **Reverse proxy** — workspace subdomain, port traffic, and file proxy to VMs
 - **Durable Objects** — per-project data, node lifecycle, idea orchestration, notifications
@@ -133,13 +133,23 @@ D1 stores platform-level data that needs to be queried across projects (e.g., "s
 
 ### Durable Objects (Per-Project Data)
 
-| Binding          | Scope       | Storage | Purpose                                                     |
-| ---------------- | ----------- | ------- | ----------------------------------------------------------- |
-| `PROJECT_DATA`   | Per project | SQLite  | Chat sessions, messages, activity events, ACP sessions      |
-| `NODE_LIFECYCLE` | Per node    | KV      | Warm pool state machine (active → warm → destroying)        |
-| `TASK_RUNNER`    | Per idea    | KV      | Multi-step idea execution orchestration via alarm callbacks |
-| `ADMIN_LOGS`     | Singleton   | KV      | Real-time log broadcast to admin WebSocket clients          |
-| `NOTIFICATION`   | Per user    | KV      | Notification delivery and state management                  |
+| Binding                         | Scope       | Purpose                                                     |
+| ------------------------------- | ----------- | ----------------------------------------------------------- |
+| `PROJECT_DATA`                  | Per project | Chat sessions, messages, activity events, ACP sessions (embedded SQLite) |
+| `NODE_LIFECYCLE`                | Per node    | Warm pool state machine (active → warm → destroying)        |
+| `TASK_RUNNER`                   | Per task    | Multi-step task execution orchestration via alarm callbacks |
+| `ADMIN_LOGS`                    | Singleton   | Real-time log broadcast to admin WebSocket clients          |
+| `NOTIFICATION`                  | Per user    | Notification delivery and state management                  |
+| `PROJECT_ORCHESTRATOR`          | Per project | Project-scoped agent orchestration                          |
+| `PROJECT_AGENT`                 | Per project | AI technical-lead session for a project                     |
+| `SAM_SESSION`                   | Per user    | SAM agent conversation session state                        |
+| `CODEX_REFRESH_LOCK`            | Per user    | Serializes Codex OAuth token refresh (prevents 429 rotation races) |
+| `GITHUB_USER_ACCESS_TOKEN_LOCK` | Per user    | Serializes GitHub OAuth user-token refresh                  |
+| `GITLAB_USER_ACCESS_TOKEN_LOCK` | Per user    | Serializes GitLab OAuth user-token refresh                  |
+| `AI_TOKEN_BUDGET_COUNTER`       | Per user    | Atomic AI token budget accounting                           |
+| `TRIAL_COUNTER`                 | Singleton   | Monthly trial-onboarding cap counter (keyed by `YYYY-MM`)   |
+| `TRIAL_EVENT_BUS`               | Per trial   | SSE event buffering for trial provisioning                  |
+| `TRIAL_ORCHESTRATOR`            | Per trial   | Alarm-driven trial provisioning                             |
 
 ### Why Hybrid?
 
@@ -155,11 +165,21 @@ Summary data flows back from DOs to D1 via debounced sync (e.g., `last_activity_
 | **R2**         | `R2`    | VM Agent binaries, TTS audio cache, Pulumi state                 |
 | **Workers AI** | `AI`    | Idea title generation, transcription, TTS, context summarization |
 
+## Agent Configuration Layers
+
+Agent behavior is assembled from several override layers rather than a single global setting:
+
+- **Composable credentials** — reusable credential rows (`cc_credentials`) and configuration/attachment rows (`cc_configurations`, `cc_attachments`) can be layered per project and per profile, resolved **skill → profile → project → platform**.
+- **Agent profiles** — named, reusable agent configurations (agent type, model, runtime, env, files) selected per chat or per task/trigger.
+- **Skills** — a first-class override layer that further specializes a profile for a specific task type.
+- **Provider modes** — each agent runs in one of three auth modes: `user-api-key` (the user's own key), `oauth` (a subscription token such as Claude Max), or `sam` (the platform-managed AI proxy, opt-in). See [Agent Authentication](/docs/guides/agents/).
+
 ## Durable Objects Deep Dive
 
 ### ProjectData DO
 
 Each project gets one `ProjectData` Durable Object instance, accessed via `env.PROJECT_DATA.idFromName(projectId)`.
+nEvery user-visible chat session has exactly one backing D1 Task. `taskMode` controls autonomous task versus human-controlled conversation lifecycle semantics; it never controls whether the Task exists. D1 `tasks.chat_session_id` and ProjectData `chat_sessions.task_id` form a bidirectional soft link. Because the stores cannot share a transaction, creation and legacy repair are idempotent and retain compatibility readers while reconciliation is in progress.
 
 **Embedded SQLite tables:**
 
@@ -254,7 +274,7 @@ The VM Agent (`packages/vm-agent/`) is a Go binary running on each node:
 
 ```mermaid
 graph TD
-    PUSH["Push to main"] --> P1
+    TRIGGER["Deploy Production workflow"] --> P1
     P1["Phase 1: Infrastructure<br/>(Pulumi)"] --> P2
     P1 -.- P1D["D1, KV, R2, DNS records"]
     P2["Phase 2: Configuration"] --> P3
@@ -267,7 +287,7 @@ graph TD
     P5 -.- P5D["Health check polling"]
 ```
 
-CI runs lint, typecheck, tests, and build on every push. The deploy workflow only triggers on pushes to `main`.
+CI runs lint, typecheck, tests, and build on pull requests and on canonical-repository `main` pushes. In the canonical repository, Deploy Production runs after successful `main` CI. In self-host forks, `main` push CI is intentionally skipped, so operators update their instance by manually running **Deploy Production** on the fork's `main` branch.
 
 ## Key Design Decisions
 
@@ -275,7 +295,7 @@ CI runs lint, typecheck, tests, and build on every push. The deploy workflow onl
 | ------------------------------------ | ------------------------------------------------------------------------- |
 | Single Worker as API + reverse proxy | Simplifies infrastructure — one Worker handles everything                 |
 | Hybrid D1 + Durable Objects          | D1 for cross-project reads, DOs for high-throughput project-scoped writes |
-| User-provided cloud tokens (BYOC)    | Users own their infrastructure and costs                                  |
+| BYOC + platform-credential fallback  | Users/self-hosters may bring their own cloud tokens; SAM's hosted platform also has an enabled platform credential so provisioning works with zero config (resolution: user → platform) |
 | Callback-driven provisioning         | VMs POST `/ready` when bootstrapped — no polling                          |
 | Dynamic DNS per workspace            | Instant subdomain resolution; cleaned up on stop                          |
 | Alarm-driven execution orchestration | Idempotent steps with exponential backoff; no long-running processes      |

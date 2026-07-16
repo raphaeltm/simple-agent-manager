@@ -5,6 +5,8 @@ description: File browsing, conversation forking, voice input, text-to-speech, a
 
 SAM's project pages are chat-first interfaces where you interact with AI coding agents in real-time.
 
+Recent chat updates make the workspace feel more like a persistent work surface: task-backed chats can be forked consistently, SAM-injected setup context is collapsed out of the main conversation, and desktop sidebars can be collapsed when you need more room.
+
 ## Real-Time Streaming
 
 Agent output streams directly to your browser via WebSocket. You see code being written, terminal commands executing, and the agent's thought process as it happens — no waiting for a complete response.
@@ -15,9 +17,9 @@ While chatting with an agent, you can browse the workspace's file system directl
 
 ### How to Use
 
-- Click **Files** in the session header to open the file browser panel
-- Click **Git** to view git status and diffs
-- Click on file references in tool call cards to jump directly to that file
+- Open the file browser panel to navigate the file tree and view files
+- View git status and diffs to see what the agent changed
+- Click file references in tool-call cards to jump directly to that file
 
 ### What You Can Do
 
@@ -76,9 +78,9 @@ Each card shows a tiered inline preview based on the file type:
 - **PDFs and other types** show an icon with the file name and size.
 
 Click a card to open the document full-screen. Because library files are stored
-durably (encrypted in R2), document cards keep working after the workspace is
-gone — a card whose file was later deleted degrades to a "no longer in the
-library" note rather than breaking.
+durably, document cards keep working after the workspace is gone — a card whose
+file was later deleted degrades to a "no longer in the library" note rather than
+breaking.
 
 ## Voice Input
 
@@ -112,6 +114,8 @@ Agent responses can be played back as audio. SAM uses Deepgram Aura 2 (via Worke
 ## Conversation Forking
 
 You can branch off from any point in a conversation to explore an alternative approach without losing the original thread.
+
+Forking now applies to task-backed chat sessions broadly, including instant-container and conversation-style sessions. You do not need to know whether the original session started from an idea, a task, or a lightweight chat; if the session is forkable, SAM preserves the lineage and starts the new branch with the right context.
 
 ### How to Fork
 
@@ -150,7 +154,27 @@ Agents can search messages using the `search_messages` MCP tool.
 
 ## Session Lifecycle
 
-Agent conversations and task sessions stay active until they complete, fail, or are explicitly stopped. The VM agent currently disables automatic idle suspension for these sessions.
+Agent conversations and task sessions stay active until they complete, fail, or are explicitly stopped.
+
+SAM also collapses platform-injected setup messages in the chat timeline. Those messages contain project instructions, task context, and policy that the agent received before it started. They remain available for debugging, but they no longer dominate the visible conversation.
+
+## Starting a New Chat
+
+When you open a new chat, SAM offers a few repo-aware **starter prompts** (for example, "What's in this repo?" or "Run the tests and fix any failures") so you can get moving without a blank page. Pick one or type your own.
+
+## Session Filters (Shared Projects)
+
+In a project shared with teammates, everyone's chat sessions appear in the same session list. A filter near the session search lets you switch between **my sessions** and **all sessions** so you can focus on your own work or see everything happening in the project.
+
+## Focus Mode
+
+On desktop, project chat has three layout levels you can cycle with the **F** key (or the toggle at the bottom of the sidebar):
+
+- **Default** — full navigation and session sidebars.
+- **Focus** — collapses the main navigation so you stay inside one project.
+- **Zen** — collapses the session sidebar too, for maximum reading and prompt-writing space.
+
+Reopen the sidebars whenever you need to switch projects, sessions, or settings.
 
 ## Command Palette
 

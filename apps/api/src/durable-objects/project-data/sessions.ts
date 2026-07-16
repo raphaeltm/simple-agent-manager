@@ -57,6 +57,14 @@ export function createSession(
   return { id, now };
 }
 
+export function linkSessionToTask(sql: SqlStorage, sessionId: string, taskId: string): boolean {
+  const cursor = sql.exec(
+    'UPDATE chat_sessions SET task_id = ?, updated_at = ? WHERE id = ? AND (task_id IS NULL OR task_id = ?)',
+    taskId, Date.now(), sessionId, taskId
+  );
+  return cursor.rowsWritten > 0;
+}
+
 function terminateSession(
   sql: SqlStorage,
   sessionId: string,

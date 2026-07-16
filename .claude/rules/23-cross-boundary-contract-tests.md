@@ -8,15 +8,16 @@ When code in **service A** makes an HTTP call to **service B**, you MUST write a
 
 For every inter-service HTTP call, verify these three contracts:
 
-| Contract | What to check | Example failure |
-|----------|--------------|-----------------|
-| **URL path** | The path A constructs matches a route B registers | TaskRunner called `/api/.../request-upload` but route was mounted at a different path → 404 |
-| **Auth mechanism** | The auth format A sends matches what B's middleware checks | TaskRunner sent `Authorization: Bearer` header but VM agent only checks `?token=` query param → 401 |
-| **Request/response shape** | Content types, body structure, and expected fields match | A sends JSON but B expects multipart; A expects field `url` but B returns `uploadUrl` |
+| Contract                   | What to check                                              | Example failure                                                                                     |
+| -------------------------- | ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| **URL path**               | The path A constructs matches a route B registers          | TaskRunner called `/api/.../request-upload` but route was mounted at a different path → 404         |
+| **Auth mechanism**         | The auth format A sends matches what B's middleware checks | TaskRunner sent `Authorization: Bearer` header but VM agent only checks `?token=` query param → 401 |
+| **Request/response shape** | Content types, body structure, and expected fields match   | A sends JSON but B expects multipart; A expects field `url` but B returns `uploadUrl`               |
 
 ### When This Applies
 
 This rule applies whenever:
+
 - API Worker calls VM agent (e.g., attachment transfer, file proxy, session management)
 - Task Runner DO calls VM agent (e.g., agent session creation, file upload)
 - Web UI calls API Worker (covered by TypeScript types, but verify runtime behavior)
@@ -68,14 +69,32 @@ test('TaskRunner can upload file to VM agent endpoint', async () => {
 ### Quick Check Before PR
 
 When your PR includes code that calls another service over HTTP:
+
 - [ ] URL path verified against the target service's route registration
 - [ ] Auth mechanism verified against the target service's middleware
 - [ ] Request content type and body shape verified against the target service's handler
 - [ ] At least one test exercises the cross-boundary call (contract test or integration test)
 
+### Multiple Callers to the Same Boundary
+
+When more than one lifecycle or route can invoke the same inter-service request,
+they MUST share the request metadata resolver/builder or have behavioral tests
+that enumerate every caller. Do not assume coverage of one caller proves another
+caller forwards the same fields.
+
+For every caller that supplies security- or identity-sensitive metadata:
+
+- Exercise the real caller and shared resolver/builder; mock only the external
+  service boundary.
+- Assert the final outbound payload contains the required values.
+- Include a missing-metadata case and verify the caller fails closed before the
+  external request.
+- Re-check deferred/replay paths separately from the primary dispatch path.
+
 ### Why This Rule Exists
 
 The R2 file upload feature shipped with two cross-boundary contract mismatches:
+
 1. **Route path**: Upload route was registered at `/request-upload` relative to its mount point, but the mount point already included `/tasks`, so the full path was different from what the client expected → 404
 2. **Auth format**: TaskRunner sent a Bearer token in the Authorization header, but the VM agent only reads tokens from the `?token=` query parameter → 401
 

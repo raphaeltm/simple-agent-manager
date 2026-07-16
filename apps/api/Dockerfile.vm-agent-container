@@ -1,4 +1,6 @@
-FROM docker.io/library/node:20-bookworm-slim
+FROM docker.io/library/node:22-bookworm-slim
+
+COPY container-entrypoints/patch-acp-amp.py /tmp/patch-acp-amp.py
 
 LABEL org.opencontainers.image.title="SAM vm-agent instant runtime" \
       org.opencontainers.image.description="Secret-free runtime image; user assets are applied at ACP session start"
@@ -12,9 +14,21 @@ RUN set -eux; \
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list; \
     apt-get update; \
     apt-get install -y --no-install-recommends gh; \
-    npm install -g @zed-industries/claude-agent-acp @anthropic-ai/claude-code @agentclientprotocol/codex-acp; \
+    npm install -g @agentclientprotocol/claude-agent-acp@0.58.1 @anthropic-ai/claude-code@2.1.207 @agentclientprotocol/codex-acp@1.1.2 @google/gemini-cli@0.50.0 opencode-ai@1.17.18 @ampcode/cli@0.0.1783785389-g0da70d; \
+    curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh; \
+    UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install mistral-vibe==2.19.1 --python 3.12 --quiet; \
+    UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install acp-amp==0.1.3 --with agent-client-protocol==0.7.1 --with amp-sdk==0.1.2 --with pydantic==2.12.5 --with pydantic-core==2.41.5 --with annotated-types==0.7.0 --with typing-inspection==0.4.2 --with typing-extensions==4.15.0 --python 3.12 --quiet; \
+    UV_PYTHON_INSTALL_DIR=/opt/uv-python uv run --python 3.12 python /tmp/patch-acp-amp.py; \
+    rm /tmp/patch-acp-amp.py; \
     npm cache clean --force; \
     rm -rf /var/lib/apt/lists/*
+
+ENV SAM_AGENT_HOME=/var/lib/vm-agent/agents \
+    NPM_CONFIG_PREFIX=/var/lib/vm-agent/agents/npm \
+    UV_TOOL_DIR=/var/lib/vm-agent/agents/uv-tools \
+    UV_PYTHON_INSTALL_DIR=/var/lib/vm-agent/agents/uv-python \
+    UV_TOOL_BIN_DIR=/var/lib/vm-agent/agents/bin \
+    PATH=/var/lib/vm-agent/agents/bin:/var/lib/vm-agent/agents/npm/bin:/usr/local/bin:/usr/bin:/bin
 
 # Build prerequisite: container-artifacts/ is gitignored and generated at deploy
 # time by `make -C packages/vm-agent prepare-container` (see deploy-reusable.yml).
@@ -24,7 +38,7 @@ COPY container-entrypoints/vm-agent-bootstrap.sh /usr/local/bin/vm-agent-bootstr
 COPY container-artifacts/vm-agent-linux-amd64 /usr/local/bin/vm-agent
 COPY container-artifacts/vm-agent-version.json /etc/sam/vm-agent-version.json
 RUN chmod +x /usr/local/bin/vm-agent-bootstrap /usr/local/bin/vm-agent && \
-    mkdir -p /workspaces /var/lib/vm-agent && \
+    mkdir -p /workspaces /var/lib/vm-agent/agents/bin /var/lib/vm-agent/agents/npm /var/lib/vm-agent/agents/uv-tools /var/lib/vm-agent/agents/uv-python && \
     touch /usr/local/bin/git-credential-sam && \
     chown -R node:node /workspaces /var/lib/vm-agent /usr/local/bin/git-credential-sam
 

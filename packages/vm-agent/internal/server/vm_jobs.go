@@ -13,8 +13,9 @@ import (
 )
 
 const (
-	vmJobKindApply   = "deployment-apply"
-	vmJobKindPublish = "deployment-publish"
+	vmJobKindApply       = "deployment-apply"
+	vmJobKindRouteConfig = "deployment-route-config"
+	vmJobKindPublish     = "deployment-publish"
 
 	vmJobStatusStarting  = "starting"
 	vmJobStatusRunning   = "running"
@@ -24,6 +25,10 @@ const (
 
 func applyJobID(environmentID string, seq int64) string {
 	return fmt.Sprintf("apply:%s:%d", environmentID, seq)
+}
+
+func routeConfigJobID(environmentID string, revision int64) string {
+	return fmt.Sprintf("routes:%s:%d", environmentID, revision)
 }
 
 func (s *Server) persistVMJobStart(jobID, kind, scopeID, status, step string) {

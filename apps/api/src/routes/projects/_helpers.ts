@@ -15,6 +15,12 @@ import {
   getGitHubUserAccessToken,
   getGitHubUserAccessTokenForOwner,
 } from '../../services/github-user-access-token';
+import {
+  getProjectGitLabRepository,
+  requireGitLabUserAccessToken,
+  requireGitLabUserAccessTokenForOwner,
+  verifyGitLabProjectAccess,
+} from '../../services/gitlab';
 
 export function normalizeProjectName(name: string): string {
   return name.trim().replace(/\s+/g, ' ').toLowerCase();
@@ -162,22 +168,12 @@ export async function buildProjectRuntimeConfigResponse(
     db
       .select()
       .from(schema.projectRuntimeEnvVars)
-      .where(
-        and(
-          eq(schema.projectRuntimeEnvVars.projectId, project.id),
-          eq(schema.projectRuntimeEnvVars.userId, project.userId)
-        )
-      )
+      .where(eq(schema.projectRuntimeEnvVars.projectId, project.id))
       .orderBy(schema.projectRuntimeEnvVars.envKey),
     db
       .select()
       .from(schema.projectRuntimeFiles)
-      .where(
-        and(
-          eq(schema.projectRuntimeFiles.projectId, project.id),
-          eq(schema.projectRuntimeFiles.userId, project.userId)
-        )
-      )
+      .where(eq(schema.projectRuntimeFiles.projectId, project.id))
       .orderBy(schema.projectRuntimeFiles.filePath),
   ]);
 
@@ -325,9 +321,25 @@ export async function requireRepositoryUserAccess(
   project: schema.Project,
   userId: string
 ): Promise<void> {
-  // Artifacts-backed (non-github) projects have no GitHub installation to
-  // intersect against — they are out of scope for this gate.
+  // Artifacts-backed projects have no external user repository to intersect
+  // against — they are out of scope for this gate.
   if (project.repoProvider === 'artifacts') {
+    return;
+  }
+  if (project.repoProvider === 'gitlab') {
+    const metadata = await getProjectGitLabRepository(db, project.id);
+    if (!metadata) {
+      throw errors.forbidden('GitLab repository metadata is missing');
+    }
+    const accessToken = await requireGitLabUserAccessToken(c, userId);
+    const verified = await verifyGitLabProjectAccess(c.env, accessToken, metadata.gitlabProjectId);
+    if (
+      verified.host !== metadata.host ||
+      verified.gitlabProjectId !== metadata.gitlabProjectId ||
+      verified.pathWithNamespace !== metadata.pathWithNamespace
+    ) {
+      throw errors.forbidden('GitLab repository access has changed; repository no longer matches');
+    }
     return;
   }
   if (project.repoProvider && project.repoProvider !== 'github') {
@@ -356,6 +368,22 @@ export async function requireRepositoryOwnerAccess(
   flow = 'owner-preflight'
 ): Promise<void> {
   if (project.repoProvider === 'artifacts') {
+    return;
+  }
+  if (project.repoProvider === 'gitlab') {
+    const metadata = await getProjectGitLabRepository(db, project.id);
+    if (!metadata) {
+      throw errors.forbidden('GitLab repository metadata is missing');
+    }
+    const accessToken = await requireGitLabUserAccessTokenForOwner(env, userId, flow);
+    const verified = await verifyGitLabProjectAccess(env, accessToken, metadata.gitlabProjectId);
+    if (
+      verified.host !== metadata.host ||
+      verified.gitlabProjectId !== metadata.gitlabProjectId ||
+      verified.pathWithNamespace !== metadata.pathWithNamespace
+    ) {
+      throw errors.forbidden('GitLab repository access has changed; repository no longer matches');
+    }
     return;
   }
   if (project.repoProvider && project.repoProvider !== 'github') {

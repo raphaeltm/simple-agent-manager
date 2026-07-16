@@ -18,6 +18,7 @@ import type {
   WorkspaceProfile,
 } from '@simple-agent-manager/shared';
 import {
+  ACP_SESSION_DEFAULTS,
   ATTACHMENT_DEFAULTS,
   CREDENTIAL_PROVIDERS,
   DEFAULT_TASK_TITLE_MAX_LENGTH,
@@ -200,6 +201,7 @@ submitRoutes.post('/submit', requireAuth(), requireApproved(), jsonValidator(Sub
         projectId: schema.tasks.projectId,
         userId: schema.tasks.userId,
         credentialAttributionUserId: schema.tasks.credentialAttributionUserId,
+        parentTaskId: schema.tasks.parentTaskId,
         credentialAttributionProjectId: schema.tasks.credentialAttributionProjectId,
         credentialAttributionSource: schema.tasks.credentialAttributionSource,
       })
@@ -218,6 +220,28 @@ submitRoutes.post('/submit', requireAuth(), requireApproved(), jsonValidator(Sub
     inheritedAttributionProjectId = inheritedAttributionSource === 'project'
       ? (parentTask.credentialAttributionProjectId ?? projectId)
       : null;
+
+    const maxForkDepth = parsePositiveInt(
+      c.env.ACP_SESSION_MAX_FORK_DEPTH,
+      ACP_SESSION_DEFAULTS.MAX_FORK_DEPTH
+    );
+    let forkDepth = 1;
+    let ancestorTaskId = parentTask.parentTaskId;
+    while (ancestorTaskId) {
+      if (forkDepth >= maxForkDepth) {
+        throw errors.badRequest(`Fork depth ${forkDepth + 1} exceeds maximum ${maxForkDepth}`);
+      }
+      const [ancestor] = await db
+        .select({ parentTaskId: schema.tasks.parentTaskId })
+        .from(schema.tasks)
+        .where(and(eq(schema.tasks.id, ancestorTaskId), eq(schema.tasks.projectId, projectId)))
+        .limit(1);
+      if (!ancestor) {
+        throw errors.badRequest('Parent task lineage is invalid');
+      }
+      ancestorTaskId = ancestor.parentTaskId;
+      forkDepth += 1;
+    }
   }
 
   // Validate nodeId if provided

@@ -165,6 +165,421 @@ func TestHandleGitCredentialRespectsRequestedHostProvider(t *testing.T) {
 	}
 }
 
+func TestHandleGitCredentialGitLabRespectsRequestedPath(t *testing.T) {
+	t.Parallel()
+
+	var controlPlaneCalls atomic.Int32
+	controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		controlPlaneCalls.Add(1)
+		if r.URL.Path != "/api/workspaces/ws-gitlab/git-token" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if r.Header.Get("Authorization") != "Bearer gitlab-callback-token" {
+			t.Fatalf("unexpected Authorization header: %q", r.Header.Get("Authorization"))
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"provider":"gitlab",
+			"token":"gl_token",
+			"expiresAt":null,
+			"cloneUrl":"https://gitlab.com/group/project.git",
+			"host":"gitlab.com",
+			"username":"oauth2",
+			"repositoryPath":"group/project"
+		}`))
+	}))
+	defer controlPlane.Close()
+
+	s := &Server{
+		config: &config.Config{
+			ControlPlaneURL: controlPlane.URL,
+			WorkspaceID:     "ws-gitlab",
+			CallbackToken:   "gitlab-callback-token",
+		},
+		workspaces: map[string]*WorkspaceRuntime{
+			"ws-gitlab": {
+				ID:             "ws-gitlab",
+				CallbackToken:  "gitlab-callback-token",
+				RepoProvider:   "gitlab",
+				RepositoryHost: "gitlab.com",
+				RepositoryPath: "group/project",
+			},
+		},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/git-credential?workspaceId=ws-gitlab&host=gitlab.com&path=group/project.git", nil)
+	req.Header.Set("Authorization", "Bearer gitlab-callback-token")
+
+	rec := httptest.NewRecorder()
+	s.handleGitCredential(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	want := "protocol=https\nhost=gitlab.com\nusername=oauth2\npassword=gl_token\n\n"
+	if rec.Body.String() != want {
+		t.Fatalf("unexpected body:\n%s\nwant:\n%s", rec.Body.String(), want)
+	}
+
+	wrongPathReq := httptest.NewRequest(http.MethodGet, "/git-credential?workspaceId=ws-gitlab&host=gitlab.com&path=other/project.git", nil)
+	wrongPathReq.Header.Set("Authorization", "Bearer gitlab-callback-token")
+
+	wrongPathRec := httptest.NewRecorder()
+	s.handleGitCredential(wrongPathRec, wrongPathReq)
+
+	if wrongPathRec.Code != http.StatusNoContent {
+		t.Fatalf("expected 204 for wrong path, got %d: %s", wrongPathRec.Code, wrongPathRec.Body.String())
+	}
+	if controlPlaneCalls.Load() != 1 {
+		t.Fatalf("wrong path should not fetch a second token, got %d calls", controlPlaneCalls.Load())
+	}
+}
+
+func TestIsAllowedCredentialPathForWorkspaceFallsBackToConfig(t *testing.T) {
+	t.Parallel()
+
+	// Standalone / unregistered-workspace mode: the workspace is not in the
+	// runtime map, so the gate must enforce the process config's GitLab path
+	// binding rather than failing open.
+	gitlab := &Server{
+		config: &config.Config{
+			RepoProvider:   "gitlab",
+			RepositoryPath: "group/project",
+		},
+		workspaces: map[string]*WorkspaceRuntime{},
+	}
+	if !gitlab.isAllowedCredentialPathForWorkspace("ws-unknown", "group/project.git") {
+		t.Fatal("matching path against config binding should be allowed")
+	}
+	if gitlab.isAllowedCredentialPathForWorkspace("ws-unknown", "other/project.git") {
+		t.Fatal("mismatched path must be blocked via config fallback, not fail open")
+	}
+
+	// Non-GitLab config: path gating does not apply (GitHub/Artifacts credentials
+	// are host-scoped), so any requested path is permitted.
+	github := &Server{
+		config:     &config.Config{RepoProvider: "github"},
+		workspaces: map[string]*WorkspaceRuntime{},
+	}
+	if !github.isAllowedCredentialPathForWorkspace("ws-unknown", "any/path.git") {
+		t.Fatal("non-gitlab config should not gate on path")
+	}
+
+	// A registered runtime takes precedence over the process config.
+	scoped := &Server{
+		config: &config.Config{RepoProvider: "gitlab", RepositoryPath: "config/path"},
+		workspaces: map[string]*WorkspaceRuntime{
+			"ws-a": {ID: "ws-a", RepoProvider: "gitlab", RepositoryPath: "runtime/path"},
+		},
+	}
+	if !scoped.isAllowedCredentialPathForWorkspace("ws-a", "runtime/path.git") {
+		t.Fatal("runtime binding path should be allowed")
+	}
+	if scoped.isAllowedCredentialPathForWorkspace("ws-a", "config/path.git") {
+		t.Fatal("runtime binding must override the config fallback")
+	}
+
+	// Fail-closed: a gitlab-bound workspace whose bound repository path is
+	// empty (misconfiguration) must refuse every requested path — never fall
+	// open to "any path allowed".
+	emptyRuntime := &Server{
+		config: &config.Config{RepoProvider: "gitlab", RepositoryPath: "config/path"},
+		workspaces: map[string]*WorkspaceRuntime{
+			"ws-empty": {ID: "ws-empty", RepoProvider: "gitlab", RepositoryPath: ""},
+		},
+	}
+	if emptyRuntime.isAllowedCredentialPathForWorkspace("ws-empty", "group/project.git") {
+		t.Fatal("gitlab runtime with empty bound path must fail closed")
+	}
+	emptyConfig := &Server{
+		config:     &config.Config{RepoProvider: "gitlab", RepositoryPath: ""},
+		workspaces: map[string]*WorkspaceRuntime{},
+	}
+	if emptyConfig.isAllowedCredentialPathForWorkspace("ws-unknown", "group/project.git") {
+		t.Fatal("gitlab config fallback with empty bound path must fail closed")
+	}
+}
+
+// TestHandleGitCredentialGitLabFailClosedWithoutHostOrPath verifies the
+// request-side fail-closed gate: a gitlab-bound workspace must supply BOTH
+// host and path or the exchange returns 204 without ever contacting the
+// control plane. GitHub/Artifacts keep the empty-allow behavior (covered by
+// TestHandleGitCredentialSuccess).
+func TestHandleGitCredentialGitLabFailClosedWithoutHostOrPath(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		query string
+	}{
+		{name: "no host and no path", query: ""},
+		{name: "host without path", query: "&host=gitlab.com"},
+		{name: "path without host", query: "&path=group/project.git"},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			var controlPlaneCalls atomic.Int32
+			controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				controlPlaneCalls.Add(1)
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"provider":"gitlab","token":"gl_token","expiresAt":null,"host":"gitlab.com","username":"oauth2","repositoryPath":"group/project"}`))
+			}))
+			defer controlPlane.Close()
+
+			s := &Server{
+				config: &config.Config{
+					ControlPlaneURL: controlPlane.URL,
+					WorkspaceID:     "ws-gitlab",
+					CallbackToken:   "gitlab-callback-token",
+				},
+				workspaces: map[string]*WorkspaceRuntime{
+					"ws-gitlab": {
+						ID:             "ws-gitlab",
+						CallbackToken:  "gitlab-callback-token",
+						RepoProvider:   "gitlab",
+						RepositoryHost: "gitlab.com",
+						RepositoryPath: "group/project",
+					},
+				},
+			}
+
+			req := httptest.NewRequest(http.MethodGet, "/git-credential?workspaceId=ws-gitlab"+tc.query, nil)
+			req.Header.Set("Authorization", "Bearer gitlab-callback-token")
+
+			rec := httptest.NewRecorder()
+			s.handleGitCredential(rec, req)
+
+			if rec.Code != http.StatusNoContent {
+				t.Fatalf("expected 204, got %d: %s", rec.Code, rec.Body.String())
+			}
+			if rec.Body.Len() != 0 {
+				t.Fatalf("expected empty body, got: %s", rec.Body.String())
+			}
+			if controlPlaneCalls.Load() != 0 {
+				t.Fatalf("gitlab-bound exchange without host+path must not fetch a token, got %d calls", controlPlaneCalls.Load())
+			}
+		})
+	}
+}
+
+// TestHandleGitCredentialGitLabResponseFailClosed verifies the response-side
+// gate: even when the local binding did NOT identify the workspace as gitlab
+// (e.g. unregistered runtime falling back to a github process config), a
+// control-plane response with provider=gitlab is only released when the caller
+// supplied a host and path and the resolved repositoryPath is verifiable.
+func TestHandleGitCredentialGitLabResponseFailClosed(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		query     string
+		tokenBody string
+	}{
+		{
+			// Local binding says github (no prefetch gitlab gate), but the control
+			// plane resolves a gitlab credential — must not be released without
+			// host+path identification.
+			name:      "gitlab response without requested host and path",
+			query:     "",
+			tokenBody: `{"provider":"gitlab","token":"gl_token","expiresAt":null,"host":"gitlab.com","username":"oauth2","repositoryPath":"group/project"}`,
+		},
+		{
+			// Host+path supplied but the control plane response carries no
+			// repositoryPath — the binding cannot be verified, so refuse.
+			name:      "gitlab response without resolved repository path",
+			query:     "&host=gitlab.com&path=group/project.git",
+			tokenBody: `{"provider":"gitlab","token":"gl_token","expiresAt":null,"host":"gitlab.com","username":"oauth2"}`,
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(tc.tokenBody))
+			}))
+			defer controlPlane.Close()
+
+			s := &Server{
+				config: &config.Config{
+					ControlPlaneURL: controlPlane.URL,
+					WorkspaceID:     "ws-mislabeled",
+					CallbackToken:   "callback-token",
+					RepoProvider:    "github",
+					RepositoryHost:  "gitlab.com",
+				},
+				workspaces: map[string]*WorkspaceRuntime{},
+			}
+
+			req := httptest.NewRequest(http.MethodGet, "/git-credential?workspaceId=ws-mislabeled"+tc.query, nil)
+			req.Header.Set("Authorization", "Bearer callback-token")
+
+			rec := httptest.NewRecorder()
+			s.handleGitCredential(rec, req)
+
+			if rec.Code != http.StatusNoContent {
+				t.Fatalf("expected 204, got %d: %s", rec.Code, rec.Body.String())
+			}
+			if strings.Contains(rec.Body.String(), "gl_token") {
+				t.Fatal("gitlab token must not be released without verified host and path")
+			}
+		})
+	}
+}
+
+// newGitLabMRTestServer builds the Server and WorkspaceRuntime shared by the
+// tryCreateGitLabMergeRequest tests, wired to the given TLS test API acting as
+// both control plane (token vending) and GitLab host.
+func newGitLabMRTestServer(api *httptest.Server) (*Server, *WorkspaceRuntime) {
+	s := &Server{
+		config: &config.Config{
+			ControlPlaneURL: api.URL,
+		},
+		httpClient: api.Client(),
+		workspaces: map[string]*WorkspaceRuntime{
+			"ws-gitlab": {
+				ID:            "ws-gitlab",
+				CallbackToken: "gitlab-callback-token",
+			},
+		},
+	}
+	runtime := &WorkspaceRuntime{
+		ID:             "ws-gitlab",
+		Branch:         "main",
+		RepoProvider:   "gitlab",
+		RepositoryHost: strings.TrimPrefix(api.URL, "https://"),
+		RepositoryPath: "group/project",
+	}
+	return s, runtime
+}
+
+func TestTryCreateGitLabMergeRequestUsesWorkspaceToken(t *testing.T) {
+	t.Parallel()
+
+	var sawTokenRequest atomic.Bool
+	var sawMergeRequest atomic.Bool
+	api := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/workspaces/ws-gitlab/git-token":
+			sawTokenRequest.Store(true)
+			if r.Method != http.MethodPost {
+				t.Fatalf("expected token POST, got %s", r.Method)
+			}
+			if r.Header.Get("Authorization") != "Bearer gitlab-callback-token" {
+				t.Fatalf("unexpected token Authorization header: %q", r.Header.Get("Authorization"))
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"provider":"gitlab","token":"gl_token","expiresAt":null}`))
+		case strings.Contains(r.RequestURI, "/api/v4/projects/group%2Fproject/merge_requests"):
+			sawMergeRequest.Store(true)
+			if r.Method != http.MethodPost {
+				t.Fatalf("expected MR POST, got %s", r.Method)
+			}
+			if r.Header.Get("Authorization") != "Bearer gl_token" {
+				t.Fatalf("unexpected MR Authorization header: %q", r.Header.Get("Authorization"))
+			}
+			if err := r.ParseForm(); err != nil {
+				t.Fatalf("parse MR form: %v", err)
+			}
+			if r.Form.Get("source_branch") != "sam/feature" {
+				t.Fatalf("unexpected source_branch: %q", r.Form.Get("source_branch"))
+			}
+			if r.Form.Get("target_branch") != "main" {
+				t.Fatalf("unexpected target_branch: %q", r.Form.Get("target_branch"))
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"web_url":"https://gitlab.example/group/project/-/merge_requests/7","iid":7}`))
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.RequestURI)
+		}
+	}))
+	defer api.Close()
+
+	s, runtime := newGitLabMRTestServer(api)
+
+	mrURL, iid := s.tryCreateGitLabMergeRequest(runtime, "sam/feature")
+
+	if mrURL != "https://gitlab.example/group/project/-/merge_requests/7" {
+		t.Fatalf("unexpected MR URL: %q", mrURL)
+	}
+	if iid != 7 {
+		t.Fatalf("unexpected MR iid: %d", iid)
+	}
+	if !sawTokenRequest.Load() {
+		t.Fatal("expected token request")
+	}
+	if !sawMergeRequest.Load() {
+		t.Fatal("expected merge request")
+	}
+}
+
+// TestTryCreateGitLabMergeRequestFallsBackToExistingOn409 verifies that when
+// GitLab rejects the MR create with 409 (an MR already exists for the source
+// branch), the agent looks up the existing open MR and returns its URL/IID
+// instead of reporting a failure.
+func TestTryCreateGitLabMergeRequestFallsBackToExistingOn409(t *testing.T) {
+	t.Parallel()
+
+	var sawCreateAttempt atomic.Bool
+	var sawLookup atomic.Bool
+	api := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/workspaces/ws-gitlab/git-token":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"provider":"gitlab","token":"gl_token","expiresAt":null}`))
+		case strings.Contains(r.RequestURI, "/api/v4/projects/group%2Fproject/merge_requests") && r.Method == http.MethodPost:
+			sawCreateAttempt.Store(true)
+			w.WriteHeader(http.StatusConflict)
+			_, _ = w.Write([]byte(`{"message":["Another open merge request already exists for this source branch"]}`))
+		case strings.Contains(r.RequestURI, "/api/v4/projects/group%2Fproject/merge_requests") && r.Method == http.MethodGet:
+			sawLookup.Store(true)
+			if r.Header.Get("Authorization") != "Bearer gl_token" {
+				t.Fatalf("unexpected lookup Authorization header: %q", r.Header.Get("Authorization"))
+			}
+			q := r.URL.Query()
+			if q.Get("state") != "opened" {
+				t.Fatalf("unexpected state param: %q", q.Get("state"))
+			}
+			if q.Get("source_branch") != "sam/feature" {
+				t.Fatalf("unexpected source_branch param: %q", q.Get("source_branch"))
+			}
+			if q.Get("target_branch") != "main" {
+				t.Fatalf("unexpected target_branch param: %q", q.Get("target_branch"))
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[{"web_url":"https://gitlab.example/group/project/-/merge_requests/9","iid":9}]`))
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.RequestURI)
+		}
+	}))
+	defer api.Close()
+
+	s, runtime := newGitLabMRTestServer(api)
+
+	mrURL, iid := s.tryCreateGitLabMergeRequest(runtime, "sam/feature")
+
+	if mrURL != "https://gitlab.example/group/project/-/merge_requests/9" {
+		t.Fatalf("unexpected MR URL: %q", mrURL)
+	}
+	if iid != 9 {
+		t.Fatalf("unexpected MR iid: %d", iid)
+	}
+	if !sawCreateAttempt.Load() {
+		t.Fatal("expected MR create attempt")
+	}
+	if !sawLookup.Load() {
+		t.Fatal("expected existing-MR lookup after 409")
+	}
+}
+
 func TestHandleGitCredentialAllowsLocalExchangeWithoutCallbackBearer(t *testing.T) {
 	t.Parallel()
 

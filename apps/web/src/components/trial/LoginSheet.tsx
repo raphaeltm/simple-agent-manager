@@ -50,12 +50,20 @@ async function defaultGoogleSignIn(returnTo: string): Promise<void> {
   });
 }
 
+async function defaultGitLabSignIn(returnTo: string): Promise<void> {
+  await authClient.signIn.social({
+    provider: 'gitlab',
+    callbackURL: returnTo,
+  });
+}
+
 export function LoginSheet({ isOpen, onClose, trialId, onSignIn }: LoginSheetProps) {
   const isMobile = useIsMobile();
   const providers = useLoginProviders();
   const panelRef = useRef<HTMLDivElement>(null);
-  const primaryCtaRef = useRef<HTMLButtonElement>(null);
+  const githubCtaRef = useRef<HTMLButtonElement>(null);
   const googleCtaRef = useRef<HTMLButtonElement>(null);
+  const gitlabCtaRef = useRef<HTMLButtonElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
 
   // Esc to close + focus management.
@@ -70,7 +78,12 @@ export function LoginSheet({ isOpen, onClose, trialId, onSignIn }: LoginSheetPro
       }
       // Focus trap: cycle between primary CTA and close button on Tab.
       if (e.key === 'Tab') {
-        const focusables = [primaryCtaRef.current, googleCtaRef.current, closeButtonRef.current].filter(Boolean);
+        const focusables = [
+          githubCtaRef.current,
+          googleCtaRef.current,
+          gitlabCtaRef.current,
+          closeButtonRef.current,
+        ].filter(Boolean);
         const currentIndex = focusables.findIndex((element) => element === document.activeElement);
         if (currentIndex === -1) return;
         if (e.shiftKey && currentIndex === 0) {
@@ -86,10 +99,10 @@ export function LoginSheet({ isOpen, onClose, trialId, onSignIn }: LoginSheetPro
     document.addEventListener('keydown', handleKeyDown);
     // Initial focus on the primary CTA so keyboard + screen-reader users land
     // on the main action, not the close button.
-    primaryCtaRef.current?.focus();
+    (githubCtaRef.current ?? googleCtaRef.current ?? gitlabCtaRef.current ?? closeButtonRef.current)?.focus();
 
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
+  }, [isOpen, onClose, providers.github, providers.gitlab, providers.google]);
 
   // Lock body scroll while open (matches Dialog primitive behavior).
   useEffect(() => {
@@ -126,6 +139,15 @@ export function LoginSheet({ isOpen, onClose, trialId, onSignIn }: LoginSheetPro
     } catch (err) {
       // eslint-disable-next-line no-console -- user-visible failure path
       console.error('Trial LoginSheet: Google sign-in failed', err);
+    }
+  };
+
+  const handleGitLabSignIn = async () => {
+    try {
+      await defaultGitLabSignIn(returnTo);
+    } catch (err) {
+      // eslint-disable-next-line no-console -- user-visible failure path
+      console.error('Trial LoginSheet: GitLab sign-in failed', err);
     }
   };
 
@@ -194,26 +216,28 @@ export function LoginSheet({ isOpen, onClose, trialId, onSignIn }: LoginSheetPro
           We&rsquo;ll save this trial to your account so you can keep exploring.
         </p>
 
-        <button
-          ref={primaryCtaRef}
-          type="button"
-          onClick={handleSignIn}
-          data-testid="trial-login-github"
-          data-return-to={returnTo}
-          className="
-            inline-flex items-center justify-center gap-2
-            min-h-14 px-5 rounded-lg
-            bg-fg-default text-surface font-semibold
-            hover:opacity-90
-            focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2
-            transition-opacity
-          "
-        >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-            <path d="M12 .5C5.73.5.5 5.73.5 12c0 5.08 3.29 9.39 7.86 10.92.58.11.79-.25.79-.56v-2.05c-3.2.7-3.87-1.36-3.87-1.36-.52-1.33-1.27-1.68-1.27-1.68-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.18 1.76 1.18 1.02 1.75 2.68 1.25 3.33.95.1-.74.4-1.25.72-1.53-2.56-.29-5.25-1.28-5.25-5.7 0-1.26.45-2.29 1.18-3.1-.12-.29-.51-1.46.11-3.04 0 0 .97-.31 3.17 1.18A11 11 0 0112 6.8c.98.01 1.97.13 2.9.39 2.2-1.49 3.17-1.18 3.17-1.18.62 1.58.23 2.75.11 3.04.74.81 1.18 1.84 1.18 3.1 0 4.43-2.69 5.41-5.26 5.69.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0023.5 12C23.5 5.73 18.27.5 12 .5z" />
-          </svg>
-          Continue with GitHub
-        </button>
+        {providers.github && (
+          <button
+            ref={githubCtaRef}
+            type="button"
+            onClick={handleSignIn}
+            data-testid="trial-login-github"
+            data-return-to={returnTo}
+            className="
+              inline-flex items-center justify-center gap-2
+              min-h-14 px-5 rounded-lg
+              bg-fg-default text-surface font-semibold
+              hover:opacity-90
+              focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2
+              transition-opacity
+            "
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M12 .5C5.73.5.5 5.73.5 12c0 5.08 3.29 9.39 7.86 10.92.58.11.79-.25.79-.56v-2.05c-3.2.7-3.87-1.36-3.87-1.36-.52-1.33-1.27-1.68-1.27-1.68-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.18 1.76 1.18 1.02 1.75 2.68 1.25 3.33.95.1-.74.4-1.25.72-1.53-2.56-.29-5.25-1.28-5.25-5.7 0-1.26.45-2.29 1.18-3.1-.12-.29-.51-1.46.11-3.04 0 0 .97-.31 3.17 1.18A11 11 0 0112 6.8c.98.01 1.97.13 2.9.39 2.2-1.49 3.17-1.18 3.17-1.18.62 1.58.23 2.75.11 3.04.74.81 1.18 1.84 1.18 3.1 0 4.43-2.69 5.41-5.26 5.69.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0023.5 12C23.5 5.73 18.27.5 12 .5z" />
+            </svg>
+            Continue with GitHub
+          </button>
+        )}
         {providers.google && (
           <button
             ref={googleCtaRef}
@@ -237,6 +261,31 @@ export function LoginSheet({ isOpen, onClose, trialId, onSignIn }: LoginSheetPro
               G
             </span>
             Continue with Google
+          </button>
+        )}
+        {providers.gitlab && (
+          <button
+            ref={gitlabCtaRef}
+            type="button"
+            onClick={handleGitLabSignIn}
+            data-testid="trial-login-gitlab"
+            data-return-to={returnTo}
+            className="
+              mt-3 inline-flex items-center justify-center gap-2
+              min-h-14 px-5 rounded-lg
+              border border-border-default bg-surface text-fg-primary font-semibold
+              hover:bg-surface-hover
+              focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2
+              transition-colors
+            "
+          >
+            <span
+              aria-hidden="true"
+              className="inline-flex h-5 w-5 items-center justify-center rounded-sm bg-[#fc6d26] text-[10px] font-bold text-white"
+            >
+              GL
+            </span>
+            Continue with GitLab
           </button>
         )}
       </div>

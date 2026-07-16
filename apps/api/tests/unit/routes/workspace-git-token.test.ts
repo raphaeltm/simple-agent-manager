@@ -15,6 +15,9 @@ const mocks = vi.hoisted(() => ({
   assertRepositoryAccess: vi.fn(),
   verifyWorkspaceCallbackAuth: vi.fn(),
   backfillProjectGithubRepoId: vi.fn(),
+  getProjectGitLabRepository: vi.fn(),
+  requireGitLabUserAccessTokenResultForOwner: vi.fn(),
+  verifyGitLabProjectAccess: vi.fn(),
   and: vi.fn((...clauses: unknown[]) => ({ op: 'and', clauses })),
   eq: vi.fn((left: unknown, right: unknown) => ({ op: 'eq', left, right })),
 }));
@@ -62,6 +65,11 @@ vi.mock('../../../src/services/github-cli-policy', () => {
 vi.mock('../../../src/services/github-repo-id-backfill', () => ({
   backfillProjectGithubRepoId: mocks.backfillProjectGithubRepoId,
 }));
+vi.mock('../../../src/services/gitlab', () => ({
+  getProjectGitLabRepository: mocks.getProjectGitLabRepository,
+  requireGitLabUserAccessTokenResultForOwner: mocks.requireGitLabUserAccessTokenResultForOwner,
+  verifyGitLabProjectAccess: mocks.verifyGitLabProjectAccess,
+}));
 
 describe('workspace git-token GitHub scoping', () => {
   let app: Hono<{ Bindings: Env }>;
@@ -102,11 +110,8 @@ describe('workspace git-token GitHub scoping', () => {
       : false;
   }
 
-  function installationRowsOnlyWhenOwnerScoped(whereClause: unknown): unknown[] {
-    if (
-      !hasEqClause(whereClause, 'id', 'inst-row-111') ||
-      !hasEqClause(whereClause, 'user_id', 'user-1')
-    ) {
+  function projectInstallationRows(whereClause: unknown): unknown[] {
+    if (!hasEqClause(whereClause, 'id', 'inst-row-111')) {
       return [];
     }
     return [
@@ -150,7 +155,7 @@ describe('workspace git-token GitHub scoping', () => {
 
   function queueWorkspaceProjectLookup(
     projectOverrides: Record<string, unknown> = {},
-    installationLookup: (whereClause: unknown) => unknown[] = installationRowsOnlyWhenOwnerScoped
+    installationLookup: (whereClause: unknown) => unknown[] = projectInstallationRows
   ) {
     limitResponses.push([workspaceRow()], [githubProjectRow(projectOverrides)], installationLookup);
   }
@@ -174,6 +179,27 @@ describe('workspace git-token GitHub scoping', () => {
     mocks.getInstallationToken.mockResolvedValue({
       token: 'github-installation-token',
       expiresAt: '2026-06-06T19:00:00.000Z',
+    });
+    mocks.getProjectGitLabRepository.mockResolvedValue({
+      userId: 'user-1',
+      host: 'gitlab.example.com',
+      gitlabProjectId: 123,
+      pathWithNamespace: 'group/project',
+      webUrl: 'https://gitlab.example.com/group/project',
+      httpUrlToRepo: 'https://gitlab.example.com/group/project.git',
+      defaultBranch: 'main',
+    });
+    mocks.requireGitLabUserAccessTokenResultForOwner.mockResolvedValue({
+      accessToken: 'gitlab-oauth-token',
+      accessTokenExpiresAt: '2026-07-12T12:00:00.000Z',
+    });
+    mocks.verifyGitLabProjectAccess.mockResolvedValue({
+      host: 'gitlab.example.com',
+      gitlabProjectId: 123,
+      pathWithNamespace: 'group/project',
+      webUrl: 'https://gitlab.example.com/group/project',
+      httpUrlToRepo: 'https://gitlab.example.com/group/project.git',
+      defaultBranch: 'main',
     });
 
     const makeSelectBuilder = () => {
@@ -215,6 +241,166 @@ describe('workspace git-token GitHub scoping', () => {
       return c.json({ error: 'INTERNAL_ERROR', message: err.message }, 500);
     });
     app.route('/ws', runtimeRoutes);
+  });
+
+  it('returns host/path-constrained GitLab credentials after re-verifying project access', async () => {
+    limitResponses.push(
+      [workspaceRow()],
+      [
+        githubProjectRow({
+          repoProvider: 'gitlab',
+          githubRepoId: null,
+          repository: 'group/project',
+        }),
+      ]
+    );
+
+    const res = await app.request('/ws/ws-1/git-token', { method: 'POST' }, mockEnv);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({
+      provider: 'gitlab',
+      token: 'gitlab-oauth-token',
+      expiresAt: '2026-07-12T12:00:00.000Z',
+      cloneUrl: 'https://gitlab.example.com/group/project.git',
+      host: 'gitlab.example.com',
+      username: 'oauth2',
+      repositoryPath: 'group/project',
+    });
+    expect(mocks.verifyGitLabProjectAccess).toHaveBeenCalledWith(
+      mockEnv,
+      'gitlab-oauth-token',
+      123
+    );
+    expect(mocks.getInstallationToken).not.toHaveBeenCalled();
+  });
+
+  it('passes through a null GitLab token expiry when the provider does not report one', async () => {
+    limitResponses.push(
+      [workspaceRow()],
+      [
+        githubProjectRow({
+          repoProvider: 'gitlab',
+          githubRepoId: null,
+          repository: 'group/project',
+        }),
+      ]
+    );
+    mocks.requireGitLabUserAccessTokenResultForOwner.mockResolvedValue({
+      accessToken: 'gitlab-oauth-token',
+      accessTokenExpiresAt: null,
+    });
+
+    const res = await app.request('/ws/ws-1/git-token', { method: 'POST' }, mockEnv);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      provider: 'gitlab',
+      token: 'gitlab-oauth-token',
+      expiresAt: null,
+    });
+  });
+
+  it('rejects GitLab token exchange when the stored repo binding belongs to a different user', async () => {
+    limitResponses.push(
+      [workspaceRow()],
+      [
+        githubProjectRow({
+          repoProvider: 'gitlab',
+          githubRepoId: null,
+          repository: 'group/project',
+        }),
+      ]
+    );
+    mocks.getProjectGitLabRepository.mockResolvedValue({
+      userId: 'user-2',
+      host: 'gitlab.example.com',
+      gitlabProjectId: 123,
+      pathWithNamespace: 'group/project',
+      webUrl: 'https://gitlab.example.com/group/project',
+      httpUrlToRepo: 'https://gitlab.example.com/group/project.git',
+      defaultBranch: 'main',
+    });
+
+    const res = await app.request('/ws/ws-1/git-token', { method: 'POST' }, mockEnv);
+
+    expect(res.status).toBe(403);
+    // Fail closed BEFORE any token is minted or upstream access re-verified.
+    expect(mocks.requireGitLabUserAccessTokenResultForOwner).not.toHaveBeenCalled();
+    expect(mocks.verifyGitLabProjectAccess).not.toHaveBeenCalled();
+  });
+
+  it('rejects GitLab token exchange when re-verified repository identity drifts', async () => {
+    limitResponses.push(
+      [workspaceRow()],
+      [
+        githubProjectRow({
+          repoProvider: 'gitlab',
+          githubRepoId: null,
+          repository: 'group/project',
+        }),
+      ]
+    );
+    mocks.verifyGitLabProjectAccess.mockResolvedValue({
+      host: 'gitlab.example.com',
+      gitlabProjectId: 123,
+      pathWithNamespace: 'other/project',
+      webUrl: 'https://gitlab.example.com/other/project',
+      httpUrlToRepo: 'https://gitlab.example.com/other/project.git',
+      defaultBranch: 'main',
+    });
+
+    const res = await app.request('/ws/ws-1/git-token', { method: 'POST' }, mockEnv);
+
+    expect(res.status).toBe(403);
+    expect(mocks.getInstallationToken).not.toHaveBeenCalled();
+  });
+
+  it('propagates GITLAB_REAUTH_REQUIRED as 401 when the owner token cannot be resolved', async () => {
+    limitResponses.push(
+      [workspaceRow()],
+      [
+        githubProjectRow({
+          repoProvider: 'gitlab',
+          githubRepoId: null,
+          repository: 'group/project',
+        }),
+      ]
+    );
+    mocks.requireGitLabUserAccessTokenResultForOwner.mockRejectedValue(
+      Object.assign(
+        new Error('Your GitLab authorization has expired - please sign out and back in'),
+        { statusCode: 401, error: 'GITLAB_REAUTH_REQUIRED' }
+      )
+    );
+
+    const res = await app.request('/ws/ws-1/git-token', { method: 'POST' }, mockEnv);
+
+    expect(res.status).toBe(401);
+    await expect(res.json()).resolves.toMatchObject({ error: 'GITLAB_REAUTH_REQUIRED' });
+    // No token exists, so upstream access must never be re-verified.
+    expect(mocks.verifyGitLabProjectAccess).not.toHaveBeenCalled();
+  });
+
+  it('rejects GitLab token exchange when repository metadata is missing', async () => {
+    limitResponses.push(
+      [workspaceRow()],
+      [
+        githubProjectRow({
+          repoProvider: 'gitlab',
+          githubRepoId: null,
+          repository: 'group/project',
+        }),
+      ]
+    );
+    mocks.getProjectGitLabRepository.mockResolvedValue(null);
+
+    const res = await app.request('/ws/ws-1/git-token', { method: 'POST' }, mockEnv);
+
+    expect(res.status).toBe(403);
+    // Fail closed BEFORE any token is minted.
+    expect(mocks.requireGitLabUserAccessTokenResultForOwner).not.toHaveBeenCalled();
+    expect(mocks.verifyGitLabProjectAccess).not.toHaveBeenCalled();
   });
 
   it('returns Artifacts token expiry from camelCase binding shape', async () => {
@@ -580,37 +766,41 @@ describe('workspace git-token GitHub scoping', () => {
     });
   });
 
-  it('rejects a workspace installation row that is not owned by the workspace user', async () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    try {
-      queueWorkspaceProjectLookup({}, (whereClause) => {
+  it('mints through the project installation row when the running member has repo access', async () => {
+    limitResponses.push(
+      [workspaceRow({ userId: 'member-user' })],
+      [githubProjectRow()],
+      (whereClause) => {
         expect(hasEqClause(whereClause, 'id', 'inst-row-111')).toBe(true);
-        expect(hasEqClause(whereClause, 'user_id', 'user-1')).toBe(true);
+        expect(hasEqClause(whereClause, 'user_id', 'member-user')).toBe(false);
         return [
           {
-            installationId: 'user-2:120081765',
+            installationId: 'owner-user:120081765',
             externalInstallationId: '120081765',
-            userId: 'user-2',
+            userId: 'owner-user',
           },
         ];
-      });
+      }
+    );
 
-      const res = await app.request('/ws/ws-1/git-token', { method: 'POST' }, mockEnv);
+    const res = await app.request('/ws/ws-1/git-token', { method: 'POST' }, mockEnv);
 
-      expect(res.status).toBe(404);
-      await expect(res.json()).resolves.toEqual({
-        error: 'NOT_FOUND',
-        message: 'GitHub installation not found',
-      });
-      expect(getInstallationToken).not.toHaveBeenCalled();
-      expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining('workspace_git_token_installation_owner_mismatch')
-      );
-      expect(warnSpy.mock.calls[0]?.[0]).toContain('"expectedUserId":"user-1"');
-      expect(warnSpy.mock.calls[0]?.[0]).toContain('"actualUserId":"user-2"');
-    } finally {
-      warnSpy.mockRestore();
-    }
+    expect(res.status).toBe(200);
+    expect(mocks.getGitHubUserAccessTokenForOwner).toHaveBeenCalledWith(
+      mockEnv,
+      'member-user',
+      'workspace-git-token'
+    );
+    expect(mocks.assertRepositoryAccess).toHaveBeenCalledWith(
+      'github-user-oauth-token',
+      '120081765',
+      'raph/sam',
+      'member-user',
+      'project-access'
+    );
+    expect(getInstallationToken).toHaveBeenCalledWith('120081765', mockEnv, {
+      repositoryIds: [42],
+    });
   });
 
   it('mints a token scoped to the primary repo plus accessible additional Repository Access repos', async () => {
@@ -618,7 +808,7 @@ describe('workspace git-token GitHub scoping', () => {
     // Additional Repository Access entries selected in Project Settings.
     whereResponses.push((whereClause) => {
       expect(hasEqClause(whereClause, 'project_id', 'proj-1')).toBe(true);
-      expect(hasEqClause(whereClause, 'user_id', 'user-1')).toBe(true);
+      expect(hasEqClause(whereClause, 'user_id', 'user-1')).toBe(false);
       return [
         { repository: 'acme/shared-lib', githubRepoId: 7 },
         { repository: 'Acme/Other-Lib', githubRepoId: 8 },

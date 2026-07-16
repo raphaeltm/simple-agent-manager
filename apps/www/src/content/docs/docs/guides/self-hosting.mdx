@@ -5,7 +5,7 @@ description: Deploy SAM to your own infrastructure with Cloudflare Workers, Pulu
 
 import GitHubAppSetup from '../../../../components/GitHubAppSetup.astro';
 
-This guide walks you through deploying Simple Agent Manager to your own infrastructure. Deployment is automated via GitHub Actions + Pulumi from your own fork.
+This guide walks you through deploying Simple Agent Manager to your own infrastructure. Deployment runs through the **Deploy Production** GitHub Actions workflow in your own fork, with Pulumi provisioning the Cloudflare resources.
 
 ## Prerequisites
 
@@ -22,6 +22,8 @@ You do **not** need a shared cloud provider account. Users provide their own [He
 ## Step 1: Choose Your Domain and Cloudflare Account
 
 Use a top-level domain as `BASE_DOMAIN` (e.g., `example.com`), not a subdomain (`sam.example.com`). Cloudflare's free Universal SSL covers `*.example.com` but not nested wildcards like `*.sam.example.com`. The root domain is not used by SAM — only `api.`, `app.`, and `*.` subdomains are created.
+
+SAM derives a resource namespace from this domain for Worker names, storage resources, and generated hostnames. For a single installation, use the generated `RESOURCE_PREFIX`; do not choose a generic prefix by hand. If you run multiple SAM installations in the same Cloudflare account and DNS zone, give each installation its own validated namespace so app, API, workspace, port, VM, and deployment hostnames do not collide.
 
 Copy your Cloudflare account ID from the dashboard URL. In a URL like `https://dash.cloudflare.com/<account-id>/<domain>`, the account ID is the 32-character value immediately after `dash.cloudflare.com/`.
 
@@ -83,6 +85,16 @@ The GitHub App needs **Pull requests: Read-only** because it subscribes to the `
 "Request user authorization (OAuth) during installation" must be **unchecked** on the GitHub form. When checked, it disables the Setup URL and breaks post-installation redirects.
 :::
 
+## Platform integrations after deploy
+
+Fresh deployments can keep most platform integration credentials out of GitHub Actions secrets. After the first deploy, open `/setup` with the one-time setup token and configure the integrations users need:
+
+- **GitHub App and GitHub OAuth** for GitHub-backed projects, pull requests, and repository access.
+- **Google login OAuth** for Sign in with Google. This is separate from Google/GCP infrastructure OAuth.
+- **GitLab OAuth** when users need to create GitLab-backed projects and workspaces.
+
+These values are stored encrypted in SAM's platform configuration store and can be updated later by a superadmin without redeploying. Environment secrets remain useful as fallback values and for infrastructure credentials that must exist before the app can boot.
+
 ## Step 5: Generate Pulumi Passphrase
 
 ```bash
@@ -125,6 +137,9 @@ instead of choosing a generic prefix.
 | `GH_WEBHOOK_SECRET`                        | Optional GitHub App webhook secret; can be configured in `/setup` instead                                                                                                           |
 | `GOOGLE_LOGIN_CLIENT_ID`                   | Optional Google **login** OAuth client ID (Sign in with Google); can be configured in `/setup` instead. Register redirect URI `https://api.yourdomain.com/api/auth/callback/google` |
 | `GOOGLE_LOGIN_CLIENT_SECRET`               | Optional Google **login** OAuth client secret; can be configured in `/setup` instead                                                                                                |
+| `GITLAB_HOST`                              | Optional GitLab OAuth host, such as `https://gitlab.com`; can be configured in `/setup` instead. Register redirect URI `https://api.yourdomain.com/api/auth/callback/gitlab` and grant the `read_user` and `api` scopes (`api` is required for repository clone/push and merge-request creation in GitLab-backed workspaces) |
+| `GITLAB_CLIENT_ID`                         | Optional GitLab OAuth application ID; can be configured in `/setup` instead                                                                                                        |
+| `GITLAB_CLIENT_SECRET`                     | Optional GitLab OAuth secret; can be configured in `/setup` instead                                                                                                                |
 | `GOOGLE_CLIENT_ID`                         | Optional Google **infra/GCP** OAuth client ID for GCP deployment authorization (separate client from login; NOT set via `/setup`)                                                   |
 | `GOOGLE_CLIENT_SECRET`                     | Optional Google **infra/GCP** OAuth client secret (separate client from login; NOT set via `/setup`)                                                                                |
 | `CF_AIG_TOKEN`                             | Optional narrower Cloudflare AI Gateway Unified Billing token                                                                                                                       |
@@ -170,6 +185,21 @@ Open the Cloudflare dashboard link printed by the workflow, copy the plaintext `
 
 Open `https://app.yourdomain.com` — you should see the login page with whichever providers you configured.
 
+If you enabled GitLab in platform configuration, create a test project from a GitLab repository and start a lightweight chat before inviting users. That validates the OAuth app, repository metadata propagation, and workspace credential helper path together.
+
+## Updating an Existing Self-Hosted Instance
+
+Sync or merge upstream SAM changes into your fork's `main` branch when you want to update. Pushing those changes to the fork does **not** update the running instance by itself. Self-host forks skip the canonical repository's full `main`-push CI path, so the automatic `workflow_run` production deploy is not the update mechanism for forks.
+
+To deploy an update:
+
+1. Sync your fork's `main` branch with upstream.
+2. Open **Actions → Deploy Production → Run workflow** in your fork.
+3. Choose the `main` branch and leave `dry_run` disabled.
+4. Wait for the workflow to finish, then re-run the health check above.
+
+Use the same manual workflow when you rotate deployment secrets, change GitHub Environment variables, or want to re-apply Pulumi-managed infrastructure.
+
 ## First Login & Admin Access
 
 The first genuine human to sign in to a fresh deployment becomes the **superadmin** — the account that can approve other users, manage platform credentials, and reach the admin dashboard.
@@ -211,7 +241,7 @@ The Workers Paid plan ($5/month) is required for Durable Objects and Cloudflare 
 
 ### User VM Costs
 
-VMs are billed to each user's own cloud provider account. SAM supports Hetzner, Scaleway, and GCP.
+VMs are billed to the cloud provider credential SAM uses for the node. In a typical self-hosted setup, that is each user's own BYOC credential; admins may also configure a platform credential for shared zero-config provisioning. SAM supports Hetzner, Scaleway, and GCP. The example prices below cover the built-in Hetzner and Scaleway size mappings; GCP pricing depends on the selected project, zone, and machine family.
 
 **Hetzner:**
 

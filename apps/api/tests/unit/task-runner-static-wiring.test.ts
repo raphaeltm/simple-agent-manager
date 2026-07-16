@@ -23,6 +23,13 @@ describe('TaskRunner static public contract', () => {
     expect(taskRunnerIndexSource).toContain('async start(input: StartTaskInput): Promise<void>');
     expect(taskRunnerIndexSource).toContain('async advanceWorkspaceReady(');
     expect(taskRunnerIndexSource).toContain('async getStatus(): Promise<TaskRunnerState | null>');
+    expect(taskRunnerIndexSource).toContain('async ensureStarted(): Promise<boolean>');
+  });
+
+  it('commits initial state and the first alarm atomically', () => {
+    expect(taskRunnerIndexSource).toContain('this.ctx.storage.transaction(async (transaction) =>');
+    expect(taskRunnerIndexSource).toContain("await transaction.put('state', state)");
+    expect(taskRunnerIndexSource).toContain('await transaction.setAlarm(now)');
   });
 
   it('keeps TaskRunnerState versioned and exportable for DO storage compatibility', () => {

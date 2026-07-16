@@ -25,6 +25,7 @@ export interface SetupCompleteResponse {
 export interface LoginProvidersResponse {
   github: boolean;
   google: boolean;
+  gitlab: boolean;
 }
 
 /** Public: which login providers are configured (Google = the login client). */
