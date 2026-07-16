@@ -88,8 +88,6 @@ See `apps/api/.env.example` for the full list. Key variables:
 - `MAX_PROJECTS_PER_USER` — Runtime project cap
 - `MAX_TASKS_PER_PROJECT` — Runtime task cap per project
 - `MAX_TASK_DEPENDENCIES_PER_TASK` — Runtime dependency-edge cap per task
-- `STUCK_TASK_MAX_CANDIDATES_PER_SWEEP` — Maximum active task rows inspected by one five-minute recovery sweep (default: 100)
-- `STUCK_TASK_SCAN_CURSOR_KV_KEY` — KV key used to resume the bounded recovery scan fairly across active rows (default: `scheduled:stuck-tasks:scan-cursor:v1`)
 - `PROJECT_INVITE_TOKEN_BYTES` — Random bytes used for generated project invite link tokens (default: 32)
 - `PROJECT_INVITE_DEFAULT_EXPIRY_DAYS` — Default lifetime for project invite links created without an explicit expiry (default: 7)
 - `PROJECT_INVITE_MAX_EXPIRY_DAYS` — Maximum allowed project invite link lifetime (default: 30)
@@ -115,6 +113,7 @@ See `apps/api/.env.example` for the full list. Key variables:
 - `TASK_RECONCILIATION_PROMPT_SOFT_STALL_MS` — In-flight prompt observation threshold before SAM records a non-interrupting reconciliation event (default: 1800000)
 - `TASK_RECONCILIATION_PROMPT_HARD_STALL_MS` — In-flight prompt hard-stall threshold before SAM requests prompt cancellation and retries check-in later (default: 7200000)
 - `TASK_RECONCILIATION_MIN_ALARM_DELAY_MS` — Minimum delay before the next reconciliation alarm can fire (default: 10000)
+- `SESSION_TASK_REPAIR_BATCH_SIZE` — Maximum legacy taskless chat sessions repaired per 5-minute sweep (default: 25; capped at 200)
 - `TASK_RUN_ABSOLUTE_CEILING_MS` — Absolute runaway-cost ceiling that fails even a demonstrably live task (default: 86400000 / 24h)
 - `SESSION_ACTIVITY_STALE_THRESHOLD_MS` — Evidence-based fallback threshold before stale working activity can be healed to idle (default: 300000)
 - `NODE_HEARTBEAT_STALE_SECONDS` — Staleness threshold for node health
@@ -161,6 +160,27 @@ See `apps/api/.env.example` for the full list. Key variables:
 
 - `RATE_LIMIT_CREDENTIAL_UPDATE` — Applied to both user-scoped (`PUT /api/credentials/agent`) and project-scoped (`PUT /api/projects/:id/credentials`) credential write endpoints (MEDIUM #7 fix)
 
+### Generic Webhook Triggers
+
+- `WEBHOOK_TRIGGERS_ENABLED` — Public ingress kill switch (default: `true`)
+- `WEBHOOK_TRIGGER_MAX_BODY_BYTES` — Maximum JSON request body (default: `65536`)
+- `WEBHOOK_TRIGGER_MAX_FILTERS` — Maximum deterministic filters per trigger (default: `10`)
+- `WEBHOOK_TRIGGER_MAX_FILTER_PATH_LENGTH` — Maximum filter dot-path length (default: `200`)
+- `WEBHOOK_TRIGGER_MAX_FILTER_PATH_DEPTH` — Maximum filter nesting depth at evaluation time (default: `8`)
+- `WEBHOOK_TRIGGER_MAX_INCLUDED_HEADERS` — Maximum safe request headers copied into template context (default: `10`)
+- `WEBHOOK_TRIGGER_MAX_HEADER_NAME_LENGTH` — Maximum configured included-header name length (default: `100`)
+- `WEBHOOK_TRIGGER_MAX_SOURCE_LABEL_LENGTH` — Maximum optional source label length (default: `100`)
+- `WEBHOOK_TRIGGER_MAX_IDEMPOTENCY_KEY_LENGTH` — Maximum `Idempotency-Key` length (default: `200`)
+- `WEBHOOK_INGRESS_RATE_LIMIT_PER_MINUTE` — Best-effort pre-auth request damping per IP/window (default: `120`)
+- `WEBHOOK_TRIGGER_RATE_LIMIT_PER_MINUTE` — Best-effort request damping per trigger/window (default: `60`)
+- `WEBHOOK_INVALID_TOKEN_RATE_LIMIT_PER_MINUTE` — Best-effort invalid-token request damping per IP/window (default: `30`)
+- `WEBHOOK_RATE_LIMIT_WINDOW_SECONDS` — Fixed rate-limit window length (default: `60`)
+- `WEBHOOK_DELIVERY_RETENTION_DAYS` — Retention for redacted delivery audit metadata (default: `7`)
+- `WEBHOOK_DELIVERY_CLEANUP_BATCH_SIZE` — Maximum expired audit rows deleted per cleanup pass (default: `500`)
+- `WEBHOOK_DELIVERY_DEFAULT_PAGE_SIZE` — Default delivery-history page size (default: `25`)
+- `WEBHOOK_DELIVERY_MAX_PAGE_SIZE` — Maximum delivery-history page size (default: `100`)
+- `WEBHOOK_DELIVERY_PROCESSING_LEASE_SECONDS` — Recovery lease for processing deliveries without a submitted task (default: `300`)
+
 ### Trial Onboarding (`/try` flow)
 
 Trial configuration is currently sourced from `apps/api/.env.example` and `apps/api/src/env.ts`. Summary:
@@ -185,6 +205,7 @@ Trial configuration is currently sourced from `apps/api/.env.example` and `apps/
 
 ### Git Operations
 
+- `GIT_CREDENTIAL_TIMEOUT` — Go duration for credential-helper callbacks to the local VM agent, such as `5s` or `1750ms` (default: `5s`)
 - `GIT_EXEC_TIMEOUT` — Timeout for git commands via docker exec (default: 30s)
 - `GIT_WORKTREE_TIMEOUT` — Timeout for git worktree create/remove (default: 30s)
 - `WORKTREE_CACHE_TTL` — Cache duration for parsed `git worktree list` results (default: 5s)
