@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { ChatSessionListItem } from '../../lib/api';
 import type { RawSessionEvent } from '../../hooks/useProjectWebSocket';
@@ -82,9 +82,9 @@ export function rawToSessionEvent(raw: RawSessionEvent): SessionEvent | null {
         type: 'session.updated',
         payload: {
           sessionId: String(p.sessionId ?? ''),
-          ...(p.topic !== undefined ? { topic: String(p.topic) } : {}),
-          ...(p.taskId !== undefined ? { taskId: String(p.taskId) } : {}),
-          ...(p.workspaceId !== undefined ? { workspaceId: String(p.workspaceId) } : {}),
+          ...(p.topic != null ? { topic: String(p.topic) } : {}),
+          ...(p.taskId != null ? { taskId: String(p.taskId) } : {}),
+          ...(p.workspaceId != null ? { workspaceId: String(p.workspaceId) } : {}),
         },
       };
     case 'session.agent_completed':
@@ -225,7 +225,11 @@ function patchSession(
 // React hook: batches rapid WebSocket events into single state updates
 // ---------------------------------------------------------------------------
 
-const BATCH_DELAY_MS = 16; // ~1 frame
+const DEFAULT_SESSION_BATCH_DELAY_MS = 16; // ~1 animation frame
+const BATCH_DELAY_MS = parseInt(
+  import.meta.env.VITE_SESSION_BATCH_DELAY_MS || String(DEFAULT_SESSION_BATCH_DELAY_MS),
+  10,
+);
 
 export function useSessionReducer() {
   const [sessions, setSessions] = useState<ChatSessionListItem[]>([]);
@@ -254,6 +258,12 @@ export function useSessionReducer() {
       batchTimerRef.current = null;
     }
     setSessions(next);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (batchTimerRef.current) clearTimeout(batchTimerRef.current);
+    };
   }, []);
 
   return { sessions, dispatchEvent, resetSessions };

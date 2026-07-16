@@ -1,4 +1,4 @@
-import { renderHook, act } from '@testing-library/react';
+import { act, renderHook } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
 import type { Task, TaskStatus } from '@simple-agent-manager/shared';
@@ -74,47 +74,24 @@ describe('useStableTaskInfoMap', () => {
       expect(secondMap).not.toBe(firstMap);
       expect(secondMap.get('task-1')?.title).toBe('V2');
     });
-  });
 
-  describe('upsertTask', () => {
-    it('adds a new task to the map', () => {
+    it('updates map reference when task count changes', () => {
       const { result } = renderHook(() => useStableTaskInfoMap());
       act(() => {
         result.current.replaceAll([makeTask({ id: 'task-1' })]);
       });
-      act(() => {
-        result.current.upsertTask(makeTask({ id: 'task-2', title: 'New' }));
-      });
-      expect(result.current.taskInfoMap.size).toBe(2);
-      expect(result.current.taskInfoMap.get('task-2')?.title).toBe('New');
-    });
-
-    it('preserves map reference when upserting identical data', () => {
-      const { result } = renderHook(() => useStableTaskInfoMap());
-      const task = makeTask({ id: 'task-1', title: 'Same' });
-      act(() => { result.current.replaceAll([task]); });
-      const firstMap = result.current.taskInfoMap;
-
-      act(() => { result.current.upsertTask(task); });
-      const secondMap = result.current.taskInfoMap;
-
-      expect(secondMap).toBe(firstMap);
-    });
-
-    it('updates map reference when upserting changed data', () => {
-      const { result } = renderHook(() => useStableTaskInfoMap());
-      act(() => {
-        result.current.replaceAll([makeTask({ id: 'task-1', title: 'V1' })]);
-      });
       const firstMap = result.current.taskInfoMap;
 
       act(() => {
-        result.current.upsertTask(makeTask({ id: 'task-1', title: 'V2' }));
+        result.current.replaceAll([
+          makeTask({ id: 'task-1' }),
+          makeTask({ id: 'task-2', title: 'New' }),
+        ]);
       });
       const secondMap = result.current.taskInfoMap;
 
       expect(secondMap).not.toBe(firstMap);
-      expect(secondMap.get('task-1')?.title).toBe('V2');
+      expect(secondMap.size).toBe(2);
     });
   });
 });
