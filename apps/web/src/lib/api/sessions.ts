@@ -300,10 +300,13 @@ export interface StartInstantChatSessionRequest {
   message: string;
   agentProfileId?: string;
   skillId?: string;
+  parentTaskId?: string;
+  contextSummary?: string;
 }
 
 export interface StartInstantChatSessionResponse {
   status: 'running';
+  taskId: string;
   runtime: {
     runtime: AgentProfileRuntime;
     reason: string;
@@ -352,6 +355,26 @@ export async function stopChatSession(
 }
 
 // Context summarization (conversation forking)
+export interface ForkPreparationResponse {
+  parentTaskId: string;
+  parentSessionId: string;
+  parentBranch: string | null;
+  sessionLabel: string;
+  summary: string;
+  messageCount: number;
+  repaired: boolean;
+}
+
+export async function prepareForkSession(
+  projectId: string,
+  sessionId: string
+): Promise<ForkPreparationResponse> {
+  return request<ForkPreparationResponse>(
+    `/api/projects/${projectId}/sessions/${sessionId}/fork-prepare`,
+    { method: 'POST' }
+  );
+}
+
 export interface SessionSummaryResponse {
   summary: string;
   messageCount: number;

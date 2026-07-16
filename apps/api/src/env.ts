@@ -644,6 +644,7 @@ export interface Env extends WebhookTriggerEnv {
   TRIGGER_EXECUTION_LOG_RETENTION_DAYS?: string; // Days to retain completed/failed/skipped execution logs (default: 90)
   TRIGGER_EXECUTION_CLEANUP_ENABLED?: string; // Kill switch: "false" to disable cleanup sweep (default: enabled)
   TRIGGER_STALE_RECOVERY_BATCH_SIZE?: string; // Max stale executions to recover per sweep (default: 100)
+  SESSION_TASK_REPAIR_BATCH_SIZE?: string; // Max legacy taskless sessions repaired per sweep (default: 25, max: 200)
   // AI Inference Proxy (Cloudflare AI Gateway — Workers AI + Anthropic)
   AI_PROXY_ENABLED?: string; // Kill switch: "false" to disable (default: enabled)
   AI_PROXY_DEFAULT_MODEL?: string; // Default model for OpenCode (default: claude-haiku-4-5-20251001)

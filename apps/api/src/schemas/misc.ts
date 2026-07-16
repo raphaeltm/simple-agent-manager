@@ -55,6 +55,8 @@ export const StartChatSessionSchema = v.object({
   message: v.optional(v.string()),
   agentProfileId: v.optional(v.string()),
   skillId: v.optional(v.string()),
+  parentTaskId: v.optional(v.string()),
+  contextSummary: v.optional(v.string()),
 });
 
 export const LinkTaskToChatSchema = v.object({

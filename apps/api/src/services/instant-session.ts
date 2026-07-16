@@ -29,10 +29,12 @@ import { resolveWorkspaceGitSource } from './workspace-git-source';
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
 export interface LaunchInstantSessionInput {
+  taskId: string;
   project: schema.Project;
   userId: string;
   initialPrompt: string;
   displayMessage?: string | null;
+  contextSummary?: string | null;
   agentType: string;
   agentProfileId?: string | null;
   skillId?: string | null;
@@ -42,6 +44,7 @@ export interface LaunchInstantSessionInput {
 }
 
 export interface LaunchInstantSessionResult {
+  taskId: string;
   runtime: AgentProfileRuntime;
   nodeId: string;
   workspaceId: string;
@@ -206,9 +209,23 @@ export async function launchInstantSession(
     input.project.id,
     workspaceId,
     workspaceName,
-    null,
+    input.taskId,
     input.userId
   );
+  await db
+    .update(schema.tasks)
+    .set({ chatSessionId, workspaceId, autoProvisionedNodeId: node.id, updatedAt: now })
+    .where(eq(schema.tasks.id, input.taskId));
+  if (input.contextSummary) {
+    await projectDataService.persistMessage(
+      env,
+      input.project.id,
+      chatSessionId,
+      'system',
+      input.contextSummary,
+      null
+    );
+  }
   await projectDataService.persistMessage(
     env,
     input.project.id,
@@ -290,6 +307,7 @@ export async function launchInstantSession(
       skillId: input.skillId ?? null,
       visibleInitialPrompt: input.initialPrompt,
       promptKind: 'conversation',
+      taskContext: { taskId: input.taskId, taskMode: 'conversation' },
       overrides: input.overrides,
       actor: {
         type: 'system',
@@ -323,6 +341,17 @@ export async function launchInstantSession(
       .set({ dispatchedAt: new Date().toISOString(), updatedAt: new Date().toISOString() })
       .where(eq(schema.workspaces.id, workspaceId));
 
+    await db
+      .update(schema.tasks)
+      .set({
+        status: 'in_progress',
+        executionStep: 'agent_running',
+        workspaceId,
+        autoProvisionedNodeId: node.id,
+        updatedAt: new Date().toISOString(),
+      })
+      .where(eq(schema.tasks.id, input.taskId));
+
     const totalDurationMs = Date.now() - startedAt;
     const preContainerDurationMs = launchStart - startedAt;
     const timings = {
@@ -339,6 +368,7 @@ export async function launchInstantSession(
     log.info('instant_session.cold_start_complete', { ...phaseDetail, ...timings });
 
     return {
+      taskId: input.taskId,
       nodeId: node.id,
       workspaceId,
       projectId: input.project.id,
@@ -355,6 +385,32 @@ export async function launchInstantSession(
   } catch (err) {
     const message = errorMessage(err);
     const failedAt = new Date().toISOString();
+    await db
+      .update(schema.tasks)
+      .set({
+        status: 'failed',
+        executionStep: 'launch_failed',
+        errorMessage: message,
+        workspaceId,
+        autoProvisionedNodeId: node.id,
+        updatedAt: failedAt,
+      })
+      .where(eq(schema.tasks.id, input.taskId))
+      .catch((updateErr) => {
+        log.warn('instant_session.task_error_update_failed', {
+          taskId: input.taskId,
+          error: errorMessage(updateErr),
+        });
+      });
+    await projectDataService
+      .failSession(env, input.project.id, chatSessionId, message)
+      .catch((updateErr) => {
+        log.warn('instant_session.chat_error_update_failed', {
+          taskId: input.taskId,
+          chatSessionId,
+          error: errorMessage(updateErr),
+        });
+      });
     await db
       .update(schema.workspaces)
       .set({

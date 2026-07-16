@@ -688,6 +688,7 @@ describe('MCP Routes', () => {
             'proj-456',
             'user-789',
             null,
+            null,
             'ws-abc',
             'Test task',
             'A test task',

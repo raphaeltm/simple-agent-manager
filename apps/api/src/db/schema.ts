@@ -763,6 +763,8 @@ export const tasks = sqliteTable(
     userId: text('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
+    /** Soft cross-store link to the ProjectData chat session backing this task. */
+    chatSessionId: text('chat_session_id'),
     /** Null for top-level tasks; set for agent-dispatched sub-tasks (dispatch depth > 0). No FK — parent may be in another project's scope. */
     parentTaskId: text('parent_task_id'),
     /** Null until a workspace is assigned during task execution. Set by TaskRunner DO. */
@@ -854,6 +856,9 @@ export const tasks = sqliteTable(
     ),
     projectCreatedAtIdx: index('idx_tasks_project_created_at').on(table.projectId, table.createdAt),
     projectUserIdx: index('idx_tasks_project_user').on(table.projectId, table.userId),
+    chatSessionIdUnique: uniqueIndex('idx_tasks_chat_session_id_unique')
+      .on(table.chatSessionId)
+      .where(sql`chat_session_id IS NOT NULL`),
     triggerExecutionIdIdx: index('idx_tasks_trigger_execution_id')
       .on(table.triggerExecutionId)
       .where(sql`trigger_execution_id IS NOT NULL`),

@@ -77,7 +77,7 @@ export class ProjectData extends DurableObject<Env> {
     this.broadcastEvent('session.created', { id, workspaceId, taskId, createdByUserId, topic, status: 'active', messageCount: 0, createdAt: now });
     return id;
   }
-
+  async linkSessionToTask(sessionId: string, taskId: string): Promise<boolean> { const updated = sessions.linkSessionToTask(this.sql, sessionId, taskId); if (updated) { this.scheduleSummarySync(); this.broadcastEvent('session.updated', { sessionId, taskId }, sessionId); } return updated; }
   async updateSessionTopic(sessionId: string, topic: string): Promise<boolean> {
     const updated = sessions.updateSessionTopic(this.sql, sessionId, topic);
     if (updated) {
