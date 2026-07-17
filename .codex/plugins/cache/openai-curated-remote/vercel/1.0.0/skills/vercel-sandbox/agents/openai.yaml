@@ -1,3 +1,0 @@
-interface:
-  display_name: "Vercel Sandbox"
-  short_description: "Vercel Sandbox guidance — ephemeral Firecracker microVMs for running untrusted code safely"

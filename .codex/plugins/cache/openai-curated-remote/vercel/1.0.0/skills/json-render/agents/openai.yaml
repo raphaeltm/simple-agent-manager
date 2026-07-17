@@ -1,3 +1,0 @@
-interface:
-  display_name: "Json Render"
-  short_description: "AI chat response rendering guidance — handling UIMessage parts, tool call displays, streaming states, and s..."

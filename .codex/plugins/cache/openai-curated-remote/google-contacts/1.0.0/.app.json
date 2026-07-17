@@ -1,8 +1,0 @@
-{
-  "apps": {
-    "google-contacts": {
-      "id": "connector_c0f748249d6a42aea4b00fd375570ded",
-      "required": true
-    }
-  }
-}

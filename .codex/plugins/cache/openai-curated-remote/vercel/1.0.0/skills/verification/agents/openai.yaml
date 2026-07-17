@@ -1,3 +1,0 @@
-interface:
-  display_name: "Verification"
-  short_description: "Full-story verification — infers what the user is building, then verifies the complete flow end-to-end: bro..."

@@ -23,6 +23,7 @@
  */
 
 import {
+  DEFAULT_TASK_TITLE_ERROR_DIAGNOSTIC_MAX_LENGTH,
   DEFAULT_TASK_TITLE_MAX_LENGTH,
   DEFAULT_TASK_TITLE_MAX_RETRIES,
   DEFAULT_TASK_TITLE_MODEL,
@@ -30,11 +31,13 @@ import {
   DEFAULT_TASK_TITLE_RETRY_MAX_DELAY_MS,
   DEFAULT_TASK_TITLE_SHORT_MESSAGE_THRESHOLD,
   DEFAULT_TASK_TITLE_TIMEOUT_MS,
+  MAX_TASK_TITLE_ERROR_DIAGNOSTIC_MAX_LENGTH,
+  MIN_TASK_TITLE_ERROR_DIAGNOSTIC_MAX_LENGTH,
 } from '@simple-agent-manager/shared';
 
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { fetchWorkersAIChatCompletion } from './ai-proxy-shared';
+import { fetchWorkersAIChatCompletion, WorkersAIGatewayError } from './ai-proxy-shared';
 
 /**
  * Build the system instructions for the title generation agent.
@@ -126,6 +129,7 @@ export interface TaskTitleConfig {
   maxRetries?: number;
   retryDelayMs?: number;
   retryMaxDelayMs?: number;
+  errorDiagnosticMaxLength?: number;
 }
 
 /** Narrow interface for the env vars read by getTaskTitleConfig. */
@@ -138,6 +142,15 @@ export interface TaskTitleEnvVars {
   TASK_TITLE_MAX_RETRIES?: string;
   TASK_TITLE_RETRY_DELAY_MS?: string;
   TASK_TITLE_RETRY_MAX_DELAY_MS?: string;
+  TASK_TITLE_ERROR_DIAGNOSTIC_MAX_LENGTH?: string;
+}
+
+export function resolveTaskTitleErrorDiagnosticMaxLength(value: number): number {
+  if (!Number.isFinite(value)) return DEFAULT_TASK_TITLE_ERROR_DIAGNOSTIC_MAX_LENGTH;
+  return Math.min(
+    MAX_TASK_TITLE_ERROR_DIAGNOSTIC_MAX_LENGTH,
+    Math.max(MIN_TASK_TITLE_ERROR_DIAGNOSTIC_MAX_LENGTH, Math.floor(value))
+  );
 }
 
 /**
@@ -162,6 +175,9 @@ export function getTaskTitleConfig(env: TaskTitleEnvVars): TaskTitleConfig {
       env.TASK_TITLE_RETRY_MAX_DELAY_MS || String(DEFAULT_TASK_TITLE_RETRY_MAX_DELAY_MS),
       10
     ),
+    errorDiagnosticMaxLength: resolveTaskTitleErrorDiagnosticMaxLength(
+      Number(env.TASK_TITLE_ERROR_DIAGNOSTIC_MAX_LENGTH)
+    ),
   };
 }
 
@@ -170,11 +186,19 @@ export function getTaskTitleConfig(env: TaskTitleEnvVars): TaskTitleConfig {
  * Helps operators distinguish between timeout, rate limit, and other failures.
  */
 export function classifyError(err: unknown): {
-  category: 'timeout' | 'rate_limit' | 'error';
+  category: 'timeout' | 'rate_limit' | 'request' | 'error';
   message: string;
 } {
   if (!(err instanceof Error)) {
     return { category: 'error', message: String(err) };
+  }
+
+  if (err instanceof WorkersAIGatewayError) {
+    if (err.status === 429) return { category: 'rate_limit', message: err.message };
+    if (err.status >= 400 && err.status < 500 && ![408, 425].includes(err.status)) {
+      return { category: 'request', message: err.message };
+    }
+    return { category: 'error', message: err.message };
   }
 
   const msg = err.message.toLowerCase();
@@ -211,21 +235,42 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+interface TaskTitleModelControls {
+  reasoningEffort?: string | null;
+  chatTemplateKwargs?: Record<string, unknown>;
+}
+
+/** Keep provider/model quirks inside an explicit capability boundary. */
+export function getTaskTitleModelControls(modelId: string): TaskTitleModelControls {
+  switch (modelId) {
+    case '@cf/zai-org/glm-5.2':
+      return { chatTemplateKwargs: { enable_thinking: false } };
+    case '@cf/zai-org/glm-4.7-flash':
+    case '@cf/google/gemma-4-26b-a4b-it':
+      return { reasoningEffort: null, chatTemplateKwargs: { enable_thinking: false } };
+    default:
+      return {};
+  }
+}
+
 async function fetchTaskTitle(
   env: Env,
   modelId: string,
   message: string,
   maxLength: number,
-  timeoutMs: number
+  timeoutMs: number,
+  errorDiagnosticMaxLength: number
 ): Promise<string | null> {
+  const controls = getTaskTitleModelControls(modelId);
   return fetchWorkersAIChatCompletion(env, {
     modelId,
     maxTokens: maxLength,
     timeoutMs,
     metadata: { source: 'task-title', modelId },
     responseLabel: 'task_title.gateway_response',
-    reasoningEffort: null,
-    chatTemplateKwargs: { enable_thinking: false },
+    reasoningEffort: controls.reasoningEffort,
+    chatTemplateKwargs: controls.chatTemplateKwargs,
+    errorDiagnosticMaxLength,
     messages: [
       { role: 'system', content: buildSystemInstructions(maxLength) },
       { role: 'user', content: message },
@@ -254,6 +299,9 @@ export async function generateTaskTitle(
   const maxRetries = config.maxRetries ?? DEFAULT_TASK_TITLE_MAX_RETRIES;
   const retryDelayMs = config.retryDelayMs ?? DEFAULT_TASK_TITLE_RETRY_DELAY_MS;
   const retryMaxDelayMs = config.retryMaxDelayMs ?? DEFAULT_TASK_TITLE_RETRY_MAX_DELAY_MS;
+  const errorDiagnosticMaxLength = resolveTaskTitleErrorDiagnosticMaxLength(
+    config.errorDiagnosticMaxLength ?? DEFAULT_TASK_TITLE_ERROR_DIAGNOSTIC_MAX_LENGTH
+  );
 
   // Short messages don't need AI generation
   if (message.length <= shortThreshold) {
@@ -270,7 +318,14 @@ export async function generateTaskTitle(
 
   for (let attempt = 1; attempt <= totalAttempts; attempt++) {
     try {
-      const rawTitle = await fetchTaskTitle(env, modelId, message, maxLength, timeoutMs);
+      const rawTitle = await fetchTaskTitle(
+        env,
+        modelId,
+        message,
+        maxLength,
+        timeoutMs,
+        errorDiagnosticMaxLength
+      );
       if (!rawTitle) {
         log.warn('task_title.empty_response', { modelId, messageLength: message.length, attempt });
         return truncateTitle(message, maxLength);
@@ -292,7 +347,8 @@ export async function generateTaskTitle(
       const classified = classifyError(err);
       lastError = classified;
 
-      const shouldRetry = attempt < totalAttempts && classified.category !== 'timeout';
+      const shouldRetry =
+        attempt < totalAttempts && !['timeout', 'request'].includes(classified.category);
 
       if (shouldRetry) {
         const delay = Math.min(retryDelayMs * Math.pow(2, attempt - 1), retryMaxDelayMs);

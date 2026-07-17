@@ -46,17 +46,14 @@ pnpm-debug.log*
 *.temp
 .cache/
 
-# Codex local state (CODEX_HOME defaults to ~/.codex)
-# Note: .codex/config.toml is NOT ignored — it's project-scoped config that should be tracked
-.codex/auth.json
-.codex/.credentials.json
-.codex/history.jsonl
-.codex/models_cache.json
-.codex/.personality_migration
-.codex/version.json
-.codex/log/
-.codex/sessions/
-.codex/tmp/
+# Codex local state. CODEX_HOME points at the repo's .codex/ (see
+# .devcontainer/devcontainer.json) so the project-scoped config survives container
+# rebuilds. Codex ALSO writes mutable runtime state here — sqlite DBs
+# (goals/logs/memories/state) plus their -wal/-shm sidecars, auth, history, model
+# caches, downloaded plugins, and session/shell snapshots — which must NEVER be
+# committed. Ignore ALL of .codex/ and track ONLY the config we author by hand.
+.codex/*
+!.codex/config.toml
 # Playwright audit screenshots write under apps/web cwd, not the repo root
 **/.codex/tmp/
 
