@@ -32,7 +32,7 @@ A second invocation encountering a fresh deletion claim will skip it as concurre
 - [x] Distinguish fresh concurrent claims from actual claim failures; retain configurable stale-claim recovery.
 - [x] Add service scenarios for conclusive absence, missing credentials, lookup failure/ambiguity, and local DNS cleanup after absence.
 - [x] Add scheduler scenarios for finalization after absence, repeated invocation/idempotency, concurrent invocation, guarded local-reference cleanup, and unchanged retryable errors.
-- [ ] Run focused API tests and the full repository quality suite.
+- [x] Run focused API tests and the full repository quality suite.
 - [ ] Run requested specialist reviews and address all correctness findings.
 - [ ] Push the assigned output branch and prepare a PR with exact evidence.
 - [ ] Request `STAGING_LEASE_REQUEST`; do not deploy or merge until `STAGING_LEASE_GRANTED`.
