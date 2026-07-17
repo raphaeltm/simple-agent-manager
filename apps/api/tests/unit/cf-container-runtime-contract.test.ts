@@ -160,7 +160,9 @@ describe('cf-container runtime spike contracts', () => {
     const chatResolver = read('routes/chat-workspace-resolver.ts');
 
     expect(containerDo).toContain('override async onStop');
-    expect(containerDo).toContain("if (status === 'expired' || status === 'sleeping' || status === 'replacing')");
+    for (const protectedStatus of ['expired', 'sleeping', 'replacing', 'stopped', 'error']) {
+      expect(containerDo).toContain("status === '" + protectedStatus + "'");
+    }
     expect(containerDo).toContain('override async onError');
     expect(containerDo).toContain('override async onActivityExpired');
     expect(containerDo).toContain(
