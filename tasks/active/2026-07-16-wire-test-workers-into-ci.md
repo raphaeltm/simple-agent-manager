@@ -1,44 +1,99 @@
-# Wire the `test:workers` (workerd/Miniflare) suite into CI
+# Require the real Durable Object worker suite in CI
 
 ## Problem
 
-`apps/api/tests/workers/**` — the only test tier that exercises Durable Object
-code against a **real** `SqlStorage`/DO SQLite boundary (via
-`@cloudflare/vitest-pool-workers`, config `apps/api/vitest.workers.config.ts`) —
-is **not run in CI**. `test:workers` is a standalone `package.json` script
-(`apps/api/package.json`), is not a turbo task (`turbo.json` defines only
-`test`/`test:coverage`), and no workflow under `.github/workflows/` invokes it.
+The API's `test:workers` tier is the only suite that runs `apps/api/tests/workers/**` inside workerd with real Durable Object `SqlStorage`, D1, KV, and R2 bindings. The default Vitest config excludes that directory, while CI previously ran only `pnpm test:coverage`. The entire cross-runtime tier therefore provided no merge protection.
 
-Consequence: there is currently **no automated tier (CI or local sandbox)** that
-proves DO read/write paths work against real SQLite type/NULL coercion. Node-pool
-unit tests mock `SqlStorage.exec` directly, so they cannot catch bugs that depend
-on real SQLite behavior (rule 35 vertical-slice intent, rule 10 capability tests).
+Local SAM sandboxes also make workerd fail before collection. The March 2026 binary pinned through `@cloudflare/vitest-pool-workers@0.14.0` repeatedly received SIGSEGV, including with one worker and an unrelated smoke file. Updating to the Vitest 4-compatible 0.16.18 pool moves to the June runtime and makes the failure terminate visibly, but the sandbox still delivers SIGSEGV before import. Native GitHub Actions is therefore authoritative for this gate.
 
-## Context / where discovered
+## Consolidated provenance
 
-Found by the `test-engineer` review of the sessions-list `INTERNAL_ERROR` fix
-(branch `claude/fix-requested-9f2ry7`). The task file for that fix framed the
-missing real-DO test as a *sandbox-only* limitation (the workerd pool crashes in
-the remote sandbox with "Worker exited unexpectedly"); the reviewer correctly
-noted the gap is broader — the suite is not wired into CI at all, so it would not
-have run even outside the sandbox.
+This record supersedes and preserves the findings from:
+
+- `tasks/backlog/2026-07-11-workers-pool-tests-not-run-in-ci.md` — discovered during PR #1567 after scheduled stuck-task assertions silently diverged.
+- `tasks/backlog/2026-07-11-ci-does-not-run-do-worker-tests.md` — documented PR #1569's origin propagation incident and the pre-collection SIGSEGV.
+- The original `tasks/backlog/2026-07-16-wire-test-workers-into-ci.md` — added the deferred large-`listSessions` real-DO slice.
+
+The two July 11 files are removed by this task so there is one canonical lifecycle record.
+
+## Research findings
+
+- `apps/api/vitest.config.ts` excludes `tests/workers/**`; this is intentional because the worker pool needs a separate runtime.
+- `apps/api/package.json:test:workers` was not a turbo task and no workflow invoked it.
+- Archived tasks consistently reproduce workerd signal 11 before test import across Node versions, files, and `maxWorkers=1`, isolating the local issue from assertions and fixture state.
+- `@cloudflare/vitest-pool-workers@0.14.0` pinned Miniflare/workerd 1.20260329.1. Version 0.16.18 supports Vitest 4 and pins a newer June workerd runtime.
+- A required path-filtered job must still report on unrelated PRs; skipping the entire job can strand branch protection. The job therefore always exists and runs an explicit no-op step when irrelevant.
+- Worker runtime concurrency is the primary resource risk. `WORKERS_TEST_MAX_WORKERS` and `WORKERS_TEST_TIMEOUT_MS` centralize the serialized default and per-test/hook timeout.
+- `recoverStuckTasks` proves task-scoped liveness through D1 workspace/node state plus ProjectData ACP session state; a node heartbeat alone is insufficient.
+- `ProjectData.listSessions` must query only the requested page and must not load large message history while enriching session rows.
+
+## Implementation checklist
+
+- [x] Reproduce and isolate the local pre-collection workerd crash with a minimal smoke file and one worker.
+- [x] Pin the Vitest 4-compatible Cloudflare worker pool and preserve fatal startup failures.
+- [x] Add a visible deterministic `Durable Object Workers` CI job with pinned actions, `contents: read`, and worker-relevant path detection.
+- [x] Run `pnpm --filter @simple-agent-manager/api test:workers` on native `ubuntu-24.04` with centralized configurable worker/time bounds.
+- [x] Add a real-D1 → reconciler → ProjectData DO vertical slice proving a genuinely live task-scoped ACP session is skipped.
+- [x] Add a real DO SQLite slice with 1,500 `chat_sessions` and 5,000 messages proving `listSessions` returns a bounded page without throwing.
+- [x] Push a deliberately wrong assertion and record the worker job failure, then restore the correct assertion in a later commit.
+- [ ] Confirm the restored branch is green and the named origin, attention-marker, ProjectData/service, node lifecycle, and scheduled stuck-task files execute.
+- [ ] Complete specialist reviews and address all correctness findings.
+- [ ] Run supported local full gates.
+- [x] Remove the two duplicate backlog records and preserve their provenance here.
+- [ ] Obtain the coordinator's staging lease or equivalent CI-only gate release before merge.
+- [ ] Merge only with all required checks green and monitor main/production workflow health.
 
 ## Acceptance criteria
 
-- [ ] `test:workers` (or `vitest.workers.config.ts`) runs in CI (a dedicated job
-      in `.github/workflows/ci.yml`, or folded into the existing Test job).
-- [ ] The job is required/visible enough to block merge on failure, consistent
-      with how the node-pool `test` job is treated.
-- [ ] Confirm the workerd pool runs green in the GitHub Actions runner (it may
-      need specific runner resources; the crash observed in the remote agent
-      sandbox is environment-specific).
-- [ ] Once wired, add the real-DO vertical-slice test for `listSessions` that was
-      deferred in the sessions-list fix (seed ~1,500 real `chat_sessions` rows +
-      large message history; assert the read returns bounded results and never
-      throws).
+- [x] Local instability has evidence-based diagnosis: sandbox workerd receives SIGSEGV before collection across two runtime versions; the failure remains non-zero and visible.
+- [x] Every PR reports one deterministic `Durable Object Workers` check; worker-relevant paths run the real pool and unrelated paths run an explicit no-op.
+- [x] CI actions are SHA-pinned and workflow permissions remain least-privilege `contents: read`.
+- [x] Runtime bounds are centralized/configurable, with one worker and 30-second test/hook defaults plus a 30-minute job ceiling.
+- [x] Commit `e3c20070f` deliberately expected 1,501 sessions; GitHub Actions job `87885158329` failed. Commit `94ab80006` restores 1,500.
+- [ ] The restored GitHub Actions run passes the complete real worker pool and visibly includes the required named files.
+- [x] Live task-scoped ACP reconciliation and large-history bounded `listSessions` execute through real DO/D1 storage rather than mocks.
+- [ ] Full supported local gates and all required specialist reviews pass.
+- [x] The three open backlog records are consolidated into this single canonical record with provenance.
+- [ ] Coordinator release is recorded before merge; no shared staging deployment occurs without it.
 
-## Notes
+## Data-flow verification
 
-- This is a pre-existing, systemic CI gap — not introduced by the sessions-list
-  fix. It is filed separately from the observability-MCP gap
-  (`tasks/backlog/2026-07-16-observability-mcp-outcome-parsing-gap.md`).
+1. PR path classification: `.github/workflows/ci.yml:changes` emits `api-workers`.
+2. Deterministic merge check: `.github/workflows/ci.yml:durable-object-workers` either reports the explicit no-op or runs the real suite.
+3. Runtime entry: `apps/api/package.json:test:workers` loads `apps/api/vitest.workers.config.ts`.
+4. Real runtime/storage: `@cloudflare/vitest-pool-workers` executes `apps/api/tests/workers/**` in workerd with the configured DO/D1 bindings.
+5. Reconciliation slice: `scheduled-stuck-tasks.test.ts` seeds D1 node/workspace/task state and ProjectData ACP state, calls `recoverStuckTasks`, and asserts the task remains `in_progress`.
+6. Listing slice: `project-data-do.test.ts` seeds real DO SQLite rows/message history, calls the public `listSessions` RPC, and asserts a bounded 25-row page, total, order, and `hasMore`.
+
+## Post-mortem
+
+### What broke
+
+Real Durable Object/SqlStorage tests existed but were dark in CI. Regressions in scheduled reconciliation and message-origin propagation could pass every required check.
+
+### Root cause
+
+The worker suite remained a standalone script while the default suite explicitly excluded its directory. Local sandbox crashes were treated as a reason the tier could not be run, but no native CI runner path was established.
+
+### Why it was not caught
+
+There was no deterministic required check representing the tier, and a skipped test directory was indistinguishable from successful coverage in the existing Test job.
+
+### Class of bug
+
+Dark test tier / mock-hidden cross-runtime integration gap.
+
+### Process fix
+
+CI now has a named required worker-pool check that always reports, executes the actual package script on relevant changes, and fails on runtime crashes or assertions. This task record also requires red/green gate proof and preserves duplicate discovery provenance.
+
+## References
+
+- PR #1619
+- GitHub Actions red-proof run 29580583024, worker job 87885158329
+- `.github/workflows/ci.yml`
+- `apps/api/vitest.workers.config.ts`
+- `apps/api/tests/workers/project-data-do.test.ts`
+- `apps/api/tests/workers/scheduled-stuck-tasks.test.ts`
+- `.claude/rules/10-e2e-verification.md`
+- `.claude/rules/35-vertical-slice-testing.md`
