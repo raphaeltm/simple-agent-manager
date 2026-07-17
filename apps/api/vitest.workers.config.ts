@@ -9,16 +9,33 @@
  *
  * Run: pnpm test:workers
  */
-import { cloudflareTest } from '@cloudflare/vitest-pool-workers';
+import { cloudflareTest, readD1Migrations } from '@cloudflare/vitest-pool-workers';
 import { defineConfig } from 'vitest/config';
 
-const workersTestMaxWorkers = Number.parseInt(process.env.WORKERS_TEST_MAX_WORKERS ?? '1', 10);
-const workersTestTimeoutMs = Number.parseInt(process.env.WORKERS_TEST_TIMEOUT_MS ?? '30000', 10);
+const DEFAULT_WORKERS_TEST_MAX_WORKERS = 1;
+const DEFAULT_WORKERS_TEST_TIMEOUT_MS = 30_000;
+
+function readPositiveInteger(name: string, fallback: number): number {
+  const value = Number.parseInt(process.env[name] ?? '', 10);
+  return Number.isInteger(value) && value > 0 ? value : fallback;
+}
+
+const workersTestMaxWorkers = readPositiveInteger(
+  'WORKERS_TEST_MAX_WORKERS',
+  DEFAULT_WORKERS_TEST_MAX_WORKERS
+);
+const workersTestTimeoutMs = readPositiveInteger(
+  'WORKERS_TEST_TIMEOUT_MS',
+  DEFAULT_WORKERS_TEST_TIMEOUT_MS
+);
+
+const databaseMigrations = await readD1Migrations('./src/db/migrations');
+const observabilityMigrations = await readD1Migrations('./src/db/migrations/observability');
 
 export default defineConfig({
   plugins: [
     cloudflareTest({
-      main: './src/index.ts',
+      main: './tests/workers/worker-entrypoint.ts',
       miniflare: {
         // 2024-04-03+ required for DO RPC (calling methods directly on stubs)
         compatibilityDate: '2024-04-03',
@@ -97,6 +114,8 @@ export default defineConfig({
     globals: true,
     include: ['tests/workers/**/*.test.ts'],
     maxWorkers: workersTestMaxWorkers,
+    setupFiles: ['./tests/workers/setup.ts'],
+    provide: { databaseMigrations, observabilityMigrations },
     hookTimeout: workersTestTimeoutMs,
     testTimeout: workersTestTimeoutMs,
   },

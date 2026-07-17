@@ -156,7 +156,7 @@ describe('recoverStuckTasks — vertical slice', () => {
       expect(result.failedInProgress).toBe(1);
       const task = await getTaskStatus(taskId);
       expect(task?.status).toBe('failed');
-      expect(task?.error_message).toContain('runtime is gone');
+      expect(task?.error_message).toContain('runtime is conclusively gone');
       expect(task?.error_message).toContain('workspace_deleted');
     });
 
@@ -294,7 +294,7 @@ describe('recoverStuckTasks — vertical slice', () => {
       const task = await getTaskStatus(taskId);
       expect(task?.status).toBe('failed');
       expect(task?.error_message).toContain("stuck in 'queued'");
-      expect(task?.error_message).toContain('node_selection');
+      expect(task?.error_message).toContain('selecting a node');
       expect(task?.completed_at).not.toBeNull();
       expect(task?.execution_step).toBeNull(); // cleared on failure
 
