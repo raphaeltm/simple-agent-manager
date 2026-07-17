@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "server_info": {
+    "name": "plugin-runtime",
+    "title": null,
+    "version": "0.1.0",
+    "description": null,
+    "icons": null,
+    "websiteUrl": null
+  }
+}
