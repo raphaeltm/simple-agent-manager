@@ -21,6 +21,7 @@ export interface RefreshRequestPayload {
 
 export interface CodexRefreshEnv {
   DATABASE: D1Database;
+  OBSERVABILITY_DATABASE?: D1Database;
   ENCRYPTION_KEY: string;
   CREDENTIAL_ENCRYPTION_KEY?: string;
   CODEX_REFRESH_UPSTREAM_URL?: string;

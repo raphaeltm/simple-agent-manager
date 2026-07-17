@@ -190,6 +190,8 @@ Webhook damping uses Cloudflare KV's eventually consistent read-update-write beh
 | `ACTIVITY_TERMINAL_REPORT_ATTEMPTS` | `5`     | Retry attempts for terminal activity reports                     |
 | `ACTIVITY_TERMINAL_REPORT_BACKOFF`  | `1s`    | Backoff between terminal activity report retries                 |
 | `ACP_IDLE_SUSPEND_TIMEOUT`          | `30m`   | Idle session auto-suspend timeout                                |
+| `ACP_CREDENTIAL_SYNC_INTERVAL`      | `2s`    | Poll interval for Codex auth-file rotation sync-back             |
+| `ACP_CREDENTIAL_SYNC_TIMEOUT`       | `10s`   | Per-read/callback timeout for credential rotation sync-back      |
 | `ACP_NOTIF_SERIALIZE_TIMEOUT`       | `5s`    | Notification serialization timeout                               |
 
 ## MCP (Agent Tools)

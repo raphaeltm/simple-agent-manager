@@ -54,6 +54,7 @@ import * as projectDataService from '../../services/project-data';
 import { extractScalewaySecretKey } from '../../services/provider-credentials';
 import { bridgeAgentActivity } from '../../services/trial/bridge';
 import { getWorkspaceRuntimeAssets } from '../../services/workspace-runtime-assets';
+import { validateOpenAICodexAuthJson } from '../../services/validation';
 import { getDecryptedAgentKey, getDecryptedCredential } from '../credentials';
 import { assertRepositoryAccess } from '../projects/_helpers';
 import { safeParseJson, verifyWorkspaceCallbackAuth } from './_helpers';
@@ -64,6 +65,14 @@ const PROXY_ELIGIBLE_AGENTS: ReadonlySet<string> = new Set(
     (capability) => capability.proxyRouteSegment && capability.proxyProviderTag
   ).map((capability) => capability.agentType)
 );
+
+async function credentialHash(credential: string): Promise<string> {
+  const bytes = new TextEncoder().encode(credential.trim());
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, '0')).join(
+    ''
+  );
+}
 
 function getProxyCapability(agentType: string) {
   const capability = HARNESS_CAPABILITIES.find((entry) => entry.agentType === agentType);
@@ -590,9 +599,7 @@ async function resolveAdditionalRepositoryIds(input: {
       githubRepoId: schema.projectGithubRepositories.githubRepoId,
     })
     .from(schema.projectGithubRepositories)
-    .where(
-      eq(schema.projectGithubRepositories.projectId, input.projectId)
-    );
+    .where(eq(schema.projectGithubRepositories.projectId, input.projectId));
   if (rows.length === 0) {
     return [];
   }
@@ -980,6 +987,12 @@ runtimeRoutes.post(
     if (!credentialKind || !validCredentialKinds.has(credentialKind)) {
       throw errors.badRequest('Invalid credentialKind');
     }
+    if (agentType === 'openai-codex' && credentialKind === 'oauth-token') {
+      const validation = validateOpenAICodexAuthJson(body.credential);
+      if (!validation.valid) {
+        throw errors.badRequest(validation.error ?? 'Invalid Codex auth.json');
+      }
+    }
 
     const db = drizzle(c.env.DATABASE, { schema });
 
@@ -1061,16 +1074,47 @@ runtimeRoutes.post(
       return c.json({ success: true, updated: false });
     }
 
+    if (
+      body.previousCredentialHash &&
+      (await credentialHash(currentCredential)) !== body.previousCredentialHash
+    ) {
+      log.warn('agent_credential_sync.superseded_rotation_rejected', {
+        workspaceId,
+        agentType,
+        credentialKind,
+        credentialId: existing.id,
+      });
+      return c.json({ success: false, reason: 'credential_superseded' }, 409);
+    }
+
     // Re-encrypt with a fresh IV and update.
     const { ciphertext, iv } = await encrypt(body.credential, getCredentialEncryptionKey(c.env));
-    await db
+    const updatedRows = await db
       .update(schema.credentials)
       .set({
         encryptedToken: ciphertext,
         iv,
         updatedAt: new Date().toISOString(),
       })
-      .where(eq(schema.credentials.id, existing.id));
+      .where(
+        and(
+          eq(schema.credentials.id, existing.id),
+          eq(schema.credentials.encryptedToken, existing.encryptedToken),
+          eq(schema.credentials.iv, existing.iv),
+          eq(schema.credentials.isActive, true)
+        )
+      )
+      .returning({ id: schema.credentials.id });
+
+    if (updatedRows.length === 0) {
+      log.warn('agent_credential_sync.concurrent_rotation_rejected', {
+        workspaceId,
+        agentType,
+        credentialKind,
+        credentialId: existing.id,
+      });
+      return c.json({ success: false, reason: 'credential_superseded' }, 409);
+    }
 
     await syncActiveAgentCredentialSecret(c.env.DATABASE, {
       userId: workspace.userId,

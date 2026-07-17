@@ -23,16 +23,17 @@ The incident must be reproduced or directly verified using the currently install
 
 ## Implementation Checklist
 
-- [ ] Add a deterministic compatibility assertion for the installed Codex build/refresh override contract without logging environment values or auth material.
-- [ ] Add durable in-session `auth.json` change detection and sync-back for Codex OAuth credentials, with bounded debounce/retry/lifecycle ownership and no credential-bearing logs.
-- [ ] Make the sync path reject unsafe/malformed or mismatched credential payloads and preserve callback scope authentication, encryption, and dual-write behavior.
-- [ ] Safely deactivate superseded unattached CC credential/configuration rows created by manual replacements if code-path evidence confirms they can remain active.
-- [ ] Surface a sanitized, actionable platform error when a stored Codex family is superseded/revoked, without exposing upstream bodies or credential material.
-- [ ] Instrument sanitized control-plane refresh and vm-agent sync milestones sufficiently to distinguish proxy refresh, direct file rotation, unchanged file, and sync failure.
-- [ ] Add Go tests for override compatibility, watcher lifecycle/change detection, debounce/concurrent changes, retry/failure, and secret-redaction behavior.
-- [ ] Add API tests for callback auth/scope, malformed payload rejection, encrypted dual-write, concurrent/ordered rotations, stale row handling, and sanitized errors.
-- [ ] Add a cross-runtime/vertical-slice test proving a Codex auth-file rotation is detected by vm-agent, accepted by the callback, and becomes the credential used to seed a later workspace.
-- [ ] Run focused and full Go/TypeScript validation and record evidence.
+- [x] Pin the verified Codex CLI build exactly across the manifest, direct install fallback, and VM-agent container image; verify the incident build and pinned build both contain the override contract without logging environment values or auth material.
+- [x] Add durable in-session `auth.json` change detection and sync-back for Codex OAuth credentials, with configurable poll/callback bounds, lifecycle cancellation, and no credential-bearing logs.
+- [x] Capture stop/suspend credential metadata before lifecycle cleanup and use the latest accepted rotation for crash recovery.
+- [x] Make live and final sync ordered with a previous-credential hash, including an atomic database compare-and-swap for simultaneous callbacks.
+- [x] Reject malformed, mismatched, and superseded credential payloads while preserving callback scope authentication, encryption, and dual-write behavior.
+- [x] Leave unattached active CC rows unchanged: resolution requires an active attachment, so production evidence did not support destructive stale-row deactivation.
+- [x] Surface a sanitized, actionable platform error when a stored Codex family is superseded/revoked, without exposing upstream bodies or credential material.
+- [x] Instrument sanitized vm-agent sync and control-plane rejection milestones without credential, path, token-body, or Authorization-header fields.
+- [x] Add Go tests for watcher rotation, lifecycle snapshot ordering, final ordered sync, crash-restart credential reuse, callback contract, permanent superseded handling, and configuration.
+- [x] Add API/DO tests for malformed payload rejection, hash mismatch, atomic concurrent rotation, encrypted dual-write, and sanitized persisted errors.
+- [x] Run focused Go/API validation, Go race detection, repository typecheck, lint, and manifest synchronization checks.
 - [ ] Complete `go-specialist`, `security-auditor`, `test-engineer`, `constitution-validator`, `doc-sync-validator`, and `task-completion-validator` reviews; address all correctness findings.
 - [ ] Prepare and push the PR branch, then report `STAGING_LEASE_REQUEST` and wait for the parent workflow coordinator.
 - [ ] After lease grant, deploy to shared staging and exercise a real current Codex session through refresh plus sync lifecycle while tailing both sanitized paths.

@@ -237,9 +237,12 @@ type SessionHost struct {
 	// Credential injection metadata (set during startAgent, read during stop).
 	// These track whether the agent used file-based credential injection so
 	// that refreshed tokens can be synced back to the control plane.
-	credInjectionMode string // "env" or "auth-file"
-	credAuthFilePath  string // relative to home dir, e.g. ".codex/auth.json"
-	credKind          string // "api-key" or "oauth-token"
+	credInjectionMode     string // "env" or "auth-file"
+	credAuthFilePath      string // relative to home dir, e.g. ".codex/auth.json"
+	credKind              string // "api-key" or "oauth-token"
+	credentialWatchCancel context.CancelFunc
+	credentialMu          sync.RWMutex
+	credentialBaseline    string
 
 	// Viewers (guarded by viewerMu)
 	viewerMu sync.RWMutex
@@ -647,14 +650,9 @@ func (h *SessionHost) Stop() {
 	}
 	h.status = HostStopped
 	h.statusErr = ""
-	h.stopCurrentAgentLocked()
 	// Snapshot credential metadata while still holding the lock.
-	snap := credSyncSnapshot{
-		injectionMode: h.credInjectionMode,
-		authFilePath:  h.credAuthFilePath,
-		credKind:      h.credKind,
-		agentType:     h.agentType,
-	}
+	snap := h.credentialSyncSnapshotLocked()
+	h.stopCurrentAgentLocked()
 	h.mu.Unlock()
 
 	// Sync refreshed credentials back to the control plane before cleanup.
@@ -899,6 +897,10 @@ func truncateString(s string, maxLen int) string {
 
 // stopCurrentAgentLocked stops the current agent process. Must hold h.mu.
 func (h *SessionHost) stopCurrentAgentLocked() {
+	if h.credentialWatchCancel != nil {
+		h.credentialWatchCancel()
+		h.credentialWatchCancel = nil
+	}
 	if h.process != nil {
 		_ = h.process.Stop()
 		h.process = nil

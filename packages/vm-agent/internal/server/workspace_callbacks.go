@@ -10,6 +10,7 @@ import (
 	neturl "net/url"
 	"strings"
 
+	"github.com/workspace/vm-agent/internal/acp"
 	"github.com/workspace/vm-agent/internal/callbackretry"
 )
 
@@ -31,6 +32,28 @@ func (s *Server) SyncCredential(
 	credentialKind string,
 	credential string,
 ) error {
+	return s.syncCredential(ctx, workspaceID, agentType, credentialKind, credential, "")
+}
+
+func (s *Server) SyncCredentialRotation(
+	ctx context.Context,
+	workspaceID string,
+	agentType string,
+	credentialKind string,
+	credential string,
+	previousCredentialHash string,
+) error {
+	return s.syncCredential(ctx, workspaceID, agentType, credentialKind, credential, previousCredentialHash)
+}
+
+func (s *Server) syncCredential(
+	ctx context.Context,
+	workspaceID string,
+	agentType string,
+	credentialKind string,
+	credential string,
+	previousCredentialHash string,
+) error {
 	trimmedWorkspaceID := strings.TrimSpace(workspaceID)
 	if trimmedWorkspaceID == "" {
 		return fmt.Errorf("workspace id is required")
@@ -45,6 +68,9 @@ func (s *Server) SyncCredential(
 		"agentType":      agentType,
 		"credentialKind": credentialKind,
 		"credential":     credential,
+	}
+	if previousCredentialHash != "" {
+		payload["previousCredentialHash"] = previousCredentialHash
 	}
 
 	body, err := json.Marshal(payload)
@@ -80,12 +106,10 @@ func (s *Server) SyncCredential(
 		defer resp.Body.Close()
 
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			responseBody, _ := io.ReadAll(io.LimitReader(resp.Body, 8*1024))
-			err := fmt.Errorf(
-				"credential-sync callback returned HTTP %d: %s",
-				resp.StatusCode,
-				strings.TrimSpace(string(responseBody)),
-			)
+			err := fmt.Errorf("credential-sync callback returned HTTP %d", resp.StatusCode)
+			if resp.StatusCode == http.StatusConflict {
+				return callbackretry.Permanent(fmt.Errorf("%w: %v", acp.ErrCredentialSuperseded, err))
+			}
 			if resp.StatusCode >= 400 && resp.StatusCode < 500 &&
 				resp.StatusCode != http.StatusRequestTimeout &&
 				resp.StatusCode != http.StatusTooManyRequests {

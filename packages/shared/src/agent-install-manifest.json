@@ -11,7 +11,8 @@
     "method": "npm",
     "package": "@agentclientprotocol/codex-acp",
     "version": "1.1.2",
-    "bin": "codex-acp"
+    "bin": "codex-acp",
+    "npmCompanion": { "package": "@openai/codex", "version": "0.144.5" }
   },
   {
     "agentType": "google-gemini",

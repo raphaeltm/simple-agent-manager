@@ -246,6 +246,8 @@ Trial configuration is currently sourced from `apps/api/.env.example` and `apps/
 - `ACTIVITY_TERMINAL_REPORT_ATTEMPTS` — Retry attempts for terminal activity reports (`idle`, `recovering`, `error`) (default: 5)
 - `ACTIVITY_TERMINAL_REPORT_BACKOFF` — Backoff between terminal activity report retries (default: 1s)
 - `ACP_IDLE_SUSPEND_TIMEOUT` — Idle timeout before auto-suspending agent session (default: 30m)
+- `ACP_CREDENTIAL_SYNC_INTERVAL` — Poll interval for Codex auth-file rotation sync-back (default: 2s)
+- `ACP_CREDENTIAL_SYNC_TIMEOUT` — Per-read/callback timeout for credential rotation sync-back (default: 10s)
 - `ACP_NOTIF_SERIALIZE_TIMEOUT` — Max wait for previous session/update processing before delivering next (default: 5s)
 
 ### Events

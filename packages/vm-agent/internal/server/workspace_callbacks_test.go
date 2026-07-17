@@ -3,16 +3,68 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/workspace/vm-agent/internal/acp"
 	"github.com/workspace/vm-agent/internal/config"
 )
 
 func TestSyncCredential(t *testing.T) {
+	t.Run("sends previous credential hash for an ordered active rotation", func(t *testing.T) {
+		t.Parallel()
+
+		controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var payload map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				t.Fatalf("decode payload: %v", err)
+			}
+			if payload["previousCredentialHash"] != strings.Repeat("a", 64) {
+				t.Fatalf("unexpected previous credential hash")
+			}
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer controlPlane.Close()
+
+		s := &Server{
+			config: &config.Config{ControlPlaneURL: controlPlane.URL, CallbackToken: "token", HTTPReadTimeout: 5 * time.Second},
+		}
+		if err := s.SyncCredentialRotation(
+			context.Background(), "ws-ordered", "openai-codex", "oauth-token", "rotated", strings.Repeat("a", 64),
+		); err != nil {
+			t.Fatalf("SyncCredentialRotation returned error: %v", err)
+		}
+	})
+
+	t.Run("maps conflict to credential superseded without retrying", func(t *testing.T) {
+		t.Parallel()
+
+		attempts := 0
+		controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			attempts++
+			w.WriteHeader(http.StatusConflict)
+			_, _ = w.Write([]byte(`{"success":false,"reason":"credential_superseded"}`))
+		}))
+		defer controlPlane.Close()
+
+		s := &Server{
+			config: &config.Config{ControlPlaneURL: controlPlane.URL, CallbackToken: "token", HTTPReadTimeout: 5 * time.Second},
+		}
+		err := s.SyncCredentialRotation(
+			context.Background(), "ws-stale", "openai-codex", "oauth-token", "stale", strings.Repeat("b", 64),
+		)
+		if !errors.Is(err, acp.ErrCredentialSuperseded) {
+			t.Fatalf("error = %v, want ErrCredentialSuperseded", err)
+		}
+		if attempts != 1 {
+			t.Fatalf("attempts = %d, want 1", attempts)
+		}
+	})
+
 	t.Run("sends credential sync payload with workspace callback token", func(t *testing.T) {
 		t.Parallel()
 

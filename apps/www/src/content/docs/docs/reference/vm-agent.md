@@ -169,6 +169,8 @@ Environment variables set by the cloud-init template:
 | `ACP_PROMPT_RETRY_MAX_RETRIES` | `2` | Max transient provider prompt retries after the initial attempt |
 | `ACP_PROMPT_RETRY_INITIAL_BACKOFF` | `15s` | Initial backoff before retrying transient provider prompt errors |
 | `ACP_PROMPT_RETRY_MAX_BACKOFF` | `2m` | Max exponential backoff for transient provider prompt retries |
+| `ACP_CREDENTIAL_SYNC_INTERVAL` | `2s` | Poll interval for Codex auth-file rotation sync-back |
+| `ACP_CREDENTIAL_SYNC_TIMEOUT` | `10s` | Per-read/callback timeout for credential rotation sync-back |
 | `ACP_NOTIF_SERIALIZE_TIMEOUT` | `5s` | Timeout for ACP notification serialization |
 
 ### Log Retrieval Settings

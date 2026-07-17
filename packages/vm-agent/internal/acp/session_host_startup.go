@@ -26,6 +26,9 @@ func (h *SessionHost) startAgentForCrashRecovery(ctx context.Context, agentType 
 }
 
 func (h *SessionHost) startAgentWithSessionMode(ctx context.Context, agentType string, cred *agentCredential, settings *agentSettingsPayload, previousAcpSessionID string, requireLoadSession bool) error {
+	if requireLoadSession {
+		cred = h.currentCredential(cred)
+	}
 	startup, err := h.prepareAgentStartup(ctx, agentType, cred, settings)
 	if err != nil {
 		return err
@@ -40,6 +43,7 @@ func (h *SessionHost) startAgentWithSessionMode(ctx context.Context, agentType s
 	}
 
 	h.process = process
+	h.startCredentialWatcher(h.credentialSyncSnapshotLocked(), cred.credential)
 	h.attachACPConnection(process)
 	go h.monitorStderr(process)
 	go h.monitorProcessExit(ctx, process, agentType, cred, startup.settings)

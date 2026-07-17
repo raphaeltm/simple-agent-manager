@@ -518,6 +518,8 @@ func TestACPPhaseTimeoutsOverride(t *testing.T) {
 	t.Setenv("ACP_NEW_SESSION_TIMEOUT_MS", "60000")
 	t.Setenv("ACP_LOAD_SESSION_TIMEOUT_MS", "20000")
 	t.Setenv("ACP_STDERR_BUFFER_BYTES", "8192")
+	t.Setenv("ACP_CREDENTIAL_SYNC_INTERVAL", "3s")
+	t.Setenv("ACP_CREDENTIAL_SYNC_TIMEOUT", "12s")
 
 	cfg, err := Load()
 	if err != nil {
@@ -534,6 +536,12 @@ func TestACPPhaseTimeoutsOverride(t *testing.T) {
 	}
 	if cfg.ACPStderrBufferBytes != 8192 {
 		t.Fatalf("ACPStderrBufferBytes=%d, want 8192", cfg.ACPStderrBufferBytes)
+	}
+	if cfg.ACPCredentialSyncInterval != 3*time.Second {
+		t.Fatalf("ACPCredentialSyncInterval=%s, want 3s", cfg.ACPCredentialSyncInterval)
+	}
+	if cfg.ACPCredentialSyncTimeout != 12*time.Second {
+		t.Fatalf("ACPCredentialSyncTimeout=%s, want 12s", cfg.ACPCredentialSyncTimeout)
 	}
 }
 

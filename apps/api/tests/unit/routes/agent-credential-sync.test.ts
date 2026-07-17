@@ -6,6 +6,7 @@
  */
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
+import { createHash } from 'node:crypto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
@@ -58,6 +59,39 @@ describe('POST /workspaces/:id/agent-credential-sync', () => {
     credential: '{"tokens":{"access_token":"new-jwt"}}',
   };
 
+  it('rejects malformed Codex auth.json before encryption', async () => {
+    setupDBMocks(
+      { userId: 'user-1', nodeId: 'node-1' },
+      { id: 'cred-1', encryptedToken: 'enc', iv: 'iv', isActive: true }
+    );
+
+    const res = await postSync({ ...validBody, credential: '{"tokens":' });
+
+    expect(res.status).toBe(400);
+    expect(encrypt).not.toHaveBeenCalled();
+    expect(mockDB.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects a stale concurrent rotation when its previous credential hash no longer matches', async () => {
+    setupDBMocks(
+      { userId: 'user-1', nodeId: 'node-1' },
+      { id: 'cred-1', encryptedToken: 'enc', iv: 'iv', isActive: true }
+    );
+    (decrypt as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      '{"auth_mode":"Chatgpt","tokens":{"refresh_token":"already-rotated"}}'
+    );
+
+    const res = await postSync({
+      ...validBody,
+      previousCredentialHash: '0'.repeat(64),
+    });
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ success: false, reason: 'credential_superseded' });
+    expect(encrypt).not.toHaveBeenCalled();
+    expect(mockDB.update).not.toHaveBeenCalled();
+  });
+
   /** Helper: issue a POST to the endpoint with proper env bindings. */
   function postSync(body: unknown, headers: Record<string, string> = {}): Promise<Response> {
     return app.request(
@@ -96,7 +130,7 @@ describe('POST /workspaces/:id/agent-credential-sync', () => {
       if (typeof appError.statusCode === 'number' && typeof appError.error === 'string') {
         return c.json(
           { error: appError.error, message: appError.message },
-          appError.statusCode as 400 | 401 | 403 | 404 | 500
+          appError.statusCode as 400 | 401 | 403 | 404 | 409 | 500
         );
       }
       return c.json({ error: 'INTERNAL_ERROR', message: err.message }, 500);
@@ -113,7 +147,7 @@ describe('POST /workspaces/:id/agent-credential-sync', () => {
       insert: vi.fn().mockReturnThis(),
       values: vi.fn().mockResolvedValue(undefined),
       delete: vi.fn().mockReturnThis(),
-      returning: vi.fn().mockResolvedValue([]),
+      returning: vi.fn().mockResolvedValue([{ id: 'cred-1' }]),
     };
 
     (drizzle as unknown as ReturnType<typeof vi.fn>).mockReturnValue(mockDB);
@@ -243,6 +277,25 @@ describe('POST /workspaces/:id/agent-credential-sync', () => {
       expect.stringContaining('UPDATE cc_credentials')
     );
     expect(d1PreparedStmt.run).toHaveBeenCalled();
+  });
+
+  it('rejects an atomic compare-and-swap race before mirroring composable credentials', async () => {
+    const priorCredential = '{"auth_mode":"Chatgpt","tokens":{"refresh_token":"prior"}}';
+    setupDBMocks(
+      { userId: 'user-1', nodeId: 'node-1' },
+      { id: 'cred-1', encryptedToken: 'enc', iv: 'iv', isActive: true }
+    );
+    (decrypt as ReturnType<typeof vi.fn>).mockResolvedValueOnce(priorCredential);
+    mockDB.returning.mockResolvedValueOnce([]);
+
+    const res = await postSync({
+      ...validBody,
+      previousCredentialHash: createHash('sha256').update(priorCredential).digest('hex'),
+    });
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ success: false, reason: 'credential_superseded' });
+    expect(d1Database.prepare).not.toHaveBeenCalled();
   });
 
   it('does not fall back to user-scoped credential when a project-scoped row exists but is inactive', async () => {

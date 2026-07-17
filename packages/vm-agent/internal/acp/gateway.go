@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -75,6 +76,20 @@ type CredentialSyncer interface {
 	// credential is the raw credential content (e.g. auth.json body).
 	SyncCredential(ctx context.Context, workspaceID, agentType, credentialKind, credential string) error
 }
+
+var ErrCredentialSuperseded = errors.New("credential was superseded by a newer rotation")
+
+// CredentialRotationSyncer adds optimistic ordering to active credential
+// rotations. The hash represents the previously observed credential and is
+// safe to transport, but must not be logged.
+type CredentialRotationSyncer interface {
+	SyncCredentialRotation(ctx context.Context, workspaceID, agentType, credentialKind, credential, previousCredentialHash string) error
+}
+
+// CredentialFileReader reads an injected credential file from its runtime.
+// It exists as a boundary so active-session rotation monitoring can be tested
+// without a real container. Implementations must never log returned content.
+type CredentialFileReader func(ctx context.Context, containerID, authFilePath string) (string, error)
 
 // MessageReporter enqueues chat messages for batched delivery to the control plane.
 // All methods must be nil-safe (a nil reporter is a no-op).
@@ -213,8 +228,17 @@ type GatewayConfig struct {
 	// missing or incomplete. Built from the vm-agent's own config at startup.
 	SAMEnvFallback []string
 	// CredentialSyncer syncs updated file-based credentials (e.g. auth.json)
-	// back to the control plane after a session ends. When nil, no sync occurs.
+	// back to the control plane while a session is active and when it ends.
+	// When nil, no sync occurs.
 	CredentialSyncer CredentialSyncer
+	// CredentialFileReader overrides credential file reads. Nil uses the
+	// container/local runtime reader.
+	CredentialFileReader CredentialFileReader
+	// CredentialSyncInterval controls active auth-file rotation detection.
+	// Zero uses DefaultCredentialSyncInterval.
+	CredentialSyncInterval time.Duration
+	// CredentialSyncTimeout bounds each auth-file read and control-plane callback.
+	CredentialSyncTimeout time.Duration
 	// McpServers are MCP server configs to inject into ACP sessions.
 	// When non-empty, these are converted to acpsdk.McpServer entries
 	// and passed in NewSession/LoadSession requests.
@@ -884,7 +908,7 @@ type agentCommandInfo struct {
 	authFilePath  string // relative to home dir, e.g. ".codex/auth.json" (only when injectionMode == "auth-file")
 }
 
-const codexACPInstallCommand = "npm install -g @agentclientprotocol/codex-acp@1.1.2"
+const codexACPInstallCommand = "npm install -g @agentclientprotocol/codex-acp@1.1.2 @openai/codex@0.144.5"
 
 // getAgentCommandInfo returns the ACP command, args, env var name, and install command for a given agent type.
 // These match the agent catalog defined in packages/shared/src/agents.ts.

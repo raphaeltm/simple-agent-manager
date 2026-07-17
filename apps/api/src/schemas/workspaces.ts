@@ -57,6 +57,7 @@ export const AgentCredentialSyncSchema = v.object({
   credential: v.string(),
   credentialKind: v.optional(CredentialKindSchema),
   agentType: v.optional(v.string()),
+  previousCredentialHash: v.optional(v.pipe(v.string(), v.regex(/^[a-f0-9]{64}$/))),
 });
 
 // Message batch schema (VM agent persistence)

@@ -38,6 +38,7 @@ import { readResponseJson } from '../lib/runtime-validation';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import { syncActiveAgentCredentialSecret } from '../services/composable-credentials/agent-sync';
 import { decrypt, encrypt } from '../services/encryption';
+import { persistError } from '../services/observability';
 import {
   type CodexRefreshEnv,
   DEFAULT_CLIENT_ID,
@@ -53,6 +54,8 @@ import {
   type RefreshRequestPayload,
   type RotatedTokenEntry,
 } from './codex-refresh-lock-config';
+
+const REVOKED_REFRESH_FAMILY_CODES = new Set(['refresh_token_invalidated', 'invalid_grant']);
 
 export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
   /**
@@ -347,19 +350,35 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
       } catch {
         // Non-JSON upstream response — use generic error.
       }
-      // Diagnostic: log OpenAI's structured rejection reason so we can
+      // Diagnostic: log OpenAI's structured rejection code so we can
       // distinguish a revoked/expired/consumed refresh_token (e.g.
       // `refresh_token_invalidated`) from a transient upstream fault or an
       // edge/WAF block. Only the parsed OAuth/OpenAI error code + message are
-      // logged — never the raw body — so a refresh token can never leak.
+      // logged — never the message or raw body — so token material cannot leak.
       log.warn('codex_refresh.upstream_rejected', {
         userId,
         credentialId: credential.id,
         status: upstreamResponse.status,
         upstreamContentType,
         upstreamErrorCode,
-        upstreamErrorMessage,
       });
+      if (
+        this.env.OBSERVABILITY_DATABASE &&
+        upstreamErrorCode &&
+        REVOKED_REFRESH_FAMILY_CODES.has(upstreamErrorCode)
+      ) {
+        await persistError(this.env.OBSERVABILITY_DATABASE, {
+          source: 'api',
+          level: 'error',
+          message: 'Stored Codex OAuth credential was superseded or revoked; reconnect Codex',
+          userId,
+          context: {
+            credentialId: credential.id,
+            upstreamStatus: upstreamResponse.status,
+            upstreamErrorCode,
+          },
+        });
+      }
       return new Response(JSON.stringify(safeError), {
         status: upstreamResponse.status,
         headers: { 'Content-Type': 'application/json' },

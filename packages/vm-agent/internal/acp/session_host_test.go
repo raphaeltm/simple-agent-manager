@@ -2765,13 +2765,151 @@ func TestHandlePrompt_NoReporter_StillBuffers(t *testing.T) {
 
 // mockCredentialSyncer implements CredentialSyncer for testing.
 type mockCredentialSyncer struct {
-	mu          sync.Mutex
-	called      bool
-	workspaceID string
-	agentType   string
-	credKind    string
-	credential  string
-	err         error
+	mu                     sync.Mutex
+	called                 bool
+	workspaceID            string
+	agentType              string
+	credKind               string
+	credential             string
+	err                    error
+	previousCredentialHash string
+}
+
+func (m *mockCredentialSyncer) SyncCredentialRotation(_ context.Context, workspaceID, agentType, credKind, credential, previousCredentialHash string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.called = true
+	m.workspaceID = workspaceID
+	m.agentType = agentType
+	m.credKind = credKind
+	m.credential = credential
+	m.previousCredentialHash = previousCredentialHash
+	return m.err
+}
+
+func TestCredentialSyncSnapshotCapturedBeforeStopClearsMetadata(t *testing.T) {
+	t.Parallel()
+
+	host := NewSessionHost(SessionHostConfig{})
+	host.agentType = "openai-codex"
+	host.credInjectionMode = "auth-file"
+	host.credAuthFilePath = ".codex/auth.json"
+	host.credKind = "oauth-token"
+
+	snap := host.credentialSyncSnapshotLocked()
+	host.stopCurrentAgentLocked()
+
+	if snap.agentType != "openai-codex" || snap.injectionMode != "auth-file" ||
+		snap.authFilePath != ".codex/auth.json" || snap.credKind != "oauth-token" {
+		t.Fatalf("credential snapshot lost metadata: %#v", snap)
+	}
+}
+
+func TestWatchCredentialChangesSyncsRotationDuringActiveSession(t *testing.T) {
+	t.Parallel()
+
+	const original = `{"auth_mode":"Chatgpt","tokens":{"refresh_token":"original"}}`
+	const rotated = `{"auth_mode":"Chatgpt","tokens":{"refresh_token":"rotated"}}`
+
+	var mu sync.Mutex
+	content := original
+	syncer := &mockCredentialSyncer{}
+	host := NewSessionHost(SessionHostConfig{
+		GatewayConfig: GatewayConfig{
+			WorkspaceID:      "workspace-rotation",
+			CredentialSyncer: syncer,
+			CredentialFileReader: func(context.Context, string, string) (string, error) {
+				mu.Lock()
+				defer mu.Unlock()
+				return content, nil
+			},
+			CredentialSyncInterval: 5 * time.Millisecond,
+		},
+	})
+	defer host.Stop()
+
+	snap := credSyncSnapshot{
+		injectionMode: "auth-file",
+		authFilePath:  ".codex/auth.json",
+		credKind:      "oauth-token",
+		agentType:     "openai-codex",
+	}
+	host.startCredentialWatcher(snap, original)
+
+	mu.Lock()
+	content = rotated
+	mu.Unlock()
+
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		syncer.mu.Lock()
+		called := syncer.called
+		got := syncer.credential
+		previousHash := syncer.previousCredentialHash
+		syncer.mu.Unlock()
+		if called {
+			if got != rotated {
+				t.Fatalf("synced credential = %q, want rotated credential", got)
+			}
+			if previousHash != credentialContentHash(original) {
+				t.Fatal("active rotation did not carry the previous credential hash")
+			}
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("active credential rotation was not synced")
+}
+
+func TestSyncCredentialOnStopUsesOrderedRotation(t *testing.T) {
+	t.Parallel()
+
+	const original = `{"auth_mode":"Chatgpt","tokens":{"refresh_token":"original"}}`
+	const rotated = `{"auth_mode":"Chatgpt","tokens":{"refresh_token":"rotated"}}`
+	syncer := &mockCredentialSyncer{}
+	host := NewSessionHost(SessionHostConfig{GatewayConfig: GatewayConfig{
+		WorkspaceID:      "workspace-final-sync",
+		CredentialSyncer: syncer,
+		CredentialFileReader: func(context.Context, string, string) (string, error) {
+			return rotated, nil
+		},
+	}})
+	host.setCredentialBaseline(original)
+	snap := host.credentialSyncSnapshotLocked()
+	snap.injectionMode = "auth-file"
+	snap.authFilePath = ".codex/auth.json"
+	snap.credKind = "oauth-token"
+	snap.agentType = "openai-codex"
+
+	host.syncCredentialOnStop(snap)
+
+	syncer.mu.Lock()
+	defer syncer.mu.Unlock()
+	if !syncer.called || syncer.credential != rotated {
+		t.Fatal("final sync did not send the rotated credential")
+	}
+	if syncer.previousCredentialHash != credentialContentHash(original) {
+		t.Fatal("final sync did not preserve the previous credential hash")
+	}
+}
+
+func TestCurrentCredentialUsesLatestAcceptedRotationForRestart(t *testing.T) {
+	t.Parallel()
+
+	host := NewSessionHost(SessionHostConfig{})
+	host.setCredentialBaseline(`{"tokens":{"refresh_token":"rotated"}}`)
+	original := &agentCredential{credentialKind: "oauth-token", credential: `{"tokens":{"refresh_token":"original"}}`}
+
+	got := host.currentCredential(original)
+	if got == original {
+		t.Fatal("restart credential must be copied before replacement")
+	}
+	if got.credential != `{"tokens":{"refresh_token":"rotated"}}` {
+		t.Fatal("restart did not use the latest accepted rotation")
+	}
+	if original.credential != `{"tokens":{"refresh_token":"original"}}` {
+		t.Fatal("restart mutated the caller credential")
+	}
 }
 
 func (m *mockCredentialSyncer) SyncCredential(_ context.Context, workspaceID, agentType, credKind, credential string) error {

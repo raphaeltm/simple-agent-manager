@@ -185,6 +185,8 @@ type Config struct {
 	ACPRecoveryWatchdog               time.Duration // Max crash recovery duration before terminal error (default: 2m)
 	ACPRestartDecayWindow             time.Duration // Quiet period before restartCount decays (default: 5m)
 	ACPIdleSuspendTimeout             time.Duration // Auto-suspend after this idle duration with no viewers (default: 30m, 0=disabled)
+	ACPCredentialSyncInterval         time.Duration // Poll interval for auth-file rotation sync (default: 2s)
+	ACPCredentialSyncTimeout          time.Duration // Per-read/callback timeout for credential rotation sync (default: 10s)
 	ACPNotifSerializeTimeout          time.Duration // Max wait for previous notification processing before delivering next (default: 5s)
 	ACPHeartbeatInterval              time.Duration // Interval for direct ACP session heartbeats to control plane (default: 60s, env: ACP_HEARTBEAT_INTERVAL)
 	ACPActivityRereportInterval       time.Duration // Re-report prompting while a prompt is active (default: 60s, env: ACTIVITY_REREPORT_INTERVAL)
@@ -423,6 +425,8 @@ func Load() (*Config, error) {
 		ACPRecoveryWatchdog:               getEnvDuration("DEFAULT_RECOVERY_WATCHDOG_TIMEOUT", DefaultACPRecoveryWatchdogTimeout),
 		ACPRestartDecayWindow:             getEnvDuration("DEFAULT_RESTART_DECAY_WINDOW", DefaultACPRestartDecayWindow),
 		ACPIdleSuspendTimeout:             getEnvDuration("ACP_IDLE_SUSPEND_TIMEOUT", 30*time.Minute),
+		ACPCredentialSyncInterval:         getEnvDuration("ACP_CREDENTIAL_SYNC_INTERVAL", 2*time.Second),
+		ACPCredentialSyncTimeout:          getEnvDuration("ACP_CREDENTIAL_SYNC_TIMEOUT", 10*time.Second),
 		ACPNotifSerializeTimeout:          getEnvDuration("ACP_NOTIF_SERIALIZE_TIMEOUT", 5*time.Second),
 		ACPHeartbeatInterval:              getEnvDuration("ACP_HEARTBEAT_INTERVAL", 60*time.Second),
 		ACPActivityRereportInterval:       getEnvDuration("ACTIVITY_REREPORT_INTERVAL", DefaultACPActivityRereportInterval),

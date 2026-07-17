@@ -389,6 +389,8 @@ func New(cfg *config.Config) (*Server, error) {
 		TerminalActivityReportBackoff:  cfg.ACPTerminalActivityReportBackoff,
 		RecoveryWatchdogTimeout:        cfg.ACPRecoveryWatchdog,
 		RestartDecayWindow:             cfg.ACPRestartDecayWindow,
+		CredentialSyncInterval:         cfg.ACPCredentialSyncInterval,
+		CredentialSyncTimeout:          cfg.ACPCredentialSyncTimeout,
 		SAMEnvFallback:                 cfg.BuildSAMEnvFallback(),
 		HTTPClient:                     config.NewControlPlaneClient(cfg.HTTPCallbackTimeout),
 	}

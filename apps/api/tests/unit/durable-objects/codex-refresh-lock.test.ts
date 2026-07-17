@@ -35,6 +35,11 @@ vi.mock('../../../src/services/encryption', () => ({
   encrypt: vi.fn(),
 }));
 
+const mockPersistError = vi.fn().mockResolvedValue(undefined);
+vi.mock('../../../src/services/observability', () => ({
+  persistError: mockPersistError,
+}));
+
 // Mock secrets helper
 vi.mock('../../../src/lib/secrets', () => ({
   getCredentialEncryptionKey: vi.fn().mockReturnValue('test-encryption-key'),
@@ -52,9 +57,7 @@ vi.mock('../../../src/lib/logger', () => ({
   },
 }));
 
-const { CodexRefreshLock } = await import(
-  '../../../src/durable-objects/codex-refresh-lock'
-);
+const { CodexRefreshLock } = await import('../../../src/durable-objects/codex-refresh-lock');
 const { decrypt, encrypt } = await import('../../../src/services/encryption');
 
 // -----------------------------------------------------------------------
@@ -103,7 +106,7 @@ function createMockCtx(prePopulated: Record<string, unknown> = {}) {
 
 function createDO(
   envOverrides: Record<string, unknown> = {},
-  storagePrePopulated: Record<string, unknown> = {}
+  storagePrePopulated: Record<string, unknown> = {},
 ) {
   const env = createMockEnv(envOverrides);
   const ctx = createMockCtx(storagePrePopulated);
@@ -239,9 +242,7 @@ describe('CodexRefreshLock', () => {
 
   it('returns 400 when userId is missing', async () => {
     const { do: doInstance } = createDO();
-    const res = await doInstance.fetch(
-      makeRequest({ refreshToken: 'rt_test' }),
-    );
+    const res = await doInstance.fetch(makeRequest({ refreshToken: 'rt_test' }));
     expect(res.status).toBe(400);
     const json = await res.json();
     expect(json.error).toBe('invalid_request');
@@ -253,9 +254,7 @@ describe('CodexRefreshLock', () => {
 
   it('returns 401 when no credential is found for user', async () => {
     const { do: doInstance } = createDO();
-    const res = await doInstance.fetch(
-      makeRequest({ refreshToken: 'rt_test', userId: 'user-1' }),
-    );
+    const res = await doInstance.fetch(makeRequest({ refreshToken: 'rt_test', userId: 'user-1' }));
     expect(res.status).toBe(401);
     const json = await res.json();
     expect(json.error).toBe('refresh_token_invalidated');
@@ -270,9 +269,7 @@ describe('CodexRefreshLock', () => {
     setupCredentialFound(env);
     vi.mocked(decrypt).mockRejectedValue(new Error('bad key'));
 
-    const res = await doInstance.fetch(
-      makeRequest({ refreshToken: 'rt_test', userId: 'user-1' }),
-    );
+    const res = await doInstance.fetch(makeRequest({ refreshToken: 'rt_test', userId: 'user-1' }));
     expect(res.status).toBe(500);
     const json = await res.json();
     expect(json.error).toBe('internal_error');
@@ -284,9 +281,7 @@ describe('CodexRefreshLock', () => {
     setupCredentialFound(env);
     vi.mocked(decrypt).mockResolvedValue('not-json{{{');
 
-    const res = await doInstance.fetch(
-      makeRequest({ refreshToken: 'rt_test', userId: 'user-1' }),
-    );
+    const res = await doInstance.fetch(makeRequest({ refreshToken: 'rt_test', userId: 'user-1' }));
     expect(res.status).toBe(500);
     const json = await res.json();
     expect(json.error).toBe('internal_error');
@@ -370,11 +365,9 @@ describe('CodexRefreshLock', () => {
       {
         name: 'token is older than the configured custom grace window',
         setup: () =>
-          createDOWithRotatedToken(
-            'recently-rotated',
-            2_000,
-            { CODEX_REFRESH_GRACE_WINDOW_MS: '1000' },
-          ),
+          createDOWithRotatedToken('recently-rotated', 2_000, {
+            CODEX_REFRESH_GRACE_WINDOW_MS: '1000',
+          }),
         refreshToken: 'recently-rotated',
       },
     ])('returns stale tokens when $name', async ({ setup, refreshToken }) => {
@@ -441,7 +434,6 @@ describe('CodexRefreshLock', () => {
       const rotatedTokens = ctx.storage._store.get('rotated-tokens');
       expect(rotatedTokens).toBeUndefined();
     });
-
   });
 
   // -----------------------------------------------------------------------
@@ -501,7 +493,7 @@ describe('CodexRefreshLock', () => {
       opts: {
         projectRow: null | { id: string; is_active: 0 | 1 };
         userRow: null | { id: string };
-      }
+      },
     ) {
       const projectFirst = vi.fn().mockResolvedValue(
         opts.projectRow
@@ -511,7 +503,7 @@ describe('CodexRefreshLock', () => {
               iv: 'test-iv',
               is_active: opts.projectRow.is_active,
             }
-          : null
+          : null,
       );
       const userFirst = vi.fn().mockResolvedValue(
         opts.userRow
@@ -520,7 +512,7 @@ describe('CodexRefreshLock', () => {
               encrypted_token: 'encrypted-data',
               iv: 'test-iv',
             }
-          : null
+          : null,
       );
       const userBind = vi.fn().mockReturnValue({
         first: userFirst,
@@ -544,7 +536,7 @@ describe('CodexRefreshLock', () => {
       });
       vi.mocked(env.DATABASE.prepare).mockImplementation(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        prepare as any
+        prepare as any,
       );
       return { projectFirst, userFirst, projectBind, userBind, runUpdate };
     }
@@ -653,10 +645,10 @@ describe('CodexRefreshLock', () => {
       });
 
       vi.mocked(fetch).mockResolvedValue(
-        new Response(
-          JSON.stringify({ access_token: 'new', refresh_token: 'new-rt' }),
-          { status: 200, headers: { 'Content-Type': 'application/json' } },
-        ),
+        new Response(JSON.stringify({ access_token: 'new', refresh_token: 'new-rt' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
       );
 
       const res = await doInstance.fetch(
@@ -688,7 +680,7 @@ describe('CodexRefreshLock', () => {
      */
     function setupDualWriteCredentials(
       env: ReturnType<typeof createMockEnv>,
-      opts: { projectId?: string } = {}
+      opts: { projectId?: string } = {},
     ) {
       const legacyRun = vi.fn().mockResolvedValue({});
       const legacyBind = vi.fn().mockReturnValue({ run: legacyRun });
@@ -702,9 +694,7 @@ describe('CodexRefreshLock', () => {
         iv: 'test-iv',
         is_active: 1,
       };
-      const projectFirst = vi
-        .fn()
-        .mockResolvedValue(opts.projectId ? credRow : null);
+      const projectFirst = vi.fn().mockResolvedValue(opts.projectId ? credRow : null);
       const userFirst = vi.fn().mockResolvedValue(credRow);
       const projectSelectBind = vi.fn().mockReturnValue({ first: projectFirst });
       const userSelectBind = vi.fn().mockReturnValue({ first: userFirst });
@@ -725,7 +715,7 @@ describe('CodexRefreshLock', () => {
       });
       vi.mocked(env.DATABASE.prepare).mockImplementation(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        prepare as any
+        prepare as any,
       );
       return {
         legacyBind,
@@ -877,8 +867,7 @@ describe('CodexRefreshLock', () => {
       // must follow that same fallback and target the IS NULL (user) scope,
       // NOT the project equality predicate, or the rotated token lands on a row
       // that resolution never reads.
-      const { ccBind, getCcSql, projectFirst, userFirst } =
-        setupDualWriteCredentials(env);
+      const { ccBind, getCcSql, projectFirst, userFirst } = setupDualWriteCredentials(env);
       mockSuccessfulRefreshResponse();
 
       const res = await doInstance.fetch(
@@ -1002,20 +991,22 @@ describe('CodexRefreshLock', () => {
 
   describe('MEDIUM #5 — rate limit', () => {
     it('counts successful refresh requests in ctx.storage', async () => {
-      const { do: doInstance, env, ctx } = createDO({
+      const {
+        do: doInstance,
+        env,
+        ctx,
+      } = createDO({
         RATE_LIMIT_CODEX_REFRESH_PER_HOUR: '5',
       });
       setupCredentialFound(env);
       vi.mocked(fetch).mockResolvedValue(
-        new Response(
-          JSON.stringify({ access_token: 'a', refresh_token: 'r' }),
-          { status: 200, headers: { 'Content-Type': 'application/json' } },
-        ),
+        new Response(JSON.stringify({ access_token: 'a', refresh_token: 'r' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
       );
 
-      await doInstance.fetch(
-        makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' }),
-      );
+      await doInstance.fetch(makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' }));
 
       // Rate-limit state must have been written at least once, keyed per-credential.
       expect(ctx.storage.put).toHaveBeenCalledWith(
@@ -1034,14 +1025,18 @@ describe('CodexRefreshLock', () => {
       const now = Math.floor(Date.now() / 1000);
       const currentWindowStart = Math.floor(now / windowSeconds) * windowSeconds;
 
-      const { do: doInstance, env, ctx } = createDO(
+      const {
+        do: doInstance,
+        env,
+        ctx,
+      } = createDO(
         {
           RATE_LIMIT_CODEX_REFRESH_PER_HOUR: '3',
           RATE_LIMIT_CODEX_REFRESH_WINDOW_SECONDS: windowSeconds.toString(),
         },
         {
           'rate-limit:cred-1': { windowStart: currentWindowStart, count: 3 },
-        }
+        },
       );
       setupCredentialFound(env);
 
@@ -1060,7 +1055,9 @@ describe('CodexRefreshLock', () => {
       // No upstream fetch and no DB write should have happened.
       expect(vi.mocked(fetch)).not.toHaveBeenCalled();
       // Count must NOT be incremented past the limit.
-      const stored = ctx.storage._store.get('rate-limit:cred-1') as { count: number };
+      const stored = ctx.storage._store.get('rate-limit:cred-1') as {
+        count: number;
+      };
       expect(stored.count).toBe(3);
     });
 
@@ -1070,21 +1067,25 @@ describe('CodexRefreshLock', () => {
       const currentWindowStart = Math.floor(now / windowSeconds) * windowSeconds;
       const stalePastWindowStart = currentWindowStart - windowSeconds;
 
-      const { do: doInstance, env, ctx } = createDO(
+      const {
+        do: doInstance,
+        env,
+        ctx,
+      } = createDO(
         {
           RATE_LIMIT_CODEX_REFRESH_PER_HOUR: '3',
           RATE_LIMIT_CODEX_REFRESH_WINDOW_SECONDS: windowSeconds.toString(),
         },
         {
           'rate-limit:cred-1': { windowStart: stalePastWindowStart, count: 3 },
-        }
+        },
       );
       setupCredentialFound(env);
       vi.mocked(fetch).mockResolvedValue(
-        new Response(
-          JSON.stringify({ access_token: 'a', refresh_token: 'r' }),
-          { status: 200, headers: { 'Content-Type': 'application/json' } },
-        ),
+        new Response(JSON.stringify({ access_token: 'a', refresh_token: 'r' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
       );
 
       const res = await doInstance.fetch(
@@ -1107,21 +1108,28 @@ describe('CodexRefreshLock', () => {
       const currentWindowStart = Math.floor(now / windowSeconds) * windowSeconds;
 
       // A DIFFERENT credential is already at its limit. cred-1 has no entry.
-      const { do: doInstance, env, ctx } = createDO(
+      const {
+        do: doInstance,
+        env,
+        ctx,
+      } = createDO(
         {
           RATE_LIMIT_CODEX_REFRESH_PER_HOUR: '3',
           RATE_LIMIT_CODEX_REFRESH_WINDOW_SECONDS: windowSeconds.toString(),
         },
         {
-          'rate-limit:other-cred': { windowStart: currentWindowStart, count: 3 },
-        }
+          'rate-limit:other-cred': {
+            windowStart: currentWindowStart,
+            count: 3,
+          },
+        },
       );
       setupCredentialFound(env);
       vi.mocked(fetch).mockResolvedValue(
-        new Response(
-          JSON.stringify({ access_token: 'a', refresh_token: 'r' }),
-          { status: 200, headers: { 'Content-Type': 'application/json' } },
-        ),
+        new Response(JSON.stringify({ access_token: 'a', refresh_token: 'r' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
       );
 
       const res = await doInstance.fetch(
@@ -1130,7 +1138,9 @@ describe('CodexRefreshLock', () => {
 
       // cred-1 is unaffected by other-cred's exhausted bucket.
       expect(res.status).toBe(200);
-      const cred1 = ctx.storage._store.get('rate-limit:cred-1') as { count: number };
+      const cred1 = ctx.storage._store.get('rate-limit:cred-1') as {
+        count: number;
+      };
       expect(cred1.count).toBe(1);
       // The unrelated credential's bucket must be left untouched.
       const otherCred = ctx.storage._store.get('rate-limit:other-cred') as {
@@ -1140,7 +1150,11 @@ describe('CodexRefreshLock', () => {
     });
 
     it('stale-token branch does NOT consume rate-limit budget', async () => {
-      const { do: doInstance, env, ctx } = createDO({
+      const {
+        do: doInstance,
+        env,
+        ctx,
+      } = createDO({
         RATE_LIMIT_CODEX_REFRESH_PER_HOUR: '5',
       });
       setupCredentialFound(env);
@@ -1154,20 +1168,15 @@ describe('CodexRefreshLock', () => {
       expect(json.stale).toBe(true);
 
       // Cached/stale responses must not touch the rate-limit bucket.
-      expect(ctx.storage.put).not.toHaveBeenCalledWith(
-        'rate-limit:cred-1',
-        expect.anything(),
-      );
+      expect(ctx.storage.put).not.toHaveBeenCalledWith('rate-limit:cred-1', expect.anything());
       expect(ctx.storage._store.has('rate-limit:cred-1')).toBe(false);
       expect(vi.mocked(fetch)).not.toHaveBeenCalled();
     });
 
     it('grace-window branch does NOT consume rate-limit budget', async () => {
-      const { do: doInstance, ctx } = await createDOWithRotatedToken(
-        'old-refresh',
-        60_000,
-        { RATE_LIMIT_CODEX_REFRESH_PER_HOUR: '5' },
-      );
+      const { do: doInstance, ctx } = await createDOWithRotatedToken('old-refresh', 60_000, {
+        RATE_LIMIT_CODEX_REFRESH_PER_HOUR: '5',
+      });
 
       const res = await doInstance.fetch(
         makeRequest({ refreshToken: 'old-refresh', userId: 'user-1' }),
@@ -1178,10 +1187,7 @@ describe('CodexRefreshLock', () => {
       expect(json.refresh_token).toBe('stored-refresh');
 
       // Grace-window hits return stored tokens directly — no budget consumed.
-      expect(ctx.storage.put).not.toHaveBeenCalledWith(
-        'rate-limit:cred-1',
-        expect.anything(),
-      );
+      expect(ctx.storage.put).not.toHaveBeenCalledWith('rate-limit:cred-1', expect.anything());
       expect(ctx.storage._store.has('rate-limit:cred-1')).toBe(false);
       expect(vi.mocked(fetch)).not.toHaveBeenCalled();
     });
@@ -1399,10 +1405,7 @@ describe('CodexRefreshLock', () => {
     vi.mocked(fetch).mockImplementation(
       () =>
         new Promise((_, reject) => {
-          setTimeout(
-            () => reject(new DOMException('Aborted', 'AbortError')),
-            5,
-          );
+          setTimeout(() => reject(new DOMException('Aborted', 'AbortError')), 5);
         }),
     );
 
@@ -1433,14 +1436,17 @@ describe('CodexRefreshLock', () => {
     setupCredentialFound(env);
 
     vi.mocked(fetch).mockResolvedValue(
-      new Response(JSON.stringify({
-        error: 'invalid_grant',
-        error_description: 'Token has been revoked',
-        debug_info: 'sensitive-data-should-not-leak',
-      }), {
-        status: 401,
-        headers: { 'Content-Type': 'application/json; charset=utf-8' },
-      }),
+      new Response(
+        JSON.stringify({
+          error: 'invalid_grant',
+          error_description: 'Token has been revoked',
+          debug_info: 'sensitive-data-should-not-leak',
+        }),
+        {
+          status: 401,
+          headers: { 'Content-Type': 'application/json; charset=utf-8' },
+        },
+      ),
     );
 
     const res = await doInstance.fetch(
@@ -1454,7 +1460,10 @@ describe('CodexRefreshLock', () => {
   });
 
   it('parses OpenAI nested error form and surfaces refresh_token_invalidated (revoked token diagnostic)', async () => {
-    const { do: doInstance, env } = createDO();
+    const observabilityDatabase = createMockD1();
+    const { do: doInstance, env } = createDO({
+      OBSERVABILITY_DATABASE: observabilityDatabase,
+    });
     setupCredentialFound(env);
     mockLogWarn.mockClear();
 
@@ -1462,17 +1471,20 @@ describe('CodexRefreshLock', () => {
     // revoked/logged-out token produces in production:
     //   { error: { message, type, param, code } }
     vi.mocked(fetch).mockResolvedValue(
-      new Response(JSON.stringify({
-        error: {
-          message: 'Your session has ended. Please log in again.',
-          type: 'invalid_request_error',
-          param: null,
-          code: 'refresh_token_invalidated',
+      new Response(
+        JSON.stringify({
+          error: {
+            message: 'Your session has ended. Please log in again.',
+            type: 'invalid_request_error',
+            param: null,
+            code: 'refresh_token_invalidated',
+          },
+        }),
+        {
+          status: 401,
+          headers: { 'Content-Type': 'application/json' },
         },
-      }), {
-        status: 401,
-        headers: { 'Content-Type': 'application/json' },
-      }),
+      ),
     );
 
     const res = await doInstance.fetch(
@@ -1491,10 +1503,24 @@ describe('CodexRefreshLock', () => {
     expect(warnCall).toBeDefined();
     const fields = warnCall?.[1] as Record<string, unknown>;
     expect(fields.upstreamErrorCode).toBe('refresh_token_invalidated');
-    expect(fields.upstreamErrorMessage).toBe('Your session has ended. Please log in again.');
+    // Upstream messages are intentionally omitted because they are not a bounded
+    // field and could echo credential material.
+    expect(fields.upstreamErrorMessage).toBeUndefined();
     expect(fields.status).toBe(401);
     // No raw-body field is logged (refresh token can never leak).
     expect(fields).not.toHaveProperty('rawBodySample');
+    expect(mockPersistError).toHaveBeenCalledWith(observabilityDatabase, {
+      source: 'api',
+      level: 'error',
+      message: 'Stored Codex OAuth credential was superseded or revoked; reconnect Codex',
+      userId: 'user-1',
+      context: {
+        credentialId: 'cred-1',
+        upstreamStatus: 401,
+        upstreamErrorCode: 'refresh_token_invalidated',
+      },
+    });
+    expect(JSON.stringify(mockPersistError.mock.calls)).not.toContain('stored-refresh');
   });
 
   it('returns generic error for non-JSON upstream error responses', async () => {
@@ -1599,12 +1625,8 @@ describe('CodexRefreshLock', () => {
     // Two overlapping refreshes for the same user, both presenting the
     // pre-rotation token.
     const [resA, resB] = await Promise.all([
-      doInstance.fetch(
-        makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' }),
-      ),
-      doInstance.fetch(
-        makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' }),
-      ),
+      doInstance.fetch(makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' })),
+      doInstance.fetch(makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' })),
     ]);
 
     // The consumed token must be presented to OpenAI exactly once.
