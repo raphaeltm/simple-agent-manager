@@ -5,6 +5,7 @@ import { type ChangeEvent, useCallback, useEffect, useState } from 'react';
 import { useToast } from '../hooks/useToast';
 import type { GcpProject } from '../lib/api';
 import {
+  API_URL,
   deleteCredential,
   getGcpOAuthResult,
   listGcpProjects,
@@ -116,12 +117,16 @@ export function GcpCredentialForm({ credential, onUpdate }: GcpCredentialFormPro
   }, [oauthHandle]);
 
   useEffect(() => {
-    if (phase === 'loading-projects' && oauthHandle) void fetchProjects();
+    if (phase === 'loading-projects' && oauthHandle) {
+      fetchProjects().catch((err) => {
+        setError(err instanceof Error ? err.message : 'Failed to load GCP projects');
+        setPhase('idle');
+      });
+    }
   }, [phase, oauthHandle, fetchProjects]);
 
   const handleConnectWif = () => {
-    const apiBase = window.location.origin.replace('app.', 'api.');
-    window.location.href = `${apiBase}/auth/google/authorize`;
+    window.location.href = `${API_URL}/auth/google/authorize`;
   };
 
   const handleSetup = async () => {
@@ -211,8 +216,15 @@ export function GcpCredentialForm({ credential, onUpdate }: GcpCredentialFormPro
   };
 
   const copyCommands = async () => {
-    await navigator.clipboard.writeText(SERVICE_ACCOUNT_COMMANDS);
-    toast.success('gcloud commands copied');
+    try {
+      if (!navigator.clipboard?.writeText) {
+        throw new Error('Clipboard access is unavailable');
+      }
+      await navigator.clipboard.writeText(SERVICE_ACCOUNT_COMMANDS);
+      toast.success('gcloud commands copied');
+    } catch {
+      toast.error('Could not copy gcloud commands');
+    }
   };
 
   if (credential && phase === 'idle') {
@@ -253,7 +265,14 @@ export function GcpCredentialForm({ credential, onUpdate }: GcpCredentialFormPro
             </div>
             <div className="flex flex-col gap-2 sm:shrink-0">
               {metadata?.authType === 'service-account-key' && (
-                <Button variant="secondary" size="sm" onClick={() => setPhase('service-account')}>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    setSelectedZone(metadata.defaultZone);
+                    setPhase('service-account');
+                  }}
+                >
                   Rotate JSON key
                 </Button>
               )}

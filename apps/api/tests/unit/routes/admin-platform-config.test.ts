@@ -223,6 +223,30 @@ describe('admin platform config routes', () => {
     expect(secretRow?.encryptedToken).not.toContain('runtime-infra-secret');
     expect(secretRow?.updatedBy).toBe('superadmin-1');
 
+    const rotate = await createApp().request('/api/admin/platform-config', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'X-Test-Role': 'superadmin' },
+      body: JSON.stringify({
+        config: {
+          googleInfrastructure: {
+            clientId: 'runtime-infra-client-rotated',
+            clientSecret: 'runtime-infra-secret-rotated',
+          },
+        },
+      }),
+    }, env);
+    expect(rotate.status).toBe(200);
+    expect(await rotate.text()).not.toContain('runtime-infra-secret-rotated');
+    const rotatedRows = await env.DATABASE.prepare(
+      `SELECT encrypted_token AS encryptedToken, updated_by AS updatedBy
+       FROM platform_credentials
+       WHERE provider = 'google-infrastructure'`,
+    ).all<{ encryptedToken: string; updatedBy: string }>();
+    expect(rotatedRows.results).toHaveLength(1);
+    expect(rotatedRows.results[0]?.encryptedToken).not.toBe(secretRow?.encryptedToken);
+    expect(rotatedRows.results[0]?.encryptedToken).not.toContain('runtime-infra-secret-rotated');
+    expect(rotatedRows.results[0]?.updatedBy).toBe('superadmin-1');
+
     const remove = await createApp().request('/api/admin/platform-config', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', 'X-Test-Role': 'superadmin' },
@@ -257,5 +281,15 @@ describe('admin platform config routes', () => {
       error: 'FORBIDDEN',
       message: 'Superadmin required',
     });
+  });
+
+  it('rejects malformed platform config bodies before persistence', async () => {
+    const res = await createApp().request('/api/admin/platform-config', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'X-Test-Role': 'superadmin' },
+      body: JSON.stringify({ config: 'not-an-object' }),
+    }, createEnv());
+
+    expect(res.status).toBe(400);
   });
 });

@@ -22,6 +22,7 @@ import {
 } from '../schemas';
 import { enforceCredentialMutationRateLimit } from '../services/credential-mutation-rate-limit';
 import { decrypt } from '../services/encryption';
+import { getTimeoutMs } from '../services/fetch-timeout';
 import { replaceUserGcpCredential } from '../services/gcp-credential-store';
 import { sanitizeGcpError, toSanitizedAppError } from '../services/gcp-errors';
 import {
@@ -91,9 +92,7 @@ async function clearCredentialCache(
 gcpRoutes.post('/projects', jsonValidator(GcpOAuthHandleSchema), async (c) => {
   const body = c.req.valid('json');
   const oauthToken = await resolveOAuthToken(body.oauthHandle, c.env.KV);
-  const timeoutMs = c.env.GCP_API_TIMEOUT_MS
-    ? Number.parseInt(c.env.GCP_API_TIMEOUT_MS, 10)
-    : DEFAULT_GCP_API_TIMEOUT_MS;
+  const timeoutMs = getTimeoutMs(c.env.GCP_API_TIMEOUT_MS, DEFAULT_GCP_API_TIMEOUT_MS);
 
   try {
     const projects = await listGcpProjects(oauthToken, timeoutMs);
@@ -147,23 +146,24 @@ gcpRoutes.put(
         c.env,
       );
       await verifyGcpServiceAccountAccess(credential, accessToken, c.env);
-      const stored = await replaceUserGcpCredential(c.env, userId, credential);
-      if (previous) {
-        await clearCredentialCache(c.env, userId, previous);
-      }
-      return c.json({
-        success: true,
-        credential: {
-          id: stored.id,
-          provider: 'gcp' as const,
-          connected: true,
-          createdAt: stored.createdAt,
-          gcp: toGcpCredentialMetadata(credential),
-        },
-      });
     } catch (err) {
       throw toSanitizedAppError(err, 'gcp-service-account-save');
     }
+
+    const stored = await replaceUserGcpCredential(c.env, userId, credential);
+    if (previous) {
+      await clearCredentialCache(c.env, userId, previous);
+    }
+    return c.json({
+      success: true,
+      credential: {
+        id: stored.id,
+        provider: 'gcp' as const,
+        connected: true,
+        createdAt: stored.createdAt,
+        gcp: toGcpCredentialMetadata(credential),
+      },
+    });
   },
 );
 
@@ -176,51 +176,53 @@ gcpRoutes.post('/setup', jsonValidator(GcpSetupSchema), async (c) => {
   }
   const oauthToken = await resolveOAuthToken(body.oauthHandle, c.env.KV);
 
+  const previous = await getStoredGcpCredential(c.env, userId).catch(() => null);
+  let credential: Awaited<ReturnType<typeof runGcpSetup>>;
   try {
-    const previous = await getStoredGcpCredential(c.env, userId).catch(() => null);
-    const credential = await runGcpSetup(
+    credential = await runGcpSetup(
       oauthToken,
       body.gcpProjectId,
       body.defaultZone,
       c.env,
     );
-    await replaceUserGcpCredential(c.env, userId, credential);
-    if (previous) {
-      await clearCredentialCache(c.env, userId, previous);
-    }
+  } catch (err) {
+    throw toSanitizedAppError(err, 'gcp-setup');
+  }
 
-    try {
-      await verifyGcpOidcSetup(userId, 'setup-verification', credential, c.env);
-    } catch (verifyErr) {
-      log.warn('gcp.oidc_verification_failed', {
-        error: verifyErr instanceof Error ? verifyErr.message : String(verifyErr),
-      });
-      return c.json({
-        success: true,
-        verified: false,
-        credential: {
-          gcpProjectId: credential.gcpProjectId,
-          gcpProjectNumber: credential.gcpProjectNumber,
-          serviceAccountEmail: credential.serviceAccountEmail,
-          defaultZone: credential.defaultZone,
-        },
-        warning: 'Setup completed but OIDC verification failed. This may resolve after a few minutes of propagation.',
-      });
-    }
+  await replaceUserGcpCredential(c.env, userId, credential);
+  if (previous) {
+    await clearCredentialCache(c.env, userId, previous);
+  }
 
+  try {
+    await verifyGcpOidcSetup(userId, 'setup-verification', credential, c.env);
+  } catch (verifyErr) {
+    log.warn('gcp.oidc_verification_failed', {
+      error: verifyErr instanceof Error ? verifyErr.message : String(verifyErr),
+    });
     return c.json({
       success: true,
-      verified: true,
+      verified: false,
       credential: {
         gcpProjectId: credential.gcpProjectId,
         gcpProjectNumber: credential.gcpProjectNumber,
         serviceAccountEmail: credential.serviceAccountEmail,
         defaultZone: credential.defaultZone,
       },
+      warning: 'Setup completed but OIDC verification failed. This may resolve after a few minutes of propagation.',
     });
-  } catch (err) {
-    throw toSanitizedAppError(err, 'gcp-setup');
   }
+
+  return c.json({
+    success: true,
+    verified: true,
+    credential: {
+      gcpProjectId: credential.gcpProjectId,
+      gcpProjectNumber: credential.gcpProjectNumber,
+      serviceAccountEmail: credential.serviceAccountEmail,
+      defaultZone: credential.defaultZone,
+    },
+  });
 });
 
 /** Verify the currently stored GCP credential, regardless of auth mode. */

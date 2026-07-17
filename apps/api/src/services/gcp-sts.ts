@@ -51,15 +51,26 @@ function cacheKeyComponent(value: string): string {
   return encodeURIComponent(value);
 }
 
-function credentialCacheIdentity(credential: GcpCredential): string {
+function legacyCredentialCacheIdentity(credential: GcpCredential): string {
   if (credential.authType === 'service-account-key') {
     return `service-account-key:${credential.privateKeyId}`;
   }
   return `workload-identity:${credential.gcpProjectNumber}:${credential.wifPoolId}:${credential.wifProviderId}`;
 }
 
-function gcpAccessTokenCachePrefix(userId: string, credential: GcpCredential): string {
-  return `gcp-token:v3:${cacheKeyComponent(userId)}:${cacheKeyComponent(credential.gcpProjectId)}:${cacheKeyComponent(credentialCacheIdentity(credential))}:`;
+function credentialCacheIdentity(credential: GcpCredential): string {
+  if (credential.authType === 'service-account-key') {
+    return legacyCredentialCacheIdentity(credential);
+  }
+  return `${legacyCredentialCacheIdentity(credential)}:${credential.serviceAccountEmail}`;
+}
+
+function gcpAccessTokenCachePrefix(
+  userId: string,
+  credential: GcpCredential,
+  identity = credentialCacheIdentity(credential),
+): string {
+  return `gcp-token:v3:${cacheKeyComponent(userId)}:${cacheKeyComponent(credential.gcpProjectId)}:${cacheKeyComponent(identity)}:`;
 }
 
 export function getGcpAccessTokenCacheKey(
@@ -76,18 +87,23 @@ export async function clearGcpAccessTokenCache(
   userId: string,
   credential: GcpCredential,
 ): Promise<void> {
-  const prefix = gcpAccessTokenCachePrefix(userId, credential);
-  let cursor: string | undefined;
-  do {
-    const page = await env.KV.list({ prefix, ...(cursor ? { cursor } : {}) });
-    await Promise.all(page.keys.map((key) => env.KV.delete(key.name)));
-    if (page.list_complete) break;
-    cursor = page.cursor;
-  } while (cursor);
+  const prefixes = new Set([
+    gcpAccessTokenCachePrefix(userId, credential),
+    gcpAccessTokenCachePrefix(userId, credential, legacyCredentialCacheIdentity(credential)),
+  ]);
+  for (const prefix of prefixes) {
+    let cursor: string | undefined;
+    do {
+      const page = await env.KV.list({ prefix, ...(cursor ? { cursor } : {}) });
+      await Promise.all(page.keys.map((key) => env.KV.delete(key.name)));
+      if (page.list_complete) break;
+      cursor = page.cursor;
+    } while (cursor);
+  }
 
   await Promise.all([
     env.KV.delete(
-      `gcp-token:v2:${userId}:${credential.gcpProjectId}:${credentialCacheIdentity(credential)}`,
+      `gcp-token:v2:${userId}:${credential.gcpProjectId}:${legacyCredentialCacheIdentity(credential)}`,
     ),
     env.KV.delete(`gcp-token:${userId}:${credential.gcpProjectId}`),
   ]);

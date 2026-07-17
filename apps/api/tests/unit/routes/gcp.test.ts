@@ -1,4 +1,5 @@
 import {
+  DEFAULT_GCP_API_TIMEOUT_MS,
   GCP_CREDENTIAL_VERSION,
   type GcpServiceAccountKeyCredential,
 } from '@simple-agent-manager/shared';
@@ -14,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   enforceMutationLimit: vi.fn(),
   getGoogleInfraOAuthConfig: vi.fn(),
   getGcpAccessToken: vi.fn(),
+  listGcpProjects: vi.fn(),
   clearGcpAccessTokenCache: vi.fn(),
   parseServiceAccountJson: vi.fn(),
   replaceUserGcpCredential: vi.fn(),
@@ -39,7 +41,7 @@ vi.mock('../../../src/services/gcp-service-account', () => ({
   verifyGcpServiceAccountAccess: mocks.verifyServiceAccountAccess,
 }));
 vi.mock('../../../src/services/gcp-setup', () => ({
-  listGcpProjects: vi.fn(),
+  listGcpProjects: mocks.listGcpProjects,
   runGcpSetup: mocks.runGcpSetup,
 }));
 vi.mock('../../../src/services/gcp-sts', () => ({
@@ -139,6 +141,7 @@ describe('GCP routes', () => {
       clientSecret: 'infra-secret',
     });
     mocks.getGcpAccessToken.mockResolvedValue('short-lived-access-token');
+    mocks.listGcpProjects.mockResolvedValue([]);
     mocks.clearGcpAccessTokenCache.mockResolvedValue(undefined);
     mocks.parseServiceAccountJson.mockResolvedValue(serviceAccountCredential);
     mocks.replaceUserGcpCredential.mockResolvedValue({
@@ -256,6 +259,47 @@ describe('GCP routes', () => {
     expect(res.status).toBe(502);
     expect(mocks.replaceUserGcpCredential).not.toHaveBeenCalled();
     expect(await res.text()).not.toContain('never-return-this');
+  });
+
+  it('uses the default timeout when the configured project-list timeout is invalid', async () => {
+    env.GCP_API_TIMEOUT_MS = 'not-a-positive-number';
+
+    const res = await app.request('/api/gcp/projects', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ oauthHandle: 'oauth-handle' }),
+    }, env);
+
+    expect(res.status).toBe(200);
+    expect(mocks.listGcpProjects).toHaveBeenCalledWith(
+      'oauth-token',
+      DEFAULT_GCP_API_TIMEOUT_MS,
+    );
+  });
+
+  it('reports service-account persistence failures as internal errors', async () => {
+    mocks.replaceUserGcpCredential.mockRejectedValue(new Error('database unavailable'));
+
+    const res = await app.request('/api/gcp/service-account', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        serviceAccountJson: '{"private_key":"uploaded-secret-material"}',
+        defaultZone: 'us-central1-a',
+      }),
+    }, env);
+
+    expect(res.status).toBe(500);
+    expect(await res.json()).toMatchObject({ error: 'INTERNAL_ERROR' });
+  });
+
+  it('reports WIF persistence failures as internal errors', async () => {
+    mocks.replaceUserGcpCredential.mockRejectedValue(new Error('database unavailable'));
+
+    const res = await app.request('/api/gcp/setup', setupRequest(), env);
+
+    expect(res.status).toBe(500);
+    expect(await res.json()).toMatchObject({ error: 'INTERNAL_ERROR' });
   });
 
   it('rejects unsupported zones before parsing or storing the uploaded credential', async () => {

@@ -30,3 +30,38 @@ export const UpdatePlatformCredentialSchema = v.object({
   label: v.optional(v.pipe(v.string(), v.minLength(1), v.maxLength(100))),
   isEnabled: v.optional(v.boolean()),
 });
+
+export const UpdatePlatformIntegrationConfigSchema = v.object({
+  config: v.object({
+    github: v.optional(
+      v.object({
+        clientId: v.optional(v.string()),
+        clientSecret: v.optional(v.string()),
+        appId: v.optional(v.string()),
+        appPrivateKey: v.optional(v.string()),
+        appSlug: v.optional(v.string()),
+        webhookSecret: v.optional(v.string()),
+      }),
+    ),
+    google: v.optional(
+      v.object({
+        clientId: v.optional(v.string()),
+        clientSecret: v.optional(v.string()),
+      }),
+    ),
+    googleInfrastructure: v.optional(
+      v.object({
+        clientId: v.optional(v.string()),
+        clientSecret: v.optional(v.string()),
+        remove: v.optional(v.boolean()),
+      }),
+    ),
+    gitlab: v.optional(
+      v.object({
+        host: v.optional(v.string()),
+        clientId: v.optional(v.string()),
+        clientSecret: v.optional(v.string()),
+      }),
+    ),
+  }),
+});

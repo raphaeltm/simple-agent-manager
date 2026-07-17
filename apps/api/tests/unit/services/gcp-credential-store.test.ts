@@ -6,10 +6,12 @@ import Database from 'better-sqlite3';
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import type { Env } from '../../../src/env';
+import { decrypt } from '../../../src/services/encryption';
 import {
   deleteUserGcpCredential,
   replaceUserGcpCredential,
 } from '../../../src/services/gcp-credential-store';
+import { parseGcpCredential } from '../../../src/services/provider-credentials';
 import { createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const ENCRYPTION_KEY = 'SK4ihJazAK3GIWUQcM6nZ1odR6KQHrqRAVSp6HdPxrg=';
@@ -180,9 +182,41 @@ describe('GCP credential atomic store', () => {
     expect(stored.credentials).toHaveLength(1);
     expect(stored.configurations).toHaveLength(1);
     expect(stored.attachments).toHaveLength(1);
+
+    const graph = sqlite.prepare(
+      `SELECT
+         legacy.encrypted_token AS legacyCiphertext,
+         legacy.iv AS legacyIv,
+         composable.id AS credentialId,
+         composable.encrypted_token AS composableCiphertext,
+         composable.iv AS composableIv,
+         configuration.id AS configurationId,
+         configuration.credential_id AS configurationCredentialId,
+         attachment.configuration_id AS attachmentConfigurationId
+       FROM credentials legacy
+       JOIN cc_configurations configuration ON configuration.owner_id = legacy.user_id
+       JOIN cc_credentials composable ON composable.id = configuration.credential_id
+       JOIN cc_attachments attachment ON attachment.configuration_id = configuration.id
+       WHERE legacy.user_id = ?`
+    ).get(USER_ID) as {
+      legacyCiphertext: string;
+      legacyIv: string;
+      credentialId: string;
+      composableCiphertext: string;
+      composableIv: string;
+      configurationId: string;
+      configurationCredentialId: string;
+      attachmentConfigurationId: string;
+    };
+    expect(graph.configurationCredentialId).toBe(graph.credentialId);
+    expect(graph.attachmentConfigurationId).toBe(graph.configurationId);
+    expect(graph.composableCiphertext).toBe(graph.legacyCiphertext);
+    expect(graph.composableIv).toBe(graph.legacyIv);
+    const decrypted = await decrypt(graph.legacyCiphertext, graph.legacyIv, ENCRYPTION_KEY);
+    expect(parseGcpCredential(decrypted).privateKeyId).toMatch(/^concurrent-key-[ab]$/);
   });
 
-  it('detaches but preserves a user-managed GCP configuration during replacement', async () => {
+  it('preserves a user-managed GCP configuration and attachment during replacement', async () => {
     sqlite
       .prepare(
         `INSERT INTO cc_credentials (
@@ -218,8 +252,8 @@ describe('GCP credential atomic store', () => {
     ).toMatchObject({ id: 'manual-configuration' });
     expect(
       sqlite.prepare(`SELECT id FROM cc_attachments WHERE id = 'manual-attachment'`).get()
-    ).toBeUndefined();
-    expect(snapshot(sqlite).attachments).toHaveLength(1);
+    ).toMatchObject({ id: 'manual-attachment' });
+    expect(snapshot(sqlite).attachments).toHaveLength(2);
   });
 
   it('rolls back every deletion when a replacement batch fails', async () => {

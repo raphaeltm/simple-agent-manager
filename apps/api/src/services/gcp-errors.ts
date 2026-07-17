@@ -122,13 +122,16 @@ export function sanitizeGcpError(err: unknown, context?: string): string {
 
     // Build user-friendly message
     const stepHint = STEP_HINTS[err.step] || 'A Google Cloud operation failed.';
-    if (err.step.startsWith('service_account')) {
+    if (err.step === 'service_account_compute_verify') {
       if (err.statusCode === 403) {
         return `${stepHint} Grant roles/compute.instanceAdmin.v1 and roles/compute.securityAdmin, and ensure the Compute Engine API is enabled.`;
       }
       if (err.statusCode === 404) {
         return `${stepHint} Verify the service-account project ID and default zone.`;
       }
+      return `${stepHint} Check the key status and service-account configuration, then try again.`;
+    }
+    if (err.step.startsWith('service_account')) {
       return `${stepHint} Check the key status and service-account configuration, then try again.`;
     }
     const statusHint = err.statusCode ? STATUS_MESSAGES[err.statusCode] : undefined;

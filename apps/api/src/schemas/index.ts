@@ -91,6 +91,7 @@ export {
   AnalyticsForwardSchema,
   CreatePlatformCredentialSchema,
   UpdatePlatformCredentialSchema,
+  UpdatePlatformIntegrationConfigSchema,
   UpdateSignupApprovalConfigSchema,
 } from './admin';
 

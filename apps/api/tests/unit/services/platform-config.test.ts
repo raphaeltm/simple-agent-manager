@@ -217,7 +217,14 @@ describe('platform config resolver', () => {
         clientSecret: 'stable-infra-secret',
       },
     }, 'admin-1');
-    env.DATABASE.batch = vi.fn().mockRejectedValue(new Error('injected batch failure'));
+    await env.DATABASE.prepare(
+      `CREATE TRIGGER reject_infrastructure_rotation
+       BEFORE UPDATE ON platform_credentials
+       WHEN OLD.provider = 'google-infrastructure'
+       BEGIN
+         SELECT RAISE(ABORT, 'injected batch failure');
+       END`,
+    ).run();
 
     await expect(savePlatformIntegrationConfig(env, {
       googleInfrastructure: {

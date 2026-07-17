@@ -27,8 +27,16 @@ function cleanupManagedCredentialStatements(
        WHERE user_id = ?
          AND project_id IS NULL
          AND consumer_kind = 'compute'
-         AND consumer_target = 'gcp'`,
-    ).bind(userId),
+         AND consumer_target = 'gcp'
+         AND configuration_id IN (
+           SELECT id
+           FROM cc_configurations
+           WHERE owner_id = ?
+             AND consumer_kind = 'compute'
+             AND consumer_target = 'gcp'
+             AND json_extract(settings_json, '$.managedBy') = 'legacy-gcp-credential'
+         )`,
+    ).bind(userId, userId),
     env.DATABASE.prepare(
       `DELETE FROM cc_credentials
        WHERE owner_id = ?

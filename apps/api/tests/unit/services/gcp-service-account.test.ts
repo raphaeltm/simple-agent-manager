@@ -2,6 +2,8 @@ import {
   DEFAULT_GCP_COMPUTE_API_BASE_URL,
   DEFAULT_GCP_SERVICE_ACCOUNT_TOKEN_URL,
   DEFAULT_GCP_STS_SCOPE,
+  GCP_CREDENTIAL_VERSION,
+  type GcpOidcCredential,
 } from '@simple-agent-manager/shared';
 import { decodeJwt, decodeProtectedHeader, exportPKCS8, generateKeyPair } from 'jose';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -199,5 +201,32 @@ describe('service-account verification and caching', () => {
 
     await clearGcpAccessTokenCache(env, 'user-1', credential);
     expect(kv.values.size).toBe(0);
+  });
+
+  it('isolates WIF tokens by impersonated service account and clears legacy cache keys', async () => {
+    const credential: GcpOidcCredential = {
+      version: GCP_CREDENTIAL_VERSION,
+      provider: 'gcp',
+      authType: 'workload-identity',
+      gcpProjectId: 'sam-test-project',
+      gcpProjectNumber: '123456789',
+      serviceAccountEmail: 'first@sam-test-project.iam.gserviceaccount.com',
+      wifPoolId: 'sam-pool',
+      wifProviderId: 'sam-provider',
+      defaultZone: 'us-central1-a',
+    };
+    const otherServiceAccount = {
+      ...credential,
+      serviceAccountEmail: 'second@sam-test-project.iam.gserviceaccount.com',
+    };
+    expect(getGcpAccessTokenCacheKey('user-1', 'project-a', otherServiceAccount))
+      .not.toBe(getGcpAccessTokenCacheKey('user-1', 'project-a', credential));
+
+    const kv = createKv();
+    await clearGcpAccessTokenCache({ KV: kv.namespace } as Env, 'user-1', credential);
+
+    expect(kv.namespace.delete).toHaveBeenCalledWith(
+      'gcp-token:v2:user-1:sam-test-project:workload-identity:123456789:sam-pool:sam-provider',
+    );
   });
 });

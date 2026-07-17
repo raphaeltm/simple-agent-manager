@@ -7,6 +7,8 @@ const mocks = vi.hoisted(() => ({
   deleteCredential: vi.fn(),
   getGcpOAuthResult: vi.fn(),
   saveGcpServiceAccountCredential: vi.fn(),
+  toastError: vi.fn(),
+  toastSuccess: vi.fn(),
 }));
 
 vi.mock('../../../src/lib/api', async (importOriginal) => ({
@@ -19,7 +21,7 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
 }));
 
 vi.mock('../../../src/hooks/useToast', () => ({
-  useToast: () => ({ success: vi.fn(), error: vi.fn() }),
+  useToast: () => ({ success: mocks.toastSuccess, error: mocks.toastError }),
 }));
 
 import { GcpCredentialForm } from '../../../src/components/GcpCredentialForm';
@@ -68,6 +70,10 @@ describe('GcpCredentialForm', () => {
     });
     // Reset URL params
     window.history.replaceState({}, '', window.location.pathname);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: vi.fn().mockResolvedValue(undefined) },
+    });
   });
 
   describe('idle state', () => {
@@ -214,6 +220,7 @@ describe('GcpCredentialForm', () => {
 
       fireEvent.click(screen.getByRole('button', { name: 'Rotate JSON key' }));
       expect(screen.getByLabelText('Or paste JSON')).toHaveValue('');
+      expect(screen.getByLabelText('Default zone')).toHaveValue('europe-west3-a');
       fireEvent.change(screen.getByLabelText('Or paste JSON'), {
         target: { value: '{"new":true}' },
       });
@@ -230,8 +237,19 @@ describe('GcpCredentialForm', () => {
       await waitFor(() => {
         expect(mocks.saveGcpServiceAccountCredential).toHaveBeenCalledWith({
           serviceAccountJson: '{"new":true}',
-          defaultZone: 'us-central1-a',
+          defaultZone: 'europe-west3-a',
         });
+      });
+    });
+
+    it('reports clipboard failures without an unhandled rejection', async () => {
+      vi.mocked(navigator.clipboard.writeText).mockRejectedValue(new Error('denied'));
+      render(<GcpCredentialForm onUpdate={onUpdate} />);
+      fireEvent.click(screen.getByRole('button', { name: 'Use service account JSON' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Copy commands' }));
+
+      await waitFor(() => {
+        expect(mocks.toastError).toHaveBeenCalledWith('Could not copy gcloud commands');
       });
     });
 
