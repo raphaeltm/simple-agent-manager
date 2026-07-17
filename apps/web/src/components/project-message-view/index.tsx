@@ -142,6 +142,13 @@ function ErrorBanner({ message, recoverable }: { message: string; recoverable: b
         boxShadow: '0 4px 24px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(239, 68, 68, 0.08)',
       }}
     >
+      {/* Same opacity scrim as SessionHeader — backdrop blur does not sample
+          the composited message scroller, so rely on opacity for legibility. */}
+      <div
+        aria-hidden="true"
+        className="absolute inset-0 rounded-[inherit] -z-10 pointer-events-none"
+        style={{ backgroundColor: 'color-mix(in srgb, var(--sam-color-bg-canvas) 78%, transparent)' }}
+      />
       <span className="sam-type-caption text-danger font-medium">
         {recoverable ? 'Agent error:' : 'Task failed:'}
       </span>{' '}
