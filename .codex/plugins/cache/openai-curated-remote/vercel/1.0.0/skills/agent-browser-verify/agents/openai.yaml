@@ -1,3 +1,0 @@
-interface:
-  display_name: "Agent Browser Verify"
-  short_description: "Automated browser verification for dev servers"
