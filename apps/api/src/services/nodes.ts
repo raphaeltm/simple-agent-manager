@@ -672,15 +672,23 @@ async function ensureStrictNodeBelongsToProvider(
   node: NodeRow,
   providerResult: ProviderForUserResult,
   targetProvider: CredentialProvider | undefined
-): Promise<void> {
-  if (targetProvider || !node.providerInstanceId) return;
+): Promise<'present' | 'absent'> {
+  if (targetProvider || !node.providerInstanceId) return 'present';
 
   const vm = await providerResult.provider.getVM(node.providerInstanceId);
-  if (!vm) {
+  if (vm === null) {
+    return 'absent';
+  }
+  if (!vm || typeof vm !== 'object') {
     throw new Error(
-      `Cannot strictly delete node ${node.id}: provider ${providerResult.providerName} does not contain VM ${node.providerInstanceId}`
+      `Cannot strictly delete node ${node.id}: provider lookup returned an ambiguous result`
     );
   }
+  return 'present';
+}
+
+export interface StrictNodeDeletionResult {
+  providerVm: 'no-instance' | 'deleted' | 'already-absent';
 }
 
 async function deleteStrictProviderInstance(
@@ -688,12 +696,12 @@ async function deleteStrictProviderInstance(
   node: NodeRow,
   userId: string,
   env: Env
-): Promise<void> {
-  if (!node.providerInstanceId) return;
+): Promise<StrictNodeDeletionResult['providerVm']> {
+  if (!node.providerInstanceId) return 'no-instance';
 
   const credentialContext = getStrictNodeCredentialContext(node, userId);
   const providerResult = await requireStrictNodeProvider(db, node, userId, env);
-  await ensureStrictNodeBelongsToProvider(
+  const providerVmState = await ensureStrictNodeBelongsToProvider(
     node,
     providerResult,
     credentialContext.targetProvider
@@ -714,7 +722,17 @@ async function deleteStrictProviderInstance(
     })
     .where(eq(schema.nodes.id, node.id));
 
+  if (providerVmState === 'absent') {
+    log.warn('node_delete.strict_provider_vm_already_absent', {
+      nodeId: node.id,
+      provider: providerResult.providerName,
+      providerInstanceId: node.providerInstanceId,
+    });
+    return 'already-absent';
+  }
+
   await providerResult.provider.deleteVM(node.providerInstanceId);
+  return 'deleted';
 }
 
 async function persistStrictDnsCleanupError(
@@ -775,10 +793,11 @@ export async function deleteNodeResourcesStrict(
   nodeId: string,
   userId: string,
   env: Env
-): Promise<void> {
+): Promise<StrictNodeDeletionResult> {
   const db = drizzle(env.DATABASE, { schema });
   const node = await requireStrictNode(db, nodeId, userId);
 
-  await deleteStrictProviderInstance(db, node, userId, env);
+  const providerVm = await deleteStrictProviderInstance(db, node, userId, env);
   await deleteStrictNodeDnsRecord(node, userId, env);
+  return { providerVm };
 }

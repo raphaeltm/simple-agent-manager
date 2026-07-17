@@ -87,9 +87,9 @@ describe('node resource deletion services', () => {
   });
 
   it('throws from strict deletion when the node row is missing', async () => {
-    await expect(
-      deleteNodeResourcesStrict('missing-node', 'user-1', ENV)
-    ).rejects.toThrow(/not found for strict deletion/);
+    await expect(deleteNodeResourcesStrict('missing-node', 'user-1', ENV)).rejects.toThrow(
+      /not found for strict deletion/
+    );
   });
 
   it('retires deployment node records as tombstones so event history can keep its FK', async () => {
@@ -118,6 +118,71 @@ describe('node resource deletion services', () => {
     );
   });
 
+  it('finalizes strict cleanup when a credentialed legacy-provider lookup conclusively returns null', async () => {
+    nodeRows.push({
+      id: 'node-absent',
+      userId: 'user-1',
+      providerInstanceId: 'vm-absent',
+      cloudProvider: null,
+      backendDnsRecordId: 'dns-absent',
+    });
+    providerGetVM.mockResolvedValueOnce(null);
+
+    await expect(deleteNodeResourcesStrict('node-absent', 'user-1', ENV)).resolves.toEqual({
+      providerVm: 'already-absent',
+    });
+
+    expect(providerGetVM).toHaveBeenCalledWith('vm-absent');
+    expect(providerDeleteVM).not.toHaveBeenCalled();
+    expect(deleteDNSRecord).toHaveBeenCalledWith('dns-absent', ENV);
+    expect(updateCalls).toContainEqual(
+      expect.objectContaining({
+        cloudProvider: 'hetzner',
+        credentialSource: 'platform',
+      })
+    );
+  });
+
+  it('fails closed when strict deletion credentials are missing', async () => {
+    nodeRows.push({
+      id: 'node-1',
+      userId: 'user-1',
+      providerInstanceId: 'vm-1',
+      cloudProvider: null,
+    });
+    createProviderForUser.mockResolvedValueOnce(null);
+
+    await expect(deleteNodeResourcesStrict('node-1', 'user-1', ENV)).rejects.toThrow(
+      /credentials missing/
+    );
+
+    expect(providerGetVM).not.toHaveBeenCalled();
+    expect(providerDeleteVM).not.toHaveBeenCalled();
+    expect(deleteDNSRecord).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      'lookup failure',
+      () => providerGetVM.mockRejectedValueOnce(new Error('provider unavailable')),
+      /provider unavailable/,
+    ],
+    ['ambiguous lookup', () => providerGetVM.mockResolvedValueOnce(undefined), /ambiguous result/],
+  ])('fails closed for %s', async (_scenario, arrange, expected) => {
+    nodeRows.push({
+      id: 'node-1',
+      userId: 'user-1',
+      providerInstanceId: 'vm-1',
+      cloudProvider: null,
+    });
+    arrange();
+
+    await expect(deleteNodeResourcesStrict('node-1', 'user-1', ENV)).rejects.toThrow(expected);
+
+    expect(providerDeleteVM).not.toHaveBeenCalled();
+    expect(deleteDNSRecord).not.toHaveBeenCalled();
+  });
+
   it('does not fail strict compute deletion when DNS cleanup fails after VM deletion', async () => {
     nodeRows.push({
       id: 'node-1',
@@ -128,7 +193,9 @@ describe('node resource deletion services', () => {
     });
     deleteDNSRecord.mockRejectedValueOnce(new Error('Cloudflare DNS outage'));
 
-    await expect(deleteNodeResourcesStrict('node-1', 'user-1', ENV)).resolves.toBeUndefined();
+    await expect(deleteNodeResourcesStrict('node-1', 'user-1', ENV)).resolves.toEqual({
+      providerVm: 'deleted',
+    });
 
     expect(providerDeleteVM).toHaveBeenCalledWith('vm-1');
     expect(deleteDNSRecord).toHaveBeenCalledWith('dns-1', ENV);

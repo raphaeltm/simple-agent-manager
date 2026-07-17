@@ -48,6 +48,13 @@ interface TrialWorkspaceCleanupRow {
   status: string;
 }
 
+interface NodeDeletionClaimRow {
+  status: string;
+  updated_at: string;
+}
+
+type NodeDeletionClaimResult = 'claimed' | 'concurrent' | 'failed';
+
 interface CountRow {
   active_count: number;
 }
@@ -247,7 +254,7 @@ async function cleanupExpiredTrialResources(
           continue;
         }
 
-        const nodeClaimed = await claimNodeForDeletion(
+        const nodeClaimResult = await claimNodeForDeletion(
           env,
           nodeId,
           anonymousUserId,
@@ -256,7 +263,15 @@ async function cleanupExpiredTrialResources(
           nowIso,
         );
 
-        if (!nodeClaimed) {
+        if (nodeClaimResult !== 'claimed') {
+          if (nodeClaimResult === 'concurrent') {
+            log.info('trial_expire.node_deletion_already_claimed', {
+              trialId: row.trial_id,
+              projectId: row.project_id,
+              nodeId,
+            });
+            continue;
+          }
           const freshActiveOtherCount = await countActiveWorkspacesExcluding(env, nodeId, cleanupWorkspaceIds);
           if (freshActiveOtherCount > 0) {
             const sharedResult = await cleanupWorkspacesOnLiveNode(
@@ -545,7 +560,7 @@ async function claimNodeForDeletion(
   cleanupWorkspaceIds: string[],
   now: number,
   nowIso: string,
-): Promise<boolean> {
+): Promise<NodeDeletionClaimResult> {
   const staleLockMs = parsePositiveInt(
     env.TRIAL_NODE_DELETION_LOCK_STALE_MS,
     DEFAULT_TRIAL_NODE_DELETION_LOCK_STALE_MS,
@@ -579,7 +594,19 @@ async function claimNodeForDeletion(
        )`
   ).bind(...bindValues).run();
 
-  return getRunChanges(updateResult) > 0;
+  if (getRunChanges(updateResult) > 0) return 'claimed';
+
+  const existingClaim = await env.DATABASE.prepare(
+    `SELECT status, updated_at
+     FROM nodes
+     WHERE id = ?
+       AND user_id = ?`
+  ).bind(nodeId, anonymousUserId).first<NodeDeletionClaimRow>();
+
+  return existingClaim?.status === 'destroying'
+    && existingClaim.updated_at >= staleDestroyingCutoffIso
+    ? 'concurrent'
+    : 'failed';
 }
 
 async function releaseNodeDeletionClaim(

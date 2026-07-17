@@ -27,11 +27,11 @@ A second invocation encountering a fresh deletion claim will skip it as concurre
 
 ## Implementation checklist
 
-- [ ] Introduce an explicit strict-delete result that distinguishes deleted/no-instance/conclusively-absent provider VMs.
-- [ ] Continue DNS cleanup and guarded local finalization after conclusive absence without weakening other strict failures.
-- [ ] Distinguish fresh concurrent claims from actual claim failures; retain configurable stale-claim recovery.
-- [ ] Add service scenarios for conclusive absence, missing credentials, lookup failure/ambiguity, and local DNS cleanup after absence.
-- [ ] Add scheduler scenarios for finalization after absence, repeated invocation/idempotency, concurrent invocation, guarded local-reference cleanup, and unchanged retryable errors.
+- [x] Introduce an explicit strict-delete result that distinguishes deleted/no-instance/conclusively-absent provider VMs.
+- [x] Continue DNS cleanup and guarded local finalization after conclusive absence without weakening other strict failures.
+- [x] Distinguish fresh concurrent claims from actual claim failures; retain configurable stale-claim recovery.
+- [x] Add service scenarios for conclusive absence, missing credentials, lookup failure/ambiguity, and local DNS cleanup after absence.
+- [x] Add scheduler scenarios for finalization after absence, repeated invocation/idempotency, concurrent invocation, guarded local-reference cleanup, and unchanged retryable errors.
 - [ ] Run focused API tests and the full repository quality suite.
 - [ ] Run requested specialist reviews and address all correctness findings.
 - [ ] Push the assigned output branch and prepare a PR with exact evidence.
