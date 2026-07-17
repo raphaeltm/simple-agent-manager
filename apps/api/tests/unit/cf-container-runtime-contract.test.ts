@@ -182,10 +182,12 @@ describe('cf-container runtime spike contracts', () => {
     expect(chatResolver).toContain(
       "inArray(schema.workspaces.status, ['running', 'recovery', 'sleeping'])"
     );
+    expect(chatResolver).toContain("workspace.nodeStatus !== 'running'");
+    expect(chatResolver).toContain("workspace.nodeStatus !== 'recovery'");
+    expect(chatResolver).toContain("workspace.nodeStatus !== 'sleeping'");
     expect(chatResolver).toContain(
-      "workspace.nodeStatus !== 'running' && workspace.nodeStatus !== 'sleeping'"
+      "inArray(schema.agentSessions.status, ['running', 'recovery', 'sleeping'])"
     );
-    expect(chatResolver).toContain("inArray(schema.agentSessions.status, ['running', 'sleeping'])");
     expect(chatResolver).not.toContain('The workspace container is asleep.');
     expect(containerDo).toContain(
       "return new Response('Container is stopped; create a new instant session.', { status: 410 })"

@@ -541,7 +541,7 @@ chatRoutes.post('/:sessionId/prompt', async (c) => {
     c.env,
     userId,
     undefined,
-    workspace.nodeStatus === 'sleeping'
+    workspace.nodeStatus === 'sleeping' || workspace.nodeStatus === 'recovery'
       ? { requestTimeoutMs: getCfContainerWakeTimeoutMs(c.env) }
       : undefined
   );

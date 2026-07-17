@@ -111,7 +111,11 @@ export async function resolveLiveAgentSessionForChat(
   // container proxy launches a fresh runtime and restores its latest snapshot
   // before forwarding the request. Preserve the fail-fast guard for every
   // other non-running node state.
-  if (workspace.nodeStatus !== 'running' && workspace.nodeStatus !== 'sleeping') {
+  if (
+    workspace.nodeStatus !== 'running' &&
+    workspace.nodeStatus !== 'recovery' &&
+    workspace.nodeStatus !== 'sleeping'
+  ) {
     throw errors.conflict(
       'The workspace node is no longer running. Start a new chat to create a fresh workspace.'
     );
@@ -126,7 +130,7 @@ export async function resolveLiveAgentSessionForChat(
       and(
         eq(schema.agentSessions.workspaceId, workspace.id),
         eq(schema.agentSessions.userId, userId),
-        inArray(schema.agentSessions.status, ['running', 'sleeping'])
+        inArray(schema.agentSessions.status, ['running', 'recovery', 'sleeping'])
       )
     )
     .limit(1);

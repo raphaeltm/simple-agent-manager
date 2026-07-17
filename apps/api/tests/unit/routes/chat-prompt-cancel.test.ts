@@ -259,6 +259,23 @@ describe('POST /sessions/:sessionId/prompt', () => {
     );
   });
 
+  it('uses the extended wake budget for a recovery session', async () => {
+    setupDrizzle({
+      workspace: { id: 'ws-1', nodeId: 'node-1', nodeStatus: 'recovery' },
+      agentSession: { id: 'agent-sess-1' },
+    });
+    mocks.sendPromptToAgentOnNode.mockResolvedValue({ ok: true });
+
+    const response = await postPrompt();
+
+    expect(response.status).toBe(200);
+    expect(mocks.sendPromptToAgentOnNode).toHaveBeenCalledWith(
+      'node-1', 'ws-1', 'agent-sess-1',
+      'hello agent', expect.anything(), 'user-1', undefined,
+      { requestTimeoutMs: 120_000 },
+    );
+  });
+
   it('returns 404 when no active workspace is found', async () => {
     setupDrizzle({ workspace: null, agentSession: null });
 
