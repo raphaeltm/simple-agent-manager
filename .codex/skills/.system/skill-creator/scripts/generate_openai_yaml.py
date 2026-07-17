@@ -11,6 +11,8 @@ import re
 import sys
 from pathlib import Path
 
+import yaml
+
 ACRONYMS = {
     "GH",
     "MCP",
@@ -112,9 +114,6 @@ def read_frontmatter_name(skill_dir):
         print("[ERROR] Invalid SKILL.md frontmatter format.")
         return None
     frontmatter_text = match.group(1)
-
-    import yaml
-
     try:
         frontmatter = yaml.safe_load(frontmatter_text)
     except yaml.YAMLError as exc:

@@ -1,3 +1,0 @@
-interface:
-  display_name: "Email"
-  short_description: "Email sending integration guidance — Resend (native Vercel Marketplace) with React Email templates"
