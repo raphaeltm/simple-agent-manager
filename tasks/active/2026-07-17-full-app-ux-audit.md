@@ -55,7 +55,7 @@ This fix is structural (it removes *permanent* occlusion at the top of the list 
 
 | Before | After |
 |---|---|
-| ![before](before/project-settings-general-375x667.png) | ![after](after/project-settings-general-375x667.png) |
+| ![before](https://raw.githubusercontent.com/raphaeltm/simple-agent-manager/sam/ux-audit-screenshots-2026-07-17/before/project-settings-general-375x667.png) | ![after](https://raw.githubusercontent.com/raphaeltm/simple-agent-manager/sam/ux-audit-screenshots-2026-07-17/after/project-settings-general-375x667.png) |
 
 ### F3 — Projects list card: broken metadata line (Medium)
 
@@ -67,7 +67,7 @@ This fix is structural (it removes *permanent* occlusion at the top of the list 
 
 | Before | After |
 |---|---|
-| ![before](before/lists-projects-dark-375-375x667.png) | ![after](after/lists-projects-dark-375-375x667.png) |
+| ![before](https://raw.githubusercontent.com/raphaeltm/simple-agent-manager/sam/ux-audit-screenshots-2026-07-17/before/lists-projects-dark-375-375x667.png) | ![after](https://raw.githubusercontent.com/raphaeltm/simple-agent-manager/sam/ux-audit-screenshots-2026-07-17/after/lists-projects-dark-375-375x667.png) |
 
 ### F4 — Node detail: hand-rolled danger button (Low)
 
@@ -79,7 +79,7 @@ This fix is structural (it removes *permanent* occlusion at the top of the list 
 
 | Before | After |
 |---|---|
-| ![before](before/node-detail-dark-375x667.png) | ![after](after/node-detail-dark-375x667.png) |
+| ![before](https://raw.githubusercontent.com/raphaeltm/simple-agent-manager/sam/ux-audit-screenshots-2026-07-17/before/node-detail-dark-375x667.png) | ![after](https://raw.githubusercontent.com/raphaeltm/simple-agent-manager/sam/ux-audit-screenshots-2026-07-17/after/node-detail-dark-375x667.png) |
 
 ### F5 — Onboarding wizard: step counter stated twice (Low)
 
@@ -91,7 +91,7 @@ This fix is structural (it removes *permanent* occlusion at the top of the list 
 
 | Before | After |
 |---|---|
-| ![before](before/onboarding-05-conversation-375x667.png) | ![after](after/onboarding-05-conversation-375x667.png) |
+| ![before](https://raw.githubusercontent.com/raphaeltm/simple-agent-manager/sam/ux-audit-screenshots-2026-07-17/before/onboarding-05-conversation-375x667.png) | ![after](https://raw.githubusercontent.com/raphaeltm/simple-agent-manager/sam/ux-audit-screenshots-2026-07-17/after/onboarding-05-conversation-375x667.png) |
 
 ### F6 — Buttons wrap their labels mid-word (Medium)
 
@@ -103,7 +103,7 @@ This fix is structural (it removes *permanent* occlusion at the top of the list 
 
 | Before | After |
 |---|---|
-| ![before](before/portal-triggers-page-mobile-375x667.png) | ![after](after/portal-triggers-page-mobile-375x667.png) |
+| ![before](https://raw.githubusercontent.com/raphaeltm/simple-agent-manager/sam/ux-audit-screenshots-2026-07-17/before/portal-triggers-page-mobile-375x667.png) | ![after](https://raw.githubusercontent.com/raphaeltm/simple-agent-manager/sam/ux-audit-screenshots-2026-07-17/after/portal-triggers-page-mobile-375x667.png) |
 
 ### F7 — Markdown tables crush columns to per-letter wrapping (Medium)
 
@@ -115,7 +115,7 @@ This fix is structural (it removes *permanent* occlusion at the top of the list 
 
 | Before | After |
 |---|---|
-| ![before](before/file-preview-markdown-mobile-375x667.png) | ![after](after/file-preview-markdown-mobile-375x667.png) |
+| ![before](https://raw.githubusercontent.com/raphaeltm/simple-agent-manager/sam/ux-audit-screenshots-2026-07-17/before/file-preview-markdown-mobile-375x667.png) | ![after](https://raw.githubusercontent.com/raphaeltm/simple-agent-manager/sam/ux-audit-screenshots-2026-07-17/after/file-preview-markdown-mobile-375x667.png) |
 
 ### F8 — Malformed notifications payload crashes the entire app (High, found by the new sweep)
 
@@ -143,7 +143,7 @@ This fix is structural (it removes *permanent* occlusion at the top of the list 
 
 | Before | After |
 |---|---|
-| ![before](before/sweep-workspaces-list-375x667.png) | ![after](after/sweep-workspaces-list-375x667.png) |
+| ![before](https://raw.githubusercontent.com/raphaeltm/simple-agent-manager/sam/ux-audit-screenshots-2026-07-17/before/sweep-workspaces-list-375x667.png) | ![after](https://raw.githubusercontent.com/raphaeltm/simple-agent-manager/sam/ux-audit-screenshots-2026-07-17/after/sweep-workspaces-list-375x667.png) |
 
 ### F11 — Create Workspace had no location context (Low)
 
@@ -165,9 +165,9 @@ Combined F1 + F12 result (both themes, plus the provisioning state with a two-li
 
 | Before | After |
 |---|---|
-| ![before](before/theme-light-chat-mobile-375x667.png) | ![after](after/theme-light-chat-mobile-375x667.png) |
-| ![before](before/theme-dark-chat-mobile-375x667.png) | ![after](after/theme-dark-chat-mobile-375x667.png) |
-| ![before](before/project-chat-provisioning-progress-iphone-se-375x667--375x667.png) | ![after](after/project-chat-provisioning-progress-iphone-se-375x667--375x667.png) |
+| ![before](https://raw.githubusercontent.com/raphaeltm/simple-agent-manager/sam/ux-audit-screenshots-2026-07-17/before/theme-light-chat-mobile-375x667.png) | ![after](https://raw.githubusercontent.com/raphaeltm/simple-agent-manager/sam/ux-audit-screenshots-2026-07-17/after/theme-light-chat-mobile-375x667.png) |
+| ![before](https://raw.githubusercontent.com/raphaeltm/simple-agent-manager/sam/ux-audit-screenshots-2026-07-17/before/theme-dark-chat-mobile-375x667.png) | ![after](https://raw.githubusercontent.com/raphaeltm/simple-agent-manager/sam/ux-audit-screenshots-2026-07-17/after/theme-dark-chat-mobile-375x667.png) |
+| ![before](https://raw.githubusercontent.com/raphaeltm/simple-agent-manager/sam/ux-audit-screenshots-2026-07-17/before/project-chat-provisioning-progress-iphone-se-375x667--375x667.png) | ![after](https://raw.githubusercontent.com/raphaeltm/simple-agent-manager/sam/ux-audit-screenshots-2026-07-17/after/project-chat-provisioning-progress-iphone-se-375x667--375x667.png) |
 
 ---
 
