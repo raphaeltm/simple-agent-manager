@@ -64,6 +64,14 @@ const KEEPALIVE_CALLBACK = 'renewActiveWorkKeepalive';
 const WAKE_DEGRADED_RESPONSE =
   'Workspace woke with degraded snapshot restore; retry the prompt or fork from transcript history.';
 
+const PLATFORM_REPLACEMENT_ERROR_FRAGMENT =
+  'runtime signalled the container to exit due to a new version rollout';
+
+function isPlatformReplacementError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.toLowerCase().includes(PLATFORM_REPLACEMENT_ERROR_FRAGMENT);
+}
+
 export class VmAgentContainer extends Container<Env> {
   defaultPort = 8080;
   requiredPorts = [8080];
@@ -329,6 +337,10 @@ export class VmAgentContainer extends Container<Env> {
   }
 
   override async onError(error: unknown): Promise<void> {
+    if (isPlatformReplacementError(error)) {
+      await this.markRuntimeReplacing();
+      return;
+    }
     await this.markRuntimeEnded(
       'error',
       error instanceof Error

@@ -275,6 +275,11 @@ describe('VmAgentContainer stop classification', () => {
       ) => Promise<void>;
     }
   ).onStop;
+  const onError = (
+    VmAgentContainer.prototype as unknown as {
+      onError: (this: unknown, error: unknown) => Promise<void>;
+    }
+  ).onError;
 
   function makeStopFake(status: string) {
     const put = vi.fn();
@@ -312,6 +317,24 @@ describe('VmAgentContainer stop classification', () => {
     await onStop.call(fake, { exitCode: 2, reason: 'exit' });
     expect(markRuntimeReplacing).not.toHaveBeenCalled();
     expect(markRuntimeEnded).toHaveBeenCalledWith('error', 'Container stopped: exit (2)');
+    expect(put).toHaveBeenCalledWith('lifecycleStatus', 'error');
+  });
+
+  it('classifies the Cloudflare rollout onError message as recoverable replacement', async () => {
+    const { fake, markRuntimeReplacing, markRuntimeEnded } = makeStopFake('running');
+    await onError.call(
+      fake,
+      new Error('Runtime signalled the container to exit due to a new version rollout: 0')
+    );
+    expect(markRuntimeReplacing).toHaveBeenCalledTimes(1);
+    expect(markRuntimeEnded).not.toHaveBeenCalled();
+  });
+
+  it('keeps an ordinary container error terminal', async () => {
+    const { fake, markRuntimeReplacing, markRuntimeEnded, put } = makeStopFake('running');
+    await onError.call(fake, new Error('process crashed'));
+    expect(markRuntimeReplacing).not.toHaveBeenCalled();
+    expect(markRuntimeEnded).toHaveBeenCalledWith('error', 'Container error: process crashed');
     expect(put).toHaveBeenCalledWith('lifecycleStatus', 'error');
   });
 
