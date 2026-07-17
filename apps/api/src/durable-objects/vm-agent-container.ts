@@ -64,12 +64,12 @@ const KEEPALIVE_CALLBACK = 'renewActiveWorkKeepalive';
 const WAKE_DEGRADED_RESPONSE =
   'Workspace woke with degraded snapshot restore; retry the prompt or fork from transcript history.';
 
-const PLATFORM_REPLACEMENT_ERROR_FRAGMENT =
-  'runtime signalled the container to exit due to a new version rollout';
+const PLATFORM_REPLACEMENT_ERROR_PATTERN =
+  /^Runtime signalled the container to exit due to a new version rollout:\s*0\.?$/i;
 
 function isPlatformReplacementError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
-  return message.toLowerCase().includes(PLATFORM_REPLACEMENT_ERROR_FRAGMENT);
+  return PLATFORM_REPLACEMENT_ERROR_PATTERN.test(message.trim());
 }
 
 export class VmAgentContainer extends Container<Env> {
@@ -338,6 +338,15 @@ export class VmAgentContainer extends Container<Env> {
 
   override async onError(error: unknown): Promise<void> {
     if (isPlatformReplacementError(error)) {
+      const status = await this.ctx.storage.get<LifecycleStatus>('lifecycleStatus');
+      if (status === 'stopping') {
+        await this.markRuntimeEnded('stopped', 'Container stopped by user request');
+        await this.ctx.storage.put('lifecycleStatus', 'stopped' satisfies LifecycleStatus);
+        return;
+      }
+      if (status !== 'launching' && status !== 'running') {
+        return;
+      }
       await this.markRuntimeReplacing();
       return;
     }

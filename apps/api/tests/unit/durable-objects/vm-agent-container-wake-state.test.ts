@@ -330,12 +330,57 @@ describe('VmAgentContainer stop classification', () => {
     expect(markRuntimeEnded).not.toHaveBeenCalled();
   });
 
+  it('handles a repeated rollout onError idempotently while replacing', async () => {
+    const { fake, markRuntimeReplacing, markRuntimeEnded, put } = makeStopFake('replacing');
+    await onError.call(
+      fake,
+      new Error('Runtime signalled the container to exit due to a new version rollout: 0')
+    );
+    expect(markRuntimeReplacing).not.toHaveBeenCalled();
+    expect(markRuntimeEnded).not.toHaveBeenCalled();
+    expect(put).not.toHaveBeenCalled();
+  });
+
+  it('keeps an intentional stop terminal when rollout arrives through onError', async () => {
+    const { fake, markRuntimeReplacing, markRuntimeEnded, put } = makeStopFake('stopping');
+    await onError.call(
+      fake,
+      new Error('Runtime signalled the container to exit due to a new version rollout: 0')
+    );
+    expect(markRuntimeReplacing).not.toHaveBeenCalled();
+    expect(markRuntimeEnded).toHaveBeenCalledWith('stopped', 'Container stopped by user request');
+    expect(put).toHaveBeenCalledWith('lifecycleStatus', 'stopped');
+  });
+
+  it('does not classify a crash that embeds the rollout message as replacement', async () => {
+    const { fake, markRuntimeReplacing, markRuntimeEnded, put } = makeStopFake('running');
+    const message =
+      'process crashed after reporting: Runtime signalled the container to exit due to a new version rollout: 0';
+    await onError.call(fake, new Error(message));
+    expect(markRuntimeReplacing).not.toHaveBeenCalled();
+    expect(markRuntimeEnded).toHaveBeenCalledWith('error', `Container error: ${message}`);
+    expect(put).toHaveBeenCalledWith('lifecycleStatus', 'error');
+  });
+
   it('keeps an ordinary container error terminal', async () => {
     const { fake, markRuntimeReplacing, markRuntimeEnded, put } = makeStopFake('running');
     await onError.call(fake, new Error('process crashed'));
     expect(markRuntimeReplacing).not.toHaveBeenCalled();
     expect(markRuntimeEnded).toHaveBeenCalledWith('error', 'Container error: process crashed');
     expect(put).toHaveBeenCalledWith('lifecycleStatus', 'error');
+  });
+
+  it('handles onStop followed by onError without restarting replacement', async () => {
+    const { fake, markRuntimeReplacing, markRuntimeEnded, put } = makeStopFake('running');
+    fake.ctx.storage.get = vi.fn().mockResolvedValueOnce('running').mockResolvedValue('replacing');
+    await onStop.call(fake, { exitCode: 0, reason: 'runtime_signal' });
+    await onError.call(
+      fake,
+      new Error('Runtime signalled the container to exit due to a new version rollout: 0')
+    );
+    expect(markRuntimeReplacing).toHaveBeenCalledTimes(1);
+    expect(markRuntimeEnded).not.toHaveBeenCalled();
+    expect(put).not.toHaveBeenCalled();
   });
 
   it('handles a repeated replacement stop idempotently', async () => {
