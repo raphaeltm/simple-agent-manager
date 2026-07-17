@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +17,39 @@ import (
 )
 
 func TestSyncCredential(t *testing.T) {
+	t.Run("matches the shared Go-to-API ordered rotation contract", func(t *testing.T) {
+		t.Parallel()
+
+		fixtureBytes, err := os.ReadFile("../../../../tests/fixtures/codex/credential-rotation.json")
+		if err != nil {
+			t.Fatalf("read contract fixture: %v", err)
+		}
+		var fixture struct {
+			WorkspaceID string            `json:"workspaceId"`
+			Payload     map[string]string `json:"payload"`
+		}
+		if err := json.Unmarshal(fixtureBytes, &fixture); err != nil {
+			t.Fatalf("decode contract fixture: %v", err)
+		}
+
+		controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var payload map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				t.Fatalf("decode emitted payload: %v", err)
+			}
+			if !maps.Equal(payload, fixture.Payload) {
+				t.Fatalf("emitted payload does not match shared contract")
+			}
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer controlPlane.Close()
+
+		s := &Server{config: &config.Config{ControlPlaneURL: controlPlane.URL, CallbackToken: "token", HTTPReadTimeout: 5 * time.Second}}
+		if err := s.SyncCredentialRotation(context.Background(), fixture.WorkspaceID, fixture.Payload["agentType"], fixture.Payload["credentialKind"], fixture.Payload["credential"], fixture.Payload["previousCredentialHash"]); err != nil {
+			t.Fatalf("SyncCredentialRotation returned error: %v", err)
+		}
+	})
+
 	t.Run("sends previous credential hash for an ordered active rotation", func(t *testing.T) {
 		t.Parallel()
 

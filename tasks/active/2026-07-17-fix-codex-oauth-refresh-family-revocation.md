@@ -33,6 +33,7 @@ The incident must be reproduced or directly verified using the currently install
 - [x] Instrument sanitized vm-agent sync and control-plane rejection milestones without credential, path, token-body, or Authorization-header fields.
 - [x] Add Go tests for watcher rotation, lifecycle snapshot ordering, final ordered sync, crash-restart credential reuse, callback contract, permanent superseded handling, and configuration.
 - [x] Add API/DO tests for malformed payload rejection, hash mismatch, atomic concurrent rotation, encrypted dual-write, and sanitized persisted errors.
+- [x] Add a shared Go/TypeScript contract fixture proving the vm-agent ordered rotation payload is accepted and persisted by the API route.
 - [x] Run focused Go/API validation, Go race detection, repository typecheck, lint, and manifest synchronization checks.
 - [ ] Complete `go-specialist`, `security-auditor`, `test-engineer`, `constitution-validator`, `doc-sync-validator`, and `task-completion-validator` reviews; address all correctness findings.
 - [ ] Prepare and push the PR branch, then report `STAGING_LEASE_REQUEST` and wait for the parent workflow coordinator.

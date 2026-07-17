@@ -5,6 +5,7 @@
  * and verify actual HTTP responses — not source code patterns.
  */
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
@@ -33,6 +34,18 @@ vi.mock('../../../src/services/encryption', () => ({
 }));
 
 const { decrypt, encrypt } = await import('../../../src/services/encryption');
+
+const rotationFixture = JSON.parse(
+  readFileSync(new URL('../../../../../tests/fixtures/codex/credential-rotation.json', import.meta.url), 'utf8')
+) as {
+  workspaceId: string;
+  payload: {
+    agentType: string;
+    credentialKind: string;
+    credential: string;
+    previousCredentialHash: string;
+  };
+};
 
 describe('POST /workspaces/:id/agent-credential-sync', () => {
   let app: Hono<{ Bindings: Env }>;
@@ -72,6 +85,24 @@ describe('POST /workspaces/:id/agent-credential-sync', () => {
     expect(encrypt).not.toHaveBeenCalled();
     expect(mockDB.update).not.toHaveBeenCalled();
   });
+
+	it('accepts the shared Go-to-API ordered rotation contract and persists it', async () => {
+		expect(rotationFixture.workspaceId).toBe('ws-123');
+		setupDBMocks(
+			{ userId: 'user-1', nodeId: 'node-1' },
+			{ id: 'cred-1', encryptedToken: 'enc', iv: 'iv', isActive: true }
+		);
+		(decrypt as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+			'{"auth_mode":"Chatgpt","tokens":{"refresh_token":"fixture-prior-not-a-secret"}}'
+		);
+
+		const res = await postSync(rotationFixture.payload);
+
+		expect(res.status).toBe(200);
+		expect(await res.json()).toEqual({ success: true, updated: true });
+		expect(encrypt).toHaveBeenCalledWith(rotationFixture.payload.credential, 'test-key');
+		expect(d1PreparedStmt.run).toHaveBeenCalled();
+	});
 
   it('rejects a stale concurrent rotation when its previous credential hash no longer matches', async () => {
     setupDBMocks(
