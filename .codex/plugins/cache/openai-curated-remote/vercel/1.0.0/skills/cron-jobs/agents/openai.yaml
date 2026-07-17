@@ -1,3 +1,0 @@
-interface:
-  display_name: "Cron Jobs"
-  short_description: "Vercel Cron Jobs configuration and best practices"

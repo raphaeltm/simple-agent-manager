@@ -1,3 +1,0 @@
-interface:
-  display_name: "Runtime Cache"
-  short_description: "Vercel Runtime Cache API guidance — ephemeral per-region key-value cache with tag-based invalidation"
