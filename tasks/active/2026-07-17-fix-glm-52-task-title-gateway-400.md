@@ -40,7 +40,7 @@ Scope is limited to the production `task-title` utility request path. The separa
 - **test-engineer — PASS:** exact GLM-5.2 payload omission, long-prompt success, safe diagnostics, invalid/bounded config, 400, 408, 429, 500, timeout, empty output, and fallback paths are covered; focused title plus summarize suites pass 54/54.
 - **constitution-validator — PASS:** model behavior is isolated in an explicit capability boundary; model, title length, timeouts, retries, delays, and diagnostic bounds remain configuration-driven with documented defaults.
 - **cloudflare-specialist — PASS:** Worker-safe AbortSignal timeout remains; provider body reads are streamed and bounded; no D1/KV/R2/binding or deployment configuration changes.
-- **doc-sync-validator — PASS:** Env interface, , shared defaults/exports, and public configuration reference agree on GLM-5.2 and .
+- **doc-sync-validator — PASS:** Env interface, `.env.example`, shared defaults/exports, and public configuration reference agree on GLM-5.2 and `TASK_TITLE_ERROR_DIAGNOSTIC_MAX_LENGTH`.
 - **task-completion-validator — WARN (expected pre-lease):** Checks A, B, D, E, and F pass; code-backed criteria and tests are covered. Live provider matrix, staging/production health, archive, merge, and lease-release criteria intentionally remain open and block final PASS.
 
 ## Acceptance Criteria
