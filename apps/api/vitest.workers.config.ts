@@ -32,6 +32,30 @@ const workersTestTimeoutMs = readPositiveInteger(
 const databaseMigrations = await readD1Migrations('./src/db/migrations');
 const observabilityMigrations = await readD1Migrations('./src/db/migrations/observability');
 
+const EXPECTED_DO_REJECTION_PATTERNS = [
+  /Chat session .* not found/,
+  /Session .* not found/,
+  /Session .* is stopped and cannot accept messages/,
+  /session message limit/i,
+  /Mailbox message limit reached/,
+  /Invalid ACP session transition/,
+  /Node mismatch/,
+  /Cannot fork session in/,
+  /node_lifecycle_(?:conflict|not_found)/,
+] as const;
+
+function isExpectedWorkerTestRejection(error: Error): boolean {
+  const stack = error.stack ?? '';
+  const isWorkerRpcError =
+    stack.includes('/tests/workers/') ||
+    stack.includes('@cloudflare/vitest-pool-workers') ||
+    (error as Error & { remote?: boolean }).remote === true;
+  return (
+    isWorkerRpcError &&
+    EXPECTED_DO_REJECTION_PATTERNS.some((pattern) => pattern.test(error.message))
+  );
+}
+
 export default defineConfig({
   plugins: [
     cloudflareTest({
@@ -110,6 +134,11 @@ export default defineConfig({
     }),
   ],
   test: {
+    // workerd reports caught DO method rejections a second time through the RPC harness.
+    // Filter only rejection messages asserted by worker tests; every other error remains fatal.
+    onUnhandledError(error) {
+      if (isExpectedWorkerTestRejection(error)) return false;
+    },
     fileParallelism: false,
     globals: true,
     include: ['tests/workers/**/*.test.ts'],
