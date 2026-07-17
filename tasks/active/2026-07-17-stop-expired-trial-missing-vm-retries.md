@@ -34,7 +34,7 @@ A second invocation encountering a fresh deletion claim will skip it as concurre
 - [x] Add scheduler scenarios for finalization after absence, repeated invocation/idempotency, concurrent invocation, guarded local-reference cleanup, and unchanged retryable errors.
 - [x] Run focused API tests and the full repository quality suite.
 - [ ] Run requested specialist reviews and address all correctness findings.
-- [ ] Push the assigned output branch and prepare a PR with exact evidence.
+- [x] Push the assigned output branch and prepare a PR with exact evidence.
 - [ ] Request `STAGING_LEASE_REQUEST`; do not deploy or merge until `STAGING_LEASE_GRANTED`.
 - [ ] After lease grant, verify the cleanup behavior on staging, merge with green gates, monitor production deployment and behavior, release the lease, and complete the SAM task.
 
