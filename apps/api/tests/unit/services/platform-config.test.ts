@@ -41,6 +41,18 @@ function createD1(sqlite: Database.Database): D1Database {
         },
       };
     },
+    async batch(statements: D1PreparedStatement[]) {
+      sqlite.exec('BEGIN');
+      const results: D1Result[] = [];
+      try {
+        for (const statement of statements) results.push(await statement.run());
+        sqlite.exec('COMMIT');
+        return results;
+      } catch (err) {
+        sqlite.exec('ROLLBACK');
+        throw err;
+      }
+    },
   } as unknown as D1Database;
 }
 
@@ -67,6 +79,7 @@ function createEnv(overrides: Partial<Env> = {}): Env {
       is_enabled INTEGER NOT NULL DEFAULT 1,
       created_by TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_by TEXT,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
   `);
@@ -133,6 +146,96 @@ describe('platform config resolver', () => {
     expect(await getGoogleInfraOAuthConfig(env)).toEqual({
       clientId: 'env-google-infra-client',
       clientSecret: 'env-google-infra-secret',
+    });
+  });
+
+  it('resolves runtime infrastructure OAuth before env without changing Google login', async () => {
+    const env = createEnv();
+    await savePlatformIntegrationConfig(env, {
+      googleInfrastructure: {
+        clientId: 'runtime-infra-client',
+        clientSecret: 'runtime-infra-secret',
+      },
+    }, 'admin-1');
+
+    await expect(getGoogleInfraOAuthConfig(env)).resolves.toEqual({
+      clientId: 'runtime-infra-client',
+      clientSecret: 'runtime-infra-secret',
+    });
+    await expect(getGoogleLoginOAuthConfig(env)).resolves.toEqual({
+      clientId: 'env-google-login-client',
+      clientSecret: 'env-google-login-secret',
+    });
+    await expect(getPlatformConfigStatus(env)).resolves.toMatchObject({
+      integrations: {
+        googleInfrastructureOAuth: {
+          configured: true,
+          source: 'runtime',
+          fields: {
+            clientId: { updatedBy: 'admin-1' },
+            clientSecret: { updatedBy: 'admin-1' },
+          },
+        },
+      },
+    });
+  });
+
+  it('atomically removes runtime infrastructure OAuth and reveals env fallback', async () => {
+    const env = createEnv();
+    await savePlatformIntegrationConfig(env, {
+      googleInfrastructure: {
+        clientId: 'runtime-infra-client',
+        clientSecret: 'runtime-infra-secret',
+      },
+    }, 'admin-1');
+
+    await savePlatformIntegrationConfig(
+      env,
+      { googleInfrastructure: { remove: true } },
+      'admin-2',
+    );
+
+    await expect(getGoogleInfraOAuthConfig(env)).resolves.toEqual({
+      clientId: 'env-google-infra-client',
+      clientSecret: 'env-google-infra-secret',
+    });
+    const runtimeSetting = await env.DATABASE.prepare(
+      "SELECT value FROM platform_settings WHERE key = 'integration.googleInfrastructure.clientId'",
+    ).first();
+    const runtimeSecret = await env.DATABASE.prepare(
+      "SELECT id FROM platform_credentials WHERE provider = 'google-infrastructure'",
+    ).first();
+    expect(runtimeSetting).toBeFalsy();
+    expect(runtimeSecret).toBeFalsy();
+  });
+
+  it('leaves the previous infrastructure pair usable when the atomic batch fails', async () => {
+    const env = createEnv();
+    await savePlatformIntegrationConfig(env, {
+      googleInfrastructure: {
+        clientId: 'stable-infra-client',
+        clientSecret: 'stable-infra-secret',
+      },
+    }, 'admin-1');
+    await env.DATABASE.prepare(
+      `CREATE TRIGGER reject_infrastructure_rotation
+       BEFORE UPDATE ON platform_credentials
+       WHEN OLD.provider = 'google-infrastructure'
+       BEGIN
+         SELECT RAISE(ABORT, 'injected batch failure');
+       END`,
+    ).run();
+
+    await expect(savePlatformIntegrationConfig(env, {
+      googleInfrastructure: {
+        clientId: 'replacement-client',
+        clientSecret: 'replacement-secret',
+      },
+    }, 'admin-2')).rejects.toThrow('injected batch failure');
+
+    await expect(getGoogleInfraOAuthConfig(env)).resolves.toEqual({
+      clientId: 'stable-infra-client',
+      clientSecret: 'stable-infra-secret',
     });
   });
 

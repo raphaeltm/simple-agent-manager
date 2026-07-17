@@ -1,0 +1,32 @@
+{
+  "name": "google-contacts",
+  "version": "1.0.0",
+  "description": "Find people and contact details from Google Contacts.",
+  "author": {
+    "name": "OpenAI",
+    "url": "https://openai.com"
+  },
+  "apps": "./.app.json",
+  "interface": {
+    "displayName": "Google Contacts",
+    "shortDescription": "Reference saved contact details",
+    "longDescription": "Search Google Contacts and directory entries to find people by name, email, company, or domain, then read contact details such as email, phone, address, birthday, and organization.",
+    "developerName": "OpenAI",
+    "category": "Productivity",
+    "capabilities": [
+      "Read"
+    ],
+    "websiteURL": "https://contacts.google.com",
+    "privacyPolicyURL": "https://policies.google.com/privacy",
+    "termsOfServiceURL": "https://policies.google.com/terms",
+    "supportURL": "https://help.openai.com",
+    "brandColor": "#4285F4",
+    "composerIcon": "./assets/icon.png",
+    "logo": "./assets/icon.png",
+    "screenshots": [],
+    "defaultPrompt": [
+      "Find contact details for this person",
+      "Look up people at this company"
+    ]
+  }
+}

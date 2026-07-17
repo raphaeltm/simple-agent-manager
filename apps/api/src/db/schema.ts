@@ -2024,6 +2024,8 @@ export const platformCredentials = sqliteTable(
     createdAt: text('created_at')
       .notNull()
       .default(sql`CURRENT_TIMESTAMP`),
+    /** Admin user who most recently rotated this credential. */
+    updatedBy: text('updated_by').references(() => users.id),
     updatedAt: text('updated_at')
       .notNull()
       .default(sql`CURRENT_TIMESTAMP`),

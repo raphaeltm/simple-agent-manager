@@ -1,6 +1,13 @@
 import type { Provider, ProviderConfig } from '@simple-agent-manager/providers';
 import { createProvider, GcpProvider } from '@simple-agent-manager/providers';
-import { computeAssembler, type CredentialProvider, type CredentialSource, type GcpOidcCredential } from '@simple-agent-manager/shared';
+import {
+  computeAssembler,
+  type CredentialProvider,
+  type CredentialSource,
+  GCP_CREDENTIAL_VERSION,
+  type GcpCredential,
+  type GcpCredentialMetadata,
+} from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
 
@@ -27,6 +34,9 @@ export function serializeCredentialToken(
       return JSON.stringify({ secretKey: fields.secretKey, projectId: fields.projectId });
     case 'gcp':
       return JSON.stringify({
+        version: GCP_CREDENTIAL_VERSION,
+        provider: 'gcp',
+        authType: 'workload-identity',
         gcpProjectId: fields.gcpProjectId,
         gcpProjectNumber: fields.gcpProjectNumber,
         serviceAccountEmail: fields.serviceAccountEmail,
@@ -114,10 +124,40 @@ export function buildProviderConfig(
   }
 }
 
+function requiredGcpString(
+  obj: Record<string, unknown>,
+  field: string,
+): string {
+  const value = obj[field];
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    throw new Error(`Invalid GCP credential format: missing ${field}`);
+  }
+  return value;
+}
+
+/** Return the browser-safe projection of a normalized GCP credential. */
+export function toGcpCredentialMetadata(credential: GcpCredential): GcpCredentialMetadata {
+  return {
+    authType: credential.authType,
+    gcpProjectId: credential.gcpProjectId,
+    serviceAccountEmail: credential.serviceAccountEmail,
+    defaultZone: credential.defaultZone,
+    ...(credential.authType === 'service-account-key'
+      ? { privateKeyId: credential.privateKeyId }
+      : {}),
+  };
+}
+
+/** Serialize a normalized, versioned GCP credential for encrypted storage. */
+export function serializeGcpCredential(credential: GcpCredential): string {
+  return JSON.stringify(credential);
+}
+
 /**
- * Parse a decrypted GCP credential token into structured GcpOidcCredential fields.
+ * Parse a decrypted GCP credential token. Existing unversioned blobs are
+ * normalized as workload-identity credentials for migration-free compatibility.
  */
-export function parseGcpCredential(decryptedToken: string): GcpOidcCredential {
+export function parseGcpCredential(decryptedToken: string): GcpCredential {
   let parsed: unknown;
   try {
     parsed = JSON.parse(decryptedToken);
@@ -125,25 +165,44 @@ export function parseGcpCredential(decryptedToken: string): GcpOidcCredential {
     throw new Error('Invalid GCP credential format: malformed stored data');
   }
   const obj = expectJsonRecord(parsed, 'provider.gcp_credential');
-  if (
-    typeof obj?.gcpProjectId !== 'string' || !obj.gcpProjectId ||
-    typeof obj?.gcpProjectNumber !== 'string' || !obj.gcpProjectNumber ||
-    typeof obj?.serviceAccountEmail !== 'string' || !obj.serviceAccountEmail ||
-    typeof obj?.wifPoolId !== 'string' || !obj.wifPoolId ||
-    typeof obj?.wifProviderId !== 'string' || !obj.wifProviderId ||
-    typeof obj?.defaultZone !== 'string' || !obj.defaultZone
-  ) {
-    throw new Error('Invalid GCP credential format: missing required fields');
+  if (typeof obj.provider === 'string' && obj.provider !== 'gcp') {
+    throw new Error(`Invalid GCP credential format: provider is ${obj.provider}`);
   }
-  return {
-    provider: 'gcp',
-    gcpProjectId: obj.gcpProjectId,
-    gcpProjectNumber: obj.gcpProjectNumber,
-    serviceAccountEmail: obj.serviceAccountEmail,
-    wifPoolId: obj.wifPoolId,
-    wifProviderId: obj.wifProviderId,
-    defaultZone: obj.defaultZone,
-  };
+
+  const legacy = obj.authType === undefined && obj.version === undefined;
+  if (!legacy && obj.version !== GCP_CREDENTIAL_VERSION) {
+    throw new Error('Invalid GCP credential format: unsupported version');
+  }
+  const authType = legacy ? 'workload-identity' : obj.authType;
+
+  if (authType === 'workload-identity') {
+    return {
+      version: GCP_CREDENTIAL_VERSION,
+      provider: 'gcp',
+      authType,
+      gcpProjectId: requiredGcpString(obj, 'gcpProjectId'),
+      gcpProjectNumber: requiredGcpString(obj, 'gcpProjectNumber'),
+      serviceAccountEmail: requiredGcpString(obj, 'serviceAccountEmail'),
+      wifPoolId: requiredGcpString(obj, 'wifPoolId'),
+      wifProviderId: requiredGcpString(obj, 'wifProviderId'),
+      defaultZone: requiredGcpString(obj, 'defaultZone'),
+    };
+  }
+
+  if (authType === 'service-account-key') {
+    return {
+      version: GCP_CREDENTIAL_VERSION,
+      provider: 'gcp',
+      authType,
+      gcpProjectId: requiredGcpString(obj, 'gcpProjectId'),
+      serviceAccountEmail: requiredGcpString(obj, 'serviceAccountEmail'),
+      privateKeyId: requiredGcpString(obj, 'privateKeyId'),
+      privateKey: requiredGcpString(obj, 'privateKey'),
+      defaultZone: requiredGcpString(obj, 'defaultZone'),
+    };
+  }
+
+  throw new Error('Invalid GCP credential format: unsupported authType');
 }
 
 /**
@@ -222,7 +281,7 @@ export async function createProviderForUser(
   }
 
   // --- Fallback: legacy single-table lookup ----------------------------------
-  return createProviderForUserLegacy(db, userId, encryptionKey, env, targetProvider);
+  return createProviderForUserLegacy(db, userId, encryptionKey, env, targetProvider, projectId);
 }
 
 /**
@@ -272,7 +331,8 @@ async function resolveProviderViaCC(
     const gcpCred = parseGcpCredential(ccConfig.token);
     const { getGcpAccessToken } = await import('./gcp-sts');
     const cacheUserId = ccConfig.isPlatform ? `platform:${userId}` : userId;
-    const tokenProvider = () => getGcpAccessToken(cacheUserId, gcpCred.gcpProjectId, gcpCred, env);
+    const cacheProjectId = projectId ?? gcpCred.gcpProjectId;
+    const tokenProvider = () => getGcpAccessToken(cacheUserId, cacheProjectId, gcpCred, env);
     const provider = new GcpProvider(gcpCred.gcpProjectId, tokenProvider, gcpCred.defaultZone);
     return { provider, providerName, credentialSource };
   }
@@ -290,6 +350,7 @@ async function createProviderForUserLegacy(
   encryptionKey: string,
   env: Env & Partial<HetznerCapacityRetryEnv>,
   targetProvider?: CredentialProvider,
+  projectId?: string | null,
 ): Promise<{ provider: Provider; providerName: CredentialProvider; credentialSource: CredentialSource } | null> {
   // 1. Try user's own credential first
   const conditions = [
@@ -314,7 +375,8 @@ async function createProviderForUserLegacy(
     if (providerName === 'gcp') {
       const gcpCred = parseGcpCredential(decryptedToken);
       const { getGcpAccessToken } = await import('./gcp-sts');
-      const tokenProvider = () => getGcpAccessToken(userId, gcpCred.gcpProjectId, gcpCred, env);
+      const cacheProjectId = projectId ?? gcpCred.gcpProjectId;
+      const tokenProvider = () => getGcpAccessToken(userId, cacheProjectId, gcpCred, env);
 
       const provider = new GcpProvider(
         gcpCred.gcpProjectId,
@@ -339,7 +401,8 @@ async function createProviderForUserLegacy(
   if (platformProvider === 'gcp') {
     const gcpCred = parseGcpCredential(decryptedToken);
     const { getGcpAccessToken } = await import('./gcp-sts');
-    const tokenProvider = () => getGcpAccessToken(`platform:${userId}`, gcpCred.gcpProjectId, gcpCred, env);
+    const cacheProjectId = projectId ?? gcpCred.gcpProjectId;
+    const tokenProvider = () => getGcpAccessToken(`platform:${userId}`, cacheProjectId, gcpCred, env);
 
     const provider = new GcpProvider(
       gcpCred.gcpProjectId,

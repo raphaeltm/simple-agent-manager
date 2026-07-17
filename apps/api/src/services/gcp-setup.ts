@@ -4,6 +4,7 @@ import {
   DEFAULT_GCP_SERVICE_ACCOUNT_ID,
   DEFAULT_GCP_WIF_POOL_ID,
   DEFAULT_GCP_WIF_PROVIDER_ID,
+  GCP_CREDENTIAL_VERSION,
 } from '@simple-agent-manager/shared';
 import * as v from 'valibot';
 
@@ -608,7 +609,9 @@ export async function runGcpSetup(
   onProgress?.('grant_project_roles', 'done');
 
   return {
+    version: GCP_CREDENTIAL_VERSION,
     provider: 'gcp',
+    authType: 'workload-identity',
     gcpProjectId,
     gcpProjectNumber: projectNumber,
     serviceAccountEmail: saEmail,

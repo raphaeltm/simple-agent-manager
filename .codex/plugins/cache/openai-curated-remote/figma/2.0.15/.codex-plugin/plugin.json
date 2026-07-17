@@ -1,0 +1,52 @@
+{
+  "apps": "./.app.json",
+  "author": {
+    "name": "Figma",
+    "url": "https://www.figma.com"
+  },
+  "description": "Figma workflows for design implementation, Code Connect templates, and design system rule generation.",
+  "homepage": "https://www.figma.com",
+  "interface": {
+    "brandColor": "#1ABCFE",
+    "brandColorDark": "#1ABCFE",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "category": "Creativity",
+    "composerIcon": "./assets/composer-icon.png",
+    "defaultPrompt": [
+      "Inspect a Figma design and implement it in code",
+      "Create Code Connect templates for my components",
+      "Build or update a screen in Figma"
+    ],
+    "developerName": "Figma",
+    "displayName": "Figma",
+    "logo": "./assets/logo.png",
+    "logoDark": "./assets/logo-dark.png",
+    "longDescription": "Figma workflows for implementing designs in code, creating Code Connect templates for published Figma components, and generating project-specific design system rules for repeatable Figma-to-code work.",
+    "privacyPolicyURL": "https://www.figma.com/legal/privacy/",
+    "screenshots": [],
+    "shortDescription": "Design-to-code workflows powered by the Figma integration",
+    "termsOfServiceURL": "https://www.figma.com/legal/developer-terms/",
+    "websiteURL": "https://www.figma.com"
+  },
+  "keywords": [
+    "figma",
+    "design",
+    "prototyping",
+    "collaboration",
+    "developer handoff",
+    "design systems",
+    "design-to-code",
+    "ui-implementation",
+    "code-connect",
+    "design-system"
+  ],
+  "license": "LicenseRef-Figma-Developer-Terms",
+  "name": "figma",
+  "repository": "https://github.com/openai/plugins",
+  "skills": "./skills/",
+  "version": "2.0.15"
+}
