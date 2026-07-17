@@ -317,7 +317,6 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
       // a sibling refresh consumed it — versus a transient upstream fault).
       const safeError: Record<string, string> = { error: 'upstream_error' };
       let upstreamErrorCode: string | null = null;
-      let upstreamErrorMessage: string | null = null;
       const upstreamContentType = upstreamResponse.headers.get('Content-Type');
       let rawBody = '';
       try {
@@ -333,7 +332,6 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
           upstreamErrorCode = parsed.error;
           if (typeof parsed.error_description === 'string') {
             safeError.error_description = parsed.error_description;
-            upstreamErrorMessage = parsed.error_description;
           }
         } else if (parsed.error && typeof parsed.error === 'object') {
           // OpenAI nested form: { error: { code, message, type } }.
@@ -344,7 +342,6 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
           }
           if (typeof nested.message === 'string') {
             safeError.error_description = nested.message;
-            upstreamErrorMessage = nested.message;
           }
         }
       } catch {
