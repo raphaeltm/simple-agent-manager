@@ -98,6 +98,7 @@ export const CreateAgentSessionAgentRequestSchema = z.object({
   label: z.string().nullable(),
   chatSessionId: z.string().optional(),
   projectId: z.string().optional(),
+  workspaceCallbackToken: z.string().min(1),
   mcpServers: z
     .array(
       z.object({

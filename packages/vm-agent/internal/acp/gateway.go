@@ -139,6 +139,9 @@ type GatewayConfig struct {
 	SessionID string
 	// CallbackToken is the JWT for authenticating with the control plane.
 	CallbackToken string
+	// CallbackTokenWorkspaceScoped confirms CallbackToken did not come from the
+	// node-token compatibility fallback. Workspace-only endpoints fail closed.
+	CallbackTokenWorkspaceScoped bool
 	// ContainerResolver returns the devcontainer's Docker container ID.
 	ContainerResolver func() (string, error)
 	// ContainerUser is the user to run as inside the container.

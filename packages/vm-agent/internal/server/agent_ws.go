@@ -289,8 +289,11 @@ func (s *Server) getOrCreateSessionHost(hostKey, workspaceID, sessionID string, 
 		slog.Info("SessionHost created with previous ACP session ID",
 			"workspace", workspaceID, "acpSessionId", session.AcpSessionID, "agentType", session.AgentType)
 	}
-	if callbackToken := s.callbackTokenForWorkspace(workspaceID); callbackToken != "" {
+	if callbackToken := s.workspaceCallbackToken(workspaceID); callbackToken != "" {
 		cfg.CallbackToken = callbackToken
+		cfg.CallbackTokenWorkspaceScoped = true
+	} else {
+		cfg.CallbackTokenWorkspaceScoped = false
 	}
 	taskCtx, hasTaskCtx := s.sessionTaskCtx[hostKey]
 	if !hasTaskCtx && s.config != nil && s.config.TaskID != "" && s.config.ProjectID != "" && workspaceID == strings.TrimSpace(s.config.WorkspaceID) {

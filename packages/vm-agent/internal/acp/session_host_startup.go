@@ -244,7 +244,8 @@ func (h *SessionHost) injectAuthFileCredential(
 
 func (h *SessionHost) codexRefreshProxyEnv(agentType string, cred *agentCredential) (string, bool) {
 	if agentType != "openai-codex" || cred.credentialKind != "oauth-token" ||
-		h.config.ControlPlaneURL == "" || h.config.CallbackToken == "" {
+		h.config.ControlPlaneURL == "" || h.config.CallbackToken == "" ||
+		!h.config.CallbackTokenWorkspaceScoped {
 		return "", false
 	}
 	u, err := url.Parse(strings.TrimSuffix(h.config.ControlPlaneURL, "/") + "/api/auth/codex-refresh")

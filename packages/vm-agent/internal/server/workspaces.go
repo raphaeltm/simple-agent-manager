@@ -961,11 +961,12 @@ func (s *Server) handleCreateAgentSession(w http.ResponseWriter, r *http.Request
 	}
 
 	var body struct {
-		SessionID     string               `json:"sessionId"`
-		Label         string               `json:"label"`
-		ChatSessionID string               `json:"chatSessionId"` // Chat session ID for message routing (warm node reuse)
-		ProjectID     string               `json:"projectId"`     // Project ID for late-init of message reporter (manual nodes)
-		McpServers    []acp.McpServerEntry `json:"mcpServers,omitempty"`
+		SessionID              string               `json:"sessionId"`
+		Label                  string               `json:"label"`
+		ChatSessionID          string               `json:"chatSessionId"` // Chat session ID for message routing (warm node reuse)
+		ProjectID              string               `json:"projectId"`     // Project ID for late-init of message reporter (manual nodes)
+		WorkspaceCallbackToken string               `json:"workspaceCallbackToken"`
+		McpServers             []acp.McpServerEntry `json:"mcpServers,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -974,6 +975,13 @@ func (s *Server) handleCreateAgentSession(w http.ResponseWriter, r *http.Request
 	if strings.TrimSpace(body.SessionID) == "" {
 		writeError(w, http.StatusBadRequest, "sessionId is required")
 		return
+	}
+	if workspaceToken := strings.TrimSpace(body.WorkspaceCallbackToken); workspaceToken != "" {
+		if _, err := s.jwtValidator.ValidateWorkspaceCallbackToken(workspaceToken, workspaceID); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid workspace callback token")
+			return
+		}
+		s.upsertWorkspaceRuntime(workspaceID, "", "", "", workspaceToken)
 	}
 
 	chatSID := strings.TrimSpace(body.ChatSessionID)

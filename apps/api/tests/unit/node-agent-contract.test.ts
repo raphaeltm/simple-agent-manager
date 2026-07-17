@@ -26,8 +26,8 @@ import {
   WorkspaceReadyRequestSchema,
   WorkspaceReadyResponseSchema,
 } from '@simple-agent-manager/shared';
-import { exportPKCS8, exportSPKI,generateKeyPair } from 'jose';
-import { afterEach,beforeAll, describe, expect, it, vi } from 'vitest';
+import { exportPKCS8, exportSPKI, generateKeyPair } from 'jose';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 // =============================================================================
 // Key generation for JWT tests
@@ -175,6 +175,7 @@ describe('Contract schemas: Control Plane -> VM Agent', () => {
       const request = {
         sessionId: 'sess-abc123',
         label: 'My Session',
+        workspaceCallbackToken: 'workspace-jwt',
       };
       const result = CreateAgentSessionAgentRequestSchema.safeParse(request);
       expect(result.success).toBe(true);
@@ -184,6 +185,7 @@ describe('Contract schemas: Control Plane -> VM Agent', () => {
       const request = {
         sessionId: 'sess-abc123',
         label: 'My Session',
+        workspaceCallbackToken: 'workspace-jwt',
         chatSessionId: 'chat-abc123',
         projectId: 'proj-abc123',
         mcpServers: [
@@ -201,6 +203,7 @@ describe('Contract schemas: Control Plane -> VM Agent', () => {
       const request = {
         sessionId: 'sess-abc123',
         label: null,
+        workspaceCallbackToken: 'workspace-jwt',
       };
       const result = CreateAgentSessionAgentRequestSchema.safeParse(request);
       expect(result.success).toBe(true);
@@ -840,6 +843,7 @@ describe('Node Agent client functions send correct payloads', () => {
         token: 'mock-jwt',
         expiresAt: new Date().toISOString(),
       }),
+      signCallbackToken: vi.fn().mockResolvedValue('workspace-jwt'),
     }));
 
     vi.doMock('../../src/services/telemetry', () => ({
@@ -909,6 +913,7 @@ describe('Node Agent client functions send correct payloads', () => {
         token: 'mock-jwt',
         expiresAt: new Date().toISOString(),
       }),
+      signCallbackToken: vi.fn().mockResolvedValue('workspace-jwt'),
     }));
 
     vi.doMock('../../src/services/telemetry', () => ({
@@ -948,6 +953,7 @@ describe('Node Agent client functions send correct payloads', () => {
         token: 'mock-jwt',
         expiresAt: new Date().toISOString(),
       }),
+      signCallbackToken: vi.fn().mockResolvedValue('workspace-jwt'),
     }));
 
     vi.doMock('../../src/services/telemetry', () => ({
@@ -989,7 +995,7 @@ describe('Node Agent client functions send correct payloads', () => {
       'user-123',
       'chat-123',
       'proj-123',
-      { url: 'https://api.example.com/mcp', token: 'mcp-token' },
+      { url: 'https://api.example.com/mcp', token: 'mcp-token' }
     );
 
     const parsedBody = JSON.parse(capturedBody!);
@@ -999,6 +1005,7 @@ describe('Node Agent client functions send correct payloads', () => {
     expect(parsedBody.label).toBe('Test Session');
     expect(parsedBody.chatSessionId).toBe('chat-123');
     expect(parsedBody.projectId).toBe('proj-123');
+    expect(parsedBody.workspaceCallbackToken).toBe('workspace-jwt');
     expect(parsedBody.mcpServers).toEqual([
       { url: 'https://api.example.com/mcp', token: 'mcp-token' },
     ]);
@@ -1012,6 +1019,7 @@ describe('Node Agent client functions send correct payloads', () => {
         token: 'mock-jwt',
         expiresAt: new Date().toISOString(),
       }),
+      signCallbackToken: vi.fn().mockResolvedValue('workspace-jwt'),
     }));
 
     vi.doMock('../../src/services/telemetry', () => ({
@@ -1043,6 +1051,7 @@ describe('Node Agent client functions send correct payloads', () => {
         token: 'mock-jwt',
         expiresAt: new Date().toISOString(),
       }),
+      signCallbackToken: vi.fn().mockResolvedValue('workspace-jwt'),
     }));
 
     vi.doMock('../../src/services/telemetry', () => ({
@@ -1075,6 +1084,7 @@ describe('Node Agent client functions send correct payloads', () => {
         token: 'mock-jwt',
         expiresAt: new Date().toISOString(),
       }),
+      signCallbackToken: vi.fn().mockResolvedValue('workspace-jwt'),
     }));
 
     vi.doMock('../../src/services/telemetry', () => ({
@@ -1082,9 +1092,13 @@ describe('Node Agent client functions send correct payloads', () => {
     }));
 
     vi.doMock('../../src/services/fetch-timeout', () => ({
-      fetchWithTimeout: vi.fn().mockRejectedValue(
-        new Error('Request timed out after 30000ms: https://node-abc.vm.example.com:8443/workspaces/ws-test')
-      ),
+      fetchWithTimeout: vi
+        .fn()
+        .mockRejectedValue(
+          new Error(
+            'Request timed out after 30000ms: https://node-abc.vm.example.com:8443/workspaces/ws-test'
+          )
+        ),
       getTimeoutMs: vi.fn().mockReturnValue(30000),
     }));
 

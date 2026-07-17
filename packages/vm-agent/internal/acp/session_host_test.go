@@ -3227,10 +3227,11 @@ func TestCodexRefreshProxyEnv(t *testing.T) {
 
 	host := NewSessionHost(SessionHostConfig{
 		GatewayConfig: GatewayConfig{
-			WorkspaceID:     "test-workspace",
-			SessionID:       "test-session",
-			ControlPlaneURL: "https://api.example.com/",
-			CallbackToken:   "token with spaces",
+			WorkspaceID:                  "test-workspace",
+			SessionID:                    "test-session",
+			ControlPlaneURL:              "https://api.example.com/",
+			CallbackToken:                "token with spaces",
+			CallbackTokenWorkspaceScoped: true,
 		},
 		MessageBufferSize: 100,
 	})
@@ -3243,6 +3244,17 @@ func TestCodexRefreshProxyEnv(t *testing.T) {
 	want := "CODEX_REFRESH_TOKEN_URL_OVERRIDE=https://api.example.com/api/auth/codex-refresh?token=token+with+spaces"
 	if envVar != want {
 		t.Fatalf("envVar = %q, want %q", envVar, want)
+	}
+}
+
+func TestCodexRefreshProxyEnvRejectsNodeScopedToken(t *testing.T) {
+	t.Parallel()
+	host := NewSessionHost(SessionHostConfig{GatewayConfig: GatewayConfig{
+		ControlPlaneURL: "https://api.example.com", CallbackToken: "node-token",
+	}})
+	defer host.Stop()
+	if envVar, ok := host.codexRefreshProxyEnv("openai-codex", &agentCredential{credentialKind: "oauth-token"}); ok || envVar != "" {
+		t.Fatalf("node-scoped token produced refresh override: ok=%v", ok)
 	}
 }
 

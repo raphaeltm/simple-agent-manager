@@ -5,7 +5,7 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { expectJsonRecord } from '../lib/runtime-validation';
 import { fetchWithTimeout, getTimeoutMs } from './fetch-timeout';
-import { signNodeManagementToken, signTerminalToken } from './jwt';
+import { signCallbackToken, signNodeManagementToken, signTerminalToken } from './jwt';
 import { recordNodeRoutingMetric } from './telemetry';
 import {
   fetchVmAgentContainer,
@@ -63,11 +63,15 @@ export function getNodeAgentReadyPollIntervalMs(env: {
   return parsed;
 }
 
-export function getNodeAgentRequestTimeoutMs(env: { NODE_AGENT_REQUEST_TIMEOUT_MS?: string }): number {
+export function getNodeAgentRequestTimeoutMs(env: {
+  NODE_AGENT_REQUEST_TIMEOUT_MS?: string;
+}): number {
   return getTimeoutMs(env.NODE_AGENT_REQUEST_TIMEOUT_MS, DEFAULT_NODE_AGENT_REQUEST_TIMEOUT_MS);
 }
 
-export function getCfContainerWakeTimeoutMs(env: { CF_CONTAINER_WAKE_TIMEOUT_MS?: string }): number {
+export function getCfContainerWakeTimeoutMs(env: {
+  CF_CONTAINER_WAKE_TIMEOUT_MS?: string;
+}): number {
   return getTimeoutMs(env.CF_CONTAINER_WAKE_TIMEOUT_MS, DEFAULT_CF_CONTAINER_WAKE_TIMEOUT_MS);
 }
 
@@ -89,7 +93,13 @@ export async function waitForNodeAgentReady(nodeId: string, env: Env): Promise<v
     try {
       const requestTimeoutError = `request timeout after ${requestTimeoutMs}ms`;
       const response = await Promise.race([
-        fetchNodeAgent(nodeId, env, healthUrl, { method: 'GET', signal: controller.signal }, requestTimeoutMs),
+        fetchNodeAgent(
+          nodeId,
+          env,
+          healthUrl,
+          { method: 'GET', signal: controller.signal },
+          requestTimeoutMs
+        ),
         new Promise<Response>((_resolve, reject) => {
           timeoutHandle = setTimeout(() => {
             controller.abort();
@@ -166,7 +176,13 @@ export async function nodeAgentRequest(
   );
 
   const requestTimeoutMs = options.requestTimeoutMs ?? getNodeAgentRequestTimeoutMs(env);
-  const response = await fetchNodeAgent(nodeId, env, url, { ...options, headers }, requestTimeoutMs);
+  const response = await fetchNodeAgent(
+    nodeId,
+    env,
+    url,
+    { ...options, headers },
+    requestTimeoutMs
+  );
 
   recordNodeRoutingMetric(
     {
@@ -373,11 +389,15 @@ export async function createAgentSessionOnNode(
   projectId?: string | null,
   mcpServer?: McpServerConfig
 ): Promise<unknown> {
+  // Session creation is the authoritative handoff for warm/recovered workspaces.
+  // Never reuse the node-management token for workspace-only routes.
+  const workspaceCallbackToken = await signCallbackToken(workspaceId, env);
   const body: Record<string, unknown> = {
     sessionId,
     label,
     chatSessionId: chatSessionId ?? undefined,
     projectId: projectId ?? undefined,
+    workspaceCallbackToken,
   };
   if (mcpServer) {
     body.mcpServers = [
@@ -529,7 +549,10 @@ export async function sendPromptToAgentOnNode(
   }
 }
 
-export { hibernateAgentSessionOnNode, restoreAgentSessionOnNode } from './node-agent-session-snapshots';
+export {
+  hibernateAgentSessionOnNode,
+  restoreAgentSessionOnNode,
+} from './node-agent-session-snapshots';
 
 /**
  * Cancel a running prompt on an agent session.
