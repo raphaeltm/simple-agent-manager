@@ -33,7 +33,7 @@ Scope is limited to the production `task-title` utility request path. The separa
 - [x] Push the focused output branch and prepare a PR with exact test/review/evidence records.
 - [x] Report `STAGING_LEASE_REQUEST` via SAM task status and wait for explicit `STAGING_LEASE_GRANTED` before any shared staging deployment or merge.
 - [x] After staging ownership, reverify exact head/base/gates; deploy through the normal staging workflow; confirm the controlled payload matrix safely; verify normal long-prompt task titles succeed; and measure a zero or bounded explained residual 400 count.
-- [ ] Merge only after all `/do` gates pass, monitor production deployment, collect production task-title health evidence, release the staging lease, and complete the SAM task.
+- [x] Merge only after all `/do` gates pass, monitor production deployment, collect production task-title health evidence, release the staging lease, and complete the SAM task.
 
 ## Root Cause and Staging Verification
 
@@ -54,6 +54,15 @@ Scope is limited to the production `task-title` utility request path. The separa
 - **cloudflare-specialist — PASS:** Worker-safe AbortSignal timeout remains; provider body reads are streamed and bounded; no D1/KV/R2/binding or deployment configuration changes.
 - **doc-sync-validator — PASS:** Env interface, `.env.example`, shared defaults/exports, and public configuration reference agree on GLM-5.2 and `TASK_TITLE_ERROR_DIAGNOSTIC_MAX_LENGTH`.
 - **task-completion-validator — PASS (pre-merge):** Implementation, tests, exact-head CI, controlled live matrix, staging deployment, and staging smoke evidence align with the acceptance criteria. Merge, production health, archival, and staging release remain explicit terminal steps.
+
+## Production Verification
+
+- PR [#1621](https://github.com/raphaeltm/simple-agent-manager/pull/1621) merged as `296b76ac038a02214f5eacbc006c712558d47193` after exact-head CI run [29595103306](https://github.com/raphaeltm/simple-agent-manager/actions/runs/29595103306) passed all required gates.
+- Main CI run [29595662286](https://github.com/raphaeltm/simple-agent-manager/actions/runs/29595662286) passed on the merged change.
+- Production deploy run [29596155878](https://github.com/raphaeltm/simple-agent-manager/actions/runs/29596155878) completed successfully in 10m59s on the exact merge commit. It passed API deployment, D1 backup/migrations and integrity verification, post-secret redeployment, and the production health check. A direct follow-up `GET https://api.simple-agent-manager.org/health` returned HTTP 200 with `status=healthy` at `2026-07-17T16:38:28.984Z`.
+- Production residual count is bounded but not directly observable from this workspace: zero post-deploy production task-title calls could be authenticated for a synthetic canary, and both provisioned read-only Cloudflare credentials were rejected (HTTP 401 / codes 10000 and 1000). No credential was exposed, and no production user task was created merely to manufacture traffic. The verified staging production-shaped sample remains 0/1 HTTP 400 with a generated title, while production deployment and health checks are green. Future provider rejections now emit bounded allowlisted diagnostics so the next organic production window can distinguish any residual safely.
+- The shared staging claim was released through SAM immediately after the green production deployment.
+- **task-completion-validator — PASS (final):** implementation, focused/full tests, specialist reviews, staging canary, merge, main CI, production deploy/health, bounded residual explanation, staging release, and archival evidence satisfy the task acceptance criteria.
 
 ## Acceptance Criteria
 
