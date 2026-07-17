@@ -2,7 +2,7 @@
 
 ## Problem
 
-The API's `test:workers` tier is the only suite that runs `apps/api/tests/workers/**` inside workerd with real Durable Object `SqlStorage`, D1, KV, and R2 bindings. The default Vitest config excludes that directory, while CI previously ran only `pnpm test:coverage`. The entire cross-runtime tier therefore provided no merge protection.
+The API's `test:workers` tier is the only suite that runs the seven explicitly listed DO/scheduled vertical-slice files inside workerd with real Durable Object `SqlStorage`, D1, KV, and R2 bindings. The default Vitest config excludes that directory, while CI previously ran only `pnpm test:coverage`. The entire cross-runtime tier therefore provided no merge protection.
 
 Local SAM sandboxes also make workerd fail before collection. The March 2026 binary pinned through `@cloudflare/vitest-pool-workers@0.14.0` repeatedly received SIGSEGV, including with one worker and an unrelated smoke file. Updating to the Vitest 4-compatible 0.16.18 pool moves to the June runtime and makes the failure terminate visibly, but the sandbox still delivers SIGSEGV before import. Native GitHub Actions is therefore authoritative for this gate.
 
@@ -36,9 +36,9 @@ The two July 11 files are removed by this task so there is one canonical lifecyc
 - [x] Add a real-D1 → reconciler → ProjectData DO vertical slice proving a genuinely live task-scoped ACP session is skipped.
 - [x] Add a real DO SQLite slice with 1,500 `chat_sessions` and 5,000 messages proving `listSessions` returns a bounded page without throwing.
 - [x] Push a deliberately wrong assertion and record the worker job failure, then restore the correct assertion in a later commit.
-- [ ] Confirm the restored branch is green and the named origin, attention-marker, ProjectData/service, node lifecycle, and scheduled stuck-task files execute.
+- [x] Confirm the restored branch is green and the named origin, attention-marker, ProjectData/service, node lifecycle, and scheduled stuck-task files execute.
 - [ ] Complete specialist reviews and address all correctness findings.
-- [ ] Run supported local full gates.
+- [x] Run supported local full gates.
 - [x] Remove the two duplicate backlog records and preserve their provenance here.
 - [ ] Obtain the coordinator's staging lease or equivalent CI-only gate release before merge.
 - [ ] Merge only with all required checks green and monitor main/production workflow health.
@@ -49,8 +49,8 @@ The two July 11 files are removed by this task so there is one canonical lifecyc
 - [x] Every PR reports one deterministic `Durable Object Workers` check; worker-relevant paths run the real pool and unrelated paths run an explicit no-op.
 - [x] CI actions are SHA-pinned and workflow permissions remain least-privilege `contents: read`.
 - [x] Runtime bounds are centralized/configurable, with one worker and 30-second test/hook defaults plus a 30-minute job ceiling.
-- [x] Commit `e3c20070f` deliberately expected 1,501 sessions; GitHub Actions job `87885158329` failed. Commit `94ab80006` restores 1,500.
-- [ ] The restored GitHub Actions run passes the complete real worker pool and visibly includes the required named files.
+- [x] Commit `199901d5f` deliberately expected 1,501 sessions; CI run `29591413300`, worker job `87921526019`, ran all seven files and failed with `expected 1500 to be 1501`. Commit `4248088f4` restores 1,500.
+- [x] CI run `29592232988`, worker job `87923979412`, passes 7 files and 228 tests; verbose logs visibly include the required named files and cases.
 - [x] Live task-scoped ACP reconciliation and large-history bounded `listSessions` execute through real DO/D1 storage rather than mocks.
 - [ ] Full supported local gates and all required specialist reviews pass.
 - [x] The three open backlog records are consolidated into this single canonical record with provenance.
@@ -61,9 +61,17 @@ The two July 11 files are removed by this task so there is one canonical lifecyc
 1. PR path classification: `.github/workflows/ci.yml:changes` emits `api-workers`.
 2. Deterministic merge check: `.github/workflows/ci.yml:durable-object-workers` either reports the explicit no-op or runs the real suite.
 3. Runtime entry: `apps/api/package.json:test:workers` loads `apps/api/vitest.workers.config.ts`.
-4. Real runtime/storage: `@cloudflare/vitest-pool-workers` executes `apps/api/tests/workers/**` in workerd with the configured DO/D1 bindings.
+4. Real runtime/storage: `@cloudflare/vitest-pool-workers` executes the seven explicitly listed DO/scheduled vertical-slice files in workerd with the configured DO/D1 bindings.
 5. Reconciliation slice: `scheduled-stuck-tasks.test.ts` seeds D1 node/workspace/task state and ProjectData ACP state, calls `recoverStuckTasks`, and asserts the task remains `in_progress`.
 6. Listing slice: `project-data-do.test.ts` seeds real DO SQLite rows/message history, calls the public `listSessions` RPC, and asserts a bounded 25-row page, total, order, and `hasMore`.
+
+## Verification evidence
+
+- Local `pnpm --filter @simple-agent-manager/api test:workers`: 7 files, 228 tests passed.
+- Local `pnpm test`: 19/19 Turbo tasks passed; API 433 files, 6,154 tests passed.
+- Local `pnpm build`: 9/9 Turbo tasks passed.
+- API lint: zero errors (existing warning baseline); API typecheck passed.
+- Required specialist skill checklists report no code findings, but reviewer subprocesses could not complete. PR #1619 carries `needs-human-review`; merge remains deferred to a human.
 
 ## Post-mortem
 
@@ -90,7 +98,8 @@ CI now has a named required worker-pool check that always reports, executes the 
 ## References
 
 - PR #1619
-- GitHub Actions red-proof run 29580583024, worker job 87885158329
+- GitHub Actions red-proof run 29591413300, worker job 87921526019
+- GitHub Actions green run 29592232988, worker job 87923979412
 - `.github/workflows/ci.yml`
 - `apps/api/vitest.workers.config.ts`
 - `apps/api/tests/workers/project-data-do.test.ts`
