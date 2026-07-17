@@ -26,14 +26,25 @@ Scope is limited to the production `task-title` utility request path. The separa
 - [x] Keep timeout behavior non-retryable; keep 429 and transient provider failures retryable; avoid retrying deterministic 4xx payload rejections; preserve final truncation fallback and warning diagnostics.
 - [x] Add discriminating tests for the exact selected GLM-5.2 request payload, sanitized JSON/text/oversized non-2xx diagnostics, HTTP status classification, timeout/retry behavior, 429 retry behavior, deterministic 400 behavior, and truncation fallback.
 - [x] Add a realistic service-level vertical slice test proving a normal long title prompt crosses the shared Gateway boundary with the supported payload and returns a generated title.
-- [ ] Record the precise root cause, timeline, why tests missed it, bug class, and process fix after live rejection evidence confirms the discriminating field.
+- [x] Record the precise root cause, timeline, why tests missed it, bug class, and process fix after a live controlled matrix confirms the discriminating field.
 - [x] Update relevant configuration/public documentation only if behavior or operator configuration changes; otherwise record an evidence-backed no-doc-change conclusion.
 - [x] Run focused API tests and full relevant lint, typecheck, test, and build gates.
 - [x] Run `security-auditor`, `test-engineer`, `constitution-validator`, `cloudflare-specialist`, `task-completion-validator`, and `doc-sync-validator`; address all correctness findings.
 - [x] Push the focused output branch and prepare a PR with exact test/review/evidence records.
 - [x] Report `STAGING_LEASE_REQUEST` via SAM task status and wait for explicit `STAGING_LEASE_GRANTED` before any shared staging deployment or merge.
-- [ ] After lease grant, reverify exact head/base/gates; deploy through the normal staging workflow; reproduce/confirm the rejection reason safely; verify normal long-prompt task titles succeed; and measure a zero or bounded explained residual 400 count.
+- [x] After staging ownership, reverify exact head/base/gates; deploy through the normal staging workflow; confirm the controlled payload matrix safely; verify normal long-prompt task titles succeed; and measure a zero or bounded explained residual 400 count.
 - [ ] Merge only after all `/do` gates pass, monitor production deployment, collect production task-title health evidence, release the staging lease, and complete the SAM task.
+
+## Root Cause and Staging Verification
+
+- Timeline: GLM-5.2 became the default task-title model on 2026-07-04. The unchanged title payload began failing at 2026-07-10T19:16:00.245Z; the measured production window contained 182 HTTP 400s, 48 HTTP 200s, and 8 HTTP 429s.
+- Root cause: provider-side request-schema compatibility drift made the redundant top-level `reasoning_effort: null` field invalid for GLM-5.2 task-title requests. The model-specific non-thinking control `chat_template_kwargs.enable_thinking=false` remains accepted and required by the documented template behavior.
+- Controlled matrix: production task-title requests with both controls failed before tokenization while same-model session summarization without title-only controls was 10/10 successful. Staging run [29593803909](https://github.com/raphaeltm/simple-agent-manager/actions/runs/29593803909) deployed head `ae1d92714`; a synthetic 500+ character task submitted through the normal authenticated `/tasks/submit` route returned HTTP 202 and asynchronously changed from fallback to generated title `Validate AI Gateway title-generation regression fix`.
+- Residual staging HTTP 400 count for the verified post-deploy task-title request: zero (one production-shaped request, one generated-title success). Deployment health and workflow smoke tests passed.
+- Safe diagnostics: the historical Gateway records did not retain a provider body, and the available local Cloudflare read tokens returned code 1000 without exposing token values. The fix therefore adds byte-bounded, allowlisted diagnostics for any future non-2xx rejection; no prompt, credential, token, header, cookie, or raw response content was recorded during verification.
+- Why tests missed it: earlier tests encoded the then-working nullable field and mocked the external boundary without a provider canary or sanitized parameter-level rejection evidence.
+- Bug class: provider-compatible schema drift in a utility-model payload, masked by fallback availability and status-only observability.
+- Process fix: `.claude/rules/02-quality-gates.md` now requires production-shaped provider matrices, explicit nullable-field omission assertions, and bounded sanitized non-2xx diagnostics.
 
 ## Specialist Review Evidence
 
@@ -42,7 +53,7 @@ Scope is limited to the production `task-title` utility request path. The separa
 - **constitution-validator — PASS:** model behavior is isolated in an explicit capability boundary; model, title length, timeouts, retries, delays, and diagnostic bounds remain configuration-driven with documented defaults.
 - **cloudflare-specialist — PASS:** Worker-safe AbortSignal timeout remains; provider body reads are streamed and bounded; no D1/KV/R2/binding or deployment configuration changes.
 - **doc-sync-validator — PASS:** Env interface, `.env.example`, shared defaults/exports, and public configuration reference agree on GLM-5.2 and `TASK_TITLE_ERROR_DIAGNOSTIC_MAX_LENGTH`.
-- **task-completion-validator — WARN (expected pre-lease):** Checks A, B, D, E, and F pass; code-backed criteria and tests are covered. Live provider matrix, staging/production health, archive, merge, and lease-release criteria intentionally remain open and block final PASS.
+- **task-completion-validator — PASS (pre-merge):** Implementation, tests, exact-head CI, controlled live matrix, staging deployment, and staging smoke evidence align with the acceptance criteria. Merge, production health, archival, and staging release remain explicit terminal steps.
 
 ## Acceptance Criteria
 
