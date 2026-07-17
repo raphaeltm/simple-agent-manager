@@ -4,7 +4,6 @@ import type { VmAgentContainer } from './durable-objects/vm-agent-container';
 import type { TaskRecoveryEnv } from './task-recovery-env';
 import type { WebhookTriggerEnv } from './webhook-trigger-env';
 
-// Cloudflare bindings type
 export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   // D1 Database
   DATABASE: D1Database;
@@ -314,6 +313,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   TASK_TITLE_MAX_RETRIES?: string;
   TASK_TITLE_RETRY_DELAY_MS?: string;
   TASK_TITLE_RETRY_MAX_DELAY_MS?: string;
+  TASK_TITLE_ERROR_DIAGNOSTIC_MAX_LENGTH?: string;
   // Context summarization (conversation forking)
   CONTEXT_SUMMARY_MODEL?: string;
   CONTEXT_SUMMARY_MAX_LENGTH?: string;

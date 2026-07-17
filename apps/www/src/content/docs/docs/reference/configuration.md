@@ -116,16 +116,17 @@ The service-account JWT bearer flow always uses `https://oauth2.googleapis.com/t
 
 ## AI Idea Title Generation
 
-| Variable                             | Default                     | Description                                      |
-| ------------------------------------ | --------------------------- | ------------------------------------------------ |
-| `TASK_TITLE_MODEL`                   | `@cf/zai-org/glm-4.7-flash` | Workers AI model for title generation            |
-| `TASK_TITLE_MAX_LENGTH`              | `100`                       | Max characters in generated title                |
-| `TASK_TITLE_TIMEOUT_MS`              | `5000`                      | Timeout before falling back to truncation        |
-| `TASK_TITLE_GENERATION_ENABLED`      | `true`                      | Set `false` to disable AI generation             |
-| `TASK_TITLE_SHORT_MESSAGE_THRESHOLD` | `100`                       | Messages at or below this length bypass AI       |
-| `TASK_TITLE_MAX_RETRIES`             | `2`                         | Max retry attempts on failure                    |
-| `TASK_TITLE_RETRY_DELAY_MS`          | `1000`                      | Base delay between retries (exponential backoff) |
-| `TASK_TITLE_RETRY_MAX_DELAY_MS`      | `4000`                      | Max delay cap for backoff                        |
+| Variable                                 | Default               | Description                                      |
+| ---------------------------------------- | --------------------- | ------------------------------------------------ |
+| `TASK_TITLE_MODEL`                       | `@cf/zai-org/glm-5.2` | Workers AI model for title generation            |
+| `TASK_TITLE_MAX_LENGTH`                  | `100`                 | Max characters in generated title                |
+| `TASK_TITLE_TIMEOUT_MS`                  | `5000`                | Timeout before falling back to truncation        |
+| `TASK_TITLE_GENERATION_ENABLED`          | `true`                | Set `false` to disable AI generation             |
+| `TASK_TITLE_SHORT_MESSAGE_THRESHOLD`     | `100`                 | Messages at or below this length bypass AI       |
+| `TASK_TITLE_MAX_RETRIES`                 | `2`                   | Max retry attempts on failure                    |
+| `TASK_TITLE_RETRY_DELAY_MS`              | `1000`                | Base delay between retries (exponential backoff) |
+| `TASK_TITLE_RETRY_MAX_DELAY_MS`          | `4000`                | Max delay cap for backoff                        |
+| `TASK_TITLE_ERROR_DIAGNOSTIC_MAX_LENGTH` | `512`                 | Max sanitized provider-error diagnostic length   |
 
 ## Agent Model Catalog
 
