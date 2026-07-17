@@ -34,6 +34,7 @@ jobs:
     timeout-minutes: 5
     runs-on: ubuntu-latest
     outputs:
+      api-workers: ${{ steps.filter.outputs.api-workers }}
       vm-agent: ${{ steps.filter.outputs.vm-agent }}
       cli: ${{ steps.filter.outputs.cli }}
       devcontainer: ${{ steps.filter.outputs.devcontainer }}
@@ -45,6 +46,16 @@ jobs:
         id: filter
         with:
           filters: |
+            api-workers:
+              - 'apps/api/**'
+              - 'packages/shared/**'
+              - 'packages/providers/**'
+              - 'packages/cloud-init/**'
+              - 'package.json'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+              - 'turbo.json'
+              - '.github/workflows/ci.yml'
             vm-agent:
               - 'packages/vm-agent/**'
               - '.github/workflows/ci.yml'
@@ -200,6 +211,46 @@ jobs:
 
       - name: Run tests with coverage
         run: pnpm test:coverage
+
+  durable-object-workers:
+    name: Durable Object Workers
+    needs: [changes]
+    # Always report one deterministic check for branch protection. Unrelated
+    # changes take the explicit no-op step instead of leaving a required check pending.
+    if: github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager'
+    timeout-minutes: 30
+    runs-on: ubuntu-24.04
+    steps:
+      - name: No worker-relevant changes
+        if: needs.changes.outputs.api-workers != 'true'
+        run: echo 'Durable Object worker tests are not required for these paths.'
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        if: needs.changes.outputs.api-workers == 'true'
+
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        if: needs.changes.outputs.api-workers == 'true'
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        if: needs.changes.outputs.api-workers == 'true'
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        if: needs.changes.outputs.api-workers == 'true'
+        run: pnpm install --frozen-lockfile
+
+      - name: Build packages
+        if: needs.changes.outputs.api-workers == 'true'
+        run: pnpm build
+
+      - name: Run real Durable Object worker tests
+        if: needs.changes.outputs.api-workers == 'true'
+        env:
+          WORKERS_TEST_MAX_WORKERS: '1'
+          WORKERS_TEST_TIMEOUT_MS: '30000'
+        run: pnpm --filter @simple-agent-manager/api test:workers
 
   build:
     name: Build

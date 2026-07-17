@@ -374,6 +374,61 @@ describe('recoverStuckTasks — vertical slice', () => {
   });
 
   describe('liveness grace period', () => {
+    it('skips an old task with a genuinely live task-scoped ACP session', async () => {
+      await seedBaseData();
+      const taskId = 'task-st-liveness-live-acp';
+      const nodeId = 'node-st-liveness-live-acp';
+      const workspaceId = 'ws-st-liveness-live-acp';
+      const fiveHoursAgo = new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString();
+      const projectData = env.PROJECT_DATA.get(env.PROJECT_DATA.idFromName(PROJECT_ID));
+
+      const chatSessionId = await projectData.createSession(
+        workspaceId,
+        'Live task-scoped session',
+        taskId
+      );
+      const acpSession = await projectData.createAcpSession({
+        chatSessionId,
+        initialPrompt: 'Continue the live task',
+        agentType: 'codex',
+      });
+      await projectData.transitionAcpSession(acpSession.id, 'assigned', {
+        actorType: 'system',
+        workspaceId,
+        nodeId,
+      });
+      await projectData.transitionAcpSession(acpSession.id, 'running', {
+        actorType: 'vm-agent',
+        actorId: nodeId,
+        acpSdkSessionId: 'acp-live-task-session',
+      });
+
+      await seedNode(nodeId, USER_ID, { lastHeartbeatAt: new Date().toISOString() });
+      await seedWorkspace(workspaceId, nodeId, USER_ID, {
+        projectId: PROJECT_ID,
+        status: 'running',
+        chatSessionId,
+      });
+      await seedTask(taskId, PROJECT_ID, USER_ID, {
+        status: 'in_progress',
+        executionStep: 'running',
+        startedAt: fiveHoursAgo,
+        updatedAt: fiveHoursAgo,
+        workspaceId,
+      });
+
+      const result = await recoverStuckTasks({
+        ...env,
+        TASK_RUN_MAX_EXECUTION_MS: '14400000',
+        TASK_RUN_HARD_TIMEOUT_MS: '28800000',
+        NODE_HEARTBEAT_STALE_SECONDS: '300',
+      } as unknown as Env);
+
+      expect(result.failedInProgress).toBe(0);
+      expect(result.heartbeatSkipped).toBeGreaterThanOrEqual(1);
+      expect((await getTaskStatus(taskId))?.status).toBe('in_progress');
+    });
+
     it('preserves an in_progress task whose runtime identity is incomplete (fail-safe)', async () => {
       // A running workspace with a fresh node heartbeat but no resolvable
       // task-scoped runtime identity yields an INCONCLUSIVE liveness result.

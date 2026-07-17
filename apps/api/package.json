@@ -44,7 +44,7 @@
     "yaml": "2.9.0"
   },
   "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "0.14.0",
+    "@cloudflare/vitest-pool-workers": "0.16.18",
     "@cloudflare/workers-types": "catalog:",
     "@types/better-sqlite3": "^7.6.13",
     "@types/diff": "^8.0.0",

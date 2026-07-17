@@ -4,7 +4,7 @@
  * Runs inside the workerd runtime via @cloudflare/vitest-pool-workers,
  * exercising real SQLite storage, DO lifecycle, and migrations.
  */
-import { env } from 'cloudflare:test';
+import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
 import type { ProjectData } from '../../src/durable-objects/project-data';
@@ -52,6 +52,48 @@ describe('ProjectData Durable Object', () => {
 
       const { sessions: page2 } = await stub.listSessions(null, 3, 3);
       expect(page2).toHaveLength(2);
+    });
+
+    it('bounds listSessions with 1,500 real sessions and large message history', async () => {
+      const stub = getStub('project-list-sessions-large');
+
+      await runInDurableObject(stub, async (instance) => {
+        const sql = instance.ctx.storage.sql;
+        const baseTimestamp = 1_750_000_000_000;
+        sql.exec(
+          `WITH RECURSIVE sequence(i) AS (
+             VALUES(0) UNION ALL SELECT i + 1 FROM sequence WHERE i < 1499
+           )
+           INSERT INTO chat_sessions
+             (id, workspace_id, topic, status, message_count, started_at, created_at, updated_at)
+           SELECT printf('large-session-%04d', i), NULL, printf('Session %04d', i),
+                  'active', CASE WHEN i = 1499 THEN 5000 ELSE 0 END,
+                  ?, ?, ? + i
+           FROM sequence`,
+          baseTimestamp,
+          baseTimestamp,
+          baseTimestamp
+        );
+        sql.exec(
+          `WITH RECURSIVE sequence(i) AS (
+             VALUES(0) UNION ALL SELECT i + 1 FROM sequence WHERE i < 4999
+           )
+           INSERT INTO chat_messages (id, session_id, role, content, created_at)
+           SELECT printf('large-message-%04d', i), 'large-session-1499',
+                  CASE WHEN i % 2 = 0 THEN 'user' ELSE 'assistant' END,
+                  printf('Deterministic message %04d', i), ? + i
+           FROM sequence`,
+          baseTimestamp
+        );
+      });
+
+      const result = await stub.listSessions(null, 25, 0);
+
+      expect(result.total).toBe(1500);
+      expect(result.sessions).toHaveLength(25);
+      expect(result.hasMore).toBe(true);
+      expect(result.sessions[0]?.id).toBe('large-session-1499');
+      expect(result.sessions[0]?.messageCount).toBe(5000);
     });
 
     it('filters sessions by status', async () => {
