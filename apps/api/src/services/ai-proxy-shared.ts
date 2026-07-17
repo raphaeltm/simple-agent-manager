@@ -89,9 +89,9 @@ export async function verifyAIProxyAuth(
             isNull(schema.agentProfiles.projectId),
             workspace.projectId
               ? eq(schema.agentProfiles.projectId, workspace.projectId)
-              : isNull(schema.agentProfiles.projectId),
-          ),
-        ),
+              : isNull(schema.agentProfiles.projectId)
+          )
+        )
       )
       .get();
     agentType = profile?.agentType ?? null;
@@ -244,6 +244,35 @@ function sanitizeGatewayDiagnosticValue(field: string, value: unknown): string |
   return /^[A-Za-z0-9_.:-]{1,64}$/.test(trimmed) ? trimmed : '[REDACTED]';
 }
 
+async function readBoundedResponseText(response: Response, maxBytes: number): Promise<string> {
+  if (!response.body) return '';
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+
+  try {
+    while (totalBytes < maxBytes) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const remaining = maxBytes - totalBytes;
+      const chunk = value.slice(0, remaining);
+      chunks.push(chunk);
+      totalBytes += chunk.byteLength;
+      if (chunk.byteLength < value.byteLength) break;
+    }
+  } finally {
+    await reader.cancel().catch(() => undefined);
+  }
+
+  const bytes = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(bytes);
+}
+
 /** Extract only bounded, allowlisted provider error fields. */
 export async function readSafeGatewayErrorDiagnostic(
   response: Response,
@@ -251,7 +280,7 @@ export async function readSafeGatewayErrorDiagnostic(
 ): Promise<string | undefined> {
   if (!Number.isFinite(maxLength) || maxLength <= 0) return undefined;
   const boundedMaxLength = Math.floor(maxLength);
-  const raw = (await response.text()).slice(0, boundedMaxLength * 4);
+  const raw = await readBoundedResponseText(response, boundedMaxLength);
 
   let payload: unknown;
   try {

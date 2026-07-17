@@ -234,6 +234,19 @@ describe('generateTaskTitle', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it('retries transient HTTP 408 responses', async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: { code: 'request_timeout' } }), { status: 408 })
+      )
+      .mockResolvedValueOnce(mockGatewayTitle('Timeout Response Recovery'));
+    const long = 'Transient HTTP timeout response. ' + 'r'.repeat(120);
+    await expect(generateTaskTitle(env, long, { maxRetries: 1, retryDelayMs: 1 })).resolves.toBe(
+      'Timeout Response Recovery'
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it('does not retry timeouts and falls back', async () => {
     fetchMock.mockRejectedValue(new DOMException('The operation timed out', 'TimeoutError'));
     const long = 'Timeout title request. ' + 't'.repeat(120);
