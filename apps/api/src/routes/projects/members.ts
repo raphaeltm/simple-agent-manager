@@ -33,6 +33,11 @@ import {
   getGitHubUserAccessTokenForOwner,
   getGitHubUserAccessTokenWithHeaders,
 } from '../../services/github-user-access-token';
+import {
+  inviteMembershipStatus,
+  resolveConcurrentAccessRequest,
+  resolveConcurrentRequestInsert,
+} from '../../services/project-access-request-reentry';
 import { applyProjectMemberOffboarding } from '../../services/project-offboarding-apply';
 import { createProjectMemberOffboardingPreview } from '../../services/project-offboarding-preview';
 import { projectOwnershipTransferRoutes } from './ownership-transfer';
@@ -131,8 +136,8 @@ function toAccessRequestResponse(row: {
     inviteLinkId: row.request.inviteLinkId,
     requesterUserId: row.request.requesterUserId,
     status: row.request.status as ProjectAccessRequestResponse['status'],
-    githubAccessStatus:
-      row.request.githubAccessStatus as ProjectAccessRequestResponse['githubAccessStatus'],
+    githubAccessStatus: row.request
+      .githubAccessStatus as ProjectAccessRequestResponse['githubAccessStatus'],
     githubAccessCheckedAt: row.request.githubAccessCheckedAt,
     githubAccessMessage: row.request.githubAccessMessage,
     requestedAt: row.request.requestedAt,
@@ -212,19 +217,24 @@ async function evaluateRequesterGithubAccess(input: {
     return {
       status: 'missing-token',
       checkedAt,
-      message: 'Requester must reauthenticate with GitHub before repository access can be verified.',
+      message:
+        'Requester must reauthenticate with GitHub before repository access can be verified.',
     };
   }
 
   try {
     const installation = await getProjectInstallation(input.db, input.project);
     const externalInstallationId = getExternalInstallationId(installation);
-    const repositories = await getUserInstallationRepositories(accessToken, externalInstallationId, {
-      flow: 'project-invite',
-      userId: input.requesterUserId,
-      installationId: externalInstallationId,
-      repository: input.project.repository,
-    });
+    const repositories = await getUserInstallationRepositories(
+      accessToken,
+      externalInstallationId,
+      {
+        flow: 'project-invite',
+        userId: input.requesterUserId,
+        installationId: externalInstallationId,
+        repository: input.project.repository,
+      }
+    );
     const matchedRepo = repositories.find(
       (repo) => repo.fullName.toLowerCase() === input.project.repository.toLowerCase()
     );
@@ -362,22 +372,24 @@ projectMembersRoutes.get('/:id/members', async (c) => {
     : [];
 
   const response: ProjectMembersResponse = {
-    members: memberRows.map((row): ProjectMemberResponse => ({
-      projectId: row.member.projectId,
-      userId: row.member.userId,
-      role: row.member.role as ProjectMemberRole,
-      status: row.member.status as ProjectMemberStatus,
-      invitedBy: row.member.invitedBy,
-      createdAt: row.member.createdAt,
-      updatedAt: row.member.updatedAt,
-      user: toUser({
-        id: row.userId,
-        name: row.name,
-        email: row.email,
-        image: row.image,
-        avatarUrl: row.avatarUrl,
-      }),
-    })),
+    members: memberRows.map(
+      (row): ProjectMemberResponse => ({
+        projectId: row.member.projectId,
+        userId: row.member.userId,
+        role: row.member.role as ProjectMemberRole,
+        status: row.member.status as ProjectMemberStatus,
+        invitedBy: row.member.invitedBy,
+        createdAt: row.member.createdAt,
+        updatedAt: row.member.updatedAt,
+        user: toUser({
+          id: row.userId,
+          name: row.name,
+          email: row.email,
+          image: row.image,
+          avatarUrl: row.avatarUrl,
+        }),
+      })
+    ),
     inviteLinks: inviteRows.map(toInviteLinkResponse),
     accessRequests: requestRows.map(toAccessRequestResponse),
   };
@@ -516,10 +528,7 @@ projectMembersRoutes.get('/invite-links/:token', async (c) => {
     .select()
     .from(schema.projectMembers)
     .where(
-      and(
-        eq(schema.projectMembers.projectId, project.id),
-        eq(schema.projectMembers.userId, userId)
-      )
+      and(eq(schema.projectMembers.projectId, project.id), eq(schema.projectMembers.userId, userId))
     )
     .limit(1);
   const requestRows = await db
@@ -553,15 +562,7 @@ projectMembersRoutes.get('/invite-links/:token', async (c) => {
       repository: project.repository,
       repoProvider: project.repoProvider as ProjectInvitePreviewResponse['project']['repoProvider'],
     },
-    membershipStatus: activeMembership
-      ? 'active-member'
-      : request?.status === 'pending'
-        ? 'pending-request'
-        : request?.status === 'approved'
-          ? 'approved-request'
-          : request?.status === 'denied'
-            ? 'denied-request'
-            : 'can-request',
+    membershipStatus: inviteMembershipStatus(activeMembership, request?.status),
     accessRequest: request,
   };
   return c.json(response);
@@ -589,16 +590,6 @@ projectMembersRoutes.post('/invite-links/:token/request', async (c) => {
   if (memberRows[0]) {
     throw errors.conflict('You are already a member of this project');
   }
-
-  const githubAccess = await evaluateRequesterGithubAccess({
-    env: c.env,
-    headers: c.req.raw.headers,
-    db,
-    project,
-    requesterUserId: userId,
-    currentRequestUserId: userId,
-  });
-  const now = new Date().toISOString();
   const existingRows = await db
     .select()
     .from(schema.projectAccessRequests)
@@ -611,11 +602,21 @@ projectMembersRoutes.post('/invite-links/:token/request', async (c) => {
     .limit(1);
   const existing = existingRows[0];
   const requestId = existing?.id ?? ulid();
+  if (existing?.status === 'pending') {
+    return c.json(await loadAccessRequestWithUser(db, project.id, existing.id));
+  }
+
+  const githubAccess = await evaluateRequesterGithubAccess({
+    env: c.env,
+    headers: c.req.raw.headers,
+    db,
+    project,
+    requesterUserId: userId,
+    currentRequestUserId: userId,
+  });
+  const now = new Date().toISOString();
   if (existing) {
-    if (existing.status === 'approved') {
-      throw errors.conflict('Access request has already been approved');
-    }
-    await db
+    const resetRows = await db
       .update(schema.projectAccessRequests)
       .set({
         inviteLinkId: link.id,
@@ -629,21 +630,47 @@ projectMembersRoutes.post('/invite-links/:token/request', async (c) => {
         decisionNote: null,
         updatedAt: now,
       })
-      .where(eq(schema.projectAccessRequests.id, existing.id));
+      .where(
+        and(
+          eq(schema.projectAccessRequests.id, existing.id),
+          eq(schema.projectAccessRequests.status, existing.status)
+        )
+      )
+      .returning({ id: schema.projectAccessRequests.id });
+    if (!resetRows[0]) {
+      const concurrentRequestId = await resolveConcurrentAccessRequest({
+        db,
+        projectId: project.id,
+        requesterUserId: userId,
+      });
+      return c.json(await loadAccessRequestWithUser(db, project.id, concurrentRequestId));
+    }
   } else {
-    await db.insert(schema.projectAccessRequests).values({
-      id: requestId,
-      projectId: project.id,
-      inviteLinkId: link.id,
-      requesterUserId: userId,
-      status: 'pending',
-      githubAccessStatus: githubAccess.status,
-      githubAccessCheckedAt: githubAccess.checkedAt,
-      githubAccessMessage: githubAccess.message,
-      requestedAt: now,
-      createdAt: now,
-      updatedAt: now,
-    });
+    const insertedRows = await db
+      .insert(schema.projectAccessRequests)
+      .values({
+        id: requestId,
+        projectId: project.id,
+        inviteLinkId: link.id,
+        requesterUserId: userId,
+        status: 'pending',
+        githubAccessStatus: githubAccess.status,
+        githubAccessCheckedAt: githubAccess.checkedAt,
+        githubAccessMessage: githubAccess.message,
+        requestedAt: now,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .onConflictDoNothing()
+      .returning({ id: schema.projectAccessRequests.id });
+    if (!insertedRows[0]) {
+      const concurrentRequestId = await resolveConcurrentRequestInsert({
+        db,
+        projectId: project.id,
+        requesterUserId: userId,
+      });
+      return c.json(await loadAccessRequestWithUser(db, project.id, concurrentRequestId));
+    }
   }
 
   await db
