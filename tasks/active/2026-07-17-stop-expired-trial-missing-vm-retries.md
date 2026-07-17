@@ -19,7 +19,7 @@ The fix must distinguish conclusive remote absence from uncertain deletion state
 
 ## Deliberate semantics
 
-A credentialed provider lookup that resolves successfully and returns `null` is an idempotent remote-delete success. Strict cleanup will return an explicit `providerVmAbsent` outcome, continue best-effort DNS cleanup, and allow the scheduler's existing guarded local cleanup/tombstoning path to finish. It will emit bounded structured operational logging, not a recurring `platform_error`.
+A credentialed provider lookup that resolves successfully and returns `null` is an idempotent remote-delete success. Strict cleanup will return an explicit `providerVm: 'already-absent'` outcome, continue best-effort DNS cleanup, and allow the scheduler's existing guarded local cleanup/tombstoning path to finish. It will emit bounded structured operational logging, not a recurring `platform_error`.
 
 Credential resolution failure, provider lookup rejection, malformed/ambiguous provider behavior, and provider deletion rejection remain exceptions. The scheduler releases those claims to the existing operator-visible retryable error state and persists the error.
 
