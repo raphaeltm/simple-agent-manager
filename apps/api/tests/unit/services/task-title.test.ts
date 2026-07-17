@@ -272,7 +272,7 @@ describe('safe Gateway diagnostics', () => {
           headers: { authorization: 'Bearer secret-token-value' },
         })
       ),
-      160
+      512
     );
     expect(diagnostic).toBe(
       'code=invalid_parameter type=invalid_request_error param=reasoning_effort message=invalid reasoning_effort parameter'

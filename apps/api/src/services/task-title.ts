@@ -193,6 +193,14 @@ export function classifyError(err: unknown): {
     return { category: 'error', message: String(err) };
   }
 
+  if (err instanceof WorkersAIGatewayError) {
+    if (err.status === 429) return { category: 'rate_limit', message: err.message };
+    if (err.status >= 400 && err.status < 500 && ![408, 425].includes(err.status)) {
+      return { category: 'request', message: err.message };
+    }
+    return { category: 'error', message: err.message };
+  }
+
   const msg = err.message.toLowerCase();
 
   // AbortSignal.timeout() throws a TimeoutError (DOMException with name "TimeoutError")
@@ -214,15 +222,6 @@ export function classifyError(err: unknown): {
     msg.includes('429')
   ) {
     return { category: 'rate_limit', message: err.message };
-  }
-
-  if (
-    err instanceof WorkersAIGatewayError &&
-    err.status >= 400 &&
-    err.status < 500 &&
-    ![408, 425].includes(err.status)
-  ) {
-    return { category: 'request', message: err.message };
   }
 
   return { category: 'error', message: err.message };
