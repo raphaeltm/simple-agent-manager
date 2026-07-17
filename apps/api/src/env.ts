@@ -787,6 +787,8 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   CF_CONTAINER_VM_AGENT_PORT?: string; // vm-agent standalone HTTP port inside the raw container (default: 8080)
   CF_CONTAINER_PORT_READY_TIMEOUT_MS?: string; // Max time to wait for vm-agent port readiness (default: 30000)
   CF_CONTAINER_WAKE_TIMEOUT_MS?: string; // Max time for launch + restore before forwarding a wake request (default: 120000)
+  CF_CONTAINER_RECOVERY_MAX_ATTEMPTS?: string; // Max serialized replacement restore attempts (default: 3)
+  CF_CONTAINER_DRAIN_TIMEOUT_MS?: string; // Max vm-agent SIGTERM checkpoint/drain duration (default: 25000)
   CF_CONTAINER_WORKSPACE_BASE_DIR?: string; // Base checkout dir inside raw container (default: /workspaces)
   // Legacy Sandbox SDK prototype (admin-only)
   SANDBOX_ENABLED?: string; // Legacy/fallback kill switch for sandbox routes and older staging config (default: false)

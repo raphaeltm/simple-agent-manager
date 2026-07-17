@@ -164,6 +164,29 @@ func (s *Server) sessionSnapshotHandlerInput(w http.ResponseWriter, r *http.Requ
 	}, true
 }
 
+// DrainStandaloneSnapshot creates the latest safe checkpoint before a platform SIGTERM.
+// It is safe to call repeatedly: completed snapshots are atomically replaced by the
+// control plane and message IDs remain deduplicated by the reporter outbox.
+func (s *Server) DrainStandaloneSnapshot(ctx context.Context) error {
+	if s.config == nil || !s.config.IsStandaloneMode() {
+		return nil
+	}
+	runtime, ok := s.getWorkspaceRuntime(s.config.WorkspaceID)
+	if !ok {
+		return nil
+	}
+	sessions := s.agentSessions.List(s.config.WorkspaceID)
+	if len(sessions) == 0 {
+		return nil
+	}
+	callbackToken := s.callbackTokenForWorkspace(s.config.WorkspaceID)
+	if callbackToken == "" {
+		return fmt.Errorf("workspace callback token unavailable for shutdown checkpoint")
+	}
+	_, err := s.hibernateSessionSnapshot(ctx, runtime, sessions[0].ID, s.config.ChatSessionID, "cf-container", callbackToken)
+	return err
+}
+
 func (s *Server) handleHibernateAgentSession(w http.ResponseWriter, r *http.Request) {
 	input, ok := s.sessionSnapshotHandlerInput(w, r)
 	if !ok {

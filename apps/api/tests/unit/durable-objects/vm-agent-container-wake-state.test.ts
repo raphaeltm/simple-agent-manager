@@ -24,9 +24,7 @@ function makeFake(opts: {
   }
   getState.mockResolvedValue({ status: opts.statuses[opts.statuses.length - 1] });
 
-  const containerFetch = vi
-    .fn()
-    .mockResolvedValue(new Response('proxied', { status: 200 }));
+  const containerFetch = vi.fn().mockResolvedValue(new Response('proxied', { status: 200 }));
   const wakeFromSnapshot = vi
     .fn()
     .mockResolvedValue(opts.wakeOk ? { ok: true } : { ok: false, message: 'degraded' });
@@ -37,17 +35,18 @@ function makeFake(opts: {
     wakeFromSnapshot,
     defaultPort: 8080,
     wakeChain: Promise.resolve(),
-    ensureAwake: (VmAgentContainer.prototype as unknown as { ensureAwake: unknown })
-      .ensureAwake,
+    ensureAwake: (VmAgentContainer.prototype as unknown as { ensureAwake: unknown }).ensureAwake,
     ctx: { storage: { get: vi.fn().mockResolvedValue(opts.lifecycleStatus) } },
   };
   return { fake, getState, containerFetch, wakeFromSnapshot };
 }
 
 function callProxyHttp(fake: unknown, request: Request): Promise<Response> {
-  return (VmAgentContainer.prototype as unknown as {
-    proxyHttp: (this: unknown, request: Request, port?: number) => Promise<Response>;
-  }).proxyHttp.call(fake, request);
+  return (
+    VmAgentContainer.prototype as unknown as {
+      proxyHttp: (this: unknown, request: Request, port?: number) => Promise<Response>;
+    }
+  ).proxyHttp.call(fake, request);
 }
 
 describe('VmAgentContainer.proxyHttp wake state re-read', () => {
@@ -59,7 +58,10 @@ describe('VmAgentContainer.proxyHttp wake state re-read', () => {
       wakeOk: true,
     });
 
-    const res = await callProxyHttp(fake, new Request('http://container/prompt', { method: 'POST' }));
+    const res = await callProxyHttp(
+      fake,
+      new Request('http://container/prompt', { method: 'POST' })
+    );
 
     expect(wakeFromSnapshot).toHaveBeenCalledTimes(1);
     // State must be re-read after wake (once before, once after) so the stopped
@@ -77,7 +79,10 @@ describe('VmAgentContainer.proxyHttp wake state re-read', () => {
       wakeOk: false,
     });
 
-    const res = await callProxyHttp(fake, new Request('http://container/prompt', { method: 'POST' }));
+    const res = await callProxyHttp(
+      fake,
+      new Request('http://container/prompt', { method: 'POST' })
+    );
 
     expect(res.status).toBe(503);
     expect(containerFetch).not.toHaveBeenCalled();
@@ -90,7 +95,10 @@ describe('VmAgentContainer.proxyHttp wake state re-read', () => {
       wakeOk: true,
     });
 
-    const res = await callProxyHttp(fake, new Request('http://container/prompt', { method: 'POST' }));
+    const res = await callProxyHttp(
+      fake,
+      new Request('http://container/prompt', { method: 'POST' })
+    );
 
     expect(wakeFromSnapshot).not.toHaveBeenCalled();
     expect(containerFetch).not.toHaveBeenCalled();
@@ -137,5 +145,132 @@ describe('VmAgentContainer.ensureAwake concurrency (rule 45)', () => {
     expect(containerFetch).toHaveBeenCalledTimes(2);
     expect(a.status).toBe(200);
     expect(b.status).toBe(200);
+  });
+});
+
+describe('VmAgentContainer replacement recovery', () => {
+  it('serializes concurrent replacement recovery and records one attempt', async () => {
+    const values = new Map<string, unknown>([
+      ['lifecycleStatus', 'replacing'],
+      ['recoveryAttempts', 0],
+    ]);
+    const storage = {
+      get: vi.fn(async (key: string) => values.get(key)),
+      put: vi.fn(async (key: string, value: unknown) => {
+        values.set(key, value);
+      }),
+    };
+    const wakeFromSnapshot = vi.fn(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      values.set('lifecycleStatus', 'running');
+      return { ok: true };
+    });
+    const fake = {
+      wakeChain: Promise.resolve(),
+      wakeFromSnapshot,
+      getRecoveryMaxAttempts: () => 3,
+      ctx: { storage },
+    };
+    const ensureAwake = (
+      VmAgentContainer.prototype as unknown as {
+        ensureAwake: (this: unknown) => Promise<{ ok: boolean; message?: string }>;
+      }
+    ).ensureAwake;
+
+    const [first, second] = await Promise.all([ensureAwake.call(fake), ensureAwake.call(fake)]);
+
+    expect(first.ok).toBe(true);
+    expect(second.ok).toBe(true);
+    expect(wakeFromSnapshot).toHaveBeenCalledTimes(1);
+    expect(values.get('recoveryAttempts')).toBe(1);
+  });
+
+  it('stops attempting restore when the configured bound is exhausted', async () => {
+    const values = new Map<string, unknown>([
+      ['lifecycleStatus', 'replacing'],
+      ['recoveryAttempts', 2],
+    ]);
+    const storage = {
+      get: vi.fn(async (key: string) => values.get(key)),
+      put: vi.fn(async (key: string, value: unknown) => {
+        values.set(key, value);
+      }),
+    };
+    const wakeFromSnapshot = vi.fn();
+    const fake = {
+      wakeChain: Promise.resolve(),
+      wakeFromSnapshot,
+      getRecoveryMaxAttempts: () => 2,
+      ctx: { storage },
+    };
+    const ensureAwake = (
+      VmAgentContainer.prototype as unknown as {
+        ensureAwake: (this: unknown) => Promise<{ ok: boolean; message?: string }>;
+      }
+    ).ensureAwake;
+
+    const result = await ensureAwake.call(fake);
+
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain('exhausted');
+    expect(wakeFromSnapshot).not.toHaveBeenCalled();
+    expect(values.get('lifecycleStatus')).toBe('error');
+  });
+});
+
+describe('VmAgentContainer stop classification', () => {
+  const onStop = (
+    VmAgentContainer.prototype as unknown as {
+      onStop: (
+        this: unknown,
+        params: { exitCode: number; reason: 'exit' | 'runtime_signal' }
+      ) => Promise<void>;
+    }
+  ).onStop;
+
+  function makeStopFake(status: string) {
+    const put = vi.fn();
+    const markRuntimeReplacing = vi.fn();
+    const markRuntimeEnded = vi.fn();
+    return {
+      fake: {
+        ctx: { storage: { get: vi.fn().mockResolvedValue(status), put } },
+        markRuntimeReplacing,
+        markRuntimeEnded,
+      },
+      put,
+      markRuntimeReplacing,
+      markRuntimeEnded,
+    };
+  }
+
+  it('classifies runtime_signal as recoverable replacement', async () => {
+    const { fake, markRuntimeReplacing, markRuntimeEnded } = makeStopFake('running');
+    await onStop.call(fake, { exitCode: 0, reason: 'runtime_signal' });
+    expect(markRuntimeReplacing).toHaveBeenCalledTimes(1);
+    expect(markRuntimeEnded).not.toHaveBeenCalled();
+  });
+
+  it('keeps an intentional stop terminal', async () => {
+    const { fake, markRuntimeReplacing, markRuntimeEnded, put } = makeStopFake('stopping');
+    await onStop.call(fake, { exitCode: 0, reason: 'runtime_signal' });
+    expect(markRuntimeReplacing).not.toHaveBeenCalled();
+    expect(markRuntimeEnded).toHaveBeenCalledWith('stopped', 'Container stopped by user request');
+    expect(put).toHaveBeenCalledWith('lifecycleStatus', 'stopped');
+  });
+
+  it('keeps an application exit terminal', async () => {
+    const { fake, markRuntimeReplacing, markRuntimeEnded, put } = makeStopFake('running');
+    await onStop.call(fake, { exitCode: 2, reason: 'exit' });
+    expect(markRuntimeReplacing).not.toHaveBeenCalled();
+    expect(markRuntimeEnded).toHaveBeenCalledWith('error', 'Container stopped: exit (2)');
+    expect(put).toHaveBeenCalledWith('lifecycleStatus', 'error');
+  });
+
+  it('handles a repeated replacement stop idempotently', async () => {
+    const { fake, markRuntimeReplacing, markRuntimeEnded } = makeStopFake('replacing');
+    await onStop.call(fake, { exitCode: 0, reason: 'runtime_signal' });
+    expect(markRuntimeReplacing).not.toHaveBeenCalled();
+    expect(markRuntimeEnded).not.toHaveBeenCalled();
   });
 });

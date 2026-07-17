@@ -10,6 +10,8 @@ import { signCallbackToken, signNodeCallbackToken, signNodeManagementToken } fro
 export const DEFAULT_CF_CONTAINER_SLEEP_AFTER = '1h';
 export const DEFAULT_CF_CONTAINER_ACTIVE_WORK_MAX_MS = 2 * 60 * 60 * 1000;
 export const DEFAULT_CF_CONTAINER_KEEPALIVE_RENEW_INTERVAL_MS = 5 * 60 * 1000;
+export const DEFAULT_CF_CONTAINER_RECOVERY_MAX_ATTEMPTS = 3;
+export const DEFAULT_CF_CONTAINER_DRAIN_TIMEOUT_MS = 25_000;
 
 export interface VmAgentContainerLaunchConfig {
   nodeId: string;
@@ -27,7 +29,15 @@ export interface VmAgentContainerLaunchSecrets {
   nodeCallbackToken: string;
 }
 
-type LifecycleStatus = 'launching' | 'running' | 'stopping' | 'stopped' | 'sleeping' | 'expired' | 'error';
+type LifecycleStatus =
+  | 'launching'
+  | 'running'
+  | 'stopping'
+  | 'stopped'
+  | 'sleeping'
+  | 'replacing'
+  | 'expired'
+  | 'error';
 
 type ActiveWorkStatus = 'active' | 'ended' | 'expired';
 
@@ -45,8 +55,12 @@ interface ActiveWorkState {
 }
 
 const ACTIVE_WORK_KEY = 'activeWork';
+const RECOVERY_ATTEMPTS_KEY = 'recoveryAttempts';
+const RECOVERY_MODE_KEY = 'recoveryMode';
+const RECOVERY_PROMPT_DISPOSITION_KEY = 'recoveryPromptDisposition';
 const KEEPALIVE_CALLBACK = 'renewActiveWorkKeepalive';
-const WAKE_DEGRADED_RESPONSE = 'Workspace woke with degraded snapshot restore; retry the prompt or fork from transcript history.';
+const WAKE_DEGRADED_RESPONSE =
+  'Workspace woke with degraded snapshot restore; retry the prompt or fork from transcript history.';
 
 export class VmAgentContainer extends Container<Env> {
   defaultPort = 8080;
@@ -62,12 +76,16 @@ export class VmAgentContainer extends Container<Env> {
 
   constructor(ctx: DurableObjectState<Record<string, never>>, env: Env) {
     super(ctx, env);
-    const configuredPort = Number.parseInt(env.CF_CONTAINER_VM_AGENT_PORT || env.SANDBOX_VM_AGENT_PORT || '', 10);
+    const configuredPort = Number.parseInt(
+      env.CF_CONTAINER_VM_AGENT_PORT || env.SANDBOX_VM_AGENT_PORT || '',
+      10
+    );
     if (Number.isFinite(configuredPort) && configuredPort > 0) {
       this.defaultPort = configuredPort;
       this.requiredPorts = [configuredPort];
     }
-    this.sleepAfter = env.CF_CONTAINER_SLEEP_AFTER || env.SANDBOX_SLEEP_AFTER || DEFAULT_CF_CONTAINER_SLEEP_AFTER;
+    this.sleepAfter =
+      env.CF_CONTAINER_SLEEP_AFTER || env.SANDBOX_SLEEP_AFTER || DEFAULT_CF_CONTAINER_SLEEP_AFTER;
   }
 
   async launch(
@@ -77,6 +95,7 @@ export class VmAgentContainer extends Container<Env> {
     await this.ctx.storage.put('launchConfig', config);
     await this.ctx.storage.put('lifecycleStatus', 'launching' satisfies LifecycleStatus);
     await this.ctx.storage.delete(ACTIVE_WORK_KEY);
+    const recoveryMode = (await this.ctx.storage.get<boolean>(RECOVERY_MODE_KEY)) === true;
     await this.clearKeepaliveSchedule();
 
     await this.startAndWaitForPorts({
@@ -99,6 +118,7 @@ export class VmAgentContainer extends Container<Env> {
           VM_AGENT_PORT: String(config.vmAgentPort),
           VM_AGENT_PROTOCOL: 'http',
           COOKIE_SECURE: 'true',
+          STANDALONE_DRAIN_TIMEOUT: `${this.getDrainTimeoutMs()}ms`,
         },
         labels: {
           nodeId: config.nodeId,
@@ -111,13 +131,16 @@ export class VmAgentContainer extends Container<Env> {
       },
     });
 
-    await this.ctx.storage.put('lifecycleStatus', 'running' satisfies LifecycleStatus);
+    await this.ctx.storage.put(
+      'lifecycleStatus',
+      recoveryMode ? 'replacing' : ('running' satisfies LifecycleStatus)
+    );
   }
 
   async proxyHttp(request: Request, port?: number): Promise<Response> {
     let state = await this.getState();
     const lifecycleStatus = await this.ctx.storage.get<LifecycleStatus>('lifecycleStatus');
-    if (lifecycleStatus === 'sleeping') {
+    if (lifecycleStatus === 'sleeping' || lifecycleStatus === 'replacing') {
       const wake = await this.ensureAwake();
       if (!wake.ok) {
         return new Response(wake.message || WAKE_DEGRADED_RESPONSE, { status: 503 });
@@ -247,7 +270,7 @@ export class VmAgentContainer extends Container<Env> {
   override async fetch(request: Request): Promise<Response> {
     let state = await this.getState();
     const lifecycleStatus = await this.ctx.storage.get<LifecycleStatus>('lifecycleStatus');
-    if (lifecycleStatus === 'sleeping') {
+    if (lifecycleStatus === 'sleeping' || lifecycleStatus === 'replacing') {
       const wake = await this.ensureAwake();
       if (!wake.ok) {
         return new Response(wake.message || WAKE_DEGRADED_RESPONSE, { status: 503 });
@@ -263,18 +286,31 @@ export class VmAgentContainer extends Container<Env> {
   }
 
   override async onStart(): Promise<void> {
-    await this.ctx.storage.put('lifecycleStatus', 'running' satisfies LifecycleStatus);
+    const recoveryMode = (await this.ctx.storage.get<boolean>(RECOVERY_MODE_KEY)) === true;
+    await this.ctx.storage.put(
+      'lifecycleStatus',
+      recoveryMode ? 'replacing' : ('running' satisfies LifecycleStatus)
+    );
   }
 
-  override async onStop(params: { exitCode: number; reason: 'exit' | 'runtime_signal' }): Promise<void> {
+  override async onStop(params: {
+    exitCode: number;
+    reason: 'exit' | 'runtime_signal';
+  }): Promise<void> {
     const status = await this.ctx.storage.get<LifecycleStatus>('lifecycleStatus');
-    if (status === 'expired' || status === 'sleeping') {
+    if (status === 'expired' || status === 'sleeping' || status === 'replacing') {
       return;
     }
     const explicitStop = status === 'stopping';
+    if (!explicitStop && params.reason === 'runtime_signal') {
+      await this.markRuntimeReplacing();
+      return;
+    }
     await this.markRuntimeEnded(
       explicitStop ? 'stopped' : 'error',
-      explicitStop ? 'Container stopped by user request' : `Container stopped: ${params.reason} (${params.exitCode})`
+      explicitStop
+        ? 'Container stopped by user request'
+        : `Container stopped: ${params.reason} (${params.exitCode})`
     );
     await this.ctx.storage.put('lifecycleStatus', explicitStop ? 'stopped' : 'error');
   }
@@ -293,7 +329,9 @@ export class VmAgentContainer extends Container<Env> {
   override async onError(error: unknown): Promise<void> {
     await this.markRuntimeEnded(
       'error',
-      error instanceof Error ? `Container error: ${error.message}` : `Container error: ${String(error)}`
+      error instanceof Error
+        ? `Container error: ${error.message}`
+        : `Container error: ${String(error)}`
     );
     await this.ctx.storage.put('lifecycleStatus', 'error' satisfies LifecycleStatus);
   }
@@ -312,8 +350,26 @@ export class VmAgentContainer extends Container<Env> {
 
   private getKeepaliveRenewIntervalMs(): number {
     const raw = this.env.CF_CONTAINER_KEEPALIVE_RENEW_INTERVAL_MS;
-    const parsed = raw ? Number.parseInt(raw, 10) : DEFAULT_CF_CONTAINER_KEEPALIVE_RENEW_INTERVAL_MS;
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_CF_CONTAINER_KEEPALIVE_RENEW_INTERVAL_MS;
+    const parsed = raw
+      ? Number.parseInt(raw, 10)
+      : DEFAULT_CF_CONTAINER_KEEPALIVE_RENEW_INTERVAL_MS;
+    return Number.isFinite(parsed) && parsed > 0
+      ? parsed
+      : DEFAULT_CF_CONTAINER_KEEPALIVE_RENEW_INTERVAL_MS;
+  }
+
+  private getDrainTimeoutMs(): number {
+    const raw = this.env.CF_CONTAINER_DRAIN_TIMEOUT_MS;
+    const parsed = raw ? Number.parseInt(raw, 10) : DEFAULT_CF_CONTAINER_DRAIN_TIMEOUT_MS;
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_CF_CONTAINER_DRAIN_TIMEOUT_MS;
+  }
+
+  private getRecoveryMaxAttempts(): number {
+    const raw = this.env.CF_CONTAINER_RECOVERY_MAX_ATTEMPTS;
+    const parsed = raw ? Number.parseInt(raw, 10) : DEFAULT_CF_CONTAINER_RECOVERY_MAX_ATTEMPTS;
+    return Number.isFinite(parsed) && parsed > 0
+      ? parsed
+      : DEFAULT_CF_CONTAINER_RECOVERY_MAX_ATTEMPTS;
   }
 
   /**
@@ -325,8 +381,20 @@ export class VmAgentContainer extends Container<Env> {
   private async ensureAwake(): Promise<{ ok: boolean; message?: string }> {
     const run = this.wakeChain.then(async () => {
       const status = await this.ctx.storage.get<LifecycleStatus>('lifecycleStatus');
-      if (status !== 'sleeping') {
+      if (status !== 'sleeping' && status !== 'replacing') {
         return { ok: true };
+      }
+      if (status === 'replacing') {
+        const attempts = (await this.ctx.storage.get<number>(RECOVERY_ATTEMPTS_KEY)) ?? 0;
+        if (attempts >= this.getRecoveryMaxAttempts()) {
+          await this.ctx.storage.put('lifecycleStatus', 'error' satisfies LifecycleStatus);
+          return {
+            ok: false,
+            message:
+              'Runtime recovery was exhausted; transcript and partial output remain available.',
+          };
+        }
+        await this.ctx.storage.put(RECOVERY_ATTEMPTS_KEY, attempts + 1);
       }
       return this.wakeFromSnapshot();
     });
@@ -373,7 +441,8 @@ export class VmAgentContainer extends Container<Env> {
       agentSessionId: agentSession.id,
     });
 
-    await this.ctx.storage.put('lifecycleStatus', 'launching' satisfies LifecycleStatus);
+    await this.ctx.storage.put(RECOVERY_MODE_KEY, true);
+    await this.ctx.storage.put('lifecycleStatus', 'replacing' satisfies LifecycleStatus);
     // The container's CALLBACK_TOKEN must be node-scoped to match the initial
     // launch (see launchInstantSession): the vm-agent uses it for node callbacks
     // (error/activity/message reporting) which reject workspace-scoped tokens.
@@ -389,8 +458,15 @@ export class VmAgentContainer extends Container<Env> {
     // pass it on the restore request; without it, restored sessions accept a
     // prompt but silently discard the agent's reply ("no auth token").
     const workspaceCallbackToken = await signCallbackToken(config.workspaceId, this.env);
-    const { token } = await signNodeManagementToken(workspace.userId, config.nodeId, config.workspaceId, this.env);
-    const restoreUrl = new URL(`http://localhost:${config.vmAgentPort}/workspaces/${config.workspaceId}/agent-sessions/${agentSession.id}/restore`);
+    const { token } = await signNodeManagementToken(
+      workspace.userId,
+      config.nodeId,
+      config.workspaceId,
+      this.env
+    );
+    const restoreUrl = new URL(
+      `http://localhost:${config.vmAgentPort}/workspaces/${config.workspaceId}/agent-sessions/${agentSession.id}/restore`
+    );
     const restoreResponse = await this.containerFetch(
       new Request(restoreUrl.toString(), {
         method: 'POST',
@@ -411,7 +487,10 @@ export class VmAgentContainer extends Container<Env> {
     );
     const restoreBody = await restoreResponse.text().catch(() => '');
     if (!restoreResponse.ok) {
-      await this.markWakeDegraded(config, restoreBody || `restore failed with HTTP ${restoreResponse.status}`);
+      await this.markWakeDegraded(
+        config,
+        restoreBody || `restore failed with HTTP ${restoreResponse.status}`
+      );
       return { ok: false, message: restoreBody || 'Session restore failed.' };
     }
     let restoreStatus = '';
@@ -428,22 +507,43 @@ export class VmAgentContainer extends Container<Env> {
     }
 
     const now = new Date().toISOString();
-    await db.update(schema.nodes).set({
-      status: 'running',
-      healthStatus: 'healthy',
-      errorMessage: null,
-      updatedAt: now,
-    }).where(eq(schema.nodes.id, config.nodeId));
-    await db.update(schema.workspaces).set({
-      status: 'running',
-      errorMessage: null,
-      updatedAt: now,
-    }).where(eq(schema.workspaces.id, config.workspaceId));
-    await db.update(schema.agentSessions).set({
-      status: 'running',
-      errorMessage: null,
-      updatedAt: now,
-    }).where(eq(schema.agentSessions.id, agentSession.id));
+    await db
+      .update(schema.nodes)
+      .set({
+        status: 'running',
+        healthStatus: 'healthy',
+        errorMessage: null,
+        updatedAt: now,
+      })
+      .where(eq(schema.nodes.id, config.nodeId));
+    await db
+      .update(schema.workspaces)
+      .set({
+        status: 'running',
+        errorMessage: null,
+        updatedAt: now,
+      })
+      .where(eq(schema.workspaces.id, config.workspaceId));
+    await db
+      .update(schema.agentSessions)
+      .set({
+        status: 'running',
+        errorMessage: null,
+        updatedAt: now,
+      })
+      .where(eq(schema.agentSessions.id, agentSession.id));
+    const promptDisposition = await this.ctx.storage.get<string>(RECOVERY_PROMPT_DISPOSITION_KEY);
+    if (promptDisposition === 'interrupted_manual_retry') {
+      await db
+        .update(schema.agentSessions)
+        .set({
+          errorMessage:
+            'Runtime replacement interrupted the active prompt; retry it manually. Partial output remains available.',
+          updatedAt: now,
+        })
+        .where(eq(schema.agentSessions.id, agentSession.id));
+    }
+    await this.ctx.storage.delete(RECOVERY_MODE_KEY);
     await this.ctx.storage.put('lifecycleStatus', 'running' satisfies LifecycleStatus);
 
     log.info('vm_agent_container_wake_completed', {
@@ -455,23 +555,81 @@ export class VmAgentContainer extends Container<Env> {
     return { ok: true };
   }
 
-  private async markWakeDegraded(config: VmAgentContainerLaunchConfig, message: string): Promise<void> {
+  private async markWakeDegraded(
+    config: VmAgentContainerLaunchConfig,
+    message: string
+  ): Promise<void> {
+    const diagnostic = message.toLowerCase().includes('timeout')
+      ? 'Runtime recovery timed out; transcript and partial output remain available.'
+      : 'Runtime recovery is degraded; transcript and partial output remain available.';
     const now = new Date().toISOString();
     const db = drizzle(this.env.DATABASE, { schema });
-    await db.update(schema.workspaces).set({
-      status: 'recovery',
-      errorMessage: message,
-      updatedAt: now,
-    }).where(eq(schema.workspaces.id, config.workspaceId));
-    await db.update(schema.agentSessions).set({
-      status: 'error',
-      errorMessage: message,
-      updatedAt: now,
-    }).where(eq(schema.agentSessions.workspaceId, config.workspaceId));
+    await db
+      .update(schema.workspaces)
+      .set({
+        status: 'recovery',
+        errorMessage: diagnostic,
+        updatedAt: now,
+      })
+      .where(eq(schema.workspaces.id, config.workspaceId));
+    await db
+      .update(schema.agentSessions)
+      .set({
+        status: 'recovery',
+        errorMessage: diagnostic,
+        updatedAt: now,
+      })
+      .where(eq(schema.agentSessions.workspaceId, config.workspaceId));
     log.warn('vm_agent_container_wake_degraded', {
       nodeId: config.nodeId,
       workspaceId: config.workspaceId,
-      message,
+      message: diagnostic,
+    });
+    if ((await this.ctx.storage.get<number>(RECOVERY_ATTEMPTS_KEY)) !== undefined) {
+      await this.ctx.storage.put('lifecycleStatus', 'replacing' satisfies LifecycleStatus);
+    }
+  }
+
+  private async markRuntimeReplacing(): Promise<void> {
+    const config = await this.ctx.storage.get<VmAgentContainerLaunchConfig>('launchConfig');
+    if (!config) return;
+    const activeWork = await this.ctx.storage.get<ActiveWorkState>(ACTIVE_WORK_KEY);
+    const diagnostic =
+      activeWork?.status === 'active'
+        ? 'Runtime replacement interrupted the active prompt; retry it manually. Partial output remains available.'
+        : 'Runtime replacement detected; restoring the session.';
+    await this.ctx.storage.put(RECOVERY_ATTEMPTS_KEY, 0);
+    await this.ctx.storage.put(RECOVERY_MODE_KEY, true);
+    await this.ctx.storage.put(
+      RECOVERY_PROMPT_DISPOSITION_KEY,
+      activeWork?.status === 'active' ? 'interrupted_manual_retry' : 'none'
+    );
+    await this.ctx.storage.put('lifecycleStatus', 'replacing' satisfies LifecycleStatus);
+    await this.clearKeepaliveSchedule();
+    const now = new Date().toISOString();
+    const db = drizzle(this.env.DATABASE, { schema });
+    await db
+      .update(schema.nodes)
+      .set({
+        status: 'recovery',
+        healthStatus: 'unhealthy',
+        errorMessage: diagnostic,
+        updatedAt: now,
+      })
+      .where(eq(schema.nodes.id, config.nodeId));
+    await db
+      .update(schema.workspaces)
+      .set({ status: 'recovery', errorMessage: diagnostic, updatedAt: now })
+      .where(eq(schema.workspaces.id, config.workspaceId));
+    await db
+      .update(schema.agentSessions)
+      .set({ status: 'recovery', errorMessage: diagnostic, updatedAt: now })
+      .where(eq(schema.agentSessions.workspaceId, config.workspaceId));
+    log.warn('vm_agent_container_platform_replacement', {
+      nodeId: config.nodeId,
+      workspaceId: config.workspaceId,
+      activePromptDisposition:
+        activeWork?.status === 'active' ? 'interrupted_manual_retry' : 'none',
     });
   }
 
@@ -531,7 +689,10 @@ export class VmAgentContainer extends Container<Env> {
     });
   }
 
-  private async markRuntimeEnded(status: Exclude<LifecycleStatus, 'launching' | 'running' | 'stopping' | 'sleeping'>, message: string): Promise<void> {
+  private async markRuntimeEnded(
+    status: Exclude<LifecycleStatus, 'launching' | 'running' | 'stopping' | 'sleeping'>,
+    message: string
+  ): Promise<void> {
     const config = await this.ctx.storage.get<VmAgentContainerLaunchConfig>('launchConfig');
     if (!config) {
       return;

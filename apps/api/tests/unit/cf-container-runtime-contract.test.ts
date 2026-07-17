@@ -18,7 +18,11 @@ function readPackage(relPath: string): string {
 }
 
 function getPinnedAgentPackage(agentType: string): string {
-  const manifest = agentInstallManifest as Array<{ agentType: string; package: string; version: string }>;
+  const manifest = agentInstallManifest as Array<{
+    agentType: string;
+    package: string;
+    version: string;
+  }>;
   const entry = manifest.find((candidate) => candidate.agentType === agentType);
   if (!entry) {
     throw new Error(`Missing agent install manifest entry for ${agentType}`);
@@ -156,7 +160,7 @@ describe('cf-container runtime spike contracts', () => {
     const chatResolver = read('routes/chat-workspace-resolver.ts');
 
     expect(containerDo).toContain('override async onStop');
-    expect(containerDo).toContain("if (status === 'expired' || status === 'sleeping')");
+    expect(containerDo).toContain("if (status === 'expired' || status === 'sleeping' || status === 'replacing')");
     expect(containerDo).toContain('override async onError');
     expect(containerDo).toContain('override async onActivityExpired');
     expect(containerDo).toContain(
@@ -166,7 +170,7 @@ describe('cf-container runtime spike contracts', () => {
       "await this.ctx.storage.put('lifecycleStatus', 'sleeping' satisfies LifecycleStatus)"
     );
     expect(containerDo).toContain("status: 'sleeping'");
-    expect(containerDo).toContain("if (lifecycleStatus === 'sleeping')");
+    expect(containerDo).toContain("if (lifecycleStatus === 'sleeping' || lifecycleStatus === 'replacing')");
     expect(containerDo).toContain('const wake = await this.ensureAwake()');
     expect(containerDo).toContain('WAKE_DEGRADED_RESPONSE');
     expect(containerDo).toContain(

@@ -85,11 +85,16 @@ func runStandaloneMode(cfg *config.Config) {
 		slog.Error("Server error", "error", err)
 		os.Exit(1)
 	case sig := <-sigCh:
-		slog.Info("Received signal, shutting down standalone agent...", "signal", sig)
+		slog.Info("Received signal, draining standalone agent...", "signal", sig)
+		drainCtx, drainCancel := context.WithTimeout(context.Background(), cfg.StandaloneDrainTimeout)
+		if err := srv.DrainStandaloneSnapshot(drainCtx); err != nil {
+			slog.Warn("Standalone shutdown checkpoint degraded", "error", err)
+		}
+		drainCancel()
 		srv.StopAllWorkspacesAndSessions()
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), cfg.StandaloneDrainTimeout)
 	defer cancel()
 	if err := srv.Stop(ctx); err != nil {
 		slog.Error("Error during shutdown", "error", err)

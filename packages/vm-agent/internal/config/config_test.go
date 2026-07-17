@@ -1126,3 +1126,27 @@ func TestStandaloneRole(t *testing.T) {
 		t.Fatal("standalone mode must not be deployment mode")
 	}
 }
+
+func TestStandaloneDrainTimeout(t *testing.T) {
+	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+	t.Setenv("NODE_ROLE", RoleStandalone)
+	t.Setenv("NODE_ID", "node-123")
+	t.Setenv("WORKSPACE_ID", "ws-123")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.StandaloneDrainTimeout != DefaultStandaloneDrainTimeout {
+		t.Fatalf("StandaloneDrainTimeout=%v, want %v", cfg.StandaloneDrainTimeout, DefaultStandaloneDrainTimeout)
+	}
+
+	t.Setenv("STANDALONE_DRAIN_TIMEOUT", "7s")
+	cfg, err = Load()
+	if err != nil {
+		t.Fatalf("Load with override returned error: %v", err)
+	}
+	if cfg.StandaloneDrainTimeout != 7*time.Second {
+		t.Fatalf("StandaloneDrainTimeout=%v, want 7s", cfg.StandaloneDrainTimeout)
+	}
+}

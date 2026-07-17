@@ -15,9 +15,9 @@ These are Cloudflare Worker secrets, set during deployment. Pulumi auto-generate
 
 | Secret                                     | Description                                                                                                                                                                                                                  |
 | ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ENCRYPTION_KEY`                           | AES-256-GCM master key. Used for BetterAuth session cookies and user credential encryption unless a purpose-specific override below is set (auto-generated)                                                                   |
-| `BETTER_AUTH_SECRET`                       | Optional purpose-specific override for BetterAuth session cookie signing/encryption. Falls back to `ENCRYPTION_KEY` when unset (`apps/api/src/lib/secrets.ts`)                                                                |
-| `CREDENTIAL_ENCRYPTION_KEY`                | Optional purpose-specific override for AES-GCM encryption of user cloud/agent credentials. Falls back to `ENCRYPTION_KEY` when unset (`apps/api/src/lib/secrets.ts`)                                                          |
+| `ENCRYPTION_KEY`                           | AES-256-GCM master key. Used for BetterAuth session cookies and user credential encryption unless a purpose-specific override below is set (auto-generated)                                                                  |
+| `BETTER_AUTH_SECRET`                       | Optional purpose-specific override for BetterAuth session cookie signing/encryption. Falls back to `ENCRYPTION_KEY` when unset (`apps/api/src/lib/secrets.ts`)                                                               |
+| `CREDENTIAL_ENCRYPTION_KEY`                | Optional purpose-specific override for AES-GCM encryption of user cloud/agent credentials. Falls back to `ENCRYPTION_KEY` when unset (`apps/api/src/lib/secrets.ts`)                                                         |
 | `JWT_PRIVATE_KEY`                          | RSA-2048 private key for signing tokens (auto-generated)                                                                                                                                                                     |
 | `JWT_PUBLIC_KEY`                           | RSA-2048 public key for token verification (exposed via JWKS)                                                                                                                                                                |
 | `DEPLOY_SIGNING_PRIVATE_KEY`               | Ed25519 private key for signing deployment apply payloads (auto-generated)                                                                                                                                                   |
@@ -75,14 +75,16 @@ GitHub App secrets use `GH_*` prefix (e.g., `GH_CLIENT_ID`, `GH_WEBHOOK_SECRET`)
 
 ## Feature Flags
 
-| Variable                         | Default                   | Description                                                                                                                                                                                                                                                                                                                  |
-| -------------------------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `CF_CONTAINER_ENABLED`           | `true`                    | Enables Cloudflare Container instant sessions for matching profiles and zero-config runtime selection. Set `false` to force cloud VM runtime.                                                                                                                                                                                |
-| `CF_CONTAINER_WAKE_TIMEOUT_MS`   | `120000`                  | Maximum time for a sleeping container to launch, restore its snapshot, and accept the triggering request.                                                                                                                                                                                                                    |
-| `REQUIRE_APPROVAL`               | _(unset)_                 | Default signup approval gate. Superadmins can override it at runtime in Admin → Users without redeploying; when no runtime override exists, this value is used. The first genuine human becomes superadmin regardless of this flag — see [First Login & Admin Access](/docs/guides/self-hosting/#first-login--admin-access). |
-| `TRIAL_ANONYMOUS_USER_ID`        | `system_anonymous_trials` | Id of the internal anonymous-trial sentinel user, excluded from first-user superadmin checks. Override only if your deployment uses a different sentinel id.                                                                                                                                                                 |
-| `CAPACITY_SIZE_FALLBACK_ENABLED` | `true`                    | When a new node's VM size is exhausted on transient capacity, descend the size chain (large→medium→small). Only applies to default-derived sizes (project/platform default), never user-requested sizes. Set `false` to disable.                                                                                             |
-| `ORIGIN_CA_CERT_VALIDITY_DAYS`   | `7`                       | Validity for per-node Cloudflare Origin CA certificates issued from node-generated CSRs. Must be one of Cloudflare's supported values: 7, 30, 90, 365, 730, 1095, or 5475.                                                                                                                                                   |
+| Variable                             | Default                   | Description                                                                                                                                                                                                                                                                                                                  |
+| ------------------------------------ | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CF_CONTAINER_ENABLED`               | `true`                    | Enables Cloudflare Container instant sessions for matching profiles and zero-config runtime selection. Set `false` to force cloud VM runtime.                                                                                                                                                                                |
+| `CF_CONTAINER_WAKE_TIMEOUT_MS`       | `120000`                  | Maximum time for a sleeping container to launch, restore its snapshot, and accept the triggering request.                                                                                                                                                                                                                    |
+| `CF_CONTAINER_RECOVERY_MAX_ATTEMPTS` | `3`                       | Maximum serialized restore attempts after a platform replacement before recovery becomes terminal.                                                                                                                                                                                                                           |
+| `CF_CONTAINER_DRAIN_TIMEOUT_MS`      | `25000`                   | Maximum SIGTERM drain window for reporter flush and the latest safe snapshot attempt.                                                                                                                                                                                                                                        |
+| `REQUIRE_APPROVAL`                   | _(unset)_                 | Default signup approval gate. Superadmins can override it at runtime in Admin → Users without redeploying; when no runtime override exists, this value is used. The first genuine human becomes superadmin regardless of this flag — see [First Login & Admin Access](/docs/guides/self-hosting/#first-login--admin-access). |
+| `TRIAL_ANONYMOUS_USER_ID`            | `system_anonymous_trials` | Id of the internal anonymous-trial sentinel user, excluded from first-user superadmin checks. Override only if your deployment uses a different sentinel id.                                                                                                                                                                 |
+| `CAPACITY_SIZE_FALLBACK_ENABLED`     | `true`                    | When a new node's VM size is exhausted on transient capacity, descend the size chain (large→medium→small). Only applies to default-derived sizes (project/platform default), never user-requested sizes. Set `false` to disable.                                                                                             |
+| `ORIGIN_CA_CERT_VALIDITY_DAYS`       | `7`                       | Validity for per-node Cloudflare Origin CA certificates issued from node-generated CSRs. Must be one of Cloudflare's supported values: 7, 30, 90, 365, 730, 1095, or 5475.                                                                                                                                                   |
 
 ## AI Idea Title Generation
 
@@ -258,12 +260,12 @@ Webhook damping uses Cloudflare KV's eventually consistent read-update-write beh
 
 ## Node & Workspace Readiness
 
-| Variable                                 | Default            | Description                           |
-| ---------------------------------------- | ------------------ | ------------------------------------- |
-| `NODE_AGENT_READY_TIMEOUT_MS`            | `600000` (10 min)  | Wait for VM agent to report ready     |
-| `NODE_AGENT_READY_POLL_INTERVAL_MS`      | `5000`             | Poll interval for agent readiness     |
-| `TASK_RUNNER_WORKSPACE_READY_TIMEOUT_MS` | `1800000` (30 min) | Max wait for workspace-ready callback |
-| `PROVISIONING_TIMEOUT_MS`                | `1800000` (30 min) | Cron marks stuck workspaces as error  |
+| Variable                                 | Default            | Description                                                   |
+| ---------------------------------------- | ------------------ | ------------------------------------------------------------- |
+| `NODE_AGENT_READY_TIMEOUT_MS`            | `600000` (10 min)  | Wait for VM agent to report ready                             |
+| `NODE_AGENT_READY_POLL_INTERVAL_MS`      | `5000`             | Poll interval for agent readiness                             |
+| `TASK_RUNNER_WORKSPACE_READY_TIMEOUT_MS` | `1800000` (30 min) | Max wait for workspace-ready callback                         |
+| `PROVISIONING_TIMEOUT_MS`                | `1800000` (30 min) | Cron marks stuck workspaces as error                          |
 | `NODE_HEARTBEAT_STALE_SECONDS`           | `180`              | Seconds without a heartbeat before a node is treated as stale |
 
 ## App Deployment Routing
@@ -299,14 +301,14 @@ Webhook damping uses Cloudflare KV's eventually consistent read-update-write beh
 
 ## Platform Limits
 
-| Variable                           | Default | Description                   |
-| ---------------------------------- | ------- | ----------------------------- |
-| `MAX_NODES_PER_USER`               | `10`    | Max nodes per user            |
+| Variable                           | Default | Description                         |
+| ---------------------------------- | ------- | ----------------------------------- |
+| `MAX_NODES_PER_USER`               | `10`    | Max nodes per user                  |
 | `MAX_WORKSPACES_PER_NODE`          | `3`     | Max workspaces packed onto one node |
-| `MAX_AGENT_SESSIONS_PER_WORKSPACE` | `10`    | Max concurrent agent sessions |
-| `MAX_PROJECTS_PER_USER`            | `100`   | Max projects per user         |
-| `MAX_TASKS_PER_PROJECT`            | `10000` | Max ideas per project         |
-| `MAX_TASK_MESSAGE_LENGTH`          | `16000` | Max idea description length   |
+| `MAX_AGENT_SESSIONS_PER_WORKSPACE` | `10`    | Max concurrent agent sessions       |
+| `MAX_PROJECTS_PER_USER`            | `100`   | Max projects per user               |
+| `MAX_TASKS_PER_PROJECT`            | `10000` | Max ideas per project               |
+| `MAX_TASK_MESSAGE_LENGTH`          | `16000` | Max idea description length         |
 
 ## Durable Object Limits
 

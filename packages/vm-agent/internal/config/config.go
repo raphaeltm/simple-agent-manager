@@ -59,6 +59,9 @@ const (
 	// DefaultGitCredentialTimeout bounds credential-helper calls back to the
 	// local VM agent. Override via GIT_CREDENTIAL_TIMEOUT.
 	DefaultGitCredentialTimeout = 5 * time.Second
+
+	// DefaultStandaloneDrainTimeout bounds SIGTERM checkpoint and reporter drain.
+	DefaultStandaloneDrainTimeout = 25 * time.Second
 )
 
 const (
@@ -244,6 +247,7 @@ type Config struct {
 
 	// Git integration settings - configurable per constitution principle XI
 	GitCredentialTimeout     time.Duration // Timeout for credential-helper callbacks (env: GIT_CREDENTIAL_TIMEOUT, default: 5s)
+	StandaloneDrainTimeout   time.Duration // Timeout for standalone SIGTERM checkpoint (env: STANDALONE_DRAIN_TIMEOUT, default: 25s)
 	GitExecTimeout           time.Duration // Timeout for git commands via docker exec (default: 30s)
 	GitFileMaxSize           int           // Max file size in bytes for /git/file (default: 1MB)
 	GitWorktreeTimeout       time.Duration // Timeout for git worktree commands (default: 30s)
@@ -479,6 +483,7 @@ func Load() (*Config, error) {
 
 		// Git integration settings - configurable per constitution principle XI
 		GitCredentialTimeout:     getEnvDuration("GIT_CREDENTIAL_TIMEOUT", DefaultGitCredentialTimeout),
+		StandaloneDrainTimeout:   getEnvDuration("STANDALONE_DRAIN_TIMEOUT", DefaultStandaloneDrainTimeout),
 		GitExecTimeout:           getEnvDuration("GIT_EXEC_TIMEOUT", 30*time.Second),
 		GitFileMaxSize:           getEnvInt("GIT_FILE_MAX_SIZE", 1048576), // 1 MB
 		GitWorktreeTimeout:       getEnvDuration("GIT_WORKTREE_TIMEOUT", 30*time.Second),
