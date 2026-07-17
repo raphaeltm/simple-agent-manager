@@ -18,7 +18,11 @@
 import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
-import type { StartTaskInput, TaskRunner, TaskRunnerState } from '../../src/durable-objects/task-runner';
+import type {
+  StartTaskInput,
+  TaskRunner,
+  TaskRunnerState,
+} from '../../src/durable-objects/task-runner';
 import { seedInstallation, seedProject, seedTask, seedUser } from './helpers/seed-d1';
 
 // ---------------------------------------------------------------------------
@@ -28,6 +32,16 @@ import { seedInstallation, seedProject, seedTask, seedUser } from './helpers/see
 function getStub(taskId: string): DurableObjectStub<TaskRunner> {
   const id = env.TASK_RUNNER.idFromName(taskId);
   return env.TASK_RUNNER.get(id) as DurableObjectStub<TaskRunner>;
+}
+
+async function startWithoutAutomaticAlarm(
+  stub: DurableObjectStub<TaskRunner>,
+  input: StartTaskInput
+): Promise<void> {
+  await runInDurableObject(stub, async (instance) => {
+    await instance.start(input);
+    await instance.ctx.storage.deleteAlarm();
+  });
 }
 
 const TEST_USER_ID = 'user-tr-test-001';
@@ -83,16 +97,24 @@ function buildStartInput(taskId: string): StartTaskInput {
   };
 }
 
-async function getTaskFromD1(taskId: string): Promise<{ status: string; execution_step: string | null; error_message: string | null } | null> {
+async function getTaskFromD1(
+  taskId: string
+): Promise<{ status: string; execution_step: string | null; error_message: string | null } | null> {
   return await env.DATABASE.prepare(
-    `SELECT status, execution_step, error_message FROM tasks WHERE id = ?`,
-  ).bind(taskId).first<{ status: string; execution_step: string | null; error_message: string | null }>();
+    `SELECT status, execution_step, error_message FROM tasks WHERE id = ?`
+  )
+    .bind(taskId)
+    .first<{ status: string; execution_step: string | null; error_message: string | null }>();
 }
 
-async function getStatusEvents(taskId: string): Promise<Array<{ from_status: string | null; to_status: string; reason: string | null }>> {
+async function getStatusEvents(
+  taskId: string
+): Promise<Array<{ from_status: string | null; to_status: string; reason: string | null }>> {
   const result = await env.DATABASE.prepare(
-    `SELECT from_status, to_status, reason FROM task_status_events WHERE task_id = ? ORDER BY created_at ASC`,
-  ).bind(taskId).all<{ from_status: string | null; to_status: string; reason: string | null }>();
+    `SELECT from_status, to_status, reason FROM task_status_events WHERE task_id = ? ORDER BY created_at ASC`
+  )
+    .bind(taskId)
+    .all<{ from_status: string | null; to_status: string; reason: string | null }>();
   return result.results;
 }
 
@@ -109,7 +131,7 @@ describe('TaskRunner DO — state persistence and idempotency', () => {
     const stub = getStub(taskId);
     const input = buildStartInput(taskId);
 
-    await stub.start(input);
+    await startWithoutAutomaticAlarm(stub, input);
 
     // Read internal state via getStatus
     const status = await stub.getStatus();
@@ -139,12 +161,12 @@ describe('TaskRunner DO — state persistence and idempotency', () => {
     const input = buildStartInput(taskId);
 
     // First call
-    await stub.start(input);
+    await startWithoutAutomaticAlarm(stub, input);
     const statusAfterFirst = await stub.getStatus();
     const createdAt = statusAfterFirst!.createdAt;
 
     // Second call — should be a no-op
-    await stub.start(input);
+    await startWithoutAutomaticAlarm(stub, input);
     const statusAfterSecond = await stub.getStatus();
 
     // CreatedAt should not change (state was not re-initialized)
@@ -159,7 +181,7 @@ describe('TaskRunner DO — state persistence and idempotency', () => {
 
     const stub = getStub(taskId);
     const input = buildStartInput(taskId);
-    await stub.start(input);
+    await startWithoutAutomaticAlarm(stub, input);
 
     // Manually inject a mock mcpToken into DO state
     await runInDurableObject(stub, async (instance) => {
@@ -188,7 +210,7 @@ describe('TaskRunner DO — advanceWorkspaceReady', () => {
     await seedTestTask(taskId);
 
     const stub = getStub(taskId);
-    await stub.start(buildStartInput(taskId));
+    await startWithoutAutomaticAlarm(stub, buildStartInput(taskId));
 
     // Send workspace ready signal
     await stub.advanceWorkspaceReady('running', null);
@@ -205,7 +227,7 @@ describe('TaskRunner DO — advanceWorkspaceReady', () => {
     await seedTestTask(taskId);
 
     const stub = getStub(taskId);
-    await stub.start(buildStartInput(taskId));
+    await startWithoutAutomaticAlarm(stub, buildStartInput(taskId));
 
     await stub.advanceWorkspaceReady('error', 'container failed to start');
 
@@ -221,7 +243,7 @@ describe('TaskRunner DO — advanceWorkspaceReady', () => {
     await seedTestTask(taskId);
 
     const stub = getStub(taskId);
-    await stub.start(buildStartInput(taskId));
+    await startWithoutAutomaticAlarm(stub, buildStartInput(taskId));
 
     // Mark DO as completed
     await runInDurableObject(stub, async (instance) => {
@@ -250,11 +272,10 @@ describe('TaskRunner DO — failure handling', () => {
     await seedTestTask(taskId);
 
     const stub = getStub(taskId);
-    await stub.start(buildStartInput(taskId));
+    await startWithoutAutomaticAlarm(stub, buildStartInput(taskId));
 
-    // Manually trigger failTask by calling the alarm handler, which will
-    // try node_selection, fail (no nodes in DB for this user), exhaust retries,
-    // and call failTask.
+    // Manually trigger failTask through node selection and provisioning.
+    // With no nodes or cloud credential, provisioning exhausts retries.
     //
     // Set retryCount to max to ensure immediate failure (no backoff).
     await runInDurableObject(stub, async (instance) => {
@@ -266,10 +287,18 @@ describe('TaskRunner DO — failure handling', () => {
       }
     });
 
-    // Trigger alarm — handleNodeSelection will try to query D1 for nodes
-    // and will fail (no nodes available), which after max retries triggers failTask
+    // First alarm advances node_selection to node_provisioning. That successful
+    // step resets retryCount, so set it again before provisioning fails.
     await runInDurableObject(stub, async (instance) => {
       await instance.alarm();
+      await instance.ctx.storage.deleteAlarm();
+      const state = await instance.ctx.storage.get<TaskRunnerState>('state');
+      if (state) {
+        state.retryCount = 100;
+        await instance.ctx.storage.put('state', state);
+      }
+      await instance.alarm();
+      await instance.ctx.storage.deleteAlarm();
     });
 
     // Verify DO is marked completed
@@ -284,7 +313,7 @@ describe('TaskRunner DO — failure handling', () => {
     // Verify a status event was recorded
     const events = await getStatusEvents(taskId);
     expect(events.length).toBeGreaterThanOrEqual(1);
-    const failEvent = events.find(e => e.to_status === 'failed');
+    const failEvent = events.find((e) => e.to_status === 'failed');
     expect(failEvent).toBeTruthy();
     expect(failEvent!.reason).toBeTruthy();
   });
@@ -295,7 +324,7 @@ describe('TaskRunner DO — failure handling', () => {
     await seedTestTask(taskId);
 
     const stub = getStub(taskId);
-    await stub.start(buildStartInput(taskId));
+    await startWithoutAutomaticAlarm(stub, buildStartInput(taskId));
 
     // Mark completed
     await runInDurableObject(stub, async (instance) => {
