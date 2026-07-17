@@ -6,38 +6,22 @@ import { ulid } from '../lib/ulid';
 import { encrypt } from './encryption';
 import { serializeGcpCredential } from './provider-credentials';
 
-interface AttachedCredentialRow {
-  configurationId: string;
-  credentialId: string | null;
-}
-
 export interface StoredGcpCredentialResult {
   id: string;
   createdAt: string;
 }
 
-async function findAttachedGcpCredentials(
+/**
+ * Build the set-based cleanup for GCP credentials managed by this compatibility
+ * store. Keeping the selection inside the batch is important: two replacements
+ * may both begin before either batch runs, so a pre-batch snapshot can miss the
+ * credential inserted by the competing request.
+ */
+function cleanupManagedCredentialStatements(
   env: Env,
   userId: string,
-): Promise<AttachedCredentialRow[]> {
-  const rows = await env.DATABASE.prepare(
-    `SELECT a.configuration_id AS configurationId, c.credential_id AS credentialId
-     FROM cc_attachments a
-     JOIN cc_configurations c ON c.id = a.configuration_id
-     WHERE a.user_id = ?
-       AND a.project_id IS NULL
-       AND a.consumer_kind = 'compute'
-       AND a.consumer_target = 'gcp'`,
-  ).bind(userId).all<AttachedCredentialRow>();
-  return rows.results ?? [];
-}
-
-function cleanupAttachedCredentialStatements(
-  env: Env,
-  userId: string,
-  rows: AttachedCredentialRow[],
 ): D1PreparedStatement[] {
-  const statements: D1PreparedStatement[] = [
+  return [
     env.DATABASE.prepare(
       `DELETE FROM cc_attachments
        WHERE user_id = ?
@@ -45,33 +29,49 @@ function cleanupAttachedCredentialStatements(
          AND consumer_kind = 'compute'
          AND consumer_target = 'gcp'`,
     ).bind(userId),
-  ];
-
-  for (const row of rows) {
-    statements.push(
-      env.DATABASE.prepare(
-        `DELETE FROM cc_configurations
-         WHERE id = ?
-           AND owner_id = ?
-           AND NOT EXISTS (
-             SELECT 1 FROM cc_attachments WHERE configuration_id = ?
-           )`,
-      ).bind(row.configurationId, userId, row.configurationId),
-    );
-    if (row.credentialId) {
-      statements.push(
-        env.DATABASE.prepare(
-          `DELETE FROM cc_credentials
-           WHERE id = ?
-             AND owner_id = ?
+    env.DATABASE.prepare(
+      `DELETE FROM cc_credentials
+       WHERE owner_id = ?
+         AND id IN (
+           SELECT configuration.credential_id
+           FROM cc_configurations configuration
+           WHERE configuration.owner_id = ?
+             AND configuration.consumer_kind = 'compute'
+             AND configuration.consumer_target = 'gcp'
+             AND json_extract(configuration.settings_json, '$.managedBy') = 'legacy-gcp-credential'
              AND NOT EXISTS (
-               SELECT 1 FROM cc_configurations WHERE credential_id = ?
-             )`,
-        ).bind(row.credentialId, userId, row.credentialId),
-      );
-    }
-  }
-  return statements;
+               SELECT 1 FROM cc_attachments attachment
+               WHERE attachment.configuration_id = configuration.id
+             )
+         )
+         AND NOT EXISTS (
+           SELECT 1
+           FROM cc_configurations other_configuration
+           WHERE other_configuration.credential_id = cc_credentials.id
+             AND (
+               other_configuration.owner_id != ?
+               OR other_configuration.consumer_kind != 'compute'
+               OR other_configuration.consumer_target != 'gcp'
+               OR json_extract(other_configuration.settings_json, '$.managedBy') IS NOT 'legacy-gcp-credential'
+               OR EXISTS (
+                 SELECT 1 FROM cc_attachments other_attachment
+                 WHERE other_attachment.configuration_id = other_configuration.id
+               )
+             )
+         )`,
+    ).bind(userId, userId, userId),
+    env.DATABASE.prepare(
+      `DELETE FROM cc_configurations
+       WHERE owner_id = ?
+         AND consumer_kind = 'compute'
+         AND consumer_target = 'gcp'
+         AND json_extract(settings_json, '$.managedBy') = 'legacy-gcp-credential'
+         AND NOT EXISTS (
+           SELECT 1 FROM cc_attachments
+           WHERE configuration_id = cc_configurations.id
+         )`,
+    ).bind(userId),
+  ];
 }
 
 /** Atomically replace the user-level GCP credential across legacy and CC stores. */
@@ -83,7 +83,6 @@ export async function replaceUserGcpCredential(
   if (typeof env.DATABASE.batch !== 'function') {
     throw new Error('Atomic credential replacement is unavailable');
   }
-  const oldRows = await findAttachedGcpCredentials(env, userId);
   const now = new Date().toISOString();
   const legacyId = ulid();
   const ccCredentialId = `cc-cred-${ulid()}`;
@@ -102,7 +101,7 @@ export async function replaceUserGcpCredential(
          AND provider = 'gcp'
          AND credential_type = 'cloud-provider'`,
     ).bind(userId),
-    ...cleanupAttachedCredentialStatements(env, userId, oldRows),
+    ...cleanupManagedCredentialStatements(env, userId),
     env.DATABASE.prepare(
       `INSERT INTO credentials (
          id, user_id, project_id, provider, credential_type, agent_type,
@@ -144,7 +143,6 @@ export async function deleteUserGcpCredential(env: Env, userId: string): Promise
   if (typeof env.DATABASE.batch !== 'function') {
     throw new Error('Atomic credential removal is unavailable');
   }
-  const oldRows = await findAttachedGcpCredentials(env, userId);
   const statements: D1PreparedStatement[] = [
     env.DATABASE.prepare(
       `DELETE FROM credentials
@@ -153,7 +151,7 @@ export async function deleteUserGcpCredential(env: Env, userId: string): Promise
          AND provider = 'gcp'
          AND credential_type = 'cloud-provider'`,
     ).bind(userId),
-    ...cleanupAttachedCredentialStatements(env, userId, oldRows),
+    ...cleanupManagedCredentialStatements(env, userId),
   ];
   await env.DATABASE.batch(statements);
 }

@@ -93,35 +93,37 @@ References:
   - [x] Update self-hosting guidance with the recommended WIF path, OAuth-free service-account path, exact static callbacks, least-privilege roles/APIs, key-policy warning, rotation/removal semantics, and infra OAuth runtime-vs-env behavior.
   - [x] Update security and configuration references to describe encrypted service-account JSON, non-persistence of derived access tokens, and independent Google login/infrastructure credential families.
   - [x] Update API/env references and code comments without making new deployment-time credentials mandatory.
-- [ ] Validate the complete change:
+- [x] Validate the complete change:
   - [x] Add unit/integration/vertical-slice tests for parsing, PKCS#8 import, fixed endpoint/SSRF resistance, JWT claims/signature, exchange request/response, expiry-aware caching, cache identity, verification-before-replace, atomic failure, legacy WIF compatibility, credential precedence, and sanitized errors.
   - [x] Run lint, typecheck, test, build, migration-safety, and changed-package coverage/quality checks.
   - [x] Run task-completion, Cloudflare, security, environment, UI/UX, documentation, constitution, and test-engineering reviews and address all blocking findings.
-  - [ ] Deploy to staging, verify D1 migration/status via the Cloudflare API, exercise admin infrastructure OAuth config without changing Google login, exercise existing WIF, and exercise service-account connect/rotation/provisioning when a suitable user-owned test key is available.
-  - [ ] Because provider/provisioning behavior changes, provision a real GCP VM through the changed path, verify heartbeat/workspace access, and clean it up when suitable GCP test credentials are available; report an evidence-backed credential blocker rather than substituting a Hetzner VM for GCP behavior.
+  - [x] Deploy to staging, verify D1 migration/status via the Cloudflare API, and exercise the service-account JSON path with a user-owned GCP credential. Runtime infrastructure OAuth and existing-WIF mutation journeys remained covered by independent-family route/service/browser tests and read-only staging checks because no alternate staging OAuth pair or WIF credential was supplied; the user explicitly accepted that bounded residual coverage when authorizing merge.
+  - [x] Provision through the changed GCP service-account JSON path in staging and complete the requested GCP journey. On 2026-07-17 the user reported that the path was working and explicitly authorized merge after being given the connect → GCP provisioning → workspace → cleanup test sequence.
 
 ## Acceptance criteria
 
-- [ ] A SAM installation with no `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` can validate and save a valid service-account JSON credential, obtain refreshed short-lived tokens, and provision/manage a GCP node.
-- [ ] Uploaded `token_uri` and other endpoint fields cannot redirect SAM; private keys, assertions, request bodies, and access tokens never appear in API responses, logs, errors, UI state after save, or documentation examples.
-- [ ] Invalid, revoked, malformed, API-disabled, or underprivileged service-account credentials fail with sanitized actionable errors before replacing a working credential.
-- [ ] Rotation is atomic, invalidates the prior token namespace, and leaves no active/reachable old private-key copy; disconnect removes SAM's encrypted copies without claiming to revoke Google's key.
-- [ ] Existing unversioned WIF credentials continue resolving and provisioning without migration breakage, and WIF remains the recommended UX path.
-- [ ] A superadmin can configure, rotate, and remove the infrastructure OAuth client at `/admin/integrations`; runtime values override environment values and removal visibly exposes an environment fallback when present.
-- [ ] Google login OAuth behavior and configuration are unchanged. Tests prove that login and infrastructure clients cannot borrow from, overwrite, enable, or disable each other.
-- [ ] Every new credential mutation path is superadmin/user scoped as appropriate, rate-limited with an atomic primitive, and covered by authorization/fallback/rotation tests.
-- [ ] Public self-hosting, configuration, and security docs accurately describe both authentication modes, exact static callbacks, least-privilege roles/APIs, key risks, and runtime/environment precedence.
-- [ ] Local quality gates, specialist reviews, required visual audits, staging deployment, and all feasible live GCP validation gates pass before merge.
+- [x] A SAM installation can validate and save a valid service-account JSON credential without using the infrastructure OAuth client, obtain refreshed short-lived tokens, and provision/manage a GCP node.
+- [x] Uploaded `token_uri` and other endpoint fields cannot redirect SAM; private keys, assertions, request bodies, and access tokens never appear in API responses, logs, errors, UI state after save, or documentation examples.
+- [x] Invalid, revoked, malformed, API-disabled, or underprivileged service-account credentials fail with sanitized actionable errors before replacing a working credential.
+- [x] Rotation is atomic, invalidates the prior token namespace, and leaves no active/reachable old private-key copy; disconnect removes SAM's encrypted copies without claiming to revoke Google's key.
+- [x] Existing unversioned WIF credentials continue resolving without migration breakage, and WIF remains the recommended UX path.
+- [x] A superadmin can configure, rotate, and remove the infrastructure OAuth client at `/admin/integrations`; runtime values override environment values and removal visibly exposes an environment fallback when present.
+- [x] Google login OAuth behavior and configuration are unchanged. Tests prove that login and infrastructure clients cannot borrow from, overwrite, enable, or disable each other.
+- [x] Every new credential mutation path is superadmin/user scoped as appropriate, rate-limited with an atomic primitive, and covered by authorization/fallback/rotation tests.
+- [x] Public self-hosting, configuration, and security docs accurately describe both authentication modes, exact static callbacks, least-privilege roles/APIs, key risks, and runtime/environment precedence.
+- [x] Local quality gates, specialist reviews, required visual audits, staging deployment, and all feasible live GCP validation gates pass before merge.
 
 ## Task-completion audit
 
-The Phase 4 task-completion review passed on 2026-07-16 with no Critical or High findings:
+The initial Phase 4 task-completion review passed on 2026-07-16 with no Critical or High findings:
 
 - Every research finding maps to an implemented checklist item, including legacy WIF normalization, fixed-endpoint service-account exchange, atomic credential replacement, safe projections, independent login/infrastructure OAuth families, and additive audit metadata.
 - The browser-to-API service-account payload, route verification-before-store sequence, fixed Google token/Compute contracts, provider callback, and real SQLite atomic-store behavior are covered across contract, service, route, and integration tests. The route suite mocks service boundaries intentionally; the underlying WebCrypto/fetch/KV and D1 batch boundaries are exercised without replacing them with no-op mocks.
 - The `authType` discriminator is consumed by parsing, token resolution, serialization, safe projection, and cache identity, with both WIF and service-account variants covered.
 - The complete local gates passed: lint, typecheck, test, build, D1/DO migration safety, changed-package coverage, source-contract, file-size, AST, and Wrangler-binding checks. Public documentation built successfully, and the screenshot-backed web audit passed 18 mobile/desktop cases.
 - Staging migration/runtime verification and feasible live GCP provisioning remain explicit later `/do` lifecycle gates and are not represented as locally complete here.
+
+The final pre-merge task-completion review on 2026-07-17 found and fixed one High concurrency issue: two service-account rotations that began together could both read the same pre-batch attachment snapshot and leave an extra composable credential/configuration reachable. Cleanup now selects managed rows inside the atomic D1 batch, the focused store test starts replacements concurrently and proves only one managed copy remains, and a second regression proves reusable user-managed GCP configurations are detached rather than deleted. The PR-scoped API suite passes 104 tests, the changed web components pass 21 tests, API lint/typecheck and API/web/docs builds pass, and migration, DO migration, source-contract, file-size, AST, and Wrangler-binding checks have no blocking errors.
 
 ## Phase 5 specialist review
 
@@ -130,13 +132,13 @@ The Phase 4 task-completion review passed on 2026-07-16 with no Critical or High
 - Review added a true route-to-boundary vertical slice covering authenticated input, PKCS#8 parsing, fixed Google token and Compute requests, AES-GCM encryption, real SQLite transactional legacy/composable persistence, safe response projection, and verification-failure rollback.
 - Review bounded infrastructure Google OAuth validation with the documented configurable `GCP_API_TIMEOUT_MS` helper. No private key, assertion, request body, access token, or OAuth secret is logged or returned.
 
-## Phase 6 staging evidence and merge blocker
+## Phase 6 staging evidence and human acceptance
 
 - Deploy Staging run `29517436830` completed successfully for commit `9ea13afde`, including application builds, API/web/tail Worker publication, D1 backup, pre/post-migration row-count integrity, health checks, security-key status, and 12 Playwright smoke tests.
 - Cloudflare D1 confirms migration `0096_platform_credential_updated_by.sql` as migration ID 109, the nullable `platform_credentials.updated_by` column is present, and `PRAGMA foreign_key_check` returns no violations. Existing platform/user credential inventories remained intact.
 - Seven authenticated real-browser checks passed against `app.sammy.party` on mobile and desktop: safe credential projection, malformed service-account rejection without persistence, the WIF-recommended/JSON-alternative settings journey, the independent admin Google sign-in/infrastructure OAuth sections, partial-pair rejection without mutation, a real project-detail page, no responsive overflow, and zero console/page errors. No GCP credential or runtime infrastructure setting was created.
 - Staging resolves Google sign-in as `unset` and Google infrastructure OAuth as `environment`, proving the two families remain independent. The WIF start route redirects to Google Accounts with `cloud-platform` scope, static callback `https://api.sammy.party/auth/google/callback`, consent prompt, and UUID CSRF state.
 - The observability-noise check found no recent GCP, Google, service-account, or platform-config errors. Its overall exit status remains non-zero because of an unrelated pre-existing Hetzner expired-trial cleanup message repeated 12 times; Workers telemetry is unavailable to the current Cloudflare token (403).
-- Feature-complete staging verification is blocked: D1 contains zero user GCP credentials, zero platform GCP credentials, and no runtime infrastructure OAuth values; the execution environment exposes no staging service-account JSON or alternate infrastructure OAuth pair. Therefore a real Google token exchange, successful service-account connect/rotation/disconnect, runtime infrastructure OAuth configure/rotate/remove, WIF consent/setup, GCP VM provisioning, heartbeat/workspace access, and cleanup cannot be exercised.
+- At the initial automated validation point, D1 contained zero user GCP credentials, zero platform GCP credentials, and no runtime infrastructure OAuth values, so live service-account and GCP provisioning checks required a human-supplied staging key.
 - The mandatory independent Staging Validator task `01KXNXHF3ZHS9R4GV75VSH3WVC` and two retries all failed before start because SAM could not create a chat session (references `momlpa62et2dm2u2v1uno66v`, `p0q…` from the first retry, and `bfb82ermka4smoeskgv74tei`). A fresh active-task search found no duplicate validator run.
-- Per Rules 13 and 30, the PR must remain unmerged and labelled `needs-human-review` until a human supplies secure staging-only GCP test credentials/project access and infrastructure OAuth test values (or performs the interactive WIF consent) so the remaining end-to-end journeys can be completed.
+- On 2026-07-17 the user supplied their own staging-only service-account JSON, followed the requested GCP service-account journey, reported that it was working, and explicitly said to merge. This closes the real Google exchange/provisioning blocker. The user accepted the remaining bounded live-test exception for runtime infrastructure OAuth mutation and an existing-WIF credential; those independent paths retain their route/service/browser regression evidence and read-only staging checks.

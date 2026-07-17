@@ -169,6 +169,59 @@ describe('GCP credential atomic store', () => {
     });
   });
 
+  it('keeps only the final managed copy when replacements begin concurrently', async () => {
+    await Promise.all([
+      replaceUserGcpCredential(env, USER_ID, credential('concurrent-key-a')),
+      replaceUserGcpCredential(env, USER_ID, credential('concurrent-key-b')),
+    ]);
+
+    const stored = snapshot(sqlite);
+    expect(stored.legacy).toHaveLength(1);
+    expect(stored.credentials).toHaveLength(1);
+    expect(stored.configurations).toHaveLength(1);
+    expect(stored.attachments).toHaveLength(1);
+  });
+
+  it('detaches but preserves a user-managed GCP configuration during replacement', async () => {
+    sqlite
+      .prepare(
+        `INSERT INTO cc_credentials (
+         id, owner_id, name, kind, encrypted_token, iv, is_active, created_at, updated_at
+       ) VALUES ('manual-credential', ?, 'Manual GCP', 'cloud-provider', 'ciphertext', 'iv', 1, 'now', 'now')`
+      )
+      .run(USER_ID);
+    sqlite
+      .prepare(
+        `INSERT INTO cc_configurations (
+         id, owner_id, name, consumer_kind, consumer_target, credential_id,
+         settings_json, is_active, created_at, updated_at
+       ) VALUES ('manual-configuration', ?, 'Manual GCP', 'compute', 'gcp',
+         'manual-credential', NULL, 1, 'now', 'now')`
+      )
+      .run(USER_ID);
+    sqlite
+      .prepare(
+        `INSERT INTO cc_attachments (
+         id, configuration_id, consumer_kind, consumer_target, user_id, project_id,
+         is_active, created_at, updated_at
+       ) VALUES ('manual-attachment', 'manual-configuration', 'compute', 'gcp', ?, NULL, 1, 'now', 'now')`
+      )
+      .run(USER_ID);
+
+    await replaceUserGcpCredential(env, USER_ID, credential('managed-key'));
+
+    expect(
+      sqlite.prepare(`SELECT id FROM cc_credentials WHERE id = 'manual-credential'`).get()
+    ).toMatchObject({ id: 'manual-credential' });
+    expect(
+      sqlite.prepare(`SELECT id FROM cc_configurations WHERE id = 'manual-configuration'`).get()
+    ).toMatchObject({ id: 'manual-configuration' });
+    expect(
+      sqlite.prepare(`SELECT id FROM cc_attachments WHERE id = 'manual-attachment'`).get()
+    ).toBeUndefined();
+    expect(snapshot(sqlite).attachments).toHaveLength(1);
+  });
+
   it('rolls back every deletion when a replacement batch fails', async () => {
     await replaceUserGcpCredential(env, USER_ID, credential('working-key-id'));
     const before = snapshot(sqlite);
