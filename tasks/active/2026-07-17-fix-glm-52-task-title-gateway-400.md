@@ -20,13 +20,13 @@ Scope is limited to the production `task-title` utility request path. The separa
 
 ## Implementation Checklist
 
-- [ ] Add a narrow, explicit utility-model capability boundary that constructs the GLM-5.2-compatible title payload without redundant/invalid reasoning fields, while retaining configuration-driven model, timeout, retry, and length values.
-- [ ] Add bounded safe parsing/sanitization of non-2xx Workers AI responses and structured errors that preserve HTTP status/retry classification without exposing prompts, credentials, headers, tokens, or arbitrary sensitive response content.
-- [ ] Keep timeout behavior non-retryable; keep 429 and transient provider failures retryable; avoid retrying deterministic 4xx payload rejections; preserve final truncation fallback and warning diagnostics.
-- [ ] Add discriminating tests for the exact selected GLM-5.2 request payload, sanitized JSON/text/oversized non-2xx diagnostics, HTTP status classification, timeout/retry behavior, 429 retry behavior, deterministic 400 behavior, and truncation fallback.
-- [ ] Add a realistic service-level vertical slice test proving a normal long title prompt crosses the shared Gateway boundary with the supported payload and returns a generated title.
+- [x] Add a narrow, explicit utility-model capability boundary that constructs the GLM-5.2-compatible title payload without redundant/invalid reasoning fields, while retaining configuration-driven model, timeout, retry, and length values.
+- [x] Add bounded safe parsing/sanitization of non-2xx Workers AI responses and structured errors that preserve HTTP status/retry classification without exposing prompts, credentials, headers, tokens, or arbitrary sensitive response content.
+- [x] Keep timeout behavior non-retryable; keep 429 and transient provider failures retryable; avoid retrying deterministic 4xx payload rejections; preserve final truncation fallback and warning diagnostics.
+- [x] Add discriminating tests for the exact selected GLM-5.2 request payload, sanitized JSON/text/oversized non-2xx diagnostics, HTTP status classification, timeout/retry behavior, 429 retry behavior, deterministic 400 behavior, and truncation fallback.
+- [x] Add a realistic service-level vertical slice test proving a normal long title prompt crosses the shared Gateway boundary with the supported payload and returns a generated title.
 - [ ] Record the precise root cause, timeline, why tests missed it, bug class, and process fix after live rejection evidence confirms the discriminating field.
-- [ ] Update relevant configuration/public documentation only if behavior or operator configuration changes; otherwise record an evidence-backed no-doc-change conclusion.
+- [x] Update relevant configuration/public documentation only if behavior or operator configuration changes; otherwise record an evidence-backed no-doc-change conclusion.
 - [ ] Run focused API tests and full relevant lint, typecheck, test, and build gates.
 - [ ] Run `security-auditor`, `test-engineer`, `constitution-validator`, `cloudflare-specialist`, `task-completion-validator`, and `doc-sync-validator`; address all correctness findings.
 - [ ] Push the focused output branch and prepare a PR with exact test/review/evidence records.

@@ -210,6 +210,77 @@ export interface WorkersAIChatCompletionOptions {
   responseLabel: string;
   reasoningEffort?: string | null;
   chatTemplateKwargs?: Record<string, unknown>;
+  errorDiagnosticMaxLength?: number;
+}
+
+export class WorkersAIGatewayError extends Error {
+  constructor(
+    public readonly status: number,
+    public readonly diagnostic: string | undefined
+  ) {
+    super(
+      `Workers AI Gateway request failed with HTTP ${status}${diagnostic ? ` (${diagnostic})` : ''}`
+    );
+    this.name = 'WorkersAIGatewayError';
+  }
+}
+
+function sanitizeGatewayDiagnosticValue(field: string, value: unknown): string | undefined {
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (typeof value !== 'string') return undefined;
+
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+
+  if (field === 'message') {
+    if (/reasoning_effort/i.test(trimmed)) return 'invalid reasoning_effort parameter';
+    if (/chat_template_kwargs|enable_thinking/i.test(trimmed))
+      return 'invalid chat template parameter';
+    if (/max_(?:completion_)?tokens/i.test(trimmed)) return 'invalid output token limit';
+    if (/model/i.test(trimmed)) return 'invalid model parameter';
+    return 'provider rejected request';
+  }
+
+  return /^[A-Za-z0-9_.:-]{1,64}$/.test(trimmed) ? trimmed : '[REDACTED]';
+}
+
+/** Extract only bounded, allowlisted provider error fields. */
+export async function readSafeGatewayErrorDiagnostic(
+  response: Response,
+  maxLength: number
+): Promise<string | undefined> {
+  if (!Number.isFinite(maxLength) || maxLength <= 0) return undefined;
+  const boundedMaxLength = Math.floor(maxLength);
+  const raw = (await response.text()).slice(0, boundedMaxLength * 4);
+
+  let payload: unknown;
+  try {
+    payload = JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
+
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return undefined;
+  const record = payload as Record<string, unknown>;
+  const nestedError =
+    record.error && typeof record.error === 'object' && !Array.isArray(record.error)
+      ? (record.error as Record<string, unknown>)
+      : undefined;
+  const firstError =
+    Array.isArray(record.errors) &&
+    record.errors[0] &&
+    typeof record.errors[0] === 'object' &&
+    !Array.isArray(record.errors[0])
+      ? (record.errors[0] as Record<string, unknown>)
+      : undefined;
+  const source = nestedError ?? firstError ?? record;
+  const fields = ['code', 'type', 'param', 'message'] as const;
+  const parts = fields.flatMap((field) => {
+    const sanitized = sanitizeGatewayDiagnosticValue(field, source[field]);
+    return sanitized ? [`${field}=${sanitized}`] : [];
+  });
+  if (parts.length === 0) return undefined;
+  return parts.join(' ').slice(0, boundedMaxLength);
 }
 
 export async function fetchWorkersAIChatCompletion(
@@ -228,13 +299,18 @@ export async function fetchWorkersAIChatCompletion(
       model: options.modelId,
       max_tokens: options.maxTokens,
       messages: options.messages,
-      ...(options.reasoningEffort !== undefined ? { reasoning_effort: options.reasoningEffort } : {}),
+      ...(options.reasoningEffort !== undefined
+        ? { reasoning_effort: options.reasoningEffort }
+        : {}),
       ...(options.chatTemplateKwargs ? { chat_template_kwargs: options.chatTemplateKwargs } : {}),
     }),
   });
 
   if (!response.ok) {
-    throw new Error(`Workers AI Gateway request failed with HTTP ${response.status}`);
+    const diagnostic = options.errorDiagnosticMaxLength
+      ? await readSafeGatewayErrorDiagnostic(response, options.errorDiagnosticMaxLength)
+      : undefined;
+    throw new WorkersAIGatewayError(response.status, diagnostic);
   }
 
   const payload = expectJsonRecord(await response.json(), options.responseLabel);

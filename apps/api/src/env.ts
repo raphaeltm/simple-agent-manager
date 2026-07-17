@@ -314,6 +314,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   TASK_TITLE_MAX_RETRIES?: string;
   TASK_TITLE_RETRY_DELAY_MS?: string;
   TASK_TITLE_RETRY_MAX_DELAY_MS?: string;
+  TASK_TITLE_ERROR_DIAGNOSTIC_MAX_LENGTH?: string;
   // Context summarization (conversation forking)
   CONTEXT_SUMMARY_MODEL?: string;
   CONTEXT_SUMMARY_MAX_LENGTH?: string;
