@@ -29,8 +29,8 @@ Scope is limited to the production `task-title` utility request path. The separa
 - [x] Update relevant configuration/public documentation only if behavior or operator configuration changes; otherwise record an evidence-backed no-doc-change conclusion.
 - [x] Run focused API tests and full relevant lint, typecheck, test, and build gates.
 - [x] Run `security-auditor`, `test-engineer`, `constitution-validator`, `cloudflare-specialist`, `task-completion-validator`, and `doc-sync-validator`; address all correctness findings.
-- [ ] Push the focused output branch and prepare a PR with exact test/review/evidence records.
-- [ ] Report `STAGING_LEASE_REQUEST` via SAM task status and wait for explicit `STAGING_LEASE_GRANTED` before any shared staging deployment or merge.
+- [x] Push the focused output branch and prepare a PR with exact test/review/evidence records.
+- [x] Report `STAGING_LEASE_REQUEST` via SAM task status and wait for explicit `STAGING_LEASE_GRANTED` before any shared staging deployment or merge.
 - [ ] After lease grant, reverify exact head/base/gates; deploy through the normal staging workflow; reproduce/confirm the rejection reason safely; verify normal long-prompt task titles succeed; and measure a zero or bounded explained residual 400 count.
 - [ ] Merge only after all `/do` gates pass, monitor production deployment, collect production task-title health evidence, release the staging lease, and complete the SAM task.
 
