@@ -11,7 +11,7 @@ import { mapToolCallContent, PlanModal } from '@simple-agent-manager/acp-client'
 import type { AgentProfile } from '@simple-agent-manager/shared';
 import { Button, Spinner } from '@simple-agent-manager/ui';
 import { ChevronDown } from 'lucide-react';
-import { type FC, type RefObject, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type FC, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 
 import { getMessageToolContent } from '../../lib/api/sessions';
@@ -54,11 +54,13 @@ export { chatMessagesToConversationItems, groupMessages } from './types';
  * status badges, error banner, output summary) varies from ~56px to several
  * hundred px — a fixed spacer leaves messages hidden behind the glass.
  */
-function useFloatingHeaderHeight(): [RefObject<HTMLDivElement | null>, number] {
-  const ref = useRef<HTMLDivElement | null>(null);
+function useFloatingHeaderHeight(): [(el: HTMLDivElement | null) => void, number] {
+  // Callback ref (not useRef + mount effect): FloatingHeader renders null until
+  // the session loads, so the element attaches AFTER mount — an []-deps effect
+  // would run before the ref exists and never observe anything.
+  const [el, setEl] = useState<HTMLDivElement | null>(null);
   const [height, setHeight] = useState(56);
   useEffect(() => {
-    const el = ref.current;
     if (!el || typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(() => {
       setHeight((prev) => {
@@ -68,8 +70,8 @@ function useFloatingHeaderHeight(): [RefObject<HTMLDivElement | null>, number] {
     });
     observer.observe(el);
     return () => observer.disconnect();
-  }, []);
-  return [ref, height];
+  }, [el]);
+  return [setEl, height];
 }
 
 /** Floating session header with optional error banner and summary. */
@@ -84,7 +86,7 @@ function FloatingHeader({
   onOpenTimeline?: () => void;
   sourceContext?: SessionSourceContext;
   onShowHierarchy?: (taskId: string) => void;
-  containerRef?: RefObject<HTMLDivElement | null>;
+  containerRef?: (el: HTMLDivElement | null) => void;
 }) {
   if (!lc.session) return null;
   const initialPromptFallback = !lc.hasMore
