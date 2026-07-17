@@ -22,14 +22,14 @@ This task delivers only the backend/API and shared-contract phase. Final web aff
 
 ## Implementation Checklist
 
-- [ ] Add a small DRY membership/request-state derivation helper and make invite preview treat stale approved history for a non-active member as `can-request`.
-- [ ] Make request creation/reset conditional and idempotent for approved/denied history and insert races while preserving active-member and pending behavior.
-- [ ] Count invite usage only for a new or reset pending request; preserve expiry/revocation and requester-scoped GitHub checks.
-- [ ] Preserve offboarding audit history; document in code/tests that offboarding does not rewrite approved request decisions.
-- [ ] Add scenario-driven API tests for removed → preview → pending re-request → approval → active membership.
-- [ ] Add negative tests for active members, authorization, expired/revoked links, and project privacy/shared-project policy.
-- [ ] Add concurrent/idempotent request tests proving retries cannot overwrite an approval or create duplicate state.
-- [ ] Run focused and full quality suites, then complete requested specialist reviews.
+- [x] Make invite preview treat stale approved history for a non-active member as `can-request` using current membership truth.
+- [x] Make request creation/reset conditional and idempotent for approved/denied history and insert races while preserving active-member and pending behavior.
+- [x] Count invite usage only for a new or reset pending request; preserve expiry/revocation and requester-scoped GitHub checks.
+- [x] Preserve offboarding audit history; do not rewrite approved request decisions during removal.
+- [x] Add scenario-driven API tests for removed → preview → pending re-request → approval → active membership.
+- [x] Preserve negative tests for active members, authorization, expired/revoked links, and project privacy/shared-project policy.
+- [x] Add concurrent/idempotent request tests proving retries cannot overwrite an approval or create duplicate state.
+- [x] Run focused and full quality suites, then complete requested specialist reviews.
 - [ ] Push the branch, prepare the PR with the exact production symptom/post-mortem, request `STAGING_LEASE_REQUEST`, and wait for the parent coordinator before any staging mutation.
 - [ ] After lease grant, validate the complete backend journey with staging users, pass CI, merge, and monitor production deployment.
 
