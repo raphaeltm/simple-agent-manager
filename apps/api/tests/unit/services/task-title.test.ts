@@ -2,6 +2,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
 import {
+  readSafeGatewayErrorDiagnostic,
+  WorkersAIGatewayError,
+} from '../../../src/services/ai-proxy-shared';
+import {
   classifyError,
   generateTaskTitle,
   getTaskTitleConfig,
@@ -11,10 +15,6 @@ import {
   type TaskTitleConfig,
   truncateTitle,
 } from '../../../src/services/task-title';
-import {
-  readSafeGatewayErrorDiagnostic,
-  WorkersAIGatewayError,
-} from '../../../src/services/ai-proxy-shared';
 
 function createMockEnv(overrides: Partial<Env> = {}): Env {
   return {
