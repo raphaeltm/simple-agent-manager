@@ -790,7 +790,6 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   CF_CONTAINER_RECOVERY_MAX_ATTEMPTS?: string; // Max serialized replacement restore attempts (default: 3)
   CF_CONTAINER_DRAIN_TIMEOUT_MS?: string; // Max vm-agent SIGTERM checkpoint/drain duration (default: 25000)
   CF_CONTAINER_WORKSPACE_BASE_DIR?: string; // Base checkout dir inside raw container (default: /workspaces)
-  // Legacy Sandbox SDK prototype (admin-only)
   SANDBOX_ENABLED?: string; // Legacy/fallback kill switch for sandbox routes and older staging config (default: false)
   SANDBOX_EXEC_TIMEOUT_MS?: string; // Default exec timeout in ms (default: 30000)
   SANDBOX_GIT_TIMEOUT_MS?: string; // Git checkout timeout in ms (default: 120000)

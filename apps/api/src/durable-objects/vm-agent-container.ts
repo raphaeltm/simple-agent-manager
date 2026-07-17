@@ -5,6 +5,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { persistRecoveryExhausted, persistWakeDegraded } from './vm-agent-container-recovery';
 import { signCallbackToken, signNodeCallbackToken, signNodeManagementToken } from '../services/jwt';
 
 export const DEFAULT_CF_CONTAINER_SLEEP_AFTER = '1h';
@@ -591,27 +592,7 @@ export class VmAgentContainer extends Container<Env> {
     config: VmAgentContainerLaunchConfig,
     message: string
   ): Promise<void> {
-    const diagnostic = message.toLowerCase().includes('timeout')
-      ? 'Runtime recovery timed out; transcript and partial output remain available.'
-      : 'Runtime recovery is degraded; transcript and partial output remain available.';
-    const now = new Date().toISOString();
-    const db = drizzle(this.env.DATABASE, { schema });
-    await db
-      .update(schema.workspaces)
-      .set({
-        status: 'recovery',
-        errorMessage: diagnostic,
-        updatedAt: now,
-      })
-      .where(eq(schema.workspaces.id, config.workspaceId));
-    await db
-      .update(schema.agentSessions)
-      .set({
-        status: 'recovery',
-        errorMessage: diagnostic,
-        updatedAt: now,
-      })
-      .where(eq(schema.agentSessions.workspaceId, config.workspaceId));
+    const diagnostic = await persistWakeDegraded(this.env, config, message);
     log.warn('vm_agent_container_wake_degraded', {
       nodeId: config.nodeId,
       workspaceId: config.workspaceId,
@@ -623,35 +604,7 @@ export class VmAgentContainer extends Container<Env> {
   }
 
   private async markRecoveryExhausted(config: VmAgentContainerLaunchConfig): Promise<void> {
-    const diagnostic =
-      'Runtime recovery attempts exhausted; transcript and partial output remain available.';
-    const now = new Date().toISOString();
-    const db = drizzle(this.env.DATABASE, { schema });
-    await db
-      .update(schema.nodes)
-      .set({
-        status: 'error',
-        healthStatus: 'unhealthy',
-        errorMessage: diagnostic,
-        updatedAt: now,
-      })
-      .where(eq(schema.nodes.id, config.nodeId));
-    await db
-      .update(schema.workspaces)
-      .set({
-        status: 'error',
-        errorMessage: diagnostic,
-        updatedAt: now,
-      })
-      .where(eq(schema.workspaces.id, config.workspaceId));
-    await db
-      .update(schema.agentSessions)
-      .set({
-        status: 'error',
-        errorMessage: diagnostic,
-        updatedAt: now,
-      })
-      .where(eq(schema.agentSessions.workspaceId, config.workspaceId));
+    const diagnostic = await persistRecoveryExhausted(this.env, config);
     log.warn('vm_agent_container_recovery_exhausted', {
       nodeId: config.nodeId,
       workspaceId: config.workspaceId,
