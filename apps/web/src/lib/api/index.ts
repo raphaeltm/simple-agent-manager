@@ -153,7 +153,13 @@ export {
   validateAgentCredential,
   validateCredential,
 } from './credentials';
-export { getGcpOAuthResult, listGcpProjects, runGcpSetup, verifyGcpSetup } from './credentials';
+export {
+  getGcpOAuthResult,
+  listGcpProjects,
+  runGcpSetup,
+  saveGcpServiceAccountCredential,
+  verifyGcpSetup,
+} from './credentials';
 export type {
   CreateDeploymentCustomDomainRequest,
   CreateDeploymentVolumeRequest,

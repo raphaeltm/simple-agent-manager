@@ -535,6 +535,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   GCP_WIF_POOL_ID?: string;
   GCP_WIF_PROVIDER_ID?: string;
   GCP_SERVICE_ACCOUNT_ID?: string;
+  GCP_SERVICE_ACCOUNT_JSON_MAX_BYTES?: string;
   GCP_DEFAULT_ZONE?: string;
   GCP_IMAGE_FAMILY?: string;
   GCP_IMAGE_PROJECT?: string;
@@ -778,7 +779,6 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   SAM_CODE_SEARCH_LIMIT?: string; // Default results per search_code (default: 10)
   SAM_CODE_SEARCH_MAX_LIMIT?: string; // Max results per search_code (default: 30)
   SAM_FILE_CONTENT_MAX_BYTES?: string; // Max file size for get_file_content (default: 1048576)
-
   // Raw Cloudflare Container instant-session runtime
   CF_CONTAINER_ENABLED?: string; // Kill switch for raw Cloudflare Container instant sessions (generated deploy default: true)
   CF_CONTAINER_SLEEP_AFTER?: string; // Container sleep-after duration (default: 1h)

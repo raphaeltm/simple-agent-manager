@@ -67,7 +67,7 @@ Set in GitHub Settings → Environments → production:
 characters of the domain's SHA-256 hash. The self-host onboarding flow fills it
 in for you.
 
-Required GitHub Actions secrets include `CF_API_TOKEN`, `CF_ACCOUNT_ID`, `CF_ZONE_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, and `PULUMI_CONFIG_PASSPHRASE`. GitHub App/OAuth secrets (`GH_CLIENT_ID`, `GH_CLIENT_SECRET`, `GH_APP_ID`, `GH_APP_PRIVATE_KEY`, `GH_APP_SLUG`, `GH_WEBHOOK_SECRET`) and the Google **login** OAuth secrets (`GOOGLE_LOGIN_CLIENT_ID`, `GOOGLE_LOGIN_CLIENT_SECRET`) are optional environment fallbacks; fresh deployments can set them through `/setup` instead. The Google **infra/GCP** OAuth secrets (`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`) are a separate client used only for GCP deployment authorization and are not part of the `/setup` wizard. Deploy signing keys are generated and persisted by Pulumi during deployment; GitHub Environment values are only needed for explicit key overrides.
+Required GitHub Actions secrets include `CF_API_TOKEN`, `CF_ACCOUNT_ID`, `CF_ZONE_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, and `PULUMI_CONFIG_PASSPHRASE`. GitHub App/OAuth secrets (`GH_CLIENT_ID`, `GH_CLIENT_SECRET`, `GH_APP_ID`, `GH_APP_PRIVATE_KEY`, `GH_APP_SLUG`, `GH_WEBHOOK_SECRET`) and Google **login** OAuth secrets (`GOOGLE_LOGIN_CLIENT_ID`, `GOOGLE_LOGIN_CLIENT_SECRET`) are optional environment fallbacks; fresh deployments can set them through `/setup` instead. The separate Google **infra/GCP** OAuth pair (`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`) is used only for WIF and can be configured by a superadmin at `/admin/integrations`; runtime values override the environment fallback. Service-account JSON users need no infrastructure OAuth client. Deploy signing keys are generated and persisted by Pulumi during deployment; GitHub Environment values are only needed for explicit key overrides.
 
 :::note[Naming convention]
 GitHub App secrets use `GH_*` prefix (e.g., `GH_CLIENT_ID`, `GH_WEBHOOK_SECRET`) because GitHub Actions secret names cannot start with `GITHUB_*`. When present, the deploy workflow maps those `GH_*` secrets to `GITHUB_*` Worker secrets. Runtime admin config in D1 is resolved first, then these environment fallbacks, then unset.
@@ -85,6 +85,36 @@ GitHub App secrets use `GH_*` prefix (e.g., `GH_CLIENT_ID`, `GH_WEBHOOK_SECRET`)
 | `TRIAL_ANONYMOUS_USER_ID`            | `system_anonymous_trials` | Id of the internal anonymous-trial sentinel user, excluded from first-user superadmin checks. Override only if your deployment uses a different sentinel id.                                                                                                                                                                 |
 | `CAPACITY_SIZE_FALLBACK_ENABLED`     | `true`                    | When a new node's VM size is exhausted on transient capacity, descend the size chain (large→medium→small). Only applies to default-derived sizes (project/platform default), never user-requested sizes. Set `false` to disable.                                                                                             |
 | `ORIGIN_CA_CERT_VALIDITY_DAYS`       | `7`                       | Validity for per-node Cloudflare Origin CA certificates issued from node-generated CSRs. Must be one of Cloudflare's supported values: 7, 30, 90, 365, 730, 1095, or 5475.                                                                                                                                                   |
+
+## Google OAuth and GCP provisioning
+
+Google login and Google infrastructure authorization are independent credential families:
+
+| Variables                                              | Purpose                    | Runtime precedence                                     | Redirect URIs                                              |
+| ------------------------------------------------------ | -------------------------- | ------------------------------------------------------ | ---------------------------------------------------------- |
+| `GOOGLE_LOGIN_CLIENT_ID`, `GOOGLE_LOGIN_CLIENT_SECRET` | BetterAuth user login      | `/setup` or superadmin runtime D1 → Worker env → unset | `/api/auth/callback/google`                                |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`             | Keyless GCP/WIF setup only | Superadmin runtime D1 → Worker env → unset             | `/auth/google/callback` and `/api/deployment/gcp/callback` |
+
+Configuring one family never enables or modifies the other. Users who choose service-account JSON do not need either infrastructure OAuth variable.
+
+| Variable                             | Default                                          | Description                                                                                 |
+| ------------------------------------ | ------------------------------------------------ | ------------------------------------------------------------------------------------------- |
+| `GCP_SERVICE_ACCOUNT_JSON_MAX_BYTES` | `65536`                                          | Maximum UTF-8 byte size accepted by `PUT /api/gcp/service-account`                          |
+| `GCP_DEFAULT_ZONE`                   | `us-central1-a`                                  | Default Compute zone                                                                        |
+| `GCP_IMAGE_FAMILY`                   | `ubuntu-2404-lts-amd64`                          | Compute image family                                                                        |
+| `GCP_IMAGE_PROJECT`                  | `ubuntu-os-cloud`                                | Compute image project                                                                       |
+| `GCP_DISK_SIZE_GB`                   | `50`                                             | Boot disk size                                                                              |
+| `GCP_TOKEN_CACHE_TTL_SECONDS`        | `3300`                                           | Maximum derivative access-token cache TTL; actual TTL is capped by Google's returned expiry |
+| `GCP_IDENTITY_TOKEN_EXPIRY_SECONDS`  | `600`                                            | SAM identity-token lifetime for WIF                                                         |
+| `GCP_OPERATION_POLL_TIMEOUT_MS`      | `300000`                                         | Maximum wait for GCP asynchronous operations                                                |
+| `GCP_API_TIMEOUT_MS`                 | `30000`                                          | GCP OAuth, IAM, and Compute request timeout                                                 |
+| `GCP_STS_SCOPE`                      | `https://www.googleapis.com/auth/cloud-platform` | WIF STS exchange scope                                                                      |
+| `GCP_SA_IMPERSONATION_SCOPES`        | `https://www.googleapis.com/auth/compute`        | Comma-separated scopes for WIF service-account impersonation                                |
+| `GCP_SA_TOKEN_LIFETIME_SECONDS`      | `3600`                                           | WIF impersonated access-token lifetime                                                      |
+| `GCP_STS_TOKEN_URL`                  | `https://sts.googleapis.com/v1/token`            | WIF STS endpoint override for controlled environments                                       |
+| `GCP_IAM_CREDENTIALS_BASE_URL`       | Google IAM Credentials API                       | WIF impersonation base URL override                                                         |
+
+The service-account JWT bearer flow always uses `https://oauth2.googleapis.com/token`; it has no endpoint override, and uploaded `token_uri` values are ignored. Source credentials are encrypted in D1. Only derivative short-lived tokens are cached.
 
 ## AI Idea Title Generation
 
@@ -346,11 +376,12 @@ Webhook damping uses Cloudflare KV's eventually consistent read-update-write beh
 
 ## External API Timeouts
 
-| Variable                        | Default | Description                    |
-| ------------------------------- | ------- | ------------------------------ |
-| `HETZNER_API_TIMEOUT_MS`        | `30000` | Hetzner API request timeout    |
-| `CF_API_TIMEOUT_MS`             | `30000` | Cloudflare API request timeout |
-| `NODE_AGENT_REQUEST_TIMEOUT_MS` | `30000` | VM Agent request timeout       |
+| Variable                        | Default | Description                                 |
+| ------------------------------- | ------- | ------------------------------------------- |
+| `HETZNER_API_TIMEOUT_MS`        | `30000` | Hetzner API request timeout                 |
+| `CF_API_TIMEOUT_MS`             | `30000` | Cloudflare API request timeout              |
+| `GCP_API_TIMEOUT_MS`            | `30000` | GCP OAuth, IAM, and Compute request timeout |
+| `NODE_AGENT_REQUEST_TIMEOUT_MS` | `30000` | VM Agent request timeout                    |
 
 ## Admin Observability
 

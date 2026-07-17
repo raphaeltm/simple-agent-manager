@@ -18,6 +18,7 @@ const ScalewayCredentialSchema = v.object({
 
 const GcpCredentialSchema = v.object({
   provider: v.literal('gcp'),
+  authType: v.optional(v.literal('workload-identity')),
   gcpProjectId: v.string(),
   gcpProjectNumber: v.string(),
   serviceAccountEmail: v.string(),
@@ -31,6 +32,11 @@ export const CreateCredentialSchema = v.variant('provider', [
   ScalewayCredentialSchema,
   GcpCredentialSchema,
 ]);
+
+export const SaveGcpServiceAccountCredentialSchema = v.object({
+  serviceAccountJson: v.pipe(v.string(), v.minLength(1)),
+  defaultZone: v.pipe(v.string(), v.minLength(1)),
+});
 
 export const SaveAgentCredentialSchema = v.object({
   agentType: AgentTypeSchema,

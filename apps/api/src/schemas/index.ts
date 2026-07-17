@@ -31,6 +31,7 @@ export {
   CreateCredentialSchema,
   CredentialKindBodySchema,
   SaveAgentCredentialSchema,
+  SaveGcpServiceAccountCredentialSchema,
 } from './credentials';
 
 // Node schemas
@@ -90,6 +91,7 @@ export {
   AnalyticsForwardSchema,
   CreatePlatformCredentialSchema,
   UpdatePlatformCredentialSchema,
+  UpdatePlatformIntegrationConfigSchema,
   UpdateSignupApprovalConfigSchema,
 } from './admin';
 

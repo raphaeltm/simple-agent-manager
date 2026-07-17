@@ -13,13 +13,19 @@ export type {
   CredentialResponse,
   CredentialSource,
   CredentialValidationStatus,
+  GcpCredential,
+  GcpCredentialAuthType,
+  GcpCredentialMetadata,
   GcpOidcCredential,
+  GcpServiceAccountKeyCredential,
+  GcpWorkloadIdentityCredential,
   ListPlatformCredentialsResponse,
   PlatformCredential,
   PlatformCredentialResponse,
   PlatformCredentialType,
   ProjectDeploymentCredential,
   ProjectDeploymentCredentialResponse,
+  SaveGcpServiceAccountCredentialRequest,
   SetupProjectDeploymentRequest,
   SignupApprovalConfig,
   SignupApprovalConfigResponse,
@@ -30,7 +36,7 @@ export type {
   UserRole,
   UserStatus,
 } from './user';
-export { CREDENTIAL_PROVIDERS } from './user';
+export { CREDENTIAL_PROVIDERS, GCP_CREDENTIAL_VERSION } from './user';
 
 // GitHub
 export type {

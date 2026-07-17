@@ -69,6 +69,7 @@ function createEnv(overrides: Partial<Env> = {}): Env {
       is_enabled INTEGER NOT NULL DEFAULT 1,
       created_by TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_by TEXT,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
   `);

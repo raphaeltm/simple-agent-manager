@@ -8,6 +8,7 @@ import type {
   PlatformIntegrationConfigInput,
   PlatformIntegrationStatus,
 } from '../lib/api';
+import { ConfirmDialog } from './ConfirmDialog';
 
 type FormValues = Record<string, string>;
 
@@ -43,6 +44,7 @@ export function PlatformIntegrationConfigForm({
   onSecondary,
 }: PlatformIntegrationConfigFormProps) {
   const [values, setValues] = useState<FormValues>({});
+  const [showRemoveInfrastructureConfirm, setShowRemoveInfrastructureConfirm] = useState(false);
   const config = useMemo(() => buildConfig(values), [values]);
 
   const updateValue = (name: string, value: string) => {
@@ -59,9 +61,20 @@ export function PlatformIntegrationConfigForm({
     await onSecondary(config);
   };
 
+  const handleRemoveInfrastructure = async () => {
+    await onPrimary({ googleInfrastructure: { remove: true } });
+    setShowRemoveInfrastructureConfirm(false);
+    setValues((current) => {
+      const next = { ...current };
+      delete next['googleInfrastructure.clientId'];
+      delete next['googleInfrastructure.clientSecret'];
+      return next;
+    });
+  };
+
   return (
     <form className="space-y-4" onSubmit={handleSubmit} data-testid="platform-config-form">
-      <div className="grid gap-4 lg:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-2">
         <IntegrationSection
           title="GitHub OAuth"
           description="Enables GitHub sign-in and user GitHub token refresh."
@@ -105,6 +118,46 @@ export function PlatformIntegrationConfigForm({
             onChange={updateValue}
           />
         </IntegrationSection>
+
+        {mode === 'admin' && (
+          <IntegrationSection
+            title="Google infrastructure OAuth"
+            description="Used only for keyless GCP/WIF setup with cloud-platform scope. Register both static callbacks: /auth/google/callback and /api/deployment/gcp/callback. This client never enables Google sign-in."
+            status={status.integrations.googleInfrastructureOAuth}
+          >
+            <TextField
+              name="googleInfrastructure.clientId"
+              label={FIELD_LABELS.clientId}
+              value={values['googleInfrastructure.clientId'] ?? ''}
+              field={status.integrations.googleInfrastructureOAuth.fields.clientId}
+              onChange={updateValue}
+            />
+            <TextField
+              name="googleInfrastructure.clientSecret"
+              label={FIELD_LABELS.clientSecret}
+              type="password"
+              value={values['googleInfrastructure.clientSecret'] ?? ''}
+              field={status.integrations.googleInfrastructureOAuth.fields.clientSecret}
+              onChange={updateValue}
+            />
+            <p className="text-xs text-fg-muted">
+              Enter both values to configure or rotate the client. Secrets are encrypted and never returned.
+            </p>
+            <FieldAudit
+              field={status.integrations.googleInfrastructureOAuth.fields.clientSecret}
+            />
+            {status.integrations.googleInfrastructureOAuth.source === 'runtime' && (
+              <button
+                type="button"
+                onClick={() => setShowRemoveInfrastructureConfirm(true)}
+                disabled={submitting || secondarySubmitting}
+                className="inline-flex min-h-11 items-center justify-center rounded-md border border-danger/40 px-3 text-sm font-semibold text-danger hover:bg-danger-tint disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Remove runtime infrastructure client
+              </button>
+            )}
+          </IntegrationSection>
+        )}
 
         <IntegrationSection
           title="GitLab OAuth"
@@ -180,6 +233,17 @@ export function PlatformIntegrationConfigForm({
           onChange={updateValue}
         />
       </IntegrationSection>
+
+      <ConfirmDialog
+        isOpen={showRemoveInfrastructureConfirm}
+        onClose={() => setShowRemoveInfrastructureConfirm(false)}
+        onConfirm={() => void handleRemoveInfrastructure()}
+        title="Remove runtime Google infrastructure OAuth?"
+        message="SAM will delete the encrypted runtime client ID and secret. If GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET are set in the environment, that fallback becomes active again."
+        confirmLabel="Remove runtime client"
+        variant="danger"
+        loading={submitting}
+      />
 
       <div className="flex flex-col gap-2 border-t border-border-default pt-4 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-xs text-fg-muted">
@@ -271,6 +335,7 @@ function TextField({
       <FieldLabel label={label} field={field} />
       <input
         type={type}
+        aria-label={label}
         value={value}
         onChange={(event) => onChange(name, event.target.value)}
         placeholder={field?.configured ? 'Leave blank to keep current value' : `Enter ${label.toLowerCase()}`}
@@ -299,6 +364,7 @@ function TextAreaField({
     <label className="block space-y-1.5">
       <FieldLabel label={label} field={field} />
       <textarea
+        aria-label={label}
         value={value}
         onChange={(event) => onChange(name, event.target.value)}
         placeholder={field?.configured ? 'Leave blank to keep current key' : 'Paste PEM private key'}
@@ -307,6 +373,16 @@ function TextAreaField({
         spellCheck={false}
       />
     </label>
+  );
+}
+
+function FieldAudit({ field }: { field?: PlatformConfigFieldStatus }) {
+  if (!field?.updatedAt) return null;
+  return (
+    <p className="text-xs text-fg-muted" data-testid="google-infrastructure-audit">
+      Last rotated {new Date(field.updatedAt).toLocaleString()}
+      {field.updatedBy ? ` by ${field.updatedBy}` : ''}
+    </p>
   );
 }
 
@@ -358,6 +434,11 @@ function buildConfig(values: FormValues): PlatformIntegrationConfigInput {
     if (key.startsWith('google.')) {
       const field = key.slice('google.'.length) as keyof NonNullable<PlatformIntegrationConfigInput['google']>;
       config.google = { ...config.google, [field]: trimmed };
+    }
+
+    if (key.startsWith('googleInfrastructure.')) {
+      const field = key.slice('googleInfrastructure.'.length) as keyof NonNullable<PlatformIntegrationConfigInput['googleInfrastructure']>;
+      config.googleInfrastructure = { ...config.googleInfrastructure, [field]: trimmed };
     }
 
     if (key.startsWith('gitlab.')) {

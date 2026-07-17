@@ -81,6 +81,25 @@ See `apps/api/.env.example` for the full list. Key variables:
 - `DEVCONTAINER_CACHE_REPOSITORY_PREFIX` — Prefix for generated cache repository names
 - `DEVCONTAINER_CACHE_CREDENTIAL_EXPIRATION_MINUTES` — TTL for short-lived registry credentials minted by the API
 
+### Google OAuth and GCP
+
+- `GOOGLE_LOGIN_CLIENT_ID`, `GOOGLE_LOGIN_CLIENT_SECRET` — Optional Google user-login OAuth fallback. Runtime `/setup` or superadmin config takes precedence. Callback: `/api/auth/callback/google`.
+- `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` — Optional, independent infrastructure OAuth fallback used only for keyless GCP/WIF setup. Runtime superadmin config takes precedence. Callbacks: `/auth/google/callback` and `/api/deployment/gcp/callback`.
+- `GCP_WIF_POOL_ID`, `GCP_WIF_PROVIDER_ID`, `GCP_SERVICE_ACCOUNT_ID` — Default identifiers used by WIF setup.
+- `GCP_SERVICE_ACCOUNT_JSON_MAX_BYTES` — Maximum UTF-8 service-account JSON upload/paste size (default: `65536`).
+- `GCP_DEFAULT_ZONE` — Default Compute zone (default: `us-central1-a`).
+- `GCP_IMAGE_FAMILY`, `GCP_IMAGE_PROJECT`, `GCP_DISK_SIZE_GB` — Compute VM image and disk defaults.
+- `GCP_TOKEN_CACHE_TTL_SECONDS` — Maximum short-lived access-token cache TTL (default: `3300`; capped by the provider-returned expiry).
+- `GCP_IDENTITY_TOKEN_EXPIRY_SECONDS` — WIF SAM identity-token lifetime (default: `600`).
+- `GCP_OPERATION_POLL_TIMEOUT_MS` — GCP asynchronous operation timeout (default: `300000`).
+- `GCP_API_TIMEOUT_MS` — Timeout for Google OAuth, IAM, and Compute verification requests (default: `30000`).
+- `GCP_STS_SCOPE` — WIF STS scope (default: `https://www.googleapis.com/auth/cloud-platform`).
+- `GCP_SA_IMPERSONATION_SCOPES` — Comma-separated WIF service-account impersonation scopes (default: Compute).
+- `GCP_SA_TOKEN_LIFETIME_SECONDS` — WIF impersonated-token lifetime (default: `3600`).
+- `GCP_STS_TOKEN_URL`, `GCP_IAM_CREDENTIALS_BASE_URL` — WIF endpoint overrides for controlled environments. They do not affect service-account JWT exchange, which always uses Google's fixed OAuth token endpoint.
+- `GCP_DEPLOY_WIF_POOL_ID`, `GCP_DEPLOY_WIF_PROVIDER_ID`, `GCP_DEPLOY_SERVICE_ACCOUNT_ID` — Default identifiers for deployment WIF.
+- `GCP_DEPLOY_IDENTITY_TOKEN_EXPIRY_SECONDS`, `GCP_DEPLOY_OAUTH_STATE_TTL_SECONDS`, `GCP_DEPLOY_OAUTH_TOKEN_HANDLE_TTL_SECONDS` — Deployment authorization lifetimes.
+
 ### Resource Limits
 
 - `MAX_NODES_PER_USER` — Runtime node cap
@@ -158,7 +177,7 @@ See `apps/api/.env.example` for the full list. Key variables:
 
 ### Credential Routes Rate Limits
 
-- `RATE_LIMIT_CREDENTIAL_UPDATE` — Applied to both user-scoped (`PUT /api/credentials/agent`) and project-scoped (`PUT /api/projects/:id/credentials`) credential write endpoints (MEDIUM #7 fix)
+- `RATE_LIMIT_CREDENTIAL_UPDATE` — Credential mutation cap used by user/project agent-key writes and the atomic `PUT /api/gcp/service-account` and superadmin Google infrastructure OAuth rotation paths.
 
 ### Generic Webhook Triggers
 
