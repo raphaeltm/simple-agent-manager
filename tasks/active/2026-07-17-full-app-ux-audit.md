@@ -123,7 +123,7 @@ This fix is structural (it removes *permanent* occlusion at the top of the list 
 
 **What was wrong:** `setNotifications(result.notifications)` stored `undefined` whenever `/api/notifications` returned anything without the expected array (proxy error body with status 200, API drift). `NotificationCenter` derives tab counts via `notifications.filter(...)` in `useMemo` — `undefined.filter` threw during render and the ErrorBoundary replaced the **whole app** with "Something went wrong". One degraded endpoint should never take down every page.
 
-**Fix:** the hook guards all three fields (`Array.isArray`, `typeof === 'number'`, `?? null`) on initial fetch and pagination, degrading to an empty list. Regression tests added (`tests/unit/hooks/useNotifications-malformed.test.ts`): malformed payload → empty list, valid payload → intact.
+**Fix:** the hook guards all three fields (`Array.isArray`, `typeof === 'number'`, `?? null`) on initial fetch and pagination, degrading to an empty list. An adversarial diff-review pass then found the same class on the WebSocket ingress (`notification.new` / `notification.updated` frames inserted the unvalidated payload; the resulting crash fires in a later render, outside the handler's try/catch) — also guarded. Regression tests added (`tests/unit/hooks/useNotifications-malformed.test.ts`): malformed REST payload → empty list, malformed WS frames → ignored, valid payload → intact.
 
 ### F9 — Malformed provider catalog crashes Create Workspace (High, found by the new sweep)
 
