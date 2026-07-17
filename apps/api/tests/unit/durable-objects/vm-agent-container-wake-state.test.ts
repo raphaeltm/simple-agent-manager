@@ -370,6 +370,31 @@ describe('VmAgentContainer stop classification', () => {
     expect(put).toHaveBeenCalledWith('lifecycleStatus', 'error');
   });
 
+  it('keeps an intentional stop terminal when onError precedes onStop', async () => {
+    const { fake, markRuntimeReplacing, markRuntimeEnded, put } = makeStopFake('stopping');
+    fake.ctx.storage.get = vi.fn().mockResolvedValueOnce('stopping').mockResolvedValue('stopped');
+    const rollout = new Error('Runtime signalled the container to exit due to a new version rollout: 0');
+    await onError.call(fake, rollout);
+    await onStop.call(fake, { exitCode: 0, reason: 'runtime_signal' });
+    expect(markRuntimeReplacing).not.toHaveBeenCalled();
+    expect(markRuntimeEnded).toHaveBeenCalledTimes(1);
+    expect(markRuntimeEnded).toHaveBeenCalledWith('stopped', 'Container stopped by user request');
+    expect(put).toHaveBeenCalledTimes(1);
+    expect(put).toHaveBeenCalledWith('lifecycleStatus', 'stopped');
+  });
+
+  it('keeps a crash terminal when onError precedes a late runtime signal', async () => {
+    const { fake, markRuntimeReplacing, markRuntimeEnded, put } = makeStopFake('running');
+    fake.ctx.storage.get = vi.fn().mockResolvedValue('error');
+    await onError.call(fake, new Error('process crashed'));
+    await onStop.call(fake, { exitCode: 0, reason: 'runtime_signal' });
+    expect(markRuntimeReplacing).not.toHaveBeenCalled();
+    expect(markRuntimeEnded).toHaveBeenCalledTimes(1);
+    expect(markRuntimeEnded).toHaveBeenCalledWith('error', 'Container error: process crashed');
+    expect(put).toHaveBeenCalledTimes(1);
+    expect(put).toHaveBeenCalledWith('lifecycleStatus', 'error');
+  });
+
   it('handles onStop followed by onError without restarting replacement', async () => {
     const { fake, markRuntimeReplacing, markRuntimeEnded, put } = makeStopFake('running');
     fake.ctx.storage.get = vi.fn().mockResolvedValueOnce('running').mockResolvedValue('replacing');

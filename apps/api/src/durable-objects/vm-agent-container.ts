@@ -308,7 +308,11 @@ export class VmAgentContainer extends Container<Env> {
     reason: 'exit' | 'runtime_signal';
   }): Promise<void> {
     const status = await this.ctx.storage.get<LifecycleStatus>('lifecycleStatus');
-    if (status === 'expired' || status === 'sleeping' || status === 'replacing') {
+    if (status === 'expired' ||
+      status === 'sleeping' ||
+      status === 'replacing' ||
+      status === 'stopped' ||
+      status === 'error') {
       return;
     }
     const explicitStop = status === 'stopping';
