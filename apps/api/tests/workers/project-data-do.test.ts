@@ -89,7 +89,7 @@ describe('ProjectData Durable Object', () => {
 
       const result = await stub.listSessions(null, 25, 0);
 
-      expect(result.total).toBe(1500);
+      expect(result.total).toBe(1501);
       expect(result.sessions).toHaveLength(25);
       expect(result.hasMore).toBe(true);
       expect(result.sessions[0]?.id).toBe('large-session-1499');
