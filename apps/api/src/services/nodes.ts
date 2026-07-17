@@ -680,16 +680,12 @@ async function ensureStrictNodeBelongsToProvider(
     return 'absent';
   }
   if (!vm || typeof vm !== 'object') {
-    throw new Error(
-      `Cannot strictly delete node ${node.id}: provider lookup returned an ambiguous result`
-    );
+    throw new Error(`Cannot strictly delete node ${node.id}: ambiguous result`);
   }
   return 'present';
 }
 
-export interface StrictNodeDeletionResult {
-  providerVm: 'no-instance' | 'deleted' | 'already-absent';
-}
+export type StrictNodeDeletionResult = { providerVm: 'no-instance' | 'deleted' | 'already-absent' };
 
 async function deleteStrictProviderInstance(
   db: NodeDb,
