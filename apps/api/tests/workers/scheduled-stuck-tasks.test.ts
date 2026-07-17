@@ -12,7 +12,7 @@
  * - Bounded D1 discovery resumes and wraps through a real KV cursor
  */
 import { env, runInDurableObject } from 'cloudflare:test';
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 
 import type { TaskRunner, TaskRunnerState } from '../../src/durable-objects/task-runner';
 import type { Env } from '../../src/env';
@@ -29,6 +29,23 @@ import {
 const USER_ID = 'user-st-test';
 const INSTALL_ID = 'install-st-test';
 const PROJECT_ID = 'project-st-test';
+
+async function clearDatabase(db: D1Database): Promise<void> {
+  const { results } = await db
+    .prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '\_cf\_%' ESCAPE '\\' AND name != 'd1_migrations'"
+    )
+    .all<{ name: string }>();
+  await db.batch([
+    db.prepare('PRAGMA defer_foreign_keys = ON'),
+    ...results.map(({ name }) => db.prepare(`DELETE FROM "${name.replaceAll('"', '""')}"`)),
+  ]);
+}
+
+beforeEach(async () => {
+  await clearDatabase(env.DATABASE);
+  await clearDatabase(env.OBSERVABILITY_DATABASE);
+});
 
 async function seedBaseData(): Promise<void> {
   await seedUser(USER_ID);
