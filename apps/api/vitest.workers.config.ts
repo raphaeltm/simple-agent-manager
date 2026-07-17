@@ -156,6 +156,7 @@ export default defineConfig({
     globals: true,
     include: [...DURABLE_OBJECT_GATE_FILES],
     maxWorkers: workersTestMaxWorkers,
+    reporters: process.env.CI ? ['verbose'] : ['default'],
     setupFiles: ['./tests/workers/setup.ts'],
     provide: { databaseMigrations, observabilityMigrations },
     hookTimeout: workersTestTimeoutMs,
