@@ -216,6 +216,43 @@ describe('VmAgentContainer replacement recovery', () => {
     expect(wakeFromSnapshot).not.toHaveBeenCalled();
     expect(values.get('lifecycleStatus')).toBe('error');
   });
+
+  it('sanitizes an unexpected wake failure and records degraded recovery', async () => {
+    const storage = {
+      get: vi.fn(async (key: string) => {
+        if (key === 'lifecycleStatus') return 'replacing';
+        if (key === 'recoveryAttempts') return 0;
+        if (key === 'launchConfig') return { workspaceId: 'ws-1' };
+        return undefined;
+      }),
+      put: vi.fn(),
+    };
+    const markWakeDegraded = vi.fn();
+    const fake = {
+      wakeChain: Promise.resolve(),
+      wakeFromSnapshot: vi.fn().mockRejectedValue(new Error('secret upstream response')),
+      markWakeDegraded,
+      getRecoveryMaxAttempts: () => 2,
+      ctx: { storage },
+    };
+    const ensureAwake = (
+      VmAgentContainer.prototype as unknown as {
+        ensureAwake: (this: unknown) => Promise<{ ok: boolean; message?: string }>;
+      }
+    ).ensureAwake;
+
+    const result = await ensureAwake.call(fake);
+
+    expect(result).toEqual({
+      ok: false,
+      message: 'Runtime recovery failed safely; transcript and partial output remain available.',
+    });
+    expect(result.message).not.toContain('secret upstream response');
+    expect(markWakeDegraded).toHaveBeenCalledWith(
+      { workspaceId: 'ws-1' },
+      'secret upstream response'
+    );
+  });
 });
 
 describe('VmAgentContainer stop classification', () => {

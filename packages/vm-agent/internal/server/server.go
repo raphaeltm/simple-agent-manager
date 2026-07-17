@@ -111,6 +111,9 @@ type Server struct {
 	publishJobsMu       sync.Mutex
 	publishJobs         map[string]publishJobState
 	buildPublishRunner  func(context.Context, *preparedBuildPublish, publish.EventSink) (*publish.ReleaseResult, error)
+	drainOnce           sync.Once
+	drainErr            error
+	drainSnapshotFn     func(context.Context) error
 	applyWatchdogMu     sync.Mutex
 	applyWatchdogs      map[string]chan struct{}
 

@@ -165,9 +165,19 @@ func (s *Server) sessionSnapshotHandlerInput(w http.ResponseWriter, r *http.Requ
 }
 
 // DrainStandaloneSnapshot creates the latest safe checkpoint before a platform SIGTERM.
-// It is safe to call repeatedly: completed snapshots are atomically replaced by the
-// control plane and message IDs remain deduplicated by the reporter outbox.
+// Repeated calls share one attempt so concurrent signals cannot race snapshot completion.
 func (s *Server) DrainStandaloneSnapshot(ctx context.Context) error {
+	s.drainOnce.Do(func() {
+		drain := s.drainSnapshotFn
+		if drain == nil {
+			drain = s.drainStandaloneSnapshot
+		}
+		s.drainErr = drain(ctx)
+	})
+	return s.drainErr
+}
+
+func (s *Server) drainStandaloneSnapshot(ctx context.Context) error {
 	if s.config == nil || !s.config.IsStandaloneMode() {
 		return nil
 	}
@@ -178,6 +188,9 @@ func (s *Server) DrainStandaloneSnapshot(ctx context.Context) error {
 	sessions := s.agentSessions.List(s.config.WorkspaceID)
 	if len(sessions) == 0 {
 		return nil
+	}
+	if len(sessions) != 1 {
+		return fmt.Errorf("shutdown checkpoint requires exactly one agent session; found %d", len(sessions))
 	}
 	callbackToken := s.callbackTokenForWorkspace(s.config.WorkspaceID)
 	if callbackToken == "" {

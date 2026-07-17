@@ -58,6 +58,7 @@ const ACTIVE_WORK_KEY = 'activeWork';
 const RECOVERY_ATTEMPTS_KEY = 'recoveryAttempts';
 const RECOVERY_MODE_KEY = 'recoveryMode';
 const RECOVERY_PROMPT_DISPOSITION_KEY = 'recoveryPromptDisposition';
+const RECOVERY_AGENT_SESSION_KEY = 'recoveryAgentSessionId';
 const KEEPALIVE_CALLBACK = 'renewActiveWorkKeepalive';
 const WAKE_DEGRADED_RESPONSE =
   'Workspace woke with degraded snapshot restore; retry the prompt or fork from transcript history.';
@@ -396,7 +397,22 @@ export class VmAgentContainer extends Container<Env> {
         }
         await this.ctx.storage.put(RECOVERY_ATTEMPTS_KEY, attempts + 1);
       }
-      return this.wakeFromSnapshot();
+      try {
+        return await this.wakeFromSnapshot();
+      } catch (error) {
+        const config = await this.ctx.storage.get<VmAgentContainerLaunchConfig>('launchConfig');
+        if (config) {
+          await this.markWakeDegraded(
+            config,
+            error instanceof Error ? error.message : String(error)
+          );
+        }
+        return {
+          ok: false,
+          message:
+            'Runtime recovery failed safely; transcript and partial output remain available.',
+        };
+      }
     });
     // Keep the chain alive even if this wake rejects, so a failure does not
     // permanently wedge all future wakes.
@@ -424,10 +440,15 @@ export class VmAgentContainer extends Container<Env> {
     if (!workspace?.chatSessionId) {
       return { ok: false, message: 'Workspace session metadata is unavailable.' };
     }
+    const recoveryAgentSessionId = await this.ctx.storage.get<string>(RECOVERY_AGENT_SESSION_KEY);
     const agentSession = await db
       .select({ id: schema.agentSessions.id, agentType: schema.agentSessions.agentType })
       .from(schema.agentSessions)
-      .where(eq(schema.agentSessions.workspaceId, config.workspaceId))
+      .where(
+        recoveryAgentSessionId
+          ? eq(schema.agentSessions.id, recoveryAgentSessionId)
+          : eq(schema.agentSessions.workspaceId, config.workspaceId)
+      )
       .orderBy(desc(schema.agentSessions.updatedAt))
       .get();
     if (!agentSession) {
@@ -491,7 +512,10 @@ export class VmAgentContainer extends Container<Env> {
         config,
         restoreBody || `restore failed with HTTP ${restoreResponse.status}`
       );
-      return { ok: false, message: restoreBody || 'Session restore failed.' };
+      return {
+        ok: false,
+        message: 'Runtime recovery is degraded; transcript and partial output remain available.',
+      };
     }
     let restoreStatus = '';
     try {
@@ -503,7 +527,10 @@ export class VmAgentContainer extends Container<Env> {
     if (restoreStatus !== 'restored') {
       const message = restoreBody || 'Session restore did not report restored status.';
       await this.markWakeDegraded(config, message);
-      return { ok: false, message };
+      return {
+        ok: false,
+        message: 'Runtime recovery is degraded; transcript and partial output remain available.',
+      };
     }
 
     const now = new Date().toISOString();
@@ -543,6 +570,8 @@ export class VmAgentContainer extends Container<Env> {
         })
         .where(eq(schema.agentSessions.id, agentSession.id));
     }
+    await this.ctx.storage.delete(RECOVERY_PROMPT_DISPOSITION_KEY);
+    await this.ctx.storage.delete(RECOVERY_AGENT_SESSION_KEY);
     await this.ctx.storage.delete(RECOVERY_MODE_KEY);
     await this.ctx.storage.put('lifecycleStatus', 'running' satisfies LifecycleStatus);
 
@@ -600,6 +629,11 @@ export class VmAgentContainer extends Container<Env> {
         : 'Runtime replacement detected; restoring the session.';
     await this.ctx.storage.put(RECOVERY_ATTEMPTS_KEY, 0);
     await this.ctx.storage.put(RECOVERY_MODE_KEY, true);
+    if (activeWork?.status === 'active') {
+      await this.ctx.storage.put(RECOVERY_AGENT_SESSION_KEY, activeWork.agentSessionId);
+    } else {
+      await this.ctx.storage.delete(RECOVERY_AGENT_SESSION_KEY);
+    }
     await this.ctx.storage.put(
       RECOVERY_PROMPT_DISPOSITION_KEY,
       activeWork?.status === 'active' ? 'interrupted_manual_retry' : 'none'
