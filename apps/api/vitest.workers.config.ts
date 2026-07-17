@@ -15,6 +15,19 @@ import { defineConfig } from 'vitest/config';
 const DEFAULT_WORKERS_TEST_MAX_WORKERS = 1;
 const DEFAULT_WORKERS_TEST_TIMEOUT_MS = 30_000;
 
+// This gate intentionally covers the real Durable Object and scheduled-worker
+// vertical slices. HTTP-entrypoint tests need the production Worker entrypoint,
+// whose unrelated Containers/Sandbox imports are not workerd-pool compatible.
+const DURABLE_OBJECT_GATE_FILES = [
+  'tests/workers/attention-markers.test.ts',
+  'tests/workers/node-lifecycle-do.test.ts',
+  'tests/workers/project-data-do.test.ts',
+  'tests/workers/project-data-service.test.ts',
+  'tests/workers/scheduled-node-cleanup.test.ts',
+  'tests/workers/scheduled-stuck-tasks.test.ts',
+  'tests/workers/task-runner-do.test.ts',
+] as const;
+
 function readPositiveInteger(name: string, fallback: number): number {
   const value = Number.parseInt(process.env[name] ?? '', 10);
   return Number.isInteger(value) && value > 0 ? value : fallback;
@@ -141,7 +154,7 @@ export default defineConfig({
     },
     fileParallelism: false,
     globals: true,
-    include: ['tests/workers/**/*.test.ts'],
+    include: [...DURABLE_OBJECT_GATE_FILES],
     maxWorkers: workersTestMaxWorkers,
     setupFiles: ['./tests/workers/setup.ts'],
     provide: { databaseMigrations, observabilityMigrations },
