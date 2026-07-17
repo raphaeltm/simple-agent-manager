@@ -114,6 +114,7 @@ type Server struct {
 	drainOnce           sync.Once
 	drainErr            error
 	drainSnapshotFn     func(context.Context) error
+	hibernateSnapshotFn func(context.Context, *WorkspaceRuntime, string, string, string, string) (map[string]interface{}, error)
 	applyWatchdogMu     sync.Mutex
 	applyWatchdogs      map[string]chan struct{}
 

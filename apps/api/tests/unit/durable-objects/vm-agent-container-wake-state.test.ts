@@ -1,4 +1,15 @@
+import Database from 'better-sqlite3';
 import { describe, expect, it, vi } from 'vitest';
+
+import { createSqliteD1 } from '../../helpers/sqlite-d1';
+
+const jwtMocks = vi.hoisted(() => ({
+  signCallbackToken: vi.fn(async () => 'workspace-token'),
+  signNodeCallbackToken: vi.fn(async () => 'node-token'),
+  signNodeManagementToken: vi.fn(async () => ({ token: 'management-token' })),
+}));
+
+vi.mock('../../../src/services/jwt', () => jwtMocks);
 
 import { VmAgentContainer } from '../../../src/durable-objects/vm-agent-container';
 
@@ -309,5 +320,106 @@ describe('VmAgentContainer stop classification', () => {
     await onStop.call(fake, { exitCode: 0, reason: 'runtime_signal' });
     expect(markRuntimeReplacing).not.toHaveBeenCalled();
     expect(markRuntimeEnded).not.toHaveBeenCalled();
+  });
+});
+
+describe('VmAgentContainer wakeFromSnapshot vertical slice', () => {
+  function makeFixture(restoreResponse: Response) {
+    const sqlite = new Database(':memory:');
+    sqlite.exec(`
+      CREATE TABLE nodes (id TEXT PRIMARY KEY, status TEXT, health_status TEXT, error_message TEXT, updated_at TEXT);
+      CREATE TABLE workspaces (id TEXT PRIMARY KEY, user_id TEXT, chat_session_id TEXT, status TEXT, error_message TEXT, updated_at TEXT);
+      CREATE TABLE agent_sessions (id TEXT PRIMARY KEY, workspace_id TEXT, agent_type TEXT, status TEXT, error_message TEXT, updated_at TEXT);
+      INSERT INTO nodes VALUES ('node-1', 'recovery', 'unhealthy', NULL, '2026-01-01');
+      INSERT INTO workspaces VALUES ('ws-1', 'user-1', 'chat-1', 'recovery', NULL, '2026-01-01');
+      INSERT INTO agent_sessions VALUES ('agent-active', 'ws-1', 'codex', 'recovery', NULL, '2026-01-01');
+      INSERT INTO agent_sessions VALUES ('agent-newer-decoy', 'ws-1', 'claude-code', 'running', NULL, '2026-01-02');
+    `);
+    const values = new Map<string, unknown>([
+      [
+        'launchConfig',
+        {
+          nodeId: 'node-1',
+          workspaceId: 'ws-1',
+          projectId: 'project-1',
+          chatSessionId: 'chat-1',
+          repository: 'owner/repo',
+          branch: 'main',
+          workspaceDir: '/workspace',
+          controlPlaneUrl: 'https://control.invalid',
+          vmAgentPort: 8080,
+        },
+      ],
+      ['recoveryAgentSessionId', 'agent-active'],
+      ['recoveryPromptDisposition', 'interrupted_manual_retry'],
+      ['recoveryMode', true],
+    ]);
+    const storage = {
+      get: vi.fn(async (key: string) => values.get(key)),
+      put: vi.fn(async (key: string, value: unknown) => {
+        values.set(key, value);
+      }),
+      delete: vi.fn(async (key: string) => {
+        values.delete(key);
+        return true;
+      }),
+    };
+    const containerFetch = vi.fn(async () => restoreResponse.clone());
+    const fake = {
+      env: { DATABASE: createSqliteD1(sqlite) },
+      ctx: { storage },
+      launch: vi.fn(),
+      containerFetch,
+      markWakeDegraded: (VmAgentContainer.prototype as unknown as { markWakeDegraded: unknown })
+        .markWakeDegraded,
+    };
+    return { sqlite, values, containerFetch, fake };
+  }
+
+  const wake = (
+    VmAgentContainer.prototype as unknown as {
+      wakeFromSnapshot: (this: unknown) => Promise<{ ok: boolean; message?: string }>;
+    }
+  ).wakeFromSnapshot;
+
+  it('restores the interrupted session and consumes manual-retry disposition exactly once', async () => {
+    const fixture = makeFixture(
+      new Response(JSON.stringify({ status: 'restored' }), { status: 200 })
+    );
+    expect(await wake.call(fixture.fake)).toEqual({ ok: true });
+    expect(fixture.containerFetch.mock.calls[0]?.[0].url).toContain(
+      '/agent-sessions/agent-active/restore'
+    );
+    const active = fixture.sqlite
+      .prepare('SELECT error_message FROM agent_sessions WHERE id = ?')
+      .get('agent-active') as { error_message: string };
+    expect(active.error_message).toContain('retry it manually');
+    expect(fixture.values.has('recoveryPromptDisposition')).toBe(false);
+    expect(fixture.values.has('recoveryAgentSessionId')).toBe(false);
+    expect(fixture.values.has('recoveryMode')).toBe(false);
+
+    expect(await wake.call(fixture.fake)).toEqual({ ok: true });
+    expect(fixture.containerFetch.mock.calls[1]?.[0].url).toContain(
+      '/agent-sessions/agent-active/restore'
+    );
+    const decoy = fixture.sqlite
+      .prepare('SELECT error_message FROM agent_sessions WHERE id = ?')
+      .get('agent-newer-decoy') as { error_message: string | null };
+    expect(decoy.error_message).toBeNull();
+  });
+
+  it('never exposes a raw failed restore body while persisting sanitized diagnostics', async () => {
+    const sentinel = 'secret=/root/private-token';
+    const fixture = makeFixture(new Response(sentinel, { status: 500 }));
+    const result = await wake.call(fixture.fake);
+    expect(result.ok).toBe(false);
+    expect(result.message).not.toContain(sentinel);
+    const workspace = fixture.sqlite
+      .prepare('SELECT error_message FROM workspaces WHERE id = ?')
+      .get('ws-1') as { error_message: string };
+    expect(workspace.error_message).toBe(
+      'Runtime recovery is degraded; transcript and partial output remain available.'
+    );
+    expect(workspace.error_message).not.toContain(sentinel);
   });
 });

@@ -388,6 +388,8 @@ export class VmAgentContainer extends Container<Env> {
       if (status === 'replacing') {
         const attempts = (await this.ctx.storage.get<number>(RECOVERY_ATTEMPTS_KEY)) ?? 0;
         if (attempts >= this.getRecoveryMaxAttempts()) {
+          const config = await this.ctx.storage.get<VmAgentContainerLaunchConfig>('launchConfig');
+          if (config) await this.markRecoveryExhausted(config);
           await this.ctx.storage.put('lifecycleStatus', 'error' satisfies LifecycleStatus);
           return {
             ok: false,
@@ -573,6 +575,7 @@ export class VmAgentContainer extends Container<Env> {
     await this.ctx.storage.delete(RECOVERY_PROMPT_DISPOSITION_KEY);
     await this.ctx.storage.delete(RECOVERY_AGENT_SESSION_KEY);
     await this.ctx.storage.delete(RECOVERY_MODE_KEY);
+    await this.ctx.storage.delete(RECOVERY_ATTEMPTS_KEY);
     await this.ctx.storage.put('lifecycleStatus', 'running' satisfies LifecycleStatus);
 
     log.info('vm_agent_container_wake_completed', {
@@ -617,6 +620,43 @@ export class VmAgentContainer extends Container<Env> {
     if ((await this.ctx.storage.get<number>(RECOVERY_ATTEMPTS_KEY)) !== undefined) {
       await this.ctx.storage.put('lifecycleStatus', 'replacing' satisfies LifecycleStatus);
     }
+  }
+
+  private async markRecoveryExhausted(config: VmAgentContainerLaunchConfig): Promise<void> {
+    const diagnostic =
+      'Runtime recovery attempts exhausted; transcript and partial output remain available.';
+    const now = new Date().toISOString();
+    const db = drizzle(this.env.DATABASE, { schema });
+    await db
+      .update(schema.nodes)
+      .set({
+        status: 'error',
+        healthStatus: 'unhealthy',
+        errorMessage: diagnostic,
+        updatedAt: now,
+      })
+      .where(eq(schema.nodes.id, config.nodeId));
+    await db
+      .update(schema.workspaces)
+      .set({
+        status: 'error',
+        errorMessage: diagnostic,
+        updatedAt: now,
+      })
+      .where(eq(schema.workspaces.id, config.workspaceId));
+    await db
+      .update(schema.agentSessions)
+      .set({
+        status: 'error',
+        errorMessage: diagnostic,
+        updatedAt: now,
+      })
+      .where(eq(schema.agentSessions.workspaceId, config.workspaceId));
+    log.warn('vm_agent_container_recovery_exhausted', {
+      nodeId: config.nodeId,
+      workspaceId: config.workspaceId,
+      message: diagnostic,
+    });
   }
 
   private async markRuntimeReplacing(): Promise<void> {

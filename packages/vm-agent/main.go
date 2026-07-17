@@ -86,17 +86,12 @@ func runStandaloneMode(cfg *config.Config) {
 		os.Exit(1)
 	case sig := <-sigCh:
 		slog.Info("Received signal, draining standalone agent...", "signal", sig)
-		shutdownDeadline := time.Now().Add(cfg.StandaloneDrainTimeout)
-		drainCtx, drainCancel := context.WithDeadline(context.Background(), shutdownDeadline)
-		if err := srv.DrainStandaloneSnapshot(drainCtx); err != nil {
-			slog.Warn("Standalone shutdown checkpoint degraded", "error", err)
+		drainErr, stopErr := shutdownStandalone(srv, cfg.StandaloneDrainTimeout)
+		if drainErr != nil {
+			slog.Warn("Standalone shutdown checkpoint degraded", "error", drainErr)
 		}
-		drainCancel()
-		srv.StopAllWorkspacesAndSessions()
-		ctx, cancel := context.WithDeadline(context.Background(), shutdownDeadline)
-		defer cancel()
-		if err := srv.Stop(ctx); err != nil {
-			slog.Error("Error during shutdown", "error", err)
+		if stopErr != nil {
+			slog.Error("Error during shutdown", "error", stopErr)
 		}
 		slog.Info("VM Agent (standalone mode) stopped")
 		return
@@ -108,6 +103,23 @@ func runStandaloneMode(cfg *config.Config) {
 		slog.Error("Error during shutdown", "error", err)
 	}
 	slog.Info("VM Agent (standalone mode) stopped")
+}
+
+type standaloneShutdownServer interface {
+	DrainStandaloneSnapshot(context.Context) error
+	StopAllWorkspacesAndSessions()
+	Stop(context.Context) error
+}
+
+func shutdownStandalone(srv standaloneShutdownServer, timeout time.Duration) (error, error) {
+	shutdownDeadline := time.Now().Add(timeout)
+	drainCtx, drainCancel := context.WithDeadline(context.Background(), shutdownDeadline)
+	drainErr := srv.DrainStandaloneSnapshot(drainCtx)
+	drainCancel()
+	srv.StopAllWorkspacesAndSessions()
+	stopCtx, stopCancel := context.WithDeadline(context.Background(), shutdownDeadline)
+	defer stopCancel()
+	return drainErr, srv.Stop(stopCtx)
 }
 
 // runDeploymentMode starts the agent in deployment mode.

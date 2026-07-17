@@ -196,7 +196,11 @@ func (s *Server) drainStandaloneSnapshot(ctx context.Context) error {
 	if callbackToken == "" {
 		return fmt.Errorf("workspace callback token unavailable for shutdown checkpoint")
 	}
-	_, err := s.hibernateSessionSnapshot(ctx, runtime, sessions[0].ID, s.config.ChatSessionID, "cf-container", callbackToken)
+	hibernate := s.hibernateSnapshotFn
+	if hibernate == nil {
+		hibernate = s.hibernateSessionSnapshot
+	}
+	_, err := hibernate(ctx, runtime, sessions[0].ID, s.config.ChatSessionID, "cf-container", callbackToken)
 	return err
 }
 
