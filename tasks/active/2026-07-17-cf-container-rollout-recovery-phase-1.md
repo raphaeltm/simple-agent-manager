@@ -17,27 +17,27 @@ Phase 1 must recover the runtime and current safe snapshot within configurable b
 
 ## Implementation checklist
 
-- [ ] Add a persisted recoverable replacement lifecycle/diagnostic record with bounded attempts.
-- [ ] Classify `runtime_signal` as replacement while preserving intentional stop, idle sleep, and crash semantics.
-- [ ] Allow replacement state through the existing serialized wake/restore critical section and mint fresh control-plane credentials/assets.
-- [ ] Persist one explicit interrupted/manual-retry active-prompt disposition while retaining transcript/output.
-- [ ] Add idempotent, deadline-bounded standalone SIGTERM drain that checkpoints before reporter/server shutdown.
-- [ ] Expose sanitized degraded diagnostics without credentials, prompt bodies, paths, or raw upstream errors.
-- [ ] Add discriminating TypeScript and Go unit/integration tests for replacement, stop, crash, concurrency, bounds, drain, and prompt disposition.
-- [ ] Document new configuration and lifecycle behavior where canonical references require it.
-- [ ] Run all requested specialist reviews and task-completion validation.
+- [x] Add a persisted recoverable replacement lifecycle/diagnostic record with bounded attempts.
+- [x] Classify `runtime_signal` as replacement while preserving intentional stop, idle sleep, and crash semantics.
+- [x] Allow replacement state through the existing serialized wake/restore critical section and mint fresh control-plane credentials/assets.
+- [x] Persist one explicit interrupted/manual-retry active-prompt disposition while retaining transcript/output.
+- [x] Add idempotent, deadline-bounded standalone SIGTERM drain that checkpoints before reporter/server shutdown.
+- [x] Expose sanitized degraded diagnostics without credentials, prompt bodies, paths, or raw upstream errors.
+- [x] Add discriminating TypeScript and Go unit/integration tests for replacement, stop, crash, concurrency, bounds, drain, and prompt disposition.
+- [x] Document new configuration and lifecycle behavior where canonical references require it.
+- [x] Run all requested specialist reviews and task-completion validation.
 
 ## Acceptance criteria
 
-- [ ] `runtime_signal` alone does not terminally error the node, workspace, session, or task.
-- [ ] Repeated/concurrent replacement handling launches at most one bounded restore and stops after the configured attempt limit.
-- [ ] A fresh replacement restores current control-plane assets/credentials and verified WIP when available.
-- [ ] Snapshot failure degrades to transcript continuity with sanitized diagnostics.
-- [ ] An active prompt receives exactly one durable `interrupted_manual_retry` disposition and is not replayed.
-- [ ] Intentional stop remains stopped and application exit/crash remains terminal.
-- [ ] SIGTERM drain is idempotent, attempts checkpointing, flushes reporters, and respects its configured deadline.
-- [ ] TypeScript and Go tests cover the lifecycle matrix and cross-boundary recovery behavior.
-- [ ] No polished web recovery UI is added.
+- [x] `runtime_signal` alone does not terminally error the node, workspace, session, or task.
+- [x] Repeated/concurrent replacement handling launches at most one bounded restore and stops after the configured attempt limit.
+- [x] A fresh replacement restores current control-plane assets/credentials and verified WIP when available.
+- [x] Snapshot failure degrades to transcript continuity with sanitized diagnostics.
+- [x] An active prompt receives exactly one durable `interrupted_manual_retry` disposition and is not replayed.
+- [x] Intentional stop remains stopped and application exit/crash remains terminal.
+- [x] SIGTERM drain is idempotent, attempts checkpointing, flushes reporters, and respects its configured deadline.
+- [x] TypeScript and Go tests cover the lifecycle matrix and cross-boundary recovery behavior.
+- [x] No polished web recovery UI is added.
 - [ ] Real active-work replacement passes on shared staging after a staging lease is granted.
 
 ## Constraints and references
