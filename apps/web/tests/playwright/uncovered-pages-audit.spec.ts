@@ -89,7 +89,12 @@ function makeWorkspace(i: number, overrides: Record<string, unknown>) {
 }
 
 const workspaces = [
-  makeWorkspace(1, { status: 'running' }),
+  // Worst-case row the truncation fix must survive: long title AND long branch
+  // AND running status (Open button + overflow menu both compete for the row).
+  makeWorkspace(1, {
+    status: 'running',
+    branch: 'sam/next-5-hours-thoroughly-5d5pke',
+  }),
   makeWorkspace(2, { status: 'creating', vmIp: null, url: undefined }),
   makeWorkspace(3, { status: 'stopped' }),
   makeWorkspace(4, {

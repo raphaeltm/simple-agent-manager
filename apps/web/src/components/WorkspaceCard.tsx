@@ -87,7 +87,7 @@ export function WorkspaceCard({ workspace, onStop, onRestart, onDelete }: Worksp
               <span className="sam-type-card-title text-fg-primary overflow-hidden text-ellipsis whitespace-nowrap flex-1 min-w-0">
                 {workspace.displayName || workspace.name}
               </span>
-              <span className="sam-type-caption text-fg-muted overflow-hidden text-ellipsis whitespace-nowrap shrink-0 max-w-[40%]">
+              <span className="sam-type-caption text-fg-muted overflow-hidden text-ellipsis whitespace-nowrap shrink-0 min-w-16 max-w-[40%]">
                 {workspace.branch}
               </span>
             </div>

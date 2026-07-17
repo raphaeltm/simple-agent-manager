@@ -109,7 +109,7 @@ export function useNotifications(): UseNotificationsReturn {
       setNotifications((prev) => prev.filter((n) => n.id !== id));
       // Re-fetch unread count
       const { count } = await getNotificationUnreadCount();
-      if (mountedRef.current) setUnreadCount(count);
+      if (mountedRef.current) setUnreadCount(typeof count === 'number' ? count : 0);
     } catch (err) {
       console.error('Failed to dismiss notification:', err);
     }
@@ -202,7 +202,7 @@ export function useNotifications(): UseNotificationsReturn {
                 break;
 
               case 'notification.unread_count':
-                setUnreadCount(msg.count);
+                setUnreadCount(typeof msg.count === 'number' ? msg.count : 0);
                 break;
 
               case 'pong':
