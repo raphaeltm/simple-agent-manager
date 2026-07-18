@@ -26,8 +26,8 @@ This is a non-breaking remediation task: preserve existing staging and productio
 - [x] Preserve web deployment and worker secret configuration semantics.
 - [x] Add/extend CI-friendly static workflow tests proving migrations complete before any API Worker deploy can serve new code.
 - [x] Run targeted workflow quality tests.
-- [ ] Run relevant full quality checks.
-- [ ] Complete requested specialist reviews: cloudflare-specialist, env-validator, doc-sync-validator, constitution-validator, test-engineer.
+- [x] Run relevant full quality checks.
+- [x] Complete requested specialist reviews: cloudflare-specialist, env-validator, doc-sync-validator, constitution-validator, test-engineer.
 - [ ] Push the output branch and open a PR that states no breaking changes and includes test evidence.
 - [ ] Do not merge the PR.
 
