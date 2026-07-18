@@ -1,5 +1,5 @@
-import { ArrowLeft, ArrowRight, ChevronDown, ChevronRight, LogOut } from 'lucide-react';
 import { useModalInteraction } from '@simple-agent-manager/ui/hooks/useModalInteraction';
+import { ArrowLeft, ArrowRight, ChevronDown, ChevronRight, LogOut } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { useCallback, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
