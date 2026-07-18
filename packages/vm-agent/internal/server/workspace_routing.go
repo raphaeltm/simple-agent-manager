@@ -370,6 +370,7 @@ func (s *Server) newPTYManagerForWorkspace(
 		ContainerUser:     resolvedContainerUser,
 		GracePeriod:       s.config.PTYOrphanGracePeriod,
 		BufferSize:        s.config.PTYOutputBufferSize,
+		CloseGrace:        s.config.PTYCloseGracePeriod,
 	}
 
 	manager := pty.NewManager(config)

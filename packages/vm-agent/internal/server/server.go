@@ -342,6 +342,7 @@ func New(cfg *config.Config) (*Server, error) {
 		ProcessGroup:      cfg.IsStandaloneMode(),
 		GracePeriod:       cfg.PTYOrphanGracePeriod,
 		BufferSize:        cfg.PTYOutputBufferSize,
+		CloseGrace:        cfg.PTYCloseGracePeriod,
 	})
 
 	// Create error reporter for sending VM agent errors to CF observability.

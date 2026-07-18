@@ -2,7 +2,10 @@ package pty
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -144,6 +147,55 @@ func TestStartOutputReader_SetsProcessExitedOnExit(t *testing.T) {
 	if !exited {
 		t.Fatal("expected ProcessExited to be true after process exits")
 	}
+}
+
+func TestCloseEscalatesToKillWhenProcessIgnoresSIGTERM(t *testing.T) {
+	scriptPath := filepath.Join(t.TempDir(), "ignore-term.sh")
+	pidPath := filepath.Join(t.TempDir(), "child.pid")
+	script := "#!/bin/sh\ntrap '' HUP TERM\necho $$ > \"" + pidPath + "\"\nwhile :; do sleep 1; done\n"
+	if err := os.WriteFile(scriptPath, []byte(script), 0o700); err != nil {
+		t.Fatalf("write test shell: %v", err)
+	}
+
+	session, err := NewSession(SessionConfig{
+		ID:               "sess-kill-test",
+		UserID:           "user1",
+		Shell:            scriptPath,
+		Rows:             24,
+		Cols:             80,
+		OutputBufferSize: 1024,
+		CloseGrace:       100 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("failed to create session: %v", err)
+	}
+
+	pid := session.Cmd.Process.Pid
+	if pid <= 0 {
+		t.Fatalf("expected process pid, got %d", pid)
+	}
+
+	if err := session.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	if session.Cmd.ProcessState == nil {
+		t.Fatal("expected process state after forced close")
+	}
+	if session.Cmd.ProcessState.Success() {
+		t.Fatal("expected HUP/TERM-ignoring process to be killed, got successful exit")
+	}
+	if processExists(pid) {
+		t.Fatalf("expected process %d to be gone after Close", pid)
+	}
+}
+
+func processExists(pid int) bool {
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	return proc.Signal(syscall.Signal(0)) == nil
 }
 
 // testWriter is a simple io.Writer for testing that captures written data.
