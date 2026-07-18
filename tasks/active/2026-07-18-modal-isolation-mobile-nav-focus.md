@@ -17,12 +17,12 @@ The shared `Dialog` primitive traps focus and restores opener focus, but it does
 
 ## Implementation checklist
 
-- [ ] Extract reusable modal behavior in `packages/ui` for focus trapping, focus restore, body scroll lock, and background isolation.
-- [ ] Update `Dialog` to use the shared modal behavior while preserving public props and existing Escape/backdrop behavior.
-- [ ] Export the shared primitive/hook in a backward-compatible way for app consumers.
-- [ ] Update `MobileNavDrawer` to use the shared modal behavior or equivalent behavior without changing its visual structure or close animation semantics.
-- [ ] Add Dialog tests for background `inert`/`aria-hidden` isolation, restoration, focus entry, and hidden/disabled focus exclusions.
-- [ ] Add MobileNavDrawer tests for focus trap, focus restoration, body scroll lock, background isolation, Escape/backdrop semantics, inactive panel focus isolation, and mobile-sized rendering where practical.
+- [x] Extract reusable modal behavior in `packages/ui` for focus trapping, focus restore, body scroll lock, and background isolation.
+- [x] Update `Dialog` to use the shared modal behavior while preserving public props and existing Escape/backdrop behavior.
+- [x] Export the shared primitive/hook in a backward-compatible way for app consumers.
+- [x] Update `MobileNavDrawer` to use the shared modal behavior or equivalent behavior without changing its visual structure or close animation semantics.
+- [x] Add Dialog tests for background `inert`/`aria-hidden` isolation, restoration, focus entry, and hidden/disabled focus exclusions.
+- [x] Add MobileNavDrawer tests for focus trap, focus restoration, body scroll lock, background isolation, Escape/backdrop semantics, inactive panel focus isolation, and mobile-sized rendering where practical.
 - [ ] Run targeted UI/web tests and full relevant quality checks.
 - [ ] Run Playwright visual audit for mobile and desktop drawer/dialog behavior and assert no horizontal overflow.
 - [ ] Run specialist reviews: `ui-ux-specialist`, `test-engineer`, `security-auditor`, `constitution-validator`.
