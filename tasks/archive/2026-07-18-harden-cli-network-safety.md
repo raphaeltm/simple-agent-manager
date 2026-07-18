@@ -53,7 +53,7 @@ This PR must be tightly targeted and backward-compatible: remote/production JWKS
 - [x] Add Go tests for HTTPS enforcement and local exceptions.
 - [x] Add Go tests for bounded CLI body reads, including oversized error responses.
 - [x] Run relevant Go tests and repository quality checks.
-- [ ] Archive this task file after validation.
+- [x] Archive this task file after validation.
 
 ## Acceptance criteria
 
