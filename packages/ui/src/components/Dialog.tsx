@@ -1,5 +1,7 @@
-import { type ReactNode, useEffect, useId, useRef } from 'react';
+import { type ReactNode, useId, useRef } from 'react';
 import { createPortal } from 'react-dom';
+
+import { useModalInteraction } from '../hooks/useModalInteraction';
 
 interface DialogProps {
   isOpen: boolean;
@@ -25,15 +27,6 @@ const maxWidthClasses: Record<NonNullable<DialogProps['maxWidth']>, string> = {
   lg: 'max-w-xl',
 };
 
-const focusableSelector = [
-  'a[href]',
-  'button:not([disabled])',
-  'textarea:not([disabled])',
-  'input:not([disabled])',
-  'select:not([disabled])',
-  '[tabindex]:not([tabindex="-1"])',
-].join(',');
-
 export function Dialog({
   isOpen,
   onClose,
@@ -46,73 +39,22 @@ export function Dialog({
 }: DialogProps) {
   const generatedLabelId = useId();
   const dialogRef = useRef<HTMLDivElement>(null);
-  const previouslyFocusedElementRef = useRef<HTMLElement | null>(null);
   const labelledby = ariaLabelledby ?? (!ariaLabel ? generatedLabelId : undefined);
 
 
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (!isOpen) return;
-
-      if (e.key === 'Escape') {
-        onClose();
-        return;
-      }
-
-      if (e.key !== 'Tab') return;
-
-      const dialog = dialogRef.current;
-      if (!dialog) return;
-
-      const focusable = Array.from(dialog.querySelectorAll<HTMLElement>(focusableSelector)).filter(
-        (element) => !element.hasAttribute('disabled') && element.getAttribute('aria-hidden') !== 'true',
-      );
-
-      if (focusable.length === 0) {
-        e.preventDefault();
-        dialog.focus();
-        return;
-      }
-
-      const first = focusable[0];
-      const last = focusable.at(-1);
-      if (!first || !last) return;
-      const active = document.activeElement;
-
-      if (e.shiftKey && (active === first || active === dialog || !dialog.contains(active))) {
-        e.preventDefault();
-        last.focus();
-        return;
-      }
-
-      if (!e.shiftKey && (active === last || !dialog.contains(active))) {
-        e.preventDefault();
-        first.focus();
-      }
-    };
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
-
-  useEffect(() => {
-    if (isOpen) {
-      previouslyFocusedElementRef.current = document.activeElement instanceof HTMLElement
-        ? document.activeElement
-        : null;
-      document.body.style.overflow = 'hidden';
-      dialogRef.current?.focus();
-    } else {
-      document.body.style.overflow = '';
-      previouslyFocusedElementRef.current?.focus();
-      previouslyFocusedElementRef.current = null;
-    }
-    return () => { document.body.style.overflow = ''; };
-  }, [isOpen]);
+  useModalInteraction({
+    enabled: isOpen,
+    modalRef: dialogRef,
+    onEscape: onClose,
+  });
 
   if (!isOpen) return null;
 
   return createPortal(
     <div
+      ref={dialogRef}
+      tabIndex={-1}
+      data-sam-modal-root=""
       className="fixed inset-0 z-dialog-backdrop flex items-center justify-center p-4"
       role="dialog"
       aria-modal="true"
@@ -127,8 +69,6 @@ export function Dialog({
         onClick={onClose}
       />
       <div
-        ref={dialogRef}
-        tabIndex={-1}
         className={`glass-panel-container glass-composited relative w-full max-h-[calc(100dvh-2rem)] flex flex-col rounded-lg glass-modal shadow-overlay ${maxWidthClasses[maxWidth]}`}
       >
         {stickyHeader && (

@@ -36,6 +36,7 @@
     "quality:preflight": "tsx scripts/quality/check-preflight-evidence.ts",
     "quality:wrangler-bindings": "tsx scripts/quality/check-wrangler-bindings.ts",
     "quality:agent-install-manifest": "tsx scripts/quality/check-agent-install-manifest.ts",
+    "quality:skill-references": "tsx scripts/quality/check-skill-references.ts",
     "quality:ast-checks": "tsx scripts/quality/ast-checks.ts",
     "quality:file-sizes": "tsx scripts/quality/check-file-sizes.ts",
     "quality:migration-safety": "tsx scripts/quality/check-migration-safety.ts",
@@ -46,7 +47,8 @@
     "quality:do-wall-time": "tsx scripts/quality/check-do-wall-time.ts",
     "quality:observability-noise": "tsx scripts/quality/check-observability-noise.ts",
     "test:infra": "pnpm --filter @simple-agent-manager/infra test",
-    "prepare": "husky"
+    "prepare": "husky",
+    "quality:migration-ordering": "tsx scripts/quality/check-migration-ordering.ts"
   },
   "dependencies": {
     "@iarna/toml": "2.2.5",

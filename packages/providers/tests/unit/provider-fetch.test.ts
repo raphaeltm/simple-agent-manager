@@ -1,6 +1,10 @@
-import { afterEach,describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { getTimeoutMs,providerFetch } from '../../src/provider-fetch';
+import {
+  getMaxProviderErrorBodyChars,
+  getTimeoutMs,
+  providerFetch,
+} from '../../src/provider-fetch';
 import { ProviderError } from '../../src/types';
 
 describe('getTimeoutMs', () => {
@@ -33,6 +37,18 @@ describe('getTimeoutMs', () => {
   });
 });
 
+describe('getMaxProviderErrorBodyChars', () => {
+  it('returns default for missing or invalid env values', () => {
+    expect(getMaxProviderErrorBodyChars(undefined, 2048)).toBe(2048);
+    expect(getMaxProviderErrorBodyChars('0', 2048)).toBe(2048);
+    expect(getMaxProviderErrorBodyChars('bad', 2048)).toBe(2048);
+  });
+
+  it('parses valid positive integer strings', () => {
+    expect(getMaxProviderErrorBodyChars('1024', 2048)).toBe(1024);
+  });
+});
+
 describe('providerFetch', () => {
   const originalFetch = globalThis.fetch;
 
@@ -41,9 +57,9 @@ describe('providerFetch', () => {
   });
 
   it('returns response on successful fetch', async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ data: 'ok' }), { status: 200 }),
-    );
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(new Response(JSON.stringify({ data: 'ok' }), { status: 200 }));
 
     const response = await providerFetch('test-provider', 'https://api.example.com/test');
     expect(response.ok).toBe(true);
@@ -52,9 +68,11 @@ describe('providerFetch', () => {
   });
 
   it('throws ProviderError on HTTP 4xx with JSON error body', async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ error: { message: 'Unauthorized' } }), { status: 401 }),
-    );
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ error: { message: 'Unauthorized' } }), { status: 401 })
+      );
 
     try {
       await providerFetch('hetzner', 'https://api.example.com/test');
@@ -69,9 +87,9 @@ describe('providerFetch', () => {
   });
 
   it('throws ProviderError on HTTP 5xx with text error body', async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue(
-      new Response('Internal Server Error', { status: 500 }),
-    );
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(new Response('Internal Server Error', { status: 500 }));
 
     try {
       await providerFetch('hetzner', 'https://api.example.com/test');
@@ -86,9 +104,7 @@ describe('providerFetch', () => {
   });
 
   it('throws ProviderError on HTTP error with empty body', async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue(
-      new Response('', { status: 403 }),
-    );
+    globalThis.fetch = vi.fn().mockResolvedValue(new Response('', { status: 403 }));
 
     try {
       await providerFetch('hetzner', 'https://api.example.com/test');
@@ -157,14 +173,60 @@ describe('providerFetch', () => {
         method: 'POST',
         headers: { Authorization: 'Bearer token' },
         body: JSON.stringify({ data: 'test' }),
-      }),
+      })
     );
   });
 
+  it('bounds non-JSON provider error bodies in normalized ProviderError messages', async () => {
+    const longBody = 'provider failure: ' + 'x'.repeat(10_000) + 'DO_NOT_LEAK_TAIL';
+    globalThis.fetch = vi
+      .fn()
+      .mockImplementation(() => Promise.resolve(new Response(longBody, { status: 502 })));
+
+    await expect(providerFetch('hetzner', 'https://api.example.com/test')).rejects.toMatchObject({
+      providerName: 'hetzner',
+      statusCode: 502,
+    });
+
+    try {
+      await providerFetch('hetzner', 'https://api.example.com/test', undefined, undefined, 256);
+      expect.fail('Should have thrown');
+    } catch (err) {
+      const pe = err as ProviderError;
+      expect(pe.message).toContain('provider failure:');
+      expect(pe.message).toContain('truncated');
+      expect(pe.message).not.toContain('DO_NOT_LEAK_TAIL');
+      expect(pe.message.length).toBeLessThan(400);
+    }
+  });
+
+  it('bounds JSON provider error messages in normalized ProviderError messages', async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(
+          JSON.stringify({ error: { message: 'bad ' + 'y'.repeat(10_000), code: 'rate_limit' } }),
+          { status: 429 }
+        )
+      );
+
+    try {
+      await providerFetch('hetzner', 'https://api.example.com/test');
+      expect.fail('Should have thrown');
+    } catch (err) {
+      const pe = err as ProviderError;
+      expect(pe.providerCode).toBe('rate_limit');
+      expect(pe.message).toContain('truncated');
+      expect(pe.message.length).toBeLessThan(4_500);
+    }
+  });
+
   it('extracts message from JSON error with top-level message field', async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ message: 'Rate limited' }), { status: 429 }),
-    );
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ message: 'Rate limited' }), { status: 429 })
+      );
 
     try {
       await providerFetch('hetzner', 'https://api.example.com/test');

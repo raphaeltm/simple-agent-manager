@@ -362,14 +362,16 @@ func (s *Server) newPTYManagerForWorkspace(
 	}
 
 	config := pty.ManagerConfig{
-		DefaultShell:      s.config.DefaultShell,
-		DefaultRows:       s.config.DefaultRows,
-		DefaultCols:       s.config.DefaultCols,
-		WorkDir:           workDir,
-		ContainerResolver: s.ptyManagerContainerResolverForLabel(containerLabelValue),
-		ContainerUser:     resolvedContainerUser,
-		GracePeriod:       s.config.PTYOrphanGracePeriod,
-		BufferSize:        s.config.PTYOutputBufferSize,
+		DefaultShell:       s.config.DefaultShell,
+		DefaultRows:        s.config.DefaultRows,
+		DefaultCols:        s.config.DefaultCols,
+		WorkDir:            workDir,
+		ContainerResolver:  s.ptyManagerContainerResolverForLabel(containerLabelValue),
+		ContainerUser:      resolvedContainerUser,
+		GracePeriod:        s.config.PTYOrphanGracePeriod,
+		BufferSize:         s.config.PTYOutputBufferSize,
+		SessionIDMaxLength: s.config.TerminalSessionIDMaxLength,
+		CloseGrace:         s.config.PTYCloseGracePeriod,
 	}
 
 	manager := pty.NewManager(config)

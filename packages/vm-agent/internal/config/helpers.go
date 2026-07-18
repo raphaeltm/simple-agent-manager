@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/workspace/vm-agent/internal/auth"
 )
 
 // getEnv returns the value of an environment variable or a default.
@@ -200,6 +202,20 @@ func (c *Config) Validate() error {
 		errs = append(errs, fmt.Errorf("CONTROL_PLANE_URL is not a valid URL: %w", err))
 	} else if u.Scheme != "http" && u.Scheme != "https" {
 		errs = append(errs, fmt.Errorf("CONTROL_PLANE_URL must use http or https scheme, got %q", u.Scheme))
+	} else if err := auth.ValidateIssuerURL(c.ControlPlaneURL); err != nil {
+		errs = append(errs, fmt.Errorf("CONTROL_PLANE_URL: %w", err))
+	}
+
+	if c.JWKSEndpoint != "" {
+		if err := auth.ValidateJWKSURL(c.JWKSEndpoint); err != nil {
+			errs = append(errs, fmt.Errorf("JWKS_ENDPOINT: %w", err))
+		}
+	}
+
+	if c.JWTIssuer != "" {
+		if err := auth.ValidateIssuerURL(c.JWTIssuer); err != nil {
+			errs = append(errs, fmt.Errorf("JWT_ISSUER: %w", err))
+		}
 	}
 
 	// TLS cert/key paths must exist when TLS is enabled
@@ -233,6 +249,27 @@ func (c *Config) Validate() error {
 		}
 		if c.WSWriteBufferSize < 1 {
 			errs = append(errs, fmt.Errorf("WS_WRITE_BUFFER_SIZE must be > 0, got %d", c.WSWriteBufferSize))
+		}
+		if c.TerminalWSMaxMessageBytes < 1 {
+			errs = append(errs, fmt.Errorf("TERMINAL_WS_MAX_MESSAGE_BYTES must be > 0, got %d", c.TerminalWSMaxMessageBytes))
+		}
+		if c.TerminalWSReadTimeout <= 0 {
+			errs = append(errs, fmt.Errorf("TERMINAL_WS_READ_TIMEOUT must be > 0, got %s", c.TerminalWSReadTimeout))
+		}
+		if c.TerminalWSPingInterval <= 0 {
+			errs = append(errs, fmt.Errorf("TERMINAL_WS_PING_INTERVAL must be > 0, got %s", c.TerminalWSPingInterval))
+		}
+		if c.TerminalWSPingInterval >= c.TerminalWSReadTimeout {
+			errs = append(errs, fmt.Errorf("TERMINAL_WS_PING_INTERVAL must be less than TERMINAL_WS_READ_TIMEOUT, got %s >= %s", c.TerminalWSPingInterval, c.TerminalWSReadTimeout))
+		}
+		if c.TerminalWSMessageRate < 1 {
+			errs = append(errs, fmt.Errorf("TERMINAL_WS_MESSAGE_RATE must be > 0, got %d", c.TerminalWSMessageRate))
+		}
+		if c.TerminalWSMessageBurst < 1 {
+			errs = append(errs, fmt.Errorf("TERMINAL_WS_MESSAGE_BURST must be > 0, got %d", c.TerminalWSMessageBurst))
+		}
+		if c.TerminalSessionIDMaxLength < 1 {
+			errs = append(errs, fmt.Errorf("TERMINAL_SESSION_ID_MAX_LENGTH must be > 0, got %d", c.TerminalSessionIDMaxLength))
 		}
 	}
 

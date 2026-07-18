@@ -73,6 +73,14 @@ Required GitHub Actions secrets include `CF_API_TOKEN`, `CF_ACCOUNT_ID`, `CF_ZON
 GitHub App secrets use `GH_*` prefix (e.g., `GH_CLIENT_ID`, `GH_WEBHOOK_SECRET`) because GitHub Actions secret names cannot start with `GITHUB_*`. When present, the deploy workflow maps those `GH_*` secrets to `GITHUB_*` Worker secrets. Runtime admin config in D1 is resolved first, then these environment fallbacks, then unset.
 :::
 
+## CLI Environment Variables
+
+These variables affect the local `sam` CLI process only. They are not Worker runtime variables or GitHub Actions secrets.
+
+| Variable                          | Default | Description                                                                 |
+| --------------------------------- | ------- | --------------------------------------------------------------------------- |
+| `SAM_CLI_MAX_API_RESPONSE_BYTES`  | `1048576` | Maximum API response body bytes the CLI reads before truncating/aborting. |
+
 ## Feature Flags
 
 | Variable                         | Default                   | Description                                                                                                                                                                                                                                                                                                                  |

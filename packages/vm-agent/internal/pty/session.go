@@ -2,6 +2,7 @@
 package pty
 
 import (
+	"errors"
 	"io"
 	"log/slog"
 	"os"
@@ -12,6 +13,8 @@ import (
 
 	"github.com/creack/pty"
 )
+
+const defaultCloseGracePeriod = 250 * time.Millisecond
 
 // Session represents a PTY session.
 type Session struct {
@@ -35,6 +38,8 @@ type Session struct {
 	OutputBuffer   *RingBuffer
 	orphanTimer    *time.Timer
 	attachedWriter io.Writer
+	closeGrace     time.Duration
+	waitProcess    func() error
 }
 
 // SessionInfo is a lightweight struct for listing sessions without exposing internals.
@@ -101,6 +106,7 @@ type SessionConfig struct {
 	ContainerUser    string // User to run as inside the container
 	ProcessGroup     bool   // If true, start in a new process group and kill by negative PGID
 	OutputBufferSize int    // Ring buffer capacity in bytes (0 = default)
+	CloseGrace       time.Duration
 }
 
 // NewSession creates a new PTY session.
@@ -174,7 +180,9 @@ func NewSession(cfg SessionConfig) (*Session, error) {
 		LastActive:   now,
 		onClose:      cfg.OnClose,
 		OutputBuffer: NewRingBuffer(cfg.OutputBufferSize),
+		closeGrace:   cfg.CloseGrace,
 	}
+	session.waitProcess = session.defaultWaitProcess
 
 	return session, nil
 }
@@ -251,28 +259,105 @@ func (s *Session) Close() error {
 		s.onClose()
 	}
 
-	// Close PTY
-	if err := s.Pty.Close(); err != nil && err != io.EOF {
+	var closeErr error
+	if s.Pty != nil {
+		if err := s.Pty.Close(); err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, os.ErrClosed) {
+			closeErr = err
+		}
+	}
+
+	if err := s.terminateProcess(); err != nil && closeErr == nil {
+		closeErr = err
+	}
+
+	return closeErr
+}
+
+func (s *Session) terminateProcess() error {
+	if s.Cmd == nil || s.Cmd.Process == nil || s.hasProcessState() {
+		return nil
+	}
+
+	if s.waitProcess == nil {
+		s.waitProcess = s.defaultWaitProcess
+	}
+	waitDone := s.startProcessWait()
+
+	if err := s.signalProcess(syscall.SIGHUP); err != nil && !errors.Is(err, os.ErrProcessDone) && !errors.Is(err, syscall.ESRCH) {
+		slog.Warn("Failed to send SIGHUP to PTY process", "sessionID", s.ID, "pid", s.Cmd.Process.Pid, "error", err)
+	}
+	if err := waitForProcess(waitDone, s.closeGraceDuration()); err == nil || errors.Is(err, os.ErrProcessDone) {
+		return nil
+	}
+
+	if err := s.signalProcess(syscall.SIGTERM); err != nil && !errors.Is(err, os.ErrProcessDone) && !errors.Is(err, syscall.ESRCH) {
+		slog.Warn("Failed to send SIGTERM to PTY process", "sessionID", s.ID, "pid", s.Cmd.Process.Pid, "error", err)
+	}
+	if err := waitForProcess(waitDone, s.closeGraceDuration()); err == nil || errors.Is(err, os.ErrProcessDone) {
+		return nil
+	}
+
+	slog.Warn("PTY process did not exit after graceful signals; escalating to SIGKILL", "sessionID", s.ID, "pid", s.Cmd.Process.Pid)
+	if err := s.signalProcess(syscall.SIGKILL); err != nil && !errors.Is(err, os.ErrProcessDone) && !errors.Is(err, syscall.ESRCH) {
 		return err
 	}
-
-	// Kill process if still running
-	if s.Cmd.Process != nil {
-		if s.Cmd.SysProcAttr != nil && s.Cmd.SysProcAttr.Setpgid {
-			pgid := s.Cmd.Process.Pid
-			if err := syscall.Kill(-pgid, syscall.SIGTERM); err == nil {
-				_, _ = s.Cmd.Process.Wait()
-				return nil
-			}
-		}
-		if s.Cmd.Process != nil {
-			_ = s.Cmd.Process.Kill()
-		}
-		_, _ = s.Cmd.Process.Wait()
+	if err := waitForProcess(waitDone, s.closeGraceDuration()); err != nil && !errors.Is(err, os.ErrProcessDone) {
+		return err
 	}
-
 	return nil
 }
+
+func (s *Session) closeGraceDuration() time.Duration {
+	if s.closeGrace > 0 {
+		return s.closeGrace
+	}
+	return defaultCloseGracePeriod
+}
+
+func (s *Session) signalProcess(signal syscall.Signal) error {
+	if s.Cmd.SysProcAttr != nil && s.Cmd.SysProcAttr.Setpgid {
+		return syscall.Kill(-s.Cmd.Process.Pid, signal)
+	}
+	return s.Cmd.Process.Signal(signal)
+}
+
+func (s *Session) startProcessWait() <-chan error {
+	done := make(chan error, 1)
+	go func() {
+		done <- s.waitProcess()
+	}()
+	return done
+}
+
+func waitForProcess(done <-chan error, timeout time.Duration) error {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
+	select {
+	case err := <-done:
+		return err
+	case <-timer.C:
+		return errProcessWaitTimeout
+	}
+}
+
+func (s *Session) defaultWaitProcess() error {
+	state, err := s.Cmd.Process.Wait()
+	if state != nil {
+		s.mu.Lock()
+		s.Cmd.ProcessState = state
+		s.mu.Unlock()
+	}
+	return err
+}
+
+func (s *Session) hasProcessState() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.Cmd.ProcessState != nil
+}
+
+var errProcessWaitTimeout = errors.New("process wait timed out")
 
 // IsRunning checks if the underlying process is still running.
 func (s *Session) IsRunning() bool {

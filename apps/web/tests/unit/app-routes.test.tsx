@@ -1,8 +1,11 @@
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+const mockUseAuth = vi.fn(() => ({ isSuperadmin: false }));
+
 vi.mock('../../src/components/AuthProvider', () => ({
   AuthProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  useAuth: () => mockUseAuth(),
 }));
 
 vi.mock('../../src/components/ErrorBoundary', () => ({
@@ -18,7 +21,9 @@ vi.mock('../../src/components/ProtectedRoute', () => ({
 }));
 
 vi.mock('../../src/components/AppShell', () => ({
-  AppShell: ({ children }: { children: React.ReactNode }) => <div data-testid="app-shell">{children}</div>,
+  AppShell: ({ children }: { children: React.ReactNode }) => (
+    <div data-testid="app-shell">{children}</div>
+  ),
 }));
 
 vi.mock('../../src/pages/Landing', () => ({
@@ -27,6 +32,69 @@ vi.mock('../../src/pages/Landing', () => ({
 
 vi.mock('../../src/pages/Dashboard', () => ({
   Dashboard: () => <div data-testid="dashboard-page" />,
+}));
+
+vi.mock('../../src/pages/Admin', async () => {
+  const { Outlet } = await import('react-router');
+  return {
+    Admin: () => (
+      <div data-testid="admin-layout">
+        <Outlet />
+      </div>
+    ),
+  };
+});
+
+vi.mock('../../src/pages/AdminUsers', () => ({
+  AdminUsers: () => <div data-testid="admin-users-page" />,
+}));
+
+vi.mock('../../src/pages/AdminPlatformConfig', () => ({
+  AdminPlatformConfig: () => <div data-testid="admin-integrations-page" />,
+}));
+
+vi.mock('../../src/pages/AdminPlatformCredentials', () => ({
+  AdminPlatformCredentials: () => <div data-testid="admin-credentials-page" />,
+}));
+
+vi.mock('../../src/pages/AdminAIProxy', () => ({
+  AdminAIProxy: () => <div data-testid="admin-ai-proxy-page" />,
+}));
+
+vi.mock('../../src/pages/AdminTrials', () => ({
+  AdminTrials: () => <div data-testid="admin-trials-page" />,
+}));
+
+vi.mock('../../src/pages/AdminCosts', () => ({
+  AdminCosts: () => <div data-testid="admin-costs-page" />,
+}));
+
+vi.mock('../../src/pages/AdminComputeUsage', () => ({
+  AdminComputeUsage: () => <div data-testid="admin-usage-page" />,
+}));
+
+vi.mock('../../src/pages/AdminComputeQuotas', () => ({
+  AdminComputeQuotas: () => <div data-testid="admin-quotas-page" />,
+}));
+
+vi.mock('../../src/pages/AdminErrors', () => ({
+  AdminErrors: () => <div data-testid="admin-errors-page" />,
+}));
+
+vi.mock('../../src/pages/AdminOverview', () => ({
+  AdminOverview: () => <div data-testid="admin-overview-page" />,
+}));
+
+vi.mock('../../src/pages/AdminLogs', () => ({
+  AdminLogs: () => <div data-testid="admin-logs-page" />,
+}));
+
+vi.mock('../../src/pages/AdminStream', () => ({
+  AdminStream: () => <div data-testid="admin-stream-page" />,
+}));
+
+vi.mock('../../src/pages/AdminAnalytics', () => ({
+  AdminAnalytics: () => <div data-testid="admin-analytics-page" />,
 }));
 
 vi.mock('../../src/pages/Settings', () => ({
@@ -77,7 +145,11 @@ vi.mock('../../src/pages/Projects', () => ({
 vi.mock('../../src/pages/Project', async () => {
   const { Outlet } = await import('react-router');
   return {
-    Project: () => <div data-testid="project-detail-page"><Outlet /></div>,
+    Project: () => (
+      <div data-testid="project-detail-page">
+        <Outlet />
+      </div>
+    ),
   };
 });
 
@@ -127,6 +199,7 @@ function renderAt(path: string) {
 afterEach(() => {
   cleanup();
   vi.unstubAllEnvs();
+  mockUseAuth.mockReturnValue({ isSuperadmin: false });
 });
 
 describe('App routes', () => {
@@ -168,13 +241,41 @@ describe('App routes', () => {
     expect(screen.getByTestId('ui-standards-page')).toBeInTheDocument();
   });
 
-  it('disables the inventoried dev-only routes under production env flags', () => {
+  it('redirects non-superadmins away from deep-linked admin child routes before child pages render', () => {
+    mockUseAuth.mockReturnValue({ isSuperadmin: false });
+
+    renderAt('/admin/users');
+
+    expect(screen.getByTestId('dashboard-page')).toBeInTheDocument();
+    expect(screen.queryByTestId('admin-layout')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('admin-users-page')).not.toBeInTheDocument();
+  });
+
+  it('renders admin child routes for superadmins', () => {
+    mockUseAuth.mockReturnValue({ isSuperadmin: true });
+
+    renderAt('/admin/users');
+
+    expect(screen.getByTestId('admin-layout')).toBeInTheDocument();
+    expect(screen.getByTestId('admin-users-page')).toBeInTheDocument();
+  });
+
+  it('does not render inventoried dev-only routes under production env flags', () => {
     vi.stubEnv('DEV', false);
     vi.stubEnv('PROD', true);
     vi.stubEnv('MODE', 'production');
 
     expect(DEV_ONLY_ROUTE_PATHS).toEqual(['/sam', '/__test/trial-chat-gate', '/ui-standards']);
     expect(devOnlyRoutesEnabled()).toBe(false);
-  });
 
+    for (const routePath of DEV_ONLY_ROUTE_PATHS) {
+      cleanup();
+      renderAt(routePath);
+
+      expect(screen.getByTestId('landing-page')).toBeInTheDocument();
+      expect(screen.queryByTestId('sam-prototype-page')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('trial-chat-gate-harness-page')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('ui-standards-page')).not.toBeInTheDocument();
+    }
+  });
 });

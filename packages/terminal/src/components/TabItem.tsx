@@ -91,9 +91,11 @@ const nameEditorStyle: React.CSSProperties = {
 export const TabItem: React.FC<TabItemProps> = ({
   session,
   isActive,
+  tabIndex,
   onActivate,
   onClose,
   onRename,
+  onKeyDown,
 }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState(session.name);
@@ -140,7 +142,11 @@ export const TabItem: React.FC<TabItemProps> = ({
     }
   };
 
-  const handleTabKeyDown = (e: React.KeyboardEvent) => {
+  const handleTabKeyDown = (e: React.KeyboardEvent<HTMLElement>) => {
+    onKeyDown?.(e, session.id);
+
+    if (e.defaultPrevented) return;
+
     if (e.key === 'Enter' || e.key === ' ') {
       if (!isActive && !isEditing) {
         e.preventDefault();
@@ -168,7 +174,7 @@ export const TabItem: React.FC<TabItemProps> = ({
       role="tab"
       aria-selected={isActive}
       aria-label={`Terminal tab: ${session.name}`}
-      tabIndex={0}
+      tabIndex={tabIndex}
       data-session-id={session.id}
     >
       {/* Active indicator bar */}
