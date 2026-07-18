@@ -24,7 +24,7 @@ The shared `Dialog` primitive traps focus and restores opener focus, but it does
 - [x] Add Dialog tests for background `inert`/`aria-hidden` isolation, restoration, focus entry, and hidden/disabled focus exclusions.
 - [x] Add MobileNavDrawer tests for focus trap, focus restoration, body scroll lock, background isolation, Escape/backdrop semantics, inactive panel focus isolation, and mobile-sized rendering where practical.
 - [ ] Run targeted UI/web tests and full relevant quality checks.
-- [ ] Run Playwright visual audit for mobile and desktop drawer/dialog behavior and assert no horizontal overflow.
+- [x] Run Playwright visual audit for mobile and desktop drawer/dialog behavior and assert no horizontal overflow.
 - [ ] Run specialist reviews: `ui-ux-specialist`, `test-engineer`, `security-auditor`, `constitution-validator`.
 - [ ] Create a non-breaking PR and do not merge it.
 
