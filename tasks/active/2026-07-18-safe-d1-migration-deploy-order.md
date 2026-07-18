@@ -21,11 +21,11 @@ This is a non-breaking remediation task: preserve existing staging and productio
 
 ## Implementation checklist
 
-- [ ] Move the existing D1 backup, pre-migration row count, migration apply, and post-migration integrity verification block before the first API Worker deploy in `.github/workflows/deploy-reusable.yml`.
-- [ ] Preserve first-deploy tail worker behavior: initial API deploy still occurs before tail worker, tail worker deploy still occurs before first-deploy API re-sync/redeploy with `tail_consumers`.
-- [ ] Preserve web deployment and worker secret configuration semantics.
-- [ ] Add/extend CI-friendly static workflow tests proving migrations complete before any API Worker deploy can serve new code.
-- [ ] Run targeted workflow quality tests.
+- [x] Move the existing D1 backup, pre-migration row count, migration apply, and post-migration integrity verification block before the first API Worker deploy in `.github/workflows/deploy-reusable.yml`.
+- [x] Preserve first-deploy tail worker behavior: initial API deploy still occurs before tail worker, tail worker deploy still occurs before first-deploy API re-sync/redeploy with `tail_consumers`.
+- [x] Preserve web deployment and worker secret configuration semantics.
+- [x] Add/extend CI-friendly static workflow tests proving migrations complete before any API Worker deploy can serve new code.
+- [x] Run targeted workflow quality tests.
 - [ ] Run relevant full quality checks.
 - [ ] Complete requested specialist reviews: cloudflare-specialist, env-validator, doc-sync-validator, constitution-validator, test-engineer.
 - [ ] Push the output branch and open a PR that states no breaking changes and includes test evidence.
