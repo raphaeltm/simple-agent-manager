@@ -128,6 +128,10 @@ async function setupApiMocks(
       return route.fulfill({ json: { notifications: [], total: 0 } });
     }
 
+    if (url.includes('/api/projects') && !url.includes('/api/projects/')) {
+      return route.fulfill({ json: { projects: [], total: 0 } });
+    }
+
     // New D1-backed cross-project endpoint (used by useAllChatSessions)
     if (url.includes('/api/chats') && !url.includes('/recent')) {
       if (options.error) {
