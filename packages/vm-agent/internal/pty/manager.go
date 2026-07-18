@@ -31,6 +31,7 @@ type Manager struct {
 	gracePeriod        time.Duration // How long orphaned sessions survive before cleanup (0 = disabled)
 	bufferSize         int           // Output ring buffer capacity per session in bytes
 	sessionIDMaxLength int           // Maximum client-supplied session ID length
+	closeGrace         time.Duration // Bounded wait after graceful PTY close signals
 }
 
 // ManagerConfig holds configuration for the session manager.
@@ -46,6 +47,7 @@ type ManagerConfig struct {
 	GracePeriod        time.Duration // How long orphaned sessions survive before cleanup (0 = disabled)
 	BufferSize         int           // Output ring buffer capacity per session in bytes
 	SessionIDMaxLength int           // Maximum client-supplied session ID length (0 = default)
+	CloseGrace         time.Duration // Bounded wait after graceful PTY close signals
 }
 
 // NewManager creates a new session manager.
@@ -75,6 +77,7 @@ func NewManager(cfg ManagerConfig) *Manager {
 		gracePeriod:        gracePeriod,
 		bufferSize:         bufferSize,
 		sessionIDMaxLength: sessionIDMaxLength,
+		closeGrace:         cfg.CloseGrace,
 	}
 }
 
@@ -128,6 +131,7 @@ func (m *Manager) CreateSessionWithID(sessionID, userID string, rows, cols int, 
 		ContainerUser:    m.containerUser,
 		ProcessGroup:     m.processGroup,
 		OutputBufferSize: m.bufferSize,
+		CloseGrace:       m.closeGrace,
 	})
 	if err != nil {
 		return nil, err

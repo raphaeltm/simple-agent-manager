@@ -343,6 +343,7 @@ func New(cfg *config.Config) (*Server, error) {
 		GracePeriod:        cfg.PTYOrphanGracePeriod,
 		BufferSize:         cfg.PTYOutputBufferSize,
 		SessionIDMaxLength: cfg.TerminalSessionIDMaxLength,
+		CloseGrace:         cfg.PTYCloseGracePeriod,
 	})
 
 	// Create error reporter for sending VM agent errors to CF observability.

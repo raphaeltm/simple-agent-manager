@@ -231,7 +231,15 @@ func (s *Server) handleTerminalWS(w http.ResponseWriter, r *http.Request) {
 		_ = conn.WriteJSON(wsMessage{Type: "error", Data: json.RawMessage(`"Failed to create terminal session"`)})
 		return
 	}
-	defer runtime.PTY.CloseSession(ptySession.ID)
+	var closeSessionOnce sync.Once
+	closeSession := func() {
+		closeSessionOnce.Do(func() {
+			if err := runtime.PTY.CloseSession(ptySession.ID); err != nil {
+				slog.Warn("Failed to close single-terminal PTY session", "sessionID", ptySession.ID, "error", err)
+			}
+		})
+	}
+	defer closeSession()
 
 	s.appendNodeEvent(workspaceID, "info", "terminal.session_open", "Terminal session opened", map[string]interface{}{"sessionId": ptySession.ID})
 
@@ -310,7 +318,7 @@ func (s *Server) handleTerminalWS(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	_ = runtime.PTY.CloseSession(ptySession.ID)
+	closeSession()
 	<-done
 }
 

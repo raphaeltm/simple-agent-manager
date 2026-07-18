@@ -371,6 +371,7 @@ func (s *Server) newPTYManagerForWorkspace(
 		GracePeriod:        s.config.PTYOrphanGracePeriod,
 		BufferSize:         s.config.PTYOutputBufferSize,
 		SessionIDMaxLength: s.config.TerminalSessionIDMaxLength,
+		CloseGrace:         s.config.PTYCloseGracePeriod,
 	}
 
 	manager := pty.NewManager(config)

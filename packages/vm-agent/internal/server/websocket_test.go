@@ -127,6 +127,75 @@ func readMsgOfType(t *testing.T, conn *websocket.Conn, expected MessageType) Bas
 	return BaseMessage{}
 }
 
+func TestTerminalWS_DisconnectClosesSingleSession(t *testing.T) {
+	cfg := &config.Config{
+		AllowedOrigins:    []string{"*"},
+		WSReadBufferSize:  4096,
+		WSWriteBufferSize: 4096,
+		DefaultShell:      "/bin/sh",
+		DefaultRows:       24,
+		DefaultCols:       80,
+	}
+	sm := auth.NewSessionManager("session", false, 1*time.Hour)
+	sess, err := sm.CreateSession(&auth.Claims{
+		RegisteredClaims: jwt.RegisteredClaims{Subject: "test-user"},
+	})
+	if err != nil {
+		t.Fatalf("create auth session: %v", err)
+	}
+	ptm := pty.NewManager(pty.ManagerConfig{
+		DefaultShell: "/bin/sh",
+		DefaultRows:  24,
+		DefaultCols:  80,
+		BufferSize:   4096,
+	})
+	s := &Server{
+		config:         cfg,
+		sessionManager: sm,
+		ptyManager:     ptm,
+		done:           make(chan struct{}),
+	}
+	ts := httptest.NewServer(http.HandlerFunc(s.handleTerminalWS))
+	t.Cleanup(func() {
+		ts.Close()
+		ptm.CloseAllSessions()
+	})
+
+	conn := dialWS(t, ts, sess.ID)
+	readMsgOfType(t, conn, MessageTypeSession)
+	runtime := s.workspaceRuntimeForTest("default")
+	if runtime == nil {
+		t.Fatal("expected default workspace runtime")
+	}
+	if got := runtime.PTY.SessionCount(); got != 1 {
+		t.Fatalf("expected one single-terminal PTY session, got %d", got)
+	}
+
+	if err := conn.Close(); err != nil {
+		t.Fatalf("close websocket: %v", err)
+	}
+
+	waitUntil(t, func() bool { return runtime.PTY.SessionCount() == 0 }, "single-terminal session cleanup")
+}
+
+func (s *Server) workspaceRuntimeForTest(workspaceID string) *WorkspaceRuntime {
+	s.workspaceMu.Lock()
+	defer s.workspaceMu.Unlock()
+	return s.workspaces[workspaceID]
+}
+
+func waitUntil(t *testing.T, condition func() bool, description string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if condition() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %s", description)
+}
+
 func TestMultiTerminalWS_CreateAndListSessions(t *testing.T) {
 	_, ts, authSessionID := newTestServer(t)
 

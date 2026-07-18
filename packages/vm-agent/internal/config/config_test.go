@@ -271,6 +271,20 @@ func TestPTYOrphanGracePeriodOverride(t *testing.T) {
 	}
 }
 
+func TestPTYCloseGracePeriodOverride(t *testing.T) {
+	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+	t.Setenv("WORKSPACE_ID", "ws-123")
+	t.Setenv("PTY_CLOSE_GRACE_PERIOD", "750ms")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.PTYCloseGracePeriod != 750*time.Millisecond {
+		t.Fatalf("PTYCloseGracePeriod=%v, want %v", cfg.PTYCloseGracePeriod, 750*time.Millisecond)
+	}
+}
+
 func TestDeriveBaseDomain(t *testing.T) {
 	t.Parallel()
 
