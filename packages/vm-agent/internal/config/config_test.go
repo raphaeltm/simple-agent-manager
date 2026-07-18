@@ -621,6 +621,87 @@ func TestValidateInvalidPort(t *testing.T) {
 	}
 }
 
+func TestValidateRejectsRemoteHTTPControlPlaneURL(t *testing.T) {
+	t.Parallel()
+	cfg := validConfig()
+	cfg.ControlPlaneURL = "http://api.example.com"
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected remote HTTP control plane URL to be rejected")
+	}
+	if !strings.Contains(err.Error(), "CONTROL_PLANE_URL") || !strings.Contains(err.Error(), "https") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateAllowsLocalHTTPControlPlaneURL(t *testing.T) {
+	t.Parallel()
+
+	for _, controlPlaneURL := range []string{"http://localhost:8787", "http://127.0.0.1:8787", "http://[::1]:8787"} {
+		controlPlaneURL := controlPlaneURL
+		t.Run(controlPlaneURL, func(t *testing.T) {
+			t.Parallel()
+			cfg := validConfig()
+			cfg.ControlPlaneURL = controlPlaneURL
+			if err := cfg.Validate(); err != nil {
+				t.Fatalf("Validate() returned error: %v", err)
+			}
+		})
+	}
+}
+
+func TestValidateRejectsRemoteHTTPJWKSAndIssuerURLs(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		mutate func(*Config)
+		want   string
+	}{
+		{
+			name: "jwks endpoint",
+			mutate: func(cfg *Config) {
+				cfg.JWKSEndpoint = "http://api.example.com/.well-known/jwks.json"
+			},
+			want: "JWKS_ENDPOINT",
+		},
+		{
+			name: "url issuer",
+			mutate: func(cfg *Config) {
+				cfg.JWTIssuer = "http://api.example.com"
+			},
+			want: "JWT_ISSUER",
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := validConfig()
+			tc.mutate(cfg)
+			err := cfg.Validate()
+			if err == nil {
+				t.Fatal("expected validation error")
+			}
+			if !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), "https") {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestValidateAllowsLocalHTTPJWKSAndPlainIssuer(t *testing.T) {
+	t.Parallel()
+	cfg := validConfig()
+	cfg.ControlPlaneURL = "http://localhost:8787"
+	cfg.JWKSEndpoint = "http://127.0.0.1:8787/.well-known/jwks.json"
+	cfg.JWTIssuer = "test-issuer"
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() returned error: %v", err)
+	}
+}
+
 func TestValidateInvalidControlPlaneURL(t *testing.T) {
 	t.Parallel()
 	cfg := validConfig()

@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/workspace/vm-agent/internal/auth"
 )
 
 // getEnv returns the value of an environment variable or a default.
@@ -200,6 +202,20 @@ func (c *Config) Validate() error {
 		errs = append(errs, fmt.Errorf("CONTROL_PLANE_URL is not a valid URL: %w", err))
 	} else if u.Scheme != "http" && u.Scheme != "https" {
 		errs = append(errs, fmt.Errorf("CONTROL_PLANE_URL must use http or https scheme, got %q", u.Scheme))
+	} else if err := auth.ValidateIssuerURL(c.ControlPlaneURL); err != nil {
+		errs = append(errs, fmt.Errorf("CONTROL_PLANE_URL: %w", err))
+	}
+
+	if c.JWKSEndpoint != "" {
+		if err := auth.ValidateJWKSURL(c.JWKSEndpoint); err != nil {
+			errs = append(errs, fmt.Errorf("JWKS_ENDPOINT: %w", err))
+		}
+	}
+
+	if c.JWTIssuer != "" {
+		if err := auth.ValidateIssuerURL(c.JWTIssuer); err != nil {
+			errs = append(errs, fmt.Errorf("JWT_ISSUER: %w", err))
+		}
 	}
 
 	// TLS cert/key paths must exist when TLS is enabled
