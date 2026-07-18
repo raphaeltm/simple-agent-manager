@@ -17,15 +17,15 @@ Prior CLI/VM/Go and security audits identified a narrow hardening gap in the VM-
 
 ## Checklist
 
-- [ ] Add configurable terminal WebSocket read/message limits with defaults and config validation.
-- [ ] Add configurable terminal WebSocket heartbeat/read deadline behavior with defaults and config validation.
-- [ ] Add configurable per-connection message rate limiting with defaults and config validation.
-- [ ] Validate client-supplied terminal session IDs at the WebSocket edge and PTY manager boundary.
-- [ ] Preserve legitimate existing ID forms used by the current client and tests, including simple hyphenated IDs.
-- [ ] Keep public terminal protocol fields backward-compatible.
-- [ ] Add Go tests for accepted and rejected terminal session IDs.
-- [ ] Add Go tests for oversized or invalid WebSocket input behavior.
-- [ ] Add Go tests for heartbeat/read deadline behavior where feasible without flaky sleeps.
+- [x] Add configurable terminal WebSocket read/message limits with defaults and config validation.
+- [x] Add configurable terminal WebSocket heartbeat/read deadline behavior with defaults and config validation.
+- [x] Add configurable per-connection message rate limiting with defaults and config validation.
+- [x] Validate client-supplied terminal session IDs at the WebSocket edge and PTY manager boundary.
+- [x] Preserve legitimate existing ID forms used by the current client and tests, including simple hyphenated IDs.
+- [x] Keep public terminal protocol fields backward-compatible.
+- [x] Add Go tests for accepted and rejected terminal session IDs.
+- [x] Add Go tests for oversized or invalid WebSocket input behavior.
+- [x] Add Go tests for heartbeat/read deadline behavior where feasible without flaky sleeps.
 - [ ] Run focused VM-agent Go tests.
 - [ ] Run repository quality checks required by `/do`.
 - [ ] Run local specialist reviews: go-specialist, security-auditor, test-engineer, constitution-validator, task-completion-validator.
@@ -47,3 +47,4 @@ Prior CLI/VM/Go and security audits identified a narrow hardening gap in the VM-
 - SAM task: `01KXT2X95TV8FRYDTVFC9F0C7P`
 - Audit tasks: `01KXT1F6JSDV3J5CJ22TGXRGAV`, `01KXT25E7FSNR952HMGACHSQE9`
 - Relevant sessions: `fd408b7a-4b2e-4684-a290-285d03a88d63`, `14d1b5ba-f76e-4f21-9d54-324a8095a486`
+- Implementation slice tests: go test ./internal/pty ./internal/server PASS.

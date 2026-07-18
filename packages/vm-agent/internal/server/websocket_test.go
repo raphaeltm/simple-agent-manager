@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -21,9 +22,14 @@ func newTestServer(t *testing.T) (*Server, *httptest.Server, string) {
 	t.Helper()
 
 	cfg := &config.Config{
-		AllowedOrigins:    []string{"*"},
-		WSReadBufferSize:  4096,
-		WSWriteBufferSize: 4096,
+		AllowedOrigins:            []string{"*"},
+		WSReadBufferSize:          4096,
+		WSWriteBufferSize:         4096,
+		TerminalWSMaxMessageBytes: config.DefaultTerminalWSMaxMessageBytes,
+		TerminalWSReadTimeout:     config.DefaultTerminalWSReadTimeout,
+		TerminalWSPingInterval:    config.DefaultTerminalWSPingInterval,
+		TerminalWSMessageRate:     config.DefaultTerminalWSMessageRate,
+		TerminalWSMessageBurst:    config.DefaultTerminalWSMessageBurst,
 	}
 
 	sm := auth.NewSessionManager("session", false, 1*time.Hour)
@@ -424,4 +430,139 @@ func mustMarshal(v interface{}) json.RawMessage {
 		panic(err)
 	}
 	return data
+}
+
+func TestTerminalSessionIDValidation(t *testing.T) {
+	accepted := []string{
+		"sess-1",
+		"terminal_01KXT3458SYZYQKYJ5KVN5J591",
+		"01KXT3458SYZYQKYJ5KVN5J591",
+		"tab.v2:abc-123_DEF",
+		strings.Repeat("a", 128),
+	}
+	for _, sessionID := range accepted {
+		if err := validateTerminalSessionID(sessionID); err != nil {
+			t.Fatalf("expected %q to be accepted: %v", sessionID, err)
+		}
+	}
+
+	rejected := []string{
+		"",
+		"../escape",
+		"sess 1",
+		"sess/1",
+		"sess$1",
+		"sess\n1",
+		strings.Repeat("a", 129),
+	}
+	for _, sessionID := range rejected {
+		if err := validateTerminalSessionID(sessionID); err == nil {
+			t.Fatalf("expected %q to be rejected", sessionID)
+		}
+	}
+}
+
+func TestMultiTerminalWSRejectsInvalidCreateSessionID(t *testing.T) {
+	s, ts, authSessionID := newTestServer(t)
+
+	conn := dialWS(t, ts, authSessionID)
+	defer conn.Close()
+
+	sendJSON(t, conn, wsMessage{
+		Type: "create_session",
+		Data: mustMarshal(wsCreateSessionData{
+			SessionID: "../bad",
+			Rows:      24,
+			Cols:      80,
+		}),
+	})
+
+	errMsg := readMsgOfType(t, conn, MessageTypeError)
+	if errMsg.SessionID != "../bad" {
+		t.Fatalf("expected invalid session ID echoed in error, got %q", errMsg.SessionID)
+	}
+	if s.ptyManager.SessionCount() != 0 {
+		t.Fatalf("expected no PTY session for invalid ID, got %d", s.ptyManager.SessionCount())
+	}
+}
+
+func TestMultiTerminalWSClosesOversizedMessage(t *testing.T) {
+	s, ts, authSessionID := newTestServer(t)
+	s.config.TerminalWSMaxMessageBytes = 64
+
+	conn := dialWS(t, ts, authSessionID)
+	defer conn.Close()
+
+	oversized := strings.Repeat("x", 256)
+	if err := conn.WriteMessage(websocket.TextMessage, []byte(oversized)); err != nil {
+		t.Fatalf("write oversized message: %v", err)
+	}
+
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_, _, err := conn.ReadMessage()
+	if err == nil {
+		t.Fatal("expected oversized message to close the websocket")
+	}
+}
+
+func TestMultiTerminalWSClosesWhenMessageRateExceeded(t *testing.T) {
+	s, ts, authSessionID := newTestServer(t)
+	s.config.TerminalWSMessageRate = 1
+	s.config.TerminalWSMessageBurst = 1
+
+	conn := dialWS(t, ts, authSessionID)
+	defer conn.Close()
+
+	sendJSON(t, conn, wsMessage{Type: "list_sessions"})
+	sendJSON(t, conn, wsMessage{Type: "list_sessions"})
+
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	for {
+		_, _, err := conn.ReadMessage()
+		if err != nil {
+			return
+		}
+	}
+}
+
+func TestMultiTerminalWSSendsHeartbeatPing(t *testing.T) {
+	s, ts, authSessionID := newTestServer(t)
+	s.config.TerminalWSReadTimeout = 500 * time.Millisecond
+	s.config.TerminalWSPingInterval = 50 * time.Millisecond
+
+	conn := dialWS(t, ts, authSessionID)
+	defer conn.Close()
+
+	var pingCount atomic.Int32
+	conn.SetPingHandler(func(appData string) error {
+		pingCount.Add(1)
+		deadline := time.Now().Add(time.Second)
+		return conn.WriteControl(websocket.PongMessage, []byte(appData), deadline)
+	})
+
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+		_, _, _ = conn.ReadMessage()
+		if pingCount.Load() > 0 {
+			return
+		}
+	}
+	t.Fatal("expected server heartbeat ping")
+}
+
+func TestMultiTerminalWSReadDeadlineClosesSilentPeer(t *testing.T) {
+	s, ts, authSessionID := newTestServer(t)
+	s.config.TerminalWSReadTimeout = 120 * time.Millisecond
+	s.config.TerminalWSPingInterval = 40 * time.Millisecond
+
+	conn := dialWS(t, ts, authSessionID)
+	defer conn.Close()
+
+	conn.SetPingHandler(func(string) error { return nil })
+	conn.SetReadDeadline(time.Now().Add(time.Second))
+	_, _, err := conn.ReadMessage()
+	if err == nil {
+		t.Fatal("expected silent peer to be closed after read deadline")
+	}
 }

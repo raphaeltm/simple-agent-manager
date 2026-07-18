@@ -132,7 +132,26 @@ func (m *Manager) CreateSessionWithID(sessionID, userID string, rows, cols int, 
 	return session, nil
 }
 
+func ValidateSessionID(sessionID string) error {
+	if sessionID == "" {
+		return fmt.Errorf("session ID is required")
+	}
+	if len(sessionID) > 128 {
+		return fmt.Errorf("session ID too long")
+	}
+	for _, r := range sessionID {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' || r == '.' || r == ':' {
+			continue
+		}
+		return fmt.Errorf("session ID contains invalid character %q", r)
+	}
+	return nil
+}
+
 func (m *Manager) canCreateSession(sessionID, userID string) error {
+	if err := ValidateSessionID(sessionID); err != nil {
+		return err
+	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	if _, exists := m.sessions[sessionID]; exists {

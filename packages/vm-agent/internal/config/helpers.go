@@ -234,6 +234,24 @@ func (c *Config) Validate() error {
 		if c.WSWriteBufferSize < 1 {
 			errs = append(errs, fmt.Errorf("WS_WRITE_BUFFER_SIZE must be > 0, got %d", c.WSWriteBufferSize))
 		}
+		if c.TerminalWSMaxMessageBytes < 1 {
+			errs = append(errs, fmt.Errorf("TERMINAL_WS_MAX_MESSAGE_BYTES must be > 0, got %d", c.TerminalWSMaxMessageBytes))
+		}
+		if c.TerminalWSReadTimeout <= 0 {
+			errs = append(errs, fmt.Errorf("TERMINAL_WS_READ_TIMEOUT must be > 0, got %s", c.TerminalWSReadTimeout))
+		}
+		if c.TerminalWSPingInterval <= 0 {
+			errs = append(errs, fmt.Errorf("TERMINAL_WS_PING_INTERVAL must be > 0, got %s", c.TerminalWSPingInterval))
+		}
+		if c.TerminalWSPingInterval >= c.TerminalWSReadTimeout {
+			errs = append(errs, fmt.Errorf("TERMINAL_WS_PING_INTERVAL must be less than TERMINAL_WS_READ_TIMEOUT, got %s >= %s", c.TerminalWSPingInterval, c.TerminalWSReadTimeout))
+		}
+		if c.TerminalWSMessageRate < 1 {
+			errs = append(errs, fmt.Errorf("TERMINAL_WS_MESSAGE_RATE must be > 0, got %d", c.TerminalWSMessageRate))
+		}
+		if c.TerminalWSMessageBurst < 1 {
+			errs = append(errs, fmt.Errorf("TERMINAL_WS_MESSAGE_BURST must be > 0, got %d", c.TerminalWSMessageBurst))
+		}
 	}
 
 	return errors.Join(errs...)

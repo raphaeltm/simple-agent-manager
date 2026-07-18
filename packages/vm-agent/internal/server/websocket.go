@@ -8,9 +8,12 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/workspace/vm-agent/internal/config"
 	"github.com/workspace/vm-agent/internal/persistence"
+	"github.com/workspace/vm-agent/internal/pty"
 )
 
 func (s *Server) createUpgrader() websocket.Upgrader {
@@ -95,6 +98,88 @@ type wsWriter struct {
 	conn      *websocket.Conn
 	writeMu   *sync.Mutex
 	sessionID string
+}
+
+type terminalWSLimiter struct {
+	rate       int
+	burst      int
+	tokens     int
+	lastRefill time.Time
+}
+
+func newTerminalWSLimiter(rate, burst int) *terminalWSLimiter {
+	if rate <= 0 {
+		rate = config.DefaultTerminalWSMessageRate
+	}
+	if burst <= 0 {
+		burst = config.DefaultTerminalWSMessageBurst
+	}
+	return &terminalWSLimiter{rate: rate, burst: burst, tokens: burst, lastRefill: time.Now()}
+}
+
+func (l *terminalWSLimiter) allow(now time.Time) bool {
+	if l == nil {
+		return true
+	}
+	elapsed := now.Sub(l.lastRefill)
+	if elapsed > 0 {
+		refill := int(elapsed.Seconds() * float64(l.rate))
+		if refill > 0 {
+			l.tokens += refill
+			if l.tokens > l.burst {
+				l.tokens = l.burst
+			}
+			l.lastRefill = now
+		}
+	}
+	if l.tokens <= 0 {
+		return false
+	}
+	l.tokens--
+	return true
+}
+
+func (s *Server) configureTerminalWebSocket(conn *websocket.Conn, writeMu *sync.Mutex) func() {
+	maxMessageBytes := s.config.TerminalWSMaxMessageBytes
+	if maxMessageBytes <= 0 {
+		maxMessageBytes = config.DefaultTerminalWSMaxMessageBytes
+	}
+	readTimeout := s.config.TerminalWSReadTimeout
+	if readTimeout <= 0 {
+		readTimeout = config.DefaultTerminalWSReadTimeout
+	}
+	pingInterval := s.config.TerminalWSPingInterval
+	if pingInterval <= 0 {
+		pingInterval = config.DefaultTerminalWSPingInterval
+	}
+	conn.SetReadLimit(maxMessageBytes)
+	_ = conn.SetReadDeadline(time.Now().Add(readTimeout))
+	conn.SetPongHandler(func(string) error {
+		return conn.SetReadDeadline(time.Now().Add(readTimeout))
+	})
+	stop := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(pingInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				writeMu.Lock()
+				err := conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(5*time.Second))
+				writeMu.Unlock()
+				if err != nil {
+					return
+				}
+			case <-stop:
+				return
+			}
+		}
+	}()
+	return func() { close(stop) }
+}
+
+func validateTerminalSessionID(sessionID string) error {
+	return pty.ValidateSessionID(sessionID)
 }
 
 func (w *wsWriter) Write(p []byte) (int, error) {
@@ -242,6 +327,9 @@ func (s *Server) handleTerminalWS(w http.ResponseWriter, r *http.Request) {
 	_ = conn.WriteJSON(wsMessage{Type: "session", Data: sessionData})
 
 	var writeMu sync.Mutex
+	stopHeartbeat := s.configureTerminalWebSocket(conn, &writeMu)
+	defer stopHeartbeat()
+	limiter := newTerminalWSLimiter(s.config.TerminalWSMessageRate, s.config.TerminalWSMessageBurst)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -270,6 +358,12 @@ func (s *Server) handleTerminalWS(w http.ResponseWriter, r *http.Request) {
 	for {
 		_, message, err := conn.ReadMessage()
 		if err != nil {
+			break
+		}
+		if !limiter.allow(time.Now()) {
+			writeMu.Lock()
+			_ = conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.ClosePolicyViolation, "rate limit exceeded"))
+			writeMu.Unlock()
 			break
 		}
 
@@ -328,6 +422,9 @@ func (s *Server) handleMultiTerminalWS(w http.ResponseWriter, r *http.Request) {
 	attachedSessions := make(map[string]struct{})
 	var asMu sync.Mutex
 	var writeMu sync.Mutex
+	stopHeartbeat := s.configureTerminalWebSocket(conn, &writeMu)
+	defer stopHeartbeat()
+	limiter := newTerminalWSLimiter(s.config.TerminalWSMessageRate, s.config.TerminalWSMessageBurst)
 
 	defer func() {
 		asMu.Lock()
@@ -371,6 +468,12 @@ func (s *Server) handleMultiTerminalWS(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			break
 		}
+		if !limiter.allow(time.Now()) {
+			writeMu.Lock()
+			_ = conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.ClosePolicyViolation, "rate limit exceeded"))
+			writeMu.Unlock()
+			break
+		}
 
 		var msg wsMessage
 		if err := json.Unmarshal(message, &msg); err != nil {
@@ -398,6 +501,10 @@ func (s *Server) handleMultiTerminalWS(w http.ResponseWriter, r *http.Request) {
 		case "reattach_session":
 			var data wsReattachSessionData
 			if err := json.Unmarshal(msg.Data, &data); err != nil {
+				continue
+			}
+			if err := validateTerminalSessionID(data.SessionID); err != nil {
+				sendSessionError(data.SessionID, "invalid session ID")
 				continue
 			}
 
@@ -445,6 +552,10 @@ func (s *Server) handleMultiTerminalWS(w http.ResponseWriter, r *http.Request) {
 		case "create_session":
 			var data wsCreateSessionData
 			if err := json.Unmarshal(msg.Data, &data); err != nil {
+				continue
+			}
+			if err := validateTerminalSessionID(data.SessionID); err != nil {
+				sendSessionError(data.SessionID, "invalid session ID")
 				continue
 			}
 			requestedWorkDir := strings.TrimSpace(data.WorkDir)
@@ -536,6 +647,10 @@ func (s *Server) handleMultiTerminalWS(w http.ResponseWriter, r *http.Request) {
 			if err := json.Unmarshal(msg.Data, &data); err != nil {
 				continue
 			}
+			if err := validateTerminalSessionID(data.SessionID); err != nil {
+				sendSessionError(data.SessionID, "invalid session ID")
+				continue
+			}
 
 			ptySession := runtime.PTY.GetSession(data.SessionID)
 			if ptySession == nil {
@@ -582,6 +697,12 @@ func (s *Server) handleMultiTerminalWS(w http.ResponseWriter, r *http.Request) {
 				}
 				asMu.Unlock()
 			}
+			if sessionID != "" {
+				if err := validateTerminalSessionID(sessionID); err != nil {
+					sendSessionError(sessionID, "invalid session ID")
+					continue
+				}
+			}
 
 			var input wsInputData
 			if err := json.Unmarshal(msg.Data, &input); err != nil {
@@ -607,6 +728,12 @@ func (s *Server) handleMultiTerminalWS(w http.ResponseWriter, r *http.Request) {
 				}
 				asMu.Unlock()
 			}
+			if sessionID != "" {
+				if err := validateTerminalSessionID(sessionID); err != nil {
+					sendSessionError(sessionID, "invalid session ID")
+					continue
+				}
+			}
 
 			var resize wsResizeData
 			if err := json.Unmarshal(msg.Data, &resize); err != nil {
@@ -627,6 +754,10 @@ func (s *Server) handleMultiTerminalWS(w http.ResponseWriter, r *http.Request) {
 		case "rename_session":
 			var data wsRenameSessionData
 			if err := json.Unmarshal(msg.Data, &data); err != nil {
+				continue
+			}
+			if err := validateTerminalSessionID(data.SessionID); err != nil {
+				sendSessionError(data.SessionID, "invalid session ID")
 				continue
 			}
 			ptySession := runtime.PTY.GetSession(data.SessionID)
