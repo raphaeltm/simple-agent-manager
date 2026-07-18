@@ -394,6 +394,7 @@ func (s *Server) handleTerminalWS(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	_ = runtime.PTY.CloseSession(ptySession.ID)
 	<-done
 }
 

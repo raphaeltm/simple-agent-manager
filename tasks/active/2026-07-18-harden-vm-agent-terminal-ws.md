@@ -26,7 +26,7 @@ Prior CLI/VM/Go and security audits identified a narrow hardening gap in the VM-
 - [x] Add Go tests for accepted and rejected terminal session IDs.
 - [x] Add Go tests for oversized or invalid WebSocket input behavior.
 - [x] Add Go tests for heartbeat/read deadline behavior where feasible without flaky sleeps.
-- [ ] Run focused VM-agent Go tests.
+- [x] Run focused VM-agent Go tests.
 - [ ] Run repository quality checks required by `/do`.
 - [ ] Run local specialist reviews: go-specialist, security-auditor, test-engineer, constitution-validator, task-completion-validator.
 - [ ] Create a PR that states no breaking changes and includes test evidence; do not merge.
@@ -48,3 +48,4 @@ Prior CLI/VM/Go and security audits identified a narrow hardening gap in the VM-
 - Audit tasks: `01KXT1F6JSDV3J5CJ22TGXRGAV`, `01KXT25E7FSNR952HMGACHSQE9`
 - Relevant sessions: `fd408b7a-4b2e-4684-a290-285d03a88d63`, `14d1b5ba-f76e-4f21-9d54-324a8095a486`
 - Implementation slice tests: go test ./internal/pty ./internal/server PASS.
+- Full VM-agent tests: go test ./... in packages/vm-agent PASS.
