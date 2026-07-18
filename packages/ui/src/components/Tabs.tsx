@@ -62,7 +62,24 @@ export function Tabs({ tabs, basePath, className }: TabsProps) {
   const activeIndex = tabs.findIndex((tab) => isActive(tab));
   useEffect(() => {
     if (activeIndex < 0) return;
-    tabRefs.current[activeIndex]?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+    const el = tabRefs.current[activeIndex];
+    const list = listRef.current;
+    el?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+    if (!el || !list) return;
+    // The strip snaps to tab left edges (snap-x snap-mandatory), but the
+    // 'nearest' reveal target usually isn't a snap position, so the snap can
+    // settle back with the active tab still clipped. If it did, align the
+    // tab's left edge (a real snap position), clamped to the end of the strip
+    // (also a valid snap stop), so the snap keeps the tab in view.
+    const raf = requestAnimationFrame(() => {
+      const elRect = el.getBoundingClientRect();
+      const listRect = list.getBoundingClientRect();
+      if (elRect.right > listRect.right + 1 || elRect.left < listRect.left - 1) {
+        const target = list.scrollLeft + (elRect.left - listRect.left);
+        list.scrollLeft = Math.max(0, Math.min(target, list.scrollWidth - list.clientWidth));
+      }
+    });
+    return () => cancelAnimationFrame(raf);
   }, [activeIndex]);
 
   function handleKeyDown(e: KeyboardEvent, index: number) {

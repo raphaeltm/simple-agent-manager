@@ -208,3 +208,21 @@ The before-corpus run finished **1128 passed / 164 failed / 86 skipped** — eve
 - An adversarial **correctness reviewer** (with a test blast-radius sweep over every changed component) found the unguarded notifications WebSocket ingress (fixed, d0fb3bf80), independently confirmed the `useFloatingHeaderHeight` callback-ref fix handles late mount/remount/cleanup, and verified **zero existing tests break** from these changes.
 - Every before/after pair was compared side by side by me, and independently by a **low-context reviewer subagent** that received only the image pairs (no knowledge of what changed or why) and was explicitly told not to assume the second image is better. Its verdicts: **7 of 9 pairs improved, 2 ties, zero regressions found**. Its confirmations matched the intended fixes one-for-one (pluralization/dangling-dot cleanup on P3, word-boundary table wrapping on P5, single-line buttons on P4, redundant step eyebrow removed on P6, title/branch truncation tradeoff called "the right tradeoff" on P8). Tradeoffs it flagged — Delete Node now *more* prominent (accepted: consistency with the app-wide danger style), zero-counts hidden on project cards (intentional decluttering), stacked triggers header consuming vertical space (accepted cost of unbroken buttons) — are each acknowledged above.
 - Staging: not deployed as part of this session — the PR is left open (not merged) for review, with the standard staging gate still to run before merge.
+
+## Staging verification addendum (2026-07-18)
+
+Branch rebased onto main (clean — zero file overlap with the 32 commits that landed since), staging deploy green, live Playwright pass on `app.sammy.party` at 375px + 1280px:
+
+- **Chat header over scrolled messages (F1/F12) — verified live.** Session header stays fully legible with messages parked mid-stream under it on mobile; no text-on-text collision, no ErrorBoundary, no overflow (`reprobe2-chat-scrolled-mobile.png`).
+- **Settings deep link (`/settings/api-tokens`) — verified live.** Active tab scrolled into view (strip at max scroll), both edge fades present when scrollable.
+- **Dashboard card metadata — verified live.** No `" ws"` abbreviation, no `"1 sessions"` pluralization anywhere in the rendered dashboard.
+- **All swept pages render clean live**: dashboard, chat, `/workspaces`, `/workspaces/new`, project notifications, project settings, settings — zero ErrorBoundary, zero horizontal overflow on every capture.
+- **Console noise triage:** `Failed to fetch notifications` errors during the sweep are in-flight polls aborted by rapid navigation (`net::ERR_ABORTED`, reproduced deliberately); at rest for 45s the page produces zero notification errors and zero failed requests. The only at-rest console errors are pre-existing 404 polls for a stopped session's reaped workspace (`GET /api/workspaces/<id>` → 404) — untouched by this PR.
+
+### Staging-found defect, fixed in this PR: snap vs. active-tab reveal (Tabs)
+
+The **project settings** deep link (`/projects/:id/settings/runtime`, 375px) left the active tab clipped 22px despite the reveal effect running: the strip's `snap-x snap-mandatory` snapped the scroll back to the nearest tab-left-edge snap position, and `scrollIntoView({inline:'nearest'})` targets are usually not snap positions — even a manual re-call cannot win (measured live: scrollLeft pinned at 159 of max 270). `/settings` worked only by arithmetic luck (its reveal target lands at max-scroll, which is a valid snap stop).
+
+**Fix:** after the `scrollIntoView` attempt, a rAF callback re-measures; if the active tab is still clipped within the strip, it aligns the tab's left edge — a genuine snap position — clamped to the strip end (also a valid snap stop). Three new unit tests capture the rAF and install the exact staging-repro geometry (mirroring 375px / 7-tab strip: clip-right + clamp, clip-left + align, already-visible no-op); the two alignment tests were verified to fail against the pre-fix component. Re-verified live on staging after redeploy.
+
+This closes the "untested gap" the PR originally documented for `scrollIntoView` (jsdom no-op — see rule 17's virtualized/scroll-coordinate lesson): the live staging pass was exactly what caught it.
