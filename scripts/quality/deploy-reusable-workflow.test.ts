@@ -18,6 +18,28 @@ function stepBlock(stepName: string): string {
 }
 
 describe('deploy reusable workflow', () => {
+  it('runs D1 migrations and integrity checks before serving new API Worker code', () => {
+    const backupIndex = workflow.indexOf('- name: Backup D1 Databases (pre-migration safety net)');
+    const preCountsIndex = workflow.indexOf(
+      '- name: Record pre-migration row counts (data integrity baseline)'
+    );
+    const migrationsIndex = workflow.indexOf('- name: Run Database Migrations');
+    const postIntegrityIndex = workflow.indexOf(
+      '- name: Verify post-migration data integrity (BLOCKS DEPLOY ON DATA LOSS)'
+    );
+    const deployApiIndex = workflow.indexOf('- name: Deploy API Worker');
+    const redeployAfterSecretsIndex = workflow.indexOf(
+      '- name: Re-deploy API Worker (after secrets)'
+    );
+
+    expect(backupIndex).toBeGreaterThan(-1);
+    expect(preCountsIndex).toBeGreaterThan(backupIndex);
+    expect(migrationsIndex).toBeGreaterThan(preCountsIndex);
+    expect(postIntegrityIndex).toBeGreaterThan(migrationsIndex);
+    expect(deployApiIndex).toBeGreaterThan(postIntegrityIndex);
+    expect(redeployAfterSecretsIndex).toBeGreaterThan(deployApiIndex);
+  });
+
   it('passes derived deployment identity into every Wrangler config sync phase', () => {
     for (const name of [
       'Sync Wrangler Config \\(API \\+ Tail Worker\\)',
