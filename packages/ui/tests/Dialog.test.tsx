@@ -171,6 +171,66 @@ describe('Dialog', () => {
     expect(confirm).toHaveFocus();
   });
 
+
+  it('isolates and restores background siblings while open', () => {
+    const background = document.createElement('main');
+    background.setAttribute('aria-hidden', 'false');
+    document.body.appendChild(background);
+
+    const { unmount } = render(
+      <Dialog isOpen={true} onClose={vi.fn()} aria-label="Isolated dialog">
+        <button type="button">Confirm</button>
+      </Dialog>,
+    );
+
+    expect(background).toHaveAttribute('aria-hidden', 'true');
+    expect(background.inert).toBe(true);
+
+    unmount();
+
+    expect(background).toHaveAttribute('aria-hidden', 'false');
+    expect(background.inert).not.toBe(true);
+    background.remove();
+  });
+
+  it('removes generated aria-hidden when restoring unlabelled background siblings', () => {
+    const background = document.createElement('main');
+    document.body.appendChild(background);
+
+    const { unmount } = render(
+      <Dialog isOpen={true} onClose={vi.fn()} aria-label="Temporary isolation">
+        <button type="button">Confirm</button>
+      </Dialog>,
+    );
+
+    expect(background).toHaveAttribute('aria-hidden', 'true');
+
+    unmount();
+
+    expect(background).not.toHaveAttribute('aria-hidden');
+    background.remove();
+  });
+
+  it('skips hidden and inert controls when trapping focus', () => {
+    render(
+      <Dialog isOpen={true} onClose={vi.fn()} aria-label="Filtered focus">
+        <button type="button" aria-hidden="true">Hidden action</button>
+        <div inert>
+          <button type="button">Inert action</button>
+        </div>
+        <button type="button">Visible action</button>
+      </Dialog>,
+    );
+
+    const dialog = screen.getByRole('dialog', { name: 'Filtered focus' });
+    const visible = screen.getByRole('button', { name: 'Visible action' });
+
+    dialog.focus();
+    fireEvent.keyDown(document, { key: 'Tab' });
+
+    expect(visible).toHaveFocus();
+  });
+
   it('locks body scroll when open and restores on close', () => {
     const { rerender } = render(
       <Dialog isOpen={true} onClose={vi.fn()}>

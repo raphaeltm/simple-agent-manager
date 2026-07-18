@@ -128,6 +128,81 @@ describe('MobileNavDrawer', () => {
     expect(defaultProps.onClose).toHaveBeenCalledTimes(1);
   });
 
+
+  it('focuses the drawer panel on open, traps Tab, and restores opener focus on unmount', () => {
+    const opener = document.createElement('button');
+    opener.textContent = 'Open navigation';
+    document.body.appendChild(opener);
+    opener.focus();
+
+    const { unmount } = render(<MobileNavDrawer {...defaultProps} />);
+
+    const panel = screen.getByRole('dialog', { name: 'Navigation menu' });
+    const close = screen.getByLabelText('Close navigation');
+    const signOut = screen.getByRole('button', { name: 'Sign out' });
+
+    expect(panel).toHaveFocus();
+
+    signOut.focus();
+    fireEvent.keyDown(document, { key: 'Tab' });
+    expect(close).toHaveFocus();
+
+    close.focus();
+    fireEvent.keyDown(document, { key: 'Tab', shiftKey: true });
+    expect(signOut).toHaveFocus();
+
+    unmount();
+    expect(opener).toHaveFocus();
+    opener.remove();
+  });
+
+  it('locks body scroll and isolates background siblings while mounted', () => {
+    const background = document.createElement('main');
+    document.body.appendChild(background);
+
+    const { unmount } = render(<MobileNavDrawer {...defaultProps} />);
+
+    expect(document.body.style.overflow).toBe('hidden');
+    expect(background).toHaveAttribute('aria-hidden', 'true');
+    expect(background.inert).toBe(true);
+
+    unmount();
+
+    expect(document.body.style.overflow).toBe('');
+    expect(background).not.toHaveAttribute('aria-hidden');
+    expect(background.inert).not.toBe(true);
+    background.remove();
+  });
+
+  it('keeps focus out of the inactive sliding nav panel', () => {
+    render(
+      <MobileNavDrawer
+        {...defaultProps}
+        projectName="Test Project"
+        navItems={[{ label: 'Chat', path: '/projects/p1/chat' }]}
+        globalNavItems={[{ label: 'Projects', path: '/projects' }]}
+        currentPath="/projects/p1/chat"
+        showGlobalNav={false}
+        onToggleGlobalNav={vi.fn()}
+      />,
+    );
+
+    const panel = screen.getByTestId('mobile-nav-panel');
+    const slidingPanels = panel.querySelectorAll('nav [aria-hidden]');
+
+    expect(slidingPanels).toHaveLength(1);
+    expect(slidingPanels[0]).toHaveAttribute('aria-hidden', 'true');
+    expect(slidingPanels[0]).toHaveAttribute('inert');
+  });
+
+  it('keeps drawer width within a mobile viewport class contract', () => {
+    render(<MobileNavDrawer {...defaultProps} />);
+
+    const panel = screen.getByTestId('mobile-nav-panel');
+    expect(panel.className).toContain('w-[85vw]');
+    expect(panel.className).toContain('max-w-80');
+  });
+
   it('marks nested path as active for non-dashboard routes', () => {
     render(<MobileNavDrawer {...defaultProps} currentPath="/projects/abc-123" />);
 

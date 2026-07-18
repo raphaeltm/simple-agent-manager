@@ -1,6 +1,7 @@
+import { useModalInteraction } from '@simple-agent-manager/ui/hooks/useModalInteraction';
 import { ArrowLeft, ArrowRight, ChevronDown, ChevronRight, LogOut } from 'lucide-react';
 import type { ReactNode } from 'react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { ThemeSwitcher } from './ThemeSwitcher';
@@ -59,6 +60,7 @@ export function MobileNavDrawer({
 }: MobileNavDrawerProps) {
   const [infraOpen, setInfraOpen] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
+  const panelRef = useRef<HTMLDivElement>(null);
 
   const handleClose = useCallback(() => {
     if (isClosing) return;
@@ -66,13 +68,11 @@ export function MobileNavDrawer({
     window.setTimeout(onClose, 250);
   }, [isClosing, onClose]);
 
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') handleClose();
-    };
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [handleClose]);
+  useModalInteraction({
+    enabled: true,
+    modalRef: panelRef,
+    onEscape: handleClose,
+  });
 
   // Determine if we're in project context with toggle capability
   const canToggle = Boolean(projectName && globalNavItems && onToggleGlobalNav);
@@ -95,9 +95,12 @@ export function MobileNavDrawer({
 
       {/* Panel */}
       <div
+        ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-label="Navigation menu"
+        tabIndex={-1}
+        data-sam-modal-root=""
         data-testid="mobile-nav-panel"
         className="sam-glass-drawer-panel glass-panel-container fixed top-0 right-0 bottom-0 w-[85vw] max-w-80 glass-modal border-r-0 rounded-l-[20px] rounded-r-none z-drawer flex flex-col overflow-hidden before:content-[''] before:absolute before:top-0 before:bottom-0 before:left-0 before:w-[3px] before:bg-[linear-gradient(to_bottom,transparent_0%,var(--sam-chrome-drawer-edge-glow)_50%,transparent_100%)] before:pointer-events-none before:blur-[1px]"
         data-state={isClosing ? 'closing' : 'open'}
