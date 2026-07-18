@@ -62,6 +62,17 @@ describe('Worker smoke tests (workerd runtime)', () => {
       expect(response.headers.get('access-control-allow-credentials')).toBe('true');
     });
 
+    it('includes CORS headers for docs origins', async () => {
+      const response = await SELF.fetch('https://api.test.example.com/health', {
+        headers: { Origin: 'https://docs.test.example.com' },
+      });
+      expect(response.status).toBe(200);
+      expect(response.headers.get('access-control-allow-origin')).toBe(
+        'https://docs.test.example.com'
+      );
+      expect(response.headers.get('access-control-allow-credentials')).toBe('true');
+    });
+
     it('handles OPTIONS preflight requests', async () => {
       const response = await SELF.fetch('https://api.test.example.com/health', {
         method: 'OPTIONS',
@@ -90,6 +101,21 @@ describe('Worker smoke tests (workerd runtime)', () => {
       });
       expect(response.status).toBe(200);
       expect(response.headers.get('access-control-allow-origin')).toBeNull();
+    });
+
+    it('rejects workspace and port origins for credentialed CORS', async () => {
+      for (const origin of [
+        'https://ws-abc123.test.example.com',
+        'https://ws-abc123--5173.test.example.com',
+        'https://customer-controlled.test.example.com',
+      ]) {
+        const response = await SELF.fetch('https://api.test.example.com/health', {
+          headers: { Origin: origin },
+        });
+        expect(response.status).toBe(200);
+        expect(response.headers.get('access-control-allow-origin')).toBeNull();
+        expect(response.headers.get('access-control-allow-credentials')).toBeNull();
+      }
     });
 
     it('allows localhost origins for development', async () => {

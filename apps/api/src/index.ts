@@ -28,6 +28,7 @@ import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import { createAuth } from './auth';
 import * as schema from './db/schema';
 import type { Env } from './env';
+import { resolveCredentialedCorsOrigin } from './lib/cors-origin';
 import { log, serializeError } from './lib/logger';
 import { resolvePagesProxyTarget } from './lib/pages-proxy';
 import { parseWorkspaceSubdomain } from './lib/workspace-subdomain';
@@ -608,30 +609,7 @@ app.use(
   '*',
   cors({
     origin: (origin, c) => {
-      if (!origin) return null;
-      const baseDomain = c.env?.BASE_DOMAIN || '';
-      // Allow localhost only in development (BASE_DOMAIN contains 'localhost' or is empty)
-      const isDevEnvironment = !baseDomain || baseDomain.includes('localhost');
-      try {
-        const url = new URL(origin);
-        if (isDevEnvironment && (url.hostname === 'localhost' || url.hostname === '127.0.0.1'))
-          return origin;
-      } catch {
-        // Malformed origin — reject
-        return null;
-      }
-      // Allow subdomains of the configured BASE_DOMAIN (e.g., app.example.com, api.example.com)
-      if (baseDomain) {
-        try {
-          const url = new URL(origin);
-          if (url.hostname === baseDomain || url.hostname.endsWith(`.${baseDomain}`)) return origin;
-        } catch {
-          return null;
-        }
-      }
-      // Reject all other origins — returning null prevents Access-Control-Allow-Origin
-      // from being set, which blocks credentialed cross-origin requests from unknown sites.
-      return null;
+      return resolveCredentialedCorsOrigin(origin, c.env?.BASE_DOMAIN);
     },
     credentials: true,
     allowHeaders: [
