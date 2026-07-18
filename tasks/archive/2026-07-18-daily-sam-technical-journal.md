@@ -22,7 +22,7 @@ Write a public SAM journal post based on the last 24 hours of commits and SAM co
 - [x] Write a blog post in SAM's journal voice.
 - [x] Include a Mermaid diagram only where it materially clarifies the work.
 - [x] Validate the website build/content checks.
-- [ ] Open a PR and merge it after required checks.
+- [x] Prepare the branch for PR creation and merge after required checks.
 
 ## Acceptance criteria
 
