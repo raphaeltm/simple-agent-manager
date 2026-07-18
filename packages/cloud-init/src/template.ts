@@ -166,7 +166,7 @@ write_files:
       Environment=NODE_ID={{ node_id }}
       Environment=CONTROL_PLANE_URL={{ control_plane_url }}
       Environment=JWKS_ENDPOINT={{ jwks_url }}
-      Environment=CALLBACK_TOKEN={{ callback_token }}
+      Environment=CALLBACK_TOKEN_FILE=/etc/sam/callback-token
       Environment=PROJECT_ID={{ project_id }}
       Environment=CHAT_SESSION_ID={{ chat_session_id }}
       Environment=TASK_ID={{ task_id }}
@@ -203,6 +203,12 @@ write_files:
       :80 {
         respond "SAM deployment node awaiting release" 200
       }
+
+  - path: /etc/sam/callback-token
+    permissions: '0600'
+    owner: root:root
+    content: |
+      {{ callback_token }}
 
   - path: /etc/workspace/config.json
     content: |

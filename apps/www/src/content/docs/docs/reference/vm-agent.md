@@ -163,7 +163,7 @@ Environment variables set by the cloud-init template:
 |----------|---------|-------------|
 | `NODE_ID` | — | Unique node identifier |
 | `CONTROL_PLANE_URL` | — | API Worker URL for callbacks |
-| `CALLBACK_TOKEN` | — | JWT for authenticating callbacks |
+| `CALLBACK_TOKEN_FILE` | `/etc/sam/callback-token` on cloud-init nodes | Root-only file containing the callback JWT for authenticating callbacks. `CALLBACK_TOKEN` remains a legacy fallback for already-provisioned nodes/manual runs. |
 | `LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |
 | `LOG_FORMAT` | `json` | Output format: `json` or `text` |
 | `ACP_PROMPT_RETRY_MAX_RETRIES` | `2` | Max transient provider prompt retries after the initial attempt |

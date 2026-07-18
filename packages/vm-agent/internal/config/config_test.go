@@ -91,6 +91,54 @@ func TestLoadDerivesWorkspaceAndContainerDefaults(t *testing.T) {
 	}
 }
 
+func TestLoadCallbackTokenFromFile(t *testing.T) {
+	tokenPath := filepath.Join(t.TempDir(), "callback-token")
+	if err := os.WriteFile(tokenPath, []byte(" file-token-123\n"), 0o600); err != nil {
+		t.Fatalf("write token file: %v", err)
+	}
+	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+	t.Setenv("WORKSPACE_ID", "ws-123")
+	t.Setenv("CALLBACK_TOKEN", "env-token-legacy")
+	t.Setenv("CALLBACK_TOKEN_FILE", tokenPath)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.CallbackToken != "file-token-123" {
+		t.Fatalf("CallbackToken=%q, want token from file", cfg.CallbackToken)
+	}
+}
+
+func TestLoadCallbackTokenFileFailsClosed(t *testing.T) {
+	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+	t.Setenv("WORKSPACE_ID", "ws-123")
+	t.Setenv("CALLBACK_TOKEN", "env-token-legacy")
+	t.Setenv("CALLBACK_TOKEN_FILE", filepath.Join(t.TempDir(), "missing-token"))
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("Load should fail when CALLBACK_TOKEN_FILE is set but unreadable")
+	}
+	if !strings.Contains(err.Error(), "read callback token file") {
+		t.Fatalf("expected callback token file error, got: %v", err)
+	}
+}
+
+func TestLoadCallbackTokenEnvFallback(t *testing.T) {
+	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+	t.Setenv("WORKSPACE_ID", "ws-123")
+	t.Setenv("CALLBACK_TOKEN", "env-token-legacy")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.CallbackToken != "env-token-legacy" {
+		t.Fatalf("CallbackToken=%q, want env fallback", cfg.CallbackToken)
+	}
+}
+
 func TestAdditionalFeaturesDefault(t *testing.T) {
 	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
 	t.Setenv("WORKSPACE_ID", "ws-123")
