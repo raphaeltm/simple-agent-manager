@@ -39,21 +39,21 @@ This PR must be tightly targeted and backward-compatible: remote/production JWKS
 
 ## Implementation checklist
 
-- [ ] Add a small shared VM-agent auth URL validation helper that:
-  - [ ] Accepts `https://` for JWKS and issuer/control-plane URLs.
-  - [ ] Accepts `http://` only for explicit local development hosts (`localhost`, loopback IPv4/IPv6).
-  - [ ] Rejects remote `http://` JWKS URLs before any network fetch.
-  - [ ] Rejects remote `http://` issuer/control-plane URLs during config validation.
-- [ ] Wire HTTPS/local validation into `auth.NewJWTValidator()`.
-- [ ] Wire HTTPS/local validation into VM agent config validation for `CONTROL_PLANE_URL`, `JWKS_ENDPOINT`, and URL-form `JWT_ISSUER`.
-- [ ] Keep non-URL issuer strings compatible for existing tests/config (`test-issuer` style).
-- [ ] Cap CLI `doJSON()` response body reads with a clear maximum.
-- [ ] Return a clear CLI error when a success response exceeds the cap before JSON decoding.
-- [ ] Preserve bounded parsing of oversized error responses without reading unbounded data.
-- [ ] Add Go tests for HTTPS enforcement and local exceptions.
-- [ ] Add Go tests for bounded CLI body reads, including oversized error responses.
-- [ ] Run relevant Go tests and repository quality checks.
-- [ ] Archive this task file after validation.
+- [x] Add a small shared VM-agent auth URL validation helper that:
+  - [x] Accepts `https://` for JWKS and issuer/control-plane URLs.
+  - [x] Accepts `http://` only for explicit local development hosts (`localhost`, loopback IPv4/IPv6).
+  - [x] Rejects remote `http://` JWKS URLs before any network fetch.
+  - [x] Rejects remote `http://` issuer/control-plane URLs during config validation.
+- [x] Wire HTTPS/local validation into `auth.NewJWTValidator()`.
+- [x] Wire HTTPS/local validation into VM agent config validation for `CONTROL_PLANE_URL`, `JWKS_ENDPOINT`, and URL-form `JWT_ISSUER`.
+- [x] Keep non-URL issuer strings compatible for existing tests/config (`test-issuer` style).
+- [x] Cap CLI `doJSON()` response body reads with a clear maximum.
+- [x] Return a clear CLI error when a success response exceeds the cap before JSON decoding.
+- [x] Preserve bounded parsing of oversized error responses without reading unbounded data.
+- [x] Add Go tests for HTTPS enforcement and local exceptions.
+- [x] Add Go tests for bounded CLI body reads, including oversized error responses.
+- [x] Run relevant Go tests and repository quality checks.
+- [x] Archive this task file after validation.
 
 ## Acceptance criteria
 
