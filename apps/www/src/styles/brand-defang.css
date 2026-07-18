@@ -1,0 +1,43 @@
+/**
+ * Defang Brand Theme Override
+ *
+ * This file overrides the default SAM theme colors with Defang's brand colors.
+ * It's designed to be fork-specific and won't conflict with upstream changes.
+ *
+ * To activate: Set BRAND_CUSTOM_CSS=./src/styles/brand-defang.css
+ */
+
+:root {
+  /* Dark theme colors — Defang brand (purple-blue) */
+  --sl-color-accent-low: #1a0f2e;
+  --sl-color-accent: #AA6EFF;
+  --sl-color-accent-high: #d4c4ff;
+
+  --sl-color-white: #eef0f8;
+  --sl-color-gray-1: #d4d8e8;
+  --sl-color-gray-2: #a8b0c8;
+  --sl-color-gray-3: #7580a0;
+  --sl-color-gray-4: #2e3448;
+  --sl-color-gray-5: #1e2230;
+  --sl-color-gray-6: #141820;
+  --sl-color-black: #0b0d12;
+}
+
+/* Light theme colors — Defang brand (inverted gray scale, purple-blue accents) */
+:root[data-theme='light'] {
+  --sl-color-accent-low: #e8dcff;
+  /* Darker than the dark-mode accent so inline links and the active TOC entry
+     (Starlight maps both to --sl-color-text-accent → --sl-color-accent) clear
+     WCAG AA on the near-white docs body. Using #6B3DBF for better contrast. */
+  --sl-color-accent: #6B3DBF;
+  --sl-color-accent-high: #4A2880;
+
+  --sl-color-white: #1e1a30;
+  --sl-color-gray-1: #2e2a40;
+  --sl-color-gray-2: #48445a;
+  --sl-color-gray-3: #5c5870;
+  --sl-color-gray-4: #a8a4b8;
+  --sl-color-gray-5: #d8d4e8;
+  --sl-color-gray-6: #f0eef8;
+  --sl-color-black: #fafbff;
+}

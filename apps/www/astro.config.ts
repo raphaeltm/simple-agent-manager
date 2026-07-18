@@ -1,6 +1,11 @@
 import { defineConfig } from 'astro/config';
 import sitemap from '@astrojs/sitemap';
 import starlight from '@astrojs/starlight';
+import { getBrandConfig } from './brand.config';
+
+// Get brand configuration (can be customized via environment variables)
+const brand = getBrandConfig();
+
 export default defineConfig({
   site: process.env.SITE_URL || 'https://www.simple-agent-manager.org',
   server: {
@@ -8,22 +13,21 @@ export default defineConfig({
   },
   integrations: [
     starlight({
-      title: 'SAM Docs',
-      description:
-        'Documentation for Simple Agent Manager — ephemeral AI coding environments on Cloudflare Workers + multi-cloud VMs.',
+      title: brand.title,
+      description: brand.description,
       logo: {
-        src: './src/assets/logo.png',
+        src: brand.logoPath,
         replacesTitle: false,
       },
       social: [
         {
           icon: 'github',
           label: 'GitHub',
-          href: 'https://github.com/raphaeltm/simple-agent-manager',
+          href: `https://github.com/${brand.githubOrg}/${brand.githubRepo}`,
         },
       ],
       editLink: {
-        baseUrl: 'https://github.com/raphaeltm/simple-agent-manager/edit/main/apps/www/',
+        baseUrl: `https://github.com/${brand.githubOrg}/${brand.githubRepo}/edit/main/apps/www/`,
       },
       sidebar: [
         {
@@ -68,7 +72,11 @@ export default defineConfig({
           ],
         },
       ],
-      customCss: ['./src/styles/starlight-custom.css'],
+      customCss: [
+        './src/styles/starlight-custom.css',
+        // Include brand-specific CSS if configured
+        ...(brand.customCssPath ? [brand.customCssPath] : []),
+      ],
       head: [
         {
           tag: 'link',

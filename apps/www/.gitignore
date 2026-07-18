@@ -10,3 +10,4 @@ public/scripts/blog-mermaid.js
 
 # Compiled from src/scripts/docs-mermaid.ts by build:docs-mermaid script
 public/scripts/docs-mermaid.js
+.env
