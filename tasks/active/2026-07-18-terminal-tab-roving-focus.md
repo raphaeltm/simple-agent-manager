@@ -14,11 +14,11 @@ The terminal tab bar exposes terminal sessions as tabs, but each tab is currentl
 
 ## Implementation checklist
 
-- [ ] Add roving tabindex support to terminal tabs: active tab is tabbable, inactive tabs are not.
-- [ ] Add ArrowRight/ArrowLeft/Home/End keyboard handling on the terminal tablist.
-- [ ] Keep Enter/Space activation behavior unchanged.
-- [ ] Keep close buttons keyboard-accessible and avoid changing session protocol or layout.
-- [ ] Add discriminating tests for tabindex, ArrowRight/ArrowLeft wrapping, Home/End, active tab focus after active-session changes, close/remove edge behavior, and ARIA roles/labels.
+- [x] Add roving tabindex support to terminal tabs: active tab is tabbable, inactive tabs are not.
+- [x] Add ArrowRight/ArrowLeft/Home/End keyboard handling on the terminal tablist.
+- [x] Keep Enter/Space activation behavior unchanged.
+- [x] Keep close buttons keyboard-accessible and avoid changing session protocol or layout.
+- [x] Add discriminating tests for tabindex, ArrowRight/ArrowLeft wrapping, Home/End, active tab focus after active-session changes, close/remove edge behavior, and ARIA roles/labels.
 - [ ] Run terminal package tests and relevant repo quality checks.
 - [ ] Document why component-level tests are sufficient if no rendered layout changes are made.
 
