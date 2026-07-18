@@ -1,11 +1,11 @@
 ---
 name: prioritize
-description: "Identify what to work on next. Reconciles candidate work against already-merged code BEFORE ranking, so stale/shipped ideas are dropped. Use when asked what to work on next, how to prioritize the backlog, or to triage ideas/tasks/incidents into a ranked shortlist."
+description: 'Identify what to work on next. Reconciles candidate work against already-merged code BEFORE ranking, so stale/shipped ideas are dropped. Use when asked what to work on next, how to prioritize the backlog, or to triage ideas/tasks/incidents into a ranked shortlist.'
 ---
 
 # Identify Next Priorities
 
-Read the full workflow from `.codex/prompts/prioritize.md` and execute it.
+Read the full workflow from `.claude/commands/prioritize.md` and execute it.
 
 ## Quick Summary
 
