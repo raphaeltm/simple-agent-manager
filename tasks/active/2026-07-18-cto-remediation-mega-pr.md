@@ -21,8 +21,8 @@ Multiple targeted remediation PRs from the strict CTO review workflow must be in
 - [x] Confirm each PR has green CI or rerun/fix as needed.
 - [x] Create integration branch `sam/execute-task-using-skill-jjat06`.
 - [x] Merge each approved PR branch into the integration branch and resolve conflicts.
-- [ ] Run local gates: lint, typecheck, tests, build, Go tests, deploy/migration script checks, and UI/Playwright checks.
-- [ ] Run required specialist reviews and address all blocking findings.
+- [x] Run local gates: lint, typecheck, tests, build, Go tests, deploy/migration script checks, and UI/Playwright checks.
+- [x] Run required specialist reviews and address all blocking findings.
 - [ ] Deploy integration branch to staging after local and CI checks are clean.
 - [ ] Validate affected API, UI, VM-agent, CLI, provider/ACP, skill, and migration surfaces on staging.
 - [ ] Validate Claude and Codex codebase-message workflows on staging.
