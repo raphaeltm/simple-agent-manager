@@ -20,21 +20,21 @@ The remediation must be tightly scoped and non-breaking. Existing provisioned no
 
 ## Checklist
 
-- [ ] Inspect cloud-init templates and generated systemd units for callback/bootstrap token exposure.
-- [ ] Inspect API bootstrap token creation/redeem paths, TTL configuration, encryption, and legacy fallback.
-- [ ] Inspect callback auth routes and tests for bearer token validation and scope/audience checks.
+- [x] Inspect cloud-init templates and generated systemd units for callback/bootstrap token exposure.
+- [x] Inspect API bootstrap token creation/redeem paths, TTL configuration, encryption, and legacy fallback.
+- [x] Inspect callback auth routes and tests for bearer token validation and scope/audience checks.
 - [ ] Implement narrow non-breaking hardening:
-  - [ ] remove callback/bootstrap tokens from systemd environment or durable logs for new nodes;
-  - [ ] keep necessary legacy compatibility only for unexpired in-flight bootstrap tokens;
-  - [ ] add observable diagnostics for legacy plaintext fallback without logging token material;
-  - [ ] fail closed for expired, malformed, or unauthorized callback/bootstrap token use.
+  - [x] remove callback/bootstrap tokens from systemd environment or durable logs for new nodes;
+  - [x] keep necessary legacy compatibility only for unexpired in-flight bootstrap tokens;
+  - [x] add observable diagnostics for legacy plaintext fallback without logging token material;
+  - [x] fail closed for expired, malformed, or unauthorized callback/bootstrap token use.
 - [ ] Add tests covering:
-  - [ ] bootstrap token TTL and expiry rejection;
-  - [ ] encrypted callback-token redemption;
-  - [ ] bounded legacy plaintext callback-token compatibility;
-  - [ ] cloud-init/systemd redaction and non-exposure of callback/bootstrap tokens;
-  - [ ] callback auth behavior for valid, invalid, expired, and wrong-audience tokens.
-- [ ] Update public docs if operator-visible behavior or follow-up guidance changes.
+  - [x] bootstrap token TTL and expiry rejection;
+  - [x] encrypted callback-token redemption;
+  - [x] bounded legacy plaintext callback-token compatibility;
+  - [x] cloud-init/systemd redaction and non-exposure of callback/bootstrap tokens;
+  - [x] callback auth behavior for valid, invalid, expired, and wrong-audience tokens.
+- [x] Update public docs if operator-visible behavior or follow-up guidance changes.
 - [ ] Run relevant checks: lint, typecheck, targeted tests, full root quality suite where feasible.
 - [ ] Run local specialist reviews: security-auditor, cloudflare-specialist if API touched, go-specialist if Go touched, env-validator, doc-sync-validator, constitution-validator, test-engineer, task-completion-validator.
 - [ ] Deploy to staging and provision a real VM; verify VM agent heartbeat, workspace reachability, and cleanup.

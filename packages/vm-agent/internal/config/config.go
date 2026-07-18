@@ -2,6 +2,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -321,10 +322,33 @@ type Config struct {
 	DeployBuildPublishTimeout           time.Duration // Max host build/push/release publish duration (env: DEPLOY_BUILD_PUBLISH_TIMEOUT)
 }
 
+func loadCallbackToken() (string, error) {
+	tokenFile := strings.TrimSpace(os.Getenv("CALLBACK_TOKEN_FILE"))
+	if tokenFile == "" {
+		return getEnv("CALLBACK_TOKEN", ""), nil
+	}
+
+	data, err := os.ReadFile(tokenFile)
+	if err != nil {
+		return "", fmt.Errorf("read callback token file: %w", err)
+	}
+
+	token := strings.TrimSpace(string(data))
+	if token == "" {
+		return "", errors.New("callback token file is empty")
+	}
+
+	return token, nil
+}
+
 // Load reads configuration from environment variables.
 func Load() (*Config, error) {
 	controlPlaneURL := getEnv("CONTROL_PLANE_URL", "")
 	repository := getEnv("REPOSITORY", "")
+	callbackToken, err := loadCallbackToken()
+	if err != nil {
+		return nil, err
+	}
 
 	workspaceDir := getEnv("WORKSPACE_DIR", "")
 	if workspaceDir == "" {
@@ -363,7 +387,7 @@ func Load() (*Config, error) {
 
 		NodeID:             getEnv("NODE_ID", getEnv("WORKSPACE_ID", "")),
 		WorkspaceID:        getEnv("WORKSPACE_ID", ""),
-		CallbackToken:      getEnv("CALLBACK_TOKEN", ""),
+		CallbackToken:      callbackToken,
 		BootstrapToken:     getEnv("BOOTSTRAP_TOKEN", ""),
 		Repository:         repository,
 		Branch:             getEnv("BRANCH", "main"),
