@@ -16,11 +16,11 @@ Provider and ACP package boundaries need narrow, non-breaking hardening around t
 
 ## Checklist
 
-- [ ] Add targeted provider tests proving timeout aborts and long/non-JSON error bodies are safely normalized and bounded.
-- [ ] Add targeted ACP/shared runtime schema validation tests for malformed boundary payloads.
-- [ ] Add targeted tool-call normalization tests proving both `sam-mcp/display_from_library` and `mcp__sam-mcp__display_from_library` resolve to the same typed rendering path.
-- [ ] Implement minimal backward-compatible helpers or checks required for those tests.
-- [ ] Avoid exported API removals and avoid speculative abstraction.
+- [x] Add targeted provider tests proving timeout aborts and long/non-JSON error bodies are safely normalized and bounded.
+- [x] Add targeted ACP/shared runtime schema validation tests for malformed boundary payloads.
+- [x] Add targeted tool-call normalization tests proving both `sam-mcp/display_from_library` and `mcp__sam-mcp__display_from_library` resolve to the same typed rendering path.
+- [x] Implement minimal backward-compatible helpers or checks required for those tests.
+- [x] Avoid exported API removals and avoid speculative abstraction.
 - [ ] Run relevant package tests, lint, typecheck, build as appropriate.
 - [ ] Run specialist reviews: test-engineer, security-auditor, constitution-validator, and doc-sync-validator if docs/contracts change.
 - [ ] Open a PR on `sam/execute-task-using-skill-4vnw0a`; do not merge.
