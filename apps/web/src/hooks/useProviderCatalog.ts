@@ -21,7 +21,7 @@ export function useProviderCatalog(): UseProviderCatalogResult {
   useEffect(() => {
     setLoading(true);
     getProviderCatalog()
-      .then((resp) => setCatalogs(resp.catalogs))
+      .then((resp) => setCatalogs(Array.isArray(resp.catalogs) ? resp.catalogs : []))
       .catch(() => { /* catalog unavailable — consumers use fallbacks */ })
       .finally(() => setLoading(false));
   }, []);

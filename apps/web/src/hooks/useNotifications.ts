@@ -49,9 +49,12 @@ export function useNotifications(): UseNotificationsReturn {
       setLoading(true);
       const result = await listNotifications({ limit: 50 });
       if (!mountedRef.current) return;
-      setNotifications(result.notifications);
-      setUnreadCount(result.unreadCount);
-      setNextCursor(result.nextCursor);
+      // Guard the shape: NotificationCenter renders in the app shell on every
+      // page, so a malformed payload here must degrade to an empty list — not
+      // crash the whole app through the ErrorBoundary (undefined.filter).
+      setNotifications(Array.isArray(result.notifications) ? result.notifications : []);
+      setUnreadCount(typeof result.unreadCount === 'number' ? result.unreadCount : 0);
+      setNextCursor(result.nextCursor ?? null);
     } catch (err) {
       console.error('Failed to fetch notifications:', err);
     } finally {
@@ -65,8 +68,9 @@ export function useNotifications(): UseNotificationsReturn {
     try {
       const result = await listNotifications({ cursor: nextCursor, limit: 50 });
       if (!mountedRef.current) return;
-      setNotifications((prev) => [...prev, ...result.notifications]);
-      setNextCursor(result.nextCursor);
+      const more = Array.isArray(result.notifications) ? result.notifications : [];
+      setNotifications((prev) => [...prev, ...more]);
+      setNextCursor(result.nextCursor ?? null);
     } catch (err) {
       console.error('Failed to load more notifications:', err);
     }
@@ -105,7 +109,7 @@ export function useNotifications(): UseNotificationsReturn {
       setNotifications((prev) => prev.filter((n) => n.id !== id));
       // Re-fetch unread count
       const { count } = await getNotificationUnreadCount();
-      if (mountedRef.current) setUnreadCount(count);
+      if (mountedRef.current) setUnreadCount(typeof count === 'number' ? count : 0);
     } catch (err) {
       console.error('Failed to dismiss notification:', err);
     }
@@ -142,13 +146,22 @@ export function useNotifications(): UseNotificationsReturn {
             const rawMsg = expectJsonRecord(JSON.parse(event.data), 'notifications.websocket.message');
             const msg = rawMsg as unknown as NotificationWsMessage;
 
+            // Same shape guard as the REST path: a malformed frame must not
+            // insert undefined into the list — the crash it causes happens in
+            // a later render, outside this try/catch.
+            const hasValidNotification =
+              (msg.type === 'notification.new' || msg.type === 'notification.updated') &&
+              typeof (msg as { notification?: { id?: unknown } }).notification?.id === 'string';
+
             switch (msg.type) {
               case 'notification.new':
+                if (!hasValidNotification) break;
                 setNotifications((prev) => [msg.notification, ...prev]);
                 setUnreadCount((prev) => prev + 1);
                 break;
 
               case 'notification.updated': {
+                if (!hasValidNotification) break;
                 // Reconcile unreadCount if readAt status changed
                 setNotifications((prev) => {
                   const existing = prev.find((n) => n.id === msg.notification.id);
@@ -189,7 +202,7 @@ export function useNotifications(): UseNotificationsReturn {
                 break;
 
               case 'notification.unread_count':
-                setUnreadCount(msg.count);
+                setUnreadCount(typeof msg.count === 'number' ? msg.count : 0);
                 break;
 
               case 'pong':

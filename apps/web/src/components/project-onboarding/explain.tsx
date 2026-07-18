@@ -100,7 +100,8 @@ export function StepHeader({
   const index = stepIndex(id);
   return (
     <div className="grid gap-2">
-      <span className="text-xs font-semibold uppercase tracking-wider text-accent">
+      {/* Hidden on mobile — MobileProgress already shows "Step N of M" right above. */}
+      <span className="hidden lg:block text-xs font-semibold uppercase tracking-wider text-accent">
         Step {index + 1} of {ONBOARDING_STEPS.length}
       </span>
       <h2 className="text-xl font-semibold text-fg-primary">{title}</h2>

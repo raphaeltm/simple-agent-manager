@@ -246,6 +246,15 @@ export function SessionHeader({
       className={`relative glass-chrome border-t-0 shrink-0${hasContentBelow ? '' : ' rounded-b-2xl after:content-[\'\'] after:absolute after:bottom-0 after:left-[8%] after:right-[8%] after:h-[3px] after:bg-[radial-gradient(ellipse_at_center,rgba(34,197,94,0.55)_0%,transparent_70%)] after:blur-[2px] after:pointer-events-none after:z-10'}`}
       style={{ boxShadow: hasContentBelow ? '0 4px 24px rgba(0, 0, 0, 0.4)' : '0 4px 24px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(34, 197, 94, 0.08)' }}
     >
+      {/* Opacity scrim: Chromium does not sample composited scroll-container
+          content for backdrop-filter, so the glass blur silently no-ops over
+          the message list and scrolled messages collide with the header text.
+          This underlay keeps the header legible without depending on blur. */}
+      <div
+        aria-hidden="true"
+        className="absolute inset-0 rounded-[inherit] -z-10 pointer-events-none"
+        style={{ backgroundColor: 'color-mix(in srgb, var(--sam-color-bg-canvas) 78%, transparent)' }}
+      />
       <div className="px-4 py-2 min-h-[54px] space-y-1.5">
         <div className="flex items-start gap-2">
           <span
