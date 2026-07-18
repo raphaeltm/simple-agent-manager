@@ -553,15 +553,20 @@ func splitFirst(s, sep string) []string {
 // validConfig returns a Config with all required fields set to valid values.
 func validConfig() *Config {
 	return &Config{
-		Port:                 8080,
-		ControlPlaneURL:      "https://api.example.com",
-		NodeID:               "node-1",
-		SessionMaxCount:      100,
-		DefaultRows:          24,
-		DefaultCols:          80,
-		WSReadBufferSize:     1024,
-		WSWriteBufferSize:    1024,
-		GitCredentialTimeout: DefaultGitCredentialTimeout,
+		Port:                      8080,
+		ControlPlaneURL:           "https://api.example.com",
+		NodeID:                    "node-1",
+		SessionMaxCount:           100,
+		DefaultRows:               24,
+		DefaultCols:               80,
+		WSReadBufferSize:          1024,
+		WSWriteBufferSize:         1024,
+		TerminalWSMaxMessageBytes: DefaultTerminalWSMaxMessageBytes,
+		TerminalWSReadTimeout:     DefaultTerminalWSReadTimeout,
+		TerminalWSPingInterval:    DefaultTerminalWSPingInterval,
+		TerminalWSMessageRate:     DefaultTerminalWSMessageRate,
+		TerminalWSMessageBurst:    DefaultTerminalWSMessageBurst,
+		GitCredentialTimeout:      DefaultGitCredentialTimeout,
 	}
 }
 
@@ -662,6 +667,35 @@ func TestValidateTLSPathsExist(t *testing.T) {
 	cfg.TLSKeyPath = keyPath
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("Validate() returned error for valid TLS config: %v", err)
+	}
+}
+
+func TestValidateTerminalWSSettings(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		mutate  func(*Config)
+		wantKey string
+	}{
+		{"max message bytes", func(cfg *Config) { cfg.TerminalWSMaxMessageBytes = 0 }, "TERMINAL_WS_MAX_MESSAGE_BYTES"},
+		{"read timeout", func(cfg *Config) { cfg.TerminalWSReadTimeout = 0 }, "TERMINAL_WS_READ_TIMEOUT"},
+		{"ping interval", func(cfg *Config) { cfg.TerminalWSPingInterval = 0 }, "TERMINAL_WS_PING_INTERVAL"},
+		{"ping interval below read timeout", func(cfg *Config) { cfg.TerminalWSPingInterval = cfg.TerminalWSReadTimeout }, "TERMINAL_WS_PING_INTERVAL"},
+		{"message rate", func(cfg *Config) { cfg.TerminalWSMessageRate = 0 }, "TERMINAL_WS_MESSAGE_RATE"},
+		{"message burst", func(cfg *Config) { cfg.TerminalWSMessageBurst = 0 }, "TERMINAL_WS_MESSAGE_BURST"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := validConfig()
+			tc.mutate(cfg)
+			err := cfg.Validate()
+			if err == nil {
+				t.Fatal("Validate() should return error for invalid terminal WS setting")
+			}
+			if !strings.Contains(err.Error(), tc.wantKey) {
+				t.Fatalf("expected %s error, got: %v", tc.wantKey, err)
+			}
+		})
 	}
 }
 
