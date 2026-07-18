@@ -19,8 +19,8 @@ The terminal tab bar exposes terminal sessions as tabs, but each tab is currentl
 - [x] Keep Enter/Space activation behavior unchanged.
 - [x] Keep close buttons keyboard-accessible and avoid changing session protocol or layout.
 - [x] Add discriminating tests for tabindex, ArrowRight/ArrowLeft wrapping, Home/End, active tab focus after active-session changes, close/remove edge behavior, and ARIA roles/labels.
-- [ ] Run terminal package tests and relevant repo quality checks.
-- [ ] Document why component-level tests are sufficient if no rendered layout changes are made.
+- [x] Run terminal package tests and relevant repo quality checks.
+- [x] Document why component-level tests are sufficient if no rendered layout changes are made.
 
 ## Acceptance criteria
 
@@ -32,3 +32,8 @@ The terminal tab bar exposes terminal sessions as tabs, but each tab is currentl
 - Screen-reader semantics remain intact: `tablist`, `tab`, `aria-selected`, and terminal tab labels.
 - No terminal session protocol changes.
 - PR states this is non-breaking and includes test evidence.
+
+## Verification notes
+
+- Component-level tests are sufficient for this remediation because the implementation changes keyboard focus management only. It does not change terminal protocol, CSS styles, dimensions, layout structure, visual content, or rendered terminal output.
+- Verified with `pnpm --filter @simple-agent-manager/terminal test -- tests/unit/components/TabBar.test.tsx`, full terminal tests, terminal typecheck/lint, and full repo `pnpm lint && pnpm typecheck && pnpm test && pnpm build`.
