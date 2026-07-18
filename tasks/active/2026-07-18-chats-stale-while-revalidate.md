@@ -23,12 +23,12 @@ This is a narrow, non-breaking UI remediation. API contracts must remain unchang
 
 ## Implementation Checklist
 
-- [ ] Update `useAllChatSessions` to distinguish first-load loading from background refresh.
-- [ ] Keep existing sessions visible while a refresh is in flight.
-- [ ] Preserve first-load loading, first-load error, and empty-state behavior.
-- [ ] Preserve stale data and surface an error when a refresh fails.
-- [ ] Keep `getAllChats` API usage and response contract unchanged.
-- [ ] Add/adjust unit tests for first load, refresh with existing data, refresh failure with stale data, empty state, and long-title/list rendering.
+- [x] Update `useAllChatSessions` to distinguish first-load loading from background refresh.
+- [x] Keep existing sessions visible while a refresh is in flight.
+- [x] Preserve first-load loading, first-load error, and empty-state behavior.
+- [x] Preserve stale data and surface an error when a refresh fails.
+- [x] Keep `getAllChats` API usage and response contract unchanged.
+- [x] Add/adjust unit tests for first load, refresh with existing data, refresh failure with stale data, empty state, and long-title/list rendering.
 - [ ] Run targeted web tests and full relevant quality checks.
 - [ ] Run `/chats` Playwright visual audit if rendered behavior changed materially.
 - [ ] Run specialist reviews: test-engineer, ui-ux-specialist, constitution-validator; security-auditor only if auth/session boundaries are touched.

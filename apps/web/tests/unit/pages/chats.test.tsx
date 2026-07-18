@@ -92,6 +92,45 @@ describe('Chats page', () => {
     expect(screen.getByText('Failed to load chat sessions')).toBeInTheDocument();
   });
 
+
+  it('keeps stale rows visible while surfacing a refresh error', () => {
+    mocks.useAllChatSessions.mockReturnValue({
+      sessions: [
+        makeSession({ id: 's-stale-good', topic: 'Known good chat', status: 'active', projectName: 'Backend' }),
+      ],
+      loading: false,
+      isRefreshing: false,
+      error: 'Failed to load chat sessions',
+      refresh: vi.fn(),
+    });
+    renderChats();
+
+    expect(screen.getByText('Failed to load chat sessions')).toBeInTheDocument();
+    expect(screen.getByText('Known good chat')).toBeInTheDocument();
+    expect(screen.queryByText('No active chats')).not.toBeInTheDocument();
+  });
+
+  it('renders long titles and many active chats without dropping rows', () => {
+    const longTitle = 'Investigate chat refresh behavior with a very long session title that should remain renderable in the active chat list without changing API contracts or blanking existing rows during revalidation';
+    mocks.useAllChatSessions.mockReturnValue({
+      sessions: Array.from({ length: 30 }, (_, index) => makeSession({
+        id: `s-${index}`,
+        topic: index === 0 ? longTitle : `Chat session ${index + 1}`,
+        projectName: index % 2 === 0 ? 'Backend' : 'Frontend',
+        lastMessageAt: NOW - index * 1000,
+      })),
+      loading: false,
+      isRefreshing: false,
+      error: null,
+      refresh: vi.fn(),
+    });
+    renderChats();
+
+    expect(screen.getByText(longTitle)).toBeInTheDocument();
+    expect(screen.getByText('Chat session 30')).toBeInTheDocument();
+    expect(screen.getAllByRole('listitem')).toHaveLength(30);
+  });
+
   it('renders session rows with topic, project name, and state badge', () => {
     mocks.useAllChatSessions.mockReturnValue({
       sessions: [
