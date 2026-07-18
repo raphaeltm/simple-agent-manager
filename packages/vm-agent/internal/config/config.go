@@ -79,6 +79,11 @@ const (
 	// DefaultTerminalWSMessageBurst permits short interactive bursts above the
 	// steady-state rate. Override via TERMINAL_WS_MESSAGE_BURST.
 	DefaultTerminalWSMessageBurst = 60
+
+	// DefaultTerminalSessionIDMaxLength bounds client-supplied terminal session
+	// IDs before they are used as PTY or tab identifiers. Override via
+	// TERMINAL_SESSION_ID_MAX_LENGTH.
+	DefaultTerminalSessionIDMaxLength = 128
 )
 
 const (
@@ -171,13 +176,14 @@ type Config struct {
 	HTTPCallbackTimeout time.Duration // timeout for outbound HTTP callbacks to the control plane
 
 	// WebSocket settings
-	WSReadBufferSize          int
-	WSWriteBufferSize         int
-	TerminalWSMaxMessageBytes int64
-	TerminalWSReadTimeout     time.Duration
-	TerminalWSPingInterval    time.Duration
-	TerminalWSMessageRate     int
-	TerminalWSMessageBurst    int
+	WSReadBufferSize           int
+	WSWriteBufferSize          int
+	TerminalWSMaxMessageBytes  int64
+	TerminalWSReadTimeout      time.Duration
+	TerminalWSPingInterval     time.Duration
+	TerminalWSMessageRate      int
+	TerminalWSMessageBurst     int
+	TerminalSessionIDMaxLength int
 
 	// PTY settings
 	DefaultShell string
@@ -414,13 +420,14 @@ func Load() (*Config, error) {
 		HTTPCallbackTimeout: getEnvDuration("HTTP_CALLBACK_TIMEOUT", 30*time.Second),
 
 		// WebSocket buffer sizes and terminal socket limits - configurable per constitution
-		WSReadBufferSize:          getEnvInt("WS_READ_BUFFER_SIZE", 1024),
-		WSWriteBufferSize:         getEnvInt("WS_WRITE_BUFFER_SIZE", 1024),
-		TerminalWSMaxMessageBytes: int64(getEnvInt("TERMINAL_WS_MAX_MESSAGE_BYTES", DefaultTerminalWSMaxMessageBytes)),
-		TerminalWSReadTimeout:     getEnvDuration("TERMINAL_WS_READ_TIMEOUT", DefaultTerminalWSReadTimeout),
-		TerminalWSPingInterval:    getEnvDuration("TERMINAL_WS_PING_INTERVAL", DefaultTerminalWSPingInterval),
-		TerminalWSMessageRate:     getEnvInt("TERMINAL_WS_MESSAGE_RATE", DefaultTerminalWSMessageRate),
-		TerminalWSMessageBurst:    getEnvInt("TERMINAL_WS_MESSAGE_BURST", DefaultTerminalWSMessageBurst),
+		WSReadBufferSize:           getEnvInt("WS_READ_BUFFER_SIZE", 1024),
+		WSWriteBufferSize:          getEnvInt("WS_WRITE_BUFFER_SIZE", 1024),
+		TerminalWSMaxMessageBytes:  int64(getEnvInt("TERMINAL_WS_MAX_MESSAGE_BYTES", DefaultTerminalWSMaxMessageBytes)),
+		TerminalWSReadTimeout:      getEnvDuration("TERMINAL_WS_READ_TIMEOUT", DefaultTerminalWSReadTimeout),
+		TerminalWSPingInterval:     getEnvDuration("TERMINAL_WS_PING_INTERVAL", DefaultTerminalWSPingInterval),
+		TerminalWSMessageRate:      getEnvInt("TERMINAL_WS_MESSAGE_RATE", DefaultTerminalWSMessageRate),
+		TerminalWSMessageBurst:     getEnvInt("TERMINAL_WS_MESSAGE_BURST", DefaultTerminalWSMessageBurst),
+		TerminalSessionIDMaxLength: getEnvInt("TERMINAL_SESSION_ID_MAX_LENGTH", DefaultTerminalSessionIDMaxLength),
 
 		DefaultShell: getEnv("DEFAULT_SHELL", "/bin/bash"),
 		DefaultRows:  getEnvInt("DEFAULT_ROWS", 24),

@@ -165,7 +165,7 @@ func (s *Server) configureTerminalWebSocket(conn *websocket.Conn, writeMu *sync.
 			select {
 			case <-ticker.C:
 				writeMu.Lock()
-				err := conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(5*time.Second))
+				err := conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(readTimeout))
 				writeMu.Unlock()
 				if err != nil {
 					return
@@ -178,8 +178,12 @@ func (s *Server) configureTerminalWebSocket(conn *websocket.Conn, writeMu *sync.
 	return func() { close(stop) }
 }
 
-func validateTerminalSessionID(sessionID string) error {
-	return pty.ValidateSessionID(sessionID)
+func (s *Server) validateTerminalSessionID(sessionID string) error {
+	maxLength := config.DefaultTerminalSessionIDMaxLength
+	if s != nil && s.config != nil && s.config.TerminalSessionIDMaxLength > 0 {
+		maxLength = s.config.TerminalSessionIDMaxLength
+	}
+	return pty.ValidateSessionIDWithMaxLength(sessionID, maxLength)
 }
 
 func (w *wsWriter) Write(p []byte) (int, error) {
@@ -504,7 +508,7 @@ func (s *Server) handleMultiTerminalWS(w http.ResponseWriter, r *http.Request) {
 			if err := json.Unmarshal(msg.Data, &data); err != nil {
 				continue
 			}
-			if err := validateTerminalSessionID(data.SessionID); err != nil {
+			if err := s.validateTerminalSessionID(data.SessionID); err != nil {
 				sendSessionError(data.SessionID, "invalid session ID")
 				continue
 			}
@@ -555,7 +559,7 @@ func (s *Server) handleMultiTerminalWS(w http.ResponseWriter, r *http.Request) {
 			if err := json.Unmarshal(msg.Data, &data); err != nil {
 				continue
 			}
-			if err := validateTerminalSessionID(data.SessionID); err != nil {
+			if err := s.validateTerminalSessionID(data.SessionID); err != nil {
 				sendSessionError(data.SessionID, "invalid session ID")
 				continue
 			}
@@ -648,7 +652,7 @@ func (s *Server) handleMultiTerminalWS(w http.ResponseWriter, r *http.Request) {
 			if err := json.Unmarshal(msg.Data, &data); err != nil {
 				continue
 			}
-			if err := validateTerminalSessionID(data.SessionID); err != nil {
+			if err := s.validateTerminalSessionID(data.SessionID); err != nil {
 				sendSessionError(data.SessionID, "invalid session ID")
 				continue
 			}
@@ -699,7 +703,7 @@ func (s *Server) handleMultiTerminalWS(w http.ResponseWriter, r *http.Request) {
 				asMu.Unlock()
 			}
 			if sessionID != "" {
-				if err := validateTerminalSessionID(sessionID); err != nil {
+				if err := s.validateTerminalSessionID(sessionID); err != nil {
 					sendSessionError(sessionID, "invalid session ID")
 					continue
 				}
@@ -730,7 +734,7 @@ func (s *Server) handleMultiTerminalWS(w http.ResponseWriter, r *http.Request) {
 				asMu.Unlock()
 			}
 			if sessionID != "" {
-				if err := validateTerminalSessionID(sessionID); err != nil {
+				if err := s.validateTerminalSessionID(sessionID); err != nil {
 					sendSessionError(sessionID, "invalid session ID")
 					continue
 				}
@@ -757,7 +761,7 @@ func (s *Server) handleMultiTerminalWS(w http.ResponseWriter, r *http.Request) {
 			if err := json.Unmarshal(msg.Data, &data); err != nil {
 				continue
 			}
-			if err := validateTerminalSessionID(data.SessionID); err != nil {
+			if err := s.validateTerminalSessionID(data.SessionID); err != nil {
 				sendSessionError(data.SessionID, "invalid session ID")
 				continue
 			}

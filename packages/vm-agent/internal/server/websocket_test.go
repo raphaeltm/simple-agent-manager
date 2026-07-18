@@ -22,14 +22,15 @@ func newTestServer(t *testing.T) (*Server, *httptest.Server, string) {
 	t.Helper()
 
 	cfg := &config.Config{
-		AllowedOrigins:            []string{"*"},
-		WSReadBufferSize:          4096,
-		WSWriteBufferSize:         4096,
-		TerminalWSMaxMessageBytes: config.DefaultTerminalWSMaxMessageBytes,
-		TerminalWSReadTimeout:     config.DefaultTerminalWSReadTimeout,
-		TerminalWSPingInterval:    config.DefaultTerminalWSPingInterval,
-		TerminalWSMessageRate:     config.DefaultTerminalWSMessageRate,
-		TerminalWSMessageBurst:    config.DefaultTerminalWSMessageBurst,
+		AllowedOrigins:             []string{"*"},
+		WSReadBufferSize:           4096,
+		WSWriteBufferSize:          4096,
+		TerminalWSMaxMessageBytes:  config.DefaultTerminalWSMaxMessageBytes,
+		TerminalWSReadTimeout:      config.DefaultTerminalWSReadTimeout,
+		TerminalWSPingInterval:     config.DefaultTerminalWSPingInterval,
+		TerminalWSMessageRate:      config.DefaultTerminalWSMessageRate,
+		TerminalWSMessageBurst:     config.DefaultTerminalWSMessageBurst,
+		TerminalSessionIDMaxLength: config.DefaultTerminalSessionIDMaxLength,
 	}
 
 	sm := auth.NewSessionManager("session", false, 1*time.Hour)
@@ -441,7 +442,7 @@ func TestTerminalSessionIDValidation(t *testing.T) {
 		strings.Repeat("a", 128),
 	}
 	for _, sessionID := range accepted {
-		if err := validateTerminalSessionID(sessionID); err != nil {
+		if err := (&Server{config: &config.Config{TerminalSessionIDMaxLength: config.DefaultTerminalSessionIDMaxLength}}).validateTerminalSessionID(sessionID); err != nil {
 			t.Fatalf("expected %q to be accepted: %v", sessionID, err)
 		}
 	}
@@ -456,7 +457,7 @@ func TestTerminalSessionIDValidation(t *testing.T) {
 		strings.Repeat("a", 129),
 	}
 	for _, sessionID := range rejected {
-		if err := validateTerminalSessionID(sessionID); err == nil {
+		if err := (&Server{config: &config.Config{TerminalSessionIDMaxLength: config.DefaultTerminalSessionIDMaxLength}}).validateTerminalSessionID(sessionID); err == nil {
 			t.Fatalf("expected %q to be rejected", sessionID)
 		}
 	}

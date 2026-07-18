@@ -252,6 +252,9 @@ func (c *Config) Validate() error {
 		if c.TerminalWSMessageBurst < 1 {
 			errs = append(errs, fmt.Errorf("TERMINAL_WS_MESSAGE_BURST must be > 0, got %d", c.TerminalWSMessageBurst))
 		}
+		if c.TerminalSessionIDMaxLength < 1 {
+			errs = append(errs, fmt.Errorf("TERMINAL_SESSION_ID_MAX_LENGTH must be > 0, got %d", c.TerminalSessionIDMaxLength))
+		}
 	}
 
 	return errors.Join(errs...)

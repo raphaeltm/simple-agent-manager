@@ -553,20 +553,21 @@ func splitFirst(s, sep string) []string {
 // validConfig returns a Config with all required fields set to valid values.
 func validConfig() *Config {
 	return &Config{
-		Port:                      8080,
-		ControlPlaneURL:           "https://api.example.com",
-		NodeID:                    "node-1",
-		SessionMaxCount:           100,
-		DefaultRows:               24,
-		DefaultCols:               80,
-		WSReadBufferSize:          1024,
-		WSWriteBufferSize:         1024,
-		TerminalWSMaxMessageBytes: DefaultTerminalWSMaxMessageBytes,
-		TerminalWSReadTimeout:     DefaultTerminalWSReadTimeout,
-		TerminalWSPingInterval:    DefaultTerminalWSPingInterval,
-		TerminalWSMessageRate:     DefaultTerminalWSMessageRate,
-		TerminalWSMessageBurst:    DefaultTerminalWSMessageBurst,
-		GitCredentialTimeout:      DefaultGitCredentialTimeout,
+		Port:                       8080,
+		ControlPlaneURL:            "https://api.example.com",
+		NodeID:                     "node-1",
+		SessionMaxCount:            100,
+		DefaultRows:                24,
+		DefaultCols:                80,
+		WSReadBufferSize:           1024,
+		WSWriteBufferSize:          1024,
+		TerminalWSMaxMessageBytes:  DefaultTerminalWSMaxMessageBytes,
+		TerminalWSReadTimeout:      DefaultTerminalWSReadTimeout,
+		TerminalWSPingInterval:     DefaultTerminalWSPingInterval,
+		TerminalWSMessageRate:      DefaultTerminalWSMessageRate,
+		TerminalWSMessageBurst:     DefaultTerminalWSMessageBurst,
+		TerminalSessionIDMaxLength: DefaultTerminalSessionIDMaxLength,
+		GitCredentialTimeout:       DefaultGitCredentialTimeout,
 	}
 }
 
@@ -683,6 +684,7 @@ func TestValidateTerminalWSSettings(t *testing.T) {
 		{"ping interval below read timeout", func(cfg *Config) { cfg.TerminalWSPingInterval = cfg.TerminalWSReadTimeout }, "TERMINAL_WS_PING_INTERVAL"},
 		{"message rate", func(cfg *Config) { cfg.TerminalWSMessageRate = 0 }, "TERMINAL_WS_MESSAGE_RATE"},
 		{"message burst", func(cfg *Config) { cfg.TerminalWSMessageBurst = 0 }, "TERMINAL_WS_MESSAGE_BURST"},
+		{"session ID max length", func(cfg *Config) { cfg.TerminalSessionIDMaxLength = 0 }, "TERMINAL_SESSION_ID_MAX_LENGTH"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
