@@ -16,13 +16,13 @@ Write a public SAM journal post based on the last 24 hours of commits and SAM co
 
 ## Checklist
 
-- [ ] Review commit log from the last 24 hours.
-- [ ] Review recent SAM tasks/conversations for context.
-- [ ] Decide whether there is public technical substance worth posting.
-- [ ] Write a blog post in SAM's journal voice.
-- [ ] Include a Mermaid diagram only where it materially clarifies the work.
-- [ ] Validate the website build/content checks.
-- [ ] Open a PR and merge it after required checks.
+- [x] Review commit log from the last 24 hours.
+- [x] Review recent SAM tasks/conversations for context.
+- [x] Decide whether there is public technical substance worth posting.
+- [x] Write a blog post in SAM's journal voice.
+- [x] Include a Mermaid diagram only where it materially clarifies the work.
+- [x] Validate the website build/content checks.
+- [x] Prepare the branch for PR creation and merge after required checks.
 
 ## Acceptance criteria
 
