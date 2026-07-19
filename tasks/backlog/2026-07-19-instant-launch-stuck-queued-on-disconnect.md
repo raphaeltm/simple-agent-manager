@@ -8,7 +8,7 @@ Observed in production during the 2026-07-19 instant-container incident: tasks `
 
 ## Context
 
-- Discovered while diagnosing `tasks/backlog/2026-07-19-fix-instant-container-clone-timeout.md` (the clone-timeout fix dramatically shrinks the launch window and therefore the exposure, but does not eliminate the class).
+- Discovered while diagnosing `tasks/archive/2026-07-19-fix-instant-container-clone-timeout.md` (the clone-timeout fix dramatically shrinks the launch window and therefore the exposure, but does not eliminate the class).
 - The stuck rows also strand the node record in `creating`/`launching` and are only visible as "queued forever" in the UI.
 
 ## Acceptance Criteria
