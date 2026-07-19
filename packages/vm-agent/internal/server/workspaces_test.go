@@ -194,83 +194,72 @@ func TestCreateWorkspaceStandaloneClonesBeforeRunning(t *testing.T) {
 	}
 }
 
+// standaloneCloneTestHarness spins up a standalone-mode server with a control
+// plane, git stub (capturing clone args), and a signed node token, then posts
+// the create-workspace request and asserts it succeeded with a clone.
+type standaloneCloneTestHarness struct {
+	server    *Server
+	cloneArgs []string
+}
+
+func runStandaloneCloneCreate(t *testing.T, workspaceID, cloneFilter string) *standaloneCloneTestHarness {
+	t.Helper()
+
+	validator, privateKey := newWorkspaceCreateJWTValidator(t, "node-1")
+	workDir := filepath.Join(t.TempDir(), "repo")
+	var readyCalled atomic.Bool
+
+	controlPlane := newStandaloneCloneControlPlane(t, workspaceID, workDir, &readyCalled)
+	t.Cleanup(controlPlane.Close)
+
+	s := newWorkspaceCreateServer(t, controlPlane.URL, validator)
+	s.config.Role = config.RoleStandalone
+	s.config.WorkspaceID = workspaceID
+	s.config.WorkspaceDir = workDir
+	s.config.ContainerWorkDir = workDir
+	s.config.WorkspaceReadyCallbackTimeout = time.Second
+	s.config.StandaloneCloneFilter = cloneFilter
+
+	harness := &standaloneCloneTestHarness{server: s}
+	var cloneCalled atomic.Bool
+	installStandaloneCloneGitStubCapture(t, s, workspaceID, workDir, &cloneCalled, &harness.cloneArgs)
+
+	token := signWorkspaceCreateNodeToken(t, privateKey, "node-1", workspaceID)
+	rec := postCreateWorkspaceWithRepository(t, s, token, workspaceID, "owner/repo")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected standalone create status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !cloneCalled.Load() {
+		t.Fatal("expected standalone create to clone repository")
+	}
+	return harness
+}
+
 // Regression test for the 2026-07-18 instant-container outage: standalone
 // clones run synchronously inside the control plane's create-workspace request,
 // so they MUST use the partial-clone filter to keep clone cost proportional to
 // the working tree instead of the full history pack. This fails on pre-fix
 // code, which issued a full clone.
 func TestCreateWorkspaceStandaloneUsesPartialCloneFilter(t *testing.T) {
-	validator, privateKey := newWorkspaceCreateJWTValidator(t, "node-1")
-	workspaceID := "ws-standalone-filter"
-	workDir := filepath.Join(t.TempDir(), "repo")
-	var readyCalled atomic.Bool
+	harness := runStandaloneCloneCreate(t, "ws-standalone-filter", config.DefaultStandaloneCloneFilter)
 
-	controlPlane := newStandaloneCloneControlPlane(t, workspaceID, workDir, &readyCalled)
-	defer controlPlane.Close()
-
-	s := newWorkspaceCreateServer(t, controlPlane.URL, validator)
-	s.config.Role = config.RoleStandalone
-	s.config.WorkspaceID = workspaceID
-	s.config.WorkspaceDir = workDir
-	s.config.ContainerWorkDir = workDir
-	s.config.WorkspaceReadyCallbackTimeout = time.Second
-	s.config.StandaloneCloneFilter = config.DefaultStandaloneCloneFilter
-
-	var cloneCalled atomic.Bool
-	var cloneArgs []string
-	installStandaloneCloneGitStubCapture(t, s, workspaceID, workDir, &cloneCalled, &cloneArgs)
-
-	token := signWorkspaceCreateNodeToken(t, privateKey, "node-1", workspaceID)
-	rec := postCreateWorkspaceWithRepository(t, s, token, workspaceID, "owner/repo")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected standalone create status 200, got %d body=%s", rec.Code, rec.Body.String())
-	}
-	if !cloneCalled.Load() {
-		t.Fatal("expected standalone create to clone repository")
-	}
-	joined := strings.Join(cloneArgs, " ")
+	joined := strings.Join(harness.cloneArgs, " ")
 	if !strings.Contains(joined, "clone --filter=blob:none --branch") {
-		t.Fatalf("clone args missing partial-clone filter: %v", cloneArgs)
+		t.Fatalf("clone args missing partial-clone filter: %v", harness.cloneArgs)
 	}
 }
 
 func TestCreateWorkspaceStandaloneCloneFilterDisabled(t *testing.T) {
-	validator, privateKey := newWorkspaceCreateJWTValidator(t, "node-1")
-	workspaceID := "ws-standalone-nofilter"
-	workDir := filepath.Join(t.TempDir(), "repo")
-	var readyCalled atomic.Bool
+	harness := runStandaloneCloneCreate(t, "ws-standalone-nofilter", config.ResolveStandaloneCloneFilter("off"))
 
-	controlPlane := newStandaloneCloneControlPlane(t, workspaceID, workDir, &readyCalled)
-	defer controlPlane.Close()
-
-	s := newWorkspaceCreateServer(t, controlPlane.URL, validator)
-	s.config.Role = config.RoleStandalone
-	s.config.WorkspaceID = workspaceID
-	s.config.WorkspaceDir = workDir
-	s.config.ContainerWorkDir = workDir
-	s.config.WorkspaceReadyCallbackTimeout = time.Second
-	s.config.StandaloneCloneFilter = config.ResolveStandaloneCloneFilter("off")
-
-	var cloneCalled atomic.Bool
-	var cloneArgs []string
-	installStandaloneCloneGitStubCapture(t, s, workspaceID, workDir, &cloneCalled, &cloneArgs)
-
-	token := signWorkspaceCreateNodeToken(t, privateKey, "node-1", workspaceID)
-	rec := postCreateWorkspaceWithRepository(t, s, token, workspaceID, "owner/repo")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected standalone create status 200, got %d body=%s", rec.Code, rec.Body.String())
-	}
-	if !cloneCalled.Load() {
-		t.Fatal("expected standalone create to clone repository")
-	}
-	for _, arg := range cloneArgs {
+	for _, arg := range harness.cloneArgs {
 		if strings.HasPrefix(arg, "--filter") {
-			t.Fatalf("clone args must not include --filter when disabled: %v", cloneArgs)
+			t.Fatalf("clone args must not include --filter when disabled: %v", harness.cloneArgs)
 		}
 	}
-	joined := strings.Join(cloneArgs, " ")
+	joined := strings.Join(harness.cloneArgs, " ")
 	if !strings.Contains(joined, "clone --branch") {
-		t.Fatalf("expected plain full clone args, got: %v", cloneArgs)
+		t.Fatalf("expected plain full clone args, got: %v", harness.cloneArgs)
 	}
 }
 

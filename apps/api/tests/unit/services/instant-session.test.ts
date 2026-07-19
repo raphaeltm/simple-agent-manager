@@ -96,6 +96,17 @@ const env = {
   CF_CONTAINER_VM_AGENT_PORT: '8080',
 } as never;
 
+function baseLaunchInput() {
+  return {
+    taskId: 'task-1',
+    project,
+    userId: 'user-1',
+    initialPrompt: 'prompt',
+    displayMessage: 'prompt',
+    agentType: 'claude-code',
+  } as never;
+}
+
 describe('launchInstantSession', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -346,14 +357,7 @@ describe('launchInstantSession', () => {
     const { db } = makeDb();
     mocks.nodeAgent.getCfContainerCreateWorkspaceTimeoutMs.mockReturnValue(90_000);
 
-    await launchInstantSession(db as never, env, {
-      taskId: 'task-1',
-      project,
-      userId: 'user-1',
-      initialPrompt: 'prompt',
-      displayMessage: 'prompt',
-      agentType: 'claude-code',
-    } as never);
+    await launchInstantSession(db as never, env, baseLaunchInput());
 
     expect(mocks.nodeAgent.getCfContainerCreateWorkspaceTimeoutMs).toHaveBeenCalledWith(env);
     expect(mocks.nodeAgent.createWorkspaceOnNode).toHaveBeenCalledWith(
@@ -401,16 +405,9 @@ describe('launchInstantSession', () => {
       new Error('Request timed out after 120000ms')
     );
 
-    await expect(
-      launchInstantSession(db as never, env, {
-        taskId: 'task-1',
-        project,
-        userId: 'user-1',
-        initialPrompt: 'prompt',
-        displayMessage: 'prompt',
-        agentType: 'claude-code',
-      })
-    ).rejects.toThrow('Request timed out after 120000ms');
+    await expect(launchInstantSession(db as never, env, baseLaunchInput())).rejects.toThrow(
+      'Request timed out after 120000ms'
+    );
 
     expect(mocks.container.destroyVmAgentContainer).toHaveBeenCalledWith(env, 'node-1');
     expect(updates).toContainEqual(
