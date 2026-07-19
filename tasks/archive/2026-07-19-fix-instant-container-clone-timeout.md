@@ -49,7 +49,7 @@ Two surgical changes:
 - [x] Docs: vm-agent reference (`apps/www/src/content/docs/docs/reference/vm-agent.md`) + configuration reference if it lists CF_CONTAINER_* vars
 - [x] Go tests: clone args include `--filter=blob:none` by default (discriminating — fails on pre-fix code); custom filter value honored; `off` disables; config parsing tests
 - [x] TS tests: `getCfContainerCreateWorkspaceTimeoutMs` default/env/invalid; `createWorkspaceOnNode` honors `requestTimeoutMs` behaviorally (small timeout → `Request timed out after Xms`, larger → succeeds); instant-session passes the configured timeout to the create-workspace call
-- [ ] Quality suite green: `pnpm lint && pnpm typecheck && pnpm test && pnpm build`; `go test ./...` in `packages/vm-agent`
+- [x] Quality suite green: `pnpm lint && pnpm typecheck && pnpm test && pnpm build`; `go test ./...` in `packages/vm-agent` (two full passes: initial + post-review-fixes)
 
 ### Review Findings Addressed (Phase 5)
 
