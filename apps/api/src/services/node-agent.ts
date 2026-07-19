@@ -16,6 +16,11 @@ import {
 
 const DEFAULT_NODE_AGENT_REQUEST_TIMEOUT_MS = 30_000;
 const DEFAULT_CF_CONTAINER_WAKE_TIMEOUT_MS = 120_000;
+// cf-container workspace creation clones the repository synchronously inside
+// the request (vm-agent handleStandaloneWorkspaceCreate), so it needs a
+// background-work budget rather than the interactive 30s default. 120s mirrors
+// the wake/restore budget, which re-runs the same clone. See rule 43.
+const DEFAULT_CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS = 120_000;
 
 const DEFAULT_NODE_AGENT_READY_TIMEOUT_MS = 900_000; // 15 min — cloud-init takes 8-12 min on Hetzner
 const DEFAULT_NODE_AGENT_READY_POLL_INTERVAL_MS = 5000;
@@ -69,6 +74,15 @@ export function getNodeAgentRequestTimeoutMs(env: { NODE_AGENT_REQUEST_TIMEOUT_M
 
 export function getCfContainerWakeTimeoutMs(env: { CF_CONTAINER_WAKE_TIMEOUT_MS?: string }): number {
   return getTimeoutMs(env.CF_CONTAINER_WAKE_TIMEOUT_MS, DEFAULT_CF_CONTAINER_WAKE_TIMEOUT_MS);
+}
+
+export function getCfContainerCreateWorkspaceTimeoutMs(env: {
+  CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS?: string;
+}): number {
+  return getTimeoutMs(
+    env.CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS,
+    DEFAULT_CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS
+  );
 }
 
 export async function waitForNodeAgentReady(nodeId: string, env: Env): Promise<void> {
@@ -296,6 +310,15 @@ export async function createWorkspaceOnNode(
       password: string;
       ref: string;
     } | null;
+  },
+  options?: {
+    /**
+     * Override for the request timeout. cf-container creation must pass the
+     * create-workspace budget (getCfContainerCreateWorkspaceTimeoutMs) because
+     * the vm-agent clones synchronously inside this request; VM-node creation
+     * is a fast 202 dispatch ack and keeps the interactive default.
+     */
+    requestTimeoutMs?: number;
   }
 ): Promise<unknown> {
   return nodeAgentRequest(nodeId, env, '/workspaces', {
@@ -303,6 +326,7 @@ export async function createWorkspaceOnNode(
     userId,
     workspaceId: workspace.workspaceId,
     body: JSON.stringify(workspace),
+    requestTimeoutMs: options?.requestTimeoutMs,
   });
 }
 

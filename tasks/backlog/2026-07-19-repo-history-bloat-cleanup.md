@@ -4,7 +4,7 @@
 
 The repository's pack size tripled to **371 MiB** on 2026-07-17/18. "chore: save agent work" auto-commits pushed `.codex/` runtime state directly to `main`: 17 copies of a ~10–12 MB SQLite log (`.codex/logs_2.sqlite`), multiple ~6 MB WAL files, ~7 MB plugin catalog JSONs, a 7 MB `.pptx` template asset, and two compiled `packages/vm-agent/vm-agent` binaries (18.4 MB + 9.3 MB). Blobs >2 MB in history total **413 MB**. PR #1622 (2026-07-17) stopped tracking `.codex/` but did not (and cannot, without history rewrite) remove the blobs from history.
 
-This bloat broke all production instant-container sessions (full clone crossed the 30s create-workspace timeout — see `tasks/backlog/2026-07-19-fix-instant-container-clone-timeout.md`), and it permanently slows every clone/fetch/CI checkout until history is rewritten.
+This bloat broke all production instant-container sessions (full clone crossed the 30s create-workspace timeout — see `tasks/archive/2026-07-19-fix-instant-container-clone-timeout.md`), and it permanently slows every clone/fetch/CI checkout until history is rewritten.
 
 ## Proposed Work (needs explicit human sign-off — history rewrite is destructive)
 

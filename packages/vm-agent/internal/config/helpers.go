@@ -109,6 +109,22 @@ func getEnvStringSlice(key string, defaultValue []string) []string {
 	return defaultValue
 }
 
+// ResolveStandaloneCloneFilter normalizes a STANDALONE_CLONE_FILTER value.
+// "off", "none", and "false" (case-insensitive) disable partial cloning and
+// return "" (full clone); any other non-blank value is passed to git verbatim
+// as --filter=<value>. Note: through Load(), an unset or empty env var yields
+// DefaultStandaloneCloneFilter (getEnv treats empty as unset), so the only
+// env-var way to disable the filter is an explicit "off"/"none"/"false".
+// Blank input to this function directly resolves to "" (no filter).
+func ResolveStandaloneCloneFilter(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	switch strings.ToLower(trimmed) {
+	case "", "off", "none", "false":
+		return ""
+	}
+	return trimmed
+}
+
 // getEnvOrGenerate returns the value of an environment variable, or generates
 // a cryptographically random hex password of the given byte length.
 // If the operator sets a value shorter than 8 characters, a warning is logged.

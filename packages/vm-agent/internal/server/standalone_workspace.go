@@ -101,22 +101,62 @@ func (s *Server) cloneStandaloneRepository(ctx context.Context, runtime *Workspa
 		branch = "main"
 	}
 
-	args := []string{"clone", "--branch", branch, cloneSpec.URL, workDir}
+	// Standalone clones run synchronously inside the control plane's
+	// create-workspace request deadline, so clone cost must stay proportional
+	// to the working tree, not the full history pack. The partial-clone filter
+	// (default blob:none) skips unreferenced historical blobs; later blob
+	// access lazy-fetches through the persistent credential helper installed
+	// by ConfigureStandaloneGitCredentialHelper.
+	cloneFilter := s.config.StandaloneCloneFilter
+	args := []string{"clone"}
+	if cloneFilter != "" {
+		args = append(args, "--filter="+cloneFilter)
+	}
+	args = append(args, "--branch", branch, cloneSpec.URL, workDir)
 	if helperPath := standaloneCloneCredentialHelperPath(extraEnv); helperPath != "" {
 		args = append([]string{"-c", "credential.helper=" + helperPath}, args...)
 	}
 
 	repository := strings.TrimSpace(runtime.Repository)
-	slog.Info("Cloning standalone repository", "workspace", runtime.ID, "repository", repository, "branch", branch, "workDir", workDir)
+	slog.Info("Cloning standalone repository", "workspace", runtime.ID, "repository", repository, "branch", branch, "workDir", workDir, "cloneFilter", cloneFilter)
 	output, err := runStandaloneGitCommand(ctx, "", extraEnv, args...)
 	if err != nil {
 		return fmt.Errorf("standalone git clone failed: %w: %s", err, redactStandaloneCloneSecrets(output, cloneSpec.Token))
+	}
+	// Surface clone warnings even on success: when the remote does not support
+	// partial clone (no uploadpack.allowFilter), git warns and silently falls
+	// back to a FULL clone — exactly the slow path this filter exists to avoid.
+	// Without this log there is no production signal that the fallback happened.
+	if warnings := standaloneCloneWarnings(output); warnings != "" {
+		slog.Warn("Standalone clone completed with git warnings",
+			"workspace", runtime.ID,
+			"repository", repository,
+			"cloneFilter", cloneFilter,
+			"warnings", redactStandaloneCloneSecrets(warnings, cloneSpec.Token))
 	}
 
 	if output, err := runStandaloneGitCommand(ctx, "", nil, "-C", workDir, "remote", "set-url", "origin", cloneSpec.URL); err != nil {
 		return fmt.Errorf("failed to sanitize standalone repository origin URL: %w: %s", err, output)
 	}
 	return nil
+}
+
+// standaloneCloneWarnings extracts the bounded set of "warning:" lines from git
+// clone output so silent behavior downgrades (e.g. a server ignoring
+// --filter) are diagnosable without persisting full command output.
+func standaloneCloneWarnings(output string) string {
+	const maxWarningsBytes = 1024
+	var lines []string
+	for _, line := range strings.Split(output, "\n") {
+		if strings.Contains(strings.ToLower(line), "warning:") {
+			lines = append(lines, strings.TrimSpace(line))
+		}
+	}
+	joined := strings.Join(lines, "; ")
+	if len(joined) > maxWarningsBytes {
+		joined = joined[:maxWarningsBytes]
+	}
+	return joined
 }
 
 func (s *Server) prepareStandaloneWorkspaceRuntime(ctx context.Context, runtime *WorkspaceRuntime) error {

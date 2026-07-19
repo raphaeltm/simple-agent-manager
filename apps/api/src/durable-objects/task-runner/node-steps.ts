@@ -511,7 +511,8 @@ async function tryClaimWarmNode(
 
   const warmNodes = await rc.env.DATABASE.prepare(
     `SELECT id, vm_size, vm_location FROM nodes
-     WHERE user_id = ? AND status = 'running' AND warm_since IS NOT NULL AND node_role = 'workspace'`
+     WHERE user_id = ? AND status = 'running' AND warm_since IS NOT NULL AND node_role = 'workspace'
+       AND (runtime IS NULL OR runtime != 'cf-container')`
   )
     .bind(state.userId)
     .all<{ id: string; vm_size: string; vm_location: string }>();
@@ -596,7 +597,8 @@ async function findNodeWithCapacity(
 
   const nodes = await rc.env.DATABASE.prepare(
     `SELECT id, vm_size, vm_location, health_status, last_metrics FROM nodes
-     WHERE user_id = ? AND status = 'running' AND health_status != 'unhealthy' AND node_role = 'workspace'`
+     WHERE user_id = ? AND status = 'running' AND health_status != 'unhealthy' AND node_role = 'workspace'
+       AND (runtime IS NULL OR runtime != 'cf-container')`
   )
     .bind(state.userId)
     .all<{

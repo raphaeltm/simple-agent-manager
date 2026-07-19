@@ -1305,3 +1305,69 @@ func TestStandaloneRole(t *testing.T) {
 		t.Fatal("standalone mode must not be deployment mode")
 	}
 }
+
+func TestStandaloneCloneFilterDefault(t *testing.T) {
+	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+	t.Setenv("WORKSPACE_ID", "ws-123")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.StandaloneCloneFilter != DefaultStandaloneCloneFilter {
+		t.Fatalf("StandaloneCloneFilter=%q, want %q", cfg.StandaloneCloneFilter, DefaultStandaloneCloneFilter)
+	}
+}
+
+func TestStandaloneCloneFilterOverride(t *testing.T) {
+	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+	t.Setenv("WORKSPACE_ID", "ws-123")
+	t.Setenv("STANDALONE_CLONE_FILTER", "blob:limit=1m")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.StandaloneCloneFilter != "blob:limit=1m" {
+		t.Fatalf("StandaloneCloneFilter=%q, want %q", cfg.StandaloneCloneFilter, "blob:limit=1m")
+	}
+}
+
+func TestStandaloneCloneFilterDisabled(t *testing.T) {
+	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+	t.Setenv("WORKSPACE_ID", "ws-123")
+	t.Setenv("STANDALONE_CLONE_FILTER", "off")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.StandaloneCloneFilter != "" {
+		t.Fatalf("StandaloneCloneFilter=%q, want empty (disabled)", cfg.StandaloneCloneFilter)
+	}
+}
+
+func TestResolveStandaloneCloneFilter(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{name: "default value passes through", raw: DefaultStandaloneCloneFilter, want: "blob:none"},
+		{name: "custom filter passes through", raw: "tree:0", want: "tree:0"},
+		{name: "whitespace trimmed", raw: "  blob:none  ", want: "blob:none"},
+		{name: "off disables", raw: "off", want: ""},
+		{name: "none disables", raw: "none", want: ""},
+		{name: "false disables", raw: "false", want: ""},
+		{name: "case-insensitive disable", raw: "OFF", want: ""},
+		{name: "blank disables", raw: "   ", want: ""},
+		{name: "empty disables", raw: "", want: ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ResolveStandaloneCloneFilter(tc.raw); got != tc.want {
+				t.Fatalf("ResolveStandaloneCloneFilter(%q)=%q, want %q", tc.raw, got, tc.want)
+			}
+		})
+	}
+}
