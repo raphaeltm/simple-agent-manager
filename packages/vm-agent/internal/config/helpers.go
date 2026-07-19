@@ -112,7 +112,10 @@ func getEnvStringSlice(key string, defaultValue []string) []string {
 // ResolveStandaloneCloneFilter normalizes a STANDALONE_CLONE_FILTER value.
 // "off", "none", and "false" (case-insensitive) disable partial cloning and
 // return "" (full clone); any other non-blank value is passed to git verbatim
-// as --filter=<value>. Blank input also disables the filter.
+// as --filter=<value>. Note: through Load(), an unset or empty env var yields
+// DefaultStandaloneCloneFilter (getEnv treats empty as unset), so the only
+// env-var way to disable the filter is an explicit "off"/"none"/"false".
+// Blank input to this function directly resolves to "" (no filter).
 func ResolveStandaloneCloneFilter(raw string) string {
 	trimmed := strings.TrimSpace(raw)
 	switch strings.ToLower(trimmed) {

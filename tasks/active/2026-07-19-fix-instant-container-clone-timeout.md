@@ -51,6 +51,15 @@ Two surgical changes:
 - [x] TS tests: `getCfContainerCreateWorkspaceTimeoutMs` default/env/invalid; `createWorkspaceOnNode` honors `requestTimeoutMs` behaviorally (small timeout → `Request timed out after Xms`, larger → succeeds); instant-session passes the configured timeout to the create-workspace call
 - [ ] Quality suite green: `pnpm lint && pnpm typecheck && pnpm test && pnpm build`; `go test ./...` in `packages/vm-agent`
 
+### Review Findings Addressed (Phase 5)
+
+- **go-specialist (HIGH)**: partial clone silently falls back to a FULL clone on servers without `uploadpack.allowFilter` (git warns + exits 0), and the success-path clone output was discarded — no production signal for the fallback. Fixed: `standaloneCloneWarnings` extracts bounded `warning:` lines and logs them at Warn on success (`standalone_workspace.go`). Cloudflare **Artifacts** git filter support is unverified — staging Phase 6 exercises an artifacts-backed instant session (Potato project) to observe behavior; GitHub (the incident repo host) is confirmed to support filters. Either way behavior degrades to the pre-fix full clone, never worse.
+- **go-specialist (MEDIUM)**: `ResolveStandaloneCloneFilter` doc claimed "blank disables" but `getEnv` maps empty env to the default — doc corrected; the supported disable keywords are `off`/`none`/`false`.
+- **test-engineer (HIGH)**: the DO `launch()` `STANDALONE_CLONE_FILTER` passthrough had no test — added `vm-agent-container-launch-env.test.ts` (prototype-borrowing pattern) covering forwarded + omitted cases. This exact spread was transiently deleted by a concurrent working-tree write during review, proving the gap was live, not hypothetical.
+- **env-validator (HIGH) / constitution-validator (MEDIUM)**: new env vars weren't in the deploy pipeline optional-var allowlists — wired into `deploy-reusable.yml` + `sync-wrangler-config.ts` with tests.
+- **security-auditor (HIGH)**: pre-existing capacity gap (no per-user instant quota vs `max_instances = 3`, worker timeout doesn't cancel container work) — tracked in `tasks/backlog/2026-07-19-instant-session-capacity-controls.md`; the 1h `sleepAfter` slot occupancy of successful sessions dominates the marginal 90s failure-path amplification. Explicitly surfaced to Raphaël in the completion report.
+- **doc-sync-validator (MEDIUM)**: `configuration.md` now lists both new vars; companion task path refs fixed.
+
 ## Acceptance Criteria
 
 - [ ] Fresh instant session on staging (fix branch deployed) launches and produces a valid conversation — including against a large-history repository comparable to `raphaeltm/simple-agent-manager` (413 MB of large blobs)
