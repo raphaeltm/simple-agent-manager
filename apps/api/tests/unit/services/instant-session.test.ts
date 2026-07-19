@@ -391,6 +391,36 @@ describe('launchInstantSession', () => {
     expect(updates).toContainEqual(expect.objectContaining({ status: 'error' }));
   });
 
+  // Capacity containment for the create-workspace timeout (security review):
+  // the Worker-side race does not abort the in-container clone, so the ONLY
+  // bound on a stalled create's container-slot hold is this immediate destroy.
+  // A timed-out create must tear the container down, not leave it running.
+  it('destroys the container when create-workspace times out', async () => {
+    const { db, updates } = makeDb();
+    mocks.nodeAgent.createWorkspaceOnNode.mockRejectedValueOnce(
+      new Error('Request timed out after 120000ms')
+    );
+
+    await expect(
+      launchInstantSession(db as never, env, {
+        taskId: 'task-1',
+        project,
+        userId: 'user-1',
+        initialPrompt: 'prompt',
+        displayMessage: 'prompt',
+        agentType: 'claude-code',
+      })
+    ).rejects.toThrow('Request timed out after 120000ms');
+
+    expect(mocks.container.destroyVmAgentContainer).toHaveBeenCalledWith(env, 'node-1');
+    expect(updates).toContainEqual(
+      expect.objectContaining({ status: 'error', errorMessage: 'Request timed out after 120000ms' })
+    );
+    expect(updates).toContainEqual(
+      expect.objectContaining({ status: 'failed', executionStep: 'launch_failed' })
+    );
+  });
+
   it('honors a configured raw container workspace base directory', async () => {
     const { db } = makeDb();
     const envWithWorkspaceBase = {
