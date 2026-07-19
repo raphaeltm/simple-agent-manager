@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   nodeAgent: {
     createAgentSessionOnNode: vi.fn(),
     createWorkspaceOnNode: vi.fn(),
+    getCfContainerCreateWorkspaceTimeoutMs: vi.fn(),
     startAgentSessionOnNode: vi.fn(),
     waitForNodeAgentReady: vi.fn(),
   },
@@ -106,6 +107,7 @@ describe('launchInstantSession', () => {
     mocks.mcp.storeMcpToken.mockResolvedValue(undefined);
     mocks.nodeAgent.createAgentSessionOnNode.mockResolvedValue({});
     mocks.nodeAgent.createWorkspaceOnNode.mockResolvedValue({});
+    mocks.nodeAgent.getCfContainerCreateWorkspaceTimeoutMs.mockReturnValue(120_000);
     mocks.nodeAgent.startAgentSessionOnNode.mockResolvedValue({});
     mocks.nodeAgent.waitForNodeAgentReady.mockResolvedValue(undefined);
     mocks.nodes.createNodeRecord.mockResolvedValue({ id: 'node-1' });
@@ -330,7 +332,36 @@ describe('launchInstantSession', () => {
         repositoryPath: 'group/gitlab-repo',
         callbackToken: 'workspace-callback-token',
         lightweight: true,
-      })
+      }),
+      { requestTimeoutMs: 120_000 }
+    );
+  });
+
+  // Regression test for the 2026-07-18 instant-container outage: the standalone
+  // vm-agent clones synchronously inside the create-workspace request, so the
+  // instant path MUST use the cf-container create budget instead of the
+  // interactive node-agent default (30s). This fails on pre-fix code, which
+  // passed no timeout override.
+  it('runs create-workspace under the configured cf-container create budget', async () => {
+    const { db } = makeDb();
+    mocks.nodeAgent.getCfContainerCreateWorkspaceTimeoutMs.mockReturnValue(90_000);
+
+    await launchInstantSession(db as never, env, {
+      taskId: 'task-1',
+      project,
+      userId: 'user-1',
+      initialPrompt: 'prompt',
+      displayMessage: 'prompt',
+      agentType: 'claude-code',
+    } as never);
+
+    expect(mocks.nodeAgent.getCfContainerCreateWorkspaceTimeoutMs).toHaveBeenCalledWith(env);
+    expect(mocks.nodeAgent.createWorkspaceOnNode).toHaveBeenCalledWith(
+      'node-1',
+      env,
+      'user-1',
+      expect.objectContaining({ workspaceId: 'workspace-1', lightweight: true }),
+      { requestTimeoutMs: 90_000 }
     );
   });
 

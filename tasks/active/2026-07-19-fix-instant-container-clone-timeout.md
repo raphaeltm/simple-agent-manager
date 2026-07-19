@@ -40,15 +40,15 @@ Two surgical changes:
 
 ## Implementation Checklist
 
-- [ ] vm-agent: `standaloneCloneFilterArgs` helper + `--filter` injection in `cloneStandaloneRepository`; filter value from `Config.StandaloneCloneFilter`
-- [ ] vm-agent: `Config.StandaloneCloneFilter` loaded from `STANDALONE_CLONE_FILTER` (default `blob:none`, `off`/`none`/empty-after-trim disables) in `config.Load`
-- [ ] API: `CF_CONTAINER_CLONE_FILTER` passthrough into container launch envVars in `durable-objects/vm-agent-container.ts` (only when set)
-- [ ] API: `getCfContainerCreateWorkspaceTimeoutMs` + `DEFAULT_CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS` in `node-agent.ts`; optional `requestTimeoutMs` on `createWorkspaceOnNode`
-- [ ] API: `launchInstantSession` passes the create-workspace timeout
-- [ ] Env plumbing: add `CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS` + `CF_CONTAINER_CLONE_FILTER` to `apps/api/src/env.ts` and `apps/api/.env.example`
-- [ ] Docs: vm-agent reference (`apps/www/src/content/docs/docs/reference/vm-agent.md`) + configuration reference if it lists CF_CONTAINER_* vars
-- [ ] Go tests: clone args include `--filter=blob:none` by default (discriminating — fails on pre-fix code); custom filter value honored; `off` disables; config parsing tests
-- [ ] TS tests: `getCfContainerCreateWorkspaceTimeoutMs` default/env/invalid; `createWorkspaceOnNode` honors `requestTimeoutMs` behaviorally (small timeout → `Request timed out after Xms`, larger → succeeds); instant-session passes the configured timeout to the create-workspace call
+- [x] vm-agent: `standaloneCloneFilterArgs` helper + `--filter` injection in `cloneStandaloneRepository`; filter value from `Config.StandaloneCloneFilter`
+- [x] vm-agent: `Config.StandaloneCloneFilter` loaded from `STANDALONE_CLONE_FILTER` (default `blob:none`, `off`/`none`/empty-after-trim disables) in `config.Load`
+- [x] API: `CF_CONTAINER_CLONE_FILTER` passthrough into container launch envVars in `durable-objects/vm-agent-container.ts` (only when set)
+- [x] API: `getCfContainerCreateWorkspaceTimeoutMs` + `DEFAULT_CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS` in `node-agent.ts`; optional `requestTimeoutMs` on `createWorkspaceOnNode`
+- [x] API: `launchInstantSession` passes the create-workspace timeout
+- [x] Env plumbing: add `CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS` + `CF_CONTAINER_CLONE_FILTER` to `apps/api/src/env.ts` and `apps/api/.env.example`
+- [x] Docs: vm-agent reference (`apps/www/src/content/docs/docs/reference/vm-agent.md`) + configuration reference if it lists CF_CONTAINER_* vars
+- [x] Go tests: clone args include `--filter=blob:none` by default (discriminating — fails on pre-fix code); custom filter value honored; `off` disables; config parsing tests
+- [x] TS tests: `getCfContainerCreateWorkspaceTimeoutMs` default/env/invalid; `createWorkspaceOnNode` honors `requestTimeoutMs` behaviorally (small timeout → `Request timed out after Xms`, larger → succeeds); instant-session passes the configured timeout to the create-workspace call
 - [ ] Quality suite green: `pnpm lint && pnpm typecheck && pnpm test && pnpm build`; `go test ./...` in `packages/vm-agent`
 
 ## Acceptance Criteria

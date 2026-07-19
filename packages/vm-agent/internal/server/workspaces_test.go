@@ -194,6 +194,86 @@ func TestCreateWorkspaceStandaloneClonesBeforeRunning(t *testing.T) {
 	}
 }
 
+// Regression test for the 2026-07-18 instant-container outage: standalone
+// clones run synchronously inside the control plane's create-workspace request,
+// so they MUST use the partial-clone filter to keep clone cost proportional to
+// the working tree instead of the full history pack. This fails on pre-fix
+// code, which issued a full clone.
+func TestCreateWorkspaceStandaloneUsesPartialCloneFilter(t *testing.T) {
+	validator, privateKey := newWorkspaceCreateJWTValidator(t, "node-1")
+	workspaceID := "ws-standalone-filter"
+	workDir := filepath.Join(t.TempDir(), "repo")
+	var readyCalled atomic.Bool
+
+	controlPlane := newStandaloneCloneControlPlane(t, workspaceID, workDir, &readyCalled)
+	defer controlPlane.Close()
+
+	s := newWorkspaceCreateServer(t, controlPlane.URL, validator)
+	s.config.Role = config.RoleStandalone
+	s.config.WorkspaceID = workspaceID
+	s.config.WorkspaceDir = workDir
+	s.config.ContainerWorkDir = workDir
+	s.config.WorkspaceReadyCallbackTimeout = time.Second
+	s.config.StandaloneCloneFilter = config.DefaultStandaloneCloneFilter
+
+	var cloneCalled atomic.Bool
+	var cloneArgs []string
+	installStandaloneCloneGitStubCapture(t, s, workspaceID, workDir, &cloneCalled, &cloneArgs)
+
+	token := signWorkspaceCreateNodeToken(t, privateKey, "node-1", workspaceID)
+	rec := postCreateWorkspaceWithRepository(t, s, token, workspaceID, "owner/repo")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected standalone create status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !cloneCalled.Load() {
+		t.Fatal("expected standalone create to clone repository")
+	}
+	joined := strings.Join(cloneArgs, " ")
+	if !strings.Contains(joined, "clone --filter=blob:none --branch") {
+		t.Fatalf("clone args missing partial-clone filter: %v", cloneArgs)
+	}
+}
+
+func TestCreateWorkspaceStandaloneCloneFilterDisabled(t *testing.T) {
+	validator, privateKey := newWorkspaceCreateJWTValidator(t, "node-1")
+	workspaceID := "ws-standalone-nofilter"
+	workDir := filepath.Join(t.TempDir(), "repo")
+	var readyCalled atomic.Bool
+
+	controlPlane := newStandaloneCloneControlPlane(t, workspaceID, workDir, &readyCalled)
+	defer controlPlane.Close()
+
+	s := newWorkspaceCreateServer(t, controlPlane.URL, validator)
+	s.config.Role = config.RoleStandalone
+	s.config.WorkspaceID = workspaceID
+	s.config.WorkspaceDir = workDir
+	s.config.ContainerWorkDir = workDir
+	s.config.WorkspaceReadyCallbackTimeout = time.Second
+	s.config.StandaloneCloneFilter = config.ResolveStandaloneCloneFilter("off")
+
+	var cloneCalled atomic.Bool
+	var cloneArgs []string
+	installStandaloneCloneGitStubCapture(t, s, workspaceID, workDir, &cloneCalled, &cloneArgs)
+
+	token := signWorkspaceCreateNodeToken(t, privateKey, "node-1", workspaceID)
+	rec := postCreateWorkspaceWithRepository(t, s, token, workspaceID, "owner/repo")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected standalone create status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !cloneCalled.Load() {
+		t.Fatal("expected standalone create to clone repository")
+	}
+	for _, arg := range cloneArgs {
+		if strings.HasPrefix(arg, "--filter") {
+			t.Fatalf("clone args must not include --filter when disabled: %v", cloneArgs)
+		}
+	}
+	joined := strings.Join(cloneArgs, " ")
+	if !strings.Contains(joined, "clone --branch") {
+		t.Fatalf("expected plain full clone args, got: %v", cloneArgs)
+	}
+}
+
 func newStandaloneCloneControlPlane(
 	t *testing.T,
 	workspaceID string,
@@ -226,6 +306,18 @@ func installStandaloneCloneGitStub(
 	cloneCalled *atomic.Bool,
 ) {
 	t.Helper()
+	installStandaloneCloneGitStubCapture(t, s, workspaceID, workDir, cloneCalled, nil)
+}
+
+func installStandaloneCloneGitStubCapture(
+	t *testing.T,
+	s *Server,
+	workspaceID string,
+	workDir string,
+	cloneCalled *atomic.Bool,
+	capturedCloneArgs *[]string,
+) {
+	t.Helper()
 
 	originalRunGit := runStandaloneGitCommand
 	t.Cleanup(func() { runStandaloneGitCommand = originalRunGit })
@@ -249,6 +341,9 @@ func installStandaloneCloneGitStub(
 		}
 		if err := os.MkdirAll(filepath.Join(target, ".git"), 0o755); err != nil {
 			t.Fatalf("create fake git dir: %v", err)
+		}
+		if capturedCloneArgs != nil {
+			*capturedCloneArgs = append([]string(nil), args...)
 		}
 		cloneCalled.Store(true)
 		return "", nil
