@@ -101,13 +101,24 @@ func (s *Server) cloneStandaloneRepository(ctx context.Context, runtime *Workspa
 		branch = "main"
 	}
 
-	args := []string{"clone", "--branch", branch, cloneSpec.URL, workDir}
+	// Standalone clones run synchronously inside the control plane's
+	// create-workspace request deadline, so clone cost must stay proportional
+	// to the working tree, not the full history pack. The partial-clone filter
+	// (default blob:none) skips unreferenced historical blobs; later blob
+	// access lazy-fetches through the persistent credential helper installed
+	// by ConfigureStandaloneGitCredentialHelper.
+	cloneFilter := s.config.StandaloneCloneFilter
+	args := []string{"clone"}
+	if cloneFilter != "" {
+		args = append(args, "--filter="+cloneFilter)
+	}
+	args = append(args, "--branch", branch, cloneSpec.URL, workDir)
 	if helperPath := standaloneCloneCredentialHelperPath(extraEnv); helperPath != "" {
 		args = append([]string{"-c", "credential.helper=" + helperPath}, args...)
 	}
 
 	repository := strings.TrimSpace(runtime.Repository)
-	slog.Info("Cloning standalone repository", "workspace", runtime.ID, "repository", repository, "branch", branch, "workDir", workDir)
+	slog.Info("Cloning standalone repository", "workspace", runtime.ID, "repository", repository, "branch", branch, "workDir", workDir, "cloneFilter", cloneFilter)
 	output, err := runStandaloneGitCommand(ctx, "", extraEnv, args...)
 	if err != nil {
 		return fmt.Errorf("standalone git clone failed: %w: %s", err, redactStandaloneCloneSecrets(output, cloneSpec.Token))

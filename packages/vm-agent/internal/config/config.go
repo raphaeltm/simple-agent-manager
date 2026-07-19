@@ -60,6 +60,15 @@ const (
 	// DefaultGitCredentialTimeout bounds credential-helper calls back to the
 	// local VM agent. Override via GIT_CREDENTIAL_TIMEOUT.
 	DefaultGitCredentialTimeout = 5 * time.Second
+
+	// DefaultStandaloneCloneFilter is the git partial-clone filter used by
+	// standalone (container) workspace preparation. Blobless clones skip all
+	// history blobs that are not in the checked-out tree, keeping clone time
+	// proportional to the working tree instead of the full pack — critical
+	// because standalone clones run synchronously inside the control plane's
+	// create-workspace request deadline. Override via STANDALONE_CLONE_FILTER;
+	// set to "off" (or "none"/"false") to force a full clone.
+	DefaultStandaloneCloneFilter = "blob:none"
 )
 
 const (
@@ -134,6 +143,11 @@ type Config struct {
 	BootstrapStatePath string
 	BootstrapMaxWait   time.Duration
 	BootstrapTimeout   time.Duration // Overall bootstrap timeout including devcontainer build
+
+	// StandaloneCloneFilter is the resolved git partial-clone filter for
+	// standalone (container) workspace clones. Empty means "full clone".
+	// See DefaultStandaloneCloneFilter and env STANDALONE_CLONE_FILTER.
+	StandaloneCloneFilter string
 
 	// Session settings
 	SessionTTL             time.Duration
@@ -401,6 +415,8 @@ func Load() (*Config, error) {
 		WorkspaceDir:       workspaceDir,
 		BootstrapStatePath: getEnv("BOOTSTRAP_STATE_PATH", "/var/lib/vm-agent/bootstrap-state.json"),
 		BootstrapMaxWait:   getEnvDuration("BOOTSTRAP_MAX_WAIT", 5*time.Minute),
+
+		StandaloneCloneFilter: ResolveStandaloneCloneFilter(getEnv("STANDALONE_CLONE_FILTER", DefaultStandaloneCloneFilter)),
 		// Must be <= API-side TASK_RUNNER_WORKSPACE_READY_TIMEOUT_MS (default 30m).
 		// If larger, the API declares the workspace dead while bootstrap is still running.
 		BootstrapTimeout: getEnvDuration("BOOTSTRAP_TIMEOUT", 30*time.Minute),

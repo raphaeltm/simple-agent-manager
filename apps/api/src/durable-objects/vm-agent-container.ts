@@ -99,6 +99,11 @@ export class VmAgentContainer extends Container<Env> {
           VM_AGENT_PORT: String(config.vmAgentPort),
           VM_AGENT_PROTOCOL: 'http',
           COOKIE_SECURE: 'true',
+          // Operator override for the standalone git partial-clone filter;
+          // the vm-agent defaults to blob:none when unset.
+          ...(this.env.CF_CONTAINER_CLONE_FILTER
+            ? { STANDALONE_CLONE_FILTER: this.env.CF_CONTAINER_CLONE_FILTER }
+            : {}),
         },
         labels: {
           nodeId: config.nodeId,
