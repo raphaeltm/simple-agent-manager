@@ -87,8 +87,8 @@ Source idea: `01KXFZPG6M70PJF72CKFZVK99B`.
 
 - [x] Focused cloud-init test suite passes on the current-main integration (178/178).
 - [x] Cloud-init package typecheck and build pass on the current-main integration.
-- [ ] Full repository lint, typecheck, test, and build pass on the current-main integration.
-- [ ] Current-head task completion and relevant specialist reviews pass.
+- [x] Full repository lint, typecheck, test, and build pass on the current-main integration.
+- [x] Current-head task completion and relevant specialist reviews pass.
 - [ ] GitHub CI passes (Phase 7 gate pending).
 - [ ] Exact-head staging deployment and built-in smoke suite pass.
 - [ ] A fresh real Hetzner node reaches a clean cloud-init completion state.
@@ -211,6 +211,23 @@ procedures were rerun directly against `main...HEAD`:
 | Documentation sync validator | PASS   | The path-scoped rule matches the production template and runtime; no public API, env, schema, or deployment documentation changed.                |
 
 No specialist raised a blocking or advisory code finding.
+
+## 2026-07-20 Current-Head Revalidation
+
+- Integrated current `main` (including merged PR #1618) with a normal merge.
+- Focused cloud-init suite: 178/178 tests; package typecheck and production build pass.
+- Complete repository gates: lint 7/7 with zero errors, typecheck 16/16,
+  production build 9/9, and tests 19/19 (API 6,190/6,190).
+- Test-engineer review: PASS. The tests extract the rendered scalar from parsed
+  YAML, execute both role branches through `/bin/sh`, isolate external side
+  effects behind harmless `logger`/`mkdir` stubs, and assert the boundary calls.
+- Constitution review: PASS. `set -eu` is the fixed POSIX interpreter contract;
+  no configurable URL, timeout, limit, identifier, or business value was added.
+- Documentation review: PASS. The path-scoped rule describes the production
+  runtime and test contract; no public API, environment, or deployment interface changed.
+- Task-completion audit: PASS for implementation readiness. Checks A/B/C/F pass;
+  D/E are N/A. CI, exact-head deployment, fresh-node boot, and live chat remain
+  explicit unchecked lifecycle gates, so this task stays active until they pass.
 
 ## References
 
