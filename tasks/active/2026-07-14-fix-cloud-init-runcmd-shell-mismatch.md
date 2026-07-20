@@ -18,10 +18,15 @@ Source idea: `01KXFZPG6M70PJF72CKFZVK99B`.
 
 ## Constraints
 
-- The user explicitly requested that this task skip staging deployment and all
-  staging mutation.
-- Replace the normal infrastructure staging gate with local execution of the
-  rendered command under its real interpreter plus high-quality automated tests.
+- The original 2026-07-14 task explicitly skipped staging mutation, but the
+  2026-07-20 parent PR-resolution task supersedes that waiver and requires
+  exact-head staging before merge.
+- Provision a fresh real Hetzner staging node through SAM's supported platform
+  credential fallback and verify cloud-init completes without the Dash error.
+- On that staged candidate, complete the core user journeys with genuine rendered
+  responses from both Claude and Codex before merge.
+- Retain local execution of the rendered command under its real interpreter plus
+  high-quality automated tests as the deterministic regression gate.
 - Keep the production change minimal and avoid a new abstraction or dependency.
 
 ## Research Findings
@@ -80,12 +85,14 @@ Source idea: `01KXFZPG6M70PJF72CKFZVK99B`.
 
 ### Validation
 
-- [x] Focused cloud-init test suite passes.
-- [x] Cloud-init package typecheck and build pass.
-- [x] Full repository lint, typecheck, test, and build pass.
-- [x] Task completion and relevant specialist reviews pass.
+- [x] Focused cloud-init test suite passes on the current-main integration (178/178).
+- [x] Cloud-init package typecheck and build pass on the current-main integration.
+- [ ] Full repository lint, typecheck, test, and build pass on the current-main integration.
+- [ ] Current-head task completion and relevant specialist reviews pass.
 - [ ] GitHub CI passes (Phase 7 gate pending).
-- [x] Staging is explicitly recorded as skipped by user instruction.
+- [ ] Exact-head staging deployment and built-in smoke suite pass.
+- [ ] A fresh real Hetzner node reaches a clean cloud-init completion state.
+- [ ] Genuine Claude and Codex responses render through the staged core chat journey.
 
 ## Acceptance Criteria
 
@@ -100,8 +107,11 @@ Source idea: `01KXFZPG6M70PJF72CKFZVK99B`.
       limit.
 - [x] Future cloud-init changes receive path-scoped guidance to test rendered
       commands with their actual interpreter.
+- [ ] A fresh exact-head Hetzner staging node completes cloud-init without
+      `Illegal option -o pipefail` or `cc_scripts_user failed`.
+- [ ] Core staged chat returns genuine rendered responses from both Claude and Codex.
 - [ ] The PR merges only after local validation, specialist review, and CI are
-      green; no staging deployment is triggered.
+      green and exact-head staging validation passes.
 
 ## Post-Mortem
 
