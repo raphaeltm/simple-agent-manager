@@ -20,3 +20,13 @@ Neither was introduced by the clone fix — the dominant slot-hold cost was alwa
 - [ ] Timeout on the cf-container create path propagates cancellation (AbortController through `fetchNodeAgent`'s container branch) or documents why the containers API cannot support it
 - [ ] `max_instances` reviewed and either raised or made deploy-configurable with rationale
 - [ ] Load review per rule 47 documented in the PR
+
+## Update 2026-07-20 (PR #1643 review)
+
+PR #1643 exposed `runtime: "cf-container"` on the MCP `dispatch_task` tool, so
+instant sessions are now agent-automatable (including recursive dispatch up to
+`dispatchMaxDepth`), not just browser-initiated via chat-start. The generic
+per-task/per-project dispatch limits apply to instant dispatches (shared atomic
+INSERT), but the missing per-user/cross-project instant capacity gate described
+above is now more reachable. Raised by the security review of PR #1643 —
+prioritize accordingly.

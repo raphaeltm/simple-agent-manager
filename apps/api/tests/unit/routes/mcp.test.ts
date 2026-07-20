@@ -1031,7 +1031,9 @@ describe('MCP Routes', () => {
           output_branch: 'sam/other',
           output_pr_url: 'https://github.com/user/repo/pull/1',
           output_summary: 'Did some work',
+          completion_evidence: null,
           error_message: null,
+          chat_session_id: 'chat-session-42',
           created_at: '2026-03-14T00:00:00Z',
           updated_at: '2026-03-14T01:00:00Z',
           started_at: '2026-03-14T00:05:00Z',
@@ -1053,6 +1055,8 @@ describe('MCP Routes', () => {
       const data = JSON.parse(body.result.content[0].text);
       expect(data.id).toBe('task-other');
       expect(data.description).toBe('Full description here');
+      // Instant dispatches point callers at get_task_details for the sessionId
+      expect(data.sessionId).toBe('chat-session-42');
     });
 
     it('should return error when task not found', async () => {
@@ -1774,6 +1778,40 @@ describe('MCP Routes', () => {
       );
     });
 
+    it('rejects cf-container dispatch before instant launch when GitHub owner access is revoked', async () => {
+      setupHappyPathMocks();
+      mockEnv.CF_CONTAINER_ENABLED = 'true';
+      mockInstantProfile();
+      instantSessionMocks.launchInstantSession.mockResolvedValue({
+        taskId: 'generated-task',
+        runtime: 'cf-container',
+      });
+      vi.mocked(projectHelpers.requireRepositoryOwnerAccess).mockRejectedValueOnce(
+        new Error('Repository access is no longer available')
+      );
+
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'dispatch_task',
+          arguments: {
+            description: 'Fix the runtime router',
+            agentProfileId: 'instant-profile',
+          },
+        })
+      );
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.error).toBeDefined();
+      expect(body.error.message).toContain('Repository access is no longer available');
+      const preflightCall = vi.mocked(projectHelpers.requireRepositoryOwnerAccess).mock.calls[0]!;
+      expect(preflightCall[3]).toBe('user-789');
+      expect(preflightCall[4]).toBe('mcp-dispatch');
+      expect(instantSessionMocks.launchInstantSession).not.toHaveBeenCalled();
+      expect(mockTaskRunnerStub.start).not.toHaveBeenCalled();
+    });
+
     it('lets an explicit cf-container runtime launch Instant without a profile', async () => {
       setupHappyPathMocks();
       mockEnv.CF_CONTAINER_ENABLED = 'true';
@@ -1824,6 +1862,60 @@ describe('MCP Routes', () => {
       const data = JSON.parse((await res.json()).result.content[0].text);
       expect(data).toMatchObject({ runtime: 'vm', runtimeReason: 'explicit-vm' });
       expect(mockTaskRunnerStub.start).toHaveBeenCalledTimes(1);
+      expect(instantSessionMocks.launchInstantSession).not.toHaveBeenCalled();
+    });
+
+    it('lets explicit cf-container override a vm profile', async () => {
+      setupHappyPathMocks();
+      mockEnv.CF_CONTAINER_ENABLED = 'true';
+      mockInstantProfile('vm');
+      instantSessionMocks.launchInstantSession.mockResolvedValue({
+        taskId: 'generated-task',
+        runtime: 'cf-container',
+      });
+
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'dispatch_task',
+          arguments: {
+            description: 'Force an Instant launch',
+            agentProfileId: 'instant-profile',
+            runtime: 'cf-container',
+          },
+        })
+      );
+
+      const body = await res.json();
+      expect(body.error).toBeUndefined();
+      const data = JSON.parse(body.result.content[0].text);
+      expect(data).toMatchObject({
+        status: 'queued',
+        runtime: 'cf-container',
+        runtimeReason: 'explicit-cf-container',
+      });
+      expect(mockTaskRunnerStub.start).not.toHaveBeenCalled();
+      expect(instantSessionMocks.launchInstantSession).toHaveBeenCalledTimes(1);
+    });
+
+    it('rejects an unrecognized runtime value', async () => {
+      setupHappyPathMocks();
+
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'dispatch_task',
+          arguments: {
+            description: 'Pick a runtime that does not exist',
+            runtime: 'gpu-cluster',
+          },
+        })
+      );
+
+      const body = await res.json();
+      expect(body.error.code).toBe(-32602);
+      expect(body.error.message).toContain('runtime must be vm or cf-container');
+      expect(mockTaskRunnerStub.start).not.toHaveBeenCalled();
       expect(instantSessionMocks.launchInstantSession).not.toHaveBeenCalled();
     });
 

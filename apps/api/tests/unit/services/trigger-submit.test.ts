@@ -61,7 +61,7 @@ vi.mock('../../../src/lib/ulid', () => ({
 
 // Mock drizzle
 const mockInsertValues = vi.fn().mockResolvedValue(undefined);
-const mockUpdateSetWhere = vi.fn().mockResolvedValue(undefined);
+const mockUpdateSetWhere = vi.fn().mockResolvedValue({ meta: { changes: 1 } });
 const mockSelectResult: any[] = [];
 
 vi.mock('drizzle-orm/d1', () => ({

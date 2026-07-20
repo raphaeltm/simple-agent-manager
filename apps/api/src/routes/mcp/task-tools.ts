@@ -578,6 +578,7 @@ export async function handleGetTaskDetails(
       outputSummary: schema.tasks.outputSummary,
       completionEvidence: schema.tasks.completionEvidence,
       errorMessage: schema.tasks.errorMessage,
+      chatSessionId: schema.tasks.chatSessionId,
       createdAt: schema.tasks.createdAt,
       updatedAt: schema.tasks.updatedAt,
       startedAt: schema.tasks.startedAt,
@@ -603,6 +604,9 @@ export async function handleGetTaskDetails(
     outputSummary: task.outputSummary,
     completionEvidence: parseCompletionEvidenceJson(task.completionEvidence ?? null),
     errorMessage: task.errorMessage,
+    // Instant (cf-container) dispatches create the chat session asynchronously;
+    // dispatch_task points callers here to obtain the sessionId after launch.
+    sessionId: task.chatSessionId,
     createdAt: task.createdAt,
     updatedAt: task.updatedAt,
     startedAt: task.startedAt,

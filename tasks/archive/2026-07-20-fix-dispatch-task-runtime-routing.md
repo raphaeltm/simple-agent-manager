@@ -54,10 +54,10 @@ Add a vertical-slice regression test for every runtime-selecting task entry poin
 - [x] Skip VM credentials/quota and pre-created chat session/message on Instant dispatch.
 - [x] Launch Instant work using `executionCtx.waitUntil`, awaiting inline when unavailable.
 - [x] Return runtime and decision reason for both Instant and VM responses.
-- [ ] Add `taskMode` passthrough to `launchInstantSession`, defaulting to conversation.
-- [ ] Add the rule-42 watchdog comment referencing the approved idea and both Instant backlog tasks.
-- [ ] Add the complete approved runtime, contradiction, credential, disabled-container, single-session/message, and taskMode test matrix.
-- [ ] Update public parameter documentation and `CLAUDE.md` Recent Changes.
+- [x] Add `taskMode` passthrough to `launchInstantSession`, defaulting to conversation.
+- [x] Add the rule-42 watchdog comment referencing the approved idea and both Instant backlog tasks.
+- [x] Add the complete approved runtime, contradiction, credential, disabled-container, single-session/message, and taskMode test matrix.
+- [x] Update public parameter documentation and `CLAUDE.md` Recent Changes.
 
 ## Acceptance Criteria
 

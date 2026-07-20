@@ -472,6 +472,21 @@ export async function handleDispatchTask(requestId: string | number | null, para
 
   let sessionId: string | undefined;
   if (isInstantRuntime) {
+    // Same fail-fast repo-access re-verification as the VM branch below and the
+    // browser Instant path (chat-start.ts) — a user whose GitHub access was
+    // revoked must not be able to spawn a cloning container via dispatch.
+    try {
+      await requireRepositoryOwnerAccess(env, db, project, tokenData.userId, 'mcp-dispatch');
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      await markQueuedTaskFailed(db, taskId, `Repository access check failed: ${errorMsg}`);
+      log.error('mcp.dispatch_task.instant_access_check_failed', {
+        taskId,
+        projectId: tokenData.projectId,
+        error: errorMsg,
+      });
+      return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to launch instant session: ${errorMsg}`);
+    }
     await launchDispatchedInstantSession(
       db,
       env,
