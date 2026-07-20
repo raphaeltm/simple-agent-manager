@@ -101,6 +101,7 @@ export interface CreateTriggerRequest {
     eventType: GitHubTriggerEventType;
     filters?: GitHubTriggerFilters;
   };
+  webhookConfig?: WebhookTriggerConfigInput;
 }
 
 export interface UpdateTriggerRequest {
@@ -116,6 +117,11 @@ export interface UpdateTriggerRequest {
   taskMode?: TaskMode;
   vmSizeOverride?: string | null;
   maxConcurrent?: number;
+  githubConfig?: {
+    eventType: GitHubTriggerEventType;
+    filters?: GitHubTriggerFilters;
+  };
+  webhookConfig?: WebhookTriggerConfigInput;
 }
 
 export interface TriggerResponse extends Trigger {
@@ -132,6 +138,13 @@ export interface TriggerResponse extends Trigger {
     eventType: GitHubTriggerEventType;
     filters: GitHubTriggerFilters;
   };
+  /** Redacted webhook configuration, present when sourceType is 'webhook'. */
+  webhookConfig?: WebhookTriggerConfig;
+}
+
+/** Create response. The raw webhook credential is present only on webhook creation. */
+export interface CreateTriggerResponse extends TriggerResponse {
+  webhookCredential?: WebhookCredential;
 }
 
 export interface TriggerExecutionResponse extends TriggerExecution {
@@ -146,6 +159,20 @@ export interface ListTriggerExecutionsResponse {
   executions: TriggerExecutionResponse[];
   nextCursor?: string | null;
 }
+
+export interface TriggerPreviewRequest {
+  payload?: Record<string, unknown>;
+  headers?: Record<string, string>;
+}
+
+export interface TriggerPreviewResponse {
+  renderedPrompt: string;
+  warnings: string[];
+  context: Record<string, unknown>;
+  filterResult?: WebhookFilterResult;
+}
+
+export type RunTriggerRequest = TriggerPreviewRequest;
 
 // =============================================================================
 // Template Context (Cron)
@@ -233,7 +260,10 @@ export interface GitHubTriggerConfig {
 }
 
 /** API request shape for creating a GitHub trigger. */
-export interface CreateGitHubTriggerRequest extends Omit<CreateTriggerRequest, 'cronExpression' | 'cronTimezone'> {
+export interface CreateGitHubTriggerRequest extends Omit<
+  CreateTriggerRequest,
+  'cronExpression' | 'cronTimezone'
+> {
   sourceType: 'github';
   githubEventType: GitHubTriggerEventType;
   githubFilters?: GitHubTriggerFilters;
@@ -279,6 +309,112 @@ export interface GitHubTemplateContext {
     id: string;
     sequenceNumber: string;
   };
+}
+
+// =============================================================================
+// Generic Webhook Trigger Configuration
+// =============================================================================
+
+export const WEBHOOK_FILTER_OPERATORS = ['exists', 'equals', 'contains'] as const;
+export type WebhookFilterOperator = (typeof WEBHOOK_FILTER_OPERATORS)[number];
+
+export const WEBHOOK_FILTER_MODES = ['all', 'any'] as const;
+export type WebhookFilterMode = (typeof WEBHOOK_FILTER_MODES)[number];
+
+export interface WebhookTriggerFilter {
+  path: string;
+  operator: WebhookFilterOperator;
+  value?: string | number | boolean | null;
+}
+
+export interface WebhookTriggerConfigInput {
+  sourceLabel?: string;
+  filterMode?: WebhookFilterMode;
+  filters?: WebhookTriggerFilter[];
+  /** Lowercase header names that may be copied into template context. */
+  includedHeaders?: string[];
+}
+
+/** Safe configuration returned by management APIs. Token material is never included. */
+export interface WebhookTriggerConfig {
+  sourceLabel: string | null;
+  filterMode: WebhookFilterMode;
+  filters: WebhookTriggerFilter[];
+  includedHeaders: string[];
+  tokenLastFour: string;
+  tokenCreatedAt: string;
+  tokenRotatedAt: string | null;
+}
+
+/** One-time credential returned only when a webhook token is created or rotated. */
+export interface WebhookCredential {
+  endpointUrl: string;
+  token: string;
+  headerName: 'Authorization';
+}
+
+export interface WebhookTemplateContext {
+  webhook: {
+    receivedAt: string;
+    deliveryId: string;
+    sourceLabel: string;
+    /** Canonical compact JSON representation of body. */
+    payload: string;
+    body: Record<string, unknown>;
+    headers: Record<string, string>;
+  };
+  trigger: {
+    id: string;
+    name: string;
+    description: string;
+    fireCount: string;
+  };
+  project: {
+    id: string;
+    name: string;
+  };
+  execution: {
+    id: string;
+    sequenceNumber: string;
+  };
+}
+
+export interface WebhookFilterResult {
+  matched: boolean;
+  reason?: string;
+  matchedFilters: number;
+  totalFilters: number;
+}
+
+export const WEBHOOK_DELIVERY_OUTCOMES = [
+  'processing',
+  'accepted',
+  'duplicate',
+  'filtered',
+  'inactive',
+  'rate_limited',
+  'still_running',
+  'concurrent_limit',
+  'configuration_error',
+  'internal_error',
+] as const;
+export type WebhookDeliveryOutcome = (typeof WEBHOOK_DELIVERY_OUTCOMES)[number];
+
+export interface WebhookDelivery {
+  id: string;
+  triggerId: string;
+  outcome: WebhookDeliveryOutcome;
+  httpStatus: number;
+  bodyBytes: number;
+  executionId: string | null;
+  errorCode: string | null;
+  receivedAt: string;
+  processedAt: string | null;
+}
+
+export interface ListWebhookDeliveriesResponse {
+  deliveries: WebhookDelivery[];
+  nextCursor: string | null;
 }
 
 // =============================================================================

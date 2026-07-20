@@ -255,4 +255,33 @@ describe('task callback recoverable errors', () => {
     );
     expect(projectDataService.stopSession).not.toHaveBeenCalled();
   });
+
+  it('accepts a repeated same-terminal callback and reruns idempotent cleanup', async () => {
+    const { cleanupTerminalTaskResourcesOrThrow } =
+      await import('../../../src/services/task-terminal-cleanup');
+    const { setTaskStatus } = await import('../../../src/routes/tasks/_helpers');
+    mocks.task.status = 'failed';
+    mocks.task.errorMessage = 'fatal error';
+
+    const res = await postCallback(app, {
+      toStatus: 'failed',
+      reason: 'duplicate delivery',
+      errorMessage: 'fatal error',
+    });
+
+    await expectOk(res);
+    expect(cleanupTerminalTaskResourcesOrThrow).toHaveBeenCalledWith(
+      expect.anything(),
+      'task-recoverable',
+      {
+        status: 'failed',
+        errorMessage: 'fatal error',
+        projectId: 'proj-recoverable',
+        failureLogEvent: 'task.callback_terminal_cleanup_failed',
+        logContext: { projectId: 'proj-recoverable', source: 'task.callback.idempotent' },
+      }
+    );
+    // Idempotency invariant: the already-terminal row is NOT written again.
+    expect(setTaskStatus).not.toHaveBeenCalled();
+  });
 });

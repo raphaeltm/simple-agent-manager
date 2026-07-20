@@ -127,10 +127,11 @@ describe('Projects page', () => {
     expect(screen.queryByText('Project One')).not.toBeInTheDocument();
   });
 
-  it('shows workspace and session counts', async () => {
+  it('shows workspace and session counts with singular/plural forms', async () => {
     renderPage();
 
-    expect(await screen.findByText(/2 ws/)).toBeInTheDocument();
-    expect(screen.getByText(/1 sessions/)).toBeInTheDocument();
+    // 2 workspaces · 1 session — counts are pluralized ("1 session", not
+    // "1 sessions") and zero-count segments are hidden entirely.
+    expect(await screen.findByText(/2 ws · 1 session$/)).toBeInTheDocument();
   });
 });

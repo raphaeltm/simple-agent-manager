@@ -96,13 +96,16 @@ describe('Bootstrap Callback Token Encryption (F-004)', () => {
     expect(body.workspaceId).toBe('ws-enc-test');
   });
 
-  it('falls back to plaintext callbackToken for legacy in-flight tokens', async () => {
+  it('falls back to plaintext callbackToken for legacy in-flight tokens (legacy callback token compatibility)', async () => {
     const { encrypt } = await import('../../../src/services/encryption');
 
     const { ciphertext: encHetzner, iv: ivHetzner } = await encrypt(
       'hetzner-token',
       env.ENCRYPTION_KEY
     );
+
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-18T08:00:00.000Z'));
 
     const tokenData: BootstrapTokenData = {
       workspaceId: 'ws-legacy',
@@ -112,16 +115,51 @@ describe('Bootstrap Callback Token Encryption (F-004)', () => {
       // No encrypted callback fields — legacy format
       encryptedGithubToken: null,
       githubTokenIv: null,
-      createdAt: new Date().toISOString(),
+      createdAt: '2026-07-18T07:50:00.000Z',
     };
 
     kv.get.mockResolvedValue(tokenData);
 
-    const res = await requestBootstrapToken('legacy-callback-token');
+    try {
+      const res = await requestBootstrapToken('legacy-callback-token');
 
-    expect(res.status).toBe(200);
-    const body: BootstrapResponse = await res.json();
-    expect(body.callbackToken).toBe('plaintext-legacy-jwt');
+      expect(res.status).toBe(200);
+      const body: BootstrapResponse = await res.json();
+      expect(body.callbackToken).toBe('plaintext-legacy-jwt');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('rejects stale plaintext callbackToken legacy data beyond bootstrap TTL', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-18T08:00:00.000Z'));
+    const { encrypt } = await import('../../../src/services/encryption');
+
+    const { ciphertext: encHetzner, iv: ivHetzner } = await encrypt(
+      'hetzner-token',
+      env.ENCRYPTION_KEY
+    );
+
+    const tokenData: BootstrapTokenData = {
+      workspaceId: 'ws-stale-legacy',
+      encryptedHetznerToken: encHetzner,
+      hetznerTokenIv: ivHetzner,
+      callbackToken: 'stale-plaintext-legacy-jwt',
+      encryptedGithubToken: null,
+      githubTokenIv: null,
+      createdAt: '2026-07-18T07:40:00.000Z',
+    };
+
+    kv.get.mockResolvedValue(tokenData);
+
+    try {
+      const res = await requestBootstrapToken('stale-legacy-callback-token');
+      expect(res.status).toBe(401);
+      expect(kv.delete).toHaveBeenCalledWith('bootstrap:stale-legacy-callback-token');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('rejects bootstrap data when both encrypted and plaintext callback fields are absent', async () => {
@@ -147,6 +185,6 @@ describe('Bootstrap Callback Token Encryption (F-004)', () => {
 
     const res = await requestBootstrapToken('no-callback-token');
 
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(401);
   });
 });

@@ -9,6 +9,7 @@ import {
   Pause,
   Play,
   Trash2,
+  Webhook,
 } from 'lucide-react';
 import { type FC, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -46,6 +47,11 @@ function formatTriggerSource(trigger: TriggerResponse): string {
     const commandPrefix = trigger.githubConfig?.filters.commandPrefix;
     return commandPrefix ? `GitHub ${eventLabel}: ${commandPrefix}` : `GitHub ${eventLabel}`;
   }
+  if (trigger.sourceType === 'webhook') {
+    const label = trigger.webhookConfig?.sourceLabel || 'Generic webhook';
+    const suffix = trigger.webhookConfig?.tokenLastFour;
+    return suffix ? `${label} · token ••••${suffix}` : label;
+  }
   return trigger.cronHumanReadable ?? trigger.cronExpression ?? 'No schedule';
 }
 
@@ -72,11 +78,17 @@ export const TriggerCard: FC<TriggerCardProps> = ({
 }) => {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuBtnRef = useRef<HTMLButtonElement>(null);
-  const statusCfg = STATUS_CONFIG[trigger.status] ?? { color: 'var(--sam-color-fg-muted)', label: 'Disabled' };
+  const statusCfg = STATUS_CONFIG[trigger.status] ?? {
+    color: 'var(--sam-color-fg-muted)',
+    label: 'Disabled',
+  };
   const disabledClass = trigger.status === 'disabled' ? 'opacity-60' : '';
 
   return (
-    <Card variant="glass" className={`p-4 hover:bg-surface-hover transition-colors duration-150 ${disabledClass}`}>
+    <Card
+      variant="glass"
+      className={`p-4 hover:bg-surface-hover transition-colors duration-150 ${disabledClass}`}
+    >
       {/* Header row: name + status */}
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
@@ -107,58 +119,76 @@ export const TriggerCard: FC<TriggerCardProps> = ({
           >
             <MoreVertical size={16} />
           </button>
-          {menuOpen && createPortal(
-            <div
-              className="w-40 glass-surface rounded-md shadow-lg py-1"
-              style={{
-                position: 'fixed',
-                zIndex: 20,
-                ...(menuBtnRef.current ? (() => {
-                  const r = menuBtnRef.current!.getBoundingClientRect();
-                  return { top: r.bottom + 4, right: window.innerWidth - r.right };
-                })() : {}),
-              }}
-            >
-              <button
-                onClick={() => { setMenuOpen(false); onEdit(trigger); }}
-                className="w-full text-left px-3 py-2 text-sm text-fg-primary hover:bg-surface-hover cursor-pointer bg-transparent border-none"
+          {menuOpen &&
+            createPortal(
+              <div
+                className="w-40 glass-surface rounded-md shadow-lg py-1"
+                style={{
+                  position: 'fixed',
+                  zIndex: 20,
+                  ...(menuBtnRef.current
+                    ? (() => {
+                        const r = menuBtnRef.current!.getBoundingClientRect();
+                        return { top: r.bottom + 4, right: window.innerWidth - r.right };
+                      })()
+                    : {}),
+                }}
               >
-                Edit
-              </button>
-              <button
-                onClick={() => { setMenuOpen(false); onRunNow(trigger); }}
-                className="w-full text-left px-3 py-2 text-sm text-fg-primary hover:bg-surface-hover cursor-pointer bg-transparent border-none"
-                disabled={trigger.status === 'disabled'}
-              >
-                Run Now
-              </button>
-              <button
-                onClick={() => { setMenuOpen(false); onTogglePause(trigger); }}
-                className="w-full text-left px-3 py-2 text-sm text-fg-primary hover:bg-surface-hover cursor-pointer bg-transparent border-none"
-              >
-                {trigger.status === 'paused' ? 'Resume' : 'Pause'}
-              </button>
-              <button
-                onClick={() => { setMenuOpen(false); onViewHistory(trigger); }}
-                className="w-full text-left px-3 py-2 text-sm text-fg-primary hover:bg-surface-hover cursor-pointer bg-transparent border-none"
-              >
-                View History
-              </button>
-              {onDelete && (
-                <>
-                  <div className="border-t border-border-default my-1" />
-                  <button
-                    onClick={() => { setMenuOpen(false); onDelete(trigger); }}
-                    className="w-full text-left px-3 py-2 text-sm text-danger hover:bg-surface-hover cursor-pointer bg-transparent border-none flex items-center gap-2"
-                  >
-                    <Trash2 size={14} aria-hidden="true" />
-                    Delete
-                  </button>
-                </>
-              )}
-            </div>,
-            document.body,
-          )}
+                <button
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onEdit(trigger);
+                  }}
+                  className="w-full text-left px-3 py-2 text-sm text-fg-primary hover:bg-surface-hover cursor-pointer bg-transparent border-none"
+                >
+                  Edit
+                </button>
+                <button
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onRunNow(trigger);
+                  }}
+                  className="w-full text-left px-3 py-2 text-sm text-fg-primary hover:bg-surface-hover cursor-pointer bg-transparent border-none"
+                  disabled={trigger.status === 'disabled'}
+                >
+                  Run Now
+                </button>
+                <button
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onTogglePause(trigger);
+                  }}
+                  className="w-full text-left px-3 py-2 text-sm text-fg-primary hover:bg-surface-hover cursor-pointer bg-transparent border-none"
+                >
+                  {trigger.status === 'paused' ? 'Resume' : 'Pause'}
+                </button>
+                <button
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onViewHistory(trigger);
+                  }}
+                  className="w-full text-left px-3 py-2 text-sm text-fg-primary hover:bg-surface-hover cursor-pointer bg-transparent border-none"
+                >
+                  View History
+                </button>
+                {onDelete && (
+                  <>
+                    <div className="border-t border-border-default my-1" />
+                    <button
+                      onClick={() => {
+                        setMenuOpen(false);
+                        onDelete(trigger);
+                      }}
+                      className="w-full text-left px-3 py-2 text-sm text-danger hover:bg-surface-hover cursor-pointer bg-transparent border-none flex items-center gap-2"
+                    >
+                      <Trash2 size={14} aria-hidden="true" />
+                      Delete
+                    </button>
+                  </>
+                )}
+              </div>,
+              document.body
+            )}
         </div>
       </div>
 
@@ -167,12 +197,12 @@ export const TriggerCard: FC<TriggerCardProps> = ({
         <span className="flex items-center gap-1.5">
           {trigger.sourceType === 'github' ? (
             <Github size={14} aria-hidden="true" />
+          ) : trigger.sourceType === 'webhook' ? (
+            <Webhook size={14} aria-hidden="true" />
           ) : (
             <Clock size={14} aria-hidden="true" />
           )}
-          <span className="truncate max-w-[200px]">
-            {formatTriggerSource(trigger)}
-          </span>
+          <span className="truncate max-w-[200px]">{formatTriggerSource(trigger)}</span>
         </span>
         {trigger.sourceType === 'cron' && trigger.nextFireAt && (
           <span className="flex items-center gap-1.5">
@@ -195,18 +225,19 @@ export const TriggerCard: FC<TriggerCardProps> = ({
         </div>
       )}
 
-      {trigger.credentialAttribution?.multiplayerActive && trigger.credentialAttribution.hasPersonalWarning && (
-        <div className="mt-3">
-          <TriggerCredentialWarning trigger={trigger} />
-        </div>
-      )}
+      {trigger.credentialAttribution?.multiplayerActive &&
+        trigger.credentialAttribution.hasPersonalWarning && (
+          <div className="mt-3">
+            <TriggerCredentialWarning trigger={trigger} />
+          </div>
+        )}
 
       {/* Quick actions row */}
-      <div className="flex items-center gap-2 mt-3 pt-3 border-t border-border-default">
+      <div className="flex items-center gap-2 flex-wrap mt-3 pt-3 border-t border-border-default">
         <button
           onClick={() => onRunNow(trigger)}
           disabled={trigger.status === 'disabled'}
-          className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-transparent border border-border-default text-fg-primary hover:bg-surface-hover cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${FOCUS_RING}`}
+          className={`inline-flex items-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-xs font-medium rounded-md bg-transparent border border-border-default text-fg-primary hover:bg-surface-hover cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${FOCUS_RING}`}
           aria-label="Run trigger now"
         >
           <Play size={12} aria-hidden="true" />
@@ -214,7 +245,7 @@ export const TriggerCard: FC<TriggerCardProps> = ({
         </button>
         <button
           onClick={() => onTogglePause(trigger)}
-          className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-transparent border border-border-default text-fg-primary hover:bg-surface-hover cursor-pointer ${FOCUS_RING}`}
+          className={`inline-flex items-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-xs font-medium rounded-md bg-transparent border border-border-default text-fg-primary hover:bg-surface-hover cursor-pointer ${FOCUS_RING}`}
           aria-label={trigger.status === 'paused' ? 'Resume trigger' : 'Pause trigger'}
         >
           <Pause size={12} aria-hidden="true" />
@@ -222,7 +253,7 @@ export const TriggerCard: FC<TriggerCardProps> = ({
         </button>
         <button
           onClick={() => onViewHistory(trigger)}
-          className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-transparent border border-border-default text-fg-muted hover:text-fg-primary hover:bg-surface-hover cursor-pointer ml-auto ${FOCUS_RING}`}
+          className={`inline-flex items-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-xs font-medium rounded-md bg-transparent border border-border-default text-fg-muted hover:text-fg-primary hover:bg-surface-hover cursor-pointer ml-auto ${FOCUS_RING}`}
         >
           View History
         </button>

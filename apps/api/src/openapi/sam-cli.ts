@@ -623,7 +623,11 @@ export const samCliOpenApiDocument: OpenApiDocument = {
           name: stringSchema(),
           description: nullable(stringSchema()),
           status: stringSchema(),
-          sourceType: stringSchema(),
+          sourceType: {
+            type: 'string',
+            enum: ['cron', 'webhook', 'github'],
+            description: 'Trigger source. Cron fields are null for event-driven sources.',
+          },
           cronExpression: nullable(stringSchema()),
           cronTimezone: stringSchema(),
           skipIfRunning: booleanSchema(),
@@ -638,8 +642,39 @@ export const samCliOpenApiDocument: OpenApiDocument = {
           createdAt: dateTimeSchema(),
           updatedAt: dateTimeSchema(),
           cronHumanReadable: stringSchema(),
+          webhookConfig: ref('WebhookTriggerConfig'),
         },
         ['id', 'name', 'sourceType', 'cronExpression', 'nextFireAt']
+      ),
+      WebhookTriggerFilter: objectSchema(
+        {
+          path: stringSchema('Dot-separated path in the JSON request body.'),
+          operator: { type: 'string', enum: ['exists', 'equals', 'contains'] },
+          value: { type: ['string', 'number', 'boolean', 'null'] },
+        },
+        ['path', 'operator']
+      ),
+      WebhookTriggerConfig: objectSchema(
+        {
+          sourceLabel: nullable(stringSchema()),
+          filterMode: { type: 'string', enum: ['all', 'any'] },
+          filters: arrayOf(ref('WebhookTriggerFilter')),
+          includedHeaders: arrayOf(stringSchema()),
+          tokenLastFour: stringSchema(
+            'Only the final four token characters; never credential material.'
+          ),
+          tokenCreatedAt: dateTimeSchema(),
+          tokenRotatedAt: nullable(dateTimeSchema()),
+        },
+        [
+          'sourceLabel',
+          'filterMode',
+          'filters',
+          'includedHeaders',
+          'tokenLastFour',
+          'tokenCreatedAt',
+          'tokenRotatedAt',
+        ]
       ),
       ListTriggersResponse: objectSchema(
         {

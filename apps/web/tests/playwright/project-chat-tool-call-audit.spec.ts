@@ -32,7 +32,7 @@ const MOCK_SESSION = {
   agentType: 'claude-code',
 };
 
-const TOOL_CONTENT = [{ type: 'content', content: { type: 'text', text: 'focused test output' } }];
+const TOOL_CONTENT = [{ type: 'terminal', output: 'SAM_DURABLE_COMMAND_OUTPUT_112\nexit status: 0 ✅' }];
 const TOOL_BUTTON_NAME = new RegExp(TOOL_TITLE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
 
 const MOCK_MESSAGES = [
@@ -126,7 +126,7 @@ async function assertPersistedToolCallLazyLoads(
   await expect(toolButton).toHaveAttribute('aria-expanded', 'false');
   await toolButton.click();
 
-  await expect(page.getByText('focused test output')).toBeVisible();
+  await expect(page.getByText(/SAM_DURABLE_COMMAND_OUTPUT_112/)).toBeVisible();
   expect(toolContentRequests).toEqual([
     expect.stringContaining('/messages/msg-tool-done/tool-content'),
   ]);

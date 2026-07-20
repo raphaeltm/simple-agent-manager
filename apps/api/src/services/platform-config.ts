@@ -5,74 +5,23 @@ import { log } from '../lib/logger';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import { ulid } from '../lib/ulid';
 import { decrypt, encrypt } from './encryption';
+import type {
+  IntegrationStatus,
+  PlatformConfigSource,
+  PlatformConfigStatus,
+  PlatformIntegrationInput,
+  ResolvedPlatformConfig,
+  ResolvedPlatformValue,
+} from './platform-config-types';
 
-export type PlatformConfigSource = 'runtime' | 'environment' | 'unset';
-
-export interface ResolvedPlatformValue {
-  value: string | null;
-  source: PlatformConfigSource;
-  updatedAt?: string | null;
-  updatedBy?: string | null;
-}
-
-export interface ResolvedPlatformConfig {
-  github: {
-    clientId: ResolvedPlatformValue;
-    clientSecret: ResolvedPlatformValue;
-    appId: ResolvedPlatformValue;
-    appPrivateKey: ResolvedPlatformValue;
-    appSlug: ResolvedPlatformValue;
-    webhookSecret: ResolvedPlatformValue;
-  };
-  google: {
-    clientId: ResolvedPlatformValue;
-    clientSecret: ResolvedPlatformValue;
-  };
-  gitlab: {
-    host: ResolvedPlatformValue;
-    clientId: ResolvedPlatformValue;
-    clientSecret: ResolvedPlatformValue;
-  };
-}
-
-export interface PlatformConfigStatus {
-  setupCompleted: boolean;
-  setupForced: boolean;
-  integrations: {
-    githubOAuth: IntegrationStatus;
-    githubApp: IntegrationStatus;
-    githubWebhook: IntegrationStatus;
-    googleOAuth: IntegrationStatus;
-    gitlabOAuth: IntegrationStatus;
-  };
-}
-
-export interface IntegrationStatus {
-  configured: boolean;
-  source: PlatformConfigSource;
-  label: string;
-  fields: Record<string, Omit<ResolvedPlatformValue, 'value'> & { configured: boolean }>;
-}
-
-export interface PlatformIntegrationInput {
-  github?: {
-    clientId?: string;
-    clientSecret?: string;
-    appId?: string;
-    appPrivateKey?: string;
-    appSlug?: string;
-    webhookSecret?: string;
-  };
-  google?: {
-    clientId?: string;
-    clientSecret?: string;
-  };
-  gitlab?: {
-    host?: string;
-    clientId?: string;
-    clientSecret?: string;
-  };
-}
+export type {
+  IntegrationStatus,
+  PlatformConfigSource,
+  PlatformConfigStatus,
+  PlatformIntegrationInput,
+  ResolvedPlatformConfig,
+  ResolvedPlatformValue,
+} from './platform-config-types';
 
 export const SETUP_COMPLETED_SETTING_KEY = 'setup.completed';
 const INTEGRATION_CREDENTIAL_TYPE = 'platform-integration';
@@ -82,6 +31,7 @@ const SETTING_KEYS = {
   githubAppId: 'integration.github.appId',
   githubAppSlug: 'integration.github.appSlug',
   googleClientId: 'integration.google.clientId',
+  googleInfrastructureClientId: 'integration.googleInfrastructure.clientId',
   gitlabHost: 'integration.gitlab.host',
   gitlabClientId: 'integration.gitlab.clientId',
 } as const;
@@ -91,6 +41,7 @@ const SECRET_KINDS = {
   githubAppPrivateKey: 'github.appPrivateKey',
   githubWebhookSecret: 'github.webhookSecret',
   googleClientSecret: 'google.clientSecret',
+  googleInfrastructureClientSecret: 'googleInfrastructure.clientSecret',
   gitlabClientSecret: 'gitlab.clientSecret',
 } as const;
 
@@ -106,6 +57,8 @@ const ENV_KEYS = {
   // OAuth app, redirect URI (/api/auth/callback/google), and scopes.
   googleClientId: 'GOOGLE_LOGIN_CLIENT_ID',
   googleClientSecret: 'GOOGLE_LOGIN_CLIENT_SECRET',
+  googleInfrastructureClientId: 'GOOGLE_CLIENT_ID',
+  googleInfrastructureClientSecret: 'GOOGLE_CLIENT_SECRET',
   gitlabHost: 'GITLAB_HOST',
   gitlabClientId: 'GITLAB_CLIENT_ID',
   gitlabClientSecret: 'GITLAB_CLIENT_SECRET',
@@ -180,7 +133,7 @@ async function resolveSecret(
   environmentKey: keyof Env
 ): Promise<ResolvedPlatformValue> {
   const prepared = env.DATABASE?.prepare?.(
-    `SELECT id, encrypted_token AS encryptedToken, iv, updated_at AS updatedAt, created_by AS updatedBy
+    `SELECT id, encrypted_token AS encryptedToken, iv, updated_at AS updatedAt, COALESCE(updated_by, created_by) AS updatedBy
      FROM platform_credentials
      WHERE credential_type = ? AND provider = ? AND credential_kind = ? AND is_enabled = 1
      ORDER BY updated_at DESC, created_at DESC`
@@ -228,51 +181,6 @@ async function resolveSecret(
   return fallback ? { value: fallback, source: 'environment', updatedAt: null, updatedBy: null } : unset();
 }
 
-async function upsertSecret(
-  env: Env,
-  provider: string,
-  kind: string,
-  label: string,
-  value: string,
-  updatedBy: string
-): Promise<void> {
-  const now = new Date().toISOString();
-  const encryptionKey = getCredentialEncryptionKey(env);
-  const encrypted = await encrypt(value, encryptionKey);
-  const existing = await env.DATABASE.prepare(
-    `SELECT id FROM platform_credentials
-     WHERE credential_type = ? AND provider = ? AND credential_kind = ?
-     ORDER BY updated_at DESC, created_at DESC
-     LIMIT 1`
-  ).bind(INTEGRATION_CREDENTIAL_TYPE, provider, kind).first<{ id: string }>();
-
-  if (existing) {
-    await env.DATABASE.prepare(
-      `UPDATE platform_credentials
-       SET label = ?, encrypted_token = ?, iv = ?, is_enabled = 1, updated_at = ?
-       WHERE id = ?`
-    ).bind(label, encrypted.ciphertext, encrypted.iv, now, existing.id).run();
-    return;
-  }
-
-  await env.DATABASE.prepare(
-    `INSERT INTO platform_credentials
-       (id, credential_type, provider, agent_type, credential_kind, label, encrypted_token, iv, is_enabled, created_by, created_at, updated_at)
-     VALUES (?, ?, ?, NULL, ?, ?, ?, ?, 1, ?, ?, ?)`
-  ).bind(
-    ulid(),
-    INTEGRATION_CREDENTIAL_TYPE,
-    provider,
-    kind,
-    label,
-    encrypted.ciphertext,
-    encrypted.iv,
-    updatedBy,
-    now,
-    now
-  ).run();
-}
-
 function creatorId(env: Env, updatedBy?: string): string {
   return updatedBy || env.TRIAL_ANONYMOUS_USER_ID || TRIAL_ANONYMOUS_USER_ID;
 }
@@ -289,54 +197,245 @@ export async function savePlatformIntegrationConfig(
   updatedBy?: string
 ): Promise<ResolvedPlatformConfig> {
   const by = creatorId(env, updatedBy);
+  const statements = await buildPlatformIntegrationStatements(
+    env,
+    input,
+    by,
+    new Date().toISOString(),
+  );
+  if (statements.length === 0) return resolvePlatformConfig(env);
+  if (typeof env.DATABASE.batch !== 'function') {
+    if (input.googleInfrastructure) {
+      throw new Error('Atomic infrastructure OAuth configuration is unavailable');
+    }
+    for (const statement of statements) await statement.run();
+  } else {
+    await env.DATABASE.batch(statements);
+  }
+  return resolvePlatformConfig(env);
+}
+
+
+function settingStatement(env: Env, key: string, value: string, updatedBy: string, now: string): D1PreparedStatement {
+  return env.DATABASE.prepare(
+    `INSERT INTO platform_settings (key, value, updated_at, updated_by)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at, updated_by = excluded.updated_by`
+  ).bind(key, value, now, updatedBy);
+}
+
+async function secretUpsertStatement(
+  env: Env,
+  provider: string,
+  kind: string,
+  label: string,
+  value: string,
+  updatedBy: string,
+  now: string
+): Promise<D1PreparedStatement> {
+  const encrypted = await encrypt(value, getCredentialEncryptionKey(env));
+  const existing = await env.DATABASE.prepare(
+    `SELECT id FROM platform_credentials
+     WHERE credential_type = ? AND provider = ? AND credential_kind = ?
+     ORDER BY updated_at DESC, created_at DESC
+     LIMIT 1`
+  ).bind(INTEGRATION_CREDENTIAL_TYPE, provider, kind).first<{ id: string }>();
+
+  if (existing) {
+    return env.DATABASE.prepare(
+      `UPDATE platform_credentials
+       SET label = ?, encrypted_token = ?, iv = ?, is_enabled = 1, updated_by = ?, updated_at = ?
+       WHERE id = ?`
+    ).bind(label, encrypted.ciphertext, encrypted.iv, updatedBy, now, existing.id);
+  }
+
+  return env.DATABASE.prepare(
+    `INSERT INTO platform_credentials
+       (id, credential_type, provider, agent_type, credential_kind, label, encrypted_token, iv, is_enabled, created_by, created_at, updated_by, updated_at)
+     VALUES (?, ?, ?, NULL, ?, ?, ?, ?, 1, ?, ?, ?, ?)`
+  ).bind(
+    ulid(),
+    INTEGRATION_CREDENTIAL_TYPE,
+    provider,
+    kind,
+    label,
+    encrypted.ciphertext,
+    encrypted.iv,
+    updatedBy,
+    now,
+    updatedBy,
+    now
+  );
+}
+
+async function buildPlatformIntegrationStatements(
+  env: Env,
+  input: PlatformIntegrationInput,
+  updatedBy: string,
+  now: string
+): Promise<D1PreparedStatement[]> {
+  const statements: D1PreparedStatement[] = [];
   const github = input.github ?? {};
   const google = input.google ?? {};
+  const googleInfrastructure = input.googleInfrastructure ?? {};
   const gitlab = input.gitlab ?? {};
 
   const githubClientId = trimOptional(github.clientId);
-  if (githubClientId) await writeSetting(env, SETTING_KEYS.githubClientId, githubClientId, by);
+  if (githubClientId) statements.push(settingStatement(env, SETTING_KEYS.githubClientId, githubClientId, updatedBy, now));
 
   const githubAppId = trimOptional(github.appId);
-  if (githubAppId) await writeSetting(env, SETTING_KEYS.githubAppId, githubAppId, by);
+  if (githubAppId) statements.push(settingStatement(env, SETTING_KEYS.githubAppId, githubAppId, updatedBy, now));
 
   const githubAppSlug = trimOptional(github.appSlug);
-  if (githubAppSlug) await writeSetting(env, SETTING_KEYS.githubAppSlug, githubAppSlug, by);
+  if (githubAppSlug) statements.push(settingStatement(env, SETTING_KEYS.githubAppSlug, githubAppSlug, updatedBy, now));
 
   const googleClientId = trimOptional(google.clientId);
-  if (googleClientId) await writeSetting(env, SETTING_KEYS.googleClientId, googleClientId, by);
+  if (googleClientId) statements.push(settingStatement(env, SETTING_KEYS.googleClientId, googleClientId, updatedBy, now));
+
+  if (googleInfrastructure.remove) {
+    statements.push(
+      env.DATABASE.prepare('DELETE FROM platform_settings WHERE key = ?')
+        .bind(SETTING_KEYS.googleInfrastructureClientId),
+      env.DATABASE.prepare(
+        'DELETE FROM platform_credentials WHERE credential_type = ? AND provider = ? AND credential_kind = ?',
+      ).bind(
+        INTEGRATION_CREDENTIAL_TYPE,
+        'google-infrastructure',
+        SECRET_KINDS.googleInfrastructureClientSecret,
+      ),
+    );
+  } else {
+    const clientId = trimOptional(googleInfrastructure.clientId);
+    if (clientId) {
+      statements.push(settingStatement(
+        env,
+        SETTING_KEYS.googleInfrastructureClientId,
+        clientId,
+        updatedBy,
+        now,
+      ));
+    }
+  }
 
   const gitlabHost = trimOptional(gitlab.host);
-  if (gitlabHost) await writeSetting(env, SETTING_KEYS.gitlabHost, gitlabHost, by);
+  if (gitlabHost) statements.push(settingStatement(env, SETTING_KEYS.gitlabHost, gitlabHost, updatedBy, now));
 
   const gitlabClientId = trimOptional(gitlab.clientId);
-  if (gitlabClientId) await writeSetting(env, SETTING_KEYS.gitlabClientId, gitlabClientId, by);
+  if (gitlabClientId) statements.push(settingStatement(env, SETTING_KEYS.gitlabClientId, gitlabClientId, updatedBy, now));
 
   const githubClientSecret = trimOptional(github.clientSecret);
   if (githubClientSecret) {
-    await upsertSecret(env, 'github', SECRET_KINDS.githubClientSecret, 'GitHub OAuth client secret', githubClientSecret, by);
+    statements.push(await secretUpsertStatement(env, 'github', SECRET_KINDS.githubClientSecret, 'GitHub OAuth client secret', githubClientSecret, updatedBy, now));
   }
 
   const githubAppPrivateKey = trimOptional(github.appPrivateKey);
   if (githubAppPrivateKey) {
-    await upsertSecret(env, 'github', SECRET_KINDS.githubAppPrivateKey, 'GitHub App private key', githubAppPrivateKey, by);
+    statements.push(await secretUpsertStatement(env, 'github', SECRET_KINDS.githubAppPrivateKey, 'GitHub App private key', githubAppPrivateKey, updatedBy, now));
   }
 
   const githubWebhookSecret = trimOptional(github.webhookSecret);
   if (githubWebhookSecret) {
-    await upsertSecret(env, 'github', SECRET_KINDS.githubWebhookSecret, 'GitHub webhook secret', githubWebhookSecret, by);
+    statements.push(await secretUpsertStatement(env, 'github', SECRET_KINDS.githubWebhookSecret, 'GitHub webhook secret', githubWebhookSecret, updatedBy, now));
   }
 
   const googleClientSecret = trimOptional(google.clientSecret);
   if (googleClientSecret) {
-    await upsertSecret(env, 'google', SECRET_KINDS.googleClientSecret, 'Google OAuth client secret', googleClientSecret, by);
+    statements.push(await secretUpsertStatement(env, 'google', SECRET_KINDS.googleClientSecret, 'Google OAuth client secret', googleClientSecret, updatedBy, now));
+  }
+
+  if (!googleInfrastructure.remove) {
+    const clientSecret = trimOptional(googleInfrastructure.clientSecret);
+    if (clientSecret) {
+      statements.push(await secretUpsertStatement(
+        env,
+        'google-infrastructure',
+        SECRET_KINDS.googleInfrastructureClientSecret,
+        'Google infrastructure OAuth client secret',
+        clientSecret,
+        updatedBy,
+        now,
+      ));
+    }
   }
 
   const gitlabClientSecret = trimOptional(gitlab.clientSecret);
   if (gitlabClientSecret) {
-    await upsertSecret(env, 'gitlab', SECRET_KINDS.gitlabClientSecret, 'GitLab OAuth client secret', gitlabClientSecret, by);
+    statements.push(await secretUpsertStatement(env, 'gitlab', SECRET_KINDS.gitlabClientSecret, 'GitLab client secret', gitlabClientSecret, updatedBy, now));
   }
 
-  return resolvePlatformConfig(env);
+  return statements;
+}
+
+
+function runtimePreview(value: string): ResolvedPlatformValue {
+  return { value, source: 'runtime', updatedAt: null, updatedBy: null };
+}
+
+function overlayPreview(target: ResolvedPlatformValue, value: string | undefined): ResolvedPlatformValue {
+  const trimmed = trimOptional(value);
+  return trimmed ? runtimePreview(trimmed) : target;
+}
+
+export async function previewPlatformIntegrationConfig(
+  env: Env,
+  input: PlatformIntegrationInput
+): Promise<ResolvedPlatformConfig> {
+  const current = await resolvePlatformConfig(env);
+  const github = input.github ?? {};
+  const google = input.google ?? {};
+  const googleInfrastructure = input.googleInfrastructure ?? {};
+  const gitlab = input.gitlab ?? {};
+
+  return {
+    github: {
+      clientId: overlayPreview(current.github.clientId, github.clientId),
+      clientSecret: overlayPreview(current.github.clientSecret, github.clientSecret),
+      appId: overlayPreview(current.github.appId, github.appId),
+      appPrivateKey: overlayPreview(current.github.appPrivateKey, github.appPrivateKey),
+      appSlug: overlayPreview(current.github.appSlug, github.appSlug),
+      webhookSecret: overlayPreview(current.github.webhookSecret, github.webhookSecret),
+    },
+    google: {
+      clientId: overlayPreview(current.google.clientId, google.clientId),
+      clientSecret: overlayPreview(current.google.clientSecret, google.clientSecret),
+    },
+    googleInfrastructure: {
+      clientId: overlayPreview(
+        current.googleInfrastructure.clientId,
+        googleInfrastructure.clientId,
+      ),
+      clientSecret: overlayPreview(
+        current.googleInfrastructure.clientSecret,
+        googleInfrastructure.clientSecret,
+      ),
+    },
+    gitlab: {
+      host: overlayPreview(current.gitlab.host, gitlab.host),
+      clientId: overlayPreview(current.gitlab.clientId, gitlab.clientId),
+      clientSecret: overlayPreview(current.gitlab.clientSecret, gitlab.clientSecret),
+    },
+  };
+}
+
+export async function completeSetupWithConfig(
+  env: Env,
+  input: PlatformIntegrationInput,
+  updatedBy?: string
+): Promise<ResolvedPlatformConfig> {
+  const by = creatorId(env, updatedBy);
+  const now = new Date().toISOString();
+  const statements = await buildPlatformIntegrationStatements(env, input, by, now);
+  statements.push(settingStatement(env, SETUP_COMPLETED_SETTING_KEY, 'true', by, now));
+
+  if (typeof env.DATABASE.batch === 'function') {
+    await env.DATABASE.batch(statements);
+    return resolvePlatformConfig(env);
+  }
+
+  // Compatibility for minimal D1 shims that do not implement batch(). Production D1 applies batch transactionally.
+  const resolved = await savePlatformIntegrationConfig(env, input, updatedBy);
+  await setSetupCompleted(env, updatedBy);
+  return resolved;
 }
 
 export async function resolvePlatformConfig(env: Env): Promise<ResolvedPlatformConfig> {
@@ -349,6 +448,8 @@ export async function resolvePlatformConfig(env: Env): Promise<ResolvedPlatformC
     githubWebhookSecret,
     googleClientId,
     googleClientSecret,
+    googleInfrastructureClientId,
+    googleInfrastructureClientSecret,
     gitlabHost,
     gitlabClientId,
     gitlabClientSecret,
@@ -361,6 +462,17 @@ export async function resolvePlatformConfig(env: Env): Promise<ResolvedPlatformC
     resolveSecret(env, 'github', SECRET_KINDS.githubWebhookSecret, ENV_KEYS.githubWebhookSecret),
     resolveSetting(env, SETTING_KEYS.googleClientId, ENV_KEYS.googleClientId),
     resolveSecret(env, 'google', SECRET_KINDS.googleClientSecret, ENV_KEYS.googleClientSecret),
+    resolveSetting(
+      env,
+      SETTING_KEYS.googleInfrastructureClientId,
+      ENV_KEYS.googleInfrastructureClientId,
+    ),
+    resolveSecret(
+      env,
+      'google-infrastructure',
+      SECRET_KINDS.googleInfrastructureClientSecret,
+      ENV_KEYS.googleInfrastructureClientSecret,
+    ),
     resolveSetting(env, SETTING_KEYS.gitlabHost, ENV_KEYS.gitlabHost),
     resolveSetting(env, SETTING_KEYS.gitlabClientId, ENV_KEYS.gitlabClientId),
     resolveSecret(env, 'gitlab', SECRET_KINDS.gitlabClientSecret, ENV_KEYS.gitlabClientSecret),
@@ -378,6 +490,10 @@ export async function resolvePlatformConfig(env: Env): Promise<ResolvedPlatformC
     google: {
       clientId: googleClientId,
       clientSecret: googleClientSecret,
+    },
+    googleInfrastructure: {
+      clientId: googleInfrastructureClientId,
+      clientSecret: googleInfrastructureClientSecret,
     },
     gitlab: {
       host: gitlabHost,
@@ -440,14 +556,19 @@ export async function getGoogleLoginOAuthConfig(env: Env): Promise<{ clientId: s
  * Infra/GCP Google OAuth client — used for GCP deployment authorization flows
  * (cloud-platform scope; redirect URIs `/auth/google/callback` and
  * `/api/deployment/gcp/callback`). Reads GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET
- * from the environment directly and does NOT consult the setup-wizard platform
- * store, so it is never affected by the login Google configuration.
+ * from the independent runtime platform store first, then the legacy
+ * GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET environment fallback. It never reads
+ * or writes the Google login client family.
  */
 export async function getGoogleInfraOAuthConfig(env: Env): Promise<{ clientId: string; clientSecret: string } | null> {
-  const clientId = envValue(env, 'GOOGLE_CLIENT_ID');
-  const clientSecret = envValue(env, 'GOOGLE_CLIENT_SECRET');
-  if (!clientId || !clientSecret) return null;
-  return { clientId, clientSecret };
+  const config = await resolvePlatformConfig(env);
+  if (!config.googleInfrastructure.clientId.value || !config.googleInfrastructure.clientSecret.value) {
+    return null;
+  }
+  return {
+    clientId: config.googleInfrastructure.clientId.value,
+    clientSecret: config.googleInfrastructure.clientSecret.value,
+  };
 }
 
 export async function getGitHubAppConfig(env: Env): Promise<{
@@ -544,6 +665,13 @@ export async function getPlatformConfigStatus(env: Env): Promise<PlatformConfigS
       ),
       googleOAuth: integrationStatus(
         { clientId: config.google.clientId, clientSecret: config.google.clientSecret },
+        ['clientId', 'clientSecret']
+      ),
+      googleInfrastructureOAuth: integrationStatus(
+        {
+          clientId: config.googleInfrastructure.clientId,
+          clientSecret: config.googleInfrastructure.clientSecret,
+        },
         ['clientId', 'clientSecret']
       ),
       gitlabOAuth: integrationStatus(

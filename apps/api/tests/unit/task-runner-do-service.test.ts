@@ -43,6 +43,11 @@ describe('task-runner-do service', () => {
     expect(serviceSource).toContain('export async function getTaskRunnerStatus(');
   });
 
+  it('exports ensureTaskRunnerStarted function', () => {
+    expect(serviceSource).toContain('export async function ensureTaskRunnerStarted(');
+    expect(serviceSource).toContain('return stub.ensureStarted()');
+  });
+
   it('uses typed DO stub via getStub helper', () => {
     expect(serviceSource).toContain('function getStub(env: Env, taskId: string): DurableObjectStub<TaskRunner>');
   });

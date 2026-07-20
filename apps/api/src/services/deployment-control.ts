@@ -19,6 +19,9 @@ export interface DeploymentHeartbeatState {
   appliedSeq?: number;
   status?: string;
   errorMessage?: string;
+  routingRevision?: number;
+  routingStatus?: string;
+  routingError?: string;
   services?: unknown;
   deployStatus?: unknown;
   diskTelemetry?: unknown;
@@ -28,6 +31,10 @@ export interface ObservedDeploymentState {
   appliedSeq: number | null;
   status: string | null;
   errorMessage: string | null;
+  routingRevision: number;
+  routingStatus: string | null;
+  routingError: string | null;
+  routingObservedAt: string | null;
   services: unknown | null;
   deployStatus: unknown | null;
   diskTelemetry: unknown | null;
@@ -95,8 +102,14 @@ export function buildObservedDeploymentUpdate(
     typeof deployment.errorMessage === 'string'
       ? truncateString(deployment.errorMessage, MAX_OBSERVED_ERROR_MESSAGE_LENGTH)
       : null;
+  const routingRevision = normalizeAppliedSeq(deployment.routingRevision);
+  const routingStatus = normalizeStatus(deployment.routingStatus);
+  const routingError =
+    typeof deployment.routingError === 'string'
+      ? truncateString(deployment.routingError, MAX_OBSERVED_ERROR_MESSAGE_LENGTH)
+      : null;
 
-  return {
+  const update: Partial<schema.NewDeploymentEnvironmentRow> = {
     observedAppliedSeq: appliedSeq,
     observedStatus: status,
     observedErrorMessage: errorMessage,
@@ -106,6 +119,21 @@ export function buildObservedDeploymentUpdate(
     observedAt,
     updatedAt: observedAt,
   };
+
+  if (routingRevision !== null) {
+    update.observedRoutingRevision = routingRevision;
+    update.observedRoutingAt = observedAt;
+  }
+  if (routingStatus !== null) {
+    update.observedRoutingStatus = routingStatus;
+    update.observedRoutingAt = observedAt;
+  }
+  if (routingError !== null) {
+    update.observedRoutingError = routingError;
+    update.observedRoutingAt = observedAt;
+  }
+
+  return update;
 }
 
 export function toObservedDeploymentState(
@@ -114,6 +142,10 @@ export function toObservedDeploymentState(
     | 'observedAppliedSeq'
     | 'observedStatus'
     | 'observedErrorMessage'
+    | 'observedRoutingRevision'
+    | 'observedRoutingStatus'
+    | 'observedRoutingError'
+    | 'observedRoutingAt'
     | 'observedServicesJson'
     | 'observedDeployStatusJson'
     | 'observedDiskTelemetryJson'
@@ -124,6 +156,10 @@ export function toObservedDeploymentState(
     appliedSeq: row.observedAppliedSeq ?? null,
     status: row.observedStatus ?? null,
     errorMessage: row.observedErrorMessage ?? null,
+    routingRevision: row.observedRoutingRevision ?? 0,
+    routingStatus: row.observedRoutingStatus ?? null,
+    routingError: row.observedRoutingError ?? null,
+    routingObservedAt: row.observedRoutingAt ?? null,
     services: parseJsonField(row.observedServicesJson),
     deployStatus: parseJsonField(row.observedDeployStatusJson),
     diskTelemetry: parseJsonField(row.observedDiskTelemetryJson),
@@ -540,9 +576,5 @@ function parseReservedAgentEnvironmentNames(configValue: string | null | undefin
       ? configValue.split(',')
       : DEFAULT_RESERVED_AGENT_ENVIRONMENT_NAMES;
 
-  return new Set(
-    rawNames
-      .map((name) => name.trim())
-      .filter((name) => name !== '')
-  );
+  return new Set(rawNames.map((name) => name.trim()).filter((name) => name !== ''));
 }

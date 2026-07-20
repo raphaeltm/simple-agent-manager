@@ -76,7 +76,9 @@ function makeProject(overrides: Partial<schema.Project> = {}): schema.Project {
   };
 }
 
-function makeInviteLink(overrides: Partial<schema.ProjectInviteLink> = {}): schema.ProjectInviteLink {
+function makeInviteLink(
+  overrides: Partial<schema.ProjectInviteLink> = {}
+): schema.ProjectInviteLink {
   return {
     id: 'invite-1',
     projectId: 'proj-1',
@@ -126,6 +128,20 @@ function makeRequestWithUser(request = makeRequest()) {
   };
 }
 
+function makeMember(overrides: Partial<schema.ProjectMember> = {}): schema.ProjectMember {
+  return {
+    projectId: 'proj-1',
+    userId: 'requester-user',
+    role: 'admin',
+    status: 'active',
+    invitedBy: 'owner-user',
+    removedAt: null,
+    createdAt: '2026-07-04T00:00:00.000Z',
+    updatedAt: '2026-07-04T00:00:00.000Z',
+    ...overrides,
+  };
+}
+
 function makeInstallation(): schema.GitHubInstallation {
   return {
     id: 'inst-row-1',
@@ -145,6 +161,7 @@ describe('project invite links and access requests', () => {
   let insertedRows: Array<{ table: unknown; values: unknown }>;
   let updatedRows: Array<{ table: unknown; values: Record<string, unknown> }>;
   let conflictUpdates: unknown[];
+  let insertReturning: QueryResult[];
   let updateReturning: QueryResult[];
 
   const env = {
@@ -159,6 +176,7 @@ describe('project invite links and access requests', () => {
     insertedRows = [];
     updatedRows = [];
     conflictUpdates = [];
+    insertReturning = [];
     updateReturning = [];
 
     const makeSelectBuilder = () => {
@@ -169,8 +187,10 @@ describe('project invite links and access requests', () => {
       chain.where = vi.fn(() => chain);
       chain.limit = vi.fn(() => Promise.resolve(selectResults.shift() ?? []));
       chain.orderBy = vi.fn(() => Promise.resolve(selectResults.shift() ?? []));
-      chain.then = (resolve: (value: QueryResult) => unknown, reject: (reason?: unknown) => unknown) =>
-        Promise.resolve(selectResults.shift() ?? []).then(resolve, reject);
+      chain.then = (
+        resolve: (value: QueryResult) => unknown,
+        reject: (reason?: unknown) => unknown
+      ) => Promise.resolve(selectResults.shift() ?? []).then(resolve, reject);
       return chain;
     };
 
@@ -179,11 +199,15 @@ describe('project invite links and access requests', () => {
       insert: vi.fn((table: unknown) => ({
         values: vi.fn((values: unknown) => {
           insertedRows.push({ table, values });
+          const returning = vi.fn(() =>
+            Promise.resolve(insertReturning.shift() ?? [{ id: (values as { id?: string }).id }])
+          );
           return {
             onConflictDoUpdate: vi.fn((config: unknown) => {
               conflictUpdates.push(config);
               return Promise.resolve(undefined);
             }),
+            onConflictDoNothing: vi.fn(() => ({ returning })),
             then: (resolve: () => unknown) => Promise.resolve(undefined).then(resolve),
           };
         }),
@@ -244,7 +268,11 @@ describe('project invite links and access requests', () => {
     expect(body.token).toMatch(/^sam_inv_/);
     expect(body.status).toBe('active');
     expect(body.expiresAt).toBeTruthy();
-    expect(mocks.requireProjectAccess).toHaveBeenCalledWith(expect.anything(), 'proj-1', 'member-user');
+    expect(mocks.requireProjectAccess).toHaveBeenCalledWith(
+      expect.anything(),
+      'proj-1',
+      'member-user'
+    );
     expect(insertedRows[0]).toMatchObject({
       table: schema.projectInviteLinks,
       values: expect.objectContaining({
@@ -299,8 +327,8 @@ describe('project invite links and access requests', () => {
     selectResults.push(
       [{ link: makeInviteLink(), project: makeProject() }],
       [],
-      [makeInstallation()],
       [],
+      [makeInstallation()],
       [makeRequestWithUser()]
     );
 
@@ -355,11 +383,19 @@ describe('project invite links and access requests', () => {
 
   it('lets an admin approve a pending request and creates an active admin membership', async () => {
     mocks.currentUserId = 'admin-user';
-    selectResults.push([makeRequest()], [makeInstallation()], [makeRequestWithUser(makeRequest({
-      status: 'approved',
-      decidedBy: 'admin-user',
-      decidedAt: '2026-07-04T01:00:00.000Z',
-    }))]);
+    selectResults.push(
+      [makeRequest()],
+      [makeInstallation()],
+      [
+        makeRequestWithUser(
+          makeRequest({
+            status: 'approved',
+            decidedBy: 'admin-user',
+            decidedAt: '2026-07-04T01:00:00.000Z',
+          })
+        ),
+      ]
+    );
 
     const response = await app.request(
       '/api/projects/proj-1/access-requests/request-1/approve',
@@ -454,8 +490,8 @@ describe('project invite links and access requests', () => {
     selectResults.push(
       [{ link: makeInviteLink(), project: makeProject() }],
       [],
-      [makeInstallation()],
       [],
+      [makeInstallation()],
       [makeRequestWithUser(makeRequest({ githubAccessStatus: 'no-access' }))]
     );
 
@@ -476,5 +512,150 @@ describe('project invite links and access requests', () => {
       })
     );
     expect(insertedRows.some((row) => row.table === schema.projectMembers)).toBe(false);
+  });
+
+  it('derives removed-member preview from active membership instead of approved history', async () => {
+    mocks.currentUserId = 'requester-user';
+    selectResults.push(
+      [{ link: makeInviteLink(), project: makeProject() }],
+      [makeMember({ status: 'removed', removedAt: '2026-07-06T11:21:29.000Z' })],
+      [
+        makeRequestWithUser(
+          makeRequest({ status: 'approved', decidedAt: '2026-07-06T11:01:20.000Z' })
+        ),
+      ]
+    );
+    const response = await app.request('/api/projects/invite-links/sam_inv_valid', {}, env);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      membershipStatus: 'can-request',
+      accessRequest: { status: 'approved', decidedAt: '2026-07-06T11:01:20.000Z' },
+    });
+  });
+
+  it('resets approved history to pending so approval can reactivate removed membership', async () => {
+    mocks.currentUserId = 'requester-user';
+    const approved = makeRequest({ status: 'approved', decidedBy: 'owner-user' });
+    selectResults.push(
+      [{ link: makeInviteLink(), project: makeProject() }],
+      [makeMember({ status: 'removed', removedAt: '2026-07-06T11:21:29.000Z' })],
+      [makeRequestWithUser(approved)]
+    );
+    const preview = await app.request('/api/projects/invite-links/sam_inv_valid', {}, env);
+    expect(await preview.json()).toMatchObject({ membershipStatus: 'can-request' });
+
+    selectResults.push(
+      [{ link: makeInviteLink(), project: makeProject() }],
+      [],
+      [approved],
+      [makeInstallation()],
+      [makeRequestWithUser(makeRequest())]
+    );
+    updateReturning.push([{ id: 'request-1' }]);
+    const response = await app.request(
+      '/api/projects/invite-links/sam_inv_valid/request',
+      { method: 'POST' },
+      env
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ status: 'pending' });
+    expect(
+      updatedRows.find((row) => row.table === schema.projectAccessRequests)?.values
+    ).toMatchObject({ status: 'pending', decidedAt: null, decidedBy: null, decisionNote: null });
+
+    mocks.currentUserId = 'admin-user';
+    selectResults.push(
+      [makeRequest()],
+      [makeInstallation()],
+      [makeRequestWithUser(makeRequest({ status: 'approved' }))]
+    );
+    const approval = await app.request(
+      '/api/projects/proj-1/access-requests/request-1/approve',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+      },
+      env
+    );
+    expect(approval.status).toBe(200);
+    expect(conflictUpdates).toContainEqual(
+      expect.objectContaining({
+        set: expect.objectContaining({ role: 'admin', status: 'active', invitedBy: 'admin-user' }),
+      })
+    );
+
+    mocks.currentUserId = 'requester-user';
+    selectResults.push(
+      [{ link: makeInviteLink(), project: makeProject() }],
+      [makeMember({ invitedBy: 'admin-user' })],
+      [makeRequestWithUser(makeRequest({ status: 'approved', decidedBy: 'admin-user' }))]
+    );
+    const activePreview = await app.request('/api/projects/invite-links/sam_inv_valid', {}, env);
+    expect(await activePreview.json()).toMatchObject({ membershipStatus: 'active-member' });
+  });
+
+  it('returns a pending request idempotently without rechecking access or consuming the invite', async () => {
+    mocks.currentUserId = 'requester-user';
+    const pending = makeRequest();
+    selectResults.push(
+      [{ link: makeInviteLink(), project: makeProject() }],
+      [],
+      [pending],
+      [makeRequestWithUser(pending)]
+    );
+    const response = await app.request(
+      '/api/projects/invite-links/sam_inv_valid/request',
+      { method: 'POST' },
+      env
+    );
+    expect(response.status).toBe(200);
+    expect(mocks.getUserInstallationRepositories).not.toHaveBeenCalled();
+    expect(updatedRows).toEqual([]);
+  });
+
+  it('does not overwrite a concurrently approved request', async () => {
+    mocks.currentUserId = 'requester-user';
+    selectResults.push(
+      [{ link: makeInviteLink(), project: makeProject() }],
+      [],
+      [makeRequest({ status: 'denied' })],
+      [makeInstallation()],
+      [makeMember()],
+      [makeRequest({ status: 'approved' })]
+    );
+    updateReturning.push([]);
+    const response = await app.request(
+      '/api/projects/invite-links/sam_inv_valid/request',
+      { method: 'POST' },
+      env
+    );
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({
+      message: 'You are already a member of this project',
+    });
+    expect(updatedRows.filter((row) => row.table === schema.projectInviteLinks)).toHaveLength(0);
+  });
+
+  it('returns the winning pending request when concurrent first requests share the unique key', async () => {
+    mocks.currentUserId = 'requester-user';
+    const pending = makeRequest();
+    selectResults.push(
+      [{ link: makeInviteLink(), project: makeProject() }],
+      [],
+      [],
+      [makeInstallation()],
+      [pending],
+      [makeRequestWithUser(pending)]
+    );
+    insertReturning.push([]);
+    const response = await app.request(
+      '/api/projects/invite-links/sam_inv_valid/request',
+      { method: 'POST' },
+      env
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ id: 'request-1', status: 'pending' });
+    expect(updatedRows.filter((row) => row.table === schema.projectInviteLinks)).toHaveLength(0);
   });
 });

@@ -21,7 +21,7 @@ const mockKV = {
  * Drizzle D1 uses .raw() which returns arrays — values must be in this exact order.
  */
 const TASK_COLUMNS = [
-  'id', 'projectId', 'userId', 'parentTaskId', 'workspaceId', 'title',
+  'id', 'projectId', 'userId', 'chatSessionId', 'parentTaskId', 'workspaceId', 'title',
   'description', 'status', 'executionStep', 'priority', 'agentProfileHint',
   'startedAt', 'completedAt', 'errorMessage', 'outputSummary', 'outputBranch',
   'outputPrUrl', 'finalizedAt', 'taskMode', 'dispatchDepth',

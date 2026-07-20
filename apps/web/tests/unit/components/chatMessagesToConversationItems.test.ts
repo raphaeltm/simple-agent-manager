@@ -701,6 +701,42 @@ describe('chatMessagesToConversationItems', () => {
     expect(items).toHaveLength(2);
   });
 
+  it('merges compact normalized Codex call/update rows by toolCallId after reload', () => {
+    const items = chatMessagesToConversationItems([
+      toolMsg({
+        id: 'codex-call',
+        content: '(tool call)',
+        toolMetadata: {
+          toolCallId: 'codex-command-1',
+          title: 'Run shell command',
+          kind: 'execute',
+          status: 'in_progress',
+          contentSize: 80,
+        },
+      }),
+      toolMsg({
+        id: 'codex-update',
+        content: 'SAM_DURABLE_COMMAND_OUTPUT_112',
+        toolMetadata: {
+          toolCallId: 'codex-command-1',
+          status: 'completed',
+          contentSize: 96,
+        },
+      }),
+    ]);
+
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      kind: 'tool_call',
+      toolCallId: 'codex-command-1',
+      title: 'Run shell command',
+      status: 'completed',
+      contentLoaded: false,
+      messageId: 'codex-update',
+      contentSize: 96,
+    });
+  });
+
   // -------------------------------------------------------------------------
   // Typed tool-call card fields (toolName / rawInput / rawOutput)
   //

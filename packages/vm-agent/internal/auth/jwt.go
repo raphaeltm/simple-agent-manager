@@ -4,6 +4,9 @@ package auth
 import (
 	"context"
 	"fmt"
+	"net"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/MicahParks/keyfunc/v3"
@@ -38,6 +41,10 @@ type JWTValidator struct {
 
 // NewJWTValidator creates a new JWT validator that fetches keys from the JWKS endpoint.
 func NewJWTValidator(jwksURL, nodeID, issuer, audience string) (*JWTValidator, error) {
+	if err := ValidateJWKSURL(jwksURL); err != nil {
+		return nil, err
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -52,6 +59,58 @@ func NewJWTValidator(jwksURL, nodeID, issuer, audience string) (*JWTValidator, e
 		issuer:   issuer,
 		nodeID:   nodeID,
 	}, nil
+}
+
+// ValidateJWKSURL requires HTTPS for remote JWKS endpoints while preserving
+// explicit local-development HTTP endpoints used by tests and local wrangler.
+func ValidateJWKSURL(rawURL string) error {
+	return validateHTTPSOrLocalHTTPURL(rawURL, "JWKS endpoint")
+}
+
+// ValidateIssuerURL requires HTTPS for URL-form issuers while preserving
+// local-development HTTP issuers. Non-URL issuer strings are accepted for
+// compatibility with existing token issuers such as "test-issuer".
+func ValidateIssuerURL(issuer string) error {
+	trimmed := strings.TrimSpace(issuer)
+	if trimmed == "" {
+		return fmt.Errorf("JWT issuer is required")
+	}
+	u, err := url.Parse(trimmed)
+	if err != nil || u.Scheme == "" {
+		return nil
+	}
+	return validateHTTPSOrLocalHTTPURL(trimmed, "JWT issuer")
+}
+
+func validateHTTPSOrLocalHTTPURL(rawURL, label string) error {
+	trimmed := strings.TrimSpace(rawURL)
+	if trimmed == "" {
+		return fmt.Errorf("%s is required", label)
+	}
+	u, err := url.Parse(trimmed)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return fmt.Errorf("%s must be an absolute URL", label)
+	}
+	switch u.Scheme {
+	case "https":
+		return nil
+	case "http":
+		if isLocalDevelopmentHost(u.Hostname()) {
+			return nil
+		}
+		return fmt.Errorf("%s must use https for remote hosts; http is allowed only for localhost or loopback development hosts", label)
+	default:
+		return fmt.Errorf("%s must use http or https scheme, got %q", label, u.Scheme)
+	}
+}
+
+func isLocalDevelopmentHost(host string) bool {
+	normalized := strings.TrimSuffix(strings.ToLower(host), ".")
+	if normalized == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(normalized)
+	return ip != nil && ip.IsLoopback()
 }
 
 func (v *JWTValidator) parse(tokenString string) (*Claims, error) {

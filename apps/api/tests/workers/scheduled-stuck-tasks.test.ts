@@ -9,10 +9,12 @@
  * - Optimistic locking (task advanced between SELECT and UPDATE)
  * - Heartbeat grace period for in_progress tasks
  * - Diagnostic gathering (workspace/node status from D1)
+ * - Bounded D1 discovery resumes and wraps through a real KV cursor
  */
-import { env } from 'cloudflare:test';
+import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
+import type { TaskRunner, TaskRunnerState } from '../../src/durable-objects/task-runner';
 import type { Env } from '../../src/env';
 import { gatherDiagnostics, recoverStuckTasks } from '../../src/scheduled/stuck-tasks';
 import {
@@ -41,34 +43,229 @@ async function getTaskStatus(taskId: string): Promise<{
   execution_step: string | null;
 } | null> {
   return env.DATABASE.prepare(
-    'SELECT status, error_message, completed_at, execution_step FROM tasks WHERE id = ?',
+    'SELECT status, error_message, completed_at, execution_step FROM tasks WHERE id = ?'
   )
     .bind(taskId)
     .first();
 }
 
-async function getTaskStatusEvents(taskId: string): Promise<{
-  from_status: string | null;
-  to_status: string;
-  actor_type: string;
-  reason: string | null;
-}[]> {
+async function getTaskStatusEvents(taskId: string): Promise<
+  {
+    from_status: string | null;
+    to_status: string;
+    actor_type: string;
+    reason: string | null;
+  }[]
+> {
   const result = await env.DATABASE.prepare(
-    'SELECT from_status, to_status, actor_type, reason FROM task_status_events WHERE task_id = ? ORDER BY created_at',
+    'SELECT from_status, to_status, actor_type, reason FROM task_status_events WHERE task_id = ? ORDER BY created_at'
   )
     .bind(taskId)
-    .all<{ from_status: string | null; to_status: string; actor_type: string; reason: string | null }>();
+    .all<{
+      from_status: string | null;
+      to_status: string;
+      actor_type: string;
+      reason: string | null;
+    }>();
   return result.results;
 }
 
-async function getObservabilityEvents(taskId: string): Promise<{ message: string; context: string }[]> {
+async function getObservabilityEvents(
+  taskId: string
+): Promise<{ message: string; context: string }[]> {
   const result = await env.OBSERVABILITY_DATABASE.prepare(
-    `SELECT message, context FROM platform_errors WHERE context LIKE ? ORDER BY created_at DESC`,
-  ).bind(`%${taskId}%`).all<{ message: string; context: string }>();
+    `SELECT message, context FROM platform_errors WHERE context LIKE ? ORDER BY created_at DESC`
+  )
+    .bind(`%${taskId}%`)
+    .all<{ message: string; context: string }>();
   return result.results;
 }
 
 describe('recoverStuckTasks — vertical slice', () => {
+  describe('DO-completed D1-active reconciliation', () => {
+    it('fails promptly when the task workspace is demonstrably gone', async () => {
+      await seedBaseData();
+      const taskId = 'task-st-do-mismatch-dead';
+      const nodeId = 'node-st-do-mismatch-dead';
+      const workspaceId = 'ws-st-do-mismatch-dead';
+      const oldDate = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+
+      await seedNode(nodeId, USER_ID, { status: 'deleted', healthStatus: 'stale' });
+      await seedWorkspace(workspaceId, nodeId, USER_ID, {
+        projectId: PROJECT_ID,
+        status: 'deleted',
+      });
+      await seedTask(taskId, PROJECT_ID, USER_ID, {
+        status: 'in_progress',
+        executionStep: 'awaiting_followup',
+        startedAt: oldDate,
+        updatedAt: oldDate,
+        workspaceId,
+        taskMode: 'conversation',
+      });
+
+      const stub = env.TASK_RUNNER.get(
+        env.TASK_RUNNER.idFromName(taskId)
+      ) as DurableObjectStub<TaskRunner>;
+      await stub.start({
+        taskId,
+        projectId: PROJECT_ID,
+        userId: USER_ID,
+        config: {
+          vmSize: 'small',
+          vmLocation: 'nbg1',
+          branch: 'main',
+          defaultBranch: 'main',
+          preferredNodeId: null,
+          userName: null,
+          userEmail: null,
+          githubId: null,
+          taskTitle: 'Dead conversation',
+          taskDescription: null,
+          repository: 'test/repo',
+          installationId: INSTALL_ID,
+          outputBranch: null,
+          projectDefaultVmSize: null,
+          chatSessionId: null,
+          agentType: 'codex',
+          workspaceProfile: null,
+          devcontainerConfigName: null,
+          cloudProvider: null,
+          taskMode: 'conversation',
+          model: null,
+          permissionMode: null,
+          opencodeProvider: null,
+          opencodeBaseUrl: null,
+          systemPromptAppend: null,
+          attachments: null,
+        },
+      });
+      await runInDurableObject(stub, async (instance) => {
+        const state = await instance.ctx.storage.get<TaskRunnerState>('state');
+        if (!state) throw new Error('TaskRunner state missing');
+        state.completed = true;
+        state.currentStep = 'running';
+        await instance.ctx.storage.put('state', state);
+      });
+
+      const result = await recoverStuckTasks({
+        ...env,
+        TASK_DO_MISMATCH_GRACE_MS: '60000',
+      } as unknown as Env);
+
+      expect(result.failedInProgress).toBe(1);
+      const task = await getTaskStatus(taskId);
+      expect(task?.status).toBe('failed');
+      expect(task?.error_message).toContain('runtime is gone');
+      expect(task?.error_message).toContain('workspace_deleted');
+    });
+
+    it('reconciles a dead runtime when TaskRunner state is missing and stays terminal', async () => {
+      await seedBaseData();
+      const taskId = 'task-st-do-missing-dead';
+      const nodeId = 'node-st-do-missing-dead';
+      const workspaceId = 'ws-st-do-missing-dead';
+      const oldDate = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+
+      await seedNode(nodeId, USER_ID, { status: 'deleted', healthStatus: 'stale' });
+      await seedWorkspace(workspaceId, nodeId, USER_ID, {
+        projectId: PROJECT_ID,
+        status: 'deleted',
+      });
+      await seedTask(taskId, PROJECT_ID, USER_ID, {
+        status: 'in_progress',
+        executionStep: 'running',
+        startedAt: oldDate,
+        updatedAt: oldDate,
+        workspaceId,
+      });
+
+      const testEnv = {
+        ...env,
+        TASK_DO_MISMATCH_GRACE_MS: '60000',
+      } as unknown as Env;
+      const firstSweep = await recoverStuckTasks(testEnv);
+
+      expect(firstSweep).toMatchObject({
+        failedInProgress: 1,
+        doHealthChecked: 1,
+        doHealthMissing: 1,
+        doHealthErrors: 0,
+        deadRuntimeReconciled: 1,
+      });
+      const task = await getTaskStatus(taskId);
+      expect(task?.status).toBe('failed');
+      expect(task?.error_message).toContain('workspace_deleted');
+
+      const eventsAfterFirstSweep = await getTaskStatusEvents(taskId);
+      expect(eventsAfterFirstSweep.filter((event) => event.to_status === 'failed')).toHaveLength(1);
+
+      const secondSweep = await recoverStuckTasks(testEnv);
+      expect(secondSweep.deadRuntimeReconciled).toBe(0);
+      expect(secondSweep.failedInProgress).toBe(0);
+      const eventsAfterSecondSweep = await getTaskStatusEvents(taskId);
+      expect(eventsAfterSecondSweep.filter((event) => event.to_status === 'failed')).toHaveLength(
+        1
+      );
+    });
+
+    it('selects a fresh dead runtime first, then resumes and wraps to an older active row', async () => {
+      await seedBaseData();
+      const oldQueuedTaskId = 'task-st-cursor-old-queued';
+      const deadTaskId = 'task-st-cursor-new-dead';
+      const nodeId = 'node-st-cursor-new-dead';
+      const workspaceId = 'ws-st-cursor-new-dead';
+      const twentyMinutesAgo = new Date(Date.now() - 20 * 60 * 1000).toISOString();
+      const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+      const oneMinuteAgo = new Date(Date.now() - 60 * 1000).toISOString();
+
+      await seedTask(oldQueuedTaskId, PROJECT_ID, USER_ID, {
+        status: 'queued',
+        executionStep: 'node_selection',
+        updatedAt: twentyMinutesAgo,
+      });
+      await seedNode(nodeId, USER_ID, { status: 'deleted', healthStatus: 'stale' });
+      await seedWorkspace(workspaceId, nodeId, USER_ID, {
+        projectId: PROJECT_ID,
+        status: 'deleted',
+      });
+      await seedTask(deadTaskId, PROJECT_ID, USER_ID, {
+        status: 'in_progress',
+        executionStep: 'running',
+        startedAt: tenMinutesAgo,
+        updatedAt: oneMinuteAgo,
+        workspaceId,
+      });
+
+      const testEnv = {
+        ...env,
+        STUCK_TASK_MAX_CANDIDATES_PER_SWEEP: '1',
+        STUCK_TASK_SCAN_CURSOR_KV_KEY: 'test:stuck-task-cursor:fresh-then-wrap',
+        TASK_DO_MISMATCH_GRACE_MS: '1000',
+        TASK_STUCK_QUEUED_TIMEOUT_MS: '3600000',
+      } as unknown as Env;
+
+      const firstSweep = await recoverStuckTasks(testEnv);
+      expect(firstSweep).toMatchObject({
+        candidatesScanned: 1,
+        candidateCursorLoaded: false,
+        failedInProgress: 1,
+        deadRuntimeReconciled: 1,
+      });
+      expect((await getTaskStatus(deadTaskId))?.status).toBe('failed');
+      expect((await getTaskStatus(oldQueuedTaskId))?.status).toBe('queued');
+
+      const secondSweep = await recoverStuckTasks(testEnv);
+      expect(secondSweep).toMatchObject({
+        candidatesScanned: 1,
+        candidateCursorLoaded: true,
+        candidateCursorWrapped: true,
+        failedQueued: 0,
+      });
+      expect((await getTaskStatus(oldQueuedTaskId))?.status).toBe('queued');
+    });
+  });
+
   describe('stuck queued task detection', () => {
     it('fails a task stuck in queued past timeout and records status event', async () => {
       await seedBaseData();
@@ -169,20 +366,28 @@ describe('recoverStuckTasks — vertical slice', () => {
 
       const task = await getTaskStatus(taskId);
       expect(task?.status).toBe('failed');
-      expect(task?.error_message).toContain('hard timeout');
+      // Past the hard timeout with no provable live runtime (no workspace), the
+      // task is failed through the liveness gate with a sanitized reason.
+      expect(task?.error_message).toContain('no longer live');
+      expect(task?.error_message).toContain('workspace_missing');
     });
   });
 
-  describe('heartbeat grace period', () => {
-    it('skips in_progress task with recent heartbeat', async () => {
+  describe('liveness grace period', () => {
+    it('preserves an in_progress task whose runtime identity is incomplete (fail-safe)', async () => {
+      // A running workspace with a fresh node heartbeat but no resolvable
+      // task-scoped runtime identity yields an INCONCLUSIVE liveness result.
+      // Fail-safe: the task must be left untouched, never failed on node
+      // heartbeat alone (the production regression this fix targets).
       await seedBaseData();
-      const taskId = 'task-st-heartbeat-skip';
+      const taskId = 'task-st-liveness-inconclusive';
       const nodeId = 'node-st-heartbeat';
       const fiveHoursAgo = new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString();
 
       await seedNode(nodeId, USER_ID, {
-        lastHeartbeatAt: new Date().toISOString(), // very recent heartbeat
+        lastHeartbeatAt: new Date().toISOString(), // very recent node heartbeat
       });
+      // Running workspace but no chat_session_id → runtime identity incomplete.
       await seedWorkspace('ws-st-heartbeat', nodeId, USER_ID, {
         projectId: PROJECT_ID,
         status: 'running',
@@ -206,9 +411,9 @@ describe('recoverStuckTasks — vertical slice', () => {
 
       const result = await recoverStuckTasks(testEnv);
 
-      expect(result.heartbeatSkipped).toBeGreaterThanOrEqual(1);
-
-      // Task should still be in_progress
+      // Inconclusive liveness is never fatal: the task is preserved, and a
+      // shared-node heartbeat alone does NOT count as a task-scoped skip.
+      expect(result.failedInProgress).toBe(0);
       const task = await getTaskStatus(taskId);
       expect(task?.status).toBe('in_progress');
     });
@@ -228,7 +433,7 @@ describe('recoverStuckTasks — vertical slice', () => {
       // Advance the task to 'delegated' just before recovery runs
       // This simulates the TaskRunner DO advancing the task between SELECT and UPDATE
       await env.DATABASE.prepare(
-        "UPDATE tasks SET status = 'delegated', updated_at = datetime('now') WHERE id = ?",
+        "UPDATE tasks SET status = 'delegated', updated_at = datetime('now') WHERE id = ?"
       )
         .bind(taskId)
         .run();
@@ -336,7 +541,7 @@ describe('gatherDiagnostics', () => {
         auto_provisioned_node_id: null,
       },
       120000,
-      'Test reason',
+      'Test reason'
     );
 
     expect(diagnostics.taskId).toBe('task-st-diag');
@@ -360,7 +565,7 @@ describe('gatherDiagnostics', () => {
         auto_provisioned_node_id: null,
       },
       60000,
-      'Test reason',
+      'Test reason'
     );
 
     expect(diagnostics.workspaceStatus).toBeNull();
@@ -369,7 +574,10 @@ describe('gatherDiagnostics', () => {
 
   it('falls back to autoProvisionedNodeId when workspace has no node', async () => {
     await seedUser('user-st-diag2');
-    await seedNode('node-st-auto', 'user-st-diag2', { status: 'creating', healthStatus: 'unknown' });
+    await seedNode('node-st-auto', 'user-st-diag2', {
+      status: 'creating',
+      healthStatus: 'unknown',
+    });
 
     const diagnostics = await gatherDiagnostics(
       env as unknown as Env,
@@ -381,7 +589,7 @@ describe('gatherDiagnostics', () => {
         auto_provisioned_node_id: 'node-st-auto',
       },
       90000,
-      'Test auto-prov',
+      'Test auto-prov'
     );
 
     expect(diagnostics.nodeId).toBe('node-st-auto');

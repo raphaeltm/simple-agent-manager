@@ -1,6 +1,8 @@
 name: Deploy Production
 
 on:
+  # Canonical repo auto-deploys after successful main CI. Forked self-host
+  # installs should update by manually running this workflow on main.
   workflow_run:
     workflows: ['CI']
     types: [completed]

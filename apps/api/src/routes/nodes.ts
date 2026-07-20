@@ -32,7 +32,13 @@ import {
   getNodeSystemInfoFromNode,
   listNodeContainersFromNode,
 } from '../services/node-agent-diagnostics';
-import { createNodeRecord, deleteNodeResources, provisionNode, stopNodeResources } from '../services/nodes';
+import {
+  createNodeRecord,
+  deleteNodeResources,
+  provisionNode,
+  retireDeletedDeploymentNodeRecord,
+  stopNodeResources,
+} from '../services/nodes';
 import { recordNodeRoutingMetric } from '../services/telemetry';
 
 const nodesRoutes = new Hono<{ Bindings: Env }>();
@@ -45,11 +51,12 @@ const nodesRoutes = new Hono<{ Bindings: Env }>();
 nodesRoutes.use('/*', async (c, next) => {
   const path = c.req.path;
   if (
-    path.endsWith('/ready')
-    || path.endsWith('/heartbeat')
-    || path.endsWith('/errors')
-    || path.endsWith('/deploy-release')
-    || path.endsWith('/origin-ca-certificate')
+    path.endsWith('/ready') ||
+    path.endsWith('/heartbeat') ||
+    path.endsWith('/errors') ||
+    path.endsWith('/deploy-release') ||
+    path.endsWith('/deploy-routes') ||
+    path.endsWith('/origin-ca-certificate')
   ) {
     return next();
   }
@@ -88,7 +95,7 @@ type DeploymentEnvironmentNodeSummary = NonNullable<NodeResponse['deploymentEnvi
 
 function toNodeResponse(
   node: schema.Node,
-  deploymentEnvironments: DeploymentEnvironmentNodeSummary[] = [],
+  deploymentEnvironments: DeploymentEnvironmentNodeSummary[] = []
 ): NodeResponse {
   let lastMetrics: NodeResponse['lastMetrics'] = null;
   if (node.lastMetrics) {
@@ -121,7 +128,7 @@ function toNodeResponse(
 
 async function loadDeploymentEnvironmentSummaries(
   db: ReturnType<typeof drizzle<typeof schema>>,
-  nodeIds: string[],
+  nodeIds: string[]
 ): Promise<Map<string, DeploymentEnvironmentNodeSummary[]>> {
   if (nodeIds.length === 0) return new Map();
 
@@ -185,9 +192,13 @@ nodesRoutes.get('/', async (c) => {
   const hydrated = await Promise.all(nodes.map((node) => refreshNodeHealth(db, node)));
   const deploymentSummaries = await loadDeploymentEnvironmentSummaries(
     db,
-    hydrated.filter((node) => (node.nodeRole ?? 'workspace') === 'deployment').map((node) => node.id),
+    hydrated
+      .filter((node) => (node.nodeRole ?? 'workspace') === 'deployment')
+      .map((node) => node.id)
   );
-  return c.json(hydrated.map((node) => toNodeResponse(node, deploymentSummaries.get(node.id) ?? [])));
+  return c.json(
+    hydrated.map((node) => toNodeResponse(node, deploymentSummaries.get(node.id) ?? []))
+  );
 });
 
 nodesRoutes.post('/', jsonValidator(CreateNodeSchema), async (c) => {
@@ -232,15 +243,20 @@ nodesRoutes.post('/', jsonValidator(CreateNodeSchema), async (c) => {
   const { resolveCredentialSource } = await import('../services/provider-credentials');
   const credResult = await resolveCredentialSource(db, userId, provider ?? undefined);
   if (!credResult) {
-    throw errors.forbidden('Cloud provider credentials required. Connect your account in Settings.');
+    throw errors.forbidden(
+      'Cloud provider credentials required. Connect your account in Settings.'
+    );
   }
-  if (credResult.credentialSource === 'platform' && c.env.COMPUTE_QUOTA_ENFORCEMENT_ENABLED !== 'false') {
+  if (
+    credResult.credentialSource === 'platform' &&
+    c.env.COMPUTE_QUOTA_ENFORCEMENT_ENABLED !== 'false'
+  ) {
     const { checkQuotaForUser } = await import('../services/compute-quotas');
     const quotaCheck = await checkQuotaForUser(db, userId);
     if (!quotaCheck.allowed) {
       throw errors.forbidden(
         `Monthly compute quota exceeded. You've used ${quotaCheck.used} of ${quotaCheck.limit} vCPU-hours this month. ` +
-        'Add your own cloud provider credentials in Settings or contact your admin to increase your quota.'
+          'Add your own cloud provider credentials in Settings or contact your admin to increase your quota.'
       );
     }
   }
@@ -254,13 +270,16 @@ nodesRoutes.post('/', jsonValidator(CreateNodeSchema), async (c) => {
     heartbeatStaleAfterSeconds: limits.nodeHeartbeatStaleSeconds,
   });
 
-  recordNodeRoutingMetric({
-    metric: 'sc_006_node_efficiency',
-    nodeId: created.id,
-    userId,
-    reusedExistingNode: false,
-    nodeCountForUser: existingNodes.length + 1,
-  }, c.env);
+  recordNodeRoutingMetric(
+    {
+      metric: 'sc_006_node_efficiency',
+      nodeId: created.id,
+      userId,
+      reusedExistingNode: false,
+      nodeCountForUser: existingNodes.length + 1,
+    },
+    c.env
+  );
 
   c.executionCtx.waitUntil(provisionNode(created.id, c.env));
   return c.json(created, 201);
@@ -291,20 +310,23 @@ nodesRoutes.post('/:id/stop', async (c) => {
   const workspaceRows = await db
     .select({ id: schema.workspaces.id, status: schema.workspaces.status })
     .from(schema.workspaces)
-    .where(
-      and(
-        eq(schema.workspaces.nodeId, nodeId),
-        eq(schema.workspaces.userId, userId)
-      )
-    );
+    .where(and(eq(schema.workspaces.nodeId, nodeId), eq(schema.workspaces.userId, userId)));
 
   if (node.status === 'running' && node.healthStatus !== 'unhealthy') {
     for (const workspace of workspaceRows) {
-      if (workspace.status === 'running' || workspace.status === 'recovery' || workspace.status === 'creating') {
+      if (
+        workspace.status === 'running' ||
+        workspace.status === 'recovery' ||
+        workspace.status === 'creating'
+      ) {
         try {
           await stopWorkspaceOnNode(nodeId, workspace.id, c.env, userId);
         } catch (e) {
-          log.warn('node.workspace_stop_before_power_off_failed', { nodeId, workspaceId: workspace.id, error: String(e) });
+          log.warn('node.workspace_stop_before_power_off_failed', {
+            nodeId,
+            workspaceId: workspace.id,
+            error: String(e),
+          });
         }
       }
     }
@@ -341,7 +363,7 @@ nodesRoutes.delete('/:id', async (c) => {
   const cleanup = await deleteNodeResources(nodeId, userId, c.env);
   if ((node.nodeRole ?? 'workspace') === 'deployment' && cleanup.errors.length > 0) {
     throw errors.conflict(
-      `Deployment node could not be fully deprovisioned: ${cleanup.errors.join('; ')}`,
+      `Deployment node could not be fully deprovisioned: ${cleanup.errors.join('; ')}`
     );
   }
 
@@ -366,7 +388,7 @@ nodesRoutes.delete('/:id', async (c) => {
         baseDomain: c.env.BASE_DOMAIN,
         routePortBase: c.env.DEPLOYMENT_ROUTE_PORT_BASE,
         routePortSpan: c.env.DEPLOYMENT_ROUTE_PORT_SPAN,
-      },
+      }
     );
 
     const dnsRecordsDeleted = await cleanupAppRouteDNSRecords(hostnames, c.env);
@@ -380,12 +402,7 @@ nodesRoutes.delete('/:id', async (c) => {
   const workspaceRows = await db
     .select({ id: schema.workspaces.id })
     .from(schema.workspaces)
-    .where(
-      and(
-        eq(schema.workspaces.nodeId, nodeId),
-        eq(schema.workspaces.userId, userId)
-      )
-    );
+    .where(and(eq(schema.workspaces.nodeId, nodeId), eq(schema.workspaces.userId, userId)));
 
   const workspaceIds = workspaceRows.map((workspace) => workspace.id);
   if (workspaceIds.length > 0) {
@@ -394,23 +411,17 @@ nodesRoutes.delete('/:id', async (c) => {
       .where(inArray(schema.agentSessions.workspaceId, workspaceIds));
   }
 
-  await db
-    .delete(schema.workspaces)
-    .where(
-      and(
-        eq(schema.workspaces.nodeId, nodeId),
-        eq(schema.workspaces.userId, userId)
-      )
-    );
+  if ((node.nodeRole ?? 'workspace') === 'deployment') {
+    await retireDeletedDeploymentNodeRecord(db, nodeId, userId);
+  } else {
+    await db
+      .delete(schema.workspaces)
+      .where(and(eq(schema.workspaces.nodeId, nodeId), eq(schema.workspaces.userId, userId)));
 
-  await db
-    .delete(schema.nodes)
-    .where(
-      and(
-        eq(schema.nodes.id, nodeId),
-        eq(schema.nodes.userId, userId)
-      )
-    );
+    await db
+      .delete(schema.nodes)
+      .where(and(eq(schema.nodes.id, nodeId), eq(schema.nodes.userId, userId)));
+  }
 
   return c.json({ success: true });
 });
@@ -460,7 +471,10 @@ nodesRoutes.get('/:id/system-info', async (c) => {
   }
 
   if (node.status !== 'running') {
-    return c.json({ error: 'NODE_NOT_RUNNING', message: 'System info unavailable when node is not running' }, 400);
+    return c.json(
+      { error: 'NODE_NOT_RUNNING', message: 'System info unavailable when node is not running' },
+      400
+    );
   }
 
   try {
@@ -555,7 +569,9 @@ nodesRoutes.get('/:id/logs/stream', async (c) => {
   const clientUrl = new URL(c.req.url);
   const vmProtocol = c.env.VM_AGENT_PROTOCOL || 'https';
   const vmPort = c.env.VM_AGENT_PORT || '8443';
-  const vmUrl = new URL(`${vmProtocol}://${nodeId.toLowerCase()}.vm.${c.env.BASE_DOMAIN}:${vmPort}/logs/stream`);
+  const vmUrl = new URL(
+    `${vmProtocol}://${nodeId.toLowerCase()}.vm.${c.env.BASE_DOMAIN}:${vmPort}/logs/stream`
+  );
   vmUrl.searchParams.set('token', token);
 
   // Forward filter params from client
@@ -570,10 +586,16 @@ nodesRoutes.get('/:id/logs/stream', async (c) => {
   headers.delete('x-sam-node-id');
   headers.set('X-SAM-Node-Id', nodeId);
 
-  return fetchNodeAgent(nodeId, c.env, vmUrl.toString(), {
-    method: 'GET',
-    headers,
-  }, getNodeAgentRequestTimeoutMs(c.env));
+  return fetchNodeAgent(
+    nodeId,
+    c.env,
+    vmUrl.toString(),
+    {
+      method: 'GET',
+      headers,
+    },
+    getNodeAgentRequestTimeoutMs(c.env)
+  );
 });
 
 /**
@@ -603,7 +625,9 @@ nodesRoutes.get('/:id/events/export', async (c) => {
       status: 200,
       headers: {
         'Content-Type': response.headers.get('Content-Type') || 'application/x-sqlite3',
-        'Content-Disposition': response.headers.get('Content-Disposition') || `attachment; filename="events-${nodeId}.db"`,
+        'Content-Disposition':
+          response.headers.get('Content-Disposition') ||
+          `attachment; filename="events-${nodeId}.db"`,
         'Content-Length': response.headers.get('Content-Length') || '',
       },
     });
@@ -639,7 +663,9 @@ nodesRoutes.get('/:id/metrics/export', async (c) => {
       status: 200,
       headers: {
         'Content-Type': response.headers.get('Content-Type') || 'application/x-sqlite3',
-        'Content-Disposition': response.headers.get('Content-Disposition') || `attachment; filename="metrics-${nodeId}.db"`,
+        'Content-Disposition':
+          response.headers.get('Content-Disposition') ||
+          `attachment; filename="metrics-${nodeId}.db"`,
         'Content-Length': response.headers.get('Content-Length') || '',
       },
     });
@@ -676,7 +702,9 @@ nodesRoutes.get('/:id/debug-package', async (c) => {
       status: 200,
       headers: {
         'Content-Type': response.headers.get('Content-Type') || 'application/gzip',
-        'Content-Disposition': response.headers.get('Content-Disposition') || `attachment; filename="debug-${nodeId}.tar.gz"`,
+        'Content-Disposition':
+          response.headers.get('Content-Disposition') ||
+          `attachment; filename="debug-${nodeId}.tar.gz"`,
       },
     });
   } catch {

@@ -486,6 +486,7 @@ export interface PlatformConfigStatus {
     githubApp: PlatformIntegrationStatus;
     githubWebhook: PlatformIntegrationStatus;
     googleOAuth: PlatformIntegrationStatus;
+    googleInfrastructureOAuth: PlatformIntegrationStatus;
     gitlabOAuth: PlatformIntegrationStatus;
   };
 }
@@ -502,6 +503,11 @@ export interface PlatformIntegrationConfigInput {
   google?: {
     clientId?: string;
     clientSecret?: string;
+  };
+  googleInfrastructure?: {
+    clientId?: string;
+    clientSecret?: string;
+    remove?: boolean;
   };
   gitlab?: {
     host?: string;

@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { memo, useMemo } from 'react';
 
 import type { ChatSessionListItem, ChatSessionResponse } from '../../lib/api';
 import { HierarchyIndicator } from './HierarchyIndicator';
@@ -8,16 +8,16 @@ import type { TaskInfo } from './useTaskGroups';
 /**
  * Flat session list item renderer.
  *
- * All tree nesting (expand/collapse, indentation, child rendering) has been
- * removed. The hierarchy button + modal is now the only way to explore
- * parent/child relationships.
+ * Wrapped in React.memo so unchanged sessions skip re-renders when the
+ * sessions array updates from a WebSocket delta that only touches a
+ * different session.
  *
  * The hierarchy indicator uses role-differentiated icons:
  * - GitBranch (blue) = parent ("Has subtasks")
  * - GitMerge (purple) = child ("Subtask")
  * - Network (amber) = both ("Has parent & subtasks")
  */
-export function SessionTreeItem({
+export const SessionTreeItem = memo(function SessionTreeItem({
   session,
   selectedSessionId,
   onSelect,
@@ -91,7 +91,7 @@ export function SessionTreeItem({
       />
     </div>
   );
-}
+});
 
 function getBlockedByTitle(
   session: ChatSessionListItem,

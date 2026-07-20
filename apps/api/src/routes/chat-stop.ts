@@ -9,12 +9,12 @@ import { ulid } from '../lib/ulid';
 import { getUserId } from '../middleware/auth';
 import { requireProjectCapability } from '../middleware/project-auth';
 import * as chatPersistence from '../services/chat-persistence';
+import { ensureSessionTaskBacked } from '../services/session-task-repair';
 import { isExecutableTaskStatus, isTaskStatus } from '../services/task-status';
 import {
   cleanupTerminalTaskResources,
   type TerminalTaskCleanupStatus,
 } from '../services/task-terminal-cleanup';
-import { cleanupWorkspaceForDeletion } from '../services/workspace-cleanup';
 import { requireSessionCreator } from './chat-session-ownership';
 
 type Database = ReturnType<typeof drizzle<typeof schema>>;
@@ -30,48 +30,6 @@ type TaskForStop = {
   status: string;
   errorMessage: string | null;
 };
-
-function nonEmptyString(value: unknown): string | null {
-  return typeof value === 'string' && value.length > 0 ? value : null;
-}
-
-async function findStandaloneSessionWorkspace(
-  db: Database,
-  context: StopRouteContext,
-  workspaceId: string | null
-): Promise<schema.Workspace | undefined> {
-  if (workspaceId) {
-    const [workspaceById] = await db
-      .select()
-      .from(schema.workspaces)
-      .where(
-        and(
-          eq(schema.workspaces.id, workspaceId),
-          eq(schema.workspaces.userId, context.userId),
-          eq(schema.workspaces.projectId, context.projectId)
-        )
-      )
-      .limit(1);
-
-    if (workspaceById) {
-      return workspaceById;
-    }
-  }
-
-  const [workspaceBySession] = await db
-    .select()
-    .from(schema.workspaces)
-    .where(
-      and(
-        eq(schema.workspaces.chatSessionId, context.sessionId),
-        eq(schema.workspaces.userId, context.userId),
-        eq(schema.workspaces.projectId, context.projectId)
-      )
-    )
-    .limit(1);
-
-  return workspaceBySession;
-}
 
 async function findTaskForStop(
   db: Database,
@@ -174,29 +132,15 @@ export function registerChatStopRoute(chatRoutes: Hono<{ Bindings: Env }>): void
     const db = drizzle(c.env.DATABASE, { schema });
 
     await requireProjectCapability(db, projectId, userId, 'task:write');
-    const session = await requireSessionCreator(c.env, projectId, sessionId, userId);
+    await requireSessionCreator(c.env, projectId, sessionId, userId);
 
     const context = { projectId, sessionId, userId };
-    const taskId = nonEmptyString(session.taskId);
-    const workspaceId = nonEmptyString(session.workspaceId);
-    const workspace = taskId
-      ? undefined
-      : await findStandaloneSessionWorkspace(db, context, workspaceId);
+    const backingTask = await ensureSessionTaskBacked(db, c.env, {
+      projectId, sessionId, fallbackUserId: userId,
+    });
+    await stopTaskBackedSession(c.env, db, backingTask.id, context);
+    await chatPersistence.stopChatSession(c.env, projectId, sessionId);
 
-    if (taskId) {
-      await stopTaskBackedSession(c.env, db, taskId, context);
-    } else if (workspace) {
-      await cleanupWorkspaceForDeletion({
-        db,
-        env: c.env,
-        workspace,
-        userId,
-        logContext: { projectId, sessionId, stopPath: 'session' },
-      });
-    } else {
-      await chatPersistence.stopChatSession(c.env, projectId, sessionId);
-    }
-
-    return c.json({ status: 'stopped', workspaceDeleted: Boolean(workspace || taskId) });
+    return c.json({ status: "stopped", workspaceDeleted: true });
   });
 }

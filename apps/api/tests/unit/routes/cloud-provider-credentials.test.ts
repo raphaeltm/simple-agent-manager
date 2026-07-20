@@ -82,7 +82,9 @@ async function expectCredentialValidationFailure(
 
   expect(res.status).toBe(400);
   const responseBody = await res.json();
-  expect(responseBody.message).toContain(`Token rejected by ${expectedProvider} API (401 Unauthorized)`);
+  expect(responseBody.message).toContain(
+    `Token rejected by ${expectedProvider} API (401 Unauthorized)`
+  );
 }
 
 // ============================================================================
@@ -259,7 +261,10 @@ describe('POST /api/credentials — cloud-provider credentials', () => {
   it('saves and returns a validation warning when Hetzner rejects the token', async () => {
     const { encrypt } = await import('../../../src/services/encryption');
     vi.mocked(globalThis.fetch).mockResolvedValueOnce(
-      new Response(JSON.stringify({ error: 'bad key' }), { status: 401, statusText: 'Unauthorized' })
+      new Response(JSON.stringify({ error: 'bad key' }), {
+        status: 401,
+        statusText: 'Unauthorized',
+      })
     );
 
     const res = await app.request(
@@ -337,7 +342,9 @@ describe('POST /api/credentials/validate — cloud-provider validation', () => {
     expect(body.provider).toBe('hetzner');
     expect(globalThis.fetch).toHaveBeenCalledWith(
       'https://api.hetzner.cloud/v1/servers',
-      expect.objectContaining({ headers: expect.objectContaining({ Authorization: 'Bearer htz-api-token' }) })
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: 'Bearer htz-api-token' }),
+      })
     );
     expect(encrypt).not.toHaveBeenCalled();
   });
@@ -433,6 +440,77 @@ describe('GET /api/credentials', () => {
 
     expect(body[0].encryptedToken).toBeUndefined();
     expect(body[0].iv).toBeUndefined();
+  });
+
+  it('returns safe GCP metadata while isolating a malformed encrypted row', async () => {
+    const { decrypt } = await import('../../../src/services/encryption');
+    mockDB.where.mockResolvedValueOnce([
+      {
+        id: 'gcp-good',
+        provider: 'gcp',
+        encryptedToken: 'encrypted-good',
+        iv: 'iv-good',
+        createdAt: '2026-07-16T00:00:00.000Z',
+      },
+      {
+        id: 'gcp-bad',
+        provider: 'gcp',
+        encryptedToken: 'encrypted-bad',
+        iv: 'iv-bad',
+        createdAt: '2026-07-16T00:01:00.000Z',
+      },
+      {
+        id: 'hetzner-good',
+        provider: 'hetzner',
+        encryptedToken: 'encrypted-hetzner',
+        iv: 'iv-hetzner',
+        createdAt: '2026-07-16T00:02:00.000Z',
+      },
+    ]);
+    vi.mocked(decrypt)
+      .mockResolvedValueOnce(
+        JSON.stringify({
+          version: 1,
+          provider: 'gcp',
+          authType: 'service-account-key',
+          gcpProjectId: 'gcp-project-1',
+          serviceAccountEmail: 'sam-agent@gcp-project-1.iam.gserviceaccount.com',
+          privateKeyId: 'safe-key-id',
+          privateKey: 'never-return-private-key',
+          defaultZone: 'us-central1-a',
+        })
+      )
+      .mockRejectedValueOnce(new Error('malformed encrypted row'));
+
+    const res = await app.request('/api/credentials', { method: 'GET' }, mockEnv);
+
+    expect(res.status).toBe(200);
+    const responseText = await res.text();
+    expect(responseText).not.toContain('never-return-private-key');
+    const body = JSON.parse(responseText);
+    expect(body).toHaveLength(3);
+    expect(body[0]).toMatchObject({
+      id: 'gcp-good',
+      connected: true,
+      gcp: {
+        authType: 'service-account-key',
+        gcpProjectId: 'gcp-project-1',
+        serviceAccountEmail: 'sam-agent@gcp-project-1.iam.gserviceaccount.com',
+        privateKeyId: 'safe-key-id',
+        defaultZone: 'us-central1-a',
+      },
+    });
+    expect(body[1]).toEqual({
+      id: 'gcp-bad',
+      provider: 'gcp',
+      connected: true,
+      createdAt: '2026-07-16T00:01:00.000Z',
+    });
+    expect(body[2]).toMatchObject({
+      id: 'hetzner-good',
+      provider: 'hetzner',
+      connected: true,
+    });
   });
 });
 

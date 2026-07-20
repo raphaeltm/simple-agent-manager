@@ -317,6 +317,15 @@ crudRoutes.post('/', requireAuth(), requireApproved(), jsonValidator(CreateWorks
     updatedAt: now,
   });
 
+  const chatTaskId = ulid();
+  await db.insert(schema.tasks).values({
+    id: chatTaskId, projectId: linkedProject.id, userId, workspaceId,
+    title: workspaceName, status: 'queued', executionStep: 'workspace_creation',
+    taskMode: 'conversation', triggeredBy: 'user',
+    credentialAttributionUserId: userId, credentialAttributionSource,
+    createdBy: userId, createdAt: now, updatedAt: now,
+  });
+
   // Create chat session in ProjectData DO (workspace always linked to project)
   try {
     const chatSessionId = await projectDataService.createSession(
@@ -324,13 +333,16 @@ crudRoutes.post('/', requireAuth(), requireApproved(), jsonValidator(CreateWorks
       linkedProject.id,
       workspaceId,
       workspaceName,
-      null,
+      chatTaskId,
       userId
     );
     await db
       .update(schema.workspaces)
       .set({ chatSessionId, updatedAt: now })
       .where(eq(schema.workspaces.id, workspaceId));
+    await db.update(schema.tasks).set({
+      chatSessionId, status: "in_progress", executionStep: "workspace_ready", updatedAt: now,
+    }).where(eq(schema.tasks.id, chatTaskId));
   } catch (err) {
     // Best-effort: session creation failure should not block workspace creation
     log.error('workspace.chat_session_create_failed', { workspaceId, error: err instanceof Error ? err.message : String(err) });

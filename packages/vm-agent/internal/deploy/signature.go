@@ -96,6 +96,47 @@ func (v *Verifier) Verify(payload *ApplyPayload, expectedEnvID, expectedNodeID s
 	return fmt.Errorf("signature verification failed")
 }
 
+
+// VerifyRouteConfig checks a signed route-only Caddy configuration payload.
+func (v *Verifier) VerifyRouteConfig(payload *RouteConfigPayload, expectedEnvID, expectedNodeID string, currentSeq, currentRoutingRevision int64) error {
+	if time.Now().Unix() > payload.ExpiresAt {
+		return fmt.Errorf("route config expired at %d, current time %d", payload.ExpiresAt, time.Now().Unix())
+	}
+	if payload.EnvironmentID != expectedEnvID {
+		return fmt.Errorf("environment mismatch: payload=%q expected=%q", payload.EnvironmentID, expectedEnvID)
+	}
+	if payload.NodeID != expectedNodeID {
+		return fmt.Errorf("node mismatch: payload=%q expected=%q", payload.NodeID, expectedNodeID)
+	}
+	if payload.CurrentSeq != currentSeq {
+		return fmt.Errorf("current sequence mismatch: payload=%d current=%d", payload.CurrentSeq, currentSeq)
+	}
+	if payload.RoutingRevision <= currentRoutingRevision {
+		return fmt.Errorf("routing revision replay: payload revision=%d <= current routing revision=%d", payload.RoutingRevision, currentRoutingRevision)
+	}
+
+	sigBytes, err := base64.StdEncoding.DecodeString(payload.Signature)
+	if err != nil {
+		return fmt.Errorf("decode signature: %w", err)
+	}
+	canonical, err := buildRouteConfigSignableBytes(payload)
+	if err != nil {
+		return fmt.Errorf("build route config signable payload: %w", err)
+	}
+
+	v.mu.RLock()
+	currentKey := v.currentKey
+	previousKey := v.previousKey
+	v.mu.RUnlock()
+	if ed25519.Verify(currentKey, canonical, sigBytes) {
+		return nil
+	}
+	if previousKey != nil && ed25519.Verify(previousKey, canonical, sigBytes) {
+		return nil
+	}
+	return fmt.Errorf("signature verification failed")
+}
+
 // buildSignableBytes constructs the canonical byte representation for signing.
 //
 // RegistryCredentials are deliberately NOT covered by the signature: they are
@@ -156,6 +197,31 @@ func buildSignableBytes(payload *ApplyPayload) ([]byte, error) {
 	return signableBytes, nil
 }
 
+func buildRouteConfigSignableBytes(payload *RouteConfigPayload) ([]byte, error) {
+	routes := payload.Routes
+	if routes == nil {
+		routes = []RouteTarget{}
+	}
+	routesBytes, err := marshalCanonicalJSON(routes)
+	if err != nil {
+		return nil, fmt.Errorf("marshal routes: %w", err)
+	}
+	routesHash := sha256.Sum256(routesBytes)
+	signable := SignableRouteConfigPayload{
+		EnvironmentID:   payload.EnvironmentID,
+		NodeID:          payload.NodeID,
+		CurrentSeq:      payload.CurrentSeq,
+		RoutingRevision: payload.RoutingRevision,
+		ExpiresAt:       payload.ExpiresAt,
+		RoutesHash:      hex.EncodeToString(routesHash[:]),
+	}
+	signableBytes, err := marshalCanonicalJSON(signable)
+	if err != nil {
+		return nil, fmt.Errorf("marshal route config signable payload: %w", err)
+	}
+	return signableBytes, nil
+}
+
 func hashInterpolationEnv(env map[string]string) (string, error) {
 	type entry [2]string
 	entries := make([]entry, 0, len(env))
@@ -187,6 +253,15 @@ func marshalCanonicalJSON(value any) ([]byte, error) {
 // This is used by the control plane (API) to sign payloads before sending to nodes.
 func SignPayload(payload *ApplyPayload, privKey ed25519.PrivateKey) (string, error) {
 	canonical, err := buildSignableBytes(payload)
+	if err != nil {
+		return "", err
+	}
+	sig := ed25519.Sign(privKey, canonical)
+	return base64.StdEncoding.EncodeToString(sig), nil
+}
+
+func SignRouteConfigPayload(payload *RouteConfigPayload, privKey ed25519.PrivateKey) (string, error) {
+	canonical, err := buildRouteConfigSignableBytes(payload)
 	if err != nil {
 		return "", err
 	}

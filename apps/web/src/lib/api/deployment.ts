@@ -95,9 +95,11 @@ export interface DeploymentPublicRoute {
   hostname: string;
   hostPort: number;
   routeIndex: number;
+  routesAreLive?: boolean;
 }
 
 export type DeploymentCustomDomainVerificationStatus = 'pending' | 'verified' | 'failed';
+export type DeploymentCustomDomainDesiredState = 'active' | 'deactivating' | 'deleted';
 
 export interface DeploymentCustomDomain {
   id: string;
@@ -109,9 +111,22 @@ export interface DeploymentCustomDomain {
   verificationStatus: DeploymentCustomDomainVerificationStatus;
   verificationError: string | null;
   verifiedAt: string | null;
+  verifiedCnameTarget: string | null;
+  desiredState: DeploymentCustomDomainDesiredState;
+  routingStatus: string;
+  servingStatus: string;
+  activationRoutingRevision: number | null;
+  deactivationRoutingRevision: number | null;
+  deletedAt: string | null;
   createdBy: string | null;
   createdAt: string;
   cnameTarget: string | null;
+  routeTargetChanged: boolean;
+  environmentStatus: string;
+  desiredRoutingRevision: number;
+  observedRoutingRevision: number;
+  observedRoutingStatus: string | null;
+  observedRoutingError: string | null;
 }
 
 export interface CreateDeploymentCustomDomainRequest {
@@ -352,8 +367,8 @@ export async function deleteDeploymentCustomDomain(
   projectId: string,
   envId: string,
   domainId: string
-): Promise<{ id: string; deleted: boolean }> {
-  return request<{ id: string; deleted: boolean }>(
+): Promise<DeploymentCustomDomain> {
+  return request<DeploymentCustomDomain>(
     `/api/projects/${projectId}/environments/${envId}/custom-domains/${domainId}`,
     { method: 'DELETE' }
   );

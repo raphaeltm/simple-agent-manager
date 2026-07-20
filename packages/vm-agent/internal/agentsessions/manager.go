@@ -251,6 +251,25 @@ func (m *Manager) UpdateAcpSessionID(workspaceID, sessionID, acpSessionID, agent
 	return nil
 }
 
+func (m *Manager) MarkError(workspaceID, sessionID, agentType, message string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	workspaceMap, ok := m.workspaceSessions[workspaceID]
+	if !ok {
+		return fmt.Errorf("workspace not found: %s", workspaceID)
+	}
+	session, ok := workspaceMap[sessionID]
+	if !ok {
+		return fmt.Errorf("session not found: %s", sessionID)
+	}
+	session.Status = StatusError
+	session.AgentType = agentType
+	session.Error = message
+	session.UpdatedAt = time.Now().UTC()
+	workspaceMap[sessionID] = session
+	return nil
+}
+
 func (m *Manager) RemoveWorkspace(workspaceID string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

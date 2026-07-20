@@ -38,7 +38,7 @@ import {
   getNodeSystemInfoFromNode,
   listNodeContainersFromNode,
 } from '../services/node-agent-diagnostics';
-import { deleteNodeResources } from '../services/nodes';
+import { deleteNodeResources, retireDeletedDeploymentNodeRecord } from '../services/nodes';
 import { registerDeploymentEnvironmentLifecycleRoutes } from './deployment-environment-lifecycle';
 
 // =============================================================================
@@ -336,12 +336,12 @@ deploymentEnvironmentRoutes.get(
     const db = drizzle(c.env.DATABASE, { schema });
     await requireProjectCapability(db, projectId, userId, 'deployment:read');
     const environment = await requireDeploymentEnvironment(db, projectId, envId);
-    if (environment.status !== 'active') {
-      return c.json({ publicRoutes: [] });
-    }
+    const routesAreLive = environment.status === 'active' || environment.status === 'starting';
 
     const targets = await getEnvironmentPublicRouteTargets(db, c.env, envId);
     return c.json({
+      environmentStatus: environment.status,
+      routesAreLive,
       publicRoutes: targets.map((route, index) => ({
         id: publicRouteId(route.service, route.containerPort, index),
         service: route.service,
@@ -349,6 +349,7 @@ deploymentEnvironmentRoutes.get(
         hostname: route.hostname,
         hostPort: route.hostPort,
         routeIndex: index,
+        routesAreLive,
       })),
     });
   }
@@ -677,9 +678,7 @@ deploymentEnvironmentRoutes.delete(
           );
         }
 
-        await db
-          .delete(schema.nodes)
-          .where(and(eq(schema.nodes.id, environment.nodeId), eq(schema.nodes.userId, userId)));
+        await retireDeletedDeploymentNodeRecord(db, environment.nodeId, userId);
         nodeDeleted = cleanup.nodeFound;
       }
     }

@@ -2,7 +2,7 @@ import type { SlashCommand } from '@simple-agent-manager/acp-client';
 import type { AgentProfile } from '@simple-agent-manager/shared';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useState } from 'react';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ProjectChatComposer } from '../../../src/components/project-chat/ProjectChatComposer';
 import { FollowUpInput } from '../../../src/components/project-message-view/FollowUpInput';
@@ -30,6 +30,21 @@ globalThis.requestAnimationFrame = (callback: FrameRequestCallback) => {
   callback(0);
   return 0;
 };
+
+function mockNavigatorPlatform(platform: string) {
+  Object.defineProperty(window.navigator, 'platform', {
+    configurable: true,
+    value: platform,
+  });
+  Object.defineProperty(window.navigator, 'userAgentData', {
+    configurable: true,
+    value: { platform },
+  });
+}
+
+afterEach(() => {
+  mockNavigatorPlatform('Linux x86_64');
+});
 
 const COMMANDS: SlashCommand[] = [
   { name: 'commit', description: 'Create a commit', source: 'client' },
@@ -117,6 +132,48 @@ describe('ProjectChatComposer', () => {
 
     fireEvent.keyDown(textarea, { key: 'Enter', ctrlKey: true });
     expect(onSend).toHaveBeenCalledTimes(1);
+  });
+
+  it('sends with Meta+Enter for Mac keyboard behavior', () => {
+    const onSend = vi.fn();
+    render(<ComposerHarness initialValue="Ship it" onSend={onSend} />);
+
+    fireEvent.keyDown(screen.getByRole('combobox'), { key: 'Enter', metaKey: true });
+
+    expect(onSend).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows Ctrl+Enter shortcut hint and Send tooltip on non-Mac platforms', () => {
+    mockNavigatorPlatform('Win32');
+
+    render(<ComposerHarness initialValue="Ship it" />);
+
+    expect(screen.getByText('Press Ctrl+Enter to send, Enter for new line')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Send' })).toHaveAttribute(
+      'title',
+      'Send message (Ctrl+Enter)',
+    );
+    expect(screen.getByRole('button', { name: 'Send' })).toHaveAttribute(
+      'aria-keyshortcuts',
+      'Control+Enter',
+    );
+  });
+
+  it('shows Cmd+Enter shortcut hint and Send tooltip on Mac platforms', () => {
+    mockNavigatorPlatform('MacIntel');
+
+    render(<ComposerHarness initialValue="Ship it" />);
+
+    expect(screen.getByText('Press Cmd+Enter to send, Enter for new line')).toBeInTheDocument();
+    expect(screen.queryByText('Press Ctrl+Enter to send, Enter for new line')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Send' })).toHaveAttribute(
+      'title',
+      'Send message (Cmd+Enter)',
+    );
+    expect(screen.getByRole('button', { name: 'Send' })).toHaveAttribute(
+      'aria-keyshortcuts',
+      'Meta+Enter',
+    );
   });
 
   it('selects agent profile mentions and quotes multi-word names', async () => {

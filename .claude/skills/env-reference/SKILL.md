@@ -81,6 +81,25 @@ See `apps/api/.env.example` for the full list. Key variables:
 - `DEVCONTAINER_CACHE_REPOSITORY_PREFIX` — Prefix for generated cache repository names
 - `DEVCONTAINER_CACHE_CREDENTIAL_EXPIRATION_MINUTES` — TTL for short-lived registry credentials minted by the API
 
+### Google OAuth and GCP
+
+- `GOOGLE_LOGIN_CLIENT_ID`, `GOOGLE_LOGIN_CLIENT_SECRET` — Optional Google user-login OAuth fallback. Runtime `/setup` or superadmin config takes precedence. Callback: `/api/auth/callback/google`.
+- `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` — Optional, independent infrastructure OAuth fallback used only for keyless GCP/WIF setup. Runtime superadmin config takes precedence. Callbacks: `/auth/google/callback` and `/api/deployment/gcp/callback`.
+- `GCP_WIF_POOL_ID`, `GCP_WIF_PROVIDER_ID`, `GCP_SERVICE_ACCOUNT_ID` — Default identifiers used by WIF setup.
+- `GCP_SERVICE_ACCOUNT_JSON_MAX_BYTES` — Maximum UTF-8 service-account JSON upload/paste size (default: `65536`).
+- `GCP_DEFAULT_ZONE` — Default Compute zone (default: `us-central1-a`).
+- `GCP_IMAGE_FAMILY`, `GCP_IMAGE_PROJECT`, `GCP_DISK_SIZE_GB` — Compute VM image and disk defaults.
+- `GCP_TOKEN_CACHE_TTL_SECONDS` — Maximum short-lived access-token cache TTL (default: `3300`; capped by the provider-returned expiry).
+- `GCP_IDENTITY_TOKEN_EXPIRY_SECONDS` — WIF SAM identity-token lifetime (default: `600`).
+- `GCP_OPERATION_POLL_TIMEOUT_MS` — GCP asynchronous operation timeout (default: `300000`).
+- `GCP_API_TIMEOUT_MS` — Timeout for Google OAuth, IAM, and Compute verification requests (default: `30000`).
+- `GCP_STS_SCOPE` — WIF STS scope (default: `https://www.googleapis.com/auth/cloud-platform`).
+- `GCP_SA_IMPERSONATION_SCOPES` — Comma-separated WIF service-account impersonation scopes (default: Compute).
+- `GCP_SA_TOKEN_LIFETIME_SECONDS` — WIF impersonated-token lifetime (default: `3600`).
+- `GCP_STS_TOKEN_URL`, `GCP_IAM_CREDENTIALS_BASE_URL` — WIF endpoint overrides for controlled environments. They do not affect service-account JWT exchange, which always uses Google's fixed OAuth token endpoint.
+- `GCP_DEPLOY_WIF_POOL_ID`, `GCP_DEPLOY_WIF_PROVIDER_ID`, `GCP_DEPLOY_SERVICE_ACCOUNT_ID` — Default identifiers for deployment WIF.
+- `GCP_DEPLOY_IDENTITY_TOKEN_EXPIRY_SECONDS`, `GCP_DEPLOY_OAUTH_STATE_TTL_SECONDS`, `GCP_DEPLOY_OAUTH_TOKEN_HANDLE_TTL_SECONDS` — Deployment authorization lifetimes.
+
 ### Resource Limits
 
 - `MAX_NODES_PER_USER` — Runtime node cap
@@ -113,6 +132,8 @@ See `apps/api/.env.example` for the full list. Key variables:
 - `TASK_RECONCILIATION_PROMPT_SOFT_STALL_MS` — In-flight prompt observation threshold before SAM records a non-interrupting reconciliation event (default: 1800000)
 - `TASK_RECONCILIATION_PROMPT_HARD_STALL_MS` — In-flight prompt hard-stall threshold before SAM requests prompt cancellation and retries check-in later (default: 7200000)
 - `TASK_RECONCILIATION_MIN_ALARM_DELAY_MS` — Minimum delay before the next reconciliation alarm can fire (default: 10000)
+- `SESSION_TASK_REPAIR_BATCH_SIZE` — Maximum legacy taskless chat sessions repaired per 5-minute sweep (default: 25; capped at 200)
+- `TASK_RUN_ABSOLUTE_CEILING_MS` — Absolute runaway-cost ceiling that fails even a demonstrably live task (default: 86400000 / 24h)
 - `SESSION_ACTIVITY_STALE_THRESHOLD_MS` — Evidence-based fallback threshold before stale working activity can be healed to idle (default: 300000)
 - `NODE_HEARTBEAT_STALE_SECONDS` — Staleness threshold for node health
 - `NODE_AGENT_READY_TIMEOUT_MS` — Max wait for freshly provisioned node-agent health
@@ -156,7 +177,28 @@ See `apps/api/.env.example` for the full list. Key variables:
 
 ### Credential Routes Rate Limits
 
-- `RATE_LIMIT_CREDENTIAL_UPDATE` — Applied to both user-scoped (`PUT /api/credentials/agent`) and project-scoped (`PUT /api/projects/:id/credentials`) credential write endpoints (MEDIUM #7 fix)
+- `RATE_LIMIT_CREDENTIAL_UPDATE` — Credential mutation cap used by user/project agent-key writes and the atomic `PUT /api/gcp/service-account` and superadmin Google infrastructure OAuth rotation paths.
+
+### Generic Webhook Triggers
+
+- `WEBHOOK_TRIGGERS_ENABLED` — Public ingress kill switch (default: `true`)
+- `WEBHOOK_TRIGGER_MAX_BODY_BYTES` — Maximum JSON request body (default: `65536`)
+- `WEBHOOK_TRIGGER_MAX_FILTERS` — Maximum deterministic filters per trigger (default: `10`)
+- `WEBHOOK_TRIGGER_MAX_FILTER_PATH_LENGTH` — Maximum filter dot-path length (default: `200`)
+- `WEBHOOK_TRIGGER_MAX_FILTER_PATH_DEPTH` — Maximum filter nesting depth at evaluation time (default: `8`)
+- `WEBHOOK_TRIGGER_MAX_INCLUDED_HEADERS` — Maximum safe request headers copied into template context (default: `10`)
+- `WEBHOOK_TRIGGER_MAX_HEADER_NAME_LENGTH` — Maximum configured included-header name length (default: `100`)
+- `WEBHOOK_TRIGGER_MAX_SOURCE_LABEL_LENGTH` — Maximum optional source label length (default: `100`)
+- `WEBHOOK_TRIGGER_MAX_IDEMPOTENCY_KEY_LENGTH` — Maximum `Idempotency-Key` length (default: `200`)
+- `WEBHOOK_INGRESS_RATE_LIMIT_PER_MINUTE` — Best-effort pre-auth request damping per IP/window (default: `120`)
+- `WEBHOOK_TRIGGER_RATE_LIMIT_PER_MINUTE` — Best-effort request damping per trigger/window (default: `60`)
+- `WEBHOOK_INVALID_TOKEN_RATE_LIMIT_PER_MINUTE` — Best-effort invalid-token request damping per IP/window (default: `30`)
+- `WEBHOOK_RATE_LIMIT_WINDOW_SECONDS` — Fixed rate-limit window length (default: `60`)
+- `WEBHOOK_DELIVERY_RETENTION_DAYS` — Retention for redacted delivery audit metadata (default: `7`)
+- `WEBHOOK_DELIVERY_CLEANUP_BATCH_SIZE` — Maximum expired audit rows deleted per cleanup pass (default: `500`)
+- `WEBHOOK_DELIVERY_DEFAULT_PAGE_SIZE` — Default delivery-history page size (default: `25`)
+- `WEBHOOK_DELIVERY_MAX_PAGE_SIZE` — Maximum delivery-history page size (default: `100`)
+- `WEBHOOK_DELIVERY_PROCESSING_LEASE_SECONDS` — Recovery lease for processing deliveries without a submitted task (default: `300`)
 
 ### Trial Onboarding (`/try` flow)
 

@@ -192,5 +192,69 @@ describe('Bootstrap Routes', () => {
       expect(body.gitUserName).toBeNull();
       expect(body.gitUserEmail).toBeNull();
     });
+
+    it('rejects concurrent replay while first redemption is in flight', async () => {
+      const { bootstrapRoutes } = await import('../../../src/routes/bootstrap');
+      const { encrypt } = await import('../../../src/services/encryption');
+
+      const app = new Hono();
+      app.route('/api/bootstrap', bootstrapRoutes);
+
+      const { ciphertext, iv } = await encrypt('hetzner-token', mockEnv.ENCRYPTION_KEY);
+      const tokenData: BootstrapTokenData = {
+        workspaceId: 'ws-123',
+        encryptedHetznerToken: ciphertext,
+        hetznerTokenIv: iv,
+        callbackToken: 'jwt-token',
+        encryptedGithubToken: null,
+        githubTokenIv: null,
+        gitUserName: null,
+        gitUserEmail: null,
+        createdAt: new Date().toISOString(),
+      };
+
+      let releaseGet!: () => void;
+      mockKV.get.mockReturnValueOnce(new Promise((resolve) => {
+        releaseGet = () => resolve(tokenData);
+      }));
+
+      const first = app.request('/api/bootstrap/concurrent-token', { method: 'POST' }, mockEnv);
+      const second = app.request('/api/bootstrap/concurrent-token', { method: 'POST' }, mockEnv);
+      releaseGet();
+
+      const [res1, res2] = await Promise.all([first, second]);
+      expect([res1.status, res2.status].sort()).toEqual([200, 401]);
+      expect(mockKV.delete).toHaveBeenCalledTimes(1);
+      expect(mockKV.delete).toHaveBeenCalledWith('bootstrap:concurrent-token');
+    });
+
+    it('fails closed when token data is missing callback token material', async () => {
+      const { bootstrapRoutes } = await import('../../../src/routes/bootstrap');
+      const { encrypt } = await import('../../../src/services/encryption');
+
+      const app = new Hono();
+      app.route('/api/bootstrap', bootstrapRoutes);
+
+      const { ciphertext, iv } = await encrypt('hetzner-token', mockEnv.ENCRYPTION_KEY);
+      const tokenData = {
+        workspaceId: 'ws-123',
+        encryptedHetznerToken: ciphertext,
+        hetznerTokenIv: iv,
+        encryptedGithubToken: null,
+        githubTokenIv: null,
+        gitUserName: null,
+        gitUserEmail: null,
+        createdAt: new Date().toISOString(),
+      } as BootstrapTokenData;
+
+      mockKV.get.mockResolvedValue(tokenData);
+
+      const res = await app.request('/api/bootstrap/malformed-token', { method: 'POST' }, mockEnv);
+      expect(res.status).toBe(401);
+      const body = await res.json();
+      expect(body.error).toBe('INVALID_TOKEN');
+      expect(mockKV.delete).toHaveBeenCalledWith('bootstrap:malformed-token');
+    });
+
   });
 });

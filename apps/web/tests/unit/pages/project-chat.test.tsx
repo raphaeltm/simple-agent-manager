@@ -40,11 +40,14 @@ const mocks = vi.hoisted(() => ({
   stopChatSession: vi.fn(),
   getProjectTask: vi.fn(),
   summarizeSession: vi.fn(),
+  prepareForkSession: vi.fn(),
   getTranscribeApiUrl: vi.fn(() => 'https://api.test.com/api/transcribe'),
   closeConversationTask: vi.fn(),
   availableCommands: [] as Array<{ name: string; description: string; source: 'client' | 'static' | 'cached' | 'agent' }>,
-  /** Captures the onSessionChange callback passed to useProjectWebSocket. */
-  capturedOnSessionChange: null as (() => void) | null,
+  /** Captures the onSessionEvent callback passed to useProjectWebSocket. */
+  capturedOnSessionEvent: null as ((event: { type: string; payload: Record<string, unknown> }) => void) | null,
+  /** Captures the onReconnected callback passed to useProjectWebSocket. */
+  capturedOnReconnected: null as (() => void) | null,
 }));
 
 vi.mock('../../../src/lib/api', async (importOriginal) => ({
@@ -63,6 +66,7 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
   stopChatSession: mocks.stopChatSession,
   getProjectTask: mocks.getProjectTask,
   summarizeSession: mocks.summarizeSession,
+  prepareForkSession: mocks.prepareForkSession,
   getTranscribeApiUrl: mocks.getTranscribeApiUrl,
   closeConversationTask: mocks.closeConversationTask,
   linkSessionIdea: vi.fn().mockResolvedValue(undefined),
@@ -121,8 +125,12 @@ vi.mock('../../../src/hooks/useAvailableCommands', () => ({
 }));
 
 vi.mock('../../../src/hooks/useProjectWebSocket', () => ({
-  useProjectWebSocket: ({ onSessionChange }: { onSessionChange: () => void }) => {
-    mocks.capturedOnSessionChange = onSessionChange;
+  useProjectWebSocket: ({ onSessionEvent, onReconnected }: {
+    onSessionEvent?: (event: { type: string; payload: Record<string, unknown> }) => void;
+    onReconnected?: () => void;
+  }) => {
+    mocks.capturedOnSessionEvent = onSessionEvent ?? null;
+    mocks.capturedOnReconnected = onReconnected ?? null;
     return { connectionState: 'connected' };
   },
 }));
@@ -420,6 +428,11 @@ describe('ProjectChat new chat button', () => {
     mocks.listSkills.mockResolvedValue([]);
     mocks.availableCommands = [];
     mocks.listProjectTasks.mockResolvedValue({ tasks: [], nextCursor: null });
+    mocks.prepareForkSession.mockResolvedValue({
+      parentTaskId: 'task-1', parentSessionId: 'session-with-task',
+      parentBranch: 'sam/fix-login-bug', sessionLabel: 'Fix the login bug',
+      summary: 'Summary of previous session', messageCount: 10, repaired: false,
+    });
     mocks.summarizeSession.mockResolvedValue({
       summary: 'Summary of previous session',
       messageCount: 10,
@@ -691,7 +704,7 @@ describe('ProjectChat new chat button', () => {
     expect((textarea as HTMLTextAreaElement).value).toContain('Parent task ID: task-1');
 
     await waitFor(() => {
-      expect(mocks.summarizeSession).toHaveBeenCalledWith(PROJECT_ID, SESSION_WITH_TASK.id);
+      expect(mocks.prepareForkSession).toHaveBeenCalledWith(PROJECT_ID, SESSION_WITH_TASK.id);
       expect(screen.queryByText('Loading context...')).not.toBeInTheDocument();
     });
 
@@ -1235,7 +1248,7 @@ describe('ProjectChat realtime sidebar updates (capability test)', () => {
     mocks.listProjectTasks.mockResolvedValue({ tasks: [], nextCursor: null });
   });
 
-  it('refreshes the session list when onSessionChange fires (simulating a WebSocket event)', async () => {
+  it('applies WebSocket session.created delta to session list (no full refetch)', async () => {
     // Initial load returns one session
     mocks.listChatSessions.mockResolvedValue({
       sessions: [SESSION_1],
@@ -1248,42 +1261,62 @@ describe('ProjectChat realtime sidebar updates (capability test)', () => {
       expect(screen.getByText('First chat')).toBeInTheDocument();
     });
 
-    // Initial load should have called listChatSessions once
     const initialCallCount = mocks.listChatSessions.mock.calls.length;
 
-    // Now simulate a new session appearing (server-side event)
-    mocks.listChatSessions.mockResolvedValue({
-      sessions: [
-        { ...SESSION_1 },
-        {
+    // Send a session.created delta event via the captured onSessionEvent callback
+    const onSessionEvent = mocks.capturedOnSessionEvent;
+    expect(onSessionEvent).toBeTruthy();
+    await act(async () => {
+      onSessionEvent?.({
+        type: 'session.created',
+        payload: {
           id: 'session-new',
           workspaceId: 'ws-new',
           topic: 'New realtime session',
           status: 'active',
           messageCount: 0,
-          startedAt: Date.now(),
-          endedAt: null,
           createdAt: Date.now(),
         },
-      ],
-      total: 2,
+      });
     });
 
-    // Invoke the captured onSessionChange callback (this is what the real
-    // WebSocket hook calls when a session lifecycle event arrives)
-    const onSessionChange = mocks.capturedOnSessionChange;
-    expect(onSessionChange).toBeTruthy();
+    // Wait for the batched state update (~16ms timer)
     await act(async () => {
-      onSessionChange?.();
+      await new Promise((r) => setTimeout(r, 50));
     });
 
-    // listChatSessions should have been called again
-    expect(mocks.listChatSessions.mock.calls.length).toBeGreaterThan(initialCallCount);
+    // listChatSessions should NOT have been called again — delta was applied directly
+    expect(mocks.listChatSessions.mock.calls.length).toBe(initialCallCount);
 
     // The new session should appear in the sidebar
     await waitFor(() => {
       expect(screen.getByText('New realtime session')).toBeInTheDocument();
     });
+  });
+
+  it('does a full refetch on reconnect', async () => {
+    mocks.listChatSessions.mockResolvedValue({
+      sessions: [SESSION_1],
+      total: 1,
+    });
+
+    renderProjectChat(`/projects/${PROJECT_ID}/chat/${SESSION_1.id}`);
+
+    await waitFor(() => {
+      expect(screen.getByText('First chat')).toBeInTheDocument();
+    });
+
+    const initialCallCount = mocks.listChatSessions.mock.calls.length;
+
+    // Simulate reconnect — this should trigger a full refetch
+    const onReconnected = mocks.capturedOnReconnected;
+    expect(onReconnected).toBeTruthy();
+    await act(async () => {
+      onReconnected?.();
+    });
+
+    // Full refetch should have been called
+    expect(mocks.listChatSessions.mock.calls.length).toBeGreaterThan(initialCallCount);
   });
 });
 

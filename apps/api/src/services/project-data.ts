@@ -201,7 +201,7 @@ export async function listSessions(
   offset: number = 0,
   taskId: string | null = null,
   createdByUserId: string | null = null
-): Promise<{ sessions: Record<string, unknown>[]; total: number }> {
+): Promise<{ sessions: Record<string, unknown>[]; total: number; hasMore: boolean }> {
   const stub = await getStub(env, projectId);
   return stub.listSessions(status, limit, offset, taskId, createdByUserId);
 }
@@ -213,6 +213,14 @@ export async function getSessionsByTaskIds(
 ): Promise<Array<Record<string, unknown>>> {
   const stub = await getStub(env, projectId);
   return stub.getSessionsByTaskIds(taskIds);
+}
+
+export async function linkSessionToTask(
+  env: Env, projectId: string, sessionId: string, taskId: string
+): Promise<boolean> {
+  return callProjectDataWithRetry(env, projectId, 'linkSessionToTask', (stub) =>
+    stub.linkSessionToTask(sessionId, taskId)
+  );
 }
 
 export async function getSession(

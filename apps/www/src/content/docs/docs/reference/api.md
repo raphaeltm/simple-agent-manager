@@ -69,7 +69,7 @@ Get the provisioning progress log for a workspace.
 
 ### `POST /api/workspaces/:id/agent-sessions`
 
-Create a new Claude Code agent session in a workspace.
+Create a new agent session in a workspace. The agent (Claude Code, Codex, Gemini CLI, etc.) is determined by the selected agent profile.
 
 ### `GET /api/workspaces/:id/agent-sessions`
 
@@ -234,15 +234,18 @@ Generate a short-lived JWT for WebSocket terminal access.
 ```json
 {
   "token": "eyJhbG...",
-  "workspaceUrl": "wss://ws-abc123.example.com"
+  "expiresAt": 1730000000000,
+  "workspaceUrl": "https://ws-abc123.example.com"
 }
 ```
+
+The client opens the terminal WebSocket at `wss://ws-abc123.example.com/terminal/ws/multi?token=...` using the returned token.
 
 ## Utility
 
 ### `GET /health`
 
-Health check endpoint. Returns status and version info.
+Public health check endpoint. Returns `{ "status": "healthy", "timestamp": "..." }` (or `"degraded"` with a `503` when critical bindings are unavailable). No version or internal details are exposed.
 
 ### `GET /.well-known/jwks.json`
 

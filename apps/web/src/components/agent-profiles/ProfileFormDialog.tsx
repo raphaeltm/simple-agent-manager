@@ -323,7 +323,7 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
     Promise.all([getProviderCatalog(), getProject(projectId)])
       .then(([catalogResponse, project]) => {
         if (cancelled) return;
-        setCatalogs(catalogResponse.catalogs);
+        setCatalogs(Array.isArray(catalogResponse.catalogs) ? catalogResponse.catalogs : []);
         setProjectProvider(project.defaultProvider ?? null);
         setProjectLocation(project.defaultLocation ?? null);
       })

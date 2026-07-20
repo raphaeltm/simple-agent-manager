@@ -1,103 +1,76 @@
 ---
-title: Creating Workspaces
-description: How to create, use, and manage workspaces in SAM.
+title: Workspaces
+description: How workspaces are provisioned, used, and managed in SAM.
 ---
 
-Workspaces are ephemeral AI coding environments — a VM, a devcontainer, and your repo, accessible through a browser terminal.
+A **workspace** is the environment an AI coding agent runs in — your repository, cloned and ready, with the tools the agent needs. In everyday use you rarely create one by hand: SAM provisions a workspace for you automatically when you start working in a project chat. This guide explains that automatic flow and the direct controls available for power users.
 
-## Before You Start
+## The Normal Flow: Workspaces Come From Chat
 
-You need:
-1. A SAM account (sign in with GitHub)
-2. A cloud provider credential (Hetzner, Scaleway, or GCP) added in Settings
-3. The **GitHub App installed** on at least one repository
+You don't start with a workspace — you start with a conversation:
 
-## Creating a Workspace
+1. From the **Dashboard**, click **Import Project** and connect a GitHub repository.
+2. Open the project and describe what you want in the **chat**.
+3. SAM automatically provisions a workspace, runs your chosen agent, and streams progress back to you. When the agent finishes, it opens a pull request.
 
-### From the Dashboard
+Provisioning takes a couple of minutes the first time, or seconds when SAM reuses a recently active ("warm") environment. You never have to pick a server or wait at a terminal — the workspace exists to serve the chat.
 
-1. Navigate to the **Dashboard**
-2. Click **New Workspace** (or use the project's workspace creation)
-3. Select:
-   - **Repository** — from repos with the GitHub App installed
-   - **VM Size** — Small, Medium, or Large
-   - **Branch** (optional) — defaults to the repo's default branch
-4. Click **Create**
+See [Idea Execution](/docs/guides/idea-execution/) for the full chat-to-pull-request workflow.
 
-### What Happens Next
+### Choosing an environment size and profile
 
-1. SAM selects an existing healthy node or provisions a new VM on your cloud provider
-2. The VM runs cloud-init: installs Docker, downloads the VM Agent, starts the agent service
-3. The VM Agent creates a Docker container with your repo's devcontainer configuration
-4. Your repository is cloned into the container
-5. The workspace becomes accessible at `ws-{id}.yourdomain.com`
+When you start a chat you can optionally choose:
 
-Provisioning takes **2-5 minutes** for new nodes, or **seconds** if reusing a warm node.
+- **Agent profile** — which agent, model, and settings to run (see [AI Agents](/docs/guides/agents/)).
+- **Workspace profile** — a **Full** environment that builds your project's `.devcontainer` (best when the agent needs to run your stack), or a **Lightweight** environment that starts faster (best for quick questions and code exploration).
+- **VM size** — more CPU and memory for heavy builds. You can set a default size per project in project settings.
 
-## Using a Workspace
+## Using a Workspace Directly
+
+Most work happens through chat, but every workspace also has a direct view for hands-on control. You'll find running workspaces under **Nodes / Workspaces** in the navigation.
 
 ### Terminal
 
-Click a running workspace to open the browser-based terminal. This is a full PTY session via xterm.js and WebSocket — it behaves like a real terminal.
+Open a workspace to get a browser-based terminal — a full interactive shell that behaves like a real terminal.
 
-Features:
 - **Session persistence** — terminal sessions survive page refreshes
-- **Multiple tabs** — shell terminals and agent chat sessions
-- **Copy/paste** — standard keyboard shortcuts work
-- **Resize** — terminal auto-resizes with the browser window
+- **Multiple tabs** — run several shells alongside agent chats
+- **Copy/paste and resize** — standard shortcuts work; the terminal fits the window
 
-### Agent Chat
+### Agent chat in a workspace
 
-Click **+ New Chat** to start a Claude Code session. Type a prompt and Claude will:
-- Read and modify code in your repository
-- Run commands in the terminal
-- Stream responses in real-time
-
-Each chat session runs in its own tab alongside shell terminals.
+Click **+ New Chat** to start an AI coding session directly in the workspace. If you've connected more than one agent, you can choose which one to use. Each chat runs in its own tab alongside your shells.
 
 ## Managing Workspaces
 
 ### Stopping
 
-Click **Stop** on a running workspace. This:
-- Powers off the VM (if no other workspaces are using it)
-- Preserves the workspace record for restart
-
-Stopped workspaces don't incur Hetzner charges.
+**Stop** a workspace to power down its environment while keeping the record so you can restart later. Stopped workspaces don't incur compute charges.
 
 ### Restarting
 
-Click **Restart** on a stopped workspace. SAM provisions a new VM and recreates the container. Your repository is re-cloned from GitHub.
+**Restart** provisions a fresh environment and re-clones your repository.
 
 :::caution
-Restarting creates a fresh container. Any uncommitted changes from the previous session are lost. Always push your work before stopping.
+Restarting starts from a clean checkout. Any uncommitted changes from the previous session are lost — always push your work before stopping.
 :::
 
 ### Deleting
 
-Click **Delete** to permanently remove a workspace. This cleans up:
-- The Docker container
-- DNS records
-- The VM (if no other workspaces are using it)
-
-## Workspaces from Ideas
-
-Workspaces are also created automatically when you execute an idea:
-
-1. Go to a project's chat view
-2. Describe what you want done
-3. SAM automatically provisions a workspace, runs your configured agent, and creates a PR
-
-After execution completes, the node enters a **warm pool** for 30 minutes, enabling fast reuse for follow-up work.
+**Delete** permanently removes a workspace and cleans up everything associated with it.
 
 ## VM Sizes
 
-| Size | Specs | Best For | Hourly Cost |
-|------|-------|----------|-------------|
-| **Small** | 2 vCPU, 4GB RAM | Simple changes, code review | ~$0.007 |
-| **Medium** | 4 vCPU, 8GB RAM | Most development work | ~$0.012 |
-| **Large** | 8 vCPU, 16GB RAM | Large builds, heavy compilation | ~$0.030 |
+SAM offers small, medium, and large sizes, trading cost for CPU and memory:
 
-:::tip
-Start with Medium for most use cases. You can set a default VM size per project in the project settings.
+| Size | Best for |
+|------|----------|
+| **Small** | Simple changes, code review, quick questions |
+| **Medium** | Most development work |
+| **Large** | Large builds and heavy compilation |
+
+Exact specs and pricing are shown in the size picker when you create a workspace and vary by cloud provider. Start with **Medium** for most work, and set a per-project default in project settings.
+
+:::note
+Creating a workspace directly (rather than through chat) is an advanced path intended for hands-on infrastructure control. It requires a project to already be imported, and — on a self-hosted instance — a Hetzner or Scaleway credential. On the hosted platform, compute is typically provided for you.
 :::

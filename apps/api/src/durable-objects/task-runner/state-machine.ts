@@ -121,12 +121,26 @@ export async function transitionToInProgress(
   ).bind(now, now, state.taskId).run();
 
   if (!result.meta.changes || result.meta.changes === 0) {
+    const authoritative = await rc.env.DATABASE.prepare(
+      `SELECT status FROM tasks WHERE id = ?`
+    ).bind(state.taskId).first<{ status: string }>();
     log.warn('task_runner_do.aborted_by_recovery', {
       taskId: state.taskId,
       step: 'in_progress_transition',
+      authoritativeStatus: authoritative?.status ?? null,
     });
-    state.completed = true;
-    await rc.ctx.storage.put('state', state);
+    if (authoritative?.status === 'in_progress') {
+      state.currentStep = 'running';
+      state.completed = true;
+      await rc.ctx.storage.put('state', state);
+      return;
+    }
+    if (!authoritative || ['completed', 'failed', 'cancelled'].includes(authoritative.status)) {
+      state.completed = true;
+      await rc.ctx.storage.put('state', state);
+      return;
+    }
+    await failTask(state, 'Task orchestration was superseded before agent handoff completed.', rc);
     return;
   }
 
@@ -207,9 +221,12 @@ export async function failTask(
     return;
   }
 
-  // Fail the task
+  // Fail the task. The status predicate makes this idempotent against a
+  // concurrent terminal transition that lands between the check above and this
+  // write — never clobber an already-terminal row (completed/failed/cancelled).
   await rc.env.DATABASE.prepare(
-    `UPDATE tasks SET status = 'failed', execution_step = NULL, error_message = ?, completed_at = ?, updated_at = ? WHERE id = ?`
+    `UPDATE tasks SET status = 'failed', execution_step = NULL, error_message = ?, completed_at = ?, updated_at = ?
+     WHERE id = ? AND status NOT IN ('completed', 'failed', 'cancelled')`
   ).bind(errorMessage, now, now, state.taskId).run();
 
   // Sync trigger execution status (best-effort) — without this, cron triggers

@@ -1,11 +1,9 @@
 ---
 title: AI Agents
-description: Configure and use AI coding agents in SAM — Claude Code, OpenAI Codex, Google Gemini, Mistral Vibe, OpenCode, and Amp.
+description: Configure and use AI coding agents in SAM — Claude Code, OpenAI Codex, Gemini CLI, Mistral Vibe, OpenCode, and Amp.
 ---
 
-SAM supports six AI coding agents. Each runs inside a workspace container and communicates via the **Agent Communication Protocol (ACP)**.
-
-Agent sessions can run on VM-backed workspaces or, for matching instant-session profiles, on Cloudflare Containers. Self-hosted deployments enable the container runtime by default; use a full workspace profile when the agent needs the repository's complete devcontainer and long-lived VM environment.
+SAM supports six AI coding agents. You connect the ones you want to use, then choose which to run for a given chat by selecting an **agent profile**.
 
 ## Supported Agents
 
@@ -29,7 +27,7 @@ Claude Code supports dual authentication: API keys (pay-per-use) and OAuth token
 | **OAuth Support** | Yes (via `~/.codex/auth.json`)                          |
 | **Get a Key**     | [OpenAI Platform](https://platform.openai.com/api-keys) |
 
-### Google Gemini
+### Gemini CLI
 
 | Property      | Value                                                  |
 | ------------- | ------------------------------------------------------ |
@@ -68,51 +66,44 @@ OpenCode defaults to OpenCode Zen. SAM loads the Zen and Go model dropdowns from
 | **OAuth Support** | No                                           |
 | **Get a Key**     | [Amp settings](https://ampcode.com/settings) |
 
-Amp uses the community `acp-amp` ACP bridge in SAM v1. It requires an Amp API key and may require paid Amp credits. Because the current `acp-amp` release only forwards stdio MCP servers to Amp, SAM bridges its remote MCP endpoint through a pinned `mcp-remote@0.1.38` stdio wrapper when starting Amp sessions. The MCP token is passed via environment variable, never in command-line arguments.
+Amp requires an Amp API key and may require paid Amp credits.
 
-## Configuring Agent Credentials
+## Connecting Agent Credentials
 
-1. Go to **Settings** in the SAM web UI
-2. Open the **Agents** tab
-3. Add your API key (or OAuth token) for each agent you want to use. Connection and configuration for each agent are grouped together on a single card.
-4. Keys are encrypted at rest using AES-256-GCM
+1. Go to **Settings → Connections** in the SAM web UI
+2. Start the **Connect** flow for the agent you want to use
+3. Provide your API key (or OAuth token). Your credentials are encrypted at rest.
 
-You can configure credentials for multiple agents simultaneously and switch between them per project.
+You can connect multiple agents and switch between them per chat by choosing a different profile.
 
-## Project Default Agent
+## AI Provider Modes
 
-Each project can set a **default agent type** that's used when executing ideas. If no default is set, you'll need to specify the agent when starting execution.
+Each agent runs in one of three provider modes, which control where LLM traffic goes and who pays for it:
 
-To set the default:
+| Mode           | What it uses                                                                 |
+| -------------- | ---------------------------------------------------------------------------- |
+| **API key**    | Your own provider API key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, etc.)      |
+| **OAuth**      | A token from your provider subscription (for example Claude Max/Pro)         |
+| **SAM**        | The platform's managed AI proxy, with billing and budget handled by SAM (opt-in) |
 
-1. Open the project settings
-2. Select your preferred agent from the dropdown
-3. Save changes
+You pick the mode when you connect an agent. The **SAM** platform proxy is never selected automatically — you have to opt in.
 
-The agent selection follows this precedence:
+## Agent Profiles
 
-1. Explicit override on execution
-2. Project default agent
-3. Platform default from `DEFAULT_TASK_AGENT_TYPE` (`opencode` in the checked-in Worker config)
+An **agent profile** bundles a connected agent, a model, and settings into a reusable configuration. Profiles are how you choose what runs: pick a profile from the chat input when you start a session, or attach one to a [trigger](/docs/guides/webhook-triggers/) for automated work. Create and manage profiles under a project's **Profiles** page.
+
+When work starts, the agent is resolved in this order:
+
+1. The profile you selected (or the trigger's profile)
+2. The project's default profile
+3. The platform default (`DEFAULT_TASK_AGENT_TYPE`, `opencode` in the checked-in Worker config)
 
 ## Workspace Profiles
 
-When running an agent, you can choose between two workspace profiles:
+When you start a chat you can also choose how much environment to bring:
 
-### Full Profile (Default)
-
-- Builds the complete devcontainer from your project's `.devcontainer` configuration
-- Includes all custom build steps, extensions, and dependencies
-- Startup time: 2-3 minutes depending on build complexity
-
-### Lightweight Profile
-
-- Skips the devcontainer build entirely
-- Uses a minimal base image with core tools pre-installed
-- Startup time: 30-120 seconds faster than full profile
-- Best for quick conversations that don't need custom environments
-
-On deployments with `CF_CONTAINER_ENABLED=true`, lightweight/instant sessions can use Cloudflare Containers instead of provisioning a VM first. This is the fastest path for exploratory chat, planning, and small repository-aware tasks. Choose the full profile when the task depends on custom devcontainer setup, heavyweight services, or cloud VM resources.
+- **Full** (default) — builds your project's `.devcontainer` so the agent can run your stack, tests, and services. Best when the work depends on your real environment.
+- **Lightweight** — starts faster with a minimal environment. Best for quick questions, planning, and code exploration.
 
 ## Agent Session Features
 
@@ -152,7 +143,7 @@ pending → assigned → running → completed/failed/interrupted
 - **Running**: Agent actively executing
 - **Completed**: Agent finished successfully
 - **Failed**: Agent encountered an error
-- **Interrupted**: VM heartbeat lost (detected after 5 minutes of silence)
+- **Interrupted**: Connection to the agent was lost
 
 SAM now backs chat sessions with task records across more runtime paths. In practice, that means forking, archive/complete controls, lineage, and status reporting behave consistently whether the work started as an idea execution, a full task, or an instant chat.
 

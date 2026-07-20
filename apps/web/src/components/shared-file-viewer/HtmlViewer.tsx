@@ -1,4 +1,5 @@
 import { Spinner } from '@simple-agent-manager/ui';
+import DOMPurify from 'dompurify';
 import { AlertTriangle, Code, Eye } from 'lucide-react';
 import { type FC, useEffect, useState } from 'react';
 
@@ -11,7 +12,7 @@ const HTML_FETCH_TIMEOUT_MS = import.meta.env.VITE_HTML_FETCH_TIMEOUT_MS
   : DEFAULT_HTML_FETCH_TIMEOUT_MS;
 const HTML_SANDBOX_CSP = [
   "default-src 'none'",
-  "script-src 'unsafe-inline'",
+  "script-src 'none'",
   "style-src 'unsafe-inline'",
   'img-src data: blob:',
   'font-src data:',
@@ -23,6 +24,31 @@ const HTML_SANDBOX_CSP = [
 ].join('; ');
 const HTML_SANDBOX_META = `<meta http-equiv="Content-Security-Policy" content="${HTML_SANDBOX_CSP}">`;
 
+const HTML_PREVIEW_SANITIZE_CONFIG = {
+  USE_PROFILES: { html: true },
+  FORBID_TAGS: [
+    'base',
+    'embed',
+    'form',
+    'iframe',
+    'input',
+    'link',
+    'meta',
+    'object',
+    'script',
+    'textarea',
+  ],
+  FORBID_ATTR: [
+    'action',
+    'formaction',
+    'href',
+    'ping',
+    'srcdoc',
+    'target',
+  ],
+  ALLOWED_URI_REGEXP: /^(?:(?:(?:https?|mailto):|[^a-z]|[a-z+.-]+(?:[^a-z+.-:]|$)))/i,
+};
+
 interface HtmlViewerProps {
   previewUrl: string;
   fileName: string;
@@ -30,19 +56,23 @@ interface HtmlViewerProps {
 }
 
 export function buildSandboxedHtmlSrcDoc(content: string): string {
-  const headMatch = content.match(/<head\b[^>]*>/i);
+  const sanitizedContent = DOMPurify.sanitize(
+    content,
+    HTML_PREVIEW_SANITIZE_CONFIG,
+  ) as string;
+  const headMatch = sanitizedContent.match(/<head\b[^>]*>/i);
   if (headMatch?.index !== undefined) {
     const insertAt = headMatch.index + headMatch[0].length;
-    return `${content.slice(0, insertAt)}${HTML_SANDBOX_META}${content.slice(insertAt)}`;
+    return `${sanitizedContent.slice(0, insertAt)}${HTML_SANDBOX_META}${sanitizedContent.slice(insertAt)}`;
   }
 
-  const htmlMatch = content.match(/<html\b[^>]*>/i);
+  const htmlMatch = sanitizedContent.match(/<html\b[^>]*>/i);
   if (htmlMatch?.index !== undefined) {
     const insertAt = htmlMatch.index + htmlMatch[0].length;
-    return `${content.slice(0, insertAt)}<head>${HTML_SANDBOX_META}</head>${content.slice(insertAt)}`;
+    return `${sanitizedContent.slice(0, insertAt)}<head>${HTML_SANDBOX_META}</head>${sanitizedContent.slice(insertAt)}`;
   }
 
-  return `${HTML_SANDBOX_META}${content}`;
+  return `${HTML_SANDBOX_META}${sanitizedContent}`;
 }
 
 export const HtmlViewer: FC<HtmlViewerProps> = ({
@@ -155,7 +185,7 @@ export const HtmlViewer: FC<HtmlViewerProps> = ({
       {viewMode === 'rendered' ? (
         <iframe
           srcDoc={renderedSrcDoc}
-          sandbox="allow-scripts"
+          sandbox=""
           referrerPolicy="no-referrer"
           title={fileName}
           className="h-full w-full flex-1 border-0 bg-white"

@@ -91,6 +91,146 @@ describe('Dialog', () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
+
+  it('supports explicit accessible labels without a broken labelledby reference', () => {
+    render(
+      <Dialog isOpen={true} onClose={vi.fn()} aria-label="Archive conversation confirmation">
+        <p>Confirm archive</p>
+      </Dialog>,
+    );
+
+    const dialog = screen.getByRole('dialog', { name: 'Archive conversation confirmation' });
+    expect(dialog).toHaveAttribute('aria-label', 'Archive conversation confirmation');
+    expect(dialog).not.toHaveAttribute('aria-labelledby');
+  });
+
+  it('uses provided labelledby and describedby ids', () => {
+    render(
+      <Dialog
+        isOpen={true}
+        onClose={vi.fn()}
+        aria-labelledby="confirm-title"
+        aria-describedby="confirm-copy"
+      >
+        <h2 id="confirm-title">Complete and delete?</h2>
+        <p id="confirm-copy">This removes the workspace.</p>
+      </Dialog>,
+    );
+
+    const dialog = screen.getByRole('dialog', { name: 'Complete and delete?' });
+    expect(dialog).toHaveAttribute('aria-labelledby', 'confirm-title');
+    expect(dialog).toHaveAttribute('aria-describedby', 'confirm-copy');
+  });
+
+  it('restores focus to the element that opened the dialog', () => {
+    const opener = document.createElement('button');
+    opener.textContent = 'Open dialog';
+    document.body.appendChild(opener);
+    opener.focus();
+
+    const { rerender } = render(
+      <Dialog isOpen={true} onClose={vi.fn()} aria-label="Focused dialog">
+        <button type="button">Cancel</button>
+      </Dialog>,
+    );
+
+    expect(screen.getByRole('dialog', { name: 'Focused dialog' })).toBeInTheDocument();
+
+    rerender(
+      <Dialog isOpen={false} onClose={vi.fn()} aria-label="Focused dialog">
+        <button type="button">Cancel</button>
+      </Dialog>,
+    );
+
+    expect(opener).toHaveFocus();
+    opener.remove();
+  });
+
+  it('keeps Tab focus inside the dialog', () => {
+    render(
+      <Dialog isOpen={true} onClose={vi.fn()} aria-label="Trap focus">
+        <button type="button">Cancel</button>
+        <button type="button">Confirm</button>
+      </Dialog>,
+    );
+
+    const dialog = screen.getByRole('dialog', { name: 'Trap focus' });
+    const cancel = screen.getByRole('button', { name: 'Cancel' });
+    const confirm = screen.getByRole('button', { name: 'Confirm' });
+
+    confirm.focus();
+    fireEvent.keyDown(document, { key: 'Tab' });
+    expect(cancel).toHaveFocus();
+
+    cancel.focus();
+    fireEvent.keyDown(document, { key: 'Tab', shiftKey: true });
+    expect(confirm).toHaveFocus();
+
+    dialog.focus();
+    fireEvent.keyDown(document, { key: 'Tab', shiftKey: true });
+    expect(confirm).toHaveFocus();
+  });
+
+
+  it('isolates and restores background siblings while open', () => {
+    const background = document.createElement('main');
+    background.setAttribute('aria-hidden', 'false');
+    document.body.appendChild(background);
+
+    const { unmount } = render(
+      <Dialog isOpen={true} onClose={vi.fn()} aria-label="Isolated dialog">
+        <button type="button">Confirm</button>
+      </Dialog>,
+    );
+
+    expect(background).toHaveAttribute('aria-hidden', 'true');
+    expect(background.inert).toBe(true);
+
+    unmount();
+
+    expect(background).toHaveAttribute('aria-hidden', 'false');
+    expect(background.inert).not.toBe(true);
+    background.remove();
+  });
+
+  it('removes generated aria-hidden when restoring unlabelled background siblings', () => {
+    const background = document.createElement('main');
+    document.body.appendChild(background);
+
+    const { unmount } = render(
+      <Dialog isOpen={true} onClose={vi.fn()} aria-label="Temporary isolation">
+        <button type="button">Confirm</button>
+      </Dialog>,
+    );
+
+    expect(background).toHaveAttribute('aria-hidden', 'true');
+
+    unmount();
+
+    expect(background).not.toHaveAttribute('aria-hidden');
+    background.remove();
+  });
+
+  it('skips hidden and inert controls when trapping focus', () => {
+    render(
+      <Dialog isOpen={true} onClose={vi.fn()} aria-label="Filtered focus">
+        <button type="button" aria-hidden="true">Hidden action</button>
+        <div inert>
+          <button type="button">Inert action</button>
+        </div>
+        <button type="button">Visible action</button>
+      </Dialog>,
+    );
+
+    const dialog = screen.getByRole('dialog', { name: 'Filtered focus' });
+    const visible = screen.getByRole('button', { name: 'Visible action' });
+
+    dialog.focus();
+    fireEvent.keyDown(document, { key: 'Tab' });
+
+    expect(visible).toHaveFocus();
+  });
+
   it('locks body scroll when open and restores on close', () => {
     const { rerender } = render(
       <Dialog isOpen={true} onClose={vi.fn()}>

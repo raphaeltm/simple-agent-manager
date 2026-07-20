@@ -1871,7 +1871,13 @@
             "type": "string"
           },
           "sourceType": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "cron",
+              "webhook",
+              "github"
+            ],
+            "description": "Trigger source. Cron fields are null for event-driven sources."
           },
           "cronExpression": {
             "type": "string",
@@ -1923,6 +1929,9 @@
           },
           "cronHumanReadable": {
             "type": "string"
+          },
+          "webhookConfig": {
+            "$ref": "#/components/schemas/WebhookTriggerConfig"
           }
         },
         "required": [
@@ -1931,6 +1940,87 @@
           "sourceType",
           "cronExpression",
           "nextFireAt"
+        ],
+        "additionalProperties": false
+      },
+      "WebhookTriggerFilter": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Dot-separated path in the JSON request body."
+          },
+          "operator": {
+            "type": "string",
+            "enum": [
+              "exists",
+              "equals",
+              "contains"
+            ]
+          },
+          "value": {
+            "type": [
+              "string",
+              "number",
+              "boolean",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "path",
+          "operator"
+        ],
+        "additionalProperties": false
+      },
+      "WebhookTriggerConfig": {
+        "type": "object",
+        "properties": {
+          "sourceLabel": {
+            "type": "string",
+            "nullable": true
+          },
+          "filterMode": {
+            "type": "string",
+            "enum": [
+              "all",
+              "any"
+            ]
+          },
+          "filters": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WebhookTriggerFilter"
+            }
+          },
+          "includedHeaders": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "tokenLastFour": {
+            "type": "string",
+            "description": "Only the final four token characters; never credential material."
+          },
+          "tokenCreatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "tokenRotatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        },
+        "required": [
+          "sourceLabel",
+          "filterMode",
+          "filters",
+          "includedHeaders",
+          "tokenLastFour",
+          "tokenCreatedAt",
+          "tokenRotatedAt"
         ],
         "additionalProperties": false
       },

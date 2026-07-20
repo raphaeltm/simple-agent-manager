@@ -132,8 +132,8 @@ export function asToolCallPatchUpdate(update: SessionUpdate): ToolCallPatchUpdat
 
 /**
  * Resolve the stable tool name from an ACP session update. Primary source is
- * the `_meta.claudeCode.toolName` extension; falls back to the mcp__<server>__
- * <tool> title convention. Mirrors the VM agent's Go extractToolName so the
+ * the `_meta.claudeCode.toolName` extension; falls back to Claude
+ * mcp__<server>__<tool> and Codex <server>/<tool> title conventions. Mirrors the VM agent's Go extractToolName so the
  * live-stream and persisted paths produce the same discriminator.
  */
 function extractToolName(update: SessionUpdate): string | undefined {
@@ -143,11 +143,11 @@ function extractToolName(update: SessionUpdate): string | undefined {
     return claudeCode.toolName;
   }
   const title = update.title;
-  if (
-    typeof title === 'string' &&
-    title.startsWith('mcp__') &&
-    (title.match(/__/g)?.length ?? 0) >= 2
-  ) {
+  if (typeof title !== 'string') return undefined;
+  if (title.startsWith('mcp__') && (title.match(/__/g)?.length ?? 0) >= 2) {
+    return title;
+  }
+  if (/^[^/\s]+\/[A-Za-z0-9_:-]+$/.test(title)) {
     return title;
   }
   return undefined;

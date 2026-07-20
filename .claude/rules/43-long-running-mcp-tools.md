@@ -13,7 +13,13 @@ Long-running MCP tools must not block on VM work that can exceed normal HTTP, pr
 - Any timeout or idle window for long-running VM work must be env-configurable with a `Default*` constant, and tests must include both slow-but-progressing and stalled/no-progress cases.
 - Before merging VM work that crosses process, HTTP, or Cloudflare proxy boundaries, reviewers must trace whether the execution context derives from the original request/client deadline after acceptance. If it does, the PR must move the work to a job-owned context or explicitly prove the operation is bounded below the request deadline.
 
+## Scope: Any Synchronous Control-Plane → VM/Container Request Doing Data-Scaled Work
+
+This rule is not limited to MCP tools. Any control-plane request that waits synchronously on VM/container work whose cost scales with data the platform does not control (repository size, artifact size, image size) is in this class. The request timeout must be a dedicated, env-configurable budget sized for the work — never the interactive node-agent default — and the work itself must be made size-proportional where possible (shallow/partial clones, streamed transfers, filters).
+
 ## Incident Lesson
+
+On 2026-07-18/19, ALL production instant (cf-container) sessions failed for ~28 hours: the standalone vm-agent clones the repository synchronously inside the control plane's create-workspace request (`handleStandaloneWorkspaceCreate`), which ran under the interactive 30s `DEFAULT_NODE_AGENT_REQUEST_TIMEOUT_MS`. When accidental auto-commits of `.codex/` runtime state tripled the repo pack to 371 MiB, full-clone time crossed 30s on the container's fractional vCPU and every instant launch died with `Request timed out after 30000ms` (or worse: stuck `queued` when the client disconnected). Two margins eroded silently — clone cost grew with unmonitored repo history, and the fixed interactive deadline had no headroom. Fix: partial clone (`--filter=blob:none`, `STANDALONE_CLONE_FILTER`) making clone cost proportional to the working tree, plus a dedicated `CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS` (default 120s) budget. See `tasks/archive/2026-07-19-fix-instant-container-clone-timeout.md`.
 
 On 2026-06-25, Dexxy compose publishing failed twice on node `01KVY98XSGTJ0Q728TF5P4Z8XS` around 125 seconds after `host build starting`: first during `docker save` with `signal: killed`, then during R2 upload with `context canceled`. The likely cause was the synchronous MCP API to Cloudflare-proxied VM HTTP request and the VM handler deriving its long-running build context from `r.Context()`. Moving the compose file later may have made one run faster, but it was not the architectural fix.
 

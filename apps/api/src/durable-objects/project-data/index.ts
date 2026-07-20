@@ -77,7 +77,7 @@ export class ProjectData extends DurableObject<Env> {
     this.broadcastEvent('session.created', { id, workspaceId, taskId, createdByUserId, topic, status: 'active', messageCount: 0, createdAt: now });
     return id;
   }
-
+  async linkSessionToTask(sessionId: string, taskId: string): Promise<boolean> { const updated = sessions.linkSessionToTask(this.sql, sessionId, taskId); if (updated) { this.scheduleSummarySync(); this.broadcastEvent('session.updated', { sessionId, taskId }, sessionId); } return updated; }
   async updateSessionTopic(sessionId: string, topic: string): Promise<boolean> {
     const updated = sessions.updateSessionTopic(this.sql, sessionId, topic);
     if (updated) {
@@ -134,9 +134,9 @@ export class ProjectData extends DurableObject<Env> {
     this.broadcastEvent('session.updated', { sessionId, workspaceId }, sessionId);
   }
 
-  async listSessions(status: string | null, limit: number = 20, offset: number = 0, taskId: string | null = null, createdByUserId: string | null = null): Promise<{ sessions: Record<string, unknown>[]; total: number }> {
+  async listSessions(status: string | null, limit: number = 20, offset: number = 0, taskId: string | null = null, createdByUserId: string | null = null): Promise<{ sessions: Record<string, unknown>[]; total: number; hasMore: boolean }> {
     const result = sessions.listSessions(this.sql, status, limit, offset, taskId, createdByUserId);
-    return { sessions: result.sessions.map((s) => this.addBaseDomain(s)), total: result.total };
+    return { sessions: result.sessions.map((s) => this.addBaseDomain(s)), total: result.total, hasMore: result.hasMore };
   }
 
   async getSessionsByTaskIds(taskIds: string[]): Promise<Array<Record<string, unknown>>> {

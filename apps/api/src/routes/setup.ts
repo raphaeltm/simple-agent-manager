@@ -4,12 +4,13 @@ import { Hono } from 'hono';
 import type { Env } from '../env';
 import { AppError, errors } from '../middleware/error';
 import {
+  completeSetupWithConfig,
   getPlatformConfigStatus,
   isSetupCompleted,
   isSetupTokenConfigured,
   type PlatformIntegrationInput,
+  previewPlatformIntegrationConfig,
   savePlatformIntegrationConfig,
-  setSetupCompleted,
   verifySetupToken,
 } from '../services/platform-config';
 import {
@@ -145,13 +146,12 @@ setupRoutes.post('/complete', async (c) => {
     throw errors.badRequest('Platform configuration is invalid', { errors: validation.errors });
   }
 
-  const resolved = await savePlatformIntegrationConfig(c.env, config);
-  const completion = validateSetupCanComplete(resolved);
+  const preview = await previewPlatformIntegrationConfig(c.env, config);
+  const completion = validateSetupCanComplete(preview);
   if (!completion.ok) {
     throw errors.badRequest('Setup cannot be completed', { errors: completion.errors });
   }
-
-  await setSetupCompleted(c.env);
+  await completeSetupWithConfig(c.env, config);
   return c.json({ completed: true, status: await getPlatformConfigStatus(c.env) });
 });
 

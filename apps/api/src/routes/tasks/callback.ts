@@ -197,6 +197,21 @@ taskCallbackRoute.post('/:projectId/tasks/:taskId/status/callback', jsonValidato
     throw errors.badRequest(`Invalid task status in database: ${task.status}`);
   }
 
+  if (
+    task.status === body.toStatus &&
+    (body.toStatus === 'completed' || body.toStatus === 'failed' || body.toStatus === 'cancelled')
+  ) {
+    await cleanupTerminalTaskResourcesOrThrow(c.env, taskId, {
+      status: body.toStatus,
+      errorMessage: task.errorMessage,
+      projectId,
+      failureLogEvent: 'task.callback_terminal_cleanup_failed',
+      logContext: { projectId, source: 'task.callback.idempotent' },
+    });
+    const blocked = await computeBlockedForTask(db, task.id);
+    return c.json(toTaskResponse(task, blocked));
+  }
+
   if (!canTransitionTaskStatus(task.status, body.toStatus)) {
     throw errors.conflict(
       `Invalid transition ${task.status} -> ${body.toStatus}. Allowed: ${getAllowedTaskTransitions(task.status).join(', ') || 'none'}`

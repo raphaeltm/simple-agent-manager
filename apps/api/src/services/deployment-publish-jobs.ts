@@ -155,6 +155,7 @@ export async function appendDeploymentPublishJobEvent(
     projectId: input.projectId,
     environmentId: input.environmentId,
     nodeId: input.nodeId,
+    nodeIdentifier: input.nodeId,
     workspaceId: input.workspaceId,
     seq,
     level: normalizeLevel(input.level),

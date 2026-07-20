@@ -59,6 +59,22 @@ func (s *Server) applyDetectedContainerUser(runtime *WorkspaceRuntime, detected 
 	s.rebuildWorkspacePTYManager(runtime)
 }
 
+func workspaceRuntimeRequiresGitToken(runtime *WorkspaceRuntime) bool {
+	if runtime == nil {
+		return false
+	}
+	if strings.TrimSpace(runtime.Repository) == "" && strings.TrimSpace(runtime.CloneURL) == "" {
+		return false
+	}
+
+	switch strings.ToLower(strings.TrimSpace(runtime.RepoProvider)) {
+	case "", "github", "gitlab", "artifacts":
+		return true
+	default:
+		return false
+	}
+}
+
 func (s *Server) provisionWorkspaceRuntime(ctx context.Context, runtime *WorkspaceRuntime) (bool, error) {
 	if runtime == nil {
 		return false, fmt.Errorf("workspace runtime is required")
@@ -96,6 +112,9 @@ func (s *Server) provisionWorkspaceRuntime(ctx context.Context, runtime *Workspa
 
 	gitToken, err := s.fetchGitTokenForWorkspace(provisionCtx, runtime.ID, callbackToken)
 	if err != nil {
+		if workspaceRuntimeRequiresGitToken(runtime) {
+			return false, fmt.Errorf("failed to fetch git token: %w", err)
+		}
 		slog.Warn("Proceeding without git token", "workspace", runtime.ID, "error", err)
 	}
 

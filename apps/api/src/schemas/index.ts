@@ -31,14 +31,11 @@ export {
   CreateCredentialSchema,
   CredentialKindBodySchema,
   SaveAgentCredentialSchema,
+  SaveGcpServiceAccountCredentialSchema,
 } from './credentials';
 
 // Node schemas
-export {
-  CreateNodeSchema,
-  PatchNodeSchema,
-  UpdateNodeLabelSchema,
-} from './nodes';
+export { CreateNodeSchema, PatchNodeSchema, UpdateNodeLabelSchema } from './nodes';
 
 // Workspace schemas
 export {
@@ -67,10 +64,7 @@ export {
 } from './agent-profiles';
 
 // Skill schemas
-export {
-  CreateSkillSchema,
-  UpdateSkillSchema,
-} from './skills';
+export { CreateSkillSchema, UpdateSkillSchema } from './skills';
 
 // Agent settings schemas
 export type { AgentSettingsValidationLimits } from './agent-settings';
@@ -97,13 +91,16 @@ export {
   AnalyticsForwardSchema,
   CreatePlatformCredentialSchema,
   UpdatePlatformCredentialSchema,
+  UpdatePlatformIntegrationConfigSchema,
   UpdateSignupApprovalConfigSchema,
 } from './admin';
 
 // Trigger schemas
 export {
   CreateTriggerSchema,
+  TriggerPreviewSchema,
   UpdateTriggerSchema,
+  WebhookConfigValueSchema,
 } from './triggers';
 
 // Miscellaneous schemas

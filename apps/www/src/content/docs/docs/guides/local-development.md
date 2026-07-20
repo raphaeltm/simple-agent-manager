@@ -10,7 +10,7 @@ SAM uses a **Cloudflare-first development approach**. Local development has sign
 1. **Make changes locally** — edit code, run lint and typecheck
 2. **Deploy to staging** — via the "Deploy Staging" GitHub Actions workflow or `pnpm deploy:staging`
 3. **Test on Cloudflare** — real D1, KV, Workers, DNS
-4. **Merge to main** — triggers production deployment
+4. **Merge to main** — in the canonical repository, successful `main` CI triggers production deployment; in self-host forks, run **Deploy Production** manually when you want to update the instance
 
 ## What Works Locally
 

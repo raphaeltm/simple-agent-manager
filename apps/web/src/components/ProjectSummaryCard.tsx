@@ -23,6 +23,16 @@ function formatRelativeTime(dateStr: string | null): string {
 export function ProjectSummaryCard({ project, onDelete }: ProjectSummaryCardProps) {
   const navigate = useNavigate();
 
+  const workspaceCount = project.activeWorkspaceCount ?? 0;
+  const sessionCount = project.activeSessionCount ?? 0;
+  const activityParts: string[] = [];
+  if (workspaceCount > 0) activityParts.push(`${workspaceCount} ws`);
+  if (sessionCount > 0) activityParts.push(`${sessionCount} ${sessionCount === 1 ? 'session' : 'sessions'}`);
+  const activitySummary = activityParts.join(' · ');
+  const detailSummary = [project.repository, formatRelativeTime(project.lastActivityAt)]
+    .filter(Boolean)
+    .join(' · ');
+
   const overflowItems: DropdownMenuItem[] = [
     {
       id: 'edit',
@@ -59,13 +69,14 @@ export function ProjectSummaryCard({ project, onDelete }: ProjectSummaryCardProp
               <span className="sam-type-card-title text-fg-primary overflow-hidden text-ellipsis whitespace-nowrap min-w-0">
                 {project.name}
               </span>
-              <span className="sam-type-caption text-fg-muted overflow-hidden text-ellipsis whitespace-nowrap">
-                {project.activeWorkspaceCount} ws &middot; {project.activeSessionCount} sessions
-              </span>
+              {activitySummary && (
+                <span className="sam-type-caption text-fg-muted whitespace-nowrap shrink-0">
+                  {activitySummary}
+                </span>
+              )}
             </div>
             <div className="sam-type-caption text-fg-muted mt-0.5 overflow-hidden text-ellipsis whitespace-nowrap">
-              {project.repository}
-              <> &middot; {formatRelativeTime(project.lastActivityAt)}</>
+              {detailSummary}
             </div>
           </div>
         </div>

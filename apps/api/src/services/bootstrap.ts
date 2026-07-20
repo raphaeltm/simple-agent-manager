@@ -7,14 +7,17 @@
 
 import type { BootstrapTokenData } from '@simple-agent-manager/shared';
 
+import { log } from '../lib/logger';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import { decrypt, encrypt } from './encryption';
 
 /** KV key prefix for bootstrap tokens */
 const BOOTSTRAP_PREFIX = 'bootstrap:';
+const inFlightRedemptions = new Map<string, Promise<BootstrapTokenData | null>>();
 
 /** Default bootstrap token TTL in seconds (15 minutes) */
 const DEFAULT_BOOTSTRAP_TTL = 900;
+const LEGACY_CLOCK_SKEW_SECONDS = 60;
 
 interface BootstrapEnv {
   BOOTSTRAP_TOKEN_TTL_SECONDS?: string;
@@ -91,33 +94,73 @@ export async function redeemBootstrapToken(
   env: BootstrapEnv
 ): Promise<BootstrapTokenData | null> {
   const key = `${BOOTSTRAP_PREFIX}${token}`;
-
-  const data = await kv.get<BootstrapTokenData>(key, { type: 'json' });
-
-  if (!data) {
+  const existing = inFlightRedemptions.get(key);
+  if (existing) {
     return null;
   }
 
-  // Delete immediately to enforce single-use
-  await kv.delete(key);
+  const redemption = (async () => {
+    const data = await kv.get<BootstrapTokenData>(key, { type: 'json' });
 
-  if (data.encryptedCallbackToken && data.callbackTokenIv) {
-    const callbackToken = await decrypt(
-      data.encryptedCallbackToken,
-      data.callbackTokenIv,
-      getCredentialEncryptionKey(env)
-    );
+    if (!data) {
+      return null;
+    }
 
-    return {
-      ...data,
-      callbackToken,
-    };
+    // Delete immediately to enforce single-use before decrypting or returning credentials.
+    await kv.delete(key);
+
+    if (data.encryptedCallbackToken && data.callbackTokenIv) {
+      const callbackToken = await decrypt(
+        data.encryptedCallbackToken,
+        data.callbackTokenIv,
+        getCredentialEncryptionKey(env)
+      );
+
+      return {
+        ...data,
+        callbackToken,
+      };
+    }
+
+    // Backward compatibility for bootstrap entries written before callback token encryption.
+    // This is intentionally bounded to entries still inside the configured bootstrap TTL
+    // plus a small clock-skew allowance; older plaintext records fail closed.
+    if (data.callbackToken && isLegacyPlaintextCallbackTokenStillRedeemable(data, env)) {
+      log.warn('bootstrap.legacy_plaintext_callback_token_redeemed', {
+        workspaceId: data.workspaceId,
+        createdAt: data.createdAt,
+      });
+      return data;
+    }
+
+    if (data.callbackToken) {
+      log.warn('bootstrap.legacy_plaintext_callback_token_rejected', {
+        workspaceId: data.workspaceId,
+        createdAt: data.createdAt,
+      });
+    }
+
+    throw new Error('Bootstrap token data is missing callback token material');
+  })();
+
+  inFlightRedemptions.set(key, redemption);
+  try {
+    return await redemption;
+  } finally {
+    inFlightRedemptions.delete(key);
+  }
+}
+
+function isLegacyPlaintextCallbackTokenStillRedeemable(
+  data: Pick<BootstrapTokenData, 'createdAt'>,
+  env: Pick<BootstrapEnv, 'BOOTSTRAP_TOKEN_TTL_SECONDS'>
+): boolean {
+  const createdAtMs = Date.parse(data.createdAt);
+  if (!Number.isFinite(createdAtMs)) {
+    return false;
   }
 
-  // Backward compatibility for bootstrap entries written before callback token encryption.
-  if (data.callbackToken) {
-    return data;
-  }
-
-  throw new Error('Bootstrap token data is missing callback token material');
+  const ageMs = Date.now() - createdAtMs;
+  const maxAgeMs = (getBootstrapTTL(env) + LEGACY_CLOCK_SKEW_SECONDS) * 1000;
+  return ageMs >= 0 && ageMs <= maxAgeMs;
 }

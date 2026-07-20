@@ -333,15 +333,17 @@ func New(cfg *config.Config) (*Server, error) {
 
 	// Create PTY manager
 	ptyManager := pty.NewManager(pty.ManagerConfig{
-		DefaultShell:      cfg.DefaultShell,
-		DefaultRows:       cfg.DefaultRows,
-		DefaultCols:       cfg.DefaultCols,
-		WorkDir:           containerWorkDir,
-		ContainerResolver: containerResolver,
-		ContainerUser:     containerUser,
-		ProcessGroup:      cfg.IsStandaloneMode(),
-		GracePeriod:       cfg.PTYOrphanGracePeriod,
-		BufferSize:        cfg.PTYOutputBufferSize,
+		DefaultShell:       cfg.DefaultShell,
+		DefaultRows:        cfg.DefaultRows,
+		DefaultCols:        cfg.DefaultCols,
+		WorkDir:            containerWorkDir,
+		ContainerResolver:  containerResolver,
+		ContainerUser:      containerUser,
+		ProcessGroup:       cfg.IsStandaloneMode(),
+		GracePeriod:        cfg.PTYOrphanGracePeriod,
+		BufferSize:         cfg.PTYOutputBufferSize,
+		SessionIDMaxLength: cfg.TerminalSessionIDMaxLength,
+		CloseGrace:         cfg.PTYCloseGracePeriod,
 	})
 
 	// Create error reporter for sending VM agent errors to CF observability.

@@ -288,7 +288,7 @@ describe('FilePreviewModal — HTML', () => {
     expect(fetchSpy).toHaveBeenCalledWith('https://api.example.com/preview/interactive', expect.objectContaining({
       credentials: 'include',
     }));
-    expect(iframe).toHaveAttribute('sandbox', 'allow-scripts');
+    expect(iframe).toHaveAttribute('sandbox', '');
     expect(iframe).toHaveAttribute('referrerpolicy', 'no-referrer');
     await waitFor(() => {
       expect(iframe.getAttribute('srcdoc')).toContain('Content-Security-Policy');
@@ -296,8 +296,9 @@ describe('FilePreviewModal — HTML', () => {
     const srcDoc = iframe.getAttribute('srcdoc') ?? '';
     expect(srcDoc).toContain("connect-src 'none'");
     expect(srcDoc).toContain('<button id="run">Run</button>');
-    expect(srcDoc).toContain('<script>window.__ran = true;</script>');
-    expect(srcDoc.indexOf('Content-Security-Policy')).toBeLessThan(srcDoc.indexOf('<script>'));
+    expect(srcDoc).not.toContain('<script>');
+    expect(srcDoc).not.toContain('window.__ran');
+    expect(srcDoc).toContain("script-src 'none'");
     expect(iframe).not.toHaveAttribute('src');
   });
 

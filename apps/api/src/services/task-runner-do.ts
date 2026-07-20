@@ -192,3 +192,11 @@ export async function getTaskRunnerStatus(
 
   return stub.getStatus();
 }
+
+/**
+ * Confirm that TaskRunner initialization committed and repair a missing alarm.
+ */
+export async function ensureTaskRunnerStarted(env: Env, taskId: string): Promise<boolean> {
+  const stub = getStub(env, taskId);
+  return stub.ensureStarted();
+}

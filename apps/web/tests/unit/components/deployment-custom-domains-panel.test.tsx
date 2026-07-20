@@ -66,9 +66,22 @@ function makeDomain(overrides: Partial<DeploymentCustomDomain>): DeploymentCusto
     verificationStatus: 'pending',
     verificationError: null,
     verifiedAt: null,
+    verifiedCnameTarget: null,
+    desiredState: 'active',
+    routingStatus: 'pending_dns',
+    servingStatus: 'pending_dns',
+    activationRoutingRevision: null,
+    deactivationRoutingRevision: null,
+    deletedAt: null,
     createdBy: 'user-1',
     createdAt: '2026-06-24T10:00:00.000Z',
     cnameTarget: WEB_ROUTE_HOSTNAME,
+    routeTargetChanged: false,
+    environmentStatus: 'active',
+    desiredRoutingRevision: 0,
+    observedRoutingRevision: 0,
+    observedRoutingStatus: null,
+    observedRoutingError: null,
     ...overrides,
   };
 }
@@ -154,9 +167,21 @@ describe('DeploymentCustomDomainsPanel', () => {
       ...pending,
       verificationStatus: 'verified' as const,
       verifiedAt: '2026-06-24T10:05:00.000Z',
+      verifiedCnameTarget: WEB_ROUTE_HOSTNAME,
+      routingStatus: 'activating',
+      servingStatus: 'activating',
+      activationRoutingRevision: 1,
+      desiredRoutingRevision: 1,
     };
     mocks.verifyDeploymentCustomDomain.mockResolvedValue(verified);
-    mocks.deleteDeploymentCustomDomain.mockResolvedValue({ id: pending.id, deleted: true });
+    mocks.deleteDeploymentCustomDomain.mockResolvedValue({
+      ...verified,
+      desiredState: 'deactivating',
+      routingStatus: 'deactivating',
+      servingStatus: 'deactivating',
+      deactivationRoutingRevision: 2,
+      desiredRoutingRevision: 2,
+    });
     await renderPanel([pending]);
 
     const card = screen.getAllByText(pending.hostname)[0]?.closest('article');
@@ -180,6 +205,6 @@ describe('DeploymentCustomDomainsPanel', () => {
         pending.id
       );
     });
-    expect(screen.queryByText(pending.hostname)).not.toBeInTheDocument();
+    expect(screen.getByText('Deactivating')).toBeInTheDocument();
   });
 });

@@ -13,7 +13,7 @@ The VM Agent is a Go binary (`packages/vm-agent/`) that runs on each provisioned
 GET /health
 ```
 
-Returns agent health status, version, uptime, and system information.
+Unauthenticated liveness check. Returns only `{ "status": "healthy" }` — no workspace IDs or other sensitive data are exposed. Richer diagnostics are available via the authenticated `/system-info`, `/metrics/export`, and `/debug-package` endpoints.
 
 ### Shell Sessions
 
@@ -34,7 +34,20 @@ Opens a PTY terminal session inside the workspace container. Supports:
 WebSocket /agent/ws
 ```
 
-Opens an AI coding agent session using the Agent Communication Protocol (ACP). Session creation, prompt, cancel, stop, suspend, and resume commands are exposed through the control-plane-authenticated `/workspaces/{workspaceId}/agent-sessions/*` HTTP endpoints.
+Opens an AI coding agent session using the Agent Communication Protocol (ACP). The full session lifecycle is also exposed through control-plane-authenticated HTTP endpoints:
+
+```
+GET    /workspaces/{workspaceId}/agent-sessions
+POST   /workspaces/{workspaceId}/agent-sessions
+POST   /workspaces/{workspaceId}/agent-sessions/{sessionId}/start
+POST   /workspaces/{workspaceId}/agent-sessions/{sessionId}/prompt
+POST   /workspaces/{workspaceId}/agent-sessions/{sessionId}/cancel
+POST   /workspaces/{workspaceId}/agent-sessions/{sessionId}/stop
+POST   /workspaces/{workspaceId}/agent-sessions/{sessionId}/suspend
+POST   /workspaces/{workspaceId}/agent-sessions/{sessionId}/resume
+POST   /workspaces/{workspaceId}/agent-sessions/{sessionId}/hibernate
+POST   /workspaces/{workspaceId}/agent-sessions/{sessionId}/restore
+```
 
 ### Tab Management
 
@@ -47,16 +60,67 @@ Returns the list of open tabs (shell and agent sessions) for a workspace. Used t
 ### Container Management
 
 ```
-POST /workspaces
-```
-
-Create a new workspace container. Called by the API Worker during workspace provisioning.
-
-```
+GET    /workspaces
+POST   /workspaces
+POST   /workspaces/{workspaceId}/stop
+POST   /workspaces/{workspaceId}/restart
+POST   /workspaces/{workspaceId}/rebuild
 DELETE /workspaces/{workspaceId}
+GET    /workspaces/{workspaceId}/events
 ```
 
-Delete a workspace container and clean up resources.
+Create, list, and manage workspace containers. Called by the API Worker during workspace provisioning and lifecycle operations.
+
+### Git
+
+```
+GET /workspaces/{workspaceId}/git/status
+GET /workspaces/{workspaceId}/git/diff
+GET /workspaces/{workspaceId}/git/file
+GET /workspaces/{workspaceId}/git/branches
+```
+
+Read git state for the workspace repository. Used by the project chat "Changes" view.
+
+### Files & Worktrees
+
+```
+GET    /workspaces/{workspaceId}/files/list
+GET    /workspaces/{workspaceId}/files/find
+GET    /workspaces/{workspaceId}/files/raw
+GET    /workspaces/{workspaceId}/files/download
+POST   /workspaces/{workspaceId}/files/upload
+GET    /workspaces/{workspaceId}/worktrees
+POST   /workspaces/{workspaceId}/worktrees
+DELETE /workspaces/{workspaceId}/worktrees
+```
+
+Browse, stream, upload, and download files inside the workspace container, and manage git worktrees.
+
+### Ports
+
+```
+GET /workspaces/{workspaceId}/ports
+    /workspaces/{workspaceId}/ports/{port}/{path...}
+    /workspaces/{workspaceId}/local-forward/{port}/{path...}
+```
+
+List detected listening ports and proxy HTTP traffic to a service running inside the container (powers exposed-port preview URLs).
+
+### Diagnostics & Observability
+
+```
+GET /debug-package
+GET /system-info
+GET /events
+GET /events/export
+GET /metrics/export
+GET /logs
+GET /logs/stream
+GET /containers
+```
+
+The `/debug-package` endpoint bundles cloud-init logs, journald, Docker logs, system info, events/metrics databases, provisioning timings, and network config into a single downloadable archive — the fastest way to diagnose a node without SSH.
 
 ## Subsystems
 
@@ -99,13 +163,14 @@ Environment variables set by the cloud-init template:
 |----------|---------|-------------|
 | `NODE_ID` | — | Unique node identifier |
 | `CONTROL_PLANE_URL` | — | API Worker URL for callbacks |
-| `CALLBACK_TOKEN` | — | JWT for authenticating callbacks |
+| `CALLBACK_TOKEN_FILE` | `/etc/sam/callback-token` on cloud-init nodes | Root-only file containing the callback JWT for authenticating callbacks. `CALLBACK_TOKEN` remains a legacy fallback for already-provisioned nodes/manual runs. |
 | `LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |
 | `LOG_FORMAT` | `json` | Output format: `json` or `text` |
 | `ACP_PROMPT_RETRY_MAX_RETRIES` | `2` | Max transient provider prompt retries after the initial attempt |
 | `ACP_PROMPT_RETRY_INITIAL_BACKOFF` | `15s` | Initial backoff before retrying transient provider prompt errors |
 | `ACP_PROMPT_RETRY_MAX_BACKOFF` | `2m` | Max exponential backoff for transient provider prompt retries |
 | `ACP_NOTIF_SERIALIZE_TIMEOUT` | `5s` | Timeout for ACP notification serialization |
+| `STANDALONE_CLONE_FILTER` | `blob:none` | Git partial-clone filter for standalone (Cloudflare Container) workspace clones, which run synchronously inside the control plane's create-workspace request (`cloneStandaloneRepository` in `internal/server/standalone_workspace.go`). Set `off` to force full clones. The control plane forwards `CF_CONTAINER_CLONE_FILTER` here. |
 
 ### Log Retrieval Settings
 

@@ -6,6 +6,7 @@ import type { MutableRefObject } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { formatFileSize } from '../../lib/file-utils';
+import { getSendButtonTitle, getSendShortcutAriaKey, getSendShortcutHint } from '../../lib/platform-shortcuts';
 import { SkillSelector } from '../skills/SkillSelector';
 
 export interface ProjectChatComposerAttachment {
@@ -94,6 +95,9 @@ export function ProjectChatComposer({
     agentProfiles.length > 0 &&
     !showSlashPalette &&
     dismissedMentionFilterRef.current !== mentionFilter;
+  const sendButtonTitle = getSendButtonTitle();
+  const sendShortcutAriaKey = getSendShortcutAriaKey();
+  const sendShortcutHint = getSendShortcutHint();
 
   useEffect(() => {
     textareaRef.current?.focus();
@@ -288,6 +292,8 @@ export function ProjectChatComposer({
           type="button"
           onClick={onSend}
           disabled={sendDisabled}
+          title={sendButtonTitle}
+          aria-keyshortcuts={sendShortcutAriaKey}
           className={`px-3 py-2 min-h-[44px] border-none rounded-md text-base font-medium whitespace-nowrap transition-all ${
             sendDisabled
               ? 'bg-inset text-fg-muted cursor-default opacity-50'
@@ -299,7 +305,7 @@ export function ProjectChatComposer({
       </div>
       {showShortcutHint && (
         <div className="sam-type-caption text-fg-muted mt-1">
-          Press Ctrl+Enter to send, Enter for new line
+          {sendShortcutHint}
         </div>
       )}
     </>

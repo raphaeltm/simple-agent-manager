@@ -4,6 +4,7 @@ import { MemoryRouter, useNavigate } from 'react-router';
 import { afterEach, beforeAll, beforeEach,describe, expect, it, vi } from 'vitest';
 
 import { AppShell } from '../../src/components/AppShell';
+import { GLOBAL_NAV_ITEMS, PROJECT_NAV_ITEMS } from '../../src/components/NavSidebar';
 import { ThemeProvider } from '../../src/contexts/ThemeContext';
 
 // AppShell renders the shared <ThemeSwitcher /> (desktop sidebar footer and the
@@ -159,6 +160,19 @@ describe('AppShell (global context)', () => {
     mockAuthState = { ...mockAuthState, isSuperadmin: false };
     renderAppShell();
     expect(screen.queryByText('Admin')).not.toBeInTheDocument();
+  });
+
+  it('does not include prototype or test-only destinations in production navigation models', () => {
+    const navPaths = [
+      ...GLOBAL_NAV_ITEMS.map((item) => item.path),
+      ...PROJECT_NAV_ITEMS.map((item) => `/projects/project-id/${item.path}`),
+    ];
+
+    expect(navPaths).not.toContain('/sam');
+    expect(navPaths).not.toContain('/__test/trial-chat-gate');
+    expect(navPaths).not.toContain('/ui-standards');
+    expect(navPaths.every((path) => !path.includes('prototype'))).toBe(true);
+    expect(navPaths.every((path) => !path.includes('__test'))).toBe(true);
   });
 });
 

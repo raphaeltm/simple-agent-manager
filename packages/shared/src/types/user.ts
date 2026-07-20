@@ -86,6 +86,8 @@ export interface CredentialResponse {
   connected: boolean;
   createdAt: string;
   validation?: CredentialValidationStatus;
+  /** Safe provider-specific metadata. Never contains credential secrets. */
+  gcp?: GcpCredentialMetadata;
 }
 
 export interface CredentialValidationStatus {
@@ -103,20 +105,66 @@ export interface CredentialValidationStatus {
 export type CreateCredentialRequest =
   | { provider: 'hetzner'; token: string }
   | { provider: 'scaleway'; secretKey: string; projectId: string }
-  | { provider: 'gcp'; gcpProjectId: string; gcpProjectNumber: string; serviceAccountEmail: string; wifPoolId: string; wifProviderId: string; defaultZone: string };
+  | {
+      provider: 'gcp';
+      authType?: 'workload-identity';
+      gcpProjectId: string;
+      gcpProjectNumber: string;
+      serviceAccountEmail: string;
+      wifPoolId: string;
+      wifProviderId: string;
+      defaultZone: string;
+    };
 
 // =============================================================================
 // GCP OIDC Credential (stored after Connect GCP flow)
 // =============================================================================
 
-/** GCP OIDC credential — public identifiers, not secrets. Stored encrypted for consistency. */
-export interface GcpOidcCredential {
+export const GCP_CREDENTIAL_VERSION = 1 as const;
+
+export type GcpCredentialAuthType = 'workload-identity' | 'service-account-key';
+
+/** GCP WIF credential — public identifiers, stored encrypted for consistency. */
+export interface GcpWorkloadIdentityCredential {
+  version: typeof GCP_CREDENTIAL_VERSION;
   provider: 'gcp';
+  authType: 'workload-identity';
   gcpProjectId: string;
   gcpProjectNumber: string;
   serviceAccountEmail: string;
   wifPoolId: string;
   wifProviderId: string;
+  defaultZone: string;
+}
+
+/** GCP service-account key credential. The private key is always encrypted at rest. */
+export interface GcpServiceAccountKeyCredential {
+  version: typeof GCP_CREDENTIAL_VERSION;
+  provider: 'gcp';
+  authType: 'service-account-key';
+  gcpProjectId: string;
+  serviceAccountEmail: string;
+  privateKeyId: string;
+  privateKey: string;
+  defaultZone: string;
+}
+
+export type GcpCredential = GcpWorkloadIdentityCredential | GcpServiceAccountKeyCredential;
+
+/** Backward-compatible name retained for existing WIF call sites. */
+export type GcpOidcCredential = GcpWorkloadIdentityCredential;
+
+/** Safe metadata returned to the browser for a connected GCP credential. */
+export interface GcpCredentialMetadata {
+  authType: GcpCredentialAuthType;
+  gcpProjectId: string;
+  serviceAccountEmail: string;
+  defaultZone: string;
+  privateKeyId?: string;
+}
+
+export interface SaveGcpServiceAccountCredentialRequest {
+  serviceAccountJson: string;
   defaultZone: string;
 }
 

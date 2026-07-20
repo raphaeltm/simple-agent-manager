@@ -154,7 +154,8 @@ describe('generateCloudInit', () => {
       expect(config).toContain('Environment=NODE_ID=node-test-123');
       expect(config).toContain('Environment=CONTROL_PLANE_URL=https://api.test.example.com');
       expect(config).toContain('Environment=JWKS_ENDPOINT=https://api.test.example.com/.well-known/jwks.json');
-      expect(config).toContain('Environment=CALLBACK_TOKEN=cb-token-abc');
+      expect(config).toContain('Environment=CALLBACK_TOKEN_FILE=/etc/sam/callback-token');
+      expect(config).not.toContain('Environment=CALLBACK_TOKEN=cb-token-abc');
       expect(config).toContain('hostname: sam-test-node');
     });
 
@@ -256,6 +257,27 @@ describe('generateCloudInit', () => {
       expect(serviceSection).toBeDefined();
       expect(serviceSection).toContain('Environment=PROJECT_ID=proj-123');
       expect(serviceSection).toContain('Environment=CHAT_SESSION_ID=sess-456');
+    });
+
+
+    it('stores callback token in a root-only file instead of systemd environment', () => {
+      const config = generateCloudInit(baseVariables());
+      const parsed = YAML.parse(config.replace(/^#cloud-config\n/, ''));
+      const unitFile = parsed.write_files.find(
+        (f: { path: string }) => f.path === '/etc/systemd/system/vm-agent.service'
+      );
+      const tokenFile = parsed.write_files.find(
+        (f: { path: string }) => f.path === '/etc/sam/callback-token'
+      );
+
+      expect(unitFile.content).toContain('Environment=CALLBACK_TOKEN_FILE=/etc/sam/callback-token');
+      expect(unitFile.content).not.toContain('CALLBACK_TOKEN=cb-token-abc');
+      expect(tokenFile).toMatchObject({
+        path: '/etc/sam/callback-token',
+        permissions: '0600',
+        owner: 'root:root',
+      });
+      expect(tokenFile.content.trim()).toBe('cb-token-abc');
     });
 
     it('systemd unit file is in write_files, not a heredoc in runcmd', () => {

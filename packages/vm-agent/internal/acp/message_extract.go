@@ -201,6 +201,7 @@ func ExtractMessages(notif acpsdk.SessionNotification) []ExtractedMessage {
 	// Tool call → role "tool"
 	if u.ToolCall != nil {
 		content := extractToolCallContents(u.ToolCall.Content)
+		normalized := normalizeRawToolOutput(u.ToolCall.RawOutput)
 		meta := ToolMeta{
 			ToolCallId: string(u.ToolCall.ToolCallId),
 			Title:      u.ToolCall.Title,
@@ -208,6 +209,10 @@ func ExtractMessages(notif acpsdk.SessionNotification) []ExtractedMessage {
 			Status:     string(u.ToolCall.Status),
 			ToolName:   extractToolName(u.ToolCall.Meta, u.ToolCall.Title),
 			Content:    marshalRawContent(u.ToolCall.Content),
+		}
+		if content == "" && len(normalized.content) > 0 {
+			meta.Content = append(meta.Content, normalized.content...)
+			content = normalized.text
 		}
 		if toolNameNeedsRawCapture(meta.ToolName) {
 			meta.RawInput = marshalRawField(u.ToolCall.RawInput)
@@ -235,9 +240,14 @@ func ExtractMessages(notif acpsdk.SessionNotification) []ExtractedMessage {
 	// Tool call update → role "tool" (status update)
 	if u.ToolCallUpdate != nil {
 		content := extractToolCallContents(u.ToolCallUpdate.Content)
+		normalized := normalizeRawToolOutput(u.ToolCallUpdate.RawOutput)
 		meta := ToolMeta{
 			ToolCallId: string(u.ToolCallUpdate.ToolCallId),
 			Content:    marshalRawContent(u.ToolCallUpdate.Content),
+		}
+		if content == "" && len(normalized.content) > 0 {
+			meta.Content = append(meta.Content, normalized.content...)
+			content = normalized.text
 		}
 		var updateTitle string
 		if u.ToolCallUpdate.Title != nil {

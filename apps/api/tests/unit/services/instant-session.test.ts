@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   nodeAgent: {
     createAgentSessionOnNode: vi.fn(),
     createWorkspaceOnNode: vi.fn(),
+    getCfContainerCreateWorkspaceTimeoutMs: vi.fn(),
     startAgentSessionOnNode: vi.fn(),
     waitForNodeAgentReady: vi.fn(),
   },
@@ -25,6 +26,7 @@ const mocks = vi.hoisted(() => ({
     getAcpSession: vi.fn(),
     persistMessage: vi.fn(),
     transitionAcpSession: vi.fn(),
+    failSession: vi.fn(),
   },
   container: {
     destroyVmAgentContainer: vi.fn(),
@@ -69,9 +71,9 @@ function makeDb(selectResults: unknown[][] = []) {
       select: vi.fn(() => ({
         from: vi.fn(() => ({
           where: vi.fn(() => ({
-            limit: vi.fn().mockImplementation(() =>
-              Promise.resolve(selectResults[selectIndex++] ?? [])
-            ),
+            limit: vi
+              .fn()
+              .mockImplementation(() => Promise.resolve(selectResults[selectIndex++] ?? [])),
           })),
         })),
       })),
@@ -94,6 +96,17 @@ const env = {
   CF_CONTAINER_VM_AGENT_PORT: '8080',
 } as never;
 
+function baseLaunchInput() {
+  return {
+    taskId: 'task-1',
+    project,
+    userId: 'user-1',
+    initialPrompt: 'prompt',
+    displayMessage: 'prompt',
+    agentType: 'claude-code',
+  } as never;
+}
+
 describe('launchInstantSession', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -105,6 +118,7 @@ describe('launchInstantSession', () => {
     mocks.mcp.storeMcpToken.mockResolvedValue(undefined);
     mocks.nodeAgent.createAgentSessionOnNode.mockResolvedValue({});
     mocks.nodeAgent.createWorkspaceOnNode.mockResolvedValue({});
+    mocks.nodeAgent.getCfContainerCreateWorkspaceTimeoutMs.mockReturnValue(120_000);
     mocks.nodeAgent.startAgentSessionOnNode.mockResolvedValue({});
     mocks.nodeAgent.waitForNodeAgentReady.mockResolvedValue(undefined);
     mocks.nodes.createNodeRecord.mockResolvedValue({ id: 'node-1' });
@@ -113,6 +127,7 @@ describe('launchInstantSession', () => {
     mocks.projectData.createSession.mockResolvedValue('chat-session-1');
     mocks.projectData.persistMessage.mockResolvedValue(undefined);
     mocks.projectData.transitionAcpSession.mockResolvedValue({});
+    mocks.projectData.failSession.mockResolvedValue(undefined);
     mocks.container.getVmAgentContainerConfig.mockReturnValue({
       vmAgentPort: 8080,
       enabled: true,
@@ -127,10 +142,12 @@ describe('launchInstantSession', () => {
     const { db, inserts, updates } = makeDb();
 
     const result = await launchInstantSession(db as never, env, {
+      taskId: 'task-1',
       project,
       userId: 'user-1',
       initialPrompt: 'enriched prompt',
       displayMessage: 'clean prompt',
+      contextSummary: 'fork context',
       agentType: 'claude-code',
       agentProfileId: 'profile-1',
       skillId: 'skill-1',
@@ -187,10 +204,20 @@ describe('launchInstantSession', () => {
       'project-1',
       'workspace-1',
       'clean prompt',
-      null,
+      'task-1',
       'user-1'
     );
-    expect(mocks.projectData.persistMessage).toHaveBeenCalledWith(
+    expect(mocks.projectData.persistMessage).toHaveBeenNthCalledWith(
+      1,
+      expect.anything(),
+      'project-1',
+      'chat-session-1',
+      'system',
+      'fork context',
+      null
+    );
+    expect(mocks.projectData.persistMessage).toHaveBeenNthCalledWith(
+      2,
       expect.anything(),
       'project-1',
       'chat-session-1',
@@ -216,7 +243,7 @@ describe('launchInstantSession', () => {
       expect.anything(),
       'mcp-token',
       expect.objectContaining({
-        taskId: '',
+        taskId: 'task-1',
         contextType: 'conversation',
         taskMode: 'conversation',
         projectId: 'project-1',
@@ -246,7 +273,7 @@ describe('launchInstantSession', () => {
       'user-1',
       { url: 'https://api.example.com/mcp', token: 'mcp-token' },
       { model: 'claude-sonnet-4-5-20250929', effort: 'auto' },
-      undefined,
+      { projectId: 'project-1', taskId: 'task-1', taskMode: 'conversation' },
       expect.stringContaining('MUST call')
     );
     expect(mocks.nodeAgent.startAgentSessionOnNode.mock.calls[0][4]).toBe('enriched prompt');
@@ -270,7 +297,10 @@ describe('launchInstantSession', () => {
     expect(JSON.stringify(launchConfig)).not.toContain('node-callback-token');
     expect(JSON.stringify(launchConfig)).not.toContain('profile-1');
     expect(JSON.stringify(launchConfig)).not.toContain('skill-1');
-    expect(updates.at(-1)).toMatchObject({ dispatchedAt: expect.any(String) });
+    expect(updates).toContainEqual(expect.objectContaining({ dispatchedAt: expect.any(String) }));
+    expect(updates).toContainEqual(
+      expect.objectContaining({ status: 'in_progress', workspaceId: 'workspace-1' })
+    );
   });
 
   it('passes GitLab repository metadata to the VM agent create-workspace request', async () => {
@@ -313,7 +343,29 @@ describe('launchInstantSession', () => {
         repositoryPath: 'group/gitlab-repo',
         callbackToken: 'workspace-callback-token',
         lightweight: true,
-      })
+      }),
+      { requestTimeoutMs: 120_000 }
+    );
+  });
+
+  // Regression test for the 2026-07-18 instant-container outage: the standalone
+  // vm-agent clones synchronously inside the create-workspace request, so the
+  // instant path MUST use the cf-container create budget instead of the
+  // interactive node-agent default (30s). This fails on pre-fix code, which
+  // passed no timeout override.
+  it('runs create-workspace under the configured cf-container create budget', async () => {
+    const { db } = makeDb();
+    mocks.nodeAgent.getCfContainerCreateWorkspaceTimeoutMs.mockReturnValue(90_000);
+
+    await launchInstantSession(db as never, env, baseLaunchInput());
+
+    expect(mocks.nodeAgent.getCfContainerCreateWorkspaceTimeoutMs).toHaveBeenCalledWith(env);
+    expect(mocks.nodeAgent.createWorkspaceOnNode).toHaveBeenCalledWith(
+      'node-1',
+      env,
+      'user-1',
+      expect.objectContaining({ workspaceId: 'workspace-1', lightweight: true }),
+      { requestTimeoutMs: 90_000 }
     );
   });
 
@@ -325,6 +377,7 @@ describe('launchInstantSession', () => {
 
     await expect(
       launchInstantSession(db as never, env, {
+        taskId: 'task-1',
         project,
         userId: 'user-1',
         initialPrompt: 'prompt',
@@ -342,6 +395,29 @@ describe('launchInstantSession', () => {
     expect(updates).toContainEqual(expect.objectContaining({ status: 'error' }));
   });
 
+  // Capacity containment for the create-workspace timeout (security review):
+  // the Worker-side race does not abort the in-container clone, so the ONLY
+  // bound on a stalled create's container-slot hold is this immediate destroy.
+  // A timed-out create must tear the container down, not leave it running.
+  it('destroys the container when create-workspace times out', async () => {
+    const { db, updates } = makeDb();
+    mocks.nodeAgent.createWorkspaceOnNode.mockRejectedValueOnce(
+      new Error('Request timed out after 120000ms')
+    );
+
+    await expect(launchInstantSession(db as never, env, baseLaunchInput())).rejects.toThrow(
+      'Request timed out after 120000ms'
+    );
+
+    expect(mocks.container.destroyVmAgentContainer).toHaveBeenCalledWith(env, 'node-1');
+    expect(updates).toContainEqual(
+      expect.objectContaining({ status: 'error', errorMessage: 'Request timed out after 120000ms' })
+    );
+    expect(updates).toContainEqual(
+      expect.objectContaining({ status: 'failed', executionStep: 'launch_failed' })
+    );
+  });
+
   it('honors a configured raw container workspace base directory', async () => {
     const { db } = makeDb();
     const envWithWorkspaceBase = {
@@ -350,6 +426,7 @@ describe('launchInstantSession', () => {
     } as never;
 
     await launchInstantSession(db as never, envWithWorkspaceBase, {
+      taskId: 'task-1',
       project: { ...project, repository: 'https://github.com/owner/custom-repo.git' } as never,
       userId: 'user-1',
       initialPrompt: 'prompt',

@@ -73,6 +73,27 @@ func TestLoadConfigUsesCompleteEnvPair(t *testing.T) {
 	}
 }
 
+func TestLoadConfigUsesMaxAPIResponseBytesEnv(t *testing.T) {
+	loaded, err := LoadConfig(fakeEnv{values: map[string]string{
+		"SAM_API_URL":                    "https://api.example.com/",
+		"SAM_SESSION_COOKIE":             "cookie=value",
+		"SAM_CLI_MAX_API_RESPONSE_BYTES": "2048",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.MaxAPIResponseBytes != 2048 {
+		t.Fatalf("MaxAPIResponseBytes = %d, want 2048", loaded.MaxAPIResponseBytes)
+	}
+}
+
+func TestLoadConfigRejectsInvalidMaxAPIResponseBytesEnv(t *testing.T) {
+	_, err := LoadConfig(fakeEnv{values: map[string]string{"SAM_CLI_MAX_API_RESPONSE_BYTES": "0"}})
+	if err == nil {
+		t.Fatal("expected invalid max response bytes error")
+	}
+}
+
 func TestResolveConfigPathsHonorsConfigPrecedence(t *testing.T) {
 	configDir := filepath.Join(t.TempDir(), "explicit")
 	xdgDir := filepath.Join(t.TempDir(), "xdg")

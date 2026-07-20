@@ -4,7 +4,7 @@ import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ToastProvider } from '../../../src/hooks/useToast';
-import { createTrigger } from '../../../src/lib/api';
+import { createTrigger, listAgentProfiles } from '../../../src/lib/api';
 import { ProjectContext, type ProjectContextValue } from '../../../src/pages/ProjectContext';
 import { ProjectTriggers } from '../../../src/pages/ProjectTriggers';
 
@@ -16,22 +16,48 @@ vi.mock('../../../src/lib/api', () => ({
   listTriggers: vi.fn().mockResolvedValue({
     triggers: [
       {
-        id: 'trig-1', projectId: 'proj-test', userId: 'user-1', name: 'Daily Sync',
-        description: 'Sync data every day', status: 'active', sourceType: 'cron',
-        cronExpression: '0 0 * * *', cronTimezone: 'UTC', skipIfRunning: false,
-        promptTemplate: 'Run sync', agentProfileId: null, taskMode: 'task',
-        vmSizeOverride: null, maxConcurrent: 1, lastTriggeredAt: null,
-        triggerCount: 0, nextFireAt: '2026-06-01T00:00:00Z',
-        createdAt: '2026-05-01T00:00:00Z', updatedAt: '2026-05-01T00:00:00Z',
+        id: 'trig-1',
+        projectId: 'proj-test',
+        userId: 'user-1',
+        name: 'Daily Sync',
+        description: 'Sync data every day',
+        status: 'active',
+        sourceType: 'cron',
+        cronExpression: '0 0 * * *',
+        cronTimezone: 'UTC',
+        skipIfRunning: false,
+        promptTemplate: 'Run sync',
+        agentProfileId: null,
+        taskMode: 'task',
+        vmSizeOverride: null,
+        maxConcurrent: 1,
+        lastTriggeredAt: null,
+        triggerCount: 0,
+        nextFireAt: '2026-06-01T00:00:00Z',
+        createdAt: '2026-05-01T00:00:00Z',
+        updatedAt: '2026-05-01T00:00:00Z',
       },
       {
-        id: 'trig-2', projectId: 'proj-test', userId: 'user-1', name: 'Weekly Report',
-        description: 'Generate weekly report', status: 'active', sourceType: 'cron',
-        cronExpression: '0 9 * * 1', cronTimezone: 'UTC', skipIfRunning: false,
-        promptTemplate: 'Run report', agentProfileId: null, taskMode: 'task',
-        vmSizeOverride: null, maxConcurrent: 1, lastTriggeredAt: null,
-        triggerCount: 0, nextFireAt: '2026-06-02T09:00:00Z',
-        createdAt: '2026-05-01T00:00:00Z', updatedAt: '2026-05-01T00:00:00Z',
+        id: 'trig-2',
+        projectId: 'proj-test',
+        userId: 'user-1',
+        name: 'Weekly Report',
+        description: 'Generate weekly report',
+        status: 'active',
+        sourceType: 'cron',
+        cronExpression: '0 9 * * 1',
+        cronTimezone: 'UTC',
+        skipIfRunning: false,
+        promptTemplate: 'Run report',
+        agentProfileId: null,
+        taskMode: 'task',
+        vmSizeOverride: null,
+        maxConcurrent: 1,
+        lastTriggeredAt: null,
+        triggerCount: 0,
+        nextFireAt: '2026-06-02T09:00:00Z',
+        createdAt: '2026-05-01T00:00:00Z',
+        updatedAt: '2026-05-01T00:00:00Z',
       },
     ],
   }),
@@ -60,7 +86,7 @@ function renderTriggers(initialRoute = '/projects/proj-test/triggers') {
           <ProjectTriggers />
         </ToastProvider>
       </ProjectContext.Provider>
-    </MemoryRouter>,
+    </MemoryRouter>
   );
 }
 
@@ -71,6 +97,32 @@ function renderTriggers(initialRoute = '/projects/proj-test/triggers') {
 describe('ProjectTriggers', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(createTrigger).mockResolvedValue({} as never);
+    vi.mocked(listAgentProfiles).mockResolvedValue([
+      {
+        id: 'profile-webhook',
+        projectId: 'proj-test',
+        userId: 'user-1',
+        name: 'Webhook Worker',
+        description: 'Runs incoming webhook tasks',
+        agentType: 'opencode',
+        model: 'openai/gpt-5.2',
+        effort: 'auto',
+        permissionMode: null,
+        systemPromptAppend: null,
+        maxTurns: null,
+        timeoutMinutes: 30,
+        vmSizeOverride: null,
+        provider: null,
+        vmLocation: null,
+        workspaceProfile: null,
+        taskMode: 'task',
+        runtime: null,
+        isBuiltin: false,
+        createdAt: '2026-07-13T00:00:00Z',
+        updatedAt: '2026-07-13T00:00:00Z',
+      },
+    ]);
   });
 
   it('renders trigger list', async () => {
@@ -158,7 +210,8 @@ describe('ProjectTriggers', () => {
         expect(screen.getByText('Daily Sync')).toBeInTheDocument();
       });
 
-      await user.click(screen.getAllByRole('button', { name: /new trigger/i })[0]);
+      const newTriggerButton = screen.getAllByRole('button', { name: /new trigger/i })[0];
+      await user.click(newTriggerButton);
       await user.type(screen.getByLabelText(/^name$/i), 'SAM comment command');
       await user.click(screen.getByRole('button', { name: /github event/i }));
       await user.clear(screen.getByLabelText(/prompt template/i));
@@ -166,20 +219,98 @@ describe('ProjectTriggers', () => {
       await user.click(screen.getByRole('button', { name: /create trigger/i }));
 
       await waitFor(() => {
-        expect(createTrigger).toHaveBeenCalledWith('proj-test', expect.objectContaining({
-          name: 'SAM comment command',
-          sourceType: 'github',
-          promptTemplate: 'Handle GitHub comment',
-          githubConfig: {
-            eventType: 'issue_comment',
-            filters: {
-              actions: ['created'],
-              commandPrefix: '/sam',
-              ignoreActors: ['dependabot[bot]'],
+        expect(createTrigger).toHaveBeenCalledWith(
+          'proj-test',
+          expect.objectContaining({
+            name: 'SAM comment command',
+            sourceType: 'github',
+            promptTemplate: 'Handle GitHub comment',
+            githubConfig: {
+              eventType: 'issue_comment',
+              filters: {
+                actions: ['created'],
+                commandPrefix: '/sam',
+                ignoreActors: ['dependabot[bot]'],
+              },
             },
-          },
-        }));
+          })
+        );
       });
     });
+
+    it('creates a webhook trigger and presents its credential only until acknowledged', async () => {
+      const user = userEvent.setup();
+      vi.mocked(createTrigger).mockResolvedValueOnce({
+        webhookCredential: {
+          endpointUrl: 'https://api.example.test/api/webhooks/ingest',
+          token: 'sam_wh_one_time_test_token',
+          headerName: 'Authorization',
+        },
+      } as never);
+      renderTriggers();
+      await screen.findByText('Daily Sync');
+
+      const newTriggerButton = screen.getAllByRole('button', { name: /new trigger/i })[0];
+      await user.click(newTriggerButton);
+      await user.type(screen.getByLabelText(/^name$/i), 'Deployment failures');
+      await user.click(screen.getByRole('button', { name: /^webhook/i }));
+      await user.selectOptions(screen.getByLabelText(/agent profile/i), 'profile-webhook');
+      await user.type(screen.getByLabelText(/source label/i), 'Release system');
+      await user.type(screen.getByLabelText(/included headers/i), 'x-event-type, x-request-id');
+      await user.click(screen.getByRole('button', { name: /add filter/i }));
+      await user.type(screen.getByLabelText(/filter 1 path/i), 'deployment.status');
+      await user.selectOptions(screen.getByLabelText(/filter 1 operator/i), 'equals');
+      await user.type(screen.getByLabelText(/^filter 1 value$/i), 'failed');
+      await user.type(
+        screen.getByLabelText(/prompt template/i),
+        'Investigate the failed deployment'
+      );
+      await user.click(screen.getByRole('button', { name: /create trigger/i }));
+
+      await waitFor(() =>
+        expect(createTrigger).toHaveBeenCalledWith('proj-test', {
+          name: 'Deployment failures',
+          description: undefined,
+          sourceType: 'webhook',
+          cronExpression: undefined,
+          cronTimezone: undefined,
+          promptTemplate: 'Investigate the failed deployment',
+          skipIfRunning: true,
+          maxConcurrent: 1,
+          vmSizeOverride: undefined,
+          taskMode: 'task',
+          agentProfileId: 'profile-webhook',
+          githubConfig: undefined,
+          webhookConfig: {
+            sourceLabel: 'Release system',
+            includedHeaders: ['x-event-type', 'x-request-id'],
+            filterMode: 'all',
+            filters: [{ path: 'deployment.status', operator: 'equals', value: 'failed' }],
+          },
+        })
+      );
+
+      const credentialDialog = await screen.findByRole('dialog', {
+        name: /save your webhook credential/i,
+      });
+      expect(credentialDialog).toHaveTextContent('sam_wh_one_time_test_token');
+      expect(credentialDialog).toHaveTextContent('https://api.example.test/api/webhooks/ingest');
+      expect(credentialDialog).not.toHaveTextContent('\n+');
+      const acknowledgment = screen.getByRole('checkbox');
+      await waitFor(() => expect(acknowledgment).toHaveFocus());
+      expect(screen.getByRole('button', { name: 'Done' })).toBeDisabled();
+
+      await user.click(acknowledgment);
+      await user.tab();
+      expect(screen.getByRole('button', { name: 'Done' })).toHaveFocus();
+      await user.tab();
+      expect(screen.getByRole('button', { name: /copy endpoint/i })).toHaveFocus();
+      await user.click(screen.getByRole('button', { name: 'Done' }));
+      expect(
+        screen.queryByRole('dialog', { name: /save your webhook credential/i })
+      ).not.toBeInTheDocument();
+      expect(screen.queryByText('sam_wh_one_time_test_token')).not.toBeInTheDocument();
+      expect(newTriggerButton).toHaveFocus();
+    }, 10_000);
   });
 });

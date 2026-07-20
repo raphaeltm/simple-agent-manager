@@ -24,7 +24,7 @@ import {
   listEnvironmentVolumes,
 } from '../services/deployment-volumes';
 import { teardownDeploymentEnvironmentOnNode } from '../services/node-agent';
-import { deleteNodeResources } from '../services/nodes';
+import { deleteNodeResources, retireDeletedDeploymentNodeRecord } from '../services/nodes';
 
 type DeploymentDb = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -105,9 +105,7 @@ async function cleanupDeploymentNodeIfUnassigned(
     return { nodeDeleted: false, warnings: cleanup.errors };
   }
 
-  await db
-    .delete(schema.nodes)
-    .where(and(eq(schema.nodes.id, nodeId), eq(schema.nodes.userId, userId)));
+  await retireDeletedDeploymentNodeRecord(db, nodeId, userId);
   return { nodeDeleted: cleanup.nodeFound, warnings: [] };
 }
 

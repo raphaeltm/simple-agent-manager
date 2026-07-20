@@ -179,7 +179,7 @@ async function setupChat(page: Page, htmlFile: Awaited<ReturnType<typeof uploadF
 }
 
 test.describe('File Preview v2 staging', () => {
-  test('opens real uploaded HTML from a DocumentCard in a sandbox and pinch-zooms image preview', async ({ page }) => {
+  test('opens real uploaded HTML from a DocumentCard in an inert sandbox and pinch-zooms image preview', async ({ page }) => {
     test.setTimeout(60_000);
     await login(page.request);
     await page.addInitScript(() => {
@@ -230,9 +230,10 @@ test.describe('File Preview v2 staging', () => {
       .poll(() => previewResponses.map((r) => `${r.status} ${r.body}`).join('\n'))
       .toContain('200 ');
     const frame = page.locator(`iframe[title="${htmlFile.filename}"]`);
-    await expect(frame).toHaveAttribute('sandbox', 'allow-scripts');
+    await expect(frame).toHaveAttribute('sandbox', '');
     await expect(frame).toHaveAttribute('srcdoc', /Interactive HTML/);
-    await expect(page.frameLocator(`iframe[title="${htmlFile.filename}"]`).locator('#result')).toHaveText('script ran; cookie=blocked');
+    await expect(frame).not.toHaveAttribute('srcdoc', /<script/i);
+    await expect(page.frameLocator(`iframe[title="${htmlFile.filename}"]`).locator('#result')).toHaveText('not run');
     await screenshot(page, 'staging-file-preview-v2-html');
     await assertNoOverflow(page);
     await page.getByRole('button', { name: /Close preview/ }).click();

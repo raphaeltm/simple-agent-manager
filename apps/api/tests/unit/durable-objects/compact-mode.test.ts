@@ -239,6 +239,43 @@ describe('getMessageToolContent', () => {
     expect(result).toEqual(content);
   });
 
+  it('round-trips normalized Codex output through compact metadata and lazy reload', () => {
+    const content = [{
+      type: 'terminal',
+      output: 'SAM_DURABLE_COMMAND_OUTPUT_112',
+      exitCode: 0,
+    }];
+    const toolMetadata = {
+      toolCallId: 'codex-command-1',
+      title: 'Run shell command',
+      status: 'completed',
+      content,
+    };
+    const row = {
+      id: 'msg-codex-command',
+      session_id: 'sess-1',
+      role: 'tool',
+      content: 'SAM_DURABLE_COMMAND_OUTPUT_112',
+      tool_metadata: JSON.stringify(toolMetadata),
+      created_at: 1234567890,
+      sequence: 2,
+    };
+
+    const compact = parseChatMessageRowCompact(row);
+    const compactMeta = compact.toolMetadata as Record<string, unknown>;
+    expect(compactMeta).toMatchObject({
+      toolCallId: 'codex-command-1',
+      title: 'Run shell command',
+      status: 'completed',
+    });
+    expect(compactMeta.content).toBeUndefined();
+    expect(compactMeta.rawOutput).toBeUndefined();
+    expect(compactMeta.contentSize).toBeGreaterThan(0);
+
+    const sql = makeSql([{ role: 'tool', tool_metadata: JSON.stringify(toolMetadata) }]);
+    expect(getMessageToolContent(sql, 'sess-1', 'msg-codex-command')).toEqual(content);
+  });
+
   it('returns null when message is not found', () => {
     const sql = makeSql([]);
     const result = getMessageToolContent(sql, 'sess-1', 'msg-missing');

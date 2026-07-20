@@ -14,6 +14,7 @@ This page summarizes recent changes that affect how people use SAM. Use it as a 
 | Forkable, task-backed chats | Any chat can be forked, archived, and tracked with task lifecycle behavior. | Project chat sessions |
 | Focus Mode sidebars | Desktop users can collapse navigation and session sidebars for more room while chatting. | Project chat workspace |
 | GitHub event triggers | GitHub issues, comments, pull requests, and pushes can start SAM work through project triggers. | Project **Triggers** page |
+| Generic webhook triggers | Any external service can start SAM work by sending an authenticated JSON webhook. | Project **Triggers** page |
 | First-run setup wizard | New self-hosted installs can configure platform integrations after deploy. | `/setup` on a fresh deployment |
 | Namespaced self-host domains | Multiple SAM installations can share one Cloudflare zone without hostname collisions. | Self-host deployment planning |
 | Default instant container runtime | New self-hosted deployments use Cloudflare Containers for instant sessions by default. | Self-host deployment and agent runtime selection |
@@ -71,9 +72,11 @@ The intended mental model:
 - Focus Mode is for staying with one session.
 - Zen-style collapsed sidebars are for maximum reading and prompt-writing space.
 
-## GitHub events can trigger SAM work
+## Triggers: schedules, GitHub events, and webhooks
 
-Project triggers now cover GitHub events in addition to schedules. A project can start agent work when matching GitHub issues, issue comments, pull requests, or pushes arrive.
+Project triggers now run from three sources: schedules (cron), GitHub events, and authenticated webhooks. A project can start agent work when matching GitHub issues, issue comments, pull requests, or pushes arrive — or when any external service sends an authenticated JSON webhook to SAM. See [Webhook Triggers](/docs/guides/webhook-triggers/) for the webhook source.
+
+For GitHub events specifically:
 
 Use this from the project **Triggers** page:
 

@@ -27,7 +27,7 @@ import {
   DEFAULT_COMPOSE_PUBLISH_MEMORY_LIMIT_MB,
 } from '../services/compose-publish-apply';
 import { collectSecretNames, renderComposeForApply } from '../services/compose-renderer';
-import { signDeployPayload } from '../services/deploy-signing';
+import { signDeployPayload, signRouteConfigPayload } from '../services/deploy-signing';
 import { buildVerifiedCustomRouteTargets } from '../services/deployment-custom-domains';
 import { loadDeploymentInterpolationEnv } from '../services/deployment-environment-config';
 import {
@@ -467,6 +467,159 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
     volumeMounts,
     signature,
     registryCredentials,
+  });
+});
+
+/**
+ * GET /api/nodes/:id/deploy-routes?revision=R&environmentId=E
+ *
+ * Returns a signed route-only Caddy configuration payload. The node applies this
+ * without running Docker Compose, so custom-domain verify/delete can reconcile
+ * live routing independently from application release applies.
+ */
+deployReleaseCallbackRoute.get('/:id/deploy-routes', async (c) => {
+  const nodeId = c.req.param('id');
+  await verifyNodeCallback(c, nodeId);
+
+  const revisionStr = c.req.query('revision');
+  const environmentId = c.req.query('environmentId');
+  if (!revisionStr || !environmentId) {
+    throw errors.badRequest('Missing required query parameters: revision, environmentId');
+  }
+
+  const routingRevision = Number.parseInt(revisionStr, 10);
+  if (!Number.isFinite(routingRevision) || routingRevision <= 0) {
+    throw errors.badRequest('Invalid revision parameter');
+  }
+
+  const db = drizzle(c.env.DATABASE, { schema });
+  const nodeRows = await db
+    .select({ userId: schema.nodes.userId })
+    .from(schema.nodes)
+    .where(eq(schema.nodes.id, nodeId))
+    .limit(1);
+  const node = nodeRows.at(0);
+  if (!node) {
+    throw errors.notFound('Node');
+  }
+
+  const envRows = await db
+    .select({
+      id: schema.deploymentEnvironments.id,
+      projectId: schema.deploymentEnvironments.projectId,
+      nodeId: schema.deploymentEnvironments.nodeId,
+      status: schema.deploymentEnvironments.status,
+      observedAppliedSeq: schema.deploymentEnvironments.observedAppliedSeq,
+      desiredRoutingRevision: schema.deploymentEnvironments.desiredRoutingRevision,
+      observedRoutingRevision: schema.deploymentEnvironments.observedRoutingRevision,
+    })
+    .from(schema.deploymentEnvironments)
+    .innerJoin(schema.projects, eq(schema.deploymentEnvironments.projectId, schema.projects.id))
+    .where(
+      and(
+        eq(schema.deploymentEnvironments.id, environmentId),
+        eq(schema.deploymentEnvironments.nodeId, nodeId),
+        eq(schema.projects.userId, node.userId)
+      )
+    )
+    .limit(1);
+  const deployEnv = envRows.at(0);
+  if (!deployEnv) {
+    throw errors.notFound('Deployment environment');
+  }
+  if (routingRevision < deployEnv.desiredRoutingRevision) {
+    throw errors.conflict('Requested routing revision is stale; wait for the latest heartbeat');
+  }
+  if (routingRevision > deployEnv.desiredRoutingRevision) {
+    throw errors.badRequest('Requested routing revision is newer than desired state');
+  }
+  if (routingRevision <= deployEnv.observedRoutingRevision) {
+    throw errors.conflict('Requested routing revision is already observed');
+  }
+
+  const currentSeq = deployEnv.observedAppliedSeq ?? 0;
+  if (currentSeq <= 0) {
+    throw errors.conflict('Deployment environment has no applied release for route reconciliation');
+  }
+
+  const releaseRows = await db
+    .select()
+    .from(schema.deploymentReleases)
+    .where(
+      and(
+        eq(schema.deploymentReleases.environmentId, environmentId),
+        eq(schema.deploymentReleases.version, currentSeq)
+      )
+    )
+    .limit(1);
+  const release = releaseRows.at(0);
+  if (!release) {
+    throw errors.notFound('Applied deployment release');
+  }
+
+  let routes: DeploymentRouteTarget[];
+  if (release.source === 'compose-publish') {
+    const submission = JSON.parse(release.manifest);
+    routes = buildComposePublishApplyPayload(submission, {
+      environmentId,
+      baseDomain: c.env.BASE_DOMAIN,
+      routePortBase: c.env.DEPLOYMENT_ROUTE_PORT_BASE,
+      routePortSpan: c.env.DEPLOYMENT_ROUTE_PORT_SPAN,
+      releaseId: release.id,
+      defaultMemoryLimitMb: parsePositiveInt(
+        c.env.DEPLOYMENT_DEFAULT_MEMORY_LIMIT_MB,
+        DEFAULT_COMPOSE_PUBLISH_MEMORY_LIMIT_MB
+      ),
+      defaultLogMaxSize:
+        c.env.DEPLOYMENT_LOG_MAX_SIZE?.trim() || DEFAULT_COMPOSE_PUBLISH_LOG_MAX_SIZE,
+      defaultLogMaxFile:
+        c.env.DEPLOYMENT_LOG_MAX_FILE?.trim() || DEFAULT_COMPOSE_PUBLISH_LOG_MAX_FILE,
+    }).routes;
+  } else {
+    routes = buildDeploymentRouteTargets(JSON.parse(release.manifest), {
+      environmentId,
+      baseDomain: c.env.BASE_DOMAIN,
+      routePortBase: c.env.DEPLOYMENT_ROUTE_PORT_BASE,
+      routePortSpan: c.env.DEPLOYMENT_ROUTE_PORT_SPAN,
+    });
+  }
+
+  const customTargets = await buildVerifiedCustomRouteTargets(db, environmentId, routes);
+  if (customTargets.length > 0) {
+    routes = [...routes, ...customTargets];
+  }
+
+  const expiresAt =
+    Math.floor(Date.now() / 1000) +
+    parsePositiveInt(c.env.DEPLOY_PAYLOAD_EXPIRY_SECONDS, DEFAULT_DEPLOY_PAYLOAD_EXPIRY_SECONDS);
+  const signature = await signRouteConfigPayload(
+    {
+      environmentId,
+      nodeId,
+      currentSeq,
+      routingRevision,
+      expiresAt,
+      routes,
+    },
+    c.env
+  );
+
+  log.info('deploy_routes.served', {
+    nodeId,
+    environmentId,
+    currentSeq,
+    routingRevision,
+    routeCount: routes.length,
+  });
+
+  return c.json({
+    environmentId,
+    nodeId,
+    currentSeq,
+    routingRevision,
+    expiresAt,
+    routes,
+    signature,
   });
 });
 

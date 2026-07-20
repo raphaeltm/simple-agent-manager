@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/workspace/vm-agent/internal/bootlog"
@@ -235,6 +236,67 @@ func TestProvisionWorkspaceRuntimeAppliesDetectedContainerUser(t *testing.T) {
 
 	if runtime.ContainerUser != "vscode" {
 		t.Fatalf("runtime.ContainerUser = %q, want %q", runtime.ContainerUser, "vscode")
+	}
+}
+
+func TestProvisionWorkspaceRuntimeFailsWhenGitTokenFetchFailsForGitHubRepo(t *testing.T) {
+	originalPrepare := prepareWorkspaceForRuntime
+	defer func() { prepareWorkspaceForRuntime = originalPrepare }()
+
+	prepareCalled := false
+	prepareWorkspaceForRuntime = func(_ context.Context, _ *config.Config, _ bootstrap.ProvisionState, _ *bootlog.Reporter) (bool, error) {
+		prepareCalled = true
+		return false, nil
+	}
+
+	controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/workspaces/WS_TEST/git-token":
+			http.Error(w, `{"error":"NOT_FOUND","message":"GitHub installation not found"}`, http.StatusForbidden)
+		case "/api/workspaces/WS_TEST/runtime-assets":
+			_, _ = w.Write([]byte(`{"workspaceId":"WS_TEST","envVars":[],"files":[]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer controlPlane.Close()
+
+	runtime := &WorkspaceRuntime{
+		ID:                  "WS_TEST",
+		Status:              "creating",
+		Repository:          "https://github.com/acme/private-repo.git",
+		RepoProvider:        "github",
+		Branch:              "main",
+		WorkspaceDir:        "/workspace/WS_TEST",
+		ContainerLabelValue: "/workspace/WS_TEST",
+		ContainerWorkDir:    "/workspaces/WS_TEST",
+		CallbackToken:       "workspace-callback-token",
+	}
+
+	s := &Server{
+		config: &config.Config{
+			ContainerMode:       true,
+			ControlPlaneURL:     controlPlane.URL,
+			WorkspaceDir:        "/workspace",
+			DefaultShell:        "/bin/bash",
+			DefaultRows:         24,
+			DefaultCols:         80,
+			ContainerLabelKey:   "devcontainer.local_folder",
+			PTYOutputBufferSize: 1024,
+		},
+		workspaces:      map[string]*WorkspaceRuntime{runtime.ID: runtime},
+		workspaceEvents: map[string][]EventRecord{},
+	}
+
+	_, err := s.provisionWorkspaceRuntime(context.Background(), runtime)
+	if err == nil {
+		t.Fatal("expected provisionWorkspaceRuntime to fail when git-token vending fails")
+	}
+	if !strings.Contains(err.Error(), "failed to fetch git token") {
+		t.Fatalf("error = %q, want git token context", err.Error())
+	}
+	if prepareCalled {
+		t.Fatal("prepareWorkspaceForRuntime was called after git-token fetch failed")
 	}
 }
 

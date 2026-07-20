@@ -7,7 +7,9 @@ describe('deployment release callback route ordering', () => {
   it('mounts callback-auth deploy release route before session-auth node routes', () => {
     const source = readFileSync(join(process.cwd(), 'src/index.ts'), 'utf8');
 
-    const deployReleaseIndex = source.indexOf("app.route('/api/nodes', deployReleaseCallbackRoute)");
+    const deployReleaseIndex = source.indexOf(
+      "app.route('/api/nodes', deployReleaseCallbackRoute)"
+    );
     const deploymentReleaseEventsIndex = source.indexOf(
       "app.route('/api/nodes', deploymentReleaseEventsCallbackRoute)"
     );
@@ -23,10 +25,11 @@ describe('deployment release callback route ordering', () => {
     expect(nodesIndex).toBeLessThan(nodeLifecycleIndex);
   });
 
-  it('keeps deploy release out of session-auth wildcard middleware', () => {
+  it('keeps deploy callbacks out of session-auth wildcard middleware', () => {
     const source = readFileSync(join(process.cwd(), 'src/routes/nodes.ts'), 'utf8');
 
     expect(source).toContain("path.endsWith('/deploy-release')");
+    expect(source).toContain("path.endsWith('/deploy-routes')");
     expect(source).not.toContain("path.endsWith('/deployment-release-events')");
   });
 });

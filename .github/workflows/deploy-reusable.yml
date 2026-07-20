@@ -122,7 +122,7 @@ jobs:
         uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
 
       - name: Setup Node.js
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'pnpm'
@@ -361,6 +361,8 @@ jobs:
           CF_CONTAINER_SLEEP_AFTER: ${{ vars.CF_CONTAINER_SLEEP_AFTER }}
           CF_CONTAINER_PORT_READY_TIMEOUT_MS: ${{ vars.CF_CONTAINER_PORT_READY_TIMEOUT_MS }}
           CF_CONTAINER_WAKE_TIMEOUT_MS: ${{ vars.CF_CONTAINER_WAKE_TIMEOUT_MS }}
+          CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS: ${{ vars.CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS }}
+          CF_CONTAINER_CLONE_FILTER: ${{ vars.CF_CONTAINER_CLONE_FILTER }}
           CF_CONTAINER_VM_AGENT_PORT: ${{ vars.CF_CONTAINER_VM_AGENT_PORT }}
           SANDBOX_ENABLED: ${{ vars.SANDBOX_ENABLED }}
           SANDBOX_EXEC_TIMEOUT_MS: ${{ vars.SANDBOX_EXEC_TIMEOUT_MS }}
@@ -467,84 +469,6 @@ jobs:
           echo '```json' >> "$GITHUB_STEP_SUMMARY"
           cat apps/api/container-artifacts/vm-agent-version.json >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
-
-      # Deploy API worker first (without tail_consumers on first deploy)
-      - name: Deploy API Worker
-        if: ${{ inputs.dry_run != true }}
-        run: |
-          OUTPUT=$(pnpm --filter @simple-agent-manager/api exec wrangler deploy --env "$DEPLOY_ENV" 2>&1) || {
-            echo "$OUTPUT"
-            exit 1
-          }
-          echo "$OUTPUT"
-          if echo "$OUTPUT" | grep -q "not inherited by environments"; then
-            NON_ARTIFACTS_BINDING_WARNINGS=$(echo "$OUTPUT" | grep -E '      - "[^"]+" exists at the top level' | grep -v '"artifacts" exists at the top level' || true)
-            if [ -z "$NON_ARTIFACTS_BINDING_WARNINGS" ] && [ "${ARTIFACTS_BINDING_ENABLED:-false}" != "true" ] && echo "$OUTPUT" | grep -q '"artifacts" exists at the top level'; then
-              echo "::notice::Ignoring intentionally gated Artifacts binding warning because ARTIFACTS_BINDING_ENABLED is not true."
-              exit 0
-            fi
-            echo ""
-            echo "::error::Wrangler detected non-inherited bindings. Check sync-wrangler-config.ts."
-            echo "See: .claude/rules/07-env-and-urls.md"
-            exit 1
-          fi
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-          DEPLOY_ENV: ${{ inputs.environment }}
-          ARTIFACTS_BINDING_ENABLED: ${{ vars.ARTIFACTS_BINDING_ENABLED }}
-
-      # Tail Worker must deploy AFTER API Worker (service binding dependency)
-      - name: Deploy Tail Worker
-        if: ${{ inputs.dry_run != true }}
-        run: pnpm --filter @simple-agent-manager/tail-worker exec wrangler deploy --env ${{ inputs.environment }}
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
-
-      # On first deploy: tail worker now exists, re-sync to add tail_consumers and re-deploy API
-      - name: Re-sync Wrangler Config (add tail_consumers)
-        if: ${{ inputs.dry_run != true && steps.first_deploy.outputs.is_first == 'true' }}
-        run: |
-          rm -f .wrangler/tail-worker-first-deploy
-          pnpm tsx scripts/deploy/sync-wrangler-config.ts
-        env:
-          PULUMI_STACK: ${{ steps.pulumi-select.outputs.stack_name }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
-          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-          BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}
-          RESOURCE_PREFIX: ${{ steps.prefix.outputs.value }}
-          REQUIRE_APPROVAL: ${{ vars.REQUIRE_APPROVAL }}
-          HETZNER_BASE_IMAGE: ${{ vars.HETZNER_BASE_IMAGE }}
-          ARTIFACTS_BINDING_ENABLED: ${{ vars.ARTIFACTS_BINDING_ENABLED }}
-
-      - name: Re-deploy API Worker (with tail_consumers)
-        if: ${{ inputs.dry_run != true && steps.first_deploy.outputs.is_first == 'true' }}
-        run: |
-          OUTPUT=$(pnpm --filter @simple-agent-manager/api exec wrangler deploy --env "$DEPLOY_ENV" 2>&1) || {
-            echo "$OUTPUT"
-            exit 1
-          }
-          echo "$OUTPUT"
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-          DEPLOY_ENV: ${{ inputs.environment }}
-          ARTIFACTS_BINDING_ENABLED: ${{ vars.ARTIFACTS_BINDING_ENABLED }}
-
-      - name: Deploy Web UI
-        if: ${{ inputs.dry_run != true }}
-        run: |
-          PREFIX="${{ steps.prefix.outputs.value }}"
-          STACK="${{ steps.stack.outputs.name }}"
-          PROJECT_NAME="${PREFIX}-web-${STACK}"
-          # --branch main: Deploy as "production" so custom domains serve this deployment.
-          # Without this, PR branches deploy as "preview" and custom domains show "Deployment Not Found".
-          pnpm --filter @simple-agent-manager/web exec wrangler pages deploy dist --project-name $PROJECT_NAME --branch main
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
 
       - name: Backup D1 Databases (pre-migration safety net)
         if: ${{ inputs.dry_run != true }}
@@ -689,6 +613,85 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+
+      # Deploy API worker after D1 migrations so new code never serves against old schema.
+      # On first deploy this still runs before the tail worker because the API service binding is required.
+      - name: Deploy API Worker
+        if: ${{ inputs.dry_run != true }}
+        run: |
+          OUTPUT=$(pnpm --filter @simple-agent-manager/api exec wrangler deploy --env "$DEPLOY_ENV" 2>&1) || {
+            echo "$OUTPUT"
+            exit 1
+          }
+          echo "$OUTPUT"
+          if echo "$OUTPUT" | grep -q "not inherited by environments"; then
+            NON_ARTIFACTS_BINDING_WARNINGS=$(echo "$OUTPUT" | grep -E '      - "[^"]+" exists at the top level' | grep -v '"artifacts" exists at the top level' || true)
+            if [ -z "$NON_ARTIFACTS_BINDING_WARNINGS" ] && [ "${ARTIFACTS_BINDING_ENABLED:-false}" != "true" ] && echo "$OUTPUT" | grep -q '"artifacts" exists at the top level'; then
+              echo "::notice::Ignoring intentionally gated Artifacts binding warning because ARTIFACTS_BINDING_ENABLED is not true."
+              exit 0
+            fi
+            echo ""
+            echo "::error::Wrangler detected non-inherited bindings. Check sync-wrangler-config.ts."
+            echo "See: .claude/rules/07-env-and-urls.md"
+            exit 1
+          fi
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          DEPLOY_ENV: ${{ inputs.environment }}
+          ARTIFACTS_BINDING_ENABLED: ${{ vars.ARTIFACTS_BINDING_ENABLED }}
+
+      # Tail Worker must deploy AFTER API Worker (service binding dependency)
+      - name: Deploy Tail Worker
+        if: ${{ inputs.dry_run != true }}
+        run: pnpm --filter @simple-agent-manager/tail-worker exec wrangler deploy --env ${{ inputs.environment }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+
+      # On first deploy: tail worker now exists, re-sync to add tail_consumers and re-deploy API
+      - name: Re-sync Wrangler Config (add tail_consumers)
+        if: ${{ inputs.dry_run != true && steps.first_deploy.outputs.is_first == 'true' }}
+        run: |
+          rm -f .wrangler/tail-worker-first-deploy
+          pnpm tsx scripts/deploy/sync-wrangler-config.ts
+        env:
+          PULUMI_STACK: ${{ steps.pulumi-select.outputs.stack_name }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}
+          RESOURCE_PREFIX: ${{ steps.prefix.outputs.value }}
+          REQUIRE_APPROVAL: ${{ vars.REQUIRE_APPROVAL }}
+          HETZNER_BASE_IMAGE: ${{ vars.HETZNER_BASE_IMAGE }}
+          ARTIFACTS_BINDING_ENABLED: ${{ vars.ARTIFACTS_BINDING_ENABLED }}
+
+      - name: Re-deploy API Worker (with tail_consumers)
+        if: ${{ inputs.dry_run != true && steps.first_deploy.outputs.is_first == 'true' }}
+        run: |
+          OUTPUT=$(pnpm --filter @simple-agent-manager/api exec wrangler deploy --env "$DEPLOY_ENV" 2>&1) || {
+            echo "$OUTPUT"
+            exit 1
+          }
+          echo "$OUTPUT"
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          DEPLOY_ENV: ${{ inputs.environment }}
+          ARTIFACTS_BINDING_ENABLED: ${{ vars.ARTIFACTS_BINDING_ENABLED }}
+
+      - name: Deploy Web UI
+        if: ${{ inputs.dry_run != true }}
+        run: |
+          PREFIX="${{ steps.prefix.outputs.value }}"
+          STACK="${{ steps.stack.outputs.name }}"
+          PROJECT_NAME="${PREFIX}-web-${STACK}"
+          # --branch main: Deploy as "production" so custom domains serve this deployment.
+          # Without this, PR branches deploy as "preview" and custom domains show "Deployment Not Found".
+          pnpm --filter @simple-agent-manager/web exec wrangler pages deploy dist --project-name $PROJECT_NAME --branch main
+        env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
 

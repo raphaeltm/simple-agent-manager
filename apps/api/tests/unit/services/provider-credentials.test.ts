@@ -1,6 +1,11 @@
 import { describe, expect,it } from 'vitest';
 
-import { buildProviderConfig,serializeCredentialToken } from '../../../src/services/provider-credentials';
+import {
+  buildProviderConfig,
+  parseGcpCredential,
+  serializeCredentialToken,
+  serializeGcpCredential,
+} from '../../../src/services/provider-credentials';
 
 describe('serializeCredentialToken', () => {
   it('should return raw token for hetzner', () => {
@@ -71,5 +76,66 @@ describe('buildProviderConfig', () => {
       secretKey: 'key-abc',
       projectId: 'proj-xyz',
     });
+  });
+});
+
+
+describe('versioned GCP credential parsing', () => {
+  const legacy = {
+    gcpProjectId: 'legacy-project',
+    gcpProjectNumber: '123456789',
+    serviceAccountEmail: 'sam@legacy-project.iam.gserviceaccount.com',
+    wifPoolId: 'sam-pool',
+    wifProviderId: 'sam-oidc',
+    defaultZone: 'us-central1-a',
+  };
+
+  it('normalizes an existing unversioned WIF blob without migration', () => {
+    expect(parseGcpCredential(JSON.stringify(legacy))).toEqual({
+      version: 1,
+      provider: 'gcp',
+      authType: 'workload-identity',
+      ...legacy,
+    });
+  });
+
+  it('serializes new WIF metadata with a version and discriminator', () => {
+    const serialized = serializeCredentialToken('gcp', legacy);
+    expect(JSON.parse(serialized)).toMatchObject({
+      version: 1,
+      provider: 'gcp',
+      authType: 'workload-identity',
+      ...legacy,
+    });
+  });
+
+  it('round-trips a service-account-key credential', () => {
+    const credential = {
+      version: 1 as const,
+      provider: 'gcp' as const,
+      authType: 'service-account-key' as const,
+      gcpProjectId: 'service-project',
+      serviceAccountEmail: 'sam@service-project.iam.gserviceaccount.com',
+      privateKeyId: 'key-123',
+      privateKey: 'private-key-value',
+      defaultZone: 'europe-west1-b',
+    };
+    expect(parseGcpCredential(serializeGcpCredential(credential))).toEqual(credential);
+  });
+
+  it('rejects provider mismatches before provider construction', () => {
+    expect(() => parseGcpCredential(JSON.stringify({
+      ...legacy,
+      version: 1,
+      provider: 'scaleway',
+      authType: 'workload-identity',
+    }))).toThrow('provider is scaleway');
+  });
+
+  it('rejects unsupported versions and auth modes', () => {
+    expect(() => parseGcpCredential(JSON.stringify({ ...legacy, version: 2, authType: 'workload-identity' })))
+      .toThrow('unsupported version');
+    expect(() => parseGcpCredential(JSON.stringify({ ...legacy, version: 1, authType: 'other' })))
+      .toThrow('unsupported authType');
   });
 });

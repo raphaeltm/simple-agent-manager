@@ -18,18 +18,13 @@ const nodeCleanupSource = readFileSync(
   resolve(process.cwd(), 'src/scheduled/node-cleanup.ts'),
   'utf8'
 );
-const timeoutSource = readFileSync(
-  resolve(process.cwd(), 'src/services/timeout.ts'),
-  'utf8'
-);
+const timeoutSource = readFileSync(resolve(process.cwd(), 'src/services/timeout.ts'), 'utf8');
 const taskRunnerSource = readFileSync(
   resolve(process.cwd(), 'src/services/task-runner.ts'),
   'utf8'
 );
-const indexSource = readFileSync(
-  resolve(process.cwd(), 'src/index.ts'),
-  'utf8'
-);
+const indexSource = readFileSync(resolve(process.cwd(), 'src/index.ts'), 'utf8');
+const adminSource = readFileSync(resolve(process.cwd(), 'src/routes/admin.ts'), 'utf8');
 
 // =========================================================================
 // Stuck Tasks — OBSERVABILITY_DATABASE Recording
@@ -65,7 +60,7 @@ describe('stuck-tasks OBSERVABILITY_DATABASE recording (TDF-7)', () => {
 
   it('records recovery failures in OBSERVABILITY_DATABASE', () => {
     const failureSection = stuckTasksSource.slice(
-      stuckTasksSource.indexOf('// Record recovery failure'),
+      stuckTasksSource.indexOf('// Record recovery failure')
     );
     expect(failureSection).toContain('persistError(env.OBSERVABILITY_DATABASE');
     expect(failureSection).toContain("level: 'error'");
@@ -112,8 +107,9 @@ describe('stuck-tasks diagnostic context capture (TDF-7)', () => {
       stuckTasksSource.indexOf('async function gatherDiagnostics('),
       stuckTasksSource.indexOf('export async function recoverStuckTasks(')
     );
-    expect(diagSection).toContain('env.TASK_RUNNER.idFromName(task.id)');
-    expect(diagSection).toContain('stub.getStatus()');
+    expect(diagSection).toContain('probeTaskRunnerStatus(env, task.id)');
+    expect(stuckTasksSource).toContain('env.TASK_RUNNER.idFromName(taskId)');
+    expect(stuckTasksSource).toContain('stub.getStatus()');
   });
 
   it('includes workspace and node status in persistError context', () => {
@@ -150,12 +146,14 @@ describe('stuck-tasks diagnostic context capture (TDF-7)', () => {
 
 describe('stuck-tasks DO health checks (TDF-7)', () => {
   it('imports TaskRunner type for typed DO stub', () => {
-    expect(stuckTasksSource).toContain("import type { TaskRunner } from '../durable-objects/task-runner'");
+    expect(stuckTasksSource).toContain(
+      "import type { TaskRunner } from '../durable-objects/task-runner'"
+    );
   });
 
   it('checks DO health for non-stuck tasks at half threshold', () => {
     expect(stuckTasksSource).toContain('halfThreshold');
-    expect(stuckTasksSource).toContain('timeForCheck > halfThreshold');
+    expect(stuckTasksSource).toContain('timeForCheck > Math.min(halfThreshold, mismatchGraceMs)');
   });
 
   it('uses started_at for in_progress tasks (consistent time base)', () => {
@@ -170,7 +168,7 @@ describe('stuck-tasks DO health checks (TDF-7)', () => {
 
   it('detects DO-completed-but-task-active mismatch', () => {
     expect(stuckTasksSource).toContain('stuck_task.do_completed_but_task_active');
-    expect(stuckTasksSource).toContain('doStatus.completed');
+    expect(stuckTasksSource).toContain('doStatus?.completed');
   });
 
   it('records DO mismatch in OBSERVABILITY_DATABASE', () => {
@@ -190,6 +188,28 @@ describe('stuck-tasks DO health checks (TDF-7)', () => {
 
   it('cron handler logs doHealthChecked count', () => {
     expect(indexSource).toContain('stuckTaskDoHealthChecked: stuckTasks.doHealthChecked');
+  });
+
+  it('runs stuck-task recovery before failure-prone operational cleanup phases', () => {
+    const sweepStart = indexSource.indexOf('// 5-minute operational sweep');
+    const recoveryIdx = indexSource.indexOf(
+      'const stuckTasks = await recoverStuckTasks(env)',
+      sweepStart
+    );
+    const provisioningIdx = indexSource.indexOf('checkProvisioningTimeouts(', sweepStart);
+    const nodeCleanupIdx = indexSource.indexOf('runNodeCleanupSweep(env)', sweepStart);
+
+    expect(recoveryIdx).toBeGreaterThan(sweepStart);
+    expect(recoveryIdx).toBeLessThan(provisioningIdx);
+    expect(recoveryIdx).toBeLessThan(nodeCleanupIdx);
+  });
+
+  it('exposes read-only reconciliation diagnostics behind the superadmin router', () => {
+    expect(adminSource).toContain(
+      "adminRoutes.use('/*', requireAuth(), requireApproved(), requireSuperadmin())"
+    );
+    expect(adminSource).toContain("adminRoutes.get('/tasks/:taskId/reconciliation-diagnostics'");
+    expect(adminSource).toContain('getTaskReconciliationDiagnostics(c.env, taskId)');
   });
 });
 
@@ -292,7 +312,7 @@ describe('node-cleanup orphan detection (TDF-7)', () => {
   it('uses grace period to avoid flagging recently created resources', () => {
     // Both orphan queries filter by created_at/updated_at to avoid false positives
     const orphanSection = nodeCleanupSource.slice(
-      nodeCleanupSource.indexOf('Orphan cleanup: task-created workspaces'),
+      nodeCleanupSource.indexOf('Orphan cleanup: task-created workspaces')
     );
     // Orphan workspace query uses gracePeriodMs cutoff on created_at
     expect(orphanSection).toContain('w.created_at < ?');
@@ -330,7 +350,9 @@ describe('timeout service OBSERVABILITY_DATABASE recording (TDF-7)', () => {
   });
 
   it('cron handler passes OBSERVABILITY_DATABASE to checkProvisioningTimeouts', () => {
-    expect(indexSource).toContain('checkProvisioningTimeouts(env.DATABASE, env, env.OBSERVABILITY_DATABASE)');
+    expect(indexSource).toContain(
+      'checkProvisioningTimeouts(env.DATABASE, env, env.OBSERVABILITY_DATABASE)'
+    );
   });
 });
 
@@ -371,7 +393,7 @@ describe('cleanup idempotency (TDF-7)', () => {
       taskRunnerSource.indexOf('// Count active workspaces')
     );
     expect(cleanupSection).toContain('schema.nodes.warmSince');
-    expect(cleanupSection).toContain("eq(schema.nodes.id, nodeId)");
+    expect(cleanupSection).toContain('eq(schema.nodes.id, nodeId)');
   });
 
   it('only calls markIdle if node is running and not warm', () => {

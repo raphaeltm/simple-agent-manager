@@ -47,8 +47,14 @@ import { lazyBackfillIfNeeded } from '../services/composable-credentials/lazy-ba
 import { resolveForConsumer } from '../services/composable-credentials/resolve';
 import { decrypt, encrypt } from '../services/encryption';
 import { getTimeoutMs } from '../services/fetch-timeout';
+import { deleteUserGcpCredential, replaceUserGcpCredential } from '../services/gcp-credential-store';
+import { clearGcpAccessTokenCache } from '../services/gcp-sts';
 import { getPlatformAgentCredential } from '../services/platform-credentials';
-import { serializeCredentialToken } from '../services/provider-credentials';
+import {
+  parseGcpCredential,
+  serializeCredentialToken,
+  toGcpCredentialMetadata,
+} from '../services/provider-credentials';
 import {
   CredentialValidator,
   formatOnlyValidation,
@@ -201,6 +207,8 @@ credentialsRoutes.get('/', async (c) => {
     .select({
       id: schema.credentials.id,
       provider: schema.credentials.provider,
+      encryptedToken: schema.credentials.encryptedToken,
+      iv: schema.credentials.iv,
       createdAt: schema.credentials.createdAt,
     })
     .from(schema.credentials)
@@ -212,11 +220,25 @@ credentialsRoutes.get('/', async (c) => {
       )
     );
 
-  const response: CredentialResponse[] = creds.map((cred) => ({
-    id: cred.id,
-    provider: cred.provider as CredentialProvider,
-    connected: true,
-    createdAt: cred.createdAt,
+  const encryptionKey = getCredentialEncryptionKey(c.env);
+  const response: CredentialResponse[] = await Promise.all(creds.map(async (cred) => {
+    const base: CredentialResponse = {
+      id: cred.id,
+      provider: cred.provider as CredentialProvider,
+      connected: true,
+      createdAt: cred.createdAt,
+    };
+    if (cred.provider !== 'gcp') return base;
+    try {
+      const plaintext = await decrypt(cred.encryptedToken, cred.iv, encryptionKey);
+      return { ...base, gcp: toGcpCredentialMetadata(parseGcpCredential(plaintext)) };
+    } catch (err) {
+      log.error('credentials.gcp_metadata_unreadable', {
+        credentialId: cred.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return base;
+    }
   }));
 
   return c.json(response);
@@ -248,6 +270,30 @@ credentialsRoutes.post('/', jsonValidator(CreateCredentialSchema), async (c) => 
   const { providerName, tokenToValidate: tokenToEncrypt } = getCloudCredentialFields(requestBody);
   const validation = await validateCloudCredentialRequest(requestBody, c.env);
   logCredentialValidationWarning('cloud', providerName, validation);
+
+  if (providerName === 'gcp') {
+    const credential = parseGcpCredential(tokenToEncrypt);
+    const [existing] = await db
+      .select({ id: schema.credentials.id })
+      .from(schema.credentials)
+      .where(and(
+        eq(schema.credentials.userId, userId),
+        eq(schema.credentials.provider, 'gcp'),
+        eq(schema.credentials.credentialType, 'cloud-provider'),
+        isNull(schema.credentials.projectId),
+      ))
+      .limit(1);
+    const stored = await replaceUserGcpCredential(c.env, userId, credential);
+    const response: CredentialResponse = {
+      id: stored.id,
+      provider: 'gcp',
+      connected: true,
+      createdAt: stored.createdAt,
+      validation,
+      gcp: toGcpCredentialMetadata(credential),
+    };
+    return existing ? c.json(response) : c.json(response, 201);
+  }
 
   // Encrypt the serialized credential token
   const { ciphertext, iv } = await encrypt(tokenToEncrypt, getCredentialEncryptionKey(c.env));
@@ -335,6 +381,48 @@ credentialsRoutes.delete('/:provider', async (c) => {
   const userId = getUserId(c);
   const provider = c.req.param('provider');
   const db = drizzle(c.env.DATABASE, { schema });
+
+  if (provider === 'gcp') {
+    const [stored] = await db
+      .select({ encryptedToken: schema.credentials.encryptedToken, iv: schema.credentials.iv })
+      .from(schema.credentials)
+      .where(and(
+        eq(schema.credentials.userId, userId),
+        eq(schema.credentials.provider, 'gcp'),
+        eq(schema.credentials.credentialType, 'cloud-provider'),
+        isNull(schema.credentials.projectId),
+      ))
+      .limit(1);
+    if (!stored) throw errors.notFound('Credential');
+
+    let credential;
+    try {
+      const plaintext = await decrypt(
+        stored.encryptedToken,
+        stored.iv,
+        getCredentialEncryptionKey(c.env),
+      );
+      credential = parseGcpCredential(plaintext);
+    } catch (err) {
+      log.error('credentials.gcp_disconnect_parse_failed', {
+        userId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+
+    await deleteUserGcpCredential(c.env, userId);
+    if (credential) {
+      try {
+        await clearGcpAccessTokenCache(c.env, userId, credential);
+      } catch (err) {
+        log.warn('credentials.gcp_disconnect_cache_cleanup_failed', {
+          userId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+    return c.json({ success: true });
+  }
 
   const result = await db
     .delete(schema.credentials)

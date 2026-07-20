@@ -30,6 +30,9 @@ export const DEFAULT_TASK_RUN_MAX_EXECUTION_MS = 4 * 60 * 60 * 1000; // 4 hours
  * Override via TASK_RUN_HARD_TIMEOUT_MS env var. */
 export const DEFAULT_TASK_RUN_HARD_TIMEOUT_MS = 8 * 60 * 60 * 1000; // 8 hours
 
+/** Absolute runaway-cost backstop (ms) that bounds even demonstrably live tasks. */
+export const DEFAULT_TASK_RUN_ABSOLUTE_CEILING_MS = 24 * 60 * 60 * 1000;
+
 /** Default threshold (ms) for a task stuck in 'queued' status. Override via TASK_STUCK_QUEUED_TIMEOUT_MS env var.
  * Must be > TASK_RUNNER_AGENT_READY_TIMEOUT_MS (15 min) to avoid the stuck-task cron killing tasks
  * that are legitimately waiting for cloud-init to finish. Cloud-init takes 8-12 min on Hetzner.
@@ -40,6 +43,26 @@ export const DEFAULT_TASK_STUCK_QUEUED_TIMEOUT_MS = 20 * 60 * 1000; // 20 minute
  * Must be > TASK_RUNNER_WORKSPACE_READY_TIMEOUT_MS (30 min) to avoid stuck-task recovery killing legitimate workspace startups.
  * Set to 31 minutes (1 min buffer above workspace ready timeout). */
 export const DEFAULT_TASK_STUCK_DELEGATED_TIMEOUT_MS = 31 * 60 * 1000; // 31 minutes
+
+/** Minimum age before reconciling a completed TaskRunner DO against active D1 state. */
+export const DEFAULT_TASK_DO_MISMATCH_GRACE_MS = 5 * 60 * 1000;
+
+/** Maximum active task rows inspected by one stuck-task cron invocation. */
+export const DEFAULT_STUCK_TASK_MAX_CANDIDATES_PER_SWEEP = 100;
+
+/** KV key used to resume the bounded stuck-task scan without starving later rows. */
+export const DEFAULT_STUCK_TASK_SCAN_CURSOR_KV_KEY = 'scheduled:stuck-tasks:scan-cursor:v1';
+
+/** Maximum ACP sessions read while proving task-scoped runtime liveness. */
+export const DEFAULT_TASK_LIVENESS_MAX_ACP_SESSIONS = 5;
+
+/**
+ * Per-candidate timeout for the task-scoped ACP liveness probe (a ProjectData DO
+ * call) inside the stuck-task control loop. A healthy runtime answers in
+ * milliseconds; past this bound the probe is treated as inconclusive (fail-safe:
+ * never fails a task on a slow/unresponsive DO). Keeps the sweep's worst-case
+ * wall time bounded (rule 47 — control-loop I/O budget). */
+export const DEFAULT_TASK_LIVENESS_PROBE_TIMEOUT_MS = 5 * 1000;
 
 // =============================================================================
 // TaskRunner DO Defaults (Alarm-Driven Orchestration — TDF-2)

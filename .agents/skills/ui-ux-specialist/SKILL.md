@@ -1,17 +1,18 @@
 ---
 name: ui-ux-specialist
-description: "UI/UX specialist for web surfaces. Use for any UI change in apps/web or packages/ui to enforce mobile-first layout quality, visual hierarchy, interaction clarity, and accessibility with screenshot-backed validation."
+description: 'UI/UX specialist for web surfaces. Use for any UI change in apps/web or packages/ui to enforce mobile-first layout quality, visual hierarchy, interaction clarity, and accessibility with screenshot-backed validation.'
 metadata:
-  short-description: "UI/UX specialist for mobile-first, screenshot-backed quality gates"
+  short-description: 'UI/UX specialist for mobile-first, screenshot-backed quality gates'
 ---
 
 # ui-ux-specialist
 
 This is a Codex skill wrapper around the Claude Code subagent definition in:
-- .claude/agents/ui-ux-specialist/
+
+- `.claude/agents/ui-ux-specialist/UI_UX_SPECIALIST.md`
 
 Use:
 
-1. Read CLAUDE_AGENT.md.
+1. Read `.claude/agents/ui-ux-specialist/UI_UX_SPECIALIST.md`.
 2. Follow its workflow, rubric, and evidence requirements.
 3. Report results with concrete file references.

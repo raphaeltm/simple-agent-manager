@@ -24,6 +24,12 @@ export const CHAT_TASK_LIST_LIMIT = parseInt(
   import.meta.env.VITE_CHAT_TASK_LIST_LIMIT || String(DEFAULT_CHAT_TASK_LIST_LIMIT),
 );
 
+/** Background sync interval for session list (ms). Override via VITE_SESSION_SYNC_INTERVAL_MS. */
+const DEFAULT_SESSION_SYNC_INTERVAL_MS = 30_000;
+export const SESSION_SYNC_INTERVAL_MS = parseInt(
+  import.meta.env.VITE_SESSION_SYNC_INTERVAL_MS || String(DEFAULT_SESSION_SYNC_INTERVAL_MS),
+);
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------

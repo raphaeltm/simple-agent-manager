@@ -28,6 +28,7 @@ import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import { createAuth } from './auth';
 import * as schema from './db/schema';
 import type { Env } from './env';
+import { resolveCredentialedCorsOrigin } from './lib/cors-origin';
 import { log, serializeError } from './lib/logger';
 import { resolvePagesProxyTarget } from './lib/pages-proxy';
 import { parseWorkspaceSubdomain } from './lib/workspace-subdomain';
@@ -121,6 +122,7 @@ import { terminalRoutes } from './routes/terminal';
 import { transcribeRoutes } from './routes/transcribe';
 import { trialRoutes } from './routes/trial';
 import { trialOnboardingRoutes } from './routes/trial/index';
+import { triggerWebhookRoutes } from './routes/trigger-webhooks';
 import { triggersRoutes } from './routes/triggers';
 import { ttsRoutes } from './routes/tts';
 import { uiGovernanceRoutes } from './routes/ui-governance';
@@ -132,6 +134,7 @@ import { runComputeUsageCleanup } from './scheduled/compute-usage-cleanup';
 import { runCronTriggerSweep } from './scheduled/cron-triggers';
 import { runNodeCleanupSweep } from './scheduled/node-cleanup';
 import { runObservabilityPurge } from './scheduled/observability-purge';
+import { runSessionTaskReconciliation } from './scheduled/session-task-reconciliation';
 import { recoverStuckTasks } from './scheduled/stuck-tasks';
 import { runTrialExpireSweep } from './scheduled/trial-expire';
 import { runTrialRolloverAudit } from './scheduled/trial-rollover';
@@ -377,11 +380,13 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
   }
 
   const nodeRuntime = workspace.nodeId
-    ? (await db
-        .select({ runtime: schema.nodes.runtime })
-        .from(schema.nodes)
-        .where(eq(schema.nodes.id, workspace.nodeId))
-        .get())?.runtime ?? 'vm'
+    ? ((
+        await db
+          .select({ runtime: schema.nodes.runtime })
+          .from(schema.nodes)
+          .where(eq(schema.nodes.id, workspace.nodeId))
+          .get()
+      )?.runtime ?? 'vm')
     : 'vm';
 
   if (workspace.status !== 'running' && workspace.status !== 'recovery') {
@@ -402,18 +407,23 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
   if (nodeRuntime === 'cf-container') {
     const containerConfig = getVmAgentContainerConfig(c.env);
     if (!containerConfig.enabled) {
-      return c.json({ error: 'CF_CONTAINER_DISABLED', message: 'Container workspace runtime is disabled' }, 503);
+      return c.json(
+        { error: 'CF_CONTAINER_DISABLED', message: 'Container workspace runtime is disabled' },
+        503
+      );
     }
     if (!c.env.VM_AGENT_CONTAINER) {
-      return c.json({ error: 'CF_CONTAINER_UNAVAILABLE', message: 'VM agent container binding is unavailable' }, 503);
+      return c.json(
+        { error: 'CF_CONTAINER_UNAVAILABLE', message: 'VM agent container binding is unavailable' },
+        503
+      );
     }
 
     const containerId = workspace.nodeId || workspaceId;
     const vmAgentPort = containerConfig.vmAgentPort;
-    const containerUrl = new URL(c.req.url);
-    containerUrl.protocol = 'http:';
-    containerUrl.hostname = 'localhost';
-    containerUrl.port = String(vmAgentPort);
+    const containerUrl = new URL(`http://localhost:${vmAgentPort}`);
+    containerUrl.pathname = url.pathname;
+    containerUrl.search = url.search;
 
     if (targetPort !== null) {
       const subPath = url.pathname === '/' ? '' : url.pathname;
@@ -427,7 +437,10 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
           workspaceId,
           ...serializeError(err),
         });
-        return c.json({ error: 'TOKEN_ERROR', message: 'Failed to generate port proxy token' }, 500);
+        return c.json(
+          { error: 'TOKEN_ERROR', message: 'Failed to generate port proxy token' },
+          500
+        );
       }
     }
 
@@ -505,10 +518,9 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
   );
   const vmAgentProtocol = c.env.VM_AGENT_PROTOCOL || 'https';
   const vmAgentPort = c.env.VM_AGENT_PORT || '8443';
-  const vmUrl = new URL(c.req.url);
-  vmUrl.protocol = `${vmAgentProtocol}:`;
-  vmUrl.hostname = backendHostname;
-  vmUrl.port = vmAgentPort;
+  const vmUrl = new URL(`${vmAgentProtocol}://${backendHostname}:${vmAgentPort}`);
+  vmUrl.pathname = url.pathname;
+  vmUrl.search = url.search;
 
   // Route port-specific requests to the VM agent's port proxy endpoint.
   // ws-{id}--3000.example.com/foo → {backend}/workspaces/{id}/ports/3000/foo
@@ -597,30 +609,7 @@ app.use(
   '*',
   cors({
     origin: (origin, c) => {
-      if (!origin) return null;
-      const baseDomain = c.env?.BASE_DOMAIN || '';
-      // Allow localhost only in development (BASE_DOMAIN contains 'localhost' or is empty)
-      const isDevEnvironment = !baseDomain || baseDomain.includes('localhost');
-      try {
-        const url = new URL(origin);
-        if (isDevEnvironment && (url.hostname === 'localhost' || url.hostname === '127.0.0.1'))
-          return origin;
-      } catch {
-        // Malformed origin — reject
-        return null;
-      }
-      // Allow subdomains of the configured BASE_DOMAIN (e.g., app.example.com, api.example.com)
-      if (baseDomain) {
-        try {
-          const url = new URL(origin);
-          if (url.hostname === baseDomain || url.hostname.endsWith(`.${baseDomain}`)) return origin;
-        } catch {
-          return null;
-        }
-      }
-      // Reject all other origins — returning null prevents Access-Control-Allow-Origin
-      // from being set, which blocks credentialed cross-origin requests from unknown sites.
-      return null;
+      return resolveCredentialedCorsOrigin(origin, c.env?.BASE_DOMAIN);
     },
     credentials: true,
     allowHeaders: [
@@ -663,7 +652,8 @@ app.get('/api/config/artifacts-enabled', (c) => {
 // only render a provider button when that provider is actually usable. Google
 // here means the LOGIN client (getGoogleLoginOAuthConfig), never the infra/GCP one.
 app.get('/api/config/login-providers', async (c) => {
-  const { getGitHubOAuthConfig, getGitLabOAuthConfig, getGoogleLoginOAuthConfig } = await import('./services/platform-config');
+  const { getGitHubOAuthConfig, getGitLabOAuthConfig, getGoogleLoginOAuthConfig } =
+    await import('./services/platform-config');
   const [github, google, gitlab] = await Promise.all([
     getGitHubOAuthConfig(c.env),
     getGoogleLoginOAuthConfig(c.env),
@@ -725,6 +715,7 @@ app.route('/api/client-errors', clientErrorsRoutes);
 app.route('/api/cli', cliRoutes);
 app.route('/api/chats', chatsRoutes);
 app.route('/api/t', analyticsIngestRoutes);
+app.route('/api/webhooks', triggerWebhookRoutes);
 // ORDERING IS CRITICAL: Routes using callback JWT auth MUST be mounted before
 // projectsRoutes. projectsRoutes has use('/*', requireAuth()) which leaks to
 // all siblings at the same base path — mounting these routes first causes them
@@ -933,6 +924,9 @@ export default {
     }
 
     // 5-minute operational sweep
+    // Recover stuck tasks first so unrelated cleanup failures cannot suppress lifecycle repair.
+    const stuckTasks = await recoverStuckTasks(env);
+
     // Check for stuck provisioning workspaces
     const timedOut = await checkProvisioningTimeouts(env.DATABASE, env, env.OBSERVABILITY_DATABASE);
 
@@ -943,9 +937,6 @@ export default {
     // Clean up stale warm nodes and expired auto-provisioned nodes
     const nodeCleanup = await runNodeCleanupSweep(env);
 
-    // Recover stuck tasks (queued/delegated/in_progress past timeout)
-    const stuckTasks = await recoverStuckTasks(env);
-
     // Purge expired observability errors (retention + row count limits)
     const observabilityPurge = await runObservabilityPurge(env);
 
@@ -954,6 +945,8 @@ export default {
 
     // Recover stale trigger executions and purge old logs
     const triggerCleanup = await runTriggerExecutionCleanup(env);
+    // Repair a bounded page of legacy taskless user-visible chat sessions.
+    const sessionTaskRepair = await runSessionTaskReconciliation(env);
 
     // Clean up abandoned R2 compose image artifacts. The cleanup module is
     // interval-gated through KV so the 5-minute sweep does not scan R2 every run.
@@ -992,7 +985,13 @@ export default {
       triggerExecStaleRecovered: triggerCleanup.staleRecovered,
       triggerExecStaleQueuedRecovered: triggerCleanup.staleQueuedRecovered,
       triggerExecRetentionPurged: triggerCleanup.retentionPurged,
+      webhookDeliveriesPurged: triggerCleanup.webhookDeliveriesPurged,
       triggerExecCleanupErrors: triggerCleanup.errors,
+      sessionTaskRepairScanned: sessionTaskRepair.scanned,
+      sessionTaskRepairRepaired: sessionTaskRepair.repaired,
+      sessionTaskRepairReused: sessionTaskRepair.reused,
+      sessionTaskRepairErrors: sessionTaskRepair.errors,
+      sessionTaskRepairResidual: sessionTaskRepair.residual,
       composeArtifactCleanupSkipped: composeArtifactCleanup.skipped,
       composeArtifactCleanupSkipReason: composeArtifactCleanup.skipReason,
       composeArtifactCleanupScanned: composeArtifactCleanup.scannedObjects,

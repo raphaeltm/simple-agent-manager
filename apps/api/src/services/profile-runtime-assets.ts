@@ -92,28 +92,18 @@ export async function requireProjectScopedProfile(
 export async function buildProfileRuntimeConfigResponse(
   db: Db,
   profileId: string,
-  userId: string
+  _userId: string
 ): Promise<ProjectRuntimeConfigResponse> {
   const [envRows, fileRows] = await Promise.all([
     db
       .select()
       .from(schema.profileRuntimeEnvVars)
-      .where(
-        and(
-          eq(schema.profileRuntimeEnvVars.profileId, profileId),
-          eq(schema.profileRuntimeEnvVars.userId, userId)
-        )
-      )
+      .where(eq(schema.profileRuntimeEnvVars.profileId, profileId))
       .orderBy(schema.profileRuntimeEnvVars.envKey),
     db
       .select()
       .from(schema.profileRuntimeFiles)
-      .where(
-        and(
-          eq(schema.profileRuntimeFiles.profileId, profileId),
-          eq(schema.profileRuntimeFiles.userId, userId)
-        )
-      )
+      .where(eq(schema.profileRuntimeFiles.profileId, profileId))
       .orderBy(schema.profileRuntimeFiles.filePath),
   ]);
 
@@ -123,18 +113,18 @@ export async function buildProfileRuntimeConfigResponse(
 export async function buildSkillRuntimeConfigResponse(
   db: Db,
   skillId: string,
-  userId: string
+  _userId: string
 ): Promise<ProjectRuntimeConfigResponse> {
   const [envRows, fileRows] = await Promise.all([
     db
       .select()
       .from(schema.skillRuntimeEnvVars)
-      .where(and(eq(schema.skillRuntimeEnvVars.skillId, skillId), eq(schema.skillRuntimeEnvVars.userId, userId)))
+      .where(eq(schema.skillRuntimeEnvVars.skillId, skillId))
       .orderBy(schema.skillRuntimeEnvVars.envKey),
     db
       .select()
       .from(schema.skillRuntimeFiles)
-      .where(and(eq(schema.skillRuntimeFiles.skillId, skillId), eq(schema.skillRuntimeFiles.userId, userId)))
+      .where(eq(schema.skillRuntimeFiles.skillId, skillId))
       .orderBy(schema.skillRuntimeFiles.filePath),
   ]);
 
@@ -227,7 +217,7 @@ export async function resolveRuntimeFileRows(
 export async function getProfileRuntimeAssets(
   db: Db,
   profileId: string,
-  userId: string,
+  _userId: string,
   encryptionKey: string
 ): Promise<RuntimeAssetRows> {
   const [envRows, fileRows] = await Promise.all([
@@ -239,12 +229,7 @@ export async function getProfileRuntimeAssets(
         isSecret: schema.profileRuntimeEnvVars.isSecret,
       })
       .from(schema.profileRuntimeEnvVars)
-      .where(
-        and(
-          eq(schema.profileRuntimeEnvVars.profileId, profileId),
-          eq(schema.profileRuntimeEnvVars.userId, userId)
-        )
-      ),
+      .where(eq(schema.profileRuntimeEnvVars.profileId, profileId)),
     db
       .select({
         path: schema.profileRuntimeFiles.filePath,
@@ -253,12 +238,7 @@ export async function getProfileRuntimeAssets(
         isSecret: schema.profileRuntimeFiles.isSecret,
       })
       .from(schema.profileRuntimeFiles)
-      .where(
-        and(
-          eq(schema.profileRuntimeFiles.profileId, profileId),
-          eq(schema.profileRuntimeFiles.userId, userId)
-        )
-      ),
+      .where(eq(schema.profileRuntimeFiles.profileId, profileId)),
   ]);
 
   return {
@@ -270,7 +250,7 @@ export async function getProfileRuntimeAssets(
 export async function getSkillRuntimeAssets(
   db: Db,
   skillId: string,
-  userId: string,
+  _userId: string,
   encryptionKey: string
 ): Promise<RuntimeAssetRows> {
   const [envRows, fileRows] = await Promise.all([
@@ -282,7 +262,7 @@ export async function getSkillRuntimeAssets(
         isSecret: schema.skillRuntimeEnvVars.isSecret,
       })
       .from(schema.skillRuntimeEnvVars)
-      .where(and(eq(schema.skillRuntimeEnvVars.skillId, skillId), eq(schema.skillRuntimeEnvVars.userId, userId))),
+      .where(eq(schema.skillRuntimeEnvVars.skillId, skillId)),
     db
       .select({
         path: schema.skillRuntimeFiles.filePath,
@@ -291,7 +271,7 @@ export async function getSkillRuntimeAssets(
         isSecret: schema.skillRuntimeFiles.isSecret,
       })
       .from(schema.skillRuntimeFiles)
-      .where(and(eq(schema.skillRuntimeFiles.skillId, skillId), eq(schema.skillRuntimeFiles.userId, userId))),
+      .where(eq(schema.skillRuntimeFiles.skillId, skillId)),
   ]);
 
   return {
@@ -318,13 +298,12 @@ export async function upsertProfileRuntimeEnvVar(
     .where(
       and(
         eq(schema.profileRuntimeEnvVars.profileId, input.profileId),
-        eq(schema.profileRuntimeEnvVars.userId, input.userId),
         eq(schema.profileRuntimeEnvVars.envKey, input.envKey)
       )
     )
     .limit(1);
 
-  await assertProfileEnvVarLimit(db, input.profileId, input.userId, input.maxCount, Boolean(existingRows[0]));
+  await assertProfileEnvVarLimit(db, input.profileId, input.maxCount, Boolean(existingRows[0]));
   const stored = input.isSecret
     ? await encrypt(input.value, input.encryptionKey)
     : { ciphertext: input.value, iv: null };
@@ -354,7 +333,7 @@ export async function upsertProfileRuntimeEnvVar(
 export async function deleteProfileRuntimeEnvVar(
   db: Db,
   profileId: string,
-  userId: string,
+  _userId: string,
   envKey: string
 ): Promise<void> {
   await db
@@ -362,7 +341,6 @@ export async function deleteProfileRuntimeEnvVar(
     .where(
       and(
         eq(schema.profileRuntimeEnvVars.profileId, profileId),
-        eq(schema.profileRuntimeEnvVars.userId, userId),
         eq(schema.profileRuntimeEnvVars.envKey, envKey)
       )
     );
@@ -386,13 +364,12 @@ export async function upsertSkillRuntimeEnvVar(
     .where(
       and(
         eq(schema.skillRuntimeEnvVars.skillId, input.skillId),
-        eq(schema.skillRuntimeEnvVars.userId, input.userId),
         eq(schema.skillRuntimeEnvVars.envKey, input.envKey)
       )
     )
     .limit(1);
 
-  await assertSkillEnvVarLimit(db, input.skillId, input.userId, input.maxCount, Boolean(existingRows[0]));
+  await assertSkillEnvVarLimit(db, input.skillId, input.maxCount, Boolean(existingRows[0]));
   const stored = input.isSecret
     ? await encrypt(input.value, input.encryptionKey)
     : { ciphertext: input.value, iv: null };
@@ -422,7 +399,7 @@ export async function upsertSkillRuntimeEnvVar(
 export async function deleteSkillRuntimeEnvVar(
   db: Db,
   skillId: string,
-  userId: string,
+  _userId: string,
   envKey: string
 ): Promise<void> {
   await db
@@ -430,7 +407,6 @@ export async function deleteSkillRuntimeEnvVar(
     .where(
       and(
         eq(schema.skillRuntimeEnvVars.skillId, skillId),
-        eq(schema.skillRuntimeEnvVars.userId, userId),
         eq(schema.skillRuntimeEnvVars.envKey, envKey)
       )
     );
@@ -454,13 +430,12 @@ export async function upsertProfileRuntimeFile(
     .where(
       and(
         eq(schema.profileRuntimeFiles.profileId, input.profileId),
-        eq(schema.profileRuntimeFiles.userId, input.userId),
         eq(schema.profileRuntimeFiles.filePath, input.path)
       )
     )
     .limit(1);
 
-  await assertProfileFileLimit(db, input.profileId, input.userId, input.maxCount, Boolean(existingRows[0]));
+  await assertProfileFileLimit(db, input.profileId, input.maxCount, Boolean(existingRows[0]));
   const stored = input.isSecret
     ? await encrypt(input.content, input.encryptionKey)
     : { ciphertext: input.content, iv: null };
@@ -490,7 +465,7 @@ export async function upsertProfileRuntimeFile(
 export async function deleteProfileRuntimeFile(
   db: Db,
   profileId: string,
-  userId: string,
+  _userId: string,
   path: string
 ): Promise<void> {
   await db
@@ -498,7 +473,6 @@ export async function deleteProfileRuntimeFile(
     .where(
       and(
         eq(schema.profileRuntimeFiles.profileId, profileId),
-        eq(schema.profileRuntimeFiles.userId, userId),
         eq(schema.profileRuntimeFiles.filePath, path)
       )
     );
@@ -522,13 +496,12 @@ export async function upsertSkillRuntimeFile(
     .where(
       and(
         eq(schema.skillRuntimeFiles.skillId, input.skillId),
-        eq(schema.skillRuntimeFiles.userId, input.userId),
         eq(schema.skillRuntimeFiles.filePath, input.path)
       )
     )
     .limit(1);
 
-  await assertSkillFileLimit(db, input.skillId, input.userId, input.maxCount, Boolean(existingRows[0]));
+  await assertSkillFileLimit(db, input.skillId, input.maxCount, Boolean(existingRows[0]));
   const stored = input.isSecret
     ? await encrypt(input.content, input.encryptionKey)
     : { ciphertext: input.content, iv: null };
@@ -558,7 +531,7 @@ export async function upsertSkillRuntimeFile(
 export async function deleteSkillRuntimeFile(
   db: Db,
   skillId: string,
-  userId: string,
+  _userId: string,
   path: string
 ): Promise<void> {
   await db
@@ -566,7 +539,6 @@ export async function deleteSkillRuntimeFile(
     .where(
       and(
         eq(schema.skillRuntimeFiles.skillId, skillId),
-        eq(schema.skillRuntimeFiles.userId, userId),
         eq(schema.skillRuntimeFiles.filePath, path)
       )
     );
@@ -575,7 +547,6 @@ export async function deleteSkillRuntimeFile(
 async function assertProfileEnvVarLimit(
   db: Db,
   profileId: string,
-  userId: string,
   maxCount: number,
   alreadyExists: boolean
 ): Promise<void> {
@@ -584,12 +555,7 @@ async function assertProfileEnvVarLimit(
   const countRows = await db
     .select({ count: count() })
     .from(schema.profileRuntimeEnvVars)
-    .where(
-      and(
-        eq(schema.profileRuntimeEnvVars.profileId, profileId),
-        eq(schema.profileRuntimeEnvVars.userId, userId)
-      )
-    );
+    .where(eq(schema.profileRuntimeEnvVars.profileId, profileId));
 
   if ((countRows[0]?.count ?? 0) >= maxCount) {
     throw errors.badRequest(`Maximum ${maxCount} runtime env vars allowed per profile`);
@@ -599,7 +565,6 @@ async function assertProfileEnvVarLimit(
 async function assertProfileFileLimit(
   db: Db,
   profileId: string,
-  userId: string,
   maxCount: number,
   alreadyExists: boolean
 ): Promise<void> {
@@ -608,12 +573,7 @@ async function assertProfileFileLimit(
   const countRows = await db
     .select({ count: count() })
     .from(schema.profileRuntimeFiles)
-    .where(
-      and(
-        eq(schema.profileRuntimeFiles.profileId, profileId),
-        eq(schema.profileRuntimeFiles.userId, userId)
-      )
-    );
+    .where(eq(schema.profileRuntimeFiles.profileId, profileId));
 
   if ((countRows[0]?.count ?? 0) >= maxCount) {
     throw errors.badRequest(`Maximum ${maxCount} runtime files allowed per profile`);
@@ -623,7 +583,6 @@ async function assertProfileFileLimit(
 async function assertSkillEnvVarLimit(
   db: Db,
   skillId: string,
-  userId: string,
   maxCount: number,
   alreadyExists: boolean
 ): Promise<void> {
@@ -631,7 +590,7 @@ async function assertSkillEnvVarLimit(
   const countRows = await db
     .select({ count: count() })
     .from(schema.skillRuntimeEnvVars)
-    .where(and(eq(schema.skillRuntimeEnvVars.skillId, skillId), eq(schema.skillRuntimeEnvVars.userId, userId)));
+    .where(eq(schema.skillRuntimeEnvVars.skillId, skillId));
   if ((countRows[0]?.count ?? 0) >= maxCount) {
     throw errors.badRequest(`Maximum ${maxCount} runtime env vars allowed per skill`);
   }
@@ -640,7 +599,6 @@ async function assertSkillEnvVarLimit(
 async function assertSkillFileLimit(
   db: Db,
   skillId: string,
-  userId: string,
   maxCount: number,
   alreadyExists: boolean
 ): Promise<void> {
@@ -648,7 +606,7 @@ async function assertSkillFileLimit(
   const countRows = await db
     .select({ count: count() })
     .from(schema.skillRuntimeFiles)
-    .where(and(eq(schema.skillRuntimeFiles.skillId, skillId), eq(schema.skillRuntimeFiles.userId, userId)));
+    .where(eq(schema.skillRuntimeFiles.skillId, skillId));
   if ((countRows[0]?.count ?? 0) >= maxCount) {
     throw errors.badRequest(`Maximum ${maxCount} runtime files allowed per skill`);
   }

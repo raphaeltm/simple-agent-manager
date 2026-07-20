@@ -1,161 +1,101 @@
 ---
 title: Core Concepts
-description: Key concepts in SAM — workspaces, nodes, providers, projects, ideas, and agent sessions.
+description: Key concepts in SAM — projects, agents, profiles, skills, triggers, workspaces, and ideas.
 ---
 
 import { Aside } from '@astrojs/starlight/components';
 
 ## Workspaces
 
-A **workspace** is an AI coding environment: a Docker container running inside a VM, with your repository cloned and a devcontainer configured.
+A **workspace** is the environment an AI coding agent runs in: your repository, cloned and ready, with a full Linux toolchain and Docker. In everyday use SAM provisions a workspace for you automatically when you start working in a project chat — you don't create one by hand.
 
 Each workspace has:
 
-- A unique subdomain (`ws-{id}.example.com`)
-- A browser-based terminal (xterm.js over WebSocket)
-- An agent chat interface (via ACP — Agent Communication Protocol)
-- Automatic port detection and exposure for dev servers
+- A browser-based terminal for hands-on work
+- One or more agent chat sessions
+- Automatic port detection and exposure for dev servers (see below)
 - Its own lifecycle: `pending` → `creating` → `running` → `stopping` → `stopped`
 
-Workspaces are **ephemeral** — they're meant to be created for a coding session and deleted when done.
+Workspaces are **ephemeral** — they exist for a session of work and are cleaned up when done, so always push anything you want to keep.
 
 ### Workspace Profiles
 
-SAM supports two workspace profiles:
+When you start a chat you can choose a workspace profile:
 
-| Profile            | Startup Time          | Description                                                            |
-| ------------------ | --------------------- | ---------------------------------------------------------------------- |
-| **Full** (default) | 2-3 minutes           | Standard devcontainer build from your project's `.devcontainer` config |
-| **Lightweight**    | 30-120 seconds faster | Skips devcontainer build, uses a minimal base image                    |
-
-Lightweight workspaces are ideal for quick conversations that don't need custom build steps. You can select the profile when starting an idea or creating a workspace.
+| Profile            | Best for                                                                 |
+| ------------------ | ------------------------------------------------------------------------ |
+| **Full** (default) | Work where the agent needs to run your stack — builds your `.devcontainer` |
+| **Lightweight**    | Quick questions and code exploration — starts faster                     |
 
 ### Port Exposure
 
-When a service starts listening on a port inside a workspace container, SAM automatically detects it and makes it accessible via a unique URL:
+When a service starts listening on a port inside a workspace, SAM automatically detects it and makes it accessible via a unique URL:
 
 ```
 https://ws-{workspaceId}--{port}.{baseDomain}
 ```
 
-For example, if your dev server starts on port 3000 in workspace `abc123`:
-
-```
-https://ws-abc123--3000.example.com
-```
-
-The port scanner polls `/proc/net/tcp` inside the container every 5 seconds and recognizes common development ports (3000, 5173, 8080, etc.) with friendly labels.
+For example, if your dev server starts on port 3000 in workspace `abc123`, you can open it at `https://ws-abc123--3000.example.com`. Common development ports get friendly labels automatically.
 
 ## Nodes
 
-A **node** is a cloud VM that hosts one or more workspaces. When you create a workspace, SAM either assigns it to an existing healthy node or provisions a new one.
+A **node** is a cloud VM that hosts one or more workspaces. You normally never think about nodes — SAM assigns your workspace to a healthy node or provisions a new one for you.
 
-Nodes have their own lifecycle:
+### Warm Reuse
 
-- `pending` → `creating` → `running` → `stopping` → `stopped`
-- Health is tracked via heartbeats from the VM Agent
-
-### Warm Node Pooling
-
-After an idea finishes executing, the node doesn't shut down immediately. Instead, it enters a **warm** state for 30 minutes (configurable via `NODE_WARM_TIMEOUT_MS`). If a new idea is executed during this window, SAM reuses the warm node instead of provisioning a new one — reducing startup time from minutes to seconds.
-
-SAM uses a three-layer defense against orphaned warm nodes:
-
-1. **Durable Object alarm** — schedules cleanup when the warm timeout expires
-2. **Cron sweep** — catches nodes that miss their alarm (runs every 5 minutes)
-3. **Max lifetime** — absolute limit of 4 hours (configurable via `MAX_AUTO_NODE_LIFETIME_MS`) for auto-provisioned nodes
-
-<Aside type="tip">
-  Warm node pooling only applies to nodes that were auto-provisioned for idea execution. Manually
-  created nodes are not affected.
-</Aside>
+After a piece of work finishes, SAM keeps the environment **warm** for a short window (30 minutes by default). If you start follow-up work during that window, SAM reuses the warm environment instead of provisioning a fresh one — cutting startup from minutes to seconds. Idle environments are cleaned up automatically afterward.
 
 ## Providers
 
-A **provider** is a cloud infrastructure abstraction. SAM currently supports three providers:
+A **provider** is the cloud your compute runs on. For running workspaces, SAM supports **Hetzner**, **Scaleway**, and **Google Cloud**. SAM follows a **Bring Your Own Cloud (BYOC)** model: you add your own provider credential in **Settings → Cloud Provider** (or **Connections**), and VM costs are billed directly to your account. On the hosted platform, compute can be provided for you, so you may not need your own credential. Cloud credentials are never stored as environment variables.
 
-### Hetzner Cloud
-
-| Size   | Server Type | Specs                        | Monthly Cost |
-| ------ | ----------- | ---------------------------- | ------------ |
-| Small  | CX23        | 2 vCPU, 4GB RAM, 40GB disk   | ~$4/mo       |
-| Medium | CX33        | 4 vCPU, 8GB RAM, 80GB disk   | ~$7.50/mo    |
-| Large  | CX43        | 8 vCPU, 16GB RAM, 160GB disk | ~$14.50/mo   |
-
-**Locations**: Falkenstein (DE), Nuremberg (DE), Helsinki (FI), Ashburn (US), Hillsboro (US)
-
-### Scaleway
-
-| Size   | Server Type | Specs                        | Hourly Cost |
-| ------ | ----------- | ---------------------------- | ----------- |
-| Small  | DEV1-M      | 3 vCPU, 4GB RAM, 40GB disk   | ~$0.024/hr  |
-| Medium | DEV1-XL     | 4 vCPU, 12GB RAM, 120GB disk | ~$0.048/hr  |
-| Large  | GP1-S       | 8 vCPU, 32GB RAM, 600GB disk | ~$0.084/hr  |
-
-**Locations**: Paris (3 zones), Amsterdam (3 zones), Warsaw (2 zones)
-
-### Google Cloud Platform (GCP)
-
-| Size   | Machine Type  | Specs                       | Monthly Cost |
-| ------ | ------------- | --------------------------- | ------------ |
-| Small  | e2-medium     | 1 vCPU, 4GB RAM, 50GB disk  | ~$25/mo      |
-| Medium | e2-standard-2 | 2 vCPU, 8GB RAM, 50GB disk  | ~$49/mo      |
-| Large  | e2-standard-4 | 4 vCPU, 16GB RAM, 50GB disk | ~$97/mo      |
-
-**Locations**: Iowa (US), South Carolina (US), Oregon (US), Belgium (EU), Frankfurt (DE), London (GB), Singapore, Tokyo (JP)
-
-### Provider Selection
-
-SAM follows a **Bring Your Own Cloud (BYOC)** model: you provide your own cloud provider credentials through the Settings UI. The platform never stores cloud credentials as environment variables. When SAM uses your own cloud credential, VM costs are billed directly to your account.
-
-You can set a **default provider** per project. When executing an idea, the provider is selected in this order:
-
-1. Explicit override on submission
-2. Project default provider
-3. First available user or platform credential
+You can set a **default provider** and **default VM size** per project. The exact machine types, regions, and pricing are shown in the size picker when you start work.
 
 ## Projects
 
-A **project** links a GitHub repository to its workspaces, chat sessions, ideas, and activity. Projects are the primary organizational unit in SAM.
+A **project** links a GitHub repository to its chats, agents, ideas, and activity. It's the primary organizational unit in SAM, and the **project chat is the primary way you interact with SAM**.
 
 Each project has:
 
-- A **chat-first interface** — the project page is a conversation view
-- An **Ideas board** — for tracking and organizing work
+- A **chat** — the main surface where you describe work and watch agents run it
+- **Agent profiles** and **skills** — reusable configurations you pick from per chat (see below)
+- An **Ideas board** — for capturing and organizing work you haven't started yet
 - A **default VM size** and **default provider** for new workspaces
-- A **default agent type** for idea execution
-- **Runtime configuration** — environment variables and files injected into workspaces
+- **Runtime configuration** — environment variables and files made available to workspaces
 
-<Aside type="note">
-  Every ACP (agent) session must belong to a project. Workspaces without a project can only use PTY
-  terminal sessions, not agent chat.
-</Aside>
+## Agent Profiles
+
+An **agent profile** is a saved, reusable configuration for running an agent: which agent, which model, VM size, system prompt, and other settings. Instead of configuring everything each time, you create profiles once and pick one when you start a chat (or attach one to a trigger). Profiles are the intended way to choose an agent — you're not limited to a single project-wide default.
+
+## Skills
+
+A **skill** is a reusable layer of instructions, environment, and files you can apply on top of a profile for a particular kind of work. Skills override profile settings when selected, following the resolution order **skill → profile → project → platform**. Pick a skill per chat the same way you pick a profile.
+
+## Triggers
+
+A **trigger** starts agent work automatically, without you opening a chat. A trigger runs from one of three sources:
+
+- **Schedule** (cron) — run on a recurring basis
+- **GitHub event** — react to activity on the linked repository
+- **Webhook** — start work when an authenticated external request arrives (see [Webhook Triggers](/docs/guides/webhook-triggers/))
+
+Each trigger runs with a specific agent profile (and optional skill), so triggered work behaves like a chat you started yourself.
 
 ## Ideas
 
-An **idea** is how you describe work you want an AI agent to do. Ideas are the primary way to interact with SAM — you write what you want, and SAM handles provisioning, execution, and cleanup.
+An **idea** captures a piece of work you want an AI agent to do. Most work starts directly from the project chat — submitting a message both creates and executes the work in one step. The **Ideas board** is where you keep ideas you've drafted but haven't started yet; once an idea is executing or done, you'll follow it in the chat session list.
 
-Ideas progress through these stages:
-
-| Stage         | Description                                    |
-| ------------- | ---------------------------------------------- |
-| **Exploring** | You're brainstorming — the idea is a draft     |
-| **Ready**     | The idea is defined and ready to execute       |
-| **Executing** | An agent is actively working on it             |
-| **Done**      | The agent finished and created a PR            |
-| **Parked**    | The idea was cancelled or the execution failed |
+You can also execute a saved idea from its detail page with the **Execute** button.
 
 ### How Execution Works
 
-When you execute an idea from the chat interface:
+When you submit work from the chat:
 
-1. SAM generates a concise title from your message (via Workers AI)
+1. SAM generates a concise title from your message
 2. A descriptive branch name is created (`sam/...`)
-3. The runner selects or provisions a node (reusing warm nodes when available)
-4. A workspace is created with your repository cloned
-5. The selected agent runs autonomously with your description
-6. When done, the agent commits, pushes, and creates a PR
-7. The workspace enters a warm pool for potential reuse
+3. SAM selects or provisions a workspace (reusing a warm one when available)
+4. Your chosen agent runs autonomously with your description
+5. When done, the agent commits, pushes, and opens a pull request
 
 ### Linking Ideas to Conversations
 
@@ -177,10 +117,12 @@ SAM supports six AI coding agents:
 | ----------------- | -------------------------- | ------------------- |
 | **Claude Code**   | Anthropic                  | `ANTHROPIC_API_KEY` |
 | **OpenAI Codex**  | OpenAI                     | `OPENAI_API_KEY`    |
-| **Google Gemini** | Google                     | `GEMINI_API_KEY`    |
+| **Gemini CLI**    | Google                     | `GEMINI_API_KEY`    |
 | **Mistral Vibe**  | Mistral                    | `MISTRAL_API_KEY`   |
 | **OpenCode**      | OpenCode managed inference | `OPENCODE_API_KEY`  |
 | **Amp**           | Sourcegraph                | `AMP_API_KEY`       |
+
+You choose which agent to run by selecting an **agent profile** in the chat. See the [AI Agents guide](/docs/guides/agents/) for how to connect credentials and configure profiles.
 
 Sessions support:
 
@@ -200,11 +142,11 @@ SAM includes an in-app notification system with real-time delivery via WebSocket
 
 | Type            | Urgency | Trigger                                  |
 | --------------- | ------- | ---------------------------------------- |
-| `task_complete` | Medium  | An idea finishes executing successfully  |
+| `task_complete` | Medium  | A task finishes executing successfully   |
 | `needs_input`   | High    | Agent is blocked and needs your decision |
 | `error`         | High    | Execution fails                          |
 | `progress`      | Low     | Agent reports incremental progress       |
-| `session_ended` | Medium  | Agent conversation turn completes        |
+| `session_ended` | Medium  | A conversation-mode session turn completes |
 | `pr_created`    | Medium  | Agent creates a pull request             |
 
 See the [Notifications guide](/docs/guides/notifications/) for full details.

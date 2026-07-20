@@ -5,18 +5,29 @@ description: How SAM handles authentication, encryption, and credential manageme
 
 SAM's security model separates **platform secrets** (managed by operators) from **user credentials** (encrypted per-user in the database).
 
+## Cloud Credential Model (BYOC + Platform Fallback)
+
+SAM supports **Bring-Your-Own-Cloud (BYOC)**: users and self-hosters may store their own Hetzner, Scaleway, or GCP credentials, encrypted per-user in D1. This is the model for self-hosted deployments and BYO-key users.
+
+However, SAM's own hosted deployment also has an **enabled platform-level cloud credential** (`platform_credentials`, `provider=hetzner`, `credential_type=cloud-provider`). Provider resolution falls back **user credential → platform credential**, so on the hosted (zero-config) platform a user does **not** need their own cloud credential for SAM to provision workspaces or deployment nodes. Self-hosted deployments without a platform credential rely on user-supplied BYOC tokens.
+
 ## Credential Types
 
 ### Platform Secrets
 
 These are Cloudflare Worker secrets set during deployment:
 
-| Secret                    | Purpose                                                                                  |
-| ------------------------- | ---------------------------------------------------------------------------------------- |
-| `ENCRYPTION_KEY`          | AES-256-GCM key for encrypting user credentials                                          |
-| `JWT_PRIVATE_KEY`         | RSA-2048 key for signing workspace and callback tokens                                   |
-| `JWT_PUBLIC_KEY`          | RSA-2048 key for token verification (exposed via JWKS)                                   |
-| `CF_API_TOKEN`            | Cloudflare deploy, DNS, Origin CA certificate issuance, observability, and AI Gateway operations (requires Account → SSL and Certificates → Edit)  |
+| Secret                       | Purpose                                                                                                                                           |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ENCRYPTION_KEY`             | AES-256-GCM master key for BetterAuth sessions and user credential encryption                                                                     |
+| `BETTER_AUTH_SECRET`         | Optional override for BetterAuth session cookies (falls back to `ENCRYPTION_KEY`)                                                                 |
+| `CREDENTIAL_ENCRYPTION_KEY`  | Optional override for user credential encryption (falls back to `ENCRYPTION_KEY`)                                                                 |
+| `JWT_PRIVATE_KEY`            | RSA-2048 key for signing workspace and callback tokens                                                                                            |
+| `JWT_PUBLIC_KEY`             | RSA-2048 key for token verification (exposed via JWKS)                                                                                            |
+| `DEPLOY_SIGNING_PRIVATE_KEY` | Ed25519 key for signing deployment apply payloads (auto-generated)                                                                                |
+| `DEPLOY_SIGNING_PUBLIC_KEY`  | Ed25519 key for deployment-node payload verification (auto-generated)                                                                             |
+| `TRIAL_CLAIM_TOKEN_SECRET`   | HMAC secret for trial onboarding claim tokens (auto-generated)                                                                                    |
+| `CF_API_TOKEN`               | Cloudflare deploy, DNS, Origin CA certificate issuance, observability, and AI Gateway operations (requires Account → SSL and Certificates → Edit) |
 
 Security keys are automatically generated and persisted by Pulumi on first deployment. Cloudflare secrets remain Worker secrets because they are deployment trust roots. GitHub App/OAuth, GitHub webhook, Google OAuth, and GitLab OAuth credentials can be supplied either as optional environment fallbacks or through the first-run/superadmin platform config UI; runtime values are stored encrypted in D1 and override environment fallbacks. They never appear in source control.
 
@@ -24,26 +35,27 @@ Security keys are automatically generated and persisted by Pulumi on first deplo
 
 Admin-managed integration secrets stored encrypted in D1:
 
-| Credential                | Purpose                                  | Resolution order                 |
-| ------------------------- | ---------------------------------------- | -------------------------------- |
-| GitHub OAuth client secret | GitHub sign-in and OAuth refresh         | Runtime D1 → Worker env → unset  |
-| GitHub App private key     | Installation tokens for repository access | Runtime D1 → Worker env → unset  |
-| GitHub webhook secret      | GitHub App webhook HMAC verification     | Runtime D1 → Worker env → unset  |
-| Google login OAuth client secret | Google sign-in (BetterAuth social login) | Runtime D1 → Worker env (`GOOGLE_LOGIN_CLIENT_SECRET`) → unset |
-| GitLab OAuth client secret | GitLab sign-in and repository access | Runtime D1 → Worker env (`GITLAB_CLIENT_SECRET`) → unset |
-| Google infra OAuth client secret | GCP deployment authorization flows (separate client from login) | Worker env (`GOOGLE_CLIENT_SECRET`) → unset |
+| Credential                       | Purpose                                                    | Resolution order                                               |
+| -------------------------------- | ---------------------------------------------------------- | -------------------------------------------------------------- |
+| GitHub OAuth client secret       | GitHub sign-in and OAuth refresh                           | Runtime D1 → Worker env → unset                                |
+| GitHub App private key           | Installation tokens for repository access                  | Runtime D1 → Worker env → unset                                |
+| GitHub webhook secret            | GitHub App webhook HMAC verification                       | Runtime D1 → Worker env → unset                                |
+| Google login OAuth client secret | Google sign-in (BetterAuth social login)                   | Runtime D1 → Worker env (`GOOGLE_LOGIN_CLIENT_SECRET`) → unset |
+| GitLab OAuth client secret       | GitLab sign-in and repository access                       | Runtime D1 → Worker env (`GITLAB_CLIENT_SECRET`) → unset       |
+| Google infra OAuth client secret | Keyless GCP/WIF authorization (separate client from login) | Runtime D1 → Worker env (`GOOGLE_CLIENT_SECRET`) → unset       |
 
 ### User Credentials
 
 User-provided secrets stored encrypted in D1:
 
-| Credential         | Purpose                      | Encryption                     |
-| ------------------ | ---------------------------- | ------------------------------ |
-| Hetzner API token  | VM provisioning              | AES-256-GCM, per-credential IV |
-| Agent API keys     | Claude/OpenAI API access     | AES-256-GCM, per-credential IV |
-| Agent OAuth tokens | Claude Pro/Max subscriptions | AES-256-GCM, per-credential IV |
+| Credential                      | Purpose                                                                     | Encryption                     |
+| ------------------------------- | --------------------------------------------------------------------------- | ------------------------------ |
+| Cloud provider credentials      | VM provisioning (Hetzner, Scaleway, GCP WIF or service-account JSON)        | AES-256-GCM, per-credential IV |
+| Agent API keys                  | Claude, OpenAI, Gemini, and other agent access                              | AES-256-GCM, per-credential IV |
+| Agent OAuth tokens              | Claude Pro/Max, Codex subscriptions                                         | AES-256-GCM, per-credential IV |
+| Composable credentials (`cc_*`) | Reusable credential + configuration attachments layered per project/profile | AES-256-GCM, per-credential IV |
 
-User credentials are **never** stored as environment variables or Worker secrets.
+Cloud provider credentials are stored with a `credentialType` of `cloud-provider`. GCP can use recommended keyless WIF or an OAuth-free service-account JSON key for VM provisioning. User credentials are **never** stored as environment variables or Worker secrets.
 
 ## Authentication Flow
 
@@ -77,6 +89,14 @@ Decrypt: { ciphertext, iv } + ENCRYPTION_KEY → plaintext   (on-demand)
 
 Each credential gets a random initialization vector (IV), ensuring identical plaintext values produce different ciphertext.
 
+### GCP credential handling
+
+GCP WIF configuration and uploaded service-account JSON use the same versioned credential boundary. Existing unversioned WIF records are normalized when read. Service-account JSON is validated as a Google `service_account` key with an importable PKCS#8 RSA private key; uploaded `token_uri` and other endpoint fields are ignored.
+
+The complete source credential is encrypted at rest with AES-256-GCM. SAM signs short-lived RS256 assertions and exchanges them only at the fixed Google OAuth token endpoint. Derived Google access tokens are cached in KV only until their returned expiry minus a safety buffer; they are never persisted as primary credentials. Cache identity includes the authentication mode and WIF or private-key identity, so switching modes or rotating a key cannot reuse a prior token.
+
+Save and rotation verify the selected Compute zone before a D1 transaction replaces both legacy and composable credential copies. A failed verification or transaction leaves the previous credential intact. Disconnect removes SAM's encrypted copies and cached derivatives but does not revoke a Google-managed service-account key.
+
 ## Terminal Authentication
 
 Terminal WebSocket connections use short-lived JWTs:
@@ -89,12 +109,12 @@ Terminal WebSocket connections use short-lived JWTs:
 
 ## Bootstrap Security
 
-When a new VM starts, it needs credentials (callback URL, node ID) but **no secrets are embedded in cloud-init**:
+When a new VM starts, cloud-init receives only the short-lived bootstrap/callback material needed to contact the control plane; long-lived provider and repository credentials are fetched through the bootstrap exchange:
 
-1. API creates a one-time bootstrap token (cryptographically random, 5-minute expiry)
-2. Cloud-init script includes only the token and API URL
+1. API creates a one-time bootstrap token (cryptographically random, 15-minute default expiry)
+2. Cloud-init starts the VM Agent with control-plane metadata and stores callback JWT material in a root-only file rather than the systemd environment
 3. VM Agent redeems the token: `POST /api/bootstrap/{token}`
-4. API returns the full configuration (callback URL, node ID, etc.)
+4. API returns the full configuration and encrypted credential payloads needed for the node
 5. Token is invalidated after use
 
 ## VM TLS Certificates
@@ -118,8 +138,8 @@ Deployments created before the per-node CSR model may have running nodes that st
 - **Minimal GitHub App permissions** — only Contents (read/write), Metadata (read-only), and Email addresses (read-only)
 - **HTTPS everywhere** — all traffic encrypted via Cloudflare
 - **Session isolation** — each workspace JWT is scoped to a specific workspace ID
-- **No shared cloud credentials** — BYOC model means the platform has no Hetzner access
+- **Per-user credential isolation** — each user's cloud/agent secrets are encrypted with a per-credential IV and are never shared between users
 
 :::caution
-Rotating the `ENCRYPTION_KEY` will make existing encrypted credentials unreadable. Users will need to re-enter their Hetzner tokens and API keys after key rotation.
+Rotating the credential-encryption key will make existing encrypted credentials unreadable. Users will need to reconnect cloud credentials—including any GCP service-account JSON—and re-enter agent API keys after key rotation.
 :::

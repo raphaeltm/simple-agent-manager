@@ -71,6 +71,68 @@ describe('ToolCallCard', () => {
 
     expect(screen.getByText('/workspaces/hono')).toBeTruthy();
   });
+  it('renders Codex 1.1.2 command rawOutput when live content is empty', () => {
+    const toolCall = createToolCall({
+      content: [],
+      rawOutput: { formatted_output: 'SAM_LIVE_COMMAND_OUTPUT_112', exit_code: 0 },
+    });
+    render(<ToolCallCard toolCall={toolCall} />);
+    const header = screen.getByRole('button', { name: /terminal execute/i });
+    expect(header.className).toContain('cursor-pointer');
+    fireEvent.click(header);
+    expect(screen.getByText('SAM_LIVE_COMMAND_OUTPUT_112')).toBeTruthy();
+  });
+
+  it('renders Codex 1.1.2 MCP result and error rawOutput live', () => {
+    const { rerender } = render(<ToolCallCard toolCall={createToolCall({
+      content: [],
+      rawOutput: { result: [{ type: 'text', text: 'SAM_LIVE_MCP_OUTPUT_112' }] },
+    })} />);
+    fireEvent.click(screen.getByRole('button', { name: /terminal execute/i }));
+    expect(screen.getByText('SAM_LIVE_MCP_OUTPUT_112')).toBeTruthy();
+    rerender(<ToolCallCard toolCall={createToolCall({
+      id: 'item-2',
+      toolCallId: 'tool-2',
+      content: [],
+      rawOutput: { error: { message: 'SAM_LIVE_MCP_ERROR_112' } },
+    })} />);
+    expect(screen.getByText('Error: SAM_LIVE_MCP_ERROR_112')).toBeTruthy();
+  });
+
+  it('renders useful MCP object fields while redacting sensitive values', () => {
+    const toolCall = createToolCall({
+      content: [],
+      rawOutput: {
+        result: {
+          count: 3,
+          items: [{ name: 'alpha' }],
+          token: 'bearer-secret',
+          command: 'cat /private/file',
+        },
+      },
+    });
+    render(<ToolCallCard toolCall={toolCall} />);
+    fireEvent.click(screen.getByRole('button', { name: /terminal execute/i }));
+    expect(screen.getByText(/count: 3/)).toBeTruthy();
+    expect(screen.getByText(/name: alpha/)).toBeTruthy();
+    expect(screen.getByText(/\[redacted\]/)).toBeTruthy();
+    expect(screen.queryByText(/bearer-secret|cat \/private\/file/)).toBeNull();
+  });
+
+  it('does not render arbitrary rawOutput or rawInput', () => {
+    const toolCall = createToolCall({
+      content: [],
+      rawInput: { command: 'secret command', token: 'secret token' },
+      rawOutput: { credential: 'secret credential' },
+    });
+    render(<ToolCallCard toolCall={toolCall} />);
+    const header = screen.getByRole('button', { name: /terminal execute/i });
+    expect(header.className).toContain('cursor-default');
+    fireEvent.click(header);
+    expect(screen.queryByText(/secret/)).toBeNull();
+  });
+
+
 
   it('lazy-loads empty tool content and keeps the card expandable', async () => {
     const onLoadContent = vi.fn().mockResolvedValue([]);

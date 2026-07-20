@@ -110,6 +110,21 @@ describe('sync wrangler config', () => {
     });
   });
 
+  it('passes cf-container clone/create tunables through from process env when set', () => {
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+
+    const unset = generateApiWorkerEnv({}, outputs, 'prod', false, false).vars;
+    expect(unset).not.toHaveProperty('CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS');
+    expect(unset).not.toHaveProperty('CF_CONTAINER_CLONE_FILTER');
+
+    vi.stubEnv('CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS', '180000');
+    vi.stubEnv('CF_CONTAINER_CLONE_FILTER', 'off');
+    expect(generateApiWorkerEnv({}, outputs, 'prod', false, false).vars).toMatchObject({
+      CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS: '180000',
+      CF_CONTAINER_CLONE_FILTER: 'off',
+    });
+  });
+
   it('omits Artifacts binding and disables runtime flag when Artifacts is not enabled', () => {
     vi.stubEnv('RESOURCE_PREFIX', 's123abc');
 

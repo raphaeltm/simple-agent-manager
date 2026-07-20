@@ -18,6 +18,7 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { requireRouteParam } from '../lib/route-helpers';
 import { expectJsonRecord } from '../lib/runtime-validation';
+import { ulid } from '../lib/ulid';
 import { getAuth, getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireProjectAccess, requireProjectCapability } from '../middleware/project-auth';
@@ -28,6 +29,7 @@ import { persistError } from '../services/observability';
 import * as projectDataService from '../services/project-data';
 import { isTaskStatus } from '../services/task-status';
 import { resolveChatAgentState } from './chat-agent-state';
+import { chatForkRoutes } from './chat-fork';
 import { getChatSessionRouteContext } from './chat-route-context';
 import { enrichSessionsWithCreators, getSessionListScope, requireSessionCreator } from './chat-session-ownership';
 import { chatStateRoutes } from './chat-state';
@@ -241,9 +243,21 @@ chatRoutes.post('/', async (c) => {
   const workspaceId = body.workspaceId?.trim() || null;
   const topic = body.topic?.trim() || null;
 
-  const sessionId = await chatPersistence.createChatSession(c.env, projectId, workspaceId, topic, userId);
+  const taskId = ulid();
+  const now = new Date().toISOString();
+  await db.insert(schema.tasks).values({
+    id: taskId, projectId, userId, title: topic || "Conversation",
+    status: "queued", executionStep: "session_persistence", taskMode: "conversation",
+    triggeredBy: "user", credentialAttributionUserId: userId,
+    credentialAttributionSource: "user", createdBy: userId, createdAt: now, updatedAt: now,
+  });
+  const sessionId = await chatPersistence.createChatSession(
+    c.env, projectId, workspaceId, topic, taskId, userId
+  );
+  await db.update(schema.tasks).set({ chatSessionId: sessionId, workspaceId, updatedAt: now })
+    .where(eq(schema.tasks.id, taskId));
 
-  return c.json({ id: sessionId }, 201);
+  return c.json({ id: sessionId, sessionId, taskId }, 201);
 });
 
 /**
@@ -274,6 +288,7 @@ chatRoutes.get('/ws', async (c) => {
  * Read the lightweight ACP activity snapshot for a chat session.
  */
 chatRoutes.route('/', chatStateRoutes);
+chatRoutes.route('/', chatForkRoutes);
 
 /**
  * GET /api/projects/:projectId/sessions/:sessionId

@@ -61,6 +61,7 @@ vi.mock('../../../src/middleware/error', () => {
 const mockGet = vi.fn();
 const mockAll = vi.fn();
 const mockUpdate = vi.fn();
+const mockGetTaskReconciliationDiagnostics = vi.fn();
 
 vi.mock('drizzle-orm/d1', () => ({
   drizzle: () => ({
@@ -101,6 +102,11 @@ vi.mock('../../../src/services/limits', () => ({
     maxNodesPerUser: 5,
     maxProjectsPerUser: 10,
   }),
+}));
+
+vi.mock('../../../src/scheduled/stuck-tasks', () => ({
+  getTaskReconciliationDiagnostics: (...args: unknown[]) =>
+    mockGetTaskReconciliationDiagnostics(...args),
 }));
 
 // --- Schemas mock ---
@@ -237,6 +243,43 @@ describe('Admin security hardening (route-level)', () => {
       expect(body.missingBindings).toContain('NOTIFICATION');
       expect(body.bindings.ADMIN_LOGS).toBe(false);
       expect(body.bindings.NOTIFICATION).toBe(false);
+    });
+  });
+
+  describe('GET /api/admin/tasks/:taskId/reconciliation-diagnostics', () => {
+    it('returns the read-only reconciliation evidence for the requested task', async () => {
+      const env = createEnv();
+      const diagnostics = {
+        taskId: 'task-1',
+        eligible: true,
+        decision: 'reconcile_dead_runtime',
+        liveness: { live: false, conclusive: true, reason: 'workspace_deleted' },
+        taskRunner: { outcome: 'missing', status: null },
+      };
+      mockGetTaskReconciliationDiagnostics.mockResolvedValueOnce(diagnostics);
+
+      const res = await app.request(
+        '/api/admin/tasks/task-1/reconciliation-diagnostics',
+        {},
+        env,
+      );
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ diagnostics });
+      expect(mockGetTaskReconciliationDiagnostics).toHaveBeenCalledWith(env, 'task-1');
+    });
+
+    it('returns 404 when the task does not exist', async () => {
+      mockGetTaskReconciliationDiagnostics.mockResolvedValueOnce(null);
+
+      const res = await app.request(
+        '/api/admin/tasks/missing/reconciliation-diagnostics',
+        {},
+        createEnv(),
+      );
+
+      expect(res.status).toBe(404);
+      expect(await res.json()).toMatchObject({ error: 'NOT_FOUND' });
     });
   });
 });

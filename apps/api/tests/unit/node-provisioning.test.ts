@@ -429,6 +429,10 @@ describe('provider-aware node provisioning', () => {
     resolve(process.cwd(), 'src/services/nodes.ts'),
     'utf8'
   );
+  const strictNodeDeletionSource = readFileSync(
+    resolve(process.cwd(), 'src/services/strict-node-deletion.ts'),
+    'utf8'
+  );
 
   it('CreateNodeInput includes optional cloudProvider field', () => {
     expect(nodesSource).toContain('cloudProvider?: string');
@@ -525,19 +529,21 @@ describe('provider-aware node provisioning', () => {
   });
 
   it('deleteNodeResourcesStrict verifies legacy unknown-provider nodes before deleting', () => {
-    const strictSection = nodesSource.slice(
-      nodesSource.indexOf('async function deleteNodeResourcesStrict')
+    const strictSection = strictNodeDeletionSource.slice(
+      strictNodeDeletionSource.indexOf('async function deleteNodeResourcesStrict')
     );
-    const verificationSection = nodesSource.slice(
-      nodesSource.indexOf('async function ensureStrictNodeBelongsToProvider'),
-      nodesSource.indexOf('async function deleteStrictProviderInstance')
+    const verificationSection = strictNodeDeletionSource.slice(
+      strictNodeDeletionSource.indexOf('async function resolveStrictNodeProvider'),
+      strictNodeDeletionSource.indexOf('async function deleteStrictProviderInstance')
     );
-    const deletionSection = nodesSource.slice(
-      nodesSource.indexOf('async function deleteStrictProviderInstance'),
-      nodesSource.indexOf('async function persistStrictDnsCleanupError')
+    const deletionSection = strictNodeDeletionSource.slice(
+      strictNodeDeletionSource.indexOf('async function deleteStrictProviderInstance'),
+      strictNodeDeletionSource.indexOf('async function persistStrictDnsCleanupError')
     );
     expect(strictSection).toContain('await deleteStrictProviderInstance(db, node, userId, env)');
-    expect(verificationSection).toContain('providerResult.provider.getVM(node.providerInstanceId)');
+    expect(verificationSection).toContain('for (const providerName of CREDENTIAL_PROVIDERS)');
+    expect(verificationSection).toContain('candidate.provider.getVM(providerInstanceId)');
+    expect(verificationSection).toContain('presentCandidates.length > 1');
     expect(verificationSection).toContain('throw new Error');
     expect(deletionSection).toContain('await providerResult.provider.deleteVM(node.providerInstanceId)');
   });

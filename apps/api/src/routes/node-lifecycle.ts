@@ -21,6 +21,7 @@ import {
   buildObservedDeploymentUpdate,
   reconcileDeploymentReleaseStatuses,
 } from '../services/deployment-control';
+import { reconcileCustomDomainRoutingObservation } from '../services/deployment-custom-domains';
 import { createNodeBackendDNSRecord, updateDNSRecord } from '../services/dns';
 import {
   shouldRefreshCallbackToken,
@@ -60,6 +61,46 @@ function isValidIPv4Address(value: string | null | undefined): value is string {
     const numeric = Number(octet);
     return numeric >= 0 && numeric <= 255;
   });
+}
+
+async function deploymentVolumesReadyForNode(params: {
+  database: Env['DATABASE'];
+  environmentId: string;
+  eventName: string;
+  nodeId: string;
+  providerInstanceId: string | null | undefined;
+  requiresVolumes: boolean;
+}): Promise<boolean> {
+  if (!params.requiresVolumes) {
+    return true;
+  }
+
+  const volumeReadiness = await params.database
+    .prepare(
+      `SELECT
+         COUNT(*) AS total,
+         COUNT(CASE WHEN attached_server_id = ? THEN 1 END) AS attached
+       FROM deployment_volumes
+       WHERE environment_id = ?`
+    )
+    .bind(params.providerInstanceId ?? '', params.environmentId)
+    .first<{ total: number; attached: number }>();
+
+  if (
+    !volumeReadiness ||
+    volumeReadiness.total === 0 ||
+    volumeReadiness.attached < volumeReadiness.total
+  ) {
+    log.info(params.eventName, {
+      nodeId: params.nodeId,
+      environmentId: params.environmentId,
+      total: volumeReadiness?.total ?? 0,
+      attached: volumeReadiness?.attached ?? 0,
+    });
+    return false;
+  }
+
+  return true;
 }
 
 /**
@@ -385,6 +426,9 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
           envId: schema.deploymentEnvironments.id,
           status: schema.deploymentEnvironments.status,
           requiresVolumes: schema.deploymentEnvironments.requiresVolumes,
+          observedAppliedSeq: schema.deploymentEnvironments.observedAppliedSeq,
+          desiredRoutingRevision: schema.deploymentEnvironments.desiredRoutingRevision,
+          observedRoutingRevision: schema.deploymentEnvironments.observedRoutingRevision,
         })
         .from(schema.deploymentEnvironments)
         .where(eq(schema.deploymentEnvironments.nodeId, nodeId));
@@ -414,12 +458,13 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
       const stateByEnv = new Map(bodyStates.map((state) => [state.environmentId, state]));
 
       const pendingReleases: Array<{ environmentId: string; seq: number }> = [];
+      const pendingRouteConfigs: Array<{ environmentId: string; revision: number }> = [];
 
       for (const envRow of activeEnvRows) {
         const envId = envRow.envId;
         const bodyState = stateByEnv.get(envId);
         const deploymentState = bodyState ?? null;
-        const appliedSeq = deploymentState?.appliedSeq ?? 0;
+        const appliedSeq = deploymentState?.appliedSeq ?? envRow.observedAppliedSeq ?? 0;
 
         if (deploymentState) {
           const observedUpdate = buildObservedDeploymentUpdate(deploymentState, now);
@@ -443,6 +488,15 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
             );
 
           await reconcileDeploymentReleaseStatuses(db, envId, deploymentState);
+          if (typeof deploymentState.routingRevision === 'number') {
+            await reconcileCustomDomainRoutingObservation(
+              db,
+              envId,
+              Math.floor(deploymentState.routingRevision),
+              deploymentState.routingStatus,
+              now
+            );
+          }
         }
 
         const latestRelease = await db
@@ -462,31 +516,45 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
           latest.version > appliedSeq &&
           (latest.status === 'created' || (latest.status === 'applying' && !nodeAlreadyApplying))
         ) {
-          if (envRow.requiresVolumes) {
-            const volumeReadiness = await c.env.DATABASE.prepare(
-              `SELECT
-                 COUNT(*) AS total,
-                 COUNT(CASE WHEN attached_server_id = ? THEN 1 END) AS attached
-               FROM deployment_volumes
-               WHERE environment_id = ?`
-            )
-              .bind(node.providerInstanceId ?? '', envId)
-              .first<{ total: number; attached: number }>();
-            if (
-              !volumeReadiness ||
-              volumeReadiness.total === 0 ||
-              volumeReadiness.attached < volumeReadiness.total
-            ) {
-              log.info('heartbeat.deploy_release_waiting_for_volume_attach', {
-                nodeId,
-                environmentId: envId,
-                total: volumeReadiness?.total ?? 0,
-                attached: volumeReadiness?.attached ?? 0,
-              });
-              continue;
-            }
+          if (
+            !(await deploymentVolumesReadyForNode({
+              database: c.env.DATABASE,
+              environmentId: envId,
+              eventName: 'heartbeat.deploy_release_waiting_for_volume_attach',
+              nodeId,
+              providerInstanceId: node.providerInstanceId,
+              requiresVolumes: envRow.requiresVolumes,
+            }))
+          ) {
+            continue;
           }
           pendingReleases.push({ environmentId: envId, seq: latest.version });
+        }
+
+        const reportedRoutingRevision =
+          typeof deploymentState?.routingRevision === 'number'
+            ? Math.floor(deploymentState.routingRevision)
+            : (envRow.observedRoutingRevision ?? 0);
+        const desiredRoutingRevision = envRow.desiredRoutingRevision ?? 0;
+        const hasCurrentAppliedRelease = !!latest && appliedSeq > 0 && latest.version <= appliedSeq;
+        if (
+          desiredRoutingRevision > reportedRoutingRevision &&
+          hasCurrentAppliedRelease &&
+          !nodeAlreadyApplying
+        ) {
+          if (
+            !(await deploymentVolumesReadyForNode({
+              database: c.env.DATABASE,
+              environmentId: envId,
+              eventName: 'heartbeat.deploy_routes_waiting_for_volume_attach',
+              nodeId,
+              providerInstanceId: node.providerInstanceId,
+              requiresVolumes: envRow.requiresVolumes,
+            }))
+          ) {
+            continue;
+          }
+          pendingRouteConfigs.push({ environmentId: envId, revision: desiredRoutingRevision });
         }
       }
 
@@ -498,6 +566,12 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
         if (pendingReleases.length === 1) {
           response.pendingReleaseSeq = pendingReleases[0]?.seq;
         }
+      }
+      if (pendingRouteConfigs.length > 0) {
+        response.deployment = {
+          ...(response.deployment as Record<string, unknown>),
+          pendingRouteConfigs,
+        };
       }
     } catch (err) {
       log.warn('heartbeat.deploy_release_lookup_failed', {

@@ -14,8 +14,10 @@
  * the event bus is wired in Track A / ACP status handlers (separate concern).
  */
 
+import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
+import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { getCredentialEncryptionKey } from '../../lib/secrets';
@@ -59,6 +61,7 @@ export interface StartDiscoveryAgentOptions {
 }
 
 export interface StartDiscoveryAgentResult {
+  taskId: string;
   chatSessionId: string;
   acpSessionId: string;
   agentType: string;
@@ -113,11 +116,11 @@ export async function startDiscoveryAgent(
   opts: StartDiscoveryAgentOptions
 ): Promise<StartDiscoveryAgentResult> {
   const config = resolveTrialRunnerConfig(env);
+  const db = drizzle(env.DATABASE, { schema });
 
   // Validate Anthropic mode: resolve the API key from platform credentials
   // (admin-managed via UI), matching the same path as the AI proxy.
   if (config.provider === 'anthropic') {
-    const db = drizzle(env.DATABASE);
     const encryptionKey = getCredentialEncryptionKey(env);
     const platformCred = await getPlatformAgentCredential(db, 'claude-code', encryptionKey);
     if (!platformCred?.credential) {
@@ -128,16 +131,32 @@ export async function startDiscoveryAgent(
   }
 
   // Chat session — groups messages/activity on the project page.
+  const [workspace] = await db.select({ userId: schema.workspaces.userId })
+    .from(schema.workspaces).where(eq(schema.workspaces.id, opts.workspaceId)).limit(1);
+  if (!workspace) throw new Error('Trial workspace not found');
+  const taskId = crypto.randomUUID();
+  const now = new Date().toISOString();
+  await db.insert(schema.tasks).values({
+    id: taskId, projectId: opts.projectId, userId: workspace.userId, workspaceId: opts.workspaceId,
+    title: opts.sessionTopic ?? 'Exploring repository', description: DISCOVERY_PROMPT,
+    status: 'in_progress', executionStep: 'trial_discovery', taskMode: 'conversation',
+    triggeredBy: 'trial', credentialAttributionUserId: workspace.userId,
+    credentialAttributionSource: 'platform', createdBy: workspace.userId,
+    createdAt: now, updatedAt: now,
+  });
   const chatSessionId = await projectDataService.createSession(
     env,
     opts.projectId,
     opts.workspaceId,
     opts.sessionTopic ?? 'Exploring repository',
-    null /* taskId */,
-    null
+    taskId,
+    workspace.userId
   );
 
   // ACP session — represents the agent run in the workspace.
+  await db.update(schema.tasks).set({ chatSessionId, updatedAt: now })
+    .where(eq(schema.tasks.id, taskId));
+
   const acpSession = await projectDataService.createAcpSession(
     env,
     opts.projectId,
@@ -158,6 +177,7 @@ export async function startDiscoveryAgent(
   });
 
   return {
+    taskId,
     chatSessionId,
     acpSessionId: acpSession.id,
     agentType: config.agentType,

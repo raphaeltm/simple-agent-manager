@@ -1,9 +1,11 @@
+// FILE SIZE EXCEPTION: Single flat Worker environment contract (one Env interface) — splitting fields across extends-chain fragments mid-hotfix creates import/review churn without behavior benefit. Tracked split: tasks/backlog/2026-07-19-split-env-interface.md. See .claude/rules/18-file-size-limits.md
 import type { Sandbox } from '@cloudflare/sandbox';
 
 import type { VmAgentContainer } from './durable-objects/vm-agent-container';
+import type { TaskRecoveryEnv } from './task-recovery-env';
+import type { WebhookTriggerEnv } from './webhook-trigger-env';
 
-// Cloudflare bindings type
-export interface Env {
+export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   // D1 Database
   DATABASE: D1Database;
   // KV for sessions
@@ -312,6 +314,7 @@ export interface Env {
   TASK_TITLE_MAX_RETRIES?: string;
   TASK_TITLE_RETRY_DELAY_MS?: string;
   TASK_TITLE_RETRY_MAX_DELAY_MS?: string;
+  TASK_TITLE_ERROR_DIAGNOSTIC_MAX_LENGTH?: string;
   // Context summarization (conversation forking)
   CONTEXT_SUMMARY_MODEL?: string;
   CONTEXT_SUMMARY_MAX_LENGTH?: string;
@@ -533,6 +536,7 @@ export interface Env {
   GCP_WIF_POOL_ID?: string;
   GCP_WIF_PROVIDER_ID?: string;
   GCP_SERVICE_ACCOUNT_ID?: string;
+  GCP_SERVICE_ACCOUNT_JSON_MAX_BYTES?: string;
   GCP_DEFAULT_ZONE?: string;
   GCP_IMAGE_FAMILY?: string;
   GCP_IMAGE_PROJECT?: string;
@@ -643,6 +647,7 @@ export interface Env {
   TRIGGER_EXECUTION_LOG_RETENTION_DAYS?: string; // Days to retain completed/failed/skipped execution logs (default: 90)
   TRIGGER_EXECUTION_CLEANUP_ENABLED?: string; // Kill switch: "false" to disable cleanup sweep (default: enabled)
   TRIGGER_STALE_RECOVERY_BATCH_SIZE?: string; // Max stale executions to recover per sweep (default: 100)
+  SESSION_TASK_REPAIR_BATCH_SIZE?: string; // Max legacy taskless sessions repaired per sweep (default: 25, max: 200)
   // AI Inference Proxy (Cloudflare AI Gateway — Workers AI + Anthropic)
   AI_PROXY_ENABLED?: string; // Kill switch: "false" to disable (default: enabled)
   AI_PROXY_DEFAULT_MODEL?: string; // Default model for OpenCode (default: claude-haiku-4-5-20251001)
@@ -784,6 +789,8 @@ export interface Env {
   CF_CONTAINER_VM_AGENT_PORT?: string; // vm-agent standalone HTTP port inside the raw container (default: 8080)
   CF_CONTAINER_PORT_READY_TIMEOUT_MS?: string; // Max time to wait for vm-agent port readiness (default: 30000)
   CF_CONTAINER_WAKE_TIMEOUT_MS?: string; // Max time for launch + restore before forwarding a wake request (default: 120000)
+  CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS?: string; // Max time for the synchronous standalone create-workspace request incl. clone (default: 120000)
+  CF_CONTAINER_CLONE_FILTER?: string; // Git partial-clone filter passed to the container as STANDALONE_CLONE_FILTER (vm-agent default: blob:none; "off" disables)
   CF_CONTAINER_WORKSPACE_BASE_DIR?: string; // Base checkout dir inside raw container (default: /workspaces)
   // Legacy Sandbox SDK prototype (admin-only)
   SANDBOX_ENABLED?: string; // Legacy/fallback kill switch for sandbox routes and older staging config (default: false)

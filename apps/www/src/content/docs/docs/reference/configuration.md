@@ -15,7 +15,9 @@ These are Cloudflare Worker secrets, set during deployment. Pulumi auto-generate
 
 | Secret                                     | Description                                                                                                                                                                                                                  |
 | ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ENCRYPTION_KEY`                           | AES-256-GCM key for credential encryption (auto-generated)                                                                                                                                                                   |
+| `ENCRYPTION_KEY`                           | AES-256-GCM master key. Used for BetterAuth session cookies and user credential encryption unless a purpose-specific override below is set (auto-generated)                                                                  |
+| `BETTER_AUTH_SECRET`                       | Optional purpose-specific override for BetterAuth session cookie signing/encryption. Falls back to `ENCRYPTION_KEY` when unset (`apps/api/src/lib/secrets.ts`)                                                               |
+| `CREDENTIAL_ENCRYPTION_KEY`                | Optional purpose-specific override for AES-GCM encryption of user cloud/agent credentials. Falls back to `ENCRYPTION_KEY` when unset (`apps/api/src/lib/secrets.ts`)                                                         |
 | `JWT_PRIVATE_KEY`                          | RSA-2048 private key for signing tokens (auto-generated)                                                                                                                                                                     |
 | `JWT_PUBLIC_KEY`                           | RSA-2048 public key for token verification (exposed via JWKS)                                                                                                                                                                |
 | `DEPLOY_SIGNING_PRIVATE_KEY`               | Ed25519 private key for signing deployment apply payloads (auto-generated)                                                                                                                                                   |
@@ -65,11 +67,19 @@ Set in GitHub Settings → Environments → production:
 characters of the domain's SHA-256 hash. The self-host onboarding flow fills it
 in for you.
 
-Required GitHub Actions secrets include `CF_API_TOKEN`, `CF_ACCOUNT_ID`, `CF_ZONE_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, and `PULUMI_CONFIG_PASSPHRASE`. GitHub App/OAuth secrets (`GH_CLIENT_ID`, `GH_CLIENT_SECRET`, `GH_APP_ID`, `GH_APP_PRIVATE_KEY`, `GH_APP_SLUG`, `GH_WEBHOOK_SECRET`) and the Google **login** OAuth secrets (`GOOGLE_LOGIN_CLIENT_ID`, `GOOGLE_LOGIN_CLIENT_SECRET`) are optional environment fallbacks; fresh deployments can set them through `/setup` instead. The Google **infra/GCP** OAuth secrets (`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`) are a separate client used only for GCP deployment authorization and are not part of the `/setup` wizard. Deploy signing keys are generated and persisted by Pulumi during deployment; GitHub Environment values are only needed for explicit key overrides.
+Required GitHub Actions secrets include `CF_API_TOKEN`, `CF_ACCOUNT_ID`, `CF_ZONE_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, and `PULUMI_CONFIG_PASSPHRASE`. GitHub App/OAuth secrets (`GH_CLIENT_ID`, `GH_CLIENT_SECRET`, `GH_APP_ID`, `GH_APP_PRIVATE_KEY`, `GH_APP_SLUG`, `GH_WEBHOOK_SECRET`) and Google **login** OAuth secrets (`GOOGLE_LOGIN_CLIENT_ID`, `GOOGLE_LOGIN_CLIENT_SECRET`) are optional environment fallbacks; fresh deployments can set them through `/setup` instead. The separate Google **infra/GCP** OAuth pair (`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`) is used only for WIF and can be configured by a superadmin at `/admin/integrations`; runtime values override the environment fallback. Service-account JSON users need no infrastructure OAuth client. Deploy signing keys are generated and persisted by Pulumi during deployment; GitHub Environment values are only needed for explicit key overrides.
 
 :::note[Naming convention]
 GitHub App secrets use `GH_*` prefix (e.g., `GH_CLIENT_ID`, `GH_WEBHOOK_SECRET`) because GitHub Actions secret names cannot start with `GITHUB_*`. When present, the deploy workflow maps those `GH_*` secrets to `GITHUB_*` Worker secrets. Runtime admin config in D1 is resolved first, then these environment fallbacks, then unset.
 :::
+
+## CLI Environment Variables
+
+These variables affect the local `sam` CLI process only. They are not Worker runtime variables or GitHub Actions secrets.
+
+| Variable                          | Default | Description                                                                 |
+| --------------------------------- | ------- | --------------------------------------------------------------------------- |
+| `SAM_CLI_MAX_API_RESPONSE_BYTES`  | `1048576` | Maximum API response body bytes the CLI reads before truncating/aborting. |
 
 ## Feature Flags
 
@@ -77,23 +87,56 @@ GitHub App secrets use `GH_*` prefix (e.g., `GH_CLIENT_ID`, `GH_WEBHOOK_SECRET`)
 | -------------------------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `CF_CONTAINER_ENABLED`           | `true`                    | Enables Cloudflare Container instant sessions for matching profiles and zero-config runtime selection. Set `false` to force cloud VM runtime.                                                                                                                                                                                |
 | `CF_CONTAINER_WAKE_TIMEOUT_MS`   | `120000`                  | Maximum time for a sleeping container to launch, restore its snapshot, and accept the triggering request.                                                                                                                                                                                                                    |
+| `CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS` | `120000`       | Budget for the synchronous instant-session create-workspace request, which includes the repository clone inside the container.                                                                                                                                                                                               |
+| `CF_CONTAINER_CLONE_FILTER`      | `blob:none`               | Git partial-clone filter forwarded to instant containers as `STANDALONE_CLONE_FILTER`. Set `off` to force full clones.                                                                                                                                                                                                       |
 | `REQUIRE_APPROVAL`               | _(unset)_                 | Default signup approval gate. Superadmins can override it at runtime in Admin → Users without redeploying; when no runtime override exists, this value is used. The first genuine human becomes superadmin regardless of this flag — see [First Login & Admin Access](/docs/guides/self-hosting/#first-login--admin-access). |
 | `TRIAL_ANONYMOUS_USER_ID`        | `system_anonymous_trials` | Id of the internal anonymous-trial sentinel user, excluded from first-user superadmin checks. Override only if your deployment uses a different sentinel id.                                                                                                                                                                 |
 | `CAPACITY_SIZE_FALLBACK_ENABLED` | `true`                    | When a new node's VM size is exhausted on transient capacity, descend the size chain (large→medium→small). Only applies to default-derived sizes (project/platform default), never user-requested sizes. Set `false` to disable.                                                                                             |
 | `ORIGIN_CA_CERT_VALIDITY_DAYS`   | `7`                       | Validity for per-node Cloudflare Origin CA certificates issued from node-generated CSRs. Must be one of Cloudflare's supported values: 7, 30, 90, 365, 730, 1095, or 5475.                                                                                                                                                   |
 
+## Google OAuth and GCP provisioning
+
+Google login and Google infrastructure authorization are independent credential families:
+
+| Variables                                              | Purpose                    | Runtime precedence                                     | Redirect URIs                                              |
+| ------------------------------------------------------ | -------------------------- | ------------------------------------------------------ | ---------------------------------------------------------- |
+| `GOOGLE_LOGIN_CLIENT_ID`, `GOOGLE_LOGIN_CLIENT_SECRET` | BetterAuth user login      | `/setup` or superadmin runtime D1 → Worker env → unset | `/api/auth/callback/google`                                |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`             | Keyless GCP/WIF setup only | Superadmin runtime D1 → Worker env → unset             | `/auth/google/callback` and `/api/deployment/gcp/callback` |
+
+Configuring one family never enables or modifies the other. Users who choose service-account JSON do not need either infrastructure OAuth variable.
+
+| Variable                             | Default                                          | Description                                                                                 |
+| ------------------------------------ | ------------------------------------------------ | ------------------------------------------------------------------------------------------- |
+| `GCP_SERVICE_ACCOUNT_JSON_MAX_BYTES` | `65536`                                          | Maximum UTF-8 byte size accepted by `PUT /api/gcp/service-account`                          |
+| `GCP_DEFAULT_ZONE`                   | `us-central1-a`                                  | Default Compute zone                                                                        |
+| `GCP_IMAGE_FAMILY`                   | `ubuntu-2404-lts-amd64`                          | Compute image family                                                                        |
+| `GCP_IMAGE_PROJECT`                  | `ubuntu-os-cloud`                                | Compute image project                                                                       |
+| `GCP_DISK_SIZE_GB`                   | `50`                                             | Boot disk size                                                                              |
+| `GCP_TOKEN_CACHE_TTL_SECONDS`        | `3300`                                           | Maximum derivative access-token cache TTL; actual TTL is capped by Google's returned expiry |
+| `GCP_IDENTITY_TOKEN_EXPIRY_SECONDS`  | `600`                                            | SAM identity-token lifetime for WIF                                                         |
+| `GCP_OPERATION_POLL_TIMEOUT_MS`      | `300000`                                         | Maximum wait for GCP asynchronous operations                                                |
+| `GCP_API_TIMEOUT_MS`                 | `30000`                                          | GCP OAuth, IAM, and Compute request timeout                                                 |
+| `GCP_STS_SCOPE`                      | `https://www.googleapis.com/auth/cloud-platform` | WIF STS exchange scope                                                                      |
+| `GCP_SA_IMPERSONATION_SCOPES`        | `https://www.googleapis.com/auth/compute`        | Comma-separated scopes for WIF service-account impersonation                                |
+| `GCP_SA_TOKEN_LIFETIME_SECONDS`      | `3600`                                           | WIF impersonated access-token lifetime                                                      |
+| `GCP_STS_TOKEN_URL`                  | `https://sts.googleapis.com/v1/token`            | WIF STS endpoint override for controlled environments                                       |
+| `GCP_IAM_CREDENTIALS_BASE_URL`       | Google IAM Credentials API                       | WIF impersonation base URL override                                                         |
+
+The service-account JWT bearer flow always uses `https://oauth2.googleapis.com/token`; it has no endpoint override, and uploaded `token_uri` values are ignored. Source credentials are encrypted in D1. Only derivative short-lived tokens are cached.
+
 ## AI Idea Title Generation
 
-| Variable                             | Default                     | Description                                      |
-| ------------------------------------ | --------------------------- | ------------------------------------------------ |
-| `TASK_TITLE_MODEL`                   | `@cf/zai-org/glm-4.7-flash` | Workers AI model for title generation            |
-| `TASK_TITLE_MAX_LENGTH`              | `100`                       | Max characters in generated title                |
-| `TASK_TITLE_TIMEOUT_MS`              | `5000`                      | Timeout before falling back to truncation        |
-| `TASK_TITLE_GENERATION_ENABLED`      | `true`                      | Set `false` to disable AI generation             |
-| `TASK_TITLE_SHORT_MESSAGE_THRESHOLD` | `100`                       | Messages at or below this length bypass AI       |
-| `TASK_TITLE_MAX_RETRIES`             | `2`                         | Max retry attempts on failure                    |
-| `TASK_TITLE_RETRY_DELAY_MS`          | `1000`                      | Base delay between retries (exponential backoff) |
-| `TASK_TITLE_RETRY_MAX_DELAY_MS`      | `4000`                      | Max delay cap for backoff                        |
+| Variable                                 | Default               | Description                                      |
+| ---------------------------------------- | --------------------- | ------------------------------------------------ |
+| `TASK_TITLE_MODEL`                       | `@cf/zai-org/glm-5.2` | Workers AI model for title generation            |
+| `TASK_TITLE_MAX_LENGTH`                  | `100`                 | Max characters in generated title                |
+| `TASK_TITLE_TIMEOUT_MS`                  | `5000`                | Timeout before falling back to truncation        |
+| `TASK_TITLE_GENERATION_ENABLED`          | `true`                | Set `false` to disable AI generation             |
+| `TASK_TITLE_SHORT_MESSAGE_THRESHOLD`     | `100`                 | Messages at or below this length bypass AI       |
+| `TASK_TITLE_MAX_RETRIES`                 | `2`                   | Max retry attempts on failure                    |
+| `TASK_TITLE_RETRY_DELAY_MS`              | `1000`                | Base delay between retries (exponential backoff) |
+| `TASK_TITLE_RETRY_MAX_DELAY_MS`          | `4000`                | Max delay cap for backoff                        |
+| `TASK_TITLE_ERROR_DIAGNOSTIC_MAX_LENGTH` | `512`                 | Max sanitized provider-error diagnostic length   |
 
 ## Agent Model Catalog
 
@@ -134,6 +177,33 @@ SAM loads OpenCode Zen and OpenCode Go model choices through the authenticated m
 | `MAX_NOTIFICATIONS_PER_USER`            | `500`                  | Max stored notifications per user                    |
 | `NOTIFICATION_PAGE_SIZE`                | `50`                   | Default page size for notification list              |
 | `MAX_NOTIFICATION_PAGE_SIZE`            | `100`                  | Max allowed page size                                |
+
+## Generic Webhook Triggers
+
+| Variable                                      | Default | Description                                                 |
+| --------------------------------------------- | ------- | ----------------------------------------------------------- |
+| `WEBHOOK_TRIGGERS_ENABLED`                    | `true`  | Public generic webhook ingress kill switch                  |
+| `WEBHOOK_TRIGGER_MAX_BODY_BYTES`              | `65536` | Maximum JSON request body size                              |
+| `WEBHOOK_TRIGGER_MAX_FILTERS`                 | `10`    | Maximum deterministic filters per trigger                   |
+| `WEBHOOK_TRIGGER_MAX_FILTER_PATH_LENGTH`      | `200`   | Maximum configured filter dot-path length                   |
+| `WEBHOOK_TRIGGER_MAX_FILTER_PATH_DEPTH`       | `8`     | Maximum filter nesting depth at evaluation time             |
+| `WEBHOOK_TRIGGER_MAX_INCLUDED_HEADERS`        | `10`    | Maximum safe request headers copied into template context   |
+| `WEBHOOK_TRIGGER_MAX_HEADER_NAME_LENGTH`      | `100`   | Maximum configured included-header name length              |
+| `WEBHOOK_TRIGGER_MAX_SOURCE_LABEL_LENGTH`     | `100`   | Maximum optional source label length                        |
+| `WEBHOOK_TRIGGER_MAX_IDEMPOTENCY_KEY_LENGTH`  | `200`   | Maximum accepted `Idempotency-Key` length                   |
+| `WEBHOOK_INGRESS_RATE_LIMIT_PER_MINUTE`       | `120`   | Best-effort pre-auth request damping per client IP/window   |
+| `WEBHOOK_TRIGGER_RATE_LIMIT_PER_MINUTE`       | `60`    | Best-effort request damping per trigger/window              |
+| `WEBHOOK_INVALID_TOKEN_RATE_LIMIT_PER_MINUTE` | `30`    | Best-effort invalid-token damping per client IP/window      |
+| `WEBHOOK_RATE_LIMIT_WINDOW_SECONDS`           | `60`    | Fixed rate-limit window length                              |
+| `WEBHOOK_DELIVERY_RETENTION_DAYS`             | `7`     | Retention for redacted delivery audit metadata              |
+| `WEBHOOK_DELIVERY_CLEANUP_BATCH_SIZE`         | `500`   | Maximum expired audit rows deleted per cleanup pass         |
+| `WEBHOOK_DELIVERY_DEFAULT_PAGE_SIZE`          | `25`    | Default delivery-history page size                          |
+| `WEBHOOK_DELIVERY_MAX_PAGE_SIZE`              | `100`   | Maximum delivery-history page size                          |
+| `WEBHOOK_DELIVERY_PROCESSING_LEASE_SECONDS`   | `300`   | Lease before an unsubmitted processing delivery can recover |
+
+Webhook tokens use the existing `ENCRYPTION_KEY` as keyed-hash material and do not require a separate deployment secret. See [Webhook Triggers](/docs/guides/webhook-triggers/) for request, credential, filtering, and audit behavior.
+
+Webhook damping uses Cloudflare KV's eventually consistent read-update-write behavior. It reduces accidental bursts and abuse but is not a strict distributed quota.
 
 ## ACP Session Lifecycle
 
@@ -201,32 +271,41 @@ SAM loads OpenCode Zen and OpenCode Go model choices through the authenticated m
 
 ## Idea Execution Timeouts
 
-| Variable                                           | Default            | Description                                                                           |
-| -------------------------------------------------- | ------------------ | ------------------------------------------------------------------------------------- |
-| `TASK_RUN_MAX_EXECUTION_MS`                        | `14400000` (4 hr)  | Max task execution time                                                               |
-| `TASK_STUCK_QUEUED_TIMEOUT_MS`                     | `600000` (10 min)  | Timeout for tasks stuck in queued state                                               |
-| `TASK_STUCK_DELEGATED_TIMEOUT_MS`                  | `1860000` (31 min) | Timeout for tasks stuck in delegated state                                            |
-| `CLAUDE_CODE_COMPACTION_LOOP_DETECTOR_ENABLED`     | `true`             | Enable Claude Code compaction-loop shutdown from recent message evidence              |
-| `CLAUDE_CODE_COMPACTION_LOOP_RECENT_MESSAGE_LIMIT` | `40`               | Recent task-session messages to inspect for compaction-loop evidence                  |
-| `CLAUDE_CODE_COMPACTION_LOOP_WINDOW_MESSAGES`      | `20`               | Rolling recent-message window used for compaction-loop detection                      |
-| `CLAUDE_CODE_COMPACTION_LOOP_MIN_PAIRS`            | `3`                | Minimum `Compacting...` / `Compacting completed` marker pairs before failing a task   |
-| `TASK_CALLBACK_TIMEOUT_MS`                         | `10000`            | Callback response timeout                                                             |
-| `TASK_CALLBACK_RETRY_MAX_ATTEMPTS`                 | `3`                | Max callback retry attempts                                                           |
-| `TASK_RUN_CLEANUP_DELAY_MS`                        | `5000`             | Delay before task cleanup                                                             |
-| `TASK_RECONCILIATION_IDLE_MS`                      | `300000` (5 min)   | Idle threshold before SAM sends a visible task check-in                               |
-| `TASK_RECONCILIATION_RESPONSE_DEADLINE_MS`         | `60000` (1 min)    | Response deadline after a visible task check-in                                       |
-| `TASK_RECONCILIATION_PROMPT_SOFT_STALL_MS`         | `1800000` (30 min) | In-flight prompt observation threshold before a non-interrupting reconciliation event |
-| `TASK_RECONCILIATION_PROMPT_HARD_STALL_MS`         | `7200000` (2 hr)   | In-flight prompt hard-stall threshold before SAM requests prompt cancellation         |
-| `TASK_RECONCILIATION_MIN_ALARM_DELAY_MS`           | `10000` (10 sec)   | Minimum delay before the next reconciliation alarm can fire                           |
+| Variable                                           | Default                                | Description                                                                                      |
+| -------------------------------------------------- | -------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `TASK_RUN_MAX_EXECUTION_MS`                        | `14400000` (4 hr)                      | Max task execution time                                                                          |
+| `TASK_STUCK_QUEUED_TIMEOUT_MS`                     | `1200000` (20 min)                     | Timeout for tasks stuck in queued state                                                          |
+| `TASK_STUCK_DELEGATED_TIMEOUT_MS`                  | `1860000` (31 min)                     | Timeout for tasks stuck in delegated state                                                       |
+| `TASK_DO_MISMATCH_GRACE_MS`                        | `300000` (5 min)                       | Minimum age before reconciling completed TaskRunner state with task-scoped liveness              |
+| `STUCK_TASK_MAX_CANDIDATES_PER_SWEEP`              | `100`                                  | Maximum active tasks inspected by each recovery sweep                                            |
+| `STUCK_TASK_SCAN_CURSOR_KV_KEY`                    | `scheduled:stuck-tasks:scan-cursor:v1` | KV key used to resume bounded recovery scans fairly across active tasks                          |
+| `TASK_LIVENESS_MAX_ACP_SESSIONS`                   | `5`                                    | Maximum task-scoped ACP sessions inspected per liveness probe                                    |
+| `TASK_LIVENESS_PROBE_TIMEOUT_MS`                   | `5000` (5 sec)                         | Per-candidate timeout for the ACP liveness probe; a timeout is inconclusive (never fails a task) |
+| `TASK_RUN_ABSOLUTE_CEILING_MS`                     | `86400000` (24 hr)                     | Absolute runaway-cost ceiling; fails even a task with a demonstrably live runtime                |
+| `CLAUDE_CODE_COMPACTION_LOOP_DETECTOR_ENABLED`     | `true`                                 | Enable Claude Code compaction-loop shutdown from recent message evidence                         |
+| `CLAUDE_CODE_COMPACTION_LOOP_RECENT_MESSAGE_LIMIT` | `40`                                   | Recent task-session messages to inspect for compaction-loop evidence                             |
+| `CLAUDE_CODE_COMPACTION_LOOP_WINDOW_MESSAGES`      | `20`                                   | Rolling recent-message window used for compaction-loop detection                                 |
+| `CLAUDE_CODE_COMPACTION_LOOP_MIN_PAIRS`            | `3`                                    | Minimum `Compacting...` / `Compacting completed` marker pairs before failing a task              |
+| `TASK_CALLBACK_TIMEOUT_MS`                         | `10000`                                | Callback response timeout                                                                        |
+| `TASK_CALLBACK_RETRY_MAX_ATTEMPTS`                 | `3`                                    | Max callback retry attempts                                                                      |
+| `TASK_RUN_CLEANUP_DELAY_MS`                        | `5000`                                 | Delay before task cleanup                                                                        |
+| `TASK_RECONCILIATION_IDLE_MS`                      | `300000` (5 min)                       | Idle threshold before SAM sends a visible task check-in                                          |
+| `TASK_RECONCILIATION_RESPONSE_DEADLINE_MS`         | `60000` (1 min)                        | Response deadline after a visible task check-in                                                  |
+| `TASK_RECONCILIATION_PROMPT_SOFT_STALL_MS`         | `1800000` (30 min)                     | In-flight prompt observation threshold before a non-interrupting reconciliation event            |
+| `TASK_RECONCILIATION_PROMPT_HARD_STALL_MS`         | `7200000` (2 hr)                       | In-flight prompt hard-stall threshold before SAM requests prompt cancellation                    |
+| `TASK_RECONCILIATION_MIN_ALARM_DELAY_MS`           | `10000` (10 sec)                       | Minimum delay before the next reconciliation alarm can fire                                      |
+
+> **Liveness-gated recovery.** Stuck-task recovery for `in_progress` tasks (including task-mode work paused at the `awaiting_followup` execution step) is gated on **task-scoped** liveness — a live workspace, a healthy node with a recent heartbeat, **and** an active task-scoped ACP session. A shared-node heartbeat alone is never sufficient. Consequently, `TASK_RUN_HARD_TIMEOUT_MS` and `TASK_RUN_MAX_EXECUTION_MS` bound the point at which a task with **no** proven live runtime is failed; a task with a demonstrably live runtime is preserved past those thresholds, but remains bounded by `TASK_RUN_ABSOLUTE_CEILING_MS` (24 hours by default) as a runaway-cost backstop. When liveness cannot be determined (probe timeout or error), the task is left untouched (fail-safe) until it reaches that absolute ceiling.
 
 ## Node & Workspace Readiness
 
-| Variable                                 | Default            | Description                           |
-| ---------------------------------------- | ------------------ | ------------------------------------- |
-| `NODE_AGENT_READY_TIMEOUT_MS`            | `600000` (10 min)  | Wait for VM agent to report ready     |
-| `NODE_AGENT_READY_POLL_INTERVAL_MS`      | `5000`             | Poll interval for agent readiness     |
-| `TASK_RUNNER_WORKSPACE_READY_TIMEOUT_MS` | `1800000` (30 min) | Max wait for workspace-ready callback |
-| `PROVISIONING_TIMEOUT_MS`                | `1800000` (30 min) | Cron marks stuck workspaces as error  |
+| Variable                                 | Default            | Description                                                   |
+| ---------------------------------------- | ------------------ | ------------------------------------------------------------- |
+| `NODE_AGENT_READY_TIMEOUT_MS`            | `600000` (10 min)  | Wait for VM agent to report ready                             |
+| `NODE_AGENT_READY_POLL_INTERVAL_MS`      | `5000`             | Poll interval for agent readiness                             |
+| `TASK_RUNNER_WORKSPACE_READY_TIMEOUT_MS` | `1800000` (30 min) | Max wait for workspace-ready callback                         |
+| `PROVISIONING_TIMEOUT_MS`                | `1800000` (30 min) | Cron marks stuck workspaces as error                          |
+| `NODE_HEARTBEAT_STALE_SECONDS`           | `180`              | Seconds without a heartbeat before a node is treated as stale |
 
 ## App Deployment Routing
 
@@ -261,13 +340,14 @@ SAM loads OpenCode Zen and OpenCode Go model choices through the authenticated m
 
 ## Platform Limits
 
-| Variable                           | Default | Description                   |
-| ---------------------------------- | ------- | ----------------------------- |
-| `MAX_NODES_PER_USER`               | `10`    | Max nodes per user            |
-| `MAX_AGENT_SESSIONS_PER_WORKSPACE` | `10`    | Max concurrent agent sessions |
-| `MAX_PROJECTS_PER_USER`            | `100`   | Max projects per user         |
-| `MAX_TASKS_PER_PROJECT`            | `10000` | Max ideas per project         |
-| `MAX_TASK_MESSAGE_LENGTH`          | `16000` | Max idea description length   |
+| Variable                           | Default | Description                         |
+| ---------------------------------- | ------- | ----------------------------------- |
+| `MAX_NODES_PER_USER`               | `10`    | Max nodes per user                  |
+| `MAX_WORKSPACES_PER_NODE`          | `3`     | Max workspaces packed onto one node |
+| `MAX_AGENT_SESSIONS_PER_WORKSPACE` | `10`    | Max concurrent agent sessions       |
+| `MAX_PROJECTS_PER_USER`            | `100`   | Max projects per user               |
+| `MAX_TASKS_PER_PROJECT`            | `10000` | Max ideas per project               |
+| `MAX_TASK_MESSAGE_LENGTH`          | `16000` | Max idea description length         |
 
 ## Durable Object Limits
 
@@ -305,11 +385,13 @@ SAM loads OpenCode Zen and OpenCode Go model choices through the authenticated m
 
 ## External API Timeouts
 
-| Variable                        | Default | Description                    |
-| ------------------------------- | ------- | ------------------------------ |
-| `HETZNER_API_TIMEOUT_MS`        | `30000` | Hetzner API request timeout    |
-| `CF_API_TIMEOUT_MS`             | `30000` | Cloudflare API request timeout |
-| `NODE_AGENT_REQUEST_TIMEOUT_MS` | `30000` | VM Agent request timeout       |
+| Variable                        | Default | Description                                 |
+| ------------------------------- | ------- | ------------------------------------------- |
+| `HETZNER_API_TIMEOUT_MS`        | `30000` | Hetzner API request timeout                 |
+| `CF_API_TIMEOUT_MS`             | `30000` | Cloudflare API request timeout              |
+| `GCP_API_TIMEOUT_MS`            | `30000` | GCP OAuth, IAM, and Compute request timeout |
+| `NODE_AGENT_REQUEST_TIMEOUT_MS` | `30000` | VM Agent request timeout                    |
+| `CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS` | `120000` | Instant-session create-workspace budget (includes in-container clone) |
 
 ## Admin Observability
 

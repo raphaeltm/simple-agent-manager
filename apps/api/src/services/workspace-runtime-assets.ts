@@ -124,8 +124,7 @@ async function validateProfileId(
     .where(
       and(
         eq(schema.agentProfiles.id, profileId),
-        eq(schema.agentProfiles.projectId, workspace.projectId),
-        eq(schema.agentProfiles.userId, workspace.userId)
+        eq(schema.agentProfiles.projectId, workspace.projectId)
       )
     )
     .limit(1);
@@ -147,8 +146,7 @@ async function validateSkillId(
     .where(
       and(
         eq(schema.skills.id, skillId),
-        eq(schema.skills.projectId, workspace.projectId),
-        eq(schema.skills.userId, workspace.userId)
+        eq(schema.skills.projectId, workspace.projectId)
       )
     )
     .limit(1);
@@ -176,12 +174,7 @@ async function resolveProjectAssets(
         isSecret: schema.projectRuntimeEnvVars.isSecret,
       })
       .from(schema.projectRuntimeEnvVars)
-      .where(
-        and(
-          eq(schema.projectRuntimeEnvVars.projectId, workspace.projectId),
-          eq(schema.projectRuntimeEnvVars.userId, workspace.userId)
-        )
-      ),
+      .where(eq(schema.projectRuntimeEnvVars.projectId, workspace.projectId)),
     db
       .select({
         path: schema.projectRuntimeFiles.filePath,
@@ -190,12 +183,7 @@ async function resolveProjectAssets(
         isSecret: schema.projectRuntimeFiles.isSecret,
       })
       .from(schema.projectRuntimeFiles)
-      .where(
-        and(
-          eq(schema.projectRuntimeFiles.projectId, workspace.projectId),
-          eq(schema.projectRuntimeFiles.userId, workspace.userId)
-        )
-      ),
+      .where(eq(schema.projectRuntimeFiles.projectId, workspace.projectId)),
   ]);
 
   return {

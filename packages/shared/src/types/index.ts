@@ -13,13 +13,19 @@ export type {
   CredentialResponse,
   CredentialSource,
   CredentialValidationStatus,
+  GcpCredential,
+  GcpCredentialAuthType,
+  GcpCredentialMetadata,
   GcpOidcCredential,
+  GcpServiceAccountKeyCredential,
+  GcpWorkloadIdentityCredential,
   ListPlatformCredentialsResponse,
   PlatformCredential,
   PlatformCredentialResponse,
   PlatformCredentialType,
   ProjectDeploymentCredential,
   ProjectDeploymentCredentialResponse,
+  SaveGcpServiceAccountCredentialRequest,
   SetupProjectDeploymentRequest,
   SignupApprovalConfig,
   SignupApprovalConfigResponse,
@@ -30,7 +36,7 @@ export type {
   UserRole,
   UserStatus,
 } from './user';
-export { CREDENTIAL_PROVIDERS } from './user';
+export { CREDENTIAL_PROVIDERS, GCP_CREDENTIAL_VERSION } from './user';
 
 // GitHub
 export type {
@@ -390,6 +396,7 @@ export {
 export type {
   CreateGitHubTriggerRequest,
   CreateTriggerRequest,
+  CreateTriggerResponse,
   CronTemplateContext,
   CronValidationResult,
   GitHubTemplateContext,
@@ -398,16 +405,30 @@ export type {
   GitHubTriggerFilters,
   ListTriggerExecutionsResponse,
   ListTriggersResponse,
+  ListWebhookDeliveriesResponse,
+  RunTriggerRequest,
   Trigger,
   TriggeredBy,
   TriggerExecution,
   TriggerExecutionResponse,
   TriggerExecutionStatus,
+  TriggerPreviewRequest,
+  TriggerPreviewResponse,
   TriggerResponse,
   TriggerSkipReason,
   TriggerSourceType,
   TriggerStatus,
   UpdateTriggerRequest,
+  WebhookCredential,
+  WebhookDelivery,
+  WebhookDeliveryOutcome,
+  WebhookFilterMode,
+  WebhookFilterOperator,
+  WebhookFilterResult,
+  WebhookTemplateContext,
+  WebhookTriggerConfig,
+  WebhookTriggerConfigInput,
+  WebhookTriggerFilter,
 } from './trigger';
 export {
   GITHUB_TRIGGER_EVENT_TYPES,
@@ -416,6 +437,9 @@ export {
   TRIGGER_SOURCE_TYPES,
   TRIGGER_STATUSES,
   TRIGGERED_BY_VALUES,
+  WEBHOOK_DELIVERY_OUTCOMES,
+  WEBHOOK_FILTER_MODES,
+  WEBHOOK_FILTER_OPERATORS,
 } from './trigger';
 
 // Compute Usage

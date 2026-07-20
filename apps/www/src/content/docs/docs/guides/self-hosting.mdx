@@ -5,7 +5,7 @@ description: Deploy SAM to your own infrastructure with Cloudflare Workers, Pulu
 
 import GitHubAppSetup from '../../../../components/GitHubAppSetup.astro';
 
-This guide walks you through deploying Simple Agent Manager to your own infrastructure. Deployment is automated via GitHub Actions + Pulumi from your own fork.
+This guide walks you through deploying Simple Agent Manager to your own infrastructure. Deployment runs through the **Deploy Production** GitHub Actions workflow in your own fork, with Pulumi provisioning the Cloudflare resources.
 
 ## Prerequisites
 
@@ -17,7 +17,7 @@ This guide walks you through deploying Simple Agent Manager to your own infrastr
 
 **Workers Paid** is required because SAM uses Durable Objects for real-time chat, task execution, and node lifecycle, and Cloudflare Containers for the default instant-session runtime. Go to **Workers & Pages** in the Cloudflare dashboard to upgrade. You also need **R2** enabled for Pulumi state and **Analytics Engine** enabled (free): **Workers & Pages** → **Analytics Engine** → **Enable**.
 
-You do **not** need a shared cloud provider account. Users provide their own [Hetzner API token](https://console.hetzner.cloud/), [Scaleway API key](https://console.scaleway.com/iam/api-keys), or GCP configuration through the Settings UI. GCP support also requires optional Google OAuth configuration on the SAM instance.
+You do **not** need a shared cloud provider account. Users provide their own [Hetzner API token](https://console.hetzner.cloud/), [Scaleway API key](https://console.scaleway.com/iam/api-keys), or GCP configuration through the Settings UI. GCP Workload Identity Federation (WIF) uses an optional infrastructure OAuth client; the service-account JSON mode is OAuth-free.
 
 ## Step 1: Choose Your Domain and Cloudflare Account
 
@@ -93,7 +93,51 @@ Fresh deployments can keep most platform integration credentials out of GitHub A
 - **Google login OAuth** for Sign in with Google. This is separate from Google/GCP infrastructure OAuth.
 - **GitLab OAuth** when users need to create GitLab-backed projects and workspaces.
 
-These values are stored encrypted in SAM's platform configuration store and can be updated later by a superadmin without redeploying. Environment secrets remain useful as fallback values and for infrastructure credentials that must exist before the app can boot.
+A superadmin can separately configure **Google infrastructure OAuth** at `/admin/integrations` for keyless GCP/WIF setup. It is intentionally absent from `/setup` so installations do not confuse it with Google login. Runtime integration values are stored encrypted and override environment fallbacks without a redeploy.
+
+## GCP provisioning credentials
+
+Each user connects Google Cloud from **Settings → Cloud Providers → Google Cloud**. SAM supports two mutually exclusive authentication modes.
+
+### Workload Identity Federation (recommended)
+
+WIF avoids user-managed private keys and uses short-lived credentials. Before users start the WIF wizard, a superadmin must configure the independent **Google infrastructure OAuth** client at `/admin/integrations`, or provide the environment fallback pair `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`.
+
+Register both static redirect URIs on that infrastructure client:
+
+- `https://api.yourdomain.com/auth/google/callback`
+- `https://api.yourdomain.com/api/deployment/gcp/callback`
+
+The flow requests the Google `cloud-platform` scope. Runtime values saved by a superadmin are encrypted in D1 and take precedence over the environment pair; removing the runtime pair reveals the environment fallback, if present. This client is never used for user login. Google sign-in uses a different client, different variable names (`GOOGLE_LOGIN_*`), and only `https://api.yourdomain.com/api/auth/callback/google`.
+
+### Service account JSON (OAuth-free alternative)
+
+If the installation has no infrastructure OAuth client, a user can paste or choose a dedicated Google service-account JSON key. SAM ignores endpoint fields from the upload, signs RS256 assertions, exchanges them only at Google's fixed token endpoint, and verifies access to the selected Compute zone before replacing a working credential.
+
+Create a dedicated least-privilege identity rather than granting Project Owner:
+
+```bash
+PROJECT_ID="your-gcp-project-id"
+SERVICE_ACCOUNT="sam-vm-manager@${PROJECT_ID}.iam.gserviceaccount.com"
+
+gcloud services enable compute.googleapis.com --project="${PROJECT_ID}"
+gcloud iam service-accounts create sam-vm-manager \
+  --project="${PROJECT_ID}" \
+  --display-name="SAM VM manager"
+gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+  --member="serviceAccount:${SERVICE_ACCOUNT}" \
+  --role="roles/compute.instanceAdmin.v1"
+gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+  --member="serviceAccount:${SERVICE_ACCOUNT}" \
+  --role="roles/compute.securityAdmin"
+gcloud iam service-accounts keys create sam-service-account.json \
+  --iam-account="${SERVICE_ACCOUNT}" \
+  --project="${PROJECT_ID}"
+```
+
+Vertex AI access is optional and is not required for VM provisioning. If your organization policy disables service-account key creation, use WIF or ask a Google Cloud administrator to approve an appropriate key-management policy; do not weaken the policy just for SAM.
+
+SAM encrypts the complete JSON in both credential stores with the configured credential-encryption key. Only safe metadata is returned to the browser. Derived Google access tokens are short-lived and cached only up to their returned expiry. Rotation verifies the new key before atomically replacing all SAM copies. Disconnect removes SAM's encrypted copies and cached tokens, but it cannot revoke the key in Google Cloud—disable or delete the old key there after a successful rotation or disconnect.
 
 ## Step 5: Generate Pulumi Passphrase
 
@@ -121,30 +165,30 @@ instead of choosing a generic prefix.
 
 **Environment secrets:**
 
-| Secret                                     | Description                                                                                                                                                                         |
-| ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `CF_API_TOKEN`                             | Cloudflare API token                                                                                                                                                                |
-| `CF_ACCOUNT_ID`                            | Cloudflare account ID (32-char hex)                                                                                                                                                 |
-| `CF_ZONE_ID`                               | Domain zone ID (32-char hex)                                                                                                                                                        |
-| `R2_ACCESS_KEY_ID`                         | R2 API token access key                                                                                                                                                             |
-| `R2_SECRET_ACCESS_KEY`                     | R2 API token secret key                                                                                                                                                             |
-| `PULUMI_CONFIG_PASSPHRASE`                 | Generated passphrase                                                                                                                                                                |
-| `GH_CLIENT_ID`                             | Optional GitHub App client ID; can be configured in `/setup` instead                                                                                                                |
-| `GH_CLIENT_SECRET`                         | Optional GitHub App client secret; can be configured in `/setup` instead                                                                                                            |
-| `GH_APP_ID`                                | Optional GitHub App ID; can be configured in `/setup` instead                                                                                                                       |
-| `GH_APP_PRIVATE_KEY`                       | Optional GitHub App private key (PEM or base64); can be configured in `/setup`                                                                                                      |
-| `GH_APP_SLUG`                              | Optional GitHub App URL slug; can be configured in `/setup` instead                                                                                                                 |
-| `GH_WEBHOOK_SECRET`                        | Optional GitHub App webhook secret; can be configured in `/setup` instead                                                                                                           |
-| `GOOGLE_LOGIN_CLIENT_ID`                   | Optional Google **login** OAuth client ID (Sign in with Google); can be configured in `/setup` instead. Register redirect URI `https://api.yourdomain.com/api/auth/callback/google` |
-| `GOOGLE_LOGIN_CLIENT_SECRET`               | Optional Google **login** OAuth client secret; can be configured in `/setup` instead                                                                                                |
+| Secret                                     | Description                                                                                                                                                                                                                                                                                                                  |
+| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CF_API_TOKEN`                             | Cloudflare API token                                                                                                                                                                                                                                                                                                         |
+| `CF_ACCOUNT_ID`                            | Cloudflare account ID (32-char hex)                                                                                                                                                                                                                                                                                          |
+| `CF_ZONE_ID`                               | Domain zone ID (32-char hex)                                                                                                                                                                                                                                                                                                 |
+| `R2_ACCESS_KEY_ID`                         | R2 API token access key                                                                                                                                                                                                                                                                                                      |
+| `R2_SECRET_ACCESS_KEY`                     | R2 API token secret key                                                                                                                                                                                                                                                                                                      |
+| `PULUMI_CONFIG_PASSPHRASE`                 | Generated passphrase                                                                                                                                                                                                                                                                                                         |
+| `GH_CLIENT_ID`                             | Optional GitHub App client ID; can be configured in `/setup` instead                                                                                                                                                                                                                                                         |
+| `GH_CLIENT_SECRET`                         | Optional GitHub App client secret; can be configured in `/setup` instead                                                                                                                                                                                                                                                     |
+| `GH_APP_ID`                                | Optional GitHub App ID; can be configured in `/setup` instead                                                                                                                                                                                                                                                                |
+| `GH_APP_PRIVATE_KEY`                       | Optional GitHub App private key (PEM or base64); can be configured in `/setup`                                                                                                                                                                                                                                               |
+| `GH_APP_SLUG`                              | Optional GitHub App URL slug; can be configured in `/setup` instead                                                                                                                                                                                                                                                          |
+| `GH_WEBHOOK_SECRET`                        | Optional GitHub App webhook secret; can be configured in `/setup` instead                                                                                                                                                                                                                                                    |
+| `GOOGLE_LOGIN_CLIENT_ID`                   | Optional Google **login** OAuth client ID (Sign in with Google); can be configured in `/setup` instead. Register redirect URI `https://api.yourdomain.com/api/auth/callback/google`                                                                                                                                          |
+| `GOOGLE_LOGIN_CLIENT_SECRET`               | Optional Google **login** OAuth client secret; can be configured in `/setup` instead                                                                                                                                                                                                                                         |
 | `GITLAB_HOST`                              | Optional GitLab OAuth host, such as `https://gitlab.com`; can be configured in `/setup` instead. Register redirect URI `https://api.yourdomain.com/api/auth/callback/gitlab` and grant the `read_user` and `api` scopes (`api` is required for repository clone/push and merge-request creation in GitLab-backed workspaces) |
-| `GITLAB_CLIENT_ID`                         | Optional GitLab OAuth application ID; can be configured in `/setup` instead                                                                                                        |
-| `GITLAB_CLIENT_SECRET`                     | Optional GitLab OAuth secret; can be configured in `/setup` instead                                                                                                                |
-| `GOOGLE_CLIENT_ID`                         | Optional Google **infra/GCP** OAuth client ID for GCP deployment authorization (separate client from login; NOT set via `/setup`)                                                   |
-| `GOOGLE_CLIENT_SECRET`                     | Optional Google **infra/GCP** OAuth client secret (separate client from login; NOT set via `/setup`)                                                                                |
-| `CF_AIG_TOKEN`                             | Optional narrower Cloudflare AI Gateway Unified Billing token                                                                                                                       |
-| `DEVCONTAINER_CACHE_CLOUDFLARE_API_TOKEN`  | Optional narrower Cloudflare token for managed devcontainer registry credentials                                                                                                    |
-| `DEVCONTAINER_CACHE_CLOUDFLARE_ACCOUNT_ID` | Optional Cloudflare account override for managed devcontainer registry credentials                                                                                                  |
+| `GITLAB_CLIENT_ID`                         | Optional GitLab OAuth application ID; can be configured in `/setup` instead                                                                                                                                                                                                                                                  |
+| `GITLAB_CLIENT_SECRET`                     | Optional GitLab OAuth secret; can be configured in `/setup` instead                                                                                                                                                                                                                                                          |
+| `GOOGLE_CLIENT_ID`                         | Optional environment fallback for the Google **infra/GCP** OAuth client ID. A superadmin can configure the independent runtime pair at `/admin/integrations`; not used for login.                                                                                                                                            |
+| `GOOGLE_CLIENT_SECRET`                     | Optional environment fallback for the Google **infra/GCP** OAuth client secret. Runtime admin configuration takes precedence; not used for login.                                                                                                                                                                            |
+| `CF_AIG_TOKEN`                             | Optional narrower Cloudflare AI Gateway Unified Billing token                                                                                                                                                                                                                                                                |
+| `DEVCONTAINER_CACHE_CLOUDFLARE_API_TOKEN`  | Optional narrower Cloudflare token for managed devcontainer registry credentials                                                                                                                                                                                                                                             |
+| `DEVCONTAINER_CACHE_CLOUDFLARE_ACCOUNT_ID` | Optional Cloudflare account override for managed devcontainer registry credentials                                                                                                                                                                                                                                           |
 
 :::note
 GitHub App secrets use `GH_*` prefix because GitHub Actions secret names cannot start with `GITHUB_*`. When present, the deployment workflow maps those `GH_*` secrets to `GITHUB_*` Worker secrets and SAM uses them as environment fallbacks. Values saved in `/setup` or the superadmin platform config UI take precedence.
@@ -187,6 +231,19 @@ Open `https://app.yourdomain.com` — you should see the login page with whichev
 
 If you enabled GitLab in platform configuration, create a test project from a GitLab repository and start a lightweight chat before inviting users. That validates the OAuth app, repository metadata propagation, and workspace credential helper path together.
 
+## Updating an Existing Self-Hosted Instance
+
+Sync or merge upstream SAM changes into your fork's `main` branch when you want to update. Pushing those changes to the fork does **not** update the running instance by itself. Self-host forks skip the canonical repository's full `main`-push CI path, so the automatic `workflow_run` production deploy is not the update mechanism for forks.
+
+To deploy an update:
+
+1. Sync your fork's `main` branch with upstream.
+2. Open **Actions → Deploy Production → Run workflow** in your fork.
+3. Choose the `main` branch and leave `dry_run` disabled.
+4. Wait for the workflow to finish, then re-run the health check above.
+
+Use the same manual workflow when you rotate deployment secrets, change GitHub Environment variables, or want to re-apply Pulumi-managed infrastructure.
+
 ## First Login & Admin Access
 
 The first genuine human to sign in to a fresh deployment becomes the **superadmin** — the account that can approve other users, manage platform credentials, and reach the admin dashboard.
@@ -228,7 +285,7 @@ The Workers Paid plan ($5/month) is required for Durable Objects and Cloudflare 
 
 ### User VM Costs
 
-VMs are billed to each user's own cloud provider account. SAM supports Hetzner, Scaleway, and GCP.
+VMs are billed to the cloud provider credential SAM uses for the node. In a typical self-hosted setup, that is each user's own BYOC credential; admins may also configure a platform credential for shared zero-config provisioning. SAM supports Hetzner, Scaleway, and GCP. The example prices below cover the built-in Hetzner and Scaleway size mappings; GCP pricing depends on the selected project, zone, and machine family.
 
 **Hetzner:**
 

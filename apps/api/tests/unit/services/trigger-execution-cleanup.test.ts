@@ -10,6 +10,11 @@ vi.mock('../../../src/lib/logger', () => ({
   createModuleLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
 
+const mockPurgeExpiredWebhookDeliveries = vi.hoisted(() => vi.fn().mockResolvedValue(0));
+vi.mock('../../../src/services/webhook-trigger-store', () => ({
+  purgeExpiredWebhookDeliveries: mockPurgeExpiredWebhookDeliveries,
+}));
+
 import {
   DEFAULT_TRIGGER_EXECUTION_LOG_RETENTION_DAYS,
   DEFAULT_TRIGGER_STALE_EXECUTION_TIMEOUT_MS,
@@ -43,17 +48,19 @@ interface TaskRow {
  * 'running' and 'queued' recovery passes. The mock routes based on the
  * status binding to return the correct mock data for each pass.
  */
-function createMockDb(options: {
-  staleRunningExecutions?: StaleRow[];
-  staleQueuedExecutions?: StaleRow[];
-  taskLookups?: Record<string, TaskRow | null>;
-  batchResults?: { meta: { changes: number } }[];
-  purgeChanges?: number;
-  staleQueryError?: Error;
-  staleQueuedQueryError?: Error;
-  batchError?: Error;
-  purgeError?: Error;
-} = {}) {
+function createMockDb(
+  options: {
+    staleRunningExecutions?: StaleRow[];
+    staleQueuedExecutions?: StaleRow[];
+    taskLookups?: Record<string, TaskRow | null>;
+    batchResults?: { meta: { changes: number } }[];
+    purgeChanges?: number;
+    staleQueryError?: Error;
+    staleQueuedQueryError?: Error;
+    batchError?: Error;
+    purgeError?: Error;
+  } = {}
+) {
   const {
     staleRunningExecutions = [],
     staleQueuedExecutions = [],
@@ -72,7 +79,11 @@ function createMockDb(options: {
         const stmt = { sql, bindings: args } as unknown as D1PreparedStatement;
 
         // SELECT stale executions by status (parameterized: status = ?)
-        if (sql.includes('FROM trigger_executions') && sql.includes('status = ?') && !sql.includes('UPDATE')) {
+        if (
+          sql.includes('FROM trigger_executions') &&
+          sql.includes('status = ?') &&
+          !sql.includes('UPDATE')
+        ) {
           const statusArg = args[0] as string;
           if (statusArg === 'running') {
             if (options.staleQueryError) {
@@ -179,6 +190,7 @@ function makeStaleExec(overrides: Partial<StaleRow> = {}): StaleRow {
 describe('runTriggerExecutionCleanup', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockPurgeExpiredWebhookDeliveries.mockResolvedValue(0);
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-04-11T12:00:00Z'));
   });
@@ -202,9 +214,12 @@ describe('runTriggerExecutionCleanup', () => {
         staleRecovered: 0,
         staleQueuedRecovered: 0,
         retentionPurged: 0,
+        webhookDeliveriesPurged: 0,
         errors: 0,
       });
-      expect((env.DATABASE as unknown as { prepare: ReturnType<typeof vi.fn> }).prepare).not.toHaveBeenCalled();
+      expect(
+        (env.DATABASE as unknown as { prepare: ReturnType<typeof vi.fn> }).prepare
+      ).not.toHaveBeenCalled();
     });
 
     it('runs normally when TRIGGER_EXECUTION_CLEANUP_ENABLED is not set', async () => {
@@ -214,6 +229,43 @@ describe('runTriggerExecutionCleanup', () => {
       await runTriggerExecutionCleanup(env);
 
       expect(db.prepare).toHaveBeenCalled();
+    });
+  });
+
+  describe('webhook delivery retention', () => {
+    it('reconciles webhook leases before excluding them from generic stale recovery', async () => {
+      const db = createMockDb();
+
+      await runTriggerExecutionCleanup(createMockEnv({ DATABASE: db }));
+
+      expect(db._calls[0]?.sql).toContain('FROM webhook_deliveries d');
+      const staleQueries = db._calls.filter(
+        ({ sql }) => sql.includes('FROM trigger_executions') && sql.includes('WHERE status = ?')
+      );
+      expect(staleQueries).toHaveLength(2);
+      for (const query of staleQueries) {
+        expect(query.sql).toContain('NOT EXISTS');
+        expect(query.sql).toContain("d.outcome = 'processing'");
+      }
+    });
+
+    it('includes purged webhook deliveries in sweep statistics', async () => {
+      mockPurgeExpiredWebhookDeliveries.mockResolvedValueOnce(4);
+
+      const stats = await runTriggerExecutionCleanup(createMockEnv());
+
+      expect(stats.webhookDeliveriesPurged).toBe(4);
+      expect(stats.errors).toBe(0);
+      expect(mockPurgeExpiredWebhookDeliveries).toHaveBeenCalledOnce();
+    });
+
+    it('records a cleanup error without aborting the execution sweep', async () => {
+      mockPurgeExpiredWebhookDeliveries.mockRejectedValueOnce(new Error('D1 unavailable'));
+
+      const stats = await runTriggerExecutionCleanup(createMockEnv());
+
+      expect(stats.webhookDeliveriesPurged).toBe(0);
+      expect(stats.errors).toBe(1);
     });
   });
 
@@ -234,7 +286,7 @@ describe('runTriggerExecutionCleanup', () => {
       expect(stats.staleRecovered).toBe(1);
       expect(stats.errors).toBe(0);
 
-      const updateCall = db._calls.find(c => c.sql.includes('UPDATE trigger_executions'));
+      const updateCall = db._calls.find((c) => c.sql.includes('UPDATE trigger_executions'));
       expect(updateCall).toBeDefined();
       expect(updateCall!.bindings[0]).toBe('Linked task task-deleted was deleted');
       expect(updateCall!.bindings[2]).toBe('exec-deleted');
@@ -251,7 +303,7 @@ describe('runTriggerExecutionCleanup', () => {
       const stats = await runTriggerExecutionCleanup(env);
 
       expect(stats.staleRecovered).toBe(1);
-      const updateCall = db._calls.find(c => c.sql.includes('UPDATE trigger_executions'));
+      const updateCall = db._calls.find((c) => c.sql.includes('UPDATE trigger_executions'));
       expect(updateCall!.bindings[0]).toBe('Linked task task-completed is completed (sync missed)');
     });
 
@@ -266,7 +318,7 @@ describe('runTriggerExecutionCleanup', () => {
       const stats = await runTriggerExecutionCleanup(env);
 
       expect(stats.staleRecovered).toBe(1);
-      const updateCall = db._calls.find(c => c.sql.includes('UPDATE trigger_executions'));
+      const updateCall = db._calls.find((c) => c.sql.includes('UPDATE trigger_executions'));
       expect(updateCall!.bindings[0]).toBe('Linked task task-failed is failed (sync missed)');
     });
 
@@ -281,7 +333,7 @@ describe('runTriggerExecutionCleanup', () => {
       const stats = await runTriggerExecutionCleanup(env);
 
       expect(stats.staleRecovered).toBe(1);
-      const updateCall = db._calls.find(c => c.sql.includes('UPDATE trigger_executions'));
+      const updateCall = db._calls.find((c) => c.sql.includes('UPDATE trigger_executions'));
       expect(updateCall!.bindings[0]).toBe('Linked task task-cancelled is cancelled (sync missed)');
     });
 
@@ -296,8 +348,10 @@ describe('runTriggerExecutionCleanup', () => {
       const stats = await runTriggerExecutionCleanup(env);
 
       expect(stats.staleRecovered).toBe(1);
-      const updateCall = db._calls.find(c => c.sql.includes('UPDATE trigger_executions'));
-      expect(updateCall!.bindings[0]).toBe("Linked task task-queued stuck in 'queued' past stale threshold");
+      const updateCall = db._calls.find((c) => c.sql.includes('UPDATE trigger_executions'));
+      expect(updateCall!.bindings[0]).toBe(
+        "Linked task task-queued stuck in 'queued' past stale threshold"
+      );
     });
 
     it('recovers execution with no linked task (submission failed)', async () => {
@@ -310,7 +364,7 @@ describe('runTriggerExecutionCleanup', () => {
       const stats = await runTriggerExecutionCleanup(env);
 
       expect(stats.staleRecovered).toBe(1);
-      const updateCall = db._calls.find(c => c.sql.includes('UPDATE trigger_executions'));
+      const updateCall = db._calls.find((c) => c.sql.includes('UPDATE trigger_executions'));
       expect(updateCall!.bindings[0]).toBe('Task was never created (submission failed)');
     });
 
@@ -397,7 +451,10 @@ describe('runTriggerExecutionCleanup', () => {
       await runTriggerExecutionCleanup(env);
 
       const runningQuery = db._calls.find(
-        c => c.sql.includes('FROM trigger_executions') && c.sql.includes('status = ?') && c.bindings[0] === 'running',
+        (c) =>
+          c.sql.includes('FROM trigger_executions') &&
+          c.sql.includes('status = ?') &&
+          c.bindings[0] === 'running'
       );
       expect(runningQuery).toBeDefined();
       expect(runningQuery!.sql).toContain('LIMIT');
@@ -421,7 +478,7 @@ describe('runTriggerExecutionCleanup', () => {
 
       await runTriggerExecutionCleanup(env);
 
-      const taskQuery = db._calls.find(c => c.sql.includes('FROM tasks WHERE id IN'));
+      const taskQuery = db._calls.find((c) => c.sql.includes('FROM tasks WHERE id IN'));
       expect(taskQuery).toBeDefined();
       expect(taskQuery!.bindings).toHaveLength(2);
     });
@@ -436,7 +493,7 @@ describe('runTriggerExecutionCleanup', () => {
 
       await runTriggerExecutionCleanup(env);
 
-      const taskQuery = db._calls.find(c => c.sql.includes('FROM tasks WHERE id IN'));
+      const taskQuery = db._calls.find((c) => c.sql.includes('FROM tasks WHERE id IN'));
       expect(taskQuery).toBeUndefined();
     });
   });
@@ -456,10 +513,12 @@ describe('runTriggerExecutionCleanup', () => {
 
       expect(stats.staleQueuedRecovered).toBe(1);
 
-      const updateCalls = db._calls.filter(c => c.sql.includes('UPDATE trigger_executions'));
-      const queuedUpdate = updateCalls.find(c => c.bindings[3] === 'queued');
+      const updateCalls = db._calls.filter((c) => c.sql.includes('UPDATE trigger_executions'));
+      const queuedUpdate = updateCalls.find((c) => c.bindings[3] === 'queued');
       expect(queuedUpdate).toBeDefined();
-      expect(queuedUpdate!.bindings[0]).toBe('Queued execution never started (submission failed or timed out)');
+      expect(queuedUpdate!.bindings[0]).toBe(
+        'Queued execution never started (submission failed or timed out)'
+      );
     });
 
     it('recovers queued execution with a linked task', async () => {
@@ -474,8 +533,8 @@ describe('runTriggerExecutionCleanup', () => {
 
       expect(stats.staleQueuedRecovered).toBe(1);
 
-      const updateCalls = db._calls.filter(c => c.sql.includes('UPDATE trigger_executions'));
-      const queuedUpdate = updateCalls.find(c => c.bindings[3] === 'queued');
+      const updateCalls = db._calls.filter((c) => c.sql.includes('UPDATE trigger_executions'));
+      const queuedUpdate = updateCalls.find((c) => c.bindings[3] === 'queued');
       expect(queuedUpdate).toBeDefined();
       expect(queuedUpdate!.bindings[0]).toContain('Queued execution stale');
     });
@@ -487,22 +546,22 @@ describe('runTriggerExecutionCleanup', () => {
       });
       const env = createMockEnv({
         DATABASE: db,
-        TRIGGER_STALE_EXECUTION_TIMEOUT_MS: '1800000',  // 30 min for running
-        TRIGGER_STALE_QUEUED_TIMEOUT_MS: '120000',       // 2 min for queued
+        TRIGGER_STALE_EXECUTION_TIMEOUT_MS: '1800000', // 30 min for running
+        TRIGGER_STALE_QUEUED_TIMEOUT_MS: '120000', // 2 min for queued
       });
 
       await runTriggerExecutionCleanup(env);
 
       // Find the running query
       const runningQuery = db._calls.find(
-        c => c.sql.includes('status = ?') && c.bindings[0] === 'running',
+        (c) => c.sql.includes('status = ?') && c.bindings[0] === 'running'
       );
       expect(runningQuery).toBeDefined();
       const runningCutoff = new Date(runningQuery!.bindings[1] as string);
 
       // Find the queued query
       const queuedQuery = db._calls.find(
-        c => c.sql.includes('status = ?') && c.bindings[0] === 'queued',
+        (c) => c.sql.includes('status = ?') && c.bindings[0] === 'queued'
       );
       expect(queuedQuery).toBeDefined();
       const queuedCutoff = new Date(queuedQuery!.bindings[1] as string);
@@ -518,7 +577,7 @@ describe('runTriggerExecutionCleanup', () => {
       await runTriggerExecutionCleanup(env);
 
       const queuedQuery = db._calls.find(
-        c => c.sql.includes('status = ?') && c.bindings[0] === 'queued',
+        (c) => c.sql.includes('status = ?') && c.bindings[0] === 'queued'
       );
       expect(queuedQuery).toBeDefined();
       const cutoffDate = new Date(queuedQuery!.bindings[1] as string);
@@ -567,7 +626,7 @@ describe('runTriggerExecutionCleanup', () => {
 
       expect(stats.retentionPurged).toBe(42);
 
-      const deleteCall = db._calls.find(c => c.sql.includes('DELETE FROM trigger_executions'));
+      const deleteCall = db._calls.find((c) => c.sql.includes('DELETE FROM trigger_executions'));
       expect(deleteCall).toBeDefined();
       expect(deleteCall!.sql).toContain("'completed', 'failed', 'skipped'");
     });
@@ -581,7 +640,7 @@ describe('runTriggerExecutionCleanup', () => {
 
       await runTriggerExecutionCleanup(env);
 
-      const deleteCall = db._calls.find(c => c.sql.includes('DELETE FROM trigger_executions'));
+      const deleteCall = db._calls.find((c) => c.sql.includes('DELETE FROM trigger_executions'));
       expect(deleteCall).toBeDefined();
       const cutoffDate = new Date(deleteCall!.bindings[0] as string);
       const expectedCutoff = new Date('2026-04-11T12:00:00Z');
@@ -595,11 +654,13 @@ describe('runTriggerExecutionCleanup', () => {
 
       await runTriggerExecutionCleanup(env);
 
-      const deleteCall = db._calls.find(c => c.sql.includes('DELETE FROM trigger_executions'));
+      const deleteCall = db._calls.find((c) => c.sql.includes('DELETE FROM trigger_executions'));
       expect(deleteCall).toBeDefined();
       const cutoffDate = new Date(deleteCall!.bindings[0] as string);
       const expectedCutoff = new Date('2026-04-11T12:00:00Z');
-      expectedCutoff.setDate(expectedCutoff.getDate() - DEFAULT_TRIGGER_EXECUTION_LOG_RETENTION_DAYS);
+      expectedCutoff.setDate(
+        expectedCutoff.getDate() - DEFAULT_TRIGGER_EXECUTION_LOG_RETENTION_DAYS
+      );
       expect(Math.abs(cutoffDate.getTime() - expectedCutoff.getTime())).toBeLessThan(1000);
     });
 
@@ -630,7 +691,8 @@ describe('runTriggerExecutionCleanup', () => {
       await runTriggerExecutionCleanup(env);
 
       const staleQuery = db._calls.find(
-        c => c.sql.includes('status = ?') && c.bindings[0] === 'running' && !c.sql.includes('UPDATE'),
+        (c) =>
+          c.sql.includes('status = ?') && c.bindings[0] === 'running' && !c.sql.includes('UPDATE')
       );
       expect(staleQuery).toBeDefined();
       const cutoffDate = new Date(staleQuery!.bindings[1] as string);
@@ -648,7 +710,8 @@ describe('runTriggerExecutionCleanup', () => {
       await runTriggerExecutionCleanup(env);
 
       const staleQuery = db._calls.find(
-        c => c.sql.includes('status = ?') && c.bindings[0] === 'running' && !c.sql.includes('UPDATE'),
+        (c) =>
+          c.sql.includes('status = ?') && c.bindings[0] === 'running' && !c.sql.includes('UPDATE')
       );
       expect(staleQuery).toBeDefined();
       const cutoffDate = new Date(staleQuery!.bindings[1] as string);

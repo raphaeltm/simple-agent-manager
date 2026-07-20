@@ -1,6 +1,7 @@
 /**
  * Chat session CRUD, state machine, listing, and search.
  */
+import { log } from '../../lib/logger';
 import { getAttentionSummary } from './attention';
 import {
   parseChatSessionListRow,
@@ -55,6 +56,14 @@ export function createSession(
   }
 
   return { id, now };
+}
+
+export function linkSessionToTask(sql: SqlStorage, sessionId: string, taskId: string): boolean {
+  const cursor = sql.exec(
+    'UPDATE chat_sessions SET task_id = ?, updated_at = ? WHERE id = ? AND (task_id IS NULL OR task_id = ?)',
+    taskId, Date.now(), sessionId, taskId
+  );
+  return cursor.rowsWritten > 0;
 }
 
 function terminateSession(
@@ -139,7 +148,7 @@ export function listSessions(
   offset: number = 0,
   taskId: string | null = null,
   createdByUserId: string | null = null
-): { sessions: Record<string, unknown>[]; total: number } {
+): { sessions: Record<string, unknown>[]; total: number; hasMore: boolean } {
   const conditions: string[] = [];
   const params: (string | number)[] = [];
 
@@ -161,6 +170,7 @@ export function listSessions(
   const totalRow = sql
     .exec(`SELECT COUNT(*) as cnt FROM chat_sessions ${whereClause}`, ...params)
     .toArray()[0];
+  const total = totalRow ? parseCountCnt(totalRow, 'sessions.list_total') : 0;
 
   const rows = sql
     .exec(
@@ -171,10 +181,58 @@ export function listSessions(
     )
     .toArray();
 
-  return {
-    sessions: rows.map((row) => enrichWithAttention(sql, mapSessionRow(row))),
-    total: totalRow ? parseCountCnt(totalRow, 'sessions.list_total') : 0,
-  };
+  // Fault-isolated enrichment. A single malformed row (e.g. a legacy row that
+  // fails the valibot schema) must NEVER throw and 500 the whole list — it is
+  // skipped and logged so the offending field is diagnosable in prod. See
+  // .claude/rules/50 (list reads tolerate a single bad row) and .claude/rules/41.
+  const { sessions, skipped } = enrichSessionRows(sql, rows, 'sessions.list');
+
+  // Offset-paginated: there are more sessions beyond this page whenever the
+  // offset window has not reached the total row count. `rows.length` is the raw
+  // SQL-fetched count, unaffected by post-fetch skips, so this stays correct.
+  const hasMore = offset + rows.length < total;
+
+  if (skipped > 0) {
+    log.warn('sessions.list_degraded', {
+      status,
+      taskId,
+      createdByUserId,
+      total,
+      fetched: rows.length,
+      returned: sessions.length,
+      skipped,
+    });
+  }
+
+  return { sessions, total, hasMore };
+}
+
+/**
+ * Map + attention-enrich a set of raw session rows without ever throwing for a
+ * single bad row. A row that fails to parse/enrich is skipped and logged with a
+ * best-effort id + the parser error so the offending field is diagnosable.
+ * Returns the successfully-enriched sessions plus the skipped count.
+ */
+function enrichSessionRows(
+  sql: SqlStorage,
+  rows: Record<string, unknown>[],
+  context: string
+): { sessions: Record<string, unknown>[]; skipped: number } {
+  const sessions: Record<string, unknown>[] = [];
+  let skipped = 0;
+
+  for (const row of rows) {
+    try {
+      sessions.push(enrichWithAttention(sql, mapSessionRow(row)));
+    } catch (e) {
+      skipped++;
+      // Extract a best-effort id for diagnosis without re-triggering the parse.
+      const rawId = typeof row.id === 'string' ? row.id : null;
+      log.warn(`${context}_row_skipped`, { rowId: rawId, error: String(e) });
+    }
+  }
+
+  return { sessions, skipped };
 }
 
 export function getSessionsByTaskIds(
@@ -194,7 +252,8 @@ export function getSessionsByTaskIds(
     )
     .toArray();
 
-  return rows.map((row) => enrichWithAttention(sql, mapSessionRow(row)));
+  // Tolerate a single malformed row rather than throwing the whole lookup.
+  return enrichSessionRows(sql, rows, 'sessions.by_task_ids').sessions;
 }
 
 export function getSession(
@@ -216,7 +275,18 @@ export function getSession(
 
   const row = rows[0];
   if (!row) return null;
-  return enrichWithAttention(sql, mapSessionRow(row));
+  // A malformed row must NOT 500 this hot single-session path (chat-state
+  // polling, deep links, task repair) — the same class of bad row the list read
+  // now tolerates. Degrade to null (caller returns a clean 404) and log the
+  // offending field for repair, rather than throwing INTERNAL_ERROR. See
+  // .claude/rules/50.
+  try {
+    return enrichWithAttention(sql, mapSessionRow(row));
+  } catch (e) {
+    const rawId = typeof row.id === 'string' ? row.id : sessionId;
+    log.warn('sessions.get_row_skipped', { rowId: rawId, error: String(e) });
+    return null;
+  }
 }
 
 export function updateSessionTopic(

@@ -5,17 +5,17 @@ description: Simple Agent Manager — ephemeral AI coding environments on Cloudf
 
 import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
 
-**Simple Agent Manager (SAM)** is an open-source platform for running ephemeral AI coding agent environments. It provisions cloud VMs, sets up devcontainers, and gives you a browser-based interface with your choice of AI coding agent — Claude Code, OpenAI Codex, Google Gemini, Mistral Vibe, OpenCode, or Amp.
+**Simple Agent Manager (SAM)** is an open-source platform for getting real work done with AI coding agents. You import a GitHub repository, describe what you want in a chat, and SAM runs your choice of AI coding agent — Claude Code, OpenAI Codex, Gemini CLI, Mistral Vibe, OpenCode, or Amp — that reads your code, makes the change, and opens a pull request. SAM provisions the environment for you.
 
 ## Why SAM?
 
-AI coding agents need real development environments — not sandboxes. SAM gives each workspace an isolated container on a cloud VM with a full Linux environment, Docker, and git, accessible through a web interface with chat and terminal.
+AI coding agents need real development environments — not sandboxes. SAM gives each agent an isolated environment with a full Linux toolchain, Docker, and git, and puts it behind a simple chat. You describe the outcome you want; SAM handles the servers, the setup, and the pull request.
 
 <CardGrid>
   <Card title="Bring Your Own Cloud" icon="cloud">
-    You connect Hetzner, Scaleway, or GCP cloud credentials. When you bring your own cloud, VMs run
-    on your infrastructure and are billed to your account. The platform never stores your cloud
-    credentials as environment variables.
+    Connect a Hetzner or Scaleway credential and VMs run on your own infrastructure, billed to your
+    account. On the hosted platform, compute can be provided for you. Your cloud credentials are
+    never stored as environment variables.
   </Card>
   <Card title="Serverless Control Plane" icon="rocket">
     The API runs on Cloudflare Workers — zero infrastructure to manage. D1 for storage, KV for
@@ -34,48 +34,40 @@ AI coding agents need real development environments — not sandboxes. SAM gives
 ## How It Works
 
 1. **Sign in** with GitHub via the web UI
-2. **Add your cloud provider credentials** in Settings (Hetzner, Scaleway, or GCP)
-3. **Configure agent credentials** for your preferred AI coding agents
-4. **Install the GitHub App** on your repositories
-5. **Create a project** — link a GitHub repo to start working
-6. **Describe your idea** — tell SAM what you want done; it provisions a VM, creates a workspace, and runs the agent autonomously
-7. **Chat with agents** — watch real-time streaming output, browse files, fork conversations, use voice input
-8. **Review the PR** — the agent commits, pushes, and opens a pull request when done
+2. **Connect an AI agent** in Settings → Connections (Claude Code, Codex, Gemini CLI, and more)
+3. **Install the GitHub App** on the repositories you want to use
+4. **Import a project** — link a GitHub repo from the Dashboard
+5. **Chat** — describe what you want; SAM provisions a workspace and runs the agent for you
+6. **Review the PR** — the agent commits, pushes, and opens a pull request when it's done
 
 ## Key Features
 
-- **Multi-provider support** — Hetzner Cloud, Scaleway, and GCP with unified VM size abstraction
-- **Six AI agents** — Claude Code, OpenAI Codex, Google Gemini, Mistral Vibe, OpenCode, Amp
-- **Idea execution** — describe what you want, SAM handles the rest with warm node pooling for fast reuse
-- **Chat-first UX** — project pages are chat interfaces with real-time streaming
-- **File browsing in chat** — browse, view, and diff workspace files without leaving the conversation
+- **Six AI agents** — Claude Code, OpenAI Codex, Gemini CLI, Mistral Vibe, OpenCode, Amp
+- **Chat-first UX** — describe what you want in plain language and watch the agent work in real time
+- **Agent profiles** — save reusable agent + model + settings combinations and pick one per chat
+- **Skills** — layer reusable instructions and tools on top of a profile for specific kinds of work
+- **Triggers** — start agent work automatically from a schedule, a GitHub event, or an authenticated webhook
+- **File browsing in chat** — browse, view, and diff files without leaving the conversation
 - **File upload & download** — attach files to conversations and download from workspaces
 - **Conversation forking** — branch from any point to explore alternatives
 - **Voice input & TTS** — speak your prompts, listen to responses with a persistent audio player
 - **Command palette** — quick navigation via Cmd+K / Ctrl+K
 - **In-app notifications** — progress updates, agent requests, PR creation alerts
-- **Port exposure** — auto-detected dev server ports accessible via unique URLs
-- **Lightweight workspaces** — fast startup by skipping devcontainer build
 - **App deployments** — create deployment environments, gate agent deploy access, and publish Docker Compose releases
-
-## Architecture at a Glance
-
-SAM is a monorepo with four main components:
-
-| Component          | Technology                      | Purpose                                                           |
-| ------------------ | ------------------------------- | ----------------------------------------------------------------- |
-| **API**            | Cloudflare Worker (Hono)        | Authentication, resource management, VM proxying, Durable Objects |
-| **Web UI**         | React + Vite (Cloudflare Pages) | Dashboard, chat interface, terminal, notifications                |
-| **VM Agent**       | Go binary                       | Docker management, PTY sessions, ACP gateway, port scanning       |
-| **Infrastructure** | Pulumi (TypeScript)             | D1, KV, R2, DNS provisioning                                      |
+- **Bring your own cloud** — run on your own Hetzner or Scaleway account, or use hosted compute
 
 <LinkCard
   title="Quickstart"
   href="/docs/quickstart/"
-  description="Get up and running with SAM in minutes."
+  description="Import a repo and get your first pull request in minutes."
+/>
+<LinkCard
+  title="AI Agents"
+  href="/docs/guides/agents/"
+  description="Choose an agent, connect credentials, and configure profiles."
 />
 <LinkCard
   title="Architecture Overview"
   href="/docs/architecture/overview/"
-  description="Deep dive into how every system fits together."
+  description="For self-hosters and the curious: how every system fits together."
 />

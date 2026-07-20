@@ -60,6 +60,12 @@ user-invocable: false
 - `POST /api/projects/:projectId/tasks/:taskId/delegate` — Delegate ready+unblocked task to owned running workspace
 - `GET /api/projects/:projectId/tasks/:taskId/events` — List append-only task status events
 
+## Administration (Superadmin Only)
+
+- `GET /api/admin/tasks/stuck` — List tasks currently in transient states
+- `GET /api/admin/tasks/:taskId/reconciliation-diagnostics` — Read the TaskRunner probe, task-scoped runtime liveness, eligibility threshold, reconciliation decision, and whether/where the bounded cursor page selects the task, without mutating task state
+- `GET /api/admin/tasks/recent-failures` — List recent failed tasks with error details
+
 ## Agent Sessions
 
 - `GET /api/workspaces/:id/agent-sessions` — List workspace agent sessions
@@ -83,6 +89,22 @@ user-invocable: false
 - `GET /api/notifications/preferences` — Get notification preferences
 - `PUT /api/notifications/preferences` — Update a notification preference
 - `GET /api/notifications/ws` — WebSocket upgrade for real-time notification delivery
+
+## Automation Triggers (Project Scoped)
+
+- `POST /api/projects/:projectId/triggers` — Create a cron, GitHub, or generic webhook trigger. Webhook creation requires `agentProfileId` and `webhookConfig`; its response includes a one-time `webhookCredential`.
+- `GET /api/projects/:projectId/triggers` — List triggers with safe source configuration. Webhook tokens are redacted to `tokenLastFour`.
+- `GET /api/projects/:projectId/triggers/:triggerId` — Get trigger details and recent execution history.
+- `PATCH /api/projects/:projectId/triggers/:triggerId` — Update common trigger settings or source-specific webhook configuration.
+- `DELETE /api/projects/:projectId/triggers/:triggerId` — Delete a trigger and cascading source configuration, delivery audit, and execution history.
+- `POST /api/projects/:projectId/triggers/:triggerId/test` — Preview the cron template context.
+- `POST /api/projects/:projectId/triggers/:triggerId/run` — Submit a manual trigger execution. Webhook triggers accept optional `{ payload, headers }` preview context.
+- `POST /api/projects/:projectId/triggers/:triggerId/webhook/preview` — Render a webhook template and evaluate configured filters without creating an execution.
+- `POST /api/projects/:projectId/triggers/:triggerId/webhook/rotate` — Rotate the webhook bearer token and return the replacement once.
+- `GET /api/projects/:projectId/triggers/:triggerId/webhook/deliveries` — List redacted webhook delivery audit metadata (`limit`, `cursor`).
+- `POST /api/webhooks/ingest` — Public generic webhook ingress. Requires `Authorization: Bearer <token>`, `Content-Type: application/json`, and a JSON object body. Supports optional `Idempotency-Key`.
+
+The MCP `create_trigger` tool intentionally creates cron triggers only. Generic webhook creation, filter management, preview, and credential rotation use the authenticated UI/REST surface so one-time credentials can be presented safely.
 
 ## VM Communication (Callback Endpoints)
 
@@ -133,9 +155,18 @@ user-invocable: false
 
 ## Credentials
 
-- `GET /api/credentials` — Get user's cloud provider credentials
-- `POST /api/credentials` — Save cloud provider credentials
-- `DELETE /api/credentials/:provider` — Delete stored cloud provider credential
+- `GET /api/credentials` — Get the user's cloud provider connections. GCP returns safe `authType`, project, service-account email, zone, and optional key ID metadata; encrypted source credentials are never returned, and malformed rows are isolated.
+- `POST /api/credentials` — Save a cloud provider credential. New GCP WIF writes use the versioned `workload-identity` variant.
+- `DELETE /api/credentials/:provider` — Delete the stored cloud provider credential. GCP deletion atomically removes legacy and generated composable copies and cached derivatives; it does not revoke Google-managed keys.
+
+### GCP
+
+- `PUT /api/gcp/service-account` — Validate and atomically save or rotate an OAuth-free service-account JSON credential. Body: `{ serviceAccountJson, defaultZone }`. Verification and the mutation rate limit run before replacement; the response contains safe metadata only.
+- `POST /api/gcp/setup` — Complete the recommended keyless WIF setup using an OAuth handle and store the versioned WIF credential.
+- `POST /api/gcp/projects` — List Google Cloud projects for a short-lived infrastructure OAuth handle.
+- `POST /api/gcp/verify` — Verify the currently stored GCP credential, dispatching to WIF or service-account authentication.
+
+The service-account flow ignores uploaded endpoint fields and exchanges RS256 assertions only at SAM's fixed Google token endpoint.
 
 ## GitHub Integration
 

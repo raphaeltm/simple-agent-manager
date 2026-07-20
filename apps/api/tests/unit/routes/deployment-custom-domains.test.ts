@@ -7,6 +7,11 @@ const deploymentEnvironments = {
   id: 'deploymentEnvironments.id',
   projectId: 'deploymentEnvironments.projectId',
   nodeId: 'deploymentEnvironments.nodeId',
+  status: 'deploymentEnvironments.status',
+  desiredRoutingRevision: 'deploymentEnvironments.desiredRoutingRevision',
+  observedRoutingRevision: 'deploymentEnvironments.observedRoutingRevision',
+  observedRoutingStatus: 'deploymentEnvironments.observedRoutingStatus',
+  observedRoutingError: 'deploymentEnvironments.observedRoutingError',
 };
 const deploymentCustomDomains = {
   id: 'deploymentCustomDomains.id',
@@ -18,6 +23,12 @@ const deploymentCustomDomains = {
   verificationStatus: 'deploymentCustomDomains.verificationStatus',
   verificationError: 'deploymentCustomDomains.verificationError',
   verifiedAt: 'deploymentCustomDomains.verifiedAt',
+  verifiedCnameTarget: 'deploymentCustomDomains.verifiedCnameTarget',
+  desiredState: 'deploymentCustomDomains.desiredState',
+  routingStatus: 'deploymentCustomDomains.routingStatus',
+  activationRoutingRevision: 'deploymentCustomDomains.activationRoutingRevision',
+  deactivationRoutingRevision: 'deploymentCustomDomains.deactivationRoutingRevision',
+  deletedAt: 'deploymentCustomDomains.deletedAt',
   createdBy: 'deploymentCustomDomains.createdBy',
   createdAt: 'deploymentCustomDomains.createdAt',
 };
@@ -28,6 +39,7 @@ const nodes = {
 
 type Condition =
   | { op: 'eq'; col: unknown; val: unknown }
+  | { op: 'isNull'; col: unknown }
   | { op: 'and'; conds: Condition[] }
   | undefined;
 
@@ -41,6 +53,21 @@ interface DomainRow {
   verificationStatus: 'pending' | 'verified' | 'failed';
   verificationError: string | null;
   verifiedAt: string | null;
+  verifiedCnameTarget: string | null;
+  desiredState: 'active' | 'deactivating' | 'deleted';
+  routingStatus:
+    | 'pending_dns'
+    | 'failed'
+    | 'activating'
+    | 'active'
+    | 'deactivating'
+    | 'deactivated'
+    | 'route_missing'
+    | 'dns_recheck_required'
+    | 'inactive_environment_stopped';
+  activationRoutingRevision: number | null;
+  deactivationRoutingRevision: number | null;
+  deletedAt: string | null;
   createdBy: string | null;
   createdAt: string;
 }
@@ -48,15 +75,29 @@ interface DomainRow {
 const mockRequireProjectAccess = vi.fn();
 const mockRequireProjectCapability = vi.fn();
 const mockGetEnvironmentPublicRouteTargets = vi.fn();
+const mockRecordCustomDomainEvent = vi.fn();
+const mockRequestRoutingRevision = vi.fn();
 const mockVerifyCustomDomainTarget = vi.fn();
 
-let envRows: Array<{ id: string; projectId: string; nodeId: string | null }> = [];
+interface EnvironmentRow {
+  id: string;
+  projectId: string;
+  nodeId: string | null;
+  status: 'active' | 'starting' | 'stopped' | 'error';
+  desiredRoutingRevision: number;
+  observedRoutingRevision: number;
+  observedRoutingStatus: string | null;
+  observedRoutingError: string | null;
+}
+
+let envRows: EnvironmentRow[] = [];
 let domainRows: DomainRow[] = [];
 let nodeRows: Array<{ id: string; ipAddress: string | null }> = [];
 
 vi.mock('drizzle-orm', () => ({
   and: (...conds: Condition[]) => ({ op: 'and', conds }),
   eq: (col: unknown, val: unknown) => ({ op: 'eq', col, val }),
+  isNull: (col: unknown) => ({ op: 'isNull', col }),
 }));
 
 vi.mock('../../../src/db/schema', () => ({
@@ -77,8 +118,14 @@ vi.mock('../../../src/middleware/project-auth', () => ({
 }));
 
 vi.mock('../../../src/services/deployment-custom-domains', () => ({
+  customDomainExpectedTargetChanged: (domain: { verifiedCnameTarget?: string | null }, parent: { hostname: string } | null) =>
+    !!domain.verifiedCnameTarget && !!parent && domain.verifiedCnameTarget !== parent.hostname,
+  findRouteTargetForDomain: (routes: Array<{ service: string; containerPort: number }>, domain: { service: string; port: number }) =>
+    routes.find((route) => route.service === domain.service && route.containerPort === domain.port) ?? null,
   getEnvironmentPublicRouteTargets: (...args: unknown[]) =>
     mockGetEnvironmentPublicRouteTargets(...args),
+  recordCustomDomainEvent: (...args: unknown[]) => mockRecordCustomDomainEvent(...args),
+  requestRoutingRevision: (...args: unknown[]) => mockRequestRoutingRevision(...args),
 }));
 
 vi.mock('../../../src/services/deployment-domain-verify', () => ({
@@ -107,6 +154,9 @@ function eqValue(condition: Condition, col: unknown): unknown {
   if (condition.op === 'eq') {
     return condition.col === col ? condition.val : undefined;
   }
+  if (condition.op === 'isNull') {
+    return undefined;
+  }
   for (const child of condition.conds) {
     const value = eqValue(child, col);
     if (value !== undefined) {
@@ -114,6 +164,19 @@ function eqValue(condition: Condition, col: unknown): unknown {
     }
   }
   return undefined;
+}
+
+function requiresNull(condition: Condition, col: unknown): boolean {
+  if (!condition) {
+    return false;
+  }
+  if (condition.op === 'isNull') {
+    return condition.col === col;
+  }
+  if (condition.op === 'and') {
+    return condition.conds.some((child) => requiresNull(child, col));
+  }
+  return false;
 }
 
 function selectRows(table: unknown, condition: Condition) {
@@ -131,11 +194,13 @@ function selectRows(table: unknown, condition: Condition) {
     const id = eqValue(condition, deploymentCustomDomains.id);
     const environmentId = eqValue(condition, deploymentCustomDomains.environmentId);
     const hostname = eqValue(condition, deploymentCustomDomains.hostname);
+    const deletedAtIsNull = requiresNull(condition, deploymentCustomDomains.deletedAt);
     return domainRows.filter((row) => {
       return (
         (id === undefined || row.id === id) &&
         (environmentId === undefined || row.environmentId === environmentId) &&
-        (hostname === undefined || row.hostname === hostname)
+        (hostname === undefined || row.hostname === hostname) &&
+        (!deletedAtIsNull || row.deletedAt === null)
       );
     });
   }
@@ -169,6 +234,12 @@ function createMockDb() {
             verificationStatus: values.verificationStatus ?? 'pending',
             verificationError: values.verificationError ?? null,
             verifiedAt: values.verifiedAt ?? null,
+            verifiedCnameTarget: values.verifiedCnameTarget ?? null,
+            desiredState: values.desiredState ?? 'active',
+            routingStatus: values.routingStatus ?? 'pending_dns',
+            activationRoutingRevision: values.activationRoutingRevision ?? null,
+            deactivationRoutingRevision: values.deactivationRoutingRevision ?? null,
+            deletedAt: values.deletedAt ?? null,
             createdBy: values.createdBy ?? 'user-1',
             createdAt: values.createdAt ?? '2026-06-24T00:00:00.000Z',
           });
@@ -180,6 +251,12 @@ function createMockDb() {
         where: vi.fn(async (condition: Condition) => {
           if (table === deploymentCustomDomains) {
             const rows = selectRows(table, condition) as DomainRow[];
+            for (const row of rows) {
+              Object.assign(row, values);
+            }
+          }
+          if (table === deploymentEnvironments) {
+            const rows = selectRows(table, condition) as EnvironmentRow[];
             for (const row of rows) {
               Object.assign(row, values);
             }
@@ -225,14 +302,57 @@ const parentRoute = {
   hostPort: 36000,
 };
 
+function makeDomainRow(overrides: Partial<DomainRow> = {}): DomainRow {
+  return {
+    id: 'domain-1',
+    environmentId: 'env-1',
+    service: 'web',
+    port: 3000,
+    routeIndex: 0,
+    hostname: 'app.customer.example.com',
+    verificationStatus: 'pending',
+    verificationError: null,
+    verifiedAt: null,
+    verifiedCnameTarget: null,
+    desiredState: 'active',
+    routingStatus: 'pending_dns',
+    activationRoutingRevision: null,
+    deactivationRoutingRevision: null,
+    deletedAt: null,
+    createdBy: 'user-1',
+    createdAt: '2026-06-24T00:00:00.000Z',
+    ...overrides,
+  };
+}
+
 describe('deployment custom domain routes', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockRequireProjectAccess.mockResolvedValue(undefined);
     mockRequireProjectCapability.mockResolvedValue(undefined);
     mockGetEnvironmentPublicRouteTargets.mockResolvedValue([parentRoute]);
+    mockRecordCustomDomainEvent.mockResolvedValue(undefined);
+    mockRequestRoutingRevision.mockImplementation(async (_db: unknown, environmentId: string) => {
+      const environment = envRows.find((row) => row.id === environmentId);
+      if (!environment) {
+        return 0;
+      }
+      environment.desiredRoutingRevision += 1;
+      return environment.desiredRoutingRevision;
+    });
     mockVerifyCustomDomainTarget.mockResolvedValue(true);
-    envRows = [{ id: 'env-1', projectId: 'proj-1', nodeId: 'node-1' }];
+    envRows = [
+      {
+        id: 'env-1',
+        projectId: 'proj-1',
+        nodeId: 'node-1',
+        status: 'active',
+        desiredRoutingRevision: 0,
+        observedRoutingRevision: 0,
+        observedRoutingStatus: null,
+        observedRoutingError: null,
+      },
+    ];
     domainRows = [];
     nodeRows = [{ id: 'node-1', ipAddress: '203.0.113.10' }];
   });
@@ -258,6 +378,10 @@ describe('deployment custom domain routes', () => {
       routeIndex: 0,
       hostname: 'app.customer.example.com',
       verificationStatus: 'pending',
+      desiredState: 'active',
+      routingStatus: 'pending_dns',
+      servingStatus: 'pending_dns',
+      verifiedCnameTarget: null,
       cnameTarget: parentRoute.hostname,
     });
     expect(domainRows).toHaveLength(1);
@@ -266,6 +390,8 @@ describe('deployment custom domain routes', () => {
       service: 'web',
       port: 3000,
       routeIndex: 0,
+      desiredState: 'active',
+      routingStatus: 'pending_dns',
       createdBy: 'user-1',
     });
   });
@@ -293,19 +419,12 @@ describe('deployment custom domain routes', () => {
 
   it('lists custom domains with the current expected CNAME target', async () => {
     domainRows = [
-      {
-        id: 'domain-1',
-        environmentId: 'env-1',
-        service: 'web',
-        port: 3000,
-        routeIndex: 0,
-        hostname: 'app.customer.example.com',
+      makeDomainRow({
         verificationStatus: 'verified',
-        verificationError: null,
         verifiedAt: '2026-06-24T00:00:00.000Z',
-        createdBy: 'user-1',
-        createdAt: '2026-06-24T00:00:00.000Z',
-      },
+        verifiedCnameTarget: parentRoute.hostname,
+        routingStatus: 'active',
+      }),
     ];
 
     const response = await request('/api/projects/proj-1/environments/env-1/custom-domains');
@@ -317,27 +436,15 @@ describe('deployment custom domain routes', () => {
         id: 'domain-1',
         hostname: 'app.customer.example.com',
         verificationStatus: 'verified',
+        verifiedCnameTarget: parentRoute.hostname,
+        servingStatus: 'active',
         cnameTarget: parentRoute.hostname,
       }),
     ]);
   });
 
   it('marks a custom domain verified when DoH points at the route target', async () => {
-    domainRows = [
-      {
-        id: 'domain-1',
-        environmentId: 'env-1',
-        service: 'web',
-        port: 3000,
-        routeIndex: 0,
-        hostname: 'app.customer.example.com',
-        verificationStatus: 'pending',
-        verificationError: null,
-        verifiedAt: null,
-        createdBy: 'user-1',
-        createdAt: '2026-06-24T00:00:00.000Z',
-      },
-    ];
+    domainRows = [makeDomainRow()];
 
     const response = await request(
       '/api/projects/proj-1/environments/env-1/custom-domains/domain-1/verify',
@@ -349,6 +456,10 @@ describe('deployment custom domain routes', () => {
     expect(body.verificationStatus).toBe('verified');
     expect(body.verificationError).toBeNull();
     expect(body.verifiedAt).toEqual(expect.any(String));
+    expect(body.verifiedCnameTarget).toBe(parentRoute.hostname);
+    expect(body.activationRoutingRevision).toBe(1);
+    expect(body.servingStatus).toBe('activating');
+    expect(mockRequestRoutingRevision).toHaveBeenCalled();
     expect(mockVerifyCustomDomainTarget).toHaveBeenCalledWith(
       'app.customer.example.com',
       parentRoute.hostname,
@@ -359,21 +470,7 @@ describe('deployment custom domain routes', () => {
 
   it('marks a custom domain failed and returns the exact CNAME target when DoH does not match', async () => {
     mockVerifyCustomDomainTarget.mockResolvedValueOnce(false);
-    domainRows = [
-      {
-        id: 'domain-1',
-        environmentId: 'env-1',
-        service: 'web',
-        port: 3000,
-        routeIndex: 0,
-        hostname: 'app.customer.example.com',
-        verificationStatus: 'pending',
-        verificationError: null,
-        verifiedAt: null,
-        createdBy: 'user-1',
-        createdAt: '2026-06-24T00:00:00.000Z',
-      },
-    ];
+    domainRows = [makeDomainRow()];
 
     const response = await request(
       '/api/projects/proj-1/environments/env-1/custom-domains/domain-1/verify',
@@ -391,21 +488,14 @@ describe('deployment custom domain routes', () => {
     });
   });
 
-  it('deletes a custom domain so it is omitted from the next apply', async () => {
+  it('requests deactivation for a verified custom domain instead of deleting immediately', async () => {
     domainRows = [
-      {
-        id: 'domain-1',
-        environmentId: 'env-1',
-        service: 'web',
-        port: 3000,
-        routeIndex: 0,
-        hostname: 'app.customer.example.com',
+      makeDomainRow({
         verificationStatus: 'verified',
-        verificationError: null,
         verifiedAt: '2026-06-24T00:00:00.000Z',
-        createdBy: 'user-1',
-        createdAt: '2026-06-24T00:00:00.000Z',
-      },
+        verifiedCnameTarget: parentRoute.hostname,
+        routingStatus: 'active',
+      }),
     ];
 
     const response = await request(
@@ -413,8 +503,21 @@ describe('deployment custom domain routes', () => {
       { method: 'DELETE' }
     );
 
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ id: 'domain-1', deleted: true });
-    expect(domainRows).toEqual([]);
+    const body = await response.json();
+    expect(response.status, JSON.stringify(body)).toBe(202);
+    expect(body).toMatchObject({
+      id: 'domain-1',
+      desiredState: 'deactivating',
+      routingStatus: 'deactivating',
+      servingStatus: 'deactivating',
+      deactivationRoutingRevision: 1,
+    });
+    expect(domainRows).toHaveLength(1);
+    expect(domainRows[0]).toMatchObject({
+      desiredState: 'deactivating',
+      routingStatus: 'deactivating',
+      deactivationRoutingRevision: 1,
+      deletedAt: null,
+    });
   });
 });

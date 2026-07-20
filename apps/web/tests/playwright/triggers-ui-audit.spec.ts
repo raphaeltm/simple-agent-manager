@@ -1,4 +1,4 @@
-import { expect, type Page, type Route, test,type TestInfo } from '@playwright/test';
+import { expect, type Page, type Route, test, type TestInfo } from '@playwright/test';
 
 import { assertNoOverflow, jsonResponse, makeMockUser } from './audit-helpers';
 
@@ -42,6 +42,27 @@ const MOCK_PROJECT = {
   },
 };
 
+const MOCK_PROFILE = {
+  id: 'profile-webhook-1',
+  projectId: 'proj-test-1',
+  userId: 'user-test-1',
+  name: 'Webhook operator',
+  description: 'Handles incoming service events',
+  model: 'claude-sonnet-4-6',
+  agentType: 'claude-code',
+  effort: 'medium',
+  isDefault: false,
+  isArchived: false,
+  createdAt: '2026-03-01T00:00:00Z',
+  updatedAt: '2026-03-01T00:00:00Z',
+};
+
+const WEBHOOK_CREDENTIAL = {
+  endpointUrl: 'https://api.example.test/api/webhooks/ingest',
+  token: `sam_wh_${'a'.repeat(43)}`,
+  headerName: 'Authorization' as const,
+};
+
 interface TriggerOverrides {
   id: string;
   name: string;
@@ -53,16 +74,28 @@ interface TriggerOverrides {
   nextFireAt?: string | null;
   lastTriggeredAt?: string | null;
   triggerCount?: number;
+  sourceType?: 'cron' | 'github' | 'webhook';
+  promptTemplate?: string;
+  agentProfileId?: string | null;
+  webhookConfig?: {
+    sourceLabel: string | null;
+    filterMode: 'all' | 'any';
+    filters: Array<{ path: string; operator: 'exists' | 'equals' | 'contains'; value?: string }>;
+    includedHeaders: string[];
+    tokenLastFour: string;
+    tokenCreatedAt: string;
+    tokenRotatedAt: string | null;
+  };
 }
 
 function makeTrigger(overrides: TriggerOverrides) {
   return {
     projectId: 'proj-test-1',
     userId: 'user-test-1',
-    sourceType: 'cron',
+    sourceType: overrides.sourceType ?? 'cron',
     skipIfRunning: true,
-    promptTemplate: 'Review open PRs for {{project.name}}',
-    agentProfileId: null,
+    promptTemplate: overrides.promptTemplate ?? 'Review open PRs for {{project.name}}',
+    agentProfileId: overrides.agentProfileId ?? null,
     taskMode: 'task',
     vmSizeOverride: null,
     maxConcurrent: 1,
@@ -144,7 +177,8 @@ const LONG_TEXT_TRIGGERS = [
   makeTrigger({
     id: 'lt-1',
     name: 'This is an extremely long trigger name that should definitely be truncated on mobile screens because it contains way too many words and characters to fit in a single line without breaking the layout',
-    description: 'This trigger has a very long description that goes into great detail about what the trigger does, when it fires, what kind of tasks it creates, and why it was configured this way. It includes multiple sentences with technical details.',
+    description:
+      'This trigger has a very long description that goes into great detail about what the trigger does, when it fires, what kind of tasks it creates, and why it was configured this way. It includes multiple sentences with technical details.',
     status: 'active',
     cronHumanReadable: 'Every 4 hours at minute 0 during weekdays in America/New_York timezone',
   }),
@@ -157,12 +191,13 @@ const LONG_TEXT_TRIGGERS = [
   makeTrigger({
     id: 'lt-3',
     name: 'Special chars: <script>alert("xss")</script> & "quotes" and 日本語テスト',
-    description: 'Unicode: 🚀🎉💻 and HTML: &amp; &lt; &gt; and URL: https://example.com/very/long/path/that/should/not/break/layout',
+    description:
+      'Unicode: 🚀🎉💻 and HTML: &amp; &lt; &gt; and URL: https://example.com/very/long/path/that/should/not/break/layout',
     status: 'paused',
   }),
 ];
 
-const MANY_TRIGGERS = Array.from({ length: 10 }, (_, i) => {
+const MANY_TRIGGERS = Array.from({ length: 30 }, (_, i) => {
   const statuses = ['active', 'paused', 'disabled'];
   return makeTrigger({
     id: `many-${i}`,
@@ -172,6 +207,129 @@ const MANY_TRIGGERS = Array.from({ length: 10 }, (_, i) => {
     triggerCount: i * 10,
   });
 });
+
+const WEBHOOK_TRIGGER = makeTrigger({
+  id: 'webhook-1',
+  name: 'Production incident intake 🚨',
+  description:
+    'Receives service events with long identifiers like incident/2026/07/13/region-eu-central-1 and safely starts the response profile.',
+  sourceType: 'webhook',
+  agentProfileId: MOCK_PROFILE.id,
+  promptTemplate: 'Triage this untrusted event: {{webhook.payload}}',
+  triggerCount: 12,
+  nextFireAt: null,
+  webhookConfig: {
+    sourceLabel: 'PagerDuty <primary> & 日本語',
+    filterMode: 'all',
+    filters: [{ path: 'event.action', operator: 'equals', value: 'triggered' }],
+    includedHeaders: ['x-request-id', 'x-event-type'],
+    tokenLastFour: '9xYz',
+    tokenCreatedAt: '2026-07-10T12:00:00Z',
+    tokenRotatedAt: null,
+  },
+});
+
+const WEBHOOK_DELIVERIES = [
+  {
+    id: 'delivery-1',
+    triggerId: WEBHOOK_TRIGGER.id,
+    outcome: 'accepted',
+    httpStatus: 202,
+    bodyBytes: 532,
+    executionId: 'execution-1',
+    errorCode: null,
+    receivedAt: '2026-07-13T10:00:00Z',
+    processedAt: '2026-07-13T10:00:01Z',
+  },
+  {
+    id: 'delivery-2',
+    triggerId: WEBHOOK_TRIGGER.id,
+    outcome: 'filtered',
+    httpStatus: 202,
+    bodyBytes: 98,
+    executionId: null,
+    errorCode: null,
+    receivedAt: '2026-07-13T09:55:00Z',
+    processedAt: '2026-07-13T09:55:00Z',
+  },
+  {
+    id: 'delivery-3',
+    triggerId: WEBHOOK_TRIGGER.id,
+    outcome: 'concurrent_limit',
+    httpStatus: 202,
+    bodyBytes: 12_345,
+    executionId: 'execution-3',
+    errorCode: null,
+    receivedAt: '2026-07-13T09:50:00Z',
+    processedAt: '2026-07-13T09:50:01Z',
+  },
+  {
+    id: 'delivery-4',
+    triggerId: WEBHOOK_TRIGGER.id,
+    outcome: 'duplicate',
+    httpStatus: 202,
+    bodyBytes: 532,
+    executionId: null,
+    errorCode: null,
+    receivedAt: '2026-07-13T09:45:00Z',
+    processedAt: '2026-07-13T09:45:00Z',
+  },
+  {
+    id: 'delivery-5',
+    triggerId: WEBHOOK_TRIGGER.id,
+    outcome: 'inactive',
+    httpStatus: 202,
+    bodyBytes: 256,
+    executionId: null,
+    errorCode: 'paused',
+    receivedAt: '2026-07-13T09:40:00Z',
+    processedAt: '2026-07-13T09:40:00Z',
+  },
+  {
+    id: 'delivery-6',
+    triggerId: WEBHOOK_TRIGGER.id,
+    outcome: 'rate_limited',
+    httpStatus: 429,
+    bodyBytes: 128,
+    executionId: null,
+    errorCode: 'rate_limited',
+    receivedAt: '2026-07-13T09:35:00Z',
+    processedAt: '2026-07-13T09:35:00Z',
+  },
+  {
+    id: 'delivery-7',
+    triggerId: WEBHOOK_TRIGGER.id,
+    outcome: 'still_running',
+    httpStatus: 202,
+    bodyBytes: 384,
+    executionId: 'execution-7',
+    errorCode: null,
+    receivedAt: '2026-07-13T09:30:00Z',
+    processedAt: '2026-07-13T09:30:01Z',
+  },
+  {
+    id: 'delivery-8',
+    triggerId: WEBHOOK_TRIGGER.id,
+    outcome: 'configuration_error',
+    httpStatus: 503,
+    bodyBytes: 211,
+    executionId: null,
+    errorCode: 'missing_agent_profile',
+    receivedAt: '2026-07-13T09:25:00Z',
+    processedAt: '2026-07-13T09:25:00Z',
+  },
+  {
+    id: 'delivery-9',
+    triggerId: WEBHOOK_TRIGGER.id,
+    outcome: 'internal_error',
+    httpStatus: 503,
+    bodyBytes: 777,
+    executionId: 'execution-9',
+    errorCode: 'submission_failed',
+    receivedAt: '2026-07-13T09:20:00Z',
+    processedAt: '2026-07-13T09:20:02Z',
+  },
+] as const;
 
 const NORMAL_EXECUTIONS = [
   makeExecution({ id: 'ex-1', status: 'completed', taskId: 'task-1' }),
@@ -219,19 +377,26 @@ const STUCK_EXECUTIONS = [
 // API Mock Setup
 // ---------------------------------------------------------------------------
 
-async function setupApiMocks(page: Page, options: {
-  triggers?: ReturnType<typeof makeTrigger>[];
-  triggerDetail?: ReturnType<typeof makeTrigger> | null;
-  executions?: ReturnType<typeof makeExecution>[];
-  triggersError?: boolean;
-  executionCleanupError?: boolean;
-} = {}) {
+async function setupApiMocks(
+  page: Page,
+  options: {
+    agentProfiles?: readonly (typeof MOCK_PROFILE)[];
+    executions?: ReturnType<typeof makeExecution>[];
+    executionCleanupError?: boolean;
+    triggerDetail?: ReturnType<typeof makeTrigger> | null;
+    triggers?: ReturnType<typeof makeTrigger>[];
+    triggersError?: boolean;
+    webhookDeliveries?: readonly object[];
+  } = {}
+) {
   const {
-    triggers = NORMAL_TRIGGERS,
-    triggerDetail = null,
+    agentProfiles = [MOCK_PROFILE],
     executions = NORMAL_EXECUTIONS,
-    triggersError = false,
     executionCleanupError = false,
+    triggerDetail = null,
+    triggers = NORMAL_TRIGGERS,
+    triggersError = false,
+    webhookDeliveries = WEBHOOK_DELIVERIES,
   } = options;
 
   await page.route('**/api/**', async (route: Route) => {
@@ -304,7 +469,7 @@ async function setupApiMocks(page: Page, options: {
 
       // Agent profiles
       if (subPath === '/agent-profiles') {
-        return respond(200, { items: [] });
+        return respond(200, { items: agentProfiles });
       }
 
       // Sessions
@@ -328,6 +493,34 @@ async function setupApiMocks(page: Page, options: {
         return respond(200, { executions, nextCursor: null });
       }
 
+      if (subPath.match(/^\/triggers\/[^/]+\/webhook\/deliveries$/)) {
+        const cursor = url.searchParams.get('cursor');
+        return respond(200, {
+          deliveries: cursor ? webhookDeliveries.slice(2) : webhookDeliveries.slice(0, 2),
+          nextCursor: !cursor && webhookDeliveries.length > 2 ? 'page-2' : null,
+        });
+      }
+
+      if (
+        subPath.match(/^\/triggers\/[^/]+\/webhook\/preview$/) &&
+        route.request().method() === 'POST'
+      ) {
+        return respond(200, {
+          renderedPrompt:
+            'Triage this untrusted event: {"event":{"action":"triggered","title":"<script>alert(1)</script> 🚨"}}',
+          warnings: [],
+          context: { webhook: { sourceLabel: 'PagerDuty <primary> & 日本語' } },
+          filterResult: { matched: true, matchedFilters: 1, totalFilters: 1 },
+        });
+      }
+
+      if (
+        subPath.match(/^\/triggers\/[^/]+\/webhook\/rotate$/) &&
+        route.request().method() === 'POST'
+      ) {
+        return respond(200, { webhookCredential: WEBHOOK_CREDENTIAL });
+      }
+
       // Trigger detail
       if (subPath.match(/^\/triggers\/[^/]+$/) && !subPath.endsWith('/triggers')) {
         if (triggerDetail) return respond(200, triggerDetail);
@@ -338,7 +531,11 @@ async function setupApiMocks(page: Page, options: {
 
       // Triggers list
       if (subPath === '/triggers') {
-        if (triggersError) return respond(500, { error: 'INTERNAL_ERROR', message: 'Server error' });
+        if (triggersError)
+          return respond(500, { error: 'INTERNAL_ERROR', message: 'Server error' });
+        if (route.request().method() === 'POST') {
+          return respond(201, { ...WEBHOOK_TRIGGER, webhookCredential: WEBHOOK_CREDENTIAL });
+        }
         return respond(200, { triggers });
       }
 
@@ -380,7 +577,10 @@ function requireProject(projectName: string, message: string) {
 }
 
 const mobileOnly = requireProject('iPhone SE (375x667)', 'mobile audit runs on iPhone SE only');
-const desktopOnly = requireProject('Desktop (1280x800)', 'desktop audit runs on desktop project only');
+const desktopOnly = requireProject(
+  'Desktop (1280x800)',
+  'desktop audit runs on desktop project only'
+);
 
 async function verifyCleanupFailure(page: Page, screenshotName: string) {
   await setupApiMocks(page, {
@@ -394,6 +594,62 @@ async function verifyCleanupFailure(page: Page, screenshotName: string) {
   await page.getByRole('button', { name: /clear stuck queued/i }).click();
   await page.waitForSelector('text=Cleanup unavailable');
   await screenshot(page, screenshotName);
+  await assertNoOverflow(page);
+}
+
+async function verifyWebhookCreation(page: Page, screenshotName: string) {
+  await setupApiMocks(page, { triggers: [] });
+  await page.goto('/projects/proj-test-1/triggers');
+  await page.getByRole('button', { name: /create your first trigger/i }).click();
+  await page.getByRole('button', { name: /Webhook/ }).click();
+  await page.getByLabel('Name').fill('Incident intake <primary> 🚨');
+  await page.getByLabel('Agent Profile *').selectOption(MOCK_PROFILE.id);
+  await page.getByLabel('Source label (optional)').fill('PagerDuty 日本語');
+  await page.getByLabel('Included headers (optional)').fill('x-request-id, x-event-type');
+  await page.getByRole('button', { name: /add filter/i }).click();
+  await page.getByLabel('Filter 1 path').fill('event.action');
+  await page.getByLabel('Filter 1 operator').selectOption('equals');
+  await page.getByLabel('Filter 1 value', { exact: true }).fill('triggered');
+  await page.getByLabel('Prompt template').fill('Triage: {{webhook.payload}}');
+  await page.getByRole('button', { name: 'Create Trigger', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: /save your webhook credential/i })).toBeVisible();
+  await expect(page.getByText(WEBHOOK_CREDENTIAL.token, { exact: true })).toBeVisible();
+  await screenshot(page, screenshotName);
+  await assertNoOverflow(page);
+  await page.getByLabel(/I saved this token/i).check();
+  await page.getByRole('button', { name: 'Done' }).click();
+  await expect(page.getByRole('dialog', { name: /save your webhook credential/i })).toHaveCount(0);
+}
+
+async function verifyWebhookDetail(page: Page, screenshotPrefix: string) {
+  await setupApiMocks(page, {
+    triggers: [WEBHOOK_TRIGGER],
+    triggerDetail: WEBHOOK_TRIGGER,
+    executions: [],
+  });
+  await page.goto(`/projects/proj-test-1/triggers/${WEBHOOK_TRIGGER.id}`);
+  await expect(page.getByRole('heading', { name: WEBHOOK_TRIGGER.name })).toBeVisible();
+  await expect(page.getByText('accepted', { exact: true })).toBeVisible();
+  await screenshot(page, `${screenshotPrefix}-normal`);
+  await assertNoOverflow(page);
+
+  await page.getByRole('button', { name: 'Load more' }).click();
+  await expect(page.getByText('concurrent limit', { exact: true })).toBeVisible();
+  await screenshot(page, `${screenshotPrefix}-deliveries`);
+  await assertNoOverflow(page);
+
+  await page
+    .getByLabel('Sample webhook JSON')
+    .fill('{"event":{"action":"triggered","title":"<script>alert(1)</script> 🚨"}}');
+  await page.getByRole('button', { name: /Preview/ }).click();
+  await expect(page.getByText('Filters: matched')).toBeVisible();
+  await screenshot(page, `${screenshotPrefix}-preview-filter`);
+  await assertNoOverflow(page);
+
+  page.once('dialog', (dialog) => dialog.accept());
+  await page.getByRole('button', { name: /Rotate token/ }).click();
+  await expect(page.getByRole('dialog', { name: /save your webhook credential/i })).toBeVisible();
+  await screenshot(page, `${screenshotPrefix}-rotation`);
   await assertNoOverflow(page);
 }
 
@@ -561,6 +817,23 @@ test.describe('Trigger Detail — Mobile', () => {
   test('cleanup failure feedback', async ({ page }) => {
     await verifyCleanupFailure(page, 'trigger-detail-cleanup-error-mobile');
   });
+
+  test('webhook delivery, preview, filter, and rotation states', async ({ page }) => {
+    await verifyWebhookDetail(page, 'trigger-webhook-detail-mobile');
+  });
+
+  test('webhook empty delivery state', async ({ page }) => {
+    await setupApiMocks(page, {
+      triggers: [WEBHOOK_TRIGGER],
+      triggerDetail: WEBHOOK_TRIGGER,
+      executions: [],
+      webhookDeliveries: [],
+    });
+    await page.goto(`/projects/proj-test-1/triggers/${WEBHOOK_TRIGGER.id}`);
+    await expect(page.getByText('No webhook deliveries yet.')).toBeVisible();
+    await screenshot(page, 'trigger-webhook-detail-empty-mobile');
+    await assertNoOverflow(page);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -584,6 +857,10 @@ test.describe('Trigger Detail — Desktop', () => {
 
   test('cleanup failure feedback', async ({ page }) => {
     await verifyCleanupFailure(page, 'trigger-detail-cleanup-error-desktop');
+  });
+
+  test('webhook delivery, preview, filter, and rotation states', async ({ page }) => {
+    await verifyWebhookDetail(page, 'trigger-webhook-detail-desktop');
   });
 });
 
@@ -613,6 +890,10 @@ test.describe('Trigger Form — Mobile', () => {
     await page.waitForSelector('text=Command prefix');
     await screenshot(page, 'trigger-form-github-mobile');
     await assertNoOverflow(page);
+  });
+
+  test('webhook form creates one-time credential', async ({ page }) => {
+    await verifyWebhookCreation(page, 'trigger-webhook-credential-mobile');
   });
 });
 
@@ -661,5 +942,9 @@ test.describe('Trigger Form — Desktop', () => {
     await page.waitForSelector('text=GitHub event');
     await screenshot(page, 'trigger-form-github-desktop');
     await assertNoOverflow(page);
+  });
+
+  test('webhook form creates one-time credential', async ({ page }) => {
+    await verifyWebhookCreation(page, 'trigger-webhook-credential-desktop');
   });
 });

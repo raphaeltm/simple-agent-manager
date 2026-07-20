@@ -28,6 +28,8 @@ import {
 
 import type { Env } from '../env';
 import { createModuleLogger } from '../lib/logger';
+import { reconcileStaleWebhookDeliveries } from '../services/webhook-delivery-reconciliation';
+import { purgeExpiredWebhookDeliveries } from '../services/webhook-trigger-store';
 
 const log = createModuleLogger('trigger-execution-cleanup');
 
@@ -48,6 +50,8 @@ export interface TriggerExecutionCleanupStats {
   staleQueuedRecovered: number;
   /** Number of old execution logs purged */
   retentionPurged: number;
+  /** Number of expired generic webhook delivery records purged */
+  webhookDeliveriesPurged: number;
   /** Number of errors encountered */
   errors: number;
 }
@@ -71,10 +75,7 @@ const TERMINAL_TASK_STATUSES = new Set(['completed', 'failed', 'cancelled']);
 /**
  * Build the reason string for why a stale execution is being recovered.
  */
-function buildRecoveryReason(
-  exec: StaleExecution,
-  taskMap: Map<string, TaskRow>,
-): string {
+function buildRecoveryReason(exec: StaleExecution, taskMap: Map<string, TaskRow>): string {
   if (!exec.task_id) {
     return 'Task was never created (submission failed)';
   }
@@ -101,7 +102,7 @@ async function recoverStaleExecutionsByStatus(
   db: D1Database,
   status: 'running' | 'queued',
   staleThresholdMs: number,
-  batchSize: number,
+  batchSize: number
 ): Promise<{ recovered: number; errors: number }> {
   const cutoff = new Date(Date.now() - staleThresholdMs).toISOString();
 
@@ -115,7 +116,11 @@ async function recoverStaleExecutionsByStatus(
          FROM trigger_executions
          WHERE status = ?
            AND COALESCE(started_at, created_at) <= ?
-         LIMIT ?`,
+           AND NOT EXISTS (
+             SELECT 1 FROM webhook_deliveries d
+              WHERE d.execution_id = trigger_executions.id AND d.outcome = 'processing'
+           )
+         LIMIT ?`
       )
       .bind(status, cutoff, batchSize)
       .all<StaleExecution>();
@@ -135,11 +140,7 @@ async function recoverStaleExecutionsByStatus(
 
   // Step 2: Batch-fetch all linked task statuses in a single query.
   const taskIds = [
-    ...new Set(
-      staleRows.results
-        .map((e) => e.task_id)
-        .filter((id): id is string => id !== null),
-    ),
+    ...new Set(staleRows.results.map((e) => e.task_id).filter((id): id is string => id !== null)),
   ];
 
   const taskMap = new Map<string, TaskRow>();
@@ -183,9 +184,13 @@ async function recoverStaleExecutionsByStatus(
         .prepare(
           `UPDATE trigger_executions
            SET status = 'failed', error_message = ?, completed_at = ?
-           WHERE id = ? AND status = ?`,
+           WHERE id = ? AND status = ?
+             AND NOT EXISTS (
+               SELECT 1 FROM webhook_deliveries d
+                WHERE d.execution_id = trigger_executions.id AND d.outcome = 'processing'
+             )`
         )
-        .bind(reason, now, exec.id, status),
+        .bind(reason, now, exec.id, status)
     );
   }
 
@@ -230,18 +235,16 @@ async function recoverStaleExecutionsByStatus(
  */
 async function purgeOldTriggerExecutions(
   db: D1Database,
-  retentionDays: number,
+  retentionDays: number
 ): Promise<{ purged: number; errors: number }> {
-  const cutoff = new Date(
-    Date.now() - retentionDays * 24 * 60 * 60 * 1000,
-  ).toISOString();
+  const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000).toISOString();
 
   try {
     const result = await db
       .prepare(
         `DELETE FROM trigger_executions
          WHERE status IN ('completed', 'failed', 'skipped')
-           AND created_at <= ?`,
+           AND created_at <= ?`
       )
       .bind(cutoff)
       .run();
@@ -265,52 +268,74 @@ async function purgeOldTriggerExecutions(
  * @param env - Worker environment bindings
  * @returns Stats about recovered stale executions and purged logs
  */
-export async function runTriggerExecutionCleanup(
-  env: Env,
-): Promise<TriggerExecutionCleanupStats> {
+export async function runTriggerExecutionCleanup(env: Env): Promise<TriggerExecutionCleanupStats> {
   // Kill switch
   if (env.TRIGGER_EXECUTION_CLEANUP_ENABLED === 'false') {
-    return { staleRecovered: 0, staleQueuedRecovered: 0, retentionPurged: 0, errors: 0 };
+    return {
+      staleRecovered: 0,
+      staleQueuedRecovered: 0,
+      retentionPurged: 0,
+      webhookDeliveriesPurged: 0,
+      errors: 0,
+    };
   }
 
   const staleRunningThresholdMs = parsePositiveInt(
     env.TRIGGER_STALE_EXECUTION_TIMEOUT_MS,
-    DEFAULT_TRIGGER_STALE_EXECUTION_TIMEOUT_MS,
+    DEFAULT_TRIGGER_STALE_EXECUTION_TIMEOUT_MS
   );
   const staleQueuedThresholdMs = parsePositiveInt(
     env.TRIGGER_STALE_QUEUED_TIMEOUT_MS,
-    DEFAULT_TRIGGER_STALE_QUEUED_TIMEOUT_MS,
+    DEFAULT_TRIGGER_STALE_QUEUED_TIMEOUT_MS
   );
   const retentionDays = parsePositiveInt(
     env.TRIGGER_EXECUTION_LOG_RETENTION_DAYS,
-    DEFAULT_TRIGGER_EXECUTION_LOG_RETENTION_DAYS,
+    DEFAULT_TRIGGER_EXECUTION_LOG_RETENTION_DAYS
   );
   const batchSize = parsePositiveInt(
     env.TRIGGER_STALE_RECOVERY_BATCH_SIZE,
-    DEFAULT_TRIGGER_STALE_RECOVERY_BATCH_SIZE,
+    DEFAULT_TRIGGER_STALE_RECOVERY_BATCH_SIZE
   );
+
+  let webhookCleanupErrors = 0;
+  try {
+    const reconciled = await reconcileStaleWebhookDeliveries(env);
+    if (reconciled > 0) log.info('webhook_deliveries_reconciled', { count: reconciled });
+  } catch (error) {
+    webhookCleanupErrors += 1;
+    log.error('webhook_delivery_reconciliation_failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 
   const staleRunning = await recoverStaleExecutionsByStatus(
     env.DATABASE,
     'running',
     staleRunningThresholdMs,
-    batchSize,
+    batchSize
   );
   const staleQueued = await recoverStaleExecutionsByStatus(
     env.DATABASE,
     'queued',
     staleQueuedThresholdMs,
-    batchSize,
+    batchSize
   );
-  const retention = await purgeOldTriggerExecutions(
-    env.DATABASE,
-    retentionDays,
-  );
+  const retention = await purgeOldTriggerExecutions(env.DATABASE, retentionDays);
+  let webhookDeliveriesPurged = 0;
+  try {
+    webhookDeliveriesPurged = await purgeExpiredWebhookDeliveries(env);
+  } catch (error) {
+    webhookCleanupErrors += 1;
+    log.error('webhook_delivery_purge_failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 
   return {
     staleRecovered: staleRunning.recovered,
     staleQueuedRecovered: staleQueued.recovered,
     retentionPurged: retention.purged,
-    errors: staleRunning.errors + staleQueued.errors + retention.errors,
+    webhookDeliveriesPurged,
+    errors: staleRunning.errors + staleQueued.errors + retention.errors + webhookCleanupErrors,
   };
 }

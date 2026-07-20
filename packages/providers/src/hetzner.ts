@@ -164,6 +164,14 @@ export function isTransientCapacityError(err: ProviderError): boolean {
   return false;
 }
 
+function isAlreadyDetachedVolumeError(err: ProviderError): boolean {
+  return (
+    err.statusCode === 422 &&
+    /volume/i.test(err.message) &&
+    /not attached/i.test(err.message)
+  );
+}
+
 const SIZE_CONFIGS: Record<VMSize, SizeConfig> = {
   small: {
     type: 'cx23',
@@ -536,8 +544,13 @@ export class HetznerProvider implements Provider {
         },
       );
     } catch (err) {
-      if (err instanceof ProviderError && err.statusCode === 404) {
-        return null;
+      if (err instanceof ProviderError) {
+        if (err.statusCode === 404) {
+          return null;
+        }
+        if (isAlreadyDetachedVolumeError(err)) {
+          return this.getVolume({ volumeId: config.volumeId, location: config.location });
+        }
       }
       throw err;
     }

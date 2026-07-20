@@ -14,6 +14,23 @@ import {
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
+const SAFE_MARKDOWN_URL_PROTOCOLS = new Set(['http:', 'https:']);
+
+function sanitizeMarkdownHref(href: string | undefined): string {
+  if (!href) return '#';
+  const trimmed = href.trim();
+  if (!trimmed) return '#';
+  if (trimmed.startsWith('#') || (trimmed.startsWith('/') && !trimmed.startsWith('//')) || trimmed.startsWith('./') || trimmed.startsWith('../')) {
+    return trimmed;
+  }
+  try {
+    const parsed = new URL(trimmed);
+    return SAFE_MARKDOWN_URL_PROTOCOLS.has(parsed.protocol) ? trimmed : '#';
+  } catch {
+    return '#';
+  }
+}
+
 export { MERMAID_SVG_SANITIZE_CONFIG as SVG_SANITIZE_CONFIG } from '@simple-agent-manager/acp-client/mermaid';
 
 // ---------- Mermaid Initialization ----------
@@ -189,7 +206,7 @@ export const RenderedMarkdown: FC<{ content: string; style?: CSSProperties; inli
             </blockquote>
           ),
           a: ({ href, children }) => (
-            <a href={href} target="_blank" rel="noreferrer" className="text-tn-blue" style={{ overflowWrap: 'anywhere' }}>
+            <a href={sanitizeMarkdownHref(href)} target="_blank" rel="noreferrer noopener" className="text-tn-blue" style={{ overflowWrap: 'anywhere' }}>
               {children}
             </a>
           ),
@@ -200,13 +217,17 @@ export const RenderedMarkdown: FC<{ content: string; style?: CSSProperties; inli
               </table>
             </div>
           ),
+          // `overflow-wrap: anywhere` on the markdown root lets the table layout
+          // crush columns below word width (per-letter wrapping). `break-word`
+          // keeps whole words in min-content sizing so the overflow-x wrapper
+          // scrolls instead, while still breaking truly unbreakable tokens.
           th: ({ children }) => (
-            <th className="border border-border-default px-2 py-1.5 text-left bg-info-tint">
+            <th className="border border-border-default px-2 py-1.5 text-left bg-info-tint" style={{ overflowWrap: 'break-word' }}>
               {children}
             </th>
           ),
           td: ({ children }) => (
-            <td className="border border-border-default px-2 py-1.5">
+            <td className="border border-border-default px-2 py-1.5" style={{ overflowWrap: 'break-word' }}>
               {children}
             </td>
           ),

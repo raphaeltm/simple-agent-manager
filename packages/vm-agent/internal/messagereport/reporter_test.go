@@ -758,10 +758,17 @@ func TestFlush_SizeFallback409DisablesReporter(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	db, r := newTokenReporter(t, ts.URL, "ws-1")
+	db := openTestDB(t)
+	cfg := testConfig(ts.URL, "ws-1")
+	cfg.BatchMaxWait = time.Hour // keep background flush out of this sequencing-sensitive test
+	r, err := New(db, cfg)
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	r.SetToken("test-token")
 
 	enqueueAssistantPair(t, r)
-	waitForCondition(t, 2*time.Second, func() bool { return atomic.LoadInt32(&requests) == 3 })
+	r.flush()
 
 	assertOutboxCount(t, db, 0, "outbox after fallback session limit")
 

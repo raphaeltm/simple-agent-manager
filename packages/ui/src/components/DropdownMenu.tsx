@@ -46,6 +46,26 @@ export function DropdownMenu({
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const menuId = useId();
 
+  const getEnabledIndex = useCallback((direction: 'first' | 'last') => {
+    if (direction === 'last') {
+      for (let i = items.length - 1; i >= 0; i -= 1) {
+        if (!items[i]?.disabled) return i;
+      }
+      return -1;
+    }
+
+    return items.findIndex((item) => !item.disabled);
+  }, [items]);
+
+  const focusItem = useCallback((index: number) => {
+    setFocusIndex(index);
+  }, []);
+
+  const open = useCallback((direction: 'first' | 'last' = 'first') => {
+    setIsOpen(true);
+    focusItem(getEnabledIndex(direction));
+  }, [focusItem, getEnabledIndex]);
+
   const close = useCallback(() => {
     setIsOpen(false);
     setFocusIndex(-1);
@@ -87,6 +107,11 @@ export function DropdownMenu({
   }, [isOpen, updateMenuPosition]);
 
   useEffect(() => {
+    if (!isOpen || focusIndex < 0) return;
+    itemRefs.current[focusIndex]?.focus();
+  }, [focusIndex, isOpen]);
+
+  useEffect(() => {
     if (!isOpen) return;
 
     function handleMouseDown(event: MouseEvent) {
@@ -111,39 +136,50 @@ export function DropdownMenu({
     if (isOpen) {
       close();
     } else {
-      setIsOpen(true);
-      setFocusIndex(0);
-      requestAnimationFrame(() => {
-        itemRefs.current[0]?.focus();
-      });
+      open('first');
     }
   }
 
   function handleTriggerKeyDown(e: KeyboardEvent) {
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      setIsOpen(true);
-      setFocusIndex(0);
-      requestAnimationFrame(() => {
-        itemRefs.current[0]?.focus();
-      });
+    switch (e.key) {
+      case 'ArrowDown':
+      case 'Enter':
+      case ' ': {
+        e.preventDefault();
+        open('first');
+        break;
+      }
+      case 'ArrowUp': {
+        e.preventDefault();
+        open('last');
+        break;
+      }
     }
+  }
+
+  function getNextEnabledIndex(index: number, direction: 1 | -1) {
+    if (items.length === 0) return -1;
+
+    for (let step = 1; step <= items.length; step += 1) {
+      const candidate = (index + direction * step + items.length) % items.length;
+      if (!items[candidate]?.disabled) return candidate;
+    }
+
+    return -1;
   }
 
   function handleItemKeyDown(e: KeyboardEvent, index: number) {
     switch (e.key) {
       case 'ArrowDown': {
         e.preventDefault();
-        const next = (index + 1) % items.length;
-        setFocusIndex(next);
-        itemRefs.current[next]?.focus();
+        const next = getNextEnabledIndex(index, 1);
+        focusItem(next);
         break;
       }
       case 'ArrowUp': {
         e.preventDefault();
-        const prev = (index - 1 + items.length) % items.length;
-        setFocusIndex(prev);
-        itemRefs.current[prev]?.focus();
+        const prev = getNextEnabledIndex(index, -1);
+        focusItem(prev);
         break;
       }
       case 'Tab':

@@ -99,6 +99,10 @@ function createD1Database(state: ReturnType<typeof createD1State>) {
     prepare: vi.fn((sql: string) => ({
       bind: (...params: unknown[]) => ({
         first: async () => {
+          if (sql.includes('SELECT status FROM tasks WHERE id = ?')) {
+            const task = state.tasks.get(String(params[0]));
+            return task ? { status: task.status } : null;
+          }
           if (sql.includes('SELECT status, mission_id FROM tasks WHERE id = ?')) {
             const task = state.tasks.get(String(params[0]));
             return task ? { status: task.status, mission_id: task.mission_id } : null;
@@ -320,6 +324,54 @@ describe('transitionToInProgress', () => {
     expect(state.currentStep).toBe('agent_session');
     expect(state.completed).toBe(true);
     expect(storageWrites.at(-1)).toMatchObject({ currentStep: 'agent_session', completed: true });
+  });
+
+  it('makes D1 terminal before completing the DO when recovery leaves an active non-delegated row', async () => {
+    const { dbState, rc, storageWrites } = createContext();
+    seedTask(dbState, {
+      status: 'queued',
+      execution_step: 'agent_session',
+    });
+    const state = makeState();
+
+    await transitionToInProgress(state, rc);
+
+    expect(dbState.tasks.get('task-1')).toMatchObject({
+      status: 'failed',
+      execution_step: null,
+      error_message: 'Task orchestration was superseded before agent handoff completed.',
+    });
+    expect(dbState.statusEvents).toContainEqual(expect.objectContaining({
+      task_id: 'task-1',
+      from_status: 'queued',
+      to_status: 'failed',
+    }));
+    expect(state.completed).toBe(true);
+    expect(storageWrites.at(-1)).toMatchObject({ completed: true });
+  });
+
+  it('completes the DO as running when a concurrent recovery already advanced D1 to in_progress', async () => {
+    // aborted_by_recovery Branch 1: the optimistic delegated->in_progress UPDATE
+    // finds 0 rows because a concurrent path already set the row to 'in_progress'.
+    // The DO must converge on 'running' WITHOUT failing the task or overwriting D1.
+    const { dbState, rc, storageWrites } = createContext();
+    seedTask(dbState, {
+      status: 'in_progress',
+      execution_step: 'running',
+    });
+    const state = makeState();
+
+    await transitionToInProgress(state, rc);
+
+    expect(dbState.tasks.get('task-1')).toMatchObject({
+      status: 'in_progress',
+      execution_step: 'running',
+    });
+    // No new status event and no failTask side effect — D1 is left as-is.
+    expect(dbState.statusEvents).toHaveLength(0);
+    expect(state.currentStep).toBe('running');
+    expect(state.completed).toBe(true);
+    expect(storageWrites.at(-1)).toMatchObject({ currentStep: 'running', completed: true });
   });
 });
 

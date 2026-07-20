@@ -45,6 +45,43 @@ describe('RenderedMarkdown', () => {
     expect(container.style.padding).toBe('32px');
   });
 
+  it('does not render raw HTML from markdown as DOM', () => {
+    const { container } = render(
+      <RenderedMarkdown content={'# Report\n\n<script>alert(1)</script><iframe src="https://evil.example"></iframe><span onclick="alert(2)">raw</span>'} />,
+    );
+
+    expect(screen.getByRole('heading', { name: 'Report' })).toBeInTheDocument();
+    expect(container.querySelector('script')).toBeNull();
+    expect(container.querySelector('iframe')).toBeNull();
+    expect(container.querySelector('[onclick]')).toBeNull();
+    expect(container.innerHTML).toContain('&lt;iframe');
+    expect(container.textContent).toContain('https://evil.example');
+  });
+
+  it('keeps safe markdown links clickable in a new tab', () => {
+    render(<RenderedMarkdown content={'[SAM](https://example.com/docs)'} />);
+
+    const link = screen.getByRole('link', { name: 'SAM' });
+    expect(link).toHaveAttribute('href', 'https://example.com/docs');
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link).toHaveAttribute('rel', 'noreferrer noopener');
+  });
+
+  it('preserves relative markdown links for local preview navigation', () => {
+    render(<RenderedMarkdown content={'[Section](#section) [Guide](/docs/guide) [Relative](../README.md)'} />);
+
+    expect(screen.getByRole('link', { name: 'Section' })).toHaveAttribute('href', '#section');
+    expect(screen.getByRole('link', { name: 'Guide' })).toHaveAttribute('href', '/docs/guide');
+    expect(screen.getByRole('link', { name: 'Relative' })).toHaveAttribute('href', '../README.md');
+  });
+
+  it('fails closed for unsafe markdown link protocols', () => {
+    render(<RenderedMarkdown content={'[bad](javascript:alert(1)) [protocol-relative](//evil.example)'} />);
+
+    expect(screen.getByRole('link', { name: 'bad' })).toHaveAttribute('href', '#');
+    expect(screen.getByRole('link', { name: 'protocol-relative' })).toHaveAttribute('href', '#');
+  });
+
   it('renders syntax-highlighted code blocks', () => {
     const content = '```typescript\nconst x = 1;\n```';
     render(<RenderedMarkdown content={content} />);
