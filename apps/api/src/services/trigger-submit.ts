@@ -32,6 +32,7 @@ import { requireRepositoryOwnerAccess } from '../routes/projects/_helpers';
 import { generateBranchName } from './branch-name';
 import * as projectDataService from './project-data';
 import { parseSkillResourceRequirementsJson, resolveSkillProfile } from './skills';
+import { markQueuedTaskFailed } from './task-failure';
 import { ensureTaskRunnerStarted, startTaskRunnerDO } from './task-runner-do';
 import { generateTaskTitle, getTaskTitleConfig } from './task-title';
 import {
@@ -252,26 +253,8 @@ export async function submitTriggeredTask(
       null
     );
   } catch (err) {
-    const failedAt = new Date().toISOString();
     const errorMsg = err instanceof Error ? err.message : String(err);
-    await db
-      .update(schema.tasks)
-      .set({
-        status: 'failed',
-        errorMessage: `Session creation failed: ${errorMsg}`,
-        updatedAt: failedAt,
-      })
-      .where(eq(schema.tasks.id, taskId));
-    await db.insert(schema.taskStatusEvents).values({
-      id: ulid(),
-      taskId,
-      fromStatus: 'queued',
-      toStatus: 'failed',
-      actorType: 'system',
-      actorId: null,
-      reason: `Session creation failed: ${errorMsg}`,
-      createdAt: failedAt,
-    });
+    await markQueuedTaskFailed(db, taskId, `Session creation failed: ${errorMsg}`);
     throw err;
   }
 
@@ -360,26 +343,8 @@ export async function submitTriggeredTask(
     }
   } catch (err) {
     if (err instanceof TriggerTaskSubmissionPendingError) throw err;
-    const failedAt = new Date().toISOString();
     const errorMsg = err instanceof Error ? err.message : String(err);
-    await db
-      .update(schema.tasks)
-      .set({
-        status: 'failed',
-        errorMessage: `Task runner startup failed: ${errorMsg}`,
-        updatedAt: failedAt,
-      })
-      .where(eq(schema.tasks.id, taskId));
-    await db.insert(schema.taskStatusEvents).values({
-      id: ulid(),
-      taskId,
-      fromStatus: 'queued',
-      toStatus: 'failed',
-      actorType: 'system',
-      actorId: null,
-      reason: `Task runner startup failed: ${errorMsg}`,
-      createdAt: failedAt,
-    });
+    await markQueuedTaskFailed(db, taskId, `Task runner startup failed: ${errorMsg}`);
     // Stop orphaned session (best-effort)
     await projectDataService.stopSession(env, input.projectId, sessionId).catch(() => {});
     throw err;

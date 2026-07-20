@@ -20,6 +20,7 @@ import { resolveProjectAgentDefault } from '../../services/project-agent-default
 import * as projectDataService from '../../services/project-data';
 import { recomputeMissionSchedulerStates } from '../../services/scheduler-state-sync';
 import { parseSkillResourceRequirementsJson, resolveSkillProfile } from '../../services/skills';
+import { markQueuedTaskFailed } from '../../services/task-failure';
 import { startTaskRunnerDO } from '../../services/task-runner-do';
 import { generateTaskTitle, getTaskTitleConfig } from '../../services/task-title';
 import { resolveWorkspaceRuntime } from '../../services/workspace-runtime';
@@ -509,31 +510,13 @@ export async function handleDispatchTask(requestId: string | number | null, para
       await projectDataService.persistMessage(env, tokenData.projectId, sessionId, 'user', fullDescription, null);
   } catch (err) {
     // Session creation failed — mark task as failed
-    const failedAt = new Date().toISOString();
     const errorMsg = err instanceof Error ? err.message : String(err);
-      await db
-        .update(schema.tasks)
-        .set({
-          status: 'failed',
-          errorMessage: `Session creation failed: ${errorMsg}`,
-          updatedAt: failedAt,
-        })
-      .where(eq(schema.tasks.id, taskId));
-    await db.insert(schema.taskStatusEvents).values({
-      id: ulid(),
+    await markQueuedTaskFailed(db, taskId, `Session creation failed: ${errorMsg}`);
+    log.error('mcp.dispatch_task.session_failed', {
       taskId,
-      fromStatus: 'queued',
-      toStatus: 'failed',
-      actorType: 'system',
-      actorId: null,
-      reason: `Session creation failed: ${errorMsg}`,
-      createdAt: failedAt,
+      projectId: tokenData.projectId,
+      error: errorMsg,
     });
-      log.error('mcp.dispatch_task.session_failed', {
-        taskId,
-        projectId: tokenData.projectId,
-        error: errorMsg,
-      });
     return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to create chat session: ${errorMsg}`);
   }
 
@@ -602,37 +585,19 @@ export async function handleDispatchTask(requestId: string | number | null, para
     });
   } catch (err) {
     // TaskRunner DO startup failed — mark task as failed
-    const failedAt = new Date().toISOString();
     const errorMsg = err instanceof Error ? err.message : String(err);
-      await db
-        .update(schema.tasks)
-        .set({
-          status: 'failed',
-          errorMessage: `Task runner startup failed: ${errorMsg}`,
-          updatedAt: failedAt,
-        })
-      .where(eq(schema.tasks.id, taskId));
-    await db.insert(schema.taskStatusEvents).values({
-      id: ulid(),
+    await markQueuedTaskFailed(db, taskId, `Task runner startup failed: ${errorMsg}`);
+    log.error('mcp.dispatch_task.do_startup_failed', {
       taskId,
-      fromStatus: 'queued',
-      toStatus: 'failed',
-      actorType: 'system',
-      actorId: null,
-      reason: `Task runner startup failed: ${errorMsg}`,
-      createdAt: failedAt,
+      projectId: tokenData.projectId,
+      error: errorMsg,
     });
-      log.error('mcp.dispatch_task.do_startup_failed', {
-        taskId,
-        projectId: tokenData.projectId,
-        error: errorMsg,
-      });
     await projectDataService.stopSession(env, tokenData.projectId, sessionId).catch((e) => {
-        log.error('mcp.dispatch_task.orphaned_session_stop_failed', {
-          projectId: tokenData.projectId,
-          sessionId,
-          error: String(e),
-        });
+      log.error('mcp.dispatch_task.orphaned_session_stop_failed', {
+        projectId: tokenData.projectId,
+        sessionId,
+        error: String(e),
+      });
     });
     return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to start task runner: ${errorMsg}`);
   }
