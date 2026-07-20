@@ -21,12 +21,12 @@ If the last 24 hours do not contain generally interesting technical work, publis
 
 ## Implementation checklist
 
-- [ ] Create a new SAM journal markdown post under `apps/www/src/content/blog/`.
-- [ ] Keep the post focused on features, tech, and code.
-- [ ] Explain runtime routing, VM cleanup, and model catalog maintenance in simple structure with precise technical terms.
-- [ ] Include a Mermaid diagram only if it materially clarifies the runtime routing flow.
-- [ ] Validate the content build.
-- [ ] Archive this task record.
+- [x] Create a new SAM journal markdown post under `apps/www/src/content/blog/`.
+- [x] Keep the post focused on features, tech, and code.
+- [x] Explain runtime routing, VM cleanup, and model catalog maintenance in simple structure with precise technical terms.
+- [x] Include a Mermaid diagram only if it materially clarifies the runtime routing flow.
+- [x] Validate the content build.
+- [x] Archive this task record.
 - [ ] Create, merge, and monitor the PR.
 
 ## Acceptance criteria
@@ -36,3 +36,9 @@ If the last 24 hours do not contain generally interesting technical work, publis
 - Technical claims are grounded in the commit log, conversation snippets, task records, and changed files.
 - No business, strategy, or unsupported claims are included.
 - The branch is pushed, PR is created and merged, and production deployment is monitored.
+
+## Validation evidence
+
+- Website build passed: `pnpm --filter @simple-agent-manager/www build`.
+- Task completion validation: PASS. Checklist items map to `apps/www/src/content/blog/sams-journal-the-task-used-the-right-room.md`; acceptance criteria are covered by content review plus website build. UI/backend and multi-resource checks are N/A for a content-only post.
+- Documentation sync validation: PASS. Scope is a new blog post only; no public setup/API/configuration claims or code-interface documentation were changed.
