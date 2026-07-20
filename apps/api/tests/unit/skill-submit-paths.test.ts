@@ -54,6 +54,6 @@ describe('skill submit path source contracts', () => {
     expect(mcpDispatch).toContain('skillId must be a non-empty string');
     expect(mcpDispatch).toContain('resolveSkillProfile');
     expect(mcpDispatch).toContain('skill_id, skill_hint');
-    expect(mcpDispatch).toContain('resolvedProfile?.skillId ?? null, skillId ?? null');
+    expect(mcpDispatch).toMatch(/resolvedProfile\?\.skillId \?\? null,\s+skillId \?\? null/);
   });
 });
