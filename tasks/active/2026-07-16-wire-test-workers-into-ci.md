@@ -2,7 +2,9 @@
 
 ## Problem
 
-The API's `test:workers` tier is the only suite that runs the seven explicitly listed DO/scheduled vertical-slice files inside workerd with real Durable Object `SqlStorage`, D1, KV, and R2 bindings. The default Vitest config excludes that directory, while CI previously ran only `pnpm test:coverage`. The entire cross-runtime tier therefore provided no merge protection.
+The API's `test:workers` tier is the only suite that runs worker integration files inside workerd with real Durable Object `SqlStorage`, D1, KV, and R2 bindings. The default Vitest config excludes that directory, while CI previously ran only `pnpm test:coverage`. The entire cross-runtime tier therefore provided no merge protection.
+
+After integrating current `main` on 2026-07-20, the directory contains 37 test files rather than the ten present at the PR's original merge base. The gate now keeps the existing `tests/workers/**/*.test.ts` wildcard instead of a seven-file allowlist, so current and future worker tests cannot silently fall out of CI.
 
 Local SAM sandboxes also make workerd fail before collection. The March 2026 binary pinned through `@cloudflare/vitest-pool-workers@0.14.0` repeatedly received SIGSEGV, including with one worker and an unrelated smoke file. Updating to the Vitest 4-compatible 0.16.18 pool moves to the June runtime and makes the failure terminate visibly, but the sandbox still delivers SIGSEGV before import. Native GitHub Actions is therefore authoritative for this gate.
 
@@ -36,7 +38,7 @@ The two July 11 files are removed by this task so there is one canonical lifecyc
 - [x] Add a real-D1 → reconciler → ProjectData DO vertical slice proving a genuinely live task-scoped ACP session is skipped.
 - [x] Add a real DO SQLite slice with 1,500 `chat_sessions` and 5,000 messages proving `listSessions` returns a bounded page without throwing.
 - [x] Push a deliberately wrong assertion and record the worker job failure, then restore the correct assertion in a later commit.
-- [x] Confirm the restored branch is green and the named origin, attention-marker, ProjectData/service, node lifecycle, and scheduled stuck-task files execute.
+- [x] Restore the wildcard suite so all current worker test files enter the native CI gate automatically.
 - [ ] Complete specialist reviews and address all correctness findings.
 - [x] Run supported local full gates.
 - [x] Remove the two duplicate backlog records and preserve their provenance here.
@@ -61,17 +63,19 @@ The two July 11 files are removed by this task so there is one canonical lifecyc
 1. PR path classification: `.github/workflows/ci.yml:changes` emits `api-workers`.
 2. Deterministic merge check: `.github/workflows/ci.yml:durable-object-workers` either reports the explicit no-op or runs the real suite.
 3. Runtime entry: `apps/api/package.json:test:workers` loads `apps/api/vitest.workers.config.ts`.
-4. Real runtime/storage: `@cloudflare/vitest-pool-workers` executes the seven explicitly listed DO/scheduled vertical-slice files in workerd with the configured DO/D1 bindings.
+4. Real runtime/storage: `@cloudflare/vitest-pool-workers` executes every `tests/workers/**/*.test.ts` file with the configured Worker, DO, D1, KV, and R2 bindings.
 5. Reconciliation slice: `scheduled-stuck-tasks.test.ts` seeds D1 node/workspace/task state and ProjectData ACP state, calls `recoverStuckTasks`, and asserts the task remains `in_progress`.
 6. Listing slice: `project-data-do.test.ts` seeds real DO SQLite rows/message history, calls the public `listSessions` RPC, and asserts a bounded 25-row page, total, order, and `hasMore`.
 
 ## Verification evidence
 
-- Local `pnpm --filter @simple-agent-manager/api test:workers`: 7 files, 228 tests passed.
+- Historical branch-local `pnpm --filter @simple-agent-manager/api test:workers`: 7 files, 228 tests passed.
+- Current-main local full wildcard run: fails visibly before collection with the documented sandbox-only workerd signal 11 when loading the production Worker entrypoint; it is not treated as a pass or hidden by the rejection filter.
+- Current-main native GitHub Actions wildcard result: pending on the repair commit; merge is blocked unless all 37 files collect and pass there.
 - Local `pnpm test`: 19/19 Turbo tasks passed; API 433 files, 6,154 tests passed.
 - Local `pnpm build`: 9/9 Turbo tasks passed.
 - API lint: zero errors (existing warning baseline); API typecheck passed.
-- Required specialist skill checklists report no code findings, but reviewer subprocesses could not complete. PR #1619 carries `needs-human-review`; merge remains deferred to a human.
+- Independent review on 2026-07-20 found the seven-file allowlist, unrelated production observability fields, and broad rejection patterns unsafe. The allowlist is removed, the production behavior change is dropped, and exact anchored rejection-policy tests now prove unexpected errors remain fatal. Fresh specialist review is still required before merge.
 
 ## Post-mortem
 

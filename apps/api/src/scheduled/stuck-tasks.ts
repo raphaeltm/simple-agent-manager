@@ -1054,9 +1054,6 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
           ...(compactionLoopRecovery
             ? { recoveryType: 'claude_code_compaction_loop' }
             : { recoveryType: 'stuck_task' }),
-          taskId: task.id,
-          projectId: task.project_id,
-          userId: task.user_id,
           taskStatus: task.status,
           executionStep: task.execution_step,
           elapsedMs: diagnosticElapsedMs,

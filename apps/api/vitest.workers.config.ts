@@ -12,21 +12,10 @@
 import { cloudflareTest, readD1Migrations } from '@cloudflare/vitest-pool-workers';
 import { defineConfig } from 'vitest/config';
 
+import { isExpectedWorkerTestRejection } from './tests/workers/worker-test-policy';
+
 const DEFAULT_WORKERS_TEST_MAX_WORKERS = 1;
 const DEFAULT_WORKERS_TEST_TIMEOUT_MS = 30_000;
-
-// This gate intentionally covers the real Durable Object and scheduled-worker
-// vertical slices. HTTP-entrypoint tests need the production Worker entrypoint,
-// whose unrelated Containers/Sandbox imports are not workerd-pool compatible.
-const DURABLE_OBJECT_GATE_FILES = [
-  'tests/workers/attention-markers.test.ts',
-  'tests/workers/node-lifecycle-do.test.ts',
-  'tests/workers/project-data-do.test.ts',
-  'tests/workers/project-data-service.test.ts',
-  'tests/workers/scheduled-node-cleanup.test.ts',
-  'tests/workers/scheduled-stuck-tasks.test.ts',
-  'tests/workers/task-runner-do.test.ts',
-] as const;
 
 function readPositiveInteger(name: string, fallback: number): number {
   const value = Number.parseInt(process.env[name] ?? '', 10);
@@ -44,35 +33,10 @@ const workersTestTimeoutMs = readPositiveInteger(
 
 const databaseMigrations = await readD1Migrations('./src/db/migrations');
 const observabilityMigrations = await readD1Migrations('./src/db/migrations/observability');
-
-const EXPECTED_DO_REJECTION_PATTERNS = [
-  /Chat session .* not found/,
-  /Session .* not found/,
-  /Session .* is stopped and cannot accept messages/,
-  /session message limit/i,
-  /Mailbox message limit reached/,
-  /Invalid ACP session transition/,
-  /Node mismatch/,
-  /Cannot fork session in/,
-  /node_lifecycle_(?:conflict|not_found)/,
-] as const;
-
-function isExpectedWorkerTestRejection(error: Error): boolean {
-  const stack = error.stack ?? '';
-  const isWorkerRpcError =
-    stack.includes('/tests/workers/') ||
-    stack.includes('@cloudflare/vitest-pool-workers') ||
-    (error as Error & { remote?: boolean }).remote === true;
-  return (
-    isWorkerRpcError &&
-    EXPECTED_DO_REJECTION_PATTERNS.some((pattern) => pattern.test(error.message))
-  );
-}
-
 export default defineConfig({
   plugins: [
     cloudflareTest({
-      main: './tests/workers/worker-entrypoint.ts',
+      main: './src/index.ts',
       miniflare: {
         // 2024-04-03+ required for DO RPC (calling methods directly on stubs)
         compatibilityDate: '2024-04-03',
@@ -154,7 +118,9 @@ export default defineConfig({
     },
     fileParallelism: false,
     globals: true,
-    include: [...DURABLE_OBJECT_GATE_FILES],
+    // Keep this as a wildcard. A newly added worker test must enter this gate
+    // automatically instead of requiring a manually maintained allowlist.
+    include: ['tests/workers/**/*.test.ts'],
     maxWorkers: workersTestMaxWorkers,
     reporters: process.env.CI ? ['verbose'] : ['default'],
     setupFiles: ['./tests/workers/setup.ts'],
