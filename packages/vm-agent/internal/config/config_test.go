@@ -91,6 +91,54 @@ func TestLoadDerivesWorkspaceAndContainerDefaults(t *testing.T) {
 	}
 }
 
+func TestLoadCallbackTokenFromFile(t *testing.T) {
+	tokenPath := filepath.Join(t.TempDir(), "callback-token")
+	if err := os.WriteFile(tokenPath, []byte(" file-token-123\n"), 0o600); err != nil {
+		t.Fatalf("write token file: %v", err)
+	}
+	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+	t.Setenv("WORKSPACE_ID", "ws-123")
+	t.Setenv("CALLBACK_TOKEN", "env-token-legacy")
+	t.Setenv("CALLBACK_TOKEN_FILE", tokenPath)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.CallbackToken != "file-token-123" {
+		t.Fatalf("CallbackToken=%q, want token from file", cfg.CallbackToken)
+	}
+}
+
+func TestLoadCallbackTokenFileFailsClosed(t *testing.T) {
+	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+	t.Setenv("WORKSPACE_ID", "ws-123")
+	t.Setenv("CALLBACK_TOKEN", "env-token-legacy")
+	t.Setenv("CALLBACK_TOKEN_FILE", filepath.Join(t.TempDir(), "missing-token"))
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("Load should fail when CALLBACK_TOKEN_FILE is set but unreadable")
+	}
+	if !strings.Contains(err.Error(), "read callback token file") {
+		t.Fatalf("expected callback token file error, got: %v", err)
+	}
+}
+
+func TestLoadCallbackTokenEnvFallback(t *testing.T) {
+	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+	t.Setenv("WORKSPACE_ID", "ws-123")
+	t.Setenv("CALLBACK_TOKEN", "env-token-legacy")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.CallbackToken != "env-token-legacy" {
+		t.Fatalf("CallbackToken=%q, want env fallback", cfg.CallbackToken)
+	}
+}
+
 func TestAdditionalFeaturesDefault(t *testing.T) {
 	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
 	t.Setenv("WORKSPACE_ID", "ws-123")
@@ -268,6 +316,20 @@ func TestPTYOrphanGracePeriodOverride(t *testing.T) {
 	}
 	if cfg.PTYOrphanGracePeriod != 5*time.Minute {
 		t.Fatalf("PTYOrphanGracePeriod=%v, want %v", cfg.PTYOrphanGracePeriod, 5*time.Minute)
+	}
+}
+
+func TestPTYCloseGracePeriodOverride(t *testing.T) {
+	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+	t.Setenv("WORKSPACE_ID", "ws-123")
+	t.Setenv("PTY_CLOSE_GRACE_PERIOD", "750ms")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.PTYCloseGracePeriod != 750*time.Millisecond {
+		t.Fatalf("PTYCloseGracePeriod=%v, want %v", cfg.PTYCloseGracePeriod, 750*time.Millisecond)
 	}
 }
 
@@ -553,15 +615,21 @@ func splitFirst(s, sep string) []string {
 // validConfig returns a Config with all required fields set to valid values.
 func validConfig() *Config {
 	return &Config{
-		Port:                 8080,
-		ControlPlaneURL:      "https://api.example.com",
-		NodeID:               "node-1",
-		SessionMaxCount:      100,
-		DefaultRows:          24,
-		DefaultCols:          80,
-		WSReadBufferSize:     1024,
-		WSWriteBufferSize:    1024,
-		GitCredentialTimeout: DefaultGitCredentialTimeout,
+		Port:                       8080,
+		ControlPlaneURL:            "https://api.example.com",
+		NodeID:                     "node-1",
+		SessionMaxCount:            100,
+		DefaultRows:                24,
+		DefaultCols:                80,
+		WSReadBufferSize:           1024,
+		WSWriteBufferSize:          1024,
+		TerminalWSMaxMessageBytes:  DefaultTerminalWSMaxMessageBytes,
+		TerminalWSReadTimeout:      DefaultTerminalWSReadTimeout,
+		TerminalWSPingInterval:     DefaultTerminalWSPingInterval,
+		TerminalWSMessageRate:      DefaultTerminalWSMessageRate,
+		TerminalWSMessageBurst:     DefaultTerminalWSMessageBurst,
+		TerminalSessionIDMaxLength: DefaultTerminalSessionIDMaxLength,
+		GitCredentialTimeout:       DefaultGitCredentialTimeout,
 	}
 }
 
@@ -621,6 +689,87 @@ func TestValidateInvalidPort(t *testing.T) {
 	}
 }
 
+func TestValidateRejectsRemoteHTTPControlPlaneURL(t *testing.T) {
+	t.Parallel()
+	cfg := validConfig()
+	cfg.ControlPlaneURL = "http://api.example.com"
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected remote HTTP control plane URL to be rejected")
+	}
+	if !strings.Contains(err.Error(), "CONTROL_PLANE_URL") || !strings.Contains(err.Error(), "https") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateAllowsLocalHTTPControlPlaneURL(t *testing.T) {
+	t.Parallel()
+
+	for _, controlPlaneURL := range []string{"http://localhost:8787", "http://127.0.0.1:8787", "http://[::1]:8787"} {
+		controlPlaneURL := controlPlaneURL
+		t.Run(controlPlaneURL, func(t *testing.T) {
+			t.Parallel()
+			cfg := validConfig()
+			cfg.ControlPlaneURL = controlPlaneURL
+			if err := cfg.Validate(); err != nil {
+				t.Fatalf("Validate() returned error: %v", err)
+			}
+		})
+	}
+}
+
+func TestValidateRejectsRemoteHTTPJWKSAndIssuerURLs(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		mutate func(*Config)
+		want   string
+	}{
+		{
+			name: "jwks endpoint",
+			mutate: func(cfg *Config) {
+				cfg.JWKSEndpoint = "http://api.example.com/.well-known/jwks.json"
+			},
+			want: "JWKS_ENDPOINT",
+		},
+		{
+			name: "url issuer",
+			mutate: func(cfg *Config) {
+				cfg.JWTIssuer = "http://api.example.com"
+			},
+			want: "JWT_ISSUER",
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := validConfig()
+			tc.mutate(cfg)
+			err := cfg.Validate()
+			if err == nil {
+				t.Fatal("expected validation error")
+			}
+			if !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), "https") {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestValidateAllowsLocalHTTPJWKSAndPlainIssuer(t *testing.T) {
+	t.Parallel()
+	cfg := validConfig()
+	cfg.ControlPlaneURL = "http://localhost:8787"
+	cfg.JWKSEndpoint = "http://127.0.0.1:8787/.well-known/jwks.json"
+	cfg.JWTIssuer = "test-issuer"
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() returned error: %v", err)
+	}
+}
+
 func TestValidateInvalidControlPlaneURL(t *testing.T) {
 	t.Parallel()
 	cfg := validConfig()
@@ -662,6 +811,36 @@ func TestValidateTLSPathsExist(t *testing.T) {
 	cfg.TLSKeyPath = keyPath
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("Validate() returned error for valid TLS config: %v", err)
+	}
+}
+
+func TestValidateTerminalWSSettings(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		mutate  func(*Config)
+		wantKey string
+	}{
+		{"max message bytes", func(cfg *Config) { cfg.TerminalWSMaxMessageBytes = 0 }, "TERMINAL_WS_MAX_MESSAGE_BYTES"},
+		{"read timeout", func(cfg *Config) { cfg.TerminalWSReadTimeout = 0 }, "TERMINAL_WS_READ_TIMEOUT"},
+		{"ping interval", func(cfg *Config) { cfg.TerminalWSPingInterval = 0 }, "TERMINAL_WS_PING_INTERVAL"},
+		{"ping interval below read timeout", func(cfg *Config) { cfg.TerminalWSPingInterval = cfg.TerminalWSReadTimeout }, "TERMINAL_WS_PING_INTERVAL"},
+		{"message rate", func(cfg *Config) { cfg.TerminalWSMessageRate = 0 }, "TERMINAL_WS_MESSAGE_RATE"},
+		{"message burst", func(cfg *Config) { cfg.TerminalWSMessageBurst = 0 }, "TERMINAL_WS_MESSAGE_BURST"},
+		{"session ID max length", func(cfg *Config) { cfg.TerminalSessionIDMaxLength = 0 }, "TERMINAL_SESSION_ID_MAX_LENGTH"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := validConfig()
+			tc.mutate(cfg)
+			err := cfg.Validate()
+			if err == nil {
+				t.Fatal("Validate() should return error for invalid terminal WS setting")
+			}
+			if !strings.Contains(err.Error(), tc.wantKey) {
+				t.Fatalf("expected %s error, got: %v", tc.wantKey, err)
+			}
+		})
 	}
 }
 
@@ -1124,5 +1303,71 @@ func TestStandaloneRole(t *testing.T) {
 	}
 	if cfg.IsDeploymentMode() {
 		t.Fatal("standalone mode must not be deployment mode")
+	}
+}
+
+func TestStandaloneCloneFilterDefault(t *testing.T) {
+	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+	t.Setenv("WORKSPACE_ID", "ws-123")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.StandaloneCloneFilter != DefaultStandaloneCloneFilter {
+		t.Fatalf("StandaloneCloneFilter=%q, want %q", cfg.StandaloneCloneFilter, DefaultStandaloneCloneFilter)
+	}
+}
+
+func TestStandaloneCloneFilterOverride(t *testing.T) {
+	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+	t.Setenv("WORKSPACE_ID", "ws-123")
+	t.Setenv("STANDALONE_CLONE_FILTER", "blob:limit=1m")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.StandaloneCloneFilter != "blob:limit=1m" {
+		t.Fatalf("StandaloneCloneFilter=%q, want %q", cfg.StandaloneCloneFilter, "blob:limit=1m")
+	}
+}
+
+func TestStandaloneCloneFilterDisabled(t *testing.T) {
+	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+	t.Setenv("WORKSPACE_ID", "ws-123")
+	t.Setenv("STANDALONE_CLONE_FILTER", "off")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.StandaloneCloneFilter != "" {
+		t.Fatalf("StandaloneCloneFilter=%q, want empty (disabled)", cfg.StandaloneCloneFilter)
+	}
+}
+
+func TestResolveStandaloneCloneFilter(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{name: "default value passes through", raw: DefaultStandaloneCloneFilter, want: "blob:none"},
+		{name: "custom filter passes through", raw: "tree:0", want: "tree:0"},
+		{name: "whitespace trimmed", raw: "  blob:none  ", want: "blob:none"},
+		{name: "off disables", raw: "off", want: ""},
+		{name: "none disables", raw: "none", want: ""},
+		{name: "false disables", raw: "false", want: ""},
+		{name: "case-insensitive disable", raw: "OFF", want: ""},
+		{name: "blank disables", raw: "   ", want: ""},
+		{name: "empty disables", raw: "", want: ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ResolveStandaloneCloneFilter(tc.raw); got != tc.want {
+				t.Fatalf("ResolveStandaloneCloneFilter(%q)=%q, want %q", tc.raw, got, tc.want)
+			}
+		})
 	}
 }

@@ -1,3 +1,5 @@
+import type React from 'react';
+
 /**
  * Multi-Terminal UI Type Definitions
  * Provides TypeScript types for multi-terminal session management
@@ -190,9 +192,11 @@ export interface TerminalConfig {
 export interface TabItemProps {
   session: TerminalSession;
   isActive: boolean;
+  tabIndex: 0 | -1;
   onActivate: (sessionId: string) => void;
   onClose: (sessionId: string) => void;
   onRename: (sessionId: string, name: string) => void;
+  onKeyDown?: (event: React.KeyboardEvent<HTMLElement>, sessionId: string) => void;
   isDraggable?: boolean;
 }
 

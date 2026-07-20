@@ -13,6 +13,7 @@ import (
 
 const apiProjectsPath = "/api/projects/"
 const apiWorkspacesPath = "/api/workspaces/"
+const defaultMaxAPIResponseBodyBytes int64 = 1 << 20
 
 type APIClient struct {
 	config CLIConfig
@@ -213,10 +214,14 @@ func projectAPIPath(projectID string, segments ...string) string {
 }
 
 func (c APIClient) request(ctx context.Context, method string, path string, body map[string]any, out any) error {
-	return doJSON(ctx, c.http, method, c.config.APIURL+path, c.config.SessionCookie, body, out)
+	return doJSONWithLimit(ctx, c.http, method, c.config.APIURL+path, c.config.SessionCookie, body, out, c.config.maxAPIResponseBytes())
 }
 
 func doJSON(ctx context.Context, httpClient HTTPDoer, method string, endpoint string, cookie string, body map[string]any, out any) error {
+	return doJSONWithLimit(ctx, httpClient, method, endpoint, cookie, body, out, defaultMaxAPIResponseBodyBytes)
+}
+
+func doJSONWithLimit(ctx context.Context, httpClient HTTPDoer, method string, endpoint string, cookie string, body map[string]any, out any, maxResponseBytes int64) error {
 	var reader io.Reader
 	if body != nil {
 		content, err := json.Marshal(body)
@@ -243,12 +248,19 @@ func doJSON(ctx context.Context, httpClient HTTPDoer, method string, endpoint st
 	}
 	defer response.Body.Close()
 
-	content, err := io.ReadAll(response.Body)
+	content, truncated, err := readBoundedAPIResponseBody(response.Body, maxResponseBytes)
 	if err != nil {
 		return err
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return parseAPIError(response.StatusCode, content)
+	}
+	if truncated {
+		return APIError{
+			Status:  response.StatusCode,
+			Code:    "RESPONSE_TOO_LARGE",
+			Message: fmt.Sprintf("SAM API response exceeded %d bytes", maxResponseBytes),
+		}
 	}
 	if len(content) == 0 {
 		return nil
@@ -267,6 +279,27 @@ func doJSON(ctx context.Context, httpClient HTTPDoer, method string, endpoint st
 		}
 	}
 	return nil
+}
+
+func readBoundedAPIResponseBody(body io.Reader, maxResponseBytes int64) ([]byte, bool, error) {
+	if maxResponseBytes <= 0 {
+		maxResponseBytes = defaultMaxAPIResponseBodyBytes
+	}
+	content, err := io.ReadAll(io.LimitReader(body, maxResponseBytes+1))
+	if err != nil {
+		return nil, false, err
+	}
+	if int64(len(content)) <= maxResponseBytes {
+		return content, false, nil
+	}
+	return content[:maxResponseBytes], true, nil
+}
+
+func (c CLIConfig) maxAPIResponseBytes() int64 {
+	if c.MaxAPIResponseBytes > 0 {
+		return c.MaxAPIResponseBytes
+	}
+	return defaultMaxAPIResponseBodyBytes
 }
 
 func safeEndpointPath(endpoint string) string {

@@ -73,12 +73,22 @@ Required GitHub Actions secrets include `CF_API_TOKEN`, `CF_ACCOUNT_ID`, `CF_ZON
 GitHub App secrets use `GH_*` prefix (e.g., `GH_CLIENT_ID`, `GH_WEBHOOK_SECRET`) because GitHub Actions secret names cannot start with `GITHUB_*`. When present, the deploy workflow maps those `GH_*` secrets to `GITHUB_*` Worker secrets. Runtime admin config in D1 is resolved first, then these environment fallbacks, then unset.
 :::
 
+## CLI Environment Variables
+
+These variables affect the local `sam` CLI process only. They are not Worker runtime variables or GitHub Actions secrets.
+
+| Variable                          | Default | Description                                                                 |
+| --------------------------------- | ------- | --------------------------------------------------------------------------- |
+| `SAM_CLI_MAX_API_RESPONSE_BYTES`  | `1048576` | Maximum API response body bytes the CLI reads before truncating/aborting. |
+
 ## Feature Flags
 
 | Variable                         | Default                   | Description                                                                                                                                                                                                                                                                                                                  |
 | -------------------------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `CF_CONTAINER_ENABLED`           | `true`                    | Enables Cloudflare Container instant sessions for matching profiles and zero-config runtime selection. Set `false` to force cloud VM runtime.                                                                                                                                                                                |
 | `CF_CONTAINER_WAKE_TIMEOUT_MS`   | `120000`                  | Maximum time for a sleeping container to launch, restore its snapshot, and accept the triggering request.                                                                                                                                                                                                                    |
+| `CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS` | `120000`       | Budget for the synchronous instant-session create-workspace request, which includes the repository clone inside the container.                                                                                                                                                                                               |
+| `CF_CONTAINER_CLONE_FILTER`      | `blob:none`               | Git partial-clone filter forwarded to instant containers as `STANDALONE_CLONE_FILTER`. Set `off` to force full clones.                                                                                                                                                                                                       |
 | `REQUIRE_APPROVAL`               | _(unset)_                 | Default signup approval gate. Superadmins can override it at runtime in Admin → Users without redeploying; when no runtime override exists, this value is used. The first genuine human becomes superadmin regardless of this flag — see [First Login & Admin Access](/docs/guides/self-hosting/#first-login--admin-access). |
 | `TRIAL_ANONYMOUS_USER_ID`        | `system_anonymous_trials` | Id of the internal anonymous-trial sentinel user, excluded from first-user superadmin checks. Override only if your deployment uses a different sentinel id.                                                                                                                                                                 |
 | `CAPACITY_SIZE_FALLBACK_ENABLED` | `true`                    | When a new node's VM size is exhausted on transient capacity, descend the size chain (large→medium→small). Only applies to default-derived sizes (project/platform default), never user-requested sizes. Set `false` to disable.                                                                                             |
@@ -116,16 +126,17 @@ The service-account JWT bearer flow always uses `https://oauth2.googleapis.com/t
 
 ## AI Idea Title Generation
 
-| Variable                             | Default                     | Description                                      |
-| ------------------------------------ | --------------------------- | ------------------------------------------------ |
-| `TASK_TITLE_MODEL`                   | `@cf/zai-org/glm-4.7-flash` | Workers AI model for title generation            |
-| `TASK_TITLE_MAX_LENGTH`              | `100`                       | Max characters in generated title                |
-| `TASK_TITLE_TIMEOUT_MS`              | `5000`                      | Timeout before falling back to truncation        |
-| `TASK_TITLE_GENERATION_ENABLED`      | `true`                      | Set `false` to disable AI generation             |
-| `TASK_TITLE_SHORT_MESSAGE_THRESHOLD` | `100`                       | Messages at or below this length bypass AI       |
-| `TASK_TITLE_MAX_RETRIES`             | `2`                         | Max retry attempts on failure                    |
-| `TASK_TITLE_RETRY_DELAY_MS`          | `1000`                      | Base delay between retries (exponential backoff) |
-| `TASK_TITLE_RETRY_MAX_DELAY_MS`      | `4000`                      | Max delay cap for backoff                        |
+| Variable                                 | Default               | Description                                      |
+| ---------------------------------------- | --------------------- | ------------------------------------------------ |
+| `TASK_TITLE_MODEL`                       | `@cf/zai-org/glm-5.2` | Workers AI model for title generation            |
+| `TASK_TITLE_MAX_LENGTH`                  | `100`                 | Max characters in generated title                |
+| `TASK_TITLE_TIMEOUT_MS`                  | `5000`                | Timeout before falling back to truncation        |
+| `TASK_TITLE_GENERATION_ENABLED`          | `true`                | Set `false` to disable AI generation             |
+| `TASK_TITLE_SHORT_MESSAGE_THRESHOLD`     | `100`                 | Messages at or below this length bypass AI       |
+| `TASK_TITLE_MAX_RETRIES`                 | `2`                   | Max retry attempts on failure                    |
+| `TASK_TITLE_RETRY_DELAY_MS`              | `1000`                | Base delay between retries (exponential backoff) |
+| `TASK_TITLE_RETRY_MAX_DELAY_MS`          | `4000`                | Max delay cap for backoff                        |
+| `TASK_TITLE_ERROR_DIAGNOSTIC_MAX_LENGTH` | `512`                 | Max sanitized provider-error diagnostic length   |
 
 ## Agent Model Catalog
 
@@ -380,6 +391,7 @@ Webhook damping uses Cloudflare KV's eventually consistent read-update-write beh
 | `CF_API_TIMEOUT_MS`             | `30000` | Cloudflare API request timeout              |
 | `GCP_API_TIMEOUT_MS`            | `30000` | GCP OAuth, IAM, and Compute request timeout |
 | `NODE_AGENT_REQUEST_TIMEOUT_MS` | `30000` | VM Agent request timeout                    |
+| `CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS` | `120000` | Instant-session create-workspace budget (includes in-container clone) |
 
 ## Admin Observability
 

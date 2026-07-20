@@ -109,12 +109,12 @@ Terminal WebSocket connections use short-lived JWTs:
 
 ## Bootstrap Security
 
-When a new VM starts, it needs credentials (callback URL, node ID) but **no secrets are embedded in cloud-init**:
+When a new VM starts, cloud-init receives only the short-lived bootstrap/callback material needed to contact the control plane; long-lived provider and repository credentials are fetched through the bootstrap exchange:
 
-1. API creates a one-time bootstrap token (cryptographically random, 5-minute expiry)
-2. Cloud-init script includes only the token and API URL
+1. API creates a one-time bootstrap token (cryptographically random, 15-minute default expiry)
+2. Cloud-init starts the VM Agent with control-plane metadata and stores callback JWT material in a root-only file rather than the systemd environment
 3. VM Agent redeems the token: `POST /api/bootstrap/{token}`
-4. API returns the full configuration (callback URL, node ID, etc.)
+4. API returns the full configuration and encrypted credential payloads needed for the node
 5. Token is invalidated after use
 
 ## VM TLS Certificates

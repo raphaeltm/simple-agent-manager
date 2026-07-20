@@ -82,10 +82,12 @@ export function WorkspaceCard({ workspace, onStop, onRestart, onDelete }: Worksp
           <StatusBadge status={workspace.status} />
           <div className="flex-1 min-w-0">
             <div className="flex items-baseline gap-2 min-w-0">
-              <span className="sam-type-card-title text-fg-primary overflow-hidden text-ellipsis whitespace-nowrap min-w-0">
+              {/* Title claims free space and truncates last; a long branch name
+                  caps at 40% instead of crushing the title to a few chars. */}
+              <span className="sam-type-card-title text-fg-primary overflow-hidden text-ellipsis whitespace-nowrap flex-1 min-w-0">
                 {workspace.displayName || workspace.name}
               </span>
-              <span className="sam-type-caption text-fg-muted overflow-hidden text-ellipsis whitespace-nowrap">
+              <span className="sam-type-caption text-fg-muted overflow-hidden text-ellipsis whitespace-nowrap shrink-0 min-w-16 max-w-[40%]">
                 {workspace.branch}
               </span>
             </div>

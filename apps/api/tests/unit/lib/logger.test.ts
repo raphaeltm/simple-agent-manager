@@ -44,30 +44,35 @@ describe('createModuleLogger', () => {
 });
 
 describe('serializeError', () => {
-  test('serializes Error with message and name', () => {
-    const err = new Error('something broke');
-    const result = serializeError(err);
-    expect(result.error).toBe('something broke');
-    expect(result.errorName).toBe('Error');
-    expect(result.stack).toBeDefined();
+  beforeEach(() => {
+    vi.restoreAllMocks();
   });
 
-  test('serializes Error with cause', () => {
-    const cause = new Error('root cause');
+  test('serializes Error with redacted message and no stack', () => {
+    const err = new Error('something broke with token sam_secret_123');
+    const result = serializeError(err);
+    expect(result.error).toBe('[REDACTED_ERROR_MESSAGE]');
+    expect(result.errorName).toBe('Error');
+    expect(result.stack).toBeUndefined();
+  });
+
+  test('serializes Error cause without raw Error cause message', () => {
+    const cause = new Error('root cause with cookie session=secret');
     const err = new Error('wrapper', { cause });
     const result = serializeError(err);
-    expect(result.error).toBe('wrapper');
-    expect(result.cause).toBe('root cause');
+    expect(result.error).toBe('[REDACTED_ERROR_MESSAGE]');
+    expect(result.cause).toBe('[REDACTED_ERROR_MESSAGE]');
   });
 
-  test('serializes Error with non-Error cause', () => {
-    const err = new Error('wrapper', { cause: 'string cause' });
+  test('serializes non-Error cause with token-like values redacted', () => {
+    const err = new Error('wrapper', { cause: 'string cause Bearer abc.def.ghi' });
     const result = serializeError(err);
-    expect(result.cause).toBe('string cause');
+    expect(result.cause).toBe('string cause [REDACTED]');
   });
 
-  test('serializes non-Error values as string', () => {
+  test('serializes non-Error values as string with token-like values redacted', () => {
     expect(serializeError('plain string')).toEqual({ error: 'plain string' });
+    expect(serializeError('failed for sk-testtoken')).toEqual({ error: 'failed for [REDACTED]' });
     expect(serializeError(42)).toEqual({ error: '42' });
     expect(serializeError(null)).toEqual({ error: 'null' });
     expect(serializeError(undefined)).toEqual({ error: 'undefined' });
@@ -76,7 +81,28 @@ describe('serializeError', () => {
   test('serializes Error subclass', () => {
     const err = new TypeError('invalid type');
     const result = serializeError(err);
-    expect(result.error).toBe('invalid type');
+    expect(result.error).toBe('[REDACTED_ERROR_MESSAGE]');
     expect(result.errorName).toBe('TypeError');
+  });
+
+  test('redacts sensitive log keys and token-like values before emitting', () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const log = createModuleLogger('auth');
+
+    log.error('failure', {
+      authorization: 'Bearer secret-token',
+      nested: {
+        cookie: 'session=secret',
+        note: 'failed for sk-testtoken',
+      },
+      safe: 'kept',
+    });
+
+    expect(spy).toHaveBeenCalledOnce();
+    const entry = JSON.parse(spy.mock.calls[0][0] as string);
+    expect(entry.authorization).toBe('[REDACTED]');
+    expect(entry.nested.cookie).toBe('[REDACTED]');
+    expect(entry.nested.note).toBe('failed for [REDACTED]');
+    expect(entry.safe).toBe('kept');
   });
 });

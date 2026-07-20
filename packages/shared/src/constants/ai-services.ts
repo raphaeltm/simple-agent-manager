@@ -24,6 +24,11 @@ export const DEFAULT_TASK_TITLE_RETRY_DELAY_MS = 1000;
 /** Default max delay (ms) cap for retry backoff. Override via TASK_TITLE_RETRY_MAX_DELAY_MS env var. */
 export const DEFAULT_TASK_TITLE_RETRY_MAX_DELAY_MS = 4000;
 
+/** Maximum safe provider-error diagnostic length. Override via TASK_TITLE_ERROR_DIAGNOSTIC_MAX_LENGTH. */
+export const DEFAULT_TASK_TITLE_ERROR_DIAGNOSTIC_MAX_LENGTH = 512;
+export const MIN_TASK_TITLE_ERROR_DIAGNOSTIC_MAX_LENGTH = 64;
+export const MAX_TASK_TITLE_ERROR_DIAGNOSTIC_MAX_LENGTH = 2048;
+
 // =============================================================================
 // Context Summarization (Conversation Forking)
 // =============================================================================

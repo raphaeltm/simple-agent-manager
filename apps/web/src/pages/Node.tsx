@@ -239,10 +239,9 @@ export function Node() {
           {stopping ? 'Stopping...' : 'Stop Node'}
         </Button>
         <Button
-          variant="secondary"
+          variant="danger"
           onClick={handleDelete}
           disabled={stopping || deleting || !node}
-          style={{ borderColor: 'var(--sam-color-danger)', color: 'var(--sam-color-danger)' }}
         >
           {deleting ? 'Deleting...' : isDeploymentNode ? 'Delete Node Only' : 'Delete Node'}
         </Button>

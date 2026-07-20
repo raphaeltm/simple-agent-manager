@@ -560,3 +560,31 @@ func TestSetContainerUser_DoesNotAffectExistingSessions(t *testing.T) {
 		t.Errorf("SetContainerUser modified existing session args:\n  before: %s\n  after:  %s", argsBefore, argsAfter)
 	}
 }
+
+func TestValidateSessionID(t *testing.T) {
+	accepted := []string{"sess-1", "terminal_01KXT3458SYZYQKYJ5KVN5J591", "tab.v2:abc-123_DEF"}
+	for _, sessionID := range accepted {
+		if err := ValidateSessionID(sessionID); err != nil {
+			t.Fatalf("expected %q to be accepted: %v", sessionID, err)
+		}
+	}
+
+	rejected := []string{"", "../escape", "has space", "slash/id", "bad$char"}
+	for _, sessionID := range rejected {
+		if err := ValidateSessionID(sessionID); err == nil {
+			t.Fatalf("expected %q to be rejected", sessionID)
+		}
+	}
+}
+
+func TestCreateSessionWithIDRejectsInvalidSessionID(t *testing.T) {
+	m := NewManager(ManagerConfig{DefaultShell: "/bin/sh", DefaultRows: 24, DefaultCols: 80})
+	t.Cleanup(m.CloseAllSessions)
+
+	if _, err := m.CreateSessionWithID("../escape", "user", 24, 80, ""); err == nil {
+		t.Fatal("expected invalid session ID to be rejected")
+	}
+	if m.SessionCount() != 0 {
+		t.Fatalf("expected no session to be created, got %d", m.SessionCount())
+	}
+}

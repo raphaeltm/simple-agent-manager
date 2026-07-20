@@ -1,48 +1,21 @@
 import { describe, expect, it } from 'vitest';
 
-/**
- * Unit tests for the CORS origin callback logic.
- *
- * These tests exercise the origin validation function in isolation by
- * replicating the exact same logic used in apps/api/src/index.ts.
- * The worker smoke tests (worker-smoke.test.ts) additionally verify
- * the real middleware in the workerd runtime.
- */
-
-/** Replicates the origin callback from apps/api/src/index.ts */
-function corsOriginCallback(origin: string | undefined, baseDomain: string): string | null {
-  if (!origin) return null;
-  // Allow localhost only in development (BASE_DOMAIN contains 'localhost' or is empty)
-  const isDevEnvironment = !baseDomain || baseDomain.includes('localhost');
-  try {
-    const url = new URL(origin);
-    if (isDevEnvironment && (url.hostname === 'localhost' || url.hostname === '127.0.0.1')) return origin;
-  } catch {
-    return null;
-  }
-  if (baseDomain) {
-    try {
-      const url = new URL(origin);
-      if (url.hostname === baseDomain || url.hostname.endsWith(`.${baseDomain}`)) return origin;
-    } catch {
-      return null;
-    }
-  }
-  return null;
-}
+import { resolveCredentialedCorsOrigin } from '../../src/lib/cors-origin';
 
 describe('CORS origin callback', () => {
   const baseDomain = 'example.com';
+  const corsOriginCallback = resolveCredentialedCorsOrigin;
 
   describe('allowed origins (production)', () => {
     it('allows exact baseDomain origins', () => {
       expect(corsOriginCallback('https://example.com', baseDomain)).toBe('https://example.com');
     });
 
-    it('allows subdomain origins of baseDomain', () => {
+    it('allows only legitimate first-party app, API, and docs origins', () => {
       expect(corsOriginCallback('https://app.example.com', baseDomain)).toBe('https://app.example.com');
       expect(corsOriginCallback('https://api.example.com', baseDomain)).toBe('https://api.example.com');
-      expect(corsOriginCallback('https://ws-abc123.example.com', baseDomain)).toBe('https://ws-abc123.example.com');
+      expect(corsOriginCallback('https://docs.example.com', baseDomain)).toBe('https://docs.example.com');
+      expect(corsOriginCallback('https://www.example.com', baseDomain)).toBe('https://www.example.com');
     });
   });
 
@@ -59,9 +32,26 @@ describe('CORS origin callback', () => {
       expect(corsOriginCallback('https://attacker.org', baseDomain)).toBeNull();
     });
 
+    it('rejects non-HTTPS origins outside local development', () => {
+      expect(corsOriginCallback('http://app.example.com', baseDomain)).toBeNull();
+      expect(corsOriginCallback('http://api.example.com', baseDomain)).toBeNull();
+    });
+
     it('rejects origins that contain baseDomain as substring but are not subdomains', () => {
       expect(corsOriginCallback('https://notexample.com', baseDomain)).toBeNull();
       expect(corsOriginCallback('https://example.com.evil.com', baseDomain)).toBeNull();
+    });
+
+    it('rejects workspace, workspace-port, VM, and arbitrary subdomain origins', () => {
+      expect(corsOriginCallback('https://ws-abc123.example.com', baseDomain)).toBeNull();
+      expect(corsOriginCallback('https://ws-abc123--5173.example.com', baseDomain)).toBeNull();
+      expect(corsOriginCallback('https://node-123.vm.example.com', baseDomain)).toBeNull();
+      expect(corsOriginCallback('https://customer-controlled.example.com', baseDomain)).toBeNull();
+    });
+
+    it('rejects nested subdomains under otherwise allowed labels', () => {
+      expect(corsOriginCallback('https://preview.app.example.com', baseDomain)).toBeNull();
+      expect(corsOriginCallback('https://foo.docs.example.com', baseDomain)).toBeNull();
     });
 
     it('rejects null/undefined origins', () => {
@@ -93,7 +83,7 @@ describe('CORS origin callback', () => {
       expect(corsOriginCallback('http://127.0.0.1:3000', 'localhost')).toBe('http://127.0.0.1:3000');
     });
 
-    it('allows baseDomain subdomains even in dev mode', () => {
+    it('allows baseDomain origins in dev mode', () => {
       expect(corsOriginCallback('http://localhost', 'localhost')).toBe('http://localhost');
     });
   });

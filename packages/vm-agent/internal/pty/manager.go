@@ -14,6 +14,8 @@ import (
 // Returns ("", nil) if container mode is disabled.
 type ContainerResolver func() (string, error)
 
+const DefaultSessionIDMaxLength = 128
+
 // Manager manages multiple PTY sessions.
 type Manager struct {
 	sessions           map[string]*Session
@@ -28,6 +30,8 @@ type Manager struct {
 	maxSessionsPerUser int           // Maximum sessions allowed per user (0 = unlimited)
 	gracePeriod        time.Duration // How long orphaned sessions survive before cleanup (0 = disabled)
 	bufferSize         int           // Output ring buffer capacity per session in bytes
+	sessionIDMaxLength int           // Maximum client-supplied session ID length
+	closeGrace         time.Duration // Bounded wait after graceful PTY close signals
 }
 
 // ManagerConfig holds configuration for the session manager.
@@ -42,6 +46,8 @@ type ManagerConfig struct {
 	MaxSessionsPerUser int           // Maximum sessions allowed per user (0 = unlimited)
 	GracePeriod        time.Duration // How long orphaned sessions survive before cleanup (0 = disabled)
 	BufferSize         int           // Output ring buffer capacity per session in bytes
+	SessionIDMaxLength int           // Maximum client-supplied session ID length (0 = default)
+	CloseGrace         time.Duration // Bounded wait after graceful PTY close signals
 }
 
 // NewManager creates a new session manager.
@@ -53,6 +59,10 @@ func NewManager(cfg ManagerConfig) *Manager {
 	bufferSize := cfg.BufferSize
 	if bufferSize <= 0 {
 		bufferSize = 262144 // 256 KB
+	}
+	sessionIDMaxLength := cfg.SessionIDMaxLength
+	if sessionIDMaxLength <= 0 {
+		sessionIDMaxLength = DefaultSessionIDMaxLength
 	}
 	return &Manager{
 		sessions:           make(map[string]*Session),
@@ -66,6 +76,8 @@ func NewManager(cfg ManagerConfig) *Manager {
 		maxSessionsPerUser: cfg.MaxSessionsPerUser,
 		gracePeriod:        gracePeriod,
 		bufferSize:         bufferSize,
+		sessionIDMaxLength: sessionIDMaxLength,
+		closeGrace:         cfg.CloseGrace,
 	}
 }
 
@@ -119,6 +131,7 @@ func (m *Manager) CreateSessionWithID(sessionID, userID string, rows, cols int, 
 		ContainerUser:    m.containerUser,
 		ProcessGroup:     m.processGroup,
 		OutputBufferSize: m.bufferSize,
+		CloseGrace:       m.closeGrace,
 	})
 	if err != nil {
 		return nil, err
@@ -132,7 +145,33 @@ func (m *Manager) CreateSessionWithID(sessionID, userID string, rows, cols int, 
 	return session, nil
 }
 
+func ValidateSessionID(sessionID string) error {
+	return ValidateSessionIDWithMaxLength(sessionID, DefaultSessionIDMaxLength)
+}
+
+func ValidateSessionIDWithMaxLength(sessionID string, maxLength int) error {
+	if maxLength <= 0 {
+		maxLength = DefaultSessionIDMaxLength
+	}
+	if sessionID == "" {
+		return fmt.Errorf("session ID is required")
+	}
+	if len(sessionID) > maxLength {
+		return fmt.Errorf("session ID too long")
+	}
+	for _, r := range sessionID {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' || r == '.' || r == ':' {
+			continue
+		}
+		return fmt.Errorf("session ID contains invalid character %q", r)
+	}
+	return nil
+}
+
 func (m *Manager) canCreateSession(sessionID, userID string) error {
+	if err := ValidateSessionIDWithMaxLength(sessionID, m.sessionIDMaxLength); err != nil {
+		return err
+	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	if _, exists := m.sessions[sessionID]; exists {

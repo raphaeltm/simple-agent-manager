@@ -12,6 +12,7 @@ import { signCallbackToken, signNodeCallbackToken } from './jwt';
 import {
   type AgentSessionOverrides,
   createWorkspaceOnNode,
+  getCfContainerCreateWorkspaceTimeoutMs,
   waitForNodeAgentReady,
 } from './node-agent';
 import { createNodeRecord } from './nodes';
@@ -279,17 +280,26 @@ export async function launchInstantSession(
     const workspaceCreateStart = Date.now();
     const workspaceCallbackToken = await signCallbackToken(workspaceId, env);
     await runContainerPhase('create_workspace', phaseDetail, () =>
-      createWorkspaceOnNode(node.id, env, input.userId, {
-        workspaceId,
-        repository: input.project.repository,
-        branch,
-        repoProvider: gitSource.repoProvider,
-        cloneUrl: gitSource.cloneUrl,
-        repositoryHost: gitSource.repositoryHost,
-        repositoryPath: gitSource.repositoryPath,
-        callbackToken: workspaceCallbackToken,
-        lightweight: true,
-      })
+      createWorkspaceOnNode(
+        node.id,
+        env,
+        input.userId,
+        {
+          workspaceId,
+          repository: input.project.repository,
+          branch,
+          repoProvider: gitSource.repoProvider,
+          cloneUrl: gitSource.cloneUrl,
+          repositoryHost: gitSource.repositoryHost,
+          repositoryPath: gitSource.repositoryPath,
+          callbackToken: workspaceCallbackToken,
+          lightweight: true,
+        },
+        // The standalone vm-agent clones the repository synchronously inside
+        // this request, so it gets the cf-container create budget instead of
+        // the interactive node-agent default.
+        { requestTimeoutMs: getCfContainerCreateWorkspaceTimeoutMs(env) }
+      )
     );
     const workspaceCreateDurationMs = Date.now() - workspaceCreateStart;
 

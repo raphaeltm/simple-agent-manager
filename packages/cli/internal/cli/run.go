@@ -473,11 +473,15 @@ func resolveAuthenticatedConfig(ctx context.Context, runtime Runtime) (*CLIConfi
 	if apiURL == "" {
 		apiURL = defaultAPIURL
 	}
+	maxAPIResponseBytes, err := loadMaxAPIResponseBytes(runtime.Env)
+	if err != nil {
+		return nil, "", err
+	}
 	response, err := ExchangeAPIToken(ctx, runtime.HTTPClient, apiURL, token)
 	if err != nil {
 		return nil, "", err
 	}
-	return &CLIConfig{APIURL: normalizeAPIURL(apiURL), SessionCookie: response.SessionCookie}, "env-token", nil
+	return &CLIConfig{APIURL: normalizeAPIURL(apiURL), SessionCookie: response.SessionCookie, MaxAPIResponseBytes: maxAPIResponseBytes}, "env-token", nil
 }
 
 func writeOrFail(runtime Runtime, jsonMode bool, text string, value any) int {

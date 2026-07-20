@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 
 import { createAuth } from '../auth';
 import type { Env } from '../env';
-import { log } from '../lib/logger';
+import { log, serializeError } from '../lib/logger';
 import { expectJsonRecord } from '../lib/runtime-validation';
 import { errors } from '../middleware/error';
 import { maybeAttachTrialClaimCookie } from '../services/trial/oauth-hook';
@@ -21,17 +21,21 @@ authRoutes.on(['GET', 'POST'], '/*', async (c) => {
     const auth = await createAuth(c.env);
     const response = await auth.handler(c.req.raw);
 
-    // Log auth errors to Worker logs for debugging
+    // Log auth error metadata only. BetterAuth response bodies may include
+    // upstream OAuth data or request-specific values that do not belong in
+    // normal Worker logs.
     if (response.status >= 400) {
-      const body = await response.clone().text();
-      log.error('auth.better_auth_error', { status: response.status, body: body || '(empty body)' });
+      log.error('auth.better_auth_error', {
+        status: response.status,
+        statusText: response.statusText || undefined,
+      });
     }
     // Trial claim hook: if this is a successful OAuth callback and the user
     // has an active trial fingerprint cookie, attach a claim cookie + redirect
     // to the trial landing page. No-op when no fingerprint is present.
     return await maybeAttachTrialClaimCookie(c.env, c.req.raw, response);
   } catch (err) {
-    log.error('auth.better_auth_exception', { error: err instanceof Error ? err.message : String(err) });
+    log.error('auth.better_auth_exception', serializeError(err));
     return c.json({ error: 'AUTH_ERROR', message: 'Internal auth error' }, 500);
   }
 });

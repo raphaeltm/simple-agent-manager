@@ -389,6 +389,9 @@ jobs:
       - name: D1 migration safety check (blocks destructive DROP TABLE)
         run: pnpm quality:migration-safety
 
+      - name: D1 migration ordering check (blocks ambiguous prefixes)
+        run: pnpm quality:migration-ordering
+
       - name: DO migration safety check (blocks destructive patterns in Durable Object SQLite)
         run: pnpm quality:do-migration-safety
 

@@ -40,7 +40,7 @@ export {
 } from './types';
 
 // Re-export utilities
-export { getTimeoutMs,providerFetch } from './provider-fetch';
+export { getMaxProviderErrorBodyChars, getTimeoutMs, providerFetch } from './provider-fetch';
 
 // Re-export providers and classification functions
 export type { GcpTokenProvider } from './gcp';
@@ -67,11 +67,7 @@ export {
   HetznerProvider,
   isTransientCapacityError,
 } from './hetzner';
-export {
-  classifyScalewayError,
-  SCALEWAY_LOCATIONS,
-  ScalewayProvider,
-} from './scaleway';
+export { classifyScalewayError, SCALEWAY_LOCATIONS, ScalewayProvider } from './scaleway';
 export {
   SCALEWAY_DEFAULT_VOLUME_IOPS,
   SCALEWAY_MAX_VOLUMES_PER_SERVER,
@@ -97,14 +93,10 @@ export function createProvider(config: ProviderConfig): Provider {
           capacityRetryMaxAttempts: config.capacityRetryMaxAttempts,
           capacityRetryBudgetMs: config.capacityRetryBudgetMs,
           logger: config.logger,
-        },
+        }
       );
     case 'scaleway':
-      return new ScalewayProvider(
-        config.secretKey,
-        config.projectId,
-        config.zone,
-      );
+      return new ScalewayProvider(config.secretKey, config.projectId, config.zone);
     case 'gcp':
       return new GcpProvider(
         config.projectId,
@@ -118,14 +110,14 @@ export function createProvider(config: ProviderConfig): Provider {
         config.firewallSourceRanges,
         config.agentPorts,
         config.appRouteSourceRanges,
-        config.appRoutePorts,
+        config.appRoutePorts
       );
     default: {
       const _exhaustive: never = config;
       throw new ProviderError(
         'factory',
         undefined,
-        `Unsupported provider: ${(_exhaustive as { provider: string }).provider}`,
+        `Unsupported provider: ${(_exhaustive as { provider: string }).provider}`
       );
     }
   }

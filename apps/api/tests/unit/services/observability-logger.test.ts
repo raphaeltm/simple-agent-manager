@@ -13,11 +13,16 @@ describe('Instrumented Logger', () => {
   const mockDb = {} as D1Database;
   const mockWaitUntil = vi.fn();
 
+  async function waitForPersistCall(): Promise<void> {
+    expect(mockWaitUntil).toHaveBeenCalledTimes(1);
+    await mockWaitUntil.mock.calls[0][0];
+  }
+
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it('should write error-level entries to D1 when db is provided', () => {
+  it('should write error-level entries to D1 when db is provided', async () => {
     const logger = createInstrumentedLogger(mockDb, mockWaitUntil);
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
@@ -27,7 +32,7 @@ describe('Instrumented Logger', () => {
     expect(errorSpy).toHaveBeenCalledTimes(1);
 
     // Should persist to D1 via waitUntil
-    expect(mockWaitUntil).toHaveBeenCalledTimes(1);
+    await waitForPersistCall();
     expect(mockPersistError).toHaveBeenCalledTimes(1);
 
     errorSpy.mockRestore();
@@ -83,31 +88,37 @@ describe('Instrumented Logger', () => {
     errorSpy.mockRestore();
   });
 
-  it('should pass correct PersistErrorInput shape to persistError', () => {
+  it('should pass correct PersistErrorInput shape to persistError', async () => {
     const logger = createInstrumentedLogger(mockDb, mockWaitUntil);
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-    logger.error('api_failure', { userId: 'user-1', path: '/api/test' });
+    logger.error('api_failure', {
+      userId: 'user-1',
+      path: '/api/test',
+      authorization: 'Bearer secret-token',
+    });
 
+    await waitForPersistCall();
     expect(mockPersistError).toHaveBeenCalledWith(
       mockDb,
       expect.objectContaining({
         source: 'api',
         level: 'error',
         message: 'api_failure',
-        context: expect.objectContaining({ userId: 'user-1', path: '/api/test' }),
+        context: expect.objectContaining({ userId: 'user-1', path: '/api/test', authorization: '[REDACTED]' }),
       })
     );
 
     errorSpy.mockRestore();
   });
 
-  it('should include event name as the message', () => {
+  it('should include event name as the message', async () => {
     const logger = createInstrumentedLogger(mockDb, mockWaitUntil);
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     logger.error('node_provision_failed', { nodeId: 'node-1', reason: 'timeout' });
 
+    await waitForPersistCall();
     expect(mockPersistError).toHaveBeenCalledWith(
       mockDb,
       expect.objectContaining({
@@ -121,12 +132,13 @@ describe('Instrumented Logger', () => {
     errorSpy.mockRestore();
   });
 
-  it('should set context to null when no details provided', () => {
+  it('should set context to null when no details provided', async () => {
     const logger = createInstrumentedLogger(mockDb, mockWaitUntil);
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     logger.error('bare_error');
 
+    await waitForPersistCall();
     expect(mockPersistError).toHaveBeenCalledWith(
       mockDb,
       expect.objectContaining({
@@ -146,17 +158,16 @@ describe('Instrumented Logger', () => {
     expect(typeof logger.error).toBe('function');
   });
 
-  it('should pass the persistError promise to waitUntil', () => {
-    const fakePromise = Promise.resolve();
-    mockPersistError.mockReturnValueOnce(fakePromise);
-
+  it('should pass a persistence promise to waitUntil', async () => {
     const logger = createInstrumentedLogger(mockDb, mockWaitUntil);
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     logger.error('test_event');
 
-    // waitUntil should receive the promise from persistError
-    expect(mockWaitUntil).toHaveBeenCalledWith(fakePromise);
+    expect(mockWaitUntil).toHaveBeenCalledTimes(1);
+    expect(mockWaitUntil.mock.calls[0][0]).toBeInstanceOf(Promise);
+    await mockWaitUntil.mock.calls[0][0];
+    expect(mockPersistError).toHaveBeenCalledTimes(1);
 
     errorSpy.mockRestore();
   });

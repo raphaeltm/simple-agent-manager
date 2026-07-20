@@ -1,6 +1,6 @@
 import type { CredentialProvider, GitHubInstallation, NodeResponse, Project, ProjectDetailResponse, ProviderCatalog, VMSize } from '@simple-agent-manager/shared';
 import { DEFAULT_VM_LOCATION, PROVIDER_LABELS } from '@simple-agent-manager/shared';
-import { Alert, Button, Card, Input, PageLayout, Select, Spinner } from '@simple-agent-manager/ui';
+import { Alert, Breadcrumb, Button, Card, Input, PageLayout, Select, Spinner } from '@simple-agent-manager/ui';
 import { useCallback,useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 
@@ -141,8 +141,12 @@ export function CreateWorkspace() {
           setCatalogLoading(true);
           getProviderCatalog()
             .then((resp) => {
-              setCatalogs(resp.catalogs);
-              const first = resp.catalogs[0];
+              // Guard the shape: a malformed catalog payload must not poison
+              // state with undefined — `catalogs.find(...)` runs on every
+              // render and would crash the whole page via the ErrorBoundary.
+              const catalogList = Array.isArray(resp.catalogs) ? resp.catalogs : [];
+              setCatalogs(catalogList);
+              const first = catalogList[0];
               if (first) {
                 setSelectedProvider(keepExistingOr(first.provider));
                 setVmLocation(keepExistingOr(first.defaultLocation));
@@ -376,6 +380,14 @@ export function CreateWorkspace() {
       title={isProjectLinked ? `New Workspace \u2014 ${linkedProject?.name}` : 'Create Workspace'}
       maxWidth="md"
     >
+      <Breadcrumb
+        className="mb-4"
+        segments={[
+          { label: 'Home', path: '/dashboard' },
+          { label: 'Workspaces', path: '/workspaces' },
+          { label: isProjectLinked && linkedProject ? `New \u2014 ${linkedProject.name}` : 'New' },
+        ]}
+      />
       {showPrereqs && (
         <Card className="mb-6 overflow-hidden">
           <div className="p-4 border-b border-border-default">

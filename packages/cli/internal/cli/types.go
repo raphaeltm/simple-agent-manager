@@ -33,10 +33,11 @@ type Runner interface {
 }
 
 type CLIConfig struct {
-	APIURL            string `json:"apiUrl"`
-	SessionCookie     string `json:"sessionCookie"`
-	ActiveProjectID   string `json:"activeProjectId,omitempty"`
-	ActiveProjectName string `json:"activeProjectName,omitempty"`
+	APIURL              string `json:"apiUrl"`
+	SessionCookie       string `json:"sessionCookie"`
+	ActiveProjectID     string `json:"activeProjectId,omitempty"`
+	ActiveProjectName   string `json:"activeProjectName,omitempty"`
+	MaxAPIResponseBytes int64  `json:"maxApiResponseBytes,omitempty"`
 }
 
 type AuthUser struct {
