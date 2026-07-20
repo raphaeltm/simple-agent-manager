@@ -1,4 +1,4 @@
-import type { AgentProfileRuntime } from '@simple-agent-manager/shared';
+import type { AgentProfileRuntime, TaskMode } from '@simple-agent-manager/shared';
 import { DEFAULT_TASK_TITLE_MAX_LENGTH } from '@simple-agent-manager/shared';
 import { eq } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
@@ -41,6 +41,7 @@ export interface LaunchInstantSessionInput {
   skillId?: string | null;
   branch?: string | null;
   workspaceName?: string | null;
+  taskMode?: TaskMode;
   overrides?: AgentSessionOverrides;
 }
 
@@ -166,6 +167,7 @@ export async function launchInstantSession(
   const config = getVmAgentContainerConfig(env);
   const startedAt = Date.now();
   const branch = input.branch?.trim() || input.project.defaultBranch || 'main';
+  const taskMode = input.taskMode ?? 'conversation';
   const workspaceName = getWorkspaceName(input);
   const gitSource = await resolveWorkspaceGitSource(db, input.project);
 
@@ -316,9 +318,13 @@ export async function launchInstantSession(
       agentProfileId: input.agentProfileId ?? null,
       skillId: input.skillId ?? null,
       visibleInitialPrompt: input.initialPrompt,
-      promptKind: 'conversation',
-      taskContext: { taskId: input.taskId, taskMode: 'conversation' },
+      promptKind: taskMode === 'task' ? 'task' : 'conversation',
+      taskContext: { taskId: input.taskId, taskMode },
       overrides: input.overrides,
+      // Task-mode Instant sessions do not yet have the TaskRunner DO execution-timeout
+      // watchdog. Keep this gap tracked by idea 01KXZNPR69JGK7S99KMPFCRZWJ and
+      // tasks/backlog/2026-07-19-instant-launch-stuck-queued-on-disconnect.md plus
+      // tasks/backlog/2026-07-19-instant-session-capacity-controls.md.
       actor: {
         type: 'system',
         id: input.userId,

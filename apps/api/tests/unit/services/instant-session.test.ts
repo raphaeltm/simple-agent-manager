@@ -303,6 +303,49 @@ describe('launchInstantSession', () => {
     );
   });
 
+  it('passes task mode through to task prompt and MCP token context exactly once', async () => {
+    const { db } = makeDb();
+
+    await launchInstantSession(db as never, env, {
+      ...baseLaunchInput(),
+      taskMode: 'task',
+    });
+
+    expect(mocks.projectData.createSession).toHaveBeenCalledTimes(1);
+    expect(mocks.projectData.persistMessage).toHaveBeenCalledTimes(1);
+    expect(mocks.projectData.persistMessage).toHaveBeenCalledWith(
+      expect.anything(),
+      'project-1',
+      'chat-session-1',
+      'user',
+      'prompt',
+      null
+    );
+    expect(mocks.mcp.storeMcpToken).toHaveBeenCalledWith(
+      expect.anything(),
+      'mcp-token',
+      expect.objectContaining({
+        taskId: 'task-1',
+        contextType: 'task',
+        taskMode: 'task',
+      }),
+      expect.anything()
+    );
+    expect(mocks.nodeAgent.startAgentSessionOnNode).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      undefined,
+      { projectId: 'project-1', taskId: 'task-1', taskMode: 'task' },
+      expect.anything()
+    );
+  });
+
   it('passes GitLab repository metadata to the VM agent create-workspace request', async () => {
     const gitlabMetadata = {
       userId: 'user-1',

@@ -93,7 +93,7 @@ An agent running inside a workspace has access to MCP tools that provide project
 
 | Tool                  | Purpose                                                                       |
 | --------------------- | ----------------------------------------------------------------------------- |
-| `dispatch_task`       | Spawn a new idea for execution                                                |
+| `dispatch_task`       | Spawn work using the selected profile runtime or an explicit runtime override |
 | `create_idea`         | Create a new idea                                                             |
 | `update_idea`         | Update an idea's title, content, priority, or status                          |
 | `list_ideas`          | View existing ideas                                                           |
@@ -102,6 +102,8 @@ An agent running inside a workspace has access to MCP tools that provide project
 | `update_task_status`  | Report progress                                                               |
 | `complete_task`       | Mark the current work as done, optionally with structured completion evidence |
 | `request_human_input` | Ask the user for a decision                                                   |
+
+`dispatch_task` accepts an optional `runtime` value of `vm` or `cf-container`. Container dispatch starts an Instant task without VM sizing or cloud credentials. Explicit VM-only options such as `vmSize`, `provider`, `vmLocation`, `workspaceProfile`, and `devcontainerConfigName` cannot be combined with a container runtime; choose `runtime: "vm"` or remove those options.
 
 ### Dispatch Limits
 

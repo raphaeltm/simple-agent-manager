@@ -10,6 +10,10 @@ const deploymentToolMocks = vi.hoisted(() => ({
   handlePreviewDeploymentRoutes: vi.fn(),
 }));
 
+const instantSessionMocks = vi.hoisted(() => ({
+  launchInstantSession: vi.fn(),
+}));
+
 vi.mock('../../../src/services/agent-profiles', () => ({
   createProfile: vi.fn(),
   deleteProfile: vi.fn(),
@@ -21,6 +25,10 @@ vi.mock('../../../src/services/agent-profiles', () => ({
 
 vi.mock('../../../src/routes/projects/_helpers', () => ({
   requireRepositoryOwnerAccess: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock('../../../src/services/instant-session', () => ({
+  launchInstantSession: instantSessionMocks.launchInstantSession,
 }));
 
 vi.mock('../../../src/routes/mcp/deployment-tools', async () => {
@@ -256,6 +264,7 @@ const mockEnv = {
   AI: mockAI,
   NOTIFICATION: mockNotification,
   BASE_DOMAIN: 'example.com',
+  CF_CONTAINER_ENABLED: 'false',
   COMPUTE_QUOTA_ENFORCEMENT_ENABLED: 'false',
 };
 
@@ -298,6 +307,7 @@ describe('MCP Routes', () => {
     vi.clearAllMocks();
     mockD1 = createMockD1();
     mockEnv.DATABASE = mockD1;
+    mockEnv.CF_CONTAINER_ENABLED = 'false';
     const { mcpRoutes } = await import('../../../src/routes/mcp');
     app = new Hono();
     app.route('/mcp', mcpRoutes);
@@ -1214,7 +1224,13 @@ describe('MCP Routes', () => {
       );
 
       expect(res.status).toBe(200);
-      expect(mockDoStub.listSessions).toHaveBeenCalledWith('active', expect.any(Number), 0, null, null);
+      expect(mockDoStub.listSessions).toHaveBeenCalledWith(
+        'active',
+        expect.any(Number),
+        0,
+        null,
+        null
+      );
     });
   });
 
@@ -1578,6 +1594,8 @@ describe('MCP Routes', () => {
       expect(dispatchTool.inputSchema.required).toContain('description');
       expect(dispatchTool.inputSchema.properties.branch).toBeDefined();
       expect(dispatchTool.inputSchema.properties.branch.type).toBe('string');
+      expect(dispatchTool.inputSchema.properties.runtime.enum).toEqual(['vm', 'cf-container']);
+      expect(dispatchTool.description).toContain('Instant session');
       expect(dispatchTool.description).toContain('Dispatch a new task');
       expect(dispatchTool.description).toContain('Rate-limited');
     });
@@ -1681,6 +1699,198 @@ describe('MCP Routes', () => {
       mockDoStub.createSession = vi.fn().mockResolvedValue('sess-new-1');
       mockDoStub.persistMessage = vi.fn().mockResolvedValue('msg-new-1');
     }
+
+    function mockInstantProfile(runtime: 'vm' | 'cf-container' = 'cf-container') {
+      vi.mocked(agentProfileService.resolveAgentProfile).mockResolvedValueOnce({
+        profileId: 'profile-instant',
+        taskMode: null,
+        vmSizeOverride: null,
+        provider: null,
+        vmLocation: null,
+        workspaceProfile: null,
+        devcontainerConfigName: null,
+        agentType: 'openai-codex',
+        model: 'gpt-5',
+        effort: 'high',
+        permissionMode: 'full-access',
+        systemPromptAppend: 'Follow the project instructions.',
+        runtime,
+      } as Awaited<ReturnType<typeof agentProfileService.resolveAgentProfile>>);
+    }
+
+    it('routes a cf-container profile to Instant task context without starting TaskRunner', async () => {
+      setupHappyPathMocks();
+      mockEnv.CF_CONTAINER_ENABLED = 'true';
+      mockInstantProfile();
+      instantSessionMocks.launchInstantSession.mockResolvedValue({
+        taskId: 'generated-task',
+        runtime: 'cf-container',
+      });
+
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'dispatch_task',
+          arguments: {
+            description: 'Fix the runtime router',
+            agentProfileId: 'instant-profile',
+            branch: 'sam/runtime-router',
+          },
+        })
+      );
+
+      const body = await res.json();
+      expect(body.error).toBeUndefined();
+      const data = JSON.parse(body.result.content[0].text);
+      expect(data).toMatchObject({
+        status: 'queued',
+        runtime: 'cf-container',
+        runtimeReason: 'explicit-cf-container',
+        taskMode: 'task',
+      });
+      expect(data.sessionId).toBeUndefined();
+      expect(data.message).toContain('get_task_details');
+      expect(mockTaskRunnerStub.start).not.toHaveBeenCalled();
+      expect(mockDoStub.createSession).not.toHaveBeenCalled();
+      expect(mockDoStub.persistMessage).not.toHaveBeenCalled();
+      expect(instantSessionMocks.launchInstantSession).toHaveBeenCalledTimes(1);
+      expect(instantSessionMocks.launchInstantSession).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        expect.objectContaining({
+          taskId: expect.any(String),
+          userId: 'user-789',
+          taskMode: 'task',
+          branch: 'sam/runtime-router',
+          agentType: 'openai-codex',
+          agentProfileId: 'profile-instant',
+          initialPrompt: expect.stringContaining('Follow the project instructions.'),
+          overrides: {
+            model: 'gpt-5',
+            effort: 'high',
+            permissionMode: 'full-access',
+          },
+        })
+      );
+    });
+
+    it('lets an explicit cf-container runtime launch Instant without a profile', async () => {
+      setupHappyPathMocks();
+      mockEnv.CF_CONTAINER_ENABLED = 'true';
+      instantSessionMocks.launchInstantSession.mockResolvedValue({
+        taskId: 'generated-task',
+        runtime: 'cf-container',
+      });
+
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'dispatch_task',
+          arguments: {
+            description: 'Launch explicitly on Instant',
+            runtime: 'cf-container',
+          },
+        })
+      );
+
+      const body = await res.json();
+      expect(body.error).toBeUndefined();
+      const data = JSON.parse(body.result.content[0].text);
+      expect(data).toMatchObject({
+        runtime: 'cf-container',
+        runtimeReason: 'explicit-cf-container',
+      });
+      expect(instantSessionMocks.launchInstantSession).toHaveBeenCalledTimes(1);
+      expect(mockTaskRunnerStub.start).not.toHaveBeenCalled();
+    });
+
+    it('lets explicit vm override a cf-container profile', async () => {
+      setupHappyPathMocks();
+      mockEnv.CF_CONTAINER_ENABLED = 'true';
+      mockInstantProfile();
+
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'dispatch_task',
+          arguments: {
+            description: 'Use a full VM',
+            agentProfileId: 'instant-profile',
+            runtime: 'vm',
+          },
+        })
+      );
+
+      const data = JSON.parse((await res.json()).result.content[0].text);
+      expect(data).toMatchObject({ runtime: 'vm', runtimeReason: 'explicit-vm' });
+      expect(mockTaskRunnerStub.start).toHaveBeenCalledTimes(1);
+      expect(instantSessionMocks.launchInstantSession).not.toHaveBeenCalled();
+    });
+
+    it('rejects VM-only fields with explicit cf-container runtime', async () => {
+      setupHappyPathMocks();
+
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'dispatch_task',
+          arguments: {
+            description: 'Contradictory runtime',
+            runtime: 'cf-container',
+            vmSize: 'large',
+          },
+        })
+      );
+
+      const body = await res.json();
+      expect(body.error.code).toBe(-32602);
+      expect(body.error.message).toContain('VM-only fields: vmSize');
+      expect(body.error.message).toContain('runtime to "vm"');
+    });
+
+    it('rejects VM-only fields when the profile resolves to cf-container', async () => {
+      setupHappyPathMocks();
+      mockInstantProfile();
+
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'dispatch_task',
+          arguments: {
+            description: 'Contradictory profile runtime',
+            agentProfileId: 'instant-profile',
+            provider: 'hetzner',
+          },
+        })
+      );
+
+      const body = await res.json();
+      expect(body.error.code).toBe(-32602);
+      expect(body.error.message).toContain('profile resolves to runtime "cf-container"');
+      expect(body.error.message).toContain('provider');
+      expect(body.error.message).toContain('runtime: "vm"');
+    });
+
+    it('falls back to VM with a surfaced reason when containers are disabled', async () => {
+      setupHappyPathMocks();
+      mockInstantProfile();
+
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'dispatch_task',
+          arguments: {
+            description: 'Fallback to a VM',
+            agentProfileId: 'instant-profile',
+          },
+        })
+      );
+
+      const data = JSON.parse((await res.json()).result.content[0].text);
+      expect(data).toMatchObject({ runtime: 'vm', runtimeReason: 'sandbox-disabled' });
+      expect(mockTaskRunnerStub.start).toHaveBeenCalledTimes(1);
+      expect(instantSessionMocks.launchInstantSession).not.toHaveBeenCalled();
+    });
 
     it('should dispatch task successfully (happy path)', async () => {
       setupHappyPathMocks();

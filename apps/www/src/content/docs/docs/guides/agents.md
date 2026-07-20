@@ -80,11 +80,11 @@ You can connect multiple agents and switch between them per chat by choosing a d
 
 Each agent runs in one of three provider modes, which control where LLM traffic goes and who pays for it:
 
-| Mode           | What it uses                                                                 |
-| -------------- | ---------------------------------------------------------------------------- |
-| **API key**    | Your own provider API key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, etc.)      |
-| **OAuth**      | A token from your provider subscription (for example Claude Max/Pro)         |
-| **SAM**        | The platform's managed AI proxy, with billing and budget handled by SAM (opt-in) |
+| Mode        | What it uses                                                                     |
+| ----------- | -------------------------------------------------------------------------------- |
+| **API key** | Your own provider API key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, etc.)          |
+| **OAuth**   | A token from your provider subscription (for example Claude Max/Pro)             |
+| **SAM**     | The platform's managed AI proxy, with billing and budget handled by SAM (opt-in) |
 
 You pick the mode when you connect an agent. The **SAM** platform proxy is never selected automatically — you have to opt in.
 
@@ -153,7 +153,7 @@ Running agents have access to project-aware MCP tools:
 
 | Tool                   | Description                                                                                                          |
 | ---------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `dispatch_task`        | Spawn a follow-up idea for execution                                                                                 |
+| `dispatch_task`        | Spawn follow-up work using the selected profile runtime, or an explicit `runtime` override                           |
 | `create_idea`          | Create a new idea                                                                                                    |
 | `update_idea`          | Update an idea's title, content, priority, or status                                                                 |
 | `list_ideas`           | View project ideas                                                                                                   |

@@ -255,8 +255,15 @@ mcpRoutes.post('/', async (c) => {
           }
           case 'request_human_input':
             return c.json(await handleRequestHumanInput(requestId, toolArgs, tokenData, c.env));
-          case 'dispatch_task':
-            return c.json(await handleDispatchTask(requestId, toolArgs, tokenData, c.env));
+          case 'dispatch_task': {
+            let execCtx: { waitUntil(p: Promise<unknown>): void } | undefined;
+            try {
+              execCtx = typeof c.executionCtx.waitUntil === 'function' ? c.executionCtx : undefined;
+            } catch {
+              execCtx = undefined;
+            }
+            return c.json(await handleDispatchTask(requestId, toolArgs, tokenData, c.env, execCtx));
+          }
           // ─── Durable messaging tools ──────────────────────────────────
           case 'send_durable_message':
             return c.json(await handleSendDurableMessage(requestId, toolArgs, tokenData, c.env));

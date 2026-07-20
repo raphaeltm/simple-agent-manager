@@ -88,7 +88,7 @@ export const TASK_LIFECYCLE_TOOLS = [
   {
     name: 'dispatch_task',
     description:
-      'Dispatch a new task to another agent in the current project. Use this to spawn parallel work, delegate sub-tasks, or follow up on findings. The dispatched task runs independently in a new workspace. Rate-limited: max dispatch depth, per-task limit, and per-project active limit apply.',
+      'Dispatch a new task to another agent in the current project. Use this to spawn parallel work, delegate sub-tasks, or follow up on findings. Runtime follows the selected skill/profile unless explicitly overridden; cf-container starts an Instant session without VM sizing. Rate-limited: max dispatch depth, per-task limit, and per-project active limit apply.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -102,6 +102,12 @@ export const TASK_LIFECYCLE_TOOLS = [
           description:
             'VM size for the dispatched task (small, medium, large). Defaults to project default.',
           enum: ['small', 'medium', 'large'],
+        },
+        runtime: {
+          type: 'string',
+          enum: ['vm', 'cf-container'],
+          description:
+            'Execution runtime override. "cf-container" launches an instant Cloudflare container (fast start, no cloud credential needed, no VM sizing). Defaults to skill/profile runtime, else VM.',
         },
         priority: {
           type: 'number',
