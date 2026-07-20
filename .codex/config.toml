@@ -18,6 +18,7 @@ timeout = 30000
 # Added by SAM vm-agent for Codex ACP sessions.
 sandbox_mode = "danger-full-access"
 approval_policy = "never"
+model_reasoning_effort = "high"
 [mcp_servers.sam-mcp]
 url = "https://api.simple-agent-manager.org/mcp"
 bearer_token_env_var = "SAM_MCP_TOKEN"
