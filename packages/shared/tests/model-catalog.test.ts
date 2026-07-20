@@ -53,6 +53,10 @@ describe('model-catalog', () => {
       const allModels = groups.flatMap((g) => g.models);
       expect(allModels.some((m) => m.id === 'gemini-2.5-pro')).toBe(true);
       expect(allModels.some((m) => m.id === 'gemini-3.5-flash')).toBe(true);
+      expect(allModels.some((m) => m.id === 'gemini-3.1-pro-preview')).toBe(true);
+      expect(allModels.some((m) => m.id === 'gemini-3.1-flash-lite')).toBe(true);
+      expect(allModels.some((m) => m.id === 'gemini-3.1-pro')).toBe(false);
+      expect(allModels.some((m) => m.id === 'gemini-2.0-flash')).toBe(false);
     });
 
     it('returns empty array for unknown agent type', () => {
@@ -80,6 +84,7 @@ describe('model-catalog', () => {
       expect(models.some((m) => m.id === 'claude-opus-4-8')).toBe(true);
       expect(models.some((m) => m.id === 'claude-opus-4-7')).toBe(true);
       expect(models.some((m) => m.id === 'claude-sonnet-4-6')).toBe(true);
+      expect(models.some((m) => m.id === 'claude-sonnet-4-20250514')).toBe(false);
     });
 
     it('lists the current Claude Code 1M context choices', () => {

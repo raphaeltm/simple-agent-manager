@@ -5,10 +5,14 @@ import { getModelGroupsForAgent, getModelsForAgent, isKnownModel } from '../../s
 const OPENCODE_CONSUMERS = ['opencode'] as const;
 
 const EXPECTED_OPENCODE_MODELS = [
-  'opencode/claude-sonnet-4-6',
-  'opencode/gpt-5.5-pro',
+  'opencode/claude-fable-5',
+  'opencode/claude-sonnet-5',
+  'opencode/gpt-5.6-sol',
+  'opencode/hy3-free',
+  'opencode/minimax-m3',
   'opencode-go/glm-5.2',
-  'opencode-go/qwen3.7-plus',
+  'opencode-go/grok-4.5',
+  'opencode-go/kimi-k3',
 ] as const;
 
 const EXPECTED_GROUP_LABELS = ['OpenCode Zen', 'OpenCode Go'] as const;
