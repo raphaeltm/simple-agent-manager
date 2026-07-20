@@ -36,7 +36,8 @@ The extra provider work is bounded by the canonical provider list and applies on
 - [x] Add service scenarios for all-provider absence, later-provider presence, multiple-provider ambiguity, missing credentials, lookup failure/malformed results, and DNS cleanup.
 - [x] Add scheduler scenarios for finalization after absence, repeated invocation/idempotency, concurrent invocation, owner-completed terminal state, guarded local-reference cleanup, and unchanged retryable errors.
 - [x] Run the corrected focused API suite (3 files, 22 tests) and build (9/9 tasks).
-- [x] Rerun the extended affected suite (3 collected files, 82 tests), lint (0 errors), typecheck (16/16 tasks), build (9/9 tasks), and the full repository suite (19/19 tasks; API 438 files/6,190 tests; web 224 files/2,740 tests) on the repaired current-main head.
+- [x] Extract strict node deletion to `services/strict-node-deletion.ts` so the touched production service stays below the mandatory 800-line limit; the repository file-size gate passes.
+- [x] Rerun the extended affected suite (4 files, 83 tests), lint (0 errors), typecheck (16/16 tasks), build (9/9 tasks), and the full repository suite (19/19 tasks; API 438 files/6,190 tests; web 224 files/2,740 tests) on the repaired current-main head.
 - [x] Apply Cloudflare/D1, security, test/vertical-slice, constitution, documentation-sync, and task-completion review lenses; no unresolved correctness findings remain before staging.
 - [x] Push the assigned output branch and prepare a PR with exact evidence.
 - [ ] Obtain the exclusive staging deployment slot and deploy the exact reviewed head.
@@ -55,6 +56,7 @@ The extra provider work is bounded by the canonical provider list and applies on
 - SAM idea `01KVQA7X6JGMFC5EA0MD5KQ2NC`
 - `apps/api/src/scheduled/trial-expire.ts`
 - `apps/api/src/services/nodes.ts`
+- `apps/api/src/services/strict-node-deletion.ts`
 - `apps/api/tests/unit/scheduled/trial-expire.test.ts`
 - `apps/api/tests/unit/services/nodes-delete.test.ts`
 - `health-report-2026-07-13.md`
