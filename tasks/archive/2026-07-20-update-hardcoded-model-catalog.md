@@ -17,13 +17,13 @@ SAM's static model catalog is a user-facing fallback and validation source for s
 
 ## Implementation checklist
 
-- [ ] Remove retired Claude and Gemini IDs from static choices.
-- [ ] Correct lifecycle labels and the Gemini 3.1 Pro preview ID.
-- [ ] Add the current Gemini 3.1 Flash-Lite choice.
-- [ ] Synchronize the OpenCode Zen and Go fallback groups with active Models.dev records and display names.
-- [ ] Update focused catalog tests for changed IDs, lifecycle exclusions, and representative OpenCode entries.
-- [ ] Run shared-package lint, typecheck, tests, and build plus the repository quality suite required by `/do`.
-- [ ] Complete specialist validation, staging verification, PR review/CI, merge, and production deployment monitoring.
+- [x] Remove retired Claude and Gemini IDs from static choices.
+- [x] Correct lifecycle labels and the Gemini 3.1 Pro preview ID.
+- [x] Add the current Gemini 3.1 Flash-Lite choice.
+- [x] Synchronize the OpenCode Zen and Go fallback groups with active Models.dev records and display names.
+- [x] Update focused catalog tests for changed IDs, lifecycle exclusions, and representative OpenCode entries.
+- [x] Run shared-package lint, typecheck, tests, and build plus the repository quality suite required by `/do`.
+- [x] Complete specialist validation, staging verification, PR review/CI, merge, and production deployment monitoring.
 
 ## Acceptance criteria
 
@@ -42,3 +42,10 @@ SAM's static model catalog is a user-facing fallback and validation source for s
 - https://ai.google.dev/gemini-api/docs/deprecations
 - https://docs.mistral.ai/models
 - https://models.dev/api.json
+
+## Validation evidence
+
+- Focused shared model-catalog tests: 20 passed.
+- Full repository lint, typecheck, test, and build suite: passed.
+- Specialist reviews: constitution PASS; test quality PASS; completion checks A-E PASS.
+- Staging deployment and smoke tests: GitHub Actions run 29755402961 passed, including 12 Playwright smoke tests.

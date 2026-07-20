@@ -39,6 +39,16 @@ function modelGroup(label: string, models: Array<Omit<ModelDefinition, 'group'>>
   };
 }
 
+function modelGroupFromTuples(
+  label: string,
+  entries: Array<readonly [id: string, name: string]>
+): ModelGroup {
+  return modelGroup(
+    label,
+    entries.map(([id, name]) => ({ id, name }))
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Claude Code models
 // ---------------------------------------------------------------------------
@@ -86,19 +96,11 @@ const CLAUDE_MODELS: ModelGroup[] = [
       { id: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5', group: 'Claude 4 (Latest)' },
     ],
   },
-  {
-    label: 'Claude 4 (Legacy)',
-    models: [
-      { id: 'claude-opus-4-5-20251101', name: 'Claude Opus 4.5', group: 'Claude 4 (Legacy)' },
-      { id: 'claude-opus-4-1-20250805', name: 'Claude Opus 4.1', group: 'Claude 4 (Legacy)' },
-      { id: 'claude-sonnet-4-5-20250929', name: 'Claude Sonnet 4.5', group: 'Claude 4 (Legacy)' },
-      {
-        id: 'claude-sonnet-4-20250514',
-        name: 'Claude Sonnet 4 (retiring Jun 15)',
-        group: 'Claude 4 (Legacy)',
-      },
-    ],
-  },
+  modelGroup('Claude 4 (Legacy)', [
+    { id: 'claude-opus-4-5-20251101', name: 'Claude Opus 4.5' },
+    { id: 'claude-opus-4-1-20250805', name: 'Claude Opus 4.1 (retires Aug 5)' },
+    { id: 'claude-sonnet-4-5-20250929', name: 'Claude Sonnet 4.5' },
+  ]),
 ];
 
 // ---------------------------------------------------------------------------
@@ -150,6 +152,7 @@ const CODEX_MODELS: ModelGroup[] = [
 const OPENCODE_MODELS: ModelGroup[] = [
   modelGroup('OpenCode Zen', [
     { id: 'opencode/big-pickle', name: 'Big Pickle' },
+    { id: 'opencode/claude-fable-5', name: 'Claude Fable 5' },
     { id: 'opencode/claude-haiku-4-5', name: 'Claude Haiku 4.5' },
     { id: 'opencode/claude-opus-4-1', name: 'Claude Opus 4.1' },
     { id: 'opencode/claude-opus-4-5', name: 'Claude Opus 4.5' },
@@ -159,6 +162,7 @@ const OPENCODE_MODELS: ModelGroup[] = [
     { id: 'opencode/claude-sonnet-4', name: 'Claude Sonnet 4' },
     { id: 'opencode/claude-sonnet-4-5', name: 'Claude Sonnet 4.5' },
     { id: 'opencode/claude-sonnet-4-6', name: 'Claude Sonnet 4.6' },
+    { id: 'opencode/claude-sonnet-5', name: 'Claude Sonnet 5' },
     { id: 'opencode/deepseek-v4-flash', name: 'DeepSeek V4 Flash' },
     { id: 'opencode/deepseek-v4-flash-free', name: 'DeepSeek V4 Flash Free' },
     { id: 'opencode/deepseek-v4-pro', name: 'DeepSeek V4 Pro' },
@@ -185,12 +189,19 @@ const OPENCODE_MODELS: ModelGroup[] = [
     { id: 'opencode/gpt-5.4-pro', name: 'GPT-5.4 Pro' },
     { id: 'opencode/gpt-5.5', name: 'GPT-5.5' },
     { id: 'opencode/gpt-5.5-pro', name: 'GPT-5.5 Pro' },
+    { id: 'opencode/gpt-5.6-luna', name: 'GPT-5.6 Luna' },
+    { id: 'opencode/gpt-5.6-sol', name: 'GPT-5.6 Sol' },
+    { id: 'opencode/gpt-5.6-terra', name: 'GPT-5.6 Terra' },
+    { id: 'opencode/grok-4.5', name: 'Grok 4.5' },
     { id: 'opencode/grok-build-0.1', name: 'Grok Build 0.1' },
+    { id: 'opencode/hy3-free', name: 'Hy3 Free' },
     { id: 'opencode/kimi-k2.5', name: 'Kimi K2.5' },
     { id: 'opencode/kimi-k2.6', name: 'Kimi K2.6' },
+    { id: 'opencode/kimi-k2.7-code', name: 'Kimi K2.7 Code' },
     { id: 'opencode/mimo-v2.5-free', name: 'MiMo V2.5 Free' },
-    { id: 'opencode/minimax-m2.5', name: 'MiniMax M2.5' },
-    { id: 'opencode/minimax-m2.7', name: 'MiniMax M2.7' },
+    { id: 'opencode/minimax-m2.5', name: 'MiniMax-M2.5' },
+    { id: 'opencode/minimax-m2.7', name: 'MiniMax-M2.7' },
+    { id: 'opencode/minimax-m3', name: 'MiniMax-M3' },
     { id: 'opencode/nemotron-3-ultra-free', name: 'Nemotron 3 Ultra Free' },
     { id: 'opencode/north-mini-code-free', name: 'North Mini Code Free' },
     { id: 'opencode/qwen3.5-plus', name: 'Qwen3.5 Plus' },
@@ -201,12 +212,14 @@ const OPENCODE_MODELS: ModelGroup[] = [
     { id: 'opencode-go/deepseek-v4-pro', name: 'DeepSeek V4 Pro' },
     { id: 'opencode-go/glm-5.1', name: 'GLM-5.1' },
     { id: 'opencode-go/glm-5.2', name: 'GLM-5.2' },
+    { id: 'opencode-go/grok-4.5', name: 'Grok 4.5' },
     { id: 'opencode-go/kimi-k2.6', name: 'Kimi K2.6' },
     { id: 'opencode-go/kimi-k2.7-code', name: 'Kimi K2.7 Code' },
+    { id: 'opencode-go/kimi-k3', name: 'Kimi K3 (2x usage)' },
     { id: 'opencode-go/mimo-v2.5', name: 'MiMo V2.5' },
     { id: 'opencode-go/mimo-v2.5-pro', name: 'MiMo V2.5 Pro' },
-    { id: 'opencode-go/minimax-m2.7', name: 'MiniMax M2.7' },
-    { id: 'opencode-go/minimax-m3', name: 'MiniMax M3 (3x usage)' },
+    { id: 'opencode-go/minimax-m2.7', name: 'MiniMax-M2.7' },
+    { id: 'opencode-go/minimax-m3', name: 'MiniMax-M3' },
     { id: 'opencode-go/qwen3.6-plus', name: 'Qwen3.6 Plus' },
     { id: 'opencode-go/qwen3.7-max', name: 'Qwen3.7 Max' },
     { id: 'opencode-go/qwen3.7-plus', name: 'Qwen3.7 Plus' },
@@ -253,23 +266,17 @@ const MISTRAL_MODELS: ModelGroup[] = [
 // ---------------------------------------------------------------------------
 
 const GEMINI_MODELS: ModelGroup[] = [
-  {
-    label: 'Gemini 3 (Latest)',
-    models: [
-      { id: 'gemini-3.5-flash', name: 'Gemini 3.5 Flash', group: 'Gemini 3 (Latest)' },
-      { id: 'gemini-3.1-pro', name: 'Gemini 3.1 Pro', group: 'Gemini 3 (Latest)' },
-    ],
-  },
+  modelGroupFromTuples('Gemini 3 (Latest)', [
+    ['gemini-3.5-flash', 'Gemini 3.5 Flash'],
+    ['gemini-3.1-pro-preview', 'Gemini 3.1 Pro Preview'],
+    ['gemini-3.1-flash-lite', 'Gemini 3.1 Flash-Lite'],
+  ]),
   {
     label: 'Gemini 2.5',
     models: [
       { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', group: 'Gemini 2.5' },
       { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', group: 'Gemini 2.5' },
     ],
-  },
-  {
-    label: 'Gemini 2.0 (Legacy)',
-    models: [{ id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash', group: 'Gemini 2.0 (Legacy)' }],
   },
 ];
 
