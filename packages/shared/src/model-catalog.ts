@@ -86,18 +86,11 @@ const CLAUDE_MODELS: ModelGroup[] = [
       { id: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5', group: 'Claude 4 (Latest)' },
     ],
   },
-  {
-    label: 'Claude 4 (Legacy)',
-    models: [
-      { id: 'claude-opus-4-5-20251101', name: 'Claude Opus 4.5', group: 'Claude 4 (Legacy)' },
-      {
-        id: 'claude-opus-4-1-20250805',
-        name: 'Claude Opus 4.1 (retires Aug 5)',
-        group: 'Claude 4 (Legacy)',
-      },
-      { id: 'claude-sonnet-4-5-20250929', name: 'Claude Sonnet 4.5', group: 'Claude 4 (Legacy)' },
-    ],
-  },
+  modelGroup('Claude 4 (Legacy)', [
+    { id: 'claude-opus-4-5-20251101', name: 'Claude Opus 4.5' },
+    { id: 'claude-opus-4-1-20250805', name: 'Claude Opus 4.1 (retires Aug 5)' },
+    { id: 'claude-sonnet-4-5-20250929', name: 'Claude Sonnet 4.5' },
+  ]),
 ];
 
 // ---------------------------------------------------------------------------
