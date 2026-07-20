@@ -39,6 +39,16 @@ function modelGroup(label: string, models: Array<Omit<ModelDefinition, 'group'>>
   };
 }
 
+function modelGroupFromTuples(
+  label: string,
+  entries: Array<readonly [id: string, name: string]>
+): ModelGroup {
+  return modelGroup(
+    label,
+    entries.map(([id, name]) => ({ id, name }))
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Claude Code models
 // ---------------------------------------------------------------------------
@@ -256,10 +266,10 @@ const MISTRAL_MODELS: ModelGroup[] = [
 // ---------------------------------------------------------------------------
 
 const GEMINI_MODELS: ModelGroup[] = [
-  modelGroup('Gemini 3 (Latest)', [
-    { id: 'gemini-3.5-flash', name: 'Gemini 3.5 Flash' },
-    { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro Preview' },
-    { id: 'gemini-3.1-flash-lite', name: 'Gemini 3.1 Flash-Lite' },
+  modelGroupFromTuples('Gemini 3 (Latest)', [
+    ['gemini-3.5-flash', 'Gemini 3.5 Flash'],
+    ['gemini-3.1-pro-preview', 'Gemini 3.1 Pro Preview'],
+    ['gemini-3.1-flash-lite', 'Gemini 3.1 Flash-Lite'],
   ]),
   {
     label: 'Gemini 2.5',
