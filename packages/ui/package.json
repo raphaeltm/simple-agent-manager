@@ -11,6 +11,7 @@
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
     },
+    "./hooks/useModalInteraction": "./src/hooks/useModalInteraction.ts",
     "./styles.css": "./src/styles.css",
     "./tokens/theme.css": "./src/tokens/theme.css"
   },

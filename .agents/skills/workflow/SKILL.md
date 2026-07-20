@@ -1,11 +1,11 @@
 ---
 name: workflow
-description: "Orchestrate multi-step workflows by decomposing into subtasks, dispatching them, and monitoring via foreground polling loops. Prevents session timeout kills during long-running orchestration. Use when coordinating multiple agents or running multi-phase work that takes more than a few minutes."
+description: 'Orchestrate multi-step workflows by decomposing into subtasks, dispatching them, and monitoring via foreground polling loops. Prevents session timeout kills during long-running orchestration. Use when coordinating multiple agents or running multi-phase work that takes more than a few minutes.'
 ---
 
 # Workflow Orchestrator
 
-Read the full workflow from `.codex/prompts/workflow.md` and execute it.
+Read the full workflow from `.claude/commands/workflow.md` and execute it.
 
 ## Quick Summary
 
@@ -25,4 +25,4 @@ All agents have access to `$CF_TOKEN` for direct Cloudflare API queries against 
 
 ## State Persistence
 
-Maintain `.workflow-state.md` (gitignored) as external memory. Re-read it before every poll cycle. This survives context compaction. See `.codex/prompts/workflow.md` for the full state file format.
+Maintain `.workflow-state.md` (gitignored) as external memory. Re-read it before every poll cycle. This survives context compaction. See `.claude/commands/workflow.md` for the full state file format.

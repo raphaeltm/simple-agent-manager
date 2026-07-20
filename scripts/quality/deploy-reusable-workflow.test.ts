@@ -18,6 +18,28 @@ function stepBlock(stepName: string): string {
 }
 
 describe('deploy reusable workflow', () => {
+  it('runs D1 migrations and integrity checks before serving new API Worker code', () => {
+    const backupIndex = workflow.indexOf('- name: Backup D1 Databases (pre-migration safety net)');
+    const preCountsIndex = workflow.indexOf(
+      '- name: Record pre-migration row counts (data integrity baseline)'
+    );
+    const migrationsIndex = workflow.indexOf('- name: Run Database Migrations');
+    const postIntegrityIndex = workflow.indexOf(
+      '- name: Verify post-migration data integrity (BLOCKS DEPLOY ON DATA LOSS)'
+    );
+    const deployApiIndex = workflow.indexOf('- name: Deploy API Worker');
+    const redeployAfterSecretsIndex = workflow.indexOf(
+      '- name: Re-deploy API Worker (after secrets)'
+    );
+
+    expect(backupIndex).toBeGreaterThan(-1);
+    expect(preCountsIndex).toBeGreaterThan(backupIndex);
+    expect(migrationsIndex).toBeGreaterThan(preCountsIndex);
+    expect(postIntegrityIndex).toBeGreaterThan(migrationsIndex);
+    expect(deployApiIndex).toBeGreaterThan(postIntegrityIndex);
+    expect(redeployAfterSecretsIndex).toBeGreaterThan(deployApiIndex);
+  });
+
   it('passes derived deployment identity into every Wrangler config sync phase', () => {
     for (const name of [
       'Sync Wrangler Config \\(API \\+ Tail Worker\\)',
@@ -88,6 +110,18 @@ describe('deploy reusable workflow', () => {
     // `make prepare-container` (and the later `build-all`) steps fail at runtime.
     expect(goSetupIndex).toBeGreaterThan(-1);
     expect(goSetupIndex).toBeLessThan(prepareIndex);
+  });
+
+  it('forwards the cf-container clone/create tunables into the wrangler config sync env', () => {
+    const sync = stepBlock('Sync Wrangler Config \\(API \\+ Tail Worker\\)');
+
+    // These operator overrides only reach the deployed Worker if the sync step
+    // copies them from GitHub Environment vars into process.env for
+    // sync-wrangler-config.ts (see the 2026-07-19 instant-container incident).
+    expect(sync).toContain(
+      'CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS: ${{ vars.CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS }}'
+    );
+    expect(sync).toContain('CF_CONTAINER_CLONE_FILTER: ${{ vars.CF_CONTAINER_CLONE_FILTER }}');
   });
 
   it('versions the R2 vm-agent binaries with the same commit SHA as the container binary', () => {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -15,15 +16,20 @@ type ConfigPaths struct {
 }
 
 const configFileName = "config.json"
+const maxAPIResponseBytesEnv = "SAM_CLI_MAX_API_RESPONSE_BYTES"
 
 func LoadConfig(env ConfigEnv) (*CLIConfig, error) {
 	apiURL := strings.TrimSpace(env.Getenv("SAM_API_URL"))
 	cookie := strings.TrimSpace(env.Getenv("SAM_SESSION_COOKIE"))
+	maxAPIResponseBytes, err := loadMaxAPIResponseBytes(env)
+	if err != nil {
+		return nil, err
+	}
 	if cookie != "" {
 		if apiURL == "" {
 			return nil, errors.New("SAM_API_URL must be set when SAM_SESSION_COOKIE is set")
 		}
-		return &CLIConfig{APIURL: normalizeAPIURL(apiURL), SessionCookie: cookie}, nil
+		return &CLIConfig{APIURL: normalizeAPIURL(apiURL), SessionCookie: cookie, MaxAPIResponseBytes: maxAPIResponseBytes}, nil
 	}
 	if apiURL != "" {
 		return nil, nil
@@ -46,6 +52,9 @@ func LoadConfig(env ConfigEnv) (*CLIConfig, error) {
 		return nil, fmt.Errorf("failed to parse SAM config: %w", err)
 	}
 	cfg.APIURL = normalizeAPIURL(cfg.APIURL)
+	if cfg.MaxAPIResponseBytes <= 0 {
+		cfg.MaxAPIResponseBytes = maxAPIResponseBytes
+	}
 	if cfg.APIURL == "" || strings.TrimSpace(cfg.SessionCookie) == "" {
 		return nil, errors.New("SAM config is missing apiUrl or sessionCookie")
 	}
@@ -102,6 +111,18 @@ func SetActiveProject(env ConfigEnv, projectID string, projectName string) error
 	cfg.ActiveProjectName = projectName
 	_, err = SaveConfig(env, *cfg)
 	return err
+}
+
+func loadMaxAPIResponseBytes(env ConfigEnv) (int64, error) {
+	value := strings.TrimSpace(env.Getenv(maxAPIResponseBytesEnv))
+	if value == "" {
+		return defaultMaxAPIResponseBodyBytes, nil
+	}
+	parsed, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || parsed <= 0 {
+		return 0, fmt.Errorf("%s must be a positive integer", maxAPIResponseBytesEnv)
+	}
+	return parsed, nil
 }
 
 func normalizeAPIURL(value string) string {

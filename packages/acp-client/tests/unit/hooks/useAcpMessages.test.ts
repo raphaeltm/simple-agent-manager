@@ -42,6 +42,30 @@ describe('useAcpMessages tool call parsing', () => {
     expect(item.stderr).toContain('peer disconnected');
   });
 
+  it('extracts Codex slash-form MCP tool names from tool_call titles', () => {
+    const { result } = renderHook(() => useAcpMessages());
+
+    act(() => {
+      result.current.processMessage(
+        sessionUpdateMessage({
+          sessionUpdate: 'tool_call',
+          toolCallId: 'tc-codex-slash',
+          title: 'sam-mcp/display_from_library',
+          status: 'completed',
+        })
+      );
+    });
+
+    const item = result.current.items.find((entry) => entry.kind === 'tool_call');
+    expect(item?.kind).toBe('tool_call');
+
+    if (item?.kind !== 'tool_call') {
+      throw new Error('expected tool_call item');
+    }
+
+    expect(item.toolName).toBe('sam-mcp/display_from_library');
+  });
+
   it('extracts nested terminal text content from tool_call payloads', () => {
     const { result } = renderHook(() => useAcpMessages());
 

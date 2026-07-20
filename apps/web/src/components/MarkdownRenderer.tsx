@@ -217,13 +217,17 @@ export const RenderedMarkdown: FC<{ content: string; style?: CSSProperties; inli
               </table>
             </div>
           ),
+          // `overflow-wrap: anywhere` on the markdown root lets the table layout
+          // crush columns below word width (per-letter wrapping). `break-word`
+          // keeps whole words in min-content sizing so the overflow-x wrapper
+          // scrolls instead, while still breaking truly unbreakable tokens.
           th: ({ children }) => (
-            <th className="border border-border-default px-2 py-1.5 text-left bg-info-tint">
+            <th className="border border-border-default px-2 py-1.5 text-left bg-info-tint" style={{ overflowWrap: 'break-word' }}>
               {children}
             </th>
           ),
           td: ({ children }) => (
-            <td className="border border-border-default px-2 py-1.5">
+            <td className="border border-border-default px-2 py-1.5" style={{ overflowWrap: 'break-word' }}>
               {children}
             </td>
           ),

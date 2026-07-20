@@ -11,6 +11,7 @@ export interface EnrichedChatSession extends SessionSummaryItem {
 interface UseAllChatSessionsResult {
   sessions: EnrichedChatSession[];
   loading: boolean;
+  isRefreshing: boolean;
   error: string | null;
   refresh: () => void;
 }
@@ -22,14 +23,20 @@ interface UseAllChatSessionsResult {
 export function useAllChatSessions(): UseAllChatSessionsResult {
   const [sessions, setSessions] = useState<EnrichedChatSession[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const cancelledRef = useRef(false);
   const fetchIdRef = useRef(0);
+  const hasLoadedRef = useRef(false);
 
   const fetchAll = useCallback(async () => {
     const id = ++fetchIdRef.current;
     cancelledRef.current = false;
-    setLoading(true);
+    if (hasLoadedRef.current) {
+      setIsRefreshing(true);
+    } else {
+      setLoading(true);
+    }
     setError(null);
 
     try {
@@ -42,11 +49,16 @@ export function useAllChatSessions(): UseAllChatSessionsResult {
           createdAt: s.startedAt,
         })),
       );
+      hasLoadedRef.current = true;
       setLoading(false);
     } catch {
       if (!cancelledRef.current && id === fetchIdRef.current) {
         setError('Failed to load chat sessions');
         setLoading(false);
+      }
+    } finally {
+      if (!cancelledRef.current && id === fetchIdRef.current) {
+        setIsRefreshing(false);
       }
     }
   }, []);
@@ -58,5 +70,5 @@ export function useAllChatSessions(): UseAllChatSessionsResult {
     };
   }, [fetchAll]);
 
-  return { sessions, loading, error, refresh: fetchAll };
+  return { sessions, loading, isRefreshing, error, refresh: fetchAll };
 }

@@ -2,9 +2,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
 import {
+  readSafeGatewayErrorDiagnostic,
+  WorkersAIGatewayError,
+} from '../../../src/services/ai-proxy-shared';
+import {
   classifyError,
   generateTaskTitle,
   getTaskTitleConfig,
+  getTaskTitleModelControls,
+  resolveTaskTitleErrorDiagnosticMaxLength,
   stripMarkdown,
   type TaskTitleConfig,
   truncateTitle,
@@ -69,6 +75,7 @@ describe('getTaskTitleConfig', () => {
     expect(config.enabled).toBe(true);
     expect(config.shortMessageThreshold).toBe(100);
     expect(config.maxRetries).toBe(2);
+    expect(config.errorDiagnosticMaxLength).toBe(512);
   });
 
   it('reads env var overrides', () => {
@@ -80,12 +87,28 @@ describe('getTaskTitleConfig', () => {
       TASK_TITLE_SHORT_MESSAGE_THRESHOLD: '50',
       TASK_TITLE_MAX_RETRIES: '0',
     });
+
     expect(config.model).toBe('@cf/custom/model');
     expect(config.maxLength).toBe(80);
     expect(config.timeoutMs).toBe(3000);
     expect(config.enabled).toBe(false);
     expect(config.shortMessageThreshold).toBe(50);
     expect(config.maxRetries).toBe(0);
+  });
+
+  it('bounds invalid and excessive diagnostic length configuration', () => {
+    expect(
+      getTaskTitleConfig({ TASK_TITLE_ERROR_DIAGNOSTIC_MAX_LENGTH: 'invalid' })
+        .errorDiagnosticMaxLength
+    ).toBe(512);
+    expect(
+      getTaskTitleConfig({ TASK_TITLE_ERROR_DIAGNOSTIC_MAX_LENGTH: '1' }).errorDiagnosticMaxLength
+    ).toBe(64);
+    expect(
+      getTaskTitleConfig({ TASK_TITLE_ERROR_DIAGNOSTIC_MAX_LENGTH: '999999' })
+        .errorDiagnosticMaxLength
+    ).toBe(2048);
+    expect(resolveTaskTitleErrorDiagnosticMaxLength(Number.POSITIVE_INFINITY)).toBe(512);
   });
 });
 
@@ -115,7 +138,10 @@ describe('generateTaskTitle', () => {
   it('calls Workers AI through AI Gateway with metadata', async () => {
     const long =
       'I need you to refactor the authentication module to use JWT tokens. ' + 'a'.repeat(100);
-    const result = await generateTaskTitle(env, long, { model: '@cf/custom/model', maxLength: 80 });
+    const result = await generateTaskTitle(env, long, {
+      model: '@cf/zai-org/glm-5.2',
+      maxLength: 80,
+    });
 
     expect(result).toBe('Fix authentication timeout bug');
     expect(fetchMock).toHaveBeenCalledOnce();
@@ -126,14 +152,14 @@ describe('generateTaskTitle', () => {
     expect(init.headers).toMatchObject({
       Authorization: 'Bearer cf-token',
       'Content-Type': 'application/json',
-      'cf-aig-metadata': JSON.stringify({ source: 'task-title', modelId: '@cf/custom/model' }),
+      'cf-aig-metadata': JSON.stringify({ source: 'task-title', modelId: '@cf/zai-org/glm-5.2' }),
     });
     expect(parseGatewayRequestBody(init)).toMatchObject({
-      model: '@cf/custom/model',
+      model: '@cf/zai-org/glm-5.2',
       max_tokens: 80,
-      reasoning_effort: null,
       chat_template_kwargs: { enable_thinking: false },
     });
+    expect(parseGatewayRequestBody(init)).not.toHaveProperty('reasoning_effort');
   });
 
   it('strips markdown and truncates Gateway output', async () => {
@@ -169,6 +195,106 @@ describe('generateTaskTitle', () => {
     expect(result).toBe(truncateTitle(long, 100));
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
+
+  it('uses the GLM-5.2 non-thinking capability without a null reasoning field', () => {
+    expect(getTaskTitleModelControls('@cf/zai-org/glm-5.2')).toEqual({
+      chatTemplateKwargs: { enable_thinking: false },
+    });
+  });
+
+  it('does not retry deterministic HTTP 400 rejections and falls back', async () => {
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: {
+            code: 'invalid_parameter',
+            param: 'reasoning_effort',
+            message: 'reasoning_effort must not be null',
+          },
+        }),
+        { status: 400 }
+      )
+    );
+    const long = 'Deterministic invalid payload. ' + 'x'.repeat(120);
+    const result = await generateTaskTitle(env, long, { maxRetries: 2, retryDelayMs: 1 });
+    expect(result).toBe(truncateTitle(long, 100));
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it('retries HTTP 429 and returns a later success', async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: { code: 'rate_limit' } }), { status: 429 })
+      )
+      .mockResolvedValueOnce(mockGatewayTitle('Rate Limit Recovery'));
+    const long = 'Rate limited title request. ' + 'r'.repeat(120);
+    await expect(generateTaskTitle(env, long, { maxRetries: 1, retryDelayMs: 1 })).resolves.toBe(
+      'Rate Limit Recovery'
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('retries transient HTTP 408 responses', async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: { code: 'request_timeout' } }), { status: 408 })
+      )
+      .mockResolvedValueOnce(mockGatewayTitle('Timeout Response Recovery'));
+    const long = 'Transient HTTP timeout response. ' + 'r'.repeat(120);
+    await expect(generateTaskTitle(env, long, { maxRetries: 1, retryDelayMs: 1 })).resolves.toBe(
+      'Timeout Response Recovery'
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not retry timeouts and falls back', async () => {
+    fetchMock.mockRejectedValue(new DOMException('The operation timed out', 'TimeoutError'));
+    const long = 'Timeout title request. ' + 't'.repeat(120);
+    await expect(generateTaskTitle(env, long, { maxRetries: 2, retryDelayMs: 1 })).resolves.toBe(
+      truncateTitle(long, 100)
+    );
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+});
+
+describe('safe Gateway diagnostics', () => {
+  it('keeps only bounded allowlisted error fields and genericizes messages', async () => {
+    const diagnostic = await readSafeGatewayErrorDiagnostic(
+      new Response(
+        JSON.stringify({
+          error: {
+            code: 'invalid_parameter',
+            type: 'invalid_request_error',
+            param: 'reasoning_effort',
+            message: 'reasoning_effort must not be null; prompt was sensitive task text',
+            request: 'sensitive task text',
+          },
+          headers: { authorization: 'Bearer secret-token-value' },
+        })
+      ),
+      512
+    );
+    expect(diagnostic).toBe(
+      'code=invalid_parameter type=invalid_request_error param=reasoning_effort message=invalid reasoning_effort parameter'
+    );
+    expect(diagnostic).not.toContain('sensitive task text');
+    expect(diagnostic).not.toContain('secret-token-value');
+  });
+
+  it('drops arbitrary text and respects the configured bound', async () => {
+    await expect(
+      readSafeGatewayErrorDiagnostic(new Response('prompt and token echoed here'), 32)
+    ).resolves.toBeUndefined();
+    const diagnostic = await readSafeGatewayErrorDiagnostic(
+      new Response(
+        JSON.stringify({
+          error: { code: 'x'.repeat(100), message: 'unknown rejection with user content' },
+        })
+      ),
+      24
+    );
+    expect(diagnostic).toBeUndefined();
+  });
 });
 
 describe('classifyError', () => {
@@ -180,6 +306,16 @@ describe('classifyError', () => {
 
   it('classifies rate limit errors', () => {
     expect(classifyError(new Error('HTTP 429 Too Many Requests')).category).toBe('rate_limit');
+  });
+
+  it('classifies deterministic Gateway 400s as request errors', () => {
+    expect(classifyError(new WorkersAIGatewayError(400, 'param=reasoning_effort')).category).toBe(
+      'request'
+    );
+  });
+
+  it('classifies transient Gateway 500s as errors', () => {
+    expect(classifyError(new WorkersAIGatewayError(500, undefined)).category).toBe('error');
   });
 
   it('classifies generic values as error', () => {

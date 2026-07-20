@@ -163,13 +163,14 @@ Environment variables set by the cloud-init template:
 |----------|---------|-------------|
 | `NODE_ID` | — | Unique node identifier |
 | `CONTROL_PLANE_URL` | — | API Worker URL for callbacks |
-| `CALLBACK_TOKEN` | — | JWT for authenticating callbacks |
+| `CALLBACK_TOKEN_FILE` | `/etc/sam/callback-token` on cloud-init nodes | Root-only file containing the callback JWT for authenticating callbacks. `CALLBACK_TOKEN` remains a legacy fallback for already-provisioned nodes/manual runs. |
 | `LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |
 | `LOG_FORMAT` | `json` | Output format: `json` or `text` |
 | `ACP_PROMPT_RETRY_MAX_RETRIES` | `2` | Max transient provider prompt retries after the initial attempt |
 | `ACP_PROMPT_RETRY_INITIAL_BACKOFF` | `15s` | Initial backoff before retrying transient provider prompt errors |
 | `ACP_PROMPT_RETRY_MAX_BACKOFF` | `2m` | Max exponential backoff for transient provider prompt retries |
 | `ACP_NOTIF_SERIALIZE_TIMEOUT` | `5s` | Timeout for ACP notification serialization |
+| `STANDALONE_CLONE_FILTER` | `blob:none` | Git partial-clone filter for standalone (Cloudflare Container) workspace clones, which run synchronously inside the control plane's create-workspace request (`cloneStandaloneRepository` in `internal/server/standalone_workspace.go`). Set `off` to force full clones. The control plane forwards `CF_CONTAINER_CLONE_FILTER` here. |
 
 ### Log Retrieval Settings
 

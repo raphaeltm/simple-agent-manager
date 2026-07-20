@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   nodeAgent: {
     createAgentSessionOnNode: vi.fn(),
     createWorkspaceOnNode: vi.fn(),
+    getCfContainerCreateWorkspaceTimeoutMs: vi.fn(),
     startAgentSessionOnNode: vi.fn(),
     waitForNodeAgentReady: vi.fn(),
   },
@@ -95,6 +96,17 @@ const env = {
   CF_CONTAINER_VM_AGENT_PORT: '8080',
 } as never;
 
+function baseLaunchInput() {
+  return {
+    taskId: 'task-1',
+    project,
+    userId: 'user-1',
+    initialPrompt: 'prompt',
+    displayMessage: 'prompt',
+    agentType: 'claude-code',
+  } as never;
+}
+
 describe('launchInstantSession', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -106,6 +118,7 @@ describe('launchInstantSession', () => {
     mocks.mcp.storeMcpToken.mockResolvedValue(undefined);
     mocks.nodeAgent.createAgentSessionOnNode.mockResolvedValue({});
     mocks.nodeAgent.createWorkspaceOnNode.mockResolvedValue({});
+    mocks.nodeAgent.getCfContainerCreateWorkspaceTimeoutMs.mockReturnValue(120_000);
     mocks.nodeAgent.startAgentSessionOnNode.mockResolvedValue({});
     mocks.nodeAgent.waitForNodeAgentReady.mockResolvedValue(undefined);
     mocks.nodes.createNodeRecord.mockResolvedValue({ id: 'node-1' });
@@ -330,7 +343,29 @@ describe('launchInstantSession', () => {
         repositoryPath: 'group/gitlab-repo',
         callbackToken: 'workspace-callback-token',
         lightweight: true,
-      })
+      }),
+      { requestTimeoutMs: 120_000 }
+    );
+  });
+
+  // Regression test for the 2026-07-18 instant-container outage: the standalone
+  // vm-agent clones synchronously inside the create-workspace request, so the
+  // instant path MUST use the cf-container create budget instead of the
+  // interactive node-agent default (30s). This fails on pre-fix code, which
+  // passed no timeout override.
+  it('runs create-workspace under the configured cf-container create budget', async () => {
+    const { db } = makeDb();
+    mocks.nodeAgent.getCfContainerCreateWorkspaceTimeoutMs.mockReturnValue(90_000);
+
+    await launchInstantSession(db as never, env, baseLaunchInput());
+
+    expect(mocks.nodeAgent.getCfContainerCreateWorkspaceTimeoutMs).toHaveBeenCalledWith(env);
+    expect(mocks.nodeAgent.createWorkspaceOnNode).toHaveBeenCalledWith(
+      'node-1',
+      env,
+      'user-1',
+      expect.objectContaining({ workspaceId: 'workspace-1', lightweight: true }),
+      { requestTimeoutMs: 90_000 }
     );
   });
 
@@ -358,6 +393,29 @@ describe('launchInstantSession', () => {
     // the workspace errored so a failed cold start does not leak resources.
     expect(mocks.container.destroyVmAgentContainer).toHaveBeenCalledWith(env, 'node-1');
     expect(updates).toContainEqual(expect.objectContaining({ status: 'error' }));
+  });
+
+  // Capacity containment for the create-workspace timeout (security review):
+  // the Worker-side race does not abort the in-container clone, so the ONLY
+  // bound on a stalled create's container-slot hold is this immediate destroy.
+  // A timed-out create must tear the container down, not leave it running.
+  it('destroys the container when create-workspace times out', async () => {
+    const { db, updates } = makeDb();
+    mocks.nodeAgent.createWorkspaceOnNode.mockRejectedValueOnce(
+      new Error('Request timed out after 120000ms')
+    );
+
+    await expect(launchInstantSession(db as never, env, baseLaunchInput())).rejects.toThrow(
+      'Request timed out after 120000ms'
+    );
+
+    expect(mocks.container.destroyVmAgentContainer).toHaveBeenCalledWith(env, 'node-1');
+    expect(updates).toContainEqual(
+      expect.objectContaining({ status: 'error', errorMessage: 'Request timed out after 120000ms' })
+    );
+    expect(updates).toContainEqual(
+      expect.objectContaining({ status: 'failed', executionStep: 'launch_failed' })
+    );
   });
 
   it('honors a configured raw container workspace base directory', async () => {

@@ -193,7 +193,7 @@ export function ProjectTriggers() {
   return (
     <div className="max-w-3xl mx-auto px-4 py-6">
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between gap-3 flex-wrap mb-6">
         <div>
           <h1 className="sam-type-page-title m-0">Triggers</h1>
           <p className="sam-type-secondary text-fg-muted mt-1 mb-0">
@@ -202,7 +202,7 @@ export function ProjectTriggers() {
         </div>
         <button
           onClick={handleNewTrigger}
-          className={`inline-flex items-center gap-2 px-4 py-2 text-sm font-medium bg-accent text-fg-on-accent rounded-md hover:bg-accent/90 cursor-pointer border-none ${FOCUS_RING}`}
+          className={`inline-flex items-center gap-2 whitespace-nowrap shrink-0 px-4 py-2 text-sm font-medium bg-accent text-fg-on-accent rounded-md hover:bg-accent/90 cursor-pointer border-none ${FOCUS_RING}`}
         >
           <Plus size={16} aria-hidden="true" />
           New Trigger
@@ -298,7 +298,7 @@ function EmptyState({ onCreateTrigger }: { onCreateTrigger: () => void }) {
       </p>
       <button
         onClick={onCreateTrigger}
-        className={`inline-flex items-center gap-2 px-4 py-2 text-sm font-medium bg-accent text-fg-on-accent rounded-md hover:bg-accent/90 cursor-pointer border-none ${FOCUS_RING}`}
+        className={`inline-flex items-center gap-2 whitespace-nowrap shrink-0 px-4 py-2 text-sm font-medium bg-accent text-fg-on-accent rounded-md hover:bg-accent/90 cursor-pointer border-none ${FOCUS_RING}`}
       >
         <Plus size={16} aria-hidden="true" />
         Create your first trigger

@@ -233,11 +233,11 @@ export const TriggerCard: FC<TriggerCardProps> = ({
         )}
 
       {/* Quick actions row */}
-      <div className="flex items-center gap-2 mt-3 pt-3 border-t border-border-default">
+      <div className="flex items-center gap-2 flex-wrap mt-3 pt-3 border-t border-border-default">
         <button
           onClick={() => onRunNow(trigger)}
           disabled={trigger.status === 'disabled'}
-          className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-transparent border border-border-default text-fg-primary hover:bg-surface-hover cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${FOCUS_RING}`}
+          className={`inline-flex items-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-xs font-medium rounded-md bg-transparent border border-border-default text-fg-primary hover:bg-surface-hover cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${FOCUS_RING}`}
           aria-label="Run trigger now"
         >
           <Play size={12} aria-hidden="true" />
@@ -245,7 +245,7 @@ export const TriggerCard: FC<TriggerCardProps> = ({
         </button>
         <button
           onClick={() => onTogglePause(trigger)}
-          className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-transparent border border-border-default text-fg-primary hover:bg-surface-hover cursor-pointer ${FOCUS_RING}`}
+          className={`inline-flex items-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-xs font-medium rounded-md bg-transparent border border-border-default text-fg-primary hover:bg-surface-hover cursor-pointer ${FOCUS_RING}`}
           aria-label={trigger.status === 'paused' ? 'Resume trigger' : 'Pause trigger'}
         >
           <Pause size={12} aria-hidden="true" />
@@ -253,7 +253,7 @@ export const TriggerCard: FC<TriggerCardProps> = ({
         </button>
         <button
           onClick={() => onViewHistory(trigger)}
-          className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-transparent border border-border-default text-fg-muted hover:text-fg-primary hover:bg-surface-hover cursor-pointer ml-auto ${FOCUS_RING}`}
+          className={`inline-flex items-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-xs font-medium rounded-md bg-transparent border border-border-default text-fg-muted hover:text-fg-primary hover:bg-surface-hover cursor-pointer ml-auto ${FOCUS_RING}`}
         >
           View History
         </button>

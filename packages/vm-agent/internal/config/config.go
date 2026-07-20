@@ -2,6 +2,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -59,6 +60,15 @@ const (
 	// DefaultGitCredentialTimeout bounds credential-helper calls back to the
 	// local VM agent. Override via GIT_CREDENTIAL_TIMEOUT.
 	DefaultGitCredentialTimeout = 5 * time.Second
+
+	// DefaultStandaloneCloneFilter is the git partial-clone filter used by
+	// standalone (container) workspace preparation. Blobless clones skip all
+	// history blobs that are not in the checked-out tree, keeping clone time
+	// proportional to the working tree instead of the full pack — critical
+	// because standalone clones run synchronously inside the control plane's
+	// create-workspace request deadline. Override via STANDALONE_CLONE_FILTER;
+	// set to "off" (or "none"/"false") to force a full clone.
+	DefaultStandaloneCloneFilter = "blob:none"
 )
 
 const (
@@ -134,6 +144,11 @@ type Config struct {
 	BootstrapMaxWait   time.Duration
 	BootstrapTimeout   time.Duration // Overall bootstrap timeout including devcontainer build
 
+	// StandaloneCloneFilter is the resolved git partial-clone filter for
+	// standalone (container) workspace clones. Empty means "full clone".
+	// See DefaultStandaloneCloneFilter and env STANDALONE_CLONE_FILTER.
+	StandaloneCloneFilter string
+
 	// Session settings
 	SessionTTL             time.Duration
 	SessionCleanupInterval time.Duration
@@ -151,8 +166,14 @@ type Config struct {
 	HTTPCallbackTimeout time.Duration // timeout for outbound HTTP callbacks to the control plane
 
 	// WebSocket settings
-	WSReadBufferSize  int
-	WSWriteBufferSize int
+	WSReadBufferSize           int
+	WSWriteBufferSize          int
+	TerminalWSMaxMessageBytes  int64
+	TerminalWSReadTimeout      time.Duration
+	TerminalWSPingInterval     time.Duration
+	TerminalWSMessageRate      int
+	TerminalWSMessageBurst     int
+	TerminalSessionIDMaxLength int
 
 	// PTY settings
 	DefaultShell string
@@ -162,6 +183,7 @@ type Config struct {
 	// PTY session persistence settings - configurable per constitution principle XI
 	PTYOrphanGracePeriod time.Duration // How long orphaned sessions survive before cleanup (0 = disabled)
 	PTYOutputBufferSize  int           // Ring buffer capacity per session in bytes
+	PTYCloseGracePeriod  time.Duration // Bounded wait after graceful PTY close signals (env: PTY_CLOSE_GRACE_PERIOD)
 
 	// ACP settings - configurable per constitution principle XI
 	ACPInitTimeoutMs                  int // Fallback timeout for all ACP init phases (default: 30000ms)
@@ -321,10 +343,33 @@ type Config struct {
 	DeployBuildPublishTimeout           time.Duration // Max host build/push/release publish duration (env: DEPLOY_BUILD_PUBLISH_TIMEOUT)
 }
 
+func loadCallbackToken() (string, error) {
+	tokenFile := strings.TrimSpace(os.Getenv("CALLBACK_TOKEN_FILE"))
+	if tokenFile == "" {
+		return getEnv("CALLBACK_TOKEN", ""), nil
+	}
+
+	data, err := os.ReadFile(tokenFile)
+	if err != nil {
+		return "", fmt.Errorf("read callback token file: %w", err)
+	}
+
+	token := strings.TrimSpace(string(data))
+	if token == "" {
+		return "", errors.New("callback token file is empty")
+	}
+
+	return token, nil
+}
+
 // Load reads configuration from environment variables.
 func Load() (*Config, error) {
 	controlPlaneURL := getEnv("CONTROL_PLANE_URL", "")
 	repository := getEnv("REPOSITORY", "")
+	callbackToken, err := loadCallbackToken()
+	if err != nil {
+		return nil, err
+	}
 
 	workspaceDir := getEnv("WORKSPACE_DIR", "")
 	if workspaceDir == "" {
@@ -363,7 +408,7 @@ func Load() (*Config, error) {
 
 		NodeID:             getEnv("NODE_ID", getEnv("WORKSPACE_ID", "")),
 		WorkspaceID:        getEnv("WORKSPACE_ID", ""),
-		CallbackToken:      getEnv("CALLBACK_TOKEN", ""),
+		CallbackToken:      callbackToken,
 		BootstrapToken:     getEnv("BOOTSTRAP_TOKEN", ""),
 		Repository:         repository,
 		Branch:             getEnv("BRANCH", "main"),
@@ -373,6 +418,8 @@ func Load() (*Config, error) {
 		// Must be <= API-side TASK_RUNNER_WORKSPACE_READY_TIMEOUT_MS (default 30m).
 		// If larger, the API declares the workspace dead while bootstrap is still running.
 		BootstrapTimeout: getEnvDuration("BOOTSTRAP_TIMEOUT", 30*time.Minute),
+
+		StandaloneCloneFilter: ResolveStandaloneCloneFilter(getEnv("STANDALONE_CLONE_FILTER", DefaultStandaloneCloneFilter)),
 
 		SessionTTL:             getEnvDuration("SESSION_TTL", 24*time.Hour),
 		SessionCleanupInterval: getEnvDuration("SESSION_CLEANUP_INTERVAL", 1*time.Minute),
@@ -388,9 +435,15 @@ func Load() (*Config, error) {
 		HTTPIdleTimeout:     getEnvDuration("HTTP_IDLE_TIMEOUT", 60*time.Second),
 		HTTPCallbackTimeout: getEnvDuration("HTTP_CALLBACK_TIMEOUT", 30*time.Second),
 
-		// WebSocket buffer sizes - configurable per constitution
-		WSReadBufferSize:  getEnvInt("WS_READ_BUFFER_SIZE", 1024),
-		WSWriteBufferSize: getEnvInt("WS_WRITE_BUFFER_SIZE", 1024),
+		// WebSocket buffer sizes and terminal socket limits - configurable per constitution
+		WSReadBufferSize:           getEnvInt("WS_READ_BUFFER_SIZE", 1024),
+		WSWriteBufferSize:          getEnvInt("WS_WRITE_BUFFER_SIZE", 1024),
+		TerminalWSMaxMessageBytes:  int64(getEnvInt("TERMINAL_WS_MAX_MESSAGE_BYTES", DefaultTerminalWSMaxMessageBytes)),
+		TerminalWSReadTimeout:      getEnvDuration("TERMINAL_WS_READ_TIMEOUT", DefaultTerminalWSReadTimeout),
+		TerminalWSPingInterval:     getEnvDuration("TERMINAL_WS_PING_INTERVAL", DefaultTerminalWSPingInterval),
+		TerminalWSMessageRate:      getEnvInt("TERMINAL_WS_MESSAGE_RATE", DefaultTerminalWSMessageRate),
+		TerminalWSMessageBurst:     getEnvInt("TERMINAL_WS_MESSAGE_BURST", DefaultTerminalWSMessageBurst),
+		TerminalSessionIDMaxLength: getEnvInt("TERMINAL_SESSION_ID_MAX_LENGTH", DefaultTerminalSessionIDMaxLength),
 
 		DefaultShell: getEnv("DEFAULT_SHELL", "/bin/bash"),
 		DefaultRows:  getEnvInt("DEFAULT_ROWS", 24),
@@ -400,6 +453,7 @@ func Load() (*Config, error) {
 		// Default keeps orphaned sessions until explicitly closed by the user.
 		PTYOrphanGracePeriod: time.Duration(getEnvInt("PTY_ORPHAN_GRACE_PERIOD", 0)) * time.Second,
 		PTYOutputBufferSize:  getEnvInt("PTY_OUTPUT_BUFFER_SIZE", 262144), // 256 KB default
+		PTYCloseGracePeriod:  getEnvDuration("PTY_CLOSE_GRACE_PERIOD", 250*time.Millisecond),
 
 		// ACP settings - configurable per constitution principle XI
 		ACPInitTimeoutMs:                  getEnvInt("ACP_INIT_TIMEOUT_MS", 30000),
@@ -707,68 +761,4 @@ func DeriveRepoDirName(repository string) string {
 	}
 	safe := strings.Trim(b.String(), "-")
 	return safe
-}
-
-// DeriveBaseDomain extracts the base domain from a control plane URL by stripping
-// the protocol, path, port, and "api." subdomain prefix.
-// Example: "https://api.example.com/foo" → "example.com"
-func DeriveBaseDomain(controlPlaneURL string) string {
-	host := controlPlaneURL
-	host = strings.TrimPrefix(host, "https://")
-	host = strings.TrimPrefix(host, "http://")
-
-	if idx := strings.Index(host, "/"); idx != -1 {
-		host = host[:idx]
-	}
-	if idx := strings.Index(host, ":"); idx != -1 {
-		host = host[:idx]
-	}
-	if strings.HasPrefix(host, "api.") {
-		return host[4:]
-	}
-	return host
-}
-
-// BuildSAMEnvFallback returns KEY=value pairs for SAM environment variables
-// derived from the vm-agent config. Used as fallback injection into ACP sessions
-// when the bootstrap-written /etc/sam/env file is missing or incomplete.
-func (c *Config) BuildSAMEnvFallback() []string {
-	baseDomain := DeriveBaseDomain(c.ControlPlaneURL)
-
-	type entry struct{ key, value string }
-	entries := []entry{
-		{"SAM_API_URL", strings.TrimRight(c.ControlPlaneURL, "/")},
-		{"SAM_BRANCH", c.Branch},
-		{"SAM_NODE_ID", c.NodeID},
-		{"SAM_PROJECT_ID", c.ProjectID},
-		{"SAM_CHAT_SESSION_ID", c.ChatSessionID},
-		{"SAM_TASK_ID", c.TaskID},
-		{"SAM_TASK_MODE", c.TaskMode},
-		{"SAM_REPOSITORY", c.Repository},
-		{"SAM_WORKSPACE_ID", c.WorkspaceID},
-	}
-	if baseDomain != "" {
-		entries = append(entries, entry{"SAM_BASE_DOMAIN", baseDomain})
-		if c.WorkspaceID != "" {
-			entries = append(entries, entry{"SAM_WORKSPACE_URL", fmt.Sprintf("https://ws-%s.%s", c.WorkspaceID, baseDomain)})
-		}
-	}
-
-	var result []string
-	for _, e := range entries {
-		if e.value != "" {
-			result = append(result, e.key+"="+e.value)
-		}
-	}
-	return result
-}
-
-// deriveAllowedOrigins extracts allowed origins from the control plane URL.
-// This allows the control plane domain and workspace subdomains.
-func deriveAllowedOrigins(controlPlaneURL string) []string {
-	baseDomain := DeriveBaseDomain(controlPlaneURL)
-	return []string{
-		controlPlaneURL,
-		"https://*." + baseDomain, // Allow workspace subdomains
-	}
 }

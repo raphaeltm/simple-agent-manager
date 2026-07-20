@@ -27,8 +27,6 @@
  *   ilog.error('api_failure', { path: '/api/test' }); // also writes to D1
  */
 
-import { persistError } from '../services/observability';
-
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
 export interface Logger {
@@ -45,22 +43,56 @@ interface LogEntry {
   [key: string]: unknown;
 }
 
+
+const REDACTED = '[REDACTED]';
+const REDACTED_MESSAGE = '[REDACTED_ERROR_MESSAGE]';
+const SENSITIVE_KEY_RE =
+  /(?:^|[_-])(authorization|cookie|token|secret|password|passwd|credential|api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|session|set[_-]?cookie)(?:$|[_-])/i;
+const SENSITIVE_VALUE_RE =
+  /\b(?:Bearer|Basic)\s+[A-Za-z0-9._~+/-]+=*|\b(?:sam_[A-Za-z0-9_]*|gh[oprsu]_[A-Za-z0-9_]+|sk-[A-Za-z0-9_-]+)\b/gi;
+
+function sanitizeString(value: string, redactWholeValue: boolean): string {
+  if (redactWholeValue) return REDACTED;
+  return value.replace(SENSITIVE_VALUE_RE, REDACTED);
+}
+
+function sanitizeLogValue(value: unknown, key?: string): unknown {
+  const redactWholeValue = key ? SENSITIVE_KEY_RE.test(key) : false;
+
+  if (typeof value === 'string') return sanitizeString(value, redactWholeValue);
+  if (value === null || value === undefined) return value;
+  if (typeof value !== 'object') return value;
+  if (value instanceof Error) return serializeError(value);
+  if (Array.isArray(value)) return value.map((item) => sanitizeLogValue(item));
+
+  const sanitized: Record<string, unknown> = {};
+  for (const [childKey, childValue] of Object.entries(value as Record<string, unknown>)) {
+    sanitized[childKey] = sanitizeLogValue(childValue, childKey);
+  }
+  return sanitized;
+}
+
+function sanitizeLogDetails(details: Record<string, unknown>): Record<string, unknown> {
+  const sanitized: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(details)) {
+    sanitized[key] = sanitizeLogValue(value, key);
+  }
+  return sanitized;
+}
+
 /** Serialize an Error (or unknown) into a structured log-safe object. */
 export function serializeError(err: unknown): Record<string, unknown> {
   if (err instanceof Error) {
     const result: Record<string, unknown> = {
-      error: err.message,
+      error: REDACTED_MESSAGE,
       errorName: err.name,
     };
-    if (err.stack) {
-      result.stack = err.stack;
-    }
     if (err.cause) {
-      result.cause = err.cause instanceof Error ? err.cause.message : String(err.cause);
+      result.cause = err.cause instanceof Error ? REDACTED_MESSAGE : sanitizeString(String(err.cause), false);
     }
     return result;
   }
-  return { error: String(err) };
+  return { error: sanitizeString(String(err), false) };
 }
 
 function emit(level: LogLevel, event: string, details: Record<string, unknown> = {}): void {
@@ -68,7 +100,7 @@ function emit(level: LogLevel, event: string, details: Record<string, unknown> =
     timestamp: new Date().toISOString(),
     level,
     event,
-    ...details,
+    ...sanitizeLogDetails(details),
   };
 
   const json = JSON.stringify(entry);
@@ -123,12 +155,14 @@ export function createInstrumentedLogger(
       // Persist error-level entries to observability D1 (fire-and-forget)
       if (db && waitUntil) {
         waitUntil(
-          persistError(db, {
-            source: 'api',
-            level: 'error',
-            message: event,
-            context: details ?? null,
-          })
+          import('../services/observability').then(({ persistError }) =>
+            persistError(db, {
+              source: 'api',
+              level: 'error',
+              message: event,
+              context: details ? sanitizeLogDetails(details) : null,
+            })
+          )
         );
       }
     },
