@@ -40,8 +40,16 @@ The extra provider work is bounded by the canonical provider list and applies on
 - [x] Rerun the extended affected suite (4 files, 83 tests), lint (0 errors), typecheck (16/16 tasks), build (9/9 tasks), and the full repository suite (19/19 tasks; API 438 files/6,190 tests; web 224 files/2,740 tests) on the repaired current-main head.
 - [x] Apply Cloudflare/D1, security, test/vertical-slice, constitution, documentation-sync, and task-completion review lenses; no unresolved correctness findings remain before staging.
 - [x] Push the assigned output branch and prepare a PR with exact evidence.
-- [ ] Obtain the exclusive staging deployment slot and deploy the exact reviewed head.
-- [ ] Verify the cleanup behavior and real Claude/Codex chat responses on staging, merge with green gates, then monitor production deployment and behavior.
+- [x] Obtain the exclusive staging deployment slot and deploy exact reviewed head `918b34c19fb72c3630ff295f328120857d3f7324` in green run `29723424865` (12/12 smoke tests).
+- [x] Verify the cleanup behavior and real Claude/Codex chat responses on staging, merge with green gates, then monitor production deployment and behavior.
+
+## Completion evidence
+
+- Exact-head staging: Deploy Staging run `29723424865` succeeded with all 12 browser smoke tests.
+- Core chat: Claude session `0923205b-603d-4f52-a871-2572c08cc5a2` and Codex session `4d2749e2-2368-4275-be3d-b5826b8297a6` each rendered a genuine assistant reply and returned idle with no browser, request, or console errors.
+- Affected cleanup: canonical staging node `01KPJMMVWB70BA7MEGA7Z5GAS8` / Hetzner VM `127415628` stopped its five-minute missing-VM error loop after the semantic candidate deploy and remained at zero recurrence across exact-final-head sweeps.
+- Independent validation: SAM staging-validator task `01KXZ4T9000YXE00M4FCA3G9E9` independently passed the rendered Claude and Codex journeys, affected cleanup transition, and live-log inspection against the final implementation.
+- Merge and production: PR #1618 was squash-merged as `9e0fa384eb661017253dd85ab9abca2e6832e6e5`; post-merge CI `29725709909` and Deploy Production `29726043880` both succeeded.
 
 ## Acceptance criteria
 
