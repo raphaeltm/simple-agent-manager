@@ -365,20 +365,20 @@ export async function handleDispatchTask(requestId: string | number | null, para
   // not consume cloud credentials or platform VM compute quota.
   let effectiveProvider: CredentialProvider | null = resolvedProvider;
   if (!isInstantRuntime) {
-    const { resolveCredentialSource } = await import('../../services/provider-credentials');
+  const { resolveCredentialSource } = await import('../../services/provider-credentials');
     const credResult = await resolveCredentialSource(db, inheritedAttributionUserId, resolvedProvider ?? undefined, inheritedAttributionProjectId);
 
-    if (!credResult) {
+  if (!credResult) {
       return jsonRpcError(requestId, INVALID_PARAMS, 'Cloud provider credentials required. The user must connect a cloud provider in Settings.');
-    }
+  }
     effectiveProvider = resolvedProvider ?? credResult.providerName;
 
-    if (credResult.credentialSource === 'platform') {
-      const quotaEnforcementEnabled = env.COMPUTE_QUOTA_ENFORCEMENT_ENABLED !== 'false';
-      if (quotaEnforcementEnabled) {
-        const { checkQuotaForUser } = await import('../../services/compute-quotas');
-        const quotaCheck = await checkQuotaForUser(db, tokenData.userId);
-        if (!quotaCheck.allowed) {
+  if (credResult.credentialSource === 'platform') {
+    const quotaEnforcementEnabled = env.COMPUTE_QUOTA_ENFORCEMENT_ENABLED !== 'false';
+    if (quotaEnforcementEnabled) {
+      const { checkQuotaForUser } = await import('../../services/compute-quotas');
+      const quotaCheck = await checkQuotaForUser(db, tokenData.userId);
+      if (!quotaCheck.allowed) {
           return jsonRpcError(requestId, INVALID_PARAMS, `Monthly compute quota exceeded. You've used ${quotaCheck.used} of ${quotaCheck.limit} vCPU-hours this month. ` + 'Add your own cloud provider credentials in Settings or contact your admin to increase your quota.');
         }
       }
@@ -411,7 +411,7 @@ export async function handleDispatchTask(requestId: string | number | null, para
      ) < ?`
   )
     .bind(
-      // INSERT values
+    // INSERT values
       taskId,
       tokenData.projectId,
       tokenData.userId,
@@ -421,12 +421,12 @@ export async function handleDispatchTask(requestId: string | number | null, para
       priority,
       newDepth,
       branchName,
-      tokenData.userId,
+    tokenData.userId,
       resolvedTaskMode,
       resolvedProfile?.profileId ?? null,
       resolvedProfile?.skillId ?? null,
       skillId ?? null,
-      explicitMissionId ?? currentTask.missionId ?? null,
+    explicitMissionId ?? currentTask.missionId ?? null,
       resolvedVmSize,
       vmSizeSource,
       resolvedProfile?.resourceRequirementsJson ?? null,
@@ -437,14 +437,14 @@ export async function handleDispatchTask(requestId: string | number | null, para
       inheritedAttributionSource,
       now,
       now,
-      // Per-task child count subquery
+    // Per-task child count subquery
       tokenData.taskId,
       tokenData.projectId,
-      ...ACTIVE_STATUSES,
-      effectiveMaxPerTask,
-      // Per-project active count subquery
-      tokenData.projectId,
-      ...ACTIVE_STATUSES,
+    ...ACTIVE_STATUSES,
+    effectiveMaxPerTask,
+    // Per-project active count subquery
+    tokenData.projectId,
+    ...ACTIVE_STATUSES,
       effectiveMaxActive
     )
     .run();
@@ -494,23 +494,23 @@ export async function handleDispatchTask(requestId: string | number | null, para
       execCtx
     );
   } else {
-    // ── Create chat session and persist initial message ─────────────────────
-    try {
-      sessionId = await projectDataService.createSession(
-        env,
-        tokenData.projectId,
-        null, // workspaceId — linked later by TaskRunner DO
-        taskTitle,
-        taskId,
+  // ── Create chat session and persist initial message ─────────────────────
+  try {
+    sessionId = await projectDataService.createSession(
+      env,
+      tokenData.projectId,
+      null, // workspaceId — linked later by TaskRunner DO
+      taskTitle,
+      taskId,
         tokenData.userId
-      );
+    );
 
-      // Persist the description as the initial user message
+    // Persist the description as the initial user message
       await projectDataService.persistMessage(env, tokenData.projectId, sessionId, 'user', fullDescription, null);
-    } catch (err) {
-      // Session creation failed — mark task as failed
-      const failedAt = new Date().toISOString();
-      const errorMsg = err instanceof Error ? err.message : String(err);
+  } catch (err) {
+    // Session creation failed — mark task as failed
+    const failedAt = new Date().toISOString();
+    const errorMsg = err instanceof Error ? err.message : String(err);
       await db
         .update(schema.tasks)
         .set({
@@ -518,92 +518,92 @@ export async function handleDispatchTask(requestId: string | number | null, para
           errorMessage: `Session creation failed: ${errorMsg}`,
           updatedAt: failedAt,
         })
-        .where(eq(schema.tasks.id, taskId));
-      await db.insert(schema.taskStatusEvents).values({
-        id: ulid(),
-        taskId,
-        fromStatus: 'queued',
-        toStatus: 'failed',
-        actorType: 'system',
-        actorId: null,
-        reason: `Session creation failed: ${errorMsg}`,
-        createdAt: failedAt,
-      });
+      .where(eq(schema.tasks.id, taskId));
+    await db.insert(schema.taskStatusEvents).values({
+      id: ulid(),
+      taskId,
+      fromStatus: 'queued',
+      toStatus: 'failed',
+      actorType: 'system',
+      actorId: null,
+      reason: `Session creation failed: ${errorMsg}`,
+      createdAt: failedAt,
+    });
       log.error('mcp.dispatch_task.session_failed', {
         taskId,
         projectId: tokenData.projectId,
         error: errorMsg,
       });
-      return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to create chat session: ${errorMsg}`);
-    }
+    return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to create chat session: ${errorMsg}`);
+  }
 
     if (!sessionId) {
       return jsonRpcError(requestId, INTERNAL_ERROR, 'Failed to create chat session');
     }
-    // ── Start TaskRunner DO ─────────────────────────────────────────────────
-    // Look up user's githubId for noreply email fallback
-    const [userRow] = await db
+  // ── Start TaskRunner DO ─────────────────────────────────────────────────
+  // Look up user's githubId for noreply email fallback
+  const [userRow] = await db
       .select({
         name: schema.users.name,
         email: schema.users.email,
         githubId: schema.users.githubId,
       })
-      .from(schema.users)
-      .where(eq(schema.users.id, tokenData.userId))
-      .limit(1);
+    .from(schema.users)
+    .where(eq(schema.users.id, tokenData.userId))
+    .limit(1);
 
-    try {
+  try {
       await requireRepositoryOwnerAccess(env, db, project, tokenData.userId, 'mcp-dispatch');
-      await startTaskRunnerDO(env, {
-        taskId,
-        projectId: tokenData.projectId,
-        userId: tokenData.userId,
-        vmSize: resolvedVmSize,
-        vmLocation: resolvedVmLocation,
-        branch: checkoutBranch,
-        defaultBranch: project.defaultBranch,
-        userName: userRow?.name ?? null,
-        userEmail: userRow?.email ?? null,
-        githubId: userRow?.githubId ?? null,
-        taskTitle,
-        taskDescription: fullDescription,
-        repository: project.repository,
-        installationId: project.installationId,
-        outputBranch: branchName,
-        projectDefaultVmSize: project.defaultVmSize as VMSize | null,
-        chatSessionId: sessionId,
-        agentType: resolvedAgentType,
-        workspaceProfile: resolvedWorkspaceProfile,
-        devcontainerConfigName: resolvedDevcontainerConfigName,
-        cloudProvider: effectiveProvider,
-        credentialAttributionUserId: inheritedAttributionUserId,
-        credentialAttributionProjectId: inheritedAttributionProjectId,
-        credentialAttributionSource: inheritedAttributionSource,
-        taskMode: resolvedTaskMode,
-        // Resolution chain: agent profile > project.agentDefaults[agentType] > null (VM agent
-        // falls through to user agent_settings via callback, then platform default).
+    await startTaskRunnerDO(env, {
+      taskId,
+      projectId: tokenData.projectId,
+      userId: tokenData.userId,
+      vmSize: resolvedVmSize,
+      vmLocation: resolvedVmLocation,
+      branch: checkoutBranch,
+      defaultBranch: project.defaultBranch,
+      userName: userRow?.name ?? null,
+      userEmail: userRow?.email ?? null,
+      githubId: userRow?.githubId ?? null,
+      taskTitle,
+      taskDescription: fullDescription,
+      repository: project.repository,
+      installationId: project.installationId,
+      outputBranch: branchName,
+      projectDefaultVmSize: project.defaultVmSize as VMSize | null,
+      chatSessionId: sessionId,
+      agentType: resolvedAgentType,
+      workspaceProfile: resolvedWorkspaceProfile,
+      devcontainerConfigName: resolvedDevcontainerConfigName,
+      cloudProvider: effectiveProvider,
+      credentialAttributionUserId: inheritedAttributionUserId,
+      credentialAttributionProjectId: inheritedAttributionProjectId,
+      credentialAttributionSource: inheritedAttributionSource,
+      taskMode: resolvedTaskMode,
+      // Resolution chain: agent profile > project.agentDefaults[agentType] > null (VM agent
+      // falls through to user agent_settings via callback, then platform default).
         model: resolvedProfile?.model ?? resolveProjectAgentDefault(project.agentDefaults, resolvedAgentType).model,
-        effort: resolvedProfile?.effort ?? null,
+      effort: resolvedProfile?.effort ?? null,
         permissionMode: resolvedProfile?.permissionMode ?? resolveProjectAgentDefault(project.agentDefaults, resolvedAgentType).permissionMode,
-        // OpenCode settings: VM agent fetches user-level settings via callback
-        opencodeProvider: null,
-        opencodeBaseUrl: null,
-        systemPromptAppend: resolvedProfile?.systemPromptAppend ?? null,
-        agentProfileHint: resolvedProfile?.profileId ?? null,
-        projectScaling: {
-          taskExecutionTimeoutMs: project.taskExecutionTimeoutMs ?? null,
-          maxWorkspacesPerNode: project.maxWorkspacesPerNode ?? null,
-          nodeCpuThresholdPercent: project.nodeCpuThresholdPercent ?? null,
-          nodeMemoryThresholdPercent: project.nodeMemoryThresholdPercent ?? null,
-          warmNodeTimeoutMs: project.warmNodeTimeoutMs ?? null,
-        },
-        resolvedReservation,
-        vmSizeSource,
-      });
-    } catch (err) {
-      // TaskRunner DO startup failed — mark task as failed
-      const failedAt = new Date().toISOString();
-      const errorMsg = err instanceof Error ? err.message : String(err);
+      // OpenCode settings: VM agent fetches user-level settings via callback
+      opencodeProvider: null,
+      opencodeBaseUrl: null,
+      systemPromptAppend: resolvedProfile?.systemPromptAppend ?? null,
+      agentProfileHint: resolvedProfile?.profileId ?? null,
+      projectScaling: {
+        taskExecutionTimeoutMs: project.taskExecutionTimeoutMs ?? null,
+        maxWorkspacesPerNode: project.maxWorkspacesPerNode ?? null,
+        nodeCpuThresholdPercent: project.nodeCpuThresholdPercent ?? null,
+        nodeMemoryThresholdPercent: project.nodeMemoryThresholdPercent ?? null,
+        warmNodeTimeoutMs: project.warmNodeTimeoutMs ?? null,
+      },
+      resolvedReservation,
+      vmSizeSource,
+    });
+  } catch (err) {
+    // TaskRunner DO startup failed — mark task as failed
+    const failedAt = new Date().toISOString();
+    const errorMsg = err instanceof Error ? err.message : String(err);
       await db
         .update(schema.tasks)
         .set({
@@ -611,31 +611,31 @@ export async function handleDispatchTask(requestId: string | number | null, para
           errorMessage: `Task runner startup failed: ${errorMsg}`,
           updatedAt: failedAt,
         })
-        .where(eq(schema.tasks.id, taskId));
-      await db.insert(schema.taskStatusEvents).values({
-        id: ulid(),
-        taskId,
-        fromStatus: 'queued',
-        toStatus: 'failed',
-        actorType: 'system',
-        actorId: null,
-        reason: `Task runner startup failed: ${errorMsg}`,
-        createdAt: failedAt,
-      });
+      .where(eq(schema.tasks.id, taskId));
+    await db.insert(schema.taskStatusEvents).values({
+      id: ulid(),
+      taskId,
+      fromStatus: 'queued',
+      toStatus: 'failed',
+      actorType: 'system',
+      actorId: null,
+      reason: `Task runner startup failed: ${errorMsg}`,
+      createdAt: failedAt,
+    });
       log.error('mcp.dispatch_task.do_startup_failed', {
         taskId,
         projectId: tokenData.projectId,
         error: errorMsg,
       });
-      await projectDataService.stopSession(env, tokenData.projectId, sessionId).catch((e) => {
+    await projectDataService.stopSession(env, tokenData.projectId, sessionId).catch((e) => {
         log.error('mcp.dispatch_task.orphaned_session_stop_failed', {
           projectId: tokenData.projectId,
           sessionId,
           error: String(e),
         });
-      });
-      return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to start task runner: ${errorMsg}`);
-    }
+    });
+    return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to start task runner: ${errorMsg}`);
+  }
   }
 
   // ── Record activity event (best-effort) ─────────────────────────────────
@@ -644,25 +644,25 @@ export async function handleDispatchTask(requestId: string | number | null, para
     const doStub = env.PROJECT_DATA.get(doId);
     await doStub.fetch(
       new Request('https://do/activity', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'task.dispatched',
-          actorType: 'agent',
-          actorId: tokenData.workspaceId,
-          metadata: {
-            taskId,
-            parentTaskId: tokenData.taskId,
-            dispatchDepth: newDepth,
-            title: taskTitle,
-            branchName,
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: 'task.dispatched',
+        actorType: 'agent',
+        actorId: tokenData.workspaceId,
+        metadata: {
+          taskId,
+          parentTaskId: tokenData.taskId,
+          dispatchDepth: newDepth,
+          title: taskTitle,
+          branchName,
             runtime: executionRuntime,
             runtimeReason: runtimeDecision.reason,
-            agentProfileId: agentProfileId ?? undefined,
-            skillId: skillId ?? undefined,
-            taskMode: resolvedTaskMode,
-          },
-        }),
+          agentProfileId: agentProfileId ?? undefined,
+          skillId: skillId ?? undefined,
+          taskMode: resolvedTaskMode,
+        },
+      }),
       })
     );
   } catch (err) {
@@ -709,20 +709,20 @@ export async function handleDispatchTask(requestId: string | number | null, para
   return jsonRpcSuccess(requestId, {
     content: [
       {
-        type: 'text',
+      type: 'text',
         text: JSON.stringify(
           {
-            taskId,
-            sessionId,
+        taskId,
+        sessionId,
             runtime: executionRuntime,
             runtimeReason: runtimeDecision.reason,
-            branchName,
-            title: taskTitle,
-            status: 'queued',
-            taskMode: resolvedTaskMode,
+        branchName,
+        title: taskTitle,
+        status: 'queued',
+        taskMode: resolvedTaskMode,
             ...(resolvedTaskMode === 'conversation' ? { warning: getConversationTaskModeWarning() } : {}),
-            dispatchDepth: newDepth,
-            url: taskUrl,
+        dispatchDepth: newDepth,
+        url: taskUrl,
             message: isInstantRuntime ? 'Task queued for Instant launch. The chat session is created asynchronously; use get_task_details to obtain sessionId.' : `Task dispatched successfully. The agent will start working independently. Track progress at: ${taskUrl}`,
           },
           null,
