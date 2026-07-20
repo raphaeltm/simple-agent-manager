@@ -44,16 +44,16 @@ Add a vertical-slice regression test for every runtime-selecting task entry poin
 
 ## Implementation Checklist
 
-- [ ] Add optional `runtime: 'vm' | 'cf-container'` to the MCP tool schema and update its description.
-- [ ] Parse runtime with the shared runtime type guard.
-- [ ] Resolve runtime from explicit parameter then resolved profile via `resolveWorkspaceRuntime`.
-- [ ] Reject cf-container plus explicit VM-only fields with actionable `INVALID_PARAMS` errors.
-- [ ] Preserve `sandbox-disabled` VM fallback and do not route on `zero-config`.
-- [ ] Keep atomic conditional INSERT and queued status event common to both runtimes.
-- [ ] Extract Instant validation/launch helpers into a sibling module.
-- [ ] Skip VM credentials/quota and pre-created chat session/message on Instant dispatch.
-- [ ] Launch Instant work using `executionCtx.waitUntil`, awaiting inline when unavailable.
-- [ ] Return runtime and decision reason for both Instant and VM responses.
+- [x] Add optional `runtime: 'vm' | 'cf-container'` to the MCP tool schema and update its description.
+- [x] Parse runtime with the shared runtime type guard.
+- [x] Resolve runtime from explicit parameter then resolved profile via `resolveWorkspaceRuntime`.
+- [x] Reject cf-container plus explicit VM-only fields with actionable `INVALID_PARAMS` errors.
+- [x] Preserve `sandbox-disabled` VM fallback and do not route on `zero-config`.
+- [x] Keep atomic conditional INSERT and queued status event common to both runtimes.
+- [x] Extract Instant validation/launch helpers into a sibling module.
+- [x] Skip VM credentials/quota and pre-created chat session/message on Instant dispatch.
+- [x] Launch Instant work using `executionCtx.waitUntil`, awaiting inline when unavailable.
+- [x] Return runtime and decision reason for both Instant and VM responses.
 - [ ] Add `taskMode` passthrough to `launchInstantSession`, defaulting to conversation.
 - [ ] Add the rule-42 watchdog comment referencing the approved idea and both Instant backlog tasks.
 - [ ] Add the complete approved runtime, contradiction, credential, disabled-container, single-session/message, and taskMode test matrix.
