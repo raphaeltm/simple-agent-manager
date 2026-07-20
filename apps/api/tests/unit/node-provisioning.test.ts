@@ -529,7 +529,7 @@ describe('provider-aware node provisioning', () => {
       nodesSource.indexOf('async function deleteNodeResourcesStrict')
     );
     const verificationSection = nodesSource.slice(
-      nodesSource.indexOf('async function ensureStrictNodeBelongsToProvider'),
+      nodesSource.indexOf('async function resolveStrictNodeProvider'),
       nodesSource.indexOf('async function deleteStrictProviderInstance')
     );
     const deletionSection = nodesSource.slice(
@@ -537,7 +537,9 @@ describe('provider-aware node provisioning', () => {
       nodesSource.indexOf('async function persistStrictDnsCleanupError')
     );
     expect(strictSection).toContain('await deleteStrictProviderInstance(db, node, userId, env)');
-    expect(verificationSection).toContain('providerResult.provider.getVM(node.providerInstanceId)');
+    expect(verificationSection).toContain('for (const providerName of CREDENTIAL_PROVIDERS)');
+    expect(verificationSection).toContain('candidate.provider.getVM(providerInstanceId)');
+    expect(verificationSection).toContain('presentCandidates.length > 1');
     expect(verificationSection).toContain('throw new Error');
     expect(deletionSection).toContain('await providerResult.provider.deleteVM(node.providerInstanceId)');
   });

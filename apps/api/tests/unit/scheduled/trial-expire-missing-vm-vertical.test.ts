@@ -84,10 +84,13 @@ describe('expired-trial conclusive provider absence vertical slice', () => {
       credentialAttributionSource: null,
     });
     providerGetVM.mockResolvedValue(null);
-    createProviderForUser.mockResolvedValue({
-      provider: { getVM: providerGetVM, deleteVM: providerDeleteVM },
-      providerName: 'hetzner',
-      credentialSource: 'platform',
+    createProviderForUser.mockImplementation(async (...args: unknown[]) => {
+      if (args[4] !== 'hetzner') return null;
+      return {
+        provider: { getVM: providerGetVM, deleteVM: providerDeleteVM },
+        providerName: 'hetzner',
+        credentialSource: 'platform',
+      };
     });
   });
 
@@ -135,12 +138,7 @@ describe('expired-trial conclusive provider absence vertical slice', () => {
     expect(providerGetVM).toHaveBeenCalledWith('vm-missing');
     expect(providerDeleteVM).not.toHaveBeenCalled();
     expect(deleteDNSRecord).toHaveBeenCalledWith('dns-old', env);
-    expect(drizzleUpdates).toContainEqual(
-      expect.objectContaining({
-        cloudProvider: 'hetzner',
-        credentialSource: 'platform',
-      })
-    );
+    expect(drizzleUpdates).toEqual([]);
     expect(calls.some(({ sql }) => sql.includes('UPDATE agent_sessions'))).toBe(true);
     expect(calls.some(({ sql }) => sql.includes('UPDATE compute_usage'))).toBe(true);
     expect(

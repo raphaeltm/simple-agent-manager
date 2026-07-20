@@ -50,9 +50,7 @@ vi.mock('../../../src/lib/logger', () => ({
   })),
 }));
 
-const { runTrialExpireSweep } = await import(
-  '../../../src/scheduled/trial-expire'
-);
+const { runTrialExpireSweep } = await import('../../../src/scheduled/trial-expire');
 
 interface MockExpiredProject {
   trial_id: string;
@@ -77,20 +75,22 @@ interface MockEnv extends Env {
   __calls: PreparedCall[];
 }
 
-function makeEnv(options: {
-  expireChanges?: number;
-  expiredProjects?: MockExpiredProject[];
-  workspaces?: MockWorkspace[];
-  workspacesByInvocation?: MockWorkspace[][];
-  existingClaim?: { status: string; updated_at: string };
-  activeOtherCount?: number;
-  activeAfterCount?: number;
-  linkChanges?: number;
-  workspaceDeleteChanges?: number;
-  nodeClaimChanges?: number;
-  nodeDeleteChanges?: number;
-  envOverrides?: Partial<Env>;
-} = {}): MockEnv {
+function makeEnv(
+  options: {
+    expireChanges?: number;
+    expiredProjects?: MockExpiredProject[];
+    workspaces?: MockWorkspace[];
+    workspacesByInvocation?: MockWorkspace[][];
+    existingClaim?: { status: string; updated_at: string };
+    activeOtherCount?: number;
+    activeAfterCount?: number;
+    linkChanges?: number;
+    workspaceDeleteChanges?: number;
+    nodeClaimChanges?: number;
+    nodeDeleteChanges?: number;
+    envOverrides?: Partial<Env>;
+  } = {}
+): MockEnv {
   const calls: PreparedCall[] = [];
   let workspaceQueryCount = 0;
   const prepare = vi.fn((sql: string) => ({
@@ -103,7 +103,8 @@ function makeEnv(options: {
           }
           if (sql.includes('FROM workspaces') && sql.includes('project_id = ?')) {
             return {
-              results: options.workspacesByInvocation?.[workspaceQueryCount++] ?? options.workspaces ?? [],
+              results:
+                options.workspacesByInvocation?.[workspaceQueryCount++] ?? options.workspaces ?? [],
             };
           }
           return { results: [] };
@@ -130,10 +131,10 @@ function makeEnv(options: {
           if (sql.includes("SET status = 'destroying'")) {
             return { meta: { changes: options.nodeClaimChanges ?? 1 } };
           }
-          if (sql.includes("UPDATE workspaces") && sql.includes("status = 'deleted'")) {
+          if (sql.includes('UPDATE workspaces') && sql.includes("status = 'deleted'")) {
             return { meta: { changes: options.workspaceDeleteChanges ?? 1 } };
           }
-          if (sql.includes("UPDATE nodes") && sql.includes("status = 'deleted'")) {
+          if (sql.includes('UPDATE nodes') && sql.includes("status = 'deleted'")) {
             return { meta: { changes: options.nodeDeleteChanges ?? 1 } };
           }
           return { meta: { changes: 1 } };
@@ -238,9 +239,13 @@ describe('runTrialExpireSweep', () => {
     expect(nodeClaim?.sql).not.toContain("'error'");
     expect(stopSessionMock).toHaveBeenCalledWith(env, 'proj_old', 'chat_old');
     expect(cleanupWorkspaceActivityMock).toHaveBeenCalledWith(env, 'proj_old', 'ws_old');
-    const agentSessionUpdate = env.__calls.find((call) => call.sql.includes('UPDATE agent_sessions'));
+    const agentSessionUpdate = env.__calls.find((call) =>
+      call.sql.includes('UPDATE agent_sessions')
+    );
     expect(agentSessionUpdate?.sql).toContain("status = 'completed'");
-    const computeUsageUpdate = env.__calls.find((call) => call.sql.includes('UPDATE compute_usage'));
+    const computeUsageUpdate = env.__calls.find((call) =>
+      call.sql.includes('UPDATE compute_usage')
+    );
     expect(computeUsageUpdate?.sql).toContain('ended_at IS NULL');
   });
 
@@ -283,6 +288,28 @@ describe('runTrialExpireSweep', () => {
     expect(persistErrorMock).not.toHaveBeenCalled();
     expect(env.__calls.some((call) => call.sql.includes('SELECT status, updated_at'))).toBe(true);
   });
+
+  it.each(['deleted', 'destroyed'])(
+    'treats a node made %s by the claim owner as terminal without a false error',
+    async (status) => {
+      const env = makeEnv({
+        expiredProjects: [{ trial_id: 'trial_old', project_id: 'proj_old' }],
+        workspaces: [baseWorkspace()],
+        activeOtherCount: 0,
+        nodeClaimChanges: 0,
+        existingClaim: {
+          status,
+          updated_at: new Date(1_700_000_000_000).toISOString(),
+        },
+      });
+
+      const result = await runTrialExpireSweep(env, 1_700_000_000_000);
+
+      expect(result).toMatchObject({ workspacesDeleted: 0, nodesDeleted: 0, cleanupErrors: 0 });
+      expect(deleteNodeResourcesStrictMock).not.toHaveBeenCalled();
+      expect(persistErrorMock).not.toHaveBeenCalled();
+    }
+  );
 
   it('does not mark workspaces or nodes deleted when strict cloud deletion fails', async () => {
     deleteNodeResourcesStrictMock.mockRejectedValueOnce(new Error('Hetzner API outage'));
@@ -347,7 +374,9 @@ describe('runTrialExpireSweep', () => {
     });
     expect(deleteWorkspaceOnNodeMock).toHaveBeenCalledTimes(1);
     expect(deleteNodeResourcesStrictMock).not.toHaveBeenCalled();
-    const activeCountCall = env.__calls.find((call) => call.sql.includes('COUNT(*) as active_count'));
+    const activeCountCall = env.__calls.find((call) =>
+      call.sql.includes('COUNT(*) as active_count')
+    );
     expect(activeCountCall?.sql).not.toContain('user_id = ?');
     expect(activeCountCall?.sql).toContain('id NOT IN');
   });

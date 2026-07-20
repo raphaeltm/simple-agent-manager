@@ -53,7 +53,7 @@ interface NodeDeletionClaimRow {
   updated_at: string;
 }
 
-type NodeDeletionClaimResult = 'claimed' | 'concurrent' | 'failed';
+type NodeDeletionClaimResult = 'claimed' | 'concurrent' | 'terminal' | 'failed';
 
 interface CountRow {
   active_count: number;
@@ -68,7 +68,7 @@ function resolveAnonymousUserId(env: Env): string {
 function parsePositiveInt(
   value: string | undefined,
   fallback: number,
-  options: { name: string; max: number },
+  options: { name: string; max: number }
 ): number {
   if (!value) return fallback;
   const parsed = Number.parseInt(value, 10);
@@ -96,7 +96,7 @@ export async function runTrialExpireSweep(
   const expireBatchSize = parsePositiveInt(
     env.TRIAL_EXPIRE_BATCH_SIZE,
     DEFAULT_TRIAL_EXPIRE_BATCH_SIZE,
-    { name: 'TRIAL_EXPIRE_BATCH_SIZE', max: MAX_TRIAL_EXPIRE_BATCH_SIZE },
+    { name: 'TRIAL_EXPIRE_BATCH_SIZE', max: MAX_TRIAL_EXPIRE_BATCH_SIZE }
   );
   const expireResult = await env.DATABASE.prepare(
     `UPDATE trials
@@ -109,7 +109,9 @@ export async function runTrialExpireSweep(
          AND expires_at < ?
        LIMIT ?
      )`
-  ).bind(now, expireBatchSize).run();
+  )
+    .bind(now, expireBatchSize)
+    .run();
 
   const cleanup = await cleanupExpiredTrialResources(env, now);
 
@@ -125,12 +127,12 @@ async function cleanupExpiredTrialResources(
   const cleanupBatchSize = parsePositiveInt(
     env.TRIAL_CLEANUP_BATCH_SIZE,
     DEFAULT_TRIAL_CLEANUP_BATCH_SIZE,
-    { name: 'TRIAL_CLEANUP_BATCH_SIZE', max: MAX_TRIAL_CLEANUP_BATCH_SIZE },
+    { name: 'TRIAL_CLEANUP_BATCH_SIZE', max: MAX_TRIAL_CLEANUP_BATCH_SIZE }
   );
   const deadlineMs = parsePositiveInt(
     env.TRIAL_CLEANUP_DEADLINE_MS,
     DEFAULT_TRIAL_CLEANUP_DEADLINE_MS,
-    { name: 'TRIAL_CLEANUP_DEADLINE_MS', max: MAX_TRIAL_CLEANUP_DEADLINE_MS },
+    { name: 'TRIAL_CLEANUP_DEADLINE_MS', max: MAX_TRIAL_CLEANUP_DEADLINE_MS }
   );
   const deadlineAt = Date.now() + deadlineMs;
   const result = {
@@ -164,7 +166,9 @@ async function cleanupExpiredTrialResources(
            AND w.status != 'deleted'
        )
      LIMIT ?`
-  ).bind(anonymousUserId, now, anonymousUserId, cleanupBatchSize).all<ExpiredTrialProjectRow>();
+  )
+    .bind(anonymousUserId, now, anonymousUserId, cleanupBatchSize)
+    .all<ExpiredTrialProjectRow>();
 
   for (const row of expiredProjects.results) {
     if (Date.now() >= deadlineAt) {
@@ -183,7 +187,9 @@ async function cleanupExpiredTrialResources(
            AND project_id IS NULL
            AND status IN ('expired', 'claimed')
            AND expires_at < ?`
-      ).bind(row.project_id, row.trial_id, now).run();
+      )
+        .bind(row.project_id, row.trial_id, now)
+        .run();
       result.projectsLinked += getRunChanges(linkResult);
 
       const workspaces = await env.DATABASE.prepare(
@@ -200,7 +206,9 @@ async function cleanupExpiredTrialResources(
                AND t.expires_at < ?
                AND (t.project_id = ? OR t.project_id IS NULL)
            )`
-      ).bind(row.project_id, anonymousUserId, row.trial_id, now, row.project_id).all<TrialWorkspaceCleanupRow>();
+      )
+        .bind(row.project_id, anonymousUserId, row.trial_id, now, row.project_id)
+        .all<TrialWorkspaceCleanupRow>();
 
       const byNode = new Map<string, TrialWorkspaceCleanupRow[]>();
       for (const workspace of workspaces.results) {
@@ -211,7 +219,7 @@ async function cleanupExpiredTrialResources(
             workspace,
             anonymousUserId,
             now,
-            nowIso,
+            nowIso
           );
           result.workspacesDeleted += deleted;
           if (deleted > 0) {
@@ -235,7 +243,11 @@ async function cleanupExpiredTrialResources(
         }
 
         const cleanupWorkspaceIds = nodeWorkspaces.map((workspace) => workspace.id);
-        const activeOtherCount = await countActiveWorkspacesExcluding(env, nodeId, cleanupWorkspaceIds);
+        const activeOtherCount = await countActiveWorkspacesExcluding(
+          env,
+          nodeId,
+          cleanupWorkspaceIds
+        );
 
         if (activeOtherCount > 0) {
           const sharedResult = await cleanupWorkspacesOnLiveNode(
@@ -247,7 +259,7 @@ async function cleanupExpiredTrialResources(
             nowIso,
             deadlineAt,
             cleanupBatchSize,
-            deadlineMs,
+            deadlineMs
           );
           result.workspacesDeleted += sharedResult.workspacesDeleted;
           result.cleanupErrors += sharedResult.cleanupErrors;
@@ -260,19 +272,28 @@ async function cleanupExpiredTrialResources(
           anonymousUserId,
           cleanupWorkspaceIds,
           now,
-          nowIso,
+          nowIso
         );
 
         if (nodeClaimResult !== 'claimed') {
-          if (nodeClaimResult === 'concurrent') {
-            log.info('trial_expire.node_deletion_already_claimed', {
-              trialId: row.trial_id,
-              projectId: row.project_id,
-              nodeId,
-            });
+          if (nodeClaimResult === 'concurrent' || nodeClaimResult === 'terminal') {
+            log.info(
+              nodeClaimResult === 'concurrent'
+                ? 'trial_expire.node_deletion_already_claimed'
+                : 'trial_expire.node_deletion_already_terminal',
+              {
+                trialId: row.trial_id,
+                projectId: row.project_id,
+                nodeId,
+              }
+            );
             continue;
           }
-          const freshActiveOtherCount = await countActiveWorkspacesExcluding(env, nodeId, cleanupWorkspaceIds);
+          const freshActiveOtherCount = await countActiveWorkspacesExcluding(
+            env,
+            nodeId,
+            cleanupWorkspaceIds
+          );
           if (freshActiveOtherCount > 0) {
             const sharedResult = await cleanupWorkspacesOnLiveNode(
               env,
@@ -283,7 +304,7 @@ async function cleanupExpiredTrialResources(
               nowIso,
               deadlineAt,
               cleanupBatchSize,
-              deadlineMs,
+              deadlineMs
             );
             result.workspacesDeleted += sharedResult.workspacesDeleted;
             result.cleanupErrors += sharedResult.cleanupErrors;
@@ -291,11 +312,17 @@ async function cleanupExpiredTrialResources(
           }
 
           result.cleanupErrors++;
-          await recordCleanupError(env, anonymousUserId, 'trial_expire.node_deletion_claim_failed', {
-            trialId: row.trial_id,
-            projectId: row.project_id,
-            nodeId,
-          }, new Error('Node could not be claimed for strict trial cleanup'));
+          await recordCleanupError(
+            env,
+            anonymousUserId,
+            'trial_expire.node_deletion_claim_failed',
+            {
+              trialId: row.trial_id,
+              projectId: row.project_id,
+              nodeId,
+            },
+            new Error('Node could not be claimed for strict trial cleanup')
+          );
           continue;
         }
 
@@ -304,11 +331,17 @@ async function cleanupExpiredTrialResources(
         } catch (err) {
           result.cleanupErrors++;
           await releaseNodeDeletionClaim(env, nodeId, anonymousUserId, nowIso, err);
-          await recordCleanupError(env, anonymousUserId, 'trial_expire.strict_node_delete_failed', {
-            trialId: row.trial_id,
-            projectId: row.project_id,
-            nodeId,
-          }, err);
+          await recordCleanupError(
+            env,
+            anonymousUserId,
+            'trial_expire.strict_node_delete_failed',
+            {
+              trialId: row.trial_id,
+              projectId: row.project_id,
+              nodeId,
+            },
+            err
+          );
           continue;
         }
 
@@ -319,7 +352,7 @@ async function cleanupExpiredTrialResources(
             workspace,
             anonymousUserId,
             now,
-            nowIso,
+            nowIso
           );
           result.workspacesDeleted += deleted;
           if (deleted > 0) {
@@ -345,16 +378,24 @@ async function cleanupExpiredTrialResources(
                  WHERE node_id = ?
                    AND status IN (${ACTIVE_WORKSPACE_STATUS_SQL})
                )`
-          ).bind(nowIso, nodeId, anonymousUserId, nodeId).run();
+          )
+            .bind(nowIso, nodeId, anonymousUserId, nodeId)
+            .run();
           result.nodesDeleted += getRunChanges(nodeDeleteResult);
         }
       }
     } catch (err) {
       result.cleanupErrors++;
-      await recordCleanupError(env, anonymousUserId, 'trial_expire.resource_cleanup_failed', {
-        trialId: row.trial_id,
-        projectId: row.project_id,
-      }, err);
+      await recordCleanupError(
+        env,
+        anonymousUserId,
+        'trial_expire.resource_cleanup_failed',
+        {
+          trialId: row.trial_id,
+          projectId: row.project_id,
+        },
+        err
+      );
     }
   }
 
@@ -370,7 +411,7 @@ async function cleanupWorkspacesOnLiveNode(
   nowIso: string,
   deadlineAt: number,
   cleanupBatchSize: number,
-  deadlineMs: number,
+  deadlineMs: number
 ): Promise<{ workspacesDeleted: number; cleanupErrors: number }> {
   const result = { workspacesDeleted: 0, cleanupErrors: 0 };
 
@@ -389,12 +430,18 @@ async function cleanupWorkspacesOnLiveNode(
       await deleteWorkspaceOnNode(workspace.node_id, workspace.id, env, workspace.user_id);
     } catch (err) {
       result.cleanupErrors++;
-      await recordCleanupError(env, anonymousUserId, 'trial_expire.delete_workspace_on_node_failed', {
-        trialId: row.trial_id,
-        projectId: row.project_id,
-        workspaceId: workspace.id,
-        nodeId: workspace.node_id,
-      }, err);
+      await recordCleanupError(
+        env,
+        anonymousUserId,
+        'trial_expire.delete_workspace_on_node_failed',
+        {
+          trialId: row.trial_id,
+          projectId: row.project_id,
+          workspaceId: workspace.id,
+          nodeId: workspace.node_id,
+        },
+        err
+      );
       continue;
     }
 
@@ -404,7 +451,7 @@ async function cleanupWorkspacesOnLiveNode(
       workspace,
       anonymousUserId,
       now,
-      nowIso,
+      nowIso
     );
     result.workspacesDeleted += deleted;
     if (deleted > 0) {
@@ -421,7 +468,7 @@ async function markWorkspaceDeletedIfTrialStillExpired(
   workspace: TrialWorkspaceCleanupRow,
   anonymousUserId: string,
   now: number,
-  nowIso: string,
+  nowIso: string
 ): Promise<number> {
   const updateResult = await env.DATABASE.prepare(
     `UPDATE workspaces
@@ -439,15 +486,9 @@ async function markWorkspaceDeletedIfTrialStillExpired(
            AND t.expires_at < ?
            AND (t.project_id = ? OR t.project_id IS NULL)
        )`
-  ).bind(
-    nowIso,
-    workspace.id,
-    anonymousUserId,
-    row.project_id,
-    row.trial_id,
-    now,
-    row.project_id,
-  ).run();
+  )
+    .bind(nowIso, workspace.id, anonymousUserId, row.project_id, row.trial_id, now, row.project_id)
+    .run();
 
   return getRunChanges(updateResult);
 }
@@ -456,7 +497,7 @@ async function cleanupWorkspaceReferences(
   env: Env,
   trialId: string,
   workspace: TrialWorkspaceCleanupRow,
-  nowIso: string,
+  nowIso: string
 ): Promise<void> {
   try {
     await env.DATABASE.prepare(
@@ -465,7 +506,9 @@ async function cleanupWorkspaceReferences(
            updated_at = ?
        WHERE workspace_id = ?
          AND status NOT IN ('completed', 'failed')`
-    ).bind(nowIso, workspace.id).run();
+    )
+      .bind(nowIso, workspace.id)
+      .run();
   } catch (err) {
     log.warn('trial_expire.agent_sessions_cleanup_failed', {
       trialId,
@@ -480,7 +523,9 @@ async function cleanupWorkspaceReferences(
        SET ended_at = ?
        WHERE workspace_id = ?
          AND ended_at IS NULL`
-    ).bind(nowIso, workspace.id).run();
+    )
+      .bind(nowIso, workspace.id)
+      .run();
   } catch (err) {
     log.warn('trial_expire.compute_usage_cleanup_failed', {
       trialId,
@@ -493,32 +538,28 @@ async function cleanupWorkspaceReferences(
     return;
   }
 
-  await projectDataService.stopSession(
-    env,
-    workspace.project_id,
-    workspace.chat_session_id
-  ).catch((err) => {
-    log.warn('trial_expire.stop_session_failed', {
-      trialId,
-      projectId: workspace.project_id,
-      workspaceId: workspace.id,
-      chatSessionId: workspace.chat_session_id,
-      error: err instanceof Error ? err.message : String(err),
+  await projectDataService
+    .stopSession(env, workspace.project_id, workspace.chat_session_id)
+    .catch((err) => {
+      log.warn('trial_expire.stop_session_failed', {
+        trialId,
+        projectId: workspace.project_id,
+        workspaceId: workspace.id,
+        chatSessionId: workspace.chat_session_id,
+        error: err instanceof Error ? err.message : String(err),
+      });
     });
-  });
 
-  await projectDataService.cleanupWorkspaceActivity(
-    env,
-    workspace.project_id,
-    workspace.id
-  ).catch((err) => {
-    log.warn('trial_expire.cleanup_workspace_activity_failed', {
-      trialId,
-      projectId: workspace.project_id,
-      workspaceId: workspace.id,
-      error: err instanceof Error ? err.message : String(err),
+  await projectDataService
+    .cleanupWorkspaceActivity(env, workspace.project_id, workspace.id)
+    .catch((err) => {
+      log.warn('trial_expire.cleanup_workspace_activity_failed', {
+        trialId,
+        projectId: workspace.project_id,
+        workspaceId: workspace.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
     });
-  });
 }
 
 async function countActiveWorkspaces(env: Env, nodeId: string): Promise<number> {
@@ -527,7 +568,9 @@ async function countActiveWorkspaces(env: Env, nodeId: string): Promise<number> 
      FROM workspaces
      WHERE node_id = ?
        AND status IN (${ACTIVE_WORKSPACE_STATUS_SQL})`
-  ).bind(nodeId).first<CountRow>();
+  )
+    .bind(nodeId)
+    .first<CountRow>();
 
   return active?.active_count ?? 0;
 }
@@ -535,7 +578,7 @@ async function countActiveWorkspaces(env: Env, nodeId: string): Promise<number> 
 async function countActiveWorkspacesExcluding(
   env: Env,
   nodeId: string,
-  excludedWorkspaceIds: string[],
+  excludedWorkspaceIds: string[]
 ): Promise<number> {
   if (excludedWorkspaceIds.length === 0) {
     return countActiveWorkspaces(env, nodeId);
@@ -548,7 +591,9 @@ async function countActiveWorkspacesExcluding(
      WHERE node_id = ?
        AND status IN (${ACTIVE_WORKSPACE_STATUS_SQL})
        AND id NOT IN (${placeholders})`
-  ).bind(nodeId, ...excludedWorkspaceIds).first<CountRow>();
+  )
+    .bind(nodeId, ...excludedWorkspaceIds)
+    .first<CountRow>();
 
   return active?.active_count ?? 0;
 }
@@ -559,21 +604,20 @@ async function claimNodeForDeletion(
   anonymousUserId: string,
   cleanupWorkspaceIds: string[],
   now: number,
-  nowIso: string,
+  nowIso: string
 ): Promise<NodeDeletionClaimResult> {
   const staleLockMs = parsePositiveInt(
     env.TRIAL_NODE_DELETION_LOCK_STALE_MS,
     DEFAULT_TRIAL_NODE_DELETION_LOCK_STALE_MS,
-    { name: 'TRIAL_NODE_DELETION_LOCK_STALE_MS', max: MAX_TRIAL_NODE_DELETION_LOCK_STALE_MS },
+    { name: 'TRIAL_NODE_DELETION_LOCK_STALE_MS', max: MAX_TRIAL_NODE_DELETION_LOCK_STALE_MS }
   );
   const staleDestroyingCutoffIso = new Date(now - staleLockMs).toISOString();
   const placeholders = cleanupWorkspaceIds.map(() => '?').join(', ');
-  const exclusionClause = cleanupWorkspaceIds.length > 0
-    ? `AND id NOT IN (${placeholders})`
-    : '';
-  const bindValues = cleanupWorkspaceIds.length > 0
-    ? [nowIso, nodeId, anonymousUserId, staleDestroyingCutoffIso, nodeId, ...cleanupWorkspaceIds]
-    : [nowIso, nodeId, anonymousUserId, staleDestroyingCutoffIso, nodeId];
+  const exclusionClause = cleanupWorkspaceIds.length > 0 ? `AND id NOT IN (${placeholders})` : '';
+  const bindValues =
+    cleanupWorkspaceIds.length > 0
+      ? [nowIso, nodeId, anonymousUserId, staleDestroyingCutoffIso, nodeId, ...cleanupWorkspaceIds]
+      : [nowIso, nodeId, anonymousUserId, staleDestroyingCutoffIso, nodeId];
 
   const updateResult = await env.DATABASE.prepare(
     `UPDATE nodes
@@ -592,7 +636,9 @@ async function claimNodeForDeletion(
            AND status IN (${ACTIVE_WORKSPACE_STATUS_SQL})
            ${exclusionClause}
        )`
-  ).bind(...bindValues).run();
+  )
+    .bind(...bindValues)
+    .run();
 
   if (getRunChanges(updateResult) > 0) return 'claimed';
 
@@ -601,12 +647,20 @@ async function claimNodeForDeletion(
      FROM nodes
      WHERE id = ?
        AND user_id = ?`
-  ).bind(nodeId, anonymousUserId).first<NodeDeletionClaimRow>();
+  )
+    .bind(nodeId, anonymousUserId)
+    .first<NodeDeletionClaimRow>();
 
-  return existingClaim?.status === 'destroying'
-    && existingClaim.updated_at >= staleDestroyingCutoffIso
-    ? 'concurrent'
-    : 'failed';
+  if (
+    existingClaim?.status === 'destroying' &&
+    existingClaim.updated_at >= staleDestroyingCutoffIso
+  ) {
+    return 'concurrent';
+  }
+  if (existingClaim?.status === 'deleted' || existingClaim?.status === 'destroyed') {
+    return 'terminal';
+  }
+  return 'failed';
 }
 
 async function releaseNodeDeletionClaim(
@@ -614,7 +668,7 @@ async function releaseNodeDeletionClaim(
   nodeId: string,
   anonymousUserId: string,
   nowIso: string,
-  err: unknown,
+  err: unknown
 ): Promise<void> {
   const message = err instanceof Error ? err.message : String(err);
   const truncated = message.length > 500 ? `${message.slice(0, 500)}...` : message;
@@ -627,7 +681,9 @@ async function releaseNodeDeletionClaim(
      WHERE id = ?
        AND user_id = ?
        AND status = 'destroying'`
-  ).bind(`Trial cleanup failed: ${truncated}`, nowIso, nodeId, anonymousUserId).run();
+  )
+    .bind(`Trial cleanup failed: ${truncated}`, nowIso, nodeId, anonymousUserId)
+    .run();
 }
 
 async function recordCleanupError(
@@ -635,7 +691,7 @@ async function recordCleanupError(
   anonymousUserId: string,
   eventName: string,
   context: CleanupContext,
-  err: unknown,
+  err: unknown
 ): Promise<void> {
   log.error(eventName, {
     ...context,

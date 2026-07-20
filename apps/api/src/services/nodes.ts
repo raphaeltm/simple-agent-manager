@@ -1,6 +1,11 @@
 import { generateCloudInit, validateCloudInitSize } from '@simple-agent-manager/cloud-init';
 import { isTransientCapacityError, ProviderError } from '@simple-agent-manager/providers';
-import type { CredentialProvider, CredentialSource, TaskMode } from '@simple-agent-manager/shared';
+import {
+  CREDENTIAL_PROVIDERS,
+  type CredentialProvider,
+  type CredentialSource,
+  type TaskMode,
+} from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
@@ -668,21 +673,80 @@ async function requireStrictNodeProvider(
   return providerResult;
 }
 
-async function ensureStrictNodeBelongsToProvider(
-  node: NodeRow,
-  providerResult: ProviderForUserResult,
-  targetProvider: CredentialProvider | undefined
-): Promise<'present' | 'absent'> {
-  if (targetProvider || !node.providerInstanceId) return 'present';
+type StrictProviderResolution =
+  | { state: 'present'; providerResult: ProviderForUserResult }
+  | { state: 'absent'; providersChecked: CredentialProvider[] };
 
-  const vm = await providerResult.provider.getVM(node.providerInstanceId);
-  if (vm === null) {
-    return 'absent';
+async function resolveStrictNodeProvider(
+  db: NodeDb,
+  node: NodeRow,
+  userId: string,
+  env: Env
+): Promise<StrictProviderResolution> {
+  const providerInstanceId = node.providerInstanceId;
+  if (!providerInstanceId) {
+    throw new Error(`Cannot strictly resolve provider for node ${node.id}: instance ID is missing`);
   }
-  if (!vm || typeof vm !== 'object') {
-    throw new Error(`Cannot strictly delete node ${node.id}: ambiguous result`);
+  const { targetProvider, attributionUserId, attributionProjectId } =
+    getStrictNodeCredentialContext(node, userId);
+
+  if (targetProvider) {
+    const providerResult = await requireStrictNodeProvider(db, node, userId, env);
+    if (providerResult.providerName !== targetProvider) {
+      throw new Error(
+        `Cannot strictly delete node ${node.id}: requested provider ${targetProvider} resolved as ${providerResult.providerName}`
+      );
+    }
+    return { state: 'present', providerResult };
   }
-  return 'present';
+
+  const candidates: ProviderForUserResult[] = [];
+  for (const providerName of CREDENTIAL_PROVIDERS) {
+    const providerResult = await createProviderForUser(
+      db,
+      attributionUserId,
+      getCredentialEncryptionKey(env),
+      env,
+      providerName,
+      attributionProjectId
+    );
+    if (!providerResult) continue;
+    if (providerResult.providerName !== providerName) {
+      throw new Error(
+        `Cannot strictly delete node ${node.id}: requested provider ${providerName} resolved as ${providerResult.providerName}`
+      );
+    }
+    candidates.push(providerResult);
+  }
+
+  if (candidates.length === 0) {
+    throw new Error(
+      `Cloud provider credentials missing for strict node deletion: node=${node.id} provider=unknown instance=${node.providerInstanceId}`
+    );
+  }
+
+  const presentCandidates: ProviderForUserResult[] = [];
+  for (const candidate of candidates) {
+    const vm = await candidate.provider.getVM(providerInstanceId);
+    if (vm === null) continue;
+    if (!vm || typeof vm !== 'object') {
+      throw new Error(
+        `Cannot strictly delete node ${node.id}: ambiguous ${candidate.providerName} lookup result`
+      );
+    }
+    presentCandidates.push(candidate);
+  }
+
+  if (presentCandidates.length > 1) {
+    throw new Error(
+      `Cannot strictly delete node ${node.id}: instance ${node.providerInstanceId} matched multiple providers`
+    );
+  }
+
+  const providerResult = presentCandidates[0];
+  return providerResult
+    ? { state: 'present', providerResult }
+    : { state: 'absent', providersChecked: candidates.map((candidate) => candidate.providerName) };
 }
 
 export type StrictNodeDeletionResult = { providerVm: 'no-instance' | 'deleted' | 'already-absent' };
@@ -696,12 +760,18 @@ async function deleteStrictProviderInstance(
   if (!node.providerInstanceId) return 'no-instance';
 
   const credentialContext = getStrictNodeCredentialContext(node, userId);
-  const providerResult = await requireStrictNodeProvider(db, node, userId, env);
-  const providerVmState = await ensureStrictNodeBelongsToProvider(
-    node,
-    providerResult,
-    credentialContext.targetProvider
-  );
+  const providerResolution = await resolveStrictNodeProvider(db, node, userId, env);
+
+  if (providerResolution.state === 'absent') {
+    log.warn('node_delete.strict_provider_vm_already_absent', {
+      nodeId: node.id,
+      providersChecked: providerResolution.providersChecked,
+      providerInstanceId: node.providerInstanceId,
+    });
+    return 'already-absent';
+  }
+
+  const { providerResult } = providerResolution;
 
   await db
     .update(schema.nodes)
@@ -717,15 +787,6 @@ async function deleteStrictProviderInstance(
       updatedAt: new Date().toISOString(),
     })
     .where(eq(schema.nodes.id, node.id));
-
-  if (providerVmState === 'absent') {
-    log.warn('node_delete.strict_provider_vm_already_absent', {
-      nodeId: node.id,
-      provider: providerResult.providerName,
-      providerInstanceId: node.providerInstanceId,
-    });
-    return 'already-absent';
-  }
 
   await providerResult.provider.deleteVM(node.providerInstanceId);
   return 'deleted';
