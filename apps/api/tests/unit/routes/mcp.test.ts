@@ -2102,6 +2102,56 @@ describe('MCP Routes', () => {
       expect(body.error.message).toContain('Cloud provider credentials required');
     });
 
+    it('dispatches explicit cf-container runtime without cloud credentials', async () => {
+      const noCredProject = {
+        id: 'proj-456',
+        name: 'Test',
+        repository: 'user/repo',
+        defaultBranch: 'main',
+        installationId: 'inst-1',
+        defaultVmSize: null,
+        defaultWorkspaceProfile: null,
+        defaultProvider: null,
+        defaultAgentType: null,
+      };
+      mockEnv.CF_CONTAINER_ENABLED = 'true';
+      mockD1._stmt.all.mockResolvedValue({ results: [noCredProject] });
+      mockD1._stmt.raw.mockResolvedValue([]);
+      mockD1._stmt.raw
+        .mockResolvedValueOnce([['task-123', 0, 'in_progress']])
+        .mockResolvedValueOnce([[0]])
+        .mockResolvedValueOnce([[0]])
+        .mockResolvedValueOnce([Object.values(noCredProject)])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([]);
+      mockD1._stmt.run.mockResolvedValue({ success: true, meta: { changes: 1 } });
+      instantSessionMocks.launchInstantSession.mockResolvedValue({
+        taskId: 'generated-task',
+        runtime: 'cf-container',
+      });
+
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'dispatch_task',
+          arguments: {
+            description: 'Run without VM credentials',
+            runtime: 'cf-container',
+          },
+        })
+      );
+
+      const body = await res.json();
+      expect(body.error).toBeUndefined();
+      expect(JSON.parse(body.result.content[0].text)).toMatchObject({
+        runtime: 'cf-container',
+        runtimeReason: 'explicit-cf-container',
+      });
+      expect(instantSessionMocks.launchInstantSession).toHaveBeenCalledTimes(1);
+      expect(mockTaskRunnerStub.start).not.toHaveBeenCalled();
+    });
+
     it('should handle session creation failure gracefully', async () => {
       const sessionProject = {
         id: 'proj-456',
