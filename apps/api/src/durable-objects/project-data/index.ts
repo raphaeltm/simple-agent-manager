@@ -30,6 +30,7 @@ import * as missionState from './missions';
 import * as policies from './policies';
 import * as reconciliation from './reconciliation';
 import { parseCountCnt, parseMaxLatest, parseMetaValue } from './row-schemas';
+import { checkRuntimeHeartbeatTimeouts } from './runtime-heartbeat-policy';
 import * as sessionState from './session-state';
 import * as sessionSummarySync from './session-summary-sync';
 import * as sessions from './sessions';
@@ -341,9 +342,8 @@ export class ProjectData extends DurableObject<Env> {
   // --- DO Alarm Handler ---
 
   async alarm(): Promise<void> {
-    const timedOut = await acpSessions.checkHeartbeatTimeouts(this.sql, this.env, async (sessionId, toStatus, opts) => {
-      await this.transitionAcpSession(sessionId, toStatus, opts);
-    });
+    const timedOut = await checkRuntimeHeartbeatTimeouts(
+      this.sql, this.env, this.transitionAcpSession.bind(this));
 
     // For conversation-mode sessions, couple agent death to workspace death.
     // Stop workspaces whose ACP sessions timed out to prevent zombie state.
