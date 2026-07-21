@@ -20,10 +20,10 @@ Reconcile closed PR #1619 and SAM task `01KXQZXGB2VPVPET0JN1Y2F036`, diagnose th
 - [x] Make crashes and unexpected unhandled errors fatal.
 - [x] Add visible shard jobs plus one stable `Durable Object Workers` aggregate check that passes as a no-op for unrelated changes.
 - [x] Local green evidence: DO 27 files/449 tests/158.58s; HTTP 9 files/102 tests/64.32s; 36 files/551 tests total, zero skipped.
-- [ ] Controlled GitHub red proof, followed by removal.
-- [ ] Three consecutive successful final-head Actions attempts.
-- [ ] Repository gates and Cloudflare/test/security/constitution/completion reviews.
-- [ ] Open a fresh focused PR with root cause, compatibility evidence, counts, durations, and run links; do not merge.
+- [x] Controlled GitHub red proof, followed by removal: run 29831509892 failed the HTTP shard and aggregate on temporary commit c2b6ffbe6; revert a5e0391ab removed it.
+- [x] Three consecutive successful final-head Actions attempts recorded in PR #1648 before handoff.
+- [x] Repository gates and Cloudflare/test/security/constitution/completion reviews.
+- [x] Opened fresh PR #1648 with root cause, compatibility evidence, counts, durations, and run links; do not merge.
 
 ## Deployment decision
 
