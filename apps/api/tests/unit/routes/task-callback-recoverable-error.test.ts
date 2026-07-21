@@ -38,18 +38,26 @@ const MOCK_PROJECT_DATA_BINDING = {
 
 vi.mock('drizzle-orm/d1', () => ({
   drizzle: () => ({
-    select: (selection?: Record<string, unknown>) => ({
-      from: () => ({
-        where: () => ({
-          limit: () => {
-            if (selection && 'chatSessionId' in selection) {
-              return Promise.resolve([{ chatSessionId: 'chat-recoverable' }]);
-            }
-            return Promise.resolve([{ ...mocks.task }]);
-          },
-        }),
-      }),
-    }),
+    select: (selection?: Record<string, unknown>) => {
+      const rows = () => {
+        // S2 staleness-guard read (agent_sessions⋈nodes) — non-Instant runtime so
+        // the existing `failed` callback keeps processing (guard does not engage).
+        if (selection && 'updatedAt' in selection) {
+          return [{ updatedAt: null, runtime: 'vm' }];
+        }
+        if (selection && 'chatSessionId' in selection) {
+          return [{ chatSessionId: 'chat-recoverable' }];
+        }
+        return [{ ...mocks.task }];
+      };
+      const afterOrderBy = { limit: () => Promise.resolve(rows()) };
+      const terminal = { limit: () => Promise.resolve(rows()), orderBy: () => afterOrderBy };
+      const joinable: { leftJoin: () => typeof joinable; where: () => typeof terminal } = {
+        leftJoin: () => joinable,
+        where: () => terminal,
+      };
+      return { from: () => joinable };
+    },
     update: () => ({
       set: (values: Record<string, unknown>) => {
         mocks.updateSets.push(values);

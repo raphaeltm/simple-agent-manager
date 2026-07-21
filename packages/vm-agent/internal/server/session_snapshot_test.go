@@ -108,6 +108,13 @@ func TestSnapshotHarnessResumeIdentity(t *testing.T) {
 			wantAgentType: "openai-codex",
 		},
 		{
+			name:      "rejects nil manifest",
+			manifest:  nil,
+			sessionID: "agent-session-1",
+			agentType: "openai-codex",
+			wantErr:   true,
+		},
+		{
 			name:      "rejects legacy snapshot without harness identity",
 			manifest:  &snapshotManifest{AgentSessionID: "agent-session-1"},
 			sessionID: "agent-session-1",

@@ -30,9 +30,9 @@ The repair must build on PR #1562's runtime-neutral snapshot/restore boundary an
 
 1. `VmAgentContainer.onStop()` maps every unexpected stop to terminal `error`; `onError()` does the same.
 2. `resolveLiveAgentSessionForChat()` permits only running/sleeping node and agent-session rows, so a terminal error blocks the request before the Durable Object can restore.
-3. The agent-session resume route returns success immediately for `running`, and for `error`/`stopped` merely rewrites D1 to `running`; it does not wake or restore a cf-container runtime.
+3. The agent-session resume route (`apps/api/src/routes/workspaces/agent-sessions.ts` `POST /:id/agent-sessions/:sessionId/resume`) returns success immediately for `running`, and for `error`/`stopped` merely rewrites D1 to `running`; it does not wake or restore a cf-container runtime.
 4. `wakeFromSnapshot()` marks the container `running` before restore completes. A missing/corrupt snapshot can leave the Durable Object apparently running even though the fresh vm-agent has no `SessionHost`.
-5. The browser persists the user's optimistic message through the ProjectData WebSocket, then silently swallows a failed `/prompt` request. The transcript is safe, but the UI does not explain that the runtime failed or that a retry is required.
+5. The browser persists the user's optimistic message through the ProjectData WebSocket, then silently swallows a failed `/prompt` request (pre-fix `catch {}` in `apps/web/src/components/project-message-view/useConnectionRecovery.ts`). The transcript is safe, but the UI does not explain that the runtime failed or that a retry is required.
 
 ### First exact-head staging gate (failed, preserved as evidence)
 
@@ -78,10 +78,28 @@ The repair must build on PR #1562's runtime-neutral snapshot/restore boundary an
 - Local Worker/Miniflare remains an evidence gap: pinned `workerd` segfaults before test import, including unchanged Worker suites. CI and exact-head Cloudflare staging remain authoritative.
 - `quality:do-wall-time` reported three pre-existing staging alarm regressions (2.03x, 4.89x, and 7.10x) before this head was deployed. This is not counted as a pass; it must be rerun and correlated after exact-head staging.
 
+## Specialist Review Round (fourth head, 2026-07-21)
+
+Eight reviewers ran against the rebased head `365cd12e5`. constitution-validator and doc-sync-validator passed (their MEDIUM/LOW polish items were applied directly: broadened `TASK_LIVENESS_PROBE_TIMEOUT_MS` doc description, task-file citations, a direct `resolveRuntimeSettings` parsing test, and backlog `2026-07-21-remove-sandbox-env-fallbacks-from-container-runtime.md`). Six returned blocking findings; all CRITICAL/HIGH were fixed in this branch:
+
+- **Explicit-stop race (CRITICAL)**: `ensureAwake()`'s post-`beginUnexpectedRecovery` guard checked only `stopped`, so a user stop landing in the unlocked window could be overwritten and the container restarted. Guard now short-circuits on `stopping` too, and the three mid-wake terminal re-checks issue an idempotent `this.stop()` so a stop-crossed wake cannot leak a started container until `sleepAfter`.
+- **Restore-identity burn (CRITICAL, Go)**: `capturePreviousAgentSelection` cleared `PreviousAcpSessionID`/`PreviousAgentType` before the restore attempt could succeed; a transient failure permanently lost the LoadSession identity (rule 49 class). Identity is now consumed only on success; concurrent `RestoreAgent` calls are serialized by an in-progress selection guard; a post-spawn `establishACPSession` failure stops the orphaned agent process.
+- **Credential-bearing HOME snapshot (CRITICAL, pre-existing from PR #1562)**: the HOME tar uploaded `~/.claude/.credentials.json`, `~/.codex/auth.json`, `~/.config/gh`, `~/.ssh`, `~/.netrc`, `~/.npmrc`, `~/.aws` to R2. `shouldExcludeHomePath` now supports multi-segment and exact-file exclusions; harness transcript state under `.claude/`/`.codex/` is retained for LoadSession. Restore reinjects fresh credentials, so nothing depends on snapshotted secrets.
+- **Stale-generation callback regression (HIGH)**: a late `error`/`failed` callback from a superseded container could kill a freshly recovered session. Destructive transitions in the activity and task callbacks now reject callbacks whose token `iat` predates the row's recovery reconciliation by more than `INSTANT_STALE_CALLBACK_MARGIN_MS` (default 60000, fail-open on ambiguity; `restartCount` was investigated and rejected — it is an in-memory decaying counter, not a generation). Follow-up for non-destructive stale surfaces: `tasks/backlog/2026-07-21-extend-stale-instant-callback-guard-coverage.md`.
+- **Resume-route clobber (HIGH)**: after a successful container recovery the route re-fetches the session row and no longer overwrites the DO-written `error_message` (manual-retry disposition survives reloads); the deliberately wide dead-precheck gate is documented in-code.
+- **VM dead-detection regression (HIGH)**: the resumable-status short-circuit in `getTaskRuntimeLiveness` is now gated on `node_runtime === 'cf-container'`, and `recovery` is restored to the VM live set so a genuinely dead VM node stuck in `recovery` is conclusively reconciled again (regression tests cover both runtimes).
+- **Non-discriminating flagship tests (2× CRITICAL)**: the Miniflare config had no `VM_AGENT_CONTAINER` binding, so the stale-heartbeat test passed via the binding-unavailable defer; the real `Container` class cannot boot under vitest-pool-workers (`ctx.container` is undefined and the constructor throws), so a test-double DO now reuses the real `inspectStoredVmAgentContainerLifecycle` + classifiers via a wrapper `main`, with a discriminating sleeping/stopped pair and a combined three-actor test (real `ProjectData.alarm()` + real `recoverStuckTasks()` over one seeded state). Stuck-task tests now drive the cf-container branch through the real sweep entry point with explicit `node_runtime` rows.
+- **Recovery UI truthfulness (3× HIGH)**: a failed idle resume no longer strands "Agent is working..."; a later successful send clears the stale delivery-error banner; `RUNTIME_STOPPED` now flows into the existing terminated-session presentation (composer disabled) instead of inviting futile retries. Auto-resume and user sends are serialized by a re-entrancy guard + monotonic attempt token; the composer keeps its text on failed delivery; the waking banner shows elapsed time. Component tests now use production-shaped `ApiClientError` codes (including the previously unrendered `RUNTIME_REQUEST_INTERRUPTED`), and the mocked Playwright audit gained interrupted + stopped scenarios across mobile/desktop.
+- **Hot-path index (MEDIUM)**: additive migration `0097_tasks_workspace_id_index.sql` adds a partial `idx_tasks_workspace_id` for the recovery-exhaustion task lookup.
+- **Deferred with evidence (rule 42)**: per-request abort/cancellation across the DO-RPC boundary cannot use `AbortSignal` (regression proven by PR #1544); tracked in `tasks/backlog/2026-07-21-instant-container-request-timeout-cancellation.md`.
+
+Every fix carries a regression test that was verified to fail on the pre-fix code (discrimination checks recorded in the respective test suites).
+
 ## Lifecycle Contract
 
 ```text
 initial launch --success--> running
+# naming: "recovery-pending" below = DO lifecycleStatus `recovering` (+ recovery phase `pending`); D1 workspace rows use status `recovery`
 initial launch --failure--> error (terminal launch failure)
 
 running --idle handback + snapshot--> sleeping
@@ -139,7 +157,7 @@ Cloudflare stop metadata (`exit` versus `runtime_signal`, exit code, raw hook/er
 Local verification gaps are tracked explicitly: the pinned Miniflare/workerd runner segfaults before importing both the new Worker tests and an unchanged worker smoke test, and the live Durable Object wall-time gate currently reports two pre-existing staging alarm regressions. These are not treated as passing evidence. A checksum-verified temporary Go 1.25.12 toolchain now covers the Go tests locally.
 
 - [x] Run focused API/DO/route tests, web tests, vm-agent Go/vet/race checks, migration gates, lint, typecheck, full tests, and build. The Worker/Miniflare process still hits the recorded local `workerd` SIGSEGV before test import and remains for CI.
-- [ ] Run `$cloudflare-specialist`, `$go-specialist` if Go changes, `$security-auditor`, `$test-engineer`, `$ui-ux-specialist`, `$constitution-validator`, `$doc-sync-validator`, and mandatory `$task-completion-validator`; address blocking findings.
+- [x] Run `$cloudflare-specialist`, `$go-specialist` if Go changes, `$security-auditor`, `$test-engineer`, `$ui-ux-specialist`, `$constitution-validator`, `$doc-sync-validator`, and mandatory `$task-completion-validator`; address blocking findings. All eight ran 2026-07-21 (fourth head). Two passed outright; six returned findings — every CRITICAL/HIGH fixed in-branch (see "Specialist review round" below); MEDIUM deferrals are tracked backlog tasks per rule 42.
 - [ ] Deploy the exact branch head to staging after checking for deployment contention.
 - [ ] From a genuine UI-created Instant session, create unique HOME plus staged/unstaged/untracked Git markers and harness context; verify an ordinary idle wake restores all markers/context in the same chat.
 - [ ] Force a real runtime replacement while work is active; verify no ambiguous replay, clear manual retry, same-chat follow-up persistence, restored markers/context, reconciled task status, and cleanup using bounded waits tied to observable progress.

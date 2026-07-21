@@ -435,6 +435,14 @@ agentSessionRoutes.post(
     }
 
     const node = await getOwnedNode(db, workspace.nodeId, userId);
+    // Intentional WIDE gate: recovery must fire whenever EITHER the node or the
+    // session looks not-running in D1. These D1 prechecks can be stale — the
+    // container may have already died and been marked 'recovery'/'error' — so a
+    // narrower gate would let a dead-D1 precheck block the very recovery that
+    // heals it. The Durable Object owns the live container generation and
+    // reconciles D1 itself; over-triggering here is safe because the DO
+    // fast-paths an already-running container. Do NOT narrow this gate without
+    // re-checking the recovery contract.
     if (
       node.runtime === 'cf-container' &&
       (node.status !== 'running' || session.status !== 'running')
@@ -452,7 +460,37 @@ agentSessionRoutes.post(
               : 409;
         throw new AppError(statusCode, recovery.code, recovery.message);
       }
+
+      // Recovery succeeded. The Durable Object (persistRuntimeRecovered) has
+      // ALREADY reconciled the agent_sessions row in D1 for THIS request —
+      // including error_message: when the interrupted prompt needs manual retry
+      // it persists RUNTIME_REQUEST_INTERRUPTED_MESSAGE so reloads / other
+      // devices see "your message needs manual retry". The local `session`
+      // snapshot read before recovery is now stale. Re-fetch and return the
+      // DO-reconciled row; do NOT fall through to the status rewrite below
+      // (S4+CF3), which would clobber the DO-written status/error_message back
+      // to running / null.
+      const [recovered] = await db
+        .select()
+        .from(schema.agentSessions)
+        .where(eq(schema.agentSessions.id, session.id))
+        .limit(1);
+      return c.json(
+        toAgentSessionResponse(
+          recovered ?? {
+            ...session,
+            status: 'running',
+            stoppedAt: null,
+            suspendedAt: null,
+            errorMessage: null,
+            updatedAt: new Date().toISOString(),
+          }
+        )
+      );
     }
+
+    // Non cf-container, or an already-running cf-container session: fall through
+    // to the legacy/VM lifecycle rewrite below.
 
     // Already running -- idempotent
     if (session.status === 'running') {

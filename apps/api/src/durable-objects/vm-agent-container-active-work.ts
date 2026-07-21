@@ -26,6 +26,16 @@ export interface ActiveWorkRuntime {
 
 export const ACTIVE_WORK_KEY = 'activeWork';
 
+// Concurrency note: these read-check-write helpers on ACTIVE_WORK_KEY are
+// deliberately NOT serialized under the DO's lifecycleChain/wakeChain mutexes.
+// Active-work state is advisory keepalive bookkeeping (it only extends the
+// container's idle deadline), so a lost interleaving self-heals on the next
+// keepalive tick or prompt: the worst case is one extra/short renewal window,
+// never an incorrect lifecycle transition. Folding these under the lifecycle
+// mutex would needlessly serialize the frequent keepalive schedule against
+// stop/wake/recovery critical sections. The authoritative lifecycle writes
+// (lifecycleStatus, runtimeRecovery) remain mutex-protected in the DO.
+
 export async function startActiveWork(
   runtime: ActiveWorkRuntime,
   nodeId: string,

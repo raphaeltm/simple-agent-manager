@@ -1,5 +1,5 @@
 import { isTaskExecutionStep } from '@simple-agent-manager/shared';
-import { and, eq } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
@@ -20,6 +20,11 @@ import {
   isTaskStatus,
 } from '../../services/task-status';
 import { cleanupTerminalTaskResourcesOrThrow } from '../../services/task-terminal-cleanup';
+import {
+  callbackTokenIssuedAtMs,
+  getInstantStaleCallbackMarginMs,
+  isSupersededInstantCallback,
+} from '../_stale-callback-guard';
 import {
   computeBlockedForTask,
   setTaskStatus,
@@ -216,6 +221,55 @@ taskCallbackRoute.post('/:projectId/tasks/:taskId/status/callback', jsonValidato
     throw errors.conflict(
       `Invalid transition ${task.status} -> ${body.toStatus}. Allowed: ${getAllowedTaskTransitions(task.status).join(', ') || 'none'}`
     );
+  }
+
+  // Staleness guard (S2): reject a DESTRUCTIVE `failed` callback that provably
+  // originates from a superseded Instant (cf-container) generation. A dead
+  // container killed mid-rollout can POST `toStatus:'failed'` with a still-valid
+  // callback token AFTER the DO has recovered a NEW generation to running; that
+  // late callback would otherwise fail an already-recovered, healthy task. Use
+  // the workspace's most-recently-reconciled agent session `updated_at` (written
+  // by the DO recovery) as the completed-recovery marker.
+  if (body.toStatus === 'failed') {
+    const [guardRow] = await db
+      .select({
+        updatedAt: schema.agentSessions.updatedAt,
+        runtime: schema.nodes.runtime,
+      })
+      .from(schema.agentSessions)
+      .leftJoin(schema.workspaces, eq(schema.workspaces.id, schema.agentSessions.workspaceId))
+      .leftJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))
+      .where(eq(schema.agentSessions.workspaceId, task.workspaceId))
+      .orderBy(desc(schema.agentSessions.updatedAt))
+      .limit(1);
+    const tokenIssuedAtMs = callbackTokenIssuedAtMs(token);
+    const marginMs = getInstantStaleCallbackMarginMs(c.env);
+    if (
+      isSupersededInstantCallback({
+        runtime: guardRow?.runtime,
+        rowUpdatedAt: guardRow?.updatedAt,
+        tokenIssuedAtMs,
+        marginMs,
+      })
+    ) {
+      log.warn('task.rejected_stale_callback', {
+        projectId,
+        taskId,
+        workspaceId: task.workspaceId,
+        callerWorkspace: payload.workspace,
+        runtime: guardRow?.runtime ?? null,
+        rowUpdatedAt: guardRow?.updatedAt ?? null,
+        tokenIssuedAtMs,
+        marginMs,
+        fromStatus: task.status,
+        toStatus: body.toStatus,
+        action: 'rejected_stale_callback',
+      });
+      // 2xx: postTaskCallback is fire-and-forget (no retry) and logs non-2xx as
+      // an error, so return the unchanged task with 200 — no regression, no noise.
+      const blocked = await computeBlockedForTask(db, task.id);
+      return c.json(toTaskResponse(task, blocked));
+    }
   }
 
   const updatedTask = await setTaskStatus(db, task, body.toStatus, 'workspace_callback', payload.workspace, {

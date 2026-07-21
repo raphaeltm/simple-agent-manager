@@ -31,7 +31,10 @@ vi.mock('../../../src/services/jwt', () => ({
 }));
 
 import { VmAgentContainer } from '../../../src/durable-objects/vm-agent-container';
-import type { RuntimeRecoveryState } from '../../../src/durable-objects/vm-agent-container-recovery';
+import {
+  RUNTIME_RECOVERY_DEGRADED_MESSAGE,
+  type RuntimeRecoveryState,
+} from '../../../src/durable-objects/vm-agent-container-recovery';
 
 const launchConfig = {
   nodeId: 'node-1',
@@ -351,7 +354,214 @@ describe('VmAgentContainer snapshot recovery state machine', () => {
     expect(recoveryMocks.persistRecovered).not.toHaveBeenCalled();
     expect(values.get('lifecycleStatus')).toBe('stopping');
     expect(values.has('runtimeRecovery')).toBe(false);
+    // CF2: startRuntime() already launched a fresh container before the restore.
+    // The completed-block re-check must tear it down (2nd stop), not just return
+    // terminal — otherwise the just-stopped session leaks compute until sleepAfter.
+    // Pre-fix this was 1 (only stopForUser's stop).
+    expect(fake.stop).toHaveBeenCalledTimes(2);
   });
+});
+
+describe('VmAgentContainer wake concurrency and persistence', () => {
+  const stopForUser = (
+    VmAgentContainer.prototype as unknown as {
+      stopForUser: (this: unknown) => Promise<void>;
+    }
+  ).stopForUser;
+
+  it('CF1: does not re-arm recovery when an explicit stop lands right after beginUnexpectedRecovery', async () => {
+    const { fake, values } = makeRecoveryFake({ lifecycle: 'sleeping' });
+    const realBegin = privateContainer.beginUnexpectedRecovery;
+    // Land the stop in the EARLIER race window: after beginUnexpectedRecovery
+    // returns (recovery created, lifecycle 'recovering') but BEFORE ensureAwake's
+    // unlocked continuation reads the terminal guard and bumps the phase to
+    // 'waking'. beginUnexpectedRecovery and stopForUser share the lifecycleChain,
+    // so the stop serializes after begin releases the lock.
+    fake.beginUnexpectedRecovery = async function (this: unknown, input: unknown) {
+      const result = await realBegin.call(this, input);
+      await stopForUser.call(this);
+      return result;
+    };
+
+    const result = await callEnsureAwake(fake);
+
+    expect(result).toMatchObject({ ok: false, status: 'stopped', code: 'RUNTIME_STOPPED' });
+    // Pre-fix (guard only checked 'stopped') the continuation flipped to 'waking'
+    // and woke the just-stopped container. These assertions go red pre-fix.
+    expect(fake.startRuntime).not.toHaveBeenCalled();
+    expect(recoveryMocks.persistRecovered).not.toHaveBeenCalled();
+    expect(values.get('lifecycleStatus')).toBe('stopping');
+    expect(values.has('runtimeRecovery')).toBe(false);
+  });
+
+  it('T10: carries recovery.attempts 1->2 across persisted storage before exhausting', async () => {
+    const { fake, values } = makeRecoveryFake({
+      maxAttempts: 2,
+      restoreResponse: Response.json({ error: 'SNAPSHOT_NOT_FOUND' }, { status: 404 }),
+    });
+
+    // First follow-up during the outage: one bounded wake attempt, degraded but
+    // NOT yet exhausted.
+    const first = await callEnsureAwake(fake);
+    expect(first).toMatchObject({ ok: false, status: 'degraded' });
+    expect(values.get('runtimeRecovery')).toMatchObject({ phase: 'degraded', attempts: 1 });
+    expect(recoveryMocks.persistFailed).not.toHaveBeenCalled();
+
+    // Second follow-up reuses the persisted record: attempts 1 -> 2, and only now
+    // exhausts.
+    const second = await callEnsureAwake(fake);
+    expect(second).toMatchObject({ ok: false, status: 'degraded' });
+    expect(values.get('runtimeRecovery')).toMatchObject({ phase: 'exhausted', attempts: 2 });
+    expect(values.get('lifecycleStatus')).toBe('error');
+    expect(recoveryMocks.persistFailed).toHaveBeenCalledTimes(1);
+  });
+
+  it('T11: honors a pre-populated recovery record left by onStop without resetting it', async () => {
+    const { fake, values } = makeRecoveryFake({
+      lifecycle: 'recovering',
+      restoreResponse: Response.json({ error: 'SNAPSHOT_NOT_FOUND' }, { status: 404 }),
+      maxAttempts: 2,
+    });
+    // Shape onStop leaves behind: phase 'pending', trigger 'stop', a manual_retry
+    // disposition, attempts 0. ensureAwake must reuse it, not start fresh.
+    values.set('runtimeRecovery', {
+      version: 1,
+      phase: 'pending',
+      trigger: 'stop',
+      cause: { kind: 'container_stop', reason: 'runtime_signal', exitCode: 137 },
+      attempts: 0,
+      promptDisposition: 'manual_retry',
+      agentSessionId: 'agent-session-1',
+      startedAt: 1000,
+      updatedAt: 1000,
+    });
+
+    await callEnsureAwake(fake);
+
+    // beginUnexpectedRecovery (which would call persistRecovering) must NOT run —
+    // the existing trigger/cause/disposition/startedAt survive; only the wake
+    // bump advances attempts 0 -> 1.
+    expect(recoveryMocks.persistRecovering).not.toHaveBeenCalled();
+    expect(values.get('runtimeRecovery')).toMatchObject({
+      trigger: 'stop',
+      cause: { kind: 'container_stop', reason: 'runtime_signal', exitCode: 137 },
+      promptDisposition: 'manual_retry',
+      agentSessionId: 'agent-session-1',
+      startedAt: 1000,
+      attempts: 1,
+    });
+  });
+
+  it('S6: re-invoking an exhausted recovery returns degraded without re-running the D1 batch', async () => {
+    const { fake, values } = makeRecoveryFake({
+      maxAttempts: 1,
+      restoreResponse: Response.json({ error: 'SNAPSHOT_NOT_FOUND' }, { status: 404 }),
+    });
+
+    const first = await callEnsureAwake(fake);
+    expect(first).toMatchObject({ ok: false, status: 'degraded' });
+    expect(values.get('runtimeRecovery')).toMatchObject({ phase: 'exhausted' });
+    expect(recoveryMocks.persistFailed).toHaveBeenCalledTimes(1);
+
+    // Every later request hits an exhausted record. Pre-fix this re-ran
+    // exhaustRecovery() (a full D1 batch + persistRuntimeRecoveryFailed) each time.
+    const second = await callEnsureAwake(fake);
+    expect(second).toMatchObject({ ok: false, status: 'degraded', code: 'RUNTIME_RECOVERY_DEGRADED' });
+    expect(recoveryMocks.persistFailed).toHaveBeenCalledTimes(1);
+  });
+
+  it('T12: degrades (not 500s) when the recovery context loader throws mid-wake', async () => {
+    const { fake, values } = makeRecoveryFake({
+      restoreResponse: Response.json({ error: 'SNAPSHOT_NOT_FOUND' }, { status: 404 }),
+    });
+    // beginUnexpectedRecovery resolves the context; the wakeFromSnapshot reload
+    // then throws a D1 error. Pre-fix that escaped as an uncaught rejection (500).
+    recoveryMocks.loadContext
+      .mockReset()
+      .mockResolvedValueOnce(runtimeContext)
+      .mockRejectedValueOnce(new Error('D1 unavailable'));
+
+    const result = await callEnsureAwake(fake);
+
+    expect(result).toMatchObject({
+      ok: false,
+      status: 'degraded',
+      code: 'RUNTIME_RECOVERY_DEGRADED',
+      message: RUNTIME_RECOVERY_DEGRADED_MESSAGE,
+    });
+    expect(values.get('runtimeRecovery')).toMatchObject({
+      phase: 'degraded',
+      lastFailure: { kind: 'unexpected' },
+    });
+  });
+});
+
+describe('VmAgentContainer wake-path lifecycle status parity', () => {
+  // Parity contract: any lifecycleStatus the wake path can set as an intermediate
+  // state must never let a later unexpected onStop/onError START A SECOND recovery.
+  // onStop enforces this via its ignore-list; onError relies on
+  // beginUnexpectedRecovery's existing-record idempotency. vm-agent-container-
+  // lifecycle.ts is read-only, so these are literals mirrored from the wake path:
+  //   ensureAwake            -> 'waking'
+  //   wakeFromSnapshot       -> 'restoring'
+  //   beginUnexpectedRecovery-> 'recovering'
+  //   degradeRecovery        -> 'degraded'
+  // A NEW wake-path status added without preserving this guard fails these tests.
+  const WAKE_PATH_INTERMEDIATE_STATUSES = [
+    'recovering',
+    'waking',
+    'restoring',
+    'degraded',
+  ] as const;
+
+  const onStop = (
+    VmAgentContainer.prototype as unknown as {
+      onStop: (
+        this: unknown,
+        input: { exitCode: number; reason: 'exit' | 'runtime_signal' }
+      ) => Promise<void>;
+    }
+  ).onStop;
+  const onError = (
+    VmAgentContainer.prototype as unknown as {
+      onError: (this: unknown, error: unknown) => Promise<void>;
+    }
+  ).onError;
+
+  it.each(WAKE_PATH_INTERMEDIATE_STATUSES)(
+    'onStop ignores mid-wake status %s and starts no fresh recovery',
+    async (status) => {
+      const { fake, values } = makeRecoveryFake({ lifecycle: status });
+      // No pre-existing recovery: if onStop did NOT ignore this status it would
+      // call beginUnexpectedRecovery -> persistRecovering, which this asserts against.
+      await onStop.call(fake, { exitCode: 0, reason: 'runtime_signal' });
+      expect(recoveryMocks.persistRecovering).not.toHaveBeenCalled();
+      expect(values.get('lifecycleStatus')).toBe(status);
+    }
+  );
+
+  it.each(WAKE_PATH_INTERMEDIATE_STATUSES)(
+    'onError does not duplicate an in-flight recovery at mid-wake status %s',
+    async (status) => {
+      const { fake, values } = makeRecoveryFake({ lifecycle: status });
+      // Mid-wake there is always a recovery record; onError must reuse it, not
+      // start a second one (beginUnexpectedRecovery returns the existing record).
+      values.set('runtimeRecovery', {
+        version: 1,
+        phase: 'waking',
+        trigger: 'error',
+        cause: { kind: 'container_error', errorName: 'RuntimeError' },
+        attempts: 1,
+        promptDisposition: 'none',
+        agentSessionId: 'agent-session-1',
+        startedAt: 1,
+        updatedAt: 1,
+      });
+      await onError.call(fake, Object.assign(new Error('boom'), { name: 'RuntimeError' }));
+      expect(recoveryMocks.persistRecovering).not.toHaveBeenCalled();
+      expect(values.get('runtimeRecovery')).toMatchObject({ trigger: 'error', attempts: 1 });
+    }
+  );
 });
 
 describe('VmAgentContainer replacement classification', () => {

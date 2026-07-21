@@ -460,6 +460,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
         >
           <Spinner size="sm" />
           <span>Waking and restoring Instant session...</span>
+          {lc.resumeStartedAt != null && <ElapsedTime startedAt={lc.resumeStartedAt} />}
         </div>
       )}
 
