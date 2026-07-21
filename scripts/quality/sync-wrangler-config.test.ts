@@ -196,9 +196,15 @@ describe('sync wrangler config', () => {
   });
 
   it('requires a Cloudflare API token before checking tail worker status', async () => {
+    vi.stubEnv('CF_API_TOKEN', '');
+    vi.stubEnv('CLOUDFLARE_API_TOKEN', '');
+    const fetchMock = vi.fn().mockRejectedValue(new Error('network must not be reached'));
+    vi.stubGlobal('fetch', fetchMock);
+
     await expect(checkTailWorkerExists('account-id', 'tail-worker')).rejects.toThrow(
       'CF_API_TOKEN or CLOUDFLARE_API_TOKEN is required'
     );
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 

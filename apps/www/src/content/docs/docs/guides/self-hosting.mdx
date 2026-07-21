@@ -219,6 +219,12 @@ Before deploying the API Worker, the workflow reads its applied Durable Object m
 
 If migration state cannot be read or does not match the checked-in history, deployment stops before Wrangler runs rather than risking migration replay or namespace replacement.
 
+If deployment stops with a Durable Object migration-state error:
+
+- **Errors mentioning listing lag or a Worker "created moments ago" are transient.** The workflow already retries the state probe a few times (tune with the `DO_MIGRATION_STATE_PROBE_ATTEMPTS` and `DO_MIGRATION_STATE_PROBE_RETRY_DELAY_MS` GitHub repository variables); re-running the deployment is safe and resumes cleanly.
+- **"tag is not present in the checked-in history"** means `apps/api/wrangler.toml` lost migration entries that were already applied to your Worker — usually an upgrade merge that dropped fork-local `[[migrations]]` entries. Restore the missing entries so the deployed tag appears in the history, then redeploy.
+- **Never delete the API Worker to recover.** Deleting a Worker destroys every Durable Object namespace behind it — all chat sessions, messages, and task state. There is no undo.
+
 ## Verification
 
 After deployment completes:
