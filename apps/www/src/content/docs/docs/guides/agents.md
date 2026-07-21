@@ -92,6 +92,8 @@ You pick the mode when you connect an agent. The **SAM** platform proxy is never
 
 An **agent profile** bundles a connected agent, a model, and settings into a reusable configuration. Profiles are how you choose what runs: pick a profile from the chat input when you start a session, or attach one to a [trigger](/docs/guides/webhook-triggers/) for automated work. Create and manage profiles under a project's **Profiles** page.
 
+In a [shared project](/docs/guides/collaboration/), agent profiles (and skills, environment variables, secrets, and files) are project-scoped resources — any member can use profiles another member created. LLM cost still follows the running user's own key unless a shared project credential is attached.
+
 When work starts, the agent is resolved in this order:
 
 1. The profile you selected (or the trigger's profile)

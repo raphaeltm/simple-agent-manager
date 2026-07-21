@@ -100,22 +100,48 @@ From the user's perspective, **Stop** is the safe way to tear down compute witho
 
 Each public route gets a SAM-owned hostname such as
 `r1-web-3000-env.apps.example.com`. You can attach your own subdomain to that
-route from the deployment environment. SAM returns the exact CNAME target to
-create, verifies the hostname through DNS-over-HTTPS, and adds the custom
-hostname to the next signed deployment apply payload.
+route from the deployment environment's **Domains** tab. SAM shows the exact
+CNAME target to create, verifies the hostname through DNS-over-HTTPS, and — once
+verified — activates the custom hostname on the running app **without a full
+redeploy**.
 
-Custom domains in this first version are intentionally simple:
+To attach a domain:
 
-- Use a concrete subdomain such as `app.example.com`.
-- Create a CNAME from your subdomain to the SAM-owned route hostname shown by
-  the environment.
-- Run verification after the DNS record propagates.
-- Redeploy or reapply the release so the deployment node receives the custom
-  hostname and Caddy can provision TLS for it.
+1. Open the deployment environment and go to the **Domains** tab.
+2. Pick the public route you want to expose and add a concrete subdomain such as
+   `app.example.com` (apex/root domains are not supported in this version).
+3. Create a **CNAME** record from your subdomain to the SAM route hostname shown
+   in the panel. Use a **DNS only** record (no proxy) so verification can see the
+   real target.
+4. Click **Verify** after the DNS record propagates. Verification succeeds when
+   the custom hostname resolves to the SAM route hostname, or to the deployment
+   node IP for DNS providers that flatten CNAMEs to A records.
 
-SAM does not create or manage your DNS record. Verification succeeds when the
-custom hostname resolves to the SAM route hostname, or to the deployment node IP
-for DNS providers that flatten CNAMEs to A records.
+That's it — you do not need to republish the release. A successful verification
+queues a **route-only** activation to the deployment node, which reloads its
+router and provisions TLS for the new hostname automatically.
 
-Root/apex domains, wildcard domains, TXT-record ownership challenges, and
-on-demand TLS authorization are out of scope for this version.
+### Domain states
+
+The Domains tab shows a live status badge for each domain so you can tell where
+it is in the lifecycle:
+
+| State | Meaning |
+| --- | --- |
+| **Pending DNS** | Waiting for DNS to resolve to the route target before activation. |
+| **Activating** | DNS is verified and route activation is queued to the node. |
+| **Active** | The node is serving the hostname with TLS. |
+| **DNS recheck required** | The underlying route target changed; re-verify the record. |
+| **Route missing** | The route this domain was attached to no longer exists in the release. |
+| **DNS mismatch** | The record does not point at the expected route target. |
+| **Inactive** | The environment is stopped; the saved domain is preserved. |
+| **Deactivating** | The domain is being removed and the node is dropping the route. |
+
+Saved domains stay visible even when the environment is **stopped** or in an
+error state, so a stop/start cycle does not lose your DNS setup. Removing a
+domain queues a route-only deactivation and finalizes once the node has dropped
+the route.
+
+SAM does not create or manage your DNS record. Root/apex domains, wildcard
+domains, TXT-record ownership challenges, and on-demand TLS authorization are out
+of scope for this version.

@@ -9,16 +9,31 @@ This page summarizes recent changes that affect how people use SAM. Use it as a 
 
 | Change | What users notice | Where to use it |
 | --- | --- | --- |
+| Shared projects & roles | Invite teammates with a link, approve access requests, and share profiles, skills, and secrets with owner/admin/member roles. | Project **Settings → Access** |
+| Credential attribution | A **Credentials** indicator shows which shared work runs on personal keys versus project credentials. | Project navigation (shared projects only) |
 | GitLab repository workspaces | Projects can be connected to GitLab repositories, not only GitHub repositories. | Project creation and workspace launch flows |
 | Project Files | You can inspect a branch's file tree and diff without opening a VM. | Project **Files** tab |
 | Forkable, task-backed chats | Any chat can be forked, archived, and tracked with task lifecycle behavior. | Project chat sessions |
 | Focus Mode sidebars | Desktop users can collapse navigation and session sidebars for more room while chatting. | Project chat workspace |
 | GitHub event triggers | GitHub issues, comments, pull requests, and pushes can start SAM work through project triggers. | Project **Triggers** page |
 | Generic webhook triggers | Any external service can start SAM work by sending an authenticated JSON webhook. | Project **Triggers** page |
+| GCP for provisioning | Connect Google Cloud with Workload Identity Federation or a service-account JSON key to provision VMs. | **Settings → Connections** |
+| Deployment custom domains | Attach your own subdomain to a deployed app; SAM verifies DNS and activates the route without a full redeploy. | Deployment environment **Domains** tab |
 | First-run setup wizard | New self-hosted installs can configure platform integrations after deploy. | `/setup` on a fresh deployment |
 | Namespaced self-host domains | Multiple SAM installations can share one Cloudflare zone without hostname collisions. | Self-host deployment planning |
 | Default instant container runtime | New self-hosted deployments use Cloudflare Containers for instant sessions by default. | Self-host deployment and agent runtime selection |
 | Cleaner injected system context | SAM-injected bootstrap/context messages are collapsed so the chat reads like user-agent conversation. | Chat timeline |
+
+## Projects can be shared with a team
+
+A project is no longer single-player. Any member can create an invite link; recipients open it and **request access**; an owner or admin approves. Members then share the project's agent profiles, skills, environment variables, secrets, and files, and everyone's chat sessions appear in one list with a **my sessions / all sessions** filter.
+
+Two things make shared projects safe to adopt:
+
+- **Roles** (owner, admin, member) decide who can manage membership, while everyday work stays open to everyone.
+- **Credential attribution** — a **Credentials** indicator in the project navigation shows which shared resources still run on someone's personal keys, with a **Fix** link to attach a project-level credential instead.
+
+See the new [Collaboration & Shared Projects](/docs/guides/collaboration/) guide for the full flow, including ownership transfer and member offboarding.
 
 ## GitLab repositories can create workspaces
 
@@ -109,6 +124,12 @@ SAM self-hosting now derives a Cloudflare resource namespace from the base domai
 For a single installation, use the generated `RESOURCE_PREFIX` from the setup flow instead of inventing one. If you later run multiple installations in the same Cloudflare account and zone, each installation needs its own explicit namespace so app, API, workspace, port, VM, and deployment hostnames remain distinct.
 
 See [Self-Hosting Guide](/docs/guides/self-hosting/#step-1-choose-your-domain-and-cloudflare-account).
+
+## Deployed apps can use your own domain
+
+When SAM hosts an app deployment, each public route gets a SAM-owned hostname. You can now attach your own subdomain to that route from the deployment environment's **Domains** tab: SAM shows the exact CNAME target, verifies it over DNS-over-HTTPS, and then activates the custom hostname on the running app **without a full redeploy** — verification queues a route-only update and TLS is provisioned automatically.
+
+The Domains tab now shows each domain's live state (waiting for DNS, routing, serving, inactive, deactivating, or recheck-required), and saved domains stay visible even when the environment is stopped, so you don't lose your DNS setup across a stop/start. See [App Deployments → Custom domains](/docs/guides/app-deployments/#custom-domains).
 
 ## Instant sessions use Cloudflare Containers by default
 
