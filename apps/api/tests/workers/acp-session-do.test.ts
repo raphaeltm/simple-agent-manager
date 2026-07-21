@@ -19,7 +19,23 @@ import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
 import type { ProjectData } from '../../src/durable-objects/project-data';
+import { shouldDeferRuntimeHeartbeatTimeout } from '../../src/durable-objects/project-data/runtime-heartbeat-policy';
+import type { VmAgentContainerLifecycleStatus } from '../../src/durable-objects/vm-agent-container-lifecycle';
+import type { Env } from '../../src/env';
 import { seedNode, seedUser, seedWorkspace } from './helpers/seed-d1';
+import type { VmAgentContainerTestDouble } from './support/vm-agent-container-double';
+
+/** Seed the bound VM_AGENT_CONTAINER double's lifecycle status for a node. */
+function seedContainerLifecycle(
+  nodeId: string,
+  status: VmAgentContainerLifecycleStatus,
+): Promise<void> {
+  const ns = env.VM_AGENT_CONTAINER!;
+  const stub = ns.get(
+    ns.idFromName(nodeId.toLowerCase()),
+  ) as unknown as DurableObjectStub<VmAgentContainerTestDouble>;
+  return stub.__seedLifecycle(status);
+}
 
 function getStub(projectId: string): DurableObjectStub<ProjectData> {
   const id = env.PROJECT_DATA.idFromName(projectId);
@@ -225,9 +241,11 @@ describe('ACP Session Lifecycle (Spec 027)', () => {
     });
   });
 
-  describe('heartbeat timeout alarm', () => {
-    it('preserves a sleeping Instant session across repeated stale-heartbeat alarms', async () => {
-      const prefix = `acp-instant-sleep-${Date.now()}-${crypto.randomUUID()}`;
+  describe('heartbeat timeout alarm — Instant container lifecycle', () => {
+    // Seed a cf-container node + non-terminal workspace + a running ACP session
+    // whose heartbeat is stale, so the alarm's heartbeat-timeout path fires and
+    // the container-lifecycle policy decides preserve vs terminalize.
+    async function setupInstantSession(prefix: string) {
       const userId = `${prefix}-user`;
       const nodeId = `${prefix}-node`;
       const workspaceId = `${prefix}-workspace`;
@@ -239,6 +257,8 @@ describe('ACP Session Lifecycle (Spec 027)', () => {
       await env.DATABASE.prepare(`UPDATE nodes SET runtime = 'cf-container' WHERE id = ?`)
         .bind(nodeId)
         .run();
+      // Workspace stays non-terminal ('sleeping') so the policy does NOT
+      // short-circuit on workspace status and actually reaches the container RPC.
       await seedWorkspace(workspaceId, nodeId, userId, {
         status: 'sleeping',
         chatSessionId,
@@ -253,21 +273,70 @@ describe('ACP Session Lifecycle (Spec 027)', () => {
         actorId: nodeId,
         acpSdkSessionId: `${prefix}-sdk`,
       });
+      return { stub, acpSession, workspaceId, nodeId };
+    }
 
-      const nextAlarm = await runInDurableObject(stub, async (instance) => {
-        instance.ctx.storage.sql.exec(
+    function staleHeartbeat(
+      stub: DurableObjectStub<ProjectData>,
+      acpSessionId: string,
+      passes: number,
+    ) {
+      return runInDurableObject(stub, async (instance, state) => {
+        state.storage.sql.exec(
           `UPDATE acp_sessions SET last_heartbeat_at = ? WHERE id = ?`,
           Date.now() - 10 * 60 * 1000,
-          acpSession.id
+          acpSessionId,
         );
-        await instance.alarm();
-        await instance.alarm();
-        return instance.ctx.storage.getAlarm();
+        for (let i = 0; i < passes; i++) await instance.alarm();
+        return state.storage.getAlarm();
       });
+    }
 
+    it('preserves a sleeping Instant session across repeated stale-heartbeat alarms', async () => {
+      const prefix = `acp-instant-sleep-${Date.now()}-${crypto.randomUUID()}`;
+      const { stub, acpSession, workspaceId, nodeId } = await setupInstantSession(prefix);
+
+      // The real container is asleep (idle handback), not terminated.
+      await seedContainerLifecycle(nodeId, 'sleeping');
+
+      // Direct policy assertion proves the binding is wired and the REAL
+      // inspectLifecycle RPC + classifier ran — the reason is lifecycle-based,
+      // NOT the 'cf_container_lifecycle_binding_unavailable' short-circuit that
+      // masked this path when VM_AGENT_CONTAINER was unbound.
+      const decision = await shouldDeferRuntimeHeartbeatTimeout(env as unknown as Env, {
+        workspaceId,
+        nodeId,
+      });
+      expect(decision).toEqual({ defer: true, reason: 'cf_container_sleeping' });
+
+      const nextAlarm = await staleHeartbeat(stub, acpSession.id, 2);
+
+      // End-to-end: the session survives repeated alarms and stays scheduled.
       expect((await stub.getAcpSession(acpSession.id))?.status).toBe('running');
       expect(nextAlarm).not.toBeNull();
       expect(nextAlarm!).toBeGreaterThan(Date.now());
+    });
+
+    it('terminalizes an Instant session when the container lifecycle is terminal', async () => {
+      const prefix = `acp-instant-stopped-${Date.now()}-${crypto.randomUUID()}`;
+      const { stub, acpSession, workspaceId, nodeId } = await setupInstantSession(prefix);
+
+      // The real container is terminated ('stopped') — the classifier treats
+      // this as conclusively dead, so the heartbeat timeout must NOT be deferred.
+      await seedContainerLifecycle(nodeId, 'stopped');
+
+      const decision = await shouldDeferRuntimeHeartbeatTimeout(env as unknown as Env, {
+        workspaceId,
+        nodeId,
+      });
+      expect(decision).toEqual({ defer: false, reason: 'cf_container_stopped' });
+
+      await staleHeartbeat(stub, acpSession.id, 1);
+
+      // End-to-end: with a dead container the stale session is interrupted.
+      // This pairing is what makes the sleeping test discriminating — moving
+      // 'sleeping' into TERMINAL_LIFECYCLE_STATUSES would flip both outcomes.
+      expect((await stub.getAcpSession(acpSession.id))?.status).toBe('interrupted');
     });
   });
 

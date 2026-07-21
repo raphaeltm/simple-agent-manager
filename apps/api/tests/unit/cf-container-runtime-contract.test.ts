@@ -161,8 +161,14 @@ describe('cf-container runtime spike contracts', () => {
     const containerLifecycle = read('durable-objects/vm-agent-container-lifecycle.ts');
     const chatResolver = read('routes/chat-workspace-resolver.ts');
 
+    // Recovery-state-machine behavior (onStop ignoring 'recovering', the resume/
+    // ensureAwake wiring, and the RUNTIME_RECOVERY_DEGRADED_MESSAGE /
+    // RUNTIME_STOPPED_MESSAGE codes) is now exercised behaviorally in
+    // durable-objects/vm-agent-container-recovery.test.ts (wake concurrency,
+    // persistence, and lifecycle-status parity suites); those source-contract
+    // string assertions were removed here to avoid duplicate, non-behavioral
+    // coverage (rule 02). Structural-only checks (type unions, storage keys) stay.
     expect(containerDo).toContain('override async onStop');
-    expect(containerDo).toContain("status === 'recovering'");
     expect(containerDo).toContain('override async onError');
     expect(containerDo).toContain('override async onActivityExpired');
     expect(containerDo).toContain(
@@ -173,8 +179,6 @@ describe('cf-container runtime spike contracts', () => {
     );
     expect(containerLifecycle).toContain("| 'sleeping'");
     expect(containerDo).toContain("status === 'sleeping' ? 'idle' : 'error'");
-    expect(containerDo).toContain('return this.ensureAwake()');
-    expect(containerDo).toContain('RUNTIME_RECOVERY_DEGRADED_MESSAGE');
     expect(containerDo).toContain(
       "await this.ctx.storage.put('lifecycleStatus', 'launching' satisfies LifecycleStatus)"
     );
@@ -189,7 +193,6 @@ describe('cf-container runtime spike contracts', () => {
     );
     expect(chatResolver).toContain('inArray(schema.agentSessions.status, agentStatuses)');
     expect(chatResolver).not.toContain('The workspace container is asleep.');
-    expect(containerDo).toContain('RUNTIME_STOPPED_MESSAGE');
     expect(containerDo).toContain("await this.ctx.storage.put('launchConfig', config)");
     expect(containerDo).toContain('nodeCallbackToken: string');
     expect(containerDo).toContain('CALLBACK_TOKEN: secrets.nodeCallbackToken');

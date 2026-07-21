@@ -7,6 +7,24 @@ const RUNTIME_RECOVERY_CODES = new Set([
   'RUNTIME_STOPPED',
 ]);
 
+/**
+ * Terminal runtime code (HTTP 410): the Instant runtime is permanently stopped
+ * and the agent session can never be resumed. Callers must reflect termination
+ * in local session state (status → 'stopped') so the existing terminated
+ * presentation takes over — never surface a dismissible "retry" banner, which
+ * only invites endless futile retries against a dead runtime.
+ */
+export function isRuntimeStoppedError(error: unknown): boolean {
+  return error instanceof ApiClientError && error.code === 'RUNTIME_STOPPED';
+}
+
+/**
+ * Fallback shown when a follow-up could not be confirmed delivered and the error
+ * carries no recognized runtime-recovery code.
+ */
+export const DEFAULT_DELIVERY_ERROR_MESSAGE =
+  'Your message is saved, but delivery could not be confirmed. Check the transcript and partial output before deciding whether to send it again.';
+
 export function getRuntimeRecoveryMessage(error: unknown): string | null {
   if (!(error instanceof ApiClientError) || !RUNTIME_RECOVERY_CODES.has(error.code)) {
     return null;

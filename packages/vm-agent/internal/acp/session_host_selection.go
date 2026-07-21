@@ -25,6 +25,9 @@ func (h *SessionHost) selectAgent(ctx context.Context, agentType string, require
 	if !started {
 		return nil
 	}
+	// Release the in-progress guard once the selection resolves (success or
+	// failure), so a later legitimate selection is not blocked as a duplicate.
+	defer h.finishAgentSelection()
 
 	h.broadcastAgentStatus(StatusStarting, agentType, "")
 	h.reportLifecycle("info", "Agent selection started", map[string]interface{}{
@@ -61,6 +64,10 @@ func (h *SessionHost) selectAgent(ctx context.Context, agentType string, require
 	if err := h.startSelectedAgent(ctx, agentType, cred, settings, loadSessionID, requireLoadSession); err != nil {
 		return err
 	}
+	// Only now that the ACP session is established do we consume the one-shot
+	// reconnect/restore identity. A transient failure above leaves it intact so a
+	// retry on the cached SessionHost can still LoadSession-resume (rule 49).
+	h.consumePreviousSelectionOnSuccess()
 
 	h.reportLifecycle("info", "Agent ready", map[string]interface{}{
 		"agentType": agentType,
@@ -88,6 +95,15 @@ func (h *SessionHost) beginAgentSelection(agentType string) (previousAgentSelect
 			"sessionID", h.config.SessionID, "agentType", agentType, "status", h.status)
 		return previousAgentSelection{}, false
 	}
+	if h.selectionInProgress && h.agentType == agentType {
+		// A concurrent selection for the same agent is mid-flight. Its
+		// credential-fetch/install runs outside h.mu, so h.process is still nil
+		// and the guard above does not catch it. Treat this as an idempotent
+		// duplicate rather than spawning a second process for one session.
+		slog.Info("SessionHost: agent selection already in progress, skipping duplicate",
+			"sessionID", h.config.SessionID, "agentType", agentType, "status", h.status)
+		return previousAgentSelection{}, false
+	}
 
 	previous := h.capturePreviousAgentSelection()
 	if h.process != nil {
@@ -96,10 +112,16 @@ func (h *SessionHost) beginAgentSelection(agentType string) (previousAgentSelect
 	h.agentType = agentType
 	h.status = HostStarting
 	h.statusErr = ""
+	h.selectionInProgress = true
 	h.resetStderrBuffer()
 	return previous, true
 }
 
+// capturePreviousAgentSelection reads the reconnect/restore identity to attempt
+// LoadSession with. It intentionally does NOT clear h.config.Previous* — that is
+// deferred to consumePreviousSelectionOnSuccess so a transient failure before
+// establishACPSession leaves the identity intact for a retry (rule 49). Must
+// hold h.mu.
 func (h *SessionHost) capturePreviousAgentSelection() previousAgentSelection {
 	previous := previousAgentSelection{agentType: h.agentType}
 	if h.sessionID != "" {
@@ -107,13 +129,30 @@ func (h *SessionHost) capturePreviousAgentSelection() previousAgentSelection {
 	}
 	if previous.acpSessionID == "" && h.config.PreviousAcpSessionID != "" {
 		previous.acpSessionID = h.config.PreviousAcpSessionID
-		h.config.PreviousAcpSessionID = ""
 	}
 	if previous.agentType == "" && h.config.PreviousAgentType != "" {
 		previous.agentType = h.config.PreviousAgentType
-		h.config.PreviousAgentType = ""
 	}
 	return previous
+}
+
+// finishAgentSelection releases the in-progress guard set by beginAgentSelection.
+func (h *SessionHost) finishAgentSelection() {
+	h.mu.Lock()
+	h.selectionInProgress = false
+	h.mu.Unlock()
+}
+
+// consumePreviousSelectionOnSuccess clears the one-shot reconnect/restore
+// identity after a selection fully succeeds. Clearing is deferred to here (not
+// capture time) so a transient pre-establishACPSession failure does not
+// permanently strip the restore identity from a cached SessionHost — a retry
+// must still be able to LoadSession-resume (rule 49).
+func (h *SessionHost) consumePreviousSelectionOnSuccess() {
+	h.mu.Lock()
+	h.config.PreviousAcpSessionID = ""
+	h.config.PreviousAgentType = ""
+	h.mu.Unlock()
 }
 
 func (h *SessionHost) resetStderrBuffer() {
@@ -233,6 +272,13 @@ func (h *SessionHost) startSelectedAgent(ctx context.Context, agentType string, 
 	}
 	if err != nil {
 		message := err.Error()
+		// establishACPSession can fail AFTER the agent process spawned (e.g.
+		// LoadSession rejected while the process is still alive). Stop it here so
+		// a failed restore/selection does not leak an orphaned agent binary.
+		// stopCurrentAgentLocked clears h.process, so the already-running
+		// monitorProcessExit goroutine sees a replaced process and skips restart
+		// once it re-acquires h.mu.
+		h.stopCurrentAgentLocked()
 		h.status = HostError
 		h.statusErr = message
 		h.mu.Unlock()

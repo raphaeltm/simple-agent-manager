@@ -90,6 +90,7 @@ export interface UseSessionLifecycleResult {
   sendingFollowUp: boolean;
   uploading: boolean;
   isResuming: boolean;
+  resumeStartedAt: number | null;
   resumeError: string | null;
   clearResumeError: () => void;
   connectionState: ChatConnectionState;
@@ -488,20 +489,34 @@ export function useSessionLifecycle(
         );
       }
 
-      // For idle sessions, resume first then send the prompt
+      // For idle sessions, resume first then send the prompt. The composer is
+      // cleared only when delivery is confirmed (onDelivered); a failed resume
+      // or delivery resets the working state and keeps the typed text as the
+      // manual-retry affordance (onFailed).
       if (sessionState === 'idle' && session?.workspaceId && session?.agentSessionId) {
-        recovery.resumeAndSend(trimmed);
+        recovery.resumeAndSend(trimmed, {
+          onDelivered: () => {
+            setFollowUp('');
+          },
+          onFailed: () => {
+            setAgentActivity('idle');
+          },
+        });
       } else {
         // Forward prompt to the running agent via REST API
         try {
           await sendFollowUpPrompt(projectId, sessionId, trimmed);
+          // Delivery confirmed — clear any stale recovery banner and the composer.
+          recovery.clearResumeError();
+          setFollowUp('');
         } catch (err) {
+          // reportDeliveryError terminates the session on a terminal RUNTIME_STOPPED
+          // (composer disabled) or shows the recovery banner otherwise. Reset the
+          // working state and keep the composer text so the user can retry.
           recovery.reportDeliveryError(err);
           setAgentActivity('idle');
         }
       }
-
-      setFollowUp('');
     } finally {
       setSendingFollowUp(false);
     }
@@ -642,6 +657,7 @@ export function useSessionLifecycle(
     sendingFollowUp,
     uploading,
     isResuming: recovery.isResuming,
+    resumeStartedAt: recovery.resumeStartedAt,
     resumeError: recovery.resumeError,
     clearResumeError: recovery.clearResumeError,
     connectionState,

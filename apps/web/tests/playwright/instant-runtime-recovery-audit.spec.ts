@@ -8,7 +8,7 @@ const WORKSPACE_ID = 'workspace-instant-recovery-audit';
 const AGENT_SESSION_ID = 'agent-instant-recovery-audit';
 const NOW = Date.now();
 
-type RecoveryScenario = 'normal' | 'waking' | 'degraded';
+type RecoveryScenario = 'normal' | 'waking' | 'degraded' | 'interrupted' | 'stopped';
 
 const PROJECT = {
   id: PROJECT_ID,
@@ -171,6 +171,23 @@ async function setupMocks(page: Page, scenario: RecoveryScenario) {
             'A_very_long_unbroken_marker_name_that_must_wrap_without_pushing_the_Dismiss_button_off_screen_0123456789.',
         });
       }
+      if (scenario === 'interrupted') {
+        return respond(route, 409, {
+          error: 'RUNTIME_REQUEST_INTERRUPTED',
+          message:
+            'The request was interrupted before the agent confirmed it. Your message is saved — résumé 🚧 ' +
+            'An_extremely_long_unbroken_disposition_token_that_must_wrap_without_pushing_Dismiss_offscreen_0123456789. ' +
+            'Resend when you are ready.',
+        });
+      }
+      if (scenario === 'stopped') {
+        // HTTP 410 — terminal. The runtime is permanently stopped and can never
+        // be resumed; the client reflects this by terminating the session.
+        return respond(route, 410, {
+          error: 'RUNTIME_STOPPED',
+          message: 'The Instant runtime has stopped and cannot be resumed.',
+        });
+      }
       return respond(route, 200, { status: 'accepted', sessionId: AGENT_SESSION_ID });
     }
 
@@ -230,6 +247,44 @@ for (const theme of ['dark', 'light'] as const) {
       });
       expect(contentFitsAlert).toBe(true);
       await screenshot(page, `instant-recovery-degraded-long-special-${theme}`);
+      await assertNoOverflow(page);
+    });
+
+    test('interrupted delivery shows a dismissible manual-retry banner that wraps', async ({
+      page,
+    }) => {
+      await setupMocks(page, 'interrupted');
+      await openConversation(page);
+      await sendFollowUp(page, 'Resend after the interruption.');
+      const recoveryAlert = page.getByRole('alert').filter({ hasText: 'was interrupted' });
+      await expect(recoveryAlert).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Dismiss' })).toBeVisible();
+      await expect(page.getByText(/Resend when you are ready\./)).toBeVisible();
+      // The long unbroken disposition token must wrap without pushing Dismiss off-screen.
+      const contentFitsAlert = await recoveryAlert.evaluate((alert) => {
+        const bounds = alert.getBoundingClientRect();
+        const childrenFit = Array.from(alert.children).every((child) => {
+          const childBounds = child.getBoundingClientRect();
+          return childBounds.left >= bounds.left - 1 && childBounds.right <= bounds.right + 1;
+        });
+        return childrenFit && alert.scrollWidth <= alert.clientWidth + 1;
+      });
+      expect(contentFitsAlert).toBe(true);
+      await screenshot(page, `instant-recovery-interrupted-${theme}`);
+      await assertNoOverflow(page);
+    });
+
+    test('terminal stop replaces the composer with the ended-session state', async ({ page }) => {
+      await setupMocks(page, 'stopped');
+      await openConversation(page);
+      await sendFollowUp(page, 'Are you still running?');
+      // The existing terminated presentation takes over…
+      await expect(page.getByText('This session has ended.')).toBeVisible();
+      // …the composer is gone (disabled), so no futile retries…
+      await expect(page.getByPlaceholder(/send a message/i)).toHaveCount(0);
+      // …and there is no dismissible retry banner.
+      await expect(page.getByRole('button', { name: 'Dismiss' })).toHaveCount(0);
+      await screenshot(page, `instant-recovery-stopped-${theme}`);
       await assertNoOverflow(page);
     });
   });

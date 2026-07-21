@@ -233,6 +233,18 @@ export async function fetchNodeAgent(
   containerUrl.hostname = 'localhost';
   containerUrl.port = String(vmAgentPort);
 
+  // Known limitation (tracked: tasks/backlog/2026-07-21-instant-container-request-timeout-cancellation.md):
+  // the loser of this race is NOT cancelled. The container fetch is a
+  // VmAgentContainer DO RPC (fetchVmAgentContainer -> stub.proxyHttp), and an
+  // AbortSignal cannot be wired to it — passing a signal into the container node
+  // fetch is a proven regression (SPIKE PR #1544 "avoid abort signal in container
+  // node fetch"), which is exactly why requestInitWithoutSignal strips it. So on
+  // timeout the DO RPC keeps running and may still succeed, yet we mark the
+  // runtime interrupted below. That is over-eager for a slow-but-healthy request.
+  // Genuine cancellation requires the per-request timeout to live INSIDE
+  // proxyHttp, wrapping this.containerFetch (a real fetch that honors signals)
+  // with an AbortController — which needs the budget plumbed through
+  // fetchVmAgentContainer. Deferred to the tracked backlog task.
   let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
   try {
     const response = await Promise.race([

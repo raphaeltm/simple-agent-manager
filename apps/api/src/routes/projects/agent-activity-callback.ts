@@ -13,6 +13,11 @@ import { verifyCallbackToken } from '../../services/jwt';
 import { hibernateAgentSessionOnNode } from '../../services/node-agent';
 import * as projectDataService from '../../services/project-data';
 import { markVmAgentContainerActiveWorkEndedBestEffort } from '../../services/vm-agent-container';
+import {
+  callbackTokenIssuedAtMs,
+  getInstantStaleCallbackMarginMs,
+  isSupersededInstantCallback,
+} from '../_stale-callback-guard';
 
 /**
  * Agent activity callback route — mounted BEFORE projectsRoutes in index.ts
@@ -86,6 +91,53 @@ agentActivityCallbackRoute.post(
         action: 'rejected',
       });
       throw errors.forbidden('Node identity verification failed');
+    }
+
+    // Staleness guard (S2): reject a DESTRUCTIVE `error` callback that provably
+    // originates from a superseded Instant (cf-container) generation. A mid-turn
+    // rollout can make a dead container fire `reportActivity("error")` (retried
+    // with backoff) with a still-valid callback token AFTER the DO has recovered
+    // a NEW container generation to running under the same nodeId. Processing it
+    // would regress the freshly recovered, healthy session to error/failed.
+    // Short-circuit BEFORE the activity mirror + destructive transition + active-
+    // work-ended, so nothing touches the live recovered generation.
+    if (body.activity === 'error') {
+      const guardDb = drizzle(c.env.DATABASE, { schema });
+      const guardRow = await guardDb
+        .select({
+          updatedAt: schema.agentSessions.updatedAt,
+          runtime: schema.nodes.runtime,
+        })
+        .from(schema.agentSessions)
+        .leftJoin(schema.workspaces, eq(schema.workspaces.id, schema.agentSessions.workspaceId))
+        .leftJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))
+        .where(eq(schema.agentSessions.id, sessionId))
+        .get();
+      const tokenIssuedAtMs = callbackTokenIssuedAtMs(token);
+      const marginMs = getInstantStaleCallbackMarginMs(c.env);
+      if (
+        isSupersededInstantCallback({
+          runtime: guardRow?.runtime,
+          rowUpdatedAt: guardRow?.updatedAt,
+          tokenIssuedAtMs,
+          marginMs,
+        })
+      ) {
+        log.warn('acp_activity.rejected_stale_callback', {
+          projectId,
+          sessionId,
+          nodeId: body.nodeId,
+          runtime: guardRow?.runtime ?? null,
+          rowUpdatedAt: guardRow?.updatedAt ?? null,
+          tokenIssuedAtMs,
+          marginMs,
+          reportedActivity: body.activity,
+          action: 'rejected_stale_callback',
+        });
+        // 2xx: the vm-agent activity client retries only on 5xx, so 204 stops
+        // retries without error-log noise. The superseded generation moves on.
+        return c.body(null, 204);
+      }
     }
 
     await projectDataService.reportAcpSessionActivity(c.env, projectId, sessionId, body.activity, {

@@ -224,9 +224,11 @@ func (s *Server) hibernateSessionSnapshot(ctx context.Context, runtime *Workspac
 	if manifest.AcpSessionID != "" && manifest.AgentType == "" {
 		manifest.AgentType = strings.TrimSpace(agentType)
 	}
+	agentContextSkipped := false
 	if manifest.AcpSessionID == "" || manifest.AgentType == "" {
 		manifest.AcpSessionID = ""
 		manifest.AgentType = ""
+		agentContextSkipped = true
 		manifest.Skipped = append(manifest.Skipped, snapshotSkippedEntry{
 			Path:   "agent-context",
 			Reason: "resumable agent session identity unavailable",
@@ -276,6 +278,13 @@ func (s *Server) hibernateSessionSnapshot(ctx context.Context, runtime *Workspac
 			manifest.Degradation = "home-skipped"
 			manifest.Status = "degraded"
 		}
+	}
+	if agentContextSkipped && manifest.Degradation == "none" {
+		// Both artifacts were captured but the snapshot has no resumable harness
+		// identity. Status flips to degraded below; a "none" degradation label
+		// alongside that would be misleading, so record a distinct reason. A more
+		// severe artifact-based degradation, if set above, takes precedence.
+		manifest.Degradation = "agent-context-skipped"
 	}
 	if len(manifest.Skipped) > 0 && manifest.Status == "available" {
 		manifest.Status = "degraded"
@@ -334,9 +343,15 @@ func (s *Server) restoreSessionSnapshot(ctx context.Context, runtime *WorkspaceR
 		// skipped it, so the restored agent's output had no reporter to enqueue
 		// to and chat replies were silently dropped after a wake.
 		s.primeRestoredMessageReporter(runtime, chatSessionID)
-		session, _, createErr := s.agentSessions.Create(runtime.ID, sessionID, "Restored session", "restore:"+sessionID)
-		if createErr != nil {
-			return nil, fmt.Errorf("recreate restored agent session: %w", createErr)
+		if _, _, createErr := s.agentSessions.Create(runtime.ID, sessionID, "Restored session", "restore:"+sessionID); createErr != nil {
+			// A concurrent path (e.g. a browser WebSocket reconnect in the freshly
+			// woken container) may have already registered this session under a
+			// different idempotency key, so Create reports "already exists". The
+			// session ID is the canonical identity, so an existing row IS the
+			// restore target: hydrate it below instead of failing a valid restore.
+			if _, exists := s.agentSessions.Get(runtime.ID, sessionID); !exists {
+				return nil, fmt.Errorf("recreate restored agent session: %w", createErr)
+			}
 		}
 		if updateErr := s.agentSessions.UpdateAcpSessionID(runtime.ID, sessionID, acpSessionID, savedAgentType); updateErr != nil {
 			return nil, fmt.Errorf("hydrate restored agent session: %w", updateErr)

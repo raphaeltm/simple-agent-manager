@@ -433,7 +433,29 @@ export class VmAgentContainer extends Container<Env> {
         status = await this.ctx.storage.get<LifecycleStatus>('lifecycleStatus');
       }
 
-      if (!recovery || status === 'stopped') {
+      // A concurrent stopForUser()/destroyForUser() runs on the same
+      // lifecycleChain as beginUnexpectedRecovery above, so an explicit stop can
+      // land between beginUnexpectedRecovery returning and this unlocked
+      // continuation — flipping lifecycleStatus to 'stopping' and deleting the
+      // recovery record. 'stopping' is terminal exactly like 'stopped'; both must
+      // short-circuit here so we never re-arm recovery or wake a container the
+      // user just stopped ("explicit stop is terminal, never recover").
+      if (status === 'stopping' || status === 'stopped') {
+        return stoppedRecoveryResult();
+      }
+      if (!recovery) {
+        return {
+          ok: false,
+          status: 'degraded',
+          code: 'RUNTIME_RECOVERY_DEGRADED',
+          message: RUNTIME_RECOVERY_DEGRADED_MESSAGE,
+        } satisfies VmAgentContainerRecoveryResult;
+      }
+
+      // Once recovery is exhausted, exhaustRecovery() has already reconciled D1
+      // and set lifecycleStatus 'error'. Return the same sanitized degraded result
+      // without re-running the full reconciliation batch on every later request.
+      if (recovery.phase === 'exhausted') {
         return {
           ok: false,
           status: 'degraded',
@@ -534,10 +556,23 @@ export class VmAgentContainer extends Container<Env> {
     const config = await this.ctx.storage.get<VmAgentContainerLaunchConfig>('launchConfig');
     if (!config) return this.degradeRecovery(recovery, 'launch');
 
-    const context = await loadRuntimeRecoveryContext(this.env, {
-      workspaceId: config.workspaceId,
-      preferredAgentSessionId: recovery.agentSessionId,
-    });
+    // loadRuntimeRecoveryContext reads D1; a query failure must degrade through the
+    // sanitized recovery path, not escape as an uncaught 500. It sits outside the
+    // restore try below, so guard it explicitly here.
+    let context: Awaited<ReturnType<typeof loadRuntimeRecoveryContext>>;
+    try {
+      context = await loadRuntimeRecoveryContext(this.env, {
+        workspaceId: config.workspaceId,
+        preferredAgentSessionId: recovery.agentSessionId,
+      });
+    } catch (error) {
+      log.warn('vm_agent_container_recovery_context_failed', {
+        nodeId: config.nodeId,
+        workspaceId: config.workspaceId,
+        errorName: error instanceof Error ? error.name : 'unknown',
+      });
+      return this.degradeRecovery(recovery, 'unexpected');
+    }
     if (!context) return this.degradeRecovery(recovery, 'unexpected');
     const target = toRuntimeRecoveryTarget(config, context);
 
@@ -610,6 +645,11 @@ export class VmAgentContainer extends Container<Env> {
         return true;
       });
       if (!completed) {
+        // An explicit stop crossed the restore after startRuntime() already
+        // launched a fresh container. Tear it down so the just-stopped session
+        // does not leak compute until sleepAfter. this.stop() is idempotent/safe
+        // if stopForUser() already issued it.
+        await this.stop().catch(() => undefined);
         return stoppedRecoveryResult();
       }
       log.info('vm_agent_container_recovery_completed', {
@@ -649,7 +689,14 @@ export class VmAgentContainer extends Container<Env> {
       await this.ctx.storage.put('lifecycleStatus', 'degraded' satisfies LifecycleStatus);
       return true;
     });
-    if (!applied) return stoppedRecoveryResult();
+    if (!applied) {
+      // A stop crossed the wake after startRuntime() launched a container (the
+      // restore_http / restore_status / restore-catch degrade calls all run
+      // post-launch). Tear it down before returning terminal. Idempotent/safe if
+      // stopForUser() already stopped it.
+      await this.stop().catch(() => undefined);
+      return stoppedRecoveryResult();
+    }
     await this.stop().catch(() => undefined);
 
     if (degraded.attempts >= this.getRuntimeSettings().recoveryMaxAttempts) {
@@ -685,7 +732,13 @@ export class VmAgentContainer extends Container<Env> {
       if (target) await persistRuntimeRecoveryFailed(this.env, target);
       return true;
     });
-    if (!applied) return stoppedRecoveryResult();
+    if (!applied) {
+      // A stop crossed exhaustion. If a fresh container was launched earlier in
+      // this wake, tear it down before returning terminal. Idempotent/safe if
+      // stopForUser() already stopped it.
+      await this.stop().catch(() => undefined);
+      return stoppedRecoveryResult();
+    }
     return {
       ok: false,
       status: 'degraded',

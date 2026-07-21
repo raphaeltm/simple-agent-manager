@@ -198,7 +198,17 @@ export interface TaskReconciliationDiagnostics {
   };
 }
 
-const LIVE_WORKSPACE_STATUSES = new Set(['running']);
+// 'running' is always a live-candidate. 'recovery' is a live-candidate ONLY for
+// VM runtimes: the VM /ready callback path transiently marks a workspace
+// 'recovery' while the agent reconnects, and such workspaces must still fall
+// through to the node-heartbeat staleness + ACP-session liveness checks below
+// (pre-PR behavior). For cf-container (Instant) runtimes, 'recovery'/'sleeping'
+// are instead handled by the resumable short-circuit, which defers to the
+// authoritative DO lifecycle probe.
+const LIVE_WORKSPACE_STATUSES = new Set(['running', 'recovery']);
+// Resumable statuses short-circuit to an inconclusive result ONLY for
+// cf-container runtimes. Gating on node_runtime keeps VM 'recovery'/'sleeping'
+// workspaces on a dead node conclusively reconcilable instead of stranding them.
 const RESUMABLE_WORKSPACE_STATUSES = new Set(['sleeping', 'recovery']);
 const ACTIVE_ACP_STATUSES = new Set(['assigned', 'running']);
 
@@ -446,7 +456,7 @@ export async function getTaskRuntimeLiveness(
     }>();
 
   if (!row) return dead('workspace_missing', null, null);
-  if (RESUMABLE_WORKSPACE_STATUSES.has(row.workspace_status)) {
+  if (row.node_runtime === 'cf-container' && RESUMABLE_WORKSPACE_STATUSES.has(row.workspace_status)) {
     return {
       live: false,
       conclusive: false,

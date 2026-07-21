@@ -94,3 +94,33 @@ describe('VmAgentContainer.launch env passthrough', () => {
     expect(envVars.NODE_ROLE).toBe('standalone');
   });
 });
+
+function storagePutMock(fake: unknown): ReturnType<typeof vi.fn> {
+  return (fake as { ctx: { storage: { put: ReturnType<typeof vi.fn> } } }).ctx.storage.put;
+}
+
+describe('VmAgentContainer.launch lifecycle status', () => {
+  it('T3: marks lifecycleStatus running after startRuntime succeeds', async () => {
+    const { fake, startAndWaitForPorts } = makeFake({});
+
+    await callLaunch(fake);
+
+    expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
+    const put = storagePutMock(fake);
+    expect(put).toHaveBeenCalledWith('lifecycleStatus', 'launching');
+    expect(put).toHaveBeenCalledWith('lifecycleStatus', 'running');
+    expect(put).not.toHaveBeenCalledWith('lifecycleStatus', 'error');
+  });
+
+  it('T3: marks lifecycleStatus error and rethrows when startRuntime fails', async () => {
+    const { fake, startAndWaitForPorts } = makeFake({});
+    const boom = Object.assign(new Error('port ready timeout'), { name: 'PortReadyError' });
+    startAndWaitForPorts.mockRejectedValueOnce(boom);
+
+    await expect(callLaunch(fake)).rejects.toBe(boom);
+
+    const put = storagePutMock(fake);
+    expect(put).toHaveBeenCalledWith('lifecycleStatus', 'error');
+    expect(put).not.toHaveBeenCalledWith('lifecycleStatus', 'running');
+  });
+});

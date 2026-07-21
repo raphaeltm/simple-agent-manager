@@ -221,6 +221,12 @@ type SessionHost struct {
 	agentSupportsLoadSession bool
 	status                   SessionHostStatus
 	statusErr                string
+	// selectionInProgress is set for the duration of a selectAgent call (from
+	// beginAgentSelection until selectAgent returns). It guards the fresh-host
+	// window where h.process is still nil during the multi-second
+	// credential-fetch/install phase, so two concurrent selections for the same
+	// agent cannot double-spawn a process for one session.
+	selectionInProgress bool
 	// intentionalPromptCancelProcessStop suppresses rapid-exit crash handling
 	// when a user cancel intentionally terminates an agent that lacks native
 	// session/cancel support.

@@ -72,10 +72,28 @@ function mockPreparedStatement(results: unknown[] = [], changes = 1) {
   };
 }
 
+/**
+ * Wire a mocked env.VM_AGENT_CONTAINER namespace whose stub.inspectLifecycle()
+ * returns the given inspection (or a never-resolving promise for the timeout
+ * case). Enables cf-container liveness-probe coverage through the real sweep.
+ */
+function containerBinding(
+  inspectLifecycle: ReturnType<typeof vi.fn>
+): Pick<Env, 'CF_CONTAINER_ENABLED' | 'VM_AGENT_CONTAINER'> {
+  return {
+    CF_CONTAINER_ENABLED: 'true',
+    VM_AGENT_CONTAINER: {
+      idFromName: vi.fn().mockReturnValue('do-id'),
+      get: vi.fn().mockReturnValue({ inspectLifecycle }),
+    } as unknown as Env['VM_AGENT_CONTAINER'],
+  };
+}
+
 function createMockEnv(
   prepareResponses: Map<string, { results: unknown[]; changes?: number }> = new Map(),
   envOverrides: Partial<Record<string, string>> = {},
-  taskRunnerStatus: unknown | Error = null
+  taskRunnerStatus: unknown | Error = null,
+  containerLifecycle?: ReturnType<typeof vi.fn>
 ): Env {
   const mockDb = {
     prepare: vi.fn((sql: string) => {
@@ -119,6 +137,7 @@ function createMockEnv(
     TASK_STUCK_DELEGATED_TIMEOUT_MS: '1860000', // 31 min
     NODE_HEARTBEAT_STALE_SECONDS: '180', // 3 min
     TASK_RUNNER: mockTaskRunnerDO,
+    ...(containerLifecycle ? containerBinding(containerLifecycle) : {}),
     ...envOverrides,
   } as unknown as Env;
 }
@@ -1064,6 +1083,8 @@ describe('recoverStuckTasks', () => {
                 node_status: workspaceStatus,
                 health_status: 'unhealthy',
                 last_heartbeat_at: tenMinutesAgo,
+                // Explicit: the resumable short-circuit is gated on cf-container.
+                node_runtime: 'cf-container',
               },
             ],
           },
@@ -1334,6 +1355,220 @@ describe('recoverStuckTasks', () => {
       expect(String(prepare.mock.calls[1]?.[0])).toContain(
         '(updated_at < ? OR (updated_at = ? AND id <= ?))'
       );
+    });
+  });
+
+  describe('runtime-aware resumable gating (V1)', () => {
+    // A VM (non-container) workspace stuck in 'recovery' on a dead node must NOT
+    // be treated as resumable — 'recovery' is a legit VM /ready-callback status,
+    // and pre-PR such rows fell through to the node-heartbeat staleness check.
+    // The resumable short-circuit is gated on node_runtime === 'cf-container'.
+    it('conclusively reconciles a VM recovery workspace on a dead node', async () => {
+      const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+      const responses = new Map<string, { results: unknown[]; changes?: number }>([
+        [
+          "status IN ('queued', 'delegated', 'in_progress')",
+          {
+            results: [
+              {
+                id: 'task-vm-recovery',
+                project_id: 'proj-vm',
+                user_id: 'user-vm',
+                status: 'in_progress',
+                execution_step: 'running',
+                updated_at: tenMinutesAgo,
+                started_at: tenMinutesAgo,
+                workspace_id: 'ws-vm',
+                auto_provisioned_node_id: 'node-vm',
+              },
+            ],
+          },
+        ],
+        [
+          'w.chat_session_id',
+          {
+            results: [
+              {
+                workspace_status: 'recovery',
+                chat_session_id: 'chat-vm',
+                node_id: 'node-vm',
+                node_status: 'error',
+                health_status: 'unhealthy',
+                last_heartbeat_at: tenMinutesAgo, // stale
+                node_runtime: 'vm',
+              },
+            ],
+          },
+        ],
+        [
+          'node_id, status FROM workspaces',
+          { results: [{ id: 'ws-vm', node_id: 'node-vm', status: 'recovery' }] },
+        ],
+        [
+          'status, health_status FROM nodes',
+          { results: [{ id: 'node-vm', status: 'error', health_status: 'unhealthy' }] },
+        ],
+        ["UPDATE tasks SET status = 'failed'", { results: [], changes: 1 }],
+      ]);
+      const env = createMockEnv(responses, { TASK_DO_MISMATCH_GRACE_MS: '60000' });
+
+      const result = await recoverStuckTasks(env);
+
+      expect(result.failedInProgress).toBe(1);
+      expect(result.deadRuntimeReconciled).toBe(1);
+      // Reason proves it "fell through to node-heartbeat staleness" (node_not_live),
+      // not a premature workspace_recovery classification.
+      expect(syncTriggerExecutionMock).toHaveBeenCalledWith(
+        env.DATABASE,
+        'task-vm-recovery',
+        'failed',
+        expect.stringContaining('node_not_live')
+      );
+    });
+  });
+
+  describe('cf-container lifecycle probe through the real sweep (T2)', () => {
+    function cfContainerResponses(workspaceStatus = 'running') {
+      const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+      return new Map<string, { results: unknown[]; changes?: number }>([
+        [
+          "status IN ('queued', 'delegated', 'in_progress')",
+          {
+            results: [
+              {
+                id: 'task-instant',
+                project_id: 'proj-instant',
+                user_id: 'user-instant',
+                status: 'in_progress',
+                execution_step: 'running',
+                updated_at: tenMinutesAgo,
+                started_at: tenMinutesAgo,
+                workspace_id: 'ws-instant',
+                auto_provisioned_node_id: 'node-instant',
+              },
+            ],
+          },
+        ],
+        [
+          'w.chat_session_id',
+          {
+            results: [
+              {
+                workspace_status: workspaceStatus,
+                chat_session_id: 'chat-instant',
+                node_id: 'node-instant',
+                node_status: 'running',
+                health_status: 'healthy',
+                last_heartbeat_at: tenMinutesAgo,
+                node_runtime: 'cf-container',
+              },
+            ],
+          },
+        ],
+        [
+          'node_id, status FROM workspaces',
+          { results: [{ id: 'ws-instant', node_id: 'node-instant', status: workspaceStatus }] },
+        ],
+        [
+          'status, health_status FROM nodes',
+          { results: [{ id: 'node-instant', status: 'running', health_status: 'healthy' }] },
+        ],
+        ["UPDATE tasks SET status = 'failed'", { results: [], changes: 1 }],
+      ]);
+    }
+
+    function inspection(status: string, activeWorkStatus: string | null) {
+      return vi.fn().mockResolvedValue({
+        status,
+        recoveryPhase: null,
+        recoveryTrigger: null,
+        activeWorkStatus,
+      });
+    }
+
+    it('(a) preserves a live container with active work as conclusively live', async () => {
+      const env = createMockEnv(
+        cfContainerResponses(),
+        { TASK_DO_MISMATCH_GRACE_MS: '60000' },
+        null,
+        inspection('running', 'active')
+      );
+
+      const result = await recoverStuckTasks(env);
+
+      expect(result.failedInProgress).toBe(0);
+      expect(result.deadRuntimeReconciled).toBe(0);
+    });
+
+    it.each(['sleeping', 'recovering'] as const)(
+      '(b) preserves a %s container with no active work as inconclusive',
+      async (lifecycleStatus) => {
+        const env = createMockEnv(
+          cfContainerResponses(),
+          { TASK_DO_MISMATCH_GRACE_MS: '60000' },
+          null,
+          inspection(lifecycleStatus, null)
+        );
+
+        const result = await recoverStuckTasks(env);
+
+        // Discriminating: if 'sleeping'/'recovering' were terminal in
+        // TERMINAL_LIFECYCLE_STATUSES, classify() would return conclusive dead and
+        // this would reconcile (failedInProgress === 1).
+        expect(result.failedInProgress).toBe(0);
+        expect(result.deadRuntimeReconciled).toBe(0);
+      }
+    );
+
+    it.each(['stopped', 'expired', 'error'] as const)(
+      '(c) reconciles a %s container as conclusively dead',
+      async (lifecycleStatus) => {
+        const env = createMockEnv(
+          cfContainerResponses(),
+          { TASK_DO_MISMATCH_GRACE_MS: '60000' },
+          null,
+          inspection(lifecycleStatus, null)
+        );
+
+        const result = await recoverStuckTasks(env);
+
+        expect(result.failedInProgress).toBe(1);
+        expect(result.deadRuntimeReconciled).toBe(1);
+        expect(syncTriggerExecutionMock).toHaveBeenCalledWith(
+          env.DATABASE,
+          'task-instant',
+          'failed',
+          expect.stringContaining(`cf_container_${lifecycleStatus}`)
+        );
+      }
+    );
+
+    it('(d) preserves the task when the lifecycle probe throws (inconclusive)', async () => {
+      const env = createMockEnv(
+        cfContainerResponses(),
+        { TASK_DO_MISMATCH_GRACE_MS: '60000' },
+        null,
+        vi.fn().mockRejectedValue(new Error('DO unavailable'))
+      );
+
+      const result = await recoverStuckTasks(env);
+
+      expect(result.failedInProgress).toBe(0);
+      expect(result.deadRuntimeReconciled).toBe(0);
+    });
+
+    it('(d) preserves the task when the lifecycle probe times out (inconclusive)', async () => {
+      const env = createMockEnv(
+        cfContainerResponses(),
+        { TASK_DO_MISMATCH_GRACE_MS: '60000', TASK_LIVENESS_PROBE_TIMEOUT_MS: '1' },
+        null,
+        vi.fn().mockImplementation(() => new Promise(() => undefined))
+      );
+
+      const result = await recoverStuckTasks(env);
+
+      expect(result.failedInProgress).toBe(0);
+      expect(result.deadRuntimeReconciled).toBe(0);
     });
   });
 
