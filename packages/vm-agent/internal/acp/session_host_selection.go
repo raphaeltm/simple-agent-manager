@@ -10,9 +10,20 @@ import (
 // It fetches credentials, installs the binary, starts the process,
 // and initializes the ACP session.
 func (h *SessionHost) SelectAgent(ctx context.Context, agentType string) {
+	_ = h.selectAgent(ctx, agentType, false)
+}
+
+// RestoreAgent restores an exact prior ACP session. Unlike normal interactive
+// selection, it never falls back to NewSession when LoadSession is unavailable
+// or fails, because that would silently present a fork as a true resume.
+func (h *SessionHost) RestoreAgent(ctx context.Context, agentType string) error {
+	return h.selectAgent(ctx, agentType, true)
+}
+
+func (h *SessionHost) selectAgent(ctx context.Context, agentType string, requireLoadSession bool) error {
 	previous, started := h.beginAgentSelection(agentType)
 	if !started {
-		return
+		return nil
 	}
 
 	h.broadcastAgentStatus(StatusStarting, agentType, "")
@@ -22,18 +33,24 @@ func (h *SessionHost) SelectAgent(ctx context.Context, agentType string) {
 		"previousAgentType":    previous.agentType,
 		"sessionId":            h.config.SessionID,
 	})
+	loadSessionID := h.resolveLoadSessionID(agentType, previous)
+	if requireLoadSession && loadSessionID == "" {
+		err := fmt.Errorf("restore requires a previous ACP session for the same agent type")
+		h.failAgentSelection(agentType, "agent_restore", "Saved agent context is unavailable", err)
+		return err
+	}
 
 	cred, err := h.fetchAgentKey(ctx, agentType)
 	if err != nil {
 		h.failAgentSelection(agentType, "agent_key_fetch", fmt.Sprintf("Failed to fetch credential for %s — check Settings", agentType), err)
-		return
+		return err
 	}
 	h.reportCredentialFetched(agentType, cred)
 
 	info := getAgentCommandInfo(agentType, cred.credentialKind)
 	if err := h.ensureAgentInstalled(ctx, info); err != nil {
 		h.failAgentSelection(agentType, "agent_install", fmt.Sprintf("Failed to install %s: %v", info.command, err), err)
-		return
+		return err
 	}
 	h.reportLifecycle("info", "Agent binary verified/installed", map[string]interface{}{
 		"agentType": agentType,
@@ -41,9 +58,8 @@ func (h *SessionHost) SelectAgent(ctx context.Context, agentType string) {
 	})
 
 	settings := h.loadAgentSettings(ctx, agentType)
-	loadSessionID := h.resolveLoadSessionID(agentType, previous)
-	if !h.startSelectedAgent(ctx, agentType, cred, settings, loadSessionID) {
-		return
+	if err := h.startSelectedAgent(ctx, agentType, cred, settings, loadSessionID, requireLoadSession); err != nil {
+		return err
 	}
 
 	h.reportLifecycle("info", "Agent ready", map[string]interface{}{
@@ -54,6 +70,7 @@ func (h *SessionHost) SelectAgent(ctx context.Context, agentType string) {
 		"agentType": agentType,
 	})
 	h.broadcastAgentStatus(StatusReady, agentType, "")
+	return nil
 }
 
 type previousAgentSelection struct {
@@ -206,9 +223,15 @@ func (h *SessionHost) resolveLoadSessionID(agentType string, previous previousAg
 	return ""
 }
 
-func (h *SessionHost) startSelectedAgent(ctx context.Context, agentType string, cred *agentCredential, settings *agentSettingsPayload, loadSessionID string) bool {
+func (h *SessionHost) startSelectedAgent(ctx context.Context, agentType string, cred *agentCredential, settings *agentSettingsPayload, loadSessionID string, requireLoadSession bool) error {
 	h.mu.Lock()
-	if err := h.startAgent(ctx, agentType, cred, settings, loadSessionID); err != nil {
+	var err error
+	if requireLoadSession {
+		err = h.startAgentForCrashRecovery(ctx, agentType, cred, settings, loadSessionID)
+	} else {
+		err = h.startAgent(ctx, agentType, cred, settings, loadSessionID)
+	}
+	if err != nil {
 		message := err.Error()
 		h.status = HostError
 		h.statusErr = message
@@ -218,10 +241,10 @@ func (h *SessionHost) startSelectedAgent(ctx context.Context, agentType string, 
 		h.reportAgentError(agentType, "agent_start", message, "")
 		h.persistAgentSelectionFailure(agentType, message)
 		h.reportActivity("error")
-		return false
+		return err
 	}
 	h.status = HostReady
 	h.statusErr = ""
 	h.mu.Unlock()
-	return true
+	return nil
 }

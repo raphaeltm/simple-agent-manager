@@ -5,6 +5,7 @@ import { AppError } from '../../../src/middleware/error';
 
 const mocks = vi.hoisted(() => ({
   updateSets: [] as Array<Record<string, unknown>>,
+  workspace: null as Record<string, unknown> | null,
   jwt: {
     verifyCallbackToken: vi.fn(),
   },
@@ -43,7 +44,7 @@ vi.mock('drizzle-orm/d1', () => ({
     select: () => ({
       from: () => ({
         leftJoin: () => ({
-          where: () => ({ get: vi.fn().mockResolvedValue(null) }),
+          where: () => ({ get: vi.fn().mockImplementation(async () => mocks.workspace) }),
         }),
       }),
     }),
@@ -116,6 +117,7 @@ describe('agent activity callback', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.updateSets.length = 0;
+    mocks.workspace = null;
     mocks.jwt.verifyCallbackToken.mockResolvedValue({
       workspace: 'workspace-1',
       type: 'callback',
@@ -126,6 +128,45 @@ describe('agent activity callback', () => {
     mocks.projectData.transitionAcpSession.mockResolvedValue({});
     mocks.projectData.failSession.mockResolvedValue(undefined);
     mocks.container.markVmAgentContainerActiveWorkEndedBestEffort.mockResolvedValue(undefined);
+  });
+
+  it('snapshots an idle Instant session with the exact agent type before handback', async () => {
+    mocks.projectData.getAcpSession.mockResolvedValueOnce(
+      assignedAcpSession({ status: 'active', acpSdkSessionId: 'sdk-session-1' })
+    );
+    mocks.workspace = {
+      id: 'workspace-1',
+      userId: 'user-1',
+      chatSessionId: 'chat-session-1',
+      runtime: 'cf-container',
+    };
+    mocks.nodeAgent.hibernateAgentSessionOnNode.mockResolvedValueOnce({ status: 'available' });
+    const app = await createTestApp();
+
+    const response = await postActivity(app, {
+      activity: 'idle',
+      nodeId: 'node-1',
+      agentType: 'openai-codex',
+    });
+
+    expect(response.status).toBe(204);
+    expect(mocks.nodeAgent.hibernateAgentSessionOnNode).toHaveBeenCalledWith(
+      'node-1',
+      'workspace-1',
+      'sdk-session-1',
+      env,
+      'user-1',
+      {
+        chatSessionId: 'chat-session-1',
+        runtime: 'cf-container',
+        agentType: 'openai-codex',
+      }
+    );
+    expect(mocks.container.markVmAgentContainerActiveWorkEndedBestEffort).toHaveBeenCalledWith(
+      env,
+      'node-1',
+      'agent_activity_idle'
+    );
   });
 
   it('turns VM-agent error activity into durable failed control-plane state', async () => {

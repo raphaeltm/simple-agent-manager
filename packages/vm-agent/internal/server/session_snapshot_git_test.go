@@ -86,6 +86,71 @@ func TestDownloadAndRestoreWIPKeepsOriginalBranch(t *testing.T) {
 	}
 }
 
+func TestDownloadAndRestoreWIPPreservesIndexAndWorktree(t *testing.T) {
+	repo := initSnapshotTestRepo(t)
+	base := gitOutput(t, repo, "rev-parse", "HEAD")
+
+	stagedPath := filepath.Join(repo, "staged.txt")
+	if err := os.WriteFile(stagedPath, []byte("staged"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", "staged.txt")
+	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("staged readme"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", "README.md")
+	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("staged readme\nunstaged readme"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "untracked.txt"), []byte("untracked"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	wantStatus := gitOutput(t, repo, "status", "--porcelain=v1")
+	_, bundlePath, _, err := createWIPBundle(context.Background(), repo, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(bundlePath)
+
+	runGit(t, repo, "reset", "--hard", base)
+	if err := os.RemoveAll(stagedPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(filepath.Join(repo, "untracked.txt")); err != nil {
+		t.Fatal(err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		f, openErr := os.Open(bundlePath)
+		if openErr != nil {
+			http.Error(w, openErr.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer f.Close()
+		_, _ = io.Copy(w, f)
+	}))
+	defer server.Close()
+
+	s := &Server{config: &config.Config{ControlPlaneURL: server.URL}}
+	if err := s.downloadAndRestoreWIP(context.Background(), server.URL, "token", time.Second, repo, base); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := gitOutput(t, repo, "status", "--porcelain=v1"); got != wantStatus {
+		t.Fatalf("restored status mismatch:\nwant %q\n got %q", wantStatus, got)
+	}
+	if got := gitOutput(t, repo, "show", ":staged.txt"); got != "staged" {
+		t.Fatalf("staged file index content = %q, want staged", got)
+	}
+	if got := gitOutput(t, repo, "show", ":README.md"); got != "staged readme" {
+		t.Fatalf("README index content = %q, want staged readme", got)
+	}
+	if got, err := os.ReadFile(filepath.Join(repo, "README.md")); err != nil || string(got) != "staged readme\nunstaged readme" {
+		t.Fatalf("README worktree content = %q, %v", got, err)
+	}
+}
+
 func initSnapshotTestRepo(t *testing.T) string {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {

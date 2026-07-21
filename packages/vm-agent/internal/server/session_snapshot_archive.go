@@ -53,14 +53,22 @@ func createWIPBundle(ctx context.Context, workDir string, entryThreshold int64) 
 			_, _ = runStandaloneGitCommand(ctx, workDir, gitEnv, "reset", "--", entry.Path)
 		}
 	}
-	tree, err := runStandaloneGitCommand(ctx, workDir, gitEnv, "write-tree")
+	worktreeTree, err := runStandaloneGitCommand(ctx, workDir, gitEnv, "write-tree")
 	if err != nil {
 		return base, "", skipped, fmt.Errorf("write snapshot tree: %w", err)
 	}
-	commitEnv := append(gitEnv, "GIT_AUTHOR_NAME=SAM Snapshot", "GIT_AUTHOR_EMAIL=snapshot@localhost", "GIT_COMMITTER_NAME=SAM Snapshot", "GIT_COMMITTER_EMAIL=snapshot@localhost")
-	commit, err := runStandaloneGitCommand(ctx, workDir, commitEnv, "commit-tree", tree, "-p", base, "-m", "SAM session snapshot")
+	indexTree, err := runStandaloneGitCommand(ctx, workDir, nil, "write-tree")
 	if err != nil {
-		return base, "", skipped, fmt.Errorf("create snapshot commit: %w", err)
+		return base, "", skipped, fmt.Errorf("write snapshot index tree: %w", err)
+	}
+	commitEnv := append(gitEnv, "GIT_AUTHOR_NAME=SAM Snapshot", "GIT_AUTHOR_EMAIL=snapshot@localhost", "GIT_COMMITTER_NAME=SAM Snapshot", "GIT_COMMITTER_EMAIL=snapshot@localhost")
+	worktreeCommit, err := runStandaloneGitCommand(ctx, workDir, commitEnv, "commit-tree", worktreeTree, "-p", base, "-m", "SAM session worktree snapshot")
+	if err != nil {
+		return base, "", skipped, fmt.Errorf("create snapshot worktree commit: %w", err)
+	}
+	indexCommit, err := runStandaloneGitCommand(ctx, workDir, commitEnv, "commit-tree", indexTree, "-p", base, "-m", "SAM session index snapshot")
+	if err != nil {
+		return base, "", skipped, fmt.Errorf("create snapshot index commit: %w", err)
 	}
 	bundle, err := os.CreateTemp("", "sam-session-wip-*.bundle")
 	if err != nil {
@@ -68,15 +76,23 @@ func createWIPBundle(ctx context.Context, workDir string, entryThreshold int64) 
 	}
 	bundlePath := bundle.Name()
 	_ = bundle.Close()
-	snapshotRef := "refs/sam/session-snapshot/" + strings.TrimSuffix(filepath.Base(bundlePath), ".bundle")
-	if _, err := runStandaloneGitCommand(ctx, workDir, nil, "update-ref", snapshotRef, commit); err != nil {
+	snapshotRefPrefix := "refs/sam/session-snapshot/" + strings.TrimSuffix(filepath.Base(bundlePath), ".bundle")
+	worktreeRef := snapshotRefPrefix + "/worktree"
+	indexRef := snapshotRefPrefix + "/index"
+	if _, err := runStandaloneGitCommand(ctx, workDir, nil, "update-ref", worktreeRef, worktreeCommit); err != nil {
 		_ = os.Remove(bundlePath)
-		return base, "", skipped, fmt.Errorf("create snapshot ref: %w", err)
+		return base, "", skipped, fmt.Errorf("create snapshot worktree ref: %w", err)
+	}
+	if _, err := runStandaloneGitCommand(ctx, workDir, nil, "update-ref", indexRef, indexCommit); err != nil {
+		_, _ = runStandaloneGitCommand(context.Background(), workDir, nil, "update-ref", "-d", worktreeRef)
+		_ = os.Remove(bundlePath)
+		return base, "", skipped, fmt.Errorf("create snapshot index ref: %w", err)
 	}
 	defer func() {
-		_, _ = runStandaloneGitCommand(context.Background(), workDir, nil, "update-ref", "-d", snapshotRef)
+		_, _ = runStandaloneGitCommand(context.Background(), workDir, nil, "update-ref", "-d", worktreeRef)
+		_, _ = runStandaloneGitCommand(context.Background(), workDir, nil, "update-ref", "-d", indexRef)
 	}()
-	if _, err := runStandaloneGitCommand(ctx, workDir, nil, "bundle", "create", bundlePath, snapshotRef); err != nil {
+	if _, err := runStandaloneGitCommand(ctx, workDir, nil, "bundle", "create", bundlePath, worktreeRef, indexRef); err != nil {
 		_ = os.Remove(bundlePath)
 		return base, "", skipped, fmt.Errorf("create git bundle: %w", err)
 	}

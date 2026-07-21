@@ -4,6 +4,7 @@ import { getNodeAgentRequestTimeoutMs, nodeAgentRequest } from './node-agent';
 interface SessionSnapshotRequest {
   chatSessionId: string;
   runtime: string;
+  agentType?: string;
 }
 
 function requestSessionSnapshot(
@@ -15,13 +16,18 @@ function requestSessionSnapshot(
   userId: string,
   input: SessionSnapshotRequest
 ): Promise<unknown> {
-  return nodeAgentRequest(nodeId, env, `/workspaces/${workspaceId}/agent-sessions/${sessionId}/${action}`, {
-    method: 'POST',
-    userId,
-    workspaceId,
-    requestTimeoutMs: getNodeAgentRequestTimeoutMs(env),
-    body: JSON.stringify(input),
-  });
+  return nodeAgentRequest(
+    nodeId,
+    env,
+    `/workspaces/${workspaceId}/agent-sessions/${sessionId}/${action}`,
+    {
+      method: 'POST',
+      userId,
+      workspaceId,
+      requestTimeoutMs: getNodeAgentRequestTimeoutMs(env),
+      body: JSON.stringify(input),
+    }
+  );
 }
 
 export function hibernateAgentSessionOnNode(

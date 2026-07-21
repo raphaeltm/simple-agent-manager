@@ -196,7 +196,8 @@ export interface TaskReconciliationDiagnostics {
   };
 }
 
-const LIVE_WORKSPACE_STATUSES = new Set(['running', 'recovery']);
+const LIVE_WORKSPACE_STATUSES = new Set(['running']);
+const RESUMABLE_WORKSPACE_STATUSES = new Set(['sleeping', 'recovery']);
 const ACTIVE_ACP_STATUSES = new Set(['assigned', 'running']);
 
 function stuckTaskScanCursorKey(env: Env): string {
@@ -441,6 +442,16 @@ export async function getTaskRuntimeLiveness(
     }>();
 
   if (!row) return dead('workspace_missing', null, null);
+  if (RESUMABLE_WORKSPACE_STATUSES.has(row.workspace_status)) {
+    return {
+      live: false,
+      conclusive: false,
+      reason: `workspace_${row.workspace_status}_resumable`,
+      workspaceStatus: row.workspace_status,
+      nodeId: row.node_id,
+      activeAcpSessionId: null,
+    };
+  }
   if (!LIVE_WORKSPACE_STATUSES.has(row.workspace_status)) {
     return dead(`workspace_${row.workspace_status}`, row.workspace_status, row.node_id);
   }

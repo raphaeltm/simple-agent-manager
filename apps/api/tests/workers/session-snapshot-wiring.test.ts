@@ -70,6 +70,8 @@ describe('session snapshot D1/R2 worker wiring', () => {
       chatSessionId,
       workspaceId,
       agentSessionId,
+      acpSessionId: 'acp-session-1',
+      agentType: 'openai-codex',
       baseCommit: 'base-commit',
       status: 'available',
       degradation: 'none',
@@ -116,6 +118,8 @@ describe('session snapshot D1/R2 worker wiring', () => {
     await expect(manifestObject.json()).resolves.toMatchObject({
       chatSessionId,
       workspaceId,
+      acpSessionId: 'acp-session-1',
+      agentType: 'openai-codex',
       artifacts: {
         home: { sizeBytes: 4 },
         wip: { sizeBytes: 3 },
