@@ -54,6 +54,11 @@ function stringField(body: Record<string, unknown>, key: string, required = true
   return value.trim();
 }
 
+function optionalStringField(body: Record<string, unknown>, key: string): string | null {
+  if (!(key in body) || body[key] === null || body[key] === undefined) return null;
+  return requiredStringField(body, key);
+}
+
 function requiredStringField(body: Record<string, unknown>, key: string): string {
   const value = stringField(body, key, true);
   if (value === null) throw errors.badRequest(`${key} is required`);
@@ -169,6 +174,16 @@ sessionSnapshotRoutes.post('/:id/session-snapshot/complete', async (c) => {
   ) {
     throw errors.badRequest('Snapshot manifest identity does not match request');
   }
+  const agentSessionId = optionalStringField(body, 'agentSessionId');
+  const manifestAgentSessionId = optionalStringField(manifestRecord, 'agentSessionId');
+  if (manifestAgentSessionId !== agentSessionId) {
+    throw errors.badRequest('Snapshot agent session does not match request');
+  }
+  const acpSessionId = optionalStringField(manifestRecord, 'acpSessionId');
+  const agentType = optionalStringField(manifestRecord, 'agentType');
+  if ((acpSessionId === null) !== (agentType === null)) {
+    throw errors.badRequest('Snapshot agent context identity is incomplete');
+  }
   const manifestArtifacts = expectJsonRecord(
     manifestRecord.artifacts ?? {},
     'snapshot manifest artifacts'
@@ -201,7 +216,7 @@ sessionSnapshotRoutes.post('/:id/session-snapshot/complete', async (c) => {
   await completeSessionSnapshot(db, c.env, {
     workspaceId,
     chatSessionId,
-    agentSessionId: stringField(body, 'agentSessionId', false),
+    agentSessionId,
     runtime: stringField(body, 'runtime', false) || 'runtime-neutral',
     baseCommit: stringField(body, 'baseCommit', false),
     status,

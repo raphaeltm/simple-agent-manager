@@ -228,6 +228,8 @@ describe('workspaces session snapshot callback routes', () => {
         chatSessionId: 'chat-1',
         workspaceId: 'WS_1',
         agentSessionId: 'agent-session-1',
+        acpSessionId: 'acp-session-1',
+        agentType: 'openai-codex',
         status: 'available',
         degradation: 'none',
         skipped: [],
@@ -261,5 +263,33 @@ describe('workspaces session snapshot callback routes', () => {
       runtimeBindings
     );
     expect(mismatch.status).toBe(400);
+
+    const sessionMismatch = await app.request(
+      '/api/workspaces/WS_1/session-snapshot/complete',
+      {
+        method: 'POST',
+        headers: { Authorization: 'Bearer callback-token', 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...body,
+          manifest: { ...body.manifest, agentSessionId: 'agent-session-other' },
+        }),
+      },
+      runtimeBindings
+    );
+    expect(sessionMismatch.status).toBe(400);
+
+    const incompleteHarness = await app.request(
+      '/api/workspaces/WS_1/session-snapshot/complete',
+      {
+        method: 'POST',
+        headers: { Authorization: 'Bearer callback-token', 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...body,
+          manifest: { ...body.manifest, agentType: undefined },
+        }),
+      },
+      runtimeBindings
+    );
+    expect(incompleteHarness.status).toBe(400);
   });
 });

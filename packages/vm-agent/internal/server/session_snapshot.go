@@ -40,12 +40,12 @@ type snapshotPrepareResponse struct {
 }
 
 type snapshotRestoreResponse struct {
-	Available   bool                   `json:"available"`
-	Reason      string                 `json:"reason,omitempty"`
-	Status      string                 `json:"status,omitempty"`
-	Degradation string                 `json:"degradation,omitempty"`
-	BaseCommit  string                 `json:"baseCommit,omitempty"`
-	Manifest    map[string]interface{} `json:"manifest,omitempty"`
+	Available   bool              `json:"available"`
+	Reason      string            `json:"reason,omitempty"`
+	Status      string            `json:"status,omitempty"`
+	Degradation string            `json:"degradation,omitempty"`
+	BaseCommit  string            `json:"baseCommit,omitempty"`
+	Manifest    *snapshotManifest `json:"manifest,omitempty"`
 	Config      struct {
 		TransferIdleTimeoutMs int64 `json:"transferIdleTimeoutMs"`
 	} `json:"config"`
@@ -61,6 +61,8 @@ type snapshotManifest struct {
 	ChatSessionID  string                      `json:"chatSessionId"`
 	WorkspaceID    string                      `json:"workspaceId"`
 	AgentSessionID string                      `json:"agentSessionId,omitempty"`
+	AcpSessionID   string                      `json:"acpSessionId,omitempty"`
+	AgentType      string                      `json:"agentType,omitempty"`
 	BaseCommit     string                      `json:"baseCommit,omitempty"`
 	Status         string                      `json:"status"`
 	Degradation    string                      `json:"degradation"`
@@ -169,7 +171,7 @@ func (s *Server) handleHibernateAgentSession(w http.ResponseWriter, r *http.Requ
 	if !ok {
 		return
 	}
-	result, err := s.hibernateSessionSnapshot(r.Context(), input.runtime, input.sessionID, input.chatSessionID, input.runtimeName, input.callbackToken)
+	result, err := s.hibernateSessionSnapshot(r.Context(), input.runtime, input.sessionID, input.chatSessionID, input.runtimeName, input.agentType, input.callbackToken)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -185,13 +187,16 @@ func (s *Server) handleRestoreAgentSession(w http.ResponseWriter, r *http.Reques
 	result, err := s.restoreSessionSnapshot(r.Context(), input.runtime, input.sessionID, input.chatSessionID, input.agentType, input.callbackToken)
 	if err != nil {
 		_ = s.reportSnapshotRestoreResult(context.Background(), input.workspaceID, input.chatSessionID, "degraded", err.Error(), input.callbackToken)
-		writeJSON(w, http.StatusOK, map[string]interface{}{"status": "degraded", "message": err.Error()})
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"status":  "degraded",
+			"message": "The saved workspace was restored, but the agent context could not be resumed.",
+		})
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
 }
 
-func (s *Server) hibernateSessionSnapshot(ctx context.Context, runtime *WorkspaceRuntime, sessionID, chatSessionID, runtimeName, callbackToken string) (map[string]interface{}, error) {
+func (s *Server) hibernateSessionSnapshot(ctx context.Context, runtime *WorkspaceRuntime, sessionID, chatSessionID, runtimeName, agentType, callbackToken string) (map[string]interface{}, error) {
 	prepare, err := s.prepareSnapshot(ctx, runtime.ID, sessionID, chatSessionID, runtimeName, callbackToken)
 	if err != nil {
 		return nil, err
@@ -209,6 +214,23 @@ func (s *Server) hibernateSessionSnapshot(ctx context.Context, runtime *Workspac
 		Skipped:        []snapshotSkippedEntry{},
 		Artifacts:      map[string]snapshotArtifact{},
 		CreatedAt:      time.Now().UTC().Format(time.RFC3339),
+	}
+	if s.agentSessions != nil {
+		if session, exists := s.agentSessions.Get(runtime.ID, sessionID); exists {
+			manifest.AcpSessionID = strings.TrimSpace(session.AcpSessionID)
+			manifest.AgentType = strings.TrimSpace(session.AgentType)
+		}
+	}
+	if manifest.AcpSessionID != "" && manifest.AgentType == "" {
+		manifest.AgentType = strings.TrimSpace(agentType)
+	}
+	if manifest.AcpSessionID == "" || manifest.AgentType == "" {
+		manifest.AcpSessionID = ""
+		manifest.AgentType = ""
+		manifest.Skipped = append(manifest.Skipped, snapshotSkippedEntry{
+			Path:   "agent-context",
+			Reason: "resumable agent session identity unavailable",
+		})
 	}
 	workDir := standaloneWorkspaceWorkDir(runtime, s.config.WorkspaceDir, s.config.ContainerWorkDir)
 	baseCommit, wipPath, wipSkipped, err := createWIPBundle(ctx, workDir, entryThreshold)
@@ -303,8 +325,9 @@ func (s *Server) restoreSessionSnapshot(ctx context.Context, runtime *WorkspaceR
 		}
 	}
 	if s.config.IsStandaloneMode() {
-		if strings.TrimSpace(agentType) == "" {
-			return nil, fmt.Errorf("agent type is required to restore a standalone session")
+		acpSessionID, savedAgentType, identityErr := snapshotHarnessResumeIdentity(restore.Manifest, sessionID, agentType)
+		if identityErr != nil {
+			return nil, identityErr
 		}
 		// Prime the per-workspace message reporter before the agent starts.
 		// handleCreateAgentSession does this on the normal path; the restore path
@@ -315,9 +338,18 @@ func (s *Server) restoreSessionSnapshot(ctx context.Context, runtime *WorkspaceR
 		if createErr != nil {
 			return nil, fmt.Errorf("recreate restored agent session: %w", createErr)
 		}
+		if updateErr := s.agentSessions.UpdateAcpSessionID(runtime.ID, sessionID, acpSessionID, savedAgentType); updateErr != nil {
+			return nil, fmt.Errorf("hydrate restored agent session: %w", updateErr)
+		}
+		session, exists := s.agentSessions.Get(runtime.ID, sessionID)
+		if !exists {
+			return nil, fmt.Errorf("restored agent session is unavailable")
+		}
 		hostKey := runtime.ID + ":" + sessionID
 		host := s.getOrCreateSessionHost(hostKey, runtime.ID, sessionID, session, runtime, "")
-		host.SelectAgent(ctx, agentType)
+		if restoreErr := host.RestoreAgent(ctx, savedAgentType); restoreErr != nil {
+			return nil, fmt.Errorf("resume saved agent context: %w", restoreErr)
+		}
 		if host.Status() != acp.HostReady {
 			return nil, fmt.Errorf("restored agent failed to become ready: %s", host.Status())
 		}
@@ -327,6 +359,29 @@ func (s *Server) restoreSessionSnapshot(ctx context.Context, runtime *WorkspaceR
 	}
 	_ = s.reportSnapshotRestoreResult(ctx, runtime.ID, chatSessionID, "restored", "", callbackToken)
 	return map[string]interface{}{"status": "restored", "degradation": restore.Degradation}, nil
+}
+
+func snapshotHarnessResumeIdentity(manifest *snapshotManifest, sessionID, requestedAgentType string) (string, string, error) {
+	if manifest == nil {
+		return "", "", fmt.Errorf("snapshot manifest is unavailable")
+	}
+	savedSessionID := strings.TrimSpace(manifest.AgentSessionID)
+	if savedSessionID != "" && savedSessionID != strings.TrimSpace(sessionID) {
+		return "", "", fmt.Errorf("snapshot agent session does not match restore target")
+	}
+	acpSessionID := strings.TrimSpace(manifest.AcpSessionID)
+	savedAgentType := strings.TrimSpace(manifest.AgentType)
+	if acpSessionID == "" || savedAgentType == "" {
+		return "", "", fmt.Errorf("snapshot does not contain resumable agent context")
+	}
+	requestedAgentType = strings.TrimSpace(requestedAgentType)
+	if requestedAgentType == "" {
+		return "", "", fmt.Errorf("agent type is required to restore a standalone session")
+	}
+	if requestedAgentType != savedAgentType {
+		return "", "", fmt.Errorf("snapshot agent type does not match requested agent")
+	}
+	return acpSessionID, savedAgentType, nil
 }
 
 // primeRestoredMessageReporter ensures the per-workspace message reporter exists
@@ -554,11 +609,45 @@ func (s *Server) downloadAndRestoreWIP(ctx context.Context, downloadPath, token 
 	if err != nil {
 		return fmt.Errorf("list snapshot bundle heads: %w: %s", err, heads)
 	}
-	fields := strings.Fields(heads)
-	if len(fields) < 2 {
+	bundleRefs := make(map[string]string)
+	for _, line := range strings.Split(strings.TrimSpace(heads), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 2 {
+			bundleRefs[fields[1]] = fields[0]
+		}
+	}
+	if len(bundleRefs) == 0 {
 		return fmt.Errorf("snapshot bundle has no restorable ref")
 	}
-	if output, err := runStandaloneGitCommand(ctx, workDir, nil, "fetch", tmpPath, fields[1]); err != nil {
+	worktreeRef, worktreeCommit := snapshotBundleRef(bundleRefs, "/worktree")
+	indexRef, indexCommit := snapshotBundleRef(bundleRefs, "/index")
+	if worktreeRef != "" && indexRef != "" {
+		if output, err := runStandaloneGitCommand(ctx, workDir, nil, "fetch", tmpPath, worktreeRef, indexRef); err != nil {
+			return fmt.Errorf("fetch snapshot bundle: %w: %s", err, output)
+		}
+		if output, err := runStandaloneGitCommand(ctx, workDir, nil, "read-tree", "--reset", "-u", worktreeCommit); err != nil {
+			return fmt.Errorf("materialize snapshot worktree: %w: %s", err, output)
+		}
+		if strings.TrimSpace(baseCommit) != "" {
+			if output, err := runStandaloneGitCommand(ctx, workDir, nil, "reset", "--soft", baseCommit); err != nil {
+				return fmt.Errorf("restore snapshot base commit: %w: %s", err, output)
+			}
+		}
+		if output, err := runStandaloneGitCommand(ctx, workDir, nil, "read-tree", indexCommit); err != nil {
+			return fmt.Errorf("restore snapshot index: %w: %s", err, output)
+		}
+		return nil
+	}
+
+	// Version 1 bundles written before index preservation contained a single
+	// synthetic commit. Keep restoring them for compatibility; their original
+	// staged/unstaged split was not encoded and therefore cannot be recovered.
+	var legacyRef string
+	for ref := range bundleRefs {
+		legacyRef = ref
+		break
+	}
+	if output, err := runStandaloneGitCommand(ctx, workDir, nil, "fetch", tmpPath, legacyRef); err != nil {
 		return fmt.Errorf("fetch snapshot bundle: %w: %s", err, output)
 	}
 	if output, err := runStandaloneGitCommand(ctx, workDir, nil, "read-tree", "--reset", "-u", "FETCH_HEAD"); err != nil {
@@ -570,6 +659,15 @@ func (s *Server) downloadAndRestoreWIP(ctx context.Context, downloadPath, token 
 		}
 	}
 	return nil
+}
+
+func snapshotBundleRef(refs map[string]string, suffix string) (string, string) {
+	for ref, commit := range refs {
+		if strings.HasSuffix(ref, suffix) {
+			return ref, commit
+		}
+	}
+	return "", ""
 }
 
 func (s *Server) snapshotDownload(ctx context.Context, downloadPath, token string) (*http.Response, error) {

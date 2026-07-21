@@ -34,6 +34,15 @@ The repair must build on PR #1562's runtime-neutral snapshot/restore boundary an
 4. `wakeFromSnapshot()` marks the container `running` before restore completes. A missing/corrupt snapshot can leave the Durable Object apparently running even though the fresh vm-agent has no `SessionHost`.
 5. The browser persists the user's optimistic message through the ProjectData WebSocket, then silently swallows a failed `/prompt` request. The transcript is safe, but the UI does not explain that the runtime failed or that a retry is required.
 
+### First exact-head staging gate (failed, preserved as evidence)
+
+- Commit `680db591d` deployed successfully to staging in workflow `29839895476`. A genuine UI-created Instant conversation created unique HOME, staged, unstaged, untracked, and harness-only markers in chat `5c64658a-0d16-45e8-8f25-2e610462bbae`.
+- The idle wake restored HOME and file contents, but the staged file returned as untracked. The original WIP bundle encoded only one synthetic full-worktree commit; restore then used `git reset --mixed`, which necessarily discarded the original index state.
+- The VM agent logged an empty previous ACP session ID and called `NewSession`. Snapshot manifest v1 persisted the SAM agent-session ID but not the underlying ACP/harness session ID or agent type, so the restore endpoint could not call `LoadSession` and nevertheless reported `restored`.
+- The first browser assertion was invalid because it counted expected text in the user's prompt and a negative assistant explanation. Persisted assistant-only transcript evidence showed that the harness phrase was not recalled and that the agent explicitly identified a fresh conversation. The live verifier now uses authenticated role-aware transcript polling, exact positive lines, Git porcelain, one-user-prompt counts, and task status.
+- While the workspace was legitimately `sleeping`, the scheduled stuck-task reconciler classified it as conclusively dead, failed the still-active conversation task with reason `workspace_sleeping`, then destroyed the workspace and node. This independently explains the user-visible “session appeared gone” symptom after idle.
+- A subsequently triggered replacement workflow was canceled before any Cloudflare mutation and is not counted as replacement evidence. The failed project remains evidence only; the corrected exact-head gate must use a fresh UI-created project/session.
+
 ## Lifecycle Contract
 
 ```text
@@ -68,6 +77,9 @@ Cloudflare stop metadata (`exit` versus `runtime_signal`, exit code, raw hook/er
 - [x] Bound recovery attempts with named environment-backed defaults. Missing, expired, corrupt, or rejected snapshots must degrade visibly and must never become transcript replay presented as a true resume.
 - [x] Catch a transport failure that crosses a request, classify recovery before a late lifecycle callback, preserve the original prompt in the transcript, and return an explicit manual-retry disposition without replaying the ambiguous request.
 - [x] Reconcile node, workspace, agent-session, ACP/chat, and active task state on recovery success and terminal degradation so neither active nor awaiting-follow-up work is stranded.
+- [x] Treat `sleeping` and `recovery` workspaces as resumable/inconclusive in stuck-task reconciliation so the cron cannot fail and destroy a normal Instant handback.
+- [x] Encode separate worktree and index commits in new WIP bundles, retain single-ref legacy restore compatibility, and prove staged/unstaged/untracked status survives exactly.
+- [x] Persist the underlying ACP session ID and agent type in the runtime-neutral manifest, hydrate the new SessionHost, and require exact `LoadSession` with no `NewSession` fallback or false resume.
 
 ### Route, service, callback, and UI behavior
 
@@ -85,13 +97,13 @@ Cloudflare stop metadata (`exit` versus `runtime_signal`, exit code, raw hook/er
 - [x] Add a request-crossing-replacement test proving the interrupted request is classified and returned as manual retry but is never replayed.
 - [x] Add route/service tests for recovery-row resolution, cf-container resume, callback-token reinjection, sanitized regular-user responses, and task/chat status reconciliation.
 - [x] Add web tests for waking/restoring/degraded/manual-retry presentation and preserved optimistic transcript messages.
-- [ ] Run existing Go snapshot/restore and race suites. Change Go only if a bounded VM-agent consumer or a missing primitive-level invariant is required; otherwise update runtime-neutral persistence idea `01KX4KSXEXQMP41KS34TW9EN01` with the precise VM consumer follow-up.
+- [x] Run focused Go snapshot/restore, ACP, vet, and race suites using the repository-pinned Go 1.25 toolchain. The bounded primitive/standalone consumer fixes preserve exact Git index and harness identity; a full VM/devcontainer consumer remains a separate explicit follow-up on runtime-neutral persistence idea `01KX4KSXEXQMP41KS34TW9EN01`.
 
 ### Verification and delivery
 
-Local verification gaps are tracked explicitly: the pinned Miniflare/workerd runner segfaults before importing both the new Worker tests and an unchanged worker smoke test; the workspace has no Go toolchain for the VM-agent race suite; and the live Durable Object wall-time gate currently reports two pre-existing staging alarm regressions. These are not treated as passing evidence.
+Local verification gaps are tracked explicitly: the pinned Miniflare/workerd runner segfaults before importing both the new Worker tests and an unchanged worker smoke test, and the live Durable Object wall-time gate currently reports two pre-existing staging alarm regressions. These are not treated as passing evidence. A checksum-verified temporary Go 1.25.12 toolchain now covers the Go tests locally.
 
-- [ ] Run focused API Worker/Miniflare tests, web tests, the vm-agent Go suite/race detector, migration gates, lint, typecheck, full tests, and build.
+- [x] Run focused API/DO/route tests, web tests, vm-agent Go/vet/race checks, migration gates, lint, typecheck, full tests, and build. The Worker/Miniflare process still hits the recorded local `workerd` SIGSEGV before test import and remains for CI.
 - [ ] Run `$cloudflare-specialist`, `$go-specialist` if Go changes, `$security-auditor`, `$test-engineer`, `$ui-ux-specialist`, `$constitution-validator`, `$doc-sync-validator`, and mandatory `$task-completion-validator`; address blocking findings.
 - [ ] Deploy the exact branch head to staging after checking for deployment contention.
 - [ ] From a genuine UI-created Instant session, create unique HOME plus staged/unstaged/untracked Git markers and harness context; verify an ordinary idle wake restores all markers/context in the same chat.

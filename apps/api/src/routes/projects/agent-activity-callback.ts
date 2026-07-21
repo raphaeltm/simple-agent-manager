@@ -175,6 +175,7 @@ agentActivityCallbackRoute.post(
             {
               chatSessionId: workspace.chatSessionId,
               runtime: 'cf-container',
+              agentType: body.agentType ?? existing.agentType ?? undefined,
             }
           ).catch((err) => {
             log.warn('acp_activity.session_snapshot_failed', {

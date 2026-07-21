@@ -1032,6 +1032,45 @@ describe('recoverStuckTasks', () => {
   });
 
   describe('prompt dead-runtime reconciliation', () => {
+    function resumableRuntimeResponses(workspaceStatus: 'sleeping' | 'recovery') {
+      const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+      return new Map<string, { results: unknown[]; changes?: number }>([
+        [
+          "status IN ('queued', 'delegated', 'in_progress')",
+          {
+            results: [
+              {
+                id: `task-${workspaceStatus}`,
+                project_id: 'proj-instant',
+                user_id: 'user-instant',
+                status: 'in_progress',
+                execution_step: 'awaiting_followup',
+                updated_at: tenMinutesAgo,
+                started_at: tenMinutesAgo,
+                workspace_id: 'ws-instant',
+                auto_provisioned_node_id: 'node-instant',
+              },
+            ],
+          },
+        ],
+        [
+          'w.chat_session_id',
+          {
+            results: [
+              {
+                workspace_status: workspaceStatus,
+                chat_session_id: 'chat-instant',
+                node_id: 'node-instant',
+                node_status: workspaceStatus,
+                health_status: 'unhealthy',
+                last_heartbeat_at: tenMinutesAgo,
+              },
+            ],
+          },
+        ],
+      ]);
+    }
+
     function deadRuntimeResponses(taskId: string) {
       const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
       return new Map<string, { results: unknown[]; changes?: number }>([
@@ -1101,6 +1140,30 @@ describe('recoverStuckTasks', () => {
         expect.stringContaining('workspace_deleted')
       );
     });
+
+    it.each(['sleeping', 'recovery'] as const)(
+      'preserves an Instant task while its workspace is %s and resumable',
+      async (workspaceStatus) => {
+        const env = createMockEnv(
+          resumableRuntimeResponses(workspaceStatus),
+          { TASK_DO_MISMATCH_GRACE_MS: '60000' },
+          {
+            completed: true,
+            currentStep: 'done',
+            retryCount: 0,
+            lastStepAt: Date.now() - 10 * 60 * 1000,
+          }
+        );
+
+        const result = await recoverStuckTasks(env);
+
+        expect(result.failedInProgress).toBe(0);
+        expect(result.deadRuntimeReconciled).toBe(0);
+        expect(result.doHealthChecked).toBe(1);
+        expect(cleanupTaskRun).not.toHaveBeenCalled();
+        expect(syncTriggerExecutionMock).not.toHaveBeenCalled();
+      }
+    );
 
     it('fails a conclusively dead runtime and records the TaskRunner RPC failure', async () => {
       const env = createMockEnv(
