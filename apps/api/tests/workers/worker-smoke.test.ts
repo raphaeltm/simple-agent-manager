@@ -13,7 +13,7 @@ describe('Worker smoke tests (workerd runtime)', () => {
   describe('health check', () => {
     it('returns healthy status', async () => {
       const response = await SELF.fetch('https://api.test.example.com/health');
-      expect(response.status).toBe(418);
+      expect(response.status).toBe(200);
 
       const body = await response.json<{
         status: string;
@@ -47,7 +47,7 @@ describe('Worker smoke tests (workerd runtime)', () => {
       const response = await SELF.fetch('https://api.test.example.com/health', {
         headers: { Origin: 'https://app.test.example.com' },
       });
-      expect(response.status).toBe(418);
+      expect(response.status).toBe(200);
       expect(response.headers.get('access-control-allow-origin')).toBe(
         'https://app.test.example.com'
       );
@@ -58,7 +58,7 @@ describe('Worker smoke tests (workerd runtime)', () => {
       const response = await SELF.fetch('https://api.test.example.com/health', {
         headers: { Origin: 'https://docs.test.example.com' },
       });
-      expect(response.status).toBe(418);
+      expect(response.status).toBe(200);
       expect(response.headers.get('access-control-allow-origin')).toBe(
         'https://docs.test.example.com'
       );
@@ -82,7 +82,7 @@ describe('Worker smoke tests (workerd runtime)', () => {
       const response = await SELF.fetch('https://api.test.example.com/health', {
         headers: { Origin: 'https://evil.com' },
       });
-      expect(response.status).toBe(418);
+      expect(response.status).toBe(200);
       // The key security assertion: unknown origins must NOT get an allow-origin header
       expect(response.headers.get('access-control-allow-origin')).toBeNull();
     });
@@ -91,7 +91,7 @@ describe('Worker smoke tests (workerd runtime)', () => {
       const response = await SELF.fetch('https://api.test.example.com/health', {
         headers: { Origin: 'https://nottest.example.com.evil.com' },
       });
-      expect(response.status).toBe(418);
+      expect(response.status).toBe(200);
       expect(response.headers.get('access-control-allow-origin')).toBeNull();
     });
 
@@ -104,7 +104,7 @@ describe('Worker smoke tests (workerd runtime)', () => {
         const response = await SELF.fetch('https://api.test.example.com/health', {
           headers: { Origin: origin },
         });
-        expect(response.status).toBe(418);
+        expect(response.status).toBe(200);
         expect(response.headers.get('access-control-allow-origin')).toBeNull();
       }
     });
@@ -113,7 +113,7 @@ describe('Worker smoke tests (workerd runtime)', () => {
       const response = await SELF.fetch('https://api.test.example.com/health', {
         headers: { Origin: 'http://localhost:5173' },
       });
-      expect(response.status).toBe(418);
+      expect(response.status).toBe(200);
       expect(response.headers.get('access-control-allow-origin')).toBeNull();
     });
   });
