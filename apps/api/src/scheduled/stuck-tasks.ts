@@ -39,6 +39,7 @@ import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import type { TaskRunner } from '../durable-objects/task-runner';
+import { classifyVmAgentContainerLiveness } from '../durable-objects/vm-agent-container-lifecycle';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
@@ -46,6 +47,7 @@ import { persistError } from '../services/observability';
 import * as projectDataService from '../services/project-data';
 import { cleanupTaskRun } from '../services/task-runner';
 import { syncTriggerExecutionStatus } from '../services/trigger-execution-sync';
+import { inspectVmAgentContainerLifecycle } from '../services/vm-agent-container';
 import {
   type CompactionLoopRecovery,
   detectTaskCompactionLoop,
@@ -196,7 +198,18 @@ export interface TaskReconciliationDiagnostics {
   };
 }
 
+// 'running' is always a live-candidate. 'recovery' is a live-candidate ONLY for
+// VM runtimes: the VM /ready callback path transiently marks a workspace
+// 'recovery' while the agent reconnects, and such workspaces must still fall
+// through to the node-heartbeat staleness + ACP-session liveness checks below
+// (pre-PR behavior). For cf-container (Instant) runtimes, 'recovery'/'sleeping'
+// are instead handled by the resumable short-circuit, which defers to the
+// authoritative DO lifecycle probe.
 const LIVE_WORKSPACE_STATUSES = new Set(['running', 'recovery']);
+// Resumable statuses short-circuit to an inconclusive result ONLY for
+// cf-container runtimes. Gating on node_runtime keeps VM 'recovery'/'sleeping'
+// workspaces on a dead node conclusively reconcilable instead of stranding them.
+const RESUMABLE_WORKSPACE_STATUSES = new Set(['sleeping', 'recovery']);
 const ACTIVE_ACP_STATUSES = new Set(['assigned', 'running']);
 
 function stuckTaskScanCursorKey(env: Env): string {
@@ -424,7 +437,8 @@ export async function getTaskRuntimeLiveness(
 
   const row = await env.DATABASE.prepare(
     `SELECT w.status AS workspace_status, w.chat_session_id, w.node_id,
-            n.status AS node_status, n.health_status, n.last_heartbeat_at
+            n.status AS node_status, n.health_status, n.last_heartbeat_at,
+            n.runtime AS node_runtime
      FROM workspaces w
      LEFT JOIN nodes n ON n.id = w.node_id
      WHERE w.id = ?
@@ -438,9 +452,20 @@ export async function getTaskRuntimeLiveness(
       node_status: string | null;
       health_status: string | null;
       last_heartbeat_at: string | null;
+      node_runtime: string | null;
     }>();
 
   if (!row) return dead('workspace_missing', null, null);
+  if (row.node_runtime === 'cf-container' && RESUMABLE_WORKSPACE_STATUSES.has(row.workspace_status)) {
+    return {
+      live: false,
+      conclusive: false,
+      reason: `workspace_${row.workspace_status}_resumable`,
+      workspaceStatus: row.workspace_status,
+      nodeId: row.node_id,
+      activeAcpSessionId: null,
+    };
+  }
   if (!LIVE_WORKSPACE_STATUSES.has(row.workspace_status)) {
     return dead(`workspace_${row.workspace_status}`, row.workspace_status, row.node_id);
   }
@@ -453,6 +478,56 @@ export async function getTaskRuntimeLiveness(
       nodeId: row.node_id,
       activeAcpSessionId: null,
     };
+  }
+
+  const probeTimeoutMs = parseMs(
+    env.TASK_LIVENESS_PROBE_TIMEOUT_MS,
+    DEFAULT_TASK_LIVENESS_PROBE_TIMEOUT_MS
+  );
+  if (row.node_runtime === 'cf-container') {
+    const TIMEOUT = Symbol('container_lifecycle_probe_timeout');
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const probe = await Promise.race([
+        inspectVmAgentContainerLifecycle(env, row.node_id),
+        new Promise<typeof TIMEOUT>((resolve) => {
+          timer = setTimeout(() => resolve(TIMEOUT), probeTimeoutMs);
+        }),
+      ]);
+      if (probe === TIMEOUT) {
+        return {
+          live: false,
+          conclusive: false,
+          reason: 'cf_container_lifecycle_timeout',
+          workspaceStatus: row.workspace_status,
+          nodeId: row.node_id,
+          activeAcpSessionId: null,
+        };
+      }
+      const classification = classifyVmAgentContainerLiveness(probe);
+      return {
+        ...classification,
+        workspaceStatus: row.workspace_status,
+        nodeId: row.node_id,
+        activeAcpSessionId: null,
+      };
+    } catch (err) {
+      log.warn('stuck_task.container_lifecycle_probe_failed', {
+        workspaceId: task.workspace_id,
+        nodeId: row.node_id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return {
+        live: false,
+        conclusive: false,
+        reason: 'cf_container_lifecycle_unknown',
+        workspaceStatus: row.workspace_status,
+        nodeId: row.node_id,
+        activeAcpSessionId: null,
+      };
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
   }
 
   const staleSeconds =
@@ -477,10 +552,6 @@ export async function getTaskRuntimeLiveness(
     );
     // Bound the ProjectData DO probe so a slow/unresponsive DO cannot stall the
     // control-loop sweep (rule 47). A timeout is inconclusive, never fatal.
-    const probeTimeoutMs = parseMs(
-      env.TASK_LIVENESS_PROBE_TIMEOUT_MS,
-      DEFAULT_TASK_LIVENESS_PROBE_TIMEOUT_MS
-    );
     const TIMEOUT = Symbol('liveness_probe_timeout');
     let timer: ReturnType<typeof setTimeout> | undefined;
     const probe = await Promise.race([

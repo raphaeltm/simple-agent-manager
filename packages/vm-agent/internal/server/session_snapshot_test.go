@@ -85,6 +85,85 @@ func TestCreateWIPBundleDegradesDuringMerge(t *testing.T) {
 	}
 }
 
+func TestSnapshotHarnessResumeIdentity(t *testing.T) {
+	tests := []struct {
+		name          string
+		manifest      *snapshotManifest
+		sessionID     string
+		agentType     string
+		wantACP       string
+		wantAgentType string
+		wantErr       bool
+	}{
+		{
+			name: "restores exact saved harness",
+			manifest: &snapshotManifest{
+				AgentSessionID: "agent-session-1",
+				AcpSessionID:   "acp-session-1",
+				AgentType:      "openai-codex",
+			},
+			sessionID:     "agent-session-1",
+			agentType:     "openai-codex",
+			wantACP:       "acp-session-1",
+			wantAgentType: "openai-codex",
+		},
+		{
+			name:      "rejects nil manifest",
+			manifest:  nil,
+			sessionID: "agent-session-1",
+			agentType: "openai-codex",
+			wantErr:   true,
+		},
+		{
+			name:      "rejects legacy snapshot without harness identity",
+			manifest:  &snapshotManifest{AgentSessionID: "agent-session-1"},
+			sessionID: "agent-session-1",
+			agentType: "openai-codex",
+			wantErr:   true,
+		},
+		{
+			name: "rejects agent session mismatch",
+			manifest: &snapshotManifest{
+				AgentSessionID: "agent-session-other",
+				AcpSessionID:   "acp-session-1",
+				AgentType:      "openai-codex",
+			},
+			sessionID: "agent-session-1",
+			agentType: "openai-codex",
+			wantErr:   true,
+		},
+		{
+			name: "rejects agent type mismatch",
+			manifest: &snapshotManifest{
+				AgentSessionID: "agent-session-1",
+				AcpSessionID:   "acp-session-1",
+				AgentType:      "claude-code",
+			},
+			sessionID: "agent-session-1",
+			agentType: "openai-codex",
+			wantErr:   true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			acpSessionID, agentType, err := snapshotHarnessResumeIdentity(tt.manifest, tt.sessionID, tt.agentType)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("snapshotHarnessResumeIdentity returned nil error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if acpSessionID != tt.wantACP || agentType != tt.wantAgentType {
+				t.Fatalf("identity = (%q, %q), want (%q, %q)", acpSessionID, agentType, tt.wantACP, tt.wantAgentType)
+			}
+		})
+	}
+}
+
 func TestDownloadAndExtractTarRejectsPathTraversal(t *testing.T) {
 	home := t.TempDir()
 	outside := filepath.Join(t.TempDir(), "outside.txt")

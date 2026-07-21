@@ -1,17 +1,30 @@
+// FILE SIZE EXCEPTION: Cross-boundary node-agent request layer marginally over the limit; interactive/background timeout tiers and cf-container interruption classification are one cohesive concern. Split candidate if it grows further. See .claude/rules/18-file-size-limits.md
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
+import {
+  getRuntimeRecoveryMessage,
+  type RuntimeRecoveryCode,
+} from '../durable-objects/vm-agent-container-recovery';
 import type { Env } from '../env';
 import { expectJsonRecord } from '../lib/runtime-validation';
+import { AppError } from '../middleware/error';
 import { fetchWithTimeout, getTimeoutMs } from './fetch-timeout';
 import { signNodeManagementToken, signTerminalToken } from './jwt';
+import {
+  getNodeAgentReadyPollIntervalMs,
+  getNodeAgentReadyTimeoutMs,
+  getNodeBackendBaseUrl,
+  waitForNodeAgentReadyWith,
+} from './node-agent-readiness';
 import { recordNodeRoutingMetric } from './telemetry';
 import {
   fetchVmAgentContainer,
   getVmAgentContainerConfig,
   markVmAgentContainerActiveWorkEndedBestEffort,
   markVmAgentContainerActiveWorkStarted,
+  markVmAgentContainerRequestInterrupted,
 } from './vm-agent-container';
 
 const DEFAULT_NODE_AGENT_REQUEST_TIMEOUT_MS = 30_000;
@@ -22,22 +35,34 @@ const DEFAULT_CF_CONTAINER_WAKE_TIMEOUT_MS = 120_000;
 // the wake/restore budget, which re-runs the same clone. See rule 43.
 const DEFAULT_CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS = 120_000;
 
-const DEFAULT_NODE_AGENT_READY_TIMEOUT_MS = 900_000; // 15 min — cloud-init takes 8-12 min on Hetzner
-const DEFAULT_NODE_AGENT_READY_POLL_INTERVAL_MS = 5000;
-
-function getNodeBackendBaseUrl(nodeId: string, env: Env): string {
-  const protocol = env.VM_AGENT_PROTOCOL || 'https';
-  const port = env.VM_AGENT_PORT || '8443';
-  // Two-level subdomain ({nodeId}.vm.{domain}) bypasses Cloudflare same-zone routing.
-  // The wildcard Worker route *.{domain}/* matches exactly one subdomain level,
-  // so {nodeId}.vm.{domain} is NOT intercepted — requests reach the VM directly.
-  return `${protocol}://${nodeId.toLowerCase()}.vm.${env.BASE_DOMAIN}:${port}`;
-}
-
 interface NodeAgentRequestOptions extends RequestInit {
   userId: string;
   workspaceId?: string | null;
   requestTimeoutMs?: number;
+}
+
+const RUNTIME_RECOVERY_CODES: ReadonlySet<string> = new Set([
+  'RUNTIME_RECOVERING',
+  'RUNTIME_REQUEST_INTERRUPTED',
+  'RUNTIME_RECOVERY_DEGRADED',
+  'RUNTIME_STOPPED',
+]);
+
+function isRuntimeRecoveryCode(value: unknown): value is RuntimeRecoveryCode {
+  return typeof value === 'string' && RUNTIME_RECOVERY_CODES.has(value);
+}
+
+function runtimeRecoveryStatus(code: RuntimeRecoveryCode): number {
+  if (code === 'RUNTIME_STOPPED') return 410;
+  if (code === 'RUNTIME_RECOVERING') return 503;
+  return 409;
+}
+
+export class NodeAgentRequestError extends AppError {
+  constructor(statusCode: number, code: RuntimeRecoveryCode, message: string) {
+    super(statusCode, code, message);
+    this.name = 'NodeAgentRequestError';
+  }
 }
 
 function requestInitWithoutSignal(options: RequestInit): RequestInit {
@@ -46,33 +71,17 @@ function requestInitWithoutSignal(options: RequestInit): RequestInit {
   return serializableOptions;
 }
 
-export function getNodeAgentReadyTimeoutMs(env: { NODE_AGENT_READY_TIMEOUT_MS?: string }): number {
-  const parsed = env.NODE_AGENT_READY_TIMEOUT_MS
-    ? Number.parseInt(env.NODE_AGENT_READY_TIMEOUT_MS, 10)
-    : DEFAULT_NODE_AGENT_READY_TIMEOUT_MS;
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    return DEFAULT_NODE_AGENT_READY_TIMEOUT_MS;
-  }
-  return parsed;
-}
+export { getNodeAgentReadyPollIntervalMs, getNodeAgentReadyTimeoutMs };
 
-export function getNodeAgentReadyPollIntervalMs(env: {
-  NODE_AGENT_READY_POLL_INTERVAL_MS?: string;
+export function getNodeAgentRequestTimeoutMs(env: {
+  NODE_AGENT_REQUEST_TIMEOUT_MS?: string;
 }): number {
-  const parsed = env.NODE_AGENT_READY_POLL_INTERVAL_MS
-    ? Number.parseInt(env.NODE_AGENT_READY_POLL_INTERVAL_MS, 10)
-    : DEFAULT_NODE_AGENT_READY_POLL_INTERVAL_MS;
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    return DEFAULT_NODE_AGENT_READY_POLL_INTERVAL_MS;
-  }
-  return parsed;
-}
-
-export function getNodeAgentRequestTimeoutMs(env: { NODE_AGENT_REQUEST_TIMEOUT_MS?: string }): number {
   return getTimeoutMs(env.NODE_AGENT_REQUEST_TIMEOUT_MS, DEFAULT_NODE_AGENT_REQUEST_TIMEOUT_MS);
 }
 
-export function getCfContainerWakeTimeoutMs(env: { CF_CONTAINER_WAKE_TIMEOUT_MS?: string }): number {
+export function getCfContainerWakeTimeoutMs(env: {
+  CF_CONTAINER_WAKE_TIMEOUT_MS?: string;
+}): number {
   return getTimeoutMs(env.CF_CONTAINER_WAKE_TIMEOUT_MS, DEFAULT_CF_CONTAINER_WAKE_TIMEOUT_MS);
 }
 
@@ -86,62 +95,7 @@ export function getCfContainerCreateWorkspaceTimeoutMs(env: {
 }
 
 export async function waitForNodeAgentReady(nodeId: string, env: Env): Promise<void> {
-  const timeoutMs = getNodeAgentReadyTimeoutMs(env);
-  const pollIntervalMs = getNodeAgentReadyPollIntervalMs(env);
-  const baseUrl = getNodeBackendBaseUrl(nodeId, env);
-  const healthUrl = `${baseUrl}/health`;
-  const deadline = Date.now() + timeoutMs;
-
-  let lastError = '';
-
-  while (Date.now() < deadline) {
-    const remainingMs = deadline - Date.now();
-    const requestTimeoutMs = Math.max(1, Math.min(pollIntervalMs, remainingMs));
-    const controller = new AbortController();
-    let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
-
-    try {
-      const requestTimeoutError = `request timeout after ${requestTimeoutMs}ms`;
-      const response = await Promise.race([
-        fetchNodeAgent(nodeId, env, healthUrl, { method: 'GET', signal: controller.signal }, requestTimeoutMs),
-        new Promise<Response>((_resolve, reject) => {
-          timeoutHandle = setTimeout(() => {
-            controller.abort();
-            reject(new Error(requestTimeoutError));
-          }, requestTimeoutMs);
-        }),
-      ]);
-      if (response.ok) {
-        return;
-      }
-
-      const responseBody = await response.text().catch(() => '');
-      lastError = `HTTP ${response.status}${responseBody ? ` ${responseBody}` : ''}`.trim();
-    } catch (err) {
-      if (err instanceof Error && err.message.startsWith('request timeout after ')) {
-        lastError = err.message;
-      } else if (err instanceof Error && err.message.startsWith('Request timed out after ')) {
-        lastError = err.message.replace('Request timed out after ', 'request timeout after ');
-      } else if (err instanceof Error && err.name === 'AbortError') {
-        lastError = `request timeout after ${requestTimeoutMs}ms`;
-      } else {
-        lastError = err instanceof Error ? err.message : String(err);
-      }
-    } finally {
-      if (timeoutHandle) {
-        clearTimeout(timeoutHandle);
-      }
-    }
-
-    const nextRemainingMs = deadline - Date.now();
-    if (nextRemainingMs <= 0) {
-      break;
-    }
-    await new Promise((resolve) => setTimeout(resolve, Math.min(pollIntervalMs, nextRemainingMs)));
-  }
-
-  const details = lastError ? ` Last error: ${lastError}` : '';
-  throw new Error(`Node Agent not reachable at ${healthUrl} within ${timeoutMs}ms.${details}`);
+  return waitForNodeAgentReadyWith(fetchNodeAgent, nodeId, env);
 }
 
 export async function nodeAgentRequest(
@@ -180,7 +134,13 @@ export async function nodeAgentRequest(
   );
 
   const requestTimeoutMs = options.requestTimeoutMs ?? getNodeAgentRequestTimeoutMs(env);
-  const response = await fetchNodeAgent(nodeId, env, url, { ...options, headers }, requestTimeoutMs);
+  const response = await fetchNodeAgent(
+    nodeId,
+    env,
+    url,
+    { ...options, headers },
+    requestTimeoutMs
+  );
 
   recordNodeRoutingMetric(
     {
@@ -195,6 +155,20 @@ export async function nodeAgentRequest(
 
   if (!response.ok) {
     const body = await response.text().catch(() => '');
+
+    let recoveryPayload: { error?: unknown; message?: unknown } | null = null;
+    try {
+      recoveryPayload = JSON.parse(body) as { error?: unknown; message?: unknown };
+    } catch {
+      // Non-recovery Node Agent responses retain the existing generic handling.
+    }
+    if (recoveryPayload && isRuntimeRecoveryCode(recoveryPayload.error)) {
+      throw new NodeAgentRequestError(
+        runtimeRecoveryStatus(recoveryPayload.error),
+        recoveryPayload.error,
+        getRuntimeRecoveryMessage(recoveryPayload.error)
+      );
+    }
 
     // Detect Worker loop-back: when the vm-{nodeId} DNS record is missing,
     // the wildcard DNS record routes the request back to this API Worker,
@@ -260,6 +234,18 @@ export async function fetchNodeAgent(
   containerUrl.hostname = 'localhost';
   containerUrl.port = String(vmAgentPort);
 
+  // Known limitation (tracked: tasks/backlog/2026-07-21-instant-container-request-timeout-cancellation.md):
+  // the loser of this race is NOT cancelled. The container fetch is a
+  // VmAgentContainer DO RPC (fetchVmAgentContainer -> stub.proxyHttp), and an
+  // AbortSignal cannot be wired to it — passing a signal into the container node
+  // fetch is a proven regression (SPIKE PR #1544 "avoid abort signal in container
+  // node fetch"), which is exactly why requestInitWithoutSignal strips it. So on
+  // timeout the DO RPC keeps running and may still succeed, yet we mark the
+  // runtime interrupted below. That is over-eager for a slow-but-healthy request.
+  // Genuine cancellation requires the per-request timeout to live INSIDE
+  // proxyHttp, wrapping this.containerFetch (a real fetch that honors signals)
+  // with an AbortController — which needs the budget plumbed through
+  // fetchVmAgentContainer. Deferred to the tracked backlog task.
   let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
   try {
     const response = await Promise.race([
@@ -277,6 +263,22 @@ export async function fetchNodeAgent(
       }),
     ]);
     return response;
+  } catch (error) {
+    const timedOut = error instanceof Error && error.message.startsWith('Request timed out after ');
+    if (!timedOut) throw error;
+
+    const recovery = await markVmAgentContainerRequestInterrupted(env, nodeId, {
+      method: options.method ?? 'GET',
+      errorName: 'request_timeout',
+    }).catch(() => null);
+    if (recovery?.code && recovery.message) {
+      throw new NodeAgentRequestError(
+        runtimeRecoveryStatus(recovery.code),
+        recovery.code,
+        getRuntimeRecoveryMessage(recovery.code)
+      );
+    }
+    throw error;
   } finally {
     if (timeoutHandle) {
       clearTimeout(timeoutHandle);
@@ -553,7 +555,10 @@ export async function sendPromptToAgentOnNode(
   }
 }
 
-export { hibernateAgentSessionOnNode, restoreAgentSessionOnNode } from './node-agent-session-snapshots';
+export {
+  hibernateAgentSessionOnNode,
+  restoreAgentSessionOnNode,
+} from './node-agent-session-snapshots';
 
 /**
  * Cancel a running prompt on an agent session.
@@ -588,7 +593,11 @@ export async function cancelAgentSessionOnNode(
     const statusMatch = msg.match(/failed:\s*(\d{3})/);
     const status = statusMatch?.[1] ? parseInt(statusMatch[1], 10) : 500;
     if (status === 409) {
-      await markVmAgentContainerActiveWorkEndedBestEffort(env, nodeId, 'cancel_agent_session_no_prompt');
+      await markVmAgentContainerActiveWorkEndedBestEffort(
+        env,
+        nodeId,
+        'cancel_agent_session_no_prompt'
+      );
     }
     return { success: false, status };
   }

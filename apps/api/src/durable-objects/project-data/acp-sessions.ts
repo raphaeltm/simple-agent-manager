@@ -396,7 +396,16 @@ export function checkHeartbeatTimeouts(
     reason?: string | null;
     errorMessage?: string;
     metadata?: Record<string, unknown> | null;
-  }) => Promise<void>
+  }) => Promise<unknown>,
+  options: {
+    shouldDeferTimeout?: (session: {
+      id: string;
+      chatSessionId: string;
+      workspaceId: string | null;
+      nodeId: string | null;
+      lastHeartbeatAt: number | null;
+    }) => Promise<{ defer: boolean; reason: string }>;
+  } = {}
 ): Promise<Array<{ sessionId: string; workspaceId: string | null }>> {
   const detectionWindow = parseInt(
     env.ACP_SESSION_DETECTION_WINDOW_MS || String(ACP_SESSION_DEFAULTS.DETECTION_WINDOW_MS),
@@ -419,6 +428,28 @@ export function checkHeartbeatTimeouts(
   const timedOut: Array<{ sessionId: string; workspaceId: string | null }> = [];
   const promises = staleSessions.map(async (session) => {
     try {
+      if (options.shouldDeferTimeout) {
+        try {
+          const decision = await options.shouldDeferTimeout(session);
+          if (decision.defer) {
+            log.info('acp_session.heartbeat_timeout_deferred', {
+              sessionId: session.id,
+              workspaceId: session.workspaceId,
+              nodeId: session.nodeId,
+              reason: decision.reason,
+            });
+            return;
+          }
+        } catch (err) {
+          log.warn('acp_session.heartbeat_timeout_policy_failed', {
+            sessionId: session.id,
+            workspaceId: session.workspaceId,
+            nodeId: session.nodeId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+          return;
+        }
+      }
       await transitionFn(session.id, 'interrupted', {
         actorType: 'alarm', reason: 'Heartbeat timeout exceeded detection window',
         errorMessage: `Heartbeat timeout: last heartbeat at ${session.lastHeartbeatAt}, cutoff was ${cutoff}`,
@@ -476,7 +507,8 @@ export function computeHeartbeatAlarmTime(sql: SqlStorage, env: Env): number | n
   const earliestHeartbeat = parseMinEarliest(earliestRow, 'acp_sessions.earliest_heartbeat');
   if (earliestHeartbeat === null) return null;
 
-  return earliestHeartbeat + detectionWindow;
+  const dueAt = earliestHeartbeat + detectionWindow;
+  return dueAt <= Date.now() ? Date.now() + detectionWindow : dueAt;
 }
 
 /**

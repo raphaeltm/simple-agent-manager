@@ -3225,6 +3225,21 @@ func TestSessionHost_SelectAgent_AllowsSwitchToDifferentAgent(t *testing.T) {
 	host.Stop()
 }
 
+func TestSessionHost_RestoreAgentRequiresPreviousACPContext(t *testing.T) {
+	t.Parallel()
+
+	host := newTestSessionHost(t)
+	defer host.Stop()
+
+	err := host.RestoreAgent(context.Background(), "openai-codex")
+	if err == nil {
+		t.Fatal("RestoreAgent returned nil error without previous ACP context")
+	}
+	if !strings.Contains(err.Error(), "previous ACP session") {
+		t.Fatalf("error = %q, want missing previous ACP session", err.Error())
+	}
+}
+
 func TestFindModelConfigOptionID(t *testing.T) {
 	t.Parallel()
 

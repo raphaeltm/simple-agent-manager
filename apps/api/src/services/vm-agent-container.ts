@@ -7,7 +7,9 @@ import {
   type VmAgentContainer,
   type VmAgentContainerLaunchConfig,
   type VmAgentContainerLaunchSecrets,
+  type VmAgentContainerRecoveryResult,
 } from '../durable-objects/vm-agent-container';
+import type { VmAgentContainerLifecycleInspection } from '../durable-objects/vm-agent-container-lifecycle';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { errors } from '../middleware/error';
@@ -22,8 +24,12 @@ export interface VmAgentContainerConfig {
 export function getVmAgentContainerConfig(env: Env): VmAgentContainerConfig {
   return {
     enabled: (env.CF_CONTAINER_ENABLED ?? env.SANDBOX_ENABLED) === 'true',
-    vmAgentPort: Number.parseInt(env.CF_CONTAINER_VM_AGENT_PORT || env.SANDBOX_VM_AGENT_PORT || '8080', 10),
-    sleepAfter: env.CF_CONTAINER_SLEEP_AFTER || env.SANDBOX_SLEEP_AFTER || DEFAULT_CF_CONTAINER_SLEEP_AFTER,
+    vmAgentPort: Number.parseInt(
+      env.CF_CONTAINER_VM_AGENT_PORT || env.SANDBOX_VM_AGENT_PORT || '8080',
+      10
+    ),
+    sleepAfter:
+      env.CF_CONTAINER_SLEEP_AFTER || env.SANDBOX_SLEEP_AFTER || DEFAULT_CF_CONTAINER_SLEEP_AFTER,
   };
 }
 
@@ -71,6 +77,31 @@ export async function fetchVmAgentContainer(
     return container.fetch(request);
   }
   return container.proxyHttp(request, port);
+}
+
+export async function resumeVmAgentContainer(
+  env: Env,
+  nodeId: string,
+  agentSessionId: string
+): Promise<VmAgentContainerRecoveryResult> {
+  const container = getVmAgentContainer(env, nodeId);
+  return container.resumeRuntime(agentSessionId);
+}
+
+export async function inspectVmAgentContainerLifecycle(
+  env: Env,
+  nodeId: string
+): Promise<VmAgentContainerLifecycleInspection> {
+  return getVmAgentContainer(env, nodeId).inspectLifecycle();
+}
+
+export async function markVmAgentContainerRequestInterrupted(
+  env: Env,
+  nodeId: string,
+  input: { method: string; errorName: string }
+): Promise<VmAgentContainerRecoveryResult> {
+  const container = getVmAgentContainer(env, nodeId);
+  return container.markRequestInterrupted(input);
 }
 
 export async function destroyVmAgentContainer(env: Env, nodeId: string): Promise<void> {

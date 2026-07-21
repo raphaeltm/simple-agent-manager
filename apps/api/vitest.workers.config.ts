@@ -15,7 +15,12 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   plugins: [
     cloudflareTest({
-      main: './src/index.ts',
+      // Test-only entry: re-exports the real worker (default handler + every DO
+      // class) AND VmAgentContainerTestDouble so VM_AGENT_CONTAINER can be bound
+      // to a container-less stand-in. The real VmAgentContainer's Container base
+      // throws under vitest-pool-workers (no container service -> ctx.container
+      // is undefined). See tests/workers/support/*.
+      main: './tests/workers/support/test-worker-entry.ts',
       miniflare: {
         // 2024-04-03+ required for DO RPC (calling methods directly on stubs)
         compatibilityDate: '2024-04-03',
@@ -58,6 +63,15 @@ export default defineConfig({
           },
           PROJECT_ORCHESTRATOR: {
             className: 'ProjectOrchestrator',
+            useSQLite: true,
+          },
+          // Container-less stand-in for the Instant runtime container DO. The
+          // real VmAgentContainer cannot be instantiated here (Container base
+          // throws without a container service), so the heartbeat policy + stuck
+          // sweep exercise the real inspectLifecycle RPC + classifier against
+          // this double. See tests/workers/support/vm-agent-container-double.ts.
+          VM_AGENT_CONTAINER: {
+            className: 'VmAgentContainerTestDouble',
             useSQLite: true,
           },
         },

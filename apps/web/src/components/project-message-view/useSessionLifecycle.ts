@@ -1,22 +1,51 @@
 import type { NodeResponse, WorkspaceResponse } from '@simple-agent-manager/shared';
-import { DEFAULT_CHAT_LOAD_UNTIL_MAX_PAGES, DEFAULT_CHAT_SESSION_MESSAGE_LIMIT, DEFAULT_CHAT_SESSION_MESSAGE_MAX } from '@simple-agent-manager/shared';
+import {
+  DEFAULT_CHAT_LOAD_UNTIL_MAX_PAGES,
+  DEFAULT_CHAT_SESSION_MESSAGE_LIMIT,
+  DEFAULT_CHAT_SESSION_MESSAGE_MAX,
+} from '@simple-agent-manager/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { ChatConnectionState } from '../../hooks/useChatWebSocket';
 import { useChatWebSocket } from '../../hooks/useChatWebSocket';
 import { useTokenRefresh } from '../../hooks/useTokenRefresh';
 import { useWorkspacePorts } from '../../hooks/useWorkspacePorts';
-import type { ChatMessageResponse, ChatSessionDetailResponse, ChatSessionResponse, SessionStateSnapshot } from '../../lib/api';
-import { cancelAgentPrompt, getChatSession, getNode, getTerminalToken, getTranscribeApiUrl, getWorkspace, resetIdleTimer, sendFollowUpPrompt, uploadSessionFiles } from '../../lib/api';
+import type {
+  ChatMessageResponse,
+  ChatSessionDetailResponse,
+  ChatSessionResponse,
+  SessionStateSnapshot,
+} from '../../lib/api';
+import {
+  cancelAgentPrompt,
+  getChatSession,
+  getNode,
+  getTerminalToken,
+  getTranscribeApiUrl,
+  getWorkspace,
+  resetIdleTimer,
+  sendFollowUpPrompt,
+  uploadSessionFiles,
+} from '../../lib/api';
 import { mergeMessages } from '../../lib/merge-messages';
 import { isWorkspaceOperational } from '../../lib/workspace-status-utils';
 import type { SessionState } from './types';
 import type { AgentActivityState } from './types';
-import { CHAT_FALLBACK_POLL_MS, deriveSessionState, IDLE_TIMEOUT_MS, isWorkingActivity, VIRTUAL_START } from './types';
+import {
+  CHAT_FALLBACK_POLL_MS,
+  deriveSessionState,
+  IDLE_TIMEOUT_MS,
+  isWorkingActivity,
+  VIRTUAL_START,
+} from './types';
 import { useActivityVerifyTimer } from './useActivityVerifyTimer';
 import { useConnectionRecovery } from './useConnectionRecovery';
 
-type FilePanelState = { mode: 'browse' | 'view' | 'diff' | 'git-status'; path?: string; line?: number | null } | null;
+type FilePanelState = {
+  mode: 'browse' | 'view' | 'diff' | 'git-status';
+  path?: string;
+  line?: number | null;
+} | null;
 
 function parsePlanContent(content: string): SessionStateSnapshot['currentPlan'] | null {
   try {
@@ -39,7 +68,9 @@ function hashPlanContent(plan: SessionStateSnapshot['currentPlan']): string {
 
 function getPlanFingerprint(state: SessionStateSnapshot | null | undefined): string {
   if (!state) return 'no-state';
-  return state.planUpdatedAt ? `updated:${state.planUpdatedAt}` : `content:${hashPlanContent(state.currentPlan)}`;
+  return state.planUpdatedAt
+    ? `updated:${state.planUpdatedAt}`
+    : `content:${hashPlanContent(state.currentPlan)}`;
 }
 
 export interface UseSessionLifecycleResult {
@@ -59,7 +90,9 @@ export interface UseSessionLifecycleResult {
   sendingFollowUp: boolean;
   uploading: boolean;
   isResuming: boolean;
+  resumeStartedAt: number | null;
   resumeError: string | null;
+  clearResumeError: () => void;
   connectionState: ChatConnectionState;
   showConnectionBanner: boolean;
   retryWs: () => void;
@@ -89,7 +122,7 @@ export function useSessionLifecycle(
   projectId: string,
   sessionId: string,
   isProvisioning: boolean,
-  _onSessionMutated?: () => void,
+  _onSessionMutated?: () => void
 ): UseSessionLifecycleResult {
   const [session, setSession] = useState<ChatSessionResponse | null>(null);
   const [taskEmbed, setTaskEmbed] = useState<ChatSessionResponse['task'] | null>(null);
@@ -103,8 +136,12 @@ export function useSessionLifecycle(
   // can read current state without stale closures.
   const messagesRef = useRef<ChatMessageResponse[]>([]);
   const hasMoreRef = useRef(false);
-  useEffect(() => { messagesRef.current = messages; }, [messages]);
-  useEffect(() => { hasMoreRef.current = hasMore; }, [hasMore]);
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+  useEffect(() => {
+    hasMoreRef.current = hasMore;
+  }, [hasMore]);
 
   const [workspace, setWorkspace] = useState<WorkspaceResponse | null>(null);
   const [node, setNode] = useState<NodeResponse | null>(null);
@@ -115,7 +152,10 @@ export function useSessionLifecycle(
   const [agentActivity, setAgentActivity] = useState<AgentActivityState>('idle');
   const [currentPlan, setCurrentPlan] = useState<SessionStateSnapshot['currentPlan']>(null);
   const [promptStartedAt, setPromptStartedAt] = useState<number | null>(null);
-  const clearActivity = useCallback(() => { setAgentActivity('idle'); setPromptStartedAt(null); }, []);
+  const clearActivity = useCallback(() => {
+    setAgentActivity('idle');
+    setPromptStartedAt(null);
+  }, []);
 
   const hydratePlan = useCallback((s: SessionStateSnapshot | null | undefined) => {
     if (!s) return;
@@ -131,18 +171,21 @@ export function useSessionLifecycle(
     onStateSnapshot: hydratePlan,
   });
 
-  const hydrateState = useCallback((s: SessionStateSnapshot | null | undefined) => {
-    if (!s) return;
-    if (isWorkingActivity(s.activity)) {
-      setAgentActivity(s.activity);
-      setPromptStartedAt(s.promptStartedAt ?? null);
-      startVerifyDecayTimer();
-    } else {
-      clearActivity();
-      stopVerifyDecayTimer();
-    }
-    hydratePlan(s);
-  }, [clearActivity, hydratePlan, startVerifyDecayTimer, stopVerifyDecayTimer]);
+  const hydrateState = useCallback(
+    (s: SessionStateSnapshot | null | undefined) => {
+      if (!s) return;
+      if (isWorkingActivity(s.activity)) {
+        setAgentActivity(s.activity);
+        setPromptStartedAt(s.promptStartedAt ?? null);
+        startVerifyDecayTimer();
+      } else {
+        clearActivity();
+        stopVerifyDecayTimer();
+      }
+      hydratePlan(s);
+    },
+    [clearActivity, hydratePlan, startVerifyDecayTimer, stopVerifyDecayTimer]
+  );
 
   const [filePanel, setFilePanel] = useState<FilePanelState>(null);
 
@@ -162,59 +205,87 @@ export function useSessionLifecycle(
   const transcribeApiUrl = getTranscribeApiUrl();
 
   // ── DO WebSocket (sole message source) ──
-  const { connectionState, wsRef, retry: retryWs } = useChatWebSocket({
+  const {
+    connectionState,
+    wsRef,
+    retry: retryWs,
+  } = useChatWebSocket({
     projectId,
     sessionId,
     enabled: session?.status === 'active',
-    onMessage: useCallback((msg: ChatMessageResponse) => {
-      setMessages((prev) => mergeMessages(prev, [msg], 'append'));
+    onMessage: useCallback(
+      (msg: ChatMessageResponse) => {
+        setMessages((prev) => mergeMessages(prev, [msg], 'append'));
 
-      if (msg.role === 'plan' && msg.content) {
-        const parsed = parsePlanContent(msg.content);
-        if (parsed) setCurrentPlan(parsed);
-      }
-      // Streaming agent output: show 'responding' heuristic, but arm the SHARED
-      // verify-before-decay timer instead of a blind decay. The blind timer used to
-      // clobber onAgentActivity's verified timer and flip to idle during long tool calls.
-      if (msg.role !== 'user') {
-        setAgentActivity('responding');
-        startVerifyDecayTimer();
-      }
-    }, [startVerifyDecayTimer]),
+        if (msg.role === 'plan' && msg.content) {
+          const parsed = parsePlanContent(msg.content);
+          if (parsed) setCurrentPlan(parsed);
+        }
+        // Streaming agent output: show 'responding' heuristic, but arm the SHARED
+        // verify-before-decay timer instead of a blind decay. The blind timer used to
+        // clobber onAgentActivity's verified timer and flip to idle during long tool calls.
+        if (msg.role !== 'user') {
+          setAgentActivity('responding');
+          startVerifyDecayTimer();
+        }
+      },
+      [startVerifyDecayTimer]
+    ),
     onSessionStopped: useCallback(() => {
-      setSession((prev) => prev ? { ...prev, status: 'stopped' } : prev);
+      setSession((prev) => (prev ? { ...prev, status: 'stopped' } : prev));
       setAgentActivity('idle');
       setPromptStartedAt(null);
       // Stop any pending verify timer so it can't re-arm and flash the bar back on.
       stopVerifyDecayTimer();
     }, [stopVerifyDecayTimer]),
-    onCatchUp: useCallback((catchUpMessages: ChatMessageResponse[], catchUpSession: ChatSessionResponse, state?: SessionStateSnapshot | null) => {
-      setSession(catchUpSession);
-      setMessages((prev) => mergeMessages(prev, catchUpMessages, 'replace'));
-      hydrateState(state);
-    }, [hydrateState]),
-    onAgentCompleted: useCallback((agentCompletedAt: number) => {
-      setSession((prev) => prev ? { ...prev, agentCompletedAt, isIdle: true } as ChatSessionResponse : prev);
-      setAgentActivity('idle');
-      setPromptStartedAt(null);
-      // Stop any pending verify timer so it can't re-arm and flash the bar back on.
-      stopVerifyDecayTimer();
-    }, [stopVerifyDecayTimer]),
-    onAgentActivity: useCallback((activity: 'prompting' | 'idle' | 'recovering' | 'error', promptStartedAt?: number | null) => {
-      const working = activity === 'prompting' || activity === 'recovering';
-      setAgentActivity(working ? activity : 'idle');
-      setPromptStartedAt(working ? (promptStartedAt ?? Date.now()) : null);
-      if (working) {
-        // Arm the shared verify-before-decay timer (prevents false idle during long tool calls).
-        startVerifyDecayTimer();
-      } else {
-        // Authoritative idle from the DO: stop any pending verify timer.
+    onCatchUp: useCallback(
+      (
+        catchUpMessages: ChatMessageResponse[],
+        catchUpSession: ChatSessionResponse,
+        state?: SessionStateSnapshot | null
+      ) => {
+        setSession(catchUpSession);
+        setMessages((prev) => mergeMessages(prev, catchUpMessages, 'replace'));
+        hydrateState(state);
+      },
+      [hydrateState]
+    ),
+    onAgentCompleted: useCallback(
+      (agentCompletedAt: number) => {
+        setSession((prev) =>
+          prev ? ({ ...prev, agentCompletedAt, isIdle: true } as ChatSessionResponse) : prev
+        );
+        setAgentActivity('idle');
+        setPromptStartedAt(null);
+        // Stop any pending verify timer so it can't re-arm and flash the bar back on.
         stopVerifyDecayTimer();
-      }
-    }, [startVerifyDecayTimer, stopVerifyDecayTimer]),
-    onSessionUpdated: useCallback((updates: Partial<Pick<ChatSessionResponse, 'topic' | 'workspaceId'>>) => {
-      setSession((prev) => prev ? { ...prev, ...updates } : prev);
-    }, []),
+      },
+      [stopVerifyDecayTimer]
+    ),
+    onAgentActivity: useCallback(
+      (
+        activity: 'prompting' | 'idle' | 'recovering' | 'error',
+        promptStartedAt?: number | null
+      ) => {
+        const working = activity === 'prompting' || activity === 'recovering';
+        setAgentActivity(working ? activity : 'idle');
+        setPromptStartedAt(working ? (promptStartedAt ?? Date.now()) : null);
+        if (working) {
+          // Arm the shared verify-before-decay timer (prevents false idle during long tool calls).
+          startVerifyDecayTimer();
+        } else {
+          // Authoritative idle from the DO: stop any pending verify timer.
+          stopVerifyDecayTimer();
+        }
+      },
+      [startVerifyDecayTimer, stopVerifyDecayTimer]
+    ),
+    onSessionUpdated: useCallback(
+      (updates: Partial<Pick<ChatSessionResponse, 'topic' | 'workspaceId'>>) => {
+        setSession((prev) => (prev ? { ...prev, ...updates } : prev));
+      },
+      []
+    ),
   });
 
   // Connection recovery (banner debounce, idle timer, auto-resume)
@@ -259,7 +330,9 @@ export function useSessionLifecycle(
     }
   }, [projectId, sessionId, hydrateState]);
 
-  useEffect(() => { void loadSession(); }, [loadSession]);
+  useEffect(() => {
+    void loadSession();
+  }, [loadSession]);
 
   // Fetch workspace and node details
   useEffect(() => {
@@ -312,7 +385,7 @@ export function useSessionLifecycle(
     workspace?.url ?? undefined,
     session?.workspaceId ?? undefined,
     terminalToken ?? undefined,
-    isWorkspaceRunning,
+    isWorkspaceRunning
   );
 
   // Degraded fallback while the DO WebSocket is unavailable. Connected active
@@ -331,9 +404,10 @@ export function useSessionLifecycle(
       try {
         // Poll only the most-recent window — mergeReplace preserves the fully
         // loaded history, so polling must NOT re-fetch the whole conversation.
-        const data: ChatSessionDetailResponse = await getChatSession(
-          projectId, sessionId, { signal: abortController.signal, limit: DEFAULT_CHAT_SESSION_MESSAGE_LIMIT },
-        );
+        const data: ChatSessionDetailResponse = await getChatSession(projectId, sessionId, {
+          signal: abortController.signal,
+          limit: DEFAULT_CHAT_SESSION_MESSAGE_LIMIT,
+        });
         if (data.session.id !== sessionId) return;
         const newLastId = data.messages[data.messages.length - 1]?.id ?? '';
         const taskStatus = data.session.task?.status ?? '';
@@ -353,7 +427,9 @@ export function useSessionLifecycle(
         pollInFlight = false;
       }
     };
-    const pollInterval = setInterval(() => { void pollActiveSession(); }, CHAT_FALLBACK_POLL_MS);
+    const pollInterval = setInterval(() => {
+      void pollActiveSession();
+    }, CHAT_FALLBACK_POLL_MS);
 
     return () => {
       clearInterval(pollInterval);
@@ -375,7 +451,12 @@ export function useSessionLifecycle(
             if (result.cleanupAt) {
               setSession((prev) => {
                 if (!prev) return prev;
-                return { ...prev, cleanupAt: result.cleanupAt, isIdle: false, agentCompletedAt: null } as ChatSessionResponse;
+                return {
+                  ...prev,
+                  cleanupAt: result.cleanupAt,
+                  isIdle: false,
+                  agentCompletedAt: null,
+                } as ChatSessionResponse;
               });
             }
           })
@@ -384,66 +465,91 @@ export function useSessionLifecycle(
 
       // Optimistic user message
       const optimisticId = `optimistic-${crypto.randomUUID()}`;
-      setMessages((prev) => [...prev, {
-        id: optimisticId,
-        sessionId,
-        role: 'user',
-        content: trimmed,
-        toolMetadata: null,
-        createdAt: Date.now(),
-      }]);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: optimisticId,
+          sessionId,
+          role: 'user',
+          content: trimmed,
+          toolMetadata: null,
+          createdAt: Date.now(),
+        },
+      ]);
 
       // Persist via DO WebSocket
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({
-          type: 'message.send',
-          sessionId,
-          content: trimmed,
-          role: 'user',
-        }));
+        wsRef.current.send(
+          JSON.stringify({
+            type: 'message.send',
+            sessionId,
+            content: trimmed,
+            role: 'user',
+          })
+        );
       }
 
-      // For idle sessions, resume first then send the prompt
+      // For idle sessions, resume first then send the prompt. The composer is
+      // cleared only when delivery is confirmed (onDelivered); a failed resume
+      // or delivery resets the working state and keeps the typed text as the
+      // manual-retry affordance (onFailed).
       if (sessionState === 'idle' && session?.workspaceId && session?.agentSessionId) {
-        recovery.resumeAndSend(trimmed);
+        recovery.resumeAndSend(trimmed, {
+          onDelivered: () => {
+            setFollowUp('');
+          },
+          onFailed: () => {
+            setAgentActivity('idle');
+          },
+        });
       } else {
         // Forward prompt to the running agent via REST API
         try {
           await sendFollowUpPrompt(projectId, sessionId, trimmed);
-        } catch {
-          // Agent may be offline — message is still persisted via DO.
+          // Delivery confirmed — clear any stale recovery banner and the composer.
+          recovery.clearResumeError();
+          setFollowUp('');
+        } catch (err) {
+          // reportDeliveryError terminates the session on a terminal RUNTIME_STOPPED
+          // (composer disabled) or shows the recovery banner otherwise. Reset the
+          // working state and keep the composer text so the user can retry.
+          recovery.reportDeliveryError(err);
           setAgentActivity('idle');
         }
       }
-
-      setFollowUp('');
     } finally {
       setSendingFollowUp(false);
     }
   };
 
   // Upload files
-  const handleUploadFiles = useCallback(async (files: FileList | File[]) => {
-    const fileArray = Array.from(files);
-    if (fileArray.length === 0) return;
-    setUploading(true);
-    try {
-      const result = await uploadSessionFiles(projectId, sessionId, fileArray);
-      const names = result.files.map((f) => f.name).join(', ');
-      setMessages((prev) => [...prev, {
-        id: `optimistic-upload-${crypto.randomUUID()}`,
-        sessionId,
-        role: 'user' as const,
-        content: `Uploaded ${result.files.length} file${result.files.length > 1 ? 's' : ''}: ${names}`,
-        toolMetadata: null,
-        createdAt: Date.now(),
-      }]);
-    } catch (err) {
-      console.error('File upload failed:', err);
-    } finally {
-      setUploading(false);
-    }
-  }, [projectId, sessionId]);
+  const handleUploadFiles = useCallback(
+    async (files: FileList | File[]) => {
+      const fileArray = Array.from(files);
+      if (fileArray.length === 0) return;
+      setUploading(true);
+      try {
+        const result = await uploadSessionFiles(projectId, sessionId, fileArray);
+        const names = result.files.map((f) => f.name).join(', ');
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `optimistic-upload-${crypto.randomUUID()}`,
+            sessionId,
+            role: 'user' as const,
+            content: `Uploaded ${result.files.length} file${result.files.length > 1 ? 's' : ''}: ${names}`,
+            toolMetadata: null,
+            createdAt: Date.now(),
+          },
+        ]);
+      } catch (err) {
+        console.error('File upload failed:', err);
+      } finally {
+        setUploading(false);
+      }
+    },
+    [projectId, sessionId]
+  );
 
   // Cancel the current in-flight prompt via REST API
   const cancellingRef = useRef(false);
@@ -488,58 +594,94 @@ export function useSessionLifecycle(
   // Load older pages until a target timestamp is covered (or no more history).
   // Used by timeline jump-to-message for the rare oversized/guard-trimmed session
   // where the target predates the loaded window, so a jump never dead-clicks.
-  const loadUntil = useCallback(async (targetTimestamp: number) => {
-    let oldest = messagesRef.current[0]?.createdAt ?? Infinity;
-    if (oldest <= targetTimestamp) return;
-    let more = hasMoreRef.current;
-    if (!more) return;
+  const loadUntil = useCallback(
+    async (targetTimestamp: number) => {
+      let oldest = messagesRef.current[0]?.createdAt ?? Infinity;
+      if (oldest <= targetTimestamp) return;
+      let more = hasMoreRef.current;
+      if (!more) return;
 
-    setLoadingMore(true);
-    try {
-      let before: number | undefined = oldest === Infinity ? undefined : oldest;
-      const accumulated: ChatMessageResponse[] = [];
-      // Safety bound: never loop unbounded even if the server misreports hasMore.
-      const maxPages = Number.parseInt(
-        import.meta.env.VITE_CHAT_LOAD_UNTIL_MAX_PAGES || '',
-        10,
-      ) || DEFAULT_CHAT_LOAD_UNTIL_MAX_PAGES;
-      let pages = 0;
-      while (more && oldest > targetTimestamp && pages++ < maxPages) {
-        const data = await getChatSession(projectId, sessionId, {
-          before,
-          limit: DEFAULT_CHAT_SESSION_MESSAGE_LIMIT,
-        });
-        if (data.messages.length === 0) { more = false; break; }
-        accumulated.unshift(...data.messages);
-        oldest = data.messages[0]!.createdAt;
-        before = oldest;
-        more = data.hasMore;
+      setLoadingMore(true);
+      try {
+        let before: number | undefined = oldest === Infinity ? undefined : oldest;
+        const accumulated: ChatMessageResponse[] = [];
+        // Safety bound: never loop unbounded even if the server misreports hasMore.
+        const maxPages =
+          Number.parseInt(import.meta.env.VITE_CHAT_LOAD_UNTIL_MAX_PAGES || '', 10) ||
+          DEFAULT_CHAT_LOAD_UNTIL_MAX_PAGES;
+        let pages = 0;
+        while (more && oldest > targetTimestamp && pages++ < maxPages) {
+          const data = await getChatSession(projectId, sessionId, {
+            before,
+            limit: DEFAULT_CHAT_SESSION_MESSAGE_LIMIT,
+          });
+          if (data.messages.length === 0) {
+            more = false;
+            break;
+          }
+          accumulated.unshift(...data.messages);
+          oldest = data.messages[0]!.createdAt;
+          before = oldest;
+          more = data.hasMore;
+        }
+        if (accumulated.length > 0) {
+          setMessages((prev) => {
+            const merged = mergeMessages(prev, accumulated, 'prepend');
+            const actualAdded = merged.length - prev.length;
+            setFirstItemIndex((fi) => fi - actualAdded);
+            return merged;
+          });
+        }
+        setHasMore(more);
+      } finally {
+        setLoadingMore(false);
       }
-      if (accumulated.length > 0) {
-        setMessages((prev) => {
-          const merged = mergeMessages(prev, accumulated, 'prepend');
-          const actualAdded = merged.length - prev.length;
-          setFirstItemIndex((fi) => fi - actualAdded);
-          return merged;
-        });
-      }
-      setHasMore(more);
-    } finally {
-      setLoadingMore(false);
-    }
-  }, [projectId, sessionId]);
+    },
+    [projectId, sessionId]
+  );
 
   return {
-    session, messages, hasMore, loading, error, setError, sessionState, taskEmbed,
-    workspace, node, detectedPorts,
-    followUp, setFollowUp, sendingFollowUp, uploading,
-    isResuming: recovery.isResuming, resumeError: recovery.resumeError,
-    connectionState, showConnectionBanner: recovery.showConnectionBanner, retryWs,
-    agentActivity, currentPlan, promptStartedAt,
-    firstItemIndex, showScrollButton, setShowScrollButton,
+    session,
+    messages,
+    hasMore,
+    loading,
+    error,
+    setError,
+    sessionState,
+    taskEmbed,
+    workspace,
+    node,
+    detectedPorts,
+    followUp,
+    setFollowUp,
+    sendingFollowUp,
+    uploading,
+    isResuming: recovery.isResuming,
+    resumeStartedAt: recovery.resumeStartedAt,
+    resumeError: recovery.resumeError,
+    clearResumeError: recovery.clearResumeError,
+    connectionState,
+    showConnectionBanner: recovery.showConnectionBanner,
+    retryWs,
+    agentActivity,
+    currentPlan,
+    promptStartedAt,
+    firstItemIndex,
+    showScrollButton,
+    setShowScrollButton,
     idleCountdownMs: recovery.idleCountdownMs,
-    filePanel, setFilePanel, handleFileClick, handleOpenFileBrowser, handleOpenGitChanges,
-    handleCancelPrompt, handleSendFollowUp, handleUploadFiles,
-    loadMore, loadUntil, loadingMore, transcribeApiUrl, wsRef,
+    filePanel,
+    setFilePanel,
+    handleFileClick,
+    handleOpenFileBrowser,
+    handleOpenGitChanges,
+    handleCancelPrompt,
+    handleSendFollowUp,
+    handleUploadFiles,
+    loadMore,
+    loadUntil,
+    loadingMore,
+    transcribeApiUrl,
+    wsRef,
   };
 }

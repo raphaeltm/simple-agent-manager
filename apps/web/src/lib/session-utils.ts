@@ -7,6 +7,11 @@ const ACTIVE_HOST_STATUSES: ReadonlySet<AgentHostStatus> = new Set([
   'ready',
   'prompting',
 ]);
+const RECOVERABLE_SESSION_STATUSES: ReadonlySet<AgentSession['status']> = new Set([
+  'running',
+  'recovery',
+  'sleeping',
+]);
 
 /**
  * Determines if a session should be treated as active (visible in tabs).
@@ -14,7 +19,7 @@ const ACTIVE_HOST_STATUSES: ReadonlySet<AgentHostStatus> = new Set([
  * is still alive despite a non-running status (orphan recovery).
  */
 export function isSessionActive(session: AgentSession): boolean {
-  if (session.status === 'running') return true;
+  if (RECOVERABLE_SESSION_STATUSES.has(session.status)) return true;
   if (!session.hostStatus) return false;
   return ACTIVE_HOST_STATUSES.has(session.hostStatus);
 }
@@ -24,7 +29,7 @@ export function isSessionActive(session: AgentSession): boolean {
  * These are "orphaned" sessions -- alive on the VM but previously hidden.
  */
 export function isOrphanedSession(session: AgentSession): boolean {
-  if (session.status === 'running') return false;
+  if (RECOVERABLE_SESSION_STATUSES.has(session.status)) return false;
   if (!session.hostStatus) return false;
   return ACTIVE_HOST_STATUSES.has(session.hostStatus);
 }

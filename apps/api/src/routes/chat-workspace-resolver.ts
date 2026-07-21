@@ -1,10 +1,9 @@
 /**
- * Tenant-scoped resolution of the live workspace that bridges a chat session
- * to its running VM. Extracted from routes/chat.ts to keep that file under the
- * 800-line limit (.claude/rules/18) and to make the security-critical resolver
- * independently testable against real D1.
+ * Tenant-scoped resolution of the workspace bridging a chat session to its
+ * runtime. Recovery states are admitted only for cf-container nodes; VM
+ * sessions preserve their fail-fast dead-node guard.
  */
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, or } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -13,32 +12,28 @@ import { errors } from '../middleware/error';
 
 type ChatDb = ReturnType<typeof drizzle<typeof schema>>;
 
+export interface ChatWorkspaceRuntime {
+  id: string;
+  nodeId: string | null;
+  nodeStatus: string | null;
+  nodeRuntime: string | null;
+}
+
 /**
- * Resolve the live workspace that bridges a chat session to its running VM,
- * scoped to the owning project AND user.
- *
- * Security: the workspace bridge MUST NOT be resolvable by `chatSessionId`
- * alone. Without project + user scoping, any authenticated caller who supplies
- * (or guesses/replays) a sessionId belonging to another tenant can drive the
- * VM agent for a workspace they do not own — an IDOR in the same class as past
- * cross-tenant leaks. We resolve via the narrowest canonical chat-scoped
- * identifier (`chatSessionId`) AND enforce ownership in the query WHERE clause
- * (see .claude/rules/06 canonical session routing, .claude/rules/11 identity
- * validation). A post-query defence-in-depth assertion rejects any row whose
- * ownership does not match the caller, guarding against a future WHERE-clause
- * regression (typo/refactor/ORM bug) per .claude/rules/28.
- *
- * Returns null when no matching active workspace exists for this owner.
+ * Resolve the workspace bridge, scoped to the owning project and user.
+ * `chatSessionId` alone is never sufficient: retaining project/user predicates
+ * is the defence against cross-tenant workspace control.
  */
 export async function resolveLiveWorkspaceForSession(
   db: ChatDb,
   { projectId, sessionId, userId }: { projectId: string; sessionId: string; userId: string }
-): Promise<{ id: string; nodeId: string | null; nodeStatus: string | null } | null> {
+): Promise<ChatWorkspaceRuntime | null> {
   const [workspace] = await db
     .select({
       id: schema.workspaces.id,
       nodeId: schema.workspaces.nodeId,
       nodeStatus: schema.nodes.status,
+      nodeRuntime: schema.nodes.runtime,
       userId: schema.workspaces.userId,
       projectId: schema.workspaces.projectId,
     })
@@ -49,16 +44,16 @@ export async function resolveLiveWorkspaceForSession(
         eq(schema.workspaces.chatSessionId, sessionId),
         eq(schema.workspaces.projectId, projectId),
         eq(schema.workspaces.userId, userId),
-        inArray(schema.workspaces.status, ['running', 'recovery', 'sleeping'])
+        or(
+          inArray(schema.workspaces.status, ['running', 'recovery', 'sleeping']),
+          and(eq(schema.nodes.runtime, 'cf-container'), eq(schema.workspaces.status, 'error'))
+        )
       )
     )
     .limit(1);
 
-  if (!workspace) {
-    return null;
-  }
+  if (!workspace) return null;
 
-  // Defence-in-depth: reject any row whose ownership doesn't match the caller.
   if (workspace.userId !== userId || workspace.projectId !== projectId) {
     log.error('chat: workspace ownership mismatch on session bridge', {
       sessionId,
@@ -72,53 +67,44 @@ export async function resolveLiveWorkspaceForSession(
     return null;
   }
 
-  return { id: workspace.id, nodeId: workspace.nodeId, nodeStatus: workspace.nodeStatus };
+  return {
+    id: workspace.id,
+    nodeId: workspace.nodeId,
+    nodeStatus: workspace.nodeStatus,
+    nodeRuntime: workspace.nodeRuntime,
+  };
 }
 
 /**
- * Resolve the live workspace AND its resumable agent session for a chat action
- * (e.g. /prompt, /cancel), enforcing tenant scoping at every layer.
- *
- * Consolidates the shared resolution path used by the /prompt and /cancel
- * handlers: workspace bridge resolution (project + user scoped), node-liveness
- * guards, and the defence-in-depth user-scoped agent-session lookup (backed by
- * idx_agent_sessions_ws_user_status). Throws the same fail-fast errors both
- * handlers relied on so callers can forward straight to the VM agent.
- *
- * @throws notFound when no active workspace/node or running agent session exists
- * @throws conflict when the workspace node is no longer running
+ * Resolve the workspace and resumable agent session for a chat action. A
+ * cf-container Durable Object owns replacement classification, so recoverable
+ * D1 states must reach it. Other runtimes still require a running node.
  */
 export async function resolveLiveAgentSessionForChat(
   db: ChatDb,
   { projectId, sessionId, userId }: { projectId: string; sessionId: string; userId: string }
-): Promise<{ workspace: { id: string; nodeId: string; nodeStatus: string }; agentSession: { id: string } }> {
-  // Find the workspace linked to this chat session, scoped to the owning
-  // project + user (see resolveLiveWorkspaceForSession). The node join also
-  // verifies the node is still active: when a node is destroyed (e.g., after
-  // task timeout), its DNS record is cleaned up but the workspace may still be
-  // marked 'running' in D1. Without this check, the request to the VM agent
-  // would hit the wildcard DNS record and loop back to this Worker (404).
+): Promise<{
+  workspace: { id: string; nodeId: string; nodeStatus: string; nodeRuntime: string };
+  agentSession: { id: string };
+}> {
   const workspace = await resolveLiveWorkspaceForSession(db, { projectId, sessionId, userId });
-
-  if (!workspace || !workspace.nodeId) {
+  if (!workspace?.nodeId || !workspace.nodeStatus || !workspace.nodeRuntime) {
     throw errors.notFound('No active workspace found for this session');
   }
 
-  // Verify the node is still reachable — prevents requests to destroyed VMs
-  // whose DNS records no longer exist (would loop back via wildcard DNS).
-  // D1 nodes.status uses 'running' for healthy nodes (not 'active'/'warm', which are DO states).
-  // A request routed to a sleeping cf-container is the wake signal: the
-  // container proxy launches a fresh runtime and restores its latest snapshot
-  // before forwarding the request. Preserve the fail-fast guard for every
-  // other non-running node state.
-  if (workspace.nodeStatus !== 'running' && workspace.nodeStatus !== 'sleeping') {
+  const isContainer = workspace.nodeRuntime === 'cf-container';
+  const nodeIsReachable = isContainer
+    ? ['running', 'sleeping', 'recovery', 'error'].includes(workspace.nodeStatus)
+    : workspace.nodeStatus === 'running';
+  if (!nodeIsReachable) {
     throw errors.conflict(
       'The workspace node is no longer running. Start a new chat to create a fresh workspace.'
     );
   }
 
-  // Find the running agent session on that workspace, scoped to the user
-  // for defence-in-depth (uses idx_agent_sessions_ws_user_status composite index).
+  const agentStatuses = isContainer
+    ? ['running', 'sleeping', 'recovery', 'error']
+    : ['running', 'sleeping'];
   const [agentSession] = await db
     .select({ id: schema.agentSessions.id })
     .from(schema.agentSessions)
@@ -126,14 +112,20 @@ export async function resolveLiveAgentSessionForChat(
       and(
         eq(schema.agentSessions.workspaceId, workspace.id),
         eq(schema.agentSessions.userId, userId),
-        inArray(schema.agentSessions.status, ['running', 'sleeping'])
+        inArray(schema.agentSessions.status, agentStatuses)
       )
     )
     .limit(1);
 
-  if (!agentSession) {
-    throw errors.notFound('No running agent session found');
-  }
+  if (!agentSession) throw errors.notFound('No running agent session found');
 
-  return { workspace: { id: workspace.id, nodeId: workspace.nodeId, nodeStatus: workspace.nodeStatus }, agentSession };
+  return {
+    workspace: {
+      id: workspace.id,
+      nodeId: workspace.nodeId,
+      nodeStatus: workspace.nodeStatus,
+      nodeRuntime: workspace.nodeRuntime,
+    },
+    agentSession,
+  };
 }

@@ -859,6 +859,12 @@ export const tasks = sqliteTable(
     chatSessionIdUnique: uniqueIndex('idx_tasks_chat_session_id_unique')
       .on(table.chatSessionId)
       .where(sql`chat_session_id IS NOT NULL`),
+    // Supports the `WHERE workspace_id = ? AND status IN (...)` lookups on the
+    // mass-outage recovery hot path (persistRuntimeRecoveryFailed) and other
+    // workspace-scoped task queries. Partial: most tasks never bind a workspace.
+    workspaceIdIdx: index('idx_tasks_workspace_id')
+      .on(table.workspaceId)
+      .where(sql`workspace_id IS NOT NULL`),
     triggerExecutionIdIdx: index('idx_tasks_trigger_execution_id')
       .on(table.triggerExecutionId)
       .where(sql`trigger_execution_id IS NOT NULL`),

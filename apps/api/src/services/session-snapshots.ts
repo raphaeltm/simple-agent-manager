@@ -25,6 +25,8 @@ export interface SessionSnapshotManifest {
   chatSessionId: string;
   workspaceId: string;
   agentSessionId?: string;
+  acpSessionId?: string;
+  agentType?: string;
   baseCommit?: string;
   status: SessionSnapshotStatus;
   degradation: SessionSnapshotDegradation;
@@ -93,7 +95,9 @@ export function getSessionSnapshotConfig(env: Env): SessionSnapshotConfig {
       env.SESSION_SNAPSHOT_JSON_BODY_MAX_BYTES,
       DEFAULT_SESSION_SNAPSHOT_JSON_BODY_MAX_BYTES
     ),
-    r2Prefix: sanitizeSnapshotPrefix(env.SESSION_SNAPSHOT_R2_PREFIX || DEFAULT_SESSION_SNAPSHOT_R2_PREFIX),
+    r2Prefix: sanitizeSnapshotPrefix(
+      env.SESSION_SNAPSHOT_R2_PREFIX || DEFAULT_SESSION_SNAPSHOT_R2_PREFIX
+    ),
   };
 }
 
@@ -116,7 +120,8 @@ export function buildSessionSnapshotR2Key(
 ): string {
   const { r2Prefix } = getSessionSnapshotConfig(env);
   const sessionKey = sanitizeKeySegment(chatSessionId);
-  const suffix = artifact === 'home' ? 'home.tar' : artifact === 'wip' ? 'wip.bundle' : 'manifest.json';
+  const suffix =
+    artifact === 'home' ? 'home.tar' : artifact === 'wip' ? 'wip.bundle' : 'manifest.json';
   return `${r2Prefix}/${sessionKey}/${suffix}`;
 }
 
@@ -174,7 +179,10 @@ export async function prepareSessionSnapshot(
   } satisfies schema.NewSessionSnapshot;
 
   if (existing[0]) {
-    await db.update(schema.sessionSnapshots).set(row).where(eq(schema.sessionSnapshots.id, snapshotId));
+    await db
+      .update(schema.sessionSnapshots)
+      .set(row)
+      .where(eq(schema.sessionSnapshots.id, snapshotId));
   } else {
     await db.insert(schema.sessionSnapshots).values({ ...row, createdAt: now.toISOString() });
   }
@@ -214,11 +222,13 @@ export async function completeSessionSnapshot(
       baseCommit: input.baseCommit,
       manifestJson,
       expiresAt:
-        (await db
-          .select({ expiresAt: schema.sessionSnapshots.expiresAt })
-          .from(schema.sessionSnapshots)
-          .where(eq(schema.sessionSnapshots.chatSessionId, input.chatSessionId))
-          .limit(1))[0]?.expiresAt || snapshotExpiry(new Date(), getSessionSnapshotConfig(env).ttlDays),
+        (
+          await db
+            .select({ expiresAt: schema.sessionSnapshots.expiresAt })
+            .from(schema.sessionSnapshots)
+            .where(eq(schema.sessionSnapshots.chatSessionId, input.chatSessionId))
+            .limit(1)
+        )[0]?.expiresAt || snapshotExpiry(new Date(), getSessionSnapshotConfig(env).ttlDays),
       updatedAt: new Date().toISOString(),
     })
     .where(eq(schema.sessionSnapshots.chatSessionId, input.chatSessionId));
@@ -264,7 +274,10 @@ export async function recordSessionSnapshotRestoreResult(
     .where(eq(schema.sessionSnapshots.chatSessionId, input.chatSessionId));
 }
 
-export async function deleteSessionSnapshotArtifacts(env: Env, chatSessionId: string): Promise<void> {
+export async function deleteSessionSnapshotArtifacts(
+  env: Env,
+  chatSessionId: string
+): Promise<void> {
   await Promise.all(
     (['home', 'wip', 'manifest'] as const).map((artifact) =>
       env.R2.delete(buildSessionSnapshotR2Key(env, chatSessionId, artifact)).catch((err) => {

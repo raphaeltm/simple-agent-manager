@@ -63,10 +63,16 @@ See `apps/api/.env.example` for the full list. Key variables:
 - `WRANGLER_PORT` — Local dev port (default: 8787)
 - `BASE_DOMAIN` — Set automatically by sync scripts
 - `CF_CONTAINER_ENABLED` — Enables Cloudflare Container instant-session runtime in generated deployment envs (default: `true`; set `false` to force VM runtime)
-- `CF_CONTAINER_SLEEP_AFTER` — Container idle sleep duration for instant-session runtime (default: `10m`)
+- `CF_CONTAINER_SLEEP_AFTER` — Container idle sleep duration for instant-session runtime (default: `1h`)
+- `CF_CONTAINER_ACTIVE_WORK_MAX_MS` — Defensive maximum active-work keepalive duration (default: `7200000`)
+- `CF_CONTAINER_KEEPALIVE_RENEW_INTERVAL_MS` — Active-work keepalive renewal interval (default: `300000`)
 - `CF_CONTAINER_VM_AGENT_PORT` — vm-agent standalone HTTP port inside the raw container (default: `8080`)
 - `CF_CONTAINER_PORT_READY_TIMEOUT_MS` — Max wait for vm-agent port readiness (default: `30000`)
-- `$1
+- `CF_CONTAINER_WAKE_TIMEOUT_MS` — Max wait for launch, snapshot restore, and request readiness (default: `120000`)
+- `CF_CONTAINER_RECOVERY_MAX_ATTEMPTS` — Max restore attempts before terminal status reconciliation (default: `2`)
+- `INSTANT_STALE_CALLBACK_MARGIN_MS` — Freshness margin for rejecting destructive callbacks from superseded Instant containers (default: `60000`)
+- `CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS` — Synchronous workspace creation and clone budget (default: `120000`)
+- `CF_CONTAINER_CLONE_FILTER` — Git partial-clone filter (default: `blob:none`; `off` disables partial clone)
 - `SESSION_SNAPSHOT_TTL_DAYS` — Retention for hibernated session snapshots; deployment also provisions matching R2 prefix expiration (default: `7`)
 - `SESSION_SNAPSHOT_TOTAL_BUDGET_BYTES` — Maximum bytes accepted for one snapshot artifact (default: `104857600`)
 - `SESSION_SNAPSHOT_ENTRY_THRESHOLD_BYTES` — Per-file threshold before snapshot content is visibly skipped (default: `52428800`)

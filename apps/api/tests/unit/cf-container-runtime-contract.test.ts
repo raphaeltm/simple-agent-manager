@@ -18,7 +18,11 @@ function readPackage(relPath: string): string {
 }
 
 function getPinnedAgentPackage(agentType: string): string {
-  const manifest = agentInstallManifest as Array<{ agentType: string; package: string; version: string }>;
+  const manifest = agentInstallManifest as Array<{
+    agentType: string;
+    package: string;
+    version: string;
+  }>;
   const entry = manifest.find((candidate) => candidate.agentType === agentType);
   if (!entry) {
     throw new Error(`Missing agent install manifest entry for ${agentType}`);
@@ -118,6 +122,7 @@ describe('cf-container runtime spike contracts', () => {
 
   it('keeps active raw container prompt work alive with a bounded renewActivityTimeout loop', () => {
     const containerDo = read('durable-objects/vm-agent-container.ts');
+    const activeWork = read('durable-objects/vm-agent-container-active-work.ts');
     const containerService = read('services/vm-agent-container.ts');
     const nodeAgent = read('services/node-agent.ts');
     const activityCallback = read('routes/projects/agent-activity-callback.ts');
@@ -134,15 +139,15 @@ describe('cf-container runtime spike contracts', () => {
     expect(containerDo).toContain(
       'await this.schedule(Math.max(1, Math.ceil(delayMs / 1000)), KEEPALIVE_CALLBACK)'
     );
-    expect(containerDo).toContain("endReason: 'keepalive_deadline_exceeded'");
+    expect(activeWork).toContain("endReason: 'keepalive_deadline_exceeded'");
     expect(nodeAgent).toContain('markVmAgentContainerActiveWorkStarted(env, nodeId');
     expect(nodeAgent).toContain("reason: 'start_agent_session'");
     expect(nodeAgent).toContain("reason: 'send_prompt'");
     expect(nodeAgent).toContain(
       "markVmAgentContainerActiveWorkEndedBestEffort(env, nodeId, 'cancel_agent_session')"
     );
-    expect(nodeAgent).toContain(
-      "markVmAgentContainerActiveWorkEndedBestEffort(env, nodeId, 'cancel_agent_session_no_prompt')"
+    expect(nodeAgent).toMatch(
+      /markVmAgentContainerActiveWorkEndedBestEffort\(\s*env,\s*nodeId,\s*'cancel_agent_session_no_prompt'\s*\)/
     );
     expect(nodeAgent).toContain(
       "markVmAgentContainerActiveWorkEndedBestEffort(env, nodeId, 'stop_agent_session')"
@@ -153,10 +158,17 @@ describe('cf-container runtime spike contracts', () => {
 
   it('classifies raw container idle expiration as sleeping instead of crash/error', () => {
     const containerDo = read('durable-objects/vm-agent-container.ts');
+    const containerLifecycle = read('durable-objects/vm-agent-container-lifecycle.ts');
     const chatResolver = read('routes/chat-workspace-resolver.ts');
 
+    // Recovery-state-machine behavior (onStop ignoring 'recovering', the resume/
+    // ensureAwake wiring, and the RUNTIME_RECOVERY_DEGRADED_MESSAGE /
+    // RUNTIME_STOPPED_MESSAGE codes) is now exercised behaviorally in
+    // durable-objects/vm-agent-container-recovery.test.ts (wake concurrency,
+    // persistence, and lifecycle-status parity suites); those source-contract
+    // string assertions were removed here to avoid duplicate, non-behavioral
+    // coverage (rule 02). Structural-only checks (type unions, storage keys) stay.
     expect(containerDo).toContain('override async onStop');
-    expect(containerDo).toContain("if (status === 'expired' || status === 'sleeping')");
     expect(containerDo).toContain('override async onError');
     expect(containerDo).toContain('override async onActivityExpired');
     expect(containerDo).toContain(
@@ -165,10 +177,8 @@ describe('cf-container runtime spike contracts', () => {
     expect(containerDo).toContain(
       "await this.ctx.storage.put('lifecycleStatus', 'sleeping' satisfies LifecycleStatus)"
     );
-    expect(containerDo).toContain("status: 'sleeping'");
-    expect(containerDo).toContain("if (lifecycleStatus === 'sleeping')");
-    expect(containerDo).toContain('const wake = await this.ensureAwake()');
-    expect(containerDo).toContain('WAKE_DEGRADED_RESPONSE');
+    expect(containerLifecycle).toContain("| 'sleeping'");
+    expect(containerDo).toContain("status === 'sleeping' ? 'idle' : 'error'");
     expect(containerDo).toContain(
       "await this.ctx.storage.put('lifecycleStatus', 'launching' satisfies LifecycleStatus)"
     );
@@ -179,17 +189,14 @@ describe('cf-container runtime spike contracts', () => {
       "inArray(schema.workspaces.status, ['running', 'recovery', 'sleeping'])"
     );
     expect(chatResolver).toContain(
-      "workspace.nodeStatus !== 'running' && workspace.nodeStatus !== 'sleeping'"
+      "['running', 'sleeping', 'recovery', 'error'].includes(workspace.nodeStatus)"
     );
-    expect(chatResolver).toContain("inArray(schema.agentSessions.status, ['running', 'sleeping'])");
+    expect(chatResolver).toContain('inArray(schema.agentSessions.status, agentStatuses)');
     expect(chatResolver).not.toContain('The workspace container is asleep.');
-    expect(containerDo).toContain(
-      "return new Response('Container is stopped; create a new instant session.', { status: 410 })"
-    );
     expect(containerDo).toContain("await this.ctx.storage.put('launchConfig', config)");
     expect(containerDo).toContain('nodeCallbackToken: string');
     expect(containerDo).toContain('CALLBACK_TOKEN: secrets.nodeCallbackToken');
-    expect(containerDo).toContain("status === 'stopped' ? 'stopped' : 'error'");
+    expect(containerDo).toContain('persistRuntimeEnded(this.env, config, status, message)');
     expect(containerDo).not.toContain(
       'Container idle timeout expired; start a new instant session.'
     );

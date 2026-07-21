@@ -110,16 +110,25 @@ describe('sync wrangler config', () => {
     });
   });
 
-  it('passes cf-container clone/create tunables through from process env when set', () => {
+  it('passes cf-container lifecycle and clone tunables through from process env when set', () => {
     vi.stubEnv('RESOURCE_PREFIX', 's123abc');
 
     const unset = generateApiWorkerEnv({}, outputs, 'prod', false, false).vars;
+    expect(unset).not.toHaveProperty('CF_CONTAINER_ACTIVE_WORK_MAX_MS');
+    expect(unset).not.toHaveProperty('CF_CONTAINER_KEEPALIVE_RENEW_INTERVAL_MS');
+    expect(unset).not.toHaveProperty('CF_CONTAINER_RECOVERY_MAX_ATTEMPTS');
     expect(unset).not.toHaveProperty('CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS');
     expect(unset).not.toHaveProperty('CF_CONTAINER_CLONE_FILTER');
 
+    vi.stubEnv('CF_CONTAINER_ACTIVE_WORK_MAX_MS', '7200000');
+    vi.stubEnv('CF_CONTAINER_KEEPALIVE_RENEW_INTERVAL_MS', '300000');
+    vi.stubEnv('CF_CONTAINER_RECOVERY_MAX_ATTEMPTS', '3');
     vi.stubEnv('CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS', '180000');
     vi.stubEnv('CF_CONTAINER_CLONE_FILTER', 'off');
     expect(generateApiWorkerEnv({}, outputs, 'prod', false, false).vars).toMatchObject({
+      CF_CONTAINER_ACTIVE_WORK_MAX_MS: '7200000',
+      CF_CONTAINER_KEEPALIVE_RENEW_INTERVAL_MS: '300000',
+      CF_CONTAINER_RECOVERY_MAX_ATTEMPTS: '3',
       CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS: '180000',
       CF_CONTAINER_CLONE_FILTER: 'off',
     });
