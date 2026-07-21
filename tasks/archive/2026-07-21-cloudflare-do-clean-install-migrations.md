@@ -136,7 +136,7 @@ operator hand-edit instructions.
 - [x] Run focused generator/workflow tests, Wrangler binding checks, lint,
       typecheck, tests, build, and migration safety checks proportionate to the
       change.
-- [ ] Run Cloudflare specialist, task completion, test, constitution, and
+- [x] Run Cloudflare specialist, task completion, test, constitution, and
       documentation reviews; address all correctness findings.
 - [ ] Deploy through the staging workflow, prove v17 legacy namespaces remain
       unchanged, and record the clean-install proof available without mutating
@@ -167,7 +167,7 @@ operator hand-edit instructions.
 
 - TDD discrimination: the new compatibility suite failed all 12 initial cases
   against the verbatim-copy generator, then passed after implementation.
-- Focused compatibility/generator tests: 35 tests passed.
+- Focused compatibility/generator tests: 37 tests passed.
 - Deployment/config gates passed: deployment-script TypeScript compilation,
   Wrangler binding parity, D1 migration safety, Durable Object migration
   safety, migration ordering, AST checks, file-size checks, source-contract
@@ -182,6 +182,22 @@ operator hand-edit instructions.
 - The final read-only state probe returned `v17` for both `sam-api-staging` and
   `sam-api-prod`; namespace backend flags were inspected separately and match
   the immutable checked-in history.
+
+## Specialist review evidence
+
+- Task completion: PASS; Checks A-F found no planned-vs-actual, acceptance,
+  UI-path, multi-resource, or vertical-slice gap.
+- Cloudflare/infra: PASS; applied tags remain immutable, clean creates are all
+  SQLite, existing v17 output is unchanged, and both deploy passes use the probe.
+- Tests: ADDRESSED; added explicit duplicate-tag and unreadable-list fail-closed
+  cases identified during review, bringing the focused total to 37.
+- Constitution: PASS; the new URL is an external Cloudflare API contract and
+  the page size is a bounded protocol request, not business configuration.
+- Documentation: PASS; the deployment rule and public self-hosting behavior
+  match the generator and introduce no new operator-managed configuration.
+- All attempted specialist subagents were interrupted by the execution
+  environment, so the repository skill checklists were executed locally and
+  this limitation will be disclosed in the PR.
 
 ## Post-mortem
 

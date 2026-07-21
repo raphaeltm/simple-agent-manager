@@ -140,6 +140,15 @@ describe('resolveDurableObjectMigrations', () => {
     ).toThrow('Deployed Durable Object migration tag "v999" is not present');
   });
 
+  it('fails closed when the checked-in history contains duplicate tags', () => {
+    expect(() =>
+      resolveDurableObjectMigrations(
+        [{ tag: 'v1', new_classes: ['LegacyClass'] }, { tag: 'v1' }],
+        null
+      )
+    ).toThrow('Durable Object migration tag "v1" is duplicated');
+  });
+
   it('feeds the resolved clean-install history into the generated environment', () => {
     vi.stubEnv('RESOURCE_PREFIX', 's123abc');
     const topLevel = TOML.parse(readFileSync(WRANGLER_TOML_PATH, 'utf8')) as WranglerToml;
@@ -198,6 +207,19 @@ describe('getDeployedWorkerMigrationTag', () => {
       'https://api.cloudflare.com/client/v4/accounts/account-id/workers/scripts?per_page=1000',
       { headers: { Authorization: 'Bearer token' } }
     );
+  });
+
+  it('fails closed before exact lookup when the Workers listing is unreadable', async () => {
+    vi.stubEnv('CF_API_TOKEN', 'token');
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response('sensitive-control-plane-detail', { status: 403 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(getDeployedWorkerMigrationTag('account-id', 'api-worker')).rejects.toThrow(
+      /^Failed to list Workers while reading migration state for "api-worker" \(HTTP 403\)$/
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('fails closed when exact Worker state cannot be read without leaking response content', async () => {
