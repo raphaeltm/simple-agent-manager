@@ -22,10 +22,10 @@ import {
   RUNTIME_STOPPED_MESSAGE,
   type RuntimeRecoveryCause,
   type RuntimeRecoveryCode,
-  type RuntimeRecoveryContext,
   type RuntimeRecoveryState,
   type RuntimeRecoveryTarget,
   type RuntimeRecoveryTrigger,
+  toRuntimeRecoveryTarget,
 } from './vm-agent-container-recovery';
 import {
   interruptedRuntimeRequestResponse as interruptedRequestResponse,
@@ -33,15 +33,17 @@ import {
   isMutatingRuntimeRequest as isMutatingRequest,
   persistRuntimeEnded,
   persistRuntimeSleeping,
+  probeLiveRuntimeSession,
+  resolveRuntimeSettings,
   runtimeRecoveryResponse as recoveryResponse,
   runtimeResultResponse as resultResponse,
 } from './vm-agent-container-runtime';
 
 export const DEFAULT_CF_CONTAINER_SLEEP_AFTER = '1h';
+export const DEFAULT_CF_CONTAINER_PORT_READY_TIMEOUT_MS = 30_000;
 export const DEFAULT_CF_CONTAINER_ACTIVE_WORK_MAX_MS = 2 * 60 * 60 * 1000;
 export const DEFAULT_CF_CONTAINER_KEEPALIVE_RENEW_INTERVAL_MS = 5 * 60 * 1000;
 export const DEFAULT_CF_CONTAINER_RECOVERY_MAX_ATTEMPTS = 2;
-
 export interface VmAgentContainerLaunchConfig {
   nodeId: string;
   workspaceId: string;
@@ -53,7 +55,6 @@ export interface VmAgentContainerLaunchConfig {
   controlPlaneUrl: string;
   vmAgentPort: number;
 }
-
 export interface VmAgentContainerLaunchSecrets {
   nodeCallbackToken: string;
 }
@@ -64,7 +65,6 @@ export interface VmAgentContainerRecoveryResult {
   code?: RuntimeRecoveryCode;
   message?: string;
 }
-
 type LifecycleStatus =
   | 'launching'
   | 'running'
@@ -80,7 +80,6 @@ type LifecycleStatus =
 
 const RECOVERY_STATE_KEY = 'runtimeRecovery';
 const KEEPALIVE_CALLBACK = 'renewActiveWorkKeepalive';
-
 function stoppedRecoveryResult(): VmAgentContainerRecoveryResult {
   return {
     ok: false,
@@ -202,7 +201,64 @@ export class VmAgentContainer extends Container<Env> {
     }
   }
 
-  async resumeRuntime(): Promise<VmAgentContainerRecoveryResult> {
+  async resumeRuntime(agentSessionId?: string): Promise<VmAgentContainerRecoveryResult> {
+    const lifecycle = await this.ctx.storage.get<LifecycleStatus>('lifecycleStatus');
+    if (lifecycle === 'running') {
+      const config = await this.ctx.storage.get<VmAgentContainerLaunchConfig>('launchConfig');
+      const context = config
+        ? await loadRuntimeRecoveryContext(this.env, {
+            workspaceId: config.workspaceId,
+            preferredAgentSessionId: agentSessionId,
+          })
+        : null;
+      if (!config || !context) {
+        return {
+          ok: false,
+          status: 'degraded',
+          code: 'RUNTIME_RECOVERY_DEGRADED',
+          message: RUNTIME_RECOVERY_DEGRADED_MESSAGE,
+        };
+      }
+      try {
+        const live = await probeLiveRuntimeSession({
+          env: this.env,
+          userId: context.userId,
+          nodeId: config.nodeId,
+          workspaceId: config.workspaceId,
+          agentSessionId: context.agentSessionId,
+          vmAgentPort: config.vmAgentPort,
+          containerFetch: (request, port) => this.containerFetch(request, port),
+        });
+        if (live) {
+          const reconciled = await this.withLifecycleLock(async () => {
+            const current = await this.ctx.storage.get<LifecycleStatus>('lifecycleStatus');
+            if (current !== 'running') return false;
+            await persistRuntimeRecovered(
+              this.env,
+              toRuntimeRecoveryTarget(config, context),
+              'none'
+            );
+            return true;
+          });
+          if (reconciled) return { ok: true, status: 'running' };
+          return this.ensureAwake();
+        }
+        await this.beginUnexpectedRecovery({
+          trigger: 'request',
+          cause: { kind: 'missing_session_host', httpStatus: 404 },
+          promptDisposition: 'none',
+        });
+      } catch (error) {
+        await this.beginUnexpectedRecovery({
+          trigger: 'request',
+          cause: {
+            kind: 'transport_interrupted',
+            errorName: error instanceof Error ? error.name : 'unknown',
+          },
+          promptDisposition: 'none',
+        });
+      }
+    }
     return this.ensureAwake();
   }
 
@@ -388,7 +444,7 @@ export class VmAgentContainer extends Container<Env> {
         } satisfies VmAgentContainerRecoveryResult;
       }
 
-      if (recovery.attempts >= this.getRecoveryMaxAttempts()) {
+      if (recovery.attempts >= this.getRuntimeSettings().recoveryMaxAttempts) {
         return this.exhaustRecovery(recovery);
       }
 
@@ -461,7 +517,7 @@ export class VmAgentContainer extends Container<Env> {
       await this.ctx.storage.put(RECOVERY_STATE_KEY, recovery);
       await this.ctx.storage.put('lifecycleStatus', 'recovering' satisfies LifecycleStatus);
       await this.clearKeepaliveSchedule();
-      await persistRuntimeRecovering(this.env, this.toRecoveryTarget(config, context));
+      await persistRuntimeRecovering(this.env, toRuntimeRecoveryTarget(config, context));
       log.warn('vm_agent_container_recovery_started', {
         nodeId: config.nodeId,
         workspaceId: config.workspaceId,
@@ -485,7 +541,7 @@ export class VmAgentContainer extends Container<Env> {
       preferredAgentSessionId: recovery.agentSessionId,
     });
     if (!context) return this.degradeRecovery(recovery, 'unexpected');
-    const target = this.toRecoveryTarget(config, context);
+    const target = toRuntimeRecoveryTarget(config, context);
 
     try {
       const nodeCallbackToken = await signNodeCallbackToken(config.nodeId, this.env);
@@ -598,7 +654,7 @@ export class VmAgentContainer extends Container<Env> {
     if (!applied) return stoppedRecoveryResult();
     await this.stop().catch(() => undefined);
 
-    if (degraded.attempts >= this.getRecoveryMaxAttempts()) {
+    if (degraded.attempts >= this.getRuntimeSettings().recoveryMaxAttempts) {
       return this.exhaustRecovery(degraded, target);
     }
     return {
@@ -623,7 +679,7 @@ export class VmAgentContainer extends Container<Env> {
           workspaceId: config.workspaceId,
           preferredAgentSessionId: recovery.agentSessionId,
         });
-        if (context) target = this.toRecoveryTarget(config, context);
+        if (context) target = toRuntimeRecoveryTarget(config, context);
       }
       const exhausted = { ...recovery, phase: 'exhausted' as const, updatedAt: Date.now() };
       await this.ctx.storage.put(RECOVERY_STATE_KEY, exhausted);
@@ -674,21 +730,8 @@ export class VmAgentContainer extends Container<Env> {
           runtime: 'cf-container',
         },
       },
-      cancellationOptions: { portReadyTimeoutMS: this.getPortReadyTimeoutMs() },
+      cancellationOptions: { portReadyTimeoutMS: this.getRuntimeSettings().portReadyTimeoutMs },
     });
-  }
-
-  private toRecoveryTarget(
-    config: VmAgentContainerLaunchConfig,
-    context: RuntimeRecoveryContext
-  ): RuntimeRecoveryTarget {
-    return {
-      nodeId: config.nodeId,
-      workspaceId: config.workspaceId,
-      projectId: config.projectId,
-      chatSessionId: context.chatSessionId,
-      agentSessionId: context.agentSessionId,
-    };
   }
 
   private withLifecycleLock<T>(operation: () => Promise<T>): Promise<T> {
@@ -701,44 +744,24 @@ export class VmAgentContainer extends Container<Env> {
   }
 
   private activeWorkRuntime(): ActiveWorkRuntime {
+    const settings = this.getRuntimeSettings();
     return {
       storage: this.ctx.storage,
-      activeWorkMaxMs: this.getActiveWorkMaxMs(),
-      renewIntervalMs: this.getKeepaliveRenewIntervalMs(),
+      activeWorkMaxMs: settings.activeWorkMaxMs,
+      renewIntervalMs: settings.keepaliveRenewIntervalMs,
       renewActivityTimeout: () => this.renewActivityTimeout(),
       replaceSchedule: (delayMs) => this.replaceKeepaliveSchedule(delayMs),
       clearSchedule: () => this.clearKeepaliveSchedule(),
     };
   }
 
-  private getPortReadyTimeoutMs(): number {
-    const raw = this.env.CF_CONTAINER_PORT_READY_TIMEOUT_MS || this.env.SANDBOX_EXEC_TIMEOUT_MS;
-    const parsed = raw ? Number.parseInt(raw, 10) : 30_000;
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : 30_000;
-  }
-
-  private getActiveWorkMaxMs(): number {
-    const raw = this.env.CF_CONTAINER_ACTIVE_WORK_MAX_MS;
-    const parsed = raw ? Number.parseInt(raw, 10) : DEFAULT_CF_CONTAINER_ACTIVE_WORK_MAX_MS;
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_CF_CONTAINER_ACTIVE_WORK_MAX_MS;
-  }
-
-  private getKeepaliveRenewIntervalMs(): number {
-    const raw = this.env.CF_CONTAINER_KEEPALIVE_RENEW_INTERVAL_MS;
-    const parsed = raw
-      ? Number.parseInt(raw, 10)
-      : DEFAULT_CF_CONTAINER_KEEPALIVE_RENEW_INTERVAL_MS;
-    return Number.isFinite(parsed) && parsed > 0
-      ? parsed
-      : DEFAULT_CF_CONTAINER_KEEPALIVE_RENEW_INTERVAL_MS;
-  }
-
-  private getRecoveryMaxAttempts(): number {
-    const raw = this.env.CF_CONTAINER_RECOVERY_MAX_ATTEMPTS;
-    const parsed = raw ? Number.parseInt(raw, 10) : DEFAULT_CF_CONTAINER_RECOVERY_MAX_ATTEMPTS;
-    return Number.isFinite(parsed) && parsed > 0
-      ? parsed
-      : DEFAULT_CF_CONTAINER_RECOVERY_MAX_ATTEMPTS;
+  private getRuntimeSettings() {
+    return resolveRuntimeSettings(this.env, {
+      portReadyTimeoutMs: DEFAULT_CF_CONTAINER_PORT_READY_TIMEOUT_MS,
+      activeWorkMaxMs: DEFAULT_CF_CONTAINER_ACTIVE_WORK_MAX_MS,
+      keepaliveRenewIntervalMs: DEFAULT_CF_CONTAINER_KEEPALIVE_RENEW_INTERVAL_MS,
+      recoveryMaxAttempts: DEFAULT_CF_CONTAINER_RECOVERY_MAX_ATTEMPTS,
+    });
   }
 
   private async replaceKeepaliveSchedule(delayMs: number): Promise<void> {

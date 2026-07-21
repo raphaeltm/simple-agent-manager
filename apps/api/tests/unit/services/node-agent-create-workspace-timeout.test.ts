@@ -156,7 +156,7 @@ describe('createWorkspaceOnNode cf-container timeout plumbing', () => {
       ok: false,
       status: 'recovering',
       code: 'RUNTIME_REQUEST_INTERRUPTED',
-      message: 'Your message is saved, but it was not replayed automatically.',
+      message: 'internal transport detail: bearer should-not-leak',
     });
 
     const promptPromise = sendPromptToAgentOnNode(
@@ -176,6 +176,7 @@ describe('createWorkspaceOnNode cf-container timeout plumbing', () => {
     expect(error).toMatchObject({
       statusCode: 409,
       error: 'RUNTIME_REQUEST_INTERRUPTED',
+      message: expect.stringContaining('execution outcome is unknown'),
     });
     expect(mocks.container.fetchVmAgentContainer).toHaveBeenCalledTimes(1);
     expect(mocks.container.markVmAgentContainerRequestInterrupted).toHaveBeenCalledWith(
@@ -190,9 +191,9 @@ describe('createWorkspaceOnNode cf-container timeout plumbing', () => {
       Response.json(
         {
           error: 'RUNTIME_REQUEST_INTERRUPTED',
-          message: 'Your message is saved, but it was not replayed automatically.',
+          message: 'internal transport detail: bearer should-not-leak',
         },
-        { status: 409 }
+        { status: 500 }
       )
     );
 
@@ -209,7 +210,9 @@ describe('createWorkspaceOnNode cf-container timeout plumbing', () => {
     expect(error).toMatchObject({
       statusCode: 409,
       error: 'RUNTIME_REQUEST_INTERRUPTED',
+      message: expect.stringContaining('execution outcome is unknown'),
     });
+    expect(error.message).not.toContain('bearer should-not-leak');
     expect(mocks.container.fetchVmAgentContainer).toHaveBeenCalledTimes(1);
     expect(mocks.container.markVmAgentContainerRequestInterrupted).not.toHaveBeenCalled();
   });

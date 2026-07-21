@@ -41,7 +41,7 @@ function makeFake(env: Record<string, string | undefined>) {
     startAndWaitForPorts,
     startRuntime: (VmAgentContainer.prototype as unknown as { startRuntime: unknown }).startRuntime,
     clearKeepaliveSchedule: vi.fn().mockResolvedValue(undefined),
-    getPortReadyTimeoutMs: () => 30_000,
+    getRuntimeSettings: () => ({ portReadyTimeoutMs: 30_000 }),
     ctx: {
       storage: {
         put: vi.fn().mockResolvedValue(undefined),

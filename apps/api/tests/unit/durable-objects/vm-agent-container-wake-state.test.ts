@@ -143,7 +143,7 @@ describe('VmAgentContainer cold-wake serialization', () => {
       ensureAwake: privateContainer.ensureAwake,
       resultResponse: privateContainer.resultResponse,
       interruptedRequestResponse: privateContainer.interruptedRequestResponse,
-      getRecoveryMaxAttempts: () => 2,
+      getRuntimeSettings: () => ({ recoveryMaxAttempts: 2 }),
       wakeFromSnapshot,
       beginUnexpectedRecovery: vi.fn(),
       getState: vi.fn(async () => ({

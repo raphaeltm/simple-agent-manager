@@ -469,10 +469,12 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
           role="alert"
           className="flex items-center gap-2 px-4 py-2 bg-danger-tint border-b border-border-default text-danger text-xs"
         >
-          <span>{lc.resumeError}</span>
+          <span className="min-w-0 flex-1 break-words [overflow-wrap:anywhere]">
+            {lc.resumeError}
+          </span>
           <button
             type="button"
-            className="ml-auto px-2 py-1 text-xs font-medium rounded border border-border-default bg-transparent cursor-pointer hover:bg-surface-raised"
+            className="ml-auto shrink-0 px-2 py-1 text-xs font-medium rounded border border-border-default bg-transparent cursor-pointer hover:bg-surface-raised"
             onClick={lc.clearResumeError}
           >
             Dismiss

@@ -58,7 +58,6 @@ type PrivateContainer = {
   wakeFromSnapshot: (this: unknown, recovery: RuntimeRecoveryState) => Promise<unknown>;
   degradeRecovery: (this: unknown, ...args: unknown[]) => Promise<unknown>;
   exhaustRecovery: (this: unknown, ...args: unknown[]) => Promise<unknown>;
-  toRecoveryTarget: (this: unknown, ...args: unknown[]) => unknown;
   withLifecycleLock: (this: unknown, operation: () => Promise<unknown>) => Promise<unknown>;
   prepareForRequest: (this: unknown) => Promise<unknown>;
 };
@@ -101,10 +100,14 @@ function makeRecoveryFake(input?: {
     wakeFromSnapshot: privateContainer.wakeFromSnapshot,
     degradeRecovery: privateContainer.degradeRecovery,
     exhaustRecovery: privateContainer.exhaustRecovery,
-    toRecoveryTarget: privateContainer.toRecoveryTarget,
     withLifecycleLock: privateContainer.withLifecycleLock,
     prepareForRequest: privateContainer.prepareForRequest,
-    getRecoveryMaxAttempts: () => input?.maxAttempts ?? 2,
+    getRuntimeSettings: () => ({
+      portReadyTimeoutMs: 30_000,
+      activeWorkMaxMs: 2 * 60 * 60 * 1000,
+      keepaliveRenewIntervalMs: 5 * 60 * 1000,
+      recoveryMaxAttempts: input?.maxAttempts ?? 2,
+    }),
     clearKeepaliveSchedule: vi.fn().mockResolvedValue(undefined),
     markActiveWorkEnded: vi.fn().mockResolvedValue(undefined),
     startRuntime: vi.fn().mockResolvedValue(undefined),
@@ -128,6 +131,17 @@ async function callEnsureAwake(fake: unknown) {
   }>;
 }
 
+async function callResumeRuntime(fake: unknown) {
+  return (
+    VmAgentContainer.prototype as unknown as {
+      resumeRuntime: (
+        this: unknown,
+        agentSessionId?: string
+      ) => Promise<{ ok: boolean; status: string; code?: string }>;
+    }
+  ).resumeRuntime.call(fake, 'agent-session-1');
+}
+
 function callProxyHttp(fake: unknown, request: Request): Promise<Response> {
   return (
     VmAgentContainer.prototype as unknown as {
@@ -148,6 +162,89 @@ beforeEach(() => {
 });
 
 describe('VmAgentContainer snapshot recovery state machine', () => {
+  it('reconciles stale D1 state only after proving the target SessionHost is live', async () => {
+    const { fake } = makeRecoveryFake({ lifecycle: 'running' });
+    fake.containerFetch.mockResolvedValueOnce(
+      Response.json({
+        sessions: [{ id: 'agent-session-1', status: 'running', hostStatus: 'ready' }],
+      })
+    );
+
+    const result = await callResumeRuntime(fake);
+
+    expect(result).toEqual({ ok: true, status: 'running' });
+    expect(recoveryMocks.loadContext).toHaveBeenCalledWith(fake.env, {
+      workspaceId: 'workspace-1',
+      preferredAgentSessionId: 'agent-session-1',
+    });
+    expect(recoveryMocks.signNodeManagementToken).toHaveBeenCalledWith(
+      'user-1',
+      'node-1',
+      'workspace-1',
+      fake.env
+    );
+    const probeRequest = fake.containerFetch.mock.calls[0]?.[0] as Request;
+    expect(probeRequest.headers.get('Authorization')).toBe('Bearer management-token');
+    expect(probeRequest.headers.get('X-SAM-Workspace-Id')).toBe('workspace-1');
+    expect(fake.startRuntime).not.toHaveBeenCalled();
+    expect(recoveryMocks.persistRecovered).toHaveBeenCalledWith(
+      fake.env,
+      expect.objectContaining({ agentSessionId: 'agent-session-1' }),
+      'none'
+    );
+  });
+
+  it('restores instead of falsely resuming when D1 says recovery but SessionHost is missing', async () => {
+    const { fake, values } = makeRecoveryFake({ lifecycle: 'running' });
+    fake.containerFetch
+      .mockResolvedValueOnce(
+        Response.json({ sessions: [{ id: 'agent-session-1', status: 'running' }] })
+      )
+      .mockResolvedValueOnce(
+        Response.json({ status: 'restored', degradation: 'none', skipped: [] })
+      );
+
+    const result = await callResumeRuntime(fake);
+
+    expect(result).toEqual({ ok: true, status: 'running' });
+    expect(fake.startRuntime).toHaveBeenCalledTimes(1);
+    expect(recoveryMocks.persistRecovering).toHaveBeenCalledTimes(1);
+    expect(values.has('runtimeRecovery')).toBe(false);
+  });
+
+  it('does not reconcile running when an explicit stop crosses the SessionHost probe', async () => {
+    let finishProbe!: (response: Response) => void;
+    const { fake, values } = makeRecoveryFake({ lifecycle: 'running' });
+    fake.containerFetch.mockImplementationOnce(
+      () =>
+        new Promise<Response>((resolve) => {
+          finishProbe = resolve;
+        })
+    );
+    const stopForUser = (
+      VmAgentContainer.prototype as unknown as {
+        stopForUser: (this: unknown) => Promise<void>;
+      }
+    ).stopForUser;
+
+    const resume = callResumeRuntime(fake);
+    await vi.waitFor(() => expect(fake.containerFetch).toHaveBeenCalledTimes(1));
+    await stopForUser.call(fake);
+    finishProbe(
+      Response.json({
+        sessions: [{ id: 'agent-session-1', status: 'running', hostStatus: 'ready' }],
+      })
+    );
+
+    await expect(resume).resolves.toMatchObject({
+      ok: false,
+      status: 'stopped',
+      code: 'RUNTIME_STOPPED',
+    });
+    expect(recoveryMocks.persistRecovered).not.toHaveBeenCalled();
+    expect(values.get('lifecycleStatus')).toBe('stopping');
+  });
+
   it('cold-wakes, reinjects fresh callback tokens, restores, then reconciles running', async () => {
     const { fake, values } = makeRecoveryFake();
 

@@ -1,4 +1,6 @@
 import type { Env } from '../env';
+import { log } from '../lib/logger';
+import { signNodeManagementToken } from '../services/jwt';
 import {
   RUNTIME_RECOVERING_MESSAGE,
   RUNTIME_RECOVERY_DEGRADED_MESSAGE,
@@ -59,9 +61,90 @@ export async function isMissingSessionHostResponse(response: Response): Promise<
   return body.toLowerCase().includes('no active agent session found');
 }
 
+const LIVE_SESSION_HOST_STATUSES = new Set(['idle', 'starting', 'ready', 'prompting']);
+
+export async function probeLiveRuntimeSession(input: {
+  env: Env;
+  userId: string;
+  nodeId: string;
+  workspaceId: string;
+  agentSessionId: string;
+  vmAgentPort: number;
+  containerFetch: (request: Request, port: number) => Promise<Response>;
+}): Promise<boolean> {
+  const { token } = await signNodeManagementToken(
+    input.userId,
+    input.nodeId,
+    input.workspaceId,
+    input.env
+  );
+  const url = new URL(
+    `http://localhost:${input.vmAgentPort}/workspaces/${input.workspaceId}/agent-sessions`
+  );
+  const response = await input.containerFetch(
+    new Request(url.toString(), {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'X-SAM-Node-Id': input.nodeId,
+        'X-SAM-Workspace-Id': input.workspaceId,
+      },
+    }),
+    input.vmAgentPort
+  );
+  if (!response.ok) {
+    log.warn('vm_agent_container_runtime_session_probe_failed', {
+      nodeId: input.nodeId,
+      workspaceId: input.workspaceId,
+      agentSessionId: input.agentSessionId,
+      status: response.status,
+    });
+    throw new Error(`runtime_session_probe_http_${response.status}`);
+  }
+  const body = (await response.json()) as {
+    sessions?: Array<{ id?: unknown; hostStatus?: unknown }>;
+  };
+  return Boolean(
+    body.sessions?.some(
+      (session) =>
+        session.id === input.agentSessionId &&
+        typeof session.hostStatus === 'string' &&
+        LIVE_SESSION_HOST_STATUSES.has(session.hostStatus)
+    )
+  );
+}
+
 export function parsePositiveRuntimeSetting(raw: string | undefined, fallback: number): number {
   const parsed = raw ? Number.parseInt(raw, 10) : fallback;
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+export function resolveRuntimeSettings(
+  env: Env,
+  defaults: {
+    portReadyTimeoutMs: number;
+    activeWorkMaxMs: number;
+    keepaliveRenewIntervalMs: number;
+    recoveryMaxAttempts: number;
+  }
+) {
+  return {
+    portReadyTimeoutMs: parsePositiveRuntimeSetting(
+      env.CF_CONTAINER_PORT_READY_TIMEOUT_MS || env.SANDBOX_EXEC_TIMEOUT_MS,
+      defaults.portReadyTimeoutMs
+    ),
+    activeWorkMaxMs: parsePositiveRuntimeSetting(
+      env.CF_CONTAINER_ACTIVE_WORK_MAX_MS,
+      defaults.activeWorkMaxMs
+    ),
+    keepaliveRenewIntervalMs: parsePositiveRuntimeSetting(
+      env.CF_CONTAINER_KEEPALIVE_RENEW_INTERVAL_MS,
+      defaults.keepaliveRenewIntervalMs
+    ),
+    recoveryMaxAttempts: parsePositiveRuntimeSetting(
+      env.CF_CONTAINER_RECOVERY_MAX_ATTEMPTS,
+      defaults.recoveryMaxAttempts
+    ),
+  };
 }
 
 export async function persistRuntimeSleeping(env: Env, identity: RuntimeIdentity): Promise<void> {

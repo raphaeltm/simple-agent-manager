@@ -58,7 +58,7 @@ export function useConnectionRecovery(
   const reportDeliveryError = useCallback((error: unknown) => {
     setResumeError(
       getRuntimeRecoveryMessage(error) ??
-        'Your message is saved, but it could not reach the agent. Send it again when the session is available.'
+        'Your message is saved, but delivery could not be confirmed. Check the transcript and partial output before deciding whether to send it again.'
     );
   }, []);
 
