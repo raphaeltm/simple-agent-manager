@@ -2,8 +2,12 @@
  * Shared types and utilities for ProjectData DO modules.
  */
 
+import type { VmAgentContainer } from '../vm-agent-container';
+
 export type Env = {
   DATABASE: D1Database;
+  VM_AGENT_CONTAINER?: DurableObjectNamespace<VmAgentContainer>;
+  TASK_LIVENESS_PROBE_TIMEOUT_MS?: string;
   BASE_DOMAIN?: string;
   DO_SUMMARY_SYNC_DEBOUNCE_MS?: string;
   MAX_SESSIONS_PER_PROJECT?: string;

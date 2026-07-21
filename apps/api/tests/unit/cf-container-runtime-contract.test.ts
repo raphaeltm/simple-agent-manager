@@ -158,6 +158,7 @@ describe('cf-container runtime spike contracts', () => {
 
   it('classifies raw container idle expiration as sleeping instead of crash/error', () => {
     const containerDo = read('durable-objects/vm-agent-container.ts');
+    const containerLifecycle = read('durable-objects/vm-agent-container-lifecycle.ts');
     const chatResolver = read('routes/chat-workspace-resolver.ts');
 
     expect(containerDo).toContain('override async onStop');
@@ -170,7 +171,7 @@ describe('cf-container runtime spike contracts', () => {
     expect(containerDo).toContain(
       "await this.ctx.storage.put('lifecycleStatus', 'sleeping' satisfies LifecycleStatus)"
     );
-    expect(containerDo).toContain("| 'sleeping'");
+    expect(containerLifecycle).toContain("| 'sleeping'");
     expect(containerDo).toContain("status === 'sleeping' ? 'idle' : 'error'");
     expect(containerDo).toContain('return this.ensureAwake()');
     expect(containerDo).toContain('RUNTIME_RECOVERY_DEGRADED_MESSAGE');

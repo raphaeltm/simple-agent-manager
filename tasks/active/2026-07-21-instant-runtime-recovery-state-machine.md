@@ -43,6 +43,41 @@ The repair must build on PR #1562's runtime-neutral snapshot/restore boundary an
 - While the workspace was legitimately `sleeping`, the scheduled stuck-task reconciler classified it as conclusively dead, failed the still-active conversation task with reason `workspace_sleeping`, then destroyed the workspace and node. This independently explains the user-visible “session appeared gone” symptom after idle.
 - A subsequently triggered replacement workflow was canceled before any Cloudflare mutation and is not counted as replacement evidence. The failed project remains evidence only; the corrected exact-head gate must use a fresh UI-created project/session.
 
+### Second exact-head staging gate (idle passed; replacement precondition failed)
+
+- Commit `4b461c051` deployed successfully in workflow `29846722061`, including 12 staging smoke tests. Genuine UI project `01KY2QCEC2FEFDJ1536GGMS3JS`, chat `df78a5d1-23d0-4865-ac02-090cc18f27aa`, and task `01KY2QYRSG14W4M8678FNXXWEB` created unique HOME, exact staged/unstaged/untracked Git state, and native harness context.
+- Idle handback wrote an `available`/non-degraded snapshot whose manifest retained underlying ACP session `0715aa21-a03e-4edc-a669-e9a7273c6b93` and `claude-code` type. Cloudflare reported the exact node instance inactive; D1 moved workspace and agent session to `sleeping`; the task stayed `in_progress/awaiting_followup` through the real 16:35 UTC five-minute reconciliation sweep.
+- The same-chat follow-up passed the strict role-aware browser gate with no API errors. It restored HOME, exact Git porcelain (` M README.md`, staged `A  ...`, untracked `?? ...`), and the harness-only phrase without recreating state or duplicating the prompt.
+- A separate ProjectData alarm had nevertheless changed the ACP control-plane record from `running` to terminal `interrupted` at 16:34:51 because its last heartbeat predated the five-minute cutoff. That heartbeat is intentionally absent while an Instant container is sleeping. Cold wake restored the real underlying harness but could not legally transition the already-terminal ProjectData row back to running.
+- At 16:45:16 the stuck-task sweep saw that terminal ACP row while the replacement prompt was starting, classified `task_acp_session_not_live`, failed the task, and deleted the workspace/node. This happened before the replacement deployment reached its Worker mutation; workflow `29849922266` was canceled and is not replacement evidence.
+- The original replacement prompt also asked for a standalone foreground sleep, which the Claude harness correctly rejected and rewrote as a background wait. The next gate uses a bounded foreground loop with observable progress ticks and requires an execution-start transcript marker plus active DO work before rollout.
+- The repair now gives `VmAgentContainer` a sanitized read-only lifecycle inspection RPC. ProjectData defers stale-heartbeat terminalization only for non-terminal cf-container lifecycle states, with alarm backoff; VM/devcontainer heartbeat behavior is unchanged. Stuck-task reconciliation uses the same lifecycle signal: active work is live, sleep/wake/restore/recovery is inconclusive/resumable, and explicit stop/expired/error remains conclusively terminal.
+
+### Control-loop I/O budget
+
+- Candidate selection is unchanged. ProjectData still selects only already-stale active ACP sessions, and stuck-task reconciliation still operates within its existing bounded candidate sweep. The new policy applies only when the selected workspace is backed by `cf-container`.
+- Per stale Instant ACP candidate, the alarm adds one indexed D1 workspace/node lookup and one sanitized `VmAgentContainer.inspectLifecycle()` RPC. The RPC reads three small Durable Object storage keys concurrently; it does not start the container or contact vm-agent.
+- Per running Instant stuck-task candidate, the sweep substitutes the same lifecycle RPC for stale node/ACP prechecks. Active work is conclusively live; non-terminal/no-active-work and probe failure are inconclusive; explicit stop/expired/error are conclusively dead.
+- Both paths use the existing env-configurable `TASK_LIVENESS_PROBE_TIMEOUT_MS` with the shared five-second background default. ProjectData evaluates stale sessions concurrently, and a deferred stale alarm is rescheduled no sooner than one detection window instead of immediately looping.
+- Deferred candidates escape through a resumed heartbeat, explicit stop/destroy, terminal runtime error/expiration, or the existing configured conversation idle cleanup. Tests cover deferred alarms, backoff, failed/never-settling probes, active replacement work, explicit terminal states, and VM/devcontainer behavior remaining unchanged.
+
+## Post-Mortem
+
+- **What broke:** A user could leave a still-valid Instant conversation for a modest delay, return to the same chat, and find that a follow-up had no response or that the task/workspace appeared gone even though transcript and snapshot data existed.
+- **Root cause:** Runtime liveness had multiple unsynchronized owners. The container lifecycle correctly entered `sleeping`, but the ProjectData ACP alarm interpreted the intentionally absent sleeping heartbeat as terminal. The later stuck-task sweep trusted that stale terminal replica and deleted recoverable work. Earlier code also let dead D1 node/session prechecks block the runtime owner's recovery path.
+- **Timeline:** Runtime-neutral snapshot/restore shipped in PR #1562. Adjacent recovery and clone-budget plumbing shipped in PRs #1637/#1639. Closed PR #1615 exposed a same-chat HTTP 500 but used invalid rollout assumptions. Production evidence on 2026-07-16 matched rollout/generic-stop loss after 20–36 minutes. The first exact-head gate found lost Git index/native harness identity and sleeping-task cleanup; the second proved ordinary idle resume, then exposed the separate ACP-heartbeat/stuck-sweep race before replacement could be tested.
+- **Why it was not caught:** Tests exercised each state store in isolation. No regression deliberately combined a sleeping/recovering runtime owner with a stale ACP heartbeat and a later cleanup sweep. The initial browser verifier also accepted prompt text and negative explanations as success instead of strict assistant-only persisted evidence.
+- **Class of bug:** Cross-control-plane lifecycle races in which a stale replica is treated as authoritative terminal state and destructive reconciliation runs before the runtime owner can classify recovery.
+- **Process fix:** `.claude/rules/02-quality-gates.md` now requires multi-control-plane lifecycle tests with stale secondary state and one shared liveness classifier across timeout/cleanup paths. The exact-head verifier uses role-aware persisted transcript evidence, observable active work, and strict no-replay assertions.
+
+### Final local gate status before third staging head
+
+- Full repository tests: 19/19 Turbo tasks, including API 446 files / 6,267 tests.
+- Build: 9/9; typecheck: 16/16; lint: 7/7 with baseline warnings only; file-size, AST (0 errors), wrangler, migration, DO-migration, source-contract, and ordering gates passed.
+- Focused lifecycle reconciliation: 5 files / 45 tests, including bounded probe timeout/failure and stale-heartbeat deferral. Go snapshot/ACP focused, race, and vet evidence remains green from the same branch head lineage; the second pass does not modify Go.
+- Local Worker/Miniflare remains an evidence gap: pinned `workerd` segfaults before test import, including unchanged Worker suites. CI and exact-head Cloudflare staging remain authoritative.
+- `quality:do-wall-time` reported three pre-existing staging alarm regressions (2.03x, 4.89x, and 7.10x) before this head was deployed. This is not counted as a pass; it must be rerun and correlated after exact-head staging.
+
 ## Lifecycle Contract
 
 ```text
@@ -77,7 +112,7 @@ Cloudflare stop metadata (`exit` versus `runtime_signal`, exit code, raw hook/er
 - [x] Bound recovery attempts with named environment-backed defaults. Missing, expired, corrupt, or rejected snapshots must degrade visibly and must never become transcript replay presented as a true resume.
 - [x] Catch a transport failure that crosses a request, classify recovery before a late lifecycle callback, preserve the original prompt in the transcript, and return an explicit manual-retry disposition without replaying the ambiguous request.
 - [x] Reconcile node, workspace, agent-session, ACP/chat, and active task state on recovery success and terminal degradation so neither active nor awaiting-follow-up work is stranded.
-- [x] Treat `sleeping` and `recovery` workspaces as resumable/inconclusive in stuck-task reconciliation so the cron cannot fail and destroy a normal Instant handback.
+- [x] Treat Instant sleep/wake/restore/recovery as resumable/inconclusive in both ProjectData heartbeat alarms and stuck-task reconciliation. Use sanitized DO lifecycle state so stale heartbeats cannot destroy a normal handback, while explicit stop/expired/error remains terminal.
 - [x] Encode separate worktree and index commits in new WIP bundles, retain single-ref legacy restore compatibility, and prove staged/unstaged/untracked status survives exactly.
 - [x] Persist the underlying ACP session ID and agent type in the runtime-neutral manifest, hydrate the new SessionHost, and require exact `LoadSession` with no `NewSession` fallback or false resume.
 

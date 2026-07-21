@@ -9,17 +9,17 @@
  * Same issue blocks existing project-data-do.test.ts.
  *
  * DOCUMENTED COVERAGE GAPS (to add when workerd issue is resolved):
- * - alarm() / checkHeartbeatTimeouts: stale session → interrupted transition
  * - listAcpSessionsByNode: reconciliation filtering by node + statuses
  * - forkAcpSession: max depth rejection, fork from failed session
  * - updateHeartbeat: silent ignore for terminal sessions
  * - transitionAcpSession: nonexistent session error
  * - listAcpSessions: chatSessionId filter, pagination, total count
  */
-import { env } from 'cloudflare:test';
-import { describe, expect,it } from 'vitest';
+import { env, runInDurableObject } from 'cloudflare:test';
+import { describe, expect, it } from 'vitest';
 
 import type { ProjectData } from '../../src/durable-objects/project-data';
+import { seedNode, seedUser, seedWorkspace } from './helpers/seed-d1';
 
 function getStub(projectId: string): DurableObjectStub<ProjectData> {
   const id = env.PROJECT_DATA.idFromName(projectId);
@@ -222,6 +222,52 @@ describe('ACP Session Lifecycle (Spec 027)', () => {
       });
 
       expect(interrupted.status).toBe('interrupted');
+    });
+  });
+
+  describe('heartbeat timeout alarm', () => {
+    it('preserves a sleeping Instant session across repeated stale-heartbeat alarms', async () => {
+      const prefix = `acp-instant-sleep-${Date.now()}-${crypto.randomUUID()}`;
+      const userId = `${prefix}-user`;
+      const nodeId = `${prefix}-node`;
+      const workspaceId = `${prefix}-workspace`;
+      const stub = getStub(`${prefix}-project`);
+      const { acpSession, chatSessionId } = await createSessionPair(stub);
+
+      await seedUser(userId);
+      await seedNode(nodeId, userId);
+      await env.DATABASE.prepare(`UPDATE nodes SET runtime = 'cf-container' WHERE id = ?`)
+        .bind(nodeId)
+        .run();
+      await seedWorkspace(workspaceId, nodeId, userId, {
+        status: 'sleeping',
+        chatSessionId,
+      });
+      await stub.transitionAcpSession(acpSession.id, 'assigned', {
+        actorType: 'system',
+        workspaceId,
+        nodeId,
+      });
+      await stub.transitionAcpSession(acpSession.id, 'running', {
+        actorType: 'vm-agent',
+        actorId: nodeId,
+        acpSdkSessionId: `${prefix}-sdk`,
+      });
+
+      const nextAlarm = await runInDurableObject(stub, async (instance) => {
+        instance.ctx.storage.sql.exec(
+          `UPDATE acp_sessions SET last_heartbeat_at = ? WHERE id = ?`,
+          Date.now() - 10 * 60 * 1000,
+          acpSession.id
+        );
+        await instance.alarm();
+        await instance.alarm();
+        return instance.ctx.storage.getAlarm();
+      });
+
+      expect((await stub.getAcpSession(acpSession.id))?.status).toBe('running');
+      expect(nextAlarm).not.toBeNull();
+      expect(nextAlarm!).toBeGreaterThan(Date.now());
     });
   });
 

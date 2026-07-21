@@ -12,6 +12,11 @@ import {
   startActiveWork,
 } from './vm-agent-container-active-work';
 import {
+  inspectStoredVmAgentContainerLifecycle,
+  type VmAgentContainerLifecycleInspection,
+  type VmAgentContainerLifecycleStatus,
+} from './vm-agent-container-lifecycle';
+import {
   loadRuntimeRecoveryContext,
   persistRuntimeRecovered,
   persistRuntimeRecovering,
@@ -65,18 +70,7 @@ export interface VmAgentContainerRecoveryResult {
   code?: RuntimeRecoveryCode;
   message?: string;
 }
-type LifecycleStatus =
-  | 'launching'
-  | 'running'
-  | 'stopping'
-  | 'stopped'
-  | 'sleeping'
-  | 'recovering'
-  | 'waking'
-  | 'restoring'
-  | 'degraded'
-  | 'expired'
-  | 'error';
+type LifecycleStatus = VmAgentContainerLifecycleStatus;
 
 const RECOVERY_STATE_KEY = 'runtimeRecovery';
 const KEEPALIVE_CALLBACK = 'renewActiveWorkKeepalive';
@@ -315,6 +309,10 @@ export class VmAgentContainer extends Container<Env> {
 
   async markActiveWorkEnded(reason: string): Promise<void> {
     await endActiveWork(this.activeWorkRuntime(), reason);
+  }
+
+  async inspectLifecycle(): Promise<VmAgentContainerLifecycleInspection> {
+    return inspectStoredVmAgentContainerLifecycle(this.ctx.storage, RECOVERY_STATE_KEY, ACTIVE_WORK_KEY);
   }
 
   async renewActiveWorkKeepalive(): Promise<void> {

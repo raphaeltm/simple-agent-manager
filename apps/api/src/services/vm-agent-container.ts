@@ -9,6 +9,7 @@ import {
   type VmAgentContainerLaunchSecrets,
   type VmAgentContainerRecoveryResult,
 } from '../durable-objects/vm-agent-container';
+import type { VmAgentContainerLifecycleInspection } from '../durable-objects/vm-agent-container-lifecycle';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { errors } from '../middleware/error';
@@ -85,6 +86,13 @@ export async function resumeVmAgentContainer(
 ): Promise<VmAgentContainerRecoveryResult> {
   const container = getVmAgentContainer(env, nodeId);
   return container.resumeRuntime(agentSessionId);
+}
+
+export async function inspectVmAgentContainerLifecycle(
+  env: Env,
+  nodeId: string
+): Promise<VmAgentContainerLifecycleInspection> {
+  return getVmAgentContainer(env, nodeId).inspectLifecycle();
 }
 
 export async function markVmAgentContainerRequestInterrupted(
