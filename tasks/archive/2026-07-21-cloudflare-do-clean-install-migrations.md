@@ -138,7 +138,7 @@ operator hand-edit instructions.
       change.
 - [x] Run Cloudflare specialist, task completion, test, constitution, and
       documentation reviews; address all correctness findings.
-- [ ] Deploy through the staging workflow, prove v17 legacy namespaces remain
+- [x] Deploy through the staging workflow, prove v17 legacy namespaces remain
       unchanged, and record the clean-install proof available without mutating
       production.
 - [ ] Open a PR that closes #1614, documents evidence/risks/blockers, waits for
@@ -182,6 +182,23 @@ operator hand-edit instructions.
 - The final read-only state probe returned `v17` for both `sam-api-staging` and
   `sam-api-prod`; namespace backend flags were inspected separately and match
   the immutable checked-in history.
+
+## Staging and clean-install proof
+
+- Staging workflow run `29830545589` deployed commit `44548e8cb` successfully.
+  Both API Worker deploys and the workflow health checks passed.
+- The generator logged `sam-api-staging` at migration state `v17`; the live
+  Playwright smoke suite passed all 12 tests.
+- Read-only pre/post namespace snapshots were identical: 17 classes remained,
+  with the same seven classes KV-backed and the other ten SQLite-backed. The
+  post-deploy Worker migration tag remained `v17`.
+- Direct generated-config proof produced 17 tags, zero `new_classes`, and 17
+  SQLite class creates for clean state; v17 output was structurally identical.
+- A live clean-account deployment was unavailable: the only accessible
+  Cloudflare accounts are canonical staging and production, and both already
+  contain legacy namespaces, so neither can exercise the clean-account condition.
+- Production was inspected read-only only; no production resource or namespace
+  was created, changed, or deleted.
 
 ## Specialist review evidence
 
