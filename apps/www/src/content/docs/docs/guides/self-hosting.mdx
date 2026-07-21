@@ -215,6 +215,10 @@ The workflow:
 5. Builds and uploads VM Agent binaries
 6. Runs health check
 
+Before deploying the API Worker, the workflow reads its applied Durable Object migration tag. A fresh installation creates every namespace with SQLite storage; an existing installation retains its already-applied namespace history and storage backends. This is automatic—do not edit historical migration entries or create namespaces manually.
+
+If migration state cannot be read or does not match the checked-in history, deployment stops before Wrangler runs rather than risking migration replay or namespace replacement.
+
 ## Verification
 
 After deployment completes:

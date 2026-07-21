@@ -6,9 +6,10 @@
  * at deploy time. The checked-in wrangler.toml files contain only top-level
  * config for local dev — all environment sections are generated here.
  *
- * Static bindings (Durable Objects, AI, migrations) are copied from the
- * top-level config. Dynamic bindings (D1 IDs, KV IDs, R2 names) come from
- * Pulumi stack outputs. Worker names are derived from DEPLOYMENT_CONFIG.
+ * Static bindings (Durable Objects and AI) are copied from the top-level
+ * config. Durable Object migrations are resolved against deployed Worker
+ * state. Dynamic bindings (D1 IDs, KV IDs, R2 names) come from Pulumi stack
+ * outputs. Worker names are derived from DEPLOYMENT_CONFIG.
  *
  * Usage:
  *   PULUMI_STACK=prod pnpm tsx scripts/deploy/sync-wrangler-config.ts
@@ -43,6 +44,8 @@ const TAIL_WORKER_WRANGLER_TOML_PATH = resolve(
 const DEPLOY_STATE_DIR = resolve(import.meta.dirname, '../../.wrangler');
 const FIRST_DEPLOY_MARKER = resolve(DEPLOY_STATE_DIR, 'tail-worker-first-deploy');
 const SETUP_TOKEN_BYTES = 24;
+const CLOUDFLARE_API_BASE_URL = 'https://api.cloudflare.com/client/v4';
+const WORKERS_LIST_PAGE_SIZE = 1000;
 
 const recordSchema = v.custom<Record<string, unknown>>(
   (value) => typeof value === 'object' && value !== null && !Array.isArray(value),
@@ -143,6 +146,159 @@ export function validatePulumiOutputs(outputs: unknown): asserts outputs is Pulu
   if (!record.stackSummary || !stackSummary.baseDomain) {
     throw new Error('Pulumi outputs missing required field: stackSummary.baseDomain');
   }
+}
+
+// ============================================================================
+// Durable Object migration compatibility
+// ============================================================================
+
+function requireCloudflareApiToken(operation: string): string {
+  const apiToken = process.env.CF_API_TOKEN || process.env.CLOUDFLARE_API_TOKEN;
+  if (!apiToken) {
+    throw new Error(`CF_API_TOKEN or CLOUDFLARE_API_TOKEN is required to ${operation}`);
+  }
+  return apiToken;
+}
+
+async function fetchCloudflareMigrationState(
+  url: string,
+  apiToken: string,
+  operation: string
+): Promise<Response> {
+  try {
+    return await fetch(url, { headers: { Authorization: `Bearer ${apiToken}` } });
+  } catch {
+    throw new Error(`${operation}: Cloudflare API request failed`);
+  }
+}
+
+/**
+ * Returns null only when Cloudflare's exact Worker settings endpoint confirms
+ * that the target Worker does not exist. For an existing Worker, reads the
+ * latest applied Durable Object migration tag from Workers script metadata.
+ *
+ * This intentionally fails closed on incomplete or unreadable state. Wrangler
+ * otherwise treats an unknown deployed tag as a reason to submit every local
+ * migration, which can replay immutable namespace history.
+ */
+export async function getDeployedWorkerMigrationTag(
+  accountId: string,
+  workerName: string
+): Promise<string | null> {
+  const apiToken = requireCloudflareApiToken('read Durable Object migration state');
+  const readOperation = `Failed to read Durable Object migration state for Worker "${workerName}"`;
+  const settingsUrl =
+    `${CLOUDFLARE_API_BASE_URL}/accounts/${encodeURIComponent(accountId)}` +
+    `/workers/scripts/${encodeURIComponent(workerName)}/settings`;
+  const settingsResponse = await fetchCloudflareMigrationState(
+    settingsUrl,
+    apiToken,
+    readOperation
+  );
+
+  if (settingsResponse.status === 404) {
+    return null;
+  }
+  if (!settingsResponse.ok) {
+    throw new Error(`${readOperation} (HTTP ${settingsResponse.status})`);
+  }
+
+  const scriptsUrl =
+    `${CLOUDFLARE_API_BASE_URL}/accounts/${encodeURIComponent(accountId)}` +
+    `/workers/scripts?per_page=${WORKERS_LIST_PAGE_SIZE}`;
+  const listOperation = `Failed to list Workers while reading migration state for "${workerName}"`;
+  const scriptsResponse = await fetchCloudflareMigrationState(scriptsUrl, apiToken, listOperation);
+  if (!scriptsResponse.ok) {
+    throw new Error(`${listOperation} (HTTP ${scriptsResponse.status})`);
+  }
+
+  let payload: unknown;
+  try {
+    payload = await scriptsResponse.json();
+  } catch {
+    throw new Error(`${listOperation}: Cloudflare returned an invalid JSON response`);
+  }
+  if (
+    typeof payload !== 'object' ||
+    payload === null ||
+    !('success' in payload) ||
+    payload.success !== true ||
+    !('result' in payload) ||
+    !Array.isArray(payload.result)
+  ) {
+    throw new Error(`${listOperation}: Cloudflare returned an invalid response`);
+  }
+
+  const worker = payload.result.find(
+    (candidate): candidate is Record<string, unknown> =>
+      typeof candidate === 'object' &&
+      candidate !== null &&
+      'id' in candidate &&
+      candidate.id === workerName
+  );
+  if (!worker) {
+    throw new Error(
+      `Worker "${workerName}" exists but is absent from the Workers scripts listing; refusing to assume clean migration state`
+    );
+  }
+  if (typeof worker.migration_tag !== 'string' || worker.migration_tag.length === 0) {
+    throw new Error(
+      `Existing Worker "${workerName}" has no migration_tag; refusing to replay Durable Object migrations`
+    );
+  }
+  return worker.migration_tag;
+}
+
+/**
+ * Preserve applied migration entries exactly, while ensuring every pending
+ * namespace create uses Cloudflare's supported SQLite storage backend.
+ */
+export function resolveDurableObjectMigrations(
+  migrations: MigrationEntry[] | undefined,
+  deployedMigrationTag: string | null
+): MigrationEntry[] | undefined {
+  if (!migrations || migrations.length === 0) {
+    if (deployedMigrationTag !== null) {
+      throw new Error(
+        `Deployed Durable Object migration tag "${deployedMigrationTag}" cannot be reconciled because the checked-in migration history is empty`
+      );
+    }
+    return undefined;
+  }
+
+  const duplicateTag = migrations.find(
+    (migration, index) =>
+      migrations.findIndex((candidate) => candidate.tag === migration.tag) !== index
+  )?.tag;
+  if (duplicateTag) {
+    throw new Error(`Durable Object migration tag "${duplicateTag}" is duplicated`);
+  }
+
+  const appliedIndex =
+    deployedMigrationTag === null
+      ? -1
+      : migrations.findIndex((migration) => migration.tag === deployedMigrationTag);
+  if (deployedMigrationTag !== null && appliedIndex === -1) {
+    throw new Error(
+      `Deployed Durable Object migration tag "${deployedMigrationTag}" is not present in the checked-in history; refusing to replay migrations`
+    );
+  }
+
+  return migrations.map((migration, index) => {
+    if (index <= appliedIndex || !migration.new_classes?.length) {
+      return migration;
+    }
+
+    const {
+      new_classes: legacyClasses,
+      new_sqlite_classes: sqliteClasses,
+      ...unchanged
+    } = migration;
+    return {
+      ...unchanged,
+      new_sqlite_classes: [...(sqliteClasses ?? []), ...legacyClasses],
+    };
+  });
 }
 
 // ============================================================================
@@ -381,13 +537,14 @@ function getAnalyticsEngineDatasets(
 function getStaticApiWorkerBindings(
   staticBindings: StaticBindings,
   analyticsEngineDatasets: AnalyticsEngineDatasetBinding[] | undefined,
-  includeArtifactsBinding: boolean
+  includeArtifactsBinding: boolean,
+  durableObjectMigrations: MigrationEntry[] | undefined
 ): Partial<WranglerEnvConfig> {
   return {
     ...(staticBindings.durable_objects ? { durable_objects: staticBindings.durable_objects } : {}),
     ...(staticBindings.ai ? { ai: staticBindings.ai } : {}),
     ...(analyticsEngineDatasets ? { analytics_engine_datasets: analyticsEngineDatasets } : {}),
-    ...(staticBindings.migrations ? { migrations: staticBindings.migrations } : {}),
+    ...(durableObjectMigrations ? { migrations: durableObjectMigrations } : {}),
     ...(staticBindings.containers ? { containers: staticBindings.containers } : {}),
     ...(includeArtifactsBinding ? { artifacts: staticBindings.artifacts } : {}),
   };
@@ -405,9 +562,14 @@ export function generateApiWorkerEnv(
   outputs: PulumiOutputs,
   stack: string,
   includeTailConsumers: boolean,
-  artifactsBindingEnabled: boolean
+  artifactsBindingEnabled: boolean,
+  deployedMigrationTag: string | null
 ): WranglerEnvConfig {
   const staticBindings = extractStaticBindings(topLevel);
+  const durableObjectMigrations = resolveDurableObjectMigrations(
+    staticBindings.migrations,
+    deployedMigrationTag
+  );
   if (artifactsBindingEnabled && !staticBindings.artifacts) {
     throw new Error(
       'Artifacts is enabled but no top-level [[artifacts]] binding exists in wrangler.toml'
@@ -475,7 +637,12 @@ export function generateApiWorkerEnv(
     r2_buckets: [{ binding: 'R2', bucket_name: outputs.r2Name }],
 
     // Static bindings copied from top-level config
-    ...getStaticApiWorkerBindings(staticBindings, analyticsEngineDatasets, includeArtifactsBinding),
+    ...getStaticApiWorkerBindings(
+      staticBindings,
+      analyticsEngineDatasets,
+      includeArtifactsBinding,
+      durableObjectMigrations
+    ),
 
     // Tail consumers (conditional — omitted on first deploy when tail worker doesn't exist)
     ...getTailConsumers(includeTailConsumers, tailWorkerName),
@@ -552,6 +719,15 @@ async function main(): Promise<void> {
   const config = loadWranglerToml();
   const envKey = DEPLOYMENT_CONFIG.getEnvironmentFromStack(stack);
 
+  const apiWorkerName = DEPLOYMENT_CONFIG.resources.workerName(stack);
+  const deployedMigrationTag = await getDeployedWorkerMigrationTag(
+    outputs.cloudflareAccountId,
+    apiWorkerName
+  );
+  console.log(
+    `  API worker "${apiWorkerName}" migration state: ${deployedMigrationTag ?? 'clean install'}`
+  );
+
   // Check if tail worker already exists (for conditional tail_consumers)
   const tailWorkerName = DEPLOYMENT_CONFIG.resources.tailWorkerName(stack);
   const hasTailWorker = await checkTailWorkerExists(outputs.cloudflareAccountId, tailWorkerName);
@@ -584,7 +760,8 @@ async function main(): Promise<void> {
     outputs,
     stack,
     hasTailWorker,
-    artifactsBindingEnabled
+    artifactsBindingEnabled,
+    deployedMigrationTag
   );
   saveWranglerToml(config);
   console.log(`Updated wrangler.toml [env.${envKey}]`);
