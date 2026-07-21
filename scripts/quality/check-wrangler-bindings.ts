@@ -7,9 +7,8 @@
  *    at deploy time by scripts/deploy/sync-wrangler-config.ts.
  *
  * 2. Top-level config has all required binding types — the sync script copies
- *    static bindings (Durable Objects, AI, migrations) from top-level into
- *    generated env sections. If they're missing at the top level, they'll be
- *    missing at runtime.
+ *    static bindings and resolves migrations from the top-level declarations.
+ *    If they're missing at the top level, they'll be missing at runtime.
  *
  * This check runs in CI to prevent misconfigurations.
  */
@@ -110,7 +109,7 @@ function main(): void {
   }
 
   if (!apiConfig.migrations?.length) {
-    errors.push('apps/api/wrangler.toml: top-level missing [[migrations]] (sync script copies these to env sections)');
+    errors.push('apps/api/wrangler.toml: top-level missing [[migrations]] (sync script resolves these into env sections)');
   }
 
   // ========================================

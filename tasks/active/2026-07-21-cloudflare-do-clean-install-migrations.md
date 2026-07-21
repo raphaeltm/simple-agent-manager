@@ -118,20 +118,20 @@ operator hand-edit instructions.
 
 ## Implementation checklist
 
-- [ ] Add typed Cloudflare Worker migration-state detection to the Wrangler
+- [x] Add typed Cloudflare Worker migration-state detection to the Wrangler
       sync generator with bounded, redacted diagnostics.
-- [ ] Add a pure migration resolver that preserves the applied prefix and
+- [x] Add a pure migration resolver that preserves the applied prefix and
       converts only pending legacy namespace creates to SQLite.
-- [ ] Feed the resolved migration list into every generated API environment.
-- [ ] Keep local Miniflare bindings and the checked-in historical migration
+- [x] Feed the resolved migration list into every generated API environment.
+- [x] Keep local Miniflare bindings and the checked-in historical migration
       chain unchanged.
-- [ ] Add clean-install, fully-upgraded legacy, partial-upgrade, unknown-tag,
+- [x] Add clean-install, fully-upgraded legacy, partial-upgrade, unknown-tag,
       missing-Worker, and Cloudflare API failure tests.
-- [ ] Add a parsed generated-config assertion proving the deployment env uses
+- [x] Add a parsed generated-config assertion proving the deployment env uses
       the selected list rather than the raw top-level list.
-- [ ] Update the Wrangler deployment rule/process guard so future DO migrations
+- [x] Update the Wrangler deployment rule/process guard so future DO migrations
       preserve applied history and use SQLite for new namespaces.
-- [ ] Update public deployment documentation only where runtime behavior needs
+- [x] Update public deployment documentation only where runtime behavior needs
       explanation; avoid making operators choose migration history manually.
 - [ ] Run focused generator/workflow tests, Wrangler binding checks, lint,
       typecheck, tests, build, and migration safety checks proportionate to the
@@ -146,20 +146,20 @@ operator hand-edit instructions.
 
 ## Acceptance criteria
 
-- [ ] A generated config for a confirmed clean target contains no
+- [x] A generated config for a confirmed clean target contains no
       `new_classes` directives and creates all 17 classes with SQLite.
-- [ ] A target already at v17 receives the unchanged historical migration list;
+- [x] A target already at v17 receives the unchanged historical migration list;
       no namespace is recreated, deleted, renamed, converted, or replayed.
-- [ ] A partially upgraded target preserves applied entries and converts only
+- [x] A partially upgraded target preserves applied entries and converts only
       future legacy creates to SQLite.
-- [ ] Unknown or unreadable deployed migration state blocks deployment with an
+- [x] Unknown or unreadable deployed migration state blocks deployment with an
       actionable error instead of assuming a clean account.
-- [ ] Canonical staging, canonical production, and self-host production all use
+- [x] Canonical staging, canonical production, and self-host production all use
       the same deterministic generator behavior.
 - [ ] Local Miniflare/Worker tests remain compatible.
-- [ ] Automated tests discriminate clean-install and existing-upgrade behavior
+- [x] Automated tests discriminate clean-install and existing-upgrade behavior
       and would fail against the current verbatim-copy generator.
-- [ ] Official documentation and read-only deployed state support the migration
+- [x] Official documentation and read-only deployed state support the migration
       reasoning recorded in the PR.
 - [ ] PR CI is green and the PR is left open/unmerged.
 
