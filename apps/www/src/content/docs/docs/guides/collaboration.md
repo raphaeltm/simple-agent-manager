@@ -57,9 +57,15 @@ Each project keeps one active invite link at a time. From the same panel you can
 
 Invite links carry an **expiry** (shown as "Expires …") and a **use count** so you can see how much a link has been shared. Expiry length is configurable by self-hosters via `PROJECT_INVITE_DEFAULT_EXPIRY_DAYS` and `PROJECT_INVITE_MAX_EXPIRY_DAYS`.
 
+![The Members panel under Settings → Access, showing current members with owner and admin roles, a pending access request from a GitHub-verified user with Approve and Deny buttons, and the invite link controls.](/images/docs/collaboration-members.png)
+
+The **Members** panel is the single place owners and admins manage everything: the invite link, current members and their roles, and any pending access requests.
+
 ## Request access (the recipient's view)
 
 When someone opens an invite link, they land on a page that shows the project name and repository and a single **Request Access** button.
+
+![The invite landing page a recipient sees: a "Request access" card naming the project (Payments API) and its repository, with a Request Access button.](/images/docs/collaboration-invite-request.png)
 
 - Clicking **Request Access** creates a pending request and shows "Your request will be reviewed by a project owner or admin."
 - Once an owner or admin approves, the same page shows **Open Project**.
@@ -101,6 +107,8 @@ By default, shared work runs on the **personal** keys of whoever set it up. That
 - The indicator only appears once a project is actually shared (more than one member, an active invite link, or a pending request) and there are credential-backed resources.
 - It shows a small badge — for example how many resources still run on personal keys, or "No shared keys" when everything is covered.
 - Clicking it opens the **Credential Attribution** panel, which lists credential-backed resources (triggers, running tasks, nodes, deployments, and project credential attachments) grouped by type. Each shows whether it is covered by a **project credential** (green) or a **personal** key (warning), with a **Fix** link that takes you to **Settings → Connections** to attach a project-level credential.
+
+![The Credential Attribution panel, showing a nightly trigger running on a member's personal Claude Code key flagged for review with a Fix link, and a staging deployment covered by a shared project Hetzner credential.](/images/docs/collaboration-credentials.png)
 
 The goal is not to block sharing — invites and approvals continue regardless. It is to let the team see, and choose to fix, which shared work is running on an individual's personal keys. To move a resource off personal keys, attach a project-scoped credential under **Settings → Connections**; project members' sessions then use the shared project credential instead of an individual's key.
 
