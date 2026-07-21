@@ -439,7 +439,7 @@ agentSessionRoutes.post(
       node.runtime === 'cf-container' &&
       (node.status !== 'running' || session.status !== 'running')
     ) {
-      const recovery = await resumeVmAgentContainer(c.env, node.id);
+      const recovery = await resumeVmAgentContainer(c.env, node.id, session.id);
       if (!recovery.ok) {
         if (!recovery.code || !recovery.message) {
           throw errors.internal('Instant session recovery failed.');

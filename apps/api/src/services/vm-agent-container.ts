@@ -80,10 +80,11 @@ export async function fetchVmAgentContainer(
 
 export async function resumeVmAgentContainer(
   env: Env,
-  nodeId: string
+  nodeId: string,
+  agentSessionId: string
 ): Promise<VmAgentContainerRecoveryResult> {
   const container = getVmAgentContainer(env, nodeId);
-  return container.resumeRuntime();
+  return container.resumeRuntime(agentSessionId);
 }
 
 export async function markVmAgentContainerRequestInterrupted(

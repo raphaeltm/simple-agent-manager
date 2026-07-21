@@ -2,7 +2,10 @@ import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
-import type { RuntimeRecoveryCode } from '../durable-objects/vm-agent-container-recovery';
+import {
+  getRuntimeRecoveryMessage,
+  type RuntimeRecoveryCode,
+} from '../durable-objects/vm-agent-container-recovery';
 import type { Env } from '../env';
 import { expectJsonRecord } from '../lib/runtime-validation';
 import { AppError } from '../middleware/error';
@@ -158,15 +161,11 @@ export async function nodeAgentRequest(
     } catch {
       // Non-recovery Node Agent responses retain the existing generic handling.
     }
-    if (
-      recoveryPayload &&
-      isRuntimeRecoveryCode(recoveryPayload.error) &&
-      typeof recoveryPayload.message === 'string'
-    ) {
+    if (recoveryPayload && isRuntimeRecoveryCode(recoveryPayload.error)) {
       throw new NodeAgentRequestError(
-        response.status,
+        runtimeRecoveryStatus(recoveryPayload.error),
         recoveryPayload.error,
-        recoveryPayload.message
+        getRuntimeRecoveryMessage(recoveryPayload.error)
       );
     }
 
@@ -263,7 +262,7 @@ export async function fetchNodeAgent(
       throw new NodeAgentRequestError(
         runtimeRecoveryStatus(recovery.code),
         recovery.code,
-        recovery.message
+        getRuntimeRecoveryMessage(recovery.code)
       );
     }
     throw error;

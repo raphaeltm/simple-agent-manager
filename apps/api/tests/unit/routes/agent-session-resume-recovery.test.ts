@@ -135,7 +135,8 @@ describe('agent session Instant recovery route', () => {
     await vi.waitFor(() =>
       expect(mocks.resumeVmAgentContainer).toHaveBeenCalledWith(
         expect.objectContaining({ DATABASE: {} }),
-        'node-1'
+        'node-1',
+        'agent-session-1'
       )
     );
     expect(mocks.updateSet).not.toHaveBeenCalled();
@@ -158,9 +159,9 @@ describe('agent session Instant recovery route', () => {
       ok: false,
       status: 'degraded',
       degraded: true,
-      code: 'SNAPSHOT_RESTORE_FAILED',
+      code: 'RUNTIME_RECOVERY_DEGRADED',
       message:
-        'The Instant session could not restore its saved state. Start a new session to continue.',
+        'The Instant session could not restore its last safe checkpoint. Your transcript and partial output are still available.',
     });
     const app = await createTestApp();
 
@@ -172,9 +173,9 @@ describe('agent session Instant recovery route', () => {
 
     const body = await response.json();
     expect(body).toEqual({
-      error: 'SNAPSHOT_RESTORE_FAILED',
+      error: 'RUNTIME_RECOVERY_DEGRADED',
       message:
-        'The Instant session could not restore its saved state. Start a new session to continue.',
+        'The Instant session could not restore its last safe checkpoint. Your transcript and partial output are still available.',
     });
     expect(mocks.updateSet).not.toHaveBeenCalled();
   });

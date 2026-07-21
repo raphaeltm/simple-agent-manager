@@ -10,7 +10,7 @@ import * as projectDataService from '../services/project-data';
 export const RUNTIME_RECOVERING_MESSAGE =
   'Instant session interrupted; restoring the last safe checkpoint.';
 export const RUNTIME_REQUEST_INTERRUPTED_MESSAGE =
-  'Your message is saved, but the Instant runtime changed while it was being sent. It was not replayed automatically. Wait for restore to finish, then send it again.';
+  'Your message is saved, but delivery was interrupted and its execution outcome is unknown. It was not replayed automatically. After restore finishes, check the transcript and partial output before deciding whether to send it again.';
 export const RUNTIME_RECOVERY_DEGRADED_MESSAGE =
   'The Instant session could not restore its last safe checkpoint. Your transcript and partial output are still available.';
 export const RUNTIME_STOPPED_MESSAGE = 'This Instant session was stopped and cannot be resumed.';
@@ -20,6 +20,13 @@ export type RuntimeRecoveryCode =
   | 'RUNTIME_REQUEST_INTERRUPTED'
   | 'RUNTIME_RECOVERY_DEGRADED'
   | 'RUNTIME_STOPPED';
+
+export function getRuntimeRecoveryMessage(code: RuntimeRecoveryCode): string {
+  if (code === 'RUNTIME_RECOVERING') return RUNTIME_RECOVERING_MESSAGE;
+  if (code === 'RUNTIME_REQUEST_INTERRUPTED') return RUNTIME_REQUEST_INTERRUPTED_MESSAGE;
+  if (code === 'RUNTIME_STOPPED') return RUNTIME_STOPPED_MESSAGE;
+  return RUNTIME_RECOVERY_DEGRADED_MESSAGE;
+}
 
 export type RuntimeRecoveryPhase = 'pending' | 'waking' | 'restoring' | 'degraded' | 'exhausted';
 
@@ -61,6 +68,19 @@ export interface RuntimeRecoveryContext {
   chatSessionId: string;
   agentSessionId: string;
   agentType: string | null;
+}
+
+export function toRuntimeRecoveryTarget(
+  config: { nodeId: string; workspaceId: string; projectId: string },
+  context: RuntimeRecoveryContext
+): RuntimeRecoveryTarget {
+  return {
+    nodeId: config.nodeId,
+    workspaceId: config.workspaceId,
+    projectId: config.projectId,
+    chatSessionId: context.chatSessionId,
+    agentSessionId: context.agentSessionId,
+  };
 }
 
 const ACTIVE_TASK_STATUSES = ['in_progress', 'delegated', 'awaiting_followup'] as const;
