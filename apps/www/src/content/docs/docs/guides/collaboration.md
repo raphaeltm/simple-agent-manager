@@ -28,7 +28,7 @@ Because the link only produces a _request_, sharing a link is safe: nobody joins
 
 ## Roles
 
-Two roles are in use today: **owner** and **admin**. Roles control who can manage the project and its members — they do not change whose credentials pay for work (see [Credential attribution](#who-pays-credential-attribution)).
+Two roles are in use today: **owner** and **admin**. (Throughout this guide, _member_ just means anyone in the project — the only roles are owner and admin.) Roles control who can manage the project and its members — they do not change whose credentials pay for work (see [Credential attribution](#who-pays-credential-attribution)).
 
 | Capability                                         | Owner | Admin |
 | -------------------------------------------------- | ----- | ----- |
@@ -56,8 +56,10 @@ One link works for your whole team: share the same link with several people, and
 
 The panel shows and manages your most recently created invite link. From here you can:
 
-- **New Link** — create a fresh link. This does **not** revoke the previous link: the old URL keeps working, and once replaced it is no longer shown in the panel. If you want only one link live, click **Revoke** _before_ creating a new one.
+- **New Link** — create a fresh link. This does **not** revoke the previous link: the old URL keeps working until it **expires** (see below) and, once replaced, is no longer shown in the panel — so you can no longer revoke it there. If you want the old URL dead immediately, click **Revoke** _before_ creating a new one.
 - **Revoke** — immediately disable the shown link. Anyone who already joined keeps their access; only the link stops working.
+
+Because a replaced link stays live until it expires, treat **Revoke-then-New-Link** as the safe way to rotate — especially since everyone who joins becomes an admin.
 
 Invite links carry an **expiry** (shown as "Expires …") and a **use count** so you can see how much a link has been shared. Expiry length is configurable by self-hosters via `PROJECT_INVITE_DEFAULT_EXPIRY_DAYS` and `PROJECT_INVITE_MAX_EXPIRY_DAYS`.
 
@@ -134,11 +136,13 @@ The **Members** panel under **Settings → Access** lists every member with thei
 
 Removing a member or leaving a project opens an **offboarding** step that previews the resources tied to that member — triggers they created, running tasks, attached credentials — and makes you choose what happens to each before finalizing. This exists precisely so a departure does not silently break shared automation.
 
-The key thing to understand: **personal credentials leave with their owner.** A trigger or task that was running on the departing member's personal key will stop working once they are gone unless you re-point it at a project credential. For each affected resource the preview offers:
+The key thing to understand: **personal credentials leave with their owner.** A resource that was running on the departing member's personal key will stop working once they are gone unless you re-point it at a project credential. The preview lets you decide, per resource:
 
-- **Reattach to a project credential** — the resource keeps running on a shared project credential instead of the departing member's personal key. Choose this to keep the nightly job alive. (You need a compatible project credential connected under **Settings → Connections**.)
-- **Disable and flag** (for a task, **Stop future work and flag**) — the resource is disabled rather than left silently broken, and flagged so you can revisit it.
-- Some resources **block removal** until you resolve them, so you cannot accidentally remove a member out from under running work.
+- **Keep it running on a shared key** — point the resource at an existing project credential (the **Use existing project credential** option) so it survives the departure. This is how you keep a nightly trigger or a deployment alive. You need a compatible project credential connected under **Settings → Connections**.
+- **Disable it** — a trigger is disabled and flagged, and a task's future work is stopped and flagged, so nothing runs silently broken.
+- **Defer** — leave a resource for later instead of resolving it now.
+
+Some resources **block removal** until they are resolved, so you can't accidentally remove a member out from under running work. Triggers and tasks clear the block as soon as you disable them (or reattach them); **nodes and deployments clear it only when you point them at a project credential.** If there is no compatible project credential to use, stop or delete that node or deployment separately before finishing the removal.
 
 Combined with the credential-attribution indicator above, this keeps a member's exit from unexpectedly cutting off the team's automation — you decide, up front, what survives.
 
