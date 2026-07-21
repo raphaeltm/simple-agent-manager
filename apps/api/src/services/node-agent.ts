@@ -1,3 +1,4 @@
+// FILE SIZE EXCEPTION: Cross-boundary node-agent request layer marginally over the limit; interactive/background timeout tiers and cf-container interruption classification are one cohesive concern. Split candidate if it grows further. See .claude/rules/18-file-size-limits.md
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 

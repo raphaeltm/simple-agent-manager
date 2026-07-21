@@ -1,3 +1,4 @@
+// FILE SIZE EXCEPTION: Durable Object recovery state machine — method groups are already extracted into vm-agent-container-{recovery,runtime,lifecycle,active-work}.ts; the remaining class body is the interlocking mutex-guarded lifecycle critical sections (rule 45), which must stay reviewable as one unit. See .claude/rules/18-file-size-limits.md
 import { Container, switchPort } from '@cloudflare/containers';
 
 import type { Env } from '../env';
