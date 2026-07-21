@@ -41,7 +41,7 @@
     "react-router": "catalog:",
     "react-simple-maps": "3.0.0",
     "react-virtuoso": "catalog:",
-    "recharts": "3.8.1",
+    "recharts": "3.10.0",
     "remark-gfm": "catalog:",
     "tailwindcss": "4.3.2",
     "valibot": "catalog:"
