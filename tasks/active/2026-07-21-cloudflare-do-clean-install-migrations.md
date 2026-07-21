@@ -39,25 +39,25 @@ SQLite. Clean installations must create every namespace as SQLite-backed.
 `apps/api/wrangler.toml` contains 17 ordered create migrations and no
 rename/delete/transfer migrations on `main`:
 
-| Tag | Class | Historical backend |
-| --- | --- | --- |
-| v1 | `ProjectData` | SQLite |
-| v2 | `NodeLifecycle` | legacy KV |
-| v3 | `AdminLogs` | legacy KV |
-| v4 | `TaskRunner` | legacy KV |
-| v5 | `NotificationService` | SQLite |
-| v6 | `CodexRefreshLock` | legacy KV |
-| v7 | `TrialCounter` | SQLite |
-| v8 | `TrialEventBus` | legacy KV |
-| v9 | `TrialOrchestrator` | SQLite |
-| v10 | `ProjectOrchestrator` | SQLite |
-| v11 | `SamSession` | SQLite |
-| v12 | `ProjectAgent` | SQLite |
-| v13 | `SandboxDO` | SQLite |
-| v14 | `AiTokenBudgetCounter` | SQLite |
-| v15 | `GitHubUserAccessTokenLock` | legacy KV |
-| v16 | `VmAgentContainer` | SQLite |
-| v17 | `GitLabUserAccessTokenLock` | legacy KV |
+| Tag | Class                       | Historical backend |
+| --- | --------------------------- | ------------------ |
+| v1  | `ProjectData`               | SQLite             |
+| v2  | `NodeLifecycle`             | legacy KV          |
+| v3  | `AdminLogs`                 | legacy KV          |
+| v4  | `TaskRunner`                | legacy KV          |
+| v5  | `NotificationService`       | SQLite             |
+| v6  | `CodexRefreshLock`          | legacy KV          |
+| v7  | `TrialCounter`              | SQLite             |
+| v8  | `TrialEventBus`             | legacy KV          |
+| v9  | `TrialOrchestrator`         | SQLite             |
+| v10 | `ProjectOrchestrator`       | SQLite             |
+| v11 | `SamSession`                | SQLite             |
+| v12 | `ProjectAgent`              | SQLite             |
+| v13 | `SandboxDO`                 | SQLite             |
+| v14 | `AiTokenBudgetCounter`      | SQLite             |
+| v15 | `GitHubUserAccessTokenLock` | legacy KV          |
+| v16 | `VmAgentContainer`          | SQLite             |
+| v17 | `GitLabUserAccessTokenLock` | legacy KV          |
 
 The temporary feature-branch version of `v9` used `new_classes`, but neither
 that commit nor its follow-up rewrite is an ancestor of `main`; the merged
@@ -133,7 +133,7 @@ operator hand-edit instructions.
       preserve applied history and use SQLite for new namespaces.
 - [x] Update public deployment documentation only where runtime behavior needs
       explanation; avoid making operators choose migration history manually.
-- [ ] Run focused generator/workflow tests, Wrangler binding checks, lint,
+- [x] Run focused generator/workflow tests, Wrangler binding checks, lint,
       typecheck, tests, build, and migration safety checks proportionate to the
       change.
 - [ ] Run Cloudflare specialist, task completion, test, constitution, and
@@ -156,12 +156,32 @@ operator hand-edit instructions.
       actionable error instead of assuming a clean account.
 - [x] Canonical staging, canonical production, and self-host production all use
       the same deterministic generator behavior.
-- [ ] Local Miniflare/Worker tests remain compatible.
+- [x] Local Miniflare/Worker tests remain compatible.
 - [x] Automated tests discriminate clean-install and existing-upgrade behavior
       and would fail against the current verbatim-copy generator.
 - [x] Official documentation and read-only deployed state support the migration
       reasoning recorded in the PR.
 - [ ] PR CI is green and the PR is left open/unmerged.
+
+## Validation evidence
+
+- TDD discrimination: the new compatibility suite failed all 12 initial cases
+  against the verbatim-copy generator, then passed after implementation.
+- Focused compatibility/generator tests: 35 tests passed.
+- Deployment/config gates passed: deployment-script TypeScript compilation,
+  Wrangler binding parity, D1 migration safety, Durable Object migration
+  safety, migration ordering, AST checks, file-size checks, source-contract
+  checks, agent-install manifest checks, and specialist-review harness tests
+  (127 tests).
+- Full repository gates passed: `pnpm lint`, `pnpm typecheck`, `pnpm test`, and
+  `pnpm build`. The Worker suite exercised Miniflare and passed 6,208 API tests;
+  the web suite passed 2,740 tests.
+- Targeted formatting and `git diff --check` passed. The repository-wide
+  formatting check still reports unrelated pre-existing formatting debt, so
+  changed files were checked directly.
+- The final read-only state probe returned `v17` for both `sam-api-staging` and
+  `sam-api-prod`; namespace backend flags were inspected separately and match
+  the immutable checked-in history.
 
 ## Post-mortem
 

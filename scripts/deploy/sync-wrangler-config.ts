@@ -186,23 +186,6 @@ export async function getDeployedWorkerMigrationTag(
   workerName: string
 ): Promise<string | null> {
   const apiToken = requireCloudflareApiToken('read Durable Object migration state');
-  const readOperation = `Failed to read Durable Object migration state for Worker "${workerName}"`;
-  const settingsUrl =
-    `${CLOUDFLARE_API_BASE_URL}/accounts/${encodeURIComponent(accountId)}` +
-    `/workers/scripts/${encodeURIComponent(workerName)}/settings`;
-  const settingsResponse = await fetchCloudflareMigrationState(
-    settingsUrl,
-    apiToken,
-    readOperation
-  );
-
-  if (settingsResponse.status === 404) {
-    return null;
-  }
-  if (!settingsResponse.ok) {
-    throw new Error(`${readOperation} (HTTP ${settingsResponse.status})`);
-  }
-
   const scriptsUrl =
     `${CLOUDFLARE_API_BASE_URL}/accounts/${encodeURIComponent(accountId)}` +
     `/workers/scripts?per_page=${WORKERS_LIST_PAGE_SIZE}`;
@@ -237,6 +220,22 @@ export async function getDeployedWorkerMigrationTag(
       candidate.id === workerName
   );
   if (!worker) {
+    const readOperation = `Failed to read Durable Object migration state for Worker "${workerName}"`;
+    const settingsUrl =
+      `${CLOUDFLARE_API_BASE_URL}/accounts/${encodeURIComponent(accountId)}` +
+      `/workers/scripts/${encodeURIComponent(workerName)}/settings`;
+    const settingsResponse = await fetchCloudflareMigrationState(
+      settingsUrl,
+      apiToken,
+      readOperation
+    );
+
+    if (settingsResponse.status === 404) {
+      return null;
+    }
+    if (!settingsResponse.ok) {
+      throw new Error(`${readOperation} (HTTP ${settingsResponse.status})`);
+    }
     throw new Error(
       `Worker "${workerName}" exists but is absent from the Workers scripts listing; refusing to assume clean migration state`
     );
