@@ -9,13 +9,41 @@
  *
  * Run: pnpm test:workers
  */
-import { cloudflareTest } from '@cloudflare/vitest-pool-workers';
+import { cloudflareTest, readD1Migrations } from '@cloudflare/vitest-pool-workers';
 import { defineConfig } from 'vitest/config';
 
+import { isExpectedWorkerTestRejection } from './tests/workers/worker-test-policy';
+import { workerTestsForShard, type WorkerTestShard } from './tests/workers/worker-test-shards';
+
+const shard = process.env.WORKER_TEST_SHARD as WorkerTestShard | undefined;
+if (shard !== 'durable-objects' && shard !== 'http') throw new Error('Invalid WORKER_TEST_SHARD');
+
+const DEFAULT_WORKERS_TEST_MAX_WORKERS = 1;
+const DEFAULT_WORKERS_TEST_TIMEOUT_MS = 30_000;
+
+function readPositiveInteger(name: string, fallback: number): number {
+  const value = Number.parseInt(process.env[name] ?? '', 10);
+  return Number.isInteger(value) && value > 0 ? value : fallback;
+}
+
+const workersTestMaxWorkers = readPositiveInteger(
+  'WORKERS_TEST_MAX_WORKERS',
+  DEFAULT_WORKERS_TEST_MAX_WORKERS
+);
+const workersTestTimeoutMs = readPositiveInteger(
+  'WORKERS_TEST_TIMEOUT_MS',
+  DEFAULT_WORKERS_TEST_TIMEOUT_MS
+);
+
+const databaseMigrations = await readD1Migrations('./src/db/migrations');
+const observabilityMigrations = await readD1Migrations('./src/db/migrations/observability');
 export default defineConfig({
   plugins: [
     cloudflareTest({
-      main: './src/index.ts',
+      main:
+        shard === 'http'
+          ? './tests/workers/worker-entrypoint-api.ts'
+          : './tests/workers/worker-entrypoint.ts',
       miniflare: {
         // 2024-04-03+ required for DO RPC (calling methods directly on stubs)
         compatibilityDate: '2024-04-03',
@@ -64,8 +92,10 @@ export default defineConfig({
         bindings: {
           BASE_DOMAIN: 'test.example.com',
           VERSION: '0.1.0-test',
-          JWT_PRIVATE_KEY: '-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQCV93x2EyxEBk7u\npFMTLatfONe6gGOnr6XV2z9FsfAN+8nVtHNykTXb+MxUPR7rn8im7CIQLkjQRRca\nieyya6tpusK5x08Qo4L/SzXW+XsKjf81k9cBwm84N3VVKSzbexUtz4uJWKWi+1sC\nFKWoCR+DWgWvhPw3jg/rt32N/hTKbMjEbMx224VmV+Dka2qVFLiqKW46o9astLcq\ngX/orE/y9wivDPzMQTM3IfRUwJHlJu0WIb70oLyptbXXAOBmGFJMdbEvpWItRODf\ndiJ3Pw9ngW97Er4AIfT2Wx0KnUchG8BFA2nfgrxI8M396nM8uSs8ezDaoCgYoktm\nCcuIIOb1AgMBAAECggEACmF5v5CfMUxAfXtpdrvkD3DXWgUWIN7jO1T0YcYp6EXk\nGENn9GfB0yq7Nh+O+t9yG7/fscAKcUQ/D6q5dDZIxMZVQVffDLdM05Aot2tIjZf7\nsQE9UlVbrogEOrNhdAXmlue1cHnu6UO97nxwZRvQjx6Voysw7EWMq5PlgIU0ejiH\nYjE52VQNadxQhZ8DqphOahcOt20deZ41cwN1bKlY4DnLuahVfkIZ9tA66+IY5ob2\nTuAl1plxQfadUNkVOusMbLjjv4ol/aqxccyhxr3IA/kM3UYiFxNohKIEJFsUuzGt\nWZxdIquRaH+FQtnhCUypkURcdzLrUisTQVgjVm97lwKBgQDGxjDwUkaefCMbv3FH\nAyVIaA8oMXRpERawEHmcS+egzfkdC4yC50Eh4fgYuSihnIKMYuJ4kJInarmfeZFD\n8EZdMqHckSNpxQcgYCII42gaXh/BjjZ+lQYmDKXyApTyfHwP/vZ/nkZjaJrEEWIg\nf4i+iN3B7KtIlZ1LuRF99d6BfwKBgQDBJCY+lYGIUBui+p+bbHdv5bK7uVg7xBim\nHLdr+LUioHQeSc0Z5mCjGWRV40KSCWP4iZNCvLHKPX8a0z3kEkKErLpwLPlZSB8a\ngWmC4p1FIFhn2P8od6LtaWGbMg+palXm/uDw990depEF3j9dMmnoQvt9rtEJxhgF\nNeDCzYzpiwKBgQDCfp7YJ8lNve2kcvhmIZ/Tb26VR36+Z6gpcpVr56GnaKM+VlSQ\nqbLDcpYNqu8k4z2iHAe5LMy1oOosLwmCzpIrEyXp6mIaVl2YwjfLNqhgVIUCISMV\nTMANbwbY/Mm9Uy0ZgcK0MKxzDKGTA+deISwuM0G5RNh8V1joBRgmhfPIBQKBgHnE\nNrBiRaYRCzt3UsUEX1CWulaMBcq4WOnxVNqnlFteWZb25G4dxnNNgOp9Ou0jKnn5\nEnSSzmw41TeuUmjF8lX/KBOs5w+Y3rMxP7oa8Rgxykq+ji+PLZMMS1My/pjKx5m4\nu0xwmGELcv8GHWC+dfLOuAuG+Zd14pL2YtuuB9b9AoGAIeYQNLMHNyEK/Kh4Vsza\n9rzbR0oXLqIe3PJOKqxpA4gSBdXbsizc7bkhhTHPDTpUo30Pke5f03O/RoawLT63\nr3SA1x5MVCsiVcqybvqtMIyy1zc/oKSUyuYh44Sjpii7Q9DJlCeMupyA3TSVb0Qa\nO+hP/5ZHDz4epkJVLKvwE2Y=\n-----END PRIVATE KEY-----',
-          JWT_PUBLIC_KEY: '-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAlfd8dhMsRAZO7qRTEy2r\nXzjXuoBjp6+l1ds/RbHwDfvJ1bRzcpE12/jMVD0e65/IpuwiEC5I0EUXGonssmur\nabrCucdPEKOC/0s11vl7Co3/NZPXAcJvODd1VSks23sVLc+LiVilovtbAhSlqAkf\ng1oFr4T8N44P67d9jf4UymzIxGzMdtuFZlfg5GtqlRS4qiluOqPWrLS3KoF/6KxP\n8vcIrwz8zEEzNyH0VMCR5SbtFiG+9KC8qbW11wDgZhhSTHWxL6ViLUTg33Yidz8P\nZ4FvexK+ACH09lsdCp1HIRvARQNp34K8SPDN/epzPLkrPHsw2qAoGKJLZgnLiCDm\n9QIDAQAB\n-----END PUBLIC KEY-----',
+          JWT_PRIVATE_KEY:
+            '-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQCV93x2EyxEBk7u\npFMTLatfONe6gGOnr6XV2z9FsfAN+8nVtHNykTXb+MxUPR7rn8im7CIQLkjQRRca\nieyya6tpusK5x08Qo4L/SzXW+XsKjf81k9cBwm84N3VVKSzbexUtz4uJWKWi+1sC\nFKWoCR+DWgWvhPw3jg/rt32N/hTKbMjEbMx224VmV+Dka2qVFLiqKW46o9astLcq\ngX/orE/y9wivDPzMQTM3IfRUwJHlJu0WIb70oLyptbXXAOBmGFJMdbEvpWItRODf\ndiJ3Pw9ngW97Er4AIfT2Wx0KnUchG8BFA2nfgrxI8M396nM8uSs8ezDaoCgYoktm\nCcuIIOb1AgMBAAECggEACmF5v5CfMUxAfXtpdrvkD3DXWgUWIN7jO1T0YcYp6EXk\nGENn9GfB0yq7Nh+O+t9yG7/fscAKcUQ/D6q5dDZIxMZVQVffDLdM05Aot2tIjZf7\nsQE9UlVbrogEOrNhdAXmlue1cHnu6UO97nxwZRvQjx6Voysw7EWMq5PlgIU0ejiH\nYjE52VQNadxQhZ8DqphOahcOt20deZ41cwN1bKlY4DnLuahVfkIZ9tA66+IY5ob2\nTuAl1plxQfadUNkVOusMbLjjv4ol/aqxccyhxr3IA/kM3UYiFxNohKIEJFsUuzGt\nWZxdIquRaH+FQtnhCUypkURcdzLrUisTQVgjVm97lwKBgQDGxjDwUkaefCMbv3FH\nAyVIaA8oMXRpERawEHmcS+egzfkdC4yC50Eh4fgYuSihnIKMYuJ4kJInarmfeZFD\n8EZdMqHckSNpxQcgYCII42gaXh/BjjZ+lQYmDKXyApTyfHwP/vZ/nkZjaJrEEWIg\nf4i+iN3B7KtIlZ1LuRF99d6BfwKBgQDBJCY+lYGIUBui+p+bbHdv5bK7uVg7xBim\nHLdr+LUioHQeSc0Z5mCjGWRV40KSCWP4iZNCvLHKPX8a0z3kEkKErLpwLPlZSB8a\ngWmC4p1FIFhn2P8od6LtaWGbMg+palXm/uDw990depEF3j9dMmnoQvt9rtEJxhgF\nNeDCzYzpiwKBgQDCfp7YJ8lNve2kcvhmIZ/Tb26VR36+Z6gpcpVr56GnaKM+VlSQ\nqbLDcpYNqu8k4z2iHAe5LMy1oOosLwmCzpIrEyXp6mIaVl2YwjfLNqhgVIUCISMV\nTMANbwbY/Mm9Uy0ZgcK0MKxzDKGTA+deISwuM0G5RNh8V1joBRgmhfPIBQKBgHnE\nNrBiRaYRCzt3UsUEX1CWulaMBcq4WOnxVNqnlFteWZb25G4dxnNNgOp9Ou0jKnn5\nEnSSzmw41TeuUmjF8lX/KBOs5w+Y3rMxP7oa8Rgxykq+ji+PLZMMS1My/pjKx5m4\nu0xwmGELcv8GHWC+dfLOuAuG+Zd14pL2YtuuB9b9AoGAIeYQNLMHNyEK/Kh4Vsza\n9rzbR0oXLqIe3PJOKqxpA4gSBdXbsizc7bkhhTHPDTpUo30Pke5f03O/RoawLT63\nr3SA1x5MVCsiVcqybvqtMIyy1zc/oKSUyuYh44Sjpii7Q9DJlCeMupyA3TSVb0Qa\nO+hP/5ZHDz4epkJVLKvwE2Y=\n-----END PRIVATE KEY-----',
+          JWT_PUBLIC_KEY:
+            '-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAlfd8dhMsRAZO7qRTEy2r\nXzjXuoBjp6+l1ds/RbHwDfvJ1bRzcpE12/jMVD0e65/IpuwiEC5I0EUXGonssmur\nabrCucdPEKOC/0s11vl7Co3/NZPXAcJvODd1VSks23sVLc+LiVilovtbAhSlqAkf\ng1oFr4T8N44P67d9jf4UymzIxGzMdtuFZlfg5GtqlRS4qiluOqPWrLS3KoF/6KxP\n8vcIrwz8zEEzNyH0VMCR5SbtFiG+9KC8qbW11wDgZhhSTHWxL6ViLUTg33Yidz8P\nZ4FvexK+ACH09lsdCp1HIRvARQNp34K8SPDN/epzPLkrPHsw2qAoGKJLZgnLiCDm\n9QIDAQAB\n-----END PUBLIC KEY-----',
           MAX_NODES_PER_USER: '10',
           MAX_AGENT_SESSIONS_PER_WORKSPACE: '10',
           MAX_PROJECTS_PER_USER: '50',
@@ -88,7 +118,21 @@ export default defineConfig({
     }),
   ],
   test: {
+    // workerd reports caught DO method rejections a second time through the RPC harness.
+    // Filter only rejection messages asserted by worker tests; every other error remains fatal.
+    onUnhandledError(error) {
+      if (isExpectedWorkerTestRejection(error)) return false;
+    },
+    fileParallelism: false,
     globals: true,
-    include: ['tests/workers/**/*.test.ts'],
+    // Discover the inventory from the repository. A newly added worker test enters this gate
+    // automatically instead of requiring a manually maintained allowlist.
+    include: workerTestsForShard(shard),
+    maxWorkers: workersTestMaxWorkers,
+    reporters: process.env.CI ? ['verbose'] : ['default'],
+    setupFiles: ['./tests/workers/setup.ts'],
+    provide: { databaseMigrations, observabilityMigrations },
+    hookTimeout: workersTestTimeoutMs,
+    testTimeout: workersTestTimeoutMs,
   },
 });

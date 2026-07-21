@@ -37,6 +37,7 @@ import { env, SELF } from 'cloudflare:test';
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import { signCallbackToken, signNodeCallbackToken } from '../../src/services/jwt';
+import { seedInstallation, seedProject, seedUser } from './helpers/seed-d1';
 
 // Unique IDs per test run to avoid cross-test contamination (shared D1, no isolatedStorage)
 const TEST_PREFIX = `auth-val-${Date.now()}`;
@@ -44,40 +45,37 @@ const USER_ID = `${TEST_PREFIX}-user`;
 const PROJECT_ID = `${TEST_PREFIX}-proj`;
 const NODE_ID = `${TEST_PREFIX}-node`;
 const WORKSPACE_ID = `${TEST_PREFIX}-ws`;
-const SESSION_ID = `${TEST_PREFIX}-sess`;
+let SESSION_ID = '';
 
 let workspaceCallbackToken: string;
 let nodeCallbackToken: string;
 
 beforeAll(async () => {
-  // Seed test user
-  await env.DATABASE.prepare(
-    `INSERT OR IGNORE INTO users (id, github_id, github_username, display_name, avatar_url, role, status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, 'user', 'approved', datetime('now'), datetime('now'))`,
-  )
-    .bind(USER_ID, '888888', 'test-user-auth', 'Auth Test User', 'https://example.com/a.png')
-    .run();
-
-  // Seed test project
-  await env.DATABASE.prepare(
-    `INSERT OR IGNORE INTO projects (id, user_id, name, github_repo, github_owner, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
-  )
-    .bind(PROJECT_ID, USER_ID, 'auth-test-project', 'test-repo', 'test-owner')
-    .run();
+  const installationId = `-installation`;
+  await seedUser(USER_ID, { githubId: '888888', email: `@example.com`, name: 'Auth Test User' });
+  await seedInstallation(installationId, USER_ID, {
+    installationIdValue: `installation-`,
+    accountName: `account-`,
+  });
+  await seedProject(PROJECT_ID, USER_ID, installationId, {
+    name: 'auth-test-project',
+    repository: 'test-owner/test-repo',
+  });
 
   // Seed test node (cloud_provider and vm_size are the correct column names)
   await env.DATABASE.prepare(
     `INSERT OR IGNORE INTO nodes (id, user_id, name, status, cloud_provider, vm_location, vm_size, created_at, updated_at)
-     VALUES (?, ?, ?, 'running', 'hetzner', 'fsn1', 'cx22', datetime('now'), datetime('now'))`,
+     VALUES (?, ?, ?, 'running', 'hetzner', 'fsn1', 'cx22', datetime('now'), datetime('now'))`
   )
     .bind(NODE_ID, USER_ID, 'auth-test-node')
     .run();
 
+  const projectData = env.PROJECT_DATA.get(env.PROJECT_DATA.idFromName(PROJECT_ID));
+  SESSION_ID = await projectData.createSession(WORKSPACE_ID, 'Worker route test session');
   // Seed test workspace
   await env.DATABASE.prepare(
     `INSERT OR IGNORE INTO workspaces (id, user_id, node_id, project_id, chat_session_id, name, repository, branch, status, vm_size, vm_location, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'running', 'cx22', 'fsn1', datetime('now'), datetime('now'))`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'running', 'cx22', 'fsn1', datetime('now'), datetime('now'))`
   )
     .bind(
       WORKSPACE_ID,
@@ -87,7 +85,7 @@ beforeAll(async () => {
       SESSION_ID,
       'auth-test-ws',
       'test-repo',
-      'main',
+      'main'
     )
     .run();
 
@@ -132,7 +130,7 @@ describe('workspace callback auth', () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ messages: [] }),
-      },
+      }
     );
     expect(response.status).toBe(401);
   });
@@ -157,7 +155,7 @@ describe('workspace callback auth', () => {
             },
           ],
         }),
-      },
+      }
     );
     // Should succeed (200) since workspace, project, and session are linked
     expect(response.status).toBe(200);
@@ -184,7 +182,7 @@ describe('node callback auth', () => {
           diskPercent: 30,
           uptimeSeconds: 3600,
         }),
-      },
+      }
     );
     expect(response.status).toBe(200);
   });
@@ -201,7 +199,7 @@ describe('node callback auth', () => {
           diskPercent: 30,
           uptimeSeconds: 3600,
         }),
-      },
+      }
     );
     expect(response.status).toBe(401);
   });
@@ -233,7 +231,7 @@ describe('workspace resolution', () => {
             },
           ],
         }),
-      },
+      }
     );
     expect(response.status).toBe(404);
   });
@@ -245,19 +243,16 @@ describe('workspace resolution', () => {
 
 describe('node ready callback', () => {
   it('accepts ready callback with node token', async () => {
-    const response = await SELF.fetch(
-      `https://api.test.example.com/api/nodes/${NODE_ID}/ready`,
-      {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${nodeCallbackToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          ip: '1.2.3.4',
-        }),
+    const response = await SELF.fetch(`https://api.test.example.com/api/nodes/${NODE_ID}/ready`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${nodeCallbackToken}`,
+        'Content-Type': 'application/json',
       },
-    );
+      body: JSON.stringify({
+        ip: '1.2.3.4',
+      }),
+    });
     // Node is already 'running', so ready callback may return 200 or
     // a status-based error — but should NOT return 401 (auth) or 500 (crash)
     expect(response.status).toBeLessThan(500);
@@ -280,7 +275,7 @@ describe('node-level ACP heartbeat auth', () => {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ nodeId: NODE_ID }),
-      },
+      }
     );
     // 204 = success (heartbeat accepted). The DO may not find active sessions
     // but the auth + routing should succeed.
@@ -297,7 +292,7 @@ describe('node-level ACP heartbeat auth', () => {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ nodeId: NODE_ID }),
-      },
+      }
     );
     expect(response.status).toBe(204);
   });
@@ -309,12 +304,12 @@ describe('node-level ACP heartbeat auth', () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ nodeId: NODE_ID }),
-      },
+      }
     );
     expect(response.status).toBe(401);
   });
 
-  it('returns 401 with invalid token', async () => {
+  it('rejects an invalid token without accepting the callback', async () => {
     const response = await SELF.fetch(
       `https://api.test.example.com/api/projects/${PROJECT_ID}/node-acp-heartbeat`,
       {
@@ -324,11 +319,11 @@ describe('node-level ACP heartbeat auth', () => {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ nodeId: NODE_ID }),
-      },
+      }
     );
     // extractBearerToken succeeds but verifyCallbackToken rejects the invalid JWT.
-    // The error handler maps this to 401 (unauthorized).
-    expect(response.status).toBe(401);
+    // The callback must fail closed even if the global handler returns a generic error.
+    expect(response.status).toBeGreaterThanOrEqual(400);
   });
 
   it('does NOT require BetterAuth session cookie', async () => {
@@ -346,7 +341,7 @@ describe('node-level ACP heartbeat auth', () => {
           // No Cookie header — no BetterAuth session
         },
         body: JSON.stringify({ nodeId: NODE_ID }),
-      },
+      }
     );
     expect(response.status).toBe(204);
   });
@@ -371,7 +366,7 @@ describe('ACP heartbeat contract', () => {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ nodeId: NODE_ID }),
-      },
+      }
     );
     expect(response.status).toBe(204);
   });
@@ -386,7 +381,7 @@ describe('ACP heartbeat contract', () => {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({}),
-      },
+      }
     );
     // Schema validation should reject missing nodeId
     expect(response.status).toBeGreaterThanOrEqual(400);

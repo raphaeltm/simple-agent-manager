@@ -1,10 +1,10 @@
 /**
  * Vertical slice tests for node-cleanup scheduled job.
  *
- * Uses real D1 + OBSERVABILITY_DATABASE via Miniflare. External HTTP calls
- * (deleteNodeResources, stopWorkspaceOnNode, deleteWorkspaceOnNode) fail in
- * the test environment since there's no real Hetzner/VM agent — but the job
- * handles errors gracefully. We verify D1 state changes and observability
+ * Uses real D1 + OBSERVABILITY_DATABASE via Miniflare. VM-agent workspace calls
+ * are stubbed at the external boundary while D1 and observability remain real.
+ * Node-provider cleanup has no credentials in the test environment, and the job
+ * handles that failure gracefully. We verify D1 state changes and observability
  * events that happen regardless of HTTP outcomes.
  *
  * Tests focus on:
@@ -27,6 +27,11 @@ import {
   seedWorkspace,
 } from './helpers/seed-d1';
 
+vi.mock('../../src/services/node-agent', () => ({
+  deleteWorkspaceOnNode: vi.fn().mockResolvedValue(undefined),
+  stopWorkspaceOnNode: vi.fn().mockResolvedValue(undefined),
+}));
+
 const USER_ID = 'user-nc-test';
 const INSTALL_ID = 'install-nc-test';
 const PROJECT_ID = 'project-nc-test';
@@ -37,7 +42,9 @@ async function seedBaseData(): Promise<void> {
   await seedProject(PROJECT_ID, USER_ID, INSTALL_ID);
 }
 
-async function getNodeStatus(nodeId: string): Promise<{ status: string; warm_since: string | null } | null> {
+async function getNodeStatus(
+  nodeId: string
+): Promise<{ status: string; warm_since: string | null } | null> {
   return env.DATABASE.prepare('SELECT status, warm_since FROM nodes WHERE id = ?')
     .bind(nodeId)
     .first<{ status: string; warm_since: string | null }>();
@@ -49,16 +56,22 @@ async function getWorkspaceStatus(wsId: string): Promise<{ status: string } | nu
     .first<{ status: string }>();
 }
 
-async function getNodeRuntimeStatus(nodeId: string): Promise<{ status: string; runtime: string } | null> {
+async function getNodeRuntimeStatus(
+  nodeId: string
+): Promise<{ status: string; runtime: string } | null> {
   return env.DATABASE.prepare('SELECT status, runtime FROM nodes WHERE id = ?')
     .bind(nodeId)
     .first<{ status: string; runtime: string }>();
 }
 
-async function getObservabilityEvents(recoveryType: string): Promise<{ id: string; message: string }[]> {
+async function getObservabilityEvents(
+  recoveryType: string
+): Promise<{ id: string; message: string }[]> {
   const result = await env.OBSERVABILITY_DATABASE.prepare(
-    `SELECT id, message FROM platform_errors WHERE context LIKE ? ORDER BY created_at DESC`,
-  ).bind(`%${recoveryType}%`).all<{ id: string; message: string }>();
+    `SELECT id, message FROM platform_errors WHERE context LIKE ? ORDER BY created_at DESC`
+  )
+    .bind(`%${recoveryType}%`)
+    .all<{ id: string; message: string }>();
   return result.results;
 }
 
@@ -77,9 +90,9 @@ describe('runNodeCleanupSweep — vertical slice', () => {
         createdAt: oldDate,
         updatedAt: oldDate,
       });
-      await env.DATABASE.prepare(
-        `UPDATE nodes SET runtime = 'cf-container' WHERE id = ?`,
-      ).bind(nodeId).run();
+      await env.DATABASE.prepare(`UPDATE nodes SET runtime = 'cf-container' WHERE id = ?`)
+        .bind(nodeId)
+        .run();
       await seedWorkspace(wsId, nodeId, USER_ID, {
         projectId: PROJECT_ID,
         status: 'running',

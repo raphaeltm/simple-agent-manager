@@ -70,7 +70,7 @@ async function appendViaBus(trialId: string, event: TrialEvent): Promise<void> {
 async function readStreamUntil(
   resp: Response,
   minDataFrames: number,
-  timeoutMs = 3000,
+  timeoutMs = 3000
 ): Promise<string> {
   if (!resp.body) throw new Error('response has no body');
   const reader = resp.body.getReader();
@@ -84,7 +84,7 @@ async function readStreamUntil(
     const { value, done } = await Promise.race([
       reader.read(),
       new Promise<{ value: undefined; done: true }>((resolve) =>
-        setTimeout(() => resolve({ value: undefined, done: true }), 250),
+        setTimeout(() => resolve({ value: undefined, done: true }), 250)
       ),
     ]);
     if (done) break;
@@ -110,8 +110,8 @@ describe('TrialEventBus → SSE endpoint (capability)', () => {
     //    — tests the immediate-return path of the DO poll loop.
     const knowledgeEvent: TrialEvent = {
       type: 'trial.knowledge',
-      key: 'description',
-      value: 'capability-test description',
+      entity: 'description',
+      observation: 'capability-test description',
       at: Date.now(),
     };
     await appendViaBus(trialId, knowledgeEvent);
@@ -121,13 +121,10 @@ describe('TrialEventBus → SSE endpoint (capability)', () => {
     const signed = await signFingerprint(fingerprintUuid, secret);
     const cookie = `${TRIAL_COOKIE_FINGERPRINT_NAME}=${encodeURIComponent(signed)}`;
 
-    const resp = await SELF.fetch(
-      `https://api.test.example.com/api/trial/${trialId}/events`,
-      {
-        method: 'GET',
-        headers: { cookie, accept: 'text/event-stream' },
-      },
-    );
+    const resp = await SELF.fetch(`https://api.test.example.com/api/trial/${trialId}/events`, {
+      method: 'GET',
+      headers: { cookie, accept: 'text/event-stream', 'CF-Connecting-IP': '192.0.2.10' },
+    });
 
     expect(resp.status).toBe(200);
     expect(resp.headers.get('content-type')).toMatch(/text\/event-stream/);
@@ -136,7 +133,7 @@ describe('TrialEventBus → SSE endpoint (capability)', () => {
     //    the long-poll wake path.
     const progressEvent: TrialEvent = {
       type: 'trial.progress',
-      step: 'capability-check',
+      stage: 'capability-check',
       at: Date.now(),
     };
     await appendViaBus(trialId, progressEvent);
@@ -163,11 +160,10 @@ describe('TrialEventBus → SSE endpoint (capability)', () => {
     expect(types).toContain('trial.progress');
 
     const knowledgeFrame = parsed.find(
-      (e): e is Extract<TrialEvent, { type: 'trial.knowledge' }> =>
-        e.type === 'trial.knowledge',
+      (e): e is Extract<TrialEvent, { type: 'trial.knowledge' }> => e.type === 'trial.knowledge'
     );
     expect(knowledgeFrame).toBeDefined();
-    expect(knowledgeFrame?.key).toBe('description');
-    expect(knowledgeFrame?.value).toBe('capability-test description');
+    expect(knowledgeFrame?.entity).toBe('description');
+    expect(knowledgeFrame?.observation).toBe('capability-test description');
   });
 });

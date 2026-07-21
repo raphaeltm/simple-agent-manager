@@ -12,7 +12,7 @@
  * - Bounded D1 discovery resumes and wraps through a real KV cursor
  */
 import { env, runInDurableObject } from 'cloudflare:test';
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 
 import type { TaskRunner, TaskRunnerState } from '../../src/durable-objects/task-runner';
 import type { Env } from '../../src/env';
@@ -29,6 +29,23 @@ import {
 const USER_ID = 'user-st-test';
 const INSTALL_ID = 'install-st-test';
 const PROJECT_ID = 'project-st-test';
+
+async function clearDatabase(db: D1Database): Promise<void> {
+  const { results } = await db
+    .prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT GLOB '_cf_*' AND name != 'd1_migrations'"
+    )
+    .all<{ name: string }>();
+  await db.batch([
+    db.prepare('PRAGMA defer_foreign_keys = ON'),
+    ...results.map(({ name }) => db.prepare(`DELETE FROM "${name.replaceAll('"', '""')}"`)),
+  ]);
+}
+
+beforeEach(async () => {
+  await clearDatabase(env.DATABASE);
+  await clearDatabase(env.OBSERVABILITY_DATABASE);
+});
 
 async function seedBaseData(): Promise<void> {
   await seedUser(USER_ID);
@@ -70,13 +87,11 @@ async function getTaskStatusEvents(taskId: string): Promise<
   return result.results;
 }
 
-async function getObservabilityEvents(
-  taskId: string
-): Promise<{ message: string; context: string }[]> {
+async function getObservabilityEvents(): Promise<{ message: string; context: string }[]> {
   const result = await env.OBSERVABILITY_DATABASE.prepare(
-    `SELECT message, context FROM platform_errors WHERE context LIKE ? ORDER BY created_at DESC`
+    `SELECT message, context FROM platform_errors WHERE context LIKE ? ORDER BY created_at DESC LIMIT 1`
   )
-    .bind(`%${taskId}%`)
+    .bind('%"recoveryType":"stuck_task"%')
     .all<{ message: string; context: string }>();
   return result.results;
 }
@@ -156,7 +171,7 @@ describe('recoverStuckTasks — vertical slice', () => {
       expect(result.failedInProgress).toBe(1);
       const task = await getTaskStatus(taskId);
       expect(task?.status).toBe('failed');
-      expect(task?.error_message).toContain('runtime is gone');
+      expect(task?.error_message).toContain('runtime is conclusively gone');
       expect(task?.error_message).toContain('workspace_deleted');
     });
 
@@ -294,7 +309,7 @@ describe('recoverStuckTasks — vertical slice', () => {
       const task = await getTaskStatus(taskId);
       expect(task?.status).toBe('failed');
       expect(task?.error_message).toContain("stuck in 'queued'");
-      expect(task?.error_message).toContain('node_selection');
+      expect(task?.error_message).toContain('selecting a node');
       expect(task?.completed_at).not.toBeNull();
       expect(task?.execution_step).toBeNull(); // cleared on failure
 
@@ -374,6 +389,61 @@ describe('recoverStuckTasks — vertical slice', () => {
   });
 
   describe('liveness grace period', () => {
+    it('skips an old task with a genuinely live task-scoped ACP session', async () => {
+      await seedBaseData();
+      const taskId = 'task-st-liveness-live-acp';
+      const nodeId = 'node-st-liveness-live-acp';
+      const workspaceId = 'ws-st-liveness-live-acp';
+      const fiveHoursAgo = new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString();
+      const projectData = env.PROJECT_DATA.get(env.PROJECT_DATA.idFromName(PROJECT_ID));
+
+      const chatSessionId = await projectData.createSession(
+        workspaceId,
+        'Live task-scoped session',
+        taskId
+      );
+      const acpSession = await projectData.createAcpSession({
+        chatSessionId,
+        initialPrompt: 'Continue the live task',
+        agentType: 'codex',
+      });
+      await projectData.transitionAcpSession(acpSession.id, 'assigned', {
+        actorType: 'system',
+        workspaceId,
+        nodeId,
+      });
+      await projectData.transitionAcpSession(acpSession.id, 'running', {
+        actorType: 'vm-agent',
+        actorId: nodeId,
+        acpSdkSessionId: 'acp-live-task-session',
+      });
+
+      await seedNode(nodeId, USER_ID, { lastHeartbeatAt: new Date().toISOString() });
+      await seedWorkspace(workspaceId, nodeId, USER_ID, {
+        projectId: PROJECT_ID,
+        status: 'running',
+        chatSessionId,
+      });
+      await seedTask(taskId, PROJECT_ID, USER_ID, {
+        status: 'in_progress',
+        executionStep: 'running',
+        startedAt: fiveHoursAgo,
+        updatedAt: fiveHoursAgo,
+        workspaceId,
+      });
+
+      const result = await recoverStuckTasks({
+        ...env,
+        TASK_RUN_MAX_EXECUTION_MS: '14400000',
+        TASK_RUN_HARD_TIMEOUT_MS: '28800000',
+        NODE_HEARTBEAT_STALE_SECONDS: '300',
+      } as unknown as Env);
+
+      expect(result.failedInProgress).toBe(0);
+      expect(result.heartbeatSkipped).toBeGreaterThanOrEqual(1);
+      expect((await getTaskStatus(taskId))?.status).toBe('in_progress');
+    });
+
     it('preserves an in_progress task whose runtime identity is incomplete (fail-safe)', async () => {
       // A running workspace with a fresh node heartbeat but no resolvable
       // task-scoped runtime identity yields an INCONCLUSIVE liveness result.
@@ -505,7 +575,7 @@ describe('recoverStuckTasks — vertical slice', () => {
       await recoverStuckTasks(testEnv);
 
       // Verify observability event has structured diagnostics
-      const events = await getObservabilityEvents(taskId);
+      const events = await getObservabilityEvents();
       expect(events.length).toBeGreaterThanOrEqual(1);
 
       const recoveryEvent = events.find((e) => e.message.includes("stuck in 'queued'"));
