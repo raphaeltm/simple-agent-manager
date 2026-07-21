@@ -15,30 +15,26 @@ SAM does not send email invitations. Instead, access is a three-step flow:
 
 ```mermaid
 flowchart LR
-  A[Member creates
-  invite link] --> B[Recipient opens link
-  and requests access]
-  B --> C[Owner or admin
-  approves or denies]
-  C -->|approved| D[Recipient becomes
-  a project member]
+  A["Member creates<br/>invite link"] --> B["Recipient opens link<br/>and requests access"]
+  B --> C["Owner or admin<br/>approves or denies"]
+  C -->|approved| D["Recipient becomes<br/>a project member"]
 ```
 
 1. **Any active member** creates an invite link from the project's settings.
 2. The recipient opens the link and **requests access** — the link never grants access on its own.
 3. An **owner or admin** approves (or denies) the pending request. Approval adds the person as a member.
 
-Because the link only produces a *request*, sharing a link is safe: nobody joins your project until someone with permission approves them.
+Because the link only produces a _request_, sharing a link is safe: nobody joins your project until someone with permission approves them.
 
 ## Roles
 
 Every member has one role. Roles control who can manage the project and its members — they do not change whose credentials pay for work (see [Credential attribution](#who-pays-credential-attribution)).
 
-| Role | Manage members & invites | Approve access requests | Transfer ownership | Everyday work (chat, tasks, triggers) |
-| --- | --- | --- | --- | --- |
-| **Owner** | Yes | Yes | Yes (hands the project to another member) | Yes |
-| **Admin** | Yes | Yes | No | Yes |
-| **Member** | No | No | No | Yes |
+| Role       | Manage members & invites | Approve access requests | Transfer ownership                        | Everyday work (chat, tasks, triggers) |
+| ---------- | ------------------------ | ----------------------- | ----------------------------------------- | ------------------------------------- |
+| **Owner**  | Yes                      | Yes                     | Yes (hands the project to another member) | Yes                                   |
+| **Admin**  | Yes                      | Yes                     | No                                        | Yes                                   |
+| **Member** | No                       | No                      | No                                        | Yes                                   |
 
 - There is exactly one **owner** per project. The owner can transfer ownership to an admin; the previous owner then becomes an admin.
 - **Admins** can do everything except transfer ownership, including approving new members and removing other non-owner members.

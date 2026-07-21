@@ -126,16 +126,16 @@ router and provisions TLS for the new hostname automatically.
 The Domains tab shows a live status badge for each domain so you can tell where
 it is in the lifecycle:
 
-| State | Meaning |
-| --- | --- |
-| **Pending DNS** | Waiting for DNS to resolve to the route target before activation. |
-| **Activating** | DNS is verified and route activation is queued to the node. |
-| **Active** | The node is serving the hostname with TLS. |
-| **DNS recheck required** | The underlying route target changed; re-verify the record. |
-| **Route missing** | The route this domain was attached to no longer exists in the release. |
-| **DNS mismatch** | The record does not point at the expected route target. |
-| **Inactive** | The environment is stopped; the saved domain is preserved. |
-| **Deactivating** | The domain is being removed and the node is dropping the route. |
+| State                    | Meaning                                                                |
+| ------------------------ | ---------------------------------------------------------------------- |
+| **Pending DNS**          | Waiting for DNS to resolve to the route target before activation.      |
+| **Activating**           | DNS is verified and route activation is queued to the node.            |
+| **Active**               | The node is serving the hostname with TLS.                             |
+| **DNS recheck required** | The underlying route target changed; re-verify the record.             |
+| **Route missing**        | The route this domain was attached to no longer exists in the release. |
+| **DNS mismatch**         | The record does not point at the expected route target.                |
+| **Inactive**             | The environment is stopped; the saved domain is preserved.             |
+| **Deactivating**         | The domain is being removed and the node is dropping the route.        |
 
 Saved domains stay visible even when the environment is **stopped** or in an
 error state, so a stop/start cycle does not lose your DNS setup. Removing a
