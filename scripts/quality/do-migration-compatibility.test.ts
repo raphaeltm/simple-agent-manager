@@ -69,6 +69,20 @@ describe('resolveDurableObjectMigrations', () => {
     expect(loadCheckedInMigrations()).toEqual(history);
   });
 
+  it('keeps the checked-in migration history append-only with sequential tags', () => {
+    // The resolver (and Wrangler itself) treat the deployed tag's array position
+    // as the applied/pending boundary, so the checked-in history must only ever
+    // be appended to. Sequential v1..vN tags make a mid-array insertion or
+    // reorder (e.g. a bad merge) fail here instead of silently skipping or
+    // misclassifying migrations. See .claude/rules/07-env-and-urls.md.
+    const history = loadCheckedInMigrations();
+
+    expect(history.length).toBeGreaterThan(0);
+    history.forEach((migration, index) => {
+      expect(migration.tag).toBe(`v${index + 1}`);
+    });
+  });
+
   it('preserves the complete migration history for an existing legacy deployment at v17', () => {
     const history = loadCheckedInMigrations();
     vi.stubEnv('RESOURCE_PREFIX', 's123abc');
@@ -211,6 +225,7 @@ describe('getDeployedWorkerMigrationTag', () => {
 
   it('fails closed before exact lookup when the Workers listing is unreadable', async () => {
     vi.stubEnv('CF_API_TOKEN', 'token');
+    vi.stubEnv('DO_MIGRATION_STATE_PROBE_ATTEMPTS', '1');
     const fetchMock = vi
       .fn()
       .mockResolvedValue(new Response('sensitive-control-plane-detail', { status: 403 }));
@@ -224,6 +239,7 @@ describe('getDeployedWorkerMigrationTag', () => {
 
   it('fails closed when exact Worker state cannot be read without leaking response content', async () => {
     vi.stubEnv('CF_API_TOKEN', 'token');
+    vi.stubEnv('DO_MIGRATION_STATE_PROBE_ATTEMPTS', '1');
     vi.stubGlobal(
       'fetch',
       vi
@@ -239,6 +255,7 @@ describe('getDeployedWorkerMigrationTag', () => {
 
   it('fails closed when an existing Worker is omitted from the scripts listing', async () => {
     vi.stubEnv('CF_API_TOKEN', 'token');
+    vi.stubEnv('DO_MIGRATION_STATE_PROBE_ATTEMPTS', '1');
     vi.stubGlobal(
       'fetch',
       vi
@@ -254,6 +271,7 @@ describe('getDeployedWorkerMigrationTag', () => {
 
   it('fails closed when an existing Worker has no migration tag', async () => {
     vi.stubEnv('CF_API_TOKEN', 'token');
+    vi.stubEnv('DO_MIGRATION_STATE_PROBE_ATTEMPTS', '1');
     vi.stubGlobal(
       'fetch',
       vi
@@ -268,9 +286,61 @@ describe('getDeployedWorkerMigrationTag', () => {
     );
   });
 
+  it('retries a transient ambiguous probe and succeeds on a later attempt', async () => {
+    vi.stubEnv('CF_API_TOKEN', 'token');
+    vi.stubEnv('DO_MIGRATION_STATE_PROBE_RETRY_DELAY_MS', '0');
+    const fetchMock = vi
+      .fn()
+      // Attempt 1: listing lags the just-created Worker; settings already sees it.
+      .mockResolvedValueOnce(new Response('{"success":true,"result":[]}', { status: 200 }))
+      .mockResolvedValueOnce(new Response('{}', { status: 200 }))
+      // Attempt 2: listing has caught up.
+      .mockResolvedValueOnce(
+        new Response('{"success":true,"result":[{"id":"api-worker","migration_tag":"v17"}]}', {
+          status: 200,
+        })
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(getDeployedWorkerMigrationTag('account-id', 'api-worker')).resolves.toBe('v17');
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it('exhausts the bounded attempts and rethrows the final probe error', async () => {
+    vi.stubEnv('CF_API_TOKEN', 'token');
+    vi.stubEnv('DO_MIGRATION_STATE_PROBE_ATTEMPTS', '2');
+    vi.stubEnv('DO_MIGRATION_STATE_PROBE_RETRY_DELAY_MS', '0');
+    const fetchMock = vi.fn().mockResolvedValue(new Response('unavailable', { status: 500 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(getDeployedWorkerMigrationTag('account-id', 'api-worker')).rejects.toThrow(
+      /^Failed to list Workers while reading migration state for "api-worker" \(HTTP 500\)$/
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('falls back to the default attempt bound when the env override is invalid', async () => {
+    vi.stubEnv('CF_API_TOKEN', 'token');
+    vi.stubEnv('DO_MIGRATION_STATE_PROBE_ATTEMPTS', 'not-a-number');
+    vi.stubEnv('DO_MIGRATION_STATE_PROBE_RETRY_DELAY_MS', '0');
+    const fetchMock = vi.fn().mockResolvedValue(new Response('forbidden', { status: 403 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(getDeployedWorkerMigrationTag('account-id', 'api-worker')).rejects.toThrow(
+      'HTTP 403'
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
   it('requires the deployment token before probing migration state', async () => {
+    vi.stubEnv('CF_API_TOKEN', '');
+    vi.stubEnv('CLOUDFLARE_API_TOKEN', '');
+    const fetchMock = vi.fn().mockRejectedValue(new Error('network must not be reached'));
+    vi.stubGlobal('fetch', fetchMock);
+
     await expect(getDeployedWorkerMigrationTag('account-id', 'api-worker')).rejects.toThrow(
       'CF_API_TOKEN or CLOUDFLARE_API_TOKEN is required'
     );
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
