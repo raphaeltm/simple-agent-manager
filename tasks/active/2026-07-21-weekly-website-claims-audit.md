@@ -17,9 +17,9 @@ Audit the SAM marketing website and public docs claims against the current codeb
 
 ## Checklist
 
-- [ ] Update docs overview BYOC copy to include GCP.
-- [ ] Re-check website/docs provider and agent claims after the change.
-- [ ] Run focused validation for the docs/marketing site.
+- [x] Update docs overview BYOC copy to include GCP.
+- [x] Re-check website/docs provider and agent claims after the change.
+- [x] Run focused validation for the docs/marketing site.
 - [ ] Archive this task before PR.
 
 ## Acceptance criteria
