@@ -314,7 +314,7 @@ jobs:
       # Deploy/quality script behavior — includes the Durable Object migration
       # compatibility regression suite (clean install vs applied history).
       - name: Run deploy and quality script tests
-        run: npx vitest run --config scripts/quality/vitest.config.ts
+        run: pnpm quality:scripts:test
 
       - name: Validate wrangler binding consistency
         run: pnpm quality:wrangler-bindings

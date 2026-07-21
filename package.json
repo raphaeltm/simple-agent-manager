@@ -43,7 +43,7 @@
     "quality:do-migration-safety": "tsx scripts/quality/check-do-migration-safety.ts",
     "quality:source-contract-tests": "tsx scripts/quality/check-source-contract-tests.ts",
     "quality:specialist-review": "tsx scripts/quality/check-specialist-review-evidence.ts",
-    "quality:specialist-review:test": "npx vitest run --config scripts/quality/vitest.config.ts",
+    "quality:scripts:test": "vitest run --config scripts/quality/vitest.config.ts",
     "quality:do-wall-time": "tsx scripts/quality/check-do-wall-time.ts",
     "quality:observability-noise": "tsx scripts/quality/check-observability-noise.ts",
     "test:infra": "pnpm --filter @simple-agent-manager/infra test",

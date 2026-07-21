@@ -302,4 +302,11 @@ function main(): void {
   }
 }
 
-main();
+// Only run main when executed directly (not when imported for testing).
+// Under vitest in CI, GITHUB_EVENT_NAME/GITHUB_EVENT_PATH are set, so an
+// import-time main() would evaluate the real PR and process.exit inside the
+// test runner.
+const isDirectExecution = process.argv[1]?.endsWith('check-specialist-review-evidence.ts');
+if (isDirectExecution) {
+  main();
+}
