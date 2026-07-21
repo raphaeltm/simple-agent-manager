@@ -311,6 +311,11 @@ jobs:
           npx tsx --check scripts/deploy/sync-wrangler-config.ts
           npx tsx --check scripts/deploy/generate-keys.ts
 
+      # Deploy/quality script behavior — includes the Durable Object migration
+      # compatibility regression suite (clean install vs applied history).
+      - name: Run deploy and quality script tests
+        run: npx vitest run --config scripts/quality/vitest.config.ts
+
       - name: Validate wrangler binding consistency
         run: pnpm quality:wrangler-bindings
 
