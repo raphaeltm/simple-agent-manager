@@ -6,7 +6,12 @@
  * TypewriterText animates the latest assistant message; historical messages
  * render instantly.
  */
-import type { ConversationItem, PlanItem, SlashCommand, ToolCallContentItem } from '@simple-agent-manager/acp-client';
+import type {
+  ConversationItem,
+  PlanItem,
+  SlashCommand,
+  ToolCallContentItem,
+} from '@simple-agent-manager/acp-client';
 import { mapToolCallContent, PlanModal } from '@simple-agent-manager/acp-client';
 import type { AgentProfile } from '@simple-agent-manager/shared';
 import { Button, Spinner } from '@simple-agent-manager/ui';
@@ -76,7 +81,15 @@ function useFloatingHeaderHeight(): [(el: HTMLDivElement | null) => void, number
 
 /** Floating session header with optional error banner and summary. */
 function FloatingHeader({
-  projectId, lc, onSessionMutated, onRetry, onFork, onOpenTimeline, sourceContext, onShowHierarchy, containerRef,
+  projectId,
+  lc,
+  onSessionMutated,
+  onRetry,
+  onFork,
+  onOpenTimeline,
+  sourceContext,
+  onShowHierarchy,
+  containerRef,
 }: {
   projectId: string;
   lc: ReturnType<typeof useSessionLifecycle>;
@@ -90,7 +103,7 @@ function FloatingHeader({
 }) {
   if (!lc.session) return null;
   const initialPromptFallback = !lc.hasMore
-    ? lc.messages.find((msg) => msg.role === 'user')?.content ?? null
+    ? (lc.messages.find((msg) => msg.role === 'user')?.content ?? null)
     : null;
   const taskStatus = lc.taskEmbed?.status;
   const hasRecoverableTaskError = Boolean(
@@ -149,7 +162,9 @@ function ErrorBanner({ message, recoverable }: { message: string; recoverable: b
       <div
         aria-hidden="true"
         className="absolute inset-0 rounded-[inherit] -z-10 pointer-events-none"
-        style={{ backgroundColor: 'color-mix(in srgb, var(--sam-color-bg-canvas) 78%, transparent)' }}
+        style={{
+          backgroundColor: 'color-mix(in srgb, var(--sam-color-bg-canvas) 78%, transparent)',
+        }}
       />
       <span className="sam-type-caption text-danger font-medium">
         {recoverable ? 'Agent error:' : 'Task failed:'}
@@ -157,7 +172,8 @@ function ErrorBanner({ message, recoverable }: { message: string; recoverable: b
       <span className="sam-type-caption text-danger break-words">{message}</span>
       {recoverable && (
         <span className="sam-type-caption text-danger break-words">
-          {' '}You can send another message to retry; your session and workspace are preserved.
+          {' '}
+          You can send another message to retry; your session and workspace are preserved.
         </span>
       )}
     </div>
@@ -172,7 +188,11 @@ function currentPlanToPlanItem(plan: Array<{ content: string; status: string }>)
     entries: plan.map((e) => ({
       content: e.content,
       priority: 'medium' as const,
-      status: (e.status === 'completed' ? 'completed' : e.status === 'in_progress' ? 'in_progress' : 'pending') as 'pending' | 'in_progress' | 'completed',
+      status: (e.status === 'completed'
+        ? 'completed'
+        : e.status === 'in_progress'
+          ? 'in_progress'
+          : 'pending') as 'pending' | 'in_progress' | 'completed',
     })),
     timestamp: Date.now(),
   };
@@ -192,7 +212,11 @@ const ElapsedTime: FC<{ startedAt: number }> = ({ startedAt }) => {
     const interval = setInterval(update, 1000);
     return () => clearInterval(interval);
   }, [startedAt]);
-  return <span className="text-xs text-fg-muted tabular-nums" aria-hidden="true">({elapsed})</span>;
+  return (
+    <span className="text-xs text-fg-muted tabular-nums" aria-hidden="true">
+      ({elapsed})
+    </span>
+  );
 };
 
 interface ProjectMessageViewProps {
@@ -279,26 +303,32 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   const [pendingJump, setPendingJump] = useState<TimelineJumpTarget | null>(null);
   const [highlightedItemId, setHighlightedItemId] = useState<string | null>(null);
 
-  const scrollAndHighlight = useCallback((itemId: string): boolean => {
-    const index = itemIndexById.get(itemId);
-    if (index === undefined) return false;
-    virtuosoRef.current?.scrollToIndex({ index, behavior: 'smooth', align: 'center' });
-    setHighlightedItemId(itemId);
-    return true;
-  }, [itemIndexById]);
+  const scrollAndHighlight = useCallback(
+    (itemId: string): boolean => {
+      const index = itemIndexById.get(itemId);
+      if (index === undefined) return false;
+      virtuosoRef.current?.scrollToIndex({ index, behavior: 'smooth', align: 'center' });
+      setHighlightedItemId(itemId);
+      return true;
+    },
+    [itemIndexById]
+  );
 
-  const handleTimelineJump = useCallback((target: TimelineJumpTarget) => {
-    setShowTimeline(false);
-    // Fast path: exact message already loaded.
-    if (target.messageId && itemIndexById.has(target.messageId)) {
-      scrollAndHighlight(target.messageId);
-      return;
-    }
-    // Otherwise resolve via the pending-jump effect, loading older pages toward
-    // the target timestamp first (no-op when the history is already fully loaded).
-    setPendingJump(target);
-    void lc.loadUntil(target.timestamp);
-  }, [itemIndexById, scrollAndHighlight, lc]);
+  const handleTimelineJump = useCallback(
+    (target: TimelineJumpTarget) => {
+      setShowTimeline(false);
+      // Fast path: exact message already loaded.
+      if (target.messageId && itemIndexById.has(target.messageId)) {
+        scrollAndHighlight(target.messageId);
+        return;
+      }
+      // Otherwise resolve via the pending-jump effect, loading older pages toward
+      // the target timestamp first (no-op when the history is already fully loaded).
+      setPendingJump(target);
+      void lc.loadUntil(target.timestamp);
+    },
+    [itemIndexById, scrollAndHighlight, lc]
+  );
 
   // Resolve a pending jump once the target (or the nearest message, after
   // loading settles) is available in the rendered list.
@@ -336,10 +366,15 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   const prevMsgCountRef = useRef(0);
 
   /** Lazy-load tool content for a compact-mode tool call card. */
-  const handleLoadToolContent = useCallback(async (messageId: string): Promise<ToolCallContentItem[]> => {
-    const { content } = await getMessageToolContent(projectId, sessionId, messageId);
-    return (content as Array<{ type: string } & Record<string, unknown>>).map((c) => mapToolCallContent(c));
-  }, [projectId, sessionId]);
+  const handleLoadToolContent = useCallback(
+    async (messageId: string): Promise<ToolCallContentItem[]> => {
+      const { content } = await getMessageToolContent(projectId, sessionId, messageId);
+      return (content as Array<{ type: string } & Record<string, unknown>>).map((c) =>
+        mapToolCallContent(c)
+      );
+    },
+    [projectId, sessionId]
+  );
 
   // Detect newly added optimistic user messages for fade animation
   useEffect(() => {
@@ -351,7 +386,9 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
         if (msg && msg.role === 'user' && msg.id.startsWith('optimistic-')) {
           animatedUserMsgIds.add(msg.id);
           // Remove from set after animation completes (max 1.5s + buffer)
-          setTimeout(() => { animatedUserMsgIds.delete(msg.id); }, 2000);
+          setTimeout(() => {
+            animatedUserMsgIds.delete(msg.id);
+          }, 2000);
         }
       }
     }
@@ -368,16 +405,19 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   }, [conversationItems]);
 
   const planItem = useMemo(
-    () => lc.currentPlan && lc.currentPlan.length > 0 ? currentPlanToPlanItem(lc.currentPlan) : null,
-    [lc.currentPlan],
+    () =>
+      lc.currentPlan && lc.currentPlan.length > 0 ? currentPlanToPlanItem(lc.currentPlan) : null,
+    [lc.currentPlan]
   );
   const canWriteSession = lc.session?.isMine !== false;
-  const sessionOwnerLabel = lc.session?.createdBy?.name?.trim()
-    || lc.session?.createdBy?.email?.split('@')[0]
-    || 'the creator';
+  const sessionOwnerLabel =
+    lc.session?.createdBy?.name?.trim() ||
+    lc.session?.createdBy?.email?.split('@')[0] ||
+    'the creator';
   const canArchiveSession = Boolean(
     onCloseConversation &&
-    (lc.taskEmbed?.taskMode === 'conversation' || (!lc.taskEmbed?.id && lc.session?.status === 'active'))
+    (lc.taskEmbed?.taskMode === 'conversation' ||
+      (!lc.taskEmbed?.id && lc.session?.status === 'active'))
   );
 
   // Initial load — only show full spinner when no data exists yet
@@ -390,11 +430,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
   }
 
   if (lc.error && !lc.session) {
-    return (
-      <div className="p-4 text-danger text-sm">
-        {lc.error}
-      </div>
-    );
+    return <div className="p-4 text-danger text-sm">{lc.error}</div>;
   }
 
   const isActive = lc.sessionState === 'active' || lc.sessionState === 'idle';
@@ -409,35 +445,37 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
       )}
 
       {/* Connection indicator (DO WebSocket) */}
-      {lc.sessionState === 'active' && lc.connectionState !== 'connected' && lc.showConnectionBanner && (
-        <ConnectionBanner state={lc.connectionState} onRetry={lc.retryWs} />
-      )}
+      {lc.sessionState === 'active' &&
+        lc.connectionState !== 'connected' &&
+        lc.showConnectionBanner && (
+          <ConnectionBanner state={lc.connectionState} onRetry={lc.retryWs} />
+        )}
 
       {/* Resuming agent banner */}
       {lc.isResuming && (
-        <div role="status" aria-label="Agent resume status" className="flex items-center gap-2 px-4 py-1.5 border-b border-border-default bg-surface text-xs text-fg-muted">
+        <div
+          role="status"
+          aria-label="Agent resume status"
+          className="flex items-center gap-2 px-4 py-1.5 border-b border-border-default bg-surface text-xs text-fg-muted"
+        >
           <Spinner size="sm" />
-          <span>Resuming agent...</span>
-          <button
-            type="button"
-            className="ml-auto px-2 py-1 text-xs font-medium rounded border border-border-default bg-transparent cursor-pointer hover:bg-surface-raised"
-            onClick={() => { lc.setError(null); }}
-          >
-            Cancel
-          </button>
+          <span>Waking and restoring Instant session...</span>
         </div>
       )}
 
       {/* Resume error banner */}
       {lc.resumeError && (
-        <div role="alert" className="flex items-center gap-2 px-4 py-2 bg-danger-tint border-b border-border-default text-danger text-xs">
+        <div
+          role="alert"
+          className="flex items-center gap-2 px-4 py-2 bg-danger-tint border-b border-border-default text-danger text-xs"
+        >
           <span>{lc.resumeError}</span>
           <button
             type="button"
             className="ml-auto px-2 py-1 text-xs font-medium rounded border border-border-default bg-transparent cursor-pointer hover:bg-surface-raised"
-            onClick={() => { lc.setError(null); }}
+            onClick={lc.clearResumeError}
           >
-            Retry
+            Dismiss
           </button>
         </div>
       )}
@@ -445,16 +483,46 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
       {/* Messages area — virtualized, DO-only */}
       {conversationItems.length === 0 ? (
         <div className="flex-1 min-h-0 flex flex-col relative">
-          <FloatingHeader projectId={projectId} lc={lc} onSessionMutated={onSessionMutated} onRetry={onRetry} onFork={onFork} onOpenTimeline={() => setShowTimeline(true)} sourceContext={sourceContext} onShowHierarchy={onShowHierarchy} containerRef={floatingHeaderRef} />
-          <div className="flex flex-1 items-center justify-center" style={{ paddingTop: floatingHeaderHeight }}>
+          <FloatingHeader
+            projectId={projectId}
+            lc={lc}
+            onSessionMutated={onSessionMutated}
+            onRetry={onRetry}
+            onFork={onFork}
+            onOpenTimeline={() => setShowTimeline(true)}
+            sourceContext={sourceContext}
+            onShowHierarchy={onShowHierarchy}
+            containerRef={floatingHeaderRef}
+          />
+          <div
+            className="flex flex-1 items-center justify-center"
+            style={{ paddingTop: floatingHeaderHeight }}
+          >
             <span className="text-fg-muted text-sm">
-              {lc.sessionState === 'active' ? 'Waiting for messages...' : 'No messages in this session.'}
+              {lc.sessionState === 'active'
+                ? 'Waiting for messages...'
+                : 'No messages in this session.'}
             </span>
           </div>
         </div>
       ) : (
-        <div className="flex-1 min-h-0 min-w-0 relative flex flex-col" role="log" aria-live="polite" aria-label="Conversation">
-          <FloatingHeader projectId={projectId} lc={lc} onSessionMutated={onSessionMutated} onRetry={onRetry} onFork={onFork} onOpenTimeline={() => setShowTimeline(true)} sourceContext={sourceContext} onShowHierarchy={onShowHierarchy} containerRef={floatingHeaderRef} />
+        <div
+          className="flex-1 min-h-0 min-w-0 relative flex flex-col"
+          role="log"
+          aria-live="polite"
+          aria-label="Conversation"
+        >
+          <FloatingHeader
+            projectId={projectId}
+            lc={lc}
+            onSessionMutated={onSessionMutated}
+            onRetry={onRetry}
+            onFork={onFork}
+            onOpenTimeline={() => setShowTimeline(true)}
+            sourceContext={sourceContext}
+            onShowHierarchy={onShowHierarchy}
+            containerRef={floatingHeaderRef}
+          />
           <div className="flex-1 min-h-0">
             <Virtuoso
               ref={virtuosoRef}
@@ -462,20 +530,32 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
               data={conversationItems}
               firstItemIndex={lc.firstItemIndex}
               initialTopMostItemIndex={conversationItems.length - 1}
-              followOutput={(isAtBottom: boolean) => isAtBottom ? 'smooth' : false}
+              followOutput={(isAtBottom: boolean) => (isAtBottom ? 'smooth' : false)}
               alignToBottom
               atBottomThreshold={50}
               atBottomStateChange={(atBottom) => lc.setShowScrollButton(!atBottom)}
               overscan={200}
               itemContent={(index, item) => (
-                <div className={`sam-message-entry px-4 pb-3${highlightedItemId === item.id ? ' sam-message-highlight' : ''}`}>
+                <div
+                  className={`sam-message-entry px-4 pb-3${highlightedItemId === item.id ? ' sam-message-highlight' : ''}`}
+                >
                   <AcpConversationItemView
                     item={item}
                     projectId={projectId}
-                    onFileClick={lc.session?.workspaceId && lc.sessionState === 'active' ? lc.handleFileClick : undefined}
+                    onFileClick={
+                      lc.session?.workspaceId && lc.sessionState === 'active'
+                        ? lc.handleFileClick
+                        : undefined
+                    }
                     onLoadToolContent={handleLoadToolContent}
-                    animateText={item.kind === 'agent_message' && (index - lc.firstItemIndex) === animationTargetIdx && lc.agentActivity === 'responding'}
-                    animateUserMessage={item.kind === 'user_message' && animatedUserMsgIds.has(item.id)}
+                    animateText={
+                      item.kind === 'agent_message' &&
+                      index - lc.firstItemIndex === animationTargetIdx &&
+                      lc.agentActivity === 'responding'
+                    }
+                    animateUserMessage={
+                      item.kind === 'user_message' && animatedUserMsgIds.has(item.id)
+                    }
                   />
                 </div>
               )}
@@ -489,7 +569,12 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
                     <div style={{ height: floatingHeaderHeight + 8 }} />
                     {lc.hasMore && (
                       <div className="text-center py-3">
-                        <Button variant="ghost" size="sm" onClick={lc.loadMore} loading={lc.loadingMore}>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={lc.loadMore}
+                          loading={lc.loadingMore}
+                        >
                           Load earlier messages
                         </Button>
                       </div>
@@ -538,11 +623,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
         />
       )}
       {planItem && (
-        <PlanModal
-          plan={planItem}
-          isOpen={showPlanModal}
-          onClose={() => setShowPlanModal(false)}
-        />
+        <PlanModal plan={planItem} isOpen={showPlanModal} onClose={() => setShowPlanModal(false)} />
       )}
 
       {/* Input area */}
@@ -550,15 +631,21 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
         <FollowUpInput
           value={lc.followUp}
           onChange={lc.setFollowUp}
-          onSend={() => { void lc.handleSendFollowUp(); }}
-          onUploadFiles={(files) => { void lc.handleUploadFiles(files); }}
+          onSend={() => {
+            void lc.handleSendFollowUp();
+          }}
+          onUploadFiles={(files) => {
+            void lc.handleUploadFiles(files);
+          }}
           sending={lc.sendingFollowUp}
           uploading={lc.uploading}
-          placeholder={lc.agentActivity === 'prompting' || lc.agentActivity === 'responding'
-            ? 'Agent is working...'
-            : lc.sessionState === 'idle'
-              ? 'Send a message to resume the agent...'
-              : 'Send a message...'}
+          placeholder={
+            lc.agentActivity === 'prompting' || lc.agentActivity === 'responding'
+              ? 'Agent is working...'
+              : lc.sessionState === 'idle'
+                ? 'Send a message to resume the agent...'
+                : 'Send a message...'
+          }
           transcribeApiUrl={lc.transcribeApiUrl}
           agentProfiles={agentProfiles}
           slashCommands={slashCommands}
@@ -569,9 +656,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
       )}
       {lc.sessionState === 'terminated' && (
         <div className="shrink-0 border-t border-border-default px-4 py-3 bg-surface text-center">
-          <span className="sam-type-secondary text-fg-muted">
-            This session has ended.
-          </span>
+          <span className="sam-type-secondary text-fg-muted">This session has ended.</span>
         </div>
       )}
 

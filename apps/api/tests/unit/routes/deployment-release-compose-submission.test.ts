@@ -75,16 +75,22 @@ vi.mock('../../../src/middleware/project-auth', () => ({
   requireProjectCapability: vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock('../../../src/middleware/error', () => ({
-  errors: {
-    badRequest: (msg: string) =>
-      Object.assign(new Error(msg), { statusCode: 400, error: 'BAD_REQUEST', message: msg }),
-    notFound: (msg: string) =>
-      Object.assign(new Error(msg), { statusCode: 404, error: 'NOT_FOUND', message: msg }),
-    conflict: (msg: string) =>
-      Object.assign(new Error(msg), { statusCode: 409, error: 'CONFLICT', message: msg }),
-  },
-}));
+vi.mock('../../../src/middleware/error', async () => {
+  const actual = await vi.importActual<typeof import('../../../src/middleware/error')>(
+    '../../../src/middleware/error'
+  );
+  return {
+    ...actual,
+    errors: {
+      badRequest: (msg: string) =>
+        Object.assign(new Error(msg), { statusCode: 400, error: 'BAD_REQUEST', message: msg }),
+      notFound: (msg: string) =>
+        Object.assign(new Error(msg), { statusCode: 404, error: 'NOT_FOUND', message: msg }),
+      conflict: (msg: string) =>
+        Object.assign(new Error(msg), { statusCode: 409, error: 'CONFLICT', message: msg }),
+    },
+  };
+});
 
 vi.mock('drizzle-orm/d1', () => ({
   drizzle: () => createMockDb(),

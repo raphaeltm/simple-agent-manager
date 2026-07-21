@@ -37,7 +37,11 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
 }));
 
 vi.mock('../../../src/hooks/useChatWebSocket', () => ({
-  useChatWebSocket: () => ({ connectionState: mocks.connectionState, wsRef: { current: null }, retry: vi.fn() }),
+  useChatWebSocket: () => ({
+    connectionState: mocks.connectionState,
+    wsRef: { current: null },
+    retry: vi.fn(),
+  }),
 }));
 vi.mock('../../../src/hooks/useTokenRefresh', () => ({
   useTokenRefresh: () => ({ token: null }),
@@ -54,6 +58,8 @@ vi.mock('../../../src/components/project-message-view/useConnectionRecovery', ()
     resumeError: null,
     showConnectionBanner: false,
     idleCountdownMs: null,
+    clearResumeError: vi.fn(),
+    reportDeliveryError: vi.fn(),
     resumeAndSend: vi.fn(),
   }),
 }));
@@ -64,14 +70,36 @@ vi.mock('../../../src/components/project-message-view/types', async (importOrigi
 
 import { useSessionLifecycle } from '../../../src/components/project-message-view/useSessionLifecycle';
 
-type Msg = { id: string; sessionId: string; role: string; content: string; toolMetadata: null; createdAt: number };
+type Msg = {
+  id: string;
+  sessionId: string;
+  role: string;
+  content: string;
+  toolMetadata: null;
+  createdAt: number;
+};
 
 function msg(id: string, createdAt: number): Msg {
-  return { id, sessionId: 'sess-1', role: 'user', content: `m-${id}`, toolMetadata: null, createdAt };
+  return {
+    id,
+    sessionId: 'sess-1',
+    role: 'user',
+    content: `m-${id}`,
+    toolMetadata: null,
+    createdAt,
+  };
 }
 
 function sessionResponse(status: string) {
-  return { id: 'sess-1', workspaceId: null, topic: 'T', status, messageCount: 1, createdAt: Date.now(), updatedAt: Date.now() };
+  return {
+    id: 'sess-1',
+    workspaceId: null,
+    topic: 'T',
+    status,
+    messageCount: 1,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  };
 }
 
 function detail(
@@ -79,7 +107,7 @@ function detail(
   hasMore: boolean,
   status = 'stopped',
   currentPlan: Array<{ content: string; status: string }> | null = null,
-  planUpdatedAt: number | null = null,
+  planUpdatedAt: number | null = null
 ) {
   return {
     session: sessionResponse(status),
@@ -143,7 +171,9 @@ describe('useSessionLifecycle loading semantics', () => {
       await waitFor(() => expect(result.current.messages.length).toBe(2));
       mocks.getChatSession.mockClear();
 
-      await act(async () => { await result.current.loadUntil(700); });
+      await act(async () => {
+        await result.current.loadUntil(700);
+      });
 
       // Oldest loaded is 500 <= 700 → nothing to fetch.
       expect(mocks.getChatSession).not.toHaveBeenCalled();
@@ -155,7 +185,9 @@ describe('useSessionLifecycle loading semantics', () => {
       await waitFor(() => expect(result.current.messages.length).toBe(1));
       mocks.getChatSession.mockClear();
 
-      await act(async () => { await result.current.loadUntil(200); });
+      await act(async () => {
+        await result.current.loadUntil(200);
+      });
 
       // Target (200) predates the loaded window, but hasMore=false → no fetch.
       expect(mocks.getChatSession).not.toHaveBeenCalled();

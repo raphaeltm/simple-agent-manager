@@ -11,12 +11,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ChatConnectionState } from '../../hooks/useChatWebSocket';
 import type { ChatSessionResponse } from '../../lib/api';
 import { resumeAgentSession, sendFollowUpPrompt } from '../../lib/api';
+import { getResumeFailureMessage, getRuntimeRecoveryMessage } from './runtimeRecoveryMessages';
 import type { SessionState } from './types';
-import {
-  AUTO_RESUME_DELAY_MS,
-  DEFAULT_IDLE_TIMEOUT_MS,
-  RECONNECT_BANNER_DELAY_MS,
-} from './types';
+import { AUTO_RESUME_DELAY_MS, DEFAULT_IDLE_TIMEOUT_MS, RECONNECT_BANNER_DELAY_MS } from './types';
 
 export interface UseConnectionRecoveryOptions {
   sessionId: string;
@@ -33,11 +30,15 @@ export interface UseConnectionRecoveryResult {
   resumeError: string | null;
   showConnectionBanner: boolean;
   idleCountdownMs: number | null;
+  clearResumeError: () => void;
+  reportDeliveryError: (error: unknown) => void;
   /** Resume an idle session and optionally send a follow-up prompt. */
   resumeAndSend: (followUpText?: string) => void;
 }
 
-export function useConnectionRecovery(opts: UseConnectionRecoveryOptions): UseConnectionRecoveryResult {
+export function useConnectionRecovery(
+  opts: UseConnectionRecoveryOptions
+): UseConnectionRecoveryResult {
   const {
     sessionId,
     projectId,
@@ -52,6 +53,14 @@ export function useConnectionRecovery(opts: UseConnectionRecoveryOptions): UseCo
   const [isResuming, setIsResuming] = useState(false);
   const [resumeError, setResumeError] = useState<string | null>(null);
   const hasAttemptedAutoResumeRef = useRef(false);
+
+  const clearResumeError = useCallback(() => setResumeError(null), []);
+  const reportDeliveryError = useCallback((error: unknown) => {
+    setResumeError(
+      getRuntimeRecoveryMessage(error) ??
+        'Your message is saved, but it could not reach the agent. Send it again when the session is available.'
+    );
+  }, []);
 
   // Connection banner debounce
   const [showConnectionBanner, setShowConnectionBanner] = useState(false);
@@ -101,7 +110,8 @@ export function useConnectionRecovery(opts: UseConnectionRecoveryOptions): UseCo
       !session?.workspaceId ||
       !agentSessionId ||
       hasAttemptedAutoResumeRef.current
-    ) return;
+    )
+      return;
 
     const timer = setTimeout(() => {
       if (hasAttemptedAutoResumeRef.current) return;
@@ -119,18 +129,12 @@ export function useConnectionRecovery(opts: UseConnectionRecoveryOptions): UseCo
         })
         .catch((err) => {
           setIsResuming(false);
-          const msg = err instanceof Error ? err.message : String(err);
-          if (msg.includes('404') || msg.includes('not found') || msg.includes('Not Found')) {
-            setResumeError('Could not resume agent \u2014 workspace may have been cleaned up.');
-          } else {
-            console.error('Auto-resume failed:', msg);
-            setResumeError('Could not resume agent \u2014 please try again.');
-          }
+          setResumeError(getResumeFailureMessage(err));
         });
     }, AUTO_RESUME_DELAY_MS);
 
     return () => clearTimeout(timer);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionState, isResuming, isProvisioning, session?.workspaceId, agentSessionId]);
 
   // Debounced connection banner
@@ -144,44 +148,43 @@ export function useConnectionRecovery(opts: UseConnectionRecoveryOptions): UseCo
   }, [connectionState]);
 
   // Resume an idle session and optionally send a follow-up prompt via REST API
-  const resumeAndSend = useCallback((followUpText?: string) => {
-    if (!session?.workspaceId || !agentSessionId) return;
-    hasAttemptedAutoResumeRef.current = true;
-    setIsResuming(true);
-    setResumeError(null);
+  const resumeAndSend = useCallback(
+    (followUpText?: string) => {
+      if (!session?.workspaceId || !agentSessionId) return;
+      hasAttemptedAutoResumeRef.current = true;
+      setIsResuming(true);
+      setResumeError(null);
 
-    resumeAgentSession(session.workspaceId, agentSessionId)
-      .then(async () => {
-        setSession((prev) => {
-          if (!prev) return prev;
-          return { ...prev, isIdle: false, agentCompletedAt: null } as ChatSessionResponse;
-        });
-        setIsResuming(false);
-        if (followUpText) {
-          try {
-            await sendFollowUpPrompt(projectId, sessionId, followUpText);
-          } catch {
-            // Agent may be offline — message is still persisted via DO
+      resumeAgentSession(session.workspaceId, agentSessionId)
+        .then(async () => {
+          setSession((prev) => {
+            if (!prev) return prev;
+            return { ...prev, isIdle: false, agentCompletedAt: null } as ChatSessionResponse;
+          });
+          setIsResuming(false);
+          if (followUpText) {
+            try {
+              await sendFollowUpPrompt(projectId, sessionId, followUpText);
+            } catch (err) {
+              reportDeliveryError(err);
+            }
           }
-        }
-      })
-      .catch((err) => {
-        setIsResuming(false);
-        const msg = err instanceof Error ? err.message : String(err);
-        if (msg.includes('404') || msg.includes('not found') || msg.includes('Not Found')) {
-          setResumeError('Could not resume agent \u2014 workspace may have been cleaned up.');
-        } else {
-          console.error('Agent resume failed:', msg);
-          setResumeError('Could not resume agent \u2014 please try again.');
-        }
-      });
-  }, [session?.workspaceId, agentSessionId, projectId, sessionId, setSession]);
+        })
+        .catch((err) => {
+          setIsResuming(false);
+          setResumeError(getResumeFailureMessage(err));
+        });
+    },
+    [session?.workspaceId, agentSessionId, projectId, sessionId, setSession, reportDeliveryError]
+  );
 
   return {
     isResuming,
     resumeError,
     showConnectionBanner,
     idleCountdownMs,
+    clearResumeError,
+    reportDeliveryError,
     resumeAndSend,
   };
 }

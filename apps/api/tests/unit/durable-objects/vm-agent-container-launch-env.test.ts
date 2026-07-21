@@ -39,6 +39,7 @@ function makeFake(env: Record<string, string | undefined>) {
   const fake = {
     env,
     startAndWaitForPorts,
+    startRuntime: (VmAgentContainer.prototype as unknown as { startRuntime: unknown }).startRuntime,
     clearKeepaliveSchedule: vi.fn().mockResolvedValue(undefined),
     getPortReadyTimeoutMs: () => 30_000,
     ctx: {

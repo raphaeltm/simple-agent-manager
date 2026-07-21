@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => ({
     getVmAgentContainerConfig: vi.fn(),
     markVmAgentContainerActiveWorkEndedBestEffort: vi.fn(),
     markVmAgentContainerActiveWorkStarted: vi.fn(),
+    markVmAgentContainerRequestInterrupted: vi.fn(),
   },
   drizzle: vi.fn(),
 }));
@@ -37,6 +38,8 @@ vi.mock('drizzle-orm/d1', () => ({ drizzle: mocks.drizzle }));
 import {
   createWorkspaceOnNode,
   getCfContainerCreateWorkspaceTimeoutMs,
+  NodeAgentRequestError,
+  sendPromptToAgentOnNode,
 } from '../../../src/services/node-agent';
 
 const cfContainerEnv = {
@@ -84,6 +87,7 @@ describe('createWorkspaceOnNode cf-container timeout plumbing', () => {
       vmAgentPort: 8080,
       sleepAfter: '10m',
     });
+    mocks.container.markVmAgentContainerRequestInterrupted.mockResolvedValue(null);
     mocks.drizzle.mockReturnValue({
       select: () => ({
         from: () => ({
@@ -103,9 +107,15 @@ describe('createWorkspaceOnNode cf-container timeout plumbing', () => {
   it('times out with the provided budget when the container request stalls', async () => {
     mocks.container.fetchVmAgentContainer.mockImplementation(() => pendingResponse(60_000));
 
-    const createPromise = createWorkspaceOnNode('node-1', cfContainerEnv, 'user-1', workspacePayload, {
-      requestTimeoutMs: 50,
-    });
+    const createPromise = createWorkspaceOnNode(
+      'node-1',
+      cfContainerEnv,
+      'user-1',
+      workspacePayload,
+      {
+        requestTimeoutMs: 50,
+      }
+    );
     const rejection = expect(createPromise).rejects.toThrow('Request timed out after 50ms');
     await vi.advanceTimersByTimeAsync(60);
     await rejection;
@@ -114,9 +124,15 @@ describe('createWorkspaceOnNode cf-container timeout plumbing', () => {
   it('completes when the container responds within the provided budget', async () => {
     mocks.container.fetchVmAgentContainer.mockImplementation(() => pendingResponse(40_000));
 
-    const createPromise = createWorkspaceOnNode('node-1', cfContainerEnv, 'user-1', workspacePayload, {
-      requestTimeoutMs: 120_000,
-    });
+    const createPromise = createWorkspaceOnNode(
+      'node-1',
+      cfContainerEnv,
+      'user-1',
+      workspacePayload,
+      {
+        requestTimeoutMs: 120_000,
+      }
+    );
     await vi.advanceTimersByTimeAsync(40_500);
     await expect(createPromise).resolves.toEqual({ workspaceId: 'ws-1' });
   });
@@ -124,9 +140,77 @@ describe('createWorkspaceOnNode cf-container timeout plumbing', () => {
   it('keeps the interactive 30s default when no override is provided', async () => {
     mocks.container.fetchVmAgentContainer.mockImplementation(() => pendingResponse(60_000));
 
-    const createPromise = createWorkspaceOnNode('node-1', cfContainerEnv, 'user-1', workspacePayload);
+    const createPromise = createWorkspaceOnNode(
+      'node-1',
+      cfContainerEnv,
+      'user-1',
+      workspacePayload
+    );
     const rejection = expect(createPromise).rejects.toThrow('Request timed out after 30000ms');
     await vi.advanceTimersByTimeAsync(30_100);
     await rejection;
+  });
+  it('classifies a timed-out prompt before returning and never replays it', async () => {
+    mocks.container.fetchVmAgentContainer.mockImplementation(() => pendingResponse(60_000));
+    mocks.container.markVmAgentContainerRequestInterrupted.mockResolvedValue({
+      ok: false,
+      status: 'recovering',
+      code: 'RUNTIME_REQUEST_INTERRUPTED',
+      message: 'Your message is saved, but it was not replayed automatically.',
+    });
+
+    const promptPromise = sendPromptToAgentOnNode(
+      'node-1',
+      'ws-1',
+      'agent-1',
+      'continue',
+      cfContainerEnv,
+      'user-1',
+      'message-1',
+      { requestTimeoutMs: 50 }
+    ).catch((error) => error);
+    await vi.advanceTimersByTimeAsync(60);
+    const error = await promptPromise;
+
+    expect(error).toBeInstanceOf(NodeAgentRequestError);
+    expect(error).toMatchObject({
+      statusCode: 409,
+      error: 'RUNTIME_REQUEST_INTERRUPTED',
+    });
+    expect(mocks.container.fetchVmAgentContainer).toHaveBeenCalledTimes(1);
+    expect(mocks.container.markVmAgentContainerRequestInterrupted).toHaveBeenCalledWith(
+      cfContainerEnv,
+      'node-1',
+      { method: 'POST', errorName: 'request_timeout' }
+    );
+  });
+
+  it('preserves a stable interruption response returned directly by the Durable Object', async () => {
+    mocks.container.fetchVmAgentContainer.mockResolvedValue(
+      Response.json(
+        {
+          error: 'RUNTIME_REQUEST_INTERRUPTED',
+          message: 'Your message is saved, but it was not replayed automatically.',
+        },
+        { status: 409 }
+      )
+    );
+
+    const error = await sendPromptToAgentOnNode(
+      'node-1',
+      'ws-1',
+      'agent-1',
+      'continue',
+      cfContainerEnv,
+      'user-1'
+    ).catch((caught) => caught);
+
+    expect(error).toBeInstanceOf(NodeAgentRequestError);
+    expect(error).toMatchObject({
+      statusCode: 409,
+      error: 'RUNTIME_REQUEST_INTERRUPTED',
+    });
+    expect(mocks.container.fetchVmAgentContainer).toHaveBeenCalledTimes(1);
+    expect(mocks.container.markVmAgentContainerRequestInterrupted).not.toHaveBeenCalled();
   });
 });

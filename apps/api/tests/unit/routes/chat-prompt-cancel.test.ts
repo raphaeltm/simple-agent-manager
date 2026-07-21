@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
+import { AppError } from '../../../src/middleware/error';
 import { chatRoutes } from '../../../src/routes/chat';
 import * as projectDataService from '../../../src/services/project-data';
 
@@ -94,6 +95,7 @@ function setupDrizzle(opts: {
     id: string;
     nodeId: string | null;
     nodeStatus: string | null;
+    nodeRuntime?: string | null;
     userId?: string;
     projectId?: string | null;
   } | null;
@@ -102,7 +104,7 @@ function setupDrizzle(opts: {
   // Default the workspace owner to the authenticated caller so the
   // defence-in-depth ownership assertion passes for positive cases.
   const workspaceRow = opts.workspace
-    ? { userId: 'user-1', projectId: 'proj-1', ...opts.workspace }
+    ? { userId: 'user-1', projectId: 'proj-1', nodeRuntime: 'vm', ...opts.workspace }
     : null;
   let callCount = 0;
   const selectMock = vi.fn().mockImplementation(() => {
@@ -112,15 +114,17 @@ function setupDrizzle(opts: {
       from: vi.fn().mockReturnValue({
         leftJoin: vi.fn().mockReturnValue({
           where: vi.fn().mockReturnValue({
-            limit: vi.fn().mockResolvedValue(
-              currentCall === 1 ? (workspaceRow ? [workspaceRow] : []) : []
-            ),
+            limit: vi
+              .fn()
+              .mockResolvedValue(currentCall === 1 ? (workspaceRow ? [workspaceRow] : []) : []),
           }),
         }),
         where: vi.fn().mockReturnValue({
-          limit: vi.fn().mockResolvedValue(
-            currentCall === 2 ? (opts.agentSession ? [opts.agentSession] : []) : []
-          ),
+          limit: vi
+            .fn()
+            .mockResolvedValue(
+              currentCall === 2 ? (opts.agentSession ? [opts.agentSession] : []) : []
+            ),
         }),
       }),
     };
@@ -158,7 +162,13 @@ describe('GET /sessions', () => {
       select: vi.fn().mockReturnValue({
         from: vi.fn().mockReturnValue({
           where: vi.fn().mockResolvedValue([
-            { id: 'user-1', name: 'Alice', email: 'alice@example.com', image: null, avatarUrl: null },
+            {
+              id: 'user-1',
+              name: 'Alice',
+              email: 'alice@example.com',
+              image: null,
+              avatarUrl: null,
+            },
             { id: 'user-2', name: 'Bob', email: 'bob@example.com', image: null, avatarUrl: null },
           ]),
         }),
@@ -176,15 +186,19 @@ describe('GET /sessions', () => {
       total: 2,
     });
 
-    const response = await app.request(
-      '/api/projects/proj-1/sessions',
-      { method: 'GET' },
-      { DATABASE: {} as D1Database } as Env,
-    );
+    const response = await app.request('/api/projects/proj-1/sessions', { method: 'GET' }, {
+      DATABASE: {} as D1Database,
+    } as Env);
 
     expect(response.status).toBe(200);
     expect(projectDataService.listSessions).toHaveBeenCalledWith(
-      expect.anything(), 'proj-1', null, 20, 0, null, null,
+      expect.anything(),
+      'proj-1',
+      null,
+      20,
+      0,
+      null,
+      null
     );
     const body = await response.json();
     expect(body.sessions).toMatchObject([
@@ -203,12 +217,18 @@ describe('GET /sessions', () => {
     const response = await app.request(
       '/api/projects/proj-1/sessions?scope=my',
       { method: 'GET' },
-      { DATABASE: {} as D1Database } as Env,
+      { DATABASE: {} as D1Database } as Env
     );
 
     expect(response.status).toBe(200);
     expect(projectDataService.listSessions).toHaveBeenCalledWith(
-      expect.anything(), 'proj-1', null, 20, 0, null, 'user-1',
+      expect.anything(),
+      'proj-1',
+      null,
+      20,
+      0,
+      null,
+      'user-1'
     );
   });
 });
@@ -222,7 +242,7 @@ describe('POST /sessions/:sessionId/prompt', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content: 'hello agent' }),
       },
-      { DATABASE: {} as D1Database } as Env,
+      { DATABASE: {} as D1Database } as Env
     );
   }
 
@@ -237,14 +257,25 @@ describe('POST /sessions/:sessionId/prompt', () => {
 
     expect(response.status).toBe(200);
     expect(mocks.sendPromptToAgentOnNode).toHaveBeenCalledWith(
-      'node-1', 'ws-1', 'agent-sess-1',
-      'hello agent', expect.anything(), 'user-1', undefined, undefined,
+      'node-1',
+      'ws-1',
+      'agent-sess-1',
+      'hello agent',
+      expect.anything(),
+      'user-1',
+      undefined,
+      undefined
     );
   });
 
   it('uses the extended wake budget for a sleeping session', async () => {
     setupDrizzle({
-      workspace: { id: 'ws-1', nodeId: 'node-1', nodeStatus: 'sleeping' },
+      workspace: {
+        id: 'ws-1',
+        nodeId: 'node-1',
+        nodeStatus: 'sleeping',
+        nodeRuntime: 'cf-container',
+      },
       agentSession: { id: 'agent-sess-1' },
     });
     mocks.sendPromptToAgentOnNode.mockResolvedValue({ ok: true });
@@ -253,10 +284,72 @@ describe('POST /sessions/:sessionId/prompt', () => {
 
     expect(response.status).toBe(200);
     expect(mocks.sendPromptToAgentOnNode).toHaveBeenCalledWith(
-      'node-1', 'ws-1', 'agent-sess-1',
-      'hello agent', expect.anything(), 'user-1', undefined,
-      { requestTimeoutMs: 120_000 },
+      'node-1',
+      'ws-1',
+      'agent-sess-1',
+      'hello agent',
+      expect.anything(),
+      'user-1',
+      undefined,
+      { requestTimeoutMs: 120_000 }
     );
+  });
+
+  it.each(['recovery', 'error'])(
+    'routes cf-container %s state to bounded recovery',
+    async (nodeStatus) => {
+      setupDrizzle({
+        workspace: {
+          id: 'ws-1',
+          nodeId: 'node-1',
+          nodeStatus,
+          nodeRuntime: 'cf-container',
+        },
+        agentSession: { id: 'agent-sess-1' },
+      });
+      mocks.sendPromptToAgentOnNode.mockResolvedValue({ ok: true });
+
+      const response = await postPrompt();
+
+      expect(response.status).toBe(200);
+      expect(mocks.sendPromptToAgentOnNode).toHaveBeenCalledWith(
+        'node-1',
+        'ws-1',
+        'agent-sess-1',
+        'hello agent',
+        expect.anything(),
+        'user-1',
+        undefined,
+        { requestTimeoutMs: 120_000 }
+      );
+    }
+  );
+
+  it('returns the stable sanitized interruption error without replaying', async () => {
+    setupDrizzle({
+      workspace: {
+        id: 'ws-1',
+        nodeId: 'node-1',
+        nodeStatus: 'running',
+        nodeRuntime: 'cf-container',
+      },
+      agentSession: { id: 'agent-sess-1' },
+    });
+    mocks.sendPromptToAgentOnNode.mockRejectedValue(
+      new AppError(
+        409,
+        'RUNTIME_REQUEST_INTERRUPTED',
+        'Your message is saved, but it was not replayed automatically.'
+      )
+    );
+
+    const response = await postPrompt();
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: 'RUNTIME_REQUEST_INTERRUPTED',
+      message: 'Your message is saved, but it was not replayed automatically.',
+    });
   });
 
   it('returns 404 when no active workspace is found', async () => {
@@ -385,11 +478,9 @@ describe('POST /sessions/:sessionId/prompt', () => {
 
 describe('POST /sessions/:sessionId/cancel', () => {
   function postCancel() {
-    return app.request(
-      '/api/projects/proj-1/sessions/chat-1/cancel',
-      { method: 'POST' },
-      { DATABASE: {} as D1Database } as Env,
-    );
+    return app.request('/api/projects/proj-1/sessions/chat-1/cancel', { method: 'POST' }, {
+      DATABASE: {} as D1Database,
+    } as Env);
   }
 
   it('cancels a running prompt successfully', async () => {
@@ -406,8 +497,11 @@ describe('POST /sessions/:sessionId/cancel', () => {
     expect(body.status).toBe('cancelled');
     expect(body.message).toBe('Prompt cancel signal sent');
     expect(mocks.cancelAgentSessionOnNode).toHaveBeenCalledWith(
-      'node-1', 'ws-1', 'agent-sess-1',
-      expect.anything(), 'user-1',
+      'node-1',
+      'ws-1',
+      'agent-sess-1',
+      expect.anything(),
+      'user-1'
     );
   });
 
