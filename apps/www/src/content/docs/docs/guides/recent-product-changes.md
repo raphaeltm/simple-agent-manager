@@ -7,22 +7,29 @@ This page summarizes recent changes that affect how people use SAM. Use it as a 
 
 ## At a glance
 
-| Change                            | What users notice                                                                                                             | Where to use it                                  |
-| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
-| Shared projects & roles           | Invite teammates with a link, approve access requests, and share profiles, skills, and secrets with owner/admin/member roles. | Project **Settings → Access**                    |
-| Credential attribution            | A **Credentials** indicator shows which shared work runs on personal keys versus project credentials.                         | Project navigation (shared projects only)        |
-| GitLab repository workspaces      | Projects can be connected to GitLab repositories, not only GitHub repositories.                                               | Project creation and workspace launch flows      |
-| Project Files                     | You can inspect a branch's file tree and diff without opening a VM.                                                           | Project **Files** tab                            |
-| Forkable, task-backed chats       | Any chat can be forked, archived, and tracked with task lifecycle behavior.                                                   | Project chat sessions                            |
-| Focus Mode sidebars               | Desktop users can collapse navigation and session sidebars for more room while chatting.                                      | Project chat workspace                           |
-| GitHub event triggers             | GitHub issues, comments, pull requests, and pushes can start SAM work through project triggers.                               | Project **Triggers** page                        |
-| Generic webhook triggers          | Any external service can start SAM work by sending an authenticated JSON webhook.                                             | Project **Triggers** page                        |
-| GCP for provisioning              | Connect Google Cloud with Workload Identity Federation or a service-account JSON key to provision VMs.                        | **Settings → Connections**                       |
-| Deployment custom domains         | Attach your own subdomain to a deployed app; SAM verifies DNS and activates the route without a full redeploy.                | Deployment environment **Domains** tab           |
-| First-run setup wizard            | New self-hosted installs can configure platform integrations after deploy.                                                    | `/setup` on a fresh deployment                   |
-| Namespaced self-host domains      | Multiple SAM installations can share one Cloudflare zone without hostname collisions.                                         | Self-host deployment planning                    |
-| Default instant container runtime | New self-hosted deployments use Cloudflare Containers for instant sessions by default.                                        | Self-host deployment and agent runtime selection |
-| Cleaner injected system context   | SAM-injected bootstrap/context messages are collapsed so the chat reads like user-agent conversation.                         | Chat timeline                                    |
+### For everyone
+
+| Change                          | What users notice                                                                                                                  | Where to use it                        |
+| ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
+| Shared projects & roles         | Invite teammates with a link, approve access requests, and share profiles, skills, and secrets. Approved teammates join as admins. | Project **Settings → Access**          |
+| Credential attribution          | A **Credentials** indicator shows which shared work runs on personal keys versus project credentials.                              | Project navigation (shared projects)   |
+| GitLab repository workspaces    | Connect a GitLab repository, not only GitHub.                                                                                      | New-project setup, repository step     |
+| Project Files                   | Inspect a branch's file tree and diff without opening a VM.                                                                        | Project **Files** tab                  |
+| Forkable, task-backed chats     | Any chat can be forked, archived, and tracked with task lifecycle behavior.                                                        | Project chat sessions                  |
+| Focus Mode sidebars             | Collapse navigation and session sidebars for more room while chatting.                                                             | Project chat (desktop)                 |
+| GitHub event triggers           | GitHub issues, comments, pull requests, and pushes can start SAM work.                                                             | Project **Triggers** page              |
+| Generic webhook triggers        | Any external service can start SAM work by sending an authenticated JSON webhook.                                                  | Project **Triggers** page              |
+| GCP for provisioning            | Connect Google Cloud with Workload Identity Federation or a service-account JSON key to provision VMs.                             | **Settings → Connections**             |
+| Deployment custom domains       | Attach your own subdomain to a deployed app; SAM verifies DNS and activates the route without a full redeploy.                     | Deployment environment **Domains** tab |
+| Cleaner injected system context | SAM-injected bootstrap/context messages are collapsed so the chat reads like user-agent conversation.                              | Chat timeline                          |
+
+### For self-hosters & admins
+
+| Change                            | What it enables                                                                    | Where to configure it                            |
+| --------------------------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------ |
+| First-run setup wizard            | Configure platform integrations after deploy instead of pre-seeding secrets.       | `/setup` on a fresh deployment                   |
+| Namespaced self-host domains      | Run multiple SAM installations in one Cloudflare zone without hostname collisions. | Self-host deploy config (`RESOURCE_PREFIX`)      |
+| Default instant container runtime | New deployments use Cloudflare Containers for instant sessions by default.         | Self-host deploy config (`CF_CONTAINER_ENABLED`) |
 
 ## Projects can be shared with a team
 
@@ -30,7 +37,7 @@ A project is no longer single-player. Any member can create an invite link; reci
 
 Two things make shared projects safe to adopt:
 
-- **Roles** (owner, admin, member) decide who can manage membership, while everyday work stays open to everyone.
+- **Roles** — every project has one **owner**; everyone you approve joins as an **admin** with full project control except transferring ownership and deleting the project. Invite only people you trust.
 - **Credential attribution** — a **Credentials** indicator in the project navigation shows which shared resources still run on someone's personal keys, with a **Fix** link to attach a project-level credential instead.
 
 See the new [Collaboration & Shared Projects](/docs/guides/collaboration/) guide for the full flow, including ownership transfer and member offboarding.

@@ -17,39 +17,47 @@ SAM does not send email invitations. Instead, access is a three-step flow:
 flowchart LR
   A["Member creates<br/>invite link"] --> B["Recipient opens link<br/>and requests access"]
   B --> C["Owner or admin<br/>approves or denies"]
-  C -->|approved| D["Recipient becomes<br/>a project member"]
+  C -->|approved| D["Recipient joins<br/>as an admin"]
 ```
 
 1. **Any active member** creates an invite link from the project's settings.
 2. The recipient opens the link and **requests access** — the link never grants access on its own.
-3. An **owner or admin** approves (or denies) the pending request. Approval adds the person as a member.
+3. An **owner or admin** approves (or denies) the pending request. Approval adds the person to the project as an admin (see [Roles](#roles)).
 
 Because the link only produces a _request_, sharing a link is safe: nobody joins your project until someone with permission approves them.
 
 ## Roles
 
-Every member has one role. Roles control who can manage the project and its members — they do not change whose credentials pay for work (see [Credential attribution](#who-pays-credential-attribution)).
+Two roles are in use today: **owner** and **admin**. Roles control who can manage the project and its members — they do not change whose credentials pay for work (see [Credential attribution](#who-pays-credential-attribution)).
 
-| Role       | Manage members & invites | Approve access requests | Transfer ownership                        | Everyday work (chat, tasks, triggers) |
-| ---------- | ------------------------ | ----------------------- | ----------------------------------------- | ------------------------------------- |
-| **Owner**  | Yes                      | Yes                     | Yes (hands the project to another member) | Yes                                   |
-| **Admin**  | Yes                      | Yes                     | No                                        | Yes                                   |
-| **Member** | No                       | No                      | No                                        | Yes                                   |
+| Capability                                         | Owner | Admin |
+| -------------------------------------------------- | ----- | ----- |
+| Everyday work — chat, tasks, triggers, deployments | Yes   | Yes   |
+| Create and revoke invite links                     | Yes   | Yes   |
+| Approve or deny access requests                    | Yes   | Yes   |
+| Remove other members (anyone except the owner)     | Yes   | Yes   |
+| Manage connections, secrets, and infrastructure    | Yes   | Yes   |
+| Transfer ownership                                 | Yes   | No    |
+| Delete the project                                 | Yes   | No    |
 
-- There is exactly one **owner** per project. The owner can transfer ownership to an admin; the previous owner then becomes an admin.
-- **Admins** can do everything except transfer ownership, including approving new members and removing other non-owner members.
-- **Members** can use the project fully — start chats, run tasks, use shared profiles and skills — but cannot manage membership.
+- There is exactly one **owner** per project — the person who created it. The owner can transfer ownership to another member (who becomes the new owner); the previous owner stays on as an admin.
+- **Everyone you approve through an invite joins as an admin.** Admins can do almost everything an owner can — approve and remove other members, create and revoke invite links, and manage connections, secrets, and infrastructure. They only lack transferring ownership and deleting the project.
+
+Because approval grants admin access, **only invite people you trust with full control of the project.** Collaboration is built for small, trusted teams; finer-grained roles (read-only or limited members) are planned but not available yet.
 
 ## Invite a teammate
 
 1. Open the project and go to **Settings → Access**.
-2. In the **Members** panel, find **Invite Link** and click **Create Link**.
+2. In the **Members** panel, find **Invite Link** and click **Create Link** (the button reads **New Link** if a link already exists).
 3. Click **Copy** and send the link to your teammate through any channel (chat, email, ticket).
+4. Sending the link does not add anyone. Your teammate opens it and **requests access**, then you approve them under **Pending Requests** (see [Approve or deny requests](#approve-or-deny-requests)). They join the project — as an admin (see [Roles](#roles)) — and appear in the **Members** list only after you approve.
 
-Each project keeps one active invite link at a time. From the same panel you can:
+One link works for your whole team: share the same link with several people, and each opens it and requests access separately. You do not need a new link per teammate.
 
-- **New Link** — rotate to a fresh link (the old one keeps working until you revoke it).
-- **Revoke** — immediately disable the active link. Anyone who already joined keeps their access; only the link stops working.
+The panel shows and manages your most recently created invite link. From here you can:
+
+- **New Link** — create a fresh link. This does **not** revoke the previous link: the old URL keeps working, and once replaced it is no longer shown in the panel. If you want only one link live, click **Revoke** _before_ creating a new one.
+- **Revoke** — immediately disable the shown link. Anyone who already joined keeps their access; only the link stops working.
 
 Invite links carry an **expiry** (shown as "Expires …") and a **use count** so you can see how much a link has been shared. Expiry length is configurable by self-hosters via `PROJECT_INVITE_DEFAULT_EXPIRY_DAYS` and `PROJECT_INVITE_MAX_EXPIRY_DAYS`.
 
@@ -64,17 +72,18 @@ When someone opens an invite link, they land on a page that shows the project na
 ![The invite landing page a recipient sees: a "Request access" card naming the project (Payments API) and its repository, with a Request Access button.](/images/docs/collaboration-invite-request.png)
 
 - Clicking **Request Access** creates a pending request and shows "Your request will be reviewed by a project owner or admin."
-- Once an owner or admin approves, the same page shows **Open Project**.
-- If the repository is on GitHub, SAM checks whether the requester's GitHub sign-in already has access to that repository and surfaces the result on the request (for example "GitHub sign-in needed" or "no repo access") so approvers can make an informed decision.
+- If the repository is on GitHub, SAM checks whether your GitHub sign-in already has access to that repository and shows the result on the request (for example "GitHub sign-in needed" or "no repo access") so approvers can decide. If you see "GitHub sign-in needed," connect GitHub in your SAM settings so SAM can confirm your repository access.
 
-The recipient must be signed in to SAM to request access. If they do not have a SAM account yet, they sign in first, then open the link again.
+**You must be signed in to SAM to request access.** If you do not have a SAM account yet, create one first (SAM uses GitHub or Google sign-in), then re-open the invite link to return to the Request Access page.
+
+**How you'll know you're approved.** SAM does not email you when a request is approved. To check, re-open the same invite link — once an owner or admin approves you it shows **Open Project** — or open the project directly from your SAM dashboard, where approved projects appear in your project list.
 
 ## Approve or deny requests
 
 Owners and admins manage requests from **Settings → Access → Members**:
 
 - Pending requests appear under **Pending Requests** with the requester's name, email, and a GitHub-access badge.
-- Click **Approve** to add the person as a member, or **Deny** to reject the request.
+- Click **Approve** to add the person to the project (as an admin), or **Deny** to reject the request.
 - A denied person can **request access again** while the link is still active — denial is not a permanent block.
 
 ## What teammates share
@@ -84,7 +93,7 @@ Once someone is a member, the project becomes genuinely shared. Any active membe
 - **Agent profiles** — the model, agent, and settings bundles configured for the project.
 - **Skills** — reusable, repeatable-work configurations.
 - **Project environment variables and secrets** — supplied to workspaces and tasks in the project.
-- **Project files and runtime assets** — files SAM materializes into each workspace.
+- **Project files and runtime assets** — files SAM copies into each workspace.
 - **Chat sessions** — everyone's sessions appear in the same list. A filter near the session search toggles between **my sessions** and **all sessions** so you can focus on your own work or watch everything happening in the project. See [Chat Features → Session filters](/docs/guides/chat-features/#session-filters-shared-projects).
 
 What stays personal:
@@ -98,15 +107,20 @@ For repository work, SAM lets a member's workspace use the project's GitHub App 
 
 Sharing a project raises a practical question: **when a teammate's trigger or task runs, whose API key and cloud credential pays for it?**
 
-By default, shared work runs on the **personal** keys of whoever set it up. That is fine for getting started, but it means one person's key can quietly fund the whole team's automation. To make this visible, a shared project shows a **Credentials** indicator in the project navigation.
+By default, a resource runs on the **personal** keys of the member who set it up — a teammate's trigger bills the teammate's key, not yours. The catch is shared automation: if you create a trigger on your personal key, the whole team benefits from work that keeps charging you. To make this visible, a shared project shows a **Credentials** indicator in the project navigation.
 
-- The indicator only appears once a project is actually shared (more than one member, an active invite link, or a pending request) and there are credential-backed resources.
+- The indicator only appears once a project is actually shared (more than one member, an active invite link, or a pending request) and there are credential-backed resources. If you do not see it, the project either is not shared yet or has no credential-backed resources (triggers, running tasks, nodes, or deployments) to attribute — it appears as soon as one exists.
 - It shows a small badge — for example how many resources still run on personal keys, or "No shared keys" when everything is covered.
-- Clicking it opens the **Credential Attribution** panel, which lists credential-backed resources (triggers, running tasks, nodes, deployments, and project credential attachments) grouped by type. Each shows whether it is covered by a **project credential** (green) or a **personal** key (warning), with a **Fix** link that takes you to **Settings → Connections** to attach a project-level credential.
+- Clicking it opens the **Credential Attribution** panel, which lists credential-backed resources (triggers, running tasks, nodes, deployments, and project credential attachments) grouped by type. Each row names the resource and the member whose credential it uses, and shows whether it is covered by a **project credential** (green check) or a **personal** key (warning) — so you can tell your own resources from a teammate's.
+
+You have two levers, depending on your goal:
+
+- **Move the cost onto a shared key** — click **Fix** on a personal-key row to go to **Settings → Connections** and attach a project-scoped credential. Members' sessions then use the shared project credential instead of an individual's key. (If you attach your _own_ key as the project credential, you are still the one paying.)
+- **Stop the work entirely** — disable or delete the trigger or task from the **Triggers** page (or the resource itself). Attaching a credential changes _who_ pays; it does not stop the automation.
 
 ![The Credential Attribution panel, showing a nightly trigger running on a member's personal Claude Code key flagged for review with a Fix link, and a staging deployment covered by a shared project Hetzner credential.](/images/docs/collaboration-credentials.png)
 
-The goal is not to block sharing — invites and approvals continue regardless. It is to let the team see, and choose to fix, which shared work is running on an individual's personal keys. To move a resource off personal keys, attach a project-scoped credential under **Settings → Connections**; project members' sessions then use the shared project credential instead of an individual's key.
+The goal is not to block sharing — invites and approvals continue regardless. It is to give the team a clear view of which shared work runs on an individual's personal keys, so you can decide, deliberately, what to move onto a shared credential and what to leave as-is.
 
 ## Manage members
 
@@ -118,9 +132,15 @@ The **Members** panel under **Settings → Access** lists every member with thei
 
 ### Offboarding: what happens to a departing member's resources
 
-Removing a member or leaving a project opens an **offboarding** step that previews the resources tied to that member — triggers they created, running tasks, attached credentials — and lets you choose what to do with each before finalizing. This prevents a departure from silently breaking shared automation or stranding running work.
+Removing a member or leaving a project opens an **offboarding** step that previews the resources tied to that member — triggers they created, running tasks, attached credentials — and makes you choose what happens to each before finalizing. This exists precisely so a departure does not silently break shared automation.
 
-If the departing member's personal credentials were paying for shared resources, the offboarding preview is where you decide whether to reassign, keep, or stop those resources. Combined with the credential-attribution indicator above, this keeps a member's exit from unexpectedly cutting off the team's automation.
+The key thing to understand: **personal credentials leave with their owner.** A trigger or task that was running on the departing member's personal key will stop working once they are gone unless you re-point it at a project credential. For each affected resource the preview offers:
+
+- **Reattach to a project credential** — the resource keeps running on a shared project credential instead of the departing member's personal key. Choose this to keep the nightly job alive. (You need a compatible project credential connected under **Settings → Connections**.)
+- **Disable and flag** (for a task, **Stop future work and flag**) — the resource is disabled rather than left silently broken, and flagged so you can revisit it.
+- Some resources **block removal** until you resolve them, so you cannot accidentally remove a member out from under running work.
+
+Combined with the credential-attribution indicator above, this keeps a member's exit from unexpectedly cutting off the team's automation — you decide, up front, what survives.
 
 ## Related
 

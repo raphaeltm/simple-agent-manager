@@ -105,14 +105,16 @@ CNAME target to create, verifies the hostname through DNS-over-HTTPS, and — on
 verified — activates the custom hostname on the running app **without a full
 redeploy**.
 
-To attach a domain:
+Custom domains attach to an already-published public route, so publish a release
+with at least one public route first. Then:
 
 1. Open the deployment environment and go to the **Domains** tab.
 2. Pick the public route you want to expose and add a concrete subdomain such as
    `app.example.com` (apex/root domains are not supported in this version).
 3. Create a **CNAME** record from your subdomain to the SAM route hostname shown
-   in the panel. Use a **DNS only** record (no proxy) so verification can see the
-   real target.
+   in the panel. If your DNS provider puts a proxy or CDN in front of records
+   (for example Cloudflare's orange-cloud toggle), turn it off for this record so
+   verification can see the real target.
 4. Click **Verify** after the DNS record propagates. Verification succeeds when
    the custom hostname resolves to the SAM route hostname, or to the deployment
    node IP for DNS providers that flatten CNAMEs to A records.
@@ -120,6 +122,8 @@ To attach a domain:
 That's it — you do not need to republish the release. A successful verification
 queues a **route-only** activation to the deployment node, which reloads its
 router and provisions TLS for the new hostname automatically.
+
+![The deployment Domains tab: an Add domain form showing the exact CNAME record to create (type CNAME, the subdomain as the name, the SAM route hostname as the value, proxy set to DNS only) with a Copy CNAME value button, the environment's public routes, and a saved custom domain in the Pending DNS state.](/images/docs/deployment-custom-domains.png)
 
 ### Domain states
 

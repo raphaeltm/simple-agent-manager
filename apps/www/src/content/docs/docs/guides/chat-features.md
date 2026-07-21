@@ -162,7 +162,7 @@ SAM also collapses platform-injected setup messages in the chat timeline. Those 
 
 When you open a new chat, SAM offers a few repo-aware **starter prompts** (for example, "What's in this repo?" or "Run the tests and fix any failures") so you can get moving without a blank page. Pick one or type your own.
 
-To send, press **Cmd+Enter** on Mac or **Ctrl+Enter** on Windows/Linux — plain **Enter** inserts a new line so you can write multi-line prompts. The composer shows the correct shortcut for your platform as a hint.
+To send on a desktop keyboard, press **Cmd+Enter** on Mac or **Ctrl+Enter** on Windows/Linux — plain **Enter** inserts a new line so you can write multi-line prompts. The composer shows the correct shortcut for your platform as a hint. On mobile, tap the send button; **Enter** always inserts a new line.
 
 ## Session Filters (Shared Projects)
 
