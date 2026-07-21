@@ -95,6 +95,20 @@ Eight reviewers ran against the rebased head `365cd12e5`. constitution-validator
 
 Every fix carries a regression test that was verified to fail on the pre-fix code (discrimination checks recorded in the respective test suites).
 
+## Third Exact-Head Staging Gate (PASSED, 2026-07-21 22:32–23:55 UTC)
+
+Head `31737ae39` deployed (run 29872844972); verification ran against it and the follow-up comments-only head `5bc143f8c` (two-line file-size-exception delta; deploys 29876306236/29877444911 green including 12-test smoke). Genuine UI-created artifacts project `01KY3D007EA6JNCCHSK5YCFEYK`, Instant claude-code profile, chat `60d82ff6-fc42-48c0-8ea4-7772df2da630`, task `01KY3D0S2RNJYDTJMFQ2F6XRTZ`, node `01KY3D0SF4Q8XVGMPG862X0BMV` (nonce HPPQ0F).
+
+**Idle wake (gate 3a):** markers created and confirmed at 22:34:59 (unique HOME file, unstaged README edit, staged file, untracked file, harness-only phrase). Container slept 22:36:23 with an `available`/`degradation=none` snapshot and survived ~8 minutes of sleep across the 5-minute reconciliation sweep boundary — task `in_progress`, agent `sleeping`, workspace intact (the exact windows where gates 1 and 2 were destroyed). The same-chat follow-up restored, within ~30 seconds: exact HOME marker content, exact `git status --porcelain` (` M README.md`, `A  staged-…`, `?? untracked-…`), and the never-on-disk phrase (real LoadSession). Exactly one new user message (no duplicates: transcript = initial + SAM-injected system context + follow-up). `session_snapshots.restore_status='restored'`, `restored_at` written — the fields that were NULL in every production incident.
+
+**Replacement (gate 3b):** two real Cloudflare rollouts were driven through the deploy pipeline.
+- *Idle-state kill:* rollout at ~23:07 hit a sleeping container; no failure, no destruction; a later follow-up (23:31:20) woke the `recovery` workspace and fully restored phrase + porcelain in ~40s with no replay; task `in_progress` throughout.
+- *Active-work kill (the decisive case):* a delivery-confirmed foreground work loop ran from 23:38 (activity `prompting`, new `EXECUTION-START` echo persisted). The rollout killed the container **mid-work at 23:44:59**. Observed classification: workspace + agent session → `recovery`; `agent_sessions.error_message` = the sanitized "Instant session interrupted; restoring the last safe checkpoint…" disposition; task stayed `in_progress` across 8 minutes of sweeps; the in-flight prompt was never replayed (EXECUTION-START count constant). The same-chat follow-up at 23:54:09 restored phrase + exact porcelain in ~28s (`RESTORE2-REPORT`), one new user message, no replay. The tick log produced only after the last safe checkpoint correctly reported `TICKS-MISSING` — last-safe-checkpoint semantics, honestly surfaced, with the restored harness retaining pre-checkpoint conversation memory (LoadSession continuity across two kills) while the control-plane transcript retains the complete record.
+
+**Cleanup:** both gate projects deleted (a first attempt's orphan `01KY3CXZZ1SV8CE8VXWHS96F74` included), workspaces 0, node row deleted — verified via D1.
+
+**Verifier notes:** the driver was hardened during the run (wizard default-provider race → stepper-jump + `aria-checked` assertion; streamed-chunk contiguous joins; delivery-confirmation before browser close — earlier attempts that closed the browser seconds after Send lost the optimistic message, the known pre-existing WS-persist gap flagged by review as out of this PR's scope). An agent-side honesty note: a 12.5-minute single foreground loop exceeds the agent's 10-minute tool cap and was refused; the verified loop is 9.2 minutes.
+
 ## Lifecycle Contract
 
 ```text
@@ -158,10 +172,10 @@ Local verification gaps are tracked explicitly: the pinned Miniflare/workerd run
 
 - [x] Run focused API/DO/route tests, web tests, vm-agent Go/vet/race checks, migration gates, lint, typecheck, full tests, and build. The Worker/Miniflare process still hits the recorded local `workerd` SIGSEGV before test import and remains for CI.
 - [x] Run `$cloudflare-specialist`, `$go-specialist` if Go changes, `$security-auditor`, `$test-engineer`, `$ui-ux-specialist`, `$constitution-validator`, `$doc-sync-validator`, and mandatory `$task-completion-validator`; address blocking findings. All eight ran 2026-07-21 (fourth head). Two passed outright; six returned findings — every CRITICAL/HIGH fixed in-branch (see "Specialist review round" below); MEDIUM deferrals are tracked backlog tasks per rule 42.
-- [ ] Deploy the exact branch head to staging after checking for deployment contention.
-- [ ] From a genuine UI-created Instant session, create unique HOME plus staged/unstaged/untracked Git markers and harness context; verify an ordinary idle wake restores all markers/context in the same chat.
-- [ ] Force a real runtime replacement while work is active; verify no ambiguous replay, clear manual retry, same-chat follow-up persistence, restored markers/context, reconciled task status, and cleanup using bounded waits tied to observable progress.
-- [ ] Open a focused PR from current `main` with production root cause, state/data flow, tests, exact staging evidence, and specialist evidence. Do not merge without separate explicit authorization. If the exact live gate fails, leave the PR blocked and report it.
+- [x] Deploy the exact branch head to staging after checking for deployment contention. Run 29872844972 deployed `31737ae39` green (one transient networkidle smoke flake passed on rerun; deploy jobs succeeded first try). Subsequent runs 29875487605/29876306236/29877444911 deployed the final comments-only head `5bc143f8c` fully green including smoke.
+- [x] From a genuine UI-created Instant session, create unique HOME plus staged/unstaged/untracked Git markers and harness context; verify an ordinary idle wake restores all markers/context in the same chat. See "Third exact-head staging gate" below — PASSED.
+- [x] Force a real runtime replacement while work is active; verify no ambiguous replay, clear manual retry, same-chat follow-up persistence, restored markers/context, reconciled task status, and cleanup using bounded waits tied to observable progress. See "Third exact-head staging gate" below — PASSED (both idle-state and active-work rollout kills).
+- [x] Open a focused PR from current `main` with production root cause, state/data flow, tests, exact staging evidence, and specialist evidence. PR #1660 is open with all CI green; it remains UNMERGED pending separate explicit authorization.
 
 ## Acceptance Criteria
 
