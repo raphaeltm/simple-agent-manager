@@ -140,9 +140,9 @@ The key thing to understand: **personal credentials leave with their owner.** A 
 
 - **Keep it running on a shared key** — point the resource at an existing project credential (the **Use existing project credential** option) so it survives the departure. This is how you keep a nightly trigger or a deployment alive. You need a compatible project credential connected under **Settings → Connections**.
 - **Disable it** — a trigger is disabled and flagged, and a task's future work is stopped and flagged, so nothing runs silently broken.
-- **Defer** — leave a resource for later instead of resolving it now.
+- **Defer** — postpone a resource instead of resolving it now. Deferring does not clear a block, so any resource that blocks removal (see below) still has to be disabled, reattached, or deleted before you can finish.
 
-Some resources **block removal** until they are resolved, so you can't accidentally remove a member out from under running work. Triggers and tasks clear the block as soon as you disable them (or reattach them); **nodes and deployments clear it only when you point them at a project credential.** If there is no compatible project credential to use, stop or delete that node or deployment separately before finishing the removal.
+Some resources **block removal** until they are resolved, so you can't accidentally remove a member out from under running work, and each type clears the block differently: a **trigger** clears it when you disable it or reattach it to a project credential; a **task** clears it only by stopping its future work (tasks can't be reattached); a **node or deployment** clears it only by reattaching to a project credential. If no compatible project credential is available for a node or deployment, stop or delete it separately before finishing the removal.
 
 Combined with the credential-attribution indicator above, this keeps a member's exit from unexpectedly cutting off the team's automation — you decide, up front, what survives.
 
