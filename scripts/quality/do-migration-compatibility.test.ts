@@ -163,12 +163,21 @@ describe('resolveDurableObjectMigrations', () => {
 describe('getDeployedWorkerMigrationTag', () => {
   it('returns null only when the exact Worker lookup confirms a clean target', async () => {
     vi.stubEnv('CF_API_TOKEN', 'token');
-    const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 404 }));
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response('{"success":true,"result":[]}', { status: 200 }))
+      .mockResolvedValueOnce(new Response('{}', { status: 404 }));
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(getDeployedWorkerMigrationTag('account-id', 'api-worker')).resolves.toBeNull();
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock).toHaveBeenCalledWith(
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      'https://api.cloudflare.com/client/v4/accounts/account-id/workers/scripts?per_page=1000',
+      { headers: { Authorization: 'Bearer token' } }
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
       'https://api.cloudflare.com/client/v4/accounts/account-id/workers/scripts/api-worker/settings',
       { headers: { Authorization: 'Bearer token' } }
     );
@@ -176,19 +185,16 @@ describe('getDeployedWorkerMigrationTag', () => {
 
   it('reads the migration tag from the Workers scripts list for an existing Worker', async () => {
     vi.stubEnv('CF_API_TOKEN', 'token');
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(new Response('{"success":true,"result":{}}', { status: 200 }))
-      .mockResolvedValueOnce(
-        new Response('{"success":true,"result":[{"id":"api-worker","migration_tag":"v17"}]}', {
-          status: 200,
-        })
-      );
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('{"success":true,"result":[{"id":"api-worker","migration_tag":"v17"}]}', {
+        status: 200,
+      })
+    );
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(getDeployedWorkerMigrationTag('account-id', 'api-worker')).resolves.toBe('v17');
     expect(fetchMock).toHaveBeenNthCalledWith(
-      2,
+      1,
       'https://api.cloudflare.com/client/v4/accounts/account-id/workers/scripts?per_page=1000',
       { headers: { Authorization: 'Bearer token' } }
     );
@@ -198,7 +204,10 @@ describe('getDeployedWorkerMigrationTag', () => {
     vi.stubEnv('CF_API_TOKEN', 'token');
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue(new Response('sensitive-control-plane-detail', { status: 403 }))
+      vi
+        .fn()
+        .mockResolvedValueOnce(new Response('{"success":true,"result":[]}', { status: 200 }))
+        .mockResolvedValueOnce(new Response('sensitive-control-plane-detail', { status: 403 }))
     );
 
     await expect(getDeployedWorkerMigrationTag('account-id', 'api-worker')).rejects.toThrow(
@@ -212,8 +221,8 @@ describe('getDeployedWorkerMigrationTag', () => {
       'fetch',
       vi
         .fn()
-        .mockResolvedValueOnce(new Response('{"success":true,"result":{}}', { status: 200 }))
         .mockResolvedValueOnce(new Response('{"success":true,"result":[]}', { status: 200 }))
+        .mockResolvedValueOnce(new Response('{"success":true,"result":{}}', { status: 200 }))
     );
 
     await expect(getDeployedWorkerMigrationTag('account-id', 'api-worker')).rejects.toThrow(
@@ -227,8 +236,7 @@ describe('getDeployedWorkerMigrationTag', () => {
       'fetch',
       vi
         .fn()
-        .mockResolvedValueOnce(new Response('{"success":true,"result":{}}', { status: 200 }))
-        .mockResolvedValueOnce(
+        .mockResolvedValue(
           new Response('{"success":true,"result":[{"id":"api-worker"}]}', { status: 200 })
         )
     );
