@@ -541,7 +541,7 @@ chatRoutes.post('/:sessionId/prompt', async (c) => {
     c.env,
     userId,
     undefined,
-    workspace.nodeStatus === 'sleeping'
+    workspace.nodeRuntime === 'cf-container' && workspace.nodeStatus !== 'running'
       ? { requestTimeoutMs: getCfContainerWakeTimeoutMs(c.env) }
       : undefined
   );

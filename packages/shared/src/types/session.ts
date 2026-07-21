@@ -144,7 +144,13 @@ export interface ProjectWebSocketEvent {
 // Agent Sessions
 // =============================================================================
 
-export type AgentSessionStatus = 'running' | 'suspended' | 'stopped' | 'error';
+export type AgentSessionStatus =
+  | 'running'
+  | 'recovery'
+  | 'sleeping'
+  | 'suspended'
+  | 'stopped'
+  | 'error';
 
 /** Live host status from the VM Agent's SessionHost (more granular than AgentSessionStatus). */
 export type AgentHostStatus = 'idle' | 'starting' | 'ready' | 'prompting' | 'error' | 'stopped';
@@ -256,14 +262,15 @@ export const ACP_SESSION_TERMINAL_STATUSES: readonly AcpSessionStatus[] = [
 ] as const;
 
 /** Valid state machine transitions for ACP sessions. */
-export const ACP_SESSION_VALID_TRANSITIONS: Record<AcpSessionStatus, readonly AcpSessionStatus[]> = {
-  pending: ['assigned'],
-  assigned: ['running', 'failed', 'interrupted'],
-  running: ['completed', 'failed', 'interrupted'],
-  completed: [],
-  failed: [],
-  interrupted: [],
-} as const;
+export const ACP_SESSION_VALID_TRANSITIONS: Record<AcpSessionStatus, readonly AcpSessionStatus[]> =
+  {
+    pending: ['assigned'],
+    assigned: ['running', 'failed', 'interrupted'],
+    running: ['completed', 'failed', 'interrupted'],
+    completed: [],
+    failed: [],
+    interrupted: [],
+  } as const;
 
 export interface AcpSession {
   id: string;

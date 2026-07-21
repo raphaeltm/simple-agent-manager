@@ -60,34 +60,36 @@ Cloudflare stop metadata (`exit` versus `runtime_signal`, exit code, raw hook/er
 
 ### Durable runtime lifecycle
 
-- [ ] Add a persisted, typed recovery record to `VmAgentContainer` with phase, trigger, sanitized user disposition, bounded attempt count, interrupted agent-session identity, and detailed admin-only cause metadata.
-- [ ] Serialize lifecycle check/transition and wake/restore critical sections across `await` boundaries; make duplicate `onStop`/`onError` callbacks idempotent.
-- [ ] Keep idle handback as `sleeping`, explicit stop/destroy as terminal `stopped`, initial launch failure as terminal `error`, and all unexpected loss of an established runtime as generic recoverable state without calling every `runtime_signal` a rollout.
-- [ ] Make stopped/error/recovery D1 rows reach the Durable Object recovery path instead of failing a dead-node precheck.
-- [ ] Keep the runtime non-running until the fresh container has restored HOME, Git WIP, fresh credentials/callback tokens, and native harness session state.
-- [ ] Bound recovery attempts with named environment-backed defaults. Missing, expired, corrupt, or rejected snapshots must degrade visibly and must never become transcript replay presented as a true resume.
-- [ ] Catch a transport failure that crosses a request, classify recovery before a late lifecycle callback, preserve the original prompt in the transcript, and return an explicit manual-retry disposition without replaying the ambiguous request.
-- [ ] Reconcile node, workspace, agent-session, ACP/chat, and active task state on recovery success and terminal degradation so neither active nor awaiting-follow-up work is stranded.
+- [x] Add a persisted, typed recovery record to `VmAgentContainer` with phase, trigger, sanitized user disposition, bounded attempt count, interrupted agent-session identity, and detailed admin-only cause metadata.
+- [x] Serialize lifecycle check/transition and wake/restore critical sections across `await` boundaries; make duplicate `onStop`/`onError` callbacks idempotent.
+- [x] Keep idle handback as `sleeping`, explicit stop/destroy as terminal `stopped`, initial launch failure as terminal `error`, and all unexpected loss of an established runtime as generic recoverable state without calling every `runtime_signal` a rollout.
+- [x] Make stopped/error/recovery D1 rows reach the Durable Object recovery path instead of failing a dead-node precheck.
+- [x] Keep the runtime non-running until the fresh container has restored HOME, Git WIP, fresh credentials/callback tokens, and native harness session state.
+- [x] Bound recovery attempts with named environment-backed defaults. Missing, expired, corrupt, or rejected snapshots must degrade visibly and must never become transcript replay presented as a true resume.
+- [x] Catch a transport failure that crosses a request, classify recovery before a late lifecycle callback, preserve the original prompt in the transcript, and return an explicit manual-retry disposition without replaying the ambiguous request.
+- [x] Reconcile node, workspace, agent-session, ACP/chat, and active task state on recovery success and terminal degradation so neither active nor awaiting-follow-up work is stranded.
 
 ### Route, service, callback, and UI behavior
 
-- [ ] Replace the agent-session resume route's D1-only rewrite for cf-container sessions with a real bounded wake/restore call; retain the VM suspended-session behavior.
-- [ ] Permit tenant-scoped recovery rows in chat resolution while preserving IDOR and destroyed-VM guards.
-- [ ] Preserve the extended wake/restore timeout only for cf-container recovery paths and keep clone/create budgets from PR #1639 distinct.
-- [ ] Return stable, sanitized error codes/messages for waking, degraded recovery, and ambiguous manual retry. Keep raw snapshot/container details in structured admin logs only.
-- [ ] Stop swallowing follow-up delivery errors in project chat. Show waking/restoring progress, tell the user when their message is saved but needs manual retry, and expose degraded recovery without claiming the agent resumed.
-- [ ] Verify fresh node-scoped and workspace-scoped callback tokens are minted on every cold runtime and that duplicate/late callbacks cannot regress a recovered or explicitly stopped session.
+- [x] Replace the agent-session resume route's D1-only rewrite for cf-container sessions with a real bounded wake/restore call; retain the VM suspended-session behavior.
+- [x] Permit tenant-scoped recovery rows in chat resolution while preserving IDOR and destroyed-VM guards.
+- [x] Preserve the extended wake/restore timeout only for cf-container recovery paths and keep clone/create budgets from PR #1639 distinct.
+- [x] Return stable, sanitized error codes/messages for waking, degraded recovery, and ambiguous manual retry. Keep raw snapshot/container details in structured admin logs only.
+- [x] Stop swallowing follow-up delivery errors in project chat. Show waking/restoring progress, tell the user when their message is saved but needs manual retry, and expose degraded recovery without claiming the agent resumed.
+- [x] Verify fresh node-scoped and workspace-scoped callback tokens are minted on every cold runtime and that duplicate/late callbacks cannot regress a recovered or explicitly stopped session.
 
 ### Tests
 
-- [ ] Add Durable Object unit/Miniflare coverage for idle snapshot handback, cold wake, recovery wake, missing/expired/corrupt snapshot degradation, explicit stop, true unexpected crash, callback ordering/duplication, and terminal status reconciliation.
-- [ ] Add a concurrency test proving simultaneous follow-ups launch and restore once and do not duplicate prompt delivery.
-- [ ] Add a request-crossing-replacement test proving the interrupted request is classified and returned as manual retry but is never replayed.
-- [ ] Add route/service tests for recovery-row resolution, cf-container resume, callback-token reinjection, sanitized regular-user responses, and task/chat status reconciliation.
-- [ ] Add web tests for waking/restoring/degraded/manual-retry presentation and preserved optimistic transcript messages.
+- [x] Add Durable Object unit/Miniflare coverage for idle snapshot handback, cold wake, recovery wake, missing/expired/corrupt snapshot degradation, explicit stop, true unexpected crash, callback ordering/duplication, and terminal status reconciliation.
+- [x] Add a concurrency test proving simultaneous follow-ups launch and restore once and do not duplicate prompt delivery.
+- [x] Add a request-crossing-replacement test proving the interrupted request is classified and returned as manual retry but is never replayed.
+- [x] Add route/service tests for recovery-row resolution, cf-container resume, callback-token reinjection, sanitized regular-user responses, and task/chat status reconciliation.
+- [x] Add web tests for waking/restoring/degraded/manual-retry presentation and preserved optimistic transcript messages.
 - [ ] Run existing Go snapshot/restore and race suites. Change Go only if a bounded VM-agent consumer or a missing primitive-level invariant is required; otherwise update runtime-neutral persistence idea `01KX4KSXEXQMP41KS34TW9EN01` with the precise VM consumer follow-up.
 
 ### Verification and delivery
+
+Local verification gaps are tracked explicitly: the pinned Miniflare/workerd runner segfaults before importing both the new Worker tests and an unchanged worker smoke test; the workspace has no Go toolchain for the VM-agent race suite; and the live Durable Object wall-time gate currently reports two pre-existing staging alarm regressions. These are not treated as passing evidence.
 
 - [ ] Run focused API Worker/Miniflare tests, web tests, the vm-agent Go suite/race detector, migration gates, lint, typecheck, full tests, and build.
 - [ ] Run `$cloudflare-specialist`, `$go-specialist` if Go changes, `$security-auditor`, `$test-engineer`, `$ui-ux-specialist`, `$constitution-validator`, `$doc-sync-validator`, and mandatory `$task-completion-validator`; address blocking findings.

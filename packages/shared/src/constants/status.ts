@@ -13,6 +13,7 @@ export const STATUS_LABELS: Record<SharedStatus, string> = {
   running: 'Running',
   recovery: 'Recovery',
   stopping: 'Stopping',
+  sleeping: 'Sleeping',
   stopped: 'Stopped',
   deleted: 'Deleted',
   error: 'Error',
@@ -25,6 +26,7 @@ export const STATUS_COLORS: Record<SharedStatus, string> = {
   recovery: 'yellow',
   stopping: 'yellow',
   stopped: 'gray',
+  sleeping: 'blue',
   deleted: 'gray',
   error: 'red',
 };
