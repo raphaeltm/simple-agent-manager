@@ -396,4 +396,8 @@ function main(): void {
   );
 }
 
-main();
+// Only run main when executed directly (not when imported for testing).
+const isDirectExecution = process.argv[1]?.endsWith('check-migration-safety.ts');
+if (isDirectExecution) {
+  main();
+}

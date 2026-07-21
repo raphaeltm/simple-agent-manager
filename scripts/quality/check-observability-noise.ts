@@ -464,7 +464,11 @@ async function main() {
   process.exit(0);
 }
 
-main().catch((err) => {
-  console.error('Fatal error:', err instanceof Error ? err.message : String(err));
-  process.exit(2);
-});
+// Only run main when executed directly (not when imported for testing).
+const isDirectExecution = process.argv[1]?.endsWith('check-observability-noise.ts');
+if (isDirectExecution) {
+  main().catch((err) => {
+    console.error('Fatal error:', err instanceof Error ? err.message : String(err));
+    process.exit(2);
+  });
+}
