@@ -113,7 +113,7 @@ Before merging any PR that touches credential resolution, rotation, or compariso
 - [ ] Provider/dialect identity mismatches are rejected before a credential is assembled or a downstream client is constructed
 - [ ] Stale/mismatch responses are asserted to OMIT the rotating credential
 - [ ] Rotation validation defaults to a conservative allowlist (not disabled)
-- [ ] Rotation validation BLOCKS on failure, not warns
+- [ ] Rotation validation BLOCKS on failure for re-usable upstreams (§3(a)); persists-then-durably-alerts for one-time-use rotating upstreams (§3(b))
 - [ ] Rate limit on rotation endpoints uses an atomic primitive (DO storage, DB lock), not KV
 - [ ] At least one test returns a mismatched-user row from the DB stub and asserts the middleware still throws 404 (defence-in-depth)
 - [ ] No source-contract tests on auth middleware
