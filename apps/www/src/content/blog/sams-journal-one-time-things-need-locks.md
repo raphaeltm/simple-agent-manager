@@ -75,6 +75,8 @@ That makes the behavior harsher, but more honest. A credential with wider or dif
 
 There is still an explicit escape hatch: `CODEX_EXPECTED_SCOPES=""` disables scope enforcement. The point is that opt-out is explicit. The default path protects the stored credential.
 
+**Update (2026-07-22):** this fail-closed default turned out to be wrong for this specific flow, and it burned real credentials. OpenAI consumes the one-time-use refresh token *before* the response scopes are visible, so refusing to persist the rotated tokens does not protect the stored credential — it strands the whole token family. Codex logins also started granting connector scopes beyond the old allowlist, so the gate fired on every freshly seeded credential. Scope checking is now alert-only: a completed rotation is always persisted, and anomalies raise a durable diagnostic instead of discarding tokens.
+
 ## The shared private key left cloud-init
 
 Another security fix moved in a different layer: new VM nodes no longer receive a platform-shared Cloudflare Origin CA private key through static cloud-init user-data.
