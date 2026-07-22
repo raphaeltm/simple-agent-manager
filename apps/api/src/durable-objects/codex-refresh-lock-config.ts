@@ -21,6 +21,14 @@ export interface RefreshRequestPayload {
 
 export interface CodexRefreshEnv {
   DATABASE: D1Database;
+  /**
+   * Optional observability database for durable auth diagnostics. Present on the
+   * full Worker env (DOs share the Worker env); optional here so unit tests can
+   * omit it. Family-fatal refresh failures and scope anomalies are persisted
+   * through it because Workers Logs are head-sampled (1% in production) and
+   * warn/error log lines alone are effectively invisible.
+   */
+  OBSERVABILITY_DATABASE?: D1Database;
   ENCRYPTION_KEY: string;
   CREDENTIAL_ENCRYPTION_KEY?: string;
   CODEX_REFRESH_UPSTREAM_URL?: string;
@@ -28,8 +36,11 @@ export interface CodexRefreshEnv {
   CODEX_REFRESH_LOCK_TIMEOUT_MS?: string;
   CODEX_CLIENT_ID?: string;
   /**
-   * Comma-separated OAuth scopes that the Codex refresh upstream is allowed to return.
-   * Empty string disables scope validation. Unset uses DEFAULT_EXPECTED_SCOPES.
+   * Comma-separated OAuth scopes that the Codex refresh upstream is expected to
+   * return. Scopes outside the allowlist raise a durable diagnostic (alert-only)
+   * — they NEVER block persistence of a completed rotation, because the upstream
+   * has already consumed the one-time-use refresh token by the time scopes are
+   * visible. Empty string disables detection. Unset uses DEFAULT_EXPECTED_SCOPES.
    */
   CODEX_EXPECTED_SCOPES?: string;
   /**
@@ -59,15 +70,21 @@ export const DEFAULT_LOCK_TIMEOUT_MS = 30_000;
  */
 export const DEFAULT_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann';
 /**
- * Default expected scopes for the Codex OAuth refresh flow. OpenAI's Codex
- * OAuth grants typically include `openid profile email offline_access` — any
- * upstream response containing additional/unknown scopes is treated as a
- * potential scope escalation or provider drift and blocked with 502.
+ * Default expected scopes for the Codex OAuth refresh flow. Codex 0.144.x
+ * logins request `openid profile email offline_access api.connectors.read
+ * api.connectors.invoke` (codex-rs `login/src/server.rs:build_authorize_url`),
+ * so refresh responses for current grants echo all six. Scopes outside this
+ * allowlist raise a durable diagnostic (provider-drift detection) — they are
+ * NEVER a reason to discard the rotated tokens: the upstream consumed the
+ * one-time-use refresh token before the scopes were visible, so blocking would
+ * strand the token family (root cause of the 2026-07-11 and 2026-07-22 Codex
+ * auth incidents; see tasks/archive/2026-07-22-fix-codex-refresh-scope-gate-family-burn.md).
  *
  * Override via CODEX_EXPECTED_SCOPES (comma-separated). Setting the env var
- * to an empty string disables validation.
+ * to an empty string disables detection.
  */
-export const DEFAULT_EXPECTED_SCOPES = 'openid,profile,email,offline_access';
+export const DEFAULT_EXPECTED_SCOPES =
+  'openid,profile,email,offline_access,api.connectors.read,api.connectors.invoke';
 export const DEFAULT_RATE_LIMIT = 30;
 export const DEFAULT_RATE_WINDOW_SECONDS = 3600;
 /**

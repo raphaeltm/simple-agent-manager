@@ -26,9 +26,14 @@
  *    every other project inheriting it.
  *  - Rate limiting (MEDIUM #5): token-bucket state is held in DO storage (strongly consistent,
  *    atomic increments). KV read-modify-write is not safe for enforcement under concurrency.
- *  - Scope validation (MEDIUM #6): unexpected upstream scopes are checked against a conservative
- *    allowlist of Codex OAuth scopes. Unexpected scopes block the refresh with 502 by default.
- *    Disable with CODEX_EXPECTED_SCOPES="" to explicitly opt out of validation.
+ *  - Scope anomaly detection (MEDIUM #6, reworked): upstream scopes are compared against an
+ *    allowlist of Codex OAuth scopes. Anomalies raise a durable diagnostic (persisted to the
+ *    observability DB — Workers Logs are 1%-sampled) but NEVER discard the rotated tokens:
+ *    by the time scopes are visible, OpenAI has already consumed the one-time-use refresh
+ *    token, so refusing to persist would strand the whole token family (this exact
+ *    block-and-discard behavior burned production credentials on 2026-07-11 and 2026-07-22 —
+ *    see tasks/archive/2026-07-22-fix-codex-refresh-scope-gate-family-burn.md).
+ *    Disable detection with CODEX_EXPECTED_SCOPES="".
  */
 import { DurableObject } from 'cloudflare:workers';
 import * as v from 'valibot';
@@ -38,6 +43,7 @@ import { readResponseJson } from '../lib/runtime-validation';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import { syncActiveAgentCredentialSecret } from '../services/composable-credentials/agent-sync';
 import { decrypt, encrypt } from '../services/encryption';
+import { persistError } from '../services/observability';
 import {
   type CodexRefreshEnv,
   DEFAULT_CLIENT_ID,
@@ -360,29 +366,36 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
         upstreamErrorCode,
         upstreamErrorMessage,
       });
+      // Family-fatal rejections mean the stored credential is dead at OpenAI
+      // and every future refresh will fail until the user re-links. Persist a
+      // durable diagnostic — Workers Logs are 1%-sampled, so the warn above is
+      // effectively invisible in production (this exact blindness delayed the
+      // 2026-07-22 incident diagnosis).
+      if (
+        upstreamErrorCode === 'refresh_token_reused' ||
+        upstreamErrorCode === 'refresh_token_invalidated' ||
+        upstreamErrorCode === 'refresh_token_expired'
+      ) {
+        await this.persistAuthDiagnostic('codex_refresh.family_fatal_rejection', userId, {
+          credentialId: credential.id,
+          status: upstreamResponse.status,
+          upstreamErrorCode,
+          upstreamErrorMessage,
+        });
+      }
       return new Response(JSON.stringify(safeError), {
         status: upstreamResponse.status,
         headers: { 'Content-Type': 'application/json' },
       });
     }
 
-    // Check lock-level abort before writing to DB.
-    if (signal.aborted) {
-      throw new DOMException('Lock timeout', 'AbortError');
-    }
-
-    // Parse new tokens from OpenAI response.
+    // From this point the upstream exchange has SUCCEEDED: OpenAI has consumed
+    // the one-time-use refresh token and issued its successor. The rotation
+    // MUST be persisted no matter what — any path that discards it (an abort,
+    // a validation gate) strands the token family permanently. This is why
+    // there is deliberately NO lock-abort check between here and the DB writes,
+    // and why scope anomalies are detected only AFTER persistence.
     const newTokens = await readResponseJson(upstreamResponse, v.record(v.string(), v.unknown()), 'codex-refresh.tokens');
-
-    // Scope validation (MEDIUM #6) — fail closed by default. Disable with
-    // CODEX_EXPECTED_SCOPES="" only when explicitly opting out of validation.
-    const scopeResult = this.validateUpstreamScopes(newTokens, userId);
-    if (!scopeResult.ok) {
-      return new Response(
-        JSON.stringify({ error: 'upstream_unexpected_scope', message: scopeResult.reason }),
-        { status: 502, headers: { 'Content-Type': 'application/json' } }
-      );
-    }
 
     // Before updating tokens, record the old refresh_token in the grace window
     // so concurrent sessions holding it can still refresh successfully.
@@ -450,6 +463,23 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
       });
     }
 
+    // Scope anomaly detection (MEDIUM #6, alert-only) — runs AFTER persistence.
+    // The rotation is already durable; an unexpected scope is provider drift or
+    // an allowlist that lags codex's login scopes, and the correct response is a
+    // loud durable alert, never discarding tokens the upstream already rotated.
+    const scopeFinding = this.detectUnexpectedScopes(newTokens, userId);
+    if (scopeFinding) {
+      log.error('codex_refresh.unexpected_scopes_detected', {
+        userId,
+        credentialId: credential.id,
+        ...scopeFinding,
+      });
+      await this.persistAuthDiagnostic('codex_refresh.unexpected_scopes_detected', userId, {
+        credentialId: credential.id,
+        ...scopeFinding,
+      });
+    }
+
     // Return the new tokens to Codex.
     return this.createTokenResponse({
       accessToken: typeof newTokens.access_token === 'string' ? newTokens.access_token : null,
@@ -492,34 +522,30 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
   }
 
   /**
-   * Validate scopes in the upstream token response.
+   * Detect unexpected scopes in the upstream token response (alert-only).
    *
-   * Returns { ok: false } when scopes don't match the allowlist. The caller blocks
-   * by default.
+   * Returns a finding describing the anomaly, or null when the scopes conform
+   * (or detection is disabled). The caller persists a durable diagnostic for
+   * findings — it MUST NOT discard the rotated tokens: by the time the scopes
+   * are visible, the upstream has already consumed the one-time-use refresh
+   * token, so refusing to persist would strand the token family (the 2026-07
+   * Codex auth incidents).
    *
    * Override allowlist with CODEX_EXPECTED_SCOPES (comma-separated). Empty
-   * string disables validation entirely.
+   * string disables detection entirely.
    */
-  private validateUpstreamScopes(
+  private detectUnexpectedScopes(
     tokens: Record<string, unknown>,
     userId: string
-  ): { ok: true } | { ok: false; reason: string } {
+  ): { expectedScopes: string; returnedScopes: string; unexpectedScopes: string } | null {
     const scope = tokens.scope;
     if (scope === undefined || scope === null) {
-      // No scope in response — common for legacy tokens. Nothing to validate.
-      return { ok: true };
-    }
-
-    if (typeof scope !== 'string') {
-      log.warn('codex_refresh.scope_validation_nonstring', {
-        userId,
-        scopeType: typeof scope,
-      });
-      return { ok: false, reason: 'Upstream scope is not a string' };
+      // No scope in response — common for legacy tokens. Nothing to detect.
+      return null;
     }
 
     // Read configured scopes. Distinguish "env var unset" (use default) from
-    // "env var set to empty string" (validation disabled).
+    // "env var set to empty string" (detection disabled).
     const expectedScopesEnv = this.env.CODEX_EXPECTED_SCOPES;
     const rawScopes =
       expectedScopesEnv === undefined
@@ -527,7 +553,19 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
         : expectedScopesEnv;
     if (rawScopes === '') {
       // Explicitly disabled.
-      return { ok: true };
+      return null;
+    }
+
+    if (typeof scope !== 'string') {
+      log.warn('codex_refresh.scope_validation_nonstring', {
+        userId,
+        scopeType: typeof scope,
+      });
+      return {
+        expectedScopes: rawScopes,
+        returnedScopes: `<non-string:${typeof scope}>`,
+        unexpectedScopes: `<non-string:${typeof scope}>`,
+      };
     }
 
     const expectedScopes = new Set(rawScopes.split(',').map((s) => s.trim()).filter(Boolean));
@@ -535,19 +573,39 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
     const unexpected = returnedScopes.filter((s) => !expectedScopes.has(s));
 
     if (unexpected.length > 0) {
-      log.warn('codex_refresh.unexpected_scopes_blocked', {
-        userId,
+      return {
         expectedScopes: [...expectedScopes].join(','),
         returnedScopes: returnedScopes.join(' '),
         unexpectedScopes: unexpected.join(','),
-      });
-      return {
-        ok: false,
-        reason: `Upstream returned unexpected scope(s): ${unexpected.join(',')}`,
       };
     }
 
-    return { ok: true };
+    return null;
+  }
+
+  /**
+   * Persist a durable auth diagnostic to the observability database.
+   *
+   * Workers Logs are head-sampled (1% in production), so log lines alone are
+   * effectively invisible for low-volume critical events like family-fatal
+   * refresh rejections. `persistError` is itself fail-silent; the optional
+   * binding guard keeps unit tests and minimal envs working. Never include
+   * token material in `context`.
+   */
+  private async persistAuthDiagnostic(
+    message: string,
+    userId: string,
+    context: Record<string, unknown>
+  ): Promise<void> {
+    const observabilityDb = this.env.OBSERVABILITY_DATABASE;
+    if (!observabilityDb) return;
+    await persistError(observabilityDb, {
+      source: 'api',
+      level: 'error',
+      message,
+      context,
+      userId,
+    });
   }
 
   /**

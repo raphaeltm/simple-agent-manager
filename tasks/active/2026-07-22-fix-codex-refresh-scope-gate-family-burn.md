@@ -69,42 +69,42 @@ Production evidence (2026-07-22 diagnosis):
 
 ## Implementation Checklist
 
-- [ ] Reorder `runRefresh`: after a successful upstream exchange, ALWAYS persist —
+- [x] Reorder `runRefresh`: after a successful upstream exchange, ALWAYS persist —
       `recordRotatedToken` → legacy `UPDATE credentials` → cc dual-write — before any
       scope evaluation. A completed rotation must never be discarded.
-- [ ] Convert scope validation from blocking to alerting: rename/reshape
+- [x] Convert scope validation from blocking to alerting: rename/reshape
       `validateUpstreamScopes` into a detector that returns unexpected scopes; on
       anomaly, `log.error('codex_refresh.unexpected_scopes', …)` + persist a durable
       diagnostic; still deliver the rotated tokens to the caller.
-- [ ] Preserve `CODEX_EXPECTED_SCOPES` semantics: unset → default allowlist;
+- [x] Preserve `CODEX_EXPECTED_SCOPES` semantics: unset → default allowlist;
       `''` → detection disabled; custom list → custom allowlist (alert-only now).
-- [ ] Expand `DEFAULT_EXPECTED_SCOPES` to
+- [x] Expand `DEFAULT_EXPECTED_SCOPES` to
       `openid,profile,email,offline_access,api.connectors.read,api.connectors.invoke`.
-- [ ] Remove the abort-check between upstream success and persist so a lock-timeout
+- [x] Remove the abort-check between upstream success and persist so a lock-timeout
       can no longer discard a completed rotation (aborts still cancel the upstream
       fetch itself).
-- [ ] Add optional `OBSERVABILITY_DATABASE?: D1Database` to `CodexRefreshEnv`; persist
+- [x] Add optional `OBSERVABILITY_DATABASE?: D1Database` to `CodexRefreshEnv`; persist
       durable diagnostics (fail-silent) for: unexpected-scope anomaly, and upstream
       rejections with family-fatal codes (`refresh_token_reused`,
       `refresh_token_invalidated`, `refresh_token_expired`).
-- [ ] Tests — flip existing block-and-not-persist scope tests to
+- [x] Tests — flip existing block-and-not-persist scope tests to
       persist-and-alert (rule 42: stop asserting destructive behavior as desired).
-- [ ] Tests — discriminating regression: upstream success with
+- [x] Tests — discriminating regression: upstream success with
       `api.connectors.read api.connectors.invoke` in scope → passes with NO anomaly
       under the new default allowlist (fails on old default).
-- [ ] Tests — scope anomaly (custom narrow allowlist): rotated tokens ARE persisted to
+- [x] Tests — scope anomaly (custom narrow allowlist): rotated tokens ARE persisted to
       legacy AND cc rows, tokens ARE returned, durable diagnostic persisted.
-- [ ] Tests — `CODEX_EXPECTED_SCOPES=''` disables detection (no anomaly, persisted).
-- [ ] Tests — upstream rejection with `refresh_token_reused` persists a durable
+- [x] Tests — `CODEX_EXPECTED_SCOPES=''` disables detection (no anomaly, persisted).
+- [x] Tests — upstream rejection with `refresh_token_reused` persists a durable
       diagnostic and does not touch stored credential.
-- [ ] Tests — existing concurrency/mutex, grace-window, rate-limit, dual-write tests
+- [x] Tests — existing concurrency/mutex, grace-window, rate-limit, dual-write tests
       remain green.
-- [ ] Process fix: amend `.claude/rules/28-credential-resolution-fallback-tests.md`
+- [x] Process fix: amend `.claude/rules/28-credential-resolution-fallback-tests.md`
       §3 with the one-time-use rotating-upstream carve-out (persist-then-alert;
       reject-no-persist is forbidden when the upstream consumes the credential).
-- [ ] Docs: update `CODEX_EXPECTED_SCOPES` description in env reference material
+- [x] Docs: update `CODEX_EXPECTED_SCOPES` description in env reference material
       (`apps/api/.env.example` if present) to reflect alert-only semantics + new default.
-- [ ] Post-mortem recorded in this task file (below) per rule 02.
+- [x] Post-mortem recorded in this task file (below) per rule 02.
 
 ## Acceptance Criteria
 

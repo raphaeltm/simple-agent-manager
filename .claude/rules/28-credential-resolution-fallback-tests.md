@@ -57,12 +57,35 @@ Any function that compares a caller-supplied credential against a stored one MUS
 
 ### 3. Rotation Scope Validation
 
-When accepting rotated credentials from an upstream (OAuth refresh, webhook signature rotation), tests MUST assert:
+**First classify the upstream.** The correct failure behavior depends on whether
+rejecting the rotation can actually preserve the prior credential:
+
+**(a) Re-usable upstream** — rejecting leaves the old credential valid (webhook
+signature rotation, non-rotating API-key exchange). Tests MUST assert:
 
 - The validation defaults to a conservative allowlist when the config env var is unset (not: defaults to disabled)
 - An unexpected scope / signature-algorithm / audience causes the request to be REJECTED (502 or equivalent), not merely logged
 - Rejected rotations MUST NOT persist the new credential (the old credential remains valid)
 - The env-var escape hatch (`EXPECTED_SCOPES=""`) is an explicit opt-out — absent env var ≠ disabled
+
+**(b) One-time-use rotating upstream** — the exchange CONSUMES the old credential
+before the response (and its scopes) is visible (OpenAI Codex refresh tokens,
+any OAuth provider with refresh-token rotation + reuse detection). Here
+"reject-no-persist" is FORBIDDEN: the old credential is already dead, so
+discarding the response permanently strands the credential family. This exact
+mistake (CodexRefreshLock scope gate, PR #1412) burned every production Codex
+credential seeded after 2026-07-01 on its first refresh — see
+`tasks/archive/2026-07-22-fix-codex-refresh-scope-gate-family-burn.md`. Tests MUST assert:
+
+- A completed upstream rotation is ALWAYS persisted (all synced representations,
+  per rule 44), regardless of validation outcome — including when an
+  abort/timeout signal fires between upstream success and the write
+- Validation anomalies produce a DURABLE alert that survives log sampling
+  (e.g. `platform_errors`), not only a log line
+- The allowlist default matches what the provider's CURRENT login flow actually
+  grants (verify against the provider client's source, not assumptions)
+- The env-var escape hatch (`EXPECTED_SCOPES=""`) still disables detection
+- No token material appears in the persisted diagnostic
 
 ### 4. Rate Limit on Credential Rotation Endpoints
 

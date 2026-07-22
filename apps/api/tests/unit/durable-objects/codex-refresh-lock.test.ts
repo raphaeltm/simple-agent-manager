@@ -8,7 +8,8 @@
  *    fallback, absent row falls through to user-scoped
  *  - MEDIUM #5: rate-limit state held in `ctx.storage` (atomic, keyed per-credential),
  *    429 with Retry-After on exceed; cached/grace/stale responses do not consume budget
- *  - MEDIUM #6: upstream scope validation (block by default; empty allowlist is explicit opt-out)
+ *  - MEDIUM #6: upstream scope anomaly detection (alert-only — a completed rotation is
+ *    ALWAYS persisted; empty allowlist is explicit opt-out)
  *  - Decrypt/parse failure handling
  *  - Upstream error paths (timeout, network, filtered error body)
  */
@@ -52,10 +53,18 @@ vi.mock('../../../src/lib/logger', () => ({
   },
 }));
 
+// Mock observability service — durable auth diagnostics (persistError is
+// fail-silent in production; here we only assert it is invoked with the right
+// payload and never receives token material).
+vi.mock('../../../src/services/observability', () => ({
+  persistError: vi.fn(),
+}));
+
 const { CodexRefreshLock } = await import(
   '../../../src/durable-objects/codex-refresh-lock'
 );
 const { decrypt, encrypt } = await import('../../../src/services/encryption');
+const { persistError } = await import('../../../src/services/observability');
 
 // -----------------------------------------------------------------------
 // Helpers
@@ -64,8 +73,10 @@ const { decrypt, encrypt } = await import('../../../src/services/encryption');
 function createMockEnv(overrides: Record<string, unknown> = {}) {
   return {
     DATABASE: createMockD1(),
+    // Opaque binding — persistError is module-mocked, the DO only checks presence.
+    OBSERVABILITY_DATABASE: {},
     ENCRYPTION_KEY: 'test-encryption-key',
-    // Disable scope validation by default for tests that don't exercise it —
+    // Disable scope detection by default for tests that don't exercise it —
     // individual tests re-enable with CODEX_EXPECTED_SCOPES overrides.
     CODEX_EXPECTED_SCOPES: '',
     ...overrides,
@@ -1188,11 +1199,11 @@ describe('CodexRefreshLock', () => {
   });
 
   // -----------------------------------------------------------------------
-  // MEDIUM #6 — Scope validation (block by default, empty allowlist is explicit opt-out)
+  // MEDIUM #6 — Scope anomaly detection (alert-only; a completed rotation is NEVER discarded)
   // -----------------------------------------------------------------------
 
-  describe('MEDIUM #6 — scope validation', () => {
-    it('blocks with 502 on unexpected scope by default and does not persist tokens', async () => {
+  describe('MEDIUM #6 — scope anomaly detection (alert-only)', () => {
+    it('persists the rotation and raises a durable diagnostic on unexpected scope (regression: block-and-discard stranded token families)', async () => {
       const { do: doInstance, env } = createDO({
         CODEX_EXPECTED_SCOPES: 'openid,offline_access',
       });
@@ -1213,15 +1224,43 @@ describe('CodexRefreshLock', () => {
       const res = await doInstance.fetch(
         makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' }),
       );
-      expect(res.status).toBe(502);
+
+      // The rotated tokens are delivered — OpenAI already consumed the old
+      // refresh token, so the caller must receive its successor.
+      expect(res.status).toBe(200);
       const json = await res.json();
-      expect(json.error).toBe('upstream_unexpected_scope');
-      expect(vi.mocked(encrypt)).not.toHaveBeenCalled();
-      expectNoCredentialUpdate(env);
-      expect(mockLogWarn).toHaveBeenCalledWith(
-        'codex_refresh.unexpected_scopes_blocked',
+      expect(json.refresh_token).toBe('new-refresh');
+      expect(json.access_token).toBe('new-access');
+
+      // The rotation is persisted to the legacy row AND mirrored to cc_credentials
+      // in the same operation — a scope anomaly must never strand the family.
+      expect(vi.mocked(encrypt)).toHaveBeenCalled();
+      expect(vi.mocked(env.DATABASE.prepare)).toHaveBeenCalledWith(
+        expect.stringContaining('UPDATE credentials'),
+      );
+      expect(vi.mocked(env.DATABASE.prepare)).toHaveBeenCalledWith(
+        expect.stringContaining('cc_credentials'),
+      );
+
+      // The anomaly is loudly reported: structured error log + durable diagnostic
+      // (Workers Logs are 1%-sampled — the durable write is the real alert).
+      expect(mockLogError).toHaveBeenCalledWith(
+        'codex_refresh.unexpected_scopes_detected',
         expect.objectContaining({ unexpectedScopes: 'admin:write' }),
       );
+      expect(vi.mocked(persistError)).toHaveBeenCalledWith(
+        env.OBSERVABILITY_DATABASE,
+        expect.objectContaining({
+          message: 'codex_refresh.unexpected_scopes_detected',
+          level: 'error',
+          userId: 'user-1',
+          context: expect.objectContaining({ unexpectedScopes: 'admin:write' }),
+        }),
+      );
+      // The diagnostic payload never contains token material.
+      const diagnosticInput = vi.mocked(persistError).mock.calls[0]?.[1];
+      expect(JSON.stringify(diagnosticInput)).not.toContain('new-refresh');
+      expect(JSON.stringify(diagnosticInput)).not.toContain('new-access');
     });
 
     it('allows refresh when scopes match expected', async () => {
@@ -1248,8 +1287,9 @@ describe('CodexRefreshLock', () => {
       expect(vi.mocked(encrypt)).toHaveBeenCalled();
     });
 
-    it('uses default allowlist and blocks when CODEX_EXPECTED_SCOPES is unset', async () => {
-      // Omit CODEX_EXPECTED_SCOPES entirely — DO must apply DEFAULT_EXPECTED_SCOPES.
+    it('accepts the full codex 0.144.x login scope set under the default allowlist (regression: connector scopes burned every fresh credential)', async () => {
+      // Omit CODEX_EXPECTED_SCOPES entirely — DO must apply DEFAULT_EXPECTED_SCOPES,
+      // which must cover everything a current `codex login` grant returns.
       const env = createMockEnv();
       // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
       delete (env as Record<string, unknown>).CODEX_EXPECTED_SCOPES;
@@ -1262,7 +1302,10 @@ describe('CodexRefreshLock', () => {
           JSON.stringify({
             access_token: 'new-access',
             refresh_token: 'new-refresh',
-            scope: 'openid offline_access admin:write', // unexpected by default
+            id_token: 'new-id',
+            // Exact scope set requested by codex-rs login (rust-v0.144.6
+            // build_authorize_url) — echoed back on refresh responses.
+            scope: 'openid profile email offline_access api.connectors.read api.connectors.invoke',
           }),
           { status: 200, headers: { 'Content-Type': 'application/json' } },
         ),
@@ -1271,14 +1314,56 @@ describe('CodexRefreshLock', () => {
       const res = await doInstance.fetch(
         makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' }),
       );
-      expect(res.status).toBe(502);
+      expect(res.status).toBe(200);
       const json = await res.json();
-      expect(json.error).toBe('upstream_unexpected_scope');
-      expect(vi.mocked(encrypt)).not.toHaveBeenCalled();
-      expectNoCredentialUpdate(env);
-      expect(mockLogWarn).toHaveBeenCalledWith(
-        'codex_refresh.unexpected_scopes_blocked',
+      expect(json.refresh_token).toBe('new-refresh');
+      expect(vi.mocked(encrypt)).toHaveBeenCalled();
+      // Conforming scopes: no anomaly log, no durable diagnostic.
+      expect(mockLogError).not.toHaveBeenCalledWith(
+        'codex_refresh.unexpected_scopes_detected',
+        expect.anything(),
+      );
+      expect(vi.mocked(persistError)).not.toHaveBeenCalled();
+    });
+
+    it('flags scopes outside the default allowlist when CODEX_EXPECTED_SCOPES is unset — and still persists', async () => {
+      const env = createMockEnv();
+      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+      delete (env as Record<string, unknown>).CODEX_EXPECTED_SCOPES;
+      const ctx = createMockCtx();
+      const doInstance = new CodexRefreshLock(ctx, env);
+      setupCredentialFound(env);
+
+      vi.mocked(fetch).mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            access_token: 'new-access',
+            refresh_token: 'new-refresh',
+            scope: 'openid offline_access admin:write', // admin:write unexpected by default
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      );
+
+      const res = await doInstance.fetch(
+        makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' }),
+      );
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.refresh_token).toBe('new-refresh');
+      expect(vi.mocked(encrypt)).toHaveBeenCalled();
+      expect(vi.mocked(env.DATABASE.prepare)).toHaveBeenCalledWith(
+        expect.stringContaining('UPDATE credentials'),
+      );
+      expect(mockLogError).toHaveBeenCalledWith(
+        'codex_refresh.unexpected_scopes_detected',
         expect.objectContaining({ unexpectedScopes: 'admin:write' }),
+      );
+      expect(vi.mocked(persistError)).toHaveBeenCalledWith(
+        env.OBSERVABILITY_DATABASE,
+        expect.objectContaining({
+          message: 'codex_refresh.unexpected_scopes_detected',
+        }),
       );
     });
 
@@ -1304,7 +1389,7 @@ describe('CodexRefreshLock', () => {
       expect(vi.mocked(encrypt)).toHaveBeenCalled();
     });
 
-    it('blocks non-string scope values by default', async () => {
+    it('flags non-string scope values without blocking the rotation', async () => {
       const { do: doInstance, env } = createDO({
         CODEX_EXPECTED_SCOPES: 'openid',
       });
@@ -1324,19 +1409,31 @@ describe('CodexRefreshLock', () => {
       const res = await doInstance.fetch(
         makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' }),
       );
-      expect(res.status).toBe(502);
+      expect(res.status).toBe(200);
+      const json = await res.json();
+      expect(json.refresh_token).toBe('new-refresh');
+      expect(vi.mocked(encrypt)).toHaveBeenCalled();
       expect(mockLogWarn).toHaveBeenCalledWith(
         'codex_refresh.scope_validation_nonstring',
         expect.objectContaining({ scopeType: 'number' }),
       );
-      expect(vi.mocked(encrypt)).not.toHaveBeenCalled();
-      expectNoCredentialUpdate(env);
+      expect(vi.mocked(persistError)).toHaveBeenCalledWith(
+        env.OBSERVABILITY_DATABASE,
+        expect.objectContaining({
+          message: 'codex_refresh.unexpected_scopes_detected',
+          context: expect.objectContaining({
+            unexpectedScopes: '<non-string:number>',
+          }),
+        }),
+      );
     });
 
-    it('blocks non-string scope values even when CODEX_SCOPE_VALIDATION_MODE=warn is set', async () => {
+    it('ignores the removed CODEX_SCOPE_VALIDATION_MODE env var — detection stays alert-only', async () => {
+      // The historical mode knob must not resurrect blocking behavior: even with
+      // a value set, an anomalous refresh persists and alerts.
       const { do: doInstance, env } = createDO({
         CODEX_EXPECTED_SCOPES: 'openid',
-        CODEX_SCOPE_VALIDATION_MODE: 'warn',
+        CODEX_SCOPE_VALIDATION_MODE: 'block',
       });
       setupCredentialFound(env);
 
@@ -1345,7 +1442,7 @@ describe('CodexRefreshLock', () => {
           JSON.stringify({
             access_token: 'new-access',
             refresh_token: 'new-refresh',
-            scope: 42, // non-string scope
+            scope: 'openid admin:write',
           }),
           { status: 200, headers: { 'Content-Type': 'application/json' } },
         ),
@@ -1354,13 +1451,12 @@ describe('CodexRefreshLock', () => {
       const res = await doInstance.fetch(
         makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' }),
       );
-      expect(res.status).toBe(502);
-      expect(mockLogWarn).toHaveBeenCalledWith(
-        'codex_refresh.scope_validation_nonstring',
-        expect.objectContaining({ scopeType: 'number' }),
+      expect(res.status).toBe(200);
+      expect(vi.mocked(encrypt)).toHaveBeenCalled();
+      expect(vi.mocked(persistError)).toHaveBeenCalledWith(
+        env.OBSERVABILITY_DATABASE,
+        expect.objectContaining({ message: 'codex_refresh.unexpected_scopes_detected' }),
       );
-      expect(vi.mocked(encrypt)).not.toHaveBeenCalled();
-      expectNoCredentialUpdate(env);
     });
 
     it('allows responses with no scope field', async () => {
@@ -1495,6 +1591,119 @@ describe('CodexRefreshLock', () => {
     expect(fields.status).toBe(401);
     // No raw-body field is logged (refresh token can never leak).
     expect(fields).not.toHaveProperty('rawBodySample');
+
+    // Family-fatal rejection → durable diagnostic (Workers Logs are 1%-sampled,
+    // so the warn log alone left the 2026-07 incidents invisible for days).
+    expect(vi.mocked(persistError)).toHaveBeenCalledWith(
+      env.OBSERVABILITY_DATABASE,
+      expect.objectContaining({
+        message: 'codex_refresh.family_fatal_rejection',
+        level: 'error',
+        userId: 'user-1',
+        context: expect.objectContaining({
+          upstreamErrorCode: 'refresh_token_invalidated',
+        }),
+      }),
+    );
+  });
+
+  it('persists a durable diagnostic on refresh_token_reused and leaves the stored credential untouched', async () => {
+    const { do: doInstance, env } = createDO();
+    setupCredentialFound(env);
+
+    // OpenAI reuse detection: the presented one-time-use token was already
+    // exchanged — the family is stranded until the user re-links.
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(JSON.stringify({
+        error: {
+          message: 'Your refresh token was already used.',
+          type: 'invalid_request_error',
+          param: null,
+          code: 'refresh_token_reused',
+        },
+      }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    const res = await doInstance.fetch(
+      makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' }),
+    );
+    expect(res.status).toBe(401);
+    const json = await res.json();
+    expect(json.error).toBe('refresh_token_reused');
+
+    expect(vi.mocked(persistError)).toHaveBeenCalledWith(
+      env.OBSERVABILITY_DATABASE,
+      expect.objectContaining({
+        message: 'codex_refresh.family_fatal_rejection',
+        context: expect.objectContaining({ upstreamErrorCode: 'refresh_token_reused' }),
+      }),
+    );
+    // A failed refresh must not touch the stored credential.
+    expect(vi.mocked(encrypt)).not.toHaveBeenCalled();
+    expectNoCredentialUpdate(env);
+    // The diagnostic payload never contains the refresh token.
+    const diagnosticInput = vi.mocked(persistError).mock.calls[0]?.[1];
+    expect(JSON.stringify(diagnosticInput)).not.toContain('stored-refresh');
+  });
+
+  it('does not persist diagnostics for transient (non-family-fatal) upstream errors', async () => {
+    const { do: doInstance, env } = createDO();
+    setupCredentialFound(env);
+
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(JSON.stringify({ error: 'temporarily_unavailable' }), {
+        status: 503,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    const res = await doInstance.fetch(
+      makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' }),
+    );
+    expect(res.status).toBe(503);
+    expect(vi.mocked(persistError)).not.toHaveBeenCalled();
+  });
+
+  it('persists a completed rotation even when the lock timeout fires after the upstream exchange (never discard a consumed one-time-use token)', async () => {
+    // Lock timeout fires at 1ms; the upstream "completes" at ~25ms. Pre-fix,
+    // an abort check between upstream success and the DB write threw and
+    // discarded the rotation (504) — stranding the family exactly like the
+    // scope gate did. Post-fix the rotation persists and the caller gets tokens.
+    const { do: doInstance, env } = createDO({ CODEX_REFRESH_LOCK_TIMEOUT_MS: '1' });
+    setupCredentialFound(env);
+
+    vi.mocked(fetch).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          setTimeout(
+            () =>
+              resolve(
+                new Response(
+                  JSON.stringify({
+                    access_token: 'new-access',
+                    refresh_token: 'new-refresh',
+                    id_token: 'new-id',
+                  }),
+                  { status: 200, headers: { 'Content-Type': 'application/json' } },
+                ),
+              ),
+            25,
+          );
+        }),
+    );
+
+    const res = await doInstance.fetch(
+      makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' }),
+    );
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.refresh_token).toBe('new-refresh');
+    expect(vi.mocked(env.DATABASE.prepare)).toHaveBeenCalledWith(
+      expect.stringContaining('UPDATE credentials'),
+    );
   });
 
   it('returns generic error for non-JSON upstream error responses', async () => {

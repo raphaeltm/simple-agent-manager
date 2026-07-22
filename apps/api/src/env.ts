@@ -513,7 +513,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   CODEX_REFRESH_UPSTREAM_URL?: string; // OpenAI token endpoint (default: https://auth.openai.com/oauth/token)
   CODEX_REFRESH_UPSTREAM_TIMEOUT_MS?: string; // Upstream request timeout (default: 10000)
   CODEX_CLIENT_ID?: string; // OpenAI OAuth client_id (default: app_EMoamEEZ73f0CkXaXp7hrann)
-  CODEX_EXPECTED_SCOPES?: string; // Comma-separated scope allowlist; unset = default allowlist enforced (openid,profile,email,offline_access); empty string disables validation
+  CODEX_EXPECTED_SCOPES?: string; // Comma-separated expected-scope allowlist (alert-only: anomalies raise durable diagnostics, never block persistence); unset = default allowlist (openid,profile,email,offline_access,api.connectors.read,api.connectors.invoke); empty string disables detection
   // Google OAuth for GCP/infra authorization flows (cloud-platform scope,
   // redirect /auth/google/callback + /api/deployment/gcp/callback).
   // NOT the login client — see GOOGLE_LOGIN_* below.
