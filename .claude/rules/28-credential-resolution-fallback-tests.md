@@ -97,7 +97,7 @@ Credential rotation endpoints (OAuth refresh, key rotation) MUST have:
 
 ## Prohibited Patterns
 
-1. **Warn-only rotation validation.** `log.warn('unexpected scope') ; storeNewTokens(...)` silently accepts escalations. Either block or don't validate.
+1. **Warn-only rotation validation.** `log.warn('unexpected scope') ; storeNewTokens(...)` silently accepts escalations. Either block or don't validate — EXCEPT for one-time-use rotating upstreams (§3(b) above), where persist-then-durable-alert is the REQUIRED pattern: blocking cannot preserve the old credential there, and a sampled-away log line is not an alert.
 
 2. **Source-contract tests on credential middleware.** `expect(file.toContain('requireOwnedProject'))` proves code is *present*, not that it *enforces identity*. Rule 02 already bans this — call it out explicitly for auth code.
 
