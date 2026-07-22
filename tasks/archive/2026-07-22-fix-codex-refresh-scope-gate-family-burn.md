@@ -138,6 +138,13 @@ so discarding the response destroys the only surviving credential. Codex 0.144.x
 logins grant two connector scopes beyond SAM's four-scope allowlist, so the gate
 fired on every refresh of every newly seeded credential.
 
+**Timeline.** 2026-07-01: #1412 merges (block-and-discard scope gate).
+2026-07-06: first post-gate credential seeded; burned on first refresh; visible
+death 2026-07-11 ("revoked") → re-seed at 17:34 UTC. 2026-07-12 → 07-21: sessions
+coast on the seeded 10-day access token while every refresh silently fails.
+2026-07-21 ~17:34: access token expires. 2026-07-22 02:10/03:32/04:55: all codex
+sessions fail with "refresh token was already used"; diagnosed same day.
+
 **Why it wasn't caught.**
 1. #1412's real-refresh staging E2E was never performed — the hard gate was blocked
    at the time by a revoked staging credential, and the change later merged.
@@ -147,6 +154,11 @@ fired on every refresh of every newly seeded credential.
    log sampling.
 4. Codex's silent fallback to the cached access token delayed the user-visible
    failure by ~10 days, decoupling cause from symptom.
+5. This exact lesson had been learned and lost once before: the scope check
+   originally shipped warn-first (PR #772, 2026-04-21 journal: "validate-then-block
+   should always start as validate-then-warn") and #1412 reverted it to
+   block-by-default citing rule 28 §3's false "old credential remains valid"
+   premise — the lesson lived in a blog post, not an enforced rule.
 
 **Class of bug.** Post-consumption validation gate discarding a one-time-use rotated
 credential — "reject-no-persist" applied to an upstream where rejection cannot

@@ -171,7 +171,7 @@ See `apps/api/.env.example` for the full list. Key variables:
 - `CODEX_REFRESH_UPSTREAM_TIMEOUT_MS` — Timeout for upstream fetch (default: 10000)
 - `CODEX_REFRESH_LOCK_TIMEOUT_MS` — Max DO lock hold time per refresh (default: 30000)
 - `CODEX_CLIENT_ID` — Public OAuth client_id for Codex (default: `app_EMoamEEZ73f0CkXaXp7hrann`)
-- `CODEX_EXPECTED_SCOPES` — Comma-separated allowlist of scopes the upstream may return. **Unset uses the default allowlist** (`openid,profile,email,offline_access`). Set to empty string (`""`) to disable validation entirely (escape hatch for provider-driven scope additions). Unexpected scopes block the refresh with 502; the previous token remains valid. (MEDIUM #6 fix)
+- `CODEX_EXPECTED_SCOPES` — Comma-separated allowlist of scopes the upstream is expected to return. **Unset uses the default allowlist** (`openid,profile,email,offline_access,api.connectors.read,api.connectors.invoke` — the codex 0.144.x login grant). Set to empty string (`""`) to disable detection entirely. **Alert-only**: unexpected scopes raise a durable `platform_errors` diagnostic but NEVER block persistence — by the time scopes are visible, OpenAI has already consumed the one-time-use refresh token, so blocking would strand the token family (root cause of the 2026-07 codex auth incidents). (MEDIUM #6, reworked)
 - `RATE_LIMIT_CODEX_REFRESH_PER_HOUR` — Per-user refresh request cap per window (default: 30). Enforced atomically via DO storage, not KV. (MEDIUM #5 fix)
 - `RATE_LIMIT_CODEX_REFRESH_WINDOW_SECONDS` — Rate-limit window length in seconds (default: 3600)
 

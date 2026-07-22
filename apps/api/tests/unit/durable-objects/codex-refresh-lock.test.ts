@@ -1387,6 +1387,12 @@ describe('CodexRefreshLock', () => {
       );
       expect(res.status).toBe(200);
       expect(vi.mocked(encrypt)).toHaveBeenCalled();
+      // Detection fully disabled: no anomaly log, no durable diagnostic.
+      expect(mockLogError).not.toHaveBeenCalledWith(
+        'codex_refresh.unexpected_scopes_detected',
+        expect.anything(),
+      );
+      expect(vi.mocked(persistError)).not.toHaveBeenCalled();
     });
 
     it('flags non-string scope values without blocking the rotation', async () => {
@@ -1647,6 +1653,64 @@ describe('CodexRefreshLock', () => {
     // The diagnostic payload never contains the refresh token.
     const diagnosticInput = vi.mocked(persistError).mock.calls[0]?.[1];
     expect(JSON.stringify(diagnosticInput)).not.toContain('stored-refresh');
+  });
+
+  it('persists a durable diagnostic on refresh_token_expired (third family-fatal code)', async () => {
+    const { do: doInstance, env } = createDO();
+    setupCredentialFound(env);
+
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(JSON.stringify({
+        error: {
+          message: 'Your refresh token has expired.',
+          type: 'invalid_request_error',
+          param: null,
+          code: 'refresh_token_expired',
+        },
+      }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    const res = await doInstance.fetch(
+      makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' }),
+    );
+    expect(res.status).toBe(401);
+    expect(vi.mocked(persistError)).toHaveBeenCalledWith(
+      env.OBSERVABILITY_DATABASE,
+      expect.objectContaining({
+        message: 'codex_refresh.family_fatal_rejection',
+        context: expect.objectContaining({ upstreamErrorCode: 'refresh_token_expired' }),
+      }),
+    );
+  });
+
+  it('persists the rotation even when the grace-window stash write fails (storage failure must not strand the family)', async () => {
+    const { do: doInstance, env, ctx } = createDO();
+    setupCredentialFound(env);
+    mockSuccessfulRefreshResponse();
+
+    // DO storage put fails ONLY for the rotated-tokens grace stash (the
+    // rate-limiter's earlier put must succeed so the flow reaches the upstream).
+    vi.mocked(ctx.storage.put).mockImplementation(async (key: string, value: unknown) => {
+      if (key === 'rotated-tokens') throw new Error('storage unavailable');
+      ctx.storage._store.set(key, value);
+    });
+
+    const res = await doInstance.fetch(
+      makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' }),
+    );
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.refresh_token).toBe('new-refresh');
+    expect(vi.mocked(env.DATABASE.prepare)).toHaveBeenCalledWith(
+      expect.stringContaining('UPDATE credentials'),
+    );
+    expect(mockLogWarn).toHaveBeenCalledWith(
+      'codex_refresh.grace_stash_failed',
+      expect.objectContaining({ userId: 'user-1' }),
+    );
   });
 
   it('does not persist diagnostics for transient (non-family-fatal) upstream errors', async () => {

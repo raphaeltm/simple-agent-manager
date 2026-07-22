@@ -399,8 +399,19 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
 
     // Before updating tokens, record the old refresh_token in the grace window
     // so concurrent sessions holding it can still refresh successfully.
+    // Non-fatal: a DO-storage failure here must not discard the completed
+    // rotation — losing the grace stash only degrades concurrent-session UX,
+    // while losing the rotation strands the token family.
     if (storedRefreshToken && typeof newTokens.refresh_token === 'string' && newTokens.refresh_token !== storedRefreshToken) {
-      await this.recordRotatedToken(storedRefreshToken);
+      try {
+        await this.recordRotatedToken(storedRefreshToken);
+      } catch (err) {
+        log.warn('codex_refresh.grace_stash_failed', {
+          userId,
+          credentialId: credential.id,
+          message: err instanceof Error ? err.message : 'unknown',
+        });
+      }
     }
 
     // Update the stored auth.json with new tokens.
