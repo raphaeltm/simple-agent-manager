@@ -109,6 +109,9 @@ function createMockCtx(prePopulated: Record<string, unknown> = {}) {
       }),
       _store: store,
     },
+    // DurableObjectState.waitUntil — the DO registers the locked refresh and
+    // background diagnostic writes so client disconnects cannot cancel them.
+    waitUntil: vi.fn((_promise: Promise<unknown>) => undefined),
   };
 }
 
@@ -214,6 +217,24 @@ function expectNoCredentialUpdate(env: ReturnType<typeof createMockEnv>) {
   expect(vi.mocked(env.DATABASE.prepare)).not.toHaveBeenCalledWith(
     expect.stringContaining('UPDATE credentials'),
   );
+}
+
+/**
+ * Rule 28 §3(b): no token material may appear in ANY persisted diagnostic.
+ * Value-content scan over every persistError payload made during the test —
+ * covers both the mock token constants and the stored-credential constants.
+ */
+function expectNoTokenMaterialInDiagnostics() {
+  for (const call of vi.mocked(persistError).mock.calls) {
+    const serialized = JSON.stringify(call[1] ?? {});
+    expect(serialized).not.toContain('new-refresh');
+    expect(serialized).not.toContain('new-access');
+    expect(serialized).not.toContain('new-id');
+    expect(serialized).not.toContain('stored-refresh');
+    expect(serialized).not.toContain('stored-access');
+    expect(serialized).not.toContain('new-encrypted');
+    expect(serialized).not.toContain('new-iv');
+  }
 }
 
 describe('CodexRefreshLock', () => {
@@ -879,6 +900,13 @@ describe('CodexRefreshLock', () => {
       expect(syncFailPayload).not.toContain('new-encrypted');
       expect(syncFailPayload).not.toContain('new-iv');
       expect(syncFailPayload).not.toContain('new-refresh');
+      // The desync is also persisted durably (rule 44 class; 1%-sampled logs
+      // are not an alert), without token material.
+      expect(vi.mocked(persistError)).toHaveBeenCalledWith(
+        env.OBSERVABILITY_DATABASE,
+        expect.objectContaining({ message: 'codex_refresh.cc_sync_failed' }),
+      );
+      expectNoTokenMaterialInDiagnostics();
     });
 
     it('falls back to the user-scoped cc_credentials row when the project row is absent', async () => {
@@ -955,6 +983,12 @@ describe('CodexRefreshLock', () => {
       expect(noRowPayload).not.toContain('new-encrypted');
       expect(noRowPayload).not.toContain('new-iv');
       expect(noRowPayload).not.toContain('new-refresh');
+      // The desync is also persisted durably (rule 44 class), without token material.
+      expect(vi.mocked(persistError)).toHaveBeenCalledWith(
+        env.OBSERVABILITY_DATABASE,
+        expect.objectContaining({ message: 'codex_refresh.cc_sync_no_row' }),
+      );
+      expectNoTokenMaterialInDiagnostics();
     });
 
     it('scopes the mirror UPDATE to the credential owner (cross-user defence)', async () => {
@@ -1365,6 +1399,7 @@ describe('CodexRefreshLock', () => {
           message: 'codex_refresh.unexpected_scopes_detected',
         }),
       );
+      expectNoTokenMaterialInDiagnostics();
     });
 
     it('allows all scopes when CODEX_EXPECTED_SCOPES is set to empty string (escape hatch)', async () => {
@@ -1432,6 +1467,7 @@ describe('CodexRefreshLock', () => {
           }),
         }),
       );
+      expectNoTokenMaterialInDiagnostics();
     });
 
     it('ignores the removed CODEX_SCOPE_VALIDATION_MODE env var — detection stays alert-only', async () => {
@@ -1463,6 +1499,65 @@ describe('CodexRefreshLock', () => {
         env.OBSERVABILITY_DATABASE,
         expect.objectContaining({ message: 'codex_refresh.unexpected_scopes_detected' }),
       );
+      expectNoTokenMaterialInDiagnostics();
+    });
+
+    it('treats an empty-string scope in the upstream response as no anomaly', async () => {
+      const { do: doInstance, env } = createDO({
+        CODEX_EXPECTED_SCOPES: 'openid,offline_access',
+      });
+      setupCredentialFound(env);
+
+      vi.mocked(fetch).mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            access_token: 'new-access',
+            refresh_token: 'new-refresh',
+            scope: '', // present but empty — zero returned scopes, zero unexpected
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      );
+
+      const res = await doInstance.fetch(
+        makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' }),
+      );
+      expect(res.status).toBe(200);
+      expect(vi.mocked(encrypt)).toHaveBeenCalled();
+      expect(vi.mocked(persistError)).not.toHaveBeenCalled();
+    });
+
+    it('a whitespace/comma-only allowlist is NOT the empty-string opt-out — it flags every scope (operator footgun, alert-only)', async () => {
+      const { do: doInstance, env } = createDO({
+        CODEX_EXPECTED_SCOPES: ' , ',
+      });
+      setupCredentialFound(env);
+
+      vi.mocked(fetch).mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            access_token: 'new-access',
+            refresh_token: 'new-refresh',
+            scope: 'openid',
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      );
+
+      const res = await doInstance.fetch(
+        makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' }),
+      );
+      // Alert-only means even a misconfigured allowlist can never break refreshes.
+      expect(res.status).toBe(200);
+      expect(vi.mocked(encrypt)).toHaveBeenCalled();
+      expect(vi.mocked(persistError)).toHaveBeenCalledWith(
+        env.OBSERVABILITY_DATABASE,
+        expect.objectContaining({
+          message: 'codex_refresh.unexpected_scopes_detected',
+          context: expect.objectContaining({ unexpectedScopes: 'openid' }),
+        }),
+      );
+      expectNoTokenMaterialInDiagnostics();
     });
 
     it('allows responses with no scope field', async () => {
@@ -1597,36 +1692,23 @@ describe('CodexRefreshLock', () => {
     expect(fields.status).toBe(401);
     // No raw-body field is logged (refresh token can never leak).
     expect(fields).not.toHaveProperty('rawBodySample');
-
-    // Family-fatal rejection → durable diagnostic (Workers Logs are 1%-sampled,
-    // so the warn log alone left the 2026-07 incidents invisible for days).
-    expect(vi.mocked(persistError)).toHaveBeenCalledWith(
-      env.OBSERVABILITY_DATABASE,
-      expect.objectContaining({
-        message: 'codex_refresh.family_fatal_rejection',
-        level: 'error',
-        userId: 'user-1',
-        context: expect.objectContaining({
-          upstreamErrorCode: 'refresh_token_invalidated',
-        }),
-      }),
-    );
   });
 
-  it('persists a durable diagnostic on refresh_token_reused and leaves the stored credential untouched', async () => {
+  // All three family-fatal codes get identical, complete treatment: the stored
+  // credential is untouched, the code is forwarded, and a durable diagnostic
+  // is persisted with the full payload shape (Workers Logs are 1%-sampled, so
+  // the warn log alone left the 2026-07 incidents invisible for days).
+  it.each([
+    ['refresh_token_reused', 'Your refresh token was already used.'],
+    ['refresh_token_invalidated', 'Your session has ended. Please log in again.'],
+    ['refresh_token_expired', 'Your refresh token has expired.'],
+  ])('persists a durable diagnostic on %s and leaves the stored credential untouched', async (code, message) => {
     const { do: doInstance, env } = createDO();
     setupCredentialFound(env);
 
-    // OpenAI reuse detection: the presented one-time-use token was already
-    // exchanged — the family is stranded until the user re-links.
     vi.mocked(fetch).mockResolvedValue(
       new Response(JSON.stringify({
-        error: {
-          message: 'Your refresh token was already used.',
-          type: 'invalid_request_error',
-          param: null,
-          code: 'refresh_token_reused',
-        },
+        error: { message, type: 'invalid_request_error', param: null, code },
       }), {
         status: 401,
         headers: { 'Content-Type': 'application/json' },
@@ -1638,52 +1720,21 @@ describe('CodexRefreshLock', () => {
     );
     expect(res.status).toBe(401);
     const json = await res.json();
-    expect(json.error).toBe('refresh_token_reused');
+    expect(json.error).toBe(code);
 
     expect(vi.mocked(persistError)).toHaveBeenCalledWith(
       env.OBSERVABILITY_DATABASE,
       expect.objectContaining({
         message: 'codex_refresh.family_fatal_rejection',
-        context: expect.objectContaining({ upstreamErrorCode: 'refresh_token_reused' }),
+        level: 'error',
+        userId: 'user-1',
+        context: expect.objectContaining({ upstreamErrorCode: code, status: 401 }),
       }),
     );
     // A failed refresh must not touch the stored credential.
     expect(vi.mocked(encrypt)).not.toHaveBeenCalled();
     expectNoCredentialUpdate(env);
-    // The diagnostic payload never contains the refresh token.
-    const diagnosticInput = vi.mocked(persistError).mock.calls[0]?.[1];
-    expect(JSON.stringify(diagnosticInput)).not.toContain('stored-refresh');
-  });
-
-  it('persists a durable diagnostic on refresh_token_expired (third family-fatal code)', async () => {
-    const { do: doInstance, env } = createDO();
-    setupCredentialFound(env);
-
-    vi.mocked(fetch).mockResolvedValue(
-      new Response(JSON.stringify({
-        error: {
-          message: 'Your refresh token has expired.',
-          type: 'invalid_request_error',
-          param: null,
-          code: 'refresh_token_expired',
-        },
-      }), {
-        status: 401,
-        headers: { 'Content-Type': 'application/json' },
-      }),
-    );
-
-    const res = await doInstance.fetch(
-      makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' }),
-    );
-    expect(res.status).toBe(401);
-    expect(vi.mocked(persistError)).toHaveBeenCalledWith(
-      env.OBSERVABILITY_DATABASE,
-      expect.objectContaining({
-        message: 'codex_refresh.family_fatal_rejection',
-        context: expect.objectContaining({ upstreamErrorCode: 'refresh_token_expired' }),
-      }),
-    );
+    expectNoTokenMaterialInDiagnostics();
   });
 
   it('persists the rotation even when the grace-window stash write fails (storage failure must not strand the family)', async () => {
@@ -1713,6 +1764,53 @@ describe('CodexRefreshLock', () => {
     );
   });
 
+  it.each([
+    ['encrypt() throws after upstream success', () => {
+      vi.mocked(encrypt).mockRejectedValue(new Error('webcrypto failure'));
+    }],
+    ['the legacy UPDATE write throws after upstream success', (env: ReturnType<typeof createMockEnv>) => {
+      const userFirst = vi.fn().mockResolvedValue({
+        id: 'cred-1', encrypted_token: 'encrypted-data', iv: 'test-iv', is_active: 1,
+      });
+      vi.mocked(env.DATABASE.prepare).mockImplementation(((sql: string) => ({
+        bind: vi.fn().mockReturnValue({
+          first: userFirst,
+          run: sql.includes('UPDATE credentials')
+            ? vi.fn().mockRejectedValue(new Error('d1 write failure'))
+            : vi.fn().mockResolvedValue({ meta: { changes: 1 } }),
+        }),
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      })) as any);
+    }],
+  ])('durably diagnoses a stranded rotation when %s (no more silent family burns)', async (_label, arrange) => {
+    const { do: doInstance, env } = createDO();
+    setupCredentialFound(env);
+    arrange(env);
+    mockSuccessfulRefreshResponse();
+
+    const res = await doInstance.fetch(
+      makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' }),
+    );
+    // The rotation could not be captured — the caller gets a 500, but the
+    // event is loudly + durably diagnosable instead of a bare internal_error.
+    expect(res.status).toBe(500);
+    const json = await res.json();
+    expect(json.error).toBe('internal_error');
+    expect(mockLogError).toHaveBeenCalledWith(
+      'codex_refresh.persist_failed',
+      expect.objectContaining({ userId: 'user-1', credentialId: 'cred-1' }),
+    );
+    expect(vi.mocked(persistError)).toHaveBeenCalledWith(
+      env.OBSERVABILITY_DATABASE,
+      expect.objectContaining({
+        message: 'codex_refresh.persist_failed',
+        level: 'error',
+        userId: 'user-1',
+      }),
+    );
+    expectNoTokenMaterialInDiagnostics();
+  });
+
   it('does not persist diagnostics for transient (non-family-fatal) upstream errors', async () => {
     const { do: doInstance, env } = createDO();
     setupCredentialFound(env);
@@ -1728,6 +1826,55 @@ describe('CodexRefreshLock', () => {
       makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' }),
     );
     expect(res.status).toBe(503);
+    expect(vi.mocked(persistError)).not.toHaveBeenCalled();
+  });
+
+  it('degrades gracefully when OBSERVABILITY_DATABASE is absent — family-fatal rejection still responds', async () => {
+    const env = createMockEnv();
+    // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+    delete (env as Record<string, unknown>).OBSERVABILITY_DATABASE;
+    const ctx = createMockCtx();
+    const doInstance = new CodexRefreshLock(ctx, env);
+    setupCredentialFound(env);
+
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(JSON.stringify({
+        error: { message: 'already used', code: 'refresh_token_reused' },
+      }), { status: 401, headers: { 'Content-Type': 'application/json' } }),
+    );
+
+    const res = await doInstance.fetch(
+      makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' }),
+    );
+    expect(res.status).toBe(401);
+    expect(vi.mocked(persistError)).not.toHaveBeenCalled();
+  });
+
+  it('degrades gracefully when OBSERVABILITY_DATABASE is absent — scope anomaly still persists rotation and responds', async () => {
+    const env = createMockEnv({ CODEX_EXPECTED_SCOPES: 'openid' });
+    // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+    delete (env as Record<string, unknown>).OBSERVABILITY_DATABASE;
+    const ctx = createMockCtx();
+    const doInstance = new CodexRefreshLock(ctx, env);
+    setupCredentialFound(env);
+
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(JSON.stringify({
+        access_token: 'new-access',
+        refresh_token: 'new-refresh',
+        scope: 'openid admin:write',
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    );
+
+    const res = await doInstance.fetch(
+      makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' }),
+    );
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.refresh_token).toBe('new-refresh');
+    expect(vi.mocked(env.DATABASE.prepare)).toHaveBeenCalledWith(
+      expect.stringContaining('UPDATE credentials'),
+    );
     expect(vi.mocked(persistError)).not.toHaveBeenCalled();
   });
 

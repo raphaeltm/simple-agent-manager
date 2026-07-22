@@ -96,6 +96,18 @@ export const DEFAULT_RATE_WINDOW_SECONDS = 3600;
  */
 export const DEFAULT_GRACE_WINDOW_MS = 300_000;
 /**
+ * OpenAI OAuth token-endpoint error codes that mean the stored refresh token
+ * family is dead (protocol constants, not deployment configuration): the token
+ * was already exchanged (`reused`), explicitly revoked (`invalidated`), or aged
+ * out (`expired`). Every future refresh will fail until the user re-links, so
+ * these persist a durable diagnostic.
+ */
+export const FAMILY_FATAL_UPSTREAM_ERROR_CODES: ReadonlySet<string> = new Set([
+  'refresh_token_reused',
+  'refresh_token_invalidated',
+  'refresh_token_expired',
+]);
+/**
  * Maximum number of recently-rotated token hashes to track in DO storage.
  * Keeps storage bounded even under pathological refresh patterns.
  */

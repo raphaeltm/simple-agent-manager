@@ -54,6 +54,7 @@ import {
   DEFAULT_RATE_WINDOW_SECONDS,
   DEFAULT_UPSTREAM_TIMEOUT_MS,
   DEFAULT_UPSTREAM_URL,
+  FAMILY_FATAL_UPSTREAM_ERROR_CODES,
   MAX_ROTATED_TOKEN_ENTRIES,
   type RateLimitState,
   type RefreshRequestPayload,
@@ -148,9 +149,17 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
 
     // Serialize the read→refresh→write critical section so concurrent refreshes
     // for the same user cannot both consume the same one-time-use refresh token.
-    return this.withRefreshLock(() =>
+    const resultPromise = this.withRefreshLock(() =>
       this.runRefresh(refreshToken, userId, projectId ?? null, signal)
     );
+    // Also register the locked operation with waitUntil: if the calling client
+    // disconnects mid-refresh, the runtime must not cancel the write-through
+    // after OpenAI has consumed the one-time-use refresh token — an interrupted
+    // persist strands the token family exactly like the removed abort check did.
+    // The catch is only to keep waitUntil from surfacing a rejection twice; the
+    // awaited return path below still propagates errors normally.
+    this.ctx.waitUntil(resultPromise.then(() => undefined, () => undefined));
+    return resultPromise;
   }
 
   /**
@@ -370,18 +379,18 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
       // and every future refresh will fail until the user re-links. Persist a
       // durable diagnostic — Workers Logs are 1%-sampled, so the warn above is
       // effectively invisible in production (this exact blindness delayed the
-      // 2026-07-22 incident diagnosis).
-      if (
-        upstreamErrorCode === 'refresh_token_reused' ||
-        upstreamErrorCode === 'refresh_token_invalidated' ||
-        upstreamErrorCode === 'refresh_token_expired'
-      ) {
-        await this.persistAuthDiagnostic('codex_refresh.family_fatal_rejection', userId, {
-          credentialId: credential.id,
-          status: upstreamResponse.status,
-          upstreamErrorCode,
-          upstreamErrorMessage,
-        });
+      // 2026-07-22 incident diagnosis). Registered via waitUntil so the write
+      // does not extend the per-user mutex hold (persistError is fail-silent;
+      // nothing in this DO reads the diagnostic back).
+      if (upstreamErrorCode !== null && FAMILY_FATAL_UPSTREAM_ERROR_CODES.has(upstreamErrorCode)) {
+        this.ctx.waitUntil(
+          this.persistAuthDiagnostic('codex_refresh.family_fatal_rejection', userId, {
+            credentialId: credential.id,
+            status: upstreamResponse.status,
+            upstreamErrorCode,
+            upstreamErrorMessage,
+          })
+        );
       }
       return new Response(JSON.stringify(safeError), {
         status: upstreamResponse.status,
@@ -392,47 +401,36 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
     // From this point the upstream exchange has SUCCEEDED: OpenAI has consumed
     // the one-time-use refresh token and issued its successor. The rotation
     // MUST be persisted no matter what — any path that discards it (an abort,
-    // a validation gate) strands the token family permanently. This is why
-    // there is deliberately NO lock-abort check between here and the DB writes,
-    // and why scope anomalies are detected only AFTER persistence.
-    const newTokens = await readResponseJson(upstreamResponse, v.record(v.string(), v.unknown()), 'codex-refresh.tokens');
-
-    // Before updating tokens, record the old refresh_token in the grace window
-    // so concurrent sessions holding it can still refresh successfully.
-    // Non-fatal: a DO-storage failure here must not discard the completed
-    // rotation — losing the grace stash only degrades concurrent-session UX,
-    // while losing the rotation strands the token family.
-    if (storedRefreshToken && typeof newTokens.refresh_token === 'string' && newTokens.refresh_token !== storedRefreshToken) {
-      try {
-        await this.recordRotatedToken(storedRefreshToken);
-      } catch (err) {
-        log.warn('codex_refresh.grace_stash_failed', {
-          userId,
+    // a validation gate, an unlogged exception) strands the token family
+    // permanently. This is why there is deliberately NO lock-abort check
+    // between here and the DB writes, why scope anomalies are detected only
+    // AFTER persistence, and why any failure in parse→encrypt→persist below is
+    // durably diagnosed instead of vanishing into a bare 500.
+    let persisted: { newTokens: Record<string, unknown>; ciphertext: string; iv: string };
+    try {
+      persisted = await this.persistRotation(upstreamResponse, storedAuth, storedRefreshToken, credential.id, encryptionKey, userId);
+    } catch (err) {
+      // The upstream already consumed the old refresh token; failing to persist
+      // its successor is a family-stranding event and must be loudly
+      // diagnosable (never token material — only the error message).
+      const message = err instanceof Error ? err.message : 'unknown';
+      log.error('codex_refresh.persist_failed', {
+        userId,
+        credentialId: credential.id,
+        message,
+      });
+      this.ctx.waitUntil(
+        this.persistAuthDiagnostic('codex_refresh.persist_failed', userId, {
           credentialId: credential.id,
-          message: err instanceof Error ? err.message : 'unknown',
-        });
-      }
+          message,
+        })
+      );
+      return new Response(
+        JSON.stringify({ error: 'internal_error' }),
+        { status: 500, headers: { 'Content-Type': 'application/json' } }
+      );
     }
-
-    // Update the stored auth.json with new tokens.
-    if (!storedAuth.tokens || typeof storedAuth.tokens !== 'object') {
-      storedAuth.tokens = {};
-    }
-    const authTokens = storedAuth.tokens as Record<string, string>;
-    if (typeof newTokens.access_token === 'string') authTokens.access_token = newTokens.access_token;
-    if (typeof newTokens.refresh_token === 'string') authTokens.refresh_token = newTokens.refresh_token;
-    if (typeof newTokens.id_token === 'string') authTokens.id_token = newTokens.id_token;
-    authTokens.last_refresh = new Date().toISOString();
-
-    // Re-encrypt with fresh IV and update the database.
-    const updatedAuthJson = JSON.stringify(storedAuth);
-    const { ciphertext, iv } = await encrypt(updatedAuthJson, encryptionKey);
-
-    const db = this.env.DATABASE;
-    await db
-      .prepare('UPDATE credentials SET encrypted_token = ?, iv = ?, updated_at = datetime(\'now\') WHERE id = ?')
-      .bind(ciphertext, iv, credential.id)
-      .run();
+    const { newTokens, ciphertext, iv } = persisted;
 
     // CORE FIX (dual-write): mirror the rotated token into the composable-
     // credentials store. The legacy UPDATE above only touches the `credentials`
@@ -445,7 +443,7 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
     // the credential row's OWN scope (scopeProjectId) — NOT the workspace's —
     // so the matching active cc_credentials row is updated (mirrors runtime.ts).
     try {
-      const ccRowsUpdated = await syncActiveAgentCredentialSecret(db, {
+      const ccRowsUpdated = await syncActiveAgentCredentialSecret(this.env.DATABASE, {
         userId,
         projectId: credential.scopeProjectId ?? undefined,
         agentType: 'openai-codex',
@@ -455,29 +453,45 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
       });
       if (ccRowsUpdated === 0) {
         // The legacy row rotated but no matching active cc_credentials row was
-        // found to mirror into. This is the exact silent desync this fix exists
-        // to prevent, so surface it (no token material) for diagnosis.
+        // found to mirror into. This is the exact silent desync (rule 44 class)
+        // the dual-write exists to prevent — persist durably, not just a
+        // 1%-sampled log line (no token material).
         log.warn('codex_refresh.cc_sync_no_row', {
           userId,
           credentialId: credential.id,
           scopeProjectId: credential.scopeProjectId ?? null,
         });
+        this.ctx.waitUntil(
+          this.persistAuthDiagnostic('codex_refresh.cc_sync_no_row', userId, {
+            credentialId: credential.id,
+            scopeProjectId: credential.scopeProjectId ?? null,
+          })
+        );
       }
     } catch (err) {
       // Never let a cc_credentials sync failure break the refresh — the legacy
-      // row is already updated and the caller has working tokens. Log without
-      // any token material so the desync is diagnosable.
+      // row is already updated and the caller has working tokens. Log + persist
+      // durably without any token material so the desync is diagnosable.
+      const message = err instanceof Error ? err.message : 'unknown';
       log.error('codex_refresh.cc_sync_failed', {
         userId,
         credentialId: credential.id,
-        message: err instanceof Error ? err.message : 'unknown',
+        message,
       });
+      this.ctx.waitUntil(
+        this.persistAuthDiagnostic('codex_refresh.cc_sync_failed', userId, {
+          credentialId: credential.id,
+          message,
+        })
+      );
     }
 
     // Scope anomaly detection (MEDIUM #6, alert-only) — runs AFTER persistence.
     // The rotation is already durable; an unexpected scope is provider drift or
     // an allowlist that lags codex's login scopes, and the correct response is a
     // loud durable alert, never discarding tokens the upstream already rotated.
+    // The diagnostic write is registered via waitUntil so it does not extend the
+    // per-user mutex hold.
     const scopeFinding = this.detectUnexpectedScopes(newTokens, userId);
     if (scopeFinding) {
       log.error('codex_refresh.unexpected_scopes_detected', {
@@ -485,10 +499,12 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
         credentialId: credential.id,
         ...scopeFinding,
       });
-      await this.persistAuthDiagnostic('codex_refresh.unexpected_scopes_detected', userId, {
-        credentialId: credential.id,
-        ...scopeFinding,
-      });
+      this.ctx.waitUntil(
+        this.persistAuthDiagnostic('codex_refresh.unexpected_scopes_detected', userId, {
+          credentialId: credential.id,
+          ...scopeFinding,
+        })
+      );
     }
 
     // Return the new tokens to Codex.
@@ -530,6 +546,60 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
     state.count += 1;
     await this.ctx.storage.put(storageKey, state);
     return { allowed: true, resetAt };
+  }
+
+  /**
+   * Parse the successful upstream response and persist the rotated tokens to
+   * the legacy `credentials` row. Runs inside the refresh lock, after the
+   * upstream has consumed the one-time-use refresh token — a throw here is a
+   * family-stranding event, so the caller wraps it with a durable diagnostic.
+   * The grace-stash write is internally non-fatal (losing it only degrades
+   * concurrent-session UX, never the rotation).
+   */
+  private async persistRotation(
+    upstreamResponse: Response,
+    storedAuth: Record<string, unknown>,
+    storedRefreshToken: string | undefined,
+    credentialId: string,
+    encryptionKey: string,
+    userId: string
+  ): Promise<{ newTokens: Record<string, unknown>; ciphertext: string; iv: string }> {
+    const newTokens = await readResponseJson(upstreamResponse, v.record(v.string(), v.unknown()), 'codex-refresh.tokens');
+
+    // Before updating tokens, record the old refresh_token in the grace window
+    // so concurrent sessions holding it can still refresh successfully.
+    if (storedRefreshToken && typeof newTokens.refresh_token === 'string' && newTokens.refresh_token !== storedRefreshToken) {
+      try {
+        await this.recordRotatedToken(storedRefreshToken);
+      } catch (err) {
+        log.warn('codex_refresh.grace_stash_failed', {
+          userId,
+          credentialId,
+          message: err instanceof Error ? err.message : 'unknown',
+        });
+      }
+    }
+
+    // Update the stored auth.json with new tokens.
+    if (!storedAuth.tokens || typeof storedAuth.tokens !== 'object') {
+      storedAuth.tokens = {};
+    }
+    const authTokens = storedAuth.tokens as Record<string, string>;
+    if (typeof newTokens.access_token === 'string') authTokens.access_token = newTokens.access_token;
+    if (typeof newTokens.refresh_token === 'string') authTokens.refresh_token = newTokens.refresh_token;
+    if (typeof newTokens.id_token === 'string') authTokens.id_token = newTokens.id_token;
+    authTokens.last_refresh = new Date().toISOString();
+
+    // Re-encrypt with fresh IV and update the database.
+    const updatedAuthJson = JSON.stringify(storedAuth);
+    const { ciphertext, iv } = await encrypt(updatedAuthJson, encryptionKey);
+
+    await this.env.DATABASE
+      .prepare('UPDATE credentials SET encrypted_token = ?, iv = ?, updated_at = datetime(\'now\') WHERE id = ?')
+      .bind(ciphertext, iv, credentialId)
+      .run();
+
+    return { newTokens, ciphertext, iv };
   }
 
   /**
