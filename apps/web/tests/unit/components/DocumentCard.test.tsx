@@ -149,6 +149,26 @@ describe('DocumentCard', () => {
     });
   });
 
+  it('renders the markdown tier for an octet-stream file with a .md name (agent-upload bug)', async () => {
+    // Agent uploads land as application/octet-stream; the extension recovers the
+    // markdown tier so the clamped source preview still renders + fetches.
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: () => Promise.resolve('# Recovered\n\nThis previews from the filename.'),
+    }));
+
+    render(<DocumentCard projectId="proj-1" item={toolItem({
+      toolName: 'mcp__sam-mcp__upload_to_library',
+      rawInput: { filePath: '/engineering/byo-nodes/plan.md' },
+      rawOutput: rawOutput({ fileId: 'f-oct', filename: 'plan.md', mimeType: 'application/octet-stream', sizeBytes: 48 }),
+    })} />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/# Recovered/)).toBeTruthy();
+    });
+  });
+
   it('shows a tombstone when a markdown preview fetch returns 404', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 404, text: () => Promise.resolve('') }));
 

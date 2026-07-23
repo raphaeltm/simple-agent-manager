@@ -400,6 +400,138 @@ describe('library routes', () => {
       expect(res.status).toBe(400);
       expect(mockDownloadFile).not.toHaveBeenCalled();
     });
+
+    // ── Extension recovery for agent-uploaded octet-stream files ──────────────
+
+    it('serves octet-stream files with a .md name as text/markdown (agent-upload bug)', async () => {
+      const content = new TextEncoder().encode('# Recovered\n\nThis previews from the filename.');
+      mockGetFile.mockResolvedValue({
+        file: { filename: 'plan.md', mimeType: 'application/octet-stream', sizeBytes: content.byteLength },
+        tags: [],
+      });
+      mockDownloadFile.mockResolvedValue({
+        data: content.buffer,
+        file: { filename: 'plan.md', mimeType: 'application/octet-stream', sizeBytes: content.byteLength },
+        metadata: {},
+      });
+
+      const { app, env } = makeApp(makeEnv());
+      const res = await app.fetch(
+        new Request(`${BASE_URL}/projects/test-project-id/library/file-123/preview`),
+        env
+      );
+
+      expect(res.status).toBe(200);
+      // Effective type recovered from the .md extension — passes the gate AND
+      // serves the correct Content-Type so the browser renders it as markdown.
+      expect(res.headers.get('Content-Type')).toBe('text/markdown');
+      expect(res.headers.get('Content-Disposition')).toContain('inline');
+      expect(res.headers.get('X-Content-Type-Options')).toBe('nosniff');
+      expect(await res.text()).toContain('# Recovered');
+    });
+
+    it('recovers previewability from an empty stored MIME type too', async () => {
+      const content = new TextEncoder().encode('# Empty-typed markdown');
+      mockGetFile.mockResolvedValue({
+        file: { filename: 'notes.md', mimeType: '', sizeBytes: content.byteLength },
+        tags: [],
+      });
+      mockDownloadFile.mockResolvedValue({
+        data: content.buffer,
+        file: { filename: 'notes.md', mimeType: '', sizeBytes: content.byteLength },
+        metadata: {},
+      });
+
+      const { app, env } = makeApp(makeEnv());
+      const res = await app.fetch(
+        new Request(`${BASE_URL}/projects/test-project-id/library/file-123/preview`),
+        env
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.headers.get('Content-Type')).toBe('text/markdown');
+    });
+
+    it('still sandboxes octet-stream files with an .html name (no security regression)', async () => {
+      const content = new TextEncoder().encode('<script>document.body.textContent = document.cookie</script>');
+      mockGetFile.mockResolvedValue({
+        file: { filename: 'agent-report.html', mimeType: 'application/octet-stream', sizeBytes: content.byteLength },
+        tags: [],
+      });
+      mockDownloadFile.mockResolvedValue({
+        data: content.buffer,
+        file: { filename: 'agent-report.html', mimeType: 'application/octet-stream', sizeBytes: content.byteLength },
+        metadata: {},
+      });
+
+      const { app, env } = makeApp(makeEnv());
+      const res = await app.fetch(
+        new Request(`${BASE_URL}/projects/test-project-id/library/file-123/preview`),
+        env
+      );
+
+      expect(res.status).toBe(200);
+      // Extension-recovered HTML flows through the SAME safety path as a stored
+      // text/html file: inert text/plain + default-src 'none' — never executable.
+      expect(res.headers.get('Content-Type')).toBe('text/plain; charset=utf-8');
+      expect(res.headers.get('Content-Type')).not.toContain('text/html');
+      expect(res.headers.get('Content-Security-Policy')).toBe("default-src 'none'");
+      expect(res.headers.get('X-Content-Type-Options')).toBe('nosniff');
+      expect(await res.text()).toContain('<script>');
+    });
+
+    it('still rejects octet-stream files with an .svg name (SVG stays non-previewable)', async () => {
+      mockGetFile.mockResolvedValue({
+        file: { filename: 'icon.svg', mimeType: 'application/octet-stream' },
+        tags: [],
+      });
+
+      const { app, env } = makeApp(makeEnv());
+      const res = await app.fetch(
+        new Request(`${BASE_URL}/projects/test-project-id/library/file-123/preview`),
+        env
+      );
+
+      expect(res.status).toBe(400);
+      expect(mockDownloadFile).not.toHaveBeenCalled();
+    });
+
+    it('rejects octet-stream files with no known extension', async () => {
+      mockGetFile.mockResolvedValue({
+        file: { filename: 'blob.bin', mimeType: 'application/octet-stream' },
+        tags: [],
+      });
+
+      const { app, env } = makeApp(makeEnv());
+      const res = await app.fetch(
+        new Request(`${BASE_URL}/projects/test-project-id/library/file-123/preview`),
+        env
+      );
+
+      expect(res.status).toBe(400);
+      expect(mockDownloadFile).not.toHaveBeenCalled();
+    });
+
+    it('does not let a misleading extension override an explicit non-previewable stored type', async () => {
+      // Defence-in-depth at the route layer: a file explicitly stored as a real,
+      // non-previewable type (text/plain) must NOT become previewable just
+      // because its name looks like markdown — extension recovery only fills the
+      // octet-stream/empty gap. Guards against an argument-order or precedence
+      // regression in the /preview wiring (not only the shared unit).
+      mockGetFile.mockResolvedValue({
+        file: { filename: 'sneaky.md', mimeType: 'text/plain' },
+        tags: [],
+      });
+
+      const { app, env } = makeApp(makeEnv());
+      const res = await app.fetch(
+        new Request(`${BASE_URL}/projects/test-project-id/library/file-123/preview`),
+        env
+      );
+
+      expect(res.status).toBe(400);
+      expect(mockDownloadFile).not.toHaveBeenCalled();
+    });
   });
 
   describe('missing encryption key', () => {

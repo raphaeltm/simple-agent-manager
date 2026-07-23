@@ -45,10 +45,12 @@ export function FilePreviewModal({
   const [pdfLoading, setPdfLoading] = useState(true);
   const [pdfError, setPdfError] = useState(false);
 
-  const isImage = isPreviewableImageMime(file.mimeType);
-  const isPdf = isPdfMime(file.mimeType);
-  const isMarkdown = isMarkdownMime(file.mimeType);
-  const isHtml = isHtmlMime(file.mimeType);
+  // Pass the filename so an octet-stream/empty stored type (agent uploads) still
+  // resolves to its real previewable type from the extension.
+  const isImage = isPreviewableImageMime(file.mimeType, file.filename);
+  const isPdf = isPdfMime(file.mimeType, file.filename);
+  const isMarkdown = isMarkdownMime(file.mimeType, file.filename);
+  const isHtml = isHtmlMime(file.mimeType, file.filename);
 
   // Markdown state
   const [mdContent, setMdContent] = useState<string | null>(null);

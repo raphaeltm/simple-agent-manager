@@ -312,14 +312,14 @@ func (s *Server) handleFileDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Determine content type from file extension
+	// Determine content type from file extension. Uses resolveContentType so
+	// text/doc extensions (.md/.txt/.yaml/...) resolve correctly even on hosts
+	// without /etc/mime.types (e.g. the minimal cf-container image) — otherwise
+	// they fall back to octet-stream and break library preview.
 	fileName := filepath.Base(filePath)
 	// Strip CRLF from filename to prevent header injection
 	fileName = strings.NewReplacer("\r", "", "\n", "").Replace(fileName)
-	contentType := mime.TypeByExtension(filepath.Ext(fileName))
-	if contentType == "" {
-		contentType = "application/octet-stream"
-	}
+	contentType := resolveContentType(fileName)
 
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", fileName))

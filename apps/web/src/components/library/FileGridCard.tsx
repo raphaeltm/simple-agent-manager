@@ -19,7 +19,7 @@ export function FileGridCard({
   onTagClick,
   onPreview,
 }: FileGridCardProps) {
-  const canPreview = onPreview && isPreviewableMime(file.mimeType);
+  const canPreview = onPreview && isPreviewableMime(file.mimeType, file.filename);
   return (
     <div className="flex flex-col rounded-lg border border-[var(--sam-form-border)] bg-[var(--sam-glass-nested-bg)] hover:border-accent/40 transition-colors overflow-hidden">
       {/* Thumbnail area */}
@@ -30,11 +30,11 @@ export function FileGridCard({
           className={`flex items-center justify-center h-24 bg-surface-inset w-full border-none cursor-pointer hover:bg-surface-hover transition-colors ${FOCUS_RING}`}
           aria-label={`Preview ${file.filename}`}
         >
-          {getFileIcon(file.mimeType)}
+          {getFileIcon(file.mimeType, file.filename)}
         </button>
       ) : (
         <div className="flex items-center justify-center h-24 bg-surface-inset">
-          {getFileIcon(file.mimeType)}
+          {getFileIcon(file.mimeType, file.filename)}
         </div>
       )}
 

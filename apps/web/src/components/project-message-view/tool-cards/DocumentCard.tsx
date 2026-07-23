@@ -56,9 +56,11 @@ export const DocumentCard: FC<DocumentCardProps> = ({ item, projectId }) => {
   const canPreview = Boolean(projectId && fileId);
   const previewUrl = canPreview ? getLibraryFilePreviewUrl(projectId as string, fileId as string) : undefined;
 
-  const isImage = Boolean(mimeType && isPreviewableImageMime(mimeType));
-  const isMarkdown = Boolean(mimeType && isMarkdownMime(mimeType));
-  const isHtml = Boolean(mimeType && isHtmlMime(mimeType));
+  // Pass the filename so an octet-stream/empty stored type still resolves to its
+  // real previewable type from the extension (agent-uploaded markdown, etc.).
+  const isImage = Boolean(mimeType && isPreviewableImageMime(mimeType, fileName));
+  const isMarkdown = Boolean(mimeType && isMarkdownMime(mimeType, fileName));
+  const isHtml = Boolean(mimeType && isHtmlMime(mimeType, fileName));
   const withinInlineCap = sizeBytes === undefined || sizeBytes <= FILE_PREVIEW_INLINE_MAX_BYTES;
 
   const showImageTier = state === 'ready' && canPreview && isImage && withinInlineCap && !imgFailed;
@@ -134,7 +136,7 @@ export const DocumentCard: FC<DocumentCardProps> = ({ item, projectId }) => {
 
   const Header = (
     <div className="flex items-center gap-2.5 min-w-0">
-      <span className="shrink-0">{getFileIcon(mimeType ?? '')}</span>
+      <span className="shrink-0">{getFileIcon(mimeType ?? '', fileName)}</span>
       <div className="min-w-0 flex-1">
         <div className="text-sm font-medium text-fg-primary truncate" title={fileName}>
           {fileName ?? 'Document'}

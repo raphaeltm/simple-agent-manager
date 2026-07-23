@@ -126,6 +126,31 @@ describe('isPreviewableMime', () => {
     expect(isPreviewableMime('IMAGE/PNG')).toBe(true);
     expect(isPreviewableMime('Application/PDF')).toBe(true);
   });
+
+  it('recovers previewability from the filename when the stored type is octet-stream', () => {
+    // The agent-upload bug: files land as application/octet-stream. With a
+    // filename, the effective type is recovered from the extension.
+    expect(isPreviewableMime('application/octet-stream', 'notes.md')).toBe(true);
+    expect(isPreviewableMime('application/octet-stream', 'page.html')).toBe(true);
+    expect(isPreviewableMime('application/octet-stream', 'diagram.png')).toBe(true);
+    expect(isPreviewableMime('', 'notes.md')).toBe(true);
+  });
+
+  it('does not preview octet-stream files with no known extension', () => {
+    expect(isPreviewableMime('application/octet-stream', 'blob.bin')).toBe(false);
+    expect(isPreviewableMime('application/octet-stream', 'Makefile')).toBe(false);
+    expect(isPreviewableMime('application/octet-stream')).toBe(false);
+    // Non-previewable text extensions stay non-previewable even via the filename.
+    expect(isPreviewableMime('application/octet-stream', 'log.txt')).toBe(false);
+    // SVG resolves from the extension but remains non-previewable (iframe script risk).
+    expect(isPreviewableMime('application/octet-stream', 'icon.svg')).toBe(false);
+  });
+
+  it('never lets the filename override a meaningful stored type', () => {
+    // A file explicitly stored as text/plain stays non-previewable even if the
+    // name looks like markdown.
+    expect(isPreviewableMime('text/plain', 'actually.md')).toBe(false);
+  });
 });
 
 describe('isPreviewableImageMime', () => {
@@ -172,6 +197,17 @@ describe('isMarkdownMime', () => {
     expect(isMarkdownMime('application/pdf')).toBe(false);
     expect(isMarkdownMime('image/png')).toBe(false);
   });
+
+  it('recovers markdown from the filename for octet-stream/empty stored types', () => {
+    expect(isMarkdownMime('application/octet-stream', 'foo.md')).toBe(true);
+    expect(isMarkdownMime('application/octet-stream', 'foo.markdown')).toBe(true);
+    expect(isMarkdownMime('', 'foo.md')).toBe(true);
+    // No filename, or a non-markdown extension → not markdown.
+    expect(isMarkdownMime('application/octet-stream')).toBe(false);
+    expect(isMarkdownMime('application/octet-stream', 'foo.bin')).toBe(false);
+    // A real binary with a markdown-looking name is NOT treated as markdown.
+    expect(isMarkdownMime('image/png', 'foo.md')).toBe(false);
+  });
 });
 
 describe('isHtmlMime', () => {
@@ -190,6 +226,13 @@ describe('isHtmlMime', () => {
     expect(isHtmlMime('text/markdown')).toBe(false);
     expect(isHtmlMime('application/pdf')).toBe(false);
     expect(isHtmlMime('image/png')).toBe(false);
+  });
+
+  it('recovers HTML from the filename for octet-stream/empty stored types', () => {
+    expect(isHtmlMime('application/octet-stream', 'page.html')).toBe(true);
+    expect(isHtmlMime('application/octet-stream', 'page.htm')).toBe(true);
+    expect(isHtmlMime('', 'page.html')).toBe(true);
+    expect(isHtmlMime('application/octet-stream', 'notes.md')).toBe(false);
   });
 });
 

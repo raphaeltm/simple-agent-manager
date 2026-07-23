@@ -81,7 +81,7 @@ export function FileActionsMenu({
             })() : {}),
           }}
         >
-          {onPreview && isPreviewableMime(file.mimeType) && (
+          {onPreview && isPreviewableMime(file.mimeType, file.filename) && (
             <button
               type="button"
               onClick={() => {
