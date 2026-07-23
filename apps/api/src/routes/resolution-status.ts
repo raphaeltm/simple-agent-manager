@@ -44,6 +44,7 @@ const CLOUD_PROVIDER_NAMES: Record<string, string> = {
   hetzner: 'Hetzner Cloud',
   scaleway: 'Scaleway',
   gcp: 'Google Cloud (GCP)',
+  vultr: 'Vultr',
 };
 
 resolutionStatusRoute.get('/resolution-status', requireAuth(), requireApproved(), async (c) => {

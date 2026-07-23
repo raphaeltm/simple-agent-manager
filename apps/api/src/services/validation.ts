@@ -216,6 +216,21 @@ export async function validateScalewayCredentialWithProvider(
   );
 }
 
+export async function validateVultrCredentialWithProvider(
+  token: string,
+  options?: CredentialValidationOptions,
+): Promise<CredentialValidationStatus> {
+  return runProviderCheck(
+    {
+      displayName: 'Vultr',
+      request: 'https://api.vultr.com/v2/account',
+      init: { headers: { Authorization: `Bearer ${token}` } },
+    },
+    'Vultr credential validated.',
+    options,
+  );
+}
+
 export async function validateAgentApiKeyCredentialWithProvider(
   agentType: AgentType,
   credential: string,

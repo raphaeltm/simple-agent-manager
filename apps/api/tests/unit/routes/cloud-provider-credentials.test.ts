@@ -148,6 +148,42 @@ describe('POST /api/credentials — cloud-provider credentials', () => {
     expect(body.connected).toBe(true);
   });
 
+  it('creates a vultr credential (raw token) and returns 201', async () => {
+    const res = await app.request(
+      '/api/credentials',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: 'vultr', token: 'vultr-api-key' }),
+      },
+      mockEnv
+    );
+
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body.provider).toBe('vultr');
+    expect(body.connected).toBe(true);
+    // The stored credential is the RAW token (like hetzner) — encrypt receives it verbatim.
+    const { encrypt } = await import('../../../src/services/encryption');
+    expect(encrypt).toHaveBeenCalledWith('vultr-api-key', expect.anything());
+  });
+
+  it('returns 400 when vultr token field is missing', async () => {
+    const res = await app.request(
+      '/api/credentials',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: 'vultr' }),
+      },
+      mockEnv
+    );
+
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.message).toContain('token');
+  });
+
   it('upserts when a credential for the same provider already exists, returning 200', async () => {
     // Simulate existing credential row
     mockDB.limit.mockResolvedValueOnce([
@@ -356,6 +392,43 @@ describe('POST /api/credentials/validate — cloud-provider validation', () => {
       { provider: 'hetzner', token: 'bad-token' },
       'Hetzner'
     );
+  });
+
+  it('validates a Vultr token against GET /v2/account without storing it', async () => {
+    const { encrypt } = await import('../../../src/services/encryption');
+
+    const res = await app.request(
+      '/api/credentials/validate',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: 'vultr', token: 'vultr-api-key' }),
+      },
+      mockEnv
+    );
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.valid).toBe(true);
+    expect(body.provider).toBe('vultr');
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      'https://api.vultr.com/v2/account',
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: 'Bearer vultr-api-key' }),
+      })
+    );
+    expect(encrypt).not.toHaveBeenCalled();
+  });
+
+  it('returns a clean sanitized 400 when Vultr rejects a bogus key (nothing stored)', async () => {
+    const { encrypt } = await import('../../../src/services/encryption');
+    await expectCredentialValidationFailure(
+      app,
+      '/api/credentials/validate',
+      { provider: 'vultr', token: 'bogus-key' },
+      'Vultr'
+    );
+    expect(encrypt).not.toHaveBeenCalled();
   });
 });
 

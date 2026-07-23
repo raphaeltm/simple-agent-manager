@@ -29,6 +29,11 @@ describe('serializeCredentialToken', () => {
       projectId: 'proj-uuid-1234',
     });
   });
+
+  it('should return raw token for vultr (stored like hetzner)', () => {
+    expect(serializeCredentialToken('vultr', { token: 'my-vultr-key' })).toBe('my-vultr-key');
+    expect(serializeCredentialToken('vultr', {})).toBe('');
+  });
 });
 
 describe('buildProviderConfig', () => {
@@ -51,6 +56,43 @@ describe('buildProviderConfig', () => {
       secretKey: 'scw-secret',
       projectId: 'proj-uuid',
     });
+  });
+
+  it('should build VultrProviderConfig from raw token string', () => {
+    const config = buildProviderConfig('vultr', 'my-vultr-key');
+    expect(config).toEqual({
+      provider: 'vultr',
+      apiToken: 'my-vultr-key',
+      region: undefined,
+      osName: undefined,
+      requestTimeoutMs: undefined,
+      ipPollTimeoutMs: undefined,
+      ipPollIntervalMs: undefined,
+    });
+  });
+
+  it('should thread VULTR_* env tuning into the vultr config', () => {
+    const config = buildProviderConfig('vultr', 'my-vultr-key', {
+      VULTR_REGION: 'ewr',
+      VULTR_OS_NAME: 'Ubuntu 24.04 LTS x64',
+      VULTR_IP_POLL_TIMEOUT_MS: '9000',
+      VULTR_IP_POLL_INTERVAL_MS: '2000',
+      VULTR_API_TIMEOUT_MS: '20000',
+    });
+    expect(config).toMatchObject({
+      provider: 'vultr',
+      apiToken: 'my-vultr-key',
+      region: 'ewr',
+      osName: 'Ubuntu 24.04 LTS x64',
+      requestTimeoutMs: 20000,
+      ipPollTimeoutMs: 9000,
+      ipPollIntervalMs: 2000,
+    });
+  });
+
+  it('should round-trip vultr serialize -> build', () => {
+    const serialized = serializeCredentialToken('vultr', { token: 'vk-123' });
+    expect(buildProviderConfig('vultr', serialized)).toMatchObject({ provider: 'vultr', apiToken: 'vk-123' });
   });
 
   it('should throw for unsupported provider', () => {
