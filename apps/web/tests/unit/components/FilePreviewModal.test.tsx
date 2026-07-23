@@ -97,6 +97,28 @@ describe('FilePreviewModal — octet-stream extension recovery', () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
+  it('does not render an image branch for an octet-stream file with a .svg name (SVG stays non-previewable)', () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal('fetch', fetchSpy);
+
+    render(
+      <FilePreviewModal
+        file={makeFile({ filename: 'icon.svg', mimeType: 'application/octet-stream' })}
+        previewUrl="https://api.test/preview/f-svg"
+        onClose={noop}
+        onDownload={noop}
+      />,
+    );
+
+    // .svg recovers to image/svg+xml, which is excluded from the previewable
+    // image set — the modal must NOT render the ImageViewer (or any other branch).
+    expect(screen.queryByTestId('image-viewer')).toBeNull();
+    expect(screen.queryByTestId('rendered-markdown')).toBeNull();
+    expect(screen.queryByTestId('html-viewer')).toBeNull();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(screen.getByText('icon.svg')).toBeTruthy();
+  });
+
   it('shows no preview branch for an octet-stream file with no known extension', () => {
     const fetchSpy = vi.fn();
     vi.stubGlobal('fetch', fetchSpy);

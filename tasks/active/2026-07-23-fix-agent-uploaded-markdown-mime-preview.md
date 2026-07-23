@@ -99,30 +99,30 @@ Flow: `upload_to_library` (MCP) → `downloadFromWorkspace()` → GET `/workspac
 
 ## Implementation checklist
 
-- [ ] Layer 1: `content_type.go` shared resolver + fallback map
-- [ ] Layer 1: wire `file_transfer.go` (`handleFileDownload`) to the resolver (keep CRLF strip)
-- [ ] Layer 1: wire `files.go` (`handleFileRaw`) to the resolver, drop `mime` import, keep nosniff/SVG CSP
-- [ ] Layer 1: `content_type_test.go` (table + host-independent fallback proof)
-- [ ] Layer 2: `packages/shared/src/mime.ts` + index re-export
-- [ ] Layer 2: shared `mime.test.ts`
-- [ ] Layer 2: `file-utils.ts` predicates take optional filename + delegate to shared
-- [ ] Layer 2: thread filename through FileGridCard / FileListItem / FileActionsMenu / FilePreviewModal / DocumentCard
-- [ ] Layer 2: `library.ts` `/preview` effective-type gate + serve (preserve HTML/SVG safety)
-- [ ] Layer 2: `file-utils.test.ts` octet-stream + filename cases
-- [ ] Layer 2: FilePreviewModal + DocumentCard behavioral octet-stream `.md` tests
-- [ ] Layer 2: `library.test.ts` octet-stream `.md` serves text/markdown; `.html`/`.svg` still safe; unknown-ext 400
-- [ ] Process fix rule `51-*`
-- [ ] `go test ./...` (vm-agent), `pnpm lint && typecheck && test && build`
-- [ ] task-completion-validator + Phase 5 specialist reviewers
+- [x] Layer 1: `content_type.go` shared resolver + fallback map
+- [x] Layer 1: wire `file_transfer.go` (`handleFileDownload`) to the resolver (keep CRLF strip)
+- [x] Layer 1: wire `files.go` (`handleFileRaw`) to the resolver, drop `mime` import, keep nosniff/SVG CSP (also dropped now-unused `filepath` import)
+- [x] Layer 1: `content_type_test.go` (table + host-independent fallback proof)
+- [x] Layer 2: `packages/shared/src/mime.ts` + index re-export
+- [x] Layer 2: shared `mime.test.ts` (12 tests)
+- [x] Layer 2: `file-utils.ts` predicates take optional filename + delegate to shared
+- [x] Layer 2: thread filename through FileGridCard / FileListItem / FileActionsMenu / FilePreviewModal / DocumentCard
+- [x] Layer 2: `library.ts` `/preview` effective-type gate + serve (preserve HTML/SVG safety)
+- [x] Layer 2: `file-utils.test.ts` octet-stream + filename cases
+- [x] Layer 2: FilePreviewModal + DocumentCard behavioral octet-stream `.md` tests
+- [x] Layer 2: `library.test.ts` octet-stream `.md` serves text/markdown; `.html`/`.svg` still safe; unknown-ext 400
+- [x] Process fix rule `51-*`
+- [x] `go test ./...` (vm-agent, 0 failures), `pnpm lint`(0 errors) `&& typecheck`(16/16) `&& test`(19/19: web 2749, api 6213) `&& build`(9/9)
+- [ ] task-completion-validator + Phase 5 specialist reviewers (running)
 - [ ] PR with Post-Mortem + explicit "staging skipped per human instruction" + note that Layer 1 (binary) can't be runtime-verified pre-merge
 
 ## Acceptance criteria
 
-- [ ] vm-agent `/files/download` + `/files/raw` return `text/markdown` (not octet-stream) for `.md` on a host WITHOUT `/etc/mime.types` (proven by the Go fallback test).
-- [ ] An already-stored library file with `mimeType=application/octet-stream` + filename `.md` previews as markdown in the web UI (predicates + modal) — no re-upload.
-- [ ] The API `/preview` route serves `text/markdown` and passes the previewable gate for that same file.
-- [ ] Octet-stream `.html` is still served as inert `text/plain` with `default-src 'none'` CSP; octet-stream `.svg` is still rejected — no security regression.
-- [ ] Process-fix rule added under `.claude/rules/`.
+- [x] vm-agent `/files/download` + `/files/raw` return `text/markdown` (not octet-stream) for `.md` on a host WITHOUT `/etc/mime.types` (proven by `TestFallbackContentType`, a direct host-independent map-lookup test).
+- [x] An already-stored library file with `mimeType=application/octet-stream` + filename `.md` previews as markdown in the web UI (predicates + modal) — no re-upload (proven by `file-utils.test.ts` + `FilePreviewModal.test.tsx` + `DocumentCard.test.tsx`).
+- [x] The API `/preview` route serves `text/markdown` and passes the previewable gate for that same file (proven by `library.test.ts`).
+- [x] Octet-stream `.html` is still served as inert `text/plain` with `default-src 'none'` CSP; octet-stream `.svg` is still rejected — no security regression (proven by `library.test.ts` + `FilePreviewModal.test.tsx`).
+- [x] Process-fix rule added under `.claude/rules/` (rule 51).
 
 ## Notes / risk
 

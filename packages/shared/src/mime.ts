@@ -10,11 +10,14 @@
  * recover the real type from the filename when the stored type is unknown —
  * fixing already-stored files without a re-upload.
  *
- * The extension → media-type mapping mirrors the Go resolver's curated table in
- * packages/vm-agent/internal/server/content_type.go. This table is broader (it
- * also lists image/pdf/html types) because it is the PRIMARY resolver here,
- * whereas the Go table is only a FALLBACK behind Go's built-in table (which
- * already covers html/png/svg/pdf/json/xml).
+ * The extension → media-type mapping corresponds to the Go resolver's curated
+ * table in packages/vm-agent/internal/server/content_type.go, with two
+ * intentional differences: (1) values here are bare (no `; charset=...`) to match
+ * the stored/served base types the preview code compares against, whereas the Go
+ * table emits wire Content-Type headers and so charset-qualifies text types; and
+ * (2) this table is broader — it also lists image/pdf/html types — because it is
+ * the PRIMARY resolver here, whereas the Go table is only a FALLBACK behind Go's
+ * built-in table (which already covers html/png/svg/pdf/json/xml).
  */
 
 /** Canonical "unknown / not sniffed" content type. */
@@ -80,7 +83,11 @@ export function mimeTypeFromFilename(filename: string | null | undefined): strin
   const lastDot = name.lastIndexOf('.');
   if (lastDot === -1) return undefined; // no extension (e.g. "README", "Makefile")
   const ext = name.slice(lastDot + 1).toLowerCase();
-  if (!ext) return undefined; // trailing dot (e.g. "weird.")
+  // Own-property check only: a filename is attacker-controlled, so an extension
+  // like `__proto__`/`constructor`/`toString` must resolve to undefined, not to
+  // the inherited Object.prototype member (a non-string, which would violate the
+  // declared return type and be a footgun for any future consumer).
+  if (!ext || !Object.hasOwn(EXTENSION_MIME_TYPES, ext)) return undefined;
   return EXTENSION_MIME_TYPES[ext];
 }
 
@@ -100,7 +107,7 @@ export function resolveEffectiveMimeType(
   filename?: string | null,
 ): string {
   const base = normalizeMimeType(storedMimeType ?? '');
-  if (base !== '' && base !== OCTET_STREAM_MIME) {
+  if (!isUnknownMimeType(base)) {
     return base;
   }
   return mimeTypeFromFilename(filename) ?? OCTET_STREAM_MIME;

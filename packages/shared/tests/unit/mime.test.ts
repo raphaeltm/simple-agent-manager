@@ -77,6 +77,21 @@ describe('mimeTypeFromFilename', () => {
     expect(mimeTypeFromFilename(null)).toBeUndefined();
     expect(mimeTypeFromFilename(undefined)).toBeUndefined();
   });
+
+  it('returns undefined (never a prototype member) for prototype-chain extensions', () => {
+    // Filenames are attacker-controlled: an extension that names an inherited
+    // Object.prototype member must NOT leak that member as a "type".
+    for (const name of ['agent.__proto__', 'x.constructor', 'x.toString', 'x.hasOwnProperty', 'x.valueOf']) {
+      const result = mimeTypeFromFilename(name);
+      expect(typeof result === 'string' || result === undefined).toBe(true);
+      expect(result).toBeUndefined();
+    }
+  });
+
+  it('resolveEffectiveMimeType falls back to octet-stream for prototype-chain extensions', () => {
+    expect(resolveEffectiveMimeType('application/octet-stream', 'agent.__proto__')).toBe(OCTET_STREAM_MIME);
+    expect(resolveEffectiveMimeType('', 'x.constructor')).toBe(OCTET_STREAM_MIME);
+  });
 });
 
 describe('resolveEffectiveMimeType', () => {

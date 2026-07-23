@@ -511,6 +511,27 @@ describe('library routes', () => {
       expect(res.status).toBe(400);
       expect(mockDownloadFile).not.toHaveBeenCalled();
     });
+
+    it('does not let a misleading extension override an explicit non-previewable stored type', async () => {
+      // Defence-in-depth at the route layer: a file explicitly stored as a real,
+      // non-previewable type (text/plain) must NOT become previewable just
+      // because its name looks like markdown — extension recovery only fills the
+      // octet-stream/empty gap. Guards against an argument-order or precedence
+      // regression in the /preview wiring (not only the shared unit).
+      mockGetFile.mockResolvedValue({
+        file: { filename: 'sneaky.md', mimeType: 'text/plain' },
+        tags: [],
+      });
+
+      const { app, env } = makeApp(makeEnv());
+      const res = await app.fetch(
+        new Request(`${BASE_URL}/projects/test-project-id/library/file-123/preview`),
+        env
+      );
+
+      expect(res.status).toBe(400);
+      expect(mockDownloadFile).not.toHaveBeenCalled();
+    });
   });
 
   describe('missing encryption key', () => {

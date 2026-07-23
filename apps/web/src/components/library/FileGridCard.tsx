@@ -30,11 +30,11 @@ export function FileGridCard({
           className={`flex items-center justify-center h-24 bg-surface-inset w-full border-none cursor-pointer hover:bg-surface-hover transition-colors ${FOCUS_RING}`}
           aria-label={`Preview ${file.filename}`}
         >
-          {getFileIcon(file.mimeType)}
+          {getFileIcon(file.mimeType, file.filename)}
         </button>
       ) : (
         <div className="flex items-center justify-center h-24 bg-surface-inset">
-          {getFileIcon(file.mimeType)}
+          {getFileIcon(file.mimeType, file.filename)}
         </div>
       )}
 

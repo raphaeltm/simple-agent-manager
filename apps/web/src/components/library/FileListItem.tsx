@@ -26,7 +26,7 @@ export function FileListItem({
   return (
     <div className="flex items-center gap-3 px-3 py-2.5 min-h-[56px] rounded-lg border border-[var(--sam-form-border)] bg-[var(--sam-glass-nested-bg)] hover:border-accent/40 transition-colors">
       {/* Icon */}
-      <div className="shrink-0">{getFileIcon(file.mimeType)}</div>
+      <div className="shrink-0">{getFileIcon(file.mimeType, file.filename)}</div>
 
       {/* File info */}
       <div className="flex-1 min-w-0">
