@@ -5,6 +5,27 @@
 **Library:** `/engineering/byo-nodes/` (research 01-05, critique-architecture, critique-security, plan-v2-final, spike-report)
 **Output branch:** `sam/build-byo-user-owned-e2d62t`
 
+## Status: Phase 0 COMPLETE (2026-07-23)
+
+All Phase-0 code + tests implemented and pushed. Full api suite green (6259 tests), lint 0 errors,
+typecheck + build clean. Experiments E1-E4 run; `spike-report.md` uploaded to library
+(`/engineering/byo-nodes/`). Process fix: new `.claude/rules/51-server-side-node-class-gates.md`.
+
+**Local specialist review (round 1):** security-auditor **0 CRITICAL / 0 HIGH** (the 3 fixes correct,
+complete, fail-closed — no bypass); constitution-validator PASS. cloudflare-specialist + test-engineer
++ task-completion-validator raised HIGH **test-coverage** gaps + one HIGH **code** race (`markIdle` D1
+fetch widening a DO input-gate race) — **all ADDRESSED** (see the fix commit). Deferred MEDIUM/LOW
+(pre-existing-correct invariants or Phase-1-only) → `tasks/backlog/2026-07-23-byo-phase0-review-followups.md`.
+
+**Post-mortem (rule 02):** this PR fixes three PRE-EXISTING shared-auth gaps latent because SAM was the
+sole minter of node credentials + sole author of the agent binary. Root cause: authorization/lifecycle
+decisions trusted a client-supplied identifier (`body.nodeId`) or an agent-side abstention rather than
+server-verified identity + the resource row's own columns. Class of bug: **trust placed in a
+client-controlled input or an agent's good behavior.** Process fix: `.claude/rules/51`.
+
+**Staging:** intentionally skipped per explicit human instruction; substitute = local tests + CI +
+bounded transport experiments. vm-agent binary changes (Phase 1C) are NOT in this PR.
+
 ## Problem & Motivation
 
 Hetzner is raising prices. Let a user register an existing machine they own (home server,
