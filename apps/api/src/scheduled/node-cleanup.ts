@@ -175,6 +175,7 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
      WHERE n.runtime = 'cf-container'
        AND n.status NOT IN ('deleted', 'stopped')
        AND n.node_role = 'workspace'
+       AND n.node_class != 'user-owned'
        AND w.status IN ('running', 'creating', 'recovery', 'sleeping', 'stopped')
        AND t.status IN ('completed', 'failed', 'cancelled')
        AND NOT EXISTS (
@@ -247,6 +248,7 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
        AND n.warm_since < ?
        AND n.status = 'running'
        AND n.node_role = 'workspace'
+       AND n.node_class != 'user-owned'
      GROUP BY n.id, n.user_id, n.warm_since`
   )
     .bind(staleThreshold)
@@ -341,6 +343,7 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
      WHERE t.auto_provisioned_node_id IS NOT NULL
        AND n.status NOT IN ('stopped', 'deleted')
        AND n.node_role = 'workspace'
+       AND n.node_class != 'user-owned'
        AND n.created_at < ?
      GROUP BY n.id, n.user_id, n.status, n.created_at`
   )
@@ -399,6 +402,7 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
      LEFT JOIN workspaces w ON w.node_id = n.id
      WHERE n.status = 'stopped'
        AND n.node_role = 'workspace'
+       AND n.node_class != 'user-owned'
        AND n.created_at < ?
      GROUP BY n.id, n.user_id, n.status, n.created_at, n.updated_at`
   )
@@ -550,6 +554,7 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
      FROM nodes n
      WHERE n.status = 'running'
        AND n.node_role = 'workspace'
+       AND n.node_class != 'user-owned'
        AND n.warm_since IS NULL
        AND n.updated_at < ?
        AND NOT EXISTS (

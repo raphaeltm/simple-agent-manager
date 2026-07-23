@@ -625,6 +625,7 @@ async function claimNodeForDeletion(
          updated_at = ?
      WHERE id = ?
        AND user_id = ?
+       AND node_class != 'user-owned'
        AND (
          status NOT IN ('deleted', 'destroyed', 'destroying')
          OR (status = 'destroying' AND updated_at < ?)

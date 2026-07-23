@@ -78,6 +78,7 @@ export type {
   Event,
   EventLevel,
   Node,
+  NodeClass,
   NodeContainerListResponse,
   NodeContainerLogTarget,
   NodeHealthStatus,
@@ -93,6 +94,7 @@ export type {
   NodeRole,
   NodeStatus,
   NodeSystemInfo,
+  NodeTransport,
   PortsResponse,
   UpdateWorkspaceRequest,
   VMLocation,
@@ -105,6 +107,8 @@ export type {
   WorkspaceRuntimeFile,
   WorkspaceStatus,
 } from './workspace';
+// Node class runtime guards (value exports, not types)
+export { isNodeClass, isUserOwnedNodeClass } from './workspace';
 // Provider Catalog
 export type { LocationInfo, ProviderCatalog, ProviderCatalogResponse, SizeInfo } from './provider';
 

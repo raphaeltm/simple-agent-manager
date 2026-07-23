@@ -48,6 +48,9 @@ vi.mock('drizzle-orm/d1', () => ({
               },
             ]),
           orderBy: () => Promise.resolve([]),
+          // node-acp-heartbeat binds a workspace-scoped token to its node via this lookup:
+          // workspace 'ws-test' lives on node 'node-test', so it may heartbeat 'node-test'.
+          get: () => Promise.resolve({ nodeId: 'node-test' }),
         }),
       }),
     }),

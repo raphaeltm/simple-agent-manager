@@ -80,6 +80,7 @@ async function cleanupDeploymentNodeIfUnassigned(
      WHERE id = ?
        AND user_id = ?
        AND node_role = 'deployment'
+       AND node_class != 'user-owned'
        AND status NOT IN ('deleting', 'deleted')
        AND NOT EXISTS (
          SELECT 1 FROM deployment_environments WHERE node_id = ?

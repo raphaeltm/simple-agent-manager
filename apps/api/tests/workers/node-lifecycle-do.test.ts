@@ -38,13 +38,17 @@ async function seedTestNode(nodeId: string, userId: string = TEST_USER_ID): Prom
   await seedNode(nodeId, userId);
 }
 
-async function getNodeFromD1(nodeId: string): Promise<{ status: string; warm_since: string | null } | null> {
-  return await env.DATABASE.prepare(
-    `SELECT status, warm_since FROM nodes WHERE id = ?`,
-  ).bind(nodeId).first<{ status: string; warm_since: string | null }>();
+async function getNodeFromD1(
+  nodeId: string
+): Promise<{ status: string; warm_since: string | null } | null> {
+  return await env.DATABASE.prepare(`SELECT status, warm_since FROM nodes WHERE id = ?`)
+    .bind(nodeId)
+    .first<{ status: string; warm_since: string | null }>();
 }
 
-async function getStoredState(stub: DurableObjectStub<NodeLifecycle>): Promise<StoredNodeLifecycleState | null> {
+async function getStoredState(
+  stub: DurableObjectStub<NodeLifecycle>
+): Promise<StoredNodeLifecycleState | null> {
   return await runInDurableObject(stub, async (instance) => {
     return (await instance.ctx.storage.get<StoredNodeLifecycleState>('state')) ?? null;
   });
@@ -82,6 +86,28 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
     const dbNode = await getNodeFromD1(nodeId);
     expect(dbNode).toBeTruthy();
     expect(dbNode!.warm_since).toBeTruthy();
+  });
+
+  it('markIdle keeps a user-owned (BYO) node ACTIVE — never warms it or arms a teardown alarm', async () => {
+    // BYO machines must never enter the warm → destroying pipeline (architecture-critique #2).
+    const nodeId = 'nl-test-byo-idle-001';
+    await seedUser(TEST_USER_ID);
+    await seedNode(nodeId, TEST_USER_ID, { nodeClass: 'user-owned' });
+
+    const stub = getStub(nodeId);
+    const result = await stub.markIdle(nodeId, TEST_USER_ID);
+
+    // Kept active, not warmed.
+    expect(result.status).toBe('active');
+    expect(result.warmSince).toBeNull();
+
+    // No warm alarm scheduled, and the stored DO state is active.
+    expect(await getAlarm(stub)).toBeNull();
+    expect((await getStoredState(stub))?.status).toBe('active');
+
+    // D1 warm_since stays null → the node never becomes a warm-pool teardown candidate.
+    const dbNode = await getNodeFromD1(nodeId);
+    expect(dbNode!.warm_since).toBeNull();
   });
 
   it('markActive transitions to active and clears D1 warm_since', async () => {
@@ -157,7 +183,7 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
     });
 
     await expect(stub.markIdle(nodeId, TEST_USER_ID)).rejects.toThrow(
-      'node_lifecycle_conflict: node is being destroyed',
+      'node_lifecycle_conflict: node is being destroyed'
     );
   });
 
@@ -361,9 +387,9 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
     });
 
     expect(await stub.getStatus()).toMatchObject({ status: 'active' });
-    const workspace = await env.DATABASE.prepare(
-      'SELECT status FROM workspaces WHERE id = ?',
-    ).bind(wsId).first<{ status: string }>();
+    const workspace = await env.DATABASE.prepare('SELECT status FROM workspaces WHERE id = ?')
+      .bind(wsId)
+      .first<{ status: string }>();
     expect(workspace?.status).toBe('deleted');
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(await getAlarm(stub)).toBeNull();

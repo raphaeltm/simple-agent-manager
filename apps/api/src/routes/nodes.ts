@@ -115,6 +115,9 @@ function toNodeResponse(
     vmSize: node.vmSize as NodeResponse['vmSize'],
     vmLocation: node.vmLocation as NodeResponse['vmLocation'],
     nodeRole: (node.nodeRole ?? 'workspace') as NodeResponse['nodeRole'],
+    nodeClass: (node.nodeClass ?? 'managed') as NodeResponse['nodeClass'],
+    transport: (node.transport as NodeResponse['transport']) ?? null,
+    tunnelName: node.tunnelName ?? null,
     ipAddress: node.ipAddress,
     lastHeartbeatAt: node.lastHeartbeatAt,
     heartbeatStaleAfterSeconds: node.heartbeatStaleAfterSeconds,
@@ -213,6 +216,8 @@ nodesRoutes.post('/', jsonValidator(CreateNodeSchema), async (c) => {
 
   // Only count workspace-role nodes against the user's node quota.
   // Deployment-role nodes are managed separately and exempt from this limit.
+  // User-owned (BYO) nodes cost SAM nothing to run, so they never consume a MAX_NODES_PER_USER
+  // slot — otherwise a few enrolled machines could block cloud auto-provisioning (critique #8).
   const existingNodes = await db
     .select({ id: schema.nodes.id })
     .from(schema.nodes)
@@ -220,7 +225,8 @@ nodesRoutes.post('/', jsonValidator(CreateNodeSchema), async (c) => {
       and(
         eq(schema.nodes.userId, userId),
         ne(schema.nodes.status, 'deleted'),
-        eq(schema.nodes.nodeRole, 'workspace')
+        eq(schema.nodes.nodeRole, 'workspace'),
+        ne(schema.nodes.nodeClass, 'user-owned')
       )
     );
 

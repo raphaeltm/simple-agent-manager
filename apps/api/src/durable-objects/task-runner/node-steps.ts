@@ -172,7 +172,7 @@ export async function handleNodeProvisioning(
       const minutes = Math.round(timeoutMs / 60_000);
       throw Object.assign(
         new Error(`Node provisioning timed out after ${minutes} minute${minutes === 1 ? '' : 's'}`),
-        { permanent: true },
+        { permanent: true }
       );
     }
 
@@ -188,20 +188,20 @@ export async function handleNodeProvisioning(
       return;
     }
     if (node?.status === 'error' || node?.status === 'stopped') {
-      throw Object.assign(
-        new Error(node.error_message || 'Node provisioning failed'),
-        { permanent: true },
-      );
+      throw Object.assign(new Error(node.error_message || 'Node provisioning failed'), {
+        permanent: true,
+      });
     }
     // Still creating — schedule another poll
     await rc.ctx.storage.setAlarm(Date.now() + rc.getProvisionPollIntervalMs());
     return;
   }
 
-  // Check user node limit
+  // Check user node limit. User-owned (BYO) nodes are excluded — they cost SAM nothing to run, so
+  // they must not consume an auto-provisioning slot or block cloud provisioning (critique #8).
   const maxNodes = parseEnvInt(rc.env.MAX_NODES_PER_USER, 10);
   const countResult = await rc.env.DATABASE.prepare(
-    `SELECT COUNT(*) as c FROM nodes WHERE user_id = ? AND status IN ('running', 'creating', 'recovery') AND node_role = 'workspace'`
+    `SELECT COUNT(*) as c FROM nodes WHERE user_id = ? AND status IN ('running', 'creating', 'recovery') AND node_role = 'workspace' AND node_class != 'user-owned'`
   )
     .bind(state.userId)
     .first<{ c: number }>();
@@ -222,9 +222,10 @@ export async function handleNodeProvisioning(
     const drizzleSchema = await import('../../db/schema');
     const db = drizzle(rc.env.DATABASE, { schema: drizzleSchema });
     const { resolveCredentialSource } = await import('../../services/provider-credentials');
-    const attributionProjectId = state.config.credentialAttributionSource === 'project'
-      ? state.config.credentialAttributionProjectId
-      : null;
+    const attributionProjectId =
+      state.config.credentialAttributionSource === 'project'
+        ? state.config.credentialAttributionProjectId
+        : null;
     const credResult = await resolveCredentialSource(
       db,
       state.config.credentialAttributionUserId,
@@ -490,7 +491,12 @@ export async function verifyNodeAgentHealthy(
         agent_ready_at: string | null;
       }>();
 
-    if (!node || node.health_status !== 'healthy' || !node.last_heartbeat_at || !node.agent_ready_at) {
+    if (
+      !node ||
+      node.health_status !== 'healthy' ||
+      !node.last_heartbeat_at ||
+      !node.agent_ready_at
+    ) {
       return false;
     }
 

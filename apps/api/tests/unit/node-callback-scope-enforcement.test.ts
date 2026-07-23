@@ -6,7 +6,7 @@
  * - Node endpoints accept node-scoped and legacy tokens
  */
 import { Hono } from 'hono';
-import { beforeEach,describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AppError } from '../../src/middleware/error';
 import type { CallbackTokenPayload } from '../../src/services/jwt';
@@ -24,14 +24,20 @@ vi.mock('drizzle-orm/d1', () => ({
     select: () => ({
       from: () => ({
         where: () => ({
-          limit: () => Promise.resolve([{
-            id: 'node-test',
-            status: 'running',
-            healthStatus: 'healthy',
-            lastHeartbeatAt: new Date().toISOString(),
-            heartbeatStaleAfterSeconds: 180,
-          }]),
+          limit: () =>
+            Promise.resolve([
+              {
+                id: 'node-test',
+                status: 'running',
+                healthStatus: 'healthy',
+                lastHeartbeatAt: new Date().toISOString(),
+                heartbeatStaleAfterSeconds: 180,
+              },
+            ]),
           orderBy: () => Promise.resolve([]),
+          // Origin-CA ownership gate loads the node row via .get() — a managed public-DNS node
+          // is eligible for wildcard issuance (user-owned/tunnel nodes are denied, tested separately).
+          get: () => Promise.resolve({ nodeClass: 'managed', transport: null }),
         }),
       }),
     }),
@@ -44,12 +50,15 @@ vi.mock('drizzle-orm/d1', () => ({
 }));
 
 // Mock JWT with controllable scope
-const mockVerifyCallbackToken = vi.fn<(token: string, env: unknown) => Promise<CallbackTokenPayload>>();
+const mockVerifyCallbackToken =
+  vi.fn<(token: string, env: unknown) => Promise<CallbackTokenPayload>>();
 vi.mock('../../src/services/jwt', () => ({
   verifyCallbackToken: (...args: [string, unknown]) => mockVerifyCallbackToken(...args),
   signCallbackToken: vi.fn().mockResolvedValue('mock-ws-token'),
   signNodeCallbackToken: vi.fn().mockResolvedValue('mock-node-token'),
-  signNodeManagementToken: vi.fn().mockResolvedValue({ token: 'mgmt-token', expiresAt: '2030-01-01' }),
+  signNodeManagementToken: vi
+    .fn()
+    .mockResolvedValue({ token: 'mgmt-token', expiresAt: '2030-01-01' }),
   shouldRefreshCallbackToken: vi.fn().mockReturnValue(false),
 }));
 
@@ -89,7 +98,9 @@ vi.mock('../../src/services/observability', () => ({
 }));
 
 vi.mock('../../src/services/limits', () => ({
-  getRuntimeLimits: vi.fn().mockReturnValue({ maxNodesPerUser: 10, nodeHeartbeatStaleSeconds: 180 }),
+  getRuntimeLimits: vi
+    .fn()
+    .mockReturnValue({ maxNodesPerUser: 10, nodeHeartbeatStaleSeconds: 180 }),
 }));
 
 vi.mock('../../src/services/project-data', () => ({
@@ -145,7 +156,7 @@ describe('node callback auth — scope enforcement', () => {
     const res = await app.request('/api/nodes/node-test/heartbeat', {
       method: 'POST',
       headers: {
-        'Authorization': 'Bearer workspace-scoped-token',
+        Authorization: 'Bearer workspace-scoped-token',
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({}),
@@ -166,7 +177,7 @@ describe('node callback auth — scope enforcement', () => {
     const res = await app.request('/api/nodes/node-test/heartbeat', {
       method: 'POST',
       headers: {
-        'Authorization': 'Bearer node-scoped-token',
+        Authorization: 'Bearer node-scoped-token',
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({}),
@@ -186,7 +197,7 @@ describe('node callback auth — scope enforcement', () => {
     const res = await app.request('/api/nodes/node-test/heartbeat', {
       method: 'POST',
       headers: {
-        'Authorization': 'Bearer legacy-node-token',
+        Authorization: 'Bearer legacy-node-token',
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({}),
@@ -205,7 +216,7 @@ describe('node callback auth — scope enforcement', () => {
     const res = await app.request('/api/nodes/node-test/ready', {
       method: 'POST',
       headers: {
-        'Authorization': 'Bearer workspace-scoped-token',
+        Authorization: 'Bearer workspace-scoped-token',
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({}),
@@ -226,7 +237,7 @@ describe('node callback auth — scope enforcement', () => {
     const res = await app.request('/api/nodes/node-test/errors', {
       method: 'POST',
       headers: {
-        'Authorization': 'Bearer workspace-scoped-token',
+        Authorization: 'Bearer workspace-scoped-token',
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ errors: [] }),

@@ -43,6 +43,11 @@ vi.mock('../../../src/services/dns', () => ({
   createNodeBackendDNSRecord: vi.fn(),
 }));
 
+const destroyVmAgentContainer = vi.fn(async () => {});
+vi.mock('../../../src/services/vm-agent-container', () => ({
+  destroyVmAgentContainer: (...args: unknown[]) => destroyVmAgentContainer(...args),
+}));
+
 const persistError = vi.fn(async () => {});
 vi.mock('../../../src/services/observability', () => ({
   persistError: (...args: unknown[]) => persistError(...args),
@@ -55,8 +60,12 @@ vi.mock('../../../src/lib/logger', () => ({
   })),
 }));
 
-const { deleteNodeResources, deleteNodeResourcesStrict, retireDeletedDeploymentNodeRecord } =
-  await import('../../../src/services/nodes');
+const {
+  deleteNodeResources,
+  deleteNodeResourcesStrict,
+  retireDeletedDeploymentNodeRecord,
+  stopNodeResources,
+} = await import('../../../src/services/nodes');
 const { drizzle } = await import('drizzle-orm/d1');
 
 const ENV = {
@@ -79,6 +88,124 @@ describe('node resource deletion services', () => {
         credentialSource: 'platform',
       };
     });
+  });
+
+  // --- User-owned (BYO) lifecycle guards (architecture-critique #2) -----------------------------
+  function userOwnedNode(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 'byo-1',
+      userId: 'user-1',
+      name: 'home server',
+      status: 'running',
+      nodeClass: 'user-owned',
+      runtime: 'vm',
+      providerInstanceId: null,
+      cloudProvider: null,
+      backendDnsRecordId: null,
+      credentialAttributionUserId: null,
+      credentialAttributionSource: 'user',
+      credentialAttributionProjectId: null,
+      ...overrides,
+    };
+  }
+
+  it('stopNodeResources takes a user-owned node OFFLINE (stopped), never deletes it or its VM', async () => {
+    nodeRows.push(userOwnedNode());
+
+    await stopNodeResources('byo-1', 'user-1', ENV);
+
+    // Node marked 'stopped' (offline), NOT 'deleted'; the enrolled machine's record survives.
+    expect(updateCalls.some((u) => u.status === 'stopped')).toBe(true);
+    expect(updateCalls.some((u) => u.status === 'deleted' && 'healthStatus' in u)).toBe(false);
+    // Never touch cloud provider or DNS for the user's own hardware.
+    expect(createProviderForUser).not.toHaveBeenCalled();
+    expect(deleteDNSRecord).not.toHaveBeenCalled();
+  });
+
+  it('deleteNodeResources never calls provider.deleteVM for a user-owned node', async () => {
+    nodeRows.push(userOwnedNode());
+
+    const result = await deleteNodeResources('byo-1', 'user-1', ENV);
+
+    expect(result.providerVmDeleted).toBe(false);
+    expect(result.providerVmDeleteSkippedReason).toBe('user-owned node — no cloud VM to delete');
+    expect(createProviderForUser).not.toHaveBeenCalled();
+    expect(providerDeleteVM).not.toHaveBeenCalled();
+  });
+
+  it('deleteNodeResources never calls deleteVM even if a user-owned node has a stray providerInstanceId', async () => {
+    // Defense-in-depth: a BYO node should never have a providerInstanceId, but if one leaked in we
+    // must still refuse to delete a cloud VM against the user's hardware.
+    nodeRows.push(
+      userOwnedNode({ providerInstanceId: 'srv-should-not-touch', cloudProvider: 'hetzner' })
+    );
+
+    const result = await deleteNodeResources('byo-1', 'user-1', ENV);
+
+    expect(result.providerVmDeleteSkippedReason).toBe('user-owned node — no cloud VM to delete');
+    expect(providerDeleteVM).not.toHaveBeenCalled();
+  });
+
+  it('stopNodeResources on a user-owned node with a STRAY providerInstanceId still never deletes VM/DNS', async () => {
+    // Discriminating for the guard itself (not the incidental null-checks): even with populated
+    // providerInstanceId + cloudProvider + backendDnsRecordId, the user-owned guard must short-circuit.
+    nodeRows.push(
+      userOwnedNode({
+        providerInstanceId: 'srv-should-not-touch',
+        cloudProvider: 'hetzner',
+        backendDnsRecordId: 'dns-should-not-touch',
+      })
+    );
+
+    await stopNodeResources('byo-1', 'user-1', ENV);
+
+    expect(updateCalls.some((u) => u.status === 'stopped')).toBe(true);
+    expect(createProviderForUser).not.toHaveBeenCalled();
+    expect(providerDeleteVM).not.toHaveBeenCalled();
+    expect(deleteDNSRecord).not.toHaveBeenCalled();
+  });
+
+  it('deleteNodeResources destroys the cf-container for a managed cf-container node (asymmetry fix)', async () => {
+    // Pre-fix, deleteNodeResources had no container branch and leaked the Sandbox container.
+    nodeRows.push({
+      id: 'cf-1',
+      userId: 'user-1',
+      name: 'cf node',
+      status: 'running',
+      nodeClass: 'managed',
+      runtime: 'cf-container',
+      providerInstanceId: null,
+      cloudProvider: null,
+      backendDnsRecordId: null,
+      credentialAttributionUserId: null,
+      credentialAttributionSource: 'user',
+      credentialAttributionProjectId: null,
+    });
+
+    await deleteNodeResources('cf-1', 'user-1', ENV);
+
+    expect(destroyVmAgentContainer).toHaveBeenCalledWith(ENV, 'cf-1');
+  });
+
+  it('deleteNodeResources does NOT destroy a container for a user-owned node', async () => {
+    // BYO nodes are never cf-container; the explicit guard proves it (even if runtime leaked in).
+    nodeRows.push(userOwnedNode({ runtime: 'cf-container' }));
+
+    await deleteNodeResources('byo-1', 'user-1', ENV);
+
+    expect(destroyVmAgentContainer).not.toHaveBeenCalled();
+  });
+
+  it('deleteNodeResourcesStrict is a no-op for a user-owned node (nothing to delete, no throw)', async () => {
+    nodeRows.push(
+      userOwnedNode({ providerInstanceId: 'srv-should-not-touch', cloudProvider: 'hetzner' })
+    );
+
+    await expect(deleteNodeResourcesStrict('byo-1', 'user-1', ENV)).resolves.toEqual({
+      providerVm: 'no-instance',
+    });
+    expect(providerDeleteVM).not.toHaveBeenCalled();
+    expect(createProviderForUser).not.toHaveBeenCalled();
   });
 
   it('keeps legacy deleteNodeResources idempotent when the node row is missing', async () => {

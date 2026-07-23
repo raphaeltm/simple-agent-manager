@@ -11,6 +11,10 @@ import { errors } from '../../middleware/error';
 import { AcpSessionActivityReportSchema, jsonValidator } from '../../schemas';
 import { verifyCallbackToken } from '../../services/jwt';
 import { hibernateAgentSessionOnNode } from '../../services/node-agent';
+import {
+  callbackTokenMatchesNode,
+  callbackTokenMatchesWorkspace,
+} from '../../services/node-callback-auth';
 import * as projectDataService from '../../services/project-data';
 import { markVmAgentContainerActiveWorkEndedBestEffort } from '../../services/vm-agent-container';
 
@@ -72,11 +76,33 @@ agentActivityCallbackRoute.post(
     const sessionId = c.req.param('sessionId');
     const body = c.req.valid('json');
 
-    // Verify node matches assigned node
     const existing = await projectDataService.getAcpSession(c.env, projectId, sessionId);
     if (!existing) {
       throw errors.notFound('ACP session not found');
     }
+
+    // Authoritative auth: bind the token's OWN identity (payload.workspace) to the session's
+    // node/workspace — never authorize on the client-supplied body.nodeId. A node-scoped token
+    // must be the session's node; a workspace-scoped token must be the session's workspace. Without
+    // this, any holder of a valid callback token (trivial to obtain once BYO self-enrollment ships)
+    // could force ANOTHER tenant's session to error/failed. See .claude/rules/28 and security-critique #1.
+    const tokenBoundToSession =
+      callbackTokenMatchesNode(payload, existing.nodeId) ||
+      callbackTokenMatchesWorkspace(payload, existing.workspaceId);
+    if (!tokenBoundToSession) {
+      log.error('acp_activity.callback_token_not_bound_to_session', {
+        sessionId,
+        projectId,
+        scope: payload.scope,
+        tokenIdentity: payload.workspace,
+        sessionNodeId: existing.nodeId,
+        sessionWorkspaceId: existing.workspaceId,
+        action: 'rejected',
+      });
+      throw errors.forbidden('Callback token not authorized for this session');
+    }
+
+    // Defense-in-depth: the reported nodeId must still match the session's assigned node.
     if (existing.nodeId !== body.nodeId) {
       log.error('acp_activity.node_mismatch', {
         sessionId,

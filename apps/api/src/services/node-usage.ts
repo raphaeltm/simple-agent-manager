@@ -6,7 +6,7 @@ import type {
   CredentialSource,
   NodeUsageRecord,
 } from '@simple-agent-manager/shared';
-import { getVcpuCount } from '@simple-agent-manager/shared';
+import { getVcpuCount, isUserOwnedNodeClass } from '@simple-agent-manager/shared';
 import { and, eq, inArray, notInArray, or, sql } from 'drizzle-orm';
 import type { DrizzleD1Database } from 'drizzle-orm/d1';
 
@@ -19,6 +19,12 @@ import { getCurrentPeriodBounds } from './compute-usage';
 
 const ENDED_STATUSES_ARRAY = ['destroyed', 'destroying', 'deleted', 'error'] as const;
 const ENDED_STATUSES = new Set<string>(ENDED_STATUSES_ARRAY);
+
+/**
+ * Sentinel credential source for user-owned (BYO) nodes. SAM provisioned nothing for these, so they
+ * cost SAM $0 and must be excluded from all vCPU-hour metering, admin cost, and quota accounting.
+ */
+const SELF_HOSTED_CREDENTIAL_SOURCE: CredentialSource = 'self-hosted';
 
 function isNodeEnded(status: string): boolean {
   return ENDED_STATUSES.has(status);
@@ -41,7 +47,7 @@ function calculateNodeHoursInPeriod(
   endedAt: string | null,
   periodStart: Date,
   periodEnd: Date,
-  now: Date,
+  now: Date
 ): number {
   const start = new Date(createdAt);
   const end = endedAt ? new Date(endedAt) : now;
@@ -57,6 +63,8 @@ export interface NodeUsageCalculationRow {
   vmSize: string;
   cloudProvider: string | null;
   credentialSource: string | null;
+  /** Ownership class; user-owned (BYO) nodes accrue $0 regardless of credentialSource. */
+  nodeClass: string | null;
   status: string;
   createdAt: string;
   updatedAt: string;
@@ -96,11 +104,34 @@ function createEmptyTotals(): NodeUsageTotals {
 
 function addNodeToTotals(
   totals: NodeUsageTotals,
-  node: Pick<NodeUsageRow, 'vmSize' | 'cloudProvider' | 'credentialSource' | 'status' | 'createdAt' | 'updatedAt'>,
+  node: Pick<
+    NodeUsageRow,
+    | 'vmSize'
+    | 'cloudProvider'
+    | 'credentialSource'
+    | 'nodeClass'
+    | 'status'
+    | 'createdAt'
+    | 'updatedAt'
+  >,
   periodStart: Date,
   periodEnd: Date,
-  now: Date,
+  now: Date
 ): void {
+  // User-owned (BYO) nodes cost SAM $0 — exclude them from every node-hour, vCPU-hour, and
+  // active-node total so metering, admin cost (getAllUsersNodeUsageSummary → here), and quota
+  // reflect only SAM-paid compute. Single chokepoint. See architecture-critique #9.
+  //
+  // Keyed on BOTH the canonical ownership axis (nodeClass='user-owned') AND the credentialSource
+  // sentinel ('self-hosted'): every other Phase-0 guard uses nodeClass, so excluding on it here too
+  // means billing can't silently re-include a BYO node if a future enrollment path sets nodeClass
+  // but forgets the credentialSource sentinel (or vice-versa). See cloudflare/security review.
+  if (
+    isUserOwnedNodeClass(node.nodeClass) ||
+    node.credentialSource === SELF_HOSTED_CREDENTIAL_SOURCE
+  ) {
+    return;
+  }
   const endedAt = getNodeEndedAt(node.status, node.updatedAt);
   const hours = calculateNodeHoursInPeriod(node.createdAt, endedAt, periodStart, periodEnd, now);
   const vcpus = getVcpuCount(node.vmSize, node.cloudProvider);
@@ -125,7 +156,7 @@ export function calculateNodeUsageTotalsForRows(
   rows: NodeUsageCalculationRow[],
   periodStart: Date,
   periodEnd: Date,
-  now: Date = new Date(),
+  now: Date = new Date()
 ): NodeUsageTotals {
   const totals = createEmptyTotals();
   for (const node of rows) {
@@ -149,13 +180,13 @@ function roundUsageTotals(totals: NodeUsageTotals): NodeUsageTotals {
 function getOverlappingNodeConditions(
   periodStartIso: string,
   periodEndIso: string,
-  opts?: { userId?: string; credentialSource?: CredentialSource },
+  opts?: { userId?: string; credentialSource?: CredentialSource }
 ) {
   const conditions = [
     sql`${schema.nodes.createdAt} < ${periodEndIso}`,
     or(
       notInArray(schema.nodes.status, [...ENDED_STATUSES_ARRAY]),
-      sql`${schema.nodes.updatedAt} > ${periodStartIso}`,
+      sql`${schema.nodes.updatedAt} > ${periodStartIso}`
     ),
   ];
 
@@ -174,7 +205,7 @@ async function getUserOverlappingNodeRows(
   userId: string,
   periodStartIso: string,
   periodEndIso: string,
-  credentialSource?: CredentialSource,
+  credentialSource?: CredentialSource
 ): Promise<NodeUsageRow[]> {
   return db
     .select({
@@ -184,19 +215,24 @@ async function getUserOverlappingNodeRows(
       vmLocation: schema.nodes.vmLocation,
       cloudProvider: schema.nodes.cloudProvider,
       credentialSource: schema.nodes.credentialSource,
+      nodeClass: schema.nodes.nodeClass,
       status: schema.nodes.status,
       createdAt: schema.nodes.createdAt,
       updatedAt: schema.nodes.updatedAt,
     })
     .from(schema.nodes)
-    .where(and(...getOverlappingNodeConditions(periodStartIso, periodEndIso, { userId, credentialSource })))
+    .where(
+      and(
+        ...getOverlappingNodeConditions(periodStartIso, periodEndIso, { userId, credentialSource })
+      )
+    )
     .orderBy(sql`${schema.nodes.createdAt} DESC`);
 }
 
 async function getAllOverlappingNodeRows(
   db: DrizzleD1Database<typeof schema>,
   periodStartIso: string,
-  periodEndIso: string,
+  periodEndIso: string
 ): Promise<UserNodeUsageRow[]> {
   return db
     .select({
@@ -207,6 +243,7 @@ async function getAllOverlappingNodeRows(
       vmLocation: schema.nodes.vmLocation,
       cloudProvider: schema.nodes.cloudProvider,
       credentialSource: schema.nodes.credentialSource,
+      nodeClass: schema.nodes.nodeClass,
       status: schema.nodes.status,
       createdAt: schema.nodes.createdAt,
       updatedAt: schema.nodes.updatedAt,
@@ -235,7 +272,10 @@ function toActiveComputeSession(node: NodeUsageRow): ActiveComputeSession | null
   };
 }
 
-function toNodeUsageRecord(node: NodeUsageRow, workspaceCounts: Map<string, number>): NodeUsageRecord {
+function toNodeUsageRecord(
+  node: NodeUsageRow,
+  workspaceCounts: Map<string, number>
+): NodeUsageRecord {
   return {
     nodeId: node.id,
     name: node.name,
@@ -257,14 +297,14 @@ export async function calculateNodeVcpuHoursForPeriod(
   userId: string,
   periodStart: Date,
   periodEnd: Date,
-  credentialSource?: CredentialSource,
+  credentialSource?: CredentialSource
 ): Promise<number> {
   const rows = await getUserOverlappingNodeRows(
     db,
     userId,
     periodStart.toISOString(),
     periodEnd.toISOString(),
-    credentialSource,
+    credentialSource
   );
   const totals = calculateNodeUsageTotalsForRows(rows, periodStart, periodEnd);
 
@@ -274,7 +314,7 @@ export async function calculateNodeVcpuHoursForPeriod(
 /** Get the current user's node-based compute usage summary for the current period. */
 export async function getUserNodeUsageSummary(
   db: DrizzleD1Database<typeof schema>,
-  userId: string,
+  userId: string
 ): Promise<{ period: ComputeUsagePeriod; activeSessions: ActiveComputeSession[] }> {
   const { start, end } = getCurrentPeriodBounds();
   const periodStart = new Date(start);
@@ -312,7 +352,7 @@ export async function getUserNodeUsageSummary(
 
 /** Get all users' node usage summary for the current period. */
 export async function getAllUsersNodeUsageSummary(
-  db: DrizzleD1Database<typeof schema>,
+  db: DrizzleD1Database<typeof schema>
 ): Promise<{ period: { start: string; end: string }; users: AdminUserNodeUsageSummary[] }> {
   const { start, end } = getCurrentPeriodBounds();
   const periodStart = new Date(start);
@@ -376,7 +416,7 @@ export async function getAllUsersNodeUsageSummary(
 export async function getUserNodeDetailedUsage(
   db: DrizzleD1Database<typeof schema>,
   userId: string,
-  recentLimit = 50,
+  recentLimit = 50
 ): Promise<AdminUserNodeDetailedUsage> {
   const { start, end } = getCurrentPeriodBounds();
   const periodStart = new Date(start);
@@ -405,7 +445,9 @@ export async function getUserNodeDetailedUsage(
     }
   }
 
-  const totals = roundUsageTotals(calculateNodeUsageTotalsForRows(allNodeRows, periodStart, periodEnd, now));
+  const totals = roundUsageTotals(
+    calculateNodeUsageTotalsForRows(allNodeRows, periodStart, periodEnd, now)
+  );
   const nodes = nodeRows.map((node) => toNodeUsageRecord(node, workspaceCounts));
 
   return {

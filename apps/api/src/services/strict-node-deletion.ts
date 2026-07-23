@@ -1,4 +1,8 @@
-import { CREDENTIAL_PROVIDERS, type CredentialProvider } from '@simple-agent-manager/shared';
+import {
+  CREDENTIAL_PROVIDERS,
+  type CredentialProvider,
+  isUserOwnedNodeClass,
+} from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
@@ -242,6 +246,14 @@ export async function deleteNodeResourcesStrict(
 ): Promise<StrictNodeDeletionResult> {
   const db = drizzle(env.DATABASE, { schema });
   const node = await requireStrictNode(db, nodeId, userId);
+
+  // User-owned (BYO) machines have no SAM-provisioned cloud VM: strict deletion of the cloud
+  // instance is a no-op ("nothing to delete"), never a hard error, and NEVER a provider.deleteVM
+  // against the user's hardware — even defensively if a providerInstanceId were somehow set.
+  // The tunnel CNAME teardown lands in Phase 1. See architecture-critique #2.
+  if (isUserOwnedNodeClass(node.nodeClass)) {
+    return { providerVm: 'no-instance' };
+  }
 
   const providerVm = await deleteStrictProviderInstance(db, node, userId, env);
   await deleteStrictNodeDnsRecord(node, userId, env);

@@ -11,7 +11,7 @@ import { env } from 'cloudflare:test';
  */
 export async function seedUser(
   userId: string,
-  opts?: { githubId?: string; email?: string; name?: string },
+  opts?: { githubId?: string; email?: string; name?: string }
 ): Promise<void> {
   const githubId = opts?.githubId ?? `gh-${userId}`;
   const email = opts?.email ?? `${userId}@test.com`;
@@ -19,7 +19,7 @@ export async function seedUser(
 
   await env.DATABASE.prepare(
     `INSERT OR IGNORE INTO users (id, github_id, email, name, created_at, updated_at)
-     VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))`,
+     VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))`
   )
     .bind(userId, githubId, email, name)
     .run();
@@ -31,7 +31,7 @@ export async function seedUser(
 export async function seedInstallation(
   installationId: string,
   userId: string,
-  opts?: { installationIdValue?: string; accountName?: string },
+  opts?: { installationIdValue?: string; accountName?: string }
 ): Promise<void> {
   const externalInstallationId = opts?.installationIdValue ?? 'inst-12345';
   const accountName = opts?.accountName ?? 'test-user';
@@ -39,14 +39,14 @@ export async function seedInstallation(
   await env.DATABASE.prepare(
     `INSERT OR IGNORE INTO github_installation_accounts
        (installation_id, account_type, account_name, normalized_account_name, created_at, updated_at)
-     VALUES (?, 'personal', ?, lower(?), datetime('now'), datetime('now'))`,
+     VALUES (?, 'personal', ?, lower(?), datetime('now'), datetime('now'))`
   )
     .bind(externalInstallationId, accountName, accountName)
     .run();
 
   await env.DATABASE.prepare(
     `INSERT OR IGNORE INTO github_installations (id, user_id, installation_id, external_installation_id, account_type, account_name, created_at, updated_at)
-     VALUES (?, ?, ?, ?, 'user', ?, datetime('now'), datetime('now'))`,
+     VALUES (?, ?, ?, ?, 'user', ?, datetime('now'), datetime('now'))`
   )
     .bind(installationId, userId, externalInstallationId, externalInstallationId, accountName)
     .run();
@@ -59,7 +59,7 @@ export async function seedProject(
   projectId: string,
   userId: string,
   installationId: string,
-  opts?: { name?: string; repository?: string },
+  opts?: { name?: string; repository?: string }
 ): Promise<void> {
   const name = opts?.name ?? 'Test Project';
   const normalizedName = name.toLowerCase().replaceAll(/\s+/g, '-');
@@ -67,7 +67,7 @@ export async function seedProject(
 
   await env.DATABASE.prepare(
     `INSERT OR IGNORE INTO projects (id, user_id, name, normalized_name, installation_id, repository, created_by, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`
   )
     .bind(projectId, userId, name, normalizedName, installationId, repository, userId)
     .run();
@@ -75,7 +75,7 @@ export async function seedProject(
   await env.DATABASE.prepare(
     `INSERT OR IGNORE INTO project_members
        (project_id, user_id, role, status, invited_by, created_at, updated_at)
-     VALUES (?, ?, 'owner', 'active', ?, datetime('now'), datetime('now'))`,
+     VALUES (?, ?, 'owner', 'active', ?, datetime('now'), datetime('now'))`
   )
     .bind(projectId, userId, userId)
     .run();
@@ -96,11 +96,12 @@ export async function seedNode(
     createdAt?: string;
     updatedAt?: string;
     lastHeartbeatAt?: string | null;
-  },
+    nodeClass?: 'managed' | 'user-owned';
+  }
 ): Promise<void> {
   await env.DATABASE.prepare(
-    `INSERT OR IGNORE INTO nodes (id, user_id, name, status, vm_size, vm_location, health_status, warm_since, last_heartbeat_at, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR IGNORE INTO nodes (id, user_id, name, status, vm_size, vm_location, health_status, warm_since, last_heartbeat_at, node_class, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   )
     .bind(
       nodeId,
@@ -112,8 +113,9 @@ export async function seedNode(
       opts?.healthStatus ?? 'healthy',
       opts?.warmSince ?? null,
       opts?.lastHeartbeatAt ?? null,
+      opts?.nodeClass ?? 'managed',
       opts?.createdAt ?? new Date().toISOString(),
-      opts?.updatedAt ?? new Date().toISOString(),
+      opts?.updatedAt ?? new Date().toISOString()
     )
     .run();
 }
@@ -125,13 +127,19 @@ export async function seedMission(
   missionId: string,
   projectId: string,
   userId: string,
-  opts?: { title?: string; status?: string },
+  opts?: { title?: string; status?: string }
 ): Promise<void> {
   await env.DATABASE.prepare(
     `INSERT OR IGNORE INTO missions (id, project_id, user_id, title, status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+     VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))`
   )
-    .bind(missionId, projectId, userId, opts?.title ?? `Test mission ${missionId}`, opts?.status ?? 'planning')
+    .bind(
+      missionId,
+      projectId,
+      userId,
+      opts?.title ?? `Test mission ${missionId}`,
+      opts?.status ?? 'planning'
+    )
     .run();
 }
 
@@ -151,12 +159,12 @@ export async function seedTask(
     taskMode?: string;
     startedAt?: string;
     updatedAt?: string;
-  },
+  }
 ): Promise<void> {
   const updatedAt = opts?.updatedAt ?? new Date().toISOString();
   await env.DATABASE.prepare(
     `INSERT OR IGNORE INTO tasks (id, project_id, user_id, title, status, workspace_id, auto_provisioned_node_id, execution_step, task_mode, started_at, created_by, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?)`
   )
     .bind(
       taskId,
@@ -170,7 +178,7 @@ export async function seedTask(
       opts?.taskMode ?? 'task',
       opts?.startedAt ?? null,
       userId,
-      updatedAt,
+      updatedAt
     )
     .run();
 }
@@ -188,11 +196,11 @@ export async function seedWorkspace(
     chatSessionId?: string;
     createdAt?: string;
     updatedAt?: string;
-  },
+  }
 ): Promise<void> {
   await env.DATABASE.prepare(
     `INSERT OR IGNORE INTO workspaces (id, node_id, user_id, project_id, name, repository, branch, status, vm_size, vm_location, chat_session_id, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, 'main', ?, 'medium', 'nbg1', ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, 'main', ?, 'medium', 'nbg1', ?, ?, ?)`
   )
     .bind(
       workspaceId,
@@ -204,7 +212,7 @@ export async function seedWorkspace(
       opts?.status ?? 'running',
       opts?.chatSessionId ?? null,
       opts?.createdAt ?? new Date().toISOString(),
-      opts?.updatedAt ?? new Date().toISOString(),
+      opts?.updatedAt ?? new Date().toISOString()
     )
     .run();
 }
@@ -217,11 +225,11 @@ export async function seedComputeUsage(
   userId: string,
   workspaceId: string,
   nodeId: string,
-  opts?: { startedAt?: string; endedAt?: string | null },
+  opts?: { startedAt?: string; endedAt?: string | null }
 ): Promise<void> {
   await env.DATABASE.prepare(
     `INSERT OR IGNORE INTO compute_usage (id, user_id, workspace_id, node_id, server_type, vcpu_count, credential_source, started_at, ended_at, created_at)
-     VALUES (?, ?, ?, ?, 'cx22', 2, 'user', ?, ?, datetime('now'))`,
+     VALUES (?, ?, ?, ?, 'cx22', 2, 'user', ?, ?, datetime('now'))`
   )
     .bind(
       id,
@@ -229,7 +237,7 @@ export async function seedComputeUsage(
       workspaceId,
       nodeId,
       opts?.startedAt ?? new Date().toISOString(),
-      opts?.endedAt ?? null,
+      opts?.endedAt ?? null
     )
     .run();
 }
@@ -254,14 +262,14 @@ export async function seedTrigger(
     nextFireAt?: string | null;
     lastTriggeredAt?: string | null;
     taskMode?: string;
-  },
+  }
 ): Promise<void> {
   await env.DATABASE.prepare(
     `INSERT OR IGNORE INTO triggers
       (id, project_id, user_id, name, status, source_type, cron_expression, cron_timezone,
        skip_if_running, prompt_template, max_concurrent, trigger_count, next_fire_at,
        last_triggered_at, task_mode, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`
   )
     .bind(
       triggerId,
@@ -278,7 +286,7 @@ export async function seedTrigger(
       opts?.triggerCount ?? 0,
       opts?.nextFireAt ?? new Date(Date.now() - 60_000).toISOString(),
       opts?.lastTriggeredAt ?? null,
-      opts?.taskMode ?? 'task',
+      opts?.taskMode ?? 'task'
     )
     .run();
 }
@@ -302,14 +310,14 @@ export async function seedTriggerExecution(
     completedAt?: string | null;
     sequenceNumber?: number;
     createdAt?: string;
-  },
+  }
 ): Promise<void> {
   await env.DATABASE.prepare(
     `INSERT OR IGNORE INTO trigger_executions
       (id, trigger_id, project_id, status, task_id, event_type, skip_reason,
        error_message, rendered_prompt, scheduled_at, started_at, completed_at,
        sequence_number, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   )
     .bind(
       executionId,
@@ -325,7 +333,7 @@ export async function seedTriggerExecution(
       opts?.startedAt ?? opts?.createdAt ?? new Date().toISOString(),
       opts?.completedAt ?? null,
       opts?.sequenceNumber ?? 1,
-      opts?.createdAt ?? new Date().toISOString(),
+      opts?.createdAt ?? new Date().toISOString()
     )
     .run();
 }

@@ -4,6 +4,7 @@
  * These endpoints are called by the VM agent (ready, heartbeat, errors) or
  * the browser (token) and use callback JWT auth rather than user session auth.
  */
+import { isUserOwnedNodeClass } from '@simple-agent-manager/shared';
 import { and, desc, eq, isNull, ne, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
@@ -30,7 +31,10 @@ import {
   signNodeManagementToken,
 } from '../services/jwt';
 import { createWorkspaceOnNode } from '../services/node-agent';
-import { verifyNodeCallbackAuth } from '../services/node-callback-auth';
+import {
+  nodeStatusBlocksTokenRefresh,
+  verifyNodeCallbackAuth,
+} from '../services/node-callback-auth';
 import { persistErrorBatch, type PersistErrorInput } from '../services/observability';
 import { issueNodeOriginCertificate } from '../services/origin-ca-certificates';
 import * as projectDataService from '../services/project-data';
@@ -219,6 +223,30 @@ nodeLifecycleRoutes.post('/:id/origin-ca-certificate', async (c) => {
   const nodeId = c.req.param('id');
   await verifyNodeCallbackAuth(c, nodeId);
 
+  // Server-side ownership gate: NEVER hand a platform-wide `*.{BASE_DOMAIN}` wildcard Origin CA
+  // cert to a user-owned (BYO) machine — a BYO owner holds a valid callback token for their own
+  // node and could otherwise `curl` this endpoint to extract the platform wildcard cert+key.
+  // Tunnel-transport nodes never need Origin CA at all (cloudflared terminates TLS at the edge).
+  // This gate is independent of what the agent chooses to send. See security-critique #2, rule 28.
+  const gateDb = drizzle(c.env.DATABASE, { schema });
+  const nodeRow = await gateDb
+    .select({ nodeClass: schema.nodes.nodeClass, transport: schema.nodes.transport })
+    .from(schema.nodes)
+    .where(eq(schema.nodes.id, nodeId))
+    .get();
+  if (!nodeRow) {
+    throw errors.notFound('Node');
+  }
+  if (isUserOwnedNodeClass(nodeRow.nodeClass) || nodeRow.transport === 'cloudflare-tunnel') {
+    log.error('node_origin_ca_certificate.denied_user_owned', {
+      nodeId,
+      nodeClass: nodeRow.nodeClass,
+      transport: nodeRow.transport,
+      action: 'rejected',
+    });
+    throw errors.forbidden('Origin CA issuance is not available for user-owned nodes');
+  }
+
   const csr = await c.req.text();
   try {
     const result = await issueNodeOriginCertificate(c.env, csr);
@@ -283,11 +311,19 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
     updatePayload.errorMessage = sql`NULL`;
   }
 
-  const heartbeatIp = c.req.header('CF-Connecting-IP');
+  // Tunnel-transport nodes are reached via a proxied CNAME → cloudflared, NOT a public-IP A record,
+  // and their CF-Connecting-IP is the tunnel/NAT egress. Suppress ALL IP/A-record backfill for them
+  // server-side (keyed on tunnelId presence, NOT nodeClass — a future public-IP BYO mode still wants
+  // backfill) so a heartbeat can never create an A record that conflicts with the enrollment CNAME.
+  // See security-critique #8 / architecture-critique #7.
+  if (node.tunnelId) {
+    log.debug('heartbeat.ip_backfill_skipped_tunnel_node', { nodeId, action: 'skipped' });
+  }
+  const heartbeatIp = node.tunnelId ? undefined : c.req.header('CF-Connecting-IP');
 
   // Defense-in-depth: backfill IP from heartbeat if node has no IP stored.
   // This self-heals Scaleway nodes where the IP wasn't captured at creation time.
-  let effectiveNodeIp = node.ipAddress;
+  let effectiveNodeIp = node.tunnelId ? null : node.ipAddress;
 
   if (!node.ipAddress) {
     if (heartbeatIp) {
@@ -413,7 +449,18 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
   };
 
   if (tokenNeedsRefresh) {
-    response.refreshedToken = await signNodeCallbackToken(nodeId, c.env);
+    // Revocation-on-refresh: a callback JWT self-renews forever via heartbeat, so a deregistered/
+    // deleted node would keep a live, auto-renewing credential. Stop honoring the refresh once the
+    // node reaches a terminal status so deregistration actually ends the cycle. See security-critique #4.
+    if (nodeStatusBlocksTokenRefresh(node.status)) {
+      log.warn('heartbeat.token_refresh_skipped_terminal_node', {
+        nodeId,
+        status: node.status,
+        action: 'refresh_skipped',
+      });
+    } else {
+      response.refreshedToken = await signNodeCallbackToken(nodeId, c.env);
+    }
   }
 
   // Deployment mode: include pending release seqs and deploy pub key for deployment nodes.

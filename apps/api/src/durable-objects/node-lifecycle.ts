@@ -31,6 +31,7 @@ import {
   DEFAULT_NODE_LIFECYCLE_ALARM_RETRY_MS,
   DEFAULT_NODE_WARM_TIMEOUT_MS,
   DEFAULT_WORKSPACE_STOPPED_TTL_MS,
+  isUserOwnedNodeClass,
 } from '@simple-agent-manager/shared';
 import { DurableObject } from 'cloudflare:workers';
 
@@ -68,12 +69,46 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
    * If already warm, resets the alarm to a new timeout.
    * Throws if the node is currently being destroyed.
    */
-  async markIdle(nodeId: string, userId: string, warmTimeoutOverrideMs?: number | null): Promise<NodeLifecycleState> {
+  async markIdle(
+    nodeId: string,
+    userId: string,
+    warmTimeoutOverrideMs?: number | null
+  ): Promise<NodeLifecycleState> {
+    // Resolve node class FIRST, before reading DO state. isUserOwnedNode does a D1 fetch (external
+    // I/O), which opens the DO input gate. If it ran BETWEEN the state read and the storage.put
+    // below, a concurrent tryClaim (fired by node-selector's warm-node claim on every new task)
+    // could interleave during that fetch and then be silently stomped by our blind overwrite —
+    // leaving the node stuck 'stopped' while serving a live workspace. Fetching it before the read
+    // keeps the read→put critical section free of external I/O so the input gate serializes it,
+    // matching the original pre-guard behavior. See rule 45 + architecture-critique #2.
+    const userOwned = await this.isUserOwnedNode(nodeId);
+
     const state = await this.getStoredState();
     const now = Date.now();
 
     if (state && state.status === 'destroying') {
       throw new Error('node_lifecycle_conflict: node is being destroyed');
+    }
+
+    // User-owned (BYO) machines must NEVER enter the warm → destroying teardown pipeline: SAM does
+    // not own the hardware and must not schedule its destruction. Keep the node active (no warm
+    // alarm) instead. BYO nodes are never auto-provisioned so markIdle should not reach them, but
+    // this is the DO chokepoint guard. See architecture-critique #2.
+    if (userOwned) {
+      log.info('node_lifecycle.mark_idle_skipped_user_owned', { nodeId, action: 'kept_active' });
+      const activeState: StoredState = {
+        nodeId,
+        userId,
+        status: 'active',
+        warmSince: null,
+        claimedByTask: null,
+        warmTimeoutOverrideMs: null,
+      };
+      await this.ctx.storage.put('state', activeState);
+      // No warm alarm; preserve any pending workspace-deletion alarms.
+      await this.recalculateAlarm(null);
+      await this.updateD1WarmSince(nodeId, null);
+      return this.toPublicState(activeState);
     }
 
     const warmTimeout = warmTimeoutOverrideMs ?? this.getWarmTimeoutMs();
@@ -130,7 +165,10 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
   async tryClaim(taskId: string): Promise<{ claimed: boolean; state: NodeLifecycleState }> {
     const state = await this.getStoredState();
     if (!state) {
-      return { claimed: false, state: { nodeId: '', status: 'active', warmSince: null, claimedByTask: null } };
+      return {
+        claimed: false,
+        state: { nodeId: '', status: 'active', warmSince: null, claimedByTask: null },
+      };
     }
 
     if (state.status !== 'warm') {
@@ -278,6 +316,26 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
     return (await this.ctx.storage.get<StoredState>('state')) ?? null;
   }
 
+  /**
+   * True if the node is a user-owned (BYO) machine. On lookup failure returns false (treat as
+   * managed) — the common case is a managed node, and the node-cleanup cron guards are the teardown
+   * backstop, so failing to "managed" cannot destroy a BYO node.
+   */
+  private async isUserOwnedNode(nodeId: string): Promise<boolean> {
+    try {
+      const row = await this.env.DATABASE.prepare('SELECT node_class FROM nodes WHERE id = ?')
+        .bind(nodeId)
+        .first<{ node_class: string }>();
+      return isUserOwnedNodeClass(row?.node_class);
+    } catch (err) {
+      log.error('node_lifecycle.node_class_lookup_failed', {
+        nodeId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return false;
+    }
+  }
+
   private getWarmTimeoutMs(): number {
     const envValue = this.env.NODE_WARM_TIMEOUT_MS;
     if (envValue) {
@@ -367,7 +425,11 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
    * Delete a workspace: call VM agent to remove Docker container + volume,
    * then update D1 status to 'deleted'.
    */
-  private async deleteWorkspace(nodeId: string, workspaceId: string, userId: string): Promise<void> {
+  private async deleteWorkspace(
+    nodeId: string,
+    workspaceId: string,
+    userId: string
+  ): Promise<void> {
     // Call VM agent DELETE endpoint via shared helper (handles JWT auth, proper URL routing)
     try {
       await deleteWorkspaceOnNode(nodeId, workspaceId, this.env as unknown as Env, userId);
@@ -385,13 +447,17 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
     const now = new Date().toISOString();
     await this.env.DATABASE.prepare(
       `UPDATE workspaces SET status = 'deleted', updated_at = ? WHERE id = ? AND status = 'stopped'`
-    ).bind(now, workspaceId).run();
+    )
+      .bind(now, workspaceId)
+      .run();
 
     // Clean up any agent_sessions referencing this workspace (best-effort)
     try {
       await this.env.DATABASE.prepare(
         `UPDATE agent_sessions SET status = 'completed', updated_at = ? WHERE workspace_id = ? AND status NOT IN ('completed', 'failed')`
-      ).bind(now, workspaceId).run();
+      )
+        .bind(now, workspaceId)
+        .run();
     } catch {
       // best-effort
     }
