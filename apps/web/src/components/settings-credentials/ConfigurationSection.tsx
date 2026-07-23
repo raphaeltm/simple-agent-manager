@@ -9,6 +9,7 @@ const COMPUTE_LABELS: Record<string, string> = {
   hetzner: 'Hetzner Cloud',
   scaleway: 'Scaleway',
   gcp: 'Google Cloud (GCP)',
+  vultr: 'Vultr',
 };
 
 interface ConfigurationSectionProps {

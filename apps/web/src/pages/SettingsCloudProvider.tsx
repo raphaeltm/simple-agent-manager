@@ -3,12 +3,14 @@ import { Skeleton } from '@simple-agent-manager/ui';
 import { GcpCredentialForm } from '../components/GcpCredentialForm';
 import { HetznerTokenForm } from '../components/HetznerTokenForm';
 import { ScalewayCredentialForm } from '../components/ScalewayCredentialForm';
+import { VultrCredentialForm } from '../components/VultrCredentialForm';
 import { useSettingsContext } from './SettingsContext';
 
 export function SettingsCloudProvider() {
   const { credentials, loading, reload } = useSettingsContext();
   const hetznerCredential = credentials.find((c) => c.provider === 'hetzner');
   const scalewayCredential = credentials.find((c) => c.provider === 'scaleway');
+  const vultrCredential = credentials.find((c) => c.provider === 'vultr');
   const gcpCredential = credentials.find((c) => c.provider === 'gcp');
 
   if (loading && credentials.length === 0) {
@@ -31,6 +33,11 @@ export function SettingsCloudProvider() {
       <section className="glass-surface rounded-lg p-4">
         <h3 className="text-base font-semibold text-fg-primary mb-3">Scaleway</h3>
         <ScalewayCredentialForm credential={scalewayCredential} onUpdate={reload} />
+      </section>
+
+      <section className="glass-surface rounded-lg p-4">
+        <h3 className="text-base font-semibold text-fg-primary mb-3">Vultr</h3>
+        <VultrCredentialForm credential={vultrCredential} onUpdate={reload} />
       </section>
 
       <section className="glass-surface rounded-lg p-4">

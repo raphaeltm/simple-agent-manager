@@ -100,7 +100,7 @@ export function ChoosePathWizard() {
         const installations = installResult.status === 'fulfilled' ? installResult.value : [];
         const agentCreds = agentResult.status === 'fulfilled' ? agentResult.value : { credentials: [] };
 
-        const hasCloud = credentials.some((c) => c.provider === 'hetzner' || c.provider === 'scaleway');
+        const hasCloud = credentials.some((c) => c.provider === 'hetzner' || c.provider === 'scaleway' || c.provider === 'vultr');
         const hasGitHub = installations.length > 0;
         const hasAgent = agentCreds.credentials.some((c) => c.isActive);
 

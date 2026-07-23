@@ -23,6 +23,7 @@ const PROVIDER_LABELS: Record<string, string> = {
   hetzner: 'Hetzner',
   scaleway: 'Scaleway',
   gcp: 'GCP',
+  vultr: 'Vultr',
 };
 
 const AGENT_TYPE_LABELS: Record<string, string> = {
@@ -249,6 +250,7 @@ function AddCredentialForm({
               >
                 <option value="hetzner">Hetzner</option>
                 <option value="scaleway">Scaleway</option>
+                <option value="vultr">Vultr</option>
                 <option value="gcp">GCP</option>
               </select>
             </div>
