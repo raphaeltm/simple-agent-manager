@@ -962,6 +962,17 @@ export const nodes = sqliteTable(
     nodeMode: text('node_mode').notNull().default('shared'),
     /** Runtime substrate: 'vm' (default) or 'cf-container' for the Sandbox spike. */
     runtime: text('runtime').notNull().default('vm'),
+    /**
+     * Ownership/lifecycle class: 'managed' (default, SAM-provisioned) or 'user-owned' (BYO
+     * enrolled machine). Drives lifecycle guards, billing, quota, and UI. Orthogonal to `runtime`.
+     */
+    nodeClass: text('node_class').notNull().default('managed'),
+    /** Reachability transport: 'vm-public-dns' | 'cloudflare-tunnel'. Null for implicit transport. */
+    transport: text('transport'),
+    /** Cloudflare Tunnel UUID for user-owned tunnel nodes. Null otherwise. */
+    tunnelId: text('tunnel_id'),
+    /** Cloudflare Tunnel display name for user-owned tunnel nodes. Null otherwise. */
+    tunnelName: text('tunnel_name'),
     errorMessage: text('error_message'),
     createdAt: text('created_at')
       .notNull()
@@ -973,6 +984,7 @@ export const nodes = sqliteTable(
   (table) => ({
     userIdIdx: index('idx_nodes_user_id').on(table.userId),
     runtimeIdx: index('idx_nodes_runtime').on(table.runtime),
+    nodeClassIdx: index('idx_nodes_node_class').on(table.nodeClass),
   })
 );
 

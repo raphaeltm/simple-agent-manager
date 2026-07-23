@@ -27,6 +27,35 @@ export type VMSize = 'small' | 'medium' | 'large';
 export type NodeRole = 'workspace' | 'deployment';
 
 /**
+ * Node class — the ownership/lifecycle axis, orthogonal to `runtime` and `nodeRole`.
+ * - 'managed' (default): SAM provisions and owns the machine's lifecycle (cloud VM or
+ *   cf-container). Eligible for warm pooling, idle teardown, billing, and quota.
+ * - 'user-owned': a machine the user already owns and enrolled (BYO). SAM never provisions,
+ *   warms, or destroys it; it is excluded from vCPU-hour metering, $ cost, and MAX_NODES_PER_USER.
+ *   `runtime` stays 'vm' (it handles transport); `nodeClass` handles lifecycle/billing — do NOT conflate.
+ */
+export type NodeClass = 'managed' | 'user-owned';
+
+/**
+ * Node transport — how the control plane and browser reach the node's vm-agent.
+ * - 'vm-public-dns' (default for managed cloud VMs): proxied A record → public IP, Origin CA TLS.
+ * - 'cloudflare-tunnel': proxied CNAME → {tunnelUUID}.cfargotunnel.com; cloudflared is the sole
+ *   ingress and vm-agent serves plain HTTP on loopback. Tunnel presence ⇒ skip A-record backfill.
+ * Null for nodes (e.g. cf-container) where transport is implicit.
+ */
+export type NodeTransport = 'vm-public-dns' | 'cloudflare-tunnel';
+
+/** Runtime type guard for {@link NodeClass}. Unknown/legacy values are treated as not user-owned. */
+export function isNodeClass(value: unknown): value is NodeClass {
+  return value === 'managed' || value === 'user-owned';
+}
+
+/** True only for enrolled BYO machines. Any unknown/absent value is treated as managed (safe default). */
+export function isUserOwnedNodeClass(value: unknown): boolean {
+  return value === 'user-owned';
+}
+
+/**
  * VM location identifier. Widened to string to support all providers:
  * - Hetzner: 'fsn1', 'nbg1', 'hel1', 'ash', 'hil'
  * - Scaleway: 'fr-par-1', 'nl-ams-1', 'pl-waw-1', etc.
@@ -75,6 +104,15 @@ export interface NodeResponse {
   vmSize: VMSize;
   vmLocation: VMLocation;
   nodeRole: NodeRole;
+  /**
+   * Ownership/lifecycle class. Optional for backward compatibility; the API always populates it.
+   * Absent ⇒ treat as 'managed'.
+   */
+  nodeClass?: NodeClass;
+  /** Reachability transport. Null/absent for implicit-transport nodes (e.g. cf-container). */
+  transport?: NodeTransport | null;
+  /** Cloudflare Tunnel display name for user-owned tunnel nodes; null otherwise. */
+  tunnelName?: string | null;
   ipAddress: string | null;
   lastHeartbeatAt: string | null;
   heartbeatStaleAfterSeconds?: number;

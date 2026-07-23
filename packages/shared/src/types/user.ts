@@ -207,7 +207,13 @@ export interface SetupProjectDeploymentRequest {
 // =============================================================================
 
 export type PlatformCredentialType = 'cloud-provider' | 'agent-api-key';
-export type CredentialSource = 'user' | 'project' | 'platform';
+/**
+ * Where the credential that provisioned a node came from.
+ * - 'user' | 'project' | 'platform': a real cloud credential SAM used to provision the machine.
+ * - 'self-hosted': sentinel for user-owned (BYO) nodes — SAM provisioned nothing, so these accrue
+ *   $0 compute cost and are excluded from vCPU-hour metering and quota by construction.
+ */
+export type CredentialSource = 'user' | 'project' | 'platform' | 'self-hosted';
 
 export interface PlatformCredential {
   id: string;
