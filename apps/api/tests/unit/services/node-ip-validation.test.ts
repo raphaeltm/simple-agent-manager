@@ -125,7 +125,10 @@ describe('heartbeat IP backfill', () => {
   });
 
   it('self-heals nodes that already have an IP but no backend DNS record', () => {
-    expect(heartbeatSection).toContain('let effectiveNodeIp = node.ipAddress');
+    // Behavioral coverage for the tunnel-skip + managed backfill lives in
+    // tests/unit/routes/node-lifecycle-byo.test.ts. This structural assertion tracks the
+    // effectiveNodeIp initializer, which now short-circuits to null for tunnel-transport nodes.
+    expect(heartbeatSection).toContain('let effectiveNodeIp = node.tunnelId ? null : node.ipAddress');
     expect(heartbeatSection).toContain('if (effectiveNodeIp) {');
     expect(heartbeatSection).toContain('const dnsIp = heartbeatIpv4 || effectiveNodeIp');
     expect(heartbeatSection).toContain('} else {');

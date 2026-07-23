@@ -32,6 +32,9 @@ vi.mock('drizzle-orm/d1', () => ({
             heartbeatStaleAfterSeconds: 180,
           }]),
           orderBy: () => Promise.resolve([]),
+          // Origin-CA ownership gate loads the node row via .get() — a managed public-DNS node
+          // is eligible for wildcard issuance (user-owned/tunnel nodes are denied, tested separately).
+          get: () => Promise.resolve({ nodeClass: 'managed', transport: null }),
         }),
       }),
     }),
