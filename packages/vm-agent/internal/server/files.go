@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"mime"
 	"net/http"
 	"path/filepath"
 	"sort"
@@ -298,12 +297,10 @@ func (s *Server) handleFileRaw(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Detect MIME type from file extension
-	ext := filepath.Ext(filePath)
-	contentType := mime.TypeByExtension(ext)
-	if contentType == "" {
-		contentType = "application/octet-stream"
-	}
+	// Detect MIME type from file extension. resolveContentType is independent
+	// of the host /etc/mime.types (absent on the cf-container image), so
+	// .md/.txt/etc. resolve correctly instead of falling back to octet-stream.
+	contentType := resolveContentType(filepath.Base(filePath))
 
 	// Set response headers before streaming.
 	// Intentionally omit Content-Length: the stat and cat are not atomic,
