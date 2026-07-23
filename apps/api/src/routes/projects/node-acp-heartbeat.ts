@@ -1,11 +1,15 @@
+import { eq } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
+import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { extractBearerToken } from '../../lib/auth-helpers';
 import { log } from '../../lib/logger';
 import { errors } from '../../middleware/error';
 import { AcpSessionHeartbeatSchema, jsonValidator } from '../../schemas';
 import { verifyCallbackToken } from '../../services/jwt';
+import { callbackTokenMatchesNode } from '../../services/node-callback-auth';
 import * as projectDataService from '../../services/project-data';
 
 /**
@@ -44,12 +48,36 @@ nodeAcpHeartbeatRoute.post('/:id/node-acp-heartbeat', jsonValidator(AcpSessionHe
   const projectId = c.req.param('id');
   const body = c.req.valid('json');
 
-  // Note: We intentionally do NOT cross-check payload.workspace against projectId
-  // here. The VM agent iterates over its active projects and sends one heartbeat
-  // per project, all using the same callback token. The DO's updateNodeHeartbeats
-  // only touches sessions assigned to the given nodeId, limiting blast radius.
-  // This matches the existing backup sweep pattern in nodes.ts:655-663.
-  // A D1 lookup per heartbeat would defeat the lightweight 2-hop design.
+  // Authoritative auth: bind the token's OWN identity to the node it claims to heartbeat, instead
+  // of trusting the client-supplied body.nodeId. A node-scoped token (the steady state, after the
+  // first heartbeat refresh) must equal body.nodeId — a pure check, no lookup. A workspace-scoped
+  // token (the transient initial token) is accepted only if that workspace is actually assigned to
+  // body.nodeId (single indexed PK lookup, hit only during the brief pre-refresh window). Without
+  // this, a holder of any valid callback token could keep ANOTHER tenant's sessions alive by
+  // supplying a guessed nodeId. See .claude/rules/28 and security-critique #1.
+  if (!callbackTokenMatchesNode(payload, body.nodeId)) {
+    let authorized = false;
+    if (payload.scope === 'workspace') {
+      const db = drizzle(c.env.DATABASE, { schema });
+      const workspaceRow = await db
+        .select({ nodeId: schema.workspaces.nodeId })
+        .from(schema.workspaces)
+        .where(eq(schema.workspaces.id, payload.workspace))
+        .get();
+      authorized = !!workspaceRow && workspaceRow.nodeId === body.nodeId;
+    }
+    if (!authorized) {
+      log.error('acp_heartbeat.callback_token_not_bound_to_node', {
+        projectId,
+        requestedNodeId: body.nodeId,
+        scope: payload.scope,
+        tokenIdentity: payload.workspace,
+        action: 'rejected',
+      });
+      throw errors.forbidden('Callback token not authorized for this node');
+    }
+  }
+
   let updated: number;
   try {
     updated = await projectDataService.updateNodeHeartbeats(c.env, projectId, body.nodeId);

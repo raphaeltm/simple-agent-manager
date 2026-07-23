@@ -181,6 +181,60 @@ describe('agent activity callback', () => {
     );
   });
 
+  // --- Callback-token binding (security-critique #1, rule 28) ---------------------------------
+  // The token's OWN identity (payload.workspace) must be bound to the session; the client-supplied
+  // body.nodeId is NOT trusted for authorization. Each rejection test is discriminating: on pre-fix
+  // code (which only compared existing.nodeId !== body.nodeId) the attacker supplies the victim's
+  // real nodeId, so the forgery is ACCEPTED — these tests would fail.
+
+  it('rejects a workspace-scoped token bound to a DIFFERENT tenant workspace (forgery)', async () => {
+    // Attacker holds a valid workspace-scoped token for their own workspace-999, targets the
+    // victim's session (workspace-1/node-1) and truthfully supplies the victim's nodeId.
+    mocks.jwt.verifyCallbackToken.mockResolvedValueOnce({
+      workspace: 'workspace-999',
+      type: 'callback',
+      scope: 'workspace',
+    });
+    const app = await createTestApp();
+
+    const response = await postActivity(app, { activity: 'error', nodeId: 'node-1' });
+
+    expect(response.status).toBe(403);
+    // The forged report must NOT mutate the victim's session.
+    expect(mocks.projectData.reportAcpSessionActivity).not.toHaveBeenCalled();
+    expect(mocks.projectData.transitionAcpSession).not.toHaveBeenCalled();
+    expect(mocks.projectData.failSession).not.toHaveBeenCalled();
+  });
+
+  it('rejects a node-scoped token bound to a DIFFERENT node (forgery)', async () => {
+    // Attacker holds a valid node-scoped token for their own node-999, supplies the victim's node-1.
+    mocks.jwt.verifyCallbackToken.mockResolvedValueOnce({
+      workspace: 'node-999',
+      type: 'callback',
+      scope: 'node',
+    });
+    const app = await createTestApp();
+
+    const response = await postActivity(app, { activity: 'error', nodeId: 'node-1' });
+
+    expect(response.status).toBe(403);
+    expect(mocks.projectData.reportAcpSessionActivity).not.toHaveBeenCalled();
+  });
+
+  it('accepts a node-scoped token bound to the session node', async () => {
+    mocks.jwt.verifyCallbackToken.mockResolvedValueOnce({
+      workspace: 'node-1',
+      type: 'callback',
+      scope: 'node',
+    });
+    const app = await createTestApp();
+
+    const response = await postActivity(app, { activity: 'idle', nodeId: 'node-1' });
+
+    expect(response.status).toBe(204);
+    expect(mocks.projectData.reportAcpSessionActivity).toHaveBeenCalled();
+  });
+
   it('does not re-fail terminal ACP sessions on duplicate late error activity', async () => {
     mocks.projectData.getAcpSession.mockResolvedValueOnce(
       assignedAcpSession({ status: 'completed', acpSdkSessionId: 'sdk-1' })
