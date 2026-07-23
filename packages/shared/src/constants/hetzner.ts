@@ -35,6 +35,16 @@ export const DEFAULT_VULTR_REGION = 'fra';
  */
 export const DEFAULT_VULTR_OS_NAME = 'Ubuntu 24.04 LTS x64';
 
+/** Default DigitalOcean region. Override via DIGITALOCEAN_REGION env var. */
+export const DEFAULT_DIGITALOCEAN_REGION = 'fra1';
+
+/**
+ * Default DigitalOcean image slug. Unlike Vultr, DO image slugs are stable, so no
+ * dynamic id resolution is needed. A numeric `config.image` is accepted as an explicit
+ * image-id override. Override via DIGITALOCEAN_IMAGE env var.
+ */
+export const DEFAULT_DIGITALOCEAN_IMAGE = 'ubuntu-24-04-x64';
+
 /** Default GCP zone. Override via GCP_DEFAULT_ZONE env var. */
 export const DEFAULT_GCP_ZONE = 'us-central1-a';
 

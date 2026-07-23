@@ -286,7 +286,8 @@ export type ProviderConfig =
   | HetznerProviderConfig
   | ScalewayProviderConfig
   | GcpProviderConfig
-  | VultrProviderConfig;
+  | VultrProviderConfig
+  | DigitalOceanProviderConfig;
 
 export interface HetznerProviderConfig {
   provider: 'hetzner';
@@ -328,6 +329,25 @@ export interface VultrProviderConfig {
   ipPollTimeoutMs?: number;
   /** Delay in ms between main_ip poll attempts (default DEFAULT_VULTR_IP_POLL_INTERVAL_MS). */
   ipPollIntervalMs?: number;
+  /** Optional provider logger. Defaults to no-op and must not receive secrets. */
+  logger?: ProviderLogger;
+}
+
+export interface DigitalOceanProviderConfig {
+  provider: 'digitalocean';
+  apiToken: string;
+  /** Default region (DO region slug, e.g. `fra1`). Defaults to DEFAULT_DIGITALOCEAN_REGION. */
+  region?: string;
+  /** Image slug (or numeric image id) for new droplets. Defaults to DEFAULT_DIGITALOCEAN_IMAGE. */
+  image?: string;
+  /** Per-request timeout in ms. Default from getTimeoutMs(). */
+  requestTimeoutMs?: number;
+  /** Total budget in ms for the post-create public-IP poll (default DEFAULT_DIGITALOCEAN_IP_POLL_TIMEOUT_MS). */
+  ipPollTimeoutMs?: number;
+  /** Delay in ms between public-IP poll attempts (default DEFAULT_DIGITALOCEAN_IP_POLL_INTERVAL_MS). */
+  ipPollIntervalMs?: number;
+  /** Total budget in ms for polling async volume actions to completion (default DEFAULT_DIGITALOCEAN_ACTION_POLL_TIMEOUT_MS). */
+  actionPollTimeoutMs?: number;
   /** Optional provider logger. Defaults to no-op and must not receive secrets. */
   logger?: ProviderLogger;
 }

@@ -142,8 +142,10 @@ export {
   SCALING_PARAMS,
 } from './scaling';
 
-// Hetzner / Scaleway / GCP / Vultr Provider Defaults
+// Hetzner / Scaleway / GCP / Vultr / DigitalOcean Provider Defaults
 export {
+  DEFAULT_DIGITALOCEAN_IMAGE,
+  DEFAULT_DIGITALOCEAN_REGION,
   DEFAULT_GCP_API_TIMEOUT_MS,
   DEFAULT_GCP_DISK_SIZE_GB,
   DEFAULT_GCP_IDENTITY_TOKEN_EXPIRY_SECONDS,

@@ -1,3 +1,4 @@
+import { DigitalOceanProvider } from './digitalocean';
 import { GcpProvider } from './gcp';
 import { HetznerProvider } from './hetzner';
 import { ScalewayProvider } from './scaleway';
@@ -7,6 +8,7 @@ import { VultrProvider } from './vultr';
 
 // Re-export types
 export type {
+  DigitalOceanProviderConfig,
   GcpProviderConfig,
   HetznerProviderConfig,
   LocationMeta,
@@ -45,6 +47,22 @@ export {
 export { getMaxProviderErrorBodyChars, getTimeoutMs, providerFetch } from './provider-fetch';
 
 // Re-export providers and classification functions
+export type { DigitalOceanProviderRuntimeOptions } from './digitalocean';
+export {
+  classifyDigitalOceanError,
+  DEFAULT_DIGITALOCEAN_IP_POLL_INTERVAL_MS,
+  DEFAULT_DIGITALOCEAN_IP_POLL_TIMEOUT_MS,
+  DEFAULT_DIGITALOCEAN_REQUEST_TIMEOUT_MS,
+  DIGITALOCEAN_LOCATIONS,
+  DigitalOceanProvider,
+  extractPublicIp,
+  mapDigitalOceanStatus,
+} from './digitalocean';
+export {
+  DEFAULT_DIGITALOCEAN_ACTION_POLL_TIMEOUT_MS,
+  DIGITALOCEAN_VOLUME_MAX_SIZE_GB,
+  DIGITALOCEAN_VOLUME_MIN_SIZE_GB,
+} from './digitalocean-volumes';
 export type { GcpTokenProvider } from './gcp';
 export {
   classifyGcpError,
@@ -118,6 +136,16 @@ export function createProvider(config: ProviderConfig): Provider {
         requestTimeoutMs: config.requestTimeoutMs,
         ipPollTimeoutMs: config.ipPollTimeoutMs,
         ipPollIntervalMs: config.ipPollIntervalMs,
+        logger: config.logger,
+      });
+    case 'digitalocean':
+      return new DigitalOceanProvider(config.apiToken, {
+        region: config.region,
+        image: config.image,
+        requestTimeoutMs: config.requestTimeoutMs,
+        ipPollTimeoutMs: config.ipPollTimeoutMs,
+        ipPollIntervalMs: config.ipPollIntervalMs,
+        actionPollTimeoutMs: config.actionPollTimeoutMs,
         logger: config.logger,
       });
     case 'gcp':
