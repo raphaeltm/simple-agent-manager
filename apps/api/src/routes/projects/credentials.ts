@@ -51,6 +51,7 @@ import { serializeCredentialToken } from '../../services/provider-credentials';
 import {
   CredentialValidator,
   formatOnlyValidation,
+  validateDigitalOceanCredentialWithProvider,
   validateHetznerCredentialWithProvider,
   validateInfomaniakCredentialWithProvider,
   validateScalewayCredentialWithProvider,
@@ -79,74 +80,61 @@ interface CloudCredentialFields {
 
 function getCloudCredentialFields(body: CreateCredentialRequest): CloudCredentialFields {
   const providerName = body.provider;
-  if (!(CREDENTIAL_PROVIDERS as readonly string[]).includes(providerName)) {
-    throw errors.badRequest(
-      `Unsupported provider: ${providerName}. Supported: ${CREDENTIAL_PROVIDERS.join(', ')}`
-    );
-  }
+  if (!providerName) throw errors.badRequest('Provider is required');
 
-  if (providerName === 'hetzner') {
-    if (!body.token) throw errors.badRequest('Token is required for Hetzner');
-    return {
-      providerName,
-      tokenToValidate: serializeCredentialToken(providerName, { token: body.token }),
-    };
+  switch (providerName) {
+    case 'hetzner':
+    case 'vultr':
+    case 'digitalocean':
+      if (!body.token) throw errors.badRequest(`Token is required for `);
+      return {
+        providerName,
+        tokenToValidate: serializeCredentialToken(providerName, { token: body.token }),
+      };
+    case 'scaleway':
+      if (!body.secretKey || !body.projectId)
+        throw errors.badRequest('secretKey and projectId are required for Scaleway');
+      return {
+        providerName,
+        tokenToValidate: serializeCredentialToken(providerName, {
+          secretKey: body.secretKey,
+          projectId: body.projectId,
+        }),
+      };
+    case 'infomaniak':
+      if (!body.applicationCredentialId || !body.applicationCredentialSecret)
+        throw errors.badRequest('Application credential ID and secret are required for Infomaniak');
+      return {
+        providerName,
+        tokenToValidate: serializeCredentialToken(providerName, {
+          applicationCredentialId: body.applicationCredentialId,
+          applicationCredentialSecret: body.applicationCredentialSecret,
+        }),
+      };
+    case 'gcp':
+      if (
+        !body.gcpProjectId ||
+        !body.gcpProjectNumber ||
+        !body.serviceAccountEmail ||
+        !body.wifPoolId ||
+        !body.wifProviderId ||
+        !body.defaultZone
+      )
+        throw errors.badRequest(
+          'gcpProjectId, gcpProjectNumber, serviceAccountEmail, wifPoolId, wifProviderId, and defaultZone are required for GCP'
+        );
+      return {
+        providerName,
+        tokenToValidate: serializeCredentialToken(providerName, {
+          gcpProjectId: body.gcpProjectId,
+          gcpProjectNumber: body.gcpProjectNumber,
+          serviceAccountEmail: body.serviceAccountEmail,
+          wifPoolId: body.wifPoolId,
+          wifProviderId: body.wifProviderId,
+          defaultZone: body.defaultZone,
+        }),
+      };
   }
-
-  if (providerName === 'scaleway') {
-    if (!body.secretKey || !body.projectId) {
-      throw errors.badRequest('secretKey and projectId are required for Scaleway');
-    }
-    return {
-      providerName,
-      tokenToValidate: serializeCredentialToken(providerName, {
-        secretKey: body.secretKey,
-        projectId: body.projectId,
-      }),
-    };
-  }
-
-  if (providerName === 'vultr') {
-    if (!body.token) throw errors.badRequest('Token is required for Vultr');
-    return {
-      providerName,
-      tokenToValidate: serializeCredentialToken(providerName, { token: body.token }),
-    };
-  }
-
-  if (providerName === 'infomaniak') {
-    const credential = {
-      applicationCredentialId: body.applicationCredentialId,
-      applicationCredentialSecret: body.applicationCredentialSecret,
-    };
-    if (!credential.applicationCredentialId || !credential.applicationCredentialSecret)
-      throw errors.badRequest('Application credential ID and secret are required for Infomaniak');
-    return { providerName, tokenToValidate: serializeCredentialToken(providerName, credential) };
-  }
-
-  if (
-    !body.gcpProjectId ||
-    !body.gcpProjectNumber ||
-    !body.serviceAccountEmail ||
-    !body.wifPoolId ||
-    !body.wifProviderId ||
-    !body.defaultZone
-  ) {
-    throw errors.badRequest(
-      'gcpProjectId, gcpProjectNumber, serviceAccountEmail, wifPoolId, wifProviderId, and defaultZone are required for GCP'
-    );
-  }
-  return {
-    providerName,
-    tokenToValidate: serializeCredentialToken(providerName, {
-      gcpProjectId: body.gcpProjectId,
-      gcpProjectNumber: body.gcpProjectNumber,
-      serviceAccountEmail: body.serviceAccountEmail,
-      wifPoolId: body.wifPoolId,
-      wifProviderId: body.wifProviderId,
-      defaultZone: body.defaultZone,
-    }),
-  };
 }
 
 const DEFAULT_SAVE_VALIDATION_TIMEOUT_MS = 8000;
@@ -188,6 +176,11 @@ async function validateCloudCredentialRequest(
       body.applicationCredentialSecret,
       validationOptions
     );
+  }
+  if (body.provider === 'digitalocean') {
+    return validateDigitalOceanCredentialWithProvider(body.token, {
+      timeoutMs: getSaveValidationTimeoutMs(env),
+    });
   }
   return formatOnlyValidation(
     'GCP credential metadata accepted. Live validation runs during Google setup.'

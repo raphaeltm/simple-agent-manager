@@ -26,6 +26,10 @@ const InfomaniakCredentialSchema = v.object({
   applicationCredentialId: v.pipe(v.string(), v.minLength(1)),
   applicationCredentialSecret: v.pipe(v.string(), v.minLength(1)),
 });
+const DigitalOceanCredentialSchema = v.object({
+  provider: v.literal('digitalocean'),
+  token: v.string(),
+});
 
 const GcpCredentialSchema = v.object({
   provider: v.literal('gcp'),
@@ -43,6 +47,7 @@ export const CreateCredentialSchema = v.variant('provider', [
   ScalewayCredentialSchema,
   VultrCredentialSchema,
   InfomaniakCredentialSchema,
+  DigitalOceanCredentialSchema,
   GcpCredentialSchema,
 ]);
 

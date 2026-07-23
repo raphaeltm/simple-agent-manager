@@ -312,6 +312,13 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   INFOMANIAK_API_TIMEOUT_MS?: string;
   INFOMANIAK_IP_POLL_TIMEOUT_MS?: string;
   INFOMANIAK_IP_POLL_INTERVAL_MS?: string;
+  // DigitalOcean provider tuning (optional; DEFAULT_DIGITALOCEAN_* apply otherwise)
+  DIGITALOCEAN_REGION?: string;
+  DIGITALOCEAN_IMAGE?: string;
+  DIGITALOCEAN_API_TIMEOUT_MS?: string;
+  DIGITALOCEAN_IP_POLL_TIMEOUT_MS?: string;
+  DIGITALOCEAN_IP_POLL_INTERVAL_MS?: string;
+  DIGITALOCEAN_ACTION_POLL_TIMEOUT_MS?: string;
   // External API timeouts (milliseconds)
   HETZNER_API_TIMEOUT_MS?: string;
   CF_API_TIMEOUT_MS?: string;

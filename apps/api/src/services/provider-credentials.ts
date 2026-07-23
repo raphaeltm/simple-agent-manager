@@ -39,6 +39,8 @@ export function serializeCredentialToken(
         applicationCredentialId: fields.applicationCredentialId,
         applicationCredentialSecret: fields.applicationCredentialSecret,
       });
+    case 'digitalocean':
+      return fields.token ?? '';
     case 'gcp':
       return JSON.stringify({
         version: GCP_CREDENTIAL_VERSION,
@@ -114,14 +116,27 @@ export interface VultrRuntimeEnv {
   VULTR_IP_POLL_INTERVAL_MS?: string;
 }
 
+/** Env vars that tune DigitalOcean provider behavior (all optional; DEFAULT_DIGITALOCEAN_* apply otherwise). */
+export interface DigitalOceanRuntimeEnv {
+  DIGITALOCEAN_REGION?: string;
+  DIGITALOCEAN_IMAGE?: string;
+  DIGITALOCEAN_API_TIMEOUT_MS?: string;
+  DIGITALOCEAN_IP_POLL_TIMEOUT_MS?: string;
+  DIGITALOCEAN_IP_POLL_INTERVAL_MS?: string;
+  DIGITALOCEAN_ACTION_POLL_TIMEOUT_MS?: string;
+}
+
 /**
  * Build a ProviderConfig from a provider name and decrypted credential token.
- * Handles both raw token strings (Hetzner, Vultr) and JSON blobs (Scaleway).
+ * Handles both raw token strings (Hetzner, Vultr, DigitalOcean) and JSON blobs (Scaleway).
  */
 export function buildProviderConfig(
   provider: CredentialProvider,
   decryptedToken: string,
-  providerEnv?: HetznerCapacityRetryEnv & VultrRuntimeEnv & InfomaniakRuntimeEnv
+  providerEnv?: HetznerCapacityRetryEnv &
+    VultrRuntimeEnv &
+    InfomaniakRuntimeEnv &
+    DigitalOceanRuntimeEnv
 ): ProviderConfig {
   switch (provider) {
     case 'hetzner':
@@ -184,6 +199,17 @@ export function buildProviderConfig(
         ipPollIntervalMs: parseOptionalInt(providerEnv?.INFOMANIAK_IP_POLL_INTERVAL_MS),
       };
     }
+    case 'digitalocean':
+      return {
+        provider: 'digitalocean',
+        apiToken: decryptedToken,
+        region: providerEnv?.DIGITALOCEAN_REGION,
+        image: providerEnv?.DIGITALOCEAN_IMAGE,
+        requestTimeoutMs: parseOptionalInt(providerEnv?.DIGITALOCEAN_API_TIMEOUT_MS),
+        ipPollTimeoutMs: parseOptionalInt(providerEnv?.DIGITALOCEAN_IP_POLL_TIMEOUT_MS),
+        ipPollIntervalMs: parseOptionalInt(providerEnv?.DIGITALOCEAN_IP_POLL_INTERVAL_MS),
+        actionPollTimeoutMs: parseOptionalInt(providerEnv?.DIGITALOCEAN_ACTION_POLL_TIMEOUT_MS),
+      };
     case 'scaleway': {
       let parsed: unknown;
       try {

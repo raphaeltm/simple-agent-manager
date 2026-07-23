@@ -49,6 +49,7 @@ export const PROVIDER_HELP: Record<CredentialProvider, ProviderHelpMeta> = {
     helpUrl: 'https://docs.infomaniak.cloud/identity/applications_credentials/',
     helpText:
       'Create an application credential with reader and member roles (both are required in dc4-a), then copy its ID and one-time secret',
+  },
   digitalocean: {
     description: 'Global cloud, simple droplets',
     helpUrl: 'https://cloud.digitalocean.com/account/api/tokens',
@@ -111,6 +112,7 @@ export const PROVIDER_LOCATIONS: Record<CredentialProvider, LocationMeta[]> = {
   infomaniak: [
     { id: 'dc4-a', name: 'Geneva DC4', country: 'CH' },
     { id: 'dc3-a', name: 'Geneva DC3', country: 'CH' },
+  ],
   digitalocean: [
     { id: 'fra1', name: 'Frankfurt', country: 'DE' },
     { id: 'ams3', name: 'Amsterdam', country: 'NL' },
@@ -158,7 +160,7 @@ export const TOKEN_COMPUTE_PROVIDERS = ['hetzner', 'scaleway', 'vultr', 'digital
  * onboarding gate so the provider set lives in exactly one place.
  */
 export function hasByocComputeCredential(
-  credentials: ReadonlyArray<{ provider: string }>,
+  credentials: ReadonlyArray<{ provider: string }>
 ): boolean {
   const providers = TOKEN_COMPUTE_PROVIDERS as readonly string[];
   return credentials.some((c) => providers.includes(c.provider));
