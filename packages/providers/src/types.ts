@@ -282,7 +282,11 @@ export interface Provider {
  * Provider configuration — discriminated union per provider type.
  * Accepts explicit credentials; MUST NOT access process.env.
  */
-export type ProviderConfig = HetznerProviderConfig | ScalewayProviderConfig | GcpProviderConfig;
+export type ProviderConfig =
+  | HetznerProviderConfig
+  | ScalewayProviderConfig
+  | GcpProviderConfig
+  | VultrProviderConfig;
 
 export interface HetznerProviderConfig {
   provider: 'hetzner';
@@ -309,6 +313,23 @@ export interface ScalewayProviderConfig {
   secretKey: string;
   projectId: string;
   zone?: string;
+}
+
+export interface VultrProviderConfig {
+  provider: 'vultr';
+  apiToken: string;
+  /** Default region (Vultr region id, e.g. `fra`). Defaults to DEFAULT_VULTR_REGION. */
+  region?: string;
+  /** OS name matched against `GET /v2/os` to resolve the numeric os_id. Defaults to DEFAULT_VULTR_OS_NAME. */
+  osName?: string;
+  /** Per-request timeout in ms. Default from getTimeoutMs(). */
+  requestTimeoutMs?: number;
+  /** Total budget in ms for the post-create main_ip poll (default DEFAULT_VULTR_IP_POLL_TIMEOUT_MS). */
+  ipPollTimeoutMs?: number;
+  /** Delay in ms between main_ip poll attempts (default DEFAULT_VULTR_IP_POLL_INTERVAL_MS). */
+  ipPollIntervalMs?: number;
+  /** Optional provider logger. Defaults to no-op and must not receive secrets. */
+  logger?: ProviderLogger;
 }
 
 export interface GcpProviderConfig {

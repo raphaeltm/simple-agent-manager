@@ -9,6 +9,7 @@ export const PROVIDER_LABELS: Record<CredentialProvider, string> = {
   hetzner: 'Hetzner',
   scaleway: 'Scaleway',
   gcp: 'Google Cloud',
+  vultr: 'Vultr',
 };
 
 /** Provider console URLs and help text for onboarding / credential setup. */
@@ -33,6 +34,12 @@ export const PROVIDER_HELP: Record<CredentialProvider, ProviderHelpMeta> = {
     description: 'Google Cloud Platform',
     helpUrl: 'https://console.cloud.google.com/iam-admin/serviceaccounts',
     helpText: 'Set up Workload Identity Federation or create a service account key',
+  },
+  vultr: {
+    description: 'Global cloud, hourly billing',
+    helpUrl: 'https://my.vultr.com/settings/#settingsapi',
+    helpText:
+      'Go to Account → API, enable API access, and set Access Control to "Allow All IPv4/IPv6" (SAM calls from Cloudflare with no fixed IP), then copy your Personal Access Token',
   },
 };
 
@@ -76,6 +83,17 @@ export const PROVIDER_LOCATIONS: Record<CredentialProvider, LocationMeta[]> = {
     { id: 'asia-southeast1-a', name: 'Singapore', country: 'SG' },
     { id: 'asia-northeast1-a', name: 'Tokyo', country: 'JP' },
   ],
+  vultr: [
+    { id: 'fra', name: 'Frankfurt', country: 'DE' },
+    { id: 'ams', name: 'Amsterdam', country: 'NL' },
+    { id: 'lhr', name: 'London', country: 'GB' },
+    { id: 'ewr', name: 'New Jersey', country: 'US' },
+    { id: 'ord', name: 'Chicago', country: 'US' },
+    { id: 'lax', name: 'Los Angeles', country: 'US' },
+    { id: 'nrt', name: 'Tokyo', country: 'JP' },
+    { id: 'sgp', name: 'Singapore', country: 'SG' },
+    { id: 'syd', name: 'Sydney', country: 'AU' },
+  ],
 };
 
 /** Default location per provider. */
@@ -83,6 +101,7 @@ export const PROVIDER_DEFAULT_LOCATIONS: Record<CredentialProvider, string> = {
   hetzner: 'fsn1',
   scaleway: 'fr-par-1',
   gcp: 'us-central1-a',
+  vultr: 'fra',
 };
 
 /** Flat lookup of all locations (derived from PROVIDER_LOCATIONS). */

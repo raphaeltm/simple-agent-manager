@@ -66,7 +66,7 @@ export interface UpdateSignupApprovalConfigRequest {
 // =============================================================================
 // Credential
 // =============================================================================
-export const CREDENTIAL_PROVIDERS = ['hetzner', 'scaleway', 'gcp'] as const;
+export const CREDENTIAL_PROVIDERS = ['hetzner', 'scaleway', 'gcp', 'vultr'] as const;
 export type CredentialProvider = (typeof CREDENTIAL_PROVIDERS)[number];
 
 export interface Credential {
@@ -100,10 +100,11 @@ export interface CredentialValidationStatus {
 
 /**
  * Create credential request — discriminated by provider.
- * Hetzner uses a single API token; Scaleway requires secretKey + projectId.
+ * Hetzner and Vultr use a single API token; Scaleway requires secretKey + projectId.
  */
 export type CreateCredentialRequest =
   | { provider: 'hetzner'; token: string }
+  | { provider: 'vultr'; token: string }
   | { provider: 'scaleway'; secretKey: string; projectId: string }
   | {
       provider: 'gcp';

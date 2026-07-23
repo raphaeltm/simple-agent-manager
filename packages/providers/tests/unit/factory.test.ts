@@ -1,6 +1,6 @@
 import { describe, expect,it } from 'vitest';
 
-import { createProvider, HetznerProvider, ProviderError,ScalewayProvider } from '../../src/index';
+import { createProvider, HetznerProvider, ProviderError,ScalewayProvider, VultrProvider } from '../../src/index';
 
 describe('createProvider', () => {
   it('should return HetznerProvider for hetzner config', () => {
@@ -48,6 +48,23 @@ describe('createProvider', () => {
       zone: 'nl-ams-1',
     });
     expect(provider).toBeInstanceOf(ScalewayProvider);
+  });
+
+  it('should return VultrProvider for vultr config', () => {
+    const provider = createProvider({ provider: 'vultr', apiToken: 'vultr-key' });
+    expect(provider).toBeInstanceOf(VultrProvider);
+    expect(provider.name).toBe('vultr');
+  });
+
+  it('should pass region + tuning to VultrProvider', () => {
+    const provider = createProvider({
+      provider: 'vultr',
+      apiToken: 'vultr-key',
+      region: 'ewr',
+      ipPollTimeoutMs: 1000,
+    });
+    expect(provider).toBeInstanceOf(VultrProvider);
+    expect(provider.defaultLocation).toBe('ewr');
   });
 
   it('should not access process.env', () => {

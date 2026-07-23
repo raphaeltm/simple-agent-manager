@@ -22,6 +22,7 @@ export const PROVIDER_VM_SIZE_VCPUS: Record<string, Record<VMSize, number>> = {
   hetzner: { small: 2, medium: 4, large: 8 },
   scaleway: { small: 3, medium: 4, large: 8 },
   gcp: { small: 1, medium: 2, large: 4 },
+  vultr: { small: 2, medium: 4, large: 6 },
 };
 
 /** Default vCPU counts when provider is unknown. Uses Hetzner as the reference. */

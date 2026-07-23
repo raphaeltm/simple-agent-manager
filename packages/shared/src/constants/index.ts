@@ -142,7 +142,7 @@ export {
   SCALING_PARAMS,
 } from './scaling';
 
-// Hetzner / Scaleway / GCP Provider Defaults
+// Hetzner / Scaleway / GCP / Vultr Provider Defaults
 export {
   DEFAULT_GCP_API_TIMEOUT_MS,
   DEFAULT_GCP_DISK_SIZE_GB,
@@ -162,6 +162,8 @@ export {
   DEFAULT_HETZNER_IMAGE,
   DEFAULT_SCALEWAY_IMAGE_NAME,
   DEFAULT_SCALEWAY_ZONE,
+  DEFAULT_VULTR_OS_NAME,
+  DEFAULT_VULTR_REGION,
   HETZNER_IMAGE,
 } from './hetzner';
 

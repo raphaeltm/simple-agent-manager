@@ -1,14 +1,7 @@
-export function labelsToScalewayTags(labels: Record<string, string>): string[] {
-  return Object.entries(labels).map(([key, value]) => `${key}=${value}`);
-}
-
-export function scalewayTagsToLabels(tags: string[]): Record<string, string> {
-  const labels: Record<string, string> = {};
-  for (const tag of tags) {
-    const eqIndex = tag.indexOf('=');
-    if (eqIndex > 0) {
-      labels[tag.slice(0, eqIndex)] = tag.slice(eqIndex + 1);
-    }
-  }
-  return labels;
-}
+// Scaleway encodes SAM labels as `key=value` tag strings — the generic encoding
+// now lives in kv-tags.ts (shared with the Vultr provider). Re-exported under the
+// original Scaleway-named symbols so existing imports keep working unchanged.
+export {
+  labelsToKvTags as labelsToScalewayTags,
+  kvTagsToLabels as scalewayTagsToLabels,
+} from './kv-tags';

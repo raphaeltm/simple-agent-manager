@@ -53,6 +53,11 @@ export const PROVIDER_VM_CAPACITY: Record<string, Record<VMSize, VmCapacity>> = 
     medium: { vcpu: 2, ramGb: 8, storageGb: 50 },
     large: { vcpu: 4, ramGb: 16, storageGb: 50 },
   },
+  vultr: {
+    small: { vcpu: 2, ramGb: 4, storageGb: 80 },
+    medium: { vcpu: 4, ramGb: 8, storageGb: 160 },
+    large: { vcpu: 6, ramGb: 16, storageGb: 320 },
+  },
 };
 
 /** Default capacity when provider is unknown. Uses Hetzner as baseline. */
