@@ -98,6 +98,16 @@ Add `vultr` as a fourth cloud provider (after hetzner, scaleway, gcp) covering B
 ## Merge protocol (authorized 2026-07-23)
 BYO-key exception: merge with CI green (incl. SonarCloud + Preflight) + all reviewers PASS/ADDRESSED + staging regression + no-key checks green. PR MUST document that live Vultr provisioning is validated post-merge in production by Raphaël with his own key, and include his manual production checklist (add real key → create Vultr node → workspace → run agent → delete node; then deployment env + Vultr volume → tear down).
 
+## Status & review outcomes (2026-07-23)
+
+**Implementation complete** across shared, providers, api, cloud-init, web, docs. All local suites green: providers, api (6229), web (2752), shared (539), cloud-init (178); typecheck 16/16; lint 0 errors; builds clean; migration/wrangler quality gates pass.
+
+**8 specialist reviewers run — 0 CRITICAL.** Code findings all FIXED in-branch:
+- `sanitizeHostname` trailing-hyphen bug (strip after truncate); `pollForIp` hard-bounded wall time (cap delay + poll GET to remaining budget); `provider-fetch` handles Vultr flat-string `{error:"..."}` (clean message); list-pagination truncation warn; `ipPollTimeoutMs` positiveOr; `VULTR_*` on `Env` interface; `CloudProviderConnectFlow` grid `sm:grid-cols-2`; onboarding comment references deferred follow-up.
+- HIGH test-coverage gaps CLOSED: `VultrCredentialForm` + `CloudProviderConnectFlow` behavioral tests (incl. proven-discriminating validate race-guard + GCP-fallthrough guard); rule-35 apps/api provisioning vertical slice; cursor-pagination 2-page tests; discriminating detach-404; `classifyVultrError`/`mapVultrStatus`/`toBase64`/volume-HTTP-failure coverage; cloud-init vultr generation.
+
+**Deferred (pre-existing cross-provider, not Vultr regressions), tracked:** credential-route rate-limiting + GCP has-cloud-provider gate gap → `tasks/backlog/2026-07-23-credential-routes-preexisting-hardening.md`. Onboarding first-run wizard parity → `tasks/backlog/2026-07-23-vultr-onboarding-wizard-parity.md`.
+
 ## References
 - Idea 01KY86EMPSA0XTZGGNAZAA0CEK · `tasks/backlog/2026-02-16-additional-cloud-providers.md` (Vultr section) · `packages/providers/src/scaleway.ts` + `scaleway-volumes.ts` (impl pattern) · `packages/providers/src/hetzner.ts` (single-token) · `apps/api/src/services/provider-credentials.ts`
 - Rules: 18 (file size), 28 (credential fallback tests), 35 (vertical slice), 11 (fail-fast), 41 (credential snapshot resilience), 47 (control-loop I/O budget), 01 (doc sync), 17 (UI visual), 42 (tracked follow-ups)

@@ -236,4 +236,45 @@ describe('providerFetch', () => {
       expect(pe.message).toContain('Rate limited');
     }
   });
+
+  // Vultr errors are `{ "error": "<flat string>", "status": <int> }` — the top-level
+  // `error` is a plain STRING, not a nested { code, message } object. The message must
+  // be the string itself, NOT the raw JSON blob (which would leak the whole body).
+  it('extracts a Vultr-style flat-string error without leaking the raw JSON', async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ error: 'Invalid API key.', status: 401 }), { status: 401 })
+      );
+
+    try {
+      await providerFetch('vultr', 'https://api.vultr.com/v2/account');
+      expect.fail('Should have thrown');
+    } catch (err) {
+      const pe = err as ProviderError;
+      expect(pe).toBeInstanceOf(ProviderError);
+      expect(pe.statusCode).toBe(401);
+      expect(pe.message).toContain('Invalid API key.');
+      // The raw JSON body must NOT be dumped into the message.
+      expect(pe.message).not.toContain('{"error"');
+    }
+  });
+
+  it('still extracts a nested { error: { code, message } } object body (no regression)', async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ error: { code: 'x', message: 'boom' } }), { status: 400 })
+      );
+
+    try {
+      await providerFetch('vultr', 'https://api.vultr.com/v2/instances');
+      expect.fail('Should have thrown');
+    } catch (err) {
+      const pe = err as ProviderError;
+      expect(pe.message).toContain('boom');
+      expect(pe.providerCode).toBe('x');
+      expect(pe.message).not.toContain('{"error"');
+    }
+  });
 });
