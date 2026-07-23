@@ -113,7 +113,7 @@ Flow: `upload_to_library` (MCP) → `downloadFromWorkspace()` → GET `/workspac
 - [x] Layer 2: `library.test.ts` octet-stream `.md` serves text/markdown; `.html`/`.svg` still safe; unknown-ext 400
 - [x] Process fix rule `51-*`
 - [x] `go test ./...` (vm-agent, 0 failures), `pnpm lint`(0 errors) `&& typecheck`(16/16) `&& test`(19/19: web 2749, api 6213) `&& build`(9/9)
-- [ ] task-completion-validator + Phase 5 specialist reviewers (running)
+- [x] task-completion-validator (PASS) + Phase 5 specialist reviewers (go/cloudflare/ui-ux/security/test-engineer/constitution — all PASS/ADDRESSED; 0 unresolved CRITICAL/HIGH). Review fixes in commit 1b9dda387; 2 pre-existing findings → backlog.
 - [ ] PR with Post-Mortem + explicit "staging skipped per human instruction" + note that Layer 1 (binary) can't be runtime-verified pre-merge
 
 ## Acceptance criteria
