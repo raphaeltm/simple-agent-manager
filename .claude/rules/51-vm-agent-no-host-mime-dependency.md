@@ -20,10 +20,12 @@ on.
 
 The MIME incident: file downloads set `Content-Type` via Go's
 `mime.TypeByExtension`, which — beyond Go's small compiled-in built-in table —
-reads the host's `/etc/mime.types` (the `media-types` package). Ubuntu VM nodes
-ship `media-types`; the minimal cf-container image does not. So `.md`, `.txt`,
-`.yaml`, `.toml`, `.csv`, `.log` resolved correctly on the VM but fell back to
-`application/octet-stream` on the container. `upload_to_library` stores that
+reads the host mime database that `mime.initMimeUnix` loads (`shared-mime-info`'s
+`/usr/share/mime/globs2`, or failing that `/etc/mime.types` from the
+`media-types` package). Ubuntu VM nodes ship one of those; the minimal
+cf-container image ships neither. So `.md`, `.txt`, `.yaml`, `.toml`, `.csv`,
+`.log` resolved correctly on the VM but fell back to `application/octet-stream`
+on the container. `upload_to_library` stores that
 `Content-Type` as the library file's `mimeType`, and both the web preview
 predicates and the API `/preview` gate reject octet-stream — so **agent-uploaded
 markdown never previewed**, but only for sessions that ran on Instant

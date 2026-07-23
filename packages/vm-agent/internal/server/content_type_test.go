@@ -107,3 +107,47 @@ func TestResolveContentType(t *testing.T) {
 		})
 	}
 }
+
+// TestResolveContentType_NoHostMimeDatabase proves the WIRING that the bug was
+// about: that resolveContentType actually falls through to the curated
+// fallbackContentTypes table when the host mime lookup returns empty. On any
+// dev/CI host with a real mime database, mime.TypeByExtension resolves the
+// curated extensions itself, so the fallthrough is never exercised and a test
+// that relied on the real lookup could NOT distinguish the fixed code from a
+// regression that dropped the fallback call. Here we override mimeTypeByExtension
+// to always return "" — exactly the minimal cf-container scenario — so the
+// assertions can ONLY pass if the fallback is wired in. This test must fail if
+// resolveContentType stops calling fallbackContentType (verified discriminating).
+func TestResolveContentType_NoHostMimeDatabase(t *testing.T) {
+	orig := mimeTypeByExtension
+	mimeTypeByExtension = func(string) string { return "" } // no host mime DB at all
+	t.Cleanup(func() { mimeTypeByExtension = orig })
+
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"README.md", "text/markdown; charset=utf-8"},
+		{"notes.markdown", "text/markdown; charset=utf-8"},
+		{"log.txt", "text/plain; charset=utf-8"},
+		{"app.log", "text/plain; charset=utf-8"},
+		{"data.csv", "text/csv; charset=utf-8"},
+		{"config.yaml", "application/yaml"},
+		{"config.yml", "application/yaml"},
+		{"Cargo.toml", "application/toml"},
+		{"package.json", "application/json"},
+		{"data.xml", "application/xml"},
+		{"/workspace/docs/guide.md", "text/markdown; charset=utf-8"},
+		// Unknown / no extension still → octet-stream when the host DB is empty.
+		{"blob.unknownext", unknownContentType},
+		{"Makefile", unknownContentType},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.input, func(t *testing.T) {
+			if got := resolveContentType(tc.input); got != tc.want {
+				t.Errorf("resolveContentType(%q) with no host mime DB = %q, want %q", tc.input, got, tc.want)
+			}
+		})
+	}
+}
