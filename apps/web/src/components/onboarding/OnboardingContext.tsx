@@ -1,3 +1,4 @@
+import { hasByocComputeCredential } from '@simple-agent-manager/shared';
 import { createContext, type ReactNode,useCallback, useContext, useEffect, useMemo, useState } from 'react';
 
 import {
@@ -78,9 +79,7 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
         const installations = installResult.status === 'fulfilled' ? installResult.value : [];
         const agentCreds = agentResult.status === 'fulfilled' ? agentResult.value : { credentials: [] };
 
-        const hasCloud = credentials.some(
-          (c) => c.provider === 'hetzner' || c.provider === 'scaleway' || c.provider === 'vultr'
-        );
+        const hasCloud = hasByocComputeCredential(credentials);
         const hasGitHub = installations.length > 0;
         const hasAgent = agentCreds.credentials.some((c) => c.isActive);
 

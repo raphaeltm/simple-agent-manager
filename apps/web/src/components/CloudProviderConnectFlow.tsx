@@ -72,6 +72,9 @@ function buildRequest(provider: CredentialProvider, form: CloudFormState): Creat
   if (provider === 'vultr') {
     return { provider, token: form.token.trim() };
   }
+  if (provider === 'digitalocean') {
+    return { provider, token: form.token.trim() };
+  }
   if (provider === 'scaleway') {
     return {
       provider,
@@ -93,6 +96,7 @@ function buildRequest(provider: CredentialProvider, form: CloudFormState): Creat
 function isReady(provider: CredentialProvider | '', form: CloudFormState): boolean {
   if (provider === 'hetzner') return form.token.trim().length > 0;
   if (provider === 'vultr') return form.token.trim().length > 0;
+  if (provider === 'digitalocean') return form.token.trim().length > 0;
   if (provider === 'scaleway') {
     return form.secretKey.trim().length > 0 && form.projectId.trim().length > 0;
   }
@@ -224,6 +228,16 @@ export function CloudProviderConnectFlow({
               value={form.token}
               onChange={(value) => setField('token', value)}
               placeholder="Vultr Personal Access Token"
+            />
+          )}
+
+          {provider === 'digitalocean' && (
+            <CredentialInput
+              id="cloud-digitalocean-token"
+              label="DigitalOcean API key (Full Access Personal Access Token)"
+              value={form.token}
+              onChange={(value) => setField('token', value)}
+              placeholder="DigitalOcean Personal Access Token"
             />
           )}
 

@@ -1,5 +1,5 @@
 import type { CredentialProvider, GitHubInstallation, NodeResponse, Project, ProjectDetailResponse, ProviderCatalog, VMSize } from '@simple-agent-manager/shared';
-import { DEFAULT_VM_LOCATION, PROVIDER_LABELS } from '@simple-agent-manager/shared';
+import { DEFAULT_VM_LOCATION, hasByocComputeCredential, PROVIDER_LABELS } from '@simple-agent-manager/shared';
 import { Alert, Breadcrumb, Button, Card, Input, PageLayout, Select, Spinner } from '@simple-agent-manager/ui';
 import { useCallback,useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
@@ -130,7 +130,7 @@ export function CreateWorkspace() {
       listCredentials().catch(() => []),
       getTrialStatus().catch(() => null),
     ]).then(([creds, trial]) => {
-        const hasUserCreds = creds.some((c: { provider: string }) => c.provider === 'hetzner' || c.provider === 'scaleway' || c.provider === 'vultr');
+        const hasUserCreds = hasByocComputeCredential(creds);
         const trialAvailable = trial?.available ?? false;
         const hasCloud = hasUserCreds || trialAvailable;
         setHasCloudProvider(hasCloud);

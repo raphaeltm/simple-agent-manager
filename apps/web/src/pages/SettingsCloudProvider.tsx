@@ -1,5 +1,6 @@
 import { Skeleton } from '@simple-agent-manager/ui';
 
+import { DigitalOceanCredentialForm } from '../components/DigitalOceanCredentialForm';
 import { GcpCredentialForm } from '../components/GcpCredentialForm';
 import { HetznerTokenForm } from '../components/HetznerTokenForm';
 import { ScalewayCredentialForm } from '../components/ScalewayCredentialForm';
@@ -11,6 +12,7 @@ export function SettingsCloudProvider() {
   const hetznerCredential = credentials.find((c) => c.provider === 'hetzner');
   const scalewayCredential = credentials.find((c) => c.provider === 'scaleway');
   const vultrCredential = credentials.find((c) => c.provider === 'vultr');
+  const digitalOceanCredential = credentials.find((c) => c.provider === 'digitalocean');
   const gcpCredential = credentials.find((c) => c.provider === 'gcp');
 
   if (loading && credentials.length === 0) {
@@ -38,6 +40,11 @@ export function SettingsCloudProvider() {
       <section className="glass-surface rounded-lg p-4">
         <h3 className="text-base font-semibold text-fg-primary mb-3">Vultr</h3>
         <VultrCredentialForm credential={vultrCredential} onUpdate={reload} />
+      </section>
+
+      <section className="glass-surface rounded-lg p-4">
+        <h3 className="text-base font-semibold text-fg-primary mb-3">DigitalOcean</h3>
+        <DigitalOceanCredentialForm credential={digitalOceanCredential} onUpdate={reload} />
       </section>
 
       <section className="glass-surface rounded-lg p-4">

@@ -10,6 +10,7 @@ const COMPUTE_LABELS: Record<string, string> = {
   scaleway: 'Scaleway',
   gcp: 'Google Cloud (GCP)',
   vultr: 'Vultr',
+  digitalocean: 'DigitalOcean',
 };
 
 interface ConfigurationSectionProps {

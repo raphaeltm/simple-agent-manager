@@ -1,6 +1,6 @@
 // FILE SIZE EXCEPTION: Pre-existing project chat state hook exceeds the 800-line gate on main; split as follow-up outside shared runtime fix scope.
 import type { AgentInfo, AgentProfile, AgentProfileRuntime, CreateAgentProfileRequest, ProviderCatalog, Task, TaskMode, UpdateAgentProfileRequest, VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
-import { DEFAULT_VM_SIZE, DEFAULT_WORKSPACE_PROFILE } from '@simple-agent-manager/shared';
+import { DEFAULT_VM_SIZE, DEFAULT_WORKSPACE_PROFILE, hasByocComputeCredential } from '@simple-agent-manager/shared';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
 
@@ -269,7 +269,7 @@ export function useProjectChatState() {
       listCredentials().catch(() => []),
       getTrialStatus().catch(() => null),
     ]).then(([creds, trial]) => {
-      const hasUserCreds = creds.some((c: { provider: string }) => c.provider === 'hetzner' || c.provider === 'scaleway' || c.provider === 'vultr');
+      const hasUserCreds = hasByocComputeCredential(creds);
       const trialAvailable = trial?.available ?? false;
       const hasCloud = hasUserCreds || trialAvailable;
       setHasUserCloudCredentials(hasUserCreds);

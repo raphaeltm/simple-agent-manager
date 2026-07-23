@@ -23,9 +23,9 @@ export type AuthMethod = 'api-key' | 'oauth-token' | 'sam';
 
 /**
  * Cloud providers selectable inline during onboarding (no GCP — it needs a multi-step handshake).
- * Vultr is intentionally deferred here (binary hetzner/scaleway ternary UI); tracked follow-up:
- * tasks/backlog/2026-07-23-vultr-onboarding-wizard-parity.md. Vultr is fully usable via
- * Settings → Cloud Providers and CloudProviderConnectFlow.
+ * Vultr and DigitalOcean are intentionally deferred here (binary hetzner/scaleway ternary UI);
+ * tracked follow-up: tasks/backlog/2026-07-23-vultr-onboarding-wizard-parity.md. Both are fully
+ * usable via Settings → Cloud Providers and CloudProviderConnectFlow.
  */
 export type CloudProvider = 'hetzner' | 'scaleway';
 

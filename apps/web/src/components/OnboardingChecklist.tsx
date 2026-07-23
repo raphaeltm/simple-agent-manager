@@ -1,3 +1,4 @@
+import { hasByocComputeCredential } from '@simple-agent-manager/shared';
 import { Button,Card } from '@simple-agent-manager/ui';
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
@@ -40,7 +41,7 @@ export function OnboardingChecklist() {
         getTrialStatus().catch(() => null),
       ]);
 
-      const hasUserCreds = credentials.some((c) => c.provider === 'hetzner' || c.provider === 'scaleway' || c.provider === 'vultr');
+      const hasUserCreds = hasByocComputeCredential(credentials);
       const trialAvailable = trial?.available ?? false;
       const hasCloudProvider = hasUserCreds || trialAvailable;
       const hasGitHubApp = installations.length > 0;

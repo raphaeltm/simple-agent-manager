@@ -6,8 +6,8 @@ import { useRef, useState } from 'react';
 import { useToast } from '../hooks/useToast';
 import { createCredential, deleteCredential, validateCredential } from '../lib/api';
 
-/** Providers whose credential is a single raw API token (Hetzner, Vultr). */
-export type SingleTokenProvider = 'hetzner' | 'vultr';
+/** Providers whose credential is a single raw API token (Hetzner, Vultr, DigitalOcean). */
+export type SingleTokenProvider = 'hetzner' | 'vultr' | 'digitalocean';
 
 interface SingleTokenCredentialFormProps {
   provider: SingleTokenProvider;
@@ -28,8 +28,9 @@ interface SingleTokenCredentialFormProps {
 
 /**
  * Shared add/update/delete form for single-API-token cloud providers.
- * Hetzner and Vultr are thin wrappers over this component (see HetznerTokenForm,
- * VultrCredentialForm) so the validate/save/delete flow lives in exactly one place.
+ * Hetzner, Vultr, and DigitalOcean are thin wrappers over this component (see
+ * HetznerTokenForm, VultrCredentialForm, DigitalOceanCredentialForm) so the
+ * validate/save/delete flow lives in exactly one place.
  */
 export function SingleTokenCredentialForm({
   provider,
