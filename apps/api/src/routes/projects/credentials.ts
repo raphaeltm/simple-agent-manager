@@ -53,6 +53,7 @@ import { serializeCredentialToken } from '../../services/provider-credentials';
 import {
   CredentialValidator,
   formatOnlyValidation,
+  validateDigitalOceanCredentialWithProvider,
   validateHetznerCredentialWithProvider,
   validateScalewayCredentialWithProvider,
   validateVultrCredentialWithProvider,
@@ -115,6 +116,14 @@ function getCloudCredentialFields(body: CreateCredentialRequest): CloudCredentia
     };
   }
 
+  if (providerName === 'digitalocean') {
+    if (!body.token) throw errors.badRequest('Token is required for DigitalOcean');
+    return {
+      providerName,
+      tokenToValidate: serializeCredentialToken(providerName, { token: body.token }),
+    };
+  }
+
   if (
     !body.gcpProjectId ||
     !body.gcpProjectNumber ||
@@ -165,6 +174,11 @@ async function validateCloudCredentialRequest(
   }
   if (body.provider === 'vultr') {
     return validateVultrCredentialWithProvider(body.token, {
+      timeoutMs: getSaveValidationTimeoutMs(env),
+    });
+  }
+  if (body.provider === 'digitalocean') {
+    return validateDigitalOceanCredentialWithProvider(body.token, {
       timeoutMs: getSaveValidationTimeoutMs(env),
     });
   }

@@ -21,6 +21,11 @@ const VultrCredentialSchema = v.object({
   token: v.string(),
 });
 
+const DigitalOceanCredentialSchema = v.object({
+  provider: v.literal('digitalocean'),
+  token: v.string(),
+});
+
 const GcpCredentialSchema = v.object({
   provider: v.literal('gcp'),
   authType: v.optional(v.literal('workload-identity')),
@@ -36,6 +41,7 @@ export const CreateCredentialSchema = v.variant('provider', [
   HetznerCredentialSchema,
   ScalewayCredentialSchema,
   VultrCredentialSchema,
+  DigitalOceanCredentialSchema,
   GcpCredentialSchema,
 ]);
 

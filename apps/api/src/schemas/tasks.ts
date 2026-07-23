@@ -4,7 +4,7 @@ import * as v from 'valibot';
 const VMSizeSchema = v.picklist(['small', 'medium', 'large']);
 const VMLocationSchema = v.string();
 const WorkspaceProfileSchema = v.picklist(['full', 'lightweight']);
-const CredentialProviderSchema = v.picklist(['hetzner', 'scaleway', 'gcp', 'vultr']);
+const CredentialProviderSchema = v.picklist(['hetzner', 'scaleway', 'gcp', 'vultr', 'digitalocean']);
 const TaskModeSchema = v.picklist(['task', 'conversation']);
 const TaskStatusSchema = v.picklist([
   'draft', 'ready', 'queued', 'delegated', 'in_progress', 'completed', 'failed', 'cancelled',

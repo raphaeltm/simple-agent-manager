@@ -45,6 +45,7 @@ const CLOUD_PROVIDER_NAMES: Record<string, string> = {
   scaleway: 'Scaleway',
   gcp: 'Google Cloud (GCP)',
   vultr: 'Vultr',
+  digitalocean: 'DigitalOcean',
 };
 
 resolutionStatusRoute.get('/resolution-status', requireAuth(), requireApproved(), async (c) => {
