@@ -19,7 +19,7 @@ export function FileGridCard({
   onTagClick,
   onPreview,
 }: FileGridCardProps) {
-  const canPreview = onPreview && isPreviewableMime(file.mimeType);
+  const canPreview = onPreview && isPreviewableMime(file.mimeType, file.filename);
   return (
     <div className="flex flex-col rounded-lg border border-[var(--sam-form-border)] bg-[var(--sam-glass-nested-bg)] hover:border-accent/40 transition-colors overflow-hidden">
       {/* Thumbnail area */}

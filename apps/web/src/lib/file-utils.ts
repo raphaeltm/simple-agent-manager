@@ -1,3 +1,5 @@
+import { normalizeMimeType, resolveEffectiveMimeType } from '@simple-agent-manager/shared';
+
 /** Image file extensions that can be rendered inline via <img> tag. */
 const IMAGE_EXTENSIONS = new Set([
   'png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'avif', 'ico', 'bmp',
@@ -28,32 +30,39 @@ export function isSvgFile(filePath: string): boolean {
 
 /** Strip MIME parameters (e.g. "; charset=utf-8") and return the base type. */
 export function baseMimeType(mimeType: string): string {
-  return (mimeType.split(';')[0] ?? mimeType).trim().toLowerCase();
+  return normalizeMimeType(mimeType);
 }
 
+// The preview predicates take an optional `filename`. When the stored MIME type
+// is octet-stream/empty (common for agent-uploaded files whose type was derived
+// on a minimal image without /etc/mime.types), the effective type is recovered
+// from the filename extension via `resolveEffectiveMimeType`. A meaningful
+// stored type is always trusted, so passing a filename never weakens an explicit
+// type. Filename is optional to preserve backward compatibility.
+
 /** Check if a file's MIME type supports inline preview. */
-export function isPreviewableMime(mimeType: string): boolean {
-  return PREVIEWABLE_MIMES.has(baseMimeType(mimeType));
+export function isPreviewableMime(mimeType: string, filename?: string): boolean {
+  return PREVIEWABLE_MIMES.has(resolveEffectiveMimeType(mimeType, filename));
 }
 
 /** Check if a MIME type is a previewable image (not SVG, not PDF). */
-export function isPreviewableImageMime(mimeType: string): boolean {
-  return PREVIEWABLE_IMAGE_MIMES.has(baseMimeType(mimeType));
+export function isPreviewableImageMime(mimeType: string, filename?: string): boolean {
+  return PREVIEWABLE_IMAGE_MIMES.has(resolveEffectiveMimeType(mimeType, filename));
 }
 
 /** Check if a MIME type is PDF. */
-export function isPdfMime(mimeType: string): boolean {
-  return baseMimeType(mimeType) === 'application/pdf';
+export function isPdfMime(mimeType: string, filename?: string): boolean {
+  return resolveEffectiveMimeType(mimeType, filename) === 'application/pdf';
 }
 
 /** Check if a MIME type is markdown. */
-export function isMarkdownMime(mimeType: string): boolean {
-  return baseMimeType(mimeType) === 'text/markdown';
+export function isMarkdownMime(mimeType: string, filename?: string): boolean {
+  return resolveEffectiveMimeType(mimeType, filename) === 'text/markdown';
 }
 
 /** Check if a MIME type is HTML. */
-export function isHtmlMime(mimeType: string): boolean {
-  return baseMimeType(mimeType) === 'text/html';
+export function isHtmlMime(mimeType: string, filename?: string): boolean {
+  return resolveEffectiveMimeType(mimeType, filename) === 'text/html';
 }
 
 /** Default threshold for inline rendering (0–10 MB). Override via VITE_FILE_PREVIEW_INLINE_MAX_BYTES. */

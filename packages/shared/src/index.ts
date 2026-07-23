@@ -30,3 +30,6 @@ export * from './compose-parser';
 
 // Composable Credentials (three-primitive model)
 export * from './composable-credentials';
+
+// MIME-type helpers (extension fallback for library preview)
+export * from './mime';

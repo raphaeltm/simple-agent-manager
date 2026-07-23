@@ -31,7 +31,7 @@ export function FileListItem({
       {/* File info */}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
-          {onPreview && isPreviewableMime(file.mimeType) ? (
+          {onPreview && isPreviewableMime(file.mimeType, file.filename) ? (
             <button
               type="button"
               onClick={() => onPreview(file)}
