@@ -198,10 +198,11 @@ export async function handleNodeProvisioning(
     return;
   }
 
-  // Check user node limit
+  // Check user node limit. User-owned (BYO) nodes are excluded — they cost SAM nothing to run, so
+  // they must not consume an auto-provisioning slot or block cloud provisioning (critique #8).
   const maxNodes = parseEnvInt(rc.env.MAX_NODES_PER_USER, 10);
   const countResult = await rc.env.DATABASE.prepare(
-    `SELECT COUNT(*) as c FROM nodes WHERE user_id = ? AND status IN ('running', 'creating', 'recovery') AND node_role = 'workspace'`
+    `SELECT COUNT(*) as c FROM nodes WHERE user_id = ? AND status IN ('running', 'creating', 'recovery') AND node_role = 'workspace' AND node_class != 'user-owned'`
   )
     .bind(state.userId)
     .first<{ c: number }>();

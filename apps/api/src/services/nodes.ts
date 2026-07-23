@@ -1,6 +1,11 @@
 import { generateCloudInit, validateCloudInitSize } from '@simple-agent-manager/cloud-init';
 import { isTransientCapacityError, ProviderError } from '@simple-agent-manager/providers';
-import type { CredentialProvider, CredentialSource, TaskMode } from '@simple-agent-manager/shared';
+import {
+  isUserOwnedNodeClass,
+  type CredentialProvider,
+  type CredentialSource,
+  type TaskMode,
+} from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
@@ -417,6 +422,24 @@ export async function stopNodeResources(nodeId: string, userId: string, env: Env
     return;
   }
 
+  // User-owned (BYO) machines are the user's hardware, never SAM-provisioned infrastructure. "Stop"
+  // means take the node offline, NOT destroy it: never delete a cloud VM (there is none), never
+  // delete the tunnel CNAME, and keep the node record so the enrolled machine can reconnect. This
+  // centralized guard also protects the markIdle failure-fallback that reaches stopNodeResources.
+  // See architecture-critique #2.
+  if (isUserOwnedNodeClass(node.nodeClass)) {
+    await db
+      .update(schema.workspaces)
+      .set({ status: 'deleted', updatedAt: now })
+      .where(and(eq(schema.workspaces.nodeId, nodeId), eq(schema.workspaces.userId, userId)));
+    await db
+      .update(schema.nodes)
+      .set({ status: 'stopped', healthStatus: 'unhealthy', updatedAt: now })
+      .where(and(eq(schema.nodes.id, nodeId), eq(schema.nodes.userId, userId)));
+    log.info('node_stop.user_owned_offline', { nodeId, action: 'marked_offline' });
+    return;
+  }
+
   if (node.runtime === 'cf-container') {
     await destroyVmAgentContainer(env, node.id).catch((err) => {
       log.error('node_stop.cf_container_destroy_failed', { nodeId, ...serializeError(err) });
@@ -511,7 +534,22 @@ export async function deleteNodeResources(
   }
   result.nodeFound = true;
 
-  if (node.providerInstanceId) {
+  // Mirror stopNodeResources: cf-container nodes must destroy their Sandbox container here too.
+  // deleteNodeResources previously had no container branch, leaking the container on delete.
+  // See architecture-critique #2 (cf-container asymmetry).
+  if (node.runtime === 'cf-container') {
+    await destroyVmAgentContainer(env, node.id).catch((err) => {
+      result.errors.push(err instanceof Error ? err.message : String(err));
+      log.error('node_delete.cf_container_destroy_failed', { nodeId, ...serializeError(err) });
+    });
+  }
+
+  // User-owned (BYO) machines have no SAM-provisioned cloud VM: "delete" = deregister the SAM
+  // record (tunnel teardown lands in Phase 1). NEVER call provider.deleteVM against the user's
+  // hardware, even defensively if a providerInstanceId were somehow set. See architecture-critique #2.
+  if (isUserOwnedNodeClass(node.nodeClass)) {
+    result.providerVmDeleteSkippedReason = 'user-owned node — no cloud VM to delete';
+  } else if (node.providerInstanceId) {
     const targetProvider = (node.cloudProvider as CredentialProvider | null) ?? undefined;
     const attributionUserId = node.credentialAttributionUserId ?? userId;
     const attributionProjectId =

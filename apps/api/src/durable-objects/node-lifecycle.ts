@@ -76,6 +76,27 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
       throw new Error('node_lifecycle_conflict: node is being destroyed');
     }
 
+    // User-owned (BYO) machines must NEVER enter the warm → destroying teardown pipeline: SAM does
+    // not own the hardware and must not schedule its destruction. Keep the node active (no warm
+    // alarm) instead. BYO nodes are never auto-provisioned so markIdle should not reach them, but
+    // this is the DO chokepoint guard. See architecture-critique #2.
+    if (await this.isUserOwnedNode(nodeId)) {
+      log.info('node_lifecycle.mark_idle_skipped_user_owned', { nodeId, action: 'kept_active' });
+      const activeState: StoredState = {
+        nodeId,
+        userId,
+        status: 'active',
+        warmSince: null,
+        claimedByTask: null,
+        warmTimeoutOverrideMs: null,
+      };
+      await this.ctx.storage.put('state', activeState);
+      // No warm alarm; preserve any pending workspace-deletion alarms.
+      await this.recalculateAlarm(null);
+      await this.updateD1WarmSince(nodeId, null);
+      return this.toPublicState(activeState);
+    }
+
     const warmTimeout = warmTimeoutOverrideMs ?? this.getWarmTimeoutMs();
 
     const newState: StoredState = {
@@ -276,6 +297,26 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
 
   private async getStoredState(): Promise<StoredState | null> {
     return (await this.ctx.storage.get<StoredState>('state')) ?? null;
+  }
+
+  /**
+   * True if the node is a user-owned (BYO) machine. On lookup failure returns false (treat as
+   * managed) — the common case is a managed node, and the node-cleanup cron guards are the teardown
+   * backstop, so failing to "managed" cannot destroy a BYO node.
+   */
+  private async isUserOwnedNode(nodeId: string): Promise<boolean> {
+    try {
+      const row = await this.env.DATABASE.prepare('SELECT node_class FROM nodes WHERE id = ?')
+        .bind(nodeId)
+        .first<{ node_class: string }>();
+      return row?.node_class === 'user-owned';
+    } catch (err) {
+      log.error('node_lifecycle.node_class_lookup_failed', {
+        nodeId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return false;
+    }
   }
 
   private getWarmTimeoutMs(): number {

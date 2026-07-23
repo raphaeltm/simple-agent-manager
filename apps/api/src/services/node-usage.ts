@@ -20,6 +20,12 @@ import { getCurrentPeriodBounds } from './compute-usage';
 const ENDED_STATUSES_ARRAY = ['destroyed', 'destroying', 'deleted', 'error'] as const;
 const ENDED_STATUSES = new Set<string>(ENDED_STATUSES_ARRAY);
 
+/**
+ * Sentinel credential source for user-owned (BYO) nodes. SAM provisioned nothing for these, so they
+ * cost SAM $0 and must be excluded from all vCPU-hour metering, admin cost, and quota accounting.
+ */
+const SELF_HOSTED_CREDENTIAL_SOURCE: CredentialSource = 'self-hosted';
+
 function isNodeEnded(status: string): boolean {
   return ENDED_STATUSES.has(status);
 }
@@ -101,6 +107,12 @@ function addNodeToTotals(
   periodEnd: Date,
   now: Date,
 ): void {
+  // User-owned (BYO) nodes cost SAM $0 — exclude them from every node-hour, vCPU-hour, and
+  // active-node total so metering, admin cost (getAllUsersNodeUsageSummary → here), and quota
+  // reflect only SAM-paid compute. Single chokepoint. See architecture-critique #9.
+  if (node.credentialSource === SELF_HOSTED_CREDENTIAL_SOURCE) {
+    return;
+  }
   const endedAt = getNodeEndedAt(node.status, node.updatedAt);
   const hours = calculateNodeHoursInPeriod(node.createdAt, endedAt, periodStart, periodEnd, now);
   const vcpus = getVcpuCount(node.vmSize, node.cloudProvider);
