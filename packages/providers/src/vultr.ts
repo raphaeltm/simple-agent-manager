@@ -145,8 +145,9 @@ function sanitizeHostname(name: string): string {
   const host = name
     .toLowerCase()
     .replace(/[^a-z0-9-]/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 63);
+    .slice(0, 63)
+    // Strip AFTER truncating so a slice landing mid-hyphen can't leave a trailing '-'.
+    .replace(/^-+|-+$/g, '');
   return host || 'sam-node';
 }
 
@@ -201,7 +202,7 @@ export class VultrProvider implements Provider {
     this.defaultLocation = this.region;
     this.osName = options?.osName || DEFAULT_VULTR_OS_NAME;
     this.requestTimeoutMs = positiveOr(options?.requestTimeoutMs, DEFAULT_VULTR_REQUEST_TIMEOUT_MS);
-    this.ipPollTimeoutMs = options?.ipPollTimeoutMs ?? DEFAULT_VULTR_IP_POLL_TIMEOUT_MS;
+    this.ipPollTimeoutMs = positiveOr(options?.ipPollTimeoutMs, DEFAULT_VULTR_IP_POLL_TIMEOUT_MS);
     this.ipPollIntervalMs = positiveOr(options?.ipPollIntervalMs, DEFAULT_VULTR_IP_POLL_INTERVAL_MS);
     this.logger = options?.logger ?? noopProviderLogger;
     this.volumeClient = new VultrVolumeClient(
@@ -348,9 +349,10 @@ export class VultrProvider implements Provider {
         'resolveOsId',
       );
       all.push(...data.os);
-      if (!data.nextCursor) break;
+      if (!data.nextCursor) return all;
       cursor = data.nextCursor;
     }
+    this.logger.warn('vultr.list_truncated', { resource: 'os', maxPages: VULTR_MAX_LIST_PAGES });
     return all;
   }
 
@@ -366,15 +368,16 @@ export class VultrProvider implements Provider {
         'listVMs',
       );
       all.push(...data.instances);
-      if (!data.nextCursor) break;
+      if (!data.nextCursor) return all;
       cursor = data.nextCursor;
     }
+    this.logger.warn('vultr.list_truncated', { resource: 'instances', maxPages: VULTR_MAX_LIST_PAGES });
     return all;
   }
 
-  private async getInstanceRaw(id: string): Promise<VultrInstancePayload | null> {
+  private async getInstanceRaw(id: string, timeoutMs?: number): Promise<VultrInstancePayload | null> {
     try {
-      const response = await this.vultrFetch(`/instances/${encodeURIComponent(id)}`);
+      const response = await this.vultrFetch(`/instances/${encodeURIComponent(id)}`, undefined, timeoutMs);
       const data = validateVultrInstanceResponse(
         await parseProviderJson(response, this.name, 'getVM'),
         'getVM',
@@ -390,15 +393,19 @@ export class VultrProvider implements Provider {
     const initial = normalizeVultrIp(initialIp);
     if (initial) return initial;
 
-    const start = Date.now();
-    while (Date.now() - start < this.ipPollTimeoutMs) {
-      await delay(this.ipPollIntervalMs);
+    // Hard-bound total wall time to ipPollTimeoutMs: cap both the inter-poll delay
+    // and each poll GET to the remaining budget so a slow (but un-aborted) request
+    // can't overshoot. Best-effort — heartbeat IP backfill is the durable fallback.
+    const deadline = Date.now() + this.ipPollTimeoutMs;
+    while (Date.now() < deadline) {
+      await delay(Math.min(this.ipPollIntervalMs, deadline - Date.now()));
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) break;
       try {
-        const instance = await this.getInstanceRaw(instanceId);
+        const instance = await this.getInstanceRaw(instanceId, Math.min(this.requestTimeoutMs, remaining));
         const ip = normalizeVultrIp(instance?.main_ip ?? '');
         if (ip) return ip;
-      } catch (err) {
-        // Best-effort only — the heartbeat IP backfill is the durable fallback.
+      } catch {
         this.logger.warn('vultr.ip_poll_error', { instanceId });
       }
     }
@@ -421,7 +428,11 @@ export class VultrProvider implements Provider {
     };
   }
 
-  private async vultrFetch(path: string, init?: RequestInit): Promise<Response> {
+  private async vultrFetch(
+    path: string,
+    init?: RequestInit,
+    timeoutMs: number = this.requestTimeoutMs,
+  ): Promise<Response> {
     try {
       return await providerFetch(
         this.name,
@@ -434,7 +445,7 @@ export class VultrProvider implements Provider {
             ...(init?.headers ?? {}),
           },
         },
-        this.requestTimeoutMs,
+        timeoutMs,
       );
     } catch (err) {
       throw this.mapProviderError(err);

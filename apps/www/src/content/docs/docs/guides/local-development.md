@@ -109,7 +109,7 @@ apps/
 
 packages/
 ├── shared/       # Shared types and utilities
-├── providers/    # Cloud provider abstraction (Hetzner, Scaleway, GCP)
+├── providers/    # Cloud provider abstraction (Hetzner, Scaleway, GCP, Vultr)
 ├── cloud-init/   # Cloud-init template generator
 ├── terminal/     # Shared terminal component (xterm.js)
 ├── ui/           # Design system components

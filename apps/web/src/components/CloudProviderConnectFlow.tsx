@@ -164,7 +164,7 @@ export function CloudProviderConnectFlow({
 
       <div className="flex flex-col gap-1.5">
         <div className="text-xs font-medium text-fg-muted">Cloud provider</div>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           {CREDENTIAL_PROVIDERS.map((item) => {
             const isSelected = provider === item;
             return (
