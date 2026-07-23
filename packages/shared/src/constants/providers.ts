@@ -142,8 +142,8 @@ export const PROVIDER_DEFAULT_LOCATIONS: Record<CredentialProvider, string> = {
 // =============================================================================
 
 /**
- * Token-based BYOC compute providers that count as "a cloud provider is connected"
- * for the onboarding / has-cloud-provider gates. A single API token connected for
+ * BYOC compute providers that count as "a cloud provider is connected"
+ * for the onboarding / has-cloud-provider gates. A connected credential for
  * any of these makes the user immediately provisionable.
  *
  * GCP is intentionally EXCLUDED: it requires a multi-step Workload Identity
@@ -151,11 +151,17 @@ export const PROVIDER_DEFAULT_LOCATIONS: Record<CredentialProvider, string> = {
  * separately (tasks/backlog/2026-07-23-credential-routes-preexisting-hardening.md).
  * Do not add GCP here without addressing that follow-up.
  */
-export const TOKEN_COMPUTE_PROVIDERS = ['hetzner', 'scaleway', 'vultr', 'digitalocean'] as const;
+export const TOKEN_COMPUTE_PROVIDERS = [
+  'hetzner',
+  'scaleway',
+  'vultr',
+  'infomaniak',
+  'digitalocean',
+] as const;
 
 /**
- * True when the credential list contains at least one BYOC token-compute credential
- * (Hetzner / Scaleway / Vultr / DigitalOcean). Excludes GCP by design — see
+ * True when the credential list contains at least one BYOC compute credential
+ * (Hetzner / Scaleway / Vultr / Infomaniak / DigitalOcean). Excludes GCP by design — see
  * TOKEN_COMPUTE_PROVIDERS. Shared by every "does the user have a cloud provider"
  * onboarding gate so the provider set lives in exactly one place.
  */

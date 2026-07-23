@@ -1,10 +1,15 @@
-import { createContext, type ReactNode,useCallback, useContext, useEffect, useMemo, useState } from 'react';
-
+import { hasByocComputeCredential } from '@simple-agent-manager/shared';
 import {
-  listAgentCredentials,
-  listCredentials,
-  listGitHubInstallations,
-} from '../../lib/api';
+  createContext,
+  type ReactNode,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
+
+import { listAgentCredentials, listCredentials, listGitHubInstallations } from '../../lib/api';
 import { useAuth } from '../AuthProvider';
 
 interface OnboardingContextValue {
@@ -76,11 +81,10 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
 
         const credentials = credResult.status === 'fulfilled' ? credResult.value : [];
         const installations = installResult.status === 'fulfilled' ? installResult.value : [];
-        const agentCreds = agentResult.status === 'fulfilled' ? agentResult.value : { credentials: [] };
+        const agentCreds =
+          agentResult.status === 'fulfilled' ? agentResult.value : { credentials: [] };
 
-        const hasCloud = credentials.some(
-          (c) => c.provider === 'hetzner' || c.provider === 'scaleway' || c.provider === 'vultr' || c.provider === 'infomaniak'
-        );
+        const hasCloud = hasByocComputeCredential(credentials);
         const hasGitHub = installations.length > 0;
         const hasAgent = agentCreds.credentials.some((c) => c.isActive);
 
@@ -140,9 +144,5 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
     [needsOnboarding, showOverlay, openOnboarding, dismissOnboarding, loading]
   );
 
-  return (
-    <OnboardingContext.Provider value={value}>
-      {children}
-    </OnboardingContext.Provider>
-  );
+  return <OnboardingContext.Provider value={value}>{children}</OnboardingContext.Provider>;
 }

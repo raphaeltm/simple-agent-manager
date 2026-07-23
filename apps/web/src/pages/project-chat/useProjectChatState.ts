@@ -1,6 +1,21 @@
 // FILE SIZE EXCEPTION: Pre-existing project chat state hook exceeds the 800-line gate on main; split as follow-up outside shared runtime fix scope.
-import type { AgentInfo, AgentProfile, AgentProfileRuntime, CreateAgentProfileRequest, ProviderCatalog, Task, TaskMode, UpdateAgentProfileRequest, VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
-import { DEFAULT_VM_SIZE, DEFAULT_WORKSPACE_PROFILE } from '@simple-agent-manager/shared';
+import type {
+  AgentInfo,
+  AgentProfile,
+  AgentProfileRuntime,
+  CreateAgentProfileRequest,
+  ProviderCatalog,
+  Task,
+  TaskMode,
+  UpdateAgentProfileRequest,
+  VMSize,
+  WorkspaceProfile,
+} from '@simple-agent-manager/shared';
+import {
+  DEFAULT_VM_SIZE,
+  DEFAULT_WORKSPACE_PROFILE,
+  hasByocComputeCredential,
+} from '@simple-agent-manager/shared';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
 
@@ -29,10 +44,7 @@ import {
   summarizeSession,
   updateAgentProfile,
 } from '../../lib/api';
-import {
-  getSessionState,
-  isStaleSession,
-} from '../../lib/chat-session-utils';
+import { getSessionState, isStaleSession } from '../../lib/chat-session-utils';
 import { stripMarkdown } from '../../lib/text-utils';
 import { useProjectContext } from '../ProjectContext';
 import { isRetryOrFork } from './lineageUtils';
@@ -44,7 +56,11 @@ import {
   resolveWizardWorkspaceProfile,
   selectProfileId,
 } from './profileWizardHelpers';
-import { buildBaseSubmitRequest, getCompletedAttachmentRefs, withAttachmentRefs } from './submitRequest';
+import {
+  buildBaseSubmitRequest,
+  getCompletedAttachmentRefs,
+  withAttachmentRefs,
+} from './submitRequest';
 import type { ProvisioningState } from './types';
 import {
   CHAT_SESSION_LIST_LIMIT,
@@ -86,7 +102,6 @@ export interface ProfileWizardState {
   saving: boolean;
   error: string | null;
 }
-
 
 export function useProjectChatState() {
   const navigate = useNavigate();
@@ -151,21 +166,22 @@ export function useProjectChatState() {
 
   // Workspace profile selection — defaults to project setting or platform default
   const [selectedWorkspaceProfile, setSelectedWorkspaceProfile] = useState<WorkspaceProfile>(
-    (project?.defaultWorkspaceProfile as WorkspaceProfile | null) ?? DEFAULT_WORKSPACE_PROFILE,
+    (project?.defaultWorkspaceProfile as WorkspaceProfile | null) ?? DEFAULT_WORKSPACE_PROFILE
   );
   const [selectedVmSizeOverride, setSelectedVmSizeOverride] = useState<VMSize | null>(null);
   const selectedVmSize = selectedVmSizeOverride ?? resolveInitialVmSize(project?.defaultVmSize);
 
   // Devcontainer config name — empty string means auto-detect
   const [selectedDevcontainerConfigName, setSelectedDevcontainerConfigName] = useState(
-    project?.defaultDevcontainerConfigName ?? '',
+    project?.defaultDevcontainerConfigName ?? ''
   );
 
   // Task mode selection — defaults based on workspace profile
   const [selectedTaskMode, setSelectedTaskMode] = useState<TaskMode>(
-    ((project?.defaultWorkspaceProfile as WorkspaceProfile | null) ?? DEFAULT_WORKSPACE_PROFILE) === 'lightweight'
+    ((project?.defaultWorkspaceProfile as WorkspaceProfile | null) ?? DEFAULT_WORKSPACE_PROFILE) ===
+      'lightweight'
       ? 'conversation'
-      : 'task',
+      : 'task'
   );
   const userSetTaskModeRef = useRef(false);
 
@@ -177,7 +193,7 @@ export function useProjectChatState() {
   const { logs: bootLogs } = useBootLogStream(
     provisioning?.workspaceId ?? undefined,
     provisioning?.workspaceUrl ?? undefined,
-    bootLogStatus,
+    bootLogStatus
   );
   const [bootLogPanelOpen, setBootLogPanelOpen] = useState(false);
 
@@ -227,10 +243,11 @@ export function useProjectChatState() {
     if (!searchQuery.trim()) return recentSessions;
     const q = searchQuery.toLowerCase();
     return recentSessions.filter(
-      (s) => (s.topic && stripMarkdown(s.topic).toLowerCase().includes(q))
-        || s.id.includes(q)
-        || (s.createdBy?.name?.toLowerCase().includes(q) ?? false)
-        || (s.createdBy?.email?.toLowerCase().includes(q) ?? false),
+      (s) =>
+        (s.topic && stripMarkdown(s.topic).toLowerCase().includes(q)) ||
+        s.id.includes(q) ||
+        (s.createdBy?.name?.toLowerCase().includes(q) ?? false) ||
+        (s.createdBy?.email?.toLowerCase().includes(q) ?? false)
     );
   }, [recentSessions, searchQuery]);
 
@@ -238,10 +255,11 @@ export function useProjectChatState() {
     if (!searchQuery.trim()) return staleSessions;
     const q = searchQuery.toLowerCase();
     return staleSessions.filter(
-      (s) => (s.topic && stripMarkdown(s.topic).toLowerCase().includes(q))
-        || s.id.includes(q)
-        || (s.createdBy?.name?.toLowerCase().includes(q) ?? false)
-        || (s.createdBy?.email?.toLowerCase().includes(q) ?? false),
+      (s) =>
+        (s.topic && stripMarkdown(s.topic).toLowerCase().includes(q)) ||
+        s.id.includes(q) ||
+        (s.createdBy?.name?.toLowerCase().includes(q) ?? false) ||
+        (s.createdBy?.email?.toLowerCase().includes(q) ?? false)
     );
   }, [staleSessions, searchQuery]);
 
@@ -263,25 +281,23 @@ export function useProjectChatState() {
     }
   }, [multiplayerActive]);
 
-
   useEffect(() => {
-    void Promise.all([
-      listCredentials().catch(() => []),
-      getTrialStatus().catch(() => null),
-    ]).then(([creds, trial]) => {
-      const hasUserCreds = creds.some((c: { provider: string }) => c.provider === 'hetzner' || c.provider === 'scaleway' || c.provider === 'vultr' || c.provider === 'infomaniak');
-      const trialAvailable = trial?.available ?? false;
-      const hasCloud = hasUserCreds || trialAvailable;
-      setHasUserCloudCredentials(hasUserCreds);
-      setHasCloudCredentials(hasCloud);
-      if (hasCloud) {
-        void getProviderCatalog()
-          .then((response) => setProviderCatalogs(response.catalogs ?? []))
-          .catch(() => setProviderCatalogs([]));
-      } else {
-        setProviderCatalogs([]);
+    void Promise.all([listCredentials().catch(() => []), getTrialStatus().catch(() => null)]).then(
+      ([creds, trial]) => {
+        const hasUserCreds = hasByocComputeCredential(creds);
+        const trialAvailable = trial?.available ?? false;
+        const hasCloud = hasUserCreds || trialAvailable;
+        setHasUserCloudCredentials(hasUserCreds);
+        setHasCloudCredentials(hasCloud);
+        if (hasCloud) {
+          void getProviderCatalog()
+            .then((response) => setProviderCatalogs(response.catalogs ?? []))
+            .catch(() => setProviderCatalogs([]));
+        } else {
+          setProviderCatalogs([]);
+        }
       }
-    });
+    );
   }, []);
 
   useEffect(() => {
@@ -296,8 +312,12 @@ export function useProjectChatState() {
           setSelectedAgentType(firstAgent.id);
         }
       })
-      .catch((err: unknown) => { console.error('Failed to load agents', err); });
-    return () => { cancelled = true; };
+      .catch((err: unknown) => {
+        console.error('Failed to load agents', err);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadProfiles = useCallback(() => {
@@ -306,25 +326,35 @@ export function useProjectChatState() {
         setAgentProfiles(data);
         setSelectedProfileId((current) => selectProfileId(current, data));
       })
-      .catch((err: unknown) => { console.error('Failed to load agent profiles', err); });
+      .catch((err: unknown) => {
+        console.error('Failed to load agent profiles', err);
+      });
   }, [projectId]);
 
-  useEffect(() => { loadProfiles(); }, [loadProfiles]);
-
-  const handleUpdateProfile = useCallback(async (profileId: string, data: UpdateAgentProfileRequest) => {
-    await updateAgentProfile(projectId, profileId, data);
+  useEffect(() => {
     loadProfiles();
-  }, [projectId, loadProfiles]);
+  }, [loadProfiles]);
+
+  const handleUpdateProfile = useCallback(
+    async (profileId: string, data: UpdateAgentProfileRequest) => {
+      await updateAgentProfile(projectId, profileId, data);
+      loadProfiles();
+    },
+    [projectId, loadProfiles]
+  );
 
   useEffect(() => {
     if (executeIdeaId && !sessionId) {
       executeIdeaIdRef.current = executeIdeaId;
       setMessage(EXECUTE_IDEA_PROMPT_TEMPLATE.replace('{ideaId}', executeIdeaId));
-      setSearchParams((prev) => {
-        const next = new URLSearchParams(prev);
-        next.delete('executeIdea');
-        return next;
-      }, { replace: true });
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.delete('executeIdea');
+          return next;
+        },
+        { replace: true }
+      );
     }
   }, [executeIdeaId, sessionId, setSearchParams]);
 
@@ -332,7 +362,10 @@ export function useProjectChatState() {
     if (hasLoadedRef.current) setIsRefreshing(true);
     try {
       const scope = multiplayerActive ? sessionScope : 'all';
-      const sessionResult = await listChatSessions(projectId, { limit: CHAT_SESSION_LIST_LIMIT, scope });
+      const sessionResult = await listChatSessions(projectId, {
+        limit: CHAT_SESSION_LIST_LIMIT,
+        scope,
+      });
       resetSessions(sessionResult.sessions);
       hasLoadedRef.current = true;
 
@@ -343,7 +376,9 @@ export function useProjectChatState() {
           setTaskTitleMap(titleMap);
           replaceTaskInfoMap(tasksResult.tasks as Task[]);
         })
-        .catch(() => { /* task titles are cosmetic */ });
+        .catch(() => {
+          /* task titles are cosmetic */
+        });
 
       return sessionResult.sessions;
     } catch {
@@ -353,17 +388,20 @@ export function useProjectChatState() {
     }
   }, [projectId, sessionScope, multiplayerActive, resetSessions, replaceTaskInfoMap]);
 
-  const handleSessionEvent = useCallback((raw: RawSessionEvent) => {
-    // session.created deltas cannot be scope-filtered client-side (we don't
-    // know isMine from the wire payload), so fall back to a full refetch when
-    // the user is viewing "My sessions" to let the server apply the filter.
-    if (raw.type === 'session.created' && multiplayerActive && sessionScope === 'my') {
-      void loadSessions();
-      return;
-    }
-    const event = rawToSessionEvent(raw);
-    if (event) dispatchEvent(event);
-  }, [dispatchEvent, multiplayerActive, sessionScope, loadSessions]);
+  const handleSessionEvent = useCallback(
+    (raw: RawSessionEvent) => {
+      // session.created deltas cannot be scope-filtered client-side (we don't
+      // know isMine from the wire payload), so fall back to a full refetch when
+      // the user is viewing "My sessions" to let the server apply the filter.
+      if (raw.type === 'session.created' && multiplayerActive && sessionScope === 'my') {
+        void loadSessions();
+        return;
+      }
+      const event = rawToSessionEvent(raw);
+      if (event) dispatchEvent(event);
+    },
+    [dispatchEvent, multiplayerActive, sessionScope, loadSessions]
+  );
 
   const { connectionState } = useProjectWebSocket({
     projectId,
@@ -394,17 +432,30 @@ export function useProjectChatState() {
         const task = await getProjectTask(projectId, provisioning.taskId);
         setProvisioning((prev) => {
           if (!prev) return null;
-          const next = { ...prev, status: task.status, executionStep: task.executionStep ?? null, errorMessage: task.errorMessage ?? null, requestedVmSize: task.requestedVmSize ?? prev.requestedVmSize, provisionedVmSize: task.provisionedVmSize ?? prev.provisionedVmSize };
+          const next = {
+            ...prev,
+            status: task.status,
+            executionStep: task.executionStep ?? null,
+            errorMessage: task.errorMessage ?? null,
+            requestedVmSize: task.requestedVmSize ?? prev.requestedVmSize,
+            provisionedVmSize: task.provisionedVmSize ?? prev.provisionedVmSize,
+          };
           if (task.workspaceId && !prev.workspaceId) next.workspaceId = task.workspaceId;
           return next;
         });
         if (task.workspaceId && !provisioning.workspaceUrl) {
           try {
             const ws = await getWorkspace(task.workspaceId);
-            if (ws.url) setProvisioning((prev) => prev ? { ...prev, workspaceUrl: ws.url ?? null } : null);
-          } catch { /* Workspace may not be ready yet */ }
+            if (ws.url)
+              setProvisioning((prev) => (prev ? { ...prev, workspaceUrl: ws.url ?? null } : null));
+          } catch {
+            /* Workspace may not be ready yet */
+          }
         }
-        if (task.status === 'in_progress' && (task.workspaceId || task.executionStep === 'running')) {
+        if (
+          task.status === 'in_progress' &&
+          (task.workspaceId || task.executionStep === 'running')
+        ) {
           navigate(`/projects/${projectId}/chat/${provisioning.sessionId}`, { replace: true });
           setProvisioning(null);
         }
@@ -413,12 +464,21 @@ export function useProjectChatState() {
           setProvisioning(null);
           void loadSessions();
         }
-      } catch { /* Continue polling on transient errors */ }
+      } catch {
+        /* Continue polling on transient errors */
+      }
     };
     void poll();
     const interval = setInterval(() => void poll(), TASK_STATUS_POLL_MS);
     return () => clearInterval(interval);
-  }, [provisioning?.taskId, provisioning?.status, projectId, navigate, loadSessions, provisioning?.sessionId]);
+  }, [
+    provisioning?.taskId,
+    provisioning?.status,
+    projectId,
+    navigate,
+    loadSessions,
+    provisioning?.sessionId,
+  ]);
 
   // Restore provisioning state when navigating to a session with an active task
   useEffect(() => {
@@ -433,30 +493,40 @@ export function useProjectChatState() {
         if (cancelled) return;
         if (!isTerminal(task.status) && task.status !== 'in_progress') {
           setProvisioning({
-            taskId: task.id, sessionId,
+            taskId: task.id,
+            sessionId,
             branchName: task.outputBranch ?? '',
-            status: task.status, executionStep: task.executionStep ?? null,
+            status: task.status,
+            executionStep: task.executionStep ?? null,
             errorMessage: task.errorMessage ?? null,
             startedAt: task.startedAt ? new Date(task.startedAt).getTime() : Date.now(),
-            workspaceId: task.workspaceId ?? null, workspaceUrl: null,
+            workspaceId: task.workspaceId ?? null,
+            workspaceUrl: null,
             requestedVmSize: task.requestedVmSize ?? null,
             provisionedVmSize: task.provisionedVmSize ?? null,
           });
         }
-      } catch { /* Best-effort */ }
+      } catch {
+        /* Best-effort */
+      }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [sessionId, sessions, projectId, provisioning]);
 
   // ---------------------------------------------------------------------------
   // Handlers
   // ---------------------------------------------------------------------------
 
-  const suggestProfileName = useCallback((agentType: string | null, workType: TaskMode | null) => {
-    const agent = configuredAgents.find((candidate) => candidate.id === agentType);
-    const agentName = agent?.name ?? 'Agent';
-    return workType === 'task' ? `${agentName} Tasks` : `${agentName} Chat`;
-  }, [configuredAgents]);
+  const suggestProfileName = useCallback(
+    (agentType: string | null, workType: TaskMode | null) => {
+      const agent = configuredAgents.find((candidate) => candidate.id === agentType);
+      const agentName = agent?.name ?? 'Agent';
+      return workType === 'task' ? `${agentName} Tasks` : `${agentName} Chat`;
+    },
+    [configuredAgents]
+  );
 
   const openProfileWizard = useCallback(() => {
     const soleAgent = configuredAgents.length === 1 ? configuredAgents[0] : null;
@@ -482,15 +552,18 @@ export function useProjectChatState() {
     setProfileWizard((current) => ({ ...current, ...patch, error: null }));
   }, []);
 
-  const createProfile = useCallback(async (data: CreateAgentProfileRequest) => {
-    const profile = await createAgentProfile(projectId, data);
-    setAgentProfiles((current) => {
-      const withoutDuplicate = current.filter((candidate) => candidate.id !== profile.id);
-      return [...withoutDuplicate, profile];
-    });
-    setSelectedProfileId(profile.id);
-    return profile;
-  }, [projectId]);
+  const createProfile = useCallback(
+    async (data: CreateAgentProfileRequest) => {
+      const profile = await createAgentProfile(projectId, data);
+      setAgentProfiles((current) => {
+        const withoutDuplicate = current.filter((candidate) => candidate.id !== profile.id);
+        return [...withoutDuplicate, profile];
+      });
+      setSelectedProfileId(profile.id);
+      return profile;
+    },
+    [projectId]
+  );
 
   const createProfileFromWizard = useCallback(async () => {
     const name = profileWizard.profileName.trim();
@@ -504,7 +577,10 @@ export function useProjectChatState() {
     }
     const agentType = profileWizard.selectedAgentType ?? configuredAgents[0]?.id;
     if (!agentType) {
-      setProfileWizard((current) => ({ ...current, error: 'Choose an agent before creating a profile' }));
+      setProfileWizard((current) => ({
+        ...current,
+        error: 'Choose an agent before creating a profile',
+      }));
       return null;
     }
     const workType = profileWizard.workType ?? 'conversation';
@@ -514,7 +590,10 @@ export function useProjectChatState() {
     try {
       const profile = await createProfile({
         name,
-        description: workType === 'task' ? 'Write code and open pull requests' : 'Chat and explore with a lightweight workspace',
+        description:
+          workType === 'task'
+            ? 'Write code and open pull requests'
+            : 'Chat and explore with a lightweight workspace',
         agentType,
         runtime,
         vmSizeOverride: runtime === 'cf-container' ? null : vmSize,
@@ -531,7 +610,16 @@ export function useProjectChatState() {
       }));
       return null;
     }
-  }, [agentProfiles, configuredAgents, createProfile, profileWizard.profileName, profileWizard.runtime, profileWizard.selectedAgentType, profileWizard.vmSize, profileWizard.workType]);
+  }, [
+    agentProfiles,
+    configuredAgents,
+    createProfile,
+    profileWizard.profileName,
+    profileWizard.runtime,
+    profileWizard.selectedAgentType,
+    profileWizard.vmSize,
+    profileWizard.workType,
+  ]);
 
   const resolveProfileIdForSubmit = useCallback(async () => {
     if (selectedProfileId) return selectedProfileId;
@@ -559,9 +647,10 @@ export function useProjectChatState() {
       const submitProfileId = await resolveProfileIdForSubmit();
       if (!submitProfileId) return;
 
-      const selectedProfile = agentProfiles.find((profile) => profile.id === submitProfileId) ?? null;
+      const selectedProfile =
+        agentProfiles.find((profile) => profile.id === submitProfileId) ?? null;
       const selectedSkill = selectedSkillId
-        ? skills.find((skill) => skill.id === selectedSkillId) ?? null
+        ? (skills.find((skill) => skill.id === selectedSkillId) ?? null)
         : null;
       const attachmentRefs = getCompletedAttachmentRefs(attachments.chatAttachments);
       const selectedRuntime = selectedSkill?.runtime ?? selectedProfile?.runtime ?? null;
@@ -586,7 +675,9 @@ export function useProjectChatState() {
       }
 
       if (!hasCloudCredentials) {
-        setSubmitError('Cloud credentials required. Connect a cloud provider in Settings, or ask your admin to enable platform trial.');
+        setSubmitError(
+          'Cloud credentials required. Connect a cloud provider in Settings, or ask your admin to enable platform trial.'
+        );
         return;
       }
 
@@ -606,16 +697,27 @@ export function useProjectChatState() {
       setPendingDerived(null);
       attachments.clearAttachments();
       setProvisioning({
-        taskId: result.taskId, sessionId: result.sessionId,
-        branchName: result.branchName, status: 'queued',
-        executionStep: null, errorMessage: null,
-        startedAt: Date.now(), workspaceId: null, workspaceUrl: null,
-        requestedVmSize: null, provisionedVmSize: null,
+        taskId: result.taskId,
+        sessionId: result.sessionId,
+        branchName: result.branchName,
+        status: 'queued',
+        executionStep: null,
+        errorMessage: null,
+        startedAt: Date.now(),
+        workspaceId: null,
+        workspaceUrl: null,
+        requestedVmSize: null,
+        provisionedVmSize: null,
       });
       if (executeIdeaIdRef.current) {
         const ideaId = executeIdeaIdRef.current;
         executeIdeaIdRef.current = null;
-        void linkSessionIdea(projectId, result.sessionId, ideaId, 'Executed from idea detail page').catch((err) => {
+        void linkSessionIdea(
+          projectId,
+          result.sessionId,
+          ideaId,
+          'Executed from idea detail page'
+        ).catch((err) => {
           console.warn('Failed to auto-link idea to session:', err);
         });
       }
@@ -639,102 +741,130 @@ export function useProjectChatState() {
     setProvisioning(null);
   }, [navigate, projectId]);
 
-  const handleSelect = useCallback((id: string) => {
-    newChatIntentRef.current = false;
-    setPendingDerived(null);
-    setProvisioning(null);
-    setSidebarOpen(false);
-    navigate(`/projects/${projectId}/chat/${id}`);
-  }, [navigate, projectId]);
+  const handleSelect = useCallback(
+    (id: string) => {
+      newChatIntentRef.current = false;
+      setPendingDerived(null);
+      setProvisioning(null);
+      setSidebarOpen(false);
+      navigate(`/projects/${projectId}/chat/${id}`);
+    },
+    [navigate, projectId]
+  );
 
   /** Prepare canonical fork lineage on the server, then open the new-chat composer. */
-  const handleFork = useCallback((session: ChatSessionResponse) => {
-    setSubmitError(null);
-    const provisionalLabel = session.topic ? stripMarkdown(session.topic) : "Chat " + session.id.slice(0, 8);
-    newChatIntentRef.current = true;
-    setPendingDerived({
-      type: "fork", parentSessionId: session.id, parentSessionLabel: provisionalLabel,
-      parentTaskId: session.task?.id ?? session.taskId ?? "",
-      parentBranch: session.task?.outputBranch ?? undefined,
-      contextSummary: "", summaryLoading: true,
-    });
-    setMessage(FORK_MESSAGE_TEMPLATE);
-    setProvisioning(null);
-    navigate("/projects/" + projectId + "/chat", { replace: true });
-    void prepareForkSession(projectId, session.id)
-      .then((result) => {
-        const sessionLabel = stripMarkdown(result.sessionLabel);
-        const forkContext = [
-          `Previous session: "${sessionLabel}"`,
-          `Parent project ID: ${projectId}`,
-          `Parent session ID: ${result.parentSessionId}`,
-          `Parent task ID: ${result.parentTaskId}`,
-        ].join("\n");
-        newChatIntentRef.current = true;
-        setPendingDerived({
-          type: "fork",
-          parentSessionId: result.parentSessionId,
-          parentSessionLabel: sessionLabel,
-          parentTaskId: result.parentTaskId,
-          parentBranch: result.parentBranch ?? undefined,
-          contextSummary: [
-            "## Fork Context", forkContext, "",
-            result.summary ? `## Previous Session Summary\n${result.summary}` : "",
-          ].filter(Boolean).join("\n"),
-          summaryLoading: false,
-        });
-        executeIdeaIdRef.current = null;
-        setMessage(`${FORK_MESSAGE_TEMPLATE}${forkContext}\n\n`);
-        setProvisioning(null);
-        navigate(`/projects/${projectId}/chat`, { replace: true });
-      })
-      .catch((err: unknown) => {
-        setSubmitError(err instanceof Error ? err.message : "Unable to prepare fork");
+  const handleFork = useCallback(
+    (session: ChatSessionResponse) => {
+      setSubmitError(null);
+      const provisionalLabel = session.topic
+        ? stripMarkdown(session.topic)
+        : 'Chat ' + session.id.slice(0, 8);
+      newChatIntentRef.current = true;
+      setPendingDerived({
+        type: 'fork',
+        parentSessionId: session.id,
+        parentSessionLabel: provisionalLabel,
+        parentTaskId: session.task?.id ?? session.taskId ?? '',
+        parentBranch: session.task?.outputBranch ?? undefined,
+        contextSummary: '',
+        summaryLoading: true,
       });
-  }, [navigate, projectId]);
+      setMessage(FORK_MESSAGE_TEMPLATE);
+      setProvisioning(null);
+      navigate('/projects/' + projectId + '/chat', { replace: true });
+      void prepareForkSession(projectId, session.id)
+        .then((result) => {
+          const sessionLabel = stripMarkdown(result.sessionLabel);
+          const forkContext = [
+            `Previous session: "${sessionLabel}"`,
+            `Parent project ID: ${projectId}`,
+            `Parent session ID: ${result.parentSessionId}`,
+            `Parent task ID: ${result.parentTaskId}`,
+          ].join('\n');
+          newChatIntentRef.current = true;
+          setPendingDerived({
+            type: 'fork',
+            parentSessionId: result.parentSessionId,
+            parentSessionLabel: sessionLabel,
+            parentTaskId: result.parentTaskId,
+            parentBranch: result.parentBranch ?? undefined,
+            contextSummary: [
+              '## Fork Context',
+              forkContext,
+              '',
+              result.summary ? `## Previous Session Summary\n${result.summary}` : '',
+            ]
+              .filter(Boolean)
+              .join('\n'),
+            summaryLoading: false,
+          });
+          executeIdeaIdRef.current = null;
+          setMessage(`${FORK_MESSAGE_TEMPLATE}${forkContext}\n\n`);
+          setProvisioning(null);
+          navigate(`/projects/${projectId}/chat`, { replace: true });
+        })
+        .catch((err: unknown) => {
+          setSubmitError(err instanceof Error ? err.message : 'Unable to prepare fork');
+        });
+    },
+    [navigate, projectId]
+  );
 
   /** Navigate to new chat screen with retry context pre-filled. */
-  const handleRetry = useCallback((session: ChatSessionResponse) => {
-    const taskId = session.task?.id ?? session.taskId;
-    if (!taskId) return;
-    const sessionLabel = session.topic ? stripMarkdown(session.topic) : `Chat ${session.id.slice(0, 8)}`;
+  const handleRetry = useCallback(
+    (session: ChatSessionResponse) => {
+      const taskId = session.task?.id ?? session.taskId;
+      if (!taskId) return;
+      const sessionLabel = session.topic
+        ? stripMarkdown(session.topic)
+        : `Chat ${session.id.slice(0, 8)}`;
 
-    const derived: PendingDerived = {
-      type: 'retry',
-      parentSessionId: session.id,
-      parentSessionLabel: sessionLabel,
-      parentTaskId: taskId,
-      parentBranch: session.task?.outputBranch ?? undefined,
-      errorMessage: session.task?.errorMessage ?? undefined,
-      contextSummary: '',
-      summaryLoading: true,
-    };
-    setPendingDerived(derived);
-    newChatIntentRef.current = true;
-    executeIdeaIdRef.current = null;
-    setSubmitError(null);
-    setProvisioning(null);
-    navigate(`/projects/${projectId}/chat`, { replace: true });
+      const derived: PendingDerived = {
+        type: 'retry',
+        parentSessionId: session.id,
+        parentSessionLabel: sessionLabel,
+        parentTaskId: taskId,
+        parentBranch: session.task?.outputBranch ?? undefined,
+        errorMessage: session.task?.errorMessage ?? undefined,
+        contextSummary: '',
+        summaryLoading: true,
+      };
+      setPendingDerived(derived);
+      newChatIntentRef.current = true;
+      executeIdeaIdRef.current = null;
+      setSubmitError(null);
+      setProvisioning(null);
+      navigate(`/projects/${projectId}/chat`, { replace: true });
 
-    void Promise.all([
-      getProjectTask(projectId, taskId).then((task) => task.description ?? '').catch(() => ''),
-      summarizeSession(projectId, session.id).then((r) => r.summary).catch(() => ''),
-    ]).then(([taskDescription, summary]) => {
-      setMessage(taskDescription);
-      const retryContext = [
-        `## Retry Context`,
-        `This is a retry of a previous task that may have failed or produced unsatisfactory results.`,
-        `Previous session: ${sessionLabel}`,
-        `Previous session ID: ${session.id}`,
-        `Previous task ID: ${taskId}`,
-        '',
-        summary ? `## Previous Session Summary\n${summary}` : '',
-      ].filter(Boolean).join('\n');
-      setPendingDerived((prev) => prev?.parentSessionId === session.id
-        ? { ...prev, contextSummary: retryContext, summaryLoading: false }
-        : prev);
-    });
-  }, [navigate, projectId]);
+      void Promise.all([
+        getProjectTask(projectId, taskId)
+          .then((task) => task.description ?? '')
+          .catch(() => ''),
+        summarizeSession(projectId, session.id)
+          .then((r) => r.summary)
+          .catch(() => ''),
+      ]).then(([taskDescription, summary]) => {
+        setMessage(taskDescription);
+        const retryContext = [
+          `## Retry Context`,
+          `This is a retry of a previous task that may have failed or produced unsatisfactory results.`,
+          `Previous session: ${sessionLabel}`,
+          `Previous session ID: ${session.id}`,
+          `Previous task ID: ${taskId}`,
+          '',
+          summary ? `## Previous Session Summary\n${summary}` : '',
+        ]
+          .filter(Boolean)
+          .join('\n');
+        setPendingDerived((prev) =>
+          prev?.parentSessionId === session.id
+            ? { ...prev, contextSummary: retryContext, summaryLoading: false }
+            : prev
+        );
+      });
+    },
+    [navigate, projectId]
+  );
 
   const handleCloseConversation = useCallback(async () => {
     const selectedSession = sessions.find((s) => s.id === sessionId);
@@ -773,28 +903,77 @@ export function useProjectChatState() {
   const hasSessions = sessions.length > 0;
 
   return {
-    projectId, project, sessionId, multiplayerActive,
-    sessions, loading, isRefreshing, hasSessions, showNewChatInput,
-    loadSessions, realtimeDegraded,
-    sidebarOpen, setSidebarOpen,
-    searchQuery, setSearchQuery, showStale, setShowStale, sessionScope, setSessionScope,
-    filteredRecent, filteredStale, effectiveShowStale, taskTitleMap, taskInfoMap,
-    message, setMessage, submitting, submitError,
-    handleSubmit, handleNewChat, handleSelect,
-    configuredAgents, selectedAgentType, setSelectedAgentType,
-    agentProfiles, selectedProfileId, setSelectedProfileId,
-    skills, selectedSkillId, setSelectedSkillId,
-    providerCatalogs, hasUserCloudCredentials,
-    profileWizard, openProfileWizard, closeProfileWizard, updateProfileWizard, createProfileFromWizard, suggestProfileName,
-    handleUpdateProfile, slashCommands,
-    selectedVmSize, handleVmSizeChange,
-    selectedWorkspaceProfile, setSelectedWorkspaceProfile,
-    selectedDevcontainerConfigName, setSelectedDevcontainerConfigName,
-    selectedTaskMode, handleTaskModeChange,
+    projectId,
+    project,
+    sessionId,
+    multiplayerActive,
+    sessions,
+    loading,
+    isRefreshing,
+    hasSessions,
+    showNewChatInput,
+    loadSessions,
+    realtimeDegraded,
+    sidebarOpen,
+    setSidebarOpen,
+    searchQuery,
+    setSearchQuery,
+    showStale,
+    setShowStale,
+    sessionScope,
+    setSessionScope,
+    filteredRecent,
+    filteredStale,
+    effectiveShowStale,
+    taskTitleMap,
+    taskInfoMap,
+    message,
+    setMessage,
+    submitting,
+    submitError,
+    handleSubmit,
+    handleNewChat,
+    handleSelect,
+    configuredAgents,
+    selectedAgentType,
+    setSelectedAgentType,
+    agentProfiles,
+    selectedProfileId,
+    setSelectedProfileId,
+    skills,
+    selectedSkillId,
+    setSelectedSkillId,
+    providerCatalogs,
+    hasUserCloudCredentials,
+    profileWizard,
+    openProfileWizard,
+    closeProfileWizard,
+    updateProfileWizard,
+    createProfileFromWizard,
+    suggestProfileName,
+    handleUpdateProfile,
+    slashCommands,
+    selectedVmSize,
+    handleVmSizeChange,
+    selectedWorkspaceProfile,
+    setSelectedWorkspaceProfile,
+    selectedDevcontainerConfigName,
+    setSelectedDevcontainerConfigName,
+    selectedTaskMode,
+    handleTaskModeChange,
     ...attachments,
-    provisioning, bootLogs, bootLogPanelOpen, setBootLogPanelOpen,
-    pendingDerived, setPendingDerived, handleFork, handleRetry,
-    closingConversation, closeError, handleCloseConversation,
-    transcribeApiUrl, getSessionState,
+    provisioning,
+    bootLogs,
+    bootLogPanelOpen,
+    setBootLogPanelOpen,
+    pendingDerived,
+    setPendingDerived,
+    handleFork,
+    handleRetry,
+    closingConversation,
+    closeError,
+    handleCloseConversation,
+    transcribeApiUrl,
+    getSessionState,
   };
 }
