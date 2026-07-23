@@ -27,7 +27,7 @@ Before you send, you can optionally choose:
 | **Skill**             | A profile-override layer for the run | None                     |
 | **Workspace profile** | `full` or `lightweight` environment  | `full`                   |
 | **VM size**           | small, medium, or large              | Project default          |
-| **Provider**          | Hetzner or Scaleway                  | Project default provider |
+| **Provider**          | Hetzner, Scaleway, Vultr, or GCP     | Project default provider |
 
 ## Idea Lifecycle
 
