@@ -56,7 +56,7 @@ Projects as the primary organizational unit:
 
 Multiple cloud providers and UX improvements:
 
-- Scaleway and GCP cloud provider support (in addition to Hetzner).
+- Scaleway, GCP, and Vultr cloud provider support (in addition to Hetzner).
 - In-app notifications with filtering.
 - Voice input and text-to-speech playback.
 - Conversation forking.
@@ -91,7 +91,7 @@ Agent-first deployment environments:
 
 ## Planned: More Providers
 
-- DigitalOcean, Vultr, AWS, and expanded provider coverage.
+- DigitalOcean, AWS, and expanded provider coverage.
 
 ## Complete: Teams & Collaboration
 

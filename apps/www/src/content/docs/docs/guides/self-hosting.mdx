@@ -17,7 +17,7 @@ This guide walks you through deploying Simple Agent Manager to your own infrastr
 
 **Workers Paid** is required because SAM uses Durable Objects for real-time chat, task execution, and node lifecycle, and Cloudflare Containers for the default instant-session runtime. Go to **Workers & Pages** in the Cloudflare dashboard to upgrade. You also need **R2** enabled for Pulumi state and **Analytics Engine** enabled (free): **Workers & Pages** → **Analytics Engine** → **Enable**.
 
-You do **not** need a shared cloud provider account. Users provide their own [Hetzner API token](https://console.hetzner.cloud/), [Scaleway API key](https://console.scaleway.com/iam/api-keys), or GCP configuration through the Settings UI. GCP Workload Identity Federation (WIF) uses an optional infrastructure OAuth client; the service-account JSON mode is OAuth-free.
+You do **not** need a shared cloud provider account. Users provide their own [Hetzner API token](https://console.hetzner.cloud/), [Scaleway API key](https://console.scaleway.com/iam/api-keys), [Vultr API key](https://my.vultr.com/settings/#settingsapi), or GCP configuration through the Settings UI. GCP Workload Identity Federation (WIF) uses an optional infrastructure OAuth client; the service-account JSON mode is OAuth-free.
 
 ## Step 1: Choose Your Domain and Cloudflare Account
 
@@ -285,7 +285,7 @@ The Workers Paid plan ($5/month) is required for Durable Objects and Cloudflare 
 
 ### User VM Costs
 
-VMs are billed to the cloud provider credential SAM uses for the node. In a typical self-hosted setup, that is each user's own BYOC credential; admins may also configure a platform credential for shared zero-config provisioning. SAM supports Hetzner, Scaleway, and GCP. The example prices below cover the built-in Hetzner and Scaleway size mappings; GCP pricing depends on the selected project, zone, and machine family.
+VMs are billed to the cloud provider credential SAM uses for the node. In a typical self-hosted setup, that is each user's own BYOC credential; admins may also configure a platform credential for shared zero-config provisioning. SAM supports Hetzner, Scaleway, Vultr, and GCP. The example prices below cover the built-in Hetzner, Scaleway, and Vultr size mappings; GCP pricing depends on the selected project, zone, and machine family.
 
 **Hetzner:**
 
@@ -302,6 +302,16 @@ VMs are billed to the cloud provider credential SAM uses for the node. In a typi
 | Small (DEV1-M)   | 3 vCPU, 4GB RAM  | ~€0.024 |
 | Medium (DEV1-XL) | 4 vCPU, 12GB RAM | ~€0.048 |
 | Large (GP1-S)    | 8 vCPU, 32GB RAM | ~€0.084 |
+
+**Vultr:**
+
+| Size               | Specs                    | Monthly |
+| ------------------ | ------------------------ | ------- |
+| Small (vc2-2c-4gb) | 2 vCPU, 4GB RAM, 80GB    | ~$20    |
+| Medium (vc2-4c-8gb)| 4 vCPU, 8GB RAM, 160GB   | ~$40    |
+| Large (vc2-6c-16gb)| 6 vCPU, 16GB RAM, 320GB  | ~$80    |
+
+Vultr bills hourly and the default region is `fra` (Frankfurt). When you create the Vultr Personal Access Token, its **IP access control** allowlist must be set to **Allow All IPv4/IPv6** — SAM calls the Vultr API from Cloudflare Workers, which have no static egress IP, so a restricted allowlist will reject provisioning requests.
 
 ## Troubleshooting
 
