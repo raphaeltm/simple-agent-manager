@@ -11,6 +11,7 @@ import { env, SELF } from 'cloudflare:test';
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import { signCallbackToken } from '../../src/services/jwt';
+import { seedInstallation, seedProject, seedUser } from './helpers/seed-d1';
 
 // Unique IDs per test to avoid cross-test contamination (isolatedStorage is off)
 const TEST_PREFIX = `msg-test-${Date.now()}`;
@@ -19,7 +20,7 @@ const WORKSPACE_NO_SESSION = `${TEST_PREFIX}-ws-nosess`;
 const WORKSPACE_NO_PROJECT = `${TEST_PREFIX}-ws-noproj`;
 const WORKSPACE_STOPPED = `${TEST_PREFIX}-ws-stopped`;
 const PROJECT_ID = `${TEST_PREFIX}-proj`;
-const SESSION_ID = `${TEST_PREFIX}-sess`;
+let SESSION_ID = '';
 const STOPPED_SESSION_ID = `${TEST_PREFIX}-stopped-sess`;
 const USER_ID = `${TEST_PREFIX}-user`;
 
@@ -55,22 +56,19 @@ describe('POST /workspaces/:id/messages — behavioral tests', () => {
   let stoppedToken: string;
 
   beforeAll(async () => {
-    // Create test user
-    await env.DATABASE.prepare(
-      `INSERT OR IGNORE INTO users (id, github_id, github_username, display_name, avatar_url, role, status, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, 'user', 'approved', datetime('now'), datetime('now'))`
-    )
-      .bind(USER_ID, 999999, 'test-user', 'Test User', 'https://example.com/avatar.png')
-      .run();
+    const installationId = `-installation`;
+    await seedUser(USER_ID, { githubId: '999999', email: `@example.com`, name: 'Test User' });
+    await seedInstallation(installationId, USER_ID, {
+      installationIdValue: `installation-`,
+      accountName: `account-`,
+    });
+    await seedProject(PROJECT_ID, USER_ID, installationId, {
+      name: 'test-project',
+      repository: 'test-owner/test-repo',
+    });
 
-    // Create test project
-    await env.DATABASE.prepare(
-      `INSERT OR IGNORE INTO projects (id, user_id, name, github_repo, github_owner, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))`
-    )
-      .bind(PROJECT_ID, USER_ID, 'test-project', 'test-repo', 'test-owner')
-      .run();
-
+    const projectData = env.PROJECT_DATA.get(env.PROJECT_DATA.idFromName(PROJECT_ID));
+    SESSION_ID = await projectData.createSession(WORKSPACE_ID, 'Worker message route session');
     // Workspace with linked chatSessionId
     await env.DATABASE.prepare(
       `INSERT OR IGNORE INTO workspaces (id, user_id, project_id, chat_session_id, name, repository, branch, status, vm_size, vm_location, created_at, updated_at)

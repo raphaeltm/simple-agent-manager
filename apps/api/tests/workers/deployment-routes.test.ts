@@ -8,6 +8,8 @@
 import { env, SELF } from 'cloudflare:test';
 import { beforeAll, describe, expect, it } from 'vitest';
 
+import { seedInstallation, seedProject, seedUser } from './helpers/seed-d1';
+
 // Unique IDs to avoid cross-test contamination
 const P = `deploy-${Date.now()}`;
 const USER_ID = `${P}-user`;
@@ -15,28 +17,21 @@ const OTHER_USER_ID = `${P}-other`;
 const PROJECT_ID = `${P}-proj`;
 
 beforeAll(async () => {
-  // Seed users
-  await env.DATABASE.prepare(
-    `INSERT OR IGNORE INTO users (id, github_id, github_username, display_name, avatar_url, role, status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, 'user', 'approved', datetime('now'), datetime('now'))`,
-  )
-    .bind(USER_ID, '990001', `deploy-test-user-${P}`, 'Deploy User', 'https://example.com/a.png')
-    .run();
-
-  await env.DATABASE.prepare(
-    `INSERT OR IGNORE INTO users (id, github_id, github_username, display_name, avatar_url, role, status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, 'user', 'approved', datetime('now'), datetime('now'))`,
-  )
-    .bind(OTHER_USER_ID, '990002', `deploy-other-${P}`, 'Other User', 'https://example.com/b.png')
-    .run();
-
-  // Seed project
-  await env.DATABASE.prepare(
-    `INSERT OR IGNORE INTO projects (id, user_id, name, github_repo, github_owner, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
-  )
-    .bind(PROJECT_ID, USER_ID, 'deploy-test-project', 'test-repo', 'test-owner')
-    .run();
+  const installationId = `-installation`;
+  await seedUser(USER_ID, { githubId: '990001', email: `-user@example.com`, name: 'Deploy User' });
+  await seedUser(OTHER_USER_ID, {
+    githubId: '990002',
+    email: `-other@example.com`,
+    name: 'Other User',
+  });
+  await seedInstallation(installationId, USER_ID, {
+    installationIdValue: `installation-`,
+    accountName: `account-`,
+  });
+  await seedProject(PROJECT_ID, USER_ID, installationId, {
+    name: 'deploy-test-project',
+    repository: 'test-owner/test-repo',
+  });
 });
 
 // Helper to build a valid single-service manifest
@@ -89,27 +84,22 @@ function secretRefManifest() {
 
 describe('deployment environment routes', () => {
   it('POST /api/projects/:projectId/environments returns 401 without auth', async () => {
-    const res = await SELF.fetch(
-      `http://localhost/api/projects/${PROJECT_ID}/environments`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: 'production' }),
-      },
-    );
+    const res = await SELF.fetch(`http://localhost/api/projects/${PROJECT_ID}/environments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'production' }),
+    });
     expect(res.status).toBe(401);
   });
 
   it('GET /api/projects/:projectId/environments returns 401 without auth', async () => {
-    const res = await SELF.fetch(
-      `http://localhost/api/projects/${PROJECT_ID}/environments`,
-    );
+    const res = await SELF.fetch(`http://localhost/api/projects/${PROJECT_ID}/environments`);
     expect(res.status).toBe(401);
   });
 
   it('GET /api/projects/:projectId/environments/:envId returns 401 without auth', async () => {
     const res = await SELF.fetch(
-      `http://localhost/api/projects/${PROJECT_ID}/environments/env-fake`,
+      `http://localhost/api/projects/${PROJECT_ID}/environments/env-fake`
     );
     expect(res.status).toBe(401);
   });
@@ -117,7 +107,7 @@ describe('deployment environment routes', () => {
   it('DELETE /api/projects/:projectId/environments/:envId returns 401 without auth', async () => {
     const res = await SELF.fetch(
       `http://localhost/api/projects/${PROJECT_ID}/environments/env-fake`,
-      { method: 'DELETE' },
+      { method: 'DELETE' }
     );
     expect(res.status).toBe(401);
   });
@@ -131,28 +121,28 @@ describe('deployment release routes', () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(validManifest()),
-      },
+      }
     );
     expect(res.status).toBe(401);
   });
 
   it('GET releases list returns 401 without auth', async () => {
     const res = await SELF.fetch(
-      `http://localhost/api/projects/${PROJECT_ID}/environments/env-fake/releases`,
+      `http://localhost/api/projects/${PROJECT_ID}/environments/env-fake/releases`
     );
     expect(res.status).toBe(401);
   });
 
   it('GET single release returns 401 without auth', async () => {
     const res = await SELF.fetch(
-      `http://localhost/api/projects/${PROJECT_ID}/environments/env-fake/releases/rel-fake`,
+      `http://localhost/api/projects/${PROJECT_ID}/environments/env-fake/releases/rel-fake`
     );
     expect(res.status).toBe(401);
   });
 
   it('GET compose returns 401 without auth', async () => {
     const res = await SELF.fetch(
-      `http://localhost/api/projects/${PROJECT_ID}/environments/env-fake/releases/rel-fake/compose`,
+      `http://localhost/api/projects/${PROJECT_ID}/environments/env-fake/releases/rel-fake/compose`
     );
     expect(res.status).toBe(401);
   });
@@ -189,14 +179,12 @@ describe('D1 schema', () => {
     const envId = `${P}-env-schema-test`;
     await env.DATABASE.prepare(
       `INSERT INTO deployment_environments (id, project_id, name, status, created_at, updated_at)
-       VALUES (?, ?, ?, 'active', datetime('now'), datetime('now'))`,
+       VALUES (?, ?, ?, 'active', datetime('now'), datetime('now'))`
     )
       .bind(envId, PROJECT_ID, 'schema-test')
       .run();
 
-    const row = await env.DATABASE.prepare(
-      `SELECT * FROM deployment_environments WHERE id = ?`,
-    )
+    const row = await env.DATABASE.prepare(`SELECT * FROM deployment_environments WHERE id = ?`)
       .bind(envId)
       .first();
 
@@ -211,7 +199,7 @@ describe('D1 schema', () => {
     const envId = `${P}-env-rel-test`;
     await env.DATABASE.prepare(
       `INSERT INTO deployment_environments (id, project_id, name, status, created_at, updated_at)
-       VALUES (?, ?, ?, 'active', datetime('now'), datetime('now'))`,
+       VALUES (?, ?, ?, 'active', datetime('now'), datetime('now'))`
     )
       .bind(envId, PROJECT_ID, 'rel-test-env')
       .run();
@@ -220,14 +208,12 @@ describe('D1 schema', () => {
     const relId = `${P}-rel-test`;
     await env.DATABASE.prepare(
       `INSERT INTO deployment_releases (id, environment_id, manifest, version, status, created_by, created_at)
-       VALUES (?, ?, ?, 1, 'created', ?, datetime('now'))`,
+       VALUES (?, ?, ?, 1, 'created', ?, datetime('now'))`
     )
       .bind(relId, envId, JSON.stringify(validManifest()), USER_ID)
       .run();
 
-    const row = await env.DATABASE.prepare(
-      `SELECT * FROM deployment_releases WHERE id = ?`,
-    )
+    const row = await env.DATABASE.prepare(`SELECT * FROM deployment_releases WHERE id = ?`)
       .bind(relId)
       .first();
 
@@ -248,7 +234,7 @@ describe('D1 schema', () => {
     const envId2 = `${P}-env-uniq-2`;
     await env.DATABASE.prepare(
       `INSERT INTO deployment_environments (id, project_id, name, status, created_at, updated_at)
-       VALUES (?, ?, ?, 'active', datetime('now'), datetime('now'))`,
+       VALUES (?, ?, ?, 'active', datetime('now'), datetime('now'))`
     )
       .bind(envId1, PROJECT_ID, 'unique-test')
       .run();
@@ -257,7 +243,7 @@ describe('D1 schema', () => {
     try {
       await env.DATABASE.prepare(
         `INSERT INTO deployment_environments (id, project_id, name, status, created_at, updated_at)
-         VALUES (?, ?, ?, 'active', datetime('now'), datetime('now'))`,
+         VALUES (?, ?, ?, 'active', datetime('now'), datetime('now'))`
       )
         .bind(envId2, PROJECT_ID, 'unique-test')
         .run();
@@ -271,7 +257,7 @@ describe('D1 schema', () => {
     const envId = `${P}-env-ver-uniq`;
     await env.DATABASE.prepare(
       `INSERT INTO deployment_environments (id, project_id, name, status, created_at, updated_at)
-       VALUES (?, ?, ?, 'active', datetime('now'), datetime('now'))`,
+       VALUES (?, ?, ?, 'active', datetime('now'), datetime('now'))`
     )
       .bind(envId, PROJECT_ID, 'ver-uniq-env')
       .run();
@@ -280,7 +266,7 @@ describe('D1 schema', () => {
     const relId2 = `${P}-rel-ver2`;
     await env.DATABASE.prepare(
       `INSERT INTO deployment_releases (id, environment_id, manifest, version, status, created_by, created_at)
-       VALUES (?, ?, ?, 1, 'created', ?, datetime('now'))`,
+       VALUES (?, ?, ?, 1, 'created', ?, datetime('now'))`
     )
       .bind(relId1, envId, '{}', USER_ID)
       .run();
@@ -288,7 +274,7 @@ describe('D1 schema', () => {
     try {
       await env.DATABASE.prepare(
         `INSERT INTO deployment_releases (id, environment_id, manifest, version, status, created_by, created_at)
-         VALUES (?, ?, ?, 1, 'created', ?, datetime('now'))`,
+         VALUES (?, ?, ?, 1, 'created', ?, datetime('now'))`
       )
         .bind(relId2, envId, '{}', USER_ID)
         .run();
@@ -302,7 +288,7 @@ describe('D1 schema', () => {
     const envId = `${P}-env-cascade`;
     await env.DATABASE.prepare(
       `INSERT INTO deployment_environments (id, project_id, name, status, created_at, updated_at)
-       VALUES (?, ?, ?, 'active', datetime('now'), datetime('now'))`,
+       VALUES (?, ?, ?, 'active', datetime('now'), datetime('now'))`
     )
       .bind(envId, PROJECT_ID, 'cascade-env')
       .run();
@@ -310,22 +296,18 @@ describe('D1 schema', () => {
     const relId = `${P}-rel-cascade`;
     await env.DATABASE.prepare(
       `INSERT INTO deployment_releases (id, environment_id, manifest, version, status, created_by, created_at)
-       VALUES (?, ?, ?, 1, 'created', ?, datetime('now'))`,
+       VALUES (?, ?, ?, 1, 'created', ?, datetime('now'))`
     )
       .bind(relId, envId, '{}', USER_ID)
       .run();
 
     // Delete the environment
-    await env.DATABASE.prepare(
-      `DELETE FROM deployment_environments WHERE id = ?`,
-    )
+    await env.DATABASE.prepare(`DELETE FROM deployment_environments WHERE id = ?`)
       .bind(envId)
       .run();
 
     // Release should be cascade-deleted
-    const row = await env.DATABASE.prepare(
-      `SELECT * FROM deployment_releases WHERE id = ?`,
-    )
+    const row = await env.DATABASE.prepare(`SELECT * FROM deployment_releases WHERE id = ?`)
       .bind(relId)
       .first();
 

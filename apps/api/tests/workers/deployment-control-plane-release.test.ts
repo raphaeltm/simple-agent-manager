@@ -2,6 +2,7 @@ import { env, SELF } from 'cloudflare:test';
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import { signCallbackToken, signNodeCallbackToken } from '../../src/services/jwt';
+import { seedInstallation, seedProject, seedUser } from './helpers/seed-d1';
 
 const TEST_PREFIX = `deploy-cp-${Date.now()}`;
 const USER_ID = `${TEST_PREFIX}-user`;
@@ -13,19 +14,16 @@ let nodeCallbackToken: string;
 let workspaceCallbackToken: string;
 
 async function seedBaseRows() {
-  await env.DATABASE.prepare(
-    `INSERT OR IGNORE INTO users (id, github_id, github_username, display_name, avatar_url, role, status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, 'user', 'approved', datetime('now'), datetime('now'))`
-  )
-    .bind(USER_ID, '777001', `${TEST_PREFIX}-user`, 'Deploy CP User', 'https://example.com/a.png')
-    .run();
-
-  await env.DATABASE.prepare(
-    `INSERT OR IGNORE INTO projects (id, user_id, name, github_repo, github_owner, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))`
-  )
-    .bind(PROJECT_ID, USER_ID, 'deploy-cp-project', 'repo', 'owner')
-    .run();
+  const installationId = `-installation`;
+  await seedUser(USER_ID, { githubId: '777001', email: `@example.com`, name: 'Deploy CP User' });
+  await seedInstallation(installationId, USER_ID, {
+    installationIdValue: `installation-`,
+    accountName: `account-`,
+  });
+  await seedProject(PROJECT_ID, USER_ID, installationId, {
+    name: 'deploy-cp-project',
+    repository: 'owner/repo',
+  });
 
   for (const nodeId of [NODE_ID, OTHER_NODE_ID]) {
     await env.DATABASE.prepare(

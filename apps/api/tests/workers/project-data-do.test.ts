@@ -4,7 +4,7 @@
  * Runs inside the workerd runtime via @cloudflare/vitest-pool-workers,
  * exercising real SQLite storage, DO lifecycle, and migrations.
  */
-import { env } from 'cloudflare:test';
+import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
 import type { ProjectData } from '../../src/durable-objects/project-data';
@@ -52,6 +52,48 @@ describe('ProjectData Durable Object', () => {
 
       const { sessions: page2 } = await stub.listSessions(null, 3, 3);
       expect(page2).toHaveLength(2);
+    });
+
+    it('bounds listSessions with 1,500 real sessions and large message history', async () => {
+      const stub = getStub('project-list-sessions-large');
+
+      await runInDurableObject(stub, async (instance) => {
+        const sql = instance.ctx.storage.sql;
+        const baseTimestamp = 1_750_000_000_000;
+        sql.exec(
+          `WITH RECURSIVE sequence(i) AS (
+             VALUES(0) UNION ALL SELECT i + 1 FROM sequence WHERE i < 1499
+           )
+           INSERT INTO chat_sessions
+             (id, workspace_id, topic, status, message_count, started_at, created_at, updated_at)
+           SELECT printf('large-session-%04d', i), NULL, printf('Session %04d', i),
+                  'active', CASE WHEN i = 1499 THEN 5000 ELSE 0 END,
+                  ?, ?, ? + i
+           FROM sequence`,
+          baseTimestamp,
+          baseTimestamp,
+          baseTimestamp
+        );
+        sql.exec(
+          `WITH RECURSIVE sequence(i) AS (
+             VALUES(0) UNION ALL SELECT i + 1 FROM sequence WHERE i < 4999
+           )
+           INSERT INTO chat_messages (id, session_id, role, content, created_at)
+           SELECT printf('large-message-%04d', i), 'large-session-1499',
+                  CASE WHEN i % 2 = 0 THEN 'user' ELSE 'assistant' END,
+                  printf('Deterministic message %04d', i), ? + i
+           FROM sequence`,
+          baseTimestamp
+        );
+      });
+
+      const result = await stub.listSessions(null, 25, 0);
+
+      expect(result.total).toBe(1500);
+      expect(result.sessions).toHaveLength(25);
+      expect(result.hasMore).toBe(true);
+      expect(result.sessions[0]?.id).toBe('large-session-1499');
+      expect(result.sessions[0]?.messageCount).toBe(5000);
     });
 
     it('filters sessions by status', async () => {
@@ -1803,10 +1845,10 @@ describe('ProjectData Durable Object', () => {
       ]);
 
       // Before stop: search should use LIKE on raw tokens
-      const beforeResults = stub.searchMessages('authentication middleware');
+      const beforeResults = await stub.searchMessages('authentication middleware');
       // LIKE on individual tokens may or may not find this — the user message has it
       expect(beforeResults.length).toBeGreaterThanOrEqual(1);
-      expect(stub.searchMessages('private injected sentinel')).toEqual([]);
+      expect(await stub.searchMessages('private injected sentinel')).toEqual([]);
 
       // Stop session — triggers materialization
       await stub.stopSession(sessionId);
@@ -1816,13 +1858,13 @@ describe('ProjectData Durable Object', () => {
       expect(session!.status).toBe('stopped');
 
       // FTS5 search should find "authentication middleware" even though it spans tokens
-      const afterResults = stub.searchMessages('authentication middleware');
+      const afterResults = await stub.searchMessages('authentication middleware');
       expect(afterResults.length).toBeGreaterThanOrEqual(1);
       // The grouped assistant message should contain the full phrase
       const assistantResult = afterResults.find((r) => r.role === 'assistant');
       expect(assistantResult).toBeDefined();
       expect(assistantResult!.snippet).toContain('auth');
-      expect(stub.searchMessages('private injected sentinel')).toEqual([]);
+      expect(await stub.searchMessages('private injected sentinel')).toEqual([]);
     });
 
     it('materializeSession is idempotent', async () => {
@@ -1835,10 +1877,10 @@ describe('ProjectData Durable Object', () => {
       await stub.stopSession(sessionId);
 
       // Calling materializeSession again should be a no-op (no error)
-      stub.materializeSession(sessionId);
+      await stub.materializeSession(sessionId);
 
       // Search should still work
-      const results = stub.searchMessages('Hello');
+      const results = await stub.searchMessages('Hello');
       expect(results.length).toBeGreaterThanOrEqual(1);
     });
 
@@ -1859,13 +1901,13 @@ describe('ProjectData Durable Object', () => {
       await stub.persistMessage(s3, 'user', 'Active session content', null);
 
       // materializeAllStopped should report already-materialized sessions as no-ops
-      const result = stub.materializeAllStopped();
+      const result = await stub.materializeAllStopped();
       expect(result.errors).toBe(0);
 
       // Both stopped sessions should be searchable
-      const r1 = stub.searchMessages('First session');
+      const r1 = await stub.searchMessages('First session');
       expect(r1.length).toBeGreaterThanOrEqual(1);
-      const r2 = stub.searchMessages('unique text');
+      const r2 = await stub.searchMessages('unique text');
       expect(r2.length).toBeGreaterThanOrEqual(1);
     });
 
@@ -1876,7 +1918,7 @@ describe('ProjectData Durable Object', () => {
       await stub.persistMessage(sessionId, 'user', 'searchable keyword here', null);
 
       // Session is still active — should fall back to LIKE
-      const results = stub.searchMessages('searchable');
+      const results = await stub.searchMessages('searchable');
       expect(results.length).toBeGreaterThanOrEqual(1);
       expect(results[0]!.snippet).toContain('searchable');
     });
@@ -1891,12 +1933,12 @@ describe('ProjectData Durable Object', () => {
       await stub.stopSession(sessionId);
 
       // Search with role filter — only user messages
-      const userResults = stub.searchMessages('database query', null, ['user']);
+      const userResults = await stub.searchMessages('database query', null, ['user']);
       expect(userResults.length).toBe(1);
       expect(userResults[0]!.role).toBe('user');
 
       // Search with role filter — only assistant messages
-      const assistantResults = stub.searchMessages('database query', null, ['assistant']);
+      const assistantResults = await stub.searchMessages('database query', null, ['assistant']);
       expect(assistantResults.length).toBe(1);
       expect(assistantResults[0]!.role).toBe('assistant');
     });
@@ -1913,7 +1955,7 @@ describe('ProjectData Durable Object', () => {
       await stub.stopSession(sessionId);
 
       // Search for a term that spans token boundaries
-      const results = stub.searchMessages('analyze the');
+      const results = await stub.searchMessages('analyze the');
       expect(results.length).toBe(1);
       expect(results[0]!.snippet).toContain('analyze');
     });
@@ -1928,9 +1970,9 @@ describe('ProjectData Durable Object', () => {
       const stub = getStub('project-idea-link');
       const sessionId = await stub.createSession(null, 'Idea discussion');
 
-      stub.linkSessionIdea(sessionId, 'task-001', 'discussing auth flow');
+      await stub.linkSessionIdea(sessionId, 'task-001', 'discussing auth flow');
 
-      const ideas = stub.getIdeasForSession(sessionId);
+      const ideas = await stub.getIdeasForSession(sessionId);
       expect(ideas).toHaveLength(1);
       expect(ideas[0]!.taskId).toBe('task-001');
       expect(ideas[0]!.context).toBe('discussing auth flow');
@@ -1941,11 +1983,11 @@ describe('ProjectData Durable Object', () => {
       const stub = getStub('project-idea-multi-link');
       const sessionId = await stub.createSession(null, 'Multi-idea session');
 
-      stub.linkSessionIdea(sessionId, 'task-a', 'first idea');
-      stub.linkSessionIdea(sessionId, 'task-b', 'second idea');
-      stub.linkSessionIdea(sessionId, 'task-c', null);
+      await stub.linkSessionIdea(sessionId, 'task-a', 'first idea');
+      await stub.linkSessionIdea(sessionId, 'task-b', 'second idea');
+      await stub.linkSessionIdea(sessionId, 'task-c', null);
 
-      const ideas = stub.getIdeasForSession(sessionId);
+      const ideas = await stub.getIdeasForSession(sessionId);
       expect(ideas).toHaveLength(3);
       expect(ideas.map((i: { taskId: string }) => i.taskId)).toEqual([
         'task-a',
@@ -1958,10 +2000,10 @@ describe('ProjectData Durable Object', () => {
       const stub = getStub('project-idea-idempotent');
       const sessionId = await stub.createSession(null, 'Idempotent test');
 
-      stub.linkSessionIdea(sessionId, 'task-dup', 'first link');
-      stub.linkSessionIdea(sessionId, 'task-dup', 'second link attempt');
+      await stub.linkSessionIdea(sessionId, 'task-dup', 'first link');
+      await stub.linkSessionIdea(sessionId, 'task-dup', 'second link attempt');
 
-      const ideas = stub.getIdeasForSession(sessionId);
+      const ideas = await stub.getIdeasForSession(sessionId);
       expect(ideas).toHaveLength(1);
       // First context wins (INSERT OR IGNORE)
       expect(ideas[0]!.context).toBe('first link');
@@ -1971,10 +2013,10 @@ describe('ProjectData Durable Object', () => {
       const stub = getStub('project-idea-unlink');
       const sessionId = await stub.createSession(null, 'Unlink test');
 
-      stub.linkSessionIdea(sessionId, 'task-rm', 'to be removed');
-      stub.unlinkSessionIdea(sessionId, 'task-rm');
+      await stub.linkSessionIdea(sessionId, 'task-rm', 'to be removed');
+      await stub.unlinkSessionIdea(sessionId, 'task-rm');
 
-      const ideas = stub.getIdeasForSession(sessionId);
+      const ideas = await stub.getIdeasForSession(sessionId);
       expect(ideas).toHaveLength(0);
     });
 
@@ -1983,9 +2025,9 @@ describe('ProjectData Durable Object', () => {
       const sessionId = await stub.createSession(null, 'No-op test');
 
       // Should not throw
-      stub.unlinkSessionIdea(sessionId, 'nonexistent-task');
+      await stub.unlinkSessionIdea(sessionId, 'nonexistent-task');
 
-      const ideas = stub.getIdeasForSession(sessionId);
+      const ideas = await stub.getIdeasForSession(sessionId);
       expect(ideas).toHaveLength(0);
     });
 
@@ -1994,10 +2036,10 @@ describe('ProjectData Durable Object', () => {
       const s1 = await stub.createSession(null, 'Session one');
       const s2 = await stub.createSession(null, 'Session two');
 
-      stub.linkSessionIdea(s1, 'shared-task', 'context 1');
-      stub.linkSessionIdea(s2, 'shared-task', 'context 2');
+      await stub.linkSessionIdea(s1, 'shared-task', 'context 1');
+      await stub.linkSessionIdea(s2, 'shared-task', 'context 2');
 
-      const sessions = stub.getSessionsForIdea('shared-task');
+      const sessions = await stub.getSessionsForIdea('shared-task');
       expect(sessions).toHaveLength(2);
       expect(sessions[0]!.sessionId).toBe(s1);
       expect(sessions[0]!.topic).toBe('Session one');
@@ -2009,7 +2051,7 @@ describe('ProjectData Durable Object', () => {
     it('returns empty array for idea with no linked sessions', async () => {
       const stub = getStub('project-idea-no-sessions');
 
-      const sessions = stub.getSessionsForIdea('orphan-task');
+      const sessions = await stub.getSessionsForIdea('orphan-task');
       expect(sessions).toHaveLength(0);
     });
 
@@ -2017,32 +2059,34 @@ describe('ProjectData Durable Object', () => {
       const stub = getStub('project-idea-bad-session');
       await stub.ensureProjectId('project-idea-bad-session');
 
-      expect(() => {
-        stub.linkSessionIdea('nonexistent-session', 'task-x', null);
-      }).toThrow('Session not found: nonexistent-session');
+      await runInDurableObject(stub, async (instance) => {
+        await expect(
+          instance.linkSessionIdea('nonexistent-session', 'task-x', null)
+        ).rejects.toThrow('Session not found: nonexistent-session');
+      });
     });
 
     it('cascade deletes links when session is deleted', async () => {
       const stub = getStub('project-idea-cascade');
       const sessionId = await stub.createSession(null, 'Cascade test');
 
-      stub.linkSessionIdea(sessionId, 'task-cascade', 'will be deleted');
+      await stub.linkSessionIdea(sessionId, 'task-cascade', 'will be deleted');
 
       // Verify link exists
-      expect(stub.getIdeasForSession(sessionId)).toHaveLength(1);
+      expect(await stub.getIdeasForSession(sessionId)).toHaveLength(1);
 
       // Stop session (does not delete in current schema, just changes status)
       await stub.stopSession(sessionId);
 
       // Links should still exist since session is stopped, not deleted
-      expect(stub.getIdeasForSession(sessionId)).toHaveLength(1);
+      expect(await stub.getIdeasForSession(sessionId)).toHaveLength(1);
     });
 
     it('returns empty ideas for a session with no links', async () => {
       const stub = getStub('project-idea-empty-session');
       const sessionId = await stub.createSession(null, 'No links');
 
-      const ideas = stub.getIdeasForSession(sessionId);
+      const ideas = await stub.getIdeasForSession(sessionId);
       expect(ideas).toHaveLength(0);
       expect(ideas).toEqual([]);
     });
@@ -2051,9 +2095,9 @@ describe('ProjectData Durable Object', () => {
       const stub = getStub('project-idea-null-ctx');
       const sessionId = await stub.createSession(null, 'Null context');
 
-      stub.linkSessionIdea(sessionId, 'task-null', null);
+      await stub.linkSessionIdea(sessionId, 'task-null', null);
 
-      const ideas = stub.getIdeasForSession(sessionId);
+      const ideas = await stub.getIdeasForSession(sessionId);
       expect(ideas).toHaveLength(1);
       expect(ideas[0]!.context).toBeNull();
     });
@@ -2062,9 +2106,9 @@ describe('ProjectData Durable Object', () => {
       const stub = getStub('project-idea-linked-at');
       const sessionId = await stub.createSession(null, 'LinkedAt test');
 
-      stub.linkSessionIdea(sessionId, 'task-la', 'test');
+      await stub.linkSessionIdea(sessionId, 'task-la', 'test');
 
-      const sessions = stub.getSessionsForIdea('task-la');
+      const sessions = await stub.getSessionsForIdea('task-la');
       expect(sessions).toHaveLength(1);
       expect(sessions[0]!.linkedAt).toBeGreaterThan(0);
       expect(typeof sessions[0]!.linkedAt).toBe('number');

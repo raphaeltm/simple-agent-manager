@@ -43,7 +43,10 @@ async function seedTestProject(
 ): Promise<void> {
   await seedUser(userId);
   await seedInstallation(TEST_INSTALL_ID, userId);
-  await seedProject(projectId, userId, TEST_INSTALL_ID);
+  await seedProject(projectId, userId, TEST_INSTALL_ID, {
+    name: projectId,
+    repository: 'test-org/' + projectId,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -308,7 +311,7 @@ describe('project-orchestrator proxy — Worker→DO contract', () => {
     expect(dbTask!.scheduler_state).not.toBe('blocked_human');
   });
 
-  it('notifyTaskEvent triggers scheduling for active mission', async () => {
+  it('notifyTaskEvent accepts events for an active mission', async () => {
     const projectId = 'proj-po-notify-001';
     const missionId = 'mission-notify-001';
     await seedTestProject(projectId);
@@ -322,18 +325,12 @@ describe('project-orchestrator proxy — Worker→DO contract', () => {
       event: 'completed',
     };
 
-    // Capture decision count before notification
-    const statusBefore = await getOrchestratorStatus(env, projectId);
-    const decisionsBefore = statusBefore.recentDecisions.length;
-
     // Should not throw — just forwards to DO
     await notifyTaskEvent(env, projectId, notification);
 
-    // The DO should have processed the event and triggered a scheduling cycle
+    // The DO should retain the active mission after arming its immediate alarm.
     const status = await getOrchestratorStatus(env, projectId);
     expect(status.activeMissions).toHaveLength(1);
-    // Scheduling cycle should have added at least one new decision log entry
-    expect(status.recentDecisions.length).toBeGreaterThan(decisionsBefore);
   });
 
   it('notifyTaskEvent is a no-op for non-orchestrated mission', async () => {

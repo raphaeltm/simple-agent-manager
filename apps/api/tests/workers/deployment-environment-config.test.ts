@@ -29,6 +29,7 @@ import {
   loadDeploymentInterpolationEnv,
   upsertDeploymentEnvironmentConfigVar,
 } from '../../src/services/deployment-environment-config';
+import { seedInstallation, seedProject, seedUser } from './helpers/seed-d1';
 
 const PREFIX = `decfg-${Date.now()}`;
 const USER_ID = `${PREFIX}-user`;
@@ -41,7 +42,7 @@ async function makeEnvironment(name: string): Promise<string> {
   const id = `${PREFIX}-env-${name}`;
   await env.DATABASE.prepare(
     `INSERT INTO deployment_environments (id, project_id, name, status, created_at, updated_at)
-     VALUES (?, ?, ?, 'active', datetime('now'), datetime('now'))`,
+     VALUES (?, ?, ?, 'active', datetime('now'), datetime('now'))`
   )
     .bind(id, PROJECT_ID, name)
     .run();
@@ -51,19 +52,16 @@ async function makeEnvironment(name: string): Promise<string> {
 beforeAll(async () => {
   db = drizzle(env.DATABASE, { schema });
 
-  await env.DATABASE.prepare(
-    `INSERT OR IGNORE INTO users (id, github_id, github_username, display_name, avatar_url, role, status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, 'user', 'approved', datetime('now'), datetime('now'))`,
-  )
-    .bind(USER_ID, '880001', `decfg-user-${PREFIX}`, 'Cfg User', 'https://example.com/a.png')
-    .run();
-
-  await env.DATABASE.prepare(
-    `INSERT OR IGNORE INTO projects (id, user_id, name, github_repo, github_owner, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
-  )
-    .bind(PROJECT_ID, USER_ID, 'decfg-project', 'test-repo', 'test-owner')
-    .run();
+  const installationId = `-installation`;
+  await seedUser(USER_ID, { githubId: '880001', email: `@example.com`, name: 'Cfg User' });
+  await seedInstallation(installationId, USER_ID, {
+    installationIdValue: `installation-`,
+    accountName: `account-`,
+  });
+  await seedProject(PROJECT_ID, USER_ID, installationId, {
+    name: 'decfg-project',
+    repository: 'test-owner/test-repo',
+  });
 });
 
 describe('buildDeploymentEnvironmentConfigResponse', () => {
@@ -271,13 +269,13 @@ describe('interpolation env resolution (build vs runtime boundary)', () => {
     await env.DATABASE.prepare(
       `INSERT INTO deployment_environment_config_vars
        (id, environment_id, env_key, stored_value, value_iv, is_secret, created_at, updated_at)
-       VALUES (?, ?, 'BROKEN', 'not-real-ciphertext', NULL, 1, datetime('now'), datetime('now'))`,
+       VALUES (?, ?, 'BROKEN', 'not-real-ciphertext', NULL, 1, datetime('now'), datetime('now'))`
     )
       .bind(ulid(), envId)
       .run();
 
     await expect(loadDeploymentInterpolationEnv(db, envId, ENCRYPTION_KEY)).rejects.toThrow(
-      /missing an IV/,
+      /missing an IV/
     );
   });
 });

@@ -379,7 +379,10 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
         userId: TEST_USER_ID,
         deleteAt: Date.now() - 1_000,
       });
-      await instance.ctx.storage.setAlarm(Date.now() - 1);
+      // Keep the platform alarm in the future while invoking alarm() directly.
+      // A past alarm can fire automatically and race this explicit invocation,
+      // making the VM deletion execute twice in newer workerd versions.
+      await instance.ctx.storage.setAlarm(Date.now() + 60_000);
     });
 
     await runInDurableObject(stub, async (instance) => {
