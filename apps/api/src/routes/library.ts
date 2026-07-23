@@ -6,7 +6,7 @@
  */
 
 import type { ListFilesRequest, MoveFileRequest, UpdateTagsRequest } from '@simple-agent-manager/shared';
-import { LIBRARY_DEFAULTS } from '@simple-agent-manager/shared';
+import { LIBRARY_DEFAULTS, resolveEffectiveMimeType } from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
@@ -305,10 +305,15 @@ libraryRoutes.get('/:fileId/preview', requireAuth(), requireApproved(), async (c
 
   await requireProjectAccess(db, projectId, userId);
 
-  // Check MIME type BEFORE decrypting to avoid wasting CPU on unsupported types
+  // Check MIME type BEFORE decrypting to avoid wasting CPU on unsupported types.
+  // When the stored MIME is application/octet-stream/empty (agent uploads that
+  // hit the vm-agent's host-MIME-DB fallback), derive the effective type from
+  // the filename extension so already-stored files still preview. The effective
+  // type flows through the SAME neutralization below (HTML → text/plain + CSP;
+  // SVG is never in PREVIEWABLE_MIMES), so no sniffed type is served unsandboxed.
   const { file } = await getFile(db, projectId, fileId);
-  const mimeTypeLower = (file.mimeType.split(';')[0] ?? file.mimeType).trim().toLowerCase();
-  if (!PREVIEWABLE_MIMES.has(mimeTypeLower)) {
+  const previewMimeType = resolveEffectiveMimeType(file.mimeType, file.filename);
+  if (!PREVIEWABLE_MIMES.has(previewMimeType)) {
     throw errors.badRequest('File type is not supported for inline preview');
   }
 
@@ -333,12 +338,12 @@ libraryRoutes.get('/:fileId/preview', requireAuth(), requireApproved(), async (c
 
   const safeFilename = file.filename.replace(/[^\x20-\x7E]|["\\;]/g, '_');
 
-  const responseContentType = mimeTypeLower === 'text/html'
+  const responseContentType = previewMimeType === 'text/html'
     ? 'text/plain; charset=utf-8'
-    : mimeTypeLower;
-  const csp = mimeTypeLower === 'application/pdf'
+    : previewMimeType;
+  const csp = previewMimeType === 'application/pdf'
     ? "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; object-src 'self'"
-    : mimeTypeLower === 'text/html'
+    : previewMimeType === 'text/html'
       ? "default-src 'none'"
       : "default-src 'none'; style-src 'unsafe-inline'";
 

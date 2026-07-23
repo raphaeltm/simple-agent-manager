@@ -250,6 +250,26 @@ describe('FilePreviewModal — Markdown', () => {
     // No markdown content should be rendered
     expect(screen.queryByTestId('rendered-markdown')).not.toBeInTheDocument();
   });
+
+  // Backfill regression: agent uploads that hit the vm-agent host-MIME-DB
+  // fallback are stored as application/octet-stream. The modal must recover the
+  // markdown branch from the filename extension so already-stored files render.
+  it('renders markdown for an octet-stream .md file (already-stored agent upload)', async () => {
+    const file = makeMarkdownFile({ mimeType: 'application/octet-stream', filename: 'notes.md' });
+    render(
+      <FilePreviewModal
+        file={file}
+        previewUrl="https://api.example.com/preview"
+        onClose={vi.fn()}
+        onDownload={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('rendered-markdown')).toBeInTheDocument();
+    });
+    expect(screen.getByText('Hello World')).toBeInTheDocument();
+  });
 });
 
 describe('FilePreviewModal — HTML', () => {
@@ -332,5 +352,37 @@ describe('FilePreviewModal — HTML', () => {
     await waitFor(() => {
       expect(document.querySelector('iframe')).toBeTruthy();
     });
+  });
+
+  // SECURITY backfill regression: an octet-stream file named *.html must still
+  // be routed through the sandboxed HtmlViewer (DOMPurify + sandboxed srcdoc
+  // iframe), never rendered as live HTML.
+  it('sandboxes an octet-stream .html file via the srcdoc iframe (security regression)', async () => {
+    const file = makeMarkdownFile({
+      mimeType: 'application/octet-stream',
+      filename: 'interactive.html',
+      sizeBytes: HTML_CONTENT.length,
+    });
+    render(
+      <FilePreviewModal
+        file={file}
+        previewUrl="https://api.example.com/preview/interactive"
+        onClose={vi.fn()}
+        onDownload={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(document.querySelector('iframe')).toBeTruthy();
+    });
+    const iframe = document.querySelector('iframe')!;
+    expect(iframe).toHaveAttribute('sandbox', '');
+    await waitFor(() => {
+      expect(iframe.getAttribute('srcdoc')).toContain('Content-Security-Policy');
+    });
+    const srcDoc = iframe.getAttribute('srcdoc') ?? '';
+    expect(srcDoc).not.toContain('<script>');
+    expect(srcDoc).not.toContain('window.__ran');
+    expect(iframe).not.toHaveAttribute('src');
   });
 });

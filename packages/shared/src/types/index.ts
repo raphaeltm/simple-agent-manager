@@ -384,11 +384,15 @@ export type {
   UpdateTagsRequest,
 } from './library';
 export {
+  baseMimeType,
   buildLibraryR2Key,
+  isUnknownMimeType,
   LIBRARY_DEFAULTS,
   LIBRARY_DIRECTORY_SEGMENT_PATTERN,
   LIBRARY_FILENAME_PATTERN,
   LIBRARY_TAG_PATTERN,
+  mimeTypeFromFilename,
+  resolveEffectiveMimeType,
   validateDirectoryPath,
 } from './library';
 

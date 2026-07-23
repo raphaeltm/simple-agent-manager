@@ -193,6 +193,40 @@ describe('isHtmlMime', () => {
   });
 });
 
+describe('octet-stream filename fallback (already-stored agent uploads)', () => {
+  const OCTET = 'application/octet-stream';
+
+  it('treats an octet-stream .md as previewable markdown via the filename', () => {
+    expect(isMarkdownMime(OCTET, 'notes.md')).toBe(true);
+    expect(isPreviewableMime(OCTET, 'notes.md')).toBe(true);
+    // Without the filename the octet-stream type alone is not previewable.
+    expect(isMarkdownMime(OCTET)).toBe(false);
+    expect(isPreviewableMime(OCTET)).toBe(false);
+  });
+
+  it('treats an octet-stream .html as HTML (routed to the sandboxed HtmlViewer)', () => {
+    expect(isHtmlMime(OCTET, 'page.html')).toBe(true);
+    expect(isPreviewableMime(OCTET, 'page.html')).toBe(true);
+  });
+
+  it('does NOT make an octet-stream binary with no known extension previewable', () => {
+    expect(isPreviewableMime(OCTET, 'archive.bin')).toBe(false);
+    expect(isMarkdownMime(OCTET, 'archive.bin')).toBe(false);
+    expect(isPreviewableMime(OCTET, 'Makefile')).toBe(false);
+  });
+
+  it('does NOT make an octet-stream .svg a previewable image (script risk)', () => {
+    expect(isPreviewableImageMime(OCTET, 'icon.svg')).toBe(false);
+    expect(isPreviewableMime(OCTET, 'icon.svg')).toBe(false);
+  });
+
+  it('ignores the filename when a real MIME type is present', () => {
+    // A genuine PNG keeps its type even if the filename claims markdown.
+    expect(isPreviewableImageMime('image/png', 'trickery.md')).toBe(true);
+    expect(isMarkdownMime('image/png', 'trickery.md')).toBe(false);
+  });
+});
+
 describe('baseMimeType', () => {
   it('strips charset parameters', () => {
     expect(baseMimeType('text/markdown; charset=utf-8')).toBe('text/markdown');

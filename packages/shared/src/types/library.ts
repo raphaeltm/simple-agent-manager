@@ -287,3 +287,102 @@ export function validateDirectoryPath(
 export function buildLibraryR2Key(projectId: string, fileId: string): string {
   return `library/${projectId}/${fileId}`;
 }
+
+// -----------------------------------------------------------------------------
+// MIME type resolution (shared by web preview predicates + API preview route)
+// -----------------------------------------------------------------------------
+
+/**
+ * Strip MIME parameters (e.g. "; charset=utf-8") and return the base type,
+ * trimmed and lowercased.
+ */
+export function baseMimeType(mimeType: string): string {
+  return (mimeType.split(';')[0] ?? mimeType).trim().toLowerCase();
+}
+
+/**
+ * Whether a stored MIME type is "unknown" and should trigger extension-based
+ * resolution. Agent uploads that hit the vm-agent's host-MIME-DB fallback land
+ * as `application/octet-stream`; some legacy rows are empty.
+ */
+export function isUnknownMimeType(mimeType: string | null | undefined): boolean {
+  const base = baseMimeType(mimeType ?? '');
+  return base === '' || base === 'application/octet-stream';
+}
+
+/**
+ * Canonical filename-extension → MIME map for preview/serve decisions.
+ *
+ * Mirrors the vm-agent's curated map (packages/vm-agent/internal/server/mimetype.go)
+ * plus the image/PDF/HTML types the library preview understands. This is the
+ * defense-in-depth + backfill layer: it makes already-stored octet-stream files
+ * (uploaded before the vm-agent fix) previewable without a re-upload, and
+ * guards against any future host-MIME-DB divergence.
+ *
+ * A curated static type table is not a Constitution Principle XI hardcoded
+ * configuration value. See .claude/rules/51-vm-agent-no-host-mime-db.md.
+ */
+const EXTENSION_TO_MIME: Record<string, string> = {
+  // text / document
+  md: 'text/markdown',
+  markdown: 'text/markdown',
+  txt: 'text/plain',
+  log: 'text/plain',
+  yaml: 'application/yaml',
+  yml: 'application/yaml',
+  toml: 'application/toml',
+  csv: 'text/csv',
+  json: 'application/json',
+  xml: 'application/xml',
+  html: 'text/html',
+  htm: 'text/html',
+  pdf: 'application/pdf',
+  // images
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  avif: 'image/avif',
+  svg: 'image/svg+xml',
+  ico: 'image/x-icon',
+  bmp: 'image/bmp',
+};
+
+/**
+ * Resolve a MIME type from a filename's extension. Returns '' when the filename
+ * has no extension or the extension is not in the curated map.
+ */
+export function mimeTypeFromFilename(filename: string | null | undefined): string {
+  if (!filename) return '';
+  const lower = filename.toLowerCase();
+  const dot = lower.lastIndexOf('.');
+  // No dot, or a leading-dot dotfile with no further extension (e.g. ".env"):
+  // treat as having no usable extension.
+  if (dot <= 0) return '';
+  const ext = lower.slice(dot + 1);
+  return EXTENSION_TO_MIME[ext] ?? '';
+}
+
+/**
+ * Resolve the effective MIME type for a stored file: use the stored MIME
+ * unless it is unknown/`application/octet-stream`, in which case fall back to
+ * the filename extension. Returns the base (parameter-stripped, lowercased)
+ * type. When the stored MIME is unknown AND the extension is unrecognized, the
+ * unknown base is returned unchanged (so callers still fail their preview gate).
+ *
+ * SECURITY: an extension-derived `text/html` / `image/svg+xml` returned here
+ * carries no special trust — callers MUST route it through the SAME
+ * neutralization/sandboxing as a stored `text/html` / `image/svg+xml` (the API
+ * preview route serves HTML as text/plain with a strict CSP and never lists
+ * SVG as previewable). Never serve a sniffed type unsandboxed.
+ */
+export function resolveEffectiveMimeType(
+  mimeType: string | null | undefined,
+  filename: string | null | undefined,
+): string {
+  const base = baseMimeType(mimeType ?? '');
+  if (!isUnknownMimeType(base)) return base;
+  const fromExt = mimeTypeFromFilename(filename);
+  return fromExt || base;
+}

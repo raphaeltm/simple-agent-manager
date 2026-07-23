@@ -56,9 +56,9 @@ export const DocumentCard: FC<DocumentCardProps> = ({ item, projectId }) => {
   const canPreview = Boolean(projectId && fileId);
   const previewUrl = canPreview ? getLibraryFilePreviewUrl(projectId as string, fileId as string) : undefined;
 
-  const isImage = Boolean(mimeType && isPreviewableImageMime(mimeType));
-  const isMarkdown = Boolean(mimeType && isMarkdownMime(mimeType));
-  const isHtml = Boolean(mimeType && isHtmlMime(mimeType));
+  const isImage = Boolean(mimeType && isPreviewableImageMime(mimeType, fileName));
+  const isMarkdown = Boolean(mimeType && isMarkdownMime(mimeType, fileName));
+  const isHtml = Boolean(mimeType && isHtmlMime(mimeType, fileName));
   const withinInlineCap = sizeBytes === undefined || sizeBytes <= FILE_PREVIEW_INLINE_MAX_BYTES;
 
   const showImageTier = state === 'ready' && canPreview && isImage && withinInlineCap && !imgFailed;

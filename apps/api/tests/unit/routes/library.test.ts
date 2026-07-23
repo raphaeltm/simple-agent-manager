@@ -400,6 +400,80 @@ describe('library routes', () => {
       expect(res.status).toBe(400);
       expect(mockDownloadFile).not.toHaveBeenCalled();
     });
+
+    // Regression: agent uploads land as application/octet-stream when the
+    // vm-agent's host MIME DB is absent (cf-container). The preview route must
+    // fall back to the filename extension so ALREADY-STORED files still preview.
+    it('serves octet-stream .md as text/markdown via filename fallback (backfill)', async () => {
+      const content = new TextEncoder().encode('# Heading\n\nbody');
+      mockGetFile.mockResolvedValue({
+        file: { filename: 'notes.md', mimeType: 'application/octet-stream', sizeBytes: content.byteLength },
+        tags: [],
+      });
+      mockDownloadFile.mockResolvedValue({
+        data: content.buffer,
+        file: { filename: 'notes.md', mimeType: 'application/octet-stream', sizeBytes: content.byteLength },
+        metadata: {},
+      });
+
+      const { app, env } = makeApp(makeEnv());
+      const res = await app.fetch(
+        new Request(`${BASE_URL}/projects/test-project-id/library/file-123/preview`),
+        env
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.headers.get('Content-Type')).toBe('text/markdown');
+      expect(res.headers.get('Content-Disposition')).toContain('inline');
+      expect(res.headers.get('X-Content-Type-Options')).toBe('nosniff');
+      expect(await res.text()).toContain('# Heading');
+    });
+
+    // SECURITY regression: an octet-stream file named *.html must go through the
+    // SAME neutralization as a stored text/html file — served as inert
+    // text/plain with a strict CSP, never as executable text/html.
+    it('still neutralizes octet-stream .html as inert text/plain with strict CSP', async () => {
+      const content = new TextEncoder().encode('<script>document.body.textContent = document.cookie</script>');
+      mockGetFile.mockResolvedValue({
+        file: { filename: 'page.html', mimeType: 'application/octet-stream', sizeBytes: content.byteLength },
+        tags: [],
+      });
+      mockDownloadFile.mockResolvedValue({
+        data: content.buffer,
+        file: { filename: 'page.html', mimeType: 'application/octet-stream', sizeBytes: content.byteLength },
+        metadata: {},
+      });
+
+      const { app, env } = makeApp(makeEnv());
+      const res = await app.fetch(
+        new Request(`${BASE_URL}/projects/test-project-id/library/file-123/preview`),
+        env
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.headers.get('Content-Type')).toBe('text/plain; charset=utf-8');
+      expect(res.headers.get('Content-Type')).not.toContain('text/html');
+      expect(res.headers.get('Content-Security-Policy')).toBe("default-src 'none'");
+      expect(res.headers.get('X-Content-Type-Options')).toBe('nosniff');
+    });
+
+    // SECURITY regression: an octet-stream file named *.svg must NOT become
+    // previewable via the extension fallback (SVG can carry scripts).
+    it('still rejects octet-stream .svg (no sniffed SVG preview)', async () => {
+      mockGetFile.mockResolvedValue({
+        file: { filename: 'icon.svg', mimeType: 'application/octet-stream' },
+        tags: [],
+      });
+
+      const { app, env } = makeApp(makeEnv());
+      const res = await app.fetch(
+        new Request(`${BASE_URL}/projects/test-project-id/library/file-123/preview`),
+        env
+      );
+
+      expect(res.status).toBe(400);
+      expect(mockDownloadFile).not.toHaveBeenCalled();
+    });
   });
 
   describe('missing encryption key', () => {
