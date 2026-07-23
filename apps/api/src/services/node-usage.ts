@@ -6,7 +6,7 @@ import type {
   CredentialSource,
   NodeUsageRecord,
 } from '@simple-agent-manager/shared';
-import { getVcpuCount } from '@simple-agent-manager/shared';
+import { getVcpuCount, isUserOwnedNodeClass } from '@simple-agent-manager/shared';
 import { and, eq, inArray, notInArray, or, sql } from 'drizzle-orm';
 import type { DrizzleD1Database } from 'drizzle-orm/d1';
 
@@ -63,6 +63,8 @@ export interface NodeUsageCalculationRow {
   vmSize: string;
   cloudProvider: string | null;
   credentialSource: string | null;
+  /** Ownership class; user-owned (BYO) nodes accrue $0 regardless of credentialSource. */
+  nodeClass: string | null;
   status: string;
   createdAt: string;
   updatedAt: string;
@@ -104,7 +106,13 @@ function addNodeToTotals(
   totals: NodeUsageTotals,
   node: Pick<
     NodeUsageRow,
-    'vmSize' | 'cloudProvider' | 'credentialSource' | 'status' | 'createdAt' | 'updatedAt'
+    | 'vmSize'
+    | 'cloudProvider'
+    | 'credentialSource'
+    | 'nodeClass'
+    | 'status'
+    | 'createdAt'
+    | 'updatedAt'
   >,
   periodStart: Date,
   periodEnd: Date,
@@ -113,7 +121,15 @@ function addNodeToTotals(
   // User-owned (BYO) nodes cost SAM $0 — exclude them from every node-hour, vCPU-hour, and
   // active-node total so metering, admin cost (getAllUsersNodeUsageSummary → here), and quota
   // reflect only SAM-paid compute. Single chokepoint. See architecture-critique #9.
-  if (node.credentialSource === SELF_HOSTED_CREDENTIAL_SOURCE) {
+  //
+  // Keyed on BOTH the canonical ownership axis (nodeClass='user-owned') AND the credentialSource
+  // sentinel ('self-hosted'): every other Phase-0 guard uses nodeClass, so excluding on it here too
+  // means billing can't silently re-include a BYO node if a future enrollment path sets nodeClass
+  // but forgets the credentialSource sentinel (or vice-versa). See cloudflare/security review.
+  if (
+    isUserOwnedNodeClass(node.nodeClass) ||
+    node.credentialSource === SELF_HOSTED_CREDENTIAL_SOURCE
+  ) {
     return;
   }
   const endedAt = getNodeEndedAt(node.status, node.updatedAt);
@@ -199,6 +215,7 @@ async function getUserOverlappingNodeRows(
       vmLocation: schema.nodes.vmLocation,
       cloudProvider: schema.nodes.cloudProvider,
       credentialSource: schema.nodes.credentialSource,
+      nodeClass: schema.nodes.nodeClass,
       status: schema.nodes.status,
       createdAt: schema.nodes.createdAt,
       updatedAt: schema.nodes.updatedAt,
@@ -226,6 +243,7 @@ async function getAllOverlappingNodeRows(
       vmLocation: schema.nodes.vmLocation,
       cloudProvider: schema.nodes.cloudProvider,
       credentialSource: schema.nodes.credentialSource,
+      nodeClass: schema.nodes.nodeClass,
       status: schema.nodes.status,
       createdAt: schema.nodes.createdAt,
       updatedAt: schema.nodes.updatedAt,

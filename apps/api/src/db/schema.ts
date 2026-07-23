@@ -940,7 +940,10 @@ export const nodes = sqliteTable(
     lastMetrics: text('last_metrics'),
     /** ISO-8601 timestamp when node entered warm pool. Null if node is not warm. Used by NodeLifecycle DO for timeout. */
     warmSince: text('warm_since'),
-    /** 'user' = provisioned with user's own credential; 'platform' = provisioned with platform credential. */
+    /**
+     * 'user' = provisioned with user's own credential; 'platform' = provisioned with platform
+     * credential; 'self-hosted' = user-owned (BYO) node SAM provisioned nothing for ($0 compute).
+     */
     credentialSource: text('credential_source').default('user'),
     /** User whose credential attribution was used to provision this node. */
     credentialAttributionUserId: text('credential_attribution_user_id').references(() => users.id, {

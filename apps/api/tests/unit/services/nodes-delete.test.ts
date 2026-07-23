@@ -43,6 +43,11 @@ vi.mock('../../../src/services/dns', () => ({
   createNodeBackendDNSRecord: vi.fn(),
 }));
 
+const destroyVmAgentContainer = vi.fn(async () => {});
+vi.mock('../../../src/services/vm-agent-container', () => ({
+  destroyVmAgentContainer: (...args: unknown[]) => destroyVmAgentContainer(...args),
+}));
+
 const persistError = vi.fn(async () => {});
 vi.mock('../../../src/services/observability', () => ({
   persistError: (...args: unknown[]) => persistError(...args),
@@ -139,6 +144,56 @@ describe('node resource deletion services', () => {
 
     expect(result.providerVmDeleteSkippedReason).toBe('user-owned node — no cloud VM to delete');
     expect(providerDeleteVM).not.toHaveBeenCalled();
+  });
+
+  it('stopNodeResources on a user-owned node with a STRAY providerInstanceId still never deletes VM/DNS', async () => {
+    // Discriminating for the guard itself (not the incidental null-checks): even with populated
+    // providerInstanceId + cloudProvider + backendDnsRecordId, the user-owned guard must short-circuit.
+    nodeRows.push(
+      userOwnedNode({
+        providerInstanceId: 'srv-should-not-touch',
+        cloudProvider: 'hetzner',
+        backendDnsRecordId: 'dns-should-not-touch',
+      })
+    );
+
+    await stopNodeResources('byo-1', 'user-1', ENV);
+
+    expect(updateCalls.some((u) => u.status === 'stopped')).toBe(true);
+    expect(createProviderForUser).not.toHaveBeenCalled();
+    expect(providerDeleteVM).not.toHaveBeenCalled();
+    expect(deleteDNSRecord).not.toHaveBeenCalled();
+  });
+
+  it('deleteNodeResources destroys the cf-container for a managed cf-container node (asymmetry fix)', async () => {
+    // Pre-fix, deleteNodeResources had no container branch and leaked the Sandbox container.
+    nodeRows.push({
+      id: 'cf-1',
+      userId: 'user-1',
+      name: 'cf node',
+      status: 'running',
+      nodeClass: 'managed',
+      runtime: 'cf-container',
+      providerInstanceId: null,
+      cloudProvider: null,
+      backendDnsRecordId: null,
+      credentialAttributionUserId: null,
+      credentialAttributionSource: 'user',
+      credentialAttributionProjectId: null,
+    });
+
+    await deleteNodeResources('cf-1', 'user-1', ENV);
+
+    expect(destroyVmAgentContainer).toHaveBeenCalledWith(ENV, 'cf-1');
+  });
+
+  it('deleteNodeResources does NOT destroy a container for a user-owned node', async () => {
+    // BYO nodes are never cf-container; the explicit guard proves it (even if runtime leaked in).
+    nodeRows.push(userOwnedNode({ runtime: 'cf-container' }));
+
+    await deleteNodeResources('byo-1', 'user-1', ENV);
+
+    expect(destroyVmAgentContainer).not.toHaveBeenCalled();
   });
 
   it('deleteNodeResourcesStrict is a no-op for a user-owned node (nothing to delete, no throw)', async () => {

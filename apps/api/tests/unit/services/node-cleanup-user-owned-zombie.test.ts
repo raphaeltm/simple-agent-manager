@@ -61,15 +61,49 @@ function seedNode(row: {
   nodeClass: 'managed' | 'user-owned';
   status: string;
   warmSince: string | null;
+  runtime?: string;
 }): void {
   sqlite
     ?.prepare(
       `
       INSERT INTO nodes (id, user_id, name, status, warm_since, node_role, node_class, runtime, created_at, updated_at)
-      VALUES (?, 'user-1', ?, ?, ?, 'workspace', ?, 'vm', ?, ?)
+      VALUES (?, 'user-1', ?, ?, ?, 'workspace', ?, ?, ?, ?)
     `
     )
-    .run(row.id, `node-${row.id}`, row.status, row.warmSince, row.nodeClass, OLD, OLD);
+    .run(
+      row.id,
+      `node-${row.id}`,
+      row.status,
+      row.warmSince,
+      row.nodeClass,
+      row.runtime ?? 'vm',
+      OLD,
+      OLD
+    );
+}
+
+// A task whose auto_provisioned_node_id points at a node makes the max-lifetime and stopped-handoff
+// queries' INNER JOIN admit that node as a candidate (so the node_class guard is what filters it).
+function seedAutoProvisionedTask(taskId: string, nodeId: string): void {
+  sqlite
+    ?.prepare(
+      `INSERT INTO tasks (id, workspace_id, status, auto_provisioned_node_id, updated_at) VALUES (?, NULL, 'completed', ?, ?)`
+    )
+    .run(taskId, nodeId, OLD);
+}
+
+// A workspace + terminal task on it makes the cf-container terminal-task query admit the node.
+function seedWorkspaceWithTerminalTask(wsId: string, nodeId: string, taskId: string): void {
+  sqlite
+    ?.prepare(
+      `INSERT INTO workspaces (id, node_id, user_id, status, created_at, updated_at) VALUES (?, ?, 'user-1', 'running', ?, ?)`
+    )
+    .run(wsId, nodeId, OLD, OLD);
+  sqlite
+    ?.prepare(
+      `INSERT INTO tasks (id, workspace_id, status, auto_provisioned_node_id, updated_at) VALUES (?, ?, 'completed', NULL, ?)`
+    )
+    .run(taskId, wsId, OLD);
 }
 
 function makeEnv(): Env {
@@ -134,15 +168,63 @@ describe('node-cleanup sweep excludes user-owned nodes', () => {
     expect(deleteCalls).not.toContain('byo-orphan');
   });
 
-  it('a "stopped" user-owned node (from stopNodeResources) is never swept by stopped-handoff', async () => {
-    // stopNodeResources marks a BYO node 'stopped'; the stopped-handoff sweep must not destroy it.
+  it('stopped-handoff: destroys a managed stopped auto-provisioned node but never a user-owned one', async () => {
+    // stopNodeResources marks a BYO node 'stopped'; the stopped-handoff sweep (INNER JOIN tasks on
+    // auto_provisioned_node_id) must destroy the managed one and skip the BYO one. Seeding the task
+    // rows is essential — without them the INNER JOIN admits nobody and the guard is never exercised.
+    seedNode({ id: 'managed-stopped', nodeClass: 'managed', status: 'stopped', warmSince: null });
     seedNode({ id: 'byo-stopped', nodeClass: 'user-owned', status: 'stopped', warmSince: null });
+    seedAutoProvisionedTask('task-ms', 'managed-stopped');
+    seedAutoProvisionedTask('task-bs', 'byo-stopped');
     const env = makeEnv();
 
     await runNodeCleanupSweep(env);
     await runNodeCleanupSweep(env);
 
+    expect(deleteCalls).toContain('managed-stopped'); // control proves the query IS reached
     expect(deleteCalls).not.toContain('byo-stopped');
     expect(stopCalls).not.toContain('byo-stopped');
+  });
+
+  it('max-lifetime: destroys a managed auto-provisioned node past lifetime but never a user-owned one', async () => {
+    // max-lifetime query: INNER JOIN tasks on auto_provisioned_node_id, running node, old created_at.
+    seedNode({ id: 'managed-old', nodeClass: 'managed', status: 'running', warmSince: null });
+    seedNode({ id: 'byo-old', nodeClass: 'user-owned', status: 'running', warmSince: null });
+    seedAutoProvisionedTask('task-mo', 'managed-old');
+    seedAutoProvisionedTask('task-bo', 'byo-old');
+    const env = makeEnv();
+
+    await runNodeCleanupSweep(env);
+    await runNodeCleanupSweep(env);
+
+    expect(deleteCalls).toContain('managed-old'); // control
+    expect(deleteCalls).not.toContain('byo-old');
+  });
+
+  it('cf-container terminal-task: stops a managed container node but never a user-owned one', async () => {
+    // cf-container query: INNER JOIN workspaces + tasks (terminal task on the workspace), runtime cf-container.
+    seedNode({
+      id: 'managed-cf',
+      nodeClass: 'managed',
+      status: 'running',
+      warmSince: null,
+      runtime: 'cf-container',
+    });
+    seedNode({
+      id: 'byo-cf',
+      nodeClass: 'user-owned',
+      status: 'running',
+      warmSince: null,
+      runtime: 'cf-container',
+    });
+    seedWorkspaceWithTerminalTask('ws-mcf', 'managed-cf', 'task-mcf');
+    seedWorkspaceWithTerminalTask('ws-bcf', 'byo-cf', 'task-bcf');
+    const env = makeEnv();
+
+    await runNodeCleanupSweep(env);
+    await runNodeCleanupSweep(env);
+
+    expect(stopCalls).toContain('managed-cf'); // control proves the cf-container query IS reached
+    expect(stopCalls).not.toContain('byo-cf');
   });
 });

@@ -536,8 +536,9 @@ export async function deleteNodeResources(
 
   // Mirror stopNodeResources: cf-container nodes must destroy their Sandbox container here too.
   // deleteNodeResources previously had no container branch, leaking the container on delete.
-  // See architecture-critique #2 (cf-container asymmetry).
-  if (node.runtime === 'cf-container') {
+  // User-owned (BYO) nodes are never cf-container — the explicit guard makes that invariant
+  // enforced rather than implicit. See architecture-critique #2 (cf-container asymmetry).
+  if (!isUserOwnedNodeClass(node.nodeClass) && node.runtime === 'cf-container') {
     await destroyVmAgentContainer(env, node.id).catch((err) => {
       result.errors.push(err instanceof Error ? err.message : String(err));
       log.error('node_delete.cf_container_destroy_failed', { nodeId, ...serializeError(err) });

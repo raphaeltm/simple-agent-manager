@@ -7,5 +7,8 @@ ALTER TABLE nodes ADD COLUMN transport TEXT;
 ALTER TABLE nodes ADD COLUMN tunnel_id TEXT;
 ALTER TABLE nodes ADD COLUMN tunnel_name TEXT;
 
--- Cleanup/scheduling queries filter on node_class to exclude user-owned nodes.
+-- Indexes positive lookups of enrolled machines (WHERE node_class = 'user-owned', e.g. a future
+-- "list my BYO nodes" query). The cleanup/scheduling exclusions use `!=` on this low-cardinality
+-- column, for which SQLite prefers the more selective existing indexes and applies node_class as a
+-- cheap residual filter — so those queries do not depend on this index.
 CREATE INDEX IF NOT EXISTS idx_nodes_node_class ON nodes(node_class);

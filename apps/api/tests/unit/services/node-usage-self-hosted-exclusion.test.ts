@@ -32,6 +32,7 @@ function createDb() {
     CREATE TABLE nodes (
       id TEXT PRIMARY KEY, user_id TEXT NOT NULL, name TEXT NOT NULL, status TEXT NOT NULL,
       vm_size TEXT NOT NULL, vm_location TEXT NOT NULL, cloud_provider TEXT, credential_source TEXT,
+      node_class TEXT NOT NULL DEFAULT 'managed',
       created_at TEXT NOT NULL, updated_at TEXT NOT NULL
     );
     CREATE TABLE workspaces (id TEXT PRIMARY KEY, node_id TEXT REFERENCES nodes(id));
@@ -53,12 +54,13 @@ function seedNode(input: {
   vmSize: string;
   cloudProvider: string | null;
   createdAt: string;
+  nodeClass?: 'managed' | 'user-owned';
 }): void {
   sqlite
     ?.prepare(
       `
-      INSERT INTO nodes (id, user_id, name, status, vm_size, vm_location, cloud_provider, credential_source, created_at, updated_at)
-      VALUES (?, ?, ?, 'running', ?, 'fsn1', ?, ?, ?, ?)
+      INSERT INTO nodes (id, user_id, name, status, vm_size, vm_location, cloud_provider, credential_source, node_class, created_at, updated_at)
+      VALUES (?, ?, ?, 'running', ?, 'fsn1', ?, ?, ?, ?, ?)
     `
     )
     .run(
@@ -68,6 +70,7 @@ function seedNode(input: {
       input.vmSize,
       input.cloudProvider,
       input.credentialSource,
+      input.nodeClass ?? 'managed',
       input.createdAt,
       input.createdAt
     );
@@ -115,6 +118,35 @@ describe('node-usage excludes self-hosted (BYO) nodes from all totals', () => {
     expect(summary.period.totalVcpuHours).toBe(summary.period.platformVcpuHours);
     // Only the platform node counts toward active node accounting.
     expect(summary.period.activeNodes).toBe(1);
+  });
+
+  it('excludes a user-owned node even if credentialSource is NOT the self-hosted sentinel (decoupling guard)', async () => {
+    // Defense-in-depth: billing must exclude BYO nodes keyed on nodeClass too, so a future
+    // enrollment path that sets nodeClass='user-owned' but forgets credentialSource='self-hosted'
+    // still accrues $0. See cloudflare/security review (billing/lifecycle two-discriminator gap).
+    const db = createDb();
+    const { start } = getCurrentPeriodBounds();
+    const nowMs = new Date(start).getTime() + 8 * MS_PER_HOUR;
+    vi.useFakeTimers();
+    vi.setSystemTime(nowMs);
+    const userId = `byo-nodeclass-${Date.now()}`;
+    seedUser(userId);
+
+    seedNode({
+      id: `${userId}-byo`,
+      userId,
+      credentialSource: 'user', // NOT 'self-hosted' — the "forgot the sentinel" case
+      nodeClass: 'user-owned',
+      vmSize: 'large',
+      cloudProvider: 'hetzner',
+      createdAt: isoAt(nowMs - 8 * MS_PER_HOUR),
+    });
+
+    const summary = await getUserNodeUsageSummary(db as never, userId);
+
+    expect(summary.period.totalVcpuHours).toBe(0);
+    expect(summary.period.userVcpuHours).toBe(0);
+    expect(summary.period.activeNodes).toBe(0);
   });
 
   it('admin all-users summary also excludes self-hosted uptime', async () => {

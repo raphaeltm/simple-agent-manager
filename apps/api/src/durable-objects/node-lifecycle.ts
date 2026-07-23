@@ -31,6 +31,7 @@ import {
   DEFAULT_NODE_LIFECYCLE_ALARM_RETRY_MS,
   DEFAULT_NODE_WARM_TIMEOUT_MS,
   DEFAULT_WORKSPACE_STOPPED_TTL_MS,
+  isUserOwnedNodeClass,
 } from '@simple-agent-manager/shared';
 import { DurableObject } from 'cloudflare:workers';
 
@@ -73,6 +74,15 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
     userId: string,
     warmTimeoutOverrideMs?: number | null
   ): Promise<NodeLifecycleState> {
+    // Resolve node class FIRST, before reading DO state. isUserOwnedNode does a D1 fetch (external
+    // I/O), which opens the DO input gate. If it ran BETWEEN the state read and the storage.put
+    // below, a concurrent tryClaim (fired by node-selector's warm-node claim on every new task)
+    // could interleave during that fetch and then be silently stomped by our blind overwrite —
+    // leaving the node stuck 'stopped' while serving a live workspace. Fetching it before the read
+    // keeps the read→put critical section free of external I/O so the input gate serializes it,
+    // matching the original pre-guard behavior. See rule 45 + architecture-critique #2.
+    const userOwned = await this.isUserOwnedNode(nodeId);
+
     const state = await this.getStoredState();
     const now = Date.now();
 
@@ -84,7 +94,7 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
     // not own the hardware and must not schedule its destruction. Keep the node active (no warm
     // alarm) instead. BYO nodes are never auto-provisioned so markIdle should not reach them, but
     // this is the DO chokepoint guard. See architecture-critique #2.
-    if (await this.isUserOwnedNode(nodeId)) {
+    if (userOwned) {
       log.info('node_lifecycle.mark_idle_skipped_user_owned', { nodeId, action: 'kept_active' });
       const activeState: StoredState = {
         nodeId,
@@ -316,7 +326,7 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
       const row = await this.env.DATABASE.prepare('SELECT node_class FROM nodes WHERE id = ?')
         .bind(nodeId)
         .first<{ node_class: string }>();
-      return row?.node_class === 'user-owned';
+      return isUserOwnedNodeClass(row?.node_class);
     } catch (err) {
       log.error('node_lifecycle.node_class_lookup_failed', {
         nodeId,

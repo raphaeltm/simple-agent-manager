@@ -11,10 +11,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as schema from '../../src/db/schema';
 import { checkQuotaForUser } from '../../src/services/compute-quotas';
 import { getCurrentPeriodBounds } from '../../src/services/compute-usage';
-import {
-  getUserNodeDetailedUsage,
-  getUserNodeUsageSummary,
-} from '../../src/services/node-usage';
+import { getUserNodeDetailedUsage, getUserNodeUsageSummary } from '../../src/services/node-usage';
 
 const MS_PER_HOUR = 60 * 60 * 1000;
 
@@ -45,6 +42,7 @@ function createDb() {
       vm_location TEXT NOT NULL,
       cloud_provider TEXT,
       credential_source TEXT,
+      node_class TEXT NOT NULL DEFAULT 'managed',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -91,11 +89,13 @@ function seedNode(input: {
   updatedAt: string;
 }): void {
   sqlite
-    ?.prepare(`
+    ?.prepare(
+      `
       INSERT INTO nodes
         (id, user_id, name, status, vm_size, vm_location, cloud_provider, credential_source, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, 'fsn1', ?, ?, ?, ?)
-    `)
+    `
+    )
     .run(
       input.id,
       input.userId,
@@ -105,17 +105,19 @@ function seedNode(input: {
       input.cloudProvider,
       input.credentialSource,
       input.createdAt,
-      input.updatedAt,
+      input.updatedAt
     );
 }
 
 function seedQuotaOverride(userId: string, limit: number): void {
   sqlite
-    ?.prepare(`
+    ?.prepare(
+      `
       INSERT INTO user_quotas
         (id, user_id, monthly_vcpu_hours_limit, updated_at, updated_by)
       VALUES (?, ?, ?, ?, ?)
-    `)
+    `
+    )
     .run(`${userId}-quota`, userId, limit, new Date().toISOString(), userId);
 }
 
