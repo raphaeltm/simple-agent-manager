@@ -68,10 +68,12 @@ function createDb() {
 
 function seedHealthyNode(id: string, userId: string): void {
   sqlite
-    ?.prepare(`
+    ?.prepare(
+      `
       INSERT INTO nodes (id, user_id, name, status, vm_size, vm_location, health_status, last_metrics, node_role, runtime, node_class)
       VALUES (?, ?, ?, 'running', 'medium', 'nbg1', 'healthy', ?, 'workspace', 'vm', 'managed')
-    `)
+    `
+    )
     .run(id, userId, `node-${id}`, JSON.stringify({ cpuLoadAvg1: 0.1, memoryPercent: 10 }));
 }
 

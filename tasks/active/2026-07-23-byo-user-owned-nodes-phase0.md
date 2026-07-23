@@ -18,6 +18,7 @@ user-visible change**, and de-risks every later phase. Phase 1+ (tunnel transpor
 endpoint, vm-agent host mode, CLI, UI) is deferred to follow-up PRs.
 
 ## Constraints (from dispatch + policies)
+
 - **NO STAGING** — explicit human instruction + policy. Substitute = local tests + CI + bounded
   experiments (spike-report). State the skip in the PR.
 - **Merge authorized via /do** only when CI green + all local reviewers PASS. Hold
@@ -29,6 +30,7 @@ endpoint, vm-agent host mode, CLI, UI) is deferred to follow-up PRs.
   nodes post-deploy (rule 27).
 
 ## Experiments (gate the DEFERRED Phase 1 transport; run + document in spike-report.md)
+
 - **E1** — Worker `fetch("https://<host>.vm.<domain>:8443")` reaches a cloudflared tunnel origin?
   (:8443 vs :443 vs per-node port override). Blocked from full edge proof by DNS-read-only CF
   token → partial local proof + CF docs + recommend adding Tunnel-edit perm + real staging spike.
@@ -41,6 +43,7 @@ endpoint, vm-agent host mode, CLI, UI) is deferred to follow-up PRs.
 ## Research findings (code-verified anchors; VERIFY before editing)
 
 ### Security (critique-security.md — 8 findings)
+
 1. **[CRITICAL] Callback-token binding.** `agent-activity-callback.ts:80` authorizes on client-supplied
    `body.nodeId`, never binds `payload.workspace`. `node-acp-heartbeat.ts:47-52` explicitly skips the
    cross-check. Correct pattern: `node-callback-auth.ts:27` (`payload.workspace !== nodeId`),
@@ -63,9 +66,10 @@ endpoint, vm-agent host mode, CLI, UI) is deferred to follow-up PRs.
    `transport==='cloudflare-tunnel'`/`tunnelId` presence (server-side).
 
 ### Architecture (critique-architecture.md — Phase-0-relevant)
+
 - Centralize lifecycle guards in 3 chokepoints (`markIdle`, `stopNodeResources`, `deleteNodeResources`)
-  + cron queries, NOT ~8 caller sites. `stopNodeResources` reachable from Stop button + markIdle
-  failure fallback (`task-runner.ts:230-234`). → **PR 0C**
+  - cron queries, NOT ~8 caller sites. `stopNodeResources` reachable from Stop button + markIdle
+    failure fallback (`task-runner.ts:230-234`). → **PR 0C**
 - `credentialSource` sentinel picked in Phase 0 (`'self-hosted'`) so metering/quota/cost exclude BYO
   by construction; admin cost exclusion must live inside `node-usage.ts`. → **PR 0A + 0C**
 - `MAX_NODES_PER_USER` counts BYO at `nodes.ts:216-229` + `node-steps.ts:202-210`. → **PR 0C**
@@ -74,6 +78,7 @@ endpoint, vm-agent host mode, CLI, UI) is deferred to follow-up PRs.
 ## Implementation checklist
 
 ### PR 0A — migration + shared types (no behavior change)
+
 - [ ] `apps/api/src/db/schema.ts` nodes: add `nodeClass` (text notNull default `'managed'`),
       `transport` (text null), `tunnelId` (text null), `tunnelName` (text null); index on `nodeClass`.
 - [ ] New additive migration `apps/api/migrations/00XX_byo_nodes.sql` (4 `ADD COLUMN`).
@@ -85,6 +90,7 @@ endpoint, vm-agent host mode, CLI, UI) is deferred to follow-up PRs.
 - [ ] Tests: migration additive test; type-guard unit tests.
 
 ### PR 0B — security prerequisites (shared-auth; MANDATORY security-auditor; hold on CRITICAL/HIGH)
+
 - [ ] `agent-activity-callback.ts`: bind token identity — node-scoped → `payload.workspace===existing.nodeId`;
       workspace-scoped → `payload.workspace===existing.workspaceId`. Keep body.nodeId check as defense-in-depth.
 - [ ] `node-acp-heartbeat.ts`: node-scoped → `payload.workspace===body.nodeId`; workspace-scoped → single
@@ -97,6 +103,7 @@ endpoint, vm-agent host mode, CLI, UI) is deferred to follow-up PRs.
       for user-owned; refresh blocked after status flip; userId-scoped scheduling regression.
 
 ### PR 0C — lifecycle guards + billing/quota exclusion
+
 - [ ] `task-runner.ts` markIdle (~222) + failure-fallback (~230-234): skip user-owned.
 - [ ] `durable-objects/node-lifecycle.ts` (markIdle ~71, alarm ~214, D1 write ~257-259): never warm/destroy user-owned.
 - [ ] `services/nodes.ts` `stopNodeResources` + `deleteNodeResources`: user-owned = never `deleteVM`, no
@@ -110,10 +117,12 @@ endpoint, vm-agent host mode, CLI, UI) is deferred to follow-up PRs.
 - [ ] `routes/node-lifecycle.ts` heartbeat: skip A-record backfill when `tunnelId` present + regression test.
 
 ### Process fix (rule 02 mandatory)
+
 - [ ] Add a `.claude/rules/` rule generalizing the class (server-side gate on node-class-sensitive
       auth/lifecycle; never trust client-supplied identity / agent abstention) + PR post-mortem section.
 
 ## Acceptance criteria
+
 - [ ] Migration is additive; `pnpm quality:migration-safety` passes.
 - [ ] Cross-tenant callback forgery is rejected by a behavioral test that FAILS on pre-fix code.
 - [ ] Origin CA wildcard issuance denied for user-owned by a behavioral test.
@@ -125,5 +134,6 @@ endpoint, vm-agent host mode, CLI, UI) is deferred to follow-up PRs.
 - [ ] spike-report.md uploaded to library with E1-E4 findings.
 
 ## References
+
 - Rules 25, 28, 31, 47, 02, 34, 40, 11, 06.
 - Idea `01KY7M8N1RBC4ZV6ZKSNG878B3`; library `/engineering/byo-nodes/`.

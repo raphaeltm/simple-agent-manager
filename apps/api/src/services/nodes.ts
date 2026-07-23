@@ -1,9 +1,9 @@
 import { generateCloudInit, validateCloudInitSize } from '@simple-agent-manager/cloud-init';
 import { isTransientCapacityError, ProviderError } from '@simple-agent-manager/providers';
 import {
-  isUserOwnedNodeClass,
   type CredentialProvider,
   type CredentialSource,
+  isUserOwnedNodeClass,
   type TaskMode,
 } from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';

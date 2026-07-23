@@ -20,7 +20,13 @@ const stopCalls: string[] = [];
 vi.mock('../../../src/services/nodes', () => ({
   deleteNodeResources: vi.fn(async (nodeId: string) => {
     deleteCalls.push(nodeId);
-    return { nodeFound: true, providerVmDeleted: true, providerVmDeleteSkippedReason: null, backendDnsDeleted: false, errors: [] };
+    return {
+      nodeFound: true,
+      providerVmDeleted: true,
+      providerVmDeleteSkippedReason: null,
+      backendDnsDeleted: false,
+      errors: [],
+    };
   }),
   stopNodeResources: vi.fn(async (nodeId: string) => {
     stopCalls.push(nodeId);
@@ -57,10 +63,12 @@ function seedNode(row: {
   warmSince: string | null;
 }): void {
   sqlite
-    ?.prepare(`
+    ?.prepare(
+      `
       INSERT INTO nodes (id, user_id, name, status, warm_since, node_role, node_class, runtime, created_at, updated_at)
       VALUES (?, 'user-1', ?, ?, ?, 'workspace', ?, 'vm', ?, ?)
-    `)
+    `
+    )
     .run(row.id, `node-${row.id}`, row.status, row.warmSince, row.nodeClass, OLD, OLD);
 }
 

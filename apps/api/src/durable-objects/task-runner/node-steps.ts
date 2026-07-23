@@ -172,7 +172,7 @@ export async function handleNodeProvisioning(
       const minutes = Math.round(timeoutMs / 60_000);
       throw Object.assign(
         new Error(`Node provisioning timed out after ${minutes} minute${minutes === 1 ? '' : 's'}`),
-        { permanent: true },
+        { permanent: true }
       );
     }
 
@@ -188,10 +188,9 @@ export async function handleNodeProvisioning(
       return;
     }
     if (node?.status === 'error' || node?.status === 'stopped') {
-      throw Object.assign(
-        new Error(node.error_message || 'Node provisioning failed'),
-        { permanent: true },
-      );
+      throw Object.assign(new Error(node.error_message || 'Node provisioning failed'), {
+        permanent: true,
+      });
     }
     // Still creating — schedule another poll
     await rc.ctx.storage.setAlarm(Date.now() + rc.getProvisionPollIntervalMs());
@@ -223,9 +222,10 @@ export async function handleNodeProvisioning(
     const drizzleSchema = await import('../../db/schema');
     const db = drizzle(rc.env.DATABASE, { schema: drizzleSchema });
     const { resolveCredentialSource } = await import('../../services/provider-credentials');
-    const attributionProjectId = state.config.credentialAttributionSource === 'project'
-      ? state.config.credentialAttributionProjectId
-      : null;
+    const attributionProjectId =
+      state.config.credentialAttributionSource === 'project'
+        ? state.config.credentialAttributionProjectId
+        : null;
     const credResult = await resolveCredentialSource(
       db,
       state.config.credentialAttributionUserId,
@@ -491,7 +491,12 @@ export async function verifyNodeAgentHealthy(
         agent_ready_at: string | null;
       }>();
 
-    if (!node || node.health_status !== 'healthy' || !node.last_heartbeat_at || !node.agent_ready_at) {
+    if (
+      !node ||
+      node.health_status !== 'healthy' ||
+      !node.last_heartbeat_at ||
+      !node.agent_ready_at
+    ) {
       return false;
     }
 

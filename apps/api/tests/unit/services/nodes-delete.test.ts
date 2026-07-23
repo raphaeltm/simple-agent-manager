@@ -131,7 +131,9 @@ describe('node resource deletion services', () => {
   it('deleteNodeResources never calls deleteVM even if a user-owned node has a stray providerInstanceId', async () => {
     // Defense-in-depth: a BYO node should never have a providerInstanceId, but if one leaked in we
     // must still refuse to delete a cloud VM against the user's hardware.
-    nodeRows.push(userOwnedNode({ providerInstanceId: 'srv-should-not-touch', cloudProvider: 'hetzner' }));
+    nodeRows.push(
+      userOwnedNode({ providerInstanceId: 'srv-should-not-touch', cloudProvider: 'hetzner' })
+    );
 
     const result = await deleteNodeResources('byo-1', 'user-1', ENV);
 
@@ -140,7 +142,9 @@ describe('node resource deletion services', () => {
   });
 
   it('deleteNodeResourcesStrict is a no-op for a user-owned node (nothing to delete, no throw)', async () => {
-    nodeRows.push(userOwnedNode({ providerInstanceId: 'srv-should-not-touch', cloudProvider: 'hetzner' }));
+    nodeRows.push(
+      userOwnedNode({ providerInstanceId: 'srv-should-not-touch', cloudProvider: 'hetzner' })
+    );
 
     await expect(deleteNodeResourcesStrict('byo-1', 'user-1', ENV)).resolves.toEqual({
       providerVm: 'no-instance',

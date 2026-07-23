@@ -68,7 +68,11 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
    * If already warm, resets the alarm to a new timeout.
    * Throws if the node is currently being destroyed.
    */
-  async markIdle(nodeId: string, userId: string, warmTimeoutOverrideMs?: number | null): Promise<NodeLifecycleState> {
+  async markIdle(
+    nodeId: string,
+    userId: string,
+    warmTimeoutOverrideMs?: number | null
+  ): Promise<NodeLifecycleState> {
     const state = await this.getStoredState();
     const now = Date.now();
 
@@ -151,7 +155,10 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
   async tryClaim(taskId: string): Promise<{ claimed: boolean; state: NodeLifecycleState }> {
     const state = await this.getStoredState();
     if (!state) {
-      return { claimed: false, state: { nodeId: '', status: 'active', warmSince: null, claimedByTask: null } };
+      return {
+        claimed: false,
+        state: { nodeId: '', status: 'active', warmSince: null, claimedByTask: null },
+      };
     }
 
     if (state.status !== 'warm') {
@@ -408,7 +415,11 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
    * Delete a workspace: call VM agent to remove Docker container + volume,
    * then update D1 status to 'deleted'.
    */
-  private async deleteWorkspace(nodeId: string, workspaceId: string, userId: string): Promise<void> {
+  private async deleteWorkspace(
+    nodeId: string,
+    workspaceId: string,
+    userId: string
+  ): Promise<void> {
     // Call VM agent DELETE endpoint via shared helper (handles JWT auth, proper URL routing)
     try {
       await deleteWorkspaceOnNode(nodeId, workspaceId, this.env as unknown as Env, userId);
@@ -426,13 +437,17 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
     const now = new Date().toISOString();
     await this.env.DATABASE.prepare(
       `UPDATE workspaces SET status = 'deleted', updated_at = ? WHERE id = ? AND status = 'stopped'`
-    ).bind(now, workspaceId).run();
+    )
+      .bind(now, workspaceId)
+      .run();
 
     // Clean up any agent_sessions referencing this workspace (best-effort)
     try {
       await this.env.DATABASE.prepare(
         `UPDATE agent_sessions SET status = 'completed', updated_at = ? WHERE workspace_id = ? AND status NOT IN ('completed', 'failed')`
-      ).bind(now, workspaceId).run();
+      )
+        .bind(now, workspaceId)
+        .run();
     } catch {
       // best-effort
     }

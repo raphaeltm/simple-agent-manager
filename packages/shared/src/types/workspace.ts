@@ -3,7 +3,14 @@ import type { CredentialProvider } from './user';
 // =============================================================================
 // Workspace & Node Core Types
 // =============================================================================
-export type NodeStatus = 'pending' | 'creating' | 'running' | 'stopping' | 'stopped' | 'deleted' | 'error';
+export type NodeStatus =
+  | 'pending'
+  | 'creating'
+  | 'running'
+  | 'stopping'
+  | 'stopped'
+  | 'deleted'
+  | 'error';
 
 export type NodeHealthStatus = 'healthy' | 'stale' | 'unhealthy';
 

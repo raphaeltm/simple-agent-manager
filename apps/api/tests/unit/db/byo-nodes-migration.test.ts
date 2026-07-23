@@ -39,9 +39,7 @@ describe('0097_byo_nodes migration', () => {
     db.exec(readMigration('0097_byo_nodes.sql'));
 
     const rows = db
-      .prepare(
-        `SELECT id, node_class, transport, tunnel_id, tunnel_name FROM nodes ORDER BY id`
-      )
+      .prepare(`SELECT id, node_class, transport, tunnel_id, tunnel_name FROM nodes ORDER BY id`)
       .all();
 
     expect(rows).toEqual([
@@ -68,12 +66,10 @@ describe('0097_byo_nodes migration', () => {
     db.exec(readMigration('0097_byo_nodes.sql'));
 
     // Default applies when node_class is omitted.
-    db.exec(
-      `INSERT INTO nodes (id, user_id, name) VALUES ('node-3', 'user-3', 'new managed')`
-    );
-    const managed = db
-      .prepare(`SELECT node_class FROM nodes WHERE id = 'node-3'`)
-      .get() as { node_class: string };
+    db.exec(`INSERT INTO nodes (id, user_id, name) VALUES ('node-3', 'user-3', 'new managed')`);
+    const managed = db.prepare(`SELECT node_class FROM nodes WHERE id = 'node-3'`).get() as {
+      node_class: string;
+    };
     expect(managed.node_class).toBe('managed');
 
     // A user-owned row round-trips its class + tunnel metadata.
@@ -82,7 +78,9 @@ describe('0097_byo_nodes migration', () => {
        VALUES ('node-byo', 'user-3', 'home server', 'user-owned', 'cloudflare-tunnel', 'tunnel-uuid', 'byo-tunnel')`
     );
     const byo = db
-      .prepare(`SELECT node_class, transport, tunnel_id, tunnel_name FROM nodes WHERE id = 'node-byo'`)
+      .prepare(
+        `SELECT node_class, transport, tunnel_id, tunnel_name FROM nodes WHERE id = 'node-byo'`
+      )
       .get();
     expect(byo).toEqual({
       node_class: 'user-owned',
@@ -98,7 +96,9 @@ describe('0097_byo_nodes migration', () => {
     db.exec(readMigration('0097_byo_nodes.sql'));
 
     const idx = db
-      .prepare(`SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_nodes_node_class'`)
+      .prepare(
+        `SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_nodes_node_class'`
+      )
       .get() as { name: string } | undefined;
     expect(idx?.name).toBe('idx_nodes_node_class');
   });

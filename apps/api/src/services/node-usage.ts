@@ -47,7 +47,7 @@ function calculateNodeHoursInPeriod(
   endedAt: string | null,
   periodStart: Date,
   periodEnd: Date,
-  now: Date,
+  now: Date
 ): number {
   const start = new Date(createdAt);
   const end = endedAt ? new Date(endedAt) : now;
@@ -102,10 +102,13 @@ function createEmptyTotals(): NodeUsageTotals {
 
 function addNodeToTotals(
   totals: NodeUsageTotals,
-  node: Pick<NodeUsageRow, 'vmSize' | 'cloudProvider' | 'credentialSource' | 'status' | 'createdAt' | 'updatedAt'>,
+  node: Pick<
+    NodeUsageRow,
+    'vmSize' | 'cloudProvider' | 'credentialSource' | 'status' | 'createdAt' | 'updatedAt'
+  >,
   periodStart: Date,
   periodEnd: Date,
-  now: Date,
+  now: Date
 ): void {
   // User-owned (BYO) nodes cost SAM $0 — exclude them from every node-hour, vCPU-hour, and
   // active-node total so metering, admin cost (getAllUsersNodeUsageSummary → here), and quota
@@ -137,7 +140,7 @@ export function calculateNodeUsageTotalsForRows(
   rows: NodeUsageCalculationRow[],
   periodStart: Date,
   periodEnd: Date,
-  now: Date = new Date(),
+  now: Date = new Date()
 ): NodeUsageTotals {
   const totals = createEmptyTotals();
   for (const node of rows) {
@@ -161,13 +164,13 @@ function roundUsageTotals(totals: NodeUsageTotals): NodeUsageTotals {
 function getOverlappingNodeConditions(
   periodStartIso: string,
   periodEndIso: string,
-  opts?: { userId?: string; credentialSource?: CredentialSource },
+  opts?: { userId?: string; credentialSource?: CredentialSource }
 ) {
   const conditions = [
     sql`${schema.nodes.createdAt} < ${periodEndIso}`,
     or(
       notInArray(schema.nodes.status, [...ENDED_STATUSES_ARRAY]),
-      sql`${schema.nodes.updatedAt} > ${periodStartIso}`,
+      sql`${schema.nodes.updatedAt} > ${periodStartIso}`
     ),
   ];
 
@@ -186,7 +189,7 @@ async function getUserOverlappingNodeRows(
   userId: string,
   periodStartIso: string,
   periodEndIso: string,
-  credentialSource?: CredentialSource,
+  credentialSource?: CredentialSource
 ): Promise<NodeUsageRow[]> {
   return db
     .select({
@@ -201,14 +204,18 @@ async function getUserOverlappingNodeRows(
       updatedAt: schema.nodes.updatedAt,
     })
     .from(schema.nodes)
-    .where(and(...getOverlappingNodeConditions(periodStartIso, periodEndIso, { userId, credentialSource })))
+    .where(
+      and(
+        ...getOverlappingNodeConditions(periodStartIso, periodEndIso, { userId, credentialSource })
+      )
+    )
     .orderBy(sql`${schema.nodes.createdAt} DESC`);
 }
 
 async function getAllOverlappingNodeRows(
   db: DrizzleD1Database<typeof schema>,
   periodStartIso: string,
-  periodEndIso: string,
+  periodEndIso: string
 ): Promise<UserNodeUsageRow[]> {
   return db
     .select({
@@ -247,7 +254,10 @@ function toActiveComputeSession(node: NodeUsageRow): ActiveComputeSession | null
   };
 }
 
-function toNodeUsageRecord(node: NodeUsageRow, workspaceCounts: Map<string, number>): NodeUsageRecord {
+function toNodeUsageRecord(
+  node: NodeUsageRow,
+  workspaceCounts: Map<string, number>
+): NodeUsageRecord {
   return {
     nodeId: node.id,
     name: node.name,
@@ -269,14 +279,14 @@ export async function calculateNodeVcpuHoursForPeriod(
   userId: string,
   periodStart: Date,
   periodEnd: Date,
-  credentialSource?: CredentialSource,
+  credentialSource?: CredentialSource
 ): Promise<number> {
   const rows = await getUserOverlappingNodeRows(
     db,
     userId,
     periodStart.toISOString(),
     periodEnd.toISOString(),
-    credentialSource,
+    credentialSource
   );
   const totals = calculateNodeUsageTotalsForRows(rows, periodStart, periodEnd);
 
@@ -286,7 +296,7 @@ export async function calculateNodeVcpuHoursForPeriod(
 /** Get the current user's node-based compute usage summary for the current period. */
 export async function getUserNodeUsageSummary(
   db: DrizzleD1Database<typeof schema>,
-  userId: string,
+  userId: string
 ): Promise<{ period: ComputeUsagePeriod; activeSessions: ActiveComputeSession[] }> {
   const { start, end } = getCurrentPeriodBounds();
   const periodStart = new Date(start);
@@ -324,7 +334,7 @@ export async function getUserNodeUsageSummary(
 
 /** Get all users' node usage summary for the current period. */
 export async function getAllUsersNodeUsageSummary(
-  db: DrizzleD1Database<typeof schema>,
+  db: DrizzleD1Database<typeof schema>
 ): Promise<{ period: { start: string; end: string }; users: AdminUserNodeUsageSummary[] }> {
   const { start, end } = getCurrentPeriodBounds();
   const periodStart = new Date(start);
@@ -388,7 +398,7 @@ export async function getAllUsersNodeUsageSummary(
 export async function getUserNodeDetailedUsage(
   db: DrizzleD1Database<typeof schema>,
   userId: string,
-  recentLimit = 50,
+  recentLimit = 50
 ): Promise<AdminUserNodeDetailedUsage> {
   const { start, end } = getCurrentPeriodBounds();
   const periodStart = new Date(start);
@@ -417,7 +427,9 @@ export async function getUserNodeDetailedUsage(
     }
   }
 
-  const totals = roundUsageTotals(calculateNodeUsageTotalsForRows(allNodeRows, periodStart, periodEnd, now));
+  const totals = roundUsageTotals(
+    calculateNodeUsageTotalsForRows(allNodeRows, periodStart, periodEnd, now)
+  );
   const nodes = nodeRows.map((node) => toNodeUsageRecord(node, workspaceCounts));
 
   return {

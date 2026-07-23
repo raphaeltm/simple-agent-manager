@@ -43,7 +43,12 @@ vi.mock('drizzle-orm', () => ({
 
 vi.mock('../../../src/db/schema', () => ({
   nodes: { id: 'nodes.id', ipAddress: 'nodes.ipAddress', nodeClass: 'nodes.nodeClass' },
-  workspaces: { id: 'workspaces.id', projectId: 'workspaces.projectId', nodeId: 'workspaces.nodeId', status: 'workspaces.status' },
+  workspaces: {
+    id: 'workspaces.id',
+    projectId: 'workspaces.projectId',
+    nodeId: 'workspaces.nodeId',
+    status: 'workspaces.status',
+  },
   deploymentEnvironments: { id: 'de.id', nodeId: 'de.nodeId' },
 }));
 

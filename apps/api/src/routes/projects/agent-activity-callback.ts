@@ -10,11 +10,11 @@ import { log } from '../../lib/logger';
 import { errors } from '../../middleware/error';
 import { AcpSessionActivityReportSchema, jsonValidator } from '../../schemas';
 import { verifyCallbackToken } from '../../services/jwt';
+import { hibernateAgentSessionOnNode } from '../../services/node-agent';
 import {
   callbackTokenMatchesNode,
   callbackTokenMatchesWorkspace,
 } from '../../services/node-callback-auth';
-import { hibernateAgentSessionOnNode } from '../../services/node-agent';
 import * as projectDataService from '../../services/project-data';
 import { markVmAgentContainerActiveWorkEndedBestEffort } from '../../services/vm-agent-container';
 

@@ -59,7 +59,7 @@ describe('provisionNode empty IP guard', () => {
     );
     expect(ipGuardBlock).toContain('nodeId: node.id');
     expect(ipGuardBlock).toContain('providerInstanceId: vm.id');
-    expect(ipGuardBlock).toContain("node_provisioning.awaiting_ip_backfill");
+    expect(ipGuardBlock).toContain('node_provisioning.awaiting_ip_backfill');
   });
 });
 
@@ -128,7 +128,9 @@ describe('heartbeat IP backfill', () => {
     // Behavioral coverage for the tunnel-skip + managed backfill lives in
     // tests/unit/routes/node-lifecycle-byo.test.ts. This structural assertion tracks the
     // effectiveNodeIp initializer, which now short-circuits to null for tunnel-transport nodes.
-    expect(heartbeatSection).toContain('let effectiveNodeIp = node.tunnelId ? null : node.ipAddress');
+    expect(heartbeatSection).toContain(
+      'let effectiveNodeIp = node.tunnelId ? null : node.ipAddress'
+    );
     expect(heartbeatSection).toContain('if (effectiveNodeIp) {');
     expect(heartbeatSection).toContain('const dnsIp = heartbeatIpv4 || effectiveNodeIp');
     expect(heartbeatSection).toContain('} else {');
@@ -142,7 +144,9 @@ describe('heartbeat IP backfill', () => {
       heartbeatSection.indexOf('if (effectiveNodeIp) {'),
       heartbeatSection.indexOf('  await db', heartbeatSection.indexOf('if (effectiveNodeIp) {'))
     );
-    expect(selfHealBlock).toContain('const heartbeatIpv4 = isValidIPv4Address(heartbeatIp) ? heartbeatIp : null');
+    expect(selfHealBlock).toContain(
+      'const heartbeatIpv4 = isValidIPv4Address(heartbeatIp) ? heartbeatIp : null'
+    );
     expect(selfHealBlock).toContain('const dnsIp = heartbeatIpv4 || effectiveNodeIp');
     expect(selfHealBlock).toContain("source: heartbeatIpv4 ? 'heartbeat' : 'stored'");
   });

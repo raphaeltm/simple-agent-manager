@@ -31,8 +31,9 @@ a well-behaved agent will act.**
 
 **Authorization / lifecycle trust placed in a client-controlled input or an agent's good behavior.**
 The tells:
+
 - Comparing a request-body identifier (`body.nodeId`) against a looked-up row, without also binding
-  the caller's *verified* identity (`payload.workspace`) to that row.
+  the caller's _verified_ identity (`payload.workspace`) to that row.
 - A comment that says the safe behavior is "the agent won't ask" / "the agent skips this" / "we
   intentionally do NOT cross-check" — an agent-side choice is not a server-side control.
 - A destroy/flag/mutate query whose predicate omits a class/ownership column that changes whether
@@ -76,6 +77,7 @@ The tells:
 ## Quick Compliance Check
 
 Before merging an endpoint or sweep whose behavior depends on which node/workspace/tenant/class:
+
 - [ ] Authorization binds the token's verified identity to the resource, not a client body field
 - [ ] Any withheld-for-a-class action is gated server-side on the row's own columns, not agent choice
 - [ ] Every destroy/flag/mutate candidate query includes the class/ownership predicate

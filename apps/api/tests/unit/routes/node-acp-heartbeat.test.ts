@@ -41,9 +41,7 @@ vi.mock('../../../src/services/jwt', () => ({
 vi.mock('../../../src/services/project-data', () => mocks.projectData);
 
 async function createTestApp(): Promise<Hono> {
-  const { nodeAcpHeartbeatRoute } = await import(
-    '../../../src/routes/projects/node-acp-heartbeat'
-  );
+  const { nodeAcpHeartbeatRoute } = await import('../../../src/routes/projects/node-acp-heartbeat');
   const app = new Hono();
   app.route('/api/projects', nodeAcpHeartbeatRoute);
   app.onError((err, c) => {

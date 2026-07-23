@@ -4,7 +4,7 @@ import type { Env } from '../env';
 import { extractBearerToken } from '../lib/auth-helpers';
 import { log } from '../lib/logger';
 import { errors } from '../middleware/error';
-import { verifyCallbackToken, type CallbackTokenPayload } from './jwt';
+import { type CallbackTokenPayload, verifyCallbackToken } from './jwt';
 
 /**
  * A callback token proves the identity carried in `payload.workspace` (a workspaceId for

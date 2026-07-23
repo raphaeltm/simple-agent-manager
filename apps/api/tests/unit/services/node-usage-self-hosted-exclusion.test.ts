@@ -10,7 +10,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import { getCurrentPeriodBounds } from '../../../src/services/compute-usage';
-import { getAllUsersNodeUsageSummary, getUserNodeUsageSummary } from '../../../src/services/node-usage';
+import {
+  getAllUsersNodeUsageSummary,
+  getUserNodeUsageSummary,
+} from '../../../src/services/node-usage';
 
 const MS_PER_HOUR = 60 * 60 * 1000;
 let sqlite: Database.Database | null = null;
@@ -52,11 +55,22 @@ function seedNode(input: {
   createdAt: string;
 }): void {
   sqlite
-    ?.prepare(`
+    ?.prepare(
+      `
       INSERT INTO nodes (id, user_id, name, status, vm_size, vm_location, cloud_provider, credential_source, created_at, updated_at)
       VALUES (?, ?, ?, 'running', ?, 'fsn1', ?, ?, ?, ?)
-    `)
-    .run(input.id, input.userId, `node-${input.id}`, input.vmSize, input.cloudProvider, input.credentialSource, input.createdAt, input.createdAt);
+    `
+    )
+    .run(
+      input.id,
+      input.userId,
+      `node-${input.id}`,
+      input.vmSize,
+      input.cloudProvider,
+      input.credentialSource,
+      input.createdAt,
+      input.createdAt
+    );
 }
 
 afterEach(() => {
