@@ -20,9 +20,24 @@ an invariant the security-auditor confirmed is **already correct** in the curren
       `workspace.userId`, never `credentialAttributionUserId` (security-critique #7 third sub-point).
       Code at `routes/workspaces/runtime.ts:658-687` is already correct; add a regression pin.
 - [ ] **`trial-expire.ts` + `deployment-environment-lifecycle.ts` zombie tests** — the Phase-0 PR added
-      `node_class != 'user-owned'` to these 3 teardown-candidate queries (per rule 51). Add two-sweep
+      `node_class != 'user-owned'` to the **2** teardown-CLAIM queries (`trial-expire.ts` `claimNodeForDeletion`
+      → `status='destroying'`; `deployment-environment-lifecycle.ts` → `status='deleting'`). Add two-sweep
       zombie tests mirroring `node-cleanup-user-owned-zombie.test.ts`. The predicates are identical to the
       node-cleanup ones (which ARE tested); a BYO node can't reach these flows until Phase 1.
+      NOTE (cloudflare re-review): `trial-expire.ts`'s two downstream `status`-transition queries
+      (`'destroying'→'deleted'` finalize, `'destroying'→'error'`) are NOT explicitly guarded but are
+      protected transitively — `claimNodeForDeletion` is the ONLY writer of `status='destroying'`, so a
+      guarded claim means a BYO node never reaches them. Add redundant explicit guards there for rule-51
+      defense-in-depth, or leave the single-writer invariant + this note.
+- [ ] **rule-45 empirical `markIdle`/`tryClaim` interleaving test** — the Phase-0 `markIdle` race fix
+      (D1 fetch moved out of the read→put critical section) is proven correct statically (fully
+      synchronous critical section) and re-confirmed by the cloudflare re-review, but no `Promise.all([
+      markIdle, tryClaim])` Miniflare interleaving test exists to catch a FUTURE regression (someone
+      re-adding an `await` inside the guard). Add one when the Miniflare workers pool is runnable. Subsumed
+      by the DO-mutex item below.
+- [ ] **`compute-usage.ts` nodeClass awareness (Phase 1 audit)** — the older parallel node-hour tracker
+      (`startComputeTracking`/`calculateVcpuHoursForPeriod`) has no nodeClass awareness; unreachable until
+      Phase 1 enrollment. Include in the Phase-1 enrollment PR's billing audit (rule 44 — enumerate writers).
 - [ ] **`toNodeResponse` field-surfacing test** — assert `nodeClass`/`transport`/`tunnelName` appear in
       node responses. Cosmetic (fields are set + typecheck); low risk.
 - [ ] **`NodeResponse.vmSize`/`vmLocation`/`cloudProvider` nullable for user-owned** — deferred to the
