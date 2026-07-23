@@ -18,6 +18,7 @@ import type { CloudInitVariables } from '../src/generate';
 import {
   generateCloudInit,
   indentForYamlBlock,
+  VALID_CLOUD_PROVIDERS,
   validateCloudInitSize,
   validateCloudInitVariables,
 } from '../src/generate';
@@ -1606,6 +1607,36 @@ describe('validateCloudInitVariables — provider field', () => {
 
   it('rejects provider with shell metacharacters', () => {
     expect(() => validateCloudInitVariables(baseVariables({ provider: 'hetzner; rm -rf /' }))).toThrow('provider');
+  });
+});
+
+describe('cloud-init supports the vultr provider', () => {
+  it('lists vultr in VALID_CLOUD_PROVIDERS', () => {
+    expect(VALID_CLOUD_PROVIDERS).toContain('vultr');
+  });
+
+  it('validateCloudInitVariables accepts provider: "vultr"', () => {
+    expect(() => validateCloudInitVariables(baseVariables({ provider: 'vultr' }))).not.toThrow();
+  });
+
+  it('generateCloudInit accepts provider: "vultr" and produces parseable YAML', () => {
+    const config = generateCloudInit(baseVariables({ provider: 'vultr' }));
+    // Output must parse as valid YAML (mirrors the hetzner/scaleway provider tests).
+    expect(() => YAML.parse(config)).not.toThrow();
+    expect(config).toContain('Environment=PROVIDER=vultr');
+  });
+
+  it('renders the apt mirror script for vultr with an empty APT_MIRROR (non-hetzner default)', () => {
+    const config = generateCloudInit(baseVariables({ provider: 'vultr' }));
+    const parsed = YAML.parse(config);
+
+    const mirrorScript = parsed.write_files.find(
+      (f: { path: string }) => f.path === '/etc/sam/apt-mirror-config.sh'
+    );
+    expect(mirrorScript).toBeDefined();
+    expect(mirrorScript.content).toContain('PROVIDER="vultr"');
+    // Only hetzner sets a mirror; vultr falls into the default (empty) case.
+    expect(mirrorScript.content).toContain('APT_MIRROR=""');
   });
 });
 

@@ -171,6 +171,57 @@ describe('resolveCredentialSource project compute precedence', () => {
   });
 });
 
+// Rule 28: every fallback branch for a NEW provider (vultr) must be behaviorally
+// covered — active-project → user → platform → null — plus the critical
+// "inactive scoped row does NOT fall through" invariant.
+describe('resolveCredentialSource vultr fallback matrix (rule 28)', () => {
+  const activeProjectRow = {
+    attachmentActive: true,
+    consumerTarget: 'vultr',
+    configurationActive: true,
+    credentialId: 'cc-vultr',
+    credentialActive: true,
+  };
+
+  it('active project attachment → project', async () => {
+    const db = makeCredentialSourceDbMock([activeProjectRow], [{ id: 'u', provider: 'vultr' }]);
+    await expect(
+      resolveCredentialSource(db as never, 'member-a', 'vultr', 'project-1'),
+    ).resolves.toEqual({ credentialSource: 'project', providerName: 'vultr' });
+  });
+
+  it('inactive project attachment halts — does NOT fall through to the user vultr credential', async () => {
+    const db = makeCredentialSourceDbMock(
+      [{ ...activeProjectRow, attachmentActive: false }],
+      [{ id: 'u', provider: 'vultr' }],
+    );
+    await expect(
+      resolveCredentialSource(db as never, 'member-a', 'vultr', 'project-1'),
+    ).resolves.toBeNull();
+  });
+
+  it('no project attachment → user vultr credential', async () => {
+    const db = makeCredentialSourceDbMock([], [{ id: 'u', provider: 'vultr' }]);
+    await expect(
+      resolveCredentialSource(db as never, 'member-a', 'vultr', 'project-1'),
+    ).resolves.toEqual({ credentialSource: 'user', providerName: 'vultr' });
+  });
+
+  it('no project, no user → platform vultr credential', async () => {
+    const db = makeCredentialSourceDbMock([], [], [{ id: 'p', provider: 'vultr' }]);
+    await expect(
+      resolveCredentialSource(db as never, 'member-a', 'vultr', 'project-1'),
+    ).resolves.toEqual({ credentialSource: 'platform', providerName: 'vultr' });
+  });
+
+  it('nothing at any tier → null', async () => {
+    const db = makeCredentialSourceDbMock([], [], []);
+    await expect(
+      resolveCredentialSource(db as never, 'member-a', 'vultr', 'project-1'),
+    ).resolves.toBeNull();
+  });
+});
+
 describe('userHasOwnCloudCredentials with targetProvider', () => {
   const serviceSource = readFileSync(
     resolve(process.cwd(), 'src/services/compute-quotas.ts'),

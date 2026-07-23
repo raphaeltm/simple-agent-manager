@@ -16,6 +16,11 @@ const ScalewayCredentialSchema = v.object({
   projectId: v.string(),
 });
 
+const VultrCredentialSchema = v.object({
+  provider: v.literal('vultr'),
+  token: v.string(),
+});
+
 const GcpCredentialSchema = v.object({
   provider: v.literal('gcp'),
   authType: v.optional(v.literal('workload-identity')),
@@ -30,6 +35,7 @@ const GcpCredentialSchema = v.object({
 export const CreateCredentialSchema = v.variant('provider', [
   HetznerCredentialSchema,
   ScalewayCredentialSchema,
+  VultrCredentialSchema,
   GcpCredentialSchema,
 ]);
 

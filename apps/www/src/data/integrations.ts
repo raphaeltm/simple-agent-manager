@@ -305,7 +305,7 @@ export const integrations: Integration[] = [
       { question: 'Do I need a Hetzner account?', answer: 'Yes — SAM uses a BYOC (Bring Your Own Cloud) model. You create a Hetzner Cloud project, generate an API token, and add it to SAM.' },
       { question: 'Is my Hetzner token secure?', answer: 'Your token is encrypted with AES-GCM and stored per-user in the database. SAM never stores cloud provider credentials as plain text or environment variables.' },
     ],
-    relatedSlugs: ['scaleway', 'claude-code', 'codex'],
+    relatedSlugs: ['scaleway', 'vultr', 'claude-code', 'codex'],
     externalUrl: 'https://www.hetzner.com/cloud/',
   },
   {
@@ -343,8 +343,46 @@ export const integrations: Integration[] = [
       { question: 'Can I use Scaleway inference with SAM?', answer: 'Yes — use OpenCode as your agent and configure it to use Scaleway\'s inference API as the backend. This creates a fully Scaleway-native stack.' },
       { question: 'How does Scaleway compare to Hetzner?', answer: 'Both are excellent European providers. Hetzner tends to be cheaper for raw compute. Scaleway offers additional services like managed inference that can complement SAM.' },
     ],
-    relatedSlugs: ['hetzner', 'opencode', 'mistral-vibe'],
+    relatedSlugs: ['hetzner', 'vultr', 'opencode', 'mistral-vibe'],
     externalUrl: 'https://www.scaleway.com/',
+  },
+  {
+    slug: 'vultr',
+    name: 'Vultr',
+    category: 'cloud-providers',
+    categoryLabel: 'Cloud Providers',
+    tagline: 'Run coding agents on global Vultr Cloud VMs',
+    description:
+      "Vultr is a global cloud provider with data center locations across six continents and simple hourly billing. With SAM, you connect a single Vultr API key and run AI coding agents on high-performance Vultr Cloud Compute VMs — with NVMe Block Storage available for persistent deployment volumes.",
+    color: '#007BFC',
+    logoPath: '/images/integrations/vultr.svg',
+    seoTitle: 'Run AI Coding Agents on Vultr Cloud | SAM',
+    seoDescription:
+      'Run AI coding agents on global Vultr Cloud VMs with hourly billing. SAM handles provisioning, devcontainer setup, and lifecycle on your Vultr account.',
+    features: [
+      { title: 'Global Footprint', description: 'Vultr operates data center locations across six continents — provision agents close to wherever your team works.' },
+      { title: 'Simple Hourly Billing', description: 'Vultr bills VMs by the hour, so you pay only for the compute time your agents actually use.' },
+      { title: 'Single API Key Auth', description: 'Connect Vultr with one Personal Access Token — no IAM roles or service accounts, just like Hetzner.' },
+      { title: 'NVMe Block Storage', description: 'Vultr Block Storage provides high-performance NVMe volumes, so Vultr-backed deployment environments can use persistent volumes.' },
+    ],
+    howItWorks: [
+      { step: 'Create a Vultr API Key', description: 'In the Vultr Customer Portal, open Account → API and generate a Personal Access Token.' },
+      { step: 'Allow All IPs on the Token', description: 'Set the token\'s access control to "Allow All IPv4/IPv6". SAM calls Vultr from Cloudflare Workers, which have no static egress IP, so a restricted allowlist blocks provisioning.' },
+      { step: 'Add Key to SAM', description: 'Paste your Vultr API key in SAM settings. It\'s encrypted with AES-GCM and stored per-user.' },
+      { step: 'Start Running Agents', description: 'Submit tasks and SAM provisions Vultr Cloud Compute VMs automatically, defaulting to the Frankfurt (fra) region.' },
+    ],
+    useCases: [
+      { title: 'Global low-latency compute', description: 'Vultr\'s worldwide regions let you run agents near your team — from North America and Europe to Asia and Australia.' },
+      { title: 'Persistent deployment volumes', description: 'Pair Vultr Block Storage with SAM app deployments to keep data across releases on high-performance NVMe volumes.' },
+      { title: 'Simple multi-cloud setup', description: 'Add Vultr alongside Hetzner and Scaleway for provider redundancy with the same single-API-key simplicity.' },
+    ],
+    faq: [
+      { question: 'How much does Vultr cost?', answer: 'SAM\'s default Vultr sizes range from about $20/mo (2 vCPU / 4GB) to $80/mo (6 vCPU / 16GB), billed hourly so you only pay for compute time used.' },
+      { question: 'Why must I set the Vultr token to "Allow All IPv4/IPv6"?', answer: 'Vultr Personal Access Tokens support an IP access-control allowlist. SAM provisions VMs from Cloudflare Workers, which have no fixed egress IP, so the token must allow all IPv4/IPv6 addresses or provisioning requests will be rejected.' },
+      { question: 'Does Vultr support persistent volumes?', answer: 'Yes — Vultr Block Storage provides NVMe-backed volumes, so Vultr-backed deployment environments can use persistent volumes. Block Storage is available in a subset of Vultr regions, so volume-backed environments are pinned to a supported region.' },
+    ],
+    relatedSlugs: ['hetzner', 'scaleway', 'claude-code'],
+    externalUrl: 'https://www.vultr.com',
   },
   {
     slug: 'gcp',

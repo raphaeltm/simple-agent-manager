@@ -269,7 +269,7 @@ export function useProjectChatState() {
       listCredentials().catch(() => []),
       getTrialStatus().catch(() => null),
     ]).then(([creds, trial]) => {
-      const hasUserCreds = creds.some((c: { provider: string }) => c.provider === 'hetzner' || c.provider === 'scaleway');
+      const hasUserCreds = creds.some((c: { provider: string }) => c.provider === 'hetzner' || c.provider === 'scaleway' || c.provider === 'vultr');
       const trialAvailable = trial?.available ?? false;
       const hasCloud = hasUserCreds || trialAvailable;
       setHasUserCloudCredentials(hasUserCreds);

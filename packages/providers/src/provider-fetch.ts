@@ -60,9 +60,16 @@ export async function providerFetch(
         // Try parsing as JSON for structured error messages
         try {
           const json = expectObject(JSON.parse(body), 'provider', 'error_response');
-          const error = json.error
-            ? expectObject(json.error, 'provider', 'error_response.error')
-            : null;
+          // `error` may be a nested object ({code,message}, Hetzner/GCP-style) OR a
+          // plain string (Vultr: {"error":"...","status":n}). Handle both without
+          // throwing — a thrown expectObject would drop us to the raw-body fallback,
+          // dumping the whole JSON blob into the message.
+          const rawError = json.error;
+          const error =
+            rawError && typeof rawError === 'object' && !Array.isArray(rawError)
+              ? (rawError as Record<string, unknown>)
+              : null;
+          const stringError = typeof rawError === 'string' ? rawError : undefined;
           // Extract structured error code from the provider response
           providerCode =
             (typeof error?.code === 'string' ? error.code : undefined) ||
@@ -76,6 +83,7 @@ export async function providerFetch(
           errorMessage = boundProviderErrorDetail(
             maxErrorBodyChars,
             (typeof error?.message === 'string' ? error.message : undefined) ||
+              stringError ||
               (typeof json.message === 'string' ? json.message : undefined) ||
               body
           );

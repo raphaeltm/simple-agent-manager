@@ -1,6 +1,6 @@
 import * as v from 'valibot';
 
-const CredentialProviderSchema = v.picklist(['hetzner', 'scaleway', 'gcp']);
+const CredentialProviderSchema = v.picklist(['hetzner', 'scaleway', 'gcp', 'vultr']);
 const VMSizeSchema = v.picklist(['small', 'medium', 'large']);
 const CredentialKindSchema = v.picklist(['api-key', 'oauth-token']);
 

@@ -7,7 +7,7 @@ SAM's security model separates **platform secrets** (managed by operators) from 
 
 ## Cloud Credential Model (BYOC + Platform Fallback)
 
-SAM supports **Bring-Your-Own-Cloud (BYOC)**: users and self-hosters may store their own Hetzner, Scaleway, or GCP credentials, encrypted per-user in D1. This is the model for self-hosted deployments and BYO-key users.
+SAM supports **Bring-Your-Own-Cloud (BYOC)**: users and self-hosters may store their own Hetzner, Scaleway, Vultr, or GCP credentials, encrypted per-user in D1. This is the model for self-hosted deployments and BYO-key users.
 
 However, SAM's own hosted deployment also has an **enabled platform-level cloud credential** (`platform_credentials`, `provider=hetzner`, `credential_type=cloud-provider`). Provider resolution falls back **user credential → platform credential**, so on the hosted (zero-config) platform a user does **not** need their own cloud credential for SAM to provision workspaces or deployment nodes. Self-hosted deployments without a platform credential rely on user-supplied BYOC tokens.
 
@@ -50,7 +50,7 @@ User-provided secrets stored encrypted in D1:
 
 | Credential                      | Purpose                                                                     | Encryption                     |
 | ------------------------------- | --------------------------------------------------------------------------- | ------------------------------ |
-| Cloud provider credentials      | VM provisioning (Hetzner, Scaleway, GCP WIF or service-account JSON)        | AES-256-GCM, per-credential IV |
+| Cloud provider credentials      | VM provisioning (Hetzner, Scaleway, Vultr, GCP WIF or service-account JSON)        | AES-256-GCM, per-credential IV |
 | Agent API keys                  | Claude, OpenAI, Gemini, and other agent access                              | AES-256-GCM, per-credential IV |
 | Agent OAuth tokens              | Claude Pro/Max, Codex subscriptions                                         | AES-256-GCM, per-credential IV |
 | Composable credentials (`cc_*`) | Reusable credential + configuration attachments layered per project/profile | AES-256-GCM, per-credential IV |

@@ -55,6 +55,7 @@ import {
   formatOnlyValidation,
   validateHetznerCredentialWithProvider,
   validateScalewayCredentialWithProvider,
+  validateVultrCredentialWithProvider,
 } from '../../services/validation';
 
 const projectCredentialsRoutes = new Hono<{ Bindings: Env }>();
@@ -106,6 +107,14 @@ function getCloudCredentialFields(body: CreateCredentialRequest): CloudCredentia
     };
   }
 
+  if (providerName === 'vultr') {
+    if (!body.token) throw errors.badRequest('Token is required for Vultr');
+    return {
+      providerName,
+      tokenToValidate: serializeCredentialToken(providerName, { token: body.token }),
+    };
+  }
+
   if (
     !body.gcpProjectId ||
     !body.gcpProjectNumber ||
@@ -151,6 +160,11 @@ async function validateCloudCredentialRequest(
   }
   if (body.provider === 'scaleway') {
     return validateScalewayCredentialWithProvider(body.secretKey, body.projectId, {
+      timeoutMs: getSaveValidationTimeoutMs(env),
+    });
+  }
+  if (body.provider === 'vultr') {
+    return validateVultrCredentialWithProvider(body.token, {
       timeoutMs: getSaveValidationTimeoutMs(env),
     });
   }

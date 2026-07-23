@@ -32,6 +32,8 @@ export function serializeCredentialToken(
       return fields.token ?? '';
     case 'scaleway':
       return JSON.stringify({ secretKey: fields.secretKey, projectId: fields.projectId });
+    case 'vultr':
+      return fields.token ?? '';
     case 'gcp':
       return JSON.stringify({
         version: GCP_CREDENTIAL_VERSION,
@@ -83,24 +85,43 @@ export interface HetznerCapacityRetryEnv {
   HETZNER_CAPACITY_RETRY_BUDGET_MS?: string;
 }
 
+/** Env vars that tune Vultr provider behavior (all optional; DEFAULT_VULTR_* apply otherwise). */
+export interface VultrRuntimeEnv {
+  VULTR_REGION?: string;
+  VULTR_OS_NAME?: string;
+  VULTR_API_TIMEOUT_MS?: string;
+  VULTR_IP_POLL_TIMEOUT_MS?: string;
+  VULTR_IP_POLL_INTERVAL_MS?: string;
+}
+
 /**
  * Build a ProviderConfig from a provider name and decrypted credential token.
- * Handles both raw token strings (Hetzner) and JSON blobs (Scaleway).
+ * Handles both raw token strings (Hetzner, Vultr) and JSON blobs (Scaleway).
  */
 export function buildProviderConfig(
   provider: CredentialProvider,
   decryptedToken: string,
-  hetznerEnv?: HetznerCapacityRetryEnv,
+  providerEnv?: HetznerCapacityRetryEnv & VultrRuntimeEnv,
 ): ProviderConfig {
   switch (provider) {
     case 'hetzner':
       return {
         provider: 'hetzner',
         apiToken: decryptedToken,
-        capacityRetryInitialDelayMs: parseOptionalInt(hetznerEnv?.HETZNER_CAPACITY_RETRY_INITIAL_DELAY_MS),
-        capacityRetryMaxDelayMs: parseOptionalInt(hetznerEnv?.HETZNER_CAPACITY_RETRY_MAX_DELAY_MS),
-        capacityRetryMaxAttempts: parseOptionalInt(hetznerEnv?.HETZNER_CAPACITY_RETRY_MAX_ATTEMPTS),
-        capacityRetryBudgetMs: parseOptionalInt(hetznerEnv?.HETZNER_CAPACITY_RETRY_BUDGET_MS),
+        capacityRetryInitialDelayMs: parseOptionalInt(providerEnv?.HETZNER_CAPACITY_RETRY_INITIAL_DELAY_MS),
+        capacityRetryMaxDelayMs: parseOptionalInt(providerEnv?.HETZNER_CAPACITY_RETRY_MAX_DELAY_MS),
+        capacityRetryMaxAttempts: parseOptionalInt(providerEnv?.HETZNER_CAPACITY_RETRY_MAX_ATTEMPTS),
+        capacityRetryBudgetMs: parseOptionalInt(providerEnv?.HETZNER_CAPACITY_RETRY_BUDGET_MS),
+      };
+    case 'vultr':
+      return {
+        provider: 'vultr',
+        apiToken: decryptedToken,
+        region: providerEnv?.VULTR_REGION,
+        osName: providerEnv?.VULTR_OS_NAME,
+        requestTimeoutMs: parseOptionalInt(providerEnv?.VULTR_API_TIMEOUT_MS),
+        ipPollTimeoutMs: parseOptionalInt(providerEnv?.VULTR_IP_POLL_TIMEOUT_MS),
+        ipPollIntervalMs: parseOptionalInt(providerEnv?.VULTR_IP_POLL_INTERVAL_MS),
       };
     case 'scaleway': {
       let parsed: unknown;

@@ -84,7 +84,7 @@ Provider-backed block volumes give a deployment environment durable storage that
 - Each volume is mounted at a SAM-managed path derived from the environment id, and the deployment apply payload tells the node which provider volume to mount where.
 - All volumes in one environment must share the same provider **and** the same location. A single VM can only attach volumes that live in its own provider/location, so an environment that mixes providers or regions is rejected before a node is provisioned.
 - When an environment has volumes (or is marked as requiring volumes), provisioning is pinned to the volumes' provider and location so the node lands where the volumes can attach.
-- The provider must support first-class block volumes. **Hetzner and Scaleway are supported; GCP deployment volumes are not** (`volumeCapabilities.supported` is `false` for the GCP provider), so a GCP-backed environment cannot use persistent deployment volumes.
+- The provider must support first-class block volumes. **Hetzner, Scaleway, and Vultr are supported; GCP deployment volumes are not** (`volumeCapabilities.supported` is `false` for the GCP provider), so a GCP-backed environment cannot use persistent deployment volumes. Vultr uses high-performance NVMe Block Storage, which is only offered in a subset of Vultr regions, so a Vultr-backed environment with volumes is pinned to a Block-Storage-capable region.
 
 ## Stop and start lifecycle
 

@@ -19,7 +19,7 @@ export const AnalyticsForwardSchema = v.object({
 
 export const CreatePlatformCredentialSchema = v.object({
   credentialType: v.picklist(['cloud-provider', 'agent-api-key']),
-  provider: v.optional(v.picklist(['hetzner', 'scaleway', 'gcp'])),
+  provider: v.optional(v.picklist(['hetzner', 'scaleway', 'gcp', 'vultr'])),
   agentType: v.optional(v.string()),
   credentialKind: v.optional(v.picklist(['api-key', 'oauth-token'])),
   label: v.pipe(v.string(), v.minLength(1), v.maxLength(100)),

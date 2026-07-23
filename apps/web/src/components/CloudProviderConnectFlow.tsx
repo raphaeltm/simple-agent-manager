@@ -69,6 +69,9 @@ function buildRequest(provider: CredentialProvider, form: CloudFormState): Creat
   if (provider === 'hetzner') {
     return { provider, token: form.token.trim() };
   }
+  if (provider === 'vultr') {
+    return { provider, token: form.token.trim() };
+  }
   if (provider === 'scaleway') {
     return {
       provider,
@@ -89,6 +92,7 @@ function buildRequest(provider: CredentialProvider, form: CloudFormState): Creat
 
 function isReady(provider: CredentialProvider | '', form: CloudFormState): boolean {
   if (provider === 'hetzner') return form.token.trim().length > 0;
+  if (provider === 'vultr') return form.token.trim().length > 0;
   if (provider === 'scaleway') {
     return form.secretKey.trim().length > 0 && form.projectId.trim().length > 0;
   }
@@ -160,7 +164,7 @@ export function CloudProviderConnectFlow({
 
       <div className="flex flex-col gap-1.5">
         <div className="text-xs font-medium text-fg-muted">Cloud provider</div>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           {CREDENTIAL_PROVIDERS.map((item) => {
             const isSelected = provider === item;
             return (
@@ -210,6 +214,16 @@ export function CloudProviderConnectFlow({
               value={form.token}
               onChange={(value) => setField('token', value)}
               placeholder="Hetzner API token"
+            />
+          )}
+
+          {provider === 'vultr' && (
+            <CredentialInput
+              id="cloud-vultr-token"
+              label="Vultr API key (set Access Control to Allow All IPv4/IPv6)"
+              value={form.token}
+              onChange={(value) => setField('token', value)}
+              placeholder="Vultr Personal Access Token"
             />
           )}
 

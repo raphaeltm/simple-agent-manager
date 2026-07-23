@@ -18,7 +18,7 @@ Open the web UI and click **Sign in with GitHub**. Authorize the GitHub App when
 Go to **Settings → Connections** and connect the AI coding agent you want to use — Claude Code, OpenAI Codex, Gemini CLI, Mistral Vibe, OpenCode, or Amp. Depending on the agent, you'll paste an API key or an OAuth token from your subscription. Your credentials stay encrypted in the database — they're never stored as environment variables.
 
 :::note
-On a hosted instance, cloud compute is usually provided for you, so you don't need your own cloud provider credential. If you're self-hosting or the operator requires it, add a [Hetzner API token](https://console.hetzner.cloud/) or [Scaleway secret key](https://console.scaleway.com/iam/api-keys) under **Settings → Cloud Provider**.
+On a hosted instance, cloud compute is usually provided for you, so you don't need your own cloud provider credential. If you're self-hosting or the operator requires it, add a [Hetzner API token](https://console.hetzner.cloud/), [Scaleway secret key](https://console.scaleway.com/iam/api-keys), or [Vultr API key](https://my.vultr.com/settings/#settingsapi) under **Settings → Cloud Provider**.
 :::
 
 ### 3. Install the GitHub App

@@ -40,7 +40,7 @@ export function OnboardingChecklist() {
         getTrialStatus().catch(() => null),
       ]);
 
-      const hasUserCreds = credentials.some((c) => c.provider === 'hetzner' || c.provider === 'scaleway');
+      const hasUserCreds = credentials.some((c) => c.provider === 'hetzner' || c.provider === 'scaleway' || c.provider === 'vultr');
       const trialAvailable = trial?.available ?? false;
       const hasCloudProvider = hasUserCreds || trialAvailable;
       const hasGitHubApp = installations.length > 0;

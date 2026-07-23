@@ -159,7 +159,7 @@ export const TASK_LIFECYCLE_TOOLS = [
         provider: {
           type: 'string',
           description:
-            'Cloud provider for auto-provisioned nodes (e.g., "hetzner", "scaleway", "gcp"). Defaults to profile or project default.',
+            'Cloud provider for auto-provisioned nodes (e.g., "hetzner", "scaleway", "gcp", "vultr"). Defaults to profile or project default.',
         },
         vmLocation: {
           type: 'string',

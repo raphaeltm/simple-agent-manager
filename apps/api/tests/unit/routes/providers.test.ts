@@ -199,6 +199,44 @@ describe('GET /api/providers/catalog', () => {
     expect(body.catalogs[1]!.provider).toBe('scaleway');
   });
 
+  it('includes a vultr catalog when the user has a vultr credential', async () => {
+    createMockDB([
+      { provider: 'vultr', encryptedToken: 'enc-vultr', iv: 'iv-v' },
+    ]);
+    mockCreateProvider.mockReturnValue(makeMockProvider({
+      name: 'vultr',
+      locations: ['fra', 'ewr'],
+      locationMetadata: {
+        fra: { name: 'Frankfurt', country: 'DE' },
+        ewr: { name: 'New Jersey', country: 'US' },
+      },
+      sizes: {
+        small: { type: 'vc2-2c-4gb', price: '~$20/mo', vcpu: 2, ramGb: 4, storageGb: 80 },
+        medium: { type: 'vc2-4c-8gb', price: '~$40/mo', vcpu: 4, ramGb: 8, storageGb: 160 },
+        large: { type: 'vc2-6c-16gb', price: '~$80/mo', vcpu: 6, ramGb: 16, storageGb: 320 },
+      },
+      defaultLocation: 'fra',
+    }));
+
+    const res = await app.request('/api/providers/catalog', { method: 'GET' }, makeEnv());
+    const body = (await res.json()) as ProviderCatalogResponse;
+    expect(body.catalogs).toHaveLength(1);
+    expect(body.catalogs[0]!.provider).toBe('vultr');
+    expect(body.catalogs[0]!.defaultLocation).toBe('fra');
+    expect(body.catalogs[0]!.sizes.small.type).toBe('vc2-2c-4gb');
+  });
+
+  it('omits vultr from the catalog when the user has no vultr credential', async () => {
+    createMockDB([
+      { provider: 'hetzner', encryptedToken: 'enc-hetzner', iv: 'iv-1' },
+    ]);
+    mockCreateProvider.mockReturnValue(makeMockProvider({ name: 'hetzner' }));
+
+    const res = await app.request('/api/providers/catalog', { method: 'GET' }, makeEnv());
+    const body = (await res.json()) as ProviderCatalogResponse;
+    expect(body.catalogs.map((c) => c.provider)).not.toContain('vultr');
+  });
+
   it('should skip providers with invalid credentials (catch-and-continue behavior)', async () => {
     createMockDB([
       { provider: 'hetzner', encryptedToken: 'enc-bad', iv: 'iv-bad' },

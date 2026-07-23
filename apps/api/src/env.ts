@@ -281,6 +281,12 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   HETZNER_CAPACITY_RETRY_MAX_DELAY_MS?: string;
   HETZNER_CAPACITY_RETRY_MAX_ATTEMPTS?: string;
   HETZNER_CAPACITY_RETRY_BUDGET_MS?: string;
+  // Vultr provider tuning (optional; DEFAULT_VULTR_* apply otherwise)
+  VULTR_REGION?: string;
+  VULTR_OS_NAME?: string;
+  VULTR_API_TIMEOUT_MS?: string;
+  VULTR_IP_POLL_TIMEOUT_MS?: string;
+  VULTR_IP_POLL_INTERVAL_MS?: string;
   // External API timeouts (milliseconds)
   HETZNER_API_TIMEOUT_MS?: string;
   CF_API_TIMEOUT_MS?: string;
