@@ -23,7 +23,10 @@ export interface SetupSessionSweepResult {
   errors: number;
 }
 
-export async function runSetupSessionSweep(env: Env): Promise<SetupSessionSweepResult> {
+export async function runSetupSessionSweep(
+  env: Env,
+  ctx?: ExecutionContext
+): Promise<SetupSessionSweepResult> {
   const result: SetupSessionSweepResult = { candidates: 0, toreDown: 0, orphansForced: 0, errors: 0 };
   // No DO namespace bound (e.g. local/miniflare without the binding) — nothing to do.
   if (!env.CREDENTIAL_SETUP_SESSION) return result;
@@ -44,21 +47,9 @@ export async function runSetupSessionSweep(env: Env): Promise<SetupSessionSweepR
   result.candidates = candidates.length;
 
   for (const row of candidates) {
-    try {
-      // Preferred path: the DO tears itself down (scrub, destroy sandbox, release).
-      await cancelSetupSession(env, row.id);
-      result.toreDown++;
-    } catch (err) {
-      result.errors++;
-      log.warn('setup_session_sweep.teardown_failed', {
-        sessionId: row.id,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-
-    // Escape-path guarantee: if the DO couldn't terminalize the row (e.g. it was
-    // never created), force the D1 row to a terminal state and free its slot so
-    // the next sweep does not re-select it (two-run zombie prevention).
+    // 1. Cheap escape-path FIRST: force the D1 row terminal + release its lease so
+    //    the candidate always leaves the set this tick (rule 47, two-run zombie
+    //    prevention), independent of how slow/unreachable the sandbox teardown is.
     try {
       const forced = await env.DATABASE.prepare(
         `UPDATE agent_credential_setup_sessions
@@ -79,6 +70,25 @@ export async function runSetupSessionSweep(env: Env): Promise<SetupSessionSweepR
         sessionId: row.id,
         error: err instanceof Error ? err.message : String(err),
       });
+    }
+
+    // 2. Best-effort sandbox scrub/destroy OFF the cron critical path — a dead
+    //    sandbox's interactive-length timeout must never block the 5-min sweep
+    //    tick (rule 47 / control-loop I/O budget). Runs in waitUntil when the
+    //    ExecutionContext is available, else awaited (tests).
+    const teardown = cancelSetupSession(env, row.id).catch((err) => {
+      result.errors++;
+      log.warn('setup_session_sweep.teardown_failed', {
+        sessionId: row.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+    if (ctx) {
+      ctx.waitUntil(teardown);
+      result.toreDown++;
+    } else {
+      await teardown;
+      result.toreDown++;
     }
   }
 

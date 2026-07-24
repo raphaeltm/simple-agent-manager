@@ -23,6 +23,7 @@ import { getAgentDefinition, isValidAgentType } from '@simple-agent-manager/shar
 import { Hono } from 'hono';
 
 import type { Env } from '../env';
+import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
 import { getUserId,requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
@@ -48,9 +49,13 @@ const SUPPORTED_AGENT_TYPE = 'openai-codex';
 const SETUP_CREDENTIAL_KIND = 'oauth-token';
 const ACTIVE_STATUS_PLACEHOLDERS = ACTIVE_SETUP_STATUSES.map(() => '?').join(', ');
 
-/** Per-session isolated CODEX_HOME inside the sandbox (deterministic from id). */
+/**
+ * Per-session isolated CODEX_HOME inside the sandbox (deterministic from id).
+ * Uses a real home dir (not /tmp) — codex refuses to create its PATH-alias
+ * helper binaries under a temporary dir and prints a scary warning otherwise.
+ */
 function codexHomeFor(sessionId: string): string {
-  return `/tmp/codex-setup-${sessionId}`;
+  return `/root/.codex-setup-${sessionId}`;
 }
 
 /** The command the browser terminal auto-runs to start the device-auth login. */
@@ -89,7 +94,7 @@ async function loadOwnedSession(
     .first<SetupSessionD1Row>();
   // Fail closed on missing OR cross-user access — never leak another user's row.
   if (!row || row.user_id !== userId) {
-    throw errors.notFound('Setup session not found');
+    throw errors.notFound('Setup session');
   }
   return row;
 }
@@ -219,11 +224,23 @@ agentCredentialSetupSessionsRoutes.post('/', requireAuth(), requireApproved(), a
       201
     );
   } catch (err) {
-    // The DO tears itself down (releases lease, marks D1 failed) on provision
-    // errors; surface a clear failure.
-    throw errors.internal(
-      `Failed to start setup session: ${err instanceof Error ? err.message : String(err)}`
-    );
+    // A provision failure self-tears-down inside the DO, but if the create() RPC
+    // itself failed the lease + D1 row would linger until the TTL sweep — release
+    // them now so a rare DO error doesn't burn a scarce slot for ~20 min.
+    await releaseSetupSlot(c.env, leaseId).catch(() => {});
+    await c.env.DATABASE.prepare(
+      `UPDATE agent_credential_setup_sessions
+       SET status = 'failed', error_code = 'start_failed', completed_at = ?, updated_at = ?
+       WHERE id = ? AND status = 'provisioning'`
+    )
+      .bind(nowIso, nowIso, sessionId)
+      .run()
+      .catch(() => {});
+    log.error('credential_setup.start_failed', {
+      sessionId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    throw errors.internal('Failed to start guided setup session');
   }
 });
 
@@ -272,7 +289,7 @@ agentCredentialSetupSessionsRoutes.get(
     if (isTerminalSetupStatus(row.status)) {
       throw errors.badRequest('Setup session has already ended');
     }
-    const token = await signCredentialSetupTerminalToken(userId, row.id, c.env);
+    const { token } = await signCredentialSetupTerminalToken(userId, row.id, c.env);
     return c.json({ token });
   }
 );

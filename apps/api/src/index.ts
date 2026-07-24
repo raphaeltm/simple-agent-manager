@@ -954,7 +954,7 @@ export default {
     const sessionTaskRepair = await runSessionTaskReconciliation(env);
 
     // Reclaim expired guided credential-setup sessions (bounded — rule 47).
-    const setupSessionSweep = await runSetupSessionSweep(env);
+    const setupSessionSweep = await runSetupSessionSweep(env, ctx);
 
     // Clean up abandoned R2 compose image artifacts. The cleanup module is
     // interval-gated through KV so the 5-minute sweep does not scan R2 every run.

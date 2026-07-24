@@ -329,6 +329,14 @@ export class CredentialSetupSession extends DurableObject<Env> {
     errorCode?: string,
     errorMessage?: string
   ): Promise<void> {
+    // Atomically claim teardown (rule 45): if a concurrent cancel()/sweep already
+    // terminalized this session while this call awaits sandbox I/O, no-op — the
+    // read + setStatus below are synchronous (no await between), so the claim is
+    // atomic within this DO instance and cleanup + the final write happen once.
+    const current = this.readRow();
+    if (!current || isTerminalSetupStatus(current.status)) return;
+    this.setStatus(current.id, finalStatus, { errorCode, errorMessage, completed: true });
+
     // 1. Delete captured credential file + scrub the setup dir.
     try {
       const sandbox = await getSandboxInstance(this.env, row.id);
@@ -359,8 +367,7 @@ export class CredentialSetupSession extends DurableObject<Env> {
         error: err instanceof Error ? err.message : String(err),
       });
     }
-    // 4. Mark DO + D1 terminal, disarm the alarm.
-    this.setStatus(row.id, finalStatus, { errorCode, errorMessage, completed: true });
+    // 4. Mark D1 terminal (DO status already claimed atomically above), disarm alarm.
     await this.updateD1Status(row.id, finalStatus, { errorCode, errorMessage, completed: true });
     try {
       await this.ctx.storage.deleteAlarm();
