@@ -6,9 +6,10 @@
  * at deploy time. The checked-in wrangler.toml files contain only top-level
  * config for local dev — all environment sections are generated here.
  *
- * Static bindings (Durable Objects, AI, migrations) are copied from the
- * top-level config. Dynamic bindings (D1 IDs, KV IDs, R2 names) come from
- * Pulumi stack outputs. Worker names are derived from DEPLOYMENT_CONFIG.
+ * Static bindings (Durable Objects and AI) are copied from the top-level
+ * config. Durable Object migrations are resolved against deployed Worker
+ * state. Dynamic bindings (D1 IDs, KV IDs, R2 names) come from Pulumi stack
+ * outputs. Worker names are derived from DEPLOYMENT_CONFIG.
  *
  * Usage:
  *   PULUMI_STACK=prod pnpm tsx scripts/deploy/sync-wrangler-config.ts
@@ -23,6 +24,10 @@ import * as TOML from '@iarna/toml';
 import * as v from 'valibot';
 
 import { DEPLOYMENT_CONFIG } from './config.js';
+import {
+  getDeployedWorkerMigrationTag,
+  resolveDurableObjectMigrations,
+} from './durable-object-migrations.js';
 import type {
   AIBinding,
   AnalyticsEngineDatasetBinding,
@@ -43,6 +48,10 @@ const TAIL_WORKER_WRANGLER_TOML_PATH = resolve(
 const DEPLOY_STATE_DIR = resolve(import.meta.dirname, '../../.wrangler');
 const FIRST_DEPLOY_MARKER = resolve(DEPLOY_STATE_DIR, 'tail-worker-first-deploy');
 const SETUP_TOKEN_BYTES = 24;
+
+// Re-exported so tests and callers keep a single import site while the
+// migration-state logic lives in its own module (file size rule 18).
+export { getDeployedWorkerMigrationTag, resolveDurableObjectMigrations };
 
 const recordSchema = v.custom<Record<string, unknown>>(
   (value) => typeof value === 'object' && value !== null && !Array.isArray(value),
@@ -389,13 +398,14 @@ function getAnalyticsEngineDatasets(
 function getStaticApiWorkerBindings(
   staticBindings: StaticBindings,
   analyticsEngineDatasets: AnalyticsEngineDatasetBinding[] | undefined,
-  includeArtifactsBinding: boolean
+  includeArtifactsBinding: boolean,
+  durableObjectMigrations: MigrationEntry[] | undefined
 ): Partial<WranglerEnvConfig> {
   return {
     ...(staticBindings.durable_objects ? { durable_objects: staticBindings.durable_objects } : {}),
     ...(staticBindings.ai ? { ai: staticBindings.ai } : {}),
     ...(analyticsEngineDatasets ? { analytics_engine_datasets: analyticsEngineDatasets } : {}),
-    ...(staticBindings.migrations ? { migrations: staticBindings.migrations } : {}),
+    ...(durableObjectMigrations ? { migrations: durableObjectMigrations } : {}),
     ...(staticBindings.containers ? { containers: staticBindings.containers } : {}),
     ...(includeArtifactsBinding ? { artifacts: staticBindings.artifacts } : {}),
   };
@@ -413,9 +423,14 @@ export function generateApiWorkerEnv(
   outputs: PulumiOutputs,
   stack: string,
   includeTailConsumers: boolean,
-  artifactsBindingEnabled: boolean
+  artifactsBindingEnabled: boolean,
+  deployedMigrationTag: string | null
 ): WranglerEnvConfig {
   const staticBindings = extractStaticBindings(topLevel);
+  const durableObjectMigrations = resolveDurableObjectMigrations(
+    staticBindings.migrations,
+    deployedMigrationTag
+  );
   if (artifactsBindingEnabled && !staticBindings.artifacts) {
     throw new Error(
       'Artifacts is enabled but no top-level [[artifacts]] binding exists in wrangler.toml'
@@ -483,7 +498,12 @@ export function generateApiWorkerEnv(
     r2_buckets: [{ binding: 'R2', bucket_name: outputs.r2Name }],
 
     // Static bindings copied from top-level config
-    ...getStaticApiWorkerBindings(staticBindings, analyticsEngineDatasets, includeArtifactsBinding),
+    ...getStaticApiWorkerBindings(
+      staticBindings,
+      analyticsEngineDatasets,
+      includeArtifactsBinding,
+      durableObjectMigrations
+    ),
 
     // Tail consumers (conditional — omitted on first deploy when tail worker doesn't exist)
     ...getTailConsumers(includeTailConsumers, tailWorkerName),
@@ -560,6 +580,15 @@ async function main(): Promise<void> {
   const config = loadWranglerToml();
   const envKey = DEPLOYMENT_CONFIG.getEnvironmentFromStack(stack);
 
+  const apiWorkerName = DEPLOYMENT_CONFIG.resources.workerName(stack);
+  const deployedMigrationTag = await getDeployedWorkerMigrationTag(
+    outputs.cloudflareAccountId,
+    apiWorkerName
+  );
+  console.log(
+    `  API worker "${apiWorkerName}" migration state: ${deployedMigrationTag ?? 'clean install'}`
+  );
+
   // Check if tail worker already exists (for conditional tail_consumers)
   const tailWorkerName = DEPLOYMENT_CONFIG.resources.tailWorkerName(stack);
   const hasTailWorker = await checkTailWorkerExists(outputs.cloudflareAccountId, tailWorkerName);
@@ -592,7 +621,8 @@ async function main(): Promise<void> {
     outputs,
     stack,
     hasTailWorker,
-    artifactsBindingEnabled
+    artifactsBindingEnabled,
+    deployedMigrationTag
   );
   saveWranglerToml(config);
   console.log(`Updated wrangler.toml [env.${envKey}]`);

@@ -39,25 +39,25 @@ SQLite. Clean installations must create every namespace as SQLite-backed.
 `apps/api/wrangler.toml` contains 17 ordered create migrations and no
 rename/delete/transfer migrations on `main`:
 
-| Tag | Class | Historical backend |
-| --- | --- | --- |
-| v1 | `ProjectData` | SQLite |
-| v2 | `NodeLifecycle` | legacy KV |
-| v3 | `AdminLogs` | legacy KV |
-| v4 | `TaskRunner` | legacy KV |
-| v5 | `NotificationService` | SQLite |
-| v6 | `CodexRefreshLock` | legacy KV |
-| v7 | `TrialCounter` | SQLite |
-| v8 | `TrialEventBus` | legacy KV |
-| v9 | `TrialOrchestrator` | SQLite |
-| v10 | `ProjectOrchestrator` | SQLite |
-| v11 | `SamSession` | SQLite |
-| v12 | `ProjectAgent` | SQLite |
-| v13 | `SandboxDO` | SQLite |
-| v14 | `AiTokenBudgetCounter` | SQLite |
-| v15 | `GitHubUserAccessTokenLock` | legacy KV |
-| v16 | `VmAgentContainer` | SQLite |
-| v17 | `GitLabUserAccessTokenLock` | legacy KV |
+| Tag | Class                       | Historical backend |
+| --- | --------------------------- | ------------------ |
+| v1  | `ProjectData`               | SQLite             |
+| v2  | `NodeLifecycle`             | legacy KV          |
+| v3  | `AdminLogs`                 | legacy KV          |
+| v4  | `TaskRunner`                | legacy KV          |
+| v5  | `NotificationService`       | SQLite             |
+| v6  | `CodexRefreshLock`          | legacy KV          |
+| v7  | `TrialCounter`              | SQLite             |
+| v8  | `TrialEventBus`             | legacy KV          |
+| v9  | `TrialOrchestrator`         | SQLite             |
+| v10 | `ProjectOrchestrator`       | SQLite             |
+| v11 | `SamSession`                | SQLite             |
+| v12 | `ProjectAgent`              | SQLite             |
+| v13 | `SandboxDO`                 | SQLite             |
+| v14 | `AiTokenBudgetCounter`      | SQLite             |
+| v15 | `GitHubUserAccessTokenLock` | legacy KV          |
+| v16 | `VmAgentContainer`          | SQLite             |
+| v17 | `GitLabUserAccessTokenLock` | legacy KV          |
 
 The temporary feature-branch version of `v9` used `new_classes`, but neither
 that commit nor its follow-up rewrite is an ancestor of `main`; the merged
@@ -118,27 +118,27 @@ operator hand-edit instructions.
 
 ## Implementation checklist
 
-- [ ] Add typed Cloudflare Worker migration-state detection to the Wrangler
+- [x] Add typed Cloudflare Worker migration-state detection to the Wrangler
       sync generator with bounded, redacted diagnostics.
-- [ ] Add a pure migration resolver that preserves the applied prefix and
+- [x] Add a pure migration resolver that preserves the applied prefix and
       converts only pending legacy namespace creates to SQLite.
-- [ ] Feed the resolved migration list into every generated API environment.
-- [ ] Keep local Miniflare bindings and the checked-in historical migration
+- [x] Feed the resolved migration list into every generated API environment.
+- [x] Keep local Miniflare bindings and the checked-in historical migration
       chain unchanged.
-- [ ] Add clean-install, fully-upgraded legacy, partial-upgrade, unknown-tag,
+- [x] Add clean-install, fully-upgraded legacy, partial-upgrade, unknown-tag,
       missing-Worker, and Cloudflare API failure tests.
-- [ ] Add a parsed generated-config assertion proving the deployment env uses
+- [x] Add a parsed generated-config assertion proving the deployment env uses
       the selected list rather than the raw top-level list.
-- [ ] Update the Wrangler deployment rule/process guard so future DO migrations
+- [x] Update the Wrangler deployment rule/process guard so future DO migrations
       preserve applied history and use SQLite for new namespaces.
-- [ ] Update public deployment documentation only where runtime behavior needs
+- [x] Update public deployment documentation only where runtime behavior needs
       explanation; avoid making operators choose migration history manually.
-- [ ] Run focused generator/workflow tests, Wrangler binding checks, lint,
+- [x] Run focused generator/workflow tests, Wrangler binding checks, lint,
       typecheck, tests, build, and migration safety checks proportionate to the
       change.
-- [ ] Run Cloudflare specialist, task completion, test, constitution, and
+- [x] Run Cloudflare specialist, task completion, test, constitution, and
       documentation reviews; address all correctness findings.
-- [ ] Deploy through the staging workflow, prove v17 legacy namespaces remain
+- [x] Deploy through the staging workflow, prove v17 legacy namespaces remain
       unchanged, and record the clean-install proof available without mutating
       production.
 - [ ] Open a PR that closes #1614, documents evidence/risks/blockers, waits for
@@ -146,22 +146,75 @@ operator hand-edit instructions.
 
 ## Acceptance criteria
 
-- [ ] A generated config for a confirmed clean target contains no
+- [x] A generated config for a confirmed clean target contains no
       `new_classes` directives and creates all 17 classes with SQLite.
-- [ ] A target already at v17 receives the unchanged historical migration list;
+- [x] A target already at v17 receives the unchanged historical migration list;
       no namespace is recreated, deleted, renamed, converted, or replayed.
-- [ ] A partially upgraded target preserves applied entries and converts only
+- [x] A partially upgraded target preserves applied entries and converts only
       future legacy creates to SQLite.
-- [ ] Unknown or unreadable deployed migration state blocks deployment with an
+- [x] Unknown or unreadable deployed migration state blocks deployment with an
       actionable error instead of assuming a clean account.
-- [ ] Canonical staging, canonical production, and self-host production all use
+- [x] Canonical staging, canonical production, and self-host production all use
       the same deterministic generator behavior.
-- [ ] Local Miniflare/Worker tests remain compatible.
-- [ ] Automated tests discriminate clean-install and existing-upgrade behavior
+- [x] Local Miniflare/Worker tests remain compatible.
+- [x] Automated tests discriminate clean-install and existing-upgrade behavior
       and would fail against the current verbatim-copy generator.
-- [ ] Official documentation and read-only deployed state support the migration
+- [x] Official documentation and read-only deployed state support the migration
       reasoning recorded in the PR.
 - [ ] PR CI is green and the PR is left open/unmerged.
+
+## Validation evidence
+
+- TDD discrimination: the new compatibility suite failed all 12 initial cases
+  against the verbatim-copy generator, then passed after implementation.
+- Focused compatibility/generator tests: 37 tests passed.
+- Deployment/config gates passed: deployment-script TypeScript compilation,
+  Wrangler binding parity, D1 migration safety, Durable Object migration
+  safety, migration ordering, AST checks, file-size checks, source-contract
+  checks, agent-install manifest checks, and specialist-review harness tests
+  (127 tests).
+- Full repository gates passed: `pnpm lint`, `pnpm typecheck`, `pnpm test`, and
+  `pnpm build`. The Worker suite exercised Miniflare and passed 6,208 API tests;
+  the web suite passed 2,740 tests.
+- Targeted formatting and `git diff --check` passed. The repository-wide
+  formatting check still reports unrelated pre-existing formatting debt, so
+  changed files were checked directly.
+- The final read-only state probe returned `v17` for both `sam-api-staging` and
+  `sam-api-prod`; namespace backend flags were inspected separately and match
+  the immutable checked-in history.
+
+## Staging and clean-install proof
+
+- Staging workflow run `29830545589` deployed commit `44548e8cb` successfully.
+  Both API Worker deploys and the workflow health checks passed.
+- The generator logged `sam-api-staging` at migration state `v17`; the live
+  Playwright smoke suite passed all 12 tests.
+- Read-only pre/post namespace snapshots were identical: 17 classes remained,
+  with the same seven classes KV-backed and the other ten SQLite-backed. The
+  post-deploy Worker migration tag remained `v17`.
+- Direct generated-config proof produced 17 tags, zero `new_classes`, and 17
+  SQLite class creates for clean state; v17 output was structurally identical.
+- A live clean-account deployment was unavailable: the only accessible
+  Cloudflare accounts are canonical staging and production, and both already
+  contain legacy namespaces, so neither can exercise the clean-account condition.
+- Production was inspected read-only only; no production resource or namespace
+  was created, changed, or deleted.
+
+## Specialist review evidence
+
+- Task completion: PASS; Checks A-F found no planned-vs-actual, acceptance,
+  UI-path, multi-resource, or vertical-slice gap.
+- Cloudflare/infra: PASS; applied tags remain immutable, clean creates are all
+  SQLite, existing v17 output is unchanged, and both deploy passes use the probe.
+- Tests: ADDRESSED; added explicit duplicate-tag and unreadable-list fail-closed
+  cases identified during review, bringing the focused total to 37.
+- Constitution: PASS; the new URL is an external Cloudflare API contract and
+  the page size is a bounded protocol request, not business configuration.
+- Documentation: PASS; the deployment rule and public self-hosting behavior
+  match the generator and introduce no new operator-managed configuration.
+- All attempted specialist subagents were interrupted by the execution
+  environment, so the repository skill checklists were executed locally and
+  this limitation will be disclosed in the PR.
 
 ## Post-mortem
 

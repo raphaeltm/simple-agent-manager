@@ -52,7 +52,7 @@ describe('sync wrangler config', () => {
       analytics_engine_datasets: [{ binding: 'ANALYTICS', dataset: 'legacy_analytics' }],
     };
 
-    const envConfig = generateApiWorkerEnv(topLevel, outputs, 'prod', false, false);
+    const envConfig = generateApiWorkerEnv(topLevel, outputs, 'prod', false, false, null);
 
     expect(envConfig.vars).toMatchObject({
       ANALYTICS_DATASET: 's123abc_analytics',
@@ -67,7 +67,7 @@ describe('sync wrangler config', () => {
   });
 
   it('fails instead of falling back to sam when deployment identity is missing', () => {
-    expect(() => generateApiWorkerEnv({}, outputs, 'prod', false, false)).toThrow(
+    expect(() => generateApiWorkerEnv({}, outputs, 'prod', false, false, null)).toThrow(
       'RESOURCE_PREFIX or BASE_DOMAIN is required'
     );
   });
@@ -75,7 +75,7 @@ describe('sync wrangler config', () => {
   it('derives deployment identity from BASE_DOMAIN when RESOURCE_PREFIX is not explicit', () => {
     vi.stubEnv('BASE_DOMAIN', 'example.com');
 
-    const envConfig = generateApiWorkerEnv({}, outputs, 'prod', false, false);
+    const envConfig = generateApiWorkerEnv({}, outputs, 'prod', false, false, null);
 
     expect(envConfig.name).toBe('sa379a6-api-prod');
     expect(envConfig.vars).toMatchObject({
@@ -88,7 +88,7 @@ describe('sync wrangler config', () => {
   it('enables Cloudflare Container runtime by default and allows explicit opt-out', () => {
     vi.stubEnv('RESOURCE_PREFIX', 's123abc');
 
-    expect(generateApiWorkerEnv({}, outputs, 'prod', false, false).vars).toMatchObject({
+    expect(generateApiWorkerEnv({}, outputs, 'prod', false, false, null).vars).toMatchObject({
       CF_CONTAINER_ENABLED: 'true',
     });
 
@@ -98,14 +98,15 @@ describe('sync wrangler config', () => {
         outputs,
         'prod',
         false,
-        false
+        false,
+        null
       ).vars
     ).toMatchObject({
       CF_CONTAINER_ENABLED: 'false',
     });
 
     vi.stubEnv('CF_CONTAINER_ENABLED', 'false');
-    expect(generateApiWorkerEnv({}, outputs, 'prod', false, false).vars).toMatchObject({
+    expect(generateApiWorkerEnv({}, outputs, 'prod', false, false, null).vars).toMatchObject({
       CF_CONTAINER_ENABLED: 'false',
     });
   });
@@ -113,13 +114,13 @@ describe('sync wrangler config', () => {
   it('passes cf-container clone/create tunables through from process env when set', () => {
     vi.stubEnv('RESOURCE_PREFIX', 's123abc');
 
-    const unset = generateApiWorkerEnv({}, outputs, 'prod', false, false).vars;
+    const unset = generateApiWorkerEnv({}, outputs, 'prod', false, false, null).vars;
     expect(unset).not.toHaveProperty('CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS');
     expect(unset).not.toHaveProperty('CF_CONTAINER_CLONE_FILTER');
 
     vi.stubEnv('CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS', '180000');
     vi.stubEnv('CF_CONTAINER_CLONE_FILTER', 'off');
-    expect(generateApiWorkerEnv({}, outputs, 'prod', false, false).vars).toMatchObject({
+    expect(generateApiWorkerEnv({}, outputs, 'prod', false, false, null).vars).toMatchObject({
       CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS: '180000',
       CF_CONTAINER_CLONE_FILTER: 'off',
     });
@@ -133,7 +134,7 @@ describe('sync wrangler config', () => {
       artifacts: [{ binding: 'ARTIFACTS', namespace: 'default' }],
     };
 
-    const envConfig = generateApiWorkerEnv(topLevel, outputs, 'prod', false, false);
+    const envConfig = generateApiWorkerEnv(topLevel, outputs, 'prod', false, false, null);
 
     expect(envConfig.artifacts).toBeUndefined();
     expect(envConfig.vars).toMatchObject({ ARTIFACTS_ENABLED: 'false' });
@@ -143,7 +144,7 @@ describe('sync wrangler config', () => {
     vi.stubEnv('RESOURCE_PREFIX', 's123abc');
 
     const artifacts = [{ binding: 'ARTIFACTS', namespace: 'default' }];
-    const envConfig = generateApiWorkerEnv({ artifacts }, outputs, 'prod', false, true);
+    const envConfig = generateApiWorkerEnv({ artifacts }, outputs, 'prod', false, true, null);
 
     expect(envConfig.artifacts).toEqual(artifacts);
     expect(envConfig.vars).toMatchObject({ ARTIFACTS_ENABLED: 'true' });
@@ -152,7 +153,7 @@ describe('sync wrangler config', () => {
   it('generates a plaintext setup token var without requiring an input secret', () => {
     vi.stubEnv('RESOURCE_PREFIX', 's123abc');
 
-    const envConfig = generateApiWorkerEnv({}, outputs, 'prod', false, false);
+    const envConfig = generateApiWorkerEnv({}, outputs, 'prod', false, false, null);
 
     expect(envConfig.vars?.SETUP_TOKEN).toEqual(expect.any(String));
     expect(String(envConfig.vars?.SETUP_TOKEN).length).toBeGreaterThan(20);
@@ -161,12 +162,12 @@ describe('sync wrangler config', () => {
   it('includes SETUP_FORCE only when explicitly requested', () => {
     vi.stubEnv('RESOURCE_PREFIX', 's123abc');
 
-    expect(generateApiWorkerEnv({}, outputs, 'prod', false, false).vars).not.toHaveProperty(
+    expect(generateApiWorkerEnv({}, outputs, 'prod', false, false, null).vars).not.toHaveProperty(
       'SETUP_FORCE'
     );
 
     vi.stubEnv('SETUP_FORCE', 'true');
-    expect(generateApiWorkerEnv({}, outputs, 'prod', false, false).vars).toMatchObject({
+    expect(generateApiWorkerEnv({}, outputs, 'prod', false, false, null).vars).toMatchObject({
       SETUP_FORCE: 'true',
     });
   });
@@ -174,7 +175,7 @@ describe('sync wrangler config', () => {
   it('fails when Artifacts is enabled without a top-level binding declaration', () => {
     vi.stubEnv('RESOURCE_PREFIX', 's123abc');
 
-    expect(() => generateApiWorkerEnv({}, outputs, 'prod', false, true)).toThrow(
+    expect(() => generateApiWorkerEnv({}, outputs, 'prod', false, true, null)).toThrow(
       'Artifacts is enabled but no top-level [[artifacts]] binding exists in wrangler.toml'
     );
   });
@@ -195,9 +196,15 @@ describe('sync wrangler config', () => {
   });
 
   it('requires a Cloudflare API token before checking tail worker status', async () => {
+    vi.stubEnv('CF_API_TOKEN', '');
+    vi.stubEnv('CLOUDFLARE_API_TOKEN', '');
+    const fetchMock = vi.fn().mockRejectedValue(new Error('network must not be reached'));
+    vi.stubGlobal('fetch', fetchMock);
+
     await expect(checkTailWorkerExists('account-id', 'tail-worker')).rejects.toThrow(
       'CF_API_TOKEN or CLOUDFLARE_API_TOKEN is required'
     );
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 
