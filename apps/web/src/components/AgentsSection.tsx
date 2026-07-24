@@ -151,6 +151,7 @@ export function AgentsSection() {
             onDeleteCredential={handleDeleteCredential}
             onSaveSettings={handleSaveSettings}
             onResetSettings={handleResetSettings}
+            onCredentialConnected={loadData}
           />
         );
       })}

@@ -25,6 +25,7 @@ import { useState } from 'react';
 
 import { useToast } from '../hooks/useToast';
 import { saveAgentCredential, saveAgentSettings, saveProjectAgentCredential } from '../lib/api';
+import { CodexConnectTrigger } from './CodexConnectTrigger';
 
 interface ConnectFlowProps {
   /** When set, writes project-scoped credentials. */
@@ -249,13 +250,20 @@ export function ConnectFlow({
               </p>
             )}
             {isCodexAuthJson ? (
-              <textarea
-                id="connect-credential"
-                placeholder="Paste the full contents of ~/.codex/auth.json"
-                value={credential}
-                onChange={(e) => setCredential(e.currentTarget.value)}
-                className="w-full py-2 px-3 min-h-32 resize-y border border-border-default rounded-sm bg-inset text-fg-primary text-[0.8125rem] font-mono box-border"
-              />
+              <div className="flex flex-col gap-2">
+                {/* Guided flow (only rendered when the platform gate is enabled). */}
+                <CodexConnectTrigger onConnected={onConnected} />
+                <div className="text-xs font-medium text-fg-muted">
+                  Or paste auth.json manually
+                </div>
+                <textarea
+                  id="connect-credential"
+                  placeholder="Paste the full contents of ~/.codex/auth.json"
+                  value={credential}
+                  onChange={(e) => setCredential(e.currentTarget.value)}
+                  className="w-full py-2 px-3 min-h-32 resize-y border border-border-default rounded-sm bg-inset text-fg-primary text-[0.8125rem] font-mono box-border"
+                />
+              </div>
             ) : (
               <input
                 id="connect-credential"
