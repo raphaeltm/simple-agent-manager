@@ -202,6 +202,16 @@ class_name = "ProjectAgent"
 name = "AI_TOKEN_BUDGET_COUNTER"
 class_name = "AiTokenBudgetCounter"
 
+# Durable Object for one guided Codex credential-setup terminal session (per session id)
+[[durable_objects.bindings]]
+name = "CREDENTIAL_SETUP_SESSION"
+class_name = "CredentialSetupSession"
+
+# Durable Object singleton gating concurrent guided credential-setup sandbox sessions
+[[durable_objects.bindings]]
+name = "SETUP_SESSION_POOL"
+class_name = "SetupSessionPool"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["ProjectData"]
@@ -250,12 +260,15 @@ new_sqlite_classes = ["SamSession"]  # Per-user SAM agent; SQLite-backed for con
 tag = "v12"
 new_sqlite_classes = ["ProjectAgent"]  # Per-project AI tech lead; SQLite-backed for conversation history
 
-# Sandbox SDK container retained for experimental toolbox/diagnostic routes.
+# Sandbox SDK container: experimental toolbox/diagnostic routes + guided
+# credential-setup login terminals. Sized with headroom above the credential-
+# setup sub-cap (MAX_CONCURRENT_SETUP_SESSIONS) so setup cannot starve the
+# admin sandbox tooling and vice versa.
 [[containers]]
 class_name = "SandboxDO"
 image = "./Dockerfile.sandbox"
 instance_type = "standard-1"
-max_instances = 3
+max_instances = 6
 
 [[durable_objects.bindings]]
 name = "SANDBOX"
@@ -291,6 +304,14 @@ new_sqlite_classes = ["VmAgentContainer"]  # Raw Cloudflare Container DO for ins
 [[migrations]]
 tag = "v17"
 new_classes = ["GitLabUserAccessTokenLock"]  # Stateless per-user mutex for BetterAuth GitLab OAuth refresh (rotating single-use refresh tokens)
+
+[[migrations]]
+tag = "v18"
+new_sqlite_classes = ["CredentialSetupSession"]  # Per-session guided Codex login DO; SQLite-backed lifecycle state + alarm loop
+
+[[migrations]]
+tag = "v19"
+new_sqlite_classes = ["SetupSessionPool"]  # Singleton concurrency gate for guided credential-setup sandbox sessions
 
 # Analytics Engine for usage tracking (Phase 1 — server-side analytics)
 [[analytics_engine_datasets]]
