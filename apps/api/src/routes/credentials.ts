@@ -28,7 +28,6 @@ import { getCredentialEncryptionKey } from '../lib/secrets';
 import { ulid } from '../lib/ulid';
 import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
-import { saveAgentCredentialForUser } from '../services/agent-credential-save';
 import { rateLimitCredentialUpdate } from '../middleware/rate-limit';
 import {
   CreateCredentialSchema,
@@ -36,6 +35,7 @@ import {
   jsonValidator,
   SaveAgentCredentialSchema,
 } from '../schemas';
+import { saveAgentCredentialForUser } from '../services/agent-credential-save';
 import {
   disconnectAgentCredentialFromCC,
   syncAgentCredentialToCC,
