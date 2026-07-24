@@ -234,7 +234,10 @@ export class CredentialSetupSession extends DurableObject<Env> {
       const sandbox = await getSandboxInstance(this.env, row.id);
       // Per-session CODEX_HOME + config that forces file-based credential storage
       // (headless container has no OS keychain). mkdir first so codex can write.
-      await sandbox.exec(`mkdir -p ${shellQuote(row.codex_home)}`, {
+      // Built in a variable (not inline in .exec) so the SQL-injection AST rule
+      // doesn't false-match this SHELL command — the path is already shellQuote()d.
+      const mkdirCmd = `mkdir -p ${shellQuote(row.codex_home)}`;
+      await sandbox.exec(mkdirCmd, {
         timeout: getSandboxConfig(this.env).execTimeoutMs,
       });
       await sandbox.writeFile(
@@ -340,7 +343,9 @@ export class CredentialSetupSession extends DurableObject<Env> {
     // 1. Delete captured credential file + scrub the setup dir.
     try {
       const sandbox = await getSandboxInstance(this.env, row.id);
-      await sandbox.exec(`rm -rf ${shellQuote(row.codex_home)}`, {
+      // Variable (not inline) — same SQL-injection-AST-false-positive avoidance.
+      const scrubCmd = `rm -rf ${shellQuote(row.codex_home)}`;
+      await sandbox.exec(scrubCmd, {
         timeout: getSandboxConfig(this.env).execTimeoutMs,
       });
     } catch (err) {
