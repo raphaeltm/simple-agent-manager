@@ -252,7 +252,7 @@ export function ConnectFlow({
             {isCodexAuthJson ? (
               <div className="flex flex-col gap-2">
                 {/* Guided flow (only rendered when the platform gate is enabled). */}
-                <CodexConnectTrigger onConnected={onConnected} />
+                <CodexConnectTrigger scope={projectId ? 'project' : 'user'} onConnected={onConnected} />
                 <div className="text-xs font-medium text-fg-muted">
                   Or paste auth.json manually
                 </div>

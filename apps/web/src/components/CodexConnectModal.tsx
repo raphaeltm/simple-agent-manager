@@ -20,6 +20,7 @@ import '@xterm/xterm/css/xterm.css';
 
 import { SandboxAddon } from '@cloudflare/sandbox/xterm';
 import { Alert, Button, Dialog } from '@simple-agent-manager/ui';
+import { FitAddon } from '@xterm/addon-fit';
 import { type ITheme, Terminal } from '@xterm/xterm';
 import { useEffect, useId, useRef, useState } from 'react';
 
@@ -133,6 +134,8 @@ export function CodexConnectModal({ isOpen, onClose, onConnected }: CodexConnect
   const containerRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<Terminal | null>(null);
   const addonRef = useRef<SandboxAddon | null>(null);
+  const fitAddonRef = useRef<FitAddon | null>(null);
+  const resizeObserverRef = useRef<ResizeObserver | null>(null);
   const sessionIdRef = useRef<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -158,6 +161,11 @@ export function CodexConnectModal({ isOpen, onClose, onConnected }: CodexConnect
 
     const disposeTerminal = () => {
       try {
+        resizeObserverRef.current?.disconnect();
+      } catch {
+        /* already disconnected */
+      }
+      try {
         addonRef.current?.dispose();
       } catch {
         /* addon already disposed */
@@ -167,6 +175,8 @@ export function CodexConnectModal({ isOpen, onClose, onConnected }: CodexConnect
       } catch {
         /* terminal already disposed */
       }
+      resizeObserverRef.current = null;
+      fitAddonRef.current = null;
       addonRef.current = null;
       termRef.current = null;
     };
@@ -197,24 +207,48 @@ export function CodexConnectModal({ isOpen, onClose, onConnected }: CodexConnect
           cursorBlink: true,
           scrollback: 2000,
         });
+        const fitAddon = new FitAddon();
+        term.loadAddon(fitAddon);
         const addon = new SandboxAddon({
           getWebSocketUrl: ({ sandboxId }) =>
             buildCodexSetupWsUrl(sandboxId, token, term.cols, term.rows),
           reconnect: false,
-          onStateChange: (state) => {
+          onStateChange: (state, error) => {
             if (cancelled) return;
             if (state === 'connected' && !autoRanRef.current) {
-              // Auto-run the device-auth login exactly once so the sign-in URL
-              // + code appear for the user to complete in their browser.
+              // Auto-run the device-auth login exactly once so the sign-in URL +
+              // code appear for the user. input() injects it as typed keystrokes
+              // so the trailing \r EXECUTES the command; paste() would wrap it in
+              // bracketed-paste markers and the shell would treat \r as literal
+              // text (the command would never run).
               autoRanRef.current = true;
-              term.paste(`${active.loginCommand}\r`);
+              term.input(`${active.loginCommand}\r`);
+            } else if (state === 'disconnected' && autoRanRef.current) {
+              // reconnect:false — a drop after connecting is unrecoverable. Surface
+              // it instead of leaving "Waiting for sign-in" over a dead terminal.
+              setTerminalError(
+                error?.message ?? 'The setup terminal disconnected. Please try again.'
+              );
             }
           },
         });
         termRef.current = term;
         addonRef.current = addon;
+        fitAddonRef.current = fitAddon;
         term.loadAddon(addon);
         term.open(container);
+        fitAddon.fit();
+        // Re-fit on container/viewport resize so the device URL + one-time code
+        // always reflow to fit and stay fully readable (mobile especially).
+        const ro = new ResizeObserver(() => {
+          try {
+            fitAddonRef.current?.fit();
+          } catch {
+            /* terminal disposed */
+          }
+        });
+        ro.observe(container);
+        resizeObserverRef.current = ro;
         addon.connect({ sandboxId: active.id });
       } catch (err) {
         if (!cancelled) {
@@ -256,6 +290,12 @@ export function CodexConnectModal({ isOpen, onClose, onConnected }: CodexConnect
     const start = async () => {
       try {
         const result = await createCodexSetupSession();
+        // Record the id BEFORE the cancelled guard so the effect cleanup can
+        // best-effort cancel a session created while the modal was already
+        // closing (otherwise a scarce pool slot leaks until the TTL sweep).
+        if (result.kind === 'created') {
+          sessionIdRef.current = result.session.id;
+        }
         if (cancelled) return;
         if (result.kind === 'no_capacity' || result.kind === 'active_exists') {
           setCreatePhase('blocked');

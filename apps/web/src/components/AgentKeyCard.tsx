@@ -178,7 +178,7 @@ export function AgentKeyCard({ agent, credentials, onSave, onDelete, opencodePro
             {credentialKind === 'oauth-token' && agent.id === 'openai-codex' ? (
               <div className="flex flex-col gap-3">
                 {/* Guided flow (only rendered when the platform gate is enabled). */}
-                <CodexConnectTrigger onConnected={onCredentialConnected} />
+                <CodexConnectTrigger scope={scope} onConnected={onCredentialConnected} />
                 <div className="text-xs font-medium text-fg-muted">
                   Or paste auth.json manually
                 </div>

@@ -16,9 +16,15 @@ import { CodexConnectModal } from './CodexConnectModal';
 interface CodexConnectTriggerProps {
   /** Forwarded to the modal; fires after the credential is captured + saved. */
   onConnected?: () => void;
+  /**
+   * Credential scope. The guided flow only saves USER-scoped credentials in v1,
+   * so it is hidden in project-scoped contexts to avoid silently overwriting the
+   * user default (the manual auth.json paste stays available there).
+   */
+  scope?: 'user' | 'project';
 }
 
-export function CodexConnectTrigger({ onConnected }: CodexConnectTriggerProps) {
+export function CodexConnectTrigger({ onConnected, scope = 'user' }: CodexConnectTriggerProps) {
   const [enabled, setEnabled] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const checkedRef = useRef(false);
@@ -40,7 +46,7 @@ export function CodexConnectTrigger({ onConnected }: CodexConnectTriggerProps) {
     };
   }, []);
 
-  if (!enabled) {
+  if (!enabled || scope !== 'user') {
     return null;
   }
 
@@ -62,7 +68,9 @@ export function CodexConnectTrigger({ onConnected }: CodexConnectTriggerProps) {
         isOpen={modalOpen}
         onClose={() => setModalOpen(false)}
         onConnected={() => {
-          setModalOpen(false);
+          // Do NOT close here — the modal shows its "Connected" success state and
+          // self-closes via onClose after a short delay. Closing now would unmount
+          // it before success ever renders. Just refresh the parent's credentials.
           onConnected?.();
         }}
       />

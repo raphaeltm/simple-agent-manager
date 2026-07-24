@@ -10,7 +10,7 @@
  * NOTE: lives under tests/ (not next to the component) because the web vitest
  * config only includes `tests/**` — a test under src/ would never run.
  */
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 interface FakeTerminal {
@@ -19,6 +19,7 @@ interface FakeTerminal {
   loadAddon: ReturnType<typeof vi.fn>;
   open: ReturnType<typeof vi.fn>;
   paste: ReturnType<typeof vi.fn>;
+  input: ReturnType<typeof vi.fn>;
   dispose: ReturnType<typeof vi.fn>;
 }
 
@@ -57,6 +58,7 @@ vi.mock('@xterm/xterm', () => ({
       loadAddon: vi.fn(),
       open: vi.fn(),
       paste: vi.fn(),
+      input: vi.fn(),
       dispose: vi.fn(),
     };
     h.terminalInstances.push(inst);
@@ -77,7 +79,24 @@ vi.mock('@cloudflare/sandbox/xterm', () => ({
   }),
 }));
 
+vi.mock('@xterm/addon-fit', () => ({
+  FitAddon: vi.fn().mockImplementation(function () {
+    return { fit: vi.fn() };
+  }),
+}));
+
+// jsdom has no ResizeObserver.
+vi.stubGlobal(
+  'ResizeObserver',
+  class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  },
+);
+
 import { CodexConnectModal } from '../../../src/components/CodexConnectModal';
+import { CodexConnectTrigger } from '../../../src/components/CodexConnectTrigger';
 import type { CodexSetupSession, CodexSetupStatus } from '../../../src/lib/api';
 
 const SESSION_ID = 'sess_codex_01';
@@ -147,8 +166,11 @@ describe('CodexConnectModal', () => {
     await waitFor(() => expect(h.addonInstances.length).toBeGreaterThan(0));
     h.addonInstances[0].options.onStateChange?.('connected');
     h.addonInstances[0].options.onStateChange?.('connected'); // guarded — still once
-    expect(h.terminalInstances[0].paste).toHaveBeenCalledTimes(1);
-    expect(h.terminalInstances[0].paste).toHaveBeenCalledWith(`${LOGIN_COMMAND}\r`);
+    // input() (NOT paste()) so the trailing \r executes the command — paste()
+    // would be bracketed and the command would never run.
+    expect(h.terminalInstances[0].input).toHaveBeenCalledTimes(1);
+    expect(h.terminalInstances[0].input).toHaveBeenCalledWith(`${LOGIN_COMMAND}\r`);
+    expect(h.terminalInstances[0].paste).not.toHaveBeenCalled();
 
     // 5. on completed: onConnected fires and a success state shows.
     await waitFor(() => expect(onConnected).toHaveBeenCalledTimes(1));
@@ -184,5 +206,38 @@ describe('CodexConnectModal', () => {
 
     await screen.findByText(/All guided setup slots are in use/);
     expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+  });
+
+  it('CodexConnectTrigger keeps the success state visible on completion (no force-close)', async () => {
+    // Reproduces the CRITICAL bug: the trigger's onConnected used to call
+    // setModalOpen(false), unmounting the modal before "Codex connected" rendered.
+    vi.stubEnv('VITE_CODEX_SETUP_SUCCESS_CLOSE_MS', '5000'); // keep success on screen
+    h.getCodexSetupConfig.mockResolvedValue({ enabled: true, agentType: 'openai-codex' });
+    h.createCodexSetupSession.mockResolvedValue({
+      kind: 'created',
+      session: makeSession('waiting_for_user'),
+    });
+    h.getCodexSetupSession.mockResolvedValue(makeSession('completed'));
+    const onConnected = vi.fn();
+
+    render(<CodexConnectTrigger scope="user" onConnected={onConnected} />);
+
+    const openBtn = await screen.findByRole('button', { name: /connect with codex/i });
+    fireEvent.click(openBtn);
+
+    await waitFor(() => expect(h.createCodexSetupSession).toHaveBeenCalledTimes(1));
+    // On completion: parent refresh fires AND the success state renders (the modal
+    // is NOT force-closed by the trigger before the user sees confirmation).
+    await waitFor(() => expect(onConnected).toHaveBeenCalledTimes(1));
+    await screen.findByText(/Codex connected/);
+  });
+
+  it('CodexConnectTrigger renders nothing in a project-scoped context', async () => {
+    h.getCodexSetupConfig.mockResolvedValue({ enabled: true, agentType: 'openai-codex' });
+    render(<CodexConnectTrigger scope="project" onConnected={vi.fn()} />);
+    // Even with the feature enabled, project scope hides the guided button (v1 is
+    // user-scoped only) — the manual auth.json paste remains the path there.
+    await waitFor(() => expect(h.getCodexSetupConfig).toHaveBeenCalled());
+    expect(screen.queryByRole('button', { name: /connect with codex/i })).toBeNull();
   });
 });
