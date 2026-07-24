@@ -24,7 +24,7 @@ import { Hono } from 'hono';
 
 import type { Env } from '../env';
 import { ulid } from '../lib/ulid';
-import { requireApproved, requireAuth, getUserId } from '../middleware/auth';
+import { getUserId,requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import {
   ACTIVE_SETUP_STATUSES,
@@ -37,9 +37,9 @@ import {
   cancelSetupSession,
   startSetupSession,
 } from '../services/credential-setup-session';
-import { getSandboxInstance, requireSandbox } from '../services/sandbox';
-import { leaseSetupSlot, releaseSetupSlot } from '../services/setup-session-pool';
 import { signCredentialSetupTerminalToken, verifyCredentialSetupTerminalToken } from '../services/jwt';
+import { getSandboxConfig, getSandboxInstance, requireSandbox } from '../services/sandbox';
+import { leaseSetupSlot, releaseSetupSlot } from '../services/setup-session-pool';
 
 const agentCredentialSetupSessionsRoutes = new Hono<{ Bindings: Env }>();
 
@@ -95,6 +95,21 @@ async function loadOwnedSession(
 }
 
 // -----------------------------------------------------------------------------
+// GET /config — whether the guided flow is available (so the UI can hide the
+// button when the default-off gate is disabled, e.g. in production).
+// Registered before /:id so "config" is not captured as a session id.
+// -----------------------------------------------------------------------------
+agentCredentialSetupSessionsRoutes.get('/config', requireAuth(), requireApproved(), (c) => {
+  const enabled =
+    isCodexSetupTerminalEnabled(c.env) &&
+    getSandboxConfig(c.env).enabled &&
+    !!c.env.SANDBOX &&
+    !!c.env.CREDENTIAL_SETUP_SESSION &&
+    !!c.env.SETUP_SESSION_POOL;
+  return c.json({ enabled, agentType: SUPPORTED_AGENT_TYPE });
+});
+
+// -----------------------------------------------------------------------------
 // POST / — create a setup session
 // -----------------------------------------------------------------------------
 agentCredentialSetupSessionsRoutes.post('/', requireAuth(), requireApproved(), async (c) => {
@@ -136,7 +151,7 @@ agentCredentialSetupSessionsRoutes.post('/', requireAuth(), requireApproved(), a
   const expiresAtIso = new Date(Date.now() + ttlMs).toISOString();
 
   const lease = await leaseSetupSlot(c.env, sessionId);
-  if (!lease.granted) {
+  if (!lease.granted || !lease.leaseId) {
     return c.json(
       {
         status: 'no_capacity',
@@ -145,6 +160,7 @@ agentCredentialSetupSessionsRoutes.post('/', requireAuth(), requireApproved(), a
       202
     );
   }
+  const leaseId = lease.leaseId;
 
   // Reserve the row (atomic one-active enforcement) before the slow sandbox boot.
   try {
@@ -159,14 +175,14 @@ agentCredentialSetupSessionsRoutes.post('/', requireAuth(), requireApproved(), a
         agentType,
         SETUP_CREDENTIAL_KIND,
         sandboxId,
-        lease.leaseId,
+        leaseId,
         expiresAtIso,
         nowIso,
         nowIso
       )
       .run();
   } catch (err) {
-    await releaseSetupSlot(c.env, lease.leaseId);
+    await releaseSetupSlot(c.env, leaseId);
     const msg = err instanceof Error ? err.message : String(err);
     if (msg.includes('UNIQUE') || msg.toLowerCase().includes('constraint')) {
       return c.json(
@@ -187,7 +203,7 @@ agentCredentialSetupSessionsRoutes.post('/', requireAuth(), requireApproved(), a
       credentialKind: SETUP_CREDENTIAL_KIND,
       provider: agentDef.provider,
       agentName: agentDef.name,
-      poolLeaseId: lease.leaseId!,
+      poolLeaseId: leaseId,
       codexHome: codexHomeFor(sessionId),
       ttlMs,
       capturePollMs: getSetupSessionCapturePollMs(c.env),

@@ -7,14 +7,14 @@
  * releases its pool slot so every selected candidate leaves the candidate set
  * (rule 47: no immortal candidates, bounded per-run cost).
  */
+import type { Env } from '../env';
+import { log } from '../lib/logger';
 import {
   ACTIVE_SETUP_STATUSES,
   getSetupSessionSweepMaxCandidates,
 } from '../services/credential-setup-config';
 import { cancelSetupSession } from '../services/credential-setup-session';
 import { releaseSetupSlot } from '../services/setup-session-pool';
-import type { Env } from '../env';
-import { log } from '../lib/logger';
 
 export interface SetupSessionSweepResult {
   candidates: number;

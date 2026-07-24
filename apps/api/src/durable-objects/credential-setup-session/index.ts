@@ -24,9 +24,8 @@
  * the constructor (CREATE TABLE IF NOT EXISTS) — no separate DO migration file,
  * mirroring TrialCounter.
  */
-import { DurableObject } from 'cloudflare:workers';
-
 import type { AgentType, CredentialKind } from '@simple-agent-manager/shared';
+import { DurableObject } from 'cloudflare:workers';
 
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';

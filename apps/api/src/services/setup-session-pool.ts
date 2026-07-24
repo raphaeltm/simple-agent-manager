@@ -5,7 +5,7 @@
  * setup-session code goes through here rather than touching the DO namespace
  * directly, so the pool key and cap resolution live in one place.
  */
-import type { SetupSessionPool, LeaseResult } from '../durable-objects/setup-session-pool';
+import type { LeaseResult,SetupSessionPool } from '../durable-objects/setup-session-pool';
 import type { Env } from '../env';
 import { getMaxConcurrentSetupSessions, getPoolLeaseMaxAgeMs } from './credential-setup-config';
 
