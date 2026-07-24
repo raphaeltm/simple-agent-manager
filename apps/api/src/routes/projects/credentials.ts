@@ -39,10 +39,8 @@ import { errors } from '../../middleware/error';
 import { requireProjectCapability } from '../../middleware/project-auth';
 import { rateLimitCredentialUpdate } from '../../middleware/rate-limit';
 import { CreateCredentialSchema, jsonValidator, SaveAgentCredentialSchema } from '../../schemas';
-import {
-  disconnectAgentCredentialFromCC,
-  syncAgentCredentialToCC,
-} from '../../services/composable-credentials/agent-sync';
+import { saveAgentCredentialForUser } from '../../services/agent-credential-save';
+import { disconnectAgentCredentialFromCC } from '../../services/composable-credentials/agent-sync';
 import {
   disconnectComputeCredentialFromCC,
   syncComputeCredentialToCC,
@@ -419,101 +417,24 @@ projectCredentialsRoutes.put(
       throw errors.badRequest(`OAuth tokens are not supported for ${agentDef.name}`);
     }
 
-    const { ciphertext, iv } = await encrypt(credential, getCredentialEncryptionKey(c.env));
-
-    // Look for an existing project-scoped credential with the same (agentType, credentialKind).
-    const existing = await db
-      .select()
-      .from(schema.credentials)
-      .where(
-        and(
-          eq(schema.credentials.userId, userId),
-          eq(schema.credentials.projectId, projectId),
-          eq(schema.credentials.credentialType, 'agent-api-key'),
-          eq(schema.credentials.agentType, body.agentType),
-          eq(schema.credentials.credentialKind, credentialKind)
-        )
-      )
-      .limit(1);
-
-    const now = new Date().toISOString();
-
-    const existingCred = existing[0];
-    // Derive mask from the plaintext that was just encrypted — matches GET/list which
-    // masks from decrypted plaintext (LOW #9 consistency).
-    const maskedKey = maskCredential(credential);
-
-    // Atomicity (cloudflare-specialist review): batch deactivate + upsert as a
-    // single D1 transaction when autoActivate is true. Two separate statements
-    // open a microsecond window where concurrent reads see zero active
-    // credentials for this (user, project, agentType) tuple.
-    //
-    // Scope guard: deactivate has `project_id = ?` so only this project's rows
-    // are touched — user-scoped credentials remain active so OTHER projects
-    // inheriting at user scope are unaffected.
-    const upsertStmt = existingCred
-      ? c.env.DATABASE.prepare(
-          `UPDATE credentials
-         SET encrypted_token = ?, iv = ?, is_active = ?, updated_at = ?
-         WHERE id = ?`
-        ).bind(ciphertext, iv, autoActivate ? 1 : 0, now, existingCred.id)
-      : c.env.DATABASE.prepare(
-          `INSERT INTO credentials (
-           id, user_id, project_id, provider, credential_type, agent_type,
-           credential_kind, is_active, encrypted_token, iv, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, 'agent-api-key', ?, ?, ?, ?, ?, ?, ?)`
-        ).bind(
-          ulid(),
-          userId,
-          projectId,
-          agentDef.provider,
-          body.agentType,
-          credentialKind,
-          autoActivate ? 1 : 0,
-          ciphertext,
-          iv,
-          now,
-          now
-        );
-
-    if (autoActivate) {
-      const deactivateStmt = c.env.DATABASE.prepare(
-        `UPDATE credentials SET is_active = 0
-       WHERE user_id = ? AND project_id = ?
-         AND credential_type = 'agent-api-key' AND agent_type = ?`
-      ).bind(userId, projectId, body.agentType);
-      await c.env.DATABASE.batch([deactivateStmt, upsertStmt]);
-    } else {
-      await upsertStmt.run();
-    }
-
-    await syncAgentCredentialToCC(c.env.DATABASE, {
+    // Encrypt + persist (legacy credentials + cc_* dual-write) through the shared
+    // single-writer service (rule 44) — same writer as the user-scoped route and
+    // the guided setup-terminal capture path.
+    const saveResult = await saveAgentCredentialForUser({
+      env: c.env,
       userId,
       projectId,
       agentType: body.agentType,
       credentialKind,
-      encryptedToken: ciphertext,
-      iv,
+      credential,
+      provider: agentDef.provider,
       agentName: agentDef.name,
-      isActive: autoActivate,
+      autoActivate,
     });
 
-    if (existingCred) {
-      const response: AgentCredentialInfo = {
-        agentType: body.agentType,
-        provider: agentDef.provider,
-        credentialKind,
-        isActive: autoActivate,
-        maskedKey,
-        label: getAgentCredentialLabel(body.agentType, credentialKind),
-        createdAt: existingCred.createdAt,
-        updatedAt: now,
-        scope: 'project',
-        projectId,
-      };
-      return c.json(response);
-    }
-
+    // Derive mask from the plaintext that was just encrypted — matches GET/list which
+    // masks from decrypted plaintext (LOW #9 consistency).
+    const maskedKey = maskCredential(credential);
     const response: AgentCredentialInfo = {
       agentType: body.agentType,
       provider: agentDef.provider,
@@ -521,12 +442,12 @@ projectCredentialsRoutes.put(
       isActive: autoActivate,
       maskedKey,
       label: getAgentCredentialLabel(body.agentType, credentialKind),
-      createdAt: now,
-      updatedAt: now,
+      createdAt: saveResult.createdAt,
+      updatedAt: saveResult.updatedAt,
       scope: 'project',
       projectId,
     };
-    return c.json(response, 201);
+    return c.json(response, saveResult.created ? 201 : 200);
   }
 );
 

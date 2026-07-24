@@ -26,6 +26,26 @@ const adminSandboxRoutes = new Hono<{ Bindings: Env }>();
 adminSandboxRoutes.use('/*', requireAuth(), requireApproved(), requireSuperadmin());
 
 /**
+ * Reject admin-toolbox access to any sandbox that belongs to a guided
+ * credential-setup session. Those containers transit a live OpenAI/ChatGPT
+ * credential (auth.json read server-side), and this superadmin debug tool shares
+ * the same `SANDBOX` namespace — without this guard it could read or overwrite
+ * an in-flight user credential (cross-feature isolation).
+ */
+async function assertNotCredentialSetupSandbox(env: Env, sandboxId: string): Promise<void> {
+  const row = await env.DATABASE.prepare(
+    'SELECT 1 FROM agent_credential_setup_sessions WHERE sandbox_id = ? LIMIT 1'
+  )
+    .bind(sandboxId)
+    .first();
+  if (row) {
+    throw errors.forbidden(
+      'This sandbox belongs to a guided credential-setup session and cannot be accessed via the admin toolbox.'
+    );
+  }
+}
+
+/**
  * GET /api/admin/sandbox/status — Check sandbox availability and config.
  */
 adminSandboxRoutes.get('/status', async (c) => {
@@ -57,6 +77,7 @@ adminSandboxRoutes.post('/exec', async (c) => {
   }
 
   const sandboxId = body.sandboxId || 'sam-prototype';
+  await assertNotCredentialSetupSandbox(c.env, sandboxId);
   const sandbox = await getSandboxInstance(c.env, sandboxId);
 
   const start = Date.now();
@@ -96,6 +117,7 @@ adminSandboxRoutes.post('/git-checkout', async (c) => {
   }
 
   const sandboxId = body.sandboxId || 'sam-prototype';
+  await assertNotCredentialSetupSandbox(c.env, sandboxId);
   const sandbox = await getSandboxInstance(c.env, sandboxId);
 
   const start = Date.now();
@@ -138,6 +160,7 @@ adminSandboxRoutes.post('/files', async (c) => {
   }
 
   const sandboxId = body.sandboxId || 'sam-prototype';
+  await assertNotCredentialSetupSandbox(c.env, sandboxId);
   const sandbox = await getSandboxInstance(c.env, sandboxId);
 
   const start = Date.now();
@@ -187,6 +210,7 @@ adminSandboxRoutes.post('/backup', async (c) => {
   }
 
   const sandboxId = body.sandboxId || 'sam-prototype';
+  await assertNotCredentialSetupSandbox(c.env, sandboxId);
   const sandbox = await getSandboxInstance(c.env, sandboxId);
 
   const start = Date.now();
@@ -229,6 +253,7 @@ adminSandboxRoutes.get('/exec-stream', async (c) => {
   }
 
   const sandboxId = c.req.query('sandboxId') || 'sam-prototype';
+  await assertNotCredentialSetupSandbox(c.env, sandboxId);
   const sandbox = await getSandboxInstance(c.env, sandboxId);
 
   const stream = await sandbox.execStream(command, {

@@ -58,6 +58,8 @@ export interface ProjectAgentCardProps {
     entry: { model: string | null; permissionMode: AgentPermissionMode | null },
   ) => Promise<void>;
   onClearDefault: (agentType: AgentType) => Promise<void>;
+  /** Refresh credentials after the guided "Connect with Codex" flow succeeds. */
+  onCredentialConnected?: () => void;
 }
 
 export function ProjectAgentCard({
@@ -69,6 +71,7 @@ export function ProjectAgentCard({
   onDeleteCredential,
   onSaveDefault,
   onClearDefault,
+  onCredentialConnected,
 }: ProjectAgentCardProps) {
   const [model, setModel] = useState(defaultValue?.model ?? '');
   const [permissionMode, setPermissionMode] = useState<AgentPermissionMode | ''>(
@@ -169,6 +172,7 @@ export function ProjectAgentCard({
           onDelete={onDeleteCredential}
           scope="project"
           embedded
+          onCredentialConnected={onCredentialConnected}
         />
         {!hasCredentialOverride && hasUserCredential && (
           <p className="text-xs text-fg-muted">

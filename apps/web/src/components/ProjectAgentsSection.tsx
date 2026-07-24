@@ -167,6 +167,7 @@ export function ProjectAgentsSection({
             onDeleteCredential={handleDeleteCredential}
             onSaveDefault={handleSaveDefault}
             onClearDefault={handleClearDefault}
+            onCredentialConnected={loadData}
           />
         );
       })}

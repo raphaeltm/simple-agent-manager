@@ -223,6 +223,56 @@ export const credentials = sqliteTable(
 );
 
 // =============================================================================
+// Agent Credential Setup Sessions (guided Cloudflare Sandbox terminal login)
+//
+// Ephemeral, short-lived (TTL ~10-15 min) sessions that run the provider login
+// CLI (e.g. `codex login --device-auth`) inside a Cloudflare Sandbox terminal,
+// capture the resulting credential server-side, and save it via the normal
+// encrypted credentials path. SECURITY: NO secret/credential material is ever
+// stored on this table — only non-secret lifecycle metadata.
+// =============================================================================
+export const agentCredentialSetupSessions = sqliteTable(
+  'agent_credential_setup_sessions',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    /** Null for user-scoped setup; set to project id for a project-scoped override. */
+    projectId: text('project_id').references(() => projects.id, { onDelete: 'cascade' }),
+    scope: text('scope').notNull().default('user'), // 'user' | 'project'
+    agentType: text('agent_type').notNull(),
+    credentialKind: text('credential_kind').notNull().default('oauth-token'),
+    /** creating|admitting|provisioning|waiting_for_user|capturing|saving|completed|failed|cancelled|expired */
+    status: text('status').notNull().default('creating'),
+    /** Cloudflare Sandbox id (== setup session id, 1:1, never shared across users). */
+    sandboxId: text('sandbox_id').notNull(),
+    /** Concurrency-pool lease id; released on teardown. */
+    poolLeaseId: text('pool_lease_id'),
+    errorCode: text('error_code'),
+    errorMessage: text('error_message'),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    startedAt: text('started_at'),
+    expiresAt: text('expires_at').notNull(),
+    completedAt: text('completed_at'),
+  },
+  (table) => ({
+    oneActive: uniqueIndex('idx_acss_one_active')
+      .on(table.userId, table.agentType)
+      .where(
+        sql`status IN ('creating', 'admitting', 'provisioning', 'waiting_for_user', 'capturing', 'saving')`
+      ),
+    sweep: index('idx_acss_sweep').on(table.status, table.expiresAt),
+    userLookup: index('idx_acss_user').on(table.userId, table.createdAt),
+  })
+);
+
+// =============================================================================
 // GitHub App Installations
 // =============================================================================
 export const githubInstallationAccounts = sqliteTable(

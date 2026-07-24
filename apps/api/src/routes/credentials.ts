@@ -35,6 +35,7 @@ import {
   jsonValidator,
   SaveAgentCredentialSchema,
 } from '../schemas';
+import { saveAgentCredentialForUser } from '../services/agent-credential-save';
 import {
   disconnectAgentCredentialFromCC,
   syncAgentCredentialToCC,
@@ -591,7 +592,6 @@ credentialsRoutes.put(
   jsonValidator(SaveAgentCredentialSchema),
   async (c) => {
     const userId = getUserId(c);
-    const db = drizzle(c.env.DATABASE, { schema });
 
     const body = c.req.valid('json');
 
@@ -631,96 +631,20 @@ credentialsRoutes.put(
         : formatOnlyValidation(`${agentDef.name} OAuth credential format looks valid.`);
     logCredentialValidationWarning('agent', agentDef.provider, providerValidation);
 
-    // Encrypt the credential
-    const { ciphertext, iv } = await encrypt(credential, getCredentialEncryptionKey(c.env));
-
-    // Check if a credential of this type already exists (user-scoped only — project_id IS NULL)
-    const existing = await db
-      .select()
-      .from(schema.credentials)
-      .where(
-        and(
-          eq(schema.credentials.userId, userId),
-          isNull(schema.credentials.projectId),
-          eq(schema.credentials.credentialType, 'agent-api-key'),
-          eq(schema.credentials.agentType, body.agentType),
-          eq(schema.credentials.credentialKind, credentialKind)
-        )
-      )
-      .limit(1);
-
-    const now = new Date().toISOString();
-
-    const existingCred = existing[0];
-
-    // Atomicity (cloudflare-specialist review): when autoActivate is true, deactivate
-    // + upsert must execute as a single D1 batch. Two separate statements leave a
-    // microsecond window where a concurrent read sees zero active credentials for
-    // the user/agent pair.
-    //
-    // Scope guard: the deactivate statement has `project_id IS NULL` so it only
-    // affects user-scoped rows — per-project overrides are never touched.
-    const upsertStmt = existingCred
-      ? c.env.DATABASE.prepare(
-          `UPDATE credentials
-         SET encrypted_token = ?, iv = ?, is_active = ?, updated_at = ?
-         WHERE id = ?`
-        ).bind(ciphertext, iv, autoActivate ? 1 : 0, now, existingCred.id)
-      : c.env.DATABASE.prepare(
-          `INSERT INTO credentials (
-           id, user_id, project_id, provider, credential_type, agent_type,
-           credential_kind, is_active, encrypted_token, iv, created_at, updated_at
-         ) VALUES (?, ?, NULL, ?, 'agent-api-key', ?, ?, ?, ?, ?, ?, ?)`
-        ).bind(
-          ulid(),
-          userId,
-          agentDef.provider,
-          body.agentType,
-          credentialKind,
-          autoActivate ? 1 : 0,
-          ciphertext,
-          iv,
-          now,
-          now
-        );
-
-    if (autoActivate) {
-      const deactivateStmt = c.env.DATABASE.prepare(
-        `UPDATE credentials SET is_active = 0
-       WHERE user_id = ? AND project_id IS NULL
-         AND credential_type = 'agent-api-key' AND agent_type = ?`
-      ).bind(userId, body.agentType);
-      await c.env.DATABASE.batch([deactivateStmt, upsertStmt]);
-    } else {
-      await upsertStmt.run();
-    }
-
-    await syncAgentCredentialToCC(c.env.DATABASE, {
+    // Encrypt + persist (legacy credentials + cc_* dual-write) through the shared
+    // single-writer service — also used by the project-scoped route and the guided
+    // setup-terminal capture path, so all writers keep the two credential
+    // representations in sync (rule 44).
+    const saveResult = await saveAgentCredentialForUser({
+      env: c.env,
       userId,
       agentType: body.agentType,
       credentialKind,
-      encryptedToken: ciphertext,
-      iv,
+      credential,
+      provider: agentDef.provider,
       agentName: agentDef.name,
-      isActive: autoActivate,
+      autoActivate,
     });
-
-    if (existingCred) {
-      const maskedKey = maskCredential(credential);
-      const response: AgentCredentialInfo = {
-        agentType: body.agentType,
-        provider: agentDef.provider,
-        credentialKind,
-        isActive: autoActivate,
-        maskedKey,
-        validation: providerValidation,
-        label: getAgentCredentialLabel(body.agentType, credentialKind),
-        createdAt: existingCred.createdAt,
-        updatedAt: now,
-      };
-
-      return c.json(response);
-    }
 
     const maskedKey = maskCredential(credential);
     const response: AgentCredentialInfo = {
@@ -731,11 +655,11 @@ credentialsRoutes.put(
       maskedKey,
       validation: providerValidation,
       label: getAgentCredentialLabel(body.agentType, credentialKind),
-      createdAt: now,
-      updatedAt: now,
+      createdAt: saveResult.createdAt,
+      updatedAt: saveResult.updatedAt,
     };
 
-    return c.json(response, 201);
+    return c.json(response, saveResult.created ? 201 : 200);
   }
 );
 

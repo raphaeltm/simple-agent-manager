@@ -64,6 +64,11 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   SAM_SESSION: DurableObjectNamespace;
   PROJECT_AGENT: DurableObjectNamespace;
   AI_TOKEN_BUDGET_COUNTER?: DurableObjectNamespace;
+  // Guided agent credential setup terminal (Cloudflare Sandbox) — per-session state
+  // machine + capture loop, and a singleton concurrency-admission pool. Optional so
+  // Miniflare tests that don't exercise the feature need not bind them.
+  CREDENTIAL_SETUP_SESSION?: DurableObjectNamespace;
+  SETUP_SESSION_POOL?: DurableObjectNamespace;
   // Raw Cloudflare Container for productized instant-session vm-agent runtime
   VM_AGENT_CONTAINER?: DurableObjectNamespace<VmAgentContainer>;
   // Sandbox SDK (experimental toolbox/diagnostics substrate, not the product vm-agent supervisor)
@@ -95,6 +100,14 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   SETUP_FORCE?: string; // "true" reopens /setup for lockout recovery
   SETUP_RATE_LIMIT_MAX_ATTEMPTS?: string; // Max setup-token attempts per identifier/window (default: 10)
   SETUP_RATE_LIMIT_WINDOW_SECONDS?: string; // Setup-token attempt window in seconds (default: 900)
+  // Guided credential setup terminal (Codex login via Cloudflare Sandbox)
+  CODEX_SETUP_TERMINAL_ENABLED?: string; // "true" enables the guided Codex login terminal (default: off)
+  MAX_CONCURRENT_SETUP_SESSIONS?: string; // Concurrency sub-cap below the Sandbox container max_instances (default: 2)
+  SETUP_SESSION_TTL_MS?: string; // Setup session lifetime in ms before auto-teardown (default: 900000 = 15 min)
+  SETUP_SESSION_CAPTURE_POLL_MS?: string; // auth.json capture poll interval in ms (default: 3000)
+  CREDENTIAL_SETUP_TERMINAL_TOKEN_EXPIRY_MS?: string; // Setup terminal WS token TTL in ms (default: 300000 = 5 min)
+  SETUP_SESSION_SWEEP_MAX_CANDIDATES?: string; // Max expired sessions torn down per cron sweep (default: 50)
+  POOL_LEASE_BUFFER_MS?: string; // Grace beyond TTL before a leaked pool lease self-prunes (default: 300000 = 5 min)
   // Deployment signing keys (Ed25519 — separate from callback JWT)
   DEPLOY_SIGNING_PRIVATE_KEY?: string; // Base64-encoded Ed25519 private key for payload signing
   DEPLOY_SIGNING_PUBLIC_KEY?: string; // Base64-encoded Ed25519 public key delivered to deployment nodes

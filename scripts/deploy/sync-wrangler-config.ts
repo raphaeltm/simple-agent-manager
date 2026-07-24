@@ -351,6 +351,14 @@ function getApiWorkerVars(
       'SANDBOX_ENABLED',
       'SANDBOX_EXEC_TIMEOUT_MS',
       'SANDBOX_VM_AGENT_PORT',
+      // Guided Codex credential-setup terminal (default-off feature gate + tuning).
+      'CODEX_SETUP_TERMINAL_ENABLED',
+      'MAX_CONCURRENT_SETUP_SESSIONS',
+      'SETUP_SESSION_TTL_MS',
+      'SETUP_SESSION_CAPTURE_POLL_MS',
+      'CREDENTIAL_SETUP_TERMINAL_TOKEN_EXPIRY_MS',
+      'SETUP_SESSION_SWEEP_MAX_CANDIDATES',
+      'POOL_LEASE_BUFFER_MS',
     ]),
     // AI Gateway ID matches the resource prefix (created by configure-ai-gateway.sh)
     AI_GATEWAY_ID: DEPLOYMENT_CONFIG.prefix,

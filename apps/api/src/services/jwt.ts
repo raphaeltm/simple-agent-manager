@@ -13,6 +13,10 @@ const NODE_MANAGEMENT_AUDIENCE = 'node-management';
 const PORT_ACCESS_AUDIENCE = 'port-access';
 const LOCAL_FORWARD_AUDIENCE = 'local-forward';
 const IDENTITY_TOKEN_TYPE = 'identity';
+// Browser -> API WebSocket auth for the ephemeral credential-setup terminal
+// (Cloudflare Sandbox). Scoped to a single {userId, setupSessionId}; NOT a
+// workspace-terminal token — a setup session has no workspace.
+const CREDENTIAL_SETUP_TERMINAL_AUDIENCE = 'credential-setup-terminal';
 
 /**
  * Get the JWT issuer URL from environment.
@@ -29,6 +33,20 @@ function getIssuer(env: Env): string {
 function getTerminalTokenExpiry(env: Env): number {
   const envValue = env.TERMINAL_TOKEN_EXPIRY_MS;
   return envValue ? parseInt(envValue, 10) : 60 * 60 * 1000;
+}
+
+/**
+ * Get credential-setup terminal token expiry in milliseconds.
+ * Short-lived: this token only authenticates a single WebSocket handshake to
+ * the ephemeral setup sandbox. Default: 5 minutes (300000ms).
+ */
+function getCredentialSetupTerminalTokenExpiry(env: Env): number {
+  const envValue = env.CREDENTIAL_SETUP_TERMINAL_TOKEN_EXPIRY_MS;
+  if (envValue) {
+    const parsed = parseInt(envValue, 10);
+    if (!isNaN(parsed) && parsed > 0) return parsed;
+  }
+  return 5 * 60 * 1000;
 }
 
 /**
@@ -61,6 +79,39 @@ export async function signTerminalToken(
     .setIssuer(issuer)
     .setSubject(userId)
     .setAudience(TERMINAL_AUDIENCE)
+    .setExpirationTime(expiresAt)
+    .setIssuedAt()
+    .sign(privateKey);
+
+  return {
+    token,
+    expiresAt: expiresAt.toISOString(),
+  };
+}
+
+/**
+ * Sign a credential-setup terminal token for a user + setup session.
+ * Used by the browser to authenticate the WebSocket connection to the ephemeral
+ * Cloudflare Sandbox terminal running the provider login CLI. Scoped to a single
+ * setup session so it cannot be used to reach any other resource.
+ */
+export async function signCredentialSetupTerminalToken(
+  userId: string,
+  setupSessionId: string,
+  env: Env
+): Promise<{ token: string; expiresAt: string }> {
+  const privateKey = await importPKCS8(env.JWT_PRIVATE_KEY, 'RS256');
+  const expiry = getCredentialSetupTerminalTokenExpiry(env);
+  const expiresAt = new Date(Date.now() + expiry);
+  const issuer = getIssuer(env);
+
+  const token = await new SignJWT({
+    setupSession: setupSessionId,
+  })
+    .setProtectedHeader({ alg: 'RS256', kid: KEY_ID })
+    .setIssuer(issuer)
+    .setSubject(userId)
+    .setAudience(CREDENTIAL_SETUP_TERMINAL_AUDIENCE)
     .setExpirationTime(expiresAt)
     .setIssuedAt()
     .sign(privateKey);
@@ -188,6 +239,11 @@ export interface TerminalTokenPayload {
   subject: string;
 }
 
+export interface CredentialSetupTerminalTokenPayload {
+  userId: string;
+  setupSessionId: string;
+}
+
 export interface PortAccessTokenPayload {
   workspace: string;
   port: number;
@@ -283,6 +339,41 @@ export async function verifyTerminalToken(
   return {
     workspace: payload.workspace,
     subject: payload.sub,
+  };
+}
+
+/**
+ * Verify a credential-setup terminal token.
+ *
+ * Sent as a `?token=` query parameter on the setup terminal WebSocket upgrade
+ * (WebSocket upgrades cannot reliably attach custom headers). The route handler
+ * MUST additionally assert the returned `setupSessionId` matches the session id
+ * in the URL before proxying to the sandbox terminal.
+ *
+ * @throws Error if token is invalid, expired, or has wrong audience
+ */
+export async function verifyCredentialSetupTerminalToken(
+  token: string,
+  env: Env
+): Promise<CredentialSetupTerminalTokenPayload> {
+  const publicKey = await importSPKI(env.JWT_PUBLIC_KEY, 'RS256');
+  const issuer = getIssuer(env);
+
+  const { payload } = await jwtVerify(token, publicKey, {
+    issuer,
+    audience: CREDENTIAL_SETUP_TERMINAL_AUDIENCE,
+  });
+
+  if (typeof payload.sub !== 'string' || payload.sub.length === 0) {
+    throw new Error('Missing subject claim');
+  }
+  if (typeof payload.setupSession !== 'string' || payload.setupSession.length === 0) {
+    throw new Error('Missing setupSession claim');
+  }
+
+  return {
+    userId: payload.sub,
+    setupSessionId: payload.setupSession,
   };
 }
 

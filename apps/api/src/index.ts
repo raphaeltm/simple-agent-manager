@@ -3,6 +3,7 @@ export { AdminLogs } from './durable-objects/admin-logs';
 export { AiTokenBudgetCounter } from './durable-objects/ai-token-budget-counter';
 // Sandbox SDK DO class — retained for experimental toolbox/diagnostics use only.
 export { CodexRefreshLock } from './durable-objects/codex-refresh-lock';
+export { CredentialSetupSession } from './durable-objects/credential-setup-session';
 export { GitHubUserAccessTokenLock } from './durable-objects/github-user-access-token-lock';
 export { GitLabUserAccessTokenLock } from './durable-objects/gitlab-user-access-token-lock';
 export { NodeLifecycle } from './durable-objects/node-lifecycle';
@@ -11,6 +12,7 @@ export { ProjectAgent } from './durable-objects/project-agent';
 export { ProjectData } from './durable-objects/project-data';
 export { ProjectOrchestrator } from './durable-objects/project-orchestrator';
 export { SamSession } from './durable-objects/sam-session';
+export { SetupSessionPool } from './durable-objects/setup-session-pool';
 export { TaskRunner } from './durable-objects/task-runner';
 export { TrialCounter } from './durable-objects/trial-counter';
 export { TrialEventBus } from './durable-objects/trial-event-bus';
@@ -52,6 +54,7 @@ import { adminSandboxRoutes } from './routes/admin-sandbox';
 import { adminTrialsRoutes } from './routes/admin-trials';
 import { adminUsageRoutes } from './routes/admin-usage';
 import { agentRoutes } from './routes/agent';
+import { agentCredentialSetupSessionsRoutes } from './routes/agent-credential-setup-sessions';
 import { agentProfileRoutes } from './routes/agent-profiles';
 import { agentSettingsRoutes } from './routes/agent-settings';
 import { agentsCatalogRoutes } from './routes/agents-catalog';
@@ -135,6 +138,7 @@ import { runCronTriggerSweep } from './scheduled/cron-triggers';
 import { runNodeCleanupSweep } from './scheduled/node-cleanup';
 import { runObservabilityPurge } from './scheduled/observability-purge';
 import { runSessionTaskReconciliation } from './scheduled/session-task-reconciliation';
+import { runSetupSessionSweep } from './scheduled/setup-session-sweep';
 import { recoverStuckTasks } from './scheduled/stuck-tasks';
 import { runTrialExpireSweep } from './scheduled/trial-expire';
 import { runTrialRolloverAudit } from './scheduled/trial-rollover';
@@ -692,6 +696,7 @@ app.route('/api/auth', authRoutes);
 app.route('/api/setup', setupRoutes);
 app.route('/api/credentials', resolutionStatusRoute);
 app.route('/api/credentials', credentialsRoutes);
+app.route('/api/agent-credential-setup-sessions', agentCredentialSetupSessionsRoutes);
 app.route('/api/cc', ccRoutes);
 app.route('/api/providers', providersRoutes);
 app.route('/api/github', githubRoutes);
@@ -948,6 +953,9 @@ export default {
     // Repair a bounded page of legacy taskless user-visible chat sessions.
     const sessionTaskRepair = await runSessionTaskReconciliation(env);
 
+    // Reclaim expired guided credential-setup sessions (bounded — rule 47).
+    const setupSessionSweep = await runSetupSessionSweep(env, ctx);
+
     // Clean up abandoned R2 compose image artifacts. The cleanup module is
     // interval-gated through KV so the 5-minute sweep does not scan R2 every run.
     const composeArtifactCleanup = await runScheduledComposeImageArtifactCleanup(env);
@@ -1007,6 +1015,9 @@ export default {
       trialWorkspacesDeleted: trialExpire.workspacesDeleted,
       trialNodesDeleted: trialExpire.nodesDeleted,
       trialCleanupErrors: trialExpire.cleanupErrors,
+      setupSessionsSwept: setupSessionSweep.toreDown,
+      setupSessionOrphansForced: setupSessionSweep.orphansForced,
+      setupSessionSweepErrors: setupSessionSweep.errors,
     });
   },
 };

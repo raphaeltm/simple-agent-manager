@@ -3,6 +3,8 @@ import { getAgentDefinition, OPENCODE_PROVIDERS, resolveOpenCodeProvider } from 
 import { Alert, Button, Input, StatusBadge } from '@simple-agent-manager/ui';
 import { useState } from 'react';
 
+import { CodexConnectTrigger } from './CodexConnectTrigger';
+
 interface AgentKeyCardProps {
   agent: AgentInfo;
   credentials?: AgentCredentialInfo[] | null; // Now an array for multiple credential types
@@ -23,12 +25,18 @@ interface AgentKeyCardProps {
    * that already shows the agent name/status in its own header.
    */
   embedded?: boolean;
+  /**
+   * Called after the guided "Connect with Codex" flow captures + saves a
+   * credential, so the parent can refresh the credential list (same refresh it
+   * performs after a manual save). No-op when the guided flow is unavailable.
+   */
+  onCredentialConnected?: () => void;
 }
 
 /**
  * Card for managing a single agent's credentials (API key and/or OAuth token).
  */
-export function AgentKeyCard({ agent, credentials, onSave, onDelete, opencodeProvider, scope = 'user', embedded = false }: AgentKeyCardProps) {
+export function AgentKeyCard({ agent, credentials, onSave, onDelete, opencodeProvider, scope = 'user', embedded = false, onCredentialConnected }: AgentKeyCardProps) {
   const [credential, setCredential] = useState('');
   const [credentialKind, setCredentialKind] = useState<CredentialKind>('api-key');
   const [loading, setLoading] = useState(false);
@@ -168,18 +176,25 @@ export function AgentKeyCard({ agent, credentials, onSave, onDelete, opencodePro
 
           <div>
             {credentialKind === 'oauth-token' && agent.id === 'openai-codex' ? (
-              <textarea
-                value={credential}
-                onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => { setCredential(e.target.value); setError(null); setValidationMessage(null); }}
-                placeholder='Paste the full contents of ~/.codex/auth.json'
-                required
-                rows={6}
-                spellCheck={false}
-                autoCorrect="off"
-                autoCapitalize="off"
-                autoComplete="off"
-                className="w-full px-3 py-2 bg-transparent border border-border-default rounded-sm text-sm text-fg-primary font-mono resize-y focus:outline-none focus:border-accent"
-              />
+              <div className="flex flex-col gap-3">
+                {/* Guided flow (only rendered when the platform gate is enabled). */}
+                <CodexConnectTrigger scope={scope} onConnected={onCredentialConnected} />
+                <div className="text-xs font-medium text-fg-muted">
+                  Or paste auth.json manually
+                </div>
+                <textarea
+                  value={credential}
+                  onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => { setCredential(e.target.value); setError(null); setValidationMessage(null); }}
+                  placeholder='Paste the full contents of ~/.codex/auth.json'
+                  required
+                  rows={6}
+                  spellCheck={false}
+                  autoCorrect="off"
+                  autoCapitalize="off"
+                  autoComplete="off"
+                  className="w-full px-3 py-2 bg-transparent border border-border-default rounded-sm text-sm text-fg-primary font-mono resize-y focus:outline-none focus:border-accent"
+                />
+              </div>
             ) : (
               <Input
                 type="password"

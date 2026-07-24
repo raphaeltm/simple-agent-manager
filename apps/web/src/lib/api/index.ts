@@ -121,6 +121,22 @@ export { getCurrentUser } from './auth';
 export { type CliVersionInfo, getCliDownloadUrl, getCliVersion } from './cli';
 export { API_URL, ApiClientError, request } from './client';
 export type {
+  CodexSetupConfig,
+  CodexSetupSession,
+  CodexSetupStatus,
+  CreateCodexSetupResult,
+} from './codex-setup';
+export {
+  buildCodexSetupWsUrl,
+  cancelCodexSetupSession,
+  CODEX_SETUP_AGENT_TYPE,
+  createCodexSetupSession,
+  getCodexSetupConfig,
+  getCodexSetupSession,
+  getCodexSetupTerminalToken,
+  isTerminalCodexSetupStatus,
+} from './codex-setup';
+export type {
   CCAttachmentListItem,
   CCConfigurationListItem,
   CCCredentialListItem,
