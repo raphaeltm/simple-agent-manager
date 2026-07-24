@@ -124,6 +124,25 @@ describe('deploy reusable workflow', () => {
     expect(sync).toContain('CF_CONTAINER_CLONE_FILTER: ${{ vars.CF_CONTAINER_CLONE_FILTER }}');
   });
 
+  it('forwards the codex credential-setup tunables into the wrangler config sync env', () => {
+    const sync = stepBlock('Sync Wrangler Config \\(API \\+ Tail Worker\\)');
+
+    // Same forwarding invariant as the cf-container tunables (2026-07-19 incident):
+    // these env-configurable setup-session values only reach the deployed Worker
+    // if the sync step copies them from GitHub Environment vars into process.env.
+    expect(sync).toContain('CODEX_SETUP_TERMINAL_ENABLED: ${{ vars.CODEX_SETUP_TERMINAL_ENABLED }}');
+    expect(sync).toContain('MAX_CONCURRENT_SETUP_SESSIONS: ${{ vars.MAX_CONCURRENT_SETUP_SESSIONS }}');
+    expect(sync).toContain('SETUP_SESSION_TTL_MS: ${{ vars.SETUP_SESSION_TTL_MS }}');
+    expect(sync).toContain('SETUP_SESSION_CAPTURE_POLL_MS: ${{ vars.SETUP_SESSION_CAPTURE_POLL_MS }}');
+    expect(sync).toContain(
+      'CREDENTIAL_SETUP_TERMINAL_TOKEN_EXPIRY_MS: ${{ vars.CREDENTIAL_SETUP_TERMINAL_TOKEN_EXPIRY_MS }}'
+    );
+    expect(sync).toContain(
+      'SETUP_SESSION_SWEEP_MAX_CANDIDATES: ${{ vars.SETUP_SESSION_SWEEP_MAX_CANDIDATES }}'
+    );
+    expect(sync).toContain('POOL_LEASE_BUFFER_MS: ${{ vars.POOL_LEASE_BUFFER_MS }}');
+  });
+
   it('versions the R2 vm-agent binaries with the same commit SHA as the container binary', () => {
     const build = stepBlock('Build VM Agent');
 

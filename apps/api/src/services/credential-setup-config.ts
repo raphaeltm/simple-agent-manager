@@ -44,9 +44,13 @@ export function getSetupSessionSweepMaxCandidates(env: Env): number {
   );
 }
 
+export function getPoolLeaseBufferMs(env: Env): number {
+  return parsePositiveInt(env.POOL_LEASE_BUFFER_MS, DEFAULT_POOL_LEASE_BUFFER_MS);
+}
+
 /** Lease age after which the pool self-prunes a leaked lease (TTL + buffer). */
 export function getPoolLeaseMaxAgeMs(env: Env): number {
-  return getSetupSessionTtlMs(env) + DEFAULT_POOL_LEASE_BUFFER_MS;
+  return getSetupSessionTtlMs(env) + getPoolLeaseBufferMs(env);
 }
 
 /**

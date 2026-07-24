@@ -107,6 +107,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   SETUP_SESSION_CAPTURE_POLL_MS?: string; // auth.json capture poll interval in ms (default: 3000)
   CREDENTIAL_SETUP_TERMINAL_TOKEN_EXPIRY_MS?: string; // Setup terminal WS token TTL in ms (default: 300000 = 5 min)
   SETUP_SESSION_SWEEP_MAX_CANDIDATES?: string; // Max expired sessions torn down per cron sweep (default: 50)
+  POOL_LEASE_BUFFER_MS?: string; // Grace beyond TTL before a leaked pool lease self-prunes (default: 300000 = 5 min)
   // Deployment signing keys (Ed25519 — separate from callback JWT)
   DEPLOY_SIGNING_PRIVATE_KEY?: string; // Base64-encoded Ed25519 private key for payload signing
   DEPLOY_SIGNING_PUBLIC_KEY?: string; // Base64-encoded Ed25519 public key delivered to deployment nodes

@@ -358,6 +358,7 @@ function getApiWorkerVars(
       'SETUP_SESSION_CAPTURE_POLL_MS',
       'CREDENTIAL_SETUP_TERMINAL_TOKEN_EXPIRY_MS',
       'SETUP_SESSION_SWEEP_MAX_CANDIDATES',
+      'POOL_LEASE_BUFFER_MS',
     ]),
     // AI Gateway ID matches the resource prefix (created by configure-ai-gateway.sh)
     AI_GATEWAY_ID: DEPLOYMENT_CONFIG.prefix,
