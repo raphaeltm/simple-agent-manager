@@ -19,6 +19,7 @@ const CODE_PATTERNS = [
   /(?:verification|one[- ]time|device)?\s*code[^A-Za-z0-9-]{0,40}([A-Z0-9][A-Z0-9-]{3,127})/i,
   /enter\s+(?:this\s+|the\s+)?(?:code\s+)?([A-Z0-9][A-Z0-9-]{3,127})/i,
 ];
+const PROSE_CODE_WORDS = new Set(['HERE', 'TRUE', 'FALSE', 'PROMPTED']);
 
 function isTrustedClaudeHost(hostname) {
   return (
@@ -70,7 +71,11 @@ export function validateClaudeOauthToken(value) {
 
 function validateUserCode(value) {
   const code = value.trim();
-  if (code.length > MAX_USER_CODE_LENGTH || !/^[A-Za-z0-9-]{4,}$/.test(code)) {
+  if (
+    code.length > MAX_USER_CODE_LENGTH ||
+    !/^[A-Z0-9-]{4,}$/.test(code) ||
+    PROSE_CODE_WORDS.has(code)
+  ) {
     return null;
   }
   return code;
@@ -89,9 +94,10 @@ export function extractClaudeSetupOutput(raw) {
     }
   }
 
+  const textWithoutUrls = text.replace(URL_PATTERN, ' ');
   let userCode;
   for (const pattern of CODE_PATTERNS) {
-    const match = pattern.exec(text);
+    const match = pattern.exec(textWithoutUrls);
     if (!match?.[1]) continue;
     const candidate = validateUserCode(match[1]);
     if (candidate) {

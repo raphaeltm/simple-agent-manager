@@ -47,6 +47,19 @@ describe('Claude setup-token driver', () => {
     expect(output.verificationUrl).toBe(
       'https://claude.com/cai/oauth/authorize?code=abc&state=def'
     );
+    expect(output.userCode).toBeUndefined();
+  });
+
+  it('does not treat URL query parameters or Claude prompt prose as a user code', () => {
+    const output = extractClaudeSetupOutput(
+      'Open https://claude.com/cai/oauth/authorize?code=true&state=def\n' +
+        'Paste code here if prompted >'
+    );
+
+    expect(output.verificationUrl).toBe(
+      'https://claude.com/cai/oauth/authorize?code=true&state=def'
+    );
+    expect(output.userCode).toBeUndefined();
   });
 
   it('accepts Anthropic-owned auth hosts and rejects untrusted hosts', () => {
