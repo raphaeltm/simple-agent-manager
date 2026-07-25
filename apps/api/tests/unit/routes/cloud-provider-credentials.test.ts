@@ -148,6 +148,87 @@ describe('POST /api/credentials — cloud-provider credentials', () => {
     expect(body.connected).toBe(true);
   });
 
+  it('validates, serializes, encrypts, and stores explicit Infomaniak application credentials', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          token: {
+            project: { id: 'project-1' },
+            catalog: [
+              {
+                type: 'compute',
+                endpoints: [
+                  {
+                    region: 'dc4-a',
+                    interface: 'public',
+                    url: 'https://compute.test/v2.1/project-1',
+                  },
+                ],
+              },
+              {
+                type: 'volumev3',
+                endpoints: [
+                  { region: 'dc4-a', interface: 'public', url: 'https://volume.test/v3/project-1' },
+                ],
+              },
+              {
+                type: 'image',
+                endpoints: [{ region: 'dc4-a', interface: 'public', url: 'https://image.test' }],
+              },
+              {
+                type: 'network',
+                endpoints: [{ region: 'dc4-a', interface: 'public', url: 'https://network.test' }],
+              },
+            ],
+          },
+        }),
+        { status: 201, headers: { 'X-Subject-Token': 'subject-token' } }
+      )
+    );
+    const res = await app.request(
+      '/api/credentials',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: 'infomaniak',
+          applicationCredentialId: 'application-id',
+          applicationCredentialSecret: 'one-time-secret',
+        }),
+      },
+      mockEnv
+    );
+    expect(res.status).toBe(201);
+    expect(await res.json()).toMatchObject({ provider: 'infomaniak', connected: true });
+    const { encrypt } = await import('../../../src/services/encryption');
+    expect(encrypt).toHaveBeenCalledWith(
+      JSON.stringify({
+        applicationCredentialId: 'application-id',
+        applicationCredentialSecret: 'one-time-secret',
+      }),
+      expect.anything()
+    );
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      'https://api.pub1.infomaniak.cloud/identity/v3/auth/tokens',
+      expect.objectContaining({ method: 'POST' })
+    );
+  });
+
+  it('rejects Infomaniak credentials unless both explicit fields are supplied', async () => {
+    const res = await app.request(
+      '/api/credentials',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: 'infomaniak', applicationCredentialId: 'id-only' }),
+      },
+      mockEnv
+    );
+    expect(res.status).toBe(400);
+    expect((await res.json()).message).toContain('applicationCredentialSecret');
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
   it('creates a vultr credential (raw token) and returns 201', async () => {
     const res = await app.request(
       '/api/credentials',

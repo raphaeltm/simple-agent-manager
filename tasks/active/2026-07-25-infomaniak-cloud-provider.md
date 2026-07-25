@@ -25,47 +25,47 @@ Live provider-key testing is explicitly deferred to Raphaël after merge. All mo
 
 ### Shared configuration and provider core
 
-- [ ] Add `infomaniak` to shared credential/provider types, labels, help, locations/defaults, VM CPU/capacity maps, and exported configurable defaults.
-- [ ] Add explicit Infomaniak config fields for application credential ID/secret, auth URL, region, interface, network, image, flavor mapping, volume type, polling/request timeouts, and operation budgets.
-- [ ] Implement a narrowly scoped Infomaniak OpenStack client with Keystone token/catalog discovery and runtime validation for Keystone, Nova, Glance, Neutron, and Cinder response shapes.
-- [ ] Implement full VM lifecycle: validate credentials, resolve image/flavor/network, create with cloud-init user data, read/list/delete, power on/off, status mapping, public IPv4 discovery, bounded polling, safe/idempotent deletion, and error classification.
-- [ ] Implement real Cinder volume operations: create/list/get/delete, Nova attach/detach, grow-only detach-first resize, region checks, attachment mapping, stable device-discovery notes, and safe deletion semantics.
-- [ ] Wire provider factory exports and full contract coverage.
+- [x] Add `infomaniak` to shared credential/provider types, labels, help, locations/defaults, VM CPU/capacity maps, and exported configurable defaults.
+- [x] Add explicit Infomaniak config fields for application credential ID/secret, auth URL, region, interface, network, image, flavor mapping, volume type, polling/request timeouts, and operation budgets.
+- [x] Implement a narrowly scoped Infomaniak OpenStack client with Keystone token/catalog discovery and runtime validation for Keystone, Nova, Glance, Neutron, and Cinder response shapes.
+- [x] Implement full VM lifecycle: validate credentials, resolve image/flavor/network, create with cloud-init user data, read/list/delete, power on/off, status mapping, public IPv4 discovery, bounded polling, safe/idempotent deletion, and error classification.
+- [x] Implement real Cinder volume operations: create/list/get/delete, Nova attach/detach, grow-only detach-first resize, region checks, attachment mapping, stable device-discovery notes, and safe deletion semantics.
+- [x] Wire provider factory exports and full contract coverage.
 
 ### API, runtime, and cloud-init
 
-- [ ] Add explicit credential schemas/routes/validation/storage serialization and provider resolution/config construction without logging secrets.
-- [ ] Add runtime environment overrides and `.env.example` documentation for all operational defaults required by project rules.
-- [ ] Update provider picklists, resolution/catalog/admin schemas, task/workspace/project/node routes, MCP field descriptions, and deployment provisioning/volume vertical slices.
-- [ ] Add `infomaniak` to cloud-init provider validation and generation tests.
+- [x] Add explicit credential schemas/routes/validation/storage serialization and provider resolution/config construction without logging secrets.
+- [x] Add runtime environment overrides and `.env.example` documentation for all operational defaults required by project rules.
+- [x] Update provider picklists, resolution/catalog/admin schemas, task/workspace/project/node routes, MCP field descriptions, and deployment provisioning/volume vertical slices.
+- [x] Add `infomaniak` to cloud-init provider validation and generation tests.
 
 ### Web, docs, and marketing
 
-- [ ] Add a clear Infomaniak application-credential form with separate ID/secret fields, role/region guidance, validation/delete behavior, and connect/settings/admin support.
-- [ ] Update provider readiness gates, workspace creation, onboarding detection, project settings, and deployment-provider selection surfaces.
-- [ ] Add behavioral tests and a local Playwright visual audit at 375×667 and 1280×800, including normal, long, empty, many, error, special-character, and minimal-content scenarios where applicable.
-- [ ] Update public documentation and marketing/provider enumerations, including compute and deployment-volume support and a production live-key validation checklist.
+- [x] Add a clear Infomaniak application-credential form with separate ID/secret fields, role/region guidance, validation/delete behavior, and connect/settings/admin support.
+- [x] Update provider readiness gates, workspace creation, onboarding detection, project settings, and deployment-provider selection surfaces.
+- [x] Add behavioral tests and a local Playwright visual audit at 375×667 and 1280×800, including normal, long, empty, many, error, special-character, and minimal-content scenarios where applicable.
+- [x] Update public documentation and marketing/provider enumerations, including compute and deployment-volume support and a production live-key validation checklist.
 
 ### Validation and shipping
 
-- [ ] Add exact-payload mocked provider unit tests, response-validation tests, contract tests, API credential/provisioning/volume vertical-slice tests, cloud-init tests, and web behavior tests.
-- [ ] Run lint, typecheck, tests, builds, coverage/quality gates, and task-completion validation.
-- [ ] Complete and address reviews from task-completion-validator, cloudflare-specialist, security-auditor, ui-ux-specialist, env-validator, doc-sync-validator, constitution-validator, and test-engineer.
-- [ ] Rebase on current main and reconcile concurrent provider additions before PR and merge.
-- [ ] Deploy to staging; verify no-key/bogus-key API and UI behavior, existing-provider regressions, and changed web surfaces. Live Infomaniak provisioning remains deferred.
+- [x] Add exact-payload mocked provider unit tests, response-validation tests, contract tests, API credential/provisioning/volume vertical-slice tests, cloud-init tests, and web behavior tests.
+- [x] Run lint, typecheck, tests, builds, coverage/quality gates, and task-completion validation.
+- [x] Complete and address reviews from task-completion-validator, cloudflare-specialist, security-auditor, ui-ux-specialist, env-validator, doc-sync-validator, constitution-validator, and test-engineer.
+- [x] Rebase on current main and reconcile concurrent provider additions before PR and merge.
+- [x] Deploy to staging; verify no-key/bogus-key API and UI behavior, existing-provider regressions, and changed web surfaces. Live Infomaniak provisioning remains deferred.
 - [ ] Open PR with review evidence and production checklist, pass all CI, merge, and monitor the matching production deploy success run by merge SHA.
 
 ## Acceptance criteria
 
-- [ ] Infomaniak is selectable and usable anywhere SAM accepts a managed cloud provider.
-- [ ] Credentials are explicit Keystone application credential ID/secret pairs and are encrypted/stored/redacted consistently with existing provider secrets.
-- [ ] Provider implements SAM's complete VM interface with validated OpenStack response shapes and configurable operational defaults.
-- [ ] Deployment volumes are truthfully supported with replacement-node-safe detach/reattach, safe deletion, same-region enforcement, stable device discovery guidance, and detach-first grow-only resize semantics.
-- [ ] Tests prove exact outgoing payloads and reject malformed Keystone/Nova/Cinder responses rather than trusting casts.
-- [ ] Web surfaces are accessible, mobile-first, visually audited, and do not misroute Infomaniak requests to another provider.
-- [ ] Public docs and marketing accurately enumerate Infomaniak compute and volume support.
-- [ ] All required reviewers pass or have findings addressed; CI and staging/no-key regression checks are green.
-- [ ] PR documents deferred live production validation: add Infomaniak credentials; create node; create workspace; run agent; delete node; create deployment environment with Infomaniak volume; verify mount and persistence across replacement; tear down.
+- [x] Infomaniak is selectable and usable anywhere SAM accepts a managed cloud provider.
+- [x] Credentials are explicit Keystone application credential ID/secret pairs and are encrypted/stored/redacted consistently with existing provider secrets.
+- [x] Provider implements SAM's complete VM interface with validated OpenStack response shapes and configurable operational defaults.
+- [x] Deployment volumes are truthfully supported with replacement-node-safe detach/reattach, safe deletion, same-region enforcement, stable device discovery guidance, and detach-first grow-only resize semantics.
+- [x] Tests prove exact outgoing payloads and reject malformed Keystone/Nova/Cinder responses rather than trusting casts.
+- [x] Web surfaces are accessible, mobile-first, visually audited, and do not misroute Infomaniak requests to another provider.
+- [x] Public docs and marketing accurately enumerate Infomaniak compute and volume support.
+- [x] All required reviewers pass or have findings addressed; CI and staging/no-key regression checks are green.
+- [x] PR documents deferred live production validation: add Infomaniak credentials; create node; create workspace; run agent; delete node; create deployment environment with Infomaniak volume; verify mount and persistence across replacement; tear down.
 - [ ] PR is merged only after syncing concurrent provider work, and the production deployment for the merge SHA succeeds.
 
 ## References
