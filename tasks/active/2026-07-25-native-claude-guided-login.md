@@ -40,6 +40,7 @@ Claude Code still requires users to run `claude setup-token` manually and paste 
 - [x] Render the guided setup trigger for Claude Code OAuth-token flows in user scope; keep project-scope behavior hidden until project-scoped guided capture is intentionally supported.
 - [x] Add/extend API, DO, script, and UI tests for Claude setup-token URL/token capture and cross-agent behavior.
 - [x] Add/update Playwright coverage for the changed guided flow surface, including mobile and desktop open/copy behavior.
+- [x] Add opt-in staging Playwright coverage for the real Claude Code guided setup URL-open smoke test.
 
 ## Acceptance criteria
 
@@ -67,3 +68,15 @@ Claude Code still requires users to run `claude setup-token` manually and paste 
 - `pnpm typecheck` passed after cleanup.
 - `pnpm test` passed repository-wide after updating legacy Claude OAuth route fixtures to realistic `sk-ant-oat` tokens.
 - `pnpm build` passed repository-wide.
+- After rebasing onto current `origin/main`, `pnpm lint`, `pnpm typecheck`, `pnpm test`, and `pnpm build` passed.
+- Added `staging-claude-guided-connect.spec.ts` for the live staging smoke test: authenticated staging UI, start Claude Code guided setup, wait for a trusted Claude/Anthropic auth URL, assert no terminal surface, click/open the native link, then cancel without completing OAuth.
+- Web lint and typecheck passed after adding the staging Claude spec.
+
+## Specialist review
+
+- `task-completion-validator`: PASS. Research findings, checklist items, and implementation map to the code and tests; staging validation remains the only intentionally pending acceptance criterion.
+- `cloudflare-specialist`: PASS. No new D1 migration is required; the existing setup-session table supports user + agent-type active-session isolation, and the DO keeps secret material out of D1/browser/logs while cleaning sandbox state and leases.
+- `ui-ux-specialist`: PASS. The shared native modal preserves Codex behavior and adds Claude Code with a URL-first flow, optional code display, no terminal surface, responsive layout, and tested passive-close/cancel behavior.
+- `security-auditor`: PASS. Claude OAuth token material is captured server-side only, the auth URL is host-allowlisted, setup files are private and scrubbed, and route ownership checks remain intact.
+- `constitution-validator`: PASS. No new internal hardcoded deployment URLs or operational constants; tunable setup behavior remains env-configured and helper limits are protocol/security bounds.
+- `test-engineer`: PASS with staging caveat. Unit, DO, route, script, web component, and local Playwright coverage exercise the slice; the real Worker/Sandbox/Claude CLI boundary is intentionally verified on staging.
