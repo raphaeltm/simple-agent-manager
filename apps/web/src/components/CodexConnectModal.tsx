@@ -76,6 +76,7 @@ export function CodexConnectModal({ isOpen, onClose, onConnected }: CodexConnect
   useEffect(() => {
     if (!isOpen) return;
     let cancelled = false;
+    let pollInFlight = false;
     let pollTimer: ReturnType<typeof setInterval> | null = null;
     let closeTimer: ReturnType<typeof setTimeout> | null = null;
     setPhase('creating');
@@ -86,7 +87,7 @@ export function CodexConnectModal({ isOpen, onClose, onConnected }: CodexConnect
     finishedRef.current = false;
 
     const finish = (next: CodexSetupSession) => {
-      if (!isTerminalCodexSetupStatus(next.status)) return;
+      if (finishedRef.current || !isTerminalCodexSetupStatus(next.status)) return;
       finishedRef.current = true;
       if (pollTimer) clearInterval(pollTimer);
       if (next.status === 'completed') {
@@ -98,7 +99,8 @@ export function CodexConnectModal({ isOpen, onClose, onConnected }: CodexConnect
     };
 
     const poll = async () => {
-      if (!sessionIdRef.current) return;
+      if (!sessionIdRef.current || pollInFlight || finishedRef.current) return;
+      pollInFlight = true;
       try {
         const next = await getCodexSetupSession(sessionIdRef.current);
         if (cancelled) return;
@@ -106,6 +108,8 @@ export function CodexConnectModal({ isOpen, onClose, onConnected }: CodexConnect
         finish(next);
       } catch {
         // Keep the last useful state visible and retry.
+      } finally {
+        pollInFlight = false;
       }
     };
 
@@ -137,8 +141,6 @@ export function CodexConnectModal({ isOpen, onClose, onConnected }: CodexConnect
       cancelled = true;
       if (pollTimer) clearInterval(pollTimer);
       if (closeTimer) clearTimeout(closeTimer);
-      const id = sessionIdRef.current;
-      if (id && !finishedRef.current) void cancelCodexSetupSession(id).catch(() => {});
       sessionIdRef.current = null;
     };
   }, [isOpen, retryNonce]);
@@ -151,6 +153,13 @@ export function CodexConnectModal({ isOpen, onClose, onConnected }: CodexConnect
     } catch {
       setMessage('Could not copy the code. Press and hold the code to copy it.');
     }
+  };
+
+  const handleCancel = async () => {
+    const id = sessionIdRef.current;
+    finishedRef.current = true;
+    if (id) await cancelCodexSetupSession(id).catch(() => {});
+    onClose();
   };
 
   const status = session?.status ?? null;
@@ -260,8 +269,8 @@ export function CodexConnectModal({ isOpen, onClose, onConnected }: CodexConnect
             {message && phase === 'created' && <Alert variant="info">{message}</Alert>}
 
             <div className="flex gap-2 justify-end">
-              {isActive && (
-                <Button variant="ghost" size="sm" onClick={onClose}>
+              {isActive && status !== 'saving' && (
+                <Button variant="ghost" size="sm" onClick={() => void handleCancel()}>
                   Cancel
                 </Button>
               )}

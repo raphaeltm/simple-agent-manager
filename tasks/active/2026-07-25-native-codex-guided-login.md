@@ -47,20 +47,20 @@ The guided flow must be available by default wherever the required Cloudflare Sa
 - [x] Parse chunked JSONL defensively and validate bounded HTTPS URL/code/login ID values.
 - [x] Write starting/waiting/completed/failed state atomically with restrictive permissions.
 - [x] Keep raw protocol, URL, code, and credentials out of process logs.
-- [ ] Handle early exit, malformed responses, login failure, overload, timeout, and SIGTERM/cancel.
+- [x] Handle early exit, malformed responses, login failure, overload, timeout, and SIGTERM/cancel.
 - [x] Add fake-app-server behavioral tests covering success, chunking, failure, and cleanup.
 
 ### Durable Object and API
 
 - [x] Start the driver during `CredentialSetupSession` provisioning.
-- [ ] Add append-only DO-local storage for ephemeral verification URL/code and process metadata.
+- [x] Add append-only DO-local storage for ephemeral verification URL/code and process metadata.
 - [x] Transition to `waiting_for_user` only after valid actionable details exist.
 - [x] Return ephemeral details from authoritative DO state after the existing D1 ownership check.
 - [x] Preserve current validated `auth.json` capture and encrypted dual-write path.
-- [ ] Clear device details on capture and every terminal lifecycle state.
+- [x] Clear device details on capture and every terminal lifecycle state.
 - [x] Kill the driver by destroying the isolated Sandbox during teardown.
 - [x] Remove `loginCommand`, terminal-token/WS routes, and terminal JWT code/tests.
-- [ ] Add owner/isolation, lifecycle, failure, no-D1-persistence, and vertical-slice tests.
+- [x] Add owner/isolation, lifecycle, failure, no-D1-persistence, and vertical-slice tests.
 
 ### Default-On Configuration
 
@@ -68,22 +68,22 @@ The guided flow must be available by default wherever the required Cloudflare Sa
 - [x] Use removal of a required binding as the explicit deployment disable mechanism.
 - [x] Do not enable unrelated admin Sandbox prototype routes as a side effect.
 - [x] Remove guided-login dependency on GitHub Environment variables and deployment forwarding.
-- [ ] Update env references, deployment tests, and public self-host documentation if configuration behavior is user-facing.
+- [x] Update env references, deployment tests, and public self-host documentation if configuration behavior is user-facing.
 
 ### Native UI
 
 - [x] Replace xterm/SandboxAddon/FitAddon with status-driven native controls.
 - [x] Render selectable one-time code, tested `Copy code`, and safe external sign-in link.
-- [ ] Provide clipboard failure fallback and accessible live feedback.
-- [ ] Handle provisioning, waiting, capturing, saving, completed, failed, cancelled, and expired states.
-- [ ] Reset ephemeral details on retry/close without effect collisions.
+- [x] Provide clipboard failure fallback and accessible live feedback.
+- [x] Handle provisioning, waiting, capturing, saving, completed, failed, cancelled, and expired states.
+- [x] Reset ephemeral details on retry/close without effect collisions.
 - [x] Remove unused web dependencies and terminal mocks.
 - [x] Add component behavioral tests and staging Playwright visual coverage at 375px and 1280px.
 
 ### Validation and Delivery
 
-- [ ] Run lint, typecheck, tests, build, migration/Workers quality gates, and container-driver tests.
-- [ ] Run task-completion, Cloudflare, UI/UX, security, env, constitution, docs, and test reviews.
+- [x] Run lint, typecheck, tests, build, migration/Workers quality gates, and container-driver tests.
+- [x] Run task-completion, Cloudflare, UI/UX, security, env, constitution, docs, and test reviews.
 - [ ] Deploy to staging after confirming no competing deployment.
 - [ ] Trigger the real pinned Codex flow through the authenticated staging UI.
 - [ ] Verify a real verification URL/code appears in native controls with no terminal.

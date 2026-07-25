@@ -7,12 +7,8 @@
  *   GET    /:id                   poll lifecycle status
  *   POST   /:id/cancel            cancel + tear down
  *
- * AUTH: REST routes use browser session-cookie auth (requireAuth/requireApproved)
- * with per-route ownership checks. The terminal WS route has NO session
- * middleware — WebSocket upgrades cannot attach cookies reliably, so it verifies
- * a `?token=` credential-setup JWT and asserts the bound setupSessionId matches
- * the URL (rules 34/51: bind to the token's own verified identity, fail closed).
- * This router MUST NOT use a wildcard `.use()` or the WS route would be rejected.
+ * AUTH: all routes use browser session-cookie auth (requireAuth/requireApproved)
+ * and perform per-session ownership checks before reading authoritative DO state.
  *
  * Availability is derived from the required runtime bindings. No deployment
  * environment variable is needed to turn this product flow on.
@@ -88,8 +84,7 @@ async function loadOwnedSession(
 }
 
 // -----------------------------------------------------------------------------
-// GET /config — whether the guided flow is available (so the UI can hide the
-// button when the default-off gate is disabled, e.g. in production).
+// GET /config — whether the required guided-flow runtime bindings are available.
 // Registered before /:id so "config" is not captured as a session id.
 // -----------------------------------------------------------------------------
 agentCredentialSetupSessionsRoutes.get('/config', requireAuth(), requireApproved(), (c) => {
@@ -127,10 +122,18 @@ agentCredentialSetupSessionsRoutes.post('/', requireAuth(), requireApproved(), a
     .bind(userId, agentType, ...ACTIVE_SETUP_STATUSES)
     .first<{ id: string }>();
   if (existingActive) {
-    return c.json(
-      { error: 'active_session_exists', message: 'A setup session is already in progress' },
-      409
-    );
+    const row = await loadOwnedSession(c.env, existingActive.id, userId);
+    const state = await getSetupSessionState(c.env, row.id);
+    return c.json({
+      id: row.id,
+      status: state?.status ?? row.status,
+      agentType: row.agent_type,
+      expiresAt: row.expires_at,
+      verificationUrl: state?.verificationUrl ?? null,
+      userCode: state?.userCode ?? null,
+      errorCode: state?.errorCode ?? row.error_code,
+      errorMessage: state?.errorMessage ?? row.error_message,
+    });
   }
 
   const sessionId = ulid();

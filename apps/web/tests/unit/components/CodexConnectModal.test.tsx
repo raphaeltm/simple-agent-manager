@@ -42,6 +42,10 @@ function makeSession(
 describe('CodexConnectModal', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    h.createCodexSetupSession.mockReset();
+    h.getCodexSetupSession.mockReset();
+    h.cancelCodexSetupSession.mockReset();
+    h.getCodexSetupConfig.mockReset();
     vi.stubEnv('VITE_CODEX_SETUP_POLL_MS', '20');
     vi.stubEnv('VITE_CODEX_SETUP_SUCCESS_CLOSE_MS', '10');
     h.cancelCodexSetupSession.mockResolvedValue({ id: SESSION_ID, status: 'cancelled' });
@@ -91,6 +95,81 @@ describe('CodexConnectModal', () => {
     await waitFor(() => expect(onConnected).toHaveBeenCalledTimes(1));
     await screen.findByText(/Codex connected/);
     expect(screen.queryByTestId('codex-terminal')).not.toBeInTheDocument();
+  });
+
+  it('keeps an active server session running on passive close but cancels explicitly', async () => {
+    h.createCodexSetupSession.mockResolvedValue({
+      kind: 'created',
+      session: makeSession('waiting_for_user', {
+        verificationUrl: VERIFICATION_URL,
+        userCode: USER_CODE,
+      }),
+    });
+    h.getCodexSetupSession.mockResolvedValue(
+      makeSession('waiting_for_user', {
+        verificationUrl: VERIFICATION_URL,
+        userCode: USER_CODE,
+      })
+    );
+    const onClose = vi.fn();
+    const view = render(<CodexConnectModal isOpen onClose={onClose} />);
+    await screen.findByRole('link', { name: /open openai sign-in/i });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(onClose).toHaveBeenCalledOnce();
+    view.unmount();
+    expect(h.cancelCodexSetupSession).not.toHaveBeenCalled();
+
+    render(<CodexConnectModal isOpen onClose={vi.fn()} />);
+    await screen.findByRole('link', { name: /open openai sign-in/i });
+    expect(screen.getByText(USER_CODE)).toBeInTheDocument();
+    expect(h.createCodexSetupSession).toHaveBeenCalledTimes(2);
+    fireEvent.click(screen.getByRole('button', { name: /^cancel$/i }));
+    await waitFor(() => expect(h.cancelCodexSetupSession).toHaveBeenCalledWith(SESSION_ID));
+  });
+
+  it('surfaces clipboard failure while leaving the code selectable', async () => {
+    vi.mocked(navigator.clipboard.writeText).mockRejectedValueOnce(new Error('denied'));
+    h.createCodexSetupSession.mockResolvedValue({
+      kind: 'created',
+      session: makeSession('waiting_for_user', {
+        verificationUrl: VERIFICATION_URL,
+        userCode: USER_CODE,
+      }),
+    });
+    h.getCodexSetupSession.mockResolvedValue(
+      makeSession('waiting_for_user', {
+        verificationUrl: VERIFICATION_URL,
+        userCode: USER_CODE,
+      })
+    );
+    render(<CodexConnectModal isOpen onClose={vi.fn()} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /copy code/i }));
+
+    await screen.findByText(/press and hold the code to copy it/i);
+    expect(screen.getByText(USER_CODE)).toHaveClass('select-all');
+  });
+
+  it('serializes polling and reports completion once', async () => {
+    let resolvePoll: ((session: CodexSetupSession) => void) | undefined;
+    h.createCodexSetupSession.mockResolvedValue({
+      kind: 'created',
+      session: makeSession('provisioning'),
+    });
+    h.getCodexSetupSession.mockReturnValue(
+      new Promise((resolve) => {
+        resolvePoll = resolve;
+      })
+    );
+    const onConnected = vi.fn();
+    render(<CodexConnectModal isOpen onClose={vi.fn()} onConnected={onConnected} />);
+    await waitFor(() => expect(h.getCodexSetupSession).toHaveBeenCalledOnce());
+    await new Promise((resolve) => setTimeout(resolve, 70));
+    expect(h.getCodexSetupSession).toHaveBeenCalledOnce();
+
+    resolvePoll?.(makeSession('completed'));
+    await waitFor(() => expect(onConnected).toHaveBeenCalledOnce());
   });
 
   it('shows the active-session conflict with retry', async () => {

@@ -27,6 +27,11 @@ Claude Code supports dual authentication: API keys (pay-per-use) and OAuth token
 | **OAuth Support** | Yes (via `~/.codex/auth.json`)                          |
 | **Get a Key**     | [OpenAI Platform](https://platform.openai.com/api-keys) |
 
+For a ChatGPT subscription, choose **Connect with Codex**. SAM opens a native
+device-login flow with an OpenAI sign-in link and a copyable one-time code; no
+terminal interaction or manual `auth.json` paste is required. Manual credential
+entry remains available when needed.
+
 ### Gemini CLI
 
 | Property      | Value                                                  |

@@ -1,12 +1,10 @@
 /**
- * Typed client for the guided agent-credential setup sessions (Codex "Connect
- * with Codex" terminal flow). Wraps the REST contract at
+ * Typed client for the native Codex guided-login setup sessions. Wraps the REST contract at
  * `${VITE_API_URL}/api/agent-credential-setup-sessions`.
  *
- * All REST calls go through the shared authed `request<T>()` client (session
- * cookie via `credentials:'include'`). The terminal WebSocket is NOT fetched
- * here — the xterm `SandboxAddon` opens it directly using the URL built by
- * `buildCodexSetupWsUrl()`.
+ * All calls go through the shared authenticated request client. Device-login
+ * process details remain server-side; this client receives semantic status,
+ * verification URL, and one-time code fields only.
  */
 import { ApiClientError, request } from './client';
 

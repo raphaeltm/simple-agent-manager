@@ -136,6 +136,9 @@ describe('deploy reusable workflow', () => {
       'SETUP_SESSION_CAPTURE_POLL_MS: ${{ vars.SETUP_SESSION_CAPTURE_POLL_MS }}'
     );
     expect(sync).toContain(
+      'CODEX_DEVICE_AUTH_REQUEST_TIMEOUT_MS: ${{ vars.CODEX_DEVICE_AUTH_REQUEST_TIMEOUT_MS }}'
+    );
+    expect(sync).toContain(
       'SETUP_SESSION_SWEEP_MAX_CANDIDATES: ${{ vars.SETUP_SESSION_SWEEP_MAX_CANDIDATES }}'
     );
     expect(sync).toContain('POOL_LEASE_BUFFER_MS: ${{ vars.POOL_LEASE_BUFFER_MS }}');

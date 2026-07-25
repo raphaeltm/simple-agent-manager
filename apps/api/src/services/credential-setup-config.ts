@@ -1,5 +1,5 @@
 /**
- * Configuration readers for the guided agent-credential setup terminal
+ * Configuration readers for guided agent-credential setup
  * (Cloudflare Sandbox). All values are env-configurable with a `DEFAULT_*`
  * constant fallback (Constitution Principle XI — no hardcoded limits/timeouts).
  */

@@ -128,6 +128,7 @@ interface FakeRow {
 
 function createFakeSql() {
   let row: FakeRow | undefined;
+  let deviceAuthDetails: { verification_url: string; user_code: string } | undefined;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const exec = vi.fn((query: string, ...args: any[]) => {
@@ -175,6 +176,20 @@ function createFakeSql() {
 
     if (q.includes('select * from setup_session')) {
       return { toArray: () => (row ? [{ ...row }] : []) };
+    }
+
+    if (q.includes('insert or replace into device_auth_details')) {
+      deviceAuthDetails = { verification_url: args[0], user_code: args[1] };
+      return { toArray: () => [] };
+    }
+
+    if (q.includes('select verification_url, user_code')) {
+      return { toArray: () => (deviceAuthDetails ? [{ ...deviceAuthDetails }] : []) };
+    }
+
+    if (q.includes('delete from device_auth_details')) {
+      deviceAuthDetails = undefined;
+      return { toArray: () => [] };
     }
 
     if (q.includes('update setup_session')) {
@@ -336,8 +351,76 @@ describe('CredentialSetupSession — alarm() provisioning step', () => {
 
     const state = await instance.getState();
     expect(state?.status).toBe('waiting_for_user');
+    expect(state?.verificationUrl).toBe('https://auth.openai.com/device');
+    expect(state?.userCode).toBe('ABCD-EFGH');
+    expect(JSON.stringify(database._calls)).not.toContain('auth.openai.com');
+    expect(JSON.stringify(database._calls)).not.toContain('ABCD-EFGH');
     expect(ctx.storage.setAlarm).toHaveBeenCalledTimes(3); // create + provision + device state
     expect(database._calls.some((c) => c.args.includes('waiting_for_user'))).toBe(true);
+  });
+
+  it('captures auth when app-server completes before the first admitting poll', async () => {
+    const { instance } = createDO();
+    await Promise.resolve();
+    const fakeSandbox = createFakeSandbox();
+    vi.mocked(getSandboxInstance).mockResolvedValue(fakeSandbox as never);
+    await instance.create({
+      id: 'setup-fast',
+      codexHome: '/tmp/codex-setup-fast',
+      ttlMs: 900_000,
+      ...BASE_PARAMS,
+    });
+    await instance.alarm();
+    fakeSandbox.exists.mockResolvedValue({ exists: true });
+    fakeSandbox.readFile.mockImplementation(async (path: string) => ({
+      content: path.endsWith('device-auth-state.json')
+        ? JSON.stringify({ status: 'completed' })
+        : validAuthJson(),
+    }));
+    vi.mocked(saveAgentCredentialForUser).mockResolvedValue({
+      created: true,
+      createdAt: '2026-07-01T00:00:00.000Z',
+      updatedAt: '2026-07-01T00:00:00.000Z',
+    });
+
+    await instance.alarm();
+
+    expect((await instance.getState())?.status).toBe('completed');
+    expect(saveAgentCredentialForUser).toHaveBeenCalledOnce();
+  });
+
+  it('does not resurrect a session cancelled during device-state I/O', async () => {
+    const { instance } = createDO();
+    await Promise.resolve();
+    const fakeSandbox = createFakeSandbox();
+    vi.mocked(getSandboxInstance).mockResolvedValue(fakeSandbox as never);
+    await instance.create({
+      id: 'setup-race',
+      codexHome: '/tmp/codex-setup-race',
+      ttlMs: 900_000,
+      ...BASE_PARAMS,
+    });
+    await instance.alarm();
+    let resolveRead: ((value: { content: string }) => void) | undefined;
+    fakeSandbox.readFile.mockReturnValue(
+      new Promise((resolve) => {
+        resolveRead = resolve;
+      })
+    );
+
+    const poll = instance.alarm();
+    await Promise.resolve();
+    await instance.cancel();
+    resolveRead?.({
+      content: JSON.stringify({
+        status: 'waiting_for_user',
+        verificationUrl: 'https://auth.openai.com/device',
+        userCode: 'ABCD-EFGH',
+      }),
+    });
+    await poll;
+
+    expect((await instance.getState())?.status).toBe('cancelled');
   });
 
   it('tears down as failed when the sandbox fails to provision', async () => {

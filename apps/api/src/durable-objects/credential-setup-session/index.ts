@@ -89,6 +89,11 @@ type SetupSessionRow = {
   completed_at: number | null;
 };
 
+type DeviceAuthDetailsRow = {
+  verification_url: string;
+  user_code: string;
+};
+
 /** Relative path of the captured credential file inside CODEX_HOME. */
 const AUTH_FILE = 'auth.json';
 const DEVICE_AUTH_STATE_FILE = 'device-auth-state.json';
@@ -125,6 +130,13 @@ export class CredentialSetupSession extends DurableObject<Env> {
           error_code      TEXT,
           error_message   TEXT,
           completed_at    INTEGER
+        )`
+      );
+      this.sql.exec(
+        `CREATE TABLE IF NOT EXISTS device_auth_details (
+          singleton        INTEGER PRIMARY KEY NOT NULL CHECK (singleton = 1),
+          verification_url TEXT NOT NULL,
+          user_code        TEXT NOT NULL
         )`
       );
     });
@@ -172,22 +184,18 @@ export class CredentialSetupSession extends DurableObject<Env> {
   }
 
   /** Read authoritative state (used by GET status when the DO is preferred over D1). */
-  async getState(): Promise<SetupSessionStateResult | null> {
+  getState(): SetupSessionStateResult | null {
     const row = this.readRow();
     if (!row) return null;
-    const deviceAuth =
-      row.status === 'admitting' || row.status === 'waiting_for_user'
-        ? await this.readDeviceAuthState(row)
-        : null;
+    const deviceAuth = row.status === 'waiting_for_user' ? this.readDeviceAuthDetails() : null;
     return {
       id: row.id,
       status: row.status as SetupSessionStatus,
       expiresAt: row.expires_at,
       errorCode: row.error_code,
       errorMessage: row.error_message,
-      verificationUrl:
-        deviceAuth?.status === 'waiting_for_user' ? (deviceAuth.verificationUrl ?? null) : null,
-      userCode: deviceAuth?.status === 'waiting_for_user' ? (deviceAuth.userCode ?? null) : null,
+      verificationUrl: deviceAuth?.verification_url ?? null,
+      userCode: deviceAuth?.user_code ?? null,
     };
   }
 
@@ -205,6 +213,20 @@ export class CredentialSetupSession extends DurableObject<Env> {
         userCode: null,
       };
     }
+    // Saving is the commit point: the encrypted credential write may already be
+    // in flight and cannot be safely rolled back by a concurrent cancel.
+    if (row.status === 'saving')
+      return (
+        this.getState() ?? {
+          id: row.id,
+          status: 'saving',
+          expiresAt: row.expires_at,
+          errorCode: row.error_code,
+          errorMessage: row.error_message,
+          verificationUrl: null,
+          userCode: null,
+        }
+      );
     if (!isTerminalSetupStatus(row.status)) {
       await this.teardown(row, 'cancelled');
     }
@@ -284,8 +306,13 @@ export class CredentialSetupSession extends DurableObject<Env> {
         'cli_auth_credentials_store = "file"\n'
       );
       const statePath = `${row.codex_home}/${DEVICE_AUTH_STATE_FILE}`;
+      const requestTimeoutEnv = this.env.CODEX_DEVICE_AUTH_REQUEST_TIMEOUT_MS
+        ? ` CODEX_DEVICE_AUTH_REQUEST_TIMEOUT_MS=${shellQuote(
+            this.env.CODEX_DEVICE_AUTH_REQUEST_TIMEOUT_MS
+          )}`
+        : '';
       const startCommand =
-        `nohup env CODEX_HOME=${shellQuote(row.codex_home)} ` +
+        `nohup env CODEX_HOME=${shellQuote(row.codex_home)}${requestTimeoutEnv} ` +
         `node /usr/local/bin/sam-codex-device-auth.mjs ${shellQuote(statePath)} ` +
         '>/dev/null 2>&1 &';
       await sandbox.exec(startCommand, {
@@ -304,13 +331,17 @@ export class CredentialSetupSession extends DurableObject<Env> {
       );
       return;
     }
-    this.setStatus(row.id, 'admitting');
-    await this.updateD1Status(row.id, 'admitting', { started: true });
+    const current = this.readRow();
+    if (!current || current.status !== 'provisioning') return;
+    this.setStatus(current.id, 'admitting');
+    await this.updateD1Status(current.id, 'admitting', { started: true });
     await this.ctx.storage.setAlarm(Date.now() + row.capture_poll_ms);
   }
 
   private async pollDeviceAuth(row: SetupSessionRow): Promise<void> {
     const state = await this.readDeviceAuthState(row);
+    const current = this.readRow();
+    if (!current || current.status !== 'admitting') return;
     if (!state || state.status === 'starting') {
       await this.ctx.storage.setAlarm(Date.now() + row.capture_poll_ms);
       return;
@@ -318,7 +349,7 @@ export class CredentialSetupSession extends DurableObject<Env> {
     if (state.status === 'failed') {
       log.warn('credential_setup.device_auth_failed', { sessionId: row.id });
       await this.teardown(
-        row,
+        current,
         'failed',
         'device_auth_start_failed',
         'Codex could not start the sign-in flow'
@@ -326,9 +357,19 @@ export class CredentialSetupSession extends DurableObject<Env> {
       return;
     }
     if (state.status === 'waiting_for_user' && state.verificationUrl && state.userCode) {
-      this.setStatus(row.id, 'waiting_for_user');
-      await this.updateD1Status(row.id, 'waiting_for_user');
+      this.sql.exec(
+        `INSERT OR REPLACE INTO device_auth_details
+         (singleton, verification_url, user_code) VALUES (1, ?, ?)`,
+        state.verificationUrl,
+        state.userCode
+      );
+      this.setStatus(current.id, 'waiting_for_user');
+      await this.updateD1Status(current.id, 'waiting_for_user');
       await this.ctx.storage.setAlarm(Date.now() + row.capture_poll_ms);
+      return;
+    }
+    if (state.status === 'completed') {
+      await this.attemptCapture(current);
       return;
     }
     await this.ctx.storage.setAlarm(Date.now() + row.capture_poll_ms);
@@ -347,6 +388,17 @@ export class CredentialSetupSession extends DurableObject<Env> {
     }
   }
 
+  private readDeviceAuthDetails(): DeviceAuthDetailsRow | null {
+    return (
+      this.sql
+        .exec<DeviceAuthDetailsRow>(
+          `SELECT verification_url, user_code
+           FROM device_auth_details WHERE singleton = 1`
+        )
+        .toArray()[0] ?? null
+    );
+  }
+
   private async attemptCapture(row: SetupSessionRow): Promise<void> {
     const sandbox = await getSandboxInstance(this.env, row.id);
     const authPath = `${row.codex_home}/${AUTH_FILE}`;
@@ -357,9 +409,11 @@ export class CredentialSetupSession extends DurableObject<Env> {
       return;
     }
 
-    if (row.status !== 'capturing') {
-      this.setStatus(row.id, 'capturing');
-      await this.updateD1Status(row.id, 'capturing');
+    let current = this.readRow();
+    if (!current || isTerminalSetupStatus(current.status)) return;
+    if (current.status !== 'capturing') {
+      this.setStatus(current.id, 'capturing');
+      await this.updateD1Status(current.id, 'capturing');
     }
 
     const file = await sandbox.readFile(authPath);
@@ -381,8 +435,12 @@ export class CredentialSetupSession extends DurableObject<Env> {
       return;
     }
 
-    this.setStatus(row.id, 'saving');
-    await this.updateD1Status(row.id, 'saving');
+    current = this.readRow();
+    if (!current || isTerminalSetupStatus(current.status)) return;
+    this.setStatus(current.id, 'saving');
+    await this.updateD1Status(current.id, 'saving');
+    current = this.readRow();
+    if (!current || current.status !== 'saving') return;
     try {
       await saveAgentCredentialForUser({
         env: this.env,
@@ -429,6 +487,7 @@ export class CredentialSetupSession extends DurableObject<Env> {
     const current = this.readRow();
     if (!current || isTerminalSetupStatus(current.status)) return;
     this.setStatus(current.id, finalStatus, { errorCode, errorMessage, completed: true });
+    this.sql.exec(`DELETE FROM device_auth_details WHERE singleton = 1`);
 
     // 1. Delete captured credential file + scrub the setup dir.
     try {
