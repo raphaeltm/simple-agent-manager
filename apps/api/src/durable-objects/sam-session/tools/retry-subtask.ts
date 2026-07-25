@@ -272,7 +272,10 @@ export async function retrySubtask(
       userId: ctx.userId,
       vmSize: resolvedVmSize,
       vmLocation: resolvedVmLocation,
-      branch: original.projectDefaultBranch,
+      // Retried subtasks have their own output branch. Check that out from the
+      // start so VM-agent completion pushes cannot land on the project default
+      // branch.
+      branch: branchName,
       defaultBranch: original.projectDefaultBranch,
       userName: userRow?.name ?? null,
       userEmail: userRow?.email ?? null,

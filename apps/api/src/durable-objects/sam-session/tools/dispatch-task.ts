@@ -286,7 +286,7 @@ export async function dispatchTask(
     ?? project.defaultAgentType
     ?? null;
 
-  const checkoutBranch = input.branch?.trim() || project.defaultBranch;
+  const explicitBranch = input.branch?.trim();
 
   // Validate location against resolved provider
   if (resolvedProvider !== null && !isValidLocationForProvider(resolvedProvider, resolvedVmLocation)) {
@@ -325,6 +325,10 @@ export async function dispatchTask(
     prefix: branchPrefix,
     maxLength: branchMaxLength,
   });
+  // Explicit branch means "continue work from this branch"; otherwise task
+  // work must start on the generated output branch so VM-agent completion
+  // pushes cannot land on the repository default branch.
+  const checkoutBranch = explicitBranch || branchName;
 
   // ── Resource Requirements Resolution (Phase 0 — audit-only) ──
   const resolvedReservation = resolveResourceReservation(

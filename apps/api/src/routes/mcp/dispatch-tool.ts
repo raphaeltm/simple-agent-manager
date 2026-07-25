@@ -356,8 +356,10 @@ export async function handleDispatchTask(requestId: string | number | null, para
   // Agent type: explicit → profile → project default → platform default
   const resolvedAgentType: string | null = explicitAgentType ?? resolvedProfile?.agentType ?? project.defaultAgentType ?? null;
 
-  // Explicit branch > project default branch.
-  const checkoutBranch = explicitBranch || project.defaultBranch;
+  // Explicit branch means "continue work from this branch"; otherwise task
+  // work must start on the generated output branch so VM-agent completion
+  // pushes cannot land on the repository default branch.
+  const checkoutBranch = explicitBranch || branchName;
 
   // ── Verify cloud credentials and enforce quota ──────────────────────────
   // Uses resolveCredentialSource to determine whether the user's own credential

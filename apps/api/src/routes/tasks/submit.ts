@@ -400,10 +400,10 @@ submitRoutes.post('/submit', requireAuth(), requireApproved(), jsonValidator(Sub
     ?? (resolvedProfile?.taskMode as import('@simple-agent-manager/shared').TaskMode | null)
     ?? (workspaceProfile === 'lightweight' ? 'conversation' : 'task');
 
-  // Always clone from the project's default branch. Forked tasks get parent
-  // context via contextSummary — the parent's output branch may not exist on
-  // the remote (agent may not have pushed, or branch was deleted).
-  const branch = project.defaultBranch;
+  // Start new task work on its generated output branch so VM-agent completion
+  // pushes cannot land on the repository default branch. Forked tasks get parent
+  // context via contextSummary instead of checking out the parent's branch.
+  const branch = branchName;
 
   // Use a deterministic title immediately. AI title refinement runs after the
   // task/session exist so submit latency is not coupled to model latency.

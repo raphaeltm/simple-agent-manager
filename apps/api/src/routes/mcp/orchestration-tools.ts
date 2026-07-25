@@ -298,7 +298,10 @@ export async function handleRetrySubtask(
     ? null
     : (project.defaultDevcontainerConfigName ?? null);
 
-  const checkoutBranch = project.defaultBranch;
+  // Retried/replacement subtasks have their own output branch. Check that out
+  // from the start so VM-agent completion pushes cannot land on the project
+  // default branch.
+  const checkoutBranch = branchName;
 
   // ── Resource Requirements Resolution (Phase 0 — audit-only) ──
   const resolvedReservation = resolveResourceReservation(

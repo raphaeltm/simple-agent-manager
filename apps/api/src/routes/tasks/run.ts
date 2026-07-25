@@ -169,7 +169,10 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
   const devcontainerConfigName: string | null = workspaceProfile === 'lightweight'
     ? null
     : (body.devcontainerConfigName ?? project.defaultDevcontainerConfigName ?? null);
-  const branch = body.branch ?? project.defaultBranch;
+  // Explicit run branch means "continue work from this branch". Otherwise,
+  // use the task output branch when present so VM-agent completion pushes cannot
+  // land on the repository default branch.
+  const branch = body.branch?.trim() || task.outputBranch || project.defaultBranch;
 
   // Validate location against provider
   if (provider !== null && !isValidLocationForProvider(provider, vmLocation)) {
