@@ -73,28 +73,44 @@ test('UI: desktop and mobile expose native open/copy actions without a terminal'
 
   const open = page.getByRole('link', { name: /open openai sign-in/i });
   const copy = page.getByRole('button', { name: /copy code/i });
+  const code = page.locator('code').filter({ hasText: /^[A-Z0-9-]{4,}$/i });
   await expect(open).toBeVisible({ timeout: 120_000 });
   await expect(copy).toBeVisible();
   await expect(open).toHaveAttribute('href', /^https:\/\/([a-z0-9-]+\.)*openai\.com\//i);
+  await expect(code).toBeVisible();
   await expect(page.getByTestId('codex-terminal')).toHaveCount(0);
 
+  const exerciseNativeActions = async () => {
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)
+    ).toBe(true);
+    const [signInPage] = await Promise.all([page.context().waitForEvent('page'), open.click()]);
+    await signInPage.waitForLoadState('domcontentloaded');
+    expect(new URL(signInPage.url()).hostname).toMatch(/(^|\.)openai\.com$/i);
+    await signInPage.close();
+
+    await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+    await page.getByRole('button', { name: /copy code|copied/i }).click();
+    await expect(page.getByRole('button', { name: /copied/i })).toBeVisible();
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
+      (await code.textContent())?.trim()
+    );
+  };
+
+  await exerciseNativeActions();
   await page.screenshot({
     path: `${SCREENSHOT_DIR}/codex-connect-modal-desktop.png`,
     fullPage: true,
   });
   await page.setViewportSize({ width: 375, height: 667 });
   await expect(open).toBeVisible();
-  await expect(copy).toBeVisible();
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
-    true
-  );
+  await expect(page.getByRole('button', { name: /copy code|copied/i })).toBeVisible();
+  await exerciseNativeActions();
   await page.screenshot({
     path: `${SCREENSHOT_DIR}/codex-connect-modal-mobile.png`,
     fullPage: true,
   });
 
-  await copy.click();
-  await expect(page.getByRole('button', { name: /copied/i })).toBeVisible();
   await page
     .getByRole('button', { name: /^cancel$/i })
     .click()
