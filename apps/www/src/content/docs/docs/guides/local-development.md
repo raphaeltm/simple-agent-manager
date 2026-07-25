@@ -21,18 +21,19 @@ pnpm dev
 ```
 
 This starts:
+
 - **API** at `http://localhost:8787` (Wrangler with Miniflare)
 - **Web UI** at `http://localhost:5173` (Vite dev server)
 
 ### Limitations
 
-| Feature | Local | Staging |
-|---------|-------|---------|
-| GitHub OAuth | No (callbacks won't work) | Yes |
-| DNS/subdomains | No | Yes |
-| VM provisioning | No | Yes |
-| D1/KV/R2 | Emulated (may differ) | Real |
-| Agent sessions | No | Yes |
+| Feature         | Local                     | Staging |
+| --------------- | ------------------------- | ------- |
+| GitHub OAuth    | No (callbacks won't work) | Yes     |
+| DNS/subdomains  | No                        | Yes     |
+| VM provisioning | No                        | Yes     |
+| D1/KV/R2        | Emulated (may differ)     | Real    |
+| Agent sessions  | No                        | Yes     |
 
 ## Prerequisites
 
@@ -109,7 +110,7 @@ apps/
 
 packages/
 ├── shared/       # Shared types and utilities
-├── providers/    # Cloud provider abstraction (Hetzner, Scaleway, GCP, Vultr, DigitalOcean)
+├── providers/    # Cloud provider abstraction (Hetzner, Scaleway, GCP, Vultr, Infomaniak, DigitalOcean)
 ├── cloud-init/   # Cloud-init template generator
 ├── terminal/     # Shared terminal component (xterm.js)
 ├── ui/           # Design system components

@@ -22,10 +22,10 @@ Workspaces are **ephemeral** — they exist for a session of work and are cleane
 
 When you start a chat you can choose a workspace profile:
 
-| Profile            | Best for                                                                 |
-| ------------------ | ------------------------------------------------------------------------ |
+| Profile            | Best for                                                                   |
+| ------------------ | -------------------------------------------------------------------------- |
 | **Full** (default) | Work where the agent needs to run your stack — builds your `.devcontainer` |
-| **Lightweight**    | Quick questions and code exploration — starts faster                     |
+| **Lightweight**    | Quick questions and code exploration — starts faster                       |
 
 ### Port Exposure
 
@@ -47,7 +47,7 @@ After a piece of work finishes, SAM keeps the environment **warm** for a short w
 
 ## Providers
 
-A **provider** is the cloud your compute runs on. For running workspaces, SAM supports **Hetzner**, **Scaleway**, **Vultr**, **DigitalOcean**, and **Google Cloud**. SAM follows a **Bring Your Own Cloud (BYOC)** model: you add your own provider credential in **Settings → Cloud Provider** (or **Connections**), and VM costs are billed directly to your account. On the hosted platform, compute can be provided for you, so you may not need your own credential. Cloud credentials are never stored as environment variables.
+A **provider** is the cloud your compute runs on. For running workspaces, SAM supports **Hetzner**, **Scaleway**, **Vultr**, **Infomaniak**, **DigitalOcean**, and **Google Cloud**. SAM follows a **Bring Your Own Cloud (BYOC)** model: you add your own provider credential in **Settings → Cloud Provider** (or **Connections**), and VM costs are billed directly to your account. On the hosted platform, compute can be provided for you, so you may not need your own credential. Cloud credentials are never stored as environment variables.
 
 You can set a **default provider** and **default VM size** per project. The exact machine types, regions, and pricing are shown in the size picker when you start work.
 
@@ -113,14 +113,14 @@ An **agent session** is an AI coding agent conversation running inside a workspa
 
 SAM supports six AI coding agents:
 
-| Agent             | Provider                   | API Key Variable    |
-| ----------------- | -------------------------- | ------------------- |
-| **Claude Code**   | Anthropic                  | `ANTHROPIC_API_KEY` |
-| **OpenAI Codex**  | OpenAI                     | `OPENAI_API_KEY`    |
-| **Gemini CLI**    | Google                     | `GEMINI_API_KEY`    |
-| **Mistral Vibe**  | Mistral                    | `MISTRAL_API_KEY`   |
-| **OpenCode**      | OpenCode managed inference | `OPENCODE_API_KEY`  |
-| **Amp**           | Sourcegraph                | `AMP_API_KEY`       |
+| Agent            | Provider                   | API Key Variable    |
+| ---------------- | -------------------------- | ------------------- |
+| **Claude Code**  | Anthropic                  | `ANTHROPIC_API_KEY` |
+| **OpenAI Codex** | OpenAI                     | `OPENAI_API_KEY`    |
+| **Gemini CLI**   | Google                     | `GEMINI_API_KEY`    |
+| **Mistral Vibe** | Mistral                    | `MISTRAL_API_KEY`   |
+| **OpenCode**     | OpenCode managed inference | `OPENCODE_API_KEY`  |
+| **Amp**          | Sourcegraph                | `AMP_API_KEY`       |
 
 You choose which agent to run by selecting an **agent profile** in the chat. See the [AI Agents guide](/docs/guides/agents/) for how to connect credentials and configure profiles.
 
@@ -140,14 +140,14 @@ See the [AI Agents guide](/docs/guides/agents/) and [Chat Features guide](/docs/
 
 SAM includes an in-app notification system with real-time delivery via WebSocket:
 
-| Type            | Urgency | Trigger                                  |
-| --------------- | ------- | ---------------------------------------- |
-| `task_complete` | Medium  | A task finishes executing successfully   |
-| `needs_input`   | High    | Agent is blocked and needs your decision |
-| `error`         | High    | Execution fails                          |
-| `progress`      | Low     | Agent reports incremental progress       |
+| Type            | Urgency | Trigger                                    |
+| --------------- | ------- | ------------------------------------------ |
+| `task_complete` | Medium  | A task finishes executing successfully     |
+| `needs_input`   | High    | Agent is blocked and needs your decision   |
+| `error`         | High    | Execution fails                            |
+| `progress`      | Low     | Agent reports incremental progress         |
 | `session_ended` | Medium  | A conversation-mode session turn completes |
-| `pr_created`    | Medium  | Agent creates a pull request             |
+| `pr_created`    | Medium  | Agent creates a pull request               |
 
 See the [Notifications guide](/docs/guides/notifications/) for full details.
 

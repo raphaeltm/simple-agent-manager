@@ -233,12 +233,12 @@ export function validateCloudInitVariables(variables: CloudInitVariables): void 
 }
 
 /** Valid cloud provider values for cloud-init. */
-export const VALID_CLOUD_PROVIDERS = ['hetzner', 'scaleway', 'gcp', 'vultr', 'infomaniak'] as const;
 export const VALID_CLOUD_PROVIDERS = [
   'hetzner',
   'scaleway',
   'gcp',
   'vultr',
+  'infomaniak',
   'digitalocean',
 ] as const;
 export type CloudProvider = (typeof VALID_CLOUD_PROVIDERS)[number];
