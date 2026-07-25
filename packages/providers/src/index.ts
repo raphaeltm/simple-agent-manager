@@ -5,6 +5,7 @@ import { ScalewayProvider } from './scaleway';
 import type { Provider, ProviderConfig } from './types';
 import { ProviderError } from './types';
 import { VultrProvider } from './vultr';
+import { UpCloudProvider } from './upcloud';
 
 // Re-export types
 export type {
@@ -35,6 +36,7 @@ export type {
   VolumeResizeConfig,
   VolumeStatus,
   VultrProviderConfig,
+  UpCloudProviderConfig,
 } from './types';
 export {
   ProviderError,
@@ -107,6 +109,21 @@ export {
   VultrProvider,
 } from './vultr';
 export { VULTR_VOLUME_MAX_SIZE_GB, VULTR_VOLUME_MIN_SIZE_GB } from './vultr-volumes';
+export type { UpCloudProviderRuntimeOptions } from './upcloud';
+export {
+  classifyUpCloudError,
+  DEFAULT_UPCLOUD_IMAGE_TITLE,
+  DEFAULT_UPCLOUD_IP_POLL_INTERVAL_MS,
+  DEFAULT_UPCLOUD_IP_POLL_TIMEOUT_MS,
+  DEFAULT_UPCLOUD_REQUEST_TIMEOUT_MS,
+  DEFAULT_UPCLOUD_STOP_TIMEOUT_SECONDS,
+  DEFAULT_UPCLOUD_ZONE,
+  mapUpCloudStatus,
+  UPCLOUD_LOCATIONS,
+  UPCLOUD_VOLUME_MAX_SIZE_GB,
+  UPCLOUD_VOLUME_MIN_SIZE_GB,
+  UpCloudProvider,
+} from './upcloud';
 
 /**
  * Create a provider instance from explicit configuration.
@@ -155,6 +172,16 @@ export function createProvider(config: ProviderConfig): Provider {
         requestTimeoutMs: config.requestTimeoutMs,
         ipPollTimeoutMs: config.ipPollTimeoutMs,
         ipPollIntervalMs: config.ipPollIntervalMs,
+        logger: config.logger,
+      });
+    case 'upcloud':
+      return new UpCloudProvider(config.username, config.password, {
+        zone: config.zone,
+        imageTitle: config.imageTitle,
+        requestTimeoutMs: config.requestTimeoutMs,
+        ipPollTimeoutMs: config.ipPollTimeoutMs,
+        ipPollIntervalMs: config.ipPollIntervalMs,
+        stopTimeoutSeconds: config.stopTimeoutSeconds,
         logger: config.logger,
       });
     case 'gcp':

@@ -1,8 +1,13 @@
-import { Button,Card } from '@simple-agent-manager/ui';
+import { Button, Card } from '@simple-agent-manager/ui';
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
 
-import { getTrialStatus, listCredentials, listGitHubInstallations, listWorkspaces } from '../lib/api';
+import {
+  getTrialStatus,
+  listCredentials,
+  listGitHubInstallations,
+  listWorkspaces,
+} from '../lib/api';
 import { useAuth } from './AuthProvider';
 
 interface OnboardingStep {
@@ -40,7 +45,14 @@ export function OnboardingChecklist() {
         getTrialStatus().catch(() => null),
       ]);
 
-      const hasUserCreds = credentials.some((c) => c.provider === 'hetzner' || c.provider === 'scaleway' || c.provider === 'vultr' || c.provider === 'infomaniak');
+      const hasUserCreds = credentials.some(
+        (c) =>
+          c.provider === 'hetzner' ||
+          c.provider === 'scaleway' ||
+          c.provider === 'vultr' ||
+          c.provider === 'infomaniak' ||
+          c.provider === 'upcloud'
+      );
       const trialAvailable = trial?.available ?? false;
       const hasCloudProvider = hasUserCreds || trialAvailable;
       const hasGitHubApp = installations.length > 0;
@@ -94,9 +106,7 @@ export function OnboardingChecklist() {
   return (
     <Card className="p-4 mb-6">
       <div className="flex items-center justify-between mb-3">
-        <h3 className="m-0 text-base font-semibold text-fg-primary">
-          Get Started
-        </h3>
+        <h3 className="m-0 text-base font-semibold text-fg-primary">Get Started</h3>
         <Button variant="ghost" size="sm" onClick={handleDismiss}>
           Dismiss
         </Button>

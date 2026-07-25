@@ -1,5 +1,9 @@
 import { InfomaniakProvider } from '@simple-agent-manager/providers';
-import type { AgentType, CredentialKind, CredentialValidationStatus } from '@simple-agent-manager/shared';
+import type {
+  AgentType,
+  CredentialKind,
+  CredentialValidationStatus,
+} from '@simple-agent-manager/shared';
 import { DEFAULT_SCALEWAY_ZONE, getAgentDefinition } from '@simple-agent-manager/shared';
 
 import { expectJsonRecord, maybeJsonRecord } from '../lib/runtime-validation';
@@ -71,11 +75,17 @@ export function validateOpenAICodexAuthJson(credential: string): OpenAIAuthJsonV
   // Hard requirement: must have a tokens object with at least access_token
   const tokens = maybeJsonRecord(parsed.tokens) ?? undefined;
   if (!tokens || typeof tokens !== 'object') {
-    return { valid: false, error: 'Missing "tokens" object. Paste the full contents of ~/.codex/auth.json' };
+    return {
+      valid: false,
+      error: 'Missing "tokens" object. Paste the full contents of ~/.codex/auth.json',
+    };
   }
 
   if (typeof tokens.access_token !== 'string' || tokens.access_token.length === 0) {
-    return { valid: false, error: 'Missing access_token in tokens. This does not look like a valid auth.json.' };
+    return {
+      valid: false,
+      error: 'Missing access_token in tokens. This does not look like a valid auth.json.',
+    };
   }
 
   // Everything else is best-effort: warn but don't reject.
@@ -96,9 +106,11 @@ export function validateOpenAICodexAuthJson(credential: string): OpenAIAuthJsonV
 
   const accessClaims = decodeJwtPayload(tokens.access_token as string);
   if (accessClaims && typeof accessClaims.exp === 'number') {
-    isExpired = (accessClaims.exp * 1000) < Date.now();
+    isExpired = accessClaims.exp * 1000 < Date.now();
     if (isExpired) {
-      warnings.push('Access token appears expired. codex-acp will attempt to refresh it automatically.');
+      warnings.push(
+        'Access token appears expired. codex-acp will attempt to refresh it automatically.'
+      );
     }
   }
 
@@ -119,7 +131,6 @@ export function validateOpenAICodexAuthJson(credential: string): OpenAIAuthJsonV
     metadata: { planType, isExpired },
   };
 }
-
 
 const DEFAULT_CREDENTIAL_VALIDATION_TIMEOUT_MS = 8000;
 
@@ -162,13 +173,13 @@ function providerUnavailable(displayName: string, err: unknown): CredentialValid
 async function runProviderCheck(
   check: ProviderCheck,
   successMessage: string,
-  options: CredentialValidationOptions = {},
+  options: CredentialValidationOptions = {}
 ): Promise<CredentialValidationStatus> {
   try {
     const response = await fetchWithTimeout(
       check.request,
       check.init,
-      options.timeoutMs ?? DEFAULT_CREDENTIAL_VALIDATION_TIMEOUT_MS,
+      options.timeoutMs ?? DEFAULT_CREDENTIAL_VALIDATION_TIMEOUT_MS
     );
 
     if (response.ok) {
@@ -187,7 +198,7 @@ export function formatOnlyValidation(message: string): CredentialValidationStatu
 
 export async function validateHetznerCredentialWithProvider(
   token: string,
-  options?: CredentialValidationOptions,
+  options?: CredentialValidationOptions
 ): Promise<CredentialValidationStatus> {
   return runProviderCheck(
     {
@@ -196,14 +207,14 @@ export async function validateHetznerCredentialWithProvider(
       init: { headers: { Authorization: `Bearer ${token}` } },
     },
     'Hetzner credential validated.',
-    options,
+    options
   );
 }
 
 export async function validateScalewayCredentialWithProvider(
   secretKey: string,
   projectId: string,
-  options?: CredentialValidationOptions,
+  options?: CredentialValidationOptions
 ): Promise<CredentialValidationStatus> {
   const query = new URLSearchParams({ per_page: '1', project: projectId });
   return runProviderCheck(
@@ -213,7 +224,7 @@ export async function validateScalewayCredentialWithProvider(
       init: { headers: { 'X-Auth-Token': secretKey } },
     },
     'Scaleway credential validated.',
-    options,
+    options
   );
 }
 
@@ -251,7 +262,7 @@ export async function validateInfomaniakCredentialWithProvider(
 
 export async function validateVultrCredentialWithProvider(
   token: string,
-  options?: CredentialValidationOptions,
+  options?: CredentialValidationOptions
 ): Promise<CredentialValidationStatus> {
   return runProviderCheck(
     {
@@ -260,18 +271,39 @@ export async function validateVultrCredentialWithProvider(
       init: { headers: { Authorization: `Bearer ${token}` } },
     },
     'Vultr credential validated.',
-    options,
+    options
+  );
+}
+
+export async function validateUpCloudCredentialWithProvider(
+  username: string,
+  password: string,
+  options?: CredentialValidationOptions
+): Promise<CredentialValidationStatus> {
+  return runProviderCheck(
+    {
+      displayName: 'UpCloud',
+      request: 'https://api.upcloud.com/1.3/account',
+      init: { headers: { Authorization: 'Basic ' + btoa(username + ':' + password) } },
+    },
+    'UpCloud credential validated.',
+    options
   );
 }
 
 export async function validateAgentApiKeyCredentialWithProvider(
   agentType: AgentType,
   credential: string,
-  options?: CredentialValidationOptions,
+  options?: CredentialValidationOptions
 ): Promise<CredentialValidationStatus> {
   const agentDef = getAgentDefinition(agentType);
   if (!agentDef) {
-    return { valid: false, message: 'Unknown agent type', error: 'Unknown agent type', validationMode: 'format' };
+    return {
+      valid: false,
+      message: 'Unknown agent type',
+      error: 'Unknown agent type',
+      validationMode: 'format',
+    };
   }
 
   if (agentDef.provider === 'anthropic') {
@@ -287,7 +319,7 @@ export async function validateAgentApiKeyCredentialWithProvider(
         },
       },
       `${agentDef.name} credential validated.`,
-      options,
+      options
     );
   }
 
@@ -299,11 +331,13 @@ export async function validateAgentApiKeyCredentialWithProvider(
         init: { headers: { Authorization: `Bearer ${credential}` } },
       },
       `${agentDef.name} credential validated.`,
-      options,
+      options
     );
   }
 
-  return formatOnlyValidation('Credential format looks valid. Provider reachability validation is not available for this agent.');
+  return formatOnlyValidation(
+    'Credential format looks valid. Provider reachability validation is not available for this agent.'
+  );
 }
 
 /**
@@ -356,7 +390,8 @@ export class CredentialValidator {
         if (credential.startsWith(CLAUDE_OAUTH_TOKEN_PREFIX)) {
           return {
             valid: false,
-            error: 'This looks like a Claude OAuth token. Please use the "OAuth Token (Pro/Max)" option instead.',
+            error:
+              'This looks like a Claude OAuth token. Please use the "OAuth Token (Pro/Max)" option instead.',
           };
         }
 
@@ -386,7 +421,8 @@ export class CredentialValidator {
       if (credential.startsWith(ANTHROPIC_API_KEY_PREFIX)) {
         return {
           valid: false,
-          error: 'This looks like an API key, not an OAuth token. Please use the "API Key" option instead.',
+          error:
+            'This looks like an API key, not an OAuth token. Please use the "API Key" option instead.',
         };
       }
     }
@@ -401,7 +437,11 @@ export class CredentialValidator {
    * @param agentType Optional agent type for agent-specific messages
    * @returns User-friendly error message
    */
-  static getCredentialErrorMessage(kind: CredentialKind, error: string, agentType?: AgentType): string {
+  static getCredentialErrorMessage(
+    kind: CredentialKind,
+    error: string,
+    agentType?: AgentType
+  ): string {
     if (kind === 'oauth-token') {
       if (agentType === 'openai-codex') {
         if (error.includes('401') || error.includes('unauthorized')) {

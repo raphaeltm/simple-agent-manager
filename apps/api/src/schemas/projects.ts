@@ -1,7 +1,7 @@
 import { VALID_PERMISSION_MODES } from '@simple-agent-manager/shared';
 import * as v from 'valibot';
 
-const CredentialProviderSchema = v.picklist(['hetzner', 'scaleway', 'gcp', 'vultr', 'infomaniak']);
+const CredentialProviderSchema = v.picklist(['hetzner', 'scaleway', 'gcp', 'vultr', 'infomaniak', 'upcloud']);
 const VMSizeSchema = v.picklist(['small', 'medium', 'large']);
 const WorkspaceProfileSchema = v.picklist(['full', 'lightweight']);
 

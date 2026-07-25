@@ -11,6 +11,7 @@ const COMPUTE_LABELS: Record<string, string> = {
   gcp: 'Google Cloud (GCP)',
   vultr: 'Vultr',
   infomaniak: 'Infomaniak Public Cloud',
+  upcloud: 'UpCloud',
 };
 
 interface ConfigurationSectionProps {
@@ -131,7 +132,10 @@ function ConfigurationCard({
           </Alert>
         )}
         <div className="flex flex-col gap-1">
-          <label htmlFor={`cc-cfg-edit-name-${cfg.id}`} className="text-xs font-medium text-fg-muted">
+          <label
+            htmlFor={`cc-cfg-edit-name-${cfg.id}`}
+            className="text-xs font-medium text-fg-muted"
+          >
             Name
           </label>
           <Input

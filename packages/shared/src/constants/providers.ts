@@ -11,6 +11,7 @@ export const PROVIDER_LABELS: Record<CredentialProvider, string> = {
   gcp: 'Google Cloud',
   vultr: 'Vultr',
   infomaniak: 'Infomaniak Public Cloud',
+  upcloud: 'UpCloud',
 };
 
 /** Provider console URLs and help text for onboarding / credential setup. */
@@ -48,6 +49,12 @@ export const PROVIDER_HELP: Record<CredentialProvider, ProviderHelpMeta> = {
     helpUrl: 'https://docs.infomaniak.cloud/identity/applications_credentials/',
     helpText:
       'Create an application credential with reader and member roles (both are required in dc4-a), then copy its ID and one-time secret',
+  },
+  upcloud: {
+    description: 'European cloud with global regions',
+    helpUrl: 'https://hub.upcloud.com/people/accounts',
+    helpText:
+      'Create a dedicated API subaccount with server and storage permissions, then enter its username and password',
   },
 };
 
@@ -106,6 +113,18 @@ export const PROVIDER_LOCATIONS: Record<CredentialProvider, LocationMeta[]> = {
     { id: 'dc4-a', name: 'Geneva DC4', country: 'CH' },
     { id: 'dc3-a', name: 'Geneva DC3', country: 'CH' },
   ],
+  upcloud: [
+    { id: 'de-fra1', name: 'Frankfurt', country: 'DE' },
+    { id: 'fi-hel1', name: 'Helsinki 1', country: 'FI' },
+    { id: 'fi-hel2', name: 'Helsinki 2', country: 'FI' },
+    { id: 'nl-ams1', name: 'Amsterdam', country: 'NL' },
+    { id: 'uk-lon1', name: 'London', country: 'GB' },
+    { id: 'us-chi1', name: 'Chicago', country: 'US' },
+    { id: 'us-nyc1', name: 'New York', country: 'US' },
+    { id: 'us-sjo1', name: 'San Jose', country: 'US' },
+    { id: 'sg-sin1', name: 'Singapore', country: 'SG' },
+    { id: 'au-syd1', name: 'Sydney', country: 'AU' },
+  ],
 };
 
 /** Default location per provider. */
@@ -115,6 +134,7 @@ export const PROVIDER_DEFAULT_LOCATIONS: Record<CredentialProvider, string> = {
   gcp: 'us-central1-a',
   vultr: 'fra',
   infomaniak: 'dc4-a',
+  upcloud: 'de-fra1',
 };
 
 /** Flat lookup of all locations (derived from PROVIDER_LOCATIONS). */

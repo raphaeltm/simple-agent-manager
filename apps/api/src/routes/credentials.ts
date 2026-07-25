@@ -67,6 +67,7 @@ import {
   validateInfomaniakCredentialWithProvider,
   validateScalewayCredentialWithProvider,
   validateVultrCredentialWithProvider,
+  validateUpCloudCredentialWithProvider,
 } from '../services/validation';
 
 const credentialsRoutes = new Hono<{ Bindings: Env }>();
@@ -106,6 +107,16 @@ function getCloudCredentialFields(body: CreateCredentialRequest): CloudCredentia
         tokenToValidate: serializeCredentialToken(providerName, {
           applicationCredentialId: body.applicationCredentialId,
           applicationCredentialSecret: body.applicationCredentialSecret,
+        }),
+      };
+    case 'upcloud':
+      if (!body.username || !body.password)
+        throw errors.badRequest('Username and password are required for UpCloud');
+      return {
+        providerName,
+        tokenToValidate: serializeCredentialToken(providerName, {
+          username: body.username,
+          password: body.password,
         }),
       };
     case 'gcp':
@@ -179,6 +190,12 @@ async function validateCloudCredentialRequest(
         region: env.INFOMANIAK_REGION,
       }
     );
+  }
+
+  if (body.provider === 'upcloud') {
+    return validateUpCloudCredentialWithProvider(body.username, body.password, {
+      timeoutMs: getSaveValidationTimeoutMs(env),
+    });
   }
 
   return formatOnlyValidation(

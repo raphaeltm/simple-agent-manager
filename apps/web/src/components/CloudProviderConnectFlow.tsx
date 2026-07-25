@@ -18,6 +18,8 @@ type CloudFormState = {
   token: string;
   secretKey: string;
   projectId: string;
+  username: string;
+  password: string;
   gcpProjectId: string;
   gcpProjectNumber: string;
   serviceAccountEmail: string;
@@ -32,6 +34,8 @@ const EMPTY_FORM: CloudFormState = {
   token: '',
   secretKey: '',
   projectId: '',
+  username: '',
+  password: '',
   gcpProjectId: '',
   gcpProjectNumber: '',
   serviceAccountEmail: '',
@@ -69,6 +73,9 @@ function buildRequest(provider: CredentialProvider, form: CloudFormState): Creat
   if (provider === 'vultr') {
     return { provider, token: form.token.trim() };
   }
+  if (provider === 'upcloud') {
+    return { provider, username: form.username.trim(), password: form.password.trim() };
+  }
   if (provider === 'infomaniak')
     return {
       provider,
@@ -96,6 +103,8 @@ function buildRequest(provider: CredentialProvider, form: CloudFormState): Creat
 function isReady(provider: CredentialProvider | '', form: CloudFormState): boolean {
   if (provider === 'hetzner') return form.token.trim().length > 0;
   if (provider === 'vultr') return form.token.trim().length > 0;
+  if (provider === 'upcloud')
+    return form.username.trim().length > 0 && form.password.trim().length > 0;
   if (provider === 'infomaniak')
     return (
       form.applicationCredentialId.trim().length > 0 &&
@@ -235,6 +244,25 @@ export function CloudProviderConnectFlow({
               onChange={(value) => setField('token', value)}
               placeholder="Vultr Personal Access Token"
             />
+          )}
+
+          {provider === 'upcloud' && (
+            <>
+              <TextInput
+                id="cloud-upcloud-username"
+                label="UpCloud API username"
+                value={form.username}
+                onChange={(value) => setField('username', value)}
+                placeholder="API subaccount username"
+              />
+              <CredentialInput
+                id="cloud-upcloud-password"
+                label="UpCloud API password"
+                value={form.password}
+                onChange={(value) => setField('password', value)}
+                placeholder="API subaccount password"
+              />
+            </>
           )}
 
           {provider === 'infomaniak' && (

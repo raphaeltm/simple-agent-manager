@@ -39,6 +39,8 @@ export function serializeCredentialToken(
         applicationCredentialId: fields.applicationCredentialId,
         applicationCredentialSecret: fields.applicationCredentialSecret,
       });
+    case 'upcloud':
+      return JSON.stringify({ username: fields.username, password: fields.password });
     case 'gcp':
       return JSON.stringify({
         version: GCP_CREDENTIAL_VERSION,
@@ -106,6 +108,16 @@ export interface InfomaniakRuntimeEnv {
   INFOMANIAK_IP_POLL_INTERVAL_MS?: string;
 }
 
+export interface UpCloudRuntimeEnv {
+  UPCLOUD_API_URL?: string;
+  UPCLOUD_ZONE?: string;
+  UPCLOUD_IMAGE_TITLE?: string;
+  UPCLOUD_API_TIMEOUT_MS?: string;
+  UPCLOUD_IP_POLL_TIMEOUT_MS?: string;
+  UPCLOUD_IP_POLL_INTERVAL_MS?: string;
+  UPCLOUD_STOP_TIMEOUT_SECONDS?: string;
+}
+
 export interface VultrRuntimeEnv {
   VULTR_REGION?: string;
   VULTR_OS_NAME?: string;
@@ -121,7 +133,7 @@ export interface VultrRuntimeEnv {
 export function buildProviderConfig(
   provider: CredentialProvider,
   decryptedToken: string,
-  providerEnv?: HetznerCapacityRetryEnv & VultrRuntimeEnv & InfomaniakRuntimeEnv
+  providerEnv?: HetznerCapacityRetryEnv & VultrRuntimeEnv & InfomaniakRuntimeEnv & UpCloudRuntimeEnv
 ): ProviderConfig {
   switch (provider) {
     case 'hetzner':
@@ -182,6 +194,34 @@ export function buildProviderConfig(
         requestTimeoutMs: parseOptionalInt(providerEnv?.INFOMANIAK_API_TIMEOUT_MS),
         ipPollTimeoutMs: parseOptionalInt(providerEnv?.INFOMANIAK_IP_POLL_TIMEOUT_MS),
         ipPollIntervalMs: parseOptionalInt(providerEnv?.INFOMANIAK_IP_POLL_INTERVAL_MS),
+      };
+    }
+    case 'upcloud': {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(decryptedToken);
+      } catch {
+        throw new Error('Invalid UpCloud credential format: malformed stored data');
+      }
+      const obj = expectJsonRecord(parsed, 'provider.upcloud_credential');
+      if (
+        typeof obj.username !== 'string' ||
+        !obj.username ||
+        typeof obj.password !== 'string' ||
+        !obj.password
+      )
+        throw new Error('Invalid UpCloud credential format: missing username or password');
+      return {
+        provider: 'upcloud',
+        username: obj.username,
+        password: obj.password,
+        apiUrl: providerEnv?.UPCLOUD_API_URL,
+        zone: providerEnv?.UPCLOUD_ZONE,
+        imageTitle: providerEnv?.UPCLOUD_IMAGE_TITLE,
+        requestTimeoutMs: parseOptionalInt(providerEnv?.UPCLOUD_API_TIMEOUT_MS),
+        ipPollTimeoutMs: parseOptionalInt(providerEnv?.UPCLOUD_IP_POLL_TIMEOUT_MS),
+        ipPollIntervalMs: parseOptionalInt(providerEnv?.UPCLOUD_IP_POLL_INTERVAL_MS),
+        stopTimeoutSeconds: parseOptionalInt(providerEnv?.UPCLOUD_STOP_TIMEOUT_SECONDS),
       };
     }
     case 'scaleway': {

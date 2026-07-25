@@ -1,17 +1,35 @@
-import { DEVCONTAINER_CONFIG_NAME_MAX_LENGTH, DEVCONTAINER_CONFIG_NAME_REGEX } from '@simple-agent-manager/shared';
+import {
+  DEVCONTAINER_CONFIG_NAME_MAX_LENGTH,
+  DEVCONTAINER_CONFIG_NAME_REGEX,
+} from '@simple-agent-manager/shared';
 import * as v from 'valibot';
 
 const VMSizeSchema = v.picklist(['small', 'medium', 'large']);
 const VMLocationSchema = v.string();
 const WorkspaceProfileSchema = v.picklist(['full', 'lightweight']);
-const CredentialProviderSchema = v.picklist(['hetzner', 'scaleway', 'gcp', 'vultr', 'infomaniak']);
+const CredentialProviderSchema = v.picklist(['hetzner', 'scaleway', 'gcp', 'vultr', 'infomaniak', 'upcloud']);
 const TaskModeSchema = v.picklist(['task', 'conversation']);
 const TaskStatusSchema = v.picklist([
-  'draft', 'ready', 'queued', 'delegated', 'in_progress', 'completed', 'failed', 'cancelled',
+  'draft',
+  'ready',
+  'queued',
+  'delegated',
+  'in_progress',
+  'completed',
+  'failed',
+  'cancelled',
 ]);
 const TaskExecutionStepSchema = v.picklist([
-  'node_selection', 'node_provisioning', 'node_agent_ready', 'workspace_creation',
-  'workspace_dispatch', 'workspace_ready', 'attachment_transfer', 'agent_session', 'running', 'awaiting_followup',
+  'node_selection',
+  'node_provisioning',
+  'node_agent_ready',
+  'workspace_creation',
+  'workspace_dispatch',
+  'workspace_ready',
+  'attachment_transfer',
+  'agent_session',
+  'running',
+  'awaiting_followup',
 ]);
 
 const GitPushResultSchema = v.object({
@@ -34,8 +52,14 @@ const TaskAttachmentSchema = v.object({
 /** Devcontainer config name — alphanumeric, hyphens, underscores, max length from shared constants. */
 const DevcontainerConfigNameSchema = v.pipe(
   v.string(),
-  v.regex(DEVCONTAINER_CONFIG_NAME_REGEX, 'Config name must be alphanumeric with hyphens/underscores'),
-  v.maxLength(DEVCONTAINER_CONFIG_NAME_MAX_LENGTH, `Config name must be at most ${DEVCONTAINER_CONFIG_NAME_MAX_LENGTH} characters`),
+  v.regex(
+    DEVCONTAINER_CONFIG_NAME_REGEX,
+    'Config name must be alphanumeric with hyphens/underscores'
+  ),
+  v.maxLength(
+    DEVCONTAINER_CONFIG_NAME_MAX_LENGTH,
+    `Config name must be at most ${DEVCONTAINER_CONFIG_NAME_MAX_LENGTH} characters`
+  )
 );
 
 /** Resource requirements — all optional, unset fields inherit from precedence chain. */

@@ -7,11 +7,7 @@
 import { ArrowLeft, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import {
-  listAgentCredentials,
-  listCredentials,
-  listGitHubInstallations,
-} from '../../../lib/api';
+import { listAgentCredentials, listCredentials, listGitHubInstallations } from '../../../lib/api';
 import { useOnboarding } from '../OnboardingContext';
 import { CompletionScreen } from './CompletionScreen';
 import { type GeneratedStep, generatePath } from './path-generator';
@@ -98,9 +94,17 @@ export function ChoosePathWizard() {
 
         const credentials = credResult.status === 'fulfilled' ? credResult.value : [];
         const installations = installResult.status === 'fulfilled' ? installResult.value : [];
-        const agentCreds = agentResult.status === 'fulfilled' ? agentResult.value : { credentials: [] };
+        const agentCreds =
+          agentResult.status === 'fulfilled' ? agentResult.value : { credentials: [] };
 
-        const hasCloud = credentials.some((c) => c.provider === 'hetzner' || c.provider === 'scaleway' || c.provider === 'vultr' || c.provider === 'infomaniak');
+        const hasCloud = credentials.some(
+          (c) =>
+            c.provider === 'hetzner' ||
+            c.provider === 'scaleway' ||
+            c.provider === 'vultr' ||
+            c.provider === 'infomaniak' ||
+            c.provider === 'upcloud'
+        );
         const hasGitHub = installations.length > 0;
         const hasAgent = agentCreds.credentials.some((c) => c.isActive);
 
@@ -196,7 +200,7 @@ export function ChoosePathWizard() {
     >
       {/* Screen reader announcement */}
       <div className="sr-only" aria-live="polite" aria-atomic="true">
-        {phase === 'questions' ? currentQuestion?.question ?? '' : ''}
+        {phase === 'questions' ? (currentQuestion?.question ?? '') : ''}
       </div>
 
       {/* Top bar — X dismiss + back nav */}
@@ -252,10 +256,7 @@ export function ChoosePathWizard() {
             />
           )}
           {phase === 'executing' && (
-            <StepExecution
-              steps={executableSteps}
-              onComplete={handleExecutionComplete}
-            />
+            <StepExecution steps={executableSteps} onComplete={handleExecutionComplete} />
           )}
           {phase === 'complete' && <CompletionScreen onDismiss={dismissOnboarding} />}
         </div>

@@ -27,6 +27,12 @@ const InfomaniakCredentialSchema = v.object({
   applicationCredentialSecret: v.pipe(v.string(), v.minLength(1)),
 });
 
+const UpCloudCredentialSchema = v.object({
+  provider: v.literal('upcloud'),
+  username: v.pipe(v.string(), v.minLength(1)),
+  password: v.pipe(v.string(), v.minLength(1)),
+});
+
 const GcpCredentialSchema = v.object({
   provider: v.literal('gcp'),
   authType: v.optional(v.literal('workload-identity')),
@@ -43,6 +49,7 @@ export const CreateCredentialSchema = v.variant('provider', [
   ScalewayCredentialSchema,
   VultrCredentialSchema,
   InfomaniakCredentialSchema,
+  UpCloudCredentialSchema,
   GcpCredentialSchema,
 ]);
 

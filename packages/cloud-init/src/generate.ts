@@ -233,7 +233,7 @@ export function validateCloudInitVariables(variables: CloudInitVariables): void 
 }
 
 /** Valid cloud provider values for cloud-init. */
-export const VALID_CLOUD_PROVIDERS = ['hetzner', 'scaleway', 'gcp', 'vultr', 'infomaniak'] as const;
+export const VALID_CLOUD_PROVIDERS = ['hetzner', 'scaleway', 'gcp', 'vultr', 'infomaniak', 'upcloud'] as const;
 export type CloudProvider = (typeof VALID_CLOUD_PROVIDERS)[number];
 
 /**
@@ -246,6 +246,7 @@ export interface CloudInitVariables {
   jwksUrl: string;
   callbackToken: string;
   /** Cloud provider (hetzner, scaleway, gcp, vultr, infomaniak). Used for provider-specific apt mirrors. */
+  /** Cloud provider (hetzner, scaleway, gcp, vultr, upcloud). Used for provider-specific apt mirrors. */
   provider?: string;
   /** journald SystemMaxUse (default: 500M) */
   logJournalMaxUse?: string;
@@ -325,7 +326,8 @@ export function generateCloudInit(
     '{{ task_mode }}': variables.taskMode ?? 'task',
     '{{ docker_name_tag }}': '{{.Name}}',
     '{{ docker_dns_servers }}': variables.dockerDnsServers ?? '"1.1.1.1", "8.8.8.8"',
-    '{{ vm_agent_port }}': variables.vmAgentPort ?? (variables.originCaCertificateUrl ? '8443' : '8080'),
+    '{{ vm_agent_port }}':
+      variables.vmAgentPort ?? (variables.originCaCertificateUrl ? '8443' : '8080'),
     '{{ tls_cert_path }}': variables.originCaCertificateUrl ? '/etc/sam/tls/origin-ca.pem' : '',
     '{{ tls_key_path }}': variables.originCaCertificateUrl ? '/etc/sam/tls/origin-ca-key.pem' : '',
     '{{ origin_ca_certificate_url }}': variables.originCaCertificateUrl ?? '',

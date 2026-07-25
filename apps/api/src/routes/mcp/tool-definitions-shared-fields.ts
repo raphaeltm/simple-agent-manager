@@ -10,7 +10,7 @@
 export const SHARED_CONFIG_FIELD_PROPERTIES = {
   description: {
     type: 'string',
-    description: 'Human-readable description of the configuration\'s purpose',
+    description: "Human-readable description of the configuration's purpose",
   },
   agentType: {
     type: 'string',
@@ -22,7 +22,8 @@ export const SHARED_CONFIG_FIELD_PROPERTIES = {
   },
   effort: {
     type: 'string',
-    description: 'Reasoning effort: auto, low, medium, high, xhigh, max. Unsupported values are rejected for the selected agent type.',
+    description:
+      'Reasoning effort: auto, low, medium, high, xhigh, max. Unsupported values are rejected for the selected agent type.',
   },
   permissionMode: {
     type: 'string',
@@ -30,7 +31,7 @@ export const SHARED_CONFIG_FIELD_PROPERTIES = {
   },
   systemPromptAppend: {
     type: 'string',
-    description: 'Text appended to the agent\'s system prompt',
+    description: "Text appended to the agent's system prompt",
   },
   maxTurns: {
     type: 'number',
@@ -46,7 +47,7 @@ export const SHARED_CONFIG_FIELD_PROPERTIES = {
   },
   provider: {
     type: 'string',
-    description: 'Cloud provider: hetzner, scaleway, gcp, vultr, infomaniak',
+    description: 'Cloud provider: hetzner, scaleway, gcp, vultr, infomaniak, upcloud',
   },
   vmLocation: {
     type: 'string',
@@ -58,11 +59,13 @@ export const SHARED_CONFIG_FIELD_PROPERTIES = {
   },
   devcontainerConfigName: {
     type: 'string',
-    description: 'Devcontainer config name (subdirectory under .devcontainer/). Omit for auto-discover default.',
+    description:
+      'Devcontainer config name (subdirectory under .devcontainer/). Omit for auto-discover default.',
   },
   taskMode: {
     type: 'string',
-    description: 'Default task mode. Most configs should use "task" or leave this unset; "conversation" requires active lifecycle management.',
+    description:
+      'Default task mode. Most configs should use "task" or leave this unset; "conversation" requires active lifecycle management.',
   },
 } as const;
 

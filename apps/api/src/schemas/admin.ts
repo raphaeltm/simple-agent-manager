@@ -19,7 +19,7 @@ export const AnalyticsForwardSchema = v.object({
 
 export const CreatePlatformCredentialSchema = v.object({
   credentialType: v.picklist(['cloud-provider', 'agent-api-key']),
-  provider: v.optional(v.picklist(['hetzner', 'scaleway', 'gcp', 'vultr', 'infomaniak'])),
+  provider: v.optional(v.picklist(['hetzner', 'scaleway', 'gcp', 'vultr', 'infomaniak', 'upcloud'])),
   agentType: v.optional(v.string()),
   credentialKind: v.optional(v.picklist(['api-key', 'oauth-token'])),
   label: v.pipe(v.string(), v.minLength(1), v.maxLength(100)),
@@ -41,27 +41,27 @@ export const UpdatePlatformIntegrationConfigSchema = v.object({
         appPrivateKey: v.optional(v.string()),
         appSlug: v.optional(v.string()),
         webhookSecret: v.optional(v.string()),
-      }),
+      })
     ),
     google: v.optional(
       v.object({
         clientId: v.optional(v.string()),
         clientSecret: v.optional(v.string()),
-      }),
+      })
     ),
     googleInfrastructure: v.optional(
       v.object({
         clientId: v.optional(v.string()),
         clientSecret: v.optional(v.string()),
         remove: v.optional(v.boolean()),
-      }),
+      })
     ),
     gitlab: v.optional(
       v.object({
         host: v.optional(v.string()),
         clientId: v.optional(v.string()),
         clientSecret: v.optional(v.string()),
-      }),
+      })
     ),
   }),
 });

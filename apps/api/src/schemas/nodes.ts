@@ -1,6 +1,6 @@
 import * as v from 'valibot';
 
-const CredentialProviderSchema = v.picklist(['hetzner', 'scaleway', 'gcp', 'vultr', 'infomaniak']);
+const CredentialProviderSchema = v.picklist(['hetzner', 'scaleway', 'gcp', 'vultr', 'infomaniak', 'upcloud']);
 const VMSizeSchema = v.picklist(['small', 'medium', 'large']);
 
 export const CreateNodeSchema = v.object({

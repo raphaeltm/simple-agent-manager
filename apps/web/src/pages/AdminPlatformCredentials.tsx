@@ -25,6 +25,7 @@ const PROVIDER_LABELS: Record<string, string> = {
   gcp: 'GCP',
   vultr: 'Vultr',
   infomaniak: 'Infomaniak Public Cloud',
+  upcloud: 'UpCloud',
 };
 
 const AGENT_TYPE_LABELS: Record<string, string> = {
@@ -113,13 +114,11 @@ export function AdminPlatformCredentials() {
         </Button>
       </div>
 
-      {error && (
-        <div className="rounded-md bg-danger-tint p-3 text-sm text-danger-fg">
-          {error}
-        </div>
-      )}
+      {error && <div className="rounded-md bg-danger-tint p-3 text-sm text-danger-fg">{error}</div>}
 
-      {showForm && <AddCredentialForm onCreated={handleCreated} onCancel={() => setShowForm(false)} />}
+      {showForm && (
+        <AddCredentialForm onCreated={handleCreated} onCancel={() => setShowForm(false)} />
+      )}
 
       {credentials.length === 0 ? (
         <Card>
@@ -149,7 +148,9 @@ export function AdminPlatformCredentials() {
                   </div>
                   <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-fg-muted">
                     <span>{CREDENTIAL_TYPE_LABELS[cred.credentialType]}</span>
-                    {cred.provider && <span>{PROVIDER_LABELS[cred.provider] || cred.provider}</span>}
+                    {cred.provider && (
+                      <span>{PROVIDER_LABELS[cred.provider] || cred.provider}</span>
+                    )}
                     {cred.agentType && (
                       <span>{AGENT_TYPE_LABELS[cred.agentType] || cred.agentType}</span>
                     )}
@@ -253,6 +254,7 @@ function AddCredentialForm({
                 <option value="scaleway">Scaleway</option>
                 <option value="vultr">Vultr</option>
                 <option value="infomaniak">Infomaniak Public Cloud</option>
+                <option value="upcloud">UpCloud</option>
                 <option value="gcp">GCP</option>
               </select>
             </div>
@@ -303,9 +305,7 @@ function AddCredentialForm({
         </div>
 
         {formError && (
-          <div className="rounded-md bg-danger-tint p-3 text-sm text-danger-fg">
-            {formError}
-          </div>
+          <div className="rounded-md bg-danger-tint p-3 text-sm text-danger-fg">{formError}</div>
         )}
 
         <div className="flex gap-2">

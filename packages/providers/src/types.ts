@@ -287,7 +287,8 @@ export type ProviderConfig =
   | ScalewayProviderConfig
   | GcpProviderConfig
   | VultrProviderConfig
-  | InfomaniakProviderConfig;
+  | InfomaniakProviderConfig
+  | UpCloudProviderConfig;
 
 export interface HetznerProviderConfig {
   provider: 'hetzner';
@@ -347,6 +348,20 @@ export interface VultrProviderConfig {
   /** Delay in ms between main_ip poll attempts (default DEFAULT_VULTR_IP_POLL_INTERVAL_MS). */
   ipPollIntervalMs?: number;
   /** Optional provider logger. Defaults to no-op and must not receive secrets. */
+  logger?: ProviderLogger;
+}
+
+export interface UpCloudProviderConfig {
+  provider: 'upcloud';
+  username: string;
+  password: string;
+  apiUrl?: string;
+  zone?: string;
+  imageTitle?: string;
+  requestTimeoutMs?: number;
+  ipPollTimeoutMs?: number;
+  ipPollIntervalMs?: number;
+  stopTimeoutSeconds?: number;
   logger?: ProviderLogger;
 }
 

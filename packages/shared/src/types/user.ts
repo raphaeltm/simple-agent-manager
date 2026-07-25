@@ -66,7 +66,7 @@ export interface UpdateSignupApprovalConfigRequest {
 // =============================================================================
 // Credential
 // =============================================================================
-export const CREDENTIAL_PROVIDERS = ['hetzner', 'scaleway', 'gcp', 'vultr', 'infomaniak'] as const;
+export const CREDENTIAL_PROVIDERS = ['hetzner', 'scaleway', 'gcp', 'vultr', 'infomaniak', 'upcloud'] as const;
 export type CredentialProvider = (typeof CREDENTIAL_PROVIDERS)[number];
 
 export interface Credential {
@@ -106,6 +106,7 @@ export type CreateCredentialRequest =
   | { provider: 'hetzner'; token: string }
   | { provider: 'vultr'; token: string }
   | { provider: 'infomaniak'; applicationCredentialId: string; applicationCredentialSecret: string }
+  | { provider: 'upcloud'; username: string; password: string }
   | { provider: 'scaleway'; secretKey: string; projectId: string }
   | {
       provider: 'gcp';
