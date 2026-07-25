@@ -1,9 +1,20 @@
-import type { AgentCredentialInfo, AgentInfo, AgentType, CredentialKind, OpenCodeProvider, SaveAgentCredentialRequest } from '@simple-agent-manager/shared';
-import { getAgentDefinition, OPENCODE_PROVIDERS, resolveOpenCodeProvider } from '@simple-agent-manager/shared';
+import type {
+  AgentCredentialInfo,
+  AgentInfo,
+  AgentType,
+  CredentialKind,
+  OpenCodeProvider,
+  SaveAgentCredentialRequest,
+} from '@simple-agent-manager/shared';
+import {
+  getAgentDefinition,
+  OPENCODE_PROVIDERS,
+  resolveOpenCodeProvider,
+} from '@simple-agent-manager/shared';
 import { Alert, Button, Input, StatusBadge } from '@simple-agent-manager/ui';
 import { useState } from 'react';
 
-import { CodexConnectTrigger } from './CodexConnectTrigger';
+import { AgentCredentialConnectTrigger } from './CodexConnectTrigger';
 
 interface AgentKeyCardProps {
   agent: AgentInfo;
@@ -36,7 +47,16 @@ interface AgentKeyCardProps {
 /**
  * Card for managing a single agent's credentials (API key and/or OAuth token).
  */
-export function AgentKeyCard({ agent, credentials, onSave, onDelete, opencodeProvider, scope = 'user', embedded = false, onCredentialConnected }: AgentKeyCardProps) {
+export function AgentKeyCard({
+  agent,
+  credentials,
+  onSave,
+  onDelete,
+  opencodeProvider,
+  scope = 'user',
+  embedded = false,
+  onCredentialConnected,
+}: AgentKeyCardProps) {
   const [credential, setCredential] = useState('');
   const [credentialKind, setCredentialKind] = useState<CredentialKind>('api-key');
   const [loading, setLoading] = useState(false);
@@ -47,9 +67,10 @@ export function AgentKeyCard({ agent, credentials, onSave, onDelete, opencodePro
   // Get agent definition for OAuth support check
   const agentDef = getAgentDefinition(agent.id);
   const supportsOAuth = !!agentDef?.oauthSupport;
+  const supportsGuidedSetup = agent.id === 'openai-codex' || agent.id === 'claude-code';
 
   // Find active credential
-  const activeCredential = credentials?.find(c => c.isActive);
+  const activeCredential = credentials?.find((c) => c.isActive);
   const hasAnyCredential = (credentials?.length ?? 0) > 0;
   const effectiveOpenCodeProvider =
     agent.id === 'opencode' ? resolveOpenCodeProvider(opencodeProvider) : null;
@@ -124,12 +145,13 @@ export function AgentKeyCard({ agent, credentials, onSave, onDelete, opencodePro
                 {activeCredential.credentialKind === 'oauth-token' ? 'OAuth Token' : 'API Key'}
                 {activeCredential.label && ` (${activeCredential.label})`}
               </span>
-              <span className="text-sm text-fg-muted font-mono">
-                {activeCredential.maskedKey}
-              </span>
+              <span className="text-sm text-fg-muted font-mono">{activeCredential.maskedKey}</span>
             </div>
             <div className="flex gap-2">
-              <button onClick={() => setShowForm(true)} className="text-xs bg-transparent border-none cursor-pointer py-0.5 px-2 text-accent">
+              <button
+                onClick={() => setShowForm(true)}
+                className="text-xs bg-transparent border-none cursor-pointer py-0.5 px-2 text-accent"
+              >
                 Update
               </button>
               <button
@@ -151,7 +173,12 @@ export function AgentKeyCard({ agent, credentials, onSave, onDelete, opencodePro
             <div className="flex gap-2 mb-2">
               <button
                 type="button"
-                onClick={() => { setCredentialKind('api-key'); setCredential(''); setError(null); setValidationMessage(null); }}
+                onClick={() => {
+                  setCredentialKind('api-key');
+                  setCredential('');
+                  setError(null);
+                  setValidationMessage(null);
+                }}
                 className={`py-2 px-3 border border-border-default rounded-sm text-sm cursor-pointer ${
                   credentialKind === 'api-key'
                     ? 'bg-accent text-white'
@@ -162,7 +189,12 @@ export function AgentKeyCard({ agent, credentials, onSave, onDelete, opencodePro
               </button>
               <button
                 type="button"
-                onClick={() => { setCredentialKind('oauth-token'); setCredential(''); setError(null); setValidationMessage(null); }}
+                onClick={() => {
+                  setCredentialKind('oauth-token');
+                  setCredential('');
+                  setError(null);
+                  setValidationMessage(null);
+                }}
                 className={`py-2 px-3 border border-border-default rounded-sm text-sm cursor-pointer ${
                   credentialKind === 'oauth-token'
                     ? 'bg-accent text-white'
@@ -175,31 +207,59 @@ export function AgentKeyCard({ agent, credentials, onSave, onDelete, opencodePro
           )}
 
           <div>
-            {credentialKind === 'oauth-token' && agent.id === 'openai-codex' ? (
+            {credentialKind === 'oauth-token' && supportsGuidedSetup ? (
               <div className="flex flex-col gap-3">
                 {/* Guided flow (only rendered when the platform gate is enabled). */}
-                <CodexConnectTrigger scope={scope} onConnected={onCredentialConnected} />
-                <div className="text-xs font-medium text-fg-muted">
-                  Or paste auth.json manually
-                </div>
-                <textarea
-                  value={credential}
-                  onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => { setCredential(e.target.value); setError(null); setValidationMessage(null); }}
-                  placeholder='Paste the full contents of ~/.codex/auth.json'
-                  required
-                  rows={6}
-                  spellCheck={false}
-                  autoCorrect="off"
-                  autoCapitalize="off"
-                  autoComplete="off"
-                  className="w-full px-3 py-2 bg-transparent border border-border-default rounded-sm text-sm text-fg-primary font-mono resize-y focus:outline-none focus:border-accent"
+                <AgentCredentialConnectTrigger
+                  agentType={agent.id as 'openai-codex' | 'claude-code'}
+                  scope={scope}
+                  onConnected={onCredentialConnected}
                 />
+                <div className="text-xs font-medium text-fg-muted">
+                  {agent.id === 'openai-codex'
+                    ? 'Or paste auth.json manually'
+                    : 'Or paste setup-token manually'}
+                </div>
+                {agent.id === 'openai-codex' ? (
+                  <textarea
+                    value={credential}
+                    onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => {
+                      setCredential(e.target.value);
+                      setError(null);
+                      setValidationMessage(null);
+                    }}
+                    placeholder="Paste the full contents of ~/.codex/auth.json"
+                    required
+                    rows={6}
+                    spellCheck={false}
+                    autoCorrect="off"
+                    autoCapitalize="off"
+                    autoComplete="off"
+                    className="w-full px-3 py-2 bg-transparent border border-border-default rounded-sm text-sm text-fg-primary font-mono resize-y focus:outline-none focus:border-accent"
+                  />
+                ) : (
+                  <Input
+                    type="password"
+                    value={credential}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                      setCredential(e.target.value);
+                      setError(null);
+                      setValidationMessage(null);
+                    }}
+                    placeholder='Paste your OAuth token from "claude setup-token"'
+                    required
+                  />
+                )}
               </div>
             ) : (
               <Input
                 type="password"
                 value={credential}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => { setCredential(e.target.value); setError(null); setValidationMessage(null); }}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                  setCredential(e.target.value);
+                  setError(null);
+                  setValidationMessage(null);
+                }}
                 placeholder={
                   credentialKind === 'oauth-token'
                     ? 'Paste your OAuth token from "claude setup-token"'
@@ -214,7 +274,12 @@ export function AgentKeyCard({ agent, credentials, onSave, onDelete, opencodePro
               {credentialKind === 'oauth-token' && agentDef?.oauthSupport ? (
                 <>
                   {agentDef.oauthSupport.setupInstructions}{' '}
-                  <a href={agentDef.oauthSupport.subscriptionUrl} target="_blank" rel="noopener noreferrer" className="text-accent">
+                  <a
+                    href={agentDef.oauthSupport.subscriptionUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-accent"
+                  >
                     View subscription
                   </a>
                 </>
@@ -223,7 +288,12 @@ export function AgentKeyCard({ agent, credentials, onSave, onDelete, opencodePro
               ) : (
                 <>
                   Get your API key from{' '}
-                  <a href={agent.credentialHelpUrl} target="_blank" rel="noopener noreferrer" className="text-accent">
+                  <a
+                    href={agent.credentialHelpUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-accent"
+                  >
                     {agent.name} Console
                   </a>
                 </>
@@ -239,7 +309,17 @@ export function AgentKeyCard({ agent, credentials, onSave, onDelete, opencodePro
               {saveCredentialLabel}
             </Button>
             {showForm && (
-              <Button type="button" variant="secondary" size="sm" onClick={() => { setShowForm(false); setError(null); setValidationMessage(null); setCredential(''); }}>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  setShowForm(false);
+                  setError(null);
+                  setValidationMessage(null);
+                  setCredential('');
+                }}
+              >
                 Cancel
               </Button>
             )}
@@ -264,7 +344,10 @@ export function AgentKeyCard({ agent, credentials, onSave, onDelete, opencodePro
           status={hasAnyCredential ? 'connected' : 'disconnected'}
           label={
             hasAnyCredential
-              ? activeCredential?.label || (activeCredential?.credentialKind === 'oauth-token' ? 'Connected (OAuth)' : 'Connected')
+              ? activeCredential?.label ||
+                (activeCredential?.credentialKind === 'oauth-token'
+                  ? 'Connected (OAuth)'
+                  : 'Connected')
               : 'Not Configured'
           }
         />

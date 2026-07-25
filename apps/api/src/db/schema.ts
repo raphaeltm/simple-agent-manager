@@ -223,10 +223,10 @@ export const credentials = sqliteTable(
 );
 
 // =============================================================================
-// Agent Credential Setup Sessions (guided Cloudflare Sandbox terminal login)
+// Agent Credential Setup Sessions (guided Cloudflare Sandbox native login)
 //
 // Ephemeral, short-lived (TTL ~10-15 min) sessions that run the provider login
-// CLI (e.g. `codex login --device-auth`) inside a Cloudflare Sandbox terminal,
+// CLI inside a Cloudflare Sandbox,
 // capture the resulting credential server-side, and save it via the normal
 // encrypted credentials path. SECURITY: NO secret/credential material is ever
 // stored on this table — only non-secret lifecycle metadata.

@@ -1,8 +1,8 @@
 /**
- * Guided agent-credential setup sessions (native Codex device login).
+ * Guided agent-credential setup sessions (native provider login).
  *
- * User-facing flow for connecting an OpenAI Codex (ChatGPT subscription) account
- * without manual auth.json paste:
+ * User-facing flow for connecting subscription/OAuth-backed coding agents
+ * without manual token/auth-file paste:
  *   POST   /                      create a setup session (leases a sandbox slot)
  *   GET    /:id                   poll lifecycle status
  *   POST   /:id/cancel            cancel + tear down
@@ -13,7 +13,7 @@
  * Availability is derived from the required runtime bindings. No deployment
  * environment variable is needed to turn this product flow on.
  */
-import { getAgentDefinition, isValidAgentType } from '@simple-agent-manager/shared';
+import { getAgentDefinition, isValidAgentType, type AgentType } from '@simple-agent-manager/shared';
 import { Hono } from 'hono';
 
 import type { Env } from '../env';
@@ -35,18 +35,24 @@ import { leaseSetupSlot, releaseSetupSlot } from '../services/setup-session-pool
 
 const agentCredentialSetupSessionsRoutes = new Hono<{ Bindings: Env }>();
 
-/** v1 supports Codex only (see idea 01KRPWSZWFT0Y06DH9VEXC7CYQ 2026-07-23 BUILD DECISION). */
-const SUPPORTED_AGENT_TYPE = 'openai-codex';
+const DEFAULT_SETUP_AGENT_TYPE = 'openai-codex';
+const SUPPORTED_SETUP_AGENT_TYPES = ['openai-codex', 'claude-code'] as const;
+type SupportedSetupAgentType = (typeof SUPPORTED_SETUP_AGENT_TYPES)[number];
 const SETUP_CREDENTIAL_KIND = 'oauth-token';
 const ACTIVE_STATUS_PLACEHOLDERS = ACTIVE_SETUP_STATUSES.map(() => '?').join(', ');
 
+function isSupportedSetupAgentType(agentType: AgentType): agentType is SupportedSetupAgentType {
+  return SUPPORTED_SETUP_AGENT_TYPES.includes(agentType as SupportedSetupAgentType);
+}
+
 /**
- * Per-session isolated CODEX_HOME inside the sandbox (deterministic from id).
- * Uses a real home dir (not /tmp) — codex refuses to create its PATH-alias
- * helper binaries under a temporary dir and prints a scary warning otherwise.
+ * Per-session isolated provider config dir inside the sandbox (deterministic from
+ * id). Codex uses CODEX_HOME; Claude Code uses CLAUDE_CONFIG_DIR.
  */
-function codexHomeFor(sessionId: string): string {
-  return `/root/.codex-setup-${sessionId}`;
+function setupHomeFor(agentType: SupportedSetupAgentType, sessionId: string): string {
+  return agentType === 'claude-code'
+    ? `/root/.claude-setup-${sessionId}`
+    : `/root/.codex-setup-${sessionId}`;
 }
 
 interface SetupSessionD1Row {
@@ -89,7 +95,11 @@ async function loadOwnedSession(
 // -----------------------------------------------------------------------------
 agentCredentialSetupSessionsRoutes.get('/config', requireAuth(), requireApproved(), (c) => {
   const enabled = guidedSetupAvailable(c.env);
-  return c.json({ enabled, agentType: SUPPORTED_AGENT_TYPE });
+  return c.json({
+    enabled,
+    agentType: DEFAULT_SETUP_AGENT_TYPE,
+    agentTypes: SUPPORTED_SETUP_AGENT_TYPES,
+  });
 });
 
 // -----------------------------------------------------------------------------
@@ -104,10 +114,13 @@ agentCredentialSetupSessionsRoutes.post('/', requireAuth(), requireApproved(), a
   const body = await c.req
     .json<{ agentType?: string }>()
     .catch(() => ({}) as { agentType?: string });
-  const agentType = body.agentType ?? SUPPORTED_AGENT_TYPE;
-  if (!isValidAgentType(agentType) || agentType !== SUPPORTED_AGENT_TYPE) {
-    throw errors.badRequest(`Guided setup currently supports only ${SUPPORTED_AGENT_TYPE}`);
+  const requestedAgentType = body.agentType ?? DEFAULT_SETUP_AGENT_TYPE;
+  if (!isValidAgentType(requestedAgentType) || !isSupportedSetupAgentType(requestedAgentType)) {
+    throw errors.badRequest(
+      `Guided setup currently supports only ${SUPPORTED_SETUP_AGENT_TYPES.join(', ')}`
+    );
   }
+  const agentType = requestedAgentType;
   const agentDef = getAgentDefinition(agentType);
   if (!agentDef) {
     throw errors.badRequest(`Unknown agent type: ${agentType}`);
@@ -196,7 +209,7 @@ agentCredentialSetupSessionsRoutes.post('/', requireAuth(), requireApproved(), a
       provider: agentDef.provider,
       agentName: agentDef.name,
       poolLeaseId: leaseId,
-      codexHome: codexHomeFor(sessionId),
+      setupHome: setupHomeFor(agentType, sessionId),
       ttlMs,
       capturePollMs: getSetupSessionCapturePollMs(c.env),
     });
@@ -226,6 +239,7 @@ agentCredentialSetupSessionsRoutes.post('/', requireAuth(), requireApproved(), a
       .catch(() => {});
     log.error('credential_setup.start_failed', {
       sessionId,
+      agentType,
       error: err instanceof Error ? err.message : String(err),
     });
     throw errors.internal('Failed to start guided setup session');

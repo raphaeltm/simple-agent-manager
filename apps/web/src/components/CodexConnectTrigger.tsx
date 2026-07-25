@@ -1,41 +1,63 @@
 /**
- * "Connect with Codex" trigger button.
+ * Guided credential setup trigger button.
  *
  * Checks the guided-setup availability gate (`GET /config`) once on mount. When
- * the flow is enabled it renders a button that opens {@link CodexConnectModal};
- * otherwise it renders nothing so the manual auth.json paste remains the only
- * control (rule 24 — this augments, it does not duplicate, the Codex credential
- * field). Failures to read the gate are treated as "disabled".
+ * the flow is enabled for the requested agent it renders a button that opens the
+ * native setup modal; otherwise it renders nothing so the manual credential field
+ * remains the only control. Failures to read the gate are treated as disabled.
  */
 import { Button } from '@simple-agent-manager/ui';
 import { useEffect, useRef, useState } from 'react';
 
-import { getCodexSetupConfig } from '../lib/api';
-import { CodexConnectModal } from './CodexConnectModal';
+import {
+  type GuidedSetupAgentType,
+  getAgentCredentialSetupConfig,
+  setupConfigSupportsAgent,
+} from '../lib/api';
+import { AgentCredentialConnectModal } from './CodexConnectModal';
 
-interface CodexConnectTriggerProps {
+interface AgentCredentialConnectTriggerProps {
+  agentType: GuidedSetupAgentType;
   /** Forwarded to the modal; fires after the credential is captured + saved. */
   onConnected?: () => void;
   /**
    * Credential scope. The guided flow only saves USER-scoped credentials in v1,
    * so it is hidden in project-scoped contexts to avoid silently overwriting the
-   * user default (the manual auth.json paste stays available there).
+   * user default (the manual credential paste stays available there).
    */
   scope?: 'user' | 'project';
 }
 
-export function CodexConnectTrigger({ onConnected, scope = 'user' }: CodexConnectTriggerProps) {
+type CodexConnectTriggerProps = Omit<AgentCredentialConnectTriggerProps, 'agentType'>;
+
+const TRIGGER_COPY: Record<GuidedSetupAgentType, { button: string; description: string }> = {
+  'openai-codex': {
+    button: 'Connect with Codex',
+    description: 'Sign in to your ChatGPT subscription — no manual auth.json needed.',
+  },
+  'claude-code': {
+    button: 'Connect with Claude Code',
+    description: 'Sign in to your Claude subscription — no manual setup-token paste needed.',
+  },
+};
+
+export function AgentCredentialConnectTrigger({
+  agentType,
+  onConnected,
+  scope = 'user',
+}: AgentCredentialConnectTriggerProps) {
   const [enabled, setEnabled] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const checkedRef = useRef(false);
+  const copy = TRIGGER_COPY[agentType];
 
   useEffect(() => {
     if (checkedRef.current) return;
     checkedRef.current = true;
     let active = true;
-    void getCodexSetupConfig()
+    void getAgentCredentialSetupConfig()
       .then((config) => {
-        if (active) setEnabled(config.enabled === true);
+        if (active) setEnabled(setupConfigSupportsAgent(config, agentType));
       })
       .catch(() => {
         // Gate unreadable (route absent / network) — keep the guided button hidden.
@@ -44,7 +66,7 @@ export function CodexConnectTrigger({ onConnected, scope = 'user' }: CodexConnec
     return () => {
       active = false;
     };
-  }, []);
+  }, [agentType]);
 
   if (!enabled || scope !== 'user') {
     return null;
@@ -59,12 +81,11 @@ export function CodexConnectTrigger({ onConnected, scope = 'user' }: CodexConnec
         onClick={() => setModalOpen(true)}
         className="self-start"
       >
-        Connect with Codex
+        {copy.button}
       </Button>
-      <p className="text-xs text-fg-muted m-0">
-        Sign in to your ChatGPT subscription in a guided terminal — no manual auth.json needed.
-      </p>
-      <CodexConnectModal
+      <p className="text-xs text-fg-muted m-0">{copy.description}</p>
+      <AgentCredentialConnectModal
+        agentType={agentType}
         isOpen={modalOpen}
         onClose={() => setModalOpen(false)}
         onConnected={() => {
@@ -76,4 +97,8 @@ export function CodexConnectTrigger({ onConnected, scope = 'user' }: CodexConnec
       />
     </div>
   );
+}
+
+export function CodexConnectTrigger(props: CodexConnectTriggerProps) {
+  return <AgentCredentialConnectTrigger agentType="openai-codex" {...props} />;
 }

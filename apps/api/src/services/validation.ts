@@ -231,7 +231,7 @@ export async function validateScalewayCredentialWithProvider(
 export async function validateInfomaniakCredentialWithProvider(
   applicationCredentialId: string,
   applicationCredentialSecret: string,
-  options: CredentialValidationOptions & { authUrl?: string; region?: string } = {},
+  options: CredentialValidationOptions & { authUrl?: string; region?: string } = {}
 ): Promise<CredentialValidationStatus> {
   try {
     const provider = new InfomaniakProvider(applicationCredentialId, applicationCredentialSecret, {
@@ -439,12 +439,19 @@ export class CredentialValidator {
       }
       // For non-Anthropic agents with API keys, accept any non-empty value
     } else if (kind === 'oauth-token') {
-      // Claude OAuth tokens: reject obvious API keys
+      // Claude OAuth tokens: reject obvious API keys and require the setup-token prefix
+      // when the caller knows this is a Claude Code credential.
       if (credential.startsWith(ANTHROPIC_API_KEY_PREFIX)) {
         return {
           valid: false,
           error:
             'This looks like an API key, not an OAuth token. Please use the "API Key" option instead.',
+        };
+      }
+      if (agentType === 'claude-code' && !credential.startsWith(CLAUDE_OAUTH_TOKEN_PREFIX)) {
+        return {
+          valid: false,
+          error: 'Claude OAuth token should start with "sk-ant-oat".',
         };
       }
     }

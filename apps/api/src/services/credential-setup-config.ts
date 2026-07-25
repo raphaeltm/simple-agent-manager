@@ -9,7 +9,7 @@ import type { Env } from '../env';
 export const DEFAULT_MAX_CONCURRENT_SETUP_SESSIONS = 2;
 /** Setup session lifetime before auto-teardown (15 min). */
 export const DEFAULT_SETUP_SESSION_TTL_MS = 15 * 60_000;
-/** auth.json capture poll interval. */
+/** credential capture poll interval. */
 export const DEFAULT_SETUP_SESSION_CAPTURE_POLL_MS = 3_000;
 /** Max expired/orphaned sessions torn down per cron sweep (bounded — rule 47). */
 export const DEFAULT_SETUP_SESSION_SWEEP_MAX_CANDIDATES = 50;

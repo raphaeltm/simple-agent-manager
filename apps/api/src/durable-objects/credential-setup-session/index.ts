@@ -1,6 +1,6 @@
 /**
  * CredentialSetupSession — per-session Durable Object that drives one guided
- * Codex login inside a short-lived Cloudflare Sandbox.
+ * agent login inside a short-lived Cloudflare Sandbox.
  *
  * One DO per setup session (keyed by the session id, which is ALSO the sandbox
  * id — 1:1, never shared across users). The DO owns the lifecycle state machine:
@@ -8,17 +8,17 @@
  *   creating -> provisioning -> waiting_for_user -> capturing -> saving
  *            -> completed | failed | cancelled | expired
  *
- * It provisions the sandbox (per-session CODEX_HOME + config.toml), then an
- * alarm loop polls `$CODEX_HOME/auth.json`. When the user finishes the ChatGPT
- * device-auth sign-in in the (browser-visible) terminal, codex writes auth.json;
- * the DO reads it server-side, validates + saves it as an encrypted credential
- * via the shared credential-save path, then tears the sandbox down.
+ * It provisions a per-session credential home, starts the provider setup driver,
+ * surfaces only non-secret URL/code details, then polls for the captured
+ * credential file. The DO reads the credential server-side, validates + saves it
+ * as an encrypted credential via the shared credential-save path, then tears the
+ * sandbox down.
  *
  * SECURITY: the captured credential is read server-side and never transits this
  * DO's SQLite, the D1 row, logs, or the browser. Only non-secret lifecycle
  * metadata is persisted. Every terminal state runs teardown (release pool lease,
- * delete auth.json, destroy sandbox, mark D1) so a vanished browser leaves no
- * orphan (rules 43/47).
+ * delete credential files, destroy sandbox, mark D1) so a vanished browser leaves
+ * no orphan (rules 43/47).
  *
  * Storage: embedded SQLite (wrangler `new_sqlite_classes`). DDL is inlined in
  * the constructor (CREATE TABLE IF NOT EXISTS) — no separate DO migration file,
@@ -53,7 +53,7 @@ export interface CreateSetupSessionParams {
   provider: string;
   agentName: string;
   poolLeaseId: string;
-  codexHome: string;
+  setupHome: string;
   ttlMs: number;
   capturePollMs: number;
 }
@@ -91,12 +91,25 @@ type SetupSessionRow = {
 
 type DeviceAuthDetailsRow = {
   verification_url: string;
-  user_code: string;
+  user_code: string | null;
 };
 
-/** Relative path of the captured credential file inside CODEX_HOME. */
-const AUTH_FILE = 'auth.json';
+/** Relative paths of captured credential files inside the per-session setup home. */
+const CODEX_AUTH_FILE = 'auth.json';
+const CLAUDE_OAUTH_TOKEN_FILE = 'claude-oauth-token.txt';
 const DEVICE_AUTH_STATE_FILE = 'device-auth-state.json';
+
+function setupDisplayName(agentType: string): string {
+  return agentType === 'claude-code' ? 'Claude Code' : 'Codex';
+}
+
+function requiresUserCode(agentType: string): boolean {
+  return agentType === 'openai-codex';
+}
+
+function credentialFileName(agentType: string): string {
+  return agentType === 'claude-code' ? CLAUDE_OAUTH_TOKEN_FILE : CODEX_AUTH_FILE;
+}
 
 interface DeviceAuthState {
   status: 'starting' | 'waiting_for_user' | 'completed' | 'failed';
@@ -136,7 +149,7 @@ export class CredentialSetupSession extends DurableObject<Env> {
         `CREATE TABLE IF NOT EXISTS device_auth_details (
           singleton        INTEGER PRIMARY KEY NOT NULL CHECK (singleton = 1),
           verification_url TEXT NOT NULL,
-          user_code        TEXT NOT NULL
+          user_code        TEXT
         )`
       );
     });
@@ -167,7 +180,7 @@ export class CredentialSetupSession extends DurableObject<Env> {
       params.provider,
       params.agentName,
       params.poolLeaseId,
-      params.codexHome,
+      params.setupHome,
       expiresAt,
       params.capturePollMs
     );
@@ -291,43 +304,39 @@ export class CredentialSetupSession extends DurableObject<Env> {
   // ---------------------------------------------------------------------------
 
   private async provision(row: SetupSessionRow): Promise<void> {
+    const displayName = setupDisplayName(row.agent_type);
     try {
       const sandbox = await getSandboxInstance(this.env, row.id);
-      // Per-session CODEX_HOME + config that forces file-based credential storage
-      // (headless container has no OS keychain). mkdir first so codex can write.
+      // Per-session setup home. For Codex this is CODEX_HOME; for Claude Code it
+      // is CLAUDE_CONFIG_DIR. mkdir first so provider CLIs can write there.
       // Built in a variable (not inline in .exec) so the SQL-injection AST rule
       // doesn't false-match this SHELL command — the path is already shellQuote()d.
       const mkdirCmd = `mkdir -p ${shellQuote(row.codex_home)}`;
       await sandbox.exec(mkdirCmd, {
         timeout: getSandboxConfig(this.env).execTimeoutMs,
       });
-      await sandbox.writeFile(
-        `${row.codex_home}/config.toml`,
-        'cli_auth_credentials_store = "file"\n'
-      );
+      if (row.agent_type === 'openai-codex') {
+        await sandbox.writeFile(
+          `${row.codex_home}/config.toml`,
+          'cli_auth_credentials_store = \"file\"\n'
+        );
+      }
       const statePath = `${row.codex_home}/${DEVICE_AUTH_STATE_FILE}`;
-      const requestTimeoutEnv = this.env.CODEX_DEVICE_AUTH_REQUEST_TIMEOUT_MS
-        ? ` CODEX_DEVICE_AUTH_REQUEST_TIMEOUT_MS=${shellQuote(
-            this.env.CODEX_DEVICE_AUTH_REQUEST_TIMEOUT_MS
-          )}`
-        : '';
-      const startCommand =
-        `nohup env CODEX_HOME=${shellQuote(row.codex_home)}${requestTimeoutEnv} ` +
-        `node /usr/local/bin/sam-codex-device-auth.mjs ${shellQuote(statePath)} ` +
-        '>/dev/null 2>&1 &';
+      const startCommand = this.startSetupDriverCommand(row, statePath);
       await sandbox.exec(startCommand, {
         timeout: getSandboxConfig(this.env).execTimeoutMs,
       });
     } catch (err) {
       log.error('credential_setup.provision_failed', {
         sessionId: row.id,
+        agentType: row.agent_type,
         error: err instanceof Error ? err.message : String(err),
       });
       await this.teardown(
         row,
         'failed',
         'sandbox_provision_failed',
-        'Failed to prepare Codex sign-in'
+        `Failed to prepare ${displayName} sign-in`
       );
       return;
     }
@@ -336,6 +345,29 @@ export class CredentialSetupSession extends DurableObject<Env> {
     this.setStatus(current.id, 'admitting');
     await this.updateD1Status(current.id, 'admitting', { started: true });
     await this.ctx.storage.setAlarm(Date.now() + row.capture_poll_ms);
+  }
+
+  private startSetupDriverCommand(row: SetupSessionRow, statePath: string): string {
+    if (row.agent_type === 'claude-code') {
+      const credentialPath = `${row.codex_home}/${CLAUDE_OAUTH_TOKEN_FILE}`;
+      return (
+        `nohup env CLAUDE_CONFIG_DIR=${shellQuote(row.codex_home)} ` +
+        'DISABLE_AUTOUPDATER=1 NO_COLOR=1 TERM=dumb ' +
+        `node /usr/local/bin/sam-claude-setup-token.mjs ${shellQuote(statePath)} ` +
+        `${shellQuote(credentialPath)} >/dev/null 2>&1 &`
+      );
+    }
+
+    const requestTimeoutEnv = this.env.CODEX_DEVICE_AUTH_REQUEST_TIMEOUT_MS
+      ? ` CODEX_DEVICE_AUTH_REQUEST_TIMEOUT_MS=${shellQuote(
+          this.env.CODEX_DEVICE_AUTH_REQUEST_TIMEOUT_MS
+        )}`
+      : '';
+    return (
+      `nohup env CODEX_HOME=${shellQuote(row.codex_home)}${requestTimeoutEnv} ` +
+      `node /usr/local/bin/sam-codex-device-auth.mjs ${shellQuote(statePath)} ` +
+      '>/dev/null 2>&1 &'
+    );
   }
 
   private async pollDeviceAuth(row: SetupSessionRow): Promise<void> {
@@ -347,21 +379,28 @@ export class CredentialSetupSession extends DurableObject<Env> {
       return;
     }
     if (state.status === 'failed') {
-      log.warn('credential_setup.device_auth_failed', { sessionId: row.id });
+      log.warn('credential_setup.device_auth_failed', {
+        sessionId: row.id,
+        agentType: row.agent_type,
+      });
       await this.teardown(
         current,
         'failed',
         'device_auth_start_failed',
-        'Codex could not start the sign-in flow'
+        `${setupDisplayName(row.agent_type)} could not start the sign-in flow`
       );
       return;
     }
-    if (state.status === 'waiting_for_user' && state.verificationUrl && state.userCode) {
+    if (
+      state.status === 'waiting_for_user' &&
+      state.verificationUrl &&
+      (!requiresUserCode(row.agent_type) || state.userCode)
+    ) {
       this.sql.exec(
         `INSERT OR REPLACE INTO device_auth_details
          (singleton, verification_url, user_code) VALUES (1, ?, ?)`,
         state.verificationUrl,
-        state.userCode
+        state.userCode ?? null
       );
       this.setStatus(current.id, 'waiting_for_user');
       await this.updateD1Status(current.id, 'waiting_for_user');
@@ -401,9 +440,9 @@ export class CredentialSetupSession extends DurableObject<Env> {
 
   private async attemptCapture(row: SetupSessionRow): Promise<void> {
     const sandbox = await getSandboxInstance(this.env, row.id);
-    const authPath = `${row.codex_home}/${AUTH_FILE}`;
+    const credentialPath = `${row.codex_home}/${credentialFileName(row.agent_type)}`;
 
-    const existence = await sandbox.exists(authPath);
+    const existence = await sandbox.exists(credentialPath);
     if (!existence.exists) {
       await this.ctx.storage.setAlarm(Date.now() + row.capture_poll_ms);
       return;
@@ -416,10 +455,11 @@ export class CredentialSetupSession extends DurableObject<Env> {
       await this.updateD1Status(current.id, 'capturing');
     }
 
-    const file = await sandbox.readFile(authPath);
-    const content = file.content ?? '';
+    const file = await sandbox.readFile(credentialPath);
+    let content = file.content ?? '';
+    if (row.agent_type === 'claude-code') content = content.trim();
 
-    // A partial write (codex mid-flush) parses as invalid — treat as not-ready
+    // A partial write (provider CLI mid-flush) parses as invalid — treat as not-ready
     // and keep polling; the TTL bounds retries. Only a VALID file triggers save.
     const validation = CredentialValidator.validateCredential(
       content,

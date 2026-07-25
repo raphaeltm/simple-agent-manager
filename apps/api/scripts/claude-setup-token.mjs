@@ -1,0 +1,233 @@
+#!/usr/bin/env node
+
+import { spawn } from 'node:child_process';
+import { rename, writeFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+import { createInterface } from 'node:readline';
+
+const MAX_VERIFICATION_URL_LENGTH = 4096;
+const MAX_USER_CODE_LENGTH = 128;
+const MAX_CLAUDE_TOKEN_LENGTH = 8192;
+const CLAUDE_OAUTH_TOKEN_PREFIX = 'sk-ant-oat';
+const ANSI_ESCAPE_PATTERN = /\u001b\[[0-9;?]*[ -/]*[@-~]/g;
+const URL_PATTERN = /https:\/\/[^\s<>'"`]+/gi;
+const TOKEN_PATTERN = /\bsk-ant-oat[A-Za-z0-9._-]{16,}\b/g;
+const CODE_PATTERNS = [
+  /(?:verification|one[- ]time|device)?\s*code[^A-Za-z0-9-]{0,40}([A-Z0-9][A-Z0-9-]{3,127})/i,
+  /enter\s+(?:this\s+|the\s+)?(?:code\s+)?([A-Z0-9][A-Z0-9-]{3,127})/i,
+];
+
+function isTrustedClaudeHost(hostname) {
+  return (
+    hostname === 'claude.ai' ||
+    hostname.endsWith('.claude.ai') ||
+    hostname === 'anthropic.com' ||
+    hostname.endsWith('.anthropic.com')
+  );
+}
+
+function cleanUrlCandidate(value) {
+  let next = value.trim();
+  while (/[),.;\]]$/.test(next)) next = next.slice(0, -1);
+  return next;
+}
+
+export function stripAnsi(value) {
+  return value.replace(ANSI_ESCAPE_PATTERN, '');
+}
+
+export function validateClaudeVerificationUrl(value) {
+  if (value.length > MAX_VERIFICATION_URL_LENGTH) {
+    throw new Error('Claude setup-token returned an overlong verification URL');
+  }
+  const url = new URL(value);
+  if (url.protocol !== 'https:' || !isTrustedClaudeHost(url.hostname)) {
+    throw new Error('Claude setup-token returned an untrusted verification URL');
+  }
+  return url.toString();
+}
+
+export function validateClaudeOauthToken(value) {
+  const token = value.trim();
+  if (!token.startsWith(CLAUDE_OAUTH_TOKEN_PREFIX)) {
+    throw new Error('Claude setup-token returned an invalid OAuth token prefix');
+  }
+  if (token.length > MAX_CLAUDE_TOKEN_LENGTH) {
+    throw new Error('Claude setup-token returned an overlong OAuth token');
+  }
+  if (!/^[A-Za-z0-9._-]+$/.test(token)) {
+    throw new Error('Claude setup-token returned an OAuth token with invalid characters');
+  }
+  return token;
+}
+
+function validateUserCode(value) {
+  const code = value.trim();
+  if (code.length > MAX_USER_CODE_LENGTH || !/^[A-Za-z0-9-]{4,}$/.test(code)) {
+    return null;
+  }
+  return code;
+}
+
+export function extractClaudeSetupOutput(raw) {
+  const text = stripAnsi(raw);
+  let verificationUrl;
+  for (const match of text.matchAll(URL_PATTERN)) {
+    const candidate = cleanUrlCandidate(match[0]);
+    try {
+      verificationUrl = validateClaudeVerificationUrl(candidate);
+      break;
+    } catch {
+      // Ignore unrelated URLs in CLI output; the driver fails if no trusted URL appears.
+    }
+  }
+
+  let userCode;
+  for (const pattern of CODE_PATTERNS) {
+    const match = pattern.exec(text);
+    if (!match?.[1]) continue;
+    const candidate = validateUserCode(match[1]);
+    if (candidate) {
+      userCode = candidate;
+      break;
+    }
+  }
+
+  let token;
+  TOKEN_PATTERN.lastIndex = 0;
+  const tokenMatch = TOKEN_PATTERN.exec(text);
+  if (tokenMatch?.[0]) token = validateClaudeOauthToken(tokenMatch[0]);
+
+  return { verificationUrl, userCode, token };
+}
+
+export async function runClaudeSetupToken({
+  statePath,
+  credentialPath,
+  spawnProcess = spawn,
+  onSpawn,
+  writeState = async (state) => {
+    const temporaryStatePath = `${statePath}.tmp`;
+    await writeFile(temporaryStatePath, `${JSON.stringify(state)}\n`, { mode: 0o600 });
+    await rename(temporaryStatePath, statePath);
+  },
+  writeCredential = async (token) => {
+    const temporaryCredentialPath = `${credentialPath}.tmp`;
+    await writeFile(temporaryCredentialPath, `${token}\n`, { mode: 0o600 });
+    await rename(temporaryCredentialPath, credentialPath);
+  },
+}) {
+  const claude = spawnProcess('claude', ['setup-token'], {
+    env: {
+      ...process.env,
+      DISABLE_AUTOUPDATER: '1',
+      NO_COLOR: '1',
+      TERM: 'dumb',
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  onSpawn?.(claude);
+
+  let publishedWaiting = false;
+  let tokenCaptured = false;
+  let terminalStatePublished = false;
+  let stateWriteQueue = Promise.resolve();
+  let settled = false;
+  let resolveReady;
+  let rejectReady;
+  const ready = new Promise((resolve, reject) => {
+    resolveReady = resolve;
+    rejectReady = reject;
+  });
+
+  function settleReady(error) {
+    if (settled) return;
+    settled = true;
+    if (error) rejectReady(error);
+    else resolveReady(claude);
+  }
+
+  function publishState(state) {
+    const isTerminal = state.status === 'completed' || state.status === 'failed';
+    if (terminalStatePublished) return stateWriteQueue;
+    if (isTerminal) terminalStatePublished = true;
+    stateWriteQueue = stateWriteQueue.then(() => writeState(state));
+    return stateWriteQueue;
+  }
+
+  function publishFailure(message) {
+    void publishState({ status: 'failed', error: message }).finally(() => {
+      settleReady(new Error(message));
+    });
+  }
+
+  function maybePublishWaiting(details) {
+    if (publishedWaiting || !details.verificationUrl) return;
+    publishedWaiting = true;
+    void publishState({
+      status: 'waiting_for_user',
+      verificationUrl: details.verificationUrl,
+      userCode: details.userCode ?? null,
+    }).then(() => settleReady());
+  }
+
+  function maybeCaptureToken(details) {
+    if (tokenCaptured || !details.token) return;
+    tokenCaptured = true;
+    void writeCredential(details.token)
+      .then(() => publishState({ status: 'completed' }))
+      .then(() => settleReady())
+      .then(() => claude.kill('SIGTERM'))
+      .catch((error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        publishFailure(message);
+        claude.kill('SIGTERM');
+      });
+  }
+
+  function processLine(line) {
+    let details;
+    try {
+      details = extractClaudeSetupOutput(line);
+    } catch (error) {
+      publishFailure(error instanceof Error ? error.message : String(error));
+      claude.kill('SIGTERM');
+      return;
+    }
+    maybePublishWaiting(details);
+    maybeCaptureToken(details);
+  }
+
+  createInterface({ input: claude.stdout }).on('line', processLine);
+  createInterface({ input: claude.stderr }).on('line', processLine);
+
+  claude.on('error', (error) => {
+    publishFailure(error.message);
+  });
+  claude.on('exit', (code, signal) => {
+    if (tokenCaptured) return;
+    publishFailure(`Claude setup-token exited before returning a token (${code ?? signal})`);
+  });
+
+  await publishState({ status: 'starting' });
+  return ready;
+}
+
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+  const statePath = process.argv[2];
+  const credentialPath = process.argv[3];
+  if (!statePath || !credentialPath) {
+    process.stderr.write('Usage: claude-setup-token.mjs <state-path> <credential-path>\n');
+    process.exitCode = 2;
+  } else {
+    runClaudeSetupToken({
+      statePath,
+      credentialPath,
+      onSpawn: (claude) => {
+        process.once('SIGTERM', () => claude.kill('SIGTERM'));
+      },
+    }).catch(() => {
+      process.exitCode = 1;
+    });
+  }
+}

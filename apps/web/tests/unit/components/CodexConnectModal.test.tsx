@@ -2,32 +2,39 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const h = vi.hoisted(() => ({
-  createCodexSetupSession: vi.fn(),
-  getCodexSetupSession: vi.fn(),
-  cancelCodexSetupSession: vi.fn(),
-  getCodexSetupConfig: vi.fn(),
+  createAgentCredentialSetupSession: vi.fn(),
+  getAgentCredentialSetupSession: vi.fn(),
+  cancelAgentCredentialSetupSession: vi.fn(),
+  getAgentCredentialSetupConfig: vi.fn(),
 }));
 
 vi.mock('../../../src/lib/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../src/lib/api')>()),
-  createCodexSetupSession: h.createCodexSetupSession,
-  getCodexSetupSession: h.getCodexSetupSession,
-  cancelCodexSetupSession: h.cancelCodexSetupSession,
-  getCodexSetupConfig: h.getCodexSetupConfig,
+  createAgentCredentialSetupSession: h.createAgentCredentialSetupSession,
+  getAgentCredentialSetupSession: h.getAgentCredentialSetupSession,
+  cancelAgentCredentialSetupSession: h.cancelAgentCredentialSetupSession,
+  getAgentCredentialSetupConfig: h.getAgentCredentialSetupConfig,
 }));
 
-import { CodexConnectModal } from '../../../src/components/CodexConnectModal';
-import { CodexConnectTrigger } from '../../../src/components/CodexConnectTrigger';
-import type { CodexSetupSession, CodexSetupStatus } from '../../../src/lib/api';
+import {
+  AgentCredentialConnectModal,
+  CodexConnectModal,
+} from '../../../src/components/CodexConnectModal';
+import {
+  AgentCredentialConnectTrigger,
+  CodexConnectTrigger,
+} from '../../../src/components/CodexConnectTrigger';
+import type { AgentCredentialSetupSession, AgentCredentialSetupStatus } from '../../../src/lib/api';
 
-const SESSION_ID = 'sess_codex_01';
+const SESSION_ID = 'sess_setup_01';
 const USER_CODE = 'ABCD-EFGH';
-const VERIFICATION_URL = 'https://auth.openai.com/device';
+const OPENAI_VERIFICATION_URL = 'https://auth.openai.com/device';
+const CLAUDE_VERIFICATION_URL = 'https://claude.ai/oauth/device';
 
 function makeSession(
-  status: CodexSetupStatus,
-  overrides: Partial<CodexSetupSession> = {}
-): CodexSetupSession {
+  status: AgentCredentialSetupStatus,
+  overrides: Partial<AgentCredentialSetupSession> = {}
+): AgentCredentialSetupSession {
   return {
     id: SESSION_ID,
     status,
@@ -39,16 +46,16 @@ function makeSession(
   };
 }
 
-describe('CodexConnectModal', () => {
+describe('AgentCredentialConnectModal', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    h.createCodexSetupSession.mockReset();
-    h.getCodexSetupSession.mockReset();
-    h.cancelCodexSetupSession.mockReset();
-    h.getCodexSetupConfig.mockReset();
+    h.createAgentCredentialSetupSession.mockReset();
+    h.getAgentCredentialSetupSession.mockReset();
+    h.cancelAgentCredentialSetupSession.mockReset();
+    h.getAgentCredentialSetupConfig.mockReset();
     vi.stubEnv('VITE_CODEX_SETUP_POLL_MS', '20');
     vi.stubEnv('VITE_CODEX_SETUP_SUCCESS_CLOSE_MS', '10');
-    h.cancelCodexSetupSession.mockResolvedValue({ id: SESSION_ID, status: 'cancelled' });
+    h.cancelAgentCredentialSetupSession.mockResolvedValue({ id: SESSION_ID, status: 'cancelled' });
     Object.defineProperty(navigator, 'clipboard', {
       configurable: true,
       value: { writeText: vi.fn().mockResolvedValue(undefined) },
@@ -57,14 +64,14 @@ describe('CodexConnectModal', () => {
 
   afterEach(() => vi.unstubAllEnvs());
 
-  it('promotes the device URL and code into native open and copy actions', async () => {
-    h.createCodexSetupSession.mockResolvedValue({
+  it('promotes the Codex device URL and code into native open and copy actions', async () => {
+    h.createAgentCredentialSetupSession.mockResolvedValue({
       kind: 'created',
       session: makeSession('provisioning'),
     });
-    h.getCodexSetupSession.mockResolvedValue(
+    h.getAgentCredentialSetupSession.mockResolvedValue(
       makeSession('waiting_for_user', {
-        verificationUrl: VERIFICATION_URL,
+        verificationUrl: OPENAI_VERIFICATION_URL,
         userCode: USER_CODE,
       })
     );
@@ -72,7 +79,8 @@ describe('CodexConnectModal', () => {
     render(<CodexConnectModal isOpen onClose={vi.fn()} />);
 
     const openLink = await screen.findByRole('link', { name: /open openai sign-in/i });
-    expect(openLink).toHaveAttribute('href', VERIFICATION_URL);
+    expect(h.createAgentCredentialSetupSession).toHaveBeenCalledWith('openai-codex');
+    expect(openLink).toHaveAttribute('href', OPENAI_VERIFICATION_URL);
     expect(screen.getByText(USER_CODE)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /copy code/i }));
@@ -80,16 +88,38 @@ describe('CodexConnectModal', () => {
     await screen.findByRole('button', { name: /copied/i });
   });
 
+  it('promotes the Claude auth URL without requiring a terminal or one-time code', async () => {
+    h.createAgentCredentialSetupSession.mockResolvedValue({
+      kind: 'created',
+      session: makeSession('provisioning', { agentType: 'claude-code' }),
+    });
+    h.getAgentCredentialSetupSession.mockResolvedValue(
+      makeSession('waiting_for_user', {
+        agentType: 'claude-code',
+        verificationUrl: CLAUDE_VERIFICATION_URL,
+        userCode: null,
+      })
+    );
+
+    render(<AgentCredentialConnectModal agentType="claude-code" isOpen onClose={vi.fn()} />);
+
+    const openLink = await screen.findByRole('link', { name: /open claude sign-in/i });
+    expect(h.createAgentCredentialSetupSession).toHaveBeenCalledWith('claude-code');
+    expect(openLink).toHaveAttribute('href', CLAUDE_VERIFICATION_URL);
+    expect(screen.queryByRole('button', { name: /copy code/i })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('codex-terminal')).not.toBeInTheDocument();
+  });
+
   it('reports completion without exposing a terminal surface', async () => {
     const onConnected = vi.fn();
-    h.createCodexSetupSession.mockResolvedValue({
+    h.createAgentCredentialSetupSession.mockResolvedValue({
       kind: 'created',
       session: makeSession('waiting_for_user', {
-        verificationUrl: VERIFICATION_URL,
+        verificationUrl: OPENAI_VERIFICATION_URL,
         userCode: USER_CODE,
       }),
     });
-    h.getCodexSetupSession.mockResolvedValue(makeSession('completed'));
+    h.getAgentCredentialSetupSession.mockResolvedValue(makeSession('completed'));
 
     render(<CodexConnectModal isOpen onClose={vi.fn()} onConnected={onConnected} />);
     await waitFor(() => expect(onConnected).toHaveBeenCalledTimes(1));
@@ -98,16 +128,16 @@ describe('CodexConnectModal', () => {
   });
 
   it('keeps an active server session running on passive close but cancels explicitly', async () => {
-    h.createCodexSetupSession.mockResolvedValue({
+    h.createAgentCredentialSetupSession.mockResolvedValue({
       kind: 'created',
       session: makeSession('waiting_for_user', {
-        verificationUrl: VERIFICATION_URL,
+        verificationUrl: OPENAI_VERIFICATION_URL,
         userCode: USER_CODE,
       }),
     });
-    h.getCodexSetupSession.mockResolvedValue(
+    h.getAgentCredentialSetupSession.mockResolvedValue(
       makeSession('waiting_for_user', {
-        verificationUrl: VERIFICATION_URL,
+        verificationUrl: OPENAI_VERIFICATION_URL,
         userCode: USER_CODE,
       })
     );
@@ -118,28 +148,30 @@ describe('CodexConnectModal', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Close' }));
     expect(onClose).toHaveBeenCalledOnce();
     view.unmount();
-    expect(h.cancelCodexSetupSession).not.toHaveBeenCalled();
+    expect(h.cancelAgentCredentialSetupSession).not.toHaveBeenCalled();
 
     render(<CodexConnectModal isOpen onClose={vi.fn()} />);
     await screen.findByRole('link', { name: /open openai sign-in/i });
     expect(screen.getByText(USER_CODE)).toBeInTheDocument();
-    expect(h.createCodexSetupSession).toHaveBeenCalledTimes(2);
+    expect(h.createAgentCredentialSetupSession).toHaveBeenCalledTimes(2);
     fireEvent.click(screen.getByRole('button', { name: /^cancel$/i }));
-    await waitFor(() => expect(h.cancelCodexSetupSession).toHaveBeenCalledWith(SESSION_ID));
+    await waitFor(() =>
+      expect(h.cancelAgentCredentialSetupSession).toHaveBeenCalledWith(SESSION_ID)
+    );
   });
 
   it('surfaces clipboard failure while leaving the code selectable', async () => {
     vi.mocked(navigator.clipboard.writeText).mockRejectedValueOnce(new Error('denied'));
-    h.createCodexSetupSession.mockResolvedValue({
+    h.createAgentCredentialSetupSession.mockResolvedValue({
       kind: 'created',
       session: makeSession('waiting_for_user', {
-        verificationUrl: VERIFICATION_URL,
+        verificationUrl: OPENAI_VERIFICATION_URL,
         userCode: USER_CODE,
       }),
     });
-    h.getCodexSetupSession.mockResolvedValue(
+    h.getAgentCredentialSetupSession.mockResolvedValue(
       makeSession('waiting_for_user', {
-        verificationUrl: VERIFICATION_URL,
+        verificationUrl: OPENAI_VERIFICATION_URL,
         userCode: USER_CODE,
       })
     );
@@ -152,28 +184,28 @@ describe('CodexConnectModal', () => {
   });
 
   it('serializes polling and reports completion once', async () => {
-    let resolvePoll: ((session: CodexSetupSession) => void) | undefined;
-    h.createCodexSetupSession.mockResolvedValue({
+    let resolvePoll: ((session: AgentCredentialSetupSession) => void) | undefined;
+    h.createAgentCredentialSetupSession.mockResolvedValue({
       kind: 'created',
       session: makeSession('provisioning'),
     });
-    h.getCodexSetupSession.mockReturnValue(
+    h.getAgentCredentialSetupSession.mockReturnValue(
       new Promise((resolve) => {
         resolvePoll = resolve;
       })
     );
     const onConnected = vi.fn();
     render(<CodexConnectModal isOpen onClose={vi.fn()} onConnected={onConnected} />);
-    await waitFor(() => expect(h.getCodexSetupSession).toHaveBeenCalledOnce());
+    await waitFor(() => expect(h.getAgentCredentialSetupSession).toHaveBeenCalledOnce());
     await new Promise((resolve) => setTimeout(resolve, 70));
-    expect(h.getCodexSetupSession).toHaveBeenCalledOnce();
+    expect(h.getAgentCredentialSetupSession).toHaveBeenCalledOnce();
 
     resolvePoll?.(makeSession('completed'));
     await waitFor(() => expect(onConnected).toHaveBeenCalledOnce());
   });
 
   it('shows the active-session conflict with retry', async () => {
-    h.createCodexSetupSession.mockResolvedValue({
+    h.createAgentCredentialSetupSession.mockResolvedValue({
       kind: 'active_exists',
       message: 'A setup session is already in progress',
     });
@@ -182,10 +214,17 @@ describe('CodexConnectModal', () => {
     expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
   });
 
-  it('keeps guided setup user-scoped and visible when runtime bindings enable it', async () => {
-    h.getCodexSetupConfig.mockResolvedValue({ enabled: true, agentType: 'openai-codex' });
+  it('keeps guided setup user-scoped and visible only when runtime bindings support the agent', async () => {
+    h.getAgentCredentialSetupConfig.mockResolvedValue({
+      enabled: true,
+      agentType: 'openai-codex',
+      agentTypes: ['openai-codex', 'claude-code'],
+    });
     render(<CodexConnectTrigger scope="project" onConnected={vi.fn()} />);
-    await waitFor(() => expect(h.getCodexSetupConfig).toHaveBeenCalled());
+    await waitFor(() => expect(h.getAgentCredentialSetupConfig).toHaveBeenCalled());
     expect(screen.queryByRole('button', { name: /connect with codex/i })).toBeNull();
+
+    render(<AgentCredentialConnectTrigger agentType="claude-code" scope="user" />);
+    await screen.findByRole('button', { name: /connect with claude code/i });
   });
 });

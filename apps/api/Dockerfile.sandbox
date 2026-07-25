@@ -4,6 +4,7 @@
 FROM docker.io/cloudflare/sandbox:0.12.1
 
 COPY scripts/codex-device-auth.mjs /usr/local/bin/sam-codex-device-auth.mjs
+COPY scripts/claude-setup-token.mjs /usr/local/bin/sam-claude-setup-token.mjs
 
 # The base image already includes Node.js 20, Bun, git, curl, and common tools.
 # Add extra tools needed for SAM agent workloads here. The normal VM runtime
@@ -29,7 +30,7 @@ RUN set -eux; \
     apt-get install -y --no-install-recommends gh; \
     npm install -g @zed-industries/claude-agent-acp @anthropic-ai/claude-code @openai/codex@0.142.5; \
     npm cache clean --force; \
-    chmod 755 /usr/local/bin/sam-codex-device-auth.mjs; \
+    chmod 755 /usr/local/bin/sam-codex-device-auth.mjs /usr/local/bin/sam-claude-setup-token.mjs; \
     mkdir -p /workspaces; \
     rm -rf /var/lib/apt/lists/*
 

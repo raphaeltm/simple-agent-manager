@@ -3,22 +3,63 @@ import { Check, Copy, ExternalLink } from 'lucide-react';
 import { useEffect, useId, useRef, useState } from 'react';
 
 import {
-  cancelCodexSetupSession,
-  type CodexSetupSession,
-  type CodexSetupStatus,
-  createCodexSetupSession,
-  getCodexSetupSession,
-  isTerminalCodexSetupStatus,
+  cancelAgentCredentialSetupSession,
+  type AgentCredentialSetupSession,
+  type AgentCredentialSetupStatus,
+  type GuidedSetupAgentType,
+  createAgentCredentialSetupSession,
+  getAgentCredentialSetupSession,
+  isTerminalAgentCredentialSetupStatus,
 } from '../lib/api';
 
-interface CodexConnectModalProps {
+interface AgentCredentialConnectModalProps {
+  agentType: GuidedSetupAgentType;
   isOpen: boolean;
   onClose: () => void;
   onConnected?: () => void;
 }
 
+type CodexConnectModalProps = Omit<AgentCredentialConnectModalProps, 'agentType'>;
+
 const DEFAULT_POLL_INTERVAL_MS = 2000;
 const DEFAULT_SUCCESS_CLOSE_DELAY_MS = 1500;
+
+const SETUP_COPY: Record<
+  GuidedSetupAgentType,
+  {
+    title: string;
+    shortName: string;
+    providerName: string;
+    openLabel: string;
+    readyInstructions: string;
+    codeLabel: string;
+    manualReturnHint: string;
+    successMessage: string;
+  }
+> = {
+  'openai-codex': {
+    title: 'Connect with Codex',
+    shortName: 'Codex',
+    providerName: 'OpenAI',
+    openLabel: 'Open OpenAI sign-in',
+    readyInstructions: 'Open the secure OpenAI sign-in page, then enter this one-time code.',
+    codeLabel: 'One-time code',
+    manualReturnHint:
+      'You can return here after approving access. This window updates automatically.',
+    successMessage: 'Codex connected. Your ChatGPT subscription credential was saved.',
+  },
+  'claude-code': {
+    title: 'Connect with Claude Code',
+    shortName: 'Claude Code',
+    providerName: 'Claude',
+    openLabel: 'Open Claude sign-in',
+    readyInstructions: 'Open the secure Claude sign-in page to authorize Claude Code.',
+    codeLabel: 'Verification code',
+    manualReturnHint:
+      'You can return here after approving access. This window updates automatically.',
+    successMessage: 'Claude Code connected. Your Claude subscription credential was saved.',
+  },
+};
 
 function getPollIntervalMs(): number {
   return Number(import.meta.env.VITE_CODEX_SETUP_POLL_MS ?? DEFAULT_POLL_INTERVAL_MS);
@@ -30,7 +71,7 @@ function getSuccessCloseDelayMs(): number {
   );
 }
 
-function statusLabel(status: CodexSetupStatus): string {
+function statusLabel(status: AgentCredentialSetupStatus, shortName: string): string {
   switch (status) {
     case 'creating':
     case 'admitting':
@@ -48,18 +89,24 @@ function statusLabel(status: CodexSetupStatus): string {
     case 'expired':
       return 'Session expired';
     case 'cancelled':
-      return 'Cancelled';
+      return `${shortName} setup cancelled`;
   }
 }
 
-function isFailureStatus(status: CodexSetupStatus): boolean {
+function isFailureStatus(status: AgentCredentialSetupStatus): boolean {
   return status === 'failed' || status === 'expired' || status === 'cancelled';
 }
 
-export function CodexConnectModal({ isOpen, onClose, onConnected }: CodexConnectModalProps) {
+export function AgentCredentialConnectModal({
+  agentType,
+  isOpen,
+  onClose,
+  onConnected,
+}: AgentCredentialConnectModalProps) {
   const titleId = useId();
+  const copy = SETUP_COPY[agentType];
   const [phase, setPhase] = useState<'creating' | 'created' | 'blocked' | 'error'>('creating');
-  const [session, setSession] = useState<CodexSetupSession | null>(null);
+  const [session, setSession] = useState<AgentCredentialSetupSession | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [retryNonce, setRetryNonce] = useState(0);
@@ -86,8 +133,8 @@ export function CodexConnectModal({ isOpen, onClose, onConnected }: CodexConnect
     sessionIdRef.current = null;
     finishedRef.current = false;
 
-    const finish = (next: CodexSetupSession) => {
-      if (finishedRef.current || !isTerminalCodexSetupStatus(next.status)) return;
+    const finish = (next: AgentCredentialSetupSession) => {
+      if (finishedRef.current || !isTerminalAgentCredentialSetupStatus(next.status)) return;
       finishedRef.current = true;
       if (pollTimer) clearInterval(pollTimer);
       if (next.status === 'completed') {
@@ -102,7 +149,7 @@ export function CodexConnectModal({ isOpen, onClose, onConnected }: CodexConnect
       if (!sessionIdRef.current || pollInFlight || finishedRef.current) return;
       pollInFlight = true;
       try {
-        const next = await getCodexSetupSession(sessionIdRef.current);
+        const next = await getAgentCredentialSetupSession(sessionIdRef.current);
         if (cancelled) return;
         setSession(next);
         finish(next);
@@ -115,7 +162,7 @@ export function CodexConnectModal({ isOpen, onClose, onConnected }: CodexConnect
 
     void (async () => {
       try {
-        const result = await createCodexSetupSession();
+        const result = await createAgentCredentialSetupSession(agentType);
         if (result.kind === 'created') sessionIdRef.current = result.session.id;
         if (cancelled) return;
         if (result.kind !== 'created') {
@@ -126,7 +173,7 @@ export function CodexConnectModal({ isOpen, onClose, onConnected }: CodexConnect
         setPhase('created');
         setSession(result.session);
         finish(result.session);
-        if (!isTerminalCodexSetupStatus(result.session.status)) {
+        if (!isTerminalAgentCredentialSetupStatus(result.session.status)) {
           pollTimer = setInterval(() => void poll(), getPollIntervalMs());
         }
       } catch (error) {
@@ -143,7 +190,7 @@ export function CodexConnectModal({ isOpen, onClose, onConnected }: CodexConnect
       if (closeTimer) clearTimeout(closeTimer);
       sessionIdRef.current = null;
     };
-  }, [isOpen, retryNonce]);
+  }, [agentType, isOpen, retryNonce]);
 
   const handleCopy = async () => {
     if (!session?.userCode) return;
@@ -158,20 +205,22 @@ export function CodexConnectModal({ isOpen, onClose, onConnected }: CodexConnect
   const handleCancel = async () => {
     const id = sessionIdRef.current;
     finishedRef.current = true;
-    if (id) await cancelCodexSetupSession(id).catch(() => {});
+    if (id) await cancelAgentCredentialSetupSession(id).catch(() => {});
     onClose();
   };
 
   const status = session?.status ?? null;
   const isCompleted = status === 'completed';
   const isFailure = status !== null && isFailureStatus(status);
-  const isActive = phase === 'created' && status !== null && !isTerminalCodexSetupStatus(status);
-  const ready = isActive && !!session?.verificationUrl && !!session.userCode;
+  const isActive =
+    phase === 'created' && status !== null && !isTerminalAgentCredentialSetupStatus(status);
+  const ready = isActive && !!session?.verificationUrl;
+  const hasCode = ready && !!session?.userCode;
 
   const header = (
     <div className="flex items-center justify-between gap-3 px-5 sm:px-6 py-4 border-b border-border-default">
       <h2 id={titleId} className="text-base font-semibold text-fg-primary m-0">
-        Connect with Codex
+        {copy.title}
       </h2>
       <button
         type="button"
@@ -218,49 +267,45 @@ export function CodexConnectModal({ isOpen, onClose, onConnected }: CodexConnect
                   isCompleted ? 'bg-success' : isFailure ? 'bg-danger' : 'bg-accent animate-pulse'
                 }`}
               />
-              <span className="text-sm font-medium text-fg-primary">{statusLabel(status)}</span>
+              <span className="text-sm font-medium text-fg-primary">
+                {statusLabel(status, copy.shortName)}
+              </span>
             </div>
 
             {ready && (
               <div className="flex flex-col gap-4">
-                <p className="text-sm text-fg-muted m-0">
-                  Open the secure OpenAI sign-in page, then enter this one-time code.
-                </p>
+                <p className="text-sm text-fg-muted m-0">{copy.readyInstructions}</p>
                 <a
                   href={session.verificationUrl ?? undefined}
                   target="_blank"
                   rel="noreferrer"
                   className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-accent px-4 py-3 text-sm font-medium text-white no-underline"
                 >
-                  Open OpenAI sign-in <ExternalLink size={16} aria-hidden="true" />
+                  {copy.openLabel} <ExternalLink size={16} aria-hidden="true" />
                 </a>
-                <div className="rounded-lg border border-border-default bg-bg-secondary p-4">
-                  <span className="block text-xs text-fg-muted mb-2">One-time code</span>
-                  <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-                    <code className="select-all text-center sm:text-left text-2xl tracking-[0.18em] font-semibold text-fg-primary break-all">
-                      {session.userCode}
-                    </code>
-                    <Button variant="secondary" size="sm" onClick={() => void handleCopy()}>
-                      {copied ? (
-                        <Check size={16} aria-hidden="true" />
-                      ) : (
-                        <Copy size={16} aria-hidden="true" />
-                      )}
-                      {copied ? 'Copied' : 'Copy code'}
-                    </Button>
+                {hasCode && (
+                  <div className="rounded-lg border border-border-default bg-bg-secondary p-4">
+                    <span className="block text-xs text-fg-muted mb-2">{copy.codeLabel}</span>
+                    <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                      <code className="select-all text-center sm:text-left text-2xl tracking-[0.18em] font-semibold text-fg-primary break-all">
+                        {session.userCode}
+                      </code>
+                      <Button variant="secondary" size="sm" onClick={() => void handleCopy()}>
+                        {copied ? (
+                          <Check size={16} aria-hidden="true" />
+                        ) : (
+                          <Copy size={16} aria-hidden="true" />
+                        )}
+                        {copied ? 'Copied' : 'Copy code'}
+                      </Button>
+                    </div>
                   </div>
-                </div>
-                <p className="text-xs text-fg-muted m-0">
-                  You can return here after approving access. This window updates automatically.
-                </p>
+                )}
+                <p className="text-xs text-fg-muted m-0">{copy.manualReturnHint}</p>
               </div>
             )}
 
-            {isCompleted && (
-              <Alert variant="success">
-                Codex connected. Your ChatGPT subscription credential was saved.
-              </Alert>
-            )}
+            {isCompleted && <Alert variant="success">{copy.successMessage}</Alert>}
             {isFailure && (
               <Alert variant="error">
                 {session?.errorMessage ?? 'The guided setup session ended before completing.'}
@@ -295,4 +340,8 @@ export function CodexConnectModal({ isOpen, onClose, onConnected }: CodexConnect
       </div>
     </Dialog>
   );
+}
+
+export function CodexConnectModal(props: CodexConnectModalProps) {
+  return <AgentCredentialConnectModal agentType="openai-codex" {...props} />;
 }

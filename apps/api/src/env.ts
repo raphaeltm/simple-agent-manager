@@ -100,10 +100,10 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   SETUP_FORCE?: string; // "true" reopens /setup for lockout recovery
   SETUP_RATE_LIMIT_MAX_ATTEMPTS?: string; // Max setup-token attempts per identifier/window (default: 10)
   SETUP_RATE_LIMIT_WINDOW_SECONDS?: string; // Setup-token attempt window in seconds (default: 900)
-  // Guided Codex credential setup via Cloudflare Sandbox
+  // Guided agent credential setup via Cloudflare Sandbox
   MAX_CONCURRENT_SETUP_SESSIONS?: string; // Concurrency sub-cap below the Sandbox container max_instances (default: 2)
   SETUP_SESSION_TTL_MS?: string; // Setup session lifetime in ms before auto-teardown (default: 900000 = 15 min)
-  SETUP_SESSION_CAPTURE_POLL_MS?: string; // auth.json capture poll interval in ms (default: 3000)
+  SETUP_SESSION_CAPTURE_POLL_MS?: string; // credential capture poll interval in ms (default: 3000)
   CODEX_DEVICE_AUTH_REQUEST_TIMEOUT_MS?: string; // App-server JSON-RPC request timeout in ms (default: 30000)
   SETUP_SESSION_SWEEP_MAX_CANDIDATES?: string; // Max expired sessions torn down per cron sweep (default: 50)
   POOL_LEASE_BUFFER_MS?: string; // Grace beyond TTL before a leaked pool lease self-prunes (default: 300000 = 5 min)

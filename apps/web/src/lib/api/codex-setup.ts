@@ -1,25 +1,34 @@
 /**
- * Typed client for the native Codex guided-login setup sessions. Wraps the REST contract at
+ * Typed client for native guided-login setup sessions. Wraps the REST contract at
  * `${VITE_API_URL}/api/agent-credential-setup-sessions`.
  *
- * All calls go through the shared authenticated request client. Device-login
+ * All calls go through the shared authenticated request client. Provider login
  * process details remain server-side; this client receives semantic status,
- * verification URL, and one-time code fields only.
+ * verification URL, and optional one-time code fields only.
  */
 import { ApiClientError, request } from './client';
 
 /** Base path for the guided setup session routes. */
 const BASE_PATH = '/api/agent-credential-setup-sessions';
 
-/** The single agent type guided setup supports in v1. */
 export const CODEX_SETUP_AGENT_TYPE = 'openai-codex';
+export const CLAUDE_CODE_SETUP_AGENT_TYPE = 'claude-code';
+export const GUIDED_SETUP_AGENT_TYPES = [
+  CODEX_SETUP_AGENT_TYPE,
+  CLAUDE_CODE_SETUP_AGENT_TYPE,
+] as const;
+export type GuidedSetupAgentType = (typeof GUIDED_SETUP_AGENT_TYPES)[number];
+
+export function isGuidedSetupAgentType(value: string): value is GuidedSetupAgentType {
+  return GUIDED_SETUP_AGENT_TYPES.includes(value as GuidedSetupAgentType);
+}
 
 /**
  * Lifecycle status of a setup session. The first six are "active" (still
  * working); the last four are terminal. `completed` = credential captured +
  * saved (success).
  */
-export type CodexSetupStatus =
+export type AgentCredentialSetupStatus =
   | 'creating'
   | 'admitting'
   | 'provisioning'
@@ -31,8 +40,10 @@ export type CodexSetupStatus =
   | 'cancelled'
   | 'expired';
 
+export type CodexSetupStatus = AgentCredentialSetupStatus;
+
 /** Terminal (non-recoverable) statuses. */
-const TERMINAL_STATUSES: ReadonlySet<CodexSetupStatus> = new Set([
+const TERMINAL_STATUSES: ReadonlySet<AgentCredentialSetupStatus> = new Set([
   'completed',
   'failed',
   'cancelled',
@@ -40,20 +51,27 @@ const TERMINAL_STATUSES: ReadonlySet<CodexSetupStatus> = new Set([
 ]);
 
 /** True when the session has reached a terminal status. */
-export function isTerminalCodexSetupStatus(status: CodexSetupStatus): boolean {
+export function isTerminalAgentCredentialSetupStatus(status: AgentCredentialSetupStatus): boolean {
   return TERMINAL_STATUSES.has(status);
 }
 
+export const isTerminalCodexSetupStatus = isTerminalAgentCredentialSetupStatus;
+
 /** Whether the guided flow is available from the deployed runtime bindings. */
-export interface CodexSetupConfig {
+export interface AgentCredentialSetupConfig {
   enabled: boolean;
+  /** Back-compat: the default guided setup agent. */
   agentType: string;
+  /** All guided setup agents supported by this deployment. Absent on older API versions. */
+  agentTypes?: string[];
 }
 
+export type CodexSetupConfig = AgentCredentialSetupConfig;
+
 /** A guided setup session as returned by create/poll. */
-export interface CodexSetupSession {
+export interface AgentCredentialSetupSession {
   id: string;
-  status: CodexSetupStatus;
+  status: AgentCredentialSetupStatus;
   agentType: string;
   expiresAt: string;
   verificationUrl?: string | null;
@@ -62,14 +80,18 @@ export interface CodexSetupSession {
   errorMessage?: string | null;
 }
 
+export type CodexSetupSession = AgentCredentialSetupSession;
+
 /**
  * Outcome of attempting to create a session. `POST /` can return 201 (created),
  * 202 (no capacity — retryable) or 409 (an active session already exists).
  */
-export type CreateCodexSetupResult =
-  | { kind: 'created'; session: CodexSetupSession }
+export type CreateAgentCredentialSetupResult =
+  | { kind: 'created'; session: AgentCredentialSetupSession }
   | { kind: 'no_capacity'; message: string }
   | { kind: 'active_exists'; message: string };
+
+export type CreateCodexSetupResult = CreateAgentCredentialSetupResult;
 
 /** Raw shape of the create response body (union across 201/202). */
 interface CreateSessionResponseBody {
@@ -82,23 +104,33 @@ interface CreateSessionResponseBody {
   message?: string;
 }
 
-/**
- * GET /config — whether the guided flow is available. Used to decide whether to
- * render the "Connect with Codex" button at all.
- */
-export async function getCodexSetupConfig(): Promise<CodexSetupConfig> {
-  return request<CodexSetupConfig>(`${BASE_PATH}/config`);
+export function setupConfigSupportsAgent(
+  config: AgentCredentialSetupConfig,
+  agentType: GuidedSetupAgentType
+): boolean {
+  if (!config.enabled) return false;
+  if (Array.isArray(config.agentTypes)) return config.agentTypes.includes(agentType);
+  return config.agentType === agentType;
 }
+
+/** GET /config — whether the guided flow is available. */
+export async function getAgentCredentialSetupConfig(): Promise<AgentCredentialSetupConfig> {
+  return request<AgentCredentialSetupConfig>(`${BASE_PATH}/config`);
+}
+
+export const getCodexSetupConfig = getAgentCredentialSetupConfig;
 
 /**
  * POST / — create a setup session (leases a sandbox slot). Normalizes the
  * 201/202/409 responses into a discriminated result the modal can branch on.
  */
-export async function createCodexSetupSession(): Promise<CreateCodexSetupResult> {
+export async function createAgentCredentialSetupSession(
+  agentType: GuidedSetupAgentType
+): Promise<CreateAgentCredentialSetupResult> {
   try {
     const body = await request<CreateSessionResponseBody>(BASE_PATH, {
       method: 'POST',
-      body: JSON.stringify({ agentType: CODEX_SETUP_AGENT_TYPE }),
+      body: JSON.stringify({ agentType }),
     });
     // 202: all slots busy — body is { status: 'no_capacity', message }.
     if (body.status === 'no_capacity') {
@@ -108,7 +140,7 @@ export async function createCodexSetupSession(): Promise<CreateCodexSetupResult>
       };
     }
     // 201: created — body is a full session row.
-    return { kind: 'created', session: body as CodexSetupSession };
+    return { kind: 'created', session: body as AgentCredentialSetupSession };
   } catch (err) {
     // 409: an active session already exists for this user + agent.
     if (
@@ -124,17 +156,27 @@ export async function createCodexSetupSession(): Promise<CreateCodexSetupResult>
   }
 }
 
-/** GET /:id — poll lifecycle status. */
-export async function getCodexSetupSession(id: string): Promise<CodexSetupSession> {
-  return request<CodexSetupSession>(`${BASE_PATH}/${encodeURIComponent(id)}`);
+export function createCodexSetupSession(): Promise<CreateCodexSetupResult> {
+  return createAgentCredentialSetupSession(CODEX_SETUP_AGENT_TYPE);
 }
 
-/** POST /:id/cancel — cancel + tear down (best-effort). */
-export async function cancelCodexSetupSession(
+/** GET /:id — poll lifecycle status. */
+export async function getAgentCredentialSetupSession(
   id: string
-): Promise<{ id: string; status: CodexSetupStatus }> {
-  return request<{ id: string; status: CodexSetupStatus }>(
+): Promise<AgentCredentialSetupSession> {
+  return request<AgentCredentialSetupSession>(`${BASE_PATH}/${encodeURIComponent(id)}`);
+}
+
+export const getCodexSetupSession = getAgentCredentialSetupSession;
+
+/** POST /:id/cancel — cancel + tear down (best-effort). */
+export async function cancelAgentCredentialSetupSession(
+  id: string
+): Promise<{ id: string; status: AgentCredentialSetupStatus }> {
+  return request<{ id: string; status: AgentCredentialSetupStatus }>(
     `${BASE_PATH}/${encodeURIComponent(id)}/cancel`,
     { method: 'POST' }
   );
 }
+
+export const cancelCodexSetupSession = cancelAgentCredentialSetupSession;

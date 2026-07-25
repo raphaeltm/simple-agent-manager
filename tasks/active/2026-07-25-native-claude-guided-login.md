@@ -31,14 +31,14 @@ Claude Code still requires users to run `claude setup-token` manually and paste 
 
 ## Implementation checklist
 
-- [ ] Generalize guided setup routing to support both `openai-codex` and `claude-code`.
-- [ ] Add provider-specific setup metadata for workspace directory, driver command, captured credential path, URL trust, optional user code, and copy/status text.
-- [ ] Add a Claude setup-token driver script that runs `claude setup-token`, captures a trusted Claude auth URL, optionally captures a displayed code, writes non-secret setup state, and writes only the final OAuth token to a private file for server-side capture.
-- [ ] Update `CredentialSetupSession` to provision/capture credentials by setup agent type, while preserving no-secret-in-D1/browser/logs semantics.
-- [ ] Copy the Claude helper into `apps/api/Dockerfile.sandbox`.
-- [ ] Generalize the web API client and modal/trigger to expose Claude Code with native open/copy controls and no terminal.
-- [ ] Render the guided setup trigger for Claude Code OAuth-token flows in user scope; keep project-scope behavior hidden until project-scoped guided capture is intentionally supported.
-- [ ] Add/extend API, DO, script, and UI tests for Claude setup-token URL/token capture and cross-agent behavior.
+- [x] Generalize guided setup routing to support both `openai-codex` and `claude-code`.
+- [x] Add provider-specific setup metadata for workspace directory, driver command, captured credential path, URL trust, optional user code, and copy/status text.
+- [x] Add a Claude setup-token driver script that runs `claude setup-token`, captures a trusted Claude auth URL, optionally captures a displayed code, writes non-secret setup state, and writes only the final OAuth token to a private file for server-side capture.
+- [x] Update `CredentialSetupSession` to provision/capture credentials by setup agent type, while preserving no-secret-in-D1/browser/logs semantics.
+- [x] Copy the Claude helper into `apps/api/Dockerfile.sandbox`.
+- [x] Generalize the web API client and modal/trigger to expose Claude Code with native open/copy controls and no terminal.
+- [x] Render the guided setup trigger for Claude Code OAuth-token flows in user scope; keep project-scope behavior hidden until project-scoped guided capture is intentionally supported.
+- [x] Add/extend API, DO, script, and UI tests for Claude setup-token URL/token capture and cross-agent behavior.
 - [ ] Add/update Playwright coverage for the changed guided flow surface, including mobile and desktop open/copy behavior.
 
 ## Acceptance criteria
@@ -56,3 +56,9 @@ Claude Code still requires users to run `claude setup-token` manually and paste 
 - Do not expose the final Claude OAuth token to the browser.
 - Do not store provider URL/code or token material in D1; only DO-local ephemeral details may include URL/code.
 - Official Claude Code docs used for the CLI contract: https://code.claude.com/docs/en/authentication
+
+## Validation log
+
+- Focused API unit tests passed for Claude setup-token parser, Codex regression, setup-session DO behavior, setup-session route creation, vertical route coverage, and credential validation.
+- Focused web unit tests passed for the native guided modal/trigger behavior, including Claude URL without code and no terminal surface.
+- `pnpm typecheck` passed after the Claude implementation.

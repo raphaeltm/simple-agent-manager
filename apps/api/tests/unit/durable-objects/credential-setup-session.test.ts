@@ -303,7 +303,7 @@ describe('CredentialSetupSession — create()', () => {
 
     const result = await instance.create({
       id: 'setup-1',
-      codexHome: '/tmp/codex-setup-setup-1',
+      setupHome: '/tmp/codex-setup-setup-1',
       ttlMs: 900_000,
       ...BASE_PARAMS,
     });
@@ -332,7 +332,7 @@ describe('CredentialSetupSession — alarm() provisioning step', () => {
 
     await instance.create({
       id: 'setup-1',
-      codexHome: '/tmp/codex-setup-setup-1',
+      setupHome: '/tmp/codex-setup-setup-1',
       ttlMs: 900_000,
       ...BASE_PARAMS,
     });
@@ -366,7 +366,7 @@ describe('CredentialSetupSession — alarm() provisioning step', () => {
     vi.mocked(getSandboxInstance).mockResolvedValue(fakeSandbox as never);
     await instance.create({
       id: 'setup-fast',
-      codexHome: '/tmp/codex-setup-fast',
+      setupHome: '/tmp/codex-setup-fast',
       ttlMs: 900_000,
       ...BASE_PARAMS,
     });
@@ -396,7 +396,7 @@ describe('CredentialSetupSession — alarm() provisioning step', () => {
     vi.mocked(getSandboxInstance).mockResolvedValue(fakeSandbox as never);
     await instance.create({
       id: 'setup-race',
-      codexHome: '/tmp/codex-setup-race',
+      setupHome: '/tmp/codex-setup-race',
       ttlMs: 900_000,
       ...BASE_PARAMS,
     });
@@ -423,6 +423,52 @@ describe('CredentialSetupSession — alarm() provisioning step', () => {
     expect((await instance.getState())?.status).toBe('cancelled');
   });
 
+  it('provisions Claude Code with an isolated CLAUDE_CONFIG_DIR and optional code', async () => {
+    const { instance } = createDO();
+    await Promise.resolve();
+    const fakeSandbox = createFakeSandbox();
+    fakeSandbox.readFile.mockImplementation(async (path: string) => ({
+      content: path.endsWith('device-auth-state.json')
+        ? JSON.stringify({
+            status: 'waiting_for_user',
+            verificationUrl: 'https://claude.ai/oauth/device',
+          })
+        : '',
+    }));
+    vi.mocked(getSandboxInstance).mockResolvedValue(fakeSandbox as never);
+
+    await instance.create({
+      id: 'setup-claude',
+      setupHome: '/tmp/claude-setup-setup-claude',
+      ttlMs: 900_000,
+      ...BASE_PARAMS,
+      agentType: 'claude-code',
+      provider: 'anthropic',
+      agentName: 'Claude Code',
+    });
+
+    await instance.alarm(); // provisioning -> admitting
+    await instance.alarm(); // admitting -> waiting_for_user
+
+    expect(fakeSandbox.writeFile).not.toHaveBeenCalledWith(
+      expect.stringContaining('config.toml'),
+      expect.anything()
+    );
+    expect(fakeSandbox.exec).toHaveBeenCalledWith(
+      expect.stringContaining('CLAUDE_CONFIG_DIR='),
+      expect.objectContaining({ timeout: expect.any(Number) })
+    );
+    expect(fakeSandbox.exec).toHaveBeenCalledWith(
+      expect.stringContaining('sam-claude-setup-token.mjs'),
+      expect.objectContaining({ timeout: expect.any(Number) })
+    );
+
+    const state = await instance.getState();
+    expect(state?.status).toBe('waiting_for_user');
+    expect(state?.verificationUrl).toBe('https://claude.ai/oauth/device');
+    expect(state?.userCode).toBeNull();
+  });
+
   it('tears down as failed when the sandbox fails to provision', async () => {
     const { instance, ctx, database } = createDO();
     await Promise.resolve();
@@ -433,7 +479,7 @@ describe('CredentialSetupSession — alarm() provisioning step', () => {
 
     await instance.create({
       id: 'setup-1',
-      codexHome: '/tmp/codex-setup-setup-1',
+      setupHome: '/tmp/codex-setup-setup-1',
       ttlMs: 900_000,
       ...BASE_PARAMS,
     });
@@ -468,7 +514,7 @@ describe('CredentialSetupSession — alarm() capture polling', () => {
 
     await created.instance.create({
       id,
-      codexHome: `/tmp/codex-setup-${id}`,
+      setupHome: `/tmp/codex-setup-${id}`,
       ttlMs: 900_000,
       ...BASE_PARAMS,
     });
@@ -544,6 +590,58 @@ describe('CredentialSetupSession — alarm() capture polling', () => {
     expect(database._calls.some((c) => c.args.includes('completed'))).toBe(true);
   });
 
+  it('captures a valid Claude setup-token, saves the credential, and completes teardown', async () => {
+    const created = createDO();
+    await Promise.resolve();
+    const fakeSandbox = createFakeSandbox();
+    vi.mocked(getSandboxInstance).mockResolvedValue(fakeSandbox as never);
+
+    await created.instance.create({
+      id: 'setup-claude-capture',
+      setupHome: '/tmp/claude-setup-capture',
+      ttlMs: 900_000,
+      ...BASE_PARAMS,
+      agentType: 'claude-code',
+      provider: 'anthropic',
+      agentName: 'Claude Code',
+    });
+    fakeSandbox.readFile.mockImplementation(async (path: string) => ({
+      content: path.endsWith('device-auth-state.json')
+        ? JSON.stringify({
+            status: 'waiting_for_user',
+            verificationUrl: 'https://claude.ai/oauth/device',
+          })
+        : '',
+    }));
+    await created.instance.alarm(); // provisioning -> admitting
+    await created.instance.alarm(); // device state -> waiting_for_user
+
+    const token = `sk-ant-oat${'B'.repeat(48)}`;
+    fakeSandbox.exists.mockResolvedValue({ exists: true });
+    fakeSandbox.readFile.mockResolvedValue({ content: `${token}\n` });
+    vi.mocked(saveAgentCredentialForUser).mockResolvedValue({
+      created: true,
+      createdAt: '2026-07-01T00:00:00.000Z',
+      updatedAt: '2026-07-01T00:00:00.000Z',
+    });
+
+    await created.instance.alarm();
+
+    expect(saveAgentCredentialForUser).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: BASE_PARAMS.userId,
+        projectId: null,
+        agentType: 'claude-code',
+        credentialKind: 'oauth-token',
+        credential: token,
+        provider: 'anthropic',
+        agentName: 'Claude Code',
+        autoActivate: true,
+      })
+    );
+    expect((await created.instance.getState())?.status).toBe('completed');
+  });
+
   it('tears down as failed when saveAgentCredentialForUser rejects', async () => {
     const { instance, database, fakeSandbox } = await createAndProvision();
     const authJson = validAuthJson();
@@ -575,7 +673,7 @@ describe('CredentialSetupSession — TTL expiry', () => {
       // Negative TTL => already expired the moment create() runs.
       await created.instance.create({
         id: 'setup-expired',
-        codexHome: '/tmp/codex-setup-expired',
+        setupHome: '/tmp/codex-setup-expired',
         ttlMs: -60_000,
         ...BASE_PARAMS,
       });
@@ -603,7 +701,7 @@ describe('CredentialSetupSession — terminal state is a stable fixed point', ()
     vi.mocked(getSandboxInstance).mockResolvedValue(fakeSandbox as never);
     await instance.create({
       id: 'setup-term',
-      codexHome: '/tmp/codex-setup-term',
+      setupHome: '/tmp/codex-setup-term',
       ttlMs: -60_000, // immediately expired -> alarm() drives it to 'expired'
       ...BASE_PARAMS,
     });
@@ -633,7 +731,7 @@ describe('CredentialSetupSession — cancel()', () => {
     vi.mocked(getSandboxInstance).mockResolvedValue(fakeSandbox as never);
     await instance.create({
       id: 'setup-cancel',
-      codexHome: '/tmp/codex-setup-cancel',
+      setupHome: '/tmp/codex-setup-cancel',
       ttlMs: 900_000,
       ...BASE_PARAMS,
     });
@@ -652,7 +750,7 @@ describe('CredentialSetupSession — cancel()', () => {
     vi.mocked(getSandboxInstance).mockResolvedValue(fakeSandbox as never);
     await instance.create({
       id: 'setup-cancel-2',
-      codexHome: '/tmp/codex-setup-cancel-2',
+      setupHome: '/tmp/codex-setup-cancel-2',
       ttlMs: 900_000,
       ...BASE_PARAMS,
     });

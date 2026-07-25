@@ -25,7 +25,7 @@ import { useState } from 'react';
 
 import { useToast } from '../hooks/useToast';
 import { saveAgentCredential, saveAgentSettings, saveProjectAgentCredential } from '../lib/api';
-import { CodexConnectTrigger } from './CodexConnectTrigger';
+import { AgentCredentialConnectTrigger } from './CodexConnectTrigger';
 
 interface ConnectFlowProps {
   /** When set, writes project-scoped credentials. */
@@ -55,7 +55,11 @@ function getFlowVerb(mode: ConnectFlowMode): string {
   }
 }
 
-function getSuccessMessage(agentName: string, mode: ConnectFlowMode, isProjectScoped: boolean): string {
+function getSuccessMessage(
+  agentName: string,
+  mode: ConnectFlowMode,
+  isProjectScoped: boolean
+): string {
   if (isProjectScoped) {
     return `${agentName} saved for this project`;
   }
@@ -98,13 +102,17 @@ export function ConnectFlow({
   const [credential, setCredential] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [opencodeProvider, setOpencodeProvider] = useState<OpenCodeProvider>(DEFAULT_OPENCODE_PROVIDER);
+  const [opencodeProvider, setOpencodeProvider] =
+    useState<OpenCodeProvider>(DEFAULT_OPENCODE_PROVIDER);
   const [opencodeModel, setOpencodeModel] = useState('');
   const [opencodeBaseUrl, setOpencodeBaseUrl] = useState('');
 
   const selectedAgent = AGENT_CATALOG.find((a) => a.id === agentId);
   const hasOAuth = selectedAgent?.oauthSupport != null;
   const isCodexAuthJson = selectedAgent?.id === 'openai-codex' && authMethod === 'oauth-token';
+  const isGuidedOAuthAgent =
+    authMethod === 'oauth-token' &&
+    (selectedAgent?.id === 'openai-codex' || selectedAgent?.id === 'claude-code');
   const isOpenCodeApiKey = selectedAgent?.id === 'opencode' && authMethod === 'api-key';
   // OpenCode provider + model selection lives in the same flow as the key, but
   // agent-settings are user-scoped only — so we only surface it for user-scope connects.
@@ -132,8 +140,7 @@ export function ConnectFlow({
       if (showOpenCodeConfig) {
         await saveAgentSettings('opencode', {
           opencodeProvider,
-          opencodeBaseUrl:
-            opencodeProvider === 'custom' ? opencodeBaseUrl.trim() || null : null,
+          opencodeBaseUrl: opencodeProvider === 'custom' ? opencodeBaseUrl.trim() || null : null,
           model: opencodeModel.trim() || null,
         });
       }
@@ -249,20 +256,37 @@ export function ConnectFlow({
                 {selectedAgent.oauthSupport.setupInstructions}
               </p>
             )}
-            {isCodexAuthJson ? (
+            {isGuidedOAuthAgent ? (
               <div className="flex flex-col gap-2">
                 {/* Guided flow (only rendered when the platform gate is enabled). */}
-                <CodexConnectTrigger scope={projectId ? 'project' : 'user'} onConnected={onConnected} />
-                <div className="text-xs font-medium text-fg-muted">
-                  Or paste auth.json manually
-                </div>
-                <textarea
-                  id="connect-credential"
-                  placeholder="Paste the full contents of ~/.codex/auth.json"
-                  value={credential}
-                  onChange={(e) => setCredential(e.currentTarget.value)}
-                  className="w-full py-2 px-3 min-h-32 resize-y border border-border-default rounded-sm bg-inset text-fg-primary text-[0.8125rem] font-mono box-border"
+                <AgentCredentialConnectTrigger
+                  agentType={selectedAgent.id as 'openai-codex' | 'claude-code'}
+                  scope={projectId ? 'project' : 'user'}
+                  onConnected={onConnected}
                 />
+                <div className="text-xs font-medium text-fg-muted">
+                  {isCodexAuthJson
+                    ? 'Or paste auth.json manually'
+                    : 'Or paste setup-token manually'}
+                </div>
+                {isCodexAuthJson ? (
+                  <textarea
+                    id="connect-credential"
+                    placeholder="Paste the full contents of ~/.codex/auth.json"
+                    value={credential}
+                    onChange={(e) => setCredential(e.currentTarget.value)}
+                    className="w-full py-2 px-3 min-h-32 resize-y border border-border-default rounded-sm bg-inset text-fg-primary text-[0.8125rem] font-mono box-border"
+                  />
+                ) : (
+                  <input
+                    id="connect-credential"
+                    type="password"
+                    placeholder='Paste your OAuth token from "claude setup-token"'
+                    value={credential}
+                    onChange={(e) => setCredential(e.currentTarget.value)}
+                    className="w-full py-2 px-3 min-h-9 border border-border-default rounded-sm bg-inset text-fg-primary text-[0.8125rem] font-mono box-border"
+                  />
+                )}
               </div>
             ) : (
               <input
@@ -284,7 +308,10 @@ export function ConnectFlow({
           {showOpenCodeConfig && (
             <>
               <div className="flex flex-col gap-1.5">
-                <label htmlFor="connect-opencode-provider" className="text-xs font-medium text-fg-muted">
+                <label
+                  htmlFor="connect-opencode-provider"
+                  className="text-xs font-medium text-fg-muted"
+                >
                   OpenCode provider
                 </label>
                 <select
@@ -303,7 +330,10 @@ export function ConnectFlow({
 
               {opencodeProvider === 'custom' && (
                 <div className="flex flex-col gap-1.5">
-                  <label htmlFor="connect-opencode-base-url" className="text-xs font-medium text-fg-muted">
+                  <label
+                    htmlFor="connect-opencode-base-url"
+                    className="text-xs font-medium text-fg-muted"
+                  >
                     Base URL
                   </label>
                   <input
@@ -318,7 +348,10 @@ export function ConnectFlow({
               )}
 
               <div className="flex flex-col gap-1.5">
-                <label htmlFor="connect-opencode-model" className="text-xs font-medium text-fg-muted">
+                <label
+                  htmlFor="connect-opencode-model"
+                  className="text-xs font-medium text-fg-muted"
+                >
                   Model
                 </label>
                 <input

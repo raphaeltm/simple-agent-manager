@@ -121,18 +121,32 @@ export { getCurrentUser } from './auth';
 export { type CliVersionInfo, getCliDownloadUrl, getCliVersion } from './cli';
 export { API_URL, ApiClientError, request } from './client';
 export type {
+  AgentCredentialSetupConfig,
+  AgentCredentialSetupSession,
+  AgentCredentialSetupStatus,
   CodexSetupConfig,
   CodexSetupSession,
   CodexSetupStatus,
+  CreateAgentCredentialSetupResult,
   CreateCodexSetupResult,
+  GuidedSetupAgentType,
 } from './codex-setup';
 export {
+  cancelAgentCredentialSetupSession,
   cancelCodexSetupSession,
+  CLAUDE_CODE_SETUP_AGENT_TYPE,
   CODEX_SETUP_AGENT_TYPE,
+  createAgentCredentialSetupSession,
   createCodexSetupSession,
+  getAgentCredentialSetupConfig,
+  getAgentCredentialSetupSession,
   getCodexSetupConfig,
   getCodexSetupSession,
+  GUIDED_SETUP_AGENT_TYPES,
+  isGuidedSetupAgentType,
+  isTerminalAgentCredentialSetupStatus,
   isTerminalCodexSetupStatus,
+  setupConfigSupportsAgent,
 } from './codex-setup';
 export type {
   CCAttachmentListItem,
