@@ -40,6 +40,7 @@ Add `digitalocean` as a **fifth cloud provider** (after hetzner, scaleway, gcp, 
 ## Implementation checklist
 
 ### packages/shared
+
 - [x] `types/user.ts` — `'digitalocean'` in `CREDENTIAL_PROVIDERS` + `| { provider: 'digitalocean'; token: string }` in `CreateCredentialRequest`.
 - [x] `constants/providers.ts` — `PROVIDER_LABELS`, `PROVIDER_HELP` (Full-Access PAT helpText), `PROVIDER_LOCATIONS` (10 regions), `PROVIDER_DEFAULT_LOCATIONS` (`fra1`); **`TOKEN_COMPUTE_PROVIDERS` + `hasByocComputeCredential()`** (DRY helper).
 - [x] `constants/vm-sizes.ts` — `PROVIDER_VM_SIZE_VCPUS.digitalocean = {small:2, medium:4, large:8}`.
@@ -47,6 +48,7 @@ Add `digitalocean` as a **fifth cloud provider** (after hetzner, scaleway, gcp, 
 - [x] `constants/hetzner.ts` — `DEFAULT_DIGITALOCEAN_REGION='fra1'`, `DEFAULT_DIGITALOCEAN_IMAGE='ubuntu-24-04-x64'`; re-export from `constants/index.ts`.
 
 ### packages/providers
+
 - [x] `types.ts` — `DigitalOceanProviderConfig` in `ProviderConfig` union.
 - [x] `kv-tags.ts` — parameterize with a separator (default `=`; existing `labelsToKvTags`/`kvTagsToLabels` become thin wrappers — Scaleway/Vultr unchanged).
 - [x] `digitalocean-tags.ts` (new) — colon encode/decode + charset validate (fail-fast) + `sam-name` volume-name round-trip key.
@@ -56,6 +58,7 @@ Add `digitalocean` as a **fifth cloud provider** (after hetzner, scaleway, gcp, 
 - [x] `index.ts` — `createProvider` `case 'digitalocean'` (exhaustive-never gate) + exports.
 
 ### apps/api
+
 - [x] `services/provider-credentials.ts` — `serializeCredentialToken` + `buildProviderConfig` digitalocean cases; `DigitalOceanRuntimeEnv`; env threading.
 - [x] `services/validation.ts` — `validateDigitalOceanCredentialWithProvider` (`GET /v2/account`, Bearer).
 - [x] `routes/credentials.ts` + `routes/projects/credentials.ts` — digitalocean branch in `getCloudCredentialFields` + `validateCloudCredentialRequest` **BEFORE the GCP fallthrough**.
@@ -65,9 +68,11 @@ Add `digitalocean` as a **fifth cloud provider** (after hetzner, scaleway, gcp, 
 - [x] `env.ts` + `.env.example` — `DIGITALOCEAN_*` tunables.
 
 ### packages/cloud-init
+
 - [x] `generate.ts` — `'digitalocean'` in `VALID_CLOUD_PROVIDERS` + doc comment.
 
 ### apps/web
+
 - [x] `DigitalOceanCredentialForm.tsx` (new) — thin wrapper over `SingleTokenCredentialForm` (widen `SingleTokenProvider`).
 - [x] `SettingsCloudProvider.tsx` — credential lookup + section.
 - [x] `CloudProviderConnectFlow.tsx` — `buildRequest` (before GCP), `isReady`, single-token render block; grid `sm:grid-cols-2` (5 providers).
@@ -76,10 +81,12 @@ Add `digitalocean` as a **fifth cloud provider** (after hetzner, scaleway, gcp, 
 - [x] Playwright visual audit (rule 17): form + connect flow @ 375/1280, long-text/empty/error.
 
 ### Docs + marketing (same PR, rule 01)
+
 - [x] Docs: `self-hosting.mdx`, `reference/roadmap.md`, `architecture/overview.md`, `architecture/security.md`, `guides/app-deployments.md`, `guides/creating-workspaces.md`, `guides/idea-execution.md`, `guides/local-development.md`, `overview.mdx`, `concepts.mdx`, `quickstart.md`.
 - [x] Marketing: `data/integrations.ts` + `public/images/integrations/digitalocean.svg`, `Roadmap.astro`, `Comparison.astro`, `HowItWorks.astro`, `self-host/index.astro`, `enterprise/{compliance,cost-control}.astro`.
 
 ## Test plan (mirror Vultr suites 1:1)
+
 - **Providers unit** (>90% coverage, exact-payload): droplet lifecycle (create body: PLAIN user_data + colon tags + image slug + backups/ipv6/monitoring false; integer-id String; IP poll happy + timeout→empty hard-bounded; delete 404; power_off/on; status matrix incl. `networks.v4` public extraction; 2-page pagination + truncation warn + label filter), volumes (name sanitize + `sam-name` round-trip; attach/detach/resize action-poll happy + timeout + errored; resize grow-only + max cap; delete-404 discriminating; deterministic linuxDevice), `classifyDigitalOceanError` matrix, colon-tags encode/decode + charset fail-fast round-trip, factory case.
 - **Contract** `tests/contract/digitalocean-contract.test.ts` (`runProviderContractTests`).
 - **apps/api:** credential CRUD (raw token; bogus → sanitized error, nothing stored); **rule-28 fallback matrix** (active-project → user → platform → null; inactive-row blocks fallback); resolve-credential-source; **rule-35 vertical provisioning slice** (DO HTTP mocked → exact createVM payload → node persisted, empty-IP tolerated); deployment-volume slice (name lowercasing + tag encoding); catalog omits digitalocean without credential.
@@ -88,6 +95,7 @@ Add `digitalocean` as a **fifth cloud provider** (after hetzner, scaleway, gcp, 
 - **provider-fetch:** DO `{id, message}` error → clean message (locks contract; no code change).
 
 ## Acceptance criteria
+
 - [ ] `pnpm lint && typecheck && test && build` green; migration/wrangler quality gates pass.
 - [ ] Full `Provider` interface incl. real volume ops; >90% coverage on new provider code.
 - [ ] Credential create/validate/delete works (raw token; bogus → clean sanitized error, nothing stored).
@@ -98,8 +106,10 @@ Add `digitalocean` as a **fifth cloud provider** (after hetzner, scaleway, gcp, 
 - [ ] Staging deployment and no-key/bogus-key UI/API regression checks pass; a platform-backed non-DigitalOcean workspace provisions, heartbeats, is reachable, and is cleaned up. Live DigitalOcean provisioning remains explicitly deferred to Raphaël’s production validation with his own key.
 
 ## Merge protocol (authorized 2026-07-23)
+
 /do dispatch = explicit merge authorization. BYO-key exception: merge with CI green (incl. SonarCloud + Preflight) + all reviewers PASS/ADDRESSED + no-key coverage complete + staging/no-key regression evidence. PR MUST document that live DigitalOcean provisioning is validated **post-merge in production by Raphaël with his own DO key** (Full Access PAT → create DO node → workspace → run agent → delete node; then create a deployment environment with a DigitalOcean volume → verify mount and persistence → tear down). After merge, monitor the matching successful Deploy Production run by merge head SHA (ignoring skipped duplicates) + confirm production health + feature code in the served bundle.
 
 ## References
+
 - Idea `01KY8JSQHXJT5SR3Z4QM46V2QK` · Blueprint `tasks/archive/2026-07-23-vultr-cloud-provider.md` · Vultr PR #1663 / `5c06da973` (site map) · `packages/providers/src/vultr.ts` + `vultr-volumes.ts` + `vultr-labels.ts` + `kv-tags.ts` · `apps/api/src/services/provider-credentials.ts` · `apps/api/src/services/deployment-volumes.ts:225-235`
 - Rules: 18 (file size), 28 (credential fallback), 35 (vertical slice), 11 (fail-fast), 41 (snapshot resilience), 01 (doc sync), 17 (UI visual), 42 (tracked follow-ups), 03 (Constitution XI)
