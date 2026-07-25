@@ -2,77 +2,30 @@ import type { CredentialResponse } from '@simple-agent-manager/shared';
 import { Alert, Button, Input } from '@simple-agent-manager/ui';
 import { useState } from 'react';
 
-import { useToast } from '../hooks/useToast';
-import { createCredential, deleteCredential } from '../lib/api';
+import { useStructuredCredentialForm } from '../hooks/useStructuredCredentialForm';
 
 interface UpCloudCredentialFormProps {
   credential?: CredentialResponse | null;
   onUpdate: () => void;
 }
 
-/**
- * Form for adding/updating/deleting UpCloud credentials (username + password).
- */
+/** Form for adding/updating/deleting UpCloud credentials (username + password). */
 export function UpCloudCredentialForm({ credential, onUpdate }: UpCloudCredentialFormProps) {
-  const toast = useToast();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [validationMessage, setValidationMessage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [showForm, setShowForm] = useState(false);
-  let submitLabel = 'Connect';
-  if (credential) submitLabel = 'Update Credentials';
-  if (loading) submitLabel = 'Testing...';
+  const form = useStructuredCredentialForm({
+    provider: 'upcloud',
+    title: 'UpCloud',
+    hasCredential: Boolean(credential),
+    onUpdate,
+  });
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    setError(null);
-    setValidationMessage(null);
-
-    try {
-      const result = await createCredential({ provider: 'upcloud', username, password });
-      if (result.validation?.valid === false) {
-        const message = `Saved, but ${result.validation.error ?? result.validation.message}`;
-        setError(message);
-        toast.warning('UpCloud credentials saved with a validation warning');
-        onUpdate();
-        return;
-      }
-      setValidationMessage(result.validation?.message ?? 'UpCloud credential validated.');
-      toast.success('UpCloud credentials saved');
-      setUsername('');
-      setPassword('');
-      setShowForm(false);
-      onUpdate();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save credentials');
-    } finally {
-      setLoading(false);
-    }
+  const updateField = (setter: (value: string) => void) => (value: string) => {
+    setter(value);
+    form.clearMessages();
   };
 
-  const handleDelete = async () => {
-    if (!confirm('Are you sure you want to disconnect your UpCloud account?')) {
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-
-    try {
-      await deleteCredential('upcloud');
-      toast.success('UpCloud account disconnected');
-      onUpdate();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete credentials');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  if (credential && !showForm) {
+  if (credential && !form.showForm) {
     return (
       <div className="flex flex-col gap-4">
         <div className="flex items-center justify-between p-4 bg-success-tint border border-success/30 rounded-md">
@@ -101,29 +54,38 @@ export function UpCloudCredentialForm({ credential, onUpdate }: UpCloudCredentia
           </div>
           <div className="flex gap-2">
             <button
-              onClick={() => setShowForm(true)}
+              onClick={() => form.setShowForm(true)}
               aria-label="Update UpCloud credentials"
               className="py-1 px-3 text-sm bg-transparent border-none cursor-pointer text-accent"
             >
               Update
             </button>
             <button
-              onClick={handleDelete}
-              disabled={loading}
+              onClick={form.remove}
+              disabled={form.loading}
               aria-label="Disconnect UpCloud account"
-              className={`py-1 px-3 text-sm bg-transparent border-none cursor-pointer text-danger ${loading ? 'opacity-50' : 'opacity-100'}`}
+              className={`py-1 px-3 text-sm bg-transparent border-none cursor-pointer text-danger ${form.loading ? 'opacity-50' : 'opacity-100'}`}
             >
-              {loading ? 'Removing...' : 'Disconnect'}
+              {form.loading ? 'Removing...' : 'Disconnect'}
             </button>
           </div>
         </div>
-        {error && <Alert variant="error">{error}</Alert>}
+        {form.error && <Alert variant="error">{form.error}</Alert>}
       </div>
     );
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+        void form.save({ provider: 'upcloud', username, password }, () => {
+          setUsername('');
+          setPassword('');
+        });
+      }}
+      className="flex flex-col gap-4"
+    >
       <div>
         <label
           htmlFor="upcloud-username"
@@ -135,16 +97,11 @@ export function UpCloudCredentialForm({ credential, onUpdate }: UpCloudCredentia
           id="upcloud-username"
           type="text"
           value={username}
-          onChange={(e) => {
-            setUsername(e.target.value);
-            setValidationMessage(null);
-            setError(null);
-          }}
+          onChange={(event) => updateField(setUsername)(event.target.value)}
           placeholder="Enter your UpCloud API username"
           required
         />
       </div>
-
       <div>
         <label
           htmlFor="upcloud-password"
@@ -156,11 +113,7 @@ export function UpCloudCredentialForm({ credential, onUpdate }: UpCloudCredentia
           id="upcloud-password"
           type="password"
           value={password}
-          onChange={(e) => {
-            setPassword(e.target.value);
-            setValidationMessage(null);
-            setError(null);
-          }}
+          onChange={(event) => updateField(setPassword)(event.target.value)}
           placeholder="Enter your UpCloud password"
           required
         />
@@ -177,16 +130,18 @@ export function UpCloudCredentialForm({ credential, onUpdate }: UpCloudCredentia
           &gt; People &gt; Accounts
         </p>
       </div>
-
-      {validationMessage && <Alert variant="success">{validationMessage}</Alert>}
-      {error && <Alert variant="error">{error}</Alert>}
-
+      {form.validationMessage && <Alert variant="success">{form.validationMessage}</Alert>}
+      {form.error && <Alert variant="error">{form.error}</Alert>}
       <div className="flex gap-3">
-        <Button type="submit" disabled={loading || !username || !password} loading={loading}>
-          {submitLabel}
+        <Button
+          type="submit"
+          disabled={form.loading || !username || !password}
+          loading={form.loading}
+        >
+          {form.submitLabel}
         </Button>
-        {showForm && (
-          <Button type="button" variant="secondary" onClick={() => setShowForm(false)}>
+        {form.showForm && (
+          <Button type="button" variant="secondary" onClick={() => form.setShowForm(false)}>
             Cancel
           </Button>
         )}
