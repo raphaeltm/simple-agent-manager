@@ -13,7 +13,7 @@
  * Availability is derived from the required runtime bindings. No deployment
  * environment variable is needed to turn this product flow on.
  */
-import { getAgentDefinition, isValidAgentType, type AgentType } from '@simple-agent-manager/shared';
+import { type AgentType, getAgentDefinition, isValidAgentType } from '@simple-agent-manager/shared';
 import { Hono } from 'hono';
 
 import type { Env } from '../env';

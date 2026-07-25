@@ -318,7 +318,7 @@ export class CredentialSetupSession extends DurableObject<Env> {
       if (row.agent_type === 'openai-codex') {
         await sandbox.writeFile(
           `${row.codex_home}/config.toml`,
-          'cli_auth_credentials_store = \"file\"\n'
+          'cli_auth_credentials_store = "file"\n'
         );
       }
       const statePath = `${row.codex_home}/${DEVICE_AUTH_STATE_FILE}`;
