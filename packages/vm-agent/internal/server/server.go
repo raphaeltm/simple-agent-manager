@@ -1565,6 +1565,27 @@ func (s *Server) gitPushWorkspaceChanges(workspaceID string, skipPR bool) gitPus
 	branchOutput, _ := s.runWorkspaceGitCommand(containerID, workDir, user, "rev-parse", "--abbrev-ref", "HEAD")
 	result.BranchName = branchOutput
 
+	// Guard: never push to the project default branch via auto-commit.
+	// The workspace is checked out on the default branch; the agent is expected
+	// to switch to the task output branch during its work. If HEAD is still the
+	// default branch, the agent never switched and pushing would land changes
+	// directly on main/master — potentially triggering production deploys.
+	if checkoutBranch := s.workspaceCheckoutBranch(workspaceID); checkoutBranch != "" &&
+		branchOutput == checkoutBranch {
+		result.Error = fmt.Sprintf(
+			"auto-commit push blocked: HEAD is still on the project default branch %q; "+
+				"the agent should have checked out the task output branch before completing. "+
+				"Changes are committed locally (sha %s) but were not pushed to protect the default branch",
+			checkoutBranch, sha,
+		)
+		slog.Warn("Auto-commit push blocked: HEAD is on the default branch",
+			"workspaceId", workspaceID,
+			"branch", branchOutput,
+			"sha", sha,
+		)
+		return result
+	}
+
 	// Push
 	pushOutput, err := s.runWorkspaceGitCommand(containerID, workDir, user, "push", "--set-upstream", "origin", "HEAD")
 	if err != nil {
@@ -1583,6 +1604,17 @@ func (s *Server) gitPushWorkspaceChanges(workspaceID string, skipPR bool) gitPus
 	}
 
 	return result
+}
+
+// workspaceCheckoutBranch returns the branch the workspace was originally
+// checked out on (the project default branch). Returns "" if the workspace
+// is not found.
+func (s *Server) workspaceCheckoutBranch(workspaceID string) string {
+	runtime, ok := s.getWorkspaceRuntime(workspaceID)
+	if !ok {
+		return ""
+	}
+	return runtime.Branch
 }
 
 func (s *Server) tryCreateReviewRequest(workspaceID, containerID, workDir, user, sourceBranch string) (string, int) {
