@@ -27,17 +27,32 @@ const CLAUDE_TOKEN = `sk-ant-oat${'A'.repeat(48)}`;
 describe('Claude setup-token driver', () => {
   it('extracts a trusted Claude URL, optional verification code, and OAuth token', () => {
     const output = extractClaudeSetupOutput(
-      `\u001b[32mOpen https://claude.ai/oauth/authorize?code=abc.\u001b[0m\nVerification code: ABCD-EFGH\nToken: ${CLAUDE_TOKEN}`
+      `\u001b[32mOpen https://claude.com/cai/oauth/authorize?code=abc.\u001b[0m\nVerification code: ABCD-EFGH\nToken: ${CLAUDE_TOKEN}`
     );
 
     expect(output).toEqual({
-      verificationUrl: 'https://claude.ai/oauth/authorize?code=abc',
+      verificationUrl: 'https://claude.com/cai/oauth/authorize?code=abc',
       userCode: 'ABCD-EFGH',
       token: CLAUDE_TOKEN,
     });
   });
 
+  it('extracts URLs from Claude terminal hyperlink output', () => {
+    const output = extractClaudeSetupOutput(
+      '\u001b]8;id=abc;https://claude.com/cai/oauth/authorize?code=abc&state=def\u0007' +
+        'https://claude.com/cai/oauth/authorize?code=abc&state=def' +
+        '\u001b]8;;\u0007\nPaste code here if prompted >'
+    );
+
+    expect(output.verificationUrl).toBe(
+      'https://claude.com/cai/oauth/authorize?code=abc&state=def'
+    );
+  });
+
   it('accepts Anthropic-owned auth hosts and rejects untrusted hosts', () => {
+    expect(validateClaudeVerificationUrl('https://claude.com/cai/oauth/authorize')).toBe(
+      'https://claude.com/cai/oauth/authorize'
+    );
     expect(validateClaudeVerificationUrl('https://console.anthropic.com/oauth')).toBe(
       'https://console.anthropic.com/oauth'
     );
@@ -55,23 +70,36 @@ describe('Claude setup-token driver', () => {
     const fake = fakeClaudeProcess();
     const states: Array<Record<string, unknown>> = [];
     const credentials: string[] = [];
+    let spawnedCommand = '';
+    let spawnedArgs: string[] = [];
 
     const ready = runClaudeSetupToken({
       statePath: '/unused-state',
       credentialPath: '/unused-token',
-      spawnProcess: () => fake,
+      spawnProcess: (command, args) => {
+        spawnedCommand = command;
+        spawnedArgs = args;
+        return fake;
+      },
       writeState: async (state) => states.push(state),
       writeCredential: async (token) => credentials.push(token),
     });
 
-    fake.stderr.write('Open https://claude.ai/oauth/device\n');
+    expect(spawnedCommand).toBe('script');
+    expect(spawnedArgs).toEqual([
+      '-qfec',
+      expect.stringContaining('claude setup-token'),
+      '/dev/null',
+    ]);
+
+    fake.stderr.write('Open https://claude.com/cai/oauth/authorize\n');
     await ready;
 
     expect(states).toEqual([
       { status: 'starting' },
       {
         status: 'waiting_for_user',
-        verificationUrl: 'https://claude.ai/oauth/device',
+        verificationUrl: 'https://claude.com/cai/oauth/authorize',
         userCode: null,
       },
     ]);

@@ -19,7 +19,7 @@ Claude Code still requires users to run `claude setup-token` manually and paste 
 2. Claude Code already has a credential contract in SAM:
    - `claude-code` + `oauth-token` is valid.
    - The composable credential assembler injects the saved token as `CLAUDE_CODE_OAUTH_TOKEN`.
-3. Official Claude Code docs describe `claude setup-token` as the CI/script flow: it opens the browser auth flow, prints a long-lived token, and that token should be used as `CLAUDE_CODE_OAUTH_TOKEN`.
+3. Official Claude Code docs describe `claude setup-token` as the CI/script flow: it opens the browser auth flow, prints a long-lived token, and that token should be used as `CLAUDE_CODE_OAUTH_TOKEN`. Staging diagnostics showed the CLI only prints the setup URL when it has a TTY, so SAM must provide one internally.
 4. The native web surface is Codex-specific:
    - `CodexConnectModal`, `CodexConnectTrigger`, and `apps/web/src/lib/api/codex-setup.ts` assume OpenAI labels, URL trust, and required one-time code.
 5. The sandbox image currently copies only the Codex setup helper:
@@ -34,6 +34,7 @@ Claude Code still requires users to run `claude setup-token` manually and paste 
 - [x] Generalize guided setup routing to support both `openai-codex` and `claude-code`.
 - [x] Add provider-specific setup metadata for workspace directory, driver command, captured credential path, URL trust, optional user code, and copy/status text.
 - [x] Add a Claude setup-token driver script that runs `claude setup-token`, captures a trusted Claude auth URL, optionally captures a displayed code, writes non-secret setup state, and writes only the final OAuth token to a private file for server-side capture.
+- [x] Run Claude Code setup-token under an internal pseudo-TTY so the real CLI emits its browser auth URL in Cloudflare Sandbox without exposing a terminal to the user.
 - [x] Update `CredentialSetupSession` to provision/capture credentials by setup agent type, while preserving no-secret-in-D1/browser/logs semantics.
 - [x] Copy the Claude helper into `apps/api/Dockerfile.sandbox`.
 - [x] Generalize the web API client and modal/trigger to expose Claude Code with native open/copy controls and no terminal.
@@ -71,6 +72,11 @@ Claude Code still requires users to run `claude setup-token` manually and paste 
 - After rebasing onto current `origin/main`, `pnpm lint`, `pnpm typecheck`, `pnpm test`, and `pnpm build` passed.
 - Added `staging-claude-guided-connect.spec.ts` for the live staging smoke test: authenticated staging UI, start Claude Code guided setup, wait for a trusted Claude/Anthropic auth URL, assert no terminal surface, click/open the native link, then cancel without completing OAuth.
 - Web lint and typecheck passed after adding the staging Claude spec.
+- First staging deploy from this branch succeeded (`deploy-staging.yml` run 30146964152), but the Claude setup session stayed in `admitting`; deployed Sandbox diagnostics confirmed the helper and `claude` 2.1.220 were present.
+- Staging diagnostics then proved the root cause: direct non-PTY helper execution stayed at `starting`, while `script -qfec '... claude setup-token' /tmp/...` emitted a trusted `https://claude.com/cai/oauth/authorize...` URL and prompt.
+- Updated the helper to allocate a pseudo-TTY with `script -qfec`, redirect the transcript to `/dev/null`, accept the real `claude.com` auth host, and parse terminal hyperlink/control-character output safely.
+- Focused API tests passed for the Claude helper and CredentialSetupSession DO after the PTY fix.
+- `pnpm lint`, `pnpm typecheck`, `pnpm test`, and `pnpm build` passed after the PTY fix. One full `pnpm test` attempt hit unrelated MCP beforeEach hook timeouts; those three suites passed in isolation and the follow-up full run passed.
 
 ## Specialist review
 
@@ -80,3 +86,4 @@ Claude Code still requires users to run `claude setup-token` manually and paste 
 - `security-auditor`: PASS. Claude OAuth token material is captured server-side only, the auth URL is host-allowlisted, setup files are private and scrubbed, and route ownership checks remain intact.
 - `constitution-validator`: PASS. No new internal hardcoded deployment URLs or operational constants; tunable setup behavior remains env-configured and helper limits are protocol/security bounds.
 - `test-engineer`: PASS with staging caveat. Unit, DO, route, script, web component, and local Playwright coverage exercise the slice; the real Worker/Sandbox/Claude CLI boundary is intentionally verified on staging.
+- Focused follow-up after PTY fix: PASS. Re-checked Cloudflare/Sandbox, security, test, and Principle XI concerns: `script -qfec` has no user input, transcript path is `/dev/null`, parent DO still discards helper stdout/stderr, `claude.com` is a real Anthropic-owned auth host observed in staging, and parser/staging tests cover terminal hyperlink/control-character output.

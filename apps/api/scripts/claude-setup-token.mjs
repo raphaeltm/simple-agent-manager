@@ -10,6 +10,9 @@ const MAX_USER_CODE_LENGTH = 128;
 const MAX_CLAUDE_TOKEN_LENGTH = 8192;
 const CLAUDE_OAUTH_TOKEN_PREFIX = 'sk-ant-oat';
 const ANSI_ESCAPE_PATTERN = /\u001b\[[0-9;?]*[ -/]*[@-~]/g;
+const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f]/;
+const CLAUDE_SETUP_COMMAND =
+  'env DISABLE_AUTOUPDATER=1 NO_COLOR=1 TERM=xterm-256color claude setup-token';
 const URL_PATTERN = /https:\/\/[^\s<>'"`]+/gi;
 const TOKEN_PATTERN = /\bsk-ant-oat[A-Za-z0-9._-]{16,}\b/g;
 const CODE_PATTERNS = [
@@ -19,6 +22,8 @@ const CODE_PATTERNS = [
 
 function isTrustedClaudeHost(hostname) {
   return (
+    hostname === 'claude.com' ||
+    hostname.endsWith('.claude.com') ||
     hostname === 'claude.ai' ||
     hostname.endsWith('.claude.ai') ||
     hostname === 'anthropic.com' ||
@@ -28,6 +33,8 @@ function isTrustedClaudeHost(hostname) {
 
 function cleanUrlCandidate(value) {
   let next = value.trim();
+  const controlIndex = next.search(CONTROL_CHARACTER_PATTERN);
+  if (controlIndex >= 0) next = next.slice(0, controlIndex);
   while (/[),.;\]]$/.test(next)) next = next.slice(0, -1);
   return next;
 }
@@ -117,12 +124,17 @@ export async function runClaudeSetupToken({
     await rename(temporaryCredentialPath, credentialPath);
   },
 }) {
-  const claude = spawnProcess('claude', ['setup-token'], {
+  // Claude Code only prints the setup-token browser URL on a TTY. The
+  // Cloudflare Sandbox exec API is non-interactive, so run it through
+  // `script` to allocate a pseudo-terminal while still capturing stdout/stderr
+  // for non-secret URL/token parsing. The transcript path is /dev/null so no
+  // token-bearing terminal log is persisted.
+  const claude = spawnProcess('script', ['-qfec', CLAUDE_SETUP_COMMAND, '/dev/null'], {
     env: {
       ...process.env,
       DISABLE_AUTOUPDATER: '1',
       NO_COLOR: '1',
-      TERM: 'dumb',
+      TERM: 'xterm-256color',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
