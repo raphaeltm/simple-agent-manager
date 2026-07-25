@@ -1,6 +1,6 @@
 # UpCloud cloud provider — BYO credentials, nodes, and deployment volumes
 
-**Task ID:** 01KYBDQCYJ0PFJWBZHXNCK04AV  
+**Task ID:** 01KYBDQCYJ0PFJWBZHXNCK04AV
 **Output branch:** `sam/implement-ship-upcloud-sam-ck04av`
 
 ## Problem
