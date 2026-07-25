@@ -26,6 +26,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import { decrypt } from '../../../src/services/encryption';
+import { createEnvironmentVolume } from '../../../src/services/deployment-volumes';
 import { createProviderForUser } from '../../../src/services/provider-credentials';
 
 // vitest hoists vi.mock above the imports, so the `decrypt` import above resolves
@@ -241,5 +242,151 @@ describe('DigitalOcean provisioning vertical slice — createProviderForUser →
       tags: ['sam-name:Deployment_DATA_01JABC', 'deployment-id:deploy-1'],
     });
     expect(volumeCall!.headers?.Authorization).toBe('Bearer ' + RAW_DIGITALOCEAN_TOKEN);
+  });
+});
+
+function makeDigitalOceanDeploymentVolumeDbMock(
+  digitaloceanRow: Record<string, unknown>,
+  insertedRows: Array<Record<string, unknown>>
+) {
+  function rowsFor(table: unknown, limited: boolean): unknown[] {
+    if (table === schema.deploymentEnvironments) return [{ projectId: null }];
+    if (table === schema.credentials) return limited ? [digitaloceanRow] : [];
+    return [];
+  }
+
+  const makeBuilder = () => {
+    let table: unknown;
+    const builder = {
+      from: (target: unknown) => {
+        table = target;
+        return builder;
+      },
+      where: () => builder,
+      innerJoin: () => builder,
+      leftJoin: () => builder,
+      limit: () => Promise.resolve(rowsFor(table, true)),
+      then: (resolve: (value: unknown[]) => unknown, reject: (reason?: unknown) => unknown) =>
+        Promise.resolve(rowsFor(table, false)).then(resolve, reject),
+    };
+    return builder;
+  };
+
+  return {
+    select: () => makeBuilder(),
+    insert: (table: unknown) => ({
+      values: (row: Record<string, unknown>) => {
+        if (table === schema.deploymentVolumes) insertedRows.push({ ...row });
+        return {
+          onConflictDoNothing: () => Promise.resolve(undefined),
+          then: (resolve: (value?: unknown) => unknown) => Promise.resolve(undefined).then(resolve),
+        };
+      },
+    }),
+  } as unknown as Parameters<typeof createEnvironmentVolume>[0];
+}
+
+describe('DigitalOcean deployment volume control-plane vertical slice', () => {
+  const env = {
+    ENCRYPTION_KEY: 'test-encryption-key',
+    DIGITALOCEAN_API_TIMEOUT_MS: '1000',
+  } as unknown as Parameters<typeof createEnvironmentVolume>[1];
+
+  beforeEach(() => {
+    mockDecrypt.mockResolvedValue(RAW_DIGITALOCEAN_TOKEN);
+  });
+
+  it('persists the real DigitalOcean volume result through the deployment volume service', async () => {
+    const insertedRows: Array<Record<string, unknown>> = [];
+    const db = makeDigitalOceanDeploymentVolumeDbMock(
+      {
+        id: 'cred-digitalocean-volume',
+        userId: USER_ID,
+        projectId: null,
+        credentialType: 'cloud-provider',
+        credentialKind: 'api-key',
+        agentType: null,
+        provider: 'digitalocean',
+        encryptedToken: 'cipher',
+        iv: 'iv',
+        isActive: true,
+      },
+      insertedRows
+    );
+    const calls: RecordedCall[] = [];
+    globalThis.fetch = makeDigitalOceanFetchMock(calls);
+
+    const row = await createEnvironmentVolume(db, env, USER_ID, {
+      environmentId: 'env-do-1',
+      name: 'app-data',
+      sizeGb: 25,
+      location: 'fra1',
+      targetProvider: 'digitalocean',
+    });
+
+    expect(row).toMatchObject({
+      environmentId: 'env-do-1',
+      name: 'app-data',
+      providerVolumeId: 'volume-slice-1',
+      providerName: 'digitalocean',
+      sizeGb: 25,
+      location: 'fra1',
+      status: 'available',
+      linuxDevice: '/dev/disk/by-id/scsi-0DO_Volume_sam-env-do-1-app-data',
+    });
+    expect(insertedRows).toHaveLength(1);
+    expect(insertedRows[0]).toMatchObject(row);
+
+    const createCall = calls.find(
+      (call) => call.method === 'POST' && call.url.endsWith('/v2/volumes')
+    );
+    expect(JSON.parse(createCall!.body as string)).toEqual({
+      name: 'sam-env-do-1-app-data',
+      region: 'fra1',
+      size_gigabytes: 25,
+      tags: [
+        'sam-name:sam-env-do-1-app-data',
+        'sam-environment:env-do-1',
+        'sam-volume-name:app-data',
+      ],
+    });
+  });
+
+  it('propagates a DigitalOcean create failure without persisting deployment state', async () => {
+    const insertedRows: Array<Record<string, unknown>> = [];
+    const db = makeDigitalOceanDeploymentVolumeDbMock(
+      {
+        id: 'cred-digitalocean-volume',
+        userId: USER_ID,
+        projectId: null,
+        credentialType: 'cloud-provider',
+        credentialKind: 'api-key',
+        agentType: null,
+        provider: 'digitalocean',
+        encryptedToken: 'cipher',
+        iv: 'iv',
+        isActive: true,
+      },
+      insertedRows
+    );
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({ id: 'unprocessable_entity', message: 'volume quota exceeded' }),
+        {
+          status: 422,
+        }
+      )
+    );
+
+    await expect(
+      createEnvironmentVolume(db, env, USER_ID, {
+        environmentId: 'env-do-1',
+        name: 'data',
+        sizeGb: 25,
+        location: 'fra1',
+        targetProvider: 'digitalocean',
+      })
+    ).rejects.toThrow('volume quota exceeded');
+    expect(insertedRows).toHaveLength(0);
   });
 });
