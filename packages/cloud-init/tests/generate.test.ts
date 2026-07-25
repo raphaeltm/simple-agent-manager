@@ -1640,6 +1640,36 @@ describe('cloud-init supports the vultr provider', () => {
   });
 });
 
+describe('cloud-init supports the infomaniak provider', () => {
+  it('lists infomaniak in VALID_CLOUD_PROVIDERS', () => {
+    expect(VALID_CLOUD_PROVIDERS).toContain('infomaniak');
+  });
+
+  it('validateCloudInitVariables accepts provider: "infomaniak"', () => {
+    expect(() => validateCloudInitVariables(baseVariables({ provider: 'infomaniak' }))).not.toThrow();
+  });
+
+  it('generateCloudInit accepts provider: "infomaniak" and produces parseable YAML', () => {
+    const config = generateCloudInit(baseVariables({ provider: 'infomaniak' }));
+    // Output must parse as valid YAML (mirrors the hetzner/scaleway provider tests).
+    expect(() => YAML.parse(config)).not.toThrow();
+    expect(config).toContain('Environment=PROVIDER=infomaniak');
+  });
+
+  it('renders the apt mirror script for infomaniak with an empty APT_MIRROR (non-hetzner default)', () => {
+    const config = generateCloudInit(baseVariables({ provider: 'infomaniak' }));
+    const parsed = YAML.parse(config);
+
+    const mirrorScript = parsed.write_files.find(
+      (f: { path: string }) => f.path === '/etc/sam/apt-mirror-config.sh'
+    );
+    expect(mirrorScript).toBeDefined();
+    expect(mirrorScript.content).toContain('PROVIDER="infomaniak"');
+    // Only hetzner sets a mirror; infomaniak falls into the default (empty) case.
+    expect(mirrorScript.content).toContain('APT_MIRROR=""');
+  });
+});
+
 describe('integrated size validation in generateCloudInit', () => {
   it('throws when output exceeds 32KB (default behavior)', () => {
     expect(() => generateCloudInit(baseVariables({

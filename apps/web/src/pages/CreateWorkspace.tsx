@@ -130,7 +130,7 @@ export function CreateWorkspace() {
       listCredentials().catch(() => []),
       getTrialStatus().catch(() => null),
     ]).then(([creds, trial]) => {
-        const hasUserCreds = creds.some((c: { provider: string }) => c.provider === 'hetzner' || c.provider === 'scaleway' || c.provider === 'vultr');
+        const hasUserCreds = creds.some((c: { provider: string }) => c.provider === 'hetzner' || c.provider === 'scaleway' || c.provider === 'vultr' || c.provider === 'infomaniak');
         const trialAvailable = trial?.available ?? false;
         const hasCloud = hasUserCreds || trialAvailable;
         setHasCloudProvider(hasCloud);

@@ -1,5 +1,6 @@
 import { GcpProvider } from './gcp';
 import { HetznerProvider } from './hetzner';
+import { InfomaniakProvider } from './infomaniak';
 import { ScalewayProvider } from './scaleway';
 import type { Provider, ProviderConfig } from './types';
 import { ProviderError } from './types';
@@ -9,6 +10,7 @@ import { VultrProvider } from './vultr';
 export type {
   GcpProviderConfig,
   HetznerProviderConfig,
+  InfomaniakProviderConfig,
   LocationMeta,
   Provider,
   ProviderConfig,
@@ -69,6 +71,23 @@ export {
   HetznerProvider,
   isTransientCapacityError,
 } from './hetzner';
+export {
+  classifyInfomaniakError,
+  DEFAULT_INFOMANIAK_AUTH_URL,
+  DEFAULT_INFOMANIAK_IMAGE_NAME,
+  DEFAULT_INFOMANIAK_IP_POLL_INTERVAL_MS,
+  DEFAULT_INFOMANIAK_IP_POLL_TIMEOUT_MS,
+  DEFAULT_INFOMANIAK_NETWORK_NAME,
+  DEFAULT_INFOMANIAK_REGION,
+  DEFAULT_INFOMANIAK_REQUEST_TIMEOUT_MS,
+  DEFAULT_INFOMANIAK_VOLUME_TYPE,
+  INFOMANIAK_LOCATIONS,
+  INFOMANIAK_VOLUME_CAPABILITIES,
+  INFOMANIAK_VOLUME_MAX_SIZE_GB,
+  INFOMANIAK_VOLUME_MIN_SIZE_GB,
+  InfomaniakProvider,
+  mapInfomaniakStatus,
+} from './infomaniak';
 export { classifyScalewayError, SCALEWAY_LOCATIONS, ScalewayProvider } from './scaleway';
 export {
   SCALEWAY_DEFAULT_VOLUME_IOPS,
@@ -106,6 +125,23 @@ export function createProvider(config: ProviderConfig): Provider {
         {
           capacityRetryMaxAttempts: config.capacityRetryMaxAttempts,
           capacityRetryBudgetMs: config.capacityRetryBudgetMs,
+          logger: config.logger,
+        }
+      );
+    case 'infomaniak':
+      return new InfomaniakProvider(
+        config.applicationCredentialId,
+        config.applicationCredentialSecret,
+        {
+          authUrl: config.authUrl,
+          region: config.region,
+          networkName: config.networkName,
+          imageName: config.imageName,
+          volumeType: config.volumeType,
+          flavors: config.flavors,
+          requestTimeoutMs: config.requestTimeoutMs,
+          ipPollTimeoutMs: config.ipPollTimeoutMs,
+          ipPollIntervalMs: config.ipPollIntervalMs,
           logger: config.logger,
         }
       );

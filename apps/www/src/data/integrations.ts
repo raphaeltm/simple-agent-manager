@@ -347,6 +347,35 @@ export const integrations: Integration[] = [
     externalUrl: 'https://www.scaleway.com/',
   },
   {
+    slug: 'infomaniak', name: 'Infomaniak Public Cloud', shortName: 'Infomaniak', category: 'cloud-providers', categoryLabel: 'Cloud Providers',
+    tagline: 'Run coding agents on sovereign Swiss OpenStack infrastructure',
+    description: 'Connect a Keystone application credential and let SAM provision workspace and deployment nodes on Infomaniak Public Cloud, with persistent Cinder volumes that survive node replacement.',
+    color: '#0098FF', logoPath: '/images/integrations/infomaniak.svg', seoTitle: 'Run AI Coding Agents on Infomaniak Public Cloud | SAM', seoDescription: 'Run coding agents and persistent app deployments on Swiss Infomaniak Public Cloud with SAM.',
+    features: [
+      { title: 'Swiss Data Location', description: 'Compute and encrypted Ceph/Cinder storage run in Infomaniak data centers in Switzerland.' },
+      { title: 'OpenStack Automation', description: 'SAM uses Keystone, Nova, Glance, Neutron, and Cinder APIs with runtime-validated responses.' },
+      { title: 'Persistent Deployment Volumes', description: 'Cinder volumes detach and reattach to replacement nodes while retaining application data.' },
+      { title: 'Explicit Application Credentials', description: 'Use a scoped application credential ID and one-time secret instead of a broad account password.' },
+    ],
+    howItWorks: [
+      { step: 'Create an Application Credential', description: 'Create a Keystone application credential with reader and member roles; both roles are required in dc4-a.' },
+      { step: 'Connect Infomaniak', description: 'Enter the application credential ID and one-time secret in SAM settings.' },
+      { step: 'Choose a Swiss Region', description: 'Select dc4-a or dc3-a for workspace and deployment nodes.' },
+      { step: 'Run Agents and Apps', description: 'SAM provisions Nova instances and region-matched Cinder volumes.' },
+    ],
+    useCases: [
+      { title: 'European and Swiss data residency', description: 'Keep workspace and deployment infrastructure in Switzerland with English and French provider support.' },
+      { title: 'Replacement-safe app data', description: 'Preserve application state on a Cinder volume while replacing deployment nodes.' },
+      { title: 'Open cloud operations', description: 'Use standard OpenStack infrastructure without coupling SAM to proprietary VM or volume semantics.' },
+    ],
+    faq: [
+      { question: 'Which credential does SAM need?', answer: 'A Keystone application credential ID and secret. In dc4-a, assign both reader and member roles.' },
+      { question: 'Do Infomaniak volumes survive node replacement?', answer: 'Yes. Cinder volumes are independent resources that can be detached and reattached within the same region.' },
+      { question: 'Can SAM resize an attached volume?', answer: 'SAM uses the documented safe path: detach first, grow the volume, then reattach. Shrinking is not supported.' },
+    ],
+    relatedSlugs: ['hetzner', 'scaleway', 'vultr', 'claude-code'], externalUrl: 'https://www.infomaniak.com/en/hosting/public-cloud',
+  },
+  {
     slug: 'vultr',
     name: 'Vultr',
     category: 'cloud-providers',

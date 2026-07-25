@@ -286,7 +286,8 @@ export type ProviderConfig =
   | HetznerProviderConfig
   | ScalewayProviderConfig
   | GcpProviderConfig
-  | VultrProviderConfig;
+  | VultrProviderConfig
+  | InfomaniakProviderConfig;
 
 export interface HetznerProviderConfig {
   provider: 'hetzner';
@@ -313,6 +314,22 @@ export interface ScalewayProviderConfig {
   secretKey: string;
   projectId: string;
   zone?: string;
+}
+
+export interface InfomaniakProviderConfig {
+  provider: 'infomaniak';
+  applicationCredentialId: string;
+  applicationCredentialSecret: string;
+  authUrl?: string;
+  region?: string;
+  networkName?: string;
+  imageName?: string;
+  volumeType?: string;
+  flavors?: Partial<Record<VMSize, string>>;
+  requestTimeoutMs?: number;
+  ipPollTimeoutMs?: number;
+  ipPollIntervalMs?: number;
+  logger?: ProviderLogger;
 }
 
 export interface VultrProviderConfig {
@@ -414,7 +431,7 @@ export class ProviderError extends Error {
       providerCode?: string;
       /** Normalized error category for retry decisions */
       category?: ProviderErrorCategory;
-    },
+    }
   ) {
     super(message, options);
     this.context = options?.context;

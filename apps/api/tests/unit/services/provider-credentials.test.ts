@@ -34,6 +34,10 @@ describe('serializeCredentialToken', () => {
     expect(serializeCredentialToken('vultr', { token: 'my-vultr-key' })).toBe('my-vultr-key');
     expect(serializeCredentialToken('vultr', {})).toBe('');
   });
+
+  it('serializes Infomaniak application credential fields together', () => {
+    expect(JSON.parse(serializeCredentialToken('infomaniak', { applicationCredentialId: 'app-id', applicationCredentialSecret: 'app-secret' }))).toEqual({ applicationCredentialId: 'app-id', applicationCredentialSecret: 'app-secret' });
+  });
 });
 
 describe('buildProviderConfig', () => {
@@ -56,6 +60,16 @@ describe('buildProviderConfig', () => {
       secretKey: 'scw-secret',
       projectId: 'proj-uuid',
     });
+  });
+
+  it('builds Infomaniak config and threads operational overrides', () => {
+    const stored = serializeCredentialToken('infomaniak', { applicationCredentialId: 'app-id', applicationCredentialSecret: 'app-secret' });
+    expect(buildProviderConfig('infomaniak', stored, { INFOMANIAK_REGION: 'dc3-a', INFOMANIAK_API_TIMEOUT_MS: '20000', INFOMANIAK_IMAGE_NAME: 'Ubuntu 24.04 noble' })).toMatchObject({ provider: 'infomaniak', applicationCredentialId: 'app-id', applicationCredentialSecret: 'app-secret', region: 'dc3-a', requestTimeoutMs: 20000, imageName: 'Ubuntu 24.04 noble' });
+  });
+
+  it('rejects malformed stored Infomaniak credentials', () => {
+    expect(() => buildProviderConfig('infomaniak', 'not-json')).toThrow('malformed stored data');
+    expect(() => buildProviderConfig('infomaniak', '{}')).toThrow('missing application credential ID or secret');
   });
 
   it('should build VultrProviderConfig from raw token string', () => {

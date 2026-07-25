@@ -299,6 +299,18 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   VULTR_API_TIMEOUT_MS?: string;
   VULTR_IP_POLL_TIMEOUT_MS?: string;
   VULTR_IP_POLL_INTERVAL_MS?: string;
+  // Infomaniak OpenStack provider tuning
+  INFOMANIAK_AUTH_URL?: string;
+  INFOMANIAK_REGION?: string;
+  INFOMANIAK_NETWORK_NAME?: string;
+  INFOMANIAK_IMAGE_NAME?: string;
+  INFOMANIAK_VOLUME_TYPE?: string;
+  INFOMANIAK_SMALL_FLAVOR?: string;
+  INFOMANIAK_MEDIUM_FLAVOR?: string;
+  INFOMANIAK_LARGE_FLAVOR?: string;
+  INFOMANIAK_API_TIMEOUT_MS?: string;
+  INFOMANIAK_IP_POLL_TIMEOUT_MS?: string;
+  INFOMANIAK_IP_POLL_INTERVAL_MS?: string;
   // External API timeouts (milliseconds)
   HETZNER_API_TIMEOUT_MS?: string;
   CF_API_TIMEOUT_MS?: string;

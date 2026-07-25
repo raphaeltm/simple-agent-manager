@@ -48,7 +48,10 @@ import { lazyBackfillIfNeeded } from '../services/composable-credentials/lazy-ba
 import { resolveForConsumer } from '../services/composable-credentials/resolve';
 import { decrypt, encrypt } from '../services/encryption';
 import { getTimeoutMs } from '../services/fetch-timeout';
-import { deleteUserGcpCredential, replaceUserGcpCredential } from '../services/gcp-credential-store';
+import {
+  deleteUserGcpCredential,
+  replaceUserGcpCredential,
+} from '../services/gcp-credential-store';
 import { clearGcpAccessTokenCache } from '../services/gcp-sts';
 import { getPlatformAgentCredential } from '../services/platform-credentials';
 import {
@@ -61,6 +64,7 @@ import {
   formatOnlyValidation,
   validateAgentApiKeyCredentialWithProvider,
   validateHetznerCredentialWithProvider,
+  validateInfomaniakCredentialWithProvider,
   validateScalewayCredentialWithProvider,
   validateVultrCredentialWithProvider,
 } from '../services/validation';
@@ -115,6 +119,18 @@ function getCloudCredentialFields(body: CreateCredentialRequest): CloudCredentia
     return {
       providerName,
       tokenToValidate: serializeCredentialToken(providerName, { token: body.token }),
+    };
+  }
+
+  if (providerName === 'infomaniak') {
+    if (!body.applicationCredentialId || !body.applicationCredentialSecret)
+      throw errors.badRequest('Application credential ID and secret are required for Infomaniak');
+    return {
+      providerName,
+      tokenToValidate: serializeCredentialToken(providerName, {
+        applicationCredentialId: body.applicationCredentialId,
+        applicationCredentialSecret: body.applicationCredentialSecret,
+      }),
     };
   }
 
@@ -178,6 +194,18 @@ async function validateCloudCredentialRequest(
     });
   }
 
+  if (body.provider === 'infomaniak') {
+    return validateInfomaniakCredentialWithProvider(
+      body.applicationCredentialId,
+      body.applicationCredentialSecret,
+      {
+        timeoutMs: getSaveValidationTimeoutMs(env),
+        authUrl: env.INFOMANIAK_AUTH_URL,
+        region: env.INFOMANIAK_REGION,
+      }
+    );
+  }
+
   return formatOnlyValidation(
     'GCP credential metadata accepted. Live validation runs during Google setup.'
   );
@@ -239,25 +267,27 @@ credentialsRoutes.get('/', async (c) => {
     );
 
   const encryptionKey = getCredentialEncryptionKey(c.env);
-  const response: CredentialResponse[] = await Promise.all(creds.map(async (cred) => {
-    const base: CredentialResponse = {
-      id: cred.id,
-      provider: cred.provider as CredentialProvider,
-      connected: true,
-      createdAt: cred.createdAt,
-    };
-    if (cred.provider !== 'gcp') return base;
-    try {
-      const plaintext = await decrypt(cred.encryptedToken, cred.iv, encryptionKey);
-      return { ...base, gcp: toGcpCredentialMetadata(parseGcpCredential(plaintext)) };
-    } catch (err) {
-      log.error('credentials.gcp_metadata_unreadable', {
-        credentialId: cred.id,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      return base;
-    }
-  }));
+  const response: CredentialResponse[] = await Promise.all(
+    creds.map(async (cred) => {
+      const base: CredentialResponse = {
+        id: cred.id,
+        provider: cred.provider as CredentialProvider,
+        connected: true,
+        createdAt: cred.createdAt,
+      };
+      if (cred.provider !== 'gcp') return base;
+      try {
+        const plaintext = await decrypt(cred.encryptedToken, cred.iv, encryptionKey);
+        return { ...base, gcp: toGcpCredentialMetadata(parseGcpCredential(plaintext)) };
+      } catch (err) {
+        log.error('credentials.gcp_metadata_unreadable', {
+          credentialId: cred.id,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return base;
+      }
+    })
+  );
 
   return c.json(response);
 });
@@ -294,12 +324,14 @@ credentialsRoutes.post('/', jsonValidator(CreateCredentialSchema), async (c) => 
     const [existing] = await db
       .select({ id: schema.credentials.id })
       .from(schema.credentials)
-      .where(and(
-        eq(schema.credentials.userId, userId),
-        eq(schema.credentials.provider, 'gcp'),
-        eq(schema.credentials.credentialType, 'cloud-provider'),
-        isNull(schema.credentials.projectId),
-      ))
+      .where(
+        and(
+          eq(schema.credentials.userId, userId),
+          eq(schema.credentials.provider, 'gcp'),
+          eq(schema.credentials.credentialType, 'cloud-provider'),
+          isNull(schema.credentials.projectId)
+        )
+      )
       .limit(1);
     const stored = await replaceUserGcpCredential(c.env, userId, credential);
     const response: CredentialResponse = {
@@ -404,12 +436,14 @@ credentialsRoutes.delete('/:provider', async (c) => {
     const [stored] = await db
       .select({ encryptedToken: schema.credentials.encryptedToken, iv: schema.credentials.iv })
       .from(schema.credentials)
-      .where(and(
-        eq(schema.credentials.userId, userId),
-        eq(schema.credentials.provider, 'gcp'),
-        eq(schema.credentials.credentialType, 'cloud-provider'),
-        isNull(schema.credentials.projectId),
-      ))
+      .where(
+        and(
+          eq(schema.credentials.userId, userId),
+          eq(schema.credentials.provider, 'gcp'),
+          eq(schema.credentials.credentialType, 'cloud-provider'),
+          isNull(schema.credentials.projectId)
+        )
+      )
       .limit(1);
     if (!stored) throw errors.notFound('Credential');
 
@@ -418,7 +452,7 @@ credentialsRoutes.delete('/:provider', async (c) => {
       const plaintext = await decrypt(
         stored.encryptedToken,
         stored.iv,
-        getCredentialEncryptionKey(c.env),
+        getCredentialEncryptionKey(c.env)
       );
       credential = parseGcpCredential(plaintext);
     } catch (err) {
@@ -1021,13 +1055,16 @@ function mapResolvedToLegacy(
 
   const credentialSource = mapSourceToLegacy(resolved.source);
   const settings = resolved.configuration?.settings ?? {};
-  const settingsBaseUrl = typeof settings.baseUrl === 'string' && settings.baseUrl.trim() !== ''
-    ? settings.baseUrl.trim()
-    : undefined;
-  const providerDialect = readProviderDialect(settings.dialect)
-    ?? (secret.kind === 'openai-compatible' ? 'openai-compatible' : undefined);
-  const baseUrl = settingsBaseUrl
-    ?? (secret.kind === 'openai-compatible' && secret.baseUrl ? secret.baseUrl : undefined);
+  const settingsBaseUrl =
+    typeof settings.baseUrl === 'string' && settings.baseUrl.trim() !== ''
+      ? settings.baseUrl.trim()
+      : undefined;
+  const providerDialect =
+    readProviderDialect(settings.dialect) ??
+    (secret.kind === 'openai-compatible' ? 'openai-compatible' : undefined);
+  const baseUrl =
+    settingsBaseUrl ??
+    (secret.kind === 'openai-compatible' && secret.baseUrl ? secret.baseUrl : undefined);
 
   return {
     credential,
@@ -1040,7 +1077,7 @@ function mapResolvedToLegacy(
 
 function readProviderDialect(value: unknown): Dialect | undefined {
   return typeof value === 'string' && (DIALECT_VALUES as readonly string[]).includes(value)
-    ? value as Dialect
+    ? (value as Dialect)
     : undefined;
 }
 

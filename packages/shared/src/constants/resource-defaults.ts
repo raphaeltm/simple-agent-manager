@@ -58,11 +58,15 @@ export const PROVIDER_VM_CAPACITY: Record<string, Record<VMSize, VmCapacity>> = 
     medium: { vcpu: 4, ramGb: 8, storageGb: 160 },
     large: { vcpu: 6, ramGb: 16, storageGb: 320 },
   },
+  infomaniak: {
+    small: { vcpu: 2, ramGb: 4, storageGb: 20 },
+    medium: { vcpu: 4, ramGb: 8, storageGb: 20 },
+    large: { vcpu: 8, ramGb: 16, storageGb: 20 },
+  },
 };
 
 /** Default capacity when provider is unknown. Uses Hetzner as baseline. */
-export const DEFAULT_VM_CAPACITY: Record<VMSize, VmCapacity> =
-  PROVIDER_VM_CAPACITY['hetzner']!;
+export const DEFAULT_VM_CAPACITY: Record<VMSize, VmCapacity> = PROVIDER_VM_CAPACITY['hetzner']!;
 
 // =============================================================================
 // VM Size Selection from Resource Requirements
@@ -74,7 +78,7 @@ export const DEFAULT_VM_CAPACITY: Record<VMSize, VmCapacity> =
  */
 export function selectVmSizeForRequirements(
   requirements: Required<ResourceRequirements>,
-  provider: string = 'hetzner',
+  provider: string = 'hetzner'
 ): VMSize {
   const capacities = PROVIDER_VM_CAPACITY[provider] ?? DEFAULT_VM_CAPACITY;
   const sizes: VMSize[] = ['small', 'medium', 'large'];
@@ -122,19 +126,27 @@ export function resolveResourceReservation(
     agentProfileId?: string;
     projectId?: string;
     userId?: string;
-  } = {},
+  } = {}
 ): ResolvedResourceReservation {
   const layers: ResolutionLayer[] = [
     { source: 'task', sourceId: ids.taskId ?? '', requirements: input.task },
     { source: 'trigger', sourceId: ids.triggerId ?? '', requirements: input.trigger },
     { source: 'skill', sourceId: ids.skillId ?? '', requirements: input.skill },
-    { source: 'agent-profile', sourceId: ids.agentProfileId ?? '', requirements: input.agentProfile },
+    {
+      source: 'agent-profile',
+      sourceId: ids.agentProfileId ?? '',
+      requirements: input.agentProfile,
+    },
     { source: 'project', sourceId: ids.projectId ?? '', requirements: input.project },
     { source: 'user', sourceId: ids.userId ?? '', requirements: input.user },
   ];
 
   const fields: RequirementField[] = [
-    'minVcpu', 'minMemoryGb', 'minDiskGb', 'exclusiveNode', 'maxCoTenants',
+    'minVcpu',
+    'minMemoryGb',
+    'minDiskGb',
+    'exclusiveNode',
+    'maxCoTenants',
   ];
 
   const resolved: Record<string, unknown> = {};

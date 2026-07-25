@@ -25,7 +25,7 @@ import { getPlatformCloudCredential } from './platform-credentials';
  */
 export function serializeCredentialToken(
   provider: CredentialProvider,
-  fields: Record<string, string>,
+  fields: Record<string, string>
 ): string {
   switch (provider) {
     case 'hetzner':
@@ -34,6 +34,11 @@ export function serializeCredentialToken(
       return JSON.stringify({ secretKey: fields.secretKey, projectId: fields.projectId });
     case 'vultr':
       return fields.token ?? '';
+    case 'infomaniak':
+      return JSON.stringify({
+        applicationCredentialId: fields.applicationCredentialId,
+        applicationCredentialSecret: fields.applicationCredentialSecret,
+      });
     case 'gcp':
       return JSON.stringify({
         version: GCP_CREDENTIAL_VERSION,
@@ -86,6 +91,20 @@ export interface HetznerCapacityRetryEnv {
 }
 
 /** Env vars that tune Vultr provider behavior (all optional; DEFAULT_VULTR_* apply otherwise). */
+export interface InfomaniakRuntimeEnv {
+  INFOMANIAK_AUTH_URL?: string;
+  INFOMANIAK_REGION?: string;
+  INFOMANIAK_NETWORK_NAME?: string;
+  INFOMANIAK_IMAGE_NAME?: string;
+  INFOMANIAK_VOLUME_TYPE?: string;
+  INFOMANIAK_SMALL_FLAVOR?: string;
+  INFOMANIAK_MEDIUM_FLAVOR?: string;
+  INFOMANIAK_LARGE_FLAVOR?: string;
+  INFOMANIAK_API_TIMEOUT_MS?: string;
+  INFOMANIAK_IP_POLL_TIMEOUT_MS?: string;
+  INFOMANIAK_IP_POLL_INTERVAL_MS?: string;
+}
+
 export interface VultrRuntimeEnv {
   VULTR_REGION?: string;
   VULTR_OS_NAME?: string;
@@ -101,16 +120,20 @@ export interface VultrRuntimeEnv {
 export function buildProviderConfig(
   provider: CredentialProvider,
   decryptedToken: string,
-  providerEnv?: HetznerCapacityRetryEnv & VultrRuntimeEnv,
+  providerEnv?: HetznerCapacityRetryEnv & VultrRuntimeEnv & InfomaniakRuntimeEnv
 ): ProviderConfig {
   switch (provider) {
     case 'hetzner':
       return {
         provider: 'hetzner',
         apiToken: decryptedToken,
-        capacityRetryInitialDelayMs: parseOptionalInt(providerEnv?.HETZNER_CAPACITY_RETRY_INITIAL_DELAY_MS),
+        capacityRetryInitialDelayMs: parseOptionalInt(
+          providerEnv?.HETZNER_CAPACITY_RETRY_INITIAL_DELAY_MS
+        ),
         capacityRetryMaxDelayMs: parseOptionalInt(providerEnv?.HETZNER_CAPACITY_RETRY_MAX_DELAY_MS),
-        capacityRetryMaxAttempts: parseOptionalInt(providerEnv?.HETZNER_CAPACITY_RETRY_MAX_ATTEMPTS),
+        capacityRetryMaxAttempts: parseOptionalInt(
+          providerEnv?.HETZNER_CAPACITY_RETRY_MAX_ATTEMPTS
+        ),
         capacityRetryBudgetMs: parseOptionalInt(providerEnv?.HETZNER_CAPACITY_RETRY_BUDGET_MS),
       };
     case 'vultr':
@@ -123,6 +146,42 @@ export function buildProviderConfig(
         ipPollTimeoutMs: parseOptionalInt(providerEnv?.VULTR_IP_POLL_TIMEOUT_MS),
         ipPollIntervalMs: parseOptionalInt(providerEnv?.VULTR_IP_POLL_INTERVAL_MS),
       };
+    case 'infomaniak': {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(decryptedToken);
+      } catch {
+        throw new Error('Invalid Infomaniak credential format: malformed stored data');
+      }
+      const obj = expectJsonRecord(parsed, 'provider.infomaniak_credential');
+      if (
+        typeof obj.applicationCredentialId !== 'string' ||
+        !obj.applicationCredentialId ||
+        typeof obj.applicationCredentialSecret !== 'string' ||
+        !obj.applicationCredentialSecret
+      )
+        throw new Error(
+          'Invalid Infomaniak credential format: missing application credential ID or secret'
+        );
+      return {
+        provider: 'infomaniak',
+        applicationCredentialId: obj.applicationCredentialId,
+        applicationCredentialSecret: obj.applicationCredentialSecret,
+        authUrl: providerEnv?.INFOMANIAK_AUTH_URL,
+        region: providerEnv?.INFOMANIAK_REGION,
+        networkName: providerEnv?.INFOMANIAK_NETWORK_NAME,
+        imageName: providerEnv?.INFOMANIAK_IMAGE_NAME,
+        volumeType: providerEnv?.INFOMANIAK_VOLUME_TYPE,
+        flavors: {
+          small: providerEnv?.INFOMANIAK_SMALL_FLAVOR ?? 'a2-ram4-disk20-perf1',
+          medium: providerEnv?.INFOMANIAK_MEDIUM_FLAVOR ?? 'a4-ram8-disk20-perf1',
+          large: providerEnv?.INFOMANIAK_LARGE_FLAVOR ?? 'a8-ram16-disk20-perf1',
+        },
+        requestTimeoutMs: parseOptionalInt(providerEnv?.INFOMANIAK_API_TIMEOUT_MS),
+        ipPollTimeoutMs: parseOptionalInt(providerEnv?.INFOMANIAK_IP_POLL_TIMEOUT_MS),
+        ipPollIntervalMs: parseOptionalInt(providerEnv?.INFOMANIAK_IP_POLL_INTERVAL_MS),
+      };
+    }
     case 'scaleway': {
       let parsed: unknown;
       try {
@@ -131,7 +190,12 @@ export function buildProviderConfig(
         throw new Error('Invalid Scaleway credential format: malformed stored data');
       }
       const obj = expectJsonRecord(parsed, 'provider.scaleway_credential');
-      if (typeof obj?.secretKey !== 'string' || !obj.secretKey || typeof obj?.projectId !== 'string' || !obj.projectId) {
+      if (
+        typeof obj?.secretKey !== 'string' ||
+        !obj.secretKey ||
+        typeof obj?.projectId !== 'string' ||
+        !obj.projectId
+      ) {
         throw new Error('Invalid Scaleway credential format: missing secretKey or projectId');
       }
       return { provider: 'scaleway', secretKey: obj.secretKey, projectId: obj.projectId };
@@ -139,16 +203,15 @@ export function buildProviderConfig(
     case 'gcp':
       // GCP credentials are metadata (not secrets). The tokenProvider must be injected
       // at a higher layer via buildGcpProviderConfig() since it depends on the env/JWT context.
-      throw new Error('GCP credentials require buildGcpProviderConfig() — cannot use buildProviderConfig() directly');
+      throw new Error(
+        'GCP credentials require buildGcpProviderConfig() — cannot use buildProviderConfig() directly'
+      );
     default:
       throw new Error(`Unsupported provider: ${provider}`);
   }
 }
 
-function requiredGcpString(
-  obj: Record<string, unknown>,
-  field: string,
-): string {
+function requiredGcpString(obj: Record<string, unknown>, field: string): string {
   const value = obj[field];
   if (typeof value !== 'string' || value.trim().length === 0) {
     throw new Error(`Invalid GCP credential format: missing ${field}`);
@@ -238,7 +301,7 @@ export async function getUserCloudProviderConfig(
   db: ReturnType<typeof drizzle>,
   userId: string,
   encryptionKey: string,
-  targetProvider?: CredentialProvider,
+  targetProvider?: CredentialProvider
 ): Promise<{ config: ProviderConfig; provider: CredentialProvider } | null> {
   const conditions = [
     eq(schema.credentials.userId, userId),
@@ -264,7 +327,9 @@ export async function getUserCloudProviderConfig(
 
   // GCP uses OIDC token exchange — cannot produce a static ProviderConfig
   if (provider === 'gcp') {
-    throw new Error('GCP credentials require createProviderForUser() — cannot use getUserCloudProviderConfig()');
+    throw new Error(
+      'GCP credentials require createProviderForUser() — cannot use getUserCloudProviderConfig()'
+    );
   }
 
   const config = buildProviderConfig(provider, decryptedToken);
@@ -287,8 +352,12 @@ export async function createProviderForUser(
   encryptionKey: string,
   env: Env & Partial<HetznerCapacityRetryEnv>,
   targetProvider?: CredentialProvider,
-  projectId?: string | null,
-): Promise<{ provider: Provider; providerName: CredentialProvider; credentialSource: CredentialSource } | null> {
+  projectId?: string | null
+): Promise<{
+  provider: Provider;
+  providerName: CredentialProvider;
+  credentialSource: CredentialSource;
+} | null> {
   // --- Primary path: composable-credentials resolver -------------------------
   // CC resolver requires a specific provider name (compute consumers are always
   // provider-specific). When targetProvider is undefined, we skip CC and use the
@@ -297,7 +366,14 @@ export async function createProviderForUser(
   // practice. When legacy tables are fully retired, all call sites must pass
   // targetProvider explicitly.
   if (targetProvider) {
-    const ccResult = await resolveProviderViaCC(db, userId, encryptionKey, env, targetProvider, projectId);
+    const ccResult = await resolveProviderViaCC(
+      db,
+      userId,
+      encryptionKey,
+      env,
+      targetProvider,
+      projectId
+    );
     if (ccResult !== undefined) return ccResult;
   }
 
@@ -315,8 +391,12 @@ async function resolveProviderViaCC(
   encryptionKey: string,
   env: Env & Partial<HetznerCapacityRetryEnv>,
   targetProvider: CredentialProvider,
-  projectId?: string | null,
-): Promise<{ provider: Provider; providerName: CredentialProvider; credentialSource: CredentialSource } | null | undefined> {
+  projectId?: string | null
+): Promise<
+  | { provider: Provider; providerName: CredentialProvider; credentialSource: CredentialSource }
+  | null
+  | undefined
+> {
   const consumer = { kind: 'compute' as const, provider: targetProvider };
   let resolved = await resolveForConsumer(db, userId, encryptionKey, consumer, projectId);
 
@@ -371,8 +451,12 @@ async function createProviderForUserLegacy(
   encryptionKey: string,
   env: Env & Partial<HetznerCapacityRetryEnv>,
   targetProvider?: CredentialProvider,
-  projectId?: string | null,
-): Promise<{ provider: Provider; providerName: CredentialProvider; credentialSource: CredentialSource } | null> {
+  projectId?: string | null
+): Promise<{
+  provider: Provider;
+  providerName: CredentialProvider;
+  credentialSource: CredentialSource;
+} | null> {
   // 1. Try user's own credential first
   const conditions = [
     eq(schema.credentials.userId, userId),
@@ -399,11 +483,7 @@ async function createProviderForUserLegacy(
       const cacheProjectId = projectId ?? gcpCred.gcpProjectId;
       const tokenProvider = () => getGcpAccessToken(userId, cacheProjectId, gcpCred, env);
 
-      const provider = new GcpProvider(
-        gcpCred.gcpProjectId,
-        tokenProvider,
-        gcpCred.defaultZone,
-      );
+      const provider = new GcpProvider(gcpCred.gcpProjectId, tokenProvider, gcpCred.defaultZone);
       return { provider, providerName, credentialSource: 'user' };
     }
 
@@ -423,18 +503,19 @@ async function createProviderForUserLegacy(
     const gcpCred = parseGcpCredential(decryptedToken);
     const { getGcpAccessToken } = await import('./gcp-sts');
     const cacheProjectId = projectId ?? gcpCred.gcpProjectId;
-    const tokenProvider = () => getGcpAccessToken(`platform:${userId}`, cacheProjectId, gcpCred, env);
+    const tokenProvider = () =>
+      getGcpAccessToken(`platform:${userId}`, cacheProjectId, gcpCred, env);
 
-    const provider = new GcpProvider(
-      gcpCred.gcpProjectId,
-      tokenProvider,
-      gcpCred.defaultZone,
-    );
+    const provider = new GcpProvider(gcpCred.gcpProjectId, tokenProvider, gcpCred.defaultZone);
     return { provider, providerName: platformProvider, credentialSource: 'platform' };
   }
 
   const config = buildProviderConfig(platformProvider, decryptedToken, env);
-  return { provider: createProvider(config), providerName: platformProvider, credentialSource: 'platform' };
+  return {
+    provider: createProvider(config),
+    providerName: platformProvider,
+    credentialSource: 'platform',
+  };
 }
 
 /**
@@ -449,9 +530,14 @@ export async function resolveCredentialSource(
   db: ReturnType<typeof drizzle>,
   userId: string,
   targetProvider?: CredentialProvider,
-  projectId?: string | null,
+  projectId?: string | null
 ): Promise<{ credentialSource: CredentialSource; providerName: CredentialProvider } | null> {
-  const projectCredential = await resolveProjectComputeCredentialSource(db, userId, targetProvider, projectId);
+  const projectCredential = await resolveProjectComputeCredentialSource(
+    db,
+    userId,
+    targetProvider,
+    projectId
+  );
   if (projectCredential !== undefined) {
     return projectCredential;
   }
@@ -507,8 +593,10 @@ async function resolveProjectComputeCredentialSource(
   db: ReturnType<typeof drizzle>,
   userId: string,
   targetProvider?: CredentialProvider,
-  projectId?: string | null,
-): Promise<{ credentialSource: CredentialSource; providerName: CredentialProvider } | null | undefined> {
+  projectId?: string | null
+): Promise<
+  { credentialSource: CredentialSource; providerName: CredentialProvider } | null | undefined
+> {
   if (!projectId) return undefined;
 
   const conditions = [
@@ -529,8 +617,14 @@ async function resolveProjectComputeCredentialSource(
       credentialActive: schema.ccCredentials.isActive,
     })
     .from(schema.ccAttachments)
-    .innerJoin(schema.ccConfigurations, eq(schema.ccAttachments.configurationId, schema.ccConfigurations.id))
-    .leftJoin(schema.ccCredentials, eq(schema.ccConfigurations.credentialId, schema.ccCredentials.id))
+    .innerJoin(
+      schema.ccConfigurations,
+      eq(schema.ccAttachments.configurationId, schema.ccConfigurations.id)
+    )
+    .leftJoin(
+      schema.ccCredentials,
+      eq(schema.ccConfigurations.credentialId, schema.ccCredentials.id)
+    )
     .where(and(...conditions))
     .limit(targetProvider ? 1 : 2);
 

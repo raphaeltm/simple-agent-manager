@@ -1,4 +1,4 @@
-import { CREDENTIAL_PROVIDERS,type CredentialProvider } from '../types';
+import { CREDENTIAL_PROVIDERS, type CredentialProvider } from '../types';
 
 // =============================================================================
 // Provider Display Labels
@@ -10,6 +10,7 @@ export const PROVIDER_LABELS: Record<CredentialProvider, string> = {
   scaleway: 'Scaleway',
   gcp: 'Google Cloud',
   vultr: 'Vultr',
+  infomaniak: 'Infomaniak Public Cloud',
 };
 
 /** Provider console URLs and help text for onboarding / credential setup. */
@@ -23,7 +24,8 @@ export const PROVIDER_HELP: Record<CredentialProvider, ProviderHelpMeta> = {
   hetzner: {
     description: 'European cloud, great value',
     helpUrl: 'https://console.hetzner.cloud/projects',
-    helpText: 'Go to your project \u2192 Security \u2192 API Tokens \u2192 Generate API Token (Read & Write)',
+    helpText:
+      'Go to your project \u2192 Security \u2192 API Tokens \u2192 Generate API Token (Read & Write)',
   },
   scaleway: {
     description: 'European cloud, GPU options',
@@ -40,6 +42,12 @@ export const PROVIDER_HELP: Record<CredentialProvider, ProviderHelpMeta> = {
     helpUrl: 'https://my.vultr.com/settings/#settingsapi',
     helpText:
       'Go to Account → API, enable API access, and set Access Control to "Allow All IPv4/IPv6" (SAM calls from Cloudflare with no fixed IP), then copy your Personal Access Token',
+  },
+  infomaniak: {
+    description: 'Swiss OpenStack cloud',
+    helpUrl: 'https://docs.infomaniak.cloud/identity/applications_credentials/',
+    helpText:
+      'Create an application credential with reader and member roles (both are required in dc4-a), then copy its ID and one-time secret',
   },
 };
 
@@ -94,6 +102,10 @@ export const PROVIDER_LOCATIONS: Record<CredentialProvider, LocationMeta[]> = {
     { id: 'sgp', name: 'Singapore', country: 'SG' },
     { id: 'syd', name: 'Sydney', country: 'AU' },
   ],
+  infomaniak: [
+    { id: 'dc4-a', name: 'Geneva DC4', country: 'CH' },
+    { id: 'dc3-a', name: 'Geneva DC3', country: 'CH' },
+  ],
 };
 
 /** Default location per provider. */
@@ -102,6 +114,7 @@ export const PROVIDER_DEFAULT_LOCATIONS: Record<CredentialProvider, string> = {
   scaleway: 'fr-par-1',
   gcp: 'us-central1-a',
   vultr: 'fra',
+  infomaniak: 'dc4-a',
 };
 
 /** Flat lookup of all locations (derived from PROVIDER_LOCATIONS). */
@@ -127,6 +140,9 @@ export function getDefaultLocationForProvider(provider: CredentialProvider): str
 }
 
 /** Check if a location is valid for the given provider. */
-export function isValidLocationForProvider(provider: CredentialProvider, location: string): boolean {
+export function isValidLocationForProvider(
+  provider: CredentialProvider,
+  location: string
+): boolean {
   return PROVIDER_LOCATIONS[provider].some((loc) => loc.id === location);
 }

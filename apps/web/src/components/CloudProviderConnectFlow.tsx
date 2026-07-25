@@ -1,12 +1,5 @@
-import type {
-  CreateCredentialRequest,
-  CredentialProvider,
-} from '@simple-agent-manager/shared';
-import {
-  CREDENTIAL_PROVIDERS,
-  PROVIDER_HELP,
-  PROVIDER_LABELS,
-} from '@simple-agent-manager/shared';
+import type { CreateCredentialRequest, CredentialProvider } from '@simple-agent-manager/shared';
+import { CREDENTIAL_PROVIDERS, PROVIDER_HELP, PROVIDER_LABELS } from '@simple-agent-manager/shared';
 import { Alert, Button, Input } from '@simple-agent-manager/ui';
 import { useState } from 'react';
 
@@ -31,6 +24,8 @@ type CloudFormState = {
   wifPoolId: string;
   wifProviderId: string;
   defaultZone: string;
+  applicationCredentialId: string;
+  applicationCredentialSecret: string;
 };
 
 const EMPTY_FORM: CloudFormState = {
@@ -43,6 +38,8 @@ const EMPTY_FORM: CloudFormState = {
   wifPoolId: '',
   wifProviderId: '',
   defaultZone: '',
+  applicationCredentialId: '',
+  applicationCredentialSecret: '',
 };
 
 function isCredentialProvider(value: string | undefined): value is CredentialProvider {
@@ -72,6 +69,12 @@ function buildRequest(provider: CredentialProvider, form: CloudFormState): Creat
   if (provider === 'vultr') {
     return { provider, token: form.token.trim() };
   }
+  if (provider === 'infomaniak')
+    return {
+      provider,
+      applicationCredentialId: form.applicationCredentialId.trim(),
+      applicationCredentialSecret: form.applicationCredentialSecret.trim(),
+    };
   if (provider === 'scaleway') {
     return {
       provider,
@@ -93,6 +96,11 @@ function buildRequest(provider: CredentialProvider, form: CloudFormState): Creat
 function isReady(provider: CredentialProvider | '', form: CloudFormState): boolean {
   if (provider === 'hetzner') return form.token.trim().length > 0;
   if (provider === 'vultr') return form.token.trim().length > 0;
+  if (provider === 'infomaniak')
+    return (
+      form.applicationCredentialId.trim().length > 0 &&
+      form.applicationCredentialSecret.trim().length > 0
+    );
   if (provider === 'scaleway') {
     return form.secretKey.trim().length > 0 && form.projectId.trim().length > 0;
   }
@@ -184,7 +192,9 @@ export function CloudProviderConnectFlow({
                 } cursor-pointer`}
               >
                 <div className="text-sm font-medium text-fg-primary">{PROVIDER_LABELS[item]}</div>
-                <div className="text-xs text-fg-muted mt-0.5">{PROVIDER_HELP[item].description}</div>
+                <div className="text-xs text-fg-muted mt-0.5">
+                  {PROVIDER_HELP[item].description}
+                </div>
               </button>
             );
           })}
@@ -225,6 +235,28 @@ export function CloudProviderConnectFlow({
               onChange={(value) => setField('token', value)}
               placeholder="Vultr Personal Access Token"
             />
+          )}
+
+          {provider === 'infomaniak' && (
+            <>
+              <TextInput
+                id="cloud-infomaniak-id"
+                label="Application credential ID"
+                value={form.applicationCredentialId}
+                onChange={(value) => setField('applicationCredentialId', value)}
+                placeholder="Application credential ID"
+              />
+              <CredentialInput
+                id="cloud-infomaniak-secret"
+                label="Application credential secret (shown once)"
+                value={form.applicationCredentialSecret}
+                onChange={(value) => setField('applicationCredentialSecret', value)}
+                placeholder="Application credential secret"
+              />
+              <p className="m-0 text-xs text-fg-muted">
+                Use both reader and member roles in dc4-a.
+              </p>
+            </>
           )}
 
           {provider === 'scaleway' && (

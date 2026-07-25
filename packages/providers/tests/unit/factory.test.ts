@@ -1,6 +1,6 @@
 import { describe, expect,it } from 'vitest';
 
-import { createProvider, HetznerProvider, ProviderError,ScalewayProvider, VultrProvider } from '../../src/index';
+import { createProvider, HetznerProvider, InfomaniakProvider, ProviderError,ScalewayProvider, VultrProvider } from '../../src/index';
 
 describe('createProvider', () => {
   it('should return HetznerProvider for hetzner config', () => {
@@ -48,6 +48,13 @@ describe('createProvider', () => {
       zone: 'nl-ams-1',
     });
     expect(provider).toBeInstanceOf(ScalewayProvider);
+  });
+
+  it('should return InfomaniakProvider for explicit application credentials', () => {
+    const provider = createProvider({ provider: 'infomaniak', applicationCredentialId: 'id', applicationCredentialSecret: 'secret', region: 'dc3-a' });
+    expect(provider).toBeInstanceOf(InfomaniakProvider);
+    expect(provider.name).toBe('infomaniak');
+    expect(provider.defaultLocation).toBe('dc3-a');
   });
 
   it('should return VultrProvider for vultr config', () => {

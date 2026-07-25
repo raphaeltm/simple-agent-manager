@@ -21,6 +21,12 @@ const VultrCredentialSchema = v.object({
   token: v.string(),
 });
 
+const InfomaniakCredentialSchema = v.object({
+  provider: v.literal('infomaniak'),
+  applicationCredentialId: v.pipe(v.string(), v.minLength(1)),
+  applicationCredentialSecret: v.pipe(v.string(), v.minLength(1)),
+});
+
 const GcpCredentialSchema = v.object({
   provider: v.literal('gcp'),
   authType: v.optional(v.literal('workload-identity')),
@@ -36,6 +42,7 @@ export const CreateCredentialSchema = v.variant('provider', [
   HetznerCredentialSchema,
   ScalewayCredentialSchema,
   VultrCredentialSchema,
+  InfomaniakCredentialSchema,
   GcpCredentialSchema,
 ]);
 
