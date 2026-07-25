@@ -63,3 +63,4 @@ A deep codebase review found that several configuration constants violate Consti
 - Deploy workflow: `.github/workflows/deploy-reusable.yml`
 - Configuration docs: `apps/www/src/content/docs/docs/reference/configuration.md`
 - Task ID: `01KYC73DQFH22WH4AF09R9861C`
+- PR: #1677 (draft)
