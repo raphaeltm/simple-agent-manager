@@ -40,44 +40,44 @@ Add `digitalocean` as a **fifth cloud provider** (after hetzner, scaleway, gcp, 
 ## Implementation checklist
 
 ### packages/shared
-- [ ] `types/user.ts` — `'digitalocean'` in `CREDENTIAL_PROVIDERS` + `| { provider: 'digitalocean'; token: string }` in `CreateCredentialRequest`.
-- [ ] `constants/providers.ts` — `PROVIDER_LABELS`, `PROVIDER_HELP` (Full-Access PAT helpText), `PROVIDER_LOCATIONS` (10 regions), `PROVIDER_DEFAULT_LOCATIONS` (`fra1`); **`TOKEN_COMPUTE_PROVIDERS` + `hasByocComputeCredential()`** (DRY helper).
-- [ ] `constants/vm-sizes.ts` — `PROVIDER_VM_SIZE_VCPUS.digitalocean = {small:2, medium:4, large:8}`.
-- [ ] `constants/resource-defaults.ts` — `PROVIDER_VM_CAPACITY.digitalocean = {small:{2,4,80}, medium:{4,8,160}, large:{8,16,320}}`.
-- [ ] `constants/hetzner.ts` — `DEFAULT_DIGITALOCEAN_REGION='fra1'`, `DEFAULT_DIGITALOCEAN_IMAGE='ubuntu-24-04-x64'`; re-export from `constants/index.ts`.
+- [x] `types/user.ts` — `'digitalocean'` in `CREDENTIAL_PROVIDERS` + `| { provider: 'digitalocean'; token: string }` in `CreateCredentialRequest`.
+- [x] `constants/providers.ts` — `PROVIDER_LABELS`, `PROVIDER_HELP` (Full-Access PAT helpText), `PROVIDER_LOCATIONS` (10 regions), `PROVIDER_DEFAULT_LOCATIONS` (`fra1`); **`TOKEN_COMPUTE_PROVIDERS` + `hasByocComputeCredential()`** (DRY helper).
+- [x] `constants/vm-sizes.ts` — `PROVIDER_VM_SIZE_VCPUS.digitalocean = {small:2, medium:4, large:8}`.
+- [x] `constants/resource-defaults.ts` — `PROVIDER_VM_CAPACITY.digitalocean = {small:{2,4,80}, medium:{4,8,160}, large:{8,16,320}}`.
+- [x] `constants/hetzner.ts` — `DEFAULT_DIGITALOCEAN_REGION='fra1'`, `DEFAULT_DIGITALOCEAN_IMAGE='ubuntu-24-04-x64'`; re-export from `constants/index.ts`.
 
 ### packages/providers
-- [ ] `types.ts` — `DigitalOceanProviderConfig` in `ProviderConfig` union.
-- [ ] `kv-tags.ts` — parameterize with a separator (default `=`; existing `labelsToKvTags`/`kvTagsToLabels` become thin wrappers — Scaleway/Vultr unchanged).
-- [ ] `digitalocean-tags.ts` (new) — colon encode/decode + charset validate (fail-fast) + `sam-name` volume-name round-trip key.
-- [ ] `digitalocean.ts` (new, <500) — droplet lifecycle per API facts; delegate volumes to `DigitalOceanVolumeClient`; `DIGITALOCEAN_LOCATIONS` + meta; SIZE_CONFIGS; `classifyDigitalOceanError`; `mapDigitalOceanStatus`; `validateToken`.
-- [ ] `digitalocean-volumes.ts` (new) — `DigitalOceanVolumeClient` + `DIGITALOCEAN_VOLUME_CAPABILITIES`; create (name sanitize + `sam-name` tag), attach/detach/resize with bounded action polling, delete-404-idempotent, get, list (tag decode + region filter), deterministic `linuxDevice`.
-- [ ] `validation-digitalocean.ts` (new) — droplet/volume/action payload validators (integer id, `networks.v4`, page meta).
-- [ ] `index.ts` — `createProvider` `case 'digitalocean'` (exhaustive-never gate) + exports.
+- [x] `types.ts` — `DigitalOceanProviderConfig` in `ProviderConfig` union.
+- [x] `kv-tags.ts` — parameterize with a separator (default `=`; existing `labelsToKvTags`/`kvTagsToLabels` become thin wrappers — Scaleway/Vultr unchanged).
+- [x] `digitalocean-tags.ts` (new) — colon encode/decode + charset validate (fail-fast) + `sam-name` volume-name round-trip key.
+- [x] `digitalocean.ts` (new, <500) — droplet lifecycle per API facts; delegate volumes to `DigitalOceanVolumeClient`; `DIGITALOCEAN_LOCATIONS` + meta; SIZE_CONFIGS; `classifyDigitalOceanError`; `mapDigitalOceanStatus`; `validateToken`.
+- [x] `digitalocean-volumes.ts` (new) — `DigitalOceanVolumeClient` + `DIGITALOCEAN_VOLUME_CAPABILITIES`; create (name sanitize + `sam-name` tag), attach/detach/resize with bounded action polling, delete-404-idempotent, get, list (tag decode + region filter), deterministic `linuxDevice`.
+- [x] `validation-digitalocean.ts` (new) — droplet/volume/action payload validators (integer id, `networks.v4`, page meta).
+- [x] `index.ts` — `createProvider` `case 'digitalocean'` (exhaustive-never gate) + exports.
 
 ### apps/api
-- [ ] `services/provider-credentials.ts` — `serializeCredentialToken` + `buildProviderConfig` digitalocean cases; `DigitalOceanRuntimeEnv`; env threading.
-- [ ] `services/validation.ts` — `validateDigitalOceanCredentialWithProvider` (`GET /v2/account`, Bearer).
-- [ ] `routes/credentials.ts` + `routes/projects/credentials.ts` — digitalocean branch in `getCloudCredentialFields` + `validateCloudCredentialRequest` **BEFORE the GCP fallthrough**.
-- [ ] `schemas/credentials.ts` — `DigitalOceanCredentialSchema` + variant; `'digitalocean'` in the 5 picklists (`tasks,admin,projects,workspaces,nodes`).
-- [ ] `routes/resolution-status.ts` — `digitalocean: 'DigitalOcean'`.
-- [ ] MCP tool-definition provider example strings (cosmetic).
-- [ ] `env.ts` + `.env.example` — `DIGITALOCEAN_*` tunables.
+- [x] `services/provider-credentials.ts` — `serializeCredentialToken` + `buildProviderConfig` digitalocean cases; `DigitalOceanRuntimeEnv`; env threading.
+- [x] `services/validation.ts` — `validateDigitalOceanCredentialWithProvider` (`GET /v2/account`, Bearer).
+- [x] `routes/credentials.ts` + `routes/projects/credentials.ts` — digitalocean branch in `getCloudCredentialFields` + `validateCloudCredentialRequest` **BEFORE the GCP fallthrough**.
+- [x] `schemas/credentials.ts` — `DigitalOceanCredentialSchema` + variant; `'digitalocean'` in the 5 picklists (`tasks,admin,projects,workspaces,nodes`).
+- [x] `routes/resolution-status.ts` — `digitalocean: 'DigitalOcean'`.
+- [x] MCP tool-definition provider example strings (cosmetic).
+- [x] `env.ts` + `.env.example` — `DIGITALOCEAN_*` tunables.
 
 ### packages/cloud-init
-- [ ] `generate.ts` — `'digitalocean'` in `VALID_CLOUD_PROVIDERS` + doc comment.
+- [x] `generate.ts` — `'digitalocean'` in `VALID_CLOUD_PROVIDERS` + doc comment.
 
 ### apps/web
-- [ ] `DigitalOceanCredentialForm.tsx` (new) — thin wrapper over `SingleTokenCredentialForm` (widen `SingleTokenProvider`).
-- [ ] `SettingsCloudProvider.tsx` — credential lookup + section.
-- [ ] `CloudProviderConnectFlow.tsx` — `buildRequest` (before GCP), `isReady`, single-token render block; grid `sm:grid-cols-2` (5 providers).
-- [ ] 5 has-cloud gates → shared DRY helper (`hasByocComputeCredential`).
-- [ ] `AdminPlatformCredentials.tsx` label + option; `settings-credentials/ConfigurationSection.tsx` `COMPUTE_LABELS`.
-- [ ] Playwright visual audit (rule 17): form + connect flow @ 375/1280, long-text/empty/error.
+- [x] `DigitalOceanCredentialForm.tsx` (new) — thin wrapper over `SingleTokenCredentialForm` (widen `SingleTokenProvider`).
+- [x] `SettingsCloudProvider.tsx` — credential lookup + section.
+- [x] `CloudProviderConnectFlow.tsx` — `buildRequest` (before GCP), `isReady`, single-token render block; grid `sm:grid-cols-2` (5 providers).
+- [x] 5 has-cloud gates → shared DRY helper (`hasByocComputeCredential`).
+- [x] `AdminPlatformCredentials.tsx` label + option; `settings-credentials/ConfigurationSection.tsx` `COMPUTE_LABELS`.
+- [x] Playwright visual audit (rule 17): form + connect flow @ 375/1280, long-text/empty/error.
 
 ### Docs + marketing (same PR, rule 01)
-- [ ] Docs: `self-hosting.mdx`, `reference/roadmap.md`, `architecture/overview.md`, `architecture/security.md`, `guides/app-deployments.md`, `guides/creating-workspaces.md`, `guides/idea-execution.md`, `guides/local-development.md`, `overview.mdx`, `concepts.mdx`, `quickstart.md`.
-- [ ] Marketing: `data/integrations.ts` + `public/images/integrations/digitalocean.svg`, `Roadmap.astro`, `Comparison.astro`, `HowItWorks.astro`, `self-host/index.astro`, `enterprise/{compliance,cost-control}.astro`.
+- [x] Docs: `self-hosting.mdx`, `reference/roadmap.md`, `architecture/overview.md`, `architecture/security.md`, `guides/app-deployments.md`, `guides/creating-workspaces.md`, `guides/idea-execution.md`, `guides/local-development.md`, `overview.mdx`, `concepts.mdx`, `quickstart.md`.
+- [x] Marketing: `data/integrations.ts` + `public/images/integrations/digitalocean.svg`, `Roadmap.astro`, `Comparison.astro`, `HowItWorks.astro`, `self-host/index.astro`, `enterprise/{compliance,cost-control}.astro`.
 
 ## Test plan (mirror Vultr suites 1:1)
 - **Providers unit** (>90% coverage, exact-payload): droplet lifecycle (create body: PLAIN user_data + colon tags + image slug + backups/ipv6/monitoring false; integer-id String; IP poll happy + timeout→empty hard-bounded; delete 404; power_off/on; status matrix incl. `networks.v4` public extraction; 2-page pagination + truncation warn + label filter), volumes (name sanitize + `sam-name` round-trip; attach/detach/resize action-poll happy + timeout + errored; resize grow-only + max cap; delete-404 discriminating; deterministic linuxDevice), `classifyDigitalOceanError` matrix, colon-tags encode/decode + charset fail-fast round-trip, factory case.
