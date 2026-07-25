@@ -91,7 +91,7 @@ Agent-first deployment environments:
 
 ## Planned: More Providers
 
-- DigitalOcean, AWS, and expanded provider coverage.
+- AWS and expanded provider coverage.
 
 ## Complete: Teams & Collaboration
 
