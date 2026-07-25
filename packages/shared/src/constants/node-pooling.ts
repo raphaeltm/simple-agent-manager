@@ -14,7 +14,7 @@ export const DEFAULT_NODE_WARM_GRACE_PERIOD_MS = 35 * 60 * 1000; // 35 minutes (
 /** Default grace period (ms) before stopping orphaned task workspaces. Override via ORPHANED_WORKSPACE_GRACE_PERIOD_MS env var. */
 export const DEFAULT_ORPHANED_WORKSPACE_GRACE_PERIOD_MS = 10 * 60 * 1000; // 10 minutes
 
-/** Default alarm retry delay (ms) when node destruction fails. */
+/** Default alarm retry delay (ms) when node destruction fails. Override via NODE_LIFECYCLE_ALARM_RETRY_MS env var. */
 export const DEFAULT_NODE_LIFECYCLE_ALARM_RETRY_MS = 60 * 1000; // 1 minute
 
 // =============================================================================
@@ -45,8 +45,8 @@ export const MIN_NODE_IDLE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 /** Maximum node idle timeout (ms). */
 export const MAX_NODE_IDLE_TIMEOUT_MS = 4 * 60 * 60 * 1000; // 4 hours
 
-/** Interval (ms) at which the ProjectData DO checks workspace idle state. */
-export const WORKSPACE_IDLE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+/** Default interval (ms) at which the ProjectData DO checks workspace idle state. Override via WORKSPACE_IDLE_CHECK_INTERVAL_MS env var. */
+export const DEFAULT_WORKSPACE_IDLE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 
 /** Minimum interval (ms) between terminal activity updates to the DO to avoid write amplification.
  * Intended for frontend heartbeat interval — not yet enforced server-side. */

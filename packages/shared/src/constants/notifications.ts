@@ -13,8 +13,8 @@ export const DEFAULT_NOTIFICATION_AUTO_DELETE_AGE_MS = 90 * 24 * 60 * 60 * 1000;
 /** Maximum notifications returned in a single list request */
 export const DEFAULT_NOTIFICATION_PAGE_SIZE = 50;
 
-/** Maximum page size for notification list requests */
-export const MAX_NOTIFICATION_PAGE_SIZE = 100;
+/** Maximum page size for notification list requests. Override via MAX_NOTIFICATION_PAGE_SIZE env var. */
+export const DEFAULT_MAX_NOTIFICATION_PAGE_SIZE = 100;
 
 /** Default urgency mapping for each notification type */
 export const NOTIFICATION_TYPE_URGENCY: Record<NotificationType, NotificationUrgency> = {

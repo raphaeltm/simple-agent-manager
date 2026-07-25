@@ -43,6 +43,7 @@ type NodeLifecycleEnv = {
   DATABASE: D1Database;
   NODE_WARM_TIMEOUT_MS?: string;
   WORKSPACE_STOPPED_TTL_MS?: string;
+  NODE_LIFECYCLE_ALARM_RETRY_MS?: string;
 };
 
 interface StoredState {
@@ -266,7 +267,7 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
     if (state.status === 'destroying') {
       // Already destroying — retry: schedule another alarm in case destruction
       // hasn't been picked up by cron yet
-      await this.ctx.storage.setAlarm(Date.now() + DEFAULT_NODE_LIFECYCLE_ALARM_RETRY_MS);
+      await this.ctx.storage.setAlarm(Date.now() + this.getAlarmRetryMs());
       return;
     }
 
@@ -304,7 +305,7 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
         error: err instanceof Error ? err.message : String(err),
       });
       // Schedule retry (use recalculateAlarm to not delay pending workspace deletions)
-      await this.recalculateAlarm(Date.now() + DEFAULT_NODE_LIFECYCLE_ALARM_RETRY_MS);
+      await this.recalculateAlarm(Date.now() + this.getAlarmRetryMs());
     }
   }
 
@@ -334,6 +335,15 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
       });
       return false;
     }
+  }
+
+  private getAlarmRetryMs(): number {
+    const envValue = this.env.NODE_LIFECYCLE_ALARM_RETRY_MS;
+    if (envValue) {
+      const parsed = parseInt(envValue, 10);
+      if (Number.isFinite(parsed) && parsed > 0) return parsed;
+    }
+    return DEFAULT_NODE_LIFECYCLE_ALARM_RETRY_MS;
   }
 
   private getWarmTimeoutMs(): number {
@@ -415,7 +425,7 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
         });
         // Leave the entry for retry on next alarm. Push deleteAt forward slightly
         // to avoid tight retry loops.
-        entry.deleteAt = now + DEFAULT_NODE_LIFECYCLE_ALARM_RETRY_MS;
+        entry.deleteAt = now + this.getAlarmRetryMs();
         await this.ctx.storage.put(key, entry);
       }
     }

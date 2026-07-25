@@ -123,7 +123,7 @@ describe('cf-container runtime spike contracts', () => {
     const activityCallback = read('routes/projects/agent-activity-callback.ts');
     const acpSessionsRoute = read('routes/projects/acp-sessions.ts');
 
-    expect(containerDo).toContain("export const DEFAULT_CF_CONTAINER_SLEEP_AFTER = '1h'");
+    expect(containerDo).toContain('DEFAULT_CF_CONTAINER_SLEEP_AFTER');
     expect(containerService).toContain('DEFAULT_CF_CONTAINER_SLEEP_AFTER');
     expect(containerDo).toContain('DEFAULT_CF_CONTAINER_ACTIVE_WORK_MAX_MS');
     expect(containerDo).toContain('DEFAULT_CF_CONTAINER_KEEPALIVE_RENEW_INTERVAL_MS');

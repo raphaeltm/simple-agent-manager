@@ -3,7 +3,7 @@
  */
 import {
   DEFAULT_WORKSPACE_IDLE_TIMEOUT_MS,
-  WORKSPACE_IDLE_CHECK_INTERVAL_MS,
+  DEFAULT_WORKSPACE_IDLE_CHECK_INTERVAL_MS,
 } from '@simple-agent-manager/shared';
 
 import { createModuleLogger, serializeError } from '../../lib/logger';
@@ -313,7 +313,10 @@ export async function checkWorkspaceIdleTimeouts(
 /**
  * Compute the alarm time for idle cleanup and workspace idle checks.
  */
-export function computeIdleAlarmTimes(sql: SqlStorage): {
+export function computeIdleAlarmTimes(
+  sql: SqlStorage,
+  env?: { WORKSPACE_IDLE_CHECK_INTERVAL_MS?: string }
+): {
   idleCleanupTime: number | null;
   workspaceIdleCheckTime: number | null;
 } {
@@ -333,7 +336,12 @@ export function computeIdleAlarmTimes(sql: SqlStorage): {
     .toArray()[0];
   const earliestActivity = earliestActivityRow ? parseMinEarliest(earliestActivityRow, 'idle_cleanup.min_activity') : null;
   if (earliestActivity !== null) {
-    const nextCheck = earliestActivity + WORKSPACE_IDLE_CHECK_INTERVAL_MS;
+    const rawInterval = env?.WORKSPACE_IDLE_CHECK_INTERVAL_MS;
+    const parsedInterval = rawInterval ? parseInt(rawInterval, 10) : NaN;
+    const checkInterval = Number.isFinite(parsedInterval) && parsedInterval > 0
+      ? parsedInterval
+      : DEFAULT_WORKSPACE_IDLE_CHECK_INTERVAL_MS;
+    const nextCheck = earliestActivity + checkInterval;
     workspaceIdleCheckTime = Math.max(nextCheck, Date.now() + 60_000);
   }
 

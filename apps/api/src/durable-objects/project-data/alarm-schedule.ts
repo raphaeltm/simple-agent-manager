@@ -13,7 +13,7 @@ import * as reconciliation from './reconciliation';
 import type { Env } from './types';
 
 export function computeProjectDataAlarmTime(sql: SqlStorage, env: Env): number | null {
-  const { idleCleanupTime, workspaceIdleCheckTime } = idleCleanup.computeIdleAlarmTimes(sql);
+  const { idleCleanupTime, workspaceIdleCheckTime } = idleCleanup.computeIdleAlarmTimes(sql, env);
   const heartbeatTime = acpSessions.computeHeartbeatAlarmTime(sql, env);
   const pollIntervalMs = Number.parseInt(env.MAILBOX_DELIVERY_POLL_INTERVAL_MS ?? '30000', 10);
   const mailboxTime = mailbox.computeMailboxAlarmTime(sql, pollIntervalMs);

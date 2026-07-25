@@ -33,7 +33,7 @@ vi.mock('@simple-agent-manager/shared', () => ({
   DEFAULT_WORKSPACE_IDLE_TIMEOUT_MS: 30 * 60 * 1000,
   DEFAULT_WORKSPACE_PROFILE: 'default',
   PROVIDER_LOCATIONS: {},
-  WORKSPACE_IDLE_CHECK_INTERVAL_MS: 60 * 1000,
+  DEFAULT_WORKSPACE_IDLE_CHECK_INTERVAL_MS: 60 * 1000,
 }));
 
 const { ProjectData } = await import('../../../src/durable-objects/project-data');

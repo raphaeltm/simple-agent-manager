@@ -1,4 +1,9 @@
 import { Container, switchPort } from '@cloudflare/containers';
+import {
+  DEFAULT_CF_CONTAINER_ACTIVE_WORK_MAX_MS,
+  DEFAULT_CF_CONTAINER_KEEPALIVE_RENEW_INTERVAL_MS,
+  DEFAULT_CF_CONTAINER_SLEEP_AFTER,
+} from '@simple-agent-manager/shared';
 import { desc, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
@@ -6,10 +11,6 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { signCallbackToken, signNodeCallbackToken, signNodeManagementToken } from '../services/jwt';
-
-export const DEFAULT_CF_CONTAINER_SLEEP_AFTER = '1h';
-export const DEFAULT_CF_CONTAINER_ACTIVE_WORK_MAX_MS = 2 * 60 * 60 * 1000;
-export const DEFAULT_CF_CONTAINER_KEEPALIVE_RENEW_INTERVAL_MS = 5 * 60 * 1000;
 
 export interface VmAgentContainerLaunchConfig {
   nodeId: string;

@@ -19,7 +19,7 @@ import {
   DEFAULT_NOTIFICATION_DEDUP_WINDOW_MS,
   DEFAULT_NOTIFICATION_PAGE_SIZE,
   DEFAULT_NOTIFICATION_PROGRESS_BATCH_WINDOW_MS,
-  MAX_NOTIFICATION_PAGE_SIZE,
+  DEFAULT_MAX_NOTIFICATION_PAGE_SIZE,
 } from '@simple-agent-manager/shared';
 import { DurableObject } from 'cloudflare:workers';
 
@@ -218,9 +218,10 @@ export class NotificationService extends DurableObject<Env> {
     unreadCount: number;
     nextCursor: string | null;
   }> {
+    const maxPageSize = parseInt(this.env.MAX_NOTIFICATION_PAGE_SIZE || '', 10) || DEFAULT_MAX_NOTIFICATION_PAGE_SIZE;
     const pageSize = Math.min(
       options.limit || parseInt(this.env.NOTIFICATION_PAGE_SIZE || '') || DEFAULT_NOTIFICATION_PAGE_SIZE,
-      MAX_NOTIFICATION_PAGE_SIZE
+      maxPageSize
     );
 
     let query = `SELECT * FROM notifications WHERE user_id = ? AND dismissed_at IS NULL`;

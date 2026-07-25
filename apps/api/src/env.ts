@@ -225,6 +225,8 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   NODE_WARM_GRACE_PERIOD_MS?: string;
   ORPHANED_WORKSPACE_GRACE_PERIOD_MS?: string;
   CF_CONTAINER_TERMINAL_TASK_SWEEP_LIMIT?: string; // Max terminal cf-container nodes to destroy per cron run (default: 25)
+  NODE_LIFECYCLE_ALARM_RETRY_MS?: string; // Retry delay for DO alarm failures (default: 60000)
+  WORKSPACE_IDLE_CHECK_INTERVAL_MS?: string; // Interval for ProjectData DO workspace idle checks (default: 300000)
   // Workspace idle timeout (global default, overridable per-project)
   WORKSPACE_IDLE_TIMEOUT_MS?: string;
   // Auto-delete stopped workspaces after this TTL (default: 300000 = 5 minutes)
@@ -551,6 +553,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   MAX_NOTIFICATIONS_PER_USER?: string;
   NOTIFICATION_AUTO_DELETE_AGE_MS?: string;
   NOTIFICATION_PAGE_SIZE?: string;
+  MAX_NOTIFICATION_PAGE_SIZE?: string; // Max allowed page size for notification list requests (default: 100)
   NOTIFICATION_PROGRESS_BATCH_WINDOW_MS?: string;
   NOTIFICATION_DEDUP_WINDOW_MS?: string;
   NOTIFICATION_FULL_BODY_LENGTH?: string;

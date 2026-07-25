@@ -1,9 +1,9 @@
+import { DEFAULT_CF_CONTAINER_SLEEP_AFTER } from '@simple-agent-manager/shared';
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import {
-  DEFAULT_CF_CONTAINER_SLEEP_AFTER,
   type VmAgentContainer,
   type VmAgentContainerLaunchConfig,
   type VmAgentContainerLaunchSecrets,
