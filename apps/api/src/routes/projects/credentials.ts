@@ -22,9 +22,9 @@ import type {
 } from '@simple-agent-manager/shared';
 import {
   CREDENTIAL_PROVIDERS,
-  PROVIDER_LABELS,
   getAgentDefinition,
   isValidAgentType,
+  PROVIDER_LABELS,
 } from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';

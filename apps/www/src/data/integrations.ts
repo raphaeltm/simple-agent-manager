@@ -1,3 +1,4 @@
+// FILE SIZE EXCEPTION: Static marketing catalog entries stay centralized for typed cross-link validation and generated integration routes.
 /**
  * Integration data for all supported technologies.
  * Used by /integrations/ hub page and /integrations/[slug] detail pages.
