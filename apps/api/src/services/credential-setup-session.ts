@@ -40,3 +40,11 @@ export async function cancelSetupSession(
 ): Promise<SetupSessionStateResult> {
   return getStub(env, sessionId).cancel();
 }
+
+export async function submitSetupSessionCredential(
+  env: Env,
+  sessionId: string,
+  credential: string
+): Promise<SetupSessionStateResult> {
+  return getStub(env, sessionId).submitCredential(credential);
+}

@@ -2,7 +2,7 @@
  * Guided agent-credential setup sessions (native provider login).
  *
  * User-facing flow for connecting subscription/OAuth-backed coding agents
- * without manual token/auth-file paste:
+ * without exposing terminal setup mechanics:
  *   POST   /                      create a setup session (leases a sandbox slot)
  *   GET    /:id                   poll lifecycle status
  *   POST   /:id/cancel            cancel + tear down
@@ -15,23 +15,28 @@
  */
 import { type AgentType, getAgentDefinition, isValidAgentType } from '@simple-agent-manager/shared';
 import { Hono } from 'hono';
+import * as v from 'valibot';
 
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
 import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
+import { jsonValidator } from '../schemas';
 import {
   ACTIVE_SETUP_STATUSES,
   getSetupSessionCapturePollMs,
   getSetupSessionTtlMs,
+  isTerminalSetupStatus,
 } from '../services/credential-setup-config';
 import {
   cancelSetupSession,
   getSetupSessionState,
   startSetupSession,
+  submitSetupSessionCredential,
 } from '../services/credential-setup-session';
 import { leaseSetupSlot, releaseSetupSlot } from '../services/setup-session-pool';
+import { CredentialValidator } from '../services/validation';
 
 const agentCredentialSetupSessionsRoutes = new Hono<{ Bindings: Env }>();
 
@@ -40,6 +45,16 @@ const SUPPORTED_SETUP_AGENT_TYPES = ['openai-codex', 'claude-code'] as const;
 type SupportedSetupAgentType = (typeof SUPPORTED_SETUP_AGENT_TYPES)[number];
 const SETUP_CREDENTIAL_KIND = 'oauth-token';
 const ACTIVE_STATUS_PLACEHOLDERS = ACTIVE_SETUP_STATUSES.map(() => '?').join(', ');
+const MAX_SUBMITTED_CLAUDE_TOKEN_LENGTH = 8192;
+
+const SubmitSetupCredentialSchema = v.object({
+  credential: v.pipe(
+    v.string(),
+    v.trim(),
+    v.minLength(1),
+    v.maxLength(MAX_SUBMITTED_CLAUDE_TOKEN_LENGTH)
+  ),
+});
 
 function isSupportedSetupAgentType(agentType: AgentType): agentType is SupportedSetupAgentType {
   return SUPPORTED_SETUP_AGENT_TYPES.includes(agentType as SupportedSetupAgentType);
@@ -264,6 +279,51 @@ agentCredentialSetupSessionsRoutes.get('/:id', requireAuth(), requireApproved(),
     errorMessage: state?.errorMessage ?? row.error_message,
   });
 });
+
+// -----------------------------------------------------------------------------
+// POST /:id/credential — complete Claude setup from browser-provided token
+// -----------------------------------------------------------------------------
+agentCredentialSetupSessionsRoutes.post(
+  '/:id/credential',
+  requireAuth(),
+  requireApproved(),
+  jsonValidator(SubmitSetupCredentialSchema),
+  async (c) => {
+    const userId = getUserId(c);
+    const row = await loadOwnedSession(c.env, c.req.param('id'), userId);
+    if (row.agent_type !== 'claude-code') {
+      throw errors.badRequest(
+        'Manual credential submission is only available for Claude Code setup'
+      );
+    }
+    if (isTerminalSetupStatus(row.status)) {
+      throw errors.conflict('Setup session is no longer active');
+    }
+
+    const body = c.req.valid('json');
+    const credential = body.credential.trim();
+    const validation = CredentialValidator.validateCredential(
+      credential,
+      SETUP_CREDENTIAL_KIND,
+      'claude-code'
+    );
+    if (!validation.valid) {
+      throw errors.badRequest(validation.error ?? 'Invalid Claude OAuth token');
+    }
+
+    const state = await submitSetupSessionCredential(c.env, row.id, credential);
+    return c.json({
+      id: row.id,
+      status: state.status,
+      agentType: row.agent_type,
+      expiresAt: row.expires_at,
+      verificationUrl: state.verificationUrl,
+      userCode: state.userCode,
+      errorCode: state.errorCode,
+      errorMessage: state.errorMessage,
+    });
+  }
+);
 
 // -----------------------------------------------------------------------------
 // POST /:id/cancel — cancel + tear down

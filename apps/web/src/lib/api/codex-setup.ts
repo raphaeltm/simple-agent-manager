@@ -180,3 +180,14 @@ export async function cancelAgentCredentialSetupSession(
 }
 
 export const cancelCodexSetupSession = cancelAgentCredentialSetupSession;
+
+/** POST /:id/credential — complete Claude Code setup with the browser-returned token. */
+export async function submitAgentCredentialSetupCredential(
+  id: string,
+  credential: string
+): Promise<AgentCredentialSetupSession> {
+  return request<AgentCredentialSetupSession>(`${BASE_PATH}/${encodeURIComponent(id)}/credential`, {
+    method: 'POST',
+    body: JSON.stringify({ credential }),
+  });
+}
