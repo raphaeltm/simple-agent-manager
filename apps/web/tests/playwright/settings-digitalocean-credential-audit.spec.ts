@@ -11,6 +11,7 @@ import {
 const MOCK_USER = makeMockUser({
   email: 'digitalocean-audit@example.com',
   name: 'DigitalOcean Audit User',
+  role: 'superadmin',
   sessionId: 'session-digitalocean-audit',
   userId: 'user-digitalocean-audit',
 });
@@ -35,7 +36,65 @@ async function setupApiMocks(page: Page, options: DigitalOceanAuditMockOptions =
     if (path.includes('/api/auth/')) return respond(200, MOCK_USER);
     if (path.startsWith('/api/notifications'))
       return respond(200, { notifications: [], unreadCount: 0 });
-    if (path === '/api/projects') return respond(200, { projects: [], nextCursor: null });
+    if (path === '/api/projects')
+      return respond(200, {
+        projects: [{ id: 'proj-1', name: 'DigitalOcean Project' }],
+        nextCursor: null,
+      });
+    if (path === '/api/projects/proj-1')
+      return respond(200, {
+        id: 'proj-1',
+        name: 'DigitalOcean Project',
+        repository: null,
+        defaultBranch: null,
+        installationId: 'inst-1',
+        defaultVmSize: null,
+      });
+    if (path === '/api/admin/platform-credentials' && method === 'GET')
+      return respond(200, {
+        credentials: [
+          {
+            id: 'platform-do',
+            credentialType: 'cloud-provider',
+            credentialKind: 'api-key',
+            provider: 'digitalocean',
+            agentType: null,
+            label: 'Shared DigitalOcean',
+            isEnabled: true,
+            createdAt: '2026-07-23T00:00:00Z',
+            updatedAt: '2026-07-23T00:00:00Z',
+          },
+        ],
+      });
+    if (path === '/api/providers/catalog')
+      return respond(200, {
+        catalogs: [
+          {
+            provider: 'digitalocean',
+            defaultLocation: 'fra1',
+            locations: [{ id: 'fra1', name: 'Frankfurt', country: 'DE' }],
+            sizes: {
+              small: { type: 's-2vcpu-4gb', price: '~/mo', vcpu: 2, ramGb: 4, storageGb: 80 },
+            },
+          },
+        ],
+      });
+    if (path === '/api/github/repositories') return respond(200, { repositories: [] });
+    if (path === '/api/github/branches') return respond(200, [{ name: 'main' }]);
+    if (path === '/api/github/installations')
+      return respond(200, [
+        {
+          id: 'inst-1',
+          installationId: '100',
+          accountName: 'sam-demo',
+          accountType: 'organization',
+          createdAt: '2026-01-01T00:00:00Z',
+          updatedAt: '2026-01-01T00:00:00Z',
+        },
+      ]);
+    if (path === '/api/nodes') return respond(200, []);
+    if (path === '/api/trial-status' || path === '/api/trial/status')
+      return respond(200, { available: false });
     if (path === '/api/credentials/resolution-status') {
       return respond(200, { consumers: resolutionConsumers ?? [] });
     }
@@ -183,11 +242,31 @@ test.describe('Settings DigitalOcean credential audit', () => {
     await page.getByRole('button', { name: 'Make default' }).click();
 
     // All five providers render in the 2x2 grid; select DigitalOcean.
-    await expect(page.getByRole('button', { name: 'DigitalOcean' })).toBeVisible();
-    await page.getByRole('button', { name: 'DigitalOcean' }).click();
+    await expect(page.getByRole('button', { name: /^DigitalOcean Global cloud/ })).toBeVisible();
+    await page.getByRole('button', { name: /^DigitalOcean Global cloud/ }).click();
     await expect(page.getByLabel(/DigitalOcean API key/i)).toBeVisible();
 
     await screenshot(page, `settings-digitalocean-connectflow-grid-${suffix}`);
+    await assertNoOverflow(page);
+  });
+  test('admin option and workspace availability render DigitalOcean at mobile + desktop', async ({
+    page,
+  }, testInfo) => {
+    await setupApiMocks(page, { existingDigitalOcean: true });
+    const suffix = getProjectSuffix(testInfo.project.name);
+
+    await page.goto('/admin/credentials');
+    await expect(page.getByText('Shared DigitalOcean')).toBeVisible();
+    await page.getByRole('button', { name: 'Add Credential' }).click();
+    await expect(page.getByLabel('Provider')).toContainText('DigitalOcean');
+    await screenshot(page, 'settings-digitalocean-admin-' + suffix);
+    await assertNoOverflow(page);
+
+    await page.goto('/workspaces/new');
+    await page.locator('main').getByRole('combobox').first().selectOption('proj-1');
+    await expect(page.getByLabel('Workspace Name')).toBeVisible();
+    await expect(page.getByText(/DigitalOcean/).first()).toBeVisible();
+    await screenshot(page, 'settings-digitalocean-workspace-' + suffix);
     await assertNoOverflow(page);
   });
 });

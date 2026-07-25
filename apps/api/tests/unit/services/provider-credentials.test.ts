@@ -234,9 +234,28 @@ describe('versioned GCP credential parsing', () => {
 describe('DigitalOcean provider credentials', () => {
   it('stores the API token raw and builds an env-threaded provider config', () => {
     expect(serializeCredentialToken('digitalocean', { token: 'do-pat' })).toBe('do-pat');
-    expect(buildProviderConfig('digitalocean', 'do-pat', {
-      DIGITALOCEAN_REGION: 'ams3', DIGITALOCEAN_IMAGE: 'custom-image', DIGITALOCEAN_API_TIMEOUT_MS: '1200',
-      DIGITALOCEAN_IP_POLL_TIMEOUT_MS: '1300', DIGITALOCEAN_IP_POLL_INTERVAL_MS: '140', DIGITALOCEAN_ACTION_POLL_TIMEOUT_MS: '1500',
-    })).toEqual({ provider: 'digitalocean', apiToken: 'do-pat', region: 'ams3', image: 'custom-image', requestTimeoutMs: 1200, ipPollTimeoutMs: 1300, ipPollIntervalMs: 140, actionPollTimeoutMs: 1500 });
+    expect(
+      buildProviderConfig('digitalocean', 'do-pat', {
+        DIGITALOCEAN_REGION: 'ams3',
+        DIGITALOCEAN_IMAGE: 'custom-image',
+        DIGITALOCEAN_API_TIMEOUT_MS: '1200',
+        DIGITALOCEAN_IP_POLL_TIMEOUT_MS: '1300',
+        DIGITALOCEAN_IP_POLL_INTERVAL_MS: '140',
+        DIGITALOCEAN_ACTION_POLL_TIMEOUT_MS: '1500',
+        DIGITALOCEAN_ACTION_POLL_INTERVAL_MS: '160',
+        DIGITALOCEAN_MAX_LIST_PAGES: '17',
+      })
+    ).toEqual({
+      provider: 'digitalocean',
+      apiToken: 'do-pat',
+      region: 'ams3',
+      image: 'custom-image',
+      requestTimeoutMs: 1200,
+      ipPollTimeoutMs: 1300,
+      ipPollIntervalMs: 140,
+      actionPollTimeoutMs: 1500,
+      actionPollIntervalMs: 160,
+      maxListPages: 17,
+    });
   });
 });

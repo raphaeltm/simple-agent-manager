@@ -33,7 +33,6 @@ import {
 
 const DIGITALOCEAN_API_URL = 'https://api.digitalocean.com/v2';
 const DIGITALOCEAN_LIST_PER_PAGE = 200;
-const DIGITALOCEAN_MAX_LIST_PAGES = 50;
 
 export const DIGITALOCEAN_VOLUME_MIN_SIZE_GB = 1;
 export const DIGITALOCEAN_VOLUME_MAX_SIZE_GB = 16_384;
@@ -67,6 +66,7 @@ export interface DigitalOceanVolumeClientOptions {
   requestTimeoutMs: number;
   actionPollTimeoutMs: number;
   actionPollIntervalMs: number;
+  maxListPages: number;
   logger?: ProviderLogger;
 }
 
@@ -92,16 +92,18 @@ export class DigitalOceanVolumeClient {
   private readonly requestTimeoutMs: number;
   private readonly actionPollTimeoutMs: number;
   private readonly actionPollIntervalMs: number;
+  private readonly maxListPages: number;
   private readonly logger?: ProviderLogger;
 
   constructor(
     private readonly apiToken: string,
     private readonly mapProviderError: DigitalOceanErrorMapper,
-    options: DigitalOceanVolumeClientOptions,
+    options: DigitalOceanVolumeClientOptions
   ) {
     this.requestTimeoutMs = options.requestTimeoutMs;
     this.actionPollTimeoutMs = options.actionPollTimeoutMs;
     this.actionPollIntervalMs = options.actionPollIntervalMs;
+    this.maxListPages = options.maxListPages;
     this.logger = options.logger;
   }
 
@@ -132,7 +134,7 @@ export class DigitalOceanVolumeClient {
 
     const data = validateDigitalOceanVolumeResponse(
       await parseProviderJson(response, 'digitalocean', 'createVolume'),
-      'createVolume',
+      'createVolume'
     );
     return this.mapVolume(data.volume);
   }
@@ -147,9 +149,14 @@ export class DigitalOceanVolumeClient {
 
     const volume = await this.getVolume({ volumeId: config.volumeId, location: config.location });
     if (!volume) {
-      throw new ProviderError('digitalocean', 404, `DigitalOcean volume ${config.volumeId} not found after attach`, {
-        category: 'invalid_config',
-      });
+      throw new ProviderError(
+        'digitalocean',
+        404,
+        `DigitalOcean volume ${config.volumeId} not found after attach`,
+        {
+          category: 'invalid_config',
+        }
+      );
     }
     return volume;
   }
@@ -180,7 +187,7 @@ export class DigitalOceanVolumeClient {
         'digitalocean',
         undefined,
         `Cannot shrink DigitalOcean volume ${config.volumeId} from ${currentSizeGb}GB to ${config.sizeGb}GB`,
-        { category: 'invalid_config' },
+        { category: 'invalid_config' }
       );
     }
 
@@ -192,9 +199,14 @@ export class DigitalOceanVolumeClient {
 
     const volume = await this.getVolume({ volumeId: config.volumeId, location: config.location });
     if (!volume) {
-      throw new ProviderError('digitalocean', 404, `DigitalOcean volume ${config.volumeId} not found after resize`, {
-        category: 'invalid_config',
-      });
+      throw new ProviderError(
+        'digitalocean',
+        404,
+        `DigitalOcean volume ${config.volumeId} not found after resize`,
+        {
+          category: 'invalid_config',
+        }
+      );
     }
     return volume;
   }
@@ -215,7 +227,7 @@ export class DigitalOceanVolumeClient {
       const response = await this.doFetch(`/volumes/${encodeURIComponent(config.volumeId)}`);
       const data = validateDigitalOceanVolumeResponse(
         await parseProviderJson(response, 'digitalocean', 'getVolume'),
-        'getVolume',
+        'getVolume'
       );
       return this.mapVolume(data.volume);
     } catch (err) {
@@ -232,14 +244,16 @@ export class DigitalOceanVolumeClient {
 
     if (config.labels && Object.keys(config.labels).length > 0) {
       const entries = Object.entries(config.labels);
-      mapped = mapped.filter((volume) => entries.every(([key, value]) => volume.labels[key] === value));
+      mapped = mapped.filter((volume) =>
+        entries.every(([key, value]) => volume.labels[key] === value)
+      );
     }
     return mapped;
   }
 
   private async fetchAllVolumes(location: string): Promise<DigitalOceanVolumePayload[]> {
     const all: DigitalOceanVolumePayload[] = [];
-    for (let page = 1; page <= DIGITALOCEAN_MAX_LIST_PAGES; page += 1) {
+    for (let page = 1; page <= this.maxListPages; page += 1) {
       const params = new URLSearchParams({
         per_page: String(DIGITALOCEAN_LIST_PER_PAGE),
         page: String(page),
@@ -248,12 +262,15 @@ export class DigitalOceanVolumeClient {
       const response = await this.doFetch(`/volumes?${params.toString()}`);
       const data = validateDigitalOceanVolumesResponse(
         await parseProviderJson(response, 'digitalocean', 'listVolumes'),
-        'listVolumes',
+        'listVolumes'
       );
       all.push(...data.volumes);
       if (!data.hasNextPage) return all;
     }
-    this.logger?.warn('digitalocean.list_truncated', { resource: 'volumes', maxPages: DIGITALOCEAN_MAX_LIST_PAGES });
+    this.logger?.warn('digitalocean.list_truncated', {
+      resource: 'volumes',
+      maxPages: this.maxListPages,
+    });
     return all;
   }
 
@@ -261,7 +278,7 @@ export class DigitalOceanVolumeClient {
   private async runVolumeAction(
     volumeId: string,
     context: string,
-    body: Record<string, unknown>,
+    body: Record<string, unknown>
   ): Promise<void> {
     const response = await this.doFetch(`/volumes/${encodeURIComponent(volumeId)}/actions`, {
       method: 'POST',
@@ -269,7 +286,7 @@ export class DigitalOceanVolumeClient {
     });
     const data = validateDigitalOceanActionResponse(
       await parseProviderJson(response, 'digitalocean', context),
-      context,
+      context
     );
     await this.pollAction(data.action, context);
   }
@@ -278,9 +295,14 @@ export class DigitalOceanVolumeClient {
   private async pollAction(action: DigitalOceanActionPayload, context: string): Promise<void> {
     if (action.status === 'completed') return;
     if (action.status === 'errored') {
-      throw new ProviderError('digitalocean', undefined, `DigitalOcean ${context} action ${action.id} errored`, {
-        category: 'transient_capacity',
-      });
+      throw new ProviderError(
+        'digitalocean',
+        undefined,
+        `DigitalOcean ${context} action ${action.id} errored`,
+        {
+          category: 'transient_capacity',
+        }
+      );
     }
 
     const deadline = Date.now() + this.actionPollTimeoutMs;
@@ -291,16 +313,21 @@ export class DigitalOceanVolumeClient {
       const current = await this.getAction(action.id, Math.min(this.requestTimeoutMs, remaining));
       if (current.status === 'completed') return;
       if (current.status === 'errored') {
-        throw new ProviderError('digitalocean', undefined, `DigitalOcean ${context} action ${action.id} errored`, {
-          category: 'transient_capacity',
-        });
+        throw new ProviderError(
+          'digitalocean',
+          undefined,
+          `DigitalOcean ${context} action ${action.id} errored`,
+          {
+            category: 'transient_capacity',
+          }
+        );
       }
     }
     throw new ProviderError(
       'digitalocean',
       undefined,
       `DigitalOcean ${context} action ${action.id} did not complete within ${this.actionPollTimeoutMs}ms`,
-      { category: 'transient_capacity' },
+      { category: 'transient_capacity' }
     );
   }
 
@@ -308,7 +335,7 @@ export class DigitalOceanVolumeClient {
     const response = await this.doFetch(`/actions/${actionId}`, undefined, timeoutMs);
     const data = validateDigitalOceanActionResponse(
       await parseProviderJson(response, 'digitalocean', 'pollAction'),
-      'pollAction',
+      'pollAction'
     );
     return data.action;
   }
@@ -316,7 +343,8 @@ export class DigitalOceanVolumeClient {
   private mapVolume(volume: DigitalOceanVolumePayload): VolumeInstance {
     const decoded = digitalOceanTagsToLabels(volume.tags);
     const { [DIGITALOCEAN_VOLUME_NAME_TAG_KEY]: encodedName, ...labels } = decoded;
-    const attachedServerId = volume.droplet_ids.length > 0 ? String(volume.droplet_ids[0]) : undefined;
+    const attachedServerId =
+      volume.droplet_ids.length > 0 ? String(volume.droplet_ids[0]) : undefined;
 
     return {
       id: volume.id,
@@ -342,7 +370,7 @@ export class DigitalOceanVolumeClient {
         'digitalocean',
         undefined,
         `DigitalOcean volume size must be an integer >= ${DIGITALOCEAN_VOLUME_MIN_SIZE_GB}GB`,
-        { category: 'invalid_config' },
+        { category: 'invalid_config' }
       );
     }
     if (sizeGb > DIGITALOCEAN_VOLUME_MAX_SIZE_GB) {
@@ -350,7 +378,7 @@ export class DigitalOceanVolumeClient {
         'digitalocean',
         undefined,
         `DigitalOcean volume size must be <= ${DIGITALOCEAN_VOLUME_MAX_SIZE_GB}GB`,
-        { category: 'invalid_config' },
+        { category: 'invalid_config' }
       );
     }
   }
@@ -358,14 +386,23 @@ export class DigitalOceanVolumeClient {
   private async getCurrentVolumeSize(config: VolumeResizeConfig): Promise<number> {
     const volume = await this.getVolume({ volumeId: config.volumeId, location: config.location });
     if (!volume) {
-      throw new ProviderError('digitalocean', 404, `DigitalOcean volume ${config.volumeId} not found`, {
-        category: 'invalid_config',
-      });
+      throw new ProviderError(
+        'digitalocean',
+        404,
+        `DigitalOcean volume ${config.volumeId} not found`,
+        {
+          category: 'invalid_config',
+        }
+      );
     }
     return volume.sizeGb;
   }
 
-  private async doFetch(path: string, init?: RequestInit, timeoutMs: number = this.requestTimeoutMs): Promise<Response> {
+  private async doFetch(
+    path: string,
+    init?: RequestInit,
+    timeoutMs: number = this.requestTimeoutMs
+  ): Promise<Response> {
     try {
       return await providerFetch(
         'digitalocean',
@@ -378,7 +415,7 @@ export class DigitalOceanVolumeClient {
             ...(init?.headers ?? {}),
           },
         },
-        timeoutMs,
+        timeoutMs
       );
     } catch (err) {
       throw this.mapProviderError(err);
@@ -390,9 +427,14 @@ export class DigitalOceanVolumeClient {
 function toDropletId(serverId: string): number {
   const dropletId = Number(serverId);
   if (!Number.isInteger(dropletId) || dropletId <= 0) {
-    throw new ProviderError('digitalocean', undefined, `Invalid DigitalOcean droplet id: "${serverId}"`, {
-      category: 'invalid_config',
-    });
+    throw new ProviderError(
+      'digitalocean',
+      undefined,
+      `Invalid DigitalOcean droplet id: "${serverId}"`,
+      {
+        category: 'invalid_config',
+      }
+    );
   }
   return dropletId;
 }

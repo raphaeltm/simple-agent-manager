@@ -43,8 +43,9 @@ const DIGITALOCEAN_API_URL = 'https://api.digitalocean.com/v2';
 export const DEFAULT_DIGITALOCEAN_REQUEST_TIMEOUT_MS = 30_000;
 export const DEFAULT_DIGITALOCEAN_IP_POLL_TIMEOUT_MS = 20_000;
 export const DEFAULT_DIGITALOCEAN_IP_POLL_INTERVAL_MS = 3_000;
+export const DEFAULT_DIGITALOCEAN_ACTION_POLL_INTERVAL_MS = 1_000;
+export const DEFAULT_DIGITALOCEAN_MAX_LIST_PAGES = 20;
 const DIGITALOCEAN_LIST_PER_PAGE = 200;
-const DIGITALOCEAN_MAX_LIST_PAGES = 50;
 
 export const DIGITALOCEAN_LOCATIONS = [
   'fra1',
@@ -103,6 +104,8 @@ export interface DigitalOceanProviderRuntimeOptions {
   ipPollTimeoutMs?: number;
   ipPollIntervalMs?: number;
   actionPollTimeoutMs?: number;
+  actionPollIntervalMs?: number;
+  maxListPages?: number;
   logger?: ProviderLogger;
 }
 
@@ -189,6 +192,7 @@ export class DigitalOceanProvider implements Provider {
   private readonly requestTimeoutMs: number;
   private readonly ipPollTimeoutMs: number;
   private readonly ipPollIntervalMs: number;
+  private readonly maxListPages: number;
   private readonly logger: ProviderLogger;
   private readonly volumeClient: DigitalOceanVolumeClient;
 
@@ -209,6 +213,9 @@ export class DigitalOceanProvider implements Provider {
       options?.ipPollIntervalMs,
       DEFAULT_DIGITALOCEAN_IP_POLL_INTERVAL_MS
     );
+    this.maxListPages = Math.floor(
+      positiveOr(options?.maxListPages, DEFAULT_DIGITALOCEAN_MAX_LIST_PAGES)
+    );
     this.logger = options?.logger ?? noopProviderLogger;
     this.volumeClient = new DigitalOceanVolumeClient(
       this.apiToken,
@@ -219,7 +226,11 @@ export class DigitalOceanProvider implements Provider {
           options?.actionPollTimeoutMs,
           DEFAULT_DIGITALOCEAN_ACTION_POLL_TIMEOUT_MS
         ),
-        actionPollIntervalMs: this.ipPollIntervalMs,
+        actionPollIntervalMs: positiveOr(
+          options?.actionPollIntervalMs,
+          DEFAULT_DIGITALOCEAN_ACTION_POLL_INTERVAL_MS
+        ),
+        maxListPages: this.maxListPages,
         logger: this.logger,
       }
     );
@@ -333,7 +344,7 @@ export class DigitalOceanProvider implements Provider {
 
   private async fetchAllDroplets(): Promise<DigitalOceanDropletPayload[]> {
     const all: DigitalOceanDropletPayload[] = [];
-    for (let page = 1; page <= DIGITALOCEAN_MAX_LIST_PAGES; page += 1) {
+    for (let page = 1; page <= this.maxListPages; page += 1) {
       const params = new URLSearchParams({
         per_page: String(DIGITALOCEAN_LIST_PER_PAGE),
         page: String(page),
@@ -348,7 +359,7 @@ export class DigitalOceanProvider implements Provider {
     }
     this.logger.warn('digitalocean.list_truncated', {
       resource: 'droplets',
-      maxPages: DIGITALOCEAN_MAX_LIST_PAGES,
+      maxPages: this.maxListPages,
     });
     return all;
   }

@@ -17,7 +17,11 @@ afterEach(() => {
 });
 function provider(mock: ReturnType<typeof vi.fn>, timeout = 100) {
   globalThis.fetch = mock;
-  return new DigitalOceanProvider('token', { actionPollTimeoutMs: timeout, ipPollIntervalMs: 1 });
+  return new DigitalOceanProvider('token', {
+    actionPollTimeoutMs: timeout,
+    actionPollIntervalMs: 1,
+    ipPollIntervalMs: 1,
+  });
 }
 function findCall(mock: ReturnType<typeof vi.fn>, method: string, matcher: RegExp) {
   return mock.mock.calls.find(

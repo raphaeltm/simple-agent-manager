@@ -172,6 +172,7 @@ export function AdminPlatformCredentials() {
                     size="sm"
                     onClick={() => handleDelete(cred.id)}
                     disabled={actionLoading === cred.id}
+                    aria-label={deleteConfirm === cred.id ? `Confirm deletion of ` : `Delete `}
                   >
                     {deleteConfirm === cred.id ? 'Confirm' : <Trash2 size={14} />}
                   </Button>
@@ -231,8 +232,11 @@ function AddCredentialForm({
       <form onSubmit={handleSubmit} className="space-y-4 p-4">
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
-            <label className="mb-1 block text-sm font-medium">Type</label>
+            <label htmlFor="platform-credential-type" className="mb-1 block text-sm font-medium">
+              Type
+            </label>
             <select
+              id="platform-credential-type"
               value={credentialType}
               onChange={(e) => setCredentialType(e.target.value as PlatformCredentialType)}
               className="w-full rounded-md border border-border-default bg-surface-secondary px-3 py-2 text-sm text-fg-primary"
@@ -244,8 +248,14 @@ function AddCredentialForm({
 
           {credentialType === 'cloud-provider' ? (
             <div>
-              <label className="mb-1 block text-sm font-medium">Provider</label>
+              <label
+                htmlFor="platform-credential-provider"
+                className="mb-1 block text-sm font-medium"
+              >
+                Provider
+              </label>
               <select
+                id="platform-credential-provider"
                 value={provider}
                 onChange={(e) => setProvider(e.target.value)}
                 className="w-full rounded-md border border-border-default bg-surface-secondary px-3 py-2 text-sm text-fg-primary"
@@ -260,8 +270,11 @@ function AddCredentialForm({
             </div>
           ) : (
             <div>
-              <label className="mb-1 block text-sm font-medium">Agent Type</label>
+              <label htmlFor="platform-credential-agent" className="mb-1 block text-sm font-medium">
+                Agent Type
+              </label>
               <select
+                id="platform-credential-agent"
                 value={agentType}
                 onChange={(e) => setAgentType(e.target.value)}
                 className="w-full rounded-md border border-border-default bg-surface-secondary px-3 py-2 text-sm text-fg-primary"
@@ -274,8 +287,11 @@ function AddCredentialForm({
         </div>
 
         <div>
-          <label className="mb-1 block text-sm font-medium">Label</label>
+          <label htmlFor="platform-credential-label" className="mb-1 block text-sm font-medium">
+            Label
+          </label>
           <input
+            id="platform-credential-label"
             type="text"
             value={label}
             onChange={(e) => setLabel(e.target.value)}
@@ -287,10 +303,11 @@ function AddCredentialForm({
         </div>
 
         <div>
-          <label className="mb-1 block text-sm font-medium">
+          <label htmlFor="platform-credential-secret" className="mb-1 block text-sm font-medium">
             {credentialType === 'cloud-provider' ? 'API Token' : 'API Key'}
           </label>
           <input
+            id="platform-credential-secret"
             type="password"
             value={credential}
             onChange={(e) => setCredential(e.target.value)}

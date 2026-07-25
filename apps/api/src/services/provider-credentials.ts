@@ -124,6 +124,8 @@ export interface DigitalOceanRuntimeEnv {
   DIGITALOCEAN_IP_POLL_TIMEOUT_MS?: string;
   DIGITALOCEAN_IP_POLL_INTERVAL_MS?: string;
   DIGITALOCEAN_ACTION_POLL_TIMEOUT_MS?: string;
+  DIGITALOCEAN_ACTION_POLL_INTERVAL_MS?: string;
+  DIGITALOCEAN_MAX_LIST_PAGES?: string;
 }
 
 /**
@@ -209,6 +211,8 @@ export function buildProviderConfig(
         ipPollTimeoutMs: parseOptionalInt(providerEnv?.DIGITALOCEAN_IP_POLL_TIMEOUT_MS),
         ipPollIntervalMs: parseOptionalInt(providerEnv?.DIGITALOCEAN_IP_POLL_INTERVAL_MS),
         actionPollTimeoutMs: parseOptionalInt(providerEnv?.DIGITALOCEAN_ACTION_POLL_TIMEOUT_MS),
+        actionPollIntervalMs: parseOptionalInt(providerEnv?.DIGITALOCEAN_ACTION_POLL_INTERVAL_MS),
+        maxListPages: parseOptionalInt(providerEnv?.DIGITALOCEAN_MAX_LIST_PAGES),
       };
     case 'scaleway': {
       let parsed: unknown;

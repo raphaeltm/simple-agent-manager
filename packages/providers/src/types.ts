@@ -366,6 +366,10 @@ export interface DigitalOceanProviderConfig {
   ipPollIntervalMs?: number;
   /** Total budget in ms for polling async volume actions to completion (default DEFAULT_DIGITALOCEAN_ACTION_POLL_TIMEOUT_MS). */
   actionPollTimeoutMs?: number;
+  /** Delay in ms between async volume action polls. */
+  actionPollIntervalMs?: number;
+  /** Maximum list pages fetched per operation. */
+  maxListPages?: number;
   /** Optional provider logger. Defaults to no-op and must not receive secrets. */
   logger?: ProviderLogger;
 }
