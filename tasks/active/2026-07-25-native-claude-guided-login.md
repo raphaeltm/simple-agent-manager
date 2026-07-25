@@ -39,16 +39,16 @@ Claude Code still requires users to run `claude setup-token` manually and paste 
 - [x] Generalize the web API client and modal/trigger to expose Claude Code with native open/copy controls and no terminal.
 - [x] Render the guided setup trigger for Claude Code OAuth-token flows in user scope; keep project-scope behavior hidden until project-scoped guided capture is intentionally supported.
 - [x] Add/extend API, DO, script, and UI tests for Claude setup-token URL/token capture and cross-agent behavior.
-- [ ] Add/update Playwright coverage for the changed guided flow surface, including mobile and desktop open/copy behavior.
+- [x] Add/update Playwright coverage for the changed guided flow surface, including mobile and desktop open/copy behavior.
 
 ## Acceptance criteria
 
-- [ ] `POST /api/agent-credential-setup-sessions` accepts `agentType: "claude-code"` when guided setup bindings are present.
-- [ ] Claude setup sessions expose only non-secret `verificationUrl`/optional `userCode` while waiting for the user.
-- [ ] On completion, SAM saves a valid Claude OAuth token via the existing encrypted credential path as `claude-code` + `oauth-token`.
-- [ ] The browser shows a native “Connect with Claude Code” flow with an auth link, optional copyable code, no terminal/log output, and clear progress/error states.
-- [ ] Local automated tests cover Codex regression and Claude behavior.
-- [ ] Local visual/behavior audit covers mobile `375x667` and desktop `1280x800`.
+- [x] `POST /api/agent-credential-setup-sessions` accepts `agentType: "claude-code"` when guided setup bindings are present.
+- [x] Claude setup sessions expose only non-secret `verificationUrl`/optional `userCode` while waiting for the user.
+- [x] On completion, SAM saves a valid Claude OAuth token via the existing encrypted credential path as `claude-code` + `oauth-token`.
+- [x] The browser shows a native “Connect with Claude Code” flow with an auth link, optional copyable code, no terminal/log output, and clear progress/error states.
+- [x] Local automated tests cover Codex regression and Claude behavior.
+- [x] Local visual/behavior audit covers mobile `375x667` and desktop `1280x800`.
 - [ ] Staging validation proves the deployed real Claude Code setup flow produces an auth URL and that clicking the native link opens the Claude auth page.
 
 ## Notes
@@ -62,3 +62,4 @@ Claude Code still requires users to run `claude setup-token` manually and paste 
 - Focused API unit tests passed for Claude setup-token parser, Codex regression, setup-session DO behavior, setup-session route creation, vertical route coverage, and credential validation.
 - Focused web unit tests passed for the native guided modal/trigger behavior, including Claude URL without code and no terminal surface.
 - `pnpm typecheck` passed after the Claude implementation.
+- Local Playwright audit passed for `agent-guided-connect-audit.spec.ts` on iPhone SE `375x667` and desktop `1280x800`; it clicked the Claude auth link, copied the optional code, asserted no terminal surface, and checked no overflow.
