@@ -114,6 +114,7 @@ Add `digitalocean` as a **fifth cloud provider** (after hetzner, scaleway, gcp, 
 - Authenticated no-key/bogus-key staging check passed: Settings rendered Full Access guidance; API returned a sanitized 400; the token was not stored; UI displayed the validation alert.
 - Enabled Hetzner platform fallback provisioned temporary node 01KYBKCW4XGAJKYX46A1FEE8FX in nbg1; it resolved to Hetzner, obtained a public IP and healthy heartbeat. Workspace 01KYBKHPHBKFVQNE82R56S0R2D created its runtime in recovery fallback mode and its public endpoint reached the auth boundary (401). Workspace and node cleanup both returned 200.
 - Rebased onto main after Infomaniak landed; combined provider allowlists, schemas, credential gates, cloud-init, factory coverage, UI surfaces, and documentation preserve both providers. Post-rebase monorepo typecheck, test, build, lint, quality gates, provider coverage, staging deploy/smoke, and full Playwright visual audit passed.
+- Reconciled the final tree after UpCloud landed on main; DigitalOcean and UpCloud coexist across registries, credentials, cloud-init, UI, tests, and documentation. Combined provider (509), cloud-init (188), API (6335), and web (2812) tests pass.
 - Live DigitalOcean provisioning remains deferred to Raphaël post-merge using his own Full Access PAT, per the authorized protocol below.
 
 ## Merge protocol (authorized 2026-07-23)
