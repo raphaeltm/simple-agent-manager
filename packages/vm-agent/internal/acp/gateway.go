@@ -1642,5 +1642,8 @@ func writeCodexConfigLocally(mcpServers []McpServerEntry, proxyProvider *codexPr
 	if err := os.WriteFile(configPath, []byte(mergedConfig), 0o600); err != nil {
 		return nil, fmt.Errorf("write codex config.toml: %w", err)
 	}
+	if err := os.Chmod(configPath, 0o600); err != nil {
+		return nil, fmt.Errorf("chmod codex config.toml: %w", err)
+	}
 	return envVars, nil
 }
