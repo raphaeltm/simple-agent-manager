@@ -51,7 +51,7 @@ Claude Code still requires users to run `claude setup-token` manually and paste 
 - [x] The browser shows a native “Connect with Claude Code” flow with an auth link, optional copyable code, no terminal/log output, and clear progress/error states.
 - [x] Local automated tests cover Codex regression and Claude behavior.
 - [x] Local visual/behavior audit covers mobile `375x667` and desktop `1280x800`.
-- [ ] Staging validation proves the deployed real Claude Code setup flow produces an auth URL and that clicking the native link opens the Claude auth page.
+- [x] Staging validation proves the deployed real Claude Code setup flow produces an auth URL and that clicking the native link opens the Claude auth page.
 
 ## Notes
 
@@ -77,6 +77,9 @@ Claude Code still requires users to run `claude setup-token` manually and paste 
 - Updated the helper to allocate a pseudo-TTY with `script -qfec`, redirect the transcript to `/dev/null`, accept the real `claude.com` auth host, and parse terminal hyperlink/control-character output safely.
 - Focused API tests passed for the Claude helper and CredentialSetupSession DO after the PTY fix.
 - `pnpm lint`, `pnpm typecheck`, `pnpm test`, and `pnpm build` passed after the PTY fix. One full `pnpm test` attempt hit unrelated MCP beforeEach hook timeouts; those three suites passed in isolation and the follow-up full run passed.
+- Added parser regression coverage after staging exposed Claude auth URLs with `code=true`; the helper now ignores URL query parameters and prompt prose when deriving optional user codes. Focused parser tests passed.
+- Second staging deploy from this branch succeeded (`deploy-staging.yml` run 30148747835), including built-in smoke-tests.
+- Claude-specific staging smoke passed: `PLAYWRIGHT_BASE_URL=https://app.sammy.party npx playwright test tests/playwright/staging-claude-guided-connect.spec.ts --project='Desktop (1280x800)' --reporter=list` passed 2/2. It validated the real setup-session API returned `waiting_for_user` with a trusted Claude auth URL and no login command, then validated the UI through the existing-credential `Update` path: native Claude auth link visible, no terminal/pre surface, no horizontal overflow, and clicking the link opened a trusted Claude/Anthropic auth host without completing OAuth.
 
 ## Specialist review
 

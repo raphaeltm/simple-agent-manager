@@ -56,6 +56,21 @@ async function waitForUserSetupSession(
   return session;
 }
 
+async function openClaudeGuidedConnect(page: import('@playwright/test').Page) {
+  const card = page.getByTestId('agent-card-claude-code');
+  await expect(card).toBeVisible({ timeout: 15_000 });
+
+  const update = card.getByRole('button', { name: /^update$/i }).first();
+  if (await update.isVisible().catch(() => false)) await update.click();
+
+  const oauthTab = card.getByRole('button', { name: /OAuth Token \(Pro\/Max\)/i }).first();
+  if (await oauthTab.isVisible().catch(() => false)) await oauthTab.click();
+
+  const connect = card.getByRole('button', { name: /connect with claude code/i }).first();
+  await expect(connect).toBeVisible({ timeout: 15_000 });
+  return connect;
+}
+
 test('API: real Claude Code setup-token flow returns trusted auth URL', async ({
   page,
 }) => {
@@ -93,13 +108,10 @@ test('UI: Claude Code exposes native auth link without a terminal', async ({
   await login(page);
   await page.goto(`${STAGING_APP}/settings/agents`, { waitUntil: 'networkidle' });
 
-  const oauthTab = page.getByText(/subscription|oauth|sign in with/i).first();
-  if (await oauthTab.count()) await oauthTab.click().catch(() => {});
 
   let sessionId: string | null = null;
   try {
-    const connect = page.getByRole('button', { name: /connect with claude code/i }).first();
-    await expect(connect).toBeVisible({ timeout: 15_000 });
+    const connect = await openClaudeGuidedConnect(page);
     const [created] = await Promise.all([
       page.waitForResponse(
         (response) =>
