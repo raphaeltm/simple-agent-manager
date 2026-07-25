@@ -317,7 +317,7 @@ describe('Credentials Routes - OAuth Support', () => {
       const request: SaveAgentCredentialRequest = {
         agentType: 'claude-code',
         credentialKind: 'oauth-token',
-        credential: 'oauth_token_from_claude_setup_1234567890abcdefghijklmnopqrstuvwxyz',
+        credential: 'sk-ant-oat01-1234567890abcdefghijklmnopqrstuvwxyz',
         autoActivate: true,
       };
 
@@ -346,7 +346,7 @@ describe('Credentials Routes - OAuth Support', () => {
       const request: SaveAgentCredentialRequest = {
         agentType: 'claude-code',
         credentialKind: 'oauth-token',
-        credential: 'new_oauth_token_1234567890abcdefghijklmnopqrstuvwxyz_1234567890',
+        credential: 'sk-ant-oat01-new1234567890abcdefghijklmnopqrstuvwxyz',
         autoActivate: true,
       };
 
@@ -618,7 +618,7 @@ describe('Credentials Routes - OAuth Support', () => {
       const request: SaveAgentCredentialRequest = {
         agentType: 'claude-code',
         credentialKind: 'oauth-token',
-        credential: 'oauth_token_that_is_long_enough_for_validation_1234567890',
+        credential: 'sk-ant-oat01-that-is-long-enough-for-validation',
         autoActivate: false,
       };
 
@@ -654,7 +654,7 @@ describe('Credentials Routes - OAuth Support', () => {
       const request: SaveAgentCredentialRequest = {
         agentType: 'claude-code',
         credentialKind: 'oauth-token',
-        credential: 'updated_oauth_token_that_is_long_enough_for_validation_1234567890',
+        credential: 'sk-ant-oat01-updated-that-is-long-enough-for-validation',
         autoActivate: true,
       };
 
