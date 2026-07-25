@@ -10,8 +10,8 @@ import { Button } from '@simple-agent-manager/ui';
 import { useEffect, useRef, useState } from 'react';
 
 import {
-  type GuidedSetupAgentType,
   getAgentCredentialSetupConfig,
+  type GuidedSetupAgentType,
   setupConfigSupportsAgent,
 } from '../lib/api';
 import { AgentCredentialConnectModal } from './CodexConnectModal';

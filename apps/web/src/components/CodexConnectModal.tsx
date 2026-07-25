@@ -3,12 +3,12 @@ import { Check, Copy, ExternalLink } from 'lucide-react';
 import { useEffect, useId, useRef, useState } from 'react';
 
 import {
-  cancelAgentCredentialSetupSession,
   type AgentCredentialSetupSession,
   type AgentCredentialSetupStatus,
-  type GuidedSetupAgentType,
+  cancelAgentCredentialSetupSession,
   createAgentCredentialSetupSession,
   getAgentCredentialSetupSession,
+  type GuidedSetupAgentType,
   isTerminalAgentCredentialSetupStatus,
 } from '../lib/api';
 
