@@ -119,7 +119,7 @@ export function classifyDigitalOceanError(
 ): ProviderErrorCategory {
   if (statusCode === 401 || statusCode === 403) return 'auth_error';
   if (statusCode === 429) return 'rate_limited';
-  if (typeof statusCode === 'number' && statusCode >= 500) return 'transient';
+  if (typeof statusCode === 'number' && statusCode >= 500) return 'transient_capacity';
   if (/not available|no capacity|out of stock|sold out|no available|unavailable/i.test(message)) {
     return 'transient_capacity';
   }

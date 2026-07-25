@@ -8,6 +8,10 @@ import {
 } from '../../src/digitalocean';
 import { ProviderError } from '../../src/types';
 import {
+  validateDigitalOceanDropletResponse,
+  validateDigitalOceanVolumesResponse,
+} from '../../src/validation-digitalocean';
+import {
   createDigitalOceanFetchMock,
   createMockDigitalOceanDroplet,
 } from '../fixtures/digitalocean-mocks';
@@ -165,7 +169,7 @@ describe('DigitalOcean pure mappings', () => {
     [401, '', 'auth_error'],
     [403, '', 'auth_error'],
     [429, '', 'rate_limited'],
-    [500, '', 'transient'],
+    [500, '', 'transient_capacity'],
     [422, 'no capacity', 'transient_capacity'],
     [400, 'bad', 'invalid_config'],
     [404, 'missing', 'invalid_config'],
@@ -173,4 +177,28 @@ describe('DigitalOcean pure mappings', () => {
   ])('classifies %s %s', (status, message, expected) =>
     expect(classifyDigitalOceanError(status as number, message)).toBe(expected)
   );
+  it('rejects malformed network, tag, volume-id, and pagination payload shapes', () => {
+    expect(() =>
+      validateDigitalOceanDropletResponse(
+        { droplet: { id: 1, status: 'active', networks: { v4: 'bad' } } },
+        'test'
+      )
+    ).toThrow(/networks.v4/);
+    expect(() =>
+      validateDigitalOceanDropletResponse(
+        { droplet: { id: 1, status: 'active', tags: ['ok', 2] } },
+        'test'
+      )
+    ).toThrow(/tags/);
+    expect(() =>
+      validateDigitalOceanVolumesResponse(
+        { volumes: [{ id: 'v', size_gigabytes: 1, droplet_ids: ['bad'] }], links: { pages: {} } },
+        'test'
+      )
+    ).toThrow(/droplet_ids/);
+    expect(
+      validateDigitalOceanVolumesResponse({ volumes: [{ id: 'v', size_gigabytes: 1 }] }, 'test')
+        .hasNextPage
+    ).toBe(false);
+  });
 });
