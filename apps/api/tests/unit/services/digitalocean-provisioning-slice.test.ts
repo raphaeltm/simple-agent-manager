@@ -25,8 +25,8 @@ import { DigitalOceanProvider } from '@simple-agent-manager/providers';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
-import { decrypt } from '../../../src/services/encryption';
 import { createEnvironmentVolume } from '../../../src/services/deployment-volumes';
+import { decrypt } from '../../../src/services/encryption';
 import { createProviderForUser } from '../../../src/services/provider-credentials';
 
 // vitest hoists vi.mock above the imports, so the `decrypt` import above resolves
