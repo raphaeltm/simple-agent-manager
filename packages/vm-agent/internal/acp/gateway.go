@@ -1623,6 +1623,8 @@ func writeCodexConfigLocally(mcpServers []McpServerEntry, proxyProvider *codexPr
 	data, err := os.ReadFile(configPath)
 	if err == nil {
 		existingConfig = string(data)
+	} else if !os.IsNotExist(err) {
+		return nil, fmt.Errorf("read existing codex config: %w", err)
 	}
 
 	mergedConfig := mergeManagedCodexMcpConfig(existingConfig, managedConfig)
@@ -1630,8 +1632,12 @@ func writeCodexConfigLocally(mcpServers []McpServerEntry, proxyProvider *codexPr
 		return nil, nil
 	}
 
-	if err := os.MkdirAll(filepath.Dir(configPath), 0o700); err != nil {
+	dir := filepath.Dir(configPath)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("create codex config directory: %w", err)
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return nil, fmt.Errorf("chmod codex config directory: %w", err)
 	}
 	if err := os.WriteFile(configPath, []byte(mergedConfig), 0o600); err != nil {
 		return nil, fmt.Errorf("write codex config.toml: %w", err)
