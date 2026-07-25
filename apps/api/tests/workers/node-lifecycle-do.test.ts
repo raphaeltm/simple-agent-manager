@@ -430,6 +430,50 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
     expect(stored?.warmTimeoutOverrideMs).toBe(60_000);
   });
 
+  it('alarm on destroying state schedules retry at DEFAULT_NODE_LIFECYCLE_ALARM_RETRY_MS', async () => {
+    // Behavioral test: verifies the real DO alarm handler uses the default retry interval
+    // when NODE_LIFECYCLE_ALARM_RETRY_MS env var is not set. This catches regressions where
+    // the alarm retry reverts to a compile-time constant without env var resolution.
+    const nodeId = 'nl-test-destroying-retry-interval-001';
+    await seedTestNode(nodeId);
+
+    const stub = getStub(nodeId);
+
+    // Set destroying state
+    await runInDurableObject(stub, async (instance) => {
+      await instance.ctx.storage.put('state', {
+        nodeId,
+        userId: TEST_USER_ID,
+        status: 'destroying',
+        warmSince: null,
+        claimedByTask: null,
+      });
+    });
+
+    const beforeAlarm = Date.now();
+
+    // Trigger alarm — should reschedule at now + retry interval
+    await runInDurableObject(stub, async (instance) => {
+      await instance.alarm();
+    });
+
+    const afterAlarm = Date.now();
+    const alarm = await getAlarm(stub);
+    expect(alarm).not.toBeNull();
+
+    // The default retry is 60_000ms. Verify the alarm is within the expected range.
+    // The alarm should be at least beforeAlarm + 60_000 and at most afterAlarm + 60_000.
+    const { DEFAULT_NODE_LIFECYCLE_ALARM_RETRY_MS } = await import(
+      '@simple-agent-manager/shared'
+    );
+    expect(alarm!).toBeGreaterThanOrEqual(beforeAlarm + DEFAULT_NODE_LIFECYCLE_ALARM_RETRY_MS);
+    expect(alarm!).toBeLessThanOrEqual(afterAlarm + DEFAULT_NODE_LIFECYCLE_ALARM_RETRY_MS);
+
+    // State should still be destroying
+    const status = await stub.getStatus();
+    expect(status.status).toBe('destroying');
+  });
+
   it('warm timeout override controls the alarm transition to destroying', async () => {
     const nodeId = 'nl-test-override-transition-001';
     await seedTestNode(nodeId);

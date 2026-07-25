@@ -14,12 +14,12 @@ import type {
   NotificationWsMessage,
 } from '@simple-agent-manager/shared';
 import {
+  DEFAULT_MAX_NOTIFICATION_PAGE_SIZE,
   DEFAULT_MAX_NOTIFICATIONS_PER_USER,
   DEFAULT_NOTIFICATION_AUTO_DELETE_AGE_MS,
   DEFAULT_NOTIFICATION_DEDUP_WINDOW_MS,
   DEFAULT_NOTIFICATION_PAGE_SIZE,
   DEFAULT_NOTIFICATION_PROGRESS_BATCH_WINDOW_MS,
-  DEFAULT_MAX_NOTIFICATION_PAGE_SIZE,
 } from '@simple-agent-manager/shared';
 import { DurableObject } from 'cloudflare:workers';
 

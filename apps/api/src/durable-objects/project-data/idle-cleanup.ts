@@ -2,8 +2,8 @@
  * Idle cleanup scheduling and workspace idle timeout management.
  */
 import {
-  DEFAULT_WORKSPACE_IDLE_TIMEOUT_MS,
   DEFAULT_WORKSPACE_IDLE_CHECK_INTERVAL_MS,
+  DEFAULT_WORKSPACE_IDLE_TIMEOUT_MS,
 } from '@simple-agent-manager/shared';
 
 import { createModuleLogger, serializeError } from '../../lib/logger';

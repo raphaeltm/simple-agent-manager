@@ -8,8 +8,6 @@
  * - MAX_NOTIFICATION_PAGE_SIZE → DEFAULT_MAX_NOTIFICATION_PAGE_SIZE
  * - CF container constants moved to shared package
  */
-import { describe, expect, it } from 'vitest';
-
 import {
   DEFAULT_CF_CONTAINER_ACTIVE_WORK_MAX_MS,
   DEFAULT_CF_CONTAINER_KEEPALIVE_RENEW_INTERVAL_MS,
@@ -18,6 +16,7 @@ import {
   DEFAULT_NODE_LIFECYCLE_ALARM_RETRY_MS,
   DEFAULT_WORKSPACE_IDLE_CHECK_INTERVAL_MS,
 } from '@simple-agent-manager/shared';
+import { describe, expect, it } from 'vitest';
 
 describe('config env var resolution', () => {
   describe('shared constants have expected default values', () => {
@@ -46,37 +45,54 @@ describe('config env var resolution', () => {
     });
   });
 
-  describe('env var resolution pattern: parseInt with fallback', () => {
-    function resolveMs(envValue: string | undefined, defaultValue: number): number {
-      if (envValue) {
-        const parsed = parseInt(envValue, 10);
-        if (Number.isFinite(parsed) && parsed > 0) return parsed;
-      }
-      return defaultValue;
+  describe('computeIdleAlarmTimes env resolution edge cases', () => {
+    async function getIdleCheckTime(envValue?: string): Promise<number | null> {
+      const { computeIdleAlarmTimes } = await import(
+        '../../src/durable-objects/project-data/idle-cleanup'
+      );
+      const baseTime = Date.now() - 60_000;
+      const mockSql = {
+        exec: (query: string) => ({
+          toArray: () => {
+            if (query.includes('idle_cleanup_schedule')) return [{ earliest: null }];
+            if (query.includes('workspace_activity')) return [{ earliest: baseTime }];
+            return [];
+          },
+        }),
+      } as unknown as SqlStorage;
+      const env = envValue !== undefined ? { WORKSPACE_IDLE_CHECK_INTERVAL_MS: envValue } : undefined;
+      return computeIdleAlarmTimes(mockSql, env).workspaceIdleCheckTime;
     }
 
-    it('returns default when env is undefined', () => {
-      expect(resolveMs(undefined, DEFAULT_NODE_LIFECYCLE_ALARM_RETRY_MS)).toBe(60_000);
+    it('falls back to default when env is empty string', async () => {
+      const result = await getIdleCheckTime('');
+      expect(result).not.toBeNull();
     });
 
-    it('returns default when env is empty string', () => {
-      expect(resolveMs('', DEFAULT_NODE_LIFECYCLE_ALARM_RETRY_MS)).toBe(60_000);
+    it('uses parsed value when env is a valid number', async () => {
+      const result = await getIdleCheckTime('600000');
+      expect(result).not.toBeNull();
+      // 600_000ms override differs from 300_000ms default — discriminating
+      const expectedWithDefault = await getIdleCheckTime(undefined);
+      expect(result).not.toBe(expectedWithDefault);
     });
 
-    it('returns parsed value when env is a valid number', () => {
-      expect(resolveMs('120000', DEFAULT_NODE_LIFECYCLE_ALARM_RETRY_MS)).toBe(120_000);
+    it('falls back to default when env is NaN', async () => {
+      const withNaN = await getIdleCheckTime('abc');
+      const withDefault = await getIdleCheckTime(undefined);
+      expect(withNaN).toBe(withDefault);
     });
 
-    it('returns default when env is not a number', () => {
-      expect(resolveMs('abc', DEFAULT_NODE_LIFECYCLE_ALARM_RETRY_MS)).toBe(60_000);
+    it('falls back to default when env is zero', async () => {
+      const withZero = await getIdleCheckTime('0');
+      const withDefault = await getIdleCheckTime(undefined);
+      expect(withZero).toBe(withDefault);
     });
 
-    it('returns default when env is zero', () => {
-      expect(resolveMs('0', DEFAULT_NODE_LIFECYCLE_ALARM_RETRY_MS)).toBe(60_000);
-    });
-
-    it('returns default when env is negative', () => {
-      expect(resolveMs('-1000', DEFAULT_NODE_LIFECYCLE_ALARM_RETRY_MS)).toBe(60_000);
+    it('falls back to default when env is negative', async () => {
+      const withNeg = await getIdleCheckTime('-1000');
+      const withDefault = await getIdleCheckTime(undefined);
+      expect(withNeg).toBe(withDefault);
     });
   });
 
