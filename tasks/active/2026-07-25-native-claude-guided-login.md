@@ -63,3 +63,7 @@ Claude Code still requires users to run `claude setup-token` manually and paste 
 - Focused web unit tests passed for the native guided modal/trigger behavior, including Claude URL without code and no terminal surface.
 - `pnpm typecheck` passed after the Claude implementation.
 - Local Playwright audit passed for `agent-guided-connect-audit.spec.ts` on iPhone SE `375x667` and desktop `1280x800`; it clicked the Claude auth link, copied the optional code, asserted no terminal surface, and checked no overflow.
+- `pnpm lint` passed after import/API lint cleanup.
+- `pnpm typecheck` passed after cleanup.
+- `pnpm test` passed repository-wide after updating legacy Claude OAuth route fixtures to realistic `sk-ant-oat` tokens.
+- `pnpm build` passed repository-wide.
