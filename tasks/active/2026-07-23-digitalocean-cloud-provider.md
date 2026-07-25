@@ -96,14 +96,23 @@ Add `digitalocean` as a **fifth cloud provider** (after hetzner, scaleway, gcp, 
 
 ## Acceptance criteria
 
-- [ ] `pnpm lint && typecheck && test && build` green; migration/wrangler quality gates pass.
-- [ ] Full `Provider` interface incl. real volume ops; >90% coverage on new provider code.
-- [ ] Credential create/validate/delete works (raw token; bogus → clean sanitized error, nothing stored).
-- [ ] rule-28 fallback matrix + rule-35 vertical-slice tests present + passing.
-- [ ] All UI surfaces render/wire digitalocean; visual audit clean @ 375/1280.
-- [ ] Docs + marketing enumerations updated.
-- [ ] Onboarding-wizard parity backlog task extended (not duplicated).
-- [ ] Staging deployment and no-key/bogus-key UI/API regression checks pass; a platform-backed non-DigitalOcean workspace provisions, heartbeats, is reachable, and is cleaned up. Live DigitalOcean provisioning remains explicitly deferred to Raphaël’s production validation with his own key.
+- [x] `pnpm lint && typecheck && test && build` green; migration/wrangler quality gates pass.
+- [x] Full `Provider` interface incl. real volume ops; >90% coverage on new provider code.
+- [x] Credential create/validate/delete works (raw token; bogus → clean sanitized error, nothing stored).
+- [x] rule-28 fallback matrix + rule-35 vertical-slice tests present + passing.
+- [x] All UI surfaces render/wire digitalocean; visual audit clean @ 375/1280.
+- [x] Docs + marketing enumerations updated.
+- [x] Onboarding-wizard parity backlog task extended (not duplicated).
+- [x] Staging deployment and no-key/bogus-key UI/API regression checks pass; a platform-backed non-DigitalOcean workspace provisions, heartbeats, is reachable, and is cleaned up. Live DigitalOcean provisioning remains explicitly deferred to Raphaël’s production validation with his own key.
+
+### Verification evidence (2026-07-25)
+
+- Full local lint, typecheck, test, build, migration, Durable Object migration, Wrangler binding, and provider coverage gates passed.
+- DigitalOcean Playwright audit passed 15/15 at 375 px, 390 px, and 1280 px across Settings, Connections, admin credentials, and workspace availability.
+- Staging deploy run 30140818283 passed for rebased SHA 7d4030c58, including 12/12 workflow smoke tests.
+- Authenticated no-key/bogus-key staging check passed: Settings rendered Full Access guidance; API returned a sanitized 400; the token was not stored; UI displayed the validation alert.
+- Enabled Hetzner platform fallback provisioned temporary node 01KYBKCW4XGAJKYX46A1FEE8FX in nbg1; it resolved to Hetzner, obtained a public IP and healthy heartbeat. Workspace 01KYBKHPHBKFVQNE82R56S0R2D created its runtime in recovery fallback mode and its public endpoint reached the auth boundary (401). Workspace and node cleanup both returned 200.
+- Live DigitalOcean provisioning remains deferred to Raphaël post-merge using his own Full Access PAT, per the authorized protocol below.
 
 ## Merge protocol (authorized 2026-07-23)
 
