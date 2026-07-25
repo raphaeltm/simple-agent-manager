@@ -38,38 +38,29 @@ func TestWorkspaceCheckoutBranch(t *testing.T) {
 	}
 }
 
-// TestGitPushGuardBlocksDefaultBranch verifies that the default-branch push
-// guard in gitPushWorkspaceChanges blocks pushes when HEAD is on the checkout
-// branch (project default branch). This is a regression test for the bug where
-// auto-commit on task completion would push to origin/main when the agent never
-// switched to the task output branch.
-//
-// Because gitPushWorkspaceChanges requires a running container (execInContainer),
-// this test validates the guard logic through a simulated scenario that exercises
-// the same conditional the production code uses.
-func TestGitPushGuardBlocksDefaultBranch(t *testing.T) {
+// TestShouldBlockDefaultBranchPush exercises the extracted predicate that
+// gitPushWorkspaceChanges calls to decide whether to block a push. This tests
+// the real production predicate, not a re-derived copy of the logic.
+func TestShouldBlockDefaultBranchPush(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name            string
-		checkoutBranch  string // the branch the workspace was created with (project default)
-		currentBranch   string // simulated HEAD branch
-		wantBlocked     bool
-		wantErrContains string
+		name           string
+		checkoutBranch string // the branch the workspace was created with (project default)
+		currentBranch  string // HEAD branch from git rev-parse
+		wantBlocked    bool
 	}{
 		{
-			name:            "HEAD on default branch main — should block",
-			checkoutBranch:  "main",
-			currentBranch:   "main",
-			wantBlocked:     true,
-			wantErrContains: "auto-commit push blocked",
+			name:           "HEAD on default branch main — should block",
+			checkoutBranch: "main",
+			currentBranch:  "main",
+			wantBlocked:    true,
 		},
 		{
-			name:            "HEAD on default branch master — should block",
-			checkoutBranch:  "master",
-			currentBranch:   "master",
-			wantBlocked:     true,
-			wantErrContains: "auto-commit push blocked",
+			name:           "HEAD on default branch master — should block",
+			checkoutBranch: "master",
+			currentBranch:  "master",
+			wantBlocked:    true,
 		},
 		{
 			name:           "HEAD on task output branch — should allow",
@@ -89,83 +80,104 @@ func TestGitPushGuardBlocksDefaultBranch(t *testing.T) {
 			currentBranch:  "main",
 			wantBlocked:    false,
 		},
+		{
+			name:           "non-standard default branch develop — should block",
+			checkoutBranch: "develop",
+			currentBranch:  "develop",
+			wantBlocked:    true,
+		},
+		{
+			name:           "non-standard default branch production — should block",
+			checkoutBranch: "production",
+			currentBranch:  "production",
+			wantBlocked:    true,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// The guard condition from gitPushWorkspaceChanges:
-			// if checkoutBranch := s.workspaceCheckoutBranch(workspaceID); checkoutBranch != "" &&
-			//     branchOutput == checkoutBranch { ... blocked ... }
-			checkoutBranch := tt.checkoutBranch
-			branchOutput := tt.currentBranch
-
-			blocked := checkoutBranch != "" && branchOutput == checkoutBranch
-
-			if blocked != tt.wantBlocked {
-				t.Errorf("guard blocked = %v, want %v (checkout=%q, current=%q)",
-					blocked, tt.wantBlocked, tt.checkoutBranch, tt.currentBranch)
-			}
-
-			if tt.wantBlocked && tt.wantErrContains != "" {
-				// Verify the error message format matches what the production code generates
-				errMsg := "auto-commit push blocked: HEAD is still on the project default branch"
-				if errMsg == "" {
-					t.Error("expected non-empty error message when blocked")
-				}
+			got := shouldBlockDefaultBranchPush(tt.checkoutBranch, tt.currentBranch)
+			if got != tt.wantBlocked {
+				t.Errorf("shouldBlockDefaultBranchPush(%q, %q) = %v, want %v",
+					tt.checkoutBranch, tt.currentBranch, got, tt.wantBlocked)
 			}
 		})
 	}
 }
 
-// TestGitPushGuardPreservesOutputBranchPush verifies that the guard does NOT
-// interfere when the agent has correctly switched to a task output branch.
-// This is the positive regression test: existing successful task completions
-// on correctly checked-out task branches must continue to work.
-func TestGitPushGuardPreservesOutputBranchPush(t *testing.T) {
+// TestGitPushGuardIntegration verifies the guard using a real Server struct
+// with workspace state, exercising both workspaceCheckoutBranch and
+// shouldBlockDefaultBranchPush together as they would be called in
+// gitPushWorkspaceChanges.
+func TestGitPushGuardIntegration(t *testing.T) {
 	t.Parallel()
 
 	s := &Server{
 		workspaces: map[string]*WorkspaceRuntime{
-			"ws-task": {ID: "ws-task", Branch: "main"},
-		},
-	}
-
-	checkoutBranch := s.workspaceCheckoutBranch("ws-task")
-	if checkoutBranch != "main" {
-		t.Fatalf("checkoutBranch = %q, want main", checkoutBranch)
-	}
-
-	// Simulate the agent having switched to a task output branch
-	currentBranch := "sam/fix-bug-abc123"
-	blocked := checkoutBranch != "" && currentBranch == checkoutBranch
-	if blocked {
-		t.Errorf("guard incorrectly blocked push from task output branch %q (checkout=%q)",
-			currentBranch, checkoutBranch)
-	}
-}
-
-// TestGitPushGuardDevelopBranch verifies the guard works for repos that use
-// non-main/master default branches (e.g. develop, production, staging).
-func TestGitPushGuardDevelopBranch(t *testing.T) {
-	t.Parallel()
-
-	s := &Server{
-		workspaces: map[string]*WorkspaceRuntime{
+			"ws-main":    {ID: "ws-main", Branch: "main"},
+			"ws-master":  {ID: "ws-master", Branch: "master"},
 			"ws-develop": {ID: "ws-develop", Branch: "develop"},
 		},
 	}
 
-	checkoutBranch := s.workspaceCheckoutBranch("ws-develop")
-
-	// HEAD still on develop → should block
-	blocked := checkoutBranch != "" && "develop" == checkoutBranch
-	if !blocked {
-		t.Error("guard should block push when HEAD is on the default branch 'develop'")
+	tests := []struct {
+		name          string
+		workspaceID   string
+		currentBranch string
+		wantBlocked   bool
+	}{
+		{
+			name:          "workspace on main, HEAD on main — blocked",
+			workspaceID:   "ws-main",
+			currentBranch: "main",
+			wantBlocked:   true,
+		},
+		{
+			name:          "workspace on main, HEAD on output branch — allowed",
+			workspaceID:   "ws-main",
+			currentBranch: "sam/fix-bug-abc123",
+			wantBlocked:   false,
+		},
+		{
+			name:          "workspace on master, HEAD on master — blocked",
+			workspaceID:   "ws-master",
+			currentBranch: "master",
+			wantBlocked:   true,
+		},
+		{
+			name:          "workspace on master, HEAD on feature — allowed",
+			workspaceID:   "ws-master",
+			currentBranch: "feature/new-thing",
+			wantBlocked:   false,
+		},
+		{
+			name:          "workspace on develop, HEAD on develop — blocked",
+			workspaceID:   "ws-develop",
+			currentBranch: "develop",
+			wantBlocked:   true,
+		},
+		{
+			name:          "workspace on develop, HEAD on task branch — allowed",
+			workspaceID:   "ws-develop",
+			currentBranch: "sam/task-123",
+			wantBlocked:   false,
+		},
+		{
+			name:          "unknown workspace — guard skipped (allowed)",
+			workspaceID:   "ws-unknown",
+			currentBranch: "main",
+			wantBlocked:   false,
+		},
 	}
 
-	// Agent switched to task branch → should allow
-	blocked = checkoutBranch != "" && "sam/task-123" == checkoutBranch
-	if blocked {
-		t.Error("guard should not block push from task output branch")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			checkoutBranch := s.workspaceCheckoutBranch(tt.workspaceID)
+			blocked := shouldBlockDefaultBranchPush(checkoutBranch, tt.currentBranch)
+			if blocked != tt.wantBlocked {
+				t.Errorf("guard(workspace=%q, HEAD=%q) blocked=%v, want %v (checkoutBranch=%q)",
+					tt.workspaceID, tt.currentBranch, blocked, tt.wantBlocked, checkoutBranch)
+			}
+		})
 	}
 }

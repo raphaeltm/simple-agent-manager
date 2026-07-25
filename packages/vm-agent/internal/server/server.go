@@ -1566,12 +1566,15 @@ func (s *Server) gitPushWorkspaceChanges(workspaceID string, skipPR bool) gitPus
 	result.BranchName = branchOutput
 
 	// Guard: never push to the project default branch via auto-commit.
-	// The workspace is checked out on the default branch; the agent is expected
-	// to switch to the task output branch during its work. If HEAD is still the
-	// default branch, the agent never switched and pushing would land changes
-	// directly on main/master — potentially triggering production deploys.
-	if checkoutBranch := s.workspaceCheckoutBranch(workspaceID); checkoutBranch != "" &&
-		branchOutput == checkoutBranch {
+	// This only covers SAM's own auto-commit path; it does not prevent the
+	// agent process from running git push directly via shell access.
+	checkoutBranch := s.workspaceCheckoutBranch(workspaceID)
+	if checkoutBranch == "" {
+		slog.Warn("Auto-commit push guard skipped: could not determine checkout branch",
+			"workspaceId", workspaceID,
+			"branch", branchOutput,
+		)
+	} else if shouldBlockDefaultBranchPush(checkoutBranch, branchOutput) {
 		result.Error = fmt.Sprintf(
 			"auto-commit push blocked: HEAD is still on the project default branch %q; "+
 				"the agent should have checked out the task output branch before completing. "+
@@ -1615,6 +1618,14 @@ func (s *Server) workspaceCheckoutBranch(workspaceID string) string {
 		return ""
 	}
 	return runtime.Branch
+}
+
+// shouldBlockDefaultBranchPush returns true when the current HEAD branch
+// matches the workspace's checkout branch (the project default branch).
+// Extracted as a pure predicate so the guard logic is testable without
+// requiring a running container.
+func shouldBlockDefaultBranchPush(checkoutBranch, currentBranch string) bool {
+	return checkoutBranch != "" && currentBranch == checkoutBranch
 }
 
 func (s *Server) tryCreateReviewRequest(workspaceID, containerID, workDir, user, sourceBranch string) (string, int) {
