@@ -85,6 +85,12 @@ function makeFetchMock(calls: RecordedCall[]) {
       body: init?.body as string | undefined,
       authorization: headers?.Authorization,
     });
+    if (method === 'GET' && String(url).endsWith('/zone')) {
+      return new Response(
+        JSON.stringify({ zones: { zone: [{ id: 'de-fra1', description: 'Frankfurt #1' }] } }),
+        { status: 200 }
+      );
+    }
     if (method === 'GET' && String(url).endsWith('/plan')) {
       return new Response(JSON.stringify({ plans: { plan: [{ name: '2xCPU-4GB' }] } }), {
         status: 200,
