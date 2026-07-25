@@ -4,15 +4,16 @@ import (
 	"testing"
 )
 
-func TestWorkspaceCheckoutBranch(t *testing.T) {
+func TestWorkspaceDefaultBranch(t *testing.T) {
 	t.Parallel()
 
 	s := &Server{
 		workspaces: map[string]*WorkspaceRuntime{
-			"ws-1": {ID: "ws-1", Branch: "main"},
-			"ws-2": {ID: "ws-2", Branch: "master"},
-			"ws-3": {ID: "ws-3", Branch: "develop"},
-			"ws-4": {ID: "ws-4", Branch: ""},
+			"ws-branch-only":    {ID: "ws-branch-only", Branch: "main"},
+			"ws-default-set":    {ID: "ws-default-set", Branch: "sam/task-123", DefaultBranch: "main"},
+			"ws-same":           {ID: "ws-same", Branch: "main", DefaultBranch: "main"},
+			"ws-empty-default":  {ID: "ws-empty-default", Branch: "develop", DefaultBranch: ""},
+			"ws-empty-both":     {ID: "ws-empty-both", Branch: "", DefaultBranch: ""},
 		},
 	}
 
@@ -21,18 +22,19 @@ func TestWorkspaceCheckoutBranch(t *testing.T) {
 		workspaceID string
 		want        string
 	}{
-		{name: "main branch", workspaceID: "ws-1", want: "main"},
-		{name: "master branch", workspaceID: "ws-2", want: "master"},
-		{name: "develop branch", workspaceID: "ws-3", want: "develop"},
-		{name: "empty branch", workspaceID: "ws-4", want: ""},
-		{name: "unknown workspace", workspaceID: "ws-unknown", want: ""},
+		{name: "fallback to Branch when DefaultBranch empty", workspaceID: "ws-branch-only", want: "main"},
+		{name: "DefaultBranch takes precedence over Branch", workspaceID: "ws-default-set", want: "main"},
+		{name: "DefaultBranch same as Branch", workspaceID: "ws-same", want: "main"},
+		{name: "empty DefaultBranch falls back to Branch", workspaceID: "ws-empty-default", want: "develop"},
+		{name: "both empty returns empty", workspaceID: "ws-empty-both", want: ""},
+		{name: "unknown workspace returns empty", workspaceID: "ws-unknown", want: ""},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := s.workspaceCheckoutBranch(tt.workspaceID)
+			got := s.workspaceDefaultBranch(tt.workspaceID)
 			if got != tt.want {
-				t.Errorf("workspaceCheckoutBranch(%q) = %q, want %q", tt.workspaceID, got, tt.want)
+				t.Errorf("workspaceDefaultBranch(%q) = %q, want %q", tt.workspaceID, got, tt.want)
 			}
 		})
 	}
@@ -46,7 +48,7 @@ func TestShouldBlockDefaultBranchPush(t *testing.T) {
 
 	tests := []struct {
 		name           string
-		checkoutBranch string // the branch the workspace was created with (project default)
+		checkoutBranch string // the project default branch
 		currentBranch  string // HEAD branch from git rev-parse
 		wantBlocked    bool
 	}{
@@ -106,7 +108,7 @@ func TestShouldBlockDefaultBranchPush(t *testing.T) {
 }
 
 // TestGitPushGuardIntegration verifies the guard using a real Server struct
-// with workspace state, exercising both workspaceCheckoutBranch and
+// with workspace state, exercising both workspaceDefaultBranch and
 // shouldBlockDefaultBranchPush together as they would be called in
 // gitPushWorkspaceChanges.
 func TestGitPushGuardIntegration(t *testing.T) {
@@ -172,11 +174,104 @@ func TestGitPushGuardIntegration(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			checkoutBranch := s.workspaceCheckoutBranch(tt.workspaceID)
-			blocked := shouldBlockDefaultBranchPush(checkoutBranch, tt.currentBranch)
+			defaultBranch := s.workspaceDefaultBranch(tt.workspaceID)
+			blocked := shouldBlockDefaultBranchPush(defaultBranch, tt.currentBranch)
 			if blocked != tt.wantBlocked {
-				t.Errorf("guard(workspace=%q, HEAD=%q) blocked=%v, want %v (checkoutBranch=%q)",
-					tt.workspaceID, tt.currentBranch, blocked, tt.wantBlocked, checkoutBranch)
+				t.Errorf("guard(workspace=%q, HEAD=%q) blocked=%v, want %v (defaultBranch=%q)",
+					tt.workspaceID, tt.currentBranch, blocked, tt.wantBlocked, defaultBranch)
+			}
+		})
+	}
+}
+
+// TestGitPushGuardWithDefaultBranch verifies the critical scenario where
+// DefaultBranch differs from Branch — the dispatch/retry case where the
+// workspace is checked out on the task output branch directly but the project
+// default branch is different. The guard must compare against DefaultBranch
+// (the project default), not Branch (the checkout branch).
+func TestGitPushGuardWithDefaultBranch(t *testing.T) {
+	t.Parallel()
+
+	s := &Server{
+		workspaces: map[string]*WorkspaceRuntime{
+			// Dispatch/retry scenario: workspace checks out the output branch directly.
+			// Branch="sam/task-123" (what was checked out), DefaultBranch="main" (project default).
+			"ws-dispatch": {
+				ID:            "ws-dispatch",
+				Branch:        "sam/task-123",
+				DefaultBranch: "main",
+			},
+			// Legacy/backwards-compat: no DefaultBranch set, falls back to Branch.
+			"ws-legacy": {
+				ID:     "ws-legacy",
+				Branch: "main",
+			},
+			// Edge case: both set to same value.
+			"ws-same-default": {
+				ID:            "ws-same-default",
+				Branch:        "main",
+				DefaultBranch: "main",
+			},
+		},
+	}
+
+	tests := []struct {
+		name          string
+		workspaceID   string
+		currentBranch string
+		wantBlocked   bool
+	}{
+		{
+			name:          "dispatch: HEAD on output branch (same as Branch) — NOT blocked (agent is on correct branch)",
+			workspaceID:   "ws-dispatch",
+			currentBranch: "sam/task-123",
+			wantBlocked:   false,
+		},
+		{
+			name:          "dispatch: HEAD on default branch main — blocked (agent failed to stay on output branch)",
+			workspaceID:   "ws-dispatch",
+			currentBranch: "main",
+			wantBlocked:   true,
+		},
+		{
+			name:          "dispatch: HEAD on unrelated feature branch — allowed",
+			workspaceID:   "ws-dispatch",
+			currentBranch: "feature/something-else",
+			wantBlocked:   false,
+		},
+		{
+			name:          "legacy: HEAD on main (no DefaultBranch set) — blocked via Branch fallback",
+			workspaceID:   "ws-legacy",
+			currentBranch: "main",
+			wantBlocked:   true,
+		},
+		{
+			name:          "legacy: HEAD on task branch — allowed",
+			workspaceID:   "ws-legacy",
+			currentBranch: "sam/task-456",
+			wantBlocked:   false,
+		},
+		{
+			name:          "same default: HEAD on main — blocked",
+			workspaceID:   "ws-same-default",
+			currentBranch: "main",
+			wantBlocked:   true,
+		},
+		{
+			name:          "same default: HEAD on output branch — allowed",
+			workspaceID:   "ws-same-default",
+			currentBranch: "sam/task-789",
+			wantBlocked:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			defaultBranch := s.workspaceDefaultBranch(tt.workspaceID)
+			blocked := shouldBlockDefaultBranchPush(defaultBranch, tt.currentBranch)
+			if blocked != tt.wantBlocked {
+				t.Errorf("guard(workspace=%q, HEAD=%q) blocked=%v, want %v (resolvedDefaultBranch=%q)",
+					tt.workspaceID, tt.currentBranch, blocked, tt.wantBlocked, defaultBranch)
 			}
 		})
 	}

@@ -145,6 +145,7 @@ type WorkspaceRuntime struct {
 	Repository             string
 	Branch                 string
 	BaseBranch             string
+	DefaultBranch          string // project's actual default branch (e.g. "main"); used by the push guard
 	RepoProvider           string
 	CloneURL               string
 	RepositoryHost         string
@@ -1568,22 +1569,25 @@ func (s *Server) gitPushWorkspaceChanges(workspaceID string, skipPR bool) gitPus
 	// Guard: never push to the project default branch via auto-commit.
 	// This only covers SAM's own auto-commit path; it does not prevent the
 	// agent process from running git push directly via shell access.
-	checkoutBranch := s.workspaceCheckoutBranch(workspaceID)
-	if checkoutBranch == "" {
-		slog.Warn("Auto-commit push guard skipped: could not determine checkout branch",
+	// Uses DefaultBranch (the project's actual default) when available,
+	// falling back to Branch (checkout branch) for older control planes.
+	defaultBranch := s.workspaceDefaultBranch(workspaceID)
+	if defaultBranch == "" {
+		slog.Warn("Auto-commit push guard skipped: could not determine default branch",
 			"workspaceId", workspaceID,
 			"branch", branchOutput,
 		)
-	} else if shouldBlockDefaultBranchPush(checkoutBranch, branchOutput) {
+	} else if shouldBlockDefaultBranchPush(defaultBranch, branchOutput) {
 		result.Error = fmt.Sprintf(
 			"auto-commit push blocked: HEAD is still on the project default branch %q; "+
 				"the agent should have checked out the task output branch before completing. "+
 				"Changes are committed locally (sha %s) but were not pushed to protect the default branch",
-			checkoutBranch, sha,
+			defaultBranch, sha,
 		)
 		slog.Warn("Auto-commit push blocked: HEAD is on the default branch",
 			"workspaceId", workspaceID,
 			"branch", branchOutput,
+			"defaultBranch", defaultBranch,
 			"sha", sha,
 		)
 		return result
@@ -1609,13 +1613,18 @@ func (s *Server) gitPushWorkspaceChanges(workspaceID string, skipPR bool) gitPus
 	return result
 }
 
-// workspaceCheckoutBranch returns the branch the workspace was originally
-// checked out on (the project default branch). Returns "" if the workspace
-// is not found.
-func (s *Server) workspaceCheckoutBranch(workspaceID string) string {
+// workspaceDefaultBranch returns the project's actual default branch for the
+// given workspace. It prefers the explicit DefaultBranch field (sent by the
+// control plane) and falls back to Branch (the checkout branch) only when
+// DefaultBranch is empty — which happens with older control planes that don't
+// send the field yet. Returns "" if the workspace is not found.
+func (s *Server) workspaceDefaultBranch(workspaceID string) string {
 	runtime, ok := s.getWorkspaceRuntime(workspaceID)
 	if !ok {
 		return ""
+	}
+	if runtime.DefaultBranch != "" {
+		return runtime.DefaultBranch
 	}
 	return runtime.Branch
 }

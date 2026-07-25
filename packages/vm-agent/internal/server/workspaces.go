@@ -469,6 +469,7 @@ type createWorkspaceRequest struct {
 	Repository             string `json:"repository"`
 	Branch                 string `json:"branch"`
 	BaseBranch             string `json:"baseBranch,omitempty"`
+	DefaultBranch          string `json:"defaultBranch,omitempty"`
 	RepoProvider           string `json:"repoProvider,omitempty"`
 	CloneURL               string `json:"cloneUrl,omitempty"`
 	RepositoryHost         string `json:"repositoryHost,omitempty"`
@@ -519,6 +520,7 @@ func createWorkspaceRuntimeOptions(body createWorkspaceRequest, devcontainerConf
 		RepositoryPath:         strings.TrimSpace(body.RepositoryPath),
 		Lightweight:            body.Lightweight,
 		DevcontainerConfigName: devcontainerConfigName,
+		DefaultBranch:          strings.TrimSpace(body.DefaultBranch),
 		DevcontainerCache: DevcontainerCacheCredentials{
 			Registry: strings.TrimSpace(body.DevcontainerCache.Registry),
 			Username: strings.TrimSpace(body.DevcontainerCache.Username),
