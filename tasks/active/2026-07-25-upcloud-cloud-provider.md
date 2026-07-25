@@ -83,7 +83,7 @@ UpCloud is SAM's first HTTP Basic-auth cloud provider. Its API uses nested respo
 - [x] Add API credential CRUD/validation tests, credential-resolution tests, provisioning and deployment-volume vertical-slice tests, cloud-init tests, and web behavior tests.
 - [x] Run lint, typecheck, all tests, build, migration/binding quality gates, and new-code coverage.
 - [x] Run required specialist reviews and address every critical/high finding: task-completion-validator, cloudflare-specialist, security-auditor, ui-ux-specialist, env-validator, doc-sync-validator, constitution-validator, and test-engineer.
-- [ ] Deploy to staging after local/reviewer gates; validate no-key/bogus-key UpCloud UI/API flows and provider-regression behavior. Exercise the existing platform Hetzner path for cloud-init/node regression because no real UpCloud credential is available.
+- [x] Deploy to staging after local/reviewer gates; validate no-key/bogus-key UpCloud UI/API flows and provider-regression behavior. Exercise the existing platform Hetzner path for cloud-init/node regression because no real UpCloud credential is available.
 
 ## Acceptance criteria
 
