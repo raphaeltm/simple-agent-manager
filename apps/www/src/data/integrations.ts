@@ -34,6 +34,10 @@ function titleDescriptionItem(title: string, description: string): { title: stri
   return { title, description };
 }
 
+function stepDescriptionItem(step: string, description: string): { step: string; description: string } {
+  return { step, description };
+}
+
 function faqItem(question: string, answer: string): { question: string; answer: string } {
   return { question, answer };
 }
@@ -352,26 +356,26 @@ export const integrations: Integration[] = [
     description: 'Connect a Keystone application credential and let SAM provision workspace and deployment nodes on Infomaniak Public Cloud, with persistent Cinder volumes that survive node replacement.',
     color: '#0098FF', logoPath: '/images/integrations/infomaniak.svg', seoTitle: 'Run AI Coding Agents on Infomaniak Public Cloud | SAM', seoDescription: 'Run coding agents and persistent app deployments on Swiss Infomaniak Public Cloud with SAM.',
     features: [
-      { title: 'Swiss Data Location', description: 'Compute and encrypted Ceph/Cinder storage run in Infomaniak data centers in Switzerland.' },
-      { title: 'OpenStack Automation', description: 'SAM uses Keystone, Nova, Glance, Neutron, and Cinder APIs with runtime-validated responses.' },
-      { title: 'Persistent Deployment Volumes', description: 'Cinder volumes detach and reattach to replacement nodes while retaining application data.' },
-      { title: 'Explicit Application Credentials', description: 'Use a scoped application credential ID and one-time secret instead of a broad account password.' },
+      titleDescriptionItem('Swiss Data Location', 'Compute and encrypted Ceph/Cinder storage run in Infomaniak data centers in Switzerland.'),
+      titleDescriptionItem('OpenStack Automation', 'SAM uses Keystone, Nova, Glance, Neutron, and Cinder APIs with runtime-validated responses.'),
+      titleDescriptionItem('Persistent Deployment Volumes', 'Cinder volumes detach and reattach to replacement nodes while retaining application data.'),
+      titleDescriptionItem('Explicit Application Credentials', 'Use a scoped application credential ID and one-time secret instead of a broad account password.'),
     ],
     howItWorks: [
-      { step: 'Create an Application Credential', description: 'Create a Keystone application credential with reader and member roles; both roles are required in dc4-a.' },
-      { step: 'Connect Infomaniak', description: 'Enter the application credential ID and one-time secret in SAM settings.' },
-      { step: 'Choose a Swiss Region', description: 'Select dc4-a or dc3-a for workspace and deployment nodes.' },
-      { step: 'Run Agents and Apps', description: 'SAM provisions Nova instances and region-matched Cinder volumes.' },
+      stepDescriptionItem('Create an Application Credential', 'Create a Keystone application credential with reader and member roles; both roles are required in dc4-a.'),
+      stepDescriptionItem('Connect Infomaniak', 'Enter the application credential ID and one-time secret in SAM settings.'),
+      stepDescriptionItem('Choose a Swiss Region', 'Select dc4-a or dc3-a for workspace and deployment nodes.'),
+      stepDescriptionItem('Run Agents and Apps', 'SAM provisions Nova instances and region-matched Cinder volumes.'),
     ],
     useCases: [
-      { title: 'European and Swiss data residency', description: 'Keep workspace and deployment infrastructure in Switzerland with English and French provider support.' },
-      { title: 'Replacement-safe app data', description: 'Preserve application state on a Cinder volume while replacing deployment nodes.' },
-      { title: 'Open cloud operations', description: 'Use standard OpenStack infrastructure without coupling SAM to proprietary VM or volume semantics.' },
+      titleDescriptionItem('European and Swiss data residency', 'Keep workspace and deployment infrastructure in Switzerland with English and French provider support.'),
+      titleDescriptionItem('Replacement-safe app data', 'Preserve application state on a Cinder volume while replacing deployment nodes.'),
+      titleDescriptionItem('Open cloud operations', 'Use standard OpenStack infrastructure without coupling SAM to proprietary VM or volume semantics.'),
     ],
     faq: [
-      { question: 'Which credential does SAM need?', answer: 'A Keystone application credential ID and secret. In dc4-a, assign both reader and member roles.' },
-      { question: 'Do Infomaniak volumes survive node replacement?', answer: 'Yes. Cinder volumes are independent resources that can be detached and reattached within the same region.' },
-      { question: 'Can SAM resize an attached volume?', answer: 'SAM uses the documented safe path: detach first, grow the volume, then reattach. Shrinking is not supported.' },
+      faqItem('Which credential does SAM need?', 'A Keystone application credential ID and secret. In dc4-a, assign both reader and member roles.'),
+      faqItem('Do Infomaniak volumes survive node replacement?', 'Yes. Cinder volumes are independent resources that can be detached and reattached within the same region.'),
+      faqItem('Can SAM resize an attached volume?', 'SAM uses the documented safe path: detach first, grow the volume, then reattach. Shrinking is not supported.'),
     ],
     relatedSlugs: ['hetzner', 'scaleway', 'vultr', 'claude-code'], externalUrl: 'https://www.infomaniak.com/en/hosting/public-cloud',
   },

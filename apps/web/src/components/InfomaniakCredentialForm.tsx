@@ -6,8 +6,8 @@ import { useToast } from '../hooks/useToast';
 import { createCredential, deleteCredential } from '../lib/api';
 
 interface InfomaniakCredentialFormProps {
-  credential?: CredentialResponse | null;
-  onUpdate: () => void;
+  readonly credential?: CredentialResponse | null;
+  readonly onUpdate: () => void;
 }
 
 /**
@@ -15,8 +15,8 @@ interface InfomaniakCredentialFormProps {
  */
 export function InfomaniakCredentialForm({ credential, onUpdate }: InfomaniakCredentialFormProps) {
   const toast = useToast();
-  const [applicationCredentialSecret, setSecretKey] = useState('');
-  const [applicationCredentialId, setProjectId] = useState('');
+  const [applicationCredentialSecret, setApplicationCredentialSecret] = useState('');
+  const [applicationCredentialId, setApplicationCredentialId] = useState('');
   const [loading, setLoading] = useState(false);
   const [validationMessage, setValidationMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -46,8 +46,8 @@ export function InfomaniakCredentialForm({ credential, onUpdate }: InfomaniakCre
       }
       setValidationMessage(result.validation?.message ?? 'Infomaniak credential validated.');
       toast.success('Infomaniak credentials saved');
-      setSecretKey('');
-      setProjectId('');
+      setApplicationCredentialSecret('');
+      setApplicationCredentialId('');
       setShowForm(false);
       onUpdate();
     } catch (err) {
@@ -105,6 +105,7 @@ export function InfomaniakCredentialForm({ credential, onUpdate }: InfomaniakCre
           </div>
           <div className="flex gap-2">
             <button
+              type="button"
               onClick={() => setShowForm(true)}
               aria-label="Update Infomaniak credentials"
               className="py-1 px-3 text-sm bg-transparent border-none cursor-pointer text-accent"
@@ -112,6 +113,7 @@ export function InfomaniakCredentialForm({ credential, onUpdate }: InfomaniakCre
               Update
             </button>
             <button
+              type="button"
               onClick={handleDelete}
               disabled={loading}
               aria-label="Disconnect Infomaniak account"
@@ -140,7 +142,7 @@ export function InfomaniakCredentialForm({ credential, onUpdate }: InfomaniakCre
           type="password"
           value={applicationCredentialSecret}
           onChange={(e) => {
-            setSecretKey(e.target.value);
+            setApplicationCredentialSecret(e.target.value);
             setValidationMessage(null);
             setError(null);
           }}
@@ -161,7 +163,7 @@ export function InfomaniakCredentialForm({ credential, onUpdate }: InfomaniakCre
           type="text"
           value={applicationCredentialId}
           onChange={(e) => {
-            setProjectId(e.target.value);
+            setApplicationCredentialId(e.target.value);
             setValidationMessage(null);
             setError(null);
           }}
@@ -177,8 +179,8 @@ export function InfomaniakCredentialForm({ credential, onUpdate }: InfomaniakCre
             className="text-accent"
           >
             Infomaniak guide
-          </a>
-          . Assign both reader and member roles in dc4-a. The secret is shown only once.
+          </a>{' '}
+          <span>Assign both reader and member roles in dc4-a. The secret is shown only once.</span>
         </p>
       </div>
 

@@ -115,15 +115,13 @@ function getCloudCredentialFields(body: CreateCredentialRequest): CloudCredentia
   }
 
   if (providerName === 'infomaniak') {
-    if (!body.applicationCredentialId || !body.applicationCredentialSecret)
-      throw errors.badRequest('Application credential ID and secret are required for Infomaniak');
-    return {
-      providerName,
-      tokenToValidate: serializeCredentialToken(providerName, {
-        applicationCredentialId: body.applicationCredentialId,
-        applicationCredentialSecret: body.applicationCredentialSecret,
-      }),
+    const credential = {
+      applicationCredentialId: body.applicationCredentialId,
+      applicationCredentialSecret: body.applicationCredentialSecret,
     };
+    if (!credential.applicationCredentialId || !credential.applicationCredentialSecret)
+      throw errors.badRequest('Application credential ID and secret are required for Infomaniak');
+    return { providerName, tokenToValidate: serializeCredentialToken(providerName, credential) };
   }
 
   if (
@@ -180,14 +178,15 @@ async function validateCloudCredentialRequest(
     });
   }
   if (body.provider === 'infomaniak') {
+    const validationOptions = {
+      timeoutMs: getSaveValidationTimeoutMs(env),
+      authUrl: env.INFOMANIAK_AUTH_URL,
+      region: env.INFOMANIAK_REGION,
+    };
     return validateInfomaniakCredentialWithProvider(
       body.applicationCredentialId,
       body.applicationCredentialSecret,
-      {
-        timeoutMs: getSaveValidationTimeoutMs(env),
-        authUrl: env.INFOMANIAK_AUTH_URL,
-        region: env.INFOMANIAK_REGION,
-      }
+      validationOptions
     );
   }
   return formatOnlyValidation(

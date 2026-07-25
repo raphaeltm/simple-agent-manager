@@ -78,89 +78,64 @@ interface CloudCredentialFields {
 
 function getCloudCredentialFields(body: CreateCredentialRequest): CloudCredentialFields {
   const providerName = body.provider;
+  if (!providerName) throw errors.badRequest('Provider is required');
 
-  if (!providerName) {
-    throw errors.badRequest('Provider is required');
-  }
-
-  if (!(CREDENTIAL_PROVIDERS as readonly string[]).includes(providerName)) {
-    throw errors.badRequest(
-      `Unsupported provider: ${providerName}. Supported: ${CREDENTIAL_PROVIDERS.join(', ')}`
-    );
-  }
-
-  if (providerName === 'hetzner') {
-    if (!body.token) {
-      throw errors.badRequest('Token is required for Hetzner');
-    }
-    return {
-      providerName,
-      tokenToValidate: serializeCredentialToken(providerName, { token: body.token }),
-    };
-  }
-
-  if (providerName === 'scaleway') {
-    if (!body.secretKey || !body.projectId) {
-      throw errors.badRequest('secretKey and projectId are required for Scaleway');
-    }
-    return {
-      providerName,
-      tokenToValidate: serializeCredentialToken(providerName, {
-        secretKey: body.secretKey,
-        projectId: body.projectId,
-      }),
-    };
-  }
-
-  if (providerName === 'vultr') {
-    if (!body.token) {
-      throw errors.badRequest('Token is required for Vultr');
-    }
-    return {
-      providerName,
-      tokenToValidate: serializeCredentialToken(providerName, { token: body.token }),
-    };
-  }
-
-  if (providerName === 'infomaniak') {
-    if (!body.applicationCredentialId || !body.applicationCredentialSecret)
-      throw errors.badRequest('Application credential ID and secret are required for Infomaniak');
-    return {
-      providerName,
-      tokenToValidate: serializeCredentialToken(providerName, {
-        applicationCredentialId: body.applicationCredentialId,
-        applicationCredentialSecret: body.applicationCredentialSecret,
-      }),
-    };
-  }
-
-  if (providerName === 'gcp') {
-    if (
-      !body.gcpProjectId ||
-      !body.gcpProjectNumber ||
-      !body.serviceAccountEmail ||
-      !body.wifPoolId ||
-      !body.wifProviderId ||
-      !body.defaultZone
-    ) {
+  switch (providerName) {
+    case 'hetzner':
+    case 'vultr':
+      if (!body.token) throw errors.badRequest(`Token is required for ${providerName}`);
+      return {
+        providerName,
+        tokenToValidate: serializeCredentialToken(providerName, { token: body.token }),
+      };
+    case 'scaleway':
+      if (!body.secretKey || !body.projectId)
+        throw errors.badRequest('secretKey and projectId are required for Scaleway');
+      return {
+        providerName,
+        tokenToValidate: serializeCredentialToken(providerName, {
+          secretKey: body.secretKey,
+          projectId: body.projectId,
+        }),
+      };
+    case 'infomaniak':
+      if (!body.applicationCredentialId || !body.applicationCredentialSecret)
+        throw errors.badRequest('Application credential ID and secret are required for Infomaniak');
+      return {
+        providerName,
+        tokenToValidate: serializeCredentialToken(providerName, {
+          applicationCredentialId: body.applicationCredentialId,
+          applicationCredentialSecret: body.applicationCredentialSecret,
+        }),
+      };
+    case 'gcp':
+      if (
+        !body.gcpProjectId ||
+        !body.gcpProjectNumber ||
+        !body.serviceAccountEmail ||
+        !body.wifPoolId ||
+        !body.wifProviderId ||
+        !body.defaultZone
+      )
+        throw errors.badRequest(
+          'gcpProjectId, gcpProjectNumber, serviceAccountEmail, wifPoolId, wifProviderId, and defaultZone are required for GCP'
+        );
+      return {
+        providerName,
+        tokenToValidate: serializeCredentialToken(providerName, {
+          gcpProjectId: body.gcpProjectId,
+          gcpProjectNumber: body.gcpProjectNumber,
+          serviceAccountEmail: body.serviceAccountEmail,
+          wifPoolId: body.wifPoolId,
+          wifProviderId: body.wifProviderId,
+          defaultZone: body.defaultZone,
+        }),
+      };
+    default:
       throw errors.badRequest(
-        'gcpProjectId, gcpProjectNumber, serviceAccountEmail, wifPoolId, wifProviderId, and defaultZone are required for GCP'
+        `Unsupported provider: ${String(providerName)}. Supported: ${CREDENTIAL_PROVIDERS.join(', ')}`
       );
-    }
-    return {
-      providerName,
-      tokenToValidate: serializeCredentialToken(providerName, {
-        gcpProjectId: body.gcpProjectId,
-        gcpProjectNumber: body.gcpProjectNumber,
-        serviceAccountEmail: body.serviceAccountEmail,
-        wifPoolId: body.wifPoolId,
-        wifProviderId: body.wifProviderId,
-        defaultZone: body.defaultZone,
-      }),
-    };
   }
-
-  throw errors.badRequest(`Unsupported provider: ${providerName}`);
 }
 
 const DEFAULT_SAVE_VALIDATION_TIMEOUT_MS = 8000;

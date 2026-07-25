@@ -65,7 +65,12 @@ async function setupApiMocks(page: Page, options: InfomaniakAuditMockOptions = {
     }
     if (path === '/api/credentials' && method === 'POST') {
       if (validateError) return respond(validateError.status, validateError.body);
-      return respond(200, { id: 'cred-infomaniak', provider: 'infomaniak', connected: true, validation: { valid: true, message: 'Infomaniak application credential validated.' } });
+      return respond(200, {
+        id: 'cred-infomaniak',
+        provider: 'infomaniak',
+        connected: true,
+        validation: { valid: true, message: 'Infomaniak application credential validated.' },
+      });
     }
 
     return respond(200, {});
@@ -78,7 +83,7 @@ test.describe('Settings Infomaniak credential audit', () => {
   }, testInfo) => {
     await setupApiMocks(page, { existingInfomaniak: false });
     await page.goto('/settings/cloud-provider');
-    await page.waitForTimeout(1000);
+    await expect(page.getByRole('heading', { name: 'Infomaniak Public Cloud' })).toBeVisible();
 
     const suffix = getProjectSuffix(testInfo.project.name);
 
@@ -96,7 +101,9 @@ test.describe('Settings Infomaniak credential audit', () => {
     await page.getByLabel('Application Credential ID').fill('app-id-with-unicode-🇨🇭');
     await page.getByLabel('Application Credential Secret').fill(`infomaniak-${'key-'.repeat(48)}`);
     // exact:true — "Connect" is a substring of "Test connection".
-    await expect(infomaniakSection.getByRole('button', { name: 'Connect', exact: true })).toBeVisible();
+    await expect(
+      infomaniakSection.getByRole('button', { name: 'Connect', exact: true })
+    ).toBeVisible();
     await screenshot(page, `settings-infomaniak-add-${suffix}`);
     await assertNoOverflow(page);
 
@@ -118,7 +125,7 @@ test.describe('Settings Infomaniak credential audit', () => {
       },
     });
     await page.goto('/settings/cloud-provider');
-    await page.waitForTimeout(1000);
+    await expect(page.getByRole('heading', { name: 'Infomaniak Public Cloud' })).toBeVisible();
 
     const suffix = getProjectSuffix(testInfo.project.name);
     const infomaniakSection = page.locator('section', {
@@ -133,19 +140,22 @@ test.describe('Settings Infomaniak credential audit', () => {
 
     // The rejected validation must surface as a visible error Alert in the Infomaniak form.
     await expect(
-      infomaniakSection.getByText('Application credential rejected by Infomaniak API (401 Unauthorized)')
+      infomaniakSection.getByText(
+        'Application credential rejected by Infomaniak API (401 Unauthorized)'
+      )
     ).toBeVisible();
     await screenshot(page, `settings-infomaniak-validation-error-${suffix}`);
     await assertNoOverflow(page);
   });
 
-  test('connected state (existing credential) fits mobile + desktop', async ({ page }, testInfo) => {
+  test('connected state (existing credential) fits mobile + desktop', async ({
+    page,
+  }, testInfo) => {
     await setupApiMocks(page, { existingInfomaniak: true });
     await page.goto('/settings/cloud-provider');
-    await page.waitForTimeout(1000);
+    await expect(page.getByRole('heading', { name: 'Infomaniak Public Cloud' })).toBeVisible();
 
     const suffix = getProjectSuffix(testInfo.project.name);
-    await expect(page.getByRole('heading', { name: 'Infomaniak Public Cloud' })).toBeVisible();
     // Connected state shows Disconnect within the Infomaniak section
     await expect(page.getByText('Connected').first()).toBeVisible();
     await screenshot(page, `settings-infomaniak-connected-${suffix}`);
@@ -171,7 +181,7 @@ test.describe('Settings Infomaniak credential audit', () => {
       ],
     });
     await page.goto('/settings/connections');
-    await page.waitForTimeout(1000);
+    await expect(page.getByRole('button', { name: 'Make default' })).toBeVisible();
 
     const suffix = getProjectSuffix(testInfo.project.name);
 
