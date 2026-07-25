@@ -64,6 +64,8 @@ export interface SetupSessionStateResult {
   expiresAt: number;
   errorCode: string | null;
   errorMessage: string | null;
+  verificationUrl: string | null;
+  userCode: string | null;
 }
 
 // `type` (not `interface`) so it carries an implicit index signature and
@@ -89,6 +91,14 @@ type SetupSessionRow = {
 
 /** Relative path of the captured credential file inside CODEX_HOME. */
 const AUTH_FILE = 'auth.json';
+const DEVICE_AUTH_STATE_FILE = 'device-auth-state.json';
+
+interface DeviceAuthState {
+  status: 'starting' | 'waiting_for_user' | 'completed' | 'failed';
+  verificationUrl?: string;
+  userCode?: string;
+  error?: string | null;
+}
 
 export class CredentialSetupSession extends DurableObject<Env> {
   private readonly sql: SqlStorage;
@@ -150,19 +160,34 @@ export class CredentialSetupSession extends DurableObject<Env> {
       params.capturePollMs
     );
     await this.ctx.storage.setAlarm(now); // immediate — provision on first tick
-    return { id: params.id, status: 'provisioning', expiresAt, errorCode: null, errorMessage: null };
+    return {
+      id: params.id,
+      status: 'provisioning',
+      expiresAt,
+      errorCode: null,
+      errorMessage: null,
+      verificationUrl: null,
+      userCode: null,
+    };
   }
 
   /** Read authoritative state (used by GET status when the DO is preferred over D1). */
   async getState(): Promise<SetupSessionStateResult | null> {
     const row = this.readRow();
     if (!row) return null;
+    const deviceAuth =
+      row.status === 'admitting' || row.status === 'waiting_for_user'
+        ? await this.readDeviceAuthState(row)
+        : null;
     return {
       id: row.id,
       status: row.status as SetupSessionStatus,
       expiresAt: row.expires_at,
       errorCode: row.error_code,
       errorMessage: row.error_message,
+      verificationUrl:
+        deviceAuth?.status === 'waiting_for_user' ? (deviceAuth.verificationUrl ?? null) : null,
+      userCode: deviceAuth?.status === 'waiting_for_user' ? (deviceAuth.userCode ?? null) : null,
     };
   }
 
@@ -170,7 +195,15 @@ export class CredentialSetupSession extends DurableObject<Env> {
   async cancel(): Promise<SetupSessionStateResult> {
     const row = this.readRow();
     if (!row) {
-      return { id: '', status: 'cancelled', expiresAt: 0, errorCode: null, errorMessage: null };
+      return {
+        id: '',
+        status: 'cancelled',
+        expiresAt: 0,
+        errorCode: null,
+        errorMessage: null,
+        verificationUrl: null,
+        userCode: null,
+      };
     }
     if (!isTerminalSetupStatus(row.status)) {
       await this.teardown(row, 'cancelled');
@@ -182,6 +215,8 @@ export class CredentialSetupSession extends DurableObject<Env> {
       expiresAt: row.expires_at,
       errorCode: after?.error_code ?? null,
       errorMessage: after?.error_message ?? null,
+      verificationUrl: null,
+      userCode: null,
     };
   }
 
@@ -209,6 +244,10 @@ export class CredentialSetupSession extends DurableObject<Env> {
     try {
       if (row.status === 'provisioning') {
         await this.provision(row);
+        return;
+      }
+      if (row.status === 'admitting') {
+        await this.pollDeviceAuth(row);
         return;
       }
       // waiting_for_user | capturing | saving — poll for the credential file.
@@ -244,6 +283,14 @@ export class CredentialSetupSession extends DurableObject<Env> {
         `${row.codex_home}/config.toml`,
         'cli_auth_credentials_store = "file"\n'
       );
+      const statePath = `${row.codex_home}/${DEVICE_AUTH_STATE_FILE}`;
+      const startCommand =
+        `nohup env CODEX_HOME=${shellQuote(row.codex_home)} ` +
+        `node /usr/local/bin/sam-codex-device-auth.mjs ${shellQuote(statePath)} ` +
+        '>/dev/null 2>&1 &';
+      await sandbox.exec(startCommand, {
+        timeout: getSandboxConfig(this.env).execTimeoutMs,
+      });
     } catch (err) {
       log.error('credential_setup.provision_failed', {
         sessionId: row.id,
@@ -253,13 +300,51 @@ export class CredentialSetupSession extends DurableObject<Env> {
         row,
         'failed',
         'sandbox_provision_failed',
-        'Failed to prepare the sign-in terminal'
+        'Failed to prepare Codex sign-in'
       );
       return;
     }
-    this.setStatus(row.id, 'waiting_for_user');
-    await this.updateD1Status(row.id, 'waiting_for_user', { started: true });
+    this.setStatus(row.id, 'admitting');
+    await this.updateD1Status(row.id, 'admitting', { started: true });
     await this.ctx.storage.setAlarm(Date.now() + row.capture_poll_ms);
+  }
+
+  private async pollDeviceAuth(row: SetupSessionRow): Promise<void> {
+    const state = await this.readDeviceAuthState(row);
+    if (!state || state.status === 'starting') {
+      await this.ctx.storage.setAlarm(Date.now() + row.capture_poll_ms);
+      return;
+    }
+    if (state.status === 'failed') {
+      log.warn('credential_setup.device_auth_failed', { sessionId: row.id });
+      await this.teardown(
+        row,
+        'failed',
+        'device_auth_start_failed',
+        'Codex could not start the sign-in flow'
+      );
+      return;
+    }
+    if (state.status === 'waiting_for_user' && state.verificationUrl && state.userCode) {
+      this.setStatus(row.id, 'waiting_for_user');
+      await this.updateD1Status(row.id, 'waiting_for_user');
+      await this.ctx.storage.setAlarm(Date.now() + row.capture_poll_ms);
+      return;
+    }
+    await this.ctx.storage.setAlarm(Date.now() + row.capture_poll_ms);
+  }
+
+  private async readDeviceAuthState(row: SetupSessionRow): Promise<DeviceAuthState | null> {
+    try {
+      const sandbox = await getSandboxInstance(this.env, row.id);
+      const path = `${row.codex_home}/${DEVICE_AUTH_STATE_FILE}`;
+      const existence = await sandbox.exists(path);
+      if (!existence.exists) return null;
+      const file = await sandbox.readFile(path);
+      return JSON.parse(file.content ?? '') as DeviceAuthState;
+    } catch {
+      return null;
+    }
   }
 
   private async attemptCapture(row: SetupSessionRow): Promise<void> {
@@ -315,7 +400,12 @@ export class CredentialSetupSession extends DurableObject<Env> {
         sessionId: row.id,
         error: err instanceof Error ? err.message : String(err),
       });
-      await this.teardown(row, 'failed', 'capture_save_failed', 'Failed to save the captured credential');
+      await this.teardown(
+        row,
+        'failed',
+        'capture_save_failed',
+        'Failed to save the captured credential'
+      );
       return;
     }
 
@@ -387,9 +477,7 @@ export class CredentialSetupSession extends DurableObject<Env> {
   // ---------------------------------------------------------------------------
 
   private readRow(): SetupSessionRow | undefined {
-    return this.sql
-      .exec<SetupSessionRow>('SELECT * FROM setup_session LIMIT 1')
-      .toArray()[0];
+    return this.sql.exec<SetupSessionRow>('SELECT * FROM setup_session LIMIT 1').toArray()[0];
   }
 
   private setStatus(

@@ -56,7 +56,6 @@ export async function destroySandboxInstance(
   sandboxId: string,
   detail: { nodeId?: string; workspaceId?: string; sandboxId?: string } = {}
 ): Promise<void> {
-  requireSandbox(env);
   const config = getSandboxConfig(env);
   const sandbox = await getSandboxInstance(env, sandboxId);
   await runSandboxPhase('destroy', { sandboxId, ...detail }, () =>

@@ -127,13 +127,11 @@ export type {
   CreateCodexSetupResult,
 } from './codex-setup';
 export {
-  buildCodexSetupWsUrl,
   cancelCodexSetupSession,
   CODEX_SETUP_AGENT_TYPE,
   createCodexSetupSession,
   getCodexSetupConfig,
   getCodexSetupSession,
-  getCodexSetupTerminalToken,
   isTerminalCodexSetupStatus,
 } from './codex-setup';
 export type {

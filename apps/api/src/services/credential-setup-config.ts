@@ -54,14 +54,6 @@ export function getPoolLeaseMaxAgeMs(env: Env): number {
 }
 
 /**
- * The guided Codex setup terminal is default-OFF. It additionally requires the
- * Sandbox runtime (`SANDBOX_ENABLED`) — see requireSandbox().
- */
-export function isCodexSetupTerminalEnabled(env: Env): boolean {
-  return env.CODEX_SETUP_TERMINAL_ENABLED === 'true';
-}
-
-/**
  * Statuses that count as "active" (occupying the one-active-per-user slot and a
  * pool lease). Mirrors the partial unique index in migration 0097.
  */
@@ -83,9 +75,6 @@ export type SetupSessionStatus =
 
 export function isTerminalSetupStatus(status: string): boolean {
   return (
-    status === 'completed' ||
-    status === 'failed' ||
-    status === 'cancelled' ||
-    status === 'expired'
+    status === 'completed' || status === 'failed' || status === 'cancelled' || status === 'expired'
   );
 }

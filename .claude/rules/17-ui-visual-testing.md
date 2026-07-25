@@ -3,6 +3,7 @@
 ## When This Applies
 
 This rule applies whenever a PR modifies files in:
+
 - `apps/web/` (control plane UI)
 - `packages/ui/` (shared design system)
 - `packages/terminal/` (terminal component)
@@ -15,19 +16,20 @@ Before proceeding to PR review (Phase 5) or staging verification (Phase 6), you 
 
 Run Playwright against the local Vite preview server with **mocked API data** covering these scenarios:
 
-| Scenario | What it catches | Example mock data |
-|----------|----------------|-------------------|
-| **Normal data** | Baseline rendering, spacing, alignment | 3-5 items with typical titles and descriptions |
-| **Long text** | Overflow, text wrapping, layout breaks | Titles 200+ chars, descriptions 500+ chars, long URLs |
-| **Empty states** | Missing empty-state handling, broken layouts | Empty arrays, null descriptions, zero counts |
-| **Many items** | Scroll behavior, pagination, performance | 30+ items in lists |
-| **Error states** | Error display, recovery UI | API 500s, timeouts, 404s |
-| **Special characters** | XSS safety, encoding issues | Unicode, emoji, HTML entities, `<script>` tags |
-| **Single character** | Minimum content handling | Single-letter titles, empty descriptions |
+| Scenario               | What it catches                              | Example mock data                                     |
+| ---------------------- | -------------------------------------------- | ----------------------------------------------------- |
+| **Normal data**        | Baseline rendering, spacing, alignment       | 3-5 items with typical titles and descriptions        |
+| **Long text**          | Overflow, text wrapping, layout breaks       | Titles 200+ chars, descriptions 500+ chars, long URLs |
+| **Empty states**       | Missing empty-state handling, broken layouts | Empty arrays, null descriptions, zero counts          |
+| **Many items**         | Scroll behavior, pagination, performance     | 30+ items in lists                                    |
+| **Error states**       | Error display, recovery UI                   | API 500s, timeouts, 404s                              |
+| **Special characters** | XSS safety, encoding issues                  | Unicode, emoji, HTML entities, `<script>` tags        |
+| **Single character**   | Minimum content handling                     | Single-letter titles, empty descriptions              |
 
 ### Viewport Requirements
 
 Every changed surface must be screenshotted at **both**:
+
 - **Mobile**: 375x667 (iPhone SE) — the narrowest supported viewport
 - **Desktop**: 1280x800 — standard desktop viewport
 
@@ -133,12 +135,30 @@ expect(overflow).toBe(false);
 ### Failure Blocks Merge
 
 If any visual audit reveals:
+
 - Horizontal overflow on mobile
 - Clipped or off-screen content
 - Broken layouts with edge-case data
 - Style inconsistencies with the design system
 
 You MUST fix the issue before proceeding. Do NOT defer visual bugs to a follow-up task.
+
+### Guided Flows Must Test the User Action
+
+When a CLI, log stream, WebSocket, or other technical transport emits an
+actionable URL, verification code, token, or confirmation:
+
+1. Promote the actionable value into semantic native controls (for example, an
+   `<a>` for opening a URL and a labeled button for copying a code). Do not make
+   users select or interpret terminal/log output.
+2. Keep the technical transport behind the product boundary unless raw terminal
+   access is itself the feature.
+3. Visual and behavioral tests must perform the primary action at mobile and
+   desktop sizes. Rendering, screenshots, and overflow checks alone are
+   insufficient; assert the link target, copy behavior, keyboard-accessible
+   control, and failure feedback.
+4. Staging validation must prove the actionable value came through the real
+   integration, then exercise the native control that exposes it.
 
 ## Virtualized-List Scroll/Jump Features (jsdom Renders All Rows — Assert the Coordinate)
 

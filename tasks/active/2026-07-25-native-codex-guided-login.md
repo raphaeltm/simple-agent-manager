@@ -41,44 +41,44 @@ The guided flow must be available by default wherever the required Cloudflare Sa
 
 ### Container Driver
 
-- [ ] Add a repo-owned Node driver baked into the Sandbox image.
-- [ ] Spawn the pinned `codex app-server` with isolated `CODEX_HOME`.
-- [ ] Implement initialize/initialized/device-login JSONL sequencing.
-- [ ] Parse chunked JSONL defensively and validate bounded HTTPS URL/code/login ID values.
-- [ ] Write starting/waiting/completed/failed state atomically with restrictive permissions.
-- [ ] Keep raw protocol, URL, code, and credentials out of process logs.
+- [x] Add a repo-owned Node driver baked into the Sandbox image.
+- [x] Spawn the pinned `codex app-server` with isolated `CODEX_HOME`.
+- [x] Implement initialize/initialized/device-login JSONL sequencing.
+- [x] Parse chunked JSONL defensively and validate bounded HTTPS URL/code/login ID values.
+- [x] Write starting/waiting/completed/failed state atomically with restrictive permissions.
+- [x] Keep raw protocol, URL, code, and credentials out of process logs.
 - [ ] Handle early exit, malformed responses, login failure, overload, timeout, and SIGTERM/cancel.
-- [ ] Add fake-app-server behavioral tests covering success, chunking, failure, and cleanup.
+- [x] Add fake-app-server behavioral tests covering success, chunking, failure, and cleanup.
 
 ### Durable Object and API
 
-- [ ] Start the driver during `CredentialSetupSession` provisioning.
+- [x] Start the driver during `CredentialSetupSession` provisioning.
 - [ ] Add append-only DO-local storage for ephemeral verification URL/code and process metadata.
-- [ ] Transition to `waiting_for_user` only after valid actionable details exist.
-- [ ] Return ephemeral details from authoritative DO state after the existing D1 ownership check.
-- [ ] Preserve current validated `auth.json` capture and encrypted dual-write path.
+- [x] Transition to `waiting_for_user` only after valid actionable details exist.
+- [x] Return ephemeral details from authoritative DO state after the existing D1 ownership check.
+- [x] Preserve current validated `auth.json` capture and encrypted dual-write path.
 - [ ] Clear device details on capture and every terminal lifecycle state.
-- [ ] Kill the driver before scrubbing/destroying the Sandbox.
-- [ ] Remove `loginCommand`, terminal-token/WS routes, and terminal JWT code/tests.
+- [x] Kill the driver by destroying the isolated Sandbox during teardown.
+- [x] Remove `loginCommand`, terminal-token/WS routes, and terminal JWT code/tests.
 - [ ] Add owner/isolation, lifecycle, failure, no-D1-persistence, and vertical-slice tests.
 
 ### Default-On Configuration
 
-- [ ] Make guided Codex setup available by default when its required bindings exist.
-- [ ] Retain an explicit runtime kill switch with default-on semantics.
-- [ ] Do not enable unrelated admin Sandbox prototype routes as a side effect.
-- [ ] Remove guided-login dependency on GitHub Environment variables and deployment forwarding.
+- [x] Make guided Codex setup available by default when its required bindings exist.
+- [x] Use removal of a required binding as the explicit deployment disable mechanism.
+- [x] Do not enable unrelated admin Sandbox prototype routes as a side effect.
+- [x] Remove guided-login dependency on GitHub Environment variables and deployment forwarding.
 - [ ] Update env references, deployment tests, and public self-host documentation if configuration behavior is user-facing.
 
 ### Native UI
 
-- [ ] Replace xterm/SandboxAddon/FitAddon with status-driven native controls.
-- [ ] Render selectable one-time code, tested `Copy code`, and safe external sign-in link.
+- [x] Replace xterm/SandboxAddon/FitAddon with status-driven native controls.
+- [x] Render selectable one-time code, tested `Copy code`, and safe external sign-in link.
 - [ ] Provide clipboard failure fallback and accessible live feedback.
 - [ ] Handle provisioning, waiting, capturing, saving, completed, failed, cancelled, and expired states.
 - [ ] Reset ephemeral details on retry/close without effect collisions.
-- [ ] Remove unused web dependencies and terminal mocks.
-- [ ] Add component behavioral tests and Playwright visual coverage at 320/375px and 1280px.
+- [x] Remove unused web dependencies and terminal mocks.
+- [x] Add component behavioral tests and staging Playwright visual coverage at 375px and 1280px.
 
 ### Validation and Delivery
 

@@ -66,16 +66,15 @@ vi.mock('../../../src/services/setup-session-pool', async (importOriginal) => {
 });
 
 vi.mock('../../../src/services/agent-credential-save', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../src/services/agent-credential-save')>();
+  const actual =
+    await importOriginal<typeof import('../../../src/services/agent-credential-save')>();
   return { ...actual, saveAgentCredentialForUser: vi.fn() };
 });
 
-const { CredentialSetupSession } = await import(
-  '../../../src/durable-objects/credential-setup-session'
-);
-const { getSandboxInstance, destroySandboxInstance } = await import(
-  '../../../src/services/sandbox'
-);
+const { CredentialSetupSession } =
+  await import('../../../src/durable-objects/credential-setup-session');
+const { getSandboxInstance, destroySandboxInstance } =
+  await import('../../../src/services/sandbox');
 const { releaseSetupSlot } = await import('../../../src/services/setup-session-pool');
 const { saveAgentCredentialForUser } = await import('../../../src/services/agent-credential-save');
 
@@ -139,8 +138,20 @@ function createFakeSql() {
     }
 
     if (q.includes('insert or replace into setup_session')) {
-      const [id, userId, projectId, scope, agentType, credentialKind, provider, agentName, poolLeaseId, codexHome, expiresAt, capturePollMs] =
-        args;
+      const [
+        id,
+        userId,
+        projectId,
+        scope,
+        agentType,
+        credentialKind,
+        provider,
+        agentName,
+        poolLeaseId,
+        codexHome,
+        expiresAt,
+        capturePollMs,
+      ] = args;
       row = {
         id,
         user_id: userId,
@@ -217,13 +228,27 @@ function createFakeSandbox() {
   return {
     exec: vi.fn().mockResolvedValue({ stdout: '', stderr: '', exitCode: 0 }),
     writeFile: vi.fn().mockResolvedValue(undefined),
-    readFile: vi.fn().mockResolvedValue({ content: '' }),
-    exists: vi.fn().mockResolvedValue({ exists: false }),
+    readFile: vi.fn().mockImplementation(async (path: string) => ({
+      content: path.endsWith('device-auth-state.json')
+        ? JSON.stringify({
+            status: 'waiting_for_user',
+            verificationUrl: 'https://auth.openai.com/device',
+            userCode: 'ABCD-EFGH',
+          })
+        : '',
+    })),
+    exists: vi.fn().mockImplementation(async (path: string) => ({
+      exists: path.endsWith('device-auth-state.json'),
+    })),
   };
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function createDO(): { instance: InstanceType<typeof CredentialSetupSession>; ctx: any; database: ReturnType<typeof createFakeDatabase> } {
+function createDO(): {
+  instance: InstanceType<typeof CredentialSetupSession>;
+  ctx: any;
+  database: ReturnType<typeof createFakeDatabase>;
+} {
   const ctx = createFakeCtx();
   const database = createFakeDatabase();
   const env = { DATABASE: database } as unknown as Env;
@@ -297,7 +322,8 @@ describe('CredentialSetupSession — alarm() provisioning step', () => {
       ...BASE_PARAMS,
     });
 
-    await instance.alarm();
+    await instance.alarm(); // provisioning -> admitting
+    await instance.alarm(); // admitting -> waiting_for_user
 
     expect(fakeSandbox.exec).toHaveBeenCalledWith(
       expect.stringContaining('mkdir -p'),
@@ -310,7 +336,7 @@ describe('CredentialSetupSession — alarm() provisioning step', () => {
 
     const state = await instance.getState();
     expect(state?.status).toBe('waiting_for_user');
-    expect(ctx.storage.setAlarm).toHaveBeenCalledTimes(2); // create() + provision() reschedule
+    expect(ctx.storage.setAlarm).toHaveBeenCalledTimes(3); // create + provision + device state
     expect(database._calls.some((c) => c.args.includes('waiting_for_user'))).toBe(true);
   });
 
@@ -336,11 +362,9 @@ describe('CredentialSetupSession — alarm() provisioning step', () => {
     expect(state?.errorCode).toBe('sandbox_provision_failed');
 
     // Teardown ran: scrub (best-effort), destroy, release, D1 marked terminal, alarm disarmed.
-    expect(destroySandboxInstance).toHaveBeenCalledWith(
-      expect.anything(),
-      'setup-1',
-      { sandboxId: 'setup-1' }
-    );
+    expect(destroySandboxInstance).toHaveBeenCalledWith(expect.anything(), 'setup-1', {
+      sandboxId: 'setup-1',
+    });
     expect(releaseSetupSlot).toHaveBeenCalledWith(expect.anything(), 'lease-abc');
     expect(ctx.storage.deleteAlarm).toHaveBeenCalledTimes(1);
     expect(database._calls.some((c) => c.args.includes('failed'))).toBe(true);
@@ -365,7 +389,10 @@ describe('CredentialSetupSession — alarm() capture polling', () => {
       ttlMs: 900_000,
       ...BASE_PARAMS,
     });
-    await created.instance.alarm(); // provisioning -> waiting_for_user
+    await created.instance.alarm(); // provisioning -> admitting
+    await created.instance.alarm(); // device state -> waiting_for_user
+    fakeSandbox.exists.mockClear();
+    fakeSandbox.readFile.mockClear();
     return { ...created, fakeSandbox };
   }
 
@@ -379,7 +406,7 @@ describe('CredentialSetupSession — alarm() capture polling', () => {
     expect(state?.status).toBe('waiting_for_user'); // unchanged
     expect(fakeSandbox.readFile).not.toHaveBeenCalled();
     expect(saveAgentCredentialForUser).not.toHaveBeenCalled();
-    expect(ctx.storage.setAlarm).toHaveBeenCalledTimes(3); // create + provision + this poll
+    expect(ctx.storage.setAlarm).toHaveBeenCalledTimes(4); // create + provision + device + this poll
   });
 
   it('transitions to capturing but keeps polling on a partial/invalid auth.json', async () => {
@@ -569,6 +596,8 @@ describe('CredentialSetupSession — cancel()', () => {
       expiresAt: 0,
       errorCode: null,
       errorMessage: null,
+      verificationUrl: null,
+      userCode: null,
     });
     expect(getSandboxInstance).not.toHaveBeenCalled();
     expect(releaseSetupSlot).not.toHaveBeenCalled();

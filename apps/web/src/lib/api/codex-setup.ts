@@ -8,7 +8,7 @@
  * here — the xterm `SandboxAddon` opens it directly using the URL built by
  * `buildCodexSetupWsUrl()`.
  */
-import { API_URL, ApiClientError, request } from './client';
+import { ApiClientError, request } from './client';
 
 /** Base path for the guided setup session routes. */
 const BASE_PATH = '/api/agent-credential-setup-sessions';
@@ -46,7 +46,7 @@ export function isTerminalCodexSetupStatus(status: CodexSetupStatus): boolean {
   return TERMINAL_STATUSES.has(status);
 }
 
-/** Whether the guided flow is available (default-OFF platform gate). */
+/** Whether the guided flow is available from the deployed runtime bindings. */
 export interface CodexSetupConfig {
   enabled: boolean;
   agentType: string;
@@ -58,7 +58,8 @@ export interface CodexSetupSession {
   status: CodexSetupStatus;
   agentType: string;
   expiresAt: string;
-  loginCommand: string;
+  verificationUrl?: string | null;
+  userCode?: string | null;
   errorCode?: string | null;
   errorMessage?: string | null;
 }
@@ -78,7 +79,8 @@ interface CreateSessionResponseBody {
   status?: string;
   agentType?: string;
   expiresAt?: string;
-  loginCommand?: string;
+  verificationUrl?: string | null;
+  userCode?: string | null;
   message?: string;
 }
 
@@ -131,35 +133,10 @@ export async function getCodexSetupSession(id: string): Promise<CodexSetupSessio
 
 /** POST /:id/cancel — cancel + tear down (best-effort). */
 export async function cancelCodexSetupSession(
-  id: string,
+  id: string
 ): Promise<{ id: string; status: CodexSetupStatus }> {
   return request<{ id: string; status: CodexSetupStatus }>(
     `${BASE_PATH}/${encodeURIComponent(id)}/cancel`,
-    { method: 'POST' },
+    { method: 'POST' }
   );
-}
-
-/** GET /:id/terminal-token — mint a short-lived WS token (TTL ~5 min). */
-export async function getCodexSetupTerminalToken(id: string): Promise<{ token: string }> {
-  return request<{ token: string }>(`${BASE_PATH}/${encodeURIComponent(id)}/terminal-token`);
-}
-
-/**
- * Build the terminal WebSocket URL for the xterm `SandboxAddon`. Derives the
- * `ws(s)://` origin from `VITE_API_URL` (http -> ws, https -> wss) so it always
- * targets the same API the REST calls use.
- */
-export function buildCodexSetupWsUrl(
-  id: string,
-  token: string,
-  cols: number,
-  rows: number,
-): string {
-  const wsBase = API_URL.replace(/^http/, 'ws');
-  const params = new URLSearchParams({
-    token,
-    cols: String(cols),
-    rows: String(rows),
-  });
-  return `${wsBase}${BASE_PATH}/${encodeURIComponent(id)}/terminal/ws?${params.toString()}`;
 }
