@@ -1567,6 +1567,81 @@ func TestBuildOpencodeConfig_CustomProviderEmitsOpenAICompatibleBlock(t *testing
 	}
 }
 
+// Regression test: writeAgentStartupConfig must call writeCodexStartupConfig
+// even when containerID is empty (standalone/cf-container sessions).
+// This is the exact bug this PR fixes — if the containerID=="" guard is moved
+// back above the Codex check, this test fails.
+func TestWriteAgentStartupConfigCodexStandaloneWritesMcpConfig(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	h := &SessionHost{
+		config: SessionHostConfig{
+			GatewayConfig: GatewayConfig{
+				McpServers: []McpServerEntry{
+					{URL: "https://api.example.com/mcp", Token: "test-standalone-token"},
+				},
+				WorkspaceID: "ws-test-standalone",
+			},
+		},
+	}
+
+	startup := &agentStartup{
+		containerID: "", // standalone — no container
+	}
+
+	err := h.writeAgentStartupConfig(context.Background(), "openai-codex", nil, startup)
+	if err != nil {
+		t.Fatalf("writeAgentStartupConfig failed: %v", err)
+	}
+
+	configPath := filepath.Join(tmpDir, ".codex", "config.toml")
+	data, readErr := os.ReadFile(configPath)
+	if readErr != nil {
+		t.Fatalf("config.toml not written for standalone Codex: %v", readErr)
+	}
+	if !strings.Contains(string(data), "sam-mcp") {
+		t.Error("config.toml missing SAM MCP server entry")
+	}
+
+	foundToken := false
+	for _, ev := range startup.envVars {
+		if strings.HasPrefix(ev, "SAM_MCP_TOKEN=") {
+			foundToken = true
+		}
+	}
+	if !foundToken {
+		t.Errorf("SAM_MCP_TOKEN not injected into startup.envVars for standalone Codex: %v", startup.envVars)
+	}
+}
+
+// Verify that non-Codex agents (opencode, vibe) are still skipped when containerID is empty.
+func TestWriteAgentStartupConfigNonCodexStandaloneIsNoop(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	h := &SessionHost{
+		config: SessionHostConfig{
+			GatewayConfig: GatewayConfig{
+				McpServers: []McpServerEntry{
+					{URL: "https://api.example.com/mcp", Token: "tok"},
+				},
+			},
+		},
+	}
+
+	for _, agentType := range []string{"opencode", "mistral-vibe", "claude-code"} {
+		startup := &agentStartup{containerID: ""}
+		err := h.writeAgentStartupConfig(context.Background(), agentType, nil, startup)
+		if err != nil {
+			t.Fatalf("writeAgentStartupConfig(%s) failed: %v", agentType, err)
+		}
+		if len(startup.envVars) > 0 {
+			t.Errorf("writeAgentStartupConfig(%s) with empty containerID should not inject env vars, got %v", agentType, startup.envVars)
+		}
+	}
+}
+
 func TestWriteCodexConfigLocallyCreatesFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
