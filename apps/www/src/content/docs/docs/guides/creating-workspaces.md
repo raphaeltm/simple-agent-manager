@@ -63,14 +63,14 @@ Restarting starts from a clean checkout. Any uncommitted changes from the previo
 
 SAM offers small, medium, and large sizes, trading cost for CPU and memory:
 
-| Size | Best for |
-|------|----------|
-| **Small** | Simple changes, code review, quick questions |
-| **Medium** | Most development work |
-| **Large** | Large builds and heavy compilation |
+| Size       | Best for                                     |
+| ---------- | -------------------------------------------- |
+| **Small**  | Simple changes, code review, quick questions |
+| **Medium** | Most development work                        |
+| **Large**  | Large builds and heavy compilation           |
 
 Exact specs and pricing are shown in the size picker when you create a workspace and vary by cloud provider. Start with **Medium** for most work, and set a per-project default in project settings.
 
 :::note
-Creating a workspace directly (rather than through chat) is an advanced path intended for hands-on infrastructure control. It requires a project to already be imported, and — on a self-hosted instance — a Hetzner, Scaleway, Vultr, or Infomaniak credential. On the hosted platform, compute is typically provided for you.
+Creating a workspace directly (rather than through chat) is an advanced path intended for hands-on infrastructure control. It requires a project to already be imported, and — on a self-hosted instance — a Hetzner, Scaleway, Vultr, Infomaniak, or UpCloud credential. On the hosted platform, compute is typically provided for you.
 :::

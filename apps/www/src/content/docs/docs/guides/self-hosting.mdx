@@ -285,7 +285,7 @@ The Workers Paid plan ($5/month) is required for Durable Objects and Cloudflare 
 
 ### User VM Costs
 
-VMs are billed to the cloud provider credential SAM uses for the node. In a typical self-hosted setup, that is each user's own BYOC credential; admins may also configure a platform credential for shared zero-config provisioning. SAM supports Hetzner, Scaleway, Vultr, Infomaniak, and GCP. The example prices below cover the built-in Hetzner, Scaleway, Vultr, and Infomaniak size mappings; GCP pricing depends on the selected project, zone, and machine family.
+VMs are billed to the cloud provider credential SAM uses for the node. In a typical self-hosted setup, that is each user's own BYOC credential; admins may also configure a platform credential for shared zero-config provisioning. SAM supports Hetzner, Scaleway, Vultr, Infomaniak, UpCloud, and GCP. The example prices below cover the built-in Hetzner, Scaleway, Vultr, Infomaniak, and UpCloud size mappings; GCP pricing depends on the selected project, zone, and machine family.
 
 **Hetzner:**
 
@@ -305,11 +305,11 @@ VMs are billed to the cloud provider credential SAM uses for the node. In a typi
 
 **Vultr:**
 
-| Size               | Specs                    | Monthly |
-| ------------------ | ------------------------ | ------- |
-| Small (vc2-2c-4gb) | 2 vCPU, 4GB RAM, 80GB    | ~$20    |
-| Medium (vc2-4c-8gb)| 4 vCPU, 8GB RAM, 160GB   | ~$40    |
-| Large (vc2-6c-16gb)| 6 vCPU, 16GB RAM, 320GB  | ~$80    |
+| Size                | Specs                   | Monthly |
+| ------------------- | ----------------------- | ------- |
+| Small (vc2-2c-4gb)  | 2 vCPU, 4GB RAM, 80GB   | ~$20    |
+| Medium (vc2-4c-8gb) | 4 vCPU, 8GB RAM, 160GB  | ~$40    |
+| Large (vc2-6c-16gb) | 6 vCPU, 16GB RAM, 320GB | ~$80    |
 
 Vultr bills hourly and the default region is `fra` (Frankfurt). When you create the Vultr Personal Access Token, its **IP access control** allowlist must be set to **Allow All IPv4/IPv6** — SAM calls the Vultr API from Cloudflare Workers, which have no static egress IP, so a restricted allowlist will reject provisioning requests.
 

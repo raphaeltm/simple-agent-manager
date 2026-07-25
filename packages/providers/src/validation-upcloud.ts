@@ -17,6 +17,7 @@ export interface UpCloudServer {
   state: string;
   zone: string;
   plan: string;
+  created: string;
   labels: UpCloudLabel[];
   ipAddresses: Array<{ access: string; address: string; family: string }>;
   storageDevices: Array<{ address: string; storage: string; title: string; bootDisk: string }>;
@@ -81,6 +82,7 @@ function server(o: Record<string, unknown>, c: string): UpCloudServer {
     state: requireString(o, 'state', 'upcloud', c),
     zone: requireString(o, 'zone', 'upcloud', c),
     plan: optionalString(o, 'plan', 'upcloud', c) ?? 'custom',
+    created: optionalString(o, 'created', 'upcloud', c) ?? '',
     labels: labels(o.labels, c),
     ipAddresses: (optionalArray(ips, 'ip_address', 'upcloud', c) ?? []).map((x) => {
       const p = expectObject(x, 'upcloud', c);

@@ -50,7 +50,7 @@ User-provided secrets stored encrypted in D1:
 
 | Credential                      | Purpose                                                                     | Encryption                     |
 | ------------------------------- | --------------------------------------------------------------------------- | ------------------------------ |
-| Cloud provider credentials      | VM provisioning (Hetzner, Scaleway, Vultr, Infomaniak, GCP WIF or service-account JSON)        | AES-256-GCM, per-credential IV |
+| Cloud provider credentials      | VM provisioning (Hetzner, Scaleway, Vultr, Infomaniak, UpCloud, GCP WIF or service-account JSON) | AES-256-GCM, per-credential IV |
 | Agent API keys                  | Claude, OpenAI, Gemini, and other agent access                              | AES-256-GCM, per-credential IV |
 | Agent OAuth tokens              | Claude Pro/Max, Codex subscriptions                                         | AES-256-GCM, per-credential IV |
 | Composable credentials (`cc_*`) | Reusable credential + configuration attachments layered per project/profile | AES-256-GCM, per-credential IV |

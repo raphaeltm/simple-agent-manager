@@ -473,7 +473,7 @@ function toVM(server: UpCloudServer): VMInstance {
     ip: publicIPv4(server),
     status: mapUpCloudStatus(server.state),
     serverType: server.plan,
-    createdAt: '',
+    createdAt: server.created,
     labels: fromLabels(server.labels),
   };
 }
