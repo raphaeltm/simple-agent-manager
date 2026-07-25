@@ -46,6 +46,7 @@ import {
   validateUpCloudServersResponse,
   validateUpCloudStorageResponse,
   validateUpCloudStoragesResponse,
+  validateUpCloudZonesResponse,
 } from './validation-upcloud';
 
 export const UPCLOUD_API_URL = 'https://api.upcloud.com/1.3';
@@ -136,6 +137,7 @@ export class UpCloudProvider implements Provider {
   private readonly logger: ProviderLogger;
   private templateId?: string;
   private planNames?: Set<string>;
+  private zoneNames?: Set<string>;
   constructor(username: string, password: string, options: UpCloudProviderRuntimeOptions = {}) {
     if (!username || !password)
       throw new ProviderError('upcloud', 401, 'UpCloud username and password are required', {
@@ -152,6 +154,7 @@ export class UpCloudProvider implements Provider {
     this.logger = options.logger ?? noLogger;
   }
   async createVM(config: VMConfig): Promise<VMInstance> {
+    await this.assertZoneAvailable(config.location);
     await this.assertPlanAvailable(this.sizes[config.size].type);
     const template = config.image ?? (await this.resolveTemplate());
     const body = {
@@ -242,6 +245,7 @@ export class UpCloudProvider implements Provider {
     return true;
   }
   async createVolume(config: VolumeConfig): Promise<VolumeInstance> {
+    await this.assertZoneAvailable(config.location);
     assertUpCloudVolumeSize(config.sizeGb, UPCLOUD_VOLUME_MIN_SIZE_GB, UPCLOUD_VOLUME_MAX_SIZE_GB);
     const response = await this.request('/storage', {
       method: 'POST',
@@ -375,6 +379,21 @@ export class UpCloudProvider implements Provider {
       if (isUpCloudNotFound(error)) return null;
       throw error;
     }
+  }
+  private async assertZoneAvailable(zone: string) {
+    if (!this.zoneNames) {
+      const response = await this.request('/zone');
+      this.zoneNames = new Set(
+        validateUpCloudZonesResponse(
+          await parseProviderJson(response, 'upcloud', 'zones'),
+          'zones'
+        ).map((value) => value.id)
+      );
+    }
+    if (!this.zoneNames.has(zone))
+      throw new ProviderError('upcloud', 400, 'UpCloud zone is not currently available: ' + zone, {
+        category: 'invalid_config',
+      });
   }
   private async assertPlanAvailable(plan: string) {
     if (!this.planNames) {

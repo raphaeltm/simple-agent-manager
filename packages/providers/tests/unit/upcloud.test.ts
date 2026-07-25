@@ -50,23 +50,25 @@ const json = (body: unknown, status = 200) =>
 describe('UpCloudProvider', () => {
   it('creates a server with Basic auth, cloud-init user_data, labels, and cloned root storage', async () => {
     const fetchMock = mock((url, _init) =>
-      url.endsWith('/plan')
-        ? json({ plans: { plan: [{ name: '2xCPU-4GB' }] } })
-        : url.endsWith('/storage/template')
-          ? json({
-              storages: {
-                storage: [
-                  storage({
-                    uuid: 'template-1',
-                    title: 'Ubuntu Server 24.04 LTS',
-                    type: 'template',
-                    template_type: 'cloud-init',
-                    zone: '',
-                  }),
-                ],
-              },
-            })
-          : json({ server: server() })
+      url.endsWith('/zone')
+        ? json({ zones: { zone: [{ id: 'de-fra1' }] } })
+        : url.endsWith('/plan')
+          ? json({ plans: { plan: [{ name: '2xCPU-4GB' }] } })
+          : url.endsWith('/storage/template')
+            ? json({
+                storages: {
+                  storage: [
+                    storage({
+                      uuid: 'template-1',
+                      title: 'Ubuntu Server 24.04 LTS',
+                      type: 'template',
+                      template_type: 'cloud-init',
+                      zone: '',
+                    }),
+                  ],
+                },
+              })
+            : json({ server: server() })
     );
     const p = new UpCloudProvider('api-user', 'sëcret', { ipPollTimeoutMs: 1 });
     const result = await p.createVM({
@@ -118,6 +120,7 @@ describe('UpCloudProvider', () => {
   });
   it('deletes the stopped server with storages=0, then only its root disk', async () => {
     const fetchMock = mock((url, init) => {
+      if (url.endsWith('/zone')) return json({ zones: { zone: [{ id: 'de-fra1' }] } });
       if ((init.method ?? 'GET') === 'GET') return json({ server: server({ state: 'stopped' }) });
       return new Response(null, { status: 204 });
     });
@@ -131,6 +134,7 @@ describe('UpCloudProvider', () => {
   });
   it('implements volume create, same-zone attach, virtio device discovery, detach, resize, and safe deletion', async () => {
     const fetchMock = mock((url, init) => {
+      if (url.endsWith('/zone')) return json({ zones: { zone: [{ id: 'de-fra1' }] } });
       if (url.endsWith('/server/srv-1') && (init.method ?? 'GET') === 'GET')
         return json({ server: server() });
       if (url.endsWith('/storage/vol-1') && (init.method ?? 'GET') === 'GET')

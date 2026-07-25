@@ -24,6 +24,8 @@ beforeEach(() => {
   globalThis.fetch = vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
     const url = String(input),
       method = init.method ?? 'GET';
+    if (url.endsWith('/zone'))
+      return new Response(JSON.stringify({ zones: { zone: [{ id: 'de-fra1' }] } }));
     if (url.endsWith('/plan'))
       return new Response(JSON.stringify({ plans: { plan: [{ name: '2xCPU-4GB' }] } }));
     if (url.endsWith('/storage/template'))

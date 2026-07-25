@@ -23,6 +23,9 @@ export interface UpCloudServer {
   ipAddresses: Array<{ access: string; address: string; family: string }>;
   storageDevices: Array<{ address: string; storage: string; title: string; bootDisk: string }>;
 }
+export interface UpCloudZone {
+  id: string;
+}
 export interface UpCloudPlan {
   name: string;
 }
@@ -51,6 +54,13 @@ export function validateUpCloudServersResponse(payload: unknown, context: string
   return requireArray(root, 'server', 'upcloud', context).map((v, i) =>
     server(expectObject(v, 'upcloud', `${context}[${i}]`), context)
   );
+}
+export function validateUpCloudZonesResponse(payload: unknown, context: string): UpCloudZone[] {
+  const root = expectObject(expectObject(payload, 'upcloud', context).zones, 'upcloud', context);
+  return requireArray(root, 'zone', 'upcloud', context).map((value, index) => {
+    const zone = expectObject(value, 'upcloud', context + '[' + index + ']');
+    return { id: requireString(zone, 'id', 'upcloud', context + '[' + index + ']') };
+  });
 }
 export function validateUpCloudPlansResponse(payload: unknown, context: string): UpCloudPlan[] {
   const root = expectObject(expectObject(payload, 'upcloud', context).plans, 'upcloud', context);
