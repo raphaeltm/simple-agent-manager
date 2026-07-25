@@ -275,6 +275,13 @@ export async function validateVultrCredentialWithProvider(
   );
 }
 
+function basicAuthHeader(username: string, password: string): string {
+  const bytes = new TextEncoder().encode(username + ':' + password);
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return 'Basic ' + btoa(binary);
+}
+
 export async function validateUpCloudCredentialWithProvider(
   username: string,
   password: string,
@@ -284,7 +291,7 @@ export async function validateUpCloudCredentialWithProvider(
     {
       displayName: 'UpCloud',
       request: 'https://api.upcloud.com/1.3/account',
-      init: { headers: { Authorization: 'Basic ' + btoa(username + ':' + password) } },
+      init: { headers: { Authorization: basicAuthHeader(username, password) } },
     },
     'UpCloud credential validated.',
     options

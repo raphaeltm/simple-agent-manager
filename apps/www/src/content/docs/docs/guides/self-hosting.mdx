@@ -313,6 +313,16 @@ VMs are billed to the cloud provider credential SAM uses for the node. In a typi
 
 Vultr bills hourly and the default region is `fra` (Frankfurt). When you create the Vultr Personal Access Token, its **IP access control** allowlist must be set to **Allow All IPv4/IPv6** — SAM calls the Vultr API from Cloudflare Workers, which have no static egress IP, so a restricted allowlist will reject provisioning requests.
 
+**UpCloud:**
+
+| Size               | Specs            | Approx. monthly |
+| ------------------ | ---------------- | --------------- |
+| Small (2xCPU-4GB)  | 2 vCPU, 4GB RAM  | ~$12            |
+| Medium (4xCPU-8GB) | 4 vCPU, 8GB RAM  | ~$24            |
+| Large (8xCPU-16GB) | 8 vCPU, 16GB RAM | ~$48            |
+
+UpCloud billing is usage-based. SAM verifies the configured simple plan and zone through the current API before provisioning; the default zone is `de-fra1` (Frankfurt). Create a dedicated API subaccount with API access and storage permissions, then enter its username and password in Settings. Prices are indicative; verify current regional pricing in the UpCloud calculator.
+
 ## Troubleshooting
 
 ### "error: failed to decrypt state"

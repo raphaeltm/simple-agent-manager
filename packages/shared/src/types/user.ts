@@ -100,7 +100,7 @@ export interface CredentialValidationStatus {
 
 /**
  * Create credential request — discriminated by provider.
- * Hetzner and Vultr use a single API token; Scaleway requires secretKey + projectId.
+ * Hetzner and Vultr use a single API token; UpCloud uses an API-subaccount username and password; Scaleway requires secretKey + projectId.
  */
 export type CreateCredentialRequest =
   | { provider: 'hetzner'; token: string }

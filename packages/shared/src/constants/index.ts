@@ -142,7 +142,7 @@ export {
   SCALING_PARAMS,
 } from './scaling';
 
-// Hetzner / Scaleway / GCP / Vultr Provider Defaults
+// Hetzner / Scaleway / GCP / Vultr / UpCloud Provider Defaults
 export {
   DEFAULT_GCP_API_TIMEOUT_MS,
   DEFAULT_GCP_DISK_SIZE_GB,
