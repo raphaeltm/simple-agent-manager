@@ -1,5 +1,8 @@
 import type { VMSize } from '@simple-agent-manager/shared';
-import { DEFAULT_DIGITALOCEAN_IMAGE, DEFAULT_DIGITALOCEAN_REGION } from '@simple-agent-manager/shared';
+import {
+  DEFAULT_DIGITALOCEAN_IMAGE,
+  DEFAULT_DIGITALOCEAN_REGION,
+} from '@simple-agent-manager/shared';
 
 import { digitalOceanTagsToLabels, labelsToDigitalOceanTags } from './digitalocean-tags';
 import {
@@ -44,7 +47,16 @@ const DIGITALOCEAN_LIST_PER_PAGE = 200;
 const DIGITALOCEAN_MAX_LIST_PAGES = 50;
 
 export const DIGITALOCEAN_LOCATIONS = [
-  'fra1', 'ams3', 'lon1', 'nyc1', 'nyc3', 'sfo3', 'tor1', 'sgp1', 'blr1', 'syd1',
+  'fra1',
+  'ams3',
+  'lon1',
+  'nyc1',
+  'nyc3',
+  'sfo3',
+  'tor1',
+  'sgp1',
+  'blr1',
+  'syd1',
 ] as const;
 
 const DIGITALOCEAN_LOCATION_META: Record<string, LocationMeta> = {
@@ -103,11 +115,11 @@ export interface DigitalOceanProviderRuntimeOptions {
  */
 export function classifyDigitalOceanError(
   statusCode: number | undefined,
-  message: string,
+  message: string
 ): ProviderErrorCategory {
   if (statusCode === 401 || statusCode === 403) return 'auth_error';
   if (statusCode === 429) return 'rate_limited';
-  if (typeof statusCode === 'number' && statusCode >= 500) return 'transient_capacity';
+  if (typeof statusCode === 'number' && statusCode >= 500) return 'transient';
   if (/not available|no capacity|out of stock|sold out|no available|unavailable/i.test(message)) {
     return 'transient_capacity';
   }
@@ -185,15 +197,32 @@ export class DigitalOceanProvider implements Provider {
     this.region = options?.region || DEFAULT_DIGITALOCEAN_REGION;
     this.defaultLocation = this.region;
     this.image = options?.image || DEFAULT_DIGITALOCEAN_IMAGE;
-    this.requestTimeoutMs = positiveOr(options?.requestTimeoutMs, DEFAULT_DIGITALOCEAN_REQUEST_TIMEOUT_MS);
-    this.ipPollTimeoutMs = positiveOr(options?.ipPollTimeoutMs, DEFAULT_DIGITALOCEAN_IP_POLL_TIMEOUT_MS);
-    this.ipPollIntervalMs = positiveOr(options?.ipPollIntervalMs, DEFAULT_DIGITALOCEAN_IP_POLL_INTERVAL_MS);
+    this.requestTimeoutMs = positiveOr(
+      options?.requestTimeoutMs,
+      DEFAULT_DIGITALOCEAN_REQUEST_TIMEOUT_MS
+    );
+    this.ipPollTimeoutMs = positiveOr(
+      options?.ipPollTimeoutMs,
+      DEFAULT_DIGITALOCEAN_IP_POLL_TIMEOUT_MS
+    );
+    this.ipPollIntervalMs = positiveOr(
+      options?.ipPollIntervalMs,
+      DEFAULT_DIGITALOCEAN_IP_POLL_INTERVAL_MS
+    );
     this.logger = options?.logger ?? noopProviderLogger;
-    this.volumeClient = new DigitalOceanVolumeClient(this.apiToken, (err) => this.mapProviderError(err), {
-      requestTimeoutMs: this.requestTimeoutMs,
-      actionPollTimeoutMs: positiveOr(options?.actionPollTimeoutMs, DEFAULT_DIGITALOCEAN_ACTION_POLL_TIMEOUT_MS),
-      actionPollIntervalMs: this.ipPollIntervalMs,
-    });
+    this.volumeClient = new DigitalOceanVolumeClient(
+      this.apiToken,
+      (err) => this.mapProviderError(err),
+      {
+        requestTimeoutMs: this.requestTimeoutMs,
+        actionPollTimeoutMs: positiveOr(
+          options?.actionPollTimeoutMs,
+          DEFAULT_DIGITALOCEAN_ACTION_POLL_TIMEOUT_MS
+        ),
+        actionPollIntervalMs: this.ipPollIntervalMs,
+        logger: this.logger,
+      }
+    );
   }
 
   async createVM(config: VMConfig): Promise<VMInstance> {
@@ -223,13 +252,16 @@ export class DigitalOceanProvider implements Provider {
 
     const data = validateDigitalOceanDropletResponse(
       await parseProviderJson(response, this.name, 'createVM'),
-      'createVM',
+      'createVM'
     );
 
     // The public IPv4 is assigned asynchronously (networks.v4 is empty until active).
     // Best-effort short poll; if it doesn't land in time, return empty ip — provisionNode
     // tolerates it and the heartbeat IP backfill self-heals on first heartbeat.
-    const ip = await this.pollForIp(String(data.droplet.id), extractPublicIp(data.droplet.networks_v4));
+    const ip = await this.pollForIp(
+      String(data.droplet.id),
+      extractPublicIp(data.droplet.networks_v4)
+    );
     return { ...this.mapDroplet(data.droplet), ip };
   }
 
@@ -309,21 +341,31 @@ export class DigitalOceanProvider implements Provider {
       const response = await this.doFetch(`/droplets?${params.toString()}`);
       const data = validateDigitalOceanDropletsResponse(
         await parseProviderJson(response, this.name, 'listVMs'),
-        'listVMs',
+        'listVMs'
       );
       all.push(...data.droplets);
       if (!data.hasNextPage) return all;
     }
-    this.logger.warn('digitalocean.list_truncated', { resource: 'droplets', maxPages: DIGITALOCEAN_MAX_LIST_PAGES });
+    this.logger.warn('digitalocean.list_truncated', {
+      resource: 'droplets',
+      maxPages: DIGITALOCEAN_MAX_LIST_PAGES,
+    });
     return all;
   }
 
-  private async getDropletRaw(id: string, timeoutMs?: number): Promise<DigitalOceanDropletPayload | null> {
+  private async getDropletRaw(
+    id: string,
+    timeoutMs?: number
+  ): Promise<DigitalOceanDropletPayload | null> {
     try {
-      const response = await this.doFetch(`/droplets/${encodeURIComponent(id)}`, undefined, timeoutMs);
+      const response = await this.doFetch(
+        `/droplets/${encodeURIComponent(id)}`,
+        undefined,
+        timeoutMs
+      );
       const data = validateDigitalOceanDropletResponse(
         await parseProviderJson(response, this.name, 'getVM'),
-        'getVM',
+        'getVM'
       );
       return data.droplet;
     } catch (err) {
@@ -344,7 +386,10 @@ export class DigitalOceanProvider implements Provider {
       const remaining = deadline - Date.now();
       if (remaining <= 0) break;
       try {
-        const droplet = await this.getDropletRaw(dropletId, Math.min(this.requestTimeoutMs, remaining));
+        const droplet = await this.getDropletRaw(
+          dropletId,
+          Math.min(this.requestTimeoutMs, remaining)
+        );
         const ip = extractPublicIp(droplet?.networks_v4 ?? []);
         if (ip) return ip;
       } catch {
@@ -376,7 +421,7 @@ export class DigitalOceanProvider implements Provider {
   private async doFetch(
     path: string,
     init?: RequestInit,
-    timeoutMs: number = this.requestTimeoutMs,
+    timeoutMs: number = this.requestTimeoutMs
   ): Promise<Response> {
     try {
       return await providerFetch(
@@ -390,7 +435,7 @@ export class DigitalOceanProvider implements Provider {
             ...(init?.headers ?? {}),
           },
         },
-        timeoutMs,
+        timeoutMs
       );
     } catch (err) {
       throw this.mapProviderError(err);

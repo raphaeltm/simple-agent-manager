@@ -21,13 +21,13 @@ The **Ideas** board holds work you've drafted but not started yet. Once an idea 
 
 Before you send, you can optionally choose:
 
-| Option                | Description                          | Default                  |
-| --------------------- | ------------------------------------ | ------------------------ |
-| **Agent profile**     | Which agent, model, and settings run | Project default profile  |
-| **Skill**             | A profile-override layer for the run | None                     |
-| **Workspace profile** | `full` or `lightweight` environment  | `full`                   |
-| **VM size**           | small, medium, or large              | Project default          |
-| **Provider**          | Hetzner, Scaleway, Vultr, Infomaniak, or GCP     | Project default provider |
+| Option                | Description                                                | Default                  |
+| --------------------- | ---------------------------------------------------------- | ------------------------ |
+| **Agent profile**     | Which agent, model, and settings run                       | Project default profile  |
+| **Skill**             | A profile-override layer for the run                       | None                     |
+| **Workspace profile** | `full` or `lightweight` environment                        | `full`                   |
+| **VM size**           | small, medium, or large                                    | Project default          |
+| **Provider**          | Hetzner, Scaleway, Vultr, Infomaniak, DigitalOcean, or GCP | Project default provider |
 
 ## Idea Lifecycle
 

@@ -1,6 +1,14 @@
-import { describe, expect,it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
-import { createProvider, HetznerProvider, InfomaniakProvider, ProviderError,ScalewayProvider, VultrProvider } from '../../src/index';
+import {
+  createProvider,
+  DigitalOceanProvider,
+  HetznerProvider,
+  InfomaniakProvider,
+  ProviderError,
+  ScalewayProvider,
+  VultrProvider,
+} from '../../src/index';
 
 describe('createProvider', () => {
   it('should return HetznerProvider for hetzner config', () => {
@@ -19,17 +27,17 @@ describe('createProvider', () => {
   });
 
   it('should throw ProviderError for unknown provider type', () => {
-    expect(() =>
-      createProvider({ provider: 'unknown' as 'hetzner', apiToken: 'x' }),
-    ).toThrow(ProviderError);
+    expect(() => createProvider({ provider: 'unknown' as 'hetzner', apiToken: 'x' })).toThrow(
+      ProviderError
+    );
   });
 
   it('should throw ProviderError with descriptive message for unknown provider', () => {
     try {
-      createProvider({ provider: 'digitalocean' as 'hetzner', apiToken: 'x' });
+      createProvider({ provider: 'unsupported' as 'hetzner', apiToken: 'x' });
     } catch (err) {
       expect(err).toBeInstanceOf(ProviderError);
-      expect((err as ProviderError).message).toContain('digitalocean');
+      expect((err as ProviderError).message).toContain('unsupported');
       expect((err as ProviderError).providerName).toBe('factory');
     }
   });
@@ -51,7 +59,12 @@ describe('createProvider', () => {
   });
 
   it('should return InfomaniakProvider for explicit application credentials', () => {
-    const provider = createProvider({ provider: 'infomaniak', applicationCredentialId: 'id', applicationCredentialSecret: 'secret', region: 'dc3-a' });
+    const provider = createProvider({
+      provider: 'infomaniak',
+      applicationCredentialId: 'id',
+      applicationCredentialSecret: 'secret',
+      region: 'dc3-a',
+    });
     expect(provider).toBeInstanceOf(InfomaniakProvider);
     expect(provider.name).toBe('infomaniak');
     expect(provider.defaultLocation).toBe('dc3-a');
@@ -72,6 +85,18 @@ describe('createProvider', () => {
     });
     expect(provider).toBeInstanceOf(VultrProvider);
     expect(provider.defaultLocation).toBe('ewr');
+  });
+
+  it('should return DigitalOceanProvider with runtime tuning', () => {
+    const provider = createProvider({
+      provider: 'digitalocean',
+      apiToken: 'do-key',
+      region: 'ams3',
+      actionPollTimeoutMs: 500,
+    });
+    expect(provider).toBeInstanceOf(DigitalOceanProvider);
+    expect(provider.name).toBe('digitalocean');
+    expect(provider.defaultLocation).toBe('ams3');
   });
 
   it('should not access process.env', () => {

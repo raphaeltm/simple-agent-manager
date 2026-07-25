@@ -401,13 +401,21 @@ Webhook damping uses Cloudflare KV's eventually consistent read-update-write beh
 
 ## External API Timeouts
 
-| Variable                                   | Default  | Description                                                           |
-| ------------------------------------------ | -------- | --------------------------------------------------------------------- |
-| `HETZNER_API_TIMEOUT_MS`                   | `30000`  | Hetzner API request timeout                                           |
-| `CF_API_TIMEOUT_MS`                        | `30000`  | Cloudflare API request timeout                                        |
-| `GCP_API_TIMEOUT_MS`                       | `30000`  | GCP OAuth, IAM, and Compute request timeout                           |
-| `NODE_AGENT_REQUEST_TIMEOUT_MS`            | `30000`  | VM Agent request timeout                                              |
-| `CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS` | `120000` | Instant-session create-workspace budget (includes in-container clone) |
+| Variable                                   | Default            | Description                                                           |
+| ------------------------------------------ | ------------------ | --------------------------------------------------------------------- |
+| `HETZNER_API_TIMEOUT_MS`                   | `30000`            | Hetzner API request timeout                                           |
+| `CF_API_TIMEOUT_MS`                        | `30000`            | Cloudflare API request timeout                                        |
+| `GCP_API_TIMEOUT_MS`                       | `30000`            | GCP OAuth, IAM, and Compute request timeout                           |
+| `NODE_AGENT_REQUEST_TIMEOUT_MS`            | `30000`            | VM Agent request timeout                                              |
+| `DIGITALOCEAN_API_TIMEOUT_MS`              | `30000`            | DigitalOcean API request timeout                                      |
+| `DIGITALOCEAN_IP_POLL_TIMEOUT_MS`          | `20000`            | Bounded best-effort public IPv4 poll budget                           |
+| `DIGITALOCEAN_IP_POLL_INTERVAL_MS`         | `3000`             | Public IPv4 poll interval                                             |
+| `DIGITALOCEAN_ACTION_POLL_TIMEOUT_MS`      | `60000`            | Block Storage action completion budget                                |
+| `DIGITALOCEAN_ACTION_POLL_INTERVAL_MS`     | `1000`             | Block Storage action poll interval                                    |
+| `DIGITALOCEAN_MAX_LIST_PAGES`              | `20`               | Maximum pages per DigitalOcean list request                           |
+| `DIGITALOCEAN_REGION`                      | `fra1`             | Default DigitalOcean region                                           |
+| `DIGITALOCEAN_IMAGE`                       | `ubuntu-24-04-x64` | Default Droplet image slug                                            |
+| `CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS` | `120000`           | Instant-session create-workspace budget (includes in-container clone) |
 
 ## Admin Observability
 

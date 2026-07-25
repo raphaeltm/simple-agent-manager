@@ -132,9 +132,7 @@ describe('GET /api/providers/catalog', () => {
   });
 
   it('should return catalog with correct locations and sizes for a single provider credential', async () => {
-    createMockDB([
-      { provider: 'hetzner', encryptedToken: 'enc-token', iv: 'test-iv' },
-    ]);
+    createMockDB([{ provider: 'hetzner', encryptedToken: 'enc-token', iv: 'test-iv' }]);
 
     const mockProvider = makeMockProvider({
       name: 'hetzner',
@@ -172,23 +170,27 @@ describe('GET /api/providers/catalog', () => {
     ]);
 
     mockCreateProvider
-      .mockReturnValueOnce(makeMockProvider({
-        name: 'hetzner',
-        locations: ['fsn1'],
-        locationMetadata: { fsn1: { name: 'Falkenstein', country: 'DE' } },
-        defaultLocation: 'fsn1',
-      }))
-      .mockReturnValueOnce(makeMockProvider({
-        name: 'scaleway',
-        locations: ['fr-par-1'],
-        locationMetadata: { 'fr-par-1': { name: 'Paris 1', country: 'FR' } },
-        sizes: {
-          small: { type: 'DEV1-M', price: '~€0.024/hr', vcpu: 3, ramGb: 4, storageGb: 40 },
-          medium: { type: 'DEV1-XL', price: '~€0.048/hr', vcpu: 4, ramGb: 12, storageGb: 120 },
-          large: { type: 'GP1-S', price: '~€0.084/hr', vcpu: 8, ramGb: 32, storageGb: 600 },
-        },
-        defaultLocation: 'fr-par-1',
-      }));
+      .mockReturnValueOnce(
+        makeMockProvider({
+          name: 'hetzner',
+          locations: ['fsn1'],
+          locationMetadata: { fsn1: { name: 'Falkenstein', country: 'DE' } },
+          defaultLocation: 'fsn1',
+        })
+      )
+      .mockReturnValueOnce(
+        makeMockProvider({
+          name: 'scaleway',
+          locations: ['fr-par-1'],
+          locationMetadata: { 'fr-par-1': { name: 'Paris 1', country: 'FR' } },
+          sizes: {
+            small: { type: 'DEV1-M', price: '~€0.024/hr', vcpu: 3, ramGb: 4, storageGb: 40 },
+            medium: { type: 'DEV1-XL', price: '~€0.048/hr', vcpu: 4, ramGb: 12, storageGb: 120 },
+            large: { type: 'GP1-S', price: '~€0.084/hr', vcpu: 8, ramGb: 32, storageGb: 600 },
+          },
+          defaultLocation: 'fr-par-1',
+        })
+      );
 
     const res = await app.request('/api/providers/catalog', { method: 'GET' }, makeEnv());
 
@@ -200,23 +202,23 @@ describe('GET /api/providers/catalog', () => {
   });
 
   it('includes a vultr catalog when the user has a vultr credential', async () => {
-    createMockDB([
-      { provider: 'vultr', encryptedToken: 'enc-vultr', iv: 'iv-v' },
-    ]);
-    mockCreateProvider.mockReturnValue(makeMockProvider({
-      name: 'vultr',
-      locations: ['fra', 'ewr'],
-      locationMetadata: {
-        fra: { name: 'Frankfurt', country: 'DE' },
-        ewr: { name: 'New Jersey', country: 'US' },
-      },
-      sizes: {
-        small: { type: 'vc2-2c-4gb', price: '~$20/mo', vcpu: 2, ramGb: 4, storageGb: 80 },
-        medium: { type: 'vc2-4c-8gb', price: '~$40/mo', vcpu: 4, ramGb: 8, storageGb: 160 },
-        large: { type: 'vc2-6c-16gb', price: '~$80/mo', vcpu: 6, ramGb: 16, storageGb: 320 },
-      },
-      defaultLocation: 'fra',
-    }));
+    createMockDB([{ provider: 'vultr', encryptedToken: 'enc-vultr', iv: 'iv-v' }]);
+    mockCreateProvider.mockReturnValue(
+      makeMockProvider({
+        name: 'vultr',
+        locations: ['fra', 'ewr'],
+        locationMetadata: {
+          fra: { name: 'Frankfurt', country: 'DE' },
+          ewr: { name: 'New Jersey', country: 'US' },
+        },
+        sizes: {
+          small: { type: 'vc2-2c-4gb', price: '~$20/mo', vcpu: 2, ramGb: 4, storageGb: 80 },
+          medium: { type: 'vc2-4c-8gb', price: '~$40/mo', vcpu: 4, ramGb: 8, storageGb: 160 },
+          large: { type: 'vc2-6c-16gb', price: '~$80/mo', vcpu: 6, ramGb: 16, storageGb: 320 },
+        },
+        defaultLocation: 'fra',
+      })
+    );
 
     const res = await app.request('/api/providers/catalog', { method: 'GET' }, makeEnv());
     const body = (await res.json()) as ProviderCatalogResponse;
@@ -227,14 +229,46 @@ describe('GET /api/providers/catalog', () => {
   });
 
   it('omits vultr from the catalog when the user has no vultr credential', async () => {
-    createMockDB([
-      { provider: 'hetzner', encryptedToken: 'enc-hetzner', iv: 'iv-1' },
-    ]);
+    createMockDB([{ provider: 'hetzner', encryptedToken: 'enc-hetzner', iv: 'iv-1' }]);
     mockCreateProvider.mockReturnValue(makeMockProvider({ name: 'hetzner' }));
 
     const res = await app.request('/api/providers/catalog', { method: 'GET' }, makeEnv());
     const body = (await res.json()) as ProviderCatalogResponse;
     expect(body.catalogs.map((c) => c.provider)).not.toContain('vultr');
+  });
+
+  it('includes a DigitalOcean catalog when the user has a DigitalOcean credential', async () => {
+    createMockDB([{ provider: 'digitalocean', encryptedToken: 'enc-digitalocean', iv: 'iv-do' }]);
+    mockCreateProvider.mockReturnValue(
+      makeMockProvider({
+        name: 'digitalocean',
+        locations: ['fra1', 'nyc3'],
+        locationMetadata: {
+          fra1: { name: 'Frankfurt 1', country: 'DE' },
+          nyc3: { name: 'New York 3', country: 'US' },
+        },
+        sizes: {
+          small: { type: 's-2vcpu-4gb', price: '~/mo', vcpu: 2, ramGb: 4, storageGb: 80 },
+          medium: { type: 's-4vcpu-8gb', price: '~/mo', vcpu: 4, ramGb: 8, storageGb: 160 },
+          large: { type: 's-8vcpu-16gb', price: '~/mo', vcpu: 8, ramGb: 16, storageGb: 320 },
+        },
+        defaultLocation: 'fra1',
+      })
+    );
+    const res = await app.request('/api/providers/catalog', { method: 'GET' }, makeEnv());
+    const body = (await res.json()) as ProviderCatalogResponse;
+    expect(body.catalogs).toHaveLength(1);
+    expect(body.catalogs[0]!.provider).toBe('digitalocean');
+    expect(body.catalogs[0]!.defaultLocation).toBe('fra1');
+    expect(body.catalogs[0]!.sizes.small.type).toBe('s-2vcpu-4gb');
+  });
+
+  it('omits DigitalOcean from the catalog when the user has no DigitalOcean credential', async () => {
+    createMockDB([{ provider: 'hetzner', encryptedToken: 'enc-hetzner', iv: 'iv-1' }]);
+    mockCreateProvider.mockReturnValue(makeMockProvider({ name: 'hetzner' }));
+    const res = await app.request('/api/providers/catalog', { method: 'GET' }, makeEnv());
+    const body = (await res.json()) as ProviderCatalogResponse;
+    expect(body.catalogs.map((c) => c.provider)).not.toContain('digitalocean');
   });
 
   it('should skip providers with invalid credentials (catch-and-continue behavior)', async () => {
@@ -248,12 +282,14 @@ describe('GET /api/providers/catalog', () => {
       .mockImplementationOnce(() => {
         throw new Error('Invalid credential format');
       })
-      .mockReturnValueOnce(makeMockProvider({
-        name: 'scaleway',
-        locations: ['fr-par-1'],
-        locationMetadata: { 'fr-par-1': { name: 'Paris 1', country: 'FR' } },
-        defaultLocation: 'fr-par-1',
-      }));
+      .mockReturnValueOnce(
+        makeMockProvider({
+          name: 'scaleway',
+          locations: ['fr-par-1'],
+          locationMetadata: { 'fr-par-1': { name: 'Paris 1', country: 'FR' } },
+          defaultLocation: 'fr-par-1',
+        })
+      );
 
     const res = await app.request('/api/providers/catalog', { method: 'GET' }, makeEnv());
 
@@ -265,9 +301,7 @@ describe('GET /api/providers/catalog', () => {
   });
 
   it('should use location id as fallback name when metadata is missing', async () => {
-    createMockDB([
-      { provider: 'hetzner', encryptedToken: 'enc-token', iv: 'test-iv' },
-    ]);
+    createMockDB([{ provider: 'hetzner', encryptedToken: 'enc-token', iv: 'test-iv' }]);
 
     // Provider with a location that has no metadata entry
     mockCreateProvider.mockReturnValue({
@@ -294,9 +328,7 @@ describe('GET /api/providers/catalog', () => {
   });
 
   it('should return empty catalogs when all providers fail', async () => {
-    createMockDB([
-      { provider: 'hetzner', encryptedToken: 'enc-bad', iv: 'iv-bad' },
-    ]);
+    createMockDB([{ provider: 'hetzner', encryptedToken: 'enc-bad', iv: 'iv-bad' }]);
 
     mockCreateProvider.mockImplementation(() => {
       throw new Error('All providers broken');

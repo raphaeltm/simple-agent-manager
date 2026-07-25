@@ -2041,3 +2041,13 @@ describe('Docker daemon.json live-restore', () => {
     expect(dockerConfig['live-restore']).toBe(true);
   });
 });
+
+describe('cloud-init supports the digitalocean provider', () => {
+  it('accepts digitalocean and generates provider-aware parseable YAML', () => {
+    expect(VALID_CLOUD_PROVIDERS).toContain('digitalocean');
+    expect(() => validateCloudInitVariables(baseVariables({ provider: 'digitalocean' }))).not.toThrow();
+    const config = generateCloudInit(baseVariables({ provider: 'digitalocean' }));
+    expect(() => YAML.parse(config)).not.toThrow();
+    expect(config).toContain('Environment=PROVIDER=digitalocean');
+  });
+});

@@ -442,3 +442,53 @@ describe('quota enforcement pattern: credential source, not existence', () => {
     });
   });
 });
+// Rule 28: every fallback branch for a NEW provider (digitalocean) must be behaviorally
+// covered — active-project → user → platform → null — plus the critical
+// "inactive scoped row does NOT fall through" invariant.
+describe('resolveCredentialSource digitalocean fallback matrix (rule 28)', () => {
+  const activeProjectRow = {
+    attachmentActive: true,
+    consumerTarget: 'digitalocean',
+    configurationActive: true,
+    credentialId: 'cc-digitalocean',
+    credentialActive: true,
+  };
+
+  it('active project attachment → project', async () => {
+    const db = makeCredentialSourceDbMock([activeProjectRow], [{ id: 'u', provider: 'digitalocean' }]);
+    await expect(
+      resolveCredentialSource(db as never, 'member-a', 'digitalocean', 'project-1'),
+    ).resolves.toEqual({ credentialSource: 'project', providerName: 'digitalocean' });
+  });
+
+  it('inactive project attachment halts — does NOT fall through to the user digitalocean credential', async () => {
+    const db = makeCredentialSourceDbMock(
+      [{ ...activeProjectRow, attachmentActive: false }],
+      [{ id: 'u', provider: 'digitalocean' }],
+    );
+    await expect(
+      resolveCredentialSource(db as never, 'member-a', 'digitalocean', 'project-1'),
+    ).resolves.toBeNull();
+  });
+
+  it('no project attachment → user digitalocean credential', async () => {
+    const db = makeCredentialSourceDbMock([], [{ id: 'u', provider: 'digitalocean' }]);
+    await expect(
+      resolveCredentialSource(db as never, 'member-a', 'digitalocean', 'project-1'),
+    ).resolves.toEqual({ credentialSource: 'user', providerName: 'digitalocean' });
+  });
+
+  it('no project, no user → platform digitalocean credential', async () => {
+    const db = makeCredentialSourceDbMock([], [], [{ id: 'p', provider: 'digitalocean' }]);
+    await expect(
+      resolveCredentialSource(db as never, 'member-a', 'digitalocean', 'project-1'),
+    ).resolves.toEqual({ credentialSource: 'platform', providerName: 'digitalocean' });
+  });
+
+  it('nothing at any tier → null', async () => {
+    const db = makeCredentialSourceDbMock([], [], []);
+    await expect(
+      resolveCredentialSource(db as never, 'member-a', 'digitalocean', 'project-1'),
+    ).resolves.toBeNull();
+  });
+});

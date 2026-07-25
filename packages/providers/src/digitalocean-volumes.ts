@@ -5,6 +5,7 @@ import {
 } from './digitalocean-tags';
 import { providerFetch } from './provider-fetch';
 import type {
+  ProviderLogger,
   VolumeAttachmentConfig,
   VolumeCapabilities,
   VolumeConfig,
@@ -66,6 +67,7 @@ export interface DigitalOceanVolumeClientOptions {
   requestTimeoutMs: number;
   actionPollTimeoutMs: number;
   actionPollIntervalMs: number;
+  logger?: ProviderLogger;
 }
 
 /**
@@ -90,6 +92,7 @@ export class DigitalOceanVolumeClient {
   private readonly requestTimeoutMs: number;
   private readonly actionPollTimeoutMs: number;
   private readonly actionPollIntervalMs: number;
+  private readonly logger?: ProviderLogger;
 
   constructor(
     private readonly apiToken: string,
@@ -99,6 +102,7 @@ export class DigitalOceanVolumeClient {
     this.requestTimeoutMs = options.requestTimeoutMs;
     this.actionPollTimeoutMs = options.actionPollTimeoutMs;
     this.actionPollIntervalMs = options.actionPollIntervalMs;
+    this.logger = options.logger;
   }
 
   async createVolume(config: VolumeConfig): Promise<VolumeInstance> {
@@ -249,6 +253,7 @@ export class DigitalOceanVolumeClient {
       all.push(...data.volumes);
       if (!data.hasNextPage) return all;
     }
+    this.logger?.warn('digitalocean.list_truncated', { resource: 'volumes', maxPages: DIGITALOCEAN_MAX_LIST_PAGES });
     return all;
   }
 

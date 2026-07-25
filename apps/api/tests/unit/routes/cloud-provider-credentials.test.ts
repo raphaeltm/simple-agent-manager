@@ -265,6 +265,36 @@ describe('POST /api/credentials — cloud-provider credentials', () => {
     expect(body.message).toContain('token');
   });
 
+  it('creates a digitalocean credential as a raw token', async () => {
+    const res = await app.request(
+      '/api/credentials',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: 'digitalocean', token: 'do-api-key' }),
+      },
+      mockEnv
+    );
+    expect(res.status).toBe(201);
+    expect((await res.json()).provider).toBe('digitalocean');
+    const { encrypt } = await import('../../../src/services/encryption');
+    expect(encrypt).toHaveBeenCalledWith('do-api-key', expect.anything());
+  });
+
+  it('rejects a digitalocean credential without a token', async () => {
+    const res = await app.request(
+      '/api/credentials',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: 'digitalocean' }),
+      },
+      mockEnv
+    );
+    expect(res.status).toBe(400);
+    expect((await res.json()).message).toContain('token');
+  });
+
   it('upserts when a credential for the same provider already exists, returning 200', async () => {
     // Simulate existing credential row
     mockDB.limit.mockResolvedValueOnce([
@@ -315,7 +345,7 @@ describe('POST /api/credentials — cloud-provider credentials', () => {
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ provider: 'digitalocean', token: 'do-token' }),
+        body: JSON.stringify({ provider: 'unsupported-cloud', token: 'token' }),
       },
       mockEnv
     );
@@ -508,6 +538,41 @@ describe('POST /api/credentials/validate — cloud-provider validation', () => {
       '/api/credentials/validate',
       { provider: 'vultr', token: 'bogus-key' },
       'Vultr'
+    );
+    expect(encrypt).not.toHaveBeenCalled();
+  });
+
+  it('validates a DigitalOcean token against GET /v2/account without storing it', async () => {
+    const { encrypt } = await import('../../../src/services/encryption');
+    const res = await app.request(
+      '/api/credentials/validate',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: 'digitalocean', token: 'digitalocean-api-key' }),
+      },
+      mockEnv
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.valid).toBe(true);
+    expect(body.provider).toBe('digitalocean');
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      'https://api.digitalocean.com/v2/account',
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: 'Bearer digitalocean-api-key' }),
+      })
+    );
+    expect(encrypt).not.toHaveBeenCalled();
+  });
+
+  it('returns a clean sanitized 400 when DigitalOcean rejects a bogus key (nothing stored)', async () => {
+    const { encrypt } = await import('../../../src/services/encryption');
+    await expectCredentialValidationFailure(
+      app,
+      '/api/credentials/validate',
+      { provider: 'digitalocean', token: 'bogus-key' },
+      'DigitalOcean'
     );
     expect(encrypt).not.toHaveBeenCalled();
   });

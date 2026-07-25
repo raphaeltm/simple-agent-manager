@@ -90,8 +90,8 @@ describe('buildProviderConfig — edge cases', () => {
   });
 
   it('throws with descriptive message for unsupported provider', () => {
-    expect(() => buildProviderConfig('digitalocean' as any, 'token')).toThrow(
-      'Unsupported provider: digitalocean',
+    expect(() => buildProviderConfig('unsupported-cloud' as any, 'token')).toThrow(
+      'Unsupported provider: unsupported-cloud',
     );
   });
 
