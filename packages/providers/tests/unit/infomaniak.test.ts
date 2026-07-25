@@ -137,6 +137,111 @@ describe('InfomaniakProvider', () => {
     ).rejects.toThrow('Detach');
   });
 
+  it('resolves OpenStack catalogs and creates a Nova server with exact cloud-init payload', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url.endsWith('/auth/tokens')) return auth();
+      if (url === `${IMAGE}/v2/images?name=Ubuntu%2024.04%20noble`)
+        return json({ images: [{ id: 'image-1', name: 'Ubuntu 24.04 noble' }] });
+      if (url === `${COMPUTE}/flavors/detail?name=a2-ram4-disk20-perf1`)
+        return json({ flavors: [{ id: 'flavor-1', name: 'a2-ram4-disk20-perf1' }] });
+      if (url === `${NETWORK}/v2.0/networks?name=ext-net1`)
+        return json({ networks: [{ id: 'network-1', name: 'ext-net1' }] });
+      if (url === `${COMPUTE}/servers` && init?.method === 'POST')
+        return json({ server: { id: 'server-1' } }, 202);
+      if (url === `${COMPUTE}/servers/server-1`)
+        return json({
+          server: {
+            id: 'server-1',
+            name: 'sam-node',
+            status: 'ACTIVE',
+            addresses: { 'ext-net1': [{ version: 4, addr: '203.0.113.10' }] },
+            flavor: { id: 'flavor-1', original_name: 'a2-ram4-disk20-perf1' },
+            created: '2026-07-25T00:00:00Z',
+            metadata: { project: 'p1' },
+          },
+        });
+      throw new Error(`Unexpected request ${init?.method ?? 'GET'} ${url}`);
+    });
+    const provider = new InfomaniakProvider('id', 'secret', { authUrl: AUTH_URL });
+    const result = await provider.createVM({
+      name: 'sam-node',
+      size: 'small',
+      location: 'dc4-a',
+      image: 'Ubuntu 24.04 noble',
+      userData: '#cloud-config\nusers: []',
+      labels: { project: 'p1' },
+    });
+    expect(result).toMatchObject({ id: 'server-1', ip: '203.0.113.10', status: 'running' });
+    const createCall = fetchMock.mock.calls.find(
+      ([input, init]) => String(input) === `${COMPUTE}/servers` && init?.method === 'POST'
+    );
+    expect(JSON.parse(String(createCall?.[1]?.body))).toEqual({
+      server: {
+        name: 'sam-node',
+        imageRef: 'image-1',
+        flavorRef: 'flavor-1',
+        networks: [{ uuid: 'network-1' }],
+        user_data: 'I2Nsb3VkLWNvbmZpZwp1c2VyczogW10=',
+        metadata: { project: 'p1' },
+      },
+    });
+  });
+
+  it('attaches through Nova with the exact payload and returns stable device discovery data', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(auth())
+      .mockResolvedValueOnce(json({ volumeAttachment: { id: 'attachment-1' } }, 202))
+      .mockResolvedValueOnce(
+        json({ volume: volume({ status: 'in-use', attachments: [{ server_id: 'server-1' }] }) })
+      );
+    const provider = new InfomaniakProvider('id', 'secret', { authUrl: AUTH_URL });
+    const result = await provider.attachVolume({
+      volumeId: 'vol-1',
+      serverId: 'server-1',
+      location: 'dc4-a',
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      `${COMPUTE}/servers/server-1/os-volume_attachments`,
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ volumeAttachment: { volumeId: 'vol-1' } }),
+      })
+    );
+    expect(result).toMatchObject({
+      attachedServerId: 'server-1',
+      status: 'attached',
+      linuxDevice: '/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_vol-1',
+    });
+  });
+
+  it('extends a detached Cinder volume with the exact grow-only action payload', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(auth())
+      .mockResolvedValueOnce(json({ volume: volume({ size: 20 }) }))
+      .mockResolvedValueOnce(new Response(null, { status: 202 }))
+      .mockResolvedValueOnce(json({ volume: volume({ size: 40 }) }));
+    const provider = new InfomaniakProvider('id', 'secret', { authUrl: AUTH_URL });
+    const result = await provider.resizeVolume({
+      volumeId: 'vol-1',
+      location: 'dc4-a',
+      sizeGb: 40,
+      currentSizeGb: 20,
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      `${VOLUME}/volumes/vol-1/action`,
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ 'os-extend': { new_size: 40 } }),
+      })
+    );
+    expect(result.sizeGb).toBe(40);
+  });
+
   it('normalizes status and errors', () => {
     expect(mapInfomaniakStatus('ACTIVE')).toBe('running');
     expect(mapInfomaniakStatus('SHUTOFF')).toBe('off');
