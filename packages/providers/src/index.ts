@@ -135,6 +135,7 @@ export function createProvider(config: ProviderConfig): Provider {
         {
           authUrl: config.authUrl,
           region: config.region,
+          endpointInterface: config.endpointInterface,
           networkName: config.networkName,
           imageName: config.imageName,
           volumeType: config.volumeType,

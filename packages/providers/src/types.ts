@@ -322,6 +322,7 @@ export interface InfomaniakProviderConfig {
   applicationCredentialSecret: string;
   authUrl?: string;
   region?: string;
+  endpointInterface?: string;
   networkName?: string;
   imageName?: string;
   volumeType?: string;

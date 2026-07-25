@@ -28,6 +28,7 @@ import {
 
 export const DEFAULT_INFOMANIAK_AUTH_URL = 'https://api.pub1.infomaniak.cloud/identity/v3';
 export const DEFAULT_INFOMANIAK_REGION = 'dc4-a';
+export const DEFAULT_INFOMANIAK_ENDPOINT_INTERFACE = 'public';
 export const DEFAULT_INFOMANIAK_NETWORK_NAME = 'ext-net1';
 export const DEFAULT_INFOMANIAK_IMAGE_NAME = 'Ubuntu 24.04 noble';
 export const DEFAULT_INFOMANIAK_VOLUME_TYPE = 'CEPH_1_perf1';
@@ -74,6 +75,7 @@ export const INFOMANIAK_VOLUME_CAPABILITIES: VolumeCapabilities = {
 export interface InfomaniakProviderOptions {
   authUrl?: string;
   region?: string;
+  endpointInterface?: string;
   networkName?: string;
   imageName?: string;
   volumeType?: string;
@@ -184,6 +186,7 @@ export class InfomaniakProvider implements Provider {
   readonly defaultLocation: string;
   private readonly authUrl: string;
   private readonly region: string;
+  private readonly endpointInterface: string;
   private readonly networkName: string;
   private readonly imageName: string;
   private readonly volumeType: string;
@@ -202,6 +205,7 @@ export class InfomaniakProvider implements Provider {
     this.authUrl = (options.authUrl ?? DEFAULT_INFOMANIAK_AUTH_URL).replace(/\/$/, '');
     this.region = options.region ?? DEFAULT_INFOMANIAK_REGION;
     this.defaultLocation = this.region;
+    this.endpointInterface = options.endpointInterface ?? DEFAULT_INFOMANIAK_ENDPOINT_INTERFACE;
     this.networkName = options.networkName ?? DEFAULT_INFOMANIAK_NETWORK_NAME;
     this.imageName = options.imageName ?? DEFAULT_INFOMANIAK_IMAGE_NAME;
     this.volumeType = options.volumeType ?? DEFAULT_INFOMANIAK_VOLUME_TYPE;
@@ -249,7 +253,7 @@ export class InfomaniakProvider implements Provider {
         throw new ProviderError('infomaniak', undefined, `Keystone catalog is missing ${type}`);
       const match = asArray(service.endpoints, `${type}.endpoints`)
         .map((value, i) => asRecord(value, `${type}.endpoints[${i}]`))
-        .find((item) => item.region === this.region && item.interface === 'public');
+        .find((item) => item.region === this.region && item.interface === this.endpointInterface);
       if (!match)
         throw new ProviderError(
           'infomaniak',

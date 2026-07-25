@@ -302,6 +302,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   // Infomaniak OpenStack provider tuning
   INFOMANIAK_AUTH_URL?: string;
   INFOMANIAK_REGION?: string;
+  INFOMANIAK_ENDPOINT_INTERFACE?: string;
   INFOMANIAK_NETWORK_NAME?: string;
   INFOMANIAK_IMAGE_NAME?: string;
   INFOMANIAK_VOLUME_TYPE?: string;

@@ -1,4 +1,4 @@
-import { describe, expect,it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import {
   buildProviderConfig,
@@ -36,7 +36,14 @@ describe('serializeCredentialToken', () => {
   });
 
   it('serializes Infomaniak application credential fields together', () => {
-    expect(JSON.parse(serializeCredentialToken('infomaniak', { applicationCredentialId: 'app-id', applicationCredentialSecret: 'app-secret' }))).toEqual({ applicationCredentialId: 'app-id', applicationCredentialSecret: 'app-secret' });
+    expect(
+      JSON.parse(
+        serializeCredentialToken('infomaniak', {
+          applicationCredentialId: 'app-id',
+          applicationCredentialSecret: 'app-secret',
+        })
+      )
+    ).toEqual({ applicationCredentialId: 'app-id', applicationCredentialSecret: 'app-secret' });
   });
 });
 
@@ -63,13 +70,33 @@ describe('buildProviderConfig', () => {
   });
 
   it('builds Infomaniak config and threads operational overrides', () => {
-    const stored = serializeCredentialToken('infomaniak', { applicationCredentialId: 'app-id', applicationCredentialSecret: 'app-secret' });
-    expect(buildProviderConfig('infomaniak', stored, { INFOMANIAK_REGION: 'dc3-a', INFOMANIAK_API_TIMEOUT_MS: '20000', INFOMANIAK_IMAGE_NAME: 'Ubuntu 24.04 noble' })).toMatchObject({ provider: 'infomaniak', applicationCredentialId: 'app-id', applicationCredentialSecret: 'app-secret', region: 'dc3-a', requestTimeoutMs: 20000, imageName: 'Ubuntu 24.04 noble' });
+    const stored = serializeCredentialToken('infomaniak', {
+      applicationCredentialId: 'app-id',
+      applicationCredentialSecret: 'app-secret',
+    });
+    expect(
+      buildProviderConfig('infomaniak', stored, {
+        INFOMANIAK_REGION: 'dc3-a',
+        INFOMANIAK_ENDPOINT_INTERFACE: 'internal',
+        INFOMANIAK_API_TIMEOUT_MS: '20000',
+        INFOMANIAK_IMAGE_NAME: 'Ubuntu 24.04 noble',
+      })
+    ).toMatchObject({
+      provider: 'infomaniak',
+      applicationCredentialId: 'app-id',
+      applicationCredentialSecret: 'app-secret',
+      region: 'dc3-a',
+      endpointInterface: 'internal',
+      requestTimeoutMs: 20000,
+      imageName: 'Ubuntu 24.04 noble',
+    });
   });
 
   it('rejects malformed stored Infomaniak credentials', () => {
     expect(() => buildProviderConfig('infomaniak', 'not-json')).toThrow('malformed stored data');
-    expect(() => buildProviderConfig('infomaniak', '{}')).toThrow('missing application credential ID or secret');
+    expect(() => buildProviderConfig('infomaniak', '{}')).toThrow(
+      'missing application credential ID or secret'
+    );
   });
 
   it('should build VultrProviderConfig from raw token string', () => {
@@ -106,7 +133,10 @@ describe('buildProviderConfig', () => {
 
   it('should round-trip vultr serialize -> build', () => {
     const serialized = serializeCredentialToken('vultr', { token: 'vk-123' });
-    expect(buildProviderConfig('vultr', serialized)).toMatchObject({ provider: 'vultr', apiToken: 'vk-123' });
+    expect(buildProviderConfig('vultr', serialized)).toMatchObject({
+      provider: 'vultr',
+      apiToken: 'vk-123',
+    });
   });
 
   it('should throw for unsupported provider', () => {
@@ -134,7 +164,6 @@ describe('buildProviderConfig', () => {
     });
   });
 });
-
 
 describe('versioned GCP credential parsing', () => {
   const legacy = {
@@ -180,18 +209,24 @@ describe('versioned GCP credential parsing', () => {
   });
 
   it('rejects provider mismatches before provider construction', () => {
-    expect(() => parseGcpCredential(JSON.stringify({
-      ...legacy,
-      version: 1,
-      provider: 'scaleway',
-      authType: 'workload-identity',
-    }))).toThrow('provider is scaleway');
+    expect(() =>
+      parseGcpCredential(
+        JSON.stringify({
+          ...legacy,
+          version: 1,
+          provider: 'scaleway',
+          authType: 'workload-identity',
+        })
+      )
+    ).toThrow('provider is scaleway');
   });
 
   it('rejects unsupported versions and auth modes', () => {
-    expect(() => parseGcpCredential(JSON.stringify({ ...legacy, version: 2, authType: 'workload-identity' })))
-      .toThrow('unsupported version');
-    expect(() => parseGcpCredential(JSON.stringify({ ...legacy, version: 1, authType: 'other' })))
-      .toThrow('unsupported authType');
+    expect(() =>
+      parseGcpCredential(JSON.stringify({ ...legacy, version: 2, authType: 'workload-identity' }))
+    ).toThrow('unsupported version');
+    expect(() =>
+      parseGcpCredential(JSON.stringify({ ...legacy, version: 1, authType: 'other' }))
+    ).toThrow('unsupported authType');
   });
 });

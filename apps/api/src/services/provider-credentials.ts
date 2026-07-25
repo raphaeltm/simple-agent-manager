@@ -94,6 +94,7 @@ export interface HetznerCapacityRetryEnv {
 export interface InfomaniakRuntimeEnv {
   INFOMANIAK_AUTH_URL?: string;
   INFOMANIAK_REGION?: string;
+  INFOMANIAK_ENDPOINT_INTERFACE?: string;
   INFOMANIAK_NETWORK_NAME?: string;
   INFOMANIAK_IMAGE_NAME?: string;
   INFOMANIAK_VOLUME_TYPE?: string;
@@ -169,6 +170,7 @@ export function buildProviderConfig(
         applicationCredentialSecret: obj.applicationCredentialSecret,
         authUrl: providerEnv?.INFOMANIAK_AUTH_URL,
         region: providerEnv?.INFOMANIAK_REGION,
+        endpointInterface: providerEnv?.INFOMANIAK_ENDPOINT_INTERFACE,
         networkName: providerEnv?.INFOMANIAK_NETWORK_NAME,
         imageName: providerEnv?.INFOMANIAK_IMAGE_NAME,
         volumeType: providerEnv?.INFOMANIAK_VOLUME_TYPE,
