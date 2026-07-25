@@ -172,7 +172,11 @@ export function AdminPlatformCredentials() {
                     size="sm"
                     onClick={() => handleDelete(cred.id)}
                     disabled={actionLoading === cred.id}
-                    aria-label={deleteConfirm === cred.id ? `Confirm deletion of ` : `Delete `}
+                    aria-label={
+                      deleteConfirm === cred.id
+                        ? 'Confirm deletion of ' + cred.label
+                        : 'Delete ' + cred.label
+                    }
                   >
                     {deleteConfirm === cred.id ? 'Confirm' : <Trash2 size={14} />}
                   </Button>

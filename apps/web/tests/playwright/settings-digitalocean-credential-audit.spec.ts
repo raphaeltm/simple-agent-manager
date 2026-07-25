@@ -257,6 +257,7 @@ test.describe('Settings DigitalOcean credential audit', () => {
 
     await page.goto('/admin/credentials');
     await expect(page.getByText('Shared DigitalOcean')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Delete Shared DigitalOcean' })).toBeVisible();
     await page.getByRole('button', { name: 'Add Credential' }).click();
     await expect(page.getByLabel('Provider')).toContainText('DigitalOcean');
     await screenshot(page, 'settings-digitalocean-admin-' + suffix);
@@ -265,7 +266,7 @@ test.describe('Settings DigitalOcean credential audit', () => {
     await page.goto('/workspaces/new');
     await page.locator('main').getByRole('combobox').first().selectOption('proj-1');
     await expect(page.getByLabel('Workspace Name')).toBeVisible();
-    await expect(page.getByText(/DigitalOcean/).first()).toBeVisible();
+    await expect(page.getByText('(DigitalOcean)', { exact: true })).toBeVisible();
     await screenshot(page, 'settings-digitalocean-workspace-' + suffix);
     await assertNoOverflow(page);
   });
