@@ -12,6 +12,7 @@ const COMPUTE_LABELS: Record<string, string> = {
   vultr: 'Vultr',
   infomaniak: 'Infomaniak Public Cloud',
   digitalocean: 'DigitalOcean',
+  upcloud: 'UpCloud',
 };
 
 interface ConfigurationSectionProps {

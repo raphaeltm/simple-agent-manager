@@ -73,6 +73,7 @@ export const CREDENTIAL_PROVIDERS = [
   'vultr',
   'infomaniak',
   'digitalocean',
+  'upcloud',
 ] as const;
 export type CredentialProvider = (typeof CREDENTIAL_PROVIDERS)[number];
 
@@ -108,12 +109,14 @@ export interface CredentialValidationStatus {
 /**
  * Create credential request — discriminated by provider.
  * Hetzner, Vultr, and DigitalOcean use a single API token; Scaleway requires secretKey + projectId.
+ * Hetzner and Vultr use a single API token; UpCloud uses an API-subaccount username and password; Scaleway requires secretKey + projectId.
  */
 export type CreateCredentialRequest =
   | { provider: 'hetzner'; token: string }
   | { provider: 'vultr'; token: string }
   | { provider: 'infomaniak'; applicationCredentialId: string; applicationCredentialSecret: string }
   | { provider: 'digitalocean'; token: string }
+  | { provider: 'upcloud'; username: string; password: string }
   | { provider: 'scaleway'; secretKey: string; projectId: string }
   | {
       provider: 'gcp';

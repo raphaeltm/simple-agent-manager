@@ -26,6 +26,7 @@ const PROVIDER_LABELS: Record<string, string> = {
   vultr: 'Vultr',
   infomaniak: 'Infomaniak Public Cloud',
   digitalocean: 'DigitalOcean',
+  upcloud: 'UpCloud',
 };
 
 const AGENT_TYPE_LABELS: Record<string, string> = {
@@ -269,6 +270,7 @@ function AddCredentialForm({
                 <option value="vultr">Vultr</option>
                 <option value="infomaniak">Infomaniak Public Cloud</option>
                 <option value="digitalocean">DigitalOcean</option>
+                <option value="upcloud">UpCloud</option>
                 <option value="gcp">GCP</option>
               </select>
             </div>

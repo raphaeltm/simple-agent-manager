@@ -47,7 +47,7 @@ export const SHARED_CONFIG_FIELD_PROPERTIES = {
   },
   provider: {
     type: 'string',
-    description: 'Cloud provider: hetzner, scaleway, gcp, vultr, infomaniak, digitalocean',
+    description: 'Cloud provider: hetzner, scaleway, gcp, vultr, infomaniak, digitalocean, upcloud',
   },
   vmLocation: {
     type: 'string',

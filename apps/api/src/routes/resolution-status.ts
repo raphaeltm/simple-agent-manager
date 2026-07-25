@@ -47,6 +47,7 @@ const CLOUD_PROVIDER_NAMES: Record<string, string> = {
   vultr: 'Vultr',
   infomaniak: 'Infomaniak Public Cloud',
   digitalocean: 'DigitalOcean',
+  upcloud: 'UpCloud',
 };
 
 resolutionStatusRoute.get('/resolution-status', requireAuth(), requireApproved(), async (c) => {

@@ -8,6 +8,7 @@ const CredentialProviderSchema = v.picklist([
   'vultr',
   'infomaniak',
   'digitalocean',
+  'upcloud',
 ]);
 const VMSizeSchema = v.picklist(['small', 'medium', 'large']);
 const WorkspaceProfileSchema = v.picklist(['full', 'lightweight']);

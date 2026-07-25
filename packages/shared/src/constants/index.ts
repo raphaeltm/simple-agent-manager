@@ -145,6 +145,7 @@ export {
 } from './scaling';
 
 // Hetzner / Scaleway / GCP / Vultr / Infomaniak / DigitalOcean Provider Defaults
+// Hetzner / Scaleway / GCP / Vultr / UpCloud Provider Defaults
 export {
   DEFAULT_DIGITALOCEAN_IMAGE,
   DEFAULT_DIGITALOCEAN_REGION,

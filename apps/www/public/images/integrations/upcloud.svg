@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title id="title">UpCloud</title>
+  <rect width="64" height="64" rx="14" fill="#7b00ff"/>
+  <path d="M17 18v19c0 8.8 5.9 14 15 14s15-5.2 15-14V18h-9v18.3c0 4.5-2 6.7-6 6.7s-6-2.2-6-6.7V18z" fill="#fff"/>
+</svg>

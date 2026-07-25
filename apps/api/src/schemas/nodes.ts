@@ -7,6 +7,7 @@ const CredentialProviderSchema = v.picklist([
   'vultr',
   'infomaniak',
   'digitalocean',
+  'upcloud',
 ]);
 const VMSizeSchema = v.picklist(['small', 'medium', 'large']);
 

@@ -25,6 +25,7 @@ export const PROVIDER_VM_SIZE_VCPUS: Record<string, Record<VMSize, number>> = {
   vultr: { small: 2, medium: 4, large: 6 },
   infomaniak: { small: 2, medium: 4, large: 8 },
   digitalocean: { small: 2, medium: 4, large: 8 },
+  upcloud: { small: 2, medium: 4, large: 8 },
 };
 
 /** Default vCPU counts when provider is unknown. Uses Hetzner as the reference. */

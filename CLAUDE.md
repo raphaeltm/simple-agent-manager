@@ -14,7 +14,7 @@ apps/
 └── tail-worker/  # Cloudflare Tail Worker (observability)
 packages/
 ├── shared/       # Shared types and utilities
-├── providers/    # Cloud provider abstraction (Hetzner, Scaleway)
+├── providers/    # Cloud provider abstraction (Hetzner, Scaleway, GCP, Vultr, UpCloud)
 ├── terminal/     # Shared terminal component
 ├── cloud-init/   # Cloud-init template generator
 ├── acp-client/   # Shared ACP React components (MessageBubble, MessageActions, AudioPlayer)

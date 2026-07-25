@@ -288,7 +288,8 @@ export type ProviderConfig =
   | GcpProviderConfig
   | VultrProviderConfig
   | InfomaniakProviderConfig
-  | DigitalOceanProviderConfig;
+  | DigitalOceanProviderConfig
+  | UpCloudProviderConfig;
 
 export interface HetznerProviderConfig {
   provider: 'hetzner';
@@ -371,6 +372,20 @@ export interface DigitalOceanProviderConfig {
   /** Maximum list pages fetched per operation. */
   maxListPages?: number;
   /** Optional provider logger. Defaults to no-op and must not receive secrets. */
+  logger?: ProviderLogger;
+}
+
+export interface UpCloudProviderConfig {
+  provider: 'upcloud';
+  username: string;
+  password: string;
+  apiUrl?: string;
+  zone?: string;
+  imageTitle?: string;
+  requestTimeoutMs?: number;
+  ipPollTimeoutMs?: number;
+  ipPollIntervalMs?: number;
+  stopTimeoutSeconds?: number;
   logger?: ProviderLogger;
 }
 

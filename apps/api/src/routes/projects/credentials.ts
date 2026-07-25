@@ -22,6 +22,7 @@ import type {
 } from '@simple-agent-manager/shared';
 import {
   CREDENTIAL_PROVIDERS,
+  PROVIDER_LABELS,
   getAgentDefinition,
   isValidAgentType,
 } from '@simple-agent-manager/shared';
@@ -55,6 +56,7 @@ import {
   validateHetznerCredentialWithProvider,
   validateInfomaniakCredentialWithProvider,
   validateScalewayCredentialWithProvider,
+  validateUpCloudCredentialWithProvider,
   validateVultrCredentialWithProvider,
 } from '../../services/validation';
 
@@ -86,7 +88,8 @@ function getCloudCredentialFields(body: CreateCredentialRequest): CloudCredentia
     case 'hetzner':
     case 'vultr':
     case 'digitalocean':
-      if (!body.token) throw errors.badRequest(`Token is required for `);
+      if (!body.token)
+        throw errors.badRequest(`Token is required for ${PROVIDER_LABELS[providerName]}`);
       return {
         providerName,
         tokenToValidate: serializeCredentialToken(providerName, { token: body.token }),
@@ -109,6 +112,16 @@ function getCloudCredentialFields(body: CreateCredentialRequest): CloudCredentia
         tokenToValidate: serializeCredentialToken(providerName, {
           applicationCredentialId: body.applicationCredentialId,
           applicationCredentialSecret: body.applicationCredentialSecret,
+        }),
+      };
+    case 'upcloud':
+      if (!body.username || !body.password)
+        throw errors.badRequest('Username and password are required for UpCloud');
+      return {
+        providerName,
+        tokenToValidate: serializeCredentialToken(providerName, {
+          username: body.username,
+          password: body.password,
         }),
       };
     case 'gcp':
@@ -182,6 +195,12 @@ async function validateCloudCredentialRequest(
       timeoutMs: getSaveValidationTimeoutMs(env),
     });
   }
+  if (body.provider === 'upcloud') {
+    return validateUpCloudCredentialWithProvider(body.username, body.password, {
+      timeoutMs: getSaveValidationTimeoutMs(env),
+    });
+  }
+
   return formatOnlyValidation(
     'GCP credential metadata accepted. Live validation runs during Google setup.'
   );

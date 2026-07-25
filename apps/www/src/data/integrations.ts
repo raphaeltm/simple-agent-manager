@@ -30,11 +30,17 @@ export interface Integration {
   models?: string[];
 }
 
-function titleDescriptionItem(title: string, description: string): { title: string; description: string } {
+function titleDescriptionItem(
+  title: string,
+  description: string
+): { title: string; description: string } {
   return { title, description };
 }
 
-function stepDescriptionItem(step: string, description: string): { step: string; description: string } {
+function stepDescriptionItem(
+  step: string,
+  description: string
+): { step: string; description: string } {
   return { step, description };
 }
 
@@ -45,7 +51,7 @@ function faqItem(question: string, answer: string): { question: string; answer: 
 const workersAiMarketingFields = {
   tagline: 'Built-in edge AI for platform features',
   description:
-    "SAM runs on Cloudflare Workers, and Workers AI provides edge inference for platform features. SAM uses Workers AI for task title generation, text-to-speech, and context summarization without requiring a separate model API key.",
+    'SAM runs on Cloudflare Workers, and Workers AI provides edge inference for platform features. SAM uses Workers AI for task title generation, text-to-speech, and context summarization without requiring a separate model API key.',
   seoTitle: 'Built-in AI with Cloudflare Workers AI | SAM',
   seoDescription:
     'SAM includes Cloudflare Workers AI for task titles, text-to-speech, and summarization. Built into the platform with no separate model key.',
@@ -53,23 +59,35 @@ const workersAiMarketingFields = {
 
 const workersAiNoSeparateModelKeyFeature = titleDescriptionItem(
   'No Separate Model Key',
-  'Workers AI is part of SAM\'s Cloudflare deployment — no additional model API key is needed for task titles and TTS.',
+  "Workers AI is part of SAM's Cloudflare deployment — no additional model API key is needed for task titles and TTS."
 );
 
 const workersAiSelfHostedUseCase = titleDescriptionItem(
   'Self-hosted AI platform',
-  'When self-hosting SAM on the Workers Paid plan, Workers AI powers platform features without a separate model API key.',
+  'When self-hosting SAM on the Workers Paid plan, Workers AI powers platform features without a separate model API key.'
 );
 
 const workersAiApiKeyFaq = faqItem(
   'Does Workers AI require a separate API key?',
-  'No — Workers AI is available through the Cloudflare account that runs SAM. Self-hosting SAM still requires the Workers Paid plan because the default deployment uses Durable Objects and Cloudflare Containers.',
+  'No — Workers AI is available through the Cloudflare account that runs SAM. Self-hosting SAM still requires the Workers Paid plan because the default deployment uses Durable Objects and Cloudflare Containers.'
 );
 
 export const categories = [
-  { id: 'ai-agents' as const, label: 'AI Coding Agents', description: 'Run any coding agent on your infrastructure' },
-  { id: 'cloud-providers' as const, label: 'Cloud Providers', description: 'Bring your own cloud — your VMs, your data' },
-  { id: 'ai-models' as const, label: 'AI Models', description: 'Use the best model for every task' },
+  {
+    id: 'ai-agents' as const,
+    label: 'AI Coding Agents',
+    description: 'Run any coding agent on your infrastructure',
+  },
+  {
+    id: 'cloud-providers' as const,
+    label: 'Cloud Providers',
+    description: 'Bring your own cloud — your VMs, your data',
+  },
+  {
+    id: 'ai-models' as const,
+    label: 'AI Models',
+    description: 'Use the best model for every task',
+  },
 ] as const;
 
 export const integrations: Integration[] = [
@@ -86,28 +104,82 @@ export const integrations: Integration[] = [
     logoPath: '/images/integrations/anthropic.svg',
     seoTitle: 'Run Claude Code in the Cloud | SAM',
     seoDescription:
-      'Run Claude Code agents in parallel on your own cloud VMs. SAM orchestrates Anthropic\'s Claude Code with isolated devcontainers, lifecycle management, and automatic PR creation.',
+      "Run Claude Code agents in parallel on your own cloud VMs. SAM orchestrates Anthropic's Claude Code with isolated devcontainers, lifecycle management, and automatic PR creation.",
     features: [
-      { title: 'Parallel Execution', description: 'Run dozens of Claude Code instances simultaneously, each tackling a different task or feature branch.' },
-      { title: 'Dual Auth Support', description: 'Bring your Anthropic API key or use a Claude Max/Pro OAuth subscription — SAM handles both seamlessly.' },
-      { title: 'Full Tool Access', description: 'Claude Code gets full Read, Edit, Bash, and other tool access inside the devcontainer, just like running it locally.' },
-      { title: 'Automatic PR Creation', description: 'When the agent finishes, SAM pushes changes and opens a pull request on your repo automatically.' },
+      {
+        title: 'Parallel Execution',
+        description:
+          'Run dozens of Claude Code instances simultaneously, each tackling a different task or feature branch.',
+      },
+      {
+        title: 'Dual Auth Support',
+        description:
+          'Bring your Anthropic API key or use a Claude Max/Pro OAuth subscription — SAM handles both seamlessly.',
+      },
+      {
+        title: 'Full Tool Access',
+        description:
+          'Claude Code gets full Read, Edit, Bash, and other tool access inside the devcontainer, just like running it locally.',
+      },
+      {
+        title: 'Automatic PR Creation',
+        description:
+          'When the agent finishes, SAM pushes changes and opens a pull request on your repo automatically.',
+      },
     ],
     howItWorks: [
-      { step: 'Create a Project', description: 'Link your GitHub repository and configure Claude Code as your agent.' },
-      { step: 'Submit a Task', description: 'Describe what you want built — a feature, bug fix, refactor, or test suite.' },
-      { step: 'SAM Provisions & Runs', description: 'SAM spins up a cloud VM, builds your devcontainer, and launches Claude Code with your task.' },
-      { step: 'Review the PR', description: 'Claude Code commits its work, pushes a branch, and opens a pull request for your review.' },
+      {
+        step: 'Create a Project',
+        description: 'Link your GitHub repository and configure Claude Code as your agent.',
+      },
+      {
+        step: 'Submit a Task',
+        description: 'Describe what you want built — a feature, bug fix, refactor, or test suite.',
+      },
+      {
+        step: 'SAM Provisions & Runs',
+        description:
+          'SAM spins up a cloud VM, builds your devcontainer, and launches Claude Code with your task.',
+      },
+      {
+        step: 'Review the PR',
+        description:
+          'Claude Code commits its work, pushes a branch, and opens a pull request for your review.',
+      },
     ],
     useCases: [
-      { title: 'Parallelize feature development', description: 'Break a large project into tasks and run an agent on each simultaneously. Ship a week of work in hours.' },
-      { title: 'Automate refactoring', description: 'Point Claude Code at a codebase and describe the refactoring pattern. It handles the mechanical work across hundreds of files.' },
-      { title: 'Run test generation at scale', description: 'Generate comprehensive test suites for existing code — Claude Code understands your codebase context and writes meaningful tests.' },
+      {
+        title: 'Parallelize feature development',
+        description:
+          'Break a large project into tasks and run an agent on each simultaneously. Ship a week of work in hours.',
+      },
+      {
+        title: 'Automate refactoring',
+        description:
+          'Point Claude Code at a codebase and describe the refactoring pattern. It handles the mechanical work across hundreds of files.',
+      },
+      {
+        title: 'Run test generation at scale',
+        description:
+          'Generate comprehensive test suites for existing code — Claude Code understands your codebase context and writes meaningful tests.',
+      },
     ],
     faq: [
-      { question: 'What models does Claude Code use?', answer: 'Claude Code uses Anthropic\'s Claude models. SAM supports configuring the model per project — including Claude Opus, Sonnet, and Haiku variants.' },
-      { question: 'Do I need an Anthropic API key?', answer: 'You can use either an Anthropic API key (pay-per-use) or a Claude Max/Pro OAuth token (subscription-based). Configure your preferred method in project settings.' },
-      { question: 'Can I run Claude Code in a devcontainer?', answer: 'Yes — SAM builds your repo\'s devcontainer on the VM. Claude Code runs inside it with the same toolchains, language runtimes, and test runners your team uses.' },
+      {
+        question: 'What models does Claude Code use?',
+        answer:
+          "Claude Code uses Anthropic's Claude models. SAM supports configuring the model per project — including Claude Opus, Sonnet, and Haiku variants.",
+      },
+      {
+        question: 'Do I need an Anthropic API key?',
+        answer:
+          'You can use either an Anthropic API key (pay-per-use) or a Claude Max/Pro OAuth token (subscription-based). Configure your preferred method in project settings.',
+      },
+      {
+        question: 'Can I run Claude Code in a devcontainer?',
+        answer:
+          "Yes — SAM builds your repo's devcontainer on the VM. Claude Code runs inside it with the same toolchains, language runtimes, and test runners your team uses.",
+      },
     ],
     relatedSlugs: ['codex', 'hetzner', 'scaleway'],
     externalUrl: 'https://docs.anthropic.com/en/docs/claude-code/overview',
@@ -128,26 +200,81 @@ export const integrations: Integration[] = [
     seoDescription:
       'Run OpenAI Codex coding agents on your own cloud VMs. SAM handles provisioning, devcontainer setup, and lifecycle management for Codex workspaces.',
     features: [
-      { title: 'Your Infrastructure', description: 'Codex runs on your cloud VMs instead of OpenAI\'s sandbox — giving you full control over compute, data residency, and costs.' },
-      { title: 'OAuth Token Management', description: 'SAM manages Codex OAuth token refresh automatically — including concurrent session handling to prevent token race conditions.' },
-      { title: 'Full GPT Model Access', description: 'Use the latest GPT models including GPT-5, o3, and o4-mini for different coding tasks.' },
-      { title: 'Devcontainer Integration', description: 'Codex works inside your repo\'s devcontainer — no separate Docker setup needed.' },
+      {
+        title: 'Your Infrastructure',
+        description:
+          "Codex runs on your cloud VMs instead of OpenAI's sandbox — giving you full control over compute, data residency, and costs.",
+      },
+      {
+        title: 'OAuth Token Management',
+        description:
+          'SAM manages Codex OAuth token refresh automatically — including concurrent session handling to prevent token race conditions.',
+      },
+      {
+        title: 'Full GPT Model Access',
+        description:
+          'Use the latest GPT models including GPT-5, o3, and o4-mini for different coding tasks.',
+      },
+      {
+        title: 'Devcontainer Integration',
+        description:
+          "Codex works inside your repo's devcontainer — no separate Docker setup needed.",
+      },
     ],
     howItWorks: [
-      { step: 'Connect Your Account', description: 'Add your OpenAI API key or Codex OAuth credentials in project settings.' },
-      { step: 'Choose Codex as Agent', description: 'Select OpenAI Codex from the agent dropdown when creating a project or submitting a task.' },
-      { step: 'Submit Tasks', description: 'Describe your coding task in natural language. SAM provisions a VM and runs Codex.' },
-      { step: 'Get Results', description: 'Codex completes the work, and SAM pushes changes to a branch with a pull request.' },
+      {
+        step: 'Connect Your Account',
+        description: 'Add your OpenAI API key or Codex OAuth credentials in project settings.',
+      },
+      {
+        step: 'Choose Codex as Agent',
+        description:
+          'Select OpenAI Codex from the agent dropdown when creating a project or submitting a task.',
+      },
+      {
+        step: 'Submit Tasks',
+        description:
+          'Describe your coding task in natural language. SAM provisions a VM and runs Codex.',
+      },
+      {
+        step: 'Get Results',
+        description:
+          'Codex completes the work, and SAM pushes changes to a branch with a pull request.',
+      },
     ],
     useCases: [
-      { title: 'Code generation at scale', description: 'Use Codex to generate boilerplate, API clients, or data models across multiple repositories simultaneously.' },
-      { title: 'Bug fix triage', description: 'Submit multiple bug reports as tasks and let Codex investigate and fix each one in parallel.' },
-      { title: 'Migration assistance', description: 'Let Codex handle framework migrations, dependency updates, or language version upgrades across your codebase.' },
+      {
+        title: 'Code generation at scale',
+        description:
+          'Use Codex to generate boilerplate, API clients, or data models across multiple repositories simultaneously.',
+      },
+      {
+        title: 'Bug fix triage',
+        description:
+          'Submit multiple bug reports as tasks and let Codex investigate and fix each one in parallel.',
+      },
+      {
+        title: 'Migration assistance',
+        description:
+          'Let Codex handle framework migrations, dependency updates, or language version upgrades across your codebase.',
+      },
     ],
     faq: [
-      { question: 'Do I need a ChatGPT Pro subscription?', answer: 'You can use either an OpenAI API key or a ChatGPT Pro/Plus OAuth token. SAM supports both authentication methods.' },
-      { question: 'How does SAM handle Codex token refresh?', answer: 'SAM includes a centralized refresh proxy that serializes token rotation per user, preventing race conditions when multiple Codex instances run concurrently.' },
-      { question: 'What models can Codex use?', answer: 'Codex supports GPT-5 variants (5.4, 5.3, 5.2, 5.1), GPT-4.1, o3, and o4-mini. You can configure the model per project.' },
+      {
+        question: 'Do I need a ChatGPT Pro subscription?',
+        answer:
+          'You can use either an OpenAI API key or a ChatGPT Pro/Plus OAuth token. SAM supports both authentication methods.',
+      },
+      {
+        question: 'How does SAM handle Codex token refresh?',
+        answer:
+          'SAM includes a centralized refresh proxy that serializes token rotation per user, preventing race conditions when multiple Codex instances run concurrently.',
+      },
+      {
+        question: 'What models can Codex use?',
+        answer:
+          'Codex supports GPT-5 variants (5.4, 5.3, 5.2, 5.1), GPT-4.1, o3, and o4-mini. You can configure the model per project.',
+      },
     ],
     relatedSlugs: ['claude-code', 'gemini-cli', 'hetzner'],
     externalUrl: 'https://openai.com/index/introducing-codex/',
@@ -168,26 +295,79 @@ export const integrations: Integration[] = [
     seoDescription:
       'Run Google Gemini CLI coding agents on your own infrastructure. SAM provisions VMs, builds devcontainers, and manages agent lifecycles for Gemini CLI.',
     features: [
-      { title: 'Multimodal Coding', description: 'Gemini CLI can understand images, diagrams, and screenshots alongside code — useful for UI implementation tasks.' },
-      { title: 'Gemini 2.5 Models', description: 'Access Gemini 2.5 Pro and Flash models for different cost/performance tradeoffs.' },
-      { title: 'Large Context Windows', description: 'Gemini models support massive context windows, ideal for understanding large codebases.' },
-      { title: 'Google API Key Auth', description: 'Simple API key authentication — add your Gemini API key and start running agents.' },
+      {
+        title: 'Multimodal Coding',
+        description:
+          'Gemini CLI can understand images, diagrams, and screenshots alongside code — useful for UI implementation tasks.',
+      },
+      {
+        title: 'Gemini 2.5 Models',
+        description:
+          'Access Gemini 2.5 Pro and Flash models for different cost/performance tradeoffs.',
+      },
+      {
+        title: 'Large Context Windows',
+        description:
+          'Gemini models support massive context windows, ideal for understanding large codebases.',
+      },
+      {
+        title: 'Google API Key Auth',
+        description:
+          'Simple API key authentication — add your Gemini API key and start running agents.',
+      },
     ],
     howItWorks: [
-      { step: 'Add Your API Key', description: 'Enter your Google Gemini API key in SAM settings.' },
-      { step: 'Select Gemini CLI', description: 'Choose Gemini CLI as the agent for your project.' },
-      { step: 'Describe Your Task', description: 'Submit a task with a natural language description of what you need built.' },
-      { step: 'Agent Executes', description: 'SAM provisions a VM, builds the devcontainer, installs Gemini CLI, and runs your task.' },
+      {
+        step: 'Add Your API Key',
+        description: 'Enter your Google Gemini API key in SAM settings.',
+      },
+      {
+        step: 'Select Gemini CLI',
+        description: 'Choose Gemini CLI as the agent for your project.',
+      },
+      {
+        step: 'Describe Your Task',
+        description: 'Submit a task with a natural language description of what you need built.',
+      },
+      {
+        step: 'Agent Executes',
+        description:
+          'SAM provisions a VM, builds the devcontainer, installs Gemini CLI, and runs your task.',
+      },
     ],
     useCases: [
-      { title: 'UI implementation from designs', description: 'Upload mockups and screenshots — Gemini CLI\'s multimodal capabilities let it implement UI from visual references.' },
-      { title: 'Large codebase analysis', description: 'Use Gemini\'s massive context window to analyze and refactor large codebases in a single session.' },
-      { title: 'Cross-language projects', description: 'Gemini handles polyglot codebases well — ideal for projects mixing TypeScript, Python, Go, and other languages.' },
+      {
+        title: 'UI implementation from designs',
+        description:
+          "Upload mockups and screenshots — Gemini CLI's multimodal capabilities let it implement UI from visual references.",
+      },
+      {
+        title: 'Large codebase analysis',
+        description:
+          "Use Gemini's massive context window to analyze and refactor large codebases in a single session.",
+      },
+      {
+        title: 'Cross-language projects',
+        description:
+          'Gemini handles polyglot codebases well — ideal for projects mixing TypeScript, Python, Go, and other languages.',
+      },
     ],
     faq: [
-      { question: 'Which Gemini models are supported?', answer: 'SAM supports Gemini 2.5 Pro, Gemini 2.5 Flash, and Gemini 2.0 Flash. Configure the model in your project settings.' },
-      { question: 'Is Gemini CLI free to use?', answer: 'Gemini CLI requires a Google Gemini API key. Google offers free tier usage with rate limits. SAM itself doesn\'t charge extra for using Gemini CLI.' },
-      { question: 'Can Gemini CLI work with devcontainers?', answer: 'Yes — Gemini CLI runs inside your repo\'s devcontainer on the provisioned VM, with full access to your project\'s tools and dependencies.' },
+      {
+        question: 'Which Gemini models are supported?',
+        answer:
+          'SAM supports Gemini 2.5 Pro, Gemini 2.5 Flash, and Gemini 2.0 Flash. Configure the model in your project settings.',
+      },
+      {
+        question: 'Is Gemini CLI free to use?',
+        answer:
+          "Gemini CLI requires a Google Gemini API key. Google offers free tier usage with rate limits. SAM itself doesn't charge extra for using Gemini CLI.",
+      },
+      {
+        question: 'Can Gemini CLI work with devcontainers?',
+        answer:
+          "Yes — Gemini CLI runs inside your repo's devcontainer on the provisioned VM, with full access to your project's tools and dependencies.",
+      },
     ],
     relatedSlugs: ['claude-code', 'mistral-vibe', 'gcp'],
     externalUrl: 'https://github.com/google-gemini/gemini-cli',
@@ -208,26 +388,77 @@ export const integrations: Integration[] = [
     seoDescription:
       'Run Mistral Vibe coding agents in parallel on your own cloud. SAM orchestrates Devstral-powered Vibe agents with full devcontainer support and automatic PR creation.',
     features: [
-      { title: 'Devstral Models', description: 'Vibe is powered by Devstral — Mistral\'s coding-specialized model available in 24B and 123B parameter sizes.' },
-      { title: 'Python-Based Agent', description: 'Installed via uv (Python package manager), Vibe integrates smoothly with Python-heavy codebases and toolchains.' },
-      { title: 'Cost-Effective Scaling', description: 'Devstral models offer strong coding performance at competitive prices — ideal for running many agents simultaneously.' },
-      { title: 'European AI Option', description: 'Mistral is a European AI company — an important option for teams with data residency considerations.' },
+      {
+        title: 'Devstral Models',
+        description:
+          "Vibe is powered by Devstral — Mistral's coding-specialized model available in 24B and 123B parameter sizes.",
+      },
+      {
+        title: 'Python-Based Agent',
+        description:
+          'Installed via uv (Python package manager), Vibe integrates smoothly with Python-heavy codebases and toolchains.',
+      },
+      {
+        title: 'Cost-Effective Scaling',
+        description:
+          'Devstral models offer strong coding performance at competitive prices — ideal for running many agents simultaneously.',
+      },
+      {
+        title: 'European AI Option',
+        description:
+          'Mistral is a European AI company — an important option for teams with data residency considerations.',
+      },
     ],
     howItWorks: [
       { step: 'Add Mistral API Key', description: 'Enter your Mistral API key in SAM settings.' },
-      { step: 'Select Mistral Vibe', description: 'Choose Mistral Vibe as the agent for your project or task.' },
-      { step: 'Submit Tasks', description: 'Describe coding tasks in natural language — bug fixes, features, refactors, tests.' },
-      { step: 'Parallel Execution', description: 'SAM provisions VMs and runs Vibe agents in parallel, each in its own devcontainer.' },
+      {
+        step: 'Select Mistral Vibe',
+        description: 'Choose Mistral Vibe as the agent for your project or task.',
+      },
+      {
+        step: 'Submit Tasks',
+        description:
+          'Describe coding tasks in natural language — bug fixes, features, refactors, tests.',
+      },
+      {
+        step: 'Parallel Execution',
+        description:
+          'SAM provisions VMs and runs Vibe agents in parallel, each in its own devcontainer.',
+      },
     ],
     useCases: [
-      { title: 'Cost-efficient batch processing', description: 'Run dozens of coding tasks simultaneously with Devstral Small — great for repetitive work like adding types, fixing linting, or writing tests.' },
-      { title: 'Python ecosystem work', description: 'Vibe excels with Python projects — migrations, refactoring, and building data pipelines.' },
-      { title: 'EU data compliance', description: 'For teams requiring European data processing, using Mistral as your AI provider paired with European cloud providers (Hetzner, Scaleway) keeps everything in the EU.' },
+      {
+        title: 'Cost-efficient batch processing',
+        description:
+          'Run dozens of coding tasks simultaneously with Devstral Small — great for repetitive work like adding types, fixing linting, or writing tests.',
+      },
+      {
+        title: 'Python ecosystem work',
+        description:
+          'Vibe excels with Python projects — migrations, refactoring, and building data pipelines.',
+      },
+      {
+        title: 'EU data compliance',
+        description:
+          'For teams requiring European data processing, using Mistral as your AI provider paired with European cloud providers (Hetzner, Scaleway) keeps everything in the EU.',
+      },
     ],
     faq: [
-      { question: 'What is Devstral?', answer: 'Devstral is Mistral AI\'s coding-specialized model family. Devstral 2 (123B) is the flagship, and Devstral Small 2 (24B) offers a cost-effective alternative.' },
-      { question: 'How does Vibe compare to Claude Code?', answer: 'Both are capable coding agents. Vibe is powered by Mistral\'s Devstral models and tends to be more cost-effective for batch operations. Claude Code uses Anthropic\'s Claude models and has deeper tool integration.' },
-      { question: 'Can I use Vibe with Codestral?', answer: 'Yes — SAM supports configuring Codestral 25.08, Mistral Large 3, and other Mistral models alongside the default Devstral models.' },
+      {
+        question: 'What is Devstral?',
+        answer:
+          "Devstral is Mistral AI's coding-specialized model family. Devstral 2 (123B) is the flagship, and Devstral Small 2 (24B) offers a cost-effective alternative.",
+      },
+      {
+        question: 'How does Vibe compare to Claude Code?',
+        answer:
+          "Both are capable coding agents. Vibe is powered by Mistral's Devstral models and tends to be more cost-effective for batch operations. Claude Code uses Anthropic's Claude models and has deeper tool integration.",
+      },
+      {
+        question: 'Can I use Vibe with Codestral?',
+        answer:
+          'Yes — SAM supports configuring Codestral 25.08, Mistral Large 3, and other Mistral models alongside the default Devstral models.',
+      },
     ],
     relatedSlugs: ['claude-code', 'opencode', 'scaleway'],
     externalUrl: 'https://docs.mistral.ai/capabilities/vibe/',
@@ -240,33 +471,83 @@ export const integrations: Integration[] = [
     categoryLabel: 'AI Coding Agents',
     tagline: 'Run OpenCode agents with any inference provider',
     description:
-      "OpenCode is an open-source AI coding agent from SST that works with multiple inference providers. With SAM, you can run OpenCode on your cloud VMs using SAM Platform inference, Scaleway, OpenCode Managed, Google Vertex, Anthropic, or any OpenAI-compatible API as the backend.",
+      'OpenCode is an open-source AI coding agent from SST that works with multiple inference providers. With SAM, you can run OpenCode on your cloud VMs using SAM Platform inference, Scaleway, OpenCode Managed, Google Vertex, Anthropic, or any OpenAI-compatible API as the backend.',
     color: '#6366F1',
     logoPath: '/images/integrations/sst.svg',
     seoTitle: 'Run OpenCode with Any AI Provider | SAM',
     seoDescription:
       'Run OpenCode agents on your cloud with any inference provider — Scaleway, Google Vertex, Anthropic, or custom endpoints. SAM handles VM provisioning and agent lifecycle.',
     features: [
-      { title: 'Provider Flexibility', description: 'Use SAM Platform inference, Scaleway, OpenCode Managed, Google Vertex, Anthropic, or your own OpenAI-compatible endpoint.' },
-      { title: 'Open Source', description: 'OpenCode is fully open source (from SST), so you can audit, modify, and extend the agent to fit your needs.' },
-      { title: 'Lightweight Footprint', description: 'Minimal resource requirements mean you can run more OpenCode instances on smaller VMs.' },
-      { title: 'Scaleway Native', description: 'First-class integration with Scaleway\'s inference API — a natural pairing with SAM\'s Scaleway cloud provider support.' },
+      {
+        title: 'Provider Flexibility',
+        description:
+          'Use SAM Platform inference, Scaleway, OpenCode Managed, Google Vertex, Anthropic, or your own OpenAI-compatible endpoint.',
+      },
+      {
+        title: 'Open Source',
+        description:
+          'OpenCode is fully open source (from SST), so you can audit, modify, and extend the agent to fit your needs.',
+      },
+      {
+        title: 'Lightweight Footprint',
+        description:
+          'Minimal resource requirements mean you can run more OpenCode instances on smaller VMs.',
+      },
+      {
+        title: 'Scaleway Native',
+        description:
+          "First-class integration with Scaleway's inference API — a natural pairing with SAM's Scaleway cloud provider support.",
+      },
     ],
     howItWorks: [
-      { step: 'Configure Provider', description: 'Set your inference provider credentials — Scaleway API key, Google Vertex config, or a custom endpoint.' },
+      {
+        step: 'Configure Provider',
+        description:
+          'Set your inference provider credentials — Scaleway API key, Google Vertex config, or a custom endpoint.',
+      },
       { step: 'Select OpenCode', description: 'Choose OpenCode as the agent for your project.' },
-      { step: 'Submit a Task', description: 'Describe your coding task. SAM provisions a VM and launches OpenCode.' },
-      { step: 'Agent Delivers', description: 'OpenCode completes the work, and SAM commits and pushes the changes.' },
+      {
+        step: 'Submit a Task',
+        description: 'Describe your coding task. SAM provisions a VM and launches OpenCode.',
+      },
+      {
+        step: 'Agent Delivers',
+        description: 'OpenCode completes the work, and SAM commits and pushes the changes.',
+      },
     ],
     useCases: [
-      { title: 'Self-hosted AI stack', description: 'Pair OpenCode with a self-hosted inference endpoint for a fully private AI coding setup — no data leaves your infrastructure.' },
-      { title: 'Scaleway-native development', description: 'Use Scaleway for both compute (VMs) and inference (Scaleway AI) — a unified European cloud stack.' },
-      { title: 'Custom model experimentation', description: 'Test different models and providers by swapping OpenCode\'s inference backend without changing your workflow.' },
+      {
+        title: 'Self-hosted AI stack',
+        description:
+          'Pair OpenCode with a self-hosted inference endpoint for a fully private AI coding setup — no data leaves your infrastructure.',
+      },
+      {
+        title: 'Scaleway-native development',
+        description:
+          'Use Scaleway for both compute (VMs) and inference (Scaleway AI) — a unified European cloud stack.',
+      },
+      {
+        title: 'Custom model experimentation',
+        description:
+          "Test different models and providers by swapping OpenCode's inference backend without changing your workflow.",
+      },
     ],
     faq: [
-      { question: 'What inference providers work with OpenCode?', answer: 'OpenCode supports SAM Platform inference, Scaleway, OpenCode Managed, Google Vertex AI, Anthropic, and OpenAI-compatible or custom endpoints. Configure the provider in your project settings.' },
-      { question: 'Is OpenCode the same as OpenAI Codex?', answer: 'No — OpenCode is a separate open-source project from SST. It\'s a different agent that happens to support multiple AI providers including (but not limited to) OpenAI-compatible APIs.' },
-      { question: 'Can I use my own fine-tuned models?', answer: 'Yes — if your model is served via an OpenAI-compatible API endpoint, OpenCode can use it. Point the inference URL to your custom endpoint.' },
+      {
+        question: 'What inference providers work with OpenCode?',
+        answer:
+          'OpenCode supports SAM Platform inference, Scaleway, OpenCode Managed, Google Vertex AI, Anthropic, and OpenAI-compatible or custom endpoints. Configure the provider in your project settings.',
+      },
+      {
+        question: 'Is OpenCode the same as OpenAI Codex?',
+        answer:
+          "No — OpenCode is a separate open-source project from SST. It's a different agent that happens to support multiple AI providers including (but not limited to) OpenAI-compatible APIs.",
+      },
+      {
+        question: 'Can I use my own fine-tuned models?',
+        answer:
+          'Yes — if your model is served via an OpenAI-compatible API endpoint, OpenCode can use it. Point the inference URL to your custom endpoint.',
+      },
     ],
     relatedSlugs: ['mistral-vibe', 'scaleway', 'gemini-cli'],
     externalUrl: 'https://opencode.ai',
@@ -288,26 +569,80 @@ export const integrations: Integration[] = [
     seoDescription:
       'Run AI coding agents on affordable Hetzner Cloud VMs. SAM handles provisioning, devcontainer setup, and lifecycle management on your Hetzner account.',
     features: [
-      { title: 'Unbeatable Pricing', description: 'Hetzner offers some of the most affordable cloud VMs available — run more agents for less.' },
-      { title: 'European & US Regions', description: 'Nuremberg, Falkenstein, Helsinki, Ashburn, and Hillsboro — choose the region closest to your team.' },
-      { title: 'Battle-Tested Integration', description: 'Hetzner is SAM\'s original cloud provider — the most mature and thoroughly tested integration.' },
-      { title: 'Simple API Key Auth', description: 'Generate an API token in the Hetzner Cloud Console and add it to SAM. No IAM complexity.' },
+      {
+        title: 'Unbeatable Pricing',
+        description:
+          'Hetzner offers some of the most affordable cloud VMs available — run more agents for less.',
+      },
+      {
+        title: 'European & US Regions',
+        description:
+          'Nuremberg, Falkenstein, Helsinki, Ashburn, and Hillsboro — choose the region closest to your team.',
+      },
+      {
+        title: 'Battle-Tested Integration',
+        description:
+          "Hetzner is SAM's original cloud provider — the most mature and thoroughly tested integration.",
+      },
+      {
+        title: 'Simple API Key Auth',
+        description:
+          'Generate an API token in the Hetzner Cloud Console and add it to SAM. No IAM complexity.',
+      },
     ],
     howItWorks: [
-      { step: 'Get a Hetzner API Token', description: 'Create a project in Hetzner Cloud Console and generate an API token.' },
-      { step: 'Add Token to SAM', description: 'Paste your Hetzner API token in SAM settings. It\'s encrypted and stored per-user.' },
-      { step: 'Choose a Location', description: 'Select from European or US data centers for your VMs.' },
-      { step: 'Start Running Agents', description: 'Submit tasks and SAM provisions Hetzner VMs automatically. Pay only for compute time used.' },
+      {
+        step: 'Get a Hetzner API Token',
+        description: 'Create a project in Hetzner Cloud Console and generate an API token.',
+      },
+      {
+        step: 'Add Token to SAM',
+        description:
+          "Paste your Hetzner API token in SAM settings. It's encrypted and stored per-user.",
+      },
+      {
+        step: 'Choose a Location',
+        description: 'Select from European or US data centers for your VMs.',
+      },
+      {
+        step: 'Start Running Agents',
+        description:
+          'Submit tasks and SAM provisions Hetzner VMs automatically. Pay only for compute time used.',
+      },
     ],
     useCases: [
-      { title: 'Cost-effective agent scaling', description: 'Hetzner\'s pricing lets you run 5-10 concurrent agents for the cost of one agent on major cloud providers.' },
-      { title: 'EU data sovereignty', description: 'Hetzner\'s European data centers keep your code and agent operations within the EU.' },
-      { title: 'Getting started quickly', description: 'The simplest cloud provider to set up with SAM — just an API token. No IAM roles, no service accounts, no billing APIs.' },
+      {
+        title: 'Cost-effective agent scaling',
+        description:
+          "Hetzner's pricing lets you run 5-10 concurrent agents for the cost of one agent on major cloud providers.",
+      },
+      {
+        title: 'EU data sovereignty',
+        description:
+          "Hetzner's European data centers keep your code and agent operations within the EU.",
+      },
+      {
+        title: 'Getting started quickly',
+        description:
+          'The simplest cloud provider to set up with SAM — just an API token. No IAM roles, no service accounts, no billing APIs.',
+      },
     ],
     faq: [
-      { question: 'How much does Hetzner cost?', answer: 'Hetzner VMs start at a few cents per hour. SAM provisions VMs on demand and can clean them up automatically, so you only pay for actual compute time.' },
-      { question: 'Do I need a Hetzner account?', answer: 'Yes — SAM uses a BYOC (Bring Your Own Cloud) model. You create a Hetzner Cloud project, generate an API token, and add it to SAM.' },
-      { question: 'Is my Hetzner token secure?', answer: 'Your token is encrypted with AES-GCM and stored per-user in the database. SAM never stores cloud provider credentials as plain text or environment variables.' },
+      {
+        question: 'How much does Hetzner cost?',
+        answer:
+          'Hetzner VMs start at a few cents per hour. SAM provisions VMs on demand and can clean them up automatically, so you only pay for actual compute time.',
+      },
+      {
+        question: 'Do I need a Hetzner account?',
+        answer:
+          'Yes — SAM uses a BYOC (Bring Your Own Cloud) model. You create a Hetzner Cloud project, generate an API token, and add it to SAM.',
+      },
+      {
+        question: 'Is my Hetzner token secure?',
+        answer:
+          'Your token is encrypted with AES-GCM and stored per-user in the database. SAM never stores cloud provider credentials as plain text or environment variables.',
+      },
     ],
     relatedSlugs: ['scaleway', 'vultr', 'claude-code', 'codex'],
     externalUrl: 'https://www.hetzner.com/cloud/',
@@ -326,58 +661,163 @@ export const integrations: Integration[] = [
     seoDescription:
       'Run AI coding agents on Scaleway VMs in Paris, Amsterdam, and Warsaw. SAM provisions workspaces on your Scaleway account with full BYOC control.',
     features: [
-      { title: 'European Data Centers', description: 'Paris, Amsterdam, and Warsaw — keep your code and agent operations within the EU.' },
-      { title: 'AI Inference Pairing', description: 'Scaleway offers its own AI inference API — pair it with OpenCode for a fully Scaleway-native AI coding stack.' },
-      { title: 'Competitive Pricing', description: 'Scaleway offers competitive VM pricing with flexible instance types suited for coding workloads.' },
-      { title: 'BYOC Integration', description: 'Bring your Scaleway credentials — SAM encrypts and stores them per-user for secure provisioning.' },
+      {
+        title: 'European Data Centers',
+        description:
+          'Paris, Amsterdam, and Warsaw — keep your code and agent operations within the EU.',
+      },
+      {
+        title: 'AI Inference Pairing',
+        description:
+          'Scaleway offers its own AI inference API — pair it with OpenCode for a fully Scaleway-native AI coding stack.',
+      },
+      {
+        title: 'Competitive Pricing',
+        description:
+          'Scaleway offers competitive VM pricing with flexible instance types suited for coding workloads.',
+      },
+      {
+        title: 'BYOC Integration',
+        description:
+          'Bring your Scaleway credentials — SAM encrypts and stores them per-user for secure provisioning.',
+      },
     ],
     howItWorks: [
-      { step: 'Get Scaleway Credentials', description: 'Generate API keys in the Scaleway Console.' },
-      { step: 'Add to SAM', description: 'Enter your Scaleway credentials in SAM settings. They\'re encrypted and stored per-user.' },
-      { step: 'Pick a Region', description: 'Choose from Paris, Amsterdam, or Warsaw data centers.' },
-      { step: 'Run Agents', description: 'Submit coding tasks and SAM provisions Scaleway VMs automatically.' },
+      {
+        step: 'Get Scaleway Credentials',
+        description: 'Generate API keys in the Scaleway Console.',
+      },
+      {
+        step: 'Add to SAM',
+        description:
+          "Enter your Scaleway credentials in SAM settings. They're encrypted and stored per-user.",
+      },
+      {
+        step: 'Pick a Region',
+        description: 'Choose from Paris, Amsterdam, or Warsaw data centers.',
+      },
+      {
+        step: 'Run Agents',
+        description: 'Submit coding tasks and SAM provisions Scaleway VMs automatically.',
+      },
     ],
     useCases: [
-      { title: 'Full European AI stack', description: 'Scaleway VMs + Scaleway AI inference + Mistral Vibe = a fully European, GDPR-friendly AI coding pipeline.' },
-      { title: 'Multi-cloud redundancy', description: 'Use Scaleway alongside Hetzner for geographic distribution and provider redundancy.' },
-      { title: 'AI inference flexibility', description: 'Scaleway\'s inference API supports multiple models — pair with OpenCode for maximum flexibility.' },
+      {
+        title: 'Full European AI stack',
+        description:
+          'Scaleway VMs + Scaleway AI inference + Mistral Vibe = a fully European, GDPR-friendly AI coding pipeline.',
+      },
+      {
+        title: 'Multi-cloud redundancy',
+        description:
+          'Use Scaleway alongside Hetzner for geographic distribution and provider redundancy.',
+      },
+      {
+        title: 'AI inference flexibility',
+        description:
+          "Scaleway's inference API supports multiple models — pair with OpenCode for maximum flexibility.",
+      },
     ],
     faq: [
-      { question: 'Which Scaleway regions does SAM support?', answer: 'SAM supports Paris (fr-par-1, fr-par-2, fr-par-3), Amsterdam (nl-ams-1, nl-ams-2, nl-ams-3), and Warsaw (pl-waw-1, pl-waw-2).' },
-      { question: 'Can I use Scaleway inference with SAM?', answer: 'Yes — use OpenCode as your agent and configure it to use Scaleway\'s inference API as the backend. This creates a fully Scaleway-native stack.' },
-      { question: 'How does Scaleway compare to Hetzner?', answer: 'Both are excellent European providers. Hetzner tends to be cheaper for raw compute. Scaleway offers additional services like managed inference that can complement SAM.' },
+      {
+        question: 'Which Scaleway regions does SAM support?',
+        answer:
+          'SAM supports Paris (fr-par-1, fr-par-2, fr-par-3), Amsterdam (nl-ams-1, nl-ams-2, nl-ams-3), and Warsaw (pl-waw-1, pl-waw-2).',
+      },
+      {
+        question: 'Can I use Scaleway inference with SAM?',
+        answer:
+          "Yes — use OpenCode as your agent and configure it to use Scaleway's inference API as the backend. This creates a fully Scaleway-native stack.",
+      },
+      {
+        question: 'How does Scaleway compare to Hetzner?',
+        answer:
+          'Both are excellent European providers. Hetzner tends to be cheaper for raw compute. Scaleway offers additional services like managed inference that can complement SAM.',
+      },
     ],
     relatedSlugs: ['hetzner', 'vultr', 'opencode', 'mistral-vibe'],
     externalUrl: 'https://www.scaleway.com/',
   },
   {
-    slug: 'infomaniak', name: 'Infomaniak Public Cloud', shortName: 'Infomaniak', category: 'cloud-providers', categoryLabel: 'Cloud Providers',
+    slug: 'infomaniak',
+    name: 'Infomaniak Public Cloud',
+    shortName: 'Infomaniak',
+    category: 'cloud-providers',
+    categoryLabel: 'Cloud Providers',
     tagline: 'Run coding agents on sovereign Swiss OpenStack infrastructure',
-    description: 'Connect a Keystone application credential and let SAM provision workspace and deployment nodes on Infomaniak Public Cloud, with persistent Cinder volumes that survive node replacement.',
-    color: '#0098FF', logoPath: '/images/integrations/infomaniak.svg', seoTitle: 'Run AI Coding Agents on Infomaniak Public Cloud | SAM', seoDescription: 'Run coding agents and persistent app deployments on Swiss Infomaniak Public Cloud with SAM.',
+    description:
+      'Connect a Keystone application credential and let SAM provision workspace and deployment nodes on Infomaniak Public Cloud, with persistent Cinder volumes that survive node replacement.',
+    color: '#0098FF',
+    logoPath: '/images/integrations/infomaniak.svg',
+    seoTitle: 'Run AI Coding Agents on Infomaniak Public Cloud | SAM',
+    seoDescription:
+      'Run coding agents and persistent app deployments on Swiss Infomaniak Public Cloud with SAM.',
     features: [
-      titleDescriptionItem('Swiss Data Location', 'Compute and encrypted Ceph/Cinder storage run in Infomaniak data centers in Switzerland.'),
-      titleDescriptionItem('OpenStack Automation', 'SAM uses Keystone, Nova, Glance, Neutron, and Cinder APIs with runtime-validated responses.'),
-      titleDescriptionItem('Persistent Deployment Volumes', 'Cinder volumes detach and reattach to replacement nodes while retaining application data.'),
-      titleDescriptionItem('Explicit Application Credentials', 'Use a scoped application credential ID and one-time secret instead of a broad account password.'),
+      titleDescriptionItem(
+        'Swiss Data Location',
+        'Compute and encrypted Ceph/Cinder storage run in Infomaniak data centers in Switzerland.'
+      ),
+      titleDescriptionItem(
+        'OpenStack Automation',
+        'SAM uses Keystone, Nova, Glance, Neutron, and Cinder APIs with runtime-validated responses.'
+      ),
+      titleDescriptionItem(
+        'Persistent Deployment Volumes',
+        'Cinder volumes detach and reattach to replacement nodes while retaining application data.'
+      ),
+      titleDescriptionItem(
+        'Explicit Application Credentials',
+        'Use a scoped application credential ID and one-time secret instead of a broad account password.'
+      ),
     ],
     howItWorks: [
-      stepDescriptionItem('Create an Application Credential', 'Create a Keystone application credential with reader and member roles; both roles are required in dc4-a.'),
-      stepDescriptionItem('Connect Infomaniak', 'Enter the application credential ID and one-time secret in SAM settings.'),
-      stepDescriptionItem('Choose a Swiss Region', 'Select dc4-a or dc3-a for workspace and deployment nodes.'),
-      stepDescriptionItem('Run Agents and Apps', 'SAM provisions Nova instances and region-matched Cinder volumes.'),
+      stepDescriptionItem(
+        'Create an Application Credential',
+        'Create a Keystone application credential with reader and member roles; both roles are required in dc4-a.'
+      ),
+      stepDescriptionItem(
+        'Connect Infomaniak',
+        'Enter the application credential ID and one-time secret in SAM settings.'
+      ),
+      stepDescriptionItem(
+        'Choose a Swiss Region',
+        'Select dc4-a or dc3-a for workspace and deployment nodes.'
+      ),
+      stepDescriptionItem(
+        'Run Agents and Apps',
+        'SAM provisions Nova instances and region-matched Cinder volumes.'
+      ),
     ],
     useCases: [
-      titleDescriptionItem('European and Swiss data residency', 'Keep workspace and deployment infrastructure in Switzerland with English and French provider support.'),
-      titleDescriptionItem('Replacement-safe app data', 'Preserve application state on a Cinder volume while replacing deployment nodes.'),
-      titleDescriptionItem('Open cloud operations', 'Use standard OpenStack infrastructure without coupling SAM to proprietary VM or volume semantics.'),
+      titleDescriptionItem(
+        'European and Swiss data residency',
+        'Keep workspace and deployment infrastructure in Switzerland with English and French provider support.'
+      ),
+      titleDescriptionItem(
+        'Replacement-safe app data',
+        'Preserve application state on a Cinder volume while replacing deployment nodes.'
+      ),
+      titleDescriptionItem(
+        'Open cloud operations',
+        'Use standard OpenStack infrastructure without coupling SAM to proprietary VM or volume semantics.'
+      ),
     ],
     faq: [
-      faqItem('Which credential does SAM need?', 'A Keystone application credential ID and secret. In dc4-a, assign both reader and member roles.'),
-      faqItem('Do Infomaniak volumes survive node replacement?', 'Yes. Cinder volumes are independent resources that can be detached and reattached within the same region.'),
-      faqItem('Can SAM resize an attached volume?', 'SAM uses the documented safe path: detach first, grow the volume, then reattach. Shrinking is not supported.'),
+      faqItem(
+        'Which credential does SAM need?',
+        'A Keystone application credential ID and secret. In dc4-a, assign both reader and member roles.'
+      ),
+      faqItem(
+        'Do Infomaniak volumes survive node replacement?',
+        'Yes. Cinder volumes are independent resources that can be detached and reattached within the same region.'
+      ),
+      faqItem(
+        'Can SAM resize an attached volume?',
+        'SAM uses the documented safe path: detach first, grow the volume, then reattach. Shrinking is not supported.'
+      ),
     ],
-    relatedSlugs: ['hetzner', 'scaleway', 'vultr', 'claude-code'], externalUrl: 'https://www.infomaniak.com/en/hosting/public-cloud',
+    relatedSlugs: ['hetzner', 'scaleway', 'vultr', 'claude-code'],
+    externalUrl: 'https://www.infomaniak.com/en/hosting/public-cloud',
   },
   {
     slug: 'vultr',
@@ -386,33 +826,89 @@ export const integrations: Integration[] = [
     categoryLabel: 'Cloud Providers',
     tagline: 'Run coding agents on global Vultr Cloud VMs',
     description:
-      "Vultr is a global cloud provider with data center locations across six continents and simple hourly billing. With SAM, you connect a single Vultr API key and run AI coding agents on high-performance Vultr Cloud Compute VMs — with NVMe Block Storage available for persistent deployment volumes.",
+      'Vultr is a global cloud provider with data center locations across six continents and simple hourly billing. With SAM, you connect a single Vultr API key and run AI coding agents on high-performance Vultr Cloud Compute VMs — with NVMe Block Storage available for persistent deployment volumes.',
     color: '#007BFC',
     logoPath: '/images/integrations/vultr.svg',
     seoTitle: 'Run AI Coding Agents on Vultr Cloud | SAM',
     seoDescription:
       'Run AI coding agents on global Vultr Cloud VMs with hourly billing. SAM handles provisioning, devcontainer setup, and lifecycle on your Vultr account.',
     features: [
-      { title: 'Global Footprint', description: 'Vultr operates data center locations across six continents — provision agents close to wherever your team works.' },
-      { title: 'Simple Hourly Billing', description: 'Vultr bills VMs by the hour, so you pay only for the compute time your agents actually use.' },
-      { title: 'Single API Key Auth', description: 'Connect Vultr with one Personal Access Token — no IAM roles or service accounts, just like Hetzner.' },
-      { title: 'NVMe Block Storage', description: 'Vultr Block Storage provides high-performance NVMe volumes, so Vultr-backed deployment environments can use persistent volumes.' },
+      {
+        title: 'Global Footprint',
+        description:
+          'Vultr operates data center locations across six continents — provision agents close to wherever your team works.',
+      },
+      {
+        title: 'Simple Hourly Billing',
+        description:
+          'Vultr bills VMs by the hour, so you pay only for the compute time your agents actually use.',
+      },
+      {
+        title: 'Single API Key Auth',
+        description:
+          'Connect Vultr with one Personal Access Token — no IAM roles or service accounts, just like Hetzner.',
+      },
+      {
+        title: 'NVMe Block Storage',
+        description:
+          'Vultr Block Storage provides high-performance NVMe volumes, so Vultr-backed deployment environments can use persistent volumes.',
+      },
     ],
     howItWorks: [
-      { step: 'Create a Vultr API Key', description: 'In the Vultr Customer Portal, open Account → API and generate a Personal Access Token.' },
-      { step: 'Allow All IPs on the Token', description: 'Set the token\'s access control to "Allow All IPv4/IPv6". SAM calls Vultr from Cloudflare Workers, which have no static egress IP, so a restricted allowlist blocks provisioning.' },
-      { step: 'Add Key to SAM', description: 'Paste your Vultr API key in SAM settings. It\'s encrypted with AES-GCM and stored per-user.' },
-      { step: 'Start Running Agents', description: 'Submit tasks and SAM provisions Vultr Cloud Compute VMs automatically, defaulting to the Frankfurt (fra) region.' },
+      {
+        step: 'Create a Vultr API Key',
+        description:
+          'In the Vultr Customer Portal, open Account → API and generate a Personal Access Token.',
+      },
+      {
+        step: 'Allow All IPs on the Token',
+        description:
+          'Set the token\'s access control to "Allow All IPv4/IPv6". SAM calls Vultr from Cloudflare Workers, which have no static egress IP, so a restricted allowlist blocks provisioning.',
+      },
+      {
+        step: 'Add Key to SAM',
+        description:
+          "Paste your Vultr API key in SAM settings. It's encrypted with AES-GCM and stored per-user.",
+      },
+      {
+        step: 'Start Running Agents',
+        description:
+          'Submit tasks and SAM provisions Vultr Cloud Compute VMs automatically, defaulting to the Frankfurt (fra) region.',
+      },
     ],
     useCases: [
-      { title: 'Global low-latency compute', description: 'Vultr\'s worldwide regions let you run agents near your team — from North America and Europe to Asia and Australia.' },
-      { title: 'Persistent deployment volumes', description: 'Pair Vultr Block Storage with SAM app deployments to keep data across releases on high-performance NVMe volumes.' },
-      { title: 'Simple multi-cloud setup', description: 'Add Vultr alongside Hetzner and Scaleway for provider redundancy with the same single-API-key simplicity.' },
+      {
+        title: 'Global low-latency compute',
+        description:
+          "Vultr's worldwide regions let you run agents near your team — from North America and Europe to Asia and Australia.",
+      },
+      {
+        title: 'Persistent deployment volumes',
+        description:
+          'Pair Vultr Block Storage with SAM app deployments to keep data across releases on high-performance NVMe volumes.',
+      },
+      {
+        title: 'Simple multi-cloud setup',
+        description:
+          'Add Vultr alongside Hetzner and Scaleway for provider redundancy with the same single-API-key simplicity.',
+      },
     ],
     faq: [
-      { question: 'How much does Vultr cost?', answer: 'SAM\'s default Vultr sizes range from about $20/mo (2 vCPU / 4GB) to $80/mo (6 vCPU / 16GB), billed hourly so you only pay for compute time used.' },
-      { question: 'Why must I set the Vultr token to "Allow All IPv4/IPv6"?', answer: 'Vultr Personal Access Tokens support an IP access-control allowlist. SAM provisions VMs from Cloudflare Workers, which have no fixed egress IP, so the token must allow all IPv4/IPv6 addresses or provisioning requests will be rejected.' },
-      { question: 'Does Vultr support persistent volumes?', answer: 'Yes — Vultr Block Storage provides NVMe-backed volumes, so Vultr-backed deployment environments can use persistent volumes. Block Storage is available in a subset of Vultr regions, so volume-backed environments are pinned to a supported region.' },
+      {
+        question: 'How much does Vultr cost?',
+        answer:
+          "SAM's default Vultr sizes range from about $20/mo (2 vCPU / 4GB) to $80/mo (6 vCPU / 16GB), billed hourly so you only pay for compute time used.",
+      },
+      {
+        question: 'Why must I set the Vultr token to "Allow All IPv4/IPv6"?',
+        answer:
+          'Vultr Personal Access Tokens support an IP access-control allowlist. SAM provisions VMs from Cloudflare Workers, which have no fixed egress IP, so the token must allow all IPv4/IPv6 addresses or provisioning requests will be rejected.',
+      },
+      {
+        question: 'Does Vultr support persistent volumes?',
+        answer:
+          'Yes — Vultr Block Storage provides NVMe-backed volumes, so Vultr-backed deployment environments can use persistent volumes. Block Storage is available in a subset of Vultr regions, so volume-backed environments are pinned to a supported region.',
+      },
     ],
     relatedSlugs: ['hetzner', 'scaleway', 'claude-code'],
     externalUrl: 'https://www.vultr.com',
@@ -423,32 +919,117 @@ export const integrations: Integration[] = [
     category: 'cloud-providers',
     categoryLabel: 'Cloud Providers',
     tagline: 'Run coding agents on DigitalOcean Droplets',
-    description: 'Connect a DigitalOcean Personal Access Token and let SAM provision Droplets for workspaces and deployment environments, with Block Storage for persistent deployment volumes.',
+    description:
+      'Connect a DigitalOcean Personal Access Token and let SAM provision Droplets for workspaces and deployment environments, with Block Storage for persistent deployment volumes.',
     color: '#0080FF',
     logoPath: '/images/integrations/digitalocean.svg',
     seoTitle: 'Run AI Coding Agents on DigitalOcean | SAM',
-    seoDescription: 'Run AI coding agents on DigitalOcean Droplets. SAM handles provisioning, cloud-init, lifecycle, and persistent Block Storage volumes.',
+    seoDescription:
+      'Run AI coding agents on DigitalOcean Droplets. SAM handles provisioning, cloud-init, lifecycle, and persistent Block Storage volumes.',
     features: [
-      { title: 'Global Droplet Regions', description: 'Provision SAM nodes across DigitalOcean regions in Europe, North America, Asia, India, and Australia.' },
-      { title: 'Simple PAT Authentication', description: 'Connect one Full Access Personal Access Token; SAM encrypts it per user.' },
-      { title: 'Persistent Block Storage', description: 'Attach grow-only DigitalOcean volumes to deployment environments with deterministic Linux device paths.' },
+      {
+        title: 'Global Droplet Regions',
+        description:
+          'Provision SAM nodes across DigitalOcean regions in Europe, North America, Asia, India, and Australia.',
+      },
+      {
+        title: 'Simple PAT Authentication',
+        description: 'Connect one Full Access Personal Access Token; SAM encrypts it per user.',
+      },
+      {
+        title: 'Persistent Block Storage',
+        description:
+          'Attach grow-only DigitalOcean volumes to deployment environments with deterministic Linux device paths.',
+      },
     ],
     howItWorks: [
-      { step: 'Create a PAT', description: 'Generate a Full Access Personal Access Token in the DigitalOcean API settings.' },
-      { step: 'Connect DigitalOcean', description: 'Paste the token in SAM Settings → Cloud Providers; SAM validates it against the account endpoint.' },
-      { step: 'Run Workspaces and Deployments', description: 'SAM provisions Ubuntu 24.04 Droplets in Frankfurt by default and manages their lifecycle.' },
+      {
+        step: 'Create a PAT',
+        description:
+          'Generate a Full Access Personal Access Token in the DigitalOcean API settings.',
+      },
+      {
+        step: 'Connect DigitalOcean',
+        description:
+          'Paste the token in SAM Settings → Cloud Providers; SAM validates it against the account endpoint.',
+      },
+      {
+        step: 'Run Workspaces and Deployments',
+        description:
+          'SAM provisions Ubuntu 24.04 Droplets in Frankfurt by default and manages their lifecycle.',
+      },
     ],
     useCases: [
-      { title: 'Multi-cloud agent capacity', description: 'Add DigitalOcean alongside Hetzner, Scaleway, Vultr, or GCP for regional choice and provider redundancy.' },
-      { title: 'Persistent app environments', description: 'Use same-region Block Storage for databases, uploads, and state that survives deployments.' },
+      {
+        title: 'Multi-cloud agent capacity',
+        description:
+          'Add DigitalOcean alongside Hetzner, Scaleway, Vultr, or GCP for regional choice and provider redundancy.',
+      },
+      {
+        title: 'Persistent app environments',
+        description:
+          'Use same-region Block Storage for databases, uploads, and state that survives deployments.',
+      },
     ],
     faq: [
-      { question: 'Which DigitalOcean token does SAM need?', answer: 'Use a Full Access PAT, or custom scopes covering droplets, block storage, tags, account, actions, images, regions, and sizes.' },
-      { question: 'Which region does SAM use by default?', answer: 'SAM defaults to fra1 (Frankfurt), with other curated DigitalOcean regions available in workspace and deployment settings.' },
-      { question: 'Does DigitalOcean support persistent deployment volumes?', answer: 'Yes. SAM creates, attaches, detaches, grows, and deletes DigitalOcean Block Storage volumes in the same region as the Droplet.' },
+      {
+        question: 'Which DigitalOcean token does SAM need?',
+        answer:
+          'Use a Full Access PAT, or custom scopes covering droplets, block storage, tags, account, actions, images, regions, and sizes.',
+      },
+      {
+        question: 'Which region does SAM use by default?',
+        answer:
+          'SAM defaults to fra1 (Frankfurt), with other curated DigitalOcean regions available in workspace and deployment settings.',
+      },
+      {
+        question: 'Does DigitalOcean support persistent deployment volumes?',
+        answer:
+          'Yes. SAM creates, attaches, detaches, grows, and deletes DigitalOcean Block Storage volumes in the same region as the Droplet.',
+      },
     ],
     relatedSlugs: ['hetzner', 'scaleway', 'vultr', 'codex'],
     externalUrl: 'https://www.digitalocean.com/',
+  },
+  {
+    slug: 'upcloud',
+    name: 'UpCloud',
+    category: 'cloud-providers',
+    categoryLabel: 'Cloud Providers',
+    tagline: 'European cloud compute with persistent deployment storage',
+    description:
+      'Connect a dedicated UpCloud API subaccount to run SAM workspace and deployment nodes with encrypted MaxIOPS storage.',
+    color: 'rgb(123 0 255)',
+    logoPath: '/images/integrations/upcloud.svg',
+    seoTitle: 'Run AI Coding Agents on UpCloud',
+    seoDescription: 'Run AI coding agents and persistent app deployments on UpCloud.',
+    features: [
+      titleDescriptionItem(
+        'Persistent Storage',
+        'Create, attach, detach, preserve, and grow encrypted deployment volumes in the same zone.'
+      ),
+    ],
+    howItWorks: [
+      {
+        step: 'Connect UpCloud',
+        description:
+          'Create a dedicated API subaccount and enter its username and password in SAM settings.',
+      },
+    ],
+    useCases: [
+      titleDescriptionItem(
+        'European agent infrastructure',
+        'Run coding agents and persistent deployments in UpCloud regions.'
+      ),
+    ],
+    faq: [
+      faqItem(
+        'Do volumes survive node deletion?',
+        'SAM preserves tracked deployment volumes until explicit teardown.'
+      ),
+    ],
+    relatedSlugs: ['hetzner', 'scaleway', 'vultr'],
+    externalUrl: 'https://upcloud.com',
   },
   {
     slug: 'gcp',
@@ -458,33 +1039,85 @@ export const integrations: Integration[] = [
     categoryLabel: 'Cloud Providers',
     tagline: 'Run coding agents on Google Cloud infrastructure',
     description:
-      "Google Cloud Platform provides global infrastructure with enterprise-grade security. SAM integrates with GCP using Workload Identity Federation — no long-lived credentials needed. Run coding agents on Compute Engine VMs across 8 regions worldwide.",
+      'Google Cloud Platform provides global infrastructure with enterprise-grade security. SAM integrates with GCP using Workload Identity Federation — no long-lived credentials needed. Run coding agents on Compute Engine VMs across 8 regions worldwide.',
     color: '#4285F4',
     logoPath: '/images/integrations/gcp.svg',
     seoTitle: 'Run AI Coding Agents on Google Cloud | SAM',
     seoDescription:
       'Run AI coding agents on Google Cloud VMs with Workload Identity Federation. SAM provisions Compute Engine instances across 8 global regions.',
     features: [
-      { title: 'Workload Identity Federation', description: 'No long-lived service account keys — SAM uses GCP\'s WIF for secure, short-lived credential exchange.' },
-      { title: 'Global Regions', description: 'Iowa, South Carolina, Oregon, Belgium, Frankfurt, London, Singapore, and Tokyo — true global coverage.' },
-      { title: 'Enterprise Security', description: 'GCP\'s IAM, audit logging, and compliance certifications for organizations with strict security requirements.' },
-      { title: 'Compute Engine Integration', description: 'SAM provisions Compute Engine VMs with the right machine types for coding agent workloads.' },
+      {
+        title: 'Workload Identity Federation',
+        description:
+          "No long-lived service account keys — SAM uses GCP's WIF for secure, short-lived credential exchange.",
+      },
+      {
+        title: 'Global Regions',
+        description:
+          'Iowa, South Carolina, Oregon, Belgium, Frankfurt, London, Singapore, and Tokyo — true global coverage.',
+      },
+      {
+        title: 'Enterprise Security',
+        description:
+          "GCP's IAM, audit logging, and compliance certifications for organizations with strict security requirements.",
+      },
+      {
+        title: 'Compute Engine Integration',
+        description:
+          'SAM provisions Compute Engine VMs with the right machine types for coding agent workloads.',
+      },
     ],
     howItWorks: [
-      { step: 'Set Up WIF', description: 'Configure a Workload Identity Pool and Provider in your GCP project following SAM\'s setup guide.' },
-      { step: 'Connect to SAM', description: 'Enter your GCP project ID, WIF pool details, and service account in SAM settings.' },
+      {
+        step: 'Set Up WIF',
+        description:
+          "Configure a Workload Identity Pool and Provider in your GCP project following SAM's setup guide.",
+      },
+      {
+        step: 'Connect to SAM',
+        description:
+          'Enter your GCP project ID, WIF pool details, and service account in SAM settings.',
+      },
       { step: 'Choose a Region', description: 'Select from 8 global regions for your VMs.' },
-      { step: 'Run Agents', description: 'Submit tasks and SAM provisions Compute Engine VMs using short-lived WIF credentials.' },
+      {
+        step: 'Run Agents',
+        description:
+          'Submit tasks and SAM provisions Compute Engine VMs using short-lived WIF credentials.',
+      },
     ],
     useCases: [
-      { title: 'Enterprise deployments', description: 'For organizations already on GCP with existing IAM policies, security controls, and compliance requirements.' },
-      { title: 'Global team distribution', description: 'GCP\'s 8 regions let you run agents close to your team — regardless of where they are in the world.' },
-      { title: 'Google ecosystem integration', description: 'Pair with Gemini CLI and Google\'s AI models for a fully Google-native coding agent stack.' },
+      {
+        title: 'Enterprise deployments',
+        description:
+          'For organizations already on GCP with existing IAM policies, security controls, and compliance requirements.',
+      },
+      {
+        title: 'Global team distribution',
+        description:
+          "GCP's 8 regions let you run agents close to your team — regardless of where they are in the world.",
+      },
+      {
+        title: 'Google ecosystem integration',
+        description:
+          "Pair with Gemini CLI and Google's AI models for a fully Google-native coding agent stack.",
+      },
     ],
     faq: [
-      { question: 'What is Workload Identity Federation?', answer: 'WIF lets SAM exchange short-lived tokens with GCP without storing long-lived service account keys. It\'s Google\'s recommended approach for third-party integrations.' },
-      { question: 'Which GCP machine types does SAM use?', answer: 'SAM provisions standard Compute Engine instances optimized for coding workloads. You can configure the VM size per project.' },
-      { question: 'Do I need a GCP billing account?', answer: 'Yes — SAM uses a BYOC model. VMs are provisioned on your GCP project, and you pay Google directly for compute usage.' },
+      {
+        question: 'What is Workload Identity Federation?',
+        answer:
+          "WIF lets SAM exchange short-lived tokens with GCP without storing long-lived service account keys. It's Google's recommended approach for third-party integrations.",
+      },
+      {
+        question: 'Which GCP machine types does SAM use?',
+        answer:
+          'SAM provisions standard Compute Engine instances optimized for coding workloads. You can configure the VM size per project.',
+      },
+      {
+        question: 'Do I need a GCP billing account?',
+        answer:
+          'Yes — SAM uses a BYOC model. VMs are provisioned on your GCP project, and you pay Google directly for compute usage.',
+      },
     ],
     relatedSlugs: ['hetzner', 'gemini-cli', 'claude-code'],
     externalUrl: 'https://cloud.google.com/',
@@ -502,25 +1135,68 @@ export const integrations: Integration[] = [
     logoPath: '/images/integrations/cloudflare.svg',
     features: [
       workersAiNoSeparateModelKeyFeature,
-      { title: 'Edge Inference', description: 'Models run at Cloudflare\'s edge — low latency for platform features, no cold starts.' },
-      { title: 'Multiple Models', description: 'Llama 4, Gemma 4, GLM-4.7, Qwen 3, and Deepgram for different tasks — SAM picks the right model automatically.' },
-      { title: 'AI Gateway', description: 'All inference is routed through Cloudflare AI Gateway for rate limiting, analytics, and reliability.' },
+      {
+        title: 'Edge Inference',
+        description:
+          "Models run at Cloudflare's edge — low latency for platform features, no cold starts.",
+      },
+      {
+        title: 'Multiple Models',
+        description:
+          'Llama 4, Gemma 4, GLM-4.7, Qwen 3, and Deepgram for different tasks — SAM picks the right model automatically.',
+      },
+      {
+        title: 'AI Gateway',
+        description:
+          'All inference is routed through Cloudflare AI Gateway for rate limiting, analytics, and reliability.',
+      },
     ],
     howItWorks: [
-      { step: 'Already Built In', description: 'Workers AI is part of SAM\'s Cloudflare infrastructure — no setup required.' },
-      { step: 'Automatic Model Selection', description: 'SAM uses the right model for each task: GLM for titles, Deepgram for TTS, Gemma for summarization.' },
-      { step: 'AI Proxy (Optional)', description: 'Enable the AI proxy to route custom inference through Workers AI with rate limiting and token budgets.' },
-      { step: 'Monitor Usage', description: 'Track AI usage, costs, and model distribution via the admin analytics dashboard.' },
+      {
+        step: 'Already Built In',
+        description: "Workers AI is part of SAM's Cloudflare infrastructure — no setup required.",
+      },
+      {
+        step: 'Automatic Model Selection',
+        description:
+          'SAM uses the right model for each task: GLM for titles, Deepgram for TTS, Gemma for summarization.',
+      },
+      {
+        step: 'AI Proxy (Optional)',
+        description:
+          'Enable the AI proxy to route custom inference through Workers AI with rate limiting and token budgets.',
+      },
+      {
+        step: 'Monitor Usage',
+        description:
+          'Track AI usage, costs, and model distribution via the admin analytics dashboard.',
+      },
     ],
     useCases: [
-      { title: 'Zero-config AI features', description: 'Task title generation, text-to-speech for messages, and context summarization work out of the box.' },
-      { title: 'AI proxy gateway', description: 'Route LLM requests through SAM\'s AI proxy for rate limiting, token budgets, and centralized analytics.' },
+      {
+        title: 'Zero-config AI features',
+        description:
+          'Task title generation, text-to-speech for messages, and context summarization work out of the box.',
+      },
+      {
+        title: 'AI proxy gateway',
+        description:
+          "Route LLM requests through SAM's AI proxy for rate limiting, token budgets, and centralized analytics.",
+      },
       workersAiSelfHostedUseCase,
     ],
     faq: [
       workersAiApiKeyFaq,
-      { question: 'Can I use Workers AI for my coding agents?', answer: 'Workers AI powers platform features, not the coding agents themselves. Agents use their own models (Claude, GPT, Gemini, Devstral) via their respective API keys.' },
-      { question: 'What models does SAM use?', answer: 'Llama 4 Scout 17B for general inference, GLM-4.7 Flash for task titles, Gemma 4 26B for context summarization, Qwen 3 30B for complex tasks, and Deepgram Aura 2 for text-to-speech.' },
+      {
+        question: 'Can I use Workers AI for my coding agents?',
+        answer:
+          'Workers AI powers platform features, not the coding agents themselves. Agents use their own models (Claude, GPT, Gemini, Devstral) via their respective API keys.',
+      },
+      {
+        question: 'What models does SAM use?',
+        answer:
+          'Llama 4 Scout 17B for general inference, GLM-4.7 Flash for task titles, Gemma 4 26B for context summarization, Qwen 3 30B for complex tasks, and Deepgram Aura 2 for text-to-speech.',
+      },
     ],
     relatedSlugs: ['claude-code', 'codex', 'gemini-cli'],
     externalUrl: 'https://ai.cloudflare.com/',
@@ -532,33 +1208,85 @@ export const integrations: Integration[] = [
     categoryLabel: 'AI Models',
     tagline: 'Deep GitHub integration for repository management',
     description:
-      "SAM integrates deeply with GitHub for repository access, authentication, and pull request management. Install the SAM GitHub App on your repos, and agents can clone code, push branches, and open PRs — all with proper GitHub permissions.",
+      'SAM integrates deeply with GitHub for repository access, authentication, and pull request management. Install the SAM GitHub App on your repos, and agents can clone code, push branches, and open PRs — all with proper GitHub permissions.',
     color: '#24292F',
     logoPath: '/images/integrations/github.svg',
     seoTitle: 'GitHub Integration for AI Coding Agents | SAM',
     seoDescription:
       'Connect your GitHub repos to SAM for automatic agent provisioning, branch management, and pull request creation. GitHub App integration with proper permissions.',
     features: [
-      { title: 'GitHub App Integration', description: 'Install the SAM GitHub App for secure repository access — proper permissions without sharing personal tokens.' },
-      { title: 'Automatic PR Creation', description: 'Agents push to descriptive branches and open pull requests automatically when work is complete.' },
-      { title: 'Repository Discovery', description: 'SAM discovers your repos via the GitHub App installation — select a repo when creating a project.' },
-      { title: 'OAuth Login', description: 'Sign in to SAM with your GitHub account — no separate account needed.' },
+      {
+        title: 'GitHub App Integration',
+        description:
+          'Install the SAM GitHub App for secure repository access — proper permissions without sharing personal tokens.',
+      },
+      {
+        title: 'Automatic PR Creation',
+        description:
+          'Agents push to descriptive branches and open pull requests automatically when work is complete.',
+      },
+      {
+        title: 'Repository Discovery',
+        description:
+          'SAM discovers your repos via the GitHub App installation — select a repo when creating a project.',
+      },
+      {
+        title: 'OAuth Login',
+        description: 'Sign in to SAM with your GitHub account — no separate account needed.',
+      },
     ],
     howItWorks: [
-      { step: 'Sign In with GitHub', description: 'Authenticate to SAM using your GitHub account via OAuth.' },
-      { step: 'Install the GitHub App', description: 'Install SAM\'s GitHub App on your organization or personal repos.' },
-      { step: 'Create a Project', description: 'Select a repository from your installations to create a SAM project.' },
-      { step: 'Agents Use GitHub', description: 'Agents clone, branch, commit, push, and open PRs using the GitHub App\'s credentials.' },
+      {
+        step: 'Sign In with GitHub',
+        description: 'Authenticate to SAM using your GitHub account via OAuth.',
+      },
+      {
+        step: 'Install the GitHub App',
+        description: "Install SAM's GitHub App on your organization or personal repos.",
+      },
+      {
+        step: 'Create a Project',
+        description: 'Select a repository from your installations to create a SAM project.',
+      },
+      {
+        step: 'Agents Use GitHub',
+        description:
+          "Agents clone, branch, commit, push, and open PRs using the GitHub App's credentials.",
+      },
     ],
     useCases: [
-      { title: 'Automated PR workflows', description: 'Submit tasks and get pull requests. Agents create descriptive branches (sam/...), commit meaningful changes, and open PRs for your review.' },
-      { title: 'Multi-repo orchestration', description: 'Create projects for different repos and run agents across your entire codebase simultaneously.' },
-      { title: 'Open source contribution', description: 'Use SAM to help maintain open source projects — triage issues, fix bugs, and generate PRs at scale.' },
+      {
+        title: 'Automated PR workflows',
+        description:
+          'Submit tasks and get pull requests. Agents create descriptive branches (sam/...), commit meaningful changes, and open PRs for your review.',
+      },
+      {
+        title: 'Multi-repo orchestration',
+        description:
+          'Create projects for different repos and run agents across your entire codebase simultaneously.',
+      },
+      {
+        title: 'Open source contribution',
+        description:
+          'Use SAM to help maintain open source projects — triage issues, fix bugs, and generate PRs at scale.',
+      },
     ],
     faq: [
-      { question: 'What GitHub permissions does SAM need?', answer: 'The SAM GitHub App requests repository read/write access for code, pull requests, and issues. You choose exactly which repos to grant access to.' },
-      { question: 'Can SAM work with GitHub Enterprise?', answer: 'SAM is designed for GitHub.com. GitHub Enterprise Server support is on the roadmap for self-hosted deployments.' },
-      { question: 'Do agents use my GitHub token?', answer: 'No — agents use the GitHub App\'s installation token for repository operations. Your personal OAuth token is only used for authentication to SAM itself.' },
+      {
+        question: 'What GitHub permissions does SAM need?',
+        answer:
+          'The SAM GitHub App requests repository read/write access for code, pull requests, and issues. You choose exactly which repos to grant access to.',
+      },
+      {
+        question: 'Can SAM work with GitHub Enterprise?',
+        answer:
+          'SAM is designed for GitHub.com. GitHub Enterprise Server support is on the roadmap for self-hosted deployments.',
+      },
+      {
+        question: 'Do agents use my GitHub token?',
+        answer:
+          "No — agents use the GitHub App's installation token for repository operations. Your personal OAuth token is only used for authentication to SAM itself.",
+      },
     ],
     relatedSlugs: ['claude-code', 'codex', 'hetzner'],
     externalUrl: 'https://github.com',

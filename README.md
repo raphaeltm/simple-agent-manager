@@ -32,7 +32,7 @@
 
 **Agents in parallel, each in a real environment.** Every agent runs in its own isolated Docker container on a VM you own — full Linux, Docker, and git, reachable from any browser. Run a handful or hundreds at once, each in a clean workspace.
 
-**Bring your own cloud.** VMs are provisioned in your own Hetzner, Scaleway, or GCP account and billed directly to you. SAM never stores your cloud provider credentials as platform env vars — they're encrypted per-user. Your agents, your infra, your data.
+**Bring your own cloud.** VMs are provisioned in your own Hetzner, Scaleway, GCP, Vultr, or UpCloud account and billed directly to you. SAM never stores your cloud provider credentials as platform env vars — they're encrypted per-user. Your agents, your infra, your data.
 
 **Bring your own agent.** Six harnesses work today: [Claude Code](https://www.anthropic.com/claude-code), Codex, Gemini, Mistral, OpenCode, and Amp. Use your own API key, your OAuth/subscription token, or the platform proxy.
 
@@ -64,12 +64,12 @@ You: "Add rate limiting to the /api/upload endpoint"
 
 ## Architecture
 
-| Layer              | What                              | How                                                                                                                        |
-| ------------------ | --------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| **Control plane**  | API, auth, orchestration          | Cloudflare Workers + D1 + KV + R2                                                                                          |
-| **Real-time data** | Chat messages, activity, sessions | Durable Objects with embedded SQLite (per project)                                                                         |
-| **Compute**        | Workspaces running coding agents  | VMs in your own cloud (Hetzner, Scaleway, or GCP) with a Go agent managing Docker containers, WebSocket terminal, and auth |
-| **Warm pool**      | Fast workspace starts             | Completed VMs stay warm for 30 min for instant reuse                                                                       |
+| Layer              | What                              | How                                                                                                                                        |
+| ------------------ | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Control plane**  | API, auth, orchestration          | Cloudflare Workers + D1 + KV + R2                                                                                                          |
+| **Real-time data** | Chat messages, activity, sessions | Durable Objects with embedded SQLite (per project)                                                                                         |
+| **Compute**        | Workspaces running coding agents  | VMs in your own cloud (Hetzner, Scaleway, GCP, Vultr, or UpCloud) with a Go agent managing Docker containers, WebSocket terminal, and auth |
+| **Warm pool**      | Fast workspace starts             | Completed VMs stay warm for 30 min for instant reuse                                                                                       |
 
 The control plane is serverless — no servers to manage, no databases to back up. Compute scales to zero when you're not using it.
 
@@ -82,7 +82,7 @@ apps/
   www/          Marketing site, blog & docs (Astro + Starlight)
 packages/
   shared/       Shared types and utilities
-  providers/    Cloud provider abstraction (Hetzner, Scaleway, GCP)
+  providers/    Cloud provider abstraction (Hetzner, Scaleway, GCP, Vultr, UpCloud)
   cloud-init/   Cloud-init template generator
   vm-agent/     Go VM agent (PTY, WebSocket, MCP tool endpoints)
   ui/           Design system tokens and shared UI components
@@ -110,7 +110,7 @@ SAM deploys through the **Deploy Production** GitHub Actions workflow in your fo
 
 To update an existing self-hosted instance, sync upstream changes into your fork's `main` branch, then manually run **Deploy Production** again.
 
-Your instance is live at `app.{your-domain}`. Users sign in with GitHub and provide their own cloud provider API token (Hetzner, Scaleway, or GCP) to create workspaces.
+Your instance is live at `app.{your-domain}`. Users sign in with GitHub and provide their own cloud provider API token (Hetzner, Scaleway, GCP, Vultr, or UpCloud) to create workspaces.
 
 ## Development
 

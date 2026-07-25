@@ -31,6 +31,12 @@ const DigitalOceanCredentialSchema = v.object({
   token: v.string(),
 });
 
+const UpCloudCredentialSchema = v.object({
+  provider: v.literal('upcloud'),
+  username: v.pipe(v.string(), v.minLength(1)),
+  password: v.pipe(v.string(), v.minLength(1)),
+});
+
 const GcpCredentialSchema = v.object({
   provider: v.literal('gcp'),
   authType: v.optional(v.literal('workload-identity')),
@@ -48,6 +54,7 @@ export const CreateCredentialSchema = v.variant('provider', [
   VultrCredentialSchema,
   InfomaniakCredentialSchema,
   DigitalOceanCredentialSchema,
+  UpCloudCredentialSchema,
   GcpCredentialSchema,
 ]);
 

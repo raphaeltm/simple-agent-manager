@@ -12,6 +12,7 @@ export const PROVIDER_LABELS: Record<CredentialProvider, string> = {
   vultr: 'Vultr',
   infomaniak: 'Infomaniak Public Cloud',
   digitalocean: 'DigitalOcean',
+  upcloud: 'UpCloud',
 };
 
 /** Provider console URLs and help text for onboarding / credential setup. */
@@ -55,6 +56,12 @@ export const PROVIDER_HELP: Record<CredentialProvider, ProviderHelpMeta> = {
     helpUrl: 'https://cloud.digitalocean.com/account/api/tokens',
     helpText:
       'Go to API → Tokens/Keys → Generate New Token with Full Access (or custom scopes covering droplet, block_storage, tag, image, region, size, account, and actions), then copy your Personal Access Token',
+  },
+  upcloud: {
+    description: 'European cloud with global regions',
+    helpUrl: 'https://hub.upcloud.com/people/accounts',
+    helpText:
+      'Create a dedicated API subaccount with server and storage permissions, then enter its username and password',
   },
 };
 
@@ -125,6 +132,18 @@ export const PROVIDER_LOCATIONS: Record<CredentialProvider, LocationMeta[]> = {
     { id: 'blr1', name: 'Bangalore', country: 'IN' },
     { id: 'syd1', name: 'Sydney', country: 'AU' },
   ],
+  upcloud: [
+    { id: 'de-fra1', name: 'Frankfurt', country: 'DE' },
+    { id: 'fi-hel1', name: 'Helsinki 1', country: 'FI' },
+    { id: 'fi-hel2', name: 'Helsinki 2', country: 'FI' },
+    { id: 'nl-ams1', name: 'Amsterdam', country: 'NL' },
+    { id: 'uk-lon1', name: 'London', country: 'GB' },
+    { id: 'us-chi1', name: 'Chicago', country: 'US' },
+    { id: 'us-nyc1', name: 'New York', country: 'US' },
+    { id: 'us-sjo1', name: 'San Jose', country: 'US' },
+    { id: 'sg-sin1', name: 'Singapore', country: 'SG' },
+    { id: 'au-syd1', name: 'Sydney', country: 'AU' },
+  ],
 };
 
 /** Default location per provider. */
@@ -135,6 +154,7 @@ export const PROVIDER_DEFAULT_LOCATIONS: Record<CredentialProvider, string> = {
   vultr: 'fra',
   infomaniak: 'dc4-a',
   digitalocean: 'fra1',
+  upcloud: 'de-fra1',
 };
 
 // =============================================================================
@@ -157,11 +177,12 @@ export const TOKEN_COMPUTE_PROVIDERS = [
   'vultr',
   'infomaniak',
   'digitalocean',
+  'upcloud',
 ] as const;
 
 /**
  * True when the credential list contains at least one BYOC compute credential
- * (Hetzner / Scaleway / Vultr / Infomaniak / DigitalOcean). Excludes GCP by design — see
+ * (Hetzner / Scaleway / Vultr / Infomaniak / DigitalOcean / UpCloud). Excludes GCP by design — see
  * TOKEN_COMPUTE_PROVIDERS. Shared by every "does the user have a cloud provider"
  * onboarding gate so the provider set lives in exactly one place.
  */

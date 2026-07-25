@@ -56,7 +56,7 @@ Projects as the primary organizational unit:
 
 Multiple cloud providers and UX improvements:
 
-- Scaleway, GCP, Vultr, Infomaniak, and DigitalOcean cloud provider support (in addition to Hetzner).
+- Scaleway, GCP, Vultr, Infomaniak, DigitalOcean, and UpCloud cloud provider support (in addition to Hetzner).
 - In-app notifications with filtering.
 - Voice input and text-to-speech playback.
 - Conversation forking.

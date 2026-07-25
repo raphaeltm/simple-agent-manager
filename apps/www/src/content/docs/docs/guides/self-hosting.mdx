@@ -17,7 +17,7 @@ This guide walks you through deploying Simple Agent Manager to your own infrastr
 
 **Workers Paid** is required because SAM uses Durable Objects for real-time chat, task execution, and node lifecycle, and Cloudflare Containers for the default instant-session runtime. Go to **Workers & Pages** in the Cloudflare dashboard to upgrade. You also need **R2** enabled for Pulumi state and **Analytics Engine** enabled (free): **Workers & Pages** → **Analytics Engine** → **Enable**.
 
-You do **not** need a shared cloud provider account. Users provide their own [Hetzner API token](https://console.hetzner.cloud/), [Scaleway API key](https://console.scaleway.com/iam/api-keys), [Vultr API key](https://my.vultr.com/settings/#settingsapi), [Infomaniak application credential](https://docs.infomaniak.cloud/identity/applications_credentials/), [DigitalOcean token](https://cloud.digitalocean.com/account/api/tokens), or GCP configuration through the Settings UI. GCP Workload Identity Federation (WIF) uses an optional infrastructure OAuth client; the service-account JSON mode is OAuth-free.
+You do **not** need a shared cloud provider account. Users provide their own [Hetzner API token](https://console.hetzner.cloud/), [Scaleway API key](https://console.scaleway.com/iam/api-keys), [Vultr API key](https://my.vultr.com/settings/#settingsapi), [Infomaniak application credential](https://docs.infomaniak.cloud/identity/applications_credentials/), [DigitalOcean token](https://cloud.digitalocean.com/account/api/tokens), [UpCloud API subaccount](https://hub.upcloud.com/people/accounts), or GCP configuration through the Settings UI. GCP Workload Identity Federation (WIF) uses an optional infrastructure OAuth client; the service-account JSON mode is OAuth-free.
 
 ## Step 1: Choose Your Domain and Cloudflare Account
 
@@ -285,7 +285,8 @@ The Workers Paid plan ($5/month) is required for Durable Objects and Cloudflare 
 
 ### User VM Costs
 
-VMs are billed to the cloud provider credential SAM uses for the node. In a typical self-hosted setup, that is each user's own BYOC credential; admins may also configure a platform credential for shared zero-config provisioning. SAM supports Hetzner, Scaleway, Vultr, Infomaniak, DigitalOcean, and GCP. The example prices below cover the built-in Hetzner, Scaleway, Vultr, Infomaniak, and DigitalOcean size mappings; GCP pricing depends on the selected project, zone, and machine family.
+VMs are billed to the cloud provider credential SAM uses for the node. In a typical self-hosted setup, that is each user's own BYOC credential; admins may also configure a platform credential for shared zero-config provisioning. SAM supports Hetzner, Scaleway, Vultr, Infomaniak, DigitalOcean, UpCloud, and GCP. The example prices below cover the built-in Hetzner, Scaleway, Vultr, Infomaniak, DigitalOcean, and UpCloud size mappings; GCP pricing depends on the selected project, zone, and machine family.
+VMs are billed to the cloud provider credential SAM uses for the node. In a typical self-hosted setup, that is each user's own BYOC credential; admins may also configure a platform credential for shared zero-config provisioning. SAM supports Hetzner, Scaleway, Vultr, Infomaniak, UpCloud, and GCP. The example prices below cover the built-in Hetzner, Scaleway, Vultr, Infomaniak, and UpCloud size mappings; GCP pricing depends on the selected project, zone, and machine family.
 
 **Hetzner:**
 
@@ -322,6 +323,15 @@ Vultr bills hourly and the default region is `fra` (Frankfurt). When you create 
 | Large (s-8vcpu-16gb) | 8 vCPU, 16GB RAM, 320GB | ~$96    |
 
 DigitalOcean bills hourly, defaults to `fra1` (Frankfurt), and requires a Full Access Personal Access Token (or equivalent custom scopes for droplets, block storage, tags, account, actions, images, regions, and sizes).
+**UpCloud:**
+
+| Size               | Specs            | Approx. monthly |
+| ------------------ | ---------------- | --------------- |
+| Small (2xCPU-4GB)  | 2 vCPU, 4GB RAM  | ~$12            |
+| Medium (4xCPU-8GB) | 4 vCPU, 8GB RAM  | ~$24            |
+| Large (8xCPU-16GB) | 8 vCPU, 16GB RAM | ~$48            |
+
+UpCloud billing is usage-based. SAM verifies the configured simple plan and zone through the current API before provisioning; the default zone is `de-fra1` (Frankfurt). Create a dedicated API subaccount with API access and storage permissions, then enter its username and password in Settings. Prices are indicative; verify current regional pricing in the UpCloud calculator.
 
 ## Troubleshooting
 

@@ -14,6 +14,7 @@ const CredentialProviderSchema = v.picklist([
   'vultr',
   'infomaniak',
   'digitalocean',
+  'upcloud',
 ]);
 const TaskModeSchema = v.picklist(['task', 'conversation']);
 const TaskStatusSchema = v.picklist([

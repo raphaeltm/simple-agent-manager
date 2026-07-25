@@ -321,6 +321,13 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   DIGITALOCEAN_ACTION_POLL_TIMEOUT_MS?: string;
   DIGITALOCEAN_ACTION_POLL_INTERVAL_MS?: string;
   DIGITALOCEAN_MAX_LIST_PAGES?: string;
+  UPCLOUD_API_URL?: string;
+  UPCLOUD_ZONE?: string;
+  UPCLOUD_IMAGE_TITLE?: string;
+  UPCLOUD_API_TIMEOUT_MS?: string;
+  UPCLOUD_IP_POLL_TIMEOUT_MS?: string;
+  UPCLOUD_IP_POLL_INTERVAL_MS?: string;
+  UPCLOUD_STOP_TIMEOUT_SECONDS?: string;
   // External API timeouts (milliseconds)
   HETZNER_API_TIMEOUT_MS?: string;
   CF_API_TIMEOUT_MS?: string;

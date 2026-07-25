@@ -67,6 +67,7 @@ import {
   validateHetznerCredentialWithProvider,
   validateInfomaniakCredentialWithProvider,
   validateScalewayCredentialWithProvider,
+  validateUpCloudCredentialWithProvider,
   validateVultrCredentialWithProvider,
 } from '../services/validation';
 
@@ -108,6 +109,16 @@ function getCloudCredentialFields(body: CreateCredentialRequest): CloudCredentia
         tokenToValidate: serializeCredentialToken(providerName, {
           applicationCredentialId: body.applicationCredentialId,
           applicationCredentialSecret: body.applicationCredentialSecret,
+        }),
+      };
+    case 'upcloud':
+      if (!body.username || !body.password)
+        throw errors.badRequest('Username and password are required for UpCloud');
+      return {
+        providerName,
+        tokenToValidate: serializeCredentialToken(providerName, {
+          username: body.username,
+          password: body.password,
         }),
       };
     case 'gcp':
@@ -180,6 +191,12 @@ async function validateCloudCredentialRequest(
   }
   if (body.provider === 'digitalocean') {
     return validateDigitalOceanCredentialWithProvider(body.token, {
+      timeoutMs: getSaveValidationTimeoutMs(env),
+    });
+  }
+
+  if (body.provider === 'upcloud') {
+    return validateUpCloudCredentialWithProvider(body.username, body.password, {
       timeoutMs: getSaveValidationTimeoutMs(env),
     });
   }
