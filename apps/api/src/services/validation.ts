@@ -254,7 +254,7 @@ export async function validateInfomaniakCredentialWithProvider(
         ? error.statusCode
         : undefined;
     const message = status
-      ? `Application credential rejected by Infomaniak API ()`
+      ? `Application credential rejected by Infomaniak API (HTTP ${status})`
       : 'Could not validate with Infomaniak API';
     return { valid: false, message, error: message, status, validationMode: 'provider' };
   }
