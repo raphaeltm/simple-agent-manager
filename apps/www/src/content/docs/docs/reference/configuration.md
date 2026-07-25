@@ -166,14 +166,14 @@ SAM loads OpenCode Zen and OpenCode Go model choices through the authenticated m
 
 ## Warm Node Pooling
 
-| Variable                        | Default            | Description                                           |
-| ------------------------------- | ------------------ | ----------------------------------------------------- |
-| `NODE_WARM_TIMEOUT_MS`          | `1800000` (30 min) | Time a node stays warm after idea execution completes |
-| `MAX_AUTO_NODE_LIFETIME_MS`     | `14400000` (4 hr)  | Absolute max lifetime for auto-provisioned nodes      |
-| `NODE_WARM_GRACE_PERIOD_MS`     | `2100000` (35 min) | Cron sweep grace period (must be > warm timeout)      |
-| `NODE_LIFECYCLE_ALARM_RETRY_MS` | `60000` (1 min)    | Retry delay for DO alarm failures                     |
-| `WORKSPACE_IDLE_CHECK_INTERVAL_MS` | `300000` (5 min) | Interval at which the ProjectData DO checks workspace idle state |
-| `DEFAULT_TASK_AGENT_TYPE`       | `opencode`         | Default agent for autonomous idea execution           |
+| Variable                           | Default            | Description                                                      |
+| ---------------------------------- | ------------------ | ---------------------------------------------------------------- |
+| `NODE_WARM_TIMEOUT_MS`             | `1800000` (30 min) | Time a node stays warm after idea execution completes            |
+| `MAX_AUTO_NODE_LIFETIME_MS`        | `14400000` (4 hr)  | Absolute max lifetime for auto-provisioned nodes                 |
+| `NODE_WARM_GRACE_PERIOD_MS`        | `2100000` (35 min) | Cron sweep grace period (must be > warm timeout)                 |
+| `NODE_LIFECYCLE_ALARM_RETRY_MS`    | `60000` (1 min)    | Retry delay for DO alarm failures                                |
+| `WORKSPACE_IDLE_CHECK_INTERVAL_MS` | `300000` (5 min)   | Interval at which the ProjectData DO checks workspace idle state |
+| `DEFAULT_TASK_AGENT_TYPE`          | `opencode`         | Default agent for autonomous idea execution                      |
 
 ## Project Invites
 

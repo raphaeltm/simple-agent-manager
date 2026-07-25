@@ -219,7 +219,8 @@ export class NotificationService extends DurableObject<Env> {
     unreadCount: number;
     nextCursor: string | null;
   }> {
-    const maxPageSize = parseInt(this.env.MAX_NOTIFICATION_PAGE_SIZE || '', 10) || DEFAULT_MAX_NOTIFICATION_PAGE_SIZE;
+    const parsedMax = parseInt(this.env.MAX_NOTIFICATION_PAGE_SIZE || '', 10);
+    const maxPageSize = Number.isFinite(parsedMax) && parsedMax > 0 ? parsedMax : DEFAULT_MAX_NOTIFICATION_PAGE_SIZE;
     const pageSize = Math.min(
       options.limit || parseInt(this.env.NOTIFICATION_PAGE_SIZE || '') || DEFAULT_NOTIFICATION_PAGE_SIZE,
       maxPageSize
