@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, vi } from 'vitest';
+
 import { UpCloudProvider } from '../../src/upcloud';
 import { runProviderContractTests } from './provider-contract.test';
 const originalFetch = globalThis.fetch;
@@ -23,6 +24,8 @@ beforeEach(() => {
   globalThis.fetch = vi.fn(async (input: string | URL | Request, init: RequestInit = {}) => {
     const url = String(input),
       method = init.method ?? 'GET';
+    if (url.endsWith('/plan'))
+      return new Response(JSON.stringify({ plans: { plan: [{ name: '2xCPU-4GB' }] } }));
     if (url.endsWith('/storage/template'))
       return new Response(
         JSON.stringify({

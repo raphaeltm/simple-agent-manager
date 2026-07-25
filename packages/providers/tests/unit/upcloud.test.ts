@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+
 import { createProvider, ProviderError } from '../../src';
 import { classifyUpCloudError, mapUpCloudStatus, UpCloudProvider } from '../../src/upcloud';
 const originalFetch = globalThis.fetch;
@@ -48,22 +49,24 @@ const json = (body: unknown, status = 200) =>
 
 describe('UpCloudProvider', () => {
   it('creates a server with Basic auth, cloud-init user_data, labels, and cloned root storage', async () => {
-    const fetchMock = mock((url, init) =>
-      url.endsWith('/storage/template')
-        ? json({
-            storages: {
-              storage: [
-                storage({
-                  uuid: 'template-1',
-                  title: 'Ubuntu Server 24.04 LTS',
-                  type: 'template',
-                  template_type: 'cloud-init',
-                  zone: '',
-                }),
-              ],
-            },
-          })
-        : json({ server: server() })
+    const fetchMock = mock((url, _init) =>
+      url.endsWith('/plan')
+        ? json({ plans: { plan: [{ name: '2xCPU-4GB' }] } })
+        : url.endsWith('/storage/template')
+          ? json({
+              storages: {
+                storage: [
+                  storage({
+                    uuid: 'template-1',
+                    title: 'Ubuntu Server 24.04 LTS',
+                    type: 'template',
+                    template_type: 'cloud-init',
+                    zone: '',
+                  }),
+                ],
+              },
+            })
+          : json({ server: server() })
     );
     const p = new UpCloudProvider('api-user', 'sëcret', { ipPollTimeoutMs: 1 });
     const result = await p.createVM({

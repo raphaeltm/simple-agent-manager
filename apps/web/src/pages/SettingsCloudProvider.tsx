@@ -4,8 +4,8 @@ import { GcpCredentialForm } from '../components/GcpCredentialForm';
 import { HetznerTokenForm } from '../components/HetznerTokenForm';
 import { InfomaniakCredentialForm } from '../components/InfomaniakCredentialForm';
 import { ScalewayCredentialForm } from '../components/ScalewayCredentialForm';
-import { VultrCredentialForm } from '../components/VultrCredentialForm';
 import { UpCloudCredentialForm } from '../components/UpCloudCredentialForm';
+import { VultrCredentialForm } from '../components/VultrCredentialForm';
 import { useSettingsContext } from './SettingsContext';
 
 export function SettingsCloudProvider() {

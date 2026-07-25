@@ -867,6 +867,7 @@ export const integrations: Integration[] = [
     description:
       'Connect a dedicated UpCloud API subaccount to run SAM workspace and deployment nodes with encrypted MaxIOPS storage.',
     color: 'rgb(123 0 255)',
+    logoPath: '/images/integrations/upcloud.svg',
     seoTitle: 'Run AI Coding Agents on UpCloud',
     seoDescription: 'Run AI coding agents and persistent app deployments on UpCloud.',
     features: [

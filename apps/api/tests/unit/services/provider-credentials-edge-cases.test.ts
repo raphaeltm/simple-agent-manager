@@ -9,7 +9,12 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { decrypt } from '../../../src/services/encryption';
-import { buildProviderConfig, extractScalewaySecretKey, getUserCloudProviderConfig,serializeCredentialToken } from '../../../src/services/provider-credentials';
+import {
+  buildProviderConfig,
+  extractScalewaySecretKey,
+  getUserCloudProviderConfig,
+  serializeCredentialToken,
+} from '../../../src/services/provider-credentials';
 
 vi.mock('../../../src/services/encryption', () => ({
   decrypt: vi.fn(),
@@ -52,10 +57,9 @@ describe('serializeCredentialToken — edge cases', () => {
   it('default branch throws for unknown providers', () => {
     // The default branch uses exhaustive type checking and throws.
     // This prevents silent data loss for unsupported providers.
-    expect(() => serializeCredentialToken(
-      'upcloud' as any,
-      { token: 'upcloud-token' },
-    )).toThrow('Unsupported provider');
+    expect(() =>
+      serializeCredentialToken('unsupported-provider' as any, { token: 'unsupported-token' })
+    ).toThrow('Unsupported provider');
   });
 });
 
@@ -74,7 +78,7 @@ describe('buildProviderConfig — edge cases', () => {
   it('throws for scaleway with valid JSON but missing secretKey', () => {
     const token = JSON.stringify({ projectId: 'proj-only' });
     expect(() => buildProviderConfig('scaleway', token)).toThrow(
-      'Invalid Scaleway credential format: missing secretKey or projectId',
+      'Invalid Scaleway credential format: missing secretKey or projectId'
     );
   });
 
@@ -91,13 +95,13 @@ describe('buildProviderConfig — edge cases', () => {
 
   it('throws with descriptive message for unsupported provider', () => {
     expect(() => buildProviderConfig('digitalocean' as any, 'token')).toThrow(
-      'Unsupported provider: digitalocean',
+      'Unsupported provider: digitalocean'
     );
   });
 
   it('throws descriptive error for malformed scaleway JSON', () => {
     expect(() => buildProviderConfig('scaleway', '{broken')).toThrow(
-      'Invalid Scaleway credential format: malformed stored data',
+      'Invalid Scaleway credential format: malformed stored data'
     );
   });
 
@@ -165,7 +169,7 @@ describe('getUserCloudProviderConfig', () => {
 
   it('returns ScalewayProviderConfig when a scaleway credential row exists', async () => {
     mockDecrypt.mockResolvedValueOnce(
-      JSON.stringify({ secretKey: 'scw-key', projectId: 'proj-id' }),
+      JSON.stringify({ secretKey: 'scw-key', projectId: 'proj-id' })
     );
 
     const db = makeDbMock([
@@ -201,9 +205,9 @@ describe('getUserCloudProviderConfig', () => {
       },
     ]) as any;
 
-    await expect(
-      getUserCloudProviderConfig(db, 'user-1', 'enc-key'),
-    ).rejects.toThrow('Unsupported provider');
+    await expect(getUserCloudProviderConfig(db, 'user-1', 'enc-key')).rejects.toThrow(
+      'Unsupported provider'
+    );
   });
 
   it('passes targetProvider as additional where condition when specified', async () => {
@@ -232,7 +236,7 @@ describe('getUserCloudProviderConfig', () => {
 
   it('returns matching credential when targetProvider matches the stored provider', async () => {
     mockDecrypt.mockResolvedValueOnce(
-      JSON.stringify({ secretKey: 'scw-key', projectId: 'proj-id' }),
+      JSON.stringify({ secretKey: 'scw-key', projectId: 'proj-id' })
     );
 
     const db = makeDbMock([
@@ -293,15 +297,22 @@ describe('extractScalewaySecretKey', () => {
   });
 
   it('returns null when secretKey is empty string', () => {
-    expect(extractScalewaySecretKey(JSON.stringify({ secretKey: '', projectId: 'proj-1' }))).toBeNull();
+    expect(
+      extractScalewaySecretKey(JSON.stringify({ secretKey: '', projectId: 'proj-1' }))
+    ).toBeNull();
   });
 
   it('returns null when secretKey is not a string', () => {
-    expect(extractScalewaySecretKey(JSON.stringify({ secretKey: 42, projectId: 'proj-1' }))).toBeNull();
+    expect(
+      extractScalewaySecretKey(JSON.stringify({ secretKey: 42, projectId: 'proj-1' }))
+    ).toBeNull();
   });
 
   it('round-trips with serializeCredentialToken', () => {
-    const serialized = serializeCredentialToken('scaleway', { secretKey: 'my-key', projectId: 'my-proj' });
+    const serialized = serializeCredentialToken('scaleway', {
+      secretKey: 'my-key',
+      projectId: 'my-proj',
+    });
     expect(extractScalewaySecretKey(serialized)).toBe('my-key');
   });
 });

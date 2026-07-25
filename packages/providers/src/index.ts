@@ -4,8 +4,8 @@ import { InfomaniakProvider } from './infomaniak';
 import { ScalewayProvider } from './scaleway';
 import type { Provider, ProviderConfig } from './types';
 import { ProviderError } from './types';
-import { VultrProvider } from './vultr';
 import { UpCloudProvider } from './upcloud';
+import { VultrProvider } from './vultr';
 
 // Re-export types
 export type {
@@ -22,6 +22,7 @@ export type {
   ProviderLogger,
   ScalewayProviderConfig,
   SizeConfig,
+  UpCloudProviderConfig,
   VMConfig,
   VMInstance,
   VMStatus,
@@ -36,7 +37,6 @@ export type {
   VolumeResizeConfig,
   VolumeStatus,
   VultrProviderConfig,
-  UpCloudProviderConfig,
 } from './types';
 export {
   ProviderError,
@@ -97,18 +97,6 @@ export {
   SCALEWAY_VOLUME_MAX_SIZE_GB,
   SCALEWAY_VOLUME_MIN_SIZE_GB,
 } from './scaleway-volumes';
-export type { VultrProviderRuntimeOptions } from './vultr';
-export {
-  classifyVultrError,
-  DEFAULT_VULTR_IP_POLL_INTERVAL_MS,
-  DEFAULT_VULTR_IP_POLL_TIMEOUT_MS,
-  DEFAULT_VULTR_REQUEST_TIMEOUT_MS,
-  findVultrOs,
-  mapVultrStatus,
-  VULTR_LOCATIONS,
-  VultrProvider,
-} from './vultr';
-export { VULTR_VOLUME_MAX_SIZE_GB, VULTR_VOLUME_MIN_SIZE_GB } from './vultr-volumes';
 export type { UpCloudProviderRuntimeOptions } from './upcloud';
 export {
   classifyUpCloudError,
@@ -124,6 +112,18 @@ export {
   UPCLOUD_VOLUME_MIN_SIZE_GB,
   UpCloudProvider,
 } from './upcloud';
+export type { VultrProviderRuntimeOptions } from './vultr';
+export {
+  classifyVultrError,
+  DEFAULT_VULTR_IP_POLL_INTERVAL_MS,
+  DEFAULT_VULTR_IP_POLL_TIMEOUT_MS,
+  DEFAULT_VULTR_REQUEST_TIMEOUT_MS,
+  findVultrOs,
+  mapVultrStatus,
+  VULTR_LOCATIONS,
+  VultrProvider,
+} from './vultr';
+export { VULTR_VOLUME_MAX_SIZE_GB, VULTR_VOLUME_MIN_SIZE_GB } from './vultr-volumes';
 
 /**
  * Create a provider instance from explicit configuration.
@@ -176,6 +176,7 @@ export function createProvider(config: ProviderConfig): Provider {
       });
     case 'upcloud':
       return new UpCloudProvider(config.username, config.password, {
+        apiUrl: config.apiUrl,
         zone: config.zone,
         imageTitle: config.imageTitle,
         requestTimeoutMs: config.requestTimeoutMs,

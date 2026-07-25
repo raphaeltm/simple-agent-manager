@@ -43,45 +43,45 @@ UpCloud is SAM's first HTTP Basic-auth cloud provider. Its API uses nested respo
 
 ### Shared types and metadata
 
-- [ ] Add `upcloud` to the credential provider union and `{provider:'upcloud'; username; password}` create request.
-- [ ] Add UpCloud label/help text, verified public locations, European default location, VM vCPU maps, and capacity maps.
-- [ ] Add configurable UpCloud API, plan, image-title, region, polling, shutdown, and request-timeout defaults without hardcoded operational values.
+- [x] Add `upcloud` to the credential provider union and `{provider:'upcloud'; username; password}` create request.
+- [x] Add UpCloud label/help text, verified public locations, European default location, VM vCPU maps, and capacity maps.
+- [x] Add configurable UpCloud API, plan, image-title, region, polling, shutdown, and request-timeout defaults without hardcoded operational values.
 
 ### Provider package
 
-- [ ] Add an UpCloud provider config variant and exhaustive factory/export wiring.
-- [ ] Implement Workers-safe HTTP Basic authentication and sanitized provider error classification.
-- [ ] Add runtime validators for nested account, plan, zone, template, server, server-list, storage, and storage-list responses.
-- [ ] Implement VM creation with dynamic cloud-init template resolution, nested `user_data`, root storage clone, labels, networking, and bounded public-IP readiness polling.
-- [ ] Implement get/list with SAM-label filtering, status mapping, power on, soft power off, and idempotent safe server deletion that removes boot storage without deleting separately tracked deployment volumes.
-- [ ] Implement real volume create/list/get/delete, attach/detach, grow-only resize, same-zone checks, encrypted maxiops defaults, Linux-device discovery notes, and idempotent/safe deletion behavior.
-- [ ] Keep provider implementation files within project size limits and extract focused shared helpers only where they remove real duplication.
+- [x] Add an UpCloud provider config variant and exhaustive factory/export wiring.
+- [x] Implement Workers-safe HTTP Basic authentication and sanitized provider error classification.
+- [x] Add runtime validators for nested account, plan, zone, template, server, server-list, storage, and storage-list responses.
+- [x] Implement VM creation with dynamic cloud-init template resolution, nested `user_data`, root storage clone, labels, networking, and bounded public-IP readiness polling.
+- [x] Implement get/list with SAM-label filtering, status mapping, power on, soft power off, and idempotent safe server deletion that removes boot storage without deleting separately tracked deployment volumes.
+- [x] Implement real volume create/list/get/delete, attach/detach, grow-only resize, same-zone checks, encrypted maxiops defaults, Linux-device discovery notes, and idempotent/safe deletion behavior.
+- [x] Keep provider implementation files within project size limits and extract focused shared helpers only where they remove real duplication.
 
 ### API, runtime configuration, and cloud-init
 
-- [ ] Add structured UpCloud credential serialization/deserialization and provider config construction with environment overrides.
-- [ ] Add UpCloud credential schemas, create/update/delete/validation routes, project credential routes, and sanitized bogus-credential behavior.
-- [ ] Add UpCloud to node/workspace/project/task/admin schema picklists, provider catalog/resolution status, MCP provider enumerations, and environment typing/examples.
-- [ ] Verify project → user → platform credential fallback and inactive-row blocking for UpCloud.
-- [ ] Add UpCloud to cloud-init provider validation and generation coverage.
-- [ ] Prove provider-agnostic workspace-node provisioning and deployment-volume vertical slices through UpCloud HTTP boundary mocks.
+- [x] Add structured UpCloud credential serialization/deserialization and provider config construction with environment overrides.
+- [x] Add UpCloud credential schemas, create/update/delete/validation routes, project credential routes, and sanitized bogus-credential behavior.
+- [x] Add UpCloud to node/workspace/project/task/admin schema picklists, provider catalog/resolution status, MCP provider enumerations, and environment typing/examples.
+- [x] Verify project → user → platform credential fallback and inactive-row blocking for UpCloud.
+- [x] Add UpCloud to cloud-init provider validation and generation coverage.
+- [x] Prove provider-agnostic workspace-node provisioning and deployment-volume vertical slices through UpCloud HTTP boundary mocks.
 
 ### Web, docs, and marketing
 
-- [ ] Add a username/password UpCloud credential form with create/update/delete behavior.
-- [ ] Wire UpCloud through Settings → Cloud Providers, the connect flow, all has-cloud-provider gates, workspace creation, onboarding, project chat, admin platform credentials, and credential configuration labels.
-- [ ] Ensure no UpCloud branch can fall through into GCP or single-token request shapes.
-- [ ] Update public architecture/security/concepts/quickstart/self-hosting/workspace/app-deployment docs and provider support tables.
-- [ ] Add UpCloud integration metadata/logo and update marketing/provider enumerations and roadmap status.
-- [ ] Run the mandatory local Playwright visual audit at 375×667 and 1280×800 with normal, long, empty, many-item, loading, and error states; assert no horizontal overflow.
+- [x] Add a username/password UpCloud credential form with create/update/delete behavior.
+- [x] Wire UpCloud through Settings → Cloud Providers, the connect flow, all has-cloud-provider gates, workspace creation, onboarding, project chat, admin platform credentials, and credential configuration labels.
+- [x] Ensure no UpCloud branch can fall through into GCP or single-token request shapes.
+- [x] Update public architecture/security/concepts/quickstart/self-hosting/workspace/app-deployment docs and provider support tables.
+- [x] Add UpCloud integration metadata/logo and update marketing/provider enumerations and roadmap status.
+- [x] Run the mandatory local Playwright visual audit at 375×667 and 1280×800 with normal, long, empty, many-item, loading, and error states; assert no horizontal overflow.
 
 ### Tests and validation
 
-- [ ] Add provider unit tests with mocked fetch and exact request/payload assertions for auth, discovery, create/get/list/delete, status mapping, polling, start/stop, and every volume operation.
-- [ ] Add response-validation and error-classification matrices, malformed-response cases, timeout cases, pagination/label behavior, idempotent 404s, unsafe attached-volume deletion rejection, same-zone rejection, and shrink rejection.
-- [ ] Reuse the provider contract suite for UpCloud.
-- [ ] Add API credential CRUD/validation tests, credential-resolution tests, provisioning and deployment-volume vertical-slice tests, cloud-init tests, and web behavior tests.
-- [ ] Run lint, typecheck, all tests, build, migration/binding quality gates, and new-code coverage.
+- [x] Add provider unit tests with mocked fetch and exact request/payload assertions for auth, discovery, create/get/list/delete, status mapping, polling, start/stop, and every volume operation.
+- [x] Add response-validation and error-classification matrices, malformed-response cases, timeout cases, pagination/label behavior, idempotent 404s, unsafe attached-volume deletion rejection, same-zone rejection, and shrink rejection.
+- [x] Reuse the provider contract suite for UpCloud.
+- [x] Add API credential CRUD/validation tests, credential-resolution tests, provisioning and deployment-volume vertical-slice tests, cloud-init tests, and web behavior tests.
+- [x] Run lint, typecheck, all tests, build, migration/binding quality gates, and new-code coverage.
 - [ ] Run required specialist reviews and address every critical/high finding: task-completion-validator, cloudflare-specialist, security-auditor, ui-ux-specialist, env-validator, doc-sync-validator, constitution-validator, and test-engineer.
 - [ ] Deploy to staging after local/reviewer gates; validate no-key/bogus-key UpCloud UI/API flows and provider-regression behavior. Exercise the existing platform Hetzner path for cloud-init/node regression because no real UpCloud credential is available.
 

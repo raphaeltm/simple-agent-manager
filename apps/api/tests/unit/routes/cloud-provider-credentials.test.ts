@@ -730,4 +730,36 @@ describe('DELETE /api/credentials/:provider', () => {
     expect(mockDB.delete).toHaveBeenCalled();
     expect(mockDB.where).toHaveBeenCalled();
   });
+  it('creates an UpCloud credential as encrypted structured JSON', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({ account: { username: 'api-user' } }), { status: 200 })
+    );
+    const res = await app.request(
+      '/api/credentials',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: 'upcloud', username: 'api-user', password: 'secret' }),
+      },
+      mockEnv
+    );
+    expect(res.status).toBe(201);
+    const { encrypt } = await import('../../../src/services/encryption');
+    expect(encrypt).toHaveBeenCalledWith(
+      JSON.stringify({ username: 'api-user', password: 'secret' }),
+      expect.anything()
+    );
+  });
+  it('rejects bogus UpCloud credentials without encryption or persistence', async () => {
+    const { encrypt } = await import('../../../src/services/encryption');
+    vi.mocked(encrypt).mockClear();
+    await expectCredentialValidationFailure(
+      app,
+      '/api/credentials/validate',
+      { provider: 'upcloud', username: 'bad', password: 'bad' },
+      'UpCloud'
+    );
+    expect(encrypt).not.toHaveBeenCalled();
+    expect(mockDB.insert).not.toHaveBeenCalled();
+  });
 });

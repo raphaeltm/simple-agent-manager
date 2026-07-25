@@ -5,6 +5,7 @@ import {
   requireArray,
   requireNumber,
   requireString,
+  validationError,
 } from './validation-core';
 export interface UpCloudLabel {
   key: string;
@@ -21,6 +22,9 @@ export interface UpCloudServer {
   labels: UpCloudLabel[];
   ipAddresses: Array<{ access: string; address: string; family: string }>;
   storageDevices: Array<{ address: string; storage: string; title: string; bootDisk: string }>;
+}
+export interface UpCloudPlan {
+  name: string;
 }
 export interface UpCloudStorage {
   uuid: string;
@@ -47,6 +51,13 @@ export function validateUpCloudServersResponse(payload: unknown, context: string
   return requireArray(root, 'server', 'upcloud', context).map((v, i) =>
     server(expectObject(v, 'upcloud', `${context}[${i}]`), context)
   );
+}
+export function validateUpCloudPlansResponse(payload: unknown, context: string): UpCloudPlan[] {
+  const root = expectObject(expectObject(payload, 'upcloud', context).plans, 'upcloud', context);
+  return requireArray(root, 'plan', 'upcloud', context).map((value, index) => {
+    const plan = expectObject(value, 'upcloud', context + '[' + index + ']');
+    return { name: requireString(plan, 'name', 'upcloud', context + '[' + index + ']') };
+  });
 }
 export function validateUpCloudStorageResponse(payload: unknown, context: string) {
   const root = expectObject(payload, 'upcloud', context);
@@ -109,6 +120,8 @@ function storage(o: Record<string, unknown>, c: string): UpCloudStorage {
     typeof o.size === 'number'
       ? requireNumber(o, 'size', 'upcloud', c)
       : Number(requireString(o, 'size', 'upcloud', c));
+  if (!Number.isFinite(size))
+    throw validationError('upcloud', c + '.size', 'expected finite number');
   return {
     uuid: requireString(o, 'uuid', 'upcloud', c),
     title: requireString(o, 'title', 'upcloud', c),

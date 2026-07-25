@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+
 import {
   buildProviderConfig,
   serializeCredentialToken,
@@ -12,6 +13,7 @@ describe('UpCloud provider credentials', () => {
     const value = serializeCredentialToken('upcloud', { username: 'user', password: 'secret' });
     expect(
       buildProviderConfig('upcloud', value, {
+        UPCLOUD_API_URL: 'https://upcloud.test/1.3',
         UPCLOUD_ZONE: 'fi-hel1',
         UPCLOUD_IMAGE_TITLE: 'Ubuntu 24.04',
         UPCLOUD_API_TIMEOUT_MS: '1234',
@@ -23,6 +25,7 @@ describe('UpCloud provider credentials', () => {
       provider: 'upcloud',
       username: 'user',
       password: 'secret',
+      apiUrl: 'https://upcloud.test/1.3',
       zone: 'fi-hel1',
       imageTitle: 'Ubuntu 24.04',
       requestTimeoutMs: 1234,

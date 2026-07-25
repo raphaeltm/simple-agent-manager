@@ -7,7 +7,7 @@ SAM's security model separates **platform secrets** (managed by operators) from 
 
 ## Cloud Credential Model (BYOC + Platform Fallback)
 
-SAM supports **Bring-Your-Own-Cloud (BYOC)**: users and self-hosters may store their own Hetzner, Scaleway, Vultr, Infomaniak, or GCP credentials, encrypted per-user in D1. This is the model for self-hosted deployments and BYO-key users.
+SAM supports **Bring-Your-Own-Cloud (BYOC)**: users and self-hosters may store their own Hetzner, Scaleway, Vultr, Infomaniak, UpCloud, or GCP credentials, encrypted per-user in D1. This is the model for self-hosted deployments and BYO-key users.
 
 However, SAM's own hosted deployment also has an **enabled platform-level cloud credential** (`platform_credentials`, `provider=hetzner`, `credential_type=cloud-provider`). Provider resolution falls back **user credential → platform credential**, so on the hosted (zero-config) platform a user does **not** need their own cloud credential for SAM to provision workspaces or deployment nodes. Self-hosted deployments without a platform credential rely on user-supplied BYOC tokens.
 

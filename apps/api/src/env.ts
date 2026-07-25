@@ -312,6 +312,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   INFOMANIAK_API_TIMEOUT_MS?: string;
   INFOMANIAK_IP_POLL_TIMEOUT_MS?: string;
   INFOMANIAK_IP_POLL_INTERVAL_MS?: string;
+  UPCLOUD_API_URL?: string;
   UPCLOUD_ZONE?: string;
   UPCLOUD_IMAGE_TITLE?: string;
   UPCLOUD_API_TIMEOUT_MS?: string;

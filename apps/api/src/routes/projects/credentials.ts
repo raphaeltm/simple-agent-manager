@@ -54,8 +54,8 @@ import {
   validateHetznerCredentialWithProvider,
   validateInfomaniakCredentialWithProvider,
   validateScalewayCredentialWithProvider,
-  validateVultrCredentialWithProvider,
   validateUpCloudCredentialWithProvider,
+  validateVultrCredentialWithProvider,
 } from '../../services/validation';
 
 const projectCredentialsRoutes = new Hono<{ Bindings: Env }>();

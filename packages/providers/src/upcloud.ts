@@ -1,14 +1,12 @@
 import type { VMSize } from '@simple-agent-manager/shared';
-import { parseProviderJson } from './validation';
+
 import { getTimeoutMs, providerFetch } from './provider-fetch';
 import type {
   Provider,
-  ProviderErrorCategory,
   ProviderLogger,
   SizeConfig,
   VMConfig,
   VMInstance,
-  VMStatus,
   VolumeAttachmentConfig,
   VolumeCapabilities,
   VolumeConfig,
@@ -26,14 +24,28 @@ import {
   SAM_VOLUME_MOUNT_PATH_TEMPLATE,
 } from './types';
 import {
+  assertUpCloudVolumeSize,
+  classifyUpCloudError,
+  isUpCloudNotFound,
+  matchesUpCloudLabels,
+  publicUpCloudIPv4,
+  sanitizeUpCloudHostname,
+  toUpCloudLabels,
+  toUpCloudVM,
+  toUpCloudVolume,
+  upCloudBasicAuth,
+  upCloudDelay,
+  upCloudDevicePath,
+} from './upcloud-utils';
+import { parseProviderJson } from './validation';
+import {
+  type UpCloudServer,
   validateUpCloudAccountResponse,
+  validateUpCloudPlansResponse,
   validateUpCloudServerResponse,
   validateUpCloudServersResponse,
   validateUpCloudStorageResponse,
   validateUpCloudStoragesResponse,
-  type UpCloudLabel,
-  type UpCloudServer,
-  type UpCloudStorage,
 } from './validation-upcloud';
 
 export const UPCLOUD_API_URL = 'https://api.upcloud.com/1.3';
@@ -98,6 +110,7 @@ export const UPCLOUD_VOLUME_CAPABILITIES: VolumeCapabilities = {
 };
 
 export interface UpCloudProviderRuntimeOptions {
+  apiUrl?: string;
   zone?: string;
   imageTitle?: string;
   requestTimeoutMs?: number;
@@ -114,6 +127,7 @@ export class UpCloudProvider implements Provider {
   readonly defaultLocation: string;
   readonly volumeCapabilities = UPCLOUD_VOLUME_CAPABILITIES;
   private readonly auth: string;
+  private readonly apiUrl: string;
   private readonly imageTitle: string;
   private readonly requestTimeoutMs: number;
   private readonly ipPollTimeoutMs: number;
@@ -121,12 +135,14 @@ export class UpCloudProvider implements Provider {
   private readonly stopTimeoutSeconds: number;
   private readonly logger: ProviderLogger;
   private templateId?: string;
+  private planNames?: Set<string>;
   constructor(username: string, password: string, options: UpCloudProviderRuntimeOptions = {}) {
     if (!username || !password)
       throw new ProviderError('upcloud', 401, 'UpCloud username and password are required', {
         category: 'auth_error',
       });
-    this.auth = basicAuth(username, password);
+    this.auth = upCloudBasicAuth(username, password);
+    this.apiUrl = options.apiUrl ?? UPCLOUD_API_URL;
     this.defaultLocation = options.zone ?? DEFAULT_UPCLOUD_ZONE;
     this.imageTitle = options.imageTitle ?? DEFAULT_UPCLOUD_IMAGE_TITLE;
     this.requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_UPCLOUD_REQUEST_TIMEOUT_MS;
@@ -136,16 +152,17 @@ export class UpCloudProvider implements Provider {
     this.logger = options.logger ?? noLogger;
   }
   async createVM(config: VMConfig): Promise<VMInstance> {
+    await this.assertPlanAvailable(this.sizes[config.size].type);
     const template = config.image ?? (await this.resolveTemplate());
     const body = {
       server: {
         zone: config.location,
         title: config.name,
-        hostname: sanitizeHostname(config.name),
+        hostname: sanitizeUpCloudHostname(config.name),
         plan: this.sizes[config.size].type,
         user_data: config.userData,
         metadata: 'yes',
-        labels: { label: toLabels(config.labels) },
+        labels: { label: toUpCloudLabels(config.labels) },
         storage_devices: {
           storage_device: [
             {
@@ -175,7 +192,7 @@ export class UpCloudProvider implements Provider {
       'createVM'
     );
     server = await this.pollForIp(server);
-    return toVM(server);
+    return toUpCloudVM(server);
   }
   async deleteVM(id: string): Promise<void> {
     const server = await this.getServer(id);
@@ -187,14 +204,14 @@ export class UpCloudProvider implements Provider {
     try {
       await this.request(`/server/${encodeURIComponent(id)}?storages=0`, { method: 'DELETE' });
     } catch (error) {
-      if (is404(error)) return;
+      if (isUpCloudNotFound(error)) return;
       throw error;
     }
     if (root) await this.deleteStorageIdempotent(root);
   }
   async getVM(id: string): Promise<VMInstance | null> {
     const server = await this.getServer(id);
-    return server ? toVM(server) : null;
+    return server ? toUpCloudVM(server) : null;
   }
   async listVMs(labels?: Record<string, string>): Promise<VMInstance[]> {
     const response = await this.request('/server');
@@ -202,7 +219,7 @@ export class UpCloudProvider implements Provider {
       await parseProviderJson(response, 'upcloud', 'listVMs'),
       'listVMs'
     );
-    return servers.filter((server) => matchesLabels(server.labels, labels)).map(toVM);
+    return servers.filter((server) => matchesUpCloudLabels(server.labels, labels)).map(toUpCloudVM);
   }
   async powerOff(id: string): Promise<void> {
     await this.request(`/server/${encodeURIComponent(id)}/stop`, {
@@ -225,7 +242,7 @@ export class UpCloudProvider implements Provider {
     return true;
   }
   async createVolume(config: VolumeConfig): Promise<VolumeInstance> {
-    assertSize(config.sizeGb);
+    assertUpCloudVolumeSize(config.sizeGb, UPCLOUD_VOLUME_MIN_SIZE_GB, UPCLOUD_VOLUME_MAX_SIZE_GB);
     const response = await this.request('/storage', {
       method: 'POST',
       body: JSON.stringify({
@@ -235,11 +252,11 @@ export class UpCloudProvider implements Provider {
           size: config.sizeGb,
           tier: 'maxiops',
           encrypted: 'yes',
-          labels: toLabels(config.labels),
+          labels: toUpCloudLabels(config.labels),
         },
       }),
     });
-    return toVolume(
+    return toUpCloudVolume(
       validateUpCloudStorageResponse(
         await parseProviderJson(response, 'upcloud', 'createVolume'),
         'createVolume'
@@ -272,7 +289,7 @@ export class UpCloudProvider implements Provider {
     return {
       ...volume,
       attachedServerId: config.serverId,
-      linuxDevice: devicePath(device?.address),
+      linuxDevice: upCloudDevicePath(device?.address),
     };
   }
   async detachVolume(config: VolumeDetachConfig): Promise<VolumeInstance | null> {
@@ -289,7 +306,7 @@ export class UpCloudProvider implements Provider {
         body: JSON.stringify({ storage_device: { storage: config.volumeId } }),
       });
     } catch (error) {
-      if (!is404(error)) throw error;
+      if (!isUpCloudNotFound(error)) throw error;
     }
     return this.getVolume({ volumeId: config.volumeId, location: config.location });
   }
@@ -300,12 +317,12 @@ export class UpCloudProvider implements Provider {
         category: 'invalid_config',
       });
     if (config.sizeGb === current) return this.requireVolume(config);
-    assertSize(config.sizeGb);
+    assertUpCloudVolumeSize(config.sizeGb, UPCLOUD_VOLUME_MIN_SIZE_GB, UPCLOUD_VOLUME_MAX_SIZE_GB);
     const response = await this.request(`/storage/${encodeURIComponent(config.volumeId)}`, {
       method: 'PUT',
       body: JSON.stringify({ storage: { size: config.sizeGb } }),
     });
-    return toVolume(
+    return toUpCloudVolume(
       validateUpCloudStorageResponse(
         await parseProviderJson(response, 'upcloud', 'resizeVolume'),
         'resizeVolume'
@@ -332,9 +349,9 @@ export class UpCloudProvider implements Provider {
         throw new ProviderError('upcloud', 400, 'UpCloud storage location mismatch', {
           category: 'invalid_config',
         });
-      return toVolume(storage);
+      return toUpCloudVolume(storage);
     } catch (error) {
-      if (is404(error)) return null;
+      if (isUpCloudNotFound(error)) return null;
       throw error;
     }
   }
@@ -344,8 +361,8 @@ export class UpCloudProvider implements Provider {
       await parseProviderJson(response, 'upcloud', 'listVolumes'),
       'listVolumes'
     )
-      .filter((s) => s.zone === config.location && matchesLabels(s.labels, config.labels))
-      .map(toVolume);
+      .filter((s) => s.zone === config.location && matchesUpCloudLabels(s.labels, config.labels))
+      .map(toUpCloudVolume);
   }
   private async getServer(id: string) {
     try {
@@ -355,9 +372,24 @@ export class UpCloudProvider implements Provider {
         'getVM'
       );
     } catch (error) {
-      if (is404(error)) return null;
+      if (isUpCloudNotFound(error)) return null;
       throw error;
     }
+  }
+  private async assertPlanAvailable(plan: string) {
+    if (!this.planNames) {
+      const response = await this.request('/plan');
+      this.planNames = new Set(
+        validateUpCloudPlansResponse(
+          await parseProviderJson(response, 'upcloud', 'plans'),
+          'plans'
+        ).map((value) => value.name)
+      );
+    }
+    if (!this.planNames.has(plan))
+      throw new ProviderError('upcloud', 400, 'UpCloud plan is not currently available: ' + plan, {
+        category: 'invalid_config',
+      });
   }
   private async resolveTemplate() {
     if (this.templateId) return this.templateId;
@@ -379,13 +411,14 @@ export class UpCloudProvider implements Provider {
   }
   private async pollForIp(server: UpCloudServer) {
     const deadline = Date.now() + this.ipPollTimeoutMs;
-    while (!publicIPv4(server) && Date.now() < deadline) {
-      await delay(Math.min(this.ipPollIntervalMs, Math.max(0, deadline - Date.now())));
+    while (!publicUpCloudIPv4(server) && Date.now() < deadline) {
+      await upCloudDelay(Math.min(this.ipPollIntervalMs, Math.max(0, deadline - Date.now())));
       const next = await this.getServer(server.uuid);
       if (!next) break;
       server = next;
     }
-    if (!publicIPv4(server)) this.logger.warn('upcloud.ip_poll_timeout', { serverId: server.uuid });
+    if (!publicUpCloudIPv4(server))
+      this.logger.warn('upcloud.ip_poll_timeout', { serverId: server.uuid });
     return server;
   }
   private async waitForState(id: string, state: string) {
@@ -393,7 +426,7 @@ export class UpCloudProvider implements Provider {
     while (Date.now() < deadline) {
       const server = await this.getServer(id);
       if (!server || server.state === state) return;
-      await delay(Math.min(this.ipPollIntervalMs, Math.max(0, deadline - Date.now())));
+      await upCloudDelay(Math.min(this.ipPollIntervalMs, Math.max(0, deadline - Date.now())));
     }
     throw new ProviderError(
       'upcloud',
@@ -424,129 +457,34 @@ export class UpCloudProvider implements Provider {
     try {
       await this.request(`/storage/${encodeURIComponent(id)}`, { method: 'DELETE' });
     } catch (error) {
-      if (!is404(error)) throw error;
+      if (!isUpCloudNotFound(error)) throw error;
     }
   }
-  private request(path: string, init: RequestInit = {}) {
-    return providerFetch(
-      'upcloud',
-      `${UPCLOUD_API_URL}${path}`,
-      {
-        ...init,
-        headers: {
-          Authorization: this.auth,
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
-          ...init.headers,
+  private async request(path: string, init: RequestInit = {}) {
+    try {
+      return await providerFetch(
+        'upcloud',
+        this.apiUrl + path,
+        {
+          ...init,
+          headers: {
+            Authorization: this.auth,
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+            ...init.headers,
+          },
         },
-      },
-      getTimeoutMs(undefined, this.requestTimeoutMs)
-    );
+        getTimeoutMs(undefined, this.requestTimeoutMs)
+      );
+    } catch (error) {
+      if (error instanceof ProviderError)
+        throw new ProviderError('upcloud', error.statusCode, error.message, {
+          providerCode: error.providerCode,
+          category: classifyUpCloudError(error.statusCode, error.message, error.providerCode),
+          cause: error,
+        });
+      throw error;
+    }
   }
 }
-export function classifyUpCloudError(
-  status?: number,
-  message = '',
-  code?: string
-): ProviderErrorCategory {
-  if (status === 401 || status === 403) return 'auth_error';
-  if (status === 429) return 'rate_limited';
-  if (status === 402 || /LIMIT_REACHED|QUOTA/i.test(code ?? '')) return 'quota_exceeded';
-  if (status === 409 && /RESOURCES_UNAVAILABLE|capacity/i.test(`${code} ${message}`))
-    return 'transient_capacity';
-  if (status === 400 || status === 404 || status === 409) return 'invalid_config';
-  return 'unknown';
-}
-export function mapUpCloudStatus(state: string): VMStatus {
-  return state === 'started'
-    ? 'running'
-    : state === 'stopped'
-      ? 'off'
-      : state === 'maintenance'
-        ? 'initializing'
-        : 'initializing';
-}
-function toVM(server: UpCloudServer): VMInstance {
-  return {
-    id: server.uuid,
-    name: server.title || server.hostname,
-    ip: publicIPv4(server),
-    status: mapUpCloudStatus(server.state),
-    serverType: server.plan,
-    createdAt: server.created,
-    labels: fromLabels(server.labels),
-  };
-}
-function toVolume(storage: UpCloudStorage): VolumeInstance {
-  return {
-    id: storage.uuid,
-    name: storage.title,
-    sizeGb: storage.size,
-    location: storage.zone,
-    status: storage.servers.length
-      ? 'attached'
-      : storage.state === 'online'
-        ? 'available'
-        : storage.state === 'maintenance'
-          ? 'creating'
-          : 'unknown',
-    attachedServerId: storage.servers[0],
-    volumeType: storage.tier,
-    createdAt: storage.created,
-    labels: fromLabels(storage.labels),
-  };
-}
-function toLabels(labels?: Record<string, string>) {
-  return Object.entries(labels ?? {}).map(([key, value]) => ({ key, value }));
-}
-function fromLabels(labels: UpCloudLabel[]) {
-  return Object.fromEntries(labels.map((l) => [l.key, l.value]));
-}
-function matchesLabels(actual: UpCloudLabel[], expected?: Record<string, string>) {
-  const map = fromLabels(actual);
-  return Object.entries(expected ?? {}).every(([k, v]) => map[k] === v);
-}
-function publicIPv4(server: UpCloudServer) {
-  return (
-    server.ipAddresses.find((ip) => ip.access === 'public' && ip.family === 'IPv4')?.address ?? ''
-  );
-}
-function devicePath(address?: string) {
-  const match = /^virtio:(\d+)$/.exec(address ?? '');
-  return match ? `/dev/vd${String.fromCharCode(97 + Number(match[1]))}` : undefined;
-}
-function sanitizeHostname(value: string) {
-  return (
-    value
-      .toLowerCase()
-      .replace(/[^a-z0-9-]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-      .slice(0, 63)
-      .replace(/-+$/, '') || 'sam-node'
-  );
-}
-function assertSize(size: number) {
-  if (
-    !Number.isInteger(size) ||
-    size < UPCLOUD_VOLUME_MIN_SIZE_GB ||
-    size > UPCLOUD_VOLUME_MAX_SIZE_GB
-  )
-    throw new ProviderError(
-      'upcloud',
-      400,
-      `UpCloud storage size must be ${UPCLOUD_VOLUME_MIN_SIZE_GB}-${UPCLOUD_VOLUME_MAX_SIZE_GB} GB`,
-      { category: 'invalid_config' }
-    );
-}
-function is404(error: unknown) {
-  return error instanceof ProviderError && error.statusCode === 404;
-}
-function delay(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-function basicAuth(username: string, password: string) {
-  const bytes = new TextEncoder().encode(`${username}:${password}`);
-  let binary = '';
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return `Basic ${btoa(binary)}`;
-}
+export { classifyUpCloudError, mapUpCloudStatus } from './upcloud-utils';

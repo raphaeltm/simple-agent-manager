@@ -17,7 +17,7 @@ This guide walks you through deploying Simple Agent Manager to your own infrastr
 
 **Workers Paid** is required because SAM uses Durable Objects for real-time chat, task execution, and node lifecycle, and Cloudflare Containers for the default instant-session runtime. Go to **Workers & Pages** in the Cloudflare dashboard to upgrade. You also need **R2** enabled for Pulumi state and **Analytics Engine** enabled (free): **Workers & Pages** → **Analytics Engine** → **Enable**.
 
-You do **not** need a shared cloud provider account. Users provide their own [Hetzner API token](https://console.hetzner.cloud/), [Scaleway API key](https://console.scaleway.com/iam/api-keys), [Vultr API key](https://my.vultr.com/settings/#settingsapi), [Infomaniak application credential](https://docs.infomaniak.cloud/identity/applications_credentials/), or GCP configuration through the Settings UI. GCP Workload Identity Federation (WIF) uses an optional infrastructure OAuth client; the service-account JSON mode is OAuth-free.
+You do **not** need a shared cloud provider account. Users provide their own [Hetzner API token](https://console.hetzner.cloud/), [Scaleway API key](https://console.scaleway.com/iam/api-keys), [Vultr API key](https://my.vultr.com/settings/#settingsapi), [Infomaniak application credential](https://docs.infomaniak.cloud/identity/applications_credentials/), [UpCloud API subaccount](https://hub.upcloud.com/people/accounts), or GCP configuration through the Settings UI. GCP Workload Identity Federation (WIF) uses an optional infrastructure OAuth client; the service-account JSON mode is OAuth-free.
 
 ## Step 1: Choose Your Domain and Cloudflare Account
 
