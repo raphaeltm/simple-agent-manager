@@ -292,6 +292,8 @@ export async function createWorkspaceOnNode(
     workspaceId: string;
     repository: string;
     branch: string;
+    /** Project's default branch — used by the VM agent to guard against auto-commit pushing to main/master. */
+    defaultBranch?: string | null;
     repoProvider?: 'github' | 'artifacts' | 'gitlab';
     cloneUrl?: string | null;
     repositoryHost?: string | null;

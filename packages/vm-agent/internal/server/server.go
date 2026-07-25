@@ -144,6 +144,7 @@ type WorkspaceRuntime struct {
 	ID                     string
 	Repository             string
 	Branch                 string
+	DefaultBranch          string
 	RepoProvider           string
 	CloneURL               string
 	RepositoryHost         string
@@ -1514,12 +1515,34 @@ func (s *Server) runWorkspaceGitCommand(containerID, workDir, user string, args 
 // gitPushWorkspaceChanges runs git status/add/commit/push inside the workspace
 // container and optionally creates a PR. When skipPR is true (conversation mode),
 // the PR creation step is skipped — the human controls when to create PRs.
+//
+// Safety: refuses to push when HEAD is on the project's default branch to
+// prevent auto-committed agent work from contaminating main/master.
 func (s *Server) gitPushWorkspaceChanges(workspaceID string, skipPR bool) gitPushResult {
 	result := gitPushResult{}
 
 	containerID, workDir, user, err := s.resolveContainerForWorkspace(workspaceID)
 	if err != nil {
 		result.Error = fmt.Sprintf("resolve container: %s", err)
+		return result
+	}
+
+	// Resolve the current branch name early — needed for default-branch guard.
+	branchOutput, _ := s.runWorkspaceGitCommand(containerID, workDir, user, "rev-parse", "--abbrev-ref", "HEAD")
+	result.BranchName = branchOutput
+
+	// Guard: refuse to push to the project's default branch.
+	if defaultBranch := s.defaultBranchForWorkspace(workspaceID); defaultBranch != "" && result.BranchName == defaultBranch {
+		result.Error = fmt.Sprintf(
+			"refused to push to default branch %q — the agent did not check out the task output branch; "+
+				"auto-commit would contaminate the project's default branch",
+			defaultBranch,
+		)
+		slog.Error("Auto-commit blocked: HEAD is on default branch",
+			"workspaceId", workspaceID,
+			"branch", result.BranchName,
+			"defaultBranch", defaultBranch,
+		)
 		return result
 	}
 
@@ -1559,10 +1582,6 @@ func (s *Server) gitPushWorkspaceChanges(workspaceID string, skipPR bool) gitPus
 	sha, _ := s.runWorkspaceGitCommand(containerID, workDir, user, "rev-parse", "HEAD")
 	result.CommitSha = sha
 
-	// Get the current branch name
-	branchOutput, _ := s.runWorkspaceGitCommand(containerID, workDir, user, "rev-parse", "--abbrev-ref", "HEAD")
-	result.BranchName = branchOutput
-
 	// Push
 	pushOutput, err := s.runWorkspaceGitCommand(containerID, workDir, user, "push", "--set-upstream", "origin", "HEAD")
 	if err != nil {
@@ -1581,6 +1600,18 @@ func (s *Server) gitPushWorkspaceChanges(workspaceID string, skipPR bool) gitPus
 	}
 
 	return result
+}
+
+// defaultBranchForWorkspace returns the project's default branch for the given
+// workspace, or "" if unknown. Used by gitPushWorkspaceChanges to guard against
+// pushing to the default branch.
+func (s *Server) defaultBranchForWorkspace(workspaceID string) string {
+	s.workspaceMu.RLock()
+	defer s.workspaceMu.RUnlock()
+	if runtime, ok := s.workspaces[workspaceID]; ok {
+		return runtime.DefaultBranch
+	}
+	return ""
 }
 
 func (s *Server) tryCreateReviewRequest(workspaceID, containerID, workDir, user, sourceBranch string) (string, int) {

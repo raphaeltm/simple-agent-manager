@@ -116,6 +116,33 @@ describe('Contract schemas: Control Plane -> VM Agent', () => {
       expect(result.success).toBe(true);
     });
 
+    it('validates request with defaultBranch field', () => {
+      const request = {
+        workspaceId: 'ws-abc123',
+        repository: 'owner/repo',
+        branch: 'feature-branch',
+        defaultBranch: 'main',
+      };
+      const result = CreateWorkspaceAgentRequestSchema.safeParse(request);
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.defaultBranch).toBe('main');
+      }
+    });
+
+    it('validates request without defaultBranch (backwards compatible)', () => {
+      const request = {
+        workspaceId: 'ws-abc123',
+        repository: 'owner/repo',
+        branch: 'main',
+      };
+      const result = CreateWorkspaceAgentRequestSchema.safeParse(request);
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.defaultBranch).toBeUndefined();
+      }
+    });
+
     it('rejects request with empty workspaceId', () => {
       const request = {
         workspaceId: '',

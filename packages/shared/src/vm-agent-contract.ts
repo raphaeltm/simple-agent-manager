@@ -68,6 +68,7 @@ export const CreateWorkspaceAgentRequestSchema = z.object({
   gitUserEmail: z.string().nullish(),
   githubId: z.string().nullish(),
   lightweight: z.boolean().optional(),
+  defaultBranch: z.string().optional(),
 });
 
 export type CreateWorkspaceAgentRequest = z.infer<typeof CreateWorkspaceAgentRequestSchema>;

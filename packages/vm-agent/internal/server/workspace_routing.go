@@ -38,6 +38,7 @@ type workspaceRuntimeOpts struct {
 	CloneURL               string
 	RepositoryHost         string
 	RepositoryPath         string
+	DefaultBranch          string
 	Lightweight            bool
 	DevcontainerConfigName string
 	DevcontainerCache      DevcontainerCacheCredentials
@@ -241,6 +242,9 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 			runtime.RepositoryPath = opt.RepositoryPath
 			metadataChanged = true
 		}
+		if opt.DefaultBranch != "" {
+			runtime.DefaultBranch = opt.DefaultBranch
+		}
 		runtime.Lightweight = opt.Lightweight
 		if opt.DevcontainerConfigName != "" {
 			runtime.DevcontainerConfigName = opt.DevcontainerConfigName
@@ -317,6 +321,7 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 		ID:                     workspaceID,
 		Repository:             effectiveRepo,
 		Branch:                 effectiveBranch,
+		DefaultBranch:          opt.DefaultBranch,
 		RepoProvider:           firstNonEmpty(opt.RepoProvider, persistedRepoProvider),
 		CloneURL:               firstNonEmpty(opt.CloneURL, persistedCloneURL),
 		RepositoryHost:         firstNonEmpty(opt.RepositoryHost, persistedRepositoryHost),

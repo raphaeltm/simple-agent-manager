@@ -408,6 +408,7 @@ async function createWorkspaceOnVmAgent(
     workspaceId,
     repository: state.config.repository,
     branch: state.config.branch,
+    defaultBranch: state.config.defaultBranch || undefined,
     repoProvider: gitSource.repoProvider,
     cloneUrl: gitSource.cloneUrl,
     repositoryHost: gitSource.repositoryHost,
