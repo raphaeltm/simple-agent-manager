@@ -1,12 +1,12 @@
 import type { VMSize } from '@simple-agent-manager/shared';
 import { DEFAULT_DIGITALOCEAN_IMAGE, DEFAULT_DIGITALOCEAN_REGION } from '@simple-agent-manager/shared';
 
+import { digitalOceanTagsToLabels, labelsToDigitalOceanTags } from './digitalocean-tags';
 import {
   DEFAULT_DIGITALOCEAN_ACTION_POLL_TIMEOUT_MS,
   DIGITALOCEAN_VOLUME_CAPABILITIES,
   DigitalOceanVolumeClient,
 } from './digitalocean-volumes';
-import { digitalOceanTagsToLabels, labelsToDigitalOceanTags } from './digitalocean-tags';
 import { providerFetch } from './provider-fetch';
 import type {
   LocationMeta,

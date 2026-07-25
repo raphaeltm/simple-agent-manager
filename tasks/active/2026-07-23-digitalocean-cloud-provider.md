@@ -1,6 +1,6 @@
 # DigitalOcean cloud provider — full BYO-key support (infrastructure + deployment volumes)
 
-**Task ID:** 01KY8JTXF169T0KWDNFW2SDCN3 · **Idea:** 01KY8JSQHXJT5SR3Z4QM46V2QK · **Output branch:** `sam/add-digitalocean-sams-fifth-2sdcn3`
+**Task ID:** 01KYBDMV58ZK5ANVZ91JBQF5TT · **Prior failed task:** 01KY8JTXF169T0KWDNFW2SDCN3 · **Idea:** 01KY8JSQHXJT5SR3Z4QM46V2QK · **Output branch:** `sam/implement-ship-digitalocean-sam-bqf5tt`
 
 ## Problem
 
@@ -95,10 +95,10 @@ Add `digitalocean` as a **fifth cloud provider** (after hetzner, scaleway, gcp, 
 - [ ] All UI surfaces render/wire digitalocean; visual audit clean @ 375/1280.
 - [ ] Docs + marketing enumerations updated.
 - [ ] Onboarding-wizard parity backlog task extended (not duplicated).
-- [ ] **NO STAGING DEPLOYMENT — explicitly skipped per Raphaël (2026-07-23).** Substitute local suites + specialist reviews + CI. State skip in PR.
+- [ ] Staging deployment and no-key/bogus-key UI/API regression checks pass; a platform-backed non-DigitalOcean workspace provisions, heartbeats, is reachable, and is cleaned up. Live DigitalOcean provisioning remains explicitly deferred to Raphaël’s production validation with his own key.
 
 ## Merge protocol (authorized 2026-07-23)
-/do dispatch = explicit merge authorization. BYO-key exception: merge with CI green (incl. SonarCloud + Preflight) + all reviewers PASS/ADDRESSED + no-key coverage complete. PR MUST document that live DigitalOcean provisioning is validated **post-merge in production by Raphaël with his own DO key** (Full Access PAT → create DO node → workspace → run agent → delete node; then deployment env + DO volume → tear down). After merge, monitor Deploy Production to completion (Phase 7b) + confirm production health + feature code in served bundle.
+/do dispatch = explicit merge authorization. BYO-key exception: merge with CI green (incl. SonarCloud + Preflight) + all reviewers PASS/ADDRESSED + no-key coverage complete + staging/no-key regression evidence. PR MUST document that live DigitalOcean provisioning is validated **post-merge in production by Raphaël with his own DO key** (Full Access PAT → create DO node → workspace → run agent → delete node; then create a deployment environment with a DigitalOcean volume → verify mount and persistence → tear down). After merge, monitor the matching successful Deploy Production run by merge head SHA (ignoring skipped duplicates) + confirm production health + feature code in the served bundle.
 
 ## References
 - Idea `01KY8JSQHXJT5SR3Z4QM46V2QK` · Blueprint `tasks/archive/2026-07-23-vultr-cloud-provider.md` · Vultr PR #1663 / `5c06da973` (site map) · `packages/providers/src/vultr.ts` + `vultr-volumes.ts` + `vultr-labels.ts` + `kv-tags.ts` · `apps/api/src/services/provider-credentials.ts` · `apps/api/src/services/deployment-volumes.ts:225-235`

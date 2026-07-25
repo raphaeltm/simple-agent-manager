@@ -16,6 +16,7 @@ export {
   getDefaultLocationForProvider,
   hasByocComputeCredential,
   getLocationsForProvider,
+  hasByocComputeCredential,
   isValidLocationForProvider,
   isValidProvider,
   PROVIDER_DEFAULT_LOCATIONS,

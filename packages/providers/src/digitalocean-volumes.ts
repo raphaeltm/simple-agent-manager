@@ -1,6 +1,6 @@
 import {
-  digitalOceanTagsToLabels,
   DIGITALOCEAN_VOLUME_NAME_TAG_KEY,
+  digitalOceanTagsToLabels,
   labelsToDigitalOceanTags,
 } from './digitalocean-tags';
 import { providerFetch } from './provider-fetch';
@@ -21,6 +21,7 @@ import {
   SAM_VOLUME_FSTAB_OPTIONS,
   SAM_VOLUME_MOUNT_PATH_TEMPLATE,
 } from './types';
+import { parseProviderJson } from './validation';
 import {
   type DigitalOceanActionPayload,
   type DigitalOceanVolumePayload,
@@ -28,7 +29,6 @@ import {
   validateDigitalOceanVolumeResponse,
   validateDigitalOceanVolumesResponse,
 } from './validation-digitalocean';
-import { parseProviderJson } from './validation';
 
 const DIGITALOCEAN_API_URL = 'https://api.digitalocean.com/v2';
 const DIGITALOCEAN_LIST_PER_PAGE = 200;
