@@ -39,7 +39,7 @@ SAM_SESSION Durable Object  (one per user, keyed by userId)
     |       |  cf-aig-metadata: {"source":"sam","userId":"..."}
     |       |
     |       +---> Anthropic Messages API
-    |               claude-sonnet-4-20250514 (default, configurable)
+    |               claude-sonnet-5 (default, configurable)
     |
     |---> D1 (projects, tasks, nodes, users)
     |---> ProjectData DOs (sessions, activity, knowledge, policies)
@@ -245,7 +245,7 @@ This lets you see SAM's token usage, cost, and latency separately from the AI pr
 
 **API key resolution**: Uses the platform Anthropic API key via `getPlatformAgentCredential(db, 'anthropic', 'api_key')` — same credential the AI proxy retrieves for `claude-*` model requests.
 
-Configurable model — defaults to `claude-sonnet-4-20250514` for speed/cost, overridable to Opus via `SAM_MODEL` env var.
+Configurable model — defaults to `claude-sonnet-5` for speed/cost, overridable to Opus via `SAM_MODEL` env var.
 
 ## SAM's Tool Set
 
@@ -506,7 +506,7 @@ All configurable via env vars with defaults in `packages/shared/src/constants/sa
 
 | Env Var | Default | Purpose |
 |---------|---------|---------|
-| `SAM_MODEL` | `claude-sonnet-4-20250514` | LLM model for SAM agent loop |
+| `SAM_MODEL` | `claude-sonnet-5` | LLM model for SAM agent loop |
 | `SAM_MAX_TOKENS` | `4096` | Max output tokens per turn |
 | `SAM_MAX_TURNS` | `20` | Max tool-use loop iterations per message |
 | `SAM_SYSTEM_PROMPT_APPEND` | `""` | Additional system prompt (user customization) |

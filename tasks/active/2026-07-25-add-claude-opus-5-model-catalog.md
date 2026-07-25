@@ -71,6 +71,28 @@ Any deployment without a `SAM_MODEL` env override has a broken SAM agent-loop de
 - Regression tests fail if a retired ID reappears in the catalog/defaults or if a
   default references a model missing from `PLATFORM_AI_MODELS`.
 
+## Review Findings (local skeptical reviewers, 2026-07-25)
+
+Six local reviewers: constitution-validator, line-by-line scan, removed-behavior +
+cross-file tracer, cleanup lenses, conventions, final gap sweep.
+
+- Constitution: PASS (all three bumped defaults keep their env-override paths).
+- Line-by-line: clean (pricing units, ID spelling, sibling-field parity verified).
+- Cleanup: `specs/031-sam-agent/plan.md` still documented the retired model as the
+  current SAM default → **fixed in this branch** (3 references → `claude-sonnet-5`).
+- Conventions: rule 52 pointed at `tasks/archive` for a still-active task → **fixed**.
+- Cross-file: 4 candidates triaged —
+  - Allowlist now 400s stored `claude-sonnet-4-20250514` rows: intended retirement
+    semantics (model 404s upstream anyway); no action.
+  - Orphaned KV admin default edge: verified NOT live (prod KV default is
+    `@cf/google/gemma-4-26b-a4b-it`, read via CF API 2026-07-25). Deferred to
+    `tasks/backlog/2026-07-25-admin-ai-proxy-orphaned-default-model.md`.
+  - Translate path forwards client `temperature`/`top_p` to models that reject them
+    (pre-existing, reachability unchanged by this PR). Deferred to
+    `tasks/backlog/2026-07-25-translate-proxy-sampling-params-4-7-plus.md`.
+  - `anthropic-version: 2023-06-01` concern: refuted — canonical version header;
+    Sonnet 5 native 1M needs no beta header.
+
 ## Post-Mortem (retired default model)
 
 - **What broke**: `DEFAULT_SAM_MODEL = 'claude-sonnet-4-20250514'` — Anthropic retired

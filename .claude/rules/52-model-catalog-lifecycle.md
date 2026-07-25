@@ -11,7 +11,8 @@ model releases, provider deprecations, or bumping a `DEFAULT_*` model constant.
 retired it (2026-06-15): every SAM-agent-loop call relying on the default would fail
 upstream. Nothing linked default constants to catalog maintenance, and no cadence
 existed for pruning retired Anthropic models (one already existed for Cloudflare
-models). See `tasks/archive` entry for 2026-07-25-add-claude-opus-5-model-catalog.
+models). See `tasks/active/2026-07-25-add-claude-opus-5-model-catalog.md` (moves to
+`tasks/archive/` on completion).
 
 ## The Two Canonical Lists (edit both, never one)
 
