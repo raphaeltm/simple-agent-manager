@@ -258,7 +258,7 @@ export class InfomaniakProvider implements Provider {
         throw new ProviderError(
           'infomaniak',
           undefined,
-          `Keystone catalog has no public ${type} endpoint for ${this.region}`
+          `Keystone catalog has no ${this.endpointInterface} ${type} endpoint for ${this.region}`
         );
       return asString(match.url, `${type}.url`)
         .replace(/\/$/, '')
@@ -466,10 +466,24 @@ export class InfomaniakProvider implements Provider {
       throw new ProviderError('infomaniak', 400, 'Volume and credential regions must match', {
         category: 'invalid_config',
       });
-    if (config.sizeGb < 1 || config.sizeGb > 10_240)
-      throw new ProviderError('infomaniak', 400, 'Volume size must be 1-10240 GB', {
-        category: 'invalid_config',
-      });
+    if (
+      config.sizeGb < INFOMANIAK_VOLUME_MIN_SIZE_GB ||
+      config.sizeGb > INFOMANIAK_VOLUME_MAX_SIZE_GB
+    )
+      throw new ProviderError(
+        'infomaniak',
+        400,
+        [
+          'Volume size must be between',
+          INFOMANIAK_VOLUME_MIN_SIZE_GB,
+          'and',
+          INFOMANIAK_VOLUME_MAX_SIZE_GB,
+          'GB',
+        ].join(' '),
+        {
+          category: 'invalid_config',
+        }
+      );
     const s = await this.authenticate();
     const r = await this.request(`${s.endpoints.volumev3}/volumes`, {
       method: 'POST',
