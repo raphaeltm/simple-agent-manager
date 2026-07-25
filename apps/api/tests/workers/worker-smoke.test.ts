@@ -157,7 +157,7 @@ describe('Worker smoke tests (workerd runtime)', () => {
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ model: 'claude-sonnet-4-20250514', messages: [{ role: 'user', content: 'hi' }] }),
+          body: JSON.stringify({ model: 'claude-sonnet-5', messages: [{ role: 'user', content: 'hi' }] }),
         },
       );
       expect(response.status).toBe(401);
@@ -184,7 +184,7 @@ describe('Worker smoke tests (workerd runtime)', () => {
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ model: 'claude-sonnet-4-20250514', messages: [] }),
+          body: JSON.stringify({ model: 'claude-sonnet-5', messages: [] }),
         },
       );
       expect(response.status).toBe(401);

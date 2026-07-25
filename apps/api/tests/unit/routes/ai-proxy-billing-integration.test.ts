@@ -51,7 +51,7 @@ describe('upstream header assembly', () => {
     const aigMetadata = buildAIGatewayMetadata({
       userId: 'u1',
       workspaceId: 'ws1',
-      modelId: 'claude-sonnet-4-20250514',
+      modelId: 'claude-sonnet-5',
       stream: false,
     });
 
@@ -79,7 +79,7 @@ describe('upstream header assembly', () => {
     const aigMetadata = buildAIGatewayMetadata({
       userId: 'u1',
       workspaceId: 'ws1',
-      modelId: 'claude-sonnet-4-20250514',
+      modelId: 'claude-sonnet-5',
       stream: true,
       hasTools: true,
     });
@@ -104,7 +104,7 @@ describe('upstream header assembly', () => {
       workspaceId: 'ws-456',
       projectId: 'proj-789',
       trialId: 'trial-abc',
-      modelId: 'claude-sonnet-4-20250514',
+      modelId: 'claude-sonnet-5',
       stream: false,
     });
 

@@ -34,7 +34,7 @@ const FORM_CONTROL =
 function modelPlaceholderFor(agentId: string): string {
   switch (agentId) {
     case 'claude-code':
-      return 'e.g. claude-opus-4-6, claude-sonnet-4-5-20250929';
+      return 'e.g. claude-opus-5, claude-sonnet-5';
     case 'openai-codex':
       return 'e.g. gpt-5-codex, o3';
     case 'google-gemini':

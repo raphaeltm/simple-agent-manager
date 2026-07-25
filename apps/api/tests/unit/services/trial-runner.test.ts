@@ -9,6 +9,7 @@
  *   - emitTrialEvent — appends to TrialEventBus DO stub, no-ops on error
  *   - emitTrialEventForProject — looks up trial by project then appends
  */
+import { PLATFORM_AI_MODELS } from '@simple-agent-manager/shared';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Mock project-data service functions used by startDiscoveryAgent
@@ -87,6 +88,12 @@ describe('trial-runner — resolveTrialRunnerConfig', () => {
     expect(cfg.mode).toBe('production');
     expect(cfg.agentType).toBe('claude-code');
     expect(cfg.provider).toBe('anthropic');
+  });
+
+  it('defaults production trials to an active platform-registered Anthropic model', () => {
+    const cfg = resolveTrialRunnerConfig(envBase({ ENVIRONMENT: 'production' } as Partial<Env>));
+    expect(cfg.model).toBe('claude-sonnet-5');
+    expect(PLATFORM_AI_MODELS.some((m) => m.id === cfg.model)).toBe(true);
   });
 
   it('detects production mode from ENVIRONMENT=prod', () => {

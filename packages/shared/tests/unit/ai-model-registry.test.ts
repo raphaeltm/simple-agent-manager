@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
   DEFAULT_AI_PROXY_ALLOWED_MODELS,
+  DEFAULT_AI_PROXY_ANTHROPIC_MODEL,
+  DEFAULT_AI_PROXY_MODEL,
   DEFAULT_CONTEXT_SUMMARY_MODEL,
   DEFAULT_SANDBOX_MODEL,
   DEFAULT_TASK_TITLE_MODEL,
@@ -12,6 +14,7 @@ import {
   type PlatformAIModel,
   type ToolCallSupport,
 } from '../../src/constants/ai-services';
+import { DEFAULT_SAM_MODEL } from '../../src/constants/sam';
 
 describe('AI Model Registry', () => {
   describe('registry integrity', () => {
@@ -68,6 +71,46 @@ describe('AI Model Registry', () => {
 
     it('registers the task title default model', () => {
       expect(PLATFORM_AI_MODELS.some((model) => model.id === DEFAULT_TASK_TITLE_MODEL)).toBe(true);
+    });
+
+    it('does not expose Anthropic models retired upstream', () => {
+      // Retired per https://platform.claude.com/docs/en/about-claude/model-deprecations
+      // (requests to these fail with 404). Add newly retired IDs here when pruning
+      // the catalog — combined with the defaults test below, this catches any
+      // DEFAULT_* constant left pointing at a dead model.
+      // Post-mortem: DEFAULT_SAM_MODEL pointed at claude-sonnet-4-20250514 for ~6
+      // weeks after its 2026-06-15 retirement.
+      const retiredAnthropicModels = [
+        'claude-sonnet-4-20250514',
+        'claude-opus-4-20250514',
+        'claude-3-7-sonnet-20250219',
+        'claude-3-5-haiku-20241022',
+        'claude-3-haiku-20240307',
+      ];
+      const activeModelIds = new Set([
+        DEFAULT_AI_PROXY_ANTHROPIC_MODEL,
+        DEFAULT_SAM_MODEL,
+        ...DEFAULT_AI_PROXY_ALLOWED_MODELS.split(','),
+        ...PLATFORM_AI_MODELS.map((m) => m.id),
+      ]);
+
+      for (const retiredModel of retiredAnthropicModels) {
+        expect(activeModelIds.has(retiredModel), retiredModel + ' should not be active').toBe(false);
+      }
+    });
+
+    it('registers every cross-file default model in PLATFORM_AI_MODELS', () => {
+      const platformIds = new Set(PLATFORM_AI_MODELS.map((m) => m.id));
+      const defaults: Record<string, string> = {
+        DEFAULT_AI_PROXY_MODEL,
+        DEFAULT_AI_PROXY_ANTHROPIC_MODEL,
+        DEFAULT_SAM_MODEL,
+      };
+      for (const [name, modelId] of Object.entries(defaults)) {
+        expect(platformIds.has(modelId), `${name} (${modelId}) missing from PLATFORM_AI_MODELS`).toBe(
+          true
+        );
+      }
     });
 
     it('all models have non-empty labels', () => {

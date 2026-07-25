@@ -110,7 +110,7 @@ function postJson(
   }, makeEnv(env));
 }
 
-function anthropicMessagesBody(model = 'claude-sonnet-4-20250514'): Record<string, unknown> {
+function anthropicMessagesBody(model = 'claude-sonnet-5'): Record<string, unknown> {
   return { model, messages: [{ role: 'user', content: 'hi' }] };
 }
 
@@ -195,7 +195,7 @@ describe('AI Proxy Passthrough Routes', () => {
 
       const res = await postJson(
         '/ai/proxy/bad-token/anthropic/v1/messages',
-        { model: 'claude-sonnet-4-20250514', messages: [{ role: 'user', content: 'hi' }] },
+        { model: 'claude-sonnet-5', messages: [{ role: 'user', content: 'hi' }] },
         { 'x-api-key': 'sk-user' },
       );
       expect(res.status).toBe(401);
@@ -249,7 +249,7 @@ describe('AI Proxy Passthrough Routes', () => {
         type: 'message',
         role: 'assistant',
         content: [{ type: 'text', text: 'hello' }],
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-5',
         stop_reason: 'end_turn',
         usage: { input_tokens: 13, output_tokens: 8 },
       }), {
@@ -259,7 +259,7 @@ describe('AI Proxy Passthrough Routes', () => {
 
       const res = await postJson(
         '/ai/proxy/valid-token/anthropic/v1/messages',
-        { model: 'claude-sonnet-4-20250514', messages: [{ role: 'user', content: 'hi' }] },
+        { model: 'claude-sonnet-5', messages: [{ role: 'user', content: 'hi' }] },
       );
 
       expect(res.status).toBe(200);
@@ -298,7 +298,7 @@ describe('AI Proxy Passthrough Routes', () => {
 
       const res = await postJson(
         '/ai/proxy/valid-token/anthropic/v1/messages/count_tokens',
-        { model: 'claude-sonnet-4-20250514', messages: [{ role: 'user', content: 'hi' }] },
+        { model: 'claude-sonnet-5', messages: [{ role: 'user', content: 'hi' }] },
       );
 
       expect(res.status).toBe(200);
@@ -315,7 +315,7 @@ describe('AI Proxy Passthrough Routes', () => {
 
       const res = await postJson(
         '/ai/proxy/valid-token/anthropic/v1/messages',
-        { model: 'claude-sonnet-4-20250514' },
+        { model: 'claude-sonnet-5' },
       );
       expect(res.status).toBe(429);
     });
@@ -333,7 +333,7 @@ describe('AI Proxy Passthrough Routes', () => {
 
       const res = await postJson(
         '/ai/proxy/valid-token/anthropic/v1/messages',
-        { model: 'claude-sonnet-4-20250514', messages: [{ role: 'user', content: 'hi' }] },
+        { model: 'claude-sonnet-5', messages: [{ role: 'user', content: 'hi' }] },
       );
       expect(res.status).toBe(429);
     });
@@ -341,7 +341,7 @@ describe('AI Proxy Passthrough Routes', () => {
     it('returns 503 when AI proxy is disabled', async () => {
       const res = await postJson(
         '/ai/proxy/valid-token/anthropic/v1/messages',
-        { model: 'claude-sonnet-4-20250514' },
+        { model: 'claude-sonnet-5' },
         {},
         { AI_PROXY_ENABLED: 'false' },
       );

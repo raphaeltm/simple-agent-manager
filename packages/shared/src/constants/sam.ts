@@ -3,8 +3,10 @@
  * See specs/031-sam-agent/plan.md for architecture details.
  */
 
-/** Default LLM model for SAM agent loop. */
-export const DEFAULT_SAM_MODEL = 'claude-sonnet-4-20250514';
+/** Default LLM model for SAM agent loop.
+ * Must be an active model present in PLATFORM_AI_MODELS (claude-sonnet-4-20250514
+ * was retired by Anthropic on 2026-06-15 and silently broke this default). */
+export const DEFAULT_SAM_MODEL = 'claude-sonnet-5';
 
 /** Max output tokens per LLM turn. */
 export const DEFAULT_SAM_MAX_TOKENS = 4096;

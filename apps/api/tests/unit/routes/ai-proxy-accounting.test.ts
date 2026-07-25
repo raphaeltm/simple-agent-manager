@@ -265,7 +265,7 @@ describe('native Anthropic AI proxy token accounting', () => {
       type: 'message',
       role: 'assistant',
       content: [{ type: 'text', text: 'hello' }],
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-5',
       stop_reason: 'end_turn',
       usage: { input_tokens: 18, output_tokens: 5 },
     }), {
@@ -274,7 +274,7 @@ describe('native Anthropic AI proxy token accounting', () => {
     }));
 
     const res = await postAnthropic('/messages', {
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-5',
       messages: [{ role: 'user', content: 'hi' }],
     });
 
@@ -292,7 +292,7 @@ describe('native Anthropic AI proxy token accounting', () => {
     }));
 
     const res = await postAnthropic('/messages/count_tokens', {
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-5',
       messages: [{ role: 'user', content: 'hi' }],
     });
 

@@ -34,7 +34,7 @@ const DEFAULT_ENVIRONMENT = 'staging';
 const DEFAULT_TRIAL_AGENT_TYPE_STAGING = 'opencode';
 const DEFAULT_TRIAL_AGENT_TYPE_PRODUCTION = 'claude-code';
 const DEFAULT_TRIAL_MODEL_STAGING = '@cf/meta/llama-4-scout-17b-16e-instruct';
-const DEFAULT_TRIAL_MODEL_PRODUCTION = 'claude-sonnet-4-5';
+const DEFAULT_TRIAL_MODEL_PRODUCTION = 'claude-sonnet-5';
 
 // ---------------------------------------------------------------------------
 // Types

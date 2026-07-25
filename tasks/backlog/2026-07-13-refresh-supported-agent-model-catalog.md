@@ -1,5 +1,12 @@
 # Refresh Supported Agent Model Catalog
 
+> **Scope update (2026-07-25):** the Claude Code slice shipped separately in
+> `tasks/active/2026-07-25-add-claude-opus-5-model-catalog.md` — Claude Opus 5 added,
+> retired Sonnet 4 pruned from `PLATFORM_AI_MODELS`, defaults bumped to
+> `claude-sonnet-5`, and retirement/default regression tests added (see
+> `.claude/rules/52-model-catalog-lifecycle.md`). Remaining scope here: Codex,
+> Gemini, Mistral Vibe, and the OpenCode static fallback sync.
+
 ## Problem
 
 SAM's shared static agent model catalog has drifted from current provider and agent sources. Several entries use invalid or retired IDs, lifecycle labels are stale, the Codex GPT-5.6 entries are still marked preview after becoming recommended models, and the OpenCode static fallback no longer matches the active Models.dev catalog. These stale suggestions can make model selection fail or hide supported choices.

@@ -670,7 +670,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   // AI Inference Proxy (Cloudflare AI Gateway — Workers AI + Anthropic)
   AI_PROXY_ENABLED?: string; // Kill switch: "false" to disable (default: enabled)
   AI_PROXY_DEFAULT_MODEL?: string; // Default model for OpenCode (default: claude-haiku-4-5-20251001)
-  AI_PROXY_DEFAULT_ANTHROPIC_MODEL?: string; // Default model for Claude Code proxy (default: claude-sonnet-4-6)
+  AI_PROXY_DEFAULT_ANTHROPIC_MODEL?: string; // Default model for Claude Code proxy (default: claude-sonnet-5)
   AI_PROXY_DEFAULT_OPENAI_MODEL?: string; // Default model for Codex proxy (default: gpt-4.1)
   AI_PROXY_ALLOWED_MODELS?: string; // Comma-separated allowed models
   MODEL_CATALOG_SOURCE_URL?: string; // OpenCode model catalog source URL (default: https://models.dev/api.json)
@@ -723,7 +723,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   TRIAL_SSE_MAX_DURATION_MS?: string; // Hard cap on a single SSE connection (default: 1800000 = 30 min)
   /** Deployment mode — "staging" | "production". Chooses trial agent + model. */
   ENVIRONMENT?: string;
-  /** Override for default trial model (production mode default: claude-sonnet-4-6). */
+  /** Override for default trial model (production mode default: claude-sonnet-5). */
   TRIAL_MODEL?: string;
   /** Override for default trial LLM provider ("anthropic" | "workers-ai"). */
   TRIAL_LLM_PROVIDER?: string;
@@ -761,7 +761,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   /** Max changed files returned by an Artifacts compare before truncating (default: 300). */
   REPO_BROWSE_MAX_COMPARE_FILES?: string;
   // SAM Agent (Top-Level Agent) configuration
-  SAM_MODEL?: string; // LLM model (default: claude-sonnet-4-20250514)
+  SAM_MODEL?: string; // LLM model (default: claude-sonnet-5)
   SAM_MAX_TOKENS?: string; // Max output tokens per turn (default: 4096)
   SAM_MAX_TURNS?: string; // Max tool-use loop iterations (default: 20)
   SAM_SYSTEM_PROMPT_APPEND?: string; // Additional system prompt text

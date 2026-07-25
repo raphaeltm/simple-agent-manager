@@ -58,6 +58,7 @@ const CLAUDE_MODELS: ModelGroup[] = [
     label: 'Claude 5 (Frontier)',
     models: [
       { id: 'claude-fable-5', name: 'Claude Fable 5 (1M context)', group: 'Claude 5 (Frontier)' },
+      { id: 'claude-opus-5', name: 'Claude Opus 5 (1M context)', group: 'Claude 5 (Frontier)' },
       { id: 'claude-sonnet-5', name: 'Claude Sonnet 5 (1M context)', group: 'Claude 5 (Frontier)' },
     ],
   },

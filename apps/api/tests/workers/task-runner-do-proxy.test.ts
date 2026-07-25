@@ -52,7 +52,7 @@ function makeStartInput(taskId: string) {
     devcontainerConfigName: 'default',
     cloudProvider: 'hetzner' as const,
     taskMode: 'task' as const,
-    model: 'claude-sonnet-4-20250514',
+    model: 'claude-sonnet-5',
     permissionMode: 'auto-edit',
     opencodeProvider: null,
     opencodeBaseUrl: null,
@@ -114,7 +114,7 @@ describe('task-runner-do proxy — Worker→DO contract', () => {
     expect(config.devcontainerConfigName).toBe('default');
     expect(config.cloudProvider).toBe('hetzner');
     expect(config.taskMode).toBe('task');
-    expect(config.model).toBe('claude-sonnet-4-20250514');
+    expect(config.model).toBe('claude-sonnet-5');
     expect(config.permissionMode).toBe('auto-edit');
     expect(config.systemPromptAppend).toBe('Always run tests before committing.');
     expect(config.agentProfileHint).toBe('profile-release-001');
