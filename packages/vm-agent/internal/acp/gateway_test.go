@@ -3,6 +3,8 @@ package acp
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -1562,5 +1564,120 @@ func TestBuildOpencodeConfig_CustomProviderEmitsOpenAICompatibleBlock(t *testing
 	}
 	if _, ok := models[alias]; !ok {
 		t.Fatalf("model alias %q not registered: %#v", alias, models)
+	}
+}
+
+func TestWriteCodexConfigLocallyCreatesFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	servers := []McpServerEntry{
+		{URL: "https://api.example.com/mcp", Token: "test-token"},
+	}
+
+	envVars, err := writeCodexConfigLocally(servers, nil, "")
+	if err != nil {
+		t.Fatalf("writeCodexConfigLocally failed: %v", err)
+	}
+
+	configPath := filepath.Join(tmpDir, ".codex", "config.toml")
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("config file not created at %s: %v", configPath, err)
+	}
+
+	content := string(data)
+	if !strings.Contains(content, "sam-mcp") {
+		t.Error("config missing MCP server entry")
+	}
+	if !strings.Contains(content, "https://api.example.com/mcp") {
+		t.Error("config missing MCP server URL")
+	}
+
+	expectedEnvName := codexMcpTokenEnvVar(0, 1)
+	foundToken := false
+	for _, ev := range envVars {
+		if strings.HasPrefix(ev, expectedEnvName+"=") {
+			foundToken = true
+			if !strings.Contains(ev, "test-token") {
+				t.Error("SAM_MCP_TOKEN env var missing token value")
+			}
+		}
+	}
+	if !foundToken {
+		t.Errorf("expected %s env var in returned envVars: %v", expectedEnvName, envVars)
+	}
+}
+
+func TestWriteCodexConfigLocallyRespectsCodexHome(t *testing.T) {
+	tmpDir := t.TempDir()
+	codexHome := filepath.Join(tmpDir, "custom-codex")
+	t.Setenv("CODEX_HOME", codexHome)
+
+	servers := []McpServerEntry{
+		{URL: "https://api.example.com/mcp", Token: "tok"},
+	}
+
+	_, err := writeCodexConfigLocally(servers, nil, "")
+	if err != nil {
+		t.Fatalf("writeCodexConfigLocally failed: %v", err)
+	}
+
+	configPath := filepath.Join(codexHome, "config.toml")
+	if _, err := os.Stat(configPath); err != nil {
+		t.Fatalf("config file not written to CODEX_HOME at %s: %v", configPath, err)
+	}
+}
+
+func TestWriteCodexConfigLocallyMergesExistingConfig(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	codexDir := filepath.Join(tmpDir, ".codex")
+	if err := os.MkdirAll(codexDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	existingContent := "model = \"gpt-5-codex\"\napproval_policy = \"never\"\n"
+	if err := os.WriteFile(filepath.Join(codexDir, "config.toml"), []byte(existingContent), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	servers := []McpServerEntry{
+		{URL: "https://api.example.com/mcp", Token: "tok"},
+	}
+
+	_, err := writeCodexConfigLocally(servers, nil, "")
+	if err != nil {
+		t.Fatalf("writeCodexConfigLocally failed: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(codexDir, "config.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	merged := string(data)
+	if !strings.Contains(merged, "model = \"gpt-5-codex\"") {
+		t.Error("existing model config was lost after merge")
+	}
+	if !strings.Contains(merged, "sam-mcp") {
+		t.Error("MCP server entry was not added during merge")
+	}
+}
+
+func TestWriteCodexConfigLocallyNoServersReturnsNil(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+
+	envVars, err := writeCodexConfigLocally(nil, nil, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if envVars != nil {
+		t.Fatalf("expected nil envVars for no servers, got %v", envVars)
+	}
+
+	configPath := filepath.Join(tmpDir, ".codex", "config.toml")
+	if _, err := os.Stat(configPath); err == nil {
+		t.Error("config file should not be created when there are no MCP servers")
 	}
 }

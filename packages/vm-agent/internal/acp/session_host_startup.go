@@ -418,11 +418,11 @@ func (h *SessionHost) applyPermissionMode(settings *agentSettingsPayload) {
 }
 
 func (h *SessionHost) writeAgentStartupConfig(ctx context.Context, agentType string, cred *agentCredential, startup *agentStartup) error {
-	if startup.containerID == "" {
-		return nil
-	}
 	if agentType == "openai-codex" {
 		h.writeCodexStartupConfig(ctx, cred, startup)
+	}
+	if startup.containerID == "" {
+		return nil
 	}
 	if agentType == "opencode" {
 		h.writeOpenCodeStartupConfig(ctx, cred, startup)
@@ -439,13 +439,27 @@ func (h *SessionHost) writeCodexStartupConfig(ctx context.Context, cred *agentCr
 	if startup.settings != nil {
 		effort = startup.settings.Effort
 	}
-	codexMcpEnvVars, err := writeCodexConfigToContainer(ctx, startup.containerID, h.config.ContainerUser, h.config.McpServers, proxyConfig, effort)
+
+	var codexMcpEnvVars []string
+	var err error
+	if startup.containerID != "" {
+		codexMcpEnvVars, err = writeCodexConfigToContainer(ctx, startup.containerID, h.config.ContainerUser, h.config.McpServers, proxyConfig, effort)
+	} else {
+		codexMcpEnvVars, err = writeCodexConfigLocally(h.config.McpServers, proxyConfig, effort)
+	}
 	if err != nil {
-		slog.Warn("Failed to write Codex config.toml", "error", err, "workspaceId", h.config.WorkspaceID)
+		slog.Warn("Failed to write Codex config.toml",
+			"error", err,
+			"workspaceId", h.config.WorkspaceID,
+			"standalone", startup.containerID == "")
 		return
 	}
 	startup.envVars = append(startup.envVars, codexMcpEnvVars...)
-	slog.Info("Wrote Codex config.toml", "mcpServers", len(h.config.McpServers), "hasProxyProvider", proxyConfig != nil, "effort", normalizeCodexEffort(effort))
+	slog.Info("Wrote Codex config.toml",
+		"mcpServers", len(h.config.McpServers),
+		"hasProxyProvider", proxyConfig != nil,
+		"effort", normalizeCodexEffort(effort),
+		"standalone", startup.containerID == "")
 }
 
 func (h *SessionHost) writeOpenCodeStartupConfig(ctx context.Context, cred *agentCredential, startup *agentStartup) {
