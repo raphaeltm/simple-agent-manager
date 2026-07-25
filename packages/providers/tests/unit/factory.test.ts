@@ -93,10 +93,19 @@ describe('createProvider', () => {
       apiToken: 'do-key',
       region: 'ams3',
       actionPollTimeoutMs: 500,
+      actionPollIntervalMs: 17,
+      maxListPages: 3,
     });
     expect(provider).toBeInstanceOf(DigitalOceanProvider);
     expect(provider.name).toBe('digitalocean');
     expect(provider.defaultLocation).toBe('ams3');
+    const runtime = provider as unknown as {
+      maxListPages: number;
+      volumeClient: { actionPollIntervalMs: number; maxListPages: number };
+    };
+    expect(runtime.maxListPages).toBe(3);
+    expect(runtime.volumeClient.actionPollIntervalMs).toBe(17);
+    expect(runtime.volumeClient.maxListPages).toBe(3);
   });
 
   it('should not access process.env', () => {

@@ -14,7 +14,6 @@ export {
 export type { LocationMeta, ProviderHelpMeta } from './providers';
 export {
   getDefaultLocationForProvider,
-  hasByocComputeCredential,
   getLocationsForProvider,
   hasByocComputeCredential,
   isValidLocationForProvider,

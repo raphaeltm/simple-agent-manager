@@ -183,6 +183,8 @@ export function createProvider(config: ProviderConfig): Provider {
         ipPollTimeoutMs: config.ipPollTimeoutMs,
         ipPollIntervalMs: config.ipPollIntervalMs,
         actionPollTimeoutMs: config.actionPollTimeoutMs,
+        actionPollIntervalMs: config.actionPollIntervalMs,
+        maxListPages: config.maxListPages,
         logger: config.logger,
       });
     case 'gcp':
