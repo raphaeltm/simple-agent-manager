@@ -10,6 +10,7 @@ import {
   getAgentCredentialSetupSession,
   type GuidedSetupAgentType,
   isTerminalAgentCredentialSetupStatus,
+  submitAgentCredentialSetupCredential,
 } from '../lib/api';
 
 interface AgentCredentialConnectModalProps {
@@ -109,9 +110,14 @@ export function AgentCredentialConnectModal({
   const [session, setSession] = useState<AgentCredentialSetupSession | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [submittedCredential, setSubmittedCredential] = useState('');
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [submittingCredential, setSubmittingCredential] = useState(false);
   const [retryNonce, setRetryNonce] = useState(0);
   const sessionIdRef = useRef<string | null>(null);
   const finishedRef = useRef(false);
+  const credentialSubmitInFlightRef = useRef(false);
+  const manualCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onConnectedRef = useRef(onConnected);
   const onCloseRef = useRef(onClose);
 
@@ -130,6 +136,12 @@ export function AgentCredentialConnectModal({
     setSession(null);
     setMessage(null);
     setCopied(false);
+    setSubmittedCredential('');
+    setSubmitError(null);
+    setSubmittingCredential(false);
+    credentialSubmitInFlightRef.current = false;
+    if (manualCloseTimerRef.current) clearTimeout(manualCloseTimerRef.current);
+    manualCloseTimerRef.current = null;
     sessionIdRef.current = null;
     finishedRef.current = false;
 
@@ -146,7 +158,13 @@ export function AgentCredentialConnectModal({
     };
 
     const poll = async () => {
-      if (!sessionIdRef.current || pollInFlight || finishedRef.current) return;
+      if (
+        !sessionIdRef.current ||
+        pollInFlight ||
+        finishedRef.current ||
+        credentialSubmitInFlightRef.current
+      )
+        return;
       pollInFlight = true;
       try {
         const next = await getAgentCredentialSetupSession(sessionIdRef.current);
@@ -188,6 +206,8 @@ export function AgentCredentialConnectModal({
       cancelled = true;
       if (pollTimer) clearInterval(pollTimer);
       if (closeTimer) clearTimeout(closeTimer);
+      if (manualCloseTimerRef.current) clearTimeout(manualCloseTimerRef.current);
+      manualCloseTimerRef.current = null;
       sessionIdRef.current = null;
     };
   }, [agentType, isOpen, retryNonce]);
@@ -199,6 +219,50 @@ export function AgentCredentialConnectModal({
       setCopied(true);
     } catch {
       setMessage('Could not copy the code. Press and hold the code to copy it.');
+    }
+  };
+
+  const handleSubmitCredential = async () => {
+    const id = sessionIdRef.current;
+    const credential = submittedCredential.trim();
+    if (!id || !credential) {
+      setSubmitError('Paste the Claude token from the browser first.');
+      return;
+    }
+
+    credentialSubmitInFlightRef.current = true;
+    setSubmittingCredential(true);
+    setSubmitError(null);
+    setMessage(null);
+    setSession((current) => (current ? { ...current, status: 'saving' } : current));
+
+    try {
+      const next = await submitAgentCredentialSetupCredential(id, credential);
+      setSession(next);
+      setSubmittedCredential('');
+      if (isTerminalAgentCredentialSetupStatus(next.status)) {
+        finishedRef.current = true;
+        if (next.status === 'completed') {
+          onConnectedRef.current?.();
+          manualCloseTimerRef.current = setTimeout(() => {
+            onCloseRef.current();
+          }, getSuccessCloseDelayMs());
+        }
+      }
+    } catch (error) {
+      setSession((current) =>
+        current && current.status === 'saving'
+          ? { ...current, status: 'waiting_for_user' }
+          : current
+      );
+      setSubmitError(
+        error instanceof Error
+          ? error.message
+          : 'Failed to save the Claude token. Please try again.'
+      );
+    } finally {
+      credentialSubmitInFlightRef.current = false;
+      setSubmittingCredential(false);
     }
   };
 
@@ -216,6 +280,8 @@ export function AgentCredentialConnectModal({
     phase === 'created' && status !== null && !isTerminalAgentCredentialSetupStatus(status);
   const ready = isActive && !!session?.verificationUrl;
   const hasCode = ready && !!session?.userCode;
+  const canSubmitClaudeCredential = ready && agentType === 'claude-code' && status !== 'saving';
+  const credentialInputId = `${titleId}-credential`;
 
   const header = (
     <div className="flex items-center justify-between gap-3 px-5 sm:px-6 py-4 border-b border-border-default">
@@ -300,6 +366,53 @@ export function AgentCredentialConnectModal({
                       </Button>
                     </div>
                   </div>
+                )}
+                {canSubmitClaudeCredential && (
+                  <form
+                    className="rounded-lg border border-border-default bg-bg-secondary p-4 flex flex-col gap-3"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      void handleSubmitCredential();
+                    }}
+                  >
+                    <div className="flex flex-col gap-2">
+                      <label
+                        htmlFor={credentialInputId}
+                        className="text-sm font-medium text-fg-primary"
+                      >
+                        Paste the Claude token from your browser
+                      </label>
+                      <input
+                        id={credentialInputId}
+                        type="password"
+                        autoComplete="off"
+                        spellCheck={false}
+                        inputMode="text"
+                        value={submittedCredential}
+                        onChange={(event) => {
+                          setSubmittedCredential(event.currentTarget.value);
+                          setSubmitError(null);
+                        }}
+                        placeholder="sk-ant-oat…"
+                        className="min-h-11 w-full rounded-md border border-border-default bg-bg-primary px-3 py-2 text-sm text-fg-primary outline-none focus:border-accent focus:ring-2 focus:ring-accent/20"
+                      />
+                      <p className="text-xs text-fg-muted m-0">
+                        After Claude shows a token, paste it here. SAM saves it encrypted and never
+                        displays it again.
+                      </p>
+                    </div>
+                    {submitError && <Alert variant="error">{submitError}</Alert>}
+                    <Button
+                      type="submit"
+                      variant="primary"
+                      size="sm"
+                      loading={submittingCredential}
+                      disabled={!submittedCredential.trim()}
+                      className="self-start"
+                    >
+                      {submittingCredential ? 'Saving…' : 'Save Claude token'}
+                    </Button>
+                  </form>
                 )}
                 <p className="text-xs text-fg-muted m-0">{copy.manualReturnHint}</p>
               </div>

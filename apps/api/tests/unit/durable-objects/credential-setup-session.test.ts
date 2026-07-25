@@ -642,6 +642,96 @@ describe('CredentialSetupSession — alarm() capture polling', () => {
     expect((await created.instance.getState())?.status).toBe('completed');
   });
 
+  it('saves a browser-submitted Claude token, completes, and tears down', async () => {
+    const created = createDO();
+    await Promise.resolve();
+    const fakeSandbox = createFakeSandbox();
+    fakeSandbox.readFile.mockImplementation(async (path: string) => ({
+      content: path.endsWith('device-auth-state.json')
+        ? JSON.stringify({
+            status: 'waiting_for_user',
+            verificationUrl: 'https://claude.ai/oauth/device',
+          })
+        : '',
+    }));
+    vi.mocked(getSandboxInstance).mockResolvedValue(fakeSandbox as never);
+
+    await created.instance.create({
+      id: 'setup-claude-manual',
+      setupHome: '/tmp/claude-setup-manual',
+      ttlMs: 900_000,
+      ...BASE_PARAMS,
+      agentType: 'claude-code',
+      provider: 'anthropic',
+      agentName: 'Claude Code',
+    });
+    await created.instance.alarm(); // provisioning -> admitting
+    await created.instance.alarm(); // device state -> waiting_for_user
+
+    const token = `sk-ant-oat${'E'.repeat(48)}`;
+    vi.mocked(saveAgentCredentialForUser).mockResolvedValue({
+      created: true,
+      createdAt: '2026-07-01T00:00:00.000Z',
+      updatedAt: '2026-07-01T00:00:00.000Z',
+    });
+
+    const result = await created.instance.submitCredential(` ${token}\n`);
+
+    expect(result.status).toBe('completed');
+    expect(saveAgentCredentialForUser).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: BASE_PARAMS.userId,
+        projectId: null,
+        agentType: 'claude-code',
+        credentialKind: 'oauth-token',
+        credential: token,
+        provider: 'anthropic',
+        agentName: 'Claude Code',
+        autoActivate: true,
+      })
+    );
+    expect(JSON.stringify(created.database._calls)).not.toContain(token);
+    expect(releaseSetupSlot).toHaveBeenCalledWith(expect.anything(), 'lease-abc');
+    expect(destroySandboxInstance).toHaveBeenCalledWith(expect.anything(), 'setup-claude-manual', {
+      sandboxId: 'setup-claude-manual',
+    });
+  });
+
+  it('rejects an invalid browser-submitted Claude token without failing the active session', async () => {
+    const created = createDO();
+    await Promise.resolve();
+    const fakeSandbox = createFakeSandbox();
+    fakeSandbox.readFile.mockImplementation(async (path: string) => ({
+      content: path.endsWith('device-auth-state.json')
+        ? JSON.stringify({
+            status: 'waiting_for_user',
+            verificationUrl: 'https://claude.ai/oauth/device',
+          })
+        : '',
+    }));
+    vi.mocked(getSandboxInstance).mockResolvedValue(fakeSandbox as never);
+
+    await created.instance.create({
+      id: 'setup-claude-invalid-manual',
+      setupHome: '/tmp/claude-setup-invalid-manual',
+      ttlMs: 900_000,
+      ...BASE_PARAMS,
+      agentType: 'claude-code',
+      provider: 'anthropic',
+      agentName: 'Claude Code',
+    });
+    await created.instance.alarm();
+    await created.instance.alarm();
+
+    await expect(created.instance.submitCredential('sk-ant-api-not-oauth')).rejects.toThrow(
+      /API key/
+    );
+
+    expect((await created.instance.getState())?.status).toBe('waiting_for_user');
+    expect(saveAgentCredentialForUser).not.toHaveBeenCalled();
+    expect(releaseSetupSlot).not.toHaveBeenCalled();
+  });
+
   it('tears down as failed when saveAgentCredentialForUser rejects', async () => {
     const { instance, database, fakeSandbox } = await createAndProvision();
     const authJson = validAuthJson();

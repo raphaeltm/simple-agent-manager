@@ -140,4 +140,121 @@ describe('native Codex setup route vertical slice', () => {
     expect(env.CREDENTIAL_SETUP_SESSION.idFromName).not.toHaveBeenCalled();
     expect(getState).not.toHaveBeenCalled();
   });
+
+  it('submits an owned Claude browser token through the DO boundary without persisting the secret in D1', async () => {
+    const sqlite = setupDatabase();
+    const now = new Date().toISOString();
+    sqlite
+      .prepare(
+        `INSERT INTO agent_credential_setup_sessions
+         (id, user_id, project_id, scope, agent_type, credential_kind, status,
+          sandbox_id, pool_lease_id, expires_at, created_at, updated_at)
+         VALUES (?, ?, NULL, 'user', 'claude-code', 'oauth-token',
+          'waiting_for_user', ?, 'lease-claude', ?, ?, ?)`
+      )
+      .run(
+        'session-claude',
+        'owner-user',
+        'session-claude',
+        new Date(Date.now() + 60_000).toISOString(),
+        now,
+        now
+      );
+
+    const token = `sk-ant-oat${'D'.repeat(48)}`;
+    const submitCredential = vi.fn().mockResolvedValue({
+      id: 'session-claude',
+      status: 'completed',
+      expiresAt: Date.now() + 60_000,
+      errorCode: null,
+      errorMessage: null,
+      verificationUrl: null,
+      userCode: null,
+    });
+    const env = {
+      DATABASE: createSqliteD1(sqlite),
+      CREDENTIAL_SETUP_SESSION: {
+        idFromName: vi.fn(() => ({ toString: () => 'do-session-claude' })),
+        get: vi.fn(() => ({ submitCredential })),
+      },
+    } as unknown as Env;
+    const app = new Hono<{ Bindings: Env }>();
+    app.onError((error, c) => {
+      const status = 'statusCode' in error ? Number(error.statusCode) : 500;
+      return c.json({ error: error.message }, status as 400 | 404 | 409 | 500);
+    });
+    app.route('/api/agent-credential-setup-sessions', agentCredentialSetupSessionsRoutes);
+
+    const response = await app.request(
+      '/api/agent-credential-setup-sessions/session-claude/credential',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ credential: ` ${token}\n` }),
+      },
+      env
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      id: 'session-claude',
+      status: 'completed',
+      agentType: 'claude-code',
+    });
+    expect(submitCredential).toHaveBeenCalledWith(token);
+    const persisted = sqlite
+      .prepare('SELECT * FROM agent_credential_setup_sessions WHERE id = ?')
+      .get('session-claude') as Record<string, unknown>;
+    expect(JSON.stringify(persisted)).not.toContain(token);
+  });
+
+  it('rejects an invalid Claude browser token before crossing the DO boundary', async () => {
+    const sqlite = setupDatabase();
+    const now = new Date().toISOString();
+    sqlite
+      .prepare(
+        `INSERT INTO agent_credential_setup_sessions
+         (id, user_id, project_id, scope, agent_type, credential_kind, status,
+          sandbox_id, pool_lease_id, expires_at, created_at, updated_at)
+         VALUES (?, ?, NULL, 'user', 'claude-code', 'oauth-token',
+          'waiting_for_user', ?, 'lease-claude', ?, ?, ?)`
+      )
+      .run(
+        'session-bad-token',
+        'owner-user',
+        'session-bad-token',
+        new Date(Date.now() + 60_000).toISOString(),
+        now,
+        now
+      );
+
+    const submitCredential = vi.fn();
+    const env = {
+      DATABASE: createSqliteD1(sqlite),
+      CREDENTIAL_SETUP_SESSION: {
+        idFromName: vi.fn(() => ({ toString: () => 'do-session-bad-token' })),
+        get: vi.fn(() => ({ submitCredential })),
+      },
+    } as unknown as Env;
+    const app = new Hono<{ Bindings: Env }>();
+    app.onError((error, c) => {
+      const status = 'statusCode' in error ? Number(error.statusCode) : 500;
+      return c.json({ error: error.message }, status as 400 | 404 | 409 | 500);
+    });
+    app.route('/api/agent-credential-setup-sessions', agentCredentialSetupSessionsRoutes);
+
+    const response = await app.request(
+      '/api/agent-credential-setup-sessions/session-bad-token/credential',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ credential: 'sk-ant-api-this-is-not-oauth' }),
+      },
+      env
+    );
+
+    expect(response.status).toBe(400);
+    expect(env.CREDENTIAL_SETUP_SESSION.idFromName).not.toHaveBeenCalled();
+    expect(submitCredential).not.toHaveBeenCalled();
+  });
 });

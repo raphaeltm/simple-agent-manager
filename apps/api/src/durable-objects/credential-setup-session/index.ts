@@ -256,6 +256,97 @@ export class CredentialSetupSession extends DurableObject<Env> {
   }
 
   /**
+   * Complete a Claude Code guided setup from the token the Claude browser flow
+   * gives back to the user. This deliberately bypasses terminal/stdin replay:
+   * the submitted secret is validated, saved through the same encrypted writer
+   * as sandbox capture, and never stored in DO SQLite or D1.
+   */
+  async submitCredential(credential: string): Promise<SetupSessionStateResult> {
+    const row = this.readRow();
+    if (!row) {
+      throw new Error('Setup session not found');
+    }
+    if (row.agent_type !== 'claude-code') {
+      throw new Error('Manual credential submission is only supported for Claude Code setup');
+    }
+
+    const currentState = this.getState();
+    if (
+      row.status === 'completed' ||
+      row.status === 'saving' ||
+      isTerminalSetupStatus(row.status)
+    ) {
+      return (
+        currentState ?? {
+          id: row.id,
+          status: row.status as SetupSessionStatus,
+          expiresAt: row.expires_at,
+          errorCode: row.error_code,
+          errorMessage: row.error_message,
+          verificationUrl: null,
+          userCode: null,
+        }
+      );
+    }
+
+    const trimmedCredential = credential.trim();
+    const validation = CredentialValidator.validateCredential(
+      trimmedCredential,
+      row.credential_kind as CredentialKind,
+      row.agent_type as AgentType
+    );
+    if (!validation.valid) {
+      throw new Error(validation.error ?? 'Invalid credential format');
+    }
+
+    this.setStatus(row.id, 'saving');
+    await this.updateD1Status(row.id, 'saving');
+    const savingRow = this.readRow();
+    if (!savingRow || savingRow.status !== 'saving') {
+      const latestState = this.getState();
+      if (latestState) return latestState;
+      throw new Error('Setup session state changed before credential save');
+    }
+
+    try {
+      await saveAgentCredentialForUser({
+        env: this.env,
+        userId: savingRow.user_id,
+        projectId: savingRow.project_id,
+        agentType: savingRow.agent_type as AgentType,
+        credentialKind: savingRow.credential_kind as CredentialKind,
+        credential: trimmedCredential,
+        provider: savingRow.provider,
+        agentName: savingRow.agent_name,
+        autoActivate: true,
+      });
+    } catch (err) {
+      log.error('credential_setup.manual_save_failed', {
+        sessionId: savingRow.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      await this.teardown(
+        savingRow,
+        'failed',
+        'manual_save_failed',
+        'Failed to save the submitted credential'
+      );
+      return (
+        this.getState() ??
+        this.terminalState(
+          savingRow,
+          'failed',
+          'manual_save_failed',
+          'Failed to save the submitted credential'
+        )
+      );
+    }
+
+    await this.teardown(savingRow, 'completed');
+    return this.getState() ?? this.terminalState(savingRow, 'completed');
+  }
+
+  /**
    * Alarm loop: provisions on the first tick, then polls for the captured
    * auth.json, and enforces the TTL. Every branch either reschedules the alarm
    * or reaches a terminal teardown, so a session cannot get stuck armed.
@@ -285,7 +376,11 @@ export class CredentialSetupSession extends DurableObject<Env> {
         await this.pollDeviceAuth(row);
         return;
       }
-      // waiting_for_user | capturing | saving — poll for the credential file.
+      if (row.status === 'saving') {
+        await this.ctx.storage.setAlarm(Date.now() + row.capture_poll_ms);
+        return;
+      }
+      // waiting_for_user | capturing — poll for the credential file.
       await this.attemptCapture(row);
     } catch (err) {
       // Unexpected transient error — log and reschedule; the TTL guard bounds
@@ -574,6 +669,23 @@ export class CredentialSetupSession extends DurableObject<Env> {
   // ---------------------------------------------------------------------------
   // Helpers
   // ---------------------------------------------------------------------------
+
+  private terminalState(
+    row: SetupSessionRow,
+    status: SetupSessionStatus,
+    errorCode: string | null = null,
+    errorMessage: string | null = null
+  ): SetupSessionStateResult {
+    return {
+      id: row.id,
+      status,
+      expiresAt: row.expires_at,
+      errorCode,
+      errorMessage,
+      verificationUrl: null,
+      userCode: null,
+    };
+  }
 
   private readRow(): SetupSessionRow | undefined {
     return this.sql.exec<SetupSessionRow>('SELECT * FROM setup_session LIMIT 1').toArray()[0];
