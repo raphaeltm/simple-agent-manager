@@ -417,7 +417,7 @@ describe('runtime.ts always-proxy', () => {
         "claude-code": {
           "apiKeySource": "callback-token",
           "baseURL": "https://api.example.com/ai/proxy/{wstoken}/anthropic",
-          "model": "claude-sonnet-4-6",
+          "model": "claude-sonnet-5",
           "provider": "anthropic-passthrough",
         },
         "openai-codex": {
@@ -456,7 +456,7 @@ describe('runtime.ts always-proxy', () => {
         "claude-code": {
           "apiKeySource": "callback-token",
           "baseURL": "https://api.example.com/ai/anthropic",
-          "model": "claude-sonnet-4-6",
+          "model": "claude-sonnet-5",
           "provider": "anthropic-proxy",
         },
         "openai-codex": {
