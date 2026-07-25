@@ -96,7 +96,7 @@ export const UPCLOUD_VOLUME_CAPABILITIES: VolumeCapabilities = {
   maxSizeGb: UPCLOUD_VOLUME_MAX_SIZE_GB,
   growOnlyResize: true,
   requiresSameLocation: true,
-  maxAttachedVolumesPerServer: 8,
+  maxAttachedVolumesPerServer: 16,
   defaultFormat: SAM_VOLUME_FILESYSTEM_FORMAT,
   lifecycle: {
     filesystem: SAM_VOLUME_FILESYSTEM_FORMAT,
