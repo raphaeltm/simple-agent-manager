@@ -112,6 +112,31 @@
     opacity: 0.5;
     cursor: not-allowed;
   }
+
+  :where(a, button, input, textarea, select, summary, [tabindex]:not([tabindex="-1"])):focus-visible {
+    outline: 2px solid var(--sam-color-focus-ring);
+    outline-offset: 2px;
+  }
+
+  .sam-skip-link {
+    position: fixed;
+    top: 0.75rem;
+    left: 0.75rem;
+    z-index: 1000;
+    transform: translateY(calc(-100% - 1rem));
+    border: 1px solid var(--sam-color-focus-ring);
+    border-radius: var(--sam-radius-sm);
+    background: var(--sam-color-bg-surface);
+    color: var(--sam-color-fg-primary);
+    padding: 0.625rem 0.875rem;
+    box-shadow: var(--sam-shadow-overlay);
+    text-decoration: none;
+    transition: transform 0.15s ease;
+  }
+
+  .sam-skip-link:focus-visible {
+    transform: translateY(0);
+  }
 }
 
 /* ── SAM-specific utility (not replaceable by Tailwind) ── */

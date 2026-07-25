@@ -264,6 +264,9 @@ export function AppShell({ children }: AppShellProps) {
       <OnboardingProvider>
       <ChoosePathWizard />
       <div className="flex flex-col h-screen">
+        <a href="#main-content" className="sam-skip-link">
+          Skip to main content
+        </a>
         <header className="relative z-30 flex items-center justify-between px-4 py-2 glass-chrome glass-panel-container glass-composited border-x-0 border-t-0 after:content-[''] after:absolute after:bottom-0 after:left-[10%] after:right-[10%] after:h-0.5 after:bg-[radial-gradient(ellipse_at_center,var(--sam-chrome-accent-glow)_0%,transparent_70%)] after:blur-[1px] after:pointer-events-none">
           {/* Title on the left */}
           <Link to="/dashboard">
@@ -290,7 +293,7 @@ export function AppShell({ children }: AppShellProps) {
           </div>
         </header>
 
-        <main className="sam-main-content flex-1 min-h-0 overflow-y-auto overflow-x-hidden flex flex-col min-w-0">
+        <main id="main-content" tabIndex={-1} className="sam-main-content flex-1 min-h-0 overflow-y-auto overflow-x-hidden flex flex-col min-w-0">
           {children ?? <Outlet />}
         </main>
 
@@ -331,6 +334,9 @@ export function AppShell({ children }: AppShellProps) {
       className="grid h-screen overflow-hidden transition-[grid-template-columns] duration-200 ease-out motion-reduce:transition-none"
       style={{ gridTemplateColumns: `${navWidthForMode(focusMode)}px 1fr`, gridTemplateRows: 'minmax(0, 1fr) auto' }}
     >
+      <a href="#main-content" className="sam-skip-link">
+        Skip to main content
+      </a>
       {/* Announce Focus Mode changes to assistive tech (mode is cycled via the
           "F" key or the toggle, so screen readers need a live region). */}
       <div aria-live="polite" className="sr-only">
@@ -450,7 +456,7 @@ export function AppShell({ children }: AppShellProps) {
         </aside>
       )}
 
-      <main className="sam-main-content flex-1 overflow-y-auto overflow-x-hidden flex flex-col min-w-0" style={{ gridRow: '1' }}>
+      <main id="main-content" tabIndex={-1} className="sam-main-content flex-1 overflow-y-auto overflow-x-hidden flex flex-col min-w-0" style={{ gridRow: '1' }}>
         {children ?? <Outlet />}
       </main>
 

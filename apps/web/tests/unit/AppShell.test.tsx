@@ -108,6 +108,16 @@ describe('AppShell (global context)', () => {
     expect(screen.getByTestId('page-content')).toBeInTheDocument();
   });
 
+  it('provides a skip link to the main content region for keyboard users', () => {
+    renderAppShell();
+    const skipLink = screen.getByRole('link', { name: 'Skip to main content' });
+    expect(skipLink).toHaveAttribute('href', '#main-content');
+
+    const main = screen.getByRole('main');
+    expect(main).toHaveAttribute('id', 'main-content');
+    expect(main).toHaveAttribute('tabindex', '-1');
+  });
+
   it('renders primary navigation with Home, Projects, Settings', () => {
     renderAppShell();
     expect(screen.getByRole('navigation', { name: 'Primary navigation' })).toBeInTheDocument();
