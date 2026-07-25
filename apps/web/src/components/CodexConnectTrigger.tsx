@@ -33,7 +33,8 @@ type CodexConnectTriggerProps = Omit<AgentCredentialConnectTriggerProps, 'agentT
 const TRIGGER_COPY: Record<GuidedSetupAgentType, { button: string; description: string }> = {
   'openai-codex': {
     button: 'Connect with Codex',
-    description: 'Sign in to your ChatGPT subscription — no manual auth.json needed.',
+    description:
+      'Sign in to your ChatGPT subscription with a secure verification code — no manual auth.json needed.',
   },
   'claude-code': {
     button: 'Connect with Claude Code',
