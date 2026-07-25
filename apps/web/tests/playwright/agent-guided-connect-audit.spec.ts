@@ -184,7 +184,7 @@ test('Claude guided connect uses native URL/copy controls without terminal outpu
   await expect(page.locator('code')).toHaveText(CLAUDE_USER_CODE);
   await expect(page.getByTestId('codex-terminal')).toHaveCount(0);
   const modal = page.getByRole('dialog', { name: 'Connect with Claude Code' });
-  await expect(modal.locator('pre, textarea, [data-testid*=\"terminal\"]')).toHaveCount(0);
+  await expect(modal.locator('pre, textarea, [data-testid*="terminal"]')).toHaveCount(0);
 
   await assertNoOverflow(page);
 
