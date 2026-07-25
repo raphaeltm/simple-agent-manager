@@ -40,6 +40,7 @@ Claude Code still requires users to run `claude setup-token` manually and paste 
 - [x] Generalize the web API client and modal/trigger to expose Claude Code with native open/copy controls and no terminal.
 - [x] Render the guided setup trigger for Claude Code OAuth-token flows in user scope; keep project-scope behavior hidden until project-scoped guided capture is intentionally supported.
 - [x] Add/extend API, DO, script, and UI tests for Claude setup-token URL/token capture and cross-agent behavior.
+- [x] Constrain Claude helper state/credential writes to the fixed setup files under `CLAUDE_CONFIG_DIR` so CLI arguments cannot escape the per-session setup directory.
 - [x] Add/update Playwright coverage for the changed guided flow surface, including mobile and desktop open/copy behavior.
 - [x] Add opt-in staging Playwright coverage for the real Claude Code guided setup URL-open smoke test.
 
@@ -80,6 +81,8 @@ Claude Code still requires users to run `claude setup-token` manually and paste 
 - Added parser regression coverage after staging exposed Claude auth URLs with `code=true`; the helper now ignores URL query parameters and prompt prose when deriving optional user codes. Focused parser tests passed.
 - Second staging deploy from this branch succeeded (`deploy-staging.yml` run 30148747835), including built-in smoke-tests.
 - Claude-specific staging smoke passed: `PLAYWRIGHT_BASE_URL=https://app.sammy.party npx playwright test tests/playwright/staging-claude-guided-connect.spec.ts --project='Desktop (1280x800)' --reporter=list` passed 2/2. It validated the real setup-session API returned `waiting_for_user` with a trusted Claude auth URL and no login command, then validated the UI through the existing-credential `Update` path: native Claude auth link visible, no terminal/pre surface, no horizontal overflow, and clicking the link opened a trusted Claude/Anthropic auth host without completing OAuth.
+- PR CI SonarCloud flagged the helper's raw CLI path arguments as filesystem-sink inputs. Fixed by deriving writable state/credential/temp paths from `CLAUDE_CONFIG_DIR` and rejecting any argv path that does not exactly match the expected setup files.
+- Post-Sonar-fix validation passed: `pnpm --filter @simple-agent-manager/api test -- tests/unit/scripts/claude-setup-token.test.ts tests/unit/durable-objects/credential-setup-session.test.ts`, `pnpm lint`, `pnpm typecheck`, and `pnpm build`.
 
 ## Specialist review
 

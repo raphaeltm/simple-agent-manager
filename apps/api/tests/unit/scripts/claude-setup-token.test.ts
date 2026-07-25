@@ -1,10 +1,11 @@
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   extractClaudeSetupOutput,
+  resolveClaudeSetupPaths,
   runClaudeSetupToken,
   validateClaudeOauthToken,
   validateClaudeVerificationUrl,
@@ -23,6 +24,18 @@ function fakeClaudeProcess() {
 }
 
 const CLAUDE_TOKEN = `sk-ant-oat${'A'.repeat(48)}`;
+const CLAUDE_SETUP_HOME = '/tmp/sam-claude-setup-test';
+const CLAUDE_STATE_PATH = `${CLAUDE_SETUP_HOME}/device-auth-state.json`;
+const CLAUDE_CREDENTIAL_PATH = `${CLAUDE_SETUP_HOME}/claude-oauth-token.txt`;
+
+function validSetupPaths() {
+  vi.stubEnv('CLAUDE_CONFIG_DIR', CLAUDE_SETUP_HOME);
+  return { statePath: CLAUDE_STATE_PATH, credentialPath: CLAUDE_CREDENTIAL_PATH };
+}
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 describe('Claude setup-token driver', () => {
   it('extracts a trusted Claude URL, optional verification code, and OAuth token', () => {
@@ -79,6 +92,42 @@ describe('Claude setup-token driver', () => {
     expect(() => validateClaudeOauthToken('sk-ant-api03-not-oauth')).toThrow(/invalid OAuth token/);
   });
 
+  it('derives setup file paths from CLAUDE_CONFIG_DIR and rejects path escapes', async () => {
+    vi.stubEnv('CLAUDE_CONFIG_DIR', CLAUDE_SETUP_HOME);
+
+    expect(
+      resolveClaudeSetupPaths({
+        statePath: CLAUDE_STATE_PATH,
+        credentialPath: CLAUDE_CREDENTIAL_PATH,
+      })
+    ).toEqual({
+      statePath: CLAUDE_STATE_PATH,
+      temporaryStatePath: `${CLAUDE_SETUP_HOME}/device-auth-state.json.tmp`,
+      credentialPath: CLAUDE_CREDENTIAL_PATH,
+      temporaryCredentialPath: `${CLAUDE_SETUP_HOME}/claude-oauth-token.txt.tmp`,
+    });
+
+    expect(() =>
+      resolveClaudeSetupPaths({
+        statePath: `${CLAUDE_SETUP_HOME}/../device-auth-state.json`,
+        credentialPath: CLAUDE_CREDENTIAL_PATH,
+      })
+    ).toThrow(/expected setup state file/);
+    expect(() =>
+      resolveClaudeSetupPaths({
+        statePath: CLAUDE_STATE_PATH,
+        credentialPath: `${CLAUDE_SETUP_HOME}/../claude-oauth-token.txt`,
+      })
+    ).toThrow(/expected OAuth token file/);
+    expect(() =>
+      resolveClaudeSetupPaths({
+        statePath: '/device-auth-state.json',
+        credentialPath: '/claude-oauth-token.txt',
+        configDir: '/',
+      })
+    ).toThrow(/must not resolve to the filesystem root/);
+  });
+
   it('publishes non-secret actionable state and writes only the token to the credential file', async () => {
     const fake = fakeClaudeProcess();
     const states: Array<Record<string, unknown>> = [];
@@ -87,8 +136,7 @@ describe('Claude setup-token driver', () => {
     let spawnedArgs: string[] = [];
 
     const ready = runClaudeSetupToken({
-      statePath: '/unused-state',
-      credentialPath: '/unused-token',
+      ...validSetupPaths(),
       spawnProcess: (command, args) => {
         spawnedCommand = command;
         spawnedArgs = args;
@@ -130,8 +178,7 @@ describe('Claude setup-token driver', () => {
     const states: Array<Record<string, unknown>> = [];
 
     const ready = runClaudeSetupToken({
-      statePath: '/unused-state',
-      credentialPath: '/unused-token',
+      ...validSetupPaths(),
       spawnProcess: () => fake,
       writeState: async (state) => states.push(state),
       writeCredential: vi.fn().mockResolvedValue(undefined),

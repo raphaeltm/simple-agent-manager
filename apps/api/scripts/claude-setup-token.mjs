@@ -2,6 +2,7 @@
 
 import { spawn } from 'node:child_process';
 import { rename, writeFile } from 'node:fs/promises';
+import { join, parse, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline';
 
@@ -9,6 +10,9 @@ const MAX_VERIFICATION_URL_LENGTH = 4096;
 const MAX_USER_CODE_LENGTH = 128;
 const MAX_CLAUDE_TOKEN_LENGTH = 8192;
 const CLAUDE_OAUTH_TOKEN_PREFIX = 'sk-ant-oat';
+const CLAUDE_CONFIG_DIR_ENV = 'CLAUDE_CONFIG_DIR';
+const DEVICE_AUTH_STATE_FILE = 'device-auth-state.json';
+const CLAUDE_OAUTH_TOKEN_FILE = 'claude-oauth-token.txt';
 const ANSI_ESCAPE_PATTERN = /\u001b\[[0-9;?]*[ -/]*[@-~]/g;
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f]/;
 const CLAUDE_SETUP_COMMAND =
@@ -69,6 +73,38 @@ export function validateClaudeOauthToken(value) {
   return token;
 }
 
+export function resolveClaudeSetupPaths({
+  statePath,
+  credentialPath,
+  configDir = process.env[CLAUDE_CONFIG_DIR_ENV],
+}) {
+  if (!configDir) {
+    throw new Error(`${CLAUDE_CONFIG_DIR_ENV} is required for Claude setup-token`);
+  }
+
+  const baseDir = resolve(configDir);
+  if (baseDir === parse(baseDir).root) {
+    throw new Error(`${CLAUDE_CONFIG_DIR_ENV} must not resolve to the filesystem root`);
+  }
+
+  const expectedStatePath = join(baseDir, DEVICE_AUTH_STATE_FILE);
+  const expectedCredentialPath = join(baseDir, CLAUDE_OAUTH_TOKEN_FILE);
+
+  if (resolve(statePath) !== expectedStatePath) {
+    throw new Error('Claude setup-token state path must be the expected setup state file');
+  }
+  if (resolve(credentialPath) !== expectedCredentialPath) {
+    throw new Error('Claude setup-token credential path must be the expected OAuth token file');
+  }
+
+  return {
+    statePath: expectedStatePath,
+    temporaryStatePath: join(baseDir, `${DEVICE_AUTH_STATE_FILE}.tmp`),
+    credentialPath: expectedCredentialPath,
+    temporaryCredentialPath: join(baseDir, `${CLAUDE_OAUTH_TOKEN_FILE}.tmp`),
+  };
+}
+
 function validateUserCode(value) {
   const code = value.trim();
   if (
@@ -119,17 +155,23 @@ export async function runClaudeSetupToken({
   credentialPath,
   spawnProcess = spawn,
   onSpawn,
-  writeState = async (state) => {
-    const temporaryStatePath = `${statePath}.tmp`;
-    await writeFile(temporaryStatePath, `${JSON.stringify(state)}\n`, { mode: 0o600 });
-    await rename(temporaryStatePath, statePath);
-  },
-  writeCredential = async (token) => {
-    const temporaryCredentialPath = `${credentialPath}.tmp`;
-    await writeFile(temporaryCredentialPath, `${token}\n`, { mode: 0o600 });
-    await rename(temporaryCredentialPath, credentialPath);
-  },
+  writeState,
+  writeCredential,
 }) {
+  const setupPaths = resolveClaudeSetupPaths({ statePath, credentialPath });
+  const writeStateFile =
+    writeState ??
+    (async (state) => {
+      await writeFile(setupPaths.temporaryStatePath, `${JSON.stringify(state)}\n`, { mode: 0o600 });
+      await rename(setupPaths.temporaryStatePath, setupPaths.statePath);
+    });
+  const writeCredentialFile =
+    writeCredential ??
+    (async (token) => {
+      await writeFile(setupPaths.temporaryCredentialPath, `${token}\n`, { mode: 0o600 });
+      await rename(setupPaths.temporaryCredentialPath, setupPaths.credentialPath);
+    });
+
   // Claude Code only prints the setup-token browser URL on a TTY. The
   // Cloudflare Sandbox exec API is non-interactive, so run it through
   // `script` to allocate a pseudo-terminal while still capturing stdout/stderr
@@ -169,7 +211,7 @@ export async function runClaudeSetupToken({
     const isTerminal = state.status === 'completed' || state.status === 'failed';
     if (terminalStatePublished) return stateWriteQueue;
     if (isTerminal) terminalStatePublished = true;
-    stateWriteQueue = stateWriteQueue.then(() => writeState(state));
+    stateWriteQueue = stateWriteQueue.then(() => writeStateFile(state));
     return stateWriteQueue;
   }
 
@@ -192,7 +234,7 @@ export async function runClaudeSetupToken({
   function maybeCaptureToken(details) {
     if (tokenCaptured || !details.token) return;
     tokenCaptured = true;
-    void writeCredential(details.token)
+    void writeCredentialFile(details.token)
       .then(() => publishState({ status: 'completed' }))
       .then(() => settleReady())
       .then(() => claude.kill('SIGTERM'))
