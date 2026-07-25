@@ -108,6 +108,7 @@ Add `digitalocean` as a **fifth cloud provider** (after hetzner, scaleway, gcp, 
 ### Verification evidence (2026-07-25)
 
 - Full local lint, typecheck, test, build, migration, Durable Object migration, Wrangler binding, and provider coverage gates passed.
+- Pull request #1670 carries the full specialist matrix, preflight classification, staging evidence, and production-owner checklist.
 - DigitalOcean Playwright audit passed 15/15 at 375 px, 390 px, and 1280 px across Settings, Connections, admin credentials, and workspace availability.
 - Staging deploy run 30140818283 passed for rebased SHA 7d4030c58, including 12/12 workflow smoke tests.
 - Authenticated no-key/bogus-key staging check passed: Settings rendered Full Access guidance; API returned a sanitized 400; the token was not stored; UI displayed the validation alert.
