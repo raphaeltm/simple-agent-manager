@@ -81,26 +81,31 @@ describe('config env var resolution', () => {
   });
 
   describe('computeIdleAlarmTimes respects WORKSPACE_IDLE_CHECK_INTERVAL_MS env', () => {
-    it('uses env value when provided', async () => {
+    it('uses env value when provided (discriminating: differs from default)', async () => {
       const { computeIdleAlarmTimes } = await import(
         '../../src/durable-objects/project-data/idle-cleanup'
       );
 
+      const baseTime = Date.now() - 60_000;
       const mockSql = {
         exec: (query: string) => ({
           toArray: () => {
             if (query.includes('idle_cleanup_schedule')) return [{ earliest: null }];
-            if (query.includes('workspace_activity')) return [{ earliest: Date.now() - 60_000 }];
+            if (query.includes('workspace_activity')) return [{ earliest: baseTime }];
             return [];
           },
         }),
       } as unknown as SqlStorage;
 
+      const envOverrideMs = 600_000; // 10 min — differs from 5 min default
       const result = computeIdleAlarmTimes(mockSql, {
-        WORKSPACE_IDLE_CHECK_INTERVAL_MS: '600000',
+        WORKSPACE_IDLE_CHECK_INTERVAL_MS: String(envOverrideMs),
       });
 
       expect(result.workspaceIdleCheckTime).not.toBeNull();
+      const expectedCheck = baseTime + envOverrideMs;
+      const nowPlus60s = Date.now() + 60_000;
+      expect(result.workspaceIdleCheckTime).toBe(Math.max(expectedCheck, nowPlus60s));
     });
 
     it('falls back to default when env is not provided', async () => {
