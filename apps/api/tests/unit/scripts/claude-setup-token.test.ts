@@ -7,6 +7,7 @@ import {
   extractClaudeSetupOutput,
   resolveClaudeSetupPaths,
   runClaudeSetupToken,
+  runClaudeSetupTokenCli,
   validateClaudeOauthToken,
   validateClaudeVerificationUrl,
 } from '../../../scripts/claude-setup-token.mjs';
@@ -143,6 +144,29 @@ describe('Claude setup-token driver', () => {
         configDir: '/',
       })
     ).toThrow(/must not resolve to the filesystem root/);
+  });
+
+  it('forwards all three executable arguments into the driver', async () => {
+    const runner = vi.fn().mockResolvedValue(undefined);
+
+    await runClaudeSetupTokenCli(
+      [
+        'node',
+        'claude-setup-token.mjs',
+        CLAUDE_STATE_PATH,
+        CLAUDE_CREDENTIAL_PATH,
+        CLAUDE_VERIFICATION_CODE_PATH,
+      ],
+      runner
+    );
+
+    expect(runner).toHaveBeenCalledWith(
+      expect.objectContaining({
+        statePath: CLAUDE_STATE_PATH,
+        credentialPath: CLAUDE_CREDENTIAL_PATH,
+        verificationCodePath: CLAUDE_VERIFICATION_CODE_PATH,
+      })
+    );
   });
 
   it('publishes non-secret actionable state and writes only the token to the credential file', async () => {

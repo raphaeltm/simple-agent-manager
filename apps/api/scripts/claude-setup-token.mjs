@@ -305,24 +305,30 @@ export async function runClaudeSetupToken({
   return ready;
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  const statePath = process.argv[2];
-  const credentialPath = process.argv[3];
-  const verificationCodePath = process.argv[4];
+export function runClaudeSetupTokenCli(argv = process.argv, runner = runClaudeSetupToken) {
+  const statePath = argv[2];
+  const credentialPath = argv[3];
+  const verificationCodePath = argv[4];
   if (!statePath || !credentialPath || !verificationCodePath) {
     process.stderr.write(
       'Usage: claude-setup-token.mjs <state-path> <credential-path> <verification-code-path>\n'
     );
     process.exitCode = 2;
-  } else {
-    runClaudeSetupToken({
-      statePath,
-      credentialPath,
-      onSpawn: (claude) => {
-        process.once('SIGTERM', () => claude.kill('SIGTERM'));
-      },
-    }).catch(() => {
-      process.exitCode = 1;
-    });
+    return;
   }
+
+  return runner({
+    statePath,
+    credentialPath,
+    verificationCodePath,
+    onSpawn: (claude) => {
+      process.once('SIGTERM', () => claude.kill('SIGTERM'));
+    },
+  });
+}
+
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+  Promise.resolve(runClaudeSetupTokenCli()).catch(() => {
+    process.exitCode = 1;
+  });
 }
