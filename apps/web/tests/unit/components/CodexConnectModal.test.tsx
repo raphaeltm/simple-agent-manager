@@ -6,7 +6,7 @@ const h = vi.hoisted(() => ({
   getAgentCredentialSetupSession: vi.fn(),
   cancelAgentCredentialSetupSession: vi.fn(),
   getAgentCredentialSetupConfig: vi.fn(),
-  submitAgentCredentialSetupCredential: vi.fn(),
+  submitAgentCredentialSetupVerificationCode: vi.fn(),
 }));
 
 vi.mock('../../../src/lib/api', async (importOriginal) => ({
@@ -15,7 +15,7 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
   getAgentCredentialSetupSession: h.getAgentCredentialSetupSession,
   cancelAgentCredentialSetupSession: h.cancelAgentCredentialSetupSession,
   getAgentCredentialSetupConfig: h.getAgentCredentialSetupConfig,
-  submitAgentCredentialSetupCredential: h.submitAgentCredentialSetupCredential,
+  submitAgentCredentialSetupVerificationCode: h.submitAgentCredentialSetupVerificationCode,
 }));
 
 import {
@@ -32,7 +32,7 @@ const SESSION_ID = 'sess_setup_01';
 const USER_CODE = 'ABCD-EFGH';
 const OPENAI_VERIFICATION_URL = 'https://auth.openai.com/device';
 const CLAUDE_VERIFICATION_URL = 'https://claude.ai/oauth/device';
-const CLAUDE_OAUTH_TOKEN = `sk-ant-oat${'C'.repeat(48)}`;
+const CLAUDE_VERIFICATION_CODE = 'abc123#state456';
 
 function makeSession(
   status: AgentCredentialSetupStatus,
@@ -56,7 +56,7 @@ describe('AgentCredentialConnectModal', () => {
     h.getAgentCredentialSetupSession.mockReset();
     h.cancelAgentCredentialSetupSession.mockReset();
     h.getAgentCredentialSetupConfig.mockReset();
-    h.submitAgentCredentialSetupCredential.mockReset();
+    h.submitAgentCredentialSetupVerificationCode.mockReset();
     vi.stubEnv('VITE_CODEX_SETUP_POLL_MS', '20');
     vi.stubEnv('VITE_CODEX_SETUP_SUCCESS_CLOSE_MS', '10');
     h.cancelAgentCredentialSetupSession.mockResolvedValue({ id: SESSION_ID, status: 'cancelled' });
@@ -114,7 +114,7 @@ describe('AgentCredentialConnectModal', () => {
     expect(screen.queryByTestId('codex-terminal')).not.toBeInTheDocument();
   });
 
-  it('lets Claude users paste the browser token and complete setup', async () => {
+  it('lets Claude users paste the browser verification code and complete setup', async () => {
     const onConnected = vi.fn();
     h.createAgentCredentialSetupSession.mockResolvedValue({
       kind: 'created',
@@ -127,7 +127,7 @@ describe('AgentCredentialConnectModal', () => {
         userCode: null,
       })
     );
-    h.submitAgentCredentialSetupCredential.mockResolvedValue(
+    h.submitAgentCredentialSetupVerificationCode.mockResolvedValue(
       makeSession('completed', { agentType: 'claude-code' })
     );
 
@@ -141,19 +141,19 @@ describe('AgentCredentialConnectModal', () => {
     );
 
     await screen.findByRole('link', { name: /open claude sign-in/i });
-    const tokenInput = screen.getByLabelText(/paste the claude token/i);
+    const tokenInput = screen.getByLabelText(/paste the code claude shows you/i);
     fireEvent.change(tokenInput, {
       target: {
-        value: ` ${CLAUDE_OAUTH_TOKEN}
+        value: ` ${CLAUDE_VERIFICATION_CODE}
 `,
       },
     });
-    fireEvent.click(screen.getByRole('button', { name: /save claude token/i }));
+    fireEvent.click(screen.getByRole('button', { name: /continue sign-in/i }));
 
     await waitFor(() =>
-      expect(h.submitAgentCredentialSetupCredential).toHaveBeenCalledWith(
+      expect(h.submitAgentCredentialSetupVerificationCode).toHaveBeenCalledWith(
         SESSION_ID,
-        CLAUDE_OAUTH_TOKEN
+        CLAUDE_VERIFICATION_CODE
       )
     );
     await waitFor(() => expect(onConnected).toHaveBeenCalledOnce());

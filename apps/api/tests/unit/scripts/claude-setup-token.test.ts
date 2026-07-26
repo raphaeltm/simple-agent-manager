@@ -16,10 +16,12 @@ function fakeClaudeProcess() {
     stdout: PassThrough;
     stderr: PassThrough;
     kill: ReturnType<typeof vi.fn>;
+    stdin: PassThrough;
   };
   process.stdout = new PassThrough();
   process.stderr = new PassThrough();
   process.kill = vi.fn();
+  process.stdin = new PassThrough();
   return process;
 }
 
@@ -27,10 +29,15 @@ const CLAUDE_TOKEN = `sk-ant-oat${'A'.repeat(48)}`;
 const CLAUDE_SETUP_HOME = '/tmp/sam-claude-setup-test';
 const CLAUDE_STATE_PATH = `${CLAUDE_SETUP_HOME}/device-auth-state.json`;
 const CLAUDE_CREDENTIAL_PATH = `${CLAUDE_SETUP_HOME}/claude-oauth-token.txt`;
+const CLAUDE_VERIFICATION_CODE_PATH = `${CLAUDE_SETUP_HOME}/verification-code.txt`;
 
 function validSetupPaths() {
   vi.stubEnv('CLAUDE_CONFIG_DIR', CLAUDE_SETUP_HOME);
-  return { statePath: CLAUDE_STATE_PATH, credentialPath: CLAUDE_CREDENTIAL_PATH };
+  return {
+    statePath: CLAUDE_STATE_PATH,
+    credentialPath: CLAUDE_CREDENTIAL_PATH,
+    verificationCodePath: CLAUDE_VERIFICATION_CODE_PATH,
+  };
 }
 
 afterEach(() => {
@@ -99,11 +106,13 @@ describe('Claude setup-token driver', () => {
       resolveClaudeSetupPaths({
         statePath: CLAUDE_STATE_PATH,
         credentialPath: CLAUDE_CREDENTIAL_PATH,
+        verificationCodePath: CLAUDE_VERIFICATION_CODE_PATH,
       })
     ).toEqual({
       statePath: CLAUDE_STATE_PATH,
       temporaryStatePath: `${CLAUDE_SETUP_HOME}/device-auth-state.json.tmp`,
       credentialPath: CLAUDE_CREDENTIAL_PATH,
+      verificationCodePath: CLAUDE_VERIFICATION_CODE_PATH,
       temporaryCredentialPath: `${CLAUDE_SETUP_HOME}/claude-oauth-token.txt.tmp`,
     });
 
@@ -111,18 +120,21 @@ describe('Claude setup-token driver', () => {
       resolveClaudeSetupPaths({
         statePath: `${CLAUDE_SETUP_HOME}/../device-auth-state.json`,
         credentialPath: CLAUDE_CREDENTIAL_PATH,
+        verificationCodePath: CLAUDE_VERIFICATION_CODE_PATH,
       })
     ).toThrow(/expected setup state file/);
     expect(() =>
       resolveClaudeSetupPaths({
         statePath: CLAUDE_STATE_PATH,
         credentialPath: `${CLAUDE_SETUP_HOME}/../claude-oauth-token.txt`,
+        verificationCodePath: CLAUDE_VERIFICATION_CODE_PATH,
       })
     ).toThrow(/expected OAuth token file/);
     expect(() =>
       resolveClaudeSetupPaths({
         statePath: '/device-auth-state.json',
         credentialPath: '/claude-oauth-token.txt',
+        verificationCodePath: '/verification-code.txt',
         configDir: '/',
       })
     ).toThrow(/must not resolve to the filesystem root/);
@@ -144,6 +156,9 @@ describe('Claude setup-token driver', () => {
       },
       writeState: async (state) => states.push(state),
       writeCredential: async (token) => credentials.push(token),
+      readVerificationCode: vi.fn().mockResolvedValue(' abc 123#state\n'),
+      deleteVerificationCode: vi.fn().mockResolvedValue(undefined),
+      verificationCodePollMs: 1,
     });
 
     expect(spawnedCommand).toBe('script');
@@ -165,6 +180,9 @@ describe('Claude setup-token driver', () => {
       },
     ]);
     expect(JSON.stringify(states)).not.toContain(CLAUDE_TOKEN);
+    const stdinBytes: Buffer[] = [];
+    fake.stdin.on('data', (chunk) => stdinBytes.push(Buffer.from(chunk)));
+    await vi.waitFor(() => expect(Buffer.concat(stdinBytes).toString()).toBe('abc123#state\r'));
 
     fake.stdout.write(`Your token: ${CLAUDE_TOKEN}\n`);
     await vi.waitFor(() => expect(credentials).toEqual([CLAUDE_TOKEN]));

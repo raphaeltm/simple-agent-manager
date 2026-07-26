@@ -33,10 +33,9 @@ import {
   cancelSetupSession,
   getSetupSessionState,
   startSetupSession,
-  submitSetupSessionCredential,
+  submitSetupSessionVerificationCode,
 } from '../services/credential-setup-session';
 import { leaseSetupSlot, releaseSetupSlot } from '../services/setup-session-pool';
-import { CredentialValidator } from '../services/validation';
 
 const agentCredentialSetupSessionsRoutes = new Hono<{ Bindings: Env }>();
 
@@ -45,15 +44,10 @@ const SUPPORTED_SETUP_AGENT_TYPES = ['openai-codex', 'claude-code'] as const;
 type SupportedSetupAgentType = (typeof SUPPORTED_SETUP_AGENT_TYPES)[number];
 const SETUP_CREDENTIAL_KIND = 'oauth-token';
 const ACTIVE_STATUS_PLACEHOLDERS = ACTIVE_SETUP_STATUSES.map(() => '?').join(', ');
-const MAX_SUBMITTED_CLAUDE_TOKEN_LENGTH = 8192;
+const MAX_SUBMITTED_CLAUDE_CODE_LENGTH = 1024;
 
-const SubmitSetupCredentialSchema = v.object({
-  credential: v.pipe(
-    v.string(),
-    v.trim(),
-    v.minLength(1),
-    v.maxLength(MAX_SUBMITTED_CLAUDE_TOKEN_LENGTH)
-  ),
+const SubmitVerificationCodeSchema = v.object({
+  code: v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(MAX_SUBMITTED_CLAUDE_CODE_LENGTH)),
 });
 
 function isSupportedSetupAgentType(agentType: AgentType): agentType is SupportedSetupAgentType {
@@ -281,37 +275,24 @@ agentCredentialSetupSessionsRoutes.get('/:id', requireAuth(), requireApproved(),
 });
 
 // -----------------------------------------------------------------------------
-// POST /:id/credential — complete Claude setup from browser-provided token
+// POST /:id/verification-code — forward Claude's browser code to the CLI
 // -----------------------------------------------------------------------------
 agentCredentialSetupSessionsRoutes.post(
-  '/:id/credential',
+  '/:id/verification-code',
   requireAuth(),
   requireApproved(),
-  jsonValidator(SubmitSetupCredentialSchema),
+  jsonValidator(SubmitVerificationCodeSchema),
   async (c) => {
     const userId = getUserId(c);
     const row = await loadOwnedSession(c.env, c.req.param('id'), userId);
     if (row.agent_type !== 'claude-code') {
-      throw errors.badRequest(
-        'Manual credential submission is only available for Claude Code setup'
-      );
+      throw errors.badRequest('Verification codes are only available for Claude Code setup');
     }
     if (isTerminalSetupStatus(row.status)) {
       throw errors.conflict('Setup session is no longer active');
     }
 
-    const body = c.req.valid('json');
-    const credential = body.credential.trim();
-    const validation = CredentialValidator.validateCredential(
-      credential,
-      SETUP_CREDENTIAL_KIND,
-      'claude-code'
-    );
-    if (!validation.valid) {
-      throw errors.badRequest(validation.error ?? 'Invalid Claude OAuth token');
-    }
-
-    const state = await submitSetupSessionCredential(c.env, row.id, credential);
+    const state = await submitSetupSessionVerificationCode(c.env, row.id, c.req.valid('json').code);
     return c.json({
       id: row.id,
       status: state.status,

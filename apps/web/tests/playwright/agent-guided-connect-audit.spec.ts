@@ -37,7 +37,7 @@ const MOCK_CLAUDE_AGENT = {
 const CLAUDE_VERIFICATION_URL =
   'https://claude.ai/oauth/device?client_id=sam-playwright&challenge=' + 'x'.repeat(180);
 const CLAUDE_USER_CODE = 'CLDE-PLAYWRIGHT-2026-LONG-CODE';
-const CLAUDE_SUBMITTED_TOKEN = 'sk-ant-oat-playwright-token-from-browser';
+const CLAUDE_SUBMITTED_CODE = 'abc123#state-playwright';
 const SETUP_SESSION = {
   id: 'setup-claude-guided-audit',
   status: 'waiting_for_user',
@@ -66,7 +66,7 @@ function respond(route: Route, status: number, body: unknown) {
 async function setupApiMocks(
   page: Page,
   seenSetupAgentTypes: string[],
-  seenSubmittedCredentials: string[]
+  seenSubmittedCodes: string[]
 ) {
   await page.route('**/api/**', async (route) => {
     const request = route.request();
@@ -115,11 +115,11 @@ async function setupApiMocks(
       return respond(route, 200, SETUP_SESSION);
     }
     if (
-      path === `/api/agent-credential-setup-sessions/${SETUP_SESSION.id}/credential` &&
+      path === `/api/agent-credential-setup-sessions/${SETUP_SESSION.id}/verification-code` &&
       method === 'POST'
     ) {
-      const body = request.postDataJSON() as { credential?: string };
-      seenSubmittedCredentials.push(body.credential ?? '');
+      const body = request.postDataJSON() as { code?: string };
+      seenSubmittedCodes.push(body.code ?? '');
       return respond(route, 200, COMPLETED_SETUP_SESSION);
     }
     if (path === `/api/agent-credential-setup-sessions/${SETUP_SESSION.id}/cancel`) {
@@ -185,8 +185,8 @@ test('Claude guided connect uses native URL/copy controls without terminal outpu
   page,
 }) => {
   const seenSetupAgentTypes: string[] = [];
-  const seenSubmittedCredentials: string[] = [];
-  await setupApiMocks(page, seenSetupAgentTypes, seenSubmittedCredentials);
+  const seenSubmittedCodes: string[] = [];
+  await setupApiMocks(page, seenSetupAgentTypes, seenSubmittedCodes);
   await navigateToAgentSettings(page);
 
   await page.getByRole('button', { name: 'OAuth Token (Pro/Max)' }).click();
@@ -202,8 +202,8 @@ test('Claude guided connect uses native URL/copy controls without terminal outpu
   await expect(open).toHaveAttribute('href', CLAUDE_VERIFICATION_URL);
   await expect(copy).toBeVisible();
   await expect(page.locator('code')).toHaveText(CLAUDE_USER_CODE);
-  await expect(page.getByLabel('Paste the Claude token from your browser')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Save Claude token' })).toBeDisabled();
+  await expect(page.getByLabel('Paste the code Claude shows you')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Continue sign-in' })).toBeDisabled();
   await expect(page.getByTestId('codex-terminal')).toHaveCount(0);
   const modal = page.getByRole('dialog', { name: 'Connect with Claude Code' });
   await expect(modal.locator('pre, textarea, [data-testid*="terminal"]')).toHaveCount(0);
@@ -223,8 +223,8 @@ test('Claude guided connect uses native URL/copy controls without terminal outpu
   await screenshot(page, 'claude-guided-connect-modal');
   await assertNoOverflow(page);
 
-  await page.getByLabel('Paste the Claude token from your browser').fill(CLAUDE_SUBMITTED_TOKEN);
-  await page.getByRole('button', { name: 'Save Claude token' }).click();
-  expect(seenSubmittedCredentials).toEqual([CLAUDE_SUBMITTED_TOKEN]);
+  await page.getByLabel('Paste the code Claude shows you').fill(CLAUDE_SUBMITTED_CODE);
+  await page.getByRole('button', { name: 'Continue sign-in' }).click();
+  expect(seenSubmittedCodes).toEqual([CLAUDE_SUBMITTED_CODE]);
   await expect(page.getByText('Claude Code connected')).toBeVisible();
 });

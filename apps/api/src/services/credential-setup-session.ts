@@ -41,10 +41,10 @@ export async function cancelSetupSession(
   return getStub(env, sessionId).cancel();
 }
 
-export async function submitSetupSessionCredential(
+export async function submitSetupSessionVerificationCode(
   env: Env,
   sessionId: string,
-  credential: string
+  code: string
 ): Promise<SetupSessionStateResult> {
-  return getStub(env, sessionId).submitCredential(credential);
+  return getStub(env, sessionId).submitVerificationCode(code);
 }

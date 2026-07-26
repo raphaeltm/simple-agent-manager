@@ -141,7 +141,7 @@ describe('native Codex setup route vertical slice', () => {
     expect(getState).not.toHaveBeenCalled();
   });
 
-  it('submits an owned Claude browser token through the DO boundary without persisting the secret in D1', async () => {
+  it('submits an owned Claude browser verification code through the DO boundary without persisting the secret in D1', async () => {
     const sqlite = setupDatabase();
     const now = new Date().toISOString();
     sqlite
@@ -161,8 +161,8 @@ describe('native Codex setup route vertical slice', () => {
         now
       );
 
-    const token = `sk-ant-oat${'D'.repeat(48)}`;
-    const submitCredential = vi.fn().mockResolvedValue({
+    const code = 'abc123#state456';
+    const submitVerificationCode = vi.fn().mockResolvedValue({
       id: 'session-claude',
       status: 'completed',
       expiresAt: Date.now() + 60_000,
@@ -175,7 +175,7 @@ describe('native Codex setup route vertical slice', () => {
       DATABASE: createSqliteD1(sqlite),
       CREDENTIAL_SETUP_SESSION: {
         idFromName: vi.fn(() => ({ toString: () => 'do-session-claude' })),
-        get: vi.fn(() => ({ submitCredential })),
+        get: vi.fn(() => ({ submitVerificationCode })),
       },
     } as unknown as Env;
     const app = new Hono<{ Bindings: Env }>();
@@ -186,11 +186,11 @@ describe('native Codex setup route vertical slice', () => {
     app.route('/api/agent-credential-setup-sessions', agentCredentialSetupSessionsRoutes);
 
     const response = await app.request(
-      '/api/agent-credential-setup-sessions/session-claude/credential',
+      '/api/agent-credential-setup-sessions/session-claude/verification-code',
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ credential: ` ${token}\n` }),
+        body: JSON.stringify({ code: ` abc123 #state456\n` }),
       },
       env
     );
@@ -201,14 +201,14 @@ describe('native Codex setup route vertical slice', () => {
       status: 'completed',
       agentType: 'claude-code',
     });
-    expect(submitCredential).toHaveBeenCalledWith(token);
+    expect(submitVerificationCode).toHaveBeenCalledWith('abc123 #state456');
     const persisted = sqlite
       .prepare('SELECT * FROM agent_credential_setup_sessions WHERE id = ?')
       .get('session-claude') as Record<string, unknown>;
-    expect(JSON.stringify(persisted)).not.toContain(token);
+    expect(JSON.stringify(persisted)).not.toContain(code);
   });
 
-  it('rejects an invalid Claude browser token before crossing the DO boundary', async () => {
+  it('passes code shape validation to the DO boundary for authoritative validation', async () => {
     const sqlite = setupDatabase();
     const now = new Date().toISOString();
     sqlite
@@ -228,12 +228,20 @@ describe('native Codex setup route vertical slice', () => {
         now
       );
 
-    const submitCredential = vi.fn();
+    const submitVerificationCode = vi.fn().mockResolvedValue({
+      id: 'session-bad-token',
+      status: 'exchanging',
+      expiresAt: Date.now() + 60_000,
+      errorCode: null,
+      errorMessage: null,
+      verificationUrl: 'https://claude.ai/oauth/device',
+      userCode: null,
+    });
     const env = {
       DATABASE: createSqliteD1(sqlite),
       CREDENTIAL_SETUP_SESSION: {
         idFromName: vi.fn(() => ({ toString: () => 'do-session-bad-token' })),
-        get: vi.fn(() => ({ submitCredential })),
+        get: vi.fn(() => ({ submitVerificationCode })),
       },
     } as unknown as Env;
     const app = new Hono<{ Bindings: Env }>();
@@ -244,17 +252,16 @@ describe('native Codex setup route vertical slice', () => {
     app.route('/api/agent-credential-setup-sessions', agentCredentialSetupSessionsRoutes);
 
     const response = await app.request(
-      '/api/agent-credential-setup-sessions/session-bad-token/credential',
+      '/api/agent-credential-setup-sessions/session-bad-token/verification-code',
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ credential: 'sk-ant-api-this-is-not-oauth' }),
+        body: JSON.stringify({ code: 'invalid code!' }),
       },
       env
     );
 
-    expect(response.status).toBe(400);
-    expect(env.CREDENTIAL_SETUP_SESSION.idFromName).not.toHaveBeenCalled();
-    expect(submitCredential).not.toHaveBeenCalled();
+    expect(response.status).toBe(200);
+    expect(submitVerificationCode).toHaveBeenCalledWith('invalid code!');
   });
 });

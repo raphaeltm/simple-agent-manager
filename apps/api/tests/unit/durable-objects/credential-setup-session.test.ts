@@ -642,7 +642,7 @@ describe('CredentialSetupSession — alarm() capture polling', () => {
     expect((await created.instance.getState())?.status).toBe('completed');
   });
 
-  it('saves a browser-submitted Claude token, completes, and tears down', async () => {
+  it('normalizes and forwards a code#state value to the sandbox, then exchanges', async () => {
     const created = createDO();
     await Promise.resolve();
     const fakeSandbox = createFakeSandbox();
@@ -657,63 +657,84 @@ describe('CredentialSetupSession — alarm() capture polling', () => {
     vi.mocked(getSandboxInstance).mockResolvedValue(fakeSandbox as never);
 
     await created.instance.create({
-      id: 'setup-claude-manual',
-      setupHome: '/tmp/claude-setup-manual',
+      id: 'setup-claude-code',
+      setupHome: '/tmp/claude-setup-code',
       ttlMs: 900_000,
       ...BASE_PARAMS,
       agentType: 'claude-code',
       provider: 'anthropic',
       agentName: 'Claude Code',
     });
-    await created.instance.alarm(); // provisioning -> admitting
-    await created.instance.alarm(); // device state -> waiting_for_user
+    await created.instance.alarm();
+    await created.instance.alarm();
 
-    const token = `sk-ant-oat${'E'.repeat(48)}`;
-    vi.mocked(saveAgentCredentialForUser).mockResolvedValue({
-      created: true,
-      createdAt: '2026-07-01T00:00:00.000Z',
-      updatedAt: '2026-07-01T00:00:00.000Z',
-    });
+    const result = await created.instance.submitVerificationCode(' abc123 #state456\n');
 
-    const result = await created.instance.submitCredential(` ${token}\n`);
-
-    expect(result.status).toBe('completed');
-    expect(saveAgentCredentialForUser).toHaveBeenCalledWith(
-      expect.objectContaining({
-        userId: BASE_PARAMS.userId,
-        projectId: null,
-        agentType: 'claude-code',
-        credentialKind: 'oauth-token',
-        credential: token,
-        provider: 'anthropic',
-        agentName: 'Claude Code',
-        autoActivate: true,
-      })
+    expect(result.status).toBe('exchanging');
+    expect(fakeSandbox.writeFile).toHaveBeenCalledWith(
+      '/tmp/claude-setup-code/verification-code.txt',
+      'abc123#state456'
     );
-    expect(JSON.stringify(created.database._calls)).not.toContain(token);
-    expect(releaseSetupSlot).toHaveBeenCalledWith(expect.anything(), 'lease-abc');
-    expect(destroySandboxInstance).toHaveBeenCalledWith(expect.anything(), 'setup-claude-manual', {
-      sandboxId: 'setup-claude-manual',
-    });
+    expect(saveAgentCredentialForUser).not.toHaveBeenCalled();
+    expect(JSON.stringify(created.database._calls)).not.toContain('abc123#state456');
   });
 
-  it('rejects an invalid browser-submitted Claude token without failing the active session', async () => {
+  it('guards verification-code agent, state, length, and charset', async () => {
     const created = createDO();
     await Promise.resolve();
+    const fakeSandbox = createFakeSandbox();
+    vi.mocked(getSandboxInstance).mockResolvedValue(fakeSandbox as never);
+    await created.instance.create({
+      id: 'setup-guard',
+      setupHome: '/tmp/setup-guard',
+      ttlMs: 900_000,
+      ...BASE_PARAMS,
+    });
+    await expect(created.instance.submitVerificationCode('abc#state')).rejects.toThrow(
+      /only supported/
+    );
+
+    const claude = createDO();
+    await Promise.resolve();
+    vi.mocked(getSandboxInstance).mockResolvedValue(fakeSandbox as never);
+    await claude.instance.create({
+      id: 'setup-claude-guard',
+      setupHome: '/tmp/setup-claude-guard',
+      ttlMs: 900_000,
+      ...BASE_PARAMS,
+      agentType: 'claude-code',
+      provider: 'anthropic',
+      agentName: 'Claude Code',
+    });
+    await expect(claude.instance.submitVerificationCode('abc#state')).rejects.toThrow(
+      /not waiting/
+    );
+    await claude.instance.alarm();
+    await claude.instance.alarm();
+    await expect(claude.instance.submitVerificationCode('bad code!')).rejects.toThrow(/Invalid/);
+    await expect(claude.instance.submitVerificationCode('x'.repeat(1025))).rejects.toThrow(
+      /Invalid/
+    );
+  });
+
+  it('fails fast with a sanitized error when Claude rejects the submitted code', async () => {
+    const created = createDO();
+    await Promise.resolve();
+    let driverStatus = 'waiting_for_user';
     const fakeSandbox = createFakeSandbox();
     fakeSandbox.readFile.mockImplementation(async (path: string) => ({
       content: path.endsWith('device-auth-state.json')
         ? JSON.stringify({
-            status: 'waiting_for_user',
+            status: driverStatus,
             verificationUrl: 'https://claude.ai/oauth/device',
+            error: 'secret provider detail',
           })
         : '',
     }));
     vi.mocked(getSandboxInstance).mockResolvedValue(fakeSandbox as never);
-
     await created.instance.create({
-      id: 'setup-claude-invalid-manual',
-      setupHome: '/tmp/claude-setup-invalid-manual',
+      id: 'setup-rejected',
+      setupHome: '/tmp/setup-rejected',
       ttlMs: 900_000,
       ...BASE_PARAMS,
       agentType: 'claude-code',
@@ -722,14 +743,14 @@ describe('CredentialSetupSession — alarm() capture polling', () => {
     });
     await created.instance.alarm();
     await created.instance.alarm();
+    await created.instance.submitVerificationCode('abc123#state456');
+    driverStatus = 'failed';
+    await created.instance.alarm();
 
-    await expect(created.instance.submitCredential('sk-ant-api-not-oauth')).rejects.toThrow(
-      /API key/
-    );
-
-    expect((await created.instance.getState())?.status).toBe('waiting_for_user');
-    expect(saveAgentCredentialForUser).not.toHaveBeenCalled();
-    expect(releaseSetupSlot).not.toHaveBeenCalled();
+    const state = await created.instance.getState();
+    expect(state).toMatchObject({ status: 'failed', errorCode: 'code_rejected' });
+    expect(state?.errorMessage).not.toContain('secret provider detail');
+    expect(releaseSetupSlot).toHaveBeenCalledWith(expect.anything(), 'lease-abc');
   });
 
   it('tears down as failed when saveAgentCredentialForUser rejects', async () => {

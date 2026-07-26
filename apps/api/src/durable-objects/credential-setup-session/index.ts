@@ -97,6 +97,9 @@ type DeviceAuthDetailsRow = {
 /** Relative paths of captured credential files inside the per-session setup home. */
 const CODEX_AUTH_FILE = 'auth.json';
 const CLAUDE_OAUTH_TOKEN_FILE = 'claude-oauth-token.txt';
+const CLAUDE_VERIFICATION_CODE_FILE = 'verification-code.txt';
+const MAX_CLAUDE_VERIFICATION_CODE_LENGTH = 1024;
+const CLAUDE_VERIFICATION_CODE_PATTERN = /^[A-Za-z0-9._~#-]+$/;
 const DEVICE_AUTH_STATE_FILE = 'device-auth-state.json';
 
 function setupDisplayName(agentType: string): string {
@@ -200,7 +203,10 @@ export class CredentialSetupSession extends DurableObject<Env> {
   getState(): SetupSessionStateResult | null {
     const row = this.readRow();
     if (!row) return null;
-    const deviceAuth = row.status === 'waiting_for_user' ? this.readDeviceAuthDetails() : null;
+    const deviceAuth =
+      row.status === 'waiting_for_user' || row.status === 'exchanging'
+        ? this.readDeviceAuthDetails()
+        : null;
     return {
       id: row.id,
       status: row.status as SetupSessionStatus,
@@ -255,95 +261,32 @@ export class CredentialSetupSession extends DurableObject<Env> {
     };
   }
 
-  /**
-   * Complete a Claude Code guided setup from the token the Claude browser flow
-   * gives back to the user. This deliberately bypasses terminal/stdin replay:
-   * the submitted secret is validated, saved through the same encrypted writer
-   * as sandbox capture, and never stored in DO SQLite or D1.
-   */
-  async submitCredential(credential: string): Promise<SetupSessionStateResult> {
+  /** Forward the browser-displayed short-lived code to the sandboxed Claude CLI. */
+  async submitVerificationCode(code: string): Promise<SetupSessionStateResult> {
     const row = this.readRow();
-    if (!row) {
-      throw new Error('Setup session not found');
-    }
+    if (!row) throw new Error('Setup session not found');
     if (row.agent_type !== 'claude-code') {
-      throw new Error('Manual credential submission is only supported for Claude Code setup');
+      throw new Error('Verification code submission is only supported for Claude Code setup');
+    }
+    if (row.status !== 'waiting_for_user') {
+      throw new Error('Claude Code setup is not waiting for a verification code');
     }
 
-    const currentState = this.getState();
+    const normalizedCode = code.trim().replace(/\s+/g, '');
     if (
-      row.status === 'completed' ||
-      row.status === 'saving' ||
-      isTerminalSetupStatus(row.status)
+      normalizedCode.length === 0 ||
+      normalizedCode.length > MAX_CLAUDE_VERIFICATION_CODE_LENGTH ||
+      !CLAUDE_VERIFICATION_CODE_PATTERN.test(normalizedCode)
     ) {
-      return (
-        currentState ?? {
-          id: row.id,
-          status: row.status as SetupSessionStatus,
-          expiresAt: row.expires_at,
-          errorCode: row.error_code,
-          errorMessage: row.error_message,
-          verificationUrl: null,
-          userCode: null,
-        }
-      );
+      throw new Error('Invalid Claude verification code');
     }
 
-    const trimmedCredential = credential.trim();
-    const validation = CredentialValidator.validateCredential(
-      trimmedCredential,
-      row.credential_kind as CredentialKind,
-      row.agent_type as AgentType
-    );
-    if (!validation.valid) {
-      throw new Error(validation.error ?? 'Invalid credential format');
-    }
-
-    this.setStatus(row.id, 'saving');
-    await this.updateD1Status(row.id, 'saving');
-    const savingRow = this.readRow();
-    if (!savingRow || savingRow.status !== 'saving') {
-      const latestState = this.getState();
-      if (latestState) return latestState;
-      throw new Error('Setup session state changed before credential save');
-    }
-
-    try {
-      await saveAgentCredentialForUser({
-        env: this.env,
-        userId: savingRow.user_id,
-        projectId: savingRow.project_id,
-        agentType: savingRow.agent_type as AgentType,
-        credentialKind: savingRow.credential_kind as CredentialKind,
-        credential: trimmedCredential,
-        provider: savingRow.provider,
-        agentName: savingRow.agent_name,
-        autoActivate: true,
-      });
-    } catch (err) {
-      log.error('credential_setup.manual_save_failed', {
-        sessionId: savingRow.id,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      await this.teardown(
-        savingRow,
-        'failed',
-        'manual_save_failed',
-        'Failed to save the submitted credential'
-      );
-      return (
-        this.getState() ??
-        this.terminalState(
-          savingRow,
-          'failed',
-          'manual_save_failed',
-          'Failed to save the submitted credential'
-        )
-      );
-    }
-
-    await this.teardown(savingRow, 'completed');
-    return this.getState() ?? this.terminalState(savingRow, 'completed');
+    const sandbox = await getSandboxInstance(this.env, row.id);
+    await sandbox.writeFile(`${row.codex_home}/${CLAUDE_VERIFICATION_CODE_FILE}`, normalizedCode);
+    this.setStatus(row.id, 'exchanging');
+    await this.updateD1Status(row.id, 'exchanging');
+    await this.ctx.storage.setAlarm(Date.now() + row.capture_poll_ms);
+    return this.getState() ?? this.terminalState(row, 'exchanging');
   }
 
   /**
@@ -380,7 +323,19 @@ export class CredentialSetupSession extends DurableObject<Env> {
         await this.ctx.storage.setAlarm(Date.now() + row.capture_poll_ms);
         return;
       }
-      // waiting_for_user | capturing — poll for the credential file.
+      // waiting_for_user | exchanging | capturing — observe driver failure and capture output.
+      const driverState = await this.readDeviceAuthState(row);
+      if (driverState?.status === 'failed') {
+        await this.teardown(
+          row,
+          'failed',
+          row.status === 'exchanging' ? 'code_rejected' : 'setup_failed',
+          row.status === 'exchanging'
+            ? 'Claude rejected the verification code. Start again and use a fresh code.'
+            : 'Claude Code could not complete sign-in'
+        );
+        return;
+      }
       await this.attemptCapture(row);
     } catch (err) {
       // Unexpected transient error — log and reschedule; the TTL guard bounds
@@ -445,11 +400,12 @@ export class CredentialSetupSession extends DurableObject<Env> {
   private startSetupDriverCommand(row: SetupSessionRow, statePath: string): string {
     if (row.agent_type === 'claude-code') {
       const credentialPath = `${row.codex_home}/${CLAUDE_OAUTH_TOKEN_FILE}`;
+      const verificationCodePath = `${row.codex_home}/${CLAUDE_VERIFICATION_CODE_FILE}`;
       return (
         `nohup env CLAUDE_CONFIG_DIR=${shellQuote(row.codex_home)} ` +
         'DISABLE_AUTOUPDATER=1 NO_COLOR=1 TERM=dumb ' +
         `node /usr/local/bin/sam-claude-setup-token.mjs ${shellQuote(statePath)} ` +
-        `${shellQuote(credentialPath)} >/dev/null 2>&1 &`
+        `${shellQuote(credentialPath)} ${shellQuote(verificationCodePath)} >/dev/null 2>&1 &`
       );
     }
 

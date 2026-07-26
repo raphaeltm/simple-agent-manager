@@ -1,10 +1,9 @@
 #!/usr/bin/env node
 
 import { spawn } from 'node:child_process';
-import { rename, writeFile } from 'node:fs/promises';
+import { readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { join, parse, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createInterface } from 'node:readline';
 
 const MAX_VERIFICATION_URL_LENGTH = 4096;
 const MAX_USER_CODE_LENGTH = 128;
@@ -13,10 +12,11 @@ const CLAUDE_OAUTH_TOKEN_PREFIX = 'sk-ant-oat';
 const CLAUDE_CONFIG_DIR_ENV = 'CLAUDE_CONFIG_DIR';
 const DEVICE_AUTH_STATE_FILE = 'device-auth-state.json';
 const CLAUDE_OAUTH_TOKEN_FILE = 'claude-oauth-token.txt';
+const VERIFICATION_CODE_FILE = 'verification-code.txt';
 const ANSI_ESCAPE_PATTERN = /\u001b\[[0-9;?]*[ -/]*[@-~]/g;
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f]/;
 const CLAUDE_SETUP_COMMAND =
-  'env DISABLE_AUTOUPDATER=1 NO_COLOR=1 TERM=xterm-256color claude setup-token';
+  'stty cols 512; env DISABLE_AUTOUPDATER=1 NO_COLOR=1 TERM=xterm-256color claude setup-token';
 const URL_PATTERN = /https:\/\/[^\s<>'"`]+/gi;
 const TOKEN_PATTERN = /\bsk-ant-oat[A-Za-z0-9._-]{16,}\b/g;
 const CODE_PATTERNS = [
@@ -76,6 +76,7 @@ export function validateClaudeOauthToken(value) {
 export function resolveClaudeSetupPaths({
   statePath,
   credentialPath,
+  verificationCodePath,
   configDir = process.env[CLAUDE_CONFIG_DIR_ENV],
 }) {
   if (!configDir) {
@@ -89,6 +90,7 @@ export function resolveClaudeSetupPaths({
 
   const expectedStatePath = join(baseDir, DEVICE_AUTH_STATE_FILE);
   const expectedCredentialPath = join(baseDir, CLAUDE_OAUTH_TOKEN_FILE);
+  const expectedVerificationCodePath = join(baseDir, VERIFICATION_CODE_FILE);
 
   if (resolve(statePath) !== expectedStatePath) {
     throw new Error('Claude setup-token state path must be the expected setup state file');
@@ -97,10 +99,15 @@ export function resolveClaudeSetupPaths({
     throw new Error('Claude setup-token credential path must be the expected OAuth token file');
   }
 
+  if (resolve(verificationCodePath) !== expectedVerificationCodePath) {
+    throw new Error('Claude setup-token verification code path must be the expected setup file');
+  }
+
   return {
     statePath: expectedStatePath,
     temporaryStatePath: join(baseDir, `${DEVICE_AUTH_STATE_FILE}.tmp`),
     credentialPath: expectedCredentialPath,
+    verificationCodePath: expectedVerificationCodePath,
     temporaryCredentialPath: join(baseDir, `${CLAUDE_OAUTH_TOKEN_FILE}.tmp`),
   };
 }
@@ -153,12 +160,16 @@ export function extractClaudeSetupOutput(raw) {
 export async function runClaudeSetupToken({
   statePath,
   credentialPath,
+  verificationCodePath,
   spawnProcess = spawn,
   onSpawn,
   writeState,
   writeCredential,
+  readVerificationCode = (path) => readFile(path, 'utf8'),
+  deleteVerificationCode = unlink,
+  verificationCodePollMs = 500,
 }) {
-  const setupPaths = resolveClaudeSetupPaths({ statePath, credentialPath });
+  const setupPaths = resolveClaudeSetupPaths({ statePath, credentialPath, verificationCodePath });
   const writeStateFile =
     writeState ??
     (async (state) => {
@@ -184,13 +195,15 @@ export async function runClaudeSetupToken({
       NO_COLOR: '1',
       TERM: 'xterm-256color',
     },
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: ['pipe', 'pipe', 'pipe'],
   });
   onSpawn?.(claude);
 
   let publishedWaiting = false;
   let tokenCaptured = false;
   let terminalStatePublished = false;
+  let verificationCodePoll;
+  let outputBuffer = '';
   let stateWriteQueue = Promise.resolve();
   let settled = false;
   let resolveReady;
@@ -216,6 +229,7 @@ export async function runClaudeSetupToken({
   }
 
   function publishFailure(message) {
+    if (verificationCodePoll) clearInterval(verificationCodePoll);
     void publishState({ status: 'failed', error: message }).finally(() => {
       settleReady(new Error(message));
     });
@@ -228,12 +242,29 @@ export async function runClaudeSetupToken({
       status: 'waiting_for_user',
       verificationUrl: details.verificationUrl,
       userCode: details.userCode ?? null,
-    }).then(() => settleReady());
+    }).then(() => {
+      verificationCodePoll = setInterval(async () => {
+        try {
+          const code = await readVerificationCode(setupPaths.verificationCodePath);
+          await deleteVerificationCode(setupPaths.verificationCodePath);
+          clearInterval(verificationCodePoll);
+          verificationCodePoll = undefined;
+          claude.stdin.write(`${code.replace(/\s+/g, '')}\r`);
+        } catch (error) {
+          if (error?.code !== 'ENOENT') {
+            publishFailure('Claude verification code could not be forwarded');
+            claude.kill('SIGTERM');
+          }
+        }
+      }, verificationCodePollMs);
+      settleReady();
+    });
   }
 
   function maybeCaptureToken(details) {
     if (tokenCaptured || !details.token) return;
     tokenCaptured = true;
+    if (verificationCodePoll) clearInterval(verificationCodePoll);
     void writeCredentialFile(details.token)
       .then(() => publishState({ status: 'completed' }))
       .then(() => settleReady())
@@ -245,10 +276,11 @@ export async function runClaudeSetupToken({
       });
   }
 
-  function processLine(line) {
+  function processOutput(chunk) {
+    outputBuffer = `${outputBuffer}${chunk}`.slice(-32768);
     let details;
     try {
-      details = extractClaudeSetupOutput(line);
+      details = extractClaudeSetupOutput(outputBuffer);
     } catch (error) {
       publishFailure(error instanceof Error ? error.message : String(error));
       claude.kill('SIGTERM');
@@ -258,8 +290,8 @@ export async function runClaudeSetupToken({
     maybeCaptureToken(details);
   }
 
-  createInterface({ input: claude.stdout }).on('line', processLine);
-  createInterface({ input: claude.stderr }).on('line', processLine);
+  claude.stdout.on('data', processOutput);
+  claude.stderr.on('data', processOutput);
 
   claude.on('error', (error) => {
     publishFailure(error.message);
@@ -276,8 +308,11 @@ export async function runClaudeSetupToken({
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const statePath = process.argv[2];
   const credentialPath = process.argv[3];
-  if (!statePath || !credentialPath) {
-    process.stderr.write('Usage: claude-setup-token.mjs <state-path> <credential-path>\n');
+  const verificationCodePath = process.argv[4];
+  if (!statePath || !credentialPath || !verificationCodePath) {
+    process.stderr.write(
+      'Usage: claude-setup-token.mjs <state-path> <credential-path> <verification-code-path>\n'
+    );
     process.exitCode = 2;
   } else {
     runClaudeSetupToken({
