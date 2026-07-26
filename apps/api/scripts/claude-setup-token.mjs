@@ -19,6 +19,7 @@ const CLAUDE_SETUP_COMMAND =
   'stty cols 512; env DISABLE_AUTOUPDATER=1 NO_COLOR=1 TERM=xterm-256color claude setup-token';
 const URL_PATTERN = /https:\/\/[^\s<>'"`]+/gi;
 const TOKEN_PATTERN = /\bsk-ant-oat(?:[A-Za-z0-9._-]|\r?\n){16,8192}\b/g;
+const OAUTH_REJECTION_PATTERN = /OAuth error:[\s\S]{0,256}status code\s*4\d\d/i;
 const CODE_PATTERNS = [
   /(?:verification|one[- ]time|device)?\s*code[^A-Za-z0-9-]{0,40}([A-Z0-9][A-Z0-9-]{3,127})/i,
   /enter\s+(?:this\s+|the\s+)?(?:code\s+)?([A-Z0-9][A-Z0-9-]{3,127})/i,
@@ -200,6 +201,7 @@ export async function runClaudeSetupToken({
   onSpawn?.(claude);
 
   let publishedWaiting = false;
+  let verificationCodeForwarded = false;
   let tokenCaptured = false;
   let terminalStatePublished = false;
   let verificationCodePoll;
@@ -249,6 +251,7 @@ export async function runClaudeSetupToken({
           await deleteVerificationCode(setupPaths.verificationCodePath);
           clearInterval(verificationCodePoll);
           verificationCodePoll = undefined;
+          verificationCodeForwarded = true;
           claude.stdin.write(`${code.replace(/\s+/g, '')}\r`);
         } catch (error) {
           if (error?.code !== 'ENOENT') {
@@ -287,6 +290,11 @@ export async function runClaudeSetupToken({
       return;
     }
     maybePublishWaiting(details);
+    if (verificationCodeForwarded && OAUTH_REJECTION_PATTERN.test(stripAnsi(outputBuffer))) {
+      publishFailure('Claude rejected the verification code');
+      claude.kill('SIGTERM');
+      return;
+    }
     maybeCaptureToken(details);
   }
 

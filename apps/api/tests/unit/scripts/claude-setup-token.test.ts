@@ -220,6 +220,35 @@ describe('Claude setup-token driver', () => {
     expect(fake.kill).toHaveBeenCalledWith('SIGTERM');
   });
 
+  it('publishes a sanitized failure when Claude rejects a forwarded code but stays open', async () => {
+    const fake = fakeClaudeProcess();
+    const states: Array<Record<string, unknown>> = [];
+
+    const ready = runClaudeSetupToken({
+      ...validSetupPaths(),
+      spawnProcess: () => fake,
+      writeState: async (state) => states.push(state),
+      writeCredential: vi.fn().mockResolvedValue(undefined),
+      readVerificationCode: vi.fn().mockResolvedValue('garbage#rejected-code'),
+      deleteVerificationCode: vi.fn().mockResolvedValue(undefined),
+      verificationCodePollMs: 1,
+    });
+
+    fake.stdout.write('Open https://claude.com/cai/oauth/authorize\n');
+    await ready;
+    await vi.waitFor(() => expect(fake.stdin.read()?.toString()).toBe('garbage#rejected-code\r'));
+    fake.stdout.write('OAuth error: Request failed with status code 400\nPress Enter to retry.');
+
+    await vi.waitFor(() =>
+      expect(states.at(-1)).toEqual({
+        status: 'failed',
+        error: 'Claude rejected the verification code',
+      })
+    );
+    expect(JSON.stringify(states)).not.toContain('garbage#rejected-code');
+    expect(fake.kill).toHaveBeenCalledWith('SIGTERM');
+  });
+
   it('fails safely when the CLI exits before returning an OAuth token', async () => {
     const fake = fakeClaudeProcess();
     const states: Array<Record<string, unknown>> = [];
