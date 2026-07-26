@@ -18,7 +18,7 @@ const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f]/;
 const CLAUDE_SETUP_COMMAND =
   'stty cols 512; env DISABLE_AUTOUPDATER=1 NO_COLOR=1 TERM=xterm-256color claude setup-token';
 const URL_PATTERN = /https:\/\/[^\s<>'"`]+/gi;
-const TOKEN_PATTERN = /\bsk-ant-oat[A-Za-z0-9._-]{16,}\b/g;
+const TOKEN_PATTERN = /\bsk-ant-oat(?:[A-Za-z0-9._-]|\r?\n){16,8192}\b/g;
 const CODE_PATTERNS = [
   /(?:verification|one[- ]time|device)?\s*code[^A-Za-z0-9-]{0,40}([A-Z0-9][A-Z0-9-]{3,127})/i,
   /enter\s+(?:this\s+|the\s+)?(?:code\s+)?([A-Z0-9][A-Z0-9-]{3,127})/i,
@@ -152,7 +152,7 @@ export function extractClaudeSetupOutput(raw) {
   let token;
   TOKEN_PATTERN.lastIndex = 0;
   const tokenMatch = TOKEN_PATTERN.exec(text);
-  if (tokenMatch?.[0]) token = validateClaudeOauthToken(tokenMatch[0]);
+  if (tokenMatch?.[0]) token = validateClaudeOauthToken(tokenMatch[0].replace(/\s+/g, ''));
 
   return { verificationUrl, userCode, token };
 }

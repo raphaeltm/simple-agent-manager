@@ -283,6 +283,10 @@ export class CredentialSetupSession extends DurableObject<Env> {
 
     const sandbox = await getSandboxInstance(this.env, row.id);
     await sandbox.writeFile(`${row.codex_home}/${CLAUDE_VERIFICATION_CODE_FILE}`, normalizedCode);
+    const current = this.readRow();
+    if (!current || current.status !== 'waiting_for_user') {
+      throw new Error('Claude Code setup is no longer waiting for a verification code');
+    }
     this.setStatus(row.id, 'exchanging');
     await this.updateD1Status(row.id, 'exchanging');
     await this.ctx.storage.setAlarm(Date.now() + row.capture_poll_ms);

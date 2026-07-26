@@ -57,6 +57,11 @@ describe('Claude setup-token driver', () => {
     });
   });
 
+  it('joins a token wrapped by the PTY instead of accepting a truncated fragment', () => {
+    const wrapped = `${CLAUDE_TOKEN.slice(0, 28)}\n${CLAUDE_TOKEN.slice(28)}`;
+    expect(extractClaudeSetupOutput(`Your token: ${wrapped}`).token).toBe(CLAUDE_TOKEN);
+  });
+
   it('extracts URLs from Claude terminal hyperlink output', () => {
     const output = extractClaudeSetupOutput(
       '\u001b]8;id=abc;https://claude.com/cai/oauth/authorize?code=abc&state=def\u0007' +
