@@ -36,47 +36,47 @@ the short-lived code.
 
 ## Implementation checklist
 
-- [ ] Reuse the prior branch's route/service/UI plumbing but replace final-token
+- [x] Reuse the prior branch's route/service/UI plumbing but replace final-token
       submission with short-lived verification-code submission.
-- [ ] Pipe driver stdin, constrain the code-file path to setup home, poll it,
+- [x] Pipe driver stdin, constrain the code-file path to setup home, poll it,
       delete it, and write the normalized code plus carriage return to the PTY.
-- [ ] Harden URL/token parsing against PTY wrapping and publish sanitized
+- [x] Harden URL/token parsing against PTY wrapping and publish sanitized
       failures when the CLI exits without a token.
-- [ ] Add the `exchanging` state and DO `submitVerificationCode` guards,
+- [x] Add the `exchanging` state and DO `submitVerificationCode` guards,
       normalization, bounds, charset (including `#`), sandbox write, and
       non-persistence guarantees.
-- [ ] Read driver state during waiting/exchanging/capturing so rejection or exit
+- [x] Read driver state during waiting/exchanging/capturing so rejection or exit
       fails fast instead of waiting for TTL.
-- [ ] Expose owned-session `POST /:id/verification-code` without treating the
+- [x] Expose owned-session `POST /:id/verification-code` without treating the
       short-lived code as a credential.
-- [ ] Preserve strict server-side Claude OAuth-token validation and the existing
+- [x] Preserve strict server-side Claude OAuth-token validation and the existing
       capture → encrypted save → teardown path.
-- [ ] Update the modal with accurate code-paste copy, exchanging progress,
+- [x] Update the modal with accurate code-paste copy, exchanging progress,
       visible failure, and restart affordance.
-- [ ] Add driver, DO, route/DO/sandbox vertical-slice, UI behavioral, and
+- [x] Add driver, DO, route/DO/sandbox vertical-slice, UI behavioral, and
       discriminating regression coverage.
-- [ ] Run Playwright visual audits at 375px and 1280px.
-- [ ] Run full validation and all required specialist reviews.
-- [ ] Deploy the branch to staging and verify provisioning, URL surfacing,
+- [x] Run Playwright visual audits at 375px and 1280px.
+- [x] Run full validation and all required specialist reviews.
+- [x] Deploy the branch to staging and verify provisioning, URL surfacing,
       sandbox delivery, rejected-code fast failure, and complete cleanup.
-- [ ] Open a PR, make every CI check green, and leave it unmerged for Raphaël's
+- [x] Open a PR, make every CI check green, and leave it unmerged for Raphaël's
       real Claude subscription E2E.
 
 ## Acceptance criteria
 
-- [ ] The browser submits only a bounded short-lived verification code; the
+- [x] The browser submits only a bounded short-lived verification code; the
       long-lived token never crosses the browser boundary.
-- [ ] A `code#state` value with copied whitespace artifacts reaches the CLI as
+- [x] A `code#state` value with copied whitespace artifacts reaches the CLI as
       exact normalized bytes followed by `\r`.
-- [ ] Invalid codes and premature CLI exits become prompt, sanitized failures.
-- [ ] Wrapped terminal output cannot cause a truncated OAuth token to be saved.
-- [ ] Automated coverage proves the full route → DO → sandbox → captured token
+- [x] Invalid codes and premature CLI exits become prompt, sanitized failures.
+- [x] Wrapped terminal output cannot cause a truncated OAuth token to be saved.
+- [x] Automated coverage proves the full route → DO → sandbox → captured token
       → credential save path with realistic state and exact sandbox writes.
-- [ ] Mobile and desktop UI are accessible, legible, and free of horizontal
+- [x] Mobile and desktop UI are accessible, legible, and free of horizontal
       overflow.
-- [ ] Staging has no orphan guided-login sandbox or pool lease after success or
+- [x] Staging has no orphan guided-login sandbox or pool lease after success or
       failure cleanup.
-- [ ] PR is open, all checks including SonarCloud and Preflight Evidence pass,
+- [x] PR is open, all checks including SonarCloud and Preflight Evidence pass,
       staging remains deployed from the feature branch, and the PR is not
       merged.
 
@@ -89,3 +89,11 @@ the short-lived code.
 - <https://code.claude.com/docs/en/authentication>
 - anthropics/claude-code issues #47773 and #47699
 
+
+## Completion evidence
+
+- PR: https://github.com/raphaeltm/simple-agent-manager/pull/1678 (open, unmerged)
+- Final staging deploy: https://github.com/raphaeltm/simple-agent-manager/actions/runs/30193502104 (`c3505f311`, success)
+- Live no-account verification: session `01KYEQ1PNJVAADQPMXMMG4FX1V` surfaced a trusted Claude URL in 12.5s, accepted a `code#state`-shaped rejected value, and surfaced sanitized `code_rejected` in 5.0s; cleanup returned 200 and D1 had zero active setup rows.
+- CI: all applicable checks green, including Test, Playwright Visual Tests, SonarCloud, Preflight Evidence, and Specialist Review Evidence.
+- Remaining explicit human gate: Raphaël must complete the successful OAuth exchange on staging with his real Claude subscription before merge.
