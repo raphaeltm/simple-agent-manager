@@ -188,6 +188,7 @@ describe('Claude setup-token driver', () => {
       readVerificationCode: vi.fn().mockResolvedValue(' abc 123#state\n'),
       deleteVerificationCode: vi.fn().mockResolvedValue(undefined),
       verificationCodePollMs: 1,
+      verificationEnterDelayMs: 1,
     });
 
     expect(spawnedCommand).toBe('script');
@@ -209,9 +210,12 @@ describe('Claude setup-token driver', () => {
       },
     ]);
     expect(JSON.stringify(states)).not.toContain(CLAUDE_TOKEN);
-    const stdinBytes: Buffer[] = [];
-    fake.stdin.on('data', (chunk) => stdinBytes.push(Buffer.from(chunk)));
-    await vi.waitFor(() => expect(Buffer.concat(stdinBytes).toString()).toBe('abc123#state\r'));
+    // The code and the Enter keypress MUST be separate stdin writes: Claude
+    // Code's prompt treats one large chunk as a paste and absorbs an inline
+    // trailing \r, leaving the code typed but never submitted.
+    const stdinWrites: string[] = [];
+    fake.stdin.on('data', (chunk) => stdinWrites.push(chunk.toString()));
+    await vi.waitFor(() => expect(stdinWrites).toEqual(['abc123#state', '\r']));
 
     fake.stdout.write(`Your token: ${CLAUDE_TOKEN}\n`);
     await vi.waitFor(() => expect(credentials).toEqual([CLAUDE_TOKEN]));
@@ -232,11 +236,14 @@ describe('Claude setup-token driver', () => {
       readVerificationCode: vi.fn().mockResolvedValue('garbage#rejected-code'),
       deleteVerificationCode: vi.fn().mockResolvedValue(undefined),
       verificationCodePollMs: 1,
+      verificationEnterDelayMs: 1,
     });
 
     fake.stdout.write('Open https://claude.com/cai/oauth/authorize\n');
     await ready;
-    await vi.waitFor(() => expect(fake.stdin.read()?.toString()).toBe('garbage#rejected-code\r'));
+    const stdinWrites: string[] = [];
+    fake.stdin.on('data', (chunk) => stdinWrites.push(chunk.toString()));
+    await vi.waitFor(() => expect(stdinWrites).toEqual(['garbage#rejected-code', '\r']));
     fake.stdout.write('OAuth error: Request failed with status code 400\nPress Enter to retry.');
 
     await vi.waitFor(() =>
@@ -246,6 +253,117 @@ describe('Claude setup-token driver', () => {
       })
     );
     expect(JSON.stringify(states)).not.toContain('garbage#rejected-code');
+    expect(fake.kill).toHaveBeenCalledWith('SIGTERM');
+  });
+
+  it('submits realistic-length codes even though the CLI paste widget absorbs an inline carriage return', async () => {
+    // Discriminating regression for the 2026-07-26 production hang: model the
+    // real Claude Code prompt, which inserts a large single chunk as pasted
+    // TEXT (an inline trailing \r is absorbed, not executed) and only submits
+    // on a subsequent standalone Enter keypress. The pre-fix driver (one
+    // `code\r` write) never submits here and this test times out.
+    const fake = fakeClaudeProcess();
+    const states: Array<Record<string, unknown>> = [];
+    const realisticCode = `${'A'.repeat(60)}#${'B'.repeat(43)}`;
+    let pastedBuffer = '';
+
+    fake.stdin.on('data', (chunk) => {
+      const text = chunk.toString();
+      if (text === '\r' && pastedBuffer.length > 0) {
+        // Standalone Enter after pasted text: the CLI submits and the exchange
+        // fails upstream (invalid test code), rendering the Ink error screen.
+        fake.stdout.write('OAuth error: Request failed with status code 400\nPress Enter to retry.');
+        return;
+      }
+      // Large chunk (with or without inline \r): inserted as text, not submitted.
+      pastedBuffer += text.replace(/\r/g, '');
+    });
+
+    const ready = runClaudeSetupToken({
+      ...validSetupPaths(),
+      spawnProcess: () => fake,
+      writeState: async (state) => states.push(state),
+      writeCredential: vi.fn().mockResolvedValue(undefined),
+      readVerificationCode: vi.fn().mockResolvedValue(realisticCode),
+      deleteVerificationCode: vi.fn().mockResolvedValue(undefined),
+      verificationCodePollMs: 1,
+      verificationEnterDelayMs: 5,
+    });
+
+    fake.stdout.write('Open https://claude.com/cai/oauth/authorize\n');
+    await ready;
+
+    await vi.waitFor(() =>
+      expect(states.at(-1)).toEqual({
+        status: 'failed',
+        error: 'Claude rejected the verification code',
+      })
+    );
+    expect(pastedBuffer).toBe(realisticCode);
+    expect(fake.kill).toHaveBeenCalledWith('SIGTERM');
+  });
+
+  it('treats any post-forward OAuth error screen as terminal, not only status-code wordings', async () => {
+    const fake = fakeClaudeProcess();
+    const states: Array<Record<string, unknown>> = [];
+
+    const ready = runClaudeSetupToken({
+      ...validSetupPaths(),
+      spawnProcess: () => fake,
+      writeState: async (state) => states.push(state),
+      writeCredential: vi.fn().mockResolvedValue(undefined),
+      readVerificationCode: vi.fn().mockResolvedValue('expired#code'),
+      deleteVerificationCode: vi.fn().mockResolvedValue(undefined),
+      verificationCodePollMs: 1,
+      verificationEnterDelayMs: 1,
+    });
+
+    fake.stdout.write('Open https://claude.com/cai/oauth/authorize\n');
+    await ready;
+    const stdinWrites: string[] = [];
+    fake.stdin.on('data', (chunk) => stdinWrites.push(chunk.toString()));
+    await vi.waitFor(() => expect(stdinWrites).toEqual(['expired#code', '\r']));
+    // Real 401 wording from claude v2.1.220 — contains no "status code" suffix.
+    fake.stdout.write(
+      'OAuth error: Authentication failed: Invalid authorization code\nPress Enter to retry.'
+    );
+
+    await vi.waitFor(() =>
+      expect(states.at(-1)).toEqual({
+        status: 'failed',
+        error: 'Claude rejected the verification code',
+      })
+    );
+    expect(fake.kill).toHaveBeenCalledWith('SIGTERM');
+  });
+
+  it('fails fast with exchange_timeout when the exchange produces no recognizable outcome', async () => {
+    const fake = fakeClaudeProcess();
+    const states: Array<Record<string, unknown>> = [];
+
+    runClaudeSetupToken({
+      ...validSetupPaths(),
+      spawnProcess: () => fake,
+      writeState: async (state) => states.push(state),
+      writeCredential: vi.fn().mockResolvedValue(undefined),
+      readVerificationCode: vi.fn().mockResolvedValue('hung#exchange'),
+      deleteVerificationCode: vi.fn().mockResolvedValue(undefined),
+      verificationCodePollMs: 1,
+      verificationEnterDelayMs: 1,
+      exchangeTimeoutMs: 25,
+    });
+
+    fake.stdout.write('Open https://claude.com/cai/oauth/authorize\n');
+    // The CLI accepts the code + Enter and then goes silent (hung request,
+    // unknown error wording, dead spinner): the driver must not stall until the
+    // session TTL.
+    await vi.waitFor(() =>
+      expect(states.at(-1)).toEqual({
+        status: 'failed',
+        error: 'Claude did not finish the verification code exchange in time',
+        code: 'exchange_timeout',
+      })
+    );
     expect(fake.kill).toHaveBeenCalledWith('SIGTERM');
   });
 

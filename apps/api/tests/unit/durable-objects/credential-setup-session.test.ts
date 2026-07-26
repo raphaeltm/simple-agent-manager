@@ -753,6 +753,43 @@ describe('CredentialSetupSession — alarm() capture polling', () => {
     expect(releaseSetupSlot).toHaveBeenCalledWith(expect.anything(), 'lease-abc');
   });
 
+  it('reports a driver exchange timeout distinctly from a rejected code', async () => {
+    const created = createDO();
+    await Promise.resolve();
+    let driverState: Record<string, unknown> = {
+      status: 'waiting_for_user',
+      verificationUrl: 'https://claude.ai/oauth/device',
+    };
+    const fakeSandbox = createFakeSandbox();
+    fakeSandbox.readFile.mockImplementation(async (path: string) => ({
+      content: path.endsWith('device-auth-state.json') ? JSON.stringify(driverState) : '',
+    }));
+    vi.mocked(getSandboxInstance).mockResolvedValue(fakeSandbox as never);
+    await created.instance.create({
+      id: 'setup-exchange-timeout',
+      setupHome: '/tmp/setup-exchange-timeout',
+      ttlMs: 900_000,
+      ...BASE_PARAMS,
+      agentType: 'claude-code',
+      provider: 'anthropic',
+      agentName: 'Claude Code',
+    });
+    await created.instance.alarm();
+    await created.instance.alarm();
+    await created.instance.submitVerificationCode('abc123#state456');
+    driverState = {
+      status: 'failed',
+      error: 'Claude did not finish the verification code exchange in time',
+      code: 'exchange_timeout',
+    };
+    await created.instance.alarm();
+
+    const state = await created.instance.getState();
+    expect(state).toMatchObject({ status: 'failed', errorCode: 'exchange_timeout' });
+    expect(state?.errorMessage).toContain('did not complete in time');
+    expect(releaseSetupSlot).toHaveBeenCalledWith(expect.anything(), 'lease-abc');
+  });
+
   it('tears down as failed when saveAgentCredentialForUser rejects', async () => {
     const { instance, database, fakeSandbox } = await createAndProvision();
     const authJson = validAuthJson();

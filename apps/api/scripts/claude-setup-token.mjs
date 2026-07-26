@@ -19,7 +19,19 @@ const CLAUDE_SETUP_COMMAND =
   'stty cols 512; env DISABLE_AUTOUPDATER=1 NO_COLOR=1 TERM=xterm-256color claude setup-token';
 const URL_PATTERN = /https:\/\/[^\s<>'"`]+/gi;
 const TOKEN_PATTERN = /\bsk-ant-oat(?:[A-Za-z0-9._-]|\r?\n){16,8192}\b/g;
-const OAUTH_REJECTION_PATTERN = /OAuth error:[\s\S]{0,256}status code\s*4\d\d/i;
+// The Ink error screen always renders `OAuth error: <message>` and then waits for a
+// retry keypress without exiting — treat ANY such marker after the code was
+// forwarded as terminal. Requiring a specific status-code suffix here made real
+// failures (401 "Authentication failed", state mismatch, network errors) hang
+// until the session TTL.
+const OAUTH_REJECTION_PATTERN = /OAuth error:/i;
+const DEFAULT_VERIFICATION_ENTER_DELAY_MS = 1000;
+const DEFAULT_EXCHANGE_TIMEOUT_MS = 120_000;
+
+function positiveIntFromEnv(name, fallback) {
+  const value = Number(process.env[name]);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
 const CODE_PATTERNS = [
   /(?:verification|one[- ]time|device)?\s*code[^A-Za-z0-9-]{0,40}([A-Z0-9][A-Z0-9-]{3,127})/i,
   /enter\s+(?:this\s+|the\s+)?(?:code\s+)?([A-Z0-9][A-Z0-9-]{3,127})/i,
@@ -169,6 +181,14 @@ export async function runClaudeSetupToken({
   readVerificationCode = (path) => readFile(path, 'utf8'),
   deleteVerificationCode = unlink,
   verificationCodePollMs = 500,
+  verificationEnterDelayMs = positiveIntFromEnv(
+    'CLAUDE_SETUP_ENTER_DELAY_MS',
+    DEFAULT_VERIFICATION_ENTER_DELAY_MS
+  ),
+  exchangeTimeoutMs = positiveIntFromEnv(
+    'CLAUDE_SETUP_EXCHANGE_TIMEOUT_MS',
+    DEFAULT_EXCHANGE_TIMEOUT_MS
+  ),
 }) {
   const setupPaths = resolveClaudeSetupPaths({ statePath, credentialPath, verificationCodePath });
   const writeStateFile =
@@ -205,6 +225,8 @@ export async function runClaudeSetupToken({
   let tokenCaptured = false;
   let terminalStatePublished = false;
   let verificationCodePoll;
+  let verificationEnterTimer;
+  let exchangeDeadlineTimer;
   let outputBuffer = '';
   let stateWriteQueue = Promise.resolve();
   let settled = false;
@@ -230,11 +252,22 @@ export async function runClaudeSetupToken({
     return stateWriteQueue;
   }
 
-  function publishFailure(message) {
+  function clearForwardingTimers() {
     if (verificationCodePoll) clearInterval(verificationCodePoll);
-    void publishState({ status: 'failed', error: message }).finally(() => {
-      settleReady(new Error(message));
-    });
+    verificationCodePoll = undefined;
+    if (verificationEnterTimer) clearTimeout(verificationEnterTimer);
+    verificationEnterTimer = undefined;
+    if (exchangeDeadlineTimer) clearTimeout(exchangeDeadlineTimer);
+    exchangeDeadlineTimer = undefined;
+  }
+
+  function publishFailure(message, code) {
+    clearForwardingTimers();
+    void publishState({ status: 'failed', error: message, ...(code ? { code } : {}) }).finally(
+      () => {
+        settleReady(new Error(message));
+      }
+    );
   }
 
   function maybePublishWaiting(details) {
@@ -252,7 +285,27 @@ export async function runClaudeSetupToken({
           clearInterval(verificationCodePoll);
           verificationCodePoll = undefined;
           verificationCodeForwarded = true;
-          claude.stdin.write(`${code.replace(/\s+/g, '')}\r`);
+          // Claude Code's interactive prompt treats one large stdin chunk as a
+          // paste and absorbs a trailing carriage return instead of submitting
+          // (reproduced with ~100-char real codes; short test codes submit).
+          // Write the code, then send Enter as a SEPARATE write after a settle
+          // delay so the CLI registers a real submit keypress.
+          claude.stdin.write(code.replace(/\s+/g, ''));
+          verificationEnterTimer = setTimeout(() => {
+            verificationEnterTimer = undefined;
+            claude.stdin.write('\r');
+            // The exchange is a bounded HTTP round-trip: any outcome the parser
+            // does not recognize (unknown error wording, hung request) must fail
+            // visibly instead of stalling until the session TTL.
+            exchangeDeadlineTimer = setTimeout(() => {
+              exchangeDeadlineTimer = undefined;
+              publishFailure(
+                'Claude did not finish the verification code exchange in time',
+                'exchange_timeout'
+              );
+              claude.kill('SIGTERM');
+            }, exchangeTimeoutMs);
+          }, verificationEnterDelayMs);
         } catch (error) {
           if (error?.code !== 'ENOENT') {
             publishFailure('Claude verification code could not be forwarded');
@@ -267,7 +320,7 @@ export async function runClaudeSetupToken({
   function maybeCaptureToken(details) {
     if (tokenCaptured || !details.token) return;
     tokenCaptured = true;
-    if (verificationCodePoll) clearInterval(verificationCodePoll);
+    clearForwardingTimers();
     void writeCredentialFile(details.token)
       .then(() => publishState({ status: 'completed' }))
       .then(() => settleReady())

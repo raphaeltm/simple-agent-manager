@@ -119,6 +119,8 @@ interface DeviceAuthState {
   verificationUrl?: string;
   userCode?: string;
   error?: string | null;
+  /** Optional machine-readable failure class from the driver (e.g. `exchange_timeout`). */
+  code?: string;
 }
 
 export class CredentialSetupSession extends DurableObject<Env> {
@@ -330,14 +332,16 @@ export class CredentialSetupSession extends DurableObject<Env> {
       // waiting_for_user | exchanging | capturing — observe driver failure and capture output.
       const driverState = await this.readDeviceAuthState(row);
       if (driverState?.status === 'failed') {
-        await this.teardown(
-          row,
-          'failed',
-          row.status === 'exchanging' ? 'code_rejected' : 'setup_failed',
-          row.status === 'exchanging'
-            ? 'Claude rejected the verification code. Start again and use a fresh code.'
-            : 'Claude Code could not complete sign-in'
-        );
+        const exchangeTimedOut = driverState.code === 'exchange_timeout';
+        let errorCode = 'setup_failed';
+        let errorMessage = 'Claude Code could not complete sign-in';
+        if (row.status === 'exchanging') {
+          errorCode = exchangeTimedOut ? 'exchange_timeout' : 'code_rejected';
+          errorMessage = exchangeTimedOut
+            ? 'Claude sign-in did not complete in time. Start again and paste a fresh code.'
+            : 'Claude rejected the verification code. Start again and use a fresh code.';
+        }
+        await this.teardown(row, 'failed', errorCode, errorMessage);
         return;
       }
       await this.attemptCapture(row);
@@ -405,9 +409,16 @@ export class CredentialSetupSession extends DurableObject<Env> {
     if (row.agent_type === 'claude-code') {
       const credentialPath = `${row.codex_home}/${CLAUDE_OAUTH_TOKEN_FILE}`;
       const verificationCodePath = `${row.codex_home}/${CLAUDE_VERIFICATION_CODE_FILE}`;
+      const enterDelayEnv = this.env.CLAUDE_SETUP_ENTER_DELAY_MS
+        ? ` CLAUDE_SETUP_ENTER_DELAY_MS=${shellQuote(this.env.CLAUDE_SETUP_ENTER_DELAY_MS)}`
+        : '';
+      const exchangeTimeoutEnv = this.env.CLAUDE_SETUP_EXCHANGE_TIMEOUT_MS
+        ? ` CLAUDE_SETUP_EXCHANGE_TIMEOUT_MS=${shellQuote(this.env.CLAUDE_SETUP_EXCHANGE_TIMEOUT_MS)}`
+        : '';
       return (
         `nohup env CLAUDE_CONFIG_DIR=${shellQuote(row.codex_home)} ` +
-        'DISABLE_AUTOUPDATER=1 NO_COLOR=1 TERM=dumb ' +
+        'DISABLE_AUTOUPDATER=1 NO_COLOR=1 TERM=dumb' +
+        `${enterDelayEnv}${exchangeTimeoutEnv} ` +
         `node /usr/local/bin/sam-claude-setup-token.mjs ${shellQuote(statePath)} ` +
         `${shellQuote(credentialPath)} ${shellQuote(verificationCodePath)} >/dev/null 2>&1 &`
       );
