@@ -243,7 +243,7 @@ export const agentCredentialSetupSessions = sqliteTable(
     scope: text('scope').notNull().default('user'), // 'user' | 'project'
     agentType: text('agent_type').notNull(),
     credentialKind: text('credential_kind').notNull().default('oauth-token'),
-    /** creating|admitting|provisioning|waiting_for_user|capturing|saving|completed|failed|cancelled|expired */
+    /** creating|admitting|provisioning|waiting_for_user|exchanging|capturing|saving|completed|failed|cancelled|expired */
     status: text('status').notNull().default('creating'),
     /** Cloudflare Sandbox id (== setup session id, 1:1, never shared across users). */
     sandboxId: text('sandbox_id').notNull(),
@@ -265,7 +265,7 @@ export const agentCredentialSetupSessions = sqliteTable(
     oneActive: uniqueIndex('idx_acss_one_active')
       .on(table.userId, table.agentType)
       .where(
-        sql`status IN ('creating', 'admitting', 'provisioning', 'waiting_for_user', 'capturing', 'saving')`
+        sql`status IN ('creating', 'admitting', 'provisioning', 'waiting_for_user', 'exchanging', 'capturing', 'saving')`
       ),
     sweep: index('idx_acss_sweep').on(table.status, table.expiresAt),
     userLookup: index('idx_acss_user').on(table.userId, table.createdAt),
