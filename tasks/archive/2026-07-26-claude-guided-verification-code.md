@@ -97,3 +97,37 @@ the short-lived code.
 - Live no-account verification: session `01KYEQ1PNJVAADQPMXMMG4FX1V` surfaced a trusted Claude URL in 12.5s, accepted a `code#state`-shaped rejected value, and surfaced sanitized `code_rejected` in 5.0s; cleanup returned 200 and D1 had zero active setup rows.
 - CI: all applicable checks green, including Test, Playwright Visual Tests, SonarCloud, Preflight Evidence, and Specialist Review Evidence.
 - Remaining explicit human gate: Raphaël must complete the successful OAuth exchange on staging with his real Claude subscription before merge.
+
+## Follow-up 2026-07-27: real-code attempt still failed — error detail was being discarded
+
+Raphaël's first real-code retest (session `01KYGZBWGAF1Y7Q4HREJS22XPB`, 05:04 UTC)
+failed with `code_rejected` — "Claude rejected the verification code" — despite a
+correctly copied code. Investigation (session `77db0283-3193-4621-8b1c-069c1a19f108`):
+
+- **The submit fix works.** Exchanges now reach a terminal outcome in seconds.
+- **Sandbox egress is fine.** A Node-fetch token exchange from inside a staging
+  sandbox got a genuine `400 invalid_grant` verdict from
+  `platform.claude.com/v1/oauth/token`. (curl-shaped probes get `429
+  rate_limit_error` from the same egress — TLS-fingerprint bot-scoring, a red
+  herring; the Bun-based CLI is not affected.)
+- **The real bug: every `OAuth error:` render was flattened into "rejected".**
+  Live-reproduced against claude v2.1.220, distinct failure wordings exist:
+  - paste missing the `#state` half → instant LOCAL `OAuth error: Invalid code.
+    Please make sure the full code was copied` (no network)
+  - full-format bad code/state/PKCE → server `OAuth error: Request failed with
+    status code 400`
+  - network failure → `OAuth error: connect ECONNREFUSED …`
+  The driver discarded the line, so the true reason of the real-code failure is
+  unrecoverable; the most likely candidates are an incomplete mobile copy
+  (missing `#` half) or a code issued against a different PKCE challenge
+  (e.g. mobile app-link interception of the sign-in URL).
+- **Fix (commit `b26de657f`):** driver extracts + classifies the OAuth error
+  line after a settle window (`CLAUDE_SETUP_REJECTION_SETTLE_MS`) into
+  `code_incomplete` / `code_rejected` / `exchange_network_error` with a bounded,
+  sk-ant-redacted `detail`; the DO maps each class to accurate guidance and
+  appends `[CLI: …]` to `error_message` (driver free-form `error` still never
+  surfaced); the modal blocks claude-code pastes without `#` before burning the
+  session. Verified end-to-end against the real CLI for both failure classes.
+- **Class of bug:** collapsing a multi-cause external failure surface into one
+  fixed user message — the discarded upstream detail was the only signal that
+  could distinguish user error from environment failure.
