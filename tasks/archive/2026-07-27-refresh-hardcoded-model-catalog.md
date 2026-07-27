@@ -19,8 +19,9 @@ SAM's static model catalog is the fallback and validation source for supported c
 
 - [x] Synchronize the OpenCode Zen and Go static fallback groups with active Models.dev records and display names.
 - [x] Update focused model-catalog tests for representative additions and the removed inactive ID.
-- [ ] Run focused shared-package and repository quality checks.
-- [ ] Complete specialist review, staging verification, PR/CI, merge, and production deploy monitoring.
+- [x] Run focused shared-package and repository quality checks.
+- [x] Complete specialist review and staging verification.
+- [ ] Complete PR/CI, merge, and production deploy monitoring.
 
 ## Acceptance criteria
 
@@ -38,3 +39,14 @@ SAM's static model catalog is the fallback and validation source for supported c
 - https://ai.google.dev/gemini-api/docs/deprecations
 - https://docs.mistral.ai/models
 - https://models.dev/api.json
+
+## Validation evidence
+
+- Focused shared catalog tests: 2 files, 21 tests passed.
+- Repository gates: `pnpm lint && pnpm typecheck && pnpm test && pnpm build` passed.
+- Specialist reviews: task completion, constitution, and test quality all passed without findings.
+- Staging deployment: [Deploy Staging run 30253600731](https://github.com/raphaeltm/simple-agent-manager/actions/runs/30253600731) passed, including deployment health checks and CI smoke tests.
+- Independent authenticated Playwright smoke suite: 11 passed, 1 passed on retry after an initial `networkidle` timeout; dashboard, projects, settings, API tokens, authentication redirect, API health/CORS, and Amp catalog exposure were verified.
+- Observability-noise gate completed with no significant noise detected; D1 and Workers telemetry subqueries were unavailable in this environment and reported as skipped.
+- Infrastructure-specific verification is not applicable because no infrastructure paths changed.
+- Mobile/desktop visual verification is not applicable because no UI paths changed.
