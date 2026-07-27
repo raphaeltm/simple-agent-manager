@@ -160,6 +160,42 @@ describe('AgentCredentialConnectModal', () => {
     expect(await screen.findByText(/Claude Code connected/)).toBeInTheDocument();
   });
 
+  it('blocks a Claude code paste missing its #state half before any server round-trip', async () => {
+    // Claude's browser page shows `<code>#<state>`; copying only the code half
+    // is guaranteed to fail inside the CLI, so the modal must catch it with
+    // actionable guidance instead of burning the setup session.
+    h.createAgentCredentialSetupSession.mockResolvedValue({
+      kind: 'created',
+      session: makeSession('provisioning', { agentType: 'claude-code' }),
+    });
+    h.getAgentCredentialSetupSession.mockResolvedValue(
+      makeSession('waiting_for_user', {
+        agentType: 'claude-code',
+        verificationUrl: CLAUDE_VERIFICATION_URL,
+        userCode: null,
+      })
+    );
+
+    render(
+      <AgentCredentialConnectModal
+        agentType="claude-code"
+        isOpen
+        onClose={vi.fn()}
+        onConnected={vi.fn()}
+      />
+    );
+
+    await screen.findByRole('link', { name: /open claude sign-in/i });
+    const tokenInput = screen.getByLabelText(/paste the code claude shows you/i);
+    fireEvent.change(tokenInput, { target: { value: 'abc123-no-state-half' } });
+    fireEvent.click(screen.getByRole('button', { name: /continue sign-in/i }));
+
+    expect(
+      await screen.findByText(/copy the entire code claude shows/i)
+    ).toBeInTheDocument();
+    expect(h.submitAgentCredentialSetupVerificationCode).not.toHaveBeenCalled();
+  });
+
   it('reports completion without exposing a terminal surface', async () => {
     const onConnected = vi.fn();
     h.createAgentCredentialSetupSession.mockResolvedValue({

@@ -4,7 +4,9 @@ import { PassThrough } from 'node:stream';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  classifyOauthError,
   extractClaudeSetupOutput,
+  extractOauthErrorDetail,
   resolveClaudeSetupPaths,
   runClaudeSetupToken,
   runClaudeSetupTokenCli,
@@ -103,6 +105,39 @@ describe('Claude setup-token driver', () => {
   it('requires Claude OAuth token shape for captured credentials', () => {
     expect(validateClaudeOauthToken(CLAUDE_TOKEN)).toBe(CLAUDE_TOKEN);
     expect(() => validateClaudeOauthToken('sk-ant-api03-not-oauth')).toThrow(/invalid OAuth token/);
+  });
+
+  it('extracts the last OAuth error line, strips the retry suffix, and redacts token-like runs', () => {
+    expect(
+      extractOauthErrorDetail(
+        'OAuth error: transient thing\nredraw\nOAuth error: Requstfailed withstatus code 400PressEntertoretry.'
+      )
+    ).toBe('Requstfailed withstatus code 400');
+    expect(extractOauthErrorDetail(`OAuth error: leaked ${CLAUDE_TOKEN} value`)).toBe(
+      'leaked [redacted] value'
+    );
+    expect(extractOauthErrorDetail(`OAuth error: ${'x'.repeat(500)}`)).toHaveLength(160);
+    expect(extractOauthErrorDetail('no marker at all')).toBeNull();
+  });
+
+  it('classifies OAuth error wordings, tolerating Ink overwrite mangling', () => {
+    // Live-captured renders from claude v2.1.220 (characters dropped by redraws).
+    expect(classifyOauthError('Invalidcode. Please makesure the fullcde wascopied').code).toBe(
+      'code_incomplete'
+    );
+    expect(classifyOauthError('Requstfailed withstatus code 400').code).toBe('code_rejected');
+    expect(classifyOauthError('Request failed with status code 429').code).toBe('code_rejected');
+    expect(classifyOauthError('connctECONNREFUSED 127.0.0.1:9').code).toBe(
+      'exchange_network_error'
+    );
+    expect(classifyOauthError('Prxy conncion ended before receving CONNECT response').code).toBe(
+      'exchange_network_error'
+    );
+    // Server-side "Invalid authorization code" is a rejection, not an incomplete paste.
+    expect(classifyOauthError('Authentication failed: Invalid authorization code').code).toBe(
+      'code_rejected'
+    );
+    expect(classifyOauthError(null).code).toBe('code_rejected');
   });
 
   it('derives setup file paths from CLAUDE_CONFIG_DIR and rejects path escapes', async () => {
@@ -237,6 +272,7 @@ describe('Claude setup-token driver', () => {
       deleteVerificationCode: vi.fn().mockResolvedValue(undefined),
       verificationCodePollMs: 1,
       verificationEnterDelayMs: 1,
+      rejectionSettleMs: 1,
     });
 
     fake.stdout.write('Open https://claude.com/cai/oauth/authorize\n');
@@ -250,6 +286,8 @@ describe('Claude setup-token driver', () => {
       expect(states.at(-1)).toEqual({
         status: 'failed',
         error: 'Claude rejected the verification code',
+        code: 'code_rejected',
+        detail: 'Request failed with status code 400',
       })
     );
     expect(JSON.stringify(states)).not.toContain('garbage#rejected-code');
@@ -288,6 +326,7 @@ describe('Claude setup-token driver', () => {
       deleteVerificationCode: vi.fn().mockResolvedValue(undefined),
       verificationCodePollMs: 1,
       verificationEnterDelayMs: 5,
+      rejectionSettleMs: 1,
     });
 
     fake.stdout.write('Open https://claude.com/cai/oauth/authorize\n');
@@ -297,6 +336,8 @@ describe('Claude setup-token driver', () => {
       expect(states.at(-1)).toEqual({
         status: 'failed',
         error: 'Claude rejected the verification code',
+        code: 'code_rejected',
+        detail: 'Request failed with status code 400',
       })
     );
     expect(pastedBuffer).toBe(realisticCode);
@@ -316,6 +357,7 @@ describe('Claude setup-token driver', () => {
       deleteVerificationCode: vi.fn().mockResolvedValue(undefined),
       verificationCodePollMs: 1,
       verificationEnterDelayMs: 1,
+      rejectionSettleMs: 1,
     });
 
     fake.stdout.write('Open https://claude.com/cai/oauth/authorize\n');
@@ -324,6 +366,9 @@ describe('Claude setup-token driver', () => {
     fake.stdin.on('data', (chunk) => stdinWrites.push(chunk.toString()));
     await vi.waitFor(() => expect(stdinWrites).toEqual(['expired#code', '\r']));
     // Real 401 wording from claude v2.1.220 — contains no "status code" suffix.
+    // "Invalid authorization code" is a SERVER rejection and must NOT be
+    // classified as the local incomplete-paste error ("Invalid code. Please
+    // make sure the full code was copied").
     fake.stdout.write(
       'OAuth error: Authentication failed: Invalid authorization code\nPress Enter to retry.'
     );
@@ -332,6 +377,82 @@ describe('Claude setup-token driver', () => {
       expect(states.at(-1)).toEqual({
         status: 'failed',
         error: 'Claude rejected the verification code',
+        code: 'code_rejected',
+        detail: 'Authentication failed: Invalid authorization code',
+      })
+    );
+    expect(fake.kill).toHaveBeenCalledWith('SIGTERM');
+  });
+
+  it('classifies the local incomplete-paste error distinctly, tolerating Ink overwrite mangling', async () => {
+    // Reproduced live against claude v2.1.220: a code pasted WITHOUT its
+    // `#state` half fails instantly and locally with "Invalid code. Please
+    // make sure the full code was copied" — advice the driver previously
+    // swallowed, reporting "code rejected … use a fresh code" instead. The
+    // rendered line arrives with characters overwritten by Ink redraws.
+    const fake = fakeClaudeProcess();
+    const states: Array<Record<string, unknown>> = [];
+
+    const ready = runClaudeSetupToken({
+      ...validSetupPaths(),
+      spawnProcess: () => fake,
+      writeState: async (state) => states.push(state),
+      writeCredential: vi.fn().mockResolvedValue(undefined),
+      readVerificationCode: vi.fn().mockResolvedValue('A'.repeat(64)),
+      deleteVerificationCode: vi.fn().mockResolvedValue(undefined),
+      verificationCodePollMs: 1,
+      verificationEnterDelayMs: 1,
+      rejectionSettleMs: 1,
+    });
+
+    fake.stdout.write('Open https://claude.com/cai/oauth/authorize\n');
+    await ready;
+    const stdinWrites: string[] = [];
+    fake.stdin.on('data', (chunk) => stdinWrites.push(chunk.toString()));
+    await vi.waitFor(() => expect(stdinWrites).toEqual(['A'.repeat(64), '\r']));
+    fake.stdout.write('OAuth error: Invalidcode. Please makesure the fullcde wascopiedPressEntertoretry.');
+
+    await vi.waitFor(() =>
+      expect(states.at(-1)).toEqual({
+        status: 'failed',
+        error: 'Claude reported the pasted verification code was incomplete',
+        code: 'code_incomplete',
+        detail: 'Invalidcode. Please makesure the fullcde wascopied',
+      })
+    );
+    expect(fake.kill).toHaveBeenCalledWith('SIGTERM');
+  });
+
+  it('classifies connection failures as exchange_network_error, not a rejected code', async () => {
+    const fake = fakeClaudeProcess();
+    const states: Array<Record<string, unknown>> = [];
+
+    const ready = runClaudeSetupToken({
+      ...validSetupPaths(),
+      spawnProcess: () => fake,
+      writeState: async (state) => states.push(state),
+      writeCredential: vi.fn().mockResolvedValue(undefined),
+      readVerificationCode: vi.fn().mockResolvedValue('real#code'),
+      deleteVerificationCode: vi.fn().mockResolvedValue(undefined),
+      verificationCodePollMs: 1,
+      verificationEnterDelayMs: 1,
+      rejectionSettleMs: 1,
+    });
+
+    fake.stdout.write('Open https://claude.com/cai/oauth/authorize\n');
+    await ready;
+    const stdinWrites: string[] = [];
+    fake.stdin.on('data', (chunk) => stdinWrites.push(chunk.toString()));
+    await vi.waitFor(() => expect(stdinWrites).toEqual(['real#code', '\r']));
+    // Mangled connection-failure render observed live (chars dropped by Ink).
+    fake.stdout.write('OAuth error: connctECONNREFUSED 10.0.0.1:443PressEntertoretry.');
+
+    await vi.waitFor(() =>
+      expect(states.at(-1)).toEqual({
+        status: 'failed',
+        error: 'Claude sign-in failed with a network error during the code exchange',
+        code: 'exchange_network_error',
+        detail: 'connctECONNREFUSED 10.0.0.1:443',
       })
     );
     expect(fake.kill).toHaveBeenCalledWith('SIGTERM');

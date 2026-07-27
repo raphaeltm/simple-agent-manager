@@ -121,6 +121,26 @@ interface DeviceAuthState {
   error?: string | null;
   /** Optional machine-readable failure class from the driver (e.g. `exchange_timeout`). */
   code?: string;
+  /** Optional short diagnostic extracted from the provider CLI's error screen. */
+  detail?: string | null;
+}
+
+/**
+ * The driver state file is written inside the sandbox, so treat its diagnostic
+ * text as untrusted: printable ASCII only, secrets redacted, hard length cap.
+ * The driver's free-form `error` field is never surfaced — only this bounded
+ * detail — mirroring the sanitized-failure posture of the existing mapping.
+ */
+const MAX_DRIVER_DETAIL_LENGTH = 160;
+function sanitizeDriverDetail(detail: string | null | undefined): string | null {
+  if (typeof detail !== 'string') return null;
+  const cleaned = detail
+    .replace(/sk-ant[A-Za-z0-9._-]*/gi, '[redacted]')
+    .replace(/[^\x20-\x7e]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, MAX_DRIVER_DETAIL_LENGTH);
+  return cleaned.length > 0 ? cleaned : null;
 }
 
 export class CredentialSetupSession extends DurableObject<Env> {
@@ -332,16 +352,38 @@ export class CredentialSetupSession extends DurableObject<Env> {
       // waiting_for_user | exchanging | capturing — observe driver failure and capture output.
       const driverState = await this.readDeviceAuthState(row);
       if (driverState?.status === 'failed') {
-        const exchangeTimedOut = driverState.code === 'exchange_timeout';
         let errorCode = 'setup_failed';
         let errorMessage = 'Claude Code could not complete sign-in';
         if (row.status === 'exchanging') {
-          errorCode = exchangeTimedOut ? 'exchange_timeout' : 'code_rejected';
-          errorMessage = exchangeTimedOut
-            ? 'Claude sign-in did not complete in time. Start again and paste a fresh code.'
-            : 'Claude rejected the verification code. Start again and use a fresh code.';
+          switch (driverState.code) {
+            case 'exchange_timeout':
+              errorCode = 'exchange_timeout';
+              errorMessage =
+                'Claude sign-in did not complete in time. Start again and paste a fresh code.';
+              break;
+            case 'code_incomplete':
+              errorCode = 'code_incomplete';
+              errorMessage =
+                'The pasted code was incomplete. Copy the entire code Claude shows — it has a # in the middle — then start again.';
+              break;
+            case 'exchange_network_error':
+              errorCode = 'exchange_network_error';
+              errorMessage =
+                'The sign-in sandbox hit a network error talking to Claude. Start again in a moment.';
+              break;
+            default:
+              errorCode = 'code_rejected';
+              errorMessage =
+                'Claude rejected the verification code. Start again and use a fresh code.';
+          }
         }
-        await this.teardown(row, 'failed', errorCode, errorMessage);
+        const detail = sanitizeDriverDetail(driverState.detail);
+        await this.teardown(
+          row,
+          'failed',
+          errorCode,
+          detail ? `${errorMessage} [CLI: ${detail}]` : errorMessage
+        );
         return;
       }
       await this.attemptCapture(row);

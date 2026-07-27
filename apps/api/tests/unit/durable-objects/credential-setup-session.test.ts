@@ -790,6 +790,69 @@ describe('CredentialSetupSession — alarm() capture polling', () => {
     expect(releaseSetupSlot).toHaveBeenCalledWith(expect.anything(), 'lease-abc');
   });
 
+  it('maps incomplete-paste and network driver failures distinctly and surfaces sanitized CLI detail', async () => {
+    const scenarios = [
+      {
+        id: 'setup-incomplete',
+        driver: {
+          status: 'failed',
+          error: 'Claude reported the pasted verification code was incomplete',
+          code: 'code_incomplete',
+          detail: 'Invalidcode. Please makesure the fullcde wascopied',
+        },
+        expectCode: 'code_incomplete',
+        expectMessage: 'entire code',
+        expectDetail: '[CLI: Invalidcode. Please makesure the fullcde wascopied]',
+      },
+      {
+        id: 'setup-network',
+        driver: {
+          status: 'failed',
+          error: 'Claude sign-in failed with a network error during the code exchange',
+          code: 'exchange_network_error',
+          detail: `connctECONNREFUSED 10.0.0.1:443 sk-ant-oat${'A'.repeat(20)} junk`,
+        },
+        expectCode: 'exchange_network_error',
+        expectMessage: 'network error',
+        expectDetail: '[CLI: connctECONNREFUSED 10.0.0.1:443 [redacted] junk]',
+      },
+    ] as const;
+
+    for (const scenario of scenarios) {
+      const created = createDO();
+      await Promise.resolve();
+      let driverState: Record<string, unknown> = {
+        status: 'waiting_for_user',
+        verificationUrl: 'https://claude.ai/oauth/device',
+      };
+      const fakeSandbox = createFakeSandbox();
+      fakeSandbox.readFile.mockImplementation(async (path: string) => ({
+        content: path.endsWith('device-auth-state.json') ? JSON.stringify(driverState) : '',
+      }));
+      vi.mocked(getSandboxInstance).mockResolvedValue(fakeSandbox as never);
+      await created.instance.create({
+        id: scenario.id,
+        setupHome: `/tmp/${scenario.id}`,
+        ttlMs: 900_000,
+        ...BASE_PARAMS,
+        agentType: 'claude-code',
+        provider: 'anthropic',
+        agentName: 'Claude Code',
+      });
+      await created.instance.alarm();
+      await created.instance.alarm();
+      await created.instance.submitVerificationCode('abc123#state456');
+      driverState = scenario.driver;
+      await created.instance.alarm();
+
+      const state = await created.instance.getState();
+      expect(state).toMatchObject({ status: 'failed', errorCode: scenario.expectCode });
+      expect(state?.errorMessage).toContain(scenario.expectMessage);
+      expect(state?.errorMessage).toContain(scenario.expectDetail);
+      expect(state?.errorMessage).not.toContain('sk-ant');
+    }
+  });
+
   it('tears down as failed when saveAgentCredentialForUser rejects', async () => {
     const { instance, database, fakeSandbox } = await createAndProvision();
     const authJson = validAuthJson();

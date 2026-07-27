@@ -231,6 +231,15 @@ export function AgentCredentialConnectModal({
       setSubmitError('Paste the code Claude shows you first.');
       return;
     }
+    // Claude's browser page shows the code as `<code>#<state>`. A paste without
+    // the `#` half is guaranteed to fail inside the CLI ("Invalid code. Please
+    // make sure the full code was copied"), so catch it before the round-trip.
+    if (agentType === 'claude-code' && !code.replace(/\s+/g, '').includes('#')) {
+      setSubmitError(
+        'That looks like only part of the code. Copy the entire code Claude shows — it includes a # in the middle.'
+      );
+      return;
+    }
 
     codeSubmitInFlightRef.current = true;
     setSubmittingCode(true);

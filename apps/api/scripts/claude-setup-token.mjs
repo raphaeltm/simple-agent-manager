@@ -25,8 +25,21 @@ const TOKEN_PATTERN = /\bsk-ant-oat(?:[A-Za-z0-9._-]|\r?\n){16,8192}\b/g;
 // failures (401 "Authentication failed", state mismatch, network errors) hang
 // until the session TTL.
 const OAUTH_REJECTION_PATTERN = /OAuth error:/i;
+// Ink redraws overwrite characters in place, so the surviving text can drop
+// letters and spaces ("Requstfailed withstatus code 400"). Classification
+// patterns must tolerate that mangling — match with optional gaps, never on
+// exact prose.
+const OAUTH_ERROR_LINE_PATTERN = /OAuth error:\s*([^\n\r]*)/gi;
+const OAUTH_RETRY_SUFFIX_PATTERN = /Press\s*Enter\s*to\s*retry.*$/i;
+const OAUTH_INCOMPLETE_CODE_PATTERN = /invalid\s*c\w{0,3}de/i;
+const OAUTH_STATUS_CODE_PATTERN = /status\s*code\s*(\d{3})/i;
+const OAUTH_NETWORK_ERROR_PATTERN =
+  /(ECONN|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|EHOSTUNREACH|ENETUNREACH|getaddrinfo|socket|network|fetch\s*fail|tunnel|conn\w{0,4}ion|CONNECT\s*response)/i;
+const SECRET_LIKE_PATTERN = /sk-ant[A-Za-z0-9._-]*/gi;
+const MAX_OAUTH_ERROR_DETAIL_LENGTH = 160;
 const DEFAULT_VERIFICATION_ENTER_DELAY_MS = 1000;
 const DEFAULT_EXCHANGE_TIMEOUT_MS = 120_000;
+const DEFAULT_REJECTION_SETTLE_MS = 400;
 
 function positiveIntFromEnv(name, fallback) {
   const value = Number(process.env[name]);
@@ -170,6 +183,54 @@ export function extractClaudeSetupOutput(raw) {
   return { verificationUrl, userCode, token };
 }
 
+/**
+ * Pull the last rendered `OAuth error: <message>` line out of the (ANSI-stripped)
+ * CLI output and reduce it to a short, non-secret diagnostic. The wording is the
+ * only signal distinguishing an incomplete paste, a server 4xx, and a sandbox
+ * network failure — discarding it turns every failure into "code rejected".
+ */
+export function extractOauthErrorDetail(text) {
+  let lastLine;
+  OAUTH_ERROR_LINE_PATTERN.lastIndex = 0;
+  for (const match of text.matchAll(OAUTH_ERROR_LINE_PATTERN)) {
+    if (match[1]) lastLine = match[1];
+  }
+  if (!lastLine) return null;
+  const detail = lastLine
+    .replace(OAUTH_RETRY_SUFFIX_PATTERN, '')
+    .replace(SECRET_LIKE_PATTERN, '[redacted]')
+    .replace(new RegExp(CONTROL_CHARACTER_PATTERN.source, 'g'), ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, MAX_OAUTH_ERROR_DETAIL_LENGTH);
+  return detail || null;
+}
+
+/**
+ * Classify an OAuth error line into a machine-readable failure class so the
+ * control plane can give accurate guidance instead of always claiming the code
+ * was rejected.
+ */
+export function classifyOauthError(detail) {
+  const text = detail ?? '';
+  if (OAUTH_INCOMPLETE_CODE_PATTERN.test(text)) {
+    return {
+      code: 'code_incomplete',
+      message: 'Claude reported the pasted verification code was incomplete',
+    };
+  }
+  if (OAUTH_STATUS_CODE_PATTERN.test(text)) {
+    return { code: 'code_rejected', message: 'Claude rejected the verification code' };
+  }
+  if (OAUTH_NETWORK_ERROR_PATTERN.test(text)) {
+    return {
+      code: 'exchange_network_error',
+      message: 'Claude sign-in failed with a network error during the code exchange',
+    };
+  }
+  return { code: 'code_rejected', message: 'Claude rejected the verification code' };
+}
+
 export async function runClaudeSetupToken({
   statePath,
   credentialPath,
@@ -188,6 +249,10 @@ export async function runClaudeSetupToken({
   exchangeTimeoutMs = positiveIntFromEnv(
     'CLAUDE_SETUP_EXCHANGE_TIMEOUT_MS',
     DEFAULT_EXCHANGE_TIMEOUT_MS
+  ),
+  rejectionSettleMs = positiveIntFromEnv(
+    'CLAUDE_SETUP_REJECTION_SETTLE_MS',
+    DEFAULT_REJECTION_SETTLE_MS
   ),
 }) {
   const setupPaths = resolveClaudeSetupPaths({ statePath, credentialPath, verificationCodePath });
@@ -227,6 +292,7 @@ export async function runClaudeSetupToken({
   let verificationCodePoll;
   let verificationEnterTimer;
   let exchangeDeadlineTimer;
+  let rejectionSettleTimer;
   let outputBuffer = '';
   let stateWriteQueue = Promise.resolve();
   let settled = false;
@@ -259,15 +325,20 @@ export async function runClaudeSetupToken({
     verificationEnterTimer = undefined;
     if (exchangeDeadlineTimer) clearTimeout(exchangeDeadlineTimer);
     exchangeDeadlineTimer = undefined;
+    if (rejectionSettleTimer) clearTimeout(rejectionSettleTimer);
+    rejectionSettleTimer = undefined;
   }
 
-  function publishFailure(message, code) {
+  function publishFailure(message, code, detail) {
     clearForwardingTimers();
-    void publishState({ status: 'failed', error: message, ...(code ? { code } : {}) }).finally(
-      () => {
-        settleReady(new Error(message));
-      }
-    );
+    void publishState({
+      status: 'failed',
+      error: message,
+      ...(code ? { code } : {}),
+      ...(detail ? { detail } : {}),
+    }).finally(() => {
+      settleReady(new Error(message));
+    });
   }
 
   function maybePublishWaiting(details) {
@@ -343,9 +414,22 @@ export async function runClaudeSetupToken({
       return;
     }
     maybePublishWaiting(details);
-    if (verificationCodeForwarded && OAUTH_REJECTION_PATTERN.test(stripAnsi(outputBuffer))) {
-      publishFailure('Claude rejected the verification code');
-      claude.kill('SIGTERM');
+    if (
+      verificationCodeForwarded &&
+      !rejectionSettleTimer &&
+      OAUTH_REJECTION_PATTERN.test(stripAnsi(outputBuffer))
+    ) {
+      // The error screen can arrive across several PTY chunks; wait one settle
+      // window so the captured detail is the complete rendered line, then
+      // classify it so the control plane can distinguish an incomplete paste,
+      // a server rejection, and a sandbox network failure.
+      rejectionSettleTimer = setTimeout(() => {
+        rejectionSettleTimer = undefined;
+        const detail = extractOauthErrorDetail(stripAnsi(outputBuffer));
+        const { code, message } = classifyOauthError(detail);
+        publishFailure(message, code, detail);
+        claude.kill('SIGTERM');
+      }, rejectionSettleMs);
       return;
     }
     maybeCaptureToken(details);
