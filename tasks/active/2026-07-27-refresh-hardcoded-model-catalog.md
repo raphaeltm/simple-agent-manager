@@ -17,8 +17,8 @@ SAM's static model catalog is the fallback and validation source for supported c
 
 ## Implementation checklist
 
-- [ ] Synchronize the OpenCode Zen and Go static fallback groups with active Models.dev records and display names.
-- [ ] Update focused model-catalog tests for representative additions and the removed inactive ID.
+- [x] Synchronize the OpenCode Zen and Go static fallback groups with active Models.dev records and display names.
+- [x] Update focused model-catalog tests for representative additions and the removed inactive ID.
 - [ ] Run focused shared-package and repository quality checks.
 - [ ] Complete specialist review, staging verification, PR/CI, merge, and production deploy monitoring.
 

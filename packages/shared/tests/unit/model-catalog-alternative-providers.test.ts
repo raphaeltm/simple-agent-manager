@@ -6,12 +6,15 @@ const OPENCODE_CONSUMERS = ['opencode'] as const;
 
 const EXPECTED_OPENCODE_MODELS = [
   'opencode/claude-fable-5',
+  'opencode/claude-opus-5',
   'opencode/claude-sonnet-5',
+  'opencode/gemini-3.6-flash',
   'opencode/gpt-5.6-sol',
-  'opencode/hy3-free',
+  'opencode/laguna-s-2.1-free',
   'opencode/minimax-m3',
   'opencode-go/glm-5.2',
   'opencode-go/grok-4.5',
+  'opencode-go/hy3',
   'opencode-go/kimi-k3',
 ] as const;
 
@@ -57,6 +60,10 @@ describe('OpenCode model catalog entries', () => {
         }
       }
     }
+  });
+
+  it('excludes inactive Models.dev records from the static fallback', () => {
+    expect(isKnownModel('opencode', 'opencode/hy3-free')).toBe(false);
   });
 
   it('does not duplicate model IDs within each OpenCode consumer catalog', () => {
