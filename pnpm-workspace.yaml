@@ -19,7 +19,7 @@ catalog:
 
   # === TypeScript ESLint ===
   '@typescript-eslint/eslint-plugin': 7.18.0
-  '@typescript-eslint/parser': 8.61.1
+  '@typescript-eslint/parser': 8.65.0
 
   # === Cloudflare ===
   '@cloudflare/workers-types': 5.20260707.1
