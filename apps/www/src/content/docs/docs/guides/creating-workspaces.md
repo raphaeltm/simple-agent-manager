@@ -35,11 +35,11 @@ SAM supports seven providers:
 
 ### Connecting a provider
 
-1. Open **Settings → Cloud Provider** (also reachable from **Settings → Connections**).
-2. Pick a provider from the list. Each shows a one-line description to help you choose.
-3. Follow the linked provider console to create the credential, paste it into the form, and save. SAM encrypts the credential at rest and validates it before the first VM is created.
+1. Open **Settings → Cloud Provider** (or **Settings → Connections**).
+2. Choose the provider you want to connect.
+3. Use the linked provider console to create the credential, paste it into the provider's form, and save. SAM encrypts the credential at rest and validates it before the first VM is created.
 
-![The cloud provider picker in SAM Settings, showing selectable cards for Hetzner, Scaleway, Vultr, Infomaniak Public Cloud, DigitalOcean, UpCloud, and Google Cloud — each with a short description — above the credential form for the selected provider.](/images/docs/cloud-provider-connect.png)
+![Connecting a cloud provider in SAM Settings: a selectable card for each supported provider — Hetzner, Scaleway, Google Cloud, Vultr, Infomaniak Public Cloud, DigitalOcean, and UpCloud — each with a short description, above the credential form for the selected provider.](/images/docs/cloud-provider-connect.png)
 
 Once a provider is connected, SAM uses it automatically when it provisions workspaces. You can connect more than one and set a default provider (and region) per project in project settings. For per-provider VM sizes, regions, and example pricing, see the [Self-Hosting guide](/docs/guides/self-hosting/#user-vm-costs).
 
