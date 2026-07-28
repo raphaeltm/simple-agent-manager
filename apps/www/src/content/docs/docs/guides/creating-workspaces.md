@@ -23,23 +23,23 @@ SAM runs each workspace on a real cloud VM. On the **hosted platform**, compute 
 
 SAM supports seven providers:
 
-| Provider                    | Known for                      | What you connect                                                      |
-| --------------------------- | ------------------------------ | --------------------------------------------------------------------- |
-| **Hetzner**                 | European cloud, great value    | An API token with Read & Write access                                 |
-| **Scaleway**                | European cloud, GPU options    | An API key (access key + secret key) and project ID                   |
-| **Vultr**                   | Global cloud, hourly billing   | A Personal Access Token with IP access set to **Allow All IPv4/IPv6** |
-| **Infomaniak Public Cloud** | Swiss OpenStack cloud          | An application credential ID and secret                               |
-| **DigitalOcean**            | Global cloud, simple droplets  | A Full Access Personal Access Token                                   |
-| **UpCloud**                 | European cloud, global regions | A dedicated API subaccount username and password                      |
-| **Google Cloud**            | Google Cloud Platform          | Workload Identity Federation, or a service-account JSON key           |
+| Provider                    | Known for                          | What you connect                                                      |
+| --------------------------- | ---------------------------------- | --------------------------------------------------------------------- |
+| **Hetzner**                 | European cloud, great value        | An API token with Read & Write access                                 |
+| **Scaleway**                | European cloud, GPU options        | An API secret key and project ID                                      |
+| **Vultr**                   | Global cloud, hourly billing       | A Personal Access Token with IP access set to **Allow All IPv4/IPv6** |
+| **Infomaniak Public Cloud** | Swiss OpenStack cloud              | An application credential ID and secret                               |
+| **DigitalOcean**            | Global cloud, simple droplets      | A Full Access Personal Access Token                                   |
+| **UpCloud**                 | European cloud with global regions | A dedicated API subaccount username and password                      |
+| **Google Cloud**            | Google Cloud Platform              | Workload Identity Federation, or a service-account JSON key           |
 
 ### Connecting a provider
 
-1. Open **Settings → Cloud Provider** (or **Settings → Connections**).
-2. Choose the provider you want to connect.
-3. Use the linked provider console to create the credential, paste it into the provider's form, and save. SAM encrypts the credential at rest and validates it before the first VM is created.
+1. Open **Settings → Connections** and start connecting a cloud provider. (The **Cloud Provider** tab lets you fill in each provider's form directly instead.)
+2. Pick a provider — each card shows a one-line description to help you choose.
+3. Use the linked provider console to create the credential, paste it into the form, and save. SAM encrypts the credential at rest and validates it before the first VM is created.
 
-![Connecting a cloud provider in SAM Settings: a selectable card for each supported provider — Hetzner, Scaleway, Google Cloud, Vultr, Infomaniak Public Cloud, DigitalOcean, and UpCloud — each with a short description, above the credential form for the selected provider.](/images/docs/cloud-provider-connect.png)
+![The cloud provider picker in SAM's Connections settings: a selectable card for each supported provider — Hetzner, Scaleway, Google Cloud, Vultr, Infomaniak Public Cloud, DigitalOcean, and UpCloud — each with a short description, above the credential form for the selected provider.](/images/docs/cloud-provider-connect.png)
 
 Once a provider is connected, SAM uses it automatically when it provisions workspaces. You can connect more than one and set a default provider (and region) per project in project settings. For per-provider VM sizes, regions, and example pricing, see the [Self-Hosting guide](/docs/guides/self-hosting/#user-vm-costs).
 

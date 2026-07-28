@@ -12,7 +12,7 @@ This page summarizes recent changes that affect how people use SAM. Use it as a 
 | Change                           | What users notice                                                                                                                        | Where to use it                        |
 | -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
 | Guided subscription sign-in      | Connect Claude Code or OpenAI Codex to your Claude Max/Pro or ChatGPT subscription with a browser sign-in — no terminal, no token paste. | **Settings → Connections**             |
-| More cloud providers             | Bring your own Vultr, DigitalOcean, UpCloud, or Infomaniak account, alongside Hetzner, Scaleway, and Google Cloud.                       | **Settings → Cloud Provider**          |
+| More cloud providers             | Bring your own Vultr, DigitalOcean, UpCloud, or Infomaniak account, alongside Hetzner, Scaleway, and Google Cloud.                       | **Settings → Connections**             |
 | Claude Opus 5                    | Pick Anthropic's newest frontier model (1M-token context) when you configure an agent profile.                                           | Agent profile model picker             |
 | Markdown previews in the library | Markdown an agent saves to a project now renders inline instead of downloading as a file.                                                | Project chat & library                 |
 | Shared projects & roles          | Invite teammates with a link, approve access requests, and share profiles, skills, and secrets. Approved teammates join as admins.       | Project **Settings → Access**          |
@@ -45,7 +45,7 @@ The manual token/`auth.json` fields are still there as a fallback, but you no lo
 
 SAM's Bring-Your-Own-Cloud model now spans **seven providers**. Vultr, DigitalOcean, UpCloud, and Infomaniak Public Cloud join the existing Hetzner, Scaleway, and Google Cloud support. Each provider brings its own regions and pricing, so you can put workspaces close to you or on the account you already pay for.
 
-Connect one under **Settings → Cloud Provider**: pick a provider, follow the linked console to create a credential, and paste it in. See [Bring Your Own Cloud](/docs/guides/creating-workspaces/#where-your-workspaces-run-bring-your-own-cloud) for the full provider table and [User VM Costs](/docs/guides/self-hosting/#user-vm-costs) for per-provider sizes and example pricing.
+Connect one under **Settings → Connections**: pick a provider, follow the linked console to create a credential, and paste it in. See [Bring Your Own Cloud](/docs/guides/creating-workspaces/#where-your-workspaces-run-bring-your-own-cloud) for the full provider table and [User VM Costs](/docs/guides/self-hosting/#user-vm-costs) for per-provider sizes and example pricing.
 
 ## Claude Opus 5 is available
 
@@ -53,7 +53,7 @@ Anthropic's **Claude Opus 5** — a frontier model with a 1M-token context windo
 
 ## Agent-generated markdown previews in place
 
-When an agent saves a file to a project's library — a written report, a plan, a summary — Markdown now renders inline in the chat and file views instead of downloading as a raw file. This is especially useful for instant-container sessions, where generated `.md`, `.txt`, `.yaml`, and similar text files previously showed up as undifferentiated downloads.
+When an agent saves a **Markdown** file to a project's library — a written report, a plan, a summary — it now renders inline in the chat and file views instead of downloading as a raw file. This is especially useful for instant-container sessions, where those files previously arrived as undifferentiated `application/octet-stream` downloads. Other agent-generated text files (`.txt`, `.yaml`, `.csv`, and similar) now carry their correct type too, so they download as the right kind of file instead of an opaque blob.
 
 ## Projects can be shared with a team
 

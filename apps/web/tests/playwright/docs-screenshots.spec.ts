@@ -127,6 +127,13 @@ test('docs: guided subscription sign-in modal (Claude Code)', async ({ page }) =
   await expect(dialog.locator('code')).toHaveText(SETUP_SESSION.userCode);
   await expect(dialog.getByRole('button', { name: 'Copy code' })).toBeVisible();
 
+  // Make the backdrop fully opaque so the settings page behind the modal does not
+  // bleed through the card's rounded corners in the docs screenshot.
+  await page.addStyleTag({
+    content:
+      '.glass-backdrop-dim{background:#0a0e0c !important;opacity:1 !important;backdrop-filter:none !important;-webkit-backdrop-filter:none !important;}',
+  });
+
   // Screenshot just the modal card (not the full-viewport backdrop overlay).
   await docsShot(page, 'agent-guided-login', dialog.locator('.glass-panel-container'));
 });
