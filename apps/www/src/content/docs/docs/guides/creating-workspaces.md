@@ -17,6 +17,36 @@ Provisioning takes a couple of minutes the first time, or seconds when SAM reuse
 
 See [Idea Execution](/docs/guides/idea-execution/) for the full chat-to-pull-request workflow.
 
+## Where your workspaces run: Bring Your Own Cloud
+
+SAM runs each workspace on a real cloud VM. On the **hosted platform**, compute is usually provided for you, so you can start working without connecting anything. On a **self-hosted instance**, or when you want VMs billed directly to your own account, SAM follows a **Bring Your Own Cloud (BYOC)** model: you connect a cloud provider once, and every VM runs on your account.
+
+SAM supports seven providers:
+
+| Provider                    | Known for                       | What you connect                                                                    |
+| --------------------------- | ------------------------------- | ----------------------------------------------------------------------------------- |
+| **Hetzner**                 | European cloud, great value     | An API token with Read & Write access                                               |
+| **Scaleway**                | European cloud, GPU options     | An API key (access key + secret key) and project ID                                 |
+| **Vultr**                   | Global cloud, hourly billing    | A Personal Access Token with IP access set to **Allow All IPv4/IPv6**               |
+| **Infomaniak Public Cloud** | Swiss OpenStack cloud           | An application credential ID and secret                                             |
+| **DigitalOcean**            | Global cloud, simple droplets   | A Full Access Personal Access Token                                                 |
+| **UpCloud**                 | European cloud, global regions  | A dedicated API subaccount username and password                                    |
+| **Google Cloud**            | Google Cloud Platform           | Workload Identity Federation, or a service-account JSON key                          |
+
+### Connecting a provider
+
+1. Open **Settings → Cloud Provider** (also reachable from **Settings → Connections**).
+2. Pick a provider from the list. Each shows a one-line description to help you choose.
+3. Follow the linked provider console to create the credential, paste it into the form, and save. SAM encrypts the credential at rest and validates it before the first VM is created.
+
+![The cloud provider picker in SAM Settings, showing selectable cards for Hetzner, Scaleway, Vultr, Infomaniak Public Cloud, DigitalOcean, UpCloud, and Google Cloud — each with a short description — above the credential form for the selected provider.](/images/docs/cloud-provider-connect.png)
+
+Once a provider is connected, SAM uses it automatically when it provisions workspaces. You can connect more than one and set a default provider (and region) per project in project settings. For per-provider VM sizes, regions, and example pricing, see the [Self-Hosting guide](/docs/guides/self-hosting/#user-vm-costs).
+
+:::note
+Cloud provider credentials are stored encrypted per user — never as environment variables or shared secrets. In a [shared project](/docs/guides/collaboration/), a member can attach a project-level cloud credential so shared work doesn't run on someone's personal account.
+:::
+
 ### Choosing an environment size and profile
 
 When you start a chat you can optionally choose:
@@ -72,5 +102,5 @@ SAM offers small, medium, and large sizes, trading cost for CPU and memory:
 Exact specs and pricing are shown in the size picker when you create a workspace and vary by cloud provider. Start with **Medium** for most work, and set a per-project default in project settings.
 
 :::note
-Creating a workspace directly (rather than through chat) is an advanced path intended for hands-on infrastructure control. It requires a project to already be imported, and — on a self-hosted instance — a Hetzner, Scaleway, Vultr, Infomaniak, DigitalOcean, or UpCloud credential. On the hosted platform, compute is typically provided for you.
+Creating a workspace directly (rather than through chat) is an advanced path intended for hands-on infrastructure control. It requires a project to already be imported, and — on a self-hosted instance — a connected [cloud provider](#where-your-workspaces-run-bring-your-own-cloud). On the hosted platform, compute is typically provided for you.
 :::

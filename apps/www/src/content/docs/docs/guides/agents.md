@@ -16,7 +16,7 @@ SAM supports six AI coding agents. You connect the ones you want to use, then ch
 | **OAuth Support** | Yes (Claude Max/Pro subscriptions)                               |
 | **Get a Key**     | [Anthropic Console](https://console.anthropic.com/settings/keys) |
 
-Claude Code supports dual authentication: API keys (pay-per-use) and OAuth tokens (from Claude Max/Pro subscriptions via `claude setup-token`). Toggle between them in Settings.
+Claude Code supports two authentication methods: an **API key** (pay-per-use) or your **Claude Max/Pro subscription**. To use a subscription, choose **Connect with Claude Code** for the [guided sign-in](#connecting-a-subscription-with-guided-sign-in) — SAM opens a Claude sign-in page and shows a copyable verification code, so you never run `claude setup-token` or paste a token by hand. Pasting a `claude setup-token` value manually is still available as a fallback.
 
 ### OpenAI Codex
 
@@ -27,10 +27,11 @@ Claude Code supports dual authentication: API keys (pay-per-use) and OAuth token
 | **OAuth Support** | Yes (via `~/.codex/auth.json`)                          |
 | **Get a Key**     | [OpenAI Platform](https://platform.openai.com/api-keys) |
 
-For a ChatGPT subscription, choose **Connect with Codex**. SAM opens a native
-device-login flow with an OpenAI sign-in link and a copyable one-time code; no
-terminal interaction or manual `auth.json` paste is required. Manual credential
-entry remains available when needed.
+For a ChatGPT subscription, choose **Connect with Codex** for the [guided
+sign-in](#connecting-a-subscription-with-guided-sign-in). SAM opens an OpenAI
+sign-in page and shows a copyable one-time code; no terminal interaction or
+manual `~/.codex/auth.json` paste is required. Pasting `auth.json` manually is
+still available as a fallback.
 
 ### Gemini CLI
 
@@ -80,6 +81,23 @@ Amp requires an Amp API key and may require paid Amp credits.
 3. Provide your API key (or OAuth token). Your credentials are encrypted at rest.
 
 You can connect multiple agents and switch between them per chat by choosing a different profile.
+
+## Connecting a subscription with guided sign-in
+
+If you pay for **Claude Max/Pro** or a **ChatGPT** plan, you can connect that subscription instead of an API key — without leaving the browser or touching a terminal. This is the recommended way to use Claude Code or OpenAI Codex on a subscription.
+
+1. Go to **Settings → Connections** (or **Settings → Agents**) and start the connect flow for Claude Code or OpenAI Codex.
+2. Choose the OAuth / subscription authentication method (rather than API key), then click **Connect with Claude Code** or **Connect with Codex**.
+3. SAM opens a secure sign-in page for the provider and shows a short **verification code**. Click the **Open sign-in** link, approve access on the provider's page, and enter the code when asked.
+4. Leave the SAM window open — it updates on its own. When the provider confirms, the panel shows **Connected** and your subscription credential is saved, encrypted at rest.
+
+![The guided sign-in dialog for Claude Code: a status line reading "Waiting for sign-in", an "Open Claude sign-in" button, and a large copyable verification code with a "Copy code" button. No terminal is shown.](/images/docs/agent-guided-login.png)
+
+A few things worth knowing:
+
+- **No terminal, no file paste.** The old flow asked you to run `claude setup-token` or paste `~/.codex/auth.json`. Those still work as a manual fallback (in the same panel), but the guided flow removes them from the happy path.
+- **User-scoped.** Guided sign-in saves the credential for your account, so it applies across your projects. To set a subscription credential for a single [shared project](/docs/guides/collaboration/), use the manual paste fallback in that project's connections.
+- **Availability.** Guided sign-in appears automatically when the deployment runs on Cloudflare Containers (the default). If the button isn't shown — for example on a deployment with Containers disabled — use the manual API key or token fields instead.
 
 ## AI Provider Modes
 

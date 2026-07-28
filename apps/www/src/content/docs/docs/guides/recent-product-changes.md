@@ -11,6 +11,10 @@ This page summarizes recent changes that affect how people use SAM. Use it as a 
 
 | Change                          | What users notice                                                                                                                  | Where to use it                        |
 | ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
+| Guided subscription sign-in     | Connect Claude Code or OpenAI Codex to your Claude Max/Pro or ChatGPT subscription with a browser sign-in — no terminal, no token paste. | **Settings → Connections**             |
+| More cloud providers            | Bring your own Vultr, DigitalOcean, UpCloud, or Infomaniak account, alongside Hetzner, Scaleway, and Google Cloud.                 | **Settings → Cloud Provider**          |
+| Claude Opus 5                   | Pick Anthropic's newest frontier model (1M-token context) when you configure an agent profile.                                     | Agent profile model picker             |
+| Markdown previews in the library | Markdown an agent saves to a project now renders inline instead of downloading as a file.                                          | Project chat & library                 |
 | Shared projects & roles         | Invite teammates with a link, approve access requests, and share profiles, skills, and secrets. Approved teammates join as admins. | Project **Settings → Access**          |
 | Credential attribution          | A **Credentials** indicator shows which shared work runs on personal keys versus project credentials.                              | Project navigation (shared projects)   |
 | GitLab repository workspaces    | Connect a GitLab repository, not only GitHub.                                                                                      | New-project setup, repository step     |
@@ -30,6 +34,26 @@ This page summarizes recent changes that affect how people use SAM. Use it as a 
 | First-run setup wizard            | Configure platform integrations after deploy instead of pre-seeding secrets.       | `/setup` on a fresh deployment                   |
 | Namespaced self-host domains      | Run multiple SAM installations in one Cloudflare zone without hostname collisions. | Self-host deploy config (`RESOURCE_PREFIX`)      |
 | Default instant container runtime | New deployments use Cloudflare Containers for instant sessions by default.         | Self-host deploy config (`CF_CONTAINER_ENABLED`) |
+
+## Connect a subscription without a terminal
+
+Connecting Claude Code or OpenAI Codex to a paid subscription used to mean running `claude setup-token` or pasting the contents of `~/.codex/auth.json` — steps that are awkward on mobile and impossible without a local terminal. There's now a **guided sign-in**: choose **Connect with Claude Code** or **Connect with Codex**, open the provider's sign-in page, enter the short verification code SAM shows you, and the panel connects itself once the provider confirms.
+
+The manual token/`auth.json` fields are still there as a fallback, but you no longer need them for the common case. See [Connecting a subscription with guided sign-in](/docs/guides/agents/#connecting-a-subscription-with-guided-sign-in).
+
+## More clouds to bring your own compute
+
+SAM's Bring-Your-Own-Cloud model now spans **seven providers**. Vultr, DigitalOcean, UpCloud, and Infomaniak Public Cloud join the existing Hetzner, Scaleway, and Google Cloud support. Each provider brings its own regions and pricing, so you can put workspaces close to you or on the account you already pay for.
+
+Connect one under **Settings → Cloud Provider**: pick a provider, follow the linked console to create a credential, and paste it in. See [Bring Your Own Cloud](/docs/guides/creating-workspaces/#where-your-workspaces-run-bring-your-own-cloud) for the full provider table and [User VM Costs](/docs/guides/self-hosting/#user-vm-costs) for per-provider sizes and example pricing.
+
+## Claude Opus 5 is available
+
+Anthropic's **Claude Opus 5** — a frontier model with a 1M-token context window — is now selectable for Claude Code (and through the SAM AI proxy). Choose it in an [agent profile](/docs/guides/agents/#agent-profiles): the model you set on a profile is the model that runs when you pick that profile for a chat or attach it to a trigger.
+
+## Agent-generated markdown previews in place
+
+When an agent saves a file to a project's library — a written report, a plan, a summary — Markdown now renders inline in the chat and file views instead of downloading as a raw file. This is especially useful for instant-container sessions, where generated `.md`, `.txt`, `.yaml`, and similar text files previously showed up as undifferentiated downloads.
 
 ## Projects can be shared with a team
 
