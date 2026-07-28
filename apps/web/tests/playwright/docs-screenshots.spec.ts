@@ -18,7 +18,7 @@ import { resolve } from 'node:path';
 
 import { expect, type Page, type Route, test } from '@playwright/test';
 
-import { makeMockUser, seedTheme, setupAuditRoutes, type AuditResponder } from './audit-helpers';
+import { type AuditResponder, makeMockUser, seedTheme, setupAuditRoutes } from './audit-helpers';
 
 const MOCK_USER = makeMockUser({
   email: 'docs@example.com',
@@ -103,7 +103,8 @@ async function setupGuidedMocks(page: Page) {
     if (path === `/api/agent-credential-setup-sessions/${SETUP_SESSION.id}`) {
       return respond(200, SETUP_SESSION);
     }
-    if (path.startsWith('/api/notifications')) return respond(200, { notifications: [], unreadCount: 0 });
+    if (path.startsWith('/api/notifications'))
+      return respond(200, { notifications: [], unreadCount: 0 });
     if (path === '/api/projects') return respond(200, { projects: [] });
     if (path.startsWith('/api/github')) return respond(200, []);
     return respond(200, {});
@@ -171,7 +172,8 @@ async function setupCloudConnectMocks(page: Page) {
     if (path === '/api/credentials') return respond(200, []);
     if (path === '/api/credentials/agent') return respond(200, { credentials: [] });
     if (path === '/api/providers/catalog') return respond(200, { catalogs: [] });
-    if (path.startsWith('/api/notifications')) return respond(200, { notifications: [], unreadCount: 0 });
+    if (path.startsWith('/api/notifications'))
+      return respond(200, { notifications: [], unreadCount: 0 });
     if (path === '/api/projects') return respond(200, { projects: [] });
     if (path === '/api/github/installations') return respond(200, []);
     return undefined;

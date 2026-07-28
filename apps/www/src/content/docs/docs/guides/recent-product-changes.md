@@ -9,23 +9,23 @@ This page summarizes recent changes that affect how people use SAM. Use it as a 
 
 ### For everyone
 
-| Change                          | What users notice                                                                                                                  | Where to use it                        |
-| ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
-| Guided subscription sign-in     | Connect Claude Code or OpenAI Codex to your Claude Max/Pro or ChatGPT subscription with a browser sign-in — no terminal, no token paste. | **Settings → Connections**             |
-| More cloud providers            | Bring your own Vultr, DigitalOcean, UpCloud, or Infomaniak account, alongside Hetzner, Scaleway, and Google Cloud.                 | **Settings → Cloud Provider**          |
-| Claude Opus 5                   | Pick Anthropic's newest frontier model (1M-token context) when you configure an agent profile.                                     | Agent profile model picker             |
-| Markdown previews in the library | Markdown an agent saves to a project now renders inline instead of downloading as a file.                                          | Project chat & library                 |
-| Shared projects & roles         | Invite teammates with a link, approve access requests, and share profiles, skills, and secrets. Approved teammates join as admins. | Project **Settings → Access**          |
-| Credential attribution          | A **Credentials** indicator shows which shared work runs on personal keys versus project credentials.                              | Project navigation (shared projects)   |
-| GitLab repository workspaces    | Connect a GitLab repository, not only GitHub.                                                                                      | New-project setup, repository step     |
-| Project Files                   | Inspect a branch's file tree and diff without opening a VM.                                                                        | Project **Files** tab                  |
-| Forkable, task-backed chats     | Any chat can be forked, archived, and tracked with task lifecycle behavior.                                                        | Project chat sessions                  |
-| Focus Mode sidebars             | Collapse navigation and session sidebars for more room while chatting.                                                             | Project chat (desktop)                 |
-| GitHub event triggers           | GitHub issues, comments, pull requests, and pushes can start SAM work.                                                             | Project **Triggers** page              |
-| Generic webhook triggers        | Any external service can start SAM work by sending an authenticated JSON webhook.                                                  | Project **Triggers** page              |
-| GCP for provisioning            | Connect Google Cloud with Workload Identity Federation or a service-account JSON key to provision VMs.                             | **Settings → Connections**             |
-| Deployment custom domains       | Attach your own subdomain to a deployed app; SAM verifies DNS and activates the route without a full redeploy.                     | Deployment environment **Domains** tab |
-| Cleaner injected system context | SAM-injected bootstrap/context messages are collapsed so the chat reads like user-agent conversation.                              | Chat timeline                          |
+| Change                           | What users notice                                                                                                                        | Where to use it                        |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
+| Guided subscription sign-in      | Connect Claude Code or OpenAI Codex to your Claude Max/Pro or ChatGPT subscription with a browser sign-in — no terminal, no token paste. | **Settings → Connections**             |
+| More cloud providers             | Bring your own Vultr, DigitalOcean, UpCloud, or Infomaniak account, alongside Hetzner, Scaleway, and Google Cloud.                       | **Settings → Cloud Provider**          |
+| Claude Opus 5                    | Pick Anthropic's newest frontier model (1M-token context) when you configure an agent profile.                                           | Agent profile model picker             |
+| Markdown previews in the library | Markdown an agent saves to a project now renders inline instead of downloading as a file.                                                | Project chat & library                 |
+| Shared projects & roles          | Invite teammates with a link, approve access requests, and share profiles, skills, and secrets. Approved teammates join as admins.       | Project **Settings → Access**          |
+| Credential attribution           | A **Credentials** indicator shows which shared work runs on personal keys versus project credentials.                                    | Project navigation (shared projects)   |
+| GitLab repository workspaces     | Connect a GitLab repository, not only GitHub.                                                                                            | New-project setup, repository step     |
+| Project Files                    | Inspect a branch's file tree and diff without opening a VM.                                                                              | Project **Files** tab                  |
+| Forkable, task-backed chats      | Any chat can be forked, archived, and tracked with task lifecycle behavior.                                                              | Project chat sessions                  |
+| Focus Mode sidebars              | Collapse navigation and session sidebars for more room while chatting.                                                                   | Project chat (desktop)                 |
+| GitHub event triggers            | GitHub issues, comments, pull requests, and pushes can start SAM work.                                                                   | Project **Triggers** page              |
+| Generic webhook triggers         | Any external service can start SAM work by sending an authenticated JSON webhook.                                                        | Project **Triggers** page              |
+| GCP for provisioning             | Connect Google Cloud with Workload Identity Federation or a service-account JSON key to provision VMs.                                   | **Settings → Connections**             |
+| Deployment custom domains        | Attach your own subdomain to a deployed app; SAM verifies DNS and activates the route without a full redeploy.                           | Deployment environment **Domains** tab |
+| Cleaner injected system context  | SAM-injected bootstrap/context messages are collapsed so the chat reads like user-agent conversation.                                    | Chat timeline                          |
 
 ### For self-hosters & admins
 

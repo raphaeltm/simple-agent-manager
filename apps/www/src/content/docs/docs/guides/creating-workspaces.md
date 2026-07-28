@@ -23,15 +23,15 @@ SAM runs each workspace on a real cloud VM. On the **hosted platform**, compute 
 
 SAM supports seven providers:
 
-| Provider                    | Known for                       | What you connect                                                                    |
-| --------------------------- | ------------------------------- | ----------------------------------------------------------------------------------- |
-| **Hetzner**                 | European cloud, great value     | An API token with Read & Write access                                               |
-| **Scaleway**                | European cloud, GPU options     | An API key (access key + secret key) and project ID                                 |
-| **Vultr**                   | Global cloud, hourly billing    | A Personal Access Token with IP access set to **Allow All IPv4/IPv6**               |
-| **Infomaniak Public Cloud** | Swiss OpenStack cloud           | An application credential ID and secret                                             |
-| **DigitalOcean**            | Global cloud, simple droplets   | A Full Access Personal Access Token                                                 |
-| **UpCloud**                 | European cloud, global regions  | A dedicated API subaccount username and password                                    |
-| **Google Cloud**            | Google Cloud Platform           | Workload Identity Federation, or a service-account JSON key                          |
+| Provider                    | Known for                      | What you connect                                                      |
+| --------------------------- | ------------------------------ | --------------------------------------------------------------------- |
+| **Hetzner**                 | European cloud, great value    | An API token with Read & Write access                                 |
+| **Scaleway**                | European cloud, GPU options    | An API key (access key + secret key) and project ID                   |
+| **Vultr**                   | Global cloud, hourly billing   | A Personal Access Token with IP access set to **Allow All IPv4/IPv6** |
+| **Infomaniak Public Cloud** | Swiss OpenStack cloud          | An application credential ID and secret                               |
+| **DigitalOcean**            | Global cloud, simple droplets  | A Full Access Personal Access Token                                   |
+| **UpCloud**                 | European cloud, global regions | A dedicated API subaccount username and password                      |
+| **Google Cloud**            | Google Cloud Platform          | Workload Identity Federation, or a service-account JSON key           |
 
 ### Connecting a provider
 
