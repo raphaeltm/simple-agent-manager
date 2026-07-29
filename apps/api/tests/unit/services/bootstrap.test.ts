@@ -45,7 +45,7 @@ describe('Bootstrap Service', () => {
   });
 
   describe('storeBootstrapToken', () => {
-    it('should store token data in KV with 15-minute TTL', async () => {
+    it('should store token data in KV with the default TTL', async () => {
       const { storeBootstrapToken } = await import(
         '../../../src/services/bootstrap'
       );
@@ -167,7 +167,7 @@ describe('Bootstrap Service', () => {
         mockEnv
       );
 
-      // Verify TTL is set to 900 seconds (15 minutes)
+      // Verify the default TTL is used when no override is configured
       expect(mockKV.put).toHaveBeenCalledWith(
         expect.any(String),
         expect.any(String),
