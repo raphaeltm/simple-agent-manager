@@ -17,13 +17,13 @@ Bootstrap token redemption currently depends on KV `get` then `delete`, plus an 
 
 ## Checklist
 
-- [ ] Add a D1 migration for a bootstrap token consume ledger keyed by a non-secret token hash.
-- [ ] Register newly created bootstrap tokens in the ledger while preserving the existing KV payload format.
-- [ ] Redeem tokens only after an atomic D1 consume succeeds.
-- [ ] Add migration-safe handling for in-flight legacy KV-only tokens, using atomic insert-wins semantics.
-- [ ] Fail closed if the consume state is ambiguous or failed.
-- [ ] Update direct legacy bootstrap-token creation to register the ledger.
-- [ ] Add tests for concurrent redemption, single-use semantics, expired/missing tokens, and existing valid-token compatibility.
+- [x] Add a D1 migration for a bootstrap token consume ledger keyed by a non-secret token hash.
+- [x] Register newly created bootstrap tokens in the ledger while preserving the existing KV payload format.
+- [x] Redeem tokens only after an atomic D1 consume succeeds.
+- [x] Add migration-safe handling for in-flight legacy KV-only tokens, using atomic insert-wins semantics.
+- [x] Fail closed if the consume state is ambiguous or failed.
+- [x] Update direct legacy bootstrap-token creation to register the ledger.
+- [x] Add tests for concurrent redemption, single-use semantics, expired/missing tokens, and existing valid-token compatibility.
 - [ ] Run relevant validation and local specialist reviews.
 - [ ] Open a narrow PR and do not merge.
 
