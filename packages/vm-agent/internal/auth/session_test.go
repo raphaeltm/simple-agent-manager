@@ -183,3 +183,43 @@ func TestGetSessionForWorkspace_ExpiredScopedCookie(t *testing.T) {
 		t.Error("expected to fall back to legacy cookie when scoped session is expired")
 	}
 }
+
+func TestSessionManagerStopIsIdempotent(t *testing.T) {
+	sm := newTestSessionManager()
+
+	sm.Stop()
+	sm.Stop()
+}
+
+func TestSessionManagerStopIsSafeUnderConcurrentCalls(t *testing.T) {
+	sm := newTestSessionManager()
+
+	const callers = 16
+	done := make(chan struct{}, callers)
+	for i := 0; i < callers; i++ {
+		go func() {
+			sm.Stop()
+			done <- struct{}{}
+		}()
+	}
+
+	for i := 0; i < callers; i++ {
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("concurrent Stop calls did not return")
+		}
+	}
+}
+
+func TestSessionManagerStopWaitsForCleanupExit(t *testing.T) {
+	sm := newTestSessionManager()
+
+	sm.Stop()
+
+	select {
+	case <-sm.cleanupDone:
+	default:
+		t.Fatal("Stop returned before cleanup goroutine exited")
+	}
+}
