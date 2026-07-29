@@ -6,16 +6,50 @@ const workflow = readFileSync(
   new URL('../../.github/workflows/deploy-reusable.yml', import.meta.url),
   'utf8'
 );
+const syncWranglerConfig = readFileSync(
+  new URL('../deploy/sync-wrangler-config.ts', import.meta.url),
+  'utf8'
+);
 
 function stepBlock(stepName: string): string {
   const pattern = new RegExp(
     String.raw`      - name: ${stepName}[\s\S]*?(?=\n      - name:|\n      #|$)`
   );
-  const match = workflow.match(pattern);
+  const block = workflow.match(pattern)?.[0];
 
-  expect(match?.[0]).toBeDefined();
-  return match![0];
+  expect(block).toBeDefined();
+  if (!block) {
+    throw new Error(`Unable to find workflow step: ${stepName}`);
+  }
+  return block;
 }
+
+function extractOptionalWorkerEnvVars(): string[] {
+  const match = syncWranglerConfig.match(/getOptionalProcessEnvVars\(\[\s*([\s\S]*?)\s*\]\)/);
+  const optionalEnvBlock = match?.[1];
+
+  expect(optionalEnvBlock).toBeDefined();
+  if (!optionalEnvBlock) {
+    throw new Error('Unable to find sync-wrangler optional Worker env var list');
+  }
+
+  const vars = Array.from(optionalEnvBlock.matchAll(/'([A-Z0-9_]+)'/g), (varMatch) => varMatch[1]);
+  expect(vars).toContain('CF_CONTAINER_ENABLED');
+  expect(vars).toContain('SANDBOX_ENABLED');
+  expect(vars).toContain('MAX_CONCURRENT_SETUP_SESSIONS');
+
+  return vars;
+}
+
+const DIRECT_SYNC_ENV_MAPPINGS = {
+  PULUMI_STACK: 'PULUMI_STACK: ${{ steps.pulumi-select.outputs.stack_name }}',
+  CF_API_TOKEN: 'CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}',
+  CLOUDFLARE_API_TOKEN: 'CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}',
+  ARTIFACTS_BINDING_ENABLED: 'ARTIFACTS_BINDING_ENABLED: ${{ vars.ARTIFACTS_BINDING_ENABLED }}',
+  SETUP_FORCE: 'SETUP_FORCE: ${{ vars.SETUP_FORCE }}',
+  BASE_DOMAIN: 'BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}',
+  RESOURCE_PREFIX: 'RESOURCE_PREFIX: ${{ steps.prefix.outputs.value }}',
+} as const;
 
 describe('deploy reusable workflow', () => {
   it('runs D1 migrations and integrity checks before serving new API Worker code', () => {
@@ -40,17 +74,34 @@ describe('deploy reusable workflow', () => {
     expect(redeployAfterSecretsIndex).toBeGreaterThan(deployApiIndex);
   });
 
-  it('passes derived deployment identity into every Wrangler config sync phase', () => {
-    for (const name of [
-      'Sync Wrangler Config \\(API \\+ Tail Worker\\)',
-      'Re-sync Wrangler Config \\(add tail_consumers\\)',
-    ]) {
-      const block = stepBlock(name);
+  it('passes derived deployment identity through the shared Wrangler config sync env', () => {
+    const initialSync = stepBlock('Sync Wrangler Config \\(API \\+ Tail Worker\\)');
+    const firstDeployResync = stepBlock('Re-sync Wrangler Config \\(add tail_consumers\\)');
 
-      expect(block).toContain('pnpm tsx scripts/deploy/sync-wrangler-config.ts');
-      expect(block).toContain('BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}');
-      expect(block).toContain('RESOURCE_PREFIX: ${{ steps.prefix.outputs.value }}');
-      expect(block).toContain('ARTIFACTS_BINDING_ENABLED: ${{ vars.ARTIFACTS_BINDING_ENABLED }}');
+    expect(initialSync).toContain('pnpm tsx scripts/deploy/sync-wrangler-config.ts');
+    expect(initialSync).toContain('BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}');
+    expect(initialSync).toContain('RESOURCE_PREFIX: ${{ steps.prefix.outputs.value }}');
+    expect(initialSync).toContain(
+      'ARTIFACTS_BINDING_ENABLED: ${{ vars.ARTIFACTS_BINDING_ENABLED }}'
+    );
+
+    expect(firstDeployResync).toContain('pnpm tsx scripts/deploy/sync-wrangler-config.ts');
+    expect(firstDeployResync).toContain('<<: *wrangler_sync_env');
+  });
+
+  it('uses one complete env mapping for every Wrangler config sync invocation', () => {
+    const initialSync = stepBlock('Sync Wrangler Config \\(API \\+ Tail Worker\\)');
+    const firstDeployResync = stepBlock('Re-sync Wrangler Config \\(add tail_consumers\\)');
+
+    expect(initialSync).toContain('env: &wrangler_sync_env');
+    expect(firstDeployResync).toContain('<<: *wrangler_sync_env');
+
+    for (const mapping of Object.values(DIRECT_SYNC_ENV_MAPPINGS)) {
+      expect(initialSync).toContain(mapping);
+    }
+
+    for (const envVar of extractOptionalWorkerEnvVars()) {
+      expect(initialSync).toContain(`${envVar}: \${{ vars.${envVar} }}`);
     }
   });
 
