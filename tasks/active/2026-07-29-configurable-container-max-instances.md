@@ -17,14 +17,14 @@ Cloudflare container `max_instances` is checked into `apps/api/wrangler.toml` as
 
 ## Implementation checklist
 
-- [ ] Add centralized container max-instance config in the Wrangler sync script with defaults exactly `SandboxDO=6` and `VmAgentContainer=3`.
-- [ ] Add generic deployment environment variable names for overriding those limits.
-- [ ] Validate overrides as positive safe integers before generating Wrangler config.
-- [ ] Generate/sync container blocks from centralized config instead of copying static `max_instances` through unchanged.
-- [ ] Forward the new optional variables from `.github/workflows/deploy-reusable.yml`.
-- [ ] Add quality tests proving defaults remain `6` and `3`.
-- [ ] Add quality tests proving overrides are respected.
-- [ ] Add quality tests proving invalid overrides fail closed.
+- [x] Add centralized container max-instance config in the Wrangler sync script with defaults exactly `SandboxDO=6` and `VmAgentContainer=3`.
+- [x] Add generic deployment environment variable names for overriding those limits.
+- [x] Validate overrides as positive safe integers before generating Wrangler config.
+- [x] Generate/sync container blocks from centralized config instead of copying static `max_instances` through unchanged.
+- [x] Forward the new optional variables from `.github/workflows/deploy-reusable.yml`.
+- [x] Add quality tests proving defaults remain `6` and `3`.
+- [x] Add quality tests proving overrides are respected.
+- [x] Add quality tests proving invalid overrides fail closed.
 - [ ] Run local Cloudflare/config/test specialist reviews and address findings.
 - [ ] Open a PR against `main`, wait for CI, and do not merge.
 
