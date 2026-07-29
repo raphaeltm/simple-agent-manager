@@ -449,8 +449,10 @@ jobs:
           elif [ "$HTTP_CODE" -eq 409 ]; then
             echo "workers.dev subdomain already configured (OK)"
           else
-            echo "::warning::Failed to set workers.dev subdomain (HTTP ${HTTP_CODE}): ${BODY}"
-            echo "Cron triggers may not work. Initialize manually: CF Dashboard > Workers & Pages > Settings > Domains & Routes"
+            echo "::error::Failed to set workers.dev subdomain (HTTP ${HTTP_CODE}): ${BODY}"
+            echo "Deployment cannot continue because Cloudflare cron triggers require the workers.dev subdomain prerequisite."
+            echo "Initialize manually: CF Dashboard > Workers & Pages > Settings > Domains & Routes"
+            exit 1
           fi
 
       # Verify Pages custom domain is active (must run BEFORE Worker deploys wildcard routes)

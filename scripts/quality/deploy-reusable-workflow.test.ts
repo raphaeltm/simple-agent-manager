@@ -1,4 +1,7 @@
-import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
@@ -50,6 +53,56 @@ const DIRECT_SYNC_ENV_MAPPINGS = {
   BASE_DOMAIN: 'BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}',
   RESOURCE_PREFIX: 'RESOURCE_PREFIX: ${{ steps.prefix.outputs.value }}',
 } as const;
+function stepRunScript(stepName: string): string {
+  const block = stepBlock(stepName);
+  const runIndex = block.indexOf('        run: |\n');
+
+  expect(runIndex).toBeGreaterThan(-1);
+
+  return block
+    .slice(runIndex + '        run: |\n'.length)
+    .split('\n')
+    .filter((line) => line.startsWith('          ') || line.trim() === '')
+    .map((line) => (line.startsWith('          ') ? line.slice('          '.length) : line))
+    .join('\n');
+}
+
+function runWorkersDevSubdomainStep(httpCode: number): { output: string; status: number } {
+  const tmp = mkdtempSync(join(tmpdir(), 'sam-workers-dev-test-'));
+  const curlPath = join(tmp, 'curl');
+
+  writeFileSync(
+    curlPath,
+    `#!/usr/bin/env bash\nprintf 'fake-body\\n%s\\n' "$SAM_FAKE_HTTP_CODE"\n`
+  );
+  chmodSync(curlPath, 0o755);
+
+  try {
+    const output = execFileSync('bash', ['-c', stepRunScript('Ensure workers.dev Subdomain')], {
+      cwd: new URL('../..', import.meta.url),
+      env: {
+        ...process.env,
+        PATH: `${tmp}:${process.env.PATH ?? ''}`,
+        CF_ACCOUNT_ID: 'account-test',
+        CF_API_TOKEN: 'token-test',
+        RESOURCE_PREFIX: 'sam-test',
+        SAM_FAKE_HTTP_CODE: String(httpCode),
+      },
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    return { output, status: 0 };
+  } catch (error) {
+    const execError = error as { stdout?: Buffer | string; stderr?: Buffer | string; status?: number };
+    return {
+      output: `${execError.stdout?.toString() ?? ''}${execError.stderr?.toString() ?? ''}`,
+      status: execError.status ?? 1,
+    };
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+}
 
 describe('deploy reusable workflow', () => {
   it('runs D1 migrations and integrity checks before serving new API Worker code', () => {
@@ -222,5 +275,31 @@ describe('deploy reusable workflow', () => {
     // the deploy commit SHA so a running agent can be correlated to its artifact.
     expect(build).toContain('make -C packages/vm-agent build-all');
     expect(build).toContain('VERSION="$GITHUB_SHA"');
+  });
+
+  it('continues deployment when workers.dev subdomain setup succeeds', () => {
+    const result = runWorkersDevSubdomainStep(200);
+
+    expect(result.status).toBe(0);
+    expect(result.output).toContain('workers.dev subdomain ready: sam-test.workers.dev');
+  });
+
+  it('continues deployment when workers.dev subdomain is already enabled', () => {
+    const result = runWorkersDevSubdomainStep(409);
+
+    expect(result.status).toBe(0);
+    expect(result.output).toContain('workers.dev subdomain already configured (OK)');
+  });
+
+  it('fails closed when workers.dev subdomain setup fails', () => {
+    const result = runWorkersDevSubdomainStep(403);
+
+    expect(result.status).toBe(1);
+    expect(result.output).toContain(
+      '::error::Failed to set workers.dev subdomain (HTTP 403): fake-body'
+    );
+    expect(result.output).toContain(
+      'Deployment cannot continue because Cloudflare cron triggers require the workers.dev subdomain prerequisite.'
+    );
   });
 });
