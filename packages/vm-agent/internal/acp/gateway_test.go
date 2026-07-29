@@ -1714,6 +1714,7 @@ func TestWriteAgentStartupConfigNonCodexStandaloneIsNoop(t *testing.T) {
 func TestWriteCodexConfigLocallyCreatesFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
+	t.Setenv("CODEX_HOME", "")
 
 	servers := []McpServerEntry{
 		{URL: "https://api.example.com/mcp", Token: "test-token"},
@@ -1776,6 +1777,7 @@ func TestWriteCodexConfigLocallyRespectsCodexHome(t *testing.T) {
 func TestWriteCodexConfigLocallyMergesExistingConfig(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
+	t.Setenv("CODEX_HOME", "")
 
 	codexDir := filepath.Join(tmpDir, ".codex")
 	if err := os.MkdirAll(codexDir, 0o700); err != nil {
@@ -1811,6 +1813,7 @@ func TestWriteCodexConfigLocallyMergesExistingConfig(t *testing.T) {
 func TestWriteCodexConfigLocallyNoServersReturnsNil(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
+	t.Setenv("CODEX_HOME", "")
 
 	envVars, err := writeCodexConfigLocally(nil, nil, "")
 	if err != nil {
