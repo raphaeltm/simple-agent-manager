@@ -31,7 +31,7 @@ This task is a retry of the failed startup task `01KYQJ1P3FPQBDPCWFQ0SWPAYJ`; du
 - [x] Add focused Go tests for repeated and concurrent `SessionManager.Stop()`.
 - [x] Add focused Go tests proving `Server.Stop()` calls auth session cleanup and repeated `Server.Stop()` does not panic.
 - [x] Run relevant Go tests, including `-race` if feasible.
-- [ ] Run local `go-specialist`, `test-engineer`, and task-completion validation reviews and address findings.
+- [x] Run local `go-specialist`, `test-engineer`, and task-completion validation reviews and address findings.
 - [ ] Open a PR against `main`, wait for CI, and do not merge.
 
 ## Acceptance criteria
@@ -42,3 +42,22 @@ This task is a retry of the failed startup task `01KYQJ1P3FPQBDPCWFQ0SWPAYJ`; du
 - No external/public API changes are introduced.
 - Strong Go regression tests cover the shutdown idempotency contract and pass locally.
 - PR includes specialist review evidence, tests run, CI status, and a no-breaking-change rationale.
+
+
+## Validation evidence
+
+- `go test ./internal/auth ./internal/server` — passed.
+- `go test -race ./internal/auth ./internal/server` — passed.
+- `go test ./...` from `packages/vm-agent` — passed.
+
+## Specialist review evidence
+
+| Reviewer | Status | Outcome |
+| --- | --- | --- |
+| task-completion-validator | PASS | Research findings, checked checklist items, and acceptance criteria are represented in the diff/tests; no UI or multi-resource paths apply. |
+| go-specialist | PASS | Concurrency/resource lifecycle is bounded by `sync.Once`; no mutex is held during I/O; auth cleanup and server background shutdown are explicit. |
+| test-engineer | PASS | Regression tests cover repeated and concurrent Stop calls, cleanup goroutine exit, and race-targeted execution. |
+
+## No-breaking-change rationale
+
+The change adds only unexported synchronization fields and internal shutdown coordination. Existing constructors, methods, HTTP routes, config fields, and response shapes are unchanged. First-call shutdown behavior is preserved while repeated calls become safe no-ops that return the first shutdown result.
