@@ -30,10 +30,10 @@ Implement canonical idea `01KXN5YQ9TGN29ZZ8DP2DKAKHN` Phase 0.5: a superadmin-on
 - [x] Add unit and vertical-slice tests for auth, correlation, token non-exposure, redaction boundary, budgets, persistence, Idea creation, and UI wiring.
 - [x] Document new environment variables and local-admin PII versus model-secret posture.
 - [x] Run the mandatory local Playwright audit at 375x667 and 1280x800 with normal, long, empty, many, error, special-character, and minimal data.
-- [ ] Run full quality gates and task-completion validation.
-- [ ] Run cloudflare, security, UI/UX, env, constitution, docs, and test specialist reviews and address findings.
-- [ ] Coordinate staging with active/queued `deploy-staging.yml` and concurrent vm-agent work.
-- [ ] On staging, select/seed a real error, run Diagnose as superadmin, verify useful redacted persistence, save a draft Idea, enforce run/daily budgets, and observe zero errors.
+- [x] Run full quality gates and task-completion validation.
+- [x] Run cloudflare, security, UI/UX, env, constitution, docs, and test specialist reviews and address findings.
+- [x] Coordinate staging with active/queued `deploy-staging.yml` and concurrent vm-agent work.
+- [x] On staging, select/seed a real error, run Diagnose as superadmin, verify useful redacted persistence, save a draft Idea, enforce run/daily budgets, and observe zero errors.
 - [ ] Create PR, wait for all CI, merge, monitor the matching production deploy, and complete the SAM task.
 
 ## Acceptance Criteria
