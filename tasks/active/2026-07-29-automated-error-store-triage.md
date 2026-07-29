@@ -76,7 +76,7 @@ scope.
       concurrent/repeated dedup, redaction canary, separate-budget, and
       cron/manual-shared-path tests.
 - [x] Update environment/deployment references and relevant API documentation.
-- [ ] Rebase against main/sibling changes and rerun validation before staging.
+- [x] Rebase against main/sibling changes and rerun validation before staging.
 
 ## Acceptance criteria
 
