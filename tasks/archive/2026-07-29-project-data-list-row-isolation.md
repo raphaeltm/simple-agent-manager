@@ -22,9 +22,9 @@ Also fix the stale bootstrap TTL comment/test wording so it remains correct when
 - [x] Add a good/bad/good regression test for malformed message rows.
 - [x] Add an all-bad regression test returning an empty non-throwing list.
 - [x] Update stale bootstrap TTL comment/test wording without changing runtime behavior.
-- [ ] Run targeted tests and broader validation.
-- [ ] Run local reviewer/subagent checks for tests and code review.
-- [ ] Open PR, wait for CI, and do not merge.
+- [x] Run targeted tests and broader validation.
+- [x] Run local reviewer/subagent checks for tests and code review.
+- [x] Open PR, wait for CI, and do not merge.
 
 ## Acceptance criteria
 
