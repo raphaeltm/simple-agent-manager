@@ -13,7 +13,6 @@ import { decrypt, encrypt } from './encryption';
 
 /** KV key prefix for bootstrap tokens */
 const BOOTSTRAP_PREFIX = 'bootstrap:';
-const inFlightRedemptions = new Map<string, Promise<BootstrapTokenData | null>>();
 
 /** Default bootstrap token TTL in seconds (15 minutes) */
 const DEFAULT_BOOTSTRAP_TTL = 900;
@@ -23,6 +22,7 @@ interface BootstrapEnv {
   BOOTSTRAP_TOKEN_TTL_SECONDS?: string;
   ENCRYPTION_KEY: string;
   CREDENTIAL_ENCRYPTION_KEY?: string;
+  DATABASE: D1Database;
 }
 
 /** Get bootstrap TTL from env or use default (per constitution principle XI) */
@@ -74,6 +74,8 @@ export async function storeBootstrapToken(
     callbackTokenIv: encryptedCallbackToken.iv,
   };
 
+  await registerBootstrapTokenConsume(env.DATABASE, token, nowPlusSeconds(ttl));
+
   await kv.put(`${BOOTSTRAP_PREFIX}${token}`, JSON.stringify(storedData), {
     expirationTtl: ttl,
   });
@@ -94,61 +96,143 @@ export async function redeemBootstrapToken(
   env: BootstrapEnv
 ): Promise<BootstrapTokenData | null> {
   const key = `${BOOTSTRAP_PREFIX}${token}`;
-  const existing = inFlightRedemptions.get(key);
-  if (existing) {
+  const consumeState = await reserveBootstrapTokenConsume(env.DATABASE, token);
+  if (consumeState === 'rejected') {
     return null;
   }
 
-  const redemption = (async () => {
-    const data = await kv.get<BootstrapTokenData>(key, { type: 'json' });
+  const data = await kv.get<BootstrapTokenData>(key, { type: 'json' });
+  if (!data) {
+    return null;
+  }
 
-    if (!data) {
+  if (consumeState === 'legacy-claim-required') {
+    const claimed = await claimLegacyBootstrapTokenConsume(env.DATABASE, token, env);
+    if (!claimed) {
       return null;
     }
-
-    // Delete immediately to enforce single-use before decrypting or returning credentials.
-    await kv.delete(key);
-
-    if (data.encryptedCallbackToken && data.callbackTokenIv) {
-      const callbackToken = await decrypt(
-        data.encryptedCallbackToken,
-        data.callbackTokenIv,
-        getCredentialEncryptionKey(env)
-      );
-
-      return {
-        ...data,
-        callbackToken,
-      };
-    }
-
-    // Backward compatibility for bootstrap entries written before callback token encryption.
-    // This is intentionally bounded to entries still inside the configured bootstrap TTL
-    // plus a small clock-skew allowance; older plaintext records fail closed.
-    if (data.callbackToken && isLegacyPlaintextCallbackTokenStillRedeemable(data, env)) {
-      log.warn('bootstrap.legacy_plaintext_callback_token_redeemed', {
-        workspaceId: data.workspaceId,
-        createdAt: data.createdAt,
-      });
-      return data;
-    }
-
-    if (data.callbackToken) {
-      log.warn('bootstrap.legacy_plaintext_callback_token_rejected', {
-        workspaceId: data.workspaceId,
-        createdAt: data.createdAt,
-      });
-    }
-
-    throw new Error('Bootstrap token data is missing callback token material');
-  })();
-
-  inFlightRedemptions.set(key, redemption);
-  try {
-    return await redemption;
-  } finally {
-    inFlightRedemptions.delete(key);
   }
+
+  // Delete after the D1 consume decision. If payload handling later fails, the D1
+  // row remains consumed so ambiguous/failed redemption is fail-closed.
+  await kv.delete(key);
+
+  if (data.encryptedCallbackToken && data.callbackTokenIv) {
+    const callbackToken = await decrypt(
+      data.encryptedCallbackToken,
+      data.callbackTokenIv,
+      getCredentialEncryptionKey(env)
+    );
+
+    return {
+      ...data,
+      callbackToken,
+    };
+  }
+
+  // Backward compatibility for bootstrap entries written before callback token encryption.
+  // This is intentionally bounded to entries still inside the configured bootstrap TTL
+  // plus a small clock-skew allowance; older plaintext records fail closed.
+  if (data.callbackToken && isLegacyPlaintextCallbackTokenStillRedeemable(data, env)) {
+    log.warn('bootstrap.legacy_plaintext_callback_token_redeemed', {
+      workspaceId: data.workspaceId,
+      createdAt: data.createdAt,
+    });
+    return data;
+  }
+
+  if (data.callbackToken) {
+    log.warn('bootstrap.legacy_plaintext_callback_token_rejected', {
+      workspaceId: data.workspaceId,
+      createdAt: data.createdAt,
+    });
+  }
+
+  throw new Error('Bootstrap token data is missing callback token material');
+}
+
+export async function registerBootstrapTokenConsume(
+  db: D1Database,
+  token: string,
+  expiresAt: string
+): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO bootstrap_token_consumes (token_hash, created_at, expires_at)
+       VALUES (?, ?, ?)`
+    )
+    .bind(await hashBootstrapToken(token), new Date().toISOString(), expiresAt)
+    .run();
+}
+
+type BootstrapConsumeState = 'consumed' | 'legacy-claim-required' | 'rejected';
+
+async function reserveBootstrapTokenConsume(
+  db: D1Database,
+  token: string
+): Promise<BootstrapConsumeState> {
+  const now = new Date().toISOString();
+  const tokenHash = await hashBootstrapToken(token);
+
+  const updated = await db
+    .prepare(
+      `UPDATE bootstrap_token_consumes
+       SET consumed_at = ?
+       WHERE token_hash = ?
+         AND consumed_at IS NULL
+         AND expires_at > ?`
+    )
+    .bind(now, tokenHash, now)
+    .run();
+
+  if (d1Changes(updated) === 1) {
+    return 'consumed';
+  }
+
+  const existing = await db
+    .prepare('SELECT token_hash FROM bootstrap_token_consumes WHERE token_hash = ?')
+    .bind(tokenHash)
+    .first('token_hash');
+
+  return existing ? 'rejected' : 'legacy-claim-required';
+}
+
+async function claimLegacyBootstrapTokenConsume(
+  db: D1Database,
+  token: string,
+  env: Pick<BootstrapEnv, 'BOOTSTRAP_TOKEN_TTL_SECONDS'>
+): Promise<boolean> {
+  const now = new Date().toISOString();
+
+  // Migration-safe compatibility for unexpired tokens that were written to KV
+  // before the D1 ledger existed, or direct legacy producers that only wrote KV.
+  // The unique token_hash insert is the atomic cross-isolate claim: one request
+  // can create the consumed row, all duplicates fail closed.
+  const legacyClaim = await db
+    .prepare(
+      `INSERT OR IGNORE INTO bootstrap_token_consumes (token_hash, created_at, expires_at, consumed_at)
+       VALUES (?, ?, ?, ?)`
+    )
+    .bind(await hashBootstrapToken(token), now, nowPlusSeconds(getBootstrapTTL(env)), now)
+    .run();
+
+  return d1Changes(legacyClaim) === 1;
+}
+
+function d1Changes(result: D1Result<unknown>): number {
+  return typeof result.meta?.changes === 'number' ? result.meta.changes : 0;
+}
+
+async function hashBootstrapToken(token: string): Promise<string> {
+  const bytes = new TextEncoder().encode(token);
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+function nowPlusSeconds(seconds: number): string {
+  return new Date(Date.now() + seconds * 1000).toISOString();
 }
 
 function isLegacyPlaintextCallbackTokenStillRedeemable(

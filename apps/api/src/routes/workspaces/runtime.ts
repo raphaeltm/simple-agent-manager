@@ -33,6 +33,7 @@ import {
   MessageBatchSchema,
 } from '../../schemas';
 import { appendBootLog } from '../../services/boot-log';
+import { registerBootstrapTokenConsume } from '../../services/bootstrap';
 import { syncActiveAgentCredentialSecret } from '../../services/composable-credentials/agent-sync';
 import { decrypt, encrypt } from '../../services/encryption';
 import { getInstallationToken, getUserInstallationRepositories } from '../../services/github-app';
@@ -1567,6 +1568,12 @@ runtimeRoutes.post('/:id/bootstrap-token', requireAuth(), requireApproved(), asy
     gitUserEmail: null,
     createdAt: now,
   };
+
+  await registerBootstrapTokenConsume(
+    c.env.DATABASE,
+    bootstrapToken,
+    new Date(Date.now() + 60 * 1000).toISOString()
+  );
 
   await c.env.KV.put(`bootstrap:${bootstrapToken}`, JSON.stringify(data), {
     expirationTtl: 60,
