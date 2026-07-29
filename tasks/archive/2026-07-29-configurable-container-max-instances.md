@@ -25,8 +25,8 @@ Cloudflare container `max_instances` is checked into `apps/api/wrangler.toml` as
 - [x] Add quality tests proving defaults remain `6` and `3`.
 - [x] Add quality tests proving overrides are respected.
 - [x] Add quality tests proving invalid overrides fail closed.
-- [ ] Run local Cloudflare/config/test specialist reviews and address findings.
-- [ ] Open a PR against `main`, wait for CI, and do not merge.
+- [x] Run local Cloudflare/config/test specialist reviews and address findings.
+- [x] Open a PR against `main`, wait for CI, and do not merge.
 
 ## Acceptance criteria
 
