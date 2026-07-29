@@ -108,6 +108,9 @@ type Server struct {
 	callbackToken       string
 	httpClient          *http.Client // shared HTTP client with timeout for control-plane callbacks
 	done                chan struct{}
+	stopOnce            sync.Once
+	stopErrMu           sync.Mutex
+	stopErr             error
 	publishJobsMu       sync.Mutex
 	publishJobs         map[string]publishJobState
 	buildPublishRunner  func(context.Context, *preparedBuildPublish, publish.EventSink) (*publish.ReleaseResult, error)
@@ -968,46 +971,57 @@ func (s *Server) StopAllWorkspacesAndSessions() {
 
 // Stop gracefully stops the server.
 func (s *Server) Stop(ctx context.Context) error {
-	// Signal background goroutines to stop.
-	close(s.done)
+	s.stopOnce.Do(func() {
+		// Signal background goroutines to stop.
+		close(s.done)
 
-	// Stop all port scanners
-	s.stopAllPortScanners()
+		// Stop all port scanners
+		s.stopAllPortScanners()
 
-	// Close JWT validator
-	s.jwtValidator.Close()
+		// Stop browser auth session cleanup.
+		s.sessionManager.Stop()
 
-	s.sessionHostMu.Lock()
-	for key, host := range s.sessionHosts {
-		if host != nil {
-			host.Stop()
+		// Close JWT validator
+		s.jwtValidator.Close()
+
+		s.sessionHostMu.Lock()
+		for key, host := range s.sessionHosts {
+			if host != nil {
+				host.Stop()
+			}
+			delete(s.sessionHosts, key)
 		}
-		delete(s.sessionHosts, key)
-	}
-	s.sessionHostMu.Unlock()
+		s.sessionHostMu.Unlock()
 
-	// Close all workspace PTY sessions.
-	s.workspaceMu.Lock()
-	for _, runtime := range s.workspaces {
-		runtime.PTY.CloseAllSessions()
-	}
-	s.workspaceMu.Unlock()
-
-	// Flush and stop error reporter
-	s.errorReporter.Shutdown()
-
-	// Flush and stop all per-workspace message reporters
-	s.shutdownAllReporters()
-
-	// Close persistence store
-	if s.store != nil {
-		if err := s.store.Close(); err != nil {
-			slog.Warn("Failed to close persistence store", "error", err)
+		// Close all workspace PTY sessions.
+		s.workspaceMu.Lock()
+		for _, runtime := range s.workspaces {
+			runtime.PTY.CloseAllSessions()
 		}
-	}
+		s.workspaceMu.Unlock()
 
-	// Shutdown HTTP server
-	return s.httpServer.Shutdown(ctx)
+		// Flush and stop error reporter
+		s.errorReporter.Shutdown()
+
+		// Flush and stop all per-workspace message reporters
+		s.shutdownAllReporters()
+
+		// Close persistence store
+		if s.store != nil {
+			if err := s.store.Close(); err != nil {
+				slog.Warn("Failed to close persistence store", "error", err)
+			}
+		}
+
+		// Shutdown HTTP server
+		stopErr := s.httpServer.Shutdown(ctx)
+		s.stopErrMu.Lock()
+		s.stopErr = stopErr
+		s.stopErrMu.Unlock()
+	})
+	s.stopErrMu.Lock()
+	defer s.stopErrMu.Unlock()
+	return s.stopErr
 }
 
 // setupRoutes configures the HTTP routes.

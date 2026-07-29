@@ -32,6 +32,8 @@ type SessionManager struct {
 	maxSessions     int
 	cookieDomain    string // Domain for cookie sharing across subdomains (e.g., ".example.com")
 	stopCleanup     chan struct{}
+	cleanupDone     chan struct{}
+	stopOnce        sync.Once
 }
 
 // SessionManagerConfig holds configuration for the session manager.
@@ -67,6 +69,7 @@ func NewSessionManagerWithConfig(cfg SessionManagerConfig) *SessionManager {
 		maxSessions:     cfg.MaxSessions,
 		cookieDomain:    cfg.CookieDomain,
 		stopCleanup:     make(chan struct{}),
+		cleanupDone:     make(chan struct{}),
 	}
 
 	// Start cleanup goroutine
@@ -262,6 +265,7 @@ func (sm *SessionManager) ClearCookie(w http.ResponseWriter) {
 func (sm *SessionManager) cleanup() {
 	ticker := time.NewTicker(sm.cleanupInterval)
 	defer ticker.Stop()
+	defer close(sm.cleanupDone)
 
 	for {
 		select {
@@ -288,7 +292,10 @@ func (sm *SessionManager) cleanup() {
 
 // Stop stops the cleanup goroutine.
 func (sm *SessionManager) Stop() {
-	close(sm.stopCleanup)
+	sm.stopOnce.Do(func() {
+		close(sm.stopCleanup)
+	})
+	<-sm.cleanupDone
 }
 
 // generateSessionID generates a random session ID.
