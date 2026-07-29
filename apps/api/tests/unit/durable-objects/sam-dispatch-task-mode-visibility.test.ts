@@ -158,6 +158,9 @@ describe('SAM dispatch_task taskMode visibility', () => {
         taskMode: 'task',
       }),
     );
+    const taskRunnerInput = mocks.startTaskRunnerDO.mock.calls[0]?.[1];
+    expect(taskRunnerInput.branch).toBe(taskRunnerInput.outputBranch);
+    expect(taskRunnerInput.branch).toMatch(/^sam\//);
   });
 
   it('blocks before provisioning when SAM-session GitHub owner access is revoked', async () => {

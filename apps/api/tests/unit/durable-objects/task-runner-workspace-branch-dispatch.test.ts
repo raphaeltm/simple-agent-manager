@@ -10,8 +10,8 @@ vi.mock('../../../src/services/node-agent', () => ({ createWorkspaceOnNode: mock
 vi.mock('../../../src/services/jwt', () => ({ signCallbackToken: mocks.signCallbackToken }));
 vi.mock('../../../src/services/workspace-git-source', () => ({ resolveWorkspaceGitSource: mocks.resolveWorkspaceGitSource }));
 
-import { handleWorkspaceDispatch } from '../../../src/durable-objects/task-runner/workspace-steps';
 import type { TaskRunnerContext, TaskRunnerState } from '../../../src/durable-objects/task-runner/types';
+import { handleWorkspaceDispatch } from '../../../src/durable-objects/task-runner/workspace-steps';
 
 function makeState(branch: string, outputBranch: string): TaskRunnerState {
   return {
@@ -64,6 +64,7 @@ describe('TaskRunner workspace branch dispatch', () => {
     ['explicit continuation branch', 'feature/existing-work', 'sam/continuation-output-def456'],
   ])('sends the %s in the outbound create-workspace payload', async (_scenario, branch, outputBranch) => {
     await handleWorkspaceDispatch(makeState(branch, outputBranch), makeContext());
+    expect(mocks.createWorkspaceOnNode).toHaveBeenCalledOnce();
     expect(mocks.createWorkspaceOnNode).toHaveBeenCalledWith(
       'node-1', expect.any(Object), 'user-1',
       expect.objectContaining({ workspaceId: 'workspace-1', branch }),
