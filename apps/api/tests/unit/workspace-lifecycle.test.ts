@@ -15,6 +15,48 @@ import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
+import type {
+  TaskRunnerContext,
+  TaskRunnerState,
+} from '../../src/durable-objects/task-runner/types';
+import { handleWorkspaceReady } from '../../src/durable-objects/task-runner/workspace-steps';
+
+function makeWorkspaceReadyState(overrides: Partial<TaskRunnerState> = {}): TaskRunnerState {
+  return {
+    taskId: 'task-ready-1',
+    projectId: 'project-1',
+    userId: 'user-1',
+    completed: false,
+    currentStep: 'workspace_ready',
+    stepResults: { workspaceId: 'workspace-1', nodeId: 'node-1' },
+    retryCount: 0,
+    config: { attachments: [] },
+    ...overrides,
+  } as TaskRunnerState;
+}
+
+function makeWorkspaceReadyContext(options?: {
+  timeoutMs?: number;
+  workspaceRow?: { status: string; error_message: string | null };
+}): TaskRunnerContext {
+  const prepare = (query: string) => ({
+    bind: () => ({
+      first: async () =>
+        query.includes('SELECT dispatched_at')
+          ? { dispatched_at: '2026-07-29T00:00:00.000Z' }
+          : (options?.workspaceRow ?? { status: 'creating', error_message: null }),
+    }),
+  });
+  return {
+    env: { DATABASE: { prepare } },
+    ctx: { storage: { put: async () => undefined, setAlarm: async () => undefined } },
+    updateD1ExecutionStep: async () => undefined,
+    advanceToStep: async () => undefined,
+    getWorkspaceReadyTimeoutMs: () => options?.timeoutMs ?? 30_000,
+    getWorkspaceReadyPollIntervalMs: () => 1_000,
+  } as unknown as TaskRunnerContext;
+}
+
 const doSource = [
   'index.ts',
   'types.ts',
@@ -23,7 +65,9 @@ const doSource = [
   'agent-session-step.ts',
   'state-machine.ts',
   'helpers.ts',
-].map(f => readFileSync(resolve(process.cwd(), 'src/durable-objects/task-runner', f), 'utf8')).join('\n');
+]
+  .map((f) => readFileSync(resolve(process.cwd(), 'src/durable-objects/task-runner', f), 'utf8'))
+  .join('\n');
 const routeSource = [
   readFileSync(resolve(process.cwd(), 'src/routes/workspaces/lifecycle.ts'), 'utf8'),
   readFileSync(resolve(process.cwd(), 'src/routes/workspaces/runtime.ts'), 'utf8'),
@@ -62,20 +106,30 @@ describe('handleWorkspaceReady — callback-driven with D1 polling safety net', 
     expect(wsReadySection).toContain("state.workspaceReadyStatus === 'recovery'");
   });
 
-  it('throws permanent error on error status', () => {
-    expect(wsReadySection).toContain("state.workspaceReadyStatus === 'error'");
-    expect(wsReadySection).toContain('{ permanent: true }');
-    expect(wsReadySection).toContain('Workspace creation failed');
+  it('throws permanent error on error status', async () => {
+    const state = makeWorkspaceReadyState({
+      workspaceReadyReceived: true,
+      workspaceReadyStatus: 'error',
+      workspaceErrorMessage: 'provisioning failed',
+    });
+    await expect(handleWorkspaceReady(state, makeWorkspaceReadyContext())).rejects.toMatchObject({
+      message: 'provisioning failed',
+      permanent: true,
+    });
   });
 
   it('uses workspace error message when available', () => {
     expect(wsReadySection).toContain('state.workspaceErrorMessage');
   });
 
-  it('checks timeout when no callback received', () => {
-    expect(wsReadySection).toContain('rc.getWorkspaceReadyTimeoutMs()');
-    expect(wsReadySection).toContain('Workspace did not become ready within');
-    expect(wsReadySection).toContain('{ permanent: true }');
+  it('checks timeout when no callback received', async () => {
+    const state = makeWorkspaceReadyState({ workspaceReadyStartedAt: Date.now() - 100 });
+    await expect(
+      handleWorkspaceReady(state, makeWorkspaceReadyContext({ timeoutMs: 1 }))
+    ).rejects.toMatchObject({
+      message: 'Workspace did not become ready within 1ms',
+      permanent: true,
+    });
   });
 
   it('initializes timeout tracking on first entry', () => {
@@ -153,7 +207,7 @@ describe('advanceWorkspaceReady — callback signal handling', () => {
     // The alarm is only set when currentStep === 'workspace_ready'.
     // For other steps, the signal is just persisted and the existing
     // alarm flow will pick it up when it reaches workspace_ready.
-    const alarmSetLine = advanceSection.indexOf("setAlarm(Date.now())");
+    const alarmSetLine = advanceSection.indexOf('setAlarm(Date.now())');
     const conditionalCheck = advanceSection.indexOf("state.currentStep === 'workspace_ready'");
     // The alarm set should appear AFTER the conditional check
     expect(conditionalCheck).toBeLessThan(alarmSetLine);
@@ -186,9 +240,7 @@ describe('advanceWorkspaceReady — callback signal handling', () => {
 describe('/ready route — inline DO notification (TDF-5)', () => {
   // Extract the /ready handler
   const readyHandlerStart = routeSource.indexOf("lifecycleRoutes.post('/:id/ready'");
-  const readyHandlerEnd = routeSource.indexOf(
-    "lifecycleRoutes.post('/:id/provisioning-failed'"
-  );
+  const readyHandlerEnd = routeSource.indexOf("lifecycleRoutes.post('/:id/provisioning-failed'");
   const readyHandler = routeSource.slice(readyHandlerStart, readyHandlerEnd);
 
   it('calls advanceTaskRunnerWorkspaceReady inline (not in waitUntil)', () => {
@@ -291,9 +343,7 @@ describe('/restart and /rebuild routes — GitHub owner access preflight', () =>
 
 describe('/provisioning-failed route — inline DO notification (TDF-5)', () => {
   // Extract the /provisioning-failed handler
-  const failedHandlerStart = routeSource.indexOf(
-    "lifecycleRoutes.post('/:id/provisioning-failed'"
-  );
+  const failedHandlerStart = routeSource.indexOf("lifecycleRoutes.post('/:id/provisioning-failed'");
   // End at the close of lifecycle.ts (the provisioning-failed handler is the
   // last route in that file). Using a runtime.ts route as the boundary would
   // wrongly pull unrelated runtime.ts code (e.g. waitUntil helpers) into the
@@ -458,8 +508,16 @@ describe('workspace ready timeout and polling alarm strategy', () => {
     expect(wsReadySection).toContain('Math.max(timeoutMs - elapsed, 0)');
   });
 
-  it('uses permanent error flag for timeout', () => {
-    expect(wsReadySection).toContain("{ permanent: true }");
+  it('uses permanent error flag for D1 provisioning failures', async () => {
+    const state = makeWorkspaceReadyState();
+    await expect(
+      handleWorkspaceReady(
+        state,
+        makeWorkspaceReadyContext({
+          workspaceRow: { status: 'error', error_message: 'D1 provisioning failure' },
+        })
+      )
+    ).rejects.toMatchObject({ message: 'D1 provisioning failure', permanent: true });
   });
 
   it('includes timeout duration in error message', () => {
