@@ -18,8 +18,8 @@ The public deployment/self-hosting docs and checked-in Worker secret inventory c
 - [x] Update the `wrangler.toml` Worker secret inventory comment to match configured secrets.
 - [x] Update public self-hosting/security docs to clarify generated Worker secrets, optional fallback secrets, and legacy Origin CA cleanup.
 - [x] Add a quality check that compares `configure-secrets.sh` `set_worker_secret` calls with the `wrangler.toml` inventory comment.
-- [ ] Run targeted checks.
-- [ ] Run doc-sync and env-validator reviews.
+- [x] Run targeted checks.
+- [x] Run doc-sync and env-validator reviews.
 - [ ] Open PR and wait for CI without merging.
 
 ## Acceptance criteria
