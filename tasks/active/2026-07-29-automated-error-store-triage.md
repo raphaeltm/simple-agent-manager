@@ -93,9 +93,9 @@ scope.
       changing the interactive debug-agent budget.
 - [x] Canary secrets, authorization material, email/IP/user-agent values, and
       raw user identifiers do not appear in generated Idea title/description.
-- [ ] Local lint, typecheck, tests, build, migration-safety checks, and all
+- [x] Local lint, typecheck, tests, build, migration-safety checks, and all
       required specialist reviews pass.
-- [ ] Staging deployment is green; a controlled manual tick creates or updates a
+- [x] Staging deployment is green; a controlled manual tick creates or updates a
       redacted draft Idea with dedup metadata visible in D1/UI.
 - [ ] PR CI is green, the PR is merged, and the matching successful production
       deployment completes.
