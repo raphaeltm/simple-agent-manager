@@ -1574,6 +1574,7 @@ func TestBuildOpencodeConfig_CustomProviderEmitsOpenAICompatibleBlock(t *testing
 func TestWriteAgentStartupConfigCodexStandaloneWritesMcpConfig(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
+	t.Setenv("CODEX_HOME", "")
 
 	h := &SessionHost{
 		config: SessionHostConfig{
@@ -1603,15 +1604,83 @@ func TestWriteAgentStartupConfigCodexStandaloneWritesMcpConfig(t *testing.T) {
 	if !strings.Contains(string(data), "sam-mcp") {
 		t.Error("config.toml missing SAM MCP server entry")
 	}
-
-	foundToken := false
-	for _, ev := range startup.envVars {
-		if strings.HasPrefix(ev, "SAM_MCP_TOKEN=") {
-			foundToken = true
-		}
+	if !strings.Contains(string(data), `url = "https://api.example.com/mcp"`) {
+		t.Errorf("config.toml missing exact SAM MCP URL: %s", data)
 	}
-	if !foundToken {
-		t.Errorf("SAM_MCP_TOKEN not injected into startup.envVars for standalone Codex: %v", startup.envVars)
+	if !strings.Contains(string(data), `bearer_token_env_var = "SAM_MCP_TOKEN"`) {
+		t.Errorf("config.toml missing SAM MCP bearer env reference: %s", data)
+	}
+	assertEnvContains(t, startup.envVars, "SAM_MCP_TOKEN", "test-standalone-token")
+}
+
+func TestWriteAgentStartupConfigCodexContainerKeepsConfigAndEnvContract(t *testing.T) {
+	tmpDir := t.TempDir()
+	capturedConfig := filepath.Join(tmpDir, "config.toml")
+	fakeDocker := filepath.Join(tmpDir, "docker")
+	script := `#!/bin/sh
+case " $* " in
+  *" printenv CODEX_HOME "*) exit 1 ;;
+  *" id -un "*) exit 1 ;;
+  *" printenv HOME "*) printf '/home/testuser\n'; exit 0 ;;
+  *" test -f "*) exit 1 ;;
+  *" tee /home/testuser/.codex/config.toml "*) cat > "$FAKE_CODEX_CONFIG"; exit 0 ;;
+  *) exit 0 ;;
+esac
+`
+	if err := os.WriteFile(fakeDocker, []byte(script), 0o700); err != nil {
+		t.Fatalf("write fake docker: %v", err)
+	}
+	t.Setenv("PATH", tmpDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("FAKE_CODEX_CONFIG", capturedConfig)
+
+	h := &SessionHost{config: SessionHostConfig{
+		GatewayConfig: GatewayConfig{
+			McpServers:    []McpServerEntry{{URL: "https://api.example.com/mcp", Token: "container-token"}},
+			WorkspaceID:   "ws-container",
+			ContainerUser: "testuser",
+		},
+	}}
+	startup := &agentStartup{containerID: "container-123"}
+
+	if err := h.writeAgentStartupConfig(context.Background(), "openai-codex", nil, startup); err != nil {
+		t.Fatalf("container Codex startup config failed: %v", err)
+	}
+	data, err := os.ReadFile(capturedConfig)
+	if err != nil {
+		t.Fatalf("read captured container config: %v", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, `[mcp_servers.sam-mcp]`) ||
+		!strings.Contains(content, `url = "https://api.example.com/mcp"`) ||
+		!strings.Contains(content, `bearer_token_env_var = "SAM_MCP_TOKEN"`) {
+		t.Fatalf("container config contract changed: %s", content)
+	}
+	assertEnvContains(t, startup.envVars, "SAM_MCP_TOKEN", "container-token")
+}
+
+func TestWriteAgentStartupConfigCodexMissingMcpTokenFailsClosed(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("HOME", tmpDir)
+	t.Setenv("CODEX_HOME", "")
+	h := &SessionHost{config: SessionHostConfig{GatewayConfig: GatewayConfig{
+		McpServers:  []McpServerEntry{{URL: "https://api.example.com/mcp"}},
+		WorkspaceID: "ws-missing-token",
+	}}}
+	startup := &agentStartup{containerID: ""}
+
+	err := h.writeAgentStartupConfig(context.Background(), "openai-codex", nil, startup)
+	if err == nil {
+		t.Fatal("expected missing SAM MCP token to prevent Codex startup")
+	}
+	if !strings.Contains(err.Error(), "missing its bearer token") || !strings.Contains(err.Error(), "SAM_MCP_TOKEN") {
+		t.Fatalf("expected clear missing-token diagnostic, got: %v", err)
+	}
+	if len(startup.envVars) != 0 {
+		t.Fatalf("failed startup must not inject partial env, got: %v", startup.envVars)
+	}
+	configPath := filepath.Join(tmpDir, ".codex", "config.toml")
+	if _, statErr := os.Stat(configPath); !os.IsNotExist(statErr) {
+		t.Fatalf("failed startup must not write config, stat error: %v", statErr)
 	}
 }
 

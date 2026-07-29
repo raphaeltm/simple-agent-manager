@@ -91,6 +91,15 @@ For every caller that supplies security- or identity-sensitive metadata:
   external request.
 - Re-check deferred/replay paths separately from the primary dispatch path.
 
+### Agent Startup Generated-Config Boundaries
+
+When vm-agent generates an agent config file plus sibling process environment
+variables (for example Codex `config.toml` plus `SAM_MCP_TOKEN`), tests MUST
+exercise every supported runtime path through the real startup writer. Assert the
+actual file content and the exact environment values together; testing the pure
+generator alone is insufficient. Include a missing required secret case and prove
+startup fails closed before launching the agent.
+
 ### Why This Rule Exists
 
 The R2 file upload feature shipped with two cross-boundary contract mismatches:
