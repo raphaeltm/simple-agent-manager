@@ -67,7 +67,7 @@ describe('TaskRunner workspace branch dispatch', () => {
     expect(mocks.createWorkspaceOnNode).toHaveBeenCalledOnce();
     expect(mocks.createWorkspaceOnNode).toHaveBeenCalledWith(
       'node-1', expect.any(Object), 'user-1',
-      expect.objectContaining({ workspaceId: 'workspace-1', branch, baseBranch }),
+      expect.objectContaining({ workspaceId: 'workspace-1', branch, baseBranch, defaultBranch: 'main' }),
     );
   });
 });

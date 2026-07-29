@@ -35,6 +35,7 @@ type WorkspaceMetadata struct {
 	Repository             string `json:"repository"`
 	Branch                 string `json:"branch"`
 	BaseBranch             string `json:"baseBranch,omitempty"`
+	DefaultBranch          string `json:"defaultBranch,omitempty"`
 	ContainerWorkDir       string `json:"containerWorkDir"`
 	ContainerUser          string `json:"containerUser"`
 	ContainerLabelVal      string `json:"containerLabelValue"`
@@ -150,6 +151,7 @@ func (s *Store) migrate() error {
 		migrateV7,
 		migrateV8,
 		migrateV9,
+		migrateV10,
 	}
 
 	for i := version; i < len(migrations); i++ {
@@ -230,9 +232,9 @@ func (s *Store) UpsertWorkspaceMetadata(meta WorkspaceMetadata) error {
 
 	_, err = s.db.Exec(
 		`INSERT OR REPLACE INTO workspace_metadata
-			(workspace_id, repository, branch, container_work_dir, container_user, container_label_value, workspace_dir, callback_token, repo_provider, clone_url, repository_host, repository_path, lightweight, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		meta.WorkspaceID, meta.Repository, meta.Branch, meta.ContainerWorkDir,
+			(workspace_id, repository, branch, base_branch, default_branch, container_work_dir, container_user, container_label_value, workspace_dir, callback_token, repo_provider, clone_url, repository_host, repository_path, lightweight, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		meta.WorkspaceID, meta.Repository, meta.Branch, meta.BaseBranch, meta.DefaultBranch, meta.ContainerWorkDir,
 		meta.ContainerUser, meta.ContainerLabelVal, meta.WorkspaceDir, callbackToken,
 		meta.RepoProvider, meta.CloneURL, meta.RepositoryHost, meta.RepositoryPath,
 		meta.Lightweight, meta.UpdatedAt,
@@ -251,10 +253,10 @@ func (s *Store) GetWorkspaceMetadata(workspaceID string) (*WorkspaceMetadata, er
 
 	var m WorkspaceMetadata
 	err := s.db.QueryRow(
-		`SELECT workspace_id, repository, branch, container_work_dir, container_user, container_label_value, workspace_dir, callback_token, repo_provider, clone_url, repository_host, repository_path, lightweight, updated_at
+		`SELECT workspace_id, repository, branch, base_branch, default_branch, container_work_dir, container_user, container_label_value, workspace_dir, callback_token, repo_provider, clone_url, repository_host, repository_path, lightweight, updated_at
 		FROM workspace_metadata WHERE workspace_id = ?`,
 		workspaceID,
-	).Scan(&m.WorkspaceID, &m.Repository, &m.Branch, &m.ContainerWorkDir,
+	).Scan(&m.WorkspaceID, &m.Repository, &m.Branch, &m.BaseBranch, &m.DefaultBranch, &m.ContainerWorkDir,
 		&m.ContainerUser, &m.ContainerLabelVal, &m.WorkspaceDir, &m.CallbackToken,
 		&m.RepoProvider, &m.CloneURL, &m.RepositoryHost, &m.RepositoryPath,
 		&m.Lightweight, &m.UpdatedAt)
@@ -502,6 +504,16 @@ func migrateV9(db *sql.DB) error {
 		ALTER TABLE workspace_metadata ADD COLUMN clone_url TEXT NOT NULL DEFAULT '';
 		ALTER TABLE workspace_metadata ADD COLUMN repository_host TEXT NOT NULL DEFAULT '';
 		ALTER TABLE workspace_metadata ADD COLUMN repository_path TEXT NOT NULL DEFAULT '';
+	`)
+	return err
+}
+
+// migrateV10 persists clone-base and project-default branch metadata so
+// workspace recovery preserves checkout creation and completion-push safety.
+func migrateV10(db *sql.DB) error {
+	_, err := db.Exec(`
+		ALTER TABLE workspace_metadata ADD COLUMN base_branch TEXT NOT NULL DEFAULT '';
+		ALTER TABLE workspace_metadata ADD COLUMN default_branch TEXT NOT NULL DEFAULT '';
 	`)
 	return err
 }

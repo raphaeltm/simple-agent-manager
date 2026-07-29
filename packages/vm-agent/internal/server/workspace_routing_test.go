@@ -343,7 +343,9 @@ func TestUpsertWorkspaceRuntimeHydratesFromSQLite(t *testing.T) {
 	err = store.UpsertWorkspaceMetadata(persistence.WorkspaceMetadata{
 		WorkspaceID:       "WS_RECONNECT",
 		Repository:        "octo/my-cool-repo",
-		Branch:            "main",
+		Branch:            "sam/task-output",
+		BaseBranch:        "main",
+		DefaultBranch:     "main",
 		ContainerWorkDir:  "/workspaces/my-cool-repo",
 		ContainerUser:     "vscode",
 		ContainerLabelVal: "/workspace/WS_RECONNECT",
@@ -371,8 +373,14 @@ func TestUpsertWorkspaceRuntimeHydratesFromSQLite(t *testing.T) {
 	if runtime.Repository != "octo/my-cool-repo" {
 		t.Errorf("expected repository 'octo/my-cool-repo', got %q", runtime.Repository)
 	}
-	if runtime.Branch != "main" {
-		t.Errorf("expected branch 'main', got %q", runtime.Branch)
+	if runtime.Branch != "sam/task-output" {
+		t.Errorf("expected branch 'sam/task-output', got %q", runtime.Branch)
+	}
+	if runtime.BaseBranch != "main" {
+		t.Errorf("expected BaseBranch 'main' hydrated from SQLite, got %q", runtime.BaseBranch)
+	}
+	if runtime.DefaultBranch != "main" {
+		t.Errorf("expected DefaultBranch 'main' hydrated from SQLite, got %q", runtime.DefaultBranch)
 	}
 	if runtime.ContainerWorkDir != "/workspaces/my-cool-repo" {
 		t.Errorf("expected ContainerWorkDir '/workspaces/my-cool-repo', got %q", runtime.ContainerWorkDir)
@@ -438,7 +446,9 @@ func TestUpsertWorkspaceRuntimeLightweightPersistsToSQLite(t *testing.T) {
 
 	// Create workspace with lightweight=true
 	s.upsertWorkspaceRuntime("WS_PERSIST_LIGHT", "octo/repo", "main", "creating", "runtime-callback-token", workspaceRuntimeOpts{
-		Lightweight: true,
+		Lightweight:   true,
+		BaseBranch:    "main",
+		DefaultBranch: "main",
 	})
 
 	// Verify it persisted to SQLite
@@ -454,6 +464,12 @@ func TestUpsertWorkspaceRuntimeLightweightPersistsToSQLite(t *testing.T) {
 	}
 	if meta.CallbackToken != "runtime-callback-token" {
 		t.Errorf("expected CallbackToken persisted, got %q", meta.CallbackToken)
+	}
+	if meta.BaseBranch != "main" {
+		t.Errorf("expected BaseBranch persisted, got %q", meta.BaseBranch)
+	}
+	if meta.DefaultBranch != "main" {
+		t.Errorf("expected DefaultBranch persisted, got %q", meta.DefaultBranch)
 	}
 }
 
