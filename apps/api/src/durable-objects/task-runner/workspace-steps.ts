@@ -3,7 +3,7 @@
  *
  * Handles workspace_creation, workspace_dispatch, workspace_ready, and attachment_transfer steps.
  */
-import { type CredentialSource,DEFAULT_WORKSPACE_PROFILE } from '@simple-agent-manager/shared';
+import { type CredentialSource, DEFAULT_WORKSPACE_PROFILE } from '@simple-agent-manager/shared';
 
 import { log } from '../../lib/logger';
 import type { DevcontainerCacheCredentials } from '../../services/devcontainer-cache';
@@ -18,7 +18,7 @@ import type { TaskRunnerContext, TaskRunnerState } from './types';
 
 export async function handleWorkspaceCreation(
   state: TaskRunnerState,
-  rc: TaskRunnerContext,
+  rc: TaskRunnerContext
 ): Promise<void> {
   await rc.updateD1ExecutionStep(state.taskId, 'workspace_creation');
 
@@ -50,7 +50,9 @@ export async function handleWorkspaceCreation(
   const now = new Date().toISOString();
   const result = await rc.env.DATABASE.prepare(
     `UPDATE tasks SET status = 'delegated', updated_at = ? WHERE id = ? AND status = 'queued'`
-  ).bind(now, state.taskId).run();
+  )
+    .bind(now, state.taskId)
+    .run();
 
   if (!result.meta.changes || result.meta.changes === 0) {
     // Task was already failed by cron recovery — abort gracefully
@@ -68,19 +70,21 @@ export async function handleWorkspaceCreation(
   await rc.env.DATABASE.prepare(
     `INSERT INTO task_status_events (id, task_id, from_status, to_status, actor_type, actor_id, reason, created_at)
      VALUES (?, ?, 'queued', 'delegated', 'system', NULL, ?, ?)`
-  ).bind(
-    ulid(),
-    state.taskId,
-    `Delegated to workspace ${state.stepResults.workspaceId} on node ${state.stepResults.nodeId}`,
-    now,
-  ).run();
+  )
+    .bind(
+      ulid(),
+      state.taskId,
+      `Delegated to workspace ${state.stepResults.workspaceId} on node ${state.stepResults.nodeId}`,
+      now
+    )
+    .run();
 
   await rc.advanceToStep(state, 'workspace_dispatch');
 }
 
 async function recoverWorkspaceFromD1(
   state: TaskRunnerState,
-  rc: TaskRunnerContext,
+  rc: TaskRunnerContext
 ): Promise<void> {
   // If workspace already created (retry or crash recovery), skip creation.
   // Check both DO state AND D1 to handle the crash window between D1 insert
@@ -92,7 +96,9 @@ async function recoverWorkspaceFromD1(
 
   const existingTask = await rc.env.DATABASE.prepare(
     `SELECT workspace_id, status FROM tasks WHERE id = ?`
-  ).bind(state.taskId).first<{ workspace_id: string | null; status: string }>();
+  )
+    .bind(state.taskId)
+    .first<{ workspace_id: string | null; status: string }>();
 
   if (!existingTask?.workspace_id) {
     return;
@@ -108,20 +114,17 @@ async function recoverWorkspaceFromD1(
   });
 }
 
-async function isTaskDelegated(
-  state: TaskRunnerState,
-  rc: TaskRunnerContext,
-): Promise<boolean> {
-  const task = await rc.env.DATABASE.prepare(
-    `SELECT status FROM tasks WHERE id = ?`
-  ).bind(state.taskId).first<{ status: string }>();
+async function isTaskDelegated(state: TaskRunnerState, rc: TaskRunnerContext): Promise<boolean> {
+  const task = await rc.env.DATABASE.prepare(`SELECT status FROM tasks WHERE id = ?`)
+    .bind(state.taskId)
+    .first<{ status: string }>();
 
   return task?.status === 'delegated';
 }
 
 async function createAndProvisionWorkspace(
   state: TaskRunnerState,
-  rc: TaskRunnerContext,
+  rc: TaskRunnerContext
 ): Promise<void> {
   const { ulid } = await import('../../lib/ulid');
   const { resolveUniqueWorkspaceDisplayName } = await import('../../services/workspace-names');
@@ -135,11 +138,7 @@ async function createAndProvisionWorkspace(
   }
   const workspaceId = ulid();
   const workspaceName = `Task: ${state.config.taskTitle.slice(0, 50)}`;
-  const uniqueName = await resolveUniqueWorkspaceDisplayName(
-    db,
-    nodeId,
-    workspaceName
-  );
+  const uniqueName = await resolveUniqueWorkspaceDisplayName(db, nodeId, workspaceName);
   const now = new Date().toISOString();
 
   await db.insert(schema.workspaces).values({
@@ -163,9 +162,9 @@ async function createAndProvisionWorkspace(
     updatedAt: now,
   });
 
-  await rc.env.DATABASE.prepare(
-    `UPDATE tasks SET workspace_id = ?, updated_at = ? WHERE id = ?`
-  ).bind(workspaceId, now, state.taskId).run();
+  await rc.env.DATABASE.prepare(`UPDATE tasks SET workspace_id = ?, updated_at = ? WHERE id = ?`)
+    .bind(workspaceId, now, state.taskId)
+    .run();
 
   state.stepResults.workspaceId = workspaceId;
   await rc.ctx.storage.put('state', state);
@@ -178,7 +177,7 @@ async function ensureWorkspaceBookkeeping(
   state: TaskRunnerState,
   rc: TaskRunnerContext,
   workspaceId: string,
-  now = new Date().toISOString(),
+  now = new Date().toISOString()
 ): Promise<void> {
   await ensureSessionLinked(state, workspaceId, rc);
   await setOutputBranch(state, rc, now);
@@ -190,16 +189,18 @@ async function startComputeTrackingBestEffort(
   rc: TaskRunnerContext,
   db: unknown,
   workspaceId: string,
-  nodeId: string,
+  nodeId: string
 ): Promise<void> {
   try {
     const { startComputeTracking } = await import('../../services/compute-usage');
     const nodeRow = await rc.env.DATABASE.prepare(
       `SELECT cloud_provider, credential_source FROM nodes WHERE id = ?`
-    ).bind(nodeId).first<{
-      cloud_provider: string | null;
-      credential_source: string | null;
-    }>();
+    )
+      .bind(nodeId)
+      .first<{
+        cloud_provider: string | null;
+        credential_source: string | null;
+      }>();
 
     await startComputeTracking(db as Parameters<typeof startComputeTracking>[0], {
       userId: state.userId,
@@ -221,12 +222,12 @@ async function startComputeTrackingBestEffort(
 async function setOutputBranch(
   state: TaskRunnerState,
   rc: TaskRunnerContext,
-  now: string,
+  now: string
 ): Promise<void> {
   const outputBranch = state.config.outputBranch || `task/${state.taskId}`;
-  await rc.env.DATABASE.prepare(
-    `UPDATE tasks SET output_branch = ?, updated_at = ? WHERE id = ?`
-  ).bind(outputBranch, now, state.taskId).run();
+  await rc.env.DATABASE.prepare(`UPDATE tasks SET output_branch = ?, updated_at = ? WHERE id = ?`)
+    .bind(outputBranch, now, state.taskId)
+    .run();
 }
 
 /**
@@ -240,7 +241,7 @@ async function setOutputBranch(
  */
 export async function ensureBranchExistsOnRemote(
   state: TaskRunnerState,
-  rc: TaskRunnerContext,
+  rc: TaskRunnerContext
 ): Promise<void> {
   const defaultBranch = state.config.defaultBranch || 'main';
 
@@ -288,7 +289,7 @@ export async function ensureBranchExistsOnRemote(
       repo,
       state.config.branch,
       defaultBranch,
-      rc.env,
+      rc.env
     );
 
     if (created) {
@@ -318,22 +319,23 @@ type TaskRunnerProjectRepo = {
 
 async function loadTaskRunnerProjectRepo(
   state: TaskRunnerState,
-  rc: TaskRunnerContext,
+  rc: TaskRunnerContext
 ): Promise<TaskRunnerProjectRepo | null> {
-  return rc.env.DATABASE.prepare(
-    `SELECT repo_provider AS repoProvider FROM projects WHERE id = ?`
-  ).bind(state.projectId).first<TaskRunnerProjectRepo>();
+  return rc.env.DATABASE.prepare(`SELECT repo_provider AS repoProvider FROM projects WHERE id = ?`)
+    .bind(state.projectId)
+    .first<TaskRunnerProjectRepo>();
 }
 
 async function ensureGitLabBranchExistsOnRemote(
   state: TaskRunnerState,
   rc: TaskRunnerContext,
-  defaultBranch: string,
+  defaultBranch: string
 ): Promise<void> {
   try {
     const { drizzle } = await import('drizzle-orm/d1');
     const schema = await import('../../db/schema');
-    const { ensureGitLabBranchExists, getProjectGitLabRepository } = await import('../../services/gitlab');
+    const { ensureGitLabBranchExists, getProjectGitLabRepository } =
+      await import('../../services/gitlab');
     const metadata = await getProjectGitLabRepository(
       drizzle(rc.env.DATABASE, { schema }),
       state.projectId
@@ -374,20 +376,22 @@ type TaskRunnerGitHubInstallation = {
 
 async function loadTaskRunnerGitHubInstallation(
   state: TaskRunnerState,
-  rc: TaskRunnerContext,
+  rc: TaskRunnerContext
 ): Promise<TaskRunnerGitHubInstallation | null> {
   return rc.env.DATABASE.prepare(
     `SELECT installation_id AS installationId, external_installation_id AS externalInstallationId
      FROM github_installations
      WHERE id = ? AND user_id = ?`
-  ).bind(state.config.installationId, state.userId).first<TaskRunnerGitHubInstallation>();
+  )
+    .bind(state.config.installationId, state.userId)
+    .first<TaskRunnerGitHubInstallation>();
 }
 
 async function createWorkspaceOnVmAgent(
   state: TaskRunnerState,
   rc: TaskRunnerContext,
   workspaceId: string,
-  nodeId: string,
+  nodeId: string
 ): Promise<void> {
   const { signCallbackToken } = await import('../../services/jwt');
   const { createWorkspaceOnNode } = await import('../../services/node-agent');
@@ -396,21 +400,19 @@ async function createWorkspaceOnVmAgent(
   const projectRepo = await loadTaskRunnerProjectRepo(state, rc);
   const { drizzle } = await import('drizzle-orm/d1');
   const schema = await import('../../db/schema');
-  const gitSource = await resolveWorkspaceGitSource(
-    drizzle(rc.env.DATABASE, { schema }),
-    {
-      id: state.projectId,
-      repoProvider: projectRepo?.repoProvider ?? 'github',
-    }
-  );
+  const gitSource = await resolveWorkspaceGitSource(drizzle(rc.env.DATABASE, { schema }), {
+    id: state.projectId,
+    repoProvider: projectRepo?.repoProvider ?? 'github',
+  });
 
   const response = await createWorkspaceOnNode(nodeId, rc.env, state.userId, {
     workspaceId,
     repository: state.config.repository,
     branch: state.config.branch,
-    baseBranch: state.config.branch === state.config.outputBranch
-      ? state.config.defaultBranch
-      : state.config.branch,
+    baseBranch:
+      state.config.branch === state.config.outputBranch
+        ? state.config.defaultBranch
+        : state.config.branch,
     defaultBranch: state.config.defaultBranch || 'main',
     repoProvider: gitSource.repoProvider,
     cloneUrl: gitSource.cloneUrl,
@@ -428,7 +430,7 @@ async function createWorkspaceOnVmAgent(
   if (!isWorkspaceDispatchAck(response, workspaceId)) {
     throw Object.assign(
       new Error(`Node Agent did not acknowledge workspace dispatch for ${workspaceId}`),
-      { permanent: true },
+      { permanent: true }
     );
   }
 }
@@ -443,7 +445,7 @@ function isWorkspaceDispatchAck(response: unknown, workspaceId: string): boolean
 
 export async function handleWorkspaceDispatch(
   state: TaskRunnerState,
-  rc: TaskRunnerContext,
+  rc: TaskRunnerContext
 ): Promise<void> {
   await rc.updateD1ExecutionStep(state.taskId, 'workspace_dispatch');
 
@@ -455,7 +457,9 @@ export async function handleWorkspaceDispatch(
 
   const workspace = await rc.env.DATABASE.prepare(
     `SELECT dispatched_at FROM workspaces WHERE id = ?`
-  ).bind(workspaceId).first<{ dispatched_at: string | null }>();
+  )
+    .bind(workspaceId)
+    .first<{ dispatched_at: string | null }>();
   if (!workspace) {
     throw Object.assign(new Error(`Workspace ${workspaceId} not found for dispatch`), {
       permanent: true,
@@ -479,7 +483,7 @@ export async function handleWorkspaceDispatch(
   if (elapsedMs > timeoutMs) {
     throw Object.assign(
       new Error(`Workspace dispatch was not acknowledged by node agent within ${timeoutMs}ms`),
-      { permanent: true },
+      { permanent: true }
     );
   }
 
@@ -492,7 +496,9 @@ export async function handleWorkspaceDispatch(
     const dispatchedAt = new Date().toISOString();
     await rc.env.DATABASE.prepare(
       `UPDATE workspaces SET dispatched_at = ?, updated_at = ? WHERE id = ?`
-    ).bind(dispatchedAt, dispatchedAt, workspaceId).run();
+    )
+      .bind(dispatchedAt, dispatchedAt, workspaceId)
+      .run();
     state.workspaceDispatchAckedAt = Date.now();
     state.workspaceDispatchLastError = null;
     await rc.ctx.storage.put('state', state);
@@ -511,15 +517,17 @@ export async function handleWorkspaceDispatch(
     const remainingMs = timeoutMs - elapsedAfterAttemptMs;
     if (remainingMs <= 0) {
       throw Object.assign(
-        new Error(`Workspace dispatch was not acknowledged by node agent within ${timeoutMs}ms. Last error: ${errorMessage}`),
-        { permanent: true },
+        new Error(
+          `Workspace dispatch was not acknowledged by node agent within ${timeoutMs}ms. Last error: ${errorMessage}`
+        ),
+        { permanent: true }
       );
     }
 
     const backoffMs = computeBackoffMs(
       state.workspaceDispatchAttempts - 1,
       rc.getWorkspaceDispatchBaseDelayMs(),
-      rc.getWorkspaceDispatchMaxDelayMs(),
+      rc.getWorkspaceDispatchMaxDelayMs()
     );
     const nextDelayMs = Math.min(backoffMs, remainingMs);
     await rc.ctx.storage.setAlarm(Date.now() + nextDelayMs);
@@ -538,7 +546,7 @@ export async function handleWorkspaceDispatch(
 async function getDevcontainerCacheForWorkspace(
   state: TaskRunnerState,
   rc: TaskRunnerContext,
-  workspaceId: string,
+  workspaceId: string
 ): Promise<DevcontainerCacheCredentials | null> {
   if (state.config.workspaceProfile === 'lightweight') {
     return null;
@@ -563,7 +571,7 @@ async function getDevcontainerCacheForWorkspace(
 
 export async function handleWorkspaceReady(
   state: TaskRunnerState,
-  rc: TaskRunnerContext,
+  rc: TaskRunnerContext
 ): Promise<void> {
   if (!state.stepResults.workspaceId) {
     throw new Error('handleWorkspaceReady: workspaceId is null — cannot poll D1');
@@ -571,7 +579,9 @@ export async function handleWorkspaceReady(
 
   const dispatchRow = await rc.env.DATABASE.prepare(
     `SELECT dispatched_at FROM workspaces WHERE id = ?`
-  ).bind(state.stepResults.workspaceId).first<{ dispatched_at: string | null }>();
+  )
+    .bind(state.stepResults.workspaceId)
+    .first<{ dispatched_at: string | null }>();
 
   if (dispatchRow && !dispatchRow.dispatched_at) {
     log.warn('task_runner_do.workspace_ready_without_dispatch_ack', {
@@ -603,10 +613,9 @@ export async function handleWorkspaceReady(
       return;
     }
     if (state.workspaceReadyStatus === 'error') {
-      throw Object.assign(
-        new Error(state.workspaceErrorMessage || 'Workspace creation failed'),
-        { permanent: true },
-      );
+      throw Object.assign(new Error(state.workspaceErrorMessage || 'Workspace creation failed'), {
+        permanent: true,
+      });
     }
   }
 
@@ -615,7 +624,9 @@ export async function handleWorkspaceReady(
   // the callback via heartbeat after initial failures.
   const wsRow = await rc.env.DATABASE.prepare(
     `SELECT status, error_message FROM workspaces WHERE id = ?`
-  ).bind(state.stepResults.workspaceId).first<{ status: string; error_message: string | null }>();
+  )
+    .bind(state.stepResults.workspaceId)
+    .first<{ status: string; error_message: string | null }>();
 
   if (wsRow?.status === 'running' || wsRow?.status === 'recovery') {
     log.info('task_runner_do.step.workspace_ready_from_d1_poll', {
@@ -623,25 +634,25 @@ export async function handleWorkspaceReady(
       workspaceId: state.stepResults.workspaceId,
       status: wsRow.status,
     });
-    const nextStepFromPoll = state.config.attachments?.length ? 'attachment_transfer' : 'agent_session';
+    const nextStepFromPoll = state.config.attachments?.length
+      ? 'attachment_transfer'
+      : 'agent_session';
     await rc.advanceToStep(state, nextStepFromPoll);
     return;
   }
   if (wsRow?.status === 'error') {
-    throw Object.assign(
-      new Error(wsRow.error_message || 'Workspace creation failed (D1 poll)'),
-      { permanent: true },
-    );
+    throw Object.assign(new Error(wsRow.error_message || 'Workspace creation failed (D1 poll)'), {
+      permanent: true,
+    });
   }
 
   // Check timeout
   const timeoutMs = rc.getWorkspaceReadyTimeoutMs();
   const elapsed = Date.now() - state.workspaceReadyStartedAt;
   if (elapsed > timeoutMs) {
-    throw Object.assign(
-      new Error(`Workspace did not become ready within ${timeoutMs}ms`),
-      { permanent: true },
-    );
+    throw Object.assign(new Error(`Workspace did not become ready within ${timeoutMs}ms`), {
+      permanent: true,
+    });
   }
 
   // No callback yet and not timed out — schedule next poll.
@@ -661,7 +672,7 @@ export async function handleWorkspaceReady(
  */
 export async function handleAttachmentTransfer(
   state: TaskRunnerState,
-  rc: TaskRunnerContext,
+  rc: TaskRunnerContext
 ): Promise<void> {
   await rc.updateD1ExecutionStep(state.taskId, 'attachment_transfer');
 
@@ -676,7 +687,8 @@ export async function handleAttachmentTransfer(
     throw new Error('Missing nodeId or workspaceId for attachment transfer');
   }
 
-  const { getAttachmentFromR2, cleanupAttachments } = await import('../../services/attachment-upload');
+  const { getAttachmentFromR2, cleanupAttachments } =
+    await import('../../services/attachment-upload');
   const { signTerminalToken } = await import('../../services/jwt');
 
   // Build VM agent URL for file upload
@@ -690,11 +702,7 @@ export async function handleAttachmentTransfer(
   const uploadBaseUrl = `${vmUrl}/workspaces/${workspaceId}/files/upload`;
 
   // Generate a terminal token for authenticating with the VM agent
-  const { token } = await signTerminalToken(
-    state.userId,
-    workspaceId,
-    rc.env,
-  );
+  const { token } = await signTerminalToken(state.userId, workspaceId, rc.env);
 
   log.info('task_runner_do.step.attachment_transfer_start', {
     taskId: state.taskId,
@@ -704,10 +712,11 @@ export async function handleAttachmentTransfer(
 
   // Configurable timeout for each attachment transfer
   const DEFAULT_ATTACHMENT_TRANSFER_TIMEOUT_MS = 60_000;
-  const transferTimeoutMs = parseInt(
-    rc.env.ATTACHMENT_TRANSFER_TIMEOUT_MS || String(DEFAULT_ATTACHMENT_TRANSFER_TIMEOUT_MS),
-    10,
-  ) || DEFAULT_ATTACHMENT_TRANSFER_TIMEOUT_MS;
+  const transferTimeoutMs =
+    parseInt(
+      rc.env.ATTACHMENT_TRANSFER_TIMEOUT_MS || String(DEFAULT_ATTACHMENT_TRANSFER_TIMEOUT_MS),
+      10
+    ) || DEFAULT_ATTACHMENT_TRANSFER_TIMEOUT_MS;
 
   // Transfer each attachment: R2 GET → FormData → VM agent POST
   for (const attachment of attachments) {
@@ -717,7 +726,11 @@ export async function handleAttachmentTransfer(
     const bodyBytes = new Uint8Array(await new Response(r2Object.body).arrayBuffer());
 
     const formData = new FormData();
-    formData.append('files', new Blob([bodyBytes], { type: r2Object.contentType }), attachment.filename);
+    formData.append(
+      'files',
+      new Blob([bodyBytes], { type: r2Object.contentType }),
+      attachment.filename
+    );
     // Omit 'destination' field — VM agent defaults to ../.private (sanitizeFilePath rejects explicit ../ paths)
 
     const controller = new AbortController();
@@ -737,8 +750,10 @@ export async function handleAttachmentTransfer(
     if (!resp.ok) {
       const errorText = await resp.text().catch(() => 'unknown');
       throw Object.assign(
-        new Error(`Attachment transfer failed for ${attachment.filename}: ${resp.status} ${errorText}`),
-        { permanent: resp.status >= 400 && resp.status < 500 },
+        new Error(
+          `Attachment transfer failed for ${attachment.filename}: ${resp.status} ${errorText}`
+        ),
+        { permanent: resp.status >= 400 && resp.status < 500 }
       );
     }
 

@@ -6,23 +6,45 @@ const mocks = vi.hoisted(() => ({
   resolveWorkspaceGitSource: vi.fn(),
 }));
 
-vi.mock('../../../src/services/node-agent', () => ({ createWorkspaceOnNode: mocks.createWorkspaceOnNode }));
+vi.mock('../../../src/services/node-agent', () => ({
+  createWorkspaceOnNode: mocks.createWorkspaceOnNode,
+}));
 vi.mock('../../../src/services/jwt', () => ({ signCallbackToken: mocks.signCallbackToken }));
-vi.mock('../../../src/services/workspace-git-source', () => ({ resolveWorkspaceGitSource: mocks.resolveWorkspaceGitSource }));
+vi.mock('../../../src/services/workspace-git-source', () => ({
+  resolveWorkspaceGitSource: mocks.resolveWorkspaceGitSource,
+}));
 
-import type { TaskRunnerContext, TaskRunnerState } from '../../../src/durable-objects/task-runner/types';
+import type {
+  TaskRunnerContext,
+  TaskRunnerState,
+} from '../../../src/durable-objects/task-runner/types';
 import { handleWorkspaceDispatch } from '../../../src/durable-objects/task-runner/workspace-steps';
 
 function makeState(branch: string, outputBranch: string): TaskRunnerState {
   return {
-    taskId: 'task-1', projectId: 'project-1', userId: 'user-1', completed: false,
-    currentStep: 'workspace_dispatch', stepResults: { nodeId: 'node-1', workspaceId: 'workspace-1' },
-    retryCount: 0, workspaceDispatchAttempts: 0, workspaceDispatchStartedAt: null,
-    workspaceDispatchLastAttemptAt: null, workspaceDispatchAckedAt: null, workspaceDispatchLastError: null,
+    taskId: 'task-1',
+    projectId: 'project-1',
+    userId: 'user-1',
+    completed: false,
+    currentStep: 'workspace_dispatch',
+    stepResults: { nodeId: 'node-1', workspaceId: 'workspace-1' },
+    retryCount: 0,
+    workspaceDispatchAttempts: 0,
+    workspaceDispatchStartedAt: null,
+    workspaceDispatchLastAttemptAt: null,
+    workspaceDispatchAckedAt: null,
+    workspaceDispatchLastError: null,
     config: {
-      repository: 'owner/repository', branch, outputBranch, defaultBranch: 'main',
-      installationId: 'installation-1', userName: 'Test User', userEmail: 'test@example.com',
-      githubId: '42', workspaceProfile: 'lightweight', devcontainerConfigName: null,
+      repository: 'owner/repository',
+      branch,
+      outputBranch,
+      defaultBranch: 'main',
+      installationId: 'installation-1',
+      userName: 'Test User',
+      userEmail: 'test@example.com',
+      githubId: '42',
+      workspaceProfile: 'lightweight',
+      devcontainerConfigName: null,
     },
   } as TaskRunnerState;
 }
@@ -32,7 +54,8 @@ function makeContext(): TaskRunnerContext {
     bind: vi.fn(() => ({
       first: vi.fn(async () => {
         if (query.includes('SELECT dispatched_at')) return { dispatched_at: null };
-        if (query.includes('FROM projects')) return { repoProvider: 'github', installationId: 'installation-1' };
+        if (query.includes('FROM projects'))
+          return { repoProvider: 'github', installationId: 'installation-1' };
         return null;
       }),
       run: vi.fn(async () => ({ meta: { changes: 1 } })),
@@ -41,7 +64,8 @@ function makeContext(): TaskRunnerContext {
   return {
     env: { DATABASE: { prepare } },
     ctx: { storage: { put: vi.fn(), setAlarm: vi.fn() } },
-    updateD1ExecutionStep: vi.fn(), advanceToStep: vi.fn(),
+    updateD1ExecutionStep: vi.fn(),
+    advanceToStep: vi.fn(),
     getWorkspaceDispatchTimeoutMs: vi.fn(() => 30_000),
     getWorkspaceDispatchBaseDelayMs: vi.fn(() => 100),
     getWorkspaceDispatchMaxDelayMs: vi.fn(() => 1_000),
@@ -53,21 +77,46 @@ describe('TaskRunner workspace branch dispatch', () => {
     vi.clearAllMocks();
     mocks.signCallbackToken.mockResolvedValue('callback-token');
     mocks.resolveWorkspaceGitSource.mockResolvedValue({
-      repoProvider: 'github', cloneUrl: 'https://github.com/owner/repository.git',
-      repositoryHost: 'github.com', repositoryPath: 'owner/repository',
+      repoProvider: 'github',
+      cloneUrl: 'https://github.com/owner/repository.git',
+      repositoryHost: 'github.com',
+      repositoryPath: 'owner/repository',
     });
-    mocks.createWorkspaceOnNode.mockResolvedValue({ workspaceId: 'workspace-1', status: 'creating' });
+    mocks.createWorkspaceOnNode.mockResolvedValue({
+      workspaceId: 'workspace-1',
+      status: 'creating',
+    });
   });
 
   it.each([
-    ['generated output branch', 'sam/generated-output-abc123', 'sam/generated-output-abc123', 'main'],
-    ['explicit continuation branch', 'feature/existing-work', 'sam/continuation-output-def456', 'feature/existing-work'],
-  ])('sends the %s in the outbound create-workspace payload', async (_scenario, branch, outputBranch, baseBranch) => {
-    await handleWorkspaceDispatch(makeState(branch, outputBranch), makeContext());
-    expect(mocks.createWorkspaceOnNode).toHaveBeenCalledOnce();
-    expect(mocks.createWorkspaceOnNode).toHaveBeenCalledWith(
-      'node-1', expect.any(Object), 'user-1',
-      expect.objectContaining({ workspaceId: 'workspace-1', branch, baseBranch, defaultBranch: 'main' }),
-    );
-  });
+    [
+      'generated output branch',
+      'sam/generated-output-abc123',
+      'sam/generated-output-abc123',
+      'main',
+    ],
+    [
+      'explicit continuation branch',
+      'feature/existing-work',
+      'sam/continuation-output-def456',
+      'feature/existing-work',
+    ],
+  ])(
+    'sends the %s in the outbound create-workspace payload',
+    async (_scenario, branch, outputBranch, baseBranch) => {
+      await handleWorkspaceDispatch(makeState(branch, outputBranch), makeContext());
+      expect(mocks.createWorkspaceOnNode).toHaveBeenCalledOnce();
+      expect(mocks.createWorkspaceOnNode).toHaveBeenCalledWith(
+        'node-1',
+        expect.any(Object),
+        'user-1',
+        expect.objectContaining({
+          workspaceId: 'workspace-1',
+          branch,
+          baseBranch,
+          defaultBranch: 'main',
+        })
+      );
+    }
+  );
 });
