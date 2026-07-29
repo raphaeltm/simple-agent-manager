@@ -144,4 +144,69 @@ describe('platform feedback triage', () => {
     expect(idea.description).toContain('Signature ref:');
     expect(idea.description).toContain('123e4567-e89b-42d3-a456-426614174000');
   });
+
+  it('maps untrusted source values to unknown before grouping or Idea construction', async () => {
+    const groups = await groupPlatformErrors(
+      [
+        {
+          id: '123e4567-e89b-42d3-a456-426614174000',
+          source: 'BearerSecretAliceExampleCom',
+          message: 'generic failure',
+          timestamp: Date.parse('2026-07-29T12:00:00Z'),
+        },
+      ],
+      10
+    );
+    expect(groups[0]?.source).toBe('unknown');
+    expect(groups[0]?.summary).toBe('Recurring unknown platform error');
+    expect(groups[0]?.summary).not.toContain('BearerSecret');
+  });
+
+  it('does not insert an Idea after losing the lease during diagnosis', async () => {
+    const { main, observability } = setup();
+    const at = Date.parse('2026-07-29T12:00:00Z');
+    observability
+      .prepare('INSERT INTO platform_errors VALUES (?, ?, ?, ?, ?)')
+      .run('123e4567-e89b-42d3-a456-426614174000', 'api', 'error', 'failure 12345', at);
+    const diagnose = vi.fn(async () => {
+      main.prepare("UPDATE platform_feedback_triages SET claim_token = 'new-owner'").run();
+      return { id: 'diagnosis-stale', diagnosis: 'redacted' } as Awaited<
+        ReturnType<typeof runDebugDiagnosis>
+      >;
+    });
+    const result = await runPlatformFeedbackTriage(
+      {
+        DATABASE: createSqliteD1(main),
+        OBSERVABILITY_DATABASE: createSqliteD1(observability),
+        PLATFORM_FEEDBACK_PROJECT_ID: 'feedback-project',
+      } as Env,
+      'manual',
+      { now: () => at + 1, diagnose }
+    );
+    expect(result).toMatchObject({ ideasCreated: 0, groupsSkipped: 1 });
+    expect(main.prepare('SELECT COUNT(*) AS count FROM tasks').get()).toEqual({ count: 0 });
+  });
+
+  it('records a bounded triage annotation when a linked Idea is no longer draft', async () => {
+    const { main, observability } = setup();
+    const at = Date.parse('2026-07-29T12:00:00Z');
+    const insert = observability.prepare('INSERT INTO platform_errors VALUES (?, ?, ?, ?, ?)');
+    insert.run('123e4567-e89b-42d3-a456-426614174000', 'api', 'error', 'failure 12345', at);
+    const diagnose = vi.fn(async () => ({ id: 'diagnosis-1', diagnosis: 'redacted' })) as unknown as typeof runDebugDiagnosis;
+    const env = {
+      DATABASE: createSqliteD1(main),
+      OBSERVABILITY_DATABASE: createSqliteD1(observability),
+      PLATFORM_FEEDBACK_PROJECT_ID: 'feedback-project',
+    } as Env;
+    await runPlatformFeedbackTriage(env, 'manual', { now: () => at + 1, diagnose });
+    main.prepare("UPDATE tasks SET status = 'ready'").run();
+    insert.run('223e4567-e89b-42d3-a456-426614174000', 'api', 'error', 'failure 67890', at + 2);
+    const repeat = await runPlatformFeedbackTriage(env, 'cron', { now: () => at + 3, diagnose });
+    expect(repeat).toMatchObject({ ideasUpdated: 0, groupsSkipped: 1 });
+    expect(main.prepare('SELECT occurrence_count FROM platform_feedback_triages').get()).toEqual({
+      occurrence_count: 2,
+    });
+    expect(main.prepare('SELECT COUNT(*) AS count FROM tasks').get()).toEqual({ count: 1 });
+    expect(diagnose).toHaveBeenCalledTimes(1);
+  });
 });

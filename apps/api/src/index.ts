@@ -137,6 +137,7 @@ import { runComputeUsageCleanup } from './scheduled/compute-usage-cleanup';
 import { runCronTriggerSweep } from './scheduled/cron-triggers';
 import { runNodeCleanupSweep } from './scheduled/node-cleanup';
 import { runObservabilityPurge } from './scheduled/observability-purge';
+import { runHourlyPlatformMaintenance } from './scheduled/platform-feedback-hourly';
 import { runSessionTaskReconciliation } from './scheduled/session-task-reconciliation';
 import { runSetupSessionSweep } from './scheduled/setup-session-sweep';
 import { recoverStuckTasks } from './scheduled/stuck-tasks';
@@ -144,10 +145,8 @@ import { runTrialExpireSweep } from './scheduled/trial-expire';
 import { runTrialRolloverAudit } from './scheduled/trial-rollover';
 import { runTrialWaitlistCleanup } from './scheduled/trial-waitlist-cleanup';
 import { runTriggerExecutionCleanup } from './scheduled/trigger-execution-cleanup';
-import { runMonthlyCostAggregation } from './services/ai-monthly-cost-cron';
 import { GcpApiError, sanitizeGcpError } from './services/gcp-errors';
 import { signTerminalToken, verifyPortAccessToken, verifyTerminalToken } from './services/jwt';
-import { runPlatformFeedbackTriage } from './services/platform-feedback-triage';
 import { recordNodeRoutingMetric } from './services/telemetry';
 import { checkProvisioningTimeouts } from './services/timeout';
 import { fetchVmAgentContainer, getVmAgentContainerConfig } from './services/vm-agent-container';
@@ -864,22 +863,24 @@ export default {
     if (isMonthlyCostAggregation) {
       ctx.waitUntil(
         (async () => {
-          const [result, feedbackTriage] = await Promise.all([
-            runMonthlyCostAggregation(env),
-            runPlatformFeedbackTriage(env, 'cron'),
-          ]);
+          const hourly = await runHourlyPlatformMaintenance(env);
+          const result = hourly.monthlyCost.status === 'fulfilled' ? hourly.monthlyCost.value : null;
+          const feedbackTriage =
+            hourly.feedbackTriage.status === 'fulfilled' ? hourly.feedbackTriage.value : null;
           log.info('cron.completed', {
             cron: controller.cron,
             type: 'monthly-cost-aggregation',
-            monthlyCostEnabled: result.enabled,
-            feedbackTriageEnabled: feedbackTriage.enabled,
-            feedbackTriageGroupsFound: feedbackTriage.groupsFound,
-            feedbackTriageIdeasCreated: feedbackTriage.ideasCreated,
-            feedbackTriageIdeasUpdated: feedbackTriage.ideasUpdated,
-            feedbackTriageGroupsSkipped: feedbackTriage.groupsSkipped,
-            monthlyCostUsersUpdated: result.usersUpdated,
-            monthlyCostTotalEntries: result.totalEntries,
-            monthlyCostErrors: result.errors,
+            monthlyCostEnabled: result?.enabled ?? false,
+            monthlyCostFailed: hourly.monthlyCost.status === 'rejected',
+            feedbackTriageEnabled: feedbackTriage?.enabled ?? false,
+            feedbackTriageFailed: hourly.feedbackTriage.status === 'rejected',
+            feedbackTriageGroupsFound: feedbackTriage?.groupsFound ?? 0,
+            feedbackTriageIdeasCreated: feedbackTriage?.ideasCreated ?? 0,
+            feedbackTriageIdeasUpdated: feedbackTriage?.ideasUpdated ?? 0,
+            feedbackTriageGroupsSkipped: feedbackTriage?.groupsSkipped ?? 0,
+            monthlyCostUsersUpdated: result?.usersUpdated ?? 0,
+            monthlyCostTotalEntries: result?.totalEntries ?? 0,
+            monthlyCostErrors: result?.errors ?? 0,
           });
         })()
       );

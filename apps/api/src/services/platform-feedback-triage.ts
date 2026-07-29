@@ -57,6 +57,7 @@ function normalizeMessage(message: string): string {
     .trim()
     .slice(0, 500);
 }
+const ALLOWED_ERROR_SOURCES = new Set(['api', 'client', 'vm-agent']);
 async function digest(value: string): Promise<string> {
   const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
   return [...new Uint8Array(bytes)].map((item) => item.toString(16).padStart(2, '0')).join('');
@@ -67,10 +68,8 @@ export async function groupPlatformErrors(
 ): Promise<FeedbackErrorGroup[]> {
   const groups = new Map<string, Omit<FeedbackErrorGroup, 'signature'>>();
   for (const row of rows) {
-    const source =
-      String(redactSensitiveData(row.source))
-        .replace(/[^a-z0-9_-]/gi, '')
-        .slice(0, 40) || 'unknown';
+    const candidateSource = row.source.trim().toLowerCase();
+    const source = ALLOWED_ERROR_SOURCES.has(candidateSource) ? candidateSource : 'unknown';
     const normalized = normalizeMessage(row.message) || 'redacted platform error';
     const summary = `Recurring ${source} platform error`;
     const key = `${source}\n${normalized}`;
@@ -197,7 +196,7 @@ export async function runPlatformFeedbackTriage(
       .bind(group.signature)
       .first<{ idea_id: string | null; diagnosis_id: string | null }>();
     if (existing?.idea_id) {
-      await env.DATABASE.prepare(
+      const update = await env.DATABASE.prepare(
         `UPDATE tasks SET description = ?, updated_at = ?
         WHERE id = ? AND project_id = ? AND status = 'draft'`
       )
@@ -208,7 +207,12 @@ export async function runPlatformFeedbackTriage(
           project.id
         )
         .run();
-      result.ideasUpdated += 1;
+      if ((update.meta.changes ?? 0) === 1) {
+        result.ideasUpdated += 1;
+      } else {
+        // The triage row remains the bounded diagnosis annotation when the linked Idea was promoted/deleted.
+        result.groupsSkipped += 1;
+      }
       continue;
     }
     const claimToken = ulid();
@@ -236,10 +240,13 @@ export async function runPlatformFeedbackTriage(
       );
       const ideaId = ulid();
       const isoNow = new Date(now).toISOString();
-      await env.DATABASE.batch([
+      const committed = await env.DATABASE.batch([
         env.DATABASE.prepare(
           `INSERT INTO tasks (id, project_id, user_id, title, description, status, priority,
-          task_mode, dispatch_depth, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'draft', 0, 'task', 0, ?, ?, ?)`
+          task_mode, dispatch_depth, created_by, created_at, updated_at)
+          SELECT ?, ?, ?, ?, ?, 'draft', 0, 'task', 0, ?, ?, ?
+          WHERE EXISTS (SELECT 1 FROM platform_feedback_triages
+          WHERE signature = ? AND claim_token = ? AND idea_id IS NULL)`
         ).bind(
           ideaId,
           project.id,
@@ -248,14 +255,24 @@ export async function runPlatformFeedbackTriage(
           ideaDescription(group, diagnosis.id),
           project.user_id,
           isoNow,
-          isoNow
+          isoNow,
+          group.signature,
+          claimToken
         ),
         env.DATABASE.prepare(
           `UPDATE platform_feedback_triages SET diagnosis_id = ?, idea_id = ?, claim_token = NULL,
           claim_expires_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE signature = ? AND claim_token = ?`
         ).bind(diagnosis.id, ideaId, group.signature, claimToken),
       ]);
-      result.ideasCreated += 1;
+      const insertChanges = committed[0]?.meta.changes ?? 0;
+      const linkChanges = committed[1]?.meta.changes ?? 0;
+      if (insertChanges === 1 && linkChanges === 1) {
+        result.ideasCreated += 1;
+      } else if (insertChanges === 0 && linkChanges === 0) {
+        result.groupsSkipped += 1;
+      } else {
+        throw new Error('Platform feedback triage claim commit was inconsistent');
+      }
     } catch (cause) {
       await env.DATABASE.prepare(
         'UPDATE platform_feedback_triages SET claim_token = NULL, claim_expires_at = NULL WHERE signature = ? AND claim_token = ?'

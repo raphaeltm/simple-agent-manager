@@ -122,6 +122,18 @@ describe('deploy reusable workflow', () => {
       'CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS: ${{ vars.CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS }}'
     );
     expect(sync).toContain('CF_CONTAINER_CLONE_FILTER: ${{ vars.CF_CONTAINER_CLONE_FILTER }}');
+    expect(sync).toContain(
+      'PLATFORM_FEEDBACK_PROJECT_ID: ${{ vars.PLATFORM_FEEDBACK_PROJECT_ID }}'
+    );
+    for (const name of [
+      'PLATFORM_FEEDBACK_TRIAGE_WINDOW_MINUTES',
+      'PLATFORM_FEEDBACK_TRIAGE_ERROR_LIMIT',
+      'PLATFORM_FEEDBACK_TRIAGE_GROUP_LIMIT',
+      'PLATFORM_FEEDBACK_TRIAGE_EVIDENCE_LIMIT',
+      'PLATFORM_FEEDBACK_TRIAGE_CLAIM_TTL_MS',
+    ]) {
+      expect(sync).toContain(name + ': ${{ vars.' + name + ' }}');
+    }
   });
 
   it('forwards the codex credential-setup tunables into the wrangler config sync env', () => {
