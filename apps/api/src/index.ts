@@ -137,7 +137,7 @@ import { runComputeUsageCleanup } from './scheduled/compute-usage-cleanup';
 import { runCronTriggerSweep } from './scheduled/cron-triggers';
 import { runNodeCleanupSweep } from './scheduled/node-cleanup';
 import { runObservabilityPurge } from './scheduled/observability-purge';
-import { runHourlyPlatformMaintenance } from './scheduled/platform-feedback-hourly';
+import { isHourlyPlatformMaintenanceCron, scheduleHourlyPlatformMaintenance } from './scheduled/platform-feedback-hourly';
 import { runSessionTaskReconciliation } from './scheduled/session-task-reconciliation';
 import { runSetupSessionSweep } from './scheduled/setup-session-sweep';
 import { recoverStuckTasks } from './scheduled/stuck-tasks';
@@ -840,7 +840,7 @@ export default {
     const waitlistCleanupCron = env.TRIAL_CRON_WAITLIST_CLEANUP ?? '0 4 * * *';
 
     const isDailyForward = controller.cron === '0 3 * * *';
-    const isMonthlyCostAggregation = controller.cron === '30 * * * *';
+    const isMonthlyCostAggregation = isHourlyPlatformMaintenanceCron(controller.cron);
     const isTrialRollover = controller.cron === rolloverCron;
     const isTrialWaitlistCleanup = controller.cron === waitlistCleanupCron;
 
@@ -859,33 +859,8 @@ export default {
       type: cronType,
     });
 
-    // Hourly: aggregate per-user monthly AI cost from Gateway logs → KV cache.
-    if (isMonthlyCostAggregation) {
-      ctx.waitUntil(
-        (async () => {
-          const hourly = await runHourlyPlatformMaintenance(env);
-          const result = hourly.monthlyCost.status === 'fulfilled' ? hourly.monthlyCost.value : null;
-          const feedbackTriage =
-            hourly.feedbackTriage.status === 'fulfilled' ? hourly.feedbackTriage.value : null;
-          log.info('cron.completed', {
-            cron: controller.cron,
-            type: 'monthly-cost-aggregation',
-            monthlyCostEnabled: result?.enabled ?? false,
-            monthlyCostFailed: hourly.monthlyCost.status === 'rejected',
-            feedbackTriageEnabled: feedbackTriage?.enabled ?? false,
-            feedbackTriageFailed: hourly.feedbackTriage.status === 'rejected',
-            feedbackTriageGroupsFound: feedbackTriage?.groupsFound ?? 0,
-            feedbackTriageIdeasCreated: feedbackTriage?.ideasCreated ?? 0,
-            feedbackTriageIdeasUpdated: feedbackTriage?.ideasUpdated ?? 0,
-            feedbackTriageGroupsSkipped: feedbackTriage?.groupsSkipped ?? 0,
-            monthlyCostUsersUpdated: result?.usersUpdated ?? 0,
-            monthlyCostTotalEntries: result?.totalEntries ?? 0,
-            monthlyCostErrors: result?.errors ?? 0,
-          });
-        })()
-      );
-      return;
-    }
+    // Hourly: aggregate cost and triage feedback through one behaviorally tested scheduler boundary.
+    if (scheduleHourlyPlatformMaintenance(controller.cron, env, ctx.waitUntil.bind(ctx))) return;
 
     // Daily analytics forwarding (Phase 4) — use ctx.waitUntil to keep the
     // isolate alive for the full duration of multi-step external API calls.
