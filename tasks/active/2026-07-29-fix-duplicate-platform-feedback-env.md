@@ -27,11 +27,11 @@ merged parallel definitions of `PLATFORM_FEEDBACK_PROJECT_ID` into
 
 ## Implementation Checklist
 
-- [ ] Remove only the redundant Report Issue block declaration from
+- [x] Remove only the redundant Report Issue block declaration from
       `apps/api/src/env.ts`, retaining the canonical platform-feedback field.
-- [ ] Confirm all deployment, documentation, and test references still use
+- [x] Confirm all deployment, documentation, and test references still use
       `PLATFORM_FEEDBACK_PROJECT_ID`.
-- [ ] Run API typecheck/build and relevant report/triage/env configuration tests.
+- [x] Run API typecheck/build and relevant report/triage/env configuration tests.
 - [ ] Run required task-completion, Cloudflare, env, documentation, and
       constitution reviews.
 - [ ] Deploy the hotfix branch to staging and verify the API/app remain healthy.
