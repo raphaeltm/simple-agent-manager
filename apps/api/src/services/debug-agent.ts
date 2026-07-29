@@ -288,39 +288,46 @@ async function executeTool(
   call: ToolCall
 ): Promise<string> {
   let result: unknown;
-  if (call.function.name === 'get_recent_errors') {
-    result = await queryErrors(env.OBSERVABILITY_DATABASE, {
-      startTime: window.startMs,
-      endTime: window.endMs,
-      limit: config.toolResultLimit,
-    });
-  } else if (call.function.name === 'get_health_summary') {
-    result = await getHealthSummary(env.DATABASE, env.OBSERVABILITY_DATABASE);
-  } else if (call.function.name === 'get_error_trends') {
-    const hours = (window.endMs - window.startMs) / 3_600_000;
-    result = await getErrorTrends(env.OBSERVABILITY_DATABASE, hours <= 1 ? '1h' : '24h');
-  } else if (call.function.name === 'query_cloudflare_logs') {
-    let args: { search?: string; levels?: string[] } = {};
-    try {
-      args = JSON.parse(call.function.arguments) as typeof args;
-    } catch {
-      /* bounded defaults */
+  try {
+    if (call.function.name === 'get_recent_errors') {
+      result = await queryErrors(env.OBSERVABILITY_DATABASE, {
+        startTime: window.startMs,
+        endTime: window.endMs,
+        limit: config.toolResultLimit,
+      });
+    } else if (call.function.name === 'get_health_summary') {
+      result = await getHealthSummary(env.DATABASE, env.OBSERVABILITY_DATABASE);
+    } else if (call.function.name === 'get_error_trends') {
+      const hours = (window.endMs - window.startMs) / 3_600_000;
+      result = await getErrorTrends(env.OBSERVABILITY_DATABASE, hours <= 1 ? '1h' : '24h');
+    } else if (call.function.name === 'query_cloudflare_logs') {
+      let args: { search?: string; levels?: string[] } = {};
+      try {
+        args = JSON.parse(call.function.arguments) as typeof args;
+      } catch {
+        /* bounded defaults */
+      }
+      result = await queryCloudflareLogs({
+        cfApiToken: env.CF_API_TOKEN,
+        cfAccountId: env.CF_ACCOUNT_ID,
+        timeRange: {
+          start: new Date(window.startMs).toISOString(),
+          end: new Date(window.endMs).toISOString(),
+        },
+        levels: args.levels?.slice(0, 3),
+        search: args.search?.slice(0, 200),
+        limit: config.toolResultLimit,
+      });
+    } else if (call.function.name === 'get_related_entity_state') {
+      result = await relatedEntityState(env, window, config.toolResultLimit);
+    } else {
+      result = { error: 'Unknown read-only debugging tool' };
     }
-    result = await queryCloudflareLogs({
-      cfApiToken: env.CF_API_TOKEN,
-      cfAccountId: env.CF_ACCOUNT_ID,
-      timeRange: {
-        start: new Date(window.startMs).toISOString(),
-        end: new Date(window.endMs).toISOString(),
-      },
-      levels: args.levels?.slice(0, 3),
-      search: args.search?.slice(0, 200),
-      limit: config.toolResultLimit,
-    });
-  } else if (call.function.name === 'get_related_entity_state') {
-    result = await relatedEntityState(env, window, config.toolResultLimit);
-  } else {
-    result = { error: 'Unknown read-only debugging tool' };
+  } catch {
+    result = {
+      error: 'Read-only evidence source unavailable',
+      tool: call.function.name,
+    };
   }
   return boundedResult(result, config.toolResultBytes);
 }
