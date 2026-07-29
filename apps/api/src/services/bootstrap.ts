@@ -161,7 +161,7 @@ export async function registerBootstrapTokenConsume(
       `INSERT INTO bootstrap_token_consumes (token_hash, created_at, expires_at)
        VALUES (?, ?, ?)`
     )
-    .bind(await hashBootstrapToken(token), new Date().toISOString(), expiresAt)
+    .bind(await hashBootstrapToken(token), Date.now(), parseBootstrapExpiry(expiresAt))
     .run();
 }
 
@@ -171,7 +171,7 @@ async function reserveBootstrapTokenConsume(
   db: D1Database,
   token: string
 ): Promise<BootstrapConsumeState> {
-  const now = new Date().toISOString();
+  const now = Date.now();
   const tokenHash = await hashBootstrapToken(token);
 
   const updated = await db
@@ -202,7 +202,7 @@ async function claimLegacyBootstrapTokenConsume(
   token: string,
   env: Pick<BootstrapEnv, 'BOOTSTRAP_TOKEN_TTL_SECONDS'>
 ): Promise<boolean> {
-  const now = new Date().toISOString();
+  const now = Date.now();
 
   // Migration-safe compatibility for unexpired tokens that were written to KV
   // before the D1 ledger existed, or direct legacy producers that only wrote KV.
@@ -213,7 +213,7 @@ async function claimLegacyBootstrapTokenConsume(
       `INSERT OR IGNORE INTO bootstrap_token_consumes (token_hash, created_at, expires_at, consumed_at)
        VALUES (?, ?, ?, ?)`
     )
-    .bind(await hashBootstrapToken(token), now, nowPlusSeconds(getBootstrapTTL(env)), now)
+    .bind(await hashBootstrapToken(token), now, nowPlusSecondsMs(getBootstrapTTL(env)), now)
     .run();
 
   return d1Changes(legacyClaim) === 1;
@@ -232,7 +232,19 @@ async function hashBootstrapToken(token: string): Promise<string> {
 }
 
 function nowPlusSeconds(seconds: number): string {
-  return new Date(Date.now() + seconds * 1000).toISOString();
+  return new Date(nowPlusSecondsMs(seconds)).toISOString();
+}
+
+function nowPlusSecondsMs(seconds: number): number {
+  return Date.now() + seconds * 1000;
+}
+
+function parseBootstrapExpiry(expiresAt: string): number {
+  const parsed = Date.parse(expiresAt);
+  if (!Number.isFinite(parsed)) {
+    throw new Error('Invalid bootstrap token expiry');
+  }
+  return parsed;
 }
 
 function isLegacyPlaintextCallbackTokenStillRedeemable(

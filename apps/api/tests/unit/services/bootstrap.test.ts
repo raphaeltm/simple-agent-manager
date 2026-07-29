@@ -22,9 +22,9 @@ function installBootstrapLedger(db: Database.Database): void {
   db.exec(`
     CREATE TABLE bootstrap_token_consumes (
       token_hash TEXT PRIMARY KEY NOT NULL,
-      created_at TEXT NOT NULL,
-      expires_at TEXT NOT NULL,
-      consumed_at TEXT
+      created_at INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL,
+      consumed_at INTEGER
     );
   `);
 }
@@ -294,7 +294,7 @@ describe('Bootstrap Service', () => {
         await tokenHash('legacy-kv-only')
       );
       expect(rows).toHaveLength(1);
-      expect(rows[0]).toMatchObject({ consumed_at: expect.any(String) });
+      expect(rows[0]).toMatchObject({ consumed_at: expect.any(Number) });
     });
   });
 
