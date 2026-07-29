@@ -94,7 +94,7 @@ describe('platform feedback triage', () => {
     observability
       .prepare('INSERT INTO platform_errors VALUES (?, ?, ?, ?, ?)')
       .run(
-        '01KYQWHP2R02GFXM5TEYZH0XK9',
+        '123e4567-e89b-42d3-a456-426614174000',
         'api',
         'error',
         `Failure for alice@example.com from 192.0.2.44 Authorization: Bearer abcdefghijklmnopqrstuvwxyz ${canary}`,
@@ -121,7 +121,7 @@ describe('platform feedback triage', () => {
     expect(diagnose).toHaveBeenCalledWith(
       env,
       'owner-1',
-      { errorId: '01KYQWHP2R02GFXM5TEYZH0XK9' },
+      { errorId: '123e4567-e89b-42d3-a456-426614174000' },
       { featureKey: SCHEDULED_TRIAGE_DEBUG_FEATURE_KEY }
     );
     const second = await runPlatformFeedbackTriage(env, 'cron', { now: () => at + 2000, diagnose });
@@ -142,6 +142,6 @@ describe('platform feedback triage', () => {
       expect(`${idea.title}\n${idea.description}`).not.toContain(forbidden);
     }
     expect(idea.description).toContain('Signature ref:');
-    expect(idea.description).toContain('01KYQWHP2R02GFXM5TEYZH0XK9');
+    expect(idea.description).toContain('123e4567-e89b-42d3-a456-426614174000');
   });
 });

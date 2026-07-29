@@ -75,7 +75,12 @@ export async function groupPlatformErrors(
     const summary = `Recurring ${source} platform error`;
     const key = `${source}\n${normalized}`;
     const current = groups.get(key);
-    const safeErrorId = /^[0-9A-HJKMNP-TV-Z]{26}$/i.test(row.id) ? row.id : 'invalid-redacted-id';
+    const safeErrorId =
+      /^(?:[0-9A-HJKMNP-TV-Z]{26}|[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i.test(
+        row.id
+      )
+        ? row.id
+        : 'invalid-redacted-id';
     const evidence = { errorId: safeErrorId, timestamp: row.timestamp };
     if (current) {
       current.count += 1;
@@ -186,18 +191,18 @@ export async function runPlatformFeedbackTriage(
       .bind(group.firstSeenAt, group.lastSeenAt, group.count, refs, group.signature)
       .run();
     const existing = await env.DATABASE.prepare(
-      `SELECT t.idea_id, d.diagnosis FROM platform_feedback_triages t
-      LEFT JOIN debug_diagnoses d ON d.id = t.diagnosis_id WHERE t.signature = ?`
+      `SELECT t.idea_id, t.diagnosis_id FROM platform_feedback_triages t
+      WHERE t.signature = ?`
     )
       .bind(group.signature)
-      .first<{ idea_id: string | null; diagnosis: string | null }>();
+      .first<{ idea_id: string | null; diagnosis_id: string | null }>();
     if (existing?.idea_id) {
       await env.DATABASE.prepare(
         `UPDATE tasks SET description = ?, updated_at = ?
         WHERE id = ? AND project_id = ? AND status = 'draft'`
       )
         .bind(
-          ideaDescription(group, 'existing'),
+          ideaDescription(group, existing.diagnosis_id ?? 'pending'),
           new Date(now).toISOString(),
           existing.idea_id,
           project.id
