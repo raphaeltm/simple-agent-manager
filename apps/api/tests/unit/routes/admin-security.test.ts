@@ -114,6 +114,8 @@ vi.mock('../../../src/schemas', () => ({
   AdminUserActionSchema: {},
   AdminUserRoleSchema: {},
   AdminLogQuerySchema: {},
+  RunDebugDiagnosisSchema: {},
+  SaveDebugDiagnosisIdeaSchema: {},
   UpdateSignupApprovalConfigSchema: {},
   jsonValidator: () => vi.fn((_c: any, next: any) => next()),
 }));
