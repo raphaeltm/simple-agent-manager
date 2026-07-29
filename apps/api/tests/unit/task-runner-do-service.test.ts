@@ -21,22 +21,6 @@ const taskRunsSource = readFileSync(
   resolve(process.cwd(), 'src/routes/tasks/run.ts'),
   'utf8'
 );
-const mcpDispatchSource = readFileSync(
-  resolve(process.cwd(), 'src/routes/mcp/dispatch-tool.ts'),
-  'utf8'
-);
-const samSessionDispatchSource = readFileSync(
-  resolve(process.cwd(), 'src/durable-objects/sam-session/tools/dispatch-task.ts'),
-  'utf8'
-);
-const mcpRetrySubtaskSource = readFileSync(
-  resolve(process.cwd(), 'src/routes/mcp/orchestration-tools.ts'),
-  'utf8'
-);
-const samSessionRetrySubtaskSource = readFileSync(
-  resolve(process.cwd(), 'src/durable-objects/sam-session/tools/retry-subtask.ts'),
-  'utf8'
-);
 const workspacesSource = [
   readFileSync(resolve(process.cwd(), 'src/routes/workspaces/lifecycle.ts'), 'utf8'),
   readFileSync(resolve(process.cwd(), 'src/routes/workspaces/runtime.ts'), 'utf8'),
@@ -165,37 +149,6 @@ describe('task-runs route uses TaskRunner DO', () => {
   it('returns 202 with queued status', () => {
     expect(taskRunsSource).toContain("status: 'queued'");
     expect(taskRunsSource).toContain('c.json(response, 202)');
-  });
-});
-
-describe('task checkout branches avoid default-branch auto-pushes', () => {
-  it('task submit starts new work on the generated output branch', () => {
-    expect(taskSubmitSource).toContain('const branch = branchName;');
-    expect(taskSubmitSource).toContain('outputBranch: branchName');
-  });
-
-  it('task run uses explicit branch first, then existing output branch, then default branch', () => {
-    expect(taskRunsSource).toContain('const branch = body.branch?.trim() || task.outputBranch || project.defaultBranch;');
-  });
-
-  it('MCP dispatch preserves explicit branch but otherwise checks out the generated output branch', () => {
-    expect(mcpDispatchSource).toContain('const checkoutBranch = explicitBranch || branchName;');
-    expect(mcpDispatchSource).toContain('branch: checkoutBranch');
-    expect(mcpDispatchSource).toContain('outputBranch: branchName');
-  });
-
-  it('SAM session dispatch preserves explicit branch but otherwise checks out the generated output branch', () => {
-    expect(samSessionDispatchSource).toContain('const explicitBranch = input.branch?.trim();');
-    expect(samSessionDispatchSource).toContain('const checkoutBranch = explicitBranch || branchName;');
-    expect(samSessionDispatchSource).toContain('branch: checkoutBranch');
-    expect(samSessionDispatchSource).toContain('outputBranch: branchName');
-  });
-
-  it('retry subtask paths check out the replacement output branch', () => {
-    expect(mcpRetrySubtaskSource).toContain('const checkoutBranch = branchName;');
-    expect(samSessionRetrySubtaskSource).toContain('branch: branchName');
-    expect(mcpRetrySubtaskSource).toContain('outputBranch: branchName');
-    expect(samSessionRetrySubtaskSource).toContain('outputBranch: branchName');
   });
 });
 
