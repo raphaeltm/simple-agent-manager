@@ -64,11 +64,10 @@ function fail(errors: string[]): never {
 
 function extractConfiguredWorkerSecrets(scriptContent: string): string[] {
   return Array.from(
-    scriptContent.matchAll(/set_worker_secret\s+"([A-Z0-9_]+)"/g),
-    (match) => match[1]
-  )
-    .filter((name, index, all) => all.indexOf(name) === index)
-    .sort();
+    new Set(
+      Array.from(scriptContent.matchAll(/set_worker_secret\s+"([A-Z0-9_]+)"/g), (match) => match[1])
+    )
+  ).sort();
 }
 
 function extractWranglerCommentedSecrets(wranglerContent: string): string[] {
@@ -78,7 +77,12 @@ function extractWranglerCommentedSecrets(wranglerContent: string): string[] {
     return [];
   }
 
-  const afterHeader = wranglerContent.slice(wranglerContent.indexOf('\n', start) + 1);
+  const headerLineEnd = wranglerContent.indexOf('\n', start);
+  if (headerLineEnd === -1) {
+    return [];
+  }
+
+  const afterHeader = wranglerContent.slice(headerLineEnd + 1);
   const lines = afterHeader.split('\n');
   const secrets: string[] = [];
 
@@ -92,7 +96,7 @@ function extractWranglerCommentedSecrets(wranglerContent: string): string[] {
     }
   }
 
-  return secrets.filter((name, index, all) => all.indexOf(name) === index).sort();
+  return Array.from(new Set(secrets)).sort();
 }
 
 function diffSecrets(expected: string[], actual: string[]): { missing: string[]; extra: string[] } {
