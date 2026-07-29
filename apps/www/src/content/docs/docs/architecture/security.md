@@ -15,7 +15,7 @@ However, SAM's own hosted deployment also has an **enabled platform-level cloud 
 
 ### Platform Secrets
 
-These are Cloudflare Worker secrets set during deployment:
+These Cloudflare Worker secrets are generated or copied during deployment and are required for a fully functional install:
 
 | Secret                       | Purpose                                                                                                                                           |
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -28,8 +28,12 @@ These are Cloudflare Worker secrets set during deployment:
 | `DEPLOY_SIGNING_PUBLIC_KEY`  | Ed25519 key for deployment-node payload verification (auto-generated)                                                                             |
 | `TRIAL_CLAIM_TOKEN_SECRET`   | HMAC secret for trial onboarding claim tokens (auto-generated)                                                                                    |
 | `CF_API_TOKEN`               | Cloudflare deploy, DNS, Origin CA certificate issuance, observability, and AI Gateway operations (requires Account → SSL and Certificates → Edit) |
+| `CF_ACCOUNT_ID`              | Cloudflare account identifier used by account-scoped Cloudflare APIs                                                                              |
+| `CF_ZONE_ID`                 | Cloudflare zone identifier used for DNS and Origin CA operations                                                                                  |
 
-Security keys are automatically generated and persisted by Pulumi on first deployment. Cloudflare secrets remain Worker secrets because they are deployment trust roots. GitHub App/OAuth, GitHub webhook, Google OAuth, and GitLab OAuth credentials can be supplied either as optional environment fallbacks or through the first-run/superadmin platform config UI; runtime values are stored encrypted in D1 and override environment fallbacks. They never appear in source control.
+Security keys are automatically generated and persisted by Pulumi on first deployment. Cloudflare secrets remain Worker secrets because they are deployment trust roots. GitHub App/OAuth, GitHub webhook, Google OAuth, GitLab OAuth, analytics forwarding, R2 attachment-upload credentials, devcontainer cache credentials, trial provider keys, and smoke-test auth flags can be supplied as optional Worker secret fallbacks when an installation needs them. Runtime platform values saved through first-run setup or the superadmin platform config UI are stored encrypted in D1 and override environment fallbacks. They never appear in source control.
+
+New VM nodes do not require static `ORIGIN_CA_CERT` or `ORIGIN_CA_KEY` Worker secrets. If those legacy secrets exist from an older deployment, remove them after draining old nodes and confirming the per-node CSR model is deployed.
 
 ### Platform Integration Credentials
 
@@ -48,12 +52,12 @@ Admin-managed integration secrets stored encrypted in D1:
 
 User-provided secrets stored encrypted in D1:
 
-| Credential                      | Purpose                                                                                               | Encryption                     |
-| ------------------------------- | ----------------------------------------------------------------------------------------------------- | ------------------------------ |
+| Credential                      | Purpose                                                                                                        | Encryption                     |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------------- | ------------------------------ |
 | Cloud provider credentials      | VM provisioning (Hetzner, Scaleway, Vultr, Infomaniak, DigitalOcean, UpCloud, GCP WIF or service-account JSON) | AES-256-GCM, per-credential IV |
-| Agent API keys                  | Claude, OpenAI, Gemini, and other agent access                                                        | AES-256-GCM, per-credential IV |
-| Agent OAuth tokens              | Claude Pro/Max, Codex subscriptions                                                                   | AES-256-GCM, per-credential IV |
-| Composable credentials (`cc_*`) | Reusable credential + configuration attachments layered per project/profile                           | AES-256-GCM, per-credential IV |
+| Agent API keys                  | Claude, OpenAI, Gemini, and other agent access                                                                 | AES-256-GCM, per-credential IV |
+| Agent OAuth tokens              | Claude Pro/Max, Codex subscriptions                                                                            | AES-256-GCM, per-credential IV |
+| Composable credentials (`cc_*`) | Reusable credential + configuration attachments layered per project/profile                                    | AES-256-GCM, per-credential IV |
 
 Cloud provider credentials are stored with a `credentialType` of `cloud-provider`. GCP can use recommended keyless WIF or an OAuth-free service-account JSON key for VM provisioning. User credentials are **never** stored as environment variables or Worker secrets.
 
