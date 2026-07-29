@@ -404,15 +404,15 @@ async function createWorkspaceOnVmAgent(
     id: state.projectId,
     repoProvider: projectRepo?.repoProvider ?? 'github',
   });
+  const checkoutBranch = state.config.outputBranch || state.config.branch;
+  const baseBranch =
+    checkoutBranch === state.config.branch ? state.config.defaultBranch : state.config.branch;
 
   const response = await createWorkspaceOnNode(nodeId, rc.env, state.userId, {
     workspaceId,
     repository: state.config.repository,
-    branch: state.config.branch,
-    baseBranch:
-      state.config.branch === state.config.outputBranch
-        ? state.config.defaultBranch
-        : state.config.branch,
+    branch: checkoutBranch,
+    baseBranch,
     defaultBranch: state.config.defaultBranch || 'main',
     repoProvider: gitSource.repoProvider,
     cloneUrl: gitSource.cloneUrl,
