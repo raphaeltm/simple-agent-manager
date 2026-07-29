@@ -24,12 +24,12 @@ Eight remediation PRs have been completed independently and need to be integrate
 
 ## Checklist
 
-- [ ] Create integration branch from current `origin/main`.
-- [ ] Merge/cherry-pick PRs #1689 through #1696.
-- [ ] Resolve conflicts without dropping tests or docs from any remediation.
-- [ ] Run targeted tests for all affected areas.
-- [ ] Run full feasible local validation: lint, typecheck, tests, build.
-- [ ] Run local specialist reviews for correctness, security, Cloudflare/env consistency, Go quality, task completion, and test quality.
+- [x] Create integration branch from current `origin/main`.
+- [x] Merge/cherry-pick PRs #1689 through #1696.
+- [x] Resolve conflicts without dropping tests or docs from any remediation.
+- [x] Run targeted tests for all affected areas.
+- [x] Run full feasible local validation: lint, typecheck, tests, build.
+- [x] Run local specialist reviews for correctness, security, Cloudflare/env consistency, Go quality, task completion, and test quality.
 - [ ] Open mega PR with specialist review evidence.
 - [ ] Wait for CI to be completely green.
 - [ ] Check staging state before deploy and avoid clobbering active validation.
