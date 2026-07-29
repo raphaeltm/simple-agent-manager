@@ -1,6 +1,9 @@
 import type { BootstrapResponse, BootstrapTokenData } from '@simple-agent-manager/shared';
+import Database from 'better-sqlite3';
 import { Hono } from 'hono';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { createSqliteD1 } from '../../helpers/sqlite-d1';
 
 // Mock rate-limit middleware to be a passthrough (tested separately)
 vi.mock('../../../src/middleware/rate-limit', () => ({
@@ -18,14 +21,34 @@ const mockKV = {
 // Mock environment
 const mockEnv = {
   KV: mockKV,
-  DATABASE: {},
+  DATABASE: undefined as unknown as D1Database,
   ENCRYPTION_KEY: 'iZEI8rg5FHtTo2yvt6Qw3m4z6aTfqj5MdLEGqOvdqw0=', // Valid 32-byte base64 key
   BASE_DOMAIN: 'workspaces.example.com',
 };
 
+let sqlite: Database.Database;
+
+function installBootstrapLedger(db: Database.Database): void {
+  db.exec(`
+    CREATE TABLE bootstrap_token_consumes (
+      token_hash TEXT PRIMARY KEY NOT NULL,
+      created_at INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL,
+      consumed_at INTEGER
+    );
+  `);
+}
+
 describe('Bootstrap Routes', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
+    sqlite = new Database(':memory:');
+    installBootstrapLedger(sqlite);
+    mockEnv.DATABASE = createSqliteD1(sqlite);
+  });
+
+  afterEach(() => {
+    sqlite.close();
   });
 
   describe('POST /api/bootstrap/:token', () => {
@@ -193,7 +216,7 @@ describe('Bootstrap Routes', () => {
       expect(body.gitUserEmail).toBeNull();
     });
 
-    it('rejects concurrent replay while first redemption is in flight', async () => {
+    it('rejects concurrent replay across requests using the D1 consume ledger', async () => {
       const { bootstrapRoutes } = await import('../../../src/routes/bootstrap');
       const { encrypt } = await import('../../../src/services/encryption');
 
@@ -213,14 +236,10 @@ describe('Bootstrap Routes', () => {
         createdAt: new Date().toISOString(),
       };
 
-      let releaseGet!: () => void;
-      mockKV.get.mockReturnValueOnce(new Promise((resolve) => {
-        releaseGet = () => resolve(tokenData);
-      }));
+      mockKV.get.mockResolvedValue(tokenData);
 
       const first = app.request('/api/bootstrap/concurrent-token', { method: 'POST' }, mockEnv);
       const second = app.request('/api/bootstrap/concurrent-token', { method: 'POST' }, mockEnv);
-      releaseGet();
 
       const [res1, res2] = await Promise.all([first, second]);
       expect([res1.status, res2.status].sort()).toEqual([200, 401]);

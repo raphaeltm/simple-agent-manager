@@ -5,8 +5,11 @@
  * to verify encrypted callbackToken decryption works end-to-end.
  */
 import type { BootstrapResponse, BootstrapTokenData } from '@simple-agent-manager/shared';
+import Database from 'better-sqlite3';
 import { Hono } from 'hono';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { createSqliteD1 } from '../../helpers/sqlite-d1';
 
 vi.mock('../../../src/middleware/rate-limit', () => {
   const continueRequest = async (_c: unknown, next: () => Promise<void>) => next();
@@ -25,14 +28,28 @@ type KvMock = {
 const TEST_ENCRYPTION_KEY = 'iZEI8rg5FHtTo2yvt6Qw3m4z6aTfqj5MdLEGqOvdqw0=';
 
 let kv: KvMock;
+let sqlite: Database.Database;
 let env: {
   KV: KvMock;
-  DATABASE: Record<string, never>;
+  DATABASE: D1Database;
   ENCRYPTION_KEY: string;
   BASE_DOMAIN: string;
 };
 
+function installBootstrapLedger(db: Database.Database): void {
+  db.exec(`
+    CREATE TABLE bootstrap_token_consumes (
+      token_hash TEXT PRIMARY KEY NOT NULL,
+      created_at INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL,
+      consumed_at INTEGER
+    );
+  `);
+}
+
 function resetBootstrapHarness() {
+  sqlite = new Database(':memory:');
+  installBootstrapLedger(sqlite);
   kv = {
     put: vi.fn(),
     get: vi.fn(),
@@ -40,7 +57,7 @@ function resetBootstrapHarness() {
   };
   env = {
     KV: kv,
-    DATABASE: {},
+    DATABASE: createSqliteD1(sqlite),
     ENCRYPTION_KEY: TEST_ENCRYPTION_KEY,
     BASE_DOMAIN: 'workspaces.example.com',
   };
@@ -55,8 +72,12 @@ async function requestBootstrapToken(token: string) {
 
 describe('Bootstrap Callback Token Encryption (F-004)', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     resetBootstrapHarness();
+  });
+
+  afterEach(() => {
+    sqlite.close();
   });
 
   it('decrypts encryptedCallbackToken via the bootstrap route', async () => {
