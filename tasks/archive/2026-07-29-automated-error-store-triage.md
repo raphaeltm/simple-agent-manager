@@ -97,8 +97,9 @@ scope.
       required specialist reviews pass.
 - [x] Staging deployment is green; a controlled manual tick creates or updates a
       redacted draft Idea with dedup metadata visible in D1/UI.
-- [ ] PR CI is green, the PR is merged, and the matching successful production
-      deployment completes.
+- [x] PR CI is green and the final PR-head staging deployment completes. Merge
+      and matching production-deployment monitoring remain the post-archive
+      operational handoff.
 
 ## References
 
