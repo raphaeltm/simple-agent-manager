@@ -26,6 +26,8 @@ const TAIL_WORKER_WRANGLER_PATH = resolve(
   '../../apps/tail-worker/wrangler.toml'
 );
 const CONFIGURE_SECRETS_PATH = resolve(import.meta.dirname, '../deploy/configure-secrets.sh');
+const SECRET_COMMENT_PATTERN = /^# - `?([A-Z0-9_]+)`?/;
+const sortAlphabetically = (left: string, right: string): number => left.localeCompare(right);
 
 interface Binding {
   name?: string;
@@ -67,7 +69,7 @@ function extractConfiguredWorkerSecrets(scriptContent: string): string[] {
     new Set(
       Array.from(scriptContent.matchAll(/set_worker_secret\s+"([A-Z0-9_]+)"/g), (match) => match[1])
     )
-  ).sort();
+  ).sort(sortAlphabetically);
 }
 
 function extractWranglerCommentedSecrets(wranglerContent: string): string[] {
@@ -90,13 +92,13 @@ function extractWranglerCommentedSecrets(wranglerContent: string): string[] {
     if (!line.startsWith('#')) {
       break;
     }
-    const match = line.match(/^# - `?([A-Z0-9_]+)`?/);
+    const match = SECRET_COMMENT_PATTERN.exec(line);
     if (match) {
       secrets.push(match[1]);
     }
   }
 
-  return Array.from(new Set(secrets)).sort();
+  return Array.from(new Set(secrets)).sort(sortAlphabetically);
 }
 
 function diffSecrets(expected: string[], actual: string[]): { missing: string[]; extra: string[] } {
@@ -108,104 +110,81 @@ function diffSecrets(expected: string[], actual: string[]): { missing: string[];
   };
 }
 
-function main(): void {
-  const errors: string[] = [];
-
-  // ========================================
-  // Check 1: No env sections committed
-  // ========================================
-
-  const apiContent = readFileSync(API_WRANGLER_PATH, 'utf-8');
-  const apiConfig = TOML.parse(apiContent) as unknown as WranglerConfig;
-  const configureSecretsContent = readFileSync(CONFIGURE_SECRETS_PATH, 'utf-8');
-
-  if (apiConfig.env && Object.keys(apiConfig.env).length > 0) {
-    const envNames = Object.keys(apiConfig.env).join(', ');
-    errors.push(
-      `apps/api/wrangler.toml contains [env.*] sections (${envNames}). ` +
-        `These are generated at deploy time by sync-wrangler-config.ts. ` +
-        `Remove them from the checked-in file.`
-    );
+function checkNoCommittedEnvSections(errors: string[], config: WranglerConfig, path: string): void {
+  if (!config.env || Object.keys(config.env).length === 0) {
+    return;
   }
 
-  const tailContent = readFileSync(TAIL_WORKER_WRANGLER_PATH, 'utf-8');
-  const tailConfig = TOML.parse(tailContent) as unknown as WranglerConfig;
+  const envNames = Object.keys(config.env).join(', ');
+  errors.push(
+    `${path} contains [env.*] sections (${envNames}). These are generated at deploy time. Remove them from the checked-in file.`
+  );
+}
 
-  if (tailConfig.env && Object.keys(tailConfig.env).length > 0) {
-    const envNames = Object.keys(tailConfig.env).join(', ');
-    errors.push(
-      `apps/tail-worker/wrangler.toml contains [env.*] sections (${envNames}). ` +
-        `These are generated at deploy time. Remove them from the checked-in file.`
-    );
+function checkRequiredApiBindings(errors: string[], apiConfig: WranglerConfig): void {
+  const requiredBindingChecks: Array<{ isPresent: boolean; message: string }> = [
+    {
+      isPresent: Boolean(apiConfig.durable_objects?.bindings?.length),
+      message:
+        'apps/api/wrangler.toml: top-level missing durable_objects.bindings (sync script copies these to env sections)',
+    },
+    {
+      isPresent: Boolean(apiConfig.ai?.binding),
+      message:
+        'apps/api/wrangler.toml: top-level missing [ai] binding (sync script copies this to env sections)',
+    },
+    {
+      isPresent: Boolean(apiConfig.d1_databases?.length),
+      message: 'apps/api/wrangler.toml: top-level missing d1_databases',
+    },
+    {
+      isPresent: Boolean(apiConfig.kv_namespaces?.length),
+      message: 'apps/api/wrangler.toml: top-level missing kv_namespaces',
+    },
+    {
+      isPresent: Boolean(apiConfig.r2_buckets?.length),
+      message: 'apps/api/wrangler.toml: top-level missing r2_buckets',
+    },
+    {
+      isPresent: Boolean(apiConfig.migrations?.length),
+      message:
+        'apps/api/wrangler.toml: top-level missing [[migrations]] (sync script copies these to env sections)',
+    },
+  ];
+
+  for (const check of requiredBindingChecks) {
+    if (!check.isPresent) {
+      errors.push(check.message);
+    }
   }
+}
 
-  // ========================================
-  // Check 2: Top-level has required bindings
-  // ========================================
-
-  if (!apiConfig.durable_objects?.bindings?.length) {
-    errors.push(
-      'apps/api/wrangler.toml: top-level missing durable_objects.bindings (sync script copies these to env sections)'
-    );
-  }
-
-  if (!apiConfig.ai?.binding) {
-    errors.push(
-      'apps/api/wrangler.toml: top-level missing [ai] binding (sync script copies this to env sections)'
-    );
-  }
-
-  if (!apiConfig.d1_databases?.length) {
-    errors.push('apps/api/wrangler.toml: top-level missing d1_databases');
-  }
-
-  if (!apiConfig.kv_namespaces?.length) {
-    errors.push('apps/api/wrangler.toml: top-level missing kv_namespaces');
-  }
-
-  if (!apiConfig.r2_buckets?.length) {
-    errors.push('apps/api/wrangler.toml: top-level missing r2_buckets');
-  }
-
-  if (!apiConfig.migrations?.length) {
-    errors.push(
-      'apps/api/wrangler.toml: top-level missing [[migrations]] (sync script copies these to env sections)'
-    );
-  }
-
-  // ========================================
-  // Check 3: Worker secret inventory comment matches configure-secrets.sh
-  // ========================================
-
-  const configuredSecrets = extractConfiguredWorkerSecrets(configureSecretsContent);
-  const commentedSecrets = extractWranglerCommentedSecrets(apiContent);
-
+function checkSecretInventory(
+  errors: string[],
+  configuredSecrets: string[],
+  commentedSecrets: string[]
+): void {
   if (commentedSecrets.length === 0) {
     errors.push(
       'apps/api/wrangler.toml: missing "# Secrets (set via wrangler secret put):" inventory comment'
     );
-  } else {
-    const { missing, extra } = diffSecrets(configuredSecrets, commentedSecrets);
-    if (missing.length > 0) {
-      errors.push(
-        `apps/api/wrangler.toml secret inventory is missing configured secrets from configure-secrets.sh: ${missing.join(', ')}`
-      );
-    }
-    if (extra.length > 0) {
-      errors.push(
-        `apps/api/wrangler.toml secret inventory lists secrets not configured by configure-secrets.sh: ${extra.join(', ')}`
-      );
-    }
+    return;
   }
 
-  // ========================================
-  // Result
-  // ========================================
-
-  if (errors.length > 0) {
-    fail(errors);
+  const { missing, extra } = diffSecrets(configuredSecrets, commentedSecrets);
+  if (missing.length > 0) {
+    errors.push(
+      `apps/api/wrangler.toml secret inventory is missing configured secrets from configure-secrets.sh: ${missing.join(', ')}`
+    );
   }
+  if (extra.length > 0) {
+    errors.push(
+      `apps/api/wrangler.toml secret inventory lists secrets not configured by configure-secrets.sh: ${extra.join(', ')}`
+    );
+  }
+}
 
+function logSuccess(apiConfig: WranglerConfig, configuredSecrets: string[]): void {
   const doCount = apiConfig.durable_objects?.bindings?.length ?? 0;
   const d1Count = apiConfig.d1_databases?.length ?? 0;
   const kvCount = apiConfig.kv_namespaces?.length ?? 0;
@@ -220,6 +199,28 @@ function main(): void {
   console.log(
     `  Worker secret inventory: ${configuredSecrets.length} configured secrets documented.`
   );
+}
+
+function main(): void {
+  const errors: string[] = [];
+  const apiContent = readFileSync(API_WRANGLER_PATH, 'utf-8');
+  const apiConfig = TOML.parse(apiContent) as unknown as WranglerConfig;
+  const configureSecretsContent = readFileSync(CONFIGURE_SECRETS_PATH, 'utf-8');
+  const tailContent = readFileSync(TAIL_WORKER_WRANGLER_PATH, 'utf-8');
+  const tailConfig = TOML.parse(tailContent) as unknown as WranglerConfig;
+  const configuredSecrets = extractConfiguredWorkerSecrets(configureSecretsContent);
+  const commentedSecrets = extractWranglerCommentedSecrets(apiContent);
+
+  checkNoCommittedEnvSections(errors, apiConfig, 'apps/api/wrangler.toml');
+  checkNoCommittedEnvSections(errors, tailConfig, 'apps/tail-worker/wrangler.toml');
+  checkRequiredApiBindings(errors, apiConfig);
+  checkSecretInventory(errors, configuredSecrets, commentedSecrets);
+
+  if (errors.length > 0) {
+    fail(errors);
+  }
+
+  logSuccess(apiConfig, configuredSecrets);
 }
 
 main();
