@@ -468,6 +468,7 @@ type createWorkspaceRequest struct {
 	WorkspaceID            string `json:"workspaceId"`
 	Repository             string `json:"repository"`
 	Branch                 string `json:"branch"`
+	BaseBranch             string `json:"baseBranch,omitempty"`
 	RepoProvider           string `json:"repoProvider,omitempty"`
 	CloneURL               string `json:"cloneUrl,omitempty"`
 	RepositoryHost         string `json:"repositoryHost,omitempty"`
@@ -512,6 +513,7 @@ func createWorkspaceRuntimeOptions(body createWorkspaceRequest, devcontainerConf
 		GitUserEmail:           strings.TrimSpace(body.GitUserEmail),
 		GitHubID:               strings.TrimSpace(body.GitHubID),
 		RepoProvider:           strings.TrimSpace(body.RepoProvider),
+		BaseBranch:             strings.TrimSpace(body.BaseBranch),
 		CloneURL:               strings.TrimSpace(body.CloneURL),
 		RepositoryHost:         strings.TrimSpace(body.RepositoryHost),
 		RepositoryPath:         strings.TrimSpace(body.RepositoryPath),

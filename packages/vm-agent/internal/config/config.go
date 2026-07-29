@@ -135,6 +135,7 @@ type Config struct {
 	BootstrapToken     string
 	Repository         string
 	Branch             string
+	BaseBranch         string
 	RepoProvider       string
 	CloneURL           string
 	RepositoryHost     string

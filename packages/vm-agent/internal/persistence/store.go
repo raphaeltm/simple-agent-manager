@@ -34,6 +34,7 @@ type WorkspaceMetadata struct {
 	WorkspaceID            string `json:"workspaceId"`
 	Repository             string `json:"repository"`
 	Branch                 string `json:"branch"`
+	BaseBranch             string `json:"baseBranch,omitempty"`
 	ContainerWorkDir       string `json:"containerWorkDir"`
 	ContainerUser          string `json:"containerUser"`
 	ContainerLabelVal      string `json:"containerLabelValue"`

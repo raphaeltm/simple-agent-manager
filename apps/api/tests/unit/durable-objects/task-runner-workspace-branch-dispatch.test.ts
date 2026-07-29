@@ -60,14 +60,14 @@ describe('TaskRunner workspace branch dispatch', () => {
   });
 
   it.each([
-    ['generated output branch', 'sam/generated-output-abc123', 'sam/generated-output-abc123'],
-    ['explicit continuation branch', 'feature/existing-work', 'sam/continuation-output-def456'],
-  ])('sends the %s in the outbound create-workspace payload', async (_scenario, branch, outputBranch) => {
+    ['generated output branch', 'sam/generated-output-abc123', 'sam/generated-output-abc123', 'main'],
+    ['explicit continuation branch', 'feature/existing-work', 'sam/continuation-output-def456', 'feature/existing-work'],
+  ])('sends the %s in the outbound create-workspace payload', async (_scenario, branch, outputBranch, baseBranch) => {
     await handleWorkspaceDispatch(makeState(branch, outputBranch), makeContext());
     expect(mocks.createWorkspaceOnNode).toHaveBeenCalledOnce();
     expect(mocks.createWorkspaceOnNode).toHaveBeenCalledWith(
       'node-1', expect.any(Object), 'user-1',
-      expect.objectContaining({ workspaceId: 'workspace-1', branch }),
+      expect.objectContaining({ workspaceId: 'workspace-1', branch, baseBranch }),
     );
   });
 });

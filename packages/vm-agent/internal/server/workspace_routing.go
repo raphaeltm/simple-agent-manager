@@ -35,6 +35,7 @@ type workspaceRuntimeOpts struct {
 	GitUserEmail           string
 	GitHubID               string
 	RepoProvider           string
+	BaseBranch             string
 	CloneURL               string
 	RepositoryHost         string
 	RepositoryPath         string
@@ -225,6 +226,10 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 		if opt.GitHubID != "" {
 			runtime.GitHubID = opt.GitHubID
 		}
+		if opt.BaseBranch != "" {
+			runtime.BaseBranch = opt.BaseBranch
+			metadataChanged = true
+		}
 		if opt.RepoProvider != "" {
 			runtime.RepoProvider = opt.RepoProvider
 			metadataChanged = true
@@ -262,6 +267,7 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 	effectiveBranch := branch
 	var persistedWorkspaceDir, persistedContainerWorkDir, persistedContainerLabelValue, persistedContainerUser string
 	var persistedCallbackToken string
+	var persistedBaseBranch string
 	var persistedRepoProvider, persistedCloneURL, persistedRepositoryHost, persistedRepositoryPath string
 	var persistedLightweight bool
 	var persistedDevcontainerConfigName string
@@ -286,6 +292,7 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 			persistedContainerUser = meta.ContainerUser
 			persistedCallbackToken = meta.CallbackToken
 			persistedRepoProvider = meta.RepoProvider
+			persistedBaseBranch = meta.BaseBranch
 			persistedCloneURL = meta.CloneURL
 			persistedRepositoryHost = meta.RepositoryHost
 			persistedRepositoryPath = meta.RepositoryPath
@@ -317,6 +324,7 @@ func (s *Server) upsertWorkspaceRuntime(workspaceID, repository, branch, status,
 		ID:                     workspaceID,
 		Repository:             effectiveRepo,
 		Branch:                 effectiveBranch,
+		BaseBranch:             firstNonEmpty(opt.BaseBranch, persistedBaseBranch),
 		RepoProvider:           firstNonEmpty(opt.RepoProvider, persistedRepoProvider),
 		CloneURL:               firstNonEmpty(opt.CloneURL, persistedCloneURL),
 		RepositoryHost:         firstNonEmpty(opt.RepositoryHost, persistedRepositoryHost),
@@ -495,6 +503,7 @@ func (s *Server) persistWorkspaceMetadata(runtime *WorkspaceRuntime) {
 		WorkspaceID:            runtime.ID,
 		Repository:             runtime.Repository,
 		Branch:                 runtime.Branch,
+		BaseBranch:             runtime.BaseBranch,
 		ContainerWorkDir:       runtime.ContainerWorkDir,
 		ContainerUser:          runtime.ContainerUser,
 		ContainerLabelVal:      runtime.ContainerLabelValue,

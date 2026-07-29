@@ -89,6 +89,7 @@ func (s *Server) provisionWorkspaceRuntime(ctx context.Context, runtime *Workspa
 	cfg.WorkspaceID = runtime.ID
 	cfg.Repository = strings.TrimSpace(runtime.Repository)
 	cfg.Branch = strings.TrimSpace(runtime.Branch)
+	cfg.BaseBranch = strings.TrimSpace(runtime.BaseBranch)
 	cfg.RepoProvider = strings.TrimSpace(runtime.RepoProvider)
 	cfg.CloneURL = strings.TrimSpace(runtime.CloneURL)
 	cfg.RepositoryHost = strings.TrimSpace(runtime.RepositoryHost)
@@ -183,6 +184,7 @@ func (s *Server) recoverWorkspaceRuntime(ctx context.Context, runtime *Workspace
 	cfg.WorkspaceID = runtime.ID
 	cfg.Repository = strings.TrimSpace(runtime.Repository)
 	cfg.Branch = strings.TrimSpace(runtime.Branch)
+	cfg.BaseBranch = strings.TrimSpace(runtime.BaseBranch)
 	cfg.RepoProvider = strings.TrimSpace(runtime.RepoProvider)
 	cfg.CloneURL = strings.TrimSpace(runtime.CloneURL)
 	cfg.RepositoryHost = strings.TrimSpace(runtime.RepositoryHost)

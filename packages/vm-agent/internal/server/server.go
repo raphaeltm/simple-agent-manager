@@ -144,6 +144,7 @@ type WorkspaceRuntime struct {
 	ID                     string
 	Repository             string
 	Branch                 string
+	BaseBranch             string
 	RepoProvider           string
 	CloneURL               string
 	RepositoryHost         string
@@ -538,6 +539,7 @@ func New(cfg *config.Config) (*Server, error) {
 			ID:                  cfg.WorkspaceID,
 			Repository:          strings.TrimSpace(cfg.Repository),
 			Branch:              strings.TrimSpace(cfg.Branch),
+			BaseBranch:          strings.TrimSpace(cfg.BaseBranch),
 			Status:              "running",
 			CreatedAt:           time.Now().UTC(),
 			UpdatedAt:           time.Now().UTC(),
