@@ -89,22 +89,31 @@ describe('TaskRunner workspace branch dispatch', () => {
   });
 
   it.each([
-    [
-      'generated output branch',
-      'sam/generated-output-abc123',
-      'sam/generated-output-abc123',
-      'main',
-    ],
-    [
-      'explicit continuation branch',
-      'feature/existing-work',
-      'sam/continuation-output-def456',
-      'feature/existing-work',
-    ],
+    {
+      scenario: 'generated output branch',
+      configuredBranch: 'sam/generated-output-abc123',
+      outputBranch: 'sam/generated-output-abc123',
+      checkoutBranch: 'sam/generated-output-abc123',
+      baseBranch: 'main',
+    },
+    {
+      scenario: 'explicit non-default branch with separate output branch',
+      configuredBranch: 'feature/existing-work',
+      outputBranch: 'sam/continuation-output-def456',
+      checkoutBranch: 'sam/continuation-output-def456',
+      baseBranch: 'feature/existing-work',
+    },
+    {
+      scenario: 'explicit default branch with separate output branch',
+      configuredBranch: 'main',
+      outputBranch: 'sam/default-safe-output-ghi789',
+      checkoutBranch: 'sam/default-safe-output-ghi789',
+      baseBranch: 'main',
+    },
   ])(
-    'sends the %s in the outbound create-workspace payload',
-    async (_scenario, branch, outputBranch, baseBranch) => {
-      await handleWorkspaceDispatch(makeState(branch, outputBranch), makeContext());
+    'checks out the task output branch for $scenario',
+    async ({ configuredBranch, outputBranch, checkoutBranch, baseBranch }) => {
+      await handleWorkspaceDispatch(makeState(configuredBranch, outputBranch), makeContext());
       expect(mocks.createWorkspaceOnNode).toHaveBeenCalledOnce();
       expect(mocks.createWorkspaceOnNode).toHaveBeenCalledWith(
         'node-1',
@@ -112,7 +121,7 @@ describe('TaskRunner workspace branch dispatch', () => {
         'user-1',
         expect.objectContaining({
           workspaceId: 'workspace-1',
-          branch,
+          branch: checkoutBranch,
           baseBranch,
           defaultBranch: 'main',
         })
