@@ -347,7 +347,7 @@ jobs:
       - name: Sync Wrangler Config (API + Tail Worker)
         if: ${{ inputs.dry_run != true }}
         run: pnpm tsx scripts/deploy/sync-wrangler-config.ts
-        env: &wrangler_sync_env
+        env:
           PULUMI_STACK: ${{ steps.pulumi-select.outputs.stack_name }}
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
@@ -683,7 +683,39 @@ jobs:
           rm -f .wrangler/tail-worker-first-deploy
           pnpm tsx scripts/deploy/sync-wrangler-config.ts
         env:
-          <<: *wrangler_sync_env
+          PULUMI_STACK: ${{ steps.pulumi-select.outputs.stack_name }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}
+          RESOURCE_PREFIX: ${{ steps.prefix.outputs.value }}
+          REQUIRE_APPROVAL: ${{ vars.REQUIRE_APPROVAL }}
+          SETUP_FORCE: ${{ vars.SETUP_FORCE }}
+          HETZNER_BASE_IMAGE: ${{ vars.HETZNER_BASE_IMAGE }}
+          ARTIFACTS_BINDING_ENABLED: ${{ vars.ARTIFACTS_BINDING_ENABLED }}
+          CF_CONTAINER_ENABLED: ${{ vars.CF_CONTAINER_ENABLED }}
+          CF_CONTAINER_SLEEP_AFTER: ${{ vars.CF_CONTAINER_SLEEP_AFTER }}
+          CF_CONTAINER_ACTIVE_WORK_MAX_MS: ${{ vars.CF_CONTAINER_ACTIVE_WORK_MAX_MS }}
+          CF_CONTAINER_KEEPALIVE_RENEW_INTERVAL_MS: ${{ vars.CF_CONTAINER_KEEPALIVE_RENEW_INTERVAL_MS }}
+          CF_CONTAINER_PORT_READY_TIMEOUT_MS: ${{ vars.CF_CONTAINER_PORT_READY_TIMEOUT_MS }}
+          CF_CONTAINER_WAKE_TIMEOUT_MS: ${{ vars.CF_CONTAINER_WAKE_TIMEOUT_MS }}
+          CF_CONTAINER_RECOVERY_MAX_ATTEMPTS: ${{ vars.CF_CONTAINER_RECOVERY_MAX_ATTEMPTS }}
+          CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS: ${{ vars.CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS }}
+          CF_CONTAINER_CLONE_FILTER: ${{ vars.CF_CONTAINER_CLONE_FILTER }}
+          CF_CONTAINER_VM_AGENT_PORT: ${{ vars.CF_CONTAINER_VM_AGENT_PORT }}
+          SANDBOX_CONTAINER_MAX_INSTANCES: ${{ vars.SANDBOX_CONTAINER_MAX_INSTANCES }}
+          VM_AGENT_CONTAINER_MAX_INSTANCES: ${{ vars.VM_AGENT_CONTAINER_MAX_INSTANCES }}
+          SANDBOX_ENABLED: ${{ vars.SANDBOX_ENABLED }}
+          MAX_CONCURRENT_SETUP_SESSIONS: ${{ vars.MAX_CONCURRENT_SETUP_SESSIONS }}
+          SETUP_SESSION_TTL_MS: ${{ vars.SETUP_SESSION_TTL_MS }}
+          SETUP_SESSION_CAPTURE_POLL_MS: ${{ vars.SETUP_SESSION_CAPTURE_POLL_MS }}
+          CODEX_DEVICE_AUTH_REQUEST_TIMEOUT_MS: ${{ vars.CODEX_DEVICE_AUTH_REQUEST_TIMEOUT_MS }}
+          SETUP_SESSION_SWEEP_MAX_CANDIDATES: ${{ vars.SETUP_SESSION_SWEEP_MAX_CANDIDATES }}
+          POOL_LEASE_BUFFER_MS: ${{ vars.POOL_LEASE_BUFFER_MS }}
+          SANDBOX_EXEC_TIMEOUT_MS: ${{ vars.SANDBOX_EXEC_TIMEOUT_MS }}
+          SANDBOX_VM_AGENT_PORT: ${{ vars.SANDBOX_VM_AGENT_PORT }}
 
       - name: Re-deploy API Worker (with tail_consumers)
         if: ${{ inputs.dry_run != true && steps.first_deploy.outputs.is_first == 'true' }}

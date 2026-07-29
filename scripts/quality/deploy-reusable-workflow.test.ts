@@ -139,22 +139,29 @@ describe('deploy reusable workflow', () => {
     );
 
     expect(firstDeployResync).toContain('pnpm tsx scripts/deploy/sync-wrangler-config.ts');
-    expect(firstDeployResync).toContain('<<: *wrangler_sync_env');
+    expect(firstDeployResync).toContain('BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}');
+    expect(firstDeployResync).toContain('RESOURCE_PREFIX: ${{ steps.prefix.outputs.value }}');
+    expect(firstDeployResync).toContain(
+      'ARTIFACTS_BINDING_ENABLED: ${{ vars.ARTIFACTS_BINDING_ENABLED }}'
+    );
   });
 
   it('uses one complete env mapping for every Wrangler config sync invocation', () => {
     const initialSync = stepBlock('Sync Wrangler Config \\(API \\+ Tail Worker\\)');
     const firstDeployResync = stepBlock('Re-sync Wrangler Config \\(add tail_consumers\\)');
 
-    expect(initialSync).toContain('env: &wrangler_sync_env');
-    expect(firstDeployResync).toContain('<<: *wrangler_sync_env');
+    expect(initialSync).toContain('env:');
+    expect(firstDeployResync).toContain('env:');
 
     for (const mapping of Object.values(DIRECT_SYNC_ENV_MAPPINGS)) {
       expect(initialSync).toContain(mapping);
+      expect(firstDeployResync).toContain(mapping);
     }
 
     for (const envVar of extractOptionalWorkerEnvVars()) {
-      expect(initialSync).toContain(`${envVar}: \${{ vars.${envVar} }}`);
+      const mapping = `${envVar}: \${{ vars.${envVar} }}`;
+      expect(initialSync).toContain(mapping);
+      expect(firstDeployResync).toContain(mapping);
     }
   });
 
