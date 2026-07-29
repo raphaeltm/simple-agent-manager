@@ -1,12 +1,16 @@
 import type {
   AdminUsersResponse,
   CreatePlatformCredentialRequest,
+  DebugDiagnosisListResponse,
+  DebugProjectOptionsResponse,
   ErrorListResponse,
   ErrorTrendResponse,
   HealthSummary,
   ListPlatformCredentialsResponse,
   LogQueryResponse,
   PlatformCredentialResponse,
+  RunDebugDiagnosisRequest,
+  RunDebugDiagnosisResponse,
   SignupApprovalConfigResponse,
   UpdatePlatformCredentialRequest,
   UpdateSignupApprovalConfigRequest,
@@ -126,6 +130,41 @@ export async function queryAdminLogs(
     method: 'POST',
     body: JSON.stringify(params),
   });
+}
+
+export async function runAdminDebugDiagnosis(
+  body: RunDebugDiagnosisRequest
+): Promise<RunDebugDiagnosisResponse> {
+  return request<RunDebugDiagnosisResponse>('/api/admin/observability/diagnoses', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function fetchAdminDebugDiagnoses(
+  filter: { errorId?: string; startTime?: string; endTime?: string }
+): Promise<DebugDiagnosisListResponse> {
+  const params = new URLSearchParams();
+  if (filter.errorId) params.set('errorId', filter.errorId);
+  if (filter.startTime) params.set('startTime', filter.startTime);
+  if (filter.endTime) params.set('endTime', filter.endTime);
+  return request<DebugDiagnosisListResponse>(
+    `/api/admin/observability/diagnoses?${params.toString()}`
+  );
+}
+
+export async function fetchAdminDebugProjects(): Promise<DebugProjectOptionsResponse> {
+  return request<DebugProjectOptionsResponse>('/api/admin/observability/debug/projects');
+}
+
+export async function saveAdminDebugDiagnosisAsIdea(
+  diagnosisId: string,
+  body: { projectId: string; title?: string }
+): Promise<{ ideaId: string }> {
+  return request<{ ideaId: string }>(
+    `/api/admin/observability/diagnoses/${diagnosisId}/idea`,
+    { method: 'POST', body: JSON.stringify(body) }
+  );
 }
 
 // =============================================================================

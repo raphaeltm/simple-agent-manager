@@ -159,6 +159,21 @@ The service-account JWT bearer flow always uses `https://oauth2.googleapis.com/t
 | `TASK_TITLE_RETRY_MAX_DELAY_MS`          | `4000`                | Max delay cap for backoff                        |
 | `TASK_TITLE_ERROR_DIAGNOSTIC_MAX_LENGTH` | `512`                 | Max sanitized provider-error diagnostic length   |
 
+## Deployment Debugging Agent
+
+| Variable                         | Default                 | Description                                                   |
+| -------------------------------- | ----------------------- | ------------------------------------------------------------- |
+| `DEBUG_AGENT_MODEL`              | `@cf/zai-org/glm-5.2`   | Workers AI model for superadmin deployment diagnosis          |
+| `DEBUG_AGENT_MAX_TURNS`          | `6`                     | Maximum model/tool turns per diagnosis                        |
+| `DEBUG_AGENT_RUN_TOKEN_LIMIT`    | `24000`                 | Combined token ceiling per diagnosis                          |
+| `DEBUG_AGENT_DAILY_TOKEN_LIMIT`  | `120000`                | Deployment-wide daily diagnosis token budget                  |
+| `DEBUG_AGENT_TOOL_RESULT_LIMIT`  | `50`                    | Maximum rows returned by a diagnosis tool                     |
+| `DEBUG_AGENT_TOOL_RESULT_BYTES`  | `32768`                 | Maximum serialized bytes per model-visible tool result        |
+| `DEBUG_AGENT_MAX_WINDOW_HOURS`   | `24`                    | Maximum selectable diagnosis window                           |
+| `DEBUG_AGENT_TIMEOUT_MS`         | `120000`                | Timeout for each diagnosis model request                      |
+
+The `/admin/errors` view remains superadmin-only and may show local user IDs, IP addresses, and user-agent strings. Before any tool result enters model context, SAM recursively removes those fields plus credential-shaped values such as API tokens, JWTs, authorization headers, private keys, and long secret-like strings. Cloudflare credentials stay server-side and are never included in model messages or saved diagnosis text.
+
 ## Agent Model Catalog
 
 SAM loads OpenCode Zen and OpenCode Go model choices through the authenticated model-catalog API, backed by Models.dev and cached in KV. If the upstream catalog or cache is unavailable, SAM falls back to the static catalog shipped with the app.

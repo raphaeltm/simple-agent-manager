@@ -43,6 +43,46 @@ export class AiTokenBudgetCounter extends DurableObject<Env> {
     return this.readBudget(dateKey);
   }
 
+  async consumeTotal(
+    dateKey: string,
+    tokenLimit: number,
+    tokens: number,
+  ): Promise<{ allowed: boolean; usedTokens: number }> {
+    return this.ctx.storage.transactionSync(() => {
+      const current = this.readBudget(dateKey).inputTokens;
+      if (current + tokens > tokenLimit) return { allowed: false, usedTokens: current };
+      const usedTokens = current + tokens;
+      this.sql.exec(
+        `INSERT INTO ai_token_budget (budget_date, input_tokens, output_tokens, updated_at)
+         VALUES (?, ?, 0, ?)
+         ON CONFLICT(budget_date) DO UPDATE SET
+           input_tokens = excluded.input_tokens,
+           updated_at = excluded.updated_at`,
+        dateKey,
+        usedTokens,
+        Date.now(),
+      );
+      return { allowed: true, usedTokens };
+    });
+  }
+
+  async releaseTotal(dateKey: string, tokens: number): Promise<number> {
+    return this.ctx.storage.transactionSync(() => {
+      const usedTokens = Math.max(0, this.readBudget(dateKey).inputTokens - tokens);
+      this.sql.exec(
+        `INSERT INTO ai_token_budget (budget_date, input_tokens, output_tokens, updated_at)
+         VALUES (?, ?, 0, ?)
+         ON CONFLICT(budget_date) DO UPDATE SET
+           input_tokens = excluded.input_tokens,
+           updated_at = excluded.updated_at`,
+        dateKey,
+        usedTokens,
+        Date.now(),
+      );
+      return usedTokens;
+    });
+  }
+
   async increment(
     dateKey: string,
     inputTokens: number,

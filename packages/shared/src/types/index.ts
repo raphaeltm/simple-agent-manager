@@ -587,6 +587,19 @@ export type {
   UserAiUsageResponse,
 } from './ai-usage';
 
+// Deployment Debugging Agent
+export type {
+  DebugAgentTarget,
+  DebugAgentUsage,
+  DebugDiagnosis,
+  DebugDiagnosisListResponse,
+  DebugProjectOption,
+  DebugProjectOptionsResponse,
+  RunDebugDiagnosisRequest,
+  RunDebugDiagnosisResponse,
+  SaveDebugDiagnosisIdeaRequest,
+} from './debug-agent';
+
 // API Error
 export type { ApiError } from './api-error';
 

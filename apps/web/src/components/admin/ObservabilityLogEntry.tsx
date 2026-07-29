@@ -1,8 +1,10 @@
 import type { PlatformError } from '@simple-agent-manager/shared';
-import { type FC,useState } from 'react';
+import { Button } from '@simple-agent-manager/ui';
+import { type FC, useState } from 'react';
 
 interface ObservabilityLogEntryProps {
   error: PlatformError;
+  onDiagnose?: (error: PlatformError) => void;
 }
 
 const SOURCE_COLORS: Record<string, { bg: string; text: string }> = {
@@ -28,7 +30,7 @@ function formatTimestamp(iso: string): string {
   });
 }
 
-export const ObservabilityLogEntry: FC<ObservabilityLogEntryProps> = ({ error: entry }) => {
+export const ObservabilityLogEntry: FC<ObservabilityLogEntryProps> = ({ error: entry, onDiagnose }) => {
   const [expanded, setExpanded] = useState(false);
 
   const sourceColor = SOURCE_COLORS[entry.source] ?? SOURCE_COLORS.api!;
@@ -36,20 +38,7 @@ export const ObservabilityLogEntry: FC<ObservabilityLogEntryProps> = ({ error: e
   const hasDetails = entry.stack || entry.context;
 
   return (
-    <div
-      className="border-b border-border-default px-4 py-3 transition-colors duration-150"
-      style={{ cursor: hasDetails ? 'pointer' : 'default' }}
-      onClick={() => hasDetails && setExpanded(!expanded)}
-      onKeyDown={(e) => {
-        if (hasDetails && (e.key === 'Enter' || e.key === ' ')) {
-          e.preventDefault();
-          setExpanded(!expanded);
-        }
-      }}
-      role={hasDetails ? 'button' : undefined}
-      tabIndex={hasDetails ? 0 : undefined}
-      aria-expanded={hasDetails ? expanded : undefined}
-    >
+    <div className="border-b border-border-default px-4 py-3 transition-colors duration-150">
       {/* Main row */}
       <div className="flex items-center gap-2 min-w-0">
         <span
@@ -67,13 +56,35 @@ export const ObservabilityLogEntry: FC<ObservabilityLogEntryProps> = ({ error: e
         <span className="text-xs text-fg-muted whitespace-nowrap shrink-0">
           {formatTimestamp(entry.timestamp)}
         </span>
-        {hasDetails && (
-          <span
-            className="text-[0.7rem] text-fg-muted shrink-0 ml-auto transition-transform duration-150"
-            style={{ transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)' }}
+        {onDiagnose && (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="ml-auto"
+            onClick={(event) => {
+              event.stopPropagation();
+              onDiagnose(entry);
+            }}
           >
-            ▶
-          </span>
+            Diagnose
+          </Button>
+        )}
+        {hasDetails && (
+          <button
+            type="button"
+            className="flex min-h-8 min-w-8 shrink-0 items-center justify-center rounded-sm text-[0.7rem] text-fg-muted transition-colors hover:bg-control-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+            aria-label={expanded ? 'Hide error details' : 'Show error details'}
+            aria-expanded={expanded}
+            onClick={() => setExpanded(!expanded)}
+          >
+            <span
+              aria-hidden="true"
+              className="transition-transform duration-150"
+              style={{ transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)' }}
+            >
+              ▶
+            </span>
+          </button>
         )}
       </div>
       {/* Message on its own line for better mobile readability */}

@@ -33,6 +33,15 @@ vi.mock('../../../src/middleware/error', () => {
   };
 });
 
+const mockRunDebugDiagnosis = vi.fn();
+const mockListDebugDiagnoses = vi.fn();
+const mockSaveDebugDiagnosisAsIdea = vi.fn();
+vi.mock('../../../src/services/debug-agent', () => ({
+  runDebugDiagnosis: (...args: unknown[]) => mockRunDebugDiagnosis(...args),
+  listDebugDiagnoses: (...args: unknown[]) => mockListDebugDiagnoses(...args),
+  saveDebugDiagnosisAsIdea: (...args: unknown[]) => mockSaveDebugDiagnosisAsIdea(...args),
+}));
+
 // Mock observability service
 const mockQueryErrors = vi.fn();
 const mockGetHealthSummary = vi.fn();
@@ -640,4 +649,45 @@ describe('Admin Observability Routes', () => {
       expect(new URL(doRequest.url).pathname).toBe('/ingest');
     });
   });
+
+  describe('deployment diagnosis routes', () => {
+    it('runs an error-targeted diagnosis as the authenticated superadmin', async () => {
+      const diagnosis = {
+        id: 'diag-1', errorId: 'err-1', startTime: '2026-07-29T10:00:00Z',
+        endTime: '2026-07-29T10:30:00Z', diagnosis: 'Actionable result',
+        model: '@cf/zai-org/glm-5.2', ideaId: null, createdBy: 'user-superadmin',
+        createdAt: '2026-07-29T10:31:00Z',
+        usage: { turns: 2, inputTokens: 100, outputTokens: 20, totalTokens: 120, dailyTokensUsed: 120, dailyTokenLimit: 120000 },
+      };
+      mockRunDebugDiagnosis.mockResolvedValue(diagnosis);
+      const response = await app.request('/api/admin/observability/diagnoses', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ errorId: 'err-1' }),
+      }, createEnv());
+      expect(response.status).toBe(201);
+      expect(await response.json()).toEqual({ diagnosis });
+      expect(mockRunDebugDiagnosis).toHaveBeenCalledWith(expect.any(Object), 'user-superadmin', { errorId: 'err-1' });
+    });
+
+    it('returns 429 when the deployment feature budget is exhausted', async () => {
+      mockRunDebugDiagnosis.mockRejectedValue(new Error('Daily deployment debugging budget exhausted'));
+      const response = await app.request('/api/admin/observability/diagnoses', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ errorId: 'err-1' }),
+      }, createEnv());
+      expect(response.status).toBe(429);
+      expect(await response.json()).toMatchObject({ error: 'DEBUG_BUDGET_EXHAUSTED' });
+    });
+
+    it('saves a persisted diagnosis as a draft Idea', async () => {
+      mockSaveDebugDiagnosisAsIdea.mockResolvedValue({ ideaId: 'idea-1' });
+      const response = await app.request('/api/admin/observability/diagnoses/diag-1/idea', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId: 'project-1' }),
+      }, createEnv());
+      expect(response.status).toBe(201);
+      expect(await response.json()).toEqual({ ideaId: 'idea-1' });
+    });
+  });
+
 });

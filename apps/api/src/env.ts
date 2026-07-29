@@ -89,6 +89,14 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   CF_API_TOKEN: string;
   CF_ZONE_ID: string;
   CF_ACCOUNT_ID: string;
+  DEBUG_AGENT_MODEL?: string;
+  DEBUG_AGENT_MAX_TURNS?: string;
+  DEBUG_AGENT_RUN_TOKEN_LIMIT?: string;
+  DEBUG_AGENT_DAILY_TOKEN_LIMIT?: string;
+  DEBUG_AGENT_TOOL_RESULT_LIMIT?: string;
+  DEBUG_AGENT_TOOL_RESULT_BYTES?: string;
+  DEBUG_AGENT_MAX_WINDOW_HOURS?: string;
+  DEBUG_AGENT_TIMEOUT_MS?: string;
   JWT_PRIVATE_KEY: string;
   JWT_PUBLIC_KEY: string;
   ENCRYPTION_KEY: string;

@@ -18,18 +18,18 @@ Implement canonical idea `01KXN5YQ9TGN29ZZ8DP2DKAKHN` Phase 0.5: a superadmin-on
 
 ## Implementation Checklist
 
-- [ ] Add shared debug-agent constants/types and env overrides for model, turns, run/daily token ceilings, tool limits, and time windows.
-- [ ] Export recursive deterministic redaction and apply it to every debug tool result and final diagnosis.
-- [ ] Add nested canary-secret fixtures covering every decided token format.
-- [ ] Add atomic feature-scoped daily accounting with KV fallback, isolated from user budgets.
-- [ ] Implement the dedicated AI-Gateway Worker loop and fixed read-only tools for errors, health, trends, CF logs, and related entity state.
-- [ ] Enforce turn/token/daily budgets, bounded payloads/windows, safe errors, and structured secret-free output.
-- [ ] Add a main-D1 diagnosis table/migration linked to error/window, usage metadata, and optional Idea.
-- [ ] Add superadmin run/list/save-as-Idea API routes with runtime validation.
-- [ ] Add typed clients and `/admin/errors` row/window Diagnose actions, diagnosis view, persisted attachments, and project-select save-as-Idea.
-- [ ] Add unit and vertical-slice tests for auth, correlation, token non-exposure, redaction boundary, budgets, persistence, Idea creation, and UI wiring.
-- [ ] Document new environment variables and local-admin PII versus model-secret posture.
-- [ ] Run the mandatory local Playwright audit at 375x667 and 1280x800 with normal, long, empty, many, error, special-character, and minimal data.
+- [x] Add shared debug-agent constants/types and env overrides for model, turns, run/daily token ceilings, tool limits, and time windows.
+- [x] Export recursive deterministic redaction and apply it to every debug tool result and final diagnosis.
+- [x] Add nested canary-secret fixtures covering every decided token format.
+- [x] Add atomic feature-scoped daily accounting with KV fallback, isolated from user budgets.
+- [x] Implement the dedicated AI-Gateway Worker loop and fixed read-only tools for errors, health, trends, CF logs, and related entity state.
+- [x] Enforce turn/token/daily budgets, bounded payloads/windows, safe errors, and structured secret-free output.
+- [x] Add a main-D1 diagnosis table/migration linked to error/window, usage metadata, and optional Idea.
+- [x] Add superadmin run/list/save-as-Idea API routes with runtime validation.
+- [x] Add typed clients and `/admin/errors` row/window Diagnose actions, diagnosis view, persisted attachments, and project-select save-as-Idea.
+- [x] Add unit and vertical-slice tests for auth, correlation, token non-exposure, redaction boundary, budgets, persistence, Idea creation, and UI wiring.
+- [x] Document new environment variables and local-admin PII versus model-secret posture.
+- [x] Run the mandatory local Playwright audit at 375x667 and 1280x800 with normal, long, empty, many, error, special-character, and minimal data.
 - [ ] Run full quality gates and task-completion validation.
 - [ ] Run cloudflare, security, UI/UX, env, constitution, docs, and test specialist reviews and address findings.
 - [ ] Coordinate staging with active/queued `deploy-staging.yml` and concurrent vm-agent work.

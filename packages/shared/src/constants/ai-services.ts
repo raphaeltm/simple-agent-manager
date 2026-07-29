@@ -5,6 +5,16 @@
 /** Default Workers AI model for task title generation. Override via TASK_TITLE_MODEL env var. */
 export const DEFAULT_TASK_TITLE_MODEL = '@cf/zai-org/glm-5.2';
 
+/** Defaults for the tightly scoped deployment debugging agent. */
+export const DEFAULT_DEBUG_AGENT_MODEL = '@cf/zai-org/glm-5.2';
+export const DEFAULT_DEBUG_AGENT_MAX_TURNS = 6;
+export const DEFAULT_DEBUG_AGENT_RUN_TOKEN_LIMIT = 24_000;
+export const DEFAULT_DEBUG_AGENT_DAILY_TOKEN_LIMIT = 120_000;
+export const DEFAULT_DEBUG_AGENT_TOOL_RESULT_LIMIT = 50;
+export const DEFAULT_DEBUG_AGENT_TOOL_RESULT_BYTES = 32_768;
+export const DEFAULT_DEBUG_AGENT_MAX_WINDOW_HOURS = 24;
+export const DEFAULT_DEBUG_AGENT_TIMEOUT_MS = 120_000;
+
 /** Default max generated title length. Override via TASK_TITLE_MAX_LENGTH env var. */
 export const DEFAULT_TASK_TITLE_MAX_LENGTH = 100;
 

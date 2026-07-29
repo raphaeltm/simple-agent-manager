@@ -46,6 +46,8 @@ export interface AiProviderUsageEntry extends AiProviderUsageAttribution {
 
 interface AiTokenBudgetCounterStub extends DurableObjectStub {
   get(dateKey: string): Promise<TokenBudget>;
+  consumeTotal(dateKey: string, tokenLimit: number, tokens: number): Promise<{ allowed: boolean; usedTokens: number }>;
+  releaseTotal(dateKey: string, tokens: number): Promise<number>;
   increment(dateKey: string, inputTokens: number, outputTokens: number): Promise<TokenBudget>;
   incrementProviderUsage(
     dateKey: string,
@@ -158,6 +160,81 @@ export async function getTokenUsage(
   const key = buildBudgetKey(userId);
   const existing = await kv.get<TokenBudget>(key, 'json');
   return existing ?? { inputTokens: 0, outputTokens: 0 };
+}
+
+
+
+export interface FeatureTokenBudgetResult {
+  allowed: boolean;
+  usedTokens: number;
+  tokenLimit: number;
+}
+
+/** Build an isolated per-deployment feature budget key. */
+export function buildFeatureBudgetKey(feature: string, date?: Date): string {
+  return `ai-feature-budget:${feature}:${buildBudgetDateKey(date)}`;
+}
+
+/** Atomically consume a feature-scoped daily token allowance when the DO is available. */
+export async function consumeFeatureTokenBudget(
+  kv: KVNamespace,
+  feature: string,
+  tokens: number,
+  tokenLimit: number,
+  env?: Env,
+): Promise<FeatureTokenBudgetResult> {
+  const normalizedTokens = Math.max(0, Math.floor(tokens));
+  const counter = getBudgetCounter(env, `feature:${feature}`);
+  if (counter) {
+    const result = await counter.consumeTotal(buildBudgetDateKey(), tokenLimit, normalizedTokens);
+    return { ...result, tokenLimit };
+  }
+
+  const key = buildFeatureBudgetKey(feature);
+  const existing = Number(await kv.get(key)) || 0;
+  if (existing + normalizedTokens > tokenLimit) {
+    return { allowed: false, usedTokens: existing, tokenLimit };
+  }
+  const usedTokens = existing + normalizedTokens;
+  const ttl = parseInt(env?.AI_USAGE_BUDGET_TTL_SECONDS || '', 10) || DEFAULT_AI_USAGE_BUDGET_TTL_SECONDS;
+  await kv.put(key, String(usedTokens), { expirationTtl: ttl });
+  return { allowed: true, usedTokens, tokenLimit };
+}
+
+/** Release an unused feature budget reservation. */
+export async function releaseFeatureTokenBudget(
+  kv: KVNamespace,
+  feature: string,
+  tokens: number,
+  tokenLimit: number,
+  env?: Env,
+): Promise<FeatureTokenBudgetResult> {
+  const normalizedTokens = Math.max(0, Math.floor(tokens));
+  const counter = getBudgetCounter(env, `feature:${feature}`);
+  if (counter) {
+    const usedTokens = await counter.releaseTotal(buildBudgetDateKey(), normalizedTokens);
+    return { allowed: usedTokens < tokenLimit, usedTokens, tokenLimit };
+  }
+
+  const key = buildFeatureBudgetKey(feature);
+  const existing = Number(await kv.get(key)) || 0;
+  const usedTokens = Math.max(0, existing - normalizedTokens);
+  const ttl = parseInt(env?.AI_USAGE_BUDGET_TTL_SECONDS || '', 10) || DEFAULT_AI_USAGE_BUDGET_TTL_SECONDS;
+  await kv.put(key, String(usedTokens), { expirationTtl: ttl });
+  return { allowed: usedTokens < tokenLimit, usedTokens, tokenLimit };
+}
+
+export async function getFeatureTokenBudget(
+  kv: KVNamespace,
+  feature: string,
+  tokenLimit: number,
+  env?: Env,
+): Promise<FeatureTokenBudgetResult> {
+  const counter = getBudgetCounter(env, `feature:${feature}`);
+  const usedTokens = counter
+    ? (await counter.get(buildBudgetDateKey())).inputTokens
+    : Number(await kv.get(buildFeatureBudgetKey(feature))) || 0;
+  return { allowed: usedTokens < tokenLimit, usedTokens, tokenLimit };
 }
 
 // =============================================================================

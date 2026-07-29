@@ -1,6 +1,6 @@
 import type { PlatformError } from '@simple-agent-manager/shared';
 import { fireEvent,render, screen } from '@testing-library/react';
-import { describe, expect,it } from 'vitest';
+import { describe, expect,it, vi } from 'vitest';
 
 import { ObservabilityLogEntry } from '../../../../src/components/admin/ObservabilityLogEntry';
 
@@ -96,6 +96,15 @@ describe('ObservabilityLogEntry', () => {
   it('should not be clickable when no stack or context', () => {
     render(<ObservabilityLogEntry error={createEntry()} />);
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
+  });
+
+  it('calls the row diagnosis action without toggling details', () => {
+    const onDiagnose = vi.fn();
+    const entry = createEntry({ stack: 'Error stack' });
+    render(<ObservabilityLogEntry error={entry} onDiagnose={onDiagnose} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Diagnose' }));
+    expect(onDiagnose).toHaveBeenCalledWith(entry);
+    expect(screen.queryByText('Error stack')).not.toBeInTheDocument();
   });
 
   it('should collapse details on second click', () => {

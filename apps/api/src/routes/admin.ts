@@ -20,8 +20,15 @@ import {
   AdminUserActionSchema,
   AdminUserRoleSchema,
   jsonValidator,
+  RunDebugDiagnosisSchema,
+  SaveDebugDiagnosisIdeaSchema,
   UpdateSignupApprovalConfigSchema,
 } from '../schemas';
+import {
+  listDebugDiagnoses,
+  runDebugDiagnosis,
+  saveDebugDiagnosisAsIdea,
+} from '../services/debug-agent';
 import { getRuntimeLimits } from '../services/limits';
 import {
   CfApiError,
@@ -424,6 +431,56 @@ adminRoutes.post(
     }
   }
 );
+
+adminRoutes.get('/observability/debug/projects', async (c) => {
+  const db = drizzle(c.env.DATABASE, { schema });
+  const projects = await db
+    .select({ id: schema.projects.id, name: schema.projects.name })
+    .from(schema.projects)
+    .orderBy(schema.projects.name)
+    .limit(200);
+  return c.json({ projects });
+});
+
+adminRoutes.get('/observability/diagnoses', async (c) => {
+  const diagnoses = await listDebugDiagnoses(c.env, {
+    errorId: c.req.query('errorId'),
+    startTime: c.req.query('startTime'),
+    endTime: c.req.query('endTime'),
+  });
+  return c.json({ diagnoses });
+});
+
+adminRoutes.post('/observability/diagnoses', jsonValidator(RunDebugDiagnosisSchema), async (c) => {
+  const body = c.req.valid('json');
+  if ((!body.errorId && (!body.startTime || !body.endTime)) || (body.errorId && (body.startTime || body.endTime))) {
+    throw errors.badRequest('Provide either errorId or a startTime/endTime window');
+  }
+  try {
+    const diagnosis = await runDebugDiagnosis(c.env, getUserId(c), body);
+    return c.json({ diagnosis }, 201);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Diagnosis failed';
+    if (message.includes('budget') || message.includes('token ceiling')) {
+      return c.json({ error: 'DEBUG_BUDGET_EXHAUSTED', message }, 429);
+    }
+    if (message.includes('not found') || message.includes('window')) throw errors.badRequest(message);
+    throw err;
+  }
+});
+
+adminRoutes.post('/observability/diagnoses/:diagnosisId/idea', jsonValidator(SaveDebugDiagnosisIdeaSchema), async (c) => {
+  const body = c.req.valid('json');
+  if (!body.projectId?.trim()) throw errors.badRequest('projectId is required');
+  const result = await saveDebugDiagnosisAsIdea(
+    c.env,
+    c.req.param('diagnosisId'),
+    body.projectId,
+    getUserId(c),
+    body.title,
+  );
+  return c.json(result, 201);
+});
 
 /**
  * GET /api/admin/observability/logs/stream - WebSocket upgrade for real-time log stream

@@ -1,8 +1,17 @@
 import type { PlatformError } from '@simple-agent-manager/shared';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach,describe, expect, it, vi } from 'vitest';
 
 import { ErrorList } from '../../../../src/components/admin/ErrorList';
+
+const mockRunAdminDebugDiagnosis = vi.fn();
+const mockFetchAdminDebugDiagnoses = vi.fn();
+vi.mock('../../../../src/lib/api', () => ({
+  runAdminDebugDiagnosis: (...args: unknown[]) => mockRunAdminDebugDiagnosis(...args),
+  fetchAdminDebugDiagnoses: (...args: unknown[]) => mockFetchAdminDebugDiagnoses(...args),
+  fetchAdminDebugProjects: vi.fn().mockResolvedValue({ projects: [] }),
+  saveAdminDebugDiagnosisAsIdea: vi.fn(),
+}));
 
 // Mock the useAdminErrors hook
 const mockUseAdminErrors = vi.fn();
@@ -61,6 +70,7 @@ function defaultHookReturn(overrides: Record<string, unknown> = {}) {
 describe('ErrorList', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockFetchAdminDebugDiagnoses.mockResolvedValue({ diagnoses: [] });
   });
 
   it('should show loading spinner when loading with no errors', () => {
@@ -131,6 +141,41 @@ describe('ErrorList', () => {
     expect(screen.getByLabelText('Search error messages')).toBeInTheDocument();
   });
 
+  it('runs a diagnosis for an error row and renders bounded usage metadata', async () => {
+    const entry = createMockEntry({ id: 'err-target', message: 'Target failure' });
+    mockRunAdminDebugDiagnosis.mockResolvedValue({
+      diagnosis: {
+        id: 'diag-1', errorId: 'err-target', startTime: '2026-02-14T11:45:00Z',
+        endTime: '2026-02-14T12:15:00Z', diagnosis: '## Summary\nHeartbeat stopped.',
+        model: '@cf/zai-org/glm-5.2', ideaId: null, createdBy: 'admin',
+        createdAt: '2026-02-14T12:16:00Z',
+        usage: { turns: 2, inputTokens: 100, outputTokens: 20, totalTokens: 120, dailyTokensUsed: 120, dailyTokenLimit: 120000 },
+      },
+    });
+    mockUseAdminErrors.mockReturnValue(defaultHookReturn({ errors: [entry], total: 1 }));
+    render(<ErrorList />);
+    fireEvent.click(screen.getByRole('button', { name: 'Diagnose' }));
+    await waitFor(() => expect(mockRunAdminDebugDiagnosis).toHaveBeenCalledWith({ errorId: 'err-target' }));
+    expect(await screen.findByText(/Heartbeat stopped/)).toBeInTheDocument();
+    expect(screen.getByText('Run tokens: 120')).toBeInTheDocument();
+  });
+
+
+  it('restores a persisted diagnosis on the error surface', async () => {
+    mockFetchAdminDebugDiagnoses.mockResolvedValue({
+      diagnoses: [{
+        id: 'diag-saved', errorId: 'err-old', startTime: '2026-02-14T11:45:00Z',
+        endTime: '2026-02-14T12:15:00Z', diagnosis: 'Persisted diagnosis evidence',
+        model: '@cf/zai-org/glm-5.2', ideaId: null, createdBy: 'admin',
+        createdAt: '2026-02-14T12:16:00Z',
+        usage: { turns: 2, inputTokens: 100, outputTokens: 20, totalTokens: 120, dailyTokensUsed: 120, dailyTokenLimit: 120000 },
+      }],
+    });
+    mockUseAdminErrors.mockReturnValue(defaultHookReturn());
+    render(<ErrorList />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Saved diagnoses (1)' }));
+    expect(screen.getByText('Persisted diagnosis evidence')).toBeInTheDocument();
+  });
   it('should show refresh button', () => {
     mockUseAdminErrors.mockReturnValue(defaultHookReturn());
     render(<ErrorList />);

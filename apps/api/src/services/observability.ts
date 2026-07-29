@@ -658,7 +658,7 @@ export async function queryCloudflareLogs(
       level: (metadata?.level ?? legacyEvent?.level ?? event.level ?? 'info') as string,
       event: (metadata?.type ?? workers?.eventType ?? legacyEvent?.type ?? event.type ?? 'unknown') as string,
       message: (metadata?.message ?? legacyEvent?.message ?? event.message ?? '') as string,
-      details: stripSensitiveFields({
+      details: redactSensitiveData({
         ...(workerEvent ?? legacyEvent ?? {}),
         scriptName: workers?.scriptName,
         requestId: metadata?.requestId ?? workers?.requestId,
@@ -679,16 +679,37 @@ export async function queryCloudflareLogs(
 /**
  * Remove potentially sensitive fields from CF API response details.
  */
-function stripSensitiveFields(obj: Record<string, unknown>): Record<string, unknown> {
-  const sensitiveKeys = new Set(['authorization', 'cookie', 'set-cookie', 'x-api-key', 'token']);
+const REDACTED = '[REDACTED]';
+const SENSITIVE_KEY_PATTERN = /^(authorization|proxy-authorization|cookie|set-cookie|x-api-key|api[-_]?key|access[-_]?token|refresh[-_]?token|token|secret|password|private[-_]?key|user[-_]?id|ip[-_]?address|user[-_]?agent)$/i;
+const SECRET_PATTERNS = [
+  /sk-ant-[A-Za-z0-9_-]{16,}/g,
+  /(?:ghp|gho|ghu|ghs)_[A-Za-z0-9]{20,}/g,
+  /github_pat_[A-Za-z0-9_]{20,}/g,
+  /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g,
+  /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----/g,
+  /\b(?:Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{12,}/gi,
+  /\b[a-fA-F0-9]{64,}\b/g,
+  /\b[A-Za-z0-9+/]{80,}={0,2}\b/g,
+] as const;
+
+function redactString(value: string): string {
+  return SECRET_PATTERNS.reduce(
+    (redacted, pattern) => redacted.replace(pattern, REDACTED),
+    value,
+  );
+}
+
+/** Deterministically redact nested tool/log data before it can enter model context. */
+export function redactSensitiveData<T>(value: T): T {
+  if (typeof value === 'string') return redactString(value) as T;
+  if (Array.isArray(value)) return value.map((item) => redactSensitiveData(item)) as T;
+  if (!value || typeof value !== 'object') return value;
+
   const result: Record<string, unknown> = {};
-
-  for (const [key, value] of Object.entries(obj)) {
-    if (sensitiveKeys.has(key.toLowerCase())) continue;
-    result[key] = value;
+  for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
+    result[key] = SENSITIVE_KEY_PATTERN.test(key) ? REDACTED : redactSensitiveData(nested);
   }
-
-  return result;
+  return result as T;
 }
 
 /**

@@ -149,6 +149,17 @@ export const AdminLogQuerySchema = v.object({
   queryId: v.optional(v.string()),
 });
 
+export const RunDebugDiagnosisSchema = v.object({
+  errorId: v.optional(v.string()),
+  startTime: v.optional(v.string()),
+  endTime: v.optional(v.string()),
+});
+
+export const SaveDebugDiagnosisIdeaSchema = v.object({
+  projectId: v.string(),
+  title: v.optional(v.string()),
+});
+
 // UI Governance schemas (replacing manual validators)
 export const UIStandardUpsertSchema = v.object({
   status: v.picklist(['draft', 'review', 'active', 'deprecated']),

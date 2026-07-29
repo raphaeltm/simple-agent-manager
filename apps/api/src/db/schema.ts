@@ -2301,6 +2301,31 @@ export const sessionSummaries = sqliteTable(
 export type SessionSummaryRow = typeof sessionSummaries.$inferSelect;
 export type NewSessionSummaryRow = typeof sessionSummaries.$inferInsert;
 
+
+export const debugDiagnoses = sqliteTable(
+  'debug_diagnoses',
+  {
+    id: text('id').primaryKey(),
+    errorId: text('error_id'),
+    startTime: text('start_time').notNull(),
+    endTime: text('end_time').notNull(),
+    diagnosis: text('diagnosis').notNull(),
+    model: text('model').notNull(),
+    turns: integer('turns').notNull(),
+    inputTokens: integer('input_tokens').notNull(),
+    outputTokens: integer('output_tokens').notNull(),
+    dailyTokensUsed: integer('daily_tokens_used').notNull(),
+    dailyTokenLimit: integer('daily_token_limit').notNull(),
+    ideaId: text('idea_id').references(() => tasks.id, { onDelete: 'set null' }),
+    createdBy: text('created_by').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    errorCreatedIdx: index('idx_debug_diagnoses_error_created').on(table.errorId, table.createdAt),
+    windowIdx: index('idx_debug_diagnoses_window').on(table.startTime, table.endTime),
+  })
+);
+
 // =============================================================================
 // DEPLOYMENT ENVIRONMENTS
 // =============================================================================
