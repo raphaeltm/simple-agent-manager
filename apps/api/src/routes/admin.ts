@@ -38,6 +38,7 @@ import {
   queryCloudflareLogs,
   queryErrors,
 } from '../services/observability';
+import { runPlatformFeedbackTriage } from '../services/platform-feedback-triage';
 import { getSignupApprovalConfig, setSignupApprovalConfig } from '../services/signup-approval';
 
 const adminRoutes = new Hono<{ Bindings: Env }>();
@@ -480,6 +481,11 @@ adminRoutes.post('/observability/diagnoses/:diagnosisId/idea', jsonValidator(Sav
     body.title,
   );
   return c.json(result, 201);
+});
+
+adminRoutes.post('/observability/feedback-triage', async (c) => {
+  const result = await runPlatformFeedbackTriage(c.env, 'manual');
+  return c.json({ result });
 });
 
 /**

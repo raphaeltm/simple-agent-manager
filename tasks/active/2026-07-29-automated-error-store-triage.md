@@ -53,45 +53,45 @@ scope.
 
 ## Implementation checklist
 
-- [ ] Add shared `DEFAULT_*` limits for triage window, group/error caps, evidence
+- [x] Add shared `DEFAULT_*` limits for triage window, group/error caps, evidence
       bounds, and configurable environment overrides.
-- [ ] Add and document `PLATFORM_FEEDBACK_PROJECT_ID`; unset/blank must make
+- [x] Add and document `PLATFORM_FEEDBACK_PROJECT_ID`; unset/blank must make
       automated/manual triage a safe no-op.
-- [ ] Add an additive main-D1 migration and Drizzle schema for durable,
+- [x] Add an additive main-D1 migration and Drizzle schema for durable,
       deterministic feedback-triage claims and Idea/diagnosis linkage.
-- [ ] Refactor `runDebugDiagnosis()` minimally so callers select an allowlisted
+- [x] Refactor `runDebugDiagnosis()` minimally so callers select an allowlisted
       accounting feature key; preserve the existing interactive default and
       atomic reserve/release semantics.
-- [ ] Implement deterministic grouping from a bounded recent error page using
+- [x] Implement deterministic grouping from a bounded recent error page using
       redacted/normalized source and message shape plus a time window. Hash only
       the sanitized canonical representation.
-- [ ] Implement one shared core service for cron and manual triggers. Resolve the
+- [x] Implement one shared core service for cron and manual triggers. Resolve the
       configured project and existing owner, claim groups idempotently, diagnose
       new groups, and create or update one draft Idea per stable signature.
-- [ ] Construct Idea provenance from PII-free summaries, bounded error IDs and
+- [x] Construct Idea provenance from PII-free summaries, bounded error IDs and
       timestamps, counts, source/signature/window metadata, and a redacted
       diagnosis. Never copy raw stack/context/identity/network fields.
-- [ ] Add the superadmin-only manual endpoint and scheduled cron integration.
-- [ ] Add disabled-config, mounted-route authorization, deterministic grouping,
+- [x] Add the superadmin-only manual endpoint and scheduled cron integration.
+- [x] Add disabled-config, mounted-route authorization, deterministic grouping,
       concurrent/repeated dedup, redaction canary, separate-budget, and
       cron/manual-shared-path tests.
-- [ ] Update environment/deployment references and relevant API documentation.
+- [x] Update environment/deployment references and relevant API documentation.
 - [ ] Rebase against main/sibling changes and rerun validation before staging.
 
 ## Acceptance criteria
 
-- [ ] With `PLATFORM_FEEDBACK_PROJECT_ID` unset or blank, triage performs no
+- [x] With `PLATFORM_FEEDBACK_PROJECT_ID` unset or blank, triage performs no
       reads that invoke the model and no Idea writes, and reports disabled.
-- [ ] Both the scheduled handler and a superadmin-only manual endpoint invoke the
+- [x] Both the scheduled handler and a superadmin-only manual endpoint invoke the
       same triage service.
-- [ ] Non-superadmins cannot invoke the manual endpoint.
-- [ ] Stable redacted source/signature/window grouping is deterministic and raw
+- [x] Non-superadmins cannot invoke the manual endpoint.
+- [x] Stable redacted source/signature/window grouping is deterministic and raw
       PII does not influence persisted Idea content.
-- [ ] Repeated or concurrent matching errors update/annotate the existing draft
+- [x] Repeated or concurrent matching errors update/annotate the existing draft
       Idea or diagnosis metadata instead of creating unbounded tasks.
-- [ ] Automated diagnosis usage is charged to a distinct feature key without
+- [x] Automated diagnosis usage is charged to a distinct feature key without
       changing the interactive debug-agent budget.
-- [ ] Canary secrets, authorization material, email/IP/user-agent values, and
+- [x] Canary secrets, authorization material, email/IP/user-agent values, and
       raw user identifiers do not appear in generated Idea title/description.
 - [ ] Local lint, typecheck, tests, build, migration-safety checks, and all
       required specialist reviews pass.

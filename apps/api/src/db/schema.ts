@@ -2301,7 +2301,6 @@ export const sessionSummaries = sqliteTable(
 export type SessionSummaryRow = typeof sessionSummaries.$inferSelect;
 export type NewSessionSummaryRow = typeof sessionSummaries.$inferInsert;
 
-
 export const debugDiagnoses = sqliteTable(
   'debug_diagnoses',
   {
@@ -2317,12 +2316,42 @@ export const debugDiagnoses = sqliteTable(
     dailyTokensUsed: integer('daily_tokens_used').notNull(),
     dailyTokenLimit: integer('daily_token_limit').notNull(),
     ideaId: text('idea_id').references(() => tasks.id, { onDelete: 'set null' }),
-    createdBy: text('created_by').notNull().references(() => users.id, { onDelete: 'cascade' }),
-    createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+    createdBy: text('created_by')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
   },
   (table) => ({
     errorCreatedIdx: index('idx_debug_diagnoses_error_created').on(table.errorId, table.createdAt),
     windowIdx: index('idx_debug_diagnoses_window').on(table.startTime, table.endTime),
+  })
+);
+export const platformFeedbackTriages = sqliteTable(
+  'platform_feedback_triages',
+  {
+    signature: text('signature').primaryKey(),
+    source: text('source').notNull(),
+    summary: text('summary').notNull(),
+    firstSeenAt: integer('first_seen_at').notNull(),
+    lastSeenAt: integer('last_seen_at').notNull(),
+    occurrenceCount: integer('occurrence_count').notNull(),
+    evidenceRefs: text('evidence_refs').notNull(),
+    diagnosisId: text('diagnosis_id').references(() => debugDiagnoses.id, { onDelete: 'set null' }),
+    ideaId: text('idea_id').references(() => tasks.id, { onDelete: 'set null' }),
+    claimToken: text('claim_token'),
+    claimExpiresAt: integer('claim_expires_at'),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    ideaIdx: index('idx_platform_feedback_triages_idea').on(table.ideaId),
+    lastSeenIdx: index('idx_platform_feedback_triages_last_seen').on(table.lastSeenAt),
   })
 );
 

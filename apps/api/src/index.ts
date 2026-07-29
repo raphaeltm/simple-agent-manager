@@ -147,6 +147,7 @@ import { runTriggerExecutionCleanup } from './scheduled/trigger-execution-cleanu
 import { runMonthlyCostAggregation } from './services/ai-monthly-cost-cron';
 import { GcpApiError, sanitizeGcpError } from './services/gcp-errors';
 import { signTerminalToken, verifyPortAccessToken, verifyTerminalToken } from './services/jwt';
+import { runPlatformFeedbackTriage } from './services/platform-feedback-triage';
 import { recordNodeRoutingMetric } from './services/telemetry';
 import { checkProvisioningTimeouts } from './services/timeout';
 import { fetchVmAgentContainer, getVmAgentContainerConfig } from './services/vm-agent-container';
@@ -863,11 +864,19 @@ export default {
     if (isMonthlyCostAggregation) {
       ctx.waitUntil(
         (async () => {
-          const result = await runMonthlyCostAggregation(env);
+          const [result, feedbackTriage] = await Promise.all([
+            runMonthlyCostAggregation(env),
+            runPlatformFeedbackTriage(env, 'cron'),
+          ]);
           log.info('cron.completed', {
             cron: controller.cron,
             type: 'monthly-cost-aggregation',
             monthlyCostEnabled: result.enabled,
+            feedbackTriageEnabled: feedbackTriage.enabled,
+            feedbackTriageGroupsFound: feedbackTriage.groupsFound,
+            feedbackTriageIdeasCreated: feedbackTriage.ideasCreated,
+            feedbackTriageIdeasUpdated: feedbackTriage.ideasUpdated,
+            feedbackTriageGroupsSkipped: feedbackTriage.groupsSkipped,
             monthlyCostUsersUpdated: result.usersUpdated,
             monthlyCostTotalEntries: result.totalEntries,
             monthlyCostErrors: result.errors,

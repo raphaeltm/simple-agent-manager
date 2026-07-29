@@ -32,7 +32,8 @@ import {
   redactSensitiveData,
 } from './observability';
 
-const DEBUG_FEATURE_KEY = 'deployment-debug-agent';
+export const INTERACTIVE_DEBUG_FEATURE_KEY = 'deployment-debug-agent';
+export const SCHEDULED_TRIAGE_DEBUG_FEATURE_KEY = 'platform-feedback-triage';
 interface DebugConfig {
   model: string;
   maxTurns: number;
@@ -339,6 +340,7 @@ function estimatedTokens(messages: ChatMessage[]): number {
 async function complete(
   env: Env,
   config: DebugConfig,
+  featureKey: string,
   messages: ChatMessage[],
   maxTokens: number
 ): Promise<Completion> {
@@ -352,7 +354,7 @@ async function complete(
         Authorization: `Bearer ${env.CF_API_TOKEN}`,
         'Content-Type': 'application/json',
         'cf-aig-metadata': JSON.stringify({
-          source: DEBUG_FEATURE_KEY,
+          source: featureKey,
           modelId: config.model,
           stream: false,
           hasTools: true,
@@ -391,11 +393,15 @@ function toDiagnosis(row: typeof schema.debugDiagnoses.$inferSelect): DebugDiagn
 export async function runDebugDiagnosis(
   env: Env,
   createdBy: string,
-  input: { errorId?: string; startTime?: string; endTime?: string }
+  input: { errorId?: string; startTime?: string; endTime?: string },
+  options: {
+    featureKey?: typeof INTERACTIVE_DEBUG_FEATURE_KEY | typeof SCHEDULED_TRIAGE_DEBUG_FEATURE_KEY;
+  } = {}
 ): Promise<DebugDiagnosis> {
+  const featureKey = options.featureKey ?? INTERACTIVE_DEBUG_FEATURE_KEY;
   const config = resolveDebugAgentConfig(env);
   const window = await resolveWindow(env, input, config);
-  const daily = await getFeatureTokenBudget(env.KV, DEBUG_FEATURE_KEY, config.dailyTokenLimit, env);
+  const daily = await getFeatureTokenBudget(env.KV, featureKey, config.dailyTokenLimit, env);
   if (!daily.allowed) throw new Error('Daily deployment debugging budget exhausted');
 
   const messages: ChatMessage[] = [
@@ -418,7 +424,7 @@ export async function runDebugDiagnosis(
     const maxTokens = Math.min(config.modelOutputTokens, remaining - requestEstimate);
     const reservation = await consumeFeatureTokenBudget(
       env.KV,
-      DEBUG_FEATURE_KEY,
+      featureKey,
       remaining,
       config.dailyTokenLimit,
       env
@@ -426,15 +432,9 @@ export async function runDebugDiagnosis(
     if (!reservation.allowed) throw new Error('Daily deployment debugging budget exhausted');
     let completion: Completion;
     try {
-      completion = await complete(env, config, messages, maxTokens);
+      completion = await complete(env, config, featureKey, messages, maxTokens);
     } catch (cause) {
-      await releaseFeatureTokenBudget(
-        env.KV,
-        DEBUG_FEATURE_KEY,
-        remaining,
-        config.dailyTokenLimit,
-        env
-      );
+      await releaseFeatureTokenBudget(env.KV, featureKey, remaining, config.dailyTokenLimit, env);
       throw cause;
     }
     turns++;
@@ -445,7 +445,7 @@ export async function runDebugDiagnosis(
     outputTokens += usedOutput;
     const released = await releaseFeatureTokenBudget(
       env.KV,
-      DEBUG_FEATURE_KEY,
+      featureKey,
       Math.max(0, remaining - actualTokens),
       config.dailyTokenLimit,
       env

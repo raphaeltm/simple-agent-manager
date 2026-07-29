@@ -1,0 +1,264 @@
+import {
+  DEFAULT_PLATFORM_FEEDBACK_TRIAGE_CLAIM_TTL_MS,
+  DEFAULT_PLATFORM_FEEDBACK_TRIAGE_ERROR_LIMIT,
+  DEFAULT_PLATFORM_FEEDBACK_TRIAGE_EVIDENCE_LIMIT,
+  DEFAULT_PLATFORM_FEEDBACK_TRIAGE_GROUP_LIMIT,
+  DEFAULT_PLATFORM_FEEDBACK_TRIAGE_WINDOW_MINUTES,
+} from '@simple-agent-manager/shared';
+
+import type { Env } from '../env';
+import { ulid } from '../lib/ulid';
+import { runDebugDiagnosis, SCHEDULED_TRIAGE_DEBUG_FEATURE_KEY } from './debug-agent';
+import { redactSensitiveData } from './observability';
+
+export type FeedbackTriageTrigger = 'cron' | 'manual';
+export interface FeedbackTriageResult {
+  enabled: boolean;
+  trigger: FeedbackTriageTrigger;
+  groupsFound: number;
+  ideasCreated: number;
+  ideasUpdated: number;
+  groupsSkipped: number;
+}
+interface ErrorRow {
+  id: string;
+  source: string;
+  message: string;
+  timestamp: number;
+}
+export interface FeedbackErrorGroup {
+  signature: string;
+  source: string;
+  summary: string;
+  firstSeenAt: number;
+  lastSeenAt: number;
+  evidence: Array<{ errorId: string; timestamp: number }>;
+  count: number;
+}
+interface TriageDeps {
+  now?: () => number;
+  diagnose?: typeof runDebugDiagnosis;
+}
+
+function positive(value: string | undefined, fallback: number): number {
+  const parsed = Number.parseInt(value ?? '', 10);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+function normalizeMessage(message: string): string {
+  return String(redactSensitiveData(message))
+    .toLowerCase()
+    .replace(/\b[a-z0-9.!#$%&*+/=?^_`{|}~-]+@[a-z0-9.-]+\.[a-z]{2,}\b/gi, '[email]')
+    .replace(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g, '[ip]')
+    .replace(/https?:\/\/\S+/g, '[url]')
+    .replace(/\b[0-9a-f]{8}-[0-9a-f-]{27,}\b/gi, '[id]')
+    .replace(/\b01[a-z0-9]{24}\b/gi, '[id]')
+    .replace(/\b\d{3,}\b/g, '[n]')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 500);
+}
+async function digest(value: string): Promise<string> {
+  const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
+  return [...new Uint8Array(bytes)].map((item) => item.toString(16).padStart(2, '0')).join('');
+}
+export async function groupPlatformErrors(
+  rows: ErrorRow[],
+  evidenceLimit: number
+): Promise<FeedbackErrorGroup[]> {
+  const groups = new Map<string, Omit<FeedbackErrorGroup, 'signature'>>();
+  for (const row of rows) {
+    const source =
+      String(redactSensitiveData(row.source))
+        .replace(/[^a-z0-9_-]/gi, '')
+        .slice(0, 40) || 'unknown';
+    const normalized = normalizeMessage(row.message) || 'redacted platform error';
+    const summary = `Recurring ${source} platform error`;
+    const key = `${source}\n${normalized}`;
+    const current = groups.get(key);
+    const safeErrorId = /^[0-9A-HJKMNP-TV-Z]{26}$/i.test(row.id) ? row.id : 'invalid-redacted-id';
+    const evidence = { errorId: safeErrorId, timestamp: row.timestamp };
+    if (current) {
+      current.count += 1;
+      current.firstSeenAt = Math.min(current.firstSeenAt, row.timestamp);
+      current.lastSeenAt = Math.max(current.lastSeenAt, row.timestamp);
+      if (current.evidence.length < evidenceLimit) current.evidence.push(evidence);
+    } else {
+      groups.set(key, {
+        source,
+        summary,
+        firstSeenAt: row.timestamp,
+        lastSeenAt: row.timestamp,
+        evidence: [evidence],
+        count: 1,
+      });
+    }
+  }
+  return Promise.all(
+    [...groups.entries()].map(async ([key, group]) => ({ ...group, signature: await digest(key) }))
+  );
+}
+function ideaDescription(group: FeedbackErrorGroup, diagnosisId: string): string {
+  const refs = group.evidence
+    .map((item) => `- ${item.errorId} at ${new Date(item.timestamp).toISOString()}`)
+    .join('\n');
+  return (
+    `Automated platform feedback triage (untrusted source; allowlisted metadata only).\n\n` +
+    `Signature ref: ${group.signature.slice(0, 16)}\nSource: ${group.source}\n` +
+    `Window: ${new Date(group.firstSeenAt).toISOString()} – ${new Date(group.lastSeenAt).toISOString()}\n` +
+    `Matching errors in latest window: ${group.count}\n\nSummary: ${group.summary}\n` +
+    `Persisted diagnosis ref: ${diagnosisId}\n\nBounded evidence references:\n${refs}`
+  );
+}
+export async function runPlatformFeedbackTriage(
+  env: Env,
+  trigger: FeedbackTriageTrigger,
+  deps: TriageDeps = {}
+): Promise<FeedbackTriageResult> {
+  const projectId = env.PLATFORM_FEEDBACK_PROJECT_ID?.trim();
+  const base: FeedbackTriageResult = {
+    enabled: Boolean(projectId),
+    trigger,
+    groupsFound: 0,
+    ideasCreated: 0,
+    ideasUpdated: 0,
+    groupsSkipped: 0,
+  };
+  if (!projectId) return base;
+  const project = await env.DATABASE.prepare('SELECT id, user_id FROM projects WHERE id = ?')
+    .bind(projectId)
+    .first<{ id: string; user_id: string }>();
+  if (!project)
+    throw new Error('PLATFORM_FEEDBACK_PROJECT_ID does not reference an existing project');
+  const now = deps.now?.() ?? Date.now();
+  const windowMinutes = positive(
+    env.PLATFORM_FEEDBACK_TRIAGE_WINDOW_MINUTES,
+    DEFAULT_PLATFORM_FEEDBACK_TRIAGE_WINDOW_MINUTES
+  );
+  const errorLimit = positive(
+    env.PLATFORM_FEEDBACK_TRIAGE_ERROR_LIMIT,
+    DEFAULT_PLATFORM_FEEDBACK_TRIAGE_ERROR_LIMIT
+  );
+  const groupLimit = positive(
+    env.PLATFORM_FEEDBACK_TRIAGE_GROUP_LIMIT,
+    DEFAULT_PLATFORM_FEEDBACK_TRIAGE_GROUP_LIMIT
+  );
+  const evidenceLimit = positive(
+    env.PLATFORM_FEEDBACK_TRIAGE_EVIDENCE_LIMIT,
+    DEFAULT_PLATFORM_FEEDBACK_TRIAGE_EVIDENCE_LIMIT
+  );
+  const claimTtl = positive(
+    env.PLATFORM_FEEDBACK_TRIAGE_CLAIM_TTL_MS,
+    DEFAULT_PLATFORM_FEEDBACK_TRIAGE_CLAIM_TTL_MS
+  );
+  const query = await env.OBSERVABILITY_DATABASE.prepare(
+    'SELECT id, source, message, timestamp FROM platform_errors WHERE level = ? AND timestamp BETWEEN ? AND ? ORDER BY timestamp DESC LIMIT ?'
+  )
+    .bind('error', now - windowMinutes * 60_000, now, errorLimit)
+    .all<ErrorRow>();
+  const groups = (await groupPlatformErrors(query.results ?? [], evidenceLimit))
+    .sort((a, b) => b.count - a.count || b.lastSeenAt - a.lastSeenAt)
+    .slice(0, groupLimit);
+  const result = { ...base, groupsFound: groups.length };
+  const diagnose = deps.diagnose ?? runDebugDiagnosis;
+
+  for (const group of groups) {
+    const refs = JSON.stringify(group.evidence);
+    await env.DATABASE.prepare(
+      `INSERT OR IGNORE INTO platform_feedback_triages
+      (signature, source, summary, first_seen_at, last_seen_at, occurrence_count, evidence_refs)
+      VALUES (?, ?, ?, ?, ?, ?, ?)`
+    )
+      .bind(
+        group.signature,
+        group.source,
+        group.summary,
+        group.firstSeenAt,
+        group.lastSeenAt,
+        group.count,
+        refs
+      )
+      .run();
+    await env.DATABASE.prepare(
+      `UPDATE platform_feedback_triages SET first_seen_at = MIN(first_seen_at, ?),
+      last_seen_at = MAX(last_seen_at, ?), occurrence_count = MAX(occurrence_count, ?), evidence_refs = ?,
+      updated_at = CURRENT_TIMESTAMP WHERE signature = ?`
+    )
+      .bind(group.firstSeenAt, group.lastSeenAt, group.count, refs, group.signature)
+      .run();
+    const existing = await env.DATABASE.prepare(
+      `SELECT t.idea_id, d.diagnosis FROM platform_feedback_triages t
+      LEFT JOIN debug_diagnoses d ON d.id = t.diagnosis_id WHERE t.signature = ?`
+    )
+      .bind(group.signature)
+      .first<{ idea_id: string | null; diagnosis: string | null }>();
+    if (existing?.idea_id) {
+      await env.DATABASE.prepare(
+        `UPDATE tasks SET description = ?, updated_at = ?
+        WHERE id = ? AND project_id = ? AND status = 'draft'`
+      )
+        .bind(
+          ideaDescription(group, 'existing'),
+          new Date(now).toISOString(),
+          existing.idea_id,
+          project.id
+        )
+        .run();
+      result.ideasUpdated += 1;
+      continue;
+    }
+    const claimToken = ulid();
+    const claim = await env.DATABASE.prepare(
+      `UPDATE platform_feedback_triages SET claim_token = ?, claim_expires_at = ?
+      WHERE signature = ? AND idea_id IS NULL AND (claim_expires_at IS NULL OR claim_expires_at < ?)`
+    )
+      .bind(claimToken, now + claimTtl, group.signature, now)
+      .run();
+    if ((claim.meta.changes ?? 0) !== 1) {
+      result.groupsSkipped += 1;
+      continue;
+    }
+    try {
+      const representative = group.evidence[0];
+      if (!representative) {
+        result.groupsSkipped += 1;
+        continue;
+      }
+      const diagnosis = await diagnose(
+        env,
+        project.user_id,
+        { errorId: representative.errorId },
+        { featureKey: SCHEDULED_TRIAGE_DEBUG_FEATURE_KEY }
+      );
+      const ideaId = ulid();
+      const isoNow = new Date(now).toISOString();
+      await env.DATABASE.batch([
+        env.DATABASE.prepare(
+          `INSERT INTO tasks (id, project_id, user_id, title, description, status, priority,
+          task_mode, dispatch_depth, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'draft', 0, 'task', 0, ?, ?, ?)`
+        ).bind(
+          ideaId,
+          project.id,
+          project.user_id,
+          group.summary.slice(0, 200),
+          ideaDescription(group, diagnosis.id),
+          project.user_id,
+          isoNow,
+          isoNow
+        ),
+        env.DATABASE.prepare(
+          `UPDATE platform_feedback_triages SET diagnosis_id = ?, idea_id = ?, claim_token = NULL,
+          claim_expires_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE signature = ? AND claim_token = ?`
+        ).bind(diagnosis.id, ideaId, group.signature, claimToken),
+      ]);
+      result.ideasCreated += 1;
+    } catch (cause) {
+      await env.DATABASE.prepare(
+        'UPDATE platform_feedback_triages SET claim_token = NULL, claim_expires_at = NULL WHERE signature = ? AND claim_token = ?'
+      )
+        .bind(group.signature, claimToken)
+        .run();
+      throw cause;
+    }
+  }
+  return result;
+}

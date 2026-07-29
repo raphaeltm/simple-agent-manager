@@ -8,7 +8,10 @@ const mockGetUserId = vi.fn().mockReturnValue('user-superadmin');
 vi.mock('../../../src/middleware/auth', () => ({
   requireAuth: () => vi.fn((_c: any, next: any) => next()),
   requireApproved: () => vi.fn((_c: any, next: any) => next()),
-  requireSuperadmin: () => vi.fn((_c: any, next: any) => next()),
+  requireSuperadmin: () => vi.fn((c: any, next: any) => {
+    if (c.req.header('x-test-role') === 'non-superadmin') return c.json({ error: 'FORBIDDEN' }, 403);
+    return next();
+  }),
   getUserId: (...args: unknown[]) => mockGetUserId(...args),
 }));
 
@@ -41,6 +44,11 @@ vi.mock('../../../src/services/debug-agent', () => ({
   listDebugDiagnoses: (...args: unknown[]) => mockListDebugDiagnoses(...args),
   saveDebugDiagnosisAsIdea: (...args: unknown[]) => mockSaveDebugDiagnosisAsIdea(...args),
 }));
+const mockRunPlatformFeedbackTriage = vi.fn();
+vi.mock('../../../src/services/platform-feedback-triage', () => ({
+  runPlatformFeedbackTriage: (...args: unknown[]) => mockRunPlatformFeedbackTriage(...args),
+}));
+
 
 // Mock observability service
 const mockQueryErrors = vi.fn();
@@ -687,6 +695,24 @@ describe('Admin Observability Routes', () => {
       }, createEnv());
       expect(response.status).toBe(201);
       expect(await response.json()).toEqual({ ideaId: 'idea-1' });
+    });
+    it('uses the shared manual feedback-triage core from the admin router', async () => {
+      const result = { enabled: true, trigger: 'manual', groupsFound: 1,
+        ideasCreated: 1, ideasUpdated: 0, groupsSkipped: 0 };
+      mockRunPlatformFeedbackTriage.mockResolvedValue(result);
+      const env = createEnv({ PLATFORM_FEEDBACK_PROJECT_ID: 'project-1' });
+      const response = await app.request('/api/admin/observability/feedback-triage', { method: 'POST' }, env);
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ result });
+      expect(mockRunPlatformFeedbackTriage).toHaveBeenCalledWith(env, 'manual');
+    });
+
+    it('rejects a non-superadmin before invoking manual triage', async () => {
+      const response = await app.request('/api/admin/observability/feedback-triage', {
+        method: 'POST', headers: { 'x-test-role': 'non-superadmin' },
+      }, createEnv({ PLATFORM_FEEDBACK_PROJECT_ID: 'project-1' }));
+      expect(response.status).toBe(403);
+      expect(mockRunPlatformFeedbackTriage).not.toHaveBeenCalled();
     });
   });
 
