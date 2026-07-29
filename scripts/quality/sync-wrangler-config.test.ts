@@ -170,6 +170,117 @@ describe('sync wrangler config', () => {
     });
   });
 
+  it('generates Cloudflare container max_instances with unchanged safe defaults', () => {
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+
+    const containers = [
+      {
+        class_name: 'SandboxDO',
+        image: './Dockerfile.sandbox',
+        instance_type: 'standard-1',
+        max_instances: 999,
+      },
+      {
+        class_name: 'VmAgentContainer',
+        image: './Dockerfile.vm-agent-container',
+        instance_type: 'standard-1',
+        max_instances: 999,
+      },
+    ];
+
+    const envConfig = generateApiWorkerEnv({ containers }, outputs, 'prod', false, false);
+
+    expect(envConfig.containers).toEqual([
+      {
+        class_name: 'SandboxDO',
+        image: './Dockerfile.sandbox',
+        instance_type: 'standard-1',
+        max_instances: 6,
+      },
+      {
+        class_name: 'VmAgentContainer',
+        image: './Dockerfile.vm-agent-container',
+        instance_type: 'standard-1',
+        max_instances: 3,
+      },
+    ]);
+  });
+
+  it('respects deployment overrides for Cloudflare container max_instances', () => {
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+    vi.stubEnv('SANDBOX_CONTAINER_MAX_INSTANCES', '8');
+    vi.stubEnv('VM_AGENT_CONTAINER_MAX_INSTANCES', '5');
+
+    const containers = [
+      {
+        class_name: 'SandboxDO',
+        image: './Dockerfile.sandbox',
+        instance_type: 'standard-1',
+        max_instances: 6,
+      },
+      {
+        class_name: 'VmAgentContainer',
+        image: './Dockerfile.vm-agent-container',
+        instance_type: 'standard-1',
+        max_instances: 3,
+      },
+      {
+        class_name: 'OtherContainer',
+        image: './Dockerfile.other',
+        instance_type: 'standard-1',
+        max_instances: 2,
+      },
+    ];
+
+    const envConfig = generateApiWorkerEnv({ containers }, outputs, 'prod', false, false);
+
+    expect(envConfig.containers).toEqual([
+      {
+        class_name: 'SandboxDO',
+        image: './Dockerfile.sandbox',
+        instance_type: 'standard-1',
+        max_instances: 8,
+      },
+      {
+        class_name: 'VmAgentContainer',
+        image: './Dockerfile.vm-agent-container',
+        instance_type: 'standard-1',
+        max_instances: 5,
+      },
+      {
+        class_name: 'OtherContainer',
+        image: './Dockerfile.other',
+        instance_type: 'standard-1',
+        max_instances: 2,
+      },
+    ]);
+  });
+
+  it('fails closed for invalid Cloudflare container max_instances overrides', () => {
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+    vi.stubEnv('SANDBOX_CONTAINER_MAX_INSTANCES', '0');
+
+    const topLevel: WranglerToml = {
+      containers: [
+        {
+          class_name: 'SandboxDO',
+          image: './Dockerfile.sandbox',
+          instance_type: 'standard-1',
+          max_instances: 6,
+        },
+      ],
+    };
+
+    expect(() => generateApiWorkerEnv(topLevel, outputs, 'prod', false, false)).toThrow(
+      'SANDBOX_CONTAINER_MAX_INSTANCES must be greater than or equal to 1'
+    );
+
+    vi.stubEnv('SANDBOX_CONTAINER_MAX_INSTANCES', '1.5');
+    expect(() => generateApiWorkerEnv(topLevel, outputs, 'prod', false, false)).toThrow(
+      'SANDBOX_CONTAINER_MAX_INSTANCES must be a positive safe integer'
+    );
+  });
+
   it('omits Artifacts binding and disables runtime flag when Artifacts is not enabled', () => {
     vi.stubEnv('RESOURCE_PREFIX', 's123abc');
 

@@ -43,10 +43,29 @@ const TAIL_WORKER_WRANGLER_TOML_PATH = resolve(
 const DEPLOY_STATE_DIR = resolve(import.meta.dirname, '../../.wrangler');
 const FIRST_DEPLOY_MARKER = resolve(DEPLOY_STATE_DIR, 'tail-worker-first-deploy');
 const SETUP_TOKEN_BYTES = 24;
+const DEFAULT_SANDBOX_CONTAINER_MAX_INSTANCES = 6;
+const DEFAULT_VM_AGENT_CONTAINER_MAX_INSTANCES = 3;
+
+const CONTAINER_MAX_INSTANCE_CONFIG = {
+  SandboxDO: {
+    envVar: 'SANDBOX_CONTAINER_MAX_INSTANCES',
+    defaultValue: DEFAULT_SANDBOX_CONTAINER_MAX_INSTANCES,
+  },
+  VmAgentContainer: {
+    envVar: 'VM_AGENT_CONTAINER_MAX_INSTANCES',
+    defaultValue: DEFAULT_VM_AGENT_CONTAINER_MAX_INSTANCES,
+  },
+} as const satisfies Record<string, { envVar: string; defaultValue: number }>;
 
 const recordSchema = v.custom<Record<string, unknown>>(
   (value) => typeof value === 'object' && value !== null && !Array.isArray(value),
   'Expected an object'
+);
+const positiveSafeIntegerSchema = v.pipe(
+  v.number(),
+  v.integer('must be an integer'),
+  v.minValue(1, 'must be greater than or equal to 1'),
+  v.safeInteger('must be a safe integer')
 );
 
 function requireRecord(value: unknown, path: string): Record<string, unknown> {
@@ -82,6 +101,49 @@ function cloudflareWorkerVariablesUrl(
   environment: string
 ): string {
   return `https://dash.cloudflare.com/${accountId}/workers/services/view/${workerName}/${environment}/settings/variables`;
+}
+
+function parseContainerMaxInstances(envVar: string, fallback: number): number {
+  const rawValue = process.env[envVar];
+  if (!rawValue) {
+    return fallback;
+  }
+
+  const trimmed = rawValue.trim();
+  if (!/^\d+$/.test(trimmed)) {
+    throw new Error(`${envVar} must be a positive safe integer`);
+  }
+
+  const parsed = Number(trimmed);
+  const result = v.safeParse(positiveSafeIntegerSchema, parsed);
+  if (!result.success) {
+    throw new Error(`${envVar} ${result.issues[0]?.message ?? 'must be a positive safe integer'}`);
+  }
+  return result.output;
+}
+
+function getConfiguredContainerMaxInstances(
+  className: string,
+  currentValue: number | undefined
+): number | undefined {
+  const config =
+    CONTAINER_MAX_INSTANCE_CONFIG[className as keyof typeof CONTAINER_MAX_INSTANCE_CONFIG];
+  if (!config) {
+    return currentValue;
+  }
+  return parseContainerMaxInstances(config.envVar, config.defaultValue);
+}
+
+function generateContainerBindings(
+  containers: ContainerBinding[] | undefined
+): ContainerBinding[] | undefined {
+  return containers?.map((container) => ({
+    ...container,
+    max_instances: getConfiguredContainerMaxInstances(
+      container.class_name,
+      container.max_instances
+    ),
+  }));
 }
 
 // ============================================================================
@@ -412,12 +474,13 @@ function getStaticApiWorkerBindings(
   analyticsEngineDatasets: AnalyticsEngineDatasetBinding[] | undefined,
   includeArtifactsBinding: boolean
 ): Partial<WranglerEnvConfig> {
+  const containers = generateContainerBindings(staticBindings.containers);
   return {
     ...(staticBindings.durable_objects ? { durable_objects: staticBindings.durable_objects } : {}),
     ...(staticBindings.ai ? { ai: staticBindings.ai } : {}),
     ...(analyticsEngineDatasets ? { analytics_engine_datasets: analyticsEngineDatasets } : {}),
     ...(staticBindings.migrations ? { migrations: staticBindings.migrations } : {}),
-    ...(staticBindings.containers ? { containers: staticBindings.containers } : {}),
+    ...(containers ? { containers } : {}),
     ...(includeArtifactsBinding ? { artifacts: staticBindings.artifacts } : {}),
   };
 }

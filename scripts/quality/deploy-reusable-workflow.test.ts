@@ -144,6 +144,17 @@ describe('deploy reusable workflow', () => {
     }
   });
 
+  it('forwards Cloudflare container max-instance overrides into the wrangler config sync env', () => {
+    const sync = stepBlock('Sync Wrangler Config \\(API \\+ Tail Worker\\)');
+
+    expect(sync).toContain(
+      'SANDBOX_CONTAINER_MAX_INSTANCES: ${{ vars.SANDBOX_CONTAINER_MAX_INSTANCES }}'
+    );
+    expect(sync).toContain(
+      'VM_AGENT_CONTAINER_MAX_INSTANCES: ${{ vars.VM_AGENT_CONTAINER_MAX_INSTANCES }}'
+    );
+  });
+
   it('forwards the codex credential-setup tunables into the wrangler config sync env', () => {
     const sync = stepBlock('Sync Wrangler Config \\(API \\+ Tail Worker\\)');
 
