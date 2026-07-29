@@ -9,6 +9,7 @@ export const DEFAULT_TASK_TITLE_MODEL = '@cf/zai-org/glm-5.2';
 export const DEFAULT_DEBUG_AGENT_MODEL = '@cf/zai-org/glm-5.2';
 export const DEFAULT_DEBUG_AGENT_MAX_TURNS = 6;
 export const DEFAULT_DEBUG_AGENT_RUN_TOKEN_LIMIT = 24_000;
+export const DEFAULT_DEBUG_AGENT_MODEL_OUTPUT_TOKENS = 4_096;
 export const DEFAULT_DEBUG_AGENT_DAILY_TOKEN_LIMIT = 120_000;
 export const DEFAULT_DEBUG_AGENT_TOOL_RESULT_LIMIT = 50;
 export const DEFAULT_DEBUG_AGENT_TOOL_RESULT_BYTES = 32_768;
@@ -150,7 +151,12 @@ export type PlatformAIModelTier = 'low-cost' | 'standard' | 'premium';
 export type ToolCallSupport = 'excellent' | 'good' | 'limited' | 'none';
 
 /** Intended role in the SAM agent hierarchy. */
-export type ModelIntendedRole = 'workspace-agent' | 'sam-agent' | 'project-agent' | 'utility' | 'any';
+export type ModelIntendedRole =
+  | 'workspace-agent'
+  | 'sam-agent'
+  | 'project-agent'
+  | 'utility'
+  | 'any';
 
 /** Scopes where a model is allowed. */
 export type ModelAllowedScope = 'workspace' | 'project' | 'top-level';
@@ -275,14 +281,7 @@ const OPENAI_GPT56_PREVIEW_MODELS = [
   ['gpt-5.6-sol', 'GPT-5.6 Sol', 'premium', 0.005, 0.03, 'openai-premium'],
   ['gpt-5.6-terra', 'GPT-5.6 Terra', 'premium', 0.0025, 0.015, 'openai-premium'],
   ['gpt-5.6-luna', 'GPT-5.6 Luna', 'standard', 0.001, 0.006, 'openai-standard'],
-] as const satisfies readonly [
-  string,
-  string,
-  PlatformAIModelTier,
-  number,
-  number,
-  string,
-][];
+] as const satisfies readonly [string, string, PlatformAIModelTier, number, number, string][];
 
 /** Models available through the SAM Platform AI proxy.
  * This is the single source of truth — the DEFAULT_AI_PROXY_ALLOWED_MODELS
@@ -631,7 +630,11 @@ export const AI_PROXY_BILLING_MODE_KV_KEY = 'platform:ai-proxy:billing-mode';
 export type BillingMode = 'unified' | 'platform-key' | 'auto';
 
 /** All valid billing modes — single source of truth for validation. */
-export const VALID_BILLING_MODES: readonly BillingMode[] = ['unified', 'platform-key', 'auto'] as const;
+export const VALID_BILLING_MODES: readonly BillingMode[] = [
+  'unified',
+  'platform-key',
+  'auto',
+] as const;
 
 /** Default billing mode. Override via AI_PROXY_BILLING_MODE env var. */
 export const DEFAULT_AI_PROXY_BILLING_MODE: BillingMode = 'auto';

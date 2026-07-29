@@ -5,6 +5,7 @@ import {
   DEFAULT_DEBUG_AGENT_MAX_TURNS,
   DEFAULT_DEBUG_AGENT_MAX_WINDOW_HOURS,
   DEFAULT_DEBUG_AGENT_MODEL,
+  DEFAULT_DEBUG_AGENT_MODEL_OUTPUT_TOKENS,
   DEFAULT_DEBUG_AGENT_RUN_TOKEN_LIMIT,
   DEFAULT_DEBUG_AGENT_TIMEOUT_MS,
   DEFAULT_DEBUG_AGENT_TOOL_RESULT_BYTES,
@@ -32,12 +33,11 @@ import {
 } from './observability';
 
 const DEBUG_FEATURE_KEY = 'deployment-debug-agent';
-const DEFAULT_MODEL_OUTPUT_TOKENS = 4_096;
-
 interface DebugConfig {
   model: string;
   maxTurns: number;
   runTokenLimit: number;
+  modelOutputTokens: number;
   dailyTokenLimit: number;
   toolResultLimit: number;
   toolResultBytes: number;
@@ -117,7 +117,8 @@ const TOOLS = [
     type: 'function',
     function: {
       name: 'get_related_entity_state',
-      description: 'Read allowlisted node, workspace, task, agent-session, and chat-session status related to the selected window.',
+      description:
+        'Read allowlisted node, workspace, task, agent-session, and chat-session status related to the selected window.',
       parameters: { type: 'object', properties: {}, additionalProperties: false },
     },
   },
@@ -142,7 +143,7 @@ function positiveInteger(value: string | undefined, fallback: number): number {
 export function resolveDebugAgentConfig(env: Env): DebugConfig {
   const model = env.DEBUG_AGENT_MODEL || DEFAULT_DEBUG_AGENT_MODEL;
   const registered = PLATFORM_AI_MODELS.some(
-    (candidate) => candidate.id === model && candidate.toolCallSupport !== 'none',
+    (candidate) => candidate.id === model && candidate.toolCallSupport !== 'none'
   );
   if (!registered || (!model.startsWith('@cf/') && !model.startsWith('@hf/'))) {
     throw new Error('DEBUG_AGENT_MODEL must be a registered Workers AI model with tool support');
@@ -152,23 +153,27 @@ export function resolveDebugAgentConfig(env: Env): DebugConfig {
     maxTurns: positiveInteger(env.DEBUG_AGENT_MAX_TURNS, DEFAULT_DEBUG_AGENT_MAX_TURNS),
     runTokenLimit: positiveInteger(
       env.DEBUG_AGENT_RUN_TOKEN_LIMIT,
-      DEFAULT_DEBUG_AGENT_RUN_TOKEN_LIMIT,
+      DEFAULT_DEBUG_AGENT_RUN_TOKEN_LIMIT
+    ),
+    modelOutputTokens: positiveInteger(
+      env.DEBUG_AGENT_MODEL_OUTPUT_TOKENS,
+      DEFAULT_DEBUG_AGENT_MODEL_OUTPUT_TOKENS
     ),
     dailyTokenLimit: positiveInteger(
       env.DEBUG_AGENT_DAILY_TOKEN_LIMIT,
-      DEFAULT_DEBUG_AGENT_DAILY_TOKEN_LIMIT,
+      DEFAULT_DEBUG_AGENT_DAILY_TOKEN_LIMIT
     ),
     toolResultLimit: positiveInteger(
       env.DEBUG_AGENT_TOOL_RESULT_LIMIT,
-      DEFAULT_DEBUG_AGENT_TOOL_RESULT_LIMIT,
+      DEFAULT_DEBUG_AGENT_TOOL_RESULT_LIMIT
     ),
     toolResultBytes: positiveInteger(
       env.DEBUG_AGENT_TOOL_RESULT_BYTES,
-      DEFAULT_DEBUG_AGENT_TOOL_RESULT_BYTES,
+      DEFAULT_DEBUG_AGENT_TOOL_RESULT_BYTES
     ),
     maxWindowHours: positiveInteger(
       env.DEBUG_AGENT_MAX_WINDOW_HOURS,
-      DEFAULT_DEBUG_AGENT_MAX_WINDOW_HOURS,
+      DEFAULT_DEBUG_AGENT_MAX_WINDOW_HOURS
     ),
     timeoutMs: positiveInteger(env.DEBUG_AGENT_TIMEOUT_MS, DEFAULT_DEBUG_AGENT_TIMEOUT_MS),
   };
@@ -177,15 +182,17 @@ export function resolveDebugAgentConfig(env: Env): DebugConfig {
 async function resolveWindow(
   env: Env,
   input: { errorId?: string; startTime?: string; endTime?: string },
-  config: DebugConfig,
+  config: DebugConfig
 ): Promise<DebugWindow> {
   let errorId: string | null = null;
   let startMs: number;
   let endMs: number;
   if (input.errorId) {
     const row = await env.OBSERVABILITY_DATABASE.prepare(
-      'SELECT id, timestamp FROM platform_errors WHERE id = ?',
-    ).bind(input.errorId).first<{ id: string; timestamp: number }>();
+      'SELECT id, timestamp FROM platform_errors WHERE id = ?'
+    )
+      .bind(input.errorId)
+      .first<{ id: string; timestamp: number }>();
     if (!row) throw new Error('Selected platform error was not found');
     errorId = row.id;
     startMs = row.timestamp - 15 * 60 * 1000;
@@ -220,39 +227,51 @@ async function relatedEntityState(env: Env, window: DebugWindow, limit: number) 
     endTime: window.endMs,
     limit,
   });
-  const nodeIds = [...new Set(errors.errors.flatMap((item) => item.nodeId ? [item.nodeId] : []))];
-  const workspaceIds = [...new Set(errors.errors.flatMap((item) => item.workspaceId ? [item.workspaceId] : []))];
+  const nodeIds = [...new Set(errors.errors.flatMap((item) => (item.nodeId ? [item.nodeId] : [])))];
+  const workspaceIds = [
+    ...new Set(errors.errors.flatMap((item) => (item.workspaceId ? [item.workspaceId] : []))),
+  ];
 
   const bindList = (values: string[]) => values.map(() => '?').join(',');
   const nodes = nodeIds.length
     ? await env.DATABASE.prepare(
-      `SELECT id, name, status, health_status, runtime, node_role, error_message, last_heartbeat_at, updated_at
-       FROM nodes WHERE id IN (${bindList(nodeIds)}) LIMIT ?`,
-    ).bind(...nodeIds, limit).all()
+        `SELECT id, name, status, health_status, runtime, node_role, error_message, last_heartbeat_at, updated_at
+       FROM nodes WHERE id IN (${bindList(nodeIds)}) LIMIT ?`
+      )
+        .bind(...nodeIds, limit)
+        .all()
     : { results: [] };
   const workspaces = workspaceIds.length
     ? await env.DATABASE.prepare(
-      `SELECT id, node_id, project_id, status, chat_session_id, error_message, created_at, updated_at
-       FROM workspaces WHERE id IN (${bindList(workspaceIds)}) LIMIT ?`,
-    ).bind(...workspaceIds, limit).all()
+        `SELECT id, node_id, project_id, status, chat_session_id, error_message, created_at, updated_at
+       FROM workspaces WHERE id IN (${bindList(workspaceIds)}) LIMIT ?`
+      )
+        .bind(...workspaceIds, limit)
+        .all()
     : { results: [] };
   const tasks = await env.DATABASE.prepare(
     `SELECT id, project_id, workspace_id, chat_session_id, status, execution_step, error_message, started_at, completed_at, updated_at
      FROM tasks
      WHERE (updated_at BETWEEN ? AND ? OR completed_at BETWEEN ? AND ?)
-     ORDER BY updated_at DESC LIMIT ?`,
-  ).bind(start, end, start, end, limit).all();
+     ORDER BY updated_at DESC LIMIT ?`
+  )
+    .bind(start, end, start, end, limit)
+    .all();
   const agentSessions = workspaceIds.length
     ? await env.DATABASE.prepare(
-      `SELECT id, workspace_id, status, agent_type, error_message, created_at, updated_at
+        `SELECT id, workspace_id, status, agent_type, error_message, created_at, updated_at
        FROM agent_sessions WHERE workspace_id IN (${bindList(workspaceIds)})
-       ORDER BY updated_at DESC LIMIT ?`,
-    ).bind(...workspaceIds, limit).all()
+       ORDER BY updated_at DESC LIMIT ?`
+      )
+        .bind(...workspaceIds, limit)
+        .all()
     : { results: [] };
   const sessionSummaries = await env.DATABASE.prepare(
     `SELECT id, project_id, status, task_id, workspace_id, message_count, started_at, last_message_at, agent_completed_at, ended_at, updated_at
-     FROM session_summaries WHERE updated_at BETWEEN ? AND ? ORDER BY updated_at DESC LIMIT ?`,
-  ).bind(window.startMs, window.endMs, limit).all();
+     FROM session_summaries WHERE updated_at BETWEEN ? AND ? ORDER BY updated_at DESC LIMIT ?`
+  )
+    .bind(window.startMs, window.endMs, limit)
+    .all();
   return {
     nodes: nodes.results,
     workspaces: workspaces.results,
@@ -266,7 +285,7 @@ async function executeTool(
   env: Env,
   window: DebugWindow,
   config: DebugConfig,
-  call: ToolCall,
+  call: ToolCall
 ): Promise<string> {
   let result: unknown;
   if (call.function.name === 'get_recent_errors') {
@@ -282,7 +301,11 @@ async function executeTool(
     result = await getErrorTrends(env.OBSERVABILITY_DATABASE, hours <= 1 ? '1h' : '24h');
   } else if (call.function.name === 'query_cloudflare_logs') {
     let args: { search?: string; levels?: string[] } = {};
-    try { args = JSON.parse(call.function.arguments) as typeof args; } catch { /* bounded defaults */ }
+    try {
+      args = JSON.parse(call.function.arguments) as typeof args;
+    } catch {
+      /* bounded defaults */
+    }
     result = await queryCloudflareLogs({
       cfApiToken: env.CF_API_TOKEN,
       cfAccountId: env.CF_ACCOUNT_ID,
@@ -310,7 +333,7 @@ async function complete(
   env: Env,
   config: DebugConfig,
   messages: ChatMessage[],
-  maxTokens: number,
+  maxTokens: number
 ): Promise<Completion> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), config.timeoutMs);
@@ -340,7 +363,7 @@ async function complete(
     if (!response.ok) {
       throw new Error(`Debugging model request failed with HTTP ${response.status}`);
     }
-    return await response.json() as Completion;
+    return (await response.json()) as Completion;
   } finally {
     clearTimeout(timer);
   }
@@ -361,16 +384,11 @@ function toDiagnosis(row: typeof schema.debugDiagnoses.$inferSelect): DebugDiagn
 export async function runDebugDiagnosis(
   env: Env,
   createdBy: string,
-  input: { errorId?: string; startTime?: string; endTime?: string },
+  input: { errorId?: string; startTime?: string; endTime?: string }
 ): Promise<DebugDiagnosis> {
   const config = resolveDebugAgentConfig(env);
   const window = await resolveWindow(env, input, config);
-  const daily = await getFeatureTokenBudget(
-    env.KV,
-    DEBUG_FEATURE_KEY,
-    config.dailyTokenLimit,
-    env,
-  );
+  const daily = await getFeatureTokenBudget(env.KV, DEBUG_FEATURE_KEY, config.dailyTokenLimit, env);
   if (!daily.allowed) throw new Error('Daily deployment debugging budget exhausted');
 
   const messages: ChatMessage[] = [
@@ -390,13 +408,13 @@ export async function runDebugDiagnosis(
     const remaining = config.runTokenLimit - inputTokens - outputTokens;
     const requestEstimate = estimatedTokens(messages);
     if (remaining <= requestEstimate) throw new Error('Per-run debugging token ceiling reached');
-    const maxTokens = Math.min(DEFAULT_MODEL_OUTPUT_TOKENS, remaining - requestEstimate);
+    const maxTokens = Math.min(config.modelOutputTokens, remaining - requestEstimate);
     const reservation = await consumeFeatureTokenBudget(
       env.KV,
       DEBUG_FEATURE_KEY,
       remaining,
       config.dailyTokenLimit,
-      env,
+      env
     );
     if (!reservation.allowed) throw new Error('Daily deployment debugging budget exhausted');
     let completion: Completion;
@@ -404,7 +422,11 @@ export async function runDebugDiagnosis(
       completion = await complete(env, config, messages, maxTokens);
     } catch (cause) {
       await releaseFeatureTokenBudget(
-        env.KV, DEBUG_FEATURE_KEY, remaining, config.dailyTokenLimit, env,
+        env.KV,
+        DEBUG_FEATURE_KEY,
+        remaining,
+        config.dailyTokenLimit,
+        env
       );
       throw cause;
     }
@@ -419,7 +441,7 @@ export async function runDebugDiagnosis(
       DEBUG_FEATURE_KEY,
       Math.max(0, remaining - actualTokens),
       config.dailyTokenLimit,
-      env,
+      env
     );
     dailyTokensUsed = released.usedTokens;
     if (inputTokens + outputTokens > config.runTokenLimit) {
@@ -465,25 +487,31 @@ export async function runDebugDiagnosis(
     dailyTokenLimit: config.dailyTokenLimit,
     createdBy,
   });
-  const row = await db.select().from(schema.debugDiagnoses).where(eq(schema.debugDiagnoses.id, id)).get();
+  const row = await db
+    .select()
+    .from(schema.debugDiagnoses)
+    .where(eq(schema.debugDiagnoses.id, id))
+    .get();
   if (!row) throw new Error('Failed to persist debugging diagnosis');
   return toDiagnosis(row);
 }
 
 export async function listDebugDiagnoses(
   env: Env,
-  filter: { errorId?: string; startTime?: string; endTime?: string },
+  filter: { errorId?: string; startTime?: string; endTime?: string }
 ): Promise<DebugDiagnosis[]> {
   const db = drizzle(env.DATABASE, { schema });
   const conditions = filter.errorId
     ? eq(schema.debugDiagnoses.errorId, filter.errorId)
     : filter.startTime && filter.endTime
       ? and(
-        eq(schema.debugDiagnoses.startTime, filter.startTime),
-        eq(schema.debugDiagnoses.endTime, filter.endTime),
-      )
+          eq(schema.debugDiagnoses.startTime, filter.startTime),
+          eq(schema.debugDiagnoses.endTime, filter.endTime)
+        )
       : undefined;
-  const rows = await db.select().from(schema.debugDiagnoses)
+  const rows = await db
+    .select()
+    .from(schema.debugDiagnoses)
     .where(conditions)
     .orderBy(desc(schema.debugDiagnoses.createdAt))
     .limit(20);
@@ -495,15 +523,21 @@ export async function saveDebugDiagnosisAsIdea(
   diagnosisId: string,
   projectId: string,
   createdBy: string,
-  title?: string,
+  title?: string
 ): Promise<{ ideaId: string }> {
   const db = drizzle(env.DATABASE, { schema });
-  const diagnosis = await db.select().from(schema.debugDiagnoses)
-    .where(eq(schema.debugDiagnoses.id, diagnosisId)).get();
+  const diagnosis = await db
+    .select()
+    .from(schema.debugDiagnoses)
+    .where(eq(schema.debugDiagnoses.id, diagnosisId))
+    .get();
   if (!diagnosis) throw new Error('Diagnosis not found');
   if (diagnosis.ideaId) return { ideaId: diagnosis.ideaId };
-  const project = await db.select({ id: schema.projects.id, userId: schema.projects.userId })
-    .from(schema.projects).where(eq(schema.projects.id, projectId)).get();
+  const project = await db
+    .select({ id: schema.projects.id, userId: schema.projects.userId })
+    .from(schema.projects)
+    .where(eq(schema.projects.id, projectId))
+    .get();
   if (!project) throw new Error('Project not found');
   const ideaId = ulid();
   const now = new Date().toISOString();
@@ -521,7 +555,9 @@ export async function saveDebugDiagnosisAsIdea(
     createdAt: now,
     updatedAt: now,
   });
-  await db.update(schema.debugDiagnoses).set({ ideaId })
+  await db
+    .update(schema.debugDiagnoses)
+    .set({ ideaId })
     .where(eq(schema.debugDiagnoses.id, diagnosis.id));
   return { ideaId };
 }

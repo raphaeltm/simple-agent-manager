@@ -92,6 +92,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   DEBUG_AGENT_MODEL?: string;
   DEBUG_AGENT_MAX_TURNS?: string;
   DEBUG_AGENT_RUN_TOKEN_LIMIT?: string;
+  DEBUG_AGENT_MODEL_OUTPUT_TOKENS?: string;
   DEBUG_AGENT_DAILY_TOKEN_LIMIT?: string;
   DEBUG_AGENT_TOOL_RESULT_LIMIT?: string;
   DEBUG_AGENT_TOOL_RESULT_BYTES?: string;
