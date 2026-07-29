@@ -406,10 +406,39 @@ export function getMessages(
   const trimmedRows = candidateRows.slice(0, safeCount);
 
   const orderedRows = order === 'desc' ? trimmedRows.reverse() : trimmedRows;
+  const messages: Record<string, unknown>[] = [];
+  let skipped = 0;
+
+  for (const row of orderedRows) {
+    try {
+      messages.push(
+        compact ? parseChatMessageRowCompact(row, compactOptions) : parseChatMessageRow(row)
+      );
+    } catch (e) {
+      skipped++;
+      log.warn('messages.list_row_skipped', {
+        rowId: typeof row.id === 'string' ? row.id : null,
+        rowSessionId: typeof row.session_id === 'string' ? row.session_id : null,
+        requestedSessionId: sessionId,
+        compact,
+        error: String(e),
+      });
+    }
+  }
+
+  if (skipped > 0) {
+    log.warn('messages.list_degraded', {
+      sessionId,
+      requestedLimit: limit,
+      fetched: rows.length,
+      returned: messages.length,
+      skipped,
+      compact,
+    });
+  }
+
   return {
-    messages: orderedRows.map((row) =>
-      compact ? parseChatMessageRowCompact(row, compactOptions) : parseChatMessageRow(row)
-    ),
+    messages,
     hasMore,
   };
 }

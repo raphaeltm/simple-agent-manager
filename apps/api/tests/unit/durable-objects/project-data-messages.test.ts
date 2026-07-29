@@ -1,6 +1,7 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { getMessages } from '../../../src/durable-objects/project-data/messages';
+import { log } from '../../../src/lib/logger';
 
 type QueryRow = Record<string, unknown>;
 
@@ -26,6 +27,10 @@ function makeSql(rows: QueryRow[]) {
 }
 
 describe('ProjectData messages getMessages', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('keeps newest-page default behavior ordered chronologically for rendering', () => {
     const newest = makeRow({ id: 'newest', content: 'Newest', created_at: 3000, sequence: 3 });
     const older = makeRow({ id: 'older', content: 'Older', created_at: 2000, sequence: 2 });
@@ -36,6 +41,70 @@ describe('ProjectData messages getMessages', () => {
     expect(sql.exec.mock.calls[0]?.[0]).toContain('ORDER BY created_at DESC, sequence DESC');
     expect(result.messages.map((message) => message.content)).toEqual(['Older', 'Newest']);
     expect(result.hasMore).toBe(false);
+  });
+
+  it('skips a malformed message row among valid rows instead of throwing', () => {
+    const warn = vi.spyOn(log, 'warn').mockImplementation(() => {});
+    const newest = makeRow({ id: 'newest', content: 'Newest', created_at: 3000, sequence: 3 });
+    const bad = makeRow({ id: 'bad', content: null, created_at: 2000, sequence: 2 });
+    const oldest = makeRow({ id: 'oldest', content: 'Oldest', created_at: 1000, sequence: 1 });
+    const sql = makeSql([newest, bad, oldest]);
+
+    expect(() => getMessages(sql, 'session-1', 3)).not.toThrow();
+
+    const result = getMessages(sql, 'session-1', 3);
+    expect(result.messages.map((message) => message.id)).toEqual(['oldest', 'newest']);
+    expect(result.hasMore).toBe(false);
+    expect(warn).toHaveBeenCalledWith(
+      'messages.list_row_skipped',
+      expect.objectContaining({
+        rowId: 'bad',
+        rowSessionId: 'session-1',
+        requestedSessionId: 'session-1',
+        compact: false,
+        error: expect.stringContaining('content'),
+      })
+    );
+    expect(warn).toHaveBeenCalledWith(
+      'messages.list_degraded',
+      expect.objectContaining({ returned: 2, skipped: 1 })
+    );
+  });
+
+  it('skips malformed compact message rows without failing the compact list', () => {
+    const warn = vi.spyOn(log, 'warn').mockImplementation(() => {});
+    const good = makeRow({ id: 'good', content: 'Good compact content' });
+    const bad = makeRow({ id: 'bad-compact', content: null });
+    const sql = makeSql([good, bad]);
+
+    const result = getMessages(sql, 'session-1', 2, null, undefined, true);
+
+    expect(result.messages.map((message) => message.id)).toEqual(['good']);
+    expect(warn).toHaveBeenCalledWith(
+      'messages.list_row_skipped',
+      expect.objectContaining({
+        rowId: 'bad-compact',
+        compact: true,
+        error: expect.stringContaining('content'),
+      })
+    );
+  });
+
+  it('returns an empty non-throwing list when every message row is malformed', () => {
+    const warn = vi.spyOn(log, 'warn').mockImplementation(() => {});
+    const sql = makeSql([
+      makeRow({ id: 'bad-1', content: null }),
+      makeRow({ id: 'bad-2', role: null }),
+    ]);
+
+    const result = getMessages(sql, 'session-1', 2);
+
+    expect(result.messages).toEqual([]);
+    expect(result.hasMore).toBe(false);
+    expect(warn).toHaveBeenCalledWith(
+      'messages.list_degraded',
+      expect.objectContaining({ returned: 0, skipped: 2 })
+    );
   });
 
   it('supports oldest-first lookups for the initial user prompt', () => {

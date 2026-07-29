@@ -16,12 +16,12 @@ Also fix the stale bootstrap TTL comment/test wording so it remains correct when
 
 ## Checklist
 
-- [ ] Add row-level parse isolation to `getMessages()` for normal and compact message rows.
-- [ ] Warn-log skipped message rows with context, best-effort row id/session id, compact mode, and parser error.
-- [ ] Preserve the existing `{ messages, hasMore }` response contract and ordering behavior.
-- [ ] Add a good/bad/good regression test for malformed message rows.
-- [ ] Add an all-bad regression test returning an empty non-throwing list.
-- [ ] Update stale bootstrap TTL comment/test wording without changing runtime behavior.
+- [x] Add row-level parse isolation to `getMessages()` for normal and compact message rows.
+- [x] Warn-log skipped message rows with context, best-effort row id/session id, compact mode, and parser error.
+- [x] Preserve the existing `{ messages, hasMore }` response contract and ordering behavior.
+- [x] Add a good/bad/good regression test for malformed message rows.
+- [x] Add an all-bad regression test returning an empty non-throwing list.
+- [x] Update stale bootstrap TTL comment/test wording without changing runtime behavior.
 - [ ] Run targeted tests and broader validation.
 - [ ] Run local reviewer/subagent checks for tests and code review.
 - [ ] Open PR, wait for CI, and do not merge.
