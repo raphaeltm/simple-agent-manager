@@ -356,6 +356,7 @@ crons = ["*/5 * * * *", "30 * * * *", "0 3 * * *", "0 4 * * *", "0 5 1 * *"]
 # - GITHUB_CLIENT_SECRET
 # - GITHUB_APP_ID
 # - GITHUB_APP_PRIVATE_KEY
+# - GITHUB_APP_SLUG
 # - CF_API_TOKEN
 # - CF_ZONE_ID
 # - CF_ACCOUNT_ID (required for admin observability log viewer)
@@ -365,8 +366,10 @@ crons = ["*/5 * * * *", "30 * * * *", "0 3 * * *", "0 4 * * *", "0 5 1 * *"]
 # - BETTER_AUTH_SECRET (optional — overrides ENCRYPTION_KEY for BetterAuth sessions)
 # - CREDENTIAL_ENCRYPTION_KEY (optional — overrides ENCRYPTION_KEY for AES-GCM credential encryption)
 # - GITHUB_WEBHOOK_SECRET (optional — overrides ENCRYPTION_KEY for GitHub webhook HMAC)
-# - ORIGIN_CA_CERT (Origin CA certificate for VM agent TLS)
-# - ORIGIN_CA_KEY (Origin CA private key for VM agent TLS)
+# - DEPLOY_SIGNING_PRIVATE_KEY (Ed25519 signing key for deployment apply payloads)
+# - DEPLOY_SIGNING_PUBLIC_KEY (Ed25519 verification key for deployment apply payloads)
+# - DEVCONTAINER_CACHE_CLOUDFLARE_API_TOKEN (optional — narrower token for managed devcontainer registry credentials)
+# - DEVCONTAINER_CACHE_CLOUDFLARE_ACCOUNT_ID (optional — account override for managed devcontainer registry credentials)
 # - GOOGLE_CLIENT_ID (optional — Google Cloud Console OAuth client ID for infra/GCP OIDC integration)
 # - GOOGLE_CLIENT_SECRET (optional — Google Cloud Console OAuth client secret for infra/GCP)
 # - GOOGLE_LOGIN_CLIENT_ID (optional — Google login OAuth client ID for "Sign in with Google"; separate client, or set via /setup)
@@ -376,7 +379,10 @@ crons = ["*/5 * * * *", "30 * * * *", "0 3 * * *", "0 4 * * *", "0 5 1 * *"]
 # - GITLAB_CLIENT_SECRET (optional — GitLab OAuth secret; or set via /setup)
 # - SEGMENT_WRITE_KEY (optional — Segment.io write key, enables Segment event forwarding)
 # - GA4_API_SECRET (optional — Google Analytics 4 API secret, enables GA4 forwarding; NOTE: GA4 Measurement Protocol requires api_secret as a query parameter — ensure outbound request URLs are not logged)
+# - GA4_MEASUREMENT_ID (optional — Google Analytics 4 measurement ID, paired with GA4_API_SECRET)
 # - R2_ACCESS_KEY_ID (optional — R2 S3-compatible API token key ID, enables task attachment presigned uploads)
 # - R2_SECRET_ACCESS_KEY (optional — R2 S3-compatible API token secret, enables task attachment presigned uploads)
 # - TRIAL_CLAIM_TOKEN_SECRET (required when trials are enabled — HMAC secret for sam_trial_claim / sam_trial_fingerprint cookies. 32+ bytes base64.)
 # - CF_AIG_TOKEN (optional — Cloudflare AI Gateway Unified Billing token; enables OpenAI/Anthropic models without separate API keys)
+# - ANTHROPIC_API_KEY_TRIAL (optional — Anthropic API key for trial traffic when not using Workers AI)
+# - SMOKE_TEST_AUTH_ENABLED (optional — enables smoke-test token auth for test environments)

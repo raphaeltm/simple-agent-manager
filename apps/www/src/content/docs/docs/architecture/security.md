@@ -15,7 +15,7 @@ However, SAM's own hosted deployment also has an **enabled platform-level cloud 
 
 ### Platform Secrets
 
-These are Cloudflare Worker secrets set during deployment:
+These Cloudflare Worker secrets are generated or copied during deployment and are required for a fully functional install:
 
 | Secret                       | Purpose                                                                                                                                           |
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -28,8 +28,12 @@ These are Cloudflare Worker secrets set during deployment:
 | `DEPLOY_SIGNING_PUBLIC_KEY`  | Ed25519 key for deployment-node payload verification (auto-generated)                                                                             |
 | `TRIAL_CLAIM_TOKEN_SECRET`   | HMAC secret for trial onboarding claim tokens (auto-generated)                                                                                    |
 | `CF_API_TOKEN`               | Cloudflare deploy, DNS, Origin CA certificate issuance, observability, and AI Gateway operations (requires Account → SSL and Certificates → Edit) |
+| `CF_ACCOUNT_ID`              | Cloudflare account identifier used by account-scoped Cloudflare APIs                                                                              |
+| `CF_ZONE_ID`                 | Cloudflare zone identifier used for DNS and Origin CA operations                                                                                  |
 
-Security keys are automatically generated and persisted by Pulumi on first deployment. Cloudflare secrets remain Worker secrets because they are deployment trust roots. GitHub App/OAuth, GitHub webhook, Google OAuth, and GitLab OAuth credentials can be supplied either as optional environment fallbacks or through the first-run/superadmin platform config UI; runtime values are stored encrypted in D1 and override environment fallbacks. They never appear in source control.
+Security keys are automatically generated and persisted by Pulumi on first deployment. Cloudflare secrets remain Worker secrets because they are deployment trust roots. GitHub App/OAuth, GitHub webhook, Google OAuth, GitLab OAuth, analytics forwarding, R2 attachment-upload credentials, devcontainer cache credentials, trial provider keys, and smoke-test auth flags can be supplied as optional Worker secret fallbacks when an installation needs them. Runtime platform values saved through first-run setup or the superadmin platform config UI are stored encrypted in D1 and override environment fallbacks. They never appear in source control.
+
+New VM nodes do not require static `ORIGIN_CA_CERT` or `ORIGIN_CA_KEY` Worker secrets. If those legacy secrets exist from an older deployment, remove them after draining old nodes and confirming the per-node CSR model is deployed.
 
 ### Platform Integration Credentials
 
