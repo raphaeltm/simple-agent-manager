@@ -23,14 +23,14 @@ This task is a retry of the failed startup task `01KYQJ1P3FPQBDPCWFQ0SWPAYJ`; du
 
 ## Implementation checklist
 
-- [ ] Make `auth.SessionManager.Stop()` idempotent and safe under repeated/concurrent calls without changing public API shape.
-- [ ] Ensure `auth.SessionManager` cleanup goroutine exits when `Stop()` is called.
-- [ ] Make `server.Server.Stop()` idempotent for repeated/concurrent calls without changing public API shape.
-- [ ] Ensure `Server.Stop()` stops the owned auth session cleanup goroutine.
-- [ ] Preserve current shutdown ordering for external behavior unless a narrow ordering change is required for complete cleanup.
-- [ ] Add focused Go tests for repeated and concurrent `SessionManager.Stop()`.
-- [ ] Add focused Go tests proving `Server.Stop()` calls auth session cleanup and repeated `Server.Stop()` does not panic.
-- [ ] Run relevant Go tests, including `-race` if feasible.
+- [x] Make `auth.SessionManager.Stop()` idempotent and safe under repeated/concurrent calls without changing public API shape.
+- [x] Ensure `auth.SessionManager` cleanup goroutine exits when `Stop()` is called.
+- [x] Make `server.Server.Stop()` idempotent for repeated/concurrent calls without changing public API shape.
+- [x] Ensure `Server.Stop()` stops the owned auth session cleanup goroutine.
+- [x] Preserve current shutdown ordering for external behavior unless a narrow ordering change is required for complete cleanup.
+- [x] Add focused Go tests for repeated and concurrent `SessionManager.Stop()`.
+- [x] Add focused Go tests proving `Server.Stop()` calls auth session cleanup and repeated `Server.Stop()` does not panic.
+- [x] Run relevant Go tests, including `-race` if feasible.
 - [ ] Run local `go-specialist`, `test-engineer`, and task-completion validation reviews and address findings.
 - [ ] Open a PR against `main`, wait for CI, and do not merge.
 
