@@ -74,6 +74,10 @@ The CI quality check (`pnpm quality:wrangler-bindings`) verifies:
 1. No `[env.*]` sections exist in checked-in `wrangler.toml` files
 2. All required binding types are present at the top level
 
+### Required action when adding a Worker var consumed by sync-wrangler-config
+
+If `scripts/deploy/sync-wrangler-config.ts` reads a GitHub Environment variable from `process.env` to generate Worker `[vars]`, add it to the centralized `wrangler_sync_env` mapping in `.github/workflows/deploy-reusable.yml`. Do not add ad hoc per-step sync env blocks. First deploys run the sync script twice (initial sync, then tail-consumer re-sync), and both invocations must receive identical optional Worker env inputs so the second sync cannot silently drop operator overrides or restore script defaults.
+
 ### Why this architecture
 
 Wrangler does NOT inherit bindings (D1, KV, R2, DO, AI, tail_consumers) from top-level into `[env.*]` sections. Previously, this required manually duplicating every binding 3x (top-level + staging + production). Now the sync script generates complete env sections, eliminating duplication and making the config fork-friendly.
