@@ -24,8 +24,8 @@ Bootstrap token redemption currently depends on KV `get` then `delete`, plus an 
 - [x] Fail closed if the consume state is ambiguous or failed.
 - [x] Update direct legacy bootstrap-token creation to register the ledger.
 - [x] Add tests for concurrent redemption, single-use semantics, expired/missing tokens, and existing valid-token compatibility.
-- [ ] Run relevant validation and local specialist reviews.
-- [ ] Open a narrow PR and do not merge.
+- [x] Run relevant validation and local specialist reviews.
+- [x] Open a narrow PR and do not merge.
 
 ## Acceptance criteria
 
