@@ -143,7 +143,13 @@ describe('CompletionDock', () => {
       />,
     );
 
-    expect(screen.getByRole('button', { name: 'Archiving...' })).toBeDisabled();
+    // The busy button is aria-disabled rather than natively disabled: setting
+    // the native attribute on a focused element blurs it to <body> permanently,
+    // so a keyboard user would lose their place on every archive.
+    const archiving = screen.getByRole('button', { name: 'Archiving...' });
+    expect(archiving).toHaveAttribute('aria-disabled', 'true');
+    expect(archiving).toHaveAttribute('aria-busy', 'true');
+    // Cancel is genuinely unavailable rather than busy, so it stays natively disabled.
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
   });
 

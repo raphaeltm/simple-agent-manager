@@ -122,7 +122,7 @@ export function AdminTrials() {
               aria-pressed={config.enabled}
               className="w-full sm:w-auto"
             >
-              <Power size={16} />
+              {!saving && <Power size={16} />}
               {nextAction}
             </Button>
           </div>

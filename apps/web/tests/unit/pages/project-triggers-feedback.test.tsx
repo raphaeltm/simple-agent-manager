@@ -113,7 +113,7 @@ describe('ProjectTriggers — resume/pause feedback', () => {
     expect(toggleButton()).toHaveTextContent('Pause');
 
     pending.resolve({ ...PAUSED_TRIGGER, status: 'active' as const });
-    await waitFor(() => expect(toggleButton()).toBeEnabled());
+    await waitFor(() => expect(toggleButton()).not.toHaveAttribute('aria-busy'));
   });
 
   it('marks the pressed button busy and disabled while in flight', async () => {
@@ -126,7 +126,8 @@ describe('ProjectTriggers — resume/pause feedback', () => {
 
     await user.click(toggleButton());
 
-    expect(toggleButton()).toBeDisabled();
+    // aria-disabled, not native disabled — see the focus test below.
+    expect(toggleButton()).toHaveAttribute('aria-disabled', 'true');
     expect(toggleButton()).toHaveAttribute('aria-busy', 'true');
     // A spinner replaces the icon so the press is visible, not just inert. It is
     // aria-hidden so it does not pollute the button's accessible name.
@@ -135,8 +136,53 @@ describe('ProjectTriggers — resume/pause feedback', () => {
     expect(spinner).toHaveAttribute('aria-hidden', 'true');
 
     pending.resolve({ ...PAUSED_TRIGGER, status: 'active' as const });
-    await waitFor(() => expect(toggleButton()).toBeEnabled());
-    expect(toggleButton()).not.toHaveAttribute('aria-busy');
+    await waitFor(() => expect(toggleButton()).not.toHaveAttribute('aria-busy'));
+  });
+
+  it('keeps keyboard focus on the pressed button while it is busy', async () => {
+    // Native `disabled` on a focused element blurs it to <body> and never
+    // restores it, so a keyboard user would lose their place on every press.
+    // The busy button must be aria-disabled, not natively disabled.
+    const pending = deferred<typeof PAUSED_TRIGGER>();
+    vi.mocked(updateTrigger).mockReturnValue(pending.promise as never);
+
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText('Nightly Tests');
+
+    const toggle = toggleButton();
+    toggle.focus();
+    expect(toggle).toHaveFocus();
+
+    await user.click(toggle);
+
+    expect(toggleButton()).toHaveAttribute('aria-disabled', 'true');
+    expect(toggleButton()).not.toHaveAttribute('disabled');
+    expect(toggleButton()).toHaveFocus();
+    expect(document.body).not.toHaveFocus();
+
+    pending.resolve({ ...PAUSED_TRIGGER, status: 'active' as const });
+    await waitFor(() => expect(toggleButton()).not.toHaveAttribute('aria-disabled'));
+    expect(toggleButton()).toHaveFocus();
+  });
+
+  it('still natively disables the sibling actions of a busy one', async () => {
+    // Siblings are genuinely unavailable rather than busy, and none of them
+    // holds focus, so the native attribute is the correct mechanism there.
+    const pending = deferred<typeof PAUSED_TRIGGER>();
+    vi.mocked(updateTrigger).mockReturnValue(pending.promise as never);
+
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText('Nightly Tests');
+
+    await user.click(toggleButton());
+    expect(screen.getByRole('button', { name: 'Run trigger now' })).toBeDisabled();
+
+    pending.resolve({ ...PAUSED_TRIGGER, status: 'active' as const });
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Run trigger now' })).toBeEnabled()
+    );
   });
 
   it('rolls the status back and shows an error toast when the request fails', async () => {
@@ -170,7 +216,7 @@ describe('ProjectTriggers — resume/pause feedback', () => {
     await screen.findByText('Nightly Tests');
 
     await user.click(toggleButton());
-    await waitFor(() => expect(toggleButton()).toBeEnabled());
+    await waitFor(() => expect(toggleButton()).not.toHaveAttribute('aria-busy'));
 
     expect(screen.queryByTestId('toast-success')).not.toBeInTheDocument();
     expect(screen.getByLabelText('Status: Active')).toBeInTheDocument();
@@ -234,7 +280,7 @@ describe('ProjectTriggers — re-entrancy guard', () => {
     expect(runTrigger).toHaveBeenCalledTimes(1);
 
     pending.resolve({ executionId: 'exec-1', taskId: 'task-1' });
-    await waitFor(() => expect(runBtn).toBeEnabled());
+    await waitFor(() => expect(runBtn).not.toHaveAttribute('aria-busy'));
   });
 
   it('re-reads the list after a run so "Last triggered" is not stale', async () => {

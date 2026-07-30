@@ -94,6 +94,13 @@ export const TriggerCard: FC<TriggerCardProps> = ({
   // Any in-flight mutation locks the row's other actions, so a resume and a
   // delete can't race each other on the same trigger.
   const anyPending = pendingAction !== null;
+  /**
+   * Siblings of the busy action are genuinely unavailable, so they take the
+   * native `disabled`. The busy button itself must NOT — it is the one holding
+   * focus, and native `disabled` would blur it to <body> permanently. Its own
+   * `loading` prop marks it aria-disabled and swallows clicks instead.
+   */
+  const lockedByOtherAction = (isThisAction: boolean) => anyPending && !isThisAction;
 
   return (
     <Card
@@ -251,7 +258,7 @@ export const TriggerCard: FC<TriggerCardProps> = ({
           variant="ghost"
           size="xs"
           onClick={() => onRunNow(trigger)}
-          disabled={trigger.status === 'disabled' || anyPending}
+          disabled={trigger.status === 'disabled' || lockedByOtherAction(runPending)}
           loading={runPending}
           className={`hover:bg-surface-hover ${FOCUS_RING}`}
           aria-label="Run trigger now"
@@ -263,7 +270,7 @@ export const TriggerCard: FC<TriggerCardProps> = ({
           variant="ghost"
           size="xs"
           onClick={() => onTogglePause(trigger)}
-          disabled={anyPending}
+          disabled={lockedByOtherAction(togglePending)}
           loading={togglePending}
           className={`hover:bg-surface-hover ${FOCUS_RING}`}
           aria-label={isPaused ? 'Resume trigger' : 'Pause trigger'}

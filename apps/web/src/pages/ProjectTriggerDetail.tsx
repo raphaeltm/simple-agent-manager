@@ -6,14 +6,11 @@ import type {
 import { Button, Spinner } from '@simple-agent-manager/ui';
 import {
   ArrowLeft,
-  Calendar,
-  CheckCircle,
   Clock,
   Pause,
   Pencil,
   Play,
   Trash2,
-  XCircle,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
@@ -22,6 +19,7 @@ import { ExecutionHistory } from '../components/triggers/ExecutionHistory';
 import { TriggerConfiguration } from '../components/triggers/TriggerConfiguration';
 import { TriggerCredentialWarning } from '../components/triggers/TriggerCredentialWarning';
 import { TriggerForm } from '../components/triggers/TriggerForm';
+import { TriggerSummaryCards } from '../components/triggers/TriggerSummaryCards';
 import { WebhookTriggerPanel } from '../components/triggers/WebhookTriggerPanel';
 import { useTriggerActions } from '../hooks/useTriggerActions';
 import { getTrigger, listTriggerExecutions } from '../lib/api';
@@ -45,28 +43,6 @@ const EXECUTIONS_PER_PAGE = 20;
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function formatDateFull(dateStr: string): string {
-  return new Date(dateStr).toLocaleString(undefined, {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    timeZoneName: 'short',
-  });
-}
-
-function formatDuration(startedAt: string | null, completedAt: string | null): string {
-  if (!startedAt || !completedAt) return '—';
-  const durationMs = new Date(completedAt).getTime() - new Date(startedAt).getTime();
-  if (durationMs < 1000) return '<1s';
-  const seconds = Math.floor(durationMs / 1000);
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  const secs = seconds % 60;
-  return secs > 0 ? `${minutes}m ${secs}s` : `${minutes}m`;
-}
 
 // ---------------------------------------------------------------------------
 // Page
@@ -233,6 +209,9 @@ export function ProjectTriggerDetail() {
   const deletePending = currentPendingAction === 'delete';
   // Any in-flight mutation locks the other header actions so they can't race.
   const anyPending = currentPendingAction !== null;
+  // The busy button keeps native `disabled` off so it does not lose focus; see
+  // the note in TriggerCard. Only its siblings are natively disabled.
+  const lockedByOtherAction = (isThisAction: boolean) => anyPending && !isThisAction;
 
   const handleLoadMore = () => {
     loadExecutions(nextExecutionCursor).catch(() => undefined);
@@ -295,7 +274,7 @@ export function ProjectTriggerDetail() {
             variant="ghost"
             size="sm"
             onClick={handleRunNow}
-            disabled={trigger.status === 'disabled' || anyPending}
+            disabled={trigger.status === 'disabled' || lockedByOtherAction(runPending)}
             loading={runPending}
             className={`hover:bg-surface-hover ${FOCUS_RING}`}
             aria-label="Run now"
@@ -307,7 +286,7 @@ export function ProjectTriggerDetail() {
             variant="ghost"
             size="sm"
             onClick={handleTogglePause}
-            disabled={anyPending}
+            disabled={lockedByOtherAction(togglePending)}
             loading={togglePending}
             className={`hover:bg-surface-hover ${FOCUS_RING}`}
             aria-label={isPaused ? 'Resume' : 'Pause'}
@@ -336,7 +315,7 @@ export function ProjectTriggerDetail() {
             variant="ghost"
             size="sm"
             onClick={() => setConfirmDelete(true)}
-            disabled={anyPending}
+            disabled={lockedByOtherAction(deletePending)}
             loading={deletePending}
             className={`border-danger/30 text-danger hover:bg-danger/10 ${FOCUS_RING}`}
             aria-label="Delete trigger"
@@ -354,75 +333,7 @@ export function ProjectTriggerDetail() {
           </div>
         )}
 
-      {/* Summary cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-8">
-        {/* Next run */}
-        <div className="border border-border-default rounded-lg p-4">
-          <p className="text-xs font-medium text-fg-muted uppercase tracking-wider m-0 mb-1">
-            {trigger.sourceType === 'cron' ? 'Next Run' : 'Source'}
-          </p>
-          <p className="text-sm text-fg-primary m-0 flex items-center gap-1.5">
-            <Calendar size={14} aria-hidden="true" />
-            {trigger.sourceType === 'cron'
-              ? trigger.nextFireAt
-                ? formatDateFull(trigger.nextFireAt)
-                : 'Not scheduled'
-              : trigger.sourceType === 'webhook'
-                ? 'Incoming webhook'
-                : 'GitHub event'}
-          </p>
-        </div>
-
-        {/* Last run */}
-        <div className="border border-border-default rounded-lg p-4">
-          <p className="text-xs font-medium text-fg-muted uppercase tracking-wider m-0 mb-1">
-            Last Run
-          </p>
-          {lastRun ? (
-            <div className="flex items-center gap-1.5 text-sm">
-              {lastRun.status === 'completed' ? (
-                <CheckCircle size={14} className="text-success" aria-hidden="true" />
-              ) : (
-                <XCircle size={14} className="text-danger" aria-hidden="true" />
-              )}
-              <span className="text-fg-primary">{formatDateFull(lastRun.scheduledAt)}</span>
-              <span className="text-fg-muted">
-                ({formatDuration(lastRun.startedAt, lastRun.completedAt)})
-              </span>
-            </div>
-          ) : (
-            <p className="text-sm text-fg-muted m-0">Never run</p>
-          )}
-        </div>
-
-        {/* Success rate */}
-        <div className="border border-border-default rounded-lg p-4">
-          <p className="text-xs font-medium text-fg-muted uppercase tracking-wider m-0 mb-1">
-            Success Rate
-          </p>
-          {successRate !== null ? (
-            <div>
-              <p className="text-sm text-fg-primary m-0 mb-1">{successRate}%</p>
-              <div className="h-1.5 bg-surface-hover rounded-full overflow-hidden">
-                <div
-                  className="h-full rounded-full transition-all duration-300"
-                  style={{
-                    width: `${successRate}%`,
-                    backgroundColor:
-                      successRate >= 80
-                        ? 'var(--sam-color-success)'
-                        : successRate >= 50
-                          ? 'var(--sam-color-warning)'
-                          : 'var(--sam-color-danger)',
-                  }}
-                />
-              </div>
-            </div>
-          ) : (
-            <p className="text-sm text-fg-muted m-0">No data</p>
-          )}
-        </div>
-      </div>
+      <TriggerSummaryCards trigger={trigger} lastRun={lastRun} successRate={successRate} />
 
       {/* Execution history */}
       <div>

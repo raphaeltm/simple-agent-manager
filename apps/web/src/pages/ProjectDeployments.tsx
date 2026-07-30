@@ -132,7 +132,7 @@ export function ProjectDeployments() {
           )}
         </label>
         <Button type="submit" loading={creating} disabled={creating || !newName.trim()}>
-          <Plus size={15} />
+          {!creating && <Plus size={15} />}
           Create
         </Button>
       </form>

@@ -1037,6 +1037,32 @@ test.describe('Trigger action feedback', () => {
     await assertNoOverflow(page);
   });
 
+  test('the busy button keeps keyboard focus', async ({ page }) => {
+    // Native `disabled` on the focused element blurs it to <body> and never
+    // restores it. jsdom does not model that, so this needs a real browser.
+    await setupApiMocks(page, { triggers: NORMAL_TRIGGERS });
+    await stubSlowStatusPatch(page);
+    await page.goto('/projects/proj-test-1/triggers');
+    await page.waitForSelector('text=Nightly Tests');
+
+    const toggle = pauseToggle(page);
+    await toggle.focus();
+    expect(await page.evaluate(() => document.activeElement?.tagName)).toBe('BUTTON');
+
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-busy', 'true');
+
+    const whileBusy = await page.evaluate(() => ({
+      tag: document.activeElement?.tagName,
+      label: document.activeElement?.getAttribute('aria-label'),
+    }));
+    expect(whileBusy.tag).toBe('BUTTON');
+    expect(whileBusy.label).toMatch(/trigger$/);
+
+    await expect(toggle).not.toHaveAttribute('aria-busy', { timeout: 5000 });
+    expect(await page.evaluate(() => document.activeElement?.tagName)).toBe('BUTTON');
+  });
+
   test('buttons have a press affordance while held down', async ({ page }) => {
     await setupApiMocks(page, { triggers: NORMAL_TRIGGERS });
     await page.goto('/projects/proj-test-1/triggers');

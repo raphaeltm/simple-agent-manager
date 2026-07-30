@@ -263,7 +263,7 @@ export function DeploymentVolumesPanel({
             loading={busy === 'create'}
             disabled={busy !== null}
           >
-            <Plus size={14} />
+            {busy !== 'create' && <Plus size={14} />}
             Add
           </Button>
         </div>
@@ -336,7 +336,7 @@ function VolumeRow({
           aria-label={`Delete volume ${volume.name}`}
           title={volume.attachedServerId ? 'Detach before deleting' : `Delete ${volume.name}`}
         >
-          <Trash2 size={14} />
+          {!deleting && <Trash2 size={14} />}
         </Button>
       </div>
       <dl className="grid grid-cols-1 gap-2 sm:grid-cols-5 text-xs">

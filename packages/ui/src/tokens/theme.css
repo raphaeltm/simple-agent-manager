@@ -184,6 +184,11 @@
   --sam-color-danger-tint: rgba(239, 68, 68, 0.1);
   --sam-color-info-tint: rgba(122, 162, 247, 0.1);
 
+  /* Press overlay for .sam-pressable. Lightens on dark surfaces; the light
+     theme inverts it. Applied as an inset box-shadow so it tints filled and
+     transparent button variants alike without touching their background. */
+  --sam-press-tint: rgba(255, 255, 255, 0.1);
+
   /* Chrome interaction tints */
   --sam-chrome-accent-hover-subtle: rgba(34, 197, 94, 0.04);
   --sam-chrome-accent-soft: rgba(34, 197, 94, 0.06);
@@ -432,6 +437,8 @@
   /* Chrome interaction tints */
   --sam-chrome-accent-hover-subtle: rgba(22, 163, 74, 0.07);
   --sam-chrome-accent-soft: rgba(22, 163, 74, 0.09);
+  --sam-press-tint: rgba(0, 0, 0, 0.09);
+
   --sam-chrome-accent-active-subtle: rgba(22, 163, 74, 0.11);
   --sam-chrome-accent-active: rgba(22, 163, 74, 0.16);
   --sam-chrome-accent-divider: rgba(22, 163, 74, 0.22);
@@ -535,23 +542,32 @@
    a substitute: touch devices have no hover, so without this a tap produces no
    feedback at all until the network round trip completes.
 
-   The brightness shift is deliberately OUTSIDE the reduced-motion gate so the
-   press still registers when motion is suppressed; only the scale is gated.
-   Tap highlight is suppressed because the browser default paints a grey box
-   over the top of (and out of sync with) this affordance.
+   Three deliberate omissions, each of which caused a real bug when present:
 
-   Deliberately sets NO transition. This file is unlayered while Tailwind
-   utilities sit in @layer utilities, so anything declared here beats them
-   regardless of source order — a `transition` shorthand here would silently
-   reset `transition-all` on every consumer (the shared Button included) and
-   snap all of its colour/opacity easing. Consumers bring their own transition;
-   `transition-property: all` already covers transform and filter. */
-.sam-pressable {
-  -webkit-tap-highlight-color: transparent;
-}
+   1. No `transition`. This file is unlayered while Tailwind utilities sit in
+      @layer utilities, so a declaration here beats them regardless of source
+      order — a `transition` shorthand silently reset `transition-all` on every
+      consumer (the shared Button included) and snapped all of its colour and
+      opacity easing. Consumers bring their own; `transition-property: all`
+      already covers transform and filter.
 
+   2. No `-webkit-tap-highlight-color: transparent`. Chromium does not reliably
+      match :active for the duration of a touch-hold — under synthetic touch it
+      only engaged on the compatibility mousedown fired after touchend — so the
+      native tap highlight may be the only feedback timed to the finger going
+      down. Suppressing it would risk trading one silent press for another on
+      the platform this fix exists for.
+
+   3. No base rule at all, so nothing is paid at rest.
+
+   The brightness shift is OUTSIDE the reduced-motion gate so the press still
+   registers when motion is suppressed; only the scale (further below) is gated.
+   `--sam-press-tint` is an overlay rather than a background change so it works
+   on filled and transparent variants alike — brightness alone is near-invisible
+   on light-theme ghost buttons, whose text is already almost black. */
 .sam-pressable:not(:disabled):not([aria-disabled='true']):active {
   filter: brightness(0.9);
+  box-shadow: inset 0 0 0 999px var(--sam-press-tint);
 }
 
 @keyframes sam-spin {

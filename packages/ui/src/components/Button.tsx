@@ -47,16 +47,39 @@ export function Button({
   disabled,
   className = '',
   style,
+  onClick,
   ...props
 }: ButtonProps) {
-  const isDisabled = Boolean(disabled || loading);
+  // "Unavailable" and "busy" are different states and need different
+  // mechanisms. `disabled` means the action cannot be taken, so the native
+  // attribute is right: it leaves the tab order. `loading` is transient, and
+  // the native attribute would be actively harmful — setting `disabled` on the
+  // element that currently has focus makes the browser blur it to <body> and
+  // never restore it, so a keyboard user who activates a button loses their
+  // place every time. `aria-disabled` keeps focus and the tab order while
+  // still announcing the control as unavailable; the click guard below is what
+  // actually prevents activation.
+  const isBusy = loading;
+  const isUnavailable = Boolean(disabled);
+  const isInert = isBusy || isUnavailable;
 
   return (
     <button
       {...props}
-      disabled={isDisabled}
-      aria-busy={loading || undefined}
-      className={`sam-pressable inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md font-semibold transition-all duration-150 ease-in-out ${isDisabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'} ${variantClasses[variant]} ${sizeClasses[size]} ${className}`}
+      disabled={isUnavailable}
+      aria-disabled={isBusy || undefined}
+      aria-busy={isBusy || undefined}
+      onClick={(event) => {
+        if (isBusy) {
+          // preventDefault also suppresses implicit form submission, which a
+          // bare `return` would not.
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
+        onClick?.(event);
+      }}
+      className={`sam-pressable inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md font-semibold transition-all duration-150 ease-in-out ${isInert ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'} ${variantClasses[variant]} ${sizeClasses[size]} ${className}`}
       style={style}
     >
       {/* Decorative: `aria-busy` above already conveys the state, and a labelled

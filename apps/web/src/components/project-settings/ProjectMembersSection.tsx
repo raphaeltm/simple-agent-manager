@@ -629,7 +629,7 @@ export function ProjectMembersSection({ projectId }: { projectId: string }) {
 
                 <div className="flex flex-wrap gap-2">
                   <Button size="sm" loading={creating} disabled={creating} onClick={() => void handleCreate()}>
-                    <UserPlus size={14} />
+                    {!creating && <UserPlus size={14} />}
                     New Link
                   </Button>
                   <Button
@@ -639,7 +639,7 @@ export function ProjectMembersSection({ projectId }: { projectId: string }) {
                     disabled={revokingId === activeInvite.id}
                     onClick={() => void handleRevoke(activeInvite)}
                   >
-                    <X size={14} />
+                    {revokingId !== activeInvite.id && <X size={14} />}
                     Revoke
                   </Button>
                 </div>
@@ -649,7 +649,7 @@ export function ProjectMembersSection({ projectId }: { projectId: string }) {
                 <p className="m-0 text-xs text-fg-muted">No active invite link.</p>
                 <div>
                   <Button size="sm" loading={creating} disabled={creating} onClick={() => void handleCreate()}>
-                    <UserPlus size={14} />
+                    {!creating && <UserPlus size={14} />}
                     Create Link
                   </Button>
                 </div>

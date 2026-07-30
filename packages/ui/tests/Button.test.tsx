@@ -28,13 +28,28 @@ describe('Button', () => {
   });
 
   describe('loading', () => {
-    it('renders a spinner, disables, and sets aria-busy', () => {
+    it('renders a spinner and marks the button busy without natively disabling it', () => {
       render(<Button loading>Archiving...</Button>);
 
       const button = screen.getByRole('button', { name: 'Archiving...' });
-      expect(button).toBeDisabled();
       expect(button).toHaveAttribute('aria-busy', 'true');
+      expect(button).toHaveAttribute('aria-disabled', 'true');
       expect(button.querySelector('[data-slot="spinner"]')).toBeTruthy();
+      // Native `disabled` would blur a focused button to <body> permanently.
+      expect(button).not.toBeDisabled();
+    });
+
+    it('keeps focus when it becomes busy', () => {
+      // The regression this guards: a keyboard user activates a button, the
+      // handler sets loading, and focus silently jumps to <body> for good.
+      const { rerender } = render(<Button>Archive</Button>);
+      const button = screen.getByRole('button', { name: 'Archive' });
+      button.focus();
+      expect(button).toHaveFocus();
+
+      rerender(<Button loading>Archive</Button>);
+      expect(screen.getByRole('button', { name: 'Archive' })).toHaveFocus();
+      expect(document.body).not.toHaveFocus();
     });
 
     it('keeps the spinner out of the accessible name', () => {

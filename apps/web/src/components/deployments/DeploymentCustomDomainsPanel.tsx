@@ -547,7 +547,7 @@ function AddDomainPanel({
         )}
 
         <Button type="submit" size="sm" loading={saving} disabled={!selectedRoute}>
-          <Plus size={14} />
+          {!saving && <Plus size={14} />}
           Add pending domain
         </Button>
       </form>
