@@ -25,15 +25,15 @@
 - [x] Update deployment plumbing tests for the Report Issue max-length envs.
 - [x] Verify `.env.example` still has no duplicate `PLATFORM_FEEDBACK_PROJECT_ID`; do not edit it unless a duplicate exists.
 - [x] Preserve trusted metadata/PAT redaction behavior covered by existing Report Issue tests.
-- [ ] Run focused Report Issue tests, API lint/typecheck, and proportional repository validation.
-- [ ] Run env-validator, security-auditor, and task-completion-validator.
+- [x] Run focused Report Issue tests, API lint/typecheck, and proportional repository validation.
+- [x] Run env-validator, security-auditor, and task-completion-validator.
 
 ## Acceptance criteria
 
 - `POST /api/report-issue` enforces a bounded, configurable, authenticated-user-scoped rate limit using the existing project middleware and standard `429` response shape.
 - Rate-limit behavior is covered by focused route tests, including the standard response body/status and no draft Idea creation when blocked.
 - Report Issue max-length env vars are consistently declared, parsed, and forwarded by deployment/sync plumbing if set.
-- `.env.example` is not churned when the previous duplicate is already absent.
+- `.env.example` duplicate `PLATFORM_FEEDBACK_PROJECT_ID` entries are reconciled only where still present.
 - PR remains scoped to Report Issue abuse protection and directly related config consistency; no platform feedback triage resilience/usability work is included.
 - Existing trust-boundary/PAT redaction behavior remains intact.
 
@@ -42,3 +42,13 @@
 - 2026-07-30: Root `.env.example` contains no `PLATFORM_FEEDBACK_PROJECT_ID` or `REPORT_ISSUE_*` entries. Follow-up review found `apps/api/.env.example` still duplicated `PLATFORM_FEEDBACK_PROJECT_ID`; removed the stale triage-block duplicate and kept the canonical Report Issue / Platform Feedback entry.
 - 2026-07-30: `pnpm --filter @simple-agent-manager/api test -- tests/unit/report-issue.test.ts tests/unit/routes/report-issue.test.ts` passed (23 tests). Existing Report Issue service tests preserve trust-boundary/PAT redaction behavior.
 - 2026-07-30: `pnpm vitest run scripts/quality/sync-wrangler-config.test.ts scripts/quality/deploy-reusable-workflow.test.ts` passed (33 tests).
+
+- 2026-07-30: `pnpm --filter @simple-agent-manager/api lint` passed (0 errors; existing warnings).
+- 2026-07-30: `pnpm --filter @simple-agent-manager/api typecheck` passed.
+- 2026-07-30: `pnpm lint` passed (0 errors; existing warnings).
+- 2026-07-30: `pnpm typecheck` passed.
+- 2026-07-30: `pnpm build` passed (existing `@simple-agent-manager/api#build` output warning).
+- 2026-07-30: `pnpm test` passed (19/19 tasks; API 476 files / 6510 tests; web 236 files / 2844 tests).
+- 2026-07-30: env-validator result: PASS. Report Issue max-length and rate-limit envs are declared in `Env`, parsed/defaulted by API code, forwarded by deployment/sync-wrangler plumbing, and documented in `apps/api/.env.example`; `PLATFORM_FEEDBACK_PROJECT_ID` now has one canonical example entry.
+- 2026-07-30: security-auditor result: PASS. POST remains authenticated/approved, user-scoped rate limiting runs before validation/report creation, blocked requests use the standard `429` shape and do not create Ideas, and existing tests preserve trust-boundary/PAT redaction. Existing KV increment behavior is best-effort/non-atomic, appropriate for abuse bounding rather than strict quota accounting.
+- 2026-07-30: task-completion-validator result: PASS. Diff matches the requested narrow scope: Report Issue POST rate limiting, directly related env/deploy consistency, duplicate env-example cleanup, and focused tests.
